@@ -87,3 +87,25 @@ CREATE TRIGGER `app_candidates_no_delete` BEFORE DELETE ON `app_candidates`
 BEGIN
 	SELECT RAISE(ABORT, 'app_candidates are kept');
 END;
+--> statement-breakpoint
+-- A report is stored only while its candidate is being verified: never
+-- for one superseded, ended or verified already.
+CREATE TRIGGER `app_candidate_reports_while_verifying` BEFORE INSERT ON `app_candidate_reports`
+WHEN NOT EXISTS (SELECT 1 FROM `app_candidates`
+	WHERE `id` = NEW.`candidate_id` AND `state` = 'verifying')
+BEGIN
+	SELECT RAISE(ABORT, 'app_candidate_reports are of candidates being verified');
+END;--> statement-breakpoint
+-- A version is made current only from its verified candidate, with its
+-- report, whoever writes (src/apps.ts, `makeCurrent`).
+CREATE TRIGGER `apps_current_from_candidate` BEFORE UPDATE OF `current_version` ON `apps`
+WHEN NEW.`current_version` IS NOT NULL
+	AND NEW.`current_version` IS NOT OLD.`current_version`
+	AND NOT EXISTS (SELECT 1 FROM `app_candidates` AS `candidate`
+		JOIN `app_candidate_reports` AS `report`
+			ON `report`.`candidate_id` = `candidate`.`id` AND `report`.`hash` = `candidate`.`report_hash`
+		WHERE `candidate`.`app_id` = NEW.`id` AND `candidate`.`version` = NEW.`current_version`
+			AND `candidate`.`state` = 'verified')
+BEGIN
+	SELECT RAISE(ABORT, 'apps are made current from a verified candidate');
+END;

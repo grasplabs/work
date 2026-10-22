@@ -220,6 +220,7 @@ describe(
       await activateVersion(env, owner, app, 1);
       const [made] = await candidatesOf(app);
       const id = made?.id ?? "";
+      const frozen = await freezeCandidate(env, owner, app, 1, 1);
       expect({
         reportChanged: await aborted(
           "UPDATE app_candidate_reports SET report = '{}' WHERE candidate_id = ?",
@@ -255,6 +256,15 @@ describe(
           id
         ),
         deleted: await aborted("DELETE FROM app_candidates WHERE id = ?", id),
+        reportForFrozen: await aborted(
+          "INSERT INTO app_candidate_reports (candidate_id, report, hash, created_at) VALUES (?, '{}', ?, 0)",
+          frozen.id,
+          "0".repeat(64)
+        ),
+        currentByHand: await aborted(
+          "UPDATE apps SET current_version = 2 WHERE id = ?",
+          app
+        ),
         createdVerified: await aborted(
           `INSERT INTO app_candidates (id, app_id, version, source_tree, based_on, state, created_by, created_at, updated_at)
          VALUES (?, ?, 1, 'tree', 0, 'verified', 'someone', 0, 0)`,
@@ -273,6 +283,8 @@ describe(
             "movedBack",
             "endedAfterActive",
             "deleted",
+            "reportForFrozen",
+            "currentByHand",
             "createdVerified",
           ].map((key) => [key, expect.stringContaining("SQLITE_CONSTRAINT")])
         )
@@ -340,20 +352,59 @@ describe(
       }).toStrictEqual({ wrong: "app.conflict", right: 2 });
     });
 
-    it("supersedes a verified candidate once a person commits, so it is never made current", async () => {
+    it("leaves a verified candidate to be made current after a person commits, as its checks are done", async () => {
       const { owner, app } = await appWith(helloFiles("one"));
       const verified = await verifiedCandidate(owner, app, 1);
       await committed(owner, app, helloFiles("two"));
+      const made = await activateCandidate(env, owner, verified);
       expect({
-        refused: await failure(
-          async () => await activateCandidate(env, owner, verified)
-        ),
-        current: await currentOf(app),
+        current: made.currentVersion,
         state: await fieldOf(verified.id, "state"),
+      }).toStrictEqual({ current: 1, state: "active" });
+    });
+
+    it("checks a candidate verified by an earlier release again before making it current", async () => {
+      const { owner, app } = await appWith(helloFiles());
+      await sealRelease(env, { app, version: 1, by: owner });
+      const { tree } = await findVersion(env, app, 1);
+      // Verified by a compiler this release doesn't run.
+      const earlier = crypto.randomUUID();
+      const report = canonicalText({
+        environment: { compilerVersion: "0.0.0-earlier", sdkProtocolVersion },
+      });
+      const hash = await sha256Hex(report);
+      await env.DB.batch([
+        env.DB.prepare(
+          `INSERT INTO app_candidates (id, app_id, version, source_tree, based_on, state, created_by, created_at, updated_at)
+           VALUES (?, ?, 1, ?, 0, 'frozen', ?, 0, 0)`
+        ).bind(earlier, app, tree, owner.userId),
+        ...["checking", "building", "verifying"].map((state) =>
+          env.DB.prepare(
+            "UPDATE app_candidates SET state = ? WHERE id = ?"
+          ).bind(state, earlier)
+        ),
+        env.DB.prepare(
+          "INSERT INTO app_candidate_reports (candidate_id, report, hash, created_at) VALUES (?, ?, ?, 0)"
+        ).bind(earlier, report, hash),
+        env.DB.prepare(
+          "UPDATE app_candidates SET state = 'verified', report_hash = ? WHERE id = ?"
+        ).bind(hash, earlier),
+      ]);
+      const made = await activateVersion(env, owner, app, 1);
+      const all = await candidatesOf(app);
+      expect({
+        current: made.currentVersion,
+        outcomes: all.map(({ id, state, outcome }) => [
+          id === earlier ? "earlier" : "again",
+          state,
+          outcome,
+        ]),
       }).toStrictEqual({
-        refused: "app.candidate_superseded",
-        current: null,
-        state: "superseded",
+        current: 1,
+        outcomes: [
+          ["earlier", "rejected", "app.candidate_environment"],
+          ["again", "active", null],
+        ],
       });
     });
 

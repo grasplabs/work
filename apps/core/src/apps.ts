@@ -7,7 +7,6 @@ import {
   commitMessageSchema,
   fileChangesSchema,
   newAppSchema,
-  openCandidateStates,
 } from "@grasp-os/shared/apps";
 import type {
   App,
@@ -178,6 +177,7 @@ export const changeEntry = (
     | "app.candidates.superseded"
     | "app.candidate.frozen"
     | "app.candidate.moved"
+    | "app.candidate.claimed"
     | "app.blueprint.marked"
     | "app.blueprint.unmarked",
   app: AppId,
@@ -684,9 +684,9 @@ export const applyChanges = (
 };
 
 /**
- * Ends every open candidate of `app` for a version before `version` as
- * superseded, for `by`'s commit of `version`: the statements, with their
- * audit event, for the commit's batch.
+ * Ends every candidate of `app` for a version before `version` that is
+ * still being checked as superseded, for `by`'s commit of `version`: the
+ * statements, with their audit event, for the commit's batch.
  */
 const supersededBy = (
   db: DrizzleD1Database,
@@ -707,7 +707,16 @@ const supersededBy = (
         and(
           eq(appCandidates.appId, app),
           lt(appCandidates.version, version),
-          inArray(appCandidates.state, [...openCandidateStates])
+          // Not a verified one: its checks are done, and it may be on its
+          // way to current right now, its store switched already. A base
+          // that moved is `makeCurrent`'s to refuse (app-candidates.ts,
+          // `rejectStale`).
+          inArray(appCandidates.state, [
+            "frozen",
+            "checking",
+            "building",
+            "verifying",
+          ])
         )
       ),
     outboxedIfChanged(

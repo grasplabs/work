@@ -7,7 +7,11 @@ import { setCurrentVersion } from "../src/apps.ts";
 import { setParam } from "../src/workflows/params.ts";
 import { startRun } from "../src/workflows/runs.ts";
 import { startDueSchedules } from "../src/workflows/triggers.ts";
-import { racingDb as racingAppsDb, release } from "./apps.ts";
+import {
+  racingDb as racingAppsDb,
+  release,
+  verifiedCandidateStatements,
+} from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { runCron } from "./cron.ts";
 import { mockIdp } from "./idp.ts";
@@ -579,6 +583,7 @@ describe("activations racing", () => {
     const racing = racingBatch(
       async (db) =>
         await db.batch([
+          ...verifiedCandidateStatements(db, app, next),
           db
             .prepare("UPDATE apps SET current_version = ? WHERE id = ?")
             .bind(next, app),

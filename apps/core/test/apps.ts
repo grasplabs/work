@@ -182,3 +182,50 @@ export const racingDb = (
     withSession: (constraint) => real.withSession(constraint),
   };
 };
+
+/**
+ * Statements leaving a verified candidate (src/app-candidates.ts) for
+ * `version` of `app`, with its report, as making it current requires
+ * (migration 0117): for tests that make a version current by hand, as
+ * another writer would, to race or bypass the real path. Each move is one
+ * the triggers allow.
+ */
+export const verifiedCandidateStatements = (
+  db: D1Database,
+  app: string,
+  version: number
+): D1PreparedStatement[] => {
+  const id = crypto.randomUUID();
+  const hash = "0".repeat(64);
+  return [
+    db
+      .prepare(
+        `INSERT INTO app_candidates (id, app_id, version, source_tree, based_on, state, created_by, created_at, updated_at)
+         VALUES (?, ?, ?, 'test', ?, 'frozen', 'test', 0, 0)`
+      )
+      .bind(id, app, version, -1 - Math.floor(Math.random() * 1e9)),
+    ...["checking", "building", "verifying"].map((state) =>
+      db
+        .prepare("UPDATE app_candidates SET state = ? WHERE id = ?")
+        .bind(state, id)
+    ),
+    db
+      .prepare(
+        "INSERT INTO app_candidate_reports (candidate_id, report, hash, created_at) VALUES (?, '{}', ?, 0)"
+      )
+      .bind(id, hash),
+    db
+      .prepare(
+        "UPDATE app_candidates SET state = 'verified', report_hash = ? WHERE id = ?"
+      )
+      .bind(hash, id),
+  ];
+};
+
+/** Leaves a verified candidate for `version` of `app` (`verifiedCandidateStatements`). */
+export const verifiedCandidate = async (
+  app: string,
+  version: number
+): Promise<void> => {
+  await env.DB.batch(verifiedCandidateStatements(env.DB, app, version));
+};

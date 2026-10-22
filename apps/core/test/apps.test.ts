@@ -632,6 +632,12 @@ export default workflowTests(report, [{ name: "counts", mocks: { count: 1 }, exp
         on: target,
         detail: { candidate, version: 1, tree, basedOn: 0 },
       },
+      {
+        by: actor,
+        action: "app.candidate.claimed",
+        on: target,
+        detail: { candidate, version: 1, at: "frozen" },
+      },
       ...[
         ["frozen", "checking"],
         ["checking", "building"],
@@ -641,7 +647,7 @@ export default workflowTests(report, [{ name: "counts", mocks: { count: 1 }, exp
         by: actor,
         action: "app.candidate.moved",
         on: target,
-        detail: { candidate, version: 1, from, to },
+        detail: { candidate, version: 1, attempt: 1, from, to },
       })),
       {
         by: actor,

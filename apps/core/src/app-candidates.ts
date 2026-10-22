@@ -10,6 +10,7 @@ import type { AppId } from "@grasp-os/shared/ids";
 import { canonicalText } from "@grasp-os/shared/json";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { and, desc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -272,31 +273,50 @@ interface Held {
  */
 const claim = async (
   env: Env,
+  by: Identity,
   candidate: CandidateRow
 ): Promise<Held | undefined> => {
   const lease = crypto.randomUUID();
   const now = new Date();
-  const [row] = await drizzle(env.DB)
-    .update(appCandidates)
-    .set({
-      lease,
-      leaseUntil: new Date(now.getTime() + candidateLeaseMs),
-      attempt: sql`${appCandidates.attempt} + 1`,
-      updatedAt: now,
-    })
-    .where(
-      and(
-        eq(appCandidates.id, candidate.id),
-        inArray(appCandidates.state, [
-          "frozen",
-          "checking",
-          "building",
-          "verifying",
-        ]),
-        or(isNull(appCandidates.lease), lt(appCandidates.leaseUntil, now))
+  const db = drizzle(env.DB);
+  const [[row]] = await auditedBatch(env, db, [
+    db
+      .update(appCandidates)
+      .set({
+        lease,
+        leaseUntil: new Date(now.getTime() + candidateLeaseMs),
+        attempt: sql`${appCandidates.attempt} + 1`,
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(appCandidates.id, candidate.id),
+          inArray(appCandidates.state, [
+            "frozen",
+            "checking",
+            "building",
+            "verifying",
+          ]),
+          or(isNull(appCandidates.lease), lt(appCandidates.leaseUntil, now))
+        )
       )
-    )
-    .returning();
+      .returning(),
+    // Who took it up, and where: a run resuming a stage another left is
+    // on the record as such (its moves carry the attempt).
+    outboxedIfChanged(
+      db,
+      changeEntry(
+        by,
+        "app.candidate.claimed",
+        appIdSchema.parse(candidate.appId),
+        {
+          candidate: candidate.id,
+          version: candidate.version,
+          at: candidate.state,
+        }
+      )
+    ),
+  ]);
   return row === undefined ? undefined : { row, lease };
 };
 
@@ -333,6 +353,7 @@ const move = async (
     changeEntry(by, "app.candidate.moved", appIdSchema.parse(appId), {
       candidate: id,
       version,
+      attempt: held.row.attempt,
       from,
       to,
       ...(typeof set.outcome === "string" ? { outcome: set.outcome } : {}),
@@ -530,7 +551,7 @@ export const runCandidate = async (
   if (candidate.state === "verified" || candidate.state === "active") {
     return candidate;
   }
-  const held = await claim(env, candidate);
+  const held = await claim(env, by, candidate);
   if (held === undefined) {
     const now = await candidateOf(env, candidate.id);
     if (now.state === "verified" || now.state === "active") {
@@ -578,29 +599,56 @@ export const runCandidate = async (
   }
 };
 
+/** The environment a report records, as `reportOf` writes it. */
+const reportedEnvironmentSchema = z.object({
+  environment: z.object({
+    compilerVersion: z.string(),
+    sdkProtocolVersion: z.int(),
+  }),
+});
+
 /**
- * Ends the verified `candidate` as rejected when its base is no longer
- * the version current: nothing makes it current any more.
+ * Whether the verified `candidate` was verified by the compiler and SDK
+ * protocol this release runs: a candidate verified by an earlier release
+ * is checked again before it is made current, never trusted across it.
  */
-const rejectStale = async (
+const verifiedHere = async (
+  env: Env,
+  candidate: CandidateRow
+): Promise<boolean> => {
+  const row = await drizzle(env.DB)
+    .select({ report: appCandidateReports.report })
+    .from(appCandidateReports)
+    .where(eq(appCandidateReports.candidateId, candidate.id))
+    .get();
+  const reported = reportedEnvironmentSchema.safeParse(
+    JSON.parse(row?.report ?? "null")
+  );
+  return (
+    reported.success &&
+    reported.data.environment.compilerVersion === compilerVersion &&
+    reported.data.environment.sdkProtocolVersion === sdkProtocolVersion
+  );
+};
+
+/** Ends the verified `candidate` as rejected, for `outcome`. */
+const retire = async (
   env: Env,
   by: Identity,
-  candidate: CandidateRow
+  candidate: CandidateRow,
+  outcome: string,
+  also?: SQL
 ): Promise<void> => {
   const db = drizzle(env.DB);
   await auditedBatch(env, db, [
     db
       .update(appCandidates)
-      .set({
-        state: "rejected",
-        outcome: "app.conflict",
-        updatedAt: new Date(),
-      })
+      .set({ state: "rejected", outcome, updatedAt: new Date() })
       .where(
         and(
           eq(appCandidates.id, candidate.id),
           eq(appCandidates.state, "verified"),
-          sql`(SELECT coalesce(current_version, 0) FROM apps WHERE id = ${candidate.appId}) IS NOT ${candidate.basedOn}`
+          also
         )
       ),
     outboxedIfChanged(
@@ -614,11 +662,29 @@ const rejectStale = async (
           version: candidate.version,
           from: "verified",
           to: "rejected",
-          outcome: "app.conflict",
+          outcome,
         }
       )
     ),
   ]);
+};
+
+/**
+ * Ends the verified `candidate` as rejected when its base is no longer
+ * the version current: nothing makes it current any more.
+ */
+const rejectStale = async (
+  env: Env,
+  by: Identity,
+  candidate: CandidateRow
+): Promise<void> => {
+  await retire(
+    env,
+    by,
+    candidate,
+    "app.conflict",
+    sql`(SELECT coalesce(current_version, 0) FROM apps WHERE id = ${candidate.appId}) IS NOT ${candidate.basedOn}`
+  );
 };
 
 /**
@@ -635,6 +701,10 @@ export const activateCandidate = async (
 ): Promise<App> => {
   if (candidate.reportHash === null) {
     throw appErrors.create("app.conflict");
+  }
+  if (!(await verifiedHere(env, candidate))) {
+    await retire(env, by, candidate, "app.candidate_environment");
+    throw appErrors.create("app.candidate_environment");
   }
   try {
     return await makeCurrent(env, by, candidate.appId, candidate.version, {
@@ -689,9 +759,23 @@ export const activateThroughCandidate = async (
     throw appErrors.create("app.conflict");
   }
   const files = await versionFiles(env, found.id, number);
-  const candidate = await freezeCandidate(env, by, found.id, number, basedOn);
-  const verified = await runCandidate(env, by, candidate, async (building) => {
-    await seal?.(found.id, number, files, building);
-  });
-  return await activateCandidate(env, by, verified);
+  const verified = async (): Promise<CandidateRow> =>
+    await runCandidate(
+      env,
+      by,
+      await freezeCandidate(env, by, found.id, number, basedOn),
+      async (building) => {
+        await seal?.(found.id, number, files, building);
+      }
+    );
+  try {
+    return await activateCandidate(env, by, await verified());
+  } catch (error) {
+    // Verified by an earlier release and retired for it: checked again,
+    // once, by this one.
+    if (isExpectedError(error) && error.code === "app.candidate_environment") {
+      return await activateCandidate(env, by, await verified());
+    }
+    throw error;
+  }
 };
