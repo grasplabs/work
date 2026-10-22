@@ -1,17 +1,23 @@
-import { buildFiles, workflowFiles } from "@grasp-os/compiler";
+import { appCodeFiles, buildFiles, workflowFiles } from "@grasp-os/compiler";
 import type { Diagnostic } from "@grasp-os/compiler";
 import type {
   BuildDiagnostic,
   CommittedVersion,
   SavedBuild,
 } from "@grasp-os/shared/apps";
+import { appErrors, appV1ServerFolder } from "@grasp-os/shared/apps";
 import { diagnosticCategory } from "@grasp-os/shared/diagnostics";
 import type { AppId } from "@grasp-os/shared/ids";
 import { log } from "@grasp-os/shared/log";
 
 import { withDraftReferences } from "./draft-references.ts";
 import type { WorkflowBindingKind } from "./permissions.ts";
-import { buildScreens, buildWorkflows, withinBuildWait } from "./screens.ts";
+import {
+  buildScreens,
+  buildWorkflows,
+  checkDraftAppCode,
+  withinBuildWait,
+} from "./screens.ts";
 import type { BuildProfile } from "./screens.ts";
 
 type SavedBuilds = CommittedVersion["builds"];
@@ -19,6 +25,12 @@ type SavedBuilds = CommittedVersion["builds"];
 /** What a save says of a build that couldn't run; nothing of App code. */
 const couldNotRun =
   "The build couldn't run now. It runs again when this is first used.";
+
+/**
+ * Most files under `app/` a draft's server build names: as many as its
+ * refusal names when committed (app-v1-server.ts).
+ */
+const maxLeftoversNamed = 20;
 
 /** What a save says of a build that didn't answer within its wait. */
 const tookTooLong =
@@ -63,8 +75,8 @@ const toDiagnostic = ({
  * the build wait (`withinBuildWait`): it runs again at its first use.
  */
 const savedBuild = async (
-  kind: keyof SavedBuilds,
-  { app, version, files }: SavedSource,
+  kind: keyof SavedBuilds | "server",
+  { app, version, files }: Pick<SavedSource, "app" | "version" | "files">,
   select: (files: Record<string, string>) => Record<string, string>,
   build: () => Promise<{ ok: boolean; diagnostics?: Diagnostic[] }>,
   env: Env,
@@ -160,4 +172,52 @@ export const buildOnSave = async (
     ),
   ]);
   return { screens, workflows };
+};
+
+/** A diagnostic of the App's layout (`server`) about `file`, in core's words. */
+const layoutProblem = (file: string, message: string): BuildDiagnostic => ({
+  file,
+  line: null,
+  rule: "server",
+  category: diagnosticCategory("server"),
+  severity: "error",
+  message,
+});
+
+/**
+ * A draft's server code (`app.ts`, `schema.ts`, `values.ts`,
+ * `operations/`, `migrations/`), checked as a check reports it: type
+ * errors and every gate a seal holds it to (`checkDraftAppCode`), without
+ * running any of it (server code with no app.ts and schema.ts fails
+ * there, saying so). Failed too when it holds files under `app/`, which
+ * no commit takes (`app.v1_server`), each named; `none` when it has no
+ * server code. Never
+ * throws, unless `signal` gave up on it, as `buildOnSave`.
+ */
+export const draftServerBuild = async (
+  env: Env,
+  source: Pick<SavedSource, "app" | "version" | "files">,
+  signal?: AbortSignal
+): Promise<SavedBuild> => {
+  const { files } = source;
+  const leftovers = Object.keys(files)
+    .filter((path) => path.startsWith(appV1ServerFolder))
+    .toSorted();
+  if (leftovers.length > 0) {
+    const refused = appErrors.create("app.v1_server").message;
+    return {
+      status: "failed",
+      diagnostics: leftovers
+        .slice(0, maxLeftoversNamed)
+        .map((path) => layoutProblem(path, refused)),
+    };
+  }
+  return await savedBuild(
+    "server",
+    source,
+    appCodeFiles,
+    async () => await checkDraftAppCode(env, files, source.app, signal),
+    env,
+    signal
+  );
 };
