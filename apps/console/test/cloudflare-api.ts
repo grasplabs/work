@@ -11,6 +11,11 @@
  * vite.test.config.ts).
  */
 import {
+  adminAskPath,
+  adminAskPurpose,
+  adminAskRequestSchema,
+} from "@grasp-os/shared/admin-ask";
+import {
   adminSnapshotPath,
   adminSnapshotPurpose,
   adminSnapshotRequestSchema,
@@ -226,6 +231,47 @@ const answerAdmin = async (
     return Response.json({ company: account.name });
   }
   return Response.json(account.admin ?? emptyAdminSnapshot(account.name));
+};
+
+/**
+ * What Grasp's own core answers Ask Grasp's question with, as core does
+ * (core's src/admin-ask.ts): the account's answer once the signature
+ * checks out, with the key its live version's auth secret gives for Ask
+ * Grasp's purpose, and the question parses, keeping it; 401 for a request
+ * signed otherwise, 403 for one that doesn't parse.
+ */
+const answerAsk = async (
+  account: AccountState,
+  live: VersionState,
+  request: Request
+): Promise<Response> => {
+  const body = await request.text();
+  const key = await hkdfHmacKey(
+    live.secrets.get("BETTER_AUTH_SECRET") ?? "",
+    adminAskPurpose,
+    ["verify"]
+  );
+  const signature = request.headers.get(platformUpdateSignatureHeader) ?? "";
+  const signed = await crypto.subtle.verify(
+    "HMAC",
+    key,
+    Uint8Array.from(signature.match(hexPair) ?? [], (pair) =>
+      Number.parseInt(pair, 16)
+    ),
+    new TextEncoder().encode(body)
+  );
+  if (!signed) {
+    return new Response("Unauthorized", { status: 401 });
+  }
+  const asked = adminAskRequestSchema.safeParse(JSON.parse(body));
+  if (!asked.success) {
+    return new Response("Forbidden", { status: 403 });
+  }
+  account.asked.push(asked.data);
+  if (account.ask === "no_model") {
+    return Response.json({ code: "admin_ask.no_model" }, { status: 503 });
+  }
+  return Response.json(account.ask ?? { text: "An answer.", truncated: false });
 };
 
 /**
@@ -590,6 +636,7 @@ export const mockCloudflareApi = (
       scriptUploads: [],
       notices: [],
       adminReaders: [],
+      asked: [],
     };
     accounts.set(account.id, account);
     return account;
@@ -843,6 +890,9 @@ export const mockCloudflareApi = (
     }
     if (url.pathname === onboardingSummaryPath && request.method === "POST") {
       return await answerSummary(account, live, request);
+    }
+    if (url.pathname === adminAskPath && request.method === "POST") {
+      return await answerAsk(account, live, request);
     }
     if (url.pathname === adminSnapshotPath && request.method === "POST") {
       adminReads.now += 1;

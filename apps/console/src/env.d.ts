@@ -22,6 +22,12 @@ interface __BaseEnv_Env {
    */
   ENTRA_CLIENT_ID?: string;
   GOOGLE_CLIENT_ID?: string;
+  /**
+   * Grasp's own client: the deployment whose core answers Ask Grasp with
+   * its model gateway (src/admin/ask.ts). Without it the chat says it isn't
+   * set up.
+   */
+  GRASP_CLIENT_ID?: string;
   /** Local dev only, from .dev.vars: who requests to this machine come from (src/access.ts). */
   DEV_ACCESS_EMAIL?: string;
 }

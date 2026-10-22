@@ -156,6 +156,8 @@ jobs:
       # last one). So are ENTRA_CLIENT_ID and GOOGLE_CLIENT_ID, Grasp's
       # OAuth apps' client ids, which each client's core signs people in
       # with: a client whose sign-in names an IdP without one isn't deployed.
+      # So is GRASP_CLIENT_ID, Grasp's own client, whose core answers Ask
+      # Grasp with its model gateway: without it the chat isn't set up.
       - name: Deploy the console with its Access settings
         if: ${{ !inputs.secrets-only }}
         env:
@@ -164,6 +166,7 @@ jobs:
           CLIENT_DOMAIN: ${{ vars.CLIENT_DOMAIN }}
           ENTRA_CLIENT_ID: ${{ vars.ENTRA_CLIENT_ID }}
           GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
+          GRASP_CLIENT_ID: ${{ vars.GRASP_CLIENT_ID }}
         run: |
           set -euo pipefail
           if [ -z "$CF_ACCESS_AUD" ] || [ -z "$CF_ACCESS_ISS" ]; then
@@ -171,7 +174,7 @@ jobs:
             exit 1
           fi
           vars=(--var "CF_ACCESS_AUD:$CF_ACCESS_AUD" --var "CF_ACCESS_ISS:$CF_ACCESS_ISS")
-          for name in CLIENT_DOMAIN ENTRA_CLIENT_ID GOOGLE_CLIENT_ID; do
+          for name in CLIENT_DOMAIN ENTRA_CLIENT_ID GOOGLE_CLIENT_ID GRASP_CLIENT_ID; do
             if [ -n "${!name}" ]; then
               vars+=(--var "$name:${!name}")
             fi
