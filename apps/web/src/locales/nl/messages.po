@@ -7534,6 +7534,10 @@ msgstr "Pad"
 msgid "Path of a new module"
 msgstr "Pad van een nieuwe module"
 
+#: src/voice/sound-controls.tsx
+msgid "Pause"
+msgstr "Pauzeren"
+
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Pause the interviews"
 msgstr "De interviews pauzeren"
@@ -7730,6 +7734,10 @@ msgstr "Platformstatistieken. Dit domein kan aantallen runs en signalen van elk 
 #: src/activity/audit-log.tsx
 msgid "Platform update"
 msgstr "Platformupdate"
+
+#: src/voice/sound-controls.tsx
+msgid "Play"
+msgstr "Afspelen"
 
 #: src/routes/_shell.policies.documents.$policyId.tsx
 #: src/routes/_shell.policies.index.tsx
@@ -10752,6 +10760,14 @@ msgstr "Probeer een andere zoekopdracht, of wis de filters om de hele audittrail
 msgid "Trying again…"
 msgstr "Opnieuw proberen…"
 
+#: src/voice/sound-controls.tsx
+msgid "Turn sound off"
+msgstr "Geluid uitzetten"
+
+#: src/voice/sound-controls.tsx
+msgid "Turn sound on"
+msgstr "Geluid aanzetten"
+
 #: src/onboarding/about-story.tsx
 msgid "Twenty minutes each, easily. About fifteen a week."
 msgstr "Twintig minuten per stuk, makkelijk. Zo’n vijftien per week."
@@ -11111,6 +11127,10 @@ msgstr "Visiepagina bevestigd"
 msgctxt "model: Stephen's voice"
 msgid "Voice"
 msgstr "Stem"
+
+#: src/voice/sound-controls.tsx
+msgid "Volume"
+msgstr "Volume"
 
 #: src/workflows/workflow-diagram.tsx
 msgid "Waiting"

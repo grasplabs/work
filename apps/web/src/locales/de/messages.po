@@ -7534,6 +7534,10 @@ msgstr "Pfad"
 msgid "Path of a new module"
 msgstr "Pfad eines neuen Moduls"
 
+#: src/voice/sound-controls.tsx
+msgid "Pause"
+msgstr "Pausieren"
+
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Pause the interviews"
 msgstr "Die Interviews pausieren"
@@ -7730,6 +7734,10 @@ msgstr "Plattformstatistiken. Diese Domäne kann die Anzahl der Läufe und Signa
 #: src/activity/audit-log.tsx
 msgid "Platform update"
 msgstr "Plattform-Update"
+
+#: src/voice/sound-controls.tsx
+msgid "Play"
+msgstr "Abspielen"
 
 #: src/routes/_shell.policies.documents.$policyId.tsx
 #: src/routes/_shell.policies.index.tsx
@@ -10752,6 +10760,14 @@ msgstr "Versuchen Sie eine andere Suche, oder setzen Sie die Filter zurück, um 
 msgid "Trying again…"
 msgstr "Neuer Versuch…"
 
+#: src/voice/sound-controls.tsx
+msgid "Turn sound off"
+msgstr "Ton ausschalten"
+
+#: src/voice/sound-controls.tsx
+msgid "Turn sound on"
+msgstr "Ton einschalten"
+
 #: src/onboarding/about-story.tsx
 msgid "Twenty minutes each, easily. About fifteen a week."
 msgstr "Locker zwanzig Minuten pro Stück. Etwa fünfzehn pro Woche."
@@ -11111,6 +11127,10 @@ msgstr "Vision-Seite bestätigt"
 msgctxt "model: Stephen's voice"
 msgid "Voice"
 msgstr "Stimme"
+
+#: src/voice/sound-controls.tsx
+msgid "Volume"
+msgstr "Lautstärke"
 
 #: src/workflows/workflow-diagram.tsx
 msgid "Waiting"

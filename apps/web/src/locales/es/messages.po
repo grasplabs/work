@@ -7534,6 +7534,10 @@ msgstr "Ruta"
 msgid "Path of a new module"
 msgstr "Ruta de un módulo nuevo"
 
+#: src/voice/sound-controls.tsx
+msgid "Pause"
+msgstr "Pausar"
+
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Pause the interviews"
 msgstr "Pausar las entrevistas"
@@ -7730,6 +7734,10 @@ msgstr "Estadísticas de la plataforma. Este dominio puede leer los recuentos de
 #: src/activity/audit-log.tsx
 msgid "Platform update"
 msgstr "Actualización de la plataforma"
+
+#: src/voice/sound-controls.tsx
+msgid "Play"
+msgstr "Reproducir"
 
 #: src/routes/_shell.policies.documents.$policyId.tsx
 #: src/routes/_shell.policies.index.tsx
@@ -10752,6 +10760,14 @@ msgstr "Prueba otra búsqueda o borra los filtros para ver todo el registro."
 msgid "Trying again…"
 msgstr "Reintentando…"
 
+#: src/voice/sound-controls.tsx
+msgid "Turn sound off"
+msgstr "Desactivar el sonido"
+
+#: src/voice/sound-controls.tsx
+msgid "Turn sound on"
+msgstr "Activar el sonido"
+
 #: src/onboarding/about-story.tsx
 msgid "Twenty minutes each, easily. About fifteen a week."
 msgstr "Veinte minutos cada una, fácil. Unas quince a la semana."
@@ -11111,6 +11127,10 @@ msgstr "Página de visión confirmada"
 msgctxt "model: Stephen's voice"
 msgid "Voice"
 msgstr "Voz"
+
+#: src/voice/sound-controls.tsx
+msgid "Volume"
+msgstr "Volumen"
 
 #: src/workflows/workflow-diagram.tsx
 msgid "Waiting"

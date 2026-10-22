@@ -23,6 +23,12 @@ interface __BaseEnv_Env {
   ENTRA_CLIENT_ID?: string;
   GOOGLE_CLIENT_ID?: string;
   /**
+   * Grasp's own client: the deployment whose core answers Ask Grasp with
+   * its model gateway (src/admin/ask.ts). Without it the chat says it isn't
+   * set up.
+   */
+  GRASP_CLIENT_ID?: string;
+  /**
    * Grasp's Rooms' team origin, e.g. `https://rooms.grasp.example`, which
    * the proposal under Contract is read from (src/proposal/rooms.ts).
    * Without it Rooms isn't read.
