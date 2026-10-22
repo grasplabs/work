@@ -618,7 +618,7 @@ describe("run tasks", { timeout: 180_000 }, () => {
     });
   });
 
-  it("tell the parent its child's end though senders filled the parent's inbox", async () => {
+  it("tell the parent each of its children's ends though senders filled the parent's inbox before the first ended", async () => {
     const admin = await person("admin");
     const child = await workflowOf(admin, "child", [
       (name) =>
@@ -627,9 +627,15 @@ describe("run tasks", { timeout: 180_000 }, () => {
           { greet: { set: { greeting: '${ "Hello, " + .who }' } } },
         ]),
     ]);
-    const { parent } = await parentOf(admin, child, [
-      runChild("greet-child", child.name),
-    ]);
+    // Five children, one after another: more ends than any reserve of
+    // the inbox would hold, each taken once told.
+    const { parent } = await parentOf(
+      admin,
+      child,
+      ["first", "second", "third", "fourth", "fifth"].map((id) =>
+        runChild(id, child.name)
+      )
+    );
 
     const runId = await started(admin, parent.id);
     await childWaiting(runId);
@@ -651,9 +657,15 @@ describe("run tasks", { timeout: 180_000 }, () => {
     );
     const run = await endOf(admin, parent.id, runId);
 
-    expect({ filled, end: endStateOf(run) }).toStrictEqual({
+    const children = await childrenOf(runId);
+    expect({
+      filled,
+      end: endStateOf(run),
+      children: children.map(({ status }) => status),
+    }).toStrictEqual({
       filled: "full",
       end: { status: "completed", output: { greeting: "Hello, Ada" } },
+      children: Array.from({ length: 5 }, () => "completed"),
     });
   });
 

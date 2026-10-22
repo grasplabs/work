@@ -159,8 +159,6 @@ import {
   maxEventPayloadBytes,
   maxInboxBytes,
   maxInboxEvents,
-  reservedInboxBytes,
-  reservedInboxEvents,
   readRun,
   readStep,
   removeJournal,
@@ -276,8 +274,10 @@ export interface EventCommand {
    */
   attributes?: Readonly<Record<string, string>> | null;
   /**
-   * Whether it may take the inbox's reserve (`reservedInboxEvents`,
-   * `reservedInboxBytes`): only for what the run's own host owes it.
+   * Whether it is past the inbox's count and byte limits: only for what
+   * the run's own host owes it (a child's end), which the host bounds
+   * itself, so no other sender can crowd it out, however long the run has
+   * taken events. Its payload is held to its limit all the same.
    */
   reserved?: boolean;
 }
@@ -2525,12 +2525,12 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
       if (bytes > maxEventPayloadBytes) {
         return { outcome: "too_large", wake: false };
       }
-      // Others stop short of the limits by what is reserved for the
-      // deliveries a run's host owes it.
-      const reserve = command.reserved === true ? 0 : 1;
+      // What the run's host owes it isn't held to the limits: every other
+      // sender's events count against them, a full inbox's included.
       if (
-        run.event_count >= maxInboxEvents - reserve * reservedInboxEvents ||
-        run.event_bytes + held > maxInboxBytes - reserve * reservedInboxBytes
+        command.reserved !== true &&
+        (run.event_count >= maxInboxEvents ||
+          run.event_bytes + held > maxInboxBytes)
       ) {
         return { outcome: "full", wake: false };
       }

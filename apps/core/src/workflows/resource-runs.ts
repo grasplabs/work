@@ -1005,8 +1005,9 @@ export const resultOf = async (
 /**
  * Tells child run `row`'s parent that it ended, and how (`ChildEnd`): an
  * event under the child's ID as its key, which the parent's wait for it
- * takes, once, and journals, in the room of the parent's inbox kept for
- * what core owes a run (`reserved`), so no sender can crowd it out. An
+ * takes, once, and journals, past the parent's inbox limits (`reserved`),
+ * so no sender can crowd it out: one per child, so bounded by the
+ * lineage's descendant runs. An
  * output too large for an event is told as a failure
  * (`workflow.child_output_too_large`), never dropped. Told again, it is
  * the same event; a parent that ended, or that the engine removed after it
@@ -1060,14 +1061,6 @@ export const tellParentOfEnd = async (env: Env, row: RunRow): Promise<void> => {
       status: "failed",
       code: "workflow.child_output_too_large",
     });
-  }
-  if (outcome === "missing") {
-    // A parent the engine no longer holds (removed with its retention) takes
-    // nothing, ever: done. One that hasn't ended is still to come.
-    const parent = await runOf(env, row.parentRunId);
-    if (parent === undefined || !unended.includes(parent.status)) {
-      return;
-    }
   }
   if (outcome === "missing") {
     // The engine has no record of the parent: removed once it ended (its

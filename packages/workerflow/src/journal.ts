@@ -98,16 +98,6 @@ export const maxInboxEvents = 10_000;
 export const maxInboxBytes = 32 * 1024 * 1024;
 
 /**
- * What of a run's inbox only a reserved delivery may take (`EventCommand
- * .reserved`): events its host owes the run itself (a child's end, say),
- * which no other sender may crowd out. Others stop this far short of the
- * limits: the count of reserved events, and room for that many of the
- * largest payloads a run accepts.
- */
-export const reservedInboxEvents = 4;
-export const reservedInboxBytes = reservedInboxEvents * 2 * 1024 * 1024;
-
-/**
  * `waitingForPause`: a pause was asked for while an activation ran; it
  * finishes the steps it has out and starts nothing new, then the run is
  * `paused`, with no activation and no alarm, until it is resumed.

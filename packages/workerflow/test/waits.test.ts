@@ -11,8 +11,6 @@ import {
   maxEventPayloadBytes,
   maxInboxBytes,
   maxInboxEvents,
-  reservedInboxBytes,
-  reservedInboxEvents,
 } from "../src/journal.ts";
 import { WorkflowRun } from "../src/run.ts";
 import {
@@ -574,11 +572,11 @@ describe("an inbox", () => {
     expect(outcomes).toStrictEqual(["accepted", "too_large"]);
   });
 
-  it("stops taking events short of its byte limit by its reserve, and the caller hears why; a reserved delivery still fits", async () => {
+  it("stops taking events at its byte limit, and the caller hears why; a reserved delivery still fits", async () => {
     const id = newId();
     await workflow("approval").create({ id });
     const bytes = 1_000_000;
-    const fit = Math.floor((maxInboxBytes - reservedInboxBytes) / bytes);
+    const fit = Math.floor(maxInboxBytes / bytes);
 
     const outcomes = await sendAll(
       id,
@@ -605,27 +603,24 @@ describe("an inbox", () => {
     ]);
   });
 
-  it("stops taking events short of its count limit by its reserve, which only reserved deliveries take", async () => {
+  it("stops taking events at its count limit, and takes reserved deliveries past it however many", async () => {
     const id = newId();
     await workflow("approval").create({ id });
-    const open = maxInboxEvents - reservedInboxEvents;
 
     const outcomes = await sendAll(
       id,
-      Array.from({ length: open + 1 }, () => encode(null))
+      Array.from({ length: maxInboxEvents + 1 }, () => encode(null))
     );
+    // As many as a lineage's children: each past the limit.
     const reserved = await sendAll(
       id,
-      Array.from({ length: reservedInboxEvents + 1 }, () => encode(null)),
+      Array.from({ length: 8 }, () => encode(null)),
       true
     );
 
-    expect(outcomes.lastIndexOf("accepted")).toBe(open - 1);
+    expect(outcomes.lastIndexOf("accepted")).toBe(maxInboxEvents - 1);
     expect(outcomes.at(-1)).toBe("full");
-    expect(reserved).toStrictEqual([
-      ...Array.from({ length: reservedInboxEvents }, () => "accepted"),
-      "full",
-    ]);
+    expect(reserved).toStrictEqual(Array.from({ length: 8 }, () => "accepted"));
   });
 });
 
