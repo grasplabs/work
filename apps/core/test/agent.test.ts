@@ -60,11 +60,12 @@ import { signedInApi, signedInWithRole } from "./sign-in.ts";
 const idp = mockIdp();
 
 /**
- * Models of different context windows, as pi's catalog gives them: the
- * tests' own, of 1,000,000 tokens, one of 200,000 and one of 24,000. Each
- * request keeps 16,384 of them for the answer, or a quarter of a window
- * too small for that (6,000 of the 24,000).
+ * Models of different context windows, as pi's catalog gives them: one of
+ * 1,000,000 tokens, one of 200,000 and one of 24,000. Each request keeps
+ * 16,384 of them for the answer, or a quarter of a window too small for that
+ * (6,000 of the 24,000).
  */
+const largeModel = "anthropic/claude-sonnet-5-5";
 const smallModel = "anthropic/claude-haiku-4-5";
 const tinyModel = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 const answerTokens = 16_384;
@@ -76,7 +77,7 @@ const inputTokens = {
 /** A deployment that allows them all. */
 const bothModels = {
   ...gatewayConfig,
-  models: [model, smallModel, tinyModel],
+  models: [model, largeModel, smallModel, tinyModel],
 };
 
 /**
@@ -1163,7 +1164,7 @@ describe("chat agent turns", () => {
     };
 
     const small = await sentTo(smallModel, "And now?", "Still here.");
-    const large = await sentTo(model, "And again?", "All here.");
+    const large = await sentTo(largeModel, "And again?", "All here.");
 
     expect({
       small: { ...small, chars: undefined },
