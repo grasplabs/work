@@ -253,26 +253,18 @@ const isTakenId = (error: unknown): boolean =>
   (error.message.includes("UNIQUE constraint failed: brain_records.id") ||
     isTakenId(error.cause));
 
+/** How often a call writes after racing another for its ids. */
+const maxWriteAttempts = 3;
+
 /**
- * Adds `input` to the Playbook as `person`, all or none: for admins. A
- * record held already, exactly so, is left as it is.
+ * Writes `fresh` as `person`, with its audit event, in one batch: none of
+ * it when the unique index finds an id taken since it was read.
  */
-export const addBrainRecords = async (
+const writeRecords = async (
   env: Env,
   person: Identity,
-  input: unknown
-): Promise<BrainRecordsAdded> => {
-  requireAdmin(person);
-  const records = recordsOf(input);
-  const [held, onboarding] = await Promise.all([
-    heldFor(env, records),
-    onboardingSourcesHeld(env, records),
-  ]);
-  const fresh = freshOf(records, held, onboarding);
-  const unchanged = records.length - fresh.length;
-  if (fresh.length === 0) {
-    return { added: 0, unchanged };
-  }
+  fresh: readonly BrainRecord[]
+): Promise<void> => {
   await requireRoom(env, fresh);
   const db = drizzle(env.DB);
   const addedAt = new Date();
@@ -290,37 +282,60 @@ export const addBrainRecords = async (
       fresh.slice(index * rowsPerInsert, (index + 1) * rowsPerInsert).map(row)
   );
   if (first === undefined) {
-    return { added: 0, unchanged };
+    return;
   }
   const insert = (rows: ReturnType<typeof row>[]) =>
     db.insert(brainRecords).values(rows);
-  try {
-    await auditedBatch(env, db, [
-      insert(first),
-      ...more.map(insert),
-      outboxed(db, {
-        actor: actorOf(person),
-        action: "brain.records.added",
-        target: { type: "brain", id: "playbook" },
-        provenance: fresh.map(keyOf),
-        detail: { added: fresh.length },
-      }),
-    ]);
-  } catch (error) {
-    // Another call added one of these ids since they were read: the unique
-    // index refused the batch, so nothing in it was kept.
-    if (isTakenId(error)) {
-      // A retry racing its first call is still a retry: read again, and
-      // refuse only a record held differently.
-      const now = await heldFor(env, records);
-      if (freshOf(records, now, onboarding).length === 0) {
-        return { added: 0, unchanged: records.length };
-      }
-      throw brainRecordErrors.create("brain.record_conflict");
+  await auditedBatch(env, db, [
+    insert(first),
+    ...more.map(insert),
+    outboxed(db, {
+      actor: actorOf(person),
+      action: "brain.records.added",
+      target: { type: "brain", id: "playbook" },
+      provenance: fresh.map(keyOf),
+      detail: { added: fresh.length },
+    }),
+  ]);
+};
+
+/**
+ * Adds `input` to the Playbook as `person`, all or none: for admins. A
+ * record held already, exactly so, is left as it is.
+ */
+export const addBrainRecords = async (
+  env: Env,
+  person: Identity,
+  input: unknown
+): Promise<BrainRecordsAdded> => {
+  requireAdmin(person);
+  const records = recordsOf(input);
+  // GRA-328: a record's free text (a statement's, a gap's question) is
+  // canonical Brain storage, so it passes the admission gate
+  // (knowledge/admission.ts, #863) here, before anything is kept.
+  const onboarding = await onboardingSourcesHeld(env, records);
+  // Another call can add some of these ids between the read and the
+  // write: the unique index then refuses the whole batch, and what is
+  // still fresh is read again and written once more.
+  for (let attempt = 1; ; attempt += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- read again after a race
+    const fresh = freshOf(records, await heldFor(env, records), onboarding);
+    const unchanged = records.length - fresh.length;
+    if (fresh.length === 0) {
+      return { added: 0, unchanged };
     }
-    throw error;
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- write again after a race
+      await writeRecords(env, person, fresh);
+      return { added: fresh.length, unchanged };
+    } catch (error) {
+      if (!isTakenId(error) || attempt === maxWriteAttempts) {
+        throw isTakenId(error)
+          ? brainRecordErrors.create("brain.record_conflict")
+          : error;
+      }
+    }
   }
-  return { added: fresh.length, unchanged };
 };
 
 /** The Playbook's records, as the brain reads them, oldest first. */

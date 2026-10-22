@@ -4,7 +4,8 @@ import {
   brainRecordsMaxPerType,
 } from "@grasp-os/shared/brain-records";
 import type { RosterInput } from "@grasp-os/shared/onboarding";
-import { describe, expect, it } from "vite-plus/test";
+import { env } from "cloudflare:workers";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import { mockIdp } from "./idp.ts";
 import { auditedDuring, outcome, signedInApi, unique } from "./sign-in.ts";
@@ -264,20 +265,46 @@ describe("the Playbook's records", { timeout: 120_000 }, () => {
     });
   });
 
-  it("take a retry racing its first call as the retry it is", async () => {
+  it("take a retry racing its first call as unchanged, and write what is still fresh when a racing call took only some ids", async () => {
     const admin = await signedInApi(idp, "admin");
     await admin.api.onboarding.saveRoster(roster);
-    const again = await signedInApi(idp, "admin");
-    const { records } = interview(unique());
+    const other = await signedInApi(idp, "admin");
 
-    const outcomes = await Promise.all([
-      admin.api.brain.addRecords(records),
-      again.api.brain.addRecords(records),
-    ]);
+    /**
+     * Adds `records` as the admin while another admin's call adding
+     * `racing` lands between this call's read and its first write.
+     */
+    const racedBy = async (
+      records: BrainRecordInput[],
+      racing: BrainRecordInput[]
+    ) => {
+      const batch = env.DB.batch.bind(env.DB);
+      let raced = false;
+      const spy = vi
+        .spyOn(env.DB, "batch")
+        .mockImplementation(async (statements) => {
+          if (!raced) {
+            raced = true;
+            await other.api.brain.addRecords(racing);
+          }
+          return await batch(statements);
+        });
+      try {
+        return await admin.api.brain.addRecords(records);
+      } finally {
+        spy.mockRestore();
+      }
+    };
+    const whole = interview(unique());
+    const part = interview(unique());
 
-    expect(
-      outcomes.map(({ added, unchanged }) => `${added}/${unchanged}`).toSorted()
-    ).toStrictEqual(["0/6", "6/0"]);
+    expect({
+      retry: await racedBy(whole.records, whole.records),
+      part: await racedBy(part.records, part.records.slice(0, 1)),
+    }).toStrictEqual({
+      retry: { added: 0, unchanged: 6 },
+      part: { added: 5, unchanged: 1 },
+    });
   });
 
   it("refuse a reference to nothing, a pain on what doesn't hurt, and anything a record doesn't name", async () => {
