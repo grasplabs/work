@@ -51,7 +51,7 @@ import { appCandidateReports, appCandidates } from "./db/core/schema.ts";
 //   it pins, and marks it active in the same batch (apps.ts,
 //   `verifiedCandidateSql`). Triggers keep every report as written, and a
 //   candidate's version, tree, base, repair link and report hash as they
-//   were set (migration 0121).
+//   were set (migration 0126).
 // - A lost update: the candidate is made current only over the version it
 //   was based on, compared and set as the version changes.
 // - A run that lost its candidate goes on writing: every move compares and

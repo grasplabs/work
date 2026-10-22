@@ -186,7 +186,7 @@ export const racingDb = (
 /**
  * Statements leaving a verified candidate (src/app-candidates.ts) for
  * `version` of `app`, with its report, as making it current requires
- * (migration 0121): for tests that make a version current by hand, as
+ * (migration 0126): for tests that make a version current by hand, as
  * another writer would, to race or bypass the real path. Each move is one
  * the triggers allow.
  */

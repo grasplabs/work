@@ -666,7 +666,7 @@ export const appVersions = sqliteTable(
  * (`based_on`, 0 for an App with none current), and moves forward
  * through its states only (`candidateStates`), each move a compare and
  * set on its state and, while it runs, on the lease of whoever runs it.
- * Triggers keep what it pins and the moves it may make (migration 0121).
+ * Triggers keep what it pins and the moves it may make (migration 0126).
  */
 export const appCandidates = sqliteTable(
   "app_candidates",
@@ -710,7 +710,7 @@ export const appCandidates = sqliteTable(
 /**
  * A verified candidate's report (spec 22.2, step 11): canonical text
  * holding only identities and hashes core itself computed, stored once
- * with its SHA-256. Never updated or deleted (migration 0121).
+ * with its SHA-256. Never updated or deleted (migration 0126).
  */
 export const appCandidateReports = sqliteTable("app_candidate_reports", {
   candidateId: text("candidate_id")
