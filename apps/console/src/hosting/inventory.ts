@@ -28,6 +28,8 @@ import {
   clientResources,
   hostingDestinations,
 } from "../db/schema.ts";
+import { holdsClient, stillHolds } from "../runners.ts";
+import type { HeldClient } from "../runners.ts";
 import {
   destinationCapabilitiesSchema,
   hostingPolicies,
@@ -67,6 +69,14 @@ export const inventoryErrorCodes = [
   "unsupported_binding",
   /** A binding names a placeholder rendering doesn't fill. */
   "unknown_placeholder",
+  /** The destination isn't one the console creates resources in (workerd is set up by its operator). */
+  "destination_unsupported",
+  /** A resource exists under a recorded name, but no run of this client asked for it. */
+  "unowned_resource",
+  /** The provider reports a resource outside the jurisdiction the inventory records. */
+  "resource_outside_jurisdiction",
+  /** Another runner took the client over: this one changes nothing more. */
+  "runner_replaced",
 ] as const;
 
 export type InventoryErrorCode = (typeof inventoryErrorCodes)[number];
@@ -149,7 +159,7 @@ export const saveDestination = async (
   );
 };
 
-const destinationOf = async (db: ConsoleDatabase, id: string) => {
+export const destinationOf = async (db: ConsoleDatabase, id: string) => {
   const row = await db
     .select()
     .from(hostingDestinations)
@@ -168,7 +178,7 @@ const destinationOf = async (db: ConsoleDatabase, id: string) => {
 };
 
 /** Throws unless `destinationId` satisfies every requirement of `policyId`. */
-const assertPlaceable = async (
+export const assertPlaceable = async (
   db: ConsoleDatabase,
   destinationId: string,
   policyId: HostingPolicyId
@@ -199,7 +209,7 @@ const newDeploymentId = (): string =>
     (byte) => BASE32[byte % BASE32.length]
   ).join("");
 
-const placementOf = async (
+export const placementOf = async (
   db: ConsoleDatabase,
   clientId: string
 ): Promise<ClientPlacement | undefined> =>
@@ -490,6 +500,7 @@ export const allocateClientResources = async (
           workerOf.get(role.role)
         ),
         providerId: null,
+        createRequestedBy: null,
         jurisdiction,
         owner: placement.deploymentId,
         operationId,
@@ -568,7 +579,9 @@ export const allocateClientResources = async (
 /**
  * Records the provider's id for a resource it observed by its recorded
  * physical name, once: the id never changes after. A resource observed
- * under another id is someone else's, or recreated, and stops it.
+ * under another id is someone else's, or recreated, and stops it. With
+ * `held`, only while that runner still holds the client: a runner that
+ * lost it records nothing.
  */
 export const recordProviderId = async (
   db: ConsoleDatabase,
@@ -578,7 +591,8 @@ export const recordProviderId = async (
     role: string;
     physicalName: string;
     providerId: string;
-  }
+  },
+  held?: HeldClient
 ): Promise<void> => {
   const { clientId, role, providerId } = observed;
   const where = and(
@@ -596,16 +610,32 @@ export const recordProviderId = async (
     db
       .update(clientResources)
       .set({ providerId, updatedAt: new Date() })
-      .where(and(where, isNull(clientResources.providerId))),
+      .where(
+        and(
+          where,
+          isNull(clientResources.providerId),
+          held === undefined ? undefined : stillHolds(held)
+        )
+      ),
     { action: "client.resource_observe", clientId, target: role }
   );
   const row = await db.select().from(clientResources).where(where).get();
-  if (row?.providerId !== providerId) {
+  if (row?.providerId === providerId) {
+    return;
+  }
+  if (
+    held !== undefined &&
+    !(await holdsClient(db, held.clientId, held.runId))
+  ) {
     throw new InventoryError(
-      "resource_conflict",
-      `${clientId}'s ${role} isn't ${observed.physicalName} with id ${providerId}`
+      "runner_replaced",
+      `${held.runId} no longer holds ${clientId}`
     );
   }
+  throw new InventoryError(
+    "resource_conflict",
+    `${clientId}'s ${role} isn't ${observed.physicalName} with id ${providerId}`
+  );
 };
 
 /** Binding kinds that name no resource of the client's: nothing to map. */
