@@ -49,6 +49,11 @@ export interface TrialObservation {
   changedTables?: readonly string[];
   /** Why the trial failed, if it did: it still counts, as not completed. */
   error?: string;
+  /**
+   * The paths of the run's Knowledge documents, by ID: what a citation
+   * linking one (`grasp:note/<id>`) cites.
+   */
+  notes?: Readonly<Record<string, string>>;
   latencyMs: number;
   costMicros: number;
   /**
@@ -133,14 +138,32 @@ export const isAbstention = (answer: string): boolean =>
 const sourceLabel = /^source:\s*/iu;
 
 /**
+ * A link to a Knowledge document as the product's agent is told to cite
+ * one (src/agent.ts): `[its title](grasp:note/<documentId>)`.
+ */
+const noteLink = /\[[^\]\n]*\]\(\s*<?grasp:note\/(?<id>[\w-]{1,128})>?\s*\)/gu;
+
+/**
  * The sources an answer cites, as `[path#heading]`, `[memory]` or
  * `[session]`; a citation that copied a handed source's label as well,
- * `[source: path#heading]`, cites that source.
+ * `[source: path#heading]`, cites that source. A link to a document, as
+ * the product cites (`[title](grasp:note/<id>)`), cites that document's
+ * path, by `notes`: the paths of the run's documents, by ID. A link to
+ * one it doesn't name cites nothing a task expects.
  */
-export const citationsOf = (answer: string): string[] =>
-  [...answer.matchAll(citation)].map(({ groups }) =>
-    (groups?.cited?.trim() ?? "").replace(sourceLabel, "")
-  );
+export const citationsOf = (
+  answer: string,
+  notes: Readonly<Record<string, string>> = {}
+): string[] => {
+  const linked = [...answer.matchAll(noteLink)].map(({ groups }) => {
+    const id = groups?.id ?? "";
+    return Object.hasOwn(notes, id) ? (notes[id] ?? "") : `grasp:note/${id}`;
+  });
+  const bracketed = [
+    ...answer.replaceAll(noteLink, " ").matchAll(citation),
+  ].map(({ groups }) => (groups?.cited?.trim() ?? "").replace(sourceLabel, ""));
+  return [...linked, ...bracketed];
+};
 
 const wordCharacter = /[\p{L}\p{N}]/u;
 const digit = /\p{N}/u;
@@ -403,7 +426,7 @@ export const scoreTrial = (
       )
     );
   }).length;
-  const cited = citationsOf(observed.answer);
+  const cited = citationsOf(observed.answer, observed.notes);
   const supported = cited.filter((source) =>
     expect.evidence.some((evidence) => names(source, evidence.source))
   ).length;

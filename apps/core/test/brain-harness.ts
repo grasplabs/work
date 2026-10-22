@@ -107,7 +107,7 @@ import { newTeam, readCollection } from "./knowledge.ts";
 import { callAuth, openRpc, signedInApi } from "./sign-in.ts";
 
 /** Bumped with any change to how the harness runs or measures a trial. */
-export const brainHarnessVersion = "5";
+export const brainHarnessVersion = "6";
 
 export const brainArms = ["agent", "fullContext", "fullText"] as const;
 export type BrainArm = (typeof brainArms)[number];
@@ -1808,6 +1808,22 @@ const lastSaid = async (place: Workspace, chatId: string): Promise<string> => {
     : "";
 };
 
+/**
+ * The paths of the company's Knowledge documents, by ID: what a citation
+ * linking one, as the product cites (`grasp:note/<id>`), cites.
+ */
+const notesOf = (company: BrainCompany): Record<string, string> => {
+  const paths = new Map(
+    Object.entries(brainDocuments).map(([key, { path }]) => [key, path])
+  );
+  return Object.fromEntries(
+    [...company.documents].flatMap(([key, { id }]) => {
+      const path = paths.get(key);
+      return path === undefined ? [] : [[id, path]];
+    })
+  );
+};
+
 const runDurabilityCase = async (
   company: BrainCompany,
   place: Workspace,
@@ -1965,8 +1981,9 @@ const runDurabilityCase = async (
   );
   const retry = await attempt(2, false);
   const ledgerAfter = await ledgerRequests();
+  const notes = notesOf(company);
   const scoreOf = (observed: TrialObservation) =>
-    scoreTrial(task.expect, observed);
+    scoreTrial(task.expect, { ...observed, notes });
   return {
     kind,
     arm,
@@ -2418,9 +2435,12 @@ export const runBrainBaseline = async (
     retry,
   ]);
   const byId = new Map(brainTasks.map((task) => [task.id, task]));
+  const notes = notesOf(company);
   const scores = observations.flatMap((observed) => {
     const task = byId.get(observed.taskId);
-    return task === undefined ? [] : [scoreTrial(task.expect, observed)];
+    return task === undefined
+      ? []
+      : [scoreTrial(task.expect, { ...observed, notes })];
   });
   const scoresOf = (arm: string) => scores.filter((score) => score.arm === arm);
   const armScores = scores.filter(({ arm }) =>

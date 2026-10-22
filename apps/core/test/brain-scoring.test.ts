@@ -108,6 +108,23 @@ describe("scoring a trial", () => {
     });
   });
 
+  it("takes a link to a document, as the product cites, as citing that document", () => {
+    const notes = { "doc-lease": "handbook/contracts.md", "doc-other": "x.md" };
+    const supportWith = (answer: string) =>
+      verdict(contract, { answer, notes }).citationSupport;
+    expect({
+      lease: supportWith(
+        "ANSWER: Marta Ruiz\nFrom [Lease](grasp:note/doc-lease)"
+      ),
+      other: supportWith(
+        "ANSWER: Marta Ruiz\nFrom [handbook/contracts.md](grasp:note/doc-other)"
+      ),
+      unknown: supportWith(
+        "ANSWER: Marta Ruiz\nFrom [Lease](grasp:note/doc-unknown)"
+      ),
+    }).toStrictEqual({ lease: 1, other: 0, unknown: 0 });
+  });
+
   it("takes the answer line's keyword in the question's language, and in bold", () => {
     const completedWith = (answer: string) =>
       verdict(contract, { answer }).completed;
