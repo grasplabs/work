@@ -97,7 +97,11 @@ import type {
   BuildJobRow,
 } from "./build-job-records.ts";
 import { revokeChatPermissions } from "./chat-connections.ts";
-import { chatMessageOf, partialOf } from "./chat-messages.ts";
+import {
+  chatMessageOf,
+  coreMessageProvider,
+  partialOf,
+} from "./chat-messages.ts";
 import { ChatWatch } from "./chat-watch.ts";
 import type { ChatListener, ChatState } from "./chat-watch.ts";
 import {
@@ -449,9 +453,9 @@ const interruptedMessage = (): AssistantMessage => ({
       text: "I was interrupted before I finished, so what I was doing may be incomplete. Ask again and I'll go on from here.",
     },
   ],
-  api: "grasp",
-  provider: "grasp",
-  model: "grasp",
+  api: coreMessageProvider,
+  provider: coreMessageProvider,
+  model: coreMessageProvider,
   usage: {
     input: 0,
     output: 0,
