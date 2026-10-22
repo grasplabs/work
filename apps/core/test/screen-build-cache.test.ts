@@ -287,6 +287,32 @@ describe("the build cache", { timeout: 120_000 }, () => {
     });
   });
 
+  it("compiles once for many views of one App at once, and hands an uncacheable build to them all", async () => {
+    const { files, built, key } = await keptBuild();
+    // Quarantined: no build of it is kept, so none is shared through R2.
+    for (let round = 0; round < quarantineAfter; round += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one round after another
+      await forgeKept(key);
+      // oxlint-disable-next-line no-await-in-loop -- one round after another
+      await buildScreens(env, files, "app-test");
+    }
+    const { started, loader } = counting();
+    const views = await Promise.all(
+      Array.from(
+        { length: 10 },
+        async () =>
+          await buildScreens({ ...env, LOADER: loader }, files, "app-test")
+      )
+    );
+
+    expect({
+      started: started.count,
+      all: views.every(
+        (view) => JSON.stringify(view) === JSON.stringify(built)
+      ),
+    }).toStrictEqual({ started: 1, all: true });
+  });
+
   it("builds the same files asked for at once by two Apps once", async () => {
     const files = screen();
     const { started, loader } = counting();

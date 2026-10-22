@@ -46,8 +46,12 @@ export const keySchema = "r1";
 /** Integrity failures of one key before it is quarantined. */
 export const quarantineAfter = 3;
 
-/** How often a build waiting for another's receipt looks again. */
-const pollMs = 250;
+/**
+ * How long a build waiting for another's receipt waits before it looks
+ * again: from the first, doubling to the most, so waiters on a cold cache
+ * (a new compiler, every screen building) don't hammer core's database.
+ */
+export const waitBackoff = { firstMs: 250, mostMs: 4000 } as const;
 
 /** Where quarantined bytes are kept for operators. */
 const quarantinePrefix = "build-quarantine/";
@@ -334,6 +338,7 @@ export const throughCache = async (
     };
   }
   const holder = crypto.randomUUID();
+  let waitMs: number = waitBackoff.firstMs;
   for (;;) {
     // Given up on while waiting: it takes no lease and serves nothing.
     signal?.throwIfAborted();
@@ -342,7 +347,8 @@ export const throughCache = async (
       break;
     }
     // oxlint-disable-next-line no-await-in-loop -- waiting for the holder
-    await scheduler.wait(pollMs);
+    await scheduler.wait(waitMs);
+    waitMs = Math.min(waitMs * 2, waitBackoff.mostMs);
     signal?.throwIfAborted();
     // oxlint-disable-next-line no-await-in-loop -- waiting for the holder
     const now = await readVerified(env, key);
@@ -397,5 +403,53 @@ export const forgetReceipts = async (
           isNull(buildReceipts.quarantinedAt)
         )
       );
+  }
+};
+
+/** How long a quarantined key stays quarantined before it is tried again. */
+export const quarantineKeepMs = 24 * 60 * 60 * 1000;
+
+/** Most receipts one run of the sweep removes. */
+const receiptSweepBatch = 500;
+
+/**
+ * Removes the receipts that hold nothing, as of `now`: those with no
+ * object whose lease ran out (a build that kept nothing, or a holder that
+ * died), and quarantines older than {@link quarantineKeepMs}, so the key
+ * is tried again. At most {@link receiptSweepBatch} a run.
+ */
+export const sweepReceipts = async (
+  env: CacheEnv,
+  now: Date
+): Promise<void> => {
+  const db = drizzle(env.DB);
+  const stale = or(
+    and(
+      isNull(buildReceipts.objectKey),
+      isNull(buildReceipts.quarantinedAt),
+      or(
+        isNull(buildReceipts.leaseExpiresAt),
+        lt(buildReceipts.leaseExpiresAt, now)
+      )
+    ),
+    lt(buildReceipts.quarantinedAt, new Date(now.getTime() - quarantineKeepMs))
+  );
+  const keys = await db
+    .select({ key: buildReceipts.key })
+    .from(buildReceipts)
+    .where(stale)
+    .limit(receiptSweepBatch);
+  for (let start = 0; start < keys.length; start += 90) {
+    // oxlint-disable-next-line no-await-in-loop -- a chunk at a time
+    await db.delete(buildReceipts).where(
+      and(
+        inArray(
+          buildReceipts.key,
+          keys.slice(start, start + 90).map(({ key }) => key)
+        ),
+        // Still stale as it goes: a lease taken meanwhile is kept.
+        stale
+      )
+    );
   }
 };
