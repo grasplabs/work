@@ -139,6 +139,7 @@ describe("searching Dutch documents", () => {
         description:
           "Lees dit bij vragen over vakantie, bijzonder verlof of zwangerschap.",
         section: 2,
+        version: 1,
         headings: ["Verlof", "Zwangerschapsverlof"],
         snippet: true,
       },

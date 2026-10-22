@@ -5,11 +5,13 @@ import { sessionEndedCloseCode } from "../src/rpc.ts";
 import { mockIdp } from "./idp.ts";
 import {
   auditedDuring,
+  callAuth,
   letSessionRecheckPass,
   openRpc,
   outcome,
   signedIn,
   signedInApi,
+  whoami,
 } from "./sign-in.ts";
 
 // A person's own sessions (Settings → Security). The ways it can fail,
@@ -29,10 +31,16 @@ const tokensOf = async (userId: string): Promise<string[]> => {
   return results.map(({ token }) => token);
 };
 
+/** A phone's browser, as it names itself. */
+const iPhoneSafari =
+  "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1";
+
 /** The person's own sessions, and another browser of theirs, signed in too. */
 const onTwoBrowsers = async () => {
   const me = await signedInApi(idp, "user");
-  const otherBrowser = await signedIn(idp, "microsoft", me.person);
+  const otherBrowser = await signedIn(idp, "microsoft", me.person, {
+    userAgent: iPhoneSafari,
+  });
   const sessions = await me.api.sessions.list();
   const elsewhere = sessions.find(({ current }) => !current);
   if (elsewhere === undefined) {
@@ -63,6 +71,24 @@ describe("a person's own sessions", { timeout: 60_000 }, () => {
       ...(await tokensOf(someoneElse.userId)),
     ];
     expect(tokens.filter((token) => listed.includes(token))).toStrictEqual([]);
+    // Nor where or with what they signed in, beyond the device's names.
+    expect(sessions.find(({ current }) => !current)?.device).toStrictEqual({
+      browser: "Safari",
+      system: "iPhone",
+      mobile: true,
+    });
+    expect(
+      new Set(sessions.flatMap((session) => Object.keys(session)))
+    ).toStrictEqual(
+      new Set([
+        "id",
+        "device",
+        "signedInAt",
+        "lastActiveAt",
+        "expiresAt",
+        "current",
+      ])
+    );
   });
 
   it("end one, which closes its open connections within seconds and is audited, leaving this one signed in", async () => {
@@ -80,7 +106,6 @@ describe("a person's own sessions", { timeout: 60_000 }, () => {
         actor: { type: "person", userId: me.userId },
         action: "session.ended",
         target: { type: "session", id: elsewhere.id },
-        detail: { current: false },
       }),
     ]);
     await expect(outcome(thereApi.whoami())).resolves.toBe(
@@ -113,16 +138,50 @@ describe("a person's own sessions", { timeout: 60_000 }, () => {
     await expect(me.api.sessions.list()).resolves.toHaveLength(2);
   });
 
-  it("end the one they are on, too, which then closes", async () => {
-    const me = await signedInApi(idp, "user");
-    const [current] = await me.api.sessions.list();
+  it("refuse to end the one they are on, which is signing out, changing and recording nothing", async () => {
+    const { me, sessions } = await onTwoBrowsers();
+    const current = sessions.find((session) => session.current);
 
-    await expect(me.api.sessions.end(current?.id ?? "")).resolves.toBe("ended");
+    const audited = await auditedDuring(async () => {
+      await expect(me.api.sessions.end(current?.id ?? "")).resolves.toBe(
+        "current"
+      );
+    });
     using _clock = letSessionRecheckPass();
 
-    await expect(outcome(me.api.whoami())).resolves.toBe(
-      "auth.unauthenticated"
+    expect(audited).toStrictEqual([]);
+    await expect(me.api.whoami()).resolves.toMatchObject({
+      userId: me.userId,
+    });
+    await expect(me.api.sessions.list()).resolves.toHaveLength(2);
+  });
+});
+
+describe("Better Auth's own session routes", { timeout: 60_000 }, () => {
+  it("are closed: they would hand the browser every session's token, or end sessions by it", async () => {
+    const { me, otherBrowser } = await onTwoBrowsers();
+    const [token] = await tokensOf(me.userId);
+
+    const statuses = await Promise.all([
+      callAuth("/list-sessions", me.session),
+      callAuth("/revoke-session", me.session, { token }),
+      callAuth("/revoke-sessions", me.session, {}),
+      callAuth("/revoke-other-sessions", me.session, {}),
+    ]);
+
+    expect(statuses.map(({ status }) => status)).toStrictEqual([
+      404, 404, 404, 404,
+    ]);
+    const bodies = await Promise.all(
+      statuses.map(async (response) => await response.text())
     );
-    await expect(me.closed).resolves.toBe(sessionEndedCloseCode);
+    const stored = await tokensOf(me.userId);
+    expect(
+      stored.filter((kept) => bodies.some((body) => body.includes(kept)))
+    ).toStrictEqual([]);
+    await expect(whoami(otherBrowser)).resolves.toMatchObject({
+      userId: me.userId,
+    });
+    await expect(me.api.sessions.list()).resolves.toHaveLength(2);
   });
 });

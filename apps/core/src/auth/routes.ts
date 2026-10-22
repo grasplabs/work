@@ -15,15 +15,15 @@ import { signInConfig } from "./config.ts";
  * may change a membership or a role. The JWT plugin's `/token` and
  * `/jwks` stay off too: a token for the whole session, or the keys App
  * tokens are checked with, are nothing a browser needs (app-tokens.ts).
+ * Nor are Better Auth's own session routes (`/list-sessions`,
+ * `/revoke-session(s)`, `/revoke-other-sessions`): they name sessions by
+ * their tokens, which are what the cookie holds. A person lists and ends
+ * their own sessions over `/rpc` instead (own-sessions.ts).
  */
 const allowedRoutes = new Set([
   "POST /sign-in/sso",
   "GET /get-session",
   "POST /sign-out",
-  "GET /list-sessions",
-  "POST /revoke-session",
-  "POST /revoke-sessions",
-  "POST /revoke-other-sessions",
   "GET /organization/get-full-organization",
   "GET /organization/list-members",
   "GET /organization/list-teams",
