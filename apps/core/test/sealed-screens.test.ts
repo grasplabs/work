@@ -8,7 +8,11 @@ import { z } from "zod";
 
 import { loadRelease, sealedScreen } from "../src/app-releases.ts";
 import { appCandidateReports, appCandidates } from "../src/db/core/schema.ts";
-import { frameAccess, stageFrame } from "../src/screen-frame.ts";
+import {
+  frameAccess,
+  frameObjectMaxBytes,
+  stageFrame,
+} from "../src/screen-frame.ts";
 import { release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { frameDocument, loadFrame, pathOf, routed } from "./screen-frames.ts";
@@ -305,6 +309,53 @@ describe("screens sealed with their release", { timeout: 120_000 }, () => {
 
     const { status } = await served(pathOf(address));
     expect(status).toBe(404);
+  });
+
+  it("refuses a staged module or manifest larger than core stages, unread, and stages no build that large", async () => {
+    const { builder, app } = await published();
+    const bundle = await builder.api.screens.open(app, "desk");
+    const frame = await loadFrame(bundle);
+    const [name, address] = Object.entries(frame?.addresses ?? {}).find(
+      ([named]) => named.startsWith("app~")
+    ) ?? ["", ""];
+    const huge = new Uint8Array(frameObjectMaxBytes + 1);
+
+    const key = moduleKeyOf(address);
+    await env.FILES.put(key, huge, { customMetadata: { name } });
+    const module = await served(pathOf(address));
+    const moduleKept = await env.FILES.head(key);
+
+    await builder.api.screens.open(app, "desk");
+    const manifest = await env.FILES.head(manifestKey(bundle.artifact));
+    await env.FILES.put(manifestKey(bundle.artifact), huge, {
+      customMetadata: manifest?.customMetadata ?? {},
+    });
+    const document = await frameDocument(bundle);
+    const manifestKept = await env.FILES.head(manifestKey(bundle.artifact));
+
+    const staging = await failure(async () => {
+      await stageFrame(env, "c".repeat(64), {
+        entry: "app~huge",
+        runtime: "app~huge",
+        modules: { "app~huge": "x".repeat(frameObjectMaxBytes + 1) },
+        kit: {},
+        css: "",
+      });
+    });
+
+    expect({
+      module: module.status,
+      moduleKept: moduleKept !== null,
+      document: document.status,
+      manifestKept: manifestKept !== null,
+      staging,
+    }).toStrictEqual({
+      module: 404,
+      moduleKept: false,
+      document: 404,
+      manifestKept: false,
+      staging: "screen.build_failed",
+    });
   });
 
   it("serves a module that starts with a byte order mark, or holds a lone surrogate, as the bytes its integrity names", async () => {

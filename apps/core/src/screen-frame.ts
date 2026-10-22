@@ -6,8 +6,10 @@ import {
 } from "@grasp-os/shared/encoding";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { log } from "@grasp-os/shared/log";
+import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { artifactSchema } from "@grasp-os/shared/screen-trust";
 import {
+  screenErrors,
   screenFrameMessage,
   screenFrameReady,
   screenLanguageOf,
@@ -271,6 +273,21 @@ const moduleDecoder = new TextDecoder("utf-8", {
   ignoreBOM: true,
 });
 
+/**
+ * The most bytes of one staged module, or of a build's manifest: no more
+ * than everything one resource's builds may produce (`artifactBytes`).
+ * Staging refuses a build with more, so serving reads nothing larger:
+ * an object over it is refused by its size alone, before its body is
+ * read, whoever wrote it.
+ */
+export const frameObjectMaxBytes = platformLimits.artifactBytes;
+
+/** A build with a module or manifest over `frameObjectMaxBytes`. */
+const oversizedBuild = (): Error =>
+  screenErrors.create("screen.build_failed", {
+    reason: "The screen's build has a module larger than one may be.",
+  });
+
 /** The hash a module is served under: of its name and its code. */
 const codeHash = async (name: string, code: string): Promise<string> =>
   await sha256Hex(canonicalJson([name, code]));
@@ -363,6 +380,9 @@ export const stageFrame = async (
       return { name, bytes, hash: await codeHash(name, code) };
     })
   );
+  if (named.some(({ bytes }) => bytes.byteLength > frameObjectMaxBytes)) {
+    throw oversizedBuild();
+  }
   const staged = await env.FILES.head(frameKey(artifact));
   if (
     staged !== null &&
@@ -374,11 +394,6 @@ export const stageFrame = async (
   ) {
     return;
   }
-  await Promise.all(
-    named.map(async ({ name, bytes, hash }) => {
-      await env.FILES.put(moduleKey(hash), bytes, { customMetadata: { name } });
-    })
-  );
   const manifest: FrameManifest = {
     entry,
     runtime,
@@ -394,6 +409,14 @@ export const stageFrame = async (
     ),
   };
   const text = JSON.stringify(manifest);
+  if (encoder.encode(text).byteLength > frameObjectMaxBytes) {
+    throw oversizedBuild();
+  }
+  await Promise.all(
+    named.map(async ({ name, bytes, hash }) => {
+      await env.FILES.put(moduleKey(hash), bytes, { customMetadata: { name } });
+    })
+  );
   await env.FILES.put(frameKey(artifact), text, {
     customMetadata: { mac: await manifestMac(env, artifact, text) },
   });
@@ -507,6 +530,13 @@ export const screenModuleResponse = async (
   if (module === null) {
     return refused(404);
   }
+  if (module.size > frameObjectMaxBytes) {
+    // Larger than core stages: not read.
+    await module.body.cancel();
+    log.error("screen_frame.module_corrupt", { hash, bytes: module.size });
+    await env.FILES.delete(moduleKey(hash));
+    return refused(404, [], "no-store");
+  }
   const bytes = new Uint8Array(await module.arrayBuffer());
   const name = module.customMetadata?.name;
   if (name === undefined || (await moduleHash(name, bytes)) !== hash) {
@@ -603,9 +633,15 @@ export const screenFrameResponse = async (
   if (stored === null) {
     return refused(404);
   }
-  const text = await stored.text();
+  // Larger than core stages: not read.
+  const tooLarge = stored.size > frameObjectMaxBytes;
+  if (tooLarge) {
+    await stored.body.cancel();
+  }
+  const text = tooLarge ? "" : await stored.text();
   const parsed = frameManifestSchema.safeParse(
-    (await isManifestOf(env, artifact.data, text, stored.customMetadata?.mac))
+    !tooLarge &&
+      (await isManifestOf(env, artifact.data, text, stored.customMetadata?.mac))
       ? JSON.parse(text)
       : undefined
   );
