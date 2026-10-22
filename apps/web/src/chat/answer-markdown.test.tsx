@@ -22,13 +22,16 @@ let copied: string[] = [];
 let downloaded: { name: string; text: string }[] = [];
 let opened: { url: string; features: string }[] = [];
 
-/** The answer `text`, rendered. */
+/** The answer `text`, rendered; again, as it streams on, where it was. */
 const shown = async (text: string): Promise<void> => {
-  const host = document.createElement("div");
-  document.body.append(host);
-  await act(async () => {
+  if (root === undefined) {
+    const host = document.createElement("div");
+    document.body.append(host);
     root = createRoot(host);
-    root.render(
+  }
+  const rendered = root;
+  await act(async () => {
+    rendered.render(
       <I18nProvider i18n={i18n}>
         <Toaster>
           <AnswerMarkdown text={text} />
@@ -182,6 +185,38 @@ describe(AnswerMarkdown, () => {
         text: 'Name,Days\r\n"\'=HYPERLINK(""https://example.com"")",-5\r\n\'@SUM(A1),+2',
       },
     ]);
+  });
+
+  it("copies a would-be formula as text in TSV too", async () => {
+    await shown("| Name | Days |\n| --- | --- |\n| =1+1 | -5 |");
+    await press(button("Copy table"));
+    await press(button("Copy table as TSV"));
+    expect(copied).toStrictEqual(["Name\tDays\n'=1+1\t-5"]);
+  });
+
+  it("copies a cell as it reads: an image's alt text, and code's characters escaped", async () => {
+    await shown(
+      "| Chart | Code |\n| --- | --- |\n| ![Leave chart](https://example.com/c.png) | `*literal*` and a \\\\ |"
+    );
+    await press(button("Copy table"));
+    await press(button("Copy table as Markdown"));
+    expect(copied).toStrictEqual([
+      "| Chart | Code |\n| --- | --- |\n| Leave chart | \\*literal\\* and a \\\\ |",
+    ]);
+  });
+
+  it("keeps a table's menu and a link's question open as the answer streams on", async () => {
+    const start =
+      "See [the policy](https://example.com/leave).\n\n| A |\n| --- |\n| 1 |";
+    await shown(start);
+    await press(button("the policy"));
+    await shown(`${start}\n\nMore`);
+    expect(document.querySelector('[role="alertdialog"]')).not.toBeNull();
+
+    await press(button("Cancel"));
+    await press(button("Copy table"));
+    await shown(`${start}\n\nMore of it`);
+    expect(button("Copy table as CSV")).toBeDefined();
   });
 
   it("opens a link out of Grasp only once the person says so", async () => {

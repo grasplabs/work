@@ -17,6 +17,11 @@ export const textOf = (node: Node | undefined): string => {
     return node.value;
   }
   if (node.type === "element") {
+    // An image shows its alt text (knowledge/markdown.tsx): that is its text.
+    if (node.tagName === "img") {
+      const { alt } = node.properties;
+      return typeof alt === "string" ? alt : "";
+    }
     return node.children.map(textOf).join("");
   }
   return "";
@@ -89,22 +94,31 @@ const csvFormula = /^[=+\-@\t\r]/u;
 const csvNumber = /^[+-]?\d+(?:[.,]\d+)*$/u;
 
 /**
- * A CSV field: a would-be formula made text with a leading apostrophe
- * (OWASP's CSV injection advice), then quoted when it must be, its quotes
- * doubled (RFC 4180).
+ * A cell a spreadsheet will read as text, not run: a would-be formula with
+ * a leading apostrophe (OWASP's CSV injection advice). Both CSV and TSV
+ * are pasted into or opened in one.
  */
+const formulaSafe = (cell: string): string =>
+  csvFormula.test(cell) && !csvNumber.test(cell) ? `'${cell}` : cell;
+
+/** A CSV field: formula-safe, then quoted when it must be, its quotes doubled (RFC 4180). */
 const csvField = (cell: string): string => {
-  const text =
-    csvFormula.test(cell) && !csvNumber.test(cell) ? `'${cell}` : cell;
+  const text = formulaSafe(cell);
   return csvSpecial.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
 };
 
 /** Breaks and tabs, which a TSV field can't hold. */
 const tsvSpecial = /[\t\r\n]+/gu;
 
-/** A Markdown cell: its pipes escaped, its breaks a space. */
+/**
+ * What Markdown would read as syntax in a cell: the backslash itself,
+ * emphasis, code, links, HTML and strikethrough, and the cell's own pipe.
+ */
+const markdownSyntax = /[\\`*_[\]<>|~]/gu;
+
+/** A Markdown cell: its text as written, every character of syntax escaped, its breaks a space. */
 const markdownCell = (cell: string): string =>
-  cell.replaceAll("|", "\\|").replaceAll(/[\r\n]+/gu, " ");
+  cell.replaceAll(markdownSyntax, "\\$&").replaceAll(/[\r\n]+/gu, " ");
 
 /** `rows`, the first the header, written as `format`. */
 export const tableAs = (rows: string[][], format: TableFormat): string => {
@@ -114,7 +128,9 @@ export const tableAs = (rows: string[][], format: TableFormat): string => {
   if (format === "tsv") {
     return rows
       .map((row) =>
-        row.map((cell) => cell.replaceAll(tsvSpecial, " ")).join("\t")
+        row
+          .map((cell) => formulaSafe(cell).replaceAll(tsvSpecial, " "))
+          .join("\t")
       )
       .join("\n");
   }
