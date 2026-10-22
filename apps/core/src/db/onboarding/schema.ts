@@ -39,6 +39,11 @@ export const onboarding = sqliteTable(
      * roster with their link; `null` before any link went out.
      */
     toldAt: text("told_at"),
+    /**
+     * When a piece of work counts as known here, as JSON
+     * (`orgRulesSchema`), or `null` while the starting values hold.
+     */
+    rules: text(),
   },
   (table) => [check("onboarding_one_row", sql`${table.id} = 1`)]
 );
@@ -298,6 +303,16 @@ export const drawnWorks = sqliteTable("drawn_works", {
   drawn: text(),
   agreed: text().notNull(),
   at: text().notNull(),
+});
+
+/**
+ * The pieces of work Grasp counts as known by hand, before the rules say
+ * so: when, and by which staff member. Goes with the piece of work.
+ */
+export const countedWorks = sqliteTable("counted_works", {
+  work: text().primaryKey(),
+  at: text().notNull(),
+  by: text().notNull(),
 });
 
 /**

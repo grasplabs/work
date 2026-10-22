@@ -1,5 +1,6 @@
 import { adminSnapshotSchema } from "@grasp-os/shared/admin-snapshot";
 import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
+import type { OrgRules } from "@grasp-os/shared/admin/onboarding-admin";
 import { actorOf } from "@grasp-os/shared/audit";
 import {
   answerMaxLength,
@@ -28,6 +29,7 @@ import {
   aiPurposes,
   logFilterSchema,
   noteMaxLength,
+  orgRulesSchema,
   stephenSetupSchema,
 } from "@grasp-os/shared/onboarding-staff";
 import type {
@@ -39,6 +41,7 @@ import type {
   StaffNote,
   StaffOverview,
   StaffTranscript,
+  StaffWorks,
   StephenSetup,
   StephenSetupView,
 } from "@grasp-os/shared/onboarding-staff";
@@ -57,6 +60,7 @@ import { readKickoff, transcriptOf } from "./kickoff.ts";
 import { needsOf, stagesOf } from "./staff-area.ts";
 import type { StaffFacts } from "./staff-area.ts";
 import { onboardingStore } from "./store.ts";
+import { staffWorksSchema } from "./work-drawing.ts";
 
 // What only Grasp's staff do in the onboarding, over `/rpc`: pause the
 // interviews and let them run again, say where the agreements stand, give
@@ -71,9 +75,11 @@ import { onboardingStore } from "./store.ts";
 // onboarding used, as numbers; and the interviews by name: where everyone
 // stands (the admin's snapshot, as the console reads it), someone's own
 // link to send by hand, the one reminder noted, a team asked in, and an
-// interview deleted because its person asked. Every read that names
-// people, or holds a link, is in the audit log first, never with what was
-// said or the link itself.
+// interview deleted because its person asked; and every piece of work as
+// drawn from the interviews (GRA-377), with the organization's rules for
+// when one is known, counted as known by hand, or drawn again. Every read
+// that names people, or holds a link, is in the audit log first, never
+// with what was said or the link itself.
 // Until the agreements are in and while the interviews are paused, no link
 // opens and none goes out; once they are in and the interviews run, the
 // links that are due go out at once, not at the store's next alarm. The client's admin sees both (`view()`), and
@@ -84,6 +90,9 @@ const noteSchema = z.string().trim().min(1).max(noteMaxLength);
 const personIdSchema = rosterPersonSchema.shape.id;
 
 const remindSchema = z.array(personIdSchema).max(onboardingPeopleMax);
+
+/** A piece of work's id, as the team map makes them. */
+const workIdSchema = z.string().min(1).max(64);
 
 /** The sponsor's answer to one field the kickoff left open. */
 const answerSchema = z.strictObject({
@@ -376,6 +385,77 @@ export class OnboardingStaffRpc
         const purpose = aiPurposes.find((each) => each === row.purpose);
         return purpose === undefined ? [] : [{ ...row, purpose }];
       });
+    });
+  }
+
+  async works(): Promise<StaffWorks> {
+    return await withPerson(this.#check, async (person) => {
+      requireStaff(person);
+      // What people agreed to, by name: on record before it is read.
+      await appendAuditEvent(this.#env, {
+        actor: actorOf(person),
+        action: "onboarding.works.read",
+        target: { type: "organization", id: organizationId },
+        detail: {},
+      });
+      // Only what the schema names leaves core.
+      return staffWorksSchema.parse(
+        await onboardingStore(this.#env).staffWorks()
+      );
+    });
+  }
+
+  async setRules(rules: OrgRules | null): Promise<void> {
+    await withPerson(this.#check, async (person) => {
+      requireStaff(person);
+      const parsed = onboardingErrors.parse(
+        "onboarding.invalid",
+        orgRulesSchema.nullable(),
+        rules
+      );
+      await onboardingStore(this.#env).setRules(parsed, actorOf(person));
+    });
+  }
+
+  async countAsKnown(work: string, counted: boolean): Promise<void> {
+    await withPerson(this.#check, async (person) => {
+      requireStaff(person);
+      const parsed = onboardingErrors.parse(
+        "onboarding.invalid",
+        z.strictObject({ work: workIdSchema, counted: z.boolean() }),
+        { work, counted }
+      );
+      const store = onboardingStore(this.#env);
+      if (
+        !(await store.countAsKnown(
+          parsed.work,
+          parsed.counted,
+          actorOf(person)
+        ))
+      ) {
+        throw onboardingErrors.create("onboarding.no_work");
+      }
+    });
+  }
+
+  async drawWorkAgain(work: string): Promise<void> {
+    await withPerson(this.#check, async (person) => {
+      requireStaff(person);
+      const id = onboardingErrors.parse(
+        "onboarding.invalid",
+        workIdSchema,
+        work
+      );
+      const drawing = await onboardingStore(this.#env).drawWorkAgain(
+        id,
+        actorOf(person)
+      );
+      if (drawing === "no_work") {
+        throw onboardingErrors.create("onboarding.no_work");
+      }
+      if (drawing === "nothing") {
+        throw onboardingErrors.create("onboarding.nothing_to_draw");
+      }
     });
   }
 

@@ -1,5 +1,7 @@
+import { STARTING_ORG_RULES } from "@grasp-os/shared/admin/onboarding-admin";
+import type { OrgRules } from "@grasp-os/shared/admin/onboarding-admin";
 import { addWorkingDays, dayOf } from "@grasp-os/shared/admin/org-record";
-import type { DrawnWork } from "@grasp-os/shared/admin/org-record";
+import type { DrawnWork, WorkRecord } from "@grasp-os/shared/admin/org-record";
 import { createAuditEvent } from "@grasp-os/shared/audit";
 import type { AuditActor, AuditDetailValue } from "@grasp-os/shared/audit";
 import { randomToken, sha256Hex } from "@grasp-os/shared/encoding";
@@ -42,6 +44,7 @@ import type {
 } from "@grasp-os/shared/onboarding-documents";
 import {
   logPageMax,
+  orgRulesSchema,
   stephenSetupSchema,
 } from "@grasp-os/shared/onboarding-staff";
 import type {
@@ -52,6 +55,7 @@ import type {
   StaffLogEntry,
   StaffNote,
   StaffTranscript,
+  StaffWorks,
   StephenSetup,
   StephenSetupView,
 } from "@grasp-os/shared/onboarding-staff";
@@ -86,6 +90,7 @@ import {
   answerWaits,
   auditOutbox,
   countedPeople,
+  countedWorks,
   drawFailures,
   drawnWorks,
   events,
@@ -1156,6 +1161,8 @@ export class Onboarding extends DurableObject<Env> {
    */
   teamWorks(team: string): TeamWork[] {
     const asked = this.#db.select().from(askedAbout).all();
+    const rules = this.#rules();
+    const byHand = this.#countedWorks();
     const roster = this.#roster();
     const lead = roster?.teams.find(({ id }) => id === team)?.lead ?? null;
     const away = new Set(
@@ -1195,15 +1202,177 @@ export class Onboarding extends DurableObject<Env> {
             .filter(({ work }) => work === row.id)
             .map(({ person }) => person),
           drawn,
-          known: knownOf(drawn, {
-            id: row.id,
-            team,
-            told,
-            doers: doers.filter((id) => !away.has(id)),
-            lead,
-          }),
+          known: knownOf(
+            drawn,
+            {
+              id: row.id,
+              team,
+              told,
+              doers: doers.filter((id) => !away.has(id)),
+              lead,
+              counted: byHand.has(row.id),
+            },
+            rules
+          ),
         };
       });
+  }
+
+  /**
+   * Every piece of work, team by team in the roster's order, as staff see
+   * it (GRA-377): as its team's map holds it, with its drawing, whether
+   * someone agreed to more since, this organization's rules and the
+   * pieces Grasp counts as known by hand.
+   */
+  staffWorks(): StaffWorks {
+    const roster = this.#roster();
+    const order = new Map(roster?.teams.map(({ id }, index) => [id, index]));
+    const due = new Set(this.#worksToDraw(Date.now()).map(({ id }) => id));
+    const drawings = new Map(
+      this.#db
+        .select({ work: drawnWorks.work, drawn: drawnWorks.drawn })
+        .from(drawnWorks)
+        .all()
+        .map(({ work, drawn }) => [work, drawingOf(drawn)])
+    );
+    const all = this.#db
+      .select()
+      .from(works)
+      .all()
+      .filter(({ team }) => order.has(team))
+      .toSorted(
+        (a, b) =>
+          (order.get(a.team) ?? 0) - (order.get(b.team) ?? 0) ||
+          a.position - b.position
+      )
+      .map((row): WorkRecord => ({
+        id: row.id,
+        team: row.team,
+        name: row.name,
+        local: row.local,
+        item: [row.one, row.many],
+        doers: doersOf(row.doers),
+        share: row.share,
+        from: "lead",
+        drawn: drawings.get(row.id) ?? null,
+        stale: due.has(row.id),
+      }));
+    const ids = new Set(all.map(({ id }) => id));
+    return {
+      works: all,
+      rules: this.#rules(),
+      counted: [...this.#countedWorks()].filter((id) => ids.has(id)),
+    };
+  }
+
+  /**
+   * Sets when a piece of work counts as known here; null takes the
+   * starting values back. In the log and the audit log with the values.
+   */
+  setRules(rules: OrgRules | null, by: AuditActor): void {
+    this.ctx.storage.transactionSync(() => {
+      this.#db
+        .update(onboarding)
+        .set({ rules: rules === null ? null : JSON.stringify(rules) })
+        .where(eq(onboarding.id, 1))
+        .run();
+      this.#changed(
+        by,
+        rules === null ? "onboarding.rules.reset" : "onboarding.rules.set",
+        rules === null ? {} : { ...rules }
+      );
+    });
+    this.#deliverAudit();
+  }
+
+  /**
+   * Counts a piece of work as known by hand, or leaves it to the rules
+   * again. False when there is no such piece of work.
+   */
+  countAsKnown(work: string, known: boolean, by: AuditActor): boolean {
+    return this.ctx.storage.transactionSync(() => {
+      const [row] = this.#db
+        .select({ id: works.id })
+        .from(works)
+        .where(eq(works.id, work))
+        .all();
+      if (row === undefined) {
+        return false;
+      }
+      if (known) {
+        this.#db
+          .insert(countedWorks)
+          .values({ work, at: new Date().toISOString(), by: whoIs(by) })
+          .onConflictDoNothing()
+          .run();
+      } else {
+        this.#db.delete(countedWorks).where(eq(countedWorks.work, work)).run();
+      }
+      this.#changed(
+        by,
+        known ? "onboarding.work.counted" : "onboarding.work.uncounted",
+        { work }
+      );
+      return true;
+    });
+  }
+
+  /**
+   * Draws a piece of work again from everything its people agreed to, as
+   * though none of it was drawn yet, at the next alarm: what was drawn
+   * stays until the new drawing replaces it, and one that kept failing is
+   * tried again at once. Says when there is no such piece of work, or
+   * nothing it could be drawn from.
+   */
+  async drawWorkAgain(
+    work: string,
+    by: AuditActor
+  ): Promise<"drawing" | "no_work" | "nothing"> {
+    const due = this.ctx.storage.transactionSync(() => {
+      const known = this.#db
+        .select({ id: works.id })
+        .from(works)
+        .where(eq(works.id, work))
+        .all();
+      if (known.length === 0) {
+        return "no_work";
+      }
+      const [row] = this.#db
+        .select({ agreed: drawnWorks.agreed })
+        .from(drawnWorks)
+        .where(eq(drawnWorks.work, work))
+        .all();
+      if (row !== undefined) {
+        this.#db
+          .update(drawnWorks)
+          .set({ agreed: "{}" })
+          .where(eq(drawnWorks.work, work))
+          .run();
+      }
+      this.#db
+        .delete(drawFailures)
+        .where(eq(drawFailures.item, `work:${work}`))
+        .run();
+      const isDue = this.#worksToDraw(Date.now()).some(({ id }) => id === work);
+      if (!isDue) {
+        // Nothing to draw it from: as it was.
+        if (row !== undefined) {
+          this.#db
+            .update(drawnWorks)
+            .set({ agreed: row.agreed })
+            .where(eq(drawnWorks.work, work))
+            .run();
+        }
+        return "nothing";
+      }
+      this.#changed(by, "onboarding.work.redraw", { work });
+      return "drawing";
+    });
+    if (due === "drawing") {
+      this.#deliverAudit();
+      await this.#armDrawing();
+    }
+    return due;
   }
 
   /**
@@ -2794,6 +2963,12 @@ export class Onboarding extends DurableObject<Env> {
       .delete(drawnWorks)
       .where(sql`${drawnWorks.work} not in (select ${works.id} from ${works})`)
       .run();
+    this.#db
+      .delete(countedWorks)
+      .where(
+        sql`${countedWorks.work} not in (select ${works.id} from ${works})`
+      )
+      .run();
   }
 
   /** Sets the alarm for the next thing to draw, when there is one. */
@@ -3208,6 +3383,31 @@ export class Onboarding extends DurableObject<Env> {
           : agreementsSchema.parse(JSON.parse(agreements)),
       pausedAt: row?.pausedAt ?? null,
     };
+  }
+
+  /** When a piece of work counts as known here: staff's, or the starting values. */
+  #rules(): OrgRules {
+    const [row] = this.#db
+      .select({ rules: onboarding.rules })
+      .from(onboarding)
+      .where(eq(onboarding.id, 1))
+      .all();
+    const stored = row?.rules ?? null;
+    return stored === null
+      ? STARTING_ORG_RULES
+      : (orgRulesSchema.safeParse(JSON.parse(stored)).data ??
+          STARTING_ORG_RULES);
+  }
+
+  /** The pieces of work Grasp counts as known by hand. */
+  #countedWorks(): Set<string> {
+    return new Set(
+      this.#db
+        .select({ work: countedWorks.work })
+        .from(countedWorks)
+        .all()
+        .map(({ work }) => work)
+    );
   }
 
   #stephen(): StephenSetup | null {

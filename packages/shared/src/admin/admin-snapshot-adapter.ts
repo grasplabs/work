@@ -3,6 +3,7 @@ import type {
   AdminLink,
   AdminSnapshot,
 } from "../admin-snapshot.ts";
+import type { StaffWorks } from "../onboarding-staff.ts";
 import type { Role } from "../roles.ts";
 import { stateWith } from "./admin-state.ts";
 import type { Agreed, Member, Org, OrgState } from "./onboarding-admin.ts";
@@ -228,7 +229,8 @@ const graspOf = (done: CoreDone): Record<string, Json> => ({
  */
 export const staffSnapshotOf = (
   snapshot: AdminSnapshot,
-  client: AdminClient
+  client: AdminClient,
+  drawn?: StaffWorks
 ): StaffSnapshot => {
   const links = new Map(snapshot.links.map((link) => [link.person, link]));
   return {
@@ -278,7 +280,7 @@ export const staffSnapshotOf = (
     interviews: snapshot.interviews.map((interview) =>
       interviewOf(interview, links.get(interview.person))
     ),
-    works: [],
+    works: drawn?.works ?? [],
     mapped: [...snapshot.mapped],
     events: [],
     // Already as the Worker counted it: by day, then purpose, then model.
@@ -289,21 +291,32 @@ export const staffSnapshotOf = (
     paused: snapshot.paused,
     unknown: {
       contract: snapshot.contract === null,
-      works: snapshot.works === null,
+      works: drawn === undefined && snapshot.works === null,
     },
   };
 };
 
 /**
  * Core's admin snapshot of one client as the admin reads it: the organization, and where it
- * stands with what core keeps in place of what the admin did by hand.
+ * stands with what core keeps in place of what the admin did by hand. `drawn` is the work drawn
+ * from the interviews, which only Grasp's staff read in the deployment itself (core's
+ * `onboardingStaff.works`), with the organization's rules and what Grasp counts as known by hand.
  */
 export const adminOrgOf = (
   snapshot: AdminSnapshot,
-  client: AdminClient
+  client: AdminClient,
+  drawn?: StaffWorks
 ): { org: Org; state: OrgState } => {
-  const read = orgOfSnapshot(staffSnapshotOf(snapshot, client));
+  const read = orgOfSnapshot(staffSnapshotOf(snapshot, client, drawn));
   // Core says no language Stephen speaks there: the profile's stand-in is not one.
   const org: Org = { ...read, stephen: { ...read.stephen, languages: [] } };
-  return { org, state: stateWith(org, doneOf(snapshot, client)) };
+  return {
+    org,
+    state: stateWith(org, {
+      ...doneOf(snapshot, client),
+      ...(drawn === undefined
+        ? {}
+        : { rules: drawn.rules, counted: drawn.counted }),
+    }),
+  };
 };
