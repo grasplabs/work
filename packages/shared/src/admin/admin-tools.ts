@@ -944,7 +944,6 @@ const ANSWERS: Record<AdminToolName, (asked: Asked) => AdminToolAnswer> = {
       structured: {
         organizations: shown.map((view) => ({
           id: view.org.id,
-          name: view.org.name,
           phase: phaseOf(view),
           known: view.knowledge.percent,
           needs: view.needs.length,
@@ -967,7 +966,6 @@ const ANSWERS: Record<AdminToolName, (asked: Asked) => AdminToolAnswer> = {
   what_needs_grasp: ({ views, names }) => {
     const all = everyNeed(views).map(({ view, need }) => ({
       id: orgRef(names, view),
-      name: view.org.name,
       kind: need.kind,
       text: needText(need, view, names),
     }));
@@ -987,7 +985,6 @@ const ANSWERS: Record<AdminToolName, (asked: Asked) => AdminToolAnswer> = {
     const ranked = views
       .map((view) => ({
         id: orgRef(names, view),
-        name: view.org.name,
         value: measureOf(view, measure),
       }))
       .toSorted((a, b) => b.value - a.value);
@@ -1014,12 +1011,11 @@ const ANSWERS: Record<AdminToolName, (asked: Asked) => AdminToolAnswer> = {
       structured: {
         integrations: sorted.map((build) => ({
           id: build.id,
-          app: build.app,
           stage: build.stage,
           waitsOn: waitsOn(build.stage),
           askedBy: build.requests.map((request) => ({
             organization: request.org,
-            workflows: request.workflows,
+            workflows: request.workflows.length,
             on: request.on,
           })),
         })),

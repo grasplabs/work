@@ -309,6 +309,22 @@ describe("what an answer names, as it goes to an outside model", () => {
     ]) {
       expect(named(text, name) ? name : null).toBeNull();
     }
+    // Nor in the structured content but under `names`.
+    const outsideNames = answers
+      .map((answer) => {
+        const { names: _names, ...rest } = answer.structured ?? {};
+        return JSON.stringify(rest);
+      })
+      .join("\n");
+    for (const name of [
+      ...written,
+      ...SAMPLE_BUILDS.map((build) => build.app),
+      ...SAMPLE_BUILDS.flatMap((build) =>
+        build.requests.flatMap((request) => request.workflows)
+      ),
+    ]) {
+      expect(named(outsideNames, name) ? name : null).toBeNull();
+    }
     const one = call("get_organization", { organization: "noordkade" });
     const names = z
       .object({
@@ -339,13 +355,22 @@ describe("the integrations to build, in a chat", () => {
     const listed = z
       .array(
         z.object({
-          app: z.string(),
+          id: z.string(),
           waitsOn: z.string(),
-          askedBy: z.array(z.object({ organization: z.string() })),
+          askedBy: z.array(
+            z.object({ organization: z.string(), workflows: z.number() })
+          ),
         })
       )
       .parse(answer.structured?.integrations);
-    expect(listed.map((each) => each.app).toSorted()).toStrictEqual(
+    expect(listed.map((each) => each.id).toSorted()).toStrictEqual(
+      SAMPLE_BUILDS.map((build) => build.id).toSorted()
+    );
+    // Each app's name only under `names`, as data.
+    const { apps } = z
+      .object({ apps: z.array(z.object({ id: z.string(), name: z.string() })) })
+      .parse(answer.structured?.names);
+    expect(apps.map((each) => each.name).toSorted()).toStrictEqual(
       SAMPLE_BUILDS.map((build) => build.app).toSorted()
     );
     const waiting = SAMPLE_BUILDS.filter(needsGrasp).length;
