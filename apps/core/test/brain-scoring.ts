@@ -114,10 +114,20 @@ const citation = /\[(?<cited>[^\]\n]{1,300})\]/gu;
 export const isAbstention = (answer: string): boolean =>
   abstention.test(answer);
 
-/** The sources an answer cites, as `[path#heading]`, `[memory]` or `[session]`. */
+/**
+ * The label the harness puts before each source it hands over
+ * (`[source: path#heading]`), which real models copy into their citations.
+ */
+const sourceLabel = /^source:\s*/iu;
+
+/**
+ * The sources an answer cites, as `[path#heading]`, `[memory]` or
+ * `[session]`; a citation that copied a handed source's label as well,
+ * `[source: path#heading]`, cites that source.
+ */
 export const citationsOf = (answer: string): string[] =>
-  [...answer.matchAll(citation)].map(
-    ({ groups }) => groups?.cited?.trim() ?? ""
+  [...answer.matchAll(citation)].map(({ groups }) =>
+    (groups?.cited?.trim() ?? "").replace(sourceLabel, "")
   );
 
 const wordCharacter = /[\p{L}\p{N}]/u;
@@ -233,7 +243,12 @@ const answers = (
   if (negation.test(said)) {
     return false;
   }
-  const values = said.split(";").map((value) => value.trim());
+  // A semicolon after the last value ("Tor 4;") ends the list: it adds
+  // no value.
+  const values = said
+    .split(";")
+    .map((value) => value.trim())
+    .filter((value) => value !== "");
   const evidence = expected.evidence.map(({ marker }) => normalized(marker));
   if (values.length !== expected.facts.length) {
     return false;

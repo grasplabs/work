@@ -93,6 +93,21 @@ describe("scoring a trial", () => {
     });
   });
 
+  it("takes a citation that copied a handed source's label as citing that source", () => {
+    expect(
+      verdict(contract, {
+        answer:
+          "ANSWER: Marta Ruiz\nFrom [source: handbook/contracts.md#Lease]",
+      })
+    ).toStrictEqual({
+      completed: true,
+      authorized: true,
+      abstained: false,
+      evidenceRecall: 1,
+      citationSupport: 1,
+    });
+  });
+
   it("doesn't complete a right answer the evidence never reached, or one that cites none of it", () => {
     expect({
       unseen: verdict(contract, { modelInput: "Contract register." }),
@@ -394,6 +409,8 @@ describe("scoring a trial", () => {
         trucks
       ),
       extra: completed(fleet, "37 trucks; 12 electric; 4 on order", trucks),
+      ended: completed(fleet, "37 trucks; 12 electric;", trucks),
+      empty: completed(fleet, "37 trucks;; 12 electric", trucks),
       eitherOrder: completed(conflict, "3 euro; gratis", parking),
       hedged: completed(conflict, "gratis of 3 euro; 3 euro", parking),
       added: completed(fleet, "37 and 99 trucks; 12 electric", trucks),
@@ -408,6 +425,8 @@ describe("scoring a trial", () => {
       unsplit: false,
       alternative: false,
       extra: false,
+      ended: true,
+      empty: true,
       eitherOrder: true,
       hedged: false,
       added: false,

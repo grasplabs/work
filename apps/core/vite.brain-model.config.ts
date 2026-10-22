@@ -13,7 +13,8 @@ import { coreProject } from "./vite.config.ts";
 //
 //   BRAIN_MODEL_MODE=estimate vp -C apps/core test -c vite.brain-model.config.ts
 //
-// then a split, with the most it may spend, in US dollars:
+// then a split (dev, validation or sealed), with the most it may spend, in
+// US dollars:
 //
 //   BRAIN_MODEL_MODE=run BRAIN_MODEL_SPLIT=validation BRAIN_MODEL_BUDGET_USD=5 \
 //     vp -C apps/core test -c vite.brain-model.config.ts
