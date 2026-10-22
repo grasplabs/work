@@ -71,6 +71,7 @@ const storedSchema = z.strictObject({
         input: z.string(),
         output: z.string(),
         readOnly: z.boolean().optional(),
+        answersFile: z.literal(true).optional(),
       })
     )
     .optional(),
@@ -108,7 +109,8 @@ const contractInvalid = (issue: string) =>
  * Schema (connector-schemas.ts) unless it is a connector contract's, both
  * its input and output are, each is one the allow-list admits, and connect
  * confirms they are exactly a native action of this release by that tool,
- * its `readOnly` as the connector declares it.
+ * its `readOnly`, and whether it answers a file, as the connector
+ * declares them.
  * Nothing else may put a pattern where core runs it (GRA-982).
  */
 const requireNativeOperations = async (
@@ -117,17 +119,24 @@ const requireNativeOperations = async (
     kind: CatalogBindingKind;
     operations?: Record<
       string,
-      { input: string; output: string; readOnly?: boolean }
+      { input: string; output: string; readOnly?: boolean; answersFile?: true }
     >;
   }
 ): Promise<void> => {
-  for (const [operation, { input, output, readOnly }] of Object.entries(
-    contract.operations ?? {}
-  )) {
+  for (const [
+    operation,
+    { input, output, readOnly, answersFile },
+  ] of Object.entries(contract.operations ?? {})) {
     const enveloped = [input, output].filter(
       (text) => envelopedSchema(text) !== undefined
     ).length;
     if (enveloped === 0) {
+      // A file answer is a native connector's to declare, confirmed below.
+      if (answersFile === true) {
+        throw contractInvalid(
+          `operations.${operation}: Only an operation described by its native connector's JSON Schemas answers a file.`
+        );
+      }
       continue;
     }
     if (contract.kind !== "connector" || enveloped !== 2) {
@@ -147,7 +156,7 @@ const requireNativeOperations = async (
         `operations.${operation}: Its JSON Schema uses something a connector call's check doesn't enforce.`
       );
     }
-    let confirmed: { readOnly: boolean };
+    let confirmed: { readOnly: boolean; answersFile?: true };
     try {
       // oxlint-disable-next-line no-await-in-loop -- one confirmation per operation, each bounded
       confirmed = await env.CONNECT.nativeOperation({
@@ -169,6 +178,13 @@ const requireNativeOperations = async (
     if ((readOnly ?? false) !== confirmed.readOnly) {
       throw contractInvalid(
         `operations.${operation}: readOnly must be what its connector declares (${String(confirmed.readOnly)}).`
+      );
+    }
+    // Sealed into the contract, so a call reads it from what was approved,
+    // never from connect as it is then (GRA-886).
+    if ((answersFile ?? false) !== (confirmed.answersFile ?? false)) {
+      throw contractInvalid(
+        `operations.${operation}: answersFile must be what its connector declares.`
       );
     }
   }
