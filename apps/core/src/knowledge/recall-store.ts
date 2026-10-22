@@ -7,6 +7,7 @@ import { collections } from "../db/knowledge/schema.ts";
 import { grantedPermissions } from "../permissions.ts";
 import type { Reader } from "./access.ts";
 import { collectionsAllowed } from "./access.ts";
+import { readableCollection } from "./collections.ts";
 import { searchSections } from "./search.ts";
 import type { FoundSection } from "./search.ts";
 
@@ -36,6 +37,15 @@ export interface BrainStore {
    * what it recalls from is still only the collections it was granted.
    */
   requireBrainGrant: (reader: Reader) => Promise<void>;
+  /**
+   * Refuses, as `knowledge.not_found`, unless `reader` may read every one
+   * of `collectionIds`: the same answer whether one is missing or hidden.
+   * Reads nothing of what they hold.
+   */
+  requireReadable: (
+    reader: Reader,
+    collectionIds: readonly CollectionId[]
+  ) => Promise<void>;
   /** Sections that match `query`, best first, of those `reader` may read. */
   findEvidence: (
     reader: Reader,
@@ -63,6 +73,16 @@ export const d1BrainStore = (env: Env): BrainStore => ({
     if (!allowed) {
       throw brainErrors.create("brain.denied");
     }
+  },
+  requireReadable: async (reader, collectionIds) => {
+    const db = drizzle(env.KNOWLEDGE);
+    const { condition } = await collectionsAllowed(env, db, reader);
+    await Promise.all(
+      collectionIds.map(
+        async (collectionId) =>
+          await readableCollection(db, condition, collectionId)
+      )
+    );
   },
   findEvidence: async (reader, { query, collectionIds, limit }) =>
     await searchSections(

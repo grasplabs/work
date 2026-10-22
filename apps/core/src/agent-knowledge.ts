@@ -1,3 +1,4 @@
+import type { MemoryPack } from "@grasp-os/shared/brain-api";
 import type {
   FollowResult,
   KnowledgeCatalog,
@@ -24,6 +25,7 @@ import {
 import type { AgentApi, AgentScope } from "./agent-scope.ts";
 import type { Reader } from "./knowledge/access.ts";
 import { readAsDelegate } from "./knowledge/binding.ts";
+import { recall } from "./knowledge/recall.ts";
 import { search } from "./knowledge/search.ts";
 import { agentKnowledgeSignals } from "./knowledge/signals.ts";
 import { catalog, follow, read } from "./knowledge/tools.ts";
@@ -124,6 +126,28 @@ export class KnowledgeApi
       found,
       found.hits.map(({ documentId }) => documentId)
     );
+  }
+
+  /**
+   * The Brain's recall, as the chat's agent under its `brain` grant: the
+   * same service and checks as every caller's (knowledge/recall.ts), with
+   * what it handed over recorded with the chat, as a search's is.
+   */
+  async recall(input: unknown): Promise<MemoryPack> {
+    const pack = await this.#asAgent(
+      "knowledge.recall",
+      async (reader) => await recall(this.env, reader, input)
+    );
+    const documents = pack.sourceVersions.flatMap((ref) =>
+      ref.kind === "document" ? [ref] : []
+    );
+    await recordSources(
+      this.env,
+      this.ctx.props,
+      [...new Set(documents.map(({ collectionId }) => collectionId))],
+      [...new Set(documents.map(({ documentId }) => documentId))]
+    );
+    return pack;
   }
 
   async read(documentId: unknown, options?: unknown): Promise<KnowledgeRead> {

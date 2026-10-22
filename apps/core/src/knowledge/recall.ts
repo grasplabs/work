@@ -201,9 +201,15 @@ export const recall = async (
       recallInputSchema,
       input
     );
-    // An App, run or agent recalls only under its `brain` grant, and only
-    // from the collections it was granted (the design: a binding can't
-    // search the whole company because its name is "Brain").
+    // Every check that can refuse runs before the timed read, so a short
+    // deadline never turns a refusal into an empty pack: the `brain` grant
+    // (an App, run or agent recalls only under it, and only from the
+    // collections it was granted: a binding can't search the whole
+    // company because its name is "Brain"), each named collection, and
+    // the access revision the pack carries. Their time counts against the
+    // deadline: the read gets what is left of it, and none once it is
+    // spent.
+    const startedAt = Date.now();
     await store.requireBrainGrant(reader);
     const limits = clampBudget(budget);
     const named = filters?.collectionIds;
@@ -211,16 +217,24 @@ export const recall = async (
       throw brainErrors.create("brain.not_found");
     }
     const collectionIds = only === undefined ? named : [only];
+    if (collectionIds !== undefined) {
+      await store.requireReadable(reader, collectionIds);
+    }
+    const accessRevision = await digest(await store.accessKey(reader));
+    const remaining = limits.deadlineMs - (Date.now() - startedAt);
     // One more than asked, to tell a full pack from a cut one.
     const limit = Math.min(limits.maxItems + 1, searchMaxLimit);
-    const read = await Promise.race([
-      store.findEvidence(reader, {
-        query,
-        limit,
-        ...(collectionIds === undefined ? {} : { collectionIds }),
-      }),
-      timeout(limits.deadlineMs),
-    ]);
+    const read =
+      remaining <= 0
+        ? undefined
+        : await Promise.race([
+            store.findEvidence(reader, {
+              query,
+              limit,
+              ...(collectionIds === undefined ? {} : { collectionIds }),
+            }),
+            timeout(remaining),
+          ]);
     const found = read?.sections ?? [];
     const { items, tokenCount } = packed(found, limits);
     const truncated =
@@ -242,7 +256,7 @@ export const recall = async (
       truncated,
       warnings: [],
       tokenCount,
-      accessRevision: await digest(await store.accessKey(reader)),
+      accessRevision,
       indexGeneration,
       createdAt: new Date().toISOString(),
     };

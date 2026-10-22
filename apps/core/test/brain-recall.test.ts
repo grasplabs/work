@@ -1,8 +1,11 @@
 import type { MemoryPack, RecallInput } from "@grasp-os/shared/brain-api";
-import type { KnowledgeApi } from "@grasp-os/shared/knowledge";
+import type { KnowledgeApi, KnowledgeTools } from "@grasp-os/shared/knowledge";
 import type { Role } from "@grasp-os/shared/roles";
+import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import { d1BrainStore } from "../src/knowledge/recall-store.ts";
+import { recall } from "../src/knowledge/recall.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { actingFor, collectionIn, envOf, knowledgeIn } from "./contexts.ts";
@@ -69,25 +72,16 @@ const cited = (pack: MemoryPack) => ({
   truncated: pack.truncated,
 });
 
-/** An agent's recall across what it may read (`KnowledgeBinding`). */
-interface Recalling {
-  recall: (input: RecallInput) => Promise<MemoryPack>;
-}
-
-/** The recall of `agent`'s Knowledge tools acting for `person`. */
+/** The Knowledge tools of `agent` acting for `person`, recall among them. */
 const agentRecall = async (
   agent: ReturnType<typeof newAgent>,
   person: Person
-): Promise<Recalling> => {
+): Promise<KnowledgeTools> => {
   const tools = knowledgeIn(await envOf(actingFor(agent, person.userId)));
   if (!tools) {
     throw new Error("No KNOWLEDGE binding");
   }
-  const recalling: unknown = tools;
-  // SAFETY: `bindingsFor` gives `KNOWLEDGE` a `KnowledgeBinding`, which
-  // has `recall` besides the tools' methods.
-  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-  return recalling as Recalling;
+  return tools;
 };
 
 describe("the Brain's recall", setUpTime, () => {
@@ -407,5 +401,83 @@ describe("the Brain's recall", setUpTime, () => {
       ),
       admin: cited(await forAdmin.recall({ query: word })).sources.length,
     }).toStrictEqual({ user: 0, userNamed: "brain.not_found", admin: 1 });
+  });
+
+  it("quotes a match deep in a long section with the words around it", async () => {
+    const admin = await personOf("admin");
+    const word = rareWord();
+    await collectionSaying(
+      admin,
+      "everyone",
+      `# Long\n\n## Section\n${"filler ".repeat(1500)}${word} closes the matter. ${"tail ".repeat(400)}`
+    );
+    const pack = await admin.knowledge.recall({ query: word });
+    const statement = pack.items[0]?.statement ?? "";
+    expect({
+      holdsTheMatch: statement.includes(`${word} closes the matter.`),
+      length: statement.length,
+    }).toStrictEqual({ holdsTheMatch: true, length: 4000 });
+  });
+
+  it("refuses a hidden or missing collection however short its deadline, never answering an empty pack", async () => {
+    const admin = await personOf("admin");
+    const user = await personOf("user");
+    const word = rareWord();
+    const mine = await collectionSaying(admin, "me", `# Private\n${word}`);
+    const asked = async (collectionId: string) =>
+      await outcome(
+        user.knowledge.recall({
+          query: word,
+          filters: { collectionIds: [collectionId] },
+          budget: { deadlineMs: 1 },
+        })
+      );
+    await expect(
+      Promise.all([asked(mine.collectionId), asked("no-such-collection")])
+    ).resolves.toStrictEqual(["brain.not_found", "brain.not_found"]);
+  });
+
+  it("counts the time its access reads take against its deadline, reading no evidence once that is spent", async () => {
+    const admin = await personOf("admin");
+    const word = rareWord();
+    await collectionSaying(admin, "everyone", `# Onboarding\n${word}`);
+    const person = await admin.api.whoami();
+    const store = d1BrainStore(env);
+    let searched = false;
+    const slowAccess = {
+      ...store,
+      accessKey: async (reader: Parameters<typeof store.accessKey>[0]) => {
+        await scheduler.wait(400);
+        return await store.accessKey(reader);
+      },
+      findEvidence: async (
+        ...args: Parameters<typeof store.findEvidence>
+      ): ReturnType<typeof store.findEvidence> => {
+        searched = true;
+        return await store.findEvidence(...args);
+      },
+    };
+    const started = Date.now();
+    const pack = await recall(
+      env,
+      { type: "person", person },
+      { query: word, budget: { deadlineMs: 200 } },
+      undefined,
+      slowAccess
+    );
+    const took = Date.now() - started;
+    expect({
+      coverage: pack.coverage.state,
+      items: pack.items.length,
+      gaps: pack.gaps.length,
+      searched,
+      withinAccessTimeAndAMargin: took < 400 + 150,
+    }).toStrictEqual({
+      coverage: "degraded",
+      items: 0,
+      gaps: 0,
+      searched: false,
+      withinAccessTimeAndAMargin: true,
+    });
   });
 });

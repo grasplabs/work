@@ -227,6 +227,20 @@ const hitRowSchema = z.object({
  */
 export const sectionTextMax = 4000;
 
+/**
+ * Up to `sectionTextMax` characters of a section, around where it first
+ * holds one of `terms` (the first that it holds, in the query's order), so
+ * a match deep in a long section still comes with its words; from the
+ * start when none is found as typed (a typo or prefix match).
+ */
+const excerptSql = (terms: readonly string[]): SQL => {
+  const found = terms.map(
+    (term) => sql`nullif(instr(lower(sections.text), ${term}), 0)`
+  );
+  const at = sql`coalesce(${sql.join([...found, sql`1`], sql`, `)})`;
+  return sql`substr(sections.text, max(1, ${at} - ${sectionTextMax / 2}), ${sectionTextMax})`;
+};
+
 /** A section a search found, as Knowledge holds it: its hit, and more. */
 export interface FoundSection {
   hit: SearchHit;
@@ -234,7 +248,7 @@ export interface FoundSection {
   version: number;
   /** When the document last changed, in milliseconds. */
   updatedAt: number;
-  /** The section's Markdown, at most `sectionTextMax` characters of it. */
+  /** The section's Markdown around its match, at most `sectionTextMax` characters. */
   text: string;
 }
 
@@ -501,7 +515,7 @@ export const searchSections = async (
       ranked.position AS section, sections.headings,
       ${snippetSql(passes)} AS snippet,
       documents.current_version AS version, documents.updated_at AS updatedAt,
-      ${recall === undefined ? sql`''` : sql`substr(sections.text, 1, ${sectionTextMax})`} AS text
+      ${recall === undefined ? sql`''` : excerptSql(terms)} AS text
     FROM top AS ranked
     JOIN documents ON documents.id = ranked.document_id
     JOIN sections ON sections.document_id = ranked.document_id
