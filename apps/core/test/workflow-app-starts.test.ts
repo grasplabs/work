@@ -71,6 +71,8 @@ import {
 } from "../src/workflow-start-intents.ts";
 import type { CallingAgent } from "../src/workflow-start-intents.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
+import { cancelArchivedRuns } from "../src/workflows/controls.ts";
+import { runEngine } from "../src/workflows/engine.ts";
 import {
   repairResourceStarts,
   resourceRunFor,
@@ -797,6 +799,46 @@ describe("an action starting a workflow", () => {
       after: after.status,
       asked,
     }).toStrictEqual({ before: null, after: "cancelled", asked: 1 });
+  });
+
+  it("stops a paused run an archive left behind at the next pass, though it is the App's only run left", async () => {
+    const fx = await fixture(true);
+    const started = await call(fx, fx.bob, "requests.kickOff", { who: "Bob" });
+    expect(started.ok).toBeTruthy();
+    if (!started.ok) {
+      return;
+    }
+    const handle = handleSchema["~standard"].validate(started.value);
+    const runId = "value" in handle ? handle.value.runId : null;
+    if (runId === null) {
+      throw new Error("No run");
+    }
+    await vi.waitFor(
+      async () => {
+        const run = await runOf(fx, runId);
+        expect(run.status).toBe("running");
+      },
+      { timeout: 30_000, interval: 100 }
+    );
+    await runEngine(env).pause(runId, 1);
+    await vi.waitFor(
+      async () => {
+        const run = await runOf(fx, runId);
+        expect(run.status).toBe("paused");
+      },
+      { timeout: 30_000, interval: 100 }
+    );
+    // Archived by a pass that never reached the run (its request ended).
+    await env.DB.prepare(
+      "UPDATE apps SET status = 'archived', status_changed_at = ? WHERE id = ?"
+    )
+      .bind(Date.now(), fx.app)
+      .run();
+
+    await cancelArchivedRuns(env);
+    const after = await ended(fx, runId);
+
+    expect(after.status).toBe("cancelled");
   });
 
   it("keeps an App archived while a stop claimed but never sent is owed, and asks again once it is due", async () => {
