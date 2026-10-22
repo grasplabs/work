@@ -381,6 +381,14 @@ describe("isolates core loads itself off Cloudflare, on a workerd served --verbo
     ["waitUntil", "this.ctx.waitUntil handed a rejection"],
     ["kept", "the constructor's kept context's waitUntil handed a rejection"],
     ["block", "a blockConcurrencyWhile callback that throws"],
+    // Code that sets out to keep the state the base sets: its class's own
+    // \`ctx\` setter, an accessor put in the quiet module's place, a class
+    // of its own on the base its class extends. Each still gets the quiet
+    // context alone. What isn't promised is code that deliberately prints:
+    // its console reaches the logs (GRA-919, below).
+    ["setter", "its class's own ctx setter's state handed a rejection"],
+    ["redefined", "an accessor in the quiet ctx's place handed a rejection"],
+    ["subclass", "a class of its own on its base handed a rejection"],
   ])(
     "prints nothing of %s (%s) in a tailed App class, where the class loaded as it is does",
     async (name) => {

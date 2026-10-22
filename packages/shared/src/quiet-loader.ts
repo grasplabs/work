@@ -138,6 +138,7 @@ export const builtins = Object.freeze({
   descriptorOf: Reflect.getOwnPropertyDescriptor,
   prototypeOf: Reflect.getPrototypeOf,
   setPrototypeOf: Reflect.setPrototypeOf,
+  construct: Reflect.construct,
   create: Object.create,
   isArray: Array.isArray,
   isPrototypeOf: Object.prototype.isPrototypeOf,
@@ -217,8 +218,11 @@ const maxThrownDetails = 8192;
  *   `webSocketError`, `fetch`) answers one too, so a throw of those
  *   is swallowed, not reported: a throwing `alarm` isn't retried. A
  *   constructor that throws makes the same stand-in. Its constructor is
- *   given the quiet context too (`RealStateBase`), so the runtime's own
- *   never reaches the App's code.
+ *   given the quiet context too (`RealStateBase`), so what the App's code
+ *   hands a context by accident stays quiet. What is guaranteed is that
+ *   much: an App's accidental throws, rejections and failures are silenced.
+ *   App code that sets out to print, or to reach the runtime's own state,
+ *   isn't stopped, just as its console isn't in a tailed isolate (GRA-919).
  *
  * A value answered is copied into plain data inside the call (`plainOf`),
  * so a getter or a proxy's trap in it runs, and throws, there, not as
@@ -239,7 +243,7 @@ const entrySource = (
   kind: ExportKind
 ): string => `import { builtins } from ${JSON.stringify(`./${builtins}`)};
 import * as main from ${JSON.stringify(`./${mainModule}`)};
-const { apply, get, define, ownKeys, descriptorOf, prototypeOf, setPrototypeOf, create, isArray, isPrototypeOf, objectPrototype, stringOf, slice, stringify, parse, Map, mapGet, mapSet, WeakMap, weakGet, weakSet, Proxy, Response, Headers, headersHas, headersDelete, resolve, then, bind, EntrypointClass, entrypointPrototype, DurableClass, durablePrototype, responsePrototype, responseHeaders, responseBody, responseStatus, responseStatusText } = builtins;
+const { apply, get, define, ownKeys, descriptorOf, prototypeOf, setPrototypeOf, construct, create, isArray, isPrototypeOf, objectPrototype, stringOf, slice, stringify, parse, Map, mapGet, mapSet, WeakMap, weakGet, weakSet, Proxy, Response, Headers, headersHas, headersDelete, resolve, then, bind, EntrypointClass, entrypointPrototype, DurableClass, durablePrototype, responsePrototype, responseHeaders, responseBody, responseStatus, responseStatusText } = builtins;
 const isDurable = ${JSON.stringify(kind === "durableObject")};
 const BaseClass = isDurable ? DurableClass : EntrypointClass;
 const basePrototype = isDurable ? durablePrototype : entrypointPrototype;
@@ -513,18 +517,32 @@ const quietContext = (ctx) => {
     },
   ]));
 };
-// A Durable Object's constructor is handed the quiet context too, so the
-// runtime's own never reaches the App's code (a constructor that keeps it
-// would hand its \`waitUntil\` what workerd reports). \`DurableObject\`'s
-// own constructor takes the real state alone, so \`RealStateBase\` stands
-// between the App's class and it, and swaps the quiet context back for the
-// state it stands for; the base then sets \`this.ctx\`, which the quiet
-// module's accessor makes a quiet one again.
+// A Durable Object's constructor is handed the quiet context too, so a
+// constructor that keeps it never hands the runtime's own \`waitUntil\` what
+// workerd reports by accident. \`DurableObject\`'s own constructor takes the
+// real state alone, so \`RealStateBase\` stands between the App's class and
+// it and swaps the quiet context back for the state it stands for. It makes
+// the object against \`CleanState\`, whose prototype is \`DurableObject\`'s
+// own, so the base's \`this.ctx\` meets only the quiet module's accessor
+// (made a quiet one again, and not configurable), never a \`ctx\` setter of
+// the App's class, then gives it the App's class's prototype. Whatever
+// builds on \`RealStateBase\`, the App's class or one App code makes, ends
+// up with a quiet \`ctx\` alone.
+//
+// What that guarantees is the App's accidents: a throw, a rejection, a
+// failure handed to a context never reaches workerd's report. It isn't a
+// wall against App code that sets out to print: that code can already do
+// so through \`console\`, which a tailed isolate keeps (GRA-919), so a way
+// it finds to the real state gives it nothing new.
 const realStates = new WeakMap();
+const CleanState = function () {};
+CleanState.prototype = durablePrototype;
 const RealStateBase = class extends DurableClass {
   constructor(ctx, env) {
     const real = ctx !== null && typeof ctx === "object" ? apply(weakGet, realStates, [ctx]) : undefined;
-    super(real === undefined ? ctx : real, env);
+    const made = construct(DurableClass, [real === undefined ? ctx : real, env], CleanState);
+    setPrototypeOf(made, get(new.target, "prototype"));
+    return made;
   }
 };
 // Puts \`RealStateBase\` under the class in \`Base\`'s chain that extends

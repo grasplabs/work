@@ -35,9 +35,12 @@
  * than a class's `this.ctx`: the one its constructor is given and keeps,
  * or a default export's handler's (the runtime passes those itself, before
  * anything of the quiet module's can wrap them). Core's and connect's own
- * Loader close the first and the last (quiet-loader.ts: every context it
- * hands App code, a Durable Object's constructor's too, is a quiet one)
- * and give App code no Node.js (`isolateBase`, GRA-939). Without
+ * Loader close the first and the last (quiet-loader.ts: the contexts it
+ * hands an entrypoint and a Durable Object's constructor are quiet ones)
+ * and give App code no Node.js (`isolateBase`, GRA-939). That covers what
+ * App code leaks by accident: a throw, a rejection, a failure. App code
+ * that sets out to print, or to reach the runtime's own context, isn't
+ * stopped, as its console isn't in a tailed isolate (GRA-919). Without
  * `--verbose` none of it is printed. The supervisor refuses `--verbose`
  * (scripts/workerd-sandbox.ts); core loading isolates itself under
  * `SANDBOX_IN_PROCESS=unbounded` can't tell how its process was served, so
@@ -232,14 +235,15 @@ ${options.nodejsCompat === true ? "quietTimers(quietNodeTimers);\n" : ""}const q
         ])
       );
 // An entrypoint's or a Durable Object's constructor sets its context: it
-// takes the quiet one.
+// takes the quiet one. Not configurable, so the isolate's code can't put
+// an accessor of its own in its place.
 for (const quietBase of [QuietEntrypoint, QuietObject]) {
   quietDefine(
     quietBase.prototype,
     "ctx",
     quietRecord([
       "configurable",
-      true,
+      false,
       "get",
       () => undefined,
       "set",

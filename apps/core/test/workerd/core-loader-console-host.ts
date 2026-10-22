@@ -26,6 +26,9 @@ export const objectCases = [
   "waitUntil",
   "kept",
   "block",
+  "setter",
+  "redefined",
+  "subclass",
 ] as const;
 
 export type ObjectCase = (typeof objectCases)[number];
@@ -43,12 +46,20 @@ const methodOf: Readonly<Record<ObjectCase, string>> = {
   waitUntil: "waitUntil",
   kept: "keptWaitUntil",
   block: "block",
+  setter: "rawWaitUntil",
+  redefined: "rawWaitUntil",
+  subclass: "subclassWaitUntil",
 };
 
 /** What the App's class's constructor does beyond making its base, by case. */
 const constructorOf = (name: ObjectCase): string => {
   if (name === "constructor") {
     return "constructor(ctx, env) { super(ctx, env); throw new Error(value); }";
+  }
+  if (name === "subclass") {
+    // The context its constructor is given, the one the base swaps back
+    // for the real state.
+    return "constructor(ctx, env) { super(ctx, env); this.given = ctx; }";
   }
   if (name === "kept") {
     // The context its constructor is given, kept: the runtime's own would
@@ -57,6 +68,30 @@ const constructorOf = (name: ObjectCase): string => {
   }
   return "";
 };
+
+/**
+ * What the App's module does as it loads, by case: `redefined` puts a
+ * `ctx` accessor of its own on `DurableObject`'s prototype, in the quiet
+ * module's place, to keep the state the base sets.
+ */
+const preludeOf = (name: ObjectCase): string =>
+  name === "redefined"
+    ? `try {
+  Object.defineProperty(DurableObject.prototype, "ctx", {
+    configurable: true,
+    get() { return this.raw; },
+    set(state) { this.raw = state; },
+  });
+} catch {
+  // Refused: the quiet module's accessor stays.
+}`
+    : "";
+
+/** The App's class's own `ctx` accessor, by case: `setter` keeps what the base sets. */
+const accessorOf = (name: ObjectCase): string =>
+  name === "setter"
+    ? "set ctx(state) { this.raw = state; }\n  get ctx() { return this.raw; }"
+    : "";
 
 /**
  * An App's server class, doing what `name` says with `value`: throwing from
@@ -69,8 +104,10 @@ const sourceOf = (
   value: string
 ): string => `import { DurableObject } from "cloudflare:workers";
 const value = ${JSON.stringify(value)};
+${preludeOf(name)}
 export class App extends DurableObject {
   ${constructorOf(name)}
+  ${accessorOf(name)}
   fail() {
     throw Object.assign(new TypeError(value), { details: { retryAfterMs: 5 } });
   }
@@ -99,6 +136,26 @@ export class App extends DurableObject {
   }
   async keptWaitUntil() {
     this.state.waitUntil(Promise.reject(new Error(value)));
+    await scheduler.wait(100);
+    return "waited";
+  }
+  // The state its \`ctx\` setter, or one it put in the quiet module's
+  // place, kept: what the base handed it.
+  async rawWaitUntil() {
+    (this.raw ?? this.ctx).waitUntil(Promise.reject(new Error(value)));
+    await scheduler.wait(100);
+    return "waited";
+  }
+  // A class of its own on the base its class extends now, with a \`ctx\`
+  // setter, made with the context its constructor was given: whatever the
+  // base swaps that for reaches the setter.
+  async subclassWaitUntil() {
+    class Unquiet extends Object.getPrototypeOf(App) {
+      set ctx(state) { this.raw = state; }
+      get ctx() { return this.raw; }
+    }
+    const made = new Unquiet(this.given, this.env);
+    (made.raw ?? made.ctx).waitUntil(Promise.reject(new Error(value)));
     await scheduler.wait(100);
     return "waited";
   }
