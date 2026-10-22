@@ -20,7 +20,7 @@ import { inList } from "../db/d1.ts";
 import { collectionTeams, collections } from "../db/knowledge/schema.ts";
 import { allowedCollections, canCreate, canWrite } from "./access.ts";
 import type { Reader } from "./access.ts";
-import { admitToKnowledge } from "./admission.ts";
+import { admissionDue, admitToKnowledge } from "./admission.ts";
 
 export type CollectionRow = typeof collections.$inferSelect;
 
@@ -176,12 +176,14 @@ export const createCollection = async (
   }
   const id = crypto.randomUUID();
   // Its name and description are kept, and shown, as its documents are.
-  await admitToKnowledge(
-    env,
-    actorOf(person),
-    id,
-    `${name}\n\n${description ?? ""}`
-  );
+  const admit = async () =>
+    await admitToKnowledge(
+      env,
+      actorOf(person),
+      id,
+      `${name}\n\n${description ?? ""}`
+    );
+  const admitted = await admit();
   const row: CollectionRow = {
     id,
     name,
@@ -196,6 +198,9 @@ export const createCollection = async (
   const insertTeams = teamIds.map((teamId) =>
     db.insert(collectionTeams).values({ collectionId: row.id, teamId })
   );
+  if (admissionDue(admitted)) {
+    await admit();
+  }
   await auditedBatch(env, db, [
     db.insert(collections).values(row),
     ...insertTeams,

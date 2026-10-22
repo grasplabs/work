@@ -38,20 +38,59 @@ export const companyTopicIdSchema = z
     /^company-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u
   );
 
+/** A run of spaces and hyphens: one gap between a term's words. */
+const termGap = /[\s-]+/gu;
+const notLetter = /[^\p{L}\p{N}]/gu;
+
+/** The letters and digits a term's stem needs before its `*`, at least. */
+export const topicStemMinLength = 3;
+
+/** The letters and digits of `word`. */
+const lettersOf = (word: string): number =>
+  word.replaceAll(notLetter, "").length;
+
 /**
  * A word or phrase a company topic is detected by, matched as whole words,
  * whatever their case or accents; a trailing `*` matches any ending
- * ("reorgani*": "reorganisation", "reorganization").
+ * ("reorgani*": "reorganisation", "reorganization") of a stem of at least
+ * `topicStemMinLength` letters, so one can't match most words. Each run
+ * of spaces and hyphens is one gap between words ("covid - 19" is "covid
+ * 19"), as admission reads text: one gap is what keeps its detector
+ * linear in the text (admission.ts's `termsPattern`).
  */
 export const topicTermSchema = z
   .string()
   .trim()
   .min(2)
   .max(100)
-  .regex(/^[\p{L}\p{N}][\p{L}\p{N}' .-]*\*?$/u);
+  .regex(/^[\p{L}\p{N}][\p{L}\p{N}' .-]*\*?$/u)
+  .transform((term) => {
+    const stem = term.endsWith("*");
+    const words = (stem ? term.slice(0, -1) : term)
+      .replaceAll(termGap, " ")
+      .trim();
+    return stem ? `${words}*` : words;
+  })
+  .refine((term) => (term.endsWith("*") ? term.length - 1 : term.length) >= 2)
+  .refine(
+    (term) =>
+      !term.endsWith("*") ||
+      lettersOf(term.slice(0, -1).split(" ").at(-1) ?? "") >=
+        topicStemMinLength,
+    { message: `A stem needs ${topicStemMinLength} letters before its *.` }
+  );
 
 /** Most terms one company topic lists. */
 export const topicMaxTerms = 200;
+
+/** Most company topics in use at once: the gate reads them all per write. */
+export const topicMaxActive = 100;
+
+/**
+ * Most company topic revisions saved but not yet in effect, all topics'
+ * together: the gate reads those too.
+ */
+export const topicMaxPending = 100;
 
 /**
  * A company topic, new (`ifRevision` 0, no `id`) or its next revision
@@ -118,4 +157,6 @@ export const admissionErrors = defineErrorFamily({
   "admission.conflict":
     "This topic changed since you opened it. Load it again and apply your change to it.",
   "admission.retired": "This topic is retired already.",
+  "admission.limit":
+    "There are as many topics, or changes still to take effect, as Grasp allows. Retire a topic, or wait for a change to take effect.",
 });

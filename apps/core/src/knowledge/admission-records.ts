@@ -3,6 +3,8 @@ import {
   topicExampleSchema,
   topicInputSchema,
   topicLeadMs,
+  topicMaxActive,
+  topicMaxPending,
   topicRetireSchema,
 } from "@grasp-os/shared/admission";
 import type {
@@ -58,7 +60,11 @@ const requireCompanyAdmin = (person: Identity): void => {
   }
 };
 
-/** Each topic's revision in effect at `now`, and the latest still to come. */
+/**
+ * Each topic's revision in effect at `now`, and the latest still to come,
+ * unless a higher revision is in effect already: that one supersedes it,
+ * and it never takes effect (admission.ts's `applying`).
+ */
 const statesOf = (rows: TopicRow[], now: Date): AdmissionTopicState[] => {
   const states = new Map<string, AdmissionTopicState>();
   for (const row of rows) {
@@ -75,6 +81,15 @@ const statesOf = (rows: TopicRow[], now: Date): AdmissionTopicState[] => {
       state.upcoming = topic;
     }
     states.set(row.id, state);
+  }
+  for (const state of states.values()) {
+    if (
+      state.current !== null &&
+      state.upcoming !== null &&
+      state.upcoming.revision < state.current.revision
+    ) {
+      state.upcoming = null;
+    }
   }
   const platform = new Set(platformTopics.map(({ record }) => record.id));
   return [...states.entries()]
@@ -104,12 +119,52 @@ const latestOf = async (env: Env, id: string): Promise<TopicRow | undefined> =>
     .limit(1)
     .get();
 
+/** A run of whitespace: normalizing turns each hyphen into a space. */
+const spaces = /\s+/gu;
+
 /**
- * A term as admission matches it: normalized, its trailing `*` kept
- * (normalizing drops Markdown's `*`).
+ * A term as admission matches it: normalized, each gap between its words
+ * one space (which keeps its detector linear: `termsPattern`), its
+ * trailing `*` kept (normalizing drops Markdown's `*`).
  */
-const matchedAs = (term: string): string =>
-  term.endsWith("*") ? `${normalized(term.slice(0, -1))}*` : normalized(term);
+const matchedAs = (term: string): string => {
+  const stem = term.endsWith("*");
+  const words = normalized(stem ? term.slice(0, -1) : term)
+    .replaceAll(spaces, " ")
+    .trim();
+  return stem ? `${words}*` : words;
+};
+
+/**
+ * Refuses a revision past the limits on what the gate reads per write:
+ * a new topic past `topicMaxActive` in use, and any revision past
+ * `topicMaxPending` still to take effect. A retirement is never refused:
+ * it ends a topic. Two saves at once may both pass;
+ * the gate reads well over the limits, and holds every write past that.
+ */
+const requireRoom = async (
+  env: Env,
+  now: Date,
+  creating: boolean
+): Promise<void> => {
+  const at = now.getTime();
+  const [active, pending] = await env.DB.batch<{ count: number }>([
+    env.DB.prepare(
+      `SELECT count(*) AS count FROM admission_topics t
+       WHERE t.owner = 'company' AND t.retired = 0
+         AND t.revision = (SELECT max(r.revision) FROM admission_topics r WHERE r.id = t.id)`
+    ),
+    env.DB.prepare(
+      "SELECT count(*) AS count FROM admission_topics WHERE owner = 'company' AND effective_at > ?"
+    ).bind(at),
+  ]);
+  const full =
+    (creating && (active?.results[0]?.count ?? 0) >= topicMaxActive) ||
+    (pending?.results[0]?.count ?? 0) >= topicMaxPending;
+  if (full) {
+    throw admissionErrors.create("admission.limit");
+  }
+};
 
 /** From when a revision saved now takes effect: never sooner than the lead. */
 const effectiveFrom = (asked: string | undefined, now: Date): Date => {
@@ -209,6 +264,7 @@ export const saveTopic = async (
     }
   }
   const now = new Date();
+  await requireRoom(env, now, parsed.id === undefined);
   const terms = [...new Set(parsed.terms.map((term) => matchedAs(term)))];
   return await writeRevision(
     env,

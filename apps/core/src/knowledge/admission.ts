@@ -3,6 +3,7 @@ import type { TopicOwner } from "@grasp-os/shared/admission";
 import type { AuditActor } from "@grasp-os/shared/audit";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { knowledgeErrors } from "@grasp-os/shared/knowledge";
+import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -42,13 +43,25 @@ import {
 /** What admission decides for a text. */
 export type AdmissionOutcome = "admitted" | "held" | "excluded";
 
-/** Matches any of `terms` as whole words (admission-topics.ts's syntax). */
+const special = /[.*+?^${}()|[\]\\]/gu;
+/** A gap between a term's words, however it's written. */
+const wordGap = /[\s-]+/u;
+
+/**
+ * Matches any of `terms` as whole words (admission-topics.ts's syntax).
+ * Each gap between a term's words, however many spaces or hyphens it was
+ * written with, becomes exactly one `\s+`: two in a row could split a
+ * run of whitespace between them in every way, and text anyone may save
+ * would make that take polynomial time.
+ */
 export const termsPattern = (terms: readonly string[]): RegExp => {
   const alternatives = terms.map((term) => {
     const stem = term.endsWith("*");
     const body = (stem ? term.slice(0, -1) : term)
-      .replaceAll(/[.*+?^${}()|[\]\\]/gu, String.raw`\$&`)
-      .replaceAll(" ", String.raw`\s+`);
+      .split(wordGap)
+      .filter((word) => word !== "")
+      .map((word) => word.replaceAll(special, String.raw`\$&`))
+      .join(String.raw`\s+`);
     return stem ? String.raw`${body}\p{L}*` : body;
   });
   return new RegExp(
@@ -544,6 +557,49 @@ export const topicRows = async (env: Env): Promise<TopicRow[]> => {
   return await db.select().from(admissionTopics).all();
 };
 
+/**
+ * Most topic revisions a write's check reads: Grasp's, and well over the
+ * company's topics in use and revisions to come that saving allows
+ * (`topicMaxActive`, `topicMaxPending`).
+ */
+export const policyMaxRows = 1000;
+
+/**
+ * The revisions a policy from `now` can apply, at most one more than
+ * `policyMaxRows`: each topic's latest revision in effect, unless it
+ * retires the topic, and every revision still to come that a higher one
+ * doesn't supersede (`superseded`; one whose effective time isn't a number
+ * among them: SQLite orders text after numbers). A topic's older
+ * revisions, and retired topics, are never read again, so a check reads
+ * no more as revisions pile up. Throws when core's database
+ * can't be read or written.
+ */
+const policyRows = async (env: Env, now: Date): Promise<TopicRow[]> => {
+  const db = drizzle(env.DB);
+  const at = now.getTime();
+  const read = async () =>
+    await db
+      .select()
+      .from(admissionTopics)
+      .where(
+        sql`(${admissionTopics.effectiveAt} > ${at} AND NOT EXISTS (SELECT 1 FROM admission_topics h WHERE h.id = ${admissionTopics.id} AND h.revision > ${admissionTopics.revision} AND h.effective_at <= ${admissionTopics.effectiveAt})) OR (${admissionTopics.retired} = 0 AND ${admissionTopics.revision} = (SELECT max(r.revision) FROM admission_topics r WHERE r.id = ${admissionTopics.id} AND r.effective_at <= ${at}))`
+      )
+      .limit(policyMaxRows + 1)
+      .all();
+  const rows = await read();
+  const recorded = new Set(rows.map((row) => `${row.id}@${row.revision}`));
+  const missing = platformTopics.some(
+    ({ record }) => !recorded.has(`${record.id}@${record.revision}`)
+  );
+  if (!missing) {
+    return rows;
+  }
+  // Grasp's current revisions recorded first (`topicRows`), unless one is
+  // older than a revision recorded already: then it's held as unenforced.
+  await topicRows(env);
+  return await read();
+};
+
 /** A topic revision, as the policy reads it. */
 interface Revision {
   id: string;
@@ -555,11 +611,31 @@ interface Revision {
 }
 
 /**
+ * Whether `row` never takes effect: a higher revision of its topic takes
+ * effect no later than it does, and the highest revision in effect is the
+ * topic's. A revision saved for next year is superseded by a retirement
+ * saved after it for next minute.
+ */
+const superseded = <
+  Row extends Pick<Revision, "id" | "revision" | "effectiveAt">,
+>(
+  row: Row,
+  rows: readonly Row[]
+): boolean =>
+  rows.some(
+    (other) =>
+      other.id === row.id &&
+      other.revision > row.revision &&
+      other.effectiveAt <= row.effectiveAt
+  );
+
+/**
  * The revisions that apply over [`from`, `until`]: each topic's revision
- * in effect at `from`, and every later one taking effect by `until`.
- * Applying them all is the strictest of the policies over the window: a
- * revision that narrows or retires a topic loosens nothing until it is in
- * effect, and one that adds to it holds from as soon as it's saved.
+ * in effect at `from`, and every later one taking effect by `until` that
+ * a higher one doesn't supersede. Applying them all is the strictest of
+ * the policies over the window: a revision that narrows or retires a
+ * topic loosens nothing until it is in effect, and one that adds to it
+ * holds from as soon as it's saved.
  */
 export const applying = <
   Row extends Pick<Revision, "id" | "revision" | "effectiveAt">,
@@ -576,7 +652,7 @@ export const applying = <
       if (held === undefined || row.revision > held.revision) {
         current.set(row.id, row);
       }
-    } else if (row.effectiveAt <= until) {
+    } else if (row.effectiveAt <= until && !superseded(row, rows)) {
       coming.push(row);
     }
   }
@@ -585,7 +661,16 @@ export const applying = <
 
 const termsSchema = z.array(z.string().min(1));
 
-/** Company topics' detectors, by `id@revision`: revisions never change. */
+/**
+ * Most detectors kept per isolate: more than a policy can apply at once
+ * (`policyMaxRows`), so a write rarely compiles one again.
+ */
+const companyPatternsKept = 2 * policyMaxRows;
+
+/**
+ * Company topics' detectors, by `id@revision` (revisions never change),
+ * the least recently used first.
+ */
 const companyPatterns = new Map<string, RegExp | null>();
 
 /** A company revision's detector; `null` if it lists no valid terms. */
@@ -593,12 +678,20 @@ const companyPattern = (row: Revision): RegExp | null => {
   const key = `${row.id}@${row.revision}`;
   const cached = companyPatterns.get(key);
   if (cached !== undefined) {
+    companyPatterns.delete(key);
+    companyPatterns.set(key, cached);
     return cached;
   }
   const parsed = termsSchema.safeParse(JSON.parse(row.terms));
   const pattern =
     parsed.success && parsed.data.length > 0 ? termsPattern(parsed.data) : null;
   companyPatterns.set(key, pattern);
+  for (const [oldest] of companyPatterns) {
+    if (companyPatterns.size <= companyPatternsKept) {
+      break;
+    }
+    companyPatterns.delete(oldest);
+  }
   return pattern;
 };
 
@@ -609,14 +702,18 @@ const companyPattern = (row: Revision): RegExp | null => {
  * can't be read, so a write fails rather than pass unchecked.
  */
 const policyFrom = async (env: Env, now: Date): Promise<Policy> => {
-  const rows = await topicRows(env);
+  const rows = await policyRows(env, now);
   const enforced = new Map(
     platformTopics.map(({ record }) => [record.id, record.revision])
   );
   const applied = applying(rows, now, new Date(now.getTime() + topicLeadMs));
   const company: RegExp[] = [];
-  // A row whose effective time can't be read may be in effect: it holds.
-  let unenforced = rows.some((row) => Number.isNaN(row.effectiveAt.getTime()));
+  // More rows than the limits allow (saves racing past them) may leave
+  // one unread: everything holds. So does a row whose effective time
+  // can't be read, which may be in effect.
+  let unenforced =
+    rows.length > policyMaxRows ||
+    rows.some((row) => Number.isNaN(row.effectiveAt.getTime()));
   for (const row of applied) {
     if (row.owner === "platform") {
       // Its own detector, or none this code knows: a newer revision.
@@ -644,6 +741,16 @@ const policyFrom = async (env: Env, now: Date): Promise<Policy> => {
  * effect, and the write is checked again.
  */
 export type AdmittedUntil = number;
+
+/**
+ * How long before its `AdmittedUntil` a write is checked again: its batch
+ * takes time too, and has to commit before then.
+ */
+export const admissionMarginMs = 10_000;
+
+/** Whether a write admitted `until` then must be checked again first. */
+export const admissionDue = (until: AdmittedUntil): boolean =>
+  Date.now() >= until - admissionMarginMs;
 
 /**
  * Admits `text` into canonical Knowledge in `collectionId`, or refuses it:

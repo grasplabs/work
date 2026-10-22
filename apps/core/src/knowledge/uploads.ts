@@ -45,7 +45,7 @@ import {
 import { errorResponse } from "../errors.ts";
 import { runEngine } from "../workflows/engine.ts";
 import { allowedCollections, noteProvenance } from "./access.ts";
-import { admitToKnowledge } from "./admission.ts";
+import { admissionDue, admitToKnowledge } from "./admission.ts";
 import { readableCollection, requireWritable } from "./collections.ts";
 import type { CollectionRow } from "./collections.ts";
 import { findByPath, writeVersion } from "./documents.ts";
@@ -243,10 +243,15 @@ export const uploadFile = async (
   requireWritable(env, person, collection);
   // Its name becomes its document's path and title, and is kept with the
   // upload from now: screened before anything of it is stored.
-  await admitToKnowledge(env, actorOf(person), collection.id, name);
-  const sha256 = hex(await crypto.subtle.digest("SHA-256", bytes));
-  const now = new Date();
   const actor = actorOf(person);
+  const admitted = await admitToKnowledge(env, actor, collection.id, name);
+  const sha256 = hex(await crypto.subtle.digest("SHA-256", bytes));
+  // Hashing a large file takes time: committed after the topics checked
+  // may have changed, it's checked again.
+  if (admissionDue(admitted)) {
+    await admitToKnowledge(env, actor, collection.id, name);
+  }
+  const now = new Date();
   const row: UploadRow = {
     id: crypto.randomUUID(),
     collectionId: collection.id,

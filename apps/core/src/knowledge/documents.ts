@@ -46,7 +46,7 @@ import {
 } from "../db/knowledge/schema.ts";
 import { allowedCollections, noteProvenance } from "./access.ts";
 import type { Reader } from "./access.ts";
-import { admitToKnowledge } from "./admission.ts";
+import { admissionDue, admitToKnowledge } from "./admission.ts";
 import type { AdmittedUntil } from "./admission.ts";
 import { allowedFor } from "./app-entries.ts";
 import type { Allowed } from "./app-entries.ts";
@@ -570,9 +570,9 @@ export const writeVersion = async (
   const send = async (staged: StagedPayload): Promise<void> => {
     await write.lastCheck?.();
     // Admission holds only until the time it gave: a staging or
-    // `lastCheck` that took longer is followed by admission again,
-    // against the topics then.
-    if (Date.now() >= admittedUntil) {
+    // `lastCheck` that took it near that time (`admissionDue`) is
+    // followed by admission again, against the topics then.
+    if (admissionDue(admittedUntil)) {
       admittedUntil = await admitted(env, by, write, prepared);
     }
     try {

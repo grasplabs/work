@@ -1,9 +1,20 @@
-import { admissionErrors, topicLeadMs } from "@grasp-os/shared/admission";
+import {
+  admissionErrors,
+  topicLeadMs,
+  topicMaxActive,
+  topicMaxPending,
+  topicTermSchema,
+} from "@grasp-os/shared/admission";
 import type { TopicInput } from "@grasp-os/shared/admission";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { saveTopic } from "../src/knowledge/admission-records.ts";
+import {
+  policyMaxRows,
+  screen,
+  termsPattern,
+} from "../src/knowledge/admission.ts";
 import { saveUserMemory } from "../src/knowledge/memory.ts";
 import { actingFor, newChat } from "./contexts.ts";
 import { mockIdp } from "./idp.ts";
@@ -265,7 +276,7 @@ describe("company topics", { timeout: 60_000 }, () => {
         { type: "own" },
         { text: `Works on the ${term} deal.`, ifVersion: 0 },
         // Between admission and the batch: an admin saves a topic, and
-        // the write is held up until after it took effect.
+        // the write is held up until it's about to take effect.
         async () => {
           await saveTopic(
             env,
@@ -281,7 +292,9 @@ describe("company topics", { timeout: 60_000 }, () => {
             topicWith(term)
           );
           vi.useFakeTimers({ toFake: ["Date"] });
-          vi.setSystemTime(Date.now() + topicLeadMs + 1000);
+          // Short of the time admission gave, but too close to it for
+          // the batch to be sure to commit before it.
+          vi.setSystemTime(Date.now() + topicLeadMs - 5000);
         }
       )
     );
@@ -295,5 +308,209 @@ describe("company topics", { timeout: 60_000 }, () => {
       remembered: "knowledge.excluded",
       stored: 0,
     });
+  });
+
+  it("match a term however it's spaced or hyphenated, in time linear in the text", async () => {
+    const admin = await personWithCollection();
+    const term = codeName();
+    const saved = await admin.api.admission.saveTopic(
+      topicWith(`${term}  -  19`)
+    );
+    const save = async (path: string, text: string) =>
+      await outcome(
+        admin.api.knowledge.saveDocument({
+          collectionId: admin.collectionId,
+          path,
+          text,
+          ifVersion: 0,
+        })
+      );
+    // A term spaced to make a backtracking detector try every way to
+    // split a run of whitespace, kept as written and as saved.
+    const spaced = "pay - - - - - - - - cut";
+    const detectors = [
+      termsPattern([spaced]),
+      termsPattern([topicTermSchema.parse(spaced)]),
+    ];
+    const size = 50_000;
+    const crafted = [
+      `pay${" ".repeat(size)}x`,
+      `pay ${"- ".repeat(size / 2)}x`,
+      `${"pay ".repeat(size / 4)}x`,
+    ];
+    const slowest = Math.max(
+      ...detectors.flatMap((detector) =>
+        crafted.map((text) => {
+          const started = performance.now();
+          screen(text, [detector]);
+          return performance.now() - started;
+        })
+      )
+    );
+
+    expect({
+      terms: saved.terms,
+      hyphenated: await save("plan.md", `The ${term}-19 plan.`),
+      spaced: await save("notes.md", `The ${term} 19 notes.`),
+      matches: detectors.map((detector) =>
+        screen("We took a pay-cut.", [detector])
+      ),
+      // Each takes milliseconds; a backtracking detector, minutes.
+      linear: slowest < 1000,
+    }).toStrictEqual({
+      terms: [`${term} 19`],
+      hyphenated: "knowledge.excluded",
+      spaced: "knowledge.excluded",
+      matches: ["excluded", "excluded"],
+      linear: true,
+    });
+  });
+
+  it("never apply a revision a higher one supersedes before it takes effect", async () => {
+    const admin = await personWithCollection();
+    const term = codeName();
+    const started = Date.now();
+    const year = 365 * 24 * 60 * 60 * 1000;
+    const saved = await admin.api.admission.saveTopic(topicWith(term));
+    // Revision 2 from a year on, then the topic retired by revision 3,
+    // from a minute on: revision 2 never takes effect.
+    await admin.api.admission.saveTopic({
+      ...topicWith(term),
+      id: saved.id,
+      ifRevision: 1,
+      effectiveAt: new Date(started + year).toISOString(),
+    });
+    await admin.api.admission.retireTopic({ id: saved.id, ifRevision: 2 });
+    const save = async (path: string) =>
+      await outcome(
+        admin.api.knowledge.saveDocument({
+          collectionId: admin.collectionId,
+          path,
+          text: `The ${term} deal.`,
+          ifVersion: 0,
+        })
+      );
+    const listed = async () => {
+      const topics = await admin.api.admission.topics();
+      const state = topics.find(
+        ({ current, upcoming }) => (current ?? upcoming)?.id === saved.id
+      );
+      return {
+        current: state?.current?.revision ?? null,
+        upcoming: state?.upcoming?.revision ?? null,
+      };
+    };
+    const before = { listed: await listed(), save: await save("before.md") };
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(started + 2 * topicLeadMs);
+    const retired = { listed: await listed(), save: await save("retired.md") };
+    // Half a minute before revision 2's time: within a write's window.
+    // A sign-in doesn't last a year; an agent's memory needs none.
+    vi.setSystemTime(started + year - 30_000);
+    const agent = { type: "agent" as const, agentId: `agent-${unique()}` };
+    const nearlyAYear = await outcome(
+      saveUserMemory(
+        env,
+        actingFor(agent, admin.userId),
+        await newChat(agent),
+        { type: "own" },
+        { text: `Works on the ${term} deal.`, ifVersion: 0 }
+      )
+    );
+
+    expect({ before, retired, nearlyAYear }).toStrictEqual({
+      before: {
+        listed: { current: null, upcoming: 3 },
+        save: "knowledge.excluded",
+      },
+      retired: { listed: { current: 3, upcoming: null }, save: "ok" },
+      nearlyAYear: "ok",
+    });
+  });
+
+  it("limit the topics a write's check reads, and hold every write past that", async () => {
+    const admin = await personWithCollection();
+    const term = codeName();
+    const saved = await admin.api.admission.saveTopic(topicWith(term));
+    const filler = `company-filler-${unique()}`;
+    /** Adds `count` filler topics, each of one revision from `at`. */
+    const fill = async (count: number, at: number, from = 0) =>
+      await env.DB.prepare(
+        `WITH RECURSIVE n(i) AS (SELECT ? UNION ALL SELECT i + 1 FROM n WHERE i < ?)
+         INSERT INTO admission_topics (id, revision, name, coverage, examples, owner, effective_at, created_at, terms)
+         SELECT ? || '-' || i, 1, 'Filler', 'Filler', '[]', 'company', ?, ?, json_array(? || i) FROM n`
+      )
+        .bind(from + 1, from + count, filler, at, Date.now(), `${filler}w`)
+        .run();
+    const save = async (path: string) =>
+      await outcome(
+        admin.api.knowledge.saveDocument({
+          collectionId: admin.collectionId,
+          path,
+          text: "# Runbook\nRestart the queue.",
+          ifVersion: 0,
+        })
+      );
+    const stems = {
+      short: await outcome(
+        admin.api.admission.saveTopic(topicWith(`${term} ab*`))
+      ),
+      long: await outcome(
+        admin.api.admission.saveTopic(topicWith(`${term}abc*`))
+      ),
+    };
+    try {
+      await fill(topicMaxActive, Date.now() - 1000);
+      const active = {
+        create: await outcome(
+          admin.api.admission.saveTopic(topicWith(codeName()))
+        ),
+        revise: await outcome(
+          admin.api.admission.saveTopic({
+            ...topicWith(term),
+            id: saved.id,
+            ifRevision: 1,
+          })
+        ),
+      };
+      await fill(topicMaxPending, Date.now() + 3_600_000, topicMaxActive);
+      const pending = {
+        revise: await outcome(
+          admin.api.admission.saveTopic({
+            ...topicWith(term),
+            id: saved.id,
+            ifRevision: 2,
+          })
+        ),
+        retire: await outcome(
+          admin.api.admission.retireTopic({ id: saved.id, ifRevision: 2 })
+        ),
+      };
+      const withinLimits = await save("within.md");
+      await fill(
+        policyMaxRows,
+        Date.now() - 1000,
+        topicMaxActive + topicMaxPending
+      );
+      const pastLimits = await save("past.md");
+
+      expect({
+        stems,
+        active,
+        pending,
+        withinLimits,
+        pastLimits,
+      }).toStrictEqual({
+        stems: { short: "admission.invalid", long: "ok" },
+        active: { create: "admission.limit", revise: "ok" },
+        pending: { revise: "admission.limit", retire: "ok" },
+        withinLimits: "ok",
+        pastLimits: "knowledge.held",
+      });
+    } finally {
+      await env.DB.prepare("DELETE FROM admission_topics WHERE id LIKE ?")
+        .bind(`${filler}-%`)
+        .run();
+    }
   });
 });
