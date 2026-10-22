@@ -19,10 +19,13 @@ function Slider({
   max = 100,
   variant = "default",
   field,
+  getAriaValueText,
   ...props
 }: SliderPrimitive.Root.Props & {
   variant?: "default" | "pill";
   field?: ReactNode;
+  /** What a screen reader says for a value, where its number alone says little (a level's name). */
+  getAriaValueText?: SliderPrimitive.Thumb.Props["getAriaValueText"];
 }) {
   // One thumb per value: a range has two, a single value one. Upstream
   // counts only arrays, so a single number got two thumbs.
@@ -68,6 +71,7 @@ function Slider({
         {Array.from({ length: _values.length }, (_, index) => (
           <SliderPrimitive.Thumb
             data-slot="slider-thumb"
+            getAriaValueText={getAriaValueText}
             key={index}
             className={
               pill

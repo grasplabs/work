@@ -423,26 +423,26 @@ test("one control picks the model and how hard it thinks, sends both with the qu
     "Model: llama-3.3-70b-instruct-fp8-fast. Change model"
   );
   await control.click();
-  const choices = page.getByRole("menuitemradio");
+  const choices = page
+    .getByRole("group", { name: "Model" })
+    .getByRole("button");
   await expect(choices).toHaveText([
     /llama-3\.3-70b-instruct-fp8-fast/u,
     /glm-5\.3-flash/u,
   ]);
+  const thinking = page.getByRole("slider", { name: "Thinking" });
+  await expect(thinking).toHaveCount(0);
 
-  // One that thinks offers its efforts in the same menu, which stays open
-  // for them, at the model's own default.
-  await page.getByRole("menuitemradio", { name: /^glm-5\.3-flash/u }).click();
-  await expect(choices).toHaveText([
-    /llama-3\.3-70b-instruct-fp8-fast/u,
-    /glm-5\.3-flash/u,
-    "Low",
-    "High",
-    "Max",
-  ]);
+  // One that thinks offers its efforts in a bar under the models, which
+  // stay open for it, at the model's own default.
+  await page.getByRole("button", { name: /^glm-5\.3-flash/u }).click();
   await expect(
-    page.getByRole("menuitemradio", { name: "High" })
-  ).toHaveAttribute("aria-checked", "true");
-  await page.getByRole("menuitemradio", { name: "Max" }).click();
+    page.getByRole("button", { name: /^glm-5\.3-flash/u })
+  ).toHaveAttribute("aria-pressed", "true");
+  await expect(thinking).toHaveAttribute("aria-valuetext", "High");
+  await thinking.focus();
+  await page.keyboard.press("End");
+  await expect(thinking).toHaveAttribute("aria-valuetext", "Max");
   await page.keyboard.press("Escape");
   await expect(choices).toHaveCount(0);
   await expect(control).toHaveAccessibleName(
@@ -472,9 +472,10 @@ test("one control picks the model and how hard it thinks, sends both with the qu
   // Back on the model that doesn't think, the effort goes.
   await control.click();
   await page
-    .getByRole("menuitemradio", { name: /^llama-3\.3-70b-instruct-fp8-fast/u })
+    .getByRole("button", { name: /^llama-3\.3-70b-instruct-fp8-fast/u })
     .click();
   await expect(choices).toHaveCount(2);
+  await expect(thinking).toHaveCount(0);
   await page.keyboard.press("Escape");
   await expect(control).toHaveAccessibleName(
     "Model: llama-3.3-70b-instruct-fp8-fast. Change model"

@@ -2039,6 +2039,9 @@ msgstr "Ajouter un mot"
 #: src/settings/person-limits.tsx
 msgid "Add an exception"
 msgstr "Ajouter une exception"
+#: src/chat/model-picker.tsx
+msgid "Add another provider"
+msgstr "Ajouter un autre fournisseur"
 
 #: src/chat/project-dialog.tsx
 msgid "Add documents"
@@ -4605,6 +4608,10 @@ msgstr "Par défaut"
 #: src/settings/person-limits.tsx
 msgid "Default limit"
 msgstr "Limite par défaut"
+#: src/chat/model-picker.tsx
+msgctxt "the default model"
+msgid "Default"
+msgstr "Par défaut"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Default: {fallback}"
@@ -5514,7 +5521,7 @@ msgstr "Exports"
 msgid "Exports of {domain}: {covered}"
 msgstr "Exports de {domain} : {covered}"
 
-#: src/chat/composer.tsx
+#: src/chat/model-picker.tsx
 msgctxt "thinking effort"
 msgid "Extra high"
 msgstr "Très élevé"
@@ -6295,7 +6302,7 @@ msgctxt "severity of a finding"
 msgid "High"
 msgstr "Élevée"
 
-#: src/chat/composer.tsx
+#: src/chat/model-picker.tsx
 msgctxt "thinking effort"
 msgid "High"
 msgstr "Élevé"
@@ -7515,7 +7522,7 @@ msgctxt "severity of a finding"
 msgid "Low"
 msgstr "Faible"
 
-#: src/chat/composer.tsx
+#: src/chat/model-picker.tsx
 msgctxt "thinking effort"
 msgid "Low"
 msgstr "Faible"
@@ -7609,7 +7616,7 @@ msgctxt "kind of app"
 msgid "Marketing"
 msgstr "Marketing"
 
-#: src/chat/composer.tsx
+#: src/chat/model-picker.tsx
 msgctxt "thinking effort"
 msgid "Max"
 msgstr "Maximal"
@@ -7627,7 +7634,7 @@ msgstr "Peut modifier quelque chose en dehors de Grasp"
 msgid "Measured return"
 msgstr "Gain mesuré"
 
-#: src/chat/composer.tsx
+#: src/chat/model-picker.tsx
 msgctxt "thinking effort"
 msgid "Medium"
 msgstr "Moyen"
@@ -7700,6 +7707,7 @@ msgctxt "state of a data processing agreement"
 msgid "Missing"
 msgstr "Manquant"
 
+#: src/chat/model-picker.tsx
 #: src/engines/resource-bindings.tsx
 #: src/routes/_shell.settings.models.tsx
 msgid "Model"
@@ -7717,11 +7725,11 @@ msgstr "Coût du modèle"
 msgid "Model training"
 msgstr "Entraînement des modèles"
 
-#: src/chat/composer.tsx
+#: src/chat/model-picker.tsx
 msgid "Model: {name}, thinking {effort, select, low {low} medium {medium} high {high} xhigh {extra high} other {max}}. Change model or thinking"
 msgstr "Modèle : {name}, réflexion {effort, select, low {faible} medium {moyenne} high {élevée} xhigh {très élevée} other {maximale}}. Changer de modèle ou de réflexion"
 
-#: src/chat/composer.tsx
+#: src/chat/model-picker.tsx
 msgid "Model: {name}. Change model"
 msgstr "Modèle : {name}. Changer de modèle"
 
@@ -7733,10 +7741,6 @@ msgstr "Modèles"
 #: src/routes/_shell.settings.models.tsx
 msgid "Models aren't set up for this deployment yet, so no model call can be made. Grasp sets them up."
 msgstr "Aucun modèle n’est encore configuré pour ce déploiement : aucun appel de modèle n’est possible. Grasp s’en charge."
-
-#: src/chat/composer.tsx
-msgid "Models for your organization"
-msgstr "Modèles de votre organisation"
 
 #: src/dashboard/dependency-requests.tsx
 msgctxt "severity of a finding"
@@ -13419,6 +13423,7 @@ msgstr "Outils utilisés"
 msgid "They're back"
 msgstr "De retour"
 
+#: src/chat/model-picker.tsx
 #: src/chat/thread.tsx
 msgid "Thinking"
 msgstr "Réflexion"

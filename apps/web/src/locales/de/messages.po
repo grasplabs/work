@@ -2039,6 +2039,9 @@ msgstr "Ein Wort hinzufügen"
 #: src/settings/person-limits.tsx
 msgid "Add an exception"
 msgstr "Ausnahme hinzufügen"
+#: src/chat/model-picker.tsx
+msgid "Add another provider"
+msgstr "Weiteren Anbieter hinzufügen"
 
 #: src/chat/project-dialog.tsx
 msgid "Add documents"
@@ -4605,6 +4608,10 @@ msgstr "Standard"
 #: src/settings/person-limits.tsx
 msgid "Default limit"
 msgstr "Standardgrenze"
+#: src/chat/model-picker.tsx
+msgctxt "the default model"
+msgid "Default"
+msgstr "Standard"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Default: {fallback}"
@@ -5514,7 +5521,7 @@ msgstr "Exporte"
 msgid "Exports of {domain}: {covered}"
 msgstr "Exporte von {domain}: {covered}"
 
-#: src/chat/composer.tsx
+#: src/chat/model-picker.tsx
 msgctxt "thinking effort"
 msgid "Extra high"
 msgstr "Sehr hoch"
@@ -6295,7 +6302,7 @@ msgctxt "severity of a finding"
 msgid "High"
 msgstr "Hoch"
 
-#: src/chat/composer.tsx
+#: src/chat/model-picker.tsx
 msgctxt "thinking effort"
 msgid "High"
 msgstr "Hoch"
@@ -7515,7 +7522,7 @@ msgctxt "severity of a finding"
 msgid "Low"
 msgstr "Niedrig"
 
-#: src/chat/composer.tsx
+#: src/chat/model-picker.tsx
 msgctxt "thinking effort"
 msgid "Low"
 msgstr "Niedrig"
@@ -7609,7 +7616,7 @@ msgctxt "kind of app"
 msgid "Marketing"
 msgstr "Marketing"
 
-#: src/chat/composer.tsx
+#: src/chat/model-picker.tsx
 msgctxt "thinking effort"
 msgid "Max"
 msgstr "Maximal"
@@ -7627,7 +7634,7 @@ msgstr "Kann etwas außerhalb von Grasp ändern"
 msgid "Measured return"
 msgstr "Gemessener Ertrag"
 
-#: src/chat/composer.tsx
+#: src/chat/model-picker.tsx
 msgctxt "thinking effort"
 msgid "Medium"
 msgstr "Mittel"
@@ -7700,6 +7707,7 @@ msgctxt "state of a data processing agreement"
 msgid "Missing"
 msgstr "Fehlt"
 
+#: src/chat/model-picker.tsx
 #: src/engines/resource-bindings.tsx
 #: src/routes/_shell.settings.models.tsx
 msgid "Model"
@@ -7717,11 +7725,11 @@ msgstr "Modellkosten"
 msgid "Model training"
 msgstr "Modelltraining"
 
-#: src/chat/composer.tsx
+#: src/chat/model-picker.tsx
 msgid "Model: {name}, thinking {effort, select, low {low} medium {medium} high {high} xhigh {extra high} other {max}}. Change model or thinking"
 msgstr "Modell: {name}, Denkaufwand {effort, select, low {niedrig} medium {mittel} high {hoch} xhigh {sehr hoch} other {maximal}}. Modell oder Denkaufwand ändern"
 
-#: src/chat/composer.tsx
+#: src/chat/model-picker.tsx
 msgid "Model: {name}. Change model"
 msgstr "Modell: {name}. Modell ändern"
 
@@ -7733,10 +7741,6 @@ msgstr "Modelle"
 #: src/routes/_shell.settings.models.tsx
 msgid "Models aren't set up for this deployment yet, so no model call can be made. Grasp sets them up."
 msgstr "Für diese Instanz sind noch keine Modelle eingerichtet, daher ist kein Modellaufruf möglich. Grasp richtet sie ein."
-
-#: src/chat/composer.tsx
-msgid "Models for your organization"
-msgstr "Modelle für Ihre Organisation"
 
 #: src/dashboard/dependency-requests.tsx
 msgctxt "severity of a finding"
@@ -13419,6 +13423,7 @@ msgstr "Nutzen"
 msgid "They're back"
 msgstr "Wieder da"
 
+#: src/chat/model-picker.tsx
 #: src/chat/thread.tsx
 msgid "Thinking"
 msgstr "Denkt nach"
