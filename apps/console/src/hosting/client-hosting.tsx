@@ -37,7 +37,7 @@ import { useRouter } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { formatTime } from "../releases/format.ts";
-import { useAction } from "../use-action.ts";
+import { thenRefresh, useAction } from "../use-action.ts";
 import { placeAndProvisionFn } from "./functions.ts";
 import type {
   ClientHostingView,
@@ -264,16 +264,22 @@ export const ClientHosting = ({
   const placing = view.placement === null;
   const start = () => {
     void run(async () => {
-      const result = await placeAndProvisionFn({
-        data: {
-          clientId: view.clientId,
-          releaseId,
-          policyId: view.policy.id,
-          destinationId: !placing || chosen === automatic ? null : chosen,
-        },
-      });
+      // Refreshed even when it fails: the client may be placed already.
+      const result = await thenRefresh(
+        async () =>
+          await placeAndProvisionFn({
+            data: {
+              clientId: view.clientId,
+              releaseId,
+              policyId: view.policy.id,
+              destinationId: !placing || chosen === automatic ? null : chosen,
+            },
+          }),
+        async () => {
+          await router.invalidate({ sync: true });
+        }
+      );
       setBlocking(result.problems);
-      await router.invalidate({ sync: true });
       return result;
     });
   };
