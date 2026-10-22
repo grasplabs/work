@@ -1,21 +1,21 @@
-import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
-import { errorPayloadSchema } from "@grasp-os/shared/errors";
-import { interviewApiPath } from "@grasp-os/shared/interview-links";
 import { interviewTurnPath, turnEvents } from "@grasp-os/shared/interview-turn";
 import type {
   InterviewTurnRequest,
   StephenTurn,
   TurnEvent,
 } from "@grasp-os/shared/interview-turn";
-import type { Roster } from "@grasp-os/shared/onboarding";
-import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
-import { z } from "zod";
 
-import { onboardingStore } from "../src/onboarding/store.ts";
-import { fakeGateway } from "./ai-gateway.ts";
-import type { GatewayReply, GatewayRequest } from "./ai-gateway.ts";
-import { routed, unique } from "./sign-in.ts";
+import type { GatewayReply } from "./ai-gateway.ts";
+import {
+  answering,
+  codeOf,
+  countedFor,
+  modelOf,
+  opened,
+  quick,
+} from "./interview-link.ts";
+import { routed } from "./sign-in.ts";
 
 // One turn of someone's interview (src/onboarding/interview.ts), over the
 // endpoint, as the page asks for it. AI Gateway is the outside system: a
@@ -29,71 +29,6 @@ import { routed, unique } from "./sign-in.ts";
 // - A turn given up halfway going uncounted, or still running.
 // - A link that isn't open, or a device that isn't the link's, getting a
 //   turn.
-
-const quick = "anthropic/claude-sonnet-4-5";
-const careful = "anthropic/claude-opus-4-8";
-
-/** The deployment's gateway: Stephen's two models, both let take sensitive data. */
-const gatewayConfig = {
-  gateway: "grasp-os-test",
-  models: [quick, careful],
-  roles: { quick, careful },
-  sensitive: { models: [quick, careful], connections: [] },
-};
-
-const dayMs = 24 * 60 * 60 * 1000;
-
-/** What a session answers, as far as these tests read it: the device's key. */
-const sessionKey = z.object({ key: z.string().optional() });
-/** A provider request, as far as these tests read it: its model. */
-const requestModel = z.object({ model: z.unknown() });
-
-/** A refusal's status and code. */
-const codeOf = async (response: Response) => {
-  const parsed = errorPayloadSchema.safeParse(await response.json());
-  return [response.status, parsed.success ? parsed.data.code : null];
-};
-const isoDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
-
-/**
- * A fresh onboarding running since yesterday, with one person in Ops (no
- * lead) whose link is out, opened on a device: their secret and key.
- */
-const opened = async () => {
-  const store = onboardingStore(env);
-  const person = `oli-${unique()}`;
-  const roster: Roster = {
-    teams: [{ id: "ops", name: "Ops", lead: null, does: "", off: false }],
-    people: [
-      {
-        id: person,
-        name: "Oli Olsen",
-        team: "ops",
-        email: "",
-        title: "",
-        away: false,
-      },
-    ],
-  };
-  const by = { type: "system" } as const;
-  await store.setPaused(false, by);
-  await store.saveRoster(roster, by);
-  await store.savePlan({ start: isoDay(Date.now() - dayMs), days: 14 }, by);
-  await store.setAgreements(
-    { processing: true, assessment: true, council: "none" },
-    by
-  );
-  await store.releaseDue();
-  const link = await store.linkOf(person);
-  const secret = link?.split("#")[1] ?? "";
-  const session = await routed(interviewApiPath, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ action: "session", secret }),
-  });
-  const { key } = sessionKey.parse(await session.json());
-  return { secret, key: key ?? "" };
-};
 
 type Turn = Omit<
   InterviewTurnRequest,
@@ -131,37 +66,6 @@ const notes = (body: unknown): GatewayReply => ({
   inputTokens: 1600,
   outputTokens: 120,
 });
-
-/** The model a request went to, by its id in pi's catalog. */
-const modelOf = ({ body }: GatewayRequest): unknown =>
-  requestModel.safeParse(body).data?.model;
-
-/** What `run` returns while the gateway answers with `replies`. */
-const answering = async <T>(replies: GatewayReply[], run: () => Promise<T>) => {
-  const before = env.MODEL_GATEWAY;
-  const fake = fakeGateway(...replies);
-  const ai: AiBinding = env.AI;
-  const spy = vi.spyOn(ai, "fetch").mockImplementation(fake.binding.fetch);
-  env.MODEL_GATEWAY = gatewayConfig;
-  try {
-    return { requests: fake.requests, result: await run() };
-  } finally {
-    env.MODEL_GATEWAY = before;
-    spy.mockRestore();
-  }
-};
-
-/** What the onboarding counted of interviews for `model`: calls and tokens read. */
-const countedFor = async (model: string) => {
-  const rows = await onboardingStore(env).usage();
-  const of = rows.filter(
-    (row) => row.purpose === "interviews" && row.model === model
-  );
-  return {
-    calls: of.reduce((sum, { calls }) => sum + calls, 0),
-    tokensIn: of.reduce((sum, { tokensIn }) => sum + tokensIn, 0),
-  };
-};
 
 describe("an interview turn", { timeout: 60_000 }, () => {
   it("holds an interview over the endpoint: his line from the quick model, what he wrote down from the careful one, and who he talks with from the store", async () => {
