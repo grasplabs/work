@@ -1173,7 +1173,7 @@ msgid "{who} consented to this before connecting it:"
 msgstr "{who} consented to this before connecting it:"
 
 #: src/interview/before.tsx
-#: src/interview/sound-check.tsx
+#: src/interview/voice-bar.tsx
 msgid "{who} is talking"
 msgstr "{who} is talking"
 
@@ -5590,7 +5590,7 @@ msgstr "Links out: {count} of {of}"
 msgid "Links to"
 msgstr "Links to"
 
-#: src/interview/sound-check.tsx
+#: src/interview/voice-bar.tsx
 msgid "Listening"
 msgstr "Listening"
 
@@ -7001,7 +7001,7 @@ msgstr "Onboarding steps"
 msgid "Once I have about {threshold}% of the picture, your team can start. I’ll fill in the rest as we go."
 msgstr "Once I have about {threshold}% of the picture, your team can start. I’ll fill in the rest as we go."
 
-#: src/interview/sound-check.tsx
+#: src/interview/voice-bar.tsx
 msgid "One moment"
 msgstr "One moment"
 
@@ -10605,6 +10605,10 @@ msgstr "Two answers"
 #: src/activity/audit-log.tsx
 msgid "Type"
 msgstr "Type"
+
+#: src/interview/composer.tsx
+msgid "Type instead"
+msgstr "Type instead"
 
 #: src/interview/before.tsx
 #: src/interview/sound-check.tsx

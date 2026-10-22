@@ -7,7 +7,6 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from "@grasp-os/ui/components/dropdown-menu";
-import { cn } from "@grasp-os/ui/lib/utils";
 import { useLingui } from "@lingui/react/macro";
 import { ChevronDownIcon } from "lucide-react";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
@@ -19,7 +18,6 @@ import {
   chooseMic,
   hangUp,
   listenForVoice,
-  micLevel,
   micProblem,
   microphone,
   microphones,
@@ -34,7 +32,8 @@ import {
   voiceLevel,
 } from "./speech.ts";
 import { SpokenText } from "./spoken.tsx";
-import { VoiceWave } from "./voice-wave.tsx";
+import { VoiceBar } from "./voice-bar.tsx";
+import type { BarDoing } from "./voice-bar.tsx";
 
 // The check before the first question (prototype `interview-intro.tsx`,
 // `Setup`), so nobody finds out halfway that the other can't be heard.
@@ -52,7 +51,7 @@ export type AnswerBy = "talk" | "type";
 type Check = "sound" | "mic" | "ready";
 
 /** What the bar under the line shows: the microphone being asked for, their voice, or the interviewer's. */
-type Doing = "asking" | "listening" | "speaking";
+type Doing = Exclude<BarDoing, "thinking">;
 
 /** How soon a screen's first line is said, so it is said once the screen has faded in. */
 export const sayAfterMs = 350;
@@ -73,42 +72,6 @@ export const Quiet = ({
     {children}
   </button>
 );
-
-/** The bar they will talk into: what is happening in words, and the sound as a wave. */
-const VoiceBar = ({ doing }: { doing: Doing }) => {
-  const { t } = useLingui();
-  const who = interviewerNames[useInterviewer()];
-  const listening = doing === "listening";
-  let label = t`One moment`;
-  if (listening) {
-    label = t`Listening`;
-  } else if (doing === "speaking") {
-    label = t`${who} is talking`;
-  }
-  return (
-    <div className="border-input flex h-14 w-full items-center gap-3 rounded-xl border pr-4 pl-4">
-      <span
-        aria-live="polite"
-        className="text-muted-foreground flex flex-none items-center gap-2.5"
-      >
-        <span
-          aria-hidden="true"
-          className={cn(
-            "size-2 rounded-full transition-colors duration-300",
-            listening ? "bg-brain-heat animate-pulse" : "bg-border"
-          )}
-        />
-        {label}
-      </span>
-      <div className="h-10 min-w-0 flex-1">
-        <VoiceWave
-          level={listening ? micLevel : voiceLevel}
-          of={listening ? "person" : "interviewer"}
-        />
-      </div>
-    </div>
-  );
-};
 
 /** Which microphone is listened through, to change where there is more than one. */
 const Microphones = ({
