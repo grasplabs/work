@@ -158,7 +158,8 @@ const PlaceItem = ({
       <SidebarMenuButton
         isActive={active}
         render={<Link to={to} />}
-        tooltip={label}
+        // The folded sidebar hides the badge, so its tooltip says the count.
+        tooltip={badge === null ? label : `${label}: ${badge.words}`}
       >
         <Icon />
         <span>{label}</span>
