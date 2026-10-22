@@ -2039,7 +2039,7 @@ const lowerRun = (
       place,
       (indent) => {
         emitter.lines.push(
-          `${indent}output = await flow.child(${literal(id)});`
+          `${indent}output = await ${emitter.flow}.child(${literal(id)});`
         );
       },
       true

@@ -127,6 +127,25 @@ const runChild = (id: string, child: string) => ({
   },
 });
 
+/**
+ * A task running `child`'s 1.0.0 on `who`, adding the greeting it answers to
+ * the context's `seen`.
+ */
+const greetEach = (id: string, child: string, who: string) => ({
+  [id]: {
+    run: {
+      workflow: {
+        namespace: workflowNamespace,
+        name: child,
+        version: "1.0.0",
+        input: { who },
+      },
+    },
+    metadata: { grasp: { binding: "child" } },
+    export: { as: "${ $context + {seen: ($context.seen + [.greeting])} }" },
+  },
+});
+
 /** The binding of `child`'s 1.0.0, as a parent declares it. */
 const childBinding = (child: string) => ({
   child: { kind: "workflow", contract: `${workflowNamespace}/${child}/1.0.0` },
@@ -369,6 +388,89 @@ describe("run tasks", { timeout: 180_000 }, () => {
       invoker: runId,
       // Its own start's: the parent's binding of it isn't the child's.
       bindings: "[]",
+    });
+  });
+
+  it("start a child of its own for each item of a loop, and take each one's output", async () => {
+    const admin = await person("admin");
+    const child = await greeter(admin);
+    const { parent } = await parentOf(admin, child, [
+      { init: { set: "${ . }", export: { as: "${ {seen: []} }" } } },
+      {
+        "each-name": {
+          for: { each: "name", in: '${ ["Ada", "Grace"] }', at: "i" },
+          do: [greetEach("greet-child", child.name, "${ $name }")],
+        },
+      },
+      {
+        finished: {
+          set: '${ {greeting: ($context.seen | join("; "))} }',
+        },
+      },
+    ]);
+
+    const runId = await started(admin, parent.id);
+    const run = await endOf(admin, parent.id, runId);
+    const children = await childrenOf(runId);
+
+    expect({
+      end: endStateOf(run),
+      children: children.map(({ status }) => status),
+      distinct: new Set(children.map(({ id }) => id)).size,
+    }).toStrictEqual({
+      end: {
+        status: "completed",
+        output: { greeting: "Hello, Ada; Hello, Grace" },
+      },
+      children: ["completed", "completed"],
+      distinct: 2,
+    });
+  });
+
+  it("start a child of its own for each item of a nested loop", async () => {
+    const admin = await person("admin");
+    const child = await greeter(admin);
+    const { parent } = await parentOf(admin, child, [
+      { init: { set: "${ . }", export: { as: "${ {seen: []} }" } } },
+      {
+        outer: {
+          for: { each: "group", in: '${ ["A", "B"] }', at: "g" },
+          do: [
+            {
+              inner: {
+                for: { each: "name", in: '${ ["Ada", "Grace"] }', at: "n" },
+                do: [
+                  greetEach("greet-child", child.name, "${ $group + $name }"),
+                ],
+              },
+            },
+          ],
+        },
+      },
+      {
+        finished: {
+          set: '${ {greeting: ($context.seen | join("; "))} }',
+        },
+      },
+    ]);
+
+    const runId = await started(admin, parent.id);
+    const run = await endOf(admin, parent.id, runId);
+    const children = await childrenOf(runId);
+
+    expect({
+      end: endStateOf(run),
+      children: children.map(({ status }) => status),
+      distinct: new Set(children.map(({ id }) => id)).size,
+    }).toStrictEqual({
+      end: {
+        status: "completed",
+        output: {
+          greeting: "Hello, AAda; Hello, AGrace; Hello, BAda; Hello, BGrace",
+        },
+      },
+      children: ["completed", "completed", "completed", "completed"],
+      distinct: 4,
     });
   });
 
