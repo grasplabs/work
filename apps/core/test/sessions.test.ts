@@ -12,6 +12,7 @@ import {
   callAuth,
   coreOrigin,
   countingSessionReads,
+  endOtherSessions,
   entraPerson,
   openRpc,
   outcome,
@@ -97,13 +98,12 @@ describe("sessions end", () => {
     );
   });
 
-  it("when the person revokes them from another session", async () => {
+  it("when the person ends them from another session", async () => {
     const person = entraPerson(acmeTenant);
     const laptop = await signedIn(idp, "microsoft", person);
     const phone = await signedIn(idp, "microsoft", person);
 
-    const revoked = await callAuth("/revoke-other-sessions", laptop, {});
-    expect(revoked.status).toBe(200);
+    await expect(endOtherSessions(laptop)).resolves.toStrictEqual(["ended"]);
     await expect(outcome(whoami(phone))).resolves.toBe("auth.unauthenticated");
     await expect(whoami(laptop)).resolves.toMatchObject({
       email: person.email,
@@ -112,13 +112,18 @@ describe("sessions end", () => {
 
   it.each([
     {
-      how: "revoked from another session",
-      end: async (_phone: string, laptop: string) =>
-        await callAuth("/revoke-other-sessions", laptop, {}),
+      how: "ended from another session",
+      end: async (_phone: string, laptop: string) => {
+        const ended = await endOtherSessions(laptop);
+        return ended.every((each) => each === "ended");
+      },
     },
     {
       how: "signed out",
-      end: async (phone: string) => await callAuth("/sign-out", phone, {}),
+      end: async (phone: string) => {
+        const signedOut = await callAuth("/sign-out", phone, {});
+        return signedOut.ok;
+      },
     },
   ])(
     "on an open connection too, within a few seconds, when $how: its calls are refused, it closes, idle or not, and can't be opened again",
@@ -145,8 +150,7 @@ describe("sessions end", () => {
           email: person.email,
         });
 
-        const ended = await end(phone, laptop);
-        expect(ended.status).toBe(200);
+        await expect(end(phone, laptop)).resolves.toBeTruthy();
         await vi.advanceTimersByTimeAsync(sessionRecheckMs);
 
         // Both closed by their own recheck, without a call: within a window
@@ -178,7 +182,7 @@ describe("sessions end", () => {
     let readElsewhere: number;
     try {
       connection = await openRpc(phone, { coreEnv: counted });
-      await callAuth("/revoke-other-sessions", laptop, {});
+      await endOtherSessions(laptop);
       // The clock moves on inside another Durable Object's request, where
       // the connection's recheck timer then runs: workerd refuses any I/O
       // there on a socket another request opened.
@@ -218,7 +222,7 @@ describe("sessions end", () => {
       socket.close();
       await closed;
       const afterClose = reads.sessions;
-      await callAuth("/revoke-other-sessions", laptop, {});
+      await endOtherSessions(laptop);
       await vi.advanceTimersByTimeAsync(3 * sessionRecheckMs);
       expect(reads.sessions).toBe(afterClose);
     } finally {
