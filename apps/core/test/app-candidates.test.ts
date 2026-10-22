@@ -8,6 +8,7 @@ import { env } from "cloudflare:workers";
 import { asc, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
+import { z } from "zod";
 
 import { activateVersion } from "../src/app-activation.ts";
 import {
@@ -22,9 +23,10 @@ import { loadRelease, sealRelease } from "../src/app-releases.ts";
 import { commitFiles, findApp, findVersion } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
 import { appCandidateReports, appCandidates } from "../src/db/core/schema.ts";
+import { revokeRelease } from "../src/release-retention.ts";
 import { racingDb } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
-import { appWith, failure, person } from "./sealed-apps.ts";
+import { appWith, artifactKey, failure, person } from "./sealed-apps.ts";
 
 // Candidates (app-candidates.ts), from their threat model: a version is
 // made current only from a candidate verified with its report, over the
@@ -198,7 +200,7 @@ describe(
         .where(eq(appCandidateReports.candidateId, made?.id ?? ""))
         .get();
       const expected = canonicalText({
-        formatVersion: 1,
+        formatVersion: 2,
         candidate: {
           id: made?.id,
           appId: app,
@@ -212,8 +214,36 @@ describe(
           sourceTreeHash: release.manifest.sourceTreeHash,
           verificationReportHash: release.manifest.verificationReportHash,
           dataStoreBindings: release.manifest.dataStoreBindings,
+          migrationEvidence: await sha256Hex(
+            canonicalText(release.manifest.migrationEvidence)
+          ),
+          artifacts: {
+            count: release.manifest.artifacts.length,
+            readBack: await sha256Hex(
+              canonicalText(
+                release.manifest.artifacts.map(({ path, sha256, bytes }) => ({
+                  path,
+                  sha256,
+                  bytes,
+                }))
+              )
+            ),
+          },
         },
-        environment: { compilerVersion, sdkProtocolVersion },
+        passed: { appTests: [], workflowTests: [] },
+        // As it was verified: no permission, not yet approved, no policy.
+        authority: {
+          permissions: await sha256Hex(canonicalText([])),
+          permissionCount: 0,
+          approved: null,
+          screenPolicy: null,
+        },
+        environment: {
+          compilerVersion,
+          sdkProtocolVersion,
+          platformRelease: env.CF_VERSION_METADATA?.id ?? null,
+        },
+        rollback: { to: null, eligible: false },
       });
       expect({
         current: activated.currentVersion,
@@ -243,6 +273,109 @@ describe(
         ["building", "verifying"],
         ["verifying", "verified"],
       ]);
+    });
+
+    it("refuses a candidate whose sealed artifact changed in storage, reading it back itself", async () => {
+      const { owner, app } = await appWith(helloFiles("one"));
+      await committed(owner, app, helloFiles("two"));
+      await activateVersion(env, owner, app, 1);
+      // Sealed, then one of its artifacts changed before it is verified.
+      await sealRelease(env, { app, version: 2, by: owner });
+      const { manifest } = await loadRelease(env, app, 2);
+      const entry = manifest.artifacts.find(({ path }) =>
+        path.startsWith("modules/")
+      );
+      const key = artifactKey(entry?.sha256 ?? "");
+      const stored = await env.FILES.get(key);
+      const forged = `${(await stored?.text()) ?? ""} `;
+      await env.FILES.put(key, forged);
+      const refused = await failure(
+        async () => await activateVersion(env, owner, app, 2)
+      );
+      const [, second] = await candidatesOf(app);
+      expect({
+        refused,
+        outcome: [second?.state, second?.outcome],
+        current: await currentOf(app),
+      }).toStrictEqual({
+        refused: "version.artifact_corrupt",
+        outcome: ["rejected", "version.artifact_corrupt"],
+        current: 1,
+      });
+    });
+
+    it("reads artifacts back without vouching for them to later loads", async () => {
+      const { owner, app } = await appWith(helloFiles());
+      await activateVersion(env, owner, app, 1);
+      const [made] = await candidatesOf(app);
+      const report = await drizzle(env.DB)
+        .select()
+        .from(appCandidateReports)
+        .where(eq(appCandidateReports.candidateId, made?.id ?? ""))
+        .get();
+      const manifestRow = await env.DB.prepare(
+        "SELECT manifest FROM sdk_release_manifests WHERE app_id = ? AND version = 1"
+      )
+        .bind(app)
+        .first<{ manifest: string }>();
+      const { artifacts } = z
+        .object({
+          artifacts: z.array(
+            z.object({ path: z.string(), sha256: z.string() })
+          ),
+        })
+        .parse(JSON.parse(manifestRow?.manifest ?? "{}"));
+      const entry = artifacts.find(({ path }) => path.startsWith("modules/"));
+      const key = artifactKey(entry?.sha256 ?? "");
+      const stored = await env.FILES.get(key);
+      await env.FILES.put(key, `${(await stored?.text()) ?? ""} `);
+      expect({
+        reported: report?.report.includes('"readBack"'),
+        load: await failure(async () => await loadRelease(env, app, 1)),
+      }).toStrictEqual({
+        reported: true,
+        load: "version.artifact_corrupt",
+      });
+    });
+
+    it("reports whether the version it replaces could run again", async () => {
+      const kept = await appWith(helloFiles("one"));
+      await committed(kept.owner, kept.app, helloFiles("two"));
+      await activateVersion(env, kept.owner, kept.app, 1);
+      await activateVersion(env, kept.owner, kept.app, 2);
+      const revoked = await appWith(helloFiles("one"));
+      await committed(revoked.owner, revoked.app, helloFiles("two"));
+      await activateVersion(env, revoked.owner, revoked.app, 1);
+      await revokeRelease(
+        env,
+        await person("admin"),
+        { app: revoked.app, version: 1 },
+        "Leaks data"
+      );
+      await activateVersion(env, revoked.owner, revoked.app, 2);
+      const rollbackOf = async (app: AppId) => {
+        const [, second] = await candidatesOf(app);
+        const row = await drizzle(env.DB)
+          .select()
+          .from(appCandidateReports)
+          .where(eq(appCandidateReports.candidateId, second?.id ?? ""))
+          .get();
+        return z
+          .object({
+            rollback: z.object({
+              to: z.number().nullable(),
+              eligible: z.boolean(),
+            }),
+          })
+          .parse(JSON.parse(row?.report ?? "{}")).rollback;
+      };
+      expect({
+        kept: await rollbackOf(kept.app),
+        revoked: await rollbackOf(revoked.app),
+      }).toStrictEqual({
+        kept: { to: 1, eligible: true },
+        revoked: { to: 1, eligible: false },
+      });
     });
 
     it("keeps every report and what a candidate pins, and moves it forward only", async () => {

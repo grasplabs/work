@@ -14,12 +14,14 @@ import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { checkedReleaseManifest } from "./app-releases.ts";
+import { readBackRelease } from "./app-releases.ts";
+import type { VerifiedObservations } from "./apps.ts";
 import {
   appFor,
   changeEntry,
   findVersion,
   makeCurrent,
+  releaseRunnable,
   verifyVersion,
   versionFiles,
 } from "./apps.ts";
@@ -28,7 +30,13 @@ import {
   outboxedEventWhere,
   outboxedIfChanged,
 } from "./audit-outbox.ts";
-import { appCandidateReports, appCandidates } from "./db/core/schema.ts";
+import {
+  appCandidateReports,
+  appCandidates,
+  appVersions,
+  permissions,
+  screenPolicies,
+} from "./db/core/schema.ts";
 
 // Candidates (spec 22.1, 22.2): one frozen version of an App on its way to
 // being made current. A candidate pins the version, its source tree and
@@ -89,7 +97,7 @@ export const candidateLeaseMs = 10 * 60_000;
 export const maxCandidateAttempts = 3;
 
 /** The format of a candidate's report. */
-const reportFormatVersion = 1;
+const reportFormatVersion = 2;
 
 /** A candidate, as core keeps it. */
 export type CandidateRow = typeof appCandidates.$inferSelect;
@@ -441,25 +449,92 @@ const endUnlessLost = async (
 };
 
 /**
- * The report of the verified candidate `row`: its identities, and for a
- * version of spec 8's layout its sealed manifest, checked against the
- * hash and store binding core recorded (`checkedReleaseManifest`), with the
- * evidence of its checks and the stores it binds. Only what core
- * computed; no verdict. Reading its artifacts back into the report is
- * GRA-394's next slice.
+ * What held of the App's authority as `row` was verified: a hash of its
+ * active permissions (each as granted), whether an admin approved the
+ * version, and its screens' data policy. Evidence of what held then,
+ * never a decision: making it current and every call read their own.
+ */
+const authorityOf = async (env: Env, row: CandidateRow) => {
+  const db = drizzle(env.DB);
+  const [granted, version, policy] = await Promise.all([
+    db
+      .select({
+        id: permissions.id,
+        objectType: permissions.objectType,
+        objectId: permissions.objectId,
+        resource: permissions.resource,
+        actions: permissions.actions,
+        binding: permissions.binding,
+        grantedAt: permissions.grantedAt,
+      })
+      .from(permissions)
+      .where(
+        and(
+          eq(permissions.subjectType, "app"),
+          eq(permissions.subjectId, row.appId),
+          eq(permissions.status, "active")
+        )
+      )
+      .orderBy(permissions.id)
+      .all(),
+    db
+      .select({ approved: appVersions.approved })
+      .from(appVersions)
+      .where(
+        and(
+          eq(appVersions.appId, row.appId),
+          eq(appVersions.version, row.version)
+        )
+      )
+      .get(),
+    db
+      .select({
+        output: screenPolicies.output,
+        generation: screenPolicies.generation,
+      })
+      .from(screenPolicies)
+      .where(eq(screenPolicies.appId, row.appId))
+      .get(),
+  ]);
+  return {
+    permissions: await sha256Hex(
+      canonicalText(
+        granted.map((grant) => ({
+          ...grant,
+          grantedAt: grant.grantedAt?.getTime() ?? null,
+        }))
+      )
+    ),
+    permissionCount: granted.length,
+    approved: version?.approved ?? null,
+    screenPolicy: policy ?? null,
+  };
+};
+
+/**
+ * The report of the verified candidate `row`, whose gates observed
+ * `observed`. Only what core computed, no verdict:
+ * - its identities;
+ * - for a version of spec 8's layout, its sealed manifest checked against
+ *   what core recorded, with every artifact read back from storage and
+ *   verified (`readBackRelease`), the evidence of its checks and its
+ *   migrations, and the stores it binds;
+ * - what the gates ran, each passing (`verifyVersion`);
+ * - the App's authority as it was (`authorityOf`);
+ * - the environment: compiler, SDK protocol and platform release;
+ * - whether the version it replaces could run again (`releaseRunnable`).
  */
 const reportOf = async (
   env: Env,
   row: CandidateRow,
-  files: Record<string, string>
+  files: Record<string, string>,
+  observed: VerifiedObservations
 ): Promise<string> => {
+  const app = appIdSchema.parse(row.appId);
   const sealed = isAppLayout(files)
-    ? await checkedReleaseManifest(
-        env,
-        appIdSchema.parse(row.appId),
-        row.version
-      )
+    ? await readBackRelease(env, app, row.version)
     : undefined;
+  const replaces = row.basedOn === 0 ? null : row.basedOn;
   return canonicalText({
     formatVersion: reportFormatVersion,
     candidate: {
@@ -478,8 +553,36 @@ const reportOf = async (
             sourceTreeHash: sealed.manifest.sourceTreeHash,
             verificationReportHash: sealed.manifest.verificationReportHash,
             dataStoreBindings: sealed.manifest.dataStoreBindings,
+            migrationEvidence: await sha256Hex(
+              canonicalText(sealed.manifest.migrationEvidence)
+            ),
+            artifacts: {
+              count: sealed.manifest.artifacts.length,
+              readBack: await sha256Hex(
+                canonicalText(
+                  sealed.manifest.artifacts.map(({ path, sha256, bytes }) => ({
+                    path,
+                    sha256,
+                    bytes,
+                  }))
+                )
+              ),
+            },
           },
-    environment: { compilerVersion, sdkProtocolVersion },
+    passed: {
+      appTests: observed.appTests,
+      workflowTests: observed.workflowTests,
+    },
+    authority: await authorityOf(env, row),
+    environment: {
+      compilerVersion,
+      sdkProtocolVersion,
+      platformRelease: env.CF_VERSION_METADATA?.id ?? null,
+    },
+    rollback:
+      replaces === null
+        ? { to: null, eligible: false }
+        : { to: replaces, eligible: await releaseRunnable(env, app, replaces) },
   });
 };
 
@@ -522,8 +625,8 @@ const verify = async (
   if (at !== "verifying") {
     await move(env, by, held, { from: "building", to: "verifying" });
   }
-  await verifyVersion(env, app, version, files);
-  const text = await reportOf(env, held.row, files);
+  const observed = await verifyVersion(env, app, version, files);
+  const text = await reportOf(env, held.row, files, observed);
   const hash = await sha256Hex(text);
   await move(
     env,

@@ -603,16 +603,22 @@ export const loadRelease = async (
 
 /**
  * The sealed manifest of `version` of `app` and its hash, checked against
- * the hash and the store binding core recorded as `loadRelease` checks
- * them, without reading its artifacts or keeping anything: what a
- * candidate's report names (app-candidates.ts).
+ * the hash and the store binding core recorded, with every artifact it
+ * names read back from storage and verified as `loadRelease` verifies
+ * them (`verifiedRelease`), but never from or into the isolate's cache of
+ * verified releases, so a later load still reads storage: what a
+ * candidate's report names (app-candidates.ts). `version.artifact_corrupt`
+ * for an artifact missing or changed.
  */
-export const checkedReleaseManifest = async (
+export const readBackRelease = async (
   env: Env,
   app: AppId,
   version: number
-): Promise<{ manifest: ReleaseManifest; hash: string }> =>
-  await checkedManifest(env, app, version);
+): Promise<{ manifest: ReleaseManifest; hash: string }> => {
+  const checked = await checkedManifest(env, app, version);
+  await verifiedRelease(storedArtifacts(env), checked.manifest);
+  return checked;
+};
 
 /** A draft release as its keeper stores it (sealed-previews.ts). */
 export interface StoredDraft {

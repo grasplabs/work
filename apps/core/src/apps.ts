@@ -1,4 +1,9 @@
-import { isAppLayout, workflowIdOf } from "@grasp-os/compiler";
+import {
+  isAppLayout,
+  isAppTestSuite,
+  workflowIdOf,
+  workflowPaths,
+} from "@grasp-os/compiler";
 import { appLimits } from "@grasp-os/shared/app-limits";
 import { versionErrors } from "@grasp-os/shared/app-releases";
 import {
@@ -66,7 +71,11 @@ import { buildOnSave } from "./save-builds.ts";
 import { recordVersionBuilds } from "./screen-builds.ts";
 import { requireStoreSchemaActive } from "./store-backfill.ts";
 import { liveStoreSql } from "./store-deletion.ts";
-import { requireWorkflowTestsPass, workflowCallsIn } from "./workflows/code.ts";
+import {
+  requireWorkflowTestsPass,
+  workflowCallsIn,
+  workflowIdsIn,
+} from "./workflows/code.ts";
 import {
   registerTriggers,
   registrationHolds,
@@ -1204,8 +1213,9 @@ export const verifyVersion = async (
   appId: AppId,
   number: number,
   files: Record<string, string>
-): Promise<void> => {
-  if (isAppLayout(files)) {
+): Promise<VerifiedObservations> => {
+  const layout = isAppLayout(files);
+  if (layout) {
     await requireRunnableRelease(env, appId, number);
     // Its migrations passed on their fixtures as it was sealed, even where
     // the store had nothing to transform; asked before its store, whose
@@ -1231,6 +1241,44 @@ export const verifyVersion = async (
   const { requireDeclaredModels } = await import("./app-activation.ts");
   await requireDeclaredModels(env, appId, number, files);
   await requireWorkflowTestsPass(env, appId, number, files);
+  // What the runners ran, each with no failure, or they had refused.
+  return {
+    appTests: layout
+      ? Object.keys(files).filter(isAppTestSuite).toSorted()
+      : [],
+    workflowTests: workflowIdsIn(files)
+      .filter((id) => Object.hasOwn(files, workflowPaths(id).tests))
+      .toSorted(),
+  };
+};
+
+/**
+ * What `verifyVersion` observed passing: the App test suites the trusted
+ * runner ran, by path, and the workflows whose tests ran, by ID.
+ */
+export interface VerifiedObservations {
+  readonly appTests: readonly string[];
+  readonly workflowTests: readonly string[];
+}
+
+/**
+ * Whether `version` of `app` could run if made current now: a version of
+ * spec 8's layout only with a release that is sealed, not revoked, and
+ * on a store that lives (`runnableReleaseSql`, as making it current asks);
+ * one of the earlier layout, which runs from its files, always.
+ */
+export const releaseRunnable = async (
+  env: Env,
+  app: AppId,
+  version: number
+): Promise<boolean> => {
+  if (!isAppLayout(await versionFiles(env, app, version))) {
+    return true;
+  }
+  const row = await drizzle(env.DB).get<{ runnable: number }>(
+    sql`SELECT (${runnableReleaseSql(app, version)}) AS runnable`
+  );
+  return row?.runnable === 1;
 };
 
 /**
