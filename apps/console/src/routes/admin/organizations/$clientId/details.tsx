@@ -7,14 +7,19 @@ import { createFileRoute } from "@tanstack/react-router";
 import { ExternalLinkIcon, MailIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
+import { AttioLink } from "../../../../admin/attio-link.tsx";
 import { useOrganization } from "../../../../admin/organization.tsx";
 import { sourceNames } from "../../../../admin/sections.ts";
+import { formatList, money } from "../../../../admin/words.ts";
+import type { AttioReadError } from "../../../../crm/attio.ts";
+import type { Crm, CrmDeal, CrmRecords } from "../../../../crm/crm.ts";
 
 /**
  * An organization's Details, as the prototype has them
  * (grasplabs/prototype `components/admin/org-details.tsx` and the Attio
  * panel of `source-panels.tsx`): the company itself, who Grasp deals with
- * there, one for each thing, the calls with it, and its papers.
+ * there, one for each thing, the company as Grasp's Attio has it with its
+ * people and deals, the calls with it, and its papers.
  *
  * Read only: the prototype corrects the papers and the contacts here, but
  * the company's own Grasp takes nothing from the console yet, so nothing
@@ -201,6 +206,152 @@ const Calls = () => (
   </Part>
 );
 
+/** Why Attio wasn't read now, as the rest of a sentence. */
+const attioUnreadWords: Record<AttioReadError, string> = {
+  refused: "Attio turned the console’s key away",
+  not_found: "Attio has no such company",
+  invalid_answer: "what Attio answered can’t be read",
+  timeout: "Attio didn’t answer in time",
+  no_answer: "the request to Attio failed",
+};
+
+/** What the CRM part says in a line under its title. */
+const crmLine = (crm: Crm): string => {
+  switch (crm.state) {
+    case "not_connected": {
+      return `${sourceNames.attio} isn’t connected yet. Once it is, this fills in by itself.`;
+    }
+    case "not_linked": {
+      return "Not linked to its company in Attio yet. Link it by the company’s record id, and this fills in by itself.";
+    }
+    case "unread": {
+      return `Attio can’t be read for it now: ${attioUnreadWords[crm.error]}.`;
+    }
+    case "read": {
+      return "As Grasp’s CRM has the company, its people and its deals.";
+    }
+    default: {
+      return crm satisfies never;
+    }
+  }
+};
+
+/** One line of what Attio says: its label, and what stands there. */
+const CrmLine = ({ label, value }: { label: string; value: string }) => (
+  <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-t px-5 py-3">
+    <dt className="text-muted-foreground">{label}</dt>
+    <dd className={value === "" ? "text-muted-foreground" : undefined}>
+      {value === "" ? "Not known" : value}
+    </dd>
+  </div>
+);
+
+/** A deal in a line: its stage, what it is worth, and who owns it. */
+const dealWords = (deal: CrmDeal): string =>
+  [
+    deal.stage ?? "",
+    deal.value === null
+      ? ""
+      : money(deal.value.amount, deal.value.currency ?? "EUR"),
+    deal.owner === null ? "" : `owned by ${deal.owner}`,
+  ]
+    .filter((part) => part !== "")
+    .join(" · ");
+
+/** What Attio says of the company: its record, its deals and its people. */
+const CrmRecordLines = ({ records }: { records: CrmRecords }) => {
+  const { company, deals, people } = records;
+  return (
+    <>
+      <dl>
+        <CrmLine label="Name in Attio" value={company.name ?? ""} />
+        <CrmLine label="Domains" value={formatList(company.domains)} />
+        <CrmLine label="Categories" value={formatList(company.categories)} />
+        <CrmLine label="Employees" value={company.employeeRange ?? ""} />
+      </dl>
+      {company.url === null ? null : (
+        <p className="border-t px-5 py-3">
+          <a
+            className="hover:text-foreground underline underline-offset-4"
+            href={company.url}
+            rel="noreferrer"
+            target="_blank"
+          >
+            Open it in Attio
+          </a>
+        </p>
+      )}
+      <h3 className="text-muted-foreground border-t px-5 pt-3 pb-1 text-xs">
+        Deals
+      </h3>
+      {deals.length === 0 ? (
+        <p className="text-muted-foreground px-5 pb-3">None in Attio.</p>
+      ) : (
+        <ul className="flex flex-col">
+          {deals.map((deal, index) => (
+            <li
+              className="flex flex-wrap items-baseline justify-between gap-x-6 px-5 py-2"
+              // Two deals can share a name; their order is Attio's.
+              key={`${deal.name}-${index}`}
+            >
+              <span className="truncate">
+                {deal.name || "A deal with no name"}
+              </span>
+              <span className="text-muted-foreground text-xs">
+                {dealWords(deal)}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+      <h3 className="text-muted-foreground border-t px-5 pt-3 pb-1 text-xs">
+        People
+      </h3>
+      {people.length === 0 ? (
+        <p className="text-muted-foreground px-5 pb-3">None in Attio.</p>
+      ) : (
+        <ul className="flex flex-col">
+          {people.map((person, index) => (
+            <li
+              className="flex flex-wrap items-baseline justify-between gap-x-6 px-5 py-2"
+              // Two people can share a name.
+              key={`${person.name}-${index}`}
+            >
+              <span className="truncate">{person.name || "No name"}</span>
+              <span className="text-muted-foreground truncate text-xs">
+                {[person.title, person.email]
+                  .filter((part) => part !== "")
+                  .join(" · ")}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </>
+  );
+};
+
+/**
+ * The company in Grasp's CRM: what Attio says of it, its deals and its
+ * people, and the company record it is linked to, which staff link or
+ * change here.
+ */
+const CrmPart = () => {
+  const { admin } = useOrganization();
+  const { crm } = admin;
+  const recordId = crm.state === "not_linked" ? null : crm.recordId;
+  return (
+    <Part
+      about={crmLine(crm)}
+      action={<Badge variant="outline">{sourceNames.attio}</Badge>}
+      title="In the CRM"
+    >
+      {crm.state === "read" ? <CrmRecordLines records={crm.records} /> : null}
+      <AttioLink clientId={admin.client.id} recordId={recordId} />
+    </Part>
+  );
+};
+
 /** One line of the papers: what it is, and what stands there, or that nothing does yet. */
 const Paper = ({
   label,
@@ -261,12 +412,13 @@ const Details = () => (
   <>
     <Company />
     <Contacts />
+    <CrmPart />
     <Calls />
     <Papers />
   </>
 );
 
-/** An organization's Details: the company, who Grasp deals with, its calls and its papers. */
+/** An organization's Details: the company, who Grasp deals with, the CRM, its calls and its papers. */
 export const Route = createFileRoute("/admin/organizations/$clientId/details")({
   component: Details,
 });
