@@ -363,13 +363,29 @@ export default function Escapes() {
 
 const page = { head: "Tickets", style: "compact" };
 
+interface Layout {
+  style: string;
+}
+
+const relayout = (layout: Layout) => {
+  layout.style = "wide";
+};
+
 export default function Lookalikes() {
   const { head, style } = page;
   const list = { head: "first" };
   list.head = "second";
+  const options = { style: "compact" };
+  options.style = "expanded";
+  const theme = { style: { density: "cosy" } } as const satisfies object;
+  const copy: { style: { density: string } } = { ...theme };
+  copy.style.density = "compact";
+  relayout(options);
+  const notice = list.head === "second";
   const saved = "Saved!";
   return (
     <section aria-label={head} title={saved}>
+      <p className={cn({ "font-bold": notice && "Saved!" }, notice || "gap-2")}>{options.style}</p>
       <p className={cn({ "text-muted-foreground": style === "Wow!" })}>
         {style}! {list.head} {String(new Error("Oops!").message)}
       </p>

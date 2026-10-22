@@ -172,6 +172,86 @@ const isSheetMember = (
 const isStyleObject = (node: unknown): boolean =>
   get(node, "type") === "MemberExpression" && memberName(node) === "style";
 
+/** A type annotation that names a DOM element, node or style declaration. */
+const elementType = /\b(?:\w*Element|Node|EventTarget|CSSStyleDeclaration)\b/u;
+
+/** Literals that are never an element, however they're asserted. */
+const plainValues = new Set([
+  "ObjectExpression",
+  "ArrayExpression",
+  "Literal",
+  "TemplateLiteral",
+]);
+
+/** Type assertions around a value: `x as T`, `x satisfies T`, `x!`. */
+const assertions = new Set([
+  "TSAsExpression",
+  "TSSatisfiesExpression",
+  "TSNonNullExpression",
+  "TSTypeAssertion",
+]);
+
+/** A value without the type assertions around it. */
+const unwrap = (node: unknown): unknown =>
+  assertions.has(String(get(node, "type")))
+    ? unwrap(get(node, "expression"))
+    : node;
+
+/** The identifier or value a member chain starts from (`a` of `a.b.c`). */
+const rootOf = (node: unknown): unknown => {
+  const value = unwrap(node);
+  return get(value, "type") === "MemberExpression"
+    ? rootOf(get(value, "object"))
+    : value;
+};
+
+/**
+ * Whether the object whose `style` is written may be a DOM element. The
+ * lint has no type information, so this reads what the source says: no
+ * when the chain starts from an object, array or string literal, or a
+ * variable declared as one or annotated with a type that isn't a DOM
+ * one (`const options = { style: "compact" }`, `(page: Page)`); yes
+ * otherwise (`ref.current`, `event.currentTarget`, an unannotated
+ * parameter, `document.querySelector(…)`), since that is how element
+ * styles are written.
+ */
+const mayBeElement = (
+  context: Rule.RuleContext,
+  node: Rule.Node,
+  object: unknown
+): boolean => {
+  const root = rootOf(object);
+  if (plainValues.has(String(get(root, "type")))) {
+    return false;
+  }
+  const name = get(root, "name");
+  if (get(root, "type") !== "Identifier" || typeof name !== "string") {
+    return true;
+  }
+  let scope: ReturnType<typeof context.sourceCode.getScope> | null =
+    context.sourceCode.getScope(node);
+  while (scope !== null && !scope.set.has(name)) {
+    scope = scope.upper;
+  }
+  const definition = scope?.set.get(name)?.defs[0];
+  if (definition === undefined) {
+    return true;
+  }
+  const annotation = get(
+    get(definition.name, "typeAnnotation"),
+    "typeAnnotation"
+  );
+  if (isRuleNode(annotation)) {
+    return elementType.test(context.sourceCode.getText(annotation));
+  }
+  const declarator = definition.node;
+  return !(
+    definition.type === "Variable" &&
+    get(declarator, "id") === definition.name &&
+    plainValues.has(String(get(unwrap(get(declarator, "init")), "type")))
+  );
+};
+
 const noStyleEscapes: Rule.RuleModule = {
   meta: {
     type: "problem",
@@ -200,7 +280,12 @@ const noStyleEscapes: Rule.RuleModule = {
         return;
       }
       const name = memberName(left);
-      if (name === "style" || isStyleObject(get(left, "object"))) {
+      const object = get(left, "object");
+      const writesStyle =
+        (name === "style" && mayBeElement(context, node, object)) ||
+        (isStyleObject(object) &&
+          mayBeElement(context, node, get(object, "object")));
+      if (writesStyle) {
         context.report({
           node,
           messageId: "styleWrite",
@@ -227,8 +312,9 @@ const noStyleEscapes: Rule.RuleModule = {
           data: { what: 'setAttribute("style")' },
         });
       } else if (
+        name === "setProperty" &&
         isStyleObject(get(callee, "object")) &&
-        name === "setProperty"
+        mayBeElement(context, node, get(get(callee, "object"), "object"))
       ) {
         context.report({
           node,
@@ -350,36 +436,96 @@ const throughClassList = new Set([
   "JSXExpressionContainer",
 ]);
 
+/** A property the walk passed: the string as its key, or in its value. */
+interface Passed {
+  role: "key" | "value";
+  key: string | undefined;
+}
+
+/** A property's key, when written as a name or string. */
+const keyOf = (property: unknown): string | undefined => {
+  const key = get(property, "key");
+  const name = get(key, "name");
+  const value = get(key, "value");
+  if (get(property, "computed") !== true && typeof name === "string") {
+    return name;
+  }
+  return typeof value === "string" ? value : undefined;
+};
+
+/** cva's keys whose string values are classes. */
+const cvaClassKeys = new Set(["class", "className"]);
+
 /**
- * Whether a string literal is a class list: an argument, however nested
- * in arrays, objects and conditions, of a class helper (`cn("…")`), or
- * a part of a `className` built with a condition. Not any string: prose
- * such as "Saved!" ends in `!` too.
+ * Whether a helper emits a string reached through `passed` (innermost
+ * first) as classes. clsx and its kin emit an object's keys, its values
+ * being conditions; cva emits its variants' values and a compound
+ * variant's `class`, its keys being variant names.
+ */
+const helperEmits = (helper: string, passed: readonly Passed[]): boolean => {
+  if (passed.length === 0) {
+    return true;
+  }
+  if (helper !== "cva") {
+    return passed.every(({ role }) => role === "key");
+  }
+  const [innermost] = passed;
+  return (
+    passed.every(({ role }) => role === "value") &&
+    (cvaClassKeys.has(innermost?.key ?? "") ||
+      passed.some(({ key }) => key === "variants"))
+  );
+};
+
+/** Whether a string at `child` of `parent` can emerge from it as a class. */
+const emerges = (parent: unknown, child: unknown): boolean => {
+  const type = get(parent, "type");
+  if (type === "ConditionalExpression") {
+    return get(parent, "test") !== child;
+  }
+  // `a && "x"` gives `a` only when it's falsy: never a class.
+  if (type === "LogicalExpression") {
+    return get(parent, "operator") !== "&&" || get(parent, "left") !== child;
+  }
+  return typeof type === "string" && throughClassList.has(type);
+};
+
+/**
+ * Whether a string literal is a class list: one a class helper emits as
+ * classes (`cn("…")`, `cn({ "…": on })`, `cn(on && "…")`), or a part of
+ * a `className` built with a condition. Not any string: prose such as
+ * `cn({ "font-bold": notice && "Saved!" })` ends in `!` too.
  */
 const inClassList = (node: unknown): boolean => {
+  const passed: Passed[] = [];
   let child = node;
   let parent = get(node, "parent");
   while (typeof get(parent, "type") === "string") {
     const type = get(parent, "type");
     if (type === "CallExpression") {
       const callee = get(parent, "callee");
+      const helper = get(callee, "name");
       return (
-        get(parent, "callee") !== child &&
+        callee !== child &&
         get(callee, "type") === "Identifier" &&
-        classHelpers.has(String(get(callee, "name")))
+        typeof helper === "string" &&
+        classHelpers.has(helper) &&
+        helperEmits(helper, passed)
       );
     }
     if (type === "JSXAttribute") {
-      return jsxName(get(parent, "name")) === "className";
+      return (
+        jsxName(get(parent, "name")) === "className" && passed.length === 0
+      );
     }
-    // An object's keys are classes (clsx) and its values may be (cva);
-    // a condition's test is not.
-    if (
-      typeof type !== "string" ||
-      !throughClassList.has(type) ||
-      (type === "ConditionalExpression" && get(parent, "test") === child)
-    ) {
+    if (!emerges(parent, child)) {
       return false;
+    }
+    if (type === "Property") {
+      passed.push({
+        role: get(parent, "key") === child ? "key" : "value",
+        key: keyOf(parent),
+      });
     }
     child = parent;
     parent = get(parent, "parent");

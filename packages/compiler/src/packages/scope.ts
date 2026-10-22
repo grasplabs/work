@@ -11,7 +11,10 @@
  * Read with CSS's own tokenizer (css.ts): rules at the top level and in
  * the at-rules that hold rules (`@media`, `@supports`, `@layer`,
  * `@container`, `@scope`, `@document`); never inside `@keyframes`,
- * `@font-face`, `@page`, `@property` or a declaration block.
+ * `@font-face`, `@page`, `@property` or a declaration block. Inside an
+ * `@scope` whose root names the package's own class or id, every rule
+ * is scoped already: `@scope (.pkg) { button {} }` styles only the
+ * buttons inside `.pkg`.
  */
 import { cssTokens } from "./css.ts";
 import type { CssToken } from "./css.ts";
@@ -162,8 +165,11 @@ const textOf = (tokens: readonly CssToken[]): string =>
     .replaceAll(/\s+/gu, " ")
     .trim();
 
-/** What the reader is in: a list of rules, or a block it skips whole. */
-type Level = "rules" | "skip";
+/**
+ * What the reader is in: a list of rules, one an `@scope` of the
+ * package's own already scopes, or a block it skips whole.
+ */
+type Level = "rules" | "scoped" | "skip";
 
 /** Where the reader is in a stylesheet. */
 interface Reading {
@@ -197,10 +203,25 @@ const restart = (reading: Reading): void => {
   reading.atRule = undefined;
 };
 
+/**
+ * Whether an `@scope` prelude's root, its first parenthesised selector
+ * list, names a class or id of the package's own in every selector. One
+ * with no root scopes to the stylesheet's owner: the whole screen.
+ */
+const scopeRootScoped = (prelude: readonly CssToken[]): boolean => {
+  const at = prelude.findIndex(({ type }) => type !== "whitespace");
+  if (prelude[at]?.type !== "(") {
+    return false;
+  }
+  const roots = selectorsOf(prelude.slice(at + 1, closeOf(prelude, at)));
+  return roots.length > 0 && roots.every(scoped);
+};
+
 /** A block opens after the prelude read: an at-rule's, or a style rule's. */
 const open = (reading: Reading): void => {
   const { atRule, prelude } = reading;
-  if (atRule === undefined) {
+  const inScope = reading.levels.at(-1) === "scoped";
+  if (atRule === undefined && !inScope) {
     for (const selector of selectorsOf(prelude)) {
       if (!scoped(selector)) {
         reading.found.add(textOf(selector).slice(0, 120));
@@ -211,7 +232,12 @@ const open = (reading: Reading): void => {
   // selector around them already scopes or doesn't: skipped whole, as an
   // at-rule's block is unless it holds rules.
   const holds = atRule !== undefined && holdingRules.has(atRule);
-  reading.levels.push(holds ? "rules" : "skip");
+  const scopes = inScope || (atRule === "scope" && scopeRootScoped(prelude));
+  if (holds) {
+    reading.levels.push(scopes ? "scoped" : "rules");
+  } else {
+    reading.levels.push("skip");
+  }
   reading.skipping = holds ? [] : ["}"];
   restart(reading);
 };

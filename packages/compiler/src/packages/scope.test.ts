@@ -61,6 +61,16 @@ h1,
     expect(unscopedInCss(css)).toStrictEqual(["body", "button", "h1"]);
   });
 
+  it("may style any element inside an @scope rooted at its own class, but not one rooted at the screen", () => {
+    const css = `@scope (.pkg) { button { color: red; } @media (min-width: 1px) { a, :scope { margin: 0; } } }
+@scope (.pkg, #chart) to (.pkg-slot) { * { box-sizing: border-box; } }
+@scope (body) { p { margin: 0; } }
+@scope (.pkg, html) { h1 { margin: 0; } }
+@scope { li { margin: 0; } }
+@media (min-width: 1px) { @scope (.pkg) { span { color: red; } } }`;
+    expect(unscopedInCss(css)).toStrictEqual(["p", "h1", "li"]);
+  });
+
   it("can't be tricked by a closer that doesn't match its opener", () => {
     const css = `:is(] ), body, .lib { margin: 0; }
 :is({ ) } ), html, .lib { margin: 0; }
