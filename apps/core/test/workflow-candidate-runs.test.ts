@@ -633,16 +633,15 @@ describe("test runs of a workflow's draft", () => {
       input: { who: "Ada" },
       fixtures: {},
     });
+    const end = endOf(await ended(ada, workflow.id, runId));
+    // Read once the test run ended: nothing it did started a child.
     const children = await env.DB.prepare(
       "SELECT COUNT(*) AS n FROM workflow_resource_runs WHERE workflow_resource_id = ?"
     )
       .bind(child.id)
       .first<{ n: number }>();
 
-    expect({
-      end: endOf(await ended(ada, workflow.id, runId)),
-      children: children?.n,
-    }).toStrictEqual({
+    expect({ end, children: children?.n }).toStrictEqual({
       end: { status: "failed", code: "workflow.child_unavailable" },
       children: 0,
     });

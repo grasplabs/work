@@ -200,9 +200,39 @@ export interface RunAdmission {
  * the run's row, only once the receipt was written.
  */
 export const runAdmitted = (db: DrizzleD1Database, run: RunAdmission) =>
-  db.insert(workflowResourceRuns).select(
-    sql`SELECT ${run.receipt}, ${run.workflowId}, ${run.version}, ${run.manifestHash}, ${run.buildHash}, ${run.principal}, 'starting', 0, ${run.createdAt}, NULL, 0, NULL, NULL, 0, ${run.restricted ? 1 : 0}, ${run.lineage?.parentRunId ?? null}, ${run.lineage?.rootRunId ?? null}, ${run.lineage?.depth ?? 0}
-        WHERE EXISTS (SELECT 1 FROM ${workflowStartReceipts} WHERE ${workflowStartReceipts.id} = ${run.receipt})`
+  // Every column by its name: drizzle refuses a selection whose names or
+  // order aren't the table's, so a column another change adds can't take
+  // a value meant for another.
+  db.insert(workflowResourceRuns).select((query) =>
+    query
+      .select({
+        id: sql<string>`${run.receipt}`.as("id"),
+        workflowResourceId: sql<string>`${run.workflowId}`.as("wf"),
+        version: sql<number>`${run.version}`.as("version"),
+        manifestHash: sql<string>`${run.manifestHash}`.as("manifest"),
+        buildHash: sql<string>`${run.buildHash}`.as("build"),
+        principalId: sql<string>`${run.principal}`.as("principal"),
+        status: sql<string>`'starting'`.as("status"),
+        engineSequence: sql<number>`0`.as("sequence"),
+        createdAt: sql<number>`${run.createdAt}`.as("created"),
+        endedAt: sql<null>`NULL`.as("ended"),
+        startAttempts: sql<number>`0`.as("attempts"),
+        nextStartAt: sql<null>`NULL`.as("next_start"),
+        failureCode: sql<null>`NULL`.as("failure"),
+        sharesFencedThrough: sql<number>`0`.as("fenced"),
+        restricted: sql<number>`${run.restricted ? 1 : 0}`.as("restricted"),
+        parentRunId: sql<string | null>`${run.lineage?.parentRunId ?? null}`.as(
+          "parent"
+        ),
+        rootRunId: sql<string | null>`${run.lineage?.rootRunId ?? null}`.as(
+          "root"
+        ),
+        depth: sql<number>`${run.lineage?.depth ?? 0}`.as("depth"),
+      })
+      .from(sql`(SELECT 1)`)
+      .where(
+        sql`EXISTS (SELECT 1 FROM ${workflowStartReceipts} WHERE ${workflowStartReceipts.id} = ${run.receipt})`
+      )
   );
 
 /** A run's row, as core keeps it. */
@@ -1130,16 +1160,18 @@ export const projectResourceRun = async (
         ]
       : []),
   ]);
-  if (ended) {
-    // A screen's cancel of it, settled by how it ended.
-    const now = await runOf(env, id);
-    if (now !== undefined) {
-      await settleCancels(env, now);
-      await afterEnd(env, now);
-    }
+  // A screen's cancel of it, settled by how it ended.
+  const now = ended ? await runOf(env, id) : undefined;
+  if (now !== undefined) {
+    await settleCancels(env, now);
   }
   if (status !== row.status) {
     await tellQueryFollowers(env, id);
+  }
+  // Last: a failure here has the engine tell the end again, which repeats
+  // only this (above), never skipping what came before it.
+  if (now !== undefined) {
+    await afterEnd(env, now);
   }
 };
 
