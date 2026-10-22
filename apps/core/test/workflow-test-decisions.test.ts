@@ -78,6 +78,37 @@ const approvalTasks = (timeout?: { seconds: number }) => [
   { rejected: { set: { status: "rejected" }, then: "end" } },
 ];
 
+/** A review of each of two invoices, their answers collected in order. */
+const loopTasks = [
+  { init: { set: "${ . }", export: { as: "${ {answers: []} }" } } },
+  {
+    "each-invoice": {
+      for: { each: "amount", at: "index", in: "${ [100, 200] }" },
+      do: [
+        {
+          "request-review": {
+            call: "grasp.decision",
+            with: {
+              binding: "invoiceApproval",
+              recipients: "${ [$params.reviewer] }",
+              prompt: "Approve this invoice?",
+              input: "${ {amount: $amount} }",
+            },
+            export: {
+              as: "${ $context + {answers: ($context.answers + [.approved])} }",
+            },
+          },
+        },
+      ],
+    },
+  },
+  {
+    finished: {
+      set: '${ {status: ($context.answers | map(tostring) | join(","))} }',
+    },
+  },
+];
+
 /** The approval workflow `name`, its decision binding on `contract`. */
 const definitionOf = (
   name: string,
@@ -274,7 +305,7 @@ const respond = async (
   session: Session,
   who: string,
   run: number,
-  answer: { approved: boolean; value?: unknown }
+  answer: { approved: boolean; value?: unknown; at?: number[] }
 ): Promise<string> =>
   codeOf(
     await session.respond(
@@ -556,6 +587,34 @@ describe(
           { recipient: "approver", status: "timed_out", decidedBy: null },
         ],
         late: "decision.closed",
+      });
+      await session.close();
+    });
+
+    it("answers the item of a loop an answer names, waiting until the run asks it", async () => {
+      const app = await invoicesApp({}, { tasks: loopTasks });
+      const { session, run, runId } = await runningIn(app);
+      // The second item's answer first: it waits for the run to ask it,
+      // which it does only once the first is answered.
+      const [second, first] = await Promise.all([
+        respond(session, "approver", run, { approved: false, at: [1] }),
+        respond(session, "approver", run, { approved: true, at: [0] }),
+      ]);
+      expect({
+        first,
+        second,
+        again: await respond(session, "approver", run, {
+          approved: false,
+          at: [0],
+        }),
+        end: await endOf(session, run),
+        decisions: await decisionCount(runId),
+      }).toStrictEqual({
+        first: "ok",
+        second: "ok",
+        again: "decision.closed",
+        end: { status: "completed", output: { status: "true,false" } },
+        decisions: 2,
       });
       await session.close();
     });
