@@ -2012,6 +2012,10 @@ msgstr "Aplicaciones en uso en los dispositivos"
 msgid "Applications signed in to"
 msgstr "Aplicaciones con inicio de sesión"
 
+#: src/onboarding/review-parts.tsx
+msgid "Apply it if the sender’s domain is {domain}."
+msgstr "Aplícala si el dominio del remitente es {domain}."
+
 #: src/engines/screen-approval.tsx
 msgid "Approval"
 msgstr "Aprobación"
@@ -2142,6 +2146,10 @@ msgstr "Artículo"
 #: src/dashboard/pile-cards.tsx
 msgid "as {binding}"
 msgstr "como {binding}"
+
+#: src/onboarding/review-parts.tsx
+msgid "As its action, set the spam confidence level (SCL) to “Bypass spam filtering”, then save it."
+msgstr "Como acción, establece el nivel de confianza de correo no deseado (SCL) en «Omitir el filtrado de correo no deseado» y guárdala."
 
 #: src/dashboard/report.ts
 msgid "As of {date}."
@@ -2650,6 +2658,11 @@ msgstr "modificar"
 #: src/routes/_shell.settings.outcomes.tsx
 msgid "Change"
 msgstr "Cambio"
+
+#: src/onboarding/review-parts.tsx
+msgctxt "change how it was settled"
+msgid "Change"
+msgstr "Cambiar"
 
 #: src/onboarding/send-plan-form.tsx
 msgctxt "change which teams"
@@ -3259,10 +3272,12 @@ msgid "Copenhagen"
 msgstr "Copenhague"
 
 #: src/chat/thread.tsx
+#: src/onboarding/review-parts.tsx
 #: src/onboarding/setup-steps.tsx
 msgid "Copied"
 msgstr "Copiado"
 
+#: src/onboarding/review-parts.tsx
 #: src/onboarding/setup-steps.tsx
 msgid "Copy"
 msgstr "Copiar"
@@ -4889,6 +4904,14 @@ msgstr "En Políticas"
 msgid "In the brain"
 msgstr "En el Brain"
 
+#: src/onboarding/review-parts.tsx
+msgid "In the Exchange admin center, go to Mail flow, then Rules, and add a rule."
+msgstr "En el Centro de administración de Exchange, ve a Flujo de correo y luego a Reglas, y agrega una regla."
+
+#: src/onboarding/review-parts.tsx
+msgid "In the Google Admin console, go to Apps, then Google Workspace, then Gmail, then Spam, phishing and malware."
+msgstr "En la Consola del administrador de Google, ve a Aplicaciones, luego a Google Workspace, luego a Gmail y luego a Spam, phishing y software malicioso."
+
 #: src/chat/builds.tsx
 msgid "In the proposer's words"
 msgstr "En palabras de quien lo propone"
@@ -5139,6 +5162,10 @@ msgstr "Se cobraron {amount} el {when}."
 msgid "It was released on {when}, charging nothing."
 msgstr "Se liberó el {when}, sin cobrar nada."
 
+#: src/onboarding/review-parts.tsx
+msgid "It’s done"
+msgstr "Hecho"
+
 #: src/chat/cited-note.tsx
 msgid "It's gone, or you can't read it."
 msgstr "Ya no existe o no puedes leerla."
@@ -5258,6 +5285,10 @@ msgstr "Ir al mensaje más reciente"
 #: src/connections/connect-dialog.tsx
 msgid "Just for you"
 msgstr "Solo para ti"
+
+#: src/onboarding/review-parts.tsx
+msgid "Keep “Require sender authentication” on, then save."
+msgstr "Deja activada la opción «Requerir autenticación del remitente» y guarda."
 
 #: src/workflows/definition-editor.tsx
 msgid "Keep my text"
@@ -5445,6 +5476,10 @@ msgstr "Deja que una app de IA como Claude o ChatGPT use Grasp. Lee lo que Grasp
 #: src/onboarding/document-drop.tsx
 msgid "Let go to add them"
 msgstr "Suelta para añadirlos"
+
+#: src/onboarding/review-parts.tsx
+msgid "Let Grasp’s mail through"
+msgstr "Deja pasar los correos de Grasp"
 
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Let the interviews run again"
@@ -8552,6 +8587,10 @@ msgstr "Establecido. Escribe un valor nuevo para reemplazarlo."
 msgid "Settings"
 msgstr "Ajustes"
 
+#: src/onboarding/review-parts.tsx
+msgid "Settled: {choice}"
+msgstr "Resuelto: {choice}"
+
 #: src/dashboard/standard-widgets.tsx
 msgid "Several workflows run with AI, across most of its work by hand."
 msgstr "Varios flujos funcionan con IA, en la mayor parte del trabajo manual."
@@ -10388,6 +10427,10 @@ msgstr "Sin categoría"
 msgid "Under 5"
 msgstr "Menos de 5"
 
+#: src/onboarding/review-parts.tsx
+msgid "Under Spam, bypass spam filters for an approved senders list, and add {domain} to it."
+msgstr "En Spam, omite los filtros de spam para una lista de remitentes aprobados y añade {domain} a ella."
+
 #: src/dashboard/report.ts
 msgctxt "programme stage"
 msgid "Under way"
@@ -11625,6 +11668,10 @@ msgstr "La cuenta de tu organización"
 #: src/onboarding/about-story.tsx
 msgid "Your people, documents and tools first. Then two weeks of short conversations with your team. At {threshold}%, your team can start."
 msgstr "Primero tu gente, tus documentos y tus herramientas. Después, dos semanas de conversaciones cortas con tu equipo. Al {threshold} %, tu equipo puede empezar."
+
+#: src/onboarding/review-parts.tsx
+msgid "Your people’s interview links come by email from Grasp’s sending domain. Allow it in your mail filter before they go out, so they don’t land in spam."
+msgstr "Los enlaces de entrevista de tu gente llegan por correo desde el dominio de envío de Grasp. Permítelo en tu filtro de correo antes de que se envíen, para que no acaben en spam."
 
 #: src/onboarding/setup-steps.tsx
 msgid "Your platform is open. We’ll walk you through it."
