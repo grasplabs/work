@@ -34,11 +34,25 @@ const maxWaits = 256;
 const taskStep =
   /^(?:task|enter|leave|item):(?<id>[a-z][a-z0-9]*(?:-[a-z0-9]+)*)(?:@[a-z0-9.\-/]+)?$/u;
 
-/** One of core's own steps of a wait it holds a step at (host.ts, `waitStep`). */
+/** The prefix of core's own steps of a wait (host.ts, `waitStepPrefix`). */
+const waitPrefix = `${coreStepPrefix.replaceAll("$", "\\$")}wait:`;
+
+/**
+ * One of core's own steps a run waits in while it holds a step (host.ts,
+ * `#waitBefore`): a round's sleep or wait for load (`<round>`), a held
+ * wait's first wait (`<round>:first`), its waits between checks
+ * (`<round>:<check>`) and its checks (`<round>:<check>:check`). Anchored at
+ * the end, so the round's other steps (`:run`, the held step running
+ * again; `:since`; `:waiting:…`) are not the hold: a retry of one is a
+ * retry (`retryOf`).
+ */
 const holdStep = new RegExp(
-  `^${coreStepPrefix.replaceAll("$", "\\$")}wait:(?<key>[0-9a-f]{16}):(?<kind>busy|held|unknown):`,
+  `^${waitPrefix}(?<key>[0-9a-f]{16}):(?<kind>busy|held|unknown):\\d+(?::(?:first|\\d+(?::check)?))?$`,
   "u"
 );
+
+/** Any of core's own steps of a wait. */
+const coreWaitStep = new RegExp(`^${waitPrefix}[0-9a-f]{16}:`, "u");
 
 /** What each kind of hold is, as a screen reads it. */
 const holds = {
@@ -86,7 +100,7 @@ const sealedTasks = async (
 };
 
 /** A pending wait as the engine lists it (workerflow's `PendingWait`). */
-interface Pending {
+export interface Pending {
   readonly ordinal: number;
   readonly type: "sleep" | "waitForEvent" | "retry";
   readonly name: string;
@@ -114,7 +128,9 @@ const holdOf = (wait: Pending, holding: Set<string>): Json | undefined => {
   }
   holding.add(hold.key);
   return {
-    id: `hold-${hold.key}`,
+    // By its place in the journal: the key is a hash of the held step's
+    // name, which the run's code chose.
+    id: `hold-${wait.ordinal}`,
     taskId: "$run",
     key: "$run",
     title: shown.title,
@@ -157,8 +173,59 @@ const timerOf = (
 };
 
 /**
+ * The retry `wait` is of one of core's own steps of a wait that is not the
+ * hold itself (the held step running again, most of all), as the run's
+ * retry, naming no step; `undefined` for any other wait.
+ */
+const retryOf = (wait: Pending): Json | undefined => {
+  if (
+    wait.type !== "retry" ||
+    !coreWaitStep.test(wait.name) ||
+    // A check of a hold is the hold, shown once already (`holdOf`).
+    holdStep.test(wait.name) ||
+    wait.openedAt === null ||
+    wait.deadline === null
+  ) {
+    return undefined;
+  }
+  return {
+    id: `wait-${wait.ordinal}`,
+    taskId: "$run",
+    key: "$run",
+    title: "Retrying a step",
+    openedAt: wait.openedAt,
+    deadline: wait.deadline,
+    kind: "timer",
+    purpose: "retry",
+  };
+};
+
+/**
+ * The waits a screen is shown of `pending`, the engine's list of a run's
+ * open waits, with the task IDs its sealed build declares (`tasks`): each
+ * hold once, a timer of a declared task, or a retry of core's own step;
+ * nothing else, as its name could be made of what the run read.
+ */
+export const shownWaits = (
+  pending: readonly Pending[],
+  tasks: ReadonlySet<string>
+): Json[] => {
+  const waits: Json[] = [];
+  const holding = new Set<string>();
+  for (const wait of pending) {
+    const shown =
+      holdOf(wait, holding) ?? timerOf(wait, tasks) ?? retryOf(wait);
+    if (shown !== undefined) {
+      waits.push(shown);
+    }
+  }
+  return waits.slice(0, maxWaits);
+};
+
+/**
  * What run `run` waits on now, as a screen's snapshot lists it (see the
- * header): none while it has no record in the engine.
+ * header): none while it has no record in the engine, or while the engine
+ * can't say (logged: the rest of the snapshot is still worth showing).
  */
 export const runWaits = async (
   env: Env,
@@ -169,18 +236,18 @@ export const runWaits = async (
     manifestHash: string;
   }
 ): Promise<Json[]> => {
-  const pending = await runObjectOf(env, run.id).pendingWaits();
+  let pending: readonly Pending[] | undefined;
+  try {
+    pending = await runObjectOf(env, run.id).pendingWaits();
+  } catch (error) {
+    log.warn("workflow.waits_unreadable", {
+      runId: run.id,
+      ...errorFields(error),
+    });
+    return [];
+  }
   if (pending === undefined || pending.length === 0) {
     return [];
   }
-  const tasks = await sealedTasks(env, run);
-  const waits: Json[] = [];
-  const holding = new Set<string>();
-  for (const wait of pending) {
-    const shown = holdOf(wait, holding) ?? timerOf(wait, tasks);
-    if (shown !== undefined) {
-      waits.push(shown);
-    }
-  }
-  return waits.slice(0, maxWaits);
+  return shownWaits(pending, await sealedTasks(env, run));
 };
