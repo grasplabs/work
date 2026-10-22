@@ -221,6 +221,18 @@ export const modelRoles = ["quick", "careful"] as const;
 export type ModelRole = (typeof modelRoles)[number];
 
 /**
+ * The model a role gets on a deployment that names none for it, where its
+ * allowlist has that model and the rules let the call use it; otherwise
+ * the role takes the first allowed model the rules let it use. `quick`
+ * defaults to GLM 5.3 Flash, which thinks at low effort, as quick lines
+ * ask: DeepSeek V4.1 Flash, chat's default and the first allowed, thinks
+ * at high at least, too slow for a line someone is waiting to hear.
+ */
+export const defaultRoleModels: Readonly<Partial<Record<ModelRole, string>>> = {
+  quick: "workers-ai/@cf/zai-org/glm-5.3-flash",
+};
+
+/**
  * The models a new deployment allows until staff change its
  * `MODEL_GATEWAY`, and core allows while none is set: Workers AI's, which
  * AI Gateway runs on the client's own account with no provider key, so a
