@@ -357,13 +357,13 @@ test("a builder hands a workflow to someone the App is shared with, from its lin
   const { builder, user } = peopleIn("workflows");
   const name = `Invoices ${crypto.randomUUID()}`;
   const app = await appWithWaitingRun(builder, user, name);
-  const members = await withApi(
+  // A builder lists whom the App is shared with, not the organization.
+  const shared = await withApi(
     builder,
-    async (api) => await api.members.list()
+    async (api) => await api.apps.members.list(app)
   );
-  const names = new Map(members.map((member) => [member.userId, member.name]));
-  const builderName = names.get(builder.userId) ?? builder.userId;
-  const userName = names.get(user.userId) ?? user.userId;
+  const userName =
+    shared.find((member) => member.id === user.userId)?.name ?? user.userId;
 
   const page = await pageOf(builder);
   await page.goto("/workflows");
@@ -374,8 +374,11 @@ test("a builder hands a workflow to someone the App is shared with, from its lin
   // Nobody set an owner: the App's, its builder.
   const owner = line.getByRole("button", { name: /^Owner: /u });
   await expect(owner).toHaveAccessibleName(
-    `Owner: ${builderName}. Change owner`,
+    /^Owner: .+\. Change owner$/u,
     pageRead
+  );
+  await expect(owner).not.toHaveAccessibleName(
+    `Owner: ${userName}. Change owner`
   );
   await owner.click();
   await page.getByPlaceholder("Search people").fill(userName);

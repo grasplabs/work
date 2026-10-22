@@ -10,8 +10,9 @@ import { PersonPicker } from "../people/person-picker.tsx";
 import type { Pickable } from "../people/person-picker.tsx";
 import { useCore } from "../use-core.ts";
 
-// A workflow's owner on its line, changed right there (GRA-450): the
-// organization's members to pick from, read when the list first opens.
+// A workflow's owner on its line, changed right there (GRA-450): people
+// to pick from, read when the list first opens: the organization's
+// members for an admin, whom the App is shared with for its builders.
 // Core decides who may own it (a member who can open the App) and who may
 // change it (`changesOwner`: an admin or a builder of the App); a refusal
 // is said in a toast, and the line keeps the owner it had.
@@ -31,23 +32,41 @@ export const WorkflowOwnerPicker = ({
     if (people !== null) {
       return;
     }
+    const current = { id: owner.userId, name };
+    let read: Pickable[] = [current];
     try {
+      // An admin lists the whole organization.
       const members = await core.withSession(
         async (session) => await session.members.list()
       );
-      setPeople(
-        members
-          .map(({ userId, name: each, email }) => ({
-            id: userId,
-            name: each,
-            email,
-          }))
-          .toSorted((a, b) => a.name.localeCompare(b.name))
-      );
+      read = members.map(({ userId, name: each, email }) => ({
+        id: userId,
+        name: each,
+        email,
+      }));
     } catch {
-      // The members couldn't be read (Grasp staff list none): only the owner is offered.
-      setPeople([{ id: owner.userId, name }]);
+      // Anyone else may only list whom the App is shared with: people who
+      // can open it, so may own its workflow. Its teams' people can too,
+      // but aren't listed one by one.
+      try {
+        const shared = await core.withSession(
+          async (session) => await session.apps.members.list(workflow.app)
+        );
+        read = [
+          current,
+          ...shared.flatMap((member) =>
+            member.type === "person" &&
+            member.name !== null &&
+            member.id !== owner.userId
+              ? [{ id: member.id, name: member.name }]
+              : []
+          ),
+        ];
+      } catch {
+        // Only the owner is offered.
+      }
     }
+    setPeople(read.toSorted((a, b) => a.name.localeCompare(b.name)));
   };
   const pick = async (person: Pickable): Promise<void> => {
     try {
