@@ -35,7 +35,7 @@ const heldPermissions = async (session: Session): Promise<HeldPermissions> => {
 
 /** The catalog and the connections; with `held`, the permissions too. */
 export const loadIntegrations = async (
-  core: CoreConnection,
+  core: Pick<CoreConnection, "withSession">,
   identity: Identity,
   { held }: { held: boolean }
 ) => {

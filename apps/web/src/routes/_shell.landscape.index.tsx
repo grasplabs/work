@@ -34,9 +34,11 @@ import { AppMosaic } from "../landscape/app-mosaic.tsx";
 import { AppTable } from "../landscape/app-table.tsx";
 import type { Density } from "../landscape/app-table.tsx";
 import { ColumnsMenu } from "../landscape/columns-menu.tsx";
+import { ConnectLandscape } from "../landscape/connect-landscape.tsx";
 import { downloadCsv, fileDate } from "../landscape/download.ts";
 import { FilterMenu } from "../landscape/filter-menu.tsx";
 import { loadLandscape } from "../landscape/landscape-data.ts";
+import { LandscapeNotLoaded } from "../landscape/landscape-not-loaded.tsx";
 import {
   defaultColumns,
   landscapeCsv,
@@ -52,8 +54,8 @@ import type {
   LandscapeSort,
   LandscapeView,
 } from "../landscape/landscape.ts";
+import { IncompleteNotice, SyncNotices } from "../landscape/sync-notice.tsx";
 import { hoverDelay, Toolbar, ToolbarLabel } from "../landscape/toolbar.tsx";
-import { NotLoaded } from "../load-from-core.tsx";
 import { policyBook, policyToday } from "../policies/policies-data.ts";
 import { applyPolicy, findings } from "../policies/policy.ts";
 
@@ -69,7 +71,14 @@ type ToolbarMenu = "filter" | "layout" | "columns";
 
 const LandscapePage = () => {
   const { t } = useLingui();
-  const { apps: loaded } = Route.useLoaderData();
+  const {
+    apps: loaded,
+    syncs,
+    integrations,
+    found,
+    incomplete,
+  } = Route.useLoaderData();
+  const { identity } = Route.useRouteContext();
   const navigate = useNavigate();
   const view = Route.useSearch().view ?? "table";
   const [query, setQuery] = useState("");
@@ -111,7 +120,10 @@ const LandscapePage = () => {
           description={t`Every app your teams use: how Grasp knows about it, what data it touches and who owns it.`}
           title={t`Landscape`}
         />
-        <NotLoaded page={loaded} />
+        <LandscapeNotLoaded found={found} integrations={integrations} />
+        <ConnectLandscape identity={identity} syncs={syncs} />
+        <SyncNotices syncs={syncs} />
+        <IncompleteNotice incomplete={incomplete} syncs={syncs} />
 
         <div className="flex flex-wrap items-center gap-2">
           <div className="w-64">

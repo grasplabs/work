@@ -7,6 +7,7 @@ import type {
   ConnectionScope,
   ListedConnection,
 } from "@grasp-os/shared/connect";
+import { landscapeProviderSchema } from "@grasp-os/shared/landscape";
 import { isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { Button } from "@grasp-os/ui/components/button";
@@ -78,12 +79,21 @@ export const canReconnect = (
   connection: ListedConnection,
   offered: boolean,
   identity: Pick<Identity, "role" | "staff">
-): boolean =>
-  connection.source === "native" &&
-  oauthProviderSchema.safeParse(connection.provider).success &&
-  offered &&
-  (connection.scope === "personal" || isAdmin(identity.role)) &&
-  !identity.staff;
+): boolean => {
+  if (connection.source !== "native" || identity.staff) {
+    return false;
+  }
+  // The landscape's own connection, which the catalog doesn't offer: an
+  // admin's to connect again (core's `landscape.connect`).
+  if (landscapeProviderSchema.safeParse(connection.provider).success) {
+    return isAdmin(identity.role);
+  }
+  return (
+    oauthProviderSchema.safeParse(connection.provider).success &&
+    offered &&
+    (connection.scope === "personal" || isAdmin(identity.role))
+  );
+};
 
 /** A step: its number in a ring, its title, and what it asks. */
 const Step = ({
@@ -258,8 +268,20 @@ const NativeFlow = ({
     again?.scope ?? "personal"
   );
   const provider = oauthProviderSchema.safeParse(integration.id);
+  const landscape = landscapeProviderSchema.safeParse(integration.id).success;
   const app = integration.name;
   const start = async (): Promise<void> => {
+    if (landscape) {
+      goTo(
+        await run(
+          async (session) =>
+            await session.landscape.connect({
+              returnTo: returnToOf(integration.key),
+            })
+        )
+      );
+      return;
+    }
     if (!provider.success) {
       return;
     }

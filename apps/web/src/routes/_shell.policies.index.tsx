@@ -19,7 +19,8 @@ import { PageLoading } from "../frame/page-states.tsx";
 import { Page, PageHeading } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { loadLandscape } from "../landscape/landscape-data.ts";
-import { NotLoaded } from "../load-from-core.tsx";
+import { LandscapeNotLoaded } from "../landscape/landscape-not-loaded.tsx";
+import { IncompleteNotice, SyncNotices } from "../landscape/sync-notice.tsx";
 import { FindingsTable } from "../policies/findings-table.tsx";
 import { policyBook, policyToday } from "../policies/policies-data.ts";
 import { PoliciesTable } from "../policies/policies-table.tsx";
@@ -100,7 +101,13 @@ const Figure = ({
 
 const PoliciesPage = () => {
   const { t, i18n } = useLingui();
-  const { apps } = Route.useLoaderData();
+  const {
+    apps,
+    integrations,
+    found: foundApps,
+    syncs,
+    incomplete,
+  } = Route.useLoaderData();
   const navigate = useNavigate();
   const tab = Route.useSearch().tab ?? "rules";
   const [show, setShow] = useState<Show>("inForce");
@@ -144,7 +151,10 @@ const PoliciesPage = () => {
           description={t`Rules for the apps and AI tools your people use, drawn from your own policies.`}
           title={t`Policies`}
         />
-        <NotLoaded page={apps} />
+        <LandscapeNotLoaded found={foundApps} integrations={integrations} />
+        {/* What the rules were checked against may not be the whole landscape. */}
+        <SyncNotices syncs={syncs} />
+        <IncompleteNotice incomplete={incomplete} syncs={syncs} />
 
         <dl className="bg-border grid grid-cols-2 gap-px overflow-hidden rounded-xl border md:grid-cols-4">
           <Figure label={t`Active rules`} value={active} />
