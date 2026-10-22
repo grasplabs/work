@@ -3635,11 +3635,13 @@ export const workflowResourceRunControls = sqliteTable(
   },
   (table) => [
     // One cancel per run, whatever key asks for it; pauses and resumes are
-    // as many as the run takes, one unresolved at a time.
+    // as many as the run takes, one unresolved at a time, and one per key:
+    // two overlapping requests under one key write one receipt between
+    // them, even one the run is already past, which takes no generation.
     uniqueIndex("workflow_resource_run_controls_cancel_idx")
       .on(table.runId)
       .where(sql`${table.kind} = 'cancel'`),
-    index("workflow_resource_run_controls_key_idx").on(
+    uniqueIndex("workflow_resource_run_controls_key_idx").on(
       table.runId,
       table.key,
       table.kind
