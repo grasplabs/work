@@ -492,6 +492,9 @@ const failed = (failure: Exclude<Failure, "lost">): Response => {
     : refusal(failure, 10_000, "Internal error");
 };
 
+/** Email Sending's domains in a zone. */
+const sendingRoute = /^\/zones\/(?<zone>[^/]+)\/email\/sending\/subdomains$/u;
+
 const accountRoute = /^\/accounts\/(?<id>[^/]+)(?<rest>\/.*)?$/u;
 
 /** A call's body: JSON parsed, form data as such, anything else as text. */
@@ -582,6 +585,7 @@ export const mockCloudflareApi = (
       d1: [],
       buckets: [],
       gateways: [],
+      zones: [],
       scripts: new Map(),
       workflows: new Map(),
       assets: new Set(),
@@ -723,13 +727,102 @@ export const mockCloudflareApi = (
     );
   };
 
+  /**
+   * Answers a call about zones (`/zones`, and Email Sending's domains in
+   * one), as the API does for zones in the accounts `caller` is a member
+   * of; undefined for any other call. A new zone is pending, as one whose
+   * name servers aren't delegated yet; a zone's name is Cloudflare's only.
+   */
+  const answerZones = (
+    call: ApiCall,
+    caller: string | undefined
+  ): Response | undefined => {
+    const sending = sendingRoute.exec(call.path)?.groups?.zone;
+    if (call.path !== "/zones" && sending === undefined) {
+      return undefined;
+    }
+    if (caller === undefined) {
+      return refusal(403, 10_000, "Authentication error");
+    }
+    const reachable = [...accounts.values()].filter((account) =>
+      isMember(account, caller)
+    );
+    const json: Json =
+      typeof call.body === "object" && call.body !== null
+        ? { ...call.body }
+        : {};
+    if (sending !== undefined) {
+      const zone = reachable
+        .flatMap(({ zones }) => zones)
+        .find(({ id }) => id === sending);
+      if (zone === undefined) {
+        return refusal(403, 9109, "Unauthorized to access requested resource");
+      }
+      if (call.method === "GET") {
+        return envelope(zone.sending);
+      }
+      const name = text(json, "name");
+      if (name !== zone.name && !name.endsWith(`.${zone.name}`)) {
+        return refusal(400, 1003, "Not a domain within the zone");
+      }
+      const existing = zone.sending.find((domain) => domain.name === name);
+      const domain = existing ?? {
+        tag: crypto.randomUUID().replaceAll("-", ""),
+        name,
+        enabled: true,
+      };
+      domain.enabled = true;
+      if (existing === undefined) {
+        zone.sending.push(domain);
+      }
+      return envelope(domain);
+    }
+    if (call.method === "GET") {
+      const accountId = call.query.get("account.id");
+      const name = call.query.get("name");
+      return paged(
+        reachable
+          .filter(({ id }) => accountId === null || id === accountId)
+          .flatMap(({ zones }) => zones)
+          .filter((zone) => name === null || zone.name === name)
+          .map(({ id, name: zoneName, status }) => ({
+            id,
+            name: zoneName,
+            status,
+          })),
+        call.query
+      );
+    }
+    const owner = z.object({ id: z.string() }).safeParse(json.account);
+    const account = reachable.find(({ id }) => id === owner.data?.id);
+    if (account === undefined) {
+      return refusal(403, 9109, "Unauthorized to access requested resource");
+    }
+    const name = text(json, "name");
+    if (
+      [...accounts.values()].some(({ zones }) =>
+        zones.some((zone) => zone.name === name)
+      )
+    ) {
+      return refusal(400, 1061, `${name} already exists`);
+    }
+    const zone = {
+      id: crypto.randomUUID().replaceAll("-", ""),
+      name,
+      status: "pending",
+      sending: [],
+    };
+    account.zones.push(zone);
+    return envelope({ id: zone.id, name, status: zone.status });
+  };
+
   /** Answers `call` as the API would. */
   const respond = async (
     request: Request,
     call: ApiCall
   ): Promise<Response> => {
     const caller = callers.get(request.headers.get("authorization") ?? "");
-    const unscoped = answerUnscoped(call, caller);
+    const unscoped = answerUnscoped(call, caller) ?? answerZones(call, caller);
     if (unscoped !== undefined) {
       return unscoped;
     }

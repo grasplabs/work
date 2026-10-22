@@ -183,11 +183,11 @@ const offerSchema = z.discriminatedUnion("source", [
 ]);
 
 /** A catalog entry's key, as the audit log names it. */
-const entryKey = (source: CatalogSource, id: string): string =>
+export const entryKey = (source: CatalogSource, id: string): string =>
   `${source}:${id}`;
 
 /** The keys of the entries an admin hid. */
-const hiddenEntries = async (env: Env): Promise<Set<string>> => {
+export const hiddenEntries = async (env: Env): Promise<Set<string>> => {
   const rows = await drizzle(env.DB)
     .select({
       source: hiddenConnectors.source,

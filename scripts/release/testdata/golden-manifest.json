@@ -10,6 +10,30 @@
     }
   },
   "commit": "0000000000000000000000000000000000000000",
+  "compatibility": {
+    "interfaces": {
+      "connect": {
+        "calls": {},
+        "serves": 1
+      },
+      "core": {
+        "calls": {
+          "connect": {
+            "max": 1,
+            "min": 1
+          }
+        }
+      }
+    },
+    "sdkProtocols": {
+      "max": 2,
+      "min": 2
+    },
+    "workflowJournal": {
+      "max": 9,
+      "min": 8
+    }
+  },
   "compatibilityDate": "2026-09-15",
   "createdAt": "2026-01-01T00:00:00.000Z",
   "manifestVersion": 1,
@@ -21,6 +45,11 @@
   "workers": {
     "connect": {
       "bindings": [
+        {
+          "class_name": "Clock",
+          "name": "CLOCK",
+          "type": "durable_object_namespace"
+        },
         {
           "name": "LOADER",
           "type": "worker_loader"
@@ -52,7 +81,14 @@
           ]
         }
       ],
-      "durableObjectMigrations": [],
+      "durableObjectMigrations": [
+        {
+          "new_sqlite_classes": [
+            "Clock"
+          ],
+          "tag": "v1"
+        }
+      ],
       "keepVars": true,
       "mainModule": "index.js",
       "modules": [
@@ -120,6 +156,11 @@
           "type": "durable_object_namespace"
         },
         {
+          "class_name": "Clock",
+          "name": "CLOCK",
+          "type": "durable_object_namespace"
+        },
+        {
           "class_name": "Onboarding",
           "name": "ONBOARDING",
           "type": "durable_object_namespace"
@@ -168,6 +209,12 @@
           "bucket_name": "grasp-os-audit-archive",
           "jurisdiction": "eu",
           "name": "AUDIT_ARCHIVE",
+          "type": "r2_bucket"
+        },
+        {
+          "bucket_name": "grasp-os-brain-objects",
+          "jurisdiction": "eu",
+          "name": "BRAIN_OBJECTS",
           "type": "r2_bucket"
         },
         {
@@ -269,6 +316,12 @@
             "ActionInvocation"
           ],
           "tag": "v7"
+        },
+        {
+          "new_sqlite_classes": [
+            "Clock"
+          ],
+          "tag": "v8"
         }
       ],
       "keepVars": true,

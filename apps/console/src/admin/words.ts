@@ -90,6 +90,21 @@ export const euros = (amount: number): string => wholeEuros.format(amount);
 export const euro = (amount: number): string =>
   amount >= 10 ? euros(amount) : euroCents.format(amount);
 
+/**
+ * An amount in the currency Stripe names (`eur`), to the cent, as an
+ * invoice says it: "€1,815.00".
+ */
+export const money = (amount: number, currency: string): string => {
+  try {
+    return new Intl.NumberFormat("en", {
+      style: "currency",
+      currency: currency.toUpperCase(),
+    }).format(amount);
+  } catch {
+    return `${amount.toFixed(2)} ${currency.toUpperCase()}`;
+  }
+};
+
 /** Hours and the like, as whole numbers. */
 export const whole = (value: number): string => wholeNumber.format(value);
 
@@ -372,6 +387,13 @@ export const needLine = (need: Need, view: OrgView): string => {
     }
     case "budget": {
       return `AI use came to ${euros(need.spend)} in ${formatMonth(need.month)}, above the ${euros(need.included)} a month the contract covers.`;
+    }
+    case "overdue": {
+      const amount = money(need.amount, need.currency);
+      const since = formatDate(need.since);
+      return need.count === 1
+        ? `An invoice of ${amount} is overdue: it was due on ${since}.`
+        : `${need.count} invoices are overdue, ${amount} in all: the oldest was due on ${since}.`;
     }
     case "read": {
       return need.count === 1

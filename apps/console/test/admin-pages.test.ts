@@ -199,8 +199,8 @@ const integrationsOf = ({
     "The company’s own Grasp doesn’t report what it connected yet."
   ),
   stillToConnect: html.includes("Still to connect</h2>"),
-  fromComposio: html.includes(
-    "Once Composio is connected, this fills in by itself."
+  needsNotReported: html.includes(
+    "The company’s own Grasp doesn’t report what its workflows need yet."
   ),
   source: html.includes(
     "What the company connected: the company’s own Grasp doesn’t hold it yet. What its workflows still need connected: from Composio, once it is connected."
@@ -318,6 +318,60 @@ describe("the admin's frame", () => {
       table: false,
       buttons: false,
       firstByHand: false,
+    });
+  });
+
+  it("lays out the sources: the admin's own tools with no address until the console serves them, today's digest, and every system to connect in order", async () => {
+    const acme = await liveClient();
+    acme.account.admin = readySnapshot("Acme");
+
+    const { status, html } = await page("/admin/sources");
+    const text = html.replaceAll(tags, " ").replaceAll(spaces, " ");
+    const parts = [
+      ">Sources</h1>",
+      ">Grasp admin</h2>",
+      ">The morning digest</h2>",
+      ">To connect, in this order</h2>",
+    ].map((part) => html.indexOf(part));
+    // The systems still to connect, in the order they come.
+    const order = [
+      "Grasp console",
+      "Rooms",
+      "Attio",
+      "Stripe",
+      "Composio",
+      "Discord",
+    ].map((name) => text.indexOf(`${name} To come`));
+
+    expect({
+      status,
+      partsInOrder:
+        parts.every((at) => at >= 0) &&
+        parts.toSorted((a, b) => a - b).every((at, i) => at === parts[i]),
+      systemsInOrder:
+        order.every((at) => at >= 0) &&
+        order.toSorted((a, b) => a - b).every((at, i) => at === order[i]),
+      // Not served yet (GRA-656): nothing to copy, and its tools listed.
+      address: html.includes("/api/admin/mcp"),
+      ownToCome: html
+        .slice(
+          html.indexOf(">Grasp admin</h2>"),
+          html.indexOf(">The morning digest</h2>")
+        )
+        .includes(">To come</span>"),
+      tools: html.includes(">daily_digest</code>"),
+      // The digest is today's, from the organizations that answered.
+      digest: text.includes("Grasp, ") && text.includes("1 organization"),
+      roomsTools: html.includes(">get_signature_receipt</code>"),
+    }).toStrictEqual({
+      status: 200,
+      partsInOrder: true,
+      systemsInOrder: true,
+      address: false,
+      ownToCome: true,
+      tools: true,
+      digest: true,
+      roomsTools: true,
     });
   });
 
@@ -738,9 +792,9 @@ describe("the admin's frame", () => {
         about: contract.html.includes(
           "What was signed, what it gives the company, and what is billed."
         ),
-        // Core holds no contract yet: it comes from Rooms and Stripe.
+        // Core holds no contract yet, from Rooms; nor is it linked in Stripe.
         source: contract.html.includes(
-          "The contract: from Rooms, once it is connected. Its invoices: from Stripe, once it is connected."
+          "The contract: from Rooms, once it is connected. Its billing and invoices: from Stripe, once it is connected."
         ),
         current: columnEntryOf(
           columnOf(contract.html, acme.name),
@@ -949,7 +1003,7 @@ describe("the admin's frame", () => {
         connected: false,
         notReported: false,
         stillToConnect: true,
-        fromComposio: true,
+        needsNotReported: true,
         source: true,
         toCome: false,
       },
@@ -960,10 +1014,117 @@ describe("the admin's frame", () => {
         connected: true,
         notReported: true,
         stillToConnect: true,
-        fromComposio: true,
+        needsNotReported: true,
         source: true,
         toCome: false,
       },
+    });
+  });
+
+  it("shows what a company connected, the app a workflow is bound to that isn't connected any more, and the workflow waiting on it", async () => {
+    const acme = await liveClient();
+    const empty = emptyAdminSnapshot("Acme");
+    const crmSync = { id: "workflow-crm", name: "CRM sync" };
+    acme.account.admin = {
+      ...empty,
+      // Past its sign-in: its directory is in, every team's lead named.
+      roster: {
+        teams: [
+          { id: "sales", name: "Sales", lead: "lea", does: "", off: false },
+        ],
+        people: [
+          {
+            id: "lea",
+            name: "Lea Lund",
+            email: "",
+            team: "sales",
+            title: "",
+            away: false,
+          },
+        ],
+      },
+      // As core sends it once a workflow's HubSpot was disconnected.
+      integrations: {
+        connected: [
+          {
+            source: "composio",
+            provider: "google_drive",
+            state: "works",
+            hidden: false,
+            connectedBy: "Anna de Vries",
+            connectedAt: daysAgo(3),
+            account: null,
+            tools: ["GOOGLEDRIVE_LIST_FILES"],
+          },
+        ],
+        personal: [
+          { source: "native", provider: "microsoft", people: 4, again: 1 },
+        ],
+        needed: [
+          {
+            workflow: crmSync,
+            alias: "crm",
+            app: { source: "composio", provider: "hubspot" },
+            state: "missing",
+          },
+          { workflow: crmSync, alias: "mail", app: null, state: "unbound" },
+        ],
+        requests: [
+          {
+            source: "native",
+            provider: "microsoft",
+            decidedBy: "person",
+            waiting: 2,
+            since: daysAgo(1),
+          },
+        ],
+      },
+    };
+
+    const integrations = await page(
+      `/admin/organizations/${acme.clientId}/integrations`
+    );
+    const workflows = await page(
+      `/admin/organizations/${acme.clientId}/workflows`
+    );
+    const overview = await page(`/admin/organizations/${acme.clientId}`);
+
+    const { html } = integrations;
+    expect({
+      status: [integrations.status, workflows.status, overview.status],
+      drive: html.includes(
+        `Connected by Anna de Vries on ${formatDate(daysAgo(3))}.`
+      ),
+      microsoft: html.includes("4 people connected their own"),
+      again: html.includes("1 needs signing in again"),
+      // Core sends the toolkit's slug, not the catalog's name for it.
+      hubspot: html.includes("Hubspot"),
+      forCrmSync: html.includes("For CRM sync"),
+      notConnected: html.includes("Not connected"),
+      asked: html.includes(
+        `Asked for in 2 chats since ${formatDate(daysAgo(1))}, waiting on the person in the chat`
+      ),
+      notReported: html.includes("doesn’t report"),
+      source: html.includes("From the company’s own Grasp and Composio."),
+      waiting: workflows.html.includes("Waiting on a connection</h2>"),
+      crm: workflows.html.includes("crm: Hubspot, not connected"),
+      mail: workflows.html.includes("mail: No connection approved yet"),
+      health: overview.html.includes("1 stopped: someone must sign in again"),
+    }).toStrictEqual({
+      status: [200, 200, 200],
+      drive: true,
+      microsoft: true,
+      again: true,
+      hubspot: true,
+      forCrmSync: true,
+      notConnected: true,
+      asked: true,
+      notReported: false,
+      source: true,
+      waiting: true,
+      crm: true,
+      mail: true,
+      health: true,
     });
   });
 

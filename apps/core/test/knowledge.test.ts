@@ -1,3 +1,4 @@
+import { sha256Hex } from "@grasp-os/shared/encoding";
 import { knowledgeErrors } from "@grasp-os/shared/knowledge";
 import type { CollectionInput, KnowledgeApi } from "@grasp-os/shared/knowledge";
 import type { Role } from "@grasp-os/shared/roles";
@@ -150,10 +151,11 @@ describe("saving a document", () => {
       sectionsOfSecond,
       read: { ...read, version: current },
       earlier: earlier.text,
-      history: versions.map(({ number, author, message }) => ({
+      history: versions.map(({ number, author, message, sha256 }) => ({
         number,
         author,
         message,
+        sha256,
       })),
     }).toStrictEqual({
       first: {
@@ -167,6 +169,8 @@ describe("saving a document", () => {
         tags: ["hr"],
         reviewDate: "2027-03-01",
         currentVersion: 1,
+        indexedVersion: 1,
+        indexing: "indexed",
         updatedAt: first.updatedAt,
       },
       sectionsOfFirst: [
@@ -197,6 +201,7 @@ describe("saving a document", () => {
           author: userId,
           message: "25 days",
           restoredFrom: null,
+          sha256: await sha256Hex(leaveV2),
           createdAt: second.updatedAt,
         },
         provenance: {
@@ -207,8 +212,18 @@ describe("saving a document", () => {
       },
       earlier: leaveV1,
       history: [
-        { number: 2, author: userId, message: "25 days" },
-        { number: 1, author: userId, message: null },
+        {
+          number: 2,
+          author: userId,
+          message: "25 days",
+          sha256: await sha256Hex(leaveV2),
+        },
+        {
+          number: 1,
+          author: userId,
+          message: null,
+          sha256: await sha256Hex(leaveV1),
+        },
       ],
     });
   });
@@ -580,6 +595,7 @@ describe("restoring a version", () => {
         author: userId,
         message: null,
         restoredFrom: 1,
+        sha256: await sha256Hex(leaveV1),
         createdAt: current.version.createdAt,
       },
       sections: [["Leave"], ["Leave", "Parental leave"]],

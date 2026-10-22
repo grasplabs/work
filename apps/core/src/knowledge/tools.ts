@@ -209,7 +209,11 @@ export const read = async (
         .select({
           document: documents,
           collection: collections,
-          section: { headings: sections.headings, text: sections.text },
+          section: {
+            version: sections.version,
+            headings: sections.headings,
+            text: sections.text,
+          },
         })
         .from(documents)
         .innerJoin(collections, eq(collections.id, documents.collectionId))
@@ -237,7 +241,7 @@ export const read = async (
       target: { type: "document", id: document.id },
       detail: {
         read: "section",
-        version: document.currentVersion,
+        version: row?.version ?? document.currentVersion,
         section,
       },
     },
@@ -250,6 +254,7 @@ export const read = async (
     ...toSummary(document),
     section: {
       position: section,
+      version: row.version,
       headings: headingsSchema.parse(JSON.parse(row.headings)),
     },
     text: row.text,

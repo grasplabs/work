@@ -392,7 +392,12 @@ export const appBindings = async (
         });
       }
       // A platform permission has one action, which its stub does.
-      if (permission.object.type === "platform") {
+      // `brain` gets no stub yet: its binding comes with the Brain's App
+      // adapter (GRA-296), and never another action's stub meanwhile.
+      if (
+        permission.object.type === "platform" &&
+        !permission.actions.includes("brain")
+      ) {
         return permission.actions.includes("guests")
           ? exports.AppGuestsBinding({
               props: { app, permissionId: permission.id },
