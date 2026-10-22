@@ -17,7 +17,9 @@ import {
   DialogDescription,
   DialogTitle,
 } from "@grasp-os/ui/components/dialog";
+import { Spinner } from "@grasp-os/ui/components/spinner";
 import { Trans, useLingui } from "@lingui/react/macro";
+import { CheckIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 
@@ -101,23 +103,57 @@ export const signInAgainTarget = (
       canReconnect(connection, integration.offered, identity)
   );
 
-/** A step: its number in a ring, its title, and what it asks. */
+/** Where a step is: waiting its turn, the one to act on, or done. */
+type StepState = "idle" | "active" | "done";
+
+const ringClass: Readonly<Record<StepState, string>> = {
+  idle: "bg-card text-muted-foreground grid size-6 place-items-center rounded-full border text-xs transition-colors duration-300",
+  active:
+    "border-foreground bg-card grid size-6 place-items-center rounded-full border text-xs font-medium transition-colors duration-300",
+  done: "bg-muted grid size-6 place-items-center rounded-full border border-transparent transition-colors duration-300",
+};
+
+/**
+ * A step's number in a ring, as in the prototype (`StepRing`): grey while
+ * it waits, dark while it is the one to act on, and a check that pops in
+ * once it is done.
+ */
+const StepRing = ({ n, state }: { n: number; state: StepState }) => {
+  const { t } = useLingui();
+  return (
+    <span className={ringClass[state]}>
+      {state === "done" ? (
+        <CheckIcon
+          aria-label={t({
+            message: "Done",
+            context: "a step that is finished",
+          })}
+          className="motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-50 size-3.5 motion-safe:duration-300"
+        />
+      ) : (
+        n
+      )}
+    </span>
+  );
+};
+
+/** A step: its ring, its title (muted unless it is the one to act on), and what it asks. */
 const Step = ({
   n,
   title,
+  state,
   last = false,
   children,
 }: {
   n: number;
   title: string;
+  state: StepState;
   last?: boolean;
   children: ReactNode;
 }) => (
   <li className="flex gap-3">
     <div className="flex w-6 flex-none flex-col items-center">
-      <span className="border-foreground bg-card grid size-6 place-items-center rounded-full border text-xs font-medium">
-        {n}
-      </span>
+      <StepRing n={n} state={state} />
       {last ? null : (
         <span
           aria-hidden="true"
@@ -132,11 +168,90 @@ const Step = ({
           : "flex min-w-0 flex-1 flex-col gap-2 pb-5"
       }
     >
-      <h3 className="flex h-6 items-center font-medium">{title}</h3>
+      <h3
+        className={
+          state === "active"
+            ? "flex h-6 items-center font-medium transition-colors"
+            : "text-muted-foreground flex h-6 items-center transition-colors"
+        }
+      >
+        {title}
+      </h3>
       {children}
     </div>
   </li>
 );
+
+/** How long a start may take before the dialog offers to try again. */
+const takingLongMs = 6000;
+
+/**
+ * While core starts the sign-in: a spinner row and, once it takes long,
+ * a way to try again, as in the prototype (`Waiting`).
+ */
+const Starting = ({ app, onRetry }: { app: string; onRetry: () => void }) => {
+  const [long, setLong] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setLong(true);
+    }, takingLongMs);
+    return () => {
+      clearTimeout(timer);
+    };
+  }, []);
+  return (
+    <div className="flex flex-col gap-2">
+      <output className="flex h-10 items-center gap-2 rounded-lg border px-3">
+        <span className="text-muted-foreground">
+          <Spinner className="size-3.5" />
+        </span>
+        <Trans>Waiting for {app}</Trans>
+      </output>
+      {long ? (
+        <p className="text-muted-foreground">
+          <Trans>
+            Taking long?{" "}
+            <Button onClick={onRetry} size="xs" variant="link">
+              Try again
+            </Button>
+          </Trans>
+        </p>
+      ) : null}
+    </div>
+  );
+};
+
+/**
+ * The step's button, Cancel beside it; while core starts the sign-in, the
+ * waiting row instead.
+ */
+const Actions = ({
+  app,
+  busy,
+  disabled = false,
+  onClose,
+  onStart,
+  children,
+}: {
+  app: string;
+  busy: boolean;
+  disabled?: boolean;
+  onClose: () => void;
+  onStart: () => void;
+  children: ReactNode;
+}) =>
+  busy ? (
+    <Starting app={app} onRetry={onStart} />
+  ) : (
+    <div className="flex items-center gap-2">
+      <Button disabled={disabled} onClick={onStart}>
+        {children}
+      </Button>
+      <Button onClick={onClose} variant="outline">
+        <Trans>Cancel</Trans>
+      </Button>
+    </div>
+  );
 
 /** What signing in means, in three lines. */
 const SignInSteps = ({ app }: { app: string }) => (
@@ -263,18 +378,22 @@ const NativeFlow = ({
   identity,
   again,
   returnTo,
+  onClose,
 }: {
   integration: Integration;
   identity: Identity;
   /** The connection to sign in to again, keeping its scope. */
   again: ListedConnection | undefined;
   returnTo: string;
+  onClose: () => void;
 }) => {
   const { busy, failure, run } = useCoreAction();
   const { t } = useLingui();
   const [scope, setScope] = useState<ConnectionScope>(
     again?.scope ?? "personal"
   );
+  // Done once the admin chose who uses it; it starts as just for them.
+  const [chose, setChose] = useState(false);
   const provider = oauthProviderSchema.safeParse(integration.id);
   const app = integration.name;
   const start = async (): Promise<void> => {
@@ -295,22 +414,23 @@ const NativeFlow = ({
   const signIn = (
     <>
       <SignInSteps app={app} />
-      <Button
-        className="self-start"
-        disabled={busy}
-        onClick={() => {
+      <Actions
+        app={app}
+        busy={busy}
+        onClose={onClose}
+        onStart={() => {
           void start();
         }}
       >
         <Trans>Sign in to {app}</Trans>
-      </Button>
+      </Actions>
       <ErrorText>{failure}</ErrorText>
     </>
   );
   if (again !== undefined || !isAdmin(identity.role)) {
     return (
       <ol className="flex flex-col">
-        <Step last n={1} title={t`Sign in`}>
+        <Step last n={1} state="active" title={t`Sign in`}>
           {signIn}
         </Step>
       </ol>
@@ -318,10 +438,16 @@ const NativeFlow = ({
   }
   return (
     <ol className="flex flex-col">
-      <Step n={1} title={t`Who uses it`}>
-        <ScopeChoice onScope={setScope} scope={scope} />
+      <Step n={1} state={chose ? "done" : "active"} title={t`Who uses it`}>
+        <ScopeChoice
+          onScope={(chosen) => {
+            setScope(chosen);
+            setChose(true);
+          }}
+          scope={scope}
+        />
       </Step>
-      <Step last n={2} title={t`Sign in`}>
+      <Step last n={2} state="active" title={t`Sign in`}>
         {signIn}
       </Step>
     </ol>
@@ -338,9 +464,11 @@ const NativeFlow = ({
 const ComposioFlow = ({
   integration,
   returnTo,
+  onClose,
 }: {
   integration: Integration;
   returnTo: string;
+  onClose: () => void;
 }) => {
   const { busy, failure, run } = useCoreAction();
   const core = useCore();
@@ -382,7 +510,11 @@ const ComposioFlow = ({
   };
   return (
     <ol className="flex flex-col">
-      <Step n={1} title={t`What Grasp may do`}>
+      <Step
+        n={1}
+        state={allowed.length === 0 ? "active" : "done"}
+        title={t`What Grasp may do`}
+      >
         <p className="text-muted-foreground">
           <Trans>
             Read-only is ticked where Composio says a tool only reads; Grasp
@@ -420,22 +552,29 @@ const ComposioFlow = ({
           </fieldset>
         )}
       </Step>
-      <Step last n={2} title={t`Consent and sign in`}>
+      <Step
+        last
+        n={2}
+        state={allowed.length === 0 ? "idle" : "active"}
+        title={t`Consent and sign in`}
+      >
         {/* The consent stays as written: core keeps a hash of the exact
             text consented to (connection-list.tsx shows it again). */}
         <blockquote className="text-muted-foreground border-l-2 pl-3">
           {composioConsentText}
         </blockquote>
         <SignInSteps app={app} />
-        <Button
-          className="self-start"
-          disabled={busy || allowed.length === 0}
-          onClick={() => {
+        <Actions
+          app={app}
+          busy={busy}
+          disabled={allowed.length === 0}
+          onClose={onClose}
+          onStart={() => {
             void connect();
           }}
         >
           <Trans>Consent and connect</Trans>
-        </Button>
+        </Actions>
         <ErrorText>{failure}</ErrorText>
       </Step>
     </ol>
@@ -492,12 +631,18 @@ export const ConnectDialog = ({
             identity={identity}
             integration={integration}
             returnTo={returnTo ?? returnToOf(integration.key)}
+            onClose={() => {
+              onOpenChange(false);
+            }}
           />
         ) : null}
         {open && integration.source === "composio" ? (
           <ComposioFlow
             integration={integration}
             returnTo={returnTo ?? returnToOf(integration.key)}
+            onClose={() => {
+              onOpenChange(false);
+            }}
           />
         ) : null}
       </DialogContent>
