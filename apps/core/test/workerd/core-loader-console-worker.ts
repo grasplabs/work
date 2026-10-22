@@ -236,6 +236,15 @@ export class App extends WorkerEntrypoint {
     throw new TypeError(${JSON.stringify(values.thrown)});
   }
 }`,
+  // A fetch that answers something that isn't a Response, whose \`then\`
+  // reads fine once and throws the next time: resolving it again after the
+  // wrapper's try would carry the code's own message.
+  "/fetch-not-response": `export class App extends WorkerEntrypoint {
+  fetch() {
+    let reads = 0;
+    return Object.defineProperty({}, "then", { get() { reads += 1; if (reads > 1) { throw new TypeError(${JSON.stringify(values.thrown)}); } return undefined; } });
+  }
+}`,
   // The quiet module's own reads, after the isolate's code replaced what
   // they'd use: a Proxy trap its context's handler doesn't define, and the
   // event's \`preventDefault\`. Each still answers, and prints nothing.

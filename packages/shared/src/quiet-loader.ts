@@ -415,13 +415,18 @@ const ownResponse = (response) => {
     ])
   );
 };
+const notResponse = new TypeError("This fetch didn't answer a Response.");
 const fetched = (method, self, args) =>
   (async () => {
     try {
       const result = apply(method, self, args);
       // A Response returned as it is isn't awaited: awaiting reads its
       // \`then\` up the chain, where the isolate's code may have put a getter.
-      return ownResponse(isResponse(result) ? result : await result);
+      const response = isResponse(result) ? result : await result;
+      // Anything else is answered as a constant error: returning it would
+      // resolve it after this try, reading a \`then\` its code may have put
+      // on it, whose throw would cross with the code's own message.
+      return isResponse(response) ? ownResponse(response) : thrownResponse(notResponse);
     } catch (error) {
       return thrownResponse(error);
     }
@@ -705,6 +710,15 @@ const rethrowing = (entry: object): object =>
     },
   });
 
+/** Whether `code` has a tail, which its console goes to alone. */
+const hasTail = (code: QuietableCode): boolean =>
+  (code.tails?.length ?? 0) > 0 || (code.streamingTails?.length ?? 0) > 0;
+
+const noDurableObjectClass = (): TypeError =>
+  new TypeError(
+    "A silenced isolate hands out a Durable Object class only with a tail: its methods' throws aren't wrapped."
+  );
+
 /**
  * `code` with its console silenced first, unless it has a tail (whose
  * tail is how a builder sees what it wrote), and its main module wrapped
@@ -714,8 +728,7 @@ const quietCode = <Code extends QuietableCode>(
   code: Code,
   entrypoint: string
 ): Code => {
-  const tailed =
-    (code.tails?.length ?? 0) > 0 || (code.streamingTails?.length ?? 0) > 0;
+  const tailed = hasTail(code);
   const main = code.modules[code.mainModule];
   // An ES module given as `{ js }` stays one: a module given as text is
   // read by its name's extension, which `{ js }` doesn't need.
@@ -780,11 +793,12 @@ const entrypointOf = (entrypoint = "default"): string => {
  * A stub of the isolate `load` loads for the entrypoint it is asked for,
  * with each call's envelope opened host-side (`rethrowing`). The isolate
  * is loaded once a caller names the entrypoint, since its wrapper main
- * exports that one (`entrySource`). A Durable Object class isn't wrapped,
- * so none is handed out: nothing core or connect loads has one.
+ * exports that one (`entrySource`). A Durable Object class is not wrapped
+ * (`durableObjectClass` gives it, or refuses): see `quietLoader`.
  */
 const quietStub = <Stub extends QuietableStub>(
-  load: (entrypoint: string) => Stub
+  load: (entrypoint: string) => Stub,
+  durableObjectClass: (name?: string) => unknown
 ): Stub => {
   const stub: QuietableStub = {
     getEntrypoint: (name, options) => {
@@ -793,11 +807,7 @@ const quietStub = <Stub extends QuietableStub>(
         ? rethrowing(entry)
         : entry;
     },
-    getDurableObjectClass: () => {
-      throw new TypeError(
-        "A silenced isolate hands out no Durable Object class: its methods' throws aren't wrapped."
-      );
-    },
+    getDurableObjectClass: (name) => durableObjectClass(name),
   };
   // SAFETY: a stub with the Loader's stub's methods, each answering what
   // the Loader's own answers, through `rethrowing`.
@@ -811,6 +821,19 @@ const quietStub = <Stub extends QuietableStub>(
  * the header). Core and connect read their `LOADER` through this, so no
  * isolate either loads prints to the deployment's logs. An isolate `get`
  * caches is cached per entrypoint: its wrapper main is that entrypoint's.
+ *
+ * A Durable Object class (an App's server object, the only one core or
+ * connect loads) is handed out only for an isolate with a tail, and then
+ * the isolate is loaded as given, not wrapped: the wrapper makes an
+ * entrypoint's throws values, which a Durable Object's methods can't
+ * answer, since a caller reads its errors as they are thrown (an App's
+ * error and its details). That is honest for a tailed isolate alone: its
+ * console already goes to the tail and not to the deployment's logs, so
+ * nothing the wrapper silences is lost, and an error its methods throw
+ * is reported to the tail, as the header says an isolate with a tail is
+ * left as it is. An isolate without a tail would print its console, and
+ * report its throws, to the deployment's logs through a class we can't
+ * wrap, so it is refused: nothing needs one.
  */
 export const quietLoader = <
   Code extends QuietableCode,
@@ -819,11 +842,22 @@ export const quietLoader = <
   loader: QuietableLoader<Code, Stub>
 ): QuietableLoader<Code, Stub> => ({
   get: (name, getCode) =>
-    quietStub((entrypoint) =>
-      loader.get(
-        name === null ? null : `${name}\u0000quiet:${entrypoint}`,
-        async () => quietCode(await getCode(), entrypoint)
-      )
+    quietStub(
+      (entrypoint) =>
+        loader.get(
+          name === null ? null : `${name}\u0000quiet:${entrypoint}`,
+          async () => quietCode(await getCode(), entrypoint)
+        ),
+      (className) =>
+        loader
+          .get(name === null ? null : `${name}\u0000quiet-class`, async () => {
+            const code = await getCode();
+            if (!hasTail(code)) {
+              throw noDurableObjectClass();
+            }
+            return code;
+          })
+          .getDurableObjectClass?.(className)
     ),
   load: (code) => {
     // Refused as it is loaded, as the Loader refuses a module it can't
@@ -832,13 +866,21 @@ export const quietLoader = <
     // One isolate per entrypoint asked for, however often it is asked for,
     // as the Loader's `load` gives one isolate however many stubs of it.
     const loaded = new Map<string, Stub>();
-    return quietStub((entrypoint) => {
-      let stub = loaded.get(entrypoint);
-      if (stub === undefined) {
-        stub = loader.load(quietCode(code, entrypoint));
-        loaded.set(entrypoint, stub);
+    return quietStub(
+      (entrypoint) => {
+        let stub = loaded.get(entrypoint);
+        if (stub === undefined) {
+          stub = loader.load(quietCode(code, entrypoint));
+          loaded.set(entrypoint, stub);
+        }
+        return stub;
+      },
+      (className) => {
+        if (!hasTail(code)) {
+          throw noDurableObjectClass();
+        }
+        return loader.load(code).getDurableObjectClass?.(className);
       }
-      return stub;
-    });
+    );
   },
 });
