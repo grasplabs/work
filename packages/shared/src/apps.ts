@@ -597,7 +597,10 @@ export interface AppsApi {
    * audited. Its data, members and grants are kept for `restore`.
    */
   archive: (app: string) => Promise<App>;
-  /** Restores an archived App, for its builders, as a draft. */
+  /**
+   * Restores an archived App, for its builders, as a draft: refused with
+   * `app.stops_pending` while runs it started are still being stopped.
+   */
   restore: (app: string) => Promise<App>;
   readonly files: AppFilesApi;
   readonly versions: AppVersionsApi;
@@ -678,6 +681,8 @@ export const appErrors = defineErrorFamily({
   "app.not_running": "The App has no current version to run yet.",
   "app.no_version": "Make a version of the App current before publishing it.",
   "app.archived": "The App is archived. A builder can restore it.",
+  "app.stops_pending":
+    "Runs the App started are still being stopped from when it was archived. Try restoring it again in a few minutes.",
   "app.not_published":
     "The App isn't published, so other Apps and workflows can't call it.",
   "app.build_failed": "The App's server code doesn't build.",

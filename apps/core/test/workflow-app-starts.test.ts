@@ -71,7 +71,6 @@ import {
 } from "../src/workflow-start-intents.ts";
 import type { CallingAgent } from "../src/workflow-start-intents.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
-import { cancelRunsOf } from "../src/workflows/controls.ts";
 import {
   repairResourceStarts,
   resourceRunFor,
@@ -800,7 +799,7 @@ describe("an action starting a workflow", () => {
     }).toStrictEqual({ before: null, after: "cancelled", asked: 1 });
   });
 
-  it("asks again to stop a run whose stop was claimed but never sent", async () => {
+  it("keeps an App archived while a stop claimed but never sent is owed, and asks again once it is due", async () => {
     const fx = await fixture(true);
     const started = await call(fx, fx.bob, "requests.kickOff", { who: "Bob" });
     expect(started.ok).toBeTruthy();
@@ -809,7 +808,8 @@ describe("an action starting a workflow", () => {
     }
     const handle = handleSchema["~standard"].validate(started.value);
     const runId = "value" in handle ? handle.value.runId : null;
-    // Archived, its stop claimed by a pass that crashed before it sent it.
+    // Archived, its stop claimed by a pass whose request died after the
+    // claim was saved and before the stop was sent.
     const claimedAgo = async (ms: number): Promise<void> => {
       await env.DB.batch([
         env.DB.prepare("UPDATE apps SET status = 'archived' WHERE id = ?").bind(
@@ -820,19 +820,30 @@ describe("an action starting a workflow", () => {
         ).bind(Date.now() - ms, runId),
       ]);
     };
-    const by = { userId: fx.ada.userId, staff: false };
+    const statusOfApp = async () =>
+      await env.DB.prepare("SELECT status FROM apps WHERE id = ?")
+        .bind(fx.app)
+        .first("status");
 
     await claimedAgo(1000);
-    const recent = await cancelRunsOf(env, by, fx.app, new Date());
+    const early = await outcome(changeStatus(env, fx.ada, fx.app, "restore"));
+    const owed = await runOf(fx, runId);
+    const whileOwed = { app: await statusOfApp(), ended: owed.endedAt };
     await claimedAgo(stopRetryMs + 1000);
-    const stale = await cancelRunsOf(env, by, fx.app, new Date());
+    const restored = await changeStatus(env, fx.ada, fx.app, "restore");
     const after = await ended(fx, runId);
 
     expect({
-      recent: recent.asked,
-      stale: stale.asked,
+      early,
+      whileOwed,
+      restored: restored.status,
       after: after.status,
-    }).toStrictEqual({ recent: 0, stale: 1, after: "cancelled" });
+    }).toStrictEqual({
+      early: "app.stops_pending",
+      whileOwed: { app: "archived", ended: null },
+      restored: "draft",
+      after: "cancelled",
+    });
   });
 
   it("abandons a start the App made that core never sent, once the App is archived", async () => {

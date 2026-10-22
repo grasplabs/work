@@ -17,6 +17,7 @@ import { apps } from "./db/core/schema.ts";
 import { appHost } from "./durable-objects.ts";
 import { requireNotStaff } from "./sharing.ts";
 import { cancelRunsOf } from "./workflows/controls.ts";
+import { stopsUnsettled } from "./workflows/resource-runs.ts";
 
 // Where an App is in its life (`AppStatus`), and its builders moving it:
 //
@@ -40,7 +41,8 @@ import { cancelRunsOf } from "./workflows/controls.ts";
 // - A trigger or run outliving the archive: archiving cancels the App's
 //   unfinished runs (`cancelRunsOf`), the cron trigger cancels any left or
 //   started in a race with it (`cancelArchivedRuns`), and a start reads
-//   the status again once its row is written (`startRun`).
+//   the status again once its row is written (`startRun`). A restore
+//   waits for the stops still settling (`cancelledBeforeRestore`).
 // - A transition by someone who lost their role: the role is read for the
 //   call, and the write only applies to the status read (`app.conflict`
 //   otherwise). Each transition is audited with the change itself.
@@ -128,7 +130,8 @@ const cancelledBeforeRestore = async (env: Env, app: App): Promise<void> => {
   // A page at a time, until a page comes back short. A cancel that failed
   // refuses the restore: once restored, nothing would ask again, and the
   // run would go on as the App's (the cron trigger asks while archived).
-  for (let page = 0; page < maxCancelPages; page += 1) {
+  let finished = false;
+  for (let page = 0; page < maxCancelPages && !finished; page += 1) {
     // oxlint-disable-next-line no-await-in-loop -- a page at a time
     const { asked, failed } = await cancelRunsOf(
       env,
@@ -145,12 +148,23 @@ const cancelledBeforeRestore = async (env: Env, app: App): Promise<void> => {
       });
       throw appErrors.create("app.conflict");
     }
-    if (asked < cancelPage) {
-      return;
-    }
+    finished = asked < cancelPage;
   }
-  // Too many to finish in one call: the restore waits for the cron trigger.
-  throw appErrors.create("app.conflict");
+  if (!finished) {
+    // Too many to finish in one call: the restore waits for the cron trigger.
+    throw appErrors.create("app.conflict");
+  }
+  // A short page proves every cancel was asked, not that every stop of a
+  // run the App started was sent: a stop claimed by another pass, or by a
+  // sender that died before sending, is skipped for `stopRetryMs`. Once
+  // restored, no repair looks at the App's runs again, so such a run would
+  // go on. So the restore waits until each claimed stop has ended its run,
+  // the cron trigger sending again any that was lost. Keeping a repair
+  // alive across the restore instead would have to tell an archive's stops
+  // apart from runs the restored App starts afresh.
+  if (await stopsUnsettled(env, app.id)) {
+    throw appErrors.create("app.stops_pending");
+  }
 };
 
 /**
