@@ -22,6 +22,7 @@ import {
   syncGraspSkills,
 } from "../src/knowledge/grasp-skills.ts";
 import type { GraspSkill } from "../src/knowledge/grasp-skills.ts";
+import { storedCurrentTexts } from "./knowledge.ts";
 import { auditedDuring } from "./sign-in.ts";
 
 // What ships with the release, installed once per release on the first
@@ -41,14 +42,8 @@ import { auditedDuring } from "./sign-in.ts";
 const thisRelease = async (): Promise<string> => await fingerprintOf(release);
 
 /** Each Grasp skill's current text, by path. */
-const storedSkills = async (): Promise<Record<string, string>> => {
-  const { results } = await env.KNOWLEDGE.prepare(
-    "SELECT d.path, v.text FROM documents d JOIN versions v ON v.document_id = d.id AND v.number = d.current_version WHERE d.collection_id = ?"
-  )
-    .bind(graspSkillsCollectionId)
-    .all<{ path: string; text: string }>();
-  return Object.fromEntries(results.map(({ path, text }) => [path, text]));
-};
+const storedSkills = async (): Promise<Record<string, string>> =>
+  await storedCurrentTexts(graspSkillsCollectionId);
 
 /** This release's skills, by path. */
 const releaseSkills = (skills: readonly GraspSkill[] = graspSkills) =>

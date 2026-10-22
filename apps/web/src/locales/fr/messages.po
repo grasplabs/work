@@ -1891,8 +1891,13 @@ msgid "Another version of this domain was made current since this list was read.
 msgstr "Une autre version de ce domaine est devenue actuelle depuis la lecture de cette liste. La liste l’affiche maintenant : relisez cette version, puis approuvez à nouveau."
 
 #: src/brain/brain.ts
+#: src/chat/brain-questions.tsx
 msgid "Answer"
 msgstr "Réponse"
+
+#: src/inbox/item-detail.tsx
+msgid "Answer in the brain"
+msgstr "Répondre dans le cerveau"
 
 #. Something that has not happened yet, on a timeline
 #: src/brain/brain.ts
@@ -2154,6 +2159,11 @@ msgstr "Tels que l’entreprise les a nommées, jusqu’à ce que la liste du pe
 #: src/routes/_shell.onboarding.stephen.tsx
 msgid "As the kickoff suggests"
 msgstr "Comme le propose le lancement"
+
+#. placeholder {0}: gap.owner
+#: src/chat/brain-questions.tsx
+msgid "Ask {0}"
+msgstr "Demander à {0}"
 
 #: src/chat/thread.tsx
 msgid "Ask again"
@@ -2580,6 +2590,7 @@ msgstr "Évoqué dans {source}"
 msgid "Can {verbs} company data"
 msgstr "Peut {verbs} les données de l’entreprise"
 
+#: src/chat/brain-questions.tsx
 #: src/chat/project-dialog.tsx
 #: src/decision-confirmation.tsx
 #: src/engines/package-approvals.tsx
@@ -3013,6 +3024,10 @@ msgstr "Compact"
 #: src/routes/_shell.settings.billing.tsx
 msgid "Company"
 msgstr "Entreprise"
+
+#: src/activity/pending.tsx
+msgid "Company Brain, read only. This can read company Brain evidence and its open questions, from the collections it was granted and only what the person it works for may read too. It can never write to the Brain. Every read is recorded"
+msgstr "Company Brain, en lecture seule. Il peut lire les éléments et les questions ouvertes du Company Brain, dans les collections qui lui ont été accordées et seulement ce que la personne pour qui il travaille peut aussi lire. Il ne peut jamais écrire dans le Brain. Chaque lecture est enregistrée"
 
 #: src/chat/builds.tsx
 msgid "Compared with version {current}, which runs now."
@@ -4361,6 +4376,16 @@ msgstr "Découle d’un autre événement"
 msgid "Follows from: {parentTitle}"
 msgstr "Découle de : {parentTitle}"
 
+#. placeholder {0}: gap.owner
+#: src/chat/brain-questions.tsx
+msgid "For {0}"
+msgstr "Pour {0}"
+
+#. placeholder {0}: gap.owner
+#: src/chat/brain-questions.tsx
+msgid "For {0}, who was asked"
+msgstr "Pour {0}, déjà sollicité"
+
 #: src/inbox/item-detail.tsx
 msgid "For {person}"
 msgstr "Pour {person}"
@@ -5274,6 +5299,10 @@ msgstr "Gardez les règles qui traduisent votre politique, modifiez-les si besoi
 #: src/dashboard/signals.tsx
 msgid "Keeps failing"
 msgstr "Échoue sans cesse"
+
+#: src/activity/audit-words.ts
+msgid "Kept something the chat can no longer read from the model"
+msgstr "A caché au modèle quelque chose que le chat ne peut plus lire"
 
 #: src/landscape/landscape.ts
 msgid "Keys, tokens, secrets, credentials or runbooks that could grant access."
@@ -7022,6 +7051,7 @@ msgctxt "inbox item kind"
 msgid "Open question"
 msgstr "Question ouverte"
 
+#: src/chat/brain-questions.tsx
 #: src/routes/_shell.brain.$noteId.tsx
 msgid "Open questions"
 msgstr "Questions ouvertes"
@@ -8483,6 +8513,10 @@ msgstr "Vues, jamais citées"
 msgctxt "send the question"
 msgid "Send"
 msgstr "Envoyer"
+
+#: src/chat/brain-questions.tsx
+msgid "Send answer"
+msgstr "Envoyer la réponse"
 
 #: src/knowledge/collection-markers.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
@@ -11557,6 +11591,10 @@ msgstr "Vous me montrez qui est qui, où sont les documents et quels outils les 
 msgid "You sign in on {app}’s own page."
 msgstr "Vous vous connectez sur la page de {app}."
 
+#: src/inbox/items.ts
+msgid "You were asked this as the {owner}. Answer it in the brain: everyone in the company reads the answer, with your name."
+msgstr "On vous a posé cette question en tant que {owner}. Répondez-y dans le cerveau : toute l’entreprise lit la réponse, avec votre nom."
+
 #: src/routes/guest.tsx
 msgid "You:"
 msgstr "Vous :"
@@ -11572,6 +11610,10 @@ msgstr "Vous êtes toujours connecté. Réessayez dans un instant."
 #: src/routes/_shell.settings.tsx
 msgid "Your account"
 msgstr "Votre compte"
+
+#: src/chat/brain-questions.tsx
+msgid "Your answer"
+msgstr "Votre réponse"
 
 #: src/decision-confirmation.tsx
 msgctxt "the answer a person gives a decision"

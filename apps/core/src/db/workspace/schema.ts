@@ -161,6 +161,33 @@ export const chatDocuments = sqliteTable(
 );
 
 /**
+ * What each code run of a chat read from, each source once a run: the
+ * backing of that run's result in the transcript. Before every model
+ * request the chat checks each source again, as its agent for its person
+ * now, and a result one of whose sources they can no longer read is
+ * withheld from the request (`withheldRuns` in workspace.ts).
+ * `withheld_at` is when the source was first found unreadable, so each
+ * withholding is audited once; cleared once it is readable again. Kept
+ * with the chat, not with the run's record (`chat_code_runs` keeps the
+ * latest runs only), as long as the transcript holds the result.
+ */
+export const chatRunSources = sqliteTable(
+  "chat_run_sources",
+  {
+    chatId: text("chat_id")
+      .$type<ChatId>()
+      .notNull()
+      .references(() => chats.id),
+    runId: text("run_id").notNull(),
+    sourceId: text("source_id").notNull(),
+    withheldAt: integer("withheld_at", { mode: "timestamp_ms" }),
+  },
+  (table) => [
+    primaryKey({ columns: [table.chatId, table.runId, table.sourceId] }),
+  ]
+);
+
+/**
  * A chat's drafts: one per App its agent writes to, over the version it
  * started from (`base`, null for an App with none). A draft is the chat's
  * own: it reaches the App only when the agent proposes it as a version

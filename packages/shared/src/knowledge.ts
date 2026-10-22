@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { auditProvenanceMaxItems } from "./audit.ts";
+import type { MemoryPack, RecallInput } from "./brain-api.ts";
 import { defineErrorFamily } from "./errors.ts";
 import {
   collectionIdSchema,
@@ -368,9 +369,28 @@ export interface DocumentSummary {
   /** When it should be reviewed (`YYYY-MM-DD`), if set. */
   reviewDate: string | null;
   currentVersion: number;
+  /**
+   * The version search holds: `currentVersion` once indexed, an older one
+   * (or `null`, for a new document) while indexing catches up.
+   */
+  indexedVersion: number | null;
+  /**
+   * Where indexing the current version stands. A save is done when it
+   * returns; search has it only once this is `indexed`.
+   */
+  indexing: DocumentIndexing;
   /** ISO 8601. */
   updatedAt: string;
 }
+
+/** Where indexing a document's current version stands. */
+export const documentIndexingStates = [
+  "queued",
+  "retrying",
+  "indexed",
+  "failed",
+] as const;
+export type DocumentIndexing = (typeof documentIndexingStates)[number];
 
 /** One version in a document's history, without its text. */
 export interface VersionSummary {
@@ -380,6 +400,13 @@ export interface VersionSummary {
   message: string | null;
   /** The version it restored, if it was a restore. */
   restoredFrom: number | null;
+  /**
+   * Its text's SHA-256, in lowercase hex: what a citation of it pins, and
+   * what every read of its text is checked against. It identifies the text,
+   * so it goes only to those who may read the version: keep it out of
+   * logs, audit details and anything a reader of the document can't see.
+   */
+  sha256: string;
   /** ISO 8601. */
   createdAt: string;
 }
@@ -490,15 +517,35 @@ export interface SearchHit {
   description: string;
   /** The section's place in its document, from 0. */
   section: number;
+  /**
+   * The version the section is of: the document's indexed one, which can
+   * be older than its current one while indexing catches up.
+   */
+  version: number;
   /** The headings above and of the section, outermost first. */
   headings: string[];
   /** Plain text from the section, around what matched. */
   snippet: string;
 }
 
+/**
+ * What a search couldn't look at: readable documents in its scope whose
+ * current version isn't indexed yet (`pending`) or failed to be
+ * (`failed`), counted up to {@link searchCoverageCap}. Search finds them
+ * by the version it last indexed, if any.
+ */
+export interface SearchCoverage {
+  pending: number;
+  failed: number;
+}
+
+/** Most documents a search's coverage counts of each kind. */
+export const searchCoverageCap = 1000;
+
 /** A search's results, best first, and where they come from. */
 export interface SearchResults {
   hits: SearchHit[];
+  coverage: SearchCoverage;
   provenance: Provenance;
 }
 
@@ -521,6 +568,8 @@ export interface KnowledgeRead extends DocumentSummary {
   section: {
     /** Its place in its document, from 0. */
     position: number;
+    /** The version it is of, as a search hit's (`SearchHit.version`). */
+    version: number;
     /** The headings above and of the section, outermost first. */
     headings: string[];
   } | null;
@@ -614,6 +663,11 @@ export interface KnowledgeTools {
   read: (documentId: string, options?: ReadOptions) => Promise<KnowledgeRead>;
   /** A document's links and backlinks, and for a skill, its files. */
   follow: (documentId: string) => Promise<FollowResult>;
+  /**
+   * The Brain's recall (brain-api.ts) across every collection it may read,
+   * under its `brain` grant: a bounded memory pack.
+   */
+  recall: (input: RecallInput) => Promise<MemoryPack>;
 }
 
 /**
@@ -741,6 +795,12 @@ export interface PurgePlan {
    */
   inLongerWords: number;
   /**
+   * Answers to the brain's gaps a term is removed from (`content`), every
+   * one holding a term, whatever documents are named. Always 0 for
+   * `personal`, which forgets the person as an answerer instead.
+   */
+  gapAnswers: number;
+  /**
    * Originals of uploaded files it deletes (and the uploads it forgets):
    * those of the collection (`personal`), or every one uploaded as a
    * document named (`content`), whether or not a term is in its text, as
@@ -766,7 +826,8 @@ export interface PurgeResult {
    * longer one (which the plan counted, `inLongerWords`), a form spelled
    * otherwise that folds to the same ("Rene" for "René"), or a term of
    * several words joined otherwise ("tom-visser" for "tom visser").
-   * Absent for `personal`.
+   * Gap answers still holding a term count too: one given after the
+   * purge read them, left to a purge again. Absent for `personal`.
    */
   stillFound?: number;
 }
@@ -808,6 +869,11 @@ export interface KnowledgeApi {
    * person may read, or from one of them.
    */
   search: (query: string, options?: SearchOptions) => Promise<SearchResults>;
+  /**
+   * The Brain's recall (brain-api.ts): evidence for a question from the
+   * collections the person may read, as a bounded memory pack.
+   */
+  recall: (input: RecallInput) => Promise<MemoryPack>;
   /** The collections the person may read and their skills, as an agent's. */
   catalog: KnowledgeTools["catalog"];
   /** A document, or one section of it. */
@@ -876,6 +942,11 @@ export interface CollectionReader {
   read: KnowledgeTools["read"];
   /** A document's links and backlinks, and for a skill, its files. */
   follow: KnowledgeTools["follow"];
+  /**
+   * The Brain's recall (brain-api.ts) over this collection only: a filter
+   * naming another is refused as not found.
+   */
+  recall: (input: RecallInput) => Promise<MemoryPack>;
 }
 
 /** Why a Knowledge call was refused. */
@@ -893,10 +964,16 @@ export const knowledgeErrors = defineErrorFamily({
     "This document has too many headings to save. Split it into several documents.",
   "knowledge.too_many_links":
     "This document has too many links to save. Split it into several documents.",
+  "knowledge.excluded":
+    "This wasn't saved: it contains sensitive personal data, such as someone's health, pay or beliefs, which Grasp doesn't keep. Remove it and save again.",
+  "knowledge.held":
+    "This wasn't saved: it may contain sensitive personal data, such as someone's health, pay or beliefs, which Grasp doesn't keep. Remove it and save again.",
   "knowledge.conflict":
     "This document changed since you opened it. Load the latest version and apply your change to it.",
   "knowledge.purge_expired":
     "This purge wasn't confirmed in time, or isn't the one prepared. Prepare it again.",
+  "knowledge.unavailable":
+    "This version's text can't be read right now. Try again in a moment.",
   "knowledge.purge_index_pending":
     "The data is deleted, but the search index isn't cleaned up yet. Run the purge again to finish.",
 });

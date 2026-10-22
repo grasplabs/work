@@ -117,6 +117,7 @@ import {
   closesOn,
   dueLinks,
   leads,
+  leadsTalked,
   progressOf,
   sendsFrom,
   takingPart,
@@ -446,6 +447,22 @@ export class Onboarding extends DurableObject<Env> {
       .limit(1)
       .all();
     return row?.at ?? null;
+  }
+
+  /**
+   * The day each team's lead finished their interview, for the teams the
+   * admin's view already counts as talked (rules.ts, `leadsTalked`): the
+   * brain's stakeholder interviews, without anything said in them.
+   */
+  leadsTalked(
+    now: string = new Date().toISOString()
+  ): { team: string; person: string; day: string }[] {
+    const roster = this.#roster();
+    return roster === null
+      ? []
+      : [...leadsTalked(roster, this.#interviews(), now)].map(
+          ([team, { person, day }]) => ({ team, person, day })
+        );
   }
 
   /** Whether interviews may happen now: not paused, and the agreements in. */
@@ -1420,7 +1437,7 @@ export class Onboarding extends DurableObject<Env> {
   adminFacts(): {
     told: boolean;
     mapped: string[];
-    links: Omit<typeof links.$inferSelect, "keyMark" | "version">[];
+    links: Omit<typeof links.$inferSelect, "keyMark" | "version" | "ledTeam">[];
     interviews: AdminInterviewFacts[];
   } {
     // Only the counts are kept, read a page of interviews at a time, so a
@@ -1572,14 +1589,17 @@ export class Onboarding extends DurableObject<Env> {
         .where(eq(onboarding.id, 1))
         .run();
       for (const person of due) {
-        this.#db.insert(links).values({ person, sentAt: now }).run();
+        // Whether they lead a team is kept as it is now, when their link
+        // goes out: a lead named later never makes theirs a lead's interview.
+        const ledTeam =
+          roster.teams.find(({ lead: led }) => led === person)?.id ?? null;
+        this.#db.insert(links).values({ person, sentAt: now, ledTeam }).run();
         this.#queuePersonMail(
           { roster, plan, said, person, sentAt: now },
           "link"
         );
         const team = roster.people.find(({ id }) => id === person)?.team;
-        const lead = roster.teams.some(({ lead: led }) => led === person);
-        if (team !== undefined && !lead) {
+        if (team !== undefined && ledTeam === null) {
           // Asked once ever: a person taken off and on again isn't asked twice.
           const added = this.#db
             .insert(countedPeople)
@@ -2014,13 +2034,37 @@ export class Onboarding extends DurableObject<Env> {
     },
     updatedAt: string = new Date().toISOString()
   ): void {
+    const [held] = this.#db
+      .select({
+        kind: interviewStates.kind,
+        leadOf: interviewStates.leadOf,
+        completedAt: interviewStates.completedAt,
+      })
+      .from(interviewStates)
+      .where(eq(interviewStates.person, state.person))
+      .all();
+    // Once they agreed, whose interview it was, and of which team, is
+    // settled: a lead named, moved or replaced afterwards changes nothing.
+    // Before that, a lead's interview is of the team they lead now.
+    const settled =
+      held === undefined || held.completedAt === null
+        ? {
+            kind: state.kind,
+            leadOf:
+              state.kind === "lead"
+                ? (this.#roster()?.teams.find(
+                    ({ lead }) => lead === state.person
+                  )?.id ?? null)
+                : null,
+          }
+        : { kind: held.kind, leadOf: held.leadOf };
     this.#db
       .insert(interviewStates)
-      .values({ ...state, updatedAt })
+      .values({ ...state, ...settled, updatedAt })
       .onConflictDoUpdate({
         target: interviewStates.person,
         set: {
-          kind: state.kind,
+          ...settled,
           startedAt: state.startedAt,
           completedAt: state.completedAt,
           updatedAt,
@@ -2139,12 +2183,27 @@ export class Onboarding extends DurableObject<Env> {
   #interviews(): Map<string, InterviewState> {
     return new Map(
       this.#db
-        .select()
+        .select({
+          person: interviewStates.person,
+          leadOf: interviewStates.leadOf,
+          startedAt: interviewStates.startedAt,
+          completedAt: interviewStates.completedAt,
+          ledTeam: links.ledTeam,
+        })
         .from(interviewStates)
+        .leftJoin(links, eq(links.person, interviewStates.person))
         .all()
-        .map(({ person, startedAt, completedAt }) => [
+        .map(({ person, leadOf, startedAt, completedAt, ledTeam }) => [
           person,
-          { person, startedAt, completedAt },
+          {
+            person,
+            startedAt,
+            completedAt,
+            // A lead's interview only if they led the team when their link
+            // went out and talked as the lead of that same team: a lead
+            // replaced or moved before they talked counts as nobody's lead.
+            ...(ledTeam !== null && ledTeam === leadOf ? { ledTeam } : {}),
+          },
         ])
     );
   }

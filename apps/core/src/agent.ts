@@ -430,6 +430,13 @@ export interface Turn {
    * so one that ends while the model answers is still read in this turn.
    */
   events?: () => Message[];
+  /**
+   * The code runs whose results may not reach the model now: the chat's
+   * agent, for its person, can no longer read something one of them read
+   * (workspace.ts). Asked before every model request, after `whyStop`, so
+   * a revocation between two requests holds from the next.
+   */
+  withheld?: () => Promise<ReadonlySet<string>>;
 }
 
 const messageRoles = new Set<unknown>([
@@ -617,6 +624,155 @@ export const recentHistory = (
   return sent;
 };
 
+/** What a withheld code result reads as, in place of its output. */
+export const withheldResult =
+  "(output withheld: this chat can no longer read what it came from)";
+
+/** What a response after a withheld result reads as, in place of its text. */
+export const withheldResponse =
+  "(withheld: written after reading what this chat can no longer read)";
+
+/** The code a call after a withheld result reads as, in place of its own. */
+const withheldCode = `// ${withheldResponse}`;
+
+/** The run a code step's result is of, as its details name it. */
+const resultRunId = (message: Message): string | undefined => {
+  if (message.role !== "toolResult") {
+    return undefined;
+  }
+  const details: unknown = message.details;
+  return typeof details === "object" &&
+    details !== null &&
+    "runId" in details &&
+    typeof details.runId === "string"
+    ? details.runId
+    : undefined;
+};
+
+/**
+ * A response kept to its shape: one note for its text, its thinking
+ * dropped, each call kept with its ID and name (so every call still has
+ * its result) and a note for its code. Only ever a response of an earlier
+ * turn, which the provider takes without its thinking: one of the turn
+ * under way stops the turn instead (`readsUnderWay`).
+ */
+const withheldAssistant = (message: AssistantMessage): AssistantMessage => {
+  const said = message.content.some(({ type }) => type === "text");
+  return {
+    ...message,
+    content: [
+      ...(said ? [{ type: "text" as const, text: withheldResponse }] : []),
+      ...message.content.flatMap((block) =>
+        block.type === "toolCall"
+          ? [
+              {
+                type: "toolCall" as const,
+                id: block.id,
+                name: block.name,
+                arguments: { code: withheldCode },
+              },
+            ]
+          : []
+      ),
+    ],
+  };
+};
+
+/**
+ * `history` as a request may send it while the code runs `runs` are
+ * withheld: each of their results reads as a note, and so does everything
+ * after it in the same turn (the model's later text and code, and later
+ * results), which may repeat what it read. What came before, the person's
+ * own words and every other turn stay as they are; each call keeps its ID
+ * and its result. The note never says what was read, from where or how
+ * long it was.
+ *
+ * Accepted residual: what the model wrote in a later turn, without reading
+ * again, from its own earlier answer stays: that turn's reads were its
+ * own. And nothing is withheld for a run that recorded no source.
+ */
+export const withholdRuns = (
+  history: readonly Message[],
+  runs: ReadonlySet<string>
+): Message[] => {
+  if (runs.size === 0) {
+    return [...history];
+  }
+  let after = false;
+  return history.map((message): Message => {
+    if (message.role === "user") {
+      after = false;
+      return message;
+    }
+    if (message.role === "toolResult") {
+      const runId = resultRunId(message);
+      if (!after && (runId === undefined || !runs.has(runId))) {
+        return message;
+      }
+      after = true;
+      return { ...message, content: [{ type: "text", text: withheldResult }] };
+    }
+    return message.role === "assistant" && after
+      ? withheldAssistant(message)
+      : message;
+  });
+};
+
+/**
+ * Whether a result of the turn under way (after its question) is of one
+ * of the code runs `runs`.
+ */
+const readsUnderWay = (
+  messages: readonly AgentMessage[],
+  runs: ReadonlySet<string>
+): boolean => {
+  if (runs.size === 0) {
+    return false;
+  }
+  const asked = messages.findLastIndex(({ role }) => role === "user");
+  return messages.slice(asked + 1).some((message) => {
+    const runId = isMessage(message) ? resultRunId(message) : undefined;
+    return runId !== undefined && runs.has(runId);
+  });
+};
+
+/**
+ * `history` with each section of the system prompt (the APIs, memory,
+ * skills, project) given only where it was given last: an earlier value,
+ * which may hold what the chat can no longer read (memory a person lost,
+ * a skill unlisted), never reaches the model, on a provider that replays
+ * every system message as on one that keeps the latest. A system message
+ * left with nothing to say is dropped; one that declares tools is kept.
+ */
+export const latestSections = (history: readonly Message[]): Message[] => {
+  const given = new Set<string>();
+  const kept: Message[] = [];
+  for (const message of history.toReversed()) {
+    if (message.role !== "system" || message.sections === undefined) {
+      kept.push(message);
+      continue;
+    }
+    const sections = Object.fromEntries(
+      Object.entries(message.sections).filter(([name]) => !given.has(name))
+    );
+    for (const name of Object.keys(message.sections)) {
+      given.add(name);
+    }
+    const { sections: _all, ...rest } = message;
+    const empty =
+      Object.keys(sections).length === 0 &&
+      message.content.length === 0 &&
+      message.toolsAdded === undefined &&
+      message.toolsRemoved === undefined;
+    if (!empty) {
+      kept.push(
+        Object.keys(sections).length === 0 ? rest : { ...rest, sections }
+      );
+    }
+  }
+  return kept.toReversed();
+};
+
 /** What the turn has done so far. */
 interface Progress {
   /** Model responses. */
@@ -628,6 +784,8 @@ interface Progress {
   asking?: { response: AssistantMessage; calls: number };
   /** Why the turn was stopped before a request, if it was. */
   stopped?: Error;
+  /** The runs the next request withholds, read as it was prepared. */
+  withheld: ReadonlySet<string>;
 }
 
 /**
@@ -698,6 +856,7 @@ export const runTurn = async ({
   write,
   whyStop,
   events,
+  withheld,
 }: Turn): Promise<TurnResult> => {
   // Cancelled by the caller, or stopped here (see `whyStop`).
   const stop = new AbortController();
@@ -706,7 +865,7 @@ export const runTurn = async ({
     ...systemUpdates(history, apis, context),
     { role: "user", content: question, timestamp: Date.now() },
   ];
-  const progress: Progress = { steps: 0, runs: 0 };
+  const progress: Progress = { steps: 0, runs: 0, withheld: new Set() };
   const tools = [
     executeCode({ apis, scope, runs, loader, sandbox, codeTimeoutMs }),
   ];
@@ -726,15 +885,29 @@ export const runTurn = async ({
     { messages: [...history], tools },
     {
       model: model.model,
-      // The transcript holds only pi's own messages.
+      // The transcript holds only pi's own messages. What the chat can no
+      // longer read is withheld first, so the request fits without it.
       convertToLlm: (messages) =>
-        recentHistory(messages.filter(isMessage), room),
+        recentHistory(
+          latestSections(
+            withholdRuns(messages.filter(isMessage), progress.withheld)
+          ),
+          room
+        ),
       toolExecution: "sequential",
       getSteeringMessages: taken,
       getFollowUpMessages: taken,
       // Checked again before every model request.
-      prepareRequest: async () => {
-        const reason = await whyStop();
+      // What is withheld is read here too, once a request: a result of the
+      // turn under way can't be withheld, as the provider takes the latest
+      // response whole (its thinking with its calls), so the turn stops.
+      prepareRequest: async ({ context: { messages } }) => {
+        progress.withheld = (await withheld?.()) ?? new Set();
+        const reason =
+          (await whyStop()) ??
+          (readsUnderWay(messages, progress.withheld)
+            ? agentErrors.create("agent.history_revoked")
+            : undefined);
         if (reason !== undefined) {
           progress.stopped = reason;
           stop.abort();
