@@ -1,4 +1,5 @@
 import { addWorkingDays, dayOf } from "@grasp-os/shared/admin/org-record";
+import type { DrawnWork } from "@grasp-os/shared/admin/org-record";
 import { createAuditEvent } from "@grasp-os/shared/audit";
 import type { AuditActor, AuditDetailValue } from "@grasp-os/shared/audit";
 import { randomToken, sha256Hex } from "@grasp-os/shared/encoding";
@@ -85,6 +86,7 @@ import {
   auditOutbox,
   countedPeople,
   drawFailures,
+  drawnWorks,
   events,
   interviewStates,
   interviewSettings,
@@ -134,6 +136,8 @@ import {
 import type { InterviewState, TeamCount } from "./rules.ts";
 import { interviewBrief, setupView } from "./stephen-setup.ts";
 import { assignWork, companyName, drawTeamMap } from "./team-map.ts";
+import { drawnWorkSchema, drawWork, knownOf } from "./work-drawing.ts";
+import type { WorkBrief, WorkKnown } from "./work-drawing.ts";
 
 // The onboarding's store: one Durable Object per deployment holds who works
 // where, the plan, everyone's link and where each interview stands, the log
@@ -282,7 +286,43 @@ export interface TeamWork {
   doers: string[];
   share: number;
   asked: string[];
+  /** As drawn from what its people agreed to; null before it is. */
+  drawn: DrawnWork | null;
+  /** How far it is known, under the organization's rules. */
+  known: WorkKnown;
 }
+
+/** A piece of work due to be drawn, with when it may be and how often it failed so far. */
+interface WorkToDraw {
+  id: string;
+  team: string;
+  /** Whose agreements it is drawn from, and when each last agreed. */
+  agreed: Record<string, string>;
+  /** Whose agreement it is drawn for: who agreed last. */
+  about: string;
+  after: number;
+  tries: number;
+}
+
+const agreedSchema = z.record(z.string(), z.string());
+
+/** Whose agreements a piece of work was drawn from, as the store keeps it. */
+const agreedOf = (stored: string): Record<string, string> =>
+  agreedSchema.safeParse(JSON.parse(stored)).data ?? {};
+
+/** A drawing as the store keeps it; null when there is none. */
+const drawingOf = (stored: string | null): DrawnWork | null =>
+  stored === null
+    ? null
+    : (drawnWorkSchema.safeParse(JSON.parse(stored)).data ?? null);
+
+/** The questions earlier interviews left open, for Stephen to ask when they come up. */
+const openKnown = (drawn: DrawnWork | null): string[] =>
+  drawn === null || drawn.open.length === 0
+    ? []
+    : [
+        `What earlier interviews left open, to ask when it comes up: ${drawn.open.slice(0, 4).join(" ")}`,
+      ];
 
 const doersSchema = z.array(z.string());
 
@@ -298,7 +338,10 @@ export interface TurnContext {
   lead: string | null;
   /** The piece of work Stephen learns about; empty until the team's map names it. */
   work: string;
-  /** What Stephen knows beforehand: a lead's team, his setup, the kickoff and the documents. */
+  /**
+   * What Stephen knows beforehand: a lead's team, what earlier interviews
+   * about someone's work left open, his setup, the kickoff and the documents.
+   */
   known: string;
   /** Names and words to listen for. */
   terms: string[];
@@ -594,6 +637,7 @@ export class Onboarding extends DurableObject<Env> {
           this.#db.delete(works).where(eq(works.id, id)).run();
         }
       }
+      this.#dropOrphanDrawings();
       for (const { person, work } of this.#db.select().from(askedAbout).all()) {
         if (teamOf.get(person) !== workTeam.get(work)) {
           this.#db
@@ -894,7 +938,8 @@ export class Onboarding extends DurableObject<Env> {
   /**
    * What one turn of someone's interview may know, from the device it is
    * on, while the interviews run: who they are, their team and lead, and
-   * what Stephen knows of the company beforehand. Never from the page,
+   * what Stephen knows of the company beforehand, and what earlier
+   * interviews about their work left open. Never from the page,
    * which could say anything. `work` stays empty until the team's map
    * names their piece of work: Stephen then asks which one it is.
    */
@@ -926,6 +971,7 @@ export class Onboarding extends DurableObject<Env> {
     const teamName = team?.name ?? "";
     const known = [
       ...(kind === "lead" ? teamKnown(person.name, teamName, members) : []),
+      ...(kind === "lead" ? [] : openKnown(this.#drawingAskedOf(person.id))),
       this.interviewBrief(),
       this.documentsBrief(teamName),
     ].filter((part) => part !== "");
@@ -1006,23 +1052,28 @@ export class Onboarding extends DurableObject<Env> {
 
   /**
    * Draws the next thing due, one at a time, so a failure leaves the rest
-   * for the next go: the map of a team whose lead agreed to something new.
-   * What fails is tried again after a minute, five and thirty; then it's
-   * given up and logged, and the team gets its links as a team without a
-   * lead does, until staff draw it again. Returns what it drew, or null.
+   * for the next go: the map of a team whose lead agreed to something new,
+   * then a piece of work someone agreed to more about, so it is drawn from
+   * who does it. What fails is tried again after a minute, five and
+   * thirty; then it's given up and logged until something new is agreed:
+   * a team then gets its links as a team without a lead does, until staff
+   * draw it again. Returns what it drew, or null.
    */
   async drawNext(now: number = Date.now()): Promise<string | null> {
-    const team = this.#teamsToMap(now).find(({ after }) => after <= now);
-    if (team === undefined) {
+    const due = this.#dueToDraw(now).find(({ after }) => after <= now);
+    if (due === undefined) {
       return null;
     }
-    const item = `team:${team.id}`;
+    const { item, about } = due;
     const at = new Date(now).toISOString();
+    const what = due.work === undefined ? "map" : "work";
     try {
-      await this.#mapTeam(team.id, at);
+      await (due.work === undefined
+        ? this.#mapTeam(due.id, at)
+        : this.#drawWork(due.work, at));
       this.#db.delete(drawFailures).where(eq(drawFailures.item, item)).run();
     } catch (error) {
-      const tries = team.tries + 1;
+      const tries = due.tries + 1;
       log.error("onboarding.draw_failed", {
         item,
         tries,
@@ -1030,7 +1081,11 @@ export class Onboarding extends DurableObject<Env> {
       });
       const wait = drawRetryMs[tries - 1];
       if (wait === undefined) {
-        this.#giveUp(team.id, team.lead, at);
+        if (due.work === undefined) {
+          this.#giveUp(due.id, about, at);
+        } else {
+          this.#giveUpWork(due.work, at);
+        }
       } else {
         const after = new Date(now + wait).toISOString();
         this.#db
@@ -1041,7 +1096,7 @@ export class Onboarding extends DurableObject<Env> {
             set: { tries, after },
           })
           .run();
-        this.#noted(team.lead, "map.failed", at, "grasp");
+        this.#noted(about, `${what}.failed`, at, "grasp");
       }
     }
     return item;
@@ -1077,29 +1132,60 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
-   * A team's pieces of work, as its map holds them, and who is asked about
-   * each: for staff, and for the drawing of each piece (GRA-366).
+   * A team's pieces of work, as its map holds them, who is asked about
+   * each, each as drawn from what its people agreed to, and how far it is
+   * known: for staff, and for the drawing of each piece.
    */
   teamWorks(team: string): TeamWork[] {
     const asked = this.#db.select().from(askedAbout).all();
+    const roster = this.#roster();
+    const lead = roster?.teams.find(({ id }) => id === team)?.lead ?? null;
+    const away = new Set(
+      roster?.people.filter((person) => person.away).map(({ id }) => id)
+    );
+    const drawings = new Map(
+      this.#db
+        .select()
+        .from(drawnWorks)
+        .all()
+        .map((row) => [row.work, row])
+    );
     return this.#db
       .select()
       .from(works)
       .where(eq(works.team, team))
       .orderBy(asc(works.position))
       .all()
-      .map((row) => ({
-        id: row.id,
-        name: row.name,
-        local: row.local,
-        one: row.one,
-        many: row.many,
-        doers: doersOf(row.doers),
-        share: row.share,
-        asked: asked
-          .filter(({ work }) => work === row.id)
-          .map(({ person }) => person),
-      }));
+      .map((row) => {
+        const doers = doersOf(row.doers);
+        const stored = drawings.get(row.id);
+        const drawn = drawingOf(stored?.drawn ?? null);
+        const agreed = agreedOf(stored?.agreed ?? "{}");
+        // Who it was drawn from, in the order they agreed.
+        const told = (drawn?.from ?? []).toSorted((a, b) =>
+          (agreed[a] ?? "").localeCompare(agreed[b] ?? "")
+        );
+        return {
+          id: row.id,
+          name: row.name,
+          local: row.local,
+          one: row.one,
+          many: row.many,
+          doers,
+          share: row.share,
+          asked: asked
+            .filter(({ work }) => work === row.id)
+            .map(({ person }) => person),
+          drawn,
+          known: knownOf(drawn, {
+            id: row.id,
+            team,
+            told,
+            doers: doers.filter((id) => !away.has(id)),
+            lead,
+          }),
+        };
+      });
   }
 
   /**
@@ -2262,10 +2348,309 @@ export class Onboarding extends DurableObject<Env> {
     });
   }
 
-  /** Sets the alarm for the next map to draw, when there is one. */
+  /**
+   * Everything due to be drawn, in the order it's drawn in: the teams'
+   * maps first, so a piece of work is drawn from who does it.
+   */
+  #dueToDraw(now: number): {
+    item: string;
+    id: string;
+    about: string;
+    after: number;
+    tries: number;
+    work?: WorkToDraw;
+  }[] {
+    return [
+      ...this.#teamsToMap(now).map((team) => ({
+        ...team,
+        item: `team:${team.id}`,
+        about: team.lead,
+      })),
+      ...this.#worksToDraw(now).map((work) => ({
+        item: `work:${work.id}`,
+        id: work.id,
+        about: work.about,
+        after: work.after,
+        tries: work.tries,
+        work,
+      })),
+    ];
+  }
+
+  /**
+   * The pieces of work due to be drawn: someone who does one, or who is
+   * asked about it, agreed to something since it was last drawn. Not
+   * before someone other than the lead agreed: the lead's interview was
+   * about the whole team, so it tells a piece of work alone only when it
+   * is the lead's own. The longest waiting first.
+   */
+  #worksToDraw(now: number): WorkToDraw[] {
+    const roster = this.#roster();
+    if (roster === null) {
+      return [];
+    }
+    const agreedAt = new Map(
+      this.#db
+        .select({
+          person: interviewStates.person,
+          agreedAt: interviewStates.agreedAt,
+        })
+        .from(interviewStates)
+        .where(isNotNull(interviewStates.agreedAt))
+        .all()
+        .map(({ person, agreedAt: at }) => [person, at ?? ""])
+    );
+    const asked = this.#db.select().from(askedAbout).all();
+    const drawnFrom = new Map(
+      this.#db
+        .select({ work: drawnWorks.work, agreed: drawnWorks.agreed })
+        .from(drawnWorks)
+        .all()
+        .map(({ work, agreed }) => [work, agreedOf(agreed)])
+    );
+    const failures = new Map(
+      this.#db
+        .select()
+        .from(drawFailures)
+        .all()
+        .map((row) => [row.item, row])
+    );
+    const teamsOn = new Map(
+      roster.teams.filter(({ off }) => !off).map((team) => [team.id, team])
+    );
+    const onRoster = new Set(roster.people.map(({ id }) => id));
+    const due = this.#db
+      .select()
+      .from(works)
+      .all()
+      .flatMap((row): (WorkToDraw & { since: string })[] => {
+        const team = teamsOn.get(row.team);
+        if (team === undefined) {
+          return [];
+        }
+        const doers = doersOf(row.doers);
+        const tellers = [
+          ...new Set([
+            ...doers,
+            ...asked
+              .filter(({ work }) => work === row.id)
+              .map(({ person }) => person),
+          ]),
+        ].filter((id) => onRoster.has(id) && agreedAt.has(id));
+        const agreed = Object.fromEntries(
+          tellers.map((id) => [id, agreedAt.get(id) ?? ""])
+        );
+        const leadsOwn =
+          doers.length > 0 && doers.every((id) => id === team.lead);
+        const before = drawnFrom.get(row.id) ?? {};
+        const since = tellers
+          .filter((id) => before[id] !== agreed[id])
+          .map((id) => agreed[id] ?? "")
+          .toSorted();
+        const [first] = since;
+        const last = since.at(-1);
+        if (
+          first === undefined ||
+          (!leadsOwn && tellers.every((id) => id === team.lead))
+        ) {
+          return [];
+        }
+        const failed = failures.get(`work:${row.id}`);
+        return [
+          {
+            id: row.id,
+            team: row.team,
+            agreed,
+            about:
+              tellers.find((id) => agreed[id] === last) ?? tellers[0] ?? "",
+            after: failed === undefined ? now : Date.parse(failed.after),
+            tries: failed?.tries ?? 0,
+            since: first,
+          },
+        ];
+      });
+    return due
+      .toSorted((a, b) => a.since.localeCompare(b.since))
+      .map(({ since: _since, ...work }) => work);
+  }
+
+  /**
+   * Draws one piece of work from the agreed facts of everyone who does it
+   * or is asked about it. The lead's interview was about the whole team,
+   * so it tells a piece of work only when nobody else who does it has
+   * talked: their own work, say. Otherwise what the lead agreed to is
+   * there for context. Drawn, unless someone agreed to more meanwhile:
+   * then it's drawn once more. Someone it rests on whose interview went
+   * while it was drawn takes the drawing with them.
+   */
+  async #drawWork(due: WorkToDraw, at: string): Promise<void> {
+    const roster = this.#roster();
+    const team = roster?.teams.find(({ id }) => id === due.team);
+    const work = this.teamWorks(due.team).find(({ id }) => id === due.id);
+    if (roster === null || team === undefined || work === undefined) {
+      return;
+    }
+    const inputs = Object.keys(due.agreed).flatMap((person) => {
+      const input = this.drawInput(person);
+      return input === null ? [] : [input];
+    });
+    const others = inputs.filter(({ person }) => person !== team.lead);
+    const telling = others.length > 0 ? others : inputs;
+    const leadInput =
+      team.lead !== null && telling.every(({ person }) => person !== team.lead)
+        ? this.drawInput(team.lead)
+        : null;
+    if (telling.length === 0) {
+      // Nothing agreed to draw from: noted as drawn as it is, so it isn't due again and again.
+      this.#keepDrawing(due, null, at);
+      return;
+    }
+    const asked = new Map(
+      this.#db
+        .select()
+        .from(askedAbout)
+        .all()
+        .map(({ person, work: of }) => [person, of])
+    );
+    const names = new Map(
+      this.#db
+        .select({ id: works.id, name: works.name })
+        .from(works)
+        .all()
+        .map(({ id, name }) => [id, name])
+    );
+    const tellers = telling.map(({ person, facts }) => {
+      const who = roster.people.find(({ id }) => id === person);
+      const of = asked.get(person);
+      let about;
+      if (person === team.lead) {
+        about = "the work of the whole team";
+      } else if (of !== undefined && of !== work.id) {
+        about = names.get(of);
+      }
+      return {
+        person,
+        title: who?.title ?? "",
+        facts,
+        example:
+          this.#held(person)?.lines.find(({ file }) => file !== undefined)
+            ?.file ?? null,
+        ...(about === undefined ? {} : { about }),
+      };
+    });
+    const brief: WorkBrief = {
+      company: await companyName(this.env),
+      team: team.name,
+      teams: roster.teams
+        .filter(({ id }) => id !== team.id)
+        .map(({ name }) => name),
+      work: { name: work.name, local: work.local, one: work.one },
+      lead: leadInput?.facts.map(({ record }) => record) ?? [],
+      tellers,
+      documents: this.documentsBrief(team.name),
+    };
+    const drawn = await drawWork(this.env, brief, (took) => {
+      this.meter(took, at);
+    });
+    this.ctx.storage.transactionSync(() => {
+      const gone = [
+        ...drawn.from,
+        ...(leadInput === null ? [] : [leadInput.person]),
+      ].some((person) => this.#agreedAt(person) === null);
+      if (gone) {
+        return;
+      }
+      this.#keepDrawing(due, drawn, at);
+    });
+  }
+
+  /**
+   * Keeps a piece of work as drawn, from whose agreements, or as it was
+   * when `drawn` is null; and notes as drawn whoever it was drawn for
+   * that has nothing else waiting to be drawn.
+   */
+  #keepDrawing(due: WorkToDraw, drawn: DrawnWork | null, at: string): void {
+    const exists = this.#db
+      .select({ id: works.id })
+      .from(works)
+      .where(eq(works.id, due.id))
+      .all();
+    if (exists.length === 0) {
+      return;
+    }
+    const agreed = JSON.stringify(due.agreed);
+    this.#db
+      .insert(drawnWorks)
+      .values({
+        work: due.id,
+        drawn: drawn === null ? null : JSON.stringify(drawn),
+        agreed,
+        at,
+      })
+      .onConflictDoUpdate({
+        target: drawnWorks.work,
+        set: {
+          ...(drawn === null ? {} : { drawn: JSON.stringify(drawn) }),
+          agreed,
+          at,
+        },
+      })
+      .run();
+    const lead = this.#roster()?.teams.find(({ id }) => id === due.team)?.lead;
+    const waiting = this.#worksToDraw(Date.now());
+    for (const [person, agreedAt] of Object.entries(due.agreed)) {
+      // A lead's own drawing is the team's map.
+      if (
+        person !== lead &&
+        !waiting.some((work) => person in work.agreed) &&
+        this.#agreedAt(person) === agreedAt
+      ) {
+        this.drawn(person, agreedAt);
+      }
+    }
+    if (drawn !== null) {
+      this.#noted(due.about, "work.drawn", at, "grasp");
+    }
+  }
+
+  /**
+   * Stops drawing a piece of work that keeps failing, until someone agrees
+   * to something new about it: what was drawn of it before stays.
+   */
+  #giveUpWork(due: WorkToDraw, at: string): void {
+    this.ctx.storage.transactionSync(() => {
+      this.#db
+        .delete(drawFailures)
+        .where(eq(drawFailures.item, `work:${due.id}`))
+        .run();
+      this.#keepDrawing(due, null, at);
+      this.#noted(due.about, "work.gave_up", at, "grasp");
+    });
+  }
+
+  /** The drawing of the piece of work someone is asked about; null before it is drawn. */
+  #drawingAskedOf(person: string): DrawnWork | null {
+    const [row] = this.#db
+      .select({ drawn: drawnWorks.drawn })
+      .from(askedAbout)
+      .innerJoin(drawnWorks, eq(drawnWorks.work, askedAbout.work))
+      .where(eq(askedAbout.person, person))
+      .all();
+    return drawingOf(row?.drawn ?? null);
+  }
+
+  /** Forgets the drawings of pieces of work that are gone. */
+  #dropOrphanDrawings(): void {
+    this.#db
+      .delete(drawnWorks)
+      .where(sql`${drawnWorks.work} not in (select ${works.id} from ${works})`)
+      .run();
+  }
+
+  /** Sets the alarm for the next thing to draw, when there is one. */
   async #armDrawing(): Promise<void> {
     const now = Date.now();
-    const afters = this.#teamsToMap(now).map(({ after }) => after);
+    const afters = this.#dueToDraw(now).map(({ after }) => after);
     if (afters.length > 0) {
       await this.#alarmBy(Math.max(Math.min(...afters), now + drawNextMs));
     }
@@ -2347,11 +2732,13 @@ export class Onboarding extends DurableObject<Env> {
           `w-${crypto.randomUUID().slice(0, 8)}`,
         doers: [...work.doers],
       }));
-      // A piece someone was asked about stays, though the map no longer names it.
+      // A piece someone was asked about, or one drawn already, stays,
+      // though the map no longer names it.
       for (const old of before) {
         if (
           !drawn.some(({ id }) => id === old.id) &&
-          members.some(({ id }) => asked.get(id) === old.id)
+          (old.drawn !== null ||
+            members.some(({ id }) => asked.get(id) === old.id))
         ) {
           drawn.push({ ...old, doers: [...old.doers] });
         }
@@ -2410,6 +2797,7 @@ export class Onboarding extends DurableObject<Env> {
         })
         .where(eq(teams.id, teamId))
         .run();
+      this.#dropOrphanDrawings();
       this.#noted(input.person, "map.drawn", at, "grasp");
     });
   }
