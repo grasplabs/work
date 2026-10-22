@@ -110,6 +110,12 @@ export const frozenBindingsOf = (
 /** What a call of a run needs to know of it, from its row and receipt. */
 export interface CallingRun {
   readonly runId: string;
+  /**
+   * Its lineage's root, as its row pins it: the run itself for a root.
+   * What its model requests count against at the gateway, with every
+   * other run of its lineage's (resource-calls.ts, `callModel`).
+   */
+  readonly rootRunId: string;
   readonly workflowId: string;
   readonly version: number;
   /** Whom it acts for: the person its start acted for. */
@@ -315,6 +321,7 @@ export const callingRunOf = async (
       principal: workflowResourceRuns.principalId,
       status: workflowResourceRuns.status,
       restricted: workflowResourceRuns.restricted,
+      rootRunId: workflowResourceRuns.rootRunId,
       invokerType: workflowStartReceipts.invokerType,
       invokerId: workflowStartReceipts.invokerId,
       originAppVersion: workflowStartReceipts.originAppVersion,
@@ -342,6 +349,7 @@ export const callingRunOf = async (
   }
   return {
     runId,
+    rootRunId: row.rootRunId ?? runId,
     workflowId: row.workflowId,
     version: row.version,
     principal: row.principal,

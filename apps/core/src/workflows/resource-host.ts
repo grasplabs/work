@@ -3,8 +3,8 @@ import { generatedImport } from "@grasp-os/open-workflow/generate";
 import { connectErrors } from "@grasp-os/shared/connect";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
-import { operationErrors } from "@grasp-os/shared/operations";
 import { errorFields, log } from "@grasp-os/shared/log";
+import { operationErrors } from "@grasp-os/shared/operations";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
@@ -314,6 +314,12 @@ export interface HostedResourceRun {
    */
   rootRunId?: string;
   depth?: number;
+  /**
+   * When its lineage's root was admitted, in ms, as the root's row says:
+   * no wait of the run's outlasts the lineage's age from then. Unset, the
+   * run is its own root: `createdAt`.
+   */
+  lineageStartedAt?: number;
   /** Its sealed build, verified. */
   build: LoadedBuild;
   /** What its calls go by: its principal, invoker and frozen bindings. */
@@ -3478,6 +3484,42 @@ export class ResourceRunHost
   }
 
   /**
+   * `#until`'s work for a listen task's enter step: its filters with its
+   * deadline, journaled beside its record.
+   */
+  async #listenUntil(
+    attempt: StepAttempt,
+    listening: Extract<SealedTask, { kind: "listen" }>,
+    passed: { input: Json; output: Json; size: number }
+  ): Promise<number> {
+    attempt.listen = await this.#resolvedListen(attempt, listening, passed);
+    attempt.until = Date.now() + listening.timeoutMs;
+    return attempt.until;
+  }
+
+  /**
+   * `#until`'s work for a run task's enter step: its child, started once,
+   * journaled beside its record, and how long the run waits for it: only
+   * while its lineage may still run, from its root's start, never a whole
+   * age from now. Past it the wait times out, the run fails and stops the
+   * child (resource-runs.ts), so no child keeps a lineage going past its
+   * age.
+   */
+  async #childUntil(
+    attempt: StepAttempt,
+    running: Extract<SealedTask, { kind: "run" }>,
+    passed: { input: Json; output: Json; size: number }
+  ): Promise<number> {
+    attempt.child = await this.#startedChild(attempt, running, passed);
+    const { limits } = await quotaPolicy(this.#env);
+    const lineageEnds =
+      (this.#run.lineageStartedAt ?? this.#run.createdAt) +
+      limits.workflowAgeMs;
+    attempt.until = Math.min(Date.now() + maxDeadlineMs, lineageEnds);
+    return attempt.until;
+  }
+
+  /**
    * `ResourceAttemptHost.until`, for `attempt`: its task's deadline, once,
    * in its enter step: an expression wait's duration from now, or a
    * `grasp.sleepUntil` call's timestamp, built from what the build sealed
@@ -3495,44 +3537,31 @@ export class ResourceRunHost
       if (step.kind === "enter" && isDecisionTask(task)) {
         return await this.#opened(attempt, task, frame);
       }
-      const entering = step.kind === "enter" && task !== undefined;
-      const deadline = entering ? deadlineOf(task) : undefined;
-      const listening = entering && task.kind === "listen" ? task : undefined;
-      const running = entering && task.kind === "run" ? task : undefined;
-      if (
-        task === undefined ||
-        (deadline === undefined &&
-          listening === undefined &&
-          running === undefined)
-      ) {
+      // What its enter step resolves: a deadline, a listen's, a child's.
+      const entered = step.kind === "enter" ? task : undefined;
+      const deadline = entered && deadlineOf(entered);
+      const listening = entered?.kind === "listen" ? entered : undefined;
+      const running = entered?.kind === "run" ? entered : undefined;
+      if (entered === undefined || !resolvesDeadline(entered)) {
         return this.#refuse(
           `Step of "${task?.id ?? "the workflow"}" resolves no deadline.`
         );
       }
       // Taken before anything is awaited: two asked at once resolve one.
       if (attempt.untilAsked || attempt.condition === "failed") {
-        return this.#refuse(`Task "${task.id}" resolves its deadline once.`);
+        return this.#refuse(`Task "${entered.id}" resolves its deadline once.`);
       }
       attempt.untilAsked = true;
-      this.#requireOpen(attempt, task, frame, "resolves its deadline");
+      this.#requireOpen(attempt, entered, frame, "resolves its deadline");
       const passed = this.#callFrame(frame);
       if (running !== undefined) {
-        // Its child, started once, journaled beside its record, and how
-        // long the run waits for it: as long as its lineage may run.
-        attempt.child = await this.#startedChild(attempt, running, passed);
-        const { limits } = await quotaPolicy(this.#env);
-        attempt.until =
-          Date.now() + Math.min(limits.workflowAgeMs, maxDeadlineMs);
-        return attempt.until;
+        return await this.#childUntil(attempt, running, passed);
       }
       if (listening !== undefined) {
-        // Its filters with its deadline, journaled beside its record.
-        attempt.listen = await this.#resolvedListen(attempt, listening, passed);
-        attempt.until = Date.now() + listening.timeoutMs;
-        return attempt.until;
+        return await this.#listenUntil(attempt, listening, passed);
       }
       if (deadline === undefined) {
-        return this.#refuse(`Task "${task.id}" resolves no deadline.`);
+        return this.#refuse(`Task "${entered.id}" resolves no deadline.`);
       }
       const value = await this.#built(
         attempt,

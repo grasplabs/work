@@ -31,8 +31,12 @@ import { runOf, tellParentOfEnd } from "./resource-runs.ts";
 // - Recursion and fan-out. Each child is admitted into its parent's lineage
 //   first (quotas.ts, `admitChild`): one level deeper, within the levels,
 //   descendant runs and age a lineage may have, its slot never given back.
-//   Its attempts, host calls and model requests count on the lineage's
-//   root (resource-runs.ts). A workflow bound to itself stops at the
+//   Its attempts and host calls count on the lineage's root (quotas.ts),
+//   and so do its model requests, at the gateway: each run's own
+//   `maxModelCalls` bounds only that run, so every model call names the
+//   lineage's root (resource-calls.ts, `callModel`), and the model ledger
+//   holds the lineage's requests, every run's together, to the quota
+//   policy's `lineageModelRequests` (model-budgets.ts). A workflow bound to itself stops at the
 //   nesting limit. Each task runs at most once a run, so a run starts at
 //   most one child per `run` task.
 // - A start retried, or its answer lost. The child's lineage slot is
@@ -40,6 +44,11 @@ import { runOf, tellParentOfEnd } from "./resource-runs.ts";
 //   that step under the parent run as invoker (`childKeyOf`): a retry, a
 //   restart or a replay that starts it again gets the same child, in the
 //   same slot.
+// - A lineage kept going past its age by a child that waits. A parent
+//   waits for its child only until its lineage's age is up, counted from
+//   its root's start, never a whole age from the child's (resource-host.ts,
+//   `#until`): then the wait times out, the parent fails and stops the
+//   child, and a grandchild's parent with it.
 // - A child outliving its parent. A parent that ends stops its children
 //   that haven't (resource-runs.ts, `projectResourceRun`), and every call a
 //   child makes asks that its parent is still going (resource-authority.ts).

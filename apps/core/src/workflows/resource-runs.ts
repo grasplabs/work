@@ -53,6 +53,7 @@ import type { Settled, StepError } from "./code.ts";
 import { runEngine } from "./engine.ts";
 import type { PinnedResourceRun } from "./engine.ts";
 import { childEndType } from "./event-envelopes.ts";
+import type { ChildEnd } from "./event-envelopes.ts";
 import {
   countedStep,
   fromIsolate,
@@ -60,7 +61,6 @@ import {
   stepLimitOf,
   unadmitted,
 } from "./host.ts";
-import type { ChildEnd } from "./event-envelopes.ts";
 import type { RunStep } from "./host.ts";
 import { admitAttempt, quotaPolicy } from "./quotas.ts";
 import type { ResourceAttemptHost } from "./resource-attempt-host.ts";
@@ -613,6 +613,25 @@ export interface ResourceRunMemory {
 }
 
 /**
+ * When run `row`'s lineage started, in ms: its root's admission, which its
+ * waits are bounded by (resource-host.ts, `#until`). A child runs nothing
+ * once its parent ended (run-children.ts): `workflow.run_ended`.
+ */
+const lineageStartOf = async (env: Env, row: RunRow): Promise<number> => {
+  if (row.parentRunId !== null) {
+    const parent = await runOf(env, row.parentRunId);
+    if (parent === undefined || !unended.includes(parent.status)) {
+      throw workflowResourceErrors.create("workflow.run_ended");
+    }
+  }
+  const root = row.rootRunId === null ? row : await runOf(env, row.rootRunId);
+  if (root === undefined) {
+    throw new Error(`Run ${row.id}'s lineage root has no record`);
+  }
+  return root.createdAt.getTime();
+};
+
+/**
  * What an activation of run `runId` loads, checked against each other and
  * the pin: its row, its receipt's input and frozen parameters, its
  * version's sealed build (the identity it was admitted for) and contract.
@@ -634,13 +653,7 @@ const loadedRun = async (
   if (!unended.includes(row.status)) {
     throw new Error(`Run ${runId} has ended: ${row.status}`);
   }
-  // A child runs nothing once its parent ended (run-children.ts).
-  if (row.parentRunId !== null) {
-    const parent = await runOf(env, row.parentRunId);
-    if (parent === undefined || !unended.includes(parent.status)) {
-      throw workflowResourceErrors.create("workflow.run_ended");
-    }
-  }
+  const lineageStartedAt = await lineageStartOf(env, row);
   const receipt = await receiptOf(env, runId);
   if (
     receipt?.manifestHash !== pin.manifest ||
@@ -703,6 +716,7 @@ const loadedRun = async (
       createdAt: row.createdAt.getTime(),
       rootRunId: row.rootRunId ?? runId,
       depth: row.depth,
+      lineageStartedAt,
       build,
       calling,
       // The workflow's own limit only ever lowers the host's ceiling.
