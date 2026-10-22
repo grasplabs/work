@@ -114,6 +114,15 @@
       groupName: "playwright",
       matchPackageNames: ["@playwright/test", "mcr.microsoft.com/playwright"],
     },
+    // Renovate reads Docker release dates only from Docker Hub, so the
+    // 3-day wait would hold the MCR image back for good and leave the group
+    // with @playwright/test alone, which check:playwright-image refuses.
+    // The image is published with the npm release, whose wait still holds.
+    {
+      matchDatasources: ["docker"],
+      matchPackageNames: ["mcr.microsoft.com/playwright"],
+      minimumReleaseAgeBehaviour: "timestamp-optional",
+    },
 
     // The screen compiler's TypeScript: 7 has no JavaScript API.
     {
