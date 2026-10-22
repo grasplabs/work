@@ -16,6 +16,7 @@ import type {
   ConnectionPerson,
   ConnectionScope,
   ConnectionSummary,
+  OrganizationConnection,
 } from "@grasp-os/shared/connect";
 import { randomToken, sha256Hex, toBase64Url } from "@grasp-os/shared/encoding";
 import { errorFields, log } from "@grasp-os/shared/log";
@@ -29,6 +30,7 @@ import type { AccountAddresses } from "./account-addresses.ts";
 import { recordEventIf, recordEvents } from "./audit.ts";
 import {
   abandonToolkitFlow,
+  composioAccountStates,
   disconnectCleanup,
   dropToolkitFlowsOf,
   revokeAtComposio,
@@ -890,6 +892,50 @@ export const listConnections = async (
     createdAt: row.createdAt.toISOString(),
     ...(row.serverKind === "composio" && { tools: allowedToolNames(row) }),
   }));
+};
+
+/**
+ * Every connection that isn't disconnected, for core's staff-only admin
+ * snapshot (`ConnectApi.organizationConnections`), with Composio's word on
+ * each Composio account. What a staff member may read of each, and no
+ * more: never a token, the server's URL (a Composio one names the
+ * account), nor anything Composio knows it by; of a personal one, not
+ * whose it is or which account, only that someone connected their own.
+ */
+export const organizationConnections = async (
+  env: Env
+): Promise<OrganizationConnection[]> => {
+  const rows = await drizzle(env.DB)
+    .select()
+    .from(connections)
+    .where(ne(connections.status, "disconnected"))
+    .orderBy(desc(connections.createdAt));
+  const composio = await composioAccountStates(
+    env,
+    rows.filter(({ serverKind }) => serverKind === "composio")
+  );
+  return rows.flatMap((row) => {
+    // Filtered above; the column's type doesn't know it.
+    if (row.status === "disconnected") {
+      return [];
+    }
+    const shared = row.scope === "shared";
+    const isComposio = row.serverKind === "composio";
+    return [
+      {
+        id: row.id,
+        source: row.serverKind,
+        provider: row.provider,
+        scope: row.scope,
+        status: row.status,
+        composio: isComposio ? (composio.get(row.id) ?? "unread") : null,
+        connectedBy: shared ? row.connectedBy : null,
+        accountName: shared ? row.accountName : null,
+        createdAt: row.createdAt.toISOString(),
+        tools: shared && isComposio ? allowedToolNames(row) : null,
+      },
+    ];
+  });
 };
 
 /**

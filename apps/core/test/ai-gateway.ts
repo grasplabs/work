@@ -51,6 +51,13 @@ export type GatewayReply =
       noUsage?: boolean;
       /** Prompt tokens written to a one-hour cache (Anthropic). */
       cacheWrite1h?: number;
+      /** The model declined to answer (Anthropic's `refusal` stop). */
+      refused?: true;
+      /**
+       * Prompt tokens read from and written to the five-minute cache
+       * (Anthropic), besides `inputTokens`.
+       */
+      cache?: { read: number; write: number };
     }
   | {
       status: number;
@@ -60,7 +67,16 @@ export type GatewayReply =
       /** Headers of the refusal, such as a rate limit's `retry-after`. */
       headers?: Record<string, string>;
     }
-  | { hang: true };
+  | { hang: true }
+  /**
+   * ElevenLabs's line said with timestamps: `audio` as the audio's bytes,
+   * and each character of the line the request sent said in
+   * {@link fakeSecondsPerCharacter}, one after another.
+   */
+  | { speech: { audio: string } };
+
+/** How long the fake gateway's ElevenLabs takes to say each character. */
+export const fakeSecondsPerCharacter = 0.1;
 
 export interface GatewayRequest {
   url: string;
@@ -215,6 +231,12 @@ const anthropicEvents = (answer: Answer): (StreamEvent | StreamPause)[] => {
           usage: {
             input_tokens: inputTokens,
             output_tokens: 0,
+            ...(answer.cache === undefined
+              ? {}
+              : {
+                  cache_read_input_tokens: answer.cache.read,
+                  cache_creation_input_tokens: answer.cache.write,
+                }),
             ...(answer.cacheWrite1h === undefined
               ? {}
               : {
@@ -284,7 +306,10 @@ const anthropicEvents = (answer: Answer): (StreamEvent | StreamPause)[] => {
       data: {
         type: "message_delta",
         delta: {
-          stop_reason: stopOf(answer, ["end_turn", "max_tokens", "tool_use"]),
+          stop_reason:
+            answer.refused === true
+              ? "refusal"
+              : stopOf(answer, ["end_turn", "max_tokens", "tool_use"]),
           stop_sequence: null,
         },
         usage: { output_tokens: outputTokens },
@@ -499,6 +524,37 @@ const responsesEvents = ({
   ];
 };
 
+const spokenSchema = z.object({ text: z.string() });
+
+/**
+ * ElevenLabs's answer to text to speech with timestamps: the audio in
+ * base64, and when each character of the line is said.
+ */
+const spokenLine = (
+  body: unknown,
+  { audio }: { audio: string },
+  logId: string
+): Response => {
+  // The fake's lines are plain text, one code point to a character.
+  // oxlint-disable-next-line typescript/no-misused-spread -- see above
+  const characters = [...spokenSchema.parse(body).text];
+  return Response.json(
+    {
+      audio_base64: btoa(audio),
+      alignment: {
+        characters,
+        character_start_times_seconds: characters.map(
+          (_, at) => at * fakeSecondsPerCharacter
+        ),
+        character_end_times_seconds: characters.map(
+          (_, at) => (at + 1) * fakeSecondsPerCharacter
+        ),
+      },
+    },
+    { headers: { "cf-aig-log-id": logId } }
+  );
+};
+
 /** The provider's stream for `answer`, by the gateway route requested. */
 const providerStream = (
   { url, signal }: Request,
@@ -627,6 +683,12 @@ export const answeringGateway = (
         },
         { status: reply.status, headers: reply.headers }
       );
+    }
+    if ("speech" in reply) {
+      if (!new URL(request.url).pathname.endsWith("/with-timestamps")) {
+        return new Response("No such route", { status: 404 });
+      }
+      return spokenLine(body, reply.speech, `log-${requests.length}`);
     }
     return providerStream(request, reply, `log-${requests.length}`);
   };

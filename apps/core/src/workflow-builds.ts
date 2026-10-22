@@ -161,11 +161,28 @@ export type SealedBuild = z.infer<typeof sealedBuildSchema>;
 /** A task's schema descriptor, as sealed: the SDK's native validator reads it. */
 const descriptorSchema = z.json();
 
+/** A task's ID, as the profile has it (and the SDK's step names). */
+const sealedTaskIdSchema = z
+  .string()
+  .max(64)
+  .regex(/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u);
+
+/**
+ * The most scopes one inside another a task runs in: `for` tasks around
+ * it (spec 18, eight levels).
+ */
+export const maxTaskScopes = 8;
+
 const taskBase = {
   id: z.string().min(1).max(64),
   pointer: z.string().max(maxSealedPointerLength),
   /** Its durable steps besides a wait's sleep (generate.ts, `TaskStep`). */
-  steps: z.array(z.enum(["task", "enter", "leave"])).max(3),
+  steps: z.array(z.enum(["task", "enter", "leave", "item"])).max(4),
+  /**
+   * The `for` tasks around it, outermost first: each of its steps runs in
+   * an item of each (generate.ts, `GeneratedTask.scope`).
+   */
+  scope: z.array(sealedTaskIdSchema).max(maxTaskScopes),
   /** The descriptors of its input, output and export schemas. */
   schemas: z.strictObject({
     input: descriptorSchema.optional(),
@@ -259,11 +276,54 @@ const sealedCallSchema = z.discriminatedUnion("name", [
 
 export type SealedCall = z.infer<typeof sealedCallSchema>;
 
+/**
+ * A listen task's events, as the build seals them (generate.ts,
+ * `GeneratedListen`): its event binding, its strategy, what of each event
+ * it reads, and its filters, each a type and the CloudEvents attributes it
+ * requires (by CloudEvents' rule for names), each a template the host
+ * builds in the task's enter step.
+ */
+const sealedListenSchema = z.strictObject({
+  binding: aliasSchema,
+  strategy: z.enum(["one", "any", "all"]),
+  read: z.enum(["data", "envelope"]),
+  filters: z
+    .array(
+      z.strictObject({
+        type: z.string().min(1).max(256),
+        attributes: z
+          .array(
+            z.tuple([z.string().regex(/^[a-z0-9]{1,20}$/u), templateSchema])
+          )
+          .max(16),
+      })
+    )
+    .min(1)
+    .max(16),
+});
+
 /** One task the generated module runs, as the host checks its steps. */
 const sealedTaskSchema = z.discriminatedUnion("kind", [
   z.strictObject({ ...taskBase, kind: z.literal("set") }),
   z.strictObject({ ...taskBase, kind: z.literal("switch") }),
   z.strictObject({ ...taskBase, kind: z.literal("do") }),
+  z.strictObject({
+    ...taskBase,
+    kind: z.literal("for"),
+    /**
+     * Its loop (generate.ts, `GeneratedTask.loop`): the collection its
+     * enter step resolves, its items' variables, and the slot of its
+     * `while`, which each item's `item` step evaluates.
+     */
+    loop: z.strictObject({
+      in: templateSchema,
+      each: z.string().min(1).max(64),
+      at: z.string().min(1).max(64),
+      while: z.int().min(0).optional(),
+    }),
+    // Its input.from, of the slots its module evaluates (generate.ts).
+    inputFrom: templateSchema.optional(),
+  }),
   z
     .strictObject({
       ...taskBase,
@@ -285,6 +345,16 @@ const sealedTaskSchema = z.discriminatedUnion("kind", [
     call: sealedCallSchema,
     // Its input.from, output.as and export.as, of the slots its module
     // evaluates (generate.ts).
+    inputFrom: templateSchema.optional(),
+    outputAs: templateSchema.optional(),
+    exportAs: templateSchema.optional(),
+  }),
+  z.strictObject({
+    ...taskBase,
+    kind: z.literal("listen"),
+    // Its timeout is its deadline: a listen never waits without one.
+    timeoutMs: z.int().positive(),
+    listen: sealedListenSchema,
     inputFrom: templateSchema.optional(),
     outputAs: templateSchema.optional(),
     exportAs: templateSchema.optional(),
@@ -315,6 +385,8 @@ const sealedExpressionSchema = z.strictObject({
   /** What it must answer: a condition a boolean (generate.ts). */
   result: z.enum(["boolean", "duration", "json"]),
   source: z.string().max(8192),
+  /** The variables of the loops around its task, outermost first. */
+  loopVariables: z.array(z.string().min(1).max(64)).max(2 * maxTaskScopes),
 });
 
 const tasksFileSchema = z.strictObject({
@@ -485,17 +557,24 @@ export const compileWorkflow = async (
             milliseconds,
             duration,
             call,
+            listen,
             inputFrom,
             outputAs,
             exportAs,
             timeoutMs,
             steps,
             schemas,
+            scope,
+            loop,
           }) => ({
             id,
             kind,
             pointer,
             steps,
+            scope: [...scope],
+            ...(loop === undefined
+              ? {}
+              : { loop: z.json().parse(structuredClone(loop)) }),
             // The SDK's descriptors and the templates, as the plain JSON
             // they are.
             schemas: z.json().parse(structuredClone(schemas)),
@@ -506,6 +585,9 @@ export const compileWorkflow = async (
             ...(call === undefined
               ? {}
               : { call: z.json().parse(structuredClone(call)) }),
+            ...(listen === undefined
+              ? {}
+              : { listen: z.json().parse(structuredClone(listen)) }),
             ...(inputFrom === undefined
               ? {}
               : { inputFrom: z.json().parse(structuredClone(inputFrom)) }),
@@ -520,6 +602,7 @@ export const compileWorkflow = async (
         ),
         expressions: generated.expressions.map((expression) => ({
           ...expression,
+          loopVariables: [...expression.loopVariables],
         })),
         workflow: { ...generated.workflow },
         params: [...generated.params],

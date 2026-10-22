@@ -372,7 +372,7 @@ const packagesHolding = async (
  * `workflow.resource_unavailable`; a version it never published
  * `workflow.version_not_found`.
  */
-const pinned = async (
+export const pinned = async (
   env: Env,
   id: string,
   version: number

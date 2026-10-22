@@ -1,3 +1,5 @@
+import { adminSnapshotSchema } from "@grasp-os/shared/admin-snapshot";
+import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
 import { actorOf } from "@grasp-os/shared/audit";
 import {
   answerMaxLength,
@@ -13,7 +15,9 @@ import type {
 import {
   agreementsSchema,
   onboardingErrors,
+  onboardingPeopleMax,
   rosterPersonSchema,
+  rosterTeamSchema,
 } from "@grasp-os/shared/onboarding";
 import type {
   Agreements,
@@ -21,6 +25,7 @@ import type {
   OnboardingView,
 } from "@grasp-os/shared/onboarding";
 import {
+  aiPurposes,
   logFilterSchema,
   noteMaxLength,
   stephenSetupSchema,
@@ -28,6 +33,8 @@ import {
 import type {
   LogFilter,
   StaffAgreements,
+  StaffAiUseRow,
+  StaffInterviewers,
   StaffLog,
   StaffNote,
   StaffOverview,
@@ -38,11 +45,14 @@ import type {
 import type { Identity } from "@grasp-os/shared/rpc";
 import { z } from "zod";
 
+import { snapshotOf } from "../admin-snapshot.ts";
 import { appendAuditEvent } from "../audit-outbox.ts";
+import { organizationId } from "../auth/auth.ts";
 import { CoreRpcTarget } from "../rpc-target.ts";
 import { withPerson } from "../session-check.ts";
 import type { SessionCheck } from "../session-check.ts";
 import { gateView } from "./gate.ts";
+import { interviewerNumbers } from "./interviewer-numbers.ts";
 import { readKickoff, transcriptOf } from "./kickoff.ts";
 import { needsOf, stagesOf } from "./staff-area.ts";
 import type { StaffFacts } from "./staff-area.ts";
@@ -50,18 +60,30 @@ import { onboardingStore } from "./store.ts";
 
 // What only Grasp's staff do in the onboarding, over `/rpc`: pause the
 // interviews and let them run again, say where the agreements stand, give
-// someone who lost their device a new start, and Grasp's onboarding area
+// someone who lost their device a new start, send someone's mail that
+// failed again, and Grasp's onboarding area
 // (staff-area.ts): where it stands, what needs Grasp, notes, the log, and
 // someone's interview, whose every read is in the audit log; and the
 // kickoff, brought in, read for what Stephen needs (kickoff.ts), and the
-// sponsor's answers to what it left open; and how Stephen is set up for
-// this deployment (stephen-setup.ts), in every interview turn's context.
+// sponsor's answers to what it left open; how Stephen is set up for
+// this deployment (stephen-setup.ts), in every interview turn's context;
+// how Stephen and Claire are doing (interviewer-numbers.ts) and the AI the
+// onboarding used, as numbers; and the interviews by name: where everyone
+// stands (the admin's snapshot, as the console reads it), someone's own
+// link to send by hand, the one reminder noted, a team asked in, and an
+// interview deleted because its person asked. Every read that names
+// people, or holds a link, is in the audit log first, never with what was
+// said or the link itself.
 // Until the agreements are in and while the interviews are paused, no link
 // opens and none goes out; once they are in and the interviews run, the
 // links that are due go out at once, not at the store's next alarm. The client's admin sees both (`view()`), and
 // the audit log has every change, as the staff member who made it.
 
 const noteSchema = z.string().trim().min(1).max(noteMaxLength);
+
+const personIdSchema = rosterPersonSchema.shape.id;
+
+const remindSchema = z.array(personIdSchema).max(onboardingPeopleMax);
 
 /** The sponsor's answer to one field the kickoff left open. */
 const answerSchema = z.strictObject({
@@ -156,6 +178,20 @@ export class OnboardingStaffRpc
     });
   }
 
+  async sendMailAgain(person: string): Promise<void> {
+    await withPerson(this.#check, async (staff) => {
+      requireStaff(staff);
+      const id = onboardingErrors.parse(
+        "onboarding.invalid",
+        rosterPersonSchema.shape.id,
+        person
+      );
+      if (!(await onboardingStore(this.#env).sendAgain(id, actorOf(staff)))) {
+        throw onboardingErrors.create("onboarding.no_failed_mail");
+      }
+    });
+  }
+
   async overview(): Promise<StaffOverview> {
     return await withPerson(this.#check, async (person) => {
       requireStaff(person);
@@ -226,6 +262,120 @@ export class OnboardingStaffRpc
         detail: {},
       });
       return transcript;
+    });
+  }
+
+  async interviews(): Promise<AdminSnapshot> {
+    return await withPerson(this.#check, async (person) => {
+      requireStaff(person);
+      // Only what the schema names leaves core, as for the console.
+      const snapshot = adminSnapshotSchema.parse(
+        await snapshotOf(this.#env, new Date().toISOString())
+      );
+      // It names people: on record before it is read.
+      await appendAuditEvent(this.#env, {
+        actor: actorOf(person),
+        action: "onboarding.interviews.read",
+        target: { type: "organization", id: organizationId },
+        detail: {},
+      });
+      return snapshot;
+    });
+  }
+
+  async link(personId: string): Promise<string> {
+    return await withPerson(this.#check, async (person) => {
+      requireStaff(person);
+      const id = onboardingErrors.parse(
+        "onboarding.invalid",
+        personIdSchema,
+        personId
+      );
+      const store = onboardingStore(this.#env);
+      const linkId = await store.linkIdOf(id);
+      if (linkId === null) {
+        throw onboardingErrors.create("onboarding.not_found");
+      }
+      // A link is a credential: on record before it is read, by its
+      // random id, as a transcript read is.
+      await appendAuditEvent(this.#env, {
+        actor: actorOf(person),
+        action: "onboarding.link.read",
+        target: { type: "interview", id: linkId },
+        detail: {},
+      });
+      const path = await store.linkOf(id);
+      if (path === null) {
+        throw onboardingErrors.create("onboarding.not_found");
+      }
+      return path;
+    });
+  }
+
+  async remind(people: string[]): Promise<number> {
+    return await withPerson(this.#check, async (person) => {
+      requireStaff(person);
+      const parsed = onboardingErrors.parse(
+        "onboarding.invalid",
+        remindSchema,
+        people
+      );
+      const noted = await onboardingStore(this.#env).remind(
+        parsed,
+        actorOf(person)
+      );
+      return noted.length;
+    });
+  }
+
+  async askIn(team: string): Promise<OnboardingView> {
+    return await withPerson(this.#check, async (person) => {
+      requireStaff(person);
+      const id = onboardingErrors.parse(
+        "onboarding.invalid",
+        rosterTeamSchema.shape.id,
+        team
+      );
+      const store = onboardingStore(this.#env);
+      if (!(await store.askIn(id, actorOf(person)))) {
+        throw onboardingErrors.create("onboarding.no_team");
+      }
+      await store.releaseDue();
+      return await store.view();
+    });
+  }
+
+  async deleteInterview(personId: string): Promise<void> {
+    await withPerson(this.#check, async (person) => {
+      requireStaff(person);
+      const id = onboardingErrors.parse(
+        "onboarding.invalid",
+        personIdSchema,
+        personId
+      );
+      const store = onboardingStore(this.#env);
+      if (!(await store.deleteOnRequest(id, actorOf(person)))) {
+        throw onboardingErrors.create("onboarding.no_link");
+      }
+    });
+  }
+
+  async interviewers(): Promise<StaffInterviewers> {
+    return await withPerson(this.#check, async (person) => {
+      requireStaff(person);
+      const facts = await onboardingStore(this.#env).interviewerFacts();
+      return interviewerNumbers(facts, new Date().toISOString());
+    });
+  }
+
+  async aiUse(): Promise<StaffAiUseRow[]> {
+    return await withPerson(this.#check, async (person) => {
+      requireStaff(person);
+      const rows = await onboardingStore(this.#env).usage();
+      return rows.flatMap((row) => {
+        const purpose = aiPurposes.find((each) => each === row.purpose);
+        return purpose === undefined ? [] : [{ ...row, purpose }];
+      });
     });
   }
 

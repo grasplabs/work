@@ -63,7 +63,11 @@
   // the deployment's AI Gateway, the models it allows and the client's rules
   // for them (src/model-rules.ts). It needs no secret:
   // provider keys stay in AI Gateway. Without it core uses the account's
-  // default gateway and Workers AI's models.
+  // default gateway and Workers AI's models. Its `voice` part says how the
+  // gateway reaches ElevenLabs: natively, or at its EU host through a
+  // custom provider. An authenticated gateway's token is the optional
+  // secret AI_GATEWAY_TOKEN, which voice requests carry; a realtime
+  // WebSocket to the gateway needs it.
   //
   // So is `PLATFORM_CHANGE` (src/platform-updates.ts): who made this
   // version, and what they changed, which the cron records in the audit log
@@ -84,6 +88,11 @@
   // (src/workflows/overview.ts): the one Email Routing's catch-all rule,
   // set up outside core, sends to core. An email trigger's address shows
   // whole with it, `<local part>@<domain>`, and as its local part without.
+  //
+  // And who the mail core sends is from, `MAIL_FROM` (src/mail.ts): a
+  // name and an address on the deployment's sending domain, set up for
+  // Email Sending outside core. Without it core sends no mail, and each
+  // mail it means to send fails, saying why.
   //
   // And the runtime profile, `RUNTIME_PROFILE` (src/code-mode.ts): only
   // `cloudflare` makes Code Mode's run record claim the CPU limit as
@@ -111,6 +120,9 @@
       // The one object that installs what ships with each release
       // (src/builtins.ts).
       { "name": "BUILTINS", "class_name": "Builtins" },
+      // The client's clock: maintenance, repair and schedule admission on
+      // its own alarm (src/clock.ts).
+      { "name": "CLOCK", "class_name": "Clock" },
       // The onboarding's one store (src/onboarding/store.ts).
       { "name": "ONBOARDING", "class_name": "Onboarding" },
       // The one ledger of what model requests reserve and spend
@@ -137,6 +149,7 @@
     { "tag": "v5", "new_sqlite_classes": ["DataStore"] },
     { "tag": "v6", "new_sqlite_classes": ["WorkflowRuns"] },
     { "tag": "v7", "new_sqlite_classes": ["ActionInvocation"] },
+    { "tag": "v8", "new_sqlite_classes": ["Clock"] },
   ],
   // Runs App sandboxes and the App compiler.
   "worker_loaders": [{ "binding": "LOADER" }],
@@ -165,6 +178,14 @@
       "bucket_name": "grasp-os-audit-archive",
       "jurisdiction": "eu",
     },
+    // The texts of Knowledge's versions, each an immutable object written
+    // once (src/knowledge/payloads.ts). One bucket per deployment, private,
+    // in the EU; only core reads and writes it.
+    {
+      "binding": "BRAIN_OBJECTS",
+      "bucket_name": "grasp-os-brain-objects",
+      "jurisdiction": "eu",
+    },
   ],
   // Every minute: appends the audit events waiting in core's outboxes and
   // connect's to the AuditLog object, records platform updates, starts
@@ -176,7 +197,10 @@
   // The model gateway's transport to AI Gateway (src/models.ts); core never
   // holds a raw provider key.
   "ai": { "binding": "AI", "remote": true },
-  // Sends mail. Mail in comes from Email Routing: a catch-all rule for the
+  // Sends mail, through the mail outbox (src/mail-outbox.ts), from
+  // `MAIL_FROM`. On-prem binds `EMAIL` to a service of its own that takes
+  // the same message, or leaves it unbound, and core then sends nothing
+  // (src/mail.ts). Mail in comes from Email Routing: a catch-all rule for the
   // deployment's mail domain that sends every message to this Worker's
   // `email` handler (src/workflows/inbound-email.ts), set up with the
   // domain, outside this file.

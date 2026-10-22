@@ -117,7 +117,12 @@ const forbidden = (): Response =>
  */
 export const withAccess =
   (handler: (request: Request, staff: Staff) => Promise<Response>) =>
-  async (request: Request, env: AccessEnv): Promise<Response> => {
+  async (
+    request: Request,
+    env: AccessEnv,
+    /** Answers a verified request before the handler does, when it returns one. */
+    first: () => Response | null = () => null
+  ): Promise<Response> => {
     if (isForgeable(request)) {
       return forbidden();
     }
@@ -129,11 +134,11 @@ export const withAccess =
       if (!loopbackHosts.has(new URL(request.url).hostname)) {
         return forbidden();
       }
-      return await handler(request, { email: devEmail, sub: "" });
+      return first() ?? (await handler(request, { email: devEmail, sub: "" }));
     }
     const staff = await verifiedStaff(request, env);
     if (staff === null) {
       return forbidden();
     }
-    return await handler(request, staff);
+    return first() ?? (await handler(request, staff));
   };

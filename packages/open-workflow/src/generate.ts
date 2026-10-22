@@ -33,11 +33,16 @@ import { literalDurationMs } from "./values.ts";
  * - Control flow that loops. Generated code has no loop statement: a
  *   transition is a `break` out of a labelled block, which can only move
  *   forward, to a later sibling (a block that closes before it), out of
- *   its list (`exit`) or out of the workflow (`end`). A target that isn't
- *   strictly later in the same list is never emitted, whatever validation
- *   said (`resolveTarget` throws), so every task runs at most once, and a
- *   run's steps are bounded by its tasks; core refuses any step run twice
- *   all the same (resource-host.ts).
+ *   its list (`exit`) or out of the workflow (`end`, or, inside a loop's
+ *   item, a return that tells the loop so). A target that isn't strictly
+ *   later in the same list is never emitted, whatever validation said
+ *   (`resolveTarget` throws). A `for` task is a call of the SDK's loop
+ *   (`flow.for`), its list a function the SDK runs once per item of the
+ *   collection its enter step recorded (sequentially; items at once and
+ *   items' own keys aren't lowered yet), so every task runs at most once
+ *   per item of the loops around it, and a run's steps are bounded by its
+ *   tasks and its loops' recorded items; core refuses any step run twice,
+ *   and any item no loop recorded, all the same (resource-host.ts).
  * - Expressions becoming code. An expression's source never enters the
  *   module: the module names it by its number in the expression table
  *   sealed beside it, and the host evaluates that table's entry with the
@@ -75,6 +80,15 @@ import { literalDurationMs } from "./values.ts";
  *   is called or with what. The host refuses a binding the run's start
  *   didn't freeze, and checks each call's authority again as it makes it
  *   (core's workflows/resource-calls.ts).
+ * - A listen taking events its source didn't name. Its binding, each
+ *   filter's type and the attribute names it requires are literals the
+ *   generator seals in the task table (`GeneratedListen`); an attribute's
+ *   value is a literal or a sealed expression the host evaluates in the
+ *   task's enter step. The generated code only asks the host to listen,
+ *   by its task: the host matches events in the run's own inbox by what
+ *   it recorded, never by anything the code passes. A filter's
+ *   `correlate`, which would evaluate expressions over each event's own
+ *   content, is reported as unsupported.
  * - Limits raising the host's ceilings. `document.metadata.grasp.limits`
  *   and a task's `timeout` (inline or from `use.timeouts`) are sealed as
  *   numbers, which the host only ever applies as the lower of them and its
@@ -103,7 +117,7 @@ export const maxTaskExpressions = 64;
 export const maxStepExpressions = 128;
 
 /** The generator's identity: part of every build it makes. */
-export const generatorVersion = "grasp-open-workflow-ts/6";
+export const generatorVersion = "grasp-open-workflow-ts/7";
 
 /** Where the generated module is among a version's files. */
 export const generatedPath = ".grasp/workflow.ts";
@@ -128,10 +142,43 @@ export interface SealedExpression {
   /** A condition (`if`, a case's `when`) must answer a boolean. */
   readonly result: ExpressionResult;
   readonly source: string;
+  /**
+   * The variables of the loops around it, as it was compiled: its `for`
+   * tasks' `each` and `at`, outermost first. Empty outside any loop.
+   */
+  readonly loopVariables: readonly string[];
 }
 
 /** The task kinds this generator lowers. */
-export type LoweredKind = "call" | "do" | "set" | "switch" | "wait";
+export type LoweredKind =
+  | "call"
+  | "do"
+  | "for"
+  | "listen"
+  | "set"
+  | "switch"
+  | "wait";
+
+/**
+ * A `listen` task's events, as the build seals them: the event binding
+ * its `metadata.grasp.binding` names, how many of its filters it waits
+ * for (`one` and `any` an event, `all` one per filter, in their order),
+ * what of each event its output holds, and its filters: each a literal
+ * type the binding admits and the attributes it requires, each a literal
+ * or an expression the host evaluates, once, in the task's enter step.
+ */
+export interface GeneratedListen {
+  readonly binding: string;
+  readonly strategy: "one" | "any" | "all";
+  readonly read: "data" | "envelope";
+  readonly filters: readonly GeneratedFilter[];
+}
+
+/** One filter of a `listen` task (`GeneratedListen`). */
+export interface GeneratedFilter {
+  readonly type: string;
+  readonly attributes: readonly (readonly [string, CallTemplate])[];
+}
 
 /**
  * A value the host builds itself when a task's call is made, or its
@@ -205,8 +252,11 @@ export interface WorkflowLimits {
   readonly maxModelCalls?: number;
 }
 
-/** A step a task runs as, besides a `wait`'s sleep. */
-export type TaskStep = "task" | "enter" | "leave";
+/**
+ * A step a task runs as, besides a `wait`'s sleep: an `item` step is a
+ * `for` task's check of its `while`, before each item.
+ */
+export type TaskStep = "task" | "enter" | "leave" | "item";
 
 /** A task's data the host checks against the task's own schema. */
 export type TaskSchemas = Readonly<
@@ -264,6 +314,8 @@ export interface GeneratedTask {
   readonly duration?: CallTemplate;
   /** A `call` task's named call. */
   readonly call?: GeneratedCall;
+  /** A `listen` task's events. */
+  readonly listen?: GeneratedListen;
   /**
    * A `call` or `wait` task's `input.from`, as a template of the
    * expressions its module evaluates for it (their slots) and its
@@ -284,6 +336,26 @@ export interface GeneratedTask {
    * `timeout`: the host applies the lower of this and its own ceiling.
    */
   readonly timeoutMs?: number;
+  /**
+   * The `for` tasks around it, outermost first: each of its steps runs in
+   * the scope of an item of each (`task:<id>@<for>.<index>/…`). Empty for
+   * a task of the workflow's own list.
+   */
+  readonly scope: readonly string[];
+  /**
+   * A `for` task's loop: its collection (`for.in`), which the host
+   * resolves in its enter step, and its items' keys
+   * (`metadata.grasp.key`), each built by the host on the item; the names
+   * its items' variables have; and the slot of its `while`, which each
+   * item's `item` step evaluates.
+   */
+  readonly loop?: {
+    readonly in: CallTemplate;
+    readonly key?: CallTemplate;
+    readonly each: string;
+    readonly at: string;
+    readonly while?: number;
+  };
   /**
    * Its durable steps (`task:<id>` for a `set`, `switch` or call; `enter:<id>`
    * and `leave:<id>` around a wait's sleep or a `do`'s list, when it has
@@ -357,7 +429,21 @@ const supportedTaskKeys = new Set([
 ]);
 
 /** Task kinds lowered here; the profile's others come later. */
-const loweredKinds = new Set<string>(["call", "do", "set", "switch", "wait"]);
+const loweredKinds = new Set<string>([
+  "call",
+  "do",
+  "for",
+  "listen",
+  "set",
+  "switch",
+  "wait",
+]);
+
+/**
+ * The longest a listen may wait for its events, as the engine takes a
+ * deadline: 365 days. A host's own ceiling (a test run's) may be lower.
+ */
+export const maxListenMs = 365 * 86_400_000;
 
 /** Named calls lowered here; decisions come later. */
 const loweredCalls = new Set<string>([
@@ -621,6 +707,10 @@ interface Emitter {
   readonly usedLabels: Set<string>;
   /** Counts lists and tasks, for labels and variables of their own. */
   counter: number;
+  /** The flow the code being written runs its tasks on: its variable. */
+  flow: string;
+  /** The `for` tasks around the code being written, outermost first. */
+  scope: string[];
 }
 
 /**
@@ -650,6 +740,7 @@ const valueCode = (
       stage: compiled.stage,
       result,
       source: compiled.source,
+      loopVariables: Object.freeze([...compiled.loopVariables]),
     });
     return `await task.evaluate(${slot})`;
   }
@@ -768,6 +859,7 @@ const templateOf = (
       stage: compiled.stage,
       result,
       source: compiled.source,
+      loopVariables: Object.freeze([...compiled.loopVariables]),
     });
     return { slot };
   }
@@ -1064,7 +1156,7 @@ const lowerSet = (
   }
   const plan = planCode([...stages.enter, `set: ${value}`, ...stages.leave]);
   emitter.lines.push(
-    `${place.indent}({ output, context } = await flow.set(${literal(item.id)}, { input: output, context }, ${plan}));`
+    `${place.indent}({ output, context } = await ${emitter.flow}.set(${literal(item.id)}, { input: output, context }, ${plan}));`
   );
 };
 
@@ -1124,7 +1216,7 @@ const lowerSwitch = (
   ]);
   emitter.lines.push(
     `${place.indent}{`,
-    `${place.indent}  const chosen = await flow.switch(${literal(item.id)}, { input: output, context }, ${plan});`,
+    `${place.indent}  const chosen = await ${emitter.flow}.switch(${literal(item.id)}, { input: output, context }, ${plan});`,
     `${place.indent}  ({ output, context } = chosen);`,
     ...jumps,
     `${place.indent}}`
@@ -1170,7 +1262,7 @@ const lowerDurable = (
     steps.push("enter");
     const plan = planCode([...stages.enter, ...(until ? ["until: true"] : [])]);
     emitter.lines.push(
-      `${inner}const ${entered} = await flow.enter(${id}, { input: output, context }, ${plan});`,
+      `${inner}const ${entered} = await ${emitter.flow}.enter(${id}, { input: output, context }, ${plan});`,
       `${inner}if (!${entered}.skipped) {`,
       `${inner}  output = ${entered}.input;`
     );
@@ -1181,7 +1273,7 @@ const lowerDurable = (
     steps.push("leave");
     const enteredInput = hasEnter ? `${entered}.input` : raw;
     emitter.lines.push(
-      `${inner}({ output, context } = await flow.leave(${id}, { input: ${raw}, context }, ${enteredInput}, output, ${planCode(stages.leave)}));`
+      `${inner}({ output, context } = await ${emitter.flow}.leave(${id}, { input: ${raw}, context }, ${enteredInput}, output, ${planCode(stages.leave)}));`
     );
   }
   if (hasEnter) {
@@ -1194,7 +1286,7 @@ const lowerDurable = (
 /** What every task the generator seals has, whatever its kind. */
 type TaskBase = Pick<
   GeneratedTask,
-  "id" | "pointer" | "line" | "schemas" | "timeoutMs"
+  "id" | "pointer" | "line" | "schemas" | "timeoutMs" | "scope"
 >;
 
 /**
@@ -1466,7 +1558,7 @@ const lowerCall = (
   });
   const plan = planCode([...stages.enter, ...stages.leave]);
   emitter.lines.push(
-    `${place.indent}({ output, context } = await flow.call(${literal(item.id)}, { input: output, context }, ${plan}));`
+    `${place.indent}({ output, context } = await ${emitter.flow}.call(${literal(item.id)}, { input: output, context }, ${plan}));`
   );
 };
 
@@ -1493,7 +1585,7 @@ const lowerSleep = (
     steps.push(
       ...lowerDurable(emitter, item, stages, place, (indent) => {
         emitter.lines.push(
-          `${indent}await flow.wait(${literal(id)}, ${literal(ms)});`
+          `${indent}await ${emitter.flow}.wait(${literal(id)}, ${literal(ms)});`
         );
       })
     );
@@ -1544,7 +1636,178 @@ const lowerSleep = (
       place,
       (indent, entered) => {
         emitter.lines.push(
-          `${indent}await flow.sleepUntil(${literal(id)}, ${entered}.until);`
+          `${indent}await ${emitter.flow}.sleepUntil(${literal(id)}, ${entered}.until);`
+        );
+      },
+      true
+    )
+  );
+};
+
+/** The event attributes a run's inbox keeps, which a listen's filter may match. */
+const matchableAttributes = new Set([
+  "id",
+  "source",
+  "subject",
+  "datacontenttype",
+]);
+
+/**
+ * The filters of listen task `item`, sealed: `undefined` once one was
+ * refused. A filter's `correlate` (an expression over each event's own
+ * content) isn't lowered: a filter matches by attribute equality alone.
+ */
+const filtersOf = (
+  emitter: Emitter,
+  item: ListTask,
+  strategy: "one" | "any" | "all",
+  to: JsonObject
+): GeneratedFilter[] | undefined => {
+  const strategyPointer = pointerJoin(
+    pointerJoin(pointerJoin(item.pointer, "listen"), "to"),
+    strategy
+  );
+  const listed = strategy === "one" ? [to.one] : to[strategy];
+  if (!Array.isArray(listed)) {
+    throw new TypeError(
+      `The checked workflow has no filters at ${item.pointer}`
+    );
+  }
+  const filters: GeneratedFilter[] = [];
+  let refused = false;
+  for (const [index, filter] of listed.entries()) {
+    const pointer =
+      strategy === "one"
+        ? strategyPointer
+        : pointerJoin(strategyPointer, index);
+    if (!isObject(filter) || !isObject(filter.with)) {
+      throw new Error(`The checked workflow has no filter at ${pointer}`);
+    }
+    if (Object.hasOwn(filter, "correlate")) {
+      emitter.refusals.add(
+        pointerJoin(pointer, "correlate"),
+        "listen:correlate",
+        item.id
+      );
+      refused = true;
+      continue;
+    }
+    const withPointer = pointerJoin(pointer, "with");
+    const { type, ...rest } = filter.with;
+    if (typeof type !== "string") {
+      throw new TypeError(
+        `The checked workflow's filter at ${pointer} has no type`
+      );
+    }
+    // Only what the run's inbox keeps of each event can match: its id,
+    // source, subject and content type (core's run-events.ts). A filter on
+    // anything else (`dataschema`) would never match, so isn't lowered.
+    const unmatchable = Object.keys(rest).filter(
+      (name) => !matchableAttributes.has(name)
+    );
+    if (unmatchable.length > 0) {
+      for (const name of unmatchable) {
+        emitter.refusals.add(
+          pointerJoin(withPointer, name),
+          `listen:${name}`,
+          item.id
+        );
+      }
+      refused = true;
+      continue;
+    }
+    const attributes = Object.entries(rest).map(
+      ([name, value]) =>
+        [
+          name,
+          templateOf(
+            emitter,
+            value ?? null,
+            pointerJoin(withPointer, name),
+            item.id,
+            "json"
+          ),
+        ] as const
+    );
+    filters.push({ type, attributes });
+  }
+  return refused ? undefined : filters;
+};
+
+/**
+ * The statements of a `listen` task: its enter step resolves its deadline
+ * (its timeout from then) and its filters' attributes, once, and records
+ * them; then the host takes its events, durably, holding no isolate; then
+ * its leave step, if it has stages after.
+ */
+const lowerListen = (
+  emitter: Emitter,
+  item: ListTask,
+  stages: Stages,
+  place: ListPlace,
+  sealed: TaskBase,
+  /** Where the task's expressions start, before its stages were compiled. */
+  taskBefore: number
+): void => {
+  const { id, task, pointer } = item;
+  const listen = isObject(task.listen) ? task.listen : {};
+  const to = isObject(listen.to) ? listen.to : {};
+  const strategy = (["one", "any", "all"] as const).find((key) =>
+    Object.hasOwn(to, key)
+  );
+  const metadata = isObject(task.metadata) ? task.metadata.grasp : undefined;
+  const binding = isObject(metadata) ? metadata.binding : undefined;
+  if (strategy === undefined || typeof binding !== "string") {
+    throw new Error(
+      `The checked workflow's listen at ${pointer} is incomplete`
+    );
+  }
+  if (sealed.timeoutMs === undefined || sealed.timeoutMs > maxListenMs) {
+    emitter.refusals.add(pointerJoin(pointer, "timeout"), "listen:timeout", id);
+    return;
+  }
+  const filters = filtersOf(emitter, item, strategy, to);
+  if (filters === undefined) {
+    return;
+  }
+  // The enter step evaluates everything of the task but its leave stages:
+  // its if, its input.from and its filters' expressions.
+  const entering = emitter.expressions
+    .slice(taskBefore)
+    .filter(
+      ({ stage }) => stage !== "taskOutputAs" && stage !== "taskExportAs"
+    ).length;
+  if (entering > maxStepExpressions) {
+    emitter.refusals.add(pointer, "step:expressions", id);
+  }
+  const inputFrom = inputFromOf(emitter, item);
+  const outputAs = sealedPartOf(emitter, item, "output", "as", "taskOutputAs");
+  const exportAs = sealedPartOf(emitter, item, "export", "as", "taskExportAs");
+  // Its `task:` step is the host's waits for its events.
+  const steps: TaskStep[] = ["task"];
+  emitter.tasks.push({
+    ...sealed,
+    kind: "listen",
+    listen: {
+      binding,
+      strategy,
+      read: listen.read === "envelope" ? "envelope" : "data",
+      filters,
+    },
+    steps,
+    ...(inputFrom === undefined ? {} : { inputFrom }),
+    ...(outputAs === undefined ? {} : { outputAs }),
+    ...(exportAs === undefined ? {} : { exportAs }),
+  });
+  steps.push(
+    ...lowerDurable(
+      emitter,
+      item,
+      stages,
+      place,
+      (indent) => {
+        emitter.lines.push(
+          `${indent}output = await ${emitter.flow}.listen(${literal(id)});`
         );
       },
       true
@@ -1564,6 +1827,86 @@ type ListLowerer = (
 /** Whether task `item` sleeps: a wait, or a `grasp.sleepUntil` call. */
 const sleepsOf = (task: JsonObject, kind: string): boolean =>
   kind === "wait" || (kind === "call" && task.call === "grasp.sleepUntil");
+
+/** The most `for` tasks one inside another (spec 18: eight levels). */
+export const maxLoopDepth = 8;
+
+/**
+ * The longest a step's name may be (`task:<id>@<for>.<index>/…`): the
+ * engine's 256 characters (workerflow's `maxStepNameLength`), less what
+ * core adds to it for the steps of a call it waits on (`:held:<round>:
+ * <check>:check`, resource-host.ts).
+ */
+export const maxStepNameLength = 200;
+
+/** The most digits an item's index has: a collection holds at most 1,000. */
+const maxIndexDigits = 3;
+
+/**
+ * The longest name of a step of task `id` in scope `scope` (the `for`
+ * tasks around it), its index at its widest: `item:` steps of a `for`
+ * task in its own item's scope too.
+ */
+const longestStepName = (
+  id: string,
+  scope: readonly string[],
+  ownItem: boolean
+): number => {
+  const segments = ownItem ? [...scope, id] : scope;
+  const suffix =
+    segments.length === 0
+      ? 0
+      : 1 +
+        segments.reduce(
+          (length, segment) => length + segment.length + 1 + maxIndexDigits,
+          segments.length - 1
+        );
+  return "enter:".length + id.length + suffix;
+};
+
+/** Task `task`'s `metadata.grasp`, if it has one. */
+const graspMetadataOf = (task: JsonObject): JsonObject | undefined =>
+  isObject(task.metadata) && isObject(task.metadata.grasp)
+    ? task.metadata.grasp
+    : undefined;
+
+/**
+ * Refuses what of `for` task `item` isn't lowered yet: items at once
+ * (`metadata.grasp.concurrency` above 1, GRA-276's next slice) and items'
+ * own keys (`metadata.grasp.key`): its items are identified by their
+ * index in the collection its enter step records. Whether anything was.
+ */
+const refusedLoop = (emitter: Emitter, item: ListTask): boolean => {
+  const grasp = graspMetadataOf(item.task);
+  const graspPointer = pointerJoin(
+    pointerJoin(item.pointer, "metadata"),
+    "grasp"
+  );
+  let refused = false;
+  if (
+    grasp !== undefined &&
+    typeof grasp.concurrency === "number" &&
+    grasp.concurrency > 1
+  ) {
+    emitter.refusals.add(
+      pointerJoin(graspPointer, "concurrency"),
+      "for:concurrency",
+      item.id
+    );
+    refused = true;
+  }
+  if (grasp !== undefined && Object.hasOwn(grasp, "key")) {
+    emitter.refusals.add(pointerJoin(graspPointer, "key"), "for:key", item.id);
+    refused = true;
+  }
+  // Loops inside one another, at most spec 18's eight levels: what the
+  // host reads of a step's name.
+  if (emitter.scope.length >= maxLoopDepth) {
+    emitter.refusals.add(item.pointer, "for:depth", item.id);
+    refused = true;
+  }
+  return refused;
+};
 
 /**
  * Refuses, by pointer, what of task `item` (of `kind`) isn't lowered: its
@@ -1586,12 +1929,18 @@ const refusedOf = (emitter: Emitter, item: ListTask, kind: string): boolean => {
     refused = true;
   }
   for (const key of Object.keys(task)) {
-    if (key !== kind && !supportedTaskKeys.has(key)) {
+    const own = kind === "for" && (key === "while" || key === "do");
+    if (key !== kind && !own && !supportedTaskKeys.has(key)) {
       emitter.refusals.add(pointerJoin(pointer, key), key, id);
       refused = true;
     }
   }
-  const timed = timedKinds.has(kind) && !sleepsOf(task, kind);
+  if (kind === "for") {
+    refused = refusedLoop(emitter, item) || refused;
+  }
+  // A listen's timeout is its deadline: required, and what it waits until.
+  const timed =
+    (timedKinds.has(kind) && !sleepsOf(task, kind)) || kind === "listen";
   if (Object.hasOwn(task, "timeout") && !timed) {
     emitter.refusals.add(
       pointerJoin(pointer, "timeout"),
@@ -1601,6 +1950,119 @@ const refusedOf = (emitter: Emitter, item: ListTask, kind: string): boolean => {
     refused = true;
   }
   return refused;
+};
+
+/**
+ * The statement `end` is where code is being written: a `break` out of
+ * the workflow's list, or, inside an item's list, a return that tells its
+ * loop the workflow ended.
+ */
+const endJump = (emitter: Emitter): string => {
+  if (emitter.scope.length > 0) {
+    return "return { output, context, end: true };";
+  }
+  emitter.usedLabels.add(workflowLabel);
+  return `break ${workflowLabel};`;
+};
+
+/**
+ * The statements of a `for` task: one call of the SDK's loop, whose enter
+ * step records the items the host resolves from the sealed collection,
+ * with its list as a function of the item's own flow and data, in which
+ * `exit` ends the item and `end` the workflow (`end: true`, which the loop
+ * passes on). Its items run one after another; generated code has still
+ * no loop statement: the SDK runs the list once per recorded item, and
+ * the host refuses any item the record doesn't have.
+ */
+const lowerFor = (
+  emitter: Emitter,
+  item: ListTask,
+  stages: Stages,
+  place: ListPlace,
+  sealed: TaskBase,
+  lowerList: ListLowerer
+): void => {
+  const { id, task, pointer } = item;
+  const loop = isObject(task.for) ? task.for : {};
+  const forPointer = pointerJoin(pointer, "for");
+  const each = typeof loop.each === "string" ? loop.each : "item";
+  const at = typeof loop.at === "string" ? loop.at : "index";
+  const steps: TaskStep[] = ["enter"];
+  const collection = templateOf(
+    emitter,
+    loop.in ?? null,
+    pointerJoin(forPointer, "in"),
+    id,
+    "json"
+  );
+  const members = [...stages.enter];
+  let whileSlot: number | undefined;
+  if (Object.hasOwn(task, "while")) {
+    const condition = stageCode(
+      emitter,
+      task.while ?? null,
+      pointerJoin(pointer, "while"),
+      id,
+      "while",
+      "boolean"
+    );
+    if (condition === undefined) {
+      return;
+    }
+    whileSlot = emitter.expressions.length - 1;
+    members.push(`while: ${condition}`);
+    steps.push("item");
+  }
+  if (stages.leave.length > 0) {
+    steps.push("leave");
+  }
+  members.push(...stages.leave);
+  const inputFrom = inputFromOf(emitter, item);
+  emitter.tasks.push({
+    ...sealed,
+    kind: "for",
+    steps,
+    loop: {
+      in: collection,
+      each,
+      at,
+      ...(whileSlot === undefined ? {} : { while: whileSlot }),
+    },
+    ...(inputFrom === undefined ? {} : { inputFrom }),
+  });
+  emitter.counter += 1;
+  const number = emitter.counter;
+  const looped = `looped${number}`;
+  const flow = `flow${number}`;
+  const state = `state${number}`;
+  const { indent } = place;
+  emitter.lines.push(
+    `${indent}{`,
+    `${indent}  const ${looped} = await ${emitter.flow}.for(${literal(id)}, { input: output, context }, ${planCode(members)}, async (${flow}, ${state}) => {`,
+    `${indent}    let { output, context } = ${state};`
+  );
+  const outer = { flow: emitter.flow, scope: emitter.scope };
+  emitter.flow = flow;
+  emitter.scope = [...emitter.scope, id];
+  emitter.counter += 1;
+  lowerList(
+    emitter,
+    Array.isArray(task.do) ? task.do : [],
+    pointerJoin(pointer, "do"),
+    `${indent}    `,
+    { label: `s${emitter.counter}`, number: emitter.counter }
+  );
+  emitter.flow = outer.flow;
+  emitter.scope = outer.scope;
+  emitter.lines.push(
+    `${indent}    return { output, context };`,
+    `${indent}  });`,
+    `${indent}  ({ output, context } = ${looped});`,
+    `${indent}  if (${looped}.end) {`,
+    `${indent}    ${endJump(emitter)}`,
+    `${indent}  }`,
+    `${indent}}`
+  );
 };
 
 /** Lowers one task, or says why it can't be. */
@@ -1618,6 +2080,12 @@ const lowerTask = (
   if (refusedOf(emitter, item, kind)) {
     return;
   }
+  // A step's name names every loop around its task: one past what the
+  // engine takes is refused here, never at run time.
+  if (longestStepName(id, emitter.scope, kind === "for") > maxStepNameLength) {
+    emitter.refusals.add(pointer, "step:name_too_long", id);
+    return;
+  }
   const sleeps = sleepsOf(task, kind);
   const line = emitter.lines.length + 1;
   const before = emitter.expressions.length;
@@ -1628,6 +2096,7 @@ const lowerTask = (
     pointer,
     line,
     schemas: Object.freeze({ ...stages.schemas }),
+    scope: Object.freeze([...emitter.scope]),
     ...(timeoutMs === undefined ? {} : { timeoutMs }),
   };
   if (kind === "set" || kind === "switch" || (kind === "call" && !sleeps)) {
@@ -1647,6 +2116,10 @@ const lowerTask = (
     }
   } else if (sleeps) {
     lowerSleep(emitter, item, stages, place, sealed, before);
+  } else if (kind === "for") {
+    lowerFor(emitter, item, stages, place, sealed, lowerList);
+  } else if (kind === "listen") {
+    lowerListen(emitter, item, stages, place, sealed, before);
   } else {
     const steps: TaskStep[] = [];
     emitter.tasks.push({ ...sealed, kind: "do", steps });
@@ -1731,10 +2204,11 @@ const lowerList: ListLowerer = (
       if (target === "continue") {
         return null;
       }
-      let to: string | undefined = label;
       if (target === "end") {
-        to = workflowLabel;
-      } else if (target !== "exit") {
+        return endJump(emitter);
+      }
+      let to: string | undefined = label;
+      if (target !== "exit") {
         to = targetLabels.get(resolveTarget(positions, target, position));
       }
       if (to === undefined) {
@@ -1866,6 +2340,8 @@ export const generateWorkflow = (checked: CheckedWorkflow): Generation => {
     spans: [],
     usedLabels: new Set(),
     counter: 0,
+    flow: "flow",
+    scope: [],
   };
   emitter.lines.push(
     "// Generated by Grasp from workflow.json: read-only, rebuilt from it.",

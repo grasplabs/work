@@ -1,3 +1,5 @@
+import { linkErrors } from "@grasp-os/shared/app-links";
+import { decisionErrors } from "@grasp-os/shared/decisions";
 import { screenErrors } from "@grasp-os/shared/screens";
 import type { ScreenTarget } from "@grasp-os/shared/screens";
 import {
@@ -12,6 +14,7 @@ import {
 } from "@grasp-os/ui/components/alert-dialog";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
+import { i18n as pageI18n } from "@lingui/core";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
@@ -21,13 +24,40 @@ import { useEffect, useRef, useState } from "react";
 import type { CoreConnection } from "../core-connection.ts";
 import { DecisionConfirmDialog } from "../decision-confirmation.tsx";
 import type { PendingConfirmation } from "../decision-confirmation.tsx";
+import { LinkConfirmDialog } from "../link-confirmation.tsx";
+import type { PendingLink } from "../link-confirmation.tsx";
 import { useCore } from "../use-core.ts";
 import { frameQuestions } from "./frame-questions.ts";
 import type { Asked } from "./frame-questions.ts";
-import { navigationPolicy } from "./navigation-policy.ts";
+import { navigationPolicy, tabBudget } from "./navigation-policy.ts";
 import type { NavigationPolicy, PageState } from "./navigation-policy.ts";
 import { runPreview, runScreen } from "./screen-host.ts";
 import type { FailureReason, ScreenState } from "./screen-host.ts";
+
+/**
+ * What a frame's screen asks the person to confirm: a decision's answer,
+ * or a link to open. One gate for both (frame-questions.ts): one dialog at
+ * a time.
+ */
+type FrameQuestion =
+  | { readonly kind: "decision"; readonly review: PendingConfirmation }
+  | { readonly kind: "link"; readonly link: PendingLink };
+
+const linkAskingPaused = msg`Another link is waiting for an answer, or one was just turned down. Try again in a moment.`;
+
+/**
+ * The refusal of a question asked while it may not be, by its kind: a
+ * link's in the person's language, as the page's other link refusals are
+ * (screen-links.ts).
+ */
+const pausedFor = (question: FrameQuestion): Error => {
+  if (question.kind === "decision") {
+    return decisionErrors.create("decision.asking_paused");
+  }
+  const refusal = linkErrors.create("link.asking_paused");
+  refusal.message = pageI18n._(linkAskingPaused);
+  return refusal;
+};
 
 const failureMessages: Readonly<Record<FailureReason, MessageDescriptor>> = {
   forbidden: msg`You can't open this domain's apps: your role doesn't allow it, or the domain has read data you can't read.`,
@@ -123,21 +153,32 @@ const start = (
   onState: (state: ScreenState) => void,
   onOpened: (appName: string) => void,
   confirm: (review: PendingConfirmation) => Promise<boolean>,
+  confirmLink: (link: PendingLink) => Promise<boolean>,
   navigation: FrameNavigation
 ): (() => void) =>
   chatId === undefined
-    ? runScreen(frame, core, app, screen ?? "", onState, onOpened, confirm, {
-        ...(route === undefined
-          ? {}
-          : {
-              route: {
-                route,
-                input: jsonInput(input),
-                ...(surface === undefined ? {} : { surface }),
-              },
-            }),
-        navigation,
-      })
+    ? runScreen(
+        frame,
+        core,
+        app,
+        screen ?? "",
+        onState,
+        onOpened,
+        confirm,
+        confirmLink,
+        {
+          ...(route === undefined
+            ? {}
+            : {
+                route: {
+                  route,
+                  input: jsonInput(input),
+                  ...(surface === undefined ? {} : { surface }),
+                },
+              }),
+          navigation,
+        }
+      )
     : runPreview(
         frame,
         { chatId, app, ...(screen === undefined ? {} : { screen }) },
@@ -158,10 +199,10 @@ const startAsking = (
   source: FrameSource,
   onState: (state: ScreenState) => void,
   onOpened: (appName: string) => void,
-  onAsk: (asked: Asked | null) => void,
+  onAsk: (asked: Asked<FrameQuestion> | null) => void,
   navigation: FrameNavigation
 ): (() => void) => {
-  const questions = frameQuestions(onAsk);
+  const questions = frameQuestions<FrameQuestion>(onAsk, Date.now, pausedFor);
   const stop = start(
     frame,
     core,
@@ -173,7 +214,8 @@ const startAsking = (
       onState(state);
     },
     onOpened,
-    questions.confirm,
+    async (review) => await questions.confirm({ kind: "decision", review }),
+    async (link) => await questions.confirm({ kind: "link", link }),
     navigation
   );
   return () => {
@@ -184,6 +226,12 @@ const startAsking = (
     navigation.leaveGuard(false);
   };
 };
+
+/**
+ * The tab's one navigation without the person acting, shared by every
+ * start of every frame in it (navigation-policy.ts).
+ */
+const thisTab = tabBudget();
 
 /**
  * How one start of a frame navigates the page and reports its guard,
@@ -200,9 +248,10 @@ const policedNavigation = (
 ): FrameNavigation => {
   // Read as each navigation is asked for. Where the page is: its history
   // entry, which differs for each, even at one address. Whether the person
-  // just acted: on the page, for a screen that is the page's; beside it,
-  // only in its own frame, so a click anywhere else on the page is never
-  // the panel's to use.
+  // just acted: in this frame, which then holds the page's focus. The
+  // browser keeps a click's activation for a few seconds, whichever frame
+  // asks, so a screen that mounted after it, never clicked, can't spend it
+  // as its own; and a click anywhere else on the page is never a panel's.
   const page: PageState = {
     location: () => ({
       here: router.state.location.state.__TSR_key ?? router.state.location.href,
@@ -211,7 +260,7 @@ const policedNavigation = (
     }),
     activated: () =>
       (navigator.userActivation?.isActive ?? false) &&
-      (!beside || document.activeElement === frame),
+      document.activeElement === frame,
     now: () => Date.now(),
   };
   const policy = navigationPolicy(
@@ -223,6 +272,7 @@ const policedNavigation = (
       await go(target, replace);
     },
     page,
+    thisTab,
     beside ? "beside" : "page"
   );
   // The leave dialog tells this start's policy when the person stays.
@@ -240,8 +290,8 @@ interface FrameProps extends FrameSource {
   title: string;
   onState: (state: ScreenState) => void;
   onOpened: (appName: string) => void;
-  /** Shows the question waiting in the dialog, or takes it away. */
-  onAsk: (asked: Asked | null) => void;
+  /** Shows the question waiting in its dialog, or takes it away. */
+  onAsk: (asked: Asked<FrameQuestion> | null) => void;
   /** How the screen navigates the page now, read when it asks. */
   navigateTo: { readonly current: ScreenNavigate | undefined };
   /** Whether the screen holds unsaved edits now. */
@@ -419,7 +469,8 @@ const FramedScreen = ({
   }, [state]);
   const [appName, setAppName] = useState("");
   const [attempt, setAttempt] = useState(0);
-  const [asked, setAsked] = useState<Asked | null>(null);
+  const [asked, setAsked] = useState<Asked<FrameQuestion> | null>(null);
+  const question = asked?.review;
   // Whether a form of the screen holds unsaved edits or an unknown
   // outcome: leaving the screen then, however the page leaves it, is
   // confirmed once, in Grasp's own dialog (spec 10.7.7).
@@ -466,17 +517,30 @@ const FramedScreen = ({
       <ScreenStatus onReload={reload} state={state} />
       <DecisionConfirmDialog
         onCancel={(review) => {
-          if (asked?.review === review) {
-            asked.settle(false);
+          if (question?.kind === "decision" && question.review === review) {
+            asked?.settle(false);
           }
         }}
         onConfirm={(review) => {
-          if (asked?.review === review) {
-            asked.settle(true);
+          if (question?.kind === "decision" && question.review === review) {
+            asked?.settle(true);
           }
         }}
-        pending={asked?.review}
+        pending={question?.kind === "decision" ? question.review : undefined}
         source="screen"
+      />
+      <LinkConfirmDialog
+        onCancel={(review) => {
+          if (question?.kind === "link" && question.link === review) {
+            asked?.settle(false);
+          }
+        }}
+        onConfirm={(review) => {
+          if (question?.kind === "link" && question.link === review) {
+            asked?.settle(true);
+          }
+        }}
+        pending={question?.kind === "link" ? question.link : undefined}
       />
       <LeaveConfirmDialog
         onLeave={() => {

@@ -45,7 +45,7 @@ import {
   modelGatewayConfigSchema as gatewayConfigSchema,
   modelRulesConfigSchema as rulesConfigSchema,
 } from "@grasp-os/shared/deployment-config";
-import type { ModelRules } from "@grasp-os/shared/deployment-config";
+import type { ModelRole, ModelRules } from "@grasp-os/shared/deployment-config";
 import {
   appIdSchema,
   connectionIdSchema,
@@ -68,6 +68,8 @@ import {
 import { quotaPolicyOf } from "@grasp-os/shared/quota-policy";
 import type { QuotaPolicy } from "@grasp-os/shared/quota-policy";
 import { modelBindingBudgetSchema } from "@grasp-os/shared/resource-bindings";
+import { maxSpeechChars } from "@grasp-os/shared/voice";
+import type { Speech } from "@grasp-os/shared/voice";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -105,6 +107,13 @@ import type { PinnedPrice, TokenCounts } from "./model-prices.ts";
 import { bodyBytes, outputCapOf, unboundedBy } from "./model-requests.ts";
 import { judgeCall } from "./model-rules.ts";
 import type { Judged, Refusal } from "./model-rules.ts";
+import {
+  charactersOf,
+  parseVoiceRef,
+  voicePricesOf,
+  wordsOf,
+} from "./voice-models.ts";
+import type { VoiceRef } from "./voice-models.ts";
 import { askAgainMs } from "./workflows/admission.ts";
 import { quotaPolicy } from "./workflows/quotas.ts";
 
@@ -235,11 +244,19 @@ const parseModelRef = (ref: string): ModelRef | undefined => {
   return model === undefined ? undefined : { provider, id, catalog: model };
 };
 
+/**
+ * A model the gateway offers: a text model of pi's catalog, or a voice
+ * model of our own (voice-models.ts), which only speech takes
+ * (`models(env).speak`). Each check stays its own, so no text call can
+ * name a voice model, nor a speech call a text model.
+ */
 const modelRefSchema = z
   .string()
-  .refine((ref) => parseModelRef(ref) !== undefined, {
-    message: "A <provider>/<model> the gateway offers",
-  });
+  .refine(
+    (ref) =>
+      parseModelRef(ref) !== undefined || parseVoiceRef(ref) !== undefined,
+    { message: "A <provider>/<model> the gateway offers" }
+  );
 
 /** The allowlist in the `MODEL_GATEWAY` var, by the models pi offers. */
 const modelGatewayConfigSchema = gatewayConfigSchema(modelRefSchema);
@@ -311,15 +328,58 @@ const modelRules = (env: ModelsEnv): ModelRules | undefined => {
 
 /**
  * The allowlist and the rules as they apply now, for admins to read
- * (models-rpc.ts): the allowed models, none while the config doesn't parse;
- * and the rules, `undefined` when they don't parse.
+ * (models-rpc.ts): the allowed text models, none while the config doesn't
+ * parse, and apart from them the allowed voice models, which only speech
+ * takes, so nothing that picks a model for text (a chat, a binding, the
+ * kickoff's reading) is offered one; and the rules, `undefined` when they
+ * don't parse.
  */
 export const gatewaySettings = (
   env: ModelsEnv
-): { models: string[]; rules: ModelRules | undefined } => ({
-  models: modelGatewayConfig(env)?.models ?? [],
-  rules: modelRules(env),
-});
+): {
+  models: string[];
+  voices: string[];
+  roles: Partial<Record<ModelRole, string>>;
+  rules: ModelRules | undefined;
+} => {
+  const config = modelGatewayConfig(env);
+  const allowed = config?.models ?? [];
+  return {
+    models: allowed.filter((ref) => parseModelRef(ref) !== undefined),
+    voices: allowed.filter((ref) => parseVoiceRef(ref) !== undefined),
+    roles: config?.roles ?? {},
+    rules: modelRules(env),
+  };
+};
+
+/**
+ * The model for `role` (`MODEL_GATEWAY`'s `roles`), for a call that
+ * carries sensitive data when `sensitive` is set: the one the deployment
+ * named, or, for a role it left out, the first allowed model the rules let
+ * the call use. `undefined` when there is none, and when the rules refuse
+ * the named model: a role never falls back to a model the deployment
+ * didn't name for it. The gateway checks the rules again either way.
+ */
+export const modelForRole = (
+  { models: allowed, roles, rules }: ReturnType<typeof gatewaySettings>,
+  role: ModelRole,
+  { sensitive }: { sensitive: boolean }
+): string | undefined => {
+  const fits = (model: string) =>
+    (!sensitive ||
+      rules?.sensitive === undefined ||
+      rules.sensitive.models.includes(model)) &&
+    (rules?.eu?.deployment !== true || rules.eu.models.includes(model));
+  const named = roles[role];
+  if (named === undefined) {
+    return allowed.find(fits);
+  }
+  if (!fits(named)) {
+    log.error("model.role_refused", { role, model: named });
+    return undefined;
+  }
+  return named;
+};
 
 /**
  * The thinking level a request asks `model` for: the call's effort, or
@@ -565,8 +625,17 @@ export interface ModelAnswer<Output> {
   output: Output;
   /** The model hit its output limit, so the text may stop short. */
   truncated: boolean;
-  /** Across every request the call made. */
-  usage: { inputTokens: number; outputTokens: number };
+  /**
+   * Across every request the call made. `inputTokens` counts the whole
+   * prompt, cached or not; `cacheRead` and `cacheWrite` say how much of it
+   * was read from the provider's prompt cache, and written to it.
+   */
+  usage: {
+    inputTokens: number;
+    outputTokens: number;
+    cacheRead: number;
+    cacheWrite: number;
+  };
   /** In US dollars, at the provider's list prices. */
   cost: number;
 }
@@ -795,7 +864,37 @@ interface Route extends Admitted {
   notes: Promise<void>;
   /** Whether a refused request is sent again (`ModelCall.providerRetries`). */
   providerRetries?: boolean;
+  /**
+   * The most a provider request with `body` may use, as its prices count
+   * it, or why it can't be bounded (`textBound`).
+   */
+  bound: (body: unknown) => RequestBound | { held: Refusal };
 }
+
+/** The most one provider request may use: its prompt, and its answer. */
+interface RequestBound {
+  inputTokens: number;
+  outputTokens: number;
+}
+
+/**
+ * What admitting a provider request takes of its route: a text model's
+ * (`Route`), or a voice model's (`speak`).
+ */
+type Admitting = Pick<
+  Route,
+  | "env"
+  | "call"
+  | "price"
+  | "perRequest"
+  | "scopesNow"
+  | "disclose"
+  | "beforeSend"
+  | "onQueued"
+  | "notes"
+  | "place"
+  | "bound"
+>;
 
 interface Request extends Route {
   /** Ends the call when it takes too long, retries included. */
@@ -838,6 +937,10 @@ interface GatewayResponse {
 interface Admission {
   id: string;
   reservedMicros: number;
+  /** The most tokens its prompt can be, as reserved: its body's bytes and more. */
+  promptTokens: number;
+  /** The most tokens its answer can be: the cap its body sets. */
+  answerCap: number;
 }
 
 interface Sent extends GatewayResponse {
@@ -1100,7 +1203,7 @@ const queuedHookMs = 2000;
  * lands after a newer one, so the last a caller records is the latest.
  */
 const told = async (
-  route: Route,
+  route: Admitting,
   queued: Parameters<QueuedHook>[0]
 ): Promise<void> => {
   const { onQueued } = route;
@@ -1136,7 +1239,7 @@ const told = async (
 };
 
 /** Gives up `route`'s call's place in the queue; its place lapses should this fail. */
-const leaveQueue = async (route: Route): Promise<void> => {
+const leaveQueue = async (route: Admitting): Promise<void> => {
   try {
     await modelLedger(route.env).leaveQueue(route.place);
   } catch (error) {
@@ -1189,7 +1292,7 @@ const settleRequest = async (
  * record of. One whose outcome is unknown keeps holding all of it.
  */
 const settleAdmitted = async (
-  route: Route,
+  route: Admitting,
   admission: Admission,
   settlement: Settlement
 ): Promise<RequestSettled> => {
@@ -1218,7 +1321,7 @@ const settleAdmitted = async (
 
 /** `route`'s scopes now, or held back when the quota policy can't be read. */
 const scopesRead = async (
-  route: Route
+  route: Admitting
 ): Promise<Awaited<ReturnType<Route["scopesNow"]>> | { held: Refusal }> => {
   try {
     return await route.scopesNow();
@@ -1303,29 +1406,17 @@ const heldBecause = (
 };
 
 /**
- * Asks the model ledger to admit one provider request, with the body it
- * will send: reserves the most it can cost, its prompt bounded by the
- * body's size and its answer by the cap the body sets (or the model's,
- * where it sets none), at the model's pinned prices. Its ID, or why it
- * is held back. Asked once more, under the quota policy read again, when
- * the ledger already admitted under a newer one (`retried`).
+ * The most a text model's request with `body` may use: its prompt bounded
+ * by the body's size, its answer by the cap the body sets (or the
+ * model's, where it sets none). Priced at the dearest tier the prompt may
+ * reach: Anthropic's long-context premium too, a tier of its own
+ * (model-prices.ts).
  */
-const admitRequest = async (
-  route: Route,
-  body: unknown,
-  endsAt: number,
-  retried = false
-): Promise<Admission | { held: Refusal }> => {
-  const { env, call, model, price, perRequest } = route;
-  const now = await scopesRead(route);
-  if ("held" in now) {
-    return now;
-  }
-  const { period, scopes, policyGeneration, fair } = now;
-  const budgeted = hasBudget(scopes) || perRequest !== undefined;
-  if (price === undefined && budgeted) {
-    return { held: { code: "model.unpriced" } };
-  }
+const textBound = (
+  call: Session,
+  model: Model<Api>,
+  body: unknown
+): RequestBound | { held: Refusal } => {
   // Never expected: the gateway sends text only, at list prices.
   const unbounded = unboundedBy(body);
   if (unbounded !== undefined) {
@@ -1339,18 +1430,42 @@ const admitRequest = async (
     log.error("model.unbounded_request", { model: call.model });
     return { held: { code: "model.ledger_unavailable" } };
   }
-  // Priced at the dearest tier the prompt may reach: Anthropic's
-  // long-context premium too, a tier of its own (model-prices.ts).
-  const promptBound = bytes + promptAllowanceTokens;
+  return { inputTokens: bytes + promptAllowanceTokens, outputTokens };
+};
+
+/**
+ * Asks the model ledger to admit one provider request, with the body it
+ * will send: reserves the most it can cost (`Route.bound`), at the
+ * model's pinned prices. Its ID, or why it is held back. Asked once
+ * more, under the quota policy read again, when the ledger already
+ * admitted under a newer one (`retried`).
+ */
+const admitRequest = async (
+  route: Admitting,
+  body: unknown,
+  endsAt: number,
+  retried = false
+): Promise<Admission | { held: Refusal }> => {
+  const { env, call, price, perRequest } = route;
+  const now = await scopesRead(route);
+  if ("held" in now) {
+    return now;
+  }
+  const { period, scopes, policyGeneration, fair } = now;
+  const budgeted = hasBudget(scopes) || perRequest !== undefined;
+  if (price === undefined && budgeted) {
+    return { held: { code: "model.unpriced" } };
+  }
+  const bound = route.bound(body);
+  if ("held" in bound) {
+    return bound;
+  }
   const pinned = price ?? unpriced;
   const id = crypto.randomUUID();
   // The call's own cut-off, which a retry or a second ask shares: never a
   // whole timeout from now.
   const callDeadline = endsAt;
-  const reservedMicros = boundMicros(pinned, {
-    inputTokens: promptBound,
-    outputTokens,
-  });
+  const reservedMicros = boundMicros(pinned, bound);
   // The binding's cap per request holds the App's request as a whole: a
   // second attempt or a retry needs room beside what the earlier ones
   // still hold, an unknown outcome all of its reservation.
@@ -1394,7 +1509,12 @@ const admitRequest = async (
       if (perRequest !== undefined) {
         perRequest.heldMicros += reservedMicros;
       }
-      return { id, reservedMicros };
+      return {
+        id,
+        reservedMicros,
+        promptTokens: bound.inputTokens,
+        answerCap: bound.outputTokens,
+      };
     }
     return { held: heldBecause(call, admitted, route.disclose) };
   } catch (error) {
@@ -1421,7 +1541,7 @@ interface Waiting {
  * cancelled while it waits asks nothing more.
  */
 const askUntilServed = async (
-  route: Route,
+  route: Admitting,
   body: unknown,
   {
     endsAt,
@@ -1511,7 +1631,7 @@ const askUntilServed = async (
  * and a caller told it waited is told it stopped.
  */
 const admitWaiting = async (
-  route: Route,
+  route: Admitting,
   body: unknown,
   { endsAt, signal }: { endsAt: number; signal: AbortSignal }
 ): Promise<Admission | { held: Refusal }> => {
@@ -1716,6 +1836,8 @@ interface Failure {
    * `cancelled` when it was stopped here.
    */
   errorType: string | undefined;
+  /** Why it was stopped here, if it was: cut off before it ended. */
+  stopped: Stopped | undefined;
 }
 
 const providerErrorType = (text: string): string | undefined => {
@@ -1745,13 +1867,14 @@ const failureOf = (
   stopped: Stopped | undefined
 ): Failure => {
   if (stopped !== undefined) {
-    return { status, errorType: stopped };
+    return { status, errorType: stopped, stopped };
   }
   const text = answer.errorMessage?.trim() ?? "";
   const quoted = failedStatusPattern.exec(text)?.groups?.status;
   return {
     status: quoted === undefined ? status : Number(quoted),
     errorType: providerErrorType(text),
+    stopped: undefined,
   };
 };
 
@@ -2101,6 +2224,60 @@ const countedTokens = ({
     : undefined;
 
 /**
+ * What a request cut off mid-answer, by its caller or its deadline, is
+ * known to have used by then. The prompt as the provider counted it at
+ * the start (Anthropic's `message_start`); where it sent no count yet
+ * (chat completions count in their last chunk), the prompt's bound, as
+ * its admission reserved it: never an estimate below what it may bill.
+ * The answer as far as it was relayed, at {@link estimatedCharsPerToken}
+ * characters a token where that is more than was counted, but never an
+ * estimate past the answer's cap, which the provider stops at. None where
+ * the counts that came aren't counts, or hold one-hour cache writes,
+ * which the catalog doesn't price.
+ */
+const cutTokens = (
+  { promptTokens, answerCap }: Admission,
+  answer: AssistantMessage
+): TokenCounts | undefined => {
+  const { input, output, cacheRead, cacheWrite, cacheWrite1h } = answer.usage;
+  if (
+    ![input, output, cacheRead, cacheWrite].every(isCount) ||
+    (cacheWrite1h ?? 0) !== 0
+  ) {
+    return undefined;
+  }
+  const relayed = Math.max(
+    output,
+    Math.min(estimatedTokens(receivedChars(answer)), answerCap)
+  );
+  return input + cacheRead + cacheWrite > 0
+    ? { input, output: relayed, cacheRead, cacheWrite }
+    : { input: promptTokens, output: relayed, cacheRead: 0, cacheWrite: 0 };
+};
+
+/**
+ * How the ledger settles the provider request whose answer streamed: at
+ * the provider's count once it ended whole; at what it is known to have
+ * used once it was cut off here (`cutTokens`), so a caller who talks on
+ * pays for what it used, and its reservation goes back at once; and
+ * otherwise (it failed, or answered with no usage at all) not at all:
+ * it keeps its whole reservation, never an estimate below what the
+ * provider may bill.
+ */
+const settlementOf = (
+  pending: Admission,
+  answer: AssistantMessage,
+  failure: Failure | undefined
+): Settlement => {
+  if (failure?.stopped !== undefined) {
+    const tokens = cutTokens(pending, answer);
+    return tokens === undefined ? { by: "unknown" } : { by: "cut", tokens };
+  }
+  const tokens = hasFailed(answer) ? undefined : countedTokens(answer.usage);
+  return tokens === undefined ? { by: "unknown" } : { by: "usage", tokens };
+};
+
+/**
  * Records one request in the audit log, however it ended, with what it
  * used as the provider counted it, or an estimate where a request that
  * failed mid-answer has no count (`usedBy`); and settles its provider
@@ -2116,21 +2293,14 @@ const record = async (
   failure?: Failure
 ): Promise<void> => {
   // Settled first, so nothing that goes wrong with the audit event keeps
-  // the provider request from being charged what it used. The one whose
-  // answer streamed is charged the provider's count; one that ended
-  // without a whole count (failed, timed out or cancelled once accepted,
-  // or answered with no usage at all) keeps its whole reservation, never
-  // an estimate below what the provider may bill.
+  // the provider request from being charged what it used (`settlementOf`).
   const { pending, logId, status } = sent;
   let settled: Settled | undefined = undefined;
   if (pending !== undefined) {
-    const tokens = hasFailed(sent.answer)
-      ? undefined
-      : countedTokens(sent.answer.usage);
     ({ settled } = await settleAdmitted(
       admitted,
       pending,
-      tokens === undefined ? { by: "unknown" } : { by: "usage", tokens }
+      settlementOf(pending, sent.answer, failure)
     ));
   }
   const used = usedBy(admitted, sent);
@@ -2282,6 +2452,50 @@ const policyOrPlatform = async (env: ModelsEnv): Promise<QuotaPolicy> => {
 };
 
 /**
+ * The scopes a provider request of `call` counts against once it is sent
+ * (`Route.scopesNow`), by `scopesOn` for its day and its lineage's limit
+ * of requests, and whose shares of the requests in flight it takes: from
+ * its trigger and work context, which core's host sets, never from App
+ * code.
+ */
+const scopesNowOf = (
+  env: ModelsEnv,
+  call: Session,
+  place: string,
+  scopesOn: (day: string, lineageRequests: number) => LedgerScope[]
+): Route["scopesNow"] => {
+  const { subject, resource } = shareIdentity(call);
+  return async () => {
+    // A run lineage's request limit, as the policy stands for this
+    // request: lowered for runs already under way too (model-budgets.ts).
+    const lineage =
+      call.trigger.type === "workflow" ? await readPolicy(env) : undefined;
+    // The shares, as the policy stands too; for a call with no lineage,
+    // the last read or the platform's own should the policy not be read.
+    const policy = lineage ?? (await policyOrPlatform(env));
+    // One clock for both, so a request at a month's last instant never
+    // counts its day in one month and its month in the next.
+    const { month, day } = budgetPeriods(env);
+    return {
+      period: month,
+      scopes: scopesOn(
+        day,
+        lineage?.limits.lineageModelRequests ?? lineageModelRequests
+      ),
+      // The generation of the policy its shares come from, a fallback's
+      // too (the last read's, or the platform's own, 0), so the ledger
+      // refuses shares from a policy older than one it saw
+      // (`policyBehind`): the request reads it again, and is held back
+      // if it still can't. Shares from a fallback apply only while the
+      // ledger knows of no newer policy, so an operator's lowered share
+      // holds through an outage.
+      policyGeneration: policy.generation,
+      fair: { place, subject, resource, shares: modelSharesOf(policy) },
+    };
+  };
+};
+
+/**
  * Checks a request against the deployment's config and rules, before
  * anything is sent, and routes it to the model at the gateway.
  */
@@ -2347,46 +2561,21 @@ const admit = async (env: ModelsEnv, call: Session): Promise<Route> => {
   }
   // Whose shares of the requests in flight the call takes, from its
   // trigger and work context, which core's host sets: never from App code.
-  const { subject, resource, disclose } = shareIdentity(call);
+  const { disclose } = shareIdentity(call);
   const place = crypto.randomUUID();
+  const model = gatewayModel(config.gateway, ref);
   return {
     call,
     ref,
     judged: verdict.judged,
-    model: gatewayModel(config.gateway, ref),
+    model,
     transport: createAiBindingFetch(env.AI),
+    bound: (body) => textBound(call, model, body),
     price,
     place,
     disclose,
     notes: Promise.resolve(),
-    scopesNow: async () => {
-      // A run lineage's request limit, as the policy stands for this
-      // request: lowered for runs already under way too (model-budgets.ts).
-      const lineage =
-        call.trigger.type === "workflow" ? await readPolicy(env) : undefined;
-      // The shares, as the policy stands too; for a call with no lineage,
-      // the last read or the platform's own should the policy not be read.
-      const policy = lineage ?? (await policyOrPlatform(env));
-      // One clock for both, so a request at a month's last instant never
-      // counts its day in one month and its month in the next.
-      const { month, day } = budgetPeriods(env);
-      return {
-        period: month,
-        scopes: scopesOn(
-          day,
-          lineage?.limits.lineageModelRequests ?? lineageModelRequests
-        ),
-        // The generation of the policy its shares come from, a fallback's
-        // too (the last read's, or the platform's own, 0), so the ledger
-        // refuses shares from a policy older than one it saw
-        // (`policyBehind`): the request reads it again, and is held back
-        // if it still can't. Shares from a fallback apply only while the
-        // ledger knows of no newer policy, so an operator's lowered share
-        // holds through an outage.
-        policyGeneration: policy.generation,
-        fair: { place, subject, resource, shares: modelSharesOf(policy) },
-      };
-    },
+    scopesNow: scopesNowOf(env, call, place, scopesOn),
     perRequest:
       requestMicros === undefined
         ? undefined
@@ -2404,7 +2593,12 @@ const answerCall = async <Output>(
   askAgain = true
 ): Promise<ModelAnswer<Output>> => {
   const { call } = request;
-  const usage = { inputTokens: 0, outputTokens: 0 };
+  const usage = {
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
+  };
   let cost = 0;
   // A call with a schema asks once more when the answer doesn't fit it.
   const attempts = schema === undefined || !askAgain ? 1 : 2;
@@ -2421,6 +2615,8 @@ const answerCall = async <Output>(
     const { answer } = sent;
     usage.inputTokens += inputTokens(answer.usage);
     usage.outputTokens += answer.usage.output;
+    usage.cacheRead += answer.usage.cacheRead;
+    usage.cacheWrite += answer.usage.cacheWrite;
     cost += pricedCost(request.price, answer.usage);
     const text = answerText(answer);
     const truncated = answer.stopReason === "length";
@@ -2745,6 +2941,531 @@ const relayOrFail = async (
   }
 };
 
+// Speech: a voice model says a line (voice-models.ts). It goes through the
+// gateway like any model call, as the lines carry interview content: the
+// allowlist and the rules judge it, the ledger admits each provider
+// request against the budgets, at its price per character, and the audit
+// log records it, never the line. ElevenLabs is reached through AI Gateway
+// over the AI binding, with the key AI Gateway stores: core sends none.
+// The gateway reaches it at the path the deployment's config names
+// (`voice.provider`): ElevenLabs's native host, or its EU host through a
+// custom provider. Nothing reaches ElevenLabs but through the gateway.
+
+/** Text without anything a URL's path would read apart: a voice's ID. */
+const voiceIdPattern = /^[A-Za-z0-9]{1,64}$/u;
+
+/** An ISO 639-1 language code. */
+const languagePattern = /^[a-z]{2}$/u;
+
+const speechSchema = z.strictObject({
+  model: sessionShape.model,
+  timeoutMs: sessionShape.timeoutMs,
+  purpose: sessionShape.purpose,
+  trigger: sessionShape.trigger,
+  provenance: sessionShape.provenance,
+  connections: sessionShape.connections,
+  work: sessionShape.work,
+  requestId: sessionShape.requestId,
+  /** The line to say: at most `maxSpeechChars`, which bounds what it costs. */
+  text: z.string().trim().min(1).max(maxSpeechChars),
+  voice: z.string().regex(voiceIdPattern),
+  language: z.string().regex(languagePattern),
+});
+type SpeechSession = z.output<typeof speechSchema>;
+
+/** One line for a voice model to say. */
+export type SpeechCall = z.input<typeof speechSchema> & {
+  /** Where the call works: required, so no caller can leave it out. */
+  work: NonNullable<z.input<typeof speechSchema>["work"]>;
+};
+
+/** How long a line may take to say when the call doesn't say, retry included. */
+const speechTimeoutMs = 60_000;
+
+/**
+ * Retries for a line the provider refused for a moment (429 or 5xx):
+ * ElevenLabs says a few lines at a time and turns the rest away, which is
+ * over in a moment.
+ */
+const speechRetries = 1;
+
+/** The wait before a line turned away is asked for again. */
+const speechRetryMs = 500;
+
+/** The audio asked for: MP3 at 44.1 kHz, 128 kbit/s, ElevenLabs's default. */
+const speechFormat = { query: "mp3_44100_128", mime: "audio/mpeg" } as const;
+
+/**
+ * Steadier than the model's default: a voice says many separate lines, so
+ * one line should sound like the next more than it should surprise.
+ */
+const voiceSettings = { stability: 0.7, similarity_boost: 0.8 };
+
+/** The same seed for every line, so the same words sound the same. */
+const voiceSeed = 7;
+
+/** ElevenLabs's answer: the audio, and when each character is said. */
+const spokenSchema = z.object({
+  audio_base64: z.string().min(1),
+  alignment: z.object({
+    characters: z.array(z.string()),
+    character_start_times_seconds: z.array(z.number().nonnegative()),
+    character_end_times_seconds: z.array(z.number().nonnegative()),
+  }),
+});
+
+/** Base64 as bytes; `undefined` for text that isn't base64. */
+const bytesOf = (base64: string): Uint8Array | undefined => {
+  try {
+    return Uint8Array.from(atob(base64), (char) => char.codePointAt(0) ?? 0);
+  } catch {
+    return undefined;
+  }
+};
+
+/** What the audit log records of one line, however it ended. */
+interface SpeechRecord {
+  /** Characters charged; 0 when the provider said nothing. */
+  characters: number;
+  cost: number;
+  logId: string | undefined;
+  outcome: Outcome;
+  status: number | undefined;
+  errorType: string | undefined;
+  ledger: Ledgered;
+}
+
+/** A line's audit entry: a `model.call`, as any model call's. */
+const speechEntry = (
+  call: SpeechSession,
+  ref: VoiceRef,
+  judged: Judged,
+  recorded: SpeechRecord
+): AuditEntry => {
+  const { logId } = recorded;
+  return keepingProvenance(call.provenance, (provenance, dropped) => ({
+    actor: call.trigger,
+    action: "model.call",
+    requestId: call.requestId,
+    provenance,
+    // A voice model counts characters, not tokens (`characters`).
+    model: {
+      provider: ref.provider,
+      model: ref.id,
+      inputTokens: 0,
+      outputTokens: 0,
+    },
+    cost: { amount: recorded.cost, currency: "USD" },
+    detail: {
+      purpose: call.purpose,
+      outcome: recorded.outcome,
+      attempt: 1,
+      status: recorded.status ?? null,
+      errorType: recorded.errorType ?? null,
+      characters: recorded.characters,
+      voice: call.voice,
+      language: call.language,
+      ledger: recorded.ledger.state,
+      ledgerRequests: recorded.ledger.requests,
+      ledgerCharged: recorded.ledger.charged,
+      ledgerHeld: recorded.ledger.held,
+      gatewayLogId:
+        logId !== undefined && logId.length <= auditIdentifierMaxLength
+          ? logId
+          : null,
+      euOnly: judged.euOnly ?? null,
+      sensitive: judged.sensitive ?? null,
+      provenanceDropped: dropped,
+      chat: chatOf(call),
+      ...workflowRunOf(call),
+    },
+  }));
+};
+
+/** The most a line can add to its audit event (`largestRecord`). */
+const largestSpeech: SpeechRecord = {
+  characters: maxSpeechChars,
+  cost: Number.MAX_VALUE,
+  logId: "x".repeat(auditIdentifierMaxLength),
+  outcome: "invalid_output",
+  status: 599,
+  errorType: "x".repeat(64),
+  ledger: largestRecord.ledger,
+};
+
+/** The gateway path to ElevenLabs's native host, unless the config names another. */
+const nativeVoiceProvider = "elevenlabs";
+
+/** A line's way to the voice model at the deployment's gateway. */
+interface SpeechRoute extends Admitting {
+  call: SpeechSession;
+  ref: VoiceRef;
+  judged: Judged;
+  price: PinnedPrice;
+  transport: FetchFunction;
+  url: string;
+  body: string;
+  /** What the line is charged as (`charactersOf`). */
+  characters: number;
+}
+
+/**
+ * Checks a line against the deployment's config and rules, as `admit`
+ * does a text model's call, before anything is sent: a voice model the
+ * allowlist or the rules don't let it use is refused, and audited.
+ */
+const admitSpeech = async (
+  env: ModelsEnv,
+  call: SpeechSession
+): Promise<SpeechRoute> => {
+  const config = modelGatewayConfig(env);
+  const rules = modelRules(env);
+  // Plain workerd (on-prem) has no AI binding, so no voice either.
+  if (
+    config === undefined ||
+    rules === undefined ||
+    typeof env.AI?.fetch !== "function"
+  ) {
+    throw modelErrors.create("model.unconfigured");
+  }
+  const ref = config.models.includes(call.model)
+    ? parseVoiceRef(call.model)
+    : undefined;
+  if (ref === undefined) {
+    return await refuse(env, call, { code: "model.not_allowed" });
+  }
+  try {
+    createAuditEvent(
+      speechEntry(call, ref, largestJudged, largestSpeech),
+      "core"
+    );
+  } catch {
+    // Never expected, as for a text model's call (`admit`).
+    throw modelErrors.create("model.invalid_call");
+  }
+  const verdict = await judgeCall(env, rules, call);
+  if (!verdict.ok) {
+    return await refuse(env, call, verdict);
+  }
+  const price = await pinnedPrice(voicePricesOf(ref));
+  if (price === undefined) {
+    // Never expected: the voice catalog's prices are ours.
+    return await refuse(env, call, { code: "model.unpriced" });
+  }
+  const place = crypto.randomUUID();
+  const characters = charactersOf(call.text);
+  const query = new URLSearchParams({
+    // ElevenLabs keeps neither the line nor the audio.
+    enable_logging: "false",
+    output_format: speechFormat.query,
+  });
+  return {
+    env,
+    call,
+    ref,
+    judged: verdict.judged,
+    price,
+    transport: createAiBindingFetch(env.AI),
+    url: `https://workers-binding.ai/ai-gateway/gateways/${config.gateway}/${config.voice?.provider ?? nativeVoiceProvider}/v1/text-to-speech/${call.voice}/with-timestamps?${query.toString()}`,
+    body: JSON.stringify({
+      text: call.text,
+      model_id: ref.id,
+      language_code: call.language,
+      seed: voiceSeed,
+      voice_settings: voiceSettings,
+    }),
+    characters,
+    // The line's characters are all it is billed for, known before it is
+    // sent: what the ledger reserves is what it charges.
+    bound: () => ({ inputTokens: characters, outputTokens: 0 }),
+    perRequest: undefined,
+    scopesNow: scopesNowOf(env, call, place, (_day, lineageRequests) =>
+      scopesFor(rules.budgets, call, lineageRequests)
+    ),
+    disclose: shareIdentity(call).disclose,
+    notes: Promise.resolve(),
+    place,
+  };
+};
+
+/**
+ * The provider request for a line, as the ledger admitted it (`id`). It
+ * carries the deployment's gateway token where one is set
+ * (`AI_GATEWAY_TOKEN`) in place of the binding's placeholder: an
+ * authenticated gateway asks for it on a realtime WebSocket, which
+ * doesn't go over the AI binding, and strips it from the binding's
+ * requests, which need none. Never logged.
+ */
+const speechRequest = (
+  route: SpeechRoute,
+  id: string,
+  signal: AbortSignal
+): RequestInit => {
+  const headers: Record<string, string> = {
+    "content-type": "application/json",
+    accept: "application/json",
+  };
+  // The gateway's own headers, without the auth placeholders pi's SDKs
+  // need dropped: this request has none of theirs.
+  for (const [name, value] of Object.entries(gatewayHeaders(route.call))) {
+    if (value !== null) {
+      headers[name] = value;
+    }
+  }
+  const token = route.env.AI_GATEWAY_TOKEN;
+  if (token !== undefined && token !== "") {
+    headers["cf-aig-authorization"] = `Bearer ${token}`;
+  }
+  return withRequestId(
+    { method: "POST", headers, body: route.body, signal },
+    id
+  );
+};
+
+/** What one line's provider requests came to. */
+interface SpeechSent {
+  /** The provider's last response, if one came. */
+  answered: Response | undefined;
+  settled: RequestSettled[];
+  /** The request the provider answered, to settle once its answer is read. */
+  pending: Admission | undefined;
+  /** Why the ledger held a request back, unsent. */
+  held: Refusal | undefined;
+}
+
+/**
+ * Sends one provider request for a line, admitted by the ledger first:
+ * `again` when the provider refused it for a moment (429 or 5xx), which
+ * may be asked once more; `done` once it ended any other way.
+ */
+const sendSpeechOnce = async (
+  route: SpeechRoute,
+  limit: Deadline,
+  sent: SpeechSent
+): Promise<"again" | "done"> => {
+  const admitted = await admitWaiting(route, route.body, limit);
+  if ("held" in admitted) {
+    sent.held = admitted.held;
+    return "done";
+  }
+  // Cancelled while it was admitted: never sent, its reservation back.
+  if (limit.signal.aborted) {
+    sent.settled.push(await settleAdmitted(route, admitted, { by: "unsent" }));
+    return "done";
+  }
+  let answered: Response | undefined = undefined;
+  try {
+    answered = await route.transport(
+      route.url,
+      speechRequest(route, admitted.id, limit.signal)
+    );
+  } catch {
+    sent.settled.push(await settleAdmitted(route, admitted, { by: "unknown" }));
+    return "done";
+  }
+  sent.answered = answered;
+  if (answered.ok) {
+    sent.pending = admitted;
+    return "done";
+  }
+  // A refusal before the provider took the line on costs nothing; a
+  // server error may have come after it did.
+  sent.settled.push(
+    await settleAdmitted(route, admitted, {
+      by: answered.status < 500 ? "refused" : "unknown",
+    })
+  );
+  return answered.status === 429 || answered.status >= 500 ? "again" : "done";
+};
+
+/**
+ * Sends a line, and once more when the provider refused it for a moment,
+ * as the model gateway does a text model's request. One that didn't
+ * connect is not sent again: it may have been said, and billed.
+ */
+const sendSpeech = async (
+  route: SpeechRoute,
+  limit: Deadline
+): Promise<SpeechSent> => {
+  const sent: SpeechSent = {
+    answered: undefined,
+    settled: [],
+    pending: undefined,
+    held: undefined,
+  };
+  for (let request = 0; request <= speechRetries; request += 1) {
+    if (request > 0) {
+      // oxlint-disable-next-line no-await-in-loop -- one request at a time
+      await sent.answered?.body?.cancel();
+      // Only the last request's response says how the line ended.
+      sent.answered = undefined;
+      // oxlint-disable-next-line no-await-in-loop -- one request at a time
+      await pause(speechRetryMs, limit.signal);
+    }
+    // oxlint-disable-next-line no-await-in-loop -- one request at a time
+    const ended = await sendSpeechOnce(route, limit, sent);
+    if (ended === "done") {
+      break;
+    }
+  }
+  return sent;
+};
+
+/** What a line's answer holds, read; `undefined` when it isn't a line. */
+const readSpeech = async (answered: Response): Promise<Speech | undefined> => {
+  const parsed = spokenSchema.safeParse(
+    await answered.json().catch(() => null)
+  );
+  if (!parsed.success) {
+    return undefined;
+  }
+  const audio = bytesOf(parsed.data.audio_base64);
+  const words = wordsOf(parsed.data.alignment);
+  return audio === undefined || words === undefined
+    ? undefined
+    : { audio, mime: speechFormat.mime, words };
+};
+
+/** A line's characters as the ledger counts them: all of them input. */
+const characterCounts = (characters: number): TokenCounts => ({
+  input: characters,
+  output: 0,
+  cacheRead: 0,
+  cacheWrite: 0,
+});
+
+/**
+ * The line the provider answered with, read, and its provider request
+ * settled: charged the line's characters, which ElevenLabs bills once it
+ * answered, whether its answer could be read or not.
+ */
+const heardSpeech = async (
+  route: SpeechRoute,
+  { answered, pending }: SpeechSent
+): Promise<{ speech: Speech | undefined; settled: RequestSettled[] }> => {
+  if (answered === undefined || pending === undefined) {
+    return { speech: undefined, settled: [] };
+  }
+  let speech: Speech | undefined = undefined;
+  try {
+    speech = await readSpeech(answered);
+  } catch {
+    // Cut off while its answer came in: said and billed all the same.
+  }
+  const settled = await settleAdmitted(route, pending, {
+    by: "usage",
+    tokens: characterCounts(route.characters),
+  });
+  return { speech, settled: [settled] };
+};
+
+/** How a line ended, as the audit log records it. */
+const speechOutcome = (
+  speech: Speech | undefined,
+  said: boolean,
+  stopped: Stopped | undefined
+): Outcome => {
+  if (speech !== undefined) {
+    return "answered";
+  }
+  if (stopped === "cancelled") {
+    return "cancelled";
+  }
+  // Said, but not as a line can be read.
+  return said && stopped === undefined ? "invalid_output" : "failed";
+};
+
+/** Records a line that was sent in the audit log, however it ended. */
+const recordSpeech = async (
+  route: SpeechRoute,
+  sent: SpeechSent,
+  {
+    outcome,
+    stopped,
+    ledger,
+  }: {
+    outcome: Outcome;
+    stopped: Stopped | undefined;
+    ledger: Ledgered;
+  }
+): Promise<void> => {
+  const { env, call } = route;
+  const said = sent.pending !== undefined;
+  const status = sent.answered?.status;
+  const refusal =
+    sent.answered !== undefined && !sent.answered.ok
+      ? refusalOf(await sent.answered.text().catch(() => ""))
+      : undefined;
+  const errorType = stopped ?? refusal?.type;
+  if (outcome !== "answered") {
+    log.warn("model.failed", {
+      model: call.model,
+      status,
+      errorType,
+      providerErrorCode: refusal?.code,
+      held: sent.held?.code,
+    });
+  }
+  const characters = said ? route.characters : 0;
+  await keepAuditEvent(
+    env,
+    drizzle(env.DB),
+    speechEntry(call, route.ref, route.judged, {
+      characters,
+      cost: costDollars(route.price, characterCounts(characters)),
+      logId: sent.answered?.headers.get("cf-aig-log-id") ?? undefined,
+      outcome,
+      status,
+      errorType,
+      ledger,
+    })
+  );
+};
+
+/**
+ * Says a line through the gateway: refused, audited, before anything is
+ * sent when the allowlist, the rules or a budget don't let it through;
+ * otherwise sent, charged its characters and audited, however it ended.
+ */
+const speakLine = async (
+  env: ModelsEnv,
+  fields: SpeechCall,
+  signal: AbortSignal | undefined
+): Promise<Speech> => {
+  const call = parseCall(speechSchema, fields);
+  const route = await admitSpeech(env, call);
+  const limit = deadline(call.timeoutMs ?? speechTimeoutMs, signal);
+  try {
+    const sent = await sendSpeech(route, limit);
+    const { speech, settled } = await heardSpeech(route, sent);
+    const ledger = ledgerOf([...sent.settled, ...settled]);
+    const { held } = sent;
+    // Held back before any request was sent: a refusal, and nothing else;
+    // after one was, that one is recorded first.
+    if (held !== undefined && ledger.requests === 0) {
+      return await refuse(env, call, held);
+    }
+    const stopped = limit.stopped();
+    const outcome = speechOutcome(speech, sent.pending !== undefined, stopped);
+    await recordSpeech(route, sent, { outcome, stopped, ledger });
+    if (held !== undefined) {
+      return await refuse(env, call, held);
+    }
+    if (speech !== undefined) {
+      return speech;
+    }
+    if (sent.answered?.status === 429 && stopped === undefined) {
+      throw modelErrors.create("model.rate_limited", {
+        model: call.model,
+        retryAfterSeconds: rateLimitedSeconds(sent.answered.headers),
+      });
+    }
+    throw modelErrors.create("model.failed");
+  } finally {
+    limit.clear();
+  }
+};
+
 /** A model for an agent loop: pi's stream function, bound to one model. */
 export interface AgentModel {
   /** The model at the deployment's gateway, as the loop names it. */
@@ -2813,6 +3534,11 @@ const agentModel = async (
  * anything, and each request is admitted again by the rules as they stand
  * then (the context's restricted mode, what `provenance` says it has read
  * by then, the budgets), sent and audited like a call's.
+ *
+ * `await models(env).speak({ model, text, voice, language, purpose,
+ * trigger, work }, signal)` has a voice model say a line: judged by the
+ * same rules, charged per character against the same budgets, and
+ * audited like a call. It returns the audio and when each word is said.
  */
 export const models = (env: ModelsEnv) => ({
   call: async <Output = undefined>(
@@ -2822,4 +3548,6 @@ export const models = (env: ModelsEnv) => ({
     session: AgentSession,
     provenance: () => readonly string[] = () => []
   ): Promise<AgentModel> => await agentModel(env, session, provenance),
+  speak: async (call: SpeechCall, signal?: AbortSignal): Promise<Speech> =>
+    await speakLine(env, call, signal),
 });

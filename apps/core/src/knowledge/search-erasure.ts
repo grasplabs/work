@@ -3,6 +3,7 @@ import { eq, lte, ne, or, sql } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
 import { searchRebuilds } from "../db/knowledge/schema.ts";
+import { readPayload } from "./payloads.ts";
 
 // Taking purged terms out of the full-text index (0001_search.sql) for
 // good, at a cost bounded by the terms, not by the corpus. Threat model
@@ -624,17 +625,19 @@ export type IndexedValues = (
 
 /** `collectionPlan`, which throws when a read fails. */
 const readCollection = async (
+  env: Env,
   db: DrizzleD1Database,
   collectionId: string,
   valuesOf: IndexedValues
 ): Promise<CollectionPlan> => {
   // How much there is, before any text is read: no more of the history
-  // than one version past the cap. Bytes, never fewer than characters: a
-  // text's `length` stops at its first NUL, which a save allows.
+  // than one version past the cap. Bytes, as each payload's row has them,
+  // never fewer than characters.
   const [size] = await db.all<{ versions: number; characters: number }>(sql`
     SELECT count(*) AS versions, coalesce(sum(size), 0) AS characters
     FROM (
-      SELECT length(CAST(v.text AS BLOB)) AS size FROM versions AS v
+      SELECT p.bytes AS size FROM versions AS v
+      JOIN brain_payloads AS p ON p.key = v.payload_key
       WHERE ${versionInCollection(collectionId)}
       LIMIT ${collectionCheckCaps.versions + 1}
     )
@@ -669,17 +672,27 @@ const readCollection = async (
       .map(({ documentId, number }) => [documentId, number]);
     // By the versions' primary key, one lookup each: never a scan.
     // oxlint-disable-next-line no-await-in-loop -- one page after another
-    const rows = await db.all<{ path: string; text: string }>(sql`
-      SELECT d.path AS path, v.text AS text
+    const refs = await db.all<{ path: string; key: string; sha256: string }>(
+      sql`
+      SELECT d.path AS path, p.key AS key, p.sha256 AS sha256
       FROM json_each(${JSON.stringify(page)}) AS read
       JOIN versions AS v ON v.document_id = json_extract(read.value, '$[0]')
         AND v.number = json_extract(read.value, '$[1]')
       JOIN documents AS d ON d.id = v.document_id
-    `);
+      JOIN brain_payloads AS p ON p.key = v.payload_key
+    `
+    );
     // A version gone meanwhile (the collection changing): rebuilt.
-    if (rows.length !== page.length) {
+    if (refs.length !== page.length) {
       return { kind: "unknown" };
     }
+    // oxlint-disable-next-line no-await-in-loop -- one page after another
+    const rows = await Promise.all(
+      refs.map(async (ref) => ({
+        path: ref.path,
+        text: await readPayload(env, ref),
+      }))
+    );
     for (const row of rows) {
       const values = valuesOf(row.path, row.text);
       if (values === undefined) {
@@ -715,12 +728,13 @@ const readCollection = async (
  * by the error's name, and the index is rebuilt.
  */
 export const collectionPlan = async (
+  env: Env,
   db: DrizzleD1Database,
   collectionId: string,
   valuesOf: IndexedValues
 ): Promise<CollectionPlan> => {
   try {
-    return await readCollection(db, collectionId, valuesOf);
+    return await readCollection(env, db, collectionId, valuesOf);
   } catch (error) {
     // Not readable here (a platform that refuses it): rebuilt instead.
     log.warn("knowledge.purge.index_check_failed", {

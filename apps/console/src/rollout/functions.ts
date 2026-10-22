@@ -22,6 +22,7 @@ import {
   pinClient,
   pinSchema,
   resumeRollout,
+  retryRollout,
   startRollout,
   startRolloutSchema,
 } from "./control.ts";
@@ -85,6 +86,16 @@ export const approveRolloutFn = createServerFn({ method: "POST" })
     async ({ data, context }) =>
       await change(async () => {
         await approveRollout(env, context.staff, data.rolloutId);
+        return data.rolloutId;
+      })
+  );
+
+export const retryRolloutFn = createServerFn({ method: "POST" })
+  .validator(rolloutSchema)
+  .handler(
+    async ({ data, context }) =>
+      await change(async () => {
+        await retryRollout(env, context.staff, data.rolloutId);
         return data.rolloutId;
       })
   );

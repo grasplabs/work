@@ -68,6 +68,7 @@ export const NEED_ORDER: readonly Need["kind"][] = [
   "go",
   "short",
   "ending",
+  "overdue",
   "blocked",
   "lead",
   "quiet",

@@ -1,6 +1,6 @@
 /**
- * Making a client's account run a release: its resources in the EU, its
- * database migrations, its Workers (each uploaded with its secrets and
+ * Making a client's account run a release: its resources in the EU and
+ * its sending domain for mail, its database migrations, its Workers (each uploaded with its secrets and
  * sent all traffic before the next: connect before core, which binds it),
  * a smoke check that core answers as the new version, as the router
  * reaches it, and the client's hostname in the router's map. A deploy is a `client_deploys` row that records how far it got, and
@@ -61,7 +61,13 @@ import {
 import type { ReleaseStore } from "../releases/import.ts";
 import { holdsClient, stillHolds } from "../runners.ts";
 import type { HeldClient } from "../runners.ts";
-import { checkDeployedConfig, derivedCoreConfig } from "./core-config.ts";
+import { currentReleases, incompatibility } from "./compatibility.ts";
+import {
+  checkDeployedConfig,
+  clientMailDomain,
+  derivedCoreConfig,
+  onboardingSender,
+} from "./core-config.ts";
 import type { SignInApps } from "./core-config.ts";
 import { DeployError } from "./errors.ts";
 import { migrateDatabases } from "./migrations.ts";
@@ -362,6 +368,15 @@ const coreApp = "core";
 
 const configVarNames: ReadonlySet<string> = new Set(deploymentConfigVars);
 
+/**
+ * The only address client `clientId`'s mail may be from: the onboarding
+ * sender's, which its `EMAIL` binding is locked to.
+ */
+export const mailSenderOf = (
+  context: { router: { domain: string } },
+  clientId: string
+): string => onboardingSender(clientId, context.router.domain).address;
+
 /** Setting `key`'s value, stored as JSON; `setting_invalid` when it isn't. */
 const settingValue = (key: string, value: string): unknown => {
   try {
@@ -370,6 +385,49 @@ const settingValue = (key: string, value: string): unknown => {
     // Not the parser's message: it quotes the value.
     throw new DeployError("setting_invalid", `The setting ${key} isn't JSON`);
   }
+};
+
+/**
+ * Client `clientId`'s core vars from its `derived` config: each replaced
+ * by the client's setting of the same name, its other settings, and
+ * `change` as `PLATFORM_CHANGE`, checked as `coreVars` says, its
+ * `MAIL_FROM` against `mailSender`, the address its mail is locked to. What a
+ * deploy sets, and what provisioning a placed client sets
+ * (src/hosting/operation.ts).
+ */
+export const configuredCoreVars = async (
+  db: ConsoleDatabase,
+  clientId: string,
+  derived: Readonly<Record<string, unknown>>,
+  change: PlatformChange,
+  mailSender: string
+): Promise<Record<string, unknown>> => {
+  const rows = await db
+    .select({ key: settings.key, value: settings.value })
+    .from(settings)
+    .where(eq(settings.clientId, clientId));
+  const unknown = rows.find(({ key }) => !configVarNames.has(key));
+  if (unknown !== undefined) {
+    throw new DeployError(
+      "unknown_setting",
+      `The setting ${unknown.key} isn't a deployment config var`
+    );
+  }
+  const vars = {
+    ...derived,
+    ...Object.fromEntries(
+      rows.map(({ key, value }): [string, unknown] => [
+        key,
+        settingValue(key, value),
+      ])
+    ),
+    PLATFORM_CHANGE: change,
+  };
+  // The config that goes out, settings included: never a SIGN_IN no admin
+  // can sign in with, nor a var core can't parse, nor a MAIL_FROM its EMAIL
+  // binding won't send from.
+  checkDeployedConfig(clientId, vars, mailSender);
+  return vars;
 };
 
 /**
@@ -389,46 +447,25 @@ const settingValue = (key: string, value: string): unknown => {
 const coreVars = async (
   context: DeployContext,
   deploy: Deploy
-): Promise<Record<string, unknown>> => {
-  const { db } = context;
-  const rows = await db
-    .select({ key: settings.key, value: settings.value })
-    .from(settings)
-    .where(eq(settings.clientId, deploy.clientId));
-  const unknown = rows.find(({ key }) => !configVarNames.has(key));
-  if (unknown !== undefined) {
-    throw new DeployError(
-      "unknown_setting",
-      `The setting ${unknown.key} isn't a deployment config var`
-    );
-  }
-  const change: PlatformChange = {
-    by: deploy.startedBy,
-    what: deploy.kind,
-    release: deploy.releaseId,
-    // When the deploy started: the same however often it's resumed.
-    at: deploy.createdAt.toISOString(),
-  };
-  const vars = {
-    ...derivedCoreConfig({
+): Promise<Record<string, unknown>> =>
+  await configuredCoreVars(
+    context.db,
+    deploy.clientId,
+    derivedCoreConfig({
       clientId: deploy.clientId,
       signIn: deploy.signIn,
       domain: context.router.domain,
       apps: context.signInApps ?? {},
     }),
-    ...Object.fromEntries(
-      rows.map(({ key, value }): [string, unknown] => [
-        key,
-        settingValue(key, value),
-      ])
-    ),
-    PLATFORM_CHANGE: change,
-  };
-  // The config that goes out, settings included: never a SIGN_IN no admin
-  // can sign in with, nor a var core can't parse.
-  checkDeployedConfig(deploy.clientId, vars);
-  return vars;
-};
+    {
+      by: deploy.startedBy,
+      what: deploy.kind,
+      release: deploy.releaseId,
+      // When the deploy started: the same however often it's resumed.
+      at: deploy.createdAt.toISOString(),
+    },
+    mailSenderOf(context, deploy.clientId)
+  );
 
 /** The deploy's runner lost the client: it stops. */
 const runnerReplaced = ({ clientId, runId }: HeldClient): DeployError =>
@@ -614,11 +651,32 @@ const runPhase = async <T>(
 };
 
 /**
+ * Refuses (`release_undeclared`, `release_incompatible`) a release the
+ * client can't go to from what its Workers run, switched in the order a
+ * deploy makes them live (src/deploy/compatibility.ts).
+ */
+const assertCompatible = async (
+  db: ConsoleDatabase,
+  { deploy, manifest }: LoadedDeploy
+): Promise<void> => {
+  const refused = incompatibility(
+    await currentReleases(db, deploy.clientId),
+    manifest,
+    appsOf(manifest)
+  );
+  if (refused !== null) {
+    throw new DeployError(refused.code, refused.message);
+  }
+};
+
+/**
  * The first two steps: the account's resources, then the release's
  * database migrations. Returns its databases' ids, by name. Before either,
- * the config the deploy would set on core is checked (`coreVars`), so a
- * setting core wouldn't take, or a sign-in nobody could use, stops the
- * deploy before it changes anything in the client's account.
+ * the release is checked against what the client runs (`assertCompatible`)
+ * and the config the deploy would set on core (`coreVars`), so a release
+ * the client can't go to, a setting core wouldn't take, or a sign-in
+ * nobody could use, stops the deploy before it changes anything in the
+ * client's account.
  */
 const prepare = async (
   context: DeployContext,
@@ -628,11 +686,22 @@ const prepare = async (
   const { api, db, store } = context;
   const { deploy, manifest } = loaded;
   current("resources");
+  await assertCompatible(db, loaded);
   await coreVars(context, deploy);
-  const resources = await ensureResources(api, deploy.accountId, manifest);
+  const resources = await ensureResources(
+    api,
+    deploy.accountId,
+    manifest,
+    clientMailDomain(deploy.clientId, context.router.domain)
+  );
   await recordStep(db, loaded, "resources", {
     databases: resources.databases.size,
     buckets: resources.buckets.length,
+    // Mail sends only once the sending domain's zone is delegated, which
+    // happens outside the deploy: on record for staff to see.
+    ...(resources.mailDomainActive === undefined
+      ? {}
+      : { mailDomainActive: resources.mailDomainActive ? 1 : 0 }),
   });
 
   current("migrations");
@@ -704,12 +773,14 @@ const uploadApp = async (
   );
   const workerVars = app === coreApp ? vars : {};
   checkBindingNames(worker, workerVars, workerSecretValues);
+  const mailSender = mailSenderOf(context, clientId);
   const fingerprint = await uploadFingerprint(secrets.clientKey, {
     manifest,
     worker,
     databases,
     vars: workerVars,
     secrets: workerSecretValues,
+    mailSender,
   });
   const secretsPrint = await secretsFingerprint(
     secrets.clientKey,
@@ -726,7 +797,8 @@ const uploadApp = async (
     manifest,
     worker,
     databases,
-    workerVars
+    workerVars,
+    mailSender
   );
   // A script upload goes live at once.
   await assertLatest(context, id, clientId);

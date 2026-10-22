@@ -8,6 +8,7 @@ import {
   companiesOf,
   goingOut,
   nextRing,
+  platformCounts,
   ringsOf,
   spreadOf,
 } from "../src/admin/platform.ts";
@@ -155,6 +156,28 @@ describe("the Platform page's model", () => {
         target("beta", 1, "pending"),
       ]).map(({ state }) => state)
     ).toStrictEqual(["done", "todo"]);
+  });
+
+  it("counts for the sidebar the companies that need a look by what was recorded alone, and a rollout that waits", () => {
+    const releases = [release("r1", 1), release("r2", 2), release("r3", 3)];
+    const rows = [
+      row("fine"),
+      row("behind", { release: "r1" }),
+      row("failed", {
+        lastDeploy: { releaseId: "r3", status: "failed", at: day(3) },
+      }),
+      row("gone", { status: "offboarded", release: "r1" }),
+    ];
+
+    expect(
+      platformCounts(rows, releases, [summary("w", "waiting")])
+    ).toStrictEqual({ needLook: 2, waiting: true });
+    expect(
+      platformCounts([row("fine")], releases, [
+        summary("d", "done"),
+        summary("c", "cancelled"),
+      ])
+    ).toStrictEqual({ needLook: 0, waiting: false });
   });
 
   it("says which active companies run each release, the newest first, then the ones the page doesn't list", () => {

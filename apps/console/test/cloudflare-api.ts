@@ -11,6 +11,11 @@
  * vite.test.config.ts).
  */
 import {
+  adminAskPath,
+  adminAskPurpose,
+  adminAskRequestSchema,
+} from "@grasp-os/shared/admin-ask";
+import {
   adminSnapshotPath,
   adminSnapshotPurpose,
   adminSnapshotRequestSchema,
@@ -49,7 +54,11 @@ import type {
   Route,
   VersionState,
 } from "./cloudflare-api-kit.ts";
-import { forgetDatabases, workerRoutes } from "./cloudflare-api-workers.ts";
+import {
+  dispatchRoutes,
+  forgetDatabases,
+  workerRoutes,
+} from "./cloudflare-api-workers.ts";
 
 /** The R2 jurisdiction a call names, as the API reads its header. */
 const jurisdictionOf = (call: ApiCall): string =>
@@ -229,6 +238,47 @@ const answerAdmin = async (
 };
 
 /**
+ * What Grasp's own core answers Ask Grasp's question with, as core does
+ * (core's src/admin-ask.ts): the account's answer once the signature
+ * checks out, with the key its live version's auth secret gives for Ask
+ * Grasp's purpose, and the question parses, keeping it; 401 for a request
+ * signed otherwise, 403 for one that doesn't parse.
+ */
+const answerAsk = async (
+  account: AccountState,
+  live: VersionState,
+  request: Request
+): Promise<Response> => {
+  const body = await request.text();
+  const key = await hkdfHmacKey(
+    live.secrets.get("BETTER_AUTH_SECRET") ?? "",
+    adminAskPurpose,
+    ["verify"]
+  );
+  const signature = request.headers.get(platformUpdateSignatureHeader) ?? "";
+  const signed = await crypto.subtle.verify(
+    "HMAC",
+    key,
+    Uint8Array.from(signature.match(hexPair) ?? [], (pair) =>
+      Number.parseInt(pair, 16)
+    ),
+    new TextEncoder().encode(body)
+  );
+  if (!signed) {
+    return new Response("Unauthorized", { status: 401 });
+  }
+  const asked = adminAskRequestSchema.safeParse(JSON.parse(body));
+  if (!asked.success) {
+    return new Response("Forbidden", { status: 403 });
+  }
+  account.asked.push(asked.data);
+  if (account.ask === "no_model") {
+    return Response.json({ code: "admin_ask.no_model" }, { status: 503 });
+  }
+  return Response.json(account.ask ?? { text: "An answer.", truncated: false });
+};
+
+/**
  * The workers.dev subdomains taken across Cloudflare: a subdomain is one
  * account's only.
  */
@@ -403,7 +453,12 @@ const memberRoutes: Route[] = [
   },
 ];
 
-const routes = [...accountRoutes, ...memberRoutes, ...workerRoutes];
+const routes = [
+  ...accountRoutes,
+  ...memberRoutes,
+  ...workerRoutes,
+  ...dispatchRoutes,
+];
 
 /** Whether `caller` is an accepted member of `account`. */
 const isMember = (account: AccountState, caller: string | undefined) =>
@@ -491,6 +546,9 @@ const failed = (failure: Exclude<Failure, "lost">): Response => {
       )
     : refusal(failure, 10_000, "Internal error");
 };
+
+/** Email Sending's domains in a zone. */
+const sendingRoute = /^\/zones\/(?<zone>[^/]+)\/email\/sending\/subdomains$/u;
 
 const accountRoute = /^\/accounts\/(?<id>[^/]+)(?<rest>\/.*)?$/u;
 
@@ -582,7 +640,9 @@ export const mockCloudflareApi = (
       d1: [],
       buckets: [],
       gateways: [],
+      zones: [],
       scripts: new Map(),
+      namespaces: new Map(),
       workflows: new Map(),
       assets: new Set(),
       sessions: new Map(),
@@ -590,6 +650,7 @@ export const mockCloudflareApi = (
       scriptUploads: [],
       notices: [],
       adminReaders: [],
+      asked: [],
     };
     accounts.set(account.id, account);
     return account;
@@ -723,13 +784,102 @@ export const mockCloudflareApi = (
     );
   };
 
+  /**
+   * Answers a call about zones (`/zones`, and Email Sending's domains in
+   * one), as the API does for zones in the accounts `caller` is a member
+   * of; undefined for any other call. A new zone is pending, as one whose
+   * name servers aren't delegated yet; a zone's name is Cloudflare's only.
+   */
+  const answerZones = (
+    call: ApiCall,
+    caller: string | undefined
+  ): Response | undefined => {
+    const sending = sendingRoute.exec(call.path)?.groups?.zone;
+    if (call.path !== "/zones" && sending === undefined) {
+      return undefined;
+    }
+    if (caller === undefined) {
+      return refusal(403, 10_000, "Authentication error");
+    }
+    const reachable = [...accounts.values()].filter((account) =>
+      isMember(account, caller)
+    );
+    const json: Json =
+      typeof call.body === "object" && call.body !== null
+        ? { ...call.body }
+        : {};
+    if (sending !== undefined) {
+      const zone = reachable
+        .flatMap(({ zones }) => zones)
+        .find(({ id }) => id === sending);
+      if (zone === undefined) {
+        return refusal(403, 9109, "Unauthorized to access requested resource");
+      }
+      if (call.method === "GET") {
+        return envelope(zone.sending);
+      }
+      const name = text(json, "name");
+      if (name !== zone.name && !name.endsWith(`.${zone.name}`)) {
+        return refusal(400, 1003, "Not a domain within the zone");
+      }
+      const existing = zone.sending.find((domain) => domain.name === name);
+      const domain = existing ?? {
+        tag: crypto.randomUUID().replaceAll("-", ""),
+        name,
+        enabled: true,
+      };
+      domain.enabled = true;
+      if (existing === undefined) {
+        zone.sending.push(domain);
+      }
+      return envelope(domain);
+    }
+    if (call.method === "GET") {
+      const accountId = call.query.get("account.id");
+      const name = call.query.get("name");
+      return paged(
+        reachable
+          .filter(({ id }) => accountId === null || id === accountId)
+          .flatMap(({ zones }) => zones)
+          .filter((zone) => name === null || zone.name === name)
+          .map(({ id, name: zoneName, status }) => ({
+            id,
+            name: zoneName,
+            status,
+          })),
+        call.query
+      );
+    }
+    const owner = z.object({ id: z.string() }).safeParse(json.account);
+    const account = reachable.find(({ id }) => id === owner.data?.id);
+    if (account === undefined) {
+      return refusal(403, 9109, "Unauthorized to access requested resource");
+    }
+    const name = text(json, "name");
+    if (
+      [...accounts.values()].some(({ zones }) =>
+        zones.some((zone) => zone.name === name)
+      )
+    ) {
+      return refusal(400, 1061, `${name} already exists`);
+    }
+    const zone = {
+      id: crypto.randomUUID().replaceAll("-", ""),
+      name,
+      status: "pending",
+      sending: [],
+    };
+    account.zones.push(zone);
+    return envelope({ id: zone.id, name, status: zone.status });
+  };
+
   /** Answers `call` as the API would. */
   const respond = async (
     request: Request,
     call: ApiCall
   ): Promise<Response> => {
     const caller = callers.get(request.headers.get("authorization") ?? "");
-    const unscoped = answerUnscoped(call, caller);
+    const unscoped = answerUnscoped(call, caller) ?? answerZones(call, caller);
     if (unscoped !== undefined) {
       return unscoped;
     }
@@ -843,6 +993,9 @@ export const mockCloudflareApi = (
     }
     if (url.pathname === onboardingSummaryPath && request.method === "POST") {
       return await answerSummary(account, live, request);
+    }
+    if (url.pathname === adminAskPath && request.method === "POST") {
+      return await answerAsk(account, live, request);
     }
     if (url.pathname === adminSnapshotPath && request.method === "POST") {
       adminReads.now += 1;

@@ -5,6 +5,7 @@
 import { sql } from "drizzle-orm";
 import {
   check,
+  index,
   integer,
   primaryKey,
   real,
@@ -87,6 +88,12 @@ export const links = sqliteTable("links", {
   /** When they deleted their interview: a copy left open can't save it back. */
   deletedAt: text("deleted_at"),
   /**
+   * The team they led when their link went out; none when they led none.
+   * Only this makes theirs a lead's interview (rules.ts, `leadsTalked`):
+   * making someone a lead afterwards tells nobody about their interview.
+   */
+  ledTeam: text("led_team"),
+  /**
    * The version of what their interview holds: a save goes up by one, and
    * so does a delete or a new start, so no copy from before either ever
    * matches again. A save from a copy of another version is refused.
@@ -126,11 +133,40 @@ export const interviews = sqliteTable("interviews", {
 export const interviewStates = sqliteTable("interview_states", {
   person: text().primaryKey(),
   kind: text({ enum: ["own", "lead"] }).notNull(),
+  /**
+   * The team they gave a lead's interview for, as the roster said before
+   * they agreed; none for an employee's interview. Settled, with `kind`,
+   * once they agree.
+   */
+  leadOf: text("lead_of"),
   startedAt: text("started_at"),
   /** When they first agreed to what was read back (ISO 8601). */
   completedAt: text("completed_at"),
+  /**
+   * When they last agreed to something new (ISO 8601): their first
+   * agreement, or what they added and agreed to after. What they agreed to
+   * is drawn from then on.
+   */
+  agreedAt: text("agreed_at"),
+  /** When what they agreed to was last drawn (ISO 8601); null before it ever was. */
+  drawnAt: text("drawn_at"),
   updatedAt: text("updated_at").notNull(),
 });
+
+/**
+ * The interviewer's texts each interview was held with, by their mark
+ * (onboarding/interviewer-text.ts), and when each first spoke in it: so
+ * staff, and the lab, know which Stephen they read. Gone with what was said.
+ */
+export const interviewTexts = sqliteTable(
+  "interview_texts",
+  {
+    person: text().notNull(),
+    mark: text().notNull(),
+    at: text().notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.person, table.mark] })]
+);
 
 /**
  * Everyone ever counted in the admin's numbers (`teamCounts`), once: the
@@ -222,6 +258,59 @@ export const documents = sqliteTable("documents", {
 });
 
 /**
+ * The teams' pieces of work, from their leads' maps (team-map.ts): a whole
+ * job that comes back, named in English and in the team's language. Drawn
+ * again, a piece keeps its id while its name stays.
+ */
+export const works = sqliteTable("works", {
+  id: text().primaryKey(),
+  team: text().notNull(),
+  position: integer().notNull(),
+  name: text().notNull(),
+  local: text().notNull(),
+  /** What one of them is called, and several. */
+  one: text().notNull(),
+  many: text().notNull(),
+  /** Who does it, by person, as JSON. */
+  doers: text().notNull(),
+  /** Roughly how much of the team's time it takes, 0 to 1. */
+  share: real().notNull(),
+});
+
+/**
+ * Which piece of work each person is asked about. Apart from the roster,
+ * so saving who works where keeps it; it goes with the person.
+ */
+export const askedAbout = sqliteTable("asked_about", {
+  person: text().primaryKey(),
+  work: text().notNull(),
+});
+
+/**
+ * Each piece of work as drawn from what its people agreed to
+ * (work-drawing.ts), apart from `works`, which a map draws again. `agreed`
+ * is whose agreements it was drawn from, and when each last agreed, as
+ * JSON: someone agreeing to more since makes it due again.
+ */
+export const drawnWorks = sqliteTable("drawn_works", {
+  work: text().primaryKey(),
+  /** The drawing as JSON (`DrawnWork`); null when it was given up before any. */
+  drawn: text(),
+  agreed: text().notNull(),
+  at: text().notNull(),
+});
+
+/**
+ * Drawings that failed and wait to be tried again: what (`team:<id>` or
+ * `work:<id>`), how often it failed, and when it may be tried again (ISO 8601).
+ */
+export const drawFailures = sqliteTable("draw_failures", {
+  item: text().primaryKey(),
+  tries: integer().notNull(),
+  after: text().notNull(),
+});
+
+/**
  * The AI the onboarding used, by day, purpose and model: calls, tokens
  * read new and from a cache, tokens written, and seconds of voice.
  */
@@ -241,6 +330,50 @@ export const usage = sqliteTable(
 );
 
 /**
+ * Seconds of voice said today (`/api/speech`, onboarding/speech.ts), by
+ * whom they were said for: `link:<person>` for someone's interview link,
+ * `admin:<user>` for an admin. Only today's are kept: each count deletes
+ * the days before it.
+ */
+export const voiceUse = sqliteTable(
+  "voice_use",
+  {
+    who: text().notNull(),
+    day: text().notNull(),
+    seconds: real().notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.who, table.day] })]
+);
+
+/**
+ * The text each interview ran on (onboarding/interviewer-text.ts), as its
+ * last turn had it: the text's mark, who held it, and in which language.
+ * Nothing that was said. Goes with the interview.
+ */
+export const interviewSettings = sqliteTable("interview_settings", {
+  person: text().primaryKey(),
+  mark: text().notNull(),
+  interviewer: text({ enum: ["stephen", "claire"] }).notNull(),
+  locale: text().notNull(),
+});
+
+/**
+ * How long people waited for Stephen's voice, from the end of what they
+ * said to his first sound, as their page measured it: by day, how many
+ * answers took up to each tenth of a second (`upTo`, in ms). Whose
+ * answers they were isn't kept.
+ */
+export const answerWaits = sqliteTable(
+  "answer_waits",
+  {
+    day: text().notNull(),
+    upTo: integer("up_to").notNull(),
+    answers: integer().notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.day, table.upTo] })]
+);
+
+/**
  * Audit events of changes here, each stored in the same transaction as its
  * change, until the object has delivered it to the audit log
  * (`drainObjectOutbox` in audit-outbox.ts).
@@ -250,3 +383,35 @@ export const auditOutbox = sqliteTable("audit_outbox", {
   event: text().notNull(),
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
 });
+
+/**
+ * Mail the onboarding sends (mail-outbox.ts), each once, by its key: a mail
+ * queued again under a key it holds already is not sent again. A mail with
+ * someone's link names whose (`fill`) and holds a slot for it, filled in
+ * only as it is sent, so the link's secret is kept here no more than
+ * anywhere else (link-secret.ts).
+ */
+export const mailOutbox = sqliteTable(
+  "mail_outbox",
+  {
+    key: text().primaryKey(),
+    /** Whom it is about, by person, for the log; null for nobody in particular. */
+    about: text(),
+    to: text("to_address").notNull(),
+    /** Subject, bodies and headers as JSON (`queuedMailSchema`), slots unfilled. */
+    mail: text().notNull(),
+    /** What fills its slots as it is sent: for a link's mail, whose link. */
+    fill: text(),
+    state: text({ enum: ["queued", "sent", "failed"] }).notNull(),
+    attempts: integer().notNull().default(0),
+    /** When it is tried next (ms since the epoch), while queued. */
+    nextAt: integer("next_at").notNull(),
+    queuedAt: text("queued_at").notNull(),
+    /** When it was sent, or ended failed (ISO 8601). */
+    settledAt: text("settled_at"),
+    /** Why its last try didn't send it: Email Sending's code, or core's. */
+    reason: text(),
+    messageId: text("message_id"),
+  },
+  (table) => [index("mail_outbox_due").on(table.state, table.nextAt)]
+);

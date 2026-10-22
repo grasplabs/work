@@ -155,17 +155,70 @@ export const staffWindowOpen = (
 const gatewayIdPattern = /^[a-z0-9][a-z0-9-]{0,63}$/u;
 
 /**
+ * The provider the allowlist names voice models by, `elevenlabs/<model>`,
+ * whichever way the gateway reaches it (`voiceGatewayProviders`).
+ */
+export const voiceModelProvider = "elevenlabs";
+
+/**
+ * How AI Gateway reaches ElevenLabs, by the gateway path it takes: its
+ * native `elevenlabs` provider, or `custom-elevenlabs-eu`, a custom
+ * provider in the deployment's gateway for ElevenLabs's EU host
+ * (`https://api.eu.residency.elevenlabs.io`), as AI Gateway has no EU
+ * endpoint of its own. The ElevenLabs key stays in the gateway either way.
+ */
+export const voiceGatewayProviders = [
+  "elevenlabs",
+  "custom-elevenlabs-eu",
+] as const;
+
+/** The `voice` part of the `MODEL_GATEWAY` var: the native provider unless set. */
+const voiceGatewaySchema = z
+  .strictObject({ provider: z.enum(voiceGatewayProviders) })
+  .optional();
+
+/**
  * The allowlist's part of the `MODEL_GATEWAY` var: the deployment's AI
- * Gateway and the models it allows. `modelRef` checks one
- * `<provider>/<model>` the gateway offers.
+ * Gateway, the models it allows, and how it reaches the voice models.
+ * `modelRef` checks one `<provider>/<model>` the gateway offers.
  */
 export const modelGatewayConfigSchema = (modelRef: z.ZodType<string>) =>
-  z.object({
-    /** The deployment's AI Gateway, in the deployment's own account. */
-    gateway: z.string().regex(gatewayIdPattern),
-    /** The models this deployment allows; every other model is refused. */
-    models: z.array(modelRef).min(1),
-  });
+  z
+    .object({
+      /** The deployment's AI Gateway, in the deployment's own account. */
+      gateway: z.string().regex(gatewayIdPattern),
+      /** The models this deployment allows; every other model is refused. */
+      models: z.array(modelRef).min(1),
+      /**
+       * The model that plays each role (`modelRoles`), one of the allowed
+       * models. A role left out goes to the first allowed model the
+       * call's rules let it use, as every call did before roles.
+       */
+      roles: z
+        .strictObject({
+          quick: modelRef.optional(),
+          careful: modelRef.optional(),
+        } satisfies Record<ModelRole, z.ZodType>)
+        .optional(),
+      /** How the gateway reaches ElevenLabs: its native provider unless set. */
+      voice: voiceGatewaySchema,
+    })
+    .refine(
+      ({ models: allowed, roles }) =>
+        Object.values(roles ?? {}).every(
+          (ref) => ref === undefined || allowed.includes(ref)
+        ),
+      { message: "A role's model is an allowed model", path: ["roles"] }
+    );
+
+/**
+ * What core's own features ask the gateway for, rather than a model:
+ * `quick` for a line someone is waiting to hear, `careful` for reading and
+ * writing that must be right. The deployment names the model for each in
+ * `MODEL_GATEWAY`'s `roles`.
+ */
+export const modelRoles = ["quick", "careful"] as const;
+export type ModelRole = (typeof modelRoles)[number];
 
 /**
  * The models a new deployment allows until staff change its
@@ -248,6 +301,7 @@ export const modelRulesConfigSchema = (modelRef: z.ZodType<string>) =>
   z
     .object({
       models: z.array(z.string()),
+      voice: voiceGatewaySchema,
       ...modelRulesShape(modelRef),
     })
     .refine(
@@ -262,6 +316,18 @@ export const modelRulesConfigSchema = (modelRef: z.ZodType<string>) =>
       {
         message: "Models for sensitive data are allowed models",
         path: ["sensitive", "models"],
+      }
+    )
+    // ElevenLabs's native host isn't in the EU: a voice model listed as
+    // hosted there is one the gateway reaches at ElevenLabs's EU host.
+    .refine(
+      ({ eu, voice }) =>
+        voice?.provider === "custom-elevenlabs-eu" ||
+        eu === undefined ||
+        !eu.models.some((ref) => ref.startsWith(`${voiceModelProvider}/`)),
+      {
+        message: "EU voice models are reached at ElevenLabs's EU host",
+        path: ["voice", "provider"],
       }
     );
 
@@ -325,6 +391,27 @@ export const inboundMailDomainSchema = domainSchema
     }
   );
 
+// MAIL_FROM (core's src/mail.ts)
+
+/**
+ * `MAIL_FROM`: who the mail core sends is from, `"<name>" <<address>>`:
+ * an address on the deployment's sending domain, set up for Email Sending
+ * outside core (the console's src/deploy/resources.ts, which also locks
+ * the `EMAIL` binding to that address), and the name shown with it. The name is one line with no
+ * quotes or angle brackets, so it can't change the header it goes in.
+ * Unset, core sends no mail: each one fails, and says why.
+ */
+export const mailFromSchema = z.strictObject({
+  name: z
+    .string()
+    .trim()
+    .min(1)
+    .max(80)
+    .regex(/^[^"<>\r\n]+$/u, "One line, without quotes or angle brackets"),
+  address: z.email().max(254),
+});
+export type MailFrom = z.infer<typeof mailFromSchema>;
+
 /**
  * The names of the deployment config vars above, the only settings the
  * console sets on core as vars. `PLATFORM_CHANGE` is the console's own, set
@@ -339,4 +426,5 @@ export const deploymentConfigVars = [
   "RUN_RETENTION_DAYS",
   "QUOTA_LIMITS",
   "INBOUND_MAIL_DOMAIN",
+  "MAIL_FROM",
 ] as const;

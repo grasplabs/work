@@ -93,13 +93,18 @@ import { queueLiveMs } from "./workflows/admission.ts";
 //   may have committed: the gateway releases it only if it knows the
 //   request was never sent (`unsent`), and otherwise it is charged in
 //   full when it comes due, never lost.
-// - Usage is lost, or an accepted stream is cancelled: the provider may
-//   bill what it already took, and an accepted request can go on after
-//   it is cancelled. Such a request is never charged nothing: its whole
-//   reservation stays held (`unknown`), and reconciliation charges it in
-//   full when it comes due (`reconcileAt`), on the object's alarm, which
-//   outlives the request, the isolate and a restart. A request whose
-//   gateway died before settling it is charged the same way.
+// - Usage is lost: the provider may bill what it already took. Such a
+//   request is never charged nothing: its whole reservation stays held
+//   (`unknown`), and reconciliation charges it in full when it comes due
+//   (`reconcileAt`), on the object's alarm, which outlives the request,
+//   the isolate and a restart. A request whose gateway died before
+//   settling it is charged the same way.
+// - An accepted stream is cut off, its caller talking on: it is never
+//   charged nothing either, but what it is known to have used (`cut`):
+//   the prompt as counted, or its bound, and the answer as relayed,
+//   estimated within its cap. The rest goes back at once, so one cut-off
+//   answer doesn't fill a budget until it comes due. The provider may
+//   bill the few tokens it made after the last one relayed.
 // - A retry releases an unknown earlier cost: every provider request has
 //   its own ID and reservation; a retry is admitted, reserved and settled
 //   on its own, and nothing settles one request by another's outcome.
@@ -369,6 +374,11 @@ const settlementSchema = z.discriminatedUnion("by", [
   z.strictObject({ by: z.literal("refused") }),
   /** It was never sent. */
   z.strictObject({ by: z.literal("unsent") }),
+  /**
+   * Its caller cut it off mid-answer: what it is known to have used by
+   * then, partly estimated (models.ts).
+   */
+  z.strictObject({ by: z.literal("cut"), tokens: tokensSchema }),
   /** It was sent, and what it used can't be known. */
   z.strictObject({ by: z.literal("unknown") }),
 ]);
@@ -859,10 +869,10 @@ export class ModelLedger extends DurableObject<Env> {
 
   /**
    * Settles one provider request: charges what its usage cost at its
-   * pinned prices, or nothing when the provider refused it or it was
-   * never sent, and releases its reservation. A request whose usage
-   * can't be known keeps its whole reservation until reconciliation
-   * charges it in full. A request settles once; settling it again
+   * pinned prices (one cut off mid-answer what it is known to have used),
+   * or nothing when the provider refused it or it was never sent, and
+   * releases its reservation. A request whose usage can't be known keeps
+   * its whole reservation until reconciliation charges it in full. A request settles once; settling it again
    * answers how it settled.
    */
   async settle(id: string, input: Settlement): Promise<Settled> {
@@ -904,13 +914,17 @@ export class ModelLedger extends DurableObject<Env> {
       // A refusal or an unsent request costs nothing, prices or not. A
       // count whose prices can't be read is charged the whole reservation,
       // as reconciliation charges a count that was lost.
-      const prices = settlement.by === "usage" ? pricesOf(row) : undefined;
-      const unpriced = settlement.by === "usage" && prices === undefined;
+      const counted =
+        settlement.by === "usage" || settlement.by === "cut"
+          ? settlement.tokens
+          : undefined;
+      const prices = counted === undefined ? undefined : pricesOf(row);
+      const unpriced = counted !== undefined && prices === undefined;
       let charged = 0;
       if (unpriced) {
         charged = row.reservedMicros;
-      } else if (settlement.by === "usage" && prices !== undefined) {
-        charged = costMicros(prices, settlement.tokens);
+      } else if (counted !== undefined && prices !== undefined) {
+        charged = costMicros(prices, counted);
       }
       const alertedNow = this.#charge(
         row,
@@ -1657,7 +1671,7 @@ export class ModelLedger extends DurableObject<Env> {
   #charge(
     row: RequestRow,
     charged: number,
-    by: "usage" | "refused" | "unsent" | "reconciled"
+    by: "usage" | "cut" | "refused" | "unsent" | "reconciled"
   ): number | "quarantined" {
     // What it reserved against, as its admission recorded it apart from
     // its JSON: the one record a person's decision on it walks too, so a

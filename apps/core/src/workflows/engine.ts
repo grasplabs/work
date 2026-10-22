@@ -25,6 +25,7 @@ import type {
 } from "@grasp-os/workerflow/contracts";
 import { runObjectName } from "@grasp-os/workerflow/identity";
 import type { RunStub } from "@grasp-os/workerflow/instance";
+import type { EventOutcome } from "@grasp-os/workerflow/run";
 import { z } from "zod";
 
 import { inJurisdiction } from "../durable-objects.ts";
@@ -54,6 +55,14 @@ import { inJurisdiction } from "../durable-objects.ts";
 // retention, so the engine purges the record itself, on the same clock as
 // core removes the rest of the run's details (retention.ts).
 
+/** An event as core admits it to a run (`RunEngine.admitEvent`). */
+export interface AdmittedEngineEvent {
+  readonly type: string;
+  readonly payload: Json;
+  readonly key: string;
+  readonly attributes: Readonly<Record<string, string>>;
+}
+
 /** What an App's run is pinned to: the dispatcher loads it by these. */
 export interface PinnedRun {
   app: AppId;
@@ -66,9 +75,15 @@ export interface PinnedRun {
  * dispatcher: extracting an upload's text (knowledge/extraction.ts), a
  * build a chat's code handed to a durable job (build-jobs.ts), or filling
  * in a store's defaulted fields before its contract takes them
- * (store-backfill.ts).
+ * (store-backfill.ts), or publishing a document version's sections to
+ * search (knowledge/indexing.ts).
  */
-export const internalWorkflows = ["extraction", "build", "backfill"] as const;
+export const internalWorkflows = [
+  "extraction",
+  "build",
+  "backfill",
+  "indexing",
+] as const;
 
 export type InternalWorkflow = (typeof internalWorkflows)[number];
 
@@ -102,6 +117,12 @@ export type RunPin =
   | ({ type: "app" } & PinnedRun)
   | ({ type: "resource" } & PinnedResourceRun)
   | ({ type: "candidate" } & PinnedCandidateRun)
+  /**
+   * A run an App's test started of a workflow its release binds
+   * (fixture-runs.ts): the same sealed version, run on the same engine,
+   * with nothing of the organization's around it.
+   */
+  | ({ type: "fixture" } & PinnedResourceRun)
   | { type: "internal"; workflow: InternalWorkflow };
 
 /** The one definition every run is a run of. */
@@ -146,6 +167,19 @@ const pinSchema = z.union([
       manifest,
     })),
   z
+    .tuple([
+      z.literal("fixture"),
+      workflowResourceIdSchema,
+      z.int().positive(),
+      z.string().regex(/^[0-9a-f]{64}$/u),
+    ])
+    .transform(([, workflow, version, manifest]): RunPin => ({
+      type: "fixture",
+      workflow,
+      version,
+      manifest,
+    })),
+  z
     .tuple([z.literal("internal"), z.enum(internalWorkflows)])
     .transform(([, workflow]): RunPin => ({ type: "internal", workflow })),
 ]);
@@ -166,6 +200,14 @@ const versionOf = (pin: RunPin): string => {
     }
     case "candidate": {
       return JSON.stringify(["candidate", pin.workflow, pin.manifest]);
+    }
+    case "fixture": {
+      return JSON.stringify([
+        "fixture",
+        pin.workflow,
+        pin.version,
+        pin.manifest,
+      ]);
     }
     case "internal": {
       return JSON.stringify(["internal", pin.workflow]);
@@ -221,6 +263,21 @@ export interface RunEngine {
     pinned: PinnedCandidateRun;
     input: Json;
   }) => Promise<void>;
+  /**
+   * As `createResource`, for a run an App's test started
+   * (fixture-runs.ts): kept a day at most once it ended, as nothing
+   * reads it after its test.
+   */
+  createFixture: (run: {
+    id: string;
+    pinned: PinnedResourceRun;
+    input: Json;
+  }) => Promise<void>;
+  /**
+   * How many steps named `name` run `id` completed, each once however it
+   * was replayed; nothing when the engine has no such run.
+   */
+  succeededSteps: (id: string, name: string) => Promise<number | undefined>;
   /** As `create`, for a run of one of core's own workflows. */
   createInternal: (run: {
     id: string;
@@ -271,6 +328,16 @@ export interface RunEngine {
     key: string
   ) => Promise<"delivered" | "refused">;
   /**
+   * Accepts `event` into the run's inbox, for a wait that matches it by
+   * its type and attributes (`waitForMatch`): the engine's own answer, so
+   * the caller tells a duplicate delivery (`duplicate`, the same key, type,
+   * payload and attributes) from a key reused for another event
+   * (`conflict`), a full inbox or too large a payload, an ended run, and a
+   * run the engine has no record of yet (`missing`). Throws when the run
+   * can't be reached.
+   */
+  admitEvent: (id: string, event: AdmittedEngineEvent) => Promise<EventOutcome>;
+  /**
    * Removes the run, with all the engine kept of it, whether or not it has
    * ended; one it has no record of stays as it is. For a run core ended
    * that the engine's own retention may not reach (retention.ts).
@@ -308,6 +375,14 @@ const retentionOf = (
   }
   const kept = `${days} days` as const;
   return { retention: { successRetention: kept, errorRetention: kept } };
+};
+
+/**
+ * How long the engine keeps a test's run once it ended: a day, the least a
+ * deployment keeps any; its test removes it sooner (fixture-runs.ts).
+ */
+const fixtureRetention: Pick<WorkflowOptions, "retention"> = {
+  retention: { successRetention: "1 day", errorRetention: "1 day" },
 };
 
 const runs = (
@@ -371,7 +446,7 @@ const admit = async (
 ): Promise<void> => {
   const binding = new Workflow<{ input?: Json }>(runs(env), runDefinition, {
     version: versionOf(pin),
-    ...retentionOf(env),
+    ...(pin.type === "fixture" ? fixtureRetention : retentionOf(env)),
   });
   await binding.admit({
     id,
@@ -391,6 +466,11 @@ export const runEngine = (env: Env): RunEngine => ({
   createCandidate: async ({ id, pinned, input }) => {
     await admit(env, id, { type: "candidate", ...pinned }, input);
   },
+  createFixture: async ({ id, pinned, input }) => {
+    await admit(env, id, { type: "fixture", ...pinned }, input);
+  },
+  succeededSteps: async (id, name) =>
+    await runStub(env, id).succeededSteps(name),
   createInternal: async ({ id, workflow, input }) => {
     await admit(env, id, { type: "internal", workflow }, input);
   },
@@ -413,6 +493,13 @@ export const runEngine = (env: Env): RunEngine => ({
   resume: async (id, generation) => {
     await runStub(env, id).resume({ keepDeadlines: true, fence: generation });
   },
+  admitEvent: async (id, event) =>
+    await runStub(env, id).sendEvent({
+      type: event.type,
+      payload: encode(event.payload),
+      key: event.key,
+      attributes: event.attributes,
+    }),
   sendEvent: async (id, type, key) => {
     const outcome = await runStub(env, id).sendEvent({
       type,

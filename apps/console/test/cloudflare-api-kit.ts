@@ -2,6 +2,10 @@
  * What the fake Cloudflare API (test/cloudflare-api.ts) is built from: an
  * account's state, the API's envelope, and how a route answers.
  */
+import type {
+  AdminAskAnswer,
+  AdminAskRequest,
+} from "@grasp-os/shared/admin-ask";
 import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
 import type { OnboardingSummary } from "@grasp-os/shared/onboarding-summary";
 
@@ -41,6 +45,15 @@ export interface ScriptState {
   migrationTag?: string;
 }
 
+/** A zone, as the API reports it, and its Email Sending domains. */
+export interface ZoneState {
+  id: string;
+  name: string;
+  /** `pending` until its name servers are delegated, then `active`. */
+  status: string;
+  sending: { tag: string; name: string; enabled: boolean }[];
+}
+
 export interface AccountState {
   id: string;
   name: string;
@@ -58,7 +71,14 @@ export interface AccountState {
   /** The jurisdiction D1 reports for a database it creates, whatever was asked. */
   d1Reports?: string;
   gateways: Json[];
+  /** Its zones, each with the domains Email Sending sends from in it. */
+  zones: ZoneState[];
   scripts: Map<string, ScriptState>;
+  /**
+   * Its Workers for Platforms dispatch namespaces, each with its user
+   * Workers by script name. A test adds a namespace; uploads fill it.
+   */
+  namespaces: Map<string, Map<string, ScriptState>>;
   workflows: Map<string, { class_name: string; script_name: string }>;
   /** The hashes of the static files the account holds. */
   assets: Set<string>;
@@ -105,6 +125,15 @@ export interface AccountState {
   adminHeld?: () => Promise<void>;
   /** The staff members its core answered a snapshot to, as each signed request named them. */
   adminReaders: string[];
+  /**
+   * What its core answers Ask Grasp's signed question with
+   * (@grasp-os/shared/admin-ask), as Grasp's own core: an answer, or
+   * `no_model` for a core with no model it may send the document to (503).
+   * Unset, it answers "An answer.".
+   */
+  ask?: AdminAskAnswer | "no_model";
+  /** The questions its core took, as each signed request sent them. */
+  asked: AdminAskRequest[];
   /**
    * What the analytics API reports for it (`/graphql`): its Workers'
    * requests and CPU time this month, its AI Gateway's spend, and its

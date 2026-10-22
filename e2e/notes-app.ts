@@ -644,6 +644,71 @@ export const unaskedDownloadFiles = (): Record<string, string> => ({
   "screens/notes.tsx": unaskedScreen,
 });
 
+const linksRegistration = registration
+  .replace(
+    "export default app({",
+    `/** The help site its screens may link to, and nothing else. */
+export const help = resource.links("help", { origins: ["https://help.example.com"] });
+
+export default app({`
+  )
+  .replace(
+    "uses: [attachments, photos],",
+    "uses: [attachments, photos, help],"
+  );
+
+const linksScreen = `import { GraspError, useClient } from "@grasp-os/sdk/react";
+import { Button } from "@grasp-os/ui/components/button";
+import { useState } from "react";
+import { resources } from "#grasp";
+
+/**
+ * A screen that opens its help site on a click, opens it a while after
+ * the click (its activation spent), and tries a site it didn't declare.
+ */
+export default function Notes() {
+  const client = useClient();
+  const [outcome, setOutcome] = useState("waiting");
+  const open = async (url: string) => {
+    try {
+      await client.links.open(resources.help, { url });
+      setOutcome("opened");
+    } catch (error) {
+      setOutcome(error instanceof GraspError ? error.code : "failed");
+    }
+  };
+  return (
+    <main className="flex flex-col gap-3 p-6">
+      <h1 className="text-2xl font-semibold">Links</h1>
+      <Button onClick={() => void open("https://help.example.com/guide")}>
+        Open help
+      </Button>
+      <Button
+        onClick={() => {
+          setTimeout(() => void open("https://help.example.com/later"), 6000);
+        }}
+      >
+        Open help later
+      </Button>
+      <Button onClick={() => void open("https://help.example.com.evil.test/")}>
+        Open elsewhere
+      </Button>
+      <output aria-label="Link">{outcome}</output>
+    </main>
+  );
+}
+`;
+
+/**
+ * The Notes App with a screen that opens links through a help site it
+ * declares, for what opening one needs: a click, or the person's say.
+ */
+export const linksFiles = (): Record<string, string> => ({
+  ...notesAppFiles(),
+  "app.ts": linksRegistration,
+  "screens/notes.tsx": linksScreen,
+});
+
 /**
  * The Notes App with two more screens to move between (spec 10.7.7): a
  * start screen that opens a note by its route, and the note's screen,
@@ -761,3 +826,66 @@ export default function Prefs({ input }: ScreenProps<typeof screens.prefs>) {
       ),
   };
 };
+
+/**
+ * The Notes App with screens that navigate without the person acting
+ * (spec 10.7.7): a start screen that opens the first hop as it mounts, a
+ * launch screen that opens it on a click, and a hop screen that opens the
+ * next one each time it starts.
+ */
+export const hoppingFiles = (): Record<string, string> => ({
+  ...notesAppFiles(),
+  "app.ts": registration
+    .replace(
+      'import { app, resource } from "@grasp-os/sdk";',
+      'import { app, resource, v } from "@grasp-os/sdk";'
+    )
+    .replace(
+      '  screens: [{ name: "notes", path: "/", source: "screens/notes.tsx" }],',
+      `  screens: [
+    { name: "notes", path: "/", source: "screens/notes.tsx" },
+    { name: "start", path: "/start", source: "screens/takeoff.tsx" },
+    { name: "launch", path: "/launch", source: "screens/launch.tsx" },
+    { name: "hop", path: "/hops/:n", source: "screens/hop.tsx", input: v.object({ n: v.string() }) },
+  ],`
+    ),
+  "screens/takeoff.tsx": `import { useEffect } from "react";
+import { useNavigate } from "@grasp-os/sdk/react";
+import { screens } from "#grasp";
+
+export default function Takeoff() {
+  const navigate = useNavigate();
+  useEffect(() => {
+    void navigate(screens.hop, { n: "1" }).catch(() => undefined);
+  }, [navigate]);
+  return <main className="p-6"><h1>Takeoff</h1></main>;
+}
+`,
+  "screens/launch.tsx": `import { useNavigate } from "@grasp-os/sdk/react";
+import { Button } from "@grasp-os/ui/components/button";
+import { screens } from "#grasp";
+
+export default function Launch() {
+  const navigate = useNavigate();
+  return (
+    <main className="p-6">
+      <h1>Launch</h1>
+      <Button onClick={() => void navigate(screens.hop, { n: "1" })}>Start hopping</Button>
+    </main>
+  );
+}
+`,
+  "screens/hop.tsx": `import { useEffect } from "react";
+import { useNavigate } from "@grasp-os/sdk/react";
+import type { ScreenProps } from "@grasp-os/sdk/react";
+import { screens } from "#grasp";
+
+export default function Hop({ input }: ScreenProps<typeof screens.hop>) {
+  const navigate = useNavigate();
+  useEffect(() => {
+    void navigate(screens.hop, { n: String(Number(input.n) + 1) }).catch(() => undefined);
+  }, [navigate, input.n]);
+  return <main className="p-6"><h1>Hop {input.n}</h1></main>;
+}
+`,
+});

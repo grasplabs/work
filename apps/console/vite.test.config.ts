@@ -81,6 +81,8 @@ export default defineProject({
           DEV_ACCESS_EMAIL: "",
           // Where provisioned clients are served (src/deploy/context.ts).
           CLIENT_DOMAIN: "grasp.test",
+          // Grasp's Rooms, which test/admin-proposal.test.ts stands in for.
+          ROOMS_ORIGIN: "https://rooms.grasp.test",
           // Where TanStack Start answers server functions: the build sets
           // it; here the Worker reads it from process.env, which workerd
           // fills from its vars, so tests can call them through the entry.
@@ -94,7 +96,7 @@ export default defineProject({
         // Where the fake Cloudflare API runs client D1 queries, one for
         // each database it holds at once (test/cloudflare-api-workers.ts).
         d1Databases: Object.fromEntries(
-          Array.from({ length: 12 }, (_, slot) => [
+          Array.from({ length: 24 }, (_, slot) => [
             `CLIENT_D1_${slot}`,
             `client-d1-${slot}`,
           ])

@@ -13,6 +13,7 @@ import { runBackfill } from "../backfill-run.ts";
 import { runBindingsFor } from "../bindings.ts";
 import { runBuildJob } from "../build-jobs.ts";
 import { runExtraction } from "../knowledge/extraction.ts";
+import { runIndexing } from "../knowledge/indexing.ts";
 import { stepModelBinding } from "../resource-bindings.ts";
 import type { WorkContext } from "../restricted.ts";
 import { afterCpuKill, trackAttemptCalls } from "./attempt-calls.ts";
@@ -22,6 +23,7 @@ import { declaredParams, loadRun } from "./code.ts";
 import type { Settled, StepError } from "./code.ts";
 import { runParamsSchema } from "./engine.ts";
 import type { InternalWorkflow, PinnedRun, RunPin } from "./engine.ts";
+import { runFixtureWorkflow } from "./fixture-runs.ts";
 import {
   countedStep,
   fromIsolate,
@@ -197,6 +199,8 @@ const runStepOf = (env: Env, step: WorkflowStep): RunStep => {
     },
     waitForEvent: async (name, options) =>
       await step.waitForEvent(name, options),
+    waitForMatch: async (name, options) =>
+      await step.waitForMatch(name, options),
   };
 };
 
@@ -400,6 +404,7 @@ const internalRuns: Record<
   extraction: runExtraction,
   build: runBuildJob,
   backfill: runBackfill,
+  indexing: runIndexing,
 };
 
 /**
@@ -426,6 +431,11 @@ export const runPinned = async (
   if (pin.type === "candidate") {
     // A test run of a draft checkpoint: its input is its row's.
     return await runCandidateWorkflow(env, pin, event.instanceId, step, memory);
+  }
+  if (pin.type === "fixture") {
+    // An independent workflow's sealed build started by an App's test: its
+    // input is its own record's.
+    return await runFixtureWorkflow(env, pin, event.instanceId, step, memory);
   }
   const { app, workflow, version } = pin;
   return await runWorkflow(

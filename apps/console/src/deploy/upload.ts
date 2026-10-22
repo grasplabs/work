@@ -33,18 +33,39 @@ const unknownPlaceholder = (worker: WorkerEntry, binding: string) =>
   );
 
 /**
+ * `binding`, if it's a `send_email` binding, locked to send from
+ * `mailSender` alone (`allowed_sender_addresses`), whatever it said.
+ */
+export const lockMailSender = (
+  binding: Record<string, unknown>,
+  mailSender: string
+): void => {
+  if (binding.type === "send_email") {
+    binding.allowed_sender_addresses = [mailSender];
+  }
+};
+
+/**
  * `worker`'s bindings with each D1 binding's id filled in: a D1 binding's
  * `id` must be exactly its own placeholder (`d1IdPlaceholder`), for a
  * database the Worker lists, and is replaced by that database's id in the
  * account. The placeholder list is closed: any other `$` value is refused
  * (`unknown_placeholder`), so the manifest and this change together.
+ *
+ * Every `send_email` binding is locked to `mailSender`, the onboarding
+ * sender's address (src/deploy/core-config.ts): it sends from that address
+ * alone (`allowed_sender_addresses`), whatever the manifest says, so no
+ * code that reaches the binding sends as anyone else from the client's
+ * domain. Limits on whom it sends to, should a release set any, stay.
  */
 export const renderBindings = (
   worker: WorkerEntry,
-  databases: ReadonlyMap<string, string>
+  databases: ReadonlyMap<string, string>,
+  mailSender: string
 ): Record<string, unknown>[] =>
   worker.bindings.map((binding) => {
     const rendered: Record<string, unknown> = { ...binding };
+    lockMailSender(rendered, mailSender);
     if (binding.type === "d1") {
       const database = worker.d1Databases.find(
         (entry) => entry.binding === binding.name
@@ -117,16 +138,15 @@ const readAssets = async (
   );
 
 /**
- * What `worker` of `manifest` is uploaded as: its metadata on the
- * release's compatibility date and flags, its bindings filled in and
- * `vars` added as JSON bindings, and its modules and static files, all
- * read from `store` and checked against the manifest.
+ * `workerUpload` with `bindings` rendered already: a placed client's,
+ * mapped onto its inventory (src/hosting/inventory.ts), its mail locked
+ * (`lockMailSender`).
  */
-export const workerUpload = async (
+export const renderedWorkerUpload = async (
   store: ReleaseStore,
   manifest: ReleaseManifest,
   worker: WorkerEntry,
-  databases: ReadonlyMap<string, string>,
+  bindings: readonly Record<string, unknown>[],
   vars: Readonly<Record<string, unknown>>
 ): Promise<WorkerUpload> => {
   const modules = await Promise.all(
@@ -141,7 +161,7 @@ export const workerUpload = async (
     compatibility_date: manifest.compatibilityDate,
     compatibility_flags: worker.compatibilityFlags,
     bindings: [
-      ...renderBindings(worker, databases),
+      ...bindings,
       ...Object.entries(vars).map(([name, json]) => ({
         type: "json",
         name,
@@ -162,6 +182,29 @@ export const workerUpload = async (
       : { assets: await readAssets(store, worker) }),
   };
 };
+
+/**
+ * What `worker` of `manifest` is uploaded as: its metadata on the
+ * release's compatibility date and flags, its bindings filled in (its
+ * mail locked to `mailSender`, `renderBindings`) and
+ * `vars` added as JSON bindings, and its modules and static files, all
+ * read from `store` and checked against the manifest.
+ */
+export const workerUpload = async (
+  store: ReleaseStore,
+  manifest: ReleaseManifest,
+  worker: WorkerEntry,
+  databases: ReadonlyMap<string, string>,
+  vars: Readonly<Record<string, unknown>>,
+  mailSender: string
+): Promise<WorkerUpload> =>
+  await renderedWorkerUpload(
+    store,
+    manifest,
+    worker,
+    renderBindings(worker, databases, mailSender),
+    vars
+  );
 
 /**
  * Throws `binding_name_taken` unless every binding, var and secret of
@@ -196,6 +239,8 @@ export interface UploadInputs {
   databases: ReadonlyMap<string, string>;
   vars: Readonly<Record<string, unknown>>;
   secrets: readonly Secret[];
+  /** The address its mail is locked to (`renderBindings`). */
+  mailSender: string;
 }
 
 /** HMAC-SHA256 of `inputs`, as canonical JSON, under `key`: hex. */
@@ -241,7 +286,7 @@ const sortedSecrets = (secrets: readonly Secret[]): [string, string][] =>
  */
 export const uploadFingerprint = async (
   key: string,
-  { manifest, worker, databases, vars, secrets }: UploadInputs
+  { manifest, worker, databases, vars, secrets, mailSender }: UploadInputs
 ): Promise<string> =>
   await keyedHash(await rawHmacKey(key), {
     compatibilityDate: manifest.compatibilityDate,
@@ -255,7 +300,7 @@ export const uploadFingerprint = async (
     assets: worker.assets ?? null,
     observability: worker.observability,
     durableObjectMigrations: worker.durableObjectMigrations,
-    bindings: renderBindings(worker, databases),
+    bindings: renderBindings(worker, databases, mailSender),
     vars,
     secrets: sortedSecrets(secrets),
   });

@@ -1,14 +1,21 @@
 import { z } from "zod";
 
 import type { InterviewProgress } from "./interview-links.ts";
+import type { InterviewPhase } from "./interview-turn.ts";
 import { answerMaxLength, kickoffTeamNameMaxLength } from "./kickoff.ts";
 import { interviewLocaleSchema } from "./onboarding.ts";
-import type { Agreements } from "./onboarding.ts";
+import type {
+  Agreements,
+  InterviewKind,
+  InterviewLocale,
+  Interviewer,
+} from "./onboarding.ts";
 
 // Grasp's onboarding area (core's onboarding/staff-area.ts): what a Grasp
 // consultant in a client's deployment sees of its onboarding. Where it
 // stands, as stages to tick off; what needs Grasp, the most pressing
-// first; Grasp's own notes; and the log of what happened. For staff
+// first; Grasp's own notes; the log of what happened; how Stephen and
+// Claire are doing; and the AI the onboarding used. For staff
 // sessions only (`onboardingStaff`), on the onboarding scope or a full one.
 
 /** The stages of an onboarding, in order. */
@@ -133,6 +140,14 @@ export interface StaffTranscript {
   startedAt: string | null;
   completedAt: string | null;
   progress: InterviewProgress | null;
+  /** Who held it: whoever they chose on the way in; null before anything was kept. */
+  interviewer: Interviewer | null;
+  /**
+   * The marks of the interviewer's texts it was held with
+   * (`interviewerTextMarkSchema`), the first one first: one, unless the
+   * text changed while it went on.
+   */
+  texts: string[];
 }
 
 /** The longest note. */
@@ -199,4 +214,81 @@ export interface StephenSetupView {
   suggested: StephenSetup;
   /** What the kickoff said of the languages and the tools, to set him by. */
   kickoff: { languages: string | null; systems: string | null };
+}
+
+/** What people who finished thought of their interview, from 1 to 5. */
+export interface StaffRating {
+  /** How many said. */
+  count: number;
+  /** Their average; null while nobody said. */
+  average: number | null;
+  /** How many gave 1, 2, 3, 4 and 5, in that order. */
+  by: number[];
+}
+
+/** The interviews that ran on one text of Stephen's or Claire's. */
+export interface StaffInterviewerText {
+  /** The text's mark (`interviewerTextMarkSchema`); null for interviews from before marks were kept. */
+  mark: string | null;
+  kind: InterviewKind | null;
+  locale: InterviewLocale | null;
+  started: number;
+  finished: number;
+  rating: StaffRating;
+}
+
+/** How one of the interviewers is doing: numbers only, never who said what. */
+export interface StaffInterviewer {
+  interviewer: Interviewer;
+  /** Interviews started with them, and those people agreed to the read-back of. */
+  started: number;
+  finished: number;
+  /** Started, not finished, and not saved for a while: where each stopped. */
+  stopped: number;
+  stops: Record<InterviewPhase, number>;
+  rating: StaffRating;
+  /** How long a finished interview took on average, in minutes: a lead's and someone's own; null without one. */
+  minutes: { lead: number | null; own: number | null };
+  /** How many finished interviews took up to so many minutes; the last has no top. */
+  lengths: { upTo: number | null; count: number }[];
+  /** The share of what they wrote down in people's own interviews that people left in; null before one finished. */
+  leftIn: number | null;
+  /** The share of finished interviews held by voice; null before one finished. */
+  byVoice: number | null;
+  /** The texts the interviews ran on, the most interviews first. */
+  texts: StaffInterviewerText[];
+}
+
+/** One day's wait for Stephen's voice, in ms: the middle answer's, and the one nine in ten were faster than. */
+export interface StaffAnswerDay {
+  day: string;
+  answers: number;
+  middle: number;
+  slow: number;
+}
+
+/** How Stephen and Claire are doing in this onboarding. */
+export interface StaffInterviewers {
+  interviewers: StaffInterviewer[];
+  /** The days with answers measured, the oldest first. */
+  answers: StaffAnswerDay[];
+}
+
+/** What the onboarding counts AI use under. */
+export const aiPurposes = ["reading", "interviews", "drawing"] as const;
+export type AiPurpose = (typeof aiPurposes)[number];
+
+/** The AI one model did for one purpose on one day, as the onboarding counted it. */
+export interface StaffAiUseRow {
+  day: string;
+  purpose: AiPurpose;
+  /** The model as the gateway names it, or `voice` for Stephen's. */
+  model: string;
+  calls: number;
+  /** Tokens read, of them from a cache, and written. */
+  tokensIn: number;
+  tokensCached: number;
+  tokensOut: number;
+  /** Seconds of voice. */
+  seconds: number;
 }

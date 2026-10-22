@@ -6,6 +6,7 @@ import type {
 import type { KnownPart } from "@grasp-os/shared/onboarding-gate";
 
 import type { ShapeKey } from "../brain/dot-shapes.ts";
+import { lengthOf, readingTiming } from "../voice/timing.ts";
 import { addDays } from "./send-plan.ts";
 
 // The client onboarding a company's admin goes through until Grasp opens
@@ -228,19 +229,8 @@ export const dotsOf = (
  * pace per character, a breath after a comma and a longer one after a full
  * stop. With no voice to say it, a step's way on waits for most of that.
  */
-export const readingSeconds = (line: string): number => {
-  let at = 0;
-  for (const char of line) {
-    if (/[.?!…]/u.test(char)) {
-      at += 0.34;
-    } else if (/[,;:]/u.test(char)) {
-      at += 0.18;
-    } else {
-      at += 0.058;
-    }
-  }
-  return at;
-};
+export const readingSeconds = (line: string): number =>
+  lengthOf(readingTiming(line));
 
 /** How far the admin went before: the furthest step, as far as core says they are. */
 export const reachedOf = (
@@ -252,11 +242,53 @@ export const reachedOf = (
     steps.length - 1
   );
 
-/** What this browser keeps of an admin's onboarding: the furthest step they reached, and the message they wrote. */
+/**
+ * What only the admin can settle, by id (the prototype's `reviewItems`):
+ * letting Grasp's mail through their mail filter, so their people's links
+ * don't land in spam. Core keeps none of it; the admin says when it's done.
+ */
+export const reviewItems = ["mail"] as const;
+export type ReviewItemId = (typeof reviewItems)[number];
+
+export const isReviewItem = (value: unknown): value is ReviewItemId =>
+  reviewItems.some((item) => item === value);
+
+/** What still needs the admin: every item they haven't settled. */
+export const openItems = (settled: readonly ReviewItemId[]): ReviewItemId[] =>
+  reviewItems.filter((item) => !settled.includes(item));
+
+/** What this browser keeps of an admin's onboarding: the furthest step they reached, the message they wrote, and what they settled. */
 export interface Kept {
   reached: number;
   message: string | null;
+  settled: ReviewItemId[];
 }
+
+/** What is kept once `item` is settled, or open again. The same object when nothing changed. */
+export const settledAs = (
+  kept: Kept,
+  item: ReviewItemId,
+  settled: boolean
+): Kept => {
+  if (kept.settled.includes(item) === settled) {
+    return kept;
+  }
+  return {
+    ...kept,
+    settled: settled
+      ? [...kept.settled, item]
+      : kept.settled.filter((each) => each !== item),
+  };
+};
+
+/**
+ * Grasp's sending domain for the deployment at `hostname`: its client's
+ * hostname (`<id>.<domain>`, where the router serves it) with `mail.` in
+ * front, the domain the console sets up for Email Sending. Core doesn't
+ * tell the web app who its mail is from yet; once it does, that replaces
+ * this.
+ */
+export const sendingDomainOf = (hostname: string): string => `mail.${hostname}`;
 
 /**
  * What is kept once the admin is on step `index`: the furthest step stays

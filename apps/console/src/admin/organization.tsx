@@ -461,7 +461,15 @@ const AnsweredPage = ({
               description={section === "overview" ? aboutOf(view) : about}
               title={section === "overview" ? name : title}
             >
-              <SourceNote origins={originsOf(admin.snapshot)[section]} />
+              <SourceNote
+                origins={
+                  originsOf(
+                    admin.snapshot,
+                    admin.billing.state === "read",
+                    admin.proposal.state === "read"
+                  )[section]
+                }
+              />
             </PageHeading>
             <OrganizationContext value={organization}>
               <Outlet />

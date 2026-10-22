@@ -561,6 +561,7 @@ const activationOf = async (
       await Promise.resolve();
     },
     waitForEvent: async () => await Promise.reject(new Error("No waits here")),
+    waitForMatch: async () => await Promise.reject(new Error("No waits here")),
   };
   return new ResourceRunHost(
     runEnv,

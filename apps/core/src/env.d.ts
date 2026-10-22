@@ -11,6 +11,13 @@ interface __BaseEnv_Env {
   GOOGLE_CLIENT_SECRET?: string;
   /** The model gateway (src/models.ts): JSON. */
   MODEL_GATEWAY?: unknown;
+  /**
+   * The deployment's AI Gateway token, a Worker secret: the
+   * `cf-aig-authorization` an authenticated gateway asks for, which voice
+   * requests carry (src/models.ts). Never logged, never sent to the
+   * browser. Without it they carry the AI binding's placeholder.
+   */
+  AI_GATEWAY_TOKEN?: string;
   /** Memory files' size limits, in tokens (src/knowledge/memory-files.ts): JSON. */
   MEMORY_LIMITS?: unknown;
   /**
@@ -32,6 +39,8 @@ interface __BaseEnv_Env {
   RUN_RETENTION_DAYS?: unknown;
   /** The domain the deployment receives mail at (src/workflows/overview.ts). */
   INBOUND_MAIL_DOMAIN?: unknown;
+  /** Who core's mail is from (src/mail.ts): JSON, `{name, address}`. */
+  MAIL_FROM?: unknown;
   /**
    * The limits the operator lowered, with the policy's generation
    * (`quotaLimitsSchema` in @grasp-os/shared/quota-policy;

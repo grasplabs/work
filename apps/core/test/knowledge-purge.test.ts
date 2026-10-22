@@ -13,6 +13,7 @@ import { forContext, saveUserMemory } from "../src/knowledge/memory.ts";
 import { rebuildSearchIndex } from "../src/knowledge/search-erasure.ts";
 import { actingFor, newChat } from "./contexts.ts";
 import { mockIdp } from "./idp.ts";
+import { storedVersionTexts, storeTextUnderneath } from "./knowledge.ts";
 import {
   auditedDuring,
   openRpc,
@@ -70,6 +71,18 @@ const wordsIndexHolds = async (token: string): Promise<boolean> =>
     .bind(`"${token}"`)
     .first()) !== null;
 
+/** Whether any object in the Brain bucket holds `lower`, in any case. */
+const bucketHolds = async (lower: string): Promise<boolean> => {
+  const listed = await env.BRAIN_OBJECTS.list();
+  const texts = await Promise.all(
+    listed.objects.map(async ({ key }) => {
+      const object = await env.BRAIN_OBJECTS.get(key);
+      return (await object?.text()) ?? "";
+    })
+  );
+  return texts.some((text) => text.toLowerCase().includes(lower));
+};
+
 /**
  * Every `table.column` of the Knowledge database that holds `term`, in any
  * case, as text or among the bytes of a row, and the words index's pages
@@ -77,7 +90,8 @@ const wordsIndexHolds = async (token: string): Promise<boolean> =>
  * (`wordsIndexHolds`), whatever its pages' bytes show. The page directory
  * (`search_words_idx`) keeps its separators whole, so its bytes say it.
  * Trigram pages keep three characters at a time, so the trigram index
- * shows only in its content.
+ * shows only in its content. `BRAIN_OBJECTS` when an object in the bucket
+ * of versions' texts holds it.
  */
 const holding = async (term: string): Promise<string[]> => {
   const { results: tables } = await env.KNOWLEDGE.prepare(
@@ -109,6 +123,9 @@ const holding = async (term: string): Promise<string[]> => {
   if (oneAsciiToken.test(lower) && (await wordsIndexHolds(lower))) {
     found.add("search_words_data.block");
   }
+  if (await bucketHolds(lower)) {
+    found.add("BRAIN_OBJECTS");
+  }
   return [...found].toSorted();
 };
 
@@ -120,14 +137,7 @@ const purged = async (admin: Person, input: PurgeInput) => {
 };
 
 /** Each version's text of `documentId`, oldest first, whoever may read it. */
-const versionTexts = async (documentId: string): Promise<string[]> => {
-  const { results } = await env.KNOWLEDGE.prepare(
-    "SELECT text FROM versions WHERE document_id = ? ORDER BY number"
-  )
-    .bind(documentId)
-    .all<{ text: string }>();
-  return results.map(({ text }) => text);
-};
+const versionTexts = storedVersionTexts;
 
 interface KnowledgeHooks {
   /** Before each statement is made. */
@@ -329,7 +339,7 @@ const watchingPurge = async (
       ) {
         written.rebuilds += 1;
       }
-      const reading = query.includes("v.text AS text");
+      const reading = query.includes("p.key AS key");
       const statement = real.prepare(
         refuseRead && query.includes("AS characters")
           ? query.replace("AS characters", "AS characters, refused_here")
@@ -511,6 +521,7 @@ describe("a personal purge", setUpTime, () => {
         versions: 2,
         occurrences: 0,
         inLongerWords: 0,
+        hostCopies: 0,
         originals: 0,
         token: "string",
         expiresAt: "string",
@@ -529,6 +540,7 @@ describe("a personal purge", setUpTime, () => {
     // The one who stays still has the name in their own USER.md; the
     // leaver's text is gone from every table, the index's pages too.
     expect(heldBefore).toStrictEqual([
+      "BRAIN_OBJECTS",
       "search_trigrams.text",
       "search_trigrams_content.c3",
       "search_words.text",
@@ -536,15 +548,20 @@ describe("a personal purge", setUpTime, () => {
       "search_words_data.block",
       "sections.text",
       "versions.message",
-      "versions.text",
     ]);
-    const { results: left } = await env.KNOWLEDGE.prepare(
-      `SELECT document_id AS documentId FROM versions
-       WHERE instr(text, ?) > 0 OR instr(message, ?) > 0`
-    )
-      .bind(secret, secret)
-      .all<{ documentId: string }>();
-    expect(left.map(({ documentId }) => documentId)).toStrictEqual(
+    const { results: stored } = await env.KNOWLEDGE.prepare(
+      "SELECT document_id AS documentId, payload_key AS key, coalesce(message, '') AS message FROM versions"
+    ).all<{ documentId: string; key: string; message: string }>();
+    const left = await Promise.all(
+      stored.map(async ({ documentId, key, message }) => {
+        const object = await env.BRAIN_OBJECTS.get(key);
+        const text = (await object?.text()) ?? "";
+        return text.includes(secret) || message.includes(secret)
+          ? [documentId]
+          : [];
+      })
+    );
+    expect(left.flat()).toStrictEqual(
       staysAfter.files
         .filter(({ name }) => name === "USER.md")
         .map(({ documentId }) => documentId)
@@ -766,6 +783,7 @@ describe("a purge of content", setUpTime, () => {
             versions: 4,
             occurrences: 8,
             inLongerWords: 0,
+            hostCopies: 0,
           },
         },
         {
@@ -1387,7 +1405,7 @@ describe("a purge of content", setUpTime, () => {
     const secret = `pietersz${unique()}`;
     const kept = `kept${unique()}`;
     // A passage, with characters a pattern would read otherwise.
-    const passage = `on sick leave (burnout${unique()}) since May.`;
+    const passage = `on paid leave (course${unique()}) since May.`;
     const handbook = await admin.api.knowledge.createCollection({
       name: "Handbook",
       access: "everyone",
@@ -1422,6 +1440,7 @@ describe("a purge of content", setUpTime, () => {
       })),
     }).toStrictEqual({
       heldBefore: [
+        "BRAIN_OBJECTS",
         "documents.description",
         "documents.title",
         "search_trigrams.description",
@@ -1443,7 +1462,6 @@ describe("a purge of content", setUpTime, () => {
         "search_words_data.block",
         "sections.headings",
         "sections.text",
-        "versions.text",
       ],
       foundBefore: 2,
       heldAfter: [],
@@ -1504,9 +1522,7 @@ describe("a purge of content", setUpTime, () => {
     // As an App once declared it: a `task`, which nothing declares now.
     const task = `---\ntype: task\nstatus: open\n---\n# Offboard\n${name} returns the laptop.`;
     await env.KNOWLEDGE.batch([
-      env.KNOWLEDGE.prepare(
-        "UPDATE versions SET text = ? WHERE document_id = ?"
-      ).bind(task, document.id),
+      ...(await storeTextUnderneath(document.id, task)),
       env.KNOWLEDGE.prepare("UPDATE documents SET type = ? WHERE id = ?").bind(
         "task",
         document.id

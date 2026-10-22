@@ -189,6 +189,8 @@ const cast = {
   decisionUnreachable: { decider: "user" },
   memberActions: { admin: "admin", one: "user", two: "user" },
   memberRemoval: { admin: "admin", leaving: "user" },
+  workspaceSettings: { admin: "admin", member: "user" },
+  memberInvites: { admin: "admin" },
   roleChange: { admin: "admin", one: "user" },
   membersUnreachable: { admin: "admin" },
   membersRecover: { admin: "admin" },
@@ -206,6 +208,7 @@ const cast = {
   intake: { admin: "admin" },
   models: { admin: "admin", builder: "builder" },
   settings: { admin: "admin", member: "user" },
+  ownSessions: { member: "user" },
   workflows: { builder: "builder", user: "user" },
   activity: { admin: "admin", builder: "builder" },
   activityAgain: { admin: "admin", builder: "builder" },
@@ -240,7 +243,11 @@ const cast = {
   iconMoves: { member: "user" },
   pageRecovery: { member: "user" },
   brain: { member: "user" },
+  brainChat: { member: "user" },
   contexts: { member: "user" },
+  staffInterviews: { admin: "admin" },
+  tour: { member: "user" },
+  setupVoice: { admin: "admin" },
 } as const satisfies Record<string, Record<string, Role>>;
 
 type Scene = keyof typeof cast;

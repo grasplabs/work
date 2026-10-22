@@ -74,6 +74,11 @@ export const useStoreSecrets = (tokens: {
     [env.GOOGLE_CLIENT_SECRET, "google-secret"],
     [env.COMPOSIO_API_KEY, "composio-key"],
     [env.APP_OAUTH_CLIENTS, "{}"],
+    // Empty, as a store nobody put Stripe's key in reads: a test that
+    // reads Stripe sets it (test/admin-billing.test.ts).
+    [env.STRIPE_RESTRICTED_KEY, ""],
+    // Rooms' token likewise (test/admin-proposal.test.ts).
+    [env.ROOMS_READ_TOKEN, ""],
   ];
   const stored: { admin: SecretsStoreAdmin; id: string }[] = [];
   beforeEach(async () => {

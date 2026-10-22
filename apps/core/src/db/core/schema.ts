@@ -984,6 +984,41 @@ export const screenSubmissions = sqliteTable(
 );
 
 /**
+ * The workflow runs an App's tests started (workflows/fixture-runs.ts),
+ * each recorded before the engine is asked for it and deleted once the
+ * engine removed it: a row left behind is a test run that died between
+ * the two, whose run the sweep removes past its deadline. What a run is
+ * and runs with is here, never in the organization's runs and receipts:
+ * its pinned version and build, the fixture principal it acts for, its
+ * input and the parameter values its fixture gave it (or their defaults:
+ * never the organization's).
+ */
+export const appTestRuns = sqliteTable(
+  "app_test_runs",
+  {
+    runId: text("run_id").primaryKey(),
+    /** The App whose tests started it, and the version under test. */
+    appId: text("app_id").notNull(),
+    appVersion: integer("app_version").notNull(),
+    workflowResourceId: text("workflow_resource_id").notNull(),
+    version: integer().notNull(),
+    manifestHash: text("manifest_hash").notNull(),
+    buildHash: text("build_hash").notNull(),
+    /** The fixture's principal it acts for (`fixture-<name>`). */
+    principal: text().notNull(),
+    input: text().notNull(),
+    params: text().notNull(),
+    createdAt: timestamp("created_at").notNull(),
+    /**
+     * When its test's time is up: no activation runs it after, and the
+     * sweep removes it once it is past.
+     */
+    deadline: timestamp("deadline").notNull(),
+  },
+  (table) => [index("app_test_runs_deadline").on(table.deadline)]
+);
+
+/**
  * The fixture stores chats' previews of their drafts run on
  * (sealed-previews.ts), each recorded before its object is first touched
  * and deleted once the object is discarded. Kept apart from App tests'
@@ -2498,25 +2533,30 @@ export const platformVersions = sqliteTable("platform_versions", {
 });
 
 /**
- * What core tells a person in the product (src/notifications.ts): for
- * now, that a workflow failed while acting for them (`run_failed`). One
- * unread row per person, App and workflow: another failure while it is
- * unread counts on it (`failures`) and names the latest run (`run_id`), so
- * a workflow that fails every minute makes one row, not thousands. Once
- * read (`read_at`), the next failure makes a new one. The person's rows
- * read over 30 days ago go when they next read, and all of them when
- * they are removed from the organization.
+ * What core tells a person in the product (src/notifications.ts): that a
+ * workflow failed while acting for them (`run_failed`), or that an admin
+ * asked them one of the brain's open questions (`gap_asked`,
+ * src/brain-gaps.ts). A `run_failed` row has its App, workflow, run and
+ * failures, and no gap; a `gap_asked` row its gap alone, once per person
+ * and gap. One unread `run_failed` row per person, App and workflow:
+ * another failure while it is unread counts on it (`failures`) and names
+ * the latest run (`run_id`), so a workflow that fails every minute makes
+ * one row, not thousands. Once read (`read_at`), the next failure makes a
+ * new one. The person's rows read over 30 days ago go when they next
+ * read, and all of them when they are removed from the organization.
  */
 export const notifications = sqliteTable(
   "notifications",
   {
     id: text().primaryKey(),
     personId: text("person_id").notNull(),
-    type: text({ enum: ["run_failed"] }).notNull(),
-    appId: text("app_id").notNull(),
-    workflowId: text("workflow_id").notNull(),
-    runId: text("run_id").notNull(),
-    failures: integer().notNull(),
+    type: text({ enum: ["run_failed", "gap_asked"] }).notNull(),
+    appId: text("app_id"),
+    workflowId: text("workflow_id"),
+    runId: text("run_id"),
+    failures: integer(),
+    /** The gap a `gap_asked` row asks about: its brain record id. */
+    gapId: text("gap_id"),
     createdAt: timestamp("created_at").notNull(),
     /** When it last changed: the latest failure it counts. */
     updatedAt: timestamp("updated_at").notNull(),
@@ -2533,6 +2573,10 @@ export const notifications = sqliteTable(
     uniqueIndex("notifications_unread_idx")
       .on(table.personId, table.type, table.appId, table.workflowId)
       .where(sql`read_at IS NULL`),
+    // A person is asked about a gap once.
+    uniqueIndex("notifications_gap_idx")
+      .on(table.personId, table.gapId)
+      .where(sql`gap_id IS NOT NULL`),
   ]
 );
 
@@ -3645,3 +3689,50 @@ export const landscapeStagedPeople = sqliteTable(
     }),
   ]
 );
+
+/**
+ * The Playbook's records (brain-records.ts): one row each, never written
+ * over, in the order they were added. `body` is the record as
+ * `brainRecordSchema` parsed it, as canonical JSON, so a record sent again
+ * compares as the same text. No row names who added it: the audit log does.
+ */
+export const brainRecords = sqliteTable(
+  "brain_records",
+  {
+    /** The order records were added in: `brain.read` keeps it. */
+    position: integer().primaryKey({ autoIncrement: true }),
+    type: text({
+      enum: [
+        "source",
+        "tool",
+        "candidate",
+        "statement",
+        "team",
+        "teamCount",
+        "stakeholder",
+        "gap",
+      ],
+    }).notNull(),
+    id: text().notNull(),
+    body: text().notNull(),
+    addedAt: timestamp("added_at").notNull(),
+  },
+  // One id is one record, whatever its type.
+  (table) => [uniqueIndex("brain_records_id_idx").on(table.id)]
+);
+
+/**
+ * What became of the Playbook's gaps (brain-records.ts): one row once a
+ * gap was asked about, answered or closed, each set once, never cleared.
+ * A gap with no row is open and nobody was asked.
+ */
+export const brainGapStates = sqliteTable("brain_gap_states", {
+  /** The gap's record id. */
+  gapId: text("gap_id").primaryKey(),
+  askedAt: timestamp("asked_at"),
+  closedAt: timestamp("closed_at"),
+  /** The answer, in the words of who gave it; null when closed without one. */
+  answer: text(),
+  /** Their name when they answered, as they chose to give it. */
+  answeredBy: text("answered_by"),
+});

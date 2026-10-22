@@ -64,6 +64,14 @@
       "binding": "ROLLOUT",
       "class_name": "Rollout",
     },
+    // Deploys one fleet client of a rollout (src/rollout/fleet-client.ts): an
+    // instance per client and retry round, a few at once, started by the
+    // rollout's run, which claims the client in the rollout's name.
+    {
+      "name": "grasp-os-rollout-client",
+      "binding": "ROLLOUT_CLIENT",
+      "class_name": "RolloutClient",
+    },
     // Rolls a client back from a rollout (src/rollout/rollback.ts): an
     // instance per rollback, a runner under the same claim as the others.
     {
@@ -78,6 +86,14 @@
       "binding": "APPLY_CLIENT",
       "class_name": "ApplyClient",
     },
+    // Provisions a client placed in a hosting destination
+    // (src/hosting/workflow.ts): an instance per attempt, each claimed in
+    // D1 first, all resuming the client's one operation.
+    {
+      "name": "grasp-os-provision-placed-client",
+      "binding": "PROVISION_PLACED_CLIENT",
+      "class_name": "ProvisionPlacedClient",
+    },
   ],
   // The router's hostname map, which a deploy writes (src/deploy/router.ts).
   // The router's first deploy creates it as grasp-os-router-hosts; `deploy`
@@ -91,7 +107,8 @@
   // accounts and makes the deployer a member (src/provision/workflow.ts);
   // the deployer's token, with deploy permissions only, on every client
   // account (AI Gateway edit among them: provisioning makes each client's
-  // gateway); the keys each client's own secrets are derived from; and the
+  // gateway; and Zone and Email Sending edit: a deploy makes the client's
+  // sending domain, src/cloudflare/email-sending.ts); the keys each client's own secrets are derived from; and the
   // secrets every client shares, which deploy-ops copies in from
   // 1Password. The store id is the account's own: `deploy` fills it in
   // (scripts/wrangler-deploy.ts), so this placeholder only reaches local
@@ -141,6 +158,27 @@
       "binding": "APP_OAUTH_CLIENTS",
       "store_id": "account-secrets-store",
       "secret_name": "APP_OAUTH_CLIENTS",
+    },
+    // A restricted Stripe key that can only read customers, subscriptions
+    // and invoices, for the admin's Billing under Contract
+    // (src/billing/stripe.ts). The console's alone: never copied to a
+    // client, never sent to the browser. Put in the store by hand; until
+    // it is, Billing says Stripe isn't connected.
+    {
+      "binding": "STRIPE_RESTRICTED_KEY",
+      "store_id": "account-secrets-store",
+      "secret_name": "STRIPE_RESTRICTED_KEY",
+    },
+    // Grasp's Rooms' read-only service token (grasplabs/rooms,
+    // worker/service-read.ts), for the proposal under Contract
+    // (src/proposal/rooms.ts): it reads rooms and their signature requests
+    // and nothing else. The console's alone, never sent to the browser. Put
+    // in the store by hand; until it is, the proposal says Rooms isn't
+    // connected.
+    {
+      "binding": "ROOMS_READ_TOKEN",
+      "store_id": "account-secrets-store",
+      "secret_name": "ROOMS_READ_TOKEN",
     },
   ],
 }

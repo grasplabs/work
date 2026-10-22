@@ -14,17 +14,21 @@ import { sessions } from "./db/core/schema.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
+import { deviceOf } from "./user-agent.ts";
 
 // A person's own sessions, over `/rpc`: the browsers they are signed in
 // on, and ending one, say on a device they lost. Only their own, as the
 // session check hands them over: another's session reads as no session at
 // all. A session's token is what its cookie holds, so it never leaves
-// core; its ID only names it. Better Auth's own `/list-sessions` answers
-// with every token, and the frontend doesn't use it.
+// core; its ID only names it, nor does the address it signed in from.
+// Better Auth's own session routes answer with tokens, so they are closed
+// (auth/routes.ts).
 //
 // Ending one deletes it: every connection on it is refused at its next
 // reading of the session (rpc.ts), within seconds, and closes. Audited as
-// an admin's revoking is (members.ts): it signs someone out.
+// an admin's revoking is (members.ts): it signs someone out. Not the one
+// this connection is on: that is signing out, which also clears the
+// browser's cookie.
 
 /** The signed-in person's own sessions. */
 export class SessionsRpc extends CoreRpcTarget implements SessionsApi {
@@ -45,9 +49,9 @@ export class SessionsRpc extends CoreRpcTarget implements SessionsApi {
       const rows = await drizzle(this.#env.DB)
         .select({
           id: sessions.id,
-          device: sessions.userAgent,
+          userAgent: sessions.userAgent,
           signedInAt: sessions.createdAt,
-          refreshedAt: sessions.updatedAt,
+          lastActiveAt: sessions.updatedAt,
           expiresAt: sessions.expiresAt,
         })
         .from(sessions)
@@ -58,9 +62,9 @@ export class SessionsRpc extends CoreRpcTarget implements SessionsApi {
         .limit(ownSessionsListed);
       return rows.map((row) => ({
         id: row.id,
-        device: row.device,
+        device: deviceOf(row.userAgent),
         signedInAt: row.signedInAt.toISOString(),
-        refreshedAt: row.refreshedAt.toISOString(),
+        lastActiveAt: row.lastActiveAt.toISOString(),
         expiresAt: row.expiresAt.toISOString(),
         current: row.id === this.#current,
       }));
@@ -73,6 +77,9 @@ export class SessionsRpc extends CoreRpcTarget implements SessionsApi {
       const parsed = identifierSchema.safeParse(id);
       if (!parsed.success) {
         return "not_found";
+      }
+      if (parsed.data === this.#current) {
+        return "current";
       }
       const db = drizzle(this.#env.DB);
       const [ended] = await auditedBatch(this.#env, db, [
@@ -89,7 +96,6 @@ export class SessionsRpc extends CoreRpcTarget implements SessionsApi {
           actor: actorOf(person),
           action: "session.ended",
           target: { type: "session", id: parsed.data },
-          detail: { current: parsed.data === this.#current },
         }),
       ]);
       return ended.length === 0 ? "not_found" : "ended";

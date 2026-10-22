@@ -66,9 +66,11 @@ export interface AdminSource {
 export const ADMIN_SOURCES: readonly AdminSource[] = [
   {
     // The admin's own MCP: what every chat about Grasp's companies asks.
+    // Its tools are written (admin-tools.ts); it is live once the console
+    // serves them to Grasp's staff (GRA-656).
     id: "grasp",
     ours: true,
-    state: "live",
+    state: "planned",
     order: 0,
     direction: "out",
     reads: ["organizations", "briefs", "needs", "digest"],
@@ -87,7 +89,9 @@ export const ADMIN_SOURCES: readonly AdminSource[] = [
     tools: [],
   },
   {
-    // Where Grasp writes its proposals and the company signs them.
+    // Where Grasp writes its proposals and the company signs them. Read
+    // through Rooms' read-only service route with one token, not its MCP
+    // server, whose OAuth grant would need renewing every week.
     id: "rooms",
     ours: true,
     state: "planned",
@@ -95,13 +99,7 @@ export const ADMIN_SOURCES: readonly AdminSource[] = [
     direction: "in",
     reads: ["proposals", "signatures"],
     feeds: ["contract", "log"],
-    tools: [
-      "list_projects",
-      "get_project",
-      "get_content",
-      "get_signature_requests",
-      "get_signature_receipt",
-    ],
+    tools: [],
   },
   {
     // The CRM: every call with a company is there, with who was in it.

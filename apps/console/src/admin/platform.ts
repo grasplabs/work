@@ -242,7 +242,6 @@ export const needsOf = (
   return needs;
 };
 
-/** How a company stands, as one word. */
 /**
  * How a company stands, as one word. `unread`: active, nothing recorded
  * needs a look, but its account wasn't read (yet, or the read failed or
@@ -306,3 +305,25 @@ export const companiesOf = (
         standingOrder[a.standing] - standingOrder[b.standing] ||
         a.row.name.localeCompare(b.row.name)
     );
+
+/**
+ * What the admin's sidebar says beside Platform: how many companies need a
+ * look by what the console recorded alone (a failed last deploy, releases
+ * behind), and whether the rollout going out waits for approval. No live
+ * read: the sidebar shows on every admin page, and drift and errors are
+ * the page's to read.
+ */
+export interface PlatformCounts {
+  needLook: number;
+  waiting: boolean;
+}
+
+export const platformCounts = (
+  rows: readonly GridRow[],
+  releases: readonly ReleaseSummary[],
+  rollouts: readonly RolloutSummary[]
+): PlatformCounts => ({
+  needLook: rows.filter((row) => needsOf(row, undefined, releases).length > 0)
+    .length,
+  waiting: goingOut(rollouts)?.status === "waiting",
+});
