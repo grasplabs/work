@@ -24,8 +24,32 @@ interface ZipEntry {
   deflate?: boolean;
 }
 
-/** A ZIP of `entries`, as an Office package is laid out (CRCs left zero). */
-const zipOf = async (entries: readonly ZipEntry[]): Promise<Uint8Array> => {
+const contentTypesNs =
+  "http://schemas.openxmlformats.org/package/2006/content-types";
+const officeDocument =
+  "http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument";
+
+/** `_rels/.rels`, naming `target` the package's main document. */
+const relsOf = (target = "main.xml", attributes = ""): ZipEntry => ({
+  name: "_rels/.rels",
+  content: encoder.encode(
+    `<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="${officeDocument}" Target="${target}"${attributes}/></Relationships>`
+  ),
+});
+
+/**
+ * A ZIP of `entries`, as an Office package is laid out (CRCs left zero),
+ * with `_rels/.rels` naming `/main.xml` its main document last, unless
+ * `entries` have one of their own or `rels` is false.
+ */
+const zipOf = async (
+  given: readonly ZipEntry[],
+  rels = true
+): Promise<Uint8Array> => {
+  const entries =
+    rels && !given.some(({ name }) => name === "_rels/.rels")
+      ? [...given, relsOf()]
+      : given;
   const locals: Uint8Array[] = [];
   const centrals: Uint8Array[] = [];
   let offset = 0;
@@ -82,12 +106,16 @@ const contentTypes = (...mains: string[]): Uint8Array =>
     `<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/>${mains
       .map(
         (main, index) =>
-          `<Override PartName="/part${index}.xml" ContentType="${main}.main+xml"/>`
+          `<Override PartName="${index === 0 ? "/main.xml" : `/part${String(index)}.xml`}" ContentType="${main}.main+xml"/>`
       )
       .join("")}</Types>`
   );
 
-const body = { name: "word/document.xml", content: encoder.encode("<w/>") };
+/** An `Override` of `part` declaring `type`. */
+const override = (part: string, type: string): string =>
+  `<Override PartName="${part}" ContentType="${type}"/>`;
+
+const body = { name: "main.xml", content: encoder.encode("<w/>") };
 
 describe(officeTypeOf, () => {
   it("names a package by the one main part its content types declare, stored or deflated", async () => {
@@ -122,7 +150,7 @@ describe(officeTypeOf, () => {
         {
           name: "[Content_Types].xml",
           content: encoder.encode(
-            `<?xml version="1.0"?><!-- <Override PartName="/a" ContentType="${word}.main+xml"/> --><?pi <Override ContentType="${word}.main+xml"?><Types/>`
+            `<?xml version="1.0"?><!-- <Override PartName="/main.xml" ContentType="${word}.main+xml"/> --><?pi <Override ContentType="${word}.main+xml"?><Types xmlns="${contentTypesNs}"/>`
           ),
         },
       ]),
@@ -131,7 +159,7 @@ describe(officeTypeOf, () => {
         {
           name: "[Content_Types].xml",
           content: encoder.encode(
-            `<?xml version="1.0"?><Types><!-- <Override PartName="/a" ContentType="${word}.main+xml"/></Types>`
+            `<?xml version="1.0"?><Types xmlns="${contentTypesNs}"><!-- <Override PartName="/main.xml" ContentType="${word}.main+xml"/></Types>`
           ),
         },
       ]),
@@ -143,7 +171,7 @@ describe(officeTypeOf, () => {
               {
                 name: "[Content_Types].xml",
                 content: encoder.encode(
-                  `<Types><![CDATA[<Override PartName="/a" ContentType="${word}.main+xml"/>${close}</Types>`
+                  `<Types xmlns="${contentTypesNs}"><![CDATA[<Override PartName="/main.xml" ContentType="${word}.main+xml"/>${close}</Types>`
                 ),
               },
             ])
@@ -153,12 +181,12 @@ describe(officeTypeOf, () => {
       // a DTD, `--` inside a comment, a stray `<`.
       ...(await Promise.all(
         [
-          `<Types><Override PartName="/a" ContentType="${word}.main+xml"/>`,
-          `<Types/><Types><Override PartName="/a" ContentType="${word}.main+xml"/></Types>`,
-          `<!DOCTYPE Types><Types><Override PartName="/a" ContentType="${word}.main+xml"/></Types>`,
-          `<Types><!-- a -- b --><Override PartName="/a" ContentType="${word}.main+xml"/></Types>`,
-          `<Types>< <Override PartName="/a" ContentType="${word}.main+xml"/></Types>`,
-          `<Types><Override PartName="/a" ContentType="${word}.main+xml" ContentType="x"/></Types>`,
+          `<Types xmlns="${contentTypesNs}"><Override PartName="/main.xml" ContentType="${word}.main+xml"/>`,
+          `<Types xmlns="${contentTypesNs}"/><Types xmlns="${contentTypesNs}"><Override PartName="/main.xml" ContentType="${word}.main+xml"/></Types>`,
+          `<!DOCTYPE Types><Types xmlns="${contentTypesNs}"><Override PartName="/main.xml" ContentType="${word}.main+xml"/></Types>`,
+          `<Types xmlns="${contentTypesNs}"><!-- a -- b --><Override PartName="/main.xml" ContentType="${word}.main+xml"/></Types>`,
+          `<Types xmlns="${contentTypesNs}">< <Override PartName="/main.xml" ContentType="${word}.main+xml"/></Types>`,
+          `<Types xmlns="${contentTypesNs}"><Override PartName="/main.xml" ContentType="${word}.main+xml" ContentType="x"/></Types>`,
         ].map(
           async (xml) =>
             await zipOf([
@@ -171,7 +199,7 @@ describe(officeTypeOf, () => {
         {
           name: "[Content_Types].xml",
           content: encoder.encode(
-            `<Types><Other><Override PartName="/a" ContentType="${word}.main+xml"/></Other></Types>`
+            `<Types xmlns="${contentTypesNs}"><Other><Override PartName="/main.xml" ContentType="${word}.main+xml"/></Other></Types>`
           ),
         },
       ]),
@@ -204,6 +232,125 @@ describe(officeTypeOf, () => {
       // oxlint-disable-next-line no-await-in-loop -- each case on its own
       await expect(officeTypeOf(bytes)).resolves.toBeUndefined();
     }
+  });
+
+  it("reads the type of the one main part .rels names, and refuses a decoy, another main document, a VBA project or declarations it can't trust", async () => {
+    const types = (...children: string[]): ZipEntry => ({
+      name: "[Content_Types].xml",
+      content: encoder.encode(
+        `<?xml version="1.0"?><Types xmlns="${contentTypesNs}"><Default Extension="xml" ContentType="application/xml"/>${children.join("")}</Types>`
+      ),
+    });
+    const docm = "application/vnd.ms-word.document.macroEnabled.main+xml";
+    const xlsm = "application/vnd.ms-excel.sheet.macroEnabled.main+xml";
+    // A real package: its main part under a folder, named with a leading
+    // slash or none, in any case.
+    const real = await zipOf(
+      [
+        types(override("/xl/workbook.xml", `${excel}.main+xml`)),
+        relsOf("/XL/Workbook.xml"),
+      ],
+      false
+    );
+    const cases = {
+      // A docm whose macro-enabled main part .rels names, with a decoy
+      // part declaring the macro-free type.
+      decoyDocm: await zipOf([
+        types(
+          override("/main.xml", docm),
+          override("/decoy.xml", `${word}.main+xml`)
+        ),
+      ]),
+      decoyXlsm: await zipOf([
+        types(
+          override("/main.xml", xlsm),
+          override("/decoy.xml", `${excel}.main+xml`)
+        ),
+      ]),
+      // The allowed type on the main part, another main document elsewhere.
+      otherMain: await zipOf([
+        types(
+          override("/main.xml", `${word}.main+xml`),
+          override("/other.xml", docm)
+        ),
+      ]),
+      // ...or by a Default, or a VBA project beside it.
+      otherDefault: await zipOf([
+        types(
+          override("/main.xml", `${word}.main+xml`),
+          `<Default Extension="bin" ContentType="${docm}"/>`
+        ),
+      ]),
+      vbaProject: await zipOf([
+        types(
+          override("/main.xml", `${word}.main+xml`),
+          override(
+            "/word/vbaProject.bin",
+            "application/vnd.ms-office.vbaProject"
+          )
+        ),
+      ]),
+      // The type declared for another part than .rels names, or none.
+      notTheMainPart: await zipOf([
+        types(override("/decoy.xml", `${word}.main+xml`)),
+      ]),
+      noRels: await zipOf(
+        [types(override("/main.xml", `${word}.main+xml`))],
+        false
+      ),
+      externalMain: await zipOf([
+        types(override("/main.xml", `${word}.main+xml`)),
+        relsOf("main.xml", ' TargetMode="External"'),
+      ]),
+      mainOutside: await zipOf([
+        types(override("/main.xml", `${word}.main+xml`)),
+        relsOf("../main.xml"),
+      ]),
+      // An Override naming no part, or the main part twice.
+      noPartName: await zipOf([
+        types(
+          override("/main.xml", `${word}.main+xml`),
+          `<Override ContentType="${word}.main+xml"/>`
+        ),
+      ]),
+      partTwice: await zipOf([
+        types(
+          override("/main.xml", `${word}.main+xml`),
+          override("/MAIN.xml", docm)
+        ),
+      ]),
+      // Content types in another namespace, or an element in its own.
+      foreignNamespace: await zipOf([
+        {
+          name: "[Content_Types].xml",
+          content: encoder.encode(
+            `<Types xmlns="urn:evil">${override("/main.xml", `${word}.main+xml`)}</Types>`
+          ),
+        },
+      ]),
+      prefixedChild: await zipOf([
+        types(
+          override("/main.xml", `${word}.main+xml`),
+          `<x:Override xmlns:x="${contentTypesNs}" PartName="/other.xml" ContentType="${docm}"/>`
+        ),
+      ]),
+      // A second [Content_Types].xml another reader could take instead.
+      twoContentTypes: await zipOf([
+        types(override("/main.xml", `${word}.main+xml`)),
+        types(override("/main.xml", docm)),
+      ]),
+    };
+    const named: Record<string, string | undefined> = {};
+    for (const [label, bytes] of Object.entries(cases)) {
+      // oxlint-disable-next-line no-await-in-loop -- each case on its own
+      named[label] = await officeTypeOf(bytes);
+    }
+    expect({ real: await officeTypeOf(real), named }).toStrictEqual({
+      real: excel,
+      named: Object.fromEntries(
+        Object.keys(cases).map((label) => [label, undefined])
+      ),
+    });
   });
 
   it("names no type for a package whose content types inflate past the bound, or a broken ZIP", async () => {

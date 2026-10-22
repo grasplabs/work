@@ -779,9 +779,21 @@ describe("a workflow run's own files", () => {
         content: base64Of("late"),
       })
     );
+    // Stale by the time it would reserve its bytes: nothing reserved.
+    const staleReserve = await outcome(
+      callFiles(env, caller.next(staleFrom(2)), "append", {
+        file: openFile,
+        content: base64Of("late"),
+      })
+    );
+    const reservedSize = await env.DB.prepare(
+      "SELECT size FROM workflow_run_files WHERE id = ?"
+    )
+      .bind(openFile)
+      .first<{ size: number }>();
     // Stale by the time its bytes would go to R2.
     const stalePut = await outcome(
-      callFiles(env, caller.next(staleFrom(2)), "append", {
+      callFiles(env, caller.next(staleFrom(3)), "append", {
         file: openFile,
         content: base64Of("late"),
       })
@@ -792,6 +804,8 @@ describe("a workflow run's own files", () => {
       otherName,
       otherType,
       staleCall,
+      staleReserve,
+      reserved: reservedSize?.size,
       stalePut,
       stored: await objectsOf(caller.run),
     }).toStrictEqual({
@@ -800,6 +814,8 @@ describe("a workflow run's own files", () => {
       otherName: "workflow.call_invalid",
       otherType: "workflow.call_invalid",
       staleCall: "Error: The attempt went stale",
+      staleReserve: "Error: The attempt went stale",
+      reserved: 0,
       stalePut: "Error: The attempt went stale",
       // Only the deleted file's bytes, which the sweep takes later.
       stored: 1,
@@ -1191,10 +1207,12 @@ describe("a workflow run's own files", () => {
     const before = await outcome(
       keepFile(env, expired.next(staleFrom(1)), { ...csv, bytes })
     );
-    // Stale after its pieces are written: never sealed, swept as unfinished.
+    // Stale after its pieces are written and hashed, just before it is
+    // sealed (open, then three checks a piece, then finish's two): never
+    // sealed, swept as unfinished.
     const late = callerOf();
     const midway = await outcome(
-      keepFile(env, late.next(staleFrom(6)), { ...csv, bytes })
+      keepFile(env, late.next(staleFrom(9)), { ...csv, bytes })
     );
     // No row, so none of the run's limits (summed from its rows) moved.
     expect({

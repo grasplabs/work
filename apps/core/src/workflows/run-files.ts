@@ -370,7 +370,9 @@ const append = async (
   requireWriter(row, caller);
   const key = `run-files/${caller.runId}/${row.id}/${crypto.randomUUID()}`;
   // Reserved against every limit in the statement that adds it, before
-  // its bytes reach R2; the file's size follows in the same batch.
+  // its bytes reach R2; the file's size follows in the same batch. The
+  // lease again first: the reads above may have outlasted it.
+  caller.requireHolds();
   const [reserved] = await env.DB.batch([
     env.DB.prepare(
       `INSERT INTO workflow_run_file_chunks
@@ -531,7 +533,9 @@ const finish = async (
       );
     throw fileErrors.create("file.content_mismatch");
   }
-  // Only the file as hashed: no append can have grown it since.
+  // Only the file as hashed: no append can have grown it since. The lease
+  // again first: hashing every chunk may have outlasted it.
+  caller.requireHolds();
   const finished = await db
     .update(workflowRunFiles)
     .set({ state: "done", sha256, finishedAt: now })
