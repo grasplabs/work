@@ -145,6 +145,19 @@ const partsOf = (deciders: string): { kind: string; id: string } => {
   return { kind: deciders.slice(0, colon), id: deciders.slice(colon + 1) };
 };
 
+/**
+ * Refuses `recipient` when it is the run's own person, as a person: they
+ * never answer its decision (R8).
+ */
+const requireNotPrincipal = (recipient: string, principal: string): void => {
+  const { kind, id } = partsOf(recipient);
+  if (kind === "person" && id === principal) {
+    throw callInvalid(
+      "recipients: The person the run acts for can't answer its decision."
+    );
+  }
+};
+
 /** Whether `userId` is in team `teamId` of the organization now. */
 const inTeam = async (
   env: Env,
@@ -350,13 +363,7 @@ export const openRunDecision = async (
     const recipient = recipientOf(call.recipients);
     const description = promptOf(call.prompt);
     const input = inputOf(contract.input, call.input);
-    const { kind, id } = partsOf(recipient);
-    // Never the run's own person, as a person: they never answer it.
-    if (kind === "person" && id === run.principal) {
-      throw callInvalid(
-        "recipients: The person the run acts for can't answer its decision."
-      );
-    }
+    requireNotPrincipal(recipient, run.principal);
     if (!(await covers(env, binding.deciders, recipient))) {
       throw callDenied();
     }
@@ -460,12 +467,14 @@ const answerSchema = z.strictObject({
 
 /**
  * Checks a test run's decision call as a real one is checked, sending
- * nothing: its recipient, prompt and input.
+ * nothing: its recipient (never `principal`, the person it acts for),
+ * prompt and input.
  */
 export const checkCandidateDecision = async (
   env: Env,
   bindings: ReadonlyMap<string, CandidateBinding>,
-  call: BuiltDecision
+  call: BuiltDecision,
+  principal: string
 ): Promise<void> => {
   const binding = bindings.get(call.binding);
   if (binding?.kind !== "decision") {
@@ -473,7 +482,7 @@ export const checkCandidateDecision = async (
   }
   const contract = await contractOf(env, binding);
   responseOf(contract);
-  recipientOf(call.recipients);
+  requireNotPrincipal(recipientOf(call.recipients), principal);
   promptOf(call.prompt);
   inputOf(contract.input, call.input);
 };

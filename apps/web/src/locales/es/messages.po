@@ -1462,7 +1462,7 @@ msgstr "Ya empezó un nuevo intento de este cambio, así que no se abandonó. La
 
 #: src/inbox/items.ts
 msgid "A run of {name} waits for your answer. Nothing more happens in it until someone answers, or until it stops waiting."
-msgstr "Una ejecución de {name} espera tu respuesta. No ocurre nada más en ella hasta que alguien responda o deje de esperar."
+msgstr "Una ejecución de {name} espera tu respuesta. No ocurre nada más en ella hasta que alguien responda o hasta que la ejecución deje de estar en espera."
 
 #: src/routes/decisions.$decision.tsx
 msgid "A run of a workflow asked for this answer."

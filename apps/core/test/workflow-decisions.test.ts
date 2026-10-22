@@ -1050,11 +1050,14 @@ describe("a test run of a JSON workflow's decision", () => {
       source: definitionOf(workflow.name, contract, approvalTasks),
       modules: {},
     });
-    const run = async (answer: unknown) => {
+    const run = async (
+      answer: unknown,
+      reviewer: string = crypto.randomUUID()
+    ) => {
       const { runId } = await startCandidateRun(env, owner, workflow.id, {
         revision: saved.revision,
         input: { amount: 5000 },
-        params: { reviewer: crypto.randomUUID() },
+        params: { reviewer },
         fixtures: { invoiceApproval: { output: answer } },
       });
       const ran = await vi.waitFor(
@@ -1091,6 +1094,11 @@ describe("a test run of a JSON workflow's decision", () => {
         by: "fixture",
         value: { comment: 7 },
       }),
+      // Asking the person it acts for, as a real run is refused.
+      ownReviewer: await run(
+        { answered: true, approved: true, by: "fixture", value: null },
+        owner.userId
+      ),
     }).toStrictEqual({
       problems: [],
       declined: {
@@ -1102,6 +1110,10 @@ describe("a test run of a JSON workflow's decision", () => {
         decisions: 0,
       },
       offContract: {
+        end: { status: "failed", code: "workflow.call_invalid" },
+        decisions: 0,
+      },
+      ownReviewer: {
         end: { status: "failed", code: "workflow.call_invalid" },
         decisions: 0,
       },

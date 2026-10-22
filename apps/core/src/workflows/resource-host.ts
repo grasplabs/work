@@ -3320,7 +3320,12 @@ export class ResourceRunHost
     };
     const { candidate } = this.#run.calling;
     if (candidate !== undefined) {
-      await checkCandidateDecision(this.#env, candidate, built);
+      await checkCandidateDecision(
+        this.#env,
+        candidate,
+        built,
+        this.#run.calling.principal
+      );
       attempt.until = Date.now();
       return attempt.until;
     }

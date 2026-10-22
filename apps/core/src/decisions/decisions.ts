@@ -974,9 +974,20 @@ export const waitingDecisions = async (
     .filter(({ id }) => answerable.has(id))
     .slice(0, maxWaitingDecisions)
     .map(({ id }) => id);
-  return await Promise.all(
-    ids.map(async (id) => await toView(env, await decisionWithRun(env, id)))
+  const views = await Promise.all(
+    ids.map(async (id) => {
+      try {
+        return [await toView(env, await decisionWithRun(env, id))];
+      } catch (error) {
+        // One gone since it was listed leaves the rest of the inbox.
+        if (decisionErrors.codeOf(error) === "decision.not_found") {
+          return [];
+        }
+        throw error;
+      }
+    })
   );
+  return views.flat();
 };
 
 /** Why an answer, or its confirmation, was refused, as audited. */
