@@ -11,6 +11,9 @@ export const relationshipsNs =
   "http://schemas.openxmlformats.org/package/2006/relationships";
 export const officeDocument =
   "http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument";
+/** A Strict package's main relationship (ISO/IEC 29500 Strict). */
+export const strictOfficeDocument =
+  "http://purl.oclc.org/ooxml/officeDocument/relationships/officeDocument";
 
 const encoder = new TextEncoder();
 
@@ -61,6 +64,16 @@ export const types = (...children: string[]): ZipEntry => ({
     `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\r\n<Types xmlns="${contentTypesNs}"><Default Extension="xml" ContentType="application/xml"/>${children.join("")}</Types>`
   ),
 });
+
+/** `[Content_Types].xml` as `xml`, exactly. */
+export const typesXml = (xml: string): ZipEntry => ({
+  name: "[Content_Types].xml",
+  content: encoder.encode(xml),
+});
+
+/** A `Default` of `extension` declaring `type`. */
+export const defaultOf = (extension: string, type: string): string =>
+  `<Default Extension="${extension}" ContentType="${type}"/>`;
 
 /** An `Override` of `part` declaring `type`. */
 export const override = (part: string, type: string): string =>
