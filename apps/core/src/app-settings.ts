@@ -12,6 +12,7 @@ import { appFor, toApp } from "./apps.ts";
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import { activeMember, organizationId } from "./auth/auth.ts";
 import { apps, teams } from "./db/core/schema.ts";
+import { indexAppNow } from "./knowledge/apps-collection.ts";
 import { requireNotStaff } from "./sharing.ts";
 import { openTo } from "./workflows/owners.ts";
 
@@ -131,7 +132,11 @@ const planAudience = async (
   row: Row,
   audience: AppMemberRef | null
 ): Promise<void> => {
-  if (audience?.type === row.audienceType && audience?.id === row.audienceId) {
+  // None is null on both sides: clearing what is clear changes nothing.
+  if (
+    (audience?.type ?? null) === row.audienceType &&
+    (audience?.id ?? null) === row.audienceId
+  ) {
     return;
   }
   if (audience !== null) {
@@ -201,6 +206,11 @@ export const updateApp = async (
   const [after] = updated;
   if (after === undefined) {
     throw appErrors.create("app.conflict");
+  }
+  // Its entry in the Apps collection carries its name and description;
+  // a failed indexing is left to the cron trigger, which finds it stale.
+  if (plan.set.name !== undefined || plan.set.description !== undefined) {
+    await indexAppNow(env, after.id);
   }
   return toApp(after);
 };
