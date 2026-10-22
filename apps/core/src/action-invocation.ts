@@ -20,10 +20,13 @@ import { platformLimits } from "@grasp-os/shared/platform-limits";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { submissionErrors } from "@grasp-os/shared/submissions";
 import { DurableObject } from "cloudflare:workers";
+import { eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 
 import { operationRoles } from "./app-access.ts";
 import { invokeAppAction, refusalOf } from "./app-functions.ts";
 import type { FunctionRequest } from "./app-functions.ts";
+import { actionInvocations } from "./db/core/schema.ts";
 import { appHost, inJurisdiction } from "./durable-objects.ts";
 import { requireNotRevoked } from "./release-runner.ts";
 
@@ -143,6 +146,12 @@ interface Started {
    * and the caller's, aren't revoked.
    */
   readonly version: number;
+  /**
+   * The object's own name (`invocationName`), which its inventory row
+   * (`action_invocations`) is under. Absent from records written before
+   * there was an inventory, which have no row.
+   */
+  readonly name?: string;
 }
 
 /**
@@ -470,18 +479,20 @@ export class ActionInvocation extends DurableObject<Env> {
           await this.ctx.storage.setAlarm(record.settledAt + streamRetentionMs);
           return;
         }
-        const { owner, inputHash, access, version } = record;
+        const { owner, inputHash, access, version, name } = record;
         this.ctx.storage.kv.put<Record>(recordKey, {
           owner,
           inputHash,
           access,
           version,
+          name,
           state: "expired",
         });
         await this.ctx.storage.setAlarm(now + streamTombstoneMs);
         return;
       }
       await this.ctx.storage.deleteAll();
+      await this.#unlist(record.name);
     });
   }
 
@@ -567,6 +578,25 @@ export class ActionInvocation extends DurableObject<Env> {
     return readerOf(live);
   }
 
+  /**
+   * Deletes the inventory row of the object named `name` once the object
+   * holds nothing: after, never before, so nothing it holds goes unlisted.
+   * A row that can't be deleted stays behind, naming an empty object,
+   * until the object next empties itself.
+   */
+  async #unlist(name: string | undefined): Promise<void> {
+    if (name === undefined) {
+      return;
+    }
+    try {
+      await drizzle(this.env.DB)
+        .delete(actionInvocations)
+        .where(eq(actionInvocations.name, name));
+    } catch {
+      // An export reads an empty object as no invocation.
+    }
+  }
+
   #record(): Record | undefined {
     return this.ctx.storage.kv.get<Record>(recordKey);
   }
@@ -607,12 +637,31 @@ export class ActionInvocation extends DurableObject<Env> {
         )
       );
     }
+    // Listed before anything is recorded here, so no object holds a run,
+    // a receipt or a tombstone its inventory doesn't name; one that can't
+    // be listed records nothing and gives back the place it held.
+    try {
+      await drizzle(this.env.DB)
+        .insert(actionInvocations)
+        .values({
+          name: spec.name,
+          personId: spec.by.userId,
+          appId: spec.app,
+          streaming: spec.streaming,
+          createdAt: new Date(),
+        })
+        .onConflictDoNothing();
+    } catch (error) {
+      await host.releaseInvocation(spec.by.userId, spec.name, spec.streaming);
+      return resultOf(refused(error));
+    }
     const runId = crypto.randomUUID();
     const record: Record = {
       owner: spec.by.userId,
       inputHash,
       access: spec.access,
       version: spec.call.reference.resourceVersion,
+      name: spec.name,
       state: "running",
       runId,
       deadline,
@@ -692,6 +741,7 @@ export class ActionInvocation extends DurableObject<Env> {
       live.idle = undefined;
       live.result = outcome.result;
       wake(live);
+      await this.#unlist(record.name);
       return;
     }
     await this.#settle(record, withReason(outcome.result, live.unfollowed));
@@ -706,12 +756,13 @@ export class ActionInvocation extends DurableObject<Env> {
     result: OperationResult
   ): Promise<void> {
     const settledAt = Date.now();
-    const { owner, inputHash, access, version } = record;
+    const { owner, inputHash, access, version, name } = record;
     this.ctx.storage.kv.put<Record>(recordKey, {
       owner,
       inputHash,
       access,
       version,
+      name,
       state: "settled",
       settledAt,
       result,
