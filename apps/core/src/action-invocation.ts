@@ -652,7 +652,11 @@ export class ActionInvocation extends DurableObject<Env> {
         })
         .onConflictDoNothing();
     } catch (error) {
-      await host.releaseInvocation(spec.by.userId, spec.name, spec.streaming);
+      try {
+        await host.releaseInvocation(spec.by.userId, spec.name, spec.streaming);
+      } catch {
+        // Its hold runs out by itself, by the run's deadline.
+      }
       return resultOf(refused(error));
     }
     const runId = crypto.randomUUID();
