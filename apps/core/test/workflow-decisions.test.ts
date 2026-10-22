@@ -611,6 +611,68 @@ describe("authority behind a JSON workflow's decision", () => {
   });
 });
 
+describe("a JSON workflow's decision in a loop", () => {
+  it("opens one decision per item, each answered on its own", async () => {
+    const { owner, reviewer, workflow } = await approvalWorkflow({
+      tasks: [
+        {
+          init: { set: "${ . }", export: { as: "${ {answers: []} }" } },
+        },
+        {
+          "each-invoice": {
+            for: { each: "amount", in: "${ [100, 200] }" },
+            do: [
+              {
+                ask: {
+                  ...requestReview,
+                  with: {
+                    ...requestReview.with,
+                    input: "${ {amount: $amount} }",
+                  },
+                  export: {
+                    as: "${ $context + {answers: ($context.answers + [.approved])} }",
+                  },
+                },
+              },
+            ],
+          },
+        },
+        {
+          finished: {
+            set: '${ {status: ($context.answers | map(tostring) | join(","))} }',
+          },
+        },
+      ],
+    });
+    const runId = await started(owner, workflow.id, 5000);
+    const first = await openedBy(runId);
+    await confirmedAnswer(reviewer, first, { approved: true });
+    const second = await vi.waitFor(
+      async () => {
+        const rows = await decisionsOf(runId);
+        const next = rows.find(({ id }) => id !== first);
+        if (next === undefined) {
+          throw new Error("No second decision yet");
+        }
+        return next.id;
+      },
+      { timeout: 20_000, interval: 100 }
+    );
+    await confirmedAnswer(reviewer, second, { approved: false });
+    const run = await ended(owner, workflow.id, runId);
+    const rows = await decisionsOf(runId);
+    expect({
+      end: endOf(run),
+      inputs: rows
+        .map(({ input }) => input)
+        .toSorted((a, b) => String(a).localeCompare(String(b))),
+    }).toStrictEqual({
+      end: { status: "completed", output: { status: "true,false" } },
+      inputs: ['{"amount":100}', '{"amount":200}'],
+    });
+  });
+});
+
 describe("durability of a JSON workflow's decision", () => {
   it("goes on with the answer once when its wake is lost and the run restarts, asking nothing twice", async () => {
     const { owner, reviewer, workflow } = await approvalWorkflow();

@@ -1693,9 +1693,9 @@ const lowerDecision = (
   const { indent } = place;
   emitter.lines.push(
     `${indent}{`,
-    `${indent}  const ${entered} = await flow.enter(${id}, { input: output, context }, ${planCode([...stages.enter, "until: true"])});`,
+    `${indent}  const ${entered} = await ${emitter.flow}.enter(${id}, { input: output, context }, ${planCode([...stages.enter, "until: true"])});`,
     `${indent}  if (!${entered}.skipped) {`,
-    `${indent}    ({ output, context } = await flow.call(${id}, { input: ${entered}.input, context }, ${planCode(stages.leave)}));`,
+    `${indent}    ({ output, context } = await ${emitter.flow}.call(${id}, { input: ${entered}.input, context }, ${planCode(stages.leave)}));`,
     `${indent}  }`,
     `${indent}}`
   );
