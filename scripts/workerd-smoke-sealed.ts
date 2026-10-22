@@ -16,7 +16,7 @@ import { appTokenPath, portableFunctionPath } from "@grasp-os/shared/portable";
 import { z } from "zod";
 
 import { localAdmin } from "../apps/core/test/sign-in-config.ts";
-import { cookieHeader, openSession } from "./core-session.ts";
+import { abortOf, cookieHeader, openSession } from "./core-session.ts";
 import type { CoreSite } from "./core-session.ts";
 
 /** The function the step calls, and what it is called with. */
@@ -68,15 +68,13 @@ const resultSchema = z.object({
 const failed = async (step: string, response: Response): Promise<Error> =>
   new Error(`${step} answered ${response.status}: ${await response.text()}`);
 
-/**
- * Seals an App on core at `site` and calls its function, then checks the
- * answer and that the supervisor ran it (`owners`, as the tap saw them).
- */
-export const sealedCallOnWorkerd = async (
+/** The step's body, its requests aborted and its session closed by `signal`. */
+const sealedCall = async (
   site: CoreSite,
-  owners: () => ReadonlySet<string>
+  owners: () => ReadonlySet<string>,
+  signal: AbortSignal
 ): Promise<void> => {
-  const admin = await openSession(site, localAdmin);
+  const admin = await openSession(site, localAdmin, { signal });
   try {
     const { id: app } = await admin.api.apps.create({ name: "Sums" });
     const { version } = await admin.api.apps.files.commit(
@@ -110,6 +108,7 @@ export const sealedCallOnWorkerd = async (
         cookie: cookieHeader(admin.cookie),
       },
       body: "{}",
+      signal,
     });
     if (!issued.ok) {
       throw await failed("The App token request", issued);
@@ -134,6 +133,7 @@ export const sealedCallOnWorkerd = async (
           },
           input: { n: called.n },
         }),
+        signal,
       }
     );
     if (!response.ok) {
@@ -154,5 +154,35 @@ export const sealedCallOnWorkerd = async (
     }
   } finally {
     admin.close();
+  }
+};
+
+/**
+ * Seals an App on core at `site` and calls its function, then checks the
+ * answer and that the supervisor ran it (`owners`, as the tap saw them).
+ * Rejects after `timeoutMs`: core may leave a request or an RPC call
+ * unanswered, and the run must still reach its cleanup. Its requests are
+ * aborted and its session closed then, so nothing keeps waiting on core.
+ */
+export const sealedCallOnWorkerd = async (
+  site: CoreSite,
+  owners: () => ReadonlySet<string>,
+  timeoutMs: number
+): Promise<void> => {
+  const deadline = new AbortController();
+  const timer = setTimeout(() => {
+    deadline.abort(
+      new Error(
+        `The sealed call didn't finish within ${timeoutMs} ms: core left a request unanswered`
+      )
+    );
+  }, timeoutMs);
+  try {
+    await Promise.race([
+      sealedCall(site, owners, deadline.signal),
+      abortOf(deadline.signal),
+    ]);
+  } finally {
+    clearTimeout(timer);
   }
 };
