@@ -6,6 +6,8 @@
  * are served before the Worker, behind Access at the edge only: they hold
  * nothing but the open-source app's code.
  *
+ * Grasp's admin can have a hostname of its own (src/admin-host.ts).
+ *
  * The cron imports newly published releases (src/releases/import.ts).
  * `ProvisionClient` is the Workflow that onboards a client
  * (src/provision/workflow.ts), `Rollout` the one that rolls a release
@@ -18,6 +20,7 @@ import handler from "@tanstack/react-start/server-entry";
 
 import { withAccess } from "./access.ts";
 import type { Staff } from "./access.ts";
+import { adminHostRedirect } from "./admin-host.ts";
 import { consoleDatabase } from "./db/act.ts";
 import { importReleases } from "./releases/import.ts";
 
@@ -33,11 +36,15 @@ declare module "@tanstack/react-start" {
   }
 }
 
+const withStaff = withAccess(
+  async (request, staff) => await handler.fetch(request, { context: { staff } })
+);
+
 export default {
-  fetch: withAccess(
-    async (request, staff) =>
-      await handler.fetch(request, { context: { staff } })
-  ),
+  // Past the Access check, a page may move to or from the admin's own
+  // hostname (src/admin-host.ts), so nothing about it shows to anyone else.
+  fetch: async (request: Request, env: Env) =>
+    await withStaff(request, env, () => adminHostRedirect(request, env)),
   scheduled: async (_controller, env) => {
     await importReleases(env.RELEASES, consoleDatabase(env.DB));
   },
