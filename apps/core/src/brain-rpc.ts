@@ -5,6 +5,7 @@ import type {
   BrainNotePage,
   Company,
   Connection,
+  Gap,
   Source,
   Stakeholder,
   Team,
@@ -29,8 +30,20 @@ import { drizzle } from "drizzle-orm/d1";
 import { organizationId } from "./auth/auth.ts";
 import { brainChanges } from "./brain-changes.ts";
 import type { SourceChange } from "./brain-changes.ts";
+import {
+  answerGap,
+  askAboutGap,
+  closeGap,
+  gapsWith,
+  redactGapAnswer,
+} from "./brain-gaps.ts";
 import { brainNotes } from "./brain-notes.ts";
-import { addBrainRecords, readBrainRecords } from "./brain-records.ts";
+import {
+  addBrainRecords,
+  datedInOrder,
+  readBrainRecords,
+} from "./brain-records.ts";
+import type { HeldRecords } from "./brain-records.ts";
 import { catalogEntries, personOf } from "./connections.ts";
 import { organizations } from "./db/core/schema.ts";
 import { mondayOf } from "./onboarding/rules.ts";
@@ -57,10 +70,11 @@ import type { SessionCheck } from "./session-check.ts";
 // | connections        | the catalog's offered entries and the person's           |
 // |                    | connections                                              |
 // | sources, tools,    | the Playbook's records (brain-records.ts), for everyone  |
-// | candidates,        | signed in, after the onboarding's                        |
-// | statements         |                                                          |
+// | candidates,        | signed in, after the onboarding's; a record's counts and |
+// | statements, teams, | stakeholders for an onboarding team join that team, for  |
+// | gaps               | whoever reads it; gaps with what became of them          |
 // | goals, workflows,  | nothing core can read holds them yet: empty              |
-// | gaps, landscape,   |                                                          |
+// | landscape,         |                                                          |
 // | policies           |                                                          |
 //
 // The onboarding (who works where, the kickoff, the interviews' progress,
@@ -571,6 +585,47 @@ const connectionsOf = async (
   return [...offered, ...unlisted];
 };
 
+/**
+ * The onboarding's teams, with what the Playbook added for each, then the
+ * Playbook's own. A value for a team the person can't see is left out.
+ */
+const teamsOf = (onboarding: Team[], records: HeldRecords): Team[] => {
+  const byId = new Map(onboarding.map((team) => [team.id, team]));
+  for (const { teamId, value } of records.teamCounts) {
+    byId.get(teamId)?.counts.push(value);
+  }
+  for (const { teamId, value } of records.stakeholders) {
+    byId.get(teamId)?.stakeholders.push(value);
+  }
+  for (const team of onboarding) {
+    datedInOrder(team);
+  }
+  return [...onboarding, ...records.teams];
+};
+
+/** The sources `team` names: where it was found, and each of its values. */
+const teamSources = ({ sourceId, counts, stakeholders }: Team): string[] => [
+  sourceId,
+  ...counts.map((count) => count.sourceId),
+  ...stakeholders.map((stakeholder) => stakeholder.sourceId),
+];
+
+/**
+ * The Playbook's gaps, with what became of each, as every member reads
+ * them: what `brain.read` serves, and what a chat's agent reads too.
+ */
+export const brainGaps = async (
+  env: Env,
+  // The one access point the brain page and an agent share: per-team gaps
+  // would be filtered here for both. Today every member reads every gap.
+  _person: Pick<Identity, "userId" | "role" | "teams">,
+  // The records `brain.read` loaded already, so it reads them once.
+  loaded?: HeldRecords
+): Promise<Gap[]> => {
+  const { gaps } = loaded ?? (await readBrainRecords(env));
+  return await gapsWith(env, gaps);
+};
+
 /** The brain's workspace, as `person` may read it. */
 export const readBrain = async (
   env: Env,
@@ -589,15 +644,17 @@ export const readBrain = async (
     people: facts?.view.roster?.people.length ?? 0,
   };
 
-  const teams = onboardingTeams(facts);
-  // A member reads the onboarding's sources only as the records naming
-  // them need: when each came in, so a fact shows where it came from.
+  const onboarding = onboardingTeams(facts);
+  const teams = teamsOf(onboarding, records);
+  // A member reads the onboarding's sources only as the records it reads
+  // name them: when each came in, so a fact shows where it came from.
   const named = new Set(
-    [...records.tools, ...records.statements].flatMap(({ sourceId }) =>
-      sourceId === kickoffSourceId || sourceId === rosterSourceId
-        ? [sourceId]
-        : []
-    )
+    [
+      ...[...records.tools, ...records.statements, ...records.gaps].map(
+        ({ sourceId }) => sourceId
+      ),
+      ...teams.flatMap(teamSources),
+    ].filter((id) => id === kickoffSourceId || id === rosterSourceId)
   );
   const sources =
     facts === null
@@ -609,11 +666,11 @@ export const readBrain = async (
     vision: visionOf(facts),
     goals: [],
     teams,
-    tools: [...documentTools(facts, teamsByName(teams)), ...records.tools],
+    tools: [...documentTools(facts, teamsByName(onboarding)), ...records.tools],
     sources: [...sources, ...records.sources],
     statements: records.statements,
     candidates: records.candidates,
-    gaps: [],
+    gaps: await brainGaps(env, person, records),
     workflows: [],
     connections,
     landscape: [],
@@ -668,6 +725,34 @@ export class BrainRpc extends CoreRpcTarget implements BrainApi {
     return await withPerson(
       this.#check,
       async (person) => await addBrainRecords(this.#env, person, records)
+    );
+  }
+
+  async askAboutGap(gapId: string): Promise<Gap> {
+    return await withPerson(
+      this.#check,
+      async (person) => await askAboutGap(this.#env, person, gapId)
+    );
+  }
+
+  async answerGap(gapId: string, answer: string): Promise<Gap> {
+    return await withPerson(
+      this.#check,
+      async (person) => await answerGap(this.#env, person, gapId, answer)
+    );
+  }
+
+  async redactGapAnswer(gapId: string): Promise<Gap> {
+    return await withPerson(
+      this.#check,
+      async (person) => await redactGapAnswer(this.#env, person, gapId)
+    );
+  }
+
+  async closeGap(gapId: string): Promise<Gap> {
+    return await withPerson(
+      this.#check,
+      async (person) => await closeGap(this.#env, person, gapId)
     );
   }
 }

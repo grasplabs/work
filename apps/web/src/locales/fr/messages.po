@@ -1894,6 +1894,10 @@ msgstr "Une autre version de ce domaine est devenue actuelle depuis la lecture d
 msgid "Answer"
 msgstr "Réponse"
 
+#: src/inbox/item-detail.tsx
+msgid "Answer in the brain"
+msgstr "Répondre dans le cerveau"
+
 #. Something that has not happened yet, on a timeline
 #: src/brain/brain.ts
 msgid "Answered"
@@ -11564,6 +11568,10 @@ msgstr "Vous me montrez qui est qui, où sont les documents et quels outils les 
 #: src/connections/connect-dialog.tsx
 msgid "You sign in on {app}’s own page."
 msgstr "Vous vous connectez sur la page de {app}."
+
+#: src/inbox/items.ts
+msgid "You were asked this as the {owner}. Answer it in the brain: everyone in the company reads the answer, with your name."
+msgstr "On vous a posé cette question en tant que {owner}. Répondez-y dans le cerveau : toute l’entreprise lit la réponse, avec votre nom."
 
 #: src/routes/guest.tsx
 msgid "You:"

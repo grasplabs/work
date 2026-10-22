@@ -754,6 +754,12 @@ export interface PurgePlan {
    */
   inLongerWords: number;
   /**
+   * Answers to the brain's gaps a term is removed from (`content`), every
+   * one holding a term, whatever documents are named. Always 0 for
+   * `personal`, which forgets the person as an answerer instead.
+   */
+  gapAnswers: number;
+  /**
    * Originals of uploaded files it deletes (and the uploads it forgets):
    * those of the collection (`personal`), or every one uploaded as a
    * document named (`content`), whether or not a term is in its text, as
@@ -779,7 +785,8 @@ export interface PurgeResult {
    * longer one (which the plan counted, `inLongerWords`), a form spelled
    * otherwise that folds to the same ("Rene" for "René"), or a term of
    * several words joined otherwise ("tom-visser" for "tom visser").
-   * Absent for `personal`.
+   * Gap answers still holding a term count too: one given after the
+   * purge read them, left to a purge again. Absent for `personal`.
    */
   stillFound?: number;
 }

@@ -1,11 +1,16 @@
 import { actorOf } from "@grasp-os/shared/audit";
 import type {
   Candidate,
+  Gap,
   Source,
+  Stakeholder,
   Statement,
+  Team,
+  TeamCount,
   Tool,
 } from "@grasp-os/shared/brain";
 import {
+  brainGapSubjects,
   brainRecordErrors,
   brainRecordSchema,
   brainRecordsMaxPerType,
@@ -88,21 +93,52 @@ const heldOf = async (
   return new Map(rows.map(({ id, type, body }) => [id, { type, body }]));
 };
 
+/**
+ * What a reference must be: a record of a type, or a note (a record of
+ * one of `brainGapSubjects`), which is what a gap may be about.
+ */
+type ReferenceType = BrainRecordType | "note";
+
+const noteTypes: ReadonlySet<string> = new Set(brainGapSubjects);
+
+/** One thing a record names: a team may also be the onboarding's. */
+interface Reference {
+  type: ReferenceType;
+  id: string;
+}
+
+const teamsOf = (ids: readonly string[]): Reference[] =>
+  ids.map((id) => ({ type: "team", id }));
+
 /** What each record names, by the type it must be. */
-const referencesOf = (
-  record: BrainRecord
-): { type: BrainRecordType; id: string }[] => {
+const referencesOf = (record: BrainRecord): Reference[] => {
   switch (record.type) {
-    case "source":
     case "candidate": {
       return [];
     }
-    case "tool": {
+    case "source": {
+      return teamsOf(record.teamIds);
+    }
+    case "team": {
       return [{ type: "source", id: record.sourceId }];
+    }
+    case "teamCount":
+    case "stakeholder": {
+      return [
+        { type: "source", id: record.sourceId },
+        { type: "team", id: record.teamId },
+      ];
+    }
+    case "tool": {
+      return [
+        { type: "source", id: record.sourceId },
+        ...teamsOf(record.teamIds),
+      ];
     }
     case "statement": {
       return [
         { type: "source", id: record.sourceId },
+        ...teamsOf(record.teamIds),
         ...record.toolIds.map((id) => ({ type: "tool" as const, id })),
         ...(record.candidateId === undefined
           ? []
@@ -112,27 +148,51 @@ const referencesOf = (
           : [{ type: "statement" as const, id: record.followsUp }]),
       ];
     }
+    case "gap": {
+      return [
+        { type: "source", id: record.sourceId },
+        ...record.about.map((id) => ({ type: "note" as const, id })),
+      ];
+    }
     default: {
       return [];
     }
   }
 };
 
+/** What the onboarding gives the brain now, that a record may name. */
+interface OnboardingHeld {
+  /** Its sources: the kickoff once brought in, the staff list once saved. */
+  sources: ReadonlySet<string>;
+  /**
+   * Its teams a value may be for: the roster's, by the ids the admin gave
+   * them. Never a kickoff-only team: its id is its place in the reading
+   * (`team.kickoff-<n>`), which reading the kickoff again moves.
+   */
+  teams: ReadonlySet<string>;
+}
+
+const nothingOnboarded: OnboardingHeld = {
+  sources: new Set(),
+  teams: new Set(),
+};
+
 /**
- * The onboarding's sources the brain has now (brain-rpc.ts names them):
- * the kickoff once it was brought in, the staff list once it was saved.
+ * What the onboarding gives the brain, read only when a record may name
+ * it: a team, or one of its source ids.
  */
-const onboardingSourcesHeld = async (
+const onboardingHeld = async (
   env: Env,
   records: readonly BrainRecord[]
-): Promise<Set<string>> => {
+): Promise<OnboardingHeld> => {
   const named = records.some((record) =>
     referencesOf(record).some(
-      ({ type, id }) => type === "source" && onboardingSourceIds.has(id)
+      ({ type, id }) =>
+        type === "team" || (type === "source" && onboardingSourceIds.has(id))
     )
   );
   if (!named) {
-    return new Set();
+    return nothingOnboarded;
   }
   const store = onboardingStore(env);
   const [kickoff, view, rosterSavedAt] = await Promise.all([
@@ -140,13 +200,26 @@ const onboardingSourcesHeld = async (
     store.view(),
     store.rosterSavedAt(),
   ]);
-  return new Set([
-    ...(kickoff.transcript === null ? [] : ["src-kickoff"]),
-    ...(view.roster === null || rosterSavedAt === null ? [] : ["src-roster"]),
-  ]);
+  const rosterTeams = view.roster?.teams ?? [];
+  return {
+    sources: new Set([
+      ...(kickoff.transcript === null ? [] : ["src-kickoff"]),
+      ...(view.roster === null || rosterSavedAt === null ? [] : ["src-roster"]),
+    ]),
+    teams: new Set(rosterTeams.map(({ id }) => `team-${id}`)),
+  };
 };
 
-const types = ["source", "tool", "candidate", "statement"] as const;
+const types = [
+  "source",
+  "tool",
+  "candidate",
+  "statement",
+  "team",
+  "teamCount",
+  "stakeholder",
+  "gap",
+] as const;
 
 /** Rows one insert writes: four columns each, within D1's 100 bound parameters. */
 const rowsPerInsert = 20;
@@ -195,9 +268,18 @@ const heldFor = async (
 const freshOf = (
   records: readonly BrainRecord[],
   held: Map<string, Held>,
-  onboarding: ReadonlySet<string>
+  onboarding: OnboardingHeld
 ): BrainRecord[] => {
-  const before = new Set<string>();
+  /** The records the call adds before the one being checked, by id. */
+  const before = new Map<string, BrainRecordType>();
+  /** Whether `reference` is a record of its type, in the call or held. */
+  const isRecord = ({ type, id }: Reference): boolean => {
+    const found = before.get(id) ?? held.get(id)?.type;
+    return (
+      found !== undefined &&
+      (type === "note" ? noteTypes.has(found) : found === type)
+    );
+  };
   const fresh: BrainRecord[] = [];
   for (const record of records) {
     const stored = held.get(record.id);
@@ -210,16 +292,16 @@ const freshOf = (
     }
     for (const reference of referencesOf(record)) {
       const known =
-        before.has(keyOf(reference)) ||
-        held.get(reference.id)?.type === reference.type ||
-        (reference.type === "source" && onboarding.has(reference.id));
+        isRecord(reference) ||
+        (reference.type === "source" && onboarding.sources.has(reference.id)) ||
+        (reference.type === "team" && onboarding.teams.has(reference.id));
       if (!known) {
         throw brainRecordErrors.create("brain.record_missing", {
           issues: [`${keyOf(record)}: no ${keyOf(reference)} before it`],
         });
       }
     }
-    before.add(keyOf(record));
+    before.set(record.id, record.type);
   }
   return fresh;
 };
@@ -313,7 +395,7 @@ export const addBrainRecords = async (
   // GRA-328: a record's free text (a statement's, a gap's question)
   // is canonical Brain storage, so it should pass the knowledge admission gate
   // here, before anything is kept; that gate is not built yet.
-  const onboarding = await onboardingSourcesHeld(env, records);
+  const onboarding = await onboardingHeld(env, records);
   // Another call can add some of these ids between the read and the
   // write: the unique index then refuses the whole batch, and what is
   // still fresh is read again and written once more.
@@ -338,13 +420,104 @@ export const addBrainRecords = async (
   }
 };
 
+/** A dated value of a team, by the team it is for. */
+interface ForTeam<T> {
+  teamId: string;
+  value: T;
+}
+
 /** The Playbook's records, as the brain reads them, oldest first. */
 export interface HeldRecords {
   sources: Source[];
   tools: Tool[];
   candidates: Candidate[];
   statements: Statement[];
+  /** Its team records, each with the counts and stakeholders added for it. */
+  teams: Team[];
+  /** Counts added for teams that aren't records: the onboarding's. */
+  teamCounts: ForTeam<TeamCount>[];
+  /** Stakeholders added for teams that aren't records: the onboarding's. */
+  stakeholders: ForTeam<Stakeholder>[];
+  gaps: GapRecord[];
 }
+
+/** A gap as added, before what became of it. */
+export type GapRecord = Omit<
+  Gap,
+  "askedAt" | "closedAt" | "answer" | "answeredBy"
+>;
+
+/** Puts `record` where the brain reads it, as the brain's own type. */
+const collect = (held: HeldRecords, record: BrainRecord): void => {
+  switch (record.type) {
+    case "source": {
+      const { type: _source, ...source } = record;
+      held.sources.push(source);
+      break;
+    }
+    case "tool": {
+      const { type: _tool, ...tool } = record;
+      held.tools.push(tool);
+      break;
+    }
+    case "candidate": {
+      const { type: _candidate, ...candidate } = record;
+      held.candidates.push(candidate);
+      break;
+    }
+    case "statement": {
+      const { type: _statement, ...statement } = record;
+      held.statements.push(statement);
+      break;
+    }
+    case "team": {
+      const { id, name, sourceId } = record;
+      held.teams.push({ id, name, sourceId, counts: [], stakeholders: [] });
+      break;
+    }
+    case "teamCount": {
+      const { teamId, sourceId, date, people, roles } = record;
+      held.teamCounts.push({
+        teamId,
+        value: {
+          sourceId,
+          date,
+          people,
+          ...(roles === undefined ? {} : { roles }),
+        },
+      });
+      break;
+    }
+    case "stakeholder": {
+      const { teamId, sourceId, date, role } = record;
+      held.stakeholders.push({ teamId, value: { sourceId, date, role } });
+      break;
+    }
+    case "gap": {
+      const { type: _gap, ...gap } = record;
+      held.gaps.push(gap);
+      break;
+    }
+    default: {
+      break;
+    }
+  }
+};
+
+/** Oldest date first: a value added later for an earlier day goes before. */
+const byDate = <T extends { date: string }>(values: T[]): T[] =>
+  // A stable sort: values of one day keep the order they were added in,
+  // so the one added last counts, as the brain reads a history.
+  values.toSorted((a, b) => a.date.localeCompare(b.date));
+
+/**
+ * Puts `team`'s counts and stakeholders in date order, which is how the
+ * brain reads them (the last one counts), whatever order they came in.
+ */
+export const datedInOrder = (team: Team): void => {
+  team.counts = byDate(team.counts);
+  team.stakeholders = byDate(team.stakeholders);
+};
 
 /** Every record core keeps, in the order they were added. */
 export const readBrainRecords = async (env: Env): Promise<HeldRecords> => {
@@ -353,6 +526,10 @@ export const readBrainRecords = async (env: Env): Promise<HeldRecords> => {
     tools: [],
     candidates: [],
     statements: [],
+    teams: [],
+    teamCounts: [],
+    stakeholders: [],
+    gaps: [],
   };
   const rows = await drizzle(env.DB)
     .select({ body: brainRecords.body })
@@ -368,31 +545,21 @@ export const readBrainRecords = async (env: Env): Promise<HeldRecords> => {
       log.error("brain.record_unreadable", errorFields(error));
       continue;
     }
-    switch (record.type) {
-      case "source": {
-        const { type: _source, ...source } = record;
-        held.sources.push(source);
-        break;
-      }
-      case "tool": {
-        const { type: _tool, ...tool } = record;
-        held.tools.push(tool);
-        break;
-      }
-      case "candidate": {
-        const { type: _candidate, ...candidate } = record;
-        held.candidates.push(candidate);
-        break;
-      }
-      case "statement": {
-        const { type: _statement, ...statement } = record;
-        held.statements.push(statement);
-        break;
-      }
-      default: {
-        break;
-      }
-    }
+    collect(held, record);
+  }
+  // A team's counts and stakeholders go with it when it is a record; the
+  // rest are for the onboarding's teams, which brain-rpc.ts gives them to.
+  const teams = new Map(held.teams.map((team) => [team.id, team]));
+  held.teamCounts = held.teamCounts.filter(({ teamId, value }) => {
+    teams.get(teamId)?.counts.push(value);
+    return !teams.has(teamId);
+  });
+  held.stakeholders = held.stakeholders.filter(({ teamId, value }) => {
+    teams.get(teamId)?.stakeholders.push(value);
+    return !teams.has(teamId);
+  });
+  for (const team of held.teams) {
+    datedInOrder(team);
   }
   return held;
 };

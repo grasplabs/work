@@ -24,6 +24,11 @@ import type { DrizzleD1Database } from "drizzle-orm/d1";
 import type { z } from "zod";
 
 import { auditedBatch, outboxed } from "../audit-outbox.ts";
+import {
+  countGapAnswers,
+  eraseGapAnswerer,
+  rewriteGapAnswers,
+} from "../brain-gaps.ts";
 import { inList } from "../db/d1.ts";
 import {
   brainPayloads,
@@ -91,6 +96,13 @@ import { cleanUpOriginals, forgetUploads } from "./uploads.ts";
 //   saved as the next version, which makes its sections, links, search
 //   rows and the document's title and description again, and fails for
 //   anyone who saved meanwhile from text not yet purged.
+//
+// Both reach the brain's gap answers too (brain-gaps.ts): a personal
+// purge forgets the person as anyone's answerer, a content purge rewrites
+// every answer holding a term, whatever documents it names, before its
+// documents. Its plan counts them (`gapAnswers`), and its check counts
+// one still holding a term (answered after the rewrite read it) with the
+// documents a term still finds (`stillFound`).
 //
 // Both delete the originals of the files uploaded as the documents they
 // purge (uploads.ts), and forget those uploads: an original holds the data
@@ -401,6 +413,8 @@ const purgePersonal = async (
   await cleanSearchIndex(async () => {
     await eraseCollectionFromSearchIndex(db, plan, { secure, id: purgeId });
   });
+  // The brain's gaps keep who answered them: never the person erased.
+  await eraseGapAnswerer(env, person, input.userId);
   return { purgeId, ...counts };
 };
 
@@ -617,6 +631,10 @@ const leftIn = (texts: (string | null)[], matcher: Matcher): number => {
   }
   return total;
 };
+
+/** Whether a content purge would remove a term from `text`. */
+const holdsTerm = (text: string, matcher: Matcher): boolean =>
+  without(text, matcher) !== text;
 
 /** How often a term is removed from `text`, in every pass (`without`). */
 const removalsIn = (text: string, matcher: Matcher): number => {
@@ -1419,6 +1437,10 @@ const purgeContent = async (
   ]);
   const done: Counts[] = [];
   try {
+    // The brain's gap answers hold people's words too: every one is
+    // rewritten, whatever documents the purge names. First, so a document
+    // whose purge fails doesn't leave them holding a term.
+    await rewriteGapAnswers(env, person, (text) => without(text, matcher));
     for (const one of named) {
       // oxlint-disable-next-line no-await-in-loop -- one document at a time, to bound memory
       done.push(await purgeDocument(env, db, person, one, matcher));
@@ -1439,13 +1461,22 @@ const purgeContent = async (
       id: purgeId,
     });
   });
-  const stillFound = await stillFoundIn(
+  const inDocuments = await stillFoundIn(
     db,
     input.terms,
     named.map(({ document }) => document.id)
   );
+  // An answer given after the rewrite read it is left to a purge again.
+  const gapAnswers = await countGapAnswers(env, (text) =>
+    holdsTerm(text, matcher)
+  );
+  const stillFound = inDocuments + gapAnswers;
   if (stillFound > 0) {
-    log.warn("knowledge.purge_still_found", { purgeId, documents: stillFound });
+    log.warn("knowledge.purge_still_found", {
+      purgeId,
+      documents: inDocuments,
+      gapAnswers,
+    });
   }
   return { purgeId, ...sum(done), stillFound };
 };
@@ -1469,6 +1500,7 @@ export const preparePurge = async (
   // A personal purge deletes whole documents: nothing is left in a word.
   let removed = 0;
   let left = 0;
+  let gapAnswers = 0;
   if (parsed.type === "personal") {
     ({ counts, ...scope } = await personalScope(db, parsed));
     originals = await originalsOf(
@@ -1482,12 +1514,9 @@ export const preparePurge = async (
       or(...named.map(({ document }) => uploadsNamed(document)))
     );
     scope = { documentIds: named.map(({ document }) => document.id) };
-    ({ counts, removed, left } = await contentCounts(
-      env,
-      db,
-      named,
-      matcherOf(parsed.terms, { countLeft: true })
-    ));
+    const matcher = matcherOf(parsed.terms, { countLeft: true });
+    ({ counts, removed, left } = await contentCounts(env, db, named, matcher));
+    gapAnswers = await countGapAnswers(env, (text) => holdsTerm(text, matcher));
   }
   await auditedBatch(env, db, [
     outboxed(
@@ -1495,7 +1524,7 @@ export const preparePurge = async (
       purgeEntry(person, "knowledge.purge.prepared", parsed, scope, {
         ...counts,
         ...(parsed.type === "content"
-          ? { occurrences: removed, inLongerWords: left }
+          ? { occurrences: removed, inLongerWords: left, gapAnswers }
           : {}),
       })
     ),
@@ -1504,6 +1533,7 @@ export const preparePurge = async (
     ...counts,
     occurrences: removed,
     inLongerWords: left,
+    gapAnswers,
     originals,
     ...(await tokenFor(env, person, parsed)),
   };
