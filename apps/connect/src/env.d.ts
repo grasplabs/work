@@ -28,6 +28,12 @@ interface __BaseEnv_Env {
    */
   MICROSOFT_DIRECTORY_CLIENT_ID?: string;
   MICROSOFT_DIRECTORY_CLIENT_SECRET?: string;
+  /**
+   * Grasp's multi-tenant Entra app for the documents' read-only admin
+   * connection (src/providers.ts), apart for the same reason.
+   */
+  MICROSOFT_DOCUMENTS_CLIENT_ID?: string;
+  MICROSOFT_DOCUMENTS_CLIENT_SECRET?: string;
   /** Grasp's Google OAuth client for connections (src/providers.ts). */
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
@@ -38,6 +44,12 @@ interface __BaseEnv_Env {
    */
   GOOGLE_DIRECTORY_CLIENT_ID?: string;
   GOOGLE_DIRECTORY_CLIENT_SECRET?: string;
+  /**
+   * Grasp's Google OAuth client for the documents' read-only admin
+   * connection (src/providers.ts), apart for the same reason.
+   */
+  GOOGLE_DOCUMENTS_CLIENT_ID?: string;
+  GOOGLE_DOCUMENTS_CLIENT_SECRET?: string;
   /**
    * Grasp's OAuth apps at the apps that aren't suites (src/providers.ts),
    * as JSON: `{"<provider>": {"id": "...", "secret": "..."}}`, by the

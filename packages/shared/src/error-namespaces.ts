@@ -52,6 +52,7 @@ export const familyNamespaces = [
   "organization",
   "package",
   "permission",
+  "place",
   "query",
   "request",
   "resource",

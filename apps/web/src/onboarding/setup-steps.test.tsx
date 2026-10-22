@@ -40,6 +40,7 @@ const listening = (paused: boolean): string => {
     },
     directory: null,
     suites: [],
+    places: null,
   };
   return renderToStaticMarkup(
     <I18nProvider i18n={i18n}>

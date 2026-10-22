@@ -15,6 +15,7 @@ import {
   connectClient,
   connectProvidersScript,
   directoryClient,
+  documentsClient,
   landscapeClient,
 } from "./test/connect-providers.ts";
 import { testSignIn } from "./test/sign-in-config.ts";
@@ -280,6 +281,8 @@ export const coreProject = (
                 MICROSOFT_LANDSCAPE_CLIENT_SECRET: landscapeClient.secret,
                 MICROSOFT_DIRECTORY_CLIENT_ID: directoryClient.id,
                 MICROSOFT_DIRECTORY_CLIENT_SECRET: directoryClient.secret,
+                MICROSOFT_DOCUMENTS_CLIENT_ID: documentsClient.id,
+                MICROSOFT_DOCUMENTS_CLIENT_SECRET: documentsClient.secret,
                 COMPOSIO_API_KEY: testComposioKey,
               },
               d1Databases: { DB: "grasp-os-connect" },

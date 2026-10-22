@@ -399,7 +399,7 @@ export const Route = createFileRoute("/setup")({
       // oxlint-disable-next-line typescript/only-throw-error -- the router redirects on a thrown redirect
       throw redirect({ to: "/", replace: true });
     }
-    // The suites people sign in with here: their directories can be connected.
+    // The suites people sign in with here: their directories, and where their documents live, can be connected.
     const suites = directorySuites.filter((suite) =>
       signInOptions.some(({ providerId }) => providerId === suite)
     );
@@ -407,13 +407,14 @@ export const Route = createFileRoute("/setup")({
   },
   loader: async ({ context: { core } }) =>
     await loadFromCore(core, async (session) => {
-      const [view, documents, gate, directory] = await Promise.all([
+      const [view, documents, gate, directory, places] = await Promise.all([
         session.onboarding.view(),
         session.onboarding.documents(),
         session.onboardingGate.view(),
         session.onboarding.directory(),
+        session.onboarding.documentPlaces(),
       ]);
-      return { view, documents, gate, directory };
+      return { view, documents, gate, directory, places };
     }),
   component: Setup,
 });

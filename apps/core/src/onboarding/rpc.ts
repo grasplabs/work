@@ -5,6 +5,14 @@ import type {
   DirectorySuite,
   OnboardingDirectory,
 } from "@grasp-os/shared/directory";
+import type {
+  DocumentPlace,
+  OnboardingPlaces,
+  PlaceItem,
+  PlaceItemsInput,
+  PlacesSuite,
+  SharePlaceFileInput,
+} from "@grasp-os/shared/document-places";
 import {
   onboardingErrors,
   planSchema,
@@ -39,6 +47,13 @@ import {
   onboardingDirectory,
   readOnboardingDirectory,
 } from "./directory.ts";
+import {
+  connectPlaces,
+  listPlaces,
+  onboardingPlaces,
+  placeItems,
+  sharePlaceFile,
+} from "./document-places.ts";
 import { shareDocument } from "./documents.ts";
 import { gateView } from "./gate.ts";
 import { mondayOf } from "./rules.ts";
@@ -55,7 +70,8 @@ import { summaryOf } from "./summary.ts";
 // dashboard: the plan's first week and the stage, and nothing of the plan
 // or the roster past them. Who works where can also come from the
 // organization's directory, connected here and read for the admin's
-// browser to make the roster of (directory.ts).
+// browser to make the roster of (directory.ts); and documents from where
+// they live, picked in the admin's browser (document-places.ts).
 
 /** The admin's answer to a document's question. */
 const answerSchema = z.strictObject({
@@ -138,6 +154,48 @@ export class OnboardingRpc extends CoreRpcTarget implements OnboardingApi {
     return await withPerson(
       this.#check,
       async (person) => await readOnboardingDirectory(this.#env, person)
+    );
+  }
+
+  async documentPlaces(): Promise<OnboardingPlaces | null> {
+    return await withPerson(
+      this.#check,
+      async (person) => await onboardingPlaces(this.#env, person)
+    );
+  }
+
+  async connectDocumentPlaces(
+    suite: PlacesSuite,
+    returnTo: string
+  ): Promise<{ url: string }> {
+    return await withPerson(
+      this.#check,
+      async (person) => await connectPlaces(this.#env, person, suite, returnTo)
+    );
+  }
+
+  async listDocumentPlaces(): Promise<DocumentPlace[]> {
+    return await withPerson(
+      this.#check,
+      async (person) => await listPlaces(this.#env, person)
+    );
+  }
+
+  async placeItems(
+    input: PlaceItemsInput
+  ): Promise<{ items: PlaceItem[]; next: string | null }> {
+    return await withPerson(
+      this.#check,
+      async (person) => await placeItems(this.#env, person, input)
+    );
+  }
+
+  async sharePlaceFile(
+    input: SharePlaceFileInput
+  ): Promise<OnboardingDocument> {
+    return await withPerson(
+      this.#check,
+      async (person) => await sharePlaceFile(this.#env, person, input)
     );
   }
 

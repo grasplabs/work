@@ -3,7 +3,6 @@ import { onboardingDocumentsCollection } from "@grasp-os/shared/onboarding-docum
 import type { SessionApi } from "@grasp-os/shared/rpc";
 import type { Upload } from "@grasp-os/shared/uploads";
 import { env } from "cloudflare:workers";
-import { zipSync } from "fflate";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { onboardingStore } from "../src/onboarding/store.ts";
@@ -11,6 +10,7 @@ import { fakeGateway } from "./ai-gateway.ts";
 import type { GatewayReply } from "./ai-gateway.ts";
 import { mockIdp } from "./idp.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
+import { wordFile } from "./word-file.ts";
 
 // A document the company's admin shares in the onboarding (GRA-298): kept
 // in Knowledge, in a collection only admins read, and read at once through
@@ -24,24 +24,6 @@ import { outcome, signedInApi } from "./sign-in.ts";
 // - An old Office file taken, or failing without a way out.
 
 const idp = mockIdp();
-
-/** A Word file holding `paragraphs`. */
-const wordFile = (paragraphs: string[]): Uint8Array<ArrayBuffer> => {
-  const encoder = new TextEncoder();
-  const body = paragraphs
-    .map((text) => `<w:p><w:r><w:t>${text}</w:t></w:r></w:p>`)
-    .join("");
-  return Uint8Array.from(
-    zipSync({
-      "word/document.xml": encoder.encode(
-        `<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${body}</w:body></w:document>`
-      ),
-      "word/styles.xml": encoder.encode(
-        `<?xml version="1.0"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"/>`
-      ),
-    })
-  );
-};
 
 /** A 2019 draft of how claims are handled. */
 const draft = wordFile([

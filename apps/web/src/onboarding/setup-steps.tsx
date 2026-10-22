@@ -3,6 +3,11 @@ import type {
   DirectorySuite,
   OnboardingDirectory,
 } from "@grasp-os/shared/directory";
+import { placeErrors } from "@grasp-os/shared/document-places";
+import type {
+  OnboardingPlaces,
+  PlacesSuite,
+} from "@grasp-os/shared/document-places";
 import {
   minTalkedShown,
   onboardingPeopleMax,
@@ -78,6 +83,8 @@ import { About } from "./about-story.tsx";
 import { DocumentDrop } from "./document-drop.tsx";
 import type { DocumentRow } from "./document-drop.tsx";
 import { LanguageChoice } from "./language-choice.tsx";
+import { PlacePicker } from "./place-picker.tsx";
+import type { PickedFile } from "./place-picker.tsx";
 import { SendPlanForm, useSendWords } from "./send-plan-form.tsx";
 import {
   choiceHolds,
@@ -140,8 +147,10 @@ export interface SetupData {
   gate: GateView;
   /** The directory connected for the onboarding; null before one is. */
   directory: OnboardingDirectory | null;
-  /** The suites this deployment signs in with, whose directory can be connected. */
+  /** The suites this deployment signs in with, whose directory and documents can be connected. */
   suites: DirectorySuite[];
+  /** Where the documents live, connected for the onboarding; null before it is. */
+  places: OnboardingPlaces | null;
 }
 
 export interface StepProps {
@@ -843,10 +852,82 @@ const Sources = (props: StepProps) => {
 const readMs = 4500;
 const readStaggerMs = 450;
 
-/** A document being read, or refused, on this visit. */
+/** A document being read, or refused, on this visit: a file dropped, or one picked where it lives. */
 interface Pending extends DocumentRow {
-  file: File;
+  from: File | PickedFile;
 }
+
+/** Where connecting the places documents live comes back to: this step. */
+const documentsStep = "/setup?step=documents";
+
+/**
+ * Starts connecting the places of `suite`: the browser goes to its
+ * sign-in, and comes back to this step. False if it could not start.
+ */
+const startPlaces = async (
+  core: ReturnType<typeof useCore>,
+  suite: PlacesSuite
+): Promise<boolean> => {
+  try {
+    const { url } = await core.withSession(
+      async (session) =>
+        await session.onboarding.connectDocumentPlaces(suite, documentsStep)
+    );
+    window.location.assign(url);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/** Shares a file picked where it lives: core fetches it and reads it at once, as a dropped one. */
+const sharePicked = async (
+  core: ReturnType<typeof useCore>,
+  { place, item }: PickedFile,
+  locale: InterviewLocale
+): Promise<{ shared: true } | { shared: false; error: unknown }> => {
+  try {
+    await core.withSession(
+      async (session) =>
+        await session.onboarding.sharePlaceFile({ locale, place, item })
+    );
+    return { shared: true };
+  } catch (error) {
+    return { shared: false, error };
+  }
+};
+
+/** The button that picks documents where they live, by suite. */
+const PlaceButton = ({
+  suite,
+  waiting,
+  disabled,
+  onChoose,
+}: {
+  suite: PlacesSuite;
+  waiting: boolean;
+  disabled: boolean;
+  onChoose: () => void;
+}) => {
+  const { t } = useLingui();
+  return (
+    <Button disabled={disabled} onClick={onChoose} variant="outline">
+      {waiting ? (
+        <Spinner data-icon="inline-start" />
+      ) : (
+        <img
+          alt=""
+          className="size-4"
+          data-icon="inline-start"
+          src={suiteLogos[suite]}
+        />
+      )}
+      {suite === "microsoft"
+        ? t`Choose from SharePoint or OneDrive`
+        : t`Choose from Google Drive`}
+    </Button>
+  );
+};
 
 /** Why core could not read a document, as its row says it. */
 const useProblemOf = (): ((error: unknown) => string) => {
@@ -858,6 +939,13 @@ const useProblemOf = (): ((error: unknown) => string) => {
     const code = documentErrors.codeOf(error);
     if (code === "document.too_large") {
       return t`Too large to read`;
+    }
+    const placeCode = placeErrors.codeOf(error);
+    if (placeCode === "place.inactive" || placeCode === "place.not_connected") {
+      return t`Not read: connect it again`;
+    }
+    if (placeCode === "place.no_item" || placeCode === "place.not_a_file") {
+      return t`No longer where it was`;
     }
     if (code === "document.old_format" || code === "document.slides") {
       return t`An old format: save it as PDF or a newer file`;
@@ -877,7 +965,11 @@ const useProblemOf = (): ((error: unknown) => string) => {
  * Documents that explain how they work. Each is read the moment it is
  * dropped, for real, by core: every row says what it is about. Only what
  * nobody but the one who shared it can say, Stephen asks at once, with the
- * answers to pick from.
+ * answers to pick from. Where the deployment signs in with Microsoft or
+ * Google, the admin can pick them where they live instead (GRA-370):
+ * SharePoint and OneDrive, or Google Drive, connected here through Grasp's
+ * own read-only connection, which fetches only the files picked; each is
+ * read as a dropped one is.
  */
 const Documents = (props: StepProps) => {
   const { t, i18n } = useLingui();
@@ -889,17 +981,33 @@ const Documents = (props: StepProps) => {
   const [pending, setPending] = useState<Pending[]>([]);
   const [fresh, setFresh] = useState(false);
   const kept = props.data.documents;
+  const { suites, places } = props.data;
+  const navigate = useNavigate();
+  const search: unknown = useSearch({ strict: false });
+  const returned = returnedSchema.safeParse(search).success;
+  // Which suite's places are being connected, or picked from.
+  const [connecting, setConnecting] = useState<PlacesSuite | null>(null);
+  // Back from the sign-in, the picker opens at once; or he says why it can't.
+  const connectedNow = returned && places?.status === "active";
+  const [picking, setPicking] = useState<PlacesSuite | null>(
+    connectedNow ? places.suite : null
+  );
+  const [placeProblem, setPlaceProblem] = useState<string | null>(
+    returned && !connectedNow
+      ? t`I could not connect where your documents live. Try again with an administrator’s account, or add them here.`
+      : null
+  );
   const locale: InterviewLocale = isLocale(i18n.locale) ? i18n.locale : "en";
   // Core keeps two documents of the same name as two: each row is its own upload, by an id of its own.
-  const take = (files: File[]) => {
-    const added = files.map((file, at): Pending => ({
+  const take = (from: (File | PickedFile)[]) => {
+    const added = from.map((each, at): Pending => ({
       key: crypto.randomUUID(),
-      name: file.name,
-      size: file.size,
+      name: each.name,
+      size: each.size,
       state: "reading",
       startedAt: Date.now(),
-      ms: readMs + at * readStaggerMs + Math.min(6000, file.size / 400),
-      file,
+      ms: readMs + at * readStaggerMs + Math.min(6000, (each.size ?? 0) / 400),
+      from: each,
     }));
     if (added.length === 0) {
       return;
@@ -909,7 +1017,10 @@ const Documents = (props: StepProps) => {
     setFresh(true);
     for (const each of added) {
       void (async () => {
-        const result = await shareDocument(core, each.file, locale);
+        const result =
+          each.from instanceof File
+            ? await shareDocument(core, each.from, locale)
+            : await sharePicked(core, each.from, locale);
         if (result.shared) {
           await refresh();
           setPending((now) => now.filter((row) => row.key !== each.key));
@@ -924,6 +1035,39 @@ const Documents = (props: StepProps) => {
       })();
     }
   };
+  const connect = async (suite: PlacesSuite) => {
+    setPicking(null);
+    setConnecting(suite);
+    setPlaceProblem(null);
+    const signIn = suiteNames[suite];
+    if (!(await startPlaces(core, suite))) {
+      setPlaceProblem(
+        t`I could not reach ${signIn} just now. Try again in a moment, or add the documents here.`
+      );
+      setConnecting(null);
+    }
+  };
+  // Picked from a working connection; connected first, or again, otherwise.
+  const choose = (suite: PlacesSuite) => {
+    if (places?.suite === suite && places.status === "active") {
+      setPlaceProblem(null);
+      setPicking(suite);
+      return;
+    }
+    void connect(suite);
+  };
+  // Back from the sign-in, the address forgets the connection.
+  const forgot = useRef(false);
+  useEffect(() => {
+    if (returned && !forgot.current) {
+      forgot.current = true;
+      void navigate({
+        to: "/setup",
+        search: { step: "documents" },
+        replace: true,
+      });
+    }
+  });
   // His one question about a document, while it waits for an answer: answered with a press.
   const open = kept.find(
     (each) => each.reading.ask !== null && each.answer === null
@@ -974,6 +1118,42 @@ const Documents = (props: StepProps) => {
           }}
           rows={rows}
         />
+        {suites.length === 0 ? null : (
+          <div className="flex flex-col items-center gap-2">
+            <div className="flex flex-wrap justify-center gap-2">
+              {suites.map((suite) => (
+                <PlaceButton
+                  disabled={connecting !== null}
+                  key={suite}
+                  onChoose={() => {
+                    choose(suite);
+                  }}
+                  suite={suite}
+                  waiting={connecting === suite}
+                />
+              ))}
+            </div>
+            <ErrorText>{placeProblem ?? undefined}</ErrorText>
+          </div>
+        )}
+        {picking === null ? null : (
+          <PlacePicker
+            onAdd={(files) => {
+              setPicking(null);
+              take(files);
+            }}
+            onOpenChange={(opened) => {
+              if (!opened) {
+                setPicking(null);
+              }
+            }}
+            onReconnect={() => {
+              void connect(picking);
+            }}
+            open
+            suite={picking}
+          />
+        )}
         {open === undefined || ask === null ? null : (
           <div
             className="animate-in fade-in slide-in-from-bottom-1 flex flex-col items-center gap-2 duration-300"
