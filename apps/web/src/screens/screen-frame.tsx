@@ -85,6 +85,8 @@ interface FrameSource {
   app: string;
   screen?: string;
   chatId?: string;
+  /** With `chatId`: the version of the chat's draft to preview, read-only. */
+  version?: number;
   /** The route the screen was navigated to by, and its input as JSON text. */
   route?: string;
   input?: string;
@@ -119,7 +121,7 @@ const jsonInput = (text: string | undefined): unknown => {
 const start = (
   frame: HTMLIFrameElement,
   core: CoreConnection,
-  { app, screen, chatId, route, input, surface }: FrameSource,
+  { app, screen, chatId, version, route, input, surface }: FrameSource,
   onState: (state: ScreenState) => void,
   onOpened: (appName: string) => void,
   confirm: (review: PendingConfirmation) => Promise<boolean>,
@@ -140,7 +142,12 @@ const start = (
       })
     : runPreview(
         frame,
-        { chatId, app, ...(screen === undefined ? {} : { screen }) },
+        {
+          chatId,
+          app,
+          ...(screen === undefined ? {} : { screen }),
+          ...(version === undefined ? {} : { version }),
+        },
         onState,
         onOpened
       );
@@ -266,6 +273,7 @@ const Frame = ({
   app,
   screen,
   chatId,
+  version,
   route,
   input,
   surface,
@@ -291,6 +299,7 @@ const Frame = ({
               app,
               ...(screen === undefined ? {} : { screen }),
               ...(chatId === undefined ? {} : { chatId }),
+              ...(version === undefined ? {} : { version }),
               ...(route === undefined ? {} : { route }),
               ...(input === undefined ? {} : { input }),
               ...(surface === undefined ? {} : { surface }),
@@ -315,6 +324,7 @@ const Frame = ({
       app,
       screen,
       chatId,
+      version,
       route,
       input,
       surface,
@@ -508,6 +518,7 @@ const FramedScreen = ({
         title={title}
         {...(source.screen === undefined ? {} : { screen: source.screen })}
         {...(source.chatId === undefined ? {} : { chatId: source.chatId })}
+        {...(source.version === undefined ? {} : { version: source.version })}
         {...(source.route === undefined ? {} : { route: source.route })}
         {...(source.input === undefined ? {} : { input: source.input })}
         {...(source.surface === undefined ? {} : { surface: source.surface })}
@@ -598,23 +609,34 @@ export const ScreenFrame = ({
  * A screen of the chat's draft of `app` (its first changed one when none
  * is named), running in a sandboxed frame as a preview: its server code
  * changes nothing and reads no real data, and what goes wrong goes to the
- * agent.
+ * agent. With `version`, of that earlier version of the draft, read-only.
  */
 export const PreviewFrame = ({
   chatId,
   app,
   screen,
+  version,
 }: {
   chatId: string;
   app: string;
   screen?: string;
+  version?: number;
 }) => {
   const { t } = useLingui();
   return (
     <FramedScreen
       embedded
-      label={t`Preview: changes nothing, reads no real data`}
-      source={{ chatId, app, ...(screen === undefined ? {} : { screen }) }}
+      label={
+        version === undefined
+          ? t`Preview: changes nothing, reads no real data`
+          : t`Version ${version}: read-only preview`
+      }
+      source={{
+        chatId,
+        app,
+        ...(screen === undefined ? {} : { screen }),
+        ...(version === undefined ? {} : { version }),
+      }}
       title={
         screen === undefined
           ? t`Preview of the draft's first app`

@@ -45,11 +45,6 @@ msgstr "(la vôtre)"
 msgid "{0, plural, one {{requester} asks for # package} other {{requester} asks for # packages}}"
 msgstr "{0, plural, one {{requester} demande # paquet} other {{requester} demande # paquets}}"
 
-#. placeholder {0}: draft.changed.length
-#: src/chat/studio.tsx
-msgid "{0, plural, one {# file changed in this chat, not proposed yet} other {# files changed in this chat, not proposed yet}}"
-msgstr "{0, plural, one {# fichier modifié dans ce chat, pas encore proposé} other {# fichiers modifiés dans ce chat, pas encore proposés}}"
-
 #. placeholder {0}: request.counts.findings
 #: src/dashboard/dependency-requests.tsx
 msgid "{0, plural, one {# finding reported} other {# findings reported}}"
@@ -2344,6 +2339,10 @@ msgstr "Retour à {destination}"
 msgid "Back to how it began"
 msgstr "Revenir comme au début"
 
+#: src/chat/draft-versions.tsx
+msgid "Back to latest"
+msgstr "Revenir à la dernière"
+
 #: src/routes/_shell.policies.documents.$policyId.tsx
 #: src/routes/_shell.policies.rules.$ruleId.tsx
 msgid "Back to policies"
@@ -3910,6 +3909,10 @@ msgctxt "older chats"
 msgid "Earlier"
 msgstr "Plus anciennes"
 
+#: src/chat/draft-versions.tsx
+msgid "Earlier version"
+msgstr "Version précédente"
+
 #: src/engines/screen-approval.tsx
 msgid "Earlier versions"
 msgstr "Versions précédentes"
@@ -5454,6 +5457,10 @@ msgstr "Ces derniers temps, le journal n’enregistre que ses propres recherches
 msgctxt "onboarding stage status"
 msgid "later"
 msgstr "plus tard"
+
+#: src/chat/draft-versions.tsx
+msgid "Later version"
+msgstr "Version suivante"
 
 #: src/dashboard/activity.tsx
 #: src/inbox/inbox-page.tsx
@@ -7808,6 +7815,7 @@ msgstr "A lu ce qui a changé sur une connexion"
 msgid "Read what could be improved"
 msgstr "A lu ce qui pourrait être amélioré"
 
+#: src/chat/draft-versions.tsx
 #: src/connections/connect-dialog.tsx
 #: src/knowledge/collection-markers.tsx
 msgid "Read-only"
@@ -10779,6 +10787,10 @@ msgstr "Version {currentVersion}"
 msgid "Version {number}"
 msgstr "Version {number}"
 
+#: src/chat/draft-versions.tsx
+msgid "Version {number} of {latest}"
+msgstr "Version {number} sur {latest}"
+
 #: src/knowledge/timeline.tsx
 msgid "Version {number}, current"
 msgstr "Version {number}, actuelle"
@@ -10794,6 +10806,10 @@ msgstr "Version {version}"
 #: src/workflows/test-run.tsx
 msgid "Version {version} has no build that runs, so nothing ran: one of its tasks uses something Grasp can't run yet."
 msgstr "La version {version} n'a pas de build exécutable, donc rien ne s'est exécuté : l'une de ses tâches utilise quelque chose que Grasp ne sait pas encore exécuter."
+
+#: src/screens/screen-frame.tsx
+msgid "Version {version}: read-only preview"
+msgstr "Version {version} : aperçu en lecture seule"
 
 #: src/dashboard/pile-cards.tsx
 msgid "Version to review: {version}"
