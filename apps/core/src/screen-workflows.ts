@@ -34,6 +34,7 @@ import { bindingPinnedSql, startAppBinding } from "./app-workflow-bindings.ts";
 import { usableApp } from "./apps.ts";
 import { auditedBatch, outboxed, outboxedWhere } from "./audit-outbox.ts";
 import {
+  workflowResourceRunControlKeys,
   workflowResourceRunControls,
   workflowResources,
   workflowResourceRuns,
@@ -159,7 +160,9 @@ import type { AdmittedEvent } from "./workflows/run-events.ts";
 //   generation the engine says it took, never from a status alone
 //   (resource-runs.ts, `settleResourceControls`). One pause or resume is
 //   unresolved at a time: the same kind asked again, under any key, joins
-//   it; the other, or either while a cancel is asked, is a conflict
+//   it, its key kept with the receipt it joined, so a retry under it is
+//   answered that receipt again, never decided anew to undo a control
+//   admitted since (`workflow_resource_run_control_keys`); the other, or either while a cancel is asked, is a conflict
 //   (`workflow.control_conflict`). A cancel has priority: one per run
 //   whatever key asks for it, it takes the next generation, so a pause or
 //   resume admitted before it can no longer reach the engine, and
@@ -836,6 +839,64 @@ const receiptsOf = async (
     .from(workflowResourceRunControls)
     .where(eq(workflowResourceRunControls.runId, runId));
 
+/** A key a pause or resume of a run was asked under, and its receipt. */
+type ControlKey = typeof workflowResourceRunControlKeys.$inferSelect;
+
+/** The keys run `runId`'s pauses and resumes were asked under. */
+const keysOf = async (env: Env, runId: string): Promise<ControlKey[]> =>
+  await drizzle(env.DB)
+    .select()
+    .from(workflowResourceRunControlKeys)
+    .where(eq(workflowResourceRunControlKeys.runId, runId));
+
+/**
+ * The receipt a request for `kind` under `key` was answered before, if
+ * any: a cancel's, whatever its key; a pause's or resume's, its own or the
+ * one it joined, as its key has it.
+ */
+const answeredBefore = (
+  receipts: readonly ResourceControlRow[],
+  keys: readonly ControlKey[],
+  kind: ResourceControlRow["kind"],
+  key: string
+): ResourceControlRow | undefined => {
+  if (kind === "cancel") {
+    return receipts.find((receipt) => receipt.kind === "cancel");
+  }
+  const keyed = keys.find((each) => each.kind === kind && each.key === key);
+  return keyed === undefined
+    ? receipts.find((receipt) => receipt.kind === kind && receipt.key === key)
+    : receipts.find(({ id }) => id === keyed.receiptId);
+};
+
+/**
+ * Keeps `key` of a pause or resume that joined `receipt`, unresolved, of
+ * run `runId`, and answers the receipt the key has: `receipt`, or the one
+ * a request under the same key was given first, by the key's uniqueness.
+ */
+const joinKey = async (
+  env: Env,
+  runId: string,
+  kind: "pause" | "resume",
+  key: string,
+  receipt: ResourceControlRow
+): Promise<ResourceControlRow> => {
+  try {
+    await drizzle(env.DB)
+      .insert(workflowResourceRunControlKeys)
+      .values({ runId, kind, key, receiptId: receipt.id });
+  } catch (error) {
+    if (!isUniqueViolation(error)) {
+      throw error;
+    }
+  }
+  const [receipts, keys] = await Promise.all([
+    receiptsOf(env, runId),
+    keysOf(env, runId),
+  ]);
+  return answeredBefore(receipts, keys, kind, key) ?? receipt;
+};
+
 /**
  * A receipt of run `runId`, as a screen is answered it: its kind and
  * state, under the revision of the run's snapshot now, which shows it
@@ -870,6 +931,7 @@ type Admission =
   | { type: "admit" }
   | { type: "done" }
   | { type: "answer"; receipt: ResourceControlRow }
+  | { type: "join"; receipt: ResourceControlRow }
   | {
       type: "refused";
       code:
@@ -880,28 +942,28 @@ type Admission =
 
 /**
  * What a request for `kind` of run `row` under `key` comes to, with the
- * run's receipts and where the engine has it (`live`; nothing when it has
- * no record yet, or couldn't say for a cancel). See the header.
+ * run's receipts and the keys they were asked under, and where the engine
+ * has it (`live`; nothing when it has no record yet, or couldn't say for a
+ * cancel). See the header.
  */
 const admissionOf = (
   row: RunRow,
   receipts: readonly ResourceControlRow[],
+  keys: readonly ControlKey[],
   kind: ResourceControlRow["kind"],
   key: string,
   live: Live
 ): Admission => {
-  // The same request again (a cancel under any key), settled or not.
-  const same = receipts.find(
-    (receipt) =>
-      receipt.kind === kind && (kind === "cancel" || receipt.key === key)
-  );
+  // The same request again (a cancel under any key), settled or not: what
+  // it was answered first, the receipt it joined included.
+  const same = answeredBefore(receipts, keys, kind, key);
   if (same !== undefined) {
     return { type: "answer", receipt: same };
   }
   const unresolved = receipts.filter(({ state }) => state === "admitted");
   const joined = unresolved.find((receipt) => receipt.kind === kind);
   if (joined !== undefined) {
-    return { type: "answer", receipt: joined };
+    return { type: "join", receipt: joined };
   }
   if (live?.status === "rollingBack") {
     return { type: "refused", code: "workflow.control_rolling_back" };
@@ -991,6 +1053,24 @@ const writeReceipt = async (
         .where(and(eq(workflowResourceRuns.id, row.id), condition))
     );
   const written = sql`EXISTS (SELECT 1 FROM ${workflowResourceRunControls} WHERE ${workflowResourceRunControls.id} = ${id})`;
+  // A pause's or resume's key, with its receipt, in the same batch: a key
+  // another request took first (one that joined) fails the whole write.
+  const keyed =
+    kind === "cancel"
+      ? []
+      : [
+          db.insert(workflowResourceRunControlKeys).select(
+            db
+              .select({
+                runId: workflowResourceRunControls.runId,
+                kind: sql<"pause" | "resume">`${kind}`.as("kind"),
+                key: sql<string>`${key}`.as("key"),
+                receiptId: workflowResourceRunControls.id,
+              })
+              .from(workflowResourceRunControls)
+              .where(eq(workflowResourceRunControls.id, id))
+          ),
+        ];
   const entry: AuditEntry | undefined =
     kind === "cancel"
       ? undefined
@@ -1016,6 +1096,7 @@ const writeReceipt = async (
           insert(
             sql`${may} AND EXISTS (SELECT 1 FROM ${workflowResourceRuns} WHERE ${and(eq(workflowResourceRuns.id, row.id), eq(workflowResourceRuns.controlGeneration, row.controlGeneration))})`
           ),
+          ...keyed,
           ...(entry === undefined ? [] : [outboxedWhere(db, entry, written)]),
         ])
       : auditedBatch(env, db, [
@@ -1027,11 +1108,12 @@ const writeReceipt = async (
             })
             .where(and(unchanged, may)),
           insert(sql`changes() > 0`),
+          ...keyed,
           ...(entry === undefined ? [] : [outboxedWhere(db, entry, written)]),
         ]));
   } catch (error) {
     // A twin written first (a cancel under any key, a pause or resume
-    // under this one): answered by the caller, its audit with it unwritten.
+    // under this one, its own or joined to another): answered by the caller, its audit with it unwritten.
     // The unique indexes are the guard, as the generation is none for a
     // request the run is already past.
     if (!isUniqueViolation(error)) {
@@ -1079,7 +1161,10 @@ const decide = async (
   // the status read after shows it. Read the other way round, a control
   // settling between the two reads would make the run look already past
   // a request it isn't, and that request be applied at once unsent.
-  const receipts = await receiptsOf(env, row.id);
+  const [receipts, keys] = await Promise.all([
+    receiptsOf(env, row.id),
+    keysOf(env, row.id),
+  ]);
   let live: Live;
   if (!isEnded(row.status)) {
     try {
@@ -1095,6 +1180,7 @@ const decide = async (
   const admission = admissionOf(
     row,
     receipts,
+    keys,
     kind,
     command.idempotencyKey,
     live
@@ -1104,6 +1190,18 @@ const decide = async (
   }
   if (admission.type === "answer") {
     return { type: "receipt", receipt: admission.receipt };
+  }
+  if (admission.type === "join" && kind !== "cancel") {
+    return {
+      type: "receipt",
+      receipt: await joinKey(
+        env,
+        row.id,
+        kind,
+        command.idempotencyKey,
+        admission.receipt
+      ),
+    };
   }
   if (admission.type === "done" && kind === "cancel") {
     return { type: "applied" };
@@ -1117,17 +1215,25 @@ const decide = async (
     command.idempotencyKey,
     admission.type === "done"
   );
-  const after = await receiptsOf(env, row.id);
-  const receipt =
+  const [after, afterKeys] = await Promise.all([
+    receiptsOf(env, row.id),
+    keysOf(env, row.id),
+  ]);
+  // Its own; or a twin written first, under this key (its own or joined
+  // to another) or, a cancel's, another; or one of its kind admitted
+  // meanwhile under another key, which it joins, keeping its key.
+  let receipt =
     after.find(({ id }) => id === written) ??
-    // A twin written first, under this key or (a cancel's) another.
-    after.find(
-      (each) =>
-        each.kind === kind &&
-        (kind === "cancel" ||
-          each.key === command.idempotencyKey ||
-          each.state === "admitted")
-    );
+    answeredBefore(after, afterKeys, kind, command.idempotencyKey);
+  const unresolved = after.find(
+    (each) => each.kind === kind && each.state === "admitted"
+  );
+  if (receipt === undefined && unresolved !== undefined) {
+    receipt =
+      kind === "cancel"
+        ? unresolved
+        : await joinKey(env, row.id, kind, command.idempotencyKey, unresolved);
+  }
   if (receipt === undefined) {
     // Another control admitted meanwhile, or the person may no longer.
     const stillMay = await holds(env, may);
