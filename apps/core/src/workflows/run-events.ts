@@ -1,14 +1,11 @@
-import { schemaFromDescriptor } from "@grasp-os/sdk/host";
 import { sha256Hex } from "@grasp-os/shared/encoding";
-import { issuesOf } from "@grasp-os/shared/errors";
 import { runIdSchema, workflowResourceIdSchema } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
-import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import { z } from "zod";
 
-import { resolveCatalogKeys } from "../workflow-catalog.ts";
 import { runEngine } from "./engine.ts";
+import { acceptedEventData, pinnedEventDataOf } from "./event-contracts.ts";
 import { contentType, eventTypeKey } from "./event-envelopes.ts";
 import type { StoredEvent } from "./event-envelopes.ts";
 import { quotaPolicy } from "./quotas.ts";
@@ -118,66 +115,6 @@ export interface AdmittedEvent {
 }
 
 /**
- * `data` as the contract's descriptor `descriptor` takes it, normalized:
- * `workflow.event_invalid` with its issues (paths, never values)
- * otherwise, or past what one event's data may take.
- */
-const acceptedData = (
-  descriptor: string,
-  data: unknown
-): StoredEvent["data"] => {
-  const checked = schemaFromDescriptor(descriptor)["~standard"].validate(data);
-  if ("then" in checked) {
-    throw new Error("An event's data schema validated asynchronously");
-  }
-  if (checked.issues !== undefined) {
-    throw workflowResourceErrors.create("workflow.event_invalid", {
-      issues: issuesOf({
-        issues: checked.issues.map(({ path, message }) => ({
-          path: (path ?? []).map(String),
-          message,
-        })),
-      }),
-    });
-  }
-  const parsed = z.json().safeParse(checked.value);
-  if (
-    !parsed.success ||
-    new TextEncoder().encode(canonicalJson(parsed.data)).byteLength >
-      platformLimits.operationInputBytes
-  ) {
-    throw workflowResourceErrors.create("workflow.event_invalid", {
-      issues: ["data: Not JSON, or too large for an event."],
-    });
-  }
-  return parsed.data;
-};
-
-/**
- * The data descriptor of type `type` in the event contract `binding` of
- * a run's start pinned, checked against the fingerprint it pinned; none
- * when the contract doesn't admit the type.
- */
-const pinnedDataOf = async (
-  env: Env,
-  binding: { contractId: string; fingerprint: string },
-  type: string
-): Promise<string | undefined> => {
-  const resolved = await resolveCatalogKeys(env, [binding.contractId]);
-  const contract = resolved.get(binding.contractId);
-  const events = contract?.contract.events;
-  if (
-    contract === undefined ||
-    contract.fingerprint !== binding.fingerprint ||
-    events === undefined ||
-    !Object.hasOwn(events, type)
-  ) {
-    return undefined;
-  }
-  return events[type]?.data;
-};
-
-/**
  * Admits `delivery` to its run's inbox, as the header says: its ID, and
  * whether this delivery was the first of it. Refused before anything is
  * accepted: `workflow.run_unavailable` for no such run of the workflow,
@@ -207,7 +144,7 @@ export const admitRunEvent = async (
   const binding = run.bindings.get(event.binding);
   const descriptor =
     binding?.kind === "event"
-      ? await pinnedDataOf(env, binding, event.type)
+      ? await pinnedEventDataOf(env, binding, event.type)
       : undefined;
   if (binding === undefined || descriptor === undefined) {
     throw workflowResourceErrors.create("workflow.event_invalid");
@@ -220,7 +157,7 @@ export const admitRunEvent = async (
     }
     throw error;
   }
-  const data = acceptedData(descriptor, event.data);
+  const data = acceptedEventData(descriptor, event.data);
   // A run its lineage's age has passed can take no more steps: an event
   // it would never take isn't accepted. An independent run is its
   // lineage's root.

@@ -3282,6 +3282,52 @@ export const workflowRunFileChunks = sqliteTable(
  * sends each again, backing off, so an instance the engine made before
  * that end never keeps its lease or alarm.
  */
+/**
+ * The events runs of independent workflows emitted (`emit` tasks,
+ * workflows/emitted-events.ts): the transactional outbox of each, written
+ * once, under an ID derived from its run and its task's step, so an
+ * attempt run again writes nothing new. Each names its run, its pinned
+ * binding and catalog contract, and the envelope the host minted: its
+ * source is the emitting run, never what the workflow says. Delivery to
+ * what consumes platform events (system triggers) marks it delivered; until
+ * something consumes them, each waits here. Retention removes an event's
+ * subject and data with its run's details (workflows/retention.ts), and
+ * closes one still undelivered then (its `delivered_at` the removal's
+ * time), so nothing delivers it without its data.
+ */
+export const workflowEmittedEvents = sqliteTable(
+  "workflow_emitted_events",
+  {
+    id: text().primaryKey(),
+    runId: text("run_id")
+      .notNull()
+      .references(() => workflowResourceRuns.id),
+    workflowResourceId: text("workflow_resource_id").notNull(),
+    version: integer().notNull(),
+    taskId: text("task_id").notNull(),
+    binding: text().notNull(),
+    contractId: text("contract_id").notNull(),
+    source: text().notNull(),
+    type: text().notNull(),
+    subject: text(),
+    dataschema: text(),
+    /** The data, canonical JSON; null once retention removed it. */
+    data: text(),
+    /** Whether its run was restricted (restricted.ts), pinned with it. */
+    restricted: integer({ mode: "boolean" }).notNull().default(false),
+    createdAt: timestamp("created_at").notNull(),
+    deliveredAt: timestamp("delivered_at"),
+    detailsRemovedAt: timestamp("details_removed_at"),
+  },
+  (table) => [
+    index("workflow_emitted_events_run").on(table.runId),
+    // The events still to deliver, oldest first.
+    index("workflow_emitted_events_undelivered")
+      .on(table.createdAt)
+      .where(sql`${table.deliveredAt} IS NULL`),
+  ]
+);
+
 export const workflowResourceRunTerminations = sqliteTable(
   "workflow_resource_run_terminations",
   {
