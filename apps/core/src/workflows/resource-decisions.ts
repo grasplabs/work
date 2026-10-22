@@ -205,6 +205,18 @@ const decisionBinding = (
   return { ...binding, deciders: binding.target.deciders };
 };
 
+/**
+ * The response schema of decision contract `contract`: what an answer's
+ * payload must be. A contract without one could take no answer the run
+ * takes: refused before any decision opens (`workflow.call_invalid`).
+ */
+const responseOf = (contract: { response?: string }): string => {
+  if (contract.response === undefined) {
+    throw callInvalid("binding: Its decision contract has no response schema.");
+  }
+  return contract.response;
+};
+
 /** `prompt`, as a decision's description: text, at most `maxPrompt` long. */
 const promptOf = (prompt: Json): string => {
   if (
@@ -329,6 +341,7 @@ export const openRunDecision = async (
   return await receipted(env, run, task, binding, "opened", async () => {
     await requireCallAuthority(env, run, binding);
     const contract = await contractOf(env, binding);
+    const response = responseOf(contract);
     const recipient = recipientOf(call.recipients);
     const description = promptOf(call.prompt);
     const input = inputOf(contract.input, call.input);
@@ -355,9 +368,7 @@ export const openRunDecision = async (
       input,
       // An answer its call couldn't take is refused as it is given, never
       // recorded only to fail the run (`takeDecision` checks it again).
-      ...(contract.response === undefined
-        ? {}
-        : { response: contract.response }),
+      response,
     });
   });
 };
@@ -387,7 +398,7 @@ export const takeDecision = async (
       throw callDenied();
     }
     const contract = await contractOf(env, binding);
-    const value = requireShape(contract.response, outcome.payload, "value");
+    const value = requireShape(responseOf(contract), outcome.payload, "value");
     await requireCallAuthority(env, run, binding);
     return {
       answered: true,
@@ -419,6 +430,7 @@ export const checkCandidateDecision = async (
     throw callDenied();
   }
   const contract = await contractOf(env, binding);
+  responseOf(contract);
   recipientOf(call.recipients);
   promptOf(call.prompt);
   inputOf(contract.input, call.input);
@@ -451,6 +463,6 @@ export const candidateDecision = async (
   const contract = await contractOf(env, binding);
   return {
     ...answer.data,
-    value: requireShape(contract.response, answer.data.value, "value"),
+    value: requireShape(responseOf(contract), answer.data.value, "value"),
   };
 };
