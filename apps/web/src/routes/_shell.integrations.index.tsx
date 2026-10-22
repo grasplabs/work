@@ -1,6 +1,7 @@
 import { catalogGroups } from "@grasp-os/shared/connect";
 import type { CatalogGroup } from "@grasp-os/shared/connect";
 import type { Identity } from "@grasp-os/shared/rpc";
+import { Button } from "@grasp-os/ui/components/button";
 import {
   InputGroup,
   InputGroupAddon,
@@ -39,6 +40,7 @@ import type {
   IntegrationFilter,
   IntegrationSection,
 } from "../connections/integrations.ts";
+import { RequestAppDialog } from "../connections/request-app-dialog.tsx";
 import { RequestedApps } from "../connections/requested-apps.tsx";
 import { ErrorText } from "../error-text.tsx";
 import { formatNumber } from "../format.ts";
@@ -527,8 +529,14 @@ const Integrations = () => {
   const loaded = catalog.state === "ready" && connections.state === "ready";
   const wholeCatalog = filter.show === "all" && q === undefined;
   const about = formatNumber(roundedDown(integrations.length));
+  const [requesting, setRequesting] = useState(false);
   return (
     <>
+      <RequestAppDialog
+        integrations={integrations}
+        onOpenChange={setRequesting}
+        open={requesting}
+      />
       <SiteHeader crumbs={[{ label: t`Integrations` }]} />
       <div className="flex min-h-0 flex-1 text-sm">
         <Filters choices={choices} filter={filter} q={q} />
@@ -585,6 +593,14 @@ const Integrations = () => {
                 <div className="w-40 @md:w-56">
                   <Search q={q} />
                 </div>
+                <Button
+                  onClick={() => {
+                    setRequesting(true);
+                  }}
+                  variant="outline"
+                >
+                  <Trans>Request app</Trans>
+                </Button>
               </div>
             </div>
             <div className="md:hidden">

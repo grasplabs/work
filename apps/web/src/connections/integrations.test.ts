@@ -5,9 +5,11 @@ import type {
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  beyond,
   find,
   integrationsOf,
   keeps,
+  nearestApps,
   parseIntegrationKey,
   roundedDown,
   sectionsOf,
@@ -219,5 +221,44 @@ describe(parseIntegrationKey, () => {
     expect(parseIntegrationKey("hubspot")).toBeUndefined();
     expect(parseIntegrationKey("other:hubspot")).toBeUndefined();
     expect(parseIntegrationKey("native:a:b")).toBeUndefined();
+  });
+});
+
+describe("beyond and nearestApps", () => {
+  const listed = integrationsOf(
+    [
+      entry("microsoft", [], { name: "Microsoft 365" }),
+      entry("microsoft_365", [], { source: "composio", name: "Microsoft 365" }),
+      entry("hubspot", [], { source: "composio", name: "HubSpot" }),
+      entry("hubspot_ads", [], { source: "composio", name: "HubSpot Ads" }),
+      entry("google_sheets", [], { source: "composio", name: "Google Sheets" }),
+    ],
+    [connection("microsoft", "shared", "active")]
+  );
+
+  it("leaves out what the company is connected to, even under another entry", () => {
+    expect(beyond(listed).map(({ id }) => id)).toStrictEqual([
+      "hubspot",
+      "hubspot_ads",
+      "google_sheets",
+    ]);
+  });
+
+  it("finds the nearest apps by name, the shortest first, however it is typed", () => {
+    expect(
+      nearestApps(beyond(listed), "hub spot").map(({ id }) => id)
+    ).toStrictEqual(["hubspot", "hubspot_ads"]);
+    expect(nearestApps(beyond(listed), "google_sheets")).toHaveLength(1);
+  });
+
+  it("finds an app whose name the typed one holds, but not a short fragment", () => {
+    expect(
+      nearestApps(beyond(listed), "Google Sheets for finance")
+    ).toHaveLength(1);
+    expect(nearestApps(beyond(listed), "hu")).toStrictEqual([]);
+  });
+
+  it("offers at most the number asked for", () => {
+    expect(nearestApps(beyond(listed), "hubspot", 1)).toHaveLength(1);
   });
 });
