@@ -1,9 +1,48 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "3018b25a-bbfa-4bd7-a079-99274edc3892",
+  "id": "88a1ced4-de7b-4e31-95fd-cc1b0a575790",
   "prevId": "213073ff-ec31-40b2-a6f1-509fe107b080",
   "tables": {
+    "answer_waits": {
+      "name": "answer_waits",
+      "columns": {
+        "day": {
+          "name": "day",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "up_to": {
+          "name": "up_to",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "answers": {
+          "name": "answers",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "answer_waits_day_up_to_pk": {
+          "columns": [
+            "day",
+            "up_to"
+          ],
+          "name": "answer_waits_day_up_to_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
     "audit_outbox": {
       "name": "audit_outbox",
       "columns": {
@@ -163,6 +202,44 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
+    "interview_settings": {
+      "name": "interview_settings",
+      "columns": {
+        "person": {
+          "name": "person",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "mark": {
+          "name": "mark",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "interviewer": {
+          "name": "interviewer",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "locale": {
+          "name": "locale",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
     "interview_states": {
       "name": "interview_states",
       "columns": {
@@ -226,45 +303,6 @@
       "indexes": {},
       "foreignKeys": {},
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "interview_texts": {
-      "name": "interview_texts",
-      "columns": {
-        "person": {
-          "name": "person",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "mark": {
-          "name": "mark",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "at": {
-          "name": "at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {
-        "interview_texts_person_mark_pk": {
-          "columns": [
-            "person",
-            "mark"
-          ],
-          "name": "interview_texts_person_mark_pk"
-        }
-      },
       "uniqueConstraints": {},
       "checkConstraints": {}
     },

@@ -432,8 +432,9 @@ export const interviewTurnResponse = async (
     interviewerText(turn.interviewer, "own", turn.locale),
     interviewerText(turn.interviewer, "lead", turn.locale),
   ]);
+  const secretMark = await sha256Hex(turn.secret);
   const found = await onboardingStore(env).turnContext(
-    await sha256Hex(turn.secret),
+    secretMark,
     await sha256Hex(turn.key),
     new Date().toISOString(),
     { own: own.mark, lead: lead.mark }
@@ -455,11 +456,19 @@ export const interviewTurnResponse = async (
       { status: 503, headers: linkHeaders }
     );
   }
-  const { text: system } = context.kind === "lead" ? lead : own;
+  const { text: system, mark } = context.kind === "lead" ? lead : own;
   const organization = await readOrganization(env);
   const cut = new AbortController();
   const store = onboardingStore(env);
-  const counting: Promise<void>[] = [];
+  // What the turn ran on, for the staff's numbers: the text that speaks,
+  // and how long they waited for his voice the answer before.
+  const counting: Promise<void>[] = [
+    store.turnRan(
+      secretMark,
+      { mark, interviewer: turn.interviewer, locale: turn.locale },
+      turn.waited
+    ),
+  ];
   const count = (took: Took | null) => {
     if (took !== null) {
       counting.push(store.meter(took));

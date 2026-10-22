@@ -23,7 +23,7 @@ import { consoleSigned } from "./console-signed.ts";
 import { errorResponse } from "./errors.ts";
 import { membersOf } from "./members.ts";
 import { gateView, staffAccessEnded } from "./onboarding/gate.ts";
-import { closesOn } from "./onboarding/rules.ts";
+import { closesOn, talkingMs } from "./onboarding/rules.ts";
 import { onboardingStore } from "./onboarding/store.ts";
 import type { AdminInterviewFacts } from "./onboarding/store.ts";
 import { readOrganization } from "./organization.ts";
@@ -55,9 +55,6 @@ import { readOrganization } from "./organization.ts";
 //   comes from connect without tokens, server URLs or anything Composio
 //   knows an account by (admin-integrations.ts), and of personal
 //   connections and chats' requests only counts by app.
-
-/** How long after its last save an interview still counts as going on. */
-const talkingMs = 15 * 60 * 1000;
 
 /**
  * Where someone stands, as the prototype's admin says it

@@ -25,6 +25,7 @@ import type {
   OnboardingView,
 } from "@grasp-os/shared/onboarding";
 import {
+  aiPurposes,
   logFilterSchema,
   noteMaxLength,
   stephenSetupSchema,
@@ -32,6 +33,8 @@ import {
 import type {
   LogFilter,
   StaffAgreements,
+  StaffAiUseRow,
+  StaffInterviewers,
   StaffLog,
   StaffNote,
   StaffOverview,
@@ -49,6 +52,7 @@ import { CoreRpcTarget } from "../rpc-target.ts";
 import { withPerson } from "../session-check.ts";
 import type { SessionCheck } from "../session-check.ts";
 import { gateView } from "./gate.ts";
+import { interviewerNumbers } from "./interviewer-numbers.ts";
 import { readKickoff, transcriptOf } from "./kickoff.ts";
 import { needsOf, stagesOf } from "./staff-area.ts";
 import type { StaffFacts } from "./staff-area.ts";
@@ -61,13 +65,15 @@ import { onboardingStore } from "./store.ts";
 // (staff-area.ts): where it stands, what needs Grasp, notes, the log, and
 // someone's interview, whose every read is in the audit log; and the
 // kickoff, brought in, read for what Stephen needs (kickoff.ts), and the
-// sponsor's answers to what it left open; and how Stephen is set up for
+// sponsor's answers to what it left open; how Stephen is set up for
 // this deployment (stephen-setup.ts), in every interview turn's context;
-// and the interviews by name: where everyone stands (the admin's snapshot,
-// as the console reads it), someone's own link to send by hand, the one
-// reminder noted, a team asked in, and an interview deleted because its
-// person asked. Every read that names people, or holds a link, is in the
-// audit log first, never with what was said or the link itself.
+// how Stephen and Claire are doing (interviewer-numbers.ts) and the AI the
+// onboarding used, as numbers; and the interviews by name: where everyone
+// stands (the admin's snapshot, as the console reads it), someone's own
+// link to send by hand, the one reminder noted, a team asked in, and an
+// interview deleted because its person asked. Every read that names
+// people, or holds a link, is in the audit log first, never with what was
+// said or the link itself.
 // Until the agreements are in and while the interviews are paused, no link
 // opens and none goes out; once they are in and the interviews run, the
 // links that are due go out at once, not at the store's next alarm. The client's admin sees both (`view()`), and
@@ -351,6 +357,25 @@ export class OnboardingStaffRpc
       if (!(await store.deleteOnRequest(id, actorOf(person)))) {
         throw onboardingErrors.create("onboarding.no_link");
       }
+    });
+  }
+
+  async interviewers(): Promise<StaffInterviewers> {
+    return await withPerson(this.#check, async (person) => {
+      requireStaff(person);
+      const facts = await onboardingStore(this.#env).interviewerFacts();
+      return interviewerNumbers(facts, new Date().toISOString());
+    });
+  }
+
+  async aiUse(): Promise<StaffAiUseRow[]> {
+    return await withPerson(this.#check, async (person) => {
+      requireStaff(person);
+      const rows = await onboardingStore(this.#env).usage();
+      return rows.flatMap((row) => {
+        const purpose = aiPurposes.find((each) => each === row.purpose);
+        return purpose === undefined ? [] : [{ ...row, purpose }];
+      });
     });
   }
 

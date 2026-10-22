@@ -7,6 +7,8 @@ import type { OnboardingDocumentsApi } from "./onboarding-documents.ts";
 import type {
   LogFilter,
   StaffAgreements,
+  StaffAiUseRow,
+  StaffInterviewers,
   StaffLog,
   StaffNote,
   StaffOverview,
@@ -342,6 +344,10 @@ export interface OnboardingStaffApi extends KickoffApi {
    * gone, and their link opens a new one.
    */
   deleteInterview: (person: string) => Promise<void>;
+  /** How Stephen and Claire are doing, as numbers: never who said what. */
+  interviewers: () => Promise<StaffInterviewers>;
+  /** The AI the onboarding used, by day, purpose and model. */
+  aiUse: () => Promise<StaffAiUseRow[]>;
 }
 
 /** Why the onboarding refused something. */
