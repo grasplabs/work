@@ -584,7 +584,11 @@ describe("provisioning a placed client", () => {
         d1: new Set(state.holdings.d1).size,
         buckets: new Set(state.holdings.buckets).size,
         scripts: state.holdings.scripts.length,
-      }).toStrictEqual({ d1: 3, buckets: 2, scripts: 2 });
+        // Neither the failed run nor its retry removes anything.
+        deleted: cloudflare.calls
+          .filter((call) => call.method === "DELETE")
+          .map(({ path }) => path),
+      }).toStrictEqual({ d1: 3, buckets: 2, scripts: 2, deleted: [] });
     }
   );
 
