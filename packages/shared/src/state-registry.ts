@@ -323,6 +323,10 @@ const coreDb: D1State = {
     trigger_resource_versions: exported(`${core}trigger-resources.ts`),
     workflow_start_receipts: exported(`${core}workflow-starts.ts`),
     workflow_resource_runs: exported(`${core}workflows/resource-runs.ts`),
+    workflow_emitted_events: exported(
+      `${core}workflows/emitted-events.ts`,
+      "The events JSON workflows' emit tasks wrote: an outbox, its undelivered rows still owed."
+    ),
     workflow_run_files: exported(`${core}workflows/run-files.ts`),
     workflow_run_file_chunks: exported(`${core}workflows/run-files.ts`),
     workflow_resource_run_terminations: exported(
