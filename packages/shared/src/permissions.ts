@@ -245,6 +245,8 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   "CAPABILITY_SIGNING_KEY",
   "CAPABILITY_SIGNING_KEY_PREVIOUS",
   "CF_VERSION_METADATA",
+  // The client's clock (core's src/clock.ts).
+  "CLOCK",
   "COMPOSIO_API_KEY",
   "CONNECT",
   "DATA_STORES",
