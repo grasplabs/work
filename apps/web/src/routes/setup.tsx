@@ -13,14 +13,17 @@ import { SetupFrame } from "../onboarding/setup-frame.tsx";
 import { SetupStepBody } from "../onboarding/setup-steps.tsx";
 import {
   brainScene,
+  isReviewItem,
   isStep,
   keptAt,
   listeningOf,
   reachedOf,
+  sendingDomainOf,
+  settledAs,
   stepIndex,
   steps,
 } from "../onboarding/setup.ts";
-import type { Kept, SetupStep } from "../onboarding/setup.ts";
+import type { Kept, ReviewItemId, SetupStep } from "../onboarding/setup.ts";
 import { signInErrorSearch } from "../sign-in-errors.ts";
 
 // The client onboarding (prototype `routes/onboarding.tsx`): what a
@@ -97,7 +100,7 @@ const onResize = (listener: () => void): (() => void) => {
   };
 };
 
-/** Where this browser keeps how far its admin went, and the message they wrote: a convenience of this browser alone. */
+/** Where this browser keeps how far its admin went, the message they wrote and what they settled: a convenience of this browser alone. */
 const keptKey = (userId: string): string => `grasp.setup.${userId}`;
 
 const readKept = (userId: string): Kept => {
@@ -106,15 +109,19 @@ const readKept = (userId: string): Kept => {
       localStorage.getItem(keptKey(userId)) ?? "null"
     );
     if (typeof raw !== "object" || raw === null) {
-      return { reached: 0, message: null };
+      return { reached: 0, message: null, settled: [] };
     }
     const reached =
       "reached" in raw && typeof raw.reached === "number" ? raw.reached : 0;
     const message =
       "message" in raw && typeof raw.message === "string" ? raw.message : null;
-    return { reached, message };
+    const settled =
+      "settled" in raw && Array.isArray(raw.settled)
+        ? raw.settled.filter(isReviewItem)
+        : [];
+    return { reached, message, settled };
   } catch {
-    return { reached: 0, message: null };
+    return { reached: 0, message: null, settled: [] };
   }
 };
 
@@ -129,9 +136,9 @@ const writeKept = (userId: string, kept: Kept): void => {
 const today = (): string => new Date().toISOString().slice(0, 10);
 
 /**
- * How far this browser's admin went, and the message they wrote: the
- * furthest step is remembered as they go, so the dots and the arrow keys
- * go on as far as they went.
+ * How far this browser's admin went, the message they wrote and what they
+ * settled: the furthest step is remembered as they go, so the dots and the
+ * arrow keys go on as far as they went.
  */
 const useKept = (userId: string, index: number) => {
   const [kept, setKept] = useState(() => readKept(userId));
@@ -140,15 +147,18 @@ const useKept = (userId: string, index: number) => {
   if (now !== kept) {
     setKept(now);
   }
-  const { reached, message } = now;
   useEffect(() => {
-    writeKept(userId, { reached, message });
-  }, [userId, reached, message]);
+    writeKept(userId, now);
+  }, [userId, now]);
   return {
-    reached,
-    message,
+    reached: now.reached,
+    message: now.message,
+    settled: now.settled,
     onMessage: (next: string) => {
-      setKept({ reached, message: next });
+      setKept({ ...now, message: next });
+    },
+    onSettle: (item: ReviewItemId, settled: boolean) => {
+      setKept(settledAs(now, item, settled));
     },
   };
 };
@@ -283,6 +293,7 @@ const Setup = () => {
     return <PageError reason={notLoadedText(loaded, i18n) ?? ""} />;
   }
   const admin = identity.name.split(" ")[0] ?? identity.name;
+  const sendingDomain = sendingDomainOf(window.location.hostname);
   return (
     <SetupFrame
       knowledge={{ parts, percent, threshold: data.gate.threshold }}
@@ -319,7 +330,7 @@ const Setup = () => {
           >
             <SetupStepBody
               cramped={cramped}
-              data={{ ...data, admin }}
+              data={{ ...data, admin, sendingDomain }}
               go={go}
               listening={listening}
               message={kept.message}
@@ -327,9 +338,13 @@ const Setup = () => {
               onMessage={(message) => {
                 kept.onMessage(message);
               }}
+              onSettle={(item, settled) => {
+                kept.onSettle(item, settled);
+              }}
               onStory={setStory}
               parts={parts}
               percent={percent}
+              settled={kept.settled}
               step={step}
               today={now}
             />
