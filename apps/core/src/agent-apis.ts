@@ -3,6 +3,7 @@ import { WorkerEntrypoint, exports } from "cloudflare:workers";
 import { z } from "zod";
 
 import { appsApi } from "./agent-apps.ts";
+import { brainAgentApi } from "./agent-brain.ts";
 import { buildApi } from "./agent-builds.ts";
 import { connectionsApi } from "./agent-connections.ts";
 import { knowledgeApi } from "./agent-knowledge.ts";
@@ -165,6 +166,7 @@ export const agentApis: readonly AgentApi[] = [
   buildApi,
   workflowsApi,
   memoryApi,
+  brainAgentApi,
 ].map((api) => ({
   ...api,
   name: apiNameSchema.parse(api.name),

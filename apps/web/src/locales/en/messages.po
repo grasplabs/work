@@ -1891,6 +1891,7 @@ msgid "Another version of this domain was made current since this list was read.
 msgstr "Another version of this domain was made current since this list was read. The list now shows it: review that version, then approve again."
 
 #: src/brain/brain.ts
+#: src/chat/brain-questions.tsx
 msgid "Answer"
 msgstr "Answer"
 
@@ -2158,6 +2159,11 @@ msgstr "As the company named them, until the staff list is in."
 #: src/routes/_shell.onboarding.stephen.tsx
 msgid "As the kickoff suggests"
 msgstr "As the kickoff suggests"
+
+#. placeholder {0}: gap.owner
+#: src/chat/brain-questions.tsx
+msgid "Ask {0}"
+msgstr "Ask {0}"
 
 #: src/chat/thread.tsx
 msgid "Ask again"
@@ -2584,6 +2590,7 @@ msgstr "Came up in {source}"
 msgid "Can {verbs} company data"
 msgstr "Can {verbs} company data"
 
+#: src/chat/brain-questions.tsx
 #: src/chat/project-dialog.tsx
 #: src/decision-confirmation.tsx
 #: src/engines/package-approvals.tsx
@@ -4368,6 +4375,16 @@ msgstr "Follows from another event"
 #: src/landscape/audit-trail.tsx
 msgid "Follows from: {parentTitle}"
 msgstr "Follows from: {parentTitle}"
+
+#. placeholder {0}: gap.owner
+#: src/chat/brain-questions.tsx
+msgid "For {0}"
+msgstr "For {0}"
+
+#. placeholder {0}: gap.owner
+#: src/chat/brain-questions.tsx
+msgid "For {0}, who was asked"
+msgstr "For {0}, who was asked"
 
 #: src/inbox/item-detail.tsx
 msgid "For {person}"
@@ -7034,6 +7051,7 @@ msgctxt "inbox item kind"
 msgid "Open question"
 msgstr "Open question"
 
+#: src/chat/brain-questions.tsx
 #: src/routes/_shell.brain.$noteId.tsx
 msgid "Open questions"
 msgstr "Open questions"
@@ -8495,6 +8513,10 @@ msgstr "Seen, never mentioned"
 msgctxt "send the question"
 msgid "Send"
 msgstr "Send"
+
+#: src/chat/brain-questions.tsx
+msgid "Send answer"
+msgstr "Send answer"
 
 #: src/knowledge/collection-markers.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
@@ -11588,6 +11610,10 @@ msgstr "You're still signed in. Try again in a moment."
 #: src/routes/_shell.settings.tsx
 msgid "Your account"
 msgstr "Your account"
+
+#: src/chat/brain-questions.tsx
+msgid "Your answer"
+msgstr "Your answer"
 
 #: src/decision-confirmation.tsx
 msgctxt "the answer a person gives a decision"
