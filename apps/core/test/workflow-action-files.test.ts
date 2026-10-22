@@ -28,6 +28,7 @@ import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { sweepWorkflowStartDetails } from "../src/workflows/retention.ts";
 import {
   callFiles,
+  keepFile,
   sweepGraceMs,
   sweepRunFiles,
 } from "../src/workflows/run-files.ts";
@@ -778,19 +779,56 @@ describe("a workflow run's own files", () => {
         content: base64Of("late"),
       })
     );
-    // Stale by the time its bytes would go to R2.
-    const stalePut = await outcome(
+    // Stale by the time it would reserve its bytes: nothing reserved.
+    const staleReserve = await outcome(
       callFiles(env, caller.next(staleFrom(2)), "append", {
         file: openFile,
         content: base64Of("late"),
       })
     );
+    const reservedSize = await env.DB.prepare(
+      "SELECT size FROM workflow_run_files WHERE id = ?"
+    )
+      .bind(openFile)
+      .first<{ size: number }>();
+    // Stale by the time its bytes would go to R2.
+    const stalePut = await outcome(
+      callFiles(env, caller.next(staleFrom(3)), "append", {
+        file: openFile,
+        content: base64Of("late"),
+      })
+    );
+    // Stale by the time it would mark the file deleted: still there.
+    const staleDelete = await outcome(
+      callFiles(env, caller.next(staleFrom(2)), "delete", { file: openFile })
+    );
+    // Stale by the time a file not of its type would be deleted, after
+    // hashing it: refused, the file left as it was.
+    const mismatched = caller.next();
+    const wrong = await callFiles(env, mismatched, "open", {
+      name: "w.txt",
+      type: "text/plain",
+    });
+    const wrongFile = String(fieldOf(wrong.output, "file"));
+    await callFiles(env, caller.next(), "append", {
+      file: wrongFile,
+      content: toBase64(Uint8Array.of(0x61, 0xff)),
+    });
+    const staleMismatch = await outcome(
+      callFiles(env, caller.next(staleFrom(2)), "finish", { file: wrongFile })
+    );
+    const rowsAfterStale = await rowsOf(caller.run);
     expect({
       deleted,
       deletedAgain,
       otherName,
       otherType,
+      staleDelete,
+      staleMismatch,
+      rowsAfterStale: rowsAfterStale.slice(1),
       staleCall,
+      staleReserve,
+      reserved: reservedSize?.size,
       stalePut,
       stored: await objectsOf(caller.run),
     }).toStrictEqual({
@@ -798,10 +836,17 @@ describe("a workflow run's own files", () => {
       deletedAgain: "ok",
       otherName: "workflow.call_invalid",
       otherType: "workflow.call_invalid",
+      staleDelete: "Error: The attempt went stale",
+      staleMismatch: "Error: The attempt went stale",
+      // The open file and the mismatched one, both still being written.
+      rowsAfterStale: ["writing", "writing"],
       staleCall: "Error: The attempt went stale",
+      staleReserve: "Error: The attempt went stale",
+      reserved: 0,
       stalePut: "Error: The attempt went stale",
-      // Only the deleted file's bytes, which the sweep takes later.
-      stored: 1,
+      // The deleted file's bytes, which the sweep takes later, and the
+      // mismatched file's, still being written.
+      stored: 2,
     });
   });
 
@@ -1033,7 +1078,7 @@ describe("a workflow run's own files", () => {
     const png = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0];
     const asType = async (bytes: number[] | string, type: string) => {
       const opened = await callFiles(env, caller.next(), "open", {
-        name: "f",
+        name: type.includes("officedocument") ? "f.docx" : "f",
         type,
       });
       const file = String(fieldOf(opened.output, "file"));
@@ -1069,6 +1114,195 @@ describe("a workflow run's own files", () => {
       nul: "file.content_mismatch",
       docx: "ok",
       unlisted: "workflow.call_invalid",
+    });
+  });
+
+  it("keep a connector's answer as one finished file of the run, whatever its size, and the same call again as the same file, only of the same bytes", async () => {
+    const caller = callerOf();
+    // Past one call's bytes: written in pieces, as an action's own writes are.
+    const text = bodyOf(runFileLimits.callBytes * 2 + 10);
+    const bytes = new TextEncoder().encode(text);
+    const keeping = caller.next();
+    const kept = await keepFile(env, keeping, {
+      name: "report.csv",
+      type: "text/csv",
+      bytes,
+    });
+    const file = String(fieldOf(kept.output, "file"));
+    // A replay, a retry: the same call, its effect key the same.
+    const again = await keepFile(env, keeping, {
+      name: "report.csv",
+      type: "text/csv",
+      bytes,
+    });
+    const other = await outcome(
+      keepFile(env, keeping, {
+        name: "report.csv",
+        type: "text/csv",
+        bytes: new TextEncoder().encode(bodyOf(10)),
+      })
+    );
+    const read = await callFiles(env, caller.next(), "read", {
+      file,
+      offset: 0,
+      length: runFileLimits.callBytes,
+    });
+    // Not text it says it is: refused, and it holds no place in the run.
+    const notText = await outcome(
+      keepFile(env, caller.next(), {
+        name: "x.txt",
+        type: "text/plain",
+        bytes: Uint8Array.from([0x61, 0xff, 0xfe]),
+      })
+    );
+    expect({
+      ref: {
+        file: file.length > 0,
+        name: fieldOf(kept.output, "name"),
+        type: fieldOf(kept.output, "type"),
+        size: fieldOf(kept.output, "size"),
+        sha256: fieldOf(kept.output, "sha256"),
+      },
+      again: fieldOf(again.output, "file") === file,
+      other,
+      size: fieldOf(read.output, "size"),
+      notText,
+      rows: await rowsOf(caller.run),
+    }).toStrictEqual({
+      ref: {
+        file: true,
+        name: "report.csv",
+        type: "text/csv",
+        size: bytes.length,
+        sha256: await sha256HexOfBytes(bytes),
+      },
+      again: true,
+      other: "workflow.call_invalid",
+      size: bytes.length,
+      notText: "file.content_mismatch",
+      rows: ["done", "deleted"],
+    });
+  });
+
+  it("name a Word or Excel document with its own extension: refused otherwise when written, renamed when kept", async () => {
+    const caller = callerOf();
+    const docx =
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+    const xlsx =
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+    const zip = Uint8Array.of(0x50, 0x4b, 0x03, 0x04, 1);
+    const opening = async (name: string, type: string) =>
+      await outcome(callFiles(env, caller.next(), "open", { name, type }));
+    const kept = async (name: string, type: typeof docx | typeof xlsx) => {
+      const answer = await keepFile(env, caller.next(), {
+        name,
+        type,
+        bytes: zip,
+      });
+      return fieldOf(answer.output, "name");
+    };
+    expect({
+      written: {
+        docm: await opening("letter.docm", docx),
+        xlsxAsDocx: await opening("sheet.xlsx", docx),
+        kelvin: await opening("letter.doc\u212Ax", docx),
+        upperCase: await opening("LETTER.DOCX", docx),
+        xlsx: await opening("sheet.xlsx", xlsx),
+      },
+      kept: {
+        docm: await kept("letter.docm", docx),
+        none: await kept("letter", docx),
+        onlyExtension: await kept(".xlsm", xlsx),
+        fits: await kept("Sheet.XLSX", xlsx),
+      },
+    }).toStrictEqual({
+      written: {
+        docm: "workflow.call_invalid",
+        xlsxAsDocx: "workflow.call_invalid",
+        kelvin: "workflow.call_invalid",
+        upperCase: "ok",
+        xlsx: "ok",
+      },
+      kept: {
+        docm: "letter.docx",
+        none: "letter.docx",
+        onlyExtension: "document.xlsx",
+        fits: "Sheet.XLSX",
+      },
+    });
+  });
+
+  it("keep nothing of a longer first attempt for a shorter retried read, sealed or not", async () => {
+    const piece = runFileLimits.callBytes;
+    const longer = new TextEncoder().encode(bodyOf(piece * 3));
+    const shorter = longer.subarray(0, piece * 2);
+    const csv = { name: "report.csv", type: "text/csv" } as const;
+    // A first attempt that wrote all its pieces, then lost its lease before
+    // sealing: the retry's own pieces replay, the first attempt's third stays.
+    const unsealed = callerOf();
+    const first = unsealed.next();
+    const as = (suffix: string): FilesCaller => ({
+      ...first,
+      effectKey: `${first.effectKey}#${suffix}`,
+    });
+    const opened = await callFiles(env, as("open"), "open", csv);
+    const id = String(fieldOf(opened.output, "file"));
+    for (let at = 0; at < 3; at += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- in order, as keepFile writes
+      await callFiles(env, as(`piece${String(at)}`), "append", {
+        file: id,
+        content: toBase64(longer.subarray(at * piece, (at + 1) * piece)),
+      });
+    }
+    const retried = await outcome(
+      keepFile(env, first, { ...csv, bytes: shorter })
+    );
+    // A first attempt that sealed the longer file: the retry can't answer it.
+    const sealed = callerOf();
+    const once = sealed.next();
+    await keepFile(env, once, { ...csv, bytes: longer });
+    const again = await outcome(
+      keepFile(env, once, { ...csv, bytes: shorter })
+    );
+    expect({
+      retried,
+      unsealedRows: await rowsOf(unsealed.run),
+      again,
+    }).toStrictEqual({
+      retried: "workflow.call_invalid",
+      unsealedRows: ["writing"],
+      again: "workflow.call_invalid",
+    });
+  });
+
+  it("keep nothing of a connector read whose attempt went stale while it was answered, and seal nothing once it goes stale mid-write", async () => {
+    const csv = { name: "report.csv", type: "text/csv" } as const;
+    const bytes = new TextEncoder().encode(bodyOf(runFileLimits.callBytes * 2));
+    // Stale before the answer is kept: no file, no reserved byte.
+    const expired = callerOf();
+    const before = await outcome(
+      keepFile(env, expired.next(staleFrom(1)), { ...csv, bytes })
+    );
+    // Stale after its pieces are written and hashed, just before it is
+    // sealed (open, then three checks a piece, then finish's two): never
+    // sealed, swept as unfinished.
+    const late = callerOf();
+    const midway = await outcome(
+      keepFile(env, late.next(staleFrom(9)), { ...csv, bytes })
+    );
+    // No row, so none of the run's limits (summed from its rows) moved.
+    expect({
+      before,
+      expiredRows: await rowsOf(expired.run),
+      expiredObjects: await objectsOf(expired.run),
+      midway,
+      lateRows: await rowsOf(late.run),
+    }).toStrictEqual({
+      before: "Error: The attempt went stale",
+      expiredRows: [],
+      expiredObjects: 0,
+      midway: "Error: The attempt went stale",
+      lateRows: ["writing"],
     });
   });
 

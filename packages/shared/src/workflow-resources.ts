@@ -281,6 +281,12 @@ export const catalogContractSchema = z
            * it is taken for a write.
            */
           readOnly: z.boolean().optional(),
+          /**
+           * That the operation answers a file an action may keep as a file
+           * of its run (GRA-886): only on an operation described by its
+           * native connector's JSON Schemas, as connect confirms it.
+           */
+          answersFile: z.literal(true).optional(),
         })
       )
       .optional(),

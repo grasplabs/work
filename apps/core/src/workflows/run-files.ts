@@ -5,6 +5,8 @@ import {
   runFileErrors,
   runFileIdSchema,
   runFileLimits,
+  runFileNameFits,
+  runFileNamed,
   runFileNameSchema,
   runFileTextTypes,
   runFileTypeOfBytes,
@@ -88,7 +90,10 @@ export type FilesCallOperation = keyof typeof filesCallOperations;
 const contentChars = Math.ceil(runFileLimits.callBytes / 3) * 4;
 
 const argumentSchemas = {
-  open: z.strictObject({ name: runFileNameSchema, type: runFileTypeSchema }),
+  // A Word or Excel document is named with its extension, never another's.
+  open: z
+    .strictObject({ name: runFileNameSchema, type: runFileTypeSchema })
+    .refine(({ name, type }) => runFileNameFits(name, type)),
   append: z.strictObject({
     file: runFileIdSchema,
     content: z.base64().min(1).max(contentChars),
@@ -370,7 +375,9 @@ const append = async (
   requireWriter(row, caller);
   const key = `run-files/${caller.runId}/${row.id}/${crypto.randomUUID()}`;
   // Reserved against every limit in the statement that adds it, before
-  // its bytes reach R2; the file's size follows in the same batch.
+  // its bytes reach R2; the file's size follows in the same batch. The
+  // lease again first: the reads above may have outlasted it.
+  caller.requireHolds();
   const [reserved] = await env.DB.batch([
     env.DB.prepare(
       `INSERT INTO workflow_run_file_chunks
@@ -520,6 +527,8 @@ const finish = async (
   const now = new Date();
   if (!shown) {
     // Not what it says it is: gone, so it holds no place in the limits.
+    // The lease again first: hashing every chunk may have outlasted it.
+    caller.requireHolds();
     await db
       .update(workflowRunFiles)
       .set({ state: "deleted", deletedAt: now })
@@ -531,7 +540,9 @@ const finish = async (
       );
     throw fileErrors.create("file.content_mismatch");
   }
-  // Only the file as hashed: no append can have grown it since.
+  // Only the file as hashed: no append can have grown it since. The lease
+  // again first: hashing every chunk may have outlasted it.
+  caller.requireHolds();
   const finished = await db
     .update(workflowRunFiles)
     .set({ state: "done", sha256, finishedAt: now })
@@ -628,6 +639,7 @@ const remove = async (
   if (row.state === "deleted") {
     return { output: null, detail: detailOf(row) };
   }
+  caller.requireHolds();
   await drizzle(env.DB)
     .update(workflowRunFiles)
     .set({ state: "deleted", deletedAt: new Date() })
@@ -706,6 +718,66 @@ export const callFiles = async (
       return operation satisfies never;
     }
   }
+};
+
+/**
+ * Keeps `bytes` as a finished file of `caller`'s run, named `name` and of
+ * `type`, for a connector read an action asked to have as a file
+ * (GRA-886): opened, written in pieces of `callBytes` and finished as an
+ * action's own writes are, each under a key of the call's own effect key,
+ * so the same call again (a replay, a retry) answers the same file, and
+ * its bytes must be the same, all of them: never a prefix of them. Every
+ * limit, the lease check, the type check against the bytes and the
+ * SHA-256 apply as they do to an action's writes.
+ */
+export const keepFile = async (
+  env: Env,
+  caller: FilesCaller,
+  file: { name: string; type: RunFileType; bytes: Uint8Array }
+): Promise<FilesAnswer> => {
+  // Keys of the call's own step: `<step key>:<ordinal>#…`, so the task
+  // that opens the file is the one that writes and finishes it.
+  const as = (suffix: string): FilesCaller => ({
+    ...caller,
+    effectKey: `${caller.effectKey}#${suffix}`,
+  });
+  // Each through `callFiles`, as an action's own calls are: its lease
+  // checked before every one, so an attempt that went stale while Connect
+  // was answering opens, reserves and seals nothing.
+  // Named with its type's extension: a document typed docx is never
+  // kept as `.docm`.
+  const opened = await callFiles(env, as("open"), "open", {
+    name: runFileNamed(file.name, file.type),
+    type: file.type,
+  });
+  const id = runFileIdSchema.parse(
+    z.object({ file: z.string() }).parse(opened.output).file
+  );
+  for (
+    let at = 0, piece = 0;
+    at < file.bytes.length;
+    at += runFileLimits.callBytes, piece += 1
+  ) {
+    // oxlint-disable-next-line no-await-in-loop -- in order: each piece follows the last
+    await callFiles(env, as(`piece${String(piece)}`), "append", {
+      file: id,
+      content: toBase64(file.bytes.subarray(at, at + runFileLimits.callBytes)),
+    });
+  }
+  // Every piece above replays only with its own bytes, but a shorter
+  // retried read would leave pieces of a longer first attempt after its
+  // own: the file must hold exactly these bytes before it is sealed, and
+  // a file a first attempt sealed must be of them.
+  const written = await fileOf(env, caller, id);
+  if (written?.state === "writing" && written.size !== file.bytes.length) {
+    throw workflowResourceErrors.create("workflow.call_invalid");
+  }
+  const finished = await callFiles(env, as("finish"), "finish", { file: id });
+  const sealed = z.object({ sha256: z.string() }).parse(finished.output);
+  if (sealed.sha256 !== (await sha256HexOfBytes(file.bytes))) {
+    throw workflowResourceErrors.create("workflow.call_invalid");
+  }
+  return finished;
 };
 
 /** Most chunks one sweep deletes at a time: R2's bound for one delete. */

@@ -6,7 +6,14 @@ import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
-import { runFileIdSchema } from "@grasp-os/shared/run-files";
+import {
+  runFileErrors,
+  runFileIdSchema,
+  runFileLimits,
+  runFileNameSchema,
+  runFileTypeOf,
+  isZip,
+} from "@grasp-os/shared/run-files";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import { writeJson } from "@grasp-os/workflow-expressions/bounded-json";
 import { evaluatorLimits } from "@grasp-os/workflow-expressions/limits";
@@ -25,6 +32,7 @@ import {
 } from "../workflow-bindings.ts";
 import { resolveCatalogKeys } from "../workflow-catalog.ts";
 import { schemaOfDescriptor, takesExactly } from "./exact-values.ts";
+import { officeTypeOf } from "./office-files.ts";
 import {
   requireCallAuthority,
   runAuthority,
@@ -40,8 +48,8 @@ import {
   callTemplate,
   requireKnowledgeRequest,
 } from "./resource-reads.ts";
-import { callFiles, requireFilesArguments } from "./run-files.ts";
-import type { FilesCallOperation } from "./run-files.ts";
+import { callFiles, keepFile, requireFilesArguments } from "./run-files.ts";
+import type { FilesAnswer, FilesCallOperation } from "./run-files.ts";
 
 // The effects of a run of an independent workflow's sealed build
 // (platform specification 13.6): its `grasp.connector`, `grasp.operation`
@@ -130,6 +138,12 @@ export type BuiltCall =
       readonly arguments: Json;
       /** The values of the binding arguments the host put in. */
       readonly sensitive: readonly Json[];
+      /**
+       * The files binding a read that answers a file keeps it in, as a
+       * file of the run (GRA-886): asked by an action that declared that
+       * files use, to write.
+       */
+      readonly into?: string;
     }
   | {
       readonly name: "grasp.model";
@@ -295,6 +309,114 @@ const workflowPermission = async (env: Env, run: CallingRun, id: string) => {
   return row;
 };
 
+/** A read that answers a file's own fields, as connector-kit's `contentAs` makes them. */
+const fileAnswerSchema = z
+  .object({
+    name: z.string().nullable(),
+    contentType: z.string().nullable(),
+    encoding: z.literal("base64"),
+    content: z.string(),
+  })
+  .catchall(z.json());
+
+/** The most base64 text a run file's bytes take. */
+const fileContentMaxChars = Math.ceil(runFileLimits.fileBytes / 3) * 4;
+
+/**
+ * A file read's answer as its base64 content, at most a run file's worth,
+ * and the rest of it: the content is checked against the contract's shape
+ * as an empty string, so the step's bound applies to the rest alone.
+ */
+const fileContentOf = (
+  output: unknown
+): { content: string; rest: Record<string, unknown> } => {
+  const read = z
+    .object({ content: z.string().max(fileContentMaxChars) })
+    .catchall(z.unknown())
+    .safeParse(output);
+  if (!read.success) {
+    throw callInvalid("output: It isn't a file's content as base64.");
+  }
+  const { content, ...rest } = read.data;
+  return { content, rest };
+};
+
+/**
+ * `input` of a read an action asked to have as a file: refused unless the
+ * operation answers one as its sealed contract records it (`answersFile`,
+ * which only a native connector's confirmed operation may, and which its
+ * approval compared with what the connection serves), and asked for as
+ * base64.
+ */
+const asFileRead = (operation: { answersFile?: true }, input: Json): Json => {
+  const fields = z.record(z.string(), z.json()).safeParse(input);
+  if (operation.answersFile !== true || !fields.success) {
+    throw callInvalid("into: This operation doesn't answer a file.");
+  }
+  if (fields.data.as !== undefined && fields.data.as !== "base64") {
+    throw callInvalid("arguments.as: A file is read as base64.");
+  }
+  return { ...fields.data, as: "base64" };
+};
+
+/** How a kept file is named when the name it came with can't be a run file's. */
+const unnamedFile = "attachment";
+
+/**
+ * `answer`, a read that answers a file, with its bytes kept as a file of
+ * the calling run (`keepFile`) and named in place of its content: its
+ * type shown by its bytes (`runFileTypeOf`, or for a ZIP its package's
+ * content types, `officeTypeOf`), never the label it came
+ * with; its name only if a run file's may be it. What the call's receipt
+ * says of the file: its ID, type, size and SHA-256, never its name.
+ */
+const keptAsFile = async (
+  env: Env,
+  run: CallingRun,
+  effect: Effect,
+  answer: Json
+): Promise<FilesAnswer> => {
+  const read = fileAnswerSchema.safeParse(answer);
+  if (!read.success) {
+    throw callInvalid("output: It isn't a file's content as base64.");
+  }
+  const { content, contentType } = read.data;
+  // Its other fields as they are; its content and encoding become the file.
+  const rest = Object.fromEntries(
+    Object.entries(read.data).filter(
+      ([key]) => key !== "content" && key !== "encoding"
+    )
+  );
+  let bytes: Uint8Array;
+  try {
+    bytes = Uint8Array.from(atob(content), (char) => char.codePointAt(0) ?? 0);
+  } catch {
+    throw callInvalid("output: Its content isn't base64.");
+  }
+  // A ZIP is a Word or Excel document only by what its package declares.
+  const type = isZip(bytes)
+    ? await officeTypeOf(bytes)
+    : runFileTypeOf(bytes, contentType);
+  if (type === undefined) {
+    throw runFileErrors.create("file.run_type_unsupported");
+  }
+  const named = runFileNameSchema.safeParse(read.data.name);
+  const kept = await keepFile(
+    env,
+    {
+      runId: run.runId,
+      workflowId: run.workflowId,
+      effectKey: effect.key,
+      requireHolds: effect.requireHolds,
+    },
+    { name: named.success ? named.data : unnamedFile, type, bytes }
+  );
+  return {
+    output: { ...rest, file: kept.output },
+    detail: kept.detail,
+  };
+};
+
 /**
  * Calls connector action `operation` through `binding`'s connection
  * permission, with `args` (binding arguments in), under the effect's key,
@@ -306,7 +428,7 @@ const callConnector = async (
   binding: FrozenCatalogBinding,
   call: Extract<BuiltCall, { name: "grasp.connector" }>,
   effect: Effect
-): Promise<Json> => {
+): Promise<FilesAnswer> => {
   const { target } = binding;
   if (target.kind !== "connector") {
     throw workflowResourceErrors.create("workflow.call_denied");
@@ -318,11 +440,14 @@ const callConnector = async (
   if (shape === undefined) {
     throw callInvalid("operation: The contract has no such operation.");
   }
-  const input = requireShape(shape.input, call.arguments, "arguments");
+  const asked = requireShape(shape.input, call.arguments, "arguments");
   const row = await workflowPermission(env, run, target.permissionId);
   if (row.objectType !== "connection") {
     throw workflowResourceErrors.create("workflow.call_denied");
   }
+  // Kept as a file of the run: only of a read its connector declares
+  // answers a file, which it is asked for as base64, the bytes as they are.
+  const input = call.into === undefined ? asked : asFileRead(shape, asked);
   const result = await runStubCall(
     env,
     // Refused at once, before any check, for a key other than the step's.
@@ -366,14 +491,29 @@ const callConnector = async (
   } catch {
     throw callInvalid("output: Not JSON.");
   }
-  const answer = requireShape(shape.output, output, "output");
+  // A file's content becomes the run's file, never the step's record: it
+  // is bound by a run file's size, the rest of the answer by a step's.
+  const content = call.into === undefined ? undefined : fileContentOf(output);
+  const answer = requireShape(
+    shape.output,
+    content === undefined ? output : { ...content.rest, content: "" },
+    "output"
+  );
   // An answer that echoes a binding argument would put its sensitive
   // value in the step's record, and on into the run: refused, never
   // redacted, so nothing of it is recorded.
   if (echoes(answer, call.sensitive)) {
     throw callInvalid("output: It echoes a sensitive argument.");
   }
-  return answer;
+  if (content === undefined) {
+    return { output: answer, detail: {} };
+  }
+  // The shape took the rest as it is: its content back in its place.
+  const fields = z.record(z.string(), z.json()).parse(answer);
+  return await keptAsFile(env, run, effect, {
+    ...fields,
+    content: content.content,
+  });
 };
 
 /**
@@ -803,12 +943,23 @@ export const makeCall = async (
       fileDetail = filesCallDetail(call.operation, call.arguments);
     }
     await requireCallAuthority(env, run, binding);
+    // A read kept as a file needs the files binding it goes into, and its
+    // authority now, as the files call it stands for would (GRA-886).
+    if (call.name === "grasp.connector" && call.into !== undefined) {
+      const files = run.bindings.get(call.into);
+      if (files?.kind !== "files") {
+        throw workflowResourceErrors.create("workflow.call_denied");
+      }
+      await requireCallAuthority(env, run, files);
+    }
     // Kept before the call goes out, or it doesn't go: a call that took
     // effect always has its receipt, whatever happens after.
     await audited(env, receipt("started"));
     switch (call.name) {
       case "grasp.connector": {
-        output = await callConnector(env, run, binding, call, effect);
+        const answer = await callConnector(env, run, binding, call, effect);
+        fileDetail = { ...fileDetail, ...answer.detail };
+        ({ output } = answer);
         break;
       }
       case "grasp.operation": {

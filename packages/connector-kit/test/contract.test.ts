@@ -50,6 +50,34 @@ const connectorWith = (
   });
 
 describe("a tool", () => {
+  it("answers a file only when read-only, taking `as` and answering a file's fields, as the manifest then says", () => {
+    const fileTool = (readOnly: boolean, output: z.ZodObject) =>
+      defineTool({
+        name: "files.read",
+        description: "Reads a file",
+        input: z.strictObject({
+          id: z.string(),
+          as: z.enum(["text", "base64"]),
+        }),
+        output,
+        readOnly,
+        answersFile: true,
+        routes: [route],
+        run: async () => await Promise.reject(new Error("Not run")),
+      });
+    const fileOutput = z.strictObject({
+      name: z.string().nullable(),
+      contentType: z.string().nullable(),
+      encoding: z.enum(["text", "base64"]),
+      content: z.string().nullable(),
+    });
+    expect(fileTool(true, fileOutput).action.answersFile).toBeTruthy();
+    expect(() => fileTool(false, fileOutput)).toThrow(/answers a file/u);
+    expect(() => fileTool(true, z.strictObject({ id: z.string() }))).toThrow(
+      /answers a file/u
+    );
+  });
+
   it("takes strict input with a string resource property", () => {
     expect(() =>
       toolWith(

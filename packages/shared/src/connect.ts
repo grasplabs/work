@@ -1560,6 +1560,12 @@ export interface ConnectorContractAction {
    */
   input: string;
   output: string;
+  /**
+   * It reads a file and answers its content (connector-kit's `contentAs`),
+   * which a workflow action may have core keep as a file of its run
+   * (GRA-886). Only a native connector's read declares it; never Composio's.
+   */
+  answersFile?: true;
 }
 
 /**
@@ -1583,6 +1589,8 @@ export interface NativeOperation {
   contract: string;
   /** Whether it only reads, as the connector declares. */
   readOnly: boolean;
+  /** That it answers a file, as the connector declares (GRA-886). */
+  answersFile?: true;
 }
 
 /** A generated contract, as connect serves it now. */
