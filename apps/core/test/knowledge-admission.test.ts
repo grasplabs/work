@@ -176,6 +176,14 @@ describe("Knowledge admission", { timeout: 60_000 }, () => {
       headingAfterBody: "# Employee Jan Jansen\nWorks in sales.\n## Cancer",
       // An amount in such a heading is certain, as in a sentence.
       headingAmount: "# Employee Jan Jansen\n## Salary: €4,200",
+      // Every line of the paragraph above a setext underline is its heading.
+      setextLines: "Employee Jan Jansen\nSick leave\n---",
+      setextLinesTopic: "Employee Jan Jansen\nCancer\n===",
+      setextLinesOver: "Employee\nJan Jansen\n===\n\nOn sick leave since May.",
+      // A heading with no blank line above it, read with the lines above.
+      headingUnderLine: "Employee Jan Jansen\n## Cancer",
+      headingInListItem: "- Employee Jan Jansen\n  ## Cancer",
+      headingsInListItem: "- # Employee Jan Jansen\n  ## Cancer",
       // Runs of lines, whatever their blocks.
       looseList: "- Employee: Jan Jansen\n\n- Status: sick leave",
       proseAndList: "Jan Jansen is an employee.\n- Status: sick leave",
@@ -229,6 +237,12 @@ describe("Knowledge admission", { timeout: 60_000 }, () => {
       setextHeadings: "held",
       headingAfterBody: "held",
       headingAmount: "excluded",
+      setextLines: "held",
+      setextLinesTopic: "held",
+      setextLinesOver: "held",
+      headingUnderLine: "held",
+      headingInListItem: "held",
+      headingsInListItem: "held",
       looseList: "held",
       proseAndList: "held",
       tableAndList: "held",

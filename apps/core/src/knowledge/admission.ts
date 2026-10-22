@@ -253,13 +253,17 @@ const unitsOf = (text: string): Unit[] => {
     kind = undefined;
     block = [];
   };
-  const endRun = () => {
+  // `joined`: a heading ended the run with no blank line before it, and
+  // is its last line.
+  const endRun = (joined = false) => {
     endBlock();
     // Judged whole too when split into more than one unit: blocks, or
     // sentences split where an abbreviation ("Ph.D.", "e.g.") looked
-    // like a sentence's end. Only a run of lines: `runStart` is stale
-    // when the lines since the last run were all headings.
-    if (run.length > 0 && units.length - runStart > 1) {
+    // like a sentence's end; or lines and the heading under them, which
+    // are each a unit of their own ("Employee Jan Jansen" over "## Cancer").
+    // Only a run of lines: `runStart` is stale when the lines since the
+    // last run were all headings.
+    if (run.length > 0 && (joined || units.length - runStart > 1)) {
       units.push({
         text: run.join("\n"),
         header: runHeader,
@@ -275,20 +279,29 @@ const unitsOf = (text: string): Unit[] => {
     const next = lines[index + 1];
     const level = headingLevel(line, next);
     if (level > 0) {
-      endRun();
+      const setext = atxHeading.exec(line) === null;
+      // A setext heading is every line of the paragraph above its
+      // underline: "Employee" over "Jan Jansen" over "===" is one heading.
+      const title =
+        setext && kind === "prose" ? [...block, line].join(" ") : line;
+      const joined = run.length > 0;
+      if (joined) {
+        run.push(line);
+      }
+      endRun(joined);
       headings.length = level - 1;
       heading = headingOf(
-        line,
+        title,
         headings.findLast((h) => h !== undefined)
       );
       headings[level - 1] = heading;
       // Judged with the headings above it, as a block under it would be:
       // "# Employee Jan" over "## Cancer" is about Jan with no body at all.
-      // `heading` holds this line's own signals too, which judging its text
-      // finds anyway.
-      units.push({ text: line, heading });
-      if (atxHeading.exec(line) === null) {
-        // A setext heading's underline.
+      // `heading` holds this heading's own signals too, which judging its
+      // text finds anyway.
+      units.push({ text: title, heading });
+      if (setext) {
+        // Its underline.
         index += 1;
       }
       continue;
