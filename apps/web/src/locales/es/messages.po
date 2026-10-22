@@ -1858,9 +1858,9 @@ msgstr "Un importe en {currency} no tiene decimales."
 msgid "An app is code that runs in people's browsers. It gets this domain's data only once an admin has approved exactly that code, and a change to the code needs a new approval. Read the code first: approved code can still send what it gets somewhere else, so approving says you trust it."
 msgstr "Una aplicación es código que se ejecuta en el navegador de las personas. Recibe los datos de este dominio solo cuando un administrador ha aprobado exactamente ese código, y un cambio en el código necesita una nueva aprobación. Lee primero el código: el código aprobado aún puede enviar lo que recibe a otro lugar, así que aprobarlo significa que confías en él."
 
-#: src/routes/_shell.domains.$engine.index.tsx
-msgid "An app is what this domain's team works in, standing on its workflows and integrations. Ask Grasp in chat to build one."
-msgstr "Una aplicación es donde trabaja el equipo de este dominio, apoyada en sus flujos de trabajo e integraciones. Pide a Grasp en el chat que cree una."
+#: src/engines/engine-apps.tsx
+msgid "An app is what this domain's team works in, standing on its workflows and integrations."
+msgstr "Una aplicación es donde trabaja el equipo de este dominio, apoyada en sus flujos de trabajo e integraciones."
 
 #: src/activity/audit-words.ts
 msgid "An app nobody approved was refused the domain's data"
@@ -2096,6 +2096,7 @@ msgstr "Aprobado: {who}."
 msgid "Approver for new tools named"
 msgstr "Responsable de aprobar herramientas nombrado"
 
+#: src/engines/engine-apps.tsx
 #: src/inbox/items.ts
 #: src/routes/_shell.domains.$engine.index.tsx
 msgid "Apps"
@@ -5955,8 +5956,8 @@ msgctxt "when Pulse may report"
 msgid "Never"
 msgstr "Nunca"
 
+#: src/engines/engine-apps.tsx
 #: src/routes/_shell.apps.new.tsx
-#: src/routes/_shell.domains.$engine.index.tsx
 msgid "New app"
 msgstr "Nueva aplicación"
 
@@ -6073,7 +6074,7 @@ msgstr "Ninguna aplicación"
 msgid "No apps match these filters."
 msgstr "Ninguna aplicación coincide con estos filtros."
 
-#: src/routes/_shell.domains.$engine.index.tsx
+#: src/engines/engine-apps.tsx
 #: src/routes/_shell.domains.index.tsx
 msgid "No apps yet"
 msgstr "Aún no hay aplicaciones"
@@ -10101,7 +10102,7 @@ msgstr "Este dominio aún no usa ninguna integración."
 msgid "This domain has no such app."
 msgstr "Este dominio no tiene esa aplicación."
 
-#: src/routes/_shell.domains.$engine.index.tsx
+#: src/engines/engine-apps.tsx
 #: src/screens/screen-frame.tsx
 msgid "This domain has no version to run yet."
 msgstr "Este dominio aún no tiene ninguna versión que ejecutar."

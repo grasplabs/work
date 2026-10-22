@@ -5,7 +5,6 @@ import type { Identity } from "@grasp-os/shared/rpc";
 import type { ScreenTrustReview } from "@grasp-os/shared/screen-trust";
 import type { SurfaceSummary } from "@grasp-os/shared/screens";
 import type { RunsPage, WorkflowSummary } from "@grasp-os/shared/workflows";
-import { buttonVariants } from "@grasp-os/ui/components/button";
 import {
   Table,
   TableBody,
@@ -20,16 +19,10 @@ import {
   TabsList,
   TabsTrigger,
 } from "@grasp-os/ui/components/tabs";
-import { cn } from "@grasp-os/ui/lib/utils";
 import { msg, ph } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
-import {
-  Await,
-  createFileRoute,
-  Link,
-  useRouterState,
-} from "@tanstack/react-router";
-import { CogIcon, LayoutGridIcon, PlusIcon } from "lucide-react";
+import { Await, createFileRoute, useRouterState } from "@tanstack/react-router";
+import { CogIcon } from "lucide-react";
 import { useState } from "react";
 import type { ReactElement } from "react";
 
@@ -38,6 +31,7 @@ import { integrationsOf } from "../connections/integrations.ts";
 import type { Integration } from "../connections/integrations.ts";
 import type { Session } from "../core.ts";
 import { decidesRequests } from "../dashboard/to-do.tsx";
+import { EngineApps } from "../engines/engine-apps.tsx";
 import { EngineIcon } from "../engines/engine-icon.tsx";
 import { engineReaders, loadEnginePage } from "../engines/engine-page.ts";
 import type { EnginePage } from "../engines/engine-page.ts";
@@ -205,92 +199,40 @@ const Workflows = ({
   );
 };
 
-/** One app (core's screen) of the engine, as the prototype's app card: it opens the app in the frame. */
-const AppCard = ({ engine, screen }: { engine: string; screen: string }) => (
-  <li className="bg-card hover:border-faint relative flex min-w-0 items-center gap-3 rounded-xl border p-4 transition-colors">
-    <span
-      aria-hidden="true"
-      className="bg-muted text-foreground inline-flex size-7.5 flex-none items-center justify-center rounded-lg"
-    >
-      <LayoutGridIcon className="size-4" />
-    </span>
-    <Link
-      className="min-w-0 flex-1 truncate font-medium outline-none after:absolute after:inset-0 after:rounded-xl focus-visible:underline"
-      params={{ engine, screen }}
-      to="/domains/$engine/apps/$screen"
-    >
-      {screen}
-    </Link>
-  </li>
-);
-
 /**
- * The engine's apps, or why there are none, and for someone who builds
- * (`builds`) the way to make a new one; for an admin, with whether their
- * code is approved for the engine's data (`approval`).
+ * The engine's apps, titled once its surfaces come, or why there are
+ * none, and for someone who builds (`builds`) the way to make a new one;
+ * for an admin, with whether their code is approved for the engine's
+ * data (`approval`).
  */
 const Apps = ({
-  engine,
+  app,
   contents,
+  surfaces,
   approval,
   builds,
 }: {
-  engine: string;
+  app: App;
   contents: AppContents;
+  surfaces: Deferred<SurfaceSummary[]>;
   approval: Deferred<ScreenTrustReview> | undefined;
   builds: boolean;
 }) => {
-  const { t } = useLingui();
-  const none = contents.version === null || contents.screens.length === 0;
+  const apps = (titled: readonly SurfaceSummary[]) => (
+    <EngineApps
+      builds={builds}
+      contents={contents}
+      description={app.description}
+      engine={app.id}
+      surfaces={titled}
+    />
+  );
   return (
     <div className="flex flex-col gap-6">
-      {builds ? (
-        <Link
-          className={cn(
-            buttonVariants({ size: "sm", variant: "outline" }),
-            "self-end"
-          )}
-          to="/apps/new"
-        >
-          <PlusIcon data-icon="inline-start" />
-          <Trans>New app</Trans>
-        </Link>
-      ) : null}
-      {none ? (
-        <div className="flex flex-col items-start gap-3 rounded-xl border border-dashed p-6">
-          <span
-            aria-hidden="true"
-            className="bg-tile flex size-7 items-center justify-center rounded-md border"
-          >
-            <LayoutGridIcon className="size-4" />
-          </span>
-          <div className="flex max-w-prose flex-col gap-1">
-            <span className="font-medium">
-              <Trans>No apps yet</Trans>
-            </span>
-            <p className="text-muted-foreground">
-              {contents.version === null ? (
-                <Trans>This domain has no version to run yet.</Trans>
-              ) : (
-                <Trans>
-                  An app is what this domain&apos;s team works in, standing on
-                  its workflows and integrations. Ask Grasp in chat to build
-                  one.
-                </Trans>
-              )}
-            </p>
-          </div>
-        </div>
-      ) : (
-        <ul
-          aria-label={t`Apps`}
-          className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3"
-        >
-          {contents.screens.map((screen) => (
-            <AppCard engine={engine} key={screen} screen={screen} />
-          ))}
-        </ul>
-      )}
+      {/* Named by their files until the surfaces come, or if they don't. */}
+      <Await fallback={apps([])} promise={surfaces}>
+        {(loaded) => apps(loaded.state === "ready" ? loaded.data : [])}
+      </Await>
       {/* Also with no apps now: earlier versions' approvals can still be
           taken back. Not before a first version, which has nothing. */}
       {approval === undefined || contents.version === null ? null : (
@@ -601,10 +543,11 @@ const EngineView = ({ page }: { page: EnginePage }) => {
         <TabsContent value="apps">
           <div className="pt-4">
             <Apps
+              app={app}
               approval={approval}
               builds={canBuild(identity.role)}
               contents={contents}
-              engine={app.id}
+              surfaces={surfaces}
             />
           </div>
         </TabsContent>
