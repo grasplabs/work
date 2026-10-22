@@ -3014,6 +3014,10 @@ msgstr "Compact"
 msgid "Company"
 msgstr "Entreprise"
 
+#: src/activity/pending.tsx
+msgid "Company Brain, read only. This can read company Brain evidence and its open questions, from the collections it was granted and only what the person it works for may read too. It can never write to the Brain. Every read is recorded"
+msgstr "Company Brain, en lecture seule. Il peut lire les éléments et les questions ouvertes du Company Brain, dans les collections qui lui ont été accordées et seulement ce que la personne pour qui il travaille peut aussi lire. Il ne peut jamais écrire dans le Brain. Chaque lecture est enregistrée"
+
 #: src/chat/builds.tsx
 msgid "Compared with version {current}, which runs now."
 msgstr "Comparée à la version {current}, qui s’exécute actuellement."
