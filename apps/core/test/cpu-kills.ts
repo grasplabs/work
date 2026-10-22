@@ -17,7 +17,9 @@ interface RunCallHost {
     fn: (attempt: unknown) => Promise<unknown>
   ) => Promise<unknown>;
   sleep: (...args: unknown[]) => Promise<unknown>;
+  sleepUntil?: (...args: unknown[]) => Promise<unknown>;
   waitForDecision: (...args: unknown[]) => Promise<unknown>;
+  quiet?: (...args: unknown[]) => Promise<unknown>;
 }
 
 /**
@@ -76,8 +78,20 @@ const killingRun =
           return value;
         }),
       sleep: async (...waitArgs) => await host.sleep(...waitArgs),
+      ...(host.sleepUntil === undefined
+        ? {}
+        : {
+            sleepUntil: async (...waitArgs: unknown[]) =>
+              await host.sleepUntil?.(...waitArgs),
+          }),
       waitForDecision: async (...waitArgs) =>
         await host.waitForDecision(...waitArgs),
+      ...(host.quiet === undefined
+        ? {}
+        : {
+            quiet: async (...quietArgs: unknown[]) =>
+              await host.quiet?.(...quietArgs),
+          }),
     };
     const ran: Promise<unknown> = Promise.resolve(
       Reflect.apply(real, target, [watched, input])
