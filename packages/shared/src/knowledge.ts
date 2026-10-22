@@ -795,11 +795,12 @@ export interface PurgePlan {
    */
   inLongerWords: number;
   /**
-   * Answers to the brain's gaps a term is removed from (`content`), every
-   * one holding a term, whatever documents are named. Always 0 for
-   * `personal`, which forgets the person as an answerer instead.
+   * Copies the host keeps outside Knowledge a term is removed from
+   * (`content`; core's: the brain's gap answers), every one holding a
+   * term, whatever documents are named. Always 0 for `personal`, which
+   * forgets the person as their author instead.
    */
-  gapAnswers: number;
+  hostCopies: number;
   /**
    * Originals of uploaded files it deletes (and the uploads it forgets):
    * those of the collection (`personal`), or every one uploaded as a
