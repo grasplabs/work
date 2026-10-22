@@ -458,6 +458,9 @@ export type Generation =
     }
   | { readonly ok: false; readonly unsupported: readonly Unsupported[] };
 
+/** A URI on the web: the only kind an event's data schema may be. */
+const webUri = /^https?:\/\//iu;
+
 /** Most unsupported constructs reported: the rest are the same kind of news. */
 const maxUnsupported = 20;
 
@@ -1699,12 +1702,14 @@ const emitCallOf = (
         )
       : undefined;
   const subject = part("subject");
-  // A data schema is an absolute URI written in the definition, never
+  // A data schema is an http(s) URI written in the definition, never
   // built from data: it is kept with the event for good, past retention.
   const { dataschema } = attributes;
   if (
     dataschema !== undefined &&
-    (typeof dataschema !== "string" || parseSlot(dataschema).kind !== "literal")
+    (typeof dataschema !== "string" ||
+      parseSlot(dataschema).kind !== "literal" ||
+      !webUri.test(dataschema))
   ) {
     emitter.refusals.add(
       pointerJoin(withPointer, "dataschema"),

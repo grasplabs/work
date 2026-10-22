@@ -355,6 +355,34 @@ describe("emit tasks", { timeout: 120_000 }, () => {
     });
   });
 
+  it("aren't lowered with a data schema that isn't an http or https URI", async () => {
+    const admin = await person("admin");
+    const unsupported = async (dataschema: string) => {
+      const { version } = await emitting(
+        admin,
+        [emitTimeout("publish-timeout", { dataschema })],
+        false
+      );
+      return version.build.executable ? [] : version.build.unsupported;
+    };
+
+    await expect(
+      Promise.all(
+        ["data:text/plain,x", "file:///etc/passwd", "urn:example:job"].map(
+          unsupported
+        )
+      )
+    ).resolves.toStrictEqual(
+      Array.from({ length: 3 }, () => [
+        {
+          pointer: "/do/0/publish-timeout/emit/event/with/dataschema",
+          taskId: "publish-timeout",
+          feature: "emit:dataschema",
+        },
+      ])
+    );
+  });
+
   it("write nothing for an attempt that stopped holding while its event was being checked", async () => {
     const admin = await person("admin");
     const { workflow } = await emitting(admin, [

@@ -278,7 +278,10 @@ const sealedCallSchema = z.discriminatedUnion("name", [
     dataschema: z
       .string()
       .max(1024)
-      .refine((text) => URL.canParse(text))
+      .refine((text) => {
+        const url = URL.canParse(text) ? new URL(text) : undefined;
+        return url?.protocol === "http:" || url?.protocol === "https:";
+      })
       .optional(),
     data: templateSchema,
   }),
