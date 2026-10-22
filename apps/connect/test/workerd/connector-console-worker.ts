@@ -14,6 +14,8 @@ import { loadConnector } from "../../src/connector-isolate.ts";
 //   have workerd report an error with its message, through `loadConnector`
 //   and as it is.
 // - `/node`: what a connector has of Node.js: nothing (GRA-939).
+// - `/marked`: a connector's own Response with the header a thrown error
+//   crosses under.
 
 /** What a connector holds that no log may carry, by route. */
 const values = {
@@ -120,6 +122,18 @@ const answerOf = async (route: string, env: ConnectEnv): Promise<unknown> => {
         ? value
         : "another error";
     }
+  }
+  if (route === "/marked") {
+    // A connector's own Response carrying the header a thrown error crosses
+    // under: still its Response, without that header.
+    const response = await loadConnector(
+      env.LOADER,
+      'export default { fetch: () => new Response("own", { headers: { "x-grasp-thrown": "1" } }) };\n',
+      env.EGRESS
+    )
+      .getEntrypoint()
+      .fetch("https://connector.internal/mcp");
+    return `${await response.text()},${String(response.headers.get("x-grasp-thrown"))}`;
   }
   if (route === "/node") {
     // A connector has no Node.js (`isolateBase`): no `setImmediate`, no

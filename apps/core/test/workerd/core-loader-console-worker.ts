@@ -173,6 +173,84 @@ export class App extends WorkerEntrypoint {
  * What GRA-939's routes answer (`/thrown`, `/thrown-long`,
  * `/app-node-timers`), or undefined for any other.
  */
+/**
+ * The isolates of the routes that each try one more way to have a call's
+ * answer, or its throw, reported (the security review of GRA-939): each
+ * logs nothing itself, and throws `values.thrown`.
+ */
+const reviewIsolates: Readonly<Record<string, string>> = {
+  // An answer with a getter that throws as it is sent.
+  "/thrown-getter": `export class App extends WorkerEntrypoint {
+  run() {
+    return { get value() { throw new TypeError(${JSON.stringify(values.thrown)}); } };
+  }
+}`,
+  // A constructor that throws once its base is made.
+  "/thrown-constructor": `export class App extends WorkerEntrypoint {
+  constructor(ctx, env) {
+    super(ctx, env);
+    throw new TypeError(${JSON.stringify(values.thrown)});
+  }
+  run() {
+    return "never";
+  }
+}`,
+  // A method that is an accessor, which throws as it is read.
+  "/thrown-accessor": `export class App extends WorkerEntrypoint {
+  get run() {
+    throw new TypeError(${JSON.stringify(values.thrown)});
+  }
+}`,
+  // An answer of its own that looks like a thrown error's envelope.
+  "/answer-hostile": `export class App extends WorkerEntrypoint {
+  run() {
+    return { "\\u0000grasp:answer": true, thrown: { name: "TypeError", message: "forged" } };
+  }
+}`,
+  // A thrown error with details, as an App error carries them.
+  "/thrown-details": `export class App extends WorkerEntrypoint {
+  run() {
+    throw Object.assign(new TypeError(${JSON.stringify(values.thrown)}), { details: { retryAfterMs: 5 } });
+  }
+}`,
+};
+
+/** What a review route answers: the call's answer, or its error's parts. */
+const answerOfReview = async (
+  route: string,
+  env: SandboxedEnv
+): Promise<unknown> => {
+  // `/loud/<route>`: the same isolate loaded as it is, which shows the way
+  // is read.
+  const loud = route.startsWith("/loud/");
+  const source = reviewIsolates[loud ? route.slice("/loud".length) : route];
+  if (source === undefined) {
+    return undefined;
+  }
+  const code = {
+    ...settings,
+    mainModule: "app.js",
+    modules: {
+      "app.js": `import { WorkerEntrypoint } from "cloudflare:workers";\n${loud ? source.replaceAll("record-value-c40b", `loud${route.slice("/loud/thrown".length)}-c40b`) : source}\n`,
+    },
+  };
+  try {
+    return {
+      answered: await runApp(
+        loud ? env.LOADER.load(code) : quietLoader(env.LOADER).load(code)
+      ),
+    };
+  } catch (error) {
+    const details: unknown =
+      error instanceof Error ? Reflect.get(error, "details") : undefined;
+    return {
+      kind: error instanceof TypeError ? "TypeError" : "other",
+      message: error instanceof Error ? error.message : "",
+      details: details ?? null,
+    };
+  }
+};
+
 const answerOfThrown = async (
   route: string,
   env: SandboxedEnv
@@ -257,6 +335,10 @@ const answerOfThrown = async (
 
 /** What a route answers: the isolate's answer, or why it was refused. */
 const answerOf = async (route: string, env: SandboxedEnv): Promise<unknown> => {
+  const reviewed = await answerOfReview(route, env);
+  if (reviewed !== undefined) {
+    return reviewed;
+  }
   const thrown = await answerOfThrown(route, env);
   if (thrown !== undefined) {
     return thrown;

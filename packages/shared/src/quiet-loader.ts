@@ -68,13 +68,12 @@ const maxThrownName = 200;
 const thrownHeader = "x-grasp-thrown";
 
 /**
- * The key a quiet entrypoint's thrown error crosses under, as a value. One
- * for every isolate, so an isolate the Loader keeps answers the same key
- * whichever stub of it asks: no value of a call has it but by intent, and
- * code that forges it only makes its own call throw, which it could do
- * anyway.
+ * The key of the envelope every wrapped call's answer comes in: `{ value }`
+ * or `{ thrown }`, made by the wrapper alone, so a value's own keys never
+ * read as a thrown error. The same for every isolate, so an isolate the
+ * Loader keeps answers the same envelope whichever stub of it asks.
  */
-const thrownKey = "\u0000grasp:thrown";
+const envelopeKey = "\u0000grasp:answer";
 
 /** The wrapper module's name: a main module none of the isolate's has. */
 const entryModule = "grasp-sandbox-entry.js";
@@ -108,13 +107,24 @@ export const builtins = Object.freeze({
   apply: Reflect.apply,
   get: Reflect.get,
   define: Reflect.defineProperty,
-  keys: Object.keys,
+  ownKeys: Reflect.ownKeys,
+  descriptorOf: Reflect.getOwnPropertyDescriptor,
+  prototypeOf: Reflect.getPrototypeOf,
+  create: Object.create,
+  isArray: Array.isArray,
   isPrototypeOf: Object.prototype.isPrototypeOf,
+  objectPrototype: Object.prototype,
   stringOf: String,
   slice: String.prototype.slice,
   stringify: JSON.stringify,
+  Map,
+  mapGet: Map.prototype.get,
+  mapSet: Map.prototype.set,
   Proxy,
   Response,
+  Headers,
+  headersHas: Headers.prototype.has,
+  headersDelete: Headers.prototype.delete,
   resolve: Promise.resolve.bind(Promise),
   then: Promise.prototype.then,
   bind: Function.prototype.bind,
@@ -125,22 +135,40 @@ export const builtins = Object.freeze({
 /** The built-ins module's name: none the isolate's modules have. */
 const builtinsModule = "grasp-sandbox-builtins.js";
 
+/** The deepest plain data the wrapper copies out of a call's answer. */
+const maxAnswerDepth = 64;
+
+/** The most characters of a thrown error's details, as JSON, that cross. */
+const maxThrownDetails = 8192;
+
 /**
  * The wrapper main module of an isolate whose entrypoint `entrypoint` is
  * called (`default` for its default export): it imports the original main
- * and exports that entrypoint wrapped, so whatever the entrypoint's call
- * throws is answered as a value under `thrownKey`, never thrown to workerd,
- * which served `--verbose` would report it with its message (GRA-939).
+ * and exports that entrypoint wrapped, so nothing of its call is thrown to
+ * workerd, which served `--verbose` would report it with its message
+ * (GRA-939). Every answer of a wrapped call is an envelope the wrapper
+ * makes (`envelopeKey`): `{ value }`, or `{ thrown }` with the thrown
+ * error's name, code, message and details, bounded. An answer's own value
+ * never becomes an error, whatever keys it has.
  *
  * - A `WorkerEntrypoint` class: a subclass whose instances are proxies,
  *   each method read through it (as workerd reads the method it calls)
  *   wrapped, and called on the real instance, so the entrypoint's own calls
- *   of its methods throw as they always did.
+ *   of its methods throw as they always did. A method read that throws (an
+ *   accessor) answers that throw. A constructor that throws makes a stand-in
+ *   whose every method answers it. The context it is given is quiet.
  * - A default export's handler object: its handlers wrapped, each called
  *   on the object, its context's `waitUntil` swallowing a rejection (the
- *   quiet module covers a `WorkerEntrypoint`'s own `ctx`).
- * - `fetch` answers a thrown error as a Response under `thrownHeader`.
+ *   quiet module covers a `WorkerEntrypoint`'s own `this.ctx`).
+ * - `fetch` answers a thrown error as a Response under `thrownHeader`; a
+ *   Response of the entrypoint's own never carries that header.
  * - Anything else is exported as it is.
+ *
+ * A value answered is copied into plain data inside the call (`plainOf`),
+ * so a getter or a proxy's trap in it runs, and throws, there, not as
+ * workerd serializes it. What isn't plain data (an RpcTarget, a stream, a
+ * Date, a class's instance) crosses as it is: its methods and accessors run
+ * after the call, outside the wrapper (GRA-939 lists it as open).
  *
  * It uses only the built-ins `builtinsSource` kept, never a global or a
  * prototype's method the isolate's code could have replaced: no spread,
@@ -152,15 +180,70 @@ const entrySource = (
   entrypoint: string
 ): string => `import { builtins } from ${JSON.stringify(`./${builtins}`)};
 import * as main from ${JSON.stringify(`./${mainModule}`)};
-const { apply, get, define, keys, isPrototypeOf, stringOf, slice, stringify, Proxy, Response, resolve, then, bind, entrypointPrototype } = builtins;
-const thrownKey = ${JSON.stringify(thrownKey)};
+const { apply, get, define, ownKeys, descriptorOf, prototypeOf, create, isArray, isPrototypeOf, objectPrototype, stringOf, slice, stringify, Map, mapGet, mapSet, Proxy, Response, Headers, headersHas, headersDelete, resolve, then, bind, entrypointPrototype } = builtins;
+const envelopeKey = ${JSON.stringify(envelopeKey)};
+const thrownHeader = ${JSON.stringify(thrownHeader)};
 const cut = (text, most) => apply(slice, text, [0, most]);
+const field = (target, key, value) =>
+  define(target, key, { configurable: true, enumerable: true, writable: true, value });
+const plainOf = (value, depth, seen) => {
+  if (value === null || typeof value !== "object") {
+    return value;
+  }
+  const known = apply(mapGet, seen, [value]);
+  if (known !== undefined) {
+    return known;
+  }
+  if (depth > ${maxAnswerDepth}) {
+    throw new TypeError("The answer is nested too deeply to send.");
+  }
+  if (isArray(value)) {
+    const copy = [];
+    apply(mapSet, seen, [value, copy]);
+    const length = get(value, "length");
+    for (let index = 0; index < length; index += 1) {
+      field(copy, index, plainOf(get(value, index), depth + 1, seen));
+    }
+    return copy;
+  }
+  const prototype = prototypeOf(value);
+  if (prototype !== objectPrototype && prototype !== null) {
+    // Not plain data: crosses as it is (an RpcTarget, a stream, a Date).
+    return value;
+  }
+  const copy = prototype === null ? create(null) : {};
+  apply(mapSet, seen, [value, copy]);
+  const names = ownKeys(value);
+  for (let index = 0; index < names.length; index += 1) {
+    const key = names[index];
+    const descriptor = typeof key === "string" ? descriptorOf(value, key) : undefined;
+    if (descriptor !== undefined && get(descriptor, "enumerable") === true) {
+      const getter = get(descriptor, "get");
+      const read =
+        typeof getter === "function" ? apply(getter, value, []) : get(descriptor, "value");
+      field(copy, key, plainOf(read, depth + 1, seen));
+    }
+  }
+  return copy;
+};
 const textOf = (read, fallback) => {
   try {
     const value = read();
     return typeof value === "string" ? value : fallback;
   } catch {
     return fallback;
+  }
+};
+const detailsOf = (error) => {
+  try {
+    const details = plainOf(get(error, "details"), 1, new Map());
+    if (details === null || typeof details !== "object") {
+      return undefined;
+    }
+    const text = stringify(details);
+    return typeof text === "string" && text.length <= ${maxThrownDetails} ? details : undefined;
+  } catch {
+    return undefined;
   }
 };
 const thrownOf = (error) => {
@@ -176,29 +259,69 @@ const thrownOf = (error) => {
   } catch {
     code = undefined;
   }
-  return { name: cut(name, ${maxThrownName}), message: cut(message, ${maxThrownMessage}), code };
+  return {
+    name: cut(name, ${maxThrownName}),
+    message: cut(message, ${maxThrownMessage}),
+    code,
+    details: isObject ? detailsOf(error) : undefined,
+  };
 };
+// An envelope whose own \`then\` is undefined: never a thenable, whatever the
+// isolate's code put on \`Object.prototype\`, so the call's promise settles
+// with it.
+const envelopeOf = (key, value) => {
+  const envelope = {};
+  field(envelope, "then", undefined);
+  field(envelope, envelopeKey, true);
+  field(envelope, key, value);
+  return envelope;
+};
+const thrownAnswer = (error) => envelopeOf("thrown", thrownOf(error));
+const thrownResponse = (error) =>
+  new Response(stringify(thrownOf(error)), {
+    status: 500,
+    headers: { [thrownHeader]: "1" },
+  });
 const answered = (method, self, args) =>
   (async () => {
     try {
-      return await apply(method, self, args);
+      const value = await apply(method, self, args);
+      return envelopeOf("value", plainOf(value, 1, new Map()));
     } catch (error) {
-      return { [thrownKey]: thrownOf(error) };
+      return thrownAnswer(error);
     }
   })();
+// A Response of the entrypoint's own, without the header a thrown error's
+// crosses under, so it never reads as one.
+const ownResponse = (response) => {
+  if (typeof response !== "object" || response === null || !apply(isPrototypeOf, Response.prototype, [response])) {
+    return response;
+  }
+  const headers = get(response, "headers");
+  if (!apply(headersHas, headers, [thrownHeader])) {
+    return response;
+  }
+  const copied = new Headers(headers);
+  apply(headersDelete, copied, [thrownHeader]);
+  return new Response(get(response, "body"), {
+    status: get(response, "status"),
+    statusText: get(response, "statusText"),
+    headers: copied,
+  });
+};
 const fetched = (method, self, args) =>
   (async () => {
     try {
-      return await apply(method, self, args);
+      return ownResponse(await apply(method, self, args));
     } catch (error) {
-      return new Response(stringify(thrownOf(error)), {
-        status: 500,
-        headers: { ${JSON.stringify(thrownHeader)}: "1" },
-      });
+      return thrownResponse(error);
     }
   })();
 const call = (key, method, self, args) =>
   key === "fetch" ? fetched(method, self, args) : answered(method, self, args);
+// What a call of a method that couldn't even be read answers: its throw.
+const thrownCall = (key, error) =>
+  key === "fetch" ? async () => thrownResponse(error) : async () => thrownAnswer(error);
 const swallowed = () => undefined;
 const quietContext = (ctx) => {
   if (ctx === null || typeof ctx !== "object") {
@@ -214,11 +337,24 @@ const quietContext = (ctx) => {
     },
   });
 };
+const methodOf = (property) =>
+  typeof property === "string" && property !== "constructor" && property !== "then";
+// An entrypoint whose constructor threw: every method answers that throw.
+const standIn = (error) =>
+  new Proxy(create(entrypointPrototype), {
+    get: (target, property) =>
+      methodOf(property) ? thrownCall(property, error) : get(target, property, target),
+  });
 const quietClass = (Base) => {
   const handler = {
     get: (target, property) => {
-      const value = get(target, property, target);
-      if (typeof property !== "string" || property === "constructor" || typeof value !== "function") {
+      let value;
+      try {
+        value = get(target, property, target);
+      } catch (error) {
+        return methodOf(property) ? thrownCall(property, error) : undefined;
+      }
+      if (!methodOf(property) || typeof value !== "function") {
         return value;
       }
       return (...args) => call(property, value, target, args);
@@ -226,32 +362,52 @@ const quietClass = (Base) => {
   };
   return class extends Base {
     constructor(ctx, env) {
-      super(ctx, env);
+      let failed = false;
+      let thrown;
+      try {
+        super(quietContext(ctx), env);
+      } catch (error) {
+        failed = true;
+        thrown = error;
+      }
+      if (failed) {
+        return standIn(thrown);
+      }
       return new Proxy(this, handler);
     }
   };
 };
 const quietHandlers = (handlers) => {
   const quiet = {};
-  const names = keys(handlers);
+  const names = ownKeys(handlers);
   for (let index = 0; index < names.length; index += 1) {
     const key = names[index];
-    const value = get(handlers, key);
-    define(quiet, key, {
-      configurable: true,
-      enumerable: true,
-      writable: true,
-      value:
-        typeof value === "function"
-          ? (...args) => {
-              // A handler's context comes third: fetch(request, env, ctx).
-              if (args.length >= 3) {
-                args[2] = quietContext(args[2]);
+    if (typeof key === "string") {
+      let value;
+      let failed = false;
+      let thrown;
+      try {
+        value = get(handlers, key);
+      } catch (error) {
+        failed = true;
+        thrown = error;
+      }
+      field(
+        quiet,
+        key,
+        failed
+          ? thrownCall(key, thrown)
+          : typeof value === "function"
+            ? (...args) => {
+                // A handler's context comes third: fetch(request, env, ctx).
+                if (args.length >= 3) {
+                  args[2] = quietContext(args[2]);
+                }
+                return call(key, value, handlers, args);
               }
-              return call(key, value, handlers, args);
-            }
-          : value,
-    });
+            : value
+      );
+    }
   }
   return quiet;
 };
@@ -302,30 +458,40 @@ const rebuilt = (thrown: unknown): Error => {
   if (error.name !== name) {
     error.name = name.slice(0, maxThrownName);
   }
-  const code = field("code");
-  if (typeof code === "string" || typeof code === "number") {
-    Object.defineProperty(error, "code", {
-      configurable: true,
-      enumerable: true,
-      value: code,
-      writable: true,
-    });
+  // Its code and details, as an RPC call's thrown error carries them, for
+  // the callers that read them (an App error's details, `retryAfterMs`).
+  for (const key of ["code", "details"] as const) {
+    const value = field(key);
+    const kept =
+      key === "code"
+        ? typeof value === "string" || typeof value === "number"
+        : typeof value === "object" && value !== null;
+    if (kept) {
+      Object.defineProperty(error, key, {
+        configurable: true,
+        enumerable: true,
+        value,
+        writable: true,
+      });
+    }
   }
   return error;
 };
 
-/** What a quiet entrypoint's call answered, its thrown error thrown again. */
+/** What a quiet entrypoint's call answered: its envelope opened. */
 const rethrown = async (answer: unknown): Promise<unknown> => {
   const value: unknown = await answer;
   if (
-    typeof value === "object" &&
-    value !== null &&
-    !Array.isArray(value) &&
-    Object.hasOwn(value, thrownKey)
+    typeof value !== "object" ||
+    value === null ||
+    !Object.hasOwn(value, envelopeKey)
   ) {
-    throw rebuilt(Reflect.get(value, thrownKey));
+    return value;
   }
-  return value;
+  if (Object.hasOwn(value, "thrown")) {
+    throw rebuilt(Reflect.get(value, "thrown"));
+  }
+  return Reflect.get(value, "value");
 };
 
 /** What a quiet `fetch` answered, its thrown error thrown again. */
@@ -344,9 +510,9 @@ const rethrownFetch = async (answer: unknown): Promise<unknown> => {
 const stubOwn: ReadonlySet<PropertyKey> = new Set(["then", "constructor"]);
 
 /**
- * The entrypoint stub `entry` with each call's thrown error, answered as a
- * value under `thrownKey`, thrown again host-side: as an error of the same
- * built-in kind, with its name, its code and its message to
+ * The entrypoint stub `entry` with each call's envelope opened: its value,
+ * or its thrown error thrown again host-side, as an error of the same
+ * built-in kind with its name, code, details and message to
  * `maxThrownMessage` characters, as an RPC call's thrown error arrived.
  */
 const rethrowing = (entry: object): object =>
@@ -370,17 +536,16 @@ const rethrowing = (entry: object): object =>
   });
 
 /**
- * `code` with its console silenced first and its main module wrapped so
- * entrypoint `entrypoint`'s thrown errors cross as values (`thrownKey`),
- * unless it has a tail.
+ * `code` with its console silenced first, unless it has a tail (whose
+ * tail is how a builder sees what it wrote), and its main module wrapped
+ * so entrypoint `entrypoint`'s call throws nothing to workerd, tail or not.
  */
 const quietCode = <Code extends QuietableCode>(
   code: Code,
   entrypoint: string
 ): Code => {
-  if ((code.tails?.length ?? 0) > 0 || (code.streamingTails?.length ?? 0) > 0) {
-    return code;
-  }
+  const tailed =
+    (code.tails?.length ?? 0) > 0 || (code.streamingTails?.length ?? 0) > 0;
   const main = code.modules[code.mainModule];
   // An ES module given as `{ js }` stays one: a module given as text is
   // read by its name's extension, which `{ js }` doesn't need.
@@ -396,17 +561,19 @@ const quietCode = <Code extends QuietableCode>(
       `An isolate's main module must be an ES module to be silenced: ${code.mainModule} isn't one.`
     );
   }
-  const modules = quietModules(
-    code.mainModule,
-    { ...code.modules, [code.mainModule]: given },
-    // Its `node:timers` caught too, where it has them.
-    {
-      nodejsCompat: hasNodeModules({
-        compatibilityDate: code.compatibilityDate ?? "",
-        compatibilityFlags: code.compatibilityFlags,
-      }),
-    }
-  );
+  const modules = tailed
+    ? { ...code.modules }
+    : quietModules(
+        code.mainModule,
+        { ...code.modules, [code.mainModule]: given },
+        // Its `node:timers` caught too, where it has them.
+        {
+          nodejsCompat: hasNodeModules({
+            compatibilityDate: code.compatibilityDate ?? "",
+            compatibilityFlags: code.compatibilityFlags,
+          }),
+        }
+      );
   const quieted = modules[code.mainModule];
   const builtins = freeModuleName(modules, builtinsModule);
   const entry = freeModuleName({ ...modules, [builtins]: "" }, entryModule);
@@ -441,9 +608,10 @@ const entrypointOf = (entrypoint = "default"): string => {
 
 /**
  * A stub of the isolate `load` loads for the entrypoint it is asked for,
- * with what its calls throw rethrown host-side (`rethrowing`). The isolate
+ * with each call's envelope opened host-side (`rethrowing`). The isolate
  * is loaded once a caller names the entrypoint, since its wrapper main
- * exports that one (`entrySource`).
+ * exports that one (`entrySource`). A Durable Object class isn't wrapped,
+ * so none is handed out: nothing core or connect loads has one.
  */
 const quietStub = <Stub extends QuietableStub>(
   load: (entrypoint: string) => Stub
@@ -455,8 +623,11 @@ const quietStub = <Stub extends QuietableStub>(
         ? rethrowing(entry)
         : entry;
     },
-    getDurableObjectClass: (name, options) =>
-      load(entrypointOf(name)).getDurableObjectClass?.(name, options),
+    getDurableObjectClass: () => {
+      throw new TypeError(
+        "A silenced isolate hands out no Durable Object class: its methods' throws aren't wrapped."
+      );
+    },
   };
   // SAFETY: a stub with the Loader's stub's methods, each answering what
   // the Loader's own answers, through `rethrowing`.

@@ -173,6 +173,60 @@ const core :Workerd.Worker = (
     });
   });
 
+  // The other ways a call's answer or its throw could reach workerd, each
+  // answered inside the call (the security review of GRA-939): a getter in
+  // the answer, a constructor's throw, a method that is a throwing
+  // accessor. An answer of the call's own never reads as a thrown error,
+  // whatever its keys, and a thrown error's details cross with it.
+  it("answers each other way a call could throw inside the call, with nothing of it reported", async () => {
+    const run = async (route: string) => {
+      const response = await fetch(new URL(route, served.url));
+      return z.object({ answered: z.unknown() }).parse(await response.json())
+        .answered;
+    };
+    const thrown = {
+      kind: "TypeError",
+      message: "record-value-c40b",
+      details: null,
+    };
+    const answers = {
+      getter: await run("/thrown-getter"),
+      construction: await run("/thrown-constructor"),
+      accessor: await run("/thrown-accessor"),
+      hostile: await run("/answer-hostile"),
+      details: await run("/thrown-details"),
+    };
+    // The same isolates loaded as they are: each way is read.
+    const loud: Record<string, boolean> = {};
+    for (const route of ["getter", "constructor", "accessor", "details"]) {
+      // oxlint-disable-next-line no-await-in-loop -- one at a time, so each one's output is its own
+      await run(`/loud/thrown-${route}`);
+      // oxlint-disable-next-line no-await-in-loop -- as above
+      await sleep(SETTLE_MS);
+      loud[route] = served.logs().includes(`loud-${route}-c40b`);
+    }
+    await sleep(SETTLE_MS);
+
+    expect({
+      ...answers,
+      loud,
+      reported: served.logs().includes("record-value-c40b"),
+    }).toStrictEqual({
+      loud: { getter: true, constructor: true, accessor: true, details: true },
+      getter: thrown,
+      construction: thrown,
+      accessor: thrown,
+      hostile: {
+        answered: {
+          "\u0000grasp:answer": true,
+          thrown: { name: "TypeError", message: "forged" },
+        },
+      },
+      details: { ...thrown, details: { retryAfterMs: 5 } },
+      reported: false,
+    });
+  });
+
   // App code has no Node.js (`isolateBase`: `nodejs_compat` is the default
   // from 2026-08-04 on, so it is turned off): a timer imported by name from
   // `node:timers`, whose callback's throw nothing loaded first can catch,

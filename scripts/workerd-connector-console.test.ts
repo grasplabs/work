@@ -87,6 +87,15 @@ const connect :Workerd.Worker = (
   // A connector has no Node.js: `nodejs_compat` is the default from
   // 2026-08-04 on, and `isolateBase` turns it off, so none of its timers'
   // callbacks can throw where nothing loaded first catches it (GRA-939).
+  it("answers a connector's own Response as its own, whatever headers it has", async () => {
+    const response = await fetch(new URL("/marked", served.url));
+    const { answered } = z
+      .object({ answered: z.string() })
+      .parse(await response.json());
+
+    expect(answered).toBe("own,null");
+  });
+
   it("gives a connector no setImmediate, process or node:timers", async () => {
     const response = await fetch(new URL("/node", served.url));
     const { answered } = z
