@@ -1807,7 +1807,7 @@ const lowerListen = (
       place,
       (indent) => {
         emitter.lines.push(
-          `${indent}output = await flow.listen(${literal(id)});`
+          `${indent}output = await ${emitter.flow}.listen(${literal(id)});`
         );
       },
       true

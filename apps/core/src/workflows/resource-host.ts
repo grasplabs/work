@@ -1169,17 +1169,17 @@ export class ResourceRunHost
    */
   readonly #items = new Map<string, Json[]>();
   /**
-   * The filters each listen task's enter step resolved, by task, as this
+   * The filters each listen task's enter step resolved, by place, as this
    * activation reached it: what its waits match, exactly.
    */
   readonly #listens = new Map<string, ResolvedListen>();
   /**
    * The input each listen task's enter step recorded, as transformed, by
-   * task: what its leave step's transformations read as `$input`.
+   * place: what its leave step's transformations read as `$input`.
    */
   readonly #listenInputs = new Map<string, Json>();
   /**
-   * The events each listen task took, as its output holds them, by task,
+   * The events each listen task took, as its output holds them, by place,
    * as this activation took them or replayed them: what its leave step
    * transforms, never what the isolate passes.
    */
