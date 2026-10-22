@@ -5,6 +5,23 @@
 import type { VectorMatch, VectorMetric } from "./vector-index.ts";
 
 /**
+ * The float32 bytes a shard holds in memory at most: half an isolate's
+ * 128 MB, so a search's own work and the rest of the object fit beside it.
+ */
+const shardBytes = 64 * 1024 * 1024;
+
+/** Records a shard holds at most, whatever their dimensions. */
+const maxShardRecords = 50_000;
+
+/**
+ * Records one shard of a generation holds: 16,384 at 1024 dimensions,
+ * 10,922 at the most, 1536. The catalog places no more in one, and its
+ * memory grows to no more than this unless it holds more.
+ */
+export const shardCapacity = (dimensions: number): number =>
+  Math.min(maxShardRecords, Math.floor(shardBytes / (dimensions * 4)));
+
+/**
  * How near a row is, higher nearer: cosine or dot product as they are,
  * euclidean as its negated distance. `sum` is the dot product, or for
  * euclidean the squared distance; a zero vector has cosine 0 to anything.
@@ -80,7 +97,13 @@ export class Scan {
     if (rows <= this.#norms.length) {
       return;
     }
-    const capacity = Math.max(rows, this.#norms.length * 2);
+    // Doubling, but not past a full shard: the old rows stay allocated
+    // while they are copied, so growing past it could take twice the
+    // memory a shard may.
+    const capacity = Math.max(
+      rows,
+      Math.min(shardCapacity(this.dimensions), this.#norms.length * 2)
+    );
     const values = new Float32Array(capacity * this.dimensions);
     values.set(this.#values);
     const norms = new Float32Array(capacity);

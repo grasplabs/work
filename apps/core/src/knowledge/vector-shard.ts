@@ -134,10 +134,17 @@ export class VectorShard extends DurableObject<Env> {
   }
 
   #load(dimensions: number): Scan {
-    const rows = this.ctx.storage.sql.exec<{ id: string; vec: ArrayBuffer }>(
+    const { sql } = this.ctx.storage;
+    // Sized to the rows first, so loading never copies them to grow.
+    const [held] = sql
+      .exec<{ held: number }>(
+        "SELECT count(*) AS held FROM vectors WHERE vec IS NOT NULL"
+      )
+      .toArray();
+    const rows = sql.exec<{ id: string; vec: ArrayBuffer }>(
       "SELECT id, vec FROM vectors WHERE vec IS NOT NULL"
     );
-    const scan = new Scan(dimensions);
+    const scan = new Scan(dimensions, Math.max(1, held?.held ?? 0));
     for (const { id, vec } of rows) {
       scan.set(id, new Float32Array(vec));
     }

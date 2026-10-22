@@ -48,6 +48,7 @@ import type {
   VectorIndexStatus,
   VectorRecord,
 } from "./vector-index.ts";
+import { shardCapacity } from "./vector-scan.ts";
 import type { VectorShard } from "./vector-shard.ts";
 
 /** The objects the provider reaches: a namespace each, or a stand-in. */
@@ -72,22 +73,6 @@ export interface SqliteVectorOptions {
    */
   shardCapacity?: number;
 }
-
-/**
- * The float32 bytes a shard holds in memory at most: half an isolate's
- * 128 MB, so a search's own work and the rest of the object fit beside it.
- */
-const shardBytes = 64 * 1024 * 1024;
-
-/** Records a shard holds at most, whatever their dimensions. */
-const maxShardRecords = 50_000;
-
-/**
- * Records one shard of a generation holds: 16,384 at 1024 dimensions,
- * 10,922 at the most, 1536.
- */
-export const shardCapacity = (dimensions: number): number =>
-  Math.min(maxShardRecords, Math.floor(shardBytes / (dimensions * 4)));
 
 /**
  * Shards one search reaches before it reports itself incomplete: as many
