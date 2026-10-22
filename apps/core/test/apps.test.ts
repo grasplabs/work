@@ -423,6 +423,22 @@ export default workflowTests(report, [{ name: "counts", mocks: { count: 1 }, exp
     });
   });
 
+  it("never marks a version still holding the v1 server's files as a blueprint", async () => {
+    const { apps, userId } = await appsApi("builder");
+    const app = await newApp(apps);
+    await storedUnchecked(app.id, userId, {
+      ...first,
+      "app/server.ts": "export class App {}\n",
+    });
+
+    await expect(apps.blueprints.mark(app.id, 1)).rejects.toMatchObject({
+      code: "app.v1_server",
+      details: { issues: ["app/server.ts"] },
+    });
+    const marked = await apps.blueprints.list();
+    expect(marked.filter(({ app: of }) => of === app.id)).toStrictEqual([]);
+  });
+
   it("audits every commit and version change, by identifiers only", async () => {
     const { apps, userId } = await appsApi("admin");
     const actor = { type: "person", userId };

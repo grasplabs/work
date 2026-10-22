@@ -679,7 +679,7 @@ export const commitFiles = async (
   if (tree === latest?.tree) {
     throw appErrors.create("app.nothing_to_commit");
   }
-  refuseV1Server(files);
+  refuseV1Server(files.keys());
   const workflowCalls = workflowCallsIn(Object.fromEntries(files));
   const workflowBindings = await appBindingKinds(env, appId);
   await storeTree(env, appId, { tree, json });
@@ -852,7 +852,7 @@ export const proposeDraft = async (
   if (tree === latest?.tree) {
     throw appErrors.create("app.nothing_to_commit");
   }
-  refuseV1Server(files);
+  refuseV1Server(files.keys());
   const workflowCalls = workflowCallsIn(Object.fromEntries(files));
   const workflowBindings = await appBindingKinds(env, appId);
   await storeTree(env, appId, { tree, json });

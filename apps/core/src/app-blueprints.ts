@@ -28,6 +28,7 @@ import {
   storeTree,
   toApp,
   toVersion,
+  versionFiles,
   versionTree,
   workflowsIn,
 } from "./apps.ts";
@@ -179,6 +180,9 @@ export const markBlueprint = async (
   const found = await appFor(env, by, app, "builder");
   requireNotStaff(by);
   const row = await findVersion(env, found.id, version);
+  // A version holding the v1 server's files is never a blueprint: no App
+  // could be created from it (`createFromBlueprint` refuses them too).
+  refuseV1Server(Object.keys(await versionFiles(env, found.id, row.version)));
   const db = drizzle(env.DB);
   const marked = async () =>
     await db
@@ -322,7 +326,7 @@ export const createFromBlueprint = async (
   );
   // A blueprint marked from a version holding the v1 server's files: no
   // App is created from it as none is committed with them.
-  refuseV1Server(files);
+  refuseV1Server(files.keys());
   const tree = await versionTree(files);
   await storeTree(env, app, tree);
 
