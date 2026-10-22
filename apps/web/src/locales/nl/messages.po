@@ -1891,8 +1891,13 @@ msgid "Another version of this domain was made current since this list was read.
 msgstr "Sinds deze lijst is gelezen, is een andere versie van dit domein actueel gemaakt. De lijst toont die nu: beoordeel die versie en keur daarna opnieuw goed."
 
 #: src/brain/brain.ts
+#: src/chat/brain-questions.tsx
 msgid "Answer"
 msgstr "Antwoord"
+
+#: src/inbox/item-detail.tsx
+msgid "Answer in the brain"
+msgstr "Beantwoorden in het brein"
 
 #. Something that has not happened yet, on a timeline
 #: src/brain/brain.ts
@@ -2154,6 +2159,11 @@ msgstr "Zoals het bedrijf ze noemde, tot de personeelslijst binnen is."
 #: src/routes/_shell.onboarding.stephen.tsx
 msgid "As the kickoff suggests"
 msgstr "Zoals de kick-off voorstelt"
+
+#. placeholder {0}: gap.owner
+#: src/chat/brain-questions.tsx
+msgid "Ask {0}"
+msgstr "Vraag het aan {0}"
 
 #: src/chat/thread.tsx
 msgid "Ask again"
@@ -2580,6 +2590,7 @@ msgstr "Kwam naar voren in {source}"
 msgid "Can {verbs} company data"
 msgstr "Kan bedrijfsdata {verbs}"
 
+#: src/chat/brain-questions.tsx
 #: src/chat/project-dialog.tsx
 #: src/decision-confirmation.tsx
 #: src/engines/package-approvals.tsx
@@ -3013,6 +3024,10 @@ msgstr "Compact"
 #: src/routes/_shell.settings.billing.tsx
 msgid "Company"
 msgstr "Bedrijf"
+
+#: src/activity/pending.tsx
+msgid "Company Brain, read only. This can read company Brain evidence and its open questions, from the collections it was granted and only what the person it works for may read too. It can never write to the Brain. Every read is recorded"
+msgstr "Company Brain, alleen lezen. Het kan bewijs en open vragen van het Company Brain lezen, uit de collecties die het kreeg en alleen wat de persoon voor wie het werkt ook mag lezen. Het kan nooit naar het Brain schrijven. Elke leesactie wordt vastgelegd"
 
 #: src/chat/builds.tsx
 msgid "Compared with version {current}, which runs now."
@@ -4361,6 +4376,16 @@ msgstr "Volgt uit een andere gebeurtenis"
 msgid "Follows from: {parentTitle}"
 msgstr "Volgt uit: {parentTitle}"
 
+#. placeholder {0}: gap.owner
+#: src/chat/brain-questions.tsx
+msgid "For {0}"
+msgstr "Voor {0}"
+
+#. placeholder {0}: gap.owner
+#: src/chat/brain-questions.tsx
+msgid "For {0}, who was asked"
+msgstr "Voor {0}, die is gevraagd"
+
 #: src/inbox/item-detail.tsx
 msgid "For {person}"
 msgstr "Voor {person}"
@@ -5274,6 +5299,10 @@ msgstr "Behoud de regels die zeggen wat je beleid bedoelt, pas ze aan waar nodig
 #: src/dashboard/signals.tsx
 msgid "Keeps failing"
 msgstr "Mislukt steeds"
+
+#: src/activity/audit-words.ts
+msgid "Kept something the chat can no longer read from the model"
+msgstr "Iets wat de chat niet meer kan lezen, voor het model weggehouden"
 
 #: src/landscape/landscape.ts
 msgid "Keys, tokens, secrets, credentials or runbooks that could grant access."
@@ -7022,6 +7051,7 @@ msgctxt "inbox item kind"
 msgid "Open question"
 msgstr "Open vraag"
 
+#: src/chat/brain-questions.tsx
 #: src/routes/_shell.brain.$noteId.tsx
 msgid "Open questions"
 msgstr "Open vragen"
@@ -8483,6 +8513,10 @@ msgstr "Gezien, nooit genoemd"
 msgctxt "send the question"
 msgid "Send"
 msgstr "Versturen"
+
+#: src/chat/brain-questions.tsx
+msgid "Send answer"
+msgstr "Antwoord versturen"
 
 #: src/knowledge/collection-markers.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
@@ -11557,6 +11591,10 @@ msgstr "Jij laat me zien wie wie is, waar de documenten staan en welke tools men
 msgid "You sign in on {app}’s own page."
 msgstr "Je meldt je aan op de eigen pagina van {app}."
 
+#: src/inbox/items.ts
+msgid "You were asked this as the {owner}. Answer it in the brain: everyone in the company reads the answer, with your name."
+msgstr "Dit is je gevraagd als {owner}. Beantwoord het in het brein: iedereen in het bedrijf leest het antwoord, met je naam."
+
 #: src/routes/guest.tsx
 msgid "You:"
 msgstr "Jij:"
@@ -11572,6 +11610,10 @@ msgstr "Je bent nog ingelogd. Probeer het zo opnieuw."
 #: src/routes/_shell.settings.tsx
 msgid "Your account"
 msgstr "Je account"
+
+#: src/chat/brain-questions.tsx
+msgid "Your answer"
+msgstr "Je antwoord"
 
 #: src/decision-confirmation.tsx
 msgctxt "the answer a person gives a decision"

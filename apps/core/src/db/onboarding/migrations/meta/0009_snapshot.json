@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "a9ef09ac-b665-4be0-9fba-d7d4d9321860",
+  "id": "fcb1c5d8-1fa0-46bb-9279-c1a6f4bdf4b4",
   "prevId": "4372ac7b-7d7d-48a9-bc42-3525e04e776c",
   "tables": {
     "audit_outbox": {
@@ -180,6 +180,13 @@
           "notNull": true,
           "autoincrement": false
         },
+        "lead_of": {
+          "name": "lead_of",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "started_at": {
           "name": "started_at",
           "type": "text",
@@ -189,20 +196,6 @@
         },
         "completed_at": {
           "name": "completed_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "agreed_at": {
-          "name": "agreed_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "drawn_at": {
-          "name": "drawn_at",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
@@ -397,6 +390,13 @@
         },
         "deleted_at": {
           "name": "deleted_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "led_team": {
+          "name": "led_team",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
