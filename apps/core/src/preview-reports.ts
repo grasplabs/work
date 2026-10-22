@@ -1,4 +1,3 @@
-import { appErrors } from "@grasp-os/shared/apps";
 import type { PreviewProblem } from "@grasp-os/shared/chat";
 import type { ChatId } from "@grasp-os/shared/ids";
 import { categoryOf } from "@grasp-os/shared/operations";
@@ -27,7 +26,8 @@ import type { ServerLog } from "@grasp-os/shared/screens";
 // A problem is text the draft's code wrote, or what the person typed into
 // the preview. It reaches the agent only as data in a check's result,
 // never as instructions (agent-builds.ts). A preview reads no real data
-// (preview-bindings.ts), so it carries none.
+// (sealed-previews.ts: a store of its own, no resources), so it carries
+// none.
 
 /** Most problems kept of one revision: the first ones. */
 const maxProblems = 10;
@@ -43,49 +43,8 @@ const openForMs = 10 * 60 * 1000;
 
 const keyOf = (chatId: ChatId, app: string): string => `${chatId}:${app}`;
 
-/** The failures of a preview's server call that are the draft's to fix. */
-const draftFailures = new Set([
-  "app.failed",
-  "app.timed_out",
-  "app.answer_invalid",
-  "app.method_invalid",
-  "app.build_failed",
-]);
-
 /** Most characters of a server failure's message kept. */
 const maxMessage = 2000;
-
-/**
- * What a preview's call of `method` failed with, as a problem of the
- * draft's server code: the draft's own message for `app.failed`, and
- * nothing for a failure that isn't the draft's (a refusal of the
- * preview's, a session that ended, a preview out of date).
- */
-export const serverProblem = (
-  method: string,
-  error: unknown
-): PreviewProblem | undefined => {
-  const code = appErrors.codeOf(error);
-  if (code === undefined || !draftFailures.has(code)) {
-    return undefined;
-  }
-  const details =
-    error instanceof Error && "details" in error ? error.details : undefined;
-  const own =
-    typeof details === "object" &&
-    details !== null &&
-    "message" in details &&
-    typeof details.message === "string"
-      ? details.message
-      : undefined;
-  const message = own ?? (error instanceof Error ? error.message : code);
-  return {
-    source: "server",
-    at: method,
-    kind: "failed",
-    message: message.slice(0, maxMessage),
-  };
-};
 
 /** The function a call's request names, as text for a problem's `at`. */
 const functionOf = (request: unknown): string => {

@@ -45,7 +45,7 @@ import type {
 import { brainTasks } from "./brain-tasks.ts";
 
 /** Bumped with any change to what the generator makes from a seed and size. */
-export const brainDistractorVersion = "1";
+export const brainDistractorVersion = "2";
 
 /** The seed runs use unless they name another. */
 export const brainDistractorSeed = 678;
@@ -65,6 +65,9 @@ export type BrainScaleSize = (typeof brainScaleSizes)[number];
 export const brainDistractorDigests: Record<string, string> = {
   "1/678/1000":
     "3e648fe5361e05709e90b2eb231967d1ced856f9fc34001ab24e1c15db483f83",
+  // Suite 2026-10-21.1's tasks: more queries for the generator to draw on.
+  "2/678/1000":
+    "3f7a3a98e1702b259850cedbb0a155afb1914bda61a2f7c48fd844cc7abd4c88",
 };
 
 /** Sections in every generated document: one chunk each. */

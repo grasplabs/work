@@ -101,6 +101,10 @@ test("someone with nothing waiting sees no pile or activity, and a board with no
     page.getByRole("region", { name: "Could be better" })
   ).toContainText("Nothing to make better right now.", pageRead);
   await expect(page.getByRole("region", { name: "Activity" })).toHaveCount(0);
+  // What the models cost is for admins only.
+  await expect(
+    page.getByRole("region", { name: "AI spend this month" })
+  ).toHaveCount(0);
   await expect(page.getByRole("alert")).toHaveCount(0);
 });
 
@@ -327,6 +331,23 @@ test("a person takes a widget off, adds it back and moves it, kept over a reload
   await expect(titles).toHaveText(begun);
   await expect(page.getByRole("alert")).toHaveCount(0);
   core[Symbol.dispose]();
+});
+
+test("an admin sees what the models cost this month, with the way to AI spend in Settings", async ({
+  pageOf,
+}) => {
+  const { admin } = peopleIn("dashboard");
+  const page = await pageOf(admin);
+  await page.goto("/dashboard");
+
+  // Other tests' calls count too, so the amount isn't pinned.
+  const spend = page.getByRole("region", { name: "AI spend this month" });
+  await expect(spend).toContainText(
+    "for every model call this month",
+    pageRead
+  );
+  await spend.getByRole("link", { name: "AI spend in Settings" }).click();
+  await expect(page).toHaveURL(/\/settings\/spend$/u);
 });
 
 test("an admin sees the latest activity, with the way to the audit trail", async ({

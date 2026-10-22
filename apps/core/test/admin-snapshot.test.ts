@@ -1,25 +1,40 @@
+import { jsonSchemaOf, schemaFromDescriptor } from "@grasp-os/sdk/host";
 import {
   adminSnapshotPath,
   adminSnapshotPurpose,
   adminSnapshotSchema,
 } from "@grasp-os/shared/admin-snapshot";
 import { hkdfHmacKey } from "@grasp-os/shared/client-secrets";
+import { composioConsentText } from "@grasp-os/shared/connect";
+import type { ConnectorContract } from "@grasp-os/shared/connect";
 import { sha256Hex, toHex } from "@grasp-os/shared/encoding";
 import type { InterviewProgress } from "@grasp-os/shared/interview-links";
 import type { Roster } from "@grasp-os/shared/onboarding";
 import { onboardingSummaryPurpose } from "@grasp-os/shared/onboarding-summary";
 import { platformUpdateSignatureHeader } from "@grasp-os/shared/platform-change";
+import type { Identity } from "@grasp-os/shared/rpc";
+import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import { createExecutionContext } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import worker from "../src/index.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
+import { requireResourceRole } from "../src/permission-resources.ts";
+import { grantPermission, requestPermission } from "../src/permissions.ts";
+import { approveWorkflowBinding } from "../src/workflow-bindings.ts";
+import { publishCatalogContract } from "../src/workflow-catalog.ts";
+import {
+  createWorkflowResource,
+  publishWorkflowVersion,
+} from "../src/workflow-resources.ts";
+import { consentCode, tokensFor } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
-import { signInConfig } from "./sign-in-config.ts";
+import { acmeTenant, signInConfig } from "./sign-in-config.ts";
 import {
   auditedDuring,
   coreOrigin,
+  openRpc,
   routed,
   signedIn,
   signedInApi,
@@ -416,12 +431,7 @@ describe("the admin snapshot", () => {
       usage: snapshot.usage.find(({ day }) => day === today)?.use.interviews?.[
         model
       ],
-      unknown: [
-        snapshot.contacts,
-        snapshot.works,
-        snapshot.contract,
-        snapshot.integrations,
-      ],
+      unknown: [snapshot.contacts, snapshot.works, snapshot.contract],
     }).toStrictEqual({
       status: 200,
       cache: "no-store",
@@ -462,7 +472,7 @@ describe("the admin snapshot", () => {
         tokensOut: 400,
         seconds: 0,
       },
-      unknown: [null, null, null, null],
+      unknown: [null, null, null],
     });
     expect(text).not.toContain(sentinel);
     expect(text).not.toContain("Their own sheet");
@@ -600,5 +610,310 @@ describe("the admin snapshot", () => {
       kickoff: { at: saved.transcript?.at, known: 0.3 },
     });
     expect(text).not.toContain(sentinel);
+  });
+});
+
+/** An admin, signed in, with their `connections` API and who they are to core. */
+const admin = async () => {
+  const { session, userId, person } = await signedInWithRole(idp, "admin");
+  const { core } = await openRpc(session);
+  const identity: Identity = {
+    userId,
+    email: String(person.email),
+    name: String(person.name),
+    role: "admin",
+    teams: [],
+    staff: false,
+    expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+  };
+  return {
+    session,
+    identity,
+    connections: core.authenticate().connections,
+  };
+};
+
+type Admin = Awaited<ReturnType<typeof admin>>;
+
+/** The provider, or Composio, sending `session`'s browser back to core. */
+const backFromProvider = async (
+  session: string,
+  query: Record<string, string>
+): Promise<void> => {
+  await routed(
+    `/api/connections/callback?${new URLSearchParams(query).toString()}`,
+    { headers: { cookie: session } }
+  );
+};
+
+/** HubSpot, connected through Composio by `by`: the new connection's ID. */
+const connectHubspot = async (by: Admin): Promise<string> => {
+  const { url } = await by.connections.connectToolkit({
+    toolkit: "hubspot",
+    tools: ["HUBSPOT_LIST_CONTACTS"],
+    consent: composioConsentText,
+    returnTo: "/connections",
+  });
+  const state = new URL(url).searchParams.get("state") ?? "";
+  await backFromProvider(by.session, { state, status: "success" });
+  const listed = await by.connections.list();
+  const hubspot = listed.find(({ provider }) => provider === "hubspot");
+  if (hubspot === undefined) {
+    throw new Error("HubSpot wasn't connected");
+  }
+  return hubspot.id;
+};
+
+/** The snapshot as the console reads it, and its text as it came. */
+const snapshotNow = async () => {
+  const response = await askAsConsole();
+  const text = await response.text();
+  return { text, snapshot: adminSnapshotSchema.parse(JSON.parse(text)) };
+};
+
+/** A workflow's input or output schema: an object of `properties`. */
+const objectSchema = (properties: Record<string, unknown>) => ({
+  format: "json",
+  document: {
+    type: "object",
+    properties,
+    required: Object.keys(properties),
+    additionalProperties: false,
+  },
+});
+
+/** The descriptor of an object with no fields, and of null. */
+const emptyObject = {
+  descriptorVersion: 1,
+  kind: "object",
+  presence: "required",
+  nullable: false,
+  fields: {},
+};
+const nullValue = {
+  descriptorVersion: 1,
+  kind: "null",
+  presence: "required",
+  nullable: false,
+};
+
+/**
+ * A workflow whose current version binds `crm` to HubSpot, as an admin
+ * approved through the workflow's own permission on `connectionId`, and
+ * declares `mail`, which no connection was approved for yet.
+ */
+const crmWorkflow = async (by: Admin, connectionId: string) => {
+  const key = `crm-${unique()}`;
+  const operation = {
+    input: JSON.stringify(emptyObject),
+    output: JSON.stringify(nullValue),
+  };
+  await publishCatalogContract(env, by.identity, {
+    key,
+    kind: "connector",
+    operations: { HUBSPOT_LIST_CONTACTS: operation },
+  });
+  const workflow = await createWorkflowResource(
+    env,
+    by.identity,
+    `crm-${unique()}`
+  );
+  const binding = (alias: string) => ({
+    [alias]: { kind: "connector", contract: key },
+  });
+  await publishWorkflowVersion(env, by.identity, workflow.id, {
+    definition: JSON.stringify({
+      document: {
+        dsl: "1.0.3",
+        namespace: workflowNamespace,
+        name: workflow.name,
+        version: "1.0.0",
+        title: workflow.name,
+        metadata: {
+          grasp: {
+            profile: "grasp-open-workflow/1",
+            params: {},
+            bindings: { ...binding("crm"), ...binding("mail") },
+          },
+        },
+      },
+      input: { schema: objectSchema({}) },
+      output: { schema: objectSchema({ status: { type: "string" } }) },
+      do: [
+        ...["crm", "mail"].map((alias) => ({
+          [alias]: {
+            call: "grasp.connector",
+            with: {
+              binding: alias,
+              operation: "HUBSPOT_LIST_CONTACTS",
+              arguments: {},
+            },
+          },
+        })),
+        { finish: { set: { status: "done" } } },
+      ],
+    }),
+    basedOn: null,
+  });
+  const asked = await requestPermission(
+    env,
+    by.identity,
+    {
+      subject: { type: "workflow", workflowId: workflow.id },
+      object: { type: "connection", connectionId },
+      actions: ["HUBSPOT_LIST_CONTACTS"],
+      binding: `CRM_${unique().toUpperCase()}`,
+    },
+    {
+      app: async () => await Promise.reject(new Error("No App here")),
+      resource: async (ref, needed) => {
+        await requireResourceRole(env, by.identity, ref, needed);
+      },
+    }
+  );
+  await grantPermission(env, by.identity, asked.id, { version: null });
+  // What connect serves the connection as: HubSpot's tool, as Composio's
+  // server would list it.
+  const served: ConnectorContract = {
+    contract: "composio.hubspot@1",
+    actions: {
+      HUBSPOT_LIST_CONTACTS: {
+        tool: "HUBSPOT_LIST_CONTACTS",
+        readOnly: false,
+        input: JSON.stringify(
+          jsonSchemaOf(schemaFromDescriptor(operation.input).descriptor, {
+            exact: true,
+          })
+        ),
+        output: JSON.stringify(
+          jsonSchemaOf(schemaFromDescriptor(operation.output).descriptor, {
+            exact: true,
+          })
+        ),
+      },
+    },
+  };
+  const connecting: Env = {
+    ...env,
+    CONNECT: new Proxy(env.CONNECT, {
+      get: (target, name): unknown =>
+        name === "connectorContract"
+          ? async () => await Promise.resolve(served)
+          : Reflect.get(target, name),
+    }),
+  };
+  await approveWorkflowBinding(connecting, by.identity, workflow.id, {
+    alias: "crm",
+    target: {
+      kind: "connector",
+      permissionId: asked.id,
+      contract: "composio.hubspot@1",
+    },
+    reviewed: { version: 1 },
+  });
+  return workflow;
+};
+
+describe("what the snapshot says the company connected and still needs", () => {
+  it("names a workflow bound to an app that isn't connected any more, and one binding no connection serves yet", async () => {
+    const by = await admin();
+    const hubspot = await connectHubspot(by);
+    const workflow = await crmWorkflow(by, hubspot);
+
+    const connected = await snapshotNow();
+    await by.connections.disconnect(hubspot);
+    const disconnected = await snapshotNow();
+
+    const needsOf = ({ snapshot }: typeof connected) =>
+      snapshot.integrations?.needed.filter(
+        (need) => need.workflow.id === workflow.id
+      );
+    expect({
+      connected: needsOf(connected),
+      disconnected: needsOf(disconnected),
+    }).toStrictEqual({
+      // Connected, HubSpot serves `crm`; nothing is approved for `mail`.
+      connected: [
+        {
+          workflow: { id: workflow.id, name: workflow.name },
+          alias: "mail",
+          app: null,
+          state: "unbound",
+        },
+      ],
+      disconnected: [
+        {
+          workflow: { id: workflow.id, name: workflow.name },
+          alias: "crm",
+          app: { source: "composio", provider: "hubspot" },
+          state: "missing",
+        },
+        {
+          workflow: { id: workflow.id, name: workflow.name },
+          alias: "mail",
+          app: null,
+          state: "unbound",
+        },
+      ],
+    });
+  });
+
+  it("says what the company connected, its people's own counted by app, and carries no token, server URL or account of theirs", async () => {
+    const by = await admin();
+    const hubspot = await connectHubspot(by);
+    // Anna connects her own mailbox.
+    const anna = await signedInWithRole(idp, "user");
+    const { core } = await openRpc(anna.session);
+    const annas = core.authenticate().connections;
+    const account = String(anna.person.oid);
+    const { url } = await annas.start({
+      provider: "microsoft",
+      scope: "personal",
+      returnTo: "/connections",
+    });
+    const authorization = new URL(url);
+    await backFromProvider(anna.session, {
+      code: consentCode(authorization, acmeTenant, account),
+      state: authorization.searchParams.get("state") ?? "",
+    });
+    // What connect holds of HubSpot: its account at Composio.
+    const [held] = await env.CONNECT.connectionOwners([hubspot]);
+
+    const { text, snapshot } = await snapshotNow();
+
+    const { connectedAt, ...hubspotRow } =
+      snapshot.integrations?.connected.find(
+        ({ provider }) => provider === "hubspot"
+      ) ?? {};
+    expect({
+      hubspot: hubspotRow,
+      connectedToday: connectedAt?.slice(0, 10),
+      microsoft: snapshot.integrations?.personal.some(
+        ({ provider, people }) => provider === "microsoft" && people > 0
+      ),
+    }).toStrictEqual({
+      hubspot: {
+        source: "composio",
+        provider: "hubspot",
+        state: "works",
+        hidden: false,
+        connectedBy: by.identity.name,
+        account: null,
+        tools: ["HUBSPOT_LIST_CONTACTS"],
+      },
+      connectedToday: new Date().toISOString().slice(0, 10),
+      microsoft: true,
+    });
+    const secrets = [
+      // Anna's tokens, her account and her address.
+      ...tokensFor(account),
+      account,
+      `${account}@acme.test`,
+      // What Composio knows HubSpot's connection by, and where its server is.
+      held?.accountId ?? "no account",
+      "composio.dev",
+      "https://",
+    ];
+    expect(secrets.filter((secret) => text.includes(secret))).toStrictEqual([]);
   });
 });

@@ -12,6 +12,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
+import { budgetMonth } from "../src/model-budgets.ts";
 import { modelLedger } from "../src/model-ledger.ts";
 import { models } from "../src/models.ts";
 import type { ModelCall } from "../src/models.ts";
@@ -24,6 +25,7 @@ import { mockIdp } from "./idp.ts";
 import { finished, woken } from "./runs.ts";
 import { openRpc, outcome, signedInApi, signedInWithRole } from "./sign-in.ts";
 import {
+  appCall,
   appWith as serverAppWith,
   bindModel,
   modelRegistration,
@@ -83,6 +85,45 @@ const llmStep = (more = "") => `  return await step.llm("extract", {
     schema: z.object({ total: z.int() }),
     ${more}
   });`;
+
+/**
+ * The sample App with an action, `assist.draft`, that asks its model
+ * resource `reader`, and a workflow, `drafter`, whose step calls it: a
+ * run's model request made through one of its App's functions.
+ */
+const draftingFiles = (): Record<string, string> => {
+  const sample = modelRegistration({});
+  return {
+    ...sample,
+    "app.ts": (sample["app.ts"] ?? "")
+      .replace(
+        'import schema from "./schema.ts";',
+        'import { draft, reader } from "./operations/assist.ts";\nimport schema from "./schema.ts";'
+      )
+      .replace("  operations: {", "  operations: {\n    assist: { draft },")
+      .replace(
+        "uses: [stats, send, search",
+        "uses: [stats, send, search, reader"
+      ),
+    "operations/assist.ts": `import { resource, v } from "@grasp-os/sdk";
+import { action } from "#grasp/server";
+
+export const reader = resource.model("reader", { maxOutputTokens: 6000 });
+
+export const draft = action({
+  args: { prompt: v.string() },
+  returns: v.string(),
+  uses: [reader],
+  handler: async (ctx, args) => await ctx.resources.reader.generate({ prompt: args.prompt }),
+});
+`,
+    ...workflowFiles(
+      "drafter",
+      `  return await step.do("draft", { description: "Draft it" }, async () => ${appCall("assist.draft", "action", '{ prompt: "Hi" }', "string")});`,
+      { draft: "Hi." }
+    ),
+  };
+};
 
 let monthsUsed = 0;
 
@@ -647,6 +688,68 @@ ${llmStep()}`,
         accountUsed: true,
         accountPlaces: 0,
       },
+    });
+  });
+
+  it("charge the model requests a run in another App's account makes through its App's functions to that account", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const appX = await appWith(
+      builder,
+      workflowFiles("idle", "  return null;")
+    );
+    const appY = await serverAppWith(builder, draftingFiles());
+    await bindModel(appY, "reader", workersAi);
+    const root = await builder.api.workflows.start(appX, "idle");
+    await finished(root.id);
+
+    const result = await withGateway(
+      { run: { limit: 1 } },
+      [cheapAnswer],
+      async (fake) => {
+        const joined = await startedByMail(appY, "drafter", root.id);
+        await finished(joined);
+        const events = await eventsNow();
+        const calls = events.filter(
+          ({ action, actor }) =>
+            action === "model.call" &&
+            actor.type === "workflow" &&
+            actor.runId === joined
+        );
+        const spent = await modelLedger(env).spendOfKeys(
+          budgetMonth(env),
+          "run",
+          [joined, root.id]
+        );
+        return {
+          sent: fake.requests.length,
+          status: await statusOf(builder, joined),
+          purposes: calls.map(({ detail }) => detail.purpose),
+          // Named on the request, and counted under: App Y's account, which
+          // is the run itself, as the first of App Y's runs in the lineage.
+          accounts: calls.map(({ actor }) =>
+            actor.type === "workflow" ? actor.accountRunId : undefined
+          ),
+          spentUnder: spent
+            .filter(({ spentMicros }) => spentMicros > 0)
+            .map(({ key }) => named(key, { joined, root: root.id })),
+          joined,
+        };
+      }
+    );
+
+    expect({
+      ...result,
+      accounts: result.accounts.map((id) =>
+        named(id ?? null, { joined: result.joined })
+      ),
+      joined: undefined,
+    }).toStrictEqual({
+      sent: 1,
+      status: "completed",
+      purposes: ["app.resource"],
+      accounts: ["joined"],
+      spentUnder: ["joined"],
+      joined: undefined,
     });
   });
 

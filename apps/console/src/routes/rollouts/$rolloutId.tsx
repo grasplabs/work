@@ -64,7 +64,7 @@ const statusOf = (rollout: RolloutView): string => {
     return "paused";
   }
   if (rollout.status === "waiting") {
-    return `waiting for approval after ring ${rollout.ring}`;
+    return `ring ${rollout.ring} passed: waiting for approval to roll out to every other client`;
   }
   if (rollout.status === "running") {
     return `rolling out to ring ${rollout.ring}`;
@@ -104,7 +104,7 @@ const Controls = ({ rollout }: { rollout: RolloutView }) => {
             act(async () => await approveRolloutFn({ data }));
           }}
         >
-          Approve the next ring
+          Approve every other client
         </Button>
       ) : null}
       {active && pausable.has(rollout.run) ? (

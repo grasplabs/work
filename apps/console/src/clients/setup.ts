@@ -129,6 +129,7 @@ const byHand: ReadonlySet<string> = new Set([
   "client.rotate_secrets",
   "client.sign_in",
   "client.apply_settings",
+  "client.stripe_customer",
 ]);
 
 const deploysOf = async (

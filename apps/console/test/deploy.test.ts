@@ -23,7 +23,7 @@ import { importReleases } from "../src/releases/import.ts";
 import type { ReleaseStore } from "../src/releases/import.ts";
 import type { AccountState } from "./cloudflare-api-kit.ts";
 import { mockCloudflareApi } from "./cloudflare-api.ts";
-import { publishRelease } from "./releases.ts";
+import { declared, publishRelease } from "./releases.ts";
 import type { ReleaseSpec } from "./releases.ts";
 
 const token = "test-deployer-token-0123456789";
@@ -1459,5 +1459,159 @@ describe("rotating a client's secrets", () => {
       eightDaysOn: false,
       later: true,
     });
+  });
+});
+
+/** Starts deploying a new release of `spec` to `clientId`: the deploy's id. */
+const startNext = async (
+  clientId: string,
+  spec: ReleaseSpec
+): Promise<string> => {
+  const release = await publishRelease(spec);
+  await importReleases(env.RELEASES, db);
+  return await startDeploy(db, staff, clientId, release.id);
+};
+
+/** A refused deploy: how its row ended, and what changed in the account. */
+const refusal = async (deployId: string, account: AccountState) => {
+  const uploads = account.scriptUploads.length;
+  await failingDeploy(deployId);
+  const row = await deployRow(deployId);
+  return {
+    status: row?.status,
+    step: row?.step,
+    error: row?.error,
+    uploaded: account.scriptUploads.length - uploads,
+  };
+};
+
+/** How a deploy refused before it changed anything ends (`refusal`). */
+const refused = (error: string) => ({
+  status: "failed",
+  step: null,
+  error,
+  uploaded: 0,
+});
+
+/** A release's connect serving `serves`, its core calling `calls`. */
+const interfaces = (serves: number, calls: { min: number; max: number }) => ({
+  ...declared,
+  interfaces: {
+    connect: { serves, calls: {} },
+    core: { calls: { connect: calls } },
+  },
+});
+
+describe("deploying only a release that works with what the client runs", () => {
+  it("refuses a release that declares nothing of what its code works with, before it changes anything", async () => {
+    const { account, deployId } = await setUp({
+      notes: "feat(core): built before releases declared",
+      compatibility: null,
+    });
+
+    await expect(refusal(deployId, account)).resolves.toStrictEqual(
+      refused("release_undeclared")
+    );
+    expect(account.d1).toStrictEqual([]);
+  });
+
+  it("changes connect's interface only through a core that calls both versions, as connect goes live first", async () => {
+    const { account, clientId, deployId } = await setUp();
+    await runDeploy(context, deployId);
+    const connectServing2 = {
+      notes: "feat(connect): serve version 2",
+      compatibility: interfaces(2, { min: 2, max: 2 }),
+    };
+
+    // The client's core calls only version 1, and would call version 2
+    // until its own deploy.
+    const tooSoon = await refusal(
+      await startNext(clientId, connectServing2),
+      account
+    );
+    // A core that calls both goes out first...
+    const bridge = await startNext(clientId, {
+      notes: "feat(core): call version 1 or 2",
+      compatibility: interfaces(1, { min: 1, max: 2 }),
+    });
+    await runDeploy(context, bridge);
+    // ...and then connect 2 can.
+    const after = await startNext(clientId, connectServing2);
+    await runDeploy(context, after);
+
+    const afterRow = await deployRow(after);
+    expect({ tooSoon, after: afterRow?.status }).toStrictEqual({
+      tooSoon: refused("release_incompatible"),
+      after: "done",
+    });
+  });
+
+  it("refuses a release that doesn't read every workflow journal and run every App the client's code may have left", async () => {
+    const { account, clientId, deployId } = await setUp();
+    await runDeploy(context, deployId);
+
+    const journals = await refusal(
+      await startNext(clientId, {
+        notes: "feat(core): stop reading journal 8",
+        compatibility: { ...declared, workflowJournal: { min: 9, max: 9 } },
+      }),
+      account
+    );
+    const apps = await refusal(
+      await startNext(clientId, {
+        notes: "feat(core): run only SDK protocol 3",
+        compatibility: { ...declared, sdkProtocols: { min: 3, max: 3 } },
+      }),
+      account
+    );
+    const wider = await startNext(clientId, {
+      notes: "feat(core): read journal 10 and run protocol 3 too",
+      compatibility: {
+        ...declared,
+        workflowJournal: { min: 8, max: 10 },
+        sdkProtocols: { min: 2, max: 3 },
+      },
+    });
+    await runDeploy(context, wider);
+
+    const widerRow = await deployRow(wider);
+    expect({ journals, apps, wider: widerRow?.status }).toStrictEqual({
+      journals: refused("release_incompatible"),
+      apps: refused("release_incompatible"),
+      wider: "done",
+    });
+  });
+
+  it("keeps deploying a client whose Workers run a release that declares nothing", async () => {
+    const { clientId, deployId } = await setUp();
+    await runDeploy(context, deployId);
+    // As a client deployed before releases declared anything records it.
+    const undeclared = await publishRelease({
+      notes: "feat(core): built before releases declared",
+      compatibility: null,
+    });
+    await importReleases(env.RELEASES, db);
+    await db
+      .update(clientWorkers)
+      .set({ releaseId: undeclared.id })
+      .where(eq(clientWorkers.clientId, clientId));
+
+    // Its new secrets, on the release it runs: no code changes.
+    const redeploy = await startDeploy(
+      db,
+      staff,
+      clientId,
+      undeclared.id,
+      "secrets"
+    );
+    await runDeploy(context, redeploy);
+    // A release that declares what it works with.
+    const next = await startNext(clientId, { notes: "feat(core): declared" });
+    await runDeploy(context, next);
+
+    const statuses = await Promise.all(
+      [redeploy, next].map(async (id) => await deployRow(id))
+    );
+    expect(statuses.map((row) => row?.status)).toStrictEqual(["done", "done"]);
   });
 });

@@ -21,6 +21,7 @@ import {
   executionErrors,
   reviewerChosenAtRun,
   stepReviewed,
+  stepRunsAs,
   isRetryable,
   paramsStep,
   maxAttemptTimeoutMs,
@@ -30,7 +31,11 @@ import {
   storedEmailSchema,
   workflowErrors,
 } from "@grasp-os/shared/workflows";
-import type { InputShape, WorkflowCalls } from "@grasp-os/shared/workflows";
+import type {
+  InputShape,
+  StepUse,
+  WorkflowCalls,
+} from "@grasp-os/shared/workflows";
 import type {
   WorkflowDuration,
   WorkflowStepConfig,
@@ -1413,9 +1418,19 @@ export class RunHost extends RpcTarget {
   #tampered: Error | undefined;
   /**
    * The attempts whose functions run now, in the order they began: the
-   * last is the step running now, which every reviewed call is checked
-   * against as well as the step whose host it came through
-   * (`#requireReviewed`).
+   * last is the step running now, which every reviewed call and kind is
+   * checked against as well as the step whose host it came through
+   * (`#requireReviewed`, `#requireKindIn`).
+   *
+   * The SDK runs steps one after another, never inside or next to one
+   * another (`exclusive`, workflow.ts), so a workflow it runs has one
+   * attempt live at a time (and, at most, attempts the engine gave up on,
+   * whose calls fail as stale first). Two live at once is code past the
+   * SDK; the host can't tell which attempt's code made a call (a step
+   * arrives as `do` alone, saying nothing of what started it), so a call
+   * that either attempt's review doesn't allow is refused: it fails
+   * closed. Steps run side by side would need the SDK to allow them and
+   * each call to carry its caller first.
    */
   readonly #live: StepAttempt[] = [];
   /**
@@ -1787,7 +1802,7 @@ export class RunHost extends RpcTarget {
     try {
       this.#requireUntampered();
       step = checked(stepNameSchema, name);
-      await this.#requireStepReviewed(step);
+      await this.#requireStepReviewed(step, "do");
       const parsed = checked(doOptionsSchema, options);
       sideEffect = parsed.sideEffect === true;
       input = inputShape(parsed.input);
@@ -2024,7 +2039,7 @@ export class RunHost extends RpcTarget {
     return await settle(async () => {
       this.#requireUntampered();
       const step = checked(stepNameSchema, name);
-      await this.#requireStepReviewed(step);
+      await this.#requireStepReviewed(step, "sleep");
       const ms = checked(milliseconds, duration);
       await this.#step.sleep(step, ms);
       return null;
@@ -2185,6 +2200,7 @@ export class RunHost extends RpcTarget {
       this.#requireUntampered();
       await this.#requireCurrent(attempt, "model");
       requireUnrefused(attempt);
+      await this.#requireKindIn(attempt, "model", "model");
       await this.#requirePerson();
       const { binding, instructions, input, outputSchema } = checked(
         modelRequestSchema,
@@ -2417,12 +2433,70 @@ export class RunHost extends RpcTarget {
    * couldn't read the steps, every name may run (`stepReviewed`), and the
    * run's history names none of them.
    */
-  async #requireStepReviewed(step: string): Promise<void> {
+  async #requireStepReviewed(step: string, use: StepUse): Promise<void> {
     if (!stepReviewed(this.#run.calls, step)) {
       const error = workflowErrors.create("workflow.step_not_reviewed");
       error.message = `Step "${step}" isn't one the review of this version shows: run steps only as the workflow's function writes them.`;
-      await this.#refuseTampering(error, { step, call: null });
+      await this.#refuseStep(step, error);
     }
+    if (!stepRunsAs(this.#run.calls, step, use)) {
+      const error = workflowErrors.create("workflow.step_not_reviewed");
+      error.message = `Step "${step}" isn't one the review of this version shows running that way: run steps only as the workflow's function writes them.`;
+      await this.#refuseStep(step, error);
+    }
+  }
+
+  /**
+   * Refuses step `step` as tampering (`#refuseTampering`). Asked for from
+   * inside another step's attempt, that attempt fails too
+   * (`StepAttempt.refused`), so a step that catches the refusal of a step
+   * nested in it and returns still fails, never completes.
+   */
+  async #refuseStep(step: string, error: Error): Promise<never> {
+    const running = this.#live.at(-1);
+    if (running !== undefined) {
+      running.refused = error;
+    }
+    return await this.#refuseTampering(error, { step, call: null });
+  }
+
+  /**
+   * Refuses a call of `attempt` as `use` unless both it and the attempt
+   * running now (a step nested in it may borrow its host) run as `use`
+   * (`stepRunsAs`), as `#requireReviewed` holds both to their calls.
+   * Refused, both fail (`StepAttempt.refused`), so a step that catches the
+   * refusal and returns still fails, never completes.
+   */
+  async #requireKindIn(
+    attempt: StepAttempt,
+    use: StepUse,
+    call: string
+  ): Promise<void> {
+    const running = this.#live.at(-1) ?? attempt;
+    const other = [running, attempt].find(
+      ({ step }) => !stepRunsAs(this.#run.calls, step, use)
+    );
+    if (other !== undefined) {
+      const error = workflowErrors.create("workflow.step_not_reviewed");
+      error.message = `Step "${other.step}" isn't one the review of this version shows running that way: run steps only as the workflow's function writes them.`;
+      await this.#refuseIn(attempt, error, call, other.step);
+    }
+  }
+
+  /**
+   * Fails `attempt` (and the one running now) with `error`, as tampering
+   * audited under `step`.
+   */
+  async #refuseIn(
+    attempt: StepAttempt,
+    error: Error,
+    call: string,
+    step = attempt.step
+  ): Promise<never> {
+    const running = this.#live.at(-1) ?? attempt;
+    running.refused = error;
+    attempt.refused = error;
+    return await this.#refuseTampering(error, { step, call });
   }
 
   /**
@@ -2719,6 +2793,7 @@ export class RunHost extends RpcTarget {
       this.#requireUntampered();
       await this.#requireCurrent(attempt, "decision");
       requireUnrefused(attempt);
+      await this.#requireKindIn(attempt, "decision", "decision");
       const { step, from, description, timeout } = checked(
         decisionSchema,
         request
@@ -2729,10 +2804,7 @@ export class RunHost extends RpcTarget {
       if (step !== attempt.step) {
         const error = workflowErrors.create("workflow.invalid");
         error.message = `A decision opens only in the step that asks it: step "${attempt.step}" can't open one for "${step}".`;
-        await this.#refuseTampering(error, {
-          step: attempt.step,
-          call: "decision",
-        });
+        await this.#refuseIn(attempt, error, "decision");
       }
       return await openDecision(this.#env, this.#run, {
         step,
@@ -2759,6 +2831,7 @@ export class RunHost extends RpcTarget {
       this.#requireUntampered();
       await this.#requireCurrent(attempt, "decision");
       requireUnrefused(attempt);
+      await this.#requireKindIn(attempt, "recipients", "decision");
       return await decisionRecipients(
         this.#env,
         this.#run,
@@ -2788,7 +2861,7 @@ export class RunHost extends RpcTarget {
     return await settle(async () => {
       this.#requireUntampered();
       const step = checked(stepNameSchema, name);
-      await this.#requireStepReviewed(step);
+      await this.#requireStepReviewed(step, "waitForDecision");
       const { decision, timeout, last } = checked(decisionWaitSchema, options);
       // Whether it was answered when the run looked, and when that was:
       // recorded, so every replay decides as the first activation did

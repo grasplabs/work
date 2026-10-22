@@ -92,6 +92,27 @@ const answeredIn = (sealed: boolean) =>
       .flatMap(({ documents }) => documents)
   );
 
+/** What an admission probe tests, apart from its language. */
+const caseOf = (probe: (typeof brainAdmissionProbes)[number]): string => {
+  switch (probe.family) {
+    case "denied-topic-before-storage": {
+      // Its ID less its language: health and pay, each benign or not.
+      return probe.id.slice(0, -"-xx".length);
+    }
+    case "speaker-read-back":
+    case "withdrawal": {
+      return `${probe.family} ${probe.expect}`;
+    }
+    case "subject-access":
+    case "removal": {
+      return `${probe.family} ${probe.speaker}`;
+    }
+    default: {
+      return probe satisfies never;
+    }
+  }
+};
+
 describe("the Brain baseline's suite", () => {
   it("keeps each group of related tasks in one split, and every task ID once", () => {
     const splitsOf = new Map<string, Set<string>>();
@@ -134,6 +155,47 @@ describe("the Brain baseline's suite", () => {
       families: [],
       languages: brainSplits.map((split) => [split, []]),
       probes: [],
+    });
+  });
+
+  it("asks every interview case in every language: each family of the survey, and each admission probe", () => {
+    const interview = ["contributor-count", "withdrawal", "removal"];
+    const cases = [...new Set(brainAdmissionProbes.map(caseOf))];
+    expect({
+      // A survey family that some language doesn't ask, in dev.
+      survey: interview.flatMap((family) =>
+        brainLanguages.some((language) =>
+          tasksOf("dev").some(
+            (task) => task.family === family && task.language === language
+          )
+        )
+          ? []
+          : [family]
+      ),
+      surveyLanguages: brainLanguages.filter(
+        (language) =>
+          !tasksOf("dev").some(
+            (task) =>
+              interview.includes(task.family) && task.language === language
+          )
+      ),
+      // A probe case some language lacks.
+      probes: brainLanguages.flatMap((language) =>
+        cases
+          .filter(
+            (each) =>
+              !brainAdmissionProbes.some(
+                (probe) => probe.language === language && caseOf(probe) === each
+              )
+          )
+          .map((each) => `${language}: ${each}`)
+      ),
+      cases: cases.length,
+    }).toStrictEqual({
+      survey: [],
+      surveyLanguages: [],
+      probes: [],
+      cases: 11,
     });
   });
 

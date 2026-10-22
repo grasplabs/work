@@ -19,8 +19,11 @@ import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
 import { setActiveChat, useActiveChat } from "./active-chat.ts";
+import type { ChatSlot } from "./active-chat.ts";
 import { useFollowedChat } from "./chat-watch.ts";
 import { Composer } from "./composer.tsx";
+import { setDockMode, useDockMode } from "./dock-mode.ts";
+import type { DockMode } from "./dock-mode.ts";
 import { HeldWrites } from "./held-writes.tsx";
 import { ChatThread } from "./thread.tsx";
 import { useAsk } from "./use-ask.ts";
@@ -34,9 +37,6 @@ import { useAsk } from "./use-ask.ts";
 // the bar. The thread and the box are the chat's own (thread.tsx,
 // composer.tsx), and the chat is the same watch as on Chat (chat-watch.ts).
 // What the agent builds is in Chat's side panel: "Open in chat" opens it.
-
-/** How the dock sits: its bar alone, a frame around it, or a drawer down the right side. */
-type DockMode = "bar" | "frame" | "drawer";
 
 /** The models a question may name, and the efforts each takes. */
 interface Offered {
@@ -134,11 +134,13 @@ const HeaderButton = ({
 
 /** The open dock's header: its title, then the ways to go on with the chat and to move the dock. */
 const DockHeader = ({
+  title,
   chatId,
   mode,
   onMove,
   onNewChat,
 }: {
+  title: string;
   chatId: string | undefined;
   mode: "frame" | "drawer";
   onMove: (next: DockMode) => void;
@@ -153,9 +155,7 @@ const DockHeader = ({
           : "flex flex-none items-center gap-0.5 border-b py-1.5 pr-1.5 pl-4"
       }
     >
-      <h2 className="flex-1 font-medium">
-        <Trans>Ask Grasp</Trans>
-      </h2>
+      <h2 className="flex-1 font-medium">{title}</h2>
       {chatId === undefined ? null : (
         <>
           <Link
@@ -208,22 +208,21 @@ const DockHeader = ({
 
 /** The open dock's conversation, or what to ask before there is one. */
 const DockThread = ({
+  empty,
   chatId,
   view,
   failure,
   onRetry,
 }: {
+  /** What it says before anything is asked. */
+  empty: string;
   chatId: string | undefined;
   view: ReturnType<typeof useFollowedChat>["view"];
   failure: string | undefined;
   onRetry: () => void;
 }) => {
   if (chatId === undefined) {
-    return (
-      <p className="text-muted-foreground flex-1 p-4">
-        <Trans>Ask anything, or describe a process</Trans>
-      </p>
-    );
+    return <p className="text-muted-foreground flex-1 p-4">{empty}</p>;
   }
   return (
     <ChatThread
@@ -245,10 +244,20 @@ const DockThread = ({
   );
 };
 
-/** The dock itself: on every page in the frame but Chat's. */
-const Dock = () => {
+/** What the dock is called and says: Grasp's, or over the atlas the brain's. */
+interface DockWords {
+  title: string;
+  placeholder: string;
+  empty: string;
+}
+
+/**
+ * The dock itself: on every page in the frame but Chat's, carrying on the
+ * tab's open chat of `slot` (active-chat.ts).
+ */
+const Dock = ({ slot, words }: { slot: ChatSlot; words: DockWords }) => {
   const { t } = useLingui();
-  const chatId = useActiveChat();
+  const chatId = useActiveChat(slot);
   const { view, failure } = useFollowedChat(chatId);
   const { models, retry } = useModels();
   const noModels = useNoModels(models);
@@ -259,9 +268,11 @@ const Dock = () => {
     chatId,
     offered?.models ?? [],
     offered?.efforts,
-    "here"
+    "here",
+    undefined,
+    slot
   );
-  const [mode, setMode] = useState<DockMode>("bar");
+  const mode = useDockMode();
   // The box stays as the dock moves, but the button that moved it may go:
   // the focus goes back to the box, so the cursor stays in it as the frame
   // opens, grows or folds away.
@@ -272,7 +283,7 @@ const Dock = () => {
     });
   };
   const moveTo = (next: DockMode): void => {
-    setMode(next);
+    setDockMode(next);
     focusBox();
   };
   const open = mode !== "bar";
@@ -281,14 +292,14 @@ const Dock = () => {
     <Composer
       {...composer}
       compact
-      label={t`Ask Grasp`}
+      label={words.title}
       onSend={() => {
         if (mode === "bar") {
           moveTo("frame");
         }
         composer.onSend();
       }}
-      placeholder={t`Ask Grasp`}
+      placeholder={words.placeholder}
       running={view.running}
     >
       {!open && chatId !== undefined ? (
@@ -309,7 +320,11 @@ const Dock = () => {
   );
   const drawer = mode === "drawer";
   // One tree in every mode, so the box, and the draft in it, stays as the
-  // dock opens, grows or folds away.
+  // dock opens, grows or folds away. As in the prototype's corner chat
+  // (`components/chat/corner-chat.tsx`): the bar 320 pixels wide at rest and
+  // 416 typed in, as round as the box in it; the frame and the drawer
+  // 442 wide, the frame kept 16 pixels off every edge of the window and
+  // rising out of the bar as it opens.
   let place =
     "pointer-events-none fixed inset-x-7 bottom-7 z-40 flex justify-end";
   let look =
@@ -318,27 +333,27 @@ const Dock = () => {
     place =
       "pointer-events-none fixed inset-y-2 right-2 left-2 z-40 flex justify-end";
     look =
-      "bg-background pointer-events-auto flex h-full w-110 max-w-full flex-col border-l text-sm";
+      "bg-background pointer-events-auto flex h-full w-110.5 max-w-full flex-col border-l text-sm";
   } else if (open) {
-    place =
-      "pointer-events-none fixed inset-x-4 bottom-4 z-40 flex justify-end";
+    place = "pointer-events-none fixed inset-4 z-40 flex items-end justify-end";
     look =
-      "chat-glow bg-background/80 pointer-events-auto flex h-136 max-h-svh w-110 max-w-full flex-col overflow-hidden rounded-2xl border text-sm backdrop-blur-md";
+      "chat-glow bg-background/80 animate-in fade-in-0 zoom-in-97 slide-in-from-bottom-4 pointer-events-auto flex h-136 max-h-full w-110.5 max-w-full origin-bottom-right flex-col overflow-hidden rounded-2xl border text-sm backdrop-blur-md duration-300 ease-out motion-reduce:animate-none";
   }
   return (
     <div className={place}>
       <section
-        aria-label={open ? t`Ask Grasp` : undefined}
+        aria-label={open ? words.title : undefined}
         className={look}
         ref={dock}
       >
         {open ? (
           <DockHeader
             chatId={chatId}
+            title={words.title}
             mode={drawer ? "drawer" : "frame"}
             onMove={moveTo}
             onNewChat={() => {
-              setActiveChat(undefined);
+              setActiveChat(undefined, slot);
               focusBox();
             }}
           />
@@ -346,6 +361,7 @@ const Dock = () => {
         {open ? (
           <DockThread
             chatId={chatId}
+            empty={words.empty}
             failure={failure}
             onRetry={() => {
               if (lastQuestion?.role === "user") {
@@ -381,9 +397,47 @@ const Dock = () => {
 
 /**
  * The dock where it belongs: on every page in the frame but Chat's own,
- * which is the chat at full size.
+ * which is the chat at full size. In the brain (its atlas, a region of
+ * it, a note or a part's page) it is the brain's own chat, kept as the
+ * person moves about the brain, as in the prototype
+ * (`knowledge/brain-chat.tsx`): its own conversation, apart from the one
+ * Chat shows, asked of Grasp's agent through core's chat like any other,
+ * whose answers cite the notes they used (`ChatCitation`, opening them as
+ * `CitedNote` does).
+ *
+ * The brain's open questions are to wait in the brain's chat, each to
+ * answer there or to have Grasp ask the role that can (`brain.answerGap`,
+ * `brain.askAboutGap`): they come with GRA-527's records (#882), and go
+ * here, between the thread and the box.
  */
 export const ChatDock = () => {
+  const { t } = useLingui();
   const { pathname } = useLocation();
-  return pathname === "/" ? null : <Dock />;
+  if (pathname === "/") {
+    return null;
+  }
+  if (pathname === "/brain" || pathname.startsWith("/brain/")) {
+    return (
+      <Dock
+        key="brain"
+        slot="brain"
+        words={{
+          title: t`Ask the brain`,
+          placeholder: t`Ask anything about the brain`,
+          empty: t`Ask anything about what the brain holds`,
+        }}
+      />
+    );
+  }
+  return (
+    <Dock
+      key="chat"
+      slot="chat"
+      words={{
+        title: t`Ask Grasp`,
+        placeholder: t`Ask Grasp`,
+        empty: t`Ask anything, or describe a process`,
+      }}
+    />
+  );
 };

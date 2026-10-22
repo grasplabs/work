@@ -9,6 +9,7 @@ export interface AttemptCalls {
   check: (which: unknown, value: unknown) => Settled<null>;
   call: (frame: unknown) => Promise<Settled<Json>>;
   until: (frame: unknown) => Promise<Settled<number>>;
+  items: (frame: unknown) => Promise<Settled<Json[]>>;
 }
 
 /**
@@ -16,7 +17,7 @@ export interface AttemptCalls {
  * (resource-host.ts), passed to the step's function in the run's isolate:
  * it evaluates the step's own expressions, checks its task's data against
  * the task's own schemas, and makes its task's call or resolves its
- * deadline, and nothing else. Every check, and everything a call is made
+ * deadline or its items, and nothing else. Every check, and everything a call is made
  * of, is its run host's.
  */
 export class ResourceAttemptHost extends RpcTarget {
@@ -45,5 +46,10 @@ export class ResourceAttemptHost extends RpcTarget {
   /** Resolves the task's deadline, as the build sealed it, on its input. */
   async until(frame: unknown): Promise<Settled<number>> {
     return await this.#calls.until(frame);
+  }
+
+  /** Resolves a `for` task's items, as the build sealed them, on its input. */
+  async items(frame: unknown): Promise<Settled<Json[]>> {
+    return await this.#calls.items(frame);
   }
 }
