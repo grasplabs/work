@@ -3548,6 +3548,10 @@ msgstr "Denied packages"
 msgid "Depends on"
 msgstr "Depends on"
 
+#: src/engines/new-app.tsx
+msgid "Describe the app: what it shows, and for whom"
+msgstr "Describe the app: what it shows, and for whom"
+
 #: src/routes/_shell.index.tsx
 msgid "Describe what you want. The agent answers from what it can read, and holds every change to an outside system until you confirm it."
 msgstr "Describe what you want. The agent answers from what it can read, and holds every change to an outside system until you confirm it."
@@ -3764,6 +3768,7 @@ msgstr "Domain shortcuts"
 #: src/dashboard/widget-board.tsx
 #: src/frame/app-sidebar.tsx
 #: src/landscape/app-cells.tsx
+#: src/routes/_shell.apps.new.tsx
 #: src/routes/_shell.domains.$engine.apps.$screen.tsx
 #: src/routes/_shell.domains.$engine.index.tsx
 #: src/routes/_shell.domains.index.tsx
@@ -5949,6 +5954,11 @@ msgstr "Never"
 msgctxt "when Pulse may report"
 msgid "Never"
 msgstr "Never"
+
+#: src/routes/_shell.apps.new.tsx
+#: src/routes/_shell.domains.$engine.index.tsx
+msgid "New app"
+msgstr "New app"
 
 #: src/chat/chat-dock.tsx
 #: src/chat/chat-list.tsx
@@ -11047,6 +11057,10 @@ msgstr "What ran"
 #: src/dashboard/report-dialog.tsx
 msgid "What ran, the decisions it asked for, every workflow and what could be better. Keep it as Markdown, or save it as a PDF from the print window."
 msgstr "What ran, the decisions it asked for, every workflow and what could be better. Keep it as Markdown, or save it as a PDF from the print window."
+
+#: src/engines/new-app.tsx
+msgid "What should the app show, and for whom?"
+msgstr "What should the app show, and for whom?"
 
 #: src/routes/_shell.onboarding.notes.tsx
 msgid "What should the next person at Grasp know?"
