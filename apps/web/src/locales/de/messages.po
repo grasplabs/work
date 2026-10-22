@@ -856,6 +856,10 @@ msgstr "{name} ist überall abgemeldet."
 msgid "{name} logo"
 msgstr "Logo von {name}"
 
+#: src/connections/connect-dialog.tsx
+msgid "{name} may write. Change to Read"
+msgstr "{name} darf schreiben. Auf Lesen ändern"
+
 #: src/chat/builds-state.ts
 msgid "{name} no longer changes the domain's data (write → read)"
 msgstr "{name} ändert die Daten der Domäne nicht mehr (schreiben → lesen)"
@@ -865,8 +869,8 @@ msgid "{name} now changes the domain's data (read → write)"
 msgstr "{name} ändert jetzt die Daten der Domäne (lesen → schreiben)"
 
 #: src/connections/connect-dialog.tsx
-msgid "{name} only reads"
-msgstr ""
+msgid "{name} reads only. Change to Write"
+msgstr "{name} liest nur. Auf Schreiben ändern"
 
 #: src/onboarding/setup-steps.tsx
 msgid "{name} takes part"
