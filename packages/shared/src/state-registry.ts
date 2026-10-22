@@ -340,6 +340,12 @@ const coreDb: D1State = {
     landscape_app_people: cache(`${core}landscape.ts`),
     landscape_staged_apps: transient(`${core}landscape.ts`),
     landscape_staged_people: transient(`${core}landscape.ts`),
+    admission_topics: exported(
+      `${core}knowledge/admission.ts`,
+      "The company's own topics its admins keep out of Knowledge."
+    ),
+    brain_records: exported(`${core}brain-records.ts`, brainPending),
+    brain_gap_states: exported(`${core}brain-gaps.ts`),
   },
 };
 
@@ -372,6 +378,11 @@ const knowledgeDb: D1State = {
     knowledge_signal_computations: cache(`${core}knowledge/signals.ts`),
     knowledge_signals: cache(`${core}knowledge/signals.ts`),
     knowledge_signal_dismissals: exported(`${core}knowledge/signals.ts`),
+    brain_payloads: exported(`${core}knowledge/payloads.ts`, brainPending),
+    brain_payload_releases: transient(
+      `${core}knowledge/payloads.ts`,
+      "Empty between batches."
+    ),
     audit_outbox: exported(
       `${core}audit-outbox.ts`,
       "Made by the database's migrations, outside its Drizzle schema."
@@ -429,6 +440,7 @@ const workspaces: DurableObjectState = {
     chat_project_documents: exported(`${core}workspace.ts`),
     chat_messages: exported(`${core}workspace.ts`),
     chat_sources: exported(`${core}workspace.ts`),
+    chat_run_sources: exported(`${core}workspace.ts`),
     chat_documents: exported(`${core}workspace.ts`),
     chat_drafts: exported(`${core}workspace.ts`),
     chat_draft_files: exported(`${core}workspace.ts`),
@@ -738,6 +750,19 @@ const files: R2State = {
   },
 };
 
+const brainObjects: R2State = {
+  role: "brain-objects",
+  worker: "core",
+  binding: "BRAIN_OBJECTS",
+  bucket: "grasp-os-brain-objects",
+  prefixes: {
+    "payloads/": exported(
+      `${core}knowledge/payloads.ts`,
+      `Knowledge version texts by SHA-256, each named by its row in brain_payloads. ${brainPending}`
+    ),
+  },
+};
+
 const auditArchive: R2State = {
   role: "audit-archive",
   worker: "core",
@@ -777,7 +802,7 @@ export const clientStateRegistry: ClientStateRegistry = {
     coreClock,
     connectClock,
   ],
-  r2: [files, auditArchive],
+  r2: [files, brainObjects, auditArchive],
   carriers: [
     {
       className: "D1Store",
