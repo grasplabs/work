@@ -8,7 +8,12 @@ import { and, eq, exists, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
-import { sourcesOf, sourcesOfApps, unreadableBy } from "./app-provenance.ts";
+import {
+  readerOf,
+  sourcesOf,
+  sourcesOfApps,
+  unreadableBy,
+} from "./app-provenance.ts";
 import { teamsOf } from "./auth/identity.ts";
 import { apps, appMembers, teamMembers } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
@@ -100,11 +105,14 @@ export const requireAppRole = async (
     throw roleErrors.create("role.forbidden");
   }
   if (shared) {
-    const unreadable = unreadableBy(await sourcesOf(env, app.id), {
-      userId: by.userId,
-      teamIds: by.teams.map(({ id }) => id),
-      admin: isAdmin(by.role),
-    });
+    const unreadable = unreadableBy(
+      await sourcesOf(env, app.id),
+      readerOf(
+        by.userId,
+        by.teams.map(({ id }) => id),
+        by.role
+      )
+    );
     if (unreadable.length > 0) {
       throw appErrors.create("app.unreadable");
     }
@@ -166,11 +174,11 @@ export const appsReadableBy = async (
     .select({ id: apps.id, owner: apps.ownerId })
     .from(apps)
     .where(inList(apps.id, ids));
-  const reader = {
-    userId: by.userId,
-    teamIds: by.teams.map(({ id }) => id),
-    admin: false,
-  };
+  const reader = readerOf(
+    by.userId,
+    by.teams.map(({ id }) => id),
+    by.role
+  );
   const own = rows.filter(({ owner }) => owner === by.userId);
   const shared = rows
     .filter(({ owner }) => owner !== by.userId)
