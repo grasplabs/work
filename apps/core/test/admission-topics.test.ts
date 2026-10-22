@@ -298,13 +298,19 @@ describe("company topics", { timeout: 60_000 }, () => {
         }
       )
     );
+    // Every version's text, as its payload in the Brain bucket holds it.
     const { results } = await env.KNOWLEDGE.prepare(
-      "SELECT count(*) AS stored FROM versions WHERE text LIKE ?"
-    )
-      .bind(`%${term}%`)
-      .all<{ stored: number }>();
+      "SELECT payload_key AS key FROM versions"
+    ).all<{ key: string }>();
+    const texts = await Promise.all(
+      results.map(async ({ key }) => {
+        const object = await env.BRAIN_OBJECTS.get(key);
+        return object === null ? "" : await object.text();
+      })
+    );
+    const stored = texts.filter((text) => text.includes(term)).length;
 
-    expect({ remembered, stored: results[0]?.stored }).toStrictEqual({
+    expect({ remembered, stored }).toStrictEqual({
       remembered: "knowledge.excluded",
       stored: 0,
     });
