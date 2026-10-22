@@ -72,7 +72,7 @@ import type { SessionCheck } from "./session-check.ts";
 // | tools              | the tools those documents name (admins)                  |
 // | connections        | the catalog's offered entries and the person's           |
 // |                    | connections                                              |
-// | sources, tools,    | the Playbook's records (brain-records.ts), for everyone  |
+// | sources, tools,    | the brain's records (brain-records.ts), for everyone     |
 // | candidates,        | signed in, after the onboarding's; a record's counts and |
 // | statements, teams, | stakeholders for an onboarding team join that team, for  |
 // | gaps               | whoever reads it; gaps with what became of them          |
@@ -96,7 +96,7 @@ import type { SessionCheck } from "./session-check.ts";
 // the tools its reading names, used by the teams it names: what the
 // admin's own list of them shows, never its text.
 //
-// The Playbook's records are company facts with no person in them (no
+// The brain's records are company facts with no person in them (no
 // author, no transcript), added by admins (`brain.addRecords`), so every
 // member reads them. The Intake App's statements and sources and the
 // workflow map's workflows stay in each App's own store, which only its
@@ -679,8 +679,8 @@ const connectionsOf = async (
 };
 
 /**
- * The onboarding's teams, with what the Playbook added for each, then the
- * Playbook's own. A value for a team the person can't see is left out. A
+ * The onboarding's teams, with what the records added for each, then the
+ * records' own. A value for a team the person can't see is left out. A
  * roster team's record (onboarding/brain-intake.ts) is that team, for
  * whoever can't read the roster: for an admin, the roster's team, which
  * is newer, with what was added for it.
@@ -713,7 +713,7 @@ const teamSources = ({ sourceId, counts, stakeholders }: Team): string[] => [
 ];
 
 /**
- * The Playbook's gaps, with what became of each, as every member reads
+ * The brain's gaps, with what became of each, as every member reads
  * them: what `brain.read` serves, and what a chat's agent reads too.
  */
 export const brainGaps = async (
