@@ -38,6 +38,7 @@ import { integrationsOf } from "../connections/integrations.ts";
 import type { Integration } from "../connections/integrations.ts";
 import type { Session } from "../core.ts";
 import { decidesRequests } from "../dashboard/to-do.tsx";
+import { SaveAsBlueprint } from "../engines/blueprints.tsx";
 import { EngineIcon } from "../engines/engine-icon.tsx";
 import { engineReaders, loadEnginePage } from "../engines/engine-page.ts";
 import type { EnginePage } from "../engines/engine-page.ts";
@@ -543,6 +544,9 @@ const EngineView = ({ page }: { page: EnginePage }) => {
             )}
           </p>
         </div>
+        {canBuild(identity.role) && version !== null ? (
+          <SaveAsBlueprint app={app.id} name={app.name} version={version} />
+        ) : null}
       </div>
       <StoreChanges changes={storeChanges} engine={app} />
       <Tabs
