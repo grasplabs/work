@@ -8982,7 +8982,7 @@ msgstr "Mit {name} beginnen"
 
 #: src/engines/blueprints.tsx
 msgid "Start from a blueprint"
-msgstr "Mit einer Blueprint beginnen"
+msgstr "Mit einem Blueprint beginnen"
 
 #: src/tour/tour-script.ts
 msgid "Start the tour"
