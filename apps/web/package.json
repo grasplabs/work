@@ -24,6 +24,7 @@
     "react": "catalog:",
     "react-dom": "catalog:",
     "react-markdown": "catalog:",
+    "rehype-highlight": "catalog:",
     "remark-gfm": "catalog:",
     "zod": "catalog:"
   },

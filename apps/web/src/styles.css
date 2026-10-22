@@ -1311,3 +1311,52 @@
 @utility grid-label-value {
   grid-template-columns: auto 1fr;
 }
+
+/*
+ * Code in the agent's answers (chat/answer-markdown.tsx), highlighted by
+ * class (rehype-highlight): coloured from the theme's tokens, so it follows
+ * light and dark, and set without any inline style the CSP would refuse.
+ */
+@layer components {
+  .hljs-comment,
+  .hljs-quote {
+    color: var(--muted-foreground);
+    font-style: italic;
+  }
+
+  .hljs-keyword,
+  .hljs-selector-tag,
+  .hljs-built_in,
+  .hljs-type,
+  .hljs-doctag {
+    font-weight: 600;
+  }
+
+  .hljs-string,
+  .hljs-regexp,
+  .hljs-addition,
+  .hljs-symbol {
+    color: var(--status-agreed);
+  }
+
+  .hljs-number,
+  .hljs-literal,
+  .hljs-deletion,
+  .hljs-variable.constant_ {
+    color: var(--destructive);
+  }
+
+  .hljs-title,
+  .hljs-section,
+  .hljs-attr,
+  .hljs-attribute,
+  .hljs-name,
+  .hljs-property {
+    color: var(--chart-5);
+  }
+
+  .hljs-meta,
+  .hljs-punctuation {
+    color: var(--muted-foreground);
+  }
+}

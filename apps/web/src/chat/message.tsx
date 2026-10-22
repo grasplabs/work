@@ -7,7 +7,7 @@ import {
 import { cn } from "@grasp-os/ui/lib/utils";
 import type { ReactNode } from "react";
 
-import { PlainMarkdown } from "../knowledge/markdown.tsx";
+import { AnswerMarkdown } from "./answer-markdown.tsx";
 
 // One message of a chat, in the prototype's AI Elements message
 // (grasplabs/prototype `components/ai-elements/message.tsx`, ddd235d):
@@ -15,8 +15,9 @@ import { PlainMarkdown } from "../knowledge/markdown.tsx";
 // across the thread, a quiet row of actions under it. Where it differs:
 // - who wrote it is Grasp's own (`user` or `assistant`), not another
 //   SDK's message type;
-// - the answer is rendered as the thread renders Markdown already
-//   (`PlainMarkdown`: GitHub-flavoured, no raw HTML), not by Streamdown;
+// - the answer is rendered by our own Markdown (`AnswerMarkdown`: GitHub-
+//   flavoured, no raw HTML, its code highlighted by class), not by
+//   Streamdown, whose highlighting colours inline;
 // - the prototype's branches and toolbar aren't here: no chat surface
 //   uses them.
 
@@ -101,4 +102,4 @@ export const MessageResponse = ({
 }: {
   text: string;
   cited?: readonly string[];
-}) => <PlainMarkdown cited={cited} text={text} />;
+}) => <AnswerMarkdown cited={cited} text={text} />;
