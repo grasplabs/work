@@ -80,6 +80,7 @@ const keptCallsSchema = z.record(
   z.string(),
   z.object({
     steps: z.record(z.string(), z.array(z.string())).nullable(),
+    kinds: z.record(z.string(), z.enum(["exact", "ai", "decision", "wait"])),
     all: z.array(z.string()),
   })
 );
