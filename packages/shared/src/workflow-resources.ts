@@ -152,6 +152,11 @@ export const workflowResourceErrors = defineErrorFamily({
     "That delivery key was used for another event to this run. Send a new event under a new key.",
   "workflow.event_timeout":
     "A listen task's events didn't all arrive before its timeout.",
+  "workflow.child_unavailable":
+    "This run can't start that child workflow: the version its binding pins has no executable build, or the run has no child workflows here.",
+  "workflow.child_failed": "A child workflow this run started didn't complete.",
+  "workflow.child_timeout":
+    "A child workflow this run started didn't end while its lineage could still run.",
   "workflow.start_unconfirmed":
     "The run never started: the workflow engine didn't confirm its start in time, so nothing of it ran. Start the workflow again.",
   "workflow.protocol_unsupported":
@@ -527,7 +532,10 @@ export interface WorkflowStart {
   workflowId: string;
   version: number;
   manifestHash: string;
-  invoker: { type: "person" | "app" | "agent" | "trigger"; id: string };
+  invoker: {
+    type: "person" | "app" | "agent" | "trigger" | "workflow";
+    id: string;
+  };
   principal: string;
   authorityGeneration: number;
   inputHash: string;
