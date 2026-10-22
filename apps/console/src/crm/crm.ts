@@ -13,15 +13,18 @@ import { log } from "@grasp-os/shared/log";
 import { isNotNull } from "drizzle-orm";
 
 import { ifStored } from "../clients/grid.ts";
+import { consoleDatabase } from "../db/act.ts";
 import type { ConsoleDatabase } from "../db/act.ts";
 import { clients } from "../db/schema.ts";
 import { storeSecret } from "../deploy/context.ts";
-import { readAttioCompany } from "./attio.ts";
+import { readAttioCompany, readWonDeals } from "./attio.ts";
 import type {
+  AttioCalls,
   AttioCompany,
   AttioDeal,
   AttioPerson,
   AttioReadError,
+  WonDeal,
 } from "./attio.ts";
 
 /** The company as Attio has it. */
@@ -37,6 +40,8 @@ export interface CrmRecords {
   /** Its people, by name. */
   people: CrmPerson[];
   deals: CrmDeal[];
+  /** The calls with it, the newest first, and where they come from; null when Attio has none to read. */
+  calls: AttioCalls;
 }
 
 /**
@@ -132,7 +137,7 @@ export const crmOf = async ({
       signal: limit.signal,
     });
     if ("records" in read) {
-      const { company, people, deals } = read.records;
+      const { company, people, deals, calls } = read.records;
       return {
         state: "read",
         recordId,
@@ -142,6 +147,7 @@ export const crmOf = async ({
             .map(personOf)
             .toSorted((one, other) => one.name.localeCompare(other.name)),
           deals: deals.map(dealOf),
+          calls,
         },
       };
     }
@@ -153,4 +159,44 @@ export const crmOf = async ({
   }
   log.warn("admin.crm_unread", { clientId, error });
   return { state: "unread", recordId, error };
+};
+
+/**
+ * The deals Grasp won in Attio that no client is linked to yet, to start
+ * a new organization from:
+ * - `not_connected`: Secrets Store has no key;
+ * - `unread`: Attio wasn't read now, and why;
+ * - `read`: the deals, the latest first.
+ */
+export type WonDeals =
+  | { state: "not_connected" }
+  | { state: "unread"; error: AttioReadError }
+  | { state: "read"; deals: WonDeal[] };
+
+/** The won deals Attio holds that no client is linked to, read within `timeoutMs`. Never throws. */
+export const wonDealsOf = async (
+  env: Env,
+  timeoutMs: number
+): Promise<WonDeals> => {
+  const key = await attioKey(env);
+  if (key === null) {
+    return { state: "not_connected" };
+  }
+  const links = await attioLinks(consoleDatabase(env.DB));
+  const linked = new Set(links.values());
+  const limit = deadline(timeoutMs);
+  let error: AttioReadError = "no_answer";
+  try {
+    const read = await readWonDeals({ key, signal: limit.signal }, linked);
+    if ("deals" in read) {
+      return { state: "read", deals: read.deals };
+    }
+    ({ error } = read);
+  } catch {
+    error = limit.stopped() === "timeout" ? "timeout" : "no_answer";
+  } finally {
+    limit.clear();
+  }
+  log.warn("admin.won_deals_unread", { error });
+  return { state: "unread", error };
 };

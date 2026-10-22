@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
+import { formatDate } from "../src/admin/words.ts";
 import { attioLimits } from "../src/crm/attio.ts";
 import { setAttioCompanyFn } from "../src/crm/functions.ts";
 import { act, consoleDatabase } from "../src/db/act.ts";
@@ -150,10 +151,14 @@ const noordkade = () => {
     stage: [attioValue.status("Won 🎉")],
     value: [attioValue.currency(21_780, "EUR")],
     owner: [attioValue.member(ruben)],
+    associated_company: [attioValue.reference("companies", companyId)],
   });
   attio.members.push({ id: ruben, firstName: "Ruben", lastName: "Jansen" });
-  return { companyId };
+  return { companyId, dealId: deal };
 };
+
+const daysAgo = (days: number): string =>
+  new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
 
 describe("an organization's company in Attio, with Attio's key", () => {
   useStoreSecrets({ deployer: token, tenant: tenantToken });
@@ -200,6 +205,180 @@ describe("an organization's company in Attio, with Attio's key", () => {
       stranger: false,
       notConnected: false,
       key: false,
+      writes: 0,
+    });
+  });
+
+  it("lists the calls with the company from its meetings, the newest first, naming only the company's people in them", async () => {
+    const clientId = await liveClient();
+    const { companyId } = noordkade();
+    attio.meetings.push(
+      {
+        title: "First conversation",
+        start: daysAgo(40),
+        participants: ["ruben@grasp.test", "sanne@noordkade.test"],
+        companyIds: [companyId],
+      },
+      {
+        title: "Kickoff with the team leads",
+        start: daysAgo(10),
+        participants: [
+          "ruben@grasp.test",
+          "Sanne@Noordkade.test",
+          "joost@noordkade.test",
+        ],
+        companyIds: [companyId],
+      },
+      {
+        title: "Next week's check-in",
+        start: daysAgo(-7),
+        participants: ["sanne@noordkade.test"],
+        companyIds: [companyId],
+      },
+      {
+        title: "Another company's call",
+        start: daysAgo(3),
+        participants: ["someone@elsewhere.test"],
+        companyIds: [crypto.randomUUID()],
+      }
+    );
+    attio.notes.push({
+      title: "A note, not a call",
+      createdAt: daysAgo(5),
+      companyId,
+    });
+
+    await link(clientId, companyId);
+    const { main } = await detailsOf(clientId);
+    const calls = main.slice(main.indexOf(">Calls</h2>"));
+    const kickoff = calls.indexOf("Kickoff with the team leads");
+    const first = calls.indexOf("First conversation");
+
+    expect({
+      deal: calls.includes(
+        "Noordkade Finance: Business · Won 🎉 · Ruben Jansen"
+      ),
+      newestFirst: kickoff !== -1 && first !== -1 && kickoff < first,
+      with: calls.includes("With Sanne de Wit and joost@noordkade.test"),
+      grasp: calls.includes("ruben@grasp.test"),
+      future: calls.includes("Next week"),
+      other: calls.includes("Another company"),
+      note: calls.includes("A note, not a call"),
+      notConnected: calls.includes("Once Attio is connected"),
+    }).toStrictEqual({
+      deal: true,
+      newestFirst: true,
+      with: true,
+      grasp: false,
+      future: false,
+      other: false,
+      note: false,
+      notConnected: false,
+    });
+  });
+
+  it("lists its notes as the calls when the workspace has no meetings", async () => {
+    const clientId = await liveClient();
+    const { companyId } = noordkade();
+    attio.hasMeetings = false;
+    attio.notes.push(
+      { title: "Call with Sanne", createdAt: daysAgo(4), companyId },
+      {
+        title: "Another company's note",
+        createdAt: daysAgo(2),
+        companyId: crypto.randomUUID(),
+      }
+    );
+    await link(clientId, companyId);
+    const { main } = await detailsOf(clientId);
+    const inCalls = (text: string): boolean =>
+      main.includes(text, main.indexOf(">Calls</h2>"));
+    expect({
+      from: inCalls("from its notes in Attio"),
+      note: inCalls("Call with Sanne"),
+      other: inCalls("Another company"),
+    }).toStrictEqual({ from: true, note: true, other: false });
+  });
+
+  it("offers the deals Grasp won to start an organization from, with their company, leaving out lost deals and companies already linked", async () => {
+    const clientId = await liveClient();
+    const { companyId, dealId } = noordkade();
+    // Noordkade is linked already: its won deal isn't offered again.
+    await link(clientId, companyId);
+    const hartog = crypto.randomUUID();
+    const birch = crypto.randomUUID();
+    attio.records.companies.set(hartog, {
+      name: [attioValue.text("Hartog Groothandel")],
+      domains: [
+        attioValue.domain("hartog.test"),
+        attioValue.domain("hartog-groothandel.test"),
+      ],
+    });
+    attio.records.companies.set(birch, {
+      name: [attioValue.text("Birch Logistics")],
+    });
+    const wonDeal = crypto.randomUUID();
+    attio.records.deals.set(wonDeal, {
+      name: [attioValue.text("Hartog Groothandel: Pilot")],
+      stage: [attioValue.status("Closed won", "2026-10-13T08:00:00.000Z")],
+      associated_company: [attioValue.reference("companies", hartog)],
+    });
+    attio.records.deals.set(crypto.randomUUID(), {
+      name: [attioValue.text("Birch Logistics: Team")],
+      stage: [attioValue.status("Lost")],
+      associated_company: [attioValue.reference("companies", birch)],
+    });
+    attio.records.deals.set(crypto.randomUUID(), {
+      name: [attioValue.text("Birch Logistics: Pilot")],
+      stage: [attioValue.status("In Progress")],
+      associated_company: [attioValue.reference("companies", birch)],
+    });
+
+    const { html } = await page("/admin/new-organization");
+    const main = mainOf(html);
+    const at = main.indexOf("A deal won in Attio");
+    const choice = main.slice(main.lastIndexOf("<label", at), at);
+    /** The tag of the field named `name`. */
+    const fieldOf = (name: string): string => {
+      const named = main.indexOf(`name="${name}"`);
+      return main.slice(
+        main.lastIndexOf("<", named),
+        main.indexOf(">", named) + 1
+      );
+    };
+    const valueOf = (name: string): string | undefined =>
+      /\svalue="(?<value>[^"]*)"/u.exec(fieldOf(name))?.groups?.value;
+    /** Whether the deal choice offers `text`. */
+    const inDeals = (text: string): boolean => {
+      const from = main.indexOf('id="org-deal"');
+      const found = main.indexOf(text, from);
+      return (
+        from !== -1 && found !== -1 && found < main.indexOf("</select>", from)
+      );
+    };
+
+    expect({
+      chosen: choice.includes('aria-checked="true"'),
+      offered: inDeals(`value="${wonDeal}"`),
+      label: inDeals(
+        `Hartog Groothandel: Pilot, Hartog Groothandel · won ${formatDate("2026-10-13")}`
+      ),
+      // Noordkade's own deal, though won, isn't: its company is a client.
+      linked: inDeals(`value="${dealId}"`),
+      name: valueOf("name"),
+      clientId: valueOf("clientId"),
+      domains: valueOf("domains"),
+      lost: main.includes("Birch Logistics"),
+      writes: attio.writes,
+    }).toStrictEqual({
+      chosen: true,
+      offered: true,
+      label: true,
+      linked: false,
+      name: "Hartog Groothandel",
+      clientId: "hartog-groothandel",
+      domains: "hartog.test, hartog-groothandel.test",
+      lost: false,
       writes: 0,
     });
   });
@@ -300,6 +479,21 @@ describe("an organization's company in Attio, with Attio's key", () => {
 describe("an organization's company in Attio, without Attio's key", () => {
   useStoreSecrets({ deployer: token, tenant: tenantToken });
   eachTest({ withKey: false });
+
+  it("offers no deal to start an organization from, saying Attio isn't connected", async () => {
+    await liveClient();
+    noordkade();
+    const { html } = await page("/admin/new-organization");
+    expect({
+      why: html.includes("Not yet: the console isn&#x27;t connected to Attio."),
+      offered: html.includes("Noordkade Finance: Business"),
+      requests: attio.requests,
+    }).toStrictEqual({
+      why: true,
+      offered: false,
+      requests: 0,
+    });
+  });
 
   it("says Attio isn't connected and asks Attio nothing", async () => {
     const clientId = await liveClient();

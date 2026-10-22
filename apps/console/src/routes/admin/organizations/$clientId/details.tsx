@@ -10,7 +10,7 @@ import type { ReactNode } from "react";
 import { AttioLink } from "../../../../admin/attio-link.tsx";
 import { useOrganization } from "../../../../admin/organization.tsx";
 import { sourceNames } from "../../../../admin/sections.ts";
-import { formatList, money } from "../../../../admin/words.ts";
+import { formatDate, formatList, money } from "../../../../admin/words.ts";
 import type { AttioReadError } from "../../../../crm/attio.ts";
 import type { Crm, CrmDeal, CrmRecords } from "../../../../crm/crm.ts";
 
@@ -191,20 +191,94 @@ const Contacts = () => {
 };
 
 /**
- * Every call with the company, with who was in it: from Attio, which the
- * console doesn't read yet, so it says where they will come from.
+ * The deal the calls are about, as the prototype's Calls panel heads them:
+ * the one won, or else the latest Attio lists.
  */
-const Calls = () => (
-  <Part
-    about="Every call with the company, with who was in it."
-    action={<Badge variant="outline">{sourceNames.attio}</Badge>}
-    title="Calls"
-  >
-    <p className="text-muted-foreground border-t px-5 py-3">
-      {`Once ${sourceNames.attio} is connected, this fills in by itself.`}
-    </p>
-  </Part>
-);
+const mainDeal = (deals: readonly CrmDeal[]): CrmDeal | undefined =>
+  deals.find((deal) => deal.stage?.kind === "won") ?? deals[0];
+
+/** What the Calls panel says when it has no calls to list. */
+const noCallsLine = (crm: Crm): string => {
+  switch (crm.state) {
+    case "read": {
+      return crm.records.calls === null
+        ? "Attio has no meetings or notes the console can read."
+        : "No call with the company in Attio yet.";
+    }
+    case "unread": {
+      return `Attio can’t be read for it now: ${attioUnreadWords[crm.error]}.`;
+    }
+    case "not_linked": {
+      return "Once it is linked to its company in Attio, above, this fills in by itself.";
+    }
+    case "not_connected": {
+      return `Once ${sourceNames.attio} is connected, this fills in by itself.`;
+    }
+    default: {
+      return crm satisfies never;
+    }
+  }
+};
+
+/**
+ * Every call with the company, with who of it was in it, as the prototype's
+ * Attio panel has them: its meetings in Attio, the newest first, or, in a
+ * workspace without them, its notes there. Headed by the deal, its stage
+ * and who at Grasp owns it.
+ */
+const Calls = () => {
+  const { crm } = useOrganization().admin;
+  const records = crm.state === "read" ? crm.records : null;
+  const calls = records?.calls?.calls ?? [];
+  const deal = records === null ? undefined : mainDeal(records.deals);
+  const fromNotes = records?.calls?.from === "notes";
+  return (
+    <Part
+      about={
+        fromNotes
+          ? "Every call with the company, from its notes in Attio."
+          : "Every call with the company, with who was in it."
+      }
+      action={<Badge variant="outline">{sourceNames.attio}</Badge>}
+      title="Calls"
+    >
+      {deal === undefined ? null : (
+        <p className="text-muted-foreground border-t px-5 py-3">
+          {[deal.name, deal.stage?.title ?? "", deal.owner ?? ""]
+            .filter((part) => part !== "")
+            .join(" · ")}
+        </p>
+      )}
+      {calls.length === 0 ? (
+        <p className="text-muted-foreground border-t px-5 py-3">
+          {noCallsLine(crm)}
+        </p>
+      ) : (
+        <ul className="flex flex-col">
+          {calls.map((call, index) => (
+            <li
+              className="grid grid-cols-1 gap-x-6 gap-y-0.5 border-t px-5 py-3 sm:grid-cols-[8rem_minmax(0,1fr)]"
+              // Two calls can share a day and a title; their order is the newest first.
+              key={`${call.on}-${call.title}-${index}`}
+            >
+              <span className="text-muted-foreground tabular-nums">
+                {formatDate(call.on)}
+              </span>
+              <span className="flex min-w-0 flex-col">
+                <span>{call.title || "A call with no title"}</span>
+                {call.with.length === 0 ? null : (
+                  <span className="text-muted-foreground text-xs">
+                    {`With ${formatList(call.with)}`}
+                  </span>
+                )}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Part>
+  );
+};
 
 /** Why Attio wasn't read now, as the rest of a sentence. */
 const attioUnreadWords: Record<AttioReadError, string> = {
@@ -249,7 +323,7 @@ const CrmLine = ({ label, value }: { label: string; value: string }) => (
 /** A deal in a line: its stage, what it is worth, and who owns it. */
 const dealWords = (deal: CrmDeal): string =>
   [
-    deal.stage ?? "",
+    deal.stage?.title ?? "",
     deal.value === null
       ? ""
       : money(deal.value.amount, deal.value.currency ?? "EUR"),

@@ -24,6 +24,21 @@ export interface FakeMember {
   lastName: string;
 }
 
+/** A meeting, as Attio answers them: when it started, who was in it, and the records it is linked to. */
+export interface FakeMeeting {
+  title: string;
+  start: string;
+  participants: string[];
+  companyIds: string[];
+}
+
+/** A note on a company, as Attio answers them. */
+export interface FakeNote {
+  title: string;
+  createdAt: string;
+  companyId: string;
+}
+
 /** Each object the fake holds records of, by the name in its path. */
 const objects: Record<string, AttioObject> = {
   companies: "companies",
@@ -31,9 +46,18 @@ const objects: Record<string, AttioObject> = {
   deals: "deals",
 };
 
+/** What Attio answers for something it doesn't have. */
+const notFound = () =>
+  Response.json(
+    { status_code: 404, type: "invalid_request_error", code: "not_found" },
+    { status: 404 }
+  );
+
 export const fakeAttio = (key: string) => {
   const members: FakeMember[] = [];
   const paths: string[] = [];
+  const meetings: FakeMeeting[] = [];
+  const notes: FakeNote[] = [];
   const state = {
     records: {
       companies: new Map<string, FakeValues>(),
@@ -46,7 +70,12 @@ export const fakeAttio = (key: string) => {
      */
     swapped: new Map<string, string>(),
     members,
+    meetings,
+    notes,
+    /** Whether the workspace has Attio's meetings to list; without, `/meetings` answers 404. */
+    hasMeetings: true,
     requests: 0,
+    /** Requests that would change something: anything not a GET, but the deals' one reading query. */
     writes: 0,
     /** Every path asked for. */
     paths,
@@ -54,11 +83,30 @@ export const fakeAttio = (key: string) => {
   const recordRoute =
     /^\/v2\/objects\/(?<object>companies|people|deals)\/records\/(?<id>[^/]+)$/u;
 
+  /** A record as Attio answers one, under the id `swapped` gives it. */
+  const recordOf = (object: AttioObject, id: string, values: FakeValues) => {
+    const recordId = state.swapped.get(id) ?? id;
+    return {
+      id: {
+        workspace_id: "workspace",
+        object_id: object,
+        record_id: recordId,
+      },
+      created_at: "2026-09-01T09:00:00.000Z",
+      web_url: `https://app.attio.com/grasp/${object === "companies" ? "company" : object.slice(0, -1)}/${recordId}/overview`,
+      values,
+    };
+  };
+
   const answer = (request: Request): Response => {
     state.requests += 1;
-    const { pathname } = new URL(request.url);
+    const url = new URL(request.url);
+    const { pathname, searchParams } = url;
     state.paths.push(pathname);
-    if (request.method !== "GET") {
+    const query =
+      request.method === "POST" &&
+      pathname === "/v2/objects/deals/records/query";
+    if (request.method !== "GET" && !query) {
       state.writes += 1;
     }
     if (request.headers.get("authorization") !== `Bearer ${key}`) {
@@ -67,11 +115,72 @@ export const fakeAttio = (key: string) => {
         { status: 401 }
       );
     }
+    if (query) {
+      return Response.json({
+        data: [...state.records.deals].map(([id, values]) =>
+          recordOf("deals", id, values)
+        ),
+      });
+    }
     if (request.method !== "GET") {
       return Response.json(
         { status_code: 403, type: "auth_error", code: "missing_scope" },
         { status: 403 }
       );
+    }
+    if (pathname === "/v2/meetings") {
+      if (!state.hasMeetings) {
+        return notFound();
+      }
+      const companyId = searchParams.get("linked_record_id");
+      return Response.json({
+        data: state.meetings
+          .filter(
+            (meeting) =>
+              searchParams.get("linked_object") === "companies" &&
+              companyId !== null &&
+              meeting.companyIds.includes(companyId)
+          )
+          .map((meeting) => ({
+            id: { workspace_id: "workspace", meeting_id: crypto.randomUUID() },
+            title: meeting.title,
+            description: "",
+            is_all_day: false,
+            start: { datetime: meeting.start, timezone: "Europe/Amsterdam" },
+            end: { datetime: meeting.start, timezone: "Europe/Amsterdam" },
+            participants: meeting.participants.map((email, index) => ({
+              email_address: email,
+              is_organizer: index === 0,
+              status: "accepted",
+            })),
+            linked_records: meeting.companyIds.map((id) => ({
+              object_slug: "companies",
+              object_id: "companies",
+              record_id: id,
+            })),
+            created_at: meeting.start,
+          })),
+        pagination: { next_cursor: null },
+      });
+    }
+    if (pathname === "/v2/notes") {
+      const companyId = searchParams.get("parent_record_id");
+      return Response.json({
+        data: state.notes
+          .filter(
+            (note) =>
+              searchParams.get("parent_object") === "companies" &&
+              note.companyId === companyId
+          )
+          .map((note) => ({
+            id: { workspace_id: "workspace", note_id: crypto.randomUUID() },
+            parent_object: "companies",
+            parent_record_id: note.companyId,
+            title: note.title,
+            content_plaintext: "",
+            created_at: note.createdAt,
+          })),
+      });
     }
     if (pathname === "/v2/workspace_members") {
       return Response.json({
@@ -93,24 +202,9 @@ export const fakeAttio = (key: string) => {
     const values =
       object === undefined ? undefined : state.records[object].get(id);
     if (object === undefined || values === undefined) {
-      return Response.json(
-        { status_code: 404, type: "invalid_request_error", code: "not_found" },
-        { status: 404 }
-      );
+      return notFound();
     }
-    const recordId = state.swapped.get(id) ?? id;
-    return Response.json({
-      data: {
-        id: {
-          workspace_id: "workspace",
-          object_id: object,
-          record_id: recordId,
-        },
-        created_at: "2026-09-01T09:00:00.000Z",
-        web_url: `https://app.attio.com/grasp/${object === "companies" ? "company" : object.slice(0, -1)}/${recordId}/overview`,
-        values,
-      },
-    });
+    return Response.json({ data: recordOf(object, id, values) });
   };
 
   beforeEach(() => {
@@ -135,6 +229,9 @@ export const fakeAttio = (key: string) => {
     }
     state.swapped.clear();
     state.members.length = 0;
+    state.meetings.length = 0;
+    state.notes.length = 0;
+    state.hasMeetings = true;
     state.requests = 0;
     state.writes = 0;
     state.paths.length = 0;
@@ -164,8 +261,9 @@ export const attioValue = {
         is_archived: false,
       },
     }),
-  status: (title: string) =>
+  status: (title: string, since = "2026-09-01T09:00:00.000Z") =>
     active("status", {
+      active_from: since,
       status: {
         id: { status_id: crypto.randomUUID() },
         title,
