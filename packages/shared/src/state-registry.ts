@@ -339,6 +339,7 @@ const coreDb: D1State = {
       `${core}workflows/resource-runs.ts`
     ),
     workflow_resource_run_controls: exported(`${core}screen-workflows.ts`),
+    workflow_resource_run_control_keys: exported(`${core}screen-workflows.ts`),
     workflow_catalog_contracts: exported(`${core}workflow-catalog.ts`),
     workflow_binding_approvals: exported(`${core}workflow-bindings.ts`),
     workflow_resource_params: exported(`${core}workflow-params.ts`),
