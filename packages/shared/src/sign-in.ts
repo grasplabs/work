@@ -30,36 +30,60 @@ export type SignInErrorCode =
   | SignInRefusal
   | (typeof betterAuthSignInErrors)[number];
 
-/** One of the person's own sessions: a browser they are signed in on. */
+/**
+ * The browser and system a session signed in from, as its user agent
+ * names them: enough to tell one's devices apart, never the user agent
+ * itself. Either is `null` when the user agent names none Grasp knows.
+ */
+export interface SessionDevice {
+  /** The browser, such as "Chrome" or "Safari". */
+  browser: string | null;
+  /** The operating system or device, such as "macOS", "Windows" or "iPhone". */
+  system: string | null;
+  /** A phone or tablet, rather than a computer. */
+  mobile: boolean;
+}
+
+/**
+ * One of the person's own sessions: a browser they are signed in on. Never
+ * its token, which is what its cookie holds, nor the address it signed in
+ * from.
+ */
 export interface OwnSession {
-  /** The session's ID, never its token. */
+  /** Names the session for {@link SessionsApi.end}; opaque, and not its token. */
   id: string;
-  /** The browser's user agent, as it sent it when signing in. */
-  device: string | null;
+  /** What it signed in on, from the user agent it sent then. */
+  device: SessionDevice;
   /** When they signed in (ISO 8601). */
   signedInAt: string;
-  /** When the session was last refreshed (ISO 8601). */
-  refreshedAt: string;
-  /** When it ends unless refreshed (ISO 8601). */
+  /**
+   * When it was last active (ISO 8601), as far as core keeps it: when the
+   * session last changed. Sessions aren't refreshed by use (core's
+   * auth.ts), so for most this is when they signed in.
+   */
+  lastActiveAt: string;
+  /** When it ends (ISO 8601). */
   expiresAt: string;
-  /** The session this connection is signed in with. */
+  /** The session this connection is signed in with: "This device". */
   current: boolean;
 }
 
-/** Most of a person's own sessions listed at once: the latest refreshed. */
+/** Most of a person's own sessions listed at once: the latest active. */
 export const ownSessionsListed = 50;
 
 /**
  * What ending a session came to. `ended`: it was theirs, and is over:
- * every connection on it closes within seconds. `not_found`: they hold no
- * such session, whether it ended already or was never theirs.
+ * every connection on it closes within seconds. `current`: it is the one
+ * this connection is signed in with, which signing out ends instead.
+ * `not_found`: they hold no such session, whether it ended already or was
+ * never theirs.
  */
-export type EndedSession = "ended" | "not_found";
+export type EndedSession = "ended" | "current" | "not_found";
 
-/** The person's own sessions, over `/rpc`. */
+/** The person's own sessions, over `/rpc`; never anyone else's. */
 export interface SessionsApi {
-  /** Their sessions that haven't expired, latest refreshed first, at most {@link ownSessionsListed}. */
+  /** Their sessions that haven't expired, latest active first, at most {@link ownSessionsListed}. */
   list: () => Promise<OwnSession[]>;
-  /** Ends one of their own sessions, this one too; audited. */
+  /** Ends one of their other sessions, by its {@link OwnSession.id}; audited. */
   end: (id: string) => Promise<EndedSession>;
 }
