@@ -22,6 +22,7 @@ import type {
   ConnectionOwner,
   ConnectionPerson,
   ConnectionSummary,
+  OrganizationConnection,
   ConnectResult,
   Disconnect,
   DisconnectPersonal,
@@ -83,6 +84,7 @@ import {
   disconnectPersonal,
   finishConnection,
   listConnections,
+  organizationConnections,
   startConnection,
 } from "./oauth.ts";
 import {
@@ -312,6 +314,10 @@ export default class Connect
     person: ConnectionPerson
   ): Promise<ConnectionSummary[]> {
     return await listConnections(this.env, person);
+  }
+
+  async organizationConnections(): Promise<OrganizationConnection[]> {
+    return await organizationConnections(this.env);
   }
 
   async connectionOwners(

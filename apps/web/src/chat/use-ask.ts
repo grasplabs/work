@@ -8,6 +8,7 @@ import { useRef, useState } from "react";
 
 import { useCoreAction } from "../use-core-action.ts";
 import { setActiveChat } from "./active-chat.ts";
+import type { ChatSlot } from "./active-chat.ts";
 import {
   readChoice,
   resolveChoice,
@@ -41,7 +42,9 @@ export const useAsk = (
   /** Where a new chat opens: on the chat page, or where the person is (the dock). */
   opens: "page" | "here" = "page",
   /** The project a new chat is made in, when it is started from one. */
-  projectId?: string
+  projectId?: string,
+  /** Which of the tab's open chats a new chat becomes. */
+  slot: ChatSlot = "chat"
 ) => {
   const router = useRouter();
   const navigate = useNavigate();
@@ -113,7 +116,7 @@ export const useAsk = (
     // earlier question, and a draft the person started stays.
     setText((now) => (now === question ? "" : now));
     if (chatId === undefined) {
-      setActiveChat(sent);
+      setActiveChat(sent, slot);
       if (opens === "page") {
         await navigate({ to: "/", search: { chat: sent } });
       }
