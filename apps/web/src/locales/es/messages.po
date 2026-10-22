@@ -4189,6 +4189,10 @@ msgstr "Denegó paquetes"
 msgid "Depends on"
 msgstr "Depende de"
 
+#: src/engines/new-app.tsx
+msgid "Describe the app: what it shows, and for whom"
+msgstr "Describe la aplicación: qué muestra y para quién"
+
 #: src/routes/_shell.index.tsx
 msgid "Describe what you want. The agent answers from what it can read, and holds every change to an outside system until you confirm it."
 msgstr "Describe lo que quieres. El agente responde con lo que puede leer y retiene cada cambio en un sistema externo hasta que lo confirmes."
@@ -4421,6 +4425,7 @@ msgstr "Accesos directos de dominios"
 #: src/dashboard/widget-board.tsx
 #: src/frame/app-sidebar.tsx
 #: src/landscape/app-cells.tsx
+#: src/routes/_shell.apps.new.tsx
 #: src/routes/_shell.domains.$engine.apps.$screen.tsx
 #: src/routes/_shell.domains.$engine.index.tsx
 #: src/routes/_shell.domains.index.tsx
@@ -7137,6 +7142,11 @@ msgstr "Nunca"
 msgctxt "when Pulse may report"
 msgid "Never"
 msgstr "Nunca"
+
+#: src/routes/_shell.apps.new.tsx
+#: src/routes/_shell.domains.$engine.index.tsx
+msgid "New app"
+msgstr "Nueva aplicación"
 
 #: src/chat/chat-dock.tsx
 #: src/chat/chat-list.tsx
@@ -13316,6 +13326,10 @@ msgstr "Qué se ejecutó"
 #: src/dashboard/report-dialog.tsx
 msgid "What ran, the decisions it asked for, every workflow and what could be better. Keep it as Markdown, or save it as a PDF from the print window."
 msgstr "Qué se ejecutó, las decisiones que pidió, cada flujo de trabajo y qué podría ir mejor. Guárdalo como Markdown o como PDF desde la ventana de impresión."
+
+#: src/engines/new-app.tsx
+msgid "What should the app show, and for whom?"
+msgstr "¿Qué debe mostrar la aplicación y para quién?"
 
 #: src/routes/_shell.onboarding.notes.tsx
 msgid "What should the next person at Grasp know?"

@@ -30,6 +30,7 @@ import { Route as ShellSettingsRouteImport } from './routes/_shell.settings'
 import { Route as DecisionsDecisionRouteImport } from './routes/decisions.$decision'
 import { Route as ShellAppsIndexRouteImport } from './routes/_shell.apps.index'
 import { Route as ShellAppsAppRouteImport } from './routes/_shell.apps.$app'
+import { Route as ShellAppsNewRouteImport } from './routes/_shell.apps.new'
 import { Route as ShellBrainIndexRouteImport } from './routes/_shell.brain.index'
 import { Route as ShellBrainNoteIdRouteImport } from './routes/_shell.brain.$noteId'
 import { Route as ShellDomainsIndexRouteImport } from './routes/_shell.domains.index'
@@ -197,6 +198,11 @@ const ShellAppsIndexRoute = ShellAppsIndexRouteImport.update({
 const ShellAppsAppRoute = ShellAppsAppRouteImport.update({
   id: '/apps/$app',
   path: '/apps/$app',
+  getParentRoute: () => ShellRoute,
+} as any)
+const ShellAppsNewRoute = ShellAppsNewRouteImport.update({
+  id: '/apps/new',
+  path: '/apps/new',
   getParentRoute: () => ShellRoute,
 } as any)
 const ShellBrainIndexRoute = ShellBrainIndexRouteImport.update({
@@ -566,6 +572,7 @@ export interface FileRoutesByFullPath {
   '/settings': typeof ShellSettingsRouteWithChildren
   '/decisions/$decision': typeof DecisionsDecisionRoute
   '/apps/$app': typeof ShellAppsAppRoute
+  '/apps/new': typeof ShellAppsNewRoute
   '/brain/$noteId': typeof ShellBrainNoteIdRoute
   '/integrations/$integration': typeof ShellIntegrationsIntegrationRoute
   '/knowledge/$collection': typeof ShellKnowledgeCollectionRoute
@@ -649,6 +656,7 @@ export interface FileRoutesByTo {
   '/decisions/$decision': typeof DecisionsDecisionRoute
   '/': typeof ShellIndexRoute
   '/apps/$app': typeof ShellAppsAppRoute
+  '/apps/new': typeof ShellAppsNewRoute
   '/brain/$noteId': typeof ShellBrainNoteIdRoute
   '/integrations/$integration': typeof ShellIntegrationsIntegrationRoute
   '/knowledge/$collection': typeof ShellKnowledgeCollectionRoute
@@ -736,6 +744,7 @@ export interface FileRoutesById {
   '/decisions/$decision': typeof DecisionsDecisionRoute
   '/_shell/': typeof ShellIndexRoute
   '/_shell/apps/$app': typeof ShellAppsAppRoute
+  '/_shell/apps/new': typeof ShellAppsNewRoute
   '/_shell/brain/$noteId': typeof ShellBrainNoteIdRoute
   '/_shell/integrations/$integration': typeof ShellIntegrationsIntegrationRoute
   '/_shell/knowledge/$collection': typeof ShellKnowledgeCollectionRoute
@@ -824,6 +833,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/decisions/$decision'
     | '/apps/$app'
+    | '/apps/new'
     | '/brain/$noteId'
     | '/integrations/$integration'
     | '/knowledge/$collection'
@@ -907,6 +917,7 @@ export interface FileRouteTypes {
     | '/decisions/$decision'
     | '/'
     | '/apps/$app'
+    | '/apps/new'
     | '/brain/$noteId'
     | '/integrations/$integration'
     | '/knowledge/$collection'
@@ -993,6 +1004,7 @@ export interface FileRouteTypes {
     | '/decisions/$decision'
     | '/_shell/'
     | '/_shell/apps/$app'
+    | '/_shell/apps/new'
     | '/_shell/brain/$noteId'
     | '/_shell/integrations/$integration'
     | '/_shell/knowledge/$collection'
@@ -1222,6 +1234,13 @@ declare module '@tanstack/react-router' {
       path: '/apps/$app'
       fullPath: '/apps/$app'
       preLoaderRoute: typeof ShellAppsAppRouteImport
+      parentRoute: typeof ShellRoute
+    }
+    '/_shell/apps/new': {
+      id: '/_shell/apps/new'
+      path: '/apps/new'
+      fullPath: '/apps/new'
+      preLoaderRoute: typeof ShellAppsNewRouteImport
       parentRoute: typeof ShellRoute
     }
     '/_shell/brain/': {
@@ -1807,6 +1826,7 @@ interface ShellRouteChildren {
   ShellSettingsRoute: typeof ShellSettingsRouteWithChildren
   ShellIndexRoute: typeof ShellIndexRoute
   ShellAppsAppRoute: typeof ShellAppsAppRoute
+  ShellAppsNewRoute: typeof ShellAppsNewRoute
   ShellIntegrationsIntegrationRoute: typeof ShellIntegrationsIntegrationRoute
   ShellKnowledgeCollectionRoute: typeof ShellKnowledgeCollectionRoute
   ShellLandscapeAppIdRoute: typeof ShellLandscapeAppIdRouteWithChildren
@@ -1844,6 +1864,7 @@ const ShellRouteChildren: ShellRouteChildren = {
   ShellSettingsRoute: ShellSettingsRouteWithChildren,
   ShellIndexRoute: ShellIndexRoute,
   ShellAppsAppRoute: ShellAppsAppRoute,
+  ShellAppsNewRoute: ShellAppsNewRoute,
   ShellIntegrationsIntegrationRoute: ShellIntegrationsIntegrationRoute,
   ShellKnowledgeCollectionRoute: ShellKnowledgeCollectionRoute,
   ShellLandscapeAppIdRoute: ShellLandscapeAppIdRouteWithChildren,
