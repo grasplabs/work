@@ -3645,3 +3645,25 @@ export const landscapeStagedPeople = sqliteTable(
     }),
   ]
 );
+
+/**
+ * The Playbook's records (brain-records.ts): one row each, never written
+ * over, in the order they were added. `body` is the record as
+ * `brainRecordSchema` parsed it, as canonical JSON, so a record sent again
+ * compares as the same text. No row names who added it: the audit log does.
+ */
+export const brainRecords = sqliteTable(
+  "brain_records",
+  {
+    /** The order records were added in: `brain.read` keeps it. */
+    position: integer().primaryKey({ autoIncrement: true }),
+    type: text({
+      enum: ["source", "tool", "candidate", "statement"],
+    }).notNull(),
+    id: text().notNull(),
+    body: text().notNull(),
+    addedAt: timestamp("added_at").notNull(),
+  },
+  // One id is one record, whatever its type.
+  (table) => [uniqueIndex("brain_records_id_idx").on(table.id)]
+);
