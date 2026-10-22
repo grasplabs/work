@@ -35,6 +35,11 @@ import type { CallingRun } from "./resource-authority.ts";
 //   writes under the same ID, which is written once (the database refuses
 //   a second row, and any change of the first but its delivery and its
 //   retention): the first stands.
+// - Data outliving its run's retention. An event's subject and data go
+//   with its run's details (retention.ts); a data schema, kept for good,
+//   is only ever a literal URI of the definition (generate.ts).
+// - An attempt acting after it ended. Its holding is asked again just
+//   before the write (`requireHolds`), nothing awaited between.
 // - A test run's events leaving it. A test run of a draft emits nothing.
 
 /** What an `emit` task's event is, before the host mints its envelope. */
@@ -45,7 +50,8 @@ export interface EmitRequest {
   readonly binding: string;
   readonly type: string;
   readonly subject?: Json;
-  readonly dataschema?: Json;
+  /** A literal absolute URI the build sealed. */
+  readonly dataschema?: string;
   readonly data: Json;
 }
 
@@ -76,7 +82,14 @@ const textOf = (value: Json | undefined, name: string, max: number) => {
 export const emitEvent = async (
   env: Env,
   run: CallingRun,
-  request: EmitRequest
+  request: EmitRequest,
+  /**
+   * Throws once the attempt emitting it no longer holds: asked last,
+   * nothing awaited between it and the write.
+   */
+  requireHolds: () => void = () => {
+    // A caller with no attempt to lose.
+  }
 ): Promise<EmittedEvent> => {
   const binding = run.bindings.get(request.binding);
   if (binding?.kind !== "event") {
@@ -102,6 +115,7 @@ export const emitEvent = async (
   const source = `urn:grasp:workflow:${run.workflowId}:run:${run.runId}`;
   const createdAt = Date.now();
   const db = drizzle(env.DB);
+  requireHolds();
   await auditedBatch(env, db, [
     db
       .insert(workflowEmittedEvents)
@@ -118,6 +132,8 @@ export const emitEvent = async (
         subject,
         dataschema,
         data: canonicalJson(data),
+        // Pinned from the run, as its calls read it (restricted.ts).
+        restricted: run.restricted,
         createdAt: new Date(createdAt),
       })
       .onConflictDoNothing(),

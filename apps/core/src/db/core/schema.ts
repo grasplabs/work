@@ -3313,6 +3313,8 @@ export const workflowEmittedEvents = sqliteTable(
     dataschema: text(),
     /** The data, canonical JSON; null once retention removed it. */
     data: text(),
+    /** Whether its run was restricted (restricted.ts), pinned with it. */
+    restricted: integer({ mode: "boolean" }).notNull().default(false),
     createdAt: timestamp("created_at").notNull(),
     deliveredAt: timestamp("delivered_at"),
     detailsRemovedAt: timestamp("details_removed_at"),

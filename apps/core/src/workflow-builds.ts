@@ -275,7 +275,11 @@ const sealedCallSchema = z.discriminatedUnion("name", [
     binding: aliasSchema,
     type: z.string().min(1).max(256),
     subject: templateSchema.optional(),
-    dataschema: templateSchema.optional(),
+    dataschema: z
+      .string()
+      .max(1024)
+      .refine((text) => URL.canParse(text))
+      .optional(),
     data: templateSchema,
   }),
   z.strictObject({

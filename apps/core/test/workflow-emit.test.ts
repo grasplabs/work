@@ -4,6 +4,7 @@ import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import type { WorkflowResourceRun } from "@grasp-os/shared/workflow-resources";
+import { executionErrors } from "@grasp-os/shared/workflows";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
@@ -17,11 +18,13 @@ import {
   publishWorkflowVersion,
 } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
+import { emitEvent } from "../src/workflows/emitted-events.ts";
+import { callingRunOf } from "../src/workflows/resource-authority.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { sweepWorkflowStartDetails } from "../src/workflows/retention.ts";
 import { allEvents } from "./audit-events.ts";
 import { liveStatus, resumed, stopped } from "./runs.ts";
-import { unique } from "./sign-in.ts";
+import { outcome, unique } from "./sign-in.ts";
 
 // Emit tasks of JSON workflows (emitted-events.ts, resource-host.ts), from
 // their threat model: an event goes only to core's outbox, through an
@@ -314,6 +317,83 @@ describe("emit tasks", { timeout: 120_000 }, () => {
         feature: "emit:datacontenttype",
       },
     ]);
+  });
+
+  it("keep a data schema only as the literal URI the definition gives, never one built from data", async () => {
+    const admin = await person("admin");
+    const { version } = await emitting(
+      admin,
+      [emitTimeout("publish-timeout", { dataschema: "${ .jobId }" })],
+      false
+    );
+    const literal = await emitting(admin, [
+      emitTimeout("publish-timeout", {
+        dataschema: "https://example.com/job-timeout",
+      }),
+    ]);
+
+    const runId = await started(admin, literal.workflow.id);
+    await endOf(admin, literal.workflow.id, runId);
+    const row = await env.DB.prepare(
+      "SELECT dataschema, restricted FROM workflow_emitted_events WHERE run_id = ?"
+    )
+      .bind(runId)
+      .first<{ dataschema: string; restricted: number }>();
+
+    expect({
+      expression: version.build.executable ? [] : version.build.unsupported,
+      literal: row,
+    }).toStrictEqual({
+      expression: [
+        {
+          pointer: "/do/0/publish-timeout/emit/event/with/dataschema",
+          taskId: "publish-timeout",
+          feature: "emit:dataschema",
+        },
+      ],
+      literal: { dataschema: "https://example.com/job-timeout", restricted: 0 },
+    });
+  });
+
+  it("write nothing for an attempt that stopped holding while its event was being checked", async () => {
+    const admin = await person("admin");
+    const { workflow } = await emitting(admin, [
+      { linger: { wait: "PT1H" } },
+      emitTimeout("publish-timeout"),
+    ]);
+    const runId = await started(admin, workflow.id);
+    await vi.waitFor(
+      async () => {
+        await expect(liveStatus(runId)).resolves.toBe("waiting");
+      },
+      { timeout: 30_000, interval: 100 }
+    );
+    const run = await callingRunOf(env, workflow.id, runId);
+    if (run === undefined) {
+      throw new Error("The run has ended");
+    }
+
+    const stale = await outcome(
+      emitEvent(
+        env,
+        run,
+        {
+          taskId: "publish-timeout",
+          stepKey: "stale-step",
+          binding: "jobEvents",
+          type: timedOut,
+          data: { jobId: "job-1" },
+        },
+        () => {
+          throw executionErrors.create("execution.stale_attempt");
+        }
+      )
+    );
+
+    expect({ stale, emitted: await emittedBy(runId) }).toStrictEqual({
+      stale: "execution.stale_attempt",
+      emitted: [],
+    });
   });
 
   it("lose their event's subject and data with their run's details, keeping its envelope", async () => {

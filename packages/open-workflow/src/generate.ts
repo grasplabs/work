@@ -298,7 +298,8 @@ export type GeneratedCall =
       readonly binding: string;
       readonly type: string;
       readonly subject?: CallTemplate;
-      readonly dataschema?: CallTemplate;
+      /** A literal absolute URI, as validation checked it. */
+      readonly dataschema?: string;
       readonly data: CallTemplate;
     };
 
@@ -1646,7 +1647,7 @@ const inputFromOf = (
 /**
  * An `emit` task's event, as a named call of the host's (`grasp.emit`):
  * its binding and type as validation checked them, its subject, data
- * schema and data as templates the host builds. `undefined` once a part
+ * schema as its literal URI, and data as a template the host builds. `undefined` once a part
  * was refused: a `source` (the host sets it, to the emitting run), or a
  * content type other than JSON's, which is the only one the host sends.
  */
@@ -1698,7 +1699,20 @@ const emitCallOf = (
         )
       : undefined;
   const subject = part("subject");
-  const dataschema = part("dataschema");
+  // A data schema is an absolute URI written in the definition, never
+  // built from data: it is kept with the event for good, past retention.
+  const { dataschema } = attributes;
+  if (
+    dataschema !== undefined &&
+    (typeof dataschema !== "string" || parseSlot(dataschema).kind !== "literal")
+  ) {
+    emitter.refusals.add(
+      pointerJoin(withPointer, "dataschema"),
+      "emit:dataschema",
+      id
+    );
+    refused = true;
+  }
   const data = part("data") ?? { literal: null };
   if (refused) {
     return undefined;
@@ -1708,7 +1722,7 @@ const emitCallOf = (
     binding,
     type: attributes.type,
     ...(subject === undefined ? {} : { subject }),
-    ...(dataschema === undefined ? {} : { dataschema }),
+    ...(typeof dataschema === "string" ? { dataschema } : {}),
     data,
   };
 };

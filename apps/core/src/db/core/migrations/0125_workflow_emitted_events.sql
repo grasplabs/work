@@ -11,6 +11,7 @@ CREATE TABLE `workflow_emitted_events` (
 	`subject` text,
 	`dataschema` text,
 	`data` text,
+	`restricted` integer DEFAULT false NOT NULL,
 	`created_at` integer NOT NULL,
 	`delivered_at` integer,
 	`details_removed_at` integer,
@@ -18,7 +19,8 @@ CREATE TABLE `workflow_emitted_events` (
 );
 --> statement-breakpoint
 CREATE INDEX `workflow_emitted_events_run` ON `workflow_emitted_events` (`run_id`);--> statement-breakpoint
-CREATE INDEX `workflow_emitted_events_undelivered` ON `workflow_emitted_events` (`created_at`) WHERE "workflow_emitted_events"."delivered_at" IS NULL;--> statement-breakpoint
+CREATE INDEX `workflow_emitted_events_undelivered` ON `workflow_emitted_events` (`created_at`) WHERE "workflow_emitted_events"."delivered_at" IS NULL;
+--> statement-breakpoint
 -- An emitted event is written once: its ID, run, binding, contract and
 -- envelope never change. Only its delivery is marked, once, and retention
 -- removes its subject and data, once (workflows/emitted-events.ts).
@@ -34,6 +36,7 @@ WHEN NOT (
 	AND NEW.`source` IS OLD.`source`
 	AND NEW.`type` IS OLD.`type`
 	AND NEW.`dataschema` IS OLD.`dataschema`
+	AND NEW.`restricted` IS OLD.`restricted`
 	AND NEW.`created_at` IS OLD.`created_at`
 	AND (NEW.`delivered_at` IS OLD.`delivered_at` OR OLD.`delivered_at` IS NULL)
 	AND (

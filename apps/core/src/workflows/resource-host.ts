@@ -1152,11 +1152,7 @@ const templatesOf = (call: SealedCall): SealedTemplate[] => {
       return [call.recipients, call.prompt, call.input];
     }
     case "grasp.emit": {
-      return [
-        call.data,
-        ...(call.subject === undefined ? [] : [call.subject]),
-        ...(call.dataschema === undefined ? [] : [call.dataschema]),
-      ];
+      return [call.data, ...(call.subject === undefined ? [] : [call.subject])];
     }
     default: {
       return call satisfies never;
@@ -3198,22 +3194,31 @@ export class ResourceRunHost
         : await this.#built(attempt, template, frame, frame.size);
     const data = await build(call.data);
     const subject = await build(call.subject);
-    const dataschema = await build(call.dataschema);
+    const { dataschema } = call;
     if (this.#run.calling.candidate !== undefined) {
       return frame.input;
     }
     this.#requireCurrent(attempt);
-    await emitEvent(this.#env, this.#run.calling, {
-      taskId: task.id,
-      // Its step's name, not its task's: a step the same task runs again
-      // under another name (a loop's iteration) emits an event of its own.
-      stepKey: stepIdempotencyKey(this.#run.runId, attempt.name),
-      binding: call.binding,
-      type: call.type,
-      data: data ?? null,
-      ...(subject === undefined ? {} : { subject }),
-      ...(dataschema === undefined ? {} : { dataschema }),
-    });
+    await emitEvent(
+      this.#env,
+      this.#run.calling,
+      {
+        taskId: task.id,
+        // Its step's name, not its task's: a step the same task runs again
+        // under another name (a loop's iteration) emits an event of its own.
+        stepKey: stepIdempotencyKey(this.#run.runId, attempt.name),
+        binding: call.binding,
+        type: call.type,
+        data: data ?? null,
+        ...(subject === undefined ? {} : { subject }),
+        ...(dataschema === undefined ? {} : { dataschema }),
+      },
+      // Asked again just before the event is written: an attempt the
+      // engine let go of, or a run cancelled meanwhile, writes nothing.
+      () => {
+        this.#requireCurrent(attempt);
+      }
+    );
     return frame.input;
   }
 
