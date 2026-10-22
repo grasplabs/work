@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "059e7248-c6f8-4d4d-946f-6c1ad623c786",
+  "id": "1b6f3fc1-6d69-4313-899d-0fd2acc9425a",
   "prevId": "4e34a57b-ab4d-43a5-9dc4-84a75f840f12",
   "tables": {
     "answer_waits": {
@@ -212,6 +212,44 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
+    "drawn_works": {
+      "name": "drawn_works",
+      "columns": {
+        "work": {
+          "name": "work",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "drawn": {
+          "name": "drawn",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "agreed": {
+          "name": "agreed",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "at": {
+          "name": "at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
     "events": {
       "name": "events",
       "columns": {
@@ -358,45 +396,6 @@
       "indexes": {},
       "foreignKeys": {},
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "interview_texts": {
-      "name": "interview_texts",
-      "columns": {
-        "person": {
-          "name": "person",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "mark": {
-          "name": "mark",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "at": {
-          "name": "at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {
-        "interview_texts_person_mark_pk": {
-          "columns": [
-            "person",
-            "mark"
-          ],
-          "name": "interview_texts_person_mark_pk"
-        }
-      },
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
