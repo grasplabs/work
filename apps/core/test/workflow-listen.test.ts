@@ -373,6 +373,112 @@ describe("listen tasks", { timeout: 120_000 }, () => {
     expect(run.output).toStrictEqual({ notes: ["first"] });
   });
 
+  it("take their own events per item when a for loop runs them, each item the first match of its own", async () => {
+    const admin = await person("admin");
+    const { workflow } = await listening(admin, [
+      { init: { set: "${ . }", export: { as: "${ {notes: []} }" } } },
+      { pause: { wait: "PT2S" } },
+      {
+        "each-job": {
+          for: { each: "name", in: '${ ["j1", "j2"] }' },
+          do: [
+            {
+              "await-item": {
+                ...listen("await-item", {
+                  one: { with: { type: completed, subject: "${ $name }" } },
+                })["await-item"],
+                export: {
+                  as: "${ {notes: ($context.notes + [.[] | .note])} }",
+                },
+              },
+            },
+          ],
+        },
+      },
+      { done: { set: { notes: "${ $context.notes }" } } },
+    ]);
+    const runId = await started(admin, workflow.id);
+    await waiting(runId);
+
+    for (const [subject, note] of [
+      ["j2", "first j2"],
+      ["j1", "j1"],
+      ["j2", "second j2"],
+    ] as const) {
+      // oxlint-disable-next-line no-await-in-loop -- in order: acceptance order matters
+      await admitRunEvent(env, delivery(workflow.id, runId, { subject, note }));
+    }
+    const run = await endOf(admin, workflow.id, runId);
+    const journal = await runObject(runId).journal();
+
+    expect({ status: run.status, output: run.output }).toStrictEqual({
+      status: "completed",
+      output: { notes: ["j1", "first j2"] },
+    });
+    expect(
+      journal?.events.map((event) => event.consumed_by !== null)
+    ).toStrictEqual([true, true, false]);
+  });
+
+  it("take their own events per item when for loops nest, each pair the first match of its own", async () => {
+    const admin = await person("admin");
+    const { workflow } = await listening(admin, [
+      { init: { set: "${ . }", export: { as: "${ {notes: []} }" } } },
+      { pause: { wait: "PT2S" } },
+      {
+        outer: {
+          for: { each: "job", at: "jobAt", in: '${ ["j1", "j2"] }' },
+          do: [
+            {
+              inner: {
+                for: { each: "part", at: "partAt", in: '${ ["x"] }' },
+                do: [
+                  {
+                    "await-pair": {
+                      ...listen("await-pair", {
+                        one: {
+                          with: {
+                            type: completed,
+                            subject: "${ $job + $part }",
+                          },
+                        },
+                      })["await-pair"],
+                      export: {
+                        as: "${ {notes: ($context.notes + [.[] | .note])} }",
+                      },
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      },
+      { done: { set: { notes: "${ $context.notes }" } } },
+    ]);
+    const runId = await started(admin, workflow.id);
+    await waiting(runId);
+
+    for (const [subject, note] of [
+      ["j2x", "first j2x"],
+      ["j1x", "j1x"],
+      ["j2x", "second j2x"],
+    ] as const) {
+      // oxlint-disable-next-line no-await-in-loop -- in order: acceptance order matters
+      await admitRunEvent(env, delivery(workflow.id, runId, { subject, note }));
+    }
+    const run = await endOf(admin, workflow.id, runId);
+    const journal = await runObject(runId).journal();
+
+    expect({ status: run.status, output: run.output }).toStrictEqual({
+      status: "completed",
+      output: { notes: ["j1x", "first j2x"] },
+    });
+    expect(
+      journal?.events.map((event) => event.consumed_by !== null)
+    ).toStrictEqual([true, true, false]);
+  });
+
   it("fail the run when their events don't come by the timeout, and an ended run takes no more", async () => {
     const admin = await person("admin");
     const { workflow } = await listening(admin, [
