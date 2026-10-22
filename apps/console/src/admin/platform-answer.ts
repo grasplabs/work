@@ -56,9 +56,6 @@ export const platformsAnswer = async (
   ]);
   const companies = companiesOf(rows, liveColumns, platform.releases);
   const lines = companies.map(({ row, standing, needs }) => {
-    if (row.status === "provisioning") {
-      return `- ${row.id}: being set up; ring ${row.ring}.`;
-    }
     const day = liveColumns[row.id]?.day;
     const runs = row.release ?? "nothing yet";
     const pinned = row.pinnedReleaseId === null ? "" : " (pinned)";
@@ -70,7 +67,9 @@ export const platformsAnswer = async (
       day === undefined || day === null
         ? "yesterday's requests not read"
         : `${day.requests} requests yesterday, ${rateWords(errorRateOf(liveColumns[row.id]))} errors`;
-    return `- ${row.id}: ${standing}; ring ${row.ring}; runs ${runs}${pinned}; ${traffic}${look}.`;
+    // One still provisioning says so, with whatever else it has.
+    const stands = row.status === "provisioning" ? "being set up" : standing;
+    return `- ${row.id}: ${stands}; ring ${row.ring}; runs ${runs}${pinned}; ${traffic}${look}.`;
   });
   const { rollout } = platform;
   const rings =
