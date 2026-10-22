@@ -9,7 +9,7 @@ const Organization = () => {
   const { clientId } = Route.useParams();
   const admin = adminRoute
     .useLoaderData()
-    .find(({ client }) => client.id === clientId);
+    .admins.find(({ client }) => client.id === clientId);
   // The loader has made sure it is there.
   return admin === undefined ? null : <OrganizationPage admin={admin} />;
 };
@@ -24,7 +24,7 @@ const Organization = () => {
 export const Route = createFileRoute("/admin/organizations/$clientId")({
   loader: async ({ params, parentMatchPromise }) => {
     const { loaderData } = await parentMatchPromise;
-    const admin = loaderData?.find(
+    const admin = loaderData?.admins.find(
       ({ client }) => client.id === params.clientId
     );
     if (admin === undefined) {
