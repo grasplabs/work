@@ -194,10 +194,17 @@ export type {
   WatchState,
 } from "./client-workflow.ts";
 export type { FileTransport, TransferProgress } from "./client-files.ts";
+export type { LinkTransport } from "./client-links.ts";
 
 // The page's side of core's file channel (spec 10.7.5): what moves a
 // screen's files' bytes, which never travel in a JSON call.
 export { fileChannel } from "./file-channel.ts";
+export { linkChannel } from "./link-channel.ts";
+export type {
+  LinkChannel,
+  LinkChannelOptions,
+  LinkDecision,
+} from "./link-channel.ts";
 export type {
   CoreFetch,
   FileChannel,
