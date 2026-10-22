@@ -3420,6 +3420,10 @@ msgstr "no se pudo leer"
 msgid "Couldn't load this domain's workflows."
 msgstr "No se pudieron cargar los flujos de trabajo de este dominio."
 
+#: src/workflows/owner-picker.tsx
+msgid "Couldn't make {chosen} the owner of {named}"
+msgstr "No se pudo hacer a {chosen} responsable de {named}"
+
 #: src/routes/_shell.onboarding.ai-use.tsx
 msgid "Counted as it happened, every time a model was asked, and every second of voice."
 msgstr "Contado según ocurría: cada vez que se consultó un modelo, y cada segundo de voz."
@@ -6436,6 +6440,10 @@ msgstr "Ningún otro dominio ofrece todas las funciones que declara, públicas y
 msgid "No owner"
 msgstr "Sin responsable"
 
+#: src/people/person-picker.tsx
+msgid "No owner yet"
+msgstr "Aún sin responsable"
+
 #: src/engines/package-approvals.tsx
 msgid "No packages are approved for this domain."
 msgstr "No hay paquetes aprobados para este dominio."
@@ -6619,6 +6627,10 @@ msgstr "Nadie lo lee"
 #: src/routes/_shell.onboarding.interviewers.tsx
 msgid "Nobody stopped halfway."
 msgstr "Nadie lo dejó a medias."
+
+#: src/people/person-picker.tsx
+msgid "Nobody with that name."
+msgstr "Nadie con ese nombre."
 
 #: src/routes/_shell.landscape.$appId.usage.$userId.tsx
 msgid "Nobody with this link is connected to {appName}."
@@ -7425,10 +7437,23 @@ msgstr "Eres responsable"
 msgid "Owner"
 msgstr "Responsable"
 
+#: src/workflows/workflows-table.tsx
+msgctxt "column: who owns a workflow"
+msgid "Owner"
+msgstr "Responsable"
+
 #: src/brain/brain.ts
 msgctxt "note property: the team that owns an application"
 msgid "Owner"
 msgstr "Responsable"
+
+#: src/people/person-picker.tsx
+msgid "Owner: {owner}. Change owner"
+msgstr "Responsable: {owner}. Cambiar responsable"
+
+#: src/people/person-picker.tsx
+msgid "Owner: nobody yet. Change owner"
+msgstr "Responsable: nadie todavía. Cambiar responsable"
 
 #: src/landscape/landscape-audit.ts
 msgctxt "category of an audit event"
@@ -8022,6 +8047,10 @@ msgstr "Falló la lectura de lo que cambió en una conexión"
 #: src/routes/guest.tsx
 msgid "Reading what you wrote"
 msgstr "Leyendo lo que has escrito"
+
+#: src/people/person-picker.tsx
+msgid "Reading who can own it…"
+msgstr "Leyendo quién puede ser responsable…"
 
 #: src/onboarding/setup-steps.tsx
 msgid "Reading your staff list"
@@ -8716,6 +8745,10 @@ msgstr "Buscar miembros"
 #: src/landscape/filter-menu.tsx
 msgid "Search owner"
 msgstr "Buscar responsable"
+
+#: src/people/person-picker.tsx
+msgid "Search people"
+msgstr "Buscar personas"
 
 #: src/settings/pulse-people.tsx
 msgid "Search people and devices"
