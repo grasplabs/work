@@ -2154,6 +2154,9 @@ const keptMarks = (): TriedOnceMarks => {
     markUnstarted: (key, attempt) => {
       unstarted.add(`${attempt}:${key}`);
     },
+    markStarted: (key, attempt) => {
+      unstarted.delete(`${attempt}:${key}`);
+    },
     unstarted: (key, attempt) => unstarted.has(`${attempt}:${key}`),
     keepFailure: (key, attempt, error) => {
       failures.set(`${attempt}:${key}`, error);
@@ -2340,6 +2343,74 @@ describe("a JSON workflow's model call, once its isolate was stopped past its CP
         { name: "TimeoutError", code: null },
       ],
       ran: ["first", "greet, next activation"],
+      requests: 1,
+    });
+  });
+
+  it("makes once, in the next activation, a call whose attempt waited for a slot as its activation died", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const busy = Array.from({ length: 8 }, (_, index) => ({
+      [`busy-${index}`]: { set: { stage: "busy" } },
+    }));
+    const { workflow, approval } = await greetingWorkflow(ada, admin, {
+      before: [longHold, ...busy],
+    });
+    const runId = await started(ada, workflow.id);
+    const gateway = gatewayAnswering(answer('{"line":"Hello Ada"}'));
+    const runKey = unique();
+    const marks = keptMarks();
+    const bindings = frozenSummary(approval);
+    const ran: string[] = [];
+    const failed: unknown[] = [];
+    const first = await activationOf(ada, workflow.id, {
+      runId,
+      runKey,
+      marks,
+      bindings,
+      failed,
+    });
+    // Eight attempts hold every slot of the activation, and never end.
+    for (const index of busy.keys()) {
+      void first.do(
+        `task:busy-${index}`,
+        adaData,
+        async () => await Promise.withResolvers<never>().promise
+      );
+    }
+    // The call's first attempt waits for a slot as its activation dies.
+    void first.do("task:greet", adaData, async (attempt) => {
+      ran.push("greet, first activation");
+      return await called(attempt);
+    });
+    await scheduler.wait(100);
+    const second = await activationOf(ada, workflow.id, {
+      runId,
+      runKey,
+      marks,
+      attempts: { "task:greet": 2 },
+      bindings,
+      failed,
+    });
+    await second.do("task:greet", adaData, async (attempt) => {
+      ran.push("greet, next activation");
+      return await called(attempt);
+    });
+    // (What the forged module then answers for its record isn't this
+    // test's: only that its call went out, once, in the next activation,
+    // never refused as left open.)
+    expect({
+      leftOpen: failed.filter(
+        (failure) =>
+          failure instanceof Object &&
+          "name" in failure &&
+          failure.name === "TimeoutError"
+      ),
+      ran,
+      requests: gateway.requests.length,
+    }).toStrictEqual({
+      leftOpen: [],
+      ran: ["greet, next activation"],
       requests: 1,
     });
   });

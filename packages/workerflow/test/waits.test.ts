@@ -606,14 +606,12 @@ describe("an inbox", () => {
 
 describe("a replay that strays from its journal", () => {
   it.each([
-    ["a new wait while the one it suspended on still waits", "new-wait"],
     ["the same wait for another event type", "type"],
     ["the same wait with another timeout", "timeout"],
   ])("ends the run with a WorkflowReplayMismatchError: %s", async (_, what) => {
     const id = newId();
     await workflow("drifts").create({ id, params: { what } });
-    const first = what === "new-wait" ? "first" : "held";
-    const { journal: before } = await suspendedOn("drifts", id, first);
+    const { journal: before } = await suspendedOn("drifts", id, "held");
 
     // The next activation replays differently.
     await deliverAlarm("drifts", id);
@@ -623,8 +621,8 @@ describe("a replay that strays from its journal", () => {
       status: "errored",
       error: { name: "WorkflowReplayMismatchError" },
     });
-    // The journal is as the first activation left it, and nothing is
-    // left to wake for: no alarm loops on the stale wait.
+    // What the journal held is as the first activation left it, and
+    // nothing is left to wake for: no alarm loops on the stale wait.
     const after = await journalOf("drifts", id);
     expect(after.steps).toStrictEqual(before.steps);
     expect(after.activations).toMatchObject([
@@ -634,7 +632,33 @@ describe("a replay that strays from its journal", () => {
     await expect(wakeOf("drifts", id)).resolves.toBeNull();
   });
 
-  it("ends the run with a WorkflowReplayMismatchError: a new wait while the step it suspended on waits to retry", async () => {
+  // A replay can't tell a wait it never reaches from one it reaches only
+  // after I/O of its own, so neither halts the run: it wakes no later
+  // than the wait it left.
+  it("goes on the way it now takes, waking no later than a wait it left", async () => {
+    const id = newId();
+    await workflow("drifts").create({ id, params: { what: "new-wait" } });
+    const { journal: before } = await suspendedOn("drifts", id, "first");
+    const left = before.steps.find(({ name }) => name === "first");
+
+    await deliverAlarm("drifts", id);
+    const { journal } = await suspendedOn("drifts", id, "second");
+    await send("drifts", id, { type: "x", payload: "taken" });
+    const status = await ended("drifts", id);
+
+    expect(journal.run.wake_at).toBeLessThanOrEqual(left?.deadline ?? 0);
+    expect(status).toMatchObject({
+      status: "complete",
+      output: { payload: "taken" },
+    });
+    const after = await journalOf("drifts", id);
+    expect(after.steps.find(({ name }) => name === "first")).toMatchObject({
+      state: "waiting",
+      deadline: left?.deadline,
+    });
+  });
+
+  it("wakes at the retry of a step it no longer reaches, not at its new wait's deadline", async () => {
     const id = newId();
     await workflow("drifts").create({ id, params: { what: "retry" } });
     const before = await until("the run to wait for a retry", async () => {
@@ -647,58 +671,320 @@ describe("a replay that strays from its journal", () => {
 
     // The next activation reaches a wait where the first reached the step.
     await deliverAlarm("drifts", id);
-    const status = await ended("drifts", id);
+    const { journal } = await suspendedOn("drifts", id, "second");
 
-    expect(status).toStrictEqual({
-      status: "errored",
-      error: {
-        name: "WorkflowReplayMismatchError",
-        message:
-          'The run\'s definition no longer replays as its journal recorded: it reached the waitForEvent "second" while the do "flaky" it suspended on is still waiting to retry',
-      },
-    });
-    const after = await journalOf("drifts", id);
-    expect(after.steps).toStrictEqual(before.steps);
-    expect(after.attempts).toStrictEqual(before.attempts);
-    expect(after.activations).toMatchObject([
-      { ended: "suspended" },
-      { ended: "settled" },
-    ]);
-    await expect(wakeOf("drifts", id)).resolves.toBeNull();
+    const retryAt = before.attempts.at(-1)?.retry_at;
+    const second = journal.steps.find(({ name }) => name === "second");
+    expect(retryAt).toBeTypeOf("number");
+    expect(journal.run.wake_at).toBe(retryAt);
+    expect(journal.run.wake_at).toBeLessThan(second?.deadline ?? 0);
+    expect(journal.attempts).toStrictEqual(before.attempts);
   });
 });
 
-describe("waits raced against each other", () => {
-  it("end the run with a WorkflowParallelWaitError, and the author's handlers hear nothing", async () => {
+describe("waits raced or awaited together", () => {
+  it("run sleeps awaited together, each to its own deadline", async () => {
+    const id = newId();
+    await workflow("naps").create({ id });
+
+    const status = await ended("naps", id);
+
+    const { steps } = await journalOf("naps", id);
+    expect(status).toStrictEqual({ status: "complete", output: "slept" });
+    expect(
+      steps.map(({ name, state, type }) => ({ name, state, type }))
+    ).toStrictEqual([
+      { name: "first", state: "succeeded", type: "sleep" },
+      { name: "second", state: "succeeded", type: "sleep" },
+    ]);
+  });
+
+  it("park a wait raced against a sleep, suspend until the earlier, and let an event win the race", async () => {
     const id = newId();
     await workflow("races").create({ id });
+    const { journal } = await suspendedOn("races", id, "give-up");
+    const reply = journal.steps.find(({ name }) => name === "reply");
+    const giveUp = journal.steps.find(({ name }) => name === "give-up");
+    // Both journaled before the run let go, and it wakes at the earlier.
+    expect({
+      reply: reply?.state,
+      wake: journal.run.wake_at,
+      earlier: Math.min(reply?.deadline ?? 0, giveUp?.deadline ?? 0),
+    }).toMatchObject({ reply: "waiting" });
+    expect(journal.run.wake_at).toBe(
+      Math.min(reply?.deadline ?? 0, giveUp?.deadline ?? 0)
+    );
+    // Nothing of the author's handlers ran while the race was undecided.
+    expect(witnessed(id)).toStrictEqual([]);
 
+    await send("races", id, { type: "reply", payload: "yes" });
     const status = await ended("races", id);
+
+    expect(status).toMatchObject({ status: "complete" });
+    expect(witnessed(id)).toStrictEqual(["finally"]);
+  });
+
+  it("hand a race the same winner on every replay, as its outcomes were first journaled, across a kill", async () => {
+    const id = newId();
+    await workflow("sleep-race").create({ id });
+    // The short sleep won; the long one comes due while "after" waits.
+    await until("the long sleep to be due and journaled", async () => {
+      const { steps } = await journalOf("sleep-race", id);
+      return steps.find(({ name }) => name === "long")?.state === "succeeded"
+        ? true
+        : undefined;
+    });
+    // Replays with both outcomes read back from the journal, then one
+    // after the object is killed.
+    await deliverAlarm("sleep-race", id);
+    await deliverAlarm("sleep-race", id);
+    await runInDurableObject(runObject("sleep-race", id), (_, state) => {
+      state.abort("killed");
+    }).catch(() => null);
+
+    const status = await ended("sleep-race", id);
+
+    const { activations } = await journalOf("sleep-race", id);
+    expect(status).toStrictEqual({ status: "complete", output: "short" });
+    expect(activations.length).toBeGreaterThanOrEqual(5);
+    // One witness for every activation from the short sleep's wake on.
+    expect(witnessed(id)).toStrictEqual(
+      Array.from({ length: activations.length - 1 }, () => "short")
+    );
+  });
+
+  // The first run journals "a" first; a replay reaches "a" only after a
+  // timer of its own, with "b" read back at once. "b" isn't held for a
+  // call not yet made, and "a" is handed over once it is: nothing hangs.
+  it.each([
+    ["a timer before the earlier step", 0],
+    ["random host latency before every call (1)", 15],
+    ["random host latency before every call (2)", 15],
+  ])(
+    "hand over a sibling's saved outcome without holding it for an earlier one reached later: %s",
+    async (_, jitter) => {
+      const id = newId();
+      await workflow("late-branch").create({ id, params: { jitter } });
+
+      const status = await ended("late-branch", id);
+
+      const { activations } = await journalOf("late-branch", id);
+      expect(status).toStrictEqual({ status: "complete", output: ["a", "b"] });
+      // Replayed past both steps: the sleep after them suspended the run.
+      expect(activations.length).toBeGreaterThanOrEqual(2);
+      // Each ran once, "a" first.
+      expect(labels(id)).toStrictEqual(["a", "b"]);
+    }
+  );
+
+  it.each([
+    [true, 1],
+    [false, 0],
+  ])(
+    "make a call the definition reaches after I/O of its own, said busy (%s), before suspending beside a sleep",
+    async (busy, before) => {
+      const id = newId();
+      await workflow("busy-branch").create({ id, params: { busy } });
+
+      const { journal } = await suspendedOn("busy-branch", id, "nap");
+
+      // Said busy, the step runs before the run sleeps an hour; otherwise
+      // it is left to the next activation.
+      expect(effectsOf(id, "work")).toHaveLength(before);
+      expect(journal.activations).toHaveLength(1);
+    }
+  );
+
+  it("pause a replay cut short at a sleep it already slept, rather than take the sleeps after it for a stray, and go on after resuming", async () => {
+    const id = newId();
+    await workflow("timer-naps").create({ id });
+    await suspendedOn("timer-naps", id, "second");
+    // A replay, out at the author's own timer when the pause comes: the
+    // sleep it reaches next parks at the pause, and "second" isn't reached.
+    const replay = deliverAlarm("timer-naps", id);
+    await until("the replay to start", async () => {
+      const { activations } = await journalOf("timer-naps", id);
+      return activations.length === 3 ? true : undefined;
+    });
+    const run = await instance("timer-naps", id);
+    await run.pause();
+    await replay;
+
+    await expect(statusOf("timer-naps", id)).resolves.toMatchObject({
+      status: "paused",
+    });
+    await run.resume();
+    const journal = await until("the run to replay to the sleep", async () => {
+      const after = await journalOf("timer-naps", id);
+      return after.activations.length === 4 &&
+        after.activations[3]?.ended === "suspended"
+        ? after
+        : undefined;
+    });
+
+    expect(journal.run.status).toBe("waiting");
+    expect(
+      journal.steps.map(({ name, state }) => ({ name, state }))
+    ).toStrictEqual([
+      { name: "first", state: "succeeded" },
+      { name: "second", state: "waiting" },
+    ]);
+  });
+
+  it.each(["step", "sleep"])(
+    "run a step started beside a sleep (%s first) to its outcome, once, before the run suspends on the sleep",
+    async (first) => {
+      const id = newId();
+      await workflow("mixes").create({ id, params: { first } });
+
+      const { journal } = await suspendedOn("mixes", id, "nap");
+
+      expect(effectsOf(id, "work")).toHaveLength(1);
+      expect(
+        journal.steps.map(({ name, state }) => ({ name, state }))
+      ).toStrictEqual(
+        first === "sleep"
+          ? [
+              { name: "nap", state: "waiting" },
+              { name: "work", state: "succeeded" },
+            ]
+          : [
+              { name: "work", state: "succeeded" },
+              { name: "nap", state: "waiting" },
+            ]
+      );
+    }
+  );
+
+  it("wake for an event accepted while the activation still ran a step, not at the wait's deadline", async () => {
+    const id = newId();
+    const slow = hold(id, "slow");
+    await workflow("listens").create({ id });
+    await slow.held;
+    // The wait for "go" is parked; the activation is still out at "slow".
+    await until("the wait to be journaled", async () => {
+      const { steps } = await journalOf("listens", id);
+      return steps.some(({ name }) => name === "go") ? true : undefined;
+    });
+    await send("listens", id, { type: "go", payload: "now" });
+    slow.release();
+
+    const status = await ended("listens", id);
+
+    expect(status).toMatchObject({
+      status: "complete",
+      output: { payload: "now" },
+    });
+    expect(effectsOf(id, "slow")).toHaveLength(1);
+  });
+
+  it("resume each of several parked waits from its own deadline after the object is killed", async () => {
+    const id = newId();
+    await workflow("naps").create({
+      id,
+      params: { duration: 1500 },
+    });
+    const { journal: before } = await suspendedOn("naps", id, "second");
+    // Killed with both waits journaled and the run suspended.
+    await runInDurableObject(runObject("naps", id), (_, state) => {
+      state.abort("killed");
+    }).catch(() => null);
+
+    const status = await ended("naps", id);
+
+    const after = await journalOf("naps", id);
+    expect(status).toStrictEqual({ status: "complete", output: "slept" });
+    expect(
+      after.steps.map(({ name, deadline }) => ({ name, deadline }))
+    ).toStrictEqual(
+      before.steps.map(({ name, deadline }) => ({ name, deadline }))
+    );
+  });
+
+  it("pause with a wait parked beside a step once the step lands, and take the event after resuming", async () => {
+    const id = newId();
+    const slow = hold(id, "slow");
+    await workflow("listens").create({ id });
+    await slow.held;
+    await until("the wait to be journaled", async () => {
+      const { steps } = await journalOf("listens", id);
+      return steps.some(({ name }) => name === "go") ? true : undefined;
+    });
+    const run = await instance("listens", id);
+    await run.pause();
+    slow.release();
+    const paused = await until("the run to pause", async () => {
+      const journal = await journalOf("listens", id);
+      return journal.run.status === "paused" ? journal : undefined;
+    });
+
+    await run.resume();
+    await send("listens", id, { type: "go", payload: "later" });
+    const status = await ended("listens", id);
+
+    expect(
+      paused.steps.map(({ name, state }) => ({ name, state }))
+    ).toStrictEqual([
+      { name: "go", state: "waiting" },
+      { name: "slow", state: "succeeded" },
+    ]);
+    expect(status).toMatchObject({
+      status: "complete",
+      output: { payload: "later" },
+    });
+    expect(effectsOf(id, "slow")).toHaveLength(1);
+  });
+
+  it("take no step called from inside another's callback, which a replay never reaches again, for a replay that strayed", async () => {
+    const id = newId();
+    await workflow("nested-retry").create({ id });
+
+    const status = await ended("nested-retry", id);
+
+    const { steps } = await journalOf("nested-retry", id);
+    expect(status).toStrictEqual({ status: "complete", output: "done" });
+    expect(steps.find(({ name }) => name === "inner")).toMatchObject({
+      state: "retrying",
+      nested: 1,
+    });
+  });
+
+  it("end the run with a WorkflowParallelWaitError for a sleep reached inside a step's callback, which would hold its step out", async () => {
+    const id = newId();
+    await workflow("sleep-in-step").create({ id });
+
+    const status = await ended("sleep-in-step", id);
 
     expect(status).toMatchObject({
       status: "errored",
       error: { name: "WorkflowParallelWaitError" },
     });
-    expect(witnessed(id)).toStrictEqual([]);
-    await expect(wakeOf("races", id)).resolves.toBeNull();
+    await expect(wakeOf("sleep-in-step", id)).resolves.toBeNull();
   });
 
-  it.each(["step", "sleep"])(
-    "end the run with a WorkflowParallelWaitError when a step and a sleep start together (%s first), and the step's callback never runs",
-    async (first) => {
-      const id = newId();
-      await workflow("mixes").create({ id, params: { first } });
+  it("wake for a retry parked beside a later sleep at the retry's time, and run the step's retry once", async () => {
+    const id = newId();
+    await workflow("retry-nap").create({ id });
 
-      const status = await ended("mixes", id);
+    const status = await ended("retry-nap", id);
 
-      expect(status).toMatchObject({
-        status: "errored",
-        error: { name: "WorkflowParallelWaitError" },
-      });
-      expect(effectsOf(id, "work")).toStrictEqual([]);
-      await expect(wakeOf("mixes", id)).resolves.toBeNull();
-    }
-  );
+    const { activations } = await journalOf("retry-nap", id);
+    // The step's second attempt's receipt, beside the sleep's nothing.
+    const [secondAttempt] = effectsOf(id, "flaky").slice(1);
+    expect(status).toStrictEqual({
+      status: "complete",
+      output: [secondAttempt?.receipt, undefined],
+    });
+    expect(effectsOf(id, "flaky").map(({ attempt }) => attempt)).toStrictEqual([
+      1, 2,
+    ]);
+    // The retry's wake, then the sleep's: one activation for each.
+    expect(activations.map(({ ended: how }) => how)).toStrictEqual([
+      "suspended",
+      "suspended",
+      "settled",
+    ]);
+  });
 });
 
 /** `promise`, or a failure if it hasn't settled by the deadline. */
@@ -716,7 +1002,7 @@ const within = async <T>(promise: Promise<T>, what: string): Promise<T> => {
 };
 
 describe("a step on its way back when its activation ends", () => {
-  it("never hands the definition its outcome: no continuation or finally runs after the run suspended", async () => {
+  it("waits for it, its continuation and finally run once, before the run suspends on a sleep reached meanwhile", async () => {
     const id = newId();
     const work = hold(id, "work");
     const nap = hold(id, "nap");
@@ -751,13 +1037,18 @@ describe("a step on its way back when its activation ends", () => {
     );
 
     // "work" commits; its renewal is out. Then the sleep is reached, and
-    // suspends the run.
+    // parks: the run doesn't suspend while "work" is on its way back.
     work.release();
     await within(renewing.promise, "the renewal after the commit");
     nap.release();
-    const { journal } = await suspendedOn("step-then-sleep", id, "nap");
-    // The renewal answers; "work" would be handed back now.
+    await until("the sleep to be journaled", async () => {
+      const { steps } = await journalOf("step-then-sleep", id);
+      return steps.some(({ name }) => name === "nap") ? true : undefined;
+    });
+    const parked = await journalOf("step-then-sleep", id);
+    // The renewal answers; "work" is handed back, then the run suspends.
     gate.resolve(true);
+    const { journal } = await suspendedOn("step-then-sleep", id, "nap");
     const after = await journalOf("step-then-sleep", id);
     await runInDurableObject(runObject("step-then-sleep", id), (_, state) => {
       if (patched.hadOwn) {
@@ -767,13 +1058,14 @@ describe("a step on its way back when its activation ends", () => {
       }
     });
 
+    expect(parked.run.status).toBe("running");
     expect(journal.steps).toMatchObject([
       { name: "work", state: "succeeded", attempt: 1 },
       { name: "nap", state: "waiting" },
     ]);
     expect(after.activations).toMatchObject([{ ended: "suspended" }]);
-    expect(witnessed(id)).toStrictEqual([]);
-    expect(labels(id)).toStrictEqual(["work"]);
+    expect(witnessed(id)).toStrictEqual(["continued", "finally"]);
+    expect(labels(id)).toStrictEqual(["work", "continued", "finally"]);
   });
 });
 
@@ -893,9 +1185,12 @@ describe("a journal write that fails while a run reaches a wait", () => {
     // The watchdog's activation, delivered now rather than a lease away.
     await deliverAlarm("guarded", id);
 
-    // The failed write took the wait's row with it: no deadline was
-    // journaled, so the activation that reaches it next journals one.
-    expect(faulted.steps.map((step) => step.name)).toStrictEqual(["before"]);
+    // The wait's deadline was journaled as it was reached, before the
+    // suspension that failed: the activation that reaches it next keeps it.
+    expect(faulted.steps.map((step) => step.name)).toStrictEqual([
+      "before",
+      "held",
+    ]);
     // The watchdog the last step armed, at the lease it journaled.
     expect(watchdog).toBe(faulted.run.lease_until);
     await expect(journalOf("guarded", id)).resolves.toMatchObject({

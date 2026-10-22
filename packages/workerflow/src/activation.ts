@@ -26,7 +26,9 @@
 // A sibling it reaches only after a timer or I/O of its own (say `await
 // scheduler.wait(1)` before a `do`) isn't seen in time: the run suspends
 // without it, until the earliest parked step, and the next activation
-// runs it then. Such a step runs late, never early. Likewise a parked
+// runs it then. Such a step runs late, never early, unless the
+// definition says it is at work towards it (`step.busy`): then the
+// activation waits for it. Likewise a parked
 // step's retry may wait past its time for siblings still out to land:
 // the step out is never cut off for it.
 //
@@ -37,12 +39,32 @@
 // left of the alarm handler's wall time (config.ts); one that doesn't is
 // left for a fresh activation, whose first attempt always runs.
 //
-// Waits come one at a time. A second sleep or wait reached while one is
-// pending ends the run with a WorkflowParallelWaitError, and a replay that
+// Waits may wait together, and beside steps (GRA-955). A sleep or a wait
+// that isn't due is journaled, with its deadline, the first time it is
+// reached, and parks as a step's retry does: the activation suspends only
+// once every call still out is parked, until the earliest of them, so no
+// step out at its effect is suspended under, and every wait raced or
+// awaited together is reached and journaled first. An event accepted for
+// a parked wait while the activation still ran wakes the run at once. A
+// wait reached inside a step's callback ends the run with a
+// WorkflowParallelWaitError: its step would stay out while it waits.
+//
+// Outcomes reach the definition in the order they were first journaled
+// (journal.ts, `createSettledOrder`), among the calls it has made: a
+// replay holds one back while a call already made has an earlier one
+// still to hand over, one per macrotask, so a race between calls made
+// together (`Promise.race`, the first of several to land) has the same
+// winner on every replay, whether its outcomes are read back from the
+// journal or come due again at once. An outcome is never held for a call
+// the definition hasn't made yet, so nothing waits on how long the
+// definition takes to get there (`#inTurn`).
+//
+// A replay may suspend before it reaches every wait or retry the journal
+// holds still waiting, for the same reason: it wakes no later than the
+// first of them, and reaches it then (`journalWake`). A replay that
 // reaches a wait other than the one the journal holds (another event type
-// or duration, or a new wait while the run's suspended one still waits)
-// ends it with a WorkflowReplayMismatchError: a `Halt`, through the same
-// typed outcome, never a loop of activations.
+// or duration) ends with a WorkflowReplayMismatchError: a `Halt`, through
+// the same typed outcome, never a loop of activations.
 //
 // A pause asked for while the activation runs (the run is
 // `waitingForPause`, run.ts) is taken at the safe boundaries: no attempt is
@@ -124,6 +146,7 @@ import {
   readNextEvent,
   readRollbackWorklist,
   readRun,
+  readSettled,
   readStep,
   startRetentionIn,
 } from "./journal.ts";
@@ -200,11 +223,15 @@ export interface ActivationLimits {
 /** What a sensitive step's error message is, wherever it is kept. */
 const redactedMessage = "[REDACTED]";
 
-/** A step, sleep or wait reached beside a sleep or wait still pending. */
-const parallelWait = (kind: string, name: string): Error =>
+/**
+ * A sleep or a wait reached from inside a step's callback: its step is
+ * out at its effect for as long as it waits, so the run could never
+ * suspend under it without the effect going out again on replay.
+ */
+const waitInStep = (kind: string, name: string): Error =>
   namedError(
     "WorkflowParallelWaitError",
-    `The ${kind} ${JSON.stringify(name)} was reached while a sleep or wait of the run was pending, or a wait beside a step still out; parallel waits aren't supported yet`
+    `The ${kind} ${JSON.stringify(name)} was reached inside a step's callback, which can't wait durably: its step stays out at its effect while it waits`
   );
 
 /** A replay that reaches what the journal doesn't hold. */
@@ -437,10 +464,54 @@ const delayFailure = (identity: StepIdentity, reason: string): Delay => ({
 type WaitOutcome =
   | { ok: true; event: EventRow | undefined }
   | { ok: false; error: string }
-  | { suspend: number }
-  | { pause: true }
+  /**
+   * Not due: parked until `wake`, the event wait's type given; a wait
+   * reached while a pause is asked for parks unjournaled, due at once.
+   */
+  | { park: number; eventType: string | null; deadline: number }
   | { mismatch: string }
   | null;
+
+/**
+ * The earliest time still to come that the journal holds a wait due, or
+ * a step's retry, of the definition's own steps (not a rollback, nor a
+ * step called from inside another's attempt): what a suspension wakes
+ * for at the latest, whether this activation reached it or not.
+ *
+ * A replay may suspend before it reaches everything the journal holds
+ * still waiting: the definition reaches some of its calls only after a
+ * timer or I/O of its own (a host's query before its step, a sandbox's
+ * call coming back), which no check for quiet can see. That's no stray
+ * to halt on, as host latency would decide it: the run wakes no later
+ * than the first of them, and the replay then reaches it, late but
+ * never early. One whose time has passed isn't waited for again: when
+ * it is reached it is due at once, and a definition that no longer
+ * reaches it (it took another way) wakes nothing over and over.
+ */
+const journalWake = (sql: SqlStorage, now: number): number => {
+  const [row] = sql
+    .exec<{ wake: number | null }>(
+      `SELECT MIN(due) AS wake FROM (
+         SELECT deadline AS due FROM steps
+           WHERE state = 'waiting' AND type != 'rollback' AND nested = 0
+         UNION ALL
+         SELECT attempts.retry_at AS due FROM steps
+           JOIN attempts ON attempts.ordinal = steps.ordinal
+             AND attempts.attempt = steps.attempt
+           WHERE steps.state = 'retrying' AND steps.type != 'rollback'
+             AND steps.nested = 0
+       ) WHERE due > ?`,
+      now
+    )
+    .toArray();
+  return row?.wake ?? Number.POSITIVE_INFINITY;
+};
+
+/**
+ * What deciding to suspend came to: the run let go of (suspended or
+ * paused), or nothing for an activation no longer current.
+ */
+type Suspension = "suspended" | "paused" | null;
 
 /** What a wait journals when it is first reached. */
 interface WaitPlan {
@@ -562,13 +633,12 @@ const timeOf = (value: unknown): number | undefined => {
 };
 
 /**
- * Why the journaled wait `step` isn't the one `plan` describes, or why
- * the journal holds another wait still waiting: waits run one at a time,
- * so a replay that reaches this one while another waits has strayed
- * from the run it replays. Undefined when the journal agrees.
+ * Why the journaled wait `step` isn't the one `plan` describes: a replay
+ * that reaches it otherwise has strayed from the run it replays.
+ * Undefined when the journal agrees, and for a wait it doesn't hold yet.
+ * Waits may wait together, so others waiting are no mismatch.
  */
 const mismatchIn = (
-  sql: SqlStorage,
   identity: StepIdentity,
   step: StepRow | undefined,
   plan: WaitPlan
@@ -585,21 +655,6 @@ const mismatchIn = (
     }
     return undefined;
   }
-  // A new wait: the run's waits come one at a time, so none may still be
-  // waiting. One that is was never reached by this replay.
-  const [other] = sql
-    .exec<{
-      type: string;
-      name: string;
-      state: string;
-    }>(
-      "SELECT type, name, state FROM steps WHERE state IN ('waiting', 'retrying') LIMIT 1"
-    )
-    .toArray();
-  if (other !== undefined) {
-    const still = other.state === "retrying" ? "waiting to retry" : "waiting";
-    return `it reached ${named} while the ${other.type} ${JSON.stringify(other.name)} it suspended on is still ${still}`;
-  }
   return undefined;
 };
 
@@ -612,20 +667,42 @@ export class Activation {
   readonly #clock: () => number;
   /** Settled, superseded, suspended or faulted: every later call is refused. */
   #over = false;
+  /**
+   * The promises of the calls this activation left unsettled (`#never`),
+   * kept for as long as it lives. Nothing else refers to one, and the
+   * runtime lets go of such a promise once it collects it: the call it
+   * belongs to then fails with "Promise will never complete", which a
+   * definition running in an isolate takes for a failed call, though the
+   * run only waits.
+   */
+  readonly #unsettled = new Set<PromiseWithResolvers<never>>();
   readonly #stop: (stop: Stop) => void;
   /** Resolves when the activation stopped without settling the run. */
   readonly stopped: Promise<Stop>;
   readonly #occurrences = new Map<string, number>();
   /**
-   * A sleep or wait of this activation that hasn't settled. One that
-   * suspended never does, so this stays set once the activation let go.
+   * Sleeps and waits of this activation that haven't settled: reached and
+   * being resolved, or parked. One that parked never settles.
    */
-  #waitPending = false;
+  #waitsOut = 0;
   /**
-   * `do` steps of this activation whose outcome isn't journaled yet: what
-   * a sleep or a wait may not be reached beside.
+   * This activation's parked waits: sleeps and event waits that aren't
+   * due, each until its deadline. They count among the waits out; once
+   * they and the parked steps are all that is out, the activation
+   * suspends until the earliest is due.
    */
-  #stepsInFlight = 0;
+  #parkedWaits = 0;
+  /**
+   * The parked event waits, by their event type and deadline: an event
+   * accepted for one before the activation suspends wakes the run at once.
+   */
+  readonly #parkedEventWaits: { eventType: string; deadline: number }[] = [];
+  /**
+   * The definition's work outside the step API that it said will reach
+   * the step API again (`step.busy`), not yet ended: the activation
+   * doesn't suspend while there is any.
+   */
+  #busy = 0;
   /**
    * `do` calls of this activation that haven't returned: out at their
    * effect, parked, or handing their outcome back to a continuation that
@@ -642,6 +719,22 @@ export class Activation {
   #parkedWake = Number.POSITIVE_INFINITY;
   /** Whether a check for quiet waits for its macrotask. */
   #quietCheckDue = false;
+  /**
+   * The numbers (`settled`, journal.ts) of the outcomes this activation's
+   * calls have reached and not yet handed to the definition: registered
+   * in the synchronous turn a call is made, when its outcome is already
+   * journaled, or once it is journaled. An outcome is handed over only
+   * once none with a lower number is still owed (`#handOver`).
+   */
+  readonly #owed = new Set<number>();
+  /**
+   * Owed outcomes ready to be handed over, by number, each waiting for
+   * its turn. Their calls count among those out, never parked: the
+   * activation doesn't suspend while one is held.
+   */
+  readonly #held = new Map<number, () => void>();
+  /** Whether `#handOver` is handing outcomes over. */
+  #handingOver = false;
   /** When this activation's alarm handler started: its wall time's start. */
   /** Whether this activation has claimed an attempt yet. */
   #claimed = false;
@@ -709,6 +802,28 @@ export class Activation {
         await this.#toAuthor(
           async () => await this.#waitForEvent<Payload>(name, options)
         ),
+      busy: () => this.#busyUntil(),
+    };
+  }
+
+  /**
+   * Counts the definition busy outside the step API until the function
+   * returned is called (once; later calls do nothing): the activation
+   * doesn't suspend meanwhile, so a call it reaches only after I/O of its
+   * own (a host's query, a sandbox's round trip) is made in this
+   * activation, as one reached through microtasks is. A quiet check for
+   * suspending follows its end.
+   */
+  #busyUntil(): () => void {
+    this.#busy += 1;
+    let ended = false;
+    return () => {
+      if (ended) {
+        return;
+      }
+      ended = true;
+      this.#busy -= 1;
+      this.#checkWhenQuiet();
     };
   }
 
@@ -729,7 +844,7 @@ export class Activation {
     // Nested calls from an attempt still out are the reference's, and run.
     const caller = attempts.getStore();
     if (hasEnded(caller)) {
-      return await never();
+      return await this.#never();
     }
     let settled: { ok: true; value: T } | { ok: false; error: unknown };
     try {
@@ -744,7 +859,7 @@ export class Activation {
     }
     const current = this.#write(() => this.#current());
     if (current === failed) {
-      return await never();
+      return await this.#never();
     }
     if (!current) {
       return await this.#refuse();
@@ -752,12 +867,19 @@ export class Activation {
     if (hasEnded(caller)) {
       // Called while its attempt was out, and answered after it ended: the
       // answer has no one to go to.
-      return await never();
+      return await this.#never();
     }
     if (!settled.ok) {
       throw settled.error;
     }
     return settled.value;
+  }
+
+  /** What a refused or suspended call gets: a promise that never settles. */
+  async #never(): Promise<never> {
+    const pending = Promise.withResolvers<never>();
+    this.#unsettled.add(pending);
+    return await pending.promise;
   }
 
   /** Whether this activation may still act: not over, not superseded. */
@@ -798,7 +920,7 @@ export class Activation {
    */
   async #halt(error: Error): Promise<never> {
     this.#haltNow(error);
-    return await never();
+    return await this.#never();
   }
 
   /** `#halt`, for a caller that can't wait on it: a stream's pull. */
@@ -882,7 +1004,7 @@ export class Activation {
   /** Refuses a call from this activation, which is over. */
   async #refuse(): Promise<never> {
     this.#letGo();
-    return await never();
+    return await this.#never();
   }
 
   #renewLease(now: number): void {
@@ -903,7 +1025,7 @@ export class Activation {
       await this.#storage.setAlarm(time);
     } catch (error) {
       this.#fault(error);
-      await never();
+      await this.#never();
     }
   }
 
@@ -925,7 +1047,7 @@ export class Activation {
       }
     });
     if (renewed === failed) {
-      return await never();
+      return await this.#never();
     }
     await this.#arm(now + this.#limits.leaseMs);
   }
@@ -1308,7 +1430,7 @@ export class Activation {
       })
     );
     if (journaled === failed) {
-      return await never();
+      return await this.#never();
     }
     if (!journaled) {
       return await this.#refuse();
@@ -1384,7 +1506,7 @@ export class Activation {
       });
     } catch (error) {
       this.#fault(error);
-      return await never();
+      return await this.#never();
     }
     if ("corrupt" in replay) {
       // A result the journal holds but can't give back: replaying again
@@ -1407,7 +1529,7 @@ export class Activation {
     // is the effect: it never runs for an activation that is over.
     const stillCurrent = this.#write(() => this.#current());
     if (stillCurrent === failed) {
-      return await never();
+      return await this.#never();
     }
     if (!stillCurrent) {
       return await this.#refuse();
@@ -1505,7 +1627,7 @@ export class Activation {
     }
     const current = this.#write(() => this.#current());
     if (current === failed) {
-      return await never();
+      return await this.#never();
     }
     if (!current) {
       return await this.#refuse();
@@ -1545,7 +1667,7 @@ export class Activation {
     }
     const landing = this.#write(() => this.#journalDelay(claim, said));
     if (landing === failed) {
-      return await never();
+      return await this.#never();
     }
     return landing;
   }
@@ -1620,7 +1742,7 @@ export class Activation {
     this.#parkedCount += 1;
     this.#parkedWake = Math.min(this.#parkedWake, wake);
     this.#checkWhenQuiet();
-    return await never();
+    return await this.#never();
   }
 
   /**
@@ -1650,22 +1772,23 @@ export class Activation {
   }
 
   /**
-   * Suspends the activation until the earliest parked step is due, once
-   * the parked steps are all that is out and no wait is pending. The wake
-   * is journaled and the alarm set in one synchronous turn.
+   * Suspends the activation until the earliest parked step or wait is
+   * due, once the parked ones are all that is out. The wake is journaled
+   * and the alarm set in one synchronous turn.
    */
   #suspendIfParked(): void {
     const quiet =
       !this.#over &&
-      this.#parkedCount > 0 &&
-      !this.#waitPending &&
-      this.#callsOut === this.#parkedCount;
+      this.#parkedCount + this.#parkedWaits > 0 &&
+      this.#busy === 0 &&
+      this.#callsOut === this.#parkedCount &&
+      this.#waitsOut === this.#parkedWaits;
     if (!quiet) {
       return;
     }
-    const wake = this.#parkedWake;
+    let wake = this.#parkedWake;
     const letGo = this.#write(() =>
-      this.#storage.transactionSync((): "suspended" | "paused" | null => {
+      this.#storage.transactionSync((): Suspension => {
         if (!this.#current()) {
           return null;
         }
@@ -1674,7 +1797,23 @@ export class Activation {
           this.#pauseIn(this.#storage.sql, now);
           return "paused";
         }
-        this.#suspendIn(this.#storage.sql, now, wake);
+        const { sql } = this.#storage;
+        // A compensating replay runs none of the forward steps it holds.
+        if (!this.#compensating) {
+          wake = Math.min(wake, journalWake(sql, now));
+        }
+        // An event accepted for a parked wait while this activation ran
+        // woke no one (`run.ts` wakes only a waiting run): the run wakes
+        // for it now, not at the wait's deadline.
+        if (
+          this.#parkedEventWaits.some(
+            ({ eventType, deadline }) =>
+              readNextEvent(sql, eventType, deadline) !== undefined
+          )
+        ) {
+          wake = Math.min(wake, now);
+        }
+        this.#suspendIn(sql, now, wake);
         return "suspended";
       })
     );
@@ -1694,29 +1833,106 @@ export class Activation {
     })();
   }
 
+  /**
+   * Registers the outcome journaled for `identity`, if there is one, as
+   * owed to the definition: called in the synchronous turn its call was
+   * made in, so of the calls a definition makes together (`Promise.race`,
+   * `Promise.all`), none hands its outcome over before an earlier
+   * journaled one it made beside it. The number, or null for none yet
+   * (and for a nested step's, which is never ordered).
+   */
+  #owe(identity: StepIdentity): number | null {
+    const number = readSettled(this.#storage.sql, identity);
+    if (number !== null) {
+      this.#owed.add(number);
+    }
+    return number;
+  }
+
+  /**
+   * Gives up an outcome owed that won't be handed over after all (reading
+   * it back threw), so the ones after it aren't held for it.
+   */
+  #forgo(number: number | null): void {
+    if (number !== null && this.#owed.delete(number)) {
+      void this.#handOver();
+    }
+  }
+
+  /**
+   * Waits for the turn of the outcome journaled for `identity` to reach
+   * the definition: once no outcome journaled before it is still owed
+   * (`#owed`), and a macrotask after the last handed over, so whatever
+   * the definition does with that one in microtasks (a race settling, its
+   * next call made and registered) is done first. The last await before
+   * an outcome is handed back: nothing after it waits on I/O. An outcome
+   * without a number (a nested step's) goes at once.
+   *
+   * Only outcomes of calls already made are waited for, never one the
+   * definition hasn't reached: a replay can't tell a call that is still
+   * coming (after a host's query, a sandbox's round trip, a timer) from
+   * one that never will, so it never holds an outcome for one, and never
+   * passes one over. Each held outcome waits only for calls already out
+   * whose outcomes are journaled, which are handed over in turn, so none
+   * is held for ever. A race between calls made together has the winner
+   * it first had on every replay, however their outcomes are read back
+   * or come due again; one decided by when the definition reaches a call
+   * after I/O of its own isn't ordered (a host records such decisions
+   * itself, as a step).
+   */
+  async #inTurn(identity: StepIdentity): Promise<void> {
+    const settled = this.#write(() => this.#owe(identity));
+    if (settled === failed) {
+      return await this.#never();
+    }
+    if (settled === null) {
+      return;
+    }
+    const turn = Promise.withResolvers<true>();
+    this.#held.set(settled, () => {
+      turn.resolve(true);
+    });
+    void this.#handOver();
+    await turn.promise;
+  }
+
+  /**
+   * Hands held outcomes over in their order, one per macrotask, for as
+   * long as the first one owed is held. Runs once at a time.
+   */
+  async #handOver(): Promise<void> {
+    if (this.#handingOver) {
+      return;
+    }
+    this.#handingOver = true;
+    try {
+      for (;;) {
+        const next =
+          this.#owed.size === 0 ? undefined : Math.min(...this.#owed);
+        const release = next === undefined ? undefined : this.#held.get(next);
+        if (this.#over || next === undefined || release === undefined) {
+          break;
+        }
+        this.#held.delete(next);
+        this.#owed.delete(next);
+        release();
+        // oxlint-disable-next-line no-await-in-loop -- one outcome per macrotask, in order
+        await scheduler.wait(0);
+      }
+    } finally {
+      this.#handingOver = false;
+    }
+  }
+
   async #do(name: string, rest: unknown[]): Promise<unknown> {
     if (this.#compensating) {
       return await this.#replayDo(name, rest);
     }
-    if (this.#waitPending) {
-      return await this.#halt(parallelWait("step", name));
-    }
-    this.#stepsInFlight += 1;
     this.#callsOut += 1;
-    let inFlight = true;
-    // Out of flight once its outcome is journaled: a wait started after
-    // that can't cost the step its effect. Once, whichever way it lands.
-    const land = (): void => {
-      if (inFlight) {
-        inFlight = false;
-        this.#stepsInFlight -= 1;
-      }
-    };
     try {
-      return await this.#doAlone(name, rest, land);
+      return await this.#doAlone(name, rest);
     } finally {
       // Never reached by a step whose call never settles.
-      land();
       this.#callsOut -= 1;
       // The calls still out may all be parked now, once the continuation
       // this outcome goes to has had its turn to reach its next step.
@@ -1724,14 +1940,10 @@ export class Activation {
     }
   }
 
-  async #doAlone(
-    name: string,
-    rest: unknown[],
-    land: () => void
-  ): Promise<unknown> {
+  async #doAlone(name: string, rest: unknown[]): Promise<unknown> {
     const current = this.#write(() => this.#current());
     if (current === failed) {
-      return await never();
+      return await this.#never();
     }
     if (!current) {
       return await this.#refuse();
@@ -1739,10 +1951,18 @@ export class Activation {
     assertStepName(name);
     const { work, config } = readCall(rest);
     const identity = this.#occurrence("do", name);
-    const journaled = this.#write(() => readStep(this.#storage.sql, identity));
-    if (journaled === failed) {
-      return await never();
+    // Its outcome, if journaled, is owed from this turn on (`#owe`).
+    const read = this.#write(() => {
+      const step = readStep(this.#storage.sql, identity);
+      const settles =
+        (step?.state === "succeeded" && step.value !== null) ||
+        (step?.state === "failed" && step.error !== null);
+      return { journaled: step, owed: settles ? this.#owe(identity) : null };
+    });
+    if (read === failed) {
+      return await this.#never();
     }
+    const { journaled, owed } = read;
     // Checked whatever state the step is in, as a wait's are: a step
     // configured otherwise isn't the step the journal holds.
     if (journaled !== undefined && journaled.config !== config.journal) {
@@ -1753,22 +1973,28 @@ export class Activation {
       );
     }
     if (journaled?.state === "succeeded" && journaled.value !== null) {
-      land();
       // What this step's work returned, through the codec or from storage,
       // as the attempt that journaled it returned it.
-      return await this.#result(journaled.ordinal, journaled.value);
+      let value: unknown;
+      try {
+        value = await this.#result(journaled.ordinal, journaled.value);
+      } catch (error) {
+        this.#forgo(owed);
+        throw error;
+      }
+      await this.#inTurn(identity);
+      return value;
     }
     if (journaled?.state === "failed" && journaled.error !== null) {
-      land();
+      await this.#inTurn(identity);
       throw rebuild(journaled.error);
     }
     if (journaled?.state === "fatal" && journaled.error !== null) {
       // The step's result couldn't be kept, and the run ends with that,
       // however this replay got here: never to the definition.
-      land();
       return await this.#halt(rebuild(journaled.error));
     }
-    return await this.#attempts(identity, config, work, land);
+    return await this.#attempts(identity, config, work);
   }
 
   /**
@@ -1778,12 +2004,11 @@ export class Activation {
   async #attempts(
     identity: StepIdentity,
     config: StepConfig,
-    work: StepWork,
-    land: () => void
+    work: StepWork
   ): Promise<unknown> {
     const next = this.#write(() => this.#nextAttempt(identity, config));
     if (next === failed) {
-      return await never();
+      return await this.#never();
     }
     if (next === null) {
       return await this.#refuse();
@@ -1797,7 +2022,7 @@ export class Activation {
       const outcome = await this.#runAttempt(identity, config, claim, work);
       if ("fault" in outcome) {
         this.#fault(outcome.fault);
-        return await never();
+        return await this.#never();
       }
       if ("superseded" in outcome) {
         // Superseded mid-upload: recorded as an answer ignored, like a
@@ -1816,7 +2041,7 @@ export class Activation {
         this.#commit(identity, claim, config, outcome)
       );
       if (committed === failed) {
-        return await never();
+        return await this.#never();
       }
       if (committed === "incomplete") {
         return await this.#fail(
@@ -1840,14 +2065,16 @@ export class Activation {
       return await this.#refuse();
     }
     if (landed === "retry") {
-      return await this.#attempts(identity, config, work, land);
+      return await this.#attempts(identity, config, work);
     }
-    land();
     await this.#renewWatchdog();
     if ("failed" in landed) {
+      await this.#inTurn(identity);
       throw rebuild(landed.failed);
     }
-    return await this.#result(landed.ordinal, landed.value);
+    const value = await this.#result(landed.ordinal, landed.value);
+    await this.#inTurn(identity);
+    return value;
   }
 
   /**
@@ -1897,7 +2124,7 @@ export class Activation {
       await this.#storage.deleteAlarm();
     } catch (error) {
       this.#fault(error);
-      await never();
+      await this.#never();
     }
   }
 
@@ -1917,15 +2144,15 @@ export class Activation {
       const now = Date.now();
       if (this.#pausing()) {
         // The safe boundary, before the wait is journaled or takes an
-        // event. Waits come with no step out (#wait), so nothing of this
-        // activation is out: the run is paused here.
-        this.#pauseIn(sql, now);
-        return { pause: true };
+        // event: it parks, due at once, and the run pauses once nothing
+        // else of this activation is out (`#suspendIfParked`). Should the
+        // pause be called off first, the next activation reaches it again.
+        return { park: now, eventType: null, deadline: now };
       }
       let step = readStep(sql, identity);
       // Checked before anything is written: a replay that strayed leaves
       // the journal as it found it.
-      const mismatch = mismatchIn(sql, identity, step, plan);
+      const mismatch = mismatchIn(identity, step, plan);
       if (mismatch !== undefined) {
         return { mismatch };
       }
@@ -1971,7 +2198,11 @@ export class Activation {
         return { ok: true, event: { ...event, consumed_by: step.ordinal } };
       }
       if (now < step.deadline) {
-        return { suspend: this.#suspendIn(sql, now, step.deadline) };
+        return {
+          park: step.deadline,
+          eventType: step.event_type,
+          deadline: step.deadline,
+        };
       }
       if (step.type === "sleep") {
         sql.exec(
@@ -1999,46 +2230,47 @@ export class Activation {
     if (this.#compensating) {
       return await this.#replayWait(plan);
     }
-    if (this.#waitPending || this.#stepsInFlight > 0) {
-      // Racing a wait against a sleep would quietly lose the sleep: the
-      // first suspends the activation, and the second is never reached. A
-      // wait beside a step out at its effect would suspend under it, and
-      // the effect would go out again on replay. Until parallel waits are
-      // built, the run ends saying so.
-      return await this.#halt(parallelWait(plan.type, plan.name));
+    // From inside a step's callback, a wait would hold its step out at its
+    // effect for as long as it waits: never quiet, never suspended.
+    if (attempts.getStore()?.live === true) {
+      return await this.#halt(waitInStep(plan.type, plan.name));
     }
-    this.#waitPending = true;
-    let pending = true;
-    // No longer pending once its outcome is journaled. Once.
-    const land = (): void => {
-      if (pending) {
-        pending = false;
-        this.#waitPending = false;
-      }
-    };
+    // A wait that isn't due parks, as a step's retry does: the
+    // activation suspends only once everything still out is parked, so
+    // no step out at its effect is suspended under, and every sleep or
+    // wait raced or awaited together is reached and journaled first.
+    this.#waitsOut += 1;
     try {
-      return await this.#waitAlone(plan, land);
+      return await this.#waitAlone(plan);
     } finally {
-      // Never reached by a wait that suspended: its call never settles.
-      land();
+      // Never reached by a wait that parked: its call never settles.
+      this.#waitsOut -= 1;
+      // What is still out may all be parked now, once the continuation
+      // this outcome goes to has had its turn to reach its next call.
+      this.#checkWhenQuiet();
     }
   }
 
-  async #waitAlone(
-    plan: WaitPlan,
-    land: () => void
-  ): Promise<EventRow | undefined> {
+  async #waitAlone(plan: WaitPlan): Promise<EventRow | undefined> {
     const current = this.#write(() => this.#current());
     if (current === failed) {
-      return await never();
+      return await this.#never();
     }
     if (!current) {
       return await this.#refuse();
     }
     const identity = this.#occurrence(plan.type, plan.name);
-    const outcome = this.#write(() => this.#resolveWait(identity, plan));
+    // Its outcome, if it has one now (read back, or due now), is owed from
+    // this turn on: before anything is awaited.
+    const outcome = this.#write(() => {
+      const resolved = this.#resolveWait(identity, plan);
+      if (resolved !== null && "ok" in resolved) {
+        this.#owe(identity);
+      }
+      return resolved;
+    });
     if (outcome === failed) {
-      return await never();
+      return await this.#never();
     }
     if (outcome === null) {
       return await this.#refuse();
@@ -2046,21 +2278,20 @@ export class Activation {
     if ("mismatch" in outcome) {
       return await this.#halt(replayMismatch(outcome.mismatch));
     }
-    if ("suspend" in outcome) {
-      this.#over = true;
-      // The wake goes with the write that suspended the run.
-      await this.#arm(outcome.suspend);
-      this.#stop(suspended);
-      return await never();
+    if ("park" in outcome) {
+      this.#parkedWaits += 1;
+      this.#parkedWake = Math.min(this.#parkedWake, outcome.park);
+      if (outcome.eventType !== null) {
+        this.#parkedEventWaits.push({
+          eventType: outcome.eventType,
+          deadline: outcome.deadline,
+        });
+      }
+      this.#checkWhenQuiet();
+      return await this.#never();
     }
-    if ("pause" in outcome) {
-      this.#over = true;
-      await this.#disarm();
-      this.#stop(suspended);
-      return await never();
-    }
-    land();
     await this.#renewWatchdog();
+    await this.#inTurn(identity);
     if (!outcome.ok) {
       throw rebuild(outcome.error);
     }
@@ -2173,7 +2404,7 @@ export class Activation {
     const identity = this.#occurrence("do", name);
     const row = this.#write(() => readStep(this.#storage.sql, identity));
     if (row === failed || row === undefined) {
-      return await never();
+      return await this.#never();
     }
     if (row.config !== call.config.journal) {
       return await this.#halt(
@@ -2207,7 +2438,7 @@ export class Activation {
     if (row.state === "failed" && row.error !== null) {
       throw rebuild(row.error);
     }
-    return await never();
+    return await this.#never();
   }
 
   /**
@@ -2223,12 +2454,12 @@ export class Activation {
         ? undefined
         : {
             row,
-            mismatch: mismatchIn(sql, identity, row, plan),
+            mismatch: mismatchIn(identity, row, plan),
             event: readConsumedEvent(sql, row.ordinal),
           };
     });
     if (read === failed || read === undefined) {
-      return await never();
+      return await this.#never();
     }
     if (read.mismatch !== undefined) {
       return await this.#halt(replayMismatch(read.mismatch));
@@ -2240,7 +2471,7 @@ export class Activation {
     if (read.row.state === "failed" && read.row.error !== null) {
       throw rebuild(read.row.error);
     }
-    return await never();
+    return await this.#never();
   }
 
   /** Resolves when the compensating replay is done, or after `ms`. */
@@ -2297,19 +2528,10 @@ export class Activation {
     };
     // Counted as `#do` counts a step: a parked retry suspends the run once
     // it is all that is out.
-    this.#stepsInFlight += 1;
     this.#callsOut += 1;
-    let inFlight = true;
-    const land = (): void => {
-      if (inFlight) {
-        inFlight = false;
-        this.#stepsInFlight -= 1;
-      }
-    };
     try {
-      await this.#attempts(identity, registration.config, work, land);
+      await this.#attempts(identity, registration.config, work);
     } finally {
-      land();
       this.#callsOut -= 1;
       this.#checkWhenQuiet();
     }
@@ -2354,7 +2576,7 @@ export class Activation {
       })
     );
     if (letGo === failed) {
-      return await never();
+      return await this.#never();
     }
     if (!letGo) {
       return await this.#refuse();
@@ -2363,7 +2585,7 @@ export class Activation {
     // The wake goes with the write that suspended the run.
     await this.#arm(wake);
     this.#stop(suspended);
-    return await never();
+    return await this.#never();
   }
 
   /**
@@ -2407,7 +2629,7 @@ export class Activation {
       })
     );
     if (plan === failed) {
-      return await never();
+      return await this.#never();
     }
     if (plan === null) {
       return await this.#refuse();
@@ -2483,7 +2705,7 @@ export class Activation {
       })
     );
     if (reset === failed) {
-      return await never();
+      return await this.#never();
     }
     if (!reset) {
       return await this.#refuse();
@@ -2522,7 +2744,7 @@ export class Activation {
         );
         if (journaled === failed) {
           // oxlint-disable-next-line no-await-in-loop -- ends the loop
-          return await never();
+          return await this.#never();
         }
         if (journaled === null) {
           // oxlint-disable-next-line no-await-in-loop -- ends the loop

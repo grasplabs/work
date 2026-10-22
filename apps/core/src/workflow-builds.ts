@@ -168,8 +168,8 @@ const sealedTaskIdSchema = z
   .regex(/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u);
 
 /**
- * The most scopes one inside another a task runs in: `for` tasks around
- * it (spec 18, eight levels).
+ * The most scopes one inside another a task runs in: `for` and `fork`
+ * tasks around it (spec 18, eight levels).
  */
 export const maxTaskScopes = 8;
 
@@ -179,8 +179,9 @@ const taskBase = {
   /** Its durable steps besides a wait's sleep (generate.ts, `TaskStep`). */
   steps: z.array(z.enum(["task", "enter", "leave", "item"])).max(4),
   /**
-   * The `for` tasks around it, outermost first: each of its steps runs in
-   * an item of each (generate.ts, `GeneratedTask.scope`).
+   * The `for` and `fork` tasks around it, outermost first: each of its
+   * steps runs in an item, or a branch, of each (generate.ts,
+   * `GeneratedTask.scope`).
    */
   scope: z.array(sealedTaskIdSchema).max(maxTaskScopes),
   /** The descriptors of its input, output and export schemas. */
@@ -283,6 +284,22 @@ const sealedTaskSchema = z.discriminatedUnion("kind", [
   z.strictObject({ ...taskBase, kind: z.literal("do") }),
   z.strictObject({
     ...taskBase,
+    kind: z.literal("fork"),
+    /**
+     * Its branches (generate.ts, `GeneratedTask.fork`): how many, each a
+     * scope of its own, and whether they race.
+     */
+    fork: z.strictObject({
+      branches: z.int().min(1).max(64),
+      compete: z.boolean(),
+      /** How many branches run at once (`metadata.grasp.concurrency`). */
+      concurrency: z.int().min(1).max(8),
+    }),
+    // Its input.from, of the slots its module evaluates (generate.ts).
+    inputFrom: templateSchema.optional(),
+  }),
+  z.strictObject({
+    ...taskBase,
     kind: z.literal("for"),
     /**
      * Its loop (generate.ts, `GeneratedTask.loop`): the collection its
@@ -294,6 +311,8 @@ const sealedTaskSchema = z.discriminatedUnion("kind", [
       each: z.string().min(1).max(64),
       at: z.string().min(1).max(64),
       while: z.int().min(0).optional(),
+      /** How many items run at once (`metadata.grasp.concurrency`). */
+      concurrency: z.int().min(1).max(8),
     }),
     // Its input.from, of the slots its module evaluates (generate.ts).
     inputFrom: templateSchema.optional(),
@@ -529,6 +548,7 @@ export const compileWorkflow = async (
             schemas,
             scope,
             loop,
+            fork,
           }) => ({
             id,
             kind,
@@ -538,6 +558,7 @@ export const compileWorkflow = async (
             ...(loop === undefined
               ? {}
               : { loop: z.json().parse(structuredClone(loop)) }),
+            ...(fork === undefined ? {} : { fork: { ...fork } }),
             // The SDK's descriptors and the templates, as the plain JSON
             // they are.
             schemas: z.json().parse(structuredClone(schemas)),

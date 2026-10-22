@@ -37,9 +37,13 @@ import type {
   SealedTask,
   SealedTemplate,
 } from "../workflow-builds.ts";
+import { betweenStepsBudgetOf } from "./between-steps.ts";
 import { settling } from "./code.ts";
 import type { RunHostCalls, Settled, StepError } from "./code.ts";
+import { engineAsks } from "./engine-asks.ts";
+import type { EngineAsk } from "./engine-asks.ts";
 import { takesExactly } from "./exact-values.ts";
+import { hostLatency } from "./host-latency.ts";
 import {
   busyMarker,
   loadRound,
@@ -84,15 +88,17 @@ import { heldWakeType } from "./wakes.ts";
 // - A step the build doesn't have. Every step is named after a task of
 //   the sealed task table and one of the steps it was sealed with
 //   (`task:<id>` for a set or switch, or a wait's sleep; `enter:<id>` and
-//   `leave:<id>` around a wait, a do or a for; `item:<id>` for a for's
-//   `while`), or the workflow's own `workflow:input` and `workflow:output`
+//   `leave:<id>` around a wait, a do, a for or a fork; `item:<id>` for a
+//   for's `while`; a race's `task:<id>`, which records its winning branch,
+//   one the fork has), or the workflow's own `workflow:input` and `workflow:output`
 //   when it has them; a wait lasts exactly what was sealed. Anything else
 //   is refused, and fails the run.
 // - A step run twice, or a loop's item it never had. Generated code has no
 //   loop statement, and each task runs at most once per item of the loops
-//   around it (generate.ts): a task inside `for` tasks names the item of
-//   each it runs in (`task:<id>@<for>.<index>/…`), exactly the loops the
-//   build sealed around it, and only an item of the items its loop's enter
+//   around it (generate.ts): a task inside `for` and `fork` tasks names the
+//   item or branch of each it runs in (`task:<id>@<for>.<index>/<fork>.<branch>`),
+//   exactly the scopes the build sealed around it, only a branch its fork
+//   has, and only an item of the items its loop's enter
 //   step recorded (`#items`), whose variables the host supplies from that
 //   record, never the isolate. An activation that asks for a step it
 //   already ran this activation is refused, so not even a forged module
@@ -100,6 +106,42 @@ import { heldWakeType } from "./wakes.ts";
 //   loops' recorded items, at most the platform's 1,000 a collection (and
 //   the run's own step ceiling). Each item's effects are keyed by its own
 //   step name, so a retry or replay of one is never another's.
+// - Items and branches at once running past what a run may (GRA-956).
+//   However many steps the module asks for at once, at most eight of the
+//   run's attempts run (`#inSlot`, spec 18); one past it waits, admitted
+//   to nothing, its module not yet told. Only a running attempt holds a
+//   slot: a step parked on its retry or a wait holds none, so the steps
+//   behind it run. Every attempt is admitted as ever, so a run's lineage
+//   only grows.
+// - A run that does otherwise as its host is slower. Between the module
+//   asking for a step and the engine hearing of it, the host does I/O of
+//   its own (the person's check), and an answer travels back to
+//   the isolate before its next ask: the engine, seeing only parked waits
+//   out, would suspend the run meanwhile, the ask running in a later
+//   activation after the run slept, so a race's slower branch could win.
+//   The host holds the run busy with the engine (`#account`) from an
+//   ask's arrival until its engine call is made, and from each answer
+//   until the isolate says it went quiet with every ask it made since
+//   arrived (`quiet`), for at most an activation's time between steps in
+//   all, so a module that never says it went quiet, or counts asks it
+//   never makes, can't keep its run from suspending on parked steps
+//   (`#account`); a replay hands back only outcomes of calls already
+//   made, in journaled order (workerflow's activation.ts), and a scope's
+//   admissions follow its settling, recorded with the run, never the order
+//   outcomes came back in (the SDK's `scoped`). Tests slow the host down
+//   at random (host-latency.ts).
+// - A branch acting after its scope settled. A race's winner, or the item
+//   or branch an `end` came from, settles its scope once, in the scope's
+//   own step (`settle`), in a fence kept with the run (`ScopeFences`,
+//   run-object.ts), first writer's: a branch that finishes first in a
+//   later replay settles nothing new. A step of an item or branch another
+//   settled its scope over runs no attempt (`workflow.branch_cancelled`,
+//   for good), every activation; what it recorded before replays as
+//   recorded, so a replay reaches every step it journaled, and a step
+//   already out as the scope settled ends as it would, its effect
+//   standing. Its sleeps sleep as recorded: nothing waits for them. The branch a scope
+//   settled on is data the run carries, never authority: only one its
+//   scope has.
 // - An expression that isn't the build's, or another step's. An attempt
 //   evaluates only the sealed table's entries of its own task, of the
 //   stages its step runs (an enter step's if and input.from, say), by
@@ -180,6 +222,11 @@ import { heldWakeType } from "./wakes.ts";
 //   workflow's model calls are held to the lower of the build's sealed
 //   limit and the host's own (`configOf`, `HostedResourceRun`).
 
+/** What a step that can't say the run busy ends (`RunStep.busy`). */
+const noBusy = (): void => {
+  // Nothing was counted.
+};
+
 /** The main module of a run of a sealed build (`openRunMain`). */
 export const openRunModule = "grasp-open-run.js";
 
@@ -190,6 +237,7 @@ export const resourceAttemptMethods = [
   "call",
   "until",
   "items",
+  "settle",
 ] as const;
 
 /** The SDK module the generated code imports, by its flat name. */
@@ -220,13 +268,41 @@ const unwrapped = (result) => {
 
 export class Run extends WorkerEntrypoint {
   async run(host, { input }) {
+    // Each time this isolate gets control back (its start, each answer to
+    // an ask), it tells the host once its code has gone quiet, a macrotask
+    // later, with how many asks it has made in all: the host holds the run
+    // busy until each has arrived, so the engine never suspends the run
+    // while one is on its way (resource-host.ts, \`quiet\`). Each is
+    // numbered by the time it got control back, so one that doesn't reach
+    // the host can be sent again, a few times, under its number, and the
+    // host counts it once however often it arrives.
+    let made = 0;
+    let times = 0;
+    const quiet = (time = (times += 1), tries = 3) => {
+      setTimeout(() => {
+        host.quiet(made, time).catch(() => {
+          if (tries > 1) {
+            quiet(time, tries - 1);
+          }
+        });
+      }, 0);
+    };
+    const asked = async (ask) => {
+      made += 1;
+      try {
+        return await ask();
+      } finally {
+        quiet();
+      }
+    };
+    quiet();
     return await settled(async () => {
       if (definition?.metadata?.profile !== "grasp-open-workflow/1" || typeof definition.run !== "function") {
         throw new Error("The generated module doesn't export its workflow.");
       }
       const engine = {
         do: async (name, data, fn) =>
-          unwrapped(await host.do(name, { input: data }, async (attempt) =>
+          unwrapped(await asked(async () => await host.do(name, { input: data }, async (attempt) =>
             await settled(async () =>
               await fn({
                 evaluate: async (slot, frame) => unwrapped(await attempt.evaluate(slot, frame)),
@@ -236,12 +312,13 @@ export class Run extends WorkerEntrypoint {
                 call: async (frame) => unwrapped(await attempt.call(frame)),
                 until: async (frame) => unwrapped(await attempt.until(frame)),
                 items: async (frame) => unwrapped(await attempt.items(frame)),
-              })))),
+                settle: async (settled) => unwrapped(await attempt.settle(settled)),
+              }))))),
         sleep: async (name, milliseconds) => {
-          unwrapped(await host.sleep(name, milliseconds));
+          unwrapped(await asked(async () => await host.sleep(name, milliseconds)));
         },
         sleepUntil: async (name, timestamp) => {
-          unwrapped(await host.sleepUntil(name, timestamp));
+          unwrapped(await asked(async () => await host.sleepUntil(name, timestamp)));
         },
       };
       return await definition.run(engine, input);
@@ -314,6 +391,13 @@ export interface ResourceHostHooks {
    */
   triedOnce?: TriedOnceMarks;
   /**
+   * The settled scopes of the run's items and branches (a race's winner,
+   * the one an `end` came from), kept with the run across its activations
+   * (run-object.ts, `fencesIn`). Unset, a store of this activation's
+   * alone.
+   */
+  fences?: ScopeFences;
+  /**
    * The model calls the run's actions made, across its activations
    * (run-object.ts, `modelCallsIn`). Unset, a count of this activation's
    * alone.
@@ -354,6 +438,11 @@ const activationModelCalls = (): ActionModelCalls => {
 export interface TriedOnceMarks {
   /** Marks an attempt as one whose module never ran: its call never went out. */
   markUnstarted: (key: string, attempt: number) => void;
+  /**
+   * Takes that mark back: the attempt may run its module from now on (it
+   * was marked only while it waited for a slot, `#onceAtMost`).
+   */
+  markStarted: (key: string, attempt: number) => void;
   /** Whether that attempt was so marked. */
   unstarted: (key: string, attempt: number) => boolean;
   /** Keeps what an attempt that ran its module failed with. */
@@ -365,6 +454,49 @@ export interface TriedOnceMarks {
 /** An attempt's ID among marks: its number, and its step's key. */
 const markId = (key: string, attempt: number): string => `${attempt}:${key}`;
 
+/**
+ * The scopes of a run's items and branches that settled, by the place of
+ * their `for` or `fork` task (`StepOf.place`): the one item or branch that
+ * settled it. Its others start no step after (`workflow.branch_cancelled`).
+ */
+export interface ScopeFences {
+  /**
+   * Settles scope `place` on `branch` unless it settled already: the
+   * branch it settled on, first writer's, in one write.
+   */
+  settle: (place: string, branch: number) => number;
+  /** The branch scope `place` settled on, if it did. */
+  settled: (place: string) => number | undefined;
+}
+
+/** Fences of one activation's alone (`ResourceHostHooks.fences` unset). */
+const activationFences = (): ScopeFences => {
+  const settled = new Map<string, number>();
+  return {
+    settle: (place, branch) => {
+      const first = settled.get(place);
+      if (first !== undefined) {
+        return first;
+      }
+      settled.set(place, branch);
+      return branch;
+    },
+    settled: (place) => settled.get(place),
+  };
+};
+
+/**
+ * The most attempts of a run that run at once (spec 18: eight simultaneous
+ * branches a run), whatever its module asks: one past it waits for one to
+ * end before the engine hears of it.
+ */
+const maxAttemptsAtOnce = platformLimits.workflowBranches;
+/**
+ * The most asks a run's isolate can have on their way to its host: no more
+ * than a run takes steps (`quiet`).
+ */
+const maxAsksOnTheirWay = platformLimits.workflowSteps;
+
 /** Marks of one activation's alone (`ResourceHostHooks.triedOnce` unset). */
 const activationMarks = (): TriedOnceMarks => {
   const unstarted = new Set<string>();
@@ -373,6 +505,9 @@ const activationMarks = (): TriedOnceMarks => {
   return {
     markUnstarted: (key, attempt) => {
       unstarted.add(id(key, attempt));
+    },
+    markStarted: (key, attempt) => {
+      unstarted.delete(id(key, attempt));
     },
     unstarted: (key, attempt) => unstarted.has(id(key, attempt)),
     keepFailure: (key, attempt, error) => {
@@ -449,6 +584,11 @@ interface StepOf {
    * recorded: never anything the isolate passes.
    */
   loop: Readonly<Record<string, Json>>;
+  /**
+   * Whether it runs in an item or a branch another settled its scope over
+   * (`#fencedOff`): no attempt of it runs.
+   */
+  fenced?: boolean;
 }
 
 /** Whether `task` sleeps: a wait, or a `grasp.sleepUntil` call. */
@@ -846,6 +986,8 @@ interface StepAttempt {
   itemsAsked: boolean;
   /** What its `item` step's `while` answered, as the host evaluated it. */
   proceeds: boolean | undefined;
+  /** The branch it settled its task's scope on, once (`settle`). */
+  settled: number | undefined;
   /**
    * Whether connect held its call for the run's person (`connect.held`):
    * the step then ends as held, whatever the isolate made of the answer.
@@ -1116,6 +1258,46 @@ export class ResourceRunHost
   readonly #actionModelCalls: ActionModelCalls;
   /** What the run keeps of its tried-once steps' attempts. */
   readonly #triedOnce: TriedOnceMarks;
+  readonly #fences: ScopeFences;
+  /** Tests only: the host's own I/O made slower (host-latency.ts). */
+  readonly #latency: () => Promise<void>;
+  /**
+   * Asks of the run's code (`do`, `sleep`, `sleepUntil`) this host is
+   * handling outside the engine: arrived, and not yet at a call of the
+   * engine's step API, or back from one and not yet answered.
+   */
+  #asksInHost = 0;
+  /** The asks of the run's code that arrived. */
+  #arrived = 0;
+  /**
+   * The times the run's code got control back: its start, and each answer
+   * to an ask. Its isolate says when it has gone quiet after each
+   * (`quiet`), with how many asks it had made by then.
+   */
+  #handedBack = 1;
+  /** Of those, the times its isolate said it went quiet after, each once. */
+  readonly #quieted = new Set<number>();
+  /** The most asks its isolate said it had made, as it went quiet. */
+  #madeByIsolate = 0;
+  /**
+   * Whether the run's isolate is done: its run returned, or it was
+   * stopped (a CPU kill). Nothing more comes from it.
+   */
+  #isolateDone = false;
+  /** Ends the engine's count of the run busy (`#account`), while held. */
+  #endBusy: (() => void) | undefined;
+  /**
+   * How much longer this activation may hold its run busy waiting on its
+   * isolate (`#account`), in all: its time between steps.
+   */
+  #isolateHoldLeftMs: number;
+  /** When the run began being held busy waiting on its isolate, if it is. */
+  #isolateHoldSince: number | undefined;
+  /** Ends that hold once its time is spent. */
+  #isolateHoldTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Attempts of this activation running, and those waiting for a slot. */
+  #running = 0;
+  readonly #waitingSlot: (() => void)[] = [];
 
   constructor(
     env: Env,
@@ -1130,6 +1312,7 @@ export class ResourceRunHost
     this.#hooks = hooks;
     this.#activationFuel = hooks.activationFuel ?? activationFuel;
     this.#triedOnce = hooks.triedOnce ?? activationMarks();
+    this.#fences = hooks.fences ?? activationFences();
     this.#actionModelCalls = hooks.modelCalls ?? activationModelCalls();
     this.#readableParams = Object.fromEntries(
       run.build.params.flatMap((name) =>
@@ -1142,6 +1325,8 @@ export class ResourceRunHost
       JSON.stringify(run.input).length +
       JSON.stringify(this.#readableParams).length;
     this.#hostSlots = hostSlotsOf(run.build);
+    this.#latency = hostLatency(env);
+    this.#isolateHoldLeftMs = betweenStepsBudgetOf(env);
   }
 
   /**
@@ -1178,22 +1363,124 @@ export class ResourceRunHost
       return this.#refuse(`Step ${shown} runs in an item no loop recorded.`);
     }
     this.#asked.add(name);
-    return { ...step, loop };
+    // Not a refusal of the module: a branch another settled its scope over
+    // (a race's winner, an `end`) runs no attempt more (`do`), every
+    // activation, while what it recorded replays as recorded.
+    return { ...step, loop, fenced: this.#fencedOff(step.scope) };
+  }
+
+  /**
+   * Whether scope `scope` runs in an item or a branch whose `for` or
+   * `fork` settled on another (`#fences`): its steps start no more.
+   *
+   * For GRA-278 (#889, its run's pending failure): with items and branches
+   * at once, a failure no catch took is pending in the scope of the step
+   * that failed, and refuses only that scope's steps and those nested in
+   * it, never a sibling branch's; a catch reads its own scope's; and only
+   * a failure pending in the workflow's own scope fails the run, a
+   * branch's surfacing as its branch's failure, for its fork.
+   */
+  #fencedOff(scope: readonly { id: string; index: number }[]): boolean {
+    return scope.some(({ id, index }, depth) => {
+      const settled = this.#fences.settled(placeOf(id, scope.slice(0, depth)));
+      return settled !== undefined && settled !== index;
+    });
+  }
+
+  /**
+   * `ResourceAttemptHost.settle`, for `attempt`: settles its `for` or
+   * `fork` task's scope on `settled.branch`, once, in the task's own step,
+   * a branch it has (its items as its enter step recorded them, its
+   * branches as sealed): the branch it settled on, an earlier
+   * activation's first (`#fences`). The others start no step after.
+   */
+  #settleOf(attempt: StepAttempt, settled: unknown): Settled<number> {
+    try {
+      this.#requireCurrent(attempt);
+      const { step } = attempt;
+      const { task } = step;
+      const branch = z
+        .strictObject({ branch: z.int().min(0) })
+        .safeParse(settled).data?.branch;
+      let count: number | undefined;
+      if (task?.kind === "fork") {
+        count = task.fork.branches;
+      } else if (task?.kind === "for") {
+        count = this.#items.get(step.place)?.length;
+      }
+      if (
+        step.kind !== "task" ||
+        count === undefined ||
+        branch === undefined ||
+        branch >= count ||
+        attempt.settled !== undefined
+      ) {
+        return this.#refuse(
+          `Step of "${task?.id ?? "the workflow"}" settles no such scope, or settles it twice.`
+        );
+      }
+      attempt.settled = this.#fences.settle(step.place, branch);
+      return { ok: true, value: attempt.settled };
+    } catch (error) {
+      return { ok: false, error: forIsolate(error) };
+    }
+  }
+
+  /**
+   * `work`, an attempt, once fewer than the run's most attempts at once
+   * (`maxAttemptsAtOnce`) of this activation run: one past it waits for
+   * one to end, before it is admitted or its module told, so it holds
+   * nothing of its lineage. It waits inside the engine's attempt, so its
+   * wait counts against the attempt's timeout: running attempts end, by
+   * their timeouts at the latest, so the wait does too.
+   */
+  async #inSlot<T>(work: () => Promise<T>): Promise<T> {
+    await this.#latency();
+    if (this.#running >= maxAttemptsAtOnce) {
+      const free = Promise.withResolvers<null>();
+      this.#waitingSlot.push(() => {
+        free.resolve(null);
+      });
+      // Handed over by the attempt that ends, still counted: nothing
+      // that comes meanwhile takes it.
+      await free.promise;
+    } else {
+      this.#running += 1;
+    }
+    try {
+      await this.#latency();
+      return await work();
+    } finally {
+      const waiter = this.#waitingSlot.shift();
+      if (waiter === undefined) {
+        this.#running -= 1;
+      } else {
+        waiter();
+      }
+    }
   }
 
   /**
    * The loop variables of scope `scope`: for each `for` around it, its
    * item and index, from the items its enter step recorded in the scope
    * around it (`#items`); `undefined` when one of them recorded none, or
-   * fewer than the index names.
+   * fewer than the index names, or a `fork` around it has no such branch.
    */
   #loopOf(
     scope: readonly { id: string; index: number }[]
   ): Record<string, Json> | undefined {
     const loop: Record<string, Json> = {};
     for (const [depth, { id, index }] of scope.entries()) {
-      const items = this.#items.get(placeOf(id, scope.slice(0, depth)));
       const task = this.#run.build.tasks.find((one) => one.id === id);
+      // A fork's branch: one of the branches it was sealed with, and no
+      // variables of its own.
+      if (task?.kind === "fork") {
+        if (index >= task.fork.branches) {
+          return undefined;
+        }
+        continue;
+      }
+      const items = this.#items.get(placeOf(id, scope.slice(0, depth)));
       if (
         items === undefined ||
         index >= items.length ||
@@ -1233,7 +1520,10 @@ export class ResourceRunHost
    * one to fail with too; one that fails never having called it (cut off
    * in an isolate already stopped, refused its admission) is marked as
    * never run, so a later attempt may run it. Only that branch, where the
-   * module was never called, ever writes the mark.
+   * module was never called, ever writes the mark, and the wait for a slot
+   * (`#inSlot`) the attempt runs in: marked as never run while it waits,
+   * and unmarked once it holds one, so an activation that dies meanwhile
+   * leaves a later attempt free to run it.
    */
   async #onceAtMost<T>(
     once: boolean,
@@ -1241,19 +1531,26 @@ export class ResourceRunHost
     attempt: (ran: () => void) => Promise<T>
   ): Promise<T> {
     if (!once) {
-      return await attempt(() => {
-        // Only a step tried once keeps what it did.
-      });
+      return await this.#inSlot(
+        async () =>
+          await attempt(() => {
+            // Only a step tried once keeps what it did.
+          })
+      );
     }
     const { idempotencyKey: key, attempt: number } = told;
     const earlier = this.#ranBefore(key, number);
     if (earlier !== undefined) {
       throw toStepError(this.#triedOnce.failureOf(key, earlier) ?? leftOpen);
     }
+    this.#triedOnce.markUnstarted(key, number);
     let ranModule = false;
     try {
-      return await attempt(() => {
-        ranModule = true;
+      return await this.#inSlot(async () => {
+        this.#triedOnce.markStarted(key, number);
+        return await attempt(() => {
+          ranModule = true;
+        });
       });
     } catch (error) {
       if (ranModule) {
@@ -1265,9 +1562,154 @@ export class ResourceRunHost
     }
   }
 
+  /**
+   * Holds the run busy with the engine (`RunStep.busy`) for as long as a
+   * call of its step API may be on its way that the engine hasn't seen:
+   * an ask of the run's code the host handles outside the engine (its
+   * person checked); an answer the isolate got whose
+   * code hasn't gone quiet yet, which may make its next ask; an ask the
+   * isolate made that hasn't arrived. Otherwise the engine could suspend
+   * the run as its parked waits are all it sees out, and the call would
+   * run in a later activation, after the run slept: host latency would
+   * decide which of a race's branches wins, and replays would differ.
+   *
+   * Waiting on the isolate is held for at most the activation's time
+   * between steps, in all (between-steps.ts): its clock stops while a step
+   * call is out, parked ones too, so it can't bound a module that never
+   * says it went quiet, or counts asks it never makes, while another of
+   * its steps is parked. An honest module goes quiet a macrotask after
+   * each answer, far within it; past it, the engine may suspend the run
+   * on its parked steps, as for a module that is done.
+   */
+  #account(): void {
+    const waitingOnIsolate =
+      !this.#isolateDone &&
+      this.#isolateHoldLeftMs > 0 &&
+      (this.#quieted.size < this.#handedBack ||
+        this.#arrived < this.#madeByIsolate);
+    this.#holdForIsolate(waitingOnIsolate);
+    const busy = this.#asksInHost > 0 || waitingOnIsolate;
+    if (busy && this.#endBusy === undefined) {
+      this.#endBusy = this.#step.busy?.() ?? noBusy;
+    } else if (!busy && this.#endBusy !== undefined) {
+      this.#endBusy();
+      this.#endBusy = undefined;
+    }
+  }
+
+  /**
+   * Runs the clock of the time the run is held busy waiting on its
+   * isolate (`#account`) while `waiting`, and stops it otherwise; once it
+   * is spent, the run is no longer held for the isolate.
+   */
+  #holdForIsolate(waiting: boolean): void {
+    if (waiting && this.#isolateHoldSince === undefined) {
+      this.#isolateHoldSince = Date.now();
+      this.#isolateHoldTimer = setTimeout(() => {
+        this.#holdForIsolate(false);
+        this.#isolateHoldLeftMs = 0;
+        this.#account();
+      }, this.#isolateHoldLeftMs);
+    } else if (!waiting && this.#isolateHoldSince !== undefined) {
+      this.#isolateHoldLeftMs -= Date.now() - this.#isolateHoldSince;
+      this.#isolateHoldSince = undefined;
+      clearTimeout(this.#isolateHoldTimer);
+      this.#isolateHoldTimer = undefined;
+    }
+  }
+
+  /**
+   * Handles an ask of the run's code by `work`, counted in the host
+   * (`#account`) from its arrival to its answer, but while a call of the
+   * engine's step API made for it is out (engine-asks.ts): the engine
+   * counts that one. An ask whose engine call never comes back (it
+   * parked) is never answered in this activation.
+   */
+  async #handling<T>(work: () => Promise<T>): Promise<T> {
+    this.#arrived += 1;
+    this.#asksInHost += 1;
+    this.#account();
+    let inEngine = 0;
+    const ask: EngineAsk = {
+      made: () => {
+        inEngine += 1;
+        if (inEngine === 1) {
+          this.#asksInHost -= 1;
+          this.#account();
+        }
+      },
+      back: () => {
+        inEngine -= 1;
+        if (inEngine === 0) {
+          this.#asksInHost += 1;
+          this.#account();
+        }
+      },
+    };
+    try {
+      return await engineAsks.run(ask, work);
+    } finally {
+      if (inEngine === 0) {
+        this.#asksInHost -= 1;
+      }
+      this.#handedBack += 1;
+      this.#account();
+    }
+  }
+
+  /**
+   * The run's isolate went quiet after it last got control back, having
+   * made `made` asks in all, the `time`th time it got control back
+   * (`openRunMain`; its start the first): every ask its code made since
+   * then is on its way, and the host holds the run busy until each has
+   * arrived. Refused, failing the run, for anything but counts. A count
+   * past what a run could have on its way (more than its steps beyond
+   * those that arrived) is taken as that. Each time counts once, however
+   * often it is said (a quiet sent again), and only one the host handed
+   * back control for.
+   */
+  // oxlint-disable-next-line require-await -- an RPC method, answered at once
+  async quiet(made: unknown, time: unknown): Promise<Settled<null>> {
+    try {
+      if (
+        typeof made !== "number" ||
+        !Number.isSafeInteger(made) ||
+        made < 0 ||
+        typeof time !== "number" ||
+        !Number.isSafeInteger(time) ||
+        time < 1
+      ) {
+        return this.#refuse("A run's isolate counts the asks it made.");
+      }
+      if (time <= this.#handedBack) {
+        this.#quieted.add(time);
+      }
+      this.#madeByIsolate = Math.max(
+        this.#madeByIsolate,
+        Math.min(made, this.#arrived + maxAsksOnTheirWay)
+      );
+      this.#account();
+      return { ok: true, value: null };
+    } catch (error) {
+      return { ok: false, error: forIsolate(error) };
+    }
+  }
+
+  /**
+   * The run's isolate is done (its run settled, or it was stopped): the
+   * host no longer holds the run busy for what it may still ask
+   * (`#account`), so the engine can suspend the run on its parked steps.
+   */
+  isolateDone(): void {
+    this.#isolateDone = true;
+    this.#account();
+  }
+
   /** The person the run acts for must still be an active member. */
   async #requirePerson(): Promise<void> {
-    if (!(await memberRole(this.#env.DB, this.#run.principal))) {
+    const active = await memberRole(this.#env.DB, this.#run.principal);
+    await this.#latency();
+    if (!active) {
       throw permissionErrors.create("permission.person_inactive");
     }
   }
@@ -1279,6 +1721,14 @@ export class ResourceRunHost
    * recorded result without calling it.
    */
   async do(
+    name: unknown,
+    options: unknown,
+    fn: (attempt: ResourceAttemptHost) => Promise<unknown>
+  ): Promise<Settled<unknown>> {
+    return await this.#handling(async () => await this.#do(name, options, fn));
+  }
+
+  async #do(
     name: unknown,
     options: unknown,
     fn: (attempt: ResourceAttemptHost) => Promise<unknown>
@@ -1317,6 +1767,15 @@ export class ResourceRunHost
           wait: loadWaitStart,
           collecting: false,
         };
+        // A step of a branch another settled its scope over runs nothing:
+        // the engine still replays what it recorded, and fails anything
+        // else for good, so a replay reaches every step it journaled.
+        // Only a running attempt holds one of the run's slots (`#inSlot`),
+        // taken as the engine hands it over (`#onceAtMost`): a step whose
+        // retry is parked never returns from the engine in this activation,
+        // so a slot taken around the engine's call would be held for good,
+        // and the steps waiting for one would hold the run busy until its
+        // load ended.
         const attemptStep = async (context: unknown): Promise<unknown> =>
           await this.#attempt(run, context, fn, stepDone.promise);
         let recorded = await this.#step.do(
@@ -1443,11 +1902,16 @@ export class ResourceRunHost
     stepDone: Promise<unknown>
   ): Promise<unknown> {
     const told = attemptContextSchema.parse(context);
-    return await this.#onceAtMost(
-      configOf(run.step).once,
-      told,
-      async (ran) => await this.#attemptOf(run, told, fn, stepDone, ran)
-    );
+    const { step } = run;
+    return await this.#onceAtMost(configOf(step).once, told, async (ran) => {
+      // Settled meanwhile too: checked again as the attempt starts.
+      if (step.fenced === true || this.#fencedOff(step.scope)) {
+        throw toStepError(
+          forIsolate(workflowResourceErrors.create("workflow.branch_cancelled"))
+        );
+      }
+      return await this.#attemptOf(run, told, fn, stepDone, ran);
+    });
   }
 
   /** One attempt of step `run` (`#attempt`), `ran` told just before its module is. */
@@ -1500,6 +1964,15 @@ export class ResourceRunHost
         // told to have run, so a check that can't answer for a moment
         // leaves it to a later attempt, never a failure kept for good.
         await this.#actionPackagesAdmitted(run, attempt, funded);
+        // Its scope settled while it waited to be admitted: refused as it
+        // would have been at its start (`do`), its module never told.
+        if (this.#fencedOff(step.scope)) {
+          throw toStepError(
+            forIsolate(
+              workflowResourceErrors.create("workflow.branch_cancelled")
+            )
+          );
+        }
         ran();
         call = fn(this.#attemptHostOf(attempt));
       }
@@ -1602,6 +2075,7 @@ export class ResourceRunHost
       items: undefined,
       itemsAsked: false,
       proceeds: undefined,
+      settled: undefined,
       held: false,
       collecting: run.collecting,
       admission,
@@ -1631,6 +2105,8 @@ export class ResourceRunHost
         await ResourceRunHost.#tracked(attempt, this.#until(attempt, frame)),
       items: async (frame) =>
         await ResourceRunHost.#tracked(attempt, this.#itemsOf(attempt, frame)),
+      settle: async (settled) =>
+        await Promise.resolve(this.#settleOf(attempt, settled)),
     });
   }
 
@@ -1814,6 +2290,10 @@ export class ResourceRunHost
 
   /** Runs a `wait` task: a durable sleep of exactly its sealed length. */
   async sleep(name: unknown, duration: unknown): Promise<Settled<null>> {
+    return await this.#handling(async () => await this.#sleep(name, duration));
+  }
+
+  async #sleep(name: unknown, duration: unknown): Promise<Settled<null>> {
     return await settle(async () => {
       const sleeping = this.#stepOf(name, true);
       const { task } = sleeping;
@@ -1840,6 +2320,12 @@ export class ResourceRunHost
    * exactly the deadline it recorded, at once when that has passed.
    */
   async sleepUntil(name: unknown, timestamp: unknown): Promise<Settled<null>> {
+    return await this.#handling(
+      async () => await this.#sleepUntil(name, timestamp)
+    );
+  }
+
+  async #sleepUntil(name: unknown, timestamp: unknown): Promise<Settled<null>> {
     return await settle(async () => {
       const sleeping = this.#stepOf(name, true);
       const { task } = sleeping;
@@ -2192,7 +2678,10 @@ export class ResourceRunHost
     task: SealedTask
   ): Json | undefined {
     const inputFrom =
-      task.kind === "call" || task.kind === "wait" || task.kind === "for"
+      task.kind === "call" ||
+      task.kind === "wait" ||
+      task.kind === "for" ||
+      task.kind === "fork"
         ? task.inputFrom
         : undefined;
     return inputFrom === undefined
@@ -2930,7 +3419,12 @@ export class ResourceRunHost
 
   /** Whether `step`, of task `taskId`, evaluates the task's `if`. */
   #hasIf(step: StepOf, taskId: string): boolean {
+    // A race's record (a fork's `task` step) follows its enter step's `if`.
+    const race =
+      step.kind === "task" &&
+      (step.task?.kind === "fork" || step.task?.kind === "for");
     return (
+      !race &&
       stagesOf[step.kind].includes("taskIf") &&
       this.#run.build.expressions.some(
         (expression) =>
@@ -2978,20 +3472,41 @@ export class ResourceRunHost
   }
 
   /**
-   * Accepts what of `record` a loop's steps record, whatever the isolate
-   * resolved: an `item` step only what its `while` answered, as the host
-   * evaluated it (whether it was the whole record); a `for` task's enter
-   * step exactly the items the host resolved in that attempt, and no
-   * other step any.
+   * Accepts what of `record` a loop's or a fork's steps record, whatever
+   * the isolate resolved: a race (a competing fork's `task` step) only
+   * its winning branch, one it has; an `item` step only what its `while`
+   * answered, as the host evaluated it (whether it was the whole record);
+   * a `for` task's enter step exactly the items the host resolved in that
+   * attempt, and no other step any.
    */
   #acceptedLoopRecord(
     attempt: StepAttempt,
-    record: { output: Json; items?: Json[] | undefined }
+    record: {
+      output: Json;
+      items?: Json[] | undefined;
+      branch?: number | undefined;
+    }
   ): boolean {
     const { step } = attempt;
     const { task } = step;
     if (task === undefined) {
       return false;
+    }
+    // A scope's settling (a fork's or a `for`'s own step) records the
+    // branch the host settled it on in this attempt, and nothing of its
+    // own: what each branch did its own steps recorded.
+    if ((task.kind === "fork" || task.kind === "for") && step.kind === "task") {
+      if (
+        attempt.settled === undefined ||
+        record.branch !== attempt.settled ||
+        record.output !== null ||
+        Object.keys(record).length !== 2
+      ) {
+        this.#refuse(
+          `Task "${task.id}" records the branch its scope settled on.`
+        );
+      }
+      return true;
     }
     if (step.kind === "item") {
       if (

@@ -1,28 +1,21 @@
 /* oxlint-disable no-template-curly-in-string, unicorn/no-thenable -- workflow expressions are written as ${ … } strings, and transitions as then */
-import type { Role } from "@grasp-os/shared/roles";
-import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
-import type { WorkflowResourceRun } from "@grasp-os/shared/workflow-resources";
 import { env } from "cloudflare:workers";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
-import type { Acting } from "../src/auth/identity.ts";
-import { loadWorkflowBuild } from "../src/workflow-builds.ts";
-import {
-  createWorkflowResource,
-  publishWorkflowVersion,
-  workflowSource,
-} from "../src/workflow-resources.ts";
-import { startWorkflow } from "../src/workflow-starts.ts";
-import type { Settled } from "../src/workflows/code.ts";
-import { runObjectOf } from "../src/workflows/engine.ts";
-import type { RunStep } from "../src/workflows/host.ts";
-import { ResourceRunHost } from "../src/workflows/resource-host.ts";
+import { workflowSource } from "../src/workflow-resources.ts";
+import type { ResourceRunHost } from "../src/workflows/resource-host.ts";
 import { resourceRunTrace } from "../src/workflows/resource-run-trace.ts";
-import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { withCpuKills } from "./cpu-kills.ts";
-import { admittedFreely } from "./runs.ts";
-import { unique } from "./sign-in.ts";
+import {
+  builder,
+  codeOf,
+  completedSteps,
+  endOf,
+  hostOf,
+  published,
+  ranFor,
+} from "./json-workflows.ts";
 
 // Sequential `for` loops of JSON workflows (GRA-276; @grasp-os/open-workflow's
 // generate.ts, the SDK's open-workflow.ts and core's resource-host.ts), from
@@ -34,105 +27,6 @@ import { unique } from "./sign-in.ts";
 // the next; `exit` ends an item and `end` the workflow; a collection past
 // the platform's 1,000 items fails the run before any item runs; and
 // generated code still has no loop statement.
-
-/** A builder of the organization, as their session has them. */
-const builder = async (role: Role = "builder"): Promise<Acting> => {
-  const userId = crypto.randomUUID();
-  await env.DB.batch([
-    env.DB.prepare(
-      "INSERT OR IGNORE INTO organizations (id, name, slug, created_at) VALUES ('organization', 'Acme', 'acme', ?)"
-    ).bind(Date.now()),
-    env.DB.prepare(
-      "INSERT INTO users (id, name, email, email_verified, created_at, updated_at) VALUES (?, ?, ?, 1, ?, ?)"
-    ).bind(userId, "Person", `${userId}@acme.test`, Date.now(), Date.now()),
-    env.DB.prepare(
-      "INSERT INTO members (id, organization_id, user_id, role, created_at) VALUES (?, 'organization', ?, ?, ?)"
-    ).bind(crypto.randomUUID(), userId, role, Date.now()),
-  ]);
-  return { userId, role, teams: [], staff: false };
-};
-
-const objectSchema = (properties: Record<string, unknown>) => ({
-  format: "json",
-  document: {
-    type: "object",
-    properties,
-    required: Object.keys(properties),
-    additionalProperties: false,
-  },
-});
-
-/** A definition of `name` running `tasks`: input `{ who }`, output `{ status }`. */
-const definitionOf = (name: string, tasks: unknown[]): string =>
-  JSON.stringify({
-    document: {
-      dsl: "1.0.3",
-      namespace: workflowNamespace,
-      name,
-      version: "1.0.0",
-      title: name,
-      metadata: {
-        grasp: { profile: "grasp-open-workflow/1", params: {}, bindings: {} },
-      },
-    },
-    input: { schema: objectSchema({ who: { type: "string" } }) },
-    output: { schema: objectSchema({ status: { type: "string" } }) },
-    do: tasks,
-  });
-
-/** A workflow of `by`'s, published once with `tasks`. */
-const published = async (by: Acting, tasks: unknown[]) => {
-  const workflow = await createWorkflowResource(env, by, `loop-${unique()}`);
-  const version = await publishWorkflowVersion(env, by, workflow.id, {
-    definition: definitionOf(workflow.name, tasks),
-    basedOn: null,
-  });
-  return { workflow, version };
-};
-
-/** Starts version 1 of workflow `id` for `by`, and waits for its end. */
-const ranFor = async (by: Acting, id: string): Promise<WorkflowResourceRun> => {
-  const { runId } = await startWorkflow(
-    env,
-    { type: "person", person: by },
-    id,
-    { version: 1, input: { who: "Ada" }, key: unique() }
-  );
-  expect(runId).not.toBeNull();
-  return await vi.waitFor(
-    async () => {
-      const run = await resourceRunFor(env, by, id, runId);
-      expect(run.endedAt).not.toBeNull();
-      return run;
-    },
-    { timeout: 30_000, interval: 100 }
-  );
-};
-
-/** What a run ended with: its status, and its output or error code. */
-const endOf = (run: WorkflowResourceRun) => ({
-  status: run.status,
-  ...(run.status === "completed"
-    ? { output: run.output }
-    : { code: run.error?.code }),
-});
-
-/** How many times run `runId`'s journal completed each step, by name. */
-const completedSteps = async (runId: string): Promise<Map<string, number>> => {
-  const page = await runObjectOf(env, runId).history({ after: 0, limit: 500 });
-  const completed = new Map<string, number>();
-  for (const record of page?.records ?? []) {
-    const step = record.unreadable ? null : record.step;
-    if (
-      step !== null &&
-      !record.unreadable &&
-      record.type === "step_completed"
-    ) {
-      completed.set(step.name, (completed.get(step.name) ?? 0) + 1);
-    }
-  }
-  return completed;
-};
 
 /** Ends the list with a status of the context's `field`, as text. */
 const statusOf = (field: string) => ({
@@ -195,8 +89,9 @@ const longNamed = (): unknown => ({
 });
 
 /** A loop of one item with `metadata.grasp`. */
-const loop = (metadata: Record<string, unknown>) => ({
+const loop = (metadata: Record<string, unknown>, extra = {}) => ({
   each: {
+    ...extra,
     for: { in: "${ [1] }" },
     do: [{ inner: { set: '${ {status: "x"} }' } }],
     metadata: { grasp: metadata },
@@ -353,14 +248,19 @@ describe("sequential for loops of JSON workflows", { timeout: 60_000 }, () => {
     ];
     const exited = await published(by, looping("exit"));
     const ended = await published(by, looping("end"));
+    const endedRun = await ranFor(by, ended.workflow.id);
+    const completed = await completedSteps(endedRun.id);
     expect({
       exited: endOf(await ranFor(by, exited.workflow.id)),
-      ended: endOf(await ranFor(by, ended.workflow.id)),
+      ended: endOf(endedRun),
+      // The item after the one that ended the workflow never started.
+      after: completed.get("task:gate@sum.3") ?? 0,
     }).toStrictEqual({
       // 1 + 2 + 4: the third item left at its exit.
       exited: { status: "completed", output: { status: "7" } },
       // The workflow's output where its end left it: nothing after ran.
       ended: { status: "completed", output: { status: "ended" } },
+      after: 0,
     });
   });
 
@@ -514,7 +414,7 @@ describe("sequential for loops of JSON workflows", { timeout: 60_000 }, () => {
     }).toStrictEqual({ sdkLoop: true, statements: false });
   });
 
-  it("don't lower items at once, items' own keys or loops nested past eight levels yet", async () => {
+  it("don't lower items' own keys, a while on items at once, loops nested past eight levels, or step names past what the engine takes", async () => {
     const by = await builder();
     const unsupportedOf = async (task: unknown) => {
       const { version } = await published(by, [task]);
@@ -523,79 +423,23 @@ describe("sequential for loops of JSON workflows", { timeout: 60_000 }, () => {
         : version.build.unsupported.map(({ feature }) => feature);
     };
     expect({
-      concurrent: await unsupportedOf(loop({ concurrency: 2 })),
       keyed: await unsupportedOf(loop({ key: "${ $item }" })),
+      whileAtOnce: await unsupportedOf(
+        loop({ concurrency: 2 }, { while: "${ $item < 3 }" })
+      ),
       eight: await unsupportedOf(nested(8)),
       nine: await unsupportedOf(nested(9)),
       // Step names past what the engine takes, once every loop is named.
       longNames: await unsupportedOf(longNamed()),
     }).toStrictEqual({
-      concurrent: ["for:concurrency"],
       keyed: ["for:key"],
+      whileAtOnce: ["for:while_concurrency"],
       eight: [],
       nine: ["for:depth"],
       longNames: ["step:name_too_long"],
     });
   });
 });
-
-/** A host of a run of version 1 of workflow `id`, its steps run at once. */
-const hostOf = async (by: Acting, id: string): Promise<ResourceRunHost> => {
-  const manifest = await env.DB.prepare(
-    "SELECT manifest_hash AS hash FROM workflow_resource_versions WHERE workflow_resource_id = ? AND version = 1"
-  )
-    .bind(id)
-    .first<{ hash: string }>();
-  const build = await loadWorkflowBuild(env, id, 1, manifest?.hash ?? "");
-  let count = 0;
-  const step: RunStep = {
-    do: async (name, _config, fn) => {
-      count += 1;
-      return await fn({ attempt: 1, idempotencyKey: `key:${name}:${count}` });
-    },
-    sleep: async () => {
-      await Promise.resolve();
-    },
-    sleepUntil: async () => {
-      await Promise.resolve();
-    },
-    waitForEvent: async () => await Promise.reject(new Error("No waits here")),
-  };
-  const runId = crypto.randomUUID();
-  return new ResourceRunHost(
-    env,
-    step,
-    {
-      runId,
-      workflowId: id,
-      version: 1,
-      principal: by.userId,
-      input: { who: "Ada" },
-      params: {},
-      createdAt: Date.now(),
-      build,
-      calling: {
-        runId,
-        workflowId: id,
-        version: 1,
-        principal: by.userId,
-        invoker: { type: "person", id: by.userId, appVersion: null },
-        bindings: new Map(),
-        restricted: false,
-      },
-      maxModelCalls: 1,
-    },
-    {
-      leaseOf: () => ({ generation: 1, deadline: Date.now() + 60_000 }),
-      tampered: () => {},
-      admitAttempt: admittedFreely,
-    }
-  );
-};
-
-/** The code `settled` failed with, or "ok". */
-const codeOf = (settled: Settled<unknown>): unknown =>
-  settled.ok ? "ok" : settled.error.code;
 
 const itemsSchema = z.object({ ok: z.literal(true), value: z.array(z.json()) });
 

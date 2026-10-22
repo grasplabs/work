@@ -316,6 +316,15 @@ const checks: Record<Family, () => void> = {
         output: "slept",
       });
     });
+
+    test("sleeps awaited together each run, and the run completes", async () => {
+      const { instances: _instances, ...outcomes } =
+        await ran("parallel-sleeps");
+      expect(sameOnBoth(outcomes)).toStrictEqual({
+        status: "complete",
+        output: "slept",
+      });
+    });
   },
   events: () => {
     test("Workerflow's waitForEvent type is Cloudflare's", () => {
@@ -339,6 +348,20 @@ const checks: Record<Family, () => void> = {
           timestampIsDate: true,
         },
       });
+    });
+
+    test("a wait raced against a sleep: the event wins the race", async () => {
+      const instances = await start("wait-race");
+      await sendBoth(instances, { type: "reply", payload: { n: 1 } });
+      const outcomes = await onBoth(instances, async (instance) =>
+        outcomeOf(await reached(instance))
+      );
+      expect(outcomes.engine.status).toBe("complete");
+      expect(outcomes.reference.status).toBe("complete");
+      expect(field(outcomes.engine.output, "payload")).toStrictEqual(
+        field(outcomes.reference.output, "payload")
+      );
+      expect(field(outcomes.engine.output, "payload")).toStrictEqual({ n: 1 });
     });
 
     test("a wait with no event by its timeout rejects, with the same message", async () => {
@@ -843,21 +866,6 @@ const discrepancyChecks: Record<DiscrepancyName, () => Promise<void>> = {
     const { reference, engine } = await ran("negative-sleep");
     expect(engine.status).toBe("errored");
     expect(reference).toStrictEqual({ status: "complete", output: "slept" });
-  },
-  "parallel-sleeps": async () => {
-    const { reference, engine } = await ran("parallel-sleeps");
-    expect(engine.error?.name).toBe("WorkflowParallelWaitError");
-    expect(reference).toStrictEqual({ status: "complete", output: "slept" });
-  },
-  "wait-race": async () => {
-    const instances = await start("wait-race");
-    await sendBoth(instances, { type: "reply", payload: { n: 1 } });
-    const outcomes = await onBoth(instances, async (instance) =>
-      outcomeOf(await reached(instance))
-    );
-    expect(outcomes.engine.error?.name).toBe("WorkflowParallelWaitError");
-    expect(outcomes.reference.status).toBe("complete");
-    expect(field(outcomes.reference.output, "payload")).toStrictEqual({ n: 1 });
   },
   "wait-timeout-name": async () => {
     const { reference, engine } = await ran("wait-timeout");
