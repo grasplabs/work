@@ -1,121 +1,23 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import { officeTypeOf } from "../src/workflows/office-files.ts";
-
-const word =
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-const excel =
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+import {
+  body,
+  contentTypes,
+  contentTypesNs,
+  docxOf,
+  excel,
+  officeDocument,
+  override,
+  relationship,
+  relsOf,
+  relsWith,
+  types,
+  word,
+  zipOf,
+} from "./office-packages.ts";
 
 const encoder = new TextEncoder();
-
-const deflated = async (bytes: Uint8Array): Promise<Uint8Array> =>
-  new Uint8Array(
-    await new Response(
-      new Blob([bytes])
-        .stream()
-        .pipeThrough(new CompressionStream("deflate-raw"))
-    ).arrayBuffer()
-  );
-
-interface ZipEntry {
-  name: string;
-  content: Uint8Array;
-  deflate?: boolean;
-}
-
-const contentTypesNs =
-  "http://schemas.openxmlformats.org/package/2006/content-types";
-const officeDocument =
-  "http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument";
-
-/** `_rels/.rels`, naming `target` the package's main document. */
-const relsOf = (target = "main.xml", attributes = ""): ZipEntry => ({
-  name: "_rels/.rels",
-  content: encoder.encode(
-    `<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="${officeDocument}" Target="${target}"${attributes}/></Relationships>`
-  ),
-});
-
-/**
- * A ZIP of `entries`, as an Office package is laid out (CRCs left zero),
- * with `_rels/.rels` naming `/main.xml` its main document last, unless
- * `entries` have one of their own or `rels` is false.
- */
-const zipOf = async (
-  given: readonly ZipEntry[],
-  rels = true
-): Promise<Uint8Array> => {
-  const entries =
-    rels && !given.some(({ name }) => name === "_rels/.rels")
-      ? [...given, relsOf()]
-      : given;
-  const locals: Uint8Array[] = [];
-  const centrals: Uint8Array[] = [];
-  let offset = 0;
-  for (const entry of entries) {
-    const name = encoder.encode(entry.name);
-    const data =
-      entry.deflate === true
-        ? // oxlint-disable-next-line no-await-in-loop -- one entry after another, as a ZIP is laid out
-          await deflated(entry.content)
-        : entry.content;
-    const method = entry.deflate === true ? 8 : 0;
-    const local = new Uint8Array(30 + name.length + data.length);
-    const localView = new DataView(local.buffer);
-    localView.setUint32(0, 0x04_03_4b_50, true);
-    localView.setUint16(8, method, true);
-    localView.setUint32(18, data.length, true);
-    localView.setUint32(22, entry.content.length, true);
-    localView.setUint16(26, name.length, true);
-    local.set(name, 30);
-    local.set(data, 30 + name.length);
-    const central = new Uint8Array(46 + name.length);
-    const centralView = new DataView(central.buffer);
-    centralView.setUint32(0, 0x02_01_4b_50, true);
-    centralView.setUint16(10, method, true);
-    centralView.setUint32(20, data.length, true);
-    centralView.setUint32(24, entry.content.length, true);
-    centralView.setUint16(28, name.length, true);
-    centralView.setUint32(42, offset, true);
-    central.set(name, 46);
-    locals.push(local);
-    centrals.push(central);
-    offset += local.length;
-  }
-  const centralSize = centrals.reduce((sum, part) => sum + part.length, 0);
-  const end = new Uint8Array(22);
-  const endView = new DataView(end.buffer);
-  endView.setUint32(0, 0x06_05_4b_50, true);
-  endView.setUint16(8, entries.length, true);
-  endView.setUint16(10, entries.length, true);
-  endView.setUint32(12, centralSize, true);
-  endView.setUint32(16, offset, true);
-  const parts = [...locals, ...centrals, end];
-  const out = new Uint8Array(parts.reduce((sum, part) => sum + part.length, 0));
-  let at = 0;
-  for (const part of parts) {
-    out.set(part, at);
-    at += part.length;
-  }
-  return out;
-};
-
-const contentTypes = (...mains: string[]): Uint8Array =>
-  encoder.encode(
-    `<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/>${mains
-      .map(
-        (main, index) =>
-          `<Override PartName="${index === 0 ? "/main.xml" : `/part${String(index)}.xml`}" ContentType="${main}.main+xml"/>`
-      )
-      .join("")}</Types>`
-  );
-
-/** An `Override` of `part` declaring `type`. */
-const override = (part: string, type: string): string =>
-  `<Override PartName="${part}" ContentType="${type}"/>`;
-
-const body = { name: "main.xml", content: encoder.encode("<w/>") };
 
 describe(officeTypeOf, () => {
   it("names a package by the one main part its content types declare, stored or deflated", async () => {
@@ -235,12 +137,6 @@ describe(officeTypeOf, () => {
   });
 
   it("reads the type of the one main part .rels names, and refuses a decoy, another main document, a VBA project or declarations it can't trust", async () => {
-    const types = (...children: string[]): ZipEntry => ({
-      name: "[Content_Types].xml",
-      content: encoder.encode(
-        `<?xml version="1.0"?><Types xmlns="${contentTypesNs}"><Default Extension="xml" ContentType="application/xml"/>${children.join("")}</Types>`
-      ),
-    });
     const docm = "application/vnd.ms-word.document.macroEnabled.main+xml";
     const xlsm = "application/vnd.ms-excel.sheet.macroEnabled.main+xml";
     // A real package: its main part under a folder, named with a leading
@@ -249,8 +145,9 @@ describe(officeTypeOf, () => {
       [
         types(override("/xl/workbook.xml", `${excel}.main+xml`)),
         relsOf("/XL/Workbook.xml"),
+        { name: "xl/workbook.xml", content: encoder.encode("<workbook/>") },
       ],
-      false
+      { rels: false }
     );
     const cases = {
       // A docm whose macro-enabled main part .rels names, with a decoy
@@ -294,10 +191,9 @@ describe(officeTypeOf, () => {
       notTheMainPart: await zipOf([
         types(override("/decoy.xml", `${word}.main+xml`)),
       ]),
-      noRels: await zipOf(
-        [types(override("/main.xml", `${word}.main+xml`))],
-        false
-      ),
+      noRels: await zipOf([types(override("/main.xml", `${word}.main+xml`))], {
+        rels: false,
+      }),
       externalMain: await zipOf([
         types(override("/main.xml", `${word}.main+xml`)),
         relsOf("main.xml", ' TargetMode="External"'),
@@ -347,6 +243,159 @@ describe(officeTypeOf, () => {
     }
     expect({ real: await officeTypeOf(real), named }).toStrictEqual({
       real: excel,
+      named: Object.fromEntries(
+        Object.keys(cases).map((label) => [label, undefined])
+      ),
+    });
+  });
+
+  it("refuses every way past the macro refusal a review found: entities, parameters, spellings, nesting, look-alike names and ZIPs two readers read apart", async () => {
+    const wordMain = `${word}.main+xml`;
+    const docm = "application/vnd.ms-word.document.macroEnabled.main+xml";
+    const macro = { name: "macro.xml", content: encoder.encode("<w/>") };
+    const asWord = types(override("/main.xml", wordMain));
+    const whole = [asWord, body];
+    const real = await zipOf(whole);
+    // A copy of the real end record: the one a reader scanning back
+    // from the end finds first, in the comment.
+    const fakeEnd = real.slice(-22);
+    const cases = {
+      // A macro-enabled main type, or a VBA project, behind an entity.
+      entityMacro: await zipOf([
+        types(
+          override("/main.xml", wordMain),
+          override(
+            "/macro.xml",
+            "application/vnd.ms-word.document.macroEnabled.main&#43;xml"
+          )
+        ),
+        body,
+        macro,
+      ]),
+      entityVba: await zipOf([
+        types(
+          override("/main.xml", wordMain),
+          override("/x.bin", "application/vnd.ms-office.vba&#80;roject")
+        ),
+        body,
+      ]),
+      // A second main document, its relationship spelt exactly, in upper
+      // case, or nested in the first.
+      secondMain: await zipOf([
+        types(override("/main.xml", wordMain), override("/macro.xml", docm)),
+        relsWith(
+          relationship("rId1", "main.xml"),
+          relationship("rId2", "macro.xml")
+        ),
+        body,
+        macro,
+      ]),
+      upperCaseType: await zipOf([
+        asWord,
+        relsWith(
+          relationship("rId1", "main.xml"),
+          relationship("rId2", "macro.xml", officeDocument.toUpperCase())
+        ),
+        body,
+        macro,
+      ]),
+      spacedType: await zipOf([
+        asWord,
+        relsWith(
+          relationship("rId1", "main.xml"),
+          relationship("rId2", "macro.xml", ` ${officeDocument}`)
+        ),
+        body,
+        macro,
+      ]),
+      nested: await zipOf([
+        asWord,
+        {
+          name: "_rels/.rels",
+          content: encoder.encode(
+            `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="${officeDocument}" Target="main.xml">${relationship("rId2", "macro.xml")}</Relationship></Relationships>`
+          ),
+        },
+        body,
+        macro,
+      ]),
+      // A macro-enabled type with parameters, on another part or the main.
+      parameters: await zipOf([
+        types(
+          override("/main.xml", wordMain),
+          override("/macro.xml", `${docm}; v=1`)
+        ),
+        body,
+        macro,
+      ]),
+      mainParameters: await zipOf([
+        types(override("/main.xml", `${wordMain}; v=1`)),
+        body,
+      ]),
+      // A Kelvin sign, which folds to K only beyond ASCII.
+      kelvinPart: await zipOf([
+        types(override("/\u212Amain.xml", wordMain)),
+        relsOf("kmain.xml"),
+        { name: "kmain.xml", content: encoder.encode("<w/>") },
+      ]),
+      kelvinEntry: await zipOf([
+        asWord,
+        body,
+        { name: "word/vba\u212A.bin", content: encoder.encode("x") },
+      ]),
+      // An end record in the comment, or any comment at all.
+      fakeEnd: await zipOf(whole, { comment: fakeEnd }),
+      // A local header naming another entry than its central record.
+      nameMismatch: await zipOf([
+        asWord,
+        { ...body, localName: "word/vbaProject.bin" },
+      ]),
+      // Encrypted, by the flag.
+      encrypted: await zipOf([asWord, { ...body, flags: 1 }]),
+      // A local entry the central directory doesn't list.
+      hiddenEntry: await zipOf(whole, {
+        hidden: [{ name: "word/vbaProject.bin", content: encoder.encode("x") }],
+      }),
+      // VBA by its entry's name, whatever the content types say.
+      vbaByName: await zipOf([
+        asWord,
+        body,
+        { name: "word/vbaProject.bin", content: encoder.encode("x") },
+      ]),
+      vbaUnderXl: await zipOf([
+        asWord,
+        body,
+        { name: "xl/VbaData.xml", content: encoder.encode("<x/>") },
+      ]),
+      // XML a reader could take otherwise: single quotes, a comment, text.
+      singleQuoted: await zipOf([
+        {
+          name: "[Content_Types].xml",
+          content: encoder.encode(
+            `<Types xmlns='${contentTypesNs}'><Override PartName='/main.xml' ContentType='${wordMain}'/></Types>`
+          ),
+        },
+        body,
+      ]),
+      unknownAttribute: await zipOf([
+        types(
+          `<Override PartName="/main.xml" ContentType="${wordMain}" Hidden="1"/>`
+        ),
+        body,
+      ]),
+    };
+    const named: Record<string, string | undefined> = {};
+    for (const [label, bytes] of Object.entries(cases)) {
+      // oxlint-disable-next-line no-await-in-loop -- each case on its own
+      named[label] = await officeTypeOf(bytes);
+    }
+    expect({
+      real: await officeTypeOf(real),
+      docx: await officeTypeOf(await docxOf()),
+      named,
+    }).toStrictEqual({
+      real: word,
+      docx: word,
       named: Object.fromEntries(
         Object.keys(cases).map((label) => [label, undefined])
       ),

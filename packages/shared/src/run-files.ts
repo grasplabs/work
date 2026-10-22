@@ -147,6 +147,47 @@ export const runFileNameSchema = z
 export const runFileTypeSchema = z.enum(runFileTypes);
 
 /**
+ * The extension a run file of a type must be named with (GRA-886): a Word
+ * or Excel document's, so a file typed as one never carries the name of
+ * another (a macro-enabled `.docm`, say) that an app would open as that.
+ */
+const runFileExtensions: Partial<Record<RunFileType, string>> = {
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+    ".docx",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
+};
+
+/** `text` with ASCII letters in lower case, and nothing else changed. */
+const asciiLower = (text: string): string =>
+  text.replaceAll(/[A-Z]/gu, (letter) => letter.toLowerCase());
+
+/** Whether `name` carries the extension a file of `type` must, if any. */
+export const runFileNameFits = (name: string, type: RunFileType): boolean => {
+  const extension = runFileExtensions[type];
+  return extension === undefined || asciiLower(name).endsWith(extension);
+};
+
+/** What a file with no name left once its extension goes is named. */
+const unnamedStem = "document";
+
+/**
+ * `name`, a run file's, as a file of `type` is named: as it is when it
+ * fits (`runFileNameFits`); otherwise its last extension replaced by the
+ * type's, within a run file name's length.
+ */
+export const runFileNamed = (name: string, type: RunFileType): string => {
+  const extension = runFileExtensions[type];
+  if (extension === undefined || runFileNameFits(name, type)) {
+    return name;
+  }
+  const dot = name.lastIndexOf(".");
+  const stem = (dot === -1 ? name : name.slice(0, dot))
+    .slice(0, runFileLimits.nameLength - extension.length)
+    .trim();
+  return `${stem === "" ? unnamedStem : stem}${extension}`;
+};
+
+/**
  * The run-file type a file someone else made shows (GRA-886), from its
  * bytes: a binary type by its signature, never by the label it came with,
  * which only names a text type, for bytes with no signature. Undefined
