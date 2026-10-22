@@ -983,18 +983,7 @@ describe("approving an operation", () => {
       input: descriptor,
       output: descriptor,
     });
-    const shape = jsonSchemaOf(schemaFromDescriptor(descriptor).descriptor, {
-      exact: true,
-    });
     const app = await appOf(ada);
-    await env.DB.prepare("UPDATE app_versions SET exports = ? WHERE app_id = ?")
-      .bind(
-        JSON.stringify({
-          lookup: { access: "read", input: shape, output: shape },
-        }),
-        app
-      )
-      .run();
     await sealed(app, 1);
     const workflow = await createWorkflowResource(env, ada, `op-${unique()}`);
     await publishWorkflowVersion(env, ada, workflow.id, {
@@ -1027,12 +1016,9 @@ describe("approving an operation", () => {
       }),
       basedOn: null,
     });
-    const permissionId = await granted(ada, admin, {
-      subject: { type: "workflow", workflowId: workflow.id },
-      object: { type: "app", appId: appIdSchema.parse(app) },
-      actions: ["read"],
-      binding: `APP_${unique().toUpperCase().replaceAll("-", "_")}`,
-    });
+    // No permission names an App's export any more (an `app` permission
+    // is an agent's): one an old record left, by its ID.
+    const permissionId = crypto.randomUUID();
     const approved = await outcome(
       approveWorkflowBinding(env, admin, workflow.id, {
         alias: "lookup",
@@ -1795,24 +1781,17 @@ describe("an App binding a workflow", () => {
 });
 
 describe("screen trust through workflows", () => {
-  it("makes the screens of an App sensitive again when an App its workflow calls is granted more", async () => {
+  it("makes the screens of an App sensitive again when a workflow it starts is granted more", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
     const workflow = await workflowOf(ada);
-    // App X starts the workflow, which calls App Y's exports.
+    // App X starts the workflow: more for the workflow is more for X.
     const starter = await appOf(ada);
-    const called = await appOf(ada);
     await granted(ada, admin, {
       subject: { type: "app", appId: appIdSchema.parse(starter) },
       object: { type: "workflow", workflowId: workflow.id },
       actions: ["start"],
       binding: "GREET",
-    });
-    await granted(ada, admin, {
-      subject: { type: "workflow", workflowId: workflow.id },
-      object: { type: "app", appId: appIdSchema.parse(called) },
-      actions: ["read"],
-      binding: `APP_${unique().toUpperCase().replaceAll("-", "_")}`,
     });
     await env.DB.prepare(
       `INSERT INTO screen_policies (app_id, output, generation) VALUES (?, 'ordinary', 1)
@@ -1822,7 +1801,7 @@ describe("screen trust through workflows", () => {
       .run();
     const before = await standingOf(env, appIdSchema.parse(starter));
     await granted(ada, admin, {
-      subject: { type: "app", appId: appIdSchema.parse(called) },
+      subject: { type: "workflow", workflowId: workflow.id },
       object: { type: "connection", connectionId: `connection-${unique()}` },
       actions: ["mail.send"],
       binding: `MAIL_${unique().toUpperCase()}`,
