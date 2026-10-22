@@ -1729,14 +1729,17 @@ export class Activation {
         if (!this.#current()) {
           return null;
         }
-        const strayed = this.#strayedIn(this.#storage.sql);
-        if (strayed !== undefined) {
-          return { strayed };
-        }
         const now = Date.now();
+        // A pause cuts a replay short by design, before the waits the
+        // journal holds are all reached again: a real stray is found
+        // again once the run resumes.
         if (this.#pausing()) {
           this.#pauseIn(this.#storage.sql, now);
           return "paused";
+        }
+        const strayed = this.#strayedIn(this.#storage.sql);
+        if (strayed !== undefined) {
+          return { strayed };
         }
         // An event accepted for a parked wait while this activation ran
         // woke no one (`run.ts` wakes only a waiting run): the run wakes
