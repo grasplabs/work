@@ -5,6 +5,7 @@ import { peopleIn } from "./people.ts";
 
 // Stephen's tour: offered on Chat the first time someone comes in, taken
 // page by page, not offered again, and started again from the person menu.
+// While he tells it, the page under him takes no press or key.
 // Which stops whose role skips is a unit test (apps/web/src/tour).
 
 /** Each stop's page and the start of his line there, in order. */
@@ -62,6 +63,28 @@ test("offers the tour on first sign-in, takes it to its end, and starts it again
   await tour.getByRole("button", { name: "I’m ready" }).click();
   await expect(page).toHaveURL(stops[0][0]);
   await expect(tour).toContainText(stops[0][1]);
+
+  // While he tells it, the page under him is held: a press on the
+  // sidebar's way to another page goes nowhere, and the keyboard never
+  // reaches the page or the sidebar.
+  const link = await page
+    .locator('[data-slot="sidebar"] nav a[href="/workflows"]')
+    .boundingBox();
+  if (link === null) {
+    throw new Error("The sidebar has no way to Workflows");
+  }
+  await page.mouse.click(link.x + link.width / 2, link.y + link.height / 2);
+  await expect(page).toHaveURL(stops[0][0]);
+  await expect(tour).toContainText(stops[0][1]);
+  for (let press = 0; press < 4; press += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- one key after the other
+    await page.keyboard.press("Tab");
+    // oxlint-disable-next-line no-await-in-loop -- see above
+    await expect(
+      page.locator('[data-slot="sidebar-wrapper"] :focus')
+    ).toHaveCount(0);
+  }
+
   await page.keyboard.press("Escape");
   await expect(tour).toHaveCount(0);
 });
