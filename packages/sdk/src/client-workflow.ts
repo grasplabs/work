@@ -83,7 +83,10 @@ import { v } from "./values.ts";
 // - Stale permission after a lost connection: the last snapshot stays on
 //   screen, but every capability is off until a fresh push arrives.
 // - Data outlives access: a refusal of the person or the build fences the
-//   whole client (client-core.ts), which clears every run shown here.
+//   whole client (client-core.ts), which clears every run shown here. A
+//   run refused as unavailable for now (its alias bound elsewhere, say)
+//   is cleared the same way, only the refusal shown; following goes on,
+//   and the run shows again only once the host pushes it again.
 // - A forged or malformed answer delivered: references, snapshots, handles
 //   and receipts are read with the native interpreter before anything of
 //   them is shown or answered; a run of another contract is refused.
@@ -831,13 +834,23 @@ const hintOf = (error: GraspError): number => {
 };
 
 /**
+ * A run refused as one the person may not see: one that doesn't exist
+ * reads the same, so nobody learns which runs there are. Access can come
+ * back (its alias bound back, a grant given again), and the host pushes
+ * the run again when it does, so following goes on, nothing of the run
+ * shown meanwhile; a run that is gone ends by its own terminal status,
+ * never by this.
+ */
+const unavailableRun = "workflow.run_unavailable";
+
+/**
  * Refusals after which following again would only be refused again: the
  * App moved on, the page follows too many, or the request itself.
  */
 const endsFollowing = (code: string): boolean =>
   code.startsWith("version.") ||
   code.startsWith("contract.") ||
-  code.startsWith("workflow.") ||
+  (code.startsWith("workflow.") && code !== unavailableRun) ||
   code === "app.not_running" ||
   code === "screen.too_many_queries" ||
   code === "screen.invalid";
@@ -1156,6 +1169,18 @@ export class WorkflowChannel {
     }
     if (entry.live === live) {
       live.retryAfterMs = hintOf(error);
+      if (error.code === unavailableRun) {
+        // Access to the run is gone, for now: nothing of it stays shown,
+        // as after a fence, only why. Following goes on, and the host's
+        // next push of it shows it again, fresh. The revision shown is
+        // kept, so no older snapshot shows after it.
+        WorkflowChannel.#show(entry, {
+          ...nothingYet,
+          revision: entry.state.revision,
+          error,
+        });
+        return;
+      }
       // Worth following again (the request budget, say): what is shown
       // stays, its capabilities off until a fresh push.
       WorkflowChannel.#show(entry, { ...entry.state, fresh: false });

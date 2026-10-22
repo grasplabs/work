@@ -184,6 +184,27 @@ export const readManifest = (text: string): AppManifest => {
  * registers, for files no release sealed (a draft, a version not yet
  * made current). Refused as sealing would refuse it.
  */
+/**
+ * The manifest `filesManifest` keeps in R2 for `files`, if it kept one:
+ * undefined on a miss, never inspecting the code itself. For reads that
+ * may only show what core has already worked out (the sidebar).
+ */
+export const cachedFilesManifest = async (
+  env: Env,
+  files: Readonly<Record<string, string>>
+): Promise<AppManifest | undefined> => {
+  const sdk = await serverSdkModules(env.ASSETS);
+  const code = {
+    ...appCodeFiles(files),
+    ...symbolicModules(),
+    [generatedPaths.server]: serverModuleSource,
+  };
+  const cached = await env.FILES.get(
+    `inspections/${await buildKey(code)}/${sdk.version}.json`
+  );
+  return cached ? readManifest(await cached.text()) : undefined;
+};
+
 export const filesManifest = async (
   env: Env,
   files: Readonly<Record<string, string>>,

@@ -1,4 +1,7 @@
-import { createScheduledController } from "cloudflare:test";
+import {
+  createExecutionContext,
+  createScheduledController,
+} from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { vi } from "vite-plus/test";
 
@@ -17,7 +20,8 @@ export const runCron = async (
       cron: "* * * * *",
       scheduledTime: at.getTime(),
     }),
-    { ...env, ...changes }
+    { ...env, ...changes },
+    createExecutionContext()
   );
 };
 
@@ -34,7 +38,8 @@ export const runQuarterHourCron = async (
       cron: "*/15 * * * *",
       scheduledTime: at.getTime(),
     }),
-    { ...env, ...changes }
+    { ...env, ...changes },
+    createExecutionContext()
   );
 };
 

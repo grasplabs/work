@@ -51,6 +51,12 @@ import { ofSubject } from "../dependencies/subjects.ts";
 import { builderFailure, packageBuilder } from "./builder.ts";
 import type { PackageBuilderRun } from "./builder.ts";
 import { lookalikeFindings } from "./lookalikes.ts";
+import {
+  advisoriesAffecting,
+  malwareAdvised,
+  osvMalwareIn,
+  whenFree,
+} from "./malware.ts";
 import { verifiedTarball } from "./tarballs.ts";
 
 // Resolving what an App's package.json asks for into one exact graph, and
@@ -214,38 +220,6 @@ const metadataRefusals = (version: NpmVersion): string[] => [
 ];
 
 /**
- * How often a metadata request connect refused as busy is asked again, and
- * how long the first pause is; each pause after doubles it.
- */
-const busyTries = 4;
-const firstBusyPauseMs = 500;
-
-/**
- * What `call` asks connect, asked again after a pause while connect says
- * it is reading too much from the registry at once
- * (`package.registry_busy`), a few times at most: then the refusal stands,
- * and says to try again.
- */
-const whenFree = async <T>(call: () => Promise<T>): Promise<T> => {
-  for (let attempt = 1; ; attempt += 1) {
-    try {
-      // One at a time: each pause waits on the one before.
-      // oxlint-disable-next-line no-await-in-loop
-      return await call();
-    } catch (error) {
-      if (
-        packageErrors.codeOf(error) !== "package.registry_busy" ||
-        attempt >= busyTries
-      ) {
-        throw error;
-      }
-      // oxlint-disable-next-line no-await-in-loop
-      await scheduler.wait(firstBusyPauseMs * 2 ** (attempt - 1));
-    }
-  }
-};
-
-/**
  * What a request's approver is shown about `packages` (GRA-699): each
  * named like a popular package (lookalikes.ts), and each advisory the
  * registry knows, through connect, that affects its exact version, one
@@ -261,34 +235,14 @@ const findingsOf = async (
   total: number;
   malware: MalwareFound[];
 }> => {
-  // By name in a Map: a package may be named `constructor`.
-  const asked = new Map<string, string[]>();
-  for (const { name, version } of packages) {
-    asked.set(name, [...(asked.get(name) ?? []), version]);
-  }
   // Two sources, asked at once: the registry's advisories (CWE-506 marks
   // malware there), and OSV.dev's malware reports (GRA-749), which carry
   // GitHub's malware advisories and the OpenSSF malicious-packages data
   // the registry's answer never does. Either failing fails the resolve.
-  const [advisories, reports] = await Promise.all([
-    whenFree(
-      async () => await env.CONNECT.npmAdvisories(Object.fromEntries(asked))
-    ),
-    whenFree(
-      async () => await env.CONNECT.npmMalwareReports(Object.fromEntries(asked))
-    ),
+  const [affecting, reported] = await Promise.all([
+    advisoriesAffecting(env, packages),
+    osvMalwareIn(env, packages),
   ]);
-  const affecting = packages.flatMap(({ name, version }) =>
-    (Object.hasOwn(advisories, name) ? (advisories[name] ?? []) : [])
-      .filter(
-        ({ vulnerableVersions }) =>
-          validRange(vulnerableVersions) === null ||
-          // As npm audit matches: a prerelease is inside a range that
-          // names none (`2.0.0-beta.1` in `<2.0.0`).
-          satisfies(version, vulnerableVersions, { includePrerelease: true })
-      )
-      .map((advisory) => ({ advisory, package: { name, version } }))
-  );
   const security = affecting.map(
     ({ advisory, package: ref }): DependencyFinding => ({
       kind: "security",
@@ -306,18 +260,7 @@ const findingsOf = async (
       )
       .slice(0, dependencyMaxFindings),
     total: all.length,
-    malware: [
-      ...affecting.flatMap(({ advisory, package: ref }) =>
-        advisory.malware ? [{ package: ref, advisory: advisory.id }] : []
-      ),
-      // Only for a version the graph holds: connect answers for what it
-      // was asked, and this holds it to that.
-      ...reports.flatMap(({ name, version, id }) =>
-        packages.some((ref) => ref.name === name && ref.version === version)
-          ? [{ package: { name, version }, advisory: id }]
-          : []
-      ),
-    ],
+    malware: [...malwareAdvised(affecting), ...reported],
   };
 };
 

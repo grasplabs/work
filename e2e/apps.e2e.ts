@@ -254,7 +254,16 @@ test("the sidebar shows everyone the sections, and Settings each person the sect
     // The nav shows once the person's identity is in.
     await expect(links.first()).toBeVisible();
     await expect(links.filter({ hasText: /^Dashboard/u })).toBeVisible();
-    const texts = await links.allTextContents();
+    // The Apps' own entries, which come on their own read, aren't Grasp's
+    // sections (app-surfaces.e2e.ts adds some on the shared deployment):
+    // every link but theirs, in one read of the page.
+    const texts = await links.evaluateAll((found) =>
+      found
+        .filter(
+          (link) => link.closest('[aria-label="Domain shortcuts"]') === null
+        )
+        .map((link) => link.textContent ?? "")
+    );
     // The person menu, at the sidebar's foot, ends in their role.
     await page
       .getByRole("button", {

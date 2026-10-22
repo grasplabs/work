@@ -1,4 +1,5 @@
 import { actorOf } from "@grasp-os/shared/audit";
+import type { AuditEntry } from "@grasp-os/shared/audit";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { workflowResourceIdSchema } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
@@ -22,7 +23,7 @@ import { and, eq, inArray, lt, lte, notInArray, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { auditedBatch, outboxed } from "../audit-outbox.ts";
+import { auditedBatch, outboxed, outboxedIfChanged } from "../audit-outbox.ts";
 import type { Acting } from "../auth/identity.ts";
 import {
   runLineageAttempts,
@@ -140,6 +141,67 @@ const projected: Record<InstanceStatus["status"], WorkflowRunStatus> = {
   complete: "completed",
   errored: "failed",
   terminated: "cancelled",
+};
+
+/** The audit action of each way a test run ends, as a run's ends are. */
+const endActions: Partial<Record<WorkflowRunStatus, string>> = {
+  completed: "workflow.run.completed",
+  failed: "workflow.run.failed",
+  cancelled: "workflow.run.cancelled",
+};
+
+/**
+ * The audit entry of test run `run` ending `status`, against its
+ * workflow and marked a test run's, naming the failure's code when it has
+ * one; none for a status that isn't an end. Its row is swept after a week
+ * (`sweepCandidateRuns`), so this is what records how it ended after that.
+ */
+const endEntry = (
+  run: { id: string; workflowResourceId: string },
+  status: WorkflowRunStatus,
+  failureCode: string | null
+): AuditEntry | undefined => {
+  const action = endActions[status];
+  if (action === undefined) {
+    return undefined;
+  }
+  return {
+    actor: { type: "system" },
+    action,
+    target: { type: "workflow_resource", id: run.workflowResourceId },
+    detail: {
+      run: run.id,
+      candidate: true,
+      ...(status === "failed" && failureCode !== null ? { failureCode } : {}),
+    },
+  };
+};
+
+/**
+ * Ends test run `run` failed at core's word (`failureCode`), at `at`, if
+ * its row is still `from`; audited with the change, once.
+ */
+const failedByCore = async (
+  env: Env,
+  run: { id: string; workflowResourceId: string },
+  from: WorkflowRunStatus,
+  failureCode: string,
+  at: Date
+): Promise<void> => {
+  const db = drizzle(env.DB);
+  const entry = endEntry(run, "failed", failureCode);
+  await auditedBatch(env, db, [
+    db
+      .update(workflowCandidateRuns)
+      .set({ status: "failed", failureCode, endedAt: at })
+      .where(
+        and(
+          eq(workflowCandidateRuns.id, run.id),
+          eq(workflowCandidateRuns.status, from)
+        )
+      ),
+    ...(entry === undefined ? [] : [outboxedIfChanged(db, entry)]),
+  ]);
 };
 
 /** Whose build artifacts a test run's are: its own. */
@@ -352,14 +414,13 @@ export const startCandidateRun = async (
     await runEngine(env).createCandidate({ id: runId, pinned, input: {} });
   } catch (error) {
     // Never started: ended failed, saying so, rather than left starting.
-    await db
-      .update(workflowCandidateRuns)
-      .set({
-        status: "failed",
-        failureCode: "workflow.start_unconfirmed",
-        endedAt: new Date(),
-      })
-      .where(eq(workflowCandidateRuns.id, runId));
+    await failedByCore(
+      env,
+      { id: runId, workflowResourceId: workflow.id },
+      "starting",
+      "workflow.start_unconfirmed",
+      new Date()
+    );
     throw error;
   }
   return { runId };
@@ -491,10 +552,18 @@ export const projectCandidateRun = async (
   engine: EngineStatus,
   failureCode: string | null = null
 ): Promise<void> => {
+  const row = await rowOf(env, id);
+  if (row === undefined) {
+    return;
+  }
+  // A row already ended (core cancelled it while starting) still gives up
+  // its places in the admission queue below; its update changes nothing,
+  // so nothing more is audited.
   const status = projected[engine.status];
   const ended = !unended.includes(status);
+  const entry = endEntry(row, status, failureCode);
   const db = drizzle(env.DB);
-  await db.batch([
+  await auditedBatch(env, db, [
     db
       .update(workflowCandidateRuns)
       .set({
@@ -514,7 +583,11 @@ export const projectCandidateRun = async (
             : lt(workflowCandidateRuns.engineSequence, engine.sequence)
         )
       ),
+    // Its end, audited with the change, once: a notification that changed
+    // nothing records nothing.
+    ...(entry === undefined ? [] : [outboxedIfChanged(db, entry)]),
     // Ended, its places in the admission queue go now, as a run's do.
+    // After the audit entry, which reads what the row's update changed.
     ...(ended
       ? [
           runDequeued(
@@ -644,7 +717,10 @@ const projectedFrom = async (
 const settleUnconfirmed = async (env: Env, at: Date): Promise<void> => {
   const db = drizzle(env.DB);
   const stuck = await db
-    .select({ id: workflowCandidateRuns.id })
+    .select({
+      id: workflowCandidateRuns.id,
+      workflowResourceId: workflowCandidateRuns.workflowResourceId,
+    })
     .from(workflowCandidateRuns)
     .where(
       and(
@@ -657,7 +733,8 @@ const settleUnconfirmed = async (env: Env, at: Date): Promise<void> => {
     )
     .orderBy(workflowCandidateRuns.createdAt)
     .limit(candidatesPerSweep);
-  for (const { id } of stuck) {
+  for (const run of stuck) {
+    const { id } = run;
     try {
       // oxlint-disable-next-line no-await-in-loop -- one run after another
       const live = await runEngine(env).status(id);
@@ -667,19 +744,13 @@ const settleUnconfirmed = async (env: Env, at: Date): Promise<void> => {
         continue;
       }
       // oxlint-disable-next-line no-await-in-loop -- as above
-      await db
-        .update(workflowCandidateRuns)
-        .set({
-          status: "failed",
-          failureCode: "workflow.start_unconfirmed",
-          endedAt: at,
-        })
-        .where(
-          and(
-            eq(workflowCandidateRuns.id, id),
-            eq(workflowCandidateRuns.status, "starting")
-          )
-        );
+      await failedByCore(
+        env,
+        run,
+        "starting",
+        "workflow.start_unconfirmed",
+        at
+      );
     } catch (error) {
       log.warn("workflow.candidate_sweep_failed", {
         run: id,
@@ -698,7 +769,10 @@ const settleUnconfirmed = async (env: Env, at: Date): Promise<void> => {
 const endOverdue = async (env: Env, cutoff: Date): Promise<void> => {
   const db = drizzle(env.DB);
   const overdue = await db
-    .select({ id: workflowCandidateRuns.id })
+    .select({
+      id: workflowCandidateRuns.id,
+      workflowResourceId: workflowCandidateRuns.workflowResourceId,
+    })
     .from(workflowCandidateRuns)
     .where(
       and(
@@ -708,7 +782,8 @@ const endOverdue = async (env: Env, cutoff: Date): Promise<void> => {
     )
     .orderBy(workflowCandidateRuns.createdAt)
     .limit(candidatesPerSweep);
-  for (const { id } of overdue) {
+  for (const run of overdue) {
+    const { id } = run;
     try {
       // oxlint-disable-next-line no-await-in-loop -- one run after another
       const live = await runEngine(env).status(id);
@@ -724,19 +799,13 @@ const endOverdue = async (env: Env, cutoff: Date): Promise<void> => {
         continue;
       }
       // oxlint-disable-next-line no-await-in-loop -- as above
-      await db
-        .update(workflowCandidateRuns)
-        .set({
-          status: "failed",
-          failureCode: "workflow.run_unavailable",
-          endedAt: new Date(),
-        })
-        .where(
-          and(
-            eq(workflowCandidateRuns.id, id),
-            eq(workflowCandidateRuns.status, "running")
-          )
-        );
+      await failedByCore(
+        env,
+        run,
+        "running",
+        "workflow.run_unavailable",
+        new Date()
+      );
     } catch (error) {
       log.warn("workflow.candidate_sweep_failed", {
         run: id,

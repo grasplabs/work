@@ -12,6 +12,9 @@ import type { Role } from "@grasp-os/shared/roles";
 
 import { localAdmin } from "../../apps/core/test/sign-in-config.ts";
 
+/** The company's name, as its brain and settings show it. */
+export const companyName = "Noordkade Finance";
+
 export const teamNames = [
   "Client onboarding",
   "Mortgage advice",

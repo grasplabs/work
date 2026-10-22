@@ -15,6 +15,13 @@ interface __BaseEnv_Env {
   /** Grasp's multi-tenant Entra app for connections (src/providers.ts). */
   MICROSOFT_CLIENT_ID?: string;
   MICROSOFT_CLIENT_SECRET?: string;
+  /**
+   * Grasp's multi-tenant Entra app for the application landscape's
+   * read-only admin connection (src/providers.ts), registered apart from
+   * the one above so its tokens can never carry mail, calendar or files.
+   */
+  MICROSOFT_LANDSCAPE_CLIENT_ID?: string;
+  MICROSOFT_LANDSCAPE_CLIENT_SECRET?: string;
   /** Grasp's Google OAuth client for connections (src/providers.ts). */
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
@@ -31,4 +38,11 @@ interface __BaseEnv_Env {
    * offered or reached.
    */
   COMPOSIO_API_KEY?: string;
+  /**
+   * `none` on workerd and on-prem, which have no Cloudflare jurisdiction:
+   * the clock's object is then taken from the plain namespace
+   * (src/clock.ts). Unset or any other value means the EU. Never set in
+   * wrangler.jsonc.
+   */
+  DURABLE_OBJECT_JURISDICTION?: string;
 }

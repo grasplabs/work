@@ -14,6 +14,7 @@ import { testVersionModule } from "./test/compiler-version.ts";
 import {
   connectClient,
   connectProvidersScript,
+  landscapeClient,
 } from "./test/connect-providers.ts";
 import { testSignIn } from "./test/sign-in-config.ts";
 import { withNoBackgroundCompile } from "./workerd-v8-flags.ts";
@@ -204,6 +205,12 @@ export const coreProject = (
               gateway: "grasp-os-test",
               models: ["workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast"],
             },
+            // Who core's mail is from (src/mail.ts); tests capture what
+            // the EMAIL binding is given (test/mail-capture.ts).
+            MAIL_FROM: {
+              name: "Stephen at Grasp",
+              address: "onboarding@mail.grasp.test",
+            },
             // workerd doesn't implement Durable Object jurisdictions.
             DURABLE_OBJECT_JURISDICTION: "none",
             // Plain workerd: no CPU limit on Code Mode's isolates.
@@ -263,13 +270,20 @@ export const coreProject = (
                 "global_fetch_strictly_public",
               ],
               bindings: {
+                DURABLE_OBJECT_JURISDICTION: "none",
                 CAPABILITY_SIGNING_KEY: capabilitySigningKey,
                 TOKEN_ENCRYPTION_KEY: btoa("test-token-key-of-exactly-32-b!!"),
                 MICROSOFT_CLIENT_ID: connectClient.id,
                 MICROSOFT_CLIENT_SECRET: connectClient.secret,
+                MICROSOFT_LANDSCAPE_CLIENT_ID: landscapeClient.id,
+                MICROSOFT_LANDSCAPE_CLIENT_SECRET: landscapeClient.secret,
                 COMPOSIO_API_KEY: testComposioKey,
               },
               d1Databases: { DB: "grasp-os-connect" },
+              // Its clock (connect's src/clock.ts).
+              durableObjects: {
+                CLOCK: { className: "Clock", useSQLite: true },
+              },
               // Its native connectors, each loaded into an isolate of its
               // own per call (connect's src/connectors.ts), as deployed.
               workerLoaders: { LOADER: {} },

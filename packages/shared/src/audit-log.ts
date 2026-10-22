@@ -83,6 +83,14 @@ const typeRules: readonly {
   // The onboarding: who works where, the plan, pausing it, the
   // agreements, and the gate that keeps the company out until Grasp's go.
   { action: "onboarding", type: "config" },
+  // An admin adding records to the Playbook the brain is built from.
+  { action: "brain.records", type: "action" },
+  // A gap's owner asked (Grasp's), and a person answering or closing it.
+  { action: "brain.gap.asked", type: "action" },
+  // A purge rewriting answers, or forgetting who gave them.
+  { action: "brain.gap.answers_purged", type: "action" },
+  { action: "brain.gap.answerer_erased", type: "action" },
+  { action: "brain.gap", type: "decision" },
   { action: "knowledge.search", type: "read" },
   { action: "knowledge.read", type: "read" },
   // Knowledge usage signals: the daily computation, an owner reading those
@@ -102,6 +110,9 @@ const typeRules: readonly {
   // A spending budget crossing its alert threshold or running out: filed
   // with the budgets it belongs to, not as a model call.
   { action: "model.budget", type: "config" },
+  // Core recording a new quota policy generation, the limits that apply
+  // from then on (core's src/workflows/quotas.ts).
+  { action: "quota_policy.recorded", type: "config" },
   { action: "model", type: "model_call" },
   { action: "permission", type: "permission" },
   // A chat or run whose context read restricted sources, and so is held to
@@ -141,8 +152,11 @@ const typeRules: readonly {
   { action: "dependency.requested", type: "action" },
   { action: "dependency.admission_refused", type: "action" },
   { action: "dependency.superseded", type: "action" },
-  // A resolve refused because a package in the graph is known malware.
+  // A resolve or an approval refused because a package in the graph is
+  // known malware; and an approval refused because whether it is couldn't
+  // be checked.
   { action: "dependency.malware_refused", type: "action" },
+  { action: "dependency.approval_refused", type: "action" },
   // A build pinning an artifact of an approved graph, and the approval it
   // relied on, and each pin that dropped; and a resolve changing what a
   // target of a graph's lock is built for (its conditions or entries).
@@ -176,6 +190,14 @@ const typeRules: readonly {
   // and each call refused.
   { action: "store.operation.called", type: "action" },
   { action: "store.operation.refused", type: "permission" },
+  // A store's cascade job deleting, after their commit, the records a
+  // deletion reached past one commit's bound (core's src/store-host.ts):
+  // started with the commit, each batch, its end, and a job set aside
+  // after its batches kept failing.
+  { action: "store.cascade_started", type: "action" },
+  { action: "store.cascade_batch", type: "action" },
+  { action: "store.cascade_finished", type: "action" },
+  { action: "store.cascade_failed", type: "action" },
   // Guest chats (core's src/guests.ts): an App inviting someone, revoking
   // the link, and reading back what they wrote; the guest opening the
   // chat, sending a message and finishing it.

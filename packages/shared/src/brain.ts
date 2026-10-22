@@ -6,6 +6,14 @@
  * brain reads are here, as the prototype named them.
  */
 
+import { z } from "zod";
+
+import type { BrainRecordInput, BrainRecordsAdded } from "./brain-records.ts";
+import { defineErrorFamily } from "./errors.ts";
+import { documentIdSchema } from "./ids.ts";
+import type { CollectionId, DocumentId } from "./ids.ts";
+import type { DocumentType } from "./knowledge.ts";
+
 /** The standard business processes a workflow belongs to. */
 export type ProcessId = "o2c" | "i2r" | "p2p" | "r2c" | "r2r" | "h2r";
 
@@ -176,6 +184,14 @@ export interface Statement {
   toolIds: string[];
   /** The candidate process it is about, if any. */
   candidateId?: string;
+  /**
+   * The earlier statement this one follows up: the same blocker or time
+   * sink, said again later, perhaps with a different pain, or resolved.
+   * The earlier statement is never edited.
+   */
+  followsUp?: string;
+  /** How much it hurts, as the team said it: only for blockers, time sinks and handovers. */
+  pain?: "low" | "medium" | "high";
 }
 
 /** A process that might be worth turning into a workflow. */
@@ -196,6 +212,8 @@ export interface Gap {
   sourceId: string;
   /** Brain note ids, statement ids or workflow ids this gap is about. */
   about: string[];
+  /** ISO date Grasp asked the owner. Empty while nobody was asked. */
+  askedAt?: string;
   closedAt?: string;
   /** The answer in the words of who gave it, and who that was. */
   answer?: string;
@@ -310,4 +328,153 @@ export interface Workspace {
  */
 export interface BrainApi {
   read: () => Promise<Workspace>;
+  /**
+   * What changed in the brain since a moment (`brain.changes`), newest
+   * first, a page at a time, as the person may read it.
+   */
+  changes: (options: BrainChangesOptions) => Promise<BrainChangePage>;
+  /**
+   * Every note in the brain with its links (`brain.notes`), a page at a
+   * time, as the person may read them.
+   */
+  notes: (options?: BrainNotesOptions) => Promise<BrainNotePage>;
+  /**
+   * Adds records to the Playbook (brain-records.ts), all or none: for
+   * admins. A record core holds already, exactly so, is left as it is.
+   */
+  addRecords: (records: BrainRecordInput[]) => Promise<BrainRecordsAdded>;
+  /** Records that the gap's owner was asked, once: for the company's admins. */
+  askAboutGap: (gapId: string) => Promise<Gap>;
+  /**
+   * Answers an open gap in the person's own words, and closes it, the
+   * brain showing their name as it is now: for every member, not Grasp's
+   * staff.
+   */
+  answerGap: (gapId: string, answer: string) => Promise<Gap>;
+  /** Closes an open gap without an answer: for the company's admins. */
+  closeGap: (gapId: string) => Promise<Gap>;
+  /**
+   * Takes a gap's answer away, and who gave it, keeping the gap closed:
+   * for the company's admins.
+   */
+  redactGapAnswer: (gapId: string) => Promise<Gap>;
+}
+
+/** Why a brain call was refused. */
+export const brainErrors = defineErrorFamily({
+  "brain.invalid": "That isn't a valid moment, page or page size.",
+});
+
+/**
+ * Most changes one page holds: its documents, and as many collections,
+ * fit in the audit event that records the read (`auditProvenanceMaxItems`).
+ */
+export const brainChangesMaxLimit = 50;
+
+/** How far back the changes go, whatever moment is asked about: 90 days. */
+export const brainChangesMaxAgeMs = 90 * 24 * 60 * 60 * 1000;
+
+/** What a call for the brain's changes asks for. */
+export const brainChangesOptionsSchema = z.strictObject({
+  /**
+   * Changes after this moment (ISO 8601): at most `brainChangesMaxAgeMs`
+   * ago, an earlier one taken as that.
+   */
+  since: z.iso.datetime({ offset: true }),
+  /** Where the page before ended (`BrainChangePage.next`); none for the first. */
+  cursor: z.string().min(1).max(512).optional(),
+  limit: z.int().min(1).max(brainChangesMaxLimit).default(50),
+});
+export type BrainChangesOptions = z.input<typeof brainChangesOptionsSchema>;
+
+/**
+ * One change in the brain: what core records today. A union on `kind`, so
+ * goals, questions and workflow suggestions join it once core keeps them.
+ */
+export type BrainChange =
+  | {
+      /** A Knowledge document added or changed: what a listing shows of it, never its text. */
+      kind: "document";
+      /** ISO 8601: when it was last changed. */
+      at: string;
+      /** Added after the moment asked about, or only changed since. */
+      change: "added" | "changed";
+      document: {
+        id: DocumentId;
+        collectionId: CollectionId;
+        path: string;
+        title: string;
+        type: DocumentType;
+      };
+    }
+  | {
+      /**
+       * A source the onboarding gave the brain, as `brain.read`'s sources
+       * name it (the kickoff, the staff list): for admins, who read them.
+       */
+      kind: "source";
+      /** ISO 8601: when it came in, or was last saved. */
+      at: string;
+      source: { id: string; title: string };
+    };
+
+/** A page of the brain's changes, newest first. */
+export interface BrainChangePage {
+  changes: BrainChange[];
+  /** Where the next page starts; null when this is the last. */
+  next: string | null;
+}
+
+/**
+ * Most notes one page holds: they, and as many collections, fit in the
+ * audit event that records the read (`auditProvenanceMaxItems`).
+ */
+export const brainNotesMaxLimit = 50;
+
+/** Most links of a note one page carries; the rest are counted (`moreLinks`). */
+export const brainNoteMaxLinks = 50;
+
+/** What a call for the brain's notes asks for. */
+export const brainNotesOptionsSchema = z
+  .strictObject({
+    /** Where the page before ended (`BrainNotePage.next`); none for the first. */
+    cursor: documentIdSchema.optional(),
+    limit: z.int().min(1).max(brainNotesMaxLimit).default(brainNotesMaxLimit),
+  })
+  .default({ limit: brainNotesMaxLimit });
+export type BrainNotesOptions = z.input<typeof brainNotesOptionsSchema>;
+
+/** A link in a note, to the path it names in the note's collection. */
+export interface BrainNoteLink {
+  path: string;
+  label: string | null;
+  /** The document at that path, when the person may read it; null otherwise. */
+  documentId: DocumentId | null;
+}
+
+/**
+ * One note of the brain: what core records today, a Knowledge document,
+ * what a listing shows of it (never its text) and its links. A union on
+ * `kind` once core keeps other records.
+ */
+export interface BrainNote {
+  kind: "document";
+  id: DocumentId;
+  collectionId: CollectionId;
+  path: string;
+  title: string;
+  type: DocumentType;
+  /** ISO 8601. */
+  updatedAt: string;
+  /** Its first `brainNoteMaxLinks` links, by the path each names. */
+  links: BrainNoteLink[];
+  /** How many links it has past those. */
+  moreLinks: number;
+}
+
+/** A page of the brain's notes. */
+export interface BrainNotePage {
+  notes: BrainNote[];
+  /** Where the next page starts; null when this is the last. */
+  next: string | null;
 }

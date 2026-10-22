@@ -1,3 +1,4 @@
+import type { MemoryPack } from "@grasp-os/shared/brain-api";
 import type {
   FollowResult,
   KnowledgeCatalog,
@@ -17,12 +18,14 @@ import {
   auditedCall,
   chatAuthority,
   chatContext,
+  recordRunReads,
   recordSources,
   requireOpenRun,
 } from "./agent-scope.ts";
 import type { AgentApi, AgentScope } from "./agent-scope.ts";
 import type { Reader } from "./knowledge/access.ts";
 import { readAsDelegate } from "./knowledge/binding.ts";
+import { recallWithSources } from "./knowledge/recall.ts";
 import { search } from "./knowledge/search.ts";
 import { agentKnowledgeSignals } from "./knowledge/signals.ts";
 import { catalog, follow, read } from "./knowledge/tools.ts";
@@ -59,12 +62,19 @@ export class KnowledgeApi
     );
   }
 
-  /** Hands over what a read returned once the chat has recorded its sources. */
-  async #recorded<T extends { provenance: Provenance }>(result: T): Promise<T> {
+  /**
+   * Hands over what a read returned once the chat has recorded its sources
+   * and the documents it hands over (`given`), which its answers may cite.
+   */
+  async #recorded<T extends { provenance: Provenance }>(
+    result: T,
+    given: readonly string[]
+  ): Promise<T> {
     await recordSources(
       this.env,
       this.ctx.props,
-      result.provenance.collectionIds
+      result.provenance.collectionIds,
+      given
     );
     return result;
   }
@@ -93,36 +103,72 @@ export class KnowledgeApi
           chatAuthority(scope),
           chatContext(scope),
           undefined,
-          async (reader) => await catalog(this.env, reader)
+          async (reader) => {
+            const listed = await catalog(this.env, reader);
+            // What it names rests on those collections: withheld once
+            // they can't be read (history-access.ts), never provenance.
+            await recordRunReads(this.env, scope, [
+              ...listed.collections.map(({ id }) => id),
+              ...listed.skills.map(({ collectionId }) => collectionId),
+            ]);
+            return listed;
+          }
         )
     );
   }
 
   async search(query: unknown, options?: unknown): Promise<SearchResults> {
-    return await this.#recorded(
-      await this.#asAgent(
-        "knowledge.search",
-        async (reader) => await search(this.env, reader, query, options)
-      )
+    const found = await this.#asAgent(
+      "knowledge.search",
+      async (reader) => await search(this.env, reader, query, options)
     );
+    return await this.#recorded(
+      found,
+      found.hits.map(({ documentId }) => documentId)
+    );
+  }
+
+  /**
+   * The Brain's recall, as the chat's agent under its `brain` grant: the
+   * same service and checks as every caller's (knowledge/recall.ts), with
+   * what it handed over recorded with the chat, as a search's is.
+   */
+  async recall(input: unknown): Promise<MemoryPack> {
+    const { pack, sources } = await this.#asAgent(
+      "knowledge.recall",
+      async (reader) => await recallWithSources(this.env, reader, input)
+    );
+    // Every collection it read from, found or not, as a search records.
+    await recordSources(this.env, this.ctx.props, sources, [
+      ...new Set(
+        pack.sourceVersions.flatMap((ref) =>
+          ref.kind === "document" ? [ref.documentId] : []
+        )
+      ),
+    ]);
+    return pack;
   }
 
   async read(documentId: unknown, options?: unknown): Promise<KnowledgeRead> {
-    return await this.#recorded(
-      await this.#asAgent(
-        "knowledge.read",
-        async (reader) => await read(this.env, reader, documentId, options)
-      )
+    const document = await this.#asAgent(
+      "knowledge.read",
+      async (reader) => await read(this.env, reader, documentId, options)
     );
+    return await this.#recorded(document, [document.id]);
   }
 
   async follow(documentId: unknown): Promise<FollowResult> {
-    return await this.#recorded(
-      await this.#asAgent(
-        "knowledge.follow",
-        async (reader) => await follow(this.env, reader, documentId)
-      )
+    const followed = await this.#asAgent(
+      "knowledge.follow",
+      async (reader) => await follow(this.env, reader, documentId)
     );
+    return await this.#recorded(followed, [
+      ...followed.links.flatMap(({ documentId: linked }) =>
+        linked === null ? [] : [linked]
+      ),
+      ...followed.backlinks.map(({ documentId: linking }) => linking),
+      ...followed.files.map(({ documentId: file }) => file),
+    ]);
   }
 
   /**
@@ -149,8 +195,19 @@ export class KnowledgeApi
           chatAuthority(scope),
           chatContext(scope),
           undefined,
-          async (reader) =>
-            await agentKnowledgeSignals(this.env, reader, scope.personId)
+          async (reader) => {
+            const found = await agentKnowledgeSignals(
+              this.env,
+              reader,
+              scope.personId
+            );
+            await recordRunReads(
+              this.env,
+              scope,
+              found.signals.map(({ collection }) => collection.id)
+            );
+            return found;
+          }
         )
     );
   }
@@ -182,6 +239,28 @@ interface KnowledgeDocument {
   reviewDate: string | null;
   currentVersion: number;
   updatedAt: string;
+}
+
+/** One piece of evidence a recall found, cited at its exact version. */
+interface MemoryItem {
+  id: string;
+  /** The section's own text around the match: evidence, not an answer. */
+  statement: string;
+  sourceRefs: { kind: "document"; documentId: string; collectionId: string; version: number; section?: number }[];
+  /** Its document's title and the section's headings. */
+  citationLocator: string[];
+}
+
+/** What a recall answers: bounded evidence, and how far the read got. */
+interface MemoryPack {
+  items: MemoryItem[];
+  /** Every source version the items cite, once each. */
+  sourceVersions: MemoryItem["sourceRefs"];
+  /** What the question needs that nothing read holds. */
+  gaps: { about: string }[];
+  /** \`complete\`: the bounded read finished (never proof nothing else exists); \`bounded\`: a budget cut it; \`degraded\`: it ran out of time. */
+  coverage: { state: "complete" | "bounded" | "degraded" };
+  truncated: boolean;
 }
 
 /** A section a search matched. */
@@ -259,6 +338,12 @@ knowledge: {
     truncated: boolean;
     provenance: Provenance;
   }>;
+  /** Evidence for a question from the company Brain, cited at exact versions: needs the Brain permission, and reads only what this chat may read. Name \`collectionIds\` to narrow it. */
+  recall(input: {
+    query: string;
+    filters?: { collectionIds?: string[] };
+    budget?: { maxItems?: number; maxTokens?: number; deadlineMs?: number };
+  }): Promise<MemoryPack>;
   /** For your person: questions nothing answered, unread and overdue documents in collections they own that you may read. Bring them up when it helps. */
   signals(): Promise<{ computedAt: string | null; signals: KnowledgeSignal[] }>;
 };`;

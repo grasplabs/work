@@ -1,5 +1,9 @@
 import { deriveClientSecret } from "@grasp-os/shared/client-secrets";
-import { defaultGatewayModels } from "@grasp-os/shared/deployment-config";
+import { deploymentConfig } from "@grasp-os/shared/config";
+import {
+  defaultGatewayModels,
+  mailFromSchema,
+} from "@grasp-os/shared/deployment-config";
 import { deriveRouterSecret } from "@grasp-os/shared/router";
 import { env } from "cloudflare:workers";
 import { and, asc, eq, sql } from "drizzle-orm";
@@ -23,7 +27,7 @@ import { importReleases } from "../src/releases/import.ts";
 import type { ReleaseStore } from "../src/releases/import.ts";
 import type { AccountState } from "./cloudflare-api-kit.ts";
 import { mockCloudflareApi } from "./cloudflare-api.ts";
-import { publishRelease } from "./releases.ts";
+import { declared, publishRelease } from "./releases.ts";
 import type { ReleaseSpec } from "./releases.ts";
 
 const token = "test-deployer-token-0123456789";
@@ -701,14 +705,29 @@ describe("deploying safely", () => {
   it("sets a client's settings as core's vars, and refuses a setting that isn't a deployment config var", async () => {
     const { account, clientId, deployId } = await setUp();
     const now = new Date();
-    await db.insert(settings).values({
-      clientId,
-      key: "AUDIT_RETENTION_DAYS",
-      value: JSON.stringify(90),
-      updatedBy: staff.email,
-      updatedAt: now,
-    });
+    await db.insert(settings).values(
+      [
+        ["AUDIT_RETENTION_DAYS", JSON.stringify(90)],
+        // Where the client receives mail, for its email triggers' addresses.
+        ["INBOUND_MAIL_DOMAIN", JSON.stringify("mail.acme.test")],
+      ].map(([key = "", value = ""]) => ({
+        clientId,
+        key,
+        value,
+        updatedBy: staff.email,
+        updatedAt: now,
+      }))
+    );
     await runDeploy(context, deployId);
+    expect(
+      bindingsOf(liveVersionOf(account, "grasp-os-core")).get(
+        "INBOUND_MAIL_DOMAIN"
+      )
+    ).toStrictEqual({
+      type: "json",
+      name: "INBOUND_MAIL_DOMAIN",
+      json: "mail.acme.test",
+    });
     await db.insert(settings).values({
       clientId,
       key: "DB",
@@ -801,6 +820,15 @@ describe("deploying safely", () => {
       ["AUDIT_ARCHIVE_RETENTION_DAYS", "30"],
       // Longer than the engine keeps an ended run.
       ["RUN_RETENTION_DAYS", "31"],
+      // Not a domain mail can be sent to: upper case, or a part too long.
+      ["INBOUND_MAIL_DOMAIN", JSON.stringify("Mail.Acme.test")],
+      ["INBOUND_MAIL_DOMAIN", JSON.stringify(`${"a".repeat(64)}.acme.test`)],
+      ["INBOUND_MAIL_DOMAIN", JSON.stringify("mail-.acme.test")],
+      // A name that would change the From header it goes in.
+      [
+        "MAIL_FROM",
+        JSON.stringify({ name: 'Grasp" <x@evil.test', address: "a@acme.test" }),
+      ],
       ["MEMORY_LIMITS", "{not json"],
       // A quota above the platform's: only a release raises one.
       [
@@ -1440,5 +1468,315 @@ describe("rotating a client's secrets", () => {
       eightDaysOn: false,
       later: true,
     });
+  });
+});
+
+/** Client `clientId`'s sending domain, and the one address it sends from. */
+const mailOf = (clientId: string) => {
+  const mailDomain = `mail.${clientId}.${domain}`;
+  return { mailDomain, address: `onboarding@${mailDomain}` };
+};
+
+/** Core's `MAIL_FROM` in `account`'s live version, as core parses it. */
+const mailFromOf = (account: AccountState) =>
+  deploymentConfig(
+    mailFromSchema,
+    "MAIL_FROM",
+    bindingsOf(liveVersionOf(account, "grasp-os-core")).get("MAIL_FROM")?.json
+  );
+
+/** Every zone in `account`, with the domains Email Sending sends from there. */
+const zonesOf = (account: AccountState) =>
+  account.zones.map(({ name, sending }) => ({
+    name,
+    sending: sending.map((entry) => ({
+      name: entry.name,
+      enabled: entry.enabled,
+    })),
+  }));
+
+/** The client's settings: `MAIL_FROM` set to `value`. */
+const setMailFrom = async (clientId: string, value: unknown) => {
+  await db
+    .insert(settings)
+    .values({
+      clientId,
+      key: "MAIL_FROM",
+      value: JSON.stringify(value),
+      updatedBy: staff.email,
+      updatedAt: new Date(),
+    })
+    .onConflictDoUpdate({
+      target: [settings.clientId, settings.key],
+      set: { value: JSON.stringify(value) },
+    });
+};
+
+describe("sending a client's onboarding mail", () => {
+  it("verifies the client's sending domain in its own account once, however often it deploys, and locks core's EMAIL to the onboarding sender its MAIL_FROM names", async () => {
+    const { account, clientId, deployId } = await setUp({
+      notes: "feat(core): send mail",
+      sendsMail: true,
+    });
+    const { mailDomain, address } = mailOf(clientId);
+
+    await runDeploy(context, deployId);
+    await runDeploy(
+      context,
+      await nextDeploy(clientId, {
+        notes: "fix(core): send it again",
+        sendsMail: true,
+      })
+    );
+
+    const creates = cloudflare.calls.filter(
+      ({ method, path }) =>
+        method === "POST" &&
+        (path === "/zones" || path.endsWith("/email/sending/subdomains"))
+    );
+    const events = await deployEvents(clientId);
+    const resources = events.filter(
+      ({ action }) => action === "deploy.resources"
+    );
+    expect({
+      zones: zonesOf(account),
+      creates: creates.length,
+      email: bindingsOf(liveVersionOf(account, "grasp-os-core")).get("EMAIL"),
+      from: mailFromOf(account),
+      // Not yet delegated, so not yet sending: on record for staff.
+      active: resources.map(
+        ({ detail }) =>
+          z
+            .object({ mailDomainActive: z.number() })
+            .parse(JSON.parse(detail ?? "null")).mailDomainActive
+      ),
+    }).toStrictEqual({
+      zones: [
+        { name: mailDomain, sending: [{ name: mailDomain, enabled: true }] },
+      ],
+      creates: 2,
+      email: {
+        type: "send_email",
+        name: "EMAIL",
+        allowed_sender_addresses: [address],
+      },
+      from: { name: "Grasp Work", address },
+      active: [0, 0],
+    });
+  });
+
+  it("turns sending on again where it was turned off, and sets up no sending domain for a release that sends no mail", async () => {
+    const { account, clientId, deployId } = await setUp();
+    const { mailDomain } = mailOf(clientId);
+    await runDeploy(context, deployId);
+    const without = zonesOf(account);
+    await runDeploy(
+      context,
+      await nextDeploy(clientId, { notes: "feat(core): mail", sendsMail: true })
+    );
+    for (const zone of account.zones) {
+      for (const entry of zone.sending) {
+        entry.enabled = false;
+      }
+    }
+
+    await runDeploy(
+      context,
+      await nextDeploy(clientId, { notes: "fix(core): mail", sendsMail: true })
+    );
+
+    expect({ without, now: zonesOf(account) }).toStrictEqual({
+      without: [],
+      now: [
+        { name: mailDomain, sending: [{ name: mailDomain, enabled: true }] },
+      ],
+    });
+  });
+
+  it("takes a MAIL_FROM setting at the onboarding sender's address under another name, and refuses one at any other address before changing anything", async () => {
+    const { account, clientId, deployId } = await setUp({
+      notes: "feat(core): send mail",
+      sendsMail: true,
+    });
+    const { address } = mailOf(clientId);
+    const named = { name: "Acme onboarding", address };
+    await setMailFrom(clientId, named);
+    await runDeploy(context, deployId);
+    const taken = mailFromOf(account);
+    const versions = account.scripts.get("grasp-os-core")?.versions.length;
+    await setMailFrom(clientId, { name: "Acme", address: "ceo@acme.test" });
+    const refused = await nextDeploy(clientId, {
+      notes: "fix(core): mail",
+      sendsMail: true,
+    });
+
+    await failingDeploy(refused);
+
+    const row = await deployRow(refused);
+    expect({
+      taken,
+      error: row?.error,
+      from: mailFromOf(account),
+      versions: account.scripts.get("grasp-os-core")?.versions.length,
+    }).toStrictEqual({
+      taken: named,
+      error: "mail_sender_locked",
+      from: named,
+      versions,
+    });
+  });
+});
+
+/** Starts deploying a new release of `spec` to `clientId`: the deploy's id. */
+const startNext = async (
+  clientId: string,
+  spec: ReleaseSpec
+): Promise<string> => {
+  const release = await publishRelease(spec);
+  await importReleases(env.RELEASES, db);
+  return await startDeploy(db, staff, clientId, release.id);
+};
+
+/** A refused deploy: how its row ended, and what changed in the account. */
+const refusal = async (deployId: string, account: AccountState) => {
+  const uploads = account.scriptUploads.length;
+  await failingDeploy(deployId);
+  const row = await deployRow(deployId);
+  return {
+    status: row?.status,
+    step: row?.step,
+    error: row?.error,
+    uploaded: account.scriptUploads.length - uploads,
+  };
+};
+
+/** How a deploy refused before it changed anything ends (`refusal`). */
+const refused = (error: string) => ({
+  status: "failed",
+  step: null,
+  error,
+  uploaded: 0,
+});
+
+/** A release's connect serving `serves`, its core calling `calls`. */
+const interfaces = (serves: number, calls: { min: number; max: number }) => ({
+  ...declared,
+  interfaces: {
+    connect: { serves, calls: {} },
+    core: { calls: { connect: calls } },
+  },
+});
+
+describe("deploying only a release that works with what the client runs", () => {
+  it("refuses a release that declares nothing of what its code works with, before it changes anything", async () => {
+    const { account, deployId } = await setUp({
+      notes: "feat(core): built before releases declared",
+      compatibility: null,
+    });
+
+    await expect(refusal(deployId, account)).resolves.toStrictEqual(
+      refused("release_undeclared")
+    );
+    expect(account.d1).toStrictEqual([]);
+  });
+
+  it("changes connect's interface only through a core that calls both versions, as connect goes live first", async () => {
+    const { account, clientId, deployId } = await setUp();
+    await runDeploy(context, deployId);
+    const connectServing2 = {
+      notes: "feat(connect): serve version 2",
+      compatibility: interfaces(2, { min: 2, max: 2 }),
+    };
+
+    // The client's core calls only version 1, and would call version 2
+    // until its own deploy.
+    const tooSoon = await refusal(
+      await startNext(clientId, connectServing2),
+      account
+    );
+    // A core that calls both goes out first...
+    const bridge = await startNext(clientId, {
+      notes: "feat(core): call version 1 or 2",
+      compatibility: interfaces(1, { min: 1, max: 2 }),
+    });
+    await runDeploy(context, bridge);
+    // ...and then connect 2 can.
+    const after = await startNext(clientId, connectServing2);
+    await runDeploy(context, after);
+
+    const afterRow = await deployRow(after);
+    expect({ tooSoon, after: afterRow?.status }).toStrictEqual({
+      tooSoon: refused("release_incompatible"),
+      after: "done",
+    });
+  });
+
+  it("refuses a release that doesn't read every workflow journal and run every App the client's code may have left", async () => {
+    const { account, clientId, deployId } = await setUp();
+    await runDeploy(context, deployId);
+
+    const journals = await refusal(
+      await startNext(clientId, {
+        notes: "feat(core): stop reading journal 8",
+        compatibility: { ...declared, workflowJournal: { min: 9, max: 9 } },
+      }),
+      account
+    );
+    const apps = await refusal(
+      await startNext(clientId, {
+        notes: "feat(core): run only SDK protocol 3",
+        compatibility: { ...declared, sdkProtocols: { min: 3, max: 3 } },
+      }),
+      account
+    );
+    const wider = await startNext(clientId, {
+      notes: "feat(core): read journal 10 and run protocol 3 too",
+      compatibility: {
+        ...declared,
+        workflowJournal: { min: 8, max: 10 },
+        sdkProtocols: { min: 2, max: 3 },
+      },
+    });
+    await runDeploy(context, wider);
+
+    const widerRow = await deployRow(wider);
+    expect({ journals, apps, wider: widerRow?.status }).toStrictEqual({
+      journals: refused("release_incompatible"),
+      apps: refused("release_incompatible"),
+      wider: "done",
+    });
+  });
+
+  it("keeps deploying a client whose Workers run a release that declares nothing", async () => {
+    const { clientId, deployId } = await setUp();
+    await runDeploy(context, deployId);
+    // As a client deployed before releases declared anything records it.
+    const undeclared = await publishRelease({
+      notes: "feat(core): built before releases declared",
+      compatibility: null,
+    });
+    await importReleases(env.RELEASES, db);
+    await db
+      .update(clientWorkers)
+      .set({ releaseId: undeclared.id })
+      .where(eq(clientWorkers.clientId, clientId));
+
+    // Its new secrets, on the release it runs: no code changes.
+    const redeploy = await startDeploy(
+      db,
+      staff,
+      clientId,
+      undeclared.id,
+      "secrets"
+    );
+    await runDeploy(context, redeploy);
+    // A release that declares what it works with.
+    const next = await startNext(clientId, { notes: "feat(core): declared" });
+    await runDeploy(context, next);
+
+    const statuses = await Promise.all(
+      [redeploy, next].map(async (id) => await deployRow(id))
+    );
+    expect(statuses.map((row) => row?.status)).toStrictEqual(["done", "done"]);
   });
 });

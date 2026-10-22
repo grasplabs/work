@@ -83,6 +83,10 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
   { action: "knowledge.upload", text: msg`Uploaded to knowledge` },
   { action: "knowledge", text: msg`Changed knowledge` },
   { action: "chat.created", text: msg`Started a chat` },
+  {
+    action: "chat.history_withheld",
+    text: msg`Kept something the chat can no longer read from the model`,
+  },
   { action: "chat", text: msg`Changed a chat` },
   { action: "agent.call", text: msg`The agent looked something up` },
   {
@@ -123,6 +127,15 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
   { action: "app", text: msg`Changed a domain` },
   { action: "member.removed", text: msg`Removed a member` },
   { action: "member.role", text: msg`Changed a member's role` },
+  { action: "member.invited", text: msg`Invited someone` },
+  {
+    action: "member.invitation.withdrawn",
+    text: msg`Withdrew an invitation`,
+  },
+  {
+    action: "member.invitation.accepted",
+    text: msg`Joined through an invitation`,
+  },
   { action: "member", text: msg`Changed a member` },
   { action: "team.created", text: msg`Created a team` },
   { action: "team.deleted", text: msg`Deleted a team` },

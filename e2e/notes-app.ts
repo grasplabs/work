@@ -697,9 +697,130 @@ export default function Note({ input }: ScreenProps<typeof screens.note>) {
         <TextField form={form} label="Title" name="title" />
       </Form>
       <Button onClick={() => void navigate(screens.start).catch(() => setRefused((count) => count + 1))}>Back to start</Button>
+      <Button onClick={() => void navigate(screens.note, { id: input.id }).catch(() => setRefused((count) => count + 1))}>Open this note again</Button>
       <p>Refused {refused}</p>
     </main>
   );
+}
+`,
+});
+
+/**
+ * The navigation fixture with surfaces (spec 34.1): the start screen as a
+ * panel (named to list after the note's panel, which needs input, so the
+ * chat's side panel must pass that one over) and the App's settings, the note as a panel and a deep link, and
+ * the list in the sidebar. The start screen also opens the note's panel.
+ */
+export const surfaceFiles = (): Record<string, string> => {
+  const files = navigationFiles();
+  return {
+    ...files,
+    "app.ts": (files["app.ts"] ?? "").replace(
+      "input: v.object({ id: v.string() }) },\n  ],\n",
+      `input: v.object({ id: v.string() }) },
+    { name: "prefs", path: "/prefs", source: "screens/prefs.tsx", input: v.object({ section: v.enum(["general", "billing"]).default("general") }) },
+  ],
+  surfaces: [
+    { name: "start", kind: "panel", screen: "start", title: "Start beside", input: v.object({}) },
+    { name: "peek", kind: "panel", screen: "note", title: "Peek", input: v.object({ id: v.string() }) },
+    { name: "all", kind: "sidebar", screen: "notes", title: "All notes", input: v.object({}) },
+    { name: "prefs", kind: "settings", screen: "prefs", title: "Preferences", input: v.object({ section: v.enum(["general", "billing"]).default("general") }) },
+    { name: "shared", kind: "deepLink", screen: "note", title: "Shared note", input: v.object({ id: v.string() }) },
+  ],
+`
+    ),
+    "screens/prefs.tsx": `import type { ScreenProps } from "@grasp-os/sdk/react";
+import type { screens } from "#grasp";
+
+export default function Prefs({ input }: ScreenProps<typeof screens.prefs>) {
+  return (
+    <main className="p-6">
+      <h1>Preferences {input.section}</h1>
+    </main>
+  );
+}
+`,
+    "screens/home.tsx": (files["screens/home.tsx"] ?? "")
+      .replace(
+        'import { screens } from "#grasp";',
+        'import { screens } from "#grasp";\nimport { useState } from "react";'
+      )
+      .replace(
+        "  const navigate = useNavigate();",
+        '  const navigate = useNavigate();\n  const [peek, setPeek] = useState("Peek not asked");'
+      )
+      .replace(
+        "    </main>",
+        `      <Button onClick={() => void navigate(screens.note, { id: "n9" }, { surface: "peek" }).then(() => setPeek("Peek opened"), () => setPeek("Peek refused"))}>Peek at note n9</Button>
+      <p>{peek}</p>
+      <Button onClick={() => void navigate(screens.prefs, {}, { surface: "prefs" })}>Open preferences</Button>
+      <Button onClick={() => void navigate(screens.prefs, { section: "billing" }, { surface: "prefs" })}>Open billing preferences</Button>
+      <Button onClick={() => { setTimeout(() => { void navigate(screens.note, { id: "n77" }); }, 1500); }}>Open note n77 later</Button>
+      <Button onClick={() => { setTimeout(() => { void navigate(screens.notes); }, 1500); }}>Open the list later</Button>
+    </main>`
+      ),
+  };
+};
+
+/**
+ * The Notes App with screens that navigate without the person acting
+ * (spec 10.7.7): a start screen that opens the first hop as it mounts, a
+ * launch screen that opens it on a click, and a hop screen that opens the
+ * next one each time it starts.
+ */
+export const hoppingFiles = (): Record<string, string> => ({
+  ...notesAppFiles(),
+  "app.ts": registration
+    .replace(
+      'import { app, resource } from "@grasp-os/sdk";',
+      'import { app, resource, v } from "@grasp-os/sdk";'
+    )
+    .replace(
+      '  screens: [{ name: "notes", path: "/", source: "screens/notes.tsx" }],',
+      `  screens: [
+    { name: "notes", path: "/", source: "screens/notes.tsx" },
+    { name: "start", path: "/start", source: "screens/takeoff.tsx" },
+    { name: "launch", path: "/launch", source: "screens/launch.tsx" },
+    { name: "hop", path: "/hops/:n", source: "screens/hop.tsx", input: v.object({ n: v.string() }) },
+  ],`
+    ),
+  "screens/takeoff.tsx": `import { useEffect } from "react";
+import { useNavigate } from "@grasp-os/sdk/react";
+import { screens } from "#grasp";
+
+export default function Takeoff() {
+  const navigate = useNavigate();
+  useEffect(() => {
+    void navigate(screens.hop, { n: "1" }).catch(() => undefined);
+  }, [navigate]);
+  return <main className="p-6"><h1>Takeoff</h1></main>;
+}
+`,
+  "screens/launch.tsx": `import { useNavigate } from "@grasp-os/sdk/react";
+import { Button } from "@grasp-os/ui/components/button";
+import { screens } from "#grasp";
+
+export default function Launch() {
+  const navigate = useNavigate();
+  return (
+    <main className="p-6">
+      <h1>Launch</h1>
+      <Button onClick={() => void navigate(screens.hop, { n: "1" })}>Start hopping</Button>
+    </main>
+  );
+}
+`,
+  "screens/hop.tsx": `import { useEffect } from "react";
+import { useNavigate } from "@grasp-os/sdk/react";
+import type { ScreenProps } from "@grasp-os/sdk/react";
+import { screens } from "#grasp";
+
+export default function Hop({ input }: ScreenProps<typeof screens.hop>) {
+  const navigate = useNavigate();
+  useEffect(() => {
+    void navigate(screens.hop, { n: String(Number(input.n) + 1) }).catch(() => undefined);
+  }, [navigate, input.n]);
+  return <main className="p-6"><h1>Hop {input.n}</h1></main>;
 }
 `,
 });

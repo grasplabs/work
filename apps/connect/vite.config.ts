@@ -71,6 +71,8 @@ export default defineProject({
       remoteBindings: false,
       miniflare: {
         bindings: {
+          // workerd has no Cloudflare jurisdiction (src/clock.ts).
+          DURABLE_OBJECT_JURISDICTION: "none",
           CAPABILITY_SIGNING_KEY:
             "test-capability-signing-key-of-32-chars-or-more",
           // As while rotating keys.
@@ -80,6 +82,8 @@ export default defineProject({
           // Grasp's OAuth apps, as test/oauth-provider.ts knows them.
           MICROSOFT_CLIENT_ID: clients.microsoft.id,
           MICROSOFT_CLIENT_SECRET: clients.microsoft.secret,
+          MICROSOFT_LANDSCAPE_CLIENT_ID: clients.microsoftLandscape.id,
+          MICROSOFT_LANDSCAPE_CLIENT_SECRET: clients.microsoftLandscape.secret,
           GOOGLE_CLIENT_ID: clients.google.id,
           GOOGLE_CLIENT_SECRET: clients.google.secret,
           // Grasp's apps at the apps, as test/app-provider.ts knows them.

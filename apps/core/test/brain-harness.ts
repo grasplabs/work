@@ -57,6 +57,7 @@ import { grantReviewed } from "./apps.ts";
 import { eventsAfterWithHead, logHead } from "./audit-events.ts";
 import {
   blockedByChange,
+  budgetVerdict,
   compareArms,
   gateViolations,
   scoreTrial,
@@ -65,6 +66,7 @@ import {
 } from "./brain-scoring.ts";
 import type {
   ArmSummary,
+  BudgetVerdict,
   GateViolation,
   PairedComparison,
   TrialObservation,
@@ -110,16 +112,17 @@ export const brainArms = ["agent", "fullContext", "fullText"] as const;
 export type BrainArm = (typeof brainArms)[number];
 
 /**
- * Arms built to test the gate, to prove it holds. All but one break it:
+ * Arms built to test the gate, to prove it holds. All but two break it:
  * one hands the model a section its person may not read; on a task that
  * revokes access, one hands it what its person could read before the
- * revocation, as a cache that outlived it would, and one reads it in an
- * earlier turn of the same chat, which the chat's history sends again
- * after the revocation; the others change stored state mid-trial, in
- * Knowledge, in core, in R2, in the chat's object and in an earlier
- * chat's history. One must not break it: `readElsewhereFirst` reads what
- * the task revokes in another chat, before the revocation, while it was
- * allowed, so the gate's cut at the revocation is where it should be.
+ * revocation, as a cache that outlived it would; the others change stored
+ * state mid-trial, in Knowledge, in core, in R2, in the chat's object and
+ * in an earlier chat's history. Two must not break it, as they read what
+ * the task revokes before the revocation, while it was allowed:
+ * `readElsewhereFirst` in another chat, so the gate's cut at the
+ * revocation is where it should be; `historyAfterRevocation` in an earlier
+ * turn of the same chat, whose history withholds it from every request
+ * after the revocation (GRA-690).
  */
 export const brainControls = [
   "leakyContext",
@@ -2036,6 +2039,12 @@ export interface BrainReport {
     learningMicros: number;
   };
   arms: ArmSummary[];
+  /**
+   * Each arm against the proposed budgets (`brainProposedBudgets`), and
+   * the background's: building and updating the index and learning cost
+   * no model call.
+   */
+  budgets: { arms: BudgetVerdict[]; background: { missed: string[] } };
   controls: ArmSummary[];
   comparisons: PairedComparison[];
   gate: { passed: boolean; violations: GateViolation[] };
@@ -2203,6 +2212,20 @@ const runDurability = async (
   return cases;
 };
 
+/**
+ * The background budgets a run missed: building and updating the index
+ * cost no model call. The baseline learns nothing (`learningMicros`).
+ */
+const backgroundMissed = (
+  build: BrainReport["costs"]["build"],
+  updates: BrainReport["costs"]["updates"]
+): string[] => [
+  ...(build.costMicros === 0 ? [] : ["cost.index-build"]),
+  ...(updates.every(({ costMicros }) => costMicros === 0)
+    ? []
+    : ["cost.index-update"]),
+];
+
 /** Runs the baseline on a company loaded at `t0`, window by window. */
 export const runBrainBaseline = async (
   company: BrainCompany,
@@ -2365,6 +2388,7 @@ export const runBrainBaseline = async (
   const violations = gateViolations(armScores);
   const controlViolations = gateViolations(controlScores);
   const durabilityViolations = gateViolations(durabilityScores);
+  const summaries = arms.map((arm) => summarizeArm(arm, scoresOf(arm)));
   return {
     identity: {
       suite: {
@@ -2410,7 +2434,11 @@ export const runBrainBaseline = async (
       ],
     },
     costs: { build: company.build, updates, learningMicros: 0 },
-    arms: arms.map((arm) => summarizeArm(arm, scoresOf(arm))),
+    arms: summaries,
+    budgets: {
+      arms: summaries.map((summary) => budgetVerdict(summary)),
+      background: { missed: backgroundMissed(company.build, updates) },
+    },
     controls: controls.map((arm) => summarizeArm(arm, scoresOf(arm))),
     comparisons: blockedByChange(
       pairs

@@ -562,9 +562,11 @@ export const requireTargetServes = async (
       await requireDeciders(env, target.deciders);
       break;
     }
-    case "event": {
-      // Nothing to load: the contract says which types it admits and with
-      // what data, and every send is checked on its own.
+    case "event":
+    case "files": {
+      // Nothing to load: an event's contract says which types it admits
+      // and with what data, and every send is checked on its own; nothing
+      // outside the run serves its own files (GRA-724).
       break;
     }
     case "knowledge": {
@@ -626,6 +628,9 @@ const targetDetail = (
     }
     case "knowledge": {
       return { targetKind: target.kind, permissionId: target.permissionId };
+    }
+    case "files": {
+      return { targetKind: target.kind };
     }
     case "template": {
       return {

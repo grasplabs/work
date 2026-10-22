@@ -31,6 +31,7 @@ import type {
   Standing,
 } from "./workflows/admission.ts";
 import { policyStill, quotaPolicy, stillCurrent } from "./workflows/quotas.ts";
+import type { QuotaEnv } from "./workflows/quotas.ts";
 
 // Fair admission of build jobs (spec 18.3, 40.5): how many of the client's
 // build jobs build at once, in all and of one App, each against its share
@@ -640,7 +641,7 @@ export interface BuildAsk {
  * under it, once.
  */
 const admitBuildOnce = async (
-  env: Pick<Env, "DB" | "QUOTA_LIMITS">,
+  env: QuotaEnv,
   owner: BuildOwner,
   { seq, waited, waitedMs }: BuildAsk,
   policy: QuotaPolicy,
@@ -726,7 +727,7 @@ const admitBuildOnce = async (
  * it has waited {@link maxBuildWaitMs}.
  */
 export const admitBuild = async (
-  env: Pick<Env, "DB" | "QUOTA_LIMITS">,
+  env: QuotaEnv,
   owner: BuildOwner,
   ask: BuildAsk
 ): Promise<{ lease: BuildLease } | { wait: BuildWait }> => {

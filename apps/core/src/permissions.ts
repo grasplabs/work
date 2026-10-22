@@ -650,7 +650,12 @@ const requireObjectFits = (
   object: PermissionObject,
   actions: readonly string[]
 ): void => {
-  if (object.type === "platform" && subject.type !== "app") {
+  // The Brain is the one platform offer an agent or an independent
+  // workflow may hold too: Apps, runs and agents share its permission.
+  const brainReader =
+    actions.includes("brain") &&
+    (subject.type === "agent" || subject.type === "workflow");
+  if (object.type === "platform" && subject.type !== "app" && !brainReader) {
     refuseRequest("subject: Only an App uses what the platform offers.");
   }
   if (
@@ -1676,21 +1681,6 @@ export const activePermissions = async (
   where?: Where
 ): Promise<Permission[]> =>
   await permissionsIn(env, subject, ["active"], where);
-
-/**
- * An App's permissions that are active or asked for and not yet granted:
- * every binding name its code may be written against. Only for the env of
- * a draft's preview (preview-bindings.ts), whose stubs allow nothing
- * whatever a permission's status, never for an env that acts.
- */
-export const activeOrRequestedPermissions = async (
-  env: Env,
-  app: AppId
-): Promise<Permission[]> =>
-  await permissionsIn(env, { type: "app", appId: app }, [
-    "active",
-    "requested",
-  ]);
 
 /** A binding name's kind: the run's stub of it (bindings.ts, `runBindingsFor`). */
 export type WorkflowBindingKind = "connection" | "collection";

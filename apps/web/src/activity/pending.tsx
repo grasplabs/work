@@ -153,6 +153,12 @@ export const objectOf = (
       msg`Guest chats. This domain can invite people who aren't members to a short chat with a model through a link, and read back what they write. Guests reach nothing else; their chats spend the model budget of whoever invites them`
     );
   }
+  if (object.type === "platform" && actions.includes("brain")) {
+    // Consent in plain words: what it reads, and whose access bounds it.
+    return i18n._(
+      msg`Company Brain, read only. This can read company Brain evidence and its open questions, from the collections it was granted and only what the person it works for may read too. It can never write to the Brain. Every read is recorded`
+    );
+  }
   if (object.type === "platform") {
     // Consent in plain words: what the App reads is published company-wide
     // on purpose (counts only, never a run), and it may show it to anyone.

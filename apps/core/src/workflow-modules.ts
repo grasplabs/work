@@ -14,6 +14,7 @@ import { valueDepth } from "@grasp-os/shared/value-depth";
 import {
   actionUseAliasPattern,
   connectorUseSchema,
+  filesUseSchema,
   knowledgeUseSchema,
   operationUseSchema,
   templateUseSchema,
@@ -116,6 +117,13 @@ export const sealedUse = (use: ActionUse | SealedUse): SealedUse => {
       });
     }
     case "knowledge": {
+      return Object.freeze({
+        alias: use.alias,
+        kind: use.kind,
+        operations: Object.freeze([...use.operations]),
+      });
+    }
+    case "files": {
       return Object.freeze({
         alias: use.alias,
         kind: use.kind,
@@ -342,6 +350,13 @@ export const versionActionsOf = (
               operations: [...use.operations],
             };
           }
+          case "files": {
+            return {
+              alias: use.alias,
+              kind: use.kind,
+              operations: [...use.operations],
+            };
+          }
           case "operation":
           case "template": {
             return { alias: use.alias, kind: use.kind };
@@ -369,6 +384,7 @@ const manifestUseSchema = z.discriminatedUnion("kind", [
   operationUseSchema,
   knowledgeUseSchema,
   templateUseSchema,
+  filesUseSchema,
   z.strictObject({
     alias: z.string().regex(actionUseAliasPattern),
     kind: z.literal("model"),

@@ -47,8 +47,12 @@ export const generatedPaths = {
   contracts: ".grasp/contracts.json",
 } as const;
 
-/** The format of `contracts.json`. */
-export const contractsFormatVersion = 2;
+/**
+ * The format of `contracts.json`: 3 since its manifest carries `surfaces`
+ * (spec 34.1). A release whose contracts are of another format doesn't
+ * load: a new version replaces it.
+ */
+export const contractsFormatVersion = 3;
 
 /**
  * The fingerprint of `operation`'s exact contract: the SHA-256, in hex, of
@@ -995,13 +999,38 @@ const referencesText = async (
   const screens = Object.values(manifest.screens).toSorted((a, b) =>
     a.name < b.name ? -1 : 1
   );
+  // Each screen's declared surfaces (spec 34.1), by name, as screens are:
+  // the same bytes whatever order the manifest's keys come in.
+  const surfacesOf = (screen: string) =>
+    Object.values(manifest.surfaces)
+      .filter((surface) => surface.screen === screen)
+      .toSorted((a, b) => (a.name < b.name ? -1 : 1));
+  const surfaceTypes = (screen: string): string => {
+    const own = surfacesOf(screen);
+    return own.length === 0
+      ? ""
+      : `, { ${own.map((surface) => `readonly ${key(surface.name)}: ${valueTypeOf(surface.input, "input")}`).join("; ")} }`;
+  };
   const screenTypes = screens.map(
     (screen) =>
-      `  readonly ${key(screen.name)}: ScreenReference<${JSON.stringify(screen.name)}, ${valueTypeOf(screen.input, "input")}, ${valueTypeOf(screen.input, "output")}>;`
+      `  readonly ${key(screen.name)}: ScreenReference<${JSON.stringify(screen.name)}, ${valueTypeOf(screen.input, "input")}, ${valueTypeOf(screen.input, "output")}${surfaceTypes(screen.name)}>;`
   );
   const screenValues = screens.map(
     (screen) =>
-      `  ${key(screen.name)}: ${dataOf({ name: screen.name, path: screen.path, input: screen.input }, 1)},`
+      `  ${key(screen.name)}: ${dataOf(
+        {
+          name: screen.name,
+          path: screen.path,
+          input: screen.input,
+          surfaces: Object.fromEntries(
+            surfacesOf(screen.name).map((surface) => [
+              surface.name,
+              { kind: surface.kind, input: surface.input },
+            ])
+          ),
+        },
+        1
+      )},`
   );
   parts.push(
     screens.length === 0
