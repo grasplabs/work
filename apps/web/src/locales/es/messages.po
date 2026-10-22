@@ -1961,6 +1961,10 @@ msgstr "Otro día"
 msgid "Another domain"
 msgstr "Otro dominio"
 
+#: src/screens/screen-frame.tsx
+msgid "Another link is waiting for an answer, or one was just turned down. Try again in a moment."
+msgstr "Otro enlace está esperando una respuesta, o se acaba de rechazar uno. Vuelve a intentarlo en un momento."
+
 #: src/activity/pending.tsx
 msgid "Another version of this domain was made current since this list was read. The list now shows it: review that version, then approve again."
 msgstr "Desde que se leyó esta lista, otra versión de este dominio pasó a ser la actual. La lista ya la muestra: revisa esa versión y vuelve a aprobar."
@@ -2703,6 +2707,7 @@ msgstr "Puede {verbs} datos de la empresa"
 #: src/engines/package-approvals.tsx
 #: src/inbox/item-detail.tsx
 #: src/knowledge/document.tsx
+#: src/link-confirmation.tsx
 #: src/settings/invitations.tsx
 msgid "Cancel"
 msgstr "Cancelar"
@@ -5818,6 +5823,10 @@ msgstr "Enlace para apps de IA"
 msgid "Linked"
 msgstr "Notas enlazadas"
 
+#: src/screens/screen-links.ts
+msgid "Links can't be opened here."
+msgstr "Aquí no se pueden abrir enlaces."
+
 #: src/onboarding/staff-words.ts
 msgid "Links out: {count} of {of}"
 msgstr "Enlaces enviados: {count} de {of}"
@@ -7401,6 +7410,11 @@ msgctxt "onboarding stage"
 msgid "Open"
 msgstr "Abierto"
 
+#: src/link-confirmation.tsx
+msgctxt "open a link to another site"
+msgid "Open"
+msgstr "Abrir"
+
 #: src/landscape/app-table.tsx
 msgctxt "open an app"
 msgid "Open"
@@ -7411,6 +7425,10 @@ msgstr "Abrir"
 #: src/knowledge/uploads.tsx
 msgid "Open {name}"
 msgstr "Abrir {name}"
+
+#: src/link-confirmation.tsx
+msgid "Open a link outside Grasp?"
+msgstr "¿Abrir un enlace fuera de Grasp?"
 
 #: src/chat/chat-dock.tsx
 msgid "Open at the side"
@@ -9957,6 +9975,10 @@ msgstr "Es demasiado corto para ser una conversación."
 msgid "That isn't a file call."
 msgstr "Esa no es una llamada de archivo."
 
+#: src/screens/screen-links.ts
+msgid "That isn't a link that can be opened."
+msgstr "Eso no es un enlace que se pueda abrir."
+
 #: src/workflows/resource-params.tsx
 msgid "That isn't a value this parameter takes."
 msgstr "Este parámetro no acepta ese valor."
@@ -10322,6 +10344,10 @@ msgstr "Las ejecuciones más recientes, primero las nuevas."
 msgid "The leads of {going} teams get their link {when}. Everyone else right after their lead has talked to me."
 msgstr "Los responsables de {going} equipos reciben su enlace {when}. Los demás justo después de que su responsable haya hablado conmigo."
 
+#: src/screens/screen-links.ts
+msgid "The link wasn't opened."
+msgstr "El enlace no se abrió."
+
 #: src/routes/guest.tsx
 msgid "The link works until {until}."
 msgstr "El enlace funciona hasta el {until}."
@@ -10446,6 +10472,7 @@ msgid "The report as it stands today"
 msgstr "El informe tal como está hoy"
 
 #: src/screens/screen-files.ts
+#: src/screens/screen-links.ts
 msgid "The request failed."
 msgstr "La solicitud ha fallado."
 
@@ -10665,6 +10692,10 @@ msgstr "Esta aplicación salió de su marco y se detuvo."
 #: src/screens/screen-frame.tsx
 msgid "This app lost its connection to the page and was stopped."
 msgstr "Esta aplicación perdió su conexión con la página y se detuvo."
+
+#: src/link-confirmation.tsx
+msgid "This app wants to open a page on another site in a new tab. Open it only if you expected to go there."
+msgstr "Esta app quiere abrir una página de otro sitio en una pestaña nueva. Ábrela solo si esperabas ir allí."
 
 #: src/engines/store-change-errors.ts
 msgid "This change is being applied again, so it can't be abandoned now. The page shows where it stands now."
