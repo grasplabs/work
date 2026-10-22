@@ -134,11 +134,11 @@ export interface TestPrincipal {
   /**
    * Answers the decision `run` waits for in its task `task` (a
    * `grasp.decision` call), as this principal: approved or declined, with
-   * `value` as the decision's contract takes it. Until the task first asks
-   * one, waits for the run to ask it, until the test's deadline; after
-   * that, answers the one it asks now, if any. Only the principal it asks
-   * answers it,
-   * one the fixture lets answer through its binding
+   * `value` as the decision's contract takes it: inside loops, the item
+   * `answer.at` names, else the task's latest. Waits for the run to ask it,
+   * until the test's deadline; one already answered isn't waited on. Only
+   * the principal it asks answers it, one the fixture lets answer through
+   * its binding
    * (`workflows.<alias>.deciders`), and only once, while the run goes on:
    * anything else fails, as `t.rejectsCode` reads it (`decision.forbidden`,
    * `decision.invalid`, `decision.closed`, `decision.not_found`).
@@ -155,6 +155,12 @@ export interface TestDecisionAnswer {
   readonly approved: boolean;
   /** What the answer carries, as the decision's contract takes it. */
   readonly value?: Json;
+  /**
+   * For a task inside `for` loops, the item it asks for: each loop's
+   * index, outermost first, such as `[1, 0]`. Without it, the task's
+   * latest decision.
+   */
+  readonly at?: readonly number[];
 }
 
 /**
@@ -954,7 +960,7 @@ const principalOf = (run: RunningTest, name: string): TestPrincipal => {
     respond: async (
       handle: WorkflowTestRun,
       task: string,
-      { approved, value }: TestDecisionAnswer
+      { approved, value, at }: TestDecisionAnswer
     ): Promise<void> => {
       unwrapped(
         await session.respond(
@@ -964,6 +970,7 @@ const principalOf = (run: RunningTest, name: string): TestPrincipal => {
             task,
             approved,
             ...(value === undefined ? {} : { value }),
+            ...(at === undefined ? {} : { at }),
           })
         )
       );

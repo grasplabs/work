@@ -273,11 +273,16 @@ export const takeFixtureDecision = async (
 /** A task's ID, as a workflow names it. */
 const taskIdSchema = z.string().regex(/^[A-Za-z][A-Za-z0-9_-]{0,127}$/u);
 
+/** The most loops a task's step names around it (resource-host.ts). */
+const maxLoopDepth = 8;
+
 /** An answer as a test principal gives it (`respond`). */
 const answerSchema = z.strictObject({
   task: taskIdSchema,
   approved: z.boolean(),
   value: z.json().optional(),
+  /** The item of each loop around the task, outermost first. */
+  at: z.array(z.int().min(0).max(9999)).max(maxLoopDepth).optional(),
 });
 
 /** How often an answer looks again for the decision it answers, in ms. */
@@ -293,35 +298,54 @@ const goesOn = (
   status.status !== "terminated";
 
 /**
- * The open decision of task `task` run `runId` waits for. Until the task
- * first asks one, waits for it while the run goes on, until `until` or
- * `stopped` (`decision.not_found` when it asked none); once its latest was
- * answered or ran out of time with none asked since, `decision.closed`.
+ * The item of each loop around the step named `step`, outermost first, as
+ * its name scopes it (`task:<id>@<loop>.<index>/…`): none outside a loop.
+ */
+const itemOf = (step: string): string => {
+  const at = step.indexOf("@");
+  return at === -1
+    ? ""
+    : step
+        .slice(at + 1)
+        .split("/")
+        .map((segment) => segment.slice(segment.lastIndexOf(".") + 1))
+        .join("/");
+};
+
+/**
+ * The decision of task `task` that run `runId` asks at item `at` (each
+ * loop's, outermost first), or, without one, its latest. Until the run
+ * asks it, waits while the run goes on, until `until` or `stopped`
+ * (`decision.not_found` when it asked none); one answered or out of time
+ * is `decision.closed`, never waited on, as a second answer to it would be.
  */
 const openDecisionOf = async (
   env: Env,
   runId: string,
   task: string,
+  at: readonly number[] | undefined,
   { until, stopped }: { until: number; stopped: () => boolean }
 ) => {
   const db = drizzle(env.DB);
+  const item = at?.join("/");
   for (;;) {
     // One look after another, as the run goes on.
     // oxlint-disable-next-line no-await-in-loop
-    const [latest] = await db
+    const asked = await db
       .select()
       .from(appTestDecisions)
       .where(
         and(eq(appTestDecisions.runId, runId), eq(appTestDecisions.task, task))
       )
-      .orderBy(desc(appTestDecisions.openedAt))
-      .limit(1);
-    if (latest?.status === "open") {
-      return latest;
+      .orderBy(desc(appTestDecisions.openedAt));
+    const found =
+      item === undefined
+        ? asked[0]
+        : asked.find(({ step }) => itemOf(step) === item);
+    if (found?.status === "open") {
+      return found;
     }
-    // Answered, or out of time, and none asked since: closed now, never
-    // waited on, as a second answer to it would be.
-    if (latest !== undefined) {
+    if (found !== undefined) {
       throw decisionErrors.create("decision.closed");
     }
     // oxlint-disable-next-line no-await-in-loop
@@ -354,8 +378,8 @@ export const answerFixtureDecision = async (
   if (!answer.success) {
     throw decisionErrors.create("decision.invalid");
   }
-  const { task, approved, value = null } = answer.data;
-  const open = await openDecisionOf(env, runId, task, wait);
+  const { task, approved, value = null, at } = answer.data;
+  const open = await openDecisionOf(env, runId, task, at, wait);
   if (open.recipient !== by) {
     throw decisionErrors.create("decision.forbidden");
   }
