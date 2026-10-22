@@ -8,6 +8,7 @@ import {
   CardTitle,
 } from "@grasp-os/ui/components/card";
 import {
+  Await,
   createFileRoute,
   Link,
   notFound,
@@ -264,8 +265,14 @@ const Client = () => {
           releases={releases}
         />
       ) : null}
-      {view.client?.status === "active" && quotaPolicy !== null ? (
-        <QuotaPolicyCard policy={quotaPolicy} />
+      {view.client?.status === "active" ? (
+        // Its core read live, within the grid's deadline: the page shows
+        // without waiting for it, and the card once it answers.
+        <Await fallback={null} promise={quotaPolicy}>
+          {(policy) =>
+            policy === null ? null : <QuotaPolicyCard policy={policy} />
+          }
+        </Await>
       ) : null}
       {settings === null ? null : (
         <ClientSettings
@@ -297,13 +304,15 @@ export const Route = createFileRoute("/clients/$clientId")({
     if (!newClientIdSchema.safeParse(params.clientId).success) {
       throw notFound();
     }
-    const [view, { releases }, { settings, history }, quotaPolicy] =
-      await Promise.all([
-        fetchProvisioning({ data: { clientId: params.clientId } }),
-        fetchNewClientOptions(),
-        fetchClientSettings({ data: { clientId: params.clientId } }),
-        fetchClientQuotaPolicy({ data: { clientId: params.clientId } }),
-      ]);
+    // Not awaited: a slow or unreachable core never holds up the page.
+    const quotaPolicy = fetchClientQuotaPolicy({
+      data: { clientId: params.clientId },
+    });
+    const [view, { releases }, { settings, history }] = await Promise.all([
+      fetchProvisioning({ data: { clientId: params.clientId } }),
+      fetchNewClientOptions(),
+      fetchClientSettings({ data: { clientId: params.clientId } }),
+    ]);
     if (view === null) {
       throw notFound();
     }
