@@ -14,6 +14,7 @@ import type {
   Vision,
   Workspace,
 } from "@grasp-os/shared/brain";
+import { onboardingIdPrefix } from "@grasp-os/shared/brain-records";
 import type {
   BrainRecordInput,
   BrainRecordsAdded,
@@ -43,9 +44,10 @@ import {
   datedInOrder,
   readBrainRecords,
 } from "./brain-records.ts";
-import type { HeldRecords } from "./brain-records.ts";
+import type { HeldRecords, OnboardingHeld } from "./brain-records.ts";
 import { catalogEntries, personOf } from "./connections.ts";
 import { organizations } from "./db/core/schema.ts";
+import { intakeIds } from "./onboarding/brain-intake.ts";
 import { mondayOf } from "./onboarding/rules.ts";
 import { onboardingStore } from "./onboarding/store.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
@@ -65,7 +67,8 @@ import type { SessionCheck } from "./session-check.ts";
 // | teams              | the roster and the kickoff's teams (admins)              |
 // | sources            | the kickoff, the roster, each team lead's finished       |
 // |                    | interview and the documents shared in the onboarding     |
-// |                    | (admins)                                                 |
+// |                    | (admins); each team's interviews, once the brain holds   |
+// |                    | what they learned, for whoever reads records naming them |
 // | tools              | the tools those documents name (admins)                  |
 // | connections        | the catalog's offered entries and the person's           |
 // |                    | connections                                              |
@@ -73,8 +76,9 @@ import type { SessionCheck } from "./session-check.ts";
 // | candidates,        | signed in, after the onboarding's; a record's counts and |
 // | statements, teams, | stakeholders for an onboarding team join that team, for  |
 // | gaps               | whoever reads it; gaps with what became of them          |
-// | goals, workflows,  | nothing core can read holds them yet: empty              |
-// | landscape,         |                                                          |
+// | workflows          | the Playbook's, as the onboarding drew them, for         |
+// |                    | everyone signed in                                       |
+// | goals, landscape,  | nothing core can read holds them yet: empty              |
 // | policies           |                                                          |
 //
 // The onboarding (who works where, the kickoff, the interviews' progress,
@@ -139,7 +143,39 @@ interface OnboardingFacts {
   leadsTalked: { team: string; person: string; day: string }[];
   /** The documents shared in the onboarding, newest first. */
   documents: OnboardingDocument[];
+  /** Each team's interviews the brain holds what they learned of. */
+  interviews: CameIn[];
 }
+
+/** A source the onboarding gives the brain, and when it came in (ISO 8601): when `brain.changes` shows it. */
+interface CameIn {
+  source: Source;
+  at: string;
+}
+
+/**
+ * Each team's interviews the brain holds what they learned of, as the one
+ * source its statements and drawings name (onboarding/brain-intake.ts):
+ * how many of its people agreed, and the week the first did, never who.
+ */
+const teamInterviews = async (env: Env): Promise<CameIn[]> => {
+  const teams = await onboardingStore(env).interviewSources();
+  return await Promise.all(
+    teams.map(async ({ team, name, people, since }) => ({
+      source: {
+        id: await intakeIds.interviews(team),
+        kind: "interview",
+        title: `Interviews with ${name}`,
+        date: mondayOf(since),
+        how: people === 1 ? "1 person" : `${people} people`,
+        step: 2,
+        interviewee: "employee",
+        teamIds: [ids.rosterTeam(team)],
+      },
+      at: `${mondayOf(since)}T00:00:00.000Z`,
+    }))
+  );
+};
 
 const onboardingFacts = async (
   env: Env,
@@ -149,16 +185,32 @@ const onboardingFacts = async (
     return null;
   }
   const store = onboardingStore(env);
-  const [view, kickoff, rosterSavedAt, sentLinks, leadsTalked, documents] =
-    await Promise.all([
-      store.view(),
-      store.kickoff(),
-      store.rosterSavedAt(),
-      store.sentLinks(),
-      store.leadsTalked(),
-      store.documents(),
-    ]);
-  return { view, kickoff, rosterSavedAt, sentLinks, leadsTalked, documents };
+  const [
+    view,
+    kickoff,
+    rosterSavedAt,
+    sentLinks,
+    leadsTalked,
+    documents,
+    interviews,
+  ] = await Promise.all([
+    store.view(),
+    store.kickoff(),
+    store.rosterSavedAt(),
+    store.sentLinks(),
+    store.leadsTalked(),
+    store.documents(),
+    teamInterviews(env),
+  ]);
+  return {
+    view,
+    kickoff,
+    rosterSavedAt,
+    sentLinks,
+    leadsTalked,
+    documents,
+    interviews,
+  };
 };
 
 /** What the kickoff said about `field` and what the sponsor answered, each on its own line; empty if neither. */
@@ -193,12 +245,6 @@ const teamIdsNamed = (
     })
   ),
 ];
-
-/** A source the onboarding gives the brain, and when it came in (ISO 8601): when `brain.changes` shows it. */
-interface CameIn {
-  source: Source;
-  at: string;
-}
 
 /**
  * Each roster team's lead's finished interview, as its stakeholder
@@ -359,11 +405,17 @@ const onboardingSources = (
         ]),
     ...leadInterviews(facts, today),
     ...documentSources(facts),
+    ...(facts?.interviews ?? []),
   ];
 };
 
+/** Whether `id` is a team's interviews, as the onboarding gives them the brain. */
+const isTeamInterviews = (id: string): boolean =>
+  id.startsWith(`${onboardingIdPrefix}src-`);
+
 /**
- * The onboarding's sources `named` (the kickoff, the staff list), for a
+ * The onboarding's sources `named` (the kickoff, the staff list, a team's
+ * interviews), for a
  * member whose brain holds records naming them: only what
  * `onboardingSources` says of each (its title and when it came in),
  * never what it says.
@@ -376,10 +428,11 @@ const sourcesForRecords = async (
     return [];
   }
   const store = onboardingStore(env);
-  const [kickoff, view, rosterSavedAt] = await Promise.all([
+  const [kickoff, view, rosterSavedAt, interviews] = await Promise.all([
     store.kickoff(),
     store.view(),
     store.rosterSavedAt(),
+    [...named].some(isTeamInterviews) ? teamInterviews(env) : [],
   ]);
   const facts: OnboardingFacts = {
     view,
@@ -388,6 +441,7 @@ const sourcesForRecords = async (
     sentLinks: [],
     leadsTalked: [],
     documents: [],
+    interviews,
   };
   return onboardingSources(facts).flatMap(({ source }) =>
     named.has(source.id) ? [source] : []
@@ -587,7 +641,10 @@ const connectionsOf = async (
 
 /**
  * The onboarding's teams, with what the Playbook added for each, then the
- * Playbook's own. A value for a team the person can't see is left out.
+ * Playbook's own. A value for a team the person can't see is left out. A
+ * roster team's record (onboarding/brain-intake.ts) is that team, for
+ * whoever can't read the roster: for an admin, the roster's team, which
+ * is newer, with what was added for it.
  */
 const teamsOf = (onboarding: Team[], records: HeldRecords): Team[] => {
   const byId = new Map(onboarding.map((team) => [team.id, team]));
@@ -597,10 +654,16 @@ const teamsOf = (onboarding: Team[], records: HeldRecords): Team[] => {
   for (const { teamId, value } of records.stakeholders) {
     byId.get(teamId)?.stakeholders.push(value);
   }
+  const own = records.teams.filter((team) => {
+    const roster = byId.get(team.id);
+    roster?.counts.push(...team.counts);
+    roster?.stakeholders.push(...team.stakeholders);
+    return roster === undefined;
+  });
   for (const team of onboarding) {
     datedInOrder(team);
   }
-  return [...onboarding, ...records.teams];
+  return [...onboarding, ...own];
 };
 
 /** The sources `team` names: where it was found, and each of its values. */
@@ -624,6 +687,32 @@ export const brainGaps = async (
 ): Promise<Gap[]> => {
   const { gaps } = loaded ?? (await readBrainRecords(env));
   return await gapsWith(env, gaps);
+};
+
+/**
+ * What the onboarding gives the brain now, that a record may name: its
+ * sources, the kickoff once brought in and the staff list once saved, and
+ * the roster's teams, by the ids the admin gave them. Never a
+ * kickoff-only team: its id is its place in the reading
+ * (`team.kickoff-<n>`), which reading the kickoff again moves.
+ */
+const onboardingHeld = async (env: Env): Promise<OnboardingHeld> => {
+  const store = onboardingStore(env);
+  const [kickoff, view, rosterSavedAt] = await Promise.all([
+    store.kickoff(),
+    store.view(),
+    store.rosterSavedAt(),
+  ]);
+  const rosterTeams = view.roster?.teams ?? [];
+  return {
+    sources: new Set([
+      ...(kickoff.transcript === null ? [] : [kickoffSourceId]),
+      ...(view.roster === null || rosterSavedAt === null
+        ? []
+        : [rosterSourceId]),
+    ]),
+    teams: new Set(rosterTeams.map(({ id }) => ids.rosterTeam(id))),
+  };
 };
 
 /** The brain's workspace, as `person` may read it. */
@@ -653,8 +742,14 @@ export const readBrain = async (
       ...[...records.tools, ...records.statements, ...records.gaps].map(
         ({ sourceId }) => sourceId
       ),
+      ...records.workflows.flatMap(({ drawings }) =>
+        (drawings ?? []).map(({ sourceId }) => sourceId)
+      ),
       ...teams.flatMap(teamSources),
-    ].filter((id) => id === kickoffSourceId || id === rosterSourceId)
+    ].filter(
+      (id) =>
+        id === kickoffSourceId || id === rosterSourceId || isTeamInterviews(id)
+    )
   );
   const sources =
     facts === null
@@ -671,7 +766,7 @@ export const readBrain = async (
     statements: records.statements,
     candidates: records.candidates,
     gaps: await brainGaps(env, person, records),
-    workflows: [],
+    workflows: records.workflows,
     connections,
     landscape: [],
     policies: [],
@@ -724,7 +819,13 @@ export class BrainRpc extends CoreRpcTarget implements BrainApi {
   async addRecords(records: BrainRecordInput[]): Promise<BrainRecordsAdded> {
     return await withPerson(
       this.#check,
-      async (person) => await addBrainRecords(this.#env, person, records)
+      async (person) =>
+        await addBrainRecords(
+          this.#env,
+          person,
+          records,
+          async () => await onboardingHeld(this.#env)
+        )
     );
   }
 
