@@ -385,7 +385,12 @@ export const throughCache = async (
   }
 };
 
-/** Forgets the receipts naming `objectKeys`, the objects the sweep deleted. */
+/**
+ * Forgets what the receipts naming `objectKeys` say of them, the objects
+ * the sweep deleted: the object, its hash, size and time. A lease or a
+ * quarantine on the row stays; once neither holds anything, the receipt
+ * sweep removes the row (`sweepReceipts`).
+ */
 export const forgetReceipts = async (
   env: CacheEnv,
   objectKeys: readonly string[]
@@ -395,13 +400,10 @@ export const forgetReceipts = async (
   for (let start = 0; start < objectKeys.length; start += 90) {
     // oxlint-disable-next-line no-await-in-loop -- a chunk at a time
     await db
-      .delete(buildReceipts)
+      .update(buildReceipts)
+      .set({ objectKey: null, sha256: null, bytes: null, builtAt: null })
       .where(
-        and(
-          inArray(buildReceipts.objectKey, objectKeys.slice(start, start + 90)),
-          isNull(buildReceipts.holder),
-          isNull(buildReceipts.quarantinedAt)
-        )
+        inArray(buildReceipts.objectKey, objectKeys.slice(start, start + 90))
       );
   }
 };
@@ -423,16 +425,20 @@ export const sweepReceipts = async (
   now: Date
 ): Promise<void> => {
   const db = drizzle(env.DB);
-  const stale = or(
-    and(
-      isNull(buildReceipts.objectKey),
-      isNull(buildReceipts.quarantinedAt),
-      or(
-        isNull(buildReceipts.leaseExpiresAt),
-        lt(buildReceipts.leaseExpiresAt, now)
+  // Never a row whose lease a build still holds: it is building now.
+  const unleased = or(
+    isNull(buildReceipts.leaseExpiresAt),
+    lt(buildReceipts.leaseExpiresAt, now)
+  );
+  const stale = and(
+    unleased,
+    or(
+      and(isNull(buildReceipts.objectKey), isNull(buildReceipts.quarantinedAt)),
+      lt(
+        buildReceipts.quarantinedAt,
+        new Date(now.getTime() - quarantineKeepMs)
       )
-    ),
-    lt(buildReceipts.quarantinedAt, new Date(now.getTime() - quarantineKeepMs))
+    )
   );
   const keys = await db
     .select({ key: buildReceipts.key })

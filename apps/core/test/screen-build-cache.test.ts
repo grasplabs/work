@@ -254,6 +254,32 @@ describe("the build cache", { timeout: 120_000 }, () => {
     });
   });
 
+  it("builds again when a kept build's object can't be read", async () => {
+    const { files, built, objectKey } = await keptBuild();
+    // Its receipt is there; reading the object it names fails.
+    const unreadable: Pick<R2Bucket, "get" | "put"> = {
+      get: async (...args: Parameters<R2Bucket["get"]>) => {
+        if (args[0] === objectKey) {
+          throw new Error("R2 is out");
+        }
+        return await env.FILES.get(...args);
+      },
+      put: async (...args: Parameters<R2Bucket["put"]>) =>
+        await env.FILES.put(...args),
+    };
+    const { started, loader } = counting();
+    const rebuilt = await buildScreens(
+      { ...env, FILES: unreadable, LOADER: loader },
+      files,
+      "app-test"
+    );
+
+    expect({ rebuilt, started: started.count }).toStrictEqual({
+      rebuilt: built,
+      started: 1,
+    });
+  });
+
   it("still builds when R2 can't be read or written, and keeps nothing unreceipted", async () => {
     const files = screen();
     // Every read and write of R2 fails, as in an outage.

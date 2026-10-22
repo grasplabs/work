@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  forgetReceipts,
   quarantineKeepMs,
   readVerified,
   sweepReceipts,
@@ -118,6 +119,14 @@ describe("the build cache's lease", { timeout: 30_000 }, () => {
         now - quarantineKeepMs - 1000,
       ],
       newQuarantine: [`new-${id}`, `new-${id}~h`, null, null, now - 1000],
+      // A day-old quarantine a build holds the lease of now: kept.
+      leasedQuarantine: [
+        `leasedold-${id}`,
+        `leasedold-${id}~h`,
+        "here",
+        now + 60_000,
+        now - quarantineKeepMs - 1000,
+      ],
     };
     for (const [key, objectKey, holder, lease, quarantined] of Object.values(
       rows
@@ -139,6 +148,46 @@ describe("the build cache's lease", { timeout: 30_000 }, () => {
 
     expect(
       results.map(({ key }) => key.replace(`-${id}`, "")).toSorted()
-    ).toStrictEqual(["kept", "leased", "new"]);
+    ).toStrictEqual(["kept", "leased", "leasedold", "new"]);
+  });
+
+  it("forgets a swept object's receipt but not a live lease, so the row goes once nothing holds it", async () => {
+    const now = Date.now();
+    const id = crypto.randomUUID();
+    const rows = [
+      // Kept, nobody building: forgotten, then swept.
+      [`idle-${id}`, `idle-${id}~h`, null, null],
+      // Kept, with a lease that ran out: the same.
+      [`expired-${id}`, `expired-${id}~h`, "gone", now - 1000],
+      // Kept, with a build holding the lease now: the lease stays.
+      [`live-${id}`, `live-${id}~h`, "here", now + 60_000],
+    ] as const;
+    for (const [key, objectKey, holder, lease] of rows) {
+      // oxlint-disable-next-line no-await-in-loop -- one row after another
+      await env.DB.prepare(
+        "INSERT INTO build_receipts (key, object_key, sha256, holder, lease_expires_at) VALUES (?, ?, 'h', ?, ?)"
+      )
+        .bind(key, objectKey, holder, lease)
+        .run();
+    }
+
+    await forgetReceipts(
+      env,
+      rows.map(([, objectKey]) => objectKey)
+    );
+    await sweepReceipts(env, new Date(now));
+    const { results } = await env.DB.prepare(
+      "SELECT key, object_key AS objectKey, holder FROM build_receipts WHERE key LIKE ?"
+    )
+      .bind(`%${id}%`)
+      .all<{ key: string; objectKey: string | null; holder: string | null }>();
+
+    expect(
+      results.map(({ key, objectKey, holder }) => ({
+        key: key.replace(`-${id}`, ""),
+        objectKey,
+        holder,
+      }))
+    ).toStrictEqual([{ key: "live", objectKey: null, holder: "here" }]);
   });
 });
