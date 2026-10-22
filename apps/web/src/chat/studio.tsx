@@ -1,6 +1,6 @@
 import type { ChatDraft } from "@grasp-os/shared/chat";
 import { Button, buttonVariants } from "@grasp-os/ui/components/button";
-import { Plural, Trans, useLingui } from "@lingui/react/macro";
+import { Trans, useLingui } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";
 import { EyeIcon } from "lucide-react";
 import { useId, useState } from "react";
@@ -9,6 +9,8 @@ import type { ReactNode } from "react";
 import { PreviewFrame } from "../screens/screen-frame.tsx";
 import { changedScreens, previewedScreen } from "./builds-state.ts";
 import type { NamedDraft } from "./builds.tsx";
+import { DraftVersionBar, shownVersion } from "./draft-versions.tsx";
+import type { ShownVersion } from "./draft-versions.tsx";
 
 // Building an App in a studio, as the prototype's (grasplabs/prototype
 // `components/apps/app-studio.tsx`): the chat stands in the middle of the
@@ -22,16 +24,19 @@ import type { NamedDraft } from "./builds.tsx";
 
 /**
  * The preview of a draft: its first screen, or one it changes the person
- * picks. Loaded afresh at each of the draft's writes, as its key says.
+ * picks; of the draft's earlier `version` when they opened one, read-only.
+ * Loaded afresh at each of the draft's writes, as its key says.
  */
 const DraftPreview = ({
   chatId,
   draft,
   name,
+  version,
 }: {
   chatId: string;
   draft: ChatDraft;
   name: string;
+  version: number | undefined;
 }) => {
   const [picked, setPicked] = useState<string>();
   const { t } = useLingui();
@@ -62,40 +67,47 @@ const DraftPreview = ({
       <PreviewFrame
         app={draft.app}
         chatId={chatId}
-        key={`${draft.app}:${draft.revision}:${screen ?? ""}`}
+        key={`${draft.app}:${draft.revision}:${screen ?? ""}:${version ?? ""}`}
         {...(screen === undefined ? {} : { screen })}
+        {...(version === undefined ? {} : { version })}
       />
     </section>
   );
 };
 
 /**
- * The App's top row: its name and how much the chat changed of it, then
- * the way to the App, where its people meet it (and an admin approves its
- * screens' code). Its padding and the button's height are the page
- * sidebar's top row's (`PageSidebarTop`), so its line continues that one.
+ * The App's top row: its name and which version of the chat's draft shows
+ * (`DraftVersionBar`), then the way to the App, where its people meet it
+ * (and an admin approves its screens' code). Its padding and the button's
+ * height are the page sidebar's top row's (`PageSidebarTop`), so its line
+ * continues that one.
  */
 const StudioBar = ({
+  chatId,
   draft,
   name,
   headingId,
+  version,
+  onVersion,
 }: {
+  chatId: string;
   draft: ChatDraft;
   name: string;
   headingId: string;
+  version: number | undefined;
+  onVersion: (version?: number) => void;
 }) => (
   <div className="flex flex-none items-center gap-3 border-b p-3">
-    <div className="flex min-w-0 flex-1 items-baseline gap-2">
+    <div className="flex min-w-0 flex-1 items-center gap-2">
       <h2 className="truncate font-medium" id={headingId}>
         {name}
       </h2>
-      <span className="text-muted-foreground truncate text-xs max-sm:hidden">
-        <Plural
-          one="# file changed in this chat, not proposed yet"
-          other="# files changed in this chat, not proposed yet"
-          value={draft.changed.length}
-        />
-      </span>
+      <DraftVersionBar
+        chatId={chatId}
+        draft={draft}
+        onShow={onVersion}
+        shown={version}
+      />
     </div>
     <Link
       className={buttonVariants({ variant: "outline" })}
@@ -196,9 +208,12 @@ export const ChatStudio = ({
   children: ReactNode;
 }) => {
   const [picked, setPicked] = useState<string>();
+  const [opened, setOpened] = useState<ShownVersion>();
   const [view, setView] = useState<View>("app");
   const headingId = useId();
   const shown = drafts.find(({ draft }) => draft.app === picked) ?? drafts[0];
+  const version =
+    shown === undefined ? undefined : shownVersion(shown.draft, opened);
   const studio = shown !== undefined;
   const chatShows = !studio || wide || view === "chat";
   let chatClass = "hidden";
@@ -225,9 +240,22 @@ export const ChatStudio = ({
             }
           >
             <StudioBar
+              chatId={chatId}
               draft={shown.draft}
               headingId={headingId}
               name={shown.name}
+              onVersion={(number) => {
+                setOpened(
+                  number === undefined
+                    ? undefined
+                    : {
+                        app: shown.draft.app,
+                        revision: shown.draft.revision,
+                        number,
+                      }
+                );
+              }}
+              version={version}
             />
             {drafts.length > 1 ? (
               <DraftPicker
@@ -242,6 +270,7 @@ export const ChatStudio = ({
                 draft={shown.draft}
                 key={shown.draft.app}
                 name={shown.name}
+                version={version}
               />
             </div>
           </section>
