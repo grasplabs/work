@@ -6,6 +6,7 @@ import type {
   HeldCall,
   PendingAction,
 } from "@grasp-os/shared/connect";
+import { sha256HexOfBytes } from "@grasp-os/shared/encoding";
 import type { Authority } from "@grasp-os/shared/permissions";
 import { env, exports } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
@@ -615,6 +616,35 @@ describe("a side effect from chat", () => {
       outcome(callAs(agentFor(anna.userId), call, signed))
     ).resolves.toBe("connect.idempotency_key_required");
     expect({ waiting: await waitingFor(anna), ran: server.ran }).toStrictEqual({
+      waiting: [],
+      ran: [],
+    });
+  });
+
+  it("with files attached is refused for a Composio tool, held or not: only a native write takes files (GRA-887)", async () => {
+    const anna = someone();
+    const connectionId = await addConnection();
+    const bytes = Uint8Array.from(new TextEncoder().encode("alpha"));
+    const call = {
+      ...mail(connectionId),
+      idempotencyKey: "run-1:files",
+      attachments: { [await sha256HexOfBytes(bytes)]: bytes },
+    };
+    const refused = [
+      await outcome(callAs(agentFor(anna.userId), call)),
+      await outcome(
+        callAs(agentFor(anna.userId), call, {
+          restricted: true,
+          origin: runOrigin,
+        })
+      ),
+    ];
+    expect({
+      refused,
+      waiting: await waitingFor(anna),
+      ran: server.ran,
+    }).toStrictEqual({
+      refused: ["connect.invalid", "connect.invalid"],
       waiting: [],
       ran: [],
     });
