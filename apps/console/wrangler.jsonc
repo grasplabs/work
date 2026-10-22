@@ -64,6 +64,14 @@
       "binding": "ROLLOUT",
       "class_name": "Rollout",
     },
+    // Deploys one fleet client of a rollout (src/rollout/fleet-client.ts): an
+    // instance per client and retry round, a few at once, started by the
+    // rollout's run, which claims the client in the rollout's name.
+    {
+      "name": "grasp-os-rollout-client",
+      "binding": "ROLLOUT_CLIENT",
+      "class_name": "RolloutClient",
+    },
     // Rolls a client back from a rollout (src/rollout/rollback.ts): an
     // instance per rollback, a runner under the same claim as the others.
     {
