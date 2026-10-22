@@ -6,7 +6,12 @@ import { activateVersion } from "../src/app-activation.ts";
 import { addMember } from "../src/app-members.ts";
 import { changeStatus } from "../src/app-status.ts";
 import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
-import { commitFiles } from "../src/apps.ts";
+import {
+  commitFiles,
+  draftOverLatest,
+  proposeDraft,
+  proposeVersion,
+} from "../src/apps.ts";
 import { shareStore } from "../src/data-stores.ts";
 import { cancelRunsOf } from "../src/workflows/controls.ts";
 import { repairStarts, startRun } from "../src/workflows/runs.ts";
@@ -584,7 +589,7 @@ describe("an App's status", () => {
     });
   });
 
-  it("keeps what an archive raced unwritten: no version committed or made current once it lands", async () => {
+  it("keeps what an archive raced unwritten: no version committed, proposed or made current once it lands", async () => {
     const builder = await signedInApi(idp, "builder");
     const app = await draftApp(builder);
     const by = await builder.api.whoami();
@@ -628,18 +633,53 @@ describe("an App's status", () => {
       )
     );
     await restore();
-    const { currentVersion } = await builder.api.apps.get(app);
+    const draft = await draftOverLatest(env, appIdSchema.parse(app), {
+      base: version,
+      changes: { "notes.md": "Drafted" },
+    });
+    const drafted = await outcome(
+      proposeDraft(
+        { ...env, DB: racingDb(archive, /insert into "app_versions"/iu) },
+        by,
+        app,
+        draft,
+        "Drafted"
+      )
+    );
+    await restore();
+    const proposed = await outcome(
+      proposeVersion(
+        {
+          ...env,
+          DB: racingDb(archive, /update "apps" set "pending_version"/iu),
+        },
+        by,
+        app,
+        version
+      )
+    );
+    await restore();
+    const after = await builder.api.apps.get(app);
+    const versionsAfter = await builder.api.apps.versions.list(app);
 
     expect({
       committed,
       versions: versions.map(({ version: number }) => number),
       madeCurrent,
-      currentVersion,
+      currentVersion: after.currentVersion,
+      drafted,
+      proposed,
+      pendingVersion: after.pendingVersion,
+      versionsAfter: versionsAfter.map(({ version: number }) => number),
     }).toStrictEqual({
       committed: "app.archived",
       versions: [version, 1],
       madeCurrent: "app.archived",
       currentVersion: 1,
+      drafted: "app.archived",
+      proposed: "app.archived",
+      pendingVersion: null,
+      versionsAfter: [version, 1],
     });
   });
 

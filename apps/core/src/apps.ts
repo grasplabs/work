@@ -1021,39 +1021,60 @@ export const proposeDraft = async (
     workflowBindings,
   };
   const db = drizzle(env.DB);
+  let undone: unknown;
   try {
     // Admitted last, with nothing slow left before the write.
     await admit?.();
+    // Taken back in the same batch should the App have been archived since
+    // `editableApp` let the draft in, as in `commitFiles`: no version, no
+    // pending version, nothing audited.
     const write = [
       db.insert(appVersions).values(row),
-      outboxed(
+      db
+        .delete(appVersions)
+        .where(
+          and(
+            eq(appVersions.appId, appId),
+            eq(appVersions.version, row.version),
+            archivedNow(appId)
+          )
+        )
+        .returning({ version: appVersions.version }),
+      outboxedWhere(
         db,
         changeEntry(by, "app.committed", appId, {
           version: row.version,
           parent,
           tree,
           files: row.files,
-        })
+        }),
+        sql`NOT ${archivedNow(appId)}`
       ),
       db
         .update(apps)
         .set({ pendingVersion: row.version })
-        .where(eq(apps.id, appId)),
-      outboxed(
+        .where(and(eq(apps.id, appId), ne(apps.status, "archived"))),
+      outboxedWhere(
         db,
         changeEntry(by, "app.version.proposed", appId, {
           version: row.version,
-        })
+        }),
+        sql`NOT ${archivedNow(appId)}`
       ),
     ] as const;
-    await (fence === undefined
+    const results: readonly unknown[] = await (fence === undefined
       ? auditedBatch(env, db, write)
       : auditedBatch(env, db, [fence.open, ...write, fence.close]));
+    // The delete's rows: what an archive took back.
+    undone = results.at(fence === undefined ? 1 : 2);
   } catch (error) {
     if (isUniqueViolation(error)) {
       throw appErrors.create("app.conflict");
     }
     throw error;
+  }
+  if (Array.isArray(undone) && undone.length > 0) {
+    throw appErrors.create("app.archived");
   }
   return toVersion(row);
 };
@@ -1142,6 +1163,8 @@ export const proposeVersion = async (
       .where(
         and(
           eq(apps.id, appId),
+          // Archived since `editableApp` let it in: read-only now.
+          ne(apps.status, "archived"),
           sql`${apps.pendingVersion} IS NOT ${number}`,
           sql`${apps.currentVersion} IS NOT ${number}`
         )
@@ -1153,8 +1176,13 @@ export const proposeVersion = async (
     ),
   ]);
   if (!proposed) {
-    // Pending or current already: nothing changed, nothing is recorded.
-    return await findApp(env, appId);
+    // Pending or current already, or archived meanwhile: nothing changed,
+    // nothing is recorded.
+    const now = await findApp(env, appId);
+    if (now.status === "archived") {
+      throw appErrors.create("app.archived");
+    }
+    return now;
   }
   return toApp(proposed);
 };
