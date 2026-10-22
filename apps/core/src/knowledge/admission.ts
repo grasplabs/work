@@ -331,12 +331,104 @@ const judge = (unit: Unit): AdmissionOutcome => {
   return outcome;
 };
 
+/** An HTML character reference, as Markdown renders one: `&#99;`, `&amp;`. */
+const characterReference =
+  /&(?:#(?<decimal>\d{1,7})|#[xX](?<hex>[\da-fA-F]{1,6})|(?<name>[a-zA-Z][a-zA-Z\d]{0,31}));/gu;
+
 /**
- * What the platform minimum's detectors decide for `text`: excluded if any
- * sentence or table certainly holds a person's sensitive data, held if one
- * might, admitted otherwise. Pure: the topics in effect are the gate's.
+ * A named reference to a letter: an accented one (`&eacute;`), or a
+ * script, fraktur or double-struck one (`&cscr;`), each read as its plain
+ * letter, as the detectors read accents anyway.
  */
-export const screen = (text: string): AdmissionOutcome => {
+const letterReference =
+  /^(?<letter>[a-zA-Z])(?:acute|grave|circ|uml|tilde|ring|cedil|caron|macr|breve|ogon|dot|dblac|strok|scr|fr|opf)$/u;
+
+/** Other named references to what the detectors read. */
+const namedReferences: Readonly<Record<string, string>> = {
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  apos: "'",
+  lsquo: "‘",
+  rsquo: "’",
+  nbsp: " ",
+  ensp: " ",
+  emsp: " ",
+  thinsp: " ",
+  hyphen: "-",
+  dash: "-",
+  ndash: "–",
+  mdash: "—",
+  sol: "/",
+  ast: "*",
+  lowbar: "_",
+  num: "#",
+  colon: ":",
+  period: ".",
+  commat: "@",
+  dollar: "$",
+  euro: "€",
+  pound: "£",
+  szlig: "ss",
+  aelig: "ae",
+  AElig: "AE",
+  oelig: "oe",
+  OElig: "OE",
+  oslash: "o",
+  Oslash: "O",
+  newline: "\n",
+};
+
+/** The largest code point. */
+const maxCodePoint = 0x10_ff_ff;
+
+const fromCodePoint = (code: number): string =>
+  code > 0 && code <= maxCodePoint ? String.fromCodePoint(code) : "";
+
+/**
+ * `text` with its HTML character references decoded, as a Markdown
+ * renderer shows it. A named one this code doesn't know is dropped, so
+ * the letters around an invisible one (`&ZeroWidthSpace;`) join up: when
+ * unsure, read the word whole.
+ */
+const decodedReferences = (text: string): string =>
+  text.replaceAll(
+    characterReference,
+    (
+      _reference: string,
+      decimal: string | undefined,
+      hex: string | undefined,
+      name: string | undefined
+    ) => {
+      if (decimal !== undefined) {
+        return fromCodePoint(Number(decimal));
+      }
+      if (hex !== undefined) {
+        return fromCodePoint(Number.parseInt(hex, 16));
+      }
+      const named = name ?? "";
+      return (
+        namedReferences[named] ??
+        letterReference.exec(named)?.groups?.letter ??
+        ""
+      );
+    }
+  );
+
+/** The worse of two outcomes. */
+const worse = (
+  first: AdmissionOutcome,
+  second: AdmissionOutcome
+): AdmissionOutcome => {
+  if (first === "excluded" || second === "excluded") {
+    return "excluded";
+  }
+  return first === "held" || second === "held" ? "held" : "admitted";
+};
+
+/** What the detectors decide for `text`, read as written. */
+const screenWritten = (text: string): AdmissionOutcome => {
   let outcome: AdmissionOutcome = "admitted";
   for (const unit of unitsOf(text)) {
     const judged = judge(unit);
@@ -348,6 +440,22 @@ export const screen = (text: string): AdmissionOutcome => {
     }
   }
   return outcome;
+};
+
+/**
+ * What the platform minimum's detectors decide for `text`: excluded if any
+ * sentence or table certainly holds a person's sensitive data, held if one
+ * might, admitted otherwise. Text with HTML character references is read
+ * twice, as written and as rendered (`&#99;ancer` is "cancer"), and the
+ * worse reading decides. Pure: the topics in effect are the gate's.
+ */
+export const screen = (text: string): AdmissionOutcome => {
+  const written = screenWritten(text);
+  if (written === "excluded" || !text.includes("&")) {
+    return written;
+  }
+  const rendered = decodedReferences(text);
+  return rendered === text ? written : worse(written, screenWritten(rendered));
 };
 
 /** The topics in effect, and whether this code enforces all of them. */

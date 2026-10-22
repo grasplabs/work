@@ -453,6 +453,57 @@ describe("Knowledge admission", { timeout: 60_000 }, () => {
     });
   });
 
+  it("refuse a save whose escapes hide sensitive data, as YAML or Markdown decode them", async () => {
+    const person = await personWithCollection();
+    const marker = `marker${unique()}`;
+    const save = async (name: string, text: string) =>
+      await outcome(
+        person.api.knowledge.saveDocument({
+          collectionId: person.collectionId,
+          path: `${marker}-${name}.md`,
+          text,
+          ifVersion: 0,
+        })
+      );
+
+    expect({
+      description: await save(
+        "description",
+        '---\ndescription: "She has \\u0063ancer."\n---\n# Notes\nWe meet on Mondays.'
+      ),
+      title: await save(
+        "title",
+        '---\ntitle: "Her \\x73alary is \\u20ac4,200"\n---\nWe meet on Mondays.'
+      ),
+      otherKey: await save(
+        "other-key",
+        '---\nstatus: "She has \\u0063ancer"\n---\nWe meet on Mondays.'
+      ),
+      tag: await save(
+        "tag",
+        '---\ntags: ["Her \\u0063ancer"]\n---\nWe meet on Mondays.'
+      ),
+      decimalEntity: await save("decimal", "# Notes\nShe has &#99;ancer."),
+      hexEntity: await save("hex", "# Notes\nHer &#x73;alary is &euro;4,200."),
+      namedEntity: await save("named", "# Notes\nShe has &cscr;an&shy;cer."),
+      plain: await save(
+        "plain",
+        '---\ndescription: "Caf\\u00e9 &amp; tea"\n---\nTom &amp; Ann meet on Mondays.'
+      ),
+      stored: await storedWith(`${marker}-`),
+    }).toStrictEqual({
+      description: "knowledge.held",
+      title: "knowledge.excluded",
+      otherKey: "knowledge.held",
+      tag: "knowledge.held",
+      decimalEntity: "knowledge.held",
+      hexEntity: "knowledge.excluded",
+      namedEntity: "knowledge.held",
+      plain: "ok",
+      stored: 1,
+    });
+  });
+
   it("refuse an agent's memory whose message holds sensitive data", async () => {
     const user = await signedInApi(idp, "user");
     const agent = { type: "agent" as const, agentId: `agent-${unique()}` };
