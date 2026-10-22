@@ -26,6 +26,7 @@ import { runQuarterHourCron } from "./cron.ts";
 import { mockIdp } from "./idp.ts";
 import { racingDb } from "./racing-db.ts";
 import { aroundEngine, endLiveRuns, finished } from "./runs.ts";
+import { clientOrigin } from "./sign-in-config.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
 import { appWith } from "./workflow-apps.ts";
 
@@ -1276,6 +1277,12 @@ describe("attachments of mail", () => {
   });
 });
 
+/**
+ * The client's own mail domain: its hostname, which the router sorts mail
+ * to it by.
+ */
+const own = new URL(clientOrigin).hostname;
+
 /** The time `n` minutes from now, ISO 8601. */
 const minutes = (n: number): string =>
   new Date(Date.now() + n * 60_000).toISOString();
@@ -1287,7 +1294,7 @@ describe("mail posted to core's raw-mail ingress", () => {
     const builder = await personApi("builder");
     const app = await appWith(builder, intake("posted"));
 
-    const response = await post("posted@grasp.test", invoiceMail());
+    const response = await post(`posted@${own}`, invoiceMail());
     const read = await readByRun(builder, app);
 
     expect(response.status).toBe(202);
@@ -1299,7 +1306,7 @@ describe("mail posted to core's raw-mail ingress", () => {
   });
 
   it("answers a bounce with core's reason", async () => {
-    const response = await post("nobody-here@grasp.test", invoiceMail());
+    const response = await post(`nobody-here@${own}`, invoiceMail());
 
     expect(response.status).toBe(422);
     await expect(response.json()).resolves.toStrictEqual({
@@ -1312,10 +1319,10 @@ describe("mail posted to core's raw-mail ingress", () => {
     const app = await appWith(builder, intake("rotated"));
     const previous = "previous-router-secret";
 
-    const before = await post("rotated@grasp.test", invoiceMail(), {
+    const before = await post(`rotated@${own}`, invoiceMail(), {
       secret: previous,
     });
-    const rotating = await post("rotated@grasp.test", invoiceMail(), {
+    const rotating = await post(`rotated@${own}`, invoiceMail(), {
       secret: previous,
       changes: { ROUTER_SECRET_PREVIOUS: previous },
     });
@@ -1327,7 +1334,7 @@ describe("mail posted to core's raw-mail ingress", () => {
   it("refuses a delivery that isn't signed for exactly what it carries, and starts nothing", async () => {
     const builder = await personApi("builder");
     const app = await appWith(builder, intake("guarded"));
-    const to = "guarded@grasp.test";
+    const to = `guarded@${own}`;
     const mail = invoiceMail();
     // Same length, other bytes: what a message swapped on the way looks like.
     const swapped = mail.replace("Friday", "Monday");
@@ -1337,7 +1344,7 @@ describe("mail posted to core's raw-mail ingress", () => {
       unsigned: await post(to, mail, { unsigned: true }),
       otherKey: await post(to, mail, { secret: "another-client-secret" }),
       // Signed for one address, sent to another.
-      otherRecipient: await post("someone-else@grasp.test", mail, {
+      otherRecipient: await post(`someone-else@${own}`, mail, {
         sent: { to },
       }),
       otherSender: await post(to, mail, {
@@ -1365,6 +1372,80 @@ describe("mail posted to core's raw-mail ingress", () => {
     ).toStrictEqual(
       Object.fromEntries(Object.keys(refusals).map((name) => [name, 403]))
     );
+    await expect(runsOf(builder, app)).resolves.toHaveLength(0);
+  });
+
+  it("takes mail for the client's own domain however its case or end is written, as the router sorts it", async () => {
+    const builder = await personApi("builder");
+    const app = await appWith(builder, intake("folded"));
+
+    const statuses = [
+      await post(`Folded@${own.toUpperCase()}`, invoiceMail()),
+      await post(`folded@${own}.`, invoiceMail({ subject: "Invoice INV-8" })),
+    ].map(({ status }) => status);
+
+    expect(statuses).toStrictEqual([202, 202]);
+    await expect(runsOf(builder, app)).resolves.toHaveLength(2);
+  });
+
+  it("bounces signed mail for any domain but the client's own, so a wrong route in the router delivers nothing, and logs no address", async () => {
+    const builder = await personApi("builder");
+    const app = await appWith(builder, intake("sorted"));
+    const warned = vi.spyOn(console, "warn");
+    // The router's map sending another client's mail here, and domains
+    // that only look like this client's.
+    const recipients = [
+      "sorted@other.grasp.test",
+      "sorted@grasp.test",
+      `sorted@mail.${own}`,
+      `sorted@${own}.evil.test`,
+      `sorted@evil-${own}`,
+      `sorted@${own}..`,
+      // A Cyrillic look-alike, as punycode: header values are ASCII.
+      "sorted@xn--cme-5cd.grasp.test",
+      // One recipient per delivery: a list is one address, whose domain
+      // follows its last @, and whose local part receives nothing.
+      `sorted@${own},sorted@other.grasp.test`,
+      `sorted@other.grasp.test,sorted@${own}`,
+      "sorted",
+      `@${own}`,
+    ];
+
+    try {
+      const answers = await Promise.all(
+        recipients.map(async (to) => {
+          // The envelope recipient is what's checked: the To header says
+          // whatever the sender wrote.
+          const response = await post(to, invoiceMail({ to: `sorted@${own}` }));
+          return [to, response.status, await response.json()];
+        })
+      );
+
+      expect(answers).toStrictEqual(
+        recipients.map((to) => [to, 422, { reason: "No such address." }])
+      );
+      await expect(runsOf(builder, app)).resolves.toHaveLength(0);
+      expect(warned).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: "mail.ingress_refused",
+          reason: "foreign_recipient",
+        })
+      );
+      expect(JSON.stringify(warned.mock.calls)).not.toContain("grasp.test");
+    } finally {
+      warned.mockRestore();
+    }
+  });
+
+  it("refuses mail, for the router to try again, while the deployment has no hostname of its own", async () => {
+    const builder = await personApi("builder");
+    const app = await appWith(builder, intake("unset"));
+
+    const response = await post(`unset@${own}`, invoiceMail(), {
+      changes: { SIGN_IN: undefined },
+    });
+
+    expect(response.status).toBe(403);
     await expect(runsOf(builder, app)).resolves.toHaveLength(0);
   });
 });
