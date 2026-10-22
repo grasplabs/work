@@ -24,7 +24,13 @@ import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { revocationsOf, tellKept } from "./access-revocations.ts";
-import { hasSources, sourcesOf, unreadableBy } from "./app-provenance.ts";
+import {
+  hasSources,
+  readerOf,
+  sourcesOf,
+  unreadableBy,
+} from "./app-provenance.ts";
+import type { Reader } from "./app-provenance.ts";
 import { appFor } from "./apps.ts";
 import {
   auditedBatch,
@@ -43,7 +49,6 @@ import {
 } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
 import { appHost } from "./durable-objects.ts";
-import type { PersonAccess } from "./knowledge/access.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
@@ -177,7 +182,7 @@ const checkedPeople = async (
   env: Env,
   app: App,
   member: AppMemberRef
-): Promise<PersonAccess[]> => {
+): Promise<Reader[]> => {
   const db = drizzle(env.DB);
   const inTeam =
     member.type === "person"
@@ -226,7 +231,7 @@ const checkedPeople = async (
     if (!known.success || isAdmin(known.data)) {
       return [];
     }
-    return [{ userId, teamIds: teamsByPerson.get(userId) ?? [], admin: false }];
+    return [readerOf(userId, teamsByPerson.get(userId) ?? [], known.data)];
   });
 };
 

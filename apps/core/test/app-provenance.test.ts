@@ -1,9 +1,11 @@
 import { connectionOwnersMax } from "@grasp-os/shared/connect";
+import { appIdSchema } from "@grasp-os/shared/ids";
 import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
+import { sourcesOfApps } from "../src/app-provenance.ts";
 import { mayRead } from "../src/knowledge/access.ts";
 import { outlook, requestGranted } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
@@ -533,5 +535,727 @@ describe("sharing an App", () => {
       .map(({ id }) => id);
     // Only the Apps that read nothing she can't: their mail, nothing else.
     expect(new Set(listed)).toStrictEqual(new Set(kept));
+  });
+});
+
+/**
+ * An app binding `caller` holds of `callee`'s public functions, as an
+ * admin's approval writes it (resource-bindings.ts), revoked if asked:
+ * what sharing follows, whatever its declaration's functions.
+ */
+const appBinding = async (
+  caller: string,
+  callee: string,
+  status: "active" | "revoked" = "active"
+): Promise<void> => {
+  await env.DB.prepare(
+    `INSERT INTO app_resource_bindings (id, app_id, alias, kind, target,
+      declaration_hash, contract_id, fingerprint, reviewed_version, status,
+      approved_by, approved_at, revoked_by, revoked_at)
+     VALUES (?, ?, ?, 'app', ?, 'hash', ?, 'fingerprint', 1, ?, 'test', 0, ?, ?)`
+  )
+    .bind(
+      crypto.randomUUID(),
+      caller,
+      `peer${unique().replaceAll("-", "")}`.slice(0, 40),
+      JSON.stringify({ kind: "app", appId: callee }),
+      `apps.${callee}`,
+      status,
+      status === "revoked" ? "test" : null,
+      status === "revoked" ? 0 : null
+    )
+    .run();
+};
+
+/** A permission row's subject and object types, as permissions.ts names them. */
+type SubjectType = "app" | "workflow" | "store";
+type ObjectType = "store" | "connection" | "workflow";
+
+/** The statement inserting a permission row, as an admin's grant writes it. */
+const grantStatement = (
+  subjectType: SubjectType,
+  subject: string,
+  objectType: ObjectType,
+  object: string,
+  actions: string[]
+) =>
+  env.DB.prepare(
+    `INSERT INTO permissions (id, subject_type, subject_id, object_type, object_id,
+      actions, binding, status, requested_by, requested_at, granted_by, granted_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'active', 'test', 0, 'test', 0)`
+  ).bind(
+    crypto.randomUUID(),
+    subjectType,
+    subject,
+    objectType,
+    object,
+    JSON.stringify(actions),
+    `GRANT_${unique().toUpperCase().replaceAll("-", "_")}`
+  );
+
+/**
+ * A permission row as an admin's grant writes it, for a subject the
+ * request path would refuse here only for lack of the other resources it
+ * checks (a workflow's builders, a store's owner).
+ */
+const grantRow = async (
+  subjectType: SubjectType,
+  subject: string,
+  objectType: ObjectType,
+  object: string,
+  actions = ["notes.list"]
+): Promise<void> => {
+  await grantStatement(subjectType, subject, objectType, object, actions).run();
+};
+
+/**
+ * A store grant `consumer` holds on a store `owner` owns (none: a store no
+ * App owns), as an admin's grant writes it. A workflow may hold one too
+ * (permissions.ts, requireObjectFits).
+ */
+const storeGrant = async (
+  consumer: string,
+  owner?: string,
+  subjectType: "app" | "workflow" = "app"
+): Promise<string> => {
+  const store = `store_${unique().replaceAll("-", "")}`;
+  if (owner !== undefined) {
+    await env.DB.prepare(
+      "INSERT INTO sdk_store_owners (store_id, app_id, claimed_at) VALUES (?, ?, 0)"
+    )
+      .bind(store, owner)
+      .run();
+  }
+  await grantRow(subjectType, consumer, "store", store);
+  return store;
+};
+
+/** A business store (data-stores.ts) no App owns, shared with `managers`. */
+const businessStore = async (
+  creator: Person,
+  managers: { type: "person" | "team"; id: string }[] = []
+): Promise<string> => {
+  const id = crypto.randomUUID();
+  await env.DB.prepare(
+    "INSERT INTO business_stores (id, owner_id, physical_namespace_role, created_at) VALUES (?, ?, 'data_store', 0)"
+  )
+    .bind(id, creator.userId)
+    .run();
+  for (const { type, id: member } of managers) {
+    // oxlint-disable-next-line no-await-in-loop -- one member at a time
+    await env.DB.prepare(
+      "INSERT INTO business_store_members (store_id, member_type, member_id, role, added_by, added_at) VALUES (?, ?, ?, 'manage', 'test', 0)"
+    )
+      .bind(id, type, member)
+      .run();
+  }
+  return id;
+};
+
+describe("sharing an App that reaches other Apps sealed", () => {
+  it("is refused when an App it calls through an approved binding read a mailbox, revoked or not, either end", async () => {
+    const [owner, anna] = await Promise.all([
+      personApi("builder"),
+      personApi("builder"),
+    ]);
+    const [caller, callee, revokedCaller] = await Promise.all([
+      newApp(owner),
+      newApp(owner),
+      newApp(owner),
+    ]);
+    const mailbox = await mailboxOf(owner);
+    await grantConnection(owner, callee, mailbox);
+    await appBinding(caller, callee);
+    await appBinding(revokedCaller, callee, "revoked");
+    // And the other way: the caller read a mailbox, its calls may carry it.
+    const [sender, receiver] = await Promise.all([
+      newApp(owner),
+      newApp(owner),
+    ]);
+    const sent = await mailboxOf(owner);
+    await grantConnection(owner, sender, sent);
+    await appBinding(sender, receiver);
+    const anyone = { type: "person", id: anna.userId } as const;
+
+    await expect(
+      Promise.all([
+        shareRefusal(owner, caller, anyone),
+        shareRefusal(owner, revokedCaller, anyone),
+        shareRefusal(owner, receiver, anyone),
+      ])
+    ).resolves.toStrictEqual([
+      { sources: [`connection:${mailbox}`], people: [anna.userId] },
+      { sources: [`connection:${mailbox}`], people: [anna.userId] },
+      { sources: [`connection:${sent}`], people: [anna.userId] },
+    ]);
+  });
+
+  it("is refused when a store it reads belongs to an App that read a mailbox, and fails closed for a store no App owns", async () => {
+    const [owner, anna] = await Promise.all([
+      personApi("builder"),
+      personApi("builder"),
+    ]);
+    const [consumer, storeOwner, orphaned] = await Promise.all([
+      newApp(owner),
+      newApp(owner),
+      newApp(owner),
+    ]);
+    const mailbox = await mailboxOf(owner);
+    await grantConnection(owner, storeOwner, mailbox);
+    await storeGrant(consumer, storeOwner);
+    const unowned = await storeGrant(orphaned);
+    const anyone = { type: "person", id: anna.userId } as const;
+
+    await expect(
+      Promise.all([
+        shareRefusal(owner, consumer, anyone),
+        // And the store's owner: what the consumer wrote may carry what it read.
+        shareRefusal(owner, orphaned, anyone),
+      ])
+    ).resolves.toStrictEqual([
+      { sources: [`connection:${mailbox}`], people: [anna.userId] },
+      { sources: [`store:${unowned}`], people: [anna.userId] },
+    ]);
+  });
+
+  it("fails closed for a binding to an App that doesn't exist", async () => {
+    const [owner, anna] = await Promise.all([
+      personApi("builder"),
+      personApi("builder"),
+    ]);
+    const app = await newApp(owner);
+    const ghost = `app_${unique().replaceAll("-", "")}`;
+    await appBinding(app, ghost);
+
+    await expect(
+      shareRefusal(owner, app, { type: "person", id: anna.userId })
+    ).resolves.toStrictEqual({
+      sources: [`app:${ghost}`],
+      people: [anna.userId],
+    });
+  });
+});
+
+/** Ways an App `a` comes to hold what an App `b` read, both sealed. */
+const links = [
+  [
+    "an app binding",
+    async (a: string, b: string) => {
+      await appBinding(a, b);
+    },
+  ],
+  [
+    "a store grant",
+    async (a: string, b: string) => {
+      await storeGrant(a, b);
+    },
+  ],
+] as const;
+
+/** Ways an App comes to hold something that doesn't resolve, and how it is named. */
+const dangling = [
+  [
+    "an app binding",
+    async (app: string) => {
+      const ghost = `app_${unique().replaceAll("-", "")}`;
+      await appBinding(app, ghost);
+      return `app:${ghost}`;
+    },
+  ],
+  ["a store grant", async (app: string) => `store:${await storeGrant(app)}`],
+] as const;
+
+describe("who still passes once an App reaches another sealed", () => {
+  it.each(links)(
+    "lets the mailbox's owner and the admin through, and no one else, over %s",
+    async (_name, link) => {
+      const [owner, anna, ben, admin] = await Promise.all([
+        personApi("builder"),
+        personApi("builder"),
+        personApi("builder"),
+        personApi("admin"),
+      ]);
+      const team = await newTeam(admin, [anna, ben]);
+      const [shared, unshared, callee] = await Promise.all([
+        newApp(owner),
+        newApp(owner),
+        newApp(anna),
+      ]);
+      // Shared with the team before it reaches anything, as in the order
+      // that can't be refused up front.
+      await owner.api.apps.members.add(shared, {
+        type: "team",
+        id: team,
+        role: "user",
+      });
+      const mailbox = await mailboxOf(anna);
+      await grantConnection(anna, callee, mailbox);
+      await link(shared, callee);
+      await link(unshared, callee);
+
+      await expect(
+        Promise.all([
+          shareRefusal(owner, unshared, { type: "person", id: anna.userId }),
+          shareRefusal(owner, unshared, { type: "person", id: ben.userId }),
+        ])
+      ).resolves.toStrictEqual([
+        "ok",
+        { sources: [`connection:${mailbox}`], people: [ben.userId] },
+      ]);
+      await expect(
+        Promise.all(
+          [anna, ben, admin, owner].map(
+            async (person) => await outcome(person.api.apps.get(shared))
+          )
+        )
+      ).resolves.toStrictEqual(["ok", "app.unreadable", "ok", "ok"]);
+    }
+  );
+
+  it.each(dangling)(
+    "fails closed over %s to what doesn't resolve: the owner and the admin pass, Anna doesn't",
+    async (_name, reach) => {
+      const [owner, anna, admin] = await Promise.all([
+        personApi("builder"),
+        personApi("builder"),
+        personApi("admin"),
+      ]);
+      const team = await newTeam(admin, [anna]);
+      const [shared, unshared] = await Promise.all([
+        newApp(owner),
+        newApp(owner),
+      ]);
+      await owner.api.apps.members.add(shared, {
+        type: "team",
+        id: team,
+        role: "user",
+      });
+      await reach(shared);
+      const named = await reach(unshared);
+
+      await expect(
+        Promise.all(
+          [anna, admin, owner].map(
+            async (person) => await outcome(person.api.apps.get(shared))
+          )
+        )
+      ).resolves.toStrictEqual(["app.unreadable", "ok", "ok"]);
+      await expect(
+        shareRefusal(owner, unshared, { type: "person", id: anna.userId })
+      ).resolves.toStrictEqual({ sources: [named], people: [anna.userId] });
+    }
+  );
+});
+
+describe("how far sharing follows Apps reaching each other", () => {
+  it("follows a chain of Apps down to the mailbox, and a cycle without end", async () => {
+    const [owner, anna] = await Promise.all([
+      personApi("builder"),
+      personApi("builder"),
+    ]);
+    const [a, b, c, x, y] = await Promise.all([
+      newApp(owner),
+      newApp(owner),
+      newApp(owner),
+      newApp(owner),
+      newApp(owner),
+    ]);
+    const mailbox = await mailboxOf(owner);
+    await grantConnection(owner, c, mailbox);
+    // A calls B, which calls C (the mailbox's App).
+    await appBinding(a, b);
+    await appBinding(b, c);
+    // And X and Y call each other, X's data from Y's mailbox.
+    const other = await mailboxOf(owner);
+    await grantConnection(owner, y, other);
+    await appBinding(x, y);
+    await appBinding(y, x);
+    const anyone = { type: "person", id: anna.userId } as const;
+
+    await expect(
+      Promise.all([
+        shareRefusal(owner, a, anyone),
+        shareRefusal(owner, x, anyone),
+      ])
+    ).resolves.toStrictEqual([
+      { sources: [`connection:${mailbox}`], people: [anna.userId] },
+      { sources: [`connection:${other}`], people: [anna.userId] },
+    ]);
+  });
+
+  it("follows a store grant to the store's owner from a third App that calls it", async () => {
+    const [owner, anna] = await Promise.all([
+      personApi("builder"),
+      personApi("builder"),
+    ]);
+    const [writer, storeOwner, caller] = await Promise.all([
+      newApp(owner),
+      newApp(owner),
+      newApp(owner),
+    ]);
+    const mailbox = await mailboxOf(owner);
+    await grantConnection(owner, writer, mailbox);
+    // The writer holds a grant on the store storeOwner owns: its writes
+    // are in the store. And caller calls storeOwner.
+    await storeGrant(writer, storeOwner);
+    await appBinding(caller, storeOwner);
+    const anyone = { type: "person", id: anna.userId } as const;
+
+    await expect(
+      Promise.all([
+        shareRefusal(owner, storeOwner, anyone),
+        shareRefusal(owner, caller, anyone),
+      ])
+    ).resolves.toStrictEqual([
+      { sources: [`connection:${mailbox}`], people: [anna.userId] },
+      { sources: [`connection:${mailbox}`], people: [anna.userId] },
+    ]);
+  });
+
+  it("fails closed past the depth it follows, instead of walking on", async () => {
+    const [owner, anna] = await Promise.all([
+      personApi("builder"),
+      personApi("builder"),
+    ]);
+    const chain = await Promise.all(
+      Array.from({ length: 40 }, async () => await newApp(owner))
+    );
+    await grantConnection(owner, chain.at(-1) ?? "", await mailboxOf(owner));
+    for (const [at, from] of chain.entries()) {
+      const to = chain[at + 1];
+      if (to !== undefined) {
+        // oxlint-disable-next-line no-await-in-loop -- in order
+        await appBinding(from, to);
+      }
+    }
+
+    await expect(
+      shareRefusal(owner, chain[0] ?? "", { type: "person", id: anna.userId })
+    ).resolves.toStrictEqual({ sources: ["app:*"], people: [anna.userId] });
+  });
+});
+
+describe("sharing an App a workflow's store grant reaches", () => {
+  it("follows what the workflow itself may read into the App whose store it holds a grant on", async () => {
+    const [owner, anna] = await Promise.all([
+      personApi("builder"),
+      personApi("builder"),
+    ]);
+    const app = await newApp(owner);
+    const mailbox = await mailboxOf(owner);
+    const workflow = `workflow_${unique().replaceAll("-", "")}`;
+    // An independent workflow with its own mailbox grant writes into the
+    // App's store.
+    await grantRow("workflow", workflow, "connection", mailbox);
+    await storeGrant(workflow, app, "workflow");
+
+    await expect(
+      shareRefusal(owner, app, { type: "person", id: anna.userId })
+    ).resolves.toStrictEqual({
+      sources: [`connection:${mailbox}`],
+      people: [anna.userId],
+    });
+  });
+});
+
+describe("sharing an App granted a business store", () => {
+  it("reaches those who manage the store, and not those who don't", async () => {
+    const [owner, creator, member, teamMate, outsider, plain, admin] =
+      await Promise.all([
+        personApi("builder"),
+        personApi("builder"),
+        personApi("builder"),
+        personApi("builder"),
+        personApi("builder"),
+        personApi("user"),
+        personApi("admin"),
+      ]);
+    const team = await newTeam(admin, [teamMate]);
+    const store = await businessStore(creator, [
+      { type: "person", id: member.userId },
+      { type: "person", id: plain.userId },
+      { type: "team", id: team },
+    ]);
+    const app = await newApp(owner);
+    await grantRow("app", app, "store", store);
+    const to = async (person: Person) =>
+      await shareRefusal(owner, app, { type: "person", id: person.userId });
+
+    await expect(
+      Promise.all([creator, member, teamMate, outsider, plain].map(to))
+    ).resolves.toStrictEqual([
+      "ok",
+      "ok",
+      "ok",
+      { sources: [`store:${store}`], people: [outsider.userId] },
+      // Shared with them, but their role in the organization doesn't build.
+      { sources: [`store:${store}`], people: [plain.userId] },
+    ]);
+  });
+});
+
+describe("sharing an App granted an independent workflow", () => {
+  it("is refused when the workflow it starts or follows read a mailbox, and lets the mailbox's owner, the admin and the owner through", async () => {
+    const [owner, anna, ben, admin] = await Promise.all([
+      personApi("builder"),
+      personApi("builder"),
+      personApi("builder"),
+      personApi("admin"),
+    ]);
+    const team = await newTeam(admin, [anna, ben]);
+    const [starter, follower] = await Promise.all([
+      newApp(owner),
+      newApp(owner),
+    ]);
+    // Shared with the team before it reaches anything, as in the order
+    // that can't be refused up front.
+    await owner.api.apps.members.add(starter, {
+      type: "team",
+      id: team,
+      role: "user",
+    });
+    const mailbox = await mailboxOf(anna);
+    const workflow = `workflow_${unique().replaceAll("-", "")}`;
+    await grantRow("workflow", workflow, "connection", mailbox);
+    await grantRow("app", starter, "workflow", workflow, ["start"]);
+    await grantRow("app", follower, "workflow", workflow, ["read"]);
+
+    await expect(
+      Promise.all([
+        shareRefusal(owner, starter, { type: "person", id: ben.userId }),
+        shareRefusal(owner, follower, { type: "person", id: ben.userId }),
+        shareRefusal(owner, starter, { type: "person", id: anna.userId }),
+      ])
+    ).resolves.toStrictEqual([
+      { sources: [`connection:${mailbox}`], people: [ben.userId] },
+      { sources: [`connection:${mailbox}`], people: [ben.userId] },
+      "ok",
+    ]);
+    await expect(
+      Promise.all(
+        [anna, ben, admin, owner].map(
+          async (person) => await outcome(person.api.apps.get(starter))
+        )
+      )
+    ).resolves.toStrictEqual(["ok", "app.unreadable", "ok", "ok"]);
+  });
+
+  it("carries what an App sends the workflow it starts on to the App whose store the workflow writes", async () => {
+    const [owner, anna] = await Promise.all([
+      personApi("builder"),
+      personApi("builder"),
+    ]);
+    const [sender, storeOwner] = await Promise.all([
+      newApp(owner),
+      newApp(owner),
+    ]);
+    const mailbox = await mailboxOf(owner);
+    await grantConnection(owner, sender, mailbox);
+    const workflow = `workflow_${unique().replaceAll("-", "")}`;
+    await grantRow("app", sender, "workflow", workflow, ["start"]);
+    await storeGrant(workflow, storeOwner, "workflow");
+
+    await expect(
+      shareRefusal(owner, storeOwner, { type: "person", id: anna.userId })
+    ).resolves.toStrictEqual({
+      sources: [`connection:${mailbox}`],
+      people: [anna.userId],
+    });
+  });
+});
+
+describe("sharing an App whose store reads on its own", () => {
+  it("counts a store's own grants as its owner's, or a business store's as its holders'", async () => {
+    const [owner, anna] = await Promise.all([
+      personApi("builder"),
+      personApi("builder"),
+    ]);
+    const [storeOwner, holder] = await Promise.all([
+      newApp(owner),
+      newApp(owner),
+    ]);
+    const [mailbox, other] = await Promise.all([
+      mailboxOf(owner),
+      mailboxOf(owner),
+    ]);
+    const store = `store_${unique().replaceAll("-", "")}`;
+    await env.DB.prepare(
+      "INSERT INTO sdk_store_owners (store_id, app_id, claimed_at) VALUES (?, ?, 0)"
+    )
+      .bind(store, storeOwner)
+      .run();
+    await grantRow("store", store, "connection", mailbox);
+    // A business store Anna manages, which read a mailbox she can't.
+    const business = await businessStore(owner, [
+      { type: "person", id: anna.userId },
+    ]);
+    await grantRow("store", business, "connection", other);
+    await grantRow("app", holder, "store", business);
+    const anyone = { type: "person", id: anna.userId } as const;
+
+    await expect(
+      Promise.all([
+        shareRefusal(owner, storeOwner, anyone),
+        shareRefusal(owner, holder, anyone),
+      ])
+    ).resolves.toStrictEqual([
+      { sources: [`connection:${mailbox}`], people: [anna.userId] },
+      { sources: [`connection:${other}`], people: [anna.userId] },
+    ]);
+  });
+});
+
+/** Workflows enough that two Apps' together pass the walk's cap, one's alone don't. */
+const workflowsEach = 300;
+
+describe("deciding many Apps at once past the walk's cap", () => {
+  it("still shows each App that passes on its own, and hides the one that doesn't", async () => {
+    const [owner, anna] = await Promise.all([
+      personApi("builder"),
+      personApi("builder"),
+    ]);
+    const mail = await mailConnection();
+    const shared = await Promise.all(
+      Array.from({ length: 3 }, async () => await newApp(owner))
+    );
+    const mailbox = await mailboxOf(owner);
+    const grants: string[] = [];
+    for (const [index, app] of shared.entries()) {
+      // Shared before it reaches anything, as in the order that can't be
+      // refused up front.
+      // oxlint-disable-next-line no-await-in-loop -- one App at a time
+      await owner.api.apps.members.add(app, {
+        type: "person",
+        id: anna.userId,
+        role: "user",
+      });
+      // Each shared App calls an App of the owner's that follows many
+      // workflows of its own: wide, but nothing Anna can't read.
+      // oxlint-disable-next-line no-await-in-loop -- one App at a time
+      const wide = await newApp(owner);
+      // oxlint-disable-next-line no-await-in-loop -- one App at a time
+      await appBinding(app, wide);
+      const workflows = Array.from(
+        { length: workflowsEach },
+        () => `workflow_${unique().replaceAll("-", "")}`
+      );
+      // oxlint-disable-next-line no-await-in-loop -- one App at a time
+      await env.DB.batch(
+        workflows.map((workflow) =>
+          grantStatement("app", wide, "workflow", workflow, ["read"])
+        )
+      );
+      // But the last one's first workflow read the owner's mailbox.
+      if (index === shared.length - 1) {
+        // oxlint-disable-next-line no-await-in-loop -- one App at a time
+        await grantRow("workflow", workflows[0] ?? "", "connection", mailbox);
+      }
+      // oxlint-disable-next-line no-await-in-loop -- one App at a time
+      const grant = await storedGrant(
+        { type: "app", id: app },
+        { type: "connection", id: mail.id },
+        ["mail.list"],
+        "MAIL"
+      );
+      grants.push(grant);
+    }
+
+    const all = await anna.api.permissions.list();
+    const listed = all
+      .filter(
+        ({ subject }) =>
+          subject.type === "app" && shared.includes(subject.appId)
+      )
+      .map(({ id }) => id);
+    expect(new Set(listed)).toStrictEqual(new Set(grants.slice(0, -1)));
+  });
+});
+
+/** Apps shared at once that all reach one graph wider than the walk's cap. */
+const hubApps = 40;
+/** Workflows the App they all call follows: past the cap on its own. */
+const hubWorkflows = 600;
+/**
+ * Queries deciding them all may take: a walk again for each, querying the
+ * same graph, would take over a dozen apiece.
+ */
+const maxQueries = 30;
+
+/** `env`, counting the statements prepared on its core database. */
+const countingEnv = (): { counted: Env; queries: () => number } => {
+  let prepared = 0;
+  const db: D1Database = {
+    prepare: (query) => {
+      prepared += 1;
+      return env.DB.prepare(query);
+    },
+    batch: async (statements) => await env.DB.batch(statements),
+    exec: async (query) => await env.DB.exec(query),
+    withSession: (constraint) => env.DB.withSession(constraint),
+    // oxlint-disable-next-line typescript/no-deprecated -- the type still declares it; nothing calls it
+    dump: async () => await Promise.reject(new Error("Not counted")),
+  };
+  return { counted: { ...env, DB: db }, queries: () => prepared };
+};
+
+describe("deciding many Apps that reach one wide graph", () => {
+  it("queries each part of the graph once, however many Apps reach it, and still decides each App", async () => {
+    const owner = await personApi("builder");
+    const [hub, medium, wide, small] = await Promise.all([
+      newApp(owner),
+      newApp(owner),
+      newApp(owner),
+      newApp(owner),
+    ]);
+    const bound = await Promise.all(
+      Array.from({ length: hubApps }, async () => await newApp(owner))
+    );
+    // Every one of `bound` calls `hub`, which follows more workflows than
+    // the walk follows: none of them passes, alone or together.
+    await Promise.all(
+      bound.map(async (app) => {
+        await appBinding(app, hub);
+      })
+    );
+    await env.DB.batch(
+      Array.from({ length: hubWorkflows }, () =>
+        grantStatement(
+          "app",
+          hub,
+          "workflow",
+          `workflow_${unique().replaceAll("-", "")}`,
+          ["read"]
+        )
+      )
+    );
+    // `medium` calls an App following fewer: it passes on its own, once
+    // the batch has tripped the cap. `small` reaches nothing.
+    await appBinding(medium, wide);
+    await env.DB.batch(
+      Array.from({ length: workflowsEach }, () =>
+        grantStatement(
+          "app",
+          wide,
+          "workflow",
+          `workflow_${unique().replaceAll("-", "")}`,
+          ["read"]
+        )
+      )
+    );
+    const asked = [medium, small, ...bound].map((id) => appIdSchema.parse(id));
+    const { counted, queries } = countingEnv();
+
+    const sources = await sourcesOfApps(counted, asked);
+
+    expect(
+      Object.fromEntries(
+        asked.map((app) => [app, sources.get(app)?.unresolved])
+      )
+    ).toStrictEqual({
+      [medium]: [],
+      [small]: [],
+      ...Object.fromEntries(bound.map((app) => [app, ["app:*"]])),
+    });
+    expect(queries()).toBeLessThanOrEqual(maxQueries);
   });
 });
