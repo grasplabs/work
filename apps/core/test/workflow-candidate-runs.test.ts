@@ -177,6 +177,30 @@ const callsOf = async (runId: string) => {
   );
 };
 
+/** The audit actions of a run's ends. */
+const endActions = new Set([
+  "workflow.run.completed",
+  "workflow.run.failed",
+  "workflow.run.cancelled",
+]);
+
+/** How the audit log says test run `runId` ended, each time it says so. */
+const endsOf = async (runId: string) => {
+  const events = await allEvents();
+  return events
+    .filter(
+      ({ action, detail }) => endActions.has(action) && detail?.run === runId
+    )
+    .map(({ action, target, detail }) => ({
+      action,
+      target,
+      candidate: detail?.candidate,
+      ...(detail?.failureCode === undefined
+        ? {}
+        : { failureCode: detail.failureCode }),
+    }));
+};
+
 /** The descriptor of an object of string `fields`, as the catalog holds one. */
 const descriptor = (fields: Record<string, string>): string =>
   JSON.stringify(
@@ -918,6 +942,14 @@ describe("test runs of a workflow's draft", () => {
       () => true,
       async () => await outcome(startCandidateRun(env, ada, workflow.id, start))
     );
+    const { results: started } = await env.DB.prepare(
+      "SELECT id FROM workflow_candidate_runs WHERE workflow_resource_id = ? ORDER BY created_at"
+    )
+      .bind(workflow.id)
+      .all<{ id: string }>();
+    const recordedEnds = await Promise.all(
+      started.map(async ({ id }) => await endsOf(id))
+    );
     // Both left as if the start had stopped before the engine answered:
     // a sweep a start's grace later settles them, each as the engine has it.
     await env.DB.prepare(
@@ -938,6 +970,7 @@ describe("test runs of a workflow's draft", () => {
         attempt,
       ]),
       refused: refused === "ok" ? "ok" : "refused",
+      recordedEnds,
       rows,
     }).toStrictEqual({
       killed: { status: "completed", output: { status: "Hi" } },
@@ -947,6 +980,25 @@ describe("test runs of a workflow's draft", () => {
         ["finish", 2],
       ],
       refused: "refused",
+      // How each ended, in the audit log as a test run's, once: the one the
+      // engine never took at core's word.
+      recordedEnds: [
+        [
+          {
+            action: "workflow.run.completed",
+            target: { type: "workflow_resource", id: workflow.id },
+            candidate: true,
+          },
+        ],
+        [
+          {
+            action: "workflow.run.failed",
+            target: { type: "workflow_resource", id: workflow.id },
+            candidate: true,
+            failureCode: "workflow.start_unconfirmed",
+          },
+        ],
+      ],
       rows: [
         { status: "completed", failureCode: null },
         { status: "failed", failureCode: "workflow.start_unconfirmed" },
@@ -1084,6 +1136,10 @@ describe("test runs of a workflow's draft", () => {
     const end = await ended(ada, workflow.id, runId);
     const again = await terminateCandidateRun(env, ada, workflow.id, runId);
     const longEnd = endOf(await ended(ada, long.id, longRun));
+    const recordedEnds = {
+      long: await endsOf(longRun),
+      stopped: await endsOf(runId),
+    };
     // Both rows left behind the engine, as if their ends never reached
     // them: the failed one still `starting`, the stopped one `running` a
     // week and more after it started. A sweep takes each as the engine has
@@ -1113,6 +1169,7 @@ describe("test runs of a workflow's draft", () => {
       end: end.status,
       // Stopping one that ended changes nothing.
       again: again.status,
+      recordedEnds,
       recorded: events
         .filter(
           ({ action, detail }) =>
@@ -1131,7 +1188,82 @@ describe("test runs of a workflow's draft", () => {
       stopped: runId,
       end: "cancelled",
       again: "cancelled",
+      // How each ended, in the audit log as a test run's, once.
+      recordedEnds: {
+        long: [
+          {
+            action: "workflow.run.failed",
+            target: { type: "workflow_resource", id: long.id },
+            candidate: true,
+            failureCode: "workflow.candidate_wait_limit",
+          },
+        ],
+        stopped: [
+          {
+            action: "workflow.run.cancelled",
+            target: { type: "workflow_resource", id: workflow.id },
+            candidate: true,
+          },
+        ],
+      },
       recorded: [true],
+    });
+  });
+
+  it("gives up a test run's places in the admission queue once the engine ends it, though core ended its row first", async () => {
+    const ada = await person("builder");
+    const { workflow, revision } = await drafted(ada, {
+      tasks: [
+        { hold: { wait: "PT10M" } },
+        { finish: { set: { status: "done" } } },
+      ],
+    });
+    const { runId } = await startCandidateRun(env, ada, workflow.id, {
+      revision,
+      input: { who: "Ada" },
+      fixtures: {},
+    });
+    await vi.waitFor(
+      async () => {
+        const going = await candidateRunFor(env, ada, workflow.id, runId);
+        if (going.status !== "running") {
+          throw new Error(`Test run ${runId} is ${going.status}`);
+        }
+      },
+      { timeout: 20_000, interval: 100 }
+    );
+    // As core leaves it stopping a run the engine hadn't confirmed: its
+    // row cancelled at core's word, a step's place still in the queue.
+    const now = Date.now();
+    await env.DB.batch([
+      env.DB.prepare(
+        "UPDATE workflow_candidate_runs SET status = 'cancelled', ended_at = ? WHERE id = ?"
+      ).bind(now, runId),
+      env.DB.prepare(
+        "INSERT INTO workflow_admission_queue (run_id, step_hash, subject, resource, enqueued_at, seen_at, waiting_for, retry_at, turn, attempt_deadline) VALUES (?, 'hold', ?, ?, ?, ?, 'person', ?, 0, ?)"
+      ).bind(runId, ada.userId, workflow.id, now, now, now, now + 60_000),
+    ]);
+    const places = async () =>
+      await env.DB.prepare(
+        "SELECT count(*) AS n FROM workflow_admission_queue WHERE run_id = ?"
+      )
+        .bind(runId)
+        .first<number>("n");
+    const before = await places();
+
+    // Stopped again, the engine ends it, and its end gives up the place.
+    await terminateCandidateRun(env, ada, workflow.id, runId);
+    await vi.waitFor(
+      async () => {
+        await expect(places()).resolves.toBe(0);
+      },
+      { timeout: 20_000, interval: 100 }
+    );
+
+    expect({ before, ends: await endsOf(runId) }).toStrictEqual({
+      before: 1,
+      // Ended at core's word, its end is recorded by the stop, not again.
+      ends: [],
     });
   });
 
@@ -1199,6 +1331,7 @@ describe("test runs of a workflow's draft", () => {
     const lost = kept[0]?.id ?? "";
     expect({
       full,
+      lostEnd: await endsOf(lost),
       lostGone: await outcome(candidateRunFor(env, ada, workflow.id, lost)),
       remaining: await countOf(
         "SELECT COUNT(*) AS n FROM workflow_candidate_runs WHERE workflow_resource_id = ?",
@@ -1209,6 +1342,14 @@ describe("test runs of a workflow's draft", () => {
       ),
     }).toStrictEqual({
       full: "workflow.candidate_kept_limit",
+      lostEnd: [
+        {
+          action: "workflow.run.failed",
+          target: { type: "workflow_resource", id: workflow.id },
+          candidate: true,
+          failureCode: "workflow.run_unavailable",
+        },
+      ],
       // Ended failed, as the engine had no record of it, then taken.
       lostGone: "workflow.candidate_unavailable",
       // Only the run of this week is left.

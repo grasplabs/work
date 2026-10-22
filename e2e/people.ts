@@ -240,6 +240,7 @@ const cast = {
   iconMoves: { member: "user" },
   pageRecovery: { member: "user" },
   brain: { member: "user" },
+  brainChat: { member: "user" },
   contexts: { member: "user" },
 } as const satisfies Record<string, Record<string, Role>>;
 
