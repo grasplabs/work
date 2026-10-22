@@ -29,6 +29,7 @@ import {
   portableCallApp,
   portableFunctionResponse,
 } from "./app-function-route.ts";
+import { appLinkResponse, linkRouteOf } from "./app-link-route.ts";
 import { appTokenResponse, tokenRequestApp } from "./app-token-route.ts";
 import { auditExportResponse } from "./audit-rpc.ts";
 import { authBasePath } from "./auth/auth.ts";
@@ -237,6 +238,17 @@ const appCallResponse = async (
   const tokenApp = tokenRequestApp(pathname);
   if (tokenApp !== undefined) {
     return await appTokenResponse(request, env, tokenApp, requestId);
+  }
+  const linkRoute = linkRouteOf(pathname, request.method);
+  if (linkRoute === "not_found") {
+    return errorResponse(
+      404,
+      requestErrors.create("request.not_found"),
+      requestId
+    );
+  }
+  if (linkRoute !== undefined) {
+    return await appLinkResponse(request, env, linkRoute, requestId);
   }
   const fileRoute = fileRouteOf(pathname, request.method);
   if (fileRoute === "not_found") {
