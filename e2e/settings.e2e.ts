@@ -2,13 +2,15 @@ import { expect } from "@playwright/test";
 import type { Page } from "@playwright/test";
 
 import { test } from "./csp.ts";
-import { peopleIn } from "./people.ts";
+import { apiOf, peopleIn, signInAs } from "./people.ts";
 
 // Settings, as in the prototype: the workspace's sections for admins, the
 // account's for everyone, listed beside the section where the page has the
 // room and as one control above it where it hasn't. The sections core
-// keeps nothing for yet (Pulse, billing, the link for AI apps) show the prototype's empty state, and nothing in them can be
-// changed. The emails a person picks are kept, so their switches work. Members, Models, AI spend and the audit trail have tests
+// keeps nothing for yet (Pulse, billing, the link for AI apps) show the
+// prototype's empty state, and nothing in them can be changed. The emails a
+// person picks are kept, so their switches work, and the devices they are
+// signed in on can be signed out one by one. Members, Models, AI spend and the audit trail have tests
 // of their own (web, models, activity).
 
 /** A section of the page, by its heading. */
@@ -103,4 +105,31 @@ test("on a phone the sections are one control above the section", async ({
   await page.getByRole("option", { name: "Members and roles" }).click();
   await expect(page).toHaveURL(/\/settings\/members$/u);
   await expect(sectionOf(page, "Roles")).toBeVisible();
+});
+
+test("someone signs out a device of theirs from Security, and its session ends", async ({
+  pageOf,
+}) => {
+  const { member } = peopleIn("ownSessions");
+  // Their other device: signed in again, from Node rather than this browser.
+  const elsewhere = await signInAs(member.email);
+  const page = await pageOf(member);
+  await page.goto("/settings/security");
+  const devices = sectionOf(page, "Devices");
+  const signOuts = devices.getByRole("button", { name: /^Sign out/u });
+  await expect(devices).toContainText("Signed in on 2 devices.");
+  await expect(devices.getByText("This device", { exact: true })).toBeVisible();
+  // This one signs out from the person menu, not here.
+  await expect(signOuts).toHaveCount(1);
+
+  await signOuts.click();
+  await expect(devices).toContainText("Signed in on 1 device.");
+  await expect(signOuts).toHaveCount(0);
+  await expect(devices.getByText("This device", { exact: true })).toBeVisible();
+  const { core, api } = apiOf({ cookie: elsewhere });
+  try {
+    await expect(api.whoami()).rejects.toThrow();
+  } finally {
+    core[Symbol.dispose]();
+  }
 });

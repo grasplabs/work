@@ -71,6 +71,7 @@ import { About } from "./about-story.tsx";
 import { DocumentDrop } from "./document-drop.tsx";
 import type { DocumentRow } from "./document-drop.tsx";
 import { LanguageChoice } from "./language-choice.tsx";
+import { MailItem } from "./review-parts.tsx";
 import { SendPlanForm, useSendWords } from "./send-plan-form.tsx";
 import {
   choiceHolds,
@@ -81,6 +82,7 @@ import {
 import {
   Asides,
   Callout,
+  copyText,
   Cramped,
   Explained,
   Figure,
@@ -92,8 +94,13 @@ import {
   Primary,
   SupportLink,
 } from "./setup-parts.tsx";
-import { closesOn, documentSources, teamNumbersOf } from "./setup.ts";
-import type { Listening, SetupStep } from "./setup.ts";
+import {
+  closesOn,
+  documentSources,
+  openItems,
+  teamNumbersOf,
+} from "./setup.ts";
+import type { Listening, ReviewItemId, SetupStep } from "./setup.ts";
 import {
   csvRows,
   exampleList,
@@ -110,8 +117,8 @@ import { XlsxError, xlsxMost, xlsxRows } from "./xlsx.ts";
 // a step keeps goes to core: who works where, who leads which team and
 // which teams take part, the documents and the answers to their questions,
 // and when the interviews run. What core keeps nothing of yet (where the
-// documents live, Pulse, what needs the admin settled) shows the step as
-// the prototype does with nothing in.
+// documents live, Pulse) shows the step as the prototype does with nothing
+// in; what needs the admin settled, this browser keeps.
 
 /** What the onboarding reads from core, and who is going through it. */
 export interface SetupData {
@@ -120,6 +127,8 @@ export interface SetupData {
   view: OnboardingView;
   documents: OnboardingDocument[];
   gate: GateView;
+  /** Grasp's sending domain, which the admin lets through their mail filter. */
+  sendingDomain: string;
 }
 
 export interface StepProps {
@@ -133,6 +142,9 @@ export interface StepProps {
   /** The message to the team, as the admin left it; null for the one drafted. */
   message: string | null;
   onMessage: (message: string) => void;
+  /** What the admin settled of what needs them. */
+  settled: ReviewItemId[];
+  onSettle: (item: ReviewItemId, settled: boolean) => void;
   go: (step: SetupStep) => void;
   /** "How this works" tells its story in the brain's figures: this sets the figure, or gives it back with null. */
   onStory: (scene: BrainScene | null) => void;
@@ -142,16 +154,6 @@ const firstName = (name: string): string => name.split(" ")[0] ?? name;
 
 /** A date as the page's language writes it, from an ISO day. */
 const formatDay = (day: string): string => formatDate(`${day}T12:00:00Z`);
-
-/** Copies text, and says whether it worked: browsers refuse without focus or permission. */
-const copyText = async (text: string): Promise<boolean> => {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    return false;
-  }
-};
 
 /** Hands the reader a CSV file to save, made in the browser. */
 const downloadCsv = (content: string, filename: string): void => {
@@ -181,6 +183,7 @@ const toolsIn = (documents: OnboardingDocument[]): string[] => [
 /** What each step says as it arrives: its title and sentence. */
 const useHeadlines = ({
   data,
+  settled,
 }: StepProps): Record<
   Exclude<SetupStep, "about">,
   { title: string; sentence: string }
@@ -191,8 +194,7 @@ const useHeadlines = ({
   const tools = formatList(named);
   const { progress } = data.view;
   const talked = (progress?.talked ?? 0) + (progress?.leadsTalked ?? 0);
-  // Nothing core keeps needs the admin settled yet.
-  const openCount = 0;
+  const openCount = openItems(settled).length;
   return {
     welcome: {
       title: t`Hi ${admin}, I’m Stephen`,
@@ -1055,6 +1057,17 @@ const Team = (props: StepProps) => {
   );
 };
 
+/** Letting Grasp's mail through, as one of what needs the admin. */
+const Mail = ({ data, settled, onSettle }: StepProps) => (
+  <MailItem
+    domain={data.sendingDomain}
+    onSettle={(done) => {
+      onSettle("mail", done);
+    }}
+    settled={settled.includes("mail")}
+  />
+);
+
 /** The one team far behind, named with the lead whose word usually helps. */
 const QuietTeam = ({ team, lead }: { team: string; lead: string }) => {
   const { t } = useLingui();
@@ -1138,6 +1151,8 @@ const ListeningStep = (props: StepProps) => {
   const { t } = useLingui();
   const { listening, percent, today, data } = props;
   const lines = useHeadlines(props).listening;
+  // oxlint-disable-next-line react/hook-use-state -- read once as the step arrives, never set
+  const [mailShown] = useState(() => !props.settled.includes("mail"));
   const { plan, progress, roster, agreed, paused } = data.view;
   const closes = plan === null ? "" : formatDay(closesOn(plan));
   const { days } = listening;
@@ -1177,6 +1192,8 @@ const ListeningStep = (props: StepProps) => {
       <Heading sentence={lines.sentence} title={lines.title} />
       <div className="flex w-full flex-col gap-4 text-left">
         <Waiting agreed={agreed} paused={paused} />
+        {/* Before the links go out, until it's done: the admin's mail filter lets Grasp's mail through. Settled here, it stays to say so until they leave. */}
+        {mailShown ? <Mail {...props} /> : null}
         <div className="flex flex-col gap-2">
           <div className="flex gap-1">
             {Array.from({ length: days }, (_, index) => (
@@ -1257,22 +1274,29 @@ const ListeningStep = (props: StepProps) => {
 };
 
 /**
- * What only the admin can settle. Core keeps none of it yet, so nothing
- * needs them: the prototype's step with every item settled.
+ * What only the admin can settle, each with a way to settle it. Nothing
+ * moves on by itself: they read what they settled, and go on once nothing
+ * is open.
  */
 const Review = (props: StepProps) => {
   const { t } = useLingui();
   const lines = useHeadlines(props).review;
+  const open = openItems(props.settled).length;
   return (
     <>
       <Heading sentence={lines.sentence} title={lines.title} />
-      <Primary
-        onClick={() => {
-          props.go("open");
-        }}
-      >
-        {t`Continue`}
-      </Primary>
+      <div className="w-full">
+        <Mail {...props} />
+      </div>
+      {open === 0 ? (
+        <Primary
+          onClick={() => {
+            props.go("open");
+          }}
+        >
+          {t`Continue`}
+        </Primary>
+      ) : null}
     </>
   );
 };

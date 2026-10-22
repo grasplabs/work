@@ -1,0 +1,192 @@
+import { Button } from "@grasp-os/ui/components/button";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@grasp-os/ui/components/tabs";
+import { useLingui } from "@lingui/react/macro";
+import { CheckIcon, CopyIcon } from "lucide-react";
+import { useState } from "react";
+import type { ReactNode } from "react";
+
+import { copyText } from "./setup-parts.tsx";
+
+// What only the admin can settle in their onboarding, one item each
+// (prototype `components/onboarding/review-parts.tsx`), and the one there
+// is: letting Grasp's mail through their mail filter (GRA-968). Microsoft
+// 365 filters mail with Exchange Online Protection and Defender, Google
+// Workspace with its own rules: either can put mail from a domain it
+// doesn't know in spam, and the interview links with it.
+
+/** A way to settle it: the first is the one Stephen would take. */
+export interface ReviewChoice {
+  id: string;
+  label: string;
+}
+
+/**
+ * Something only the admin can settle, with what they need to settle it:
+ * what it is about, anything more it shows, and every way to decide as a
+ * button of its own. Once settled it says which way they chose, and that
+ * can still be changed.
+ */
+export const ReviewItem = ({
+  title,
+  context,
+  children,
+  choices,
+  chosen,
+  onChoose,
+  onReopen,
+}: {
+  title: string;
+  context: string;
+  children?: ReactNode;
+  choices: ReviewChoice[];
+  /** The choice it was settled with; none while it is open. */
+  chosen: ReviewChoice | null;
+  onChoose: (choice: ReviewChoice) => void;
+  onReopen: () => void;
+}) => {
+  const { t } = useLingui();
+  const settled = chosen !== null;
+  const choice = chosen?.label ?? "";
+  return (
+    <div className="flex flex-col gap-3 border-t py-4 text-left last:border-b">
+      <div className="flex flex-col">
+        <span className={settled ? "text-muted-foreground" : "font-medium"}>
+          {title}
+        </span>
+        <span className="text-muted-foreground">{context}</span>
+      </div>
+      {settled ? null : children}
+      {chosen === null ? (
+        <div className="flex flex-wrap gap-2" key="choices">
+          {choices.map((each, at) => (
+            <Button
+              key={each.id}
+              onClick={() => {
+                onChoose(each);
+              }}
+              size="sm"
+              variant={at === 0 ? "default" : "outline"}
+            >
+              {each.label}
+            </Button>
+          ))}
+        </div>
+      ) : (
+        <div
+          className="text-muted-foreground animate-in fade-in flex items-center gap-2 duration-300"
+          key="settled"
+        >
+          <CheckIcon
+            aria-hidden="true"
+            className="text-status-agreed size-4 flex-none"
+          />
+          <span className="min-w-0 flex-1">{t`Settled: ${choice}`}</span>
+          <Button onClick={onReopen} size="sm" variant="ghost">
+            {t({ message: "Change", context: "change how it was settled" })}
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+};
+
+/** The sending domain as the admin types it into their filter, with a way to copy it. */
+const DomainToCopy = ({ domain }: { domain: string }) => {
+  const { t } = useLingui();
+  const [copied, setCopied] = useState(false);
+  return (
+    <div className="bg-muted/50 flex items-center gap-2 rounded-lg border py-1 pr-1 pl-3">
+      <code className="min-w-0 flex-1 truncate font-mono">{domain}</code>
+      <Button
+        onClick={() => {
+          void (async () => {
+            setCopied(await copyText(domain));
+          })();
+        }}
+        size="sm"
+        variant="ghost"
+      >
+        {copied ? (
+          <CheckIcon data-icon="inline-start" />
+        ) : (
+          <CopyIcon data-icon="inline-start" />
+        )}
+        {copied ? t`Copied` : t`Copy`}
+      </Button>
+    </div>
+  );
+};
+
+/** Numbered steps, short enough to follow in the other window. */
+const Steps = ({ steps }: { steps: string[] }) => (
+  <ol className="flex list-decimal flex-col gap-1.5 pl-5">
+    {steps.map((step) => (
+      <li key={step}>{step}</li>
+    ))}
+  </ol>
+);
+
+/**
+ * Letting Grasp's mail through: the sending domain, and the few steps that
+ * allow it in Microsoft 365 (a mail flow rule that skips spam filtering
+ * for it) or Google Workspace (an approved senders list that asks for
+ * authentication, which Grasp's signed mail passes). Settled when the
+ * admin says it's done.
+ */
+export const MailItem = ({
+  domain,
+  settled,
+  onSettle,
+}: {
+  domain: string;
+  settled: boolean;
+  onSettle: (settled: boolean) => void;
+}) => {
+  const { t } = useLingui();
+  const done: ReviewChoice = { id: "done", label: t`It’s done` };
+  return (
+    <ReviewItem
+      choices={[done]}
+      chosen={settled ? done : null}
+      context={t`Your people’s interview links come by email from Grasp’s sending domain. Allow it in your mail filter before they go out, so they don’t land in spam.`}
+      onChoose={() => {
+        onSettle(true);
+      }}
+      onReopen={() => {
+        onSettle(false);
+      }}
+      title={t`Let Grasp’s mail through`}
+    >
+      <DomainToCopy domain={domain} />
+      <Tabs defaultValue="microsoft">
+        <TabsList variant="line">
+          <TabsTrigger value="microsoft">Microsoft 365</TabsTrigger>
+          <TabsTrigger value="google">Google Workspace</TabsTrigger>
+        </TabsList>
+        <TabsContent value="microsoft">
+          <Steps
+            steps={[
+              t`In the Exchange admin center, go to Mail flow, then Rules, and add a rule.`,
+              t`Apply it if the sender’s domain is ${domain}.`,
+              t`As its action, set the spam confidence level (SCL) to “Bypass spam filtering”, then save it.`,
+            ]}
+          />
+        </TabsContent>
+        <TabsContent value="google">
+          <Steps
+            steps={[
+              t`In the Google Admin console, go to Apps, then Google Workspace, then Gmail, then Spam, phishing and malware.`,
+              t`Under Spam, bypass spam filters for an approved senders list, and add ${domain} to it.`,
+              t`Keep “Require sender authentication” on, then save.`,
+            ]}
+          />
+        </TabsContent>
+      </Tabs>
+    </ReviewItem>
+  );
+};
