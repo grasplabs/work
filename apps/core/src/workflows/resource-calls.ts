@@ -477,6 +477,17 @@ const attachedTo = async (
     throw callInvalid("from: This operation attaches no files.");
   }
   const fields = z.record(z.string(), z.json()).safeParse(input);
+  // Never passed on to an operation that takes no files, whatever its own
+  // schema allows: run files leave only where the contract says they may.
+  if (
+    !takes &&
+    fields.success &&
+    Object.hasOwn(fields.data, attachmentsProperty)
+  ) {
+    throw callInvalid(
+      "arguments.attachments: This operation attaches no files."
+    );
+  }
   const named =
     takes && fields.success && Object.hasOwn(fields.data, attachmentsProperty)
       ? attachmentRefsSchema.safeParse(fields.data[attachmentsProperty])
@@ -502,6 +513,30 @@ const attachedTo = async (
     files: attached.bytes,
     detail: attached.detail,
   };
+};
+
+/**
+ * Refuses (`workflow.call_denied`) a connector call that names a files
+ * binding (`aliases`: where a read is kept, where a write's attachments
+ * are read from) unless the run's start froze that alias as a files
+ * binding and its authority holds now, as the files call it stands for
+ * would (GRA-886, GRA-887).
+ */
+const requireFilesBindings = async (
+  env: Env,
+  run: CallingRun,
+  aliases: readonly (string | undefined)[]
+): Promise<void> => {
+  for (const alias of aliases) {
+    if (alias !== undefined) {
+      const files = run.bindings.get(alias);
+      if (files?.kind !== "files") {
+        throw workflowResourceErrors.create("workflow.call_denied");
+      }
+      // oxlint-disable-next-line no-await-in-loop -- at most two, each decided in turn
+      await requireCallAuthority(env, run, files);
+    }
+  }
 };
 
 /**
@@ -559,12 +594,17 @@ const callConnector = async (
         // authority again, then its attempt, nothing awaited after.
         stillAllowed: async () => {
           await requireCallAuthority(env, run, binding);
+          // And the files uses it keeps a read in or attaches files from.
+          await requireFilesBindings(env, run, [call.into, call.from]);
           effect.requireHolds();
         },
       };
     },
     {
-      context: runContext(run),
+      // A write that attaches files names the files use they come from,
+      // so a held one's release decides that use's authority again
+      // (pending-actions.ts).
+      context: runContext(run, call.from),
       permissionId: permissionIdSchema.parse(target.permissionId),
       connection: {
         type: "connection",
@@ -960,30 +1000,6 @@ const candidateAnswer = async (
     }
     default: {
       return call satisfies never;
-    }
-  }
-};
-
-/**
- * Refuses (`workflow.call_denied`) a connector call that names a files
- * binding (`aliases`: where a read is kept, where a write's attachments
- * are read from) unless the run's start froze that alias as a files
- * binding and its authority holds now, as the files call it stands for
- * would (GRA-886, GRA-887).
- */
-const requireFilesBindings = async (
-  env: Env,
-  run: CallingRun,
-  aliases: readonly (string | undefined)[]
-): Promise<void> => {
-  for (const alias of aliases) {
-    if (alias !== undefined) {
-      const files = run.bindings.get(alias);
-      if (files?.kind !== "files") {
-        throw workflowResourceErrors.create("workflow.call_denied");
-      }
-      // oxlint-disable-next-line no-await-in-loop -- at most two, each decided in turn
-      await requireCallAuthority(env, run, files);
     }
   }
 };

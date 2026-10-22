@@ -145,11 +145,18 @@ export const runAuthority = (run: CallingRun): Authority => ({
   mode: "workflow",
 });
 
-/** Where a run's calls work: the run itself. */
-export const runContext = (run: CallingRun): WorkContext => ({
+/**
+ * Where a run's calls work: the run itself; for a write that attaches
+ * files, with the files use they come from (`filesFrom`, GRA-887).
+ */
+export const runContext = (
+  run: CallingRun,
+  filesFrom?: string
+): WorkContext => ({
   type: "workflowRun",
   workflowId: workflowResourceIdSchema.parse(run.workflowId),
   runId: runIdSchema.parse(run.runId),
+  ...(filesFrom === undefined ? {} : { filesFrom }),
 });
 
 /**
