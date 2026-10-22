@@ -29,7 +29,8 @@ import { readableCollection } from "./collections.ts";
 import { nearestCollectionsMax, nearestDetail } from "./usage-tally.ts";
 
 // Full-text search over sections, in two FTS5 indexes kept by triggers on
-// the sections table (see the migration `0001_search.sql`): whole words,
+// the sections table (see the migrations `0001_search.sql` and
+// `0017_search_one_content.sql`, one copy of the text for both): whole words,
 // with diacritics removed and prefixes indexed ("vakan" finds
 // "vakantiedagen", "financiele" finds "financiële"), and trigrams, which
 // find a word inside a compound ("verlof" in "zwangerschapsverlof").

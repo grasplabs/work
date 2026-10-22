@@ -90,7 +90,8 @@ const bucketHolds = async (lower: string): Promise<boolean> => {
  * (`wordsIndexHolds`), whatever its pages' bytes show. The page directory
  * (`search_words_idx`) keeps its separators whole, so its bytes say it.
  * Trigram pages keep three characters at a time, so the trigram index
- * shows only in its content. `BRAIN_OBJECTS` when an object in the bucket
+ * shows only in its columns, which read the words index's content.
+ * `BRAIN_OBJECTS` when an object in the bucket
  * of versions' texts holds it.
  */
 const holding = async (term: string): Promise<string[]> => {
@@ -541,8 +542,7 @@ describe("a personal purge", setUpTime, () => {
     // leaver's text is gone from every table, the index's pages too.
     expect(heldBefore).toStrictEqual([
       "BRAIN_OBJECTS",
-      "search_trigrams.text",
-      "search_trigrams_content.c3",
+      "search_trigrams.c3",
       "search_words.text",
       "search_words_content.c3",
       "search_words_data.block",
@@ -1443,14 +1443,10 @@ describe("a purge of content", setUpTime, () => {
         "BRAIN_OBJECTS",
         "documents.description",
         "documents.title",
-        "search_trigrams.description",
-        "search_trigrams.headings",
-        "search_trigrams.text",
-        "search_trigrams.title",
-        "search_trigrams_content.c0",
-        "search_trigrams_content.c1",
-        "search_trigrams_content.c2",
-        "search_trigrams_content.c3",
+        "search_trigrams.c0",
+        "search_trigrams.c1",
+        "search_trigrams.c2",
+        "search_trigrams.c3",
         "search_words.description",
         "search_words.headings",
         "search_words.text",
