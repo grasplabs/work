@@ -3162,6 +3162,35 @@ export const workflowRunFileChunks = sqliteTable(
 );
 
 /**
+ * Who read a run's files from its run page, once a day each
+ * (workflows/run-file-downloads.ts): a download of a file, or an admin's
+ * listing of someone else's run. The audit event for a day is written only
+ * with the row that day's first read inserts, so it carries the real time
+ * of that read and is never sent again with another (a duplicate of
+ * differing content is a conflict in the log). Swept two days on.
+ */
+export const workflowRunFileReads = sqliteTable(
+  "workflow_run_file_reads",
+  {
+    /** The file downloaded, or the run whose files were listed. */
+    subjectId: text("subject_id").notNull(),
+    userId: text("user_id").notNull(),
+    /** The UTC day, `YYYY-MM-DD`. */
+    day: text().notNull(),
+    action: text({
+      enum: ["workflow.file.downloaded", "workflow.files.listed"],
+    }).notNull(),
+    readAt: timestamp("read_at").notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.subjectId, table.userId, table.day, table.action],
+    }),
+    index("workflow_run_file_reads_day_idx").on(table.day),
+  ]
+);
+
+/**
  * Terminations core owes the engine for runs it ended while they were
  * still starting, cancelled or abandoned (workflows/resource-runs.ts):
  * the run's row ends at once and never changes again, so what is still

@@ -17,7 +17,11 @@ import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { workflowRunFileChunks, workflowRunFiles } from "../db/core/schema.ts";
+import {
+  workflowRunFileChunks,
+  workflowRunFileReads,
+  workflowRunFiles,
+} from "../db/core/schema.ts";
 import { inList } from "../db/d1.ts";
 
 // A workflow run's own files (GRA-724): what its actions write through a
@@ -761,6 +765,18 @@ export const sweepRunFiles = async (
           workflowRunFiles.createdAt,
           new Date(now.getTime() - runFileLimits.orphanMs)
         )
+      )
+    );
+  // Who read run files on days before yesterday: only today's rows keep a
+  // day's audit event from being written twice (run-file-downloads.ts).
+  await db
+    .delete(workflowRunFileReads)
+    .where(
+      lt(
+        workflowRunFileReads.day,
+        new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000)
+          .toISOString()
+          .slice(0, 10)
       )
     );
   const graceEnded = new Date(now.getTime() - sweepGraceMs);
