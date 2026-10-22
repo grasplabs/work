@@ -105,7 +105,6 @@ const row = (values: (string | number | null)[]): string =>
     )
     .join(", ")})`;
 
-const ids = companies.map(({ id }) => sqlString(id)).join(", ");
 // Only the deploys the seed wrote: anything else a local console deployed
 // for these companies, and the rollouts that name it, stay.
 const deployIds = companies
@@ -118,9 +117,8 @@ const statements = [
   `DELETE FROM rollout_targets WHERE rollout_id = ${sqlString(rolloutId)}`,
   `DELETE FROM rollouts WHERE id = ${sqlString(rolloutId)}`,
   `DELETE FROM client_deploys WHERE id IN (${deployIds})`,
-  `DELETE FROM client_workers WHERE client_id IN (${ids})`,
-  // The companies and releases in place, as anything else a local console
-  // made of them (another rollout's targets, say) may name them.
+  // The companies, releases and workers in place, as anything else a local
+  // console made of them (another rollout's targets, say) may name them.
   `INSERT INTO releases (id, commit_sha, manifest, manifest_sha256, built_at, imported_at) VALUES ${releases
     .map(({ id, day, notes }) =>
       row([
@@ -160,7 +158,9 @@ const statements = [
                 at(14),
               ])
             )
-            .join(", ")}`,
+            .join(
+              ", "
+            )} ON CONFLICT(client_id, worker) DO UPDATE SET script_name = excluded.script_name, release_id = excluded.release_id, version_id = excluded.version_id, deployed_at = excluded.deployed_at`,
         ]
   ),
   ...companies.flatMap(({ id, release, lastDeploy }) =>
