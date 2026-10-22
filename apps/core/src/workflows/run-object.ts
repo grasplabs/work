@@ -23,6 +23,7 @@ import { sharesReleased } from "./quotas.ts";
 import type { ActionModelCalls, TriedOnceMarks } from "./resource-host.ts";
 import { projectResourceRun } from "./resource-runs.ts";
 import { completeCancel, projectStatus } from "./runs.ts";
+import type { EngineStatus } from "./runs.ts";
 import { wakeQueueFronts } from "./share-wakes.ts";
 
 /**
@@ -701,6 +702,7 @@ export class WorkflowRuns extends WorkflowRun<Env> {
           status: latest.status,
           at: latest.timestamp,
           sequence: latest.sequence,
+          ...this.#compensationOf(latest.status),
         },
         live?.status === "errored" ? (live.error.code ?? null) : null
       );
@@ -748,6 +750,38 @@ export class WorkflowRuns extends WorkflowRun<Env> {
   }
 
   /**
+   * The run's compensation as its journal has it now (spec 10.7.3): while
+   * it rolls back, why (its failure and the code it failed with, or a
+   * cancellation); once it ended having rolled back, how that went. Read
+   * from the run's own journal, and given only with a notification of the
+   * same state (`notified`): a rollback's end only with an end, its cause
+   * only while it rolls back, so a late notification never carries what a
+   * newer state says.
+   */
+  #compensationOf(
+    notified: RunNotification["status"]
+  ): Pick<EngineStatus, "rollback" | "compensation"> {
+    const live = this.status();
+    if (live?.status !== notified) {
+      return {};
+    }
+    const rollback =
+      live !== undefined && "rollback" in live ? live.rollback : undefined;
+    const cause = this.rollbackCause();
+    return {
+      ...(rollback === undefined ? {} : { rollback: rollback.status }),
+      ...(cause === undefined
+        ? {}
+        : {
+            compensation:
+              cause.cause === "terminated"
+                ? { cause: "cancellation", code: null }
+                : { cause: "failure", code: cause.error.code ?? null },
+          }),
+    };
+  }
+
+  /**
    * Makes core's record of run `run` follow the engine's `latest` status
    * (runs.ts, `projectStatus`), its cancel (`mark`) recorded first.
    */
@@ -769,6 +803,7 @@ export class WorkflowRuns extends WorkflowRun<Env> {
       ...(latest.firstActivatedAt === null
         ? {}
         : { startedAt: latest.firstActivatedAt }),
+      ...this.#compensationOf(latest.status),
     });
     // A pause or resume settles from where the engine has the run now,
     // and which controls it took, read together here from its journal,

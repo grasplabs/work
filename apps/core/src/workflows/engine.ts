@@ -239,9 +239,14 @@ export interface RunEngine {
   ) => Promise<{ status: InstanceStatus; fence: number | null } | undefined>;
   /**
    * Terminates the run; one that has ended already, that is rolling back,
-   * or that the engine has no record of, stays as it is.
+   * or that the engine has no record of, stays as it is. Answers whether
+   * the engine took it: `rolling_back` for a run whose compensation it
+   * doesn't cut short.
    */
-  terminate: (id: string, generation?: number) => Promise<void>;
+  terminate: (
+    id: string,
+    generation?: number
+  ) => Promise<"taken" | "rolling_back">;
   /**
    * Pauses the run at its next safe boundary: a run asleep or waiting at
    * once, a running one once the steps it has out end. One that is queued,
@@ -399,10 +404,11 @@ export const runEngine = (env: Env): RunEngine => ({
   terminate: async (id, generation) => {
     // Ended, rolling back or missing: nothing to terminate, and nothing
     // to fail over (a cancel racing a run's own end finds it ended).
-    await runStub(env, id).terminate({
+    const outcome = await runStub(env, id).terminate({
       rollback: false,
       ...(generation === undefined ? {} : { fence: generation }),
     });
+    return outcome === "rolling_back" ? "rolling_back" : "taken";
   },
   // Each with the run's control generation it was admitted under: the run
   // ignores one older than the newest it took, in the same write as the

@@ -92,6 +92,8 @@ export const workflowErrors = defineErrorFamily({
   // own: the audit log and failure reports carry these instead.
   "workflow.step_failed": "A step of the workflow failed.",
   "workflow.run_failed": "The workflow run failed.",
+  "workflow.compensation_failed":
+    "The workflow run failed, and undoing what it had done failed too.",
 });
 
 /**
@@ -572,6 +574,11 @@ export interface RunSummary {
   compensation?: {
     cause: "failure" | "cancellation";
     activity: "running" | "waiting" | "paused";
+    /**
+     * After a failure, what the run failed with, to those who see why a
+     * run failed (its person and admins): as `error` once it ends.
+     */
+    originalError?: { code: string; message: string };
   };
   /** Why it failed, once failed: a code and message, no values. */
   error?: { code: string; message: string };
