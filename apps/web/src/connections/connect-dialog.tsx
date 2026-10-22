@@ -6,12 +6,13 @@ import type {
   CatalogTool,
   ConnectionScope,
   ListedConnection,
+  OAuthProvider,
 } from "@grasp-os/shared/connect";
 import { failureText } from "@grasp-os/shared/errors";
 import { isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
+import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
-import { Checkbox } from "@grasp-os/ui/components/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -19,8 +20,9 @@ import {
   DialogTitle,
 } from "@grasp-os/ui/components/dialog";
 import { Spinner } from "@grasp-os/ui/components/spinner";
+import { Switch } from "@grasp-os/ui/components/switch";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { CheckIcon } from "lucide-react";
+import { CheckIcon, EyeIcon, LockIcon, PenLineIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
@@ -309,15 +311,42 @@ const Actions = ({
     </div>
   );
 
-/** What signing in means, in three lines. */
-const SignInSteps = ({ app }: { app: string }) => (
+/**
+ * Where a native provider's sign-in page is, shown as the prototype shows
+ * it: the host connect sends the browser to (apps/connect/src/providers.ts).
+ */
+export const signInHosts: Readonly<Record<OAuthProvider, string>> = {
+  microsoft: "login.microsoftonline.com",
+  google: "accounts.google.com",
+};
+
+/** The sign-in host of `integration`, when it is a native provider's. */
+export const signInHostOf = (integration: Integration): string | undefined => {
+  if (integration.source !== "native") {
+    return undefined;
+  }
+  const provider = oauthProviderSchema.safeParse(integration.id);
+  return provider.success ? signInHosts[provider.data] : undefined;
+};
+
+/** What signing in means, in three lines; where it happens, when known. */
+const SignInSteps = ({ app, host }: { app: string; host?: string }) => (
   <>
     <p className="text-muted-foreground">
       <Trans>Signing in happens at {app}. It takes about a minute.</Trans>
     </p>
     <ol className="flex flex-col overflow-hidden rounded-lg border">
-      <li className="flex min-h-11 items-center border-b px-3 py-2.5">
-        <Trans>You sign in on {app}’s own page.</Trans>
+      <li className="flex min-h-11 flex-wrap items-center gap-1 border-b px-3 py-2.5">
+        {host === undefined ? (
+          <Trans>You sign in on {app}’s own page.</Trans>
+        ) : (
+          <Trans comment="{host} is the web address of the sign-in page, e.g. login.microsoftonline.com.">
+            You sign in at{" "}
+            <span className="bg-muted rounded-sm border px-1 font-mono text-xs">
+              {host}
+            </span>
+          </Trans>
+        )}
       </li>
       <li className="flex min-h-11 items-center border-b px-3 py-2.5">
         <Trans>You approve there. {app} shows what Grasp asks for.</Trans>
@@ -394,9 +423,19 @@ const ScopeChoice = ({
   </fieldset>
 );
 
+/** A tool that is off: Grasp never calls it. */
+const NeverBadge = () => (
+  <Badge variant="outline">
+    <LockIcon data-icon="inline-start" />
+    <Trans context="what a tool may do">Never</Trans>
+  </Badge>
+);
+
 /**
- * One tool of a toolkit: whether to allow it and, once allowed, whether it
- * only reads (tool-choices.ts).
+ * One tool of a toolkit, as the prototype's permission row: a switch to
+ * allow it, and a badge with what it may do: Never while it is off, Read
+ * when it only reads, Write when it changes things. An allowed tool's badge
+ * is a button that switches it between Read and Write (tool-choices.ts).
  */
 const ToolChoice = ({
   tool,
@@ -411,24 +450,53 @@ const ToolChoice = ({
 }) => {
   const { t } = useLingui();
   const { name } = tool;
+  const id = `connect-tool-${name}`;
   return (
-    <li className="flex min-h-11 items-center justify-between gap-4 border-b px-3 py-2 last:border-b-0">
-      <label className="flex min-w-0 items-center gap-2">
-        <Checkbox checked={choice !== undefined} onCheckedChange={onAllow} />
-        <span className="truncate">{tool.name}</span>
+    <li className="flex min-h-11 items-center gap-2 border-b px-3 py-2 last:border-b-0">
+      <label
+        className={
+          choice === undefined
+            ? "text-muted-foreground min-w-0 flex-1 truncate"
+            : "min-w-0 flex-1 truncate"
+        }
+        htmlFor={id}
+      >
+        {name}
       </label>
-      {choice === undefined ? null : (
-        <div className="text-muted-foreground flex flex-none items-center gap-2">
-          <Checkbox
-            checked={choice.read}
-            aria-label={t`${name} is read-only`}
-            onCheckedChange={onRead}
-          />
-          <span aria-hidden="true">
-            <Trans>Read-only</Trans>
-          </span>
-        </div>
+      {choice === undefined ? (
+        <NeverBadge />
+      ) : (
+        <Badge
+          className="cursor-pointer"
+          onClick={() => {
+            onRead(!choice.read);
+          }}
+          render={
+            <button
+              aria-label={t`${name} only reads`}
+              aria-pressed={choice.read}
+              type="button"
+            />
+          }
+          variant={choice.read ? "outline" : "secondary"}
+        >
+          {choice.read ? (
+            <EyeIcon data-icon="inline-start" />
+          ) : (
+            <PenLineIcon data-icon="inline-start" />
+          )}
+          {choice.read ? (
+            <Trans context="what a tool may do">Read</Trans>
+          ) : (
+            <Trans context="what a tool may do">Write</Trans>
+          )}
+        </Badge>
       )}
+      <Switch
+        checked={choice !== undefined}
+        id={id}
+        onCheckedChange={onAllow}
+      />
     </li>
   );
 };
@@ -474,7 +542,7 @@ const NativeFlow = ({
   };
   const signIn = (
     <>
-      <SignInSteps app={app} />
+      <SignInSteps app={app} host={signInHostOf(integration)} />
       <Actions
         app={app}
         attempt={attempt}
@@ -577,12 +645,13 @@ const ComposioFlow = ({
       >
         <p className="text-muted-foreground">
           <Trans>
-            Read-only is ticked where Composio says a tool only reads; Grasp
-            doesn&apos;t check that. A read-only tool runs without asking. A
-            call of any other tool from chat, or from a person using a domain,
+            A tool switched on starts as Read where Composio says it only reads;
+            Grasp doesn&apos;t check that. A Read tool runs without asking. A
+            call of a Write tool from chat, or from a person using a domain,
             waits for that person to confirm it; a workflow&apos;s run makes it
-            as one of its steps. Mark a tool read-only only if it changes
-            nothing: marked wrongly, it changes things without asking.
+            as one of its steps. Press a tool&apos;s badge to change it. Mark a
+            tool Read only if it changes nothing: marked wrongly, it changes
+            things without asking.
           </Trans>
         </p>
         {listed === undefined ? <LoadingLines /> : null}
