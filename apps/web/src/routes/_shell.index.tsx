@@ -11,7 +11,7 @@ import { GraspBuddy } from "../buddy/grasp-buddy.tsx";
 import { activeChat, setActiveChat } from "../chat/active-chat.ts";
 import { BuildsFailure, draftsOf, useChatBuilds } from "../chat/builds.tsx";
 import { ChatList, ChatSidebar } from "../chat/chat-list.tsx";
-import { chatMarkdown } from "../chat/chat-markdown.ts";
+import { ChatMore } from "../chat/chat-more.tsx";
 import { useFollowedChat } from "../chat/chat-watch.ts";
 import { Composer } from "../chat/composer.tsx";
 import { ConnectionRequests } from "../chat/connection-requests.tsx";
@@ -24,7 +24,6 @@ import { ChatThread } from "../chat/thread.tsx";
 import { useAsk } from "../chat/use-ask.ts";
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
-import { ExportMenu } from "../export/export-menu.tsx";
 import { PageNotLoaded, PageLoading } from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { useWide } from "../frame/wide.ts";
@@ -147,16 +146,6 @@ const crumbsOf = (
   ];
 };
 
-/** Characters a file name can't hold on some system, and runs of space. */
-const unsafeInFileName = /[\s"*/:<>?\\|]+/gu;
-
-/** The name a chat exports under: its title, made safe for a file. */
-const fileNameOf = (title: string): string =>
-  title
-    .replaceAll(unsafeInFileName, "-")
-    .replaceAll(/^-+|-+$/gu, "")
-    .slice(0, 80) || "grasp-chat";
-
 /**
  * One chat, followed as it streams, in the studio with the App its agent
  * builds (`onBuilding` says whether one stands beside it), and with the
@@ -180,7 +169,7 @@ const OpenChat = ({
   onBuilding: (building: boolean) => void;
 }) => {
   const { view, failure } = useFollowedChat(chat.id);
-  const { i18n, t } = useLingui();
+  const { t } = useLingui();
   const { composer, ask } = useAsk(chat.id, models, efforts);
   const lastQuestion = view.messages.findLast(({ role }) => role === "user");
   const wide = useWide();
@@ -217,27 +206,6 @@ const OpenChat = ({
           className="relative flex min-h-0 min-w-0 flex-1 flex-col"
         >
           <h1 className="sr-only">{chat.title}</h1>
-          {/* In a row of its own above the thread, so no message scrolls under it. */}
-          {view.messages.length === 0 ? null : (
-            <div className="flex flex-none justify-end px-4 pt-2">
-              <ExportMenu
-                file={{
-                  name: fileNameOf(chat.title),
-                  title: chat.title,
-                  markdown: () =>
-                    chatMarkdown({
-                      title: chat.title,
-                      messages: view.messages,
-                      partial: view.partial,
-                      provenance: view.provenance,
-                      names: sourceNames,
-                      i18n,
-                    }),
-                }}
-                label={t`Export this chat`}
-              />
-            </div>
-          )}
           <ChatThread
             loaded={view.loaded}
             messages={view.messages}
@@ -392,6 +360,11 @@ const Chat = () => {
                     <Trans>New chat</Trans>
                   </span>
                 </Link>
+                <ChatMore
+                  chat={chat}
+                  projects={projects}
+                  sourceNames={sourceNames}
+                />
               </>
             )}
           </>

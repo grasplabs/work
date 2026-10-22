@@ -2809,6 +2809,7 @@ msgid "Chat"
 msgstr "Chat"
 
 #: src/chat/chat-list.tsx
+#: src/chat/chat-more.tsx
 msgid "Chat name"
 msgstr "Nom du chat"
 
@@ -3262,6 +3263,7 @@ msgstr "Conversations"
 msgid "Copenhagen"
 msgstr "Copenhague"
 
+#: src/chat/chat-more.tsx
 #: src/chat/thread.tsx
 #: src/onboarding/setup-steps.tsx
 msgid "Copied"
@@ -3279,6 +3281,10 @@ msgstr "Copier l’adresse"
 msgid "Copy app ID"
 msgstr "Copier l’ID de l’application"
 
+#: src/chat/chat-more.tsx
+msgid "Copy as Markdown"
+msgstr "Copier en Markdown"
+
 #: src/landscape/audit-trail.tsx
 msgid "Copy fingerprint"
 msgstr "Copier l’empreinte"
@@ -3286,6 +3292,10 @@ msgstr "Copier l’empreinte"
 #: src/chat/thread.tsx
 msgid "Copy the answer"
 msgstr "Copier la réponse"
+
+#: src/chat/chat-more.tsx
+msgid "Copying didn't work"
+msgstr "La copie n’a pas fonctionné"
 
 #: src/landscape/landscape.ts
 msgid "Core AI"
@@ -3506,10 +3516,12 @@ msgid "Definition version"
 msgstr "Version de la définition"
 
 #: src/chat/chat-list.tsx
+#: src/chat/chat-more.tsx
+#: src/chat/delete-chat-dialog.tsx
 msgid "Delete"
 msgstr "Supprimer"
 
-#: src/chat/chat-list.tsx
+#: src/chat/delete-chat-dialog.tsx
 msgid "Delete “{title}”?"
 msgstr "Supprimer « {title} » ?"
 
@@ -3783,6 +3795,10 @@ msgstr "Traité"
 msgctxt "tour"
 msgid "Done"
 msgstr "Terminé"
+
+#: src/chat/chat-more.tsx
+msgid "Download"
+msgstr "Télécharger"
 
 #: src/knowledge/uploads.tsx
 msgid "Download {name}"
@@ -4132,10 +4148,6 @@ msgstr "Exporter le rapport"
 #: src/activity/audit-log.tsx
 msgid "Export the audit trail"
 msgstr "Exporter le journal d’audit"
-
-#: src/routes/_shell.index.tsx
-msgid "Export this chat"
-msgstr "Exporter ce chat"
 
 #: src/activity/audit-words.ts
 msgid "Exported the audit trail"
@@ -5191,7 +5203,7 @@ msgstr "Sa version actuelle n’a aucun paramètre."
 msgid "Its goal and documents are deleted. Its chats stay, back among the chats by date."
 msgstr "Son objectif et ses documents sont supprimés. Ses chats restent, de retour parmi les chats par date."
 
-#: src/chat/chat-list.tsx
+#: src/chat/delete-chat-dialog.tsx
 msgid "Its messages are deleted for good, and every change its agent holds for you is rejected. What the agent did stays in the audit log."
 msgstr "Ses messages sont supprimés définitivement, et chaque modification que son agent retient pour vous est rejetée. Ce que l’agent a fait reste dans le journal d’audit."
 
@@ -5632,6 +5644,7 @@ msgstr "Cartographié"
 msgid "Mark, where does the time go on a mortgage file?"
 msgstr "Mark, où part le temps sur un dossier de prêt ?"
 
+#: src/chat/chat-more.tsx
 #: src/export/export-menu.tsx
 msgid "Markdown (.md)"
 msgstr "Markdown (.md)"
@@ -5776,6 +5789,10 @@ msgstr "Plus pour {title}"
 msgid "More for the project {name}"
 msgstr "Plus pour le projet {name}"
 
+#: src/chat/chat-more.tsx
+msgid "More for this chat"
+msgstr "Plus d’options pour ce chat"
+
 #: src/routes/_shell.integrations.index.tsx
 msgid "More than {about} apps your workflows can work in. Grasp only does what you allow per app."
 msgstr "Plus de {about} applications dans lesquelles vos workflows peuvent travailler. Grasp ne fait que ce que vous autorisez pour chaque application."
@@ -5813,6 +5830,7 @@ msgid "Move {title}: drag it, or use the arrow keys"
 msgstr "Déplacer {title} : faites glisser, ou utilisez les flèches du clavier"
 
 #: src/chat/chat-list.tsx
+#: src/chat/chat-more.tsx
 msgid "Move to project"
 msgstr "Déplacer vers un projet"
 
@@ -7274,6 +7292,7 @@ msgstr "Moyen de paiement"
 msgid "Payment receipts"
 msgstr "Reçus de paiement"
 
+#: src/chat/chat-more.tsx
 #: src/export/export-menu.tsx
 msgid "PDF"
 msgstr "PDF"
@@ -7917,8 +7936,13 @@ msgid "Removed: it acts for whoever uses the domain, with everything the domain 
 msgstr "Supprimé : il agissait pour quiconque utilise le domaine, avec tout ce que détient le domaine"
 
 #: src/chat/chat-list.tsx
+#: src/chat/chat-more.tsx
 msgid "Rename"
 msgstr "Renommer"
+
+#: src/chat/chat-more.tsx
+msgid "Rename chat"
+msgstr "Renommer le chat"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Repeats, {items}:"
@@ -8353,6 +8377,7 @@ msgstr "A dit oui"
 msgid "Same version, different contents: {changed}"
 msgstr "Même version, contenu différent : {changed}"
 
+#: src/chat/chat-more.tsx
 #: src/chat/project-dialog.tsx
 #: src/knowledge/document.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
@@ -9124,6 +9149,7 @@ msgid "Take off the dashboard"
 msgstr "Retirer du tableau de bord"
 
 #: src/chat/chat-list.tsx
+#: src/chat/chat-more.tsx
 msgid "Take out of the project"
 msgstr "Retirer du projet"
 
@@ -9464,6 +9490,10 @@ msgstr "Le catalogue des intégrations n’a pas pu être lu : cette page ne mon
 msgid "The change to the store {name} was abandoned"
 msgstr "La modification du magasin {name} a été abandonnée"
 
+#: src/chat/chat-more.tsx
+msgid "The chat wasn't moved"
+msgstr "Le chat n’a pas été déplacé"
+
 #: src/engines/screen-approval.tsx
 msgid "The code of version {version}"
 msgstr "Le code de la version {version}"
@@ -9593,6 +9623,7 @@ msgstr "Les domaines que ce chat crée n’ont pas été chargés."
 msgid "the EU"
 msgstr "UE"
 
+#: src/chat/chat-more.tsx
 #: src/dashboard/report-dialog.tsx
 #: src/export/export-menu.tsx
 msgid "The export didn't work. Try again."
