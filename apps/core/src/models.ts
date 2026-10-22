@@ -111,7 +111,6 @@ import {
   charactersOf,
   parseVoiceRef,
   voicePricesOf,
-  voiceProvider,
   wordsOf,
 } from "./voice-models.ts";
 import type { VoiceRef } from "./voice-models.ts";
@@ -2837,6 +2836,9 @@ const relayOrFail = async (
 // request against the budgets, at its price per character, and the audit
 // log records it, never the line. ElevenLabs is reached through AI Gateway
 // over the AI binding, with the key AI Gateway stores: core sends none.
+// The gateway reaches it at the path the deployment's config names
+// (`voice.provider`): ElevenLabs's native host, or its EU host through a
+// custom provider. Nothing reaches ElevenLabs but through the gateway.
 
 /** Text without anything a URL's path would read apart: a voice's ID. */
 const voiceIdPattern = /^[A-Za-z0-9]{1,64}$/u;
@@ -2980,6 +2982,9 @@ const largestSpeech: SpeechRecord = {
   ledger: largestRecord.ledger,
 };
 
+/** The gateway path to ElevenLabs's native host, unless the config names another. */
+const nativeVoiceProvider = "elevenlabs";
+
 /** A line's way to the voice model at the deployment's gateway. */
 interface SpeechRoute extends Admitting {
   call: SpeechSession;
@@ -3050,7 +3055,7 @@ const admitSpeech = async (
     judged: verdict.judged,
     price,
     transport: createAiBindingFetch(env.AI),
-    url: `https://workers-binding.ai/ai-gateway/gateways/${config.gateway}/${voiceProvider}/v1/text-to-speech/${call.voice}/with-timestamps?${query.toString()}`,
+    url: `https://workers-binding.ai/ai-gateway/gateways/${config.gateway}/${config.voice?.provider ?? nativeVoiceProvider}/v1/text-to-speech/${call.voice}/with-timestamps?${query.toString()}`,
     body: JSON.stringify({
       text: call.text,
       model_id: ref.id,
@@ -3072,7 +3077,14 @@ const admitSpeech = async (
   };
 };
 
-/** The provider request for a line, as the ledger admitted it (`id`). */
+/**
+ * The provider request for a line, as the ledger admitted it (`id`). It
+ * carries the deployment's gateway token where one is set
+ * (`AI_GATEWAY_TOKEN`) in place of the binding's placeholder: an
+ * authenticated gateway asks for it on a realtime WebSocket, which
+ * doesn't go over the AI binding, and strips it from the binding's
+ * requests, which need none. Never logged.
+ */
 const speechRequest = (
   route: SpeechRoute,
   id: string,
@@ -3088,6 +3100,10 @@ const speechRequest = (
     if (value !== null) {
       headers[name] = value;
     }
+  }
+  const token = route.env.AI_GATEWAY_TOKEN;
+  if (token !== undefined && token !== "") {
+    headers["cf-aig-authorization"] = `Bearer ${token}`;
   }
   return withRequestId(
     { method: "POST", headers, body: route.body, signal },
