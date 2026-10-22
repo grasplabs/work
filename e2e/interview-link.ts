@@ -37,10 +37,23 @@ const storeFiles = async (): Promise<string[]> => {
   return files.flat();
 };
 
-/** The random id behind `person`'s link, if they have one. */
+/**
+ * The random id behind `person`'s link, if they have one. A file without
+ * the store's tables is passed over: the folder also holds Miniflare's
+ * `metadata.sqlite`.
+ */
 const linkIdOf = (file: string, person: string): string | undefined => {
   const database = new DatabaseSync(file, { readOnly: true });
   try {
+    const hasCodes =
+      database
+        .prepare(
+          "select 1 from sqlite_master where type = 'table' and name = 'link_codes'"
+        )
+        .get() !== undefined;
+    if (!hasCodes) {
+      return undefined;
+    }
     const row = database
       .prepare("select link_id from link_codes where person = ?")
       .get(person);
