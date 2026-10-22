@@ -8,11 +8,11 @@
  */
 import { createServerFn } from "@tanstack/react-start";
 import { env } from "cloudflare:workers";
-import { and, desc, inArray, ne } from "drizzle-orm";
+import { and, desc, eq, inArray, ne } from "drizzle-orm";
 
 import { consoleDatabase } from "../db/act.ts";
 import type { ConsoleDatabase } from "../db/act.ts";
-import { auditEvents } from "../db/schema.ts";
+import { auditEvents, rollouts as rolloutRows } from "../db/schema.ts";
 import { listReleases } from "../releases/queries.ts";
 import type { ReleaseSummary } from "../releases/queries.ts";
 import { getRollout, listRollouts } from "../rollout/queries.ts";
@@ -53,6 +53,12 @@ export interface StaffEvent {
   action: StaffAction;
   clientId: string | null;
   target: string | null;
+  /**
+   * For a rollout's action, what it rolls out, as the reader tells rollouts
+   * apart: its release's id, or `secrets`. Null for a client's action, or a
+   * rollout the console no longer has.
+   */
+  rollout: string | null;
 }
 
 const isStaffAction = (action: string): action is StaffAction =>
@@ -70,8 +76,11 @@ export const staffEvents = async (
       action: auditEvents.action,
       clientId: auditEvents.clientId,
       target: auditEvents.target,
+      rolloutKind: rolloutRows.kind,
+      rolloutRelease: rolloutRows.releaseId,
     })
     .from(auditEvents)
+    .leftJoin(rolloutRows, eq(rolloutRows.id, auditEvents.target))
     .where(
       and(
         ne(auditEvents.actor, "system"),
@@ -80,9 +89,14 @@ export const staffEvents = async (
     )
     .orderBy(desc(auditEvents.at), desc(auditEvents.id))
     .limit(staffEventLimit);
-  return rows.flatMap(({ action, ...row }) =>
-    isStaffAction(action) ? [{ ...row, action }] : []
-  );
+  return rows.flatMap(({ action, rolloutKind, rolloutRelease, ...row }) => {
+    if (!isStaffAction(action)) {
+      return [];
+    }
+    const rollout =
+      rolloutKind === "secrets" ? "secrets" : (rolloutRelease ?? null);
+    return [{ ...row, action, rollout }];
+  });
 };
 
 /** What the Platform page reads of releases, rollouts and staff's actions. */

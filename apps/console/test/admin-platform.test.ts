@@ -3,6 +3,7 @@ import { ne } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
 import { platformData, staffEvents } from "../src/admin/platform-data.ts";
+import { eventWords } from "../src/admin/platform-parts.tsx";
 import {
   companiesOf,
   goingOut,
@@ -326,8 +327,21 @@ describe("the Platform page's data", () => {
     });
   });
 
-  it("lists what staff did to the platform, the latest first, and none of the console's own jobs or a deploy's steps", async () => {
+  it("lists what staff did to the platform, the latest first, naming each rollout by its release, and none of the console's own jobs or a deploy's steps", async () => {
     const tag = crypto.randomUUID().slice(0, 8);
+    const shipped = await publishRelease({ notes: "feat(core): shipped" });
+    await importReleases(env.RELEASES, db);
+    const rolloutId = crypto.randomUUID();
+    await db.insert(rollouts).values({
+      id: rolloutId,
+      kind: "release",
+      releaseId: shipped.id,
+      status: "waiting",
+      ring: 0,
+      startedBy: "ops@grasp.test",
+      createdAt: later(0),
+      updatedAt: later(0),
+    });
     await db.insert(auditEvents).values([
       {
         id: `pin-${tag}`,
@@ -342,7 +356,14 @@ describe("the Platform page's data", () => {
         at: later(3),
         actor: "ops@grasp.test",
         action: "rollout.approve",
-        target: "rollout-1",
+        target: rolloutId,
+      },
+      {
+        id: `cancel-${tag}`,
+        at: later(6),
+        actor: "ops@grasp.test",
+        action: "rollout.cancel",
+        target: `gone-${tag}`,
       },
       {
         id: `system-${tag}`,
@@ -362,9 +383,15 @@ describe("the Platform page's data", () => {
 
     const events = await staffEvents(db);
 
-    expect(events.slice(0, 2).map(({ id }) => id)).toStrictEqual([
-      `approve-${tag}`,
-      `pin-${tag}`,
+    expect(
+      events
+        .slice(0, 3)
+        .map((event) => eventWords(event, (id) => id.split("-")[0] ?? id))
+    ).toStrictEqual([
+      // A rollout the console no longer has is still a rollout.
+      "ops@grasp.test cancelled a rollout",
+      `ops@grasp.test approved the next ring of the rollout of ${shipped.id}`,
+      "ops@grasp.test pinned acme to r1",
     ]);
   });
 });

@@ -82,13 +82,19 @@ export const eventWords = (
 ): string => {
   const company = event.clientId === null ? "" : nameOf(event.clientId);
   const target = event.target ?? "";
+  // A rollout's id says nothing to a reader; what it rolls out tells it apart.
+  let rollout = "a rollout";
+  if (event.rollout === "secrets") {
+    rollout = "a secrets rollout";
+  } else if (event.rollout !== null) {
+    rollout = `the rollout of ${event.rollout}`;
+  }
   const what: Record<StaffEvent["action"], string> = {
-    // A rollout's id says nothing to a reader; its release is on the page.
-    "rollout.start": "started a rollout",
-    "rollout.approve": "approved a rollout's next ring",
-    "rollout.pause": "paused a rollout",
-    "rollout.resume": "resumed a rollout",
-    "rollout.cancel": "cancelled a rollout",
+    "rollout.start": `started ${rollout}`,
+    "rollout.approve": `approved the next ring of ${rollout}`,
+    "rollout.pause": `paused ${rollout}`,
+    "rollout.resume": `resumed ${rollout}`,
+    "rollout.cancel": `cancelled ${rollout}`,
     "rollout.rollback": `rolled ${company} back`,
     "client.create": `added ${company}`,
     "client.ring": `moved ${company} to another ring`,
