@@ -85,14 +85,16 @@ const share = (some: number, of: number): number => (of === 0 ? 0 : some / of);
 /**
  * What Grasp knows of the company, part by part, from what the onboarding
  * holds; the kickoff by how much of what Stephen needs from it is in
- * (`kickoff`, 0 to 1), and the documents once any is shared (`documents`).
- * Where they live, Pulse and the review come in with their own issues
- * (GRA-299, GRA-300, GRA-304) and count nothing until then.
+ * (`kickoff`, 0 to 1), the documents once any is shared (`documents`), and
+ * the review by how much of what needs the admin is settled and how much
+ * of the work is known (`review`, 0 to 1). Where they live and Pulse come
+ * in with their own issues (GRA-299, GRA-300) and count nothing until then.
  */
 export const knownParts = (
   view: OnboardingView,
   kickoff = 0,
-  documents = 0
+  documents = 0,
+  review = 0
 ): KnownPart[] => {
   const { roster, progress } = view;
   const taking = roster?.teams.filter((team) => !team.off) ?? [];
@@ -112,7 +114,7 @@ export const knownParts = (
       taking.length > 0 && taking.every((team) => team.lead !== null) ? 1 : 0
     ),
     part("conversations", conversations),
-    part("review", 0),
+    part("review", review),
   ];
 };
 
@@ -200,7 +202,8 @@ export const gateView = async (
   const parts = knownParts(
     view,
     await store.kickoffKnown(),
-    shared.length > 0 ? 1 : 0
+    shared.length > 0 ? 1 : 0,
+    await store.reviewKnown()
   );
   let sum = 0;
   for (const { weight, known } of parts) {

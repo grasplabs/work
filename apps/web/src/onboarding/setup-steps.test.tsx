@@ -42,6 +42,7 @@ const said = (
       openedAt: null,
       staff: null,
     },
+    review: { differences: [], mapped: 0 },
   };
   return renderToStaticMarkup(
     <I18nProvider i18n={i18n}>

@@ -15,6 +15,7 @@ import {
   patchAt,
   REACH,
   shimmerAt,
+  showBrain,
   SPREAD_S,
   swayAt,
   tideOut,
@@ -1159,6 +1160,8 @@ const animate = (
     attributeFilter: ["class", "data-theme", "style"],
   });
   const brain = brainOf(live.current.scene, live.current.apart !== undefined);
+  // On screen, so the way into the platform can take these very dots over.
+  const hide = showBrain({ element, size: CANVAS, ...brain.screen });
   const rings = ringFieldOf();
   const taken = (sx: number, sy: number) => {
     const cx = Math.floor(sx / rings.cell);
@@ -1241,6 +1244,7 @@ const animate = (
       dots.targetId = brain.morphAt >= 0 ? "" : brain.targetId;
       kept = dots;
     }
+    hide();
     watcher.disconnect();
     themes.disconnect();
     scheme.removeEventListener("change", repaint);

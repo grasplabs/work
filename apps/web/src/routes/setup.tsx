@@ -9,6 +9,7 @@ import type { BrainScene } from "../brain/dot-brain.tsx";
 import { loadCoreStatus } from "../core-connection.ts";
 import { PageError } from "../frame/page-states.tsx";
 import { loadFromCore, notLoadedText } from "../load-from-core.tsx";
+import { useReveal } from "../onboarding/platform-reveal.tsx";
 import { SetupFrame } from "../onboarding/setup-frame.tsx";
 import { SetupStepBody } from "../onboarding/setup-steps.tsx";
 import {
@@ -280,6 +281,21 @@ const useVoiceBetweenSteps = (step: SetupStep): void => {
   }, [step]);
 };
 
+/**
+ * On the way into the platform the brain fills up and charges, and
+ * everything around it fades: the scene the brain takes then, whether the
+ * way in is on, and whether the rest is fading.
+ */
+const useWayIn = (figure: BrainScene) => {
+  const { phase } = useReveal();
+  const revealing = phase !== "idle";
+  return {
+    scene: revealing ? { ...figure, fill: 1, charge: true } : figure,
+    revealing,
+    clearing: phase === "clearing" || phase === "building",
+  };
+};
+
 const Setup = () => {
   const { t, i18n } = useLingui();
   const navigate = useNavigate();
@@ -306,7 +322,9 @@ const Setup = () => {
   // "How this works" tells its story in the brain's figures, so the figure follows the story there.
   const [story, setStory] = useState<BrainScene | null>(null);
   const told = brainScene(step, { roster, listening, known: percent });
-  const scene = step === "about" && story !== null ? story : told;
+  const { scene, revealing, clearing } = useWayIn(
+    step === "about" && story !== null ? story : told
+  );
   const go = (next: SetupStep) => {
     void navigate({ to: "/setup", search: { step: next } });
   };
@@ -323,7 +341,9 @@ const Setup = () => {
     <SetupFrame
       knowledge={{ parts, percent, threshold: data.gate.threshold }}
       onExit={() => {
-        void navigate({ to: "/" });
+        if (!revealing) {
+          void navigate({ to: "/" });
+        }
       }}
       onGo={go}
       reached={reached}
@@ -348,8 +368,15 @@ const Setup = () => {
             </div>
           )}
         </div>
-        {/* One step fades out, the next fades in: nothing slides. */}
-        <div className="flex w-full flex-col items-center" ref={body}>
+        {/* One step fades out, the next fades in: nothing slides. On the way in, the step fades and only the brain stays. */}
+        <div
+          className={cn(
+            "flex w-full flex-col items-center transition-all duration-450",
+            { "opacity-0 blur-sm": clearing }
+          )}
+          inert={revealing}
+          ref={body}
+        >
           <div
             className="animate-in fade-in flex w-full flex-col items-center gap-6 duration-500"
             key={step}
@@ -407,12 +434,13 @@ export const Route = createFileRoute("/setup")({
   },
   loader: async ({ context: { core } }) =>
     await loadFromCore(core, async (session) => {
-      const [view, documents, gate] = await Promise.all([
+      const [view, documents, gate, review] = await Promise.all([
         session.onboarding.view(),
         session.onboarding.documents(),
         session.onboardingGate.view(),
+        session.onboarding.review(),
       ]);
-      return { view, documents, gate };
+      return { view, documents, gate, review };
     }),
   component: Setup,
 });

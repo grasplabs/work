@@ -256,6 +256,46 @@ export interface OnboardingView {
   paused: boolean;
 }
 
+/**
+ * How the admin settles a piece of work its people told two ways, when
+ * nobody could say why: both ways kept, or which way holds, the way most
+ * told it (`first`) or the other.
+ */
+export const settleChoices = ["both", "first", "other"] as const;
+export type SettleChoice = (typeof settleChoices)[number];
+
+export const settleSchema = z.strictObject({
+  work: z.string().min(1).max(64),
+  holds: z.enum(settleChoices),
+});
+
+/**
+ * A step of a piece of work that its people told two ways, and nobody
+ * could say why: what only the admin can settle. Never who told which way.
+ */
+export interface Difference {
+  /** The piece of work's id. */
+  work: string;
+  /** The piece of work, in the company's own words. */
+  name: string;
+  /** The team that does it. */
+  team: string;
+  /** The step as most told it. */
+  way: string;
+  /** The other way some told it. */
+  other: string;
+  /** How the admin settled it; null while it is open. */
+  holds: SettleChoice | null;
+}
+
+/** What needs the admin once the interviews are done, and what Stephen thanks them with. */
+export interface OnboardingReview {
+  /** The differences nobody could explain, in the teams that take part. */
+  differences: Difference[];
+  /** How many pieces of work are drawn from what their people agreed to. */
+  mapped: number;
+}
+
 /** How many weeks the programme with Grasp runs. */
 export const programmeWeeks = 8;
 
@@ -289,6 +329,10 @@ export interface OnboardingApi extends OnboardingDocumentsApi {
   saveRoster: (roster: RosterInput) => Promise<OnboardingView>;
   /** Sets when the interviews run; links go out by it. */
   savePlan: (plan: PlanInput) => Promise<OnboardingView>;
+  /** What only the admin can settle, and how much of the work is mapped. */
+  review: () => Promise<OnboardingReview>;
+  /** Settles a piece of work told two ways: both kept, or which holds. */
+  settle: (work: string, holds: SettleChoice) => Promise<OnboardingReview>;
 }
 
 /** What only Grasp's staff do in an onboarding, the kickoff included. */
@@ -360,4 +404,6 @@ export const onboardingErrors = defineErrorFamily({
   "onboarding.not_found": "Nobody on the list by that id.",
   "onboarding.no_team": "No team on the list by that id.",
   "onboarding.no_failed_mail": "That person has no mail that failed.",
+  "onboarding.no_difference":
+    "Nothing about that piece of work needs settling.",
 });

@@ -301,6 +301,18 @@ export const drawnWorks = sqliteTable("drawn_works", {
 });
 
 /**
+ * How the company's admin settled a piece of work told two ways that
+ * nobody could explain: both ways kept, or which way holds, the way most
+ * told it (`first`) or the other. Apart from the drawing, so drawing it
+ * again keeps it; it goes with the piece of work.
+ */
+export const settledWorks = sqliteTable("settled_works", {
+  work: text().primaryKey(),
+  holds: text({ enum: ["both", "first", "other"] }).notNull(),
+  at: text().notNull(),
+});
+
+/**
  * Drawings that failed and wait to be tried again: what (`team:<id>` or
  * `work:<id>`), how often it failed, and when it may be tried again (ISO 8601).
  */

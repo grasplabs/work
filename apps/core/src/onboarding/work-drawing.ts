@@ -10,6 +10,7 @@ import {
 } from "@grasp-os/shared/admin/onboarding-admin";
 import type { OrgRules } from "@grasp-os/shared/admin/onboarding-admin";
 import type { DrawnWork, Told } from "@grasp-os/shared/admin/org-record";
+import type { SettleChoice } from "@grasp-os/shared/onboarding";
 import { z } from "zod";
 
 import { gatewaySettings, modelForRole, models } from "../models.ts";
@@ -507,6 +508,20 @@ const heardOf = (drawn: DrawnWork | null, talked: readonly string[]) => {
   return { described, ways, added };
 };
 
+/**
+ * Whether a step is told two ways, and whether why is known, once the
+ * admin settled it (`holds`): both ways kept are explained, and one way
+ * holding leaves one way.
+ */
+const settledOf = (
+  drawn: DrawnWork | null,
+  ways: ReadonlySet<boolean>,
+  holds: SettleChoice | null
+): { differs: boolean; explained: boolean } => ({
+  differs: ways.size === 2 && (holds === null || holds === "both"),
+  explained: drawn?.differs?.why !== "conflict" || holds === "both",
+});
+
 /** How far a piece of work is known, under the organization's rules. */
 export interface WorkKnown extends WorkflowEvidence {
   state: WorkflowState;
@@ -525,7 +540,9 @@ export interface WorkKnown extends WorkflowEvidence {
  * blocks it; and more than the most interviews without settling means two
  * pieces of work in one. `told` is who it was drawn from, in the order
  * they agreed; `doers` who does it, away people left out; `lead` the
- * team's lead, whose overview alone never makes it known.
+ * team's lead, whose overview alone never makes it known; `holds` how the
+ * admin settled a difference nobody could explain: both ways kept makes
+ * them variants, and one way holding leaves no difference at all.
  */
 export const knownOf = (
   drawn: DrawnWork | null,
@@ -535,12 +552,14 @@ export const knownOf = (
     told,
     doers,
     lead,
+    holds = null,
   }: {
     id: string;
     team: string;
     told: readonly string[];
     doers: readonly string[];
     lead: string | null;
+    holds?: SettleChoice | null;
   },
   rules: OrgRules = STARTING_ORG_RULES
 ): WorkKnown => {
@@ -551,8 +570,7 @@ export const knownOf = (
   const { described, ways, added } = heardOf(drawn, talked);
   const recent = added.slice(-own.run);
   const said = recent.reduce((sum, { all }) => sum + all, 0);
-  const differs = ways.size === 2;
-  const explained = drawn?.differs?.why !== "conflict";
+  const { differs, explained } = settledOf(drawn, ways, holds);
   const everyone =
     doers.length > 0 &&
     doers.every((person) => talked.includes(person)) &&
