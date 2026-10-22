@@ -117,6 +117,15 @@ describe(officeTypeOf, () => {
     const cases = [
       // No content types at all: a plain ZIP, whatever it was labelled.
       await zipOf([body]),
+      // The main part named only in a comment and a processing instruction.
+      await zipOf([
+        {
+          name: "[Content_Types].xml",
+          content: encoder.encode(
+            `<?xml version="1.0"?><!-- <Override PartName="/a" ContentType="${word}.main+xml"/> --><?pi <Override ContentType="${word}.main+xml"?><Types/>`
+          ),
+        },
+      ]),
       // Both main parts: neither one.
       await zipOf([
         { name: "[Content_Types].xml", content: contentTypes(word, excel) },
