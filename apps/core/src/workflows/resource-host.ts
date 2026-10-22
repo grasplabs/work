@@ -1692,6 +1692,15 @@ export class ResourceRunHost
         // told to have run, so a check that can't answer for a moment
         // leaves it to a later attempt, never a failure kept for good.
         await this.#actionPackagesAdmitted(run, attempt, funded);
+        // Its scope settled while it waited to be admitted: refused as it
+        // would have been at its start (`do`), its module never told.
+        if (this.#fencedOff(step.scope)) {
+          throw toStepError(
+            forIsolate(
+              workflowResourceErrors.create("workflow.branch_cancelled")
+            )
+          );
+        }
         ran();
         call = fn(this.#attemptHostOf(attempt));
       }

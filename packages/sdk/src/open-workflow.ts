@@ -699,6 +699,9 @@ const flowOf = (engine: OpenWorkflowEngine, within = ""): Flow => {
     let failing = false;
     // One after another, an end stops the items after it.
     let ending = false;
+    // A scope around this one settled over the item or branch this scope
+    // runs in: none starts after, each would be refused at its first step.
+    let fenced = false;
     const settle = async (branch: number): Promise<number> => {
       settling ??= (async () => {
         const record = readRecord(
@@ -719,6 +722,19 @@ const flowOf = (engine: OpenWorkflowEngine, within = ""): Flow => {
       return await settling;
     };
     const settled = Promise.withResolvers<number>();
+    // Settles the scope on `branch`, unless a fence around it refuses the
+    // settling: whether it settled.
+    const settledOn = async (branch: number): Promise<boolean> => {
+      try {
+        settled.resolve(await settle(branch));
+        return true;
+      } catch (error) {
+        if (!fencedOff(error)) {
+          throw error;
+        }
+        return false;
+      }
+    };
     const pool = pooled(
       count,
       limit,
@@ -727,9 +743,23 @@ const flowOf = (engine: OpenWorkflowEngine, within = ""): Flow => {
         try {
           done = await run(index, flowOf(engine, itemScope(within, id, index)));
         } catch (error) {
-          // A step refused for a scope another settled over fails nothing
-          // of the scope: the one that settled it still starts.
-          failing ||= !compete && !fencedOff(error);
+          if (!fencedOff(error)) {
+            failing ||= !compete;
+            return { ok: false, error };
+          }
+          // A step refused for a fence fails nothing of the scope. The
+          // fence is this scope's own, which an earlier activation may
+          // have settled before this one reached its settling, or one
+          // around it. A scope that settles asks: the host answers the
+          // branch its own fence holds, and the one it settled on still
+          // starts; or it refuses the settling too, for a fence around
+          // it, and then none starts after. One that never settles has no
+          // fence of its own.
+          if (!settles) {
+            fenced = true;
+          } else if (settling === undefined) {
+            fenced = !(await settledOn(index));
+          }
           return { ok: false, error };
         }
         if (done === null) {
@@ -747,10 +777,28 @@ const flowOf = (engine: OpenWorkflowEngine, within = ""): Flow => {
         return { ok: true, done };
       },
       async (index) => {
+        // Each answer here comes from what this activation has seen so
+        // far: the outcomes of the items and branches before it. A replay
+        // asks the same at the same points, as the engine hands a run's
+        // outcomes back in the order they were journaled, each before the
+        // next. So it starts every item and branch the first run started,
+        // one started behind a failure before the scope settled included,
+        // and reaches each wait and retry the journal holds of them: its
+        // steps the fence refuses replay as recorded, and run nothing.
+        if (fenced) {
+          return "stop";
+        }
         // Once settled, only the one it settled on starts (it may be an
         // earlier activation's, not yet replayed to): none of the others.
         if (settling !== undefined) {
-          return index === (await settling) ? "run" : "skip";
+          let branch: number;
+          try {
+            branch = await settling;
+          } catch {
+            // Refused for a fence around this scope (`fenced`).
+            return "stop";
+          }
+          return index === branch ? "run" : "skip";
         }
         return failing || ending ? "stop" : "run";
       }
