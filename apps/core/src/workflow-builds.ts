@@ -271,6 +271,14 @@ const sealedCallSchema = z.discriminatedUnion("name", [
     arguments: templateSchema,
   }),
   z.strictObject({
+    name: z.literal("grasp.emit"),
+    binding: aliasSchema,
+    type: z.string().min(1).max(256),
+    subject: templateSchema.optional(),
+    dataschema: templateSchema.optional(),
+    data: templateSchema,
+  }),
+  z.strictObject({
     name: z.literal("grasp.action"),
     binding: aliasSchema,
     // One of the workflow's own actions, as the generator sealed it.

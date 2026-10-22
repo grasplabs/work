@@ -286,6 +286,20 @@ export type GeneratedCall =
       readonly module: string;
       readonly export: string;
       readonly arguments: CallTemplate;
+    }
+  | {
+      /**
+       * An `emit` task's event, lowered as a named call of the host's:
+       * its event binding and literal type, as validation checked them,
+       * and the templates of its subject, data schema and data. Its id,
+       * source, time and content type are the host's.
+       */
+      readonly name: "grasp.emit";
+      readonly binding: string;
+      readonly type: string;
+      readonly subject?: CallTemplate;
+      readonly dataschema?: CallTemplate;
+      readonly data: CallTemplate;
     };
 
 /** The named calls this generator lowers. */
@@ -480,6 +494,7 @@ const loweredKinds = new Set<string>([
   "call",
   "do",
   "for",
+  "emit",
   "listen",
   "run",
   "set",
@@ -1629,6 +1644,76 @@ const inputFromOf = (
   sealedPartOf(emitter, item, "input", "from", "taskInputFrom");
 
 /**
+ * An `emit` task's event, as a named call of the host's (`grasp.emit`):
+ * its binding and type as validation checked them, its subject, data
+ * schema and data as templates the host builds. `undefined` once a part
+ * was refused: a `source` (the host sets it, to the emitting run), or a
+ * content type other than JSON's, which is the only one the host sends.
+ */
+const emitCallOf = (
+  emitter: Emitter,
+  item: ListTask
+): GeneratedCall | undefined => {
+  const { id, task, pointer } = item;
+  const metadata = isObject(task.metadata) ? task.metadata.grasp : undefined;
+  const binding = isObject(metadata) ? metadata.binding : undefined;
+  const emit = isObject(task.emit) ? task.emit : {};
+  const event = isObject(emit.event) ? emit.event : {};
+  const attributes = isObject(event.with) ? event.with : undefined;
+  const withPointer = pointerJoin(
+    pointerJoin(pointerJoin(pointer, "emit"), "event"),
+    "with"
+  );
+  if (
+    typeof binding !== "string" ||
+    attributes === undefined ||
+    typeof attributes.type !== "string"
+  ) {
+    throw new Error(`The checked workflow's emit at ${pointer} is incomplete`);
+  }
+  let refused = false;
+  if (Object.hasOwn(attributes, "source")) {
+    emitter.refusals.add(pointerJoin(withPointer, "source"), "emit:source", id);
+    refused = true;
+  }
+  if (
+    Object.hasOwn(attributes, "datacontenttype") &&
+    attributes.datacontenttype !== "application/json"
+  ) {
+    emitter.refusals.add(
+      pointerJoin(withPointer, "datacontenttype"),
+      "emit:datacontenttype",
+      id
+    );
+    refused = true;
+  }
+  const part = (key: string): CallTemplate | undefined =>
+    Object.hasOwn(attributes, key)
+      ? templateOf(
+          emitter,
+          attributes[key] ?? null,
+          pointerJoin(withPointer, key),
+          id,
+          "json"
+        )
+      : undefined;
+  const subject = part("subject");
+  const dataschema = part("dataschema");
+  const data = part("data") ?? { literal: null };
+  if (refused) {
+    return undefined;
+  }
+  return {
+    name: "grasp.emit",
+    binding,
+    type: attributes.type,
+    ...(subject === undefined ? {} : { subject }),
+    ...(dataschema === undefined ? {} : { dataschema }),
+    data,
+  };
+};
+
+/**
  * The statement of a call task that makes its call within its step (every
  * named call but `grasp.sleepUntil`): the host makes the call, from what
  * the build sealed, as the step's own work.
@@ -1640,7 +1725,11 @@ const lowerCall = (
   place: ListPlace,
   sealed: TaskBase
 ): void => {
-  const call = callOf(emitter, item);
+  // An emit's own step is a call's: the host emits it, once, as its work.
+  const call =
+    kindOf(item.task) === "emit"
+      ? emitCallOf(emitter, item)
+      : callOf(emitter, item);
   if (call === undefined) {
     return;
   }
@@ -2304,7 +2393,7 @@ const lowerOneStep = (
   stages: Parameters<typeof lowerCall>[2],
   place: ListPlace,
   sealed: Parameters<typeof lowerCall>[4],
-  kind: "set" | "switch" | "call"
+  kind: "set" | "switch" | "emit" | "call"
 ): void => {
   if (kind === "set") {
     emitter.tasks.push({ ...sealed, kind, steps: ["task"] });
@@ -2356,6 +2445,7 @@ const lowerTask = (
   } else if (
     kind === "set" ||
     kind === "switch" ||
+    kind === "emit" ||
     (kind === "call" && !sleeps)
   ) {
     lowerOneStep(emitter, item, stages, place, sealed, kind);
