@@ -312,6 +312,7 @@ export default function Escapes() {
       <link rel="stylesheet" href="https://cdn.example/theme.css" />
       <img alt="" src="https://cdn.example/logo.png" />
       <img alt="" srcSet="data:image/png;base64,AAAA 1x,https://cdn.example/logo@2x.png 2x" />
+      <img alt="" srcSet="/local.png (foo(bar),https://cdn.example/image.png 2x" />
       <div className="!p-2 gap-2" />
       <div dangerouslySetInnerHTML={{ __html: "<b>hi</b>" }} />
       <div className={cn("gap-2", [{ "p-4!": true }])} />
@@ -340,10 +341,11 @@ export default function Escapes() {
       "18 grasp/no-remote-resources",
       "19 grasp/no-remote-resources",
       "20 grasp/no-remote-resources",
-      "21 grasp/no-important",
-      "22 grasp/no-style-escapes",
-      "23 grasp/no-important",
+      "21 grasp/no-remote-resources",
+      "22 grasp/no-important",
+      "23 grasp/no-style-escapes",
       "24 grasp/no-important",
+      "25 grasp/no-important",
     ]);
     // Each says what to do instead.
     expect(

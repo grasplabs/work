@@ -44,7 +44,8 @@ const srcSetSpace = /\s/u;
  * A `srcSet`'s candidate URLs, as HTML parses them (§4.8.4.3.1): each a
  * run up to whitespace, after any whitespace and commas, ending the
  * candidate if it ends in commas; else its descriptors follow, up to the
- * next comma outside parentheses. A `data:` URL keeps its own commas.
+ * next comma outside parentheses, which don't nest. A `data:` URL keeps
+ * its own commas.
  */
 const srcSetUrls = (value: string): string[] => {
   const urls: string[] = [];
@@ -63,16 +64,18 @@ const srcSetUrls = (value: string): string[] => {
       urls.push(trimmed);
     }
     if (trimmed === url) {
-      let depth = 0;
+      // HTML's descriptor states: "(" enters parentheses, the first ")"
+      // leaves them (they don't nest), a comma outside ends the candidate.
+      let inParens = false;
       while (at < value.length) {
         const char = value.charAt(at);
-        if (char === "," && depth === 0) {
+        if (char === "," && !inParens) {
           break;
         }
         if (char === "(") {
-          depth += 1;
-        } else if (char === ")" && depth > 0) {
-          depth -= 1;
+          inParens = true;
+        } else if (char === ")") {
+          inParens = false;
         }
         at += 1;
       }
