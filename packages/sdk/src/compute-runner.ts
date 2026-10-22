@@ -231,8 +231,15 @@ const resourceOf = (
   if (kind === "connector") {
     return {
       // oxlint-disable-next-line typescript/promise-function-async -- the very promise callHost tracks
-      call: (operation: unknown, args: unknown) =>
-        callHost(alias, { operation, arguments: args }),
+      call: (operation: unknown, args: unknown, options?: unknown) => {
+        // Read once, as data: only its `into`, a files use's alias.
+        const into = exportOf(options, "into");
+        return callHost(alias, {
+          operation,
+          arguments: args,
+          ...(into === undefined ? {} : { into }),
+        });
+      },
     };
   }
   if (kind === "knowledge") {
