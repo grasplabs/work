@@ -16,6 +16,7 @@ import {
   clients,
   releases,
 } from "../src/db/schema.ts";
+import { onboardingSender } from "../src/deploy/core-config.ts";
 import { mappedRoute } from "../src/deploy/router.ts";
 import type { DeploySecrets } from "../src/deploy/secrets.ts";
 import {
@@ -520,6 +521,31 @@ describe("provisioning a placed client", () => {
         recorded.includes(value)
       )
     ).toStrictEqual([]);
+  });
+
+  it("locks a placed client's mail to its onboarding sender, whatever the release allows", async () => {
+    const manifest = await importRelease(
+      "dedicated",
+      { sendsMail: true },
+      (core) => ({
+        ...core,
+        bindings: core.bindings.map((binding) =>
+          binding.type === "send_email"
+            ? { ...binding, allowed_sender_addresses: ["ceo@acme.test"] }
+            : binding
+        ),
+      })
+    );
+    const { account, clientId, held } = await setUp("dedicated", manifest);
+
+    await runClientProvision(context, held);
+
+    const { core } = await scriptsOf(clientId);
+    expect(liveBindings(account, core).EMAIL).toStrictEqual({
+      type: "send_email",
+      name: "EMAIL",
+      allowed_sender_addresses: [onboardingSender(clientId, domain).address],
+    });
   });
 
   it("does nothing once done", async () => {

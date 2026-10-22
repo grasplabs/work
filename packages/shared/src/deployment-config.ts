@@ -330,7 +330,8 @@ export const inboundMailDomainSchema = domainSchema
 /**
  * `MAIL_FROM`: who the mail core sends is from, `"<name>" <<address>>`:
  * an address on the deployment's sending domain, set up for Email Sending
- * outside core, and the name shown with it. The name is one line with no
+ * outside core (the console's src/deploy/resources.ts, which also locks
+ * the `EMAIL` binding to that address), and the name shown with it. The name is one line with no
  * quotes or angle brackets, so it can't change the header it goes in.
  * Unset, core sends no mail: each one fails, and says why.
  */

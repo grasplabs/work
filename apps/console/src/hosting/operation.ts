@@ -92,7 +92,11 @@ import { clientProvisions, clients, clientWorkers } from "../db/schema.ts";
 import { currentReleases, incompatibility } from "../deploy/compatibility.ts";
 import { derivedCoreConfig } from "../deploy/core-config.ts";
 import type { SignInApps } from "../deploy/core-config.ts";
-import { configuredCoreVars, errorCode } from "../deploy/deploy.ts";
+import {
+  configuredCoreVars,
+  errorCode,
+  mailSenderOf,
+} from "../deploy/deploy.ts";
 import { migrateDatabases } from "../deploy/migrations.ts";
 import { importedManifest } from "../deploy/release.ts";
 import {
@@ -107,6 +111,7 @@ import type { DeploySecrets } from "../deploy/secrets.ts";
 import {
   checkBindingNames,
   keyedHash,
+  lockMailSender,
   renderedWorkerUpload,
   secretsFingerprint,
 } from "../deploy/upload.ts";
@@ -507,13 +512,19 @@ const coreVarsOf = async (
     domain: context.router.domain,
     apps: context.signInApps ?? {},
   });
-  return await configuredCoreVars(context.db, loaded.held.clientId, derived, {
-    by: loaded.operation.startedBy,
-    what: "release",
-    release: loaded.operation.releaseId,
-    // When the operation started: the same however often it's resumed.
-    at: loaded.operation.createdAt.toISOString(),
-  });
+  return await configuredCoreVars(
+    context.db,
+    loaded.held.clientId,
+    derived,
+    {
+      by: loaded.operation.startedBy,
+      what: "release",
+      release: loaded.operation.releaseId,
+      // When the operation started: the same however often it's resumed.
+      at: loaded.operation.createdAt.toISOString(),
+    },
+    mailSenderOf(context, loaded.held.clientId)
+  );
 };
 
 /** The secrets Worker `app` runs with: the client's derived ones and the shared ones it needs. */
@@ -697,6 +708,12 @@ const upload = async (
   const { manifest, held, placement } = loaded;
   const worker = workerOf(manifest, app);
   const rendered = renderClientWorker(worker, placement, inventory);
+  // Its mail sends from the client's onboarding sender alone, as a
+  // deploy's does (`renderBindings`).
+  const mailSender = mailSenderOf(context, held.clientId);
+  for (const binding of rendered.bindings) {
+    lockMailSender(binding, mailSender);
+  }
   const target = targetOf(loaded, inventory, app);
   const vars = app === "core" ? await coreVarsOf(context, loaded) : {};
   const fingerprint = await keyedHash(
