@@ -3687,30 +3687,6 @@ export const brainRecords = sqliteTable(
 );
 
 /**
- * Exclusion topics, one row per revision: what Knowledge admission
- * (knowledge/admission.ts) keeps out of canonical storage. The platform's
- * own topics are written from code (knowledge/admission-topics.ts), which
- * also holds their detectors, so no row can loosen them; a company's
- * topics would be added here. A revision never changes once written: a
- * change is the next revision, from its `effective_at`.
- */
-export const admissionTopics = sqliteTable(
-  "admission_topics",
-  {
-    id: text().notNull(),
-    revision: integer().notNull(),
-    name: text().notNull(),
-    coverage: text().notNull(),
-    /** `TopicExample[]`, as JSON: at least one per product language. */
-    examples: text().notNull(),
-    owner: text({ enum: ["platform", "company"] }).notNull(),
-    effectiveAt: timestamp("effective_at").notNull(),
-    createdAt: timestamp("created_at").notNull(),
-  },
-  (table) => [primaryKey({ columns: [table.id, table.revision] })]
-);
-
-/**
  * What became of the Playbook's gaps (brain-records.ts): one row once a
  * gap was asked about, answered or closed, each set once, never cleared.
  * A gap with no row is open and nobody was asked.

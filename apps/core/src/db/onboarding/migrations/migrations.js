@@ -11,7 +11,8 @@ import m0008 from './0008_voice_use.sql';
 import m0009 from './0009_lead_at_send.sql';
 import m0010 from './0010_agreed.sql';
 import m0011 from './0011_interview_numbers.sql';
-import m0012 from './0012_interview_texts.sql';
+import m0012 from './0012_works.sql';
+import m0013 from './0013_interview_texts.sql';
 
   export default {
     journal,
@@ -28,7 +29,8 @@ m0008,
 m0009,
 m0010,
 m0011,
-m0012
+m0012,
+m0013
     }
   }
   

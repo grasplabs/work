@@ -60,7 +60,6 @@ const receipt: CommandReceipt = {
   status: "committed",
   resourceRefs: [],
   indexingState: "pending",
-  admissionState: "held",
   retentionUntil: "2026-11-21T08:00:00.000Z",
   createdAt: "2026-10-21T08:00:00.000Z",
 };
