@@ -729,6 +729,13 @@ export interface RunHostCalls<Attempt = AttemptHost> {
     name: unknown,
     options: unknown
   ) => Promise<Settled<unknown>>;
+  /**
+   * The run's isolate went quiet after it last got control back, having
+   * made `made` asks in all: an independent workflow's (resource-host.ts),
+   * which holds the run busy until they have all arrived; an App's run
+   * makes none.
+   */
+  quiet?: (made: unknown) => Promise<Settled<null>>;
 }
 
 /** A run's code, loaded: `run` runs it once, from its start or a resume. */
@@ -963,6 +970,10 @@ export const sessionRunHost = <Attempt extends object = AttemptHost>(
       : await host.child(name),
   waitForDecision: async (name, options) =>
     await host.waitForDecision(name, options),
+  quiet: async (made) =>
+    host.quiet === undefined
+      ? { ok: true, value: null }
+      : await host.quiet(made),
 });
 
 /**
@@ -1086,6 +1097,7 @@ export const loadRunIsolate = <Attempt extends object = AttemptHost>(
                 "listen",
                 "child",
                 "waitForDecision",
+                "quiet",
               ]
             ),
           },

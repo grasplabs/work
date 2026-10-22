@@ -418,6 +418,8 @@ export default coreProject({
     // Stephen's eval against a real model, which costs money, on request
     // only: vite.stephen-model.config.ts.
     "test/stephen-real-model.test.ts",
+    // With the host made slower at random: vite.latency.config.ts.
+    "test/workflow-latency.test.ts",
     "build-blueprints.test.ts",
     "host-json.bundle.test.ts",
   ],

@@ -257,6 +257,7 @@ export default defineConfig({
       "apps/core/vite.on-prem.config.ts",
       "apps/core/vite.brain.config.ts",
       "apps/core/vite.stephen.config.ts",
+      "apps/core/vite.latency.config.ts",
       "packages/*",
       "packages/workerflow/vite.process.config.ts",
       "packages/workerflow/vite.conformance.config.ts",
