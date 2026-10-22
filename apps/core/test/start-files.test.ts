@@ -23,6 +23,7 @@ import { z } from "zod";
 
 import { callAppFunction } from "../src/app-functions.ts";
 import { loadRelease } from "../src/app-releases.ts";
+import { appStartFiles } from "../src/app-start-files.ts";
 import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
 import { appFor, setCurrentVersion } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
@@ -864,6 +865,41 @@ describe(
         handing: handing.handsFilesToWorkflows,
         notHanding: notHanding.handsFilesToWorkflows,
       }).toStrictEqual({ handing: true, notHanding: false });
+    });
+
+    it("refuses a commit's start once the person it acts for left the App before its dispatch, their file read as missing, never as the App", async () => {
+      const fixture = await reviewsApp();
+      const colleague = await signedIn("user");
+      const member = {
+        type: "person" as const,
+        id: colleague.userId,
+        role: "user" as const,
+      };
+      await fixture.builder.api.apps.members.add(fixture.app, member);
+      const screen = await screenOf(colleague, fixture.app);
+      const own = await uploaded(screen, png(100));
+      await calledAs(colleague, fixture, "review.stageReview", { file: own });
+      // Out of the App before the start is dispatched.
+      await fixture.builder.api.apps.members.remove(fixture.app, {
+        type: "person",
+        id: colleague.userId,
+      });
+
+      const entries = await dispatched(fixture);
+      // Read as they are now, should their role go between the start's
+      // decision and its read: a missing file, never the App.
+      const read = await outcome(
+        appStartFiles(env, colleague.userId, fixture.app, fixture.release, {
+          kind: "commit",
+          agent: null,
+        }).read(own)
+      );
+
+      expect({ entries, read }).toStrictEqual({
+        // Refused as the start is decided: they may no longer use the App.
+        entries: [{ undeliverable: "workflow.start_denied" }],
+        read: "file.not_found",
+      });
     });
   }
 );
