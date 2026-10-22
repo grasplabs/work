@@ -47,6 +47,7 @@ import { z } from "zod";
 import {
   builtCode,
   checkedCode,
+  cachedFilesManifest,
   filesManifest,
   inspected,
   readManifest,
@@ -936,6 +937,61 @@ export const versionReferenceSource = async (
   }
   const manifest = await filesManifest(env, files, app);
   return { manifest, workflows: await boundWorkflowsOf(env, app, manifest) };
+};
+
+/**
+ * A sealed release's App manifest alone: its release manifest checked
+ * against its hash, and its contracts artifact read and checked against
+ * the release's hash of it, its other artifacts not read. Refused as
+ * `loadRelease` refuses the same faults; for reads that only list.
+ */
+const sealedAppManifest = async (
+  env: Env,
+  app: AppId,
+  version: number
+): Promise<AppManifest> => {
+  const { manifest } = await checkedManifest(env, app, version);
+  const entry = manifest.artifacts.find(
+    ({ path }) => path === generatedPaths.contracts
+  );
+  const text =
+    entry === undefined
+      ? undefined
+      : await artifactText(storedArtifacts(env), entry);
+  if (text === undefined || (await sha256Hex(text)) !== manifest.contractHash) {
+    throw versionErrors.create("version.artifact_corrupt", {
+      path: generatedPaths.contracts,
+    });
+  }
+  try {
+    const contracts = contractsSchema.parse(JSON.parse(text));
+    return readAppManifest(JSON.stringify(contracts.manifest));
+  } catch {
+    throw versionErrors.create("version.artifact_corrupt", {
+      path: generatedPaths.contracts,
+    });
+  }
+};
+
+/**
+ * `version`'s manifest as core already holds it, never working it out:
+ * its sealed release's, or the one kept for its code (`cachedFilesManifest`);
+ * undefined when core has neither yet, or for a version not of spec 8's
+ * layout.
+ */
+export const heldManifest = async (
+  env: Env,
+  app: AppId,
+  version: number,
+  files: Readonly<Record<string, string>>
+): Promise<AppManifest | undefined> => {
+  if (!isAppLayout(files)) {
+    return undefined;
+  }
+  if (await isSealed(env, app, version)) {
+    return await sealedAppManifest(env, app, version);
+  }
+  return await cachedFilesManifest(env, files);
 };
 
 /**

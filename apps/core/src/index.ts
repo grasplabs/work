@@ -10,6 +10,7 @@ import { handleRequest } from "./entry.ts";
 import { sweepGuestChats } from "./guests.ts";
 import { indexApps } from "./knowledge/apps-collection.ts";
 import { sweepUploads } from "./knowledge/uploads.ts";
+import { syncLandscapes } from "./landscape.ts";
 import { retryDisconnects } from "./members.ts";
 import { sweepPackageFiles } from "./packages/cleanup.ts";
 import { recordPlatformUpdate } from "./platform-updates.ts";
@@ -29,6 +30,7 @@ import {
   repairResourceTerminations,
 } from "./workflows/resource-runs.ts";
 import { sweepRunDetails } from "./workflows/retention.ts";
+import { sweepRunFiles } from "./workflows/run-files.ts";
 import { repairStarts } from "./workflows/runs.ts";
 import { startDueSchedules } from "./workflows/triggers.ts";
 import { repairWakes } from "./workflows/wakes.ts";
@@ -60,13 +62,6 @@ export { CollectionBinding } from "./knowledge/binding.ts";
 export { KnowledgeBinding } from "./knowledge/tools-binding.ts";
 export { ActionInvocation } from "./action-invocation.ts";
 export { WorkflowRuns } from "./workflows/run-object.ts";
-export {
-  PreviewCollection,
-  PreviewConnection,
-  PreviewExports,
-  PreviewGuests,
-  PreviewStatistics,
-} from "./preview-bindings.ts";
 export { Workspace } from "./workspace.ts";
 
 export default {
@@ -106,7 +101,8 @@ export default {
   // once their days are over (see src/workflows/kept-email.ts), guest
   // chats 30 days after they ended (see src/guests.ts), and the details
   // of workflow runs that ended longer ago than their retention (see
-  // src/workflows/retention.ts), and screens' staged builds 30 days
+  // src/workflows/retention.ts), with their own files once those went
+  // (see src/workflows/run-files.ts), and screens' staged builds 30 days
   // after they were last staged (see src/screen-frame.ts), and cached
   // builds 30 days after they were last used (see src/screens.ts), and npm
   // tarballs and package builds no lock names any more (see
@@ -132,6 +128,8 @@ export default {
             sweepGuestChats(env, new Date(controller.scheduledTime)),
             sweepRunDetails(env, new Date(controller.scheduledTime)),
             sweepCandidateRuns(env, new Date(controller.scheduledTime)),
+            // The clock as it sweeps: its grace counts from real time.
+            sweepRunFiles(env),
             sweepScreenFrames(env, new Date(controller.scheduledTime)),
             sweepPreviewStores(env, new Date(controller.scheduledTime)),
             sweepBuilds(env, new Date(controller.scheduledTime)),
@@ -140,6 +138,9 @@ export default {
             sweepTestFixtures(env, new Date(controller.scheduledTime)),
             sweepScreenSubmissions(env, new Date(controller.scheduledTime)),
             sweepTokenKeys(env, new Date(controller.scheduledTime)),
+            // The application landscape: each connection read once a day,
+            // a bounded number of pages a run (src/landscape.ts).
+            syncLandscapes(env, new Date(controller.scheduledTime)),
             auditLog(env).armRetention(),
           ]
         : [

@@ -18,6 +18,7 @@ export const familyNamespaces = [
   "app",
   "audit",
   "auth",
+  "brain",
   "capability",
   "connect",
   "connection",

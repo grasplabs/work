@@ -6,6 +6,7 @@ import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
+import { runFileIdSchema } from "@grasp-os/shared/run-files";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import { writeJson } from "@grasp-os/workflow-expressions/bounded-json";
 import { evaluatorLimits } from "@grasp-os/workflow-expressions/limits";
@@ -39,6 +40,8 @@ import {
   callTemplate,
   requireKnowledgeRequest,
 } from "./resource-reads.ts";
+import { callFiles, requireFilesArguments } from "./run-files.ts";
+import type { FilesCallOperation } from "./run-files.ts";
 
 // The effects of a run of an independent workflow's sealed build
 // (platform specification 13.6): its `grasp.connector`, `grasp.operation`
@@ -149,6 +152,13 @@ export type BuiltCall =
       /** A pinned template version's content, by an action (GRA-700). */
       readonly name: "grasp.template";
       readonly binding: string;
+    }
+  | {
+      /** One call on the run's own files, by an action (GRA-724). */
+      readonly name: "grasp.files";
+      readonly binding: string;
+      readonly operation: FilesCallOperation;
+      readonly arguments: Json;
     };
 
 /** The binding kind each call goes through. */
@@ -158,6 +168,7 @@ const kindOf = {
   "grasp.model": "model",
   "grasp.knowledge": "knowledge",
   "grasp.template": "template",
+  "grasp.files": "files",
 } as const;
 
 /** Keeps `entry` in the audit log, or fails before anything more. */
@@ -641,6 +652,21 @@ export const auditAdmissionRefusal = async (
   await writing;
 };
 
+const namesFileSchema = z.object({ file: runFileIdSchema });
+
+/**
+ * What every receipt of a files call says before its answer: the
+ * operation, and the file it names, if it names one as a file ID, so a
+ * refused call's receipt still says which file was asked for.
+ */
+const filesCallDetail = (
+  operation: string,
+  args: Json
+): Record<string, string> => {
+  const named = namesFileSchema.safeParse(args);
+  return { operation, ...(named.success ? { file: named.data.file } : {}) };
+};
+
 /**
  * What `call` of a test run answers: the answer its start gave the call's
  * binding, checked as a real call checks what it sends and what comes back
@@ -689,6 +715,13 @@ const candidateAnswer = async (
     case "grasp.template": {
       return boundedAnswer(answer, "output");
     }
+    // A test run keeps no file: its files calls answer what its start
+    // gave, and nothing is written to the run's files, once their
+    // arguments are what a real call would take.
+    case "grasp.files": {
+      requireFilesArguments(call.operation, call.arguments);
+      return boundedAnswer(answer, "output");
+    }
     default: {
       return call satisfies never;
     }
@@ -721,6 +754,8 @@ export const makeCall = async (
   if (binding?.kind !== kindOf[call.name]) {
     throw workflowResourceErrors.create("workflow.call_denied");
   }
+  // What a files call's receipts say of its file (GRA-724): never its name.
+  let fileDetail: Readonly<Record<string, string | number>> = {};
   const receipt = (outcome: string): AuditEntry => ({
     actor: { type: "system" },
     action: "workflow.run.called",
@@ -735,6 +770,7 @@ export const makeCall = async (
       key: effect.key,
       person: run.principal,
       outcome,
+      ...fileDetail,
     },
   });
   // The outcome's receipt follows the started one, which is kept before
@@ -763,6 +799,9 @@ export const makeCall = async (
     ) {
       throw workflowResourceErrors.create("workflow.action_restricted");
     }
+    if (call.name === "grasp.files") {
+      fileDetail = filesCallDetail(call.operation, call.arguments);
+    }
     await requireCallAuthority(env, run, binding);
     // Kept before the call goes out, or it doesn't go: a call that took
     // effect always has its receipt, whatever happens after.
@@ -786,6 +825,22 @@ export const makeCall = async (
       }
       case "grasp.template": {
         output = await callTemplate(env, binding);
+        break;
+      }
+      case "grasp.files": {
+        const answer = await callFiles(
+          env,
+          {
+            runId: run.runId,
+            workflowId: run.workflowId,
+            effectKey: effect.key,
+            requireHolds: effect.requireHolds,
+          },
+          call.operation,
+          call.arguments
+        );
+        fileDetail = { ...fileDetail, ...answer.detail };
+        ({ output } = answer);
         break;
       }
       default: {

@@ -128,6 +128,27 @@ describe("the Platform page's model", () => {
     ]);
   });
 
+  it("marks the ring a rollout failed on as failed while its companies still wait, and done once they were all on it", () => {
+    const rings = ringsOf(summary("f", "failed", 1), [
+      target("acme", 0, "done"),
+      target("beta", 1, "pending"),
+      target("gamma", 2, "pending"),
+    ]);
+
+    expect(rings.map(({ state }) => state)).toStrictEqual([
+      "done",
+      "failed",
+      "todo",
+    ]);
+    // Failed after its ring was done, waiting to approve the next: done.
+    expect(
+      ringsOf(summary("w", "failed", 0), [
+        target("acme", 0, "done"),
+        target("beta", 1, "pending"),
+      ]).map(({ state }) => state)
+    ).toStrictEqual(["done", "todo"]);
+  });
+
   it("says which active companies run each release, the newest first, then the ones the page doesn't list", () => {
     const spread = spreadOf(
       [
@@ -154,7 +175,7 @@ describe("the Platform page's model", () => {
     ]);
   });
 
-  it("lists the companies that need a look first: a failed deploy, drift, errors, or two releases behind unpinned, older than every listed one included", () => {
+  it("lists the companies that need a look first: a failed deploy, drift, errors, or two releases behind unpinned, older than every listed one included; one not read never as healthy", () => {
     const releases = [release("r1", 1), release("r2", 2), release("r3", 3)];
     const companies = companiesOf(
       [
@@ -168,6 +189,8 @@ describe("the Platform page's model", () => {
         row("older", { release: "r0" }),
         row("pinned", { release: "r1", pinnedReleaseId: "r1" }),
         row("new", { status: "provisioning", release: null }),
+        row("unread"),
+        row("timedout"),
         row("gone", { status: "offboarded", release: "r1" }),
       ],
       {
@@ -178,6 +201,7 @@ describe("the Platform page's model", () => {
         behind: live(),
         older: live(),
         pinned: live(),
+        timedout: live({ drift: "unknown", day: null, reach: "unknown" }),
       },
       releases
     );
@@ -195,6 +219,8 @@ describe("the Platform page's model", () => {
       { id: "older", standing: "attention", needs: ["behind"] },
       { id: "split", standing: "attention", needs: ["drift"] },
       { id: "new", standing: "setup", needs: [] },
+      { id: "timedout", standing: "unread", needs: [] },
+      { id: "unread", standing: "unread", needs: [] },
       { id: "pinned", standing: "healthy", needs: [] },
       { id: "zeta", standing: "healthy", needs: [] },
       { id: "gone", standing: "offboarded", needs: [] },

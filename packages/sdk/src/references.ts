@@ -153,27 +153,61 @@ export interface LinksReference<
 }
 
 declare const screenInputType: unique symbol;
+declare const surfaceInputType: unique symbol;
 
-/** A generated reference to one of the App's screens. */
+/** One of a screen's declared surfaces, as its reference carries it. */
+export interface ScreenSurfaceData {
+  readonly kind: "sidebar" | "panel" | "settings" | "deepLink";
+  /** The descriptor the surface's input is validated with. */
+  readonly input: ValueDescriptor;
+}
+
+/**
+ * A generated reference to one of the App's screens. `Surfaces` maps each
+ * surface the App declares for it (spec 34.1) to that surface's input.
+ */
 export interface ScreenReference<
   Name extends string = string,
   Input = unknown,
   Output = Input,
+  Surfaces extends Readonly<Record<string, unknown>> = Readonly<
+    Record<never, never>
+  >,
 > {
   readonly name: Name;
   /** Its route, e.g. `/notes/:id`. */
   readonly path: string;
   /** The descriptor its route input is validated with. */
   readonly input: ValueDescriptor;
+  /** Its declared surfaces, by name. */
+  readonly surfaces: {
+    readonly [Surface in keyof Surfaces]: ScreenSurfaceData;
+  };
   /** Types only: never set. */
   readonly [argsType]?: Input;
   /** Types only: never set. */
   readonly [screenInputType]?: Output;
+  /** Types only: never set. */
+  readonly [surfaceInputType]?: Surfaces;
 }
 
 /** The route input of `Screen`, as a caller passes it. */
 export type ScreenInputOf<Screen> =
   Screen extends ScreenReference<string, infer Input> ? Input : never;
+
+/** The names of the surfaces declared for `Screen`. */
+export type SurfaceNameOf<Screen> =
+  Screen extends ScreenReference<string, unknown, unknown, infer Surfaces>
+    ? Extract<keyof Surfaces, string>
+    : never;
+
+/** The input `Screen`'s surface `Surface` is opened with, as a caller passes it. */
+export type SurfaceInputOf<Screen, Surface extends string> =
+  Screen extends ScreenReference<string, unknown, unknown, infer Surfaces>
+    ? Surface extends keyof Surfaces
+      ? Surfaces[Surface]
+      : never
+    : never;
 
 /**
  * The route input `Screen` gets, as its route's schema normalized it

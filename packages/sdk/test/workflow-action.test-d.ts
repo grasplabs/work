@@ -12,6 +12,7 @@ import type {
   KnowledgeDocument,
   KnowledgeHit,
   ModelRequest,
+  RunFile,
   TemplateContent,
 } from "../src/action.ts";
 import type { JsonValue } from "../src/value-descriptor.ts";
@@ -51,6 +52,27 @@ void ctx.resources.docs.read;
 // A knowledge use calls only search and read.
 // @ts-expect-error -- no such operation
 resource.knowledge("docs", { operations: ["delete"] });
+
+// A files use: only the operations it declares (GRA-724).
+const files = resource.files("files", { operations: ["write", "read"] });
+declare const filing: ActionCtx<readonly [typeof files]>;
+expectTypeOf(
+  filing.resources.files.write
+).returns.resolves.toEqualTypeOf<RunFile>();
+expectTypeOf(
+  filing.resources.files.read({ file: "f", as: "bytes" })
+).resolves.toEqualTypeOf<Uint8Array>();
+expectTypeOf(
+  filing.resources.files.read({ file: "f" })
+).resolves.toEqualTypeOf<string>();
+// @ts-expect-error -- "list" isn't declared
+void filing.resources.files.list;
+// @ts-expect-error -- a files use writes, reads, lists or deletes
+resource.files("files", { operations: ["append"] });
+type FileWrite = Parameters<typeof filing.resources.files.write>[0];
+// @ts-expect-error -- only the run file types
+const html: FileWrite["type"] = "text/html";
+void html;
 
 declare const reading: ActionCtx<
   readonly [ReturnType<typeof resource.knowledge<"docs", "read">>]

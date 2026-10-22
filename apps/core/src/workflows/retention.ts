@@ -19,6 +19,7 @@ import {
 } from "../db/core/schema.ts";
 import { chunks } from "../db/d1.ts";
 import { runEngine, runRetentionDays } from "./engine.ts";
+import { runFilesRemoved } from "./run-files.ts";
 
 // Retention of workflow runs. A run reads what its person may read (a
 // message, a chat's transcript, a record) and keeps it: as its input, in
@@ -411,6 +412,9 @@ export const sweepWorkflowStartDetails = async (
   await db.batch([
     // A start's run has its receipt's ID (resource-runs.ts).
     ...attemptsPruned(db, due, now),
+    // Its own files go with its details (GRA-724): marked here, their
+    // chunks deleted by `sweepRunFiles`.
+    runFilesRemoved(db, due),
     db
       .update(receipts)
       .set({ input: null, params: null, detailsRemovedAt: now })

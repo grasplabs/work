@@ -125,7 +125,7 @@ export const connectionOwnersOf = async (
 };
 
 /** The organization's tenant at `provider`, from the sign-in config. */
-const tenantOf = (
+export const tenantOf = (
   config: SignInConfig,
   provider: OAuthProvider
 ): string | undefined =>
@@ -139,7 +139,7 @@ const tenantOf = (
  * the URL parser drops), another scheme, or a fragment. What the browser is
  * sent back to comes only from here, so the callback is no open redirect.
  */
-const onOrigin = (origin: string, path: string): URL | undefined => {
+export const onOrigin = (origin: string, path: string): URL | undefined => {
   if (!path.startsWith("/") || path.length > returnPathMaxLength) {
     return undefined;
   }
@@ -183,11 +183,11 @@ const offerSchema = z.discriminatedUnion("source", [
 ]);
 
 /** A catalog entry's key, as the audit log names it. */
-const entryKey = (source: CatalogSource, id: string): string =>
+export const entryKey = (source: CatalogSource, id: string): string =>
   `${source}:${id}`;
 
 /** The keys of the entries an admin hid. */
-const hiddenEntries = async (env: Env): Promise<Set<string>> => {
+export const hiddenEntries = async (env: Env): Promise<Set<string>> => {
   const rows = await drizzle(env.DB)
     .select({
       source: hiddenConnectors.source,

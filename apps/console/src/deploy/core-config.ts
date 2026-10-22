@@ -18,6 +18,7 @@ import {
   auditRetentionDefaultDays,
   auditRetentionSchema,
   defaultGatewayModels,
+  inboundMailDomainSchema,
   modelGatewayConfigSchema,
   modelRulesConfigSchema,
   runRetentionSchema,
@@ -259,6 +260,7 @@ const configSchemas: Readonly<Record<string, readonly z.ZodType[]>> = {
   AUDIT_RETENTION_DAYS: [auditRetentionSchema],
   AUDIT_ARCHIVE_RETENTION_DAYS: [auditArchiveRetentionSchema],
   RUN_RETENTION_DAYS: [runRetentionSchema],
+  INBOUND_MAIL_DOMAIN: [inboundMailDomainSchema],
   QUOTA_LIMITS: [quotaLimitsSchema],
 };
 

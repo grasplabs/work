@@ -1150,6 +1150,85 @@ describe(
       });
     });
 
+    it("shows nothing of a screen's run but why while its alias is bound elsewhere, and the run again once bound back", async () => {
+      const fixture = await requestsApp("PT1H");
+      const { builder, app, reference } = fixture;
+      const lease = await screenOf(builder, app);
+      const channel = workflowChannel(screenClient(builder, app, lease));
+      const read = readWorkflowReference(reference);
+      const watched = await channel.start(read, { who: "Ada" });
+      const other = await channel.start(read, { who: "Bo" });
+      const stopRun = channel.followRun(read, watched.runId, () => {
+        // Read below.
+      });
+      const shown = () => channel.peekRun(read, watched.runId);
+      await vi.waitFor(() => {
+        expect(shown()).toMatchObject({
+          fresh: true,
+          value: { status: "running" },
+        });
+      }, settles);
+      const before = shown();
+      // Bound away: the next read, which another run's end causes, refuses.
+      await publishWorkflowVersion(env, builder.acting, fixture.workflow, {
+        definition: definitionOf(fixture.workflowName, "PT1H", "2.0.0"),
+        basedOn: 1,
+      });
+      await bindWorkflowToApp(env, builder.acting, fixture.workflow, {
+        app,
+        alias: "followUp",
+        version: 2,
+      });
+      await terminateResourceRun(
+        env,
+        builder.acting,
+        fixture.workflow,
+        other.runId
+      );
+      await vi.waitFor(() => {
+        expect(shown().error?.code).toBe("workflow.run_unavailable");
+      }, settles);
+      const away = shown();
+      // Bound back, and read again as a new run starts: shown again.
+      await bindWorkflowToApp(env, builder.acting, fixture.workflow, {
+        app,
+        alias: "followUp",
+        version: 1,
+      });
+      await channel.start(read, { who: "Cy" });
+      await vi.waitFor(() => {
+        expect(shown().fresh).toBeTruthy();
+      }, settles);
+      const back = shown();
+      stopRun();
+
+      expect({
+        before: { revision: before.revision, control: before.value?.control },
+        away: {
+          value: away.value,
+          fresh: away.fresh,
+          error: away.error?.code,
+        },
+        back: { revision: back.revision, control: back.value?.control },
+      }).toStrictEqual({
+        before: {
+          revision: before.revision,
+          control: {
+            canPause: false,
+            canResume: false,
+            canCancel: true,
+            pendingControl: null,
+          },
+        },
+        away: {
+          value: undefined,
+          fresh: false,
+          error: "workflow.run_unavailable",
+        },
+        back: { revision: before.revision, control: before.value?.control },
+      });
+    });
+
     it("shows a failed run only a code the platform defines, in its own words, never what the run read", async () => {
       const { builder, app, reference } = await requestsApp(
         undefined,

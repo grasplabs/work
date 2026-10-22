@@ -108,6 +108,7 @@ export const chatMarkdown = ({
             id: Number.MAX_SAFE_INTEGER,
             role: "assistant" as const,
             text: partial.text,
+            citations: [],
             code: [],
             end: "done" as const,
             at: "",

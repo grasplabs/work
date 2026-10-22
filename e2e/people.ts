@@ -165,9 +165,11 @@ const cast = {
   screens: { one: "builder", two: "builder" },
   screenAttacks: { builder: "builder", admin: "admin" },
   screenWorkflows: { builder: "builder", admin: "admin" },
+  screenBoundWorkflow: { builder: "builder", admin: "admin" },
   screenApproval: { builder: "builder", admin: "admin" },
   notesApp: { builder: "builder" },
   screenNavigation: { builder: "builder" },
+  appSurfaces: { builder: "builder", user: "user" },
   notesAppSwitch: { first: "builder", next: "user" },
   notesAppTwoTabs: { first: "builder", next: "user" },
   notesAppSignedOut: { first: "builder" },
@@ -188,6 +190,7 @@ const cast = {
   memberActions: { admin: "admin", one: "user", two: "user" },
   memberRemoval: { admin: "admin", leaving: "user" },
   workspaceSettings: { admin: "admin", member: "user" },
+  memberInvites: { admin: "admin" },
   roleChange: { admin: "admin", one: "user" },
   membersUnreachable: { admin: "admin" },
   membersRecover: { admin: "admin" },
@@ -239,7 +242,9 @@ const cast = {
   iconMoves: { member: "user" },
   pageRecovery: { member: "user" },
   brain: { member: "user" },
+  brainChat: { member: "user" },
   contexts: { member: "user" },
+  tour: { member: "user" },
 } as const satisfies Record<string, Record<string, Role>>;
 
 type Scene = keyof typeof cast;

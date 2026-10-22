@@ -1164,7 +1164,7 @@ const sendTermination = async (env: Env, runId: string): Promise<void> => {
  * builder's; a screen's cancel, screen-workflows.ts, the run's person's).
  * See `terminateResourceRun` for how a run still starting is ended.
  */
-export const stopResourceRun = async (
+const stopResourceRun = async (
   env: Env,
   actor: AuditActor,
   row: RunRow,

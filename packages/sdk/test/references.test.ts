@@ -263,11 +263,24 @@ describe("generated modules", () => {
         name: "notes",
         path: "/",
         input: v.object({}).descriptor,
+        surfaces: {
+          all: { kind: "sidebar", input: v.object({}).descriptor },
+        },
       },
       note: {
         name: "note",
         path: "/notes/:id",
         input: v.object({ id: v.id("notes") }).descriptor,
+        surfaces: {
+          beside: {
+            kind: "panel",
+            input: v.object({ id: v.id("notes") }).descriptor,
+          },
+          shared: {
+            kind: "deepLink",
+            input: v.object({ id: v.id("notes") }).descriptor,
+          },
+        },
       },
     });
   });
@@ -1276,6 +1289,212 @@ describe("screens and preferences", () => {
     expect(() =>
       small({ operations: { notes: { list }, admin: { workflows: { send } } } })
     ).not.toThrow();
+  });
+});
+
+/** A panel surface of the note screen with `input` (or another `kind`). */
+const panel = (input: unknown, kind = "panel") => ({
+  name: "beside",
+  kind,
+  screen: "note",
+  title: "Note",
+  input,
+});
+
+describe("surfaces", () => {
+  /** Two screens: a list taking nothing, and a note taking an ID and a tab. */
+  const routed = [
+    { name: "list", path: "/", source: "screens/list.tsx" },
+    {
+      name: "note",
+      path: "/notes/:id",
+      source: "screens/note.tsx",
+      input: v.object({
+        id: v.string(),
+        tab: v.enum(["view", "edit"]).default("view"),
+        query: v.string().max(100).optional(),
+      }),
+    },
+  ];
+  const surfaced = (surfaces: unknown) => small({ screens: routed, surfaces });
+
+  test("are kept by name with their screen, kind, title and input", () => {
+    const { manifest } = inspectApp(
+      surfaced([
+        {
+          name: "all",
+          kind: "sidebar",
+          screen: "list",
+          title: "All",
+          input: v.object({}),
+        },
+        panel(v.object({ id: v.string() })),
+        {
+          name: "settings",
+          kind: "settings",
+          screen: "list",
+          title: "Settings",
+          input: v.object({}),
+        },
+      ])
+    );
+    expect({
+      names: Object.keys(manifest.surfaces),
+      beside: manifest.surfaces.beside,
+      none: inspectApp(small()).manifest.surfaces,
+    }).toStrictEqual({
+      names: ["all", "beside", "settings"],
+      beside: {
+        name: "beside",
+        kind: "panel",
+        screen: "note",
+        title: "Note",
+        input: v.object({ id: v.string() }).descriptor,
+      },
+      none: {},
+    });
+  });
+
+  test.each([
+    [
+      "narrower bounds",
+      v.object({ id: v.string().min(1), query: v.string().max(10) }),
+    ],
+    ["an enum's subset", v.object({ id: v.string(), tab: v.enum(["view"]) })],
+    [
+      "a literal the enum holds",
+      v.object({ id: v.string(), tab: v.literal("edit") }),
+    ],
+    [
+      "a default for a required field",
+      v.object({ id: v.string().default("n1") }),
+    ],
+    [
+      "a union of what it takes",
+      v.object({ id: v.union(v.literal("a"), v.literal("b")) }),
+    ],
+  ])("take input its screen takes: %s", (_case, input) => {
+    expect(() => surfaced([panel(input)])).not.toThrow();
+  });
+
+  test.each([
+    [
+      "a field the screen doesn't take",
+      v.object({ id: v.string(), admin: v.boolean() }),
+    ],
+    ["a required field left optional", v.object({ id: v.string().optional() })],
+    ["a required field left out", v.object({})],
+    [
+      "a wider enum",
+      v.object({ id: v.string(), tab: v.enum(["view", "delete"]) }),
+    ],
+    [
+      "a literal the enum doesn't hold",
+      v.object({ id: v.string(), tab: v.literal("delete") }),
+    ],
+    ["wider bounds", v.object({ id: v.string(), query: v.string().max(1000) })],
+    ["a nullable field", v.object({ id: v.string().nullable() })],
+    ["another kind", v.object({ id: v.number() })],
+  ])("refuse input its screen doesn't take: %s", (_case, input) => {
+    expect(refusal(() => surfaced([panel(input)]))).toContain(
+      "isn't one screen `note` takes"
+    );
+  });
+
+  test.each([
+    ["a map instead of a list", {}, "is a list"],
+    [
+      "an unknown kind",
+      [panel(v.object({ id: v.string() }), "fileViewer")],
+      "`kind` is",
+    ],
+    [
+      "no input",
+      [{ name: "beside", kind: "panel", screen: "note", title: "Note" }],
+      "declares its `input`",
+    ],
+    [
+      "input that isn't an object",
+      [panel(v.string())],
+      "is a required `v.object`",
+    ],
+    [
+      "a screen the App doesn't declare",
+      [{ ...panel(v.object({ id: v.string() })), screen: "other" }],
+      "doesn't declare",
+    ],
+    [
+      "a screen named after a prototype key",
+      [{ ...panel(v.object({ id: v.string() })), screen: "constructor" }],
+      "doesn't declare",
+    ],
+    [
+      "an empty title",
+      [{ ...panel(v.object({ id: v.string() })), title: " " }],
+      "`title` is 1 to",
+    ],
+    [
+      "a key it doesn't know",
+      [{ ...panel(v.object({ id: v.string() })), match: "*" }],
+      "`{ name, kind, screen, title, input }`",
+    ],
+    [
+      "two of one name",
+      [
+        panel(v.object({ id: v.string() })),
+        panel(v.object({ id: v.string() })),
+      ],
+      "Two surfaces are named",
+    ],
+    [
+      "two settings",
+      [
+        {
+          name: "a",
+          kind: "settings",
+          screen: "list",
+          title: "A",
+          input: v.object({}),
+        },
+        {
+          name: "b",
+          kind: "settings",
+          screen: "list",
+          title: "B",
+          input: v.object({}),
+        },
+      ],
+      "at most one `settings`",
+    ],
+    [
+      "a sidebar that can't open with nothing",
+      [
+        {
+          name: "a",
+          kind: "sidebar",
+          screen: "note",
+          title: "A",
+          input: v.object({ id: v.string() }),
+        },
+      ],
+      "opens with nothing",
+    ],
+  ])("with %s are refused", (_case, surfaces, message) => {
+    expect(refusal(() => surfaced(surfaces))).toContain(message);
+  });
+
+  test("read back from a manifest as they were declared, and refused when filed under another name", () => {
+    const declared = surfaced([panel(v.object({ id: v.string() }))]);
+    const { manifest } = inspectApp(declared);
+    const data: unknown = JSON.parse(textOf(manifest));
+    setAt(data, ["surfaces", "beside", "name"], "other");
+    expect({
+      same: readAppManifest(textOf(manifest)).surfaces,
+      renamed: refusal(() => readAppManifest(textOf(data))),
+    }).toStrictEqual({
+      same: manifest.surfaces,
+      renamed: "Surface `beside` is filed under another name.",
+    });
   });
 });
 

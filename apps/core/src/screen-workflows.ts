@@ -153,10 +153,10 @@ const workflowRequestSchema = z.union([
 export type WorkflowRequest = z.infer<typeof workflowRequestSchema>;
 
 /** A command: a start or a control. */
-export type WorkflowCommand = Extract<WorkflowRequest, { command: string }>;
+type WorkflowCommand = Extract<WorkflowRequest, { command: string }>;
 
 /** A watch: of a run, or of the binding. */
-export type WorkflowWatch = Extract<WorkflowRequest, { watch: string }>;
+type WorkflowWatch = Extract<WorkflowRequest, { watch: string }>;
 
 const encoder = new TextEncoder();
 

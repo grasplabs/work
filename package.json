@@ -12,6 +12,7 @@
     "smoke:workerd": "node scripts/workerd-smoke.ts",
     "smoke:code-mode": "node scripts/workerd-code-mode.ts",
     "check:docs": "node scripts/check-docs.ts",
+    "check:product-name": "node scripts/check-product-name.ts",
     "check:migrations": "node scripts/check-migrations.ts",
     "check:wrangler-configs": "node scripts/check-wrangler-configs.ts",
     "github:setup": "node scripts/github-setup.ts",
