@@ -11,10 +11,12 @@ import {
 } from "@grasp-os/shared/interview-links";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { LogFields } from "@grasp-os/shared/log";
+import { mailIngressPath } from "@grasp-os/shared/mail-ingress";
 import { onboardingSummaryPath } from "@grasp-os/shared/onboarding-summary";
 import { platformUpdatePath } from "@grasp-os/shared/platform-change";
 import { quotaPolicyReportPath } from "@grasp-os/shared/quota-policy-report";
 import { screenFramePath } from "@grasp-os/shared/screens";
+import { speechPath } from "@grasp-os/shared/voice";
 
 import { adminSnapshotResponse } from "./admin-snapshot.ts";
 import { appFileResponse, fileRouteOf } from "./app-file-route.ts";
@@ -29,6 +31,7 @@ import { authBasePath } from "./auth/auth.ts";
 import { signInConfig } from "./auth/config.ts";
 import { handleAuthRequest } from "./auth/routes.ts";
 import { installBuiltinsOnce } from "./builtins.ts";
+import { ensureClockOnce } from "./clock.ts";
 import {
   catalogLogoResponse,
   handleConnectionCallback,
@@ -38,7 +41,9 @@ import { errorReportResponse } from "./error-reports.ts";
 import { errorResponse } from "./errors.ts";
 import { guestResponse } from "./guests.ts";
 import { originalResponse } from "./knowledge/uploads.ts";
+import { mailIngressResponse } from "./mail-ingress.ts";
 import { interviewResponse } from "./onboarding/links.ts";
+import { speechResponse } from "./onboarding/speech.ts";
 import { onboardingSummaryResponse } from "./onboarding/summary.ts";
 import {
   packageArtifactResponse,
@@ -125,7 +130,9 @@ const originalPath = /^\/api\/knowledge\/uploads\/(?<id>[\w-]+)\/original$/u;
 /**
  * The pages a link opens, which have no session: the link's secret in the
  * body is all they have. A guest's (src/guests.ts), and someone's own
- * interview, with the device's key too (src/onboarding/links.ts).
+ * interview, with the device's key too (src/onboarding/links.ts), whose
+ * lines are said at the speech endpoint, also for an admin signed in
+ * (src/onboarding/speech.ts).
  */
 const linkResponse = async (
   pathname: string,
@@ -138,6 +145,9 @@ const linkResponse = async (
   }
   if (pathname === interviewApiPath) {
     return await interviewResponse(request, env, requestId);
+  }
+  if (pathname === speechPath) {
+    return await speechResponse(request, env, requestId);
   }
   return undefined;
 };
@@ -228,15 +238,18 @@ const appCallResponse = async (
     : await appFileResponse(request, env, fileRoute, requestId);
 };
 
-/** What the console alone asks core, each signed for its own purpose. */
-const consoleRoutes: ReadonlyMap<
+/** The routes at one path whose handler takes the request alone. */
+const pathHandlers: ReadonlyMap<
   string,
   (request: Request, env: Env, requestId: string) => Promise<Response>
 > = new Map([
+  [auditExportPath, auditExportResponse],
+  [errorReportPath, errorReportResponse],
   [onboardingSummaryPath, onboardingSummaryResponse],
   [quotaPolicyReportPath, quotaPolicyReportResponse],
   [adminSnapshotPath, adminSnapshotResponse],
   [platformUpdatePath, platformUpdateResponse],
+  [mailIngressPath, mailIngressResponse],
 ]);
 
 /** Routes a request that has passed the router-secret check. */
@@ -278,19 +291,13 @@ const route = async (
   if (connection !== undefined) {
     return connection;
   }
-  if (pathname === auditExportPath) {
-    return await auditExportResponse(request, env, requestId);
+  const handler = pathHandlers.get(pathname);
+  if (handler !== undefined) {
+    return await handler(request, env, requestId);
   }
   const linked = await linkResponse(pathname, request, env, requestId);
   if (linked !== undefined) {
     return linked;
-  }
-  if (pathname === errorReportPath) {
-    return await errorReportResponse(request, env, requestId);
-  }
-  const fromConsole = consoleRoutes.get(pathname);
-  if (fromConsole !== undefined) {
-    return await fromConsole(request, env, requestId);
   }
   const appCall = await appCallResponse(pathname, request, env, requestId);
   if (appCall !== undefined) {
@@ -327,6 +334,7 @@ const respond = async (
     const checked = await checkRouterSecret(request, env);
     if (checked.ok) {
       installBuiltinsOnce(env, ctx);
+      ensureClockOnce(env, ctx);
       const response = await route(checked.request, env, requestId);
       return { response, level: "info" };
     }
