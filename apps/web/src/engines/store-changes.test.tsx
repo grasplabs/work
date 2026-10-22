@@ -50,6 +50,8 @@ const engine: App = {
   name: "Notes",
   description: "",
   owner: "ada",
+  responsible: "ada",
+  audience: null,
   blueprint: null,
   currentVersion: 2,
   pendingVersion: null,
