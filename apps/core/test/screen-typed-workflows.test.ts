@@ -56,6 +56,7 @@ import {
   repairResourceTerminations,
   terminateResourceRun,
 } from "../src/workflows/resource-runs.ts";
+import { published } from "./apps.ts";
 import { hostOrigin } from "./host-sockets.ts";
 import { mockIdp } from "./idp.ts";
 import { closeWhenTestEnds } from "./open-sockets.ts";
@@ -354,6 +355,7 @@ const requestsApp = async (
   });
   await seal(fixture);
   await setCurrentVersion(env, builder.acting, fixture.app, 1);
+  await published(fixture.app);
   const asked = await requestPermission(
     env,
     builder.acting,

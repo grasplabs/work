@@ -18,6 +18,7 @@ import type { OpenStore } from "../src/data-stores.ts";
 import { appMembers } from "../src/db/core/schema.ts";
 import { callOperation } from "../src/operations.ts";
 import type { Runner } from "../src/operations.ts";
+import { published } from "./apps.ts";
 
 // The App's roles, as the operation host applies them to tables its
 // members share (`appMembers`) and tables only its builders reach
@@ -112,6 +113,7 @@ interface Team {
 const team = async (): Promise<Team> => {
   const owner = await person("builder");
   const { id: appId } = await createApp(env, owner, { name: "Team" });
+  await published(appId);
   const store = await openStore(env, await createStore(env, owner));
   await store.defineTables(manifestText(manifest.schema));
   return { owner, appId, store };

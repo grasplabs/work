@@ -10,7 +10,7 @@ import { drizzle } from "drizzle-orm/d1";
 import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 import { z } from "zod";
 
-import { appFor } from "../apps.ts";
+import { editableApp } from "../apps.ts";
 import { auditedBatch, outboxedIfChanged } from "../audit-outbox.ts";
 import { activeMember } from "../auth/auth.ts";
 import {
@@ -127,7 +127,7 @@ export const setWorkflowOwner = async (
   if (by.staff) {
     throw roleErrors.create("role.forbidden");
   }
-  const found = await appFor(env, by, app, "builder");
+  const found = await editableApp(env, by, app);
   const workflowId = workflowErrors.parse(
     "workflow.invalid",
     workflowIdSchema,

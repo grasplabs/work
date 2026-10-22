@@ -46,6 +46,7 @@ import { executionErrors } from "@grasp-os/shared/workflows";
 import { DurableObject, exports } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/d1";
 
+import { requireServes } from "./app-access.ts";
 import type { Person } from "./app-access.ts";
 import { appBindings } from "./app-bindings.ts";
 import { CallQueue } from "./app-call-queue.ts";
@@ -960,6 +961,10 @@ export class App extends DurableObject<Env> {
     ends?: number
   ): Promise<AppAnswer> {
     requireAppMethod(method);
+    // The App's status, whoever calls (app-access.ts): every caller's way
+    // in, other Apps and independent workflows included, comes through
+    // here.
+    await requireServes(this.env, this.#app, caller.admission);
     // Each on its own: a stub among them would keep the others from being
     // walked as structured clone carries them (`holdsBigInt`).
     if (args.some((arg) => holdsBigInt(arg))) {

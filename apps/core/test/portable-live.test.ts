@@ -66,6 +66,7 @@ const notesApp = async ({ sensitive = false } = {}) => {
     "First"
   );
   await builder.api.apps.versions.setCurrent(id, version);
+  await builder.api.apps.publish(id);
   if (!sensitive) {
     const { generation } = await admin.api.screenTrust.review(id);
     await admin.api.screenTrust.classify(id, "ordinary", generation);
