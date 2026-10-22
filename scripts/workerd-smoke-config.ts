@@ -56,7 +56,57 @@ export interface SmokeConfigInputs {
    * and the D1 service's: workerd has no SQLite in memory.
    */
   storage: string;
+  /**
+   * What the sealed-call step (workerd-smoke-sealed.ts) adds: the fake IdP
+   * people sign in through, as a Worker of its own on `idpPort`; core's
+   * assets (the compiler, the SDK and the kit a seal reads) from a folder;
+   * and core's sign-in vars, for this machine only.
+   */
+  signIn?: {
+    idpPort: number;
+    idpModules: readonly string[];
+    assets: string;
+    vars: Readonly<Record<string, unknown>>;
+  };
 }
+
+/**
+ * The Worker that answers core's `ASSETS` from a folder, as Workers' static
+ * assets do: by path, with the type each file's extension says, which core
+ * checks (packages/compiler/src/index.ts). workerd's disk service answers
+ * the bytes alone. The on-prem profile has no such service yet: GRA-985.
+ */
+export const assetsWorkerSource = `const types = {
+  ".css": "text/css",
+  ".html": "text/html",
+  ".js": "text/javascript",
+  ".json": "application/json",
+  ".wasm": "application/wasm",
+};
+export default {
+  async fetch(request, env) {
+    const { pathname } = new URL(request.url);
+    const found = await env.FILES.fetch(new URL(pathname, "http://files"));
+    if (!found.ok) {
+      return new Response("Not found", { status: 404 });
+    }
+    const dot = pathname.lastIndexOf(".");
+    const type = types[dot === -1 ? "" : pathname.slice(dot)] ?? "application/octet-stream";
+    return new Response(found.body, { headers: { "content-type": type } });
+  },
+};
+`;
+
+/** A capnp text literal of `value`. */
+const capnpText = (value: string): string => JSON.stringify(value);
+
+/** A binding of core's for each sign-in var: text, or JSON for anything else. */
+const varBindings = (vars: Readonly<Record<string, unknown>>): string[] =>
+  Object.entries(vars).map(([name, value]) =>
+    typeof value === "string"
+      ? `(name = "${name}", text = ${capnpText(value)})`
+      : `(name = "${name}", json = ${capnpText(JSON.stringify(value))})`
+  );
 
 /** The `config.capnp` text that serves core on plain workerd. */
 export const smokeConfig = ({
@@ -65,6 +115,7 @@ export const smokeConfig = ({
   routerSecret,
   modules,
   storage,
+  signIn,
 }: SmokeConfigInputs): string => {
   const durableObjects = coreDurableObjects();
   const durableObjectBindings = durableObjects.map(
@@ -75,6 +126,44 @@ export const smokeConfig = ({
     ({ className }) =>
       `(className = "${className}", uniqueKey = "${className}", enableSql = true)`
   );
+  const signInServices =
+    signIn === undefined
+      ? ""
+      : `
+    # The fake IdP people sign in through (apps/core/test/idp-worker.ts),
+    # never deployed: core sends sign-in here only while both it and core
+    # are on this machine (apps/core/src/auth/config.ts devIdpOrigin).
+    (name = "idp", worker = .idp),
+    # Core's assets: the compiler, SDK and kit modules a seal reads, with
+    # their types (\`assetsWorkerSource\`), over the folder they are in.
+    (name = "assets", worker = .assets),
+    (name = "asset-files", disk = (path = ${capnpText(signIn.assets)})),
+    # Core's fetches reach the fake IdP on this machine, which workerd's
+    # default outbound refuses as a private address.
+    (name = "internet", network = (allow = ["public", "local"])),`;
+  const signInSockets =
+    signIn === undefined
+      ? ""
+      : `, (name = "idp", address = "127.0.0.1:${signIn.idpPort}", http = (), service = "idp")`;
+  const signInBindings =
+    signIn === undefined
+      ? []
+      : [`(name = "ASSETS", service = "assets")`, ...varBindings(signIn.vars)];
+  const idpWorker =
+    signIn === undefined
+      ? ""
+      : `
+const idp :Workerd.Worker = (
+  modules = [${signIn.idpModules.join(", ")}],
+  compatibilityDate = "2026-09-15",
+);
+
+const assets :Workerd.Worker = (
+  modules = [(name = "assets.js", esModule = embed "assets.js")],
+  compatibilityDate = "2026-09-15",
+  bindings = [(name = "FILES", service = "asset-files")],
+);
+`;
   return `using Workerd = import "/workerd/workerd.capnp";
 
 const config :Workerd.Config = (
@@ -91,9 +180,9 @@ const config :Workerd.Config = (
     ${r2Service("storage")},
     # Where untrusted App code runs: the sandbox supervisor, outside core's
     # process, which plain workerd's lack of a CPU limit can't stall.
-    (name = "sandbox", external = (address = "unix:${sandboxSocket}", http = ())),
+    (name = "sandbox", external = (address = "unix:${sandboxSocket}", http = ())),${signInServices}
   ],
-  sockets = [(name = "http", address = "127.0.0.1:${port}", http = (), service = "core")],
+  sockets = [(name = "http", address = "127.0.0.1:${port}", http = (), service = "core")${signInSockets}],
 );
 
 const core :Workerd.Worker = (
@@ -108,8 +197,10 @@ const core :Workerd.Worker = (
     ${durableObjectBindings.join(",\n    ")},
     ${d1Bindings(d1DatabasesOf(coreWranglerConfig)).join(",\n    ")},
     ${r2Bindings(r2BucketsOf(coreWranglerConfig)).join(",\n    ")},
-    # No LOADER (experimental in workerd): apps, screens and App workflow
-    # runs need workerd's --experimental. The workflow engine itself is a
+    ${signInBindings.map((binding) => `${binding},`).join("\n    ")}
+    # No LOADER (experimental in workerd) in core itself: on-prem, App
+    # functions and builds run on the sandbox host, whose workerd
+    # processes have one (workerd-sandbox.ts). The workflow engine is a
     # Durable Object (WORKFLOW_RUNS), bound with the others.
   ],
   durableObjectNamespaces = [
@@ -119,5 +210,5 @@ const core :Workerd.Worker = (
   # storage aborts workerd when an alarm fires (the audit log's retention).
   durableObjectStorage = (localDisk = "storage"),
 );
-`;
+${idpWorker}`;
 };
