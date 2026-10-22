@@ -17,6 +17,7 @@ import { knowledgeErrors, searchMaxLimit } from "@grasp-os/shared/knowledge";
 import { memoryTokens } from "@grasp-os/shared/memory";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 
+import { derivedHmacKey } from "../derived-keys.ts";
 import type { Reader } from "./access.ts";
 import { d1BrainStore } from "./recall-store.ts";
 import type { BrainStore } from "./recall-store.ts";
@@ -167,13 +168,22 @@ const coverageOf = (timedOut: boolean, truncated: boolean): Coverage => {
   };
 };
 
-/** A digest of `text`, for a pack's access revision. */
-const digest = async (text: string): Promise<string> =>
-  toHex(
-    new Uint8Array(
-      await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text))
-    )
-  ).slice(0, 32);
+/**
+ * A pack's access revision: `text` (what the reader may read now) signed
+ * with a key of the deployment's own, so it can't be computed, or guessed
+ * back, from what a caller knows of its own access.
+ */
+const digest = async (env: Env, text: string): Promise<string> => {
+  const key = await derivedHmacKey(env, "grasp-os brain access revision", [
+    "sign",
+  ]);
+  const mac = await crypto.subtle.sign(
+    "HMAC",
+    key,
+    new TextEncoder().encode(text)
+  );
+  return toHex(new Uint8Array(mac)).slice(0, 32);
+};
 
 /** Waits `ms`, then resolves with `undefined`. */
 const timeout = async (ms: number): Promise<undefined> => {
@@ -182,19 +192,19 @@ const timeout = async (ms: number): Promise<undefined> => {
 };
 
 /**
- * The evidence that applies to `input`'s question, for `reader`: a bounded
- * memory pack. A filter only narrows: a collection `reader` can't read
- * refuses the whole recall as `brain.not_found` before anything is read.
- * Refusals are the Brain's stable codes.
+ * `recall`, with every collection it read from: those its search reported
+ * (a search records the collections it searched, found or not) and every
+ * one it was told to read, so a caller that labels what it was handed
+ * (a chat) labels a "nothing found in S" answer with S too.
  */
-export const recall = async (
+export const recallWithSources = async (
   env: Env,
   reader: Reader,
   input: unknown,
   /** A collection's stub passes its own: the one collection it reads. */
   only?: CollectionId,
   store: BrainStore = d1BrainStore(env)
-): Promise<MemoryPack> => {
+): Promise<{ pack: MemoryPack; sources: CollectionId[] }> => {
   try {
     const { query, filters, budget } = brainErrors.parse(
       "brain.invalid",
@@ -220,7 +230,7 @@ export const recall = async (
     if (collectionIds !== undefined) {
       await store.requireReadable(reader, collectionIds);
     }
-    const accessRevision = await digest(await store.accessKey(reader));
+    const accessRevision = await digest(env, await store.accessKey(reader));
     const remaining = limits.deadlineMs - (Date.now() - startedAt);
     // One more than asked, to tell a full pack from a cut one.
     const limit = Math.min(limits.maxItems + 1, searchMaxLimit);
@@ -239,7 +249,13 @@ export const recall = async (
     const { items, tokenCount } = packed(found, limits);
     const truncated =
       items.length < found.length || read?.sections.length === searchMaxLimit;
-    return {
+    const sources = [
+      ...new Set([
+        ...(read?.provenance.collectionIds ?? []),
+        ...(collectionIds ?? []),
+      ]),
+    ];
+    const pack: MemoryPack = {
       id: crypto.randomUUID(),
       contractVersion: brainContractVersion,
       retrievalPolicyVersion: recallPolicyVersion,
@@ -260,7 +276,25 @@ export const recall = async (
       indexGeneration,
       createdAt: new Date().toISOString(),
     };
+    return { pack, sources };
   } catch (error) {
     throw asBrainError(error);
   }
+};
+
+/**
+ * The evidence that applies to `input`'s question, for `reader`: a bounded
+ * memory pack. A filter only narrows: a collection `reader` can't read
+ * refuses the whole recall as `brain.not_found` before anything is read.
+ * Refusals are the Brain's stable codes.
+ */
+export const recall = async (
+  env: Env,
+  reader: Reader,
+  input: unknown,
+  only?: CollectionId,
+  store: BrainStore = d1BrainStore(env)
+): Promise<MemoryPack> => {
+  const { pack } = await recallWithSources(env, reader, input, only, store);
+  return pack;
 };
