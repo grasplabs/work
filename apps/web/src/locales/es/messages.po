@@ -9098,10 +9098,6 @@ msgstr "Comprobante"
 msgid "Recent chats"
 msgstr "Chats recientes"
 
-#: src/routes/_shell.integrations.$integration.tsx
-msgid "Reconnect"
-msgstr ""
-
 #: src/landscape/audit-trail.tsx
 msgid "Recorded by"
 msgstr "Registrado por"

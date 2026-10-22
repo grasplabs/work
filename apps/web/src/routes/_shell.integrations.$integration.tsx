@@ -19,7 +19,7 @@ import { useState } from "react";
 import { AppLogo } from "../connections/app-logo.tsx";
 import {
   canConnect,
-  canReconnect,
+  signInAgainTarget,
   ConnectDialog,
 } from "../connections/connect-dialog.tsx";
 import { ConnectionList } from "../connections/connection-list.tsx";
@@ -249,10 +249,11 @@ const Reaches = ({ integration }: { integration: Integration }) => {
 };
 
 /**
- * Where its account stands, once it is connected: signing in again to a
- * connection whose access ran out (else reconnecting its newest), who
- * connected it, and what it reaches. Each connection's own card is on
- * Account.
+ * Where its account stands, once it is connected: signing in again to the
+ * first connection whose access ran out that this person may sign in to
+ * again, who connected it, and what it reaches. An active connection has
+ * nothing to sign in to again (connect refuses it as already connected).
+ * Each connection's own card is on Account.
  */
 const AccountCard = ({
   integration,
@@ -264,12 +265,7 @@ const AccountCard = ({
   const { i18n } = useLingui();
   const [signingIn, setSigningIn] = useState(false);
   const state = stateOf(integration);
-  const ranOut = integration.connections.find(
-    ({ status }) => status === "needs_reauth"
-  );
-  const target = ranOut ?? newestOf(integration);
-  const reconnectable =
-    target !== undefined && canReconnect(target, integration.offered, identity);
+  const target = signInAgainTarget(integration, identity);
   return (
     <section
       aria-labelledby="integration-status"
@@ -279,21 +275,16 @@ const AccountCard = ({
         <h2 className="font-medium" id="integration-status">
           <Trans>Account</Trans>
         </h2>
-        {reconnectable ? (
+        {target === undefined ? null : (
           <Button
             onClick={() => {
               setSigningIn(true);
             }}
             size="sm"
-            variant={ranOut === undefined ? "outline" : "default"}
           >
-            {ranOut === undefined ? (
-              <Trans>Reconnect</Trans>
-            ) : (
-              <Trans>Sign in again</Trans>
-            )}
+            <Trans>Sign in again</Trans>
           </Button>
-        ) : null}
+        )}
       </div>
       <dl className="bg-card grid grid-cols-[auto_minmax(0,1fr)] gap-x-8 gap-y-3 rounded-xl border p-4">
         <dt className="text-muted-foreground">
@@ -318,7 +309,7 @@ const AccountCard = ({
         </dd>
         <ConnectedBy integration={integration} />
       </dl>
-      {reconnectable ? (
+      {target === undefined ? null : (
         <ConnectDialog
           again={target}
           identity={identity}
@@ -326,7 +317,7 @@ const AccountCard = ({
           onOpenChange={setSigningIn}
           open={signingIn}
         />
-      ) : null}
+      )}
     </section>
   );
 };

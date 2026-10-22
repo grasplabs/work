@@ -9098,10 +9098,6 @@ msgstr "Ontvangstbewijs"
 msgid "Recent chats"
 msgstr "Recente chats"
 
-#: src/routes/_shell.integrations.$integration.tsx
-msgid "Reconnect"
-msgstr ""
-
 #: src/landscape/audit-trail.tsx
 msgid "Recorded by"
 msgstr "Vastgelegd door"
