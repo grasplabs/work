@@ -340,6 +340,22 @@ describe(
       });
     });
 
+    it("refuses the database a version made current over a base its candidate wasn't verified over", async () => {
+      const { owner, app } = await appWith(helloFiles("one"));
+      await committed(owner, app, helloFiles("two"));
+      await committed(owner, app, helloFiles("three"));
+      await activateVersion(env, owner, app, 1);
+      const stale = await verifiedCandidate(owner, app, 2);
+      await activateVersion(env, owner, app, 3);
+      await expect(
+        aborted("UPDATE apps SET current_version = 2 WHERE id = ?", app)
+      ).resolves.toContain("SQLITE_CONSTRAINT");
+      expect({
+        current: await currentOf(app),
+        state: await fieldOf(stale.id, "state"),
+      }).toStrictEqual({ current: 3, state: "verified" });
+    });
+
     it("refuses a caller's expected version that isn't current", async () => {
       const { owner, app } = await appWith(helloFiles("one"));
       await committed(owner, app, helloFiles("two"));

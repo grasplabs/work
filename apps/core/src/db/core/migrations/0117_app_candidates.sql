@@ -105,7 +105,8 @@ WHEN NEW.`current_version` IS NOT NULL
 		JOIN `app_candidate_reports` AS `report`
 			ON `report`.`candidate_id` = `candidate`.`id` AND `report`.`hash` = `candidate`.`report_hash`
 		WHERE `candidate`.`app_id` = NEW.`id` AND `candidate`.`version` = NEW.`current_version`
-			AND `candidate`.`state` = 'verified')
+			AND `candidate`.`state` = 'verified'
+			AND `candidate`.`based_on` IS coalesce(OLD.`current_version`, 0))
 BEGIN
 	SELECT RAISE(ABORT, 'apps are made current from a verified candidate');
 END;

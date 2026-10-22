@@ -1504,15 +1504,8 @@ export const makeCurrent = async (
         await requireMigrationEvidence(env, appId, number);
       }
     }
-    // Superseded by a person's commit since it was read.
-    const ended = await db
-      .select({ state: appCandidates.state })
-      .from(appCandidates)
-      .where(eq(appCandidates.id, candidate.id))
-      .get();
-    if (ended?.state === "superseded") {
-      throw appErrors.create("app.candidate_superseded");
-    }
+    // A verified candidate is never superseded (`supersededBy`), so what
+    // is left is a conflict: the base moved, or the candidate ended.
     throw appErrors.create("app.conflict");
   }
   // What its screens build to with this release's kit, which may not be
