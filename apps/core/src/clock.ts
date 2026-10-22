@@ -65,13 +65,7 @@ export const clockTasks: readonly ClockTask<Env>[] = [
   },
   { name: "knowledge.uploads", period: "minute", run: sweepUploads },
   // Knowledge payloads no version refers to (src/knowledge/payloads.ts).
-  {
-    name: "knowledge.payloads",
-    period: "minute",
-    run: async (env) => {
-      await sweepPayloads(env, new Date());
-    },
-  },
+  { name: "knowledge.payloads", period: "minute", run: sweepPayloads },
   // Deploys apply migrations first (CI's db:migrate, and the console's
   // deploy), so `platform_versions` exists. A version running before it
   // does records nothing, and the first run after the migration records
