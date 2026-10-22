@@ -220,6 +220,8 @@ const categories: Readonly<Record<string, ErrorCategory>> = {
   // A call it started outlived the operation's deadline: the operation
   // broke its contract to end with its calls.
   "operation.unfinished_call": "contract",
+  // A JSON workflow's own error, which its `raise` task declares.
+  "workflow.raised": "domain",
 };
 
 /** The platform codes worth trying again, unchanged, a little later. */

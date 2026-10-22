@@ -69,6 +69,13 @@ import type { CallingRun } from "./resource-authority.ts";
 import { auditAdmissionRefusal, makeCall } from "./resource-calls.ts";
 import type { BuiltCall } from "./resource-calls.ts";
 import { callCompute } from "./resource-compute.ts";
+import {
+  failureOf,
+  matchesFilter,
+  notCaught,
+  raisedCode,
+} from "./resource-errors.ts";
+import type { CaughtError, Failure } from "./resource-errors.ts";
 import { requirePackagesAdmitted } from "./sealed-packages.ts";
 import { heldWakeType } from "./wakes.ts";
 
@@ -83,11 +90,12 @@ import { heldWakeType } from "./wakes.ts";
 //
 // - A step the build doesn't have. Every step is named after a task of
 //   the sealed task table and one of the steps it was sealed with
-//   (`task:<id>` for a set or switch, or a wait's sleep; `enter:<id>` and
-//   `leave:<id>` around a wait, a do or a for; `item:<id>` for a for's
-//   `while`), or the workflow's own `workflow:input` and `workflow:output`
-//   when it has them; a wait lasts exactly what was sealed. Anything else
-//   is refused, and fails the run.
+//   (`task:<id>` for a set, switch, call or raise, or a wait's sleep;
+//   `enter:<id>` and `leave:<id>` around a wait, a do, a for or a try;
+//   `item:<id>` for a for's `while`; a try's `catch:<id>`), or the
+//   workflow's own `workflow:input` and `workflow:output` when it has
+//   them; a wait lasts exactly what was sealed. Anything else is refused,
+//   and fails the run.
 // - A step run twice, or a loop's item it never had. Generated code has no
 //   loop statement, and each task runs at most once per item of the loops
 //   around it (generate.ts): a task inside `for` tasks names the item of
@@ -176,6 +184,18 @@ import { heldWakeType } from "./wakes.ts";
 //   isolate made of it; the run waits, checking connect, and runs the
 //   step again under the same key once they decided, so connect answers
 //   what they decided, never a second send (`#waitWhileHeld`).
+// - A catch taking a failure it mustn't, or one that never happened. A
+//   try's catch step asks the host (`#catches`), which decides from its
+//   own record of the run (`#failure`): the failure of the last step it
+//   reached, fresh or replayed, while nothing after it succeeded, mapped
+//   by resource-errors.ts, which never lets a catch take an unknown
+//   outcome or a refusal; only one of a task in the try's own list, with
+//   every property of its sealed filter, its sealed conditions evaluated
+//   here. The step records exactly that answer, and journals the error it
+//   took beside it, which the catch's variable is bound to from then on,
+//   fresh or replayed (`#caughtErrors`); an expression reading it before
+//   its catch took one is refused. A raise's step fails with the error its
+//   build sealed, by the host, however the isolate records it.
 // - Limits raising the host's ceilings. A task's timeout and the
 //   workflow's model calls are held to the lower of the build's sealed
 //   limit and the host's own (`configOf`, `HostedResourceRun`).
@@ -190,6 +210,7 @@ export const resourceAttemptMethods = [
   "call",
   "until",
   "items",
+  "catches",
 ] as const;
 
 /** The SDK module the generated code imports, by its flat name. */
@@ -236,6 +257,7 @@ export class Run extends WorkerEntrypoint {
                 call: async (frame) => unwrapped(await attempt.call(frame)),
                 until: async (frame) => unwrapped(await attempt.until(frame)),
                 items: async (frame) => unwrapped(await attempt.items(frame)),
+                catches: async () => unwrapped(await attempt.catches()),
               })))),
         sleep: async (name, milliseconds) => {
           unwrapped(await host.sleep(name, milliseconds));
@@ -393,6 +415,31 @@ const leftOpen: StepError = {
   message: "The step ran out of time.",
 };
 
+/**
+ * What a step failed with, as a catch's mapping reads it (resource-errors.ts):
+ * as the isolate would see it, but a step that ran out of time as the
+ * timeout it is, however the engine named it as it journaled it (an
+ * attempt cut off, one left open: `TimeoutError`).
+ */
+const failedWith = (error: unknown): StepError => {
+  const seen = forIsolate(error);
+  return error instanceof Error && error.name === "TimeoutError"
+    ? { name: "TimeoutError", message: seen.message }
+    : seen;
+};
+
+/**
+ * What a step whose call took effect fails with when anything of it fails
+ * after (its output off its schema, say): never a catch's to take
+ * (resource-errors.ts), as a catch would take it as a call that didn't.
+ */
+const failedAfterEffect: StepError = {
+  name: "Error",
+  message: workflowResourceErrors.create("workflow.failed_after_effect")
+    .message,
+  code: "workflow.failed_after_effect",
+};
+
 /** A step's error (`toStepError`) as plain data again, to keep. */
 const stepErrorOf = (error: unknown): StepError => {
   if (!(error instanceof Error)) {
@@ -408,7 +455,7 @@ const stepErrorOf = (error: unknown): StepError => {
 
 /** A step's name, as the SDK names it. */
 const stepNamePattern =
-  /^(?:(?<kind>task|enter|leave|item):(?<id>[a-z][a-z0-9]*(?:-[a-z0-9]+)*)(?:@(?<scope>[a-z][a-z0-9-]{0,63}\.(?:0|[1-9][0-9]{0,3})(?:\/[a-z][a-z0-9-]{0,63}\.(?:0|[1-9][0-9]{0,3})){0,7}))?|workflow:(?<flow>input|output))$/u;
+  /^(?:(?<kind>task|enter|leave|item|catch):(?<id>[a-z][a-z0-9]*(?:-[a-z0-9]+)*)(?:@(?<scope>[a-z][a-z0-9-]{0,63}\.(?:0|[1-9][0-9]{0,3})(?:\/[a-z][a-z0-9-]{0,63}\.(?:0|[1-9][0-9]{0,3})){0,7}))?|workflow:(?<flow>input|output))$/u;
 
 /** One scope of a step's name: an item, by index, of a `for` task. */
 const scopeSegmentPattern =
@@ -420,10 +467,11 @@ type StepKind =
   | "enter"
   | "leave"
   | "item"
+  | "catch"
   | "workflow-input"
   | "workflow-output";
 
-const taskStepSchema = z.enum(["task", "enter", "leave", "item"]);
+const taskStepSchema = z.enum(["task", "enter", "leave", "item", "catch"]);
 
 /** The step an attempt belongs to: its kind and its task, if a task's. */
 interface StepOf {
@@ -587,6 +635,8 @@ const stagesOf: Readonly<Record<StepKind, readonly Stage[]>> = {
   leave: ["taskOutputAs", "taskExportAs"],
   // A `for` task's `while`, before each item (`#expressionOf`).
   item: ["taskDefinition"],
+  // A catch's conditions are the host's own to evaluate (`#catches`).
+  catch: [],
   "workflow-input": ["workflowInputFrom"],
   "workflow-output": ["workflowOutputAs"],
 };
@@ -597,6 +647,7 @@ const checksOf: Readonly<Record<StepKind, readonly DataCheck[]>> = {
   enter: ["input"],
   leave: ["output", "export"],
   item: [],
+  catch: [],
   "workflow-input": [],
   "workflow-output": [],
 };
@@ -624,6 +675,7 @@ const recordSchema = z.union([
       .array(z.json())
       .max(platformLimits.workflowCollectionItems)
       .optional(),
+    caught: z.boolean().optional(),
   }),
 ]);
 
@@ -631,6 +683,24 @@ const recordSchema = z.union([
 const enteredSchema = z.strictObject({
   record: z.json(),
   startedAt: z.number(),
+});
+
+/**
+ * What a catch step journals: its record, and the error its catch took,
+ * as the host mapped it then (resource-errors.ts), so a replay binds the
+ * catch's variable to the same error, whatever maps it now.
+ */
+const catchJournalSchema = z.strictObject({
+  record: z.json(),
+  error: z
+    .strictObject({
+      type: z.string(),
+      status: z.int(),
+      instance: z.string(),
+      title: z.string().optional(),
+      detail: z.string().optional(),
+    })
+    .optional(),
 });
 
 /**
@@ -853,6 +923,19 @@ interface StepAttempt {
   held: boolean;
   /** Whether it collects a held call's outcome (`StepRun.collecting`). */
   collecting: boolean;
+  /** For a catch step, the failure it decides on (`StepRun.failure`). */
+  failure: Failure | undefined;
+  /** Whether its catch takes that failure, as the host decided it, once. */
+  caught: boolean | undefined;
+  /** Whether it asked if its catch takes the failure: once, however it went. */
+  catchAsked: boolean;
+  /**
+   * The first failure the host answered one of its calls with: what the
+   * step failed with, when it failed, whatever the isolate reports.
+   */
+  hostError: StepError | undefined;
+  /** What its call failed with, once failed: the step's failure, first. */
+  callError: StepError | undefined;
   /** Its admission: what admits each evaluation as a host call. */
   admission: AttemptAdmission;
 }
@@ -877,6 +960,11 @@ interface StepRun {
    * though it has none left (quotas.ts, `QuotaAttempt.collecting`).
    */
   collecting: boolean;
+  /**
+   * For a catch step, the failure that left its try's list, as the run
+   * stood when the step began (`ResourceRunHost.#failure`).
+   */
+  failure: Failure | undefined;
 }
 
 /** Expressions compiled once per build, by build hash and slot. */
@@ -1009,6 +1097,13 @@ const hostSlotsOf = (build: LoadedBuild): ReadonlySet<number> => {
       slotsOf(task.duration, slots);
     } else if (task.kind === "for") {
       slotsOf(task.loop.in, slots);
+    } else if (task.kind === "try") {
+      // A catch's conditions: its catch step's, which the host evaluates.
+      for (const slot of [task.catch.when, task.catch.exceptWhen]) {
+        if (slot !== undefined) {
+          slots.add(slot);
+        }
+      }
     }
   }
   return slots;
@@ -1116,6 +1211,21 @@ export class ResourceRunHost
   readonly #actionModelCalls: ActionModelCalls;
   /** What the run keeps of its tried-once steps' attempts. */
   readonly #triedOnce: TriedOnceMarks;
+  /**
+   * The failure of the step the run reached last, fresh or replayed, while
+   * no step after it succeeded and no catch took it: what a `try` task's
+   * catch step decides on. A step's success, or a catch taking it, clears
+   * it; a catch that doesn't take it leaves it for the next catch out.
+   * Generated code runs its tasks one at a time, so between a step's
+   * failure and the catch steps it reaches nothing else runs.
+   */
+  #failure: Failure | undefined;
+  /**
+   * The error each `try` task's catch took, by the task's place, as its catch step
+   * journaled it, fresh or replayed: what its catch's variable is to the
+   * expressions of its `do`.
+   */
+  readonly #caughtErrors = new Map<string, CaughtError>();
 
   constructor(
     env: Env,
@@ -1265,6 +1375,27 @@ export class ResourceRunHost
     }
   }
 
+  /**
+   * Refuses step `step` while a failure no catch took is pending: after a
+   * failure, generated code asks only the catch steps of the tries around
+   * it, then either runs a catch's do or ends the run with the failure. A
+   * module that goes on past it otherwise is refused, and the run fails.
+   */
+  #requireNoFailure(step: StepOf | undefined): void {
+    if (this.#failure !== undefined && step?.kind !== "catch") {
+      this.#refuse("A run goes on past a failure only once a catch took it.");
+    }
+  }
+
+  /**
+   * Whether a failure no catch took is pending as the run's code ends: a
+   * run whose code ends well with one went on past it, and fails
+   * (resource-runs.ts).
+   */
+  get failureUntaken(): boolean {
+    return this.#failure !== undefined;
+  }
+
   /** The person the run acts for must still be an active member. */
   async #requirePerson(): Promise<void> {
     if (!(await memberRole(this.#env.DB, this.#run.principal))) {
@@ -1284,123 +1415,180 @@ export class ResourceRunHost
     fn: (attempt: ResourceAttemptHost) => Promise<unknown>
   ): Promise<Settled<unknown>> {
     const stepDone = Promise.withResolvers<null>();
+    // The step, once known: what a catch sees of its failure.
+    let reached: StepOf | undefined;
     try {
       return await settle(async () => {
-        const step = this.#stepOf(name, false);
-        const bounded = boundedJson(options);
-        const captured = capturedSchema.safeParse(bounded?.value);
-        if (bounded === undefined || !captured.success) {
-          return this.#refuse(
-            "A step captures its input and context, within a step's size."
+        try {
+          reached = this.#stepOf(name, false);
+          this.#requireNoFailure(reached);
+          return await this.#runStep(
+            reached,
+            name,
+            options,
+            fn,
+            stepDone.promise
           );
+        } catch (error) {
+          // A catch step's own failure is no catch's to take: a catch
+          // around it would otherwise take it in place of a failure no
+          // catch may take, an unknown outcome's, that it decided on.
+          this.#failure =
+            reached?.kind === "catch"
+              ? notCaught()
+              : failureOf(
+                  failedWith(error),
+                  reached?.task,
+                  this.#tampered !== undefined
+                );
+          throw error;
         }
-        const data = captured.data.input;
-        await this.#requirePerson();
-        const stepName = String(name);
-        // An enter step records when its task started beside its record,
-        // and a leave step's expressions see that time, whatever separates
-        // them (a wait, a nested do, another activation).
-        const entering = step.kind === "enter" && step.task !== undefined;
-        const taskStart =
-          step.kind === "leave" && step.task !== undefined
-            ? this.#taskStarts.get(step.place)
-            : undefined;
-        // Its wait for load since its last admission, read off the markers
-        // its attempts recorded, so every replay counts the same.
-        const run: StepRun = {
-          step,
-          name: stepName,
-          data,
-          capturedSize: bounded.size,
-          taskStart,
-          entering,
-          wait: loadWaitStart,
-          collecting: false,
-        };
-        const attemptStep = async (context: unknown): Promise<unknown> =>
-          await this.#attempt(run, context, fn, stepDone.promise);
-        let recorded = await this.#step.do(
-          stepName,
-          engineConfigOf(step),
-          attemptStep
-        );
-        // Refused for load: the step runs again after a durable sleep, in
-        // steps of core's own outside the run's step allowance, as an App
-        // run's does (host.ts, `RunHost.do`), until it has waited as long
-        // as a step may. Held for its person: waited for, then run again
-        // under a step of its own, its call under the same key, so connect
-        // answers what they decided. Fresh or replayed alike, each round
-        // as recorded.
-        const waitKey = await waitKeyOf(stepName);
-        for (
-          let marker = markerOf(recorded), round = 1;
-          marker !== undefined || heldMarkerSchema.safeParse(recorded).success;
-          marker = markerOf(recorded), round += 1
-        ) {
-          if (marker === undefined) {
-            // Only a connector call is held for its person, and connect
-            // answers its rerun what the person decided, under the same
-            // key: the attempt that was held took the host calls of its
-            // call and of everything it evaluated, and the rerun repeats
-            // that work only to collect the outcome, sending nothing new.
-            // So its attempts take none (GRA-570): a lineage that ran out
-            // while the person decided still gets the effect they let out.
-            // The wait's own checks and sleeps stay steps of the run's.
-            run.collecting =
-              step.task?.kind === "call" &&
-              step.task.call.name === "grasp.connector";
-            // oxlint-disable-next-line no-await-in-loop -- one round at a time
-            await this.#waitWhileHeld(stepName, round);
-            // oxlint-disable-next-line no-await-in-loop -- one round at a time
-            await this.#requirePerson();
-            // oxlint-disable-next-line no-await-in-loop -- one round at a time
-            recorded = await this.#step.do(
-              `${stepName}:held:${round}:run`,
-              engineConfigOf(step),
-              attemptStep
-            );
-            continue;
-          }
-          // Only the host records a marker, and only a busy one.
-          if (marker.kind !== "busy") {
-            throw new Error(`Step "${stepName}" recorded a hold it can't have`);
-          }
-          run.wait = loadWaitAfter(run.wait, marker);
-          if (run.wait.sleepMs <= 0) {
-            throw toStepError(queueTimedOut(stepName, marker.maxWaitMs));
-          }
-          const prefix = waitStep(waitKey, "busy", round);
-          // oxlint-disable-next-line no-await-in-loop -- one round at a time
-          await loadRound(
-            this.#step,
-            prefix,
-            stepName,
-            marker,
-            run.wait.sleepMs
-          );
-          // oxlint-disable-next-line no-await-in-loop -- one round at a time
-          recorded = await this.#step.do(
-            `${prefix}:run`,
-            engineConfigOf(step),
-            attemptStep
-          );
-        }
-        let outcome = recorded;
-        if (entering) {
-          // The host's own journal entry, fresh or replayed.
-          const journal = enteredSchema.parse(recorded);
-          outcome = journal.record;
-          if (step.task !== undefined) {
-            this.#taskStarts.set(step.place, journal.startedAt);
-          }
-        }
-        // Fresh or replayed alike: what the run has reached, in order.
-        this.#noteRecorded(step, outcome);
-        return outcome;
       });
     } finally {
       stepDone.resolve(null);
     }
+  }
+
+  /** `do`'s work, of `step`, once it is known to be the build's. */
+  async #runStep(
+    step: StepOf,
+    name: unknown,
+    options: unknown,
+    fn: (attempt: ResourceAttemptHost) => Promise<unknown>,
+    stepDone: Promise<unknown>
+  ): Promise<unknown> {
+    const bounded = boundedJson(options);
+    const captured = capturedSchema.safeParse(bounded?.value);
+    if (bounded === undefined || !captured.success) {
+      return this.#refuse(
+        "A step captures its input and context, within a step's size."
+      );
+    }
+    const data = captured.data.input;
+    await this.#requirePerson();
+    const stepName = String(name);
+    // An enter step records when its task started beside its record,
+    // and a leave step's expressions see that time, whatever separates
+    // them (a wait, a nested do, another activation).
+    const entering = step.kind === "enter" && step.task !== undefined;
+    const taskStart =
+      step.kind === "leave" && step.task !== undefined
+        ? this.#taskStarts.get(step.place)
+        : undefined;
+    // Its wait for load since its last admission, read off the markers
+    // its attempts recorded, so every replay counts the same.
+    const run: StepRun = {
+      step,
+      name: stepName,
+      data,
+      capturedSize: bounded.size,
+      taskStart,
+      entering,
+      wait: loadWaitStart,
+      collecting: false,
+      // As the run stands as it begins, for every attempt and round.
+      failure: step.kind === "catch" ? this.#failure : undefined,
+    };
+    const attemptStep = async (context: unknown): Promise<unknown> =>
+      await this.#attempt(run, context, fn, stepDone);
+    let recorded = await this.#step.do(
+      stepName,
+      engineConfigOf(step),
+      attemptStep
+    );
+    // Refused for load: the step runs again after a durable sleep, in
+    // steps of core's own outside the run's step allowance, as an App
+    // run's does (host.ts, `RunHost.do`), until it has waited as long
+    // as a step may. Held for its person: waited for, then run again
+    // under a step of its own, its call under the same key, so connect
+    // answers what they decided. Fresh or replayed alike, each round
+    // as recorded.
+    const waitKey = await waitKeyOf(stepName);
+    for (
+      let marker = markerOf(recorded), round = 1;
+      marker !== undefined || heldMarkerSchema.safeParse(recorded).success;
+      marker = markerOf(recorded), round += 1
+    ) {
+      if (marker === undefined) {
+        // Only a connector call is held for its person, and connect
+        // answers its rerun what the person decided, under the same
+        // key: the attempt that was held took the host calls of its
+        // call and of everything it evaluated, and the rerun repeats
+        // that work only to collect the outcome, sending nothing new.
+        // So its attempts take none (GRA-570): a lineage that ran out
+        // while the person decided still gets the effect they let out.
+        // The wait's own checks and sleeps stay steps of the run's.
+        run.collecting =
+          step.task?.kind === "call" &&
+          step.task.call.name === "grasp.connector";
+        // oxlint-disable-next-line no-await-in-loop -- one round at a time
+        await this.#waitWhileHeld(stepName, round);
+        // oxlint-disable-next-line no-await-in-loop -- one round at a time
+        await this.#requirePerson();
+        // oxlint-disable-next-line no-await-in-loop -- one round at a time
+        recorded = await this.#step.do(
+          `${stepName}:held:${round}:run`,
+          engineConfigOf(step),
+          attemptStep
+        );
+        continue;
+      }
+      // Only the host records a marker, and only a busy one.
+      if (marker.kind !== "busy") {
+        throw new Error(`Step "${stepName}" recorded a hold it can't have`);
+      }
+      run.wait = loadWaitAfter(run.wait, marker);
+      if (run.wait.sleepMs <= 0) {
+        throw toStepError(queueTimedOut(stepName, marker.maxWaitMs));
+      }
+      const prefix = waitStep(waitKey, "busy", round);
+      // oxlint-disable-next-line no-await-in-loop -- one round at a time
+      await loadRound(this.#step, prefix, stepName, marker, run.wait.sleepMs);
+      // oxlint-disable-next-line no-await-in-loop -- one round at a time
+      recorded = await this.#step.do(
+        `${prefix}:run`,
+        engineConfigOf(step),
+        attemptStep
+      );
+    }
+    let outcome = recorded;
+    if (entering) {
+      // The host's own journal entry, fresh or replayed.
+      const journal = enteredSchema.parse(recorded);
+      outcome = journal.record;
+      if (step.task !== undefined) {
+        this.#taskStarts.set(step.place, journal.startedAt);
+      }
+    }
+    if (step.kind === "catch") {
+      outcome = this.#noteCatch(step, recorded);
+    } else {
+      // A step that succeeded: no failure is left for a catch.
+      this.#failure = undefined;
+    }
+    // Fresh or replayed alike: what the run has reached, in order.
+    this.#noteRecorded(step, outcome);
+    return outcome;
+  }
+
+  /**
+   * What catch step `step` journaled (`recorded`), fresh or replayed: its
+   * record. A catch that took the failure binds its variable to the error
+   * it journaled, and ends the failure; one that didn't leaves it for the
+   * next catch out, as the original failure goes on.
+   */
+  #noteCatch(step: StepOf, recorded: unknown): Json {
+    const journal = catchJournalSchema.parse(recorded);
+    const record = recordSchema.parse(journal.record);
+    const caught = "caught" in record && record.caught === true;
+    if (step.task === undefined || caught !== (journal.error !== undefined)) {
+      throw new Error("A catch step journaled what no catch step does");
+    }
+    if (journal.error !== undefined) {
+      this.#caughtErrors.set(step.place, journal.error);
+      this.#failure = undefined;
+    }
+    return journal.record;
   }
 
   /**
@@ -1414,17 +1602,38 @@ export class ResourceRunHost
   #outcomeOf(
     run: StepRun,
     attempt: StepAttempt | undefined,
-    result: Settled<unknown>
+    result: Settled<unknown>,
+    /** Whether the host made `result` itself: a cut-off, a CPU stop. */
+    hostMade: boolean
   ): unknown {
     if (attempt?.held === true) {
       return heldMarker;
     }
-    if (!result.ok || attempt === undefined) {
+    if (!result.ok) {
+      // The host's own word for why, never the isolate's: a module may
+      // report any code, and a catch reads it (resource-errors.ts). One
+      // that failed without the host failing anything of it failed of its
+      // own accord, as generated code never does.
+      // A step whose call took effect, then failed (its output off its
+      // schema, say), failed with its effect out: no catch may take that
+      // as a failure of the call, nor compensate as though it never ran.
+      if (attempt?.call === "done") {
+        throw toStepError(failedAfterEffect);
+      }
       throw toStepError(
-        result.ok
-          ? forIsolate(new Error("The attempt was cut off"))
-          : result.error
+        hostMade
+          ? result.error
+          : (attempt?.callError ??
+              attempt?.hostError ?? {
+                name: "Error",
+                message:
+                  "The step's code failed with no failure of the host's.",
+                code: "workflow.invalid",
+              })
       );
+    }
+    if (attempt === undefined) {
+      throw toStepError(forIsolate(new Error("The attempt was cut off")));
     }
     return this.#recordOf(run, attempt, result.value);
   }
@@ -1505,6 +1714,8 @@ export class ResourceRunHost
       }
       this.#hooks.attemptCall?.(call, stepDone);
       let result: Settled<unknown>;
+      // Cut off by the host, or stopped past its CPU: the host's own.
+      let hostMade = attempt === undefined;
       try {
         result = fromIsolate(await call);
       } catch (error) {
@@ -1512,6 +1723,7 @@ export class ResourceRunHost
           throw error;
         }
         this.#isolateStopped = true;
+        hostMade = true;
         result = { ok: false, error: forIsolate(error) };
       } finally {
         if (attempt !== undefined) {
@@ -1529,7 +1741,7 @@ export class ResourceRunHost
       if (this.#tampered !== undefined) {
         throw toStepError(forIsolate(this.#tampered));
       }
-      return this.#outcomeOf(run, attempt, result);
+      return this.#outcomeOf(run, attempt, result, hostMade);
     } finally {
       // Settled last, however it ended: what it held of its lineage's time
       // turns into what it used, its evaluations' and its record's checks'
@@ -1604,6 +1816,11 @@ export class ResourceRunHost
       proceeds: undefined,
       held: false,
       collecting: run.collecting,
+      failure: run.failure,
+      caught: undefined,
+      catchAsked: false,
+      hostError: undefined,
+      callError: undefined,
       admission,
     };
   }
@@ -1621,16 +1838,58 @@ export class ResourceRunHost
 
   /** The host `attempt`'s function gets in the isolate. */
   #attemptHostOf(attempt: StepAttempt): ResourceAttemptHost {
+    // The first failure the host answers is what the step fails with.
+    const kept = <T>(settled: Settled<T>): Settled<T> => {
+      if (!settled.ok) {
+        attempt.hostError ??= settled.error;
+      }
+      return settled;
+    };
+    // Generated code asks for nothing else while its task's call is out:
+    // a module that does, with a failure of it to report as the step's
+    // while the call's effect goes out, is refused, and the run fails.
+    const besideCall = (): Settled<never> | undefined => {
+      if (attempt.call !== "pending") {
+        return undefined;
+      }
+      try {
+        return this.#refuse(
+          "Nothing else of a step runs while its call is out."
+        );
+      } catch (error) {
+        return { ok: false, error: forIsolate(error) };
+      }
+    };
     return new ResourceAttemptHost({
       evaluate: async (slot, frame) =>
-        await this.#evaluate(attempt, slot, frame),
-      check: (which, value) => this.#check(attempt, which, value),
+        kept(besideCall() ?? (await this.#evaluate(attempt, slot, frame))),
+      check: (which, value) =>
+        kept(besideCall() ?? this.#check(attempt, which, value)),
       call: async (frame) =>
-        await ResourceRunHost.#tracked(attempt, this.#call(attempt, frame)),
+        kept(
+          await ResourceRunHost.#tracked(attempt, this.#call(attempt, frame))
+        ),
       until: async (frame) =>
-        await ResourceRunHost.#tracked(attempt, this.#until(attempt, frame)),
+        kept(
+          besideCall() ??
+            (await ResourceRunHost.#tracked(
+              attempt,
+              this.#until(attempt, frame)
+            ))
+        ),
       items: async (frame) =>
-        await ResourceRunHost.#tracked(attempt, this.#itemsOf(attempt, frame)),
+        kept(
+          besideCall() ??
+            (await ResourceRunHost.#tracked(
+              attempt,
+              this.#itemsOf(attempt, frame)
+            ))
+        ),
+      catches: async () =>
+        kept(
+          besideCall() ??
+            (await ResourceRunHost.#tracked(attempt, this.#catches(attempt)))
+        ),
     });
   }
 
@@ -1667,8 +1926,33 @@ export class ResourceRunHost
     try {
       this.#acceptRecord(attempt, value);
     } catch (error) {
-      // A record off its task's schemas fails the same every time.
-      throw toStepError(forIsolate(error));
+      // A record off its task's schemas fails the same every time; one of
+      // a call that took effect failed with its effect out.
+      // A refusal stays one.
+      const afterEffect =
+        attempt.call === "done" && this.#tampered === undefined;
+      throw toStepError(afterEffect ? failedAfterEffect : forIsolate(error));
+    }
+    const { task } = run.step;
+    const record = recordSchema.safeParse(value).data;
+    const skipped = record !== undefined && "skipped" in record;
+    if (run.step.kind === "task" && task?.kind === "raise" && !skipped) {
+      // Not skipped (`#acceptRecord` held a skip to its if): the step fails
+      // with the task's error, as the workflow's own, never tried again.
+      throw toStepError({
+        name: "Error",
+        message:
+          task.error.title ??
+          workflowResourceErrors.create("workflow.raised").message,
+        code: raisedCode,
+      });
+    }
+    if (run.step.kind === "catch") {
+      // What its catch took, as mapped now, journaled beside its record.
+      const { failure } = attempt;
+      return attempt.caught === true && failure?.catchable === true
+        ? { record: value, error: failure.error }
+        : { record: value };
     }
     if (!run.entering) {
       return value;
@@ -1812,26 +2096,46 @@ export class ResourceRunHost
     }
   }
 
+  /**
+   * `work`, a sleep, as a catch sees it: once it has slept, no failure is
+   * left for a catch; one that failed (a test run's wait past its limit, a
+   * refusal) is no failure of a step's work, which no catch takes.
+   */
+  async #sleeping(work: () => Promise<null>): Promise<null> {
+    try {
+      await work();
+    } catch (error) {
+      this.#failure = notCaught();
+      throw error;
+    }
+    this.#failure = undefined;
+    return null;
+  }
+
   /** Runs a `wait` task: a durable sleep of exactly its sealed length. */
   async sleep(name: unknown, duration: unknown): Promise<Settled<null>> {
-    return await settle(async () => {
-      const sleeping = this.#stepOf(name, true);
-      const { task } = sleeping;
-      if (
-        task?.kind !== "wait" ||
-        task.milliseconds === undefined ||
-        duration !== task.milliseconds
-      ) {
-        return this.#refuse(
-          `Task "${task?.id ?? ""}" waits as its build says.`
-        );
-      }
-      // Its length alone, as sealed: the same on every replay.
-      this.#requireShortSleep(task.milliseconds);
-      await this.#requirePerson();
-      await this.#step.sleep(sleeping.name, task.milliseconds);
-      return null;
-    });
+    return await settle(
+      async () =>
+        await this.#sleeping(async () => {
+          const sleeping = this.#stepOf(name, true);
+          this.#requireNoFailure(sleeping);
+          const { task } = sleeping;
+          if (
+            task?.kind !== "wait" ||
+            task.milliseconds === undefined ||
+            duration !== task.milliseconds
+          ) {
+            return this.#refuse(
+              `Task "${task?.id ?? ""}" waits as its build says.`
+            );
+          }
+          // Its length alone, as sealed: the same on every replay.
+          this.#requireShortSleep(task.milliseconds);
+          await this.#requirePerson();
+          await this.#step.sleep(sleeping.name, task.milliseconds);
+          return null;
+        })
+    );
   }
 
   /**
@@ -1840,27 +2144,33 @@ export class ResourceRunHost
    * exactly the deadline it recorded, at once when that has passed.
    */
   async sleepUntil(name: unknown, timestamp: unknown): Promise<Settled<null>> {
-    return await settle(async () => {
-      const sleeping = this.#stepOf(name, true);
-      const { task } = sleeping;
-      const deadline =
-        task === undefined ? undefined : this.#deadlines.get(sleeping.place);
-      if (
-        task === undefined ||
-        deadlineOf(task) === undefined ||
-        deadline === undefined ||
-        timestamp !== deadline
-      ) {
-        return this.#refuse(
-          `Task "${task?.id ?? ""}" sleeps until the deadline it recorded.`
-        );
-      }
-      // From the run's start, both recorded: the same on every replay.
-      this.#requireShortSleep(deadline - this.#run.createdAt);
-      await this.#requirePerson();
-      await this.#step.sleepUntil(sleeping.name, deadline);
-      return null;
-    });
+    return await settle(
+      async () =>
+        await this.#sleeping(async () => {
+          const sleeping = this.#stepOf(name, true);
+          this.#requireNoFailure(sleeping);
+          const { task } = sleeping;
+          const deadline =
+            task === undefined
+              ? undefined
+              : this.#deadlines.get(sleeping.place);
+          if (
+            task === undefined ||
+            deadlineOf(task) === undefined ||
+            deadline === undefined ||
+            timestamp !== deadline
+          ) {
+            return this.#refuse(
+              `Task "${task?.id ?? ""}" sleeps until the deadline it recorded.`
+            );
+          }
+          // From the run's start, both recorded: the same on every replay.
+          this.#requireShortSleep(deadline - this.#run.createdAt);
+          await this.#requirePerson();
+          await this.#step.sleepUntil(sleeping.name, deadline);
+          return null;
+        })
+    );
   }
 
   /**
@@ -1960,7 +2270,10 @@ export class ResourceRunHost
             stage: expression.stage,
             scope: expression.taskId === null ? [] : [expression.taskId],
             pointer: expression.pointer,
-            loopVariables: expression.loopVariables,
+            loopVariables: [
+              ...expression.loopVariables,
+              ...(expression.caught ?? []).map(({ variable }) => variable),
+            ],
           },
           true
         )
@@ -1974,22 +2287,15 @@ export class ResourceRunHost
   }
 
   /**
-   * What `expression` evaluates on, at its stage: `.` and the variables
-   * its stage has, from the host's record, the step's capture and, for
-   * what only the task's own work makes, `frame`.
-   */
-  /**
    * The loop variables `expression` was compiled with, from what its
-   * step's scope resolved (`StepOf.loop`): never the isolate's. Refused
+   * step's scope resolved (`StepOf.loop`) and, for a catch's variable,
+   * the error that catch took (`#caughtOf`): never the isolate's. Refused
    * when its step runs in no such loop.
    */
   #loopScopeOf(
     attempt: StepAttempt,
     expression: SealedExpression
   ): { loop?: Record<string, Json> } {
-    if (expression.loopVariables.length === 0) {
-      return {};
-    }
     const values = attempt.step.loop;
     const loop: Record<string, Json> = {};
     for (const name of expression.loopVariables) {
@@ -2000,9 +2306,49 @@ export class ResourceRunHost
       }
       loop[name] = values[name] ?? null;
     }
-    return { loop };
+    Object.assign(loop, this.#caughtOf(attempt, expression));
+    return Object.keys(loop).length === 0 ? {} : { loop };
   }
 
+  /**
+   * The caught errors `expression` reads, by their variables: the error
+   * each catch took, as its catch step journaled it, in the item of each
+   * loop around the expression's step; in a catch step of its own, the
+   * failure it decides on. Refused when that catch took none, as only a
+   * forged module asks then.
+   */
+  #caughtOf(
+    attempt: StepAttempt,
+    expression: SealedExpression
+  ): Record<string, Json> {
+    const loop: Record<string, Json> = {};
+    for (const { variable, taskId } of expression.caught ?? []) {
+      const own =
+        attempt.step.kind === "catch" && attempt.step.task?.id === taskId;
+      const tried = this.#run.build.tasks.find(({ id }) => id === taskId);
+      const pending =
+        attempt.failure?.catchable === true ? attempt.failure.error : undefined;
+      const error = own
+        ? pending
+        : this.#caughtErrors.get(
+            placeOf(
+              taskId,
+              attempt.step.scope.slice(0, tried?.scope.length ?? 0)
+            )
+          );
+      if (error === undefined) {
+        return this.#refuse(`Task "${taskId}"'s catch took no failure.`);
+      }
+      loop[variable] = { ...error };
+    }
+    return loop;
+  }
+
+  /**
+   * What `expression` evaluates on, at its stage: `.` and the variables
+   * its stage has, from the host's record, the step's capture and, for
+   * what only the task's own work makes, `frame`.
+   */
   #scopeOf(
     attempt: StepAttempt,
     expression: SealedExpression,
@@ -2441,6 +2787,18 @@ export class ResourceRunHost
       if (attempt.call !== "none") {
         return this.#refuse(`Task "${task.id}" makes its call once.`);
       }
+      // No call goes out of a run already refused, nor of an attempt the
+      // host already failed something of: generated code throws then, so
+      // a module that calls on is forged, and its call would go out under
+      // a failure a catch could take.
+      if (this.#tampered !== undefined) {
+        throw this.#tampered;
+      }
+      if (attempt.hostError !== undefined) {
+        return this.#refuse(
+          `Task "${task.id}" makes its call only before anything of its step failed.`
+        );
+      }
       attempt.call = "pending";
       this.#requireOpen(attempt, task, frame, "makes its call");
       try {
@@ -2450,6 +2808,8 @@ export class ResourceRunHost
         return answer;
       } catch (error) {
         attempt.call = "failed";
+        // The call's own failure: what the step fails with (`#outcomeOf`).
+        attempt.callError = forIsolate(error);
         // Only a connector call's hold makes the step wait and run again:
         // connect keeps its answer under the step's key, so a rerun sends
         // nothing new. An App export can answer `connect.held` too (a call
@@ -2775,6 +3135,9 @@ export class ResourceRunHost
       if (attempt.over) {
         throw executionErrors.create("execution.stale_attempt");
       }
+      if (this.#tampered !== undefined) {
+        throw this.#tampered;
+      }
       const { step } = attempt;
       const { task } = step;
       const deadline =
@@ -2849,6 +3212,71 @@ export class ResourceRunHost
       attempt.items = items.data;
       return items.data;
     });
+  }
+
+  /**
+   * `ResourceAttemptHost.catches`, for `attempt`, a `try` task's catch
+   * step: whether its catch takes the failure that left the try's list,
+   * decided once, by the host alone, from the failure it recorded as the
+   * step began (`StepRun.failure`): one a catch may take
+   * (resource-errors.ts) of a task in the try's own list, with every
+   * property of the catch's `errors.with`, its `when` holding and its
+   * `exceptWhen` not, each evaluated here with the error bound to the
+   * catch's variable. The step records the answer.
+   */
+  async #catches(attempt: StepAttempt): Promise<Settled<boolean>> {
+    return await settle(async () => {
+      this.#requireCurrent(attempt);
+      const { step } = attempt;
+      const { task } = step;
+      if (step.kind !== "catch" || task?.kind !== "try") {
+        return this.#refuse(
+          `Step of "${task?.id ?? "the workflow"}" has no catch to decide.`
+        );
+      }
+      // Taken before anything is awaited: two asked at once decide once.
+      if (attempt.catchAsked) {
+        return this.#refuse(`Task "${task.id}" decides its catch once.`);
+      }
+      attempt.catchAsked = true;
+      const takes = await this.#takes(attempt, task);
+      this.#requireCurrent(attempt);
+      attempt.caught = takes;
+      return takes;
+    });
+  }
+
+  /** `#catches`'s decision, for try task `task`. */
+  async #takes(
+    attempt: StepAttempt,
+    task: Extract<SealedTask, { kind: "try" }>
+  ): Promise<boolean> {
+    const { failure } = attempt;
+    if (
+      failure?.catchable !== true ||
+      !failure.error.instance.startsWith(`${task.pointer}/try/`) ||
+      !matchesFilter(failure.error, task.catch.errors)
+    ) {
+      return false;
+    }
+    const frame = { input: attempt.data.input, output: null };
+    const holds = async (slot: number): Promise<boolean> => {
+      const expression = this.#expressionOf(attempt, slot, true);
+      return (
+        (await this.#evaluated(
+          attempt,
+          expression,
+          frame,
+          JSON.stringify(frame).length
+        )) === true
+      );
+    };
+    if (task.catch.when !== undefined && !(await holds(task.catch.when))) {
+      return false;
+    }
+    return task.catch.exceptWhen === undefined
+      ? true
+      : !(await holds(task.catch.exceptWhen));
   }
 
   /** The descriptor text of `task`'s `which` schema, if it has one. */
@@ -3019,6 +3447,65 @@ export class ResourceRunHost
     return false;
   }
 
+  /**
+   * Accepts `record` of `attempt`'s catch step: the try's own input,
+   * unchanged, and whether its catch took the failure, exactly as the host
+   * decided it in this attempt. Whether it was a catch step's; any other
+   * step records no catch.
+   */
+  #acceptedCatch(
+    attempt: StepAttempt,
+    task: SealedTask,
+    record: z.infer<typeof recordSchema>
+  ): boolean {
+    const decided = "caught" in record ? record.caught : undefined;
+    if (attempt.step.kind !== "catch") {
+      if (decided !== undefined) {
+        this.#refuse(`Only a catch step of "${task.id}" records a catch.`);
+      }
+      return false;
+    }
+    const exact =
+      !("skipped" in record) &&
+      attempt.caught !== undefined &&
+      decided === attempt.caught &&
+      record.context === undefined &&
+      record.branch === undefined &&
+      record.until === undefined &&
+      canonicalJson(record.output) === canonicalJson(attempt.data.input);
+    if (!exact) {
+      this.#refuse(
+        `Task "${task.id}"'s catch step records what the host decided.`
+      );
+    }
+    return true;
+  }
+
+  /**
+   * A task with an `if` records an outcome only once the host evaluated it
+   * in this step, and is skipped exactly when it answered false: leaving
+   * it out never takes the task past it.
+   */
+  #requireIfAnswered(
+    attempt: StepAttempt,
+    task: SealedTask,
+    skipped: boolean
+  ): void {
+    if (
+      this.#hasIf(attempt.step, task.id) &&
+      attempt.condition === "unevaluated"
+    ) {
+      this.#refuse(
+        `Task "${task.id}" records an outcome only once its if was evaluated.`
+      );
+    }
+    if (skipped !== (attempt.condition === "failed")) {
+      this.#refuse(
+        `Task "${task.id}" is skipped exactly when its if answered false.`
+      );
+    }
+  }
+
   #acceptRecord(attempt: StepAttempt, value: Json): void {
     const { step, data } = attempt;
     const { task } = step;
@@ -3036,18 +3523,10 @@ export class ResourceRunHost
     }
     const record = parsed.data;
     const skipped = "skipped" in record;
-    // A task with an `if` records an outcome only once the host evaluated
-    // it in this step: leaving it out never takes the task past it.
-    if (this.#hasIf(step, task.id) && attempt.condition === "unevaluated") {
-      return this.#refuse(
-        `Task "${task.id}" records an outcome only once its if was evaluated.`
-      );
+    if (this.#acceptedCatch(attempt, task, record)) {
+      return;
     }
-    if (skipped !== (attempt.condition === "failed")) {
-      return this.#refuse(
-        `Task "${task.id}" is skipped exactly when its if answered false.`
-      );
-    }
+    this.#requireIfAnswered(attempt, task, skipped);
     if (skipped) {
       return;
     }

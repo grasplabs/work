@@ -11,6 +11,7 @@ import type {
   WorkflowResourceRun,
   WorkflowRunStatus,
 } from "@grasp-os/shared/workflow-resources";
+import { workflowErrors } from "@grasp-os/shared/workflows";
 import type { InstanceStatus } from "@grasp-os/workerflow/contracts";
 import { namedError } from "@grasp-os/workerflow/errors";
 import { writeJson } from "@grasp-os/workflow-expressions/bounded-json";
@@ -51,7 +52,13 @@ import { loadRunIsolate } from "./code.ts";
 import type { Settled, StepError } from "./code.ts";
 import { runEngine } from "./engine.ts";
 import type { PinnedResourceRun } from "./engine.ts";
-import { countedStep, fromIsolate, settle, stepLimitOf } from "./host.ts";
+import {
+  countedStep,
+  forIsolate,
+  fromIsolate,
+  settle,
+  stepLimitOf,
+} from "./host.ts";
 import type { RunStep } from "./host.ts";
 import { admitAttempt, quotaPolicy } from "./quotas.ts";
 import type { ResourceAttemptHost } from "./resource-attempt-host.ts";
@@ -881,7 +888,12 @@ export const runLoadedResource = async (
   }
   // The refusal that caught the isolate asking for what generated code
   // never does: the run fails with it, whatever the code made of it.
-  const failed = tampered ?? (result.ok ? undefined : result.error);
+  // Ended well past a failure no catch took: its code went on past it.
+  const untaken =
+    result.ok && host.failureUntaken
+      ? forIsolate(workflowErrors.create("workflow.invalid"))
+      : undefined;
+  const failed = tampered ?? untaken ?? (result.ok ? undefined : result.error);
   if (failed !== undefined) {
     throw namedError(failed.name, failed.message, failed.code);
   }

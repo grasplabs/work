@@ -447,14 +447,10 @@ describe("runs of JSON workflows", () => {
     const workflow = await published(by, (name) =>
       definitionOf(name, [
         {
-          stop: {
-            raise: {
-              error: {
-                type: "urn:grasp:error:test.stopped",
-                status: 400,
-                title: "Stopped.",
-              },
-            },
+          // A catch that retries isn't lowered (yet): no build.
+          guard: {
+            try: [{ attempt: { set: { status: "trying" } } }],
+            catch: { retry: { limit: { attempt: { count: 2 } } } },
           },
         },
       ])

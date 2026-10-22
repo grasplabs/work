@@ -399,7 +399,7 @@ const historyRunOf = async (
 };
 
 /** A step of the generated code's own: its kind, then its task's ID. */
-const taskStep = /^(?:task|enter|leave):(?<id>[a-z0-9][a-z0-9-]{0,63})$/u;
+const taskStep = /^(?:task|enter|leave|catch):(?<id>[a-z0-9][a-z0-9-]{0,63})$/u;
 
 /** A history entry's error, as a screen reads one: never the workflow's text. */
 const errorRow = (error: { code: string; message: string }): Json => ({

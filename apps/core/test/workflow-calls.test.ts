@@ -2178,6 +2178,7 @@ const activationOf = async (
     attempts = {},
     bindings,
     failed,
+    parks = false,
   }: {
     /** The run's row: a real start's, which its calls are checked against. */
     runId: string;
@@ -2189,6 +2190,11 @@ const activationOf = async (
     bindings: ReadonlyMap<string, FrozenCatalogBinding>;
     /** What each attempt failed with, as the engine heard it: its name and code. */
     failed: unknown[];
+    /**
+     * Whether a step whose attempt fails as it may be tried again is parked,
+     * as the engine parks it: its call never settles, the activation over.
+     */
+    parks?: boolean;
   }
 ): Promise<ResourceRunHost> => {
   const manifest = await env.DB.prepare(
@@ -2211,6 +2217,12 @@ const activationOf = async (
           name: error instanceof Error ? error.name : "unknown",
           code: code ?? null,
         });
+        if (parks && error instanceof Error && error.name === "TimeoutError") {
+          // oxlint-disable-next-line promise/avoid-new -- a parked step's call never settles
+          return await new Promise<never>(() => {
+            // Never settles.
+          });
+        }
         throw error;
       }
     },
@@ -2302,16 +2314,26 @@ describe("a JSON workflow's model call, once its isolate was stopped past its CP
       marks,
       bindings,
       failed,
+      parks: true,
     });
-    // The isolate is stopped past its CPU time in an earlier step's call.
-    await first.do("task:first", adaData, async () => {
+    // The isolate is stopped past its CPU time in an earlier step's call,
+    // which the engine parks; a step still out after it (one of a branch)
+    // asks next.
+    const parkedOnce = async (count: number) => {
+      await vi.waitFor(() => {
+        expect(failed).toHaveLength(count);
+      });
+    };
+    void first.do("task:first", adaData, async () => {
       ran.push("first");
       return await Promise.reject(cpuLimitKill());
     });
-    await first.do("task:greet", adaData, async (attempt) => {
+    await parkedOnce(1);
+    void first.do("task:greet", adaData, async (attempt) => {
       ran.push("greet, first activation");
       return await called(attempt);
     });
+    await parkedOnce(2);
     const parked = [...failed];
     // The next activation's attempt, the step's retry: its module runs.
     const second = await activationOf(ada, workflow.id, {

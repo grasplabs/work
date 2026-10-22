@@ -22,9 +22,10 @@ import { detailsRemoved } from "./retention.ts";
 // the engine's own history (workerflow's `history`), never inferred from
 // the diagram, the run's status or its code. The generated code names each
 // durable step of task `<id>` `task:<id>`, `enter:<id>`, `leave:<id>` or
-// `item:<id>`, inside a loop with the item after `@` (@grasp-os/sdk
-// open-workflow), and only those names are read; any other
-// step adds nothing. Records are metadata: no value of the run's reaches
+// `item:<id>` or `catch:<id>`, inside a loop with the item after `@`
+// (@grasp-os/sdk open-workflow), and only those names are read; any other
+// step adds nothing. A failure a catch took still shows as its task's: it
+// happened. Records are metadata: no value of the run's reaches
 // the trace. For the workflow's builders, who read its definitions.
 
 /** How many history records one trace reads at most. */
@@ -37,7 +38,7 @@ const pageRecords = 500;
 // (`task:<id>@<for>.<index>/…`), and a loop's check of its `while` is an
 // `item:` step: each item's steps count as their task's.
 const stepName =
-  /^(?:task|enter|leave|item):(?<task>[a-z][a-z0-9-]{0,63})(?:@[a-z0-9./-]{1,600})?$/u;
+  /^(?:task|enter|leave|item|catch):(?<task>[a-z][a-z0-9-]{0,63})(?:@[a-z0-9./-]{1,600})?$/u;
 
 /** The more telling of two states of one task's steps. */
 const rank: Readonly<Record<TraceState, number>> = {
