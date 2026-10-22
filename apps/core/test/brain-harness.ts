@@ -107,7 +107,7 @@ import { newTeam, readCollection } from "./knowledge.ts";
 import { callAuth, openRpc, signedInApi } from "./sign-in.ts";
 
 /** Bumped with any change to how the harness runs or measures a trial. */
-export const brainHarnessVersion = "7";
+export const brainHarnessVersion = "8";
 
 export const brainArms = ["agent", "fullContext", "fullText"] as const;
 export type BrainArm = (typeof brainArms)[number];
@@ -160,6 +160,7 @@ export const answerProtocol = [
   "Answer from what you can read in this chat: your memory, this conversation and Knowledge.",
   "Cite each source you used in square brackets: [path#heading], [memory] or [session].",
   "Start your reply with a line ANSWER: followed by only the answer's values (names, numbers, dates, codes), in the order the question asks for them, separated by semicolons; explain after it.",
+  "Give each value on its own, without words around it: for a shift from 05:15 to 13:15, ANSWER: 05:15; 13:15.",
   "If those sources don't answer the question, start your reply with ABSTAIN: instead and say why.",
   "Don't save, change or send anything.",
 ].join("\n");
@@ -1986,7 +1987,7 @@ const runDurabilityCase = async (
   const ledgerAfter = await ledgerRequests();
   const notes = notesOf(company);
   const scoreOf = (observed: TrialObservation) =>
-    scoreTrial(task.expect, { ...observed, notes });
+    scoreTrial(task.expect, { ...observed, notes }, task.language);
   return {
     kind,
     arm,
@@ -2443,7 +2444,7 @@ export const runBrainBaseline = async (
     const task = byId.get(observed.taskId);
     return task === undefined
       ? []
-      : [scoreTrial(task.expect, { ...observed, notes })];
+      : [scoreTrial(task.expect, { ...observed, notes }, task.language)];
   });
   const scoresOf = (arm: string) => scores.filter((score) => score.arm === arm);
   const armScores = scores.filter(({ arm }) =>
