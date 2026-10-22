@@ -52,6 +52,7 @@ import {
   storedEventSchema,
 } from "./event-envelopes.ts";
 import { takesExactly } from "./exact-values.ts";
+import { fixtureCall } from "./fixture-calls.ts";
 import type { FixtureDecisionRun } from "./fixture-decisions.ts";
 import {
   fixtureDecisionOutcome,
@@ -304,6 +305,18 @@ export class Run extends WorkerEntrypoint {
 }
 `;
 
+/**
+ * The named calls a run an App's test started makes (`fixture`): its own
+ * calculations, its decisions (fixture-decisions.ts), and the model and
+ * store calls its test serves (fixture-calls.ts). Every other is refused.
+ */
+const fixtureCalls: ReadonlySet<string> = new Set([
+  "grasp.compute",
+  "grasp.decision",
+  "grasp.model",
+  "grasp.operation",
+]);
+
 /** The run a host serves, as the dispatcher loaded it. */
 export interface HostedResourceRun {
   runId: string;
@@ -418,10 +431,12 @@ export interface ResourceHostHooks {
   /**
    * A run an App's test started (fixture-runs.ts): it acts for a fixture's
    * principal, no member of the organization, and reaches nothing outside
-   * its own code and sealed modules. Every call that would (an App's, a
-   * store's, a model's, a connection's, Knowledge's, a template's, an
-   * action's) is refused (`resource.unavailable`) before it is built.
-   * Its decisions are its test's own (fixture-decisions.ts).
+   * its own code, its sealed modules and its test. Its decisions are its
+   * test's own (fixture-decisions.ts); its model calls are answered by its
+   * test's fixture and its store calls run on its test's own store
+   * (fixture-calls.ts). Every other call that would leave it (a
+   * connection's, Knowledge's, a template's, a file's, an action's) is
+   * refused (`resource.unavailable`) before it is built.
    */
   fixture?: true;
 }
@@ -3141,13 +3156,12 @@ export class ResourceRunHost
     if (call.name === "grasp.sleepUntil") {
       return this.#refuse(`Task "${task.id}" makes no call.`);
     }
-    // A test's run reaches only its own sealed modules (`fixture`), and
-    // its decisions, which its test answers (fixture-decisions.ts).
-    if (
-      this.#hooks.fixture === true &&
-      call.name !== "grasp.compute" &&
-      call.name !== "grasp.decision"
-    ) {
+    // A test's run reaches only its own sealed modules (`fixture`), its
+    // decisions, which its test answers (fixture-decisions.ts), and its
+    // model and store calls, which its test's fixture serves
+    // (fixture-calls.ts): never a connection, Knowledge, a template, a
+    // file or an action.
+    if (this.#hooks.fixture === true && !fixtureCalls.has(call.name)) {
       throw operationErrors.create("resource.unavailable");
     }
     if (call.name === "grasp.model") {
@@ -3190,13 +3204,19 @@ export class ResourceRunHost
       return await this.#emitted(attempt, task, call, passed);
     }
     const built = await this.#builtCall(attempt, call, passed);
-    return await makeCall(this.#env, this.#run.calling, task.id, built, {
+    const effect = {
       key: stepIdempotencyKey(this.#run.runId, attempt.step.name),
       deadline: attempt.deadline,
       requireHolds: () => {
         this.#requireCurrent(attempt);
       },
-    });
+    };
+    // Built and counted as a real call is, then served by its test: a
+    // model's answer from its fixture, a store's on its test's own store.
+    if (this.#hooks.fixture === true) {
+      return await fixtureCall(this.#env, this.#fixtureRun(), built, effect);
+    }
+    return await makeCall(this.#env, this.#run.calling, task.id, built, effect);
   }
 
   /**

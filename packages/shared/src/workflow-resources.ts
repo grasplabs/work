@@ -216,6 +216,8 @@ export const workflowResourceErrors = defineErrorFamily({
     "A task's action made as many calls as one attempt of it may, so the run failed.",
   "workflow.candidate_unfixtured":
     "This test run made a call its start gave no answer for. A test run never calls anything: give each binding it calls an answer, then start it again.",
+  "workflow.test_unfixtured":
+    "This test's run made a model or store call its fixture gives nothing for. A test's run never calls a real model or store: in the fixture's workflows, give each model binding it calls an answer, and each operation binding an operation of the App.",
   "workflow.candidate_unexecutable":
     "This checkpoint uses something a run can't do yet, so it can't be test-run.",
   "workflow.candidate_unavailable":

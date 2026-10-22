@@ -1102,6 +1102,22 @@ export const appTestRuns = sqliteTable(
      * (workflows/fixture-decisions.ts).
      */
     deciders: text().notNull().default("{}"),
+    /**
+     * What each model binding answers in its test, by the binding's alias,
+     * as JSON: no model is ever asked (workflows/fixture-calls.ts).
+     */
+    models: text().notNull().default("{}"),
+    /**
+     * Which public operation of the release under test serves each
+     * operation binding in its test, by the binding's alias, as JSON
+     * (workflows/fixture-calls.ts).
+     */
+    operations: text().notNull().default("{}"),
+    /**
+     * Its test's own fixture store (`app_test_fixtures`), the only store
+     * its operation calls run on; null for an App with no store.
+     */
+    storeId: text("store_id"),
   },
   (table) => [index("app_test_runs_deadline").on(table.deadline)]
 );

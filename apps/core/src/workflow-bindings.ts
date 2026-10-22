@@ -318,6 +318,26 @@ const requireConnectorServes = async (
 };
 
 /**
+ * Whether store operation `operation` takes and returns exactly what
+ * operation contract `contract` says: its arguments' and return's exact
+ * JSON Schemas the contract descriptors', nothing looser. What an
+ * approval requires, and a test's run of the operation too
+ * (workflows/fixture-calls.ts).
+ */
+export const operationServesContract = (
+  operation: Pick<ServedStoreOperation["operation"], "args" | "returns">,
+  contract: { readonly input?: string; readonly output?: string }
+): boolean =>
+  sameShape(
+    jsonSchemaOf(operation.args, { exact: true }),
+    schemaOfDescriptor(contract.input)
+  ) &&
+  sameShape(
+    jsonSchemaOf(operation.returns, { exact: true }),
+    schemaOfDescriptor(contract.output)
+  );
+
+/**
  * The store operation `target` names, if workflow `id` may call it now
  * and it takes and returns exactly what the catalog contract `key` says:
  * the workflow's own store permission lists it, and the store's owning
@@ -353,14 +373,8 @@ const requireStoreOperationServes = async (
   const contracts = await resolveCatalogKeys(env, [key]);
   const contract = contracts.get(key)?.contract;
   if (
-    !sameShape(
-      jsonSchemaOf(served.operation.args, { exact: true }),
-      schemaOfDescriptor(contract?.input)
-    ) ||
-    !sameShape(
-      jsonSchemaOf(served.operation.returns, { exact: true }),
-      schemaOfDescriptor(contract?.output)
-    )
+    contract === undefined ||
+    !operationServesContract(served.operation, contract)
   ) {
     throw invalid(
       "target.operation: Its arguments and return aren't the operation contract's."

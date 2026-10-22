@@ -123,9 +123,14 @@ export interface TestPrincipal {
    * Starts a run of one of the workflows the App binds (`workflows` from
    * `#grasp`), as a screen's `useWorkflow` starts one: the same version,
    * run on the real engine, with nothing of the organization's around it.
-   * Calls that leave its own code (an App's, a store's, a model's, a
-   * connection's) are refused (`resource.unavailable`) for now. The run is
-   * removed as the test ends.
+   * A model call answers what the fixture gives its binding
+   * (`workflows.<alias>.models.<binding>`): no model is ever asked. A store
+   * call runs the App's public query or mutation the fixture names for its
+   * binding (`workflows.<alias>.operations.<binding>`) on this test's own
+   * store, which the test's principals read too. A binding the fixture
+   * gives nothing fails the run (`workflow.test_unfixtured`). Other calls
+   * that leave its own code (a connection's, Knowledge's, an action's) are
+   * refused (`resource.unavailable`). The run is removed as the test ends.
    */
   start: <Reference extends AnyWorkflowReference>(
     reference: Reference,
