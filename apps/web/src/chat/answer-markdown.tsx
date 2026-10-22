@@ -191,7 +191,9 @@ const AnswerTable = ({
 
 /**
  * A link out of Grasp, which asks first: an answer may repeat whatever
- * the agent read, a link to anywhere among it. Opened in a tab of its own
+ * the agent read, a link to anywhere among it. It is a button until the
+ * person says yes, with no address a middle click or the browser's own
+ * "open link" could follow past the question. Opened in a tab of its own
  * without this page as its opener. An address the transform emptied was
  * unsafe: the text stays, as text.
  */
@@ -208,18 +210,15 @@ const LeavingLink = ({
   }
   return (
     <>
-      <a
-        className="underline"
-        href={href}
-        onClick={(event) => {
-          event.preventDefault();
+      <button
+        className="cursor-pointer underline"
+        onClick={() => {
           setAsking(true);
         }}
-        rel="noopener noreferrer"
-        target="_blank"
+        type="button"
       >
         {children}
-      </a>
+      </button>
       <AlertDialog onOpenChange={setAsking} open={asking}>
         <AlertDialogContent>
           <AlertDialogHeader>

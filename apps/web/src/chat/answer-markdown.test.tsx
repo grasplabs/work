@@ -169,17 +169,33 @@ describe(AnswerMarkdown, () => {
     ]);
   });
 
+  it("downloads a would-be formula as text, and a negative number as a number", async () => {
+    await shown(
+      '| Name | Days |\n| --- | --- |\n| =HYPERLINK("https://example.com") | -5 |\n| @SUM(A1) | +2 |'
+    );
+    await press(button("Download table"));
+    await press(button("Download table as CSV"));
+    await settled();
+    expect(downloaded).toStrictEqual([
+      {
+        name: "table.csv",
+        text: 'Name,Days\r\n"\'=HYPERLINK(""https://example.com"")",-5\r\n\'@SUM(A1),+2',
+      },
+    ]);
+  });
+
   it("opens a link out of Grasp only once the person says so", async () => {
     await shown("See [the policy](https://example.com/leave).");
-    const link = document.querySelector<HTMLAnchorElement>("a");
-    if (link === null) {
-      throw new Error("No link");
-    }
+    // No address on the page to follow past the question: a middle click,
+    // or the browser's own "open link", has none.
+    expect(document.querySelector("a[href]")).toBeNull();
+    const link = button("the policy");
     await press(link);
     expect(opened).toStrictEqual([]);
     const dialog = document.querySelector('[role="alertdialog"]');
-    expect(dialog?.textContent).toContain("Open external link?");
-    expect(dialog?.textContent).toContain("https://example.com/leave");
+    expect(dialog?.textContent).toMatch(
+      /Open external link\?.*https:\/\/example\.com\/leave/u
+    );
 
     await press(button("Cancel"));
     expect(opened).toStrictEqual([]);
