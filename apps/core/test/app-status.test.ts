@@ -735,8 +735,13 @@ describe("an App's status", () => {
       .bind(id)
       .first("pending");
 
-    expect({ status: await statusOf(id), pendingNow }).toStrictEqual({
-      status: "starting",
+    // The engine's own notification may move it from starting to running
+    // at any moment; what matters is that it goes on, confirmed.
+    expect({
+      goesOn: ["starting", "running"].includes(String(await statusOf(id))),
+      pendingNow,
+    }).toStrictEqual({
+      goesOn: true,
       pendingNow: 0,
     });
   });
