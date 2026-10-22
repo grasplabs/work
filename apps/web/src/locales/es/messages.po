@@ -2454,6 +2454,14 @@ msgstr "Respondida: {question}"
 msgid "Answers"
 msgstr "Respuestas"
 
+#: src/chat/composer-note.tsx
+msgid "Answers come only from what {organizationName} shared, with sources."
+msgstr "Las respuestas salen solo de lo que {organizationName} ha compartido, con fuentes."
+
+#: src/chat/composer-note.tsx
+msgid "Answers come only from what your organization shared, with sources."
+msgstr "Las respuestas salen solo de lo que tu organización ha compartido, con fuentes."
+
 #: src/landscape/filter-menu.tsx
 msgid "Any AI type"
 msgstr "Cualquier tipo de IA"
@@ -4450,10 +4458,6 @@ msgstr "Denegó paquetes"
 msgid "Depends on"
 msgstr "Depende de"
 
-#: src/routes/_shell.index.tsx
-msgid "Describe what you want. The agent answers from what it can read, and holds every change to an outside system until you confirm it."
-msgstr "Describe lo que quieres. El agente responde con lo que puede leer y retiene cada cambio en un sistema externo hasta que lo confirmes."
-
 #: src/landscape/landscape-audit.ts
 #: src/landscape/landscape.ts
 msgid "Description"
@@ -5701,10 +5705,6 @@ msgstr "Grasp no ha encontrado en esta política ningún requisito que una regla
 #: src/onboarding/staff-words.ts
 msgid "Grasp gave its go"
 msgstr "Grasp dio su visto bueno"
-
-#: src/routes/_shell.index.tsx
-msgid "Grasp holds every change to an outside system until you confirm it."
-msgstr "Grasp retiene cada cambio en un sistema externo hasta que lo confirmes."
 
 #: src/routes/_shell.settings.profile.tsx
 msgid "Grasp in your language. Numbers, dates and amounts follow it too."
