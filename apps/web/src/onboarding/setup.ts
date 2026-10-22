@@ -1,8 +1,13 @@
+import type { CatalogSource, OAuthProvider } from "@grasp-os/shared/connect";
 import type {
   OnboardingProgress,
   Plan,
   Roster,
 } from "@grasp-os/shared/onboarding";
+import type {
+  DocumentSourceId,
+  SetupChoices,
+} from "@grasp-os/shared/onboarding-choices";
 import type { KnownPart } from "@grasp-os/shared/onboarding-gate";
 
 import type { ShapeKey } from "../brain/dot-shapes.ts";
@@ -38,15 +43,66 @@ export const isStep = (value: unknown): value is SetupStep =>
 
 export const stepIndex = (step: SetupStep): number => steps.indexOf(step);
 
+/** A place where a company keeps its documents, and the integration Grasp connects it through. */
+export interface DocumentSource {
+  id: DocumentSourceId;
+  name: string;
+  /** A suite's own places come with its sign-in; the others connect on their own. */
+  suite: OAuthProvider | null;
+  integration: { source: CatalogSource; id: string };
+}
+
 /** Where a company keeps its documents, as the onboarding names them. */
-export const documentSources = [
-  "SharePoint",
-  "OneDrive",
-  "Microsoft Teams",
-  "Google Drive",
-  "Confluence",
-  "Notion",
-] as const;
+export const documentSources: readonly DocumentSource[] = [
+  {
+    id: "sharepoint",
+    name: "SharePoint",
+    suite: "microsoft",
+    integration: { source: "native", id: "microsoft" },
+  },
+  {
+    id: "onedrive",
+    name: "OneDrive",
+    suite: "microsoft",
+    integration: { source: "native", id: "microsoft" },
+  },
+  {
+    id: "teams",
+    name: "Microsoft Teams",
+    suite: "microsoft",
+    integration: { source: "native", id: "microsoft" },
+  },
+  {
+    id: "drive",
+    name: "Google Drive",
+    suite: "google",
+    integration: { source: "native", id: "google" },
+  },
+  {
+    id: "confluence",
+    name: "Confluence",
+    suite: null,
+    integration: { source: "composio", id: "confluence" },
+  },
+  {
+    id: "notion",
+    name: "Notion",
+    suite: null,
+    integration: { source: "composio", id: "notion" },
+  },
+];
+
+/** The places in the order to offer them: those of the company's sign-in first, the rest as they are. */
+export const sourcesFor = (
+  signIn: readonly OAuthProvider[]
+): DocumentSource[] => [
+  ...documentSources.filter(
+    ({ suite }) => suite !== null && signIn.includes(suite)
+  ),
+  ...documentSources.filter(
+    ({ suite }) => suite === null || !signIn.includes(suite)
+  ),
+];
 
 /** How long the interviews run unless planned otherwise, in days. */
 export const listenDays = 14;
@@ -138,29 +194,33 @@ export interface SetupFacts {
   listening: Listening;
   /** How much Grasp knows, in percent. */
   known: number;
+  /** What the admin chose about what Grasp may connect. */
+  choices: SetupChoices;
 }
 
 /**
  * The figure the brain takes on each step, and how full it is: the step's
  * context, in dots. Where who is who is known, the figure is the company
  * brain itself with a nerve to each team; where the documents live, a
- * nerve to each place. Nothing is connected there yet, so every place's
- * nerve stays in dashes, and what was known on another step (who is who)
- * stays on the brain as a nerve that runs on beyond the picture.
+ * nerve to each place, drawn once the place is noted and in dashes until
+ * then. What was known on another step (who is who, the tools, the HR
+ * platform) stays on the brain as a nerve that runs on beyond the picture.
  */
 export const brainScene = (
   step: SetupStep,
-  { roster, listening, known }: SetupFacts
+  { roster, listening, known, choices }: SetupFacts
 ): { shape: ShapeKey; fill: number; teams: number[] } => {
   const teams = teamsOf(roster);
-  const leads = (roster?.teams ?? []).some(
-    (team) => !team.off && team.lead !== null
-  );
+  const hr = choices.hr?.kind === "platform";
+  const leads =
+    hr || (roster?.teams ?? []).some((team) => !team.off && team.lead !== null);
+  const documents = choices.sources.length > 0 ? 1 : 0;
+  const tools = choices.pulse === "wanted" ? 1 : 0;
   const org = (withLeads: boolean): ShapeKey => ({
     kind: "org",
     teams: teams.map((team) => team.people),
     leads: withLeads,
-    beyond: 0,
+    beyond: documents + tools + (hr ? 1 : 0),
   });
   const shapes: Record<SetupStep, ShapeKey> = {
     welcome: { kind: "head" },
@@ -168,8 +228,8 @@ export const brainScene = (
     company: org(false),
     sources: {
       kind: "hub",
-      linked: documentSources.map(() => false),
-      beyond: roster === null ? 0 : 1,
+      linked: documentSources.map(({ id }) => choices.sources.includes(id)),
+      beyond: (roster === null ? 0 : 1) + tools,
     },
     documents: { kind: "sheets" },
     pulse: { kind: "laptop" },

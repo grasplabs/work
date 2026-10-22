@@ -39,6 +39,11 @@ export const onboarding = sqliteTable(
      * roster with their link; `null` before any link went out.
      */
     toldAt: text("told_at"),
+    /**
+     * What the admin chose about what Grasp may connect, as JSON
+     * (`setupChoicesSchema`), or `null` before anything.
+     */
+    choices: text(),
   },
   (table) => [check("onboarding_one_row", sql`${table.id} = 1`)]
 );
