@@ -551,6 +551,7 @@ const onboarding: DurableObjectState = {
     kickoff: exported(`${core}onboarding/kickoff.ts`),
     documents: exported(`${core}onboarding/documents.ts`),
     usage: exported(`${core}onboarding/store.ts`),
+    interview_texts: exported(`${core}onboarding/store.ts`),
     voice_use: transient(
       `${core}onboarding/store.ts`,
       "Today's seconds of voice, a limit's count: each count deletes the days before it."
