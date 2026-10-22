@@ -635,17 +635,14 @@ export const Route = createFileRoute("/_shell/integrations/")({
   // new one keeps the page as it is rather than reading it again. A change
   // reads it again (use-change.ts invalidates it).
   shouldReload: false,
-  loader: async ({ context: { core, identity } }) => {
-    const [integrations, requests] = await Promise.all([
-      loadIntegrations(core, identity, { held: false }),
-      // Read on its own: a list that fails or hangs leaves the catalog.
-      loadFromCore(
-        core,
-        async (session) => await session.connections.appRequests()
-      ),
-    ]);
-    return { ...integrations, requests };
-  },
+  loader: async ({ context: { core, identity } }) => ({
+    ...(await loadIntegrations(core, identity, { held: false })),
+    // Not awaited: the catalog never waits for the apps people asked for.
+    requests: loadFromCore(
+      core,
+      async (session) => await session.connections.appRequests()
+    ),
+  }),
   pendingComponent: PageLoading,
   component: Integrations,
 });

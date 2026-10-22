@@ -1,9 +1,10 @@
 import type { AppRequest } from "@grasp-os/shared/connect";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Trans, useLingui } from "@lingui/react/macro";
+import { Await } from "@tanstack/react-router";
 import { ClockIcon } from "lucide-react";
 
-import { formatDayMonth } from "../format.ts";
+import { formatDate, formatDayMonth } from "../format.ts";
 import type { Loaded } from "../load-from-core.tsx";
 import { AppLogo } from "./app-logo.tsx";
 
@@ -15,8 +16,12 @@ import { AppLogo } from "./app-logo.tsx";
 const RequestedRow = ({ request }: { request: AppRequest }) => {
   const { t } = useLingui();
   const asker = request.requestedBy.name;
-  // Without the year: requests are recent.
-  const date = formatDayMonth(request.requestedAt);
+  // Without the year while it is this year's, so recent ones stay short.
+  const sameYear =
+    new Date(request.requestedAt).getFullYear() === new Date().getFullYear();
+  const date = sameYear
+    ? formatDayMonth(request.requestedAt)
+    : formatDate(request.requestedAt);
   const askedBy =
     asker === null ? t`Asked by a former member` : t`Asked by ${asker}`;
   const about = request.why ?? askedBy;
@@ -35,13 +40,7 @@ const RequestedRow = ({ request }: { request: AppRequest }) => {
   );
 };
 
-/** The apps asked for, under the catalog; nothing when nobody asked. */
-export const RequestedApps = ({
-  requests,
-}: {
-  /** As the page read them; any failure shows nothing here. */
-  requests: Loaded<AppRequest[]>;
-}) => {
+const RequestedList = ({ requests }: { requests: Loaded<AppRequest[]> }) => {
   if (requests.state !== "ready" || requests.data.length === 0) {
     return null;
   }
@@ -61,3 +60,18 @@ export const RequestedApps = ({
     </section>
   );
 };
+
+/**
+ * The apps asked for, under the catalog; nothing while they load, when
+ * nobody asked, or when the read failed.
+ */
+export const RequestedApps = ({
+  requests,
+}: {
+  /** Read on its own, so the catalog never waits for it. */
+  requests: Promise<Loaded<AppRequest[]>>;
+}) => (
+  <Await fallback={null} promise={requests}>
+    {(loaded) => <RequestedList requests={loaded} />}
+  </Await>
+);
