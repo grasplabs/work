@@ -52,6 +52,12 @@ import {
   storedEventSchema,
 } from "./event-envelopes.ts";
 import { takesExactly } from "./exact-values.ts";
+import type { FixtureDecisionRun } from "./fixture-decisions.ts";
+import {
+  fixtureDecisionOutcome,
+  openFixtureDecision,
+  takeFixtureDecision,
+} from "./fixture-decisions.ts";
 import {
   busyMarker,
   loadRound,
@@ -222,7 +228,9 @@ import { heldWakeType } from "./wakes.ts";
 //   decision itself, never from the event that wakes the run; its call
 //   answers that outcome, its authority decided again, and its record,
 //   output.as and export.as are held to it as any call's are. A decision
-//   nobody answered fails the call: no outcome is made up for it.
+//   nobody answered fails the call: no outcome is made up for it. A run an
+//   App's test started waits the same way for a decision of its test's
+//   own, which only its fixture's principal answers (fixture-decisions.ts).
 
 /** The main module of a run of a sealed build (`openRunMain`). */
 export const openRunModule = "grasp-open-run.js";
@@ -413,6 +421,7 @@ export interface ResourceHostHooks {
    * its own code and sealed modules. Every call that would (an App's, a
    * store's, a model's, a connection's, Knowledge's, a template's, an
    * action's) is refused (`resource.unavailable`) before it is built.
+   * Its decisions are its test's own (fixture-decisions.ts).
    */
   fixture?: true;
 }
@@ -2150,24 +2159,33 @@ export class ResourceRunHost
     if (decision === undefined) {
       return this.#refuse(`Task "${task.id}" takes the decision it opened.`);
     }
-    // Its people asked once, the ask a step of its own: a replay asks
-    // nobody again.
-    await this.#step.do(
-      `${stepName}:decision:asked`,
-      {},
-      async () => await askDeciders(this.#env, this.#run.calling, decision)
-    );
+    // A test's run asks its fixture's principal, who answers through its
+    // test (fixture-decisions.ts): nobody is told of it.
+    const fixture = this.#hooks.fixture === true;
+    if (!fixture) {
+      // Its people asked once, the ask a step of its own: a replay asks
+      // nobody again.
+      await this.#step.do(
+        `${stepName}:decision:asked`,
+        {},
+        async () => await askDeciders(this.#env, this.#run.calling, decision)
+      );
+    }
     const run = decisionRunOf(this.#run.calling);
+    const outcomeOf = async (close: boolean): Promise<DecisionOutcome> =>
+      fixture
+        ? await fixtureDecisionOutcome(
+            this.#env,
+            this.#run.runId,
+            decision,
+            close
+          )
+        : await decisionOutcome(this.#env, run, decision, close);
     const look = async (name: string) =>
       lookSchema.parse(
         await this.#step.do(name, {}, async () => {
           const at = Date.now();
-          const { answered } = await decisionOutcome(
-            this.#env,
-            run,
-            decision,
-            false
-          );
+          const { answered } = await outcomeOf(false);
           return { at, answered };
         })
       );
@@ -2193,7 +2211,7 @@ export class ResourceRunHost
       await this.#step.do(
         `${stepName}:decision:outcome`,
         {},
-        async () => await decisionOutcome(this.#env, run, decision, true)
+        async () => await outcomeOf(true)
       )
     );
   }
@@ -3123,8 +3141,13 @@ export class ResourceRunHost
     if (call.name === "grasp.sleepUntil") {
       return this.#refuse(`Task "${task.id}" makes no call.`);
     }
-    // A test's run reaches only its own sealed modules (`fixture`).
-    if (this.#hooks.fixture === true && call.name !== "grasp.compute") {
+    // A test's run reaches only its own sealed modules (`fixture`), and
+    // its decisions, which its test answers (fixture-decisions.ts).
+    if (
+      this.#hooks.fixture === true &&
+      call.name !== "grasp.compute" &&
+      call.name !== "grasp.decision"
+    ) {
       throw operationErrors.create("resource.unavailable");
     }
     if (call.name === "grasp.model") {
@@ -3446,6 +3469,12 @@ export class ResourceRunHost
     }
   }
 
+  /** The run, as a test's run's decisions take it (fixture-decisions.ts). */
+  #fixtureRun(): FixtureDecisionRun {
+    const { runId, workflowId, version, principal, createdAt } = this.#run;
+    return { runId, workflowId, version, principal, createdAt };
+  }
+
   /**
    * What decision task `task`'s call answers in `attempt` of its call
    * step: its decision's outcome, as the host waited for it before the
@@ -3464,6 +3493,13 @@ export class ResourceRunHost
       answer = await candidateDecision(this.#env, candidate, call.binding);
     } else if (attempt.decided === undefined) {
       return this.#refuse(`Task "${task.id}" takes its decision's outcome.`);
+    } else if (this.#hooks.fixture === true) {
+      answer = await takeFixtureDecision(
+        this.#env,
+        this.#fixtureRun(),
+        call.binding,
+        attempt.decided
+      );
     } else {
       answer = await takeDecision(
         this.#env,
@@ -3523,14 +3559,24 @@ export class ResourceRunHost
       return attempt.until;
     }
     this.#requireCurrent(attempt);
-    const opened = await openRunDecision(
-      this.#env,
-      { ...this.#run.calling, createdAt: this.#run.createdAt },
-      task.id,
-      // Its call step's name, in its scope: one decision per item of a loop.
-      attempt.step.name.replace(/^enter:/u, "task:"),
-      built
-    );
+    // Its call step's name, in its scope: one decision per item of a loop.
+    const decisionStep = attempt.step.name.replace(/^enter:/u, "task:");
+    const opened =
+      this.#hooks.fixture === true
+        ? await openFixtureDecision(
+            this.#env,
+            this.#fixtureRun(),
+            task.id,
+            decisionStep,
+            built
+          )
+        : await openRunDecision(
+            this.#env,
+            { ...this.#run.calling, createdAt: this.#run.createdAt },
+            task.id,
+            decisionStep,
+            built
+          );
     this.#requireCurrent(attempt);
     attempt.decision = opened.decision;
     attempt.until = opened.deadline;
