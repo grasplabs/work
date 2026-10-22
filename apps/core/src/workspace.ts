@@ -743,6 +743,11 @@ export class Workspace extends DurableObject<Env> {
       })
       .returning({ id: chatMessages.id, createdAt: chatMessages.createdAt })
       .get();
+    this.#db
+      .update(chats)
+      .set({ lastAt: createdAt })
+      .where(eq(chats.id, chatId))
+      .run();
     const shown = chatMessageOf(
       id,
       message,
@@ -806,12 +811,14 @@ export class Workspace extends DurableObject<Env> {
           project === null ? {} : { project }
         );
       }
+      const now = new Date();
       const made = this.#db
         .insert(chats)
         .values({
           id,
           title,
-          createdAt: new Date(),
+          createdAt: now,
+          lastAt: now,
           personId,
           agentId: agent.data,
           restricted: fix?.restricted === true,
@@ -2097,24 +2104,29 @@ export class Workspace extends DurableObject<Env> {
     return this.#transcript(this.#chat(chatId).id);
   }
 
-  /** `personId`'s chats, newest first: at most {@link listedChats}. */
+  /**
+   * `personId`'s chats, the most recently active first: at most
+   * {@link listedChats}.
+   */
   chats(personId: string): ChatSummary[] {
     return this.#db
       .select({
         id: chats.id,
         title: chats.title,
         createdAt: chats.createdAt,
+        lastAt: chats.lastAt,
         projectId: chats.projectId,
       })
       .from(chats)
       .where(eq(chats.personId, personId))
-      .orderBy(desc(chats.createdAt))
+      .orderBy(desc(chats.lastAt))
       .limit(listedChats)
       .all()
-      .map(({ id, title, createdAt, projectId }) => ({
+      .map(({ id, title, createdAt, lastAt, projectId }) => ({
         id,
         title,
         createdAt: createdAt.toISOString(),
+        lastAt: lastAt.toISOString(),
         running: this.#turns.has(id),
         projectId,
       }));

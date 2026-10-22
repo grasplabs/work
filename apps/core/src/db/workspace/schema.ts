@@ -24,6 +24,13 @@ export const chats = sqliteTable(
     id: text().$type<ChatId>().primaryKey(),
     title: text().notNull(),
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    /**
+     * When it last had a message, or was made before it had any: what the
+     * person's list goes by, so a chat they just continued comes first.
+     */
+    lastAt: integer("last_at", { mode: "timestamp_ms" })
+      .notNull()
+      .default(sql`0`),
     /** It read restricted data, and is in restricted mode for good. */
     restricted: integer({ mode: "boolean" }).notNull().default(false),
     /**
@@ -43,9 +50,9 @@ export const chats = sqliteTable(
      */
     projectId: text("project_id"),
   },
-  // A person's list, newest first.
+  // A person's list, most recently active first.
   (table) => [
-    index("chats_person").on(table.personId, table.createdAt),
+    index("chats_person").on(table.personId, table.lastAt),
     index("chats_project").on(table.projectId),
   ]
 );
