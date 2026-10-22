@@ -297,6 +297,10 @@ describe("whom an App is made for", slow, () => {
       ),
     };
     const cleared = await owner.api.apps.update(app, { audience: null });
+    // Clearing what is clear changes and records nothing.
+    const clearedAgain = await auditedDuring(
+      async () => await owner.api.apps.update(app, { audience: null })
+    );
 
     expect({
       created: created.audience,
@@ -306,6 +310,7 @@ describe("whom an App is made for", slow, () => {
       reached,
       refused,
       cleared: cleared.audience,
+      clearedAgain: clearedAgain.length,
     }).toStrictEqual({
       created: null,
       audited: [
@@ -328,6 +333,7 @@ describe("whom an App is made for", slow, () => {
         person: "app.audience_invalid",
       },
       cleared: null,
+      clearedAgain: 0,
     });
   });
 
