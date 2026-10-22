@@ -1468,8 +1468,8 @@ const admitRequest = async (
       return {
         id,
         reservedMicros,
-        promptTokens: promptBound,
-        answerCap: outputTokens,
+        promptTokens: bound.inputTokens,
+        answerCap: bound.outputTokens,
       };
     }
     return { held: heldBecause(call, admitted, route.disclose) };
