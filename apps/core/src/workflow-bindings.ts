@@ -54,6 +54,7 @@ import {
   requireWorkflowRole,
 } from "./workflow-resources.ts";
 import type { PinnedBinding } from "./workflow-resources.ts";
+import { envelopedSchemaText } from "./workflows/connector-schemas.ts";
 
 // Approved bindings of independent workflows (platform specification 13.2):
 // which concrete resource serves each catalog binding a workflow declares
@@ -243,6 +244,13 @@ const schemaOfDescriptor = (
   }
 };
 
+/**
+ * A connector operation's shape as its exact JSON Schema: the connector's
+ * own schema it holds (connector-schemas.ts), or its descriptor's.
+ */
+const connectorShapeOf = (text: string): string | undefined =>
+  envelopedSchemaText(text) ?? schemaOfDescriptor(text);
+
 /** That a JSON Schema (as data or JSON text) is exactly `expected`. */
 const sameShape = (schema: unknown, expected: string | undefined): boolean => {
   if (expected === undefined) {
@@ -306,8 +314,8 @@ const requireConnectorServes = async (
       return (
         action !== undefined &&
         allowed.includes(action.tool) &&
-        sameShape(action.input, schemaOfDescriptor(shape.input)) &&
-        sameShape(action.output, schemaOfDescriptor(shape.output))
+        sameShape(action.input, connectorShapeOf(shape.input)) &&
+        sameShape(action.output, connectorShapeOf(shape.output))
       );
     });
   if (!serves) {

@@ -5,6 +5,7 @@ import {
 import type { CatalogContract } from "@grasp-os/open-workflow/catalog";
 import { actorOf } from "@grasp-os/shared/audit";
 import { sha256Hex } from "@grasp-os/shared/encoding";
+import { isExpectedError } from "@grasp-os/shared/errors";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { requireBuilder, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
@@ -25,11 +26,19 @@ import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import { workflowCatalogContracts } from "./db/core/schema.ts";
 import { inList, isUniqueViolation } from "./db/d1.ts";
 import { requireMemberAdmin, stillAdminSql } from "./permissions.ts";
+import {
+  envelopedSchema,
+  envelopedSchemaText,
+  forValidation,
+  readEnvelope,
+} from "./workflows/connector-schemas.ts";
 
 // The host catalog of contracts independent workflows bind besides each
 // other (platform specification 13.2): operation, connector, model,
 // decision and event contracts, each a key and the SDK descriptors of
-// what a call passes and returns, or of each event type's data. A workflow's validation resolves its bindings'
+// what a call passes and returns, or of each event type's data; a
+// connector's operation may instead carry a native connector's own JSON
+// Schemas, as connect confirms them (connector-schemas.ts). A workflow's validation resolves its bindings'
 // contract keys here; an admin's approval (workflow-bindings.ts) then names
 // what serves each. Threat model, and how each is closed:
 //
@@ -85,6 +94,82 @@ const entryOf = (row: typeof workflowCatalogContracts.$inferSelect) => ({
   publishedAt: row.publishedAt.toISOString(),
 });
 
+const contractInvalid = (issue: string) =>
+  workflowResourceErrors.create("workflow.contract_invalid", {
+    issues: [issue],
+  });
+
+/**
+ * Refuses (`workflow.contract_invalid`) an operation described by JSON
+ * Schema (connector-schemas.ts) unless it is a connector contract's, both
+ * its input and output are, each is one the allow-list admits, and connect
+ * confirms they are exactly a native action of this release by that tool,
+ * its `readOnly` as the connector declares it.
+ * Nothing else may put a pattern where core runs it (GRA-982).
+ */
+const requireNativeOperations = async (
+  env: Env,
+  contract: {
+    kind: CatalogBindingKind;
+    operations?: Record<
+      string,
+      { input: string; output: string; readOnly?: boolean }
+    >;
+  }
+): Promise<void> => {
+  for (const [operation, { input, output, readOnly }] of Object.entries(
+    contract.operations ?? {}
+  )) {
+    const enveloped = [input, output].filter(
+      (text) => envelopedSchema(text) !== undefined
+    ).length;
+    if (enveloped === 0) {
+      continue;
+    }
+    if (contract.kind !== "connector" || enveloped !== 2) {
+      throw contractInvalid(
+        `operations.${operation}: Only a connector's operation is described by JSON Schema, its input and output both.`
+      );
+    }
+    const inputSchema = envelopedSchemaText(input);
+    const outputSchema = envelopedSchemaText(output);
+    if (
+      readEnvelope(input) === undefined ||
+      readEnvelope(output) === undefined ||
+      inputSchema === undefined ||
+      outputSchema === undefined
+    ) {
+      throw contractInvalid(
+        `operations.${operation}: Its JSON Schema uses something a connector call's check doesn't enforce.`
+      );
+    }
+    let confirmed: { readOnly: boolean };
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- one confirmation per operation, each bounded
+      confirmed = await env.CONNECT.nativeOperation({
+        tool: operation,
+        input: inputSchema,
+        output: outputSchema,
+      });
+    } catch (error) {
+      if (isExpectedError(error)) {
+        throw contractInvalid(
+          `operations.${operation}: Its JSON Schemas aren't exactly a native connector action's of this release.`
+        );
+      }
+      throw error;
+    }
+    // Whether it only reads is the connector's to say, not the admin's: a
+    // write published as a read would leave the writes a model may steer
+    // out of a version's review (GRA-718).
+    if ((readOnly ?? false) !== confirmed.readOnly) {
+      throw contractInvalid(
+        `operations.${operation}: readOnly must be what its connector declares (${String(confirmed.readOnly)}).`
+      );
+    }
+  }
+};
+
 /**
  * Publishes a contract to the catalog for `by`, one of the organization's
  * own admins: refused unless the profile's catalog reader accepts it
@@ -102,7 +187,12 @@ export const publishCatalogContract = async (
     catalogContractSchema,
     input
   );
-  const read = resolveContract(() => contract, key, createCatalogBudget());
+  await requireNativeOperations(env, contract);
+  const read = resolveContract(
+    () => forValidation(contract),
+    key,
+    createCatalogBudget()
+  );
   if (!read.found) {
     throw workflowResourceErrors.create("workflow.contract_invalid", {
       issues: [read.reason],

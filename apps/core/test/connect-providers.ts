@@ -70,6 +70,14 @@ export const graphLoseUrl = "https://graph-control.test/lose";
 export const graphDraftsUrl = "https://graph-control.test/drafts";
 
 /**
+ * Where tests put a file attachment on a message of a mailbox, as Graph
+ * then answers it (`/users/{mailbox}/messages/{message}/attachments/{id}`):
+ * POST `{ mailbox, message, id, name, contentType, contentBytes }`, its
+ * bytes as base64.
+ */
+export const graphAttachmentUrl = "https://graph-control.test/attachment";
+
+/**
  * Where tests publish a package on the fake npm registry: POST one
  * version as connect's test/npm-registry-fake.ts takes it, as JSON.
  */
@@ -108,6 +116,7 @@ const graphEvents = (${graphEventsFake.toString()})();
 const graphSent = [];
 const graphLosing = new Map();
 const graphDrafts = new Map();
+const graphAttachments = new Map();
 /** Whether Graph loses this write's answer (\`graphLoseUrl\`). */
 const losesAnswer = (mailbox) => {
   const losing = graphLosing.get(mailbox) ?? 0;
@@ -226,7 +235,23 @@ export default {
       if (request.method === "GET" && mailPath && rest[0] === "messages") {
         return Response.json({ value: [] });
       }
+      // A message's file attachment, as a test put it (\`graphAttachmentUrl\`):
+      // its fields alone when selected, its content too otherwise.
+      if (request.method === "GET" && version === "v1.0" && users === "users" && rest.length === 4 && rest[0] === "messages" && rest[2] === "attachments") {
+        const found = graphAttachments.get([mailbox, rest[1], rest[3]].join("/"));
+        if (!found) {
+          return Response.json({ error: { code: "ErrorItemNotFound" } }, { status: 404 });
+        }
+        const size = atob(found.contentBytes).length;
+        const fields = { "@odata.type": "#microsoft.graph.fileAttachment", id: found.id, name: found.name, contentType: found.contentType, size, isInline: false };
+        return Response.json(url.searchParams.has("$select") ? fields : { ...fields, contentBytes: found.contentBytes });
+      }
       return graphEvents.answer(request, url);
+    }
+    if (request.method === "POST" && url.href === ${JSON.stringify(graphAttachmentUrl)}) {
+      const attachment = await request.json();
+      graphAttachments.set([attachment.mailbox, attachment.message, attachment.id].join("/"), attachment);
+      return new Response(null, { status: 204 });
     }
     if (url.href === ${JSON.stringify(graphSentUrl)}) {
       return Response.json(graphSent);

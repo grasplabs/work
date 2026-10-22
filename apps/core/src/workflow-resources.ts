@@ -117,6 +117,7 @@ import type {
   ModuleContracts,
   ModulePackages,
 } from "./workflow-modules.ts";
+import { forValidation } from "./workflows/connector-schemas.ts";
 import {
   packagesHoldSql,
   packagesRefusal,
@@ -1040,7 +1041,12 @@ const inspectDefinition = async (
   }
   const policy = await quotaPolicy(env);
   const result = await validateWorkflow(definition, {
-    catalog: (key) => resolved.get(key)?.contract ?? catalog.get(key)?.contract,
+    catalog: (key) => {
+      const contract =
+        resolved.get(key)?.contract ?? catalog.get(key)?.contract;
+      // A connector's own schemas, read as their descriptors.
+      return contract === undefined ? undefined : forValidation(contract);
+    },
     // `local:` keys resolve against the workflow's own modules only.
     modules: moduleLookup(modules),
     ceilings: {
