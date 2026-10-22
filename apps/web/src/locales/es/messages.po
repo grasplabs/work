@@ -977,6 +977,14 @@ msgstr "{sources, plural, one {Trabajo que lleva mucho tiempo y podría automati
 msgid "{spent} of {limit}"
 msgstr "{spent} de {limit}"
 
+#: src/onboarding/about-story.tsx
+msgid "{sponsor} gave me the big picture. Now I need the details."
+msgstr "{sponsor} me dio la visión general. Ahora necesito los detalles."
+
+#: src/onboarding/setup-steps.tsx
+msgid "{sponsor} told me a lot about your company in our first conversation. Before we start, which language do you prefer?"
+msgstr "{sponsor} me contó mucho sobre tu empresa en nuestra primera conversación. Antes de empezar, ¿qué idioma prefieres?"
+
 #: src/brain/brain.ts
 msgid "{statements, plural, one {# statement: {breakdown}} other {# statements: {breakdown}}}"
 msgstr "{statements, plural, one {# afirmación: {breakdown}} other {# afirmaciones: {breakdown}}}"

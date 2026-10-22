@@ -177,6 +177,7 @@ describe("Grasp's go", () => {
       plan,
       agreed: true,
       paused: false,
+      sponsor: null,
       progress: {
         teams: [],
         // Both leads talked; half of the others did.

@@ -12,6 +12,7 @@ import type { Interviewer } from "@grasp-os/shared/onboarding";
 
 import { CLAIRE_CELLS } from "./claire-portrait.ts";
 import { PORTRAIT_CELLS, PORTRAIT_SIZE } from "./portrait-data.ts";
+import { MARK_CELLS, TIM_CELLS } from "./team-portraits.ts";
 
 /**
  * The distance between neighbouring dots, in figure units (a figure spans -1 to 1): wide enough
@@ -152,12 +153,19 @@ const head = (x: number, y: number, z: number): number => {
   return smin(d, collar, 0.05);
 };
 
+/** The three of the team who answer in the sample interview. */
+export const teammates = ["mark", "lisa", "tim"] as const;
+export type Teammate = (typeof teammates)[number];
+
 /** Which figure the brain takes, and for the org, what is known of it. */
 export type ShapeKey =
   | { kind: "head" }
 
   /** Whoever holds an interview, talking and listening: Stephen, unless it says Claire. */
   | { kind: "listen"; who?: Interviewer }
+
+  /** One of the team in the sample interview, alone and talking, from their photo. */
+  | { kind: "person"; who: Teammate }
   | { kind: "pair" }
   | { kind: "crowd" }
   | { kind: "sheets" }
@@ -243,6 +251,9 @@ export const shapeId = (key: ShapeKey): string => {
   }
   if (key.kind === "spokes") {
     return `spokes:${key.count}`;
+  }
+  if (key.kind === "person") {
+    return `person:${key.who}`;
   }
   if (key.kind === "listen" && key.who && key.who !== "stephen") {
     return `listen:${key.who}`;
@@ -346,7 +357,7 @@ const brainField = (x: number, y: number, z: number): number => {
 /** In the same frame as Stephen: the figure shows the middle of the photo's square, head to chest. */
 const CROP = { x: 0.5, y: 0.47, half: 0.45 };
 
-/** Every person drawn from a photo, by name: the interviewers. */
+/** Every person drawn from a photo, by name: the interviewers, and the three of the team in the sample interview. */
 const PORTRAITS = {
   stephen: {
     cells: PORTRAIT_CELLS,
@@ -363,6 +374,28 @@ const PORTRAITS = {
     mouth: [-0.02, -0.08, 0.36],
     ear: [0.31, -0.06, 0.12],
     gamma: 1.9,
+  },
+  mark: {
+    cells: MARK_CELLS,
+    size: 180,
+    crop: CROP,
+    mouth: [0, -0.12, 0.36],
+    ear: [0.3, -0.03, 0.12],
+  },
+  // Lisa is the photo Claire stands in with, printed as it is.
+  lisa: {
+    cells: CLAIRE_CELLS,
+    size: 180,
+    crop: CROP,
+    mouth: [-0.02, -0.08, 0.36],
+    ear: [0.31, -0.06, 0.12],
+  },
+  tim: {
+    cells: TIM_CELLS,
+    size: 180,
+    crop: CROP,
+    mouth: [0.01, -0.11, 0.36],
+    ear: [0.31, -0.02, 0.12],
   },
 } satisfies Record<string, Portrait>;
 
@@ -986,6 +1019,10 @@ const plan = (key: ShapeKey): Plan => {
         true,
         PORTRAITS[INTERVIEWER_PORTRAITS[key.who ?? "stephen"]]
       );
+    }
+    // One of the team, talking, as Stephen is: the mouth warms as they speak.
+    case "person": {
+      return portraitPlan(false, PORTRAITS[key.who]);
     }
     case "pair": {
       const left = placedHead(-0.98, 0, 0, 0.62, 0.92);

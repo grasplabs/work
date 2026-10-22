@@ -50,6 +50,7 @@ export const storedReadingSchema = z.object({
       people: z.number().optional(),
     })
   ),
+  sponsor: z.string().optional(),
 });
 
 /** The sponsor's answers as the store keeps them. */
@@ -91,6 +92,7 @@ How to read it:
 - When the conversation does not say it, or only touches it: leave "text" and "quote" empty, and write in "ask" the one short question to put to the sponsor. At most 15 words, plain, not leading.
 - When it does say it, leave "ask" empty.
 - "teams": the teams or departments the company named, as they called them, with what each does in a few words when that was said, otherwise empty, and how many people when that was said, otherwise 0.
+- "sponsor": the first name of the sponsor, the person who speaks for the company in this conversation, as the transcript writes it. Empty when the transcript does not name them.
 - Write "text", "ask" and what each team does in ${NAMED[locale]}. Keep quotes and team names as they were said.`;
 
 /** What the model answers: loose, as the check that follows is strict. */
@@ -106,6 +108,7 @@ const answerSchema = z.object({
   teams: z.array(
     z.object({ name: z.string(), does: z.string(), people: z.number() })
   ),
+  sponsor: z.string().optional(),
 });
 type Answer = z.infer<typeof answerSchema>;
 
@@ -152,10 +155,27 @@ const teamOf =
     return [{ name, does: tidy(team.does, 160), ...counted }];
   };
 
+/** A first name: letters, with a hyphen or an apostrophe inside it. */
+const firstName = /^\p{L}+(?:['’-]\p{L}+)*$/u;
+
+/**
+ * The sponsor's first name as the model gave it, kept only when it looks
+ * like one and the transcript (`said`, as `plain` made it) holds it as a
+ * word: a name the model made up never reaches the admin.
+ */
+const sponsorOf = (given: string | undefined, said: string): string | null => {
+  const name = tidy(given ?? "", 40);
+  const named = plain(name);
+  return firstName.test(name) && ` ${said} `.includes(` ${named} `)
+    ? name.charAt(0).toUpperCase() + name.slice(1)
+    : null;
+};
+
 /**
  * What the model gave back, checked against `transcript`: a field counts
- * only when the words it rests on were really said, and a team only when
- * it was named. Whatever is left over is what to ask the sponsor.
+ * only when the words it rests on were really said, and a team or the
+ * sponsor's name only when it was named. Whatever is left over is what to
+ * ask the sponsor.
  */
 export const readingOf = (
   answer: Answer,
@@ -175,6 +195,10 @@ export const readingOf = (
     }
   }
   reading.teams = answer.teams.slice(0, teamsMax).flatMap(teamOf(said));
+  const sponsor = sponsorOf(answer.sponsor, said);
+  if (sponsor !== null) {
+    reading.sponsor = sponsor;
+  }
   return reading;
 };
 

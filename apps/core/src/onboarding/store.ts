@@ -397,7 +397,19 @@ export class Onboarding extends DurableObject<Env> {
           : progressOf(roster, this.#interviews(), this.#counts(), now),
       agreed: agreementsIn(row.agreements),
       paused: row.pausedAt !== null,
+      sponsor: this.#sponsor(),
     };
+  }
+
+  /** The sponsor's first name, when the kickoff named them: read without its transcript. */
+  #sponsor(): string | null {
+    const [row] = this.#db
+      .select({ reading: kickoff.reading })
+      .from(kickoff)
+      .all();
+    return row === undefined
+      ? null
+      : (storedReadingSchema.parse(JSON.parse(row.reading)).sponsor ?? null);
   }
 
   /**
