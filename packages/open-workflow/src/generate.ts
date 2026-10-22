@@ -2405,7 +2405,17 @@ const lowerFor = (
   );
 };
 
-/** Lowers a set, a switch or a call that doesn't sleep: one step each. */
+/** Whether a task of `kind` is lowered as one step: no waiting, no body. */
+const inOneStep = (
+  kind: string,
+  sleeps: boolean
+): kind is "set" | "switch" | "emit" | "call" =>
+  kind === "set" ||
+  kind === "switch" ||
+  kind === "emit" ||
+  (kind === "call" && !sleeps);
+
+/** Lowers a set, a switch, an emit or a call that doesn't sleep: one step each. */
 const lowerOneStep = (
   emitter: Emitter,
   item: ListTask,
@@ -2461,12 +2471,7 @@ const lowerTask = (
   };
   if (kind === "call" && task.call === "grasp.decision") {
     lowerDecision(emitter, item, stages, place, sealed, before);
-  } else if (
-    kind === "set" ||
-    kind === "switch" ||
-    kind === "emit" ||
-    (kind === "call" && !sleeps)
-  ) {
+  } else if (inOneStep(kind, sleeps)) {
     lowerOneStep(emitter, item, stages, place, sealed, kind);
     // One step evaluates all of these. A durable task's enter and leave
     // steps hold two stages each, so never more than this.
