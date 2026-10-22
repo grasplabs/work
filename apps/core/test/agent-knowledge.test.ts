@@ -1,3 +1,4 @@
+import { agentErrors } from "@grasp-os/shared/agent";
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import type { ChatMessage } from "@grasp-os/shared/chat";
 import { workspaceIdSchema } from "@grasp-os/shared/ids";
@@ -8,7 +9,11 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
-import { withheldResponse, withheldResult } from "../src/agent.ts";
+import {
+  requestChars,
+  withheldResponse,
+  withheldResult,
+} from "../src/agent.ts";
 import { refreshDailySignals } from "../src/daily-signals.ts";
 import { workspace } from "../src/durable-objects.ts";
 import {
@@ -1080,6 +1085,82 @@ describe("a chat's recall before a question", setUpTime, () => {
       steps: [],
       sent: false,
       provenance: { sources: [], restricted: false },
+    });
+  });
+
+  it("keeps the recall within what the model takes, for a question near its limit", async () => {
+    const admin = await newAdmin();
+    const person = await newPerson();
+    const word = `zq${crypto.randomUUID().replaceAll(/[^a-f]/gu, "")}`;
+    const { id: collectionId } = await admin.knowledge.createCollection({
+      name: `Handbook ${unique()}`,
+      access: "everyone",
+    });
+    // Five long sections the question's word matches: more evidence than
+    // a question near the limit leaves room for.
+    for (const index of [1, 2, 3, 4, 5]) {
+      // oxlint-disable-next-line no-await-in-loop -- one document at a time
+      await admin.knowledge.saveDocument({
+        collectionId,
+        path: `long-${index}.md`,
+        text: `# Long ${index}\n\n${`The ${word} rule applies. `.repeat(40)}`,
+        ifVersion: 0,
+      });
+    }
+    // The model that takes 18,000 tokens: its window of 24,000 less a
+    // quarter kept for the answer (agent.test.ts).
+    const tiny = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+    const { stub, chat, gateway, agent } = await chatOf(
+      person.userId,
+      says("Near the limit."),
+      says("With room.")
+    );
+    await pointAtGateway(stub, gateway, {
+      config: { ...gatewayConfig, models: [model, tiny] },
+    });
+    await grantRead(admin, agent, collectionId);
+    await grantBrain(admin, agent);
+    const question = (chars: number) =>
+      `${word} ${"x".repeat(chars - word.length - 1)}`;
+    // The longest question the model takes, to within a thousand
+    // characters: a longer one is refused before anything runs.
+    let chars = 54_000;
+    let near: Awaited<ReturnType<typeof stub.ask>> | undefined;
+    const refusals = new Set<string | undefined>();
+    while (near === undefined) {
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- shorter until one fits
+        near = await stub.ask(chat.id, { text: question(chars), model: tiny });
+      } catch (error) {
+        refusals.add(agentErrors.codeOf(error));
+        chars -= 1000;
+      }
+    }
+    const nearSteps = await codeResults(stub, chat.id);
+    const withRoom = await stub.ask(chat.id, {
+      text: question(chars - 12_000),
+      model: tiny,
+    });
+    const steps = await codeResults(stub, chat.id);
+    const window = requestChars(18_000);
+    expect({
+      refusals: [...refusals],
+      near: near.outcome,
+      nearSteps,
+      nearFits: JSON.stringify(gateway.requests[0]?.body).length <= window,
+      withRoom: withRoom.outcome,
+      recalled: steps.at(-1)?.text.includes(`"evidence":[{`),
+      fits: JSON.stringify(gateway.requests[1]?.body).length <= window,
+    }).toStrictEqual({
+      refusals: ["agent.question_too_long"],
+      near: "answered",
+      // No room left for evidence: no recall.
+      nearSteps: [],
+      nearFits: true,
+      withRoom: "answered",
+      // Evidence, as much as fits.
+      recalled: true,
+      fits: true,
     });
   });
 
