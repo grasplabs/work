@@ -50,6 +50,7 @@ jobs:
       - run: vp run check:product-name
       - run: vp run check:migrations
       - run: vp run check:wrangler-configs
+      - run: vp run check:playwright-image
       - run: vp run -r build
       # The console isn't deployed from here (see deploy-staging): check that
       # its build is a Worker wrangler would deploy. No credentials needed.
@@ -198,9 +199,22 @@ jobs:
           # A matrix job's result: a failure if any shard failed.
           TEST: ${{ needs.test.result }}
 
+  # In Playwright's image, which has the browsers and their system packages
+  # installed: `playwright install --with-deps` fetched 119 MB of them from
+  # the Ubuntu mirror, up to 12 minutes when it was slow (October 2026,
+  # GRA-1016). Its tag must be the catalog's @playwright/test, whose browser
+  # builds it carries: check:playwright-image (static) holds the two
+  # together, and Renovate moves them in one pull request.
   e2e:
     name: e2e
     if: github.event_name != 'push'
+    container:
+      image: mcr.microsoft.com/playwright:v1.63.0-noble
+      # The runner's own user, which owns the checkout, the caches and
+      # $HOME, as Playwright's CI guide has it: Firefox won't start as root
+      # in a home it doesn't own. A host IPC namespace, so Chromium's shared
+      # memory isn't held to Docker's 64 MB /dev/shm.
+      options: --user 1001 --ipc=host
     runs-on: ubuntu-latest
     # 11 to 20 minutes when it passed (October 2026): about 1 minute of
     # setup, the browsers' system packages from the Ubuntu mirror (under a
@@ -217,9 +231,6 @@ jobs:
           cache: true
           run-install: |
             - args: ["--frozen-lockfile"]
-      # Firefox and WebKit run only the attacks on a screen's frame
-      # (playwright.config.ts): the sandbox is each browser's own.
-      - run: vp exec playwright install --with-deps chromium firefox webkit
       - run: vp run e2e
       # A failing test is retried with a trace (playwright.config.ts): keep it.
       - if: failure()

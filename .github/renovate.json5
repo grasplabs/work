@@ -107,6 +107,13 @@
       groupName: "github actions",
       matchManagers: ["github-actions"],
     },
+    // After github actions, so the e2e job's image (found by that manager)
+    // joins this group: the image carries the browsers of its own release,
+    // so it moves with the test runner (scripts/check-playwright-image.ts).
+    {
+      groupName: "playwright",
+      matchPackageNames: ["@playwright/test", "mcr.microsoft.com/playwright"],
+    },
 
     // The screen compiler's TypeScript: 7 has no JavaScript API.
     {
