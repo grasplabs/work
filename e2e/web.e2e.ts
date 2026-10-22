@@ -478,9 +478,13 @@ test("says an address no page has, and an App that isn't there, are not found, i
   await signInTo(context, member);
 
   await page.goto("/no-such-page");
-  await expect(page.getByRole("heading", { name: "Not found" })).toBeVisible();
   await expect(
-    page.getByText("It may have been renamed or removed.")
+    page.getByRole("heading", { name: "This page is not here" })
+  ).toBeVisible();
+  await expect(
+    page.getByText(
+      "The address may be wrong, or the page was moved or removed."
+    )
   ).toBeVisible();
   // In the frame: the sidebar is there to go on from.
   const nav = page.getByRole("navigation", { name: "Main" });
