@@ -1819,6 +1819,57 @@ describe("rolling out to the fleet a few clients at a time", () => {
     });
   });
 
+  it("stops the fleet clients deploying when the rollout's run ends outside the console, once the rollout is marked failed", async () => {
+    const before = await importedRelease("feat(core): the release before");
+    await activeClient(0, before);
+    const fleet = await activeClients(2, 1, before);
+    const accounts = new Set(fleet.map(({ account }) => account.id));
+    const release = await importedRelease("feat(core): run ended mid-fleet");
+    await using run = await followRollouts();
+    const rolloutId = await rollOut(release, { scope: "all" });
+    await run.waitForStepResult({ name: "ring 1 approved" });
+    // Terminated from the dashboard as a fleet client's deploy reaches its
+    // account; the next rollout's start finds the run ended and marks the
+    // rollout failed.
+    cloudflare.beforeAnswering(
+      (call) => accounts.has(call.path.split("/")[2] ?? ""),
+      async () => {
+        const instance = await env.ROLLOUT.get(rolloutId);
+        await instance.terminate();
+        await rollOut(before, { scope: "ring", ring: 0 });
+      }
+    );
+
+    await approveRollout(env, staff, rolloutId);
+    await vi.waitUntil(async () => {
+      const row = await rolloutRow(rolloutId);
+      return row?.status === "failed";
+    });
+    const started = await run.childRuns();
+    await Promise.all(started.map(settled));
+
+    // A child started for a client ends it as soon as it sees the
+    // rollout failed; a client never started stays pending.
+    const targets = await targetsOf(rolloutId);
+    const reached = fleet
+      .map(({ clientId }) => targets[clientId])
+      .filter((target) => target?.status !== "pending");
+    expect({
+      rollout: await rolloutRow(rolloutId),
+      reached: reached.length > 0 && reached.length <= started.length,
+      ended: reached.map((target) => ({
+        stopped: ["stopped", "skipped"].includes(target?.status ?? ""),
+        error: target?.error,
+      })),
+      runners: await runnersOf(fleet),
+    }).toStrictEqual({
+      rollout: { status: "failed", ring: 1 },
+      reached: true,
+      ended: reached.map(() => ({ stopped: true, error: "failed" })),
+      runners: fleet.map(() => null),
+    });
+  });
+
   it("rolls back one fleet client while others deploy beside it, which stops the rollout and leaves every client ended and released", async () => {
     const before = await importedRelease("feat(core): the release before");
     await activeClient(0, before);

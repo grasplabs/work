@@ -49,7 +49,8 @@
  * fleet client; one a child is deploying already is finished, or stopped
  * by a rollback, so a pause never leaves a fleet client's traffic split
  * for as long as staff take to resume (`deployFleet`). One rule stops
- * the run once the rollout is cancelled: every step of a client checks
+ * the run once the rollout is cancelled, and a child once its rollout
+ * failed (its run is gone, `stoppedAs`): every step of a client checks
  * first, in the rollout's run and in a child alike (`clientStep`), and
  * ends the client there, `skipped` while nothing of it has started and
  * `stopped` once anything has (`endIfCancelled`). A
@@ -261,16 +262,26 @@ type Claimed =
   | { state: "cancelled" }
   | { state: "claimed"; deployId: string; running: PreviousRun };
 
-/** Whether rollout `rolloutId` was stopped by staff (a rollback, or a cancel). */
-const isCancelled = async (
+/** How rollout `rolloutId` ended while still deploying clients. */
+type StoppedAs = "cancelled" | "failed";
+
+/**
+ * How rollout `rolloutId` was stopped, if it was: `cancelled` by staff (a
+ * rollback, or a cancel), or `failed` once its run stopped (it recorded
+ * its own failure, or staff found it ended, src/rollout/control.ts). A
+ * failed rollout's run is gone, so no child of it goes on deploying.
+ */
+const stoppedAs = async (
   db: ConsoleDatabase,
   rolloutId: string
-): Promise<boolean> => {
+): Promise<StoppedAs | null> => {
   const [row] = await db
     .select({ status: rollouts.status })
     .from(rollouts)
     .where(eq(rollouts.id, rolloutId));
-  return row?.status === "cancelled";
+  return row?.status === "cancelled" || row?.status === "failed"
+    ? row.status
+    : null;
 };
 
 /** Rollout `rolloutId`'s target client `clientId`. */
@@ -330,8 +341,8 @@ const skipTarget = async (
 };
 
 /**
- * Ends the rollout's work on client `clientId` if staff stopped the
- * rollout, and returns whether it did: the one rule, checked at the start
+ * Ends the rollout's work on client `clientId` if the rollout was
+ * stopped (`stoppedAs`), and returns whether it did: the one rule, checked at the start
  * of every step of a client (`clientStep`), a retry's too. What the target
  * ends as depends only on whether anything of the client started (its
  * prepare step marks it `deploying` before it begins, `markStarted`):
@@ -346,7 +357,8 @@ const endIfCancelled = async (
   rolloutId: string,
   clientId: string
 ): Promise<boolean> => {
-  if (!(await isCancelled(db, rolloutId))) {
+  const reason = await stoppedAs(db, rolloutId);
+  if (reason === null) {
     return false;
   }
   const [target] = await db
@@ -361,7 +373,7 @@ const endIfCancelled = async (
   if (target?.status !== "deploying") {
     // Nothing of it started, or its target ended already (a rollback of
     // this client): skipped only while pending, released either way.
-    await skipTarget(db, rolloutId, clientId, "cancelled", cancelling);
+    await skipTarget(db, rolloutId, clientId, reason, cancelling);
     return true;
   }
   await actIfChanged(
@@ -369,7 +381,7 @@ const endIfCancelled = async (
     "system",
     db
       .update(rolloutTargets)
-      .set({ status: "stopped", error: "cancelled", updatedAt: new Date() })
+      .set({ status: "stopped", error: reason, updatedAt: new Date() })
       .where(
         and(
           targetWhere(rolloutId, clientId),
@@ -380,7 +392,7 @@ const endIfCancelled = async (
       action: "rollout.client_stop",
       clientId,
       target: rolloutId,
-      detail: { reason: "cancelled" },
+      detail: { reason },
     },
     [...cancelling, releaseRun(db, clientId, rolloutId)]
   );
@@ -1148,7 +1160,7 @@ const advanceFleet = async (
 ): Promise<FleetState> => {
   const { rolloutId } = params;
   const db = consoleDatabase(env.DB);
-  const cancelled = await isCancelled(db, rolloutId);
+  const cancelled = (await stoppedAs(db, rolloutId)) !== null;
   const rows = await db
     .select({ clientId: rolloutTargets.clientId })
     .from(rolloutTargets)
