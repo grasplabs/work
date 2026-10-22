@@ -19,6 +19,8 @@ import type { SandboxedEnv } from "../../src/sandboxed.ts";
 //   carriage return, with an App import after it.
 // - `/nested`: a main module in a directory, beside an App module named
 //   as the quiet module is.
+// - `/thrown-named`: one whose name an object's prototype has;
+//   `/loaded-once`: one isolate's entrypoint asked for twice.
 // - `/thrown-cached`: the same, from an isolate the Loader keeps, asked
 //   for twice.
 // - `/thrown`: a call that throws to its caller, which crosses as a value
@@ -205,6 +207,33 @@ const answerOfThrown = async (
       async () => await runApp(quietLoader(env.LOADER).get(key, () => code))
     );
     return { first, second };
+  }
+  if (route === "/thrown-named") {
+    // A name an object's prototype has (`constructor`): still an Error.
+    return await thrownBy(
+      async () =>
+        await runApp(
+          quietLoader(env.LOADER).load({
+            ...settings,
+            mainModule: "app.js",
+            modules: {
+              "app.js": `import { WorkerEntrypoint } from "cloudflare:workers";\nexport class App extends WorkerEntrypoint {\n  run() {\n    throw Object.assign(new Error("named"), { name: "constructor" });\n  }\n}\n`,
+            },
+          })
+        )
+    );
+  }
+  if (route === "/loaded-once") {
+    // One isolate however often its entrypoint is asked for: its module
+    // state is the same for both.
+    const stub = quietLoader(env.LOADER).load({
+      ...settings,
+      mainModule: "app.js",
+      modules: {
+        "app.js": `import { WorkerEntrypoint } from "cloudflare:workers";\nlet calls = 0;\nexport class App extends WorkerEntrypoint {\n  run() {\n    calls += 1;\n    return calls;\n  }\n}\n`,
+      },
+    });
+    return [await runApp(stub), await runApp(stub)];
   }
   if (route === "/app-node-timers") {
     try {

@@ -390,11 +390,20 @@ class Session extends CapnwebTarget {
         ? await readChunkedModules(parsed.chunkedModules, reader)
         : {};
     const { compatibilityFlags } = this.#settings;
+    // Node.js on where the call asks for it: the flags that turn it off
+    // (`isolateSettings`) dropped. The same list the isolate loads with is
+    // the one its quiet module is made for.
+    const flags = parsed.nodejsCompat
+      ? [
+          ...compatibilityFlags.filter(
+            (flag) => !flag.startsWith("no_nodejs_compat")
+          ),
+          "nodejs_compat",
+        ]
+      : compatibilityFlags;
     const nodejsCompat = hasNodeModules({
       compatibilityDate: this.#settings.compatibilityDate,
-      compatibilityFlags: parsed.nodejsCompat
-        ? [...compatibilityFlags, "nodejs_compat"]
-        : compatibilityFlags,
+      compatibilityFlags: flags,
     });
     const modules = { ...parsed.modules, ...chunked };
     // Printing nothing to the process's output, the deployment's logs;
@@ -414,16 +423,7 @@ class Session extends CapnwebTarget {
           });
     const isolate = this.#env.LOADER.get(null, () => ({
       ...this.#settings,
-      compatibilityFlags: parsed.nodejsCompat
-        ? [
-            // Node.js on: the flags that turn it off (`isolateSettings`)
-            // dropped.
-            ...compatibilityFlags.filter(
-              (flag) => !flag.startsWith("no_nodejs_compat")
-            ),
-            "nodejs_compat",
-          ]
-        : compatibilityFlags,
+      compatibilityFlags: flags,
       ...loaded,
       env: {},
       globalOutbound: null,

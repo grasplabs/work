@@ -129,12 +129,16 @@ const core :Workerd.Worker = (
     const thrown = await run("/thrown");
     const long = await run("/thrown-long");
     const cached = await run("/thrown-cached");
+    const named = await run("/thrown-named");
+    const once = await run("/loaded-once");
     await sleep(SETTLE_MS);
 
     expect({
       thrown,
       long,
       cached,
+      named,
+      once,
       reported: served.logs().includes("record-value-c40b"),
     }).toStrictEqual({
       thrown: {
@@ -163,6 +167,8 @@ const core :Workerd.Worker = (
           start: "record-value-c40b",
         },
       },
+      named: { kind: "other", code: "undefined", length: 5, start: "named" },
+      once: [1, 2],
       reported: false,
     });
   });

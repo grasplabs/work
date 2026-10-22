@@ -295,7 +295,10 @@ const rebuilt = (thrown: unknown): Error => {
     TypeError,
     URIError,
   };
-  const error = new (kinds[name] ?? Error)(message);
+  // The isolate's code chose the name: only a built-in kind's own entry,
+  // never one `Object.prototype` gives (`constructor`, `toString`).
+  const Kind = Object.hasOwn(kinds, name) ? kinds[name] : undefined;
+  const error = new (Kind ?? Error)(message);
   if (error.name !== name) {
     error.name = name.slice(0, maxThrownName);
   }
@@ -485,6 +488,16 @@ export const quietLoader = <
     // Refused as it is loaded, as the Loader refuses a module it can't
     // load: the isolate itself loads once an entrypoint is asked for.
     quietCode(code, "default");
-    return quietStub((entrypoint) => loader.load(quietCode(code, entrypoint)));
+    // One isolate per entrypoint asked for, however often it is asked for,
+    // as the Loader's `load` gives one isolate however many stubs of it.
+    const loaded = new Map<string, Stub>();
+    return quietStub((entrypoint) => {
+      let stub = loaded.get(entrypoint);
+      if (stub === undefined) {
+        stub = loader.load(quietCode(code, entrypoint));
+        loaded.set(entrypoint, stub);
+      }
+      return stub;
+    });
   },
 });
