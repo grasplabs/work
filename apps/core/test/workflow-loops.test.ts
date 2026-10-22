@@ -560,6 +560,7 @@ const hostOf = async (by: Acting, id: string): Promise<ResourceRunHost> => {
       await Promise.resolve();
     },
     waitForEvent: async () => await Promise.reject(new Error("No waits here")),
+    waitForMatch: async () => await Promise.reject(new Error("No waits here")),
   };
   const runId = crypto.randomUUID();
   return new ResourceRunHost(

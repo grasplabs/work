@@ -555,6 +555,8 @@ const workflowStep = (
         loop: {},
       }
     : undefined;
+
+/**
  * Whether `task`'s enter step resolves a deadline: an expression wait's, a
  * `grasp.sleepUntil` call's, a listen's (its timeout from then).
  */
@@ -1166,6 +1168,7 @@ export class ResourceRunHost
    * on, and the only items they may name.
    */
   readonly #items = new Map<string, Json[]>();
+  /**
    * The filters each listen task's enter step resolved, by task, as this
    * activation reached it: what its waits match, exactly.
    */
