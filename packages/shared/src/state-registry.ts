@@ -549,6 +549,7 @@ const onboarding: DurableObjectState = {
     usage: exported(`${core}onboarding/store.ts`),
     works: exported(`${core}onboarding/store.ts`),
     asked_about: exported(`${core}onboarding/store.ts`),
+    drawn_works: exported(`${core}onboarding/store.ts`),
     draw_failures: transient(
       `${core}onboarding/store.ts`,
       "Drawings that failed, waiting to be tried again: a destination draws anew."
