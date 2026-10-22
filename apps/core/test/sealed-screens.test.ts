@@ -8,6 +8,7 @@ import { z } from "zod";
 
 import { loadRelease, sealedScreen } from "../src/app-releases.ts";
 import { appCandidateReports, appCandidates } from "../src/db/core/schema.ts";
+import { frameAccess, stageFrame } from "../src/screen-frame.ts";
 import { release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { frameDocument, loadFrame, pathOf, routed } from "./screen-frames.ts";
@@ -87,13 +88,19 @@ const manifestKey = (artifact: string): string =>
 const moduleKeyOf = (address: string): string =>
   `screen-modules/${new URL(address).pathname.split("/").at(-1) ?? ""}`;
 
-/** The sha384 Subresource Integrity of `text`, as a browser checks it. */
-const sha384 = async (text: string): Promise<string> =>
+/** The sha384 Subresource Integrity of `served`, as a browser checks it. */
+const sha384 = async (served: string | Uint8Array): Promise<string> =>
   `sha384-${toBase64(
     new Uint8Array(
-      await crypto.subtle.digest("SHA-384", new TextEncoder().encode(text))
+      await crypto.subtle.digest(
+        "SHA-384",
+        typeof served === "string" ? new TextEncoder().encode(served) : served
+      )
     )
   )}`;
+
+/** `text` as the UTF-8 bytes it encodes to. */
+const encoded = (text: string): number[] => [...new TextEncoder().encode(text)];
 
 /** What core answers for `path`: its status, and how long it may be kept. */
 const served = async (path: string) => {
@@ -298,6 +305,48 @@ describe("screens sealed with their release", { timeout: 120_000 }, () => {
 
     const { status } = await served(pathOf(address));
     expect(status).toBe(404);
+  });
+
+  it("serves a module that starts with a byte order mark, or holds a lone surrogate, as the bytes its integrity names", async () => {
+    const bom = "\uFEFFexport default 1;\n";
+    const surrogate = 'export default "\uD800";\n';
+    const code = {
+      entry: "app~bom",
+      runtime: "app~bom",
+      modules: { "app~bom": bom, "app~surrogate": surrogate },
+      kit: {},
+      css: "",
+    };
+    const artifact = "b".repeat(64);
+    await stageFrame(env, artifact, code);
+    const frame = await loadFrame({
+      artifact,
+      frameToken: await frameAccess(env, artifact),
+    });
+    const modules = await Promise.all(
+      Object.entries(frame?.addresses ?? {}).map(async ([name, address]) => {
+        const response = await routed(pathOf(address));
+        const bytes = new Uint8Array(await response.arrayBuffer());
+        return {
+          name,
+          status: response.status,
+          bytes: [...bytes],
+          integrity: frame?.integrity[address] === (await sha384(bytes)),
+        };
+      })
+    );
+
+    expect(
+      modules.toSorted((a, b) => a.name.localeCompare(b.name))
+    ).toStrictEqual([
+      { name: "app~bom", status: 200, bytes: encoded(bom), integrity: true },
+      {
+        name: "app~surrogate",
+        status: 200,
+        bytes: encoded(surrogate),
+        integrity: true,
+      },
+    ]);
   });
 
   it("refuses a frame manifest changed in R2, or moved from another build, and stages it again at the next open", async () => {

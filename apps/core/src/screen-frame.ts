@@ -261,14 +261,41 @@ const isManifestOf = async (
   );
 };
 
+// A module is staged, hashed, checked and served as the same UTF-8
+// bytes, never as a string read back: reading text drops a leading BOM,
+// and a lone surrogate doesn't survive encoding, so a hash of the string
+// staged and one of the text read would differ, and the screen fail on
+// every open. Its code is decoded only to hash, keeping a BOM.
+const moduleDecoder = new TextDecoder("utf-8", {
+  fatal: true,
+  ignoreBOM: true,
+});
+
 /** The hash a module is served under: of its name and its code. */
-const moduleHash = async (name: string, code: string): Promise<string> =>
+const codeHash = async (name: string, code: string): Promise<string> =>
   await sha256Hex(canonicalJson([name, code]));
 
+/**
+ * The hash of a module staged as `bytes`: of its name and its code as
+ * they decode. Null for bytes that aren't UTF-8, which core never stages.
+ */
+const moduleHash = async (
+  name: string,
+  bytes: Uint8Array
+): Promise<string | null> => {
+  let code: string;
+  try {
+    code = moduleDecoder.decode(bytes);
+  } catch {
+    return null;
+  }
+  return await codeHash(name, code);
+};
+
 /** A module's Subresource Integrity: the sha384 of the bytes served. */
-const moduleIntegrity = async (code: string): Promise<string> =>
+const moduleIntegrity = async (bytes: Uint8Array): Promise<string> =>
   `sha384-${toBase64(
-    new Uint8Array(await crypto.subtle.digest("SHA-384", encoder.encode(code)))
+    new Uint8Array(await crypto.subtle.digest("SHA-384", bytes))
   )}`;
 
 const day = 24 * 60 * 60 * 1000;
@@ -328,11 +355,13 @@ export const stageFrame = async (
   now = new Date()
 ): Promise<void> => {
   const named = await Promise.all(
-    Object.entries({ ...kit, ...modules }).map(async ([name, code]) => ({
-      name,
-      code,
-      hash: await moduleHash(name, code),
-    }))
+    Object.entries({ ...kit, ...modules }).map(async ([name, source]) => {
+      // Encoding makes any lone surrogate U+FFFD: hashed as it decodes,
+      // so as it is checked when served.
+      const bytes = encoder.encode(source);
+      const code = moduleDecoder.decode(bytes);
+      return { name, bytes, hash: await codeHash(name, code) };
+    })
   );
   const staged = await env.FILES.head(frameKey(artifact));
   if (
@@ -346,8 +375,8 @@ export const stageFrame = async (
     return;
   }
   await Promise.all(
-    named.map(async ({ name, code, hash }) => {
-      await env.FILES.put(moduleKey(hash), code, { customMetadata: { name } });
+    named.map(async ({ name, bytes, hash }) => {
+      await env.FILES.put(moduleKey(hash), bytes, { customMetadata: { name } });
     })
   );
   const manifest: FrameManifest = {
@@ -358,7 +387,8 @@ export const stageFrame = async (
     integrity: Object.fromEntries(
       await Promise.all(
         named.map(
-          async ({ code, hash }) => [hash, await moduleIntegrity(code)] as const
+          async ({ bytes, hash }) =>
+            [hash, await moduleIntegrity(bytes)] as const
         )
       )
     ),
@@ -477,9 +507,9 @@ export const screenModuleResponse = async (
   if (module === null) {
     return refused(404);
   }
-  const code = await module.text();
+  const bytes = new Uint8Array(await module.arrayBuffer());
   const name = module.customMetadata?.name;
-  if (name === undefined || (await moduleHash(name, code)) !== hash) {
+  if (name === undefined || (await moduleHash(name, bytes)) !== hash) {
     // Not what core staged under this address: never served. Gone, so
     // the frame's document finds it missing and the next open stages the
     // build again; meanwhile a miss nothing caches.
@@ -487,7 +517,7 @@ export const screenModuleResponse = async (
     await env.FILES.delete(moduleKey(hash));
     return refused(404, [], "no-store");
   }
-  return new Response(code, {
+  return new Response(bytes, {
     headers: {
       "content-type": "text/javascript; charset=utf-8",
       // The frame's origin is opaque, so its module requests are
