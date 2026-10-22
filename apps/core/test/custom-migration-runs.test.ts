@@ -1,8 +1,12 @@
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
+import { and, eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it, vi } from "vite-plus/test";
+import { z } from "zod";
 
 import { commitFiles, setCurrentVersion } from "../src/apps.ts";
+import { appCandidateReports, appCandidates } from "../src/db/core/schema.ts";
 import { requireStoreSchemaActive } from "../src/store-backfill.ts";
 import { racingDb } from "./apps.ts";
 import {
@@ -234,6 +238,21 @@ export default appTest({
       { timeout: 120_000, interval: 500 }
     );
     await setCurrentVersion(env, fixture.owner, fixture.app, 3);
+    // Its candidate's report said so before it was made current.
+    const report = await drizzle(env.DB)
+      .select({ report: appCandidateReports.report })
+      .from(appCandidateReports)
+      .innerJoin(
+        appCandidates,
+        eq(appCandidates.id, appCandidateReports.candidateId)
+      )
+      .where(
+        and(eq(appCandidates.appId, fixture.app), eq(appCandidates.version, 3))
+      )
+      .get();
+    const { rollback } = z
+      .object({ rollback: z.unknown() })
+      .parse(JSON.parse(report?.report ?? "{}"));
     const toFirst = await refusalOf(
       async () => await setCurrentVersion(env, fixture.owner, fixture.app, 1)
     );
@@ -269,6 +288,7 @@ export default appTest({
     );
 
     expect({
+      rollback,
       toFirst,
       status: await object.schemaStatus(store.id, fixture.firstSchema),
       toThird: toThird.currentVersion,
@@ -276,6 +296,11 @@ export default appTest({
       abandoned,
       withoutAbandoned,
     }).toStrictEqual({
+      rollback: {
+        to: 1,
+        eligible: false,
+        reason: "migration.rollback_incompatible",
+      },
       toFirst: {
         code: "migration.rollback_incompatible",
         details: { compatible: [3] },

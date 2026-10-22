@@ -465,9 +465,10 @@ export default appTest({
           .get();
         return z
           .object({
-            rollback: z.object({
+            rollback: z.strictObject({
               to: z.number().nullable(),
               eligible: z.boolean(),
+              reason: z.string().optional(),
             }),
           })
           .parse(JSON.parse(row?.report ?? "{}")).rollback;
@@ -478,8 +479,8 @@ export default appTest({
         damaged: await rollbackOf(damaged.app),
       }).toStrictEqual({
         kept: { to: 1, eligible: true },
-        revoked: { to: 1, eligible: false },
-        damaged: { to: 1, eligible: false },
+        revoked: { to: 1, eligible: false, reason: "release_not_runnable" },
+        damaged: { to: 1, eligible: false, reason: "version.artifact_corrupt" },
       });
     });
 

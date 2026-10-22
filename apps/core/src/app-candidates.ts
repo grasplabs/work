@@ -1,5 +1,6 @@
 import { compilerVersion, isAppLayout } from "@grasp-os/compiler";
 import { sdkProtocolVersion } from "@grasp-os/shared/app-releases";
+import type { ReleaseManifest } from "@grasp-os/shared/app-releases";
 import { appErrors, openCandidateStates } from "@grasp-os/shared/apps";
 import type { App, CandidateState } from "@grasp-os/shared/apps";
 import { createAuditEvent } from "@grasp-os/shared/audit";
@@ -512,32 +513,66 @@ const authorityOf = async (env: Env, row: CandidateRow) => {
   };
 };
 
+/** Whether the version a report says it replaces could run again, and why not. */
+type RollbackEligibility =
+  | { readonly eligible: true }
+  | { readonly eligible: false; readonly reason: string };
+
 /**
- * Whether `version` could be made current again: its release not
- * revoked and its store live (`releaseRunnable`), and, for one of spec 8's
+ * Whether `candidate` moves a store `replaced` binds on to another schema
+ * through one of its explicit migrations: made current, it switches that
+ * store (`makeCurrent`), and the version it replaces is refused there
+ * from then on (`migration.rollback_incompatible`, store-backfill.ts).
+ */
+const migratesPast = (
+  candidate: ReleaseManifest,
+  replaced: ReleaseManifest
+): boolean =>
+  candidate.dataStoreBindings.some(
+    (bound) =>
+      replaced.dataStoreBindings.some(
+        (before) =>
+          before.storeId === bound.storeId &&
+          before.schemaHash !== bound.schemaHash
+      ) &&
+      candidate.migrationEvidence.some(
+        ({ toSchema }) => toSchema === bound.schemaHash
+      )
+  );
+
+/**
+ * Whether `version` could be made current again once `candidate` (its
+ * sealed manifest, for one of spec 8's layout) is: its release not
+ * revoked and its store live (`releaseRunnable`); for one of spec 8's
  * layout, its release read back from storage, every artifact present and
- * as sealed (`readBackRelease`), as the database flags alone can't tell.
+ * as sealed (`readBackRelease`), as the database flags alone can't tell;
+ * and its store not migrated past it by the candidate (`migratesPast`).
  */
 const rollbackEligible = async (
   env: Env,
   app: AppId,
-  version: number
-): Promise<boolean> => {
+  version: number,
+  candidate: ReleaseManifest | undefined
+): Promise<RollbackEligibility> => {
   if (!(await releaseRunnable(env, app, version))) {
-    return false;
+    return { eligible: false, reason: "release_not_runnable" };
   }
   if (!isAppLayout(await versionFiles(env, app, version))) {
-    return true;
+    return { eligible: true };
   }
+  let replaced: ReleaseManifest;
   try {
-    await readBackRelease(env, app, version);
-    return true;
+    ({ manifest: replaced } = await readBackRelease(env, app, version));
   } catch (error) {
     if (isExpectedError(error)) {
-      return false;
+      return { eligible: false, reason: error.code };
     }
     throw error;
   }
+  if (candidate !== undefined && migratesPast(candidate, replaced)) {
+    return { eligible: false, reason: "migration.rollback_incompatible" };
+  }
+  return { eligible: true };
 };
 
 /**
@@ -552,8 +587,9 @@ const rollbackEligible = async (
  * - the App's authority as it was (`authorityOf`);
  * - the environment: compiler, SDK protocol and platform release;
  * - whether the version it replaces could run again: its release not
- *   revoked and its store live (`releaseRunnable`), and, for one of spec
- *   8's layout, read back from storage as this one is (`rollbackEligible`).
+ *   revoked and its store live (`releaseRunnable`), for one of spec 8's
+ *   layout read back from storage as this one is, and its store not
+ *   migrated past it by this one (`rollbackEligible`), with why not.
  */
 const reportOf = async (
   env: Env,
@@ -589,6 +625,9 @@ const reportOf = async (
             ),
             artifacts: {
               count: sealed.manifest.artifacts.length,
+              // A digest of the manifest's entries (path, sha256, size),
+              // not of the bytes read: `readBackRelease` above re-hashed
+              // every artifact's bytes against them (`verifiedRelease`).
               readBack: await artifactDigest(sealed.manifest),
             },
           },
@@ -614,7 +653,7 @@ const reportOf = async (
         ? { to: null, eligible: false }
         : {
             to: replaces,
-            eligible: await rollbackEligible(env, app, replaces),
+            ...(await rollbackEligible(env, app, replaces, sealed?.manifest)),
           },
   });
 };
