@@ -18,6 +18,7 @@ import {
   RocketIcon,
   SparklesIcon,
   UserRoundIcon,
+  UsersRoundIcon,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -46,6 +47,7 @@ type AreaPath =
   | "/onboarding/interviewers"
   | "/onboarding/ai-use"
   | "/onboarding/open"
+  | "/onboarding/interviews"
   | "/onboarding/notes"
   | "/onboarding/log";
 
@@ -92,6 +94,11 @@ const sections: readonly AreaSection[] = [
     to: "/onboarding/open",
     label: msg({ message: "The go", context: "onboarding area section" }),
     icon: RocketIcon,
+  },
+  {
+    to: "/onboarding/interviews",
+    label: msg({ message: "Interviews", context: "onboarding area section" }),
+    icon: UsersRoundIcon,
   },
   {
     to: "/onboarding/notes",

@@ -24,6 +24,7 @@ import type {
 import { errorFields, log } from "@grasp-os/shared/log";
 import {
   agreementsSchema,
+  firstInterviewer,
   planSchema,
   remindAfterWorkingDays,
 } from "@grasp-os/shared/onboarding";
@@ -89,6 +90,7 @@ import {
   drawnWorks,
   events,
   interviewStates,
+  interviewTexts,
   interviewSettings,
   interviews,
   linkCodes,
@@ -655,6 +657,10 @@ export class Onboarding extends DurableObject<Env> {
           .where(eq(interviewStates.person, person))
           .run();
         this.#db
+          .delete(interviewTexts)
+          .where(eq(interviewTexts.person, person))
+          .run();
+        this.#db
           .delete(interviewSettings)
           .where(eq(interviewSettings.person, person))
           .run();
@@ -941,12 +947,15 @@ export class Onboarding extends DurableObject<Env> {
    * what Stephen knows of the company beforehand, and what earlier
    * interviews about their work left open. Never from the page,
    * which could say anything. `work` stays empty until the team's map
-   * names their piece of work: Stephen then asks which one it is.
+   * names their piece of work: Stephen then asks which one it is. With
+   * `texts`, the marks of the interviewer's text for each kind, the one
+   * this turn is held with is kept with the interview.
    */
   turnContext(
     secretMark: string,
     keyMark: string,
-    now: string = new Date().toISOString()
+    now: string = new Date().toISOString(),
+    texts?: Record<InterviewKind, string>
   ): LinkAnswer<TurnContext> {
     const found = this.#onLink(secretMark, now, "save");
     if (!found.ok) {
@@ -961,6 +970,15 @@ export class Onboarding extends DurableObject<Env> {
       ({ id }) => id === team?.lead && id !== person.id
     );
     const kind = leads(roster, person.id) ? "lead" : "own";
+    if (texts !== undefined) {
+      // The text this turn is held with, kept by its mark: the first time
+      // it spoke in this interview is when it came in.
+      this.#db
+        .insert(interviewTexts)
+        .values({ person: person.id, mark: texts[kind], at: now })
+        .onConflictDoNothing()
+        .run();
+    }
     const members =
       kind === "lead"
         ? roster.people.filter(
@@ -1787,7 +1805,10 @@ export class Onboarding extends DurableObject<Env> {
     return { entries, teams: named };
   }
 
-  /** Someone's interview for Grasp's staff, with the link's random id to audit its read by. */
+  /**
+   * Someone's interview for Grasp's staff, with who held it and the texts
+   * it was held with, and the link's random id to audit its read by.
+   */
   transcriptOf(
     person: string
   ): (StaffTranscript & { interviewId: string }) | null {
@@ -1802,15 +1823,143 @@ export class Onboarding extends DurableObject<Env> {
       return null;
     }
     const state = this.#interviews().get(person);
+    const progress = this.#held(person);
+    const texts = this.#db
+      .select({ mark: interviewTexts.mark })
+      .from(interviewTexts)
+      .where(eq(interviewTexts.person, person))
+      .orderBy(asc(interviewTexts.at), asc(interviewTexts.mark))
+      .all();
     return {
       person,
       name: one.name,
       team: roster?.teams.find(({ id }) => id === one.team)?.name ?? "",
       startedAt: state?.startedAt ?? null,
       completedAt: state?.completedAt ?? null,
-      progress: this.#held(person),
+      progress,
+      interviewer:
+        progress === null ? null : (progress.interviewer ?? firstInterviewer),
+      texts: texts.map(({ mark }) => mark),
       interviewId: code.linkId,
     };
+  }
+
+  /**
+   * Someone's link's random id, to audit a read of their link by: none
+   * for anyone not on the roster.
+   */
+  linkIdOf(person: string): string | null {
+    if (!this.#onRoster(person)) {
+      return null;
+    }
+    const [code] = this.#db
+      .select({ linkId: linkCodes.linkId })
+      .from(linkCodes)
+      .where(eq(linkCodes.person, person))
+      .all();
+    return code?.linkId ?? null;
+  }
+
+  /**
+   * Notes the one reminder as sent by hand, by Grasp's staff, to each of
+   * `whom` whose link is out, who hasn't agreed to their interview and
+   * wasn't reminded before: once, ever. Returns who it was noted for. The
+   * audit log has how many, never who.
+   */
+  remind(
+    whom: readonly string[],
+    by: AuditActor,
+    now: string = new Date().toISOString()
+  ): string[] {
+    const wanted = new Set(whom);
+    const talked = this.#interviews();
+    const due = this.#db
+      .select({ person: links.person })
+      .from(links)
+      .where(isNull(links.remindedAt))
+      .all()
+      .map(({ person }) => person)
+      .filter(
+        (person) =>
+          wanted.has(person) &&
+          (talked.get(person)?.completedAt ?? null) === null
+      );
+    if (due.length === 0) {
+      return [];
+    }
+    this.ctx.storage.transactionSync(() => {
+      for (const person of due) {
+        this.#db
+          .update(links)
+          .set({ remindedAt: now })
+          .where(eq(links.person, person))
+          .run();
+        this.#noted(person, "interview.reminded", now, whoIs(by));
+      }
+      this.#changed(by, "onboarding.reminded", { count: due.length });
+    });
+    this.#deliverAudit();
+    return due;
+  }
+
+  /**
+   * A team that didn't take part takes part from now on, as the company's
+   * list then says: its lead's link goes out first, by the plan. False for
+   * a team not on the list.
+   */
+  askIn(team: string, by: AuditActor): boolean {
+    const [row] = this.#db
+      .select({ off: teams.off })
+      .from(teams)
+      .where(eq(teams.id, team))
+      .all();
+    if (row === undefined) {
+      return false;
+    }
+    if (row.off) {
+      this.ctx.storage.transactionSync(() => {
+        this.#db
+          .update(teams)
+          .set({ off: false })
+          .where(eq(teams.id, team))
+          .run();
+        this.#changed(by, "onboarding.team.asked_in", {});
+      });
+      this.#deliverAudit();
+    }
+    return true;
+  }
+
+  /**
+   * Deletes someone's interview because they asked Grasp to: what they
+   * said is gone at once, a copy left open can't save it back, and their
+   * link opens a new one on the device it is on. False when no link of
+   * theirs went out. The audit log has that staff did, not for whom.
+   */
+  deleteOnRequest(
+    person: string,
+    by: AuditActor,
+    now: string = new Date().toISOString()
+  ): boolean {
+    const [link] = this.#db
+      .select()
+      .from(links)
+      .where(eq(links.person, person))
+      .all();
+    if (link === undefined) {
+      return false;
+    }
+    this.ctx.storage.transactionSync(() => {
+      this.#forget(person, now, "interview.deleted", whoIs(by));
+      this.#db
+        .update(links)
+        .set({ deletedAt: now, version: link.version + 1 })
+        .where(eq(links.person, person))
+        .run();
+      this.#changed(by, "onboarding.interview.deleted", {});
+    });
+    this.#deliverAudit();
+    return true;
   }
 
   /** What Grasp's staff see of where the interviews stand: exact, by person. */
@@ -2946,6 +3095,10 @@ export class Onboarding extends DurableObject<Env> {
   /** Removes what someone said and where their interview stood, and notes why. */
   #forget(person: string, now: string, what: string, by: string): void {
     this.#db.delete(interviews).where(eq(interviews.person, person)).run();
+    this.#db
+      .delete(interviewTexts)
+      .where(eq(interviewTexts.person, person))
+      .run();
     this.#db
       .delete(interviewStates)
       .where(eq(interviewStates.person, person))

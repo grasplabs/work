@@ -1,8 +1,11 @@
+import { interviewApiPath } from "@grasp-os/shared/interview-links";
+import type { InterviewProgress } from "@grasp-os/shared/interview-links";
 import { expect } from "@playwright/test";
 
 import { test } from "./csp.ts";
-import { apiOf, signInAs, signInStaff, signInTo } from "./people.ts";
+import { apiOf, peopleIn, signInAs, signInStaff, signInTo } from "./people.ts";
 import type { Person } from "./people.ts";
+import { origin } from "./stack.ts";
 
 // What only Grasp's staff do in a client's onboarding (GRA-320), end to
 // end: they put the agreements in place, and the links that waited for
@@ -84,6 +87,175 @@ test("staff put the agreements in place, and the links that waited go out", asyn
 
   await page.goto("/onboarding");
   await expect(page.getByText("Links out: 2 of 3")).toBeVisible();
+  expect(cspViolations).toStrictEqual([]);
+});
+
+/** What someone said in their interview, with what Stephen marked in it. */
+const said = "Every morning I open the invoices in Exact first.";
+
+/** Lea's interview, finished and agreed to, as her page keeps it. */
+const leasInterview = (): InterviewProgress => ({
+  person: "completed",
+  told: true,
+  mode: "type",
+  lines: [
+    { from: "stephen", text: "What do you do first in the morning?" },
+    {
+      from: "person",
+      text: said,
+      typed: true,
+      marks: [{ quote: "open the invoices in Exact", tag: "system" }],
+    },
+  ],
+  facts: [
+    {
+      id: "f1",
+      tag: "system",
+      text: "You open the invoices in Exact first.",
+      record: "Open the invoices in Exact first.",
+      agreed: true,
+    },
+  ],
+  phase: "readback",
+  wants: "end",
+  startedAt: Date.now() - 20 * 60 * 1000,
+  confirmed: 1,
+  adding: false,
+  addedAt: 0,
+  rating: 5,
+  interviewer: "claire",
+});
+
+/** One call of the interview page to core. */
+const interviewCall = async (body: object): Promise<unknown> => {
+  const response = await fetch(new URL(interviewApiPath, origin), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  expect(response.ok).toBe(true);
+  return await response.json();
+};
+
+/** Keeps `progress` on a person's link, from a device that opens it as their page does. */
+const interviewOn = async (
+  path: string,
+  progress: InterviewProgress
+): Promise<void> => {
+  const secret = path.split("#")[1] ?? "";
+  const session = await interviewCall({ action: "session", secret });
+  const key =
+    typeof session === "object" &&
+    session !== null &&
+    "key" in session &&
+    typeof session.key === "string"
+      ? session.key
+      : "";
+  await interviewCall({ action: "save", secret, key, version: 0, progress });
+};
+
+test("staff open someone's transcript, and the audit log has the read; the company's admin reaches none of it", async ({
+  page,
+  cspViolations,
+}) => {
+  const staff = await signInStaff();
+  const { admin } = peopleIn("staffInterviews");
+  const since = new Date().toISOString();
+  // Lea, the lead whose link the test before sent out, talks with Claire.
+  const { core, api } = apiOf(staff);
+  let lea = "";
+  try {
+    const { roster, links } = await api.onboardingStaff.interviews();
+    lea =
+      roster?.people.find(
+        (person) =>
+          person.name === "Lea" &&
+          links.some(
+            (link) => link.person === person.id && link.sentAt !== null
+          )
+      )?.id ?? "";
+    await interviewOn(await api.onboardingStaff.link(lea), leasInterview());
+  } finally {
+    core[Symbol.dispose]();
+  }
+
+  await signInTo(page.context(), staff);
+  await page.goto("/onboarding");
+  await page
+    .getByRole("complementary", { name: "Onboarding sections" })
+    .getByRole("link", { name: "Interviews" })
+    .click();
+  await expect(
+    page.getByRole("list", { name: "How far everyone has come" })
+  ).toBeVisible();
+  await page
+    .getByRole("navigation", { name: "Interviews" })
+    .getByRole("link", { name: "Transcripts" })
+    .click();
+  await page.getByRole("link", { name: "Read the transcript of Lea" }).click();
+
+  const conversation = page.getByRole("region", { name: "The conversation" });
+  await expect(conversation).toContainText(said);
+  // What Claire wrote down is marked where Lea said it, and kept as the record has it.
+  await expect(conversation.locator("mark")).toHaveText(
+    "open the invoices in Exact"
+  );
+  await expect(
+    page.getByRole("region", { name: "What Claire wrote down" })
+  ).toContainText("Open the invoices in Exact first.");
+
+  // The read is in the audit log, by the staff member, once the log has
+  // taken it from core's outbox.
+  const reader = apiOf(staff);
+  try {
+    await expect
+      .poll(async () => {
+        const { records } = await reader.api.audit.search({
+          action: "onboarding.transcript.read",
+          from: since,
+        });
+        return records.map(({ event }) => [
+          event?.actor.type,
+          event?.target?.type,
+        ]);
+      })
+      .toStrictEqual([["staff", "interview"]]);
+  } finally {
+    reader.core[Symbol.dispose]();
+  }
+
+  // The company's admin: the area takes them home, and core refuses them.
+  await page.context().clearCookies();
+  await signInTo(page.context(), admin);
+  await page.goto(`/onboarding/interviews/${lea}`);
+  await expect(page).not.toHaveURL(/\/onboarding/u);
+  await expect(page.getByText(said)).toHaveCount(0);
+  const company = apiOf(admin);
+  try {
+    const refused = await Promise.all(
+      [
+        company.api.onboardingStaff.interviews(),
+        company.api.onboardingStaff.transcript(lea),
+        company.api.onboardingStaff.link(lea),
+      ].map(async (call) => {
+        try {
+          await call;
+          return "answered";
+        } catch (error) {
+          return error instanceof Error && "code" in error
+            ? String(error.code)
+            : "failed";
+        }
+      })
+    );
+    expect(refused).toStrictEqual([
+      "onboarding.staff_only",
+      "onboarding.staff_only",
+      "onboarding.staff_only",
+    ]);
+  } finally {
+    company.core[Symbol.dispose]();
+  }
   expect(cspViolations).toStrictEqual([]);
 });
 
