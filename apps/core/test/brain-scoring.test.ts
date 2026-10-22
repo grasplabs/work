@@ -625,6 +625,40 @@ const request = (...calls: string[]) => ({
   },
 });
 
+/**
+ * A chat completions request (Workers AI's models): the system prompt is
+ * a message, each call rides on the model's message, and each result is a
+ * message of its own naming its call.
+ */
+const completionsRequest = (...calls: string[]) => ({
+  url: "https://gateway.test/workers-ai/v1/chat/completions",
+  headers: new Headers(),
+  signal: new AbortController().signal,
+  body: {
+    messages: [
+      { role: "system", content: "You are the agent." },
+      { role: "user", content: "Who owns the lease?" },
+      ...calls.flatMap((call) => [
+        {
+          role: "assistant",
+          content: null,
+          tool_calls: [
+            {
+              id: call,
+              type: "function",
+              function: {
+                name: "executeCode",
+                arguments: JSON.stringify({ code: `return "${call}";` }),
+              },
+            },
+          ],
+        },
+        { role: "tool", tool_call_id: call, content: "x" },
+      ]),
+    ],
+  },
+});
+
 /** Each tool result's call and backing, in order. */
 const backings = (parts: ReturnType<typeof transcriptWithReads>) =>
   parts.flatMap(({ by, call, backing }) =>
@@ -784,6 +818,24 @@ describe("backing tool results with reads", () => {
         ["a", []],
         ["b", []],
       ],
+    });
+  });
+
+  it("reads chat completions as Anthropic's messages: who wrote what, and which call each result answers", () => {
+    const parts = transcriptWithReads(
+      [completionsRequest(), completionsRequest("a")],
+      [[], ["read by a"]]
+    );
+    expect({
+      backed: backings(parts),
+      by: parts.slice(-4).map(({ by }) => by),
+      system: parts.at(-4)?.text,
+      code: parts.at(-2)?.text,
+    }).toStrictEqual({
+      backed: [["a", ["read by a"]]],
+      by: ["source", "source", "model", "tool"],
+      system: "You are the agent.",
+      code: 'return "a";',
     });
   });
 });
