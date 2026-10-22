@@ -292,6 +292,8 @@ const sealedTaskSchema = z.discriminatedUnion("kind", [
     fork: z.strictObject({
       branches: z.int().min(1).max(64),
       compete: z.boolean(),
+      /** How many branches run at once (`metadata.grasp.concurrency`). */
+      concurrency: z.int().min(1).max(8),
     }),
     // Its input.from, of the slots its module evaluates (generate.ts).
     inputFrom: templateSchema.optional(),
@@ -309,6 +311,8 @@ const sealedTaskSchema = z.discriminatedUnion("kind", [
       each: z.string().min(1).max(64),
       at: z.string().min(1).max(64),
       while: z.int().min(0).optional(),
+      /** How many items run at once (`metadata.grasp.concurrency`). */
+      concurrency: z.int().min(1).max(8),
     }),
     // Its input.from, of the slots its module evaluates (generate.ts).
     inputFrom: templateSchema.optional(),

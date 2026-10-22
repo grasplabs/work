@@ -116,12 +116,17 @@ describe("fork tasks of JSON workflows", { timeout: 60_000 }, () => {
     ];
     const exited = await published(by, leaving("exit"));
     const ended = await published(by, leaving("end"));
+    const endedRun = await ranFor(by, ended.workflow.id);
+    const completed = await completedSteps(endedRun.id);
     expect({
       exited: endOf(await ranFor(by, exited.workflow.id)),
-      ended: endOf(await ranFor(by, ended.workflow.id)),
+      ended: endOf(endedRun),
+      // The branch after the one that ended the workflow never started.
+      after: completed.get("task:other@both.1") ?? 0,
     }).toStrictEqual({
       exited: { status: "completed", output: { status: "left,other!" } },
       ended: { status: "completed", output: { status: "left" } },
+      after: 0,
     });
   });
 
@@ -207,23 +212,6 @@ describe("fork tasks of JSON workflows", { timeout: 60_000 }, () => {
       late: 0,
     });
   });
-
-  it("don't lower branches at once yet", async () => {
-    const by = await builder();
-    const { version } = await published(by, [
-      {
-        both: {
-          fork: { branches: [branch("only", '${ {status: "x"} }')] },
-          metadata: { grasp: { concurrency: 2 } },
-        },
-      },
-    ]);
-    expect(
-      version.build.executable
-        ? []
-        : version.build.unsupported.map(({ feature }) => feature)
-    ).toStrictEqual(["fork:concurrency"]);
-  });
 });
 
 const ada = { input: { input: { who: "Ada" }, context: {} } };
@@ -257,6 +245,25 @@ describe("a run's host, against a forged module's fork", () => {
         })
       );
     };
+    /** The race step settling on `branch`, recording `recorded` of it. */
+    const settling = async (
+      which: number,
+      recorded: (settled: unknown) => unknown
+    ) => {
+      const host = await hostOf(by, workflow.id);
+      return codeOf(
+        await host.do("task:pick", ada, async (attempt) => {
+          const settled = await attempt.settle({ branch: which });
+          return {
+            ok: true,
+            value: {
+              output: null,
+              branch: recorded(settled.ok ? settled.value : null),
+            },
+          };
+        })
+      );
+    };
     expect({
       inBranch: await forged("task:right@pick.1", {
         output: { status: "right" },
@@ -267,19 +274,19 @@ describe("a run's host, against a forged module's fork", () => {
       otherBranchTask: await forged("task:right", {
         output: { status: "right" },
       }),
-      winner: await forged("task:pick", { output: { status: "x" }, branch: 1 }),
-      noSuchWinner: await forged("task:pick", {
-        output: { status: "x" },
-        branch: 2,
-      }),
-      noWinner: await forged("task:pick", { output: { status: "x" } }),
+      // A race's record names the branch the host settled it on.
+      winner: await settling(1, (settled) => settled),
+      otherWinner: await settling(1, () => 0),
+      noSuchWinner: await settling(2, (settled) => settled),
+      unsettled: await forged("task:pick", { output: null, branch: 1 }),
     }).toStrictEqual({
       inBranch: "ok",
       pastBranches: "workflow.invalid",
       otherBranchTask: "workflow.invalid",
       winner: "ok",
+      otherWinner: "workflow.invalid",
       noSuchWinner: "workflow.invalid",
-      noWinner: "workflow.invalid",
+      unsettled: "workflow.invalid",
     });
   });
 });

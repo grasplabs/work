@@ -15,6 +15,7 @@ import type { Settled } from "../src/workflows/code.ts";
 import { runObjectOf } from "../src/workflows/engine.ts";
 import type { RunStep } from "../src/workflows/host.ts";
 import { ResourceRunHost } from "../src/workflows/resource-host.ts";
+import type { ScopeFences } from "../src/workflows/resource-host.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { admittedFreely } from "./runs.ts";
 import { unique } from "./sign-in.ts";
@@ -131,7 +132,16 @@ export const completedSteps = async (
 /** A host of a run of version 1 of workflow `id`, its steps run at once. */
 export const hostOf = async (
   by: Acting,
-  id: string
+  id: string,
+  {
+    step: given,
+    fences,
+  }: {
+    /** The engine's steps, if not ones that run each step at once. */
+    step?: RunStep;
+    /** The run's settled scopes, if kept beyond this host. */
+    fences?: ScopeFences;
+  } = {}
 ): Promise<ResourceRunHost> => {
   const manifest = await env.DB.prepare(
     "SELECT manifest_hash AS hash FROM workflow_resource_versions WHERE workflow_resource_id = ? AND version = 1"
@@ -140,7 +150,7 @@ export const hostOf = async (
     .first<{ hash: string }>();
   const build = await loadWorkflowBuild(env, id, 1, manifest?.hash ?? "");
   let count = 0;
-  const step: RunStep = {
+  const step: RunStep = given ?? {
     do: async (name, _config, fn) => {
       count += 1;
       return await fn({ attempt: 1, idempotencyKey: `key:${name}:${count}` });
@@ -179,6 +189,7 @@ export const hostOf = async (
     },
     {
       leaseOf: () => ({ generation: 1, deadline: Date.now() + 60_000 }),
+      ...(fences === undefined ? {} : { fences }),
       tampered: () => {
         // A refusal is what each test reads: nothing else to do with it.
       },

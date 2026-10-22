@@ -132,6 +132,8 @@ export const workflowResourceErrors = defineErrorFamily({
     "The workflow's result doesn't match its output schema, so the run failed.",
   "workflow.task_data_invalid":
     "A task's input, output or exported context doesn't match the task's schema, so the run failed.",
+  "workflow.branch_cancelled":
+    "Another branch settled this branch's scope (a race's winner, or an end), so this branch's next step didn't run.",
   "workflow.collection_invalid":
     "A for task's collection isn't a list of at most 1,000 items, so the run failed.",
   "workflow.run_unavailable": "This workflow has no such run.",

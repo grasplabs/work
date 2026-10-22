@@ -20,7 +20,11 @@ import { pinOf } from "./engine.ts";
 import { newAiCalls } from "./host.ts";
 import type { AiCalls, BusyRefusals } from "./host.ts";
 import { sharesReleased } from "./quotas.ts";
-import type { ActionModelCalls, TriedOnceMarks } from "./resource-host.ts";
+import type {
+  ActionModelCalls,
+  ScopeFences,
+  TriedOnceMarks,
+} from "./resource-host.ts";
 import { projectResourceRun } from "./resource-runs.ts";
 import { completeCancel, projectStatus } from "./runs.ts";
 import { wakeQueueFronts } from "./share-wakes.ts";
@@ -159,6 +163,79 @@ const keptFailureSchema = z.object({
   name: z.string(),
   message: z.string(),
   code: z.string().optional(),
+});
+
+/**
+ * The settled scopes of the run's items and branches (resource-host.ts,
+ * `ScopeFences`): a table of its object's SQLite beside the engine's
+ * journal, dropped with it, one row a scope of the run's current
+ * execution, so a restarted run settles its scopes anew. Only the host
+ * writes it, never the run's code.
+ */
+const fencesTable = "grasp_scope_fences";
+
+/** The run's current execution, as the engine keeps it. */
+const executionOf = (sql: SqlStorage): string | undefined => {
+  if (!runIsThere(sql)) {
+    return undefined;
+  }
+  const [row] = sql
+    .exec<{ execution: string }>("SELECT execution_uid AS execution FROM run")
+    .toArray();
+  return row?.execution;
+};
+
+/** Whether the table of settled scopes is there yet. */
+const hasFences = (sql: SqlStorage): boolean =>
+  sql
+    .exec(
+      "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+      fencesTable
+    )
+    .toArray().length > 0;
+
+/** The branch scope `place` of `execution` settled on, if it did. */
+const fenceOf = (
+  sql: SqlStorage,
+  execution: string,
+  place: string
+): number | undefined => {
+  if (!hasFences(sql)) {
+    return undefined;
+  }
+  const [row] = sql
+    .exec<{ branch: number }>(
+      `SELECT branch FROM ${fencesTable} WHERE execution = ? AND place = ?`,
+      execution,
+      place
+    )
+    .toArray();
+  return row?.branch;
+};
+
+/** The run's settled scopes, kept with it (`fencesTable`). */
+export const fencesIn = (sql: SqlStorage): ScopeFences => ({
+  settle: (place, branch) => {
+    const execution = executionOf(sql);
+    if (execution === undefined) {
+      return branch;
+    }
+    sql.exec(
+      `CREATE TABLE IF NOT EXISTS ${fencesTable} (execution TEXT NOT NULL, place TEXT NOT NULL, branch INTEGER NOT NULL, PRIMARY KEY (execution, place))`
+    );
+    // The first writer's: a scope settles once, whoever asks again.
+    sql.exec(
+      `INSERT OR IGNORE INTO ${fencesTable} (execution, place, branch) VALUES (?, ?, ?)`,
+      execution,
+      place,
+      branch
+    );
+    return fenceOf(sql, execution, place) ?? branch;
+  },
+  settled: (place) => {
+    const execution = executionOf(sql);
+    return execution === undefined ? undefined : fenceOf(sql, execution, place);
+  },
 });
 
 /** The run's tried-once attempts, kept with it (`triedOnceTable`). */
@@ -403,6 +480,7 @@ export class WorkflowRuns extends WorkflowRun<Env> {
         return await runPinned(this.env, pin, event, step, {
           busyRefusals: busyRefusalsIn(this.ctx.storage.sql),
           triedOnce: triedOnceIn(this.ctx.storage.sql),
+          fences: fencesIn(this.ctx.storage.sql),
           modelCalls: modelCallsIn(this.ctx.storage.sql),
           aiCalls: this.#aiCalls,
           leaseOf: (key, attempt) => this.#leaseOf(key, attempt),

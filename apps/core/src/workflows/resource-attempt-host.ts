@@ -10,6 +10,7 @@ export interface AttemptCalls {
   call: (frame: unknown) => Promise<Settled<Json>>;
   until: (frame: unknown) => Promise<Settled<number>>;
   items: (frame: unknown) => Promise<Settled<Json[]>>;
+  settle: (settled: unknown) => Promise<Settled<number>>;
 }
 
 /**
@@ -51,5 +52,10 @@ export class ResourceAttemptHost extends RpcTarget {
   /** Resolves a `for` task's items, as the build sealed them, on its input. */
   async items(frame: unknown): Promise<Settled<Json[]>> {
     return await this.#calls.items(frame);
+  }
+
+  /** Settles a scope of items or branches on one of them, once. */
+  async settle(settled: unknown): Promise<Settled<number>> {
+    return await this.#calls.settle(settled);
   }
 }

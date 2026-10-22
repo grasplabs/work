@@ -247,14 +247,19 @@ describe("sequential for loops of JSON workflows", { timeout: 60_000 }, () => {
     ];
     const exited = await published(by, looping("exit"));
     const ended = await published(by, looping("end"));
+    const endedRun = await ranFor(by, ended.workflow.id);
+    const completed = await completedSteps(endedRun.id);
     expect({
       exited: endOf(await ranFor(by, exited.workflow.id)),
-      ended: endOf(await ranFor(by, ended.workflow.id)),
+      ended: endOf(endedRun),
+      // The item after the one that ended the workflow never started.
+      after: completed.get("task:gate@sum.3") ?? 0,
     }).toStrictEqual({
       // 1 + 2 + 4: the third item left at its exit.
       exited: { status: "completed", output: { status: "7" } },
       // The workflow's output where its end left it: nothing after ran.
       ended: { status: "completed", output: { status: "ended" } },
+      after: 0,
     });
   });
 
@@ -408,7 +413,7 @@ describe("sequential for loops of JSON workflows", { timeout: 60_000 }, () => {
     }).toStrictEqual({ sdkLoop: true, statements: false });
   });
 
-  it("don't lower items at once, items' own keys or loops nested past eight levels yet", async () => {
+  it("don't lower items' own keys, loops nested past eight levels, or step names past what the engine takes", async () => {
     const by = await builder();
     const unsupportedOf = async (task: unknown) => {
       const { version } = await published(by, [task]);
@@ -417,14 +422,12 @@ describe("sequential for loops of JSON workflows", { timeout: 60_000 }, () => {
         : version.build.unsupported.map(({ feature }) => feature);
     };
     expect({
-      concurrent: await unsupportedOf(loop({ concurrency: 2 })),
       keyed: await unsupportedOf(loop({ key: "${ $item }" })),
       eight: await unsupportedOf(nested(8)),
       nine: await unsupportedOf(nested(9)),
       // Step names past what the engine takes, once every loop is named.
       longNames: await unsupportedOf(longNamed()),
     }).toStrictEqual({
-      concurrent: ["for:concurrency"],
       keyed: ["for:key"],
       eight: [],
       nine: ["for:depth"],

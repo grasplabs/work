@@ -325,6 +325,8 @@ export interface GeneratedTask {
     readonly branches: number;
     /** Whether they race: the first that succeeds wins. */
     readonly compete: boolean;
+    /** How many of them run at once (`metadata.grasp.concurrency`). */
+    readonly concurrency: number;
   };
   readonly loop?: {
     readonly in: CallTemplate;
@@ -332,6 +334,8 @@ export interface GeneratedTask {
     readonly each: string;
     readonly at: string;
     readonly while?: number;
+    /** How many items run at once (`metadata.grasp.concurrency`). */
+    readonly concurrency: number;
   };
   /**
    * Its durable steps (`task:<id>` for a `set`, `switch` or call; `enter:<id>`
@@ -1676,10 +1680,19 @@ const graspMetadataOf = (task: JsonObject): JsonObject | undefined =>
     : undefined;
 
 /**
- * Refuses what of `for` task `item` isn't lowered yet: items at once
- * (`metadata.grasp.concurrency` above 1, GRA-276's next slice) and items'
- * own keys (`metadata.grasp.key`): its items are identified by their
- * index in the collection its enter step records. Whether anything was.
+ * How many of task `task`'s items or branches run at once: its
+ * `metadata.grasp.concurrency` (validation holds it to 1..8), 1 if unset.
+ */
+const concurrencyOf = (task: JsonObject): number => {
+  const grasp = graspMetadataOf(task);
+  return typeof grasp?.concurrency === "number" ? grasp.concurrency : 1;
+};
+
+/**
+ * Refuses what of `for` task `item` isn't lowered yet: items' own keys
+ * (`metadata.grasp.key`, GRA-952): its items are identified by their
+ * index in the collection its enter step records; and loops nested past
+ * the scopes a step's name holds. Whether anything was.
  */
 const refusedLoop = (emitter: Emitter, item: ListTask): boolean => {
   const grasp = graspMetadataOf(item.task);
@@ -1688,18 +1701,6 @@ const refusedLoop = (emitter: Emitter, item: ListTask): boolean => {
     "grasp"
   );
   let refused = false;
-  if (
-    grasp !== undefined &&
-    typeof grasp.concurrency === "number" &&
-    grasp.concurrency > 1
-  ) {
-    emitter.refusals.add(
-      pointerJoin(graspPointer, "concurrency"),
-      "for:concurrency",
-      item.id
-    );
-    refused = true;
-  }
   if (grasp !== undefined && Object.hasOwn(grasp, "key")) {
     emitter.refusals.add(pointerJoin(graspPointer, "key"), "for:key", item.id);
     refused = true;
@@ -1714,28 +1715,11 @@ const refusedLoop = (emitter: Emitter, item: ListTask): boolean => {
 };
 
 /**
- * Refuses what of `fork` task `item` isn't lowered yet: branches at once
- * (`metadata.grasp.concurrency` above 1, GRA-956) and forks nested past
- * the scopes a step's name holds. Whether anything was.
+ * Refuses what of `fork` task `item` isn't lowered: forks nested past the
+ * scopes a step's name holds. Whether anything was.
  */
 const refusedFork = (emitter: Emitter, item: ListTask): boolean => {
-  const grasp = graspMetadataOf(item.task);
   let refused = false;
-  if (
-    grasp !== undefined &&
-    typeof grasp.concurrency === "number" &&
-    grasp.concurrency > 1
-  ) {
-    emitter.refusals.add(
-      pointerJoin(
-        pointerJoin(pointerJoin(item.pointer, "metadata"), "grasp"),
-        "concurrency"
-      ),
-      "fork:concurrency",
-      item.id
-    );
-    refused = true;
-  }
   if (emitter.scope.length >= maxLoopDepth) {
     emitter.refusals.add(item.pointer, "fork:depth", item.id);
     refused = true;
@@ -1849,6 +1833,13 @@ const lowerFor = (
     members.push(`while: ${condition}`);
     steps.push("item");
   }
+  // Items at once settle an `end` in one of them in a step of the loop's
+  // own (`task:<id>`), which fences the others (resource-host.ts).
+  const concurrency = concurrencyOf(task);
+  if (concurrency > 1) {
+    steps.push("task");
+    members.push(`concurrency: ${literal(concurrency)}`);
+  }
   if (stages.leave.length > 0) {
     steps.push("leave");
   }
@@ -1863,6 +1854,7 @@ const lowerFor = (
       each,
       at,
       ...(whileSlot === undefined ? {} : { while: whileSlot }),
+      concurrency,
     },
     ...(inputFrom === undefined ? {} : { inputFrom }),
   });
@@ -1922,10 +1914,13 @@ const lowerFork = (
   const branchesPointer = pointerJoin(pointerJoin(pointer, "fork"), "branches");
   const branches = Array.isArray(fork.branches) ? fork.branches : [];
   const steps: TaskStep[] = [];
+  const concurrency = concurrencyOf(task);
   if (stages.enter.length > 0) {
     steps.push("enter");
   }
-  if (compete) {
+  // A race's winner, or an `end` in branches at once, settles in a step of
+  // the fork's own (`task:<id>`), which fences the other branches.
+  if (compete || concurrency > 1) {
     steps.push("task");
   }
   if (stages.leave.length > 0) {
@@ -1936,7 +1931,7 @@ const lowerFork = (
     ...sealed,
     kind: "fork",
     steps,
-    fork: { branches: branches.length, compete },
+    fork: { branches: branches.length, compete, concurrency },
     ...(inputFrom === undefined ? {} : { inputFrom }),
   });
   emitter.counter += 1;
@@ -1946,6 +1941,7 @@ const lowerFork = (
     ...stages.enter,
     ...stages.leave,
     ...(compete ? ["compete: true"] : []),
+    ...(concurrency > 1 ? [`concurrency: ${literal(concurrency)}`] : []),
   ]);
   emitter.lines.push(
     `${indent}{`,
