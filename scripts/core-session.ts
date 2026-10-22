@@ -6,6 +6,8 @@
  * Each request carries `headers` too, such as the router secret a core
  * served without the router asks for.
  */
+import { once } from "node:events";
+
 import type { CoreApi } from "@grasp-os/shared/rpc";
 import { newWebSocketRpcSession } from "capnweb";
 import type { RpcStub } from "capnweb";
@@ -66,8 +68,11 @@ export const signInThrough = async (
         loginHint: email,
       }),
     });
-  } catch {
-    throw new Error(`Nothing answers at ${origin}.`);
+  } catch (error) {
+    if (signal?.aborted === true) {
+      throw error;
+    }
+    throw new Error(`Nothing answers at ${origin}.`, { cause: error });
   }
   const body: unknown = await started.json();
   if (
@@ -116,12 +121,28 @@ export interface Session {
   close: () => void;
 }
 
-/** Signs `email` in at `site` and opens their API. */
+/** Rejects with why `signal` aborted, once it does. */
+export const abortOf = async (signal: AbortSignal): Promise<never> => {
+  if (!signal.aborted) {
+    await once(signal, "abort");
+  }
+  throw signal.reason instanceof Error
+    ? signal.reason
+    : new Error("Aborted", { cause: signal.reason });
+};
+
+/**
+ * Signs `email` in at `site` and opens their API. With a `signal`, its
+ * requests are aborted and the session is closed once it aborts, so a
+ * caller with a deadline is never left waiting on core.
+ */
 export const openSession = async (
   site: CoreSite,
-  email: string
+  email: string,
+  { signal }: { signal?: AbortSignal } = {}
 ): Promise<Session> => {
-  const cookie = await signInThrough(site, email);
+  const cookie = await signInThrough(site, email, { signal });
+  signal?.throwIfAborted();
   const url = new URL("/rpc", site.origin);
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
   // Node's WebSocket (undici) takes headers, which a browser's doesn't.
@@ -133,22 +154,22 @@ export const openSession = async (
     },
   });
   const core = newWebSocketRpcSession<CoreApi>(socket);
+  const close = (): void => {
+    signal?.removeEventListener("abort", close);
+    core[Symbol.dispose]();
+  };
+  signal?.addEventListener("abort", close, { once: true });
   const api = core.authenticate();
   let userId: string;
   try {
-    ({ userId } = await api.whoami());
+    const whoami = api.whoami();
+    ({ userId } = await (signal === undefined
+      ? whoami
+      : Promise.race([whoami, abortOf(signal)])));
   } catch (error) {
     // Nothing returned closes it: close the session here.
-    core[Symbol.dispose]();
+    close();
     throw error;
   }
-  return {
-    email,
-    userId,
-    cookie,
-    api,
-    close: () => {
-      core[Symbol.dispose]();
-    },
-  };
+  return { email, userId, cookie, api, close };
 };

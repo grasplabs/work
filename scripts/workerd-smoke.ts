@@ -43,6 +43,8 @@ const ROUTER_SECRET = "smoke-router-secret";
 const ATTEMPTS = 50;
 const RETRY_DELAY_MS = 100;
 const INSTALL_TIMEOUT_MS = 120_000;
+/** How long sign-in, the seal and the call may take, all told. */
+const SEALED_CALL_TIMEOUT_MS = 120_000;
 
 /**
  * What the on-prem profile can't do yet, so the install can't complete:
@@ -192,7 +194,8 @@ try {
   );
   await sealedCallOnWorkerd(
     { origin, idpOrigin, headers: { [routerSecretHeader]: ROUTER_SECRET } },
-    tap.owners
+    tap.owners,
+    SEALED_CALL_TIMEOUT_MS
   );
   console.info(
     "a sealed App's function ran on the sandbox host, in a Worker Loader isolate"
