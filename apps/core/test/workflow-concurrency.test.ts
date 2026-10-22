@@ -14,7 +14,9 @@ import {
   objectSchema,
   published,
   ranFor,
+  startedSteps,
 } from "./json-workflows.ts";
+import { admittedFreely } from "./runs.ts";
 
 // Items and branches at once in JSON workflows (GRA-956): `for` and `fork`
 // tasks of `metadata.grasp.concurrency` 2 to 8, from their threat model:
@@ -263,6 +265,54 @@ describe("items and branches at once", { timeout: 60_000 }, () => {
       end: { status: "completed", output: { status: "ended" } },
       settled: 1,
       item0Late: 0,
+    });
+  });
+
+  it("start no item of a loop in a branch its race settled over, once the first is refused", async () => {
+    const by = await builder();
+    const { workflow } = await published(by, [
+      {
+        pick: {
+          fork: {
+            branches: [
+              {
+                slow: {
+                  // Entered before the race settles: its first item waits
+                  // past it, and its next step is refused.
+                  for: { in: "${ [range(0; 6)] }" },
+                  do: [
+                    {
+                      gate: {
+                        switch: [
+                          { first: { when: "${ $index == 0 }", then: "hold" } },
+                          { other: { then: "note" } },
+                        ],
+                      },
+                    },
+                    { hold: { wait: { milliseconds: 800 }, then: "note" } },
+                    { note: { set: '${ {status: "slow"} }' } },
+                  ],
+                },
+              },
+              after("quick", { milliseconds: 200 }, "quick"),
+            ],
+            compete: true,
+          },
+          metadata: { grasp: { concurrency: 2 } },
+        },
+      },
+      // Out long enough for the loser's wait to end meanwhile.
+      { rest: { wait: { milliseconds: 1500 } } },
+    ]);
+    const run = await ranFor(by, workflow.id);
+    const started = await startedSteps(run.id);
+    expect({
+      end: endOf(run),
+      // The first item's refused step, and no other item's.
+      items: started.filter((name) => name.includes("@pick.0/slow.")),
+    }).toStrictEqual({
+      end: { status: "completed", output: { status: "quick" } },
+      items: ["task:gate@pick.0/slow.0", "task:note@pick.0/slow.0"],
     });
   });
 
@@ -558,6 +608,57 @@ describe("a run's host, against a forged module at once", () => {
       whileHeld: 8,
       most: 8,
       answered: Array.from({ length: 10 }, () => "ok"),
+    });
+  });
+
+  it("starts no attempt of a branch whose race settled while the attempt waited to be admitted", async () => {
+    const by = await builder();
+    const { workflow } = await published(by, [
+      {
+        pick: {
+          fork: {
+            branches: [
+              after("slow", "PT2S", "slow"),
+              after("quick", "PT1S", "quick"),
+            ],
+            compete: true,
+          },
+          metadata: { grasp: { concurrency: 2 } },
+        },
+      },
+    ]);
+    // The loser's attempt waits in admission until the race has settled.
+    const raced = Promise.withResolvers<null>();
+    const host = await hostOf(by, workflow.id, {
+      admitAttempt: async (attempt) => {
+        if (attempt.step === "task:slow-done@pick.0") {
+          await raced.promise;
+        }
+        return await admittedFreely();
+      },
+    });
+    let ranLoser = false;
+    const loser = host.do("task:slow-done@pick.0", ada, async () => {
+      ranLoser = true;
+      await Promise.resolve();
+      return { ok: true, value: { output: { status: "slow" } } };
+    });
+    const won = await host.do("task:pick", ada, async (attempt) => {
+      const branch = await attempt.settle({ branch: 1 });
+      return {
+        ok: true,
+        value: { output: null, branch: branch.ok ? branch.value : null },
+      };
+    });
+    raced.resolve(null);
+    expect({
+      won: won.ok && won.value,
+      loser: codeOf(await loser),
+      ranLoser,
+    }).toStrictEqual({
+      won: { output: null, branch: 1 },
+      loser: "workflow.branch_cancelled",
+      ranLoser: false,
     });
   });
 
