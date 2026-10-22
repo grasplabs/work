@@ -1,0 +1,202 @@
+// @vitest-environment happy-dom
+import { Toaster } from "@grasp-os/ui/components/toast";
+import { i18n } from "@lingui/core";
+import { I18nProvider } from "@lingui/react";
+import { act } from "react";
+import { createRoot } from "react-dom/client";
+import type { Root } from "react-dom/client";
+import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
+
+import { AnswerMarkdown } from "./answer-markdown.tsx";
+
+// An answer as the thread renders it: a code block highlighted, with a
+// button that copies its code; a table that copies as Markdown, CSV or
+// TSV and downloads as CSV or Markdown, all in the browser; a link out of
+// Grasp that opens only once the person says so; and, as before, nothing
+// of raw HTML or an image that would load.
+
+Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
+
+let root: Root | undefined;
+let copied: string[] = [];
+let downloaded: { name: string; text: string }[] = [];
+let opened: { url: string; features: string }[] = [];
+
+/** The answer `text`, rendered. */
+const shown = async (text: string): Promise<void> => {
+  const host = document.createElement("div");
+  document.body.append(host);
+  await act(async () => {
+    root = createRoot(host);
+    root.render(
+      <I18nProvider i18n={i18n}>
+        <Toaster>
+          <AnswerMarkdown text={text} />
+        </Toaster>
+      </I18nProvider>
+    );
+    await Promise.resolve();
+  });
+};
+
+/** Lets every pending promise and render settle. */
+const settled = async (): Promise<void> => {
+  await act(async () => {
+    const { promise, resolve } = Promise.withResolvers<boolean>();
+    setTimeout(() => {
+      resolve(true);
+    }, 0);
+    await promise;
+  });
+};
+
+const press = async (element: HTMLElement): Promise<void> => {
+  await act(async () => {
+    element.click();
+    await Promise.resolve();
+  });
+  await settled();
+};
+
+/** The button named `name`, by its label or its text. */
+const button = (name: string): HTMLElement => {
+  const found = [
+    ...document.querySelectorAll<HTMLElement>("button, [role='menuitem']"),
+  ].find(
+    (element) =>
+      element.getAttribute("aria-label") === name ||
+      element.textContent?.trim() === name
+  );
+  if (found === undefined) {
+    throw new Error(`No button ${name}`);
+  }
+  return found;
+};
+
+describe(AnswerMarkdown, () => {
+  beforeEach(() => {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: async (text: string) => {
+          await Promise.resolve();
+          copied.push(text);
+        },
+      },
+    });
+    // A download is a link to the file, clicked: what it would save is read
+    // from the file the page made, and its name from the link.
+    const files = new Map<string, Blob>();
+    URL.createObjectURL = (blob: Blob) => {
+      const url = `blob:test/${files.size}`;
+      files.set(url, blob);
+      return url;
+    };
+    HTMLAnchorElement.prototype.click = function click(
+      this: HTMLAnchorElement
+    ) {
+      const file = files.get(this.href);
+      if (file === undefined) {
+        // Any other link is clicked as a person clicks it.
+        this.dispatchEvent(
+          new MouseEvent("click", { bubbles: true, cancelable: true })
+        );
+        return;
+      }
+      void file.text().then((text) => {
+        downloaded.push({ name: this.download, text });
+      });
+    };
+    window.open = (url?: string | URL, _target?: string, features?: string) => {
+      opened.push({ url: String(url), features: features ?? "" });
+      return null;
+    };
+  });
+
+  afterEach(() => {
+    act(() => {
+      root?.unmount();
+    });
+    root = undefined;
+    copied = [];
+    downloaded = [];
+    opened = [];
+    document.body.replaceChildren();
+  });
+
+  it("highlights a code block in the language it names, and copies its code", async () => {
+    await shown("```ts\nconst days = 25;\n```");
+    const figure = document.querySelector("figure");
+    expect(figure?.textContent).toContain("ts");
+    expect(figure?.querySelector(".hljs-keyword")?.textContent).toBe("const");
+    expect(figure?.querySelector(".hljs-number")?.textContent).toBe("25");
+
+    await press(button("Copy code"));
+    expect(copied).toStrictEqual(["const days = 25;"]);
+    expect(button("Copied")).toBeDefined();
+  });
+
+  it("copies a table as Markdown, CSV and TSV", async () => {
+    await shown(
+      '| Name | Days |\n| --- | --- |\n| Ann, "A" | 25 |\n| Bo \\| B | 20 |'
+    );
+    for (const format of ["Markdown", "CSV", "TSV"]) {
+      // oxlint-disable-next-line no-await-in-loop -- one menu after the other
+      await press(button("Copy table"));
+      // oxlint-disable-next-line no-await-in-loop -- see above
+      await press(button(`Copy table as ${format}`));
+    }
+    expect(copied).toStrictEqual([
+      '| Name | Days |\n| --- | --- |\n| Ann, "A" | 25 |\n| Bo \\| B | 20 |',
+      'Name,Days\r\n"Ann, ""A""",25\r\nBo | B,20',
+      'Name\tDays\nAnn, "A"\t25\nBo | B\t20',
+    ]);
+  });
+
+  it("downloads a table as CSV and as Markdown", async () => {
+    await shown("| Name | Days |\n| --- | --- |\n| Ann | 25 |");
+    await press(button("Download table"));
+    await press(button("Download table as CSV"));
+    await press(button("Download table"));
+    await press(button("Download table as Markdown"));
+    await settled();
+    expect(downloaded).toStrictEqual([
+      { name: "table.csv", text: "Name,Days\r\nAnn,25" },
+      {
+        name: "table.md",
+        text: "| Name | Days |\n| --- | --- |\n| Ann | 25 |",
+      },
+    ]);
+  });
+
+  it("opens a link out of Grasp only once the person says so", async () => {
+    await shown("See [the policy](https://example.com/leave).");
+    const link = document.querySelector<HTMLAnchorElement>("a");
+    if (link === null) {
+      throw new Error("No link");
+    }
+    await press(link);
+    expect(opened).toStrictEqual([]);
+    const dialog = document.querySelector('[role="alertdialog"]');
+    expect(dialog?.textContent).toContain("Open external link?");
+    expect(dialog?.textContent).toContain("https://example.com/leave");
+
+    await press(button("Cancel"));
+    expect(opened).toStrictEqual([]);
+
+    await press(link);
+    await press(button("Open link"));
+    expect(opened).toStrictEqual([
+      { url: "https://example.com/leave", features: "noopener,noreferrer" },
+    ]);
+  });
+
+  it("renders nothing of raw HTML, and no image that would load", async () => {
+    await shown(
+      'Before <script>alert(1)</script><img src="https://example.com/t.png"> after\n\n![A chart](https://example.com/chart.png)\n\n<iframe src="https://example.com"></iframe>'
+    );
+    expect(document.querySelector("script, img, iframe")).toBeNull();
+    expect(document.body.textContent).toContain("Before");
+    expect(document.body.textContent).toContain("A chart");
+  });
+});

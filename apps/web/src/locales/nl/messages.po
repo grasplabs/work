@@ -2580,6 +2580,7 @@ msgstr "Kwam naar voren in {source}"
 msgid "Can {verbs} company data"
 msgstr "Kan bedrijfsdata {verbs}"
 
+#: src/chat/answer-markdown.tsx
 #: src/chat/project-dialog.tsx
 #: src/decision-confirmation.tsx
 #: src/engines/package-approvals.tsx
@@ -2926,6 +2927,7 @@ msgstr "Paneel sluiten"
 msgid "Closes {closes}"
 msgstr "Sluit op {closes}"
 
+#: src/chat/answer-markdown.tsx
 #: src/chat/thread.tsx
 msgid "Code"
 msgstr "Code"
@@ -3262,6 +3264,7 @@ msgstr "Gesprekken"
 msgid "Copenhagen"
 msgstr "Kopenhagen"
 
+#: src/chat/answer-markdown.tsx
 #: src/chat/thread.tsx
 #: src/onboarding/setup-steps.tsx
 msgid "Copied"
@@ -3279,13 +3282,37 @@ msgstr "Adres kopiëren"
 msgid "Copy app ID"
 msgstr "App-ID kopiëren"
 
+#: src/chat/answer-markdown.tsx
+msgid "Copy code"
+msgstr "Code kopiëren"
+
 #: src/landscape/audit-trail.tsx
 msgid "Copy fingerprint"
 msgstr "Vingerafdruk kopiëren"
 
+#: src/chat/answer-markdown.tsx
+msgid "Copy table"
+msgstr "Tabel kopiëren"
+
+#: src/chat/answer-markdown.tsx
+msgid "Copy table as CSV"
+msgstr "Tabel kopiëren als CSV"
+
+#: src/chat/answer-markdown.tsx
+msgid "Copy table as Markdown"
+msgstr "Tabel kopiëren als Markdown"
+
+#: src/chat/answer-markdown.tsx
+msgid "Copy table as TSV"
+msgstr "Tabel kopiëren als TSV"
+
 #: src/chat/thread.tsx
 msgid "Copy the answer"
 msgstr "Antwoord kopiëren"
+
+#: src/chat/answer-markdown.tsx
+msgid "Copying didn't work"
+msgstr "Kopiëren is niet gelukt"
 
 #: src/landscape/landscape.ts
 msgid "Core AI"
@@ -3791,6 +3818,18 @@ msgstr "{name} downloaden"
 #: src/dashboard/report-dialog.tsx
 msgid "Download Markdown"
 msgstr "Markdown downloaden"
+
+#: src/chat/answer-markdown.tsx
+msgid "Download table"
+msgstr "Tabel downloaden"
+
+#: src/chat/answer-markdown.tsx
+msgid "Download table as CSV"
+msgstr "Tabel downloaden als CSV"
+
+#: src/chat/answer-markdown.tsx
+msgid "Download table as Markdown"
+msgstr "Tabel downloaden als Markdown"
 
 #: src/landscape/landscape-overview.ts
 msgid "DPA status"
@@ -6993,6 +7032,10 @@ msgstr "Aan de zijkant openen"
 msgid "Open Chat"
 msgstr "Chat openen"
 
+#: src/chat/answer-markdown.tsx
+msgid "Open external link?"
+msgstr "Externe link openen?"
+
 #: src/routes/_shell.domains.$engine.apps.$screen.tsx
 msgid "Open full page"
 msgstr "Volledige pagina openen"
@@ -7016,6 +7059,10 @@ msgstr "Openen in het applicatielandschap"
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Open it anyway"
 msgstr "Toch openen"
+
+#: src/chat/answer-markdown.tsx
+msgid "Open link"
+msgstr "Link openen"
 
 #: src/dashboard/runs-widget.tsx
 msgid "Open now"
@@ -11568,6 +11615,10 @@ msgstr "Je meldt je aan op de eigen pagina van {app}."
 #: src/routes/guest.tsx
 msgid "You:"
 msgstr "Jij:"
+
+#: src/chat/answer-markdown.tsx
+msgid "You’re about to visit an external website."
+msgstr "Je gaat naar een externe website."
 
 #: src/knowledge/document.tsx
 msgid "You're reading version {number}, saved {saved}. The current version is {current}."

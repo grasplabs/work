@@ -2580,6 +2580,7 @@ msgstr "Came up in {source}"
 msgid "Can {verbs} company data"
 msgstr "Can {verbs} company data"
 
+#: src/chat/answer-markdown.tsx
 #: src/chat/project-dialog.tsx
 #: src/decision-confirmation.tsx
 #: src/engines/package-approvals.tsx
@@ -2926,6 +2927,7 @@ msgstr "Close panel"
 msgid "Closes {closes}"
 msgstr "Closes {closes}"
 
+#: src/chat/answer-markdown.tsx
 #: src/chat/thread.tsx
 msgid "Code"
 msgstr "Code"
@@ -3262,6 +3264,7 @@ msgstr "Conversations"
 msgid "Copenhagen"
 msgstr "Copenhagen"
 
+#: src/chat/answer-markdown.tsx
 #: src/chat/thread.tsx
 #: src/onboarding/setup-steps.tsx
 msgid "Copied"
@@ -3279,13 +3282,37 @@ msgstr "Copy address"
 msgid "Copy app ID"
 msgstr "Copy app ID"
 
+#: src/chat/answer-markdown.tsx
+msgid "Copy code"
+msgstr "Copy code"
+
 #: src/landscape/audit-trail.tsx
 msgid "Copy fingerprint"
 msgstr "Copy fingerprint"
 
+#: src/chat/answer-markdown.tsx
+msgid "Copy table"
+msgstr "Copy table"
+
+#: src/chat/answer-markdown.tsx
+msgid "Copy table as CSV"
+msgstr "Copy table as CSV"
+
+#: src/chat/answer-markdown.tsx
+msgid "Copy table as Markdown"
+msgstr "Copy table as Markdown"
+
+#: src/chat/answer-markdown.tsx
+msgid "Copy table as TSV"
+msgstr "Copy table as TSV"
+
 #: src/chat/thread.tsx
 msgid "Copy the answer"
 msgstr "Copy the answer"
+
+#: src/chat/answer-markdown.tsx
+msgid "Copying didn't work"
+msgstr "Copying didn't work"
 
 #: src/landscape/landscape.ts
 msgid "Core AI"
@@ -3791,6 +3818,18 @@ msgstr "Download {name}"
 #: src/dashboard/report-dialog.tsx
 msgid "Download Markdown"
 msgstr "Download Markdown"
+
+#: src/chat/answer-markdown.tsx
+msgid "Download table"
+msgstr "Download table"
+
+#: src/chat/answer-markdown.tsx
+msgid "Download table as CSV"
+msgstr "Download table as CSV"
+
+#: src/chat/answer-markdown.tsx
+msgid "Download table as Markdown"
+msgstr "Download table as Markdown"
 
 #: src/landscape/landscape-overview.ts
 msgid "DPA status"
@@ -6993,6 +7032,10 @@ msgstr "Open at the side"
 msgid "Open Chat"
 msgstr "Open Chat"
 
+#: src/chat/answer-markdown.tsx
+msgid "Open external link?"
+msgstr "Open external link?"
+
 #: src/routes/_shell.domains.$engine.apps.$screen.tsx
 msgid "Open full page"
 msgstr "Open full page"
@@ -7016,6 +7059,10 @@ msgstr "Open in the landscape"
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Open it anyway"
 msgstr "Open it anyway"
+
+#: src/chat/answer-markdown.tsx
+msgid "Open link"
+msgstr "Open link"
 
 #: src/dashboard/runs-widget.tsx
 msgid "Open now"
@@ -11568,6 +11615,10 @@ msgstr "You sign in on {app}’s own page."
 #: src/routes/guest.tsx
 msgid "You:"
 msgstr "You:"
+
+#: src/chat/answer-markdown.tsx
+msgid "You’re about to visit an external website."
+msgstr "You’re about to visit an external website."
 
 #: src/knowledge/document.tsx
 msgid "You're reading version {number}, saved {saved}. The current version is {current}."
