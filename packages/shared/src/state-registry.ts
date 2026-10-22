@@ -547,6 +547,12 @@ const onboarding: DurableObjectState = {
     kickoff: exported(`${core}onboarding/kickoff.ts`),
     documents: exported(`${core}onboarding/documents.ts`),
     usage: exported(`${core}onboarding/store.ts`),
+    works: exported(`${core}onboarding/store.ts`),
+    asked_about: exported(`${core}onboarding/store.ts`),
+    draw_failures: transient(
+      `${core}onboarding/store.ts`,
+      "Drawings that failed, waiting to be tried again: a destination draws anew."
+    ),
     interview_settings: exported(`${core}onboarding/store.ts`),
     answer_waits: exported(`${core}onboarding/store.ts`),
     voice_use: transient(
