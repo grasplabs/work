@@ -25,6 +25,7 @@ import {
   fetchRollout,
   pauseRolloutFn,
   resumeRolloutFn,
+  retryRolloutFn,
   rollbackClientFn,
   rollbackRingFn,
 } from "../../rollout/functions.ts";
@@ -58,10 +59,18 @@ const pausable: ReadonlySet<RolloutView["run"]> = new Set([
   "waiting",
 ]);
 
+/** How many of the rollout's clients failed. */
+const failedCount = (rollout: RolloutView): number =>
+  rollout.targets.filter(({ status }) => status === "failed").length;
+
 /** What the rollout is doing, in words, from its status and its run's. */
 const statusOf = (rollout: RolloutView): string => {
   if (rollout.run === "paused") {
     return "paused";
+  }
+  const failed = failedCount(rollout);
+  if (rollout.status === "waiting" && failed > 0) {
+    return `reached every client, ${failed} failed: waiting for a retry of ${failed === 1 ? "it" : "them"}, or a cancel to end it there`;
   }
   if (rollout.status === "waiting") {
     return `ring ${rollout.ring} passed: waiting for approval to roll out to every other client`;
@@ -97,7 +106,7 @@ const Controls = ({ rollout }: { rollout: RolloutView }) => {
   const waiting = rollout.status === "waiting" && rollout.run !== "paused";
   return (
     <div className="flex flex-wrap items-center gap-4">
-      {waiting ? (
+      {waiting && failedCount(rollout) === 0 ? (
         <Button
           disabled={busy}
           onClick={() => {
@@ -105,6 +114,16 @@ const Controls = ({ rollout }: { rollout: RolloutView }) => {
           }}
         >
           Approve every other client
+        </Button>
+      ) : null}
+      {waiting && failedCount(rollout) > 0 ? (
+        <Button
+          disabled={busy}
+          onClick={() => {
+            act(async () => await retryRolloutFn({ data }));
+          }}
+        >
+          Retry failed clients
         </Button>
       ) : null}
       {active && pausable.has(rollout.run) ? (
