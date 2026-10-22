@@ -89,8 +89,9 @@ const longNamed = (): unknown => ({
 });
 
 /** A loop of one item with `metadata.grasp`. */
-const loop = (metadata: Record<string, unknown>) => ({
+const loop = (metadata: Record<string, unknown>, extra = {}) => ({
   each: {
+    ...extra,
     for: { in: "${ [1] }" },
     do: [{ inner: { set: '${ {status: "x"} }' } }],
     metadata: { grasp: metadata },
@@ -413,7 +414,7 @@ describe("sequential for loops of JSON workflows", { timeout: 60_000 }, () => {
     }).toStrictEqual({ sdkLoop: true, statements: false });
   });
 
-  it("don't lower items' own keys, loops nested past eight levels, or step names past what the engine takes", async () => {
+  it("don't lower items' own keys, a while on items at once, loops nested past eight levels, or step names past what the engine takes", async () => {
     const by = await builder();
     const unsupportedOf = async (task: unknown) => {
       const { version } = await published(by, [task]);
@@ -423,12 +424,16 @@ describe("sequential for loops of JSON workflows", { timeout: 60_000 }, () => {
     };
     expect({
       keyed: await unsupportedOf(loop({ key: "${ $item }" })),
+      whileAtOnce: await unsupportedOf(
+        loop({ concurrency: 2 }, { while: "${ $item < 3 }" })
+      ),
       eight: await unsupportedOf(nested(8)),
       nine: await unsupportedOf(nested(9)),
       // Step names past what the engine takes, once every loop is named.
       longNames: await unsupportedOf(longNamed()),
     }).toStrictEqual({
       keyed: ["for:key"],
+      whileAtOnce: ["for:while_concurrency"],
       eight: [],
       nine: ["for:depth"],
       longNames: ["step:name_too_long"],
