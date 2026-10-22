@@ -62,12 +62,18 @@ const loadDiscoveredPage = async (
     [summary],
     findings(policyBook.rules, [summary], policyBook.exceptions, policyToday())
   );
-  const { connectionId } = summary.discovered;
+  const { connectionId, appId: providerAppId } = summary.discovered;
+  // The connection's own events, and of the events about one of its apps
+  // only this app's.
   const audit = isAdmin(identity.role)
     ? loadFromCore(
         core,
         async (session) =>
-          await readAppAudit(session, [{ id: connectionId, accountName: null }])
+          await readAppAudit(
+            session,
+            [{ id: connectionId, accountName: null }],
+            providerAppId
+          )
       )
     : Promise.resolve(adminsOnly);
   return { app: { state: "ready", data: app ?? null }, audit };

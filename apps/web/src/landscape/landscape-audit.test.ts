@@ -360,6 +360,33 @@ describe("reading an app's trail from core's audit log", () => {
     });
   });
 
+  it("keeps, for one app found on a connection, the connection's events and only its own app's", async () => {
+    const viewed = (seq: number, app: string) =>
+      record(seq, {
+        ...stored,
+        action: "landscape.people_viewed",
+        target: { type: "connection", id: "c1" },
+        detail: { app },
+      });
+    const search = auditLog(
+      [
+        onConnection(1, "c1"),
+        viewed(2, "app-crm"),
+        viewed(3, "app-other"),
+        onPermission(4, "c1"),
+      ],
+      100
+    );
+    expect({
+      app: seqs(
+        trailRecords(await readTrail(search, startTrail(["c1"], "app-crm")))
+      ),
+      connection: seqs(
+        trailRecords(await readTrail(search, startTrail(["c1"])))
+      ),
+    }).toStrictEqual({ app: [4, 2, 1], connection: [4, 3, 2, 1] });
+  });
+
   it("reads a stretch of the log at a time, and older stretches as asked for, until none is left", async () => {
     const entries = Array.from({ length: 60 }, (_, index) =>
       index % 3 === 0
