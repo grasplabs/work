@@ -558,6 +558,8 @@ const onboarding: DurableObjectState = {
       `${core}onboarding/store.ts`,
       "Drawings that failed, waiting to be tried again: a destination draws anew."
     ),
+    interview_settings: exported(`${core}onboarding/store.ts`),
+    answer_waits: exported(`${core}onboarding/store.ts`),
     voice_use: transient(
       `${core}onboarding/store.ts`,
       "Today's seconds of voice, a limit's count: each count deletes the days before it."
