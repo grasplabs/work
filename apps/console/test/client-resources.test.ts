@@ -1,8 +1,12 @@
 import type { ReleaseManifest } from "@grasp-os/shared/release";
+import { env } from "cloudflare:workers";
+import { and, desc, eq } from "drizzle-orm";
 import { describe, expect, it } from "vite-plus/test";
 
+import { auditEvents } from "../src/db/schema.ts";
 import {
   allocateClientResources,
+  capabilityEvidence,
   clientInventory,
   InventoryError,
   placeClient,
@@ -13,7 +17,10 @@ import {
 import type {
   ClientPlacement,
   ClientResource,
+  DestinationInput,
 } from "../src/hosting/inventory.ts";
+import type { Evidence } from "../src/hosting/policy.ts";
+import { importReleases } from "../src/releases/import.ts";
 import {
   client,
   db,
@@ -24,6 +31,38 @@ import {
   staff,
   verified,
 } from "./hosting.ts";
+import { publishRelease } from "./releases.ts";
+
+/** A release CI published and the console imported: one evidence can name. */
+const importedRelease = async () => {
+  const { manifest } = await publishRelease({ notes: "feat(core): verify" });
+  await importReleases(env.RELEASES, db);
+  return manifest;
+};
+
+/**
+ * Saves a new destination of `kind` whose evidence names `subject`: the
+ * code it's refused with, if it is, and whether its evidence was kept.
+ */
+const save = async (
+  subject: Evidence["subject"],
+  kind: DestinationInput["kind"] = "workers_for_platforms"
+) => {
+  const id = `eu-subject-${crypto.randomUUID().slice(0, 8)}`;
+  const refused = await saveDestination(db, staff, {
+    id,
+    kind,
+    accountId: null,
+    namespace: null,
+    policies: ["eu-storage"],
+    capabilities: verified({}, { ...evidence, subject }),
+  }).then(
+    () => null,
+    (error: unknown) => (error instanceof InventoryError ? error.code : error)
+  );
+  const kept = await capabilityEvidence(db, id);
+  return { error: refused, kept: kept.length > 0 };
+};
 
 /** What the provider reports for each database once created: its own uuid. */
 const observeDatabases = async (
@@ -132,6 +171,113 @@ describe("placing a client", () => {
         },
       })
     ).rejects.toThrow("evidence");
+  });
+
+  it("doesn't take evidence about anything the console can't check", async () => {
+    const imported = await importedRelease();
+    await expect(
+      Promise.all([
+        save({ kind: "release", id: imported.releaseId }),
+        save({ kind: "source", id: imported.commit }),
+        save({ kind: "profile", id: "cloudflare" }),
+        save({ kind: "profile", id: "workerd" }, "workerd"),
+      ])
+    ).resolves.toStrictEqual(
+      Array.from({ length: 4 }, () => ({ error: null, kept: true }))
+    );
+    await expect(
+      Promise.all([
+        save({ kind: "release", id: "r000000001-abcdef0" }),
+        save({ kind: "source", id: "0".repeat(40) }),
+        save({ kind: "candidate", id: imported.releaseId }),
+        save({ kind: "profile", id: "workerd" }),
+        save({ kind: "profile", id: "cloudflare" }, "workerd"),
+      ])
+    ).resolves.toStrictEqual(
+      Array.from({ length: 5 }, () => ({
+        error: "evidence_subject_unknown",
+        kept: false,
+      }))
+    );
+  });
+
+  it("keeps the evidence of every save, and audits what each names", async () => {
+    const { releaseId } = await importedRelease();
+    const destinationId = await destination();
+    const observed: Evidence = {
+      ...evidence,
+      subject: { kind: "release", id: releaseId },
+      observedAt: "2026-10-21T09:00:00.000Z",
+      record: "https://ci.grasp.test/runs/42?token=not-for-the-log#step-3",
+    };
+    await saveDestination(db, staff, {
+      id: destinationId,
+      kind: "workers_for_platforms",
+      accountId: null,
+      namespace: "production",
+      policies: ["eu-storage"],
+      capabilities: verified({ "logs.payload_free": "unknown" }, observed),
+    });
+
+    const history = await capabilityEvidence(db, destinationId);
+    const declared = history.filter(
+      ({ capability }) => capability === "logs.payload_free"
+    );
+    expect(
+      declared.map(
+        ({ status, subjectKind, subjectId, record, declaredBy }) => ({
+          status,
+          subject: subjectKind === null ? null : `${subjectKind}:${subjectId}`,
+          record,
+          declaredBy,
+        })
+      )
+    ).toStrictEqual([
+      {
+        status: "verified",
+        subject: "profile:cloudflare",
+        record: evidence.record,
+        declaredBy: staff.email,
+      },
+      {
+        status: "unknown",
+        subject: null,
+        record: null,
+        declaredBy: staff.email,
+      },
+    ]);
+    expect(
+      history.findLast(({ capability }) => capability === "d1.eu_jurisdiction")
+    ).toMatchObject({
+      status: "verified",
+      subjectKind: "release",
+      subjectId: releaseId,
+      record: observed.record,
+      observedAt: new Date(observed.observedAt),
+      recordedBy: observed.recordedBy,
+    });
+
+    const [saved] = await db
+      .select({ actor: auditEvents.actor, detail: auditEvents.detail })
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.action, "destination.save"),
+          eq(auditEvents.target, destinationId)
+        )
+      )
+      .orderBy(desc(auditEvents.at))
+      .limit(1);
+    const detail: unknown = JSON.parse(saved?.detail ?? "{}");
+    expect({ actor: saved?.actor, detail }).toMatchObject({
+      actor: staff.email,
+      detail: {
+        "evidence.d1.eu_jurisdiction": `verified release:${releaseId} https://ci.grasp.test/runs/42`,
+      },
+    });
+    // The unknown capability has no evidence, and the record's token stays out.
+    expect(detail).not.toHaveProperty(["evidence.logs.payload_free"]);
+    expect(saved?.detail).not.toContain("not-for-the-log");
   });
 
   it("happens once, however often it's asked at the same time, and moving is a migration", async () => {
@@ -370,6 +516,43 @@ describe("a client's resources", () => {
       })
     ).rejects.toMatchObject({ code: "placement_refused" });
     await expect(clientInventory(db, clientId)).resolves.toStrictEqual([]);
+
+    // Verified again, on the release it was observed against: the latest
+    // evidence is what allocation reads, and what the history ends with.
+    const { releaseId } = await importedRelease();
+    await saveDestination(db, staff, {
+      id: destinationId,
+      kind: "workers_for_platforms",
+      accountId: null,
+      namespace: "production",
+      policies: ["eu-storage"],
+      capabilities: verified(
+        {},
+        { ...evidence, subject: { kind: "release", id: releaseId } }
+      ),
+    });
+    await expect(
+      allocateClientResources(db, staff, {
+        clientId,
+        manifest: await release(),
+        operationId: "op",
+      })
+    ).resolves.not.toStrictEqual([]);
+    const history = await capabilityEvidence(db, destinationId);
+    const latest = new Map(
+      history.map((row) => [
+        row.capability,
+        { status: row.status, subjectId: row.subjectId },
+      ])
+    );
+    expect(latest.get("r2.eu_jurisdiction")).toStrictEqual({
+      status: "verified",
+      subjectId: releaseId,
+    });
+    expect(latest.get("execution.eu_ingress")).toStrictEqual({
+      status: "unknown",
+      subjectId: null,
+    });
   });
 
   it("are refused for a bucket outside the policy's jurisdiction or a class moved by a rename", async () => {

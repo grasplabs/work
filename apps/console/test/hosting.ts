@@ -14,30 +14,34 @@ import { hostingPolicies } from "../src/hosting/policy.ts";
 import type {
   Capability,
   DestinationCapabilities,
+  Evidence,
 } from "../src/hosting/policy.ts";
 import { buildRelease } from "./releases.ts";
 
 export const db = consoleDatabase(env.DB);
 export const staff = { email: "staff@grasp.test", sub: "sub-staff" };
 
-export const evidence = {
+/** Evidence observed on Cloudflare's runtime profile, which a Cloudflare destination runs. */
+export const evidence: Evidence = {
   procedure:
     "Created a D1 database, R2 bucket and Durable Object in the EU and read back their jurisdiction",
-  subject: { kind: "release", id: "r000000001-abcdef0" },
+  subject: { kind: "profile", id: "cloudflare" },
   observedAt: "2026-10-20T10:00:00.000Z",
   recordedBy: "staff@grasp.test",
   record: "https://linear.app/grasp-os/issue/GRA-430",
-} as const;
+};
 
+/** Every `eu-storage` requirement verified with `observed`, unless said. */
 export const verified = (
-  except: Partial<Record<Capability, "unsupported" | "unknown">> = {}
+  except: Partial<Record<Capability, "unsupported" | "unknown">> = {},
+  observed: Evidence = evidence
 ): DestinationCapabilities =>
   Object.fromEntries(
     hostingPolicies["eu-storage"].requires
       .filter((capability) => except[capability] !== "unknown")
       .map((capability) => [
         capability,
-        { status: except[capability] ?? "verified", evidence },
+        { status: except[capability] ?? "verified", evidence: observed },
       ])
   );
 
@@ -48,13 +52,18 @@ export const destination = async (
 ): Promise<string> => {
   destinations += 1;
   const id = `eu-${crypto.randomUUID().slice(0, 8)}-${destinations}`;
+  // Verified on the runtime profile the destination runs.
+  const profile = input.kind === "workerd" ? "workerd" : "cloudflare";
   await saveDestination(db, staff, {
     id,
     kind: "workers_for_platforms",
     accountId: crypto.randomUUID().replaceAll("-", ""),
     namespace: "production",
     policies: ["eu-storage"],
-    capabilities: verified(),
+    capabilities: verified(
+      {},
+      { ...evidence, subject: { kind: "profile", id: profile } }
+    ),
     ...input,
   });
   return id;
