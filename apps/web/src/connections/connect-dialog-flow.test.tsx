@@ -198,10 +198,14 @@ describe("choosing what Grasp may do in a toolkit", () => {
     await press(switchOf("HUBSPOT_LIST_CONTACTS"));
     await press(switchOf("HUBSPOT_CREATE_NOTE"));
     await press(
-      row("HUBSPOT_LIST_CONTACTS").querySelector("button[aria-pressed]")
+      row("HUBSPOT_LIST_CONTACTS").querySelector(
+        "button[aria-label*='Change to']"
+      )
     );
     await press(
-      row("HUBSPOT_CREATE_NOTE").querySelector("button[aria-pressed]")
+      row("HUBSPOT_CREATE_NOTE").querySelector(
+        "button[aria-label*='Change to']"
+      )
     );
     await press(button("Consent and connect"));
     expect(sent).toStrictEqual([

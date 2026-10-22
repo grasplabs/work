@@ -881,6 +881,10 @@ msgstr "{name} is signed out everywhere."
 msgid "{name} logo"
 msgstr "{name} logo"
 
+#: src/connections/connect-dialog.tsx
+msgid "{name} may write. Change to Read"
+msgstr "{name} may write. Change to Read"
+
 #: src/chat/builds-state.ts
 msgid "{name} no longer changes the domain's data (write → read)"
 msgstr "{name} no longer changes the domain's data (write → read)"
@@ -890,8 +894,8 @@ msgid "{name} now changes the domain's data (read → write)"
 msgstr "{name} now changes the domain's data (read → write)"
 
 #: src/connections/connect-dialog.tsx
-msgid "{name} only reads"
-msgstr "{name} only reads"
+msgid "{name} reads only. Change to Write"
+msgstr "{name} reads only. Change to Write"
 
 #: src/onboarding/setup-steps.tsx
 msgid "{name} takes part"

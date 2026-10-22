@@ -473,8 +473,11 @@ const ToolChoice = ({
           }}
           render={
             <button
-              aria-label={t`${name} only reads`}
-              aria-pressed={choice.read}
+              aria-label={
+                choice.read
+                  ? t`${name} reads only. Change to Write`
+                  : t`${name} may write. Change to Read`
+              }
               type="button"
             />
           }
