@@ -2014,6 +2014,10 @@ msgstr "Another day"
 msgid "Another domain"
 msgstr "Another domain"
 
+#: src/screens/screen-frame.tsx
+msgid "Another link is waiting for an answer, or one was just turned down. Try again in a moment."
+msgstr "Another link is waiting for an answer, or one was just turned down. Try again in a moment."
+
 #: src/activity/pending.tsx
 msgid "Another version of this domain was made current since this list was read. The list now shows it: review that version, then approve again."
 msgstr "Another version of this domain was made current since this list was read. The list now shows it: review that version, then approve again."
@@ -2804,6 +2808,7 @@ msgstr "Can {verbs} company data"
 #: src/engines/package-approvals.tsx
 #: src/inbox/item-detail.tsx
 #: src/knowledge/document.tsx
+#: src/link-confirmation.tsx
 #: src/settings/invitations.tsx
 msgid "Cancel"
 msgstr "Cancel"
@@ -6043,6 +6048,10 @@ msgstr "Link out on {date}"
 msgid "Linked"
 msgstr "Linked"
 
+#: src/screens/screen-links.ts
+msgid "Links can't be opened here."
+msgstr "Links can't be opened here."
+
 #: src/onboarding/interview-words.ts
 msgid "Links out"
 msgstr "Links out"
@@ -7712,6 +7721,11 @@ msgctxt "onboarding stage"
 msgid "Open"
 msgstr "Open"
 
+#: src/link-confirmation.tsx
+msgctxt "open a link to another site"
+msgid "Open"
+msgstr "Open"
+
 #: src/landscape/app-table.tsx
 msgctxt "open an app"
 msgid "Open"
@@ -7723,6 +7737,10 @@ msgstr "Open"
 #: src/onboarding/interview-people.tsx
 msgid "Open {name}"
 msgstr "Open {name}"
+
+#: src/link-confirmation.tsx
+msgid "Open a link outside Grasp?"
+msgstr "Open a link outside Grasp?"
 
 #: src/chat/chat-dock.tsx
 msgid "Open at the side"
@@ -10425,6 +10443,10 @@ msgstr "That is too short to be a conversation."
 msgid "That isn't a file call."
 msgstr "That isn't a file call."
 
+#: src/screens/screen-links.ts
+msgid "That isn't a link that can be opened."
+msgstr "That isn't a link that can be opened."
+
 #: src/workflows/resource-params.tsx
 msgid "That isn't a value this parameter takes."
 msgstr "That isn't a value this parameter takes."
@@ -10798,6 +10820,10 @@ msgstr "The latest runs, newest first."
 msgid "The leads of {going} teams get their link {when}. Everyone else right after their lead has talked to me."
 msgstr "The leads of {going} teams get their link {when}. Everyone else right after their lead has talked to me."
 
+#: src/screens/screen-links.ts
+msgid "The link wasn't opened."
+msgstr "The link wasn't opened."
+
 #: src/routes/guest.tsx
 msgid "The link works until {until}."
 msgstr "The link works until {until}."
@@ -10940,6 +10966,7 @@ msgid "The report as it stands today"
 msgstr "The report as it stands today"
 
 #: src/screens/screen-files.ts
+#: src/screens/screen-links.ts
 msgid "The request failed."
 msgstr "The request failed."
 
@@ -11186,6 +11213,10 @@ msgstr "This app left its frame and was stopped."
 #: src/screens/screen-frame.tsx
 msgid "This app lost its connection to the page and was stopped."
 msgstr "This app lost its connection to the page and was stopped."
+
+#: src/link-confirmation.tsx
+msgid "This app wants to open a page on another site in a new tab. Open it only if you expected to go there."
+msgstr "This app wants to open a page on another site in a new tab. Open it only if you expected to go there."
 
 #: src/engines/store-change-errors.ts
 msgid "This change is being applied again, so it can't be abandoned now. The page shows where it stands now."

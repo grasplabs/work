@@ -42,6 +42,7 @@ export const familyNamespaces = [
   "knowledge",
   "knowledge_signal",
   "landscape",
+  "link",
   "member",
   "migration",
   "model",
