@@ -298,7 +298,10 @@ export const throughCache = async (
   object?: R2Object;
   objectKey?: string;
 }> => {
+  // Given up on before or while it read: it serves nothing.
+  signal?.throwIfAborted();
   const first = await readVerified(env, key);
+  signal?.throwIfAborted();
   if (first.state === "hit") {
     return {
       text: first.text,
@@ -307,8 +310,6 @@ export const throughCache = async (
       objectKey: first.objectKey,
     };
   }
-  // Given up on: no lease is taken, and nothing more is read or built.
-  signal?.throwIfAborted();
   const holder = crypto.randomUUID();
   for (;;) {
     // Given up on while waiting: it takes no lease and serves nothing.
