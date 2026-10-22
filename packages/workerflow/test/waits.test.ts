@@ -539,7 +539,8 @@ const payloadOf = (bytes: number): string =>
 const sendAll = async (
   id: string,
   payloads: string[],
-  reserved = false
+  reserved = false,
+  type = "spam"
 ): Promise<string[]> =>
   await runInDurableObject(runObject("approval", id), async (run) => {
     if (!(run instanceof WorkflowRun)) {
@@ -549,7 +550,7 @@ const sendAll = async (
     for (const payload of payloads) {
       // oxlint-disable-next-line no-await-in-loop -- in order, as a sender would
       const outcome = await run.sendEvent({
-        type: "spam",
+        type,
         payload,
         key: null,
         reserved,
@@ -621,6 +622,47 @@ describe("an inbox", () => {
     expect(outcomes.lastIndexOf("accepted")).toBe(maxInboxEvents - 1);
     expect(outcomes.at(-1)).toBe("full");
     expect(reserved).toStrictEqual(Array.from({ length: 8 }, () => "accepted"));
+  });
+
+  it("counts only what senders sent against its limits: a reserved delivery at the limit leaves ordinary ones their room", async () => {
+    const id = newId();
+    await workflow("approval").create({ id });
+
+    const filled = await sendAll(
+      id,
+      Array.from({ length: maxInboxEvents - 1 }, () => encode(null))
+    );
+    const reserved = await sendAll(id, [encode(null)], true);
+    const after = await sendAll(id, [encode(null), encode(null)]);
+
+    expect({
+      filled: filled.every((outcome) => outcome === "accepted"),
+      reserved,
+      after,
+    }).toStrictEqual({
+      filled: true,
+      reserved: ["accepted"],
+      after: ["accepted", "full"],
+    });
+  });
+
+  it("leaves reserved deliveries out of its counts when a restart counts them again", async () => {
+    const id = newId();
+    await workflow("approval").create({ id });
+    await suspendedOn("approval", id, "approval");
+    const payload = encode("yes");
+    await sendAll(id, [payload], true, "approved");
+    await ended("approval", id);
+
+    const run = await instance("approval", id);
+    await run.restart({ from: { name: "after" } });
+    await ended("approval", id);
+    const { run: row, events } = await journalOf("approval", id);
+
+    expect({
+      kept: events.length,
+      counts: [row.event_count, row.event_bytes],
+    }).toStrictEqual({ kept: 1, counts: [0, 0] });
   });
 });
 
