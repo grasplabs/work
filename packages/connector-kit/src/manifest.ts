@@ -4,6 +4,7 @@ import {
   oauthProviderSchema,
   toolReachSchema,
 } from "@grasp-os/shared/connect";
+import { attachmentsProperty } from "@grasp-os/shared/connector-attachments";
 import { permissionActionSchema } from "@grasp-os/shared/permissions";
 import { z } from "zod";
 
@@ -128,6 +129,17 @@ export const changeMetaKey = "grasp-os/change";
 
 /** Largest change a result may report, in bytes of JSON. */
 export const maxChangeBytes = 256 * 1024;
+
+/**
+ * Call `_meta` key: the bytes of the files a call attaches (GRA-887), an
+ * object of base64 by the SHA-256 of each, which connect sends to a native
+ * connector's tool that takes files (`takesFiles`) only. The input names
+ * each file by digest only (`attachments`); the tool checks every part
+ * against those digests before it uses one, and keeps none. Core makes
+ * them from the run's own files, outside the call's input, and connect
+ * checks them too.
+ */
+export const attachmentsMetaKey = "grasp-os/attachments";
 
 /**
  * The header a mail tool puts a stamp on (`stampMetaKey`), and connect's
@@ -352,6 +364,14 @@ const actionManifestSchema = z.strictObject({
    */
   answersFile: z.literal(true).optional(),
   /**
+   * It attaches files (GRA-887): its input has an `attachments` property
+   * naming each by digest, and its bytes come beside the input
+   * (`attachmentsMetaKey`). In its generated contract the property names
+   * run files by ID instead, which a workflow's action gives and core
+   * turns into the digests and bytes. Only a write takes files.
+   */
+  takesFiles: z.literal(true).optional(),
+  /**
    * Its input and its output, as the JSON Schemas the connector's own
    * schemas make: the generated contract an App's resource binding is
    * checked against (spec 12), in both directions. Data only: connect
@@ -444,6 +464,15 @@ export const connectorManifestSchema = z
         ({ answersFile, readOnly }) => answersFile !== true || readOnly
       ),
     "Only a read-only action answers a file"
+  )
+  .refine(
+    ({ actions }) =>
+      Object.values(actions).every(
+        ({ takesFiles, readOnly, input }) =>
+          takesFiles !== true ||
+          (!readOnly && input.includes(attachmentsProperty))
+      ),
+    "Only a write takes files, as its `attachments` input property"
   )
   .refine(
     ({ actions }) =>

@@ -70,7 +70,12 @@ import { WorkerEntrypoint } from "cloudflare:workers";
 
 import { ackAuditEvents, auditCall, takeAuditEvents } from "./audit.ts";
 import type { CallOutcome, CallRecord } from "./audit.ts";
-import { carryOut, connectionFor, heldOutcome } from "./call.ts";
+import {
+  carryOut,
+  connectionFor,
+  heldOutcome,
+  requireHeldFiles,
+} from "./call.ts";
 import type { CallDone, CallProgress } from "./call.ts";
 import { catalog, catalogTools } from "./catalog.ts";
 import { keptChange } from "./changes.ts";
@@ -218,11 +223,12 @@ const callOutcome = ({
   return failed ? "failed" : "ok";
 };
 
-type StatedCall = Omit<ConnectCall, "capability" | "input">;
+type StatedCall = Omit<ConnectCall, "capability" | "input" | "attachments">;
 
-/** The call as the audit log states it: never its input. */
+/** The call as the audit log states it: never its input or its files. */
 const statedOf = ({
   input: _input,
+  attachments: _attachments,
   ...stated
 }: Omit<ConnectCall, "capability">): StatedCall => stated;
 
@@ -701,7 +707,7 @@ export default class Connect
     if (!parsed.success) {
       throw connectErrors.create("connect.invalid");
     }
-    const { capability, person, id, inputHash, via } = parsed.data;
+    const { capability, person, id, inputHash, via, attachments } = parsed.data;
     const held = await heldFor(this.env, person, id, "confirm", via);
     // Its day over: declined as expired, whatever the press carries.
     await refuseEnded(this.env, person, held);
@@ -717,7 +723,16 @@ export default class Connect
       if (inputHash !== held.inputHash) {
         throw connectErrors.create("connect.pending_changed");
       }
-      await connectionFor(this.env, claims, call.connectionId, held);
+      const connection = await connectionFor(
+        this.env,
+        claims,
+        call.connectionId,
+        held
+      );
+      // The files it attaches (GRA-887): only the bytes of the digests the
+      // person was shown, checked before the action is taken, so bytes
+      // that differ leave it waiting. None are kept with it.
+      await requireHeldFiles(connection, call, attachments);
     } catch (error) {
       await auditRefusedDecision(
         this.env,
@@ -733,7 +748,11 @@ export default class Connect
     }
     await take(this.env, person, held, "confirm", claims.restricted, via);
     try {
-      return await this.#carryOutAudited(call, claims, held);
+      return await this.#carryOutAudited(
+        attachments === undefined ? call : { ...call, attachments },
+        claims,
+        held
+      );
     } catch (error) {
       // Taken, and failed: said so, so core tells the action's chat. What
       // went unexpectedly wrong is logged here, and goes as a failure.
