@@ -242,7 +242,6 @@ export const needsOf = (
   return needs;
 };
 
-/** How a company stands, as one word. */
 /**
  * How a company stands, as one word. `unread`: active, nothing recorded
  * needs a look, but its account wasn't read (yet, or the read failed or
