@@ -99,9 +99,21 @@ export interface TrialScore {
 export const normalized = (text: string): string =>
   text.normalize("NFC").toLowerCase().replaceAll(/\s+/gu, " ").trim();
 
-const abstention = /^\s*abstain\b/iu;
-/** The protocol's answer line: `ANSWER:` and only the answer, on one line. */
-const answerLine = /^\s*answer:(?<answer>[^\n]*)/iu;
+/**
+ * The protocol's abstention: `ABSTAIN` first, bold or not (`**ABSTAIN:**`),
+ * as models write markdown.
+ */
+const abstention = /^\s*(?:\*\*)?\s*abstain\b/iu;
+/**
+ * The protocol's answer line: `ANSWER:` and only the answer, on one line.
+ * Its keyword may be in the question's language, as real models translate
+ * it (`RESPUESTA:`, `RÉPONSE :`), and bold; neither changes what the
+ * answer says.
+ */
+const answerLine =
+  /^\s*(?:\*\*)?\s*(?:answer|antwoord|antwort|réponse|reponse|respuesta)\s*:\s*(?:\*\*)?(?<answer>[^\n]*)/iu;
+/** Markdown emphasis around the answer's values (`**3**`), which isn't theirs. */
+const emphasis = /\*\*|__/gu;
 /**
  * Words that turn an answer line around ("not Marta Ruiz"), in the five
  * languages: such a line asserts nothing the task can check.
@@ -315,10 +327,9 @@ export const scoreTrial = (
   // What the answer asserts: its answer line, citations aside. Facts named
   // only in an explanation or a citation's label aren't the answer.
   const said = normalized(
-    (answerLine.exec(observed.answer)?.groups?.answer ?? "").replaceAll(
-      citation,
-      " "
-    )
+    (answerLine.exec(observed.answer)?.groups?.answer ?? "")
+      .replaceAll(citation, " ")
+      .replaceAll(emphasis, "")
   );
   const input = normalized(observed.modelInput);
   const parts = observed.transcript.map(({ by, text, backing = [] }) => ({

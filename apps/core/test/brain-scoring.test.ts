@@ -108,6 +108,38 @@ describe("scoring a trial", () => {
     });
   });
 
+  it("takes the answer line's keyword in the question's language, and in bold", () => {
+    const completedWith = (answer: string) =>
+      verdict(contract, { answer }).completed;
+    expect({
+      spanish: completedWith(
+        "RESPUESTA: Marta Ruiz\nSegún [handbook/contracts.md#Lease]"
+      ),
+      french: completedWith(
+        "**RÉPONSE :** Marta Ruiz\nSelon [handbook/contracts.md#Lease]"
+      ),
+      german: completedWith(
+        "Antwort: **Marta Ruiz**\nLaut [handbook/contracts.md#Lease]"
+      ),
+      dutch: completedWith(
+        "ANTWOORD: Marta Ruiz\nVolgens [handbook/contracts.md#Lease]"
+      ),
+      unmarked: completedWith(
+        "Marta Ruiz owns the lease [handbook/contracts.md#Lease]"
+      ),
+      boldAbstention: verdict(contract, {
+        answer: "**ABSTAIN:** no source names the owner.",
+      }).abstained,
+    }).toStrictEqual({
+      spanish: true,
+      french: true,
+      german: true,
+      dutch: true,
+      unmarked: false,
+      boldAbstention: true,
+    });
+  });
+
   it("doesn't complete a right answer the evidence never reached, or one that cites none of it", () => {
     expect({
       unseen: verdict(contract, { modelInput: "Contract register." }),
