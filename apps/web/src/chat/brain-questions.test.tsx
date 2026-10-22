@@ -21,7 +21,8 @@ import { BrainQuestions } from "./brain-questions.tsx";
 // The brain's open questions in its chat, against core's brain as the page
 // reaches it over RPC, faked: a closed question isn't shown; a member
 // answers in their own words; only the company's admins ask the owner;
-// Grasp's staff do neither; a refusal is said and the draft kept.
+// Grasp's staff do neither; a refusal is said and the draft kept, and an
+// ask nobody could receive is said and shows nothing as asked.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -189,6 +190,26 @@ describe(BrainQuestions, () => {
     expect({ before, calls }).toStrictEqual({
       before: ["Answer", "Ask Head of finance", "Answer"],
       calls: ["ask gap-open"],
+    });
+  });
+
+  it("says why core didn't ask when nobody holds the role, and changes nothing", async () => {
+    const { changed } = await shown(
+      [open],
+      { role: "admin", staff: false },
+      "Nobody who can sign in holds that question's role on the staff list, so there is no one to ask yet."
+    );
+
+    await press("Ask Head of finance");
+
+    expect({
+      said: document.body.textContent.includes("no one to ask yet"),
+      changed: changed.length,
+      still: buttons(),
+    }).toStrictEqual({
+      said: true,
+      changed: 0,
+      still: ["Answer", "Ask Head of finance"],
     });
   });
 

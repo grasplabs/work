@@ -14,10 +14,12 @@ import { useCore } from "../use-core.ts";
 
 // The brain's open questions in the brain's chat (GRA-531, GRA-936), as
 // in the prototype (`knowledge/brain-chat.tsx`): each to answer there, in
-// the person's own words, or to have Grasp ask the role that can. Both go
-// through core's brain (`brain.answerGap`, `brain.askAboutGap`), which
-// decides who may: any member answers, never Grasp's staff; only the
-// company's own admins ask. The buttons follow what core allows, but
+// the person's own words, or to ask the role that can: core delivers the
+// question to the members holding that role on the staff list, in their
+// inbox, and refuses when nobody can receive it, so "asked" only shows
+// once someone was. Both go through core's brain (`brain.answerGap`,
+// `brain.askAboutGap`), which decides who may: any member answers, never
+// Grasp's staff; only the company's own admins ask. The buttons follow what core allows, but
 // core is what refuses. An answer is the person's own act here: the
 // chat's agent only reads the questions, never answers them.
 
