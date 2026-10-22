@@ -1,23 +1,11 @@
-import type {
-  App,
-  AppContents,
-  AppsApi,
-  CurrentExports,
-  NewApp,
-} from "@grasp-os/shared/apps";
+import type { App, AppContents, AppsApi, NewApp } from "@grasp-os/shared/apps";
 import type { DefinitionPackage } from "@grasp-os/shared/definition-packages";
 
 import { AppBlueprintsRpc } from "./app-blueprints.ts";
 import { AppFilesRpc } from "./app-files-rpc.ts";
 import { AppMembersRpc } from "./app-members.ts";
 import { AppVersionsRpc } from "./app-versions-rpc.ts";
-import {
-  appContents,
-  appExports,
-  createApp,
-  getApp,
-  listApps,
-} from "./apps.ts";
+import { appContents, createApp, getApp, listApps } from "./apps.ts";
 import { exportAppDefinition } from "./definition-export.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
@@ -88,13 +76,6 @@ export class AppsRpc extends CoreRpcTarget implements AppsApi {
     return await withPerson(
       this.#check,
       async (by) => await appContents(this.#env, by, app)
-    );
-  }
-
-  async exports(app: string): Promise<CurrentExports> {
-    return await withPerson(
-      this.#check,
-      async (by) => await appExports(this.#env, by, app)
     );
   }
 

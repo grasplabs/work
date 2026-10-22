@@ -664,12 +664,13 @@ export const rewriteImports =
   };
 
 /**
- * App code that runs outside the screens: its server (`app/`) or its
- * workflows (`workflows/`). Each imports its own files and a few of the
+ * App code built here that runs outside the screens: its workflows
+ * (`workflows/`), a JSON workflow's generated module and its compute
+ * modules. Each imports its own files and a few of the
  * platform's modules, by the flat name each is loaded under.
  */
 export interface CodeKind {
-  /** What the code is, for messages: "Server" or "Workflow". */
+  /** What the code is, for messages, such as "Workflow". */
   name: string;
   folder: string;
   /** The modules it may import besides its own files, and their flat names. */
@@ -680,13 +681,6 @@ export interface CodeKind {
    */
   typeChecked?: boolean;
 }
-
-/** Server code imports its own files and the Workers runtime. */
-export const serverCode: CodeKind = {
-  name: "Server",
-  folder: "app/",
-  imports: new Map([["cloudflare:workers", "cloudflare:workers"]]),
-};
 
 /**
  * The SDK modules workflow code may import: the workflow SDK and its test
@@ -810,8 +804,7 @@ export const codeImportError = (
   // An ambient module would declare, or shadow, a module by name in the
   // type check, or `declare global` give every file globals its isolate
   // doesn't have: code of a `typeChecked` kind (App workflows, compute
-  // modules) declares none. The v1 server's types are stripped, and
-  // generated workflow code is the host's own, so there it reaches nothing.
+  // modules) declares none. Generated workflow code is the host's own, so there it reaches nothing.
   if (ambient) {
     if (kind.typeChecked !== true) {
       return undefined;

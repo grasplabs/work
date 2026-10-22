@@ -171,7 +171,6 @@ const waiting = (status: "active" | "needs_reauth" = "needs_reauth") =>
       data: {
         requests: [request],
         directory: { people: new Map(), apps: new Map() },
-        exports: new Map(),
       },
     },
     dependencies: {

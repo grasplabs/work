@@ -165,7 +165,7 @@ export const RequestDetails = ({
  */
 export const RequestCard = ({
   request,
-  pending: { directory, exports },
+  pending: { directory },
   pile,
 }: {
   request: Permission;
@@ -176,7 +176,7 @@ export const RequestCard = ({
   const { busy, failure, run } = useCoreAction();
   const { t } = useLingui();
   const subject = subjectOf(request, directory);
-  const object = objectOf(request, directory, exports);
+  const object = objectOf(request, directory);
   const actions = formatList(request.actions);
   const who = t`${subject}: ${actions} on ${object}`;
   const decide = async (

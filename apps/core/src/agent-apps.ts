@@ -1,9 +1,4 @@
-import type {
-  App,
-  AppExports,
-  AppFiles,
-  AppVersion,
-} from "@grasp-os/shared/apps";
+import type { App, AppFiles, AppVersion } from "@grasp-os/shared/apps";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { operationErrors } from "@grasp-os/shared/operations";
@@ -17,14 +12,7 @@ import type { AgentApi, AgentScope } from "./agent-scope.ts";
 import { callAppFunction } from "./app-functions.ts";
 import type { FunctionAnswer } from "./app-functions.ts";
 import { cancelRequest, requestText } from "./app-requests.ts";
-import {
-  appExports,
-  appFor,
-  findApp,
-  listApps,
-  listVersions,
-  readFiles,
-} from "./apps.ts";
+import { appFor, findApp, listApps, listVersions, readFiles } from "./apps.ts";
 import { appHost } from "./durable-objects.ts";
 import { appsCollectionId } from "./knowledge/app-entries.ts";
 import { grantedPermissions } from "./permissions.ts";
@@ -95,26 +83,6 @@ export class AppsApi extends WorkerEntrypoint<Env, AgentScope> {
         app: typeof app === "string" ? app : null,
         version: typeof version === "number" ? version : null,
         files: Object.keys(files).length,
-      }),
-    });
-  }
-
-  /**
-   * What an App's current version exports to other Apps (the methods they
-   * may call under a permission an admin grants): for anyone with a role
-   * in it. Read only: nothing here asks for or calls one.
-   */
-  async exports(
-    app: unknown
-  ): Promise<{ version: number | null; exports: AppExports }> {
-    return await asPerson(this.env, this.ctx.props, {
-      allowed: readsApps,
-      method: "apps.exports",
-      read: async (person) => await appExports(this.env, person, app),
-      detail: (found) => ({
-        app: typeof app === "string" ? app : null,
-        version: found.version,
-        exports: Object.keys(found.exports).length,
       }),
     });
   }
@@ -306,23 +274,6 @@ apps: {
   }[]>;
   /** An App's files by path, at \`version\`, or at its latest version without one. Only for Apps the person builds. */
   files(app: string, version?: number): Promise<Record<string, string>>;
-  /**
-   * The methods an App's current version lets other Apps call, by name, as
-   * its \`app/exports.json\` declares them: whether each only reads or also
-   * writes the App's data, and the JSON Schemas of its input and answer.
-   * Another App calls one only once an admin grants it a permission on
-   * this App's exports. Any App the person has a role in.
-   */
-  exports(app: string): Promise<{
-    /** The current version; null (and no exports) while it has none. */
-    version: number | null;
-    exports: Record<string, {
-      access: "read" | "write";
-      description: string;
-      input: Record<string, unknown>;
-      output: Record<string, unknown>;
-    }>;
-  }>;
   /**
    * Calls a public function (query, mutation or action) of an App's current
    * version for the person, through a sealed reference: \`request\` is the

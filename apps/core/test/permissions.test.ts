@@ -75,6 +75,14 @@ const callThrough = async (
   action = "mail.list"
 ): Promise<string> => await callStub(await envOf(authority), binding, action);
 
+/** An agent's request on App `appId`: the one way a request names another App. */
+const onApp = (appId: string): PermissionRequest => ({
+  subject: { type: "agent", agentId: `agent-${unique()}` },
+  object: { type: "app", appId },
+  actions: ["read"],
+  binding: "INVOICES",
+});
+
 describe("permissions", () => {
   it("allow nothing until an admin grants them", async () => {
     const admin = await permissionApi("admin");
@@ -575,24 +583,17 @@ describe("permissions", () => {
 
   it("are refused for an App that isn't in the registry", async () => {
     const admin = await permissionApi("admin");
-    const app = await newApp(admin.api);
     const missing = { type: "app" as const, appId: `app-${unique()}` };
     const other = await newApp(admin.api);
-    const exportsOf = (appId: string): PermissionRequest => ({
-      subject: app,
-      object: { type: "app", appId },
-      actions: ["read"],
-      binding: "INVOICES",
-    });
     const refused = await Promise.all(
-      [outlook(missing.appId), exportsOf(missing.appId)].map(
+      [outlook(missing.appId), onApp(missing.appId)].map(
         async (request) => await outcome(admin.api.permissions.request(request))
       )
     );
     // As for any App the person has no role in.
     expect(refused).toStrictEqual(["app.not_found", "app.not_found"]);
     await expect(
-      outcome(admin.api.permissions.request(exportsOf(other.appId)))
+      outcome(admin.api.permissions.request(onApp(other.appId)))
     ).resolves.toBe("ok");
   });
 

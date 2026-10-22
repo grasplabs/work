@@ -1,4 +1,4 @@
-import type { AgentProposer, AppExports } from "@grasp-os/shared/apps";
+import type { AgentProposer } from "@grasp-os/shared/apps";
 import { auditRejectReasons } from "@grasp-os/shared/audit";
 import type { DependencySummary } from "@grasp-os/shared/dependencies";
 import type { Json } from "@grasp-os/shared/json";
@@ -315,7 +315,8 @@ export const auditOutboxRejected = sqliteTable(
  * The object is stored by type: a connection is `object_id`, with
  * `resource` naming one resource in it or null for all of it; a collection
  * is `object_id`; a workflow is its workflow resource's ID in `object_id`;
- * another App's exports are that App's ID in `object_id`. `actions` is a
+ * an App (an agent's, to call its functions) and a store are their IDs in
+ * `object_id`. `actions` is a
  * JSON array of action names.
  */
 export const permissions = sqliteTable(
@@ -385,8 +386,8 @@ export const permissions = sqliteTable(
       table.status,
       table.revokedAt
     ),
-    // The Apps granted to call an App's exports, found from that App
-    // (app-provenance.ts): by object, not subject.
+    // The permissions on one object, found from it: by object, not
+    // subject.
     index("permissions_object_idx").on(table.objectType, table.objectId),
     // A binding name is one stub in the subject's env, so it is unique
     // among the permissions that aren't revoked: those that hold anywhere,
@@ -625,15 +626,6 @@ export const appVersions = sqliteTable(
      */
     workflowCalls: text("workflow_calls", { mode: "json" })
       .$type<Record<string, WorkflowCalls>>()
-      .notNull()
-      .default(sql`'{}'`),
-    /**
-     * The version's exports (JSON, `AppExports`), read from its
-     * `app/exports.json` when it is committed (app-exports.ts): so a call
-     * from another App reads no files to find what it may call.
-     */
-    exports: text({ mode: "json" })
-      .$type<AppExports>()
       .notNull()
       .default(sql`'{}'`),
     /**

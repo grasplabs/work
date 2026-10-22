@@ -447,11 +447,9 @@ export const findRow = async (env: Env, id: string): Promise<Row | undefined> =>
     .get();
 
 /**
- * The Apps a permission names, its subject and a workflow's or another
- * App's exports' App, must be in the registry: one query for both. Apps
- * are never deleted, so one that exists now still does when the permission
- * is stored. Another App's exports are never the subject's own: an App
- * calls its own methods without a permission.
+ * The Apps a permission names, its subject and the App an agent calls,
+ * must be in the registry: one query for both. Apps are never deleted, so
+ * one that exists now still does when the permission is stored.
  */
 const requireApps = async (
   env: Env,
@@ -467,15 +465,6 @@ const requireApps = async (
   }
   if (named.size === 0) {
     return;
-  }
-  if (
-    object.type === "app" &&
-    subject.type === "app" &&
-    object.appId === subject.appId
-  ) {
-    throw permissionErrors.create("permission.invalid", {
-      issues: ["object.appId: An App calls its own methods without one."],
-    });
   }
   const found = await drizzle(env.DB)
     .select({ id: apps.id })
@@ -641,6 +630,13 @@ const requireObjectFits = (
   if (object.type === "platform" && subject.type !== "app") {
     refuseRequest("subject: Only an App uses what the platform offers.");
   }
+  // An App, a workflow or a store reaches another App's functions only
+  // through an app resource an admin approved (resource-apps.ts).
+  if (object.type === "app" && subject.type !== "agent") {
+    refuseRequest(
+      "subject: Only an agent calls an App's functions through a permission. An App calls another's through an app resource."
+    );
+  }
   if (
     subject.type === "trigger" &&
     (object.type !== "workflow" ||
@@ -791,7 +787,7 @@ export const insertWhere = (
  * Asks for a permission for an App, an agent, or an independent workflow,
  * store or trigger. It allows nothing until an admin grants it. Only the
  * subject's builders ask; a workflow only someone with a role in it names,
- * and another App's exports only someone with a role in that App
+ * and an App an agent calls only someone with a role in that App
  * (`roles`), before anything says whether it exists.
  */
 export const requestPermission = async (
@@ -821,19 +817,7 @@ export const requestPermission = async (
     await roles.resource({ type: "workflow", id: object.workflowId }, "user");
   }
   if (object.type === "app") {
-    // An App calls another's exports; an agent calls an App's sealed
-    // functions (agent-apps.ts), reading with `read` and writing with
-    // `write`, never by an export's name.
-    if (
-      subject.type === "agent" &&
-      !actions.every((action) => action === "read" || action === "write")
-    ) {
-      throw permissionErrors.create("permission.invalid", {
-        issues: [
-          "actions: An agent calls an App's functions with read or write.",
-        ],
-      });
-    }
+    // Only someone with a role in the App names it (`roles`).
     await roles.app(object.appId, "user");
   }
   await requireStoreObject(env, subject, object, roles);
@@ -895,7 +879,7 @@ export const requestPermission = async (
  * `app` asks for or was given (its permissions that aren't revoked), its
  * collections and what the platform offers, which name the same thing for
  * whoever creates from it. A connection is someone's, set up for this
- * App, and a workflow or exports name an App, which the creator may not
+ * App, and a workflow names an App, which the creator may not
  * see: a copy's builders ask for those themselves.
  */
 export const declarableOf = async (
@@ -1114,7 +1098,7 @@ export const grantPermission = async (
       ? [workflowGenerationMoved(db, found.objectId, storedEvent(event.id))]
       : []),
     // More access for an App is more for every App that reaches it
-    // through exports or workflows: their data, if an admin had said it
+    // through workflows: their data, if an admin had said it
     // may go to code nobody approved, is sensitive again, and their
     // screens' policy moves on (screen-trust.ts). More for a workflow is
     // more for every App that starts it, or a workflow that binds it.
@@ -1199,9 +1183,8 @@ const canGrantSql = (by: Identity): SQL =>
  * That a permission lets an App change things for the person using it,
  * as SQL on its row: any on a connection (core can't tell a connector's
  * writes from its reads; connect knows), or with an action other than
- * `read`, such as starting a workflow, inviting guests, or calling
- * another App's exports marked `write` (or one by name, whichever it is
- * marked: its App's next version may mark it `write`). Any on a store too:
+ * `read`, such as starting a workflow, inviting guests, or an agent
+ * calling an App's functions that write. Any on a store too:
  * its actions are operation paths, and a mutation may be named `read`.
  */
 const changesThingsSql = or(
@@ -1261,8 +1244,7 @@ export const isApprovedVersion = async (
  * its permissions granted again for another. Without a version, which the
  * host always sets for an App, nothing is approved: it fails closed. The
  * App and its version may be columns of the query it runs in. `changes`
- * says whether the action changes things when the action alone doesn't:
- * an export named in a permission changes things if it is marked `write`.
+ * says whether the action changes things when the action alone doesn't.
  * A chat's own permission allows only in that chat, for the person who
  * asked for it there (`where`, `holdsIn`).
  */
@@ -1549,9 +1531,9 @@ export const listPermissions = async (
         );
   const db = drizzle(env.DB);
   const open = db.select({ id: apps.id }).from(apps).where(openApps);
-  // Both Apps a permission names, its subject and an exports' App, must
-  // be open to the person: an agent's permission for a hidden App's
-  // exports would name that App otherwise. Workflows a permission names
+  // Both Apps a permission names, its subject and the App an agent calls,
+  // must be open to the person: an agent's permission on a hidden App
+  // would name that App otherwise. Workflows a permission names
   // are filtered by the person's roles in them (permissions-open.ts).
   const ofOpenApp =
     openApps === undefined
@@ -1814,54 +1796,5 @@ export const authorize = async (
     .get();
   if (!allowing) {
     throw permissionErrors.create("permission.denied", { action });
-  }
-};
-
-/**
- * The permission check for a call of another App's export, as `authorize`
- * is for the other objects: the person is still a member, and
- * `permissionId` is active, of that exact subject, on `app`'s exports, and
- * allows `method`: by its name, or by `access`, how the export is marked
- * (`read` or `write`). A call of an export marked `write` also needs the
- * calling code's version to be one an admin approved, whichever allows it.
- * Throws `permission.denied` or `permission.person_inactive` otherwise.
- */
-export const authorizeExport = async (
-  env: Env,
-  authority: Authority,
-  app: AppId,
-  { method, access }: { method: string; access: "read" | "write" },
-  permissionId: PermissionId
-): Promise<void> => {
-  await requireActivePerson(env, authority);
-  const object: PermissionObject = { type: "app", appId: app };
-  const changes = access === "write";
-  const allowing = await drizzle(env.DB)
-    .select({ id: permissions.id })
-    .from(permissions)
-    .where(
-      and(
-        eq(permissions.id, permissionId),
-        or(
-          allowingPermissionSql(
-            authority.subject,
-            authority.appVersion,
-            object,
-            access,
-            changes
-          ),
-          allowingPermissionSql(
-            authority.subject,
-            authority.appVersion,
-            object,
-            method,
-            changes
-          )
-        )
-      )
-    )
-    .get();
-  if (!allowing) {
-    throw permissionErrors.create("permission.denied", { action: method });
   }
 };

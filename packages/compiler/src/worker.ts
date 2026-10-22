@@ -12,9 +12,8 @@
  * Tailwind compiles the CSS for the classes in the App's sources and in the
  * kit modules it loads.
  *
- * It also builds an App's server code and workflows, which run in core
- * (see `buildServer` and `buildWorkflows`): the same Babel, stripping
- * types only.
+ * It also builds an App's workflows, which run in core (see
+ * `buildWorkflows`): the same Babel, stripping types only.
  */
 import { packageEntrySchema } from "@grasp-os/shared/packages";
 import { WorkerEntrypoint } from "cloudflare:workers";
@@ -57,7 +56,6 @@ import {
   generatedWorkflowCode,
   rewriteImports,
   screenTypeImportError,
-  serverCode,
   workflowCode,
 } from "./imports.ts";
 import type {
@@ -76,8 +74,6 @@ import {
   computeModuleErrors,
   openWorkflowErrors,
   screenFile,
-  serverEntry,
-  serverFiles,
   strayFileMessage,
   strayFilesIn,
   workflowFiles,
@@ -510,14 +506,6 @@ export const buildScreens = async (
   };
 };
 
-/**
- * An App's server code as modules by flat name, and the one that exports
- * its `App` class; or why it failed.
- */
-export type ServerBuild =
-  | { ok: true; mainModule: string; modules: Record<string, string> }
-  | { ok: false; diagnostics: Diagnostic[] };
-
 /** Compiles one server or workflow file, or says why it can't be. */
 const compileCodeFile = (
   kind: CodeKind,
@@ -617,34 +605,6 @@ const compileCode = (
   return errors.length > 0
     ? { ok: false, diagnostics: errors }
     : { ok: true, modules };
-};
-
-/**
- * Builds an App's server: `app/server.ts`, which exports its `App` class,
- * and the other TypeScript files under `app/`. Types are stripped, not
- * checked; imports reach only those files and the Workers runtime.
- */
-export const buildServer = (files: Record<string, string>): ServerBuild => {
-  const server = serverFiles(files);
-  const tooMuch = limitErrors(server);
-  if (tooMuch.length > 0) {
-    return { ok: false, diagnostics: tooMuch };
-  }
-  if (!Object.hasOwn(server, serverEntry)) {
-    return {
-      ok: false,
-      diagnostics: [
-        problem(
-          "server",
-          `The App has no server: add ${serverEntry}, exporting its App class.`
-        ),
-      ],
-    };
-  }
-  const built = compileCode(serverCode, server);
-  return built.ok
-    ? { ...built, mainModule: appModuleName(serverEntry) }
-    : built;
 };
 
 /**
@@ -1127,13 +1087,12 @@ export const checkAppCode = (files: Record<string, string>): AppCodeBuild => {
 };
 
 /**
- * What the compiler builds: an App's screens, its v1 server (`app/`), its
- * server code of spec 8's layout (`app`), its tests, its workflows, a
+ * What the compiler builds: an App's screens, its server code of spec
+ * 8's layout (`app`), its tests, its workflows, a
  * JSON workflow's generated module and its compute modules.
  */
 export type CompileTarget =
   | "screens"
-  | "server"
   | "app"
   | "app-tests"
   | "workflows"
@@ -1143,7 +1102,6 @@ export type CompileTarget =
 /** What a build of each target answers. */
 export interface TargetBuilds {
   screens: ScreenBuild;
-  server: ServerBuild;
   app: AppCodeBuild;
   "app-tests": AppCodeBuild;
   workflows: WorkflowBuild;
@@ -1162,7 +1120,6 @@ const targetBuilds: {
   ) => TargetBuilds[Target] | Promise<TargetBuilds[Target]>;
 } = {
   screens: buildScreens,
-  server: buildServer,
   app: checkAppCode,
   "app-tests": buildAppTests,
   workflows: buildWorkflows,
