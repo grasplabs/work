@@ -23,6 +23,7 @@ import { declaredParams, loadRun } from "./code.ts";
 import type { Settled, StepError } from "./code.ts";
 import { runParamsSchema } from "./engine.ts";
 import type { InternalWorkflow, PinnedRun, RunPin } from "./engine.ts";
+import { runFixtureWorkflow } from "./fixture-runs.ts";
 import {
   countedStep,
   fromIsolate,
@@ -430,6 +431,11 @@ export const runPinned = async (
   if (pin.type === "candidate") {
     // A test run of a draft checkpoint: its input is its row's.
     return await runCandidateWorkflow(env, pin, event.instanceId, step, memory);
+  }
+  if (pin.type === "fixture") {
+    // An independent workflow's sealed build started by an App's test: its
+    // input is its own record's.
+    return await runFixtureWorkflow(env, pin, event.instanceId, step, memory);
   }
   const { app, workflow, version } = pin;
   return await runWorkflow(

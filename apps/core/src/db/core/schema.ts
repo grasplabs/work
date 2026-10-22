@@ -984,6 +984,41 @@ export const screenSubmissions = sqliteTable(
 );
 
 /**
+ * The workflow runs an App's tests started (workflows/fixture-runs.ts),
+ * each recorded before the engine is asked for it and deleted once the
+ * engine removed it: a row left behind is a test run that died between
+ * the two, whose run the sweep removes past its deadline. What a run is
+ * and runs with is here, never in the organization's runs and receipts:
+ * its pinned version and build, the fixture principal it acts for, its
+ * input and the parameter values its fixture gave it (or their defaults:
+ * never the organization's).
+ */
+export const appTestRuns = sqliteTable(
+  "app_test_runs",
+  {
+    runId: text("run_id").primaryKey(),
+    /** The App whose tests started it, and the version under test. */
+    appId: text("app_id").notNull(),
+    appVersion: integer("app_version").notNull(),
+    workflowResourceId: text("workflow_resource_id").notNull(),
+    version: integer().notNull(),
+    manifestHash: text("manifest_hash").notNull(),
+    buildHash: text("build_hash").notNull(),
+    /** The fixture's principal it acts for (`fixture-<name>`). */
+    principal: text().notNull(),
+    input: text().notNull(),
+    params: text().notNull(),
+    createdAt: timestamp("created_at").notNull(),
+    /**
+     * When its test's time is up: no activation runs it after, and the
+     * sweep removes it once it is past.
+     */
+    deadline: timestamp("deadline").notNull(),
+  },
+  (table) => [index("app_test_runs_deadline").on(table.deadline)]
+);
+
+/**
  * The fixture stores chats' previews of their drafts run on
  * (sealed-previews.ts), each recorded before its object is first touched
  * and deleted once the object is discarded. Kept apart from App tests'
