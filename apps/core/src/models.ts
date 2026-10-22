@@ -106,7 +106,7 @@ import {
 import type { PinnedPrice, TokenCounts } from "./model-prices.ts";
 import { bodyBytes, outputCapOf, unboundedBy } from "./model-requests.ts";
 import { judgeCall } from "./model-rules.ts";
-import type { Judged, Refusal } from "./model-rules.ts";
+import type { EuOnly, Judged, Refusal } from "./model-rules.ts";
 import {
   charactersOf,
   parseVoiceRef,
@@ -396,6 +396,34 @@ export const modelEffortsOf = (ref: string): ModelEfforts => {
 export const deploymentStaysInEu = (env: ModelsEnv): boolean => {
   const parsed = modelRulesConfigSchema.safeParse(gatewayVar(env));
   return !parsed.success || parsed.data.eu?.deployment === true;
+};
+
+/**
+ * Which of the deployment's EU rules keeps some of its data in the EU, for
+ * a service that holds data of the whole deployment, such as the vector
+ * index (knowledge/vector-index-profile.ts): `deployment` for everything,
+ * `workflow` or `connection` for what some workflows or connections
+ * handle, which such a service can't tell apart. `unreadable` for rules
+ * that don't parse: it fails closed. `undefined` when no rule applies.
+ */
+export const deploymentEuRule = (
+  env: ModelsEnv
+): EuOnly | "unreadable" | undefined => {
+  const parsed = modelRulesConfigSchema.safeParse(gatewayVar(env));
+  if (!parsed.success) {
+    return "unreadable";
+  }
+  const { eu } = parsed.data;
+  if (eu === undefined) {
+    return undefined;
+  }
+  if (eu.deployment) {
+    return "deployment";
+  }
+  if (eu.connections.length > 0) {
+    return "connection";
+  }
+  return eu.workflows.length > 0 ? "workflow" : undefined;
 };
 
 /** What a call is for, such as `workflow.step` or `chat.turn`. */
