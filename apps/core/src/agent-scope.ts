@@ -1,10 +1,15 @@
 import { agentErrors } from "@grasp-os/shared/agent";
-import { delegateActorOf } from "@grasp-os/shared/audit";
+import {
+  auditProvenanceMaxItems,
+  delegateActorOf,
+} from "@grasp-os/shared/audit";
 import type { AuditDetailValue, AuditEntry } from "@grasp-os/shared/audit";
 import { isExpectedError } from "@grasp-os/shared/errors";
+import { connectionIdSchema, identifierSchema } from "@grasp-os/shared/ids";
 import type { ChatId, WorkspaceId } from "@grasp-os/shared/ids";
 import {
   authoritySchema,
+  permissionActionSchema,
   permissionErrors,
 } from "@grasp-os/shared/permissions";
 import type { Authority } from "@grasp-os/shared/permissions";
@@ -141,17 +146,103 @@ export const recordSources = async (
   { workspaceId, chatId, runId }: AgentScope,
   sources: readonly string[],
   /** The Knowledge documents the call hands over, which answers may cite. */
-  documentIds: readonly string[] = []
+  documentIds: readonly string[] = [],
+  /**
+   * What the run's result rests on, if not `sources`: a connection call's
+   * grant (`connectionRead`), where the chat's provenance names the
+   * connection alone.
+   */
+  runReads?: readonly string[]
 ): Promise<void> => {
   const recorded = await workspace(env, workspaceId).recordSources(
     chatId,
     runId,
     sources,
-    documentIds
+    documentIds,
+    runReads
   );
   if (recorded !== "open") {
     throw runRefusal(recorded);
   }
+};
+
+/**
+ * Records with the run alone what a call read that isn't the chat's
+ * provenance (an App's answer or files, the Knowledge catalog), before the
+ * call hands it over, so the run's result is withheld from the model once
+ * the agent may no longer read it for its person (history-access.ts). A
+ * run that ended since the call began records nothing, and the call is
+ * refused.
+ */
+export const recordRunReads = async (
+  env: Env,
+  { workspaceId, chatId, runId }: AgentScope,
+  reads: readonly string[]
+): Promise<void> => {
+  const unique = [...new Set(reads)];
+  // A few at a time, as the object takes them (`sourcesSchema`).
+  for (
+    let at = 0;
+    at < Math.max(unique.length, 1);
+    at += auditProvenanceMaxItems
+  ) {
+    // oxlint-disable-next-line no-await-in-loop -- in order, each admitted
+    const recorded = await workspace(env, workspaceId).recordRunReads(
+      chatId,
+      runId,
+      unique.slice(at, at + auditProvenanceMaxItems)
+    );
+    if (recorded !== "open") {
+      throw runRefusal(recorded);
+    }
+  }
+};
+
+const connectionReadPrefix = "connection-read:";
+
+/** A connection call's read: the connection, the action, the resource. */
+const connectionReadSchema = z.tuple([
+  connectionIdSchema,
+  permissionActionSchema,
+  identifierSchema.nullable(),
+]);
+
+/**
+ * The source a run's call of `action` on connection `connectionId` is
+ * recorded as, under a grant for `resource` (`null`: the whole
+ * connection). Checked again as that grant, never as the connection: a
+ * grant left for another action or resource doesn't let its result
+ * through. Each part may be a full identifier, so this one may be longer
+ * than one (`runReadMaxLength` in workspace.ts).
+ */
+export const connectionRead = (
+  connectionId: string,
+  action: string,
+  resource: string | null
+): string =>
+  `${connectionReadPrefix}${JSON.stringify([connectionId, action, resource])}`;
+
+/** The connection call a source recorded by `connectionRead` names. */
+export const connectionReadOf = (
+  source: string
+):
+  | { connectionId: string; action: string; resource: string | null }
+  | undefined => {
+  if (!source.startsWith(connectionReadPrefix)) {
+    return undefined;
+  }
+  let parts: unknown;
+  try {
+    parts = JSON.parse(source.slice(connectionReadPrefix.length));
+  } catch {
+    return undefined;
+  }
+  const read = connectionReadSchema.safeParse(parts);
+  if (!read.success) {
+    return undefined;
+  }
+  const [connectionId, action, resource] = read.data;
+  return { connectionId, action, resource };
 };
 
 /** One call of a chat's code, as the audit log records it. */

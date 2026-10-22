@@ -22,6 +22,11 @@
  * The console holds no client data (@grasp-os/shared/onboarding-summary):
  * nothing of a snapshot is kept, only when each core last answered and the
  * latest failure's code (`clientAdminReads`).
+ *
+ * Beside its core, each deployed client's customer in Grasp's Stripe is
+ * read, when one is linked and Secrets Store has the key
+ * (src/billing/billing.ts): in the same turn, within the same deadline, so
+ * its billing never holds up the snapshot or another client.
  */
 import {
   adminSnapshotPath,
@@ -41,6 +46,8 @@ import { routerSecretHeader } from "@grasp-os/shared/router";
 import { sql } from "drizzle-orm";
 
 import type { Staff } from "../access.ts";
+import { billingOf, stripeKey, stripeLinks } from "../billing/billing.ts";
+import type { Billing } from "../billing/billing.ts";
 import { consoleDatabase } from "../db/act.ts";
 import type { ConsoleDatabase } from "../db/act.ts";
 import { clientAdminReads } from "../db/schema.ts";
@@ -88,6 +95,8 @@ export type ClientAdmin =
       snapshot: AdminSnapshot;
       /** When its core answered. */
       at: string;
+      /** What it pays and whether it is paid, as Stripe says, or why that isn't read. */
+      billing: Billing;
     }
   | {
       client: GridRow;
@@ -346,9 +355,11 @@ export const clientAdmins = async (
   const db = consoleDatabase(env.DB);
   const grid = await clientGrid(env);
   const known = grid.filter(({ status }) => status !== "offboarded");
-  const [lastAnswered, secrets] = await Promise.all([
+  const [lastAnswered, secrets, key, links] = await Promise.all([
     lastAnswers(db),
     ifStored(async (): Promise<DeploySecrets> => await deploySecrets(env)),
+    stripeKey(env),
+    stripeLinks(db),
   ]);
   const askedAt = new Date();
   const sources: ReadSources = {
@@ -359,20 +370,37 @@ export const clientAdmins = async (
   };
   // Each client's deadline starts inside its turn, not here: time spent
   // waiting for a turn isn't counted against it.
-  const outcomes = await eachLimited(
+  const read = await eachLimited(
     known,
     options.concurrency,
-    async (row) => [row.id, await readClient(sources, row)] as const
+    async (row) =>
+      await Promise.all([
+        readClient(sources, row),
+        // Only a deployed client's page is shown, so only its billing is read.
+        row.status === "active"
+          ? billingOf({
+              key,
+              customerId: links.get(row.id) ?? null,
+              clientId: row.id,
+              timeoutMs: options.timeoutMs,
+            })
+          : null,
+      ])
+  );
+  const outcomes = known.map(
+    (row, index) =>
+      [row.id, read[index]?.[0] ?? { error: "no_answer" }] as const
   );
   await keepOutcomes(db, outcomes, askedAt);
   return known.map((client, index): ClientAdmin => {
-    const outcome = outcomes[index]?.[1];
+    const [outcome, billing] = read[index] ?? [];
     if (outcome !== undefined && "snapshot" in outcome) {
       return {
         client,
         state: "answered",
         snapshot: outcome.snapshot,
         at: outcome.at.toISOString(),
+        billing: billing ?? { state: "not_linked" },
       };
     }
     return {

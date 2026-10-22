@@ -159,8 +159,17 @@ const waiting = (status: "active" | "needs_reauth" = "needs_reauth") =>
               at: "2026-10-13T10:00:00.000Z",
               read: false,
             },
+            {
+              id: "asked-1",
+              type: "gap_asked",
+              gap: "gap-invoices",
+              question: "How many invoices come in a month?",
+              owner: "Head of finance",
+              at: "2026-10-13T09:00:00.000Z",
+              read: false,
+            },
           ],
-          unread: 1,
+          unread: 2,
           more: false,
         },
       },
@@ -195,6 +204,7 @@ describe(inboxItems, () => {
     const ids = inboxItems(waiting(), admin, readAt).map(({ id }) => id);
     expect(ids.toSorted()).toStrictEqual(
       [
+        "asked:asked-1",
         "failed:failure-1",
         "held:held-new",
         "held:held-old",
@@ -260,7 +270,19 @@ describe(listed, () => {
     expect(
       listed(items, "workflows", "urgent").map(({ kind }) => kind)
     ).toStrictEqual(["failedRun"]);
-    expect(listed(items, "brain", "urgent")).toStrictEqual([]);
-    expect(listed(items, "apps", "urgent")).toHaveLength(items.length - 1);
+    expect(
+      listed(items, "brain", "urgent").map(({ kind, title, about }) => ({
+        kind,
+        title,
+        about,
+      }))
+    ).toStrictEqual([
+      {
+        kind: "openQuestion",
+        title: "How many invoices come in a month?",
+        about: { kind: "brain" },
+      },
+    ]);
+    expect(listed(items, "apps", "urgent")).toHaveLength(items.length - 2);
   });
 });

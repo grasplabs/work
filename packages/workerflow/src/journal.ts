@@ -34,6 +34,7 @@
 // Values and errors are kept as codec text (codec.ts), never as live
 // objects; a step's stream result as chunks beside them (streams.ts).
 import { createHistory } from "./history.ts";
+import { journalSchemaVersion } from "./journal-schema.ts";
 import { createNotifications } from "./notifications.ts";
 import { createStreamChunks } from "./streams.ts";
 
@@ -46,16 +47,7 @@ export class JournalSchemaError extends Error {
   override readonly name = "JournalSchemaError";
 }
 
-/**
- * The journal's own layout; a change to it is a new version, with the
- * upgrade from the one before it (`upgradedSchema`). No journal predates
- * version 8 (nothing earlier was released), so a run of an older version,
- * or a newer one, is refused when it is read.
- *
- * - 9: `run.control_fence`, the newest fence a control came with (run.ts,
- *   `ControlFence`).
- */
-export const journalSchemaVersion = 9;
+export { journalSchemaVersion } from "./journal-schema.ts";
 
 /**
  * The journal's version, once upgraded to this engine's where it was the
@@ -658,7 +650,7 @@ export const readRun = (sql: SqlStorage): RunRow | undefined => {
     return undefined;
   }
   if (schema !== journalSchemaVersion) {
-    // No journal predates version 8; see journalSchemaVersion.
+    // Outside what this engine reads (journal-schema.ts).
     throw new JournalSchemaError(
       `This run's journal has schema ${String(schema)}, where this engine reads only schema ${journalSchemaVersion}`
     );

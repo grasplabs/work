@@ -81,6 +81,12 @@ export const minTalkedShown = 3;
  */
 export const leadWaitWorkingDays = 3;
 
+/**
+ * Whoever hasn't finished this many working days after their link went
+ * out gets one reminder, while the interviews run. Then nothing more.
+ */
+export const remindAfterWorkingDays = 3;
+
 /** How long the interviews run, in days: by default, and at least and most. */
 export const planDays = { usual: 14, least: 5, most: 42 } as const;
 
@@ -301,6 +307,11 @@ export interface OnboardingStaffApi extends KickoffApi {
    * what they said goes, and their link opens on the next device.
    */
   newStart: (person: string) => Promise<void>;
+  /**
+   * Sends someone's mail that failed (their link, or the reminder) again,
+   * once whatever stopped it is put right.
+   */
+  sendMailAgain: (person: string) => Promise<void>;
   /** Where the onboarding stands: its stages, what needs Grasp, Grasp's notes. */
   overview: () => Promise<StaffOverview>;
   /** What happened, the newest first, narrowed by `filter`. */
@@ -342,4 +353,5 @@ export const onboardingErrors = defineErrorFamily({
   "onboarding.no_link": "That person has no link out yet.",
   "onboarding.not_found": "Nobody on the list by that id.",
   "onboarding.no_team": "No team on the list by that id.",
+  "onboarding.no_failed_mail": "That person has no mail that failed.",
 });
