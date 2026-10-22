@@ -57,6 +57,13 @@
       "when": 1792619422199,
       "tag": "0007_agreed",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1792653657717,
+      "tag": "0008_works",
+      "breakpoints": true
     }
   ]
 }
