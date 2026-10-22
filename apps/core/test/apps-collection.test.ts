@@ -14,6 +14,7 @@ import {
   newTeam,
   readCollection,
   storedGrant,
+  storedVersionTexts,
 } from "./knowledge.ts";
 import {
   auditedDuring,
@@ -630,12 +631,8 @@ const entryVersion = async (owner: Person, app: string): Promise<number> => {
 
 /** How many versions of the document `id` hold `word`. */
 const versionsHolding = async (id: string, word: string): Promise<number> => {
-  const { results } = await env.KNOWLEDGE.prepare(
-    "SELECT text FROM versions WHERE document_id = ?"
-  )
-    .bind(id)
-    .all<{ text: string }>();
-  return results.filter(({ text }) => text.includes(word)).length;
+  const texts = await storedVersionTexts(id);
+  return texts.filter((text) => text.includes(word)).length;
 };
 
 describe("read-only", setUpTime, () => {
