@@ -1,6 +1,8 @@
 import { schemaHash } from "@grasp-os/sdk/host";
 import { fileErrors } from "@grasp-os/shared/app-files";
+import { appErrors } from "@grasp-os/shared/apps";
 import type { AppId } from "@grasp-os/shared/ids";
+import { roleErrors } from "@grasp-os/shared/roles";
 import { drizzle } from "drizzle-orm/d1";
 
 import { operationRoles } from "./app-access.ts";
@@ -67,12 +69,26 @@ export const appStartFiles = (
       if (role === undefined) {
         throw fileErrors.create("file.not_found");
       }
+      // Their roles in the App now: someone with none left reads nothing,
+      // refused as any file that isn't theirs, never as the App.
+      let roles: Awaited<ReturnType<typeof operationRoles>>;
+      try {
+        roles = await operationRoles(env, { userId: principal, role }, app);
+      } catch (error) {
+        if (
+          appErrors.codeOf(error) !== undefined ||
+          roleErrors.codeOf(error) !== undefined
+        ) {
+          throw fileErrors.create("file.not_found");
+        }
+        throw error;
+      }
       const { storeId, stub } = await storeFiles(env, store.storeId);
       const content = await stub.fileReadableThrough(
         storeId,
         {
           principal,
-          roles: await operationRoles(env, { userId: principal, role }, app),
+          roles,
           schemaHash: await schemaHash(declared.schema),
         },
         fileId,

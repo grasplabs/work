@@ -43,7 +43,7 @@ import {
   workflowIdsIn,
   workflowTestOutcome,
 } from "./workflows/code.ts";
-import { holdsFile } from "./workflows/start-files.ts";
+import { takesFile } from "./workflows/start-files.ts";
 
 // What a version changes, for the builder who reviews it before making
 // it current: worked out here from the version and the App as they are
@@ -84,8 +84,9 @@ const handsFilesOf = async (
     log.warn("version_review.manifest_unread", errorFields(error));
     return null;
   }
+  // No App layout: no App, nothing to hand.
   if (manifest === undefined) {
-    return null;
+    return false;
   }
   const readsFiles = Object.values(manifest.browserResources).some(
     (resource) =>
@@ -93,7 +94,7 @@ const handsFilesOf = async (
   );
   return (
     readsFiles &&
-    Object.values(manifest.workflows).some(({ input }) => holdsFile(input))
+    Object.values(manifest.workflows).some(({ input }) => takesFile(input))
   );
 };
 
