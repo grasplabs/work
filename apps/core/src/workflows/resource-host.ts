@@ -1664,7 +1664,7 @@ export class ResourceRunHost
           step.task?.kind === "call" &&
           step.task.call.name === "grasp.connector";
         // oxlint-disable-next-line no-await-in-loop -- one round at a time
-        await this.#waitWhileHeld(base, round);
+        await this.#waitWhileHeld(base, step.name, round);
         // oxlint-disable-next-line no-await-in-loop -- one round at a time
         await this.#requirePerson();
         // oxlint-disable-next-line no-await-in-loop -- one round at a time
@@ -1793,12 +1793,18 @@ export class ResourceRunHost
     if (lease === undefined) {
       throw new Error(`Step "${run.name}"'s retry decision holds no lease`);
     }
-    const admitted = await this.#admit(
+    // Its conditions spend the activation's fuel as any attempt's do
+    // (`#attemptOf`): one the activation can't fund any more is cut off
+    // as the Loader cuts off an isolate past its CPU time, and the engine
+    // tries the decision again in the next activation.
+    if (this.#isolateStopped || this.#activationFuel < attemptFuel) {
+      throw toStepError(forIsolate(cpuLimitKill()));
+    }
+    const admitted = await this.#admitFunded(
+      { ...run, wait: loadWaitStart, collecting: false },
       told,
       lease,
-      run.name,
-      loadWaitStart,
-      false
+      true
     );
     if (!("settle" in admitted)) {
       // Refused for load: tried again by the engine, as a timeout is.
@@ -1841,7 +1847,10 @@ export class ResourceRunHost
       return { retry: false, delayMs: 0, firstFailedAt: firstAt };
     } finally {
       attempt.over = true;
+      // What it didn't spend of its share goes back once every evaluation
+      // it started has settled, as an attempt's does.
       await Promise.allSettled(attempt.pending);
+      this.#activationFuel += Math.max(0, attempt.budget.fuel);
       await admitted.settle();
     }
   }
@@ -2365,9 +2374,9 @@ export class ResourceRunHost
   }
 
   /**
-   * Waits, in round `round`, while the call of step `stepName` (a call
-   * task's, whose key its call carries) is held for the run's person:
-   * each check a step of its own (retried, and replayed without asking
+   * Waits, in round `round` of the step run under the name `base`, while
+   * the call of step `callStep` (a call task's, whose key its call
+   * carries) is held for the run's person: each check a step of its own (retried, and replayed without asking
    * connect again), then a durable wait that the person's decision ends
    * (`heldWakeType`, wakes.ts), or else the next check: a first wait
    * (`waitMsOf`) doubling up to `maxWaits` of them, in steps named after
@@ -2381,12 +2390,19 @@ export class ResourceRunHost
    * a run suspended in one: Grasp has no release yet, so no such run
    * outlives a deploy.
    */
-  async #waitWhileHeld(stepName: string, round: number): Promise<void> {
+  async #waitWhileHeld(
+    base: string,
+    callStep: string,
+    round: number
+  ): Promise<void> {
     const first = waitMsOf(this.#env);
-    const prefix = `${stepName}:held:${round}`;
-    const wakeType = await heldWakeType(stepName);
+    const prefix = `${base}:held:${round}`;
+    // The call's own identity, never the round's: a retry's round
+    // (`base`, `…:retry:<n>`) calls under its step's key, which connect
+    // holds and the person's decision wakes.
+    const wakeType = await heldWakeType(callStep);
     // The key `#made` gives the task's call, in every attempt and round.
-    const idempotencyKey = stepIdempotencyKey(this.#run.runId, stepName);
+    const idempotencyKey = stepIdempotencyKey(this.#run.runId, callStep);
     for (let checks = 0; ; checks += 1) {
       // oxlint-disable-next-line no-await-in-loop -- one check at a time
       const held = await this.#step.do(

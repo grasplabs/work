@@ -762,7 +762,9 @@ const hostOf = async (
   /** Steps the engine times out, as it ends an attempt it gave up on. */
   timesOut: ReadonlySet<string> = new Set(),
   /** Gets the name of each step and sleep the host asks the engine for. */
-  asked: string[] = []
+  asked: string[] = [],
+  /** The activation's fuel for expressions, if not the host's own. */
+  activationFuel?: number
 ): Promise<ResourceRunHost> => {
   const manifest = await env.DB.prepare(
     "SELECT manifest_hash AS hash FROM workflow_resource_versions WHERE workflow_resource_id = ? AND version = 1"
@@ -820,6 +822,7 @@ const hostOf = async (
       leaseOf: () => ({ generation: 1, deadline: Date.now() + 60_000 }),
       tampered: () => {},
       admitAttempt: admittedFreely,
+      ...(activationFuel === undefined ? {} : { activationFuel }),
       timers: {
         passed: async () => await Promise.resolve(0),
         opened: async (timer) => {
@@ -1584,6 +1587,61 @@ describe("a run's host, retrying a step", () => {
         "task:count:retry:2",
       ],
       untaken: false,
+    });
+  });
+
+  it("spends the activation's fuel on its retry decisions' conditions, deciding no more once it runs out", async () => {
+    const by = await builder();
+    const { workflow } = await published(by, (name) =>
+      definitionOf(name, [
+        guarded([{ count: { set: { status: "counted" } } }], {
+          as: "failure",
+          retry: {
+            delay: { milliseconds: 10 },
+            limit: { attempt: { count: 5 } },
+            when: "${ $failure.status >= 400 }",
+          },
+        }),
+      ])
+    );
+    const asked: string[] = [];
+    // Each round of `count` runs out of time, and the activation has one
+    // attempt's share of fuel left once the try's enter step is checked,
+    // and little more: its first decision spends some of that share, so
+    // no other decides in this activation (the engine tries it again in
+    // the next).
+    const rounds = Array.from({ length: 5 }, (_, index) =>
+      index === 0 ? "task:count" : `task:count:retry:${String(index + 1)}`
+    );
+    const host = await hostOf(
+      by,
+      workflow.id,
+      () => 1,
+      new Set(rounds),
+      asked,
+      2 ** 27 + 2 ** 19 + 2 ** 12
+    );
+    await host.do(
+      "enter:guard",
+      data,
+      async () => await Promise.resolve({ ok: true, value: { output: input } })
+    );
+    await host.do(
+      "task:count",
+      data,
+      async () =>
+        await Promise.resolve({
+          ok: true,
+          value: { output: { status: "counted" } },
+        })
+    );
+    expect({
+      decided: asked.filter((name) => name.endsWith(":decide")),
+      retried: asked.filter((name) => /^task:count:retry:\d+$/u.test(name)),
+    }).toStrictEqual({
+      // Asked for again, the second decision is cut off as it begins.
+      decided: ["task:count:retry:2:decide", "task:count:retry:3:decide"],
+      retried: ["task:count:retry:2"],
     });
   });
 });
