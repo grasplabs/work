@@ -766,6 +766,104 @@ describe("listen tasks", { timeout: 120_000 }, () => {
     expect(run.output).toStrictEqual({ notes: ["same origin"] });
   });
 
+  it("fail the run when the event that took a correlated filter has no such attribute, so a sender can't turn the correlation off", async () => {
+    const admin = await person("admin");
+    const { workflow } = await listening(admin, [
+      listen("await-done", { one: byJob(completed) }),
+      listen("await-timeout", { one: byJob(timedOut) }),
+      notes,
+    ]);
+    const runId = await started(admin, workflow.id, "job-7");
+    await waiting(runId);
+
+    await admitRunEvent(
+      env,
+      delivery(workflow.id, runId, { subject: undefined, note: "no subject" })
+    );
+    const run = await endOf(admin, workflow.id, runId);
+
+    expect({ status: run.status, code: run.error?.code }).toStrictEqual({
+      status: "failed",
+      code: "workflow.call_invalid",
+    });
+  });
+
+  it("aren't lowered with one correlation name that one filter expects and another of the same listen records", async () => {
+    const admin = await person("admin");
+    const { version } = await listening(admin, [
+      listen("await-both", {
+        all: [
+          byJob(completed),
+          {
+            with: { type: timedOut },
+            correlate: { job: { from: "${ .subject }", expect: "job-1" } },
+          },
+        ],
+      }),
+      listen("await-both-reversed", {
+        all: [
+          {
+            with: { type: timedOut },
+            correlate: { job: { from: "${ .subject }", expect: "job-1" } },
+          },
+          byJob(completed),
+        ],
+      }),
+      listen("await-expected", {
+        all: [
+          {
+            with: { type: completed },
+            correlate: { job: { from: "${ .subject }", expect: "job-1" } },
+          },
+          {
+            with: { type: timedOut },
+            correlate: { job: { from: "${ .subject }", expect: "job-1" } },
+          },
+        ],
+      }),
+      notes,
+    ]);
+
+    expect(
+      version.build.executable ? [] : version.build.unsupported
+    ).toStrictEqual([
+      {
+        pointer: "/do/0/await-both/listen/to/all",
+        taskId: "await-both",
+        feature: "listen:correlate",
+      },
+      {
+        pointer: "/do/1/await-both-reversed/listen/to/all",
+        taskId: "await-both-reversed",
+        feature: "listen:correlate",
+      },
+    ]);
+  });
+
+  it("refuse a correlation inside a fork when the workflow is published, and take a fork without one", async () => {
+    const admin = await person("admin");
+    const forked = (filter: Record<string, unknown>) => [
+      {
+        race: {
+          fork: {
+            branches: [
+              listen("await-job", { one: filter }),
+              { other: { set: { notes: [] } } },
+            ],
+          },
+        },
+      },
+      notes,
+    ];
+
+    await expect(
+      Promise.all([
+        outcome(listening(admin, forked(byJob(completed)))),
+        outcome(listening(admin, forked({ with: { type: completed } }))),
+      ])
+    ).resolves.toStrictEqual(["workflow.definition_invalid", "ok"]);
+  });
+
   it("aren't lowered with a filter that correlates on an event's content, or on an attribute it names twice", async () => {
     const admin = await person("admin");
     const { version } = await listening(admin, [

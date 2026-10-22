@@ -205,6 +205,16 @@ const checkEventFilter = (
     return;
   }
   const correlatePointer = pointerJoin(pointer, "correlate");
+  if (checker.forkDepth > 0) {
+    // "What earlier listens took" is whatever the scheduler ran first
+    // between a fork's branches, which no replay may decide differently.
+    checker.report.error(
+      "profile.invalid_value",
+      at(site, correlatePointer),
+      "Correlate outside a fork: its branches run side by side, so which listens came earlier isn't fixed."
+    );
+    return;
+  }
   const correlate = objectAt(
     checker,
     filter.correlate,

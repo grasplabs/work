@@ -736,15 +736,7 @@ export const everyKind = documentAround(
                   to: {
                     all: [
                       { with: { type: "grasp.job.completed" } },
-                      {
-                        with: { type: "grasp.job.timeout" },
-                        correlate: {
-                          job: {
-                            from: "${ .subject }",
-                            expect: "${ $workflow.input.jobId }",
-                          },
-                        },
-                      },
+                      { with: { type: "grasp.job.timeout" } },
                     ],
                   },
                   read: "envelope",
@@ -764,7 +756,15 @@ export const everyKind = documentAround(
           to: {
             any: [
               { with: { type: "grasp.job.completed" } },
-              { with: { type: "grasp.job.timeout" } },
+              {
+                with: { type: "grasp.job.timeout" },
+                correlate: {
+                  job: {
+                    from: "${ .subject }",
+                    expect: "${ $workflow.input.jobId }",
+                  },
+                },
+              },
             ],
           },
         },

@@ -1752,10 +1752,11 @@ const correlationsOf = (
 };
 
 /**
- * Refuses, by its listen's pointer, a correlation without an `expect`
- * named by two filters of one listen: what the first of them takes
- * would have to decide what the second matches, which the enter step
- * resolves before either takes anything. Whether one was.
+ * Refuses, by its listen's pointer, a correlation named by two filters of
+ * one listen when either lacks an `expect`: what the first of them takes
+ * would have to decide what the second matches (or pin the value the
+ * second expects), which the enter step resolves before either takes
+ * anything. Two filters that each `expect` a value under one name are fine.
  */
 const unrecordedTwice = (
   emitter: Emitter,
@@ -1763,18 +1764,17 @@ const unrecordedTwice = (
   filters: readonly GeneratedFilter[],
   pointer: string
 ): boolean => {
-  const seen = new Set<string>();
+  const open = new Set<string>();
+  const pinned = new Set<string>();
   for (const filter of filters) {
     const expected = new Set(filter.attributes.map(([name]) => name));
     for (const { name, attribute } of filter.correlate ?? []) {
-      if (expected.has(attribute)) {
-        continue;
-      }
-      if (seen.has(name)) {
+      const expects = expected.has(attribute);
+      if (open.has(name) || (!expects && pinned.has(name))) {
         emitter.refusals.add(pointer, "listen:correlate", item.id);
         return true;
       }
-      seen.add(name);
+      (expects ? pinned : open).add(name);
     }
   }
   return false;

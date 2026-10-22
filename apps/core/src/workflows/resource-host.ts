@@ -2056,8 +2056,11 @@ export class ResourceRunHost
    * took `stored`: `taker` (an `all` listen's, which waits on one filter at
    * a time), or the first of its filters, as resolved (`resolved`, in the
    * build's order), whose type and attributes it has. Each of that
-   * filter's correlations not yet held takes the event's attribute; one
-   * the event lacks (an event with no subject) stays unheld.
+   * filter's correlations not yet held takes the event's attribute. An
+   * event that lacks one (an event with no subject) fails the listen
+   * (`workflow.call_invalid`): holding nothing would let a sender turn the
+   * correlation off, and later listens match any value. The same on every
+   * replay, as the event is.
    */
   async #correlate(
     task: Extract<SealedTask, { kind: "listen" }>,
@@ -2081,7 +2084,14 @@ export class ResourceRunHost
     for (const { name, attribute } of task.listen.filters[index]?.correlate ??
       []) {
       const value = attributes[attribute];
-      if (value !== undefined && !this.#correlated.has(name)) {
+      if (value === undefined) {
+        throw workflowResourceErrors.create("workflow.call_invalid", {
+          issues: [
+            `listen: An event the listen took has no ${attribute}, which correlation ${name} reads.`,
+          ],
+        });
+      }
+      if (!this.#correlated.has(name)) {
         this.#correlated.set(name, value);
       }
     }
