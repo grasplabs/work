@@ -381,6 +381,8 @@ const readAttachment = defineTool({
   }),
   readOnly: true,
   reach: "own",
+  // A workflow action may keep it as a file of its run (GRA-886).
+  answersFile: true,
   resource: "mailbox",
   routes: [
     get("/messages/{message}"),
