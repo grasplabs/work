@@ -306,15 +306,27 @@ describe("JSON workflow builds", () => {
             },
           },
           {
-            // Retries come with GRA-278's durable retry timers.
+            // A reusable retry policy's conditions had no error in scope.
             guard: {
               try: [{ attempt: { set: { status: "trying" } } }],
-              catch: { retry: { limit: { attempt: { count: 2 } } } },
+              catch: { retry: "transient" },
             },
           },
           { finish: { set: { status: "done" } } },
         ],
-        { more: { timeout: { after: { minutes: 5 } } } }
+        {
+          more: {
+            timeout: { after: { minutes: 5 } },
+            use: {
+              retries: {
+                transient: {
+                  when: "${ true }",
+                  limit: { attempt: { count: 2 } },
+                },
+              },
+            },
+          },
+        }
       )
     );
     expect(version.build.executable).toBeFalsy();
@@ -330,7 +342,7 @@ describe("JSON workflow builds", () => {
       {
         pointer: "/do/1/guard/catch/retry",
         taskId: "guard",
-        feature: "catch.retry",
+        feature: "use.retries:when",
       },
     ]);
     // Nothing generated, nothing sealed: the export is the definition alone.

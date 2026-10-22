@@ -3068,6 +3068,23 @@ export const workflowResourceRuns = sqliteTable(
      * it here (restricted.ts), so no step, retry or replay runs without it.
      */
     restricted: integer({ mode: "boolean" }).notNull().default(false),
+    /**
+     * The timer the run waits on now, if any, as its host opened it
+     * (workflows/resource-host.ts): a JSON object of its ID, task,
+     * purpose (`sleep` or `retry`), when it opened and its deadline. What
+     * a screen's snapshot of the run lists as its wait (spec 10.7.2).
+     */
+    timer: text(),
+    /**
+     * How often its timer opened or closed: part of its snapshot's
+     * revision (screen-workflows.ts), so each is a revision of its own.
+     */
+    timerRevision: integer("timer_revision").notNull().default(0),
+    /**
+     * How many of its timers have passed, in the order its code reaches
+     * them: a replay that reaches one of those again keeps nothing of it.
+     */
+    timersPassed: integer("timers_passed").notNull().default(0),
   },
   (table) => [
     // A workflow's runs that haven't ended, for its deletion check.

@@ -96,6 +96,7 @@ import {
   admittedFreely,
   liveStatus,
   resumed,
+  runInstance,
   runObject,
   stopped,
   whileEngineRefuses,
@@ -486,6 +487,7 @@ const mailingWorkflow = async (
     plan = [],
     sharing,
     plain = false,
+    retry,
   }: {
     before?: unknown[];
     to?: string;
@@ -497,9 +499,24 @@ const mailingWorkflow = async (
      * run's output: nothing after the send is admitted or evaluated.
      */
     plain?: boolean;
+    /** A retry policy of a try's catch around the send. */
+    retry?: Record<string, unknown>;
   } = {}
 ) => {
   const key = await mailContract(admin);
+  const send = {
+    send: {
+      call: "grasp.connector",
+      with: {
+        binding: "mail",
+        operation: "mail.send",
+        arguments: { to, subject: "${ $params.token }" },
+      },
+      ...(plain
+        ? { output: { as: "${ {status: .messageId} }" } }
+        : { export: { as: "${ {sent: .messageId} }" } }),
+    },
+  };
   const { workflow, executable } = await published(by, {
     bindings: {
       mail: { kind: "connector", contract: key },
@@ -533,19 +550,11 @@ const mailingWorkflow = async (
               },
             },
           ]),
-      {
-        send: {
-          call: "grasp.connector",
-          with: {
-            binding: "mail",
-            operation: "mail.send",
-            arguments: { to, subject: "${ $params.token }" },
-          },
-          ...(plain
-            ? { output: { as: "${ {status: .messageId} }" } }
-            : { export: { as: "${ {sent: .messageId} }" } }),
-        },
-      },
+      ...[send].map((task) =>
+        retry === undefined
+          ? task
+          : { guard: { try: [task], catch: { retry } } }
+      ),
       ...(plain
         ? []
         : [pause, { finish: { set: { status: "${ $context.sent }" } } }]),
@@ -1939,6 +1948,72 @@ describe("runs started by a restricted App", () => {
       end: { status: "completed", output: { status: "message-1" } },
       calls: 1,
       hostCalls: 1,
+    });
+  });
+
+  it("wait for their person when a send that failed for a moment is held on its retry, then send it once confirmed", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    // Its first round can't reach the mail server for a moment, through
+    // its step's own attempts (connect lists the server's tools before it
+    // holds anything), so the try's retry calls again under the send's
+    // key, which connect holds for Ada.
+    const { workflow, mail, serving } = await mailingWorkflow(ada, admin, {
+      to: "Ada",
+      plain: true,
+      plan: ["unavailable", "unavailable", "unavailable"],
+      retry: {
+        delay: { milliseconds: 10 },
+        limit: { attempt: { count: 2 } },
+      },
+    });
+    const starter = await startingApp(ada, admin, workflow.id, {
+      restricted: true,
+    });
+    const runId = await starter.start(serving);
+    const held = await heldFor(ada, runId);
+    // Long enough for a host that rerun the held call at once to spend
+    // the run's steps on it.
+    await scheduler.wait(3000);
+    const runWhileHeld = await resourceRunFor(env, ada, workflow.id, runId);
+    const mailWhileHeld = await mail.did();
+    const whileHeld = {
+      status: runWhileHeld.status,
+      calls: mailWhileHeld.calls,
+    };
+    await confirmPendingAction(env, ada, held.id, held.inputHash);
+    const run = await ended(ada, workflow.id, runId);
+    // The steps the run started: one rerun of the held call, once Ada
+    // decided, never one for each check while she hadn't.
+    using events = await runInstance(runId).subscribe({
+      filter: ["attempt_started"],
+    });
+    const steps: string[] = [];
+    for (;;) {
+      // oxlint-disable-next-line no-await-in-loop -- one event at a time, in order
+      const { done, value } = await events.next();
+      if (done === true) {
+        break;
+      }
+      if (value.type === "attempt_started") {
+        steps.push(value.stepName);
+      }
+    }
+    const sent = await mail.did();
+    expect({
+      whileHeld,
+      end: endOf(run),
+      calls: sent.calls,
+      retried: steps.includes("task:send:retry:2-1"),
+      heldReruns: steps.filter((name) =>
+        /^task:send:retry:2:held:\d+:run-/u.test(name)
+      ).length,
+    }).toStrictEqual({
+      whileHeld: { status: "running", calls: 0 },
+      end: { status: "completed", output: { status: "message-1" } },
+      calls: 1,
+      retried: true,
+      heldReruns: 1,
     });
   });
 

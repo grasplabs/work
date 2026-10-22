@@ -447,10 +447,10 @@ describe("runs of JSON workflows", () => {
     const workflow = await published(by, (name) =>
       definitionOf(name, [
         {
-          // A catch that retries isn't lowered (yet): no build.
-          guard: {
-            try: [{ attempt: { set: { status: "trying" } } }],
-            catch: { retry: { limit: { attempt: { count: 2 } } } },
+          // A nested list's timeout isn't lowered: no build.
+          check: {
+            do: [{ inner: { set: { status: "checking" } } }],
+            timeout: { after: { seconds: 5 } },
           },
         },
       ])

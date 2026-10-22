@@ -417,6 +417,12 @@ const stages = {
   ended: 5,
 } as const;
 
+/**
+ * How many of a run's timers each stage of it numbers: far more than a
+ * run's steps, which bound its timers, can open and close.
+ */
+const timerRevisions = 2 ** 20;
+
 /** How many stages a policy generation holds (`revisionOf`). */
 const stagesPerGeneration = 5;
 
@@ -433,8 +439,50 @@ const stagesPerGeneration = 5;
  */
 const revisionOf = (
   generation: number,
-  stage: (typeof stages)[keyof typeof stages]
-): number => generation * stagesPerGeneration + stage;
+  stage: (typeof stages)[keyof typeof stages],
+  /** How often its timer opened or closed (`timerRevision`). */
+  timers: number
+): number =>
+  (generation * stagesPerGeneration + stage) * timerRevisions +
+  Math.min(timers, timerRevisions - 1);
+
+/** A run's timer, as its host kept it (resource-runs.ts, `keepTimer`). */
+const timerSchema = z.object({
+  id: z.string().min(1).max(256),
+  taskId: z.string().min(1).max(64),
+  purpose: z.enum(["sleep", "retry"]),
+  /** Its task's declared label, or empty: never a task's ID. */
+  title: z.string().max(200).default(""),
+  openedAt: z.number(),
+  deadline: z.number(),
+});
+
+/**
+ * The waits of run `row` a snapshot lists (spec 10.7.2): the timer it
+ * waits on now while it runs, a wait task's sleep or a retry's backoff,
+ * by its task; none otherwise.
+ */
+const waitsOf = (row: RunRow): Json[] => {
+  if (row.status !== "running" || row.timer === null) {
+    return [];
+  }
+  const timer = timerSchema.safeParse(JSON.parse(row.timer)).data;
+  if (timer === undefined) {
+    return [];
+  }
+  return [
+    {
+      id: timer.id,
+      taskId: timer.taskId,
+      key: timer.taskId,
+      title: timer.title,
+      openedAt: timer.openedAt,
+      deadline: timer.deadline,
+      kind: "timer",
+      purpose: timer.purpose,
+    },
+  ];
+};
 
 /** Run `row`'s stage, a cancel asked of it or not. */
 const stageOf = (
@@ -624,7 +672,7 @@ const runSnapshot = async (
     status,
     startedAt: status === "queued" ? null : row.createdAt.getTime(),
     finishedAt: row.endedAt === null ? null : row.endedAt.getTime(),
-    waits: [],
+    waits: waitsOf(row),
     control: {
       canPause: false,
       canResume: false,
@@ -636,7 +684,11 @@ const runSnapshot = async (
   };
   return {
     value,
-    revision: revisionOf(generation, stageOf(row, cancelling)),
+    revision: revisionOf(
+      generation,
+      stageOf(row, cancelling),
+      row.timerRevision
+    ),
   };
 };
 
@@ -704,7 +756,8 @@ const receiptAnswer = async (
     state,
     revision: revisionOf(
       generation,
-      state === "admitted" ? stageOf(now ?? row, true) : stages.ended
+      state === "admitted" ? stageOf(now ?? row, true) : stages.ended,
+      (now ?? row).timerRevision
     ),
   };
 };
