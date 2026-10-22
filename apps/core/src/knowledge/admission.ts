@@ -233,6 +233,8 @@ const unitsOf = (text: string): Unit[] => {
   let block: string[] = [];
   let run: string[] = [];
   let runHeader: string | undefined = undefined;
+  // How many units there were when the run began.
+  let runStart = 0;
   const endBlock = () => {
     if (kind === "prose") {
       for (const sentence of block.join(" ").split(sentenceEnd)) {
@@ -248,7 +250,10 @@ const unitsOf = (text: string): Unit[] => {
   };
   const endRun = () => {
     endBlock();
-    if (run.length > 1) {
+    // Judged whole too when split into more than one unit: blocks, or
+    // sentences split where an abbreviation ("Ph.D.", "e.g.") looked
+    // like a sentence's end.
+    if (units.length - runStart > 1) {
       units.push({
         text: run.join("\n"),
         header: runHeader,
@@ -293,6 +298,9 @@ const unitsOf = (text: string): Unit[] => {
     }
     kind = lineKind;
     block.push(line);
+    if (run.length === 0) {
+      runStart = units.length;
+    }
     run.push(line);
     if (lineKind === "table") {
       runHeader ??= line;

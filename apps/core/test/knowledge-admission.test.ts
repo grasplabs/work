@@ -155,6 +155,9 @@ describe("Knowledge admission", { timeout: 60_000 }, () => {
       // Markup inside the words.
       tagged: 'She is a trade <span class="x">union</span> member.',
       linked: "She is a trade [union](https://hr.example) member.",
+      // An abbreviation's full stop, read as a sentence's end.
+      abbreviation: "She has a Ph.D. and is on sick leave.",
+      abbreviations: "E.g. she is on sick leave, i.e. off work.",
       // What only looks like a tag is read as written too.
       comparison: "Jan's hours < 8, on sick leave > 5 days.",
       underTaggedHeading:
@@ -192,6 +195,8 @@ describe("Knowledge admission", { timeout: 60_000 }, () => {
       tagged: "held",
       linked: "held",
       comparison: "held",
+      abbreviation: "held",
+      abbreviations: "held",
       underTaggedHeading: "held",
       french: "held",
       frenchCurly: "held",
@@ -411,7 +416,17 @@ describe("Knowledge admission", { timeout: 60_000 }, () => {
         })
       );
 
+    const abbreviated = await outcome(
+      person.api.knowledge.saveDocument({
+        collectionId: person.collectionId,
+        path: `${marker}-notes.md`,
+        text: `${marker}: she has a Ph.D. and is on sick leave.`,
+        ifVersion: 0,
+      })
+    );
+
     expect({
+      abbreviated,
       path: await save(`${marker}/jan-is-diagnosed-with-cancer.md`),
       message: await save(`${marker}-a.md`, "His salary is €4,200."),
       collection: await outcome(
@@ -429,6 +444,7 @@ describe("Knowledge admission", { timeout: 60_000 }, () => {
       ),
       stored: await storedWith(marker),
     }).toStrictEqual({
+      abbreviated: "knowledge.held",
       path: "knowledge.excluded",
       message: "knowledge.excluded",
       collection: "knowledge.held",
