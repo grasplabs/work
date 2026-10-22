@@ -571,6 +571,70 @@ describe(
       });
     });
 
+    it("hands a text, number, boolean or null under a union that allows a file as it is, and refuses an object there", async () => {
+      const field = {
+        descriptorVersion: 1,
+        nullable: false,
+        presence: "required",
+      } as const;
+      const descriptor = {
+        ...field,
+        kind: "object",
+        fields: {
+          doc: {
+            ...field,
+            kind: "union",
+            members: [
+              { ...field, kind: "file" },
+              { ...field, kind: "string", trim: false, email: false },
+            ],
+          },
+        },
+      } as const;
+      const handed = async (doc: unknown) => {
+        const start = handFiles(
+          env,
+          descriptor,
+          JSON.stringify({ doc }),
+          {
+            runId: crypto.randomUUID(),
+            workflowId: crypto.randomUUID(),
+            runs: true,
+          },
+          {
+            // Nothing is a file to read: a text is handed as it is, and an
+            // object under the union is refused before any read.
+            read: () => {
+              throw new Error("Never read");
+            },
+            sent: () => {
+              throw new Error("Never audited");
+            },
+          }
+        );
+        const refused = await outcome(start);
+        if (refused !== "ok") {
+          return refused;
+        }
+        const { input, runId } = await start;
+        return { input, runId };
+      };
+
+      expect({
+        text: await handed("a note"),
+        number: await handed(3),
+        yes: await handed(true),
+        nothing: await handed(null),
+        file: await handed({ id: crypto.randomUUID() }),
+      }).toStrictEqual({
+        text: { input: '{"doc":"a note"}', runId: undefined },
+        number: { input: '{"doc":3}', runId: undefined },
+        yes: { input: '{"doc":true}', runId: undefined },
+        nothing: { input: '{"doc":null}', runId: undefined },
+        file: "file.start_files",
+      });
+    });
+
     it("counts no dropped copy against the workflow's bytes, and sweeps a copy no start admitted within the hour", async () => {
       const workflowId = crypto.randomUUID();
       const runId = crypto.randomUUID();

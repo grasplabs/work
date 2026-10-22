@@ -124,9 +124,16 @@ export const fileSlots = (
           walk(at.value, inner, [...path, key]);
         }
       }
-    } else if (at.kind === "union" && at.members.some(holdsFile)) {
+    } else if (
+      at.kind === "union" &&
+      at.members.some(holdsFile) &&
+      here !== null &&
+      typeof here === "object"
+    ) {
       // Which member a value is, is the checker's to say, not this
-      // walk's: a file under a union is never guessed at.
+      // walk's: a file under a union is never guessed at. A string,
+      // number, boolean or null is no file and holds none, whichever
+      // member took it.
       throw runFileErrors.create("file.start_files");
     }
   };
