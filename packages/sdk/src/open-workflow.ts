@@ -751,7 +751,7 @@ const flowOf = (engine: OpenWorkflowEngine, within = ""): Flow => {
       }
       await engine.sleepUntil(step, timestamp);
     },
-    listen: async (id) => await engine.listen(stepOf("task", id)),
+    listen: async (id) => await engine.listen(named("task", id)),
   };
   return freeze(flow);
 };
