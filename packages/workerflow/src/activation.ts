@@ -667,6 +667,15 @@ export class Activation {
   readonly #clock: () => number;
   /** Settled, superseded, suspended or faulted: every later call is refused. */
   #over = false;
+  /**
+   * The promises of the calls this activation left unsettled (`#never`),
+   * kept for as long as it lives. Nothing else refers to one, and the
+   * runtime lets go of such a promise once it collects it: the call it
+   * belongs to then fails with "Promise will never complete", which a
+   * definition running in an isolate takes for a failed call, though the
+   * run only waits.
+   */
+  readonly #unsettled = new Set<PromiseWithResolvers<never>>();
   readonly #stop: (stop: Stop) => void;
   /** Resolves when the activation stopped without settling the run. */
   readonly stopped: Promise<Stop>;
@@ -835,7 +844,7 @@ export class Activation {
     // Nested calls from an attempt still out are the reference's, and run.
     const caller = attempts.getStore();
     if (hasEnded(caller)) {
-      return await never();
+      return await this.#never();
     }
     let settled: { ok: true; value: T } | { ok: false; error: unknown };
     try {
@@ -850,7 +859,7 @@ export class Activation {
     }
     const current = this.#write(() => this.#current());
     if (current === failed) {
-      return await never();
+      return await this.#never();
     }
     if (!current) {
       return await this.#refuse();
@@ -858,12 +867,19 @@ export class Activation {
     if (hasEnded(caller)) {
       // Called while its attempt was out, and answered after it ended: the
       // answer has no one to go to.
-      return await never();
+      return await this.#never();
     }
     if (!settled.ok) {
       throw settled.error;
     }
     return settled.value;
+  }
+
+  /** What a refused or suspended call gets: a promise that never settles. */
+  async #never(): Promise<never> {
+    const pending = Promise.withResolvers<never>();
+    this.#unsettled.add(pending);
+    return await pending.promise;
   }
 
   /** Whether this activation may still act: not over, not superseded. */
@@ -904,7 +920,7 @@ export class Activation {
    */
   async #halt(error: Error): Promise<never> {
     this.#haltNow(error);
-    return await never();
+    return await this.#never();
   }
 
   /** `#halt`, for a caller that can't wait on it: a stream's pull. */
@@ -988,7 +1004,7 @@ export class Activation {
   /** Refuses a call from this activation, which is over. */
   async #refuse(): Promise<never> {
     this.#letGo();
-    return await never();
+    return await this.#never();
   }
 
   #renewLease(now: number): void {
@@ -1009,7 +1025,7 @@ export class Activation {
       await this.#storage.setAlarm(time);
     } catch (error) {
       this.#fault(error);
-      await never();
+      await this.#never();
     }
   }
 
@@ -1031,7 +1047,7 @@ export class Activation {
       }
     });
     if (renewed === failed) {
-      return await never();
+      return await this.#never();
     }
     await this.#arm(now + this.#limits.leaseMs);
   }
@@ -1414,7 +1430,7 @@ export class Activation {
       })
     );
     if (journaled === failed) {
-      return await never();
+      return await this.#never();
     }
     if (!journaled) {
       return await this.#refuse();
@@ -1490,7 +1506,7 @@ export class Activation {
       });
     } catch (error) {
       this.#fault(error);
-      return await never();
+      return await this.#never();
     }
     if ("corrupt" in replay) {
       // A result the journal holds but can't give back: replaying again
@@ -1513,7 +1529,7 @@ export class Activation {
     // is the effect: it never runs for an activation that is over.
     const stillCurrent = this.#write(() => this.#current());
     if (stillCurrent === failed) {
-      return await never();
+      return await this.#never();
     }
     if (!stillCurrent) {
       return await this.#refuse();
@@ -1611,7 +1627,7 @@ export class Activation {
     }
     const current = this.#write(() => this.#current());
     if (current === failed) {
-      return await never();
+      return await this.#never();
     }
     if (!current) {
       return await this.#refuse();
@@ -1651,7 +1667,7 @@ export class Activation {
     }
     const landing = this.#write(() => this.#journalDelay(claim, said));
     if (landing === failed) {
-      return await never();
+      return await this.#never();
     }
     return landing;
   }
@@ -1726,7 +1742,7 @@ export class Activation {
     this.#parkedCount += 1;
     this.#parkedWake = Math.min(this.#parkedWake, wake);
     this.#checkWhenQuiet();
-    return await never();
+    return await this.#never();
   }
 
   /**
@@ -1867,7 +1883,7 @@ export class Activation {
   async #inTurn(identity: StepIdentity): Promise<void> {
     const settled = this.#write(() => this.#owe(identity));
     if (settled === failed) {
-      return await never();
+      return await this.#never();
     }
     if (settled === null) {
       return;
@@ -1927,7 +1943,7 @@ export class Activation {
   async #doAlone(name: string, rest: unknown[]): Promise<unknown> {
     const current = this.#write(() => this.#current());
     if (current === failed) {
-      return await never();
+      return await this.#never();
     }
     if (!current) {
       return await this.#refuse();
@@ -1944,7 +1960,7 @@ export class Activation {
       return { journaled: step, owed: settles ? this.#owe(identity) : null };
     });
     if (read === failed) {
-      return await never();
+      return await this.#never();
     }
     const { journaled, owed } = read;
     // Checked whatever state the step is in, as a wait's are: a step
@@ -1992,7 +2008,7 @@ export class Activation {
   ): Promise<unknown> {
     const next = this.#write(() => this.#nextAttempt(identity, config));
     if (next === failed) {
-      return await never();
+      return await this.#never();
     }
     if (next === null) {
       return await this.#refuse();
@@ -2006,7 +2022,7 @@ export class Activation {
       const outcome = await this.#runAttempt(identity, config, claim, work);
       if ("fault" in outcome) {
         this.#fault(outcome.fault);
-        return await never();
+        return await this.#never();
       }
       if ("superseded" in outcome) {
         // Superseded mid-upload: recorded as an answer ignored, like a
@@ -2025,7 +2041,7 @@ export class Activation {
         this.#commit(identity, claim, config, outcome)
       );
       if (committed === failed) {
-        return await never();
+        return await this.#never();
       }
       if (committed === "incomplete") {
         return await this.#fail(
@@ -2108,7 +2124,7 @@ export class Activation {
       await this.#storage.deleteAlarm();
     } catch (error) {
       this.#fault(error);
-      await never();
+      await this.#never();
     }
   }
 
@@ -2238,7 +2254,7 @@ export class Activation {
   async #waitAlone(plan: WaitPlan): Promise<EventRow | undefined> {
     const current = this.#write(() => this.#current());
     if (current === failed) {
-      return await never();
+      return await this.#never();
     }
     if (!current) {
       return await this.#refuse();
@@ -2254,7 +2270,7 @@ export class Activation {
       return resolved;
     });
     if (outcome === failed) {
-      return await never();
+      return await this.#never();
     }
     if (outcome === null) {
       return await this.#refuse();
@@ -2272,7 +2288,7 @@ export class Activation {
         });
       }
       this.#checkWhenQuiet();
-      return await never();
+      return await this.#never();
     }
     await this.#renewWatchdog();
     await this.#inTurn(identity);
@@ -2388,7 +2404,7 @@ export class Activation {
     const identity = this.#occurrence("do", name);
     const row = this.#write(() => readStep(this.#storage.sql, identity));
     if (row === failed || row === undefined) {
-      return await never();
+      return await this.#never();
     }
     if (row.config !== call.config.journal) {
       return await this.#halt(
@@ -2422,7 +2438,7 @@ export class Activation {
     if (row.state === "failed" && row.error !== null) {
       throw rebuild(row.error);
     }
-    return await never();
+    return await this.#never();
   }
 
   /**
@@ -2443,7 +2459,7 @@ export class Activation {
           };
     });
     if (read === failed || read === undefined) {
-      return await never();
+      return await this.#never();
     }
     if (read.mismatch !== undefined) {
       return await this.#halt(replayMismatch(read.mismatch));
@@ -2455,7 +2471,7 @@ export class Activation {
     if (read.row.state === "failed" && read.row.error !== null) {
       throw rebuild(read.row.error);
     }
-    return await never();
+    return await this.#never();
   }
 
   /** Resolves when the compensating replay is done, or after `ms`. */
@@ -2560,7 +2576,7 @@ export class Activation {
       })
     );
     if (letGo === failed) {
-      return await never();
+      return await this.#never();
     }
     if (!letGo) {
       return await this.#refuse();
@@ -2569,7 +2585,7 @@ export class Activation {
     // The wake goes with the write that suspended the run.
     await this.#arm(wake);
     this.#stop(suspended);
-    return await never();
+    return await this.#never();
   }
 
   /**
@@ -2613,7 +2629,7 @@ export class Activation {
       })
     );
     if (plan === failed) {
-      return await never();
+      return await this.#never();
     }
     if (plan === null) {
       return await this.#refuse();
@@ -2689,7 +2705,7 @@ export class Activation {
       })
     );
     if (reset === failed) {
-      return await never();
+      return await this.#never();
     }
     if (!reset) {
       return await this.#refuse();
@@ -2728,7 +2744,7 @@ export class Activation {
         );
         if (journaled === failed) {
           // oxlint-disable-next-line no-await-in-loop -- ends the loop
-          return await never();
+          return await this.#never();
         }
         if (journaled === null) {
           // oxlint-disable-next-line no-await-in-loop -- ends the loop
