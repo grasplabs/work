@@ -597,14 +597,26 @@ describe("sequential for loops of JSON workflows", { timeout: 60_000 }, () => {
       by,
       keyedOver('${ ["a", ""] }', "${ $item }")
     );
+    // No key for the first item and two for the second: as many keys as
+    // items, all different, but not one for each.
+    const noneThenTwo = await published(
+      by,
+      keyedOver("${ [0, 2] }", "${ range(0; .) }")
+    );
+    const two = await published(by, keyedOver("${ [1] }", "${ (., . + 10) }"));
     const duplicateRun = await ranFor(by, duplicate.workflow.id);
     const duplicateSteps = await completedSteps(duplicateRun.id);
+    const noneThenTwoRun = await ranFor(by, noneThenTwo.workflow.id);
+    const noneThenTwoSteps = await completedSteps(noneThenTwoRun.id);
     expect({
       duplicate: endOf(duplicateRun),
       marked: duplicateSteps.get("task:mark@over.0") ?? 0,
       notKeys: endOf(await ranFor(by, notKeys.workflow.id)),
       missing: endOf(await ranFor(by, missing.workflow.id)),
       empty: endOf(await ranFor(by, empty.workflow.id)),
+      noneThenTwo: endOf(noneThenTwoRun),
+      noneThenTwoMarked: noneThenTwoSteps.get("task:mark@over.0") ?? 0,
+      two: endOf(await ranFor(by, two.workflow.id)),
     }).toStrictEqual({
       duplicate: { status: "failed", code: "workflow.item_keys_duplicate" },
       marked: 0,
@@ -612,6 +624,9 @@ describe("sequential for loops of JSON workflows", { timeout: 60_000 }, () => {
       // `null` for an item without one: not a key.
       missing: { status: "failed", code: "workflow.item_keys_invalid" },
       empty: { status: "failed", code: "workflow.item_keys_invalid" },
+      noneThenTwo: { status: "failed", code: "workflow.item_keys_invalid" },
+      noneThenTwoMarked: 0,
+      two: { status: "failed", code: "workflow.item_keys_invalid" },
     });
   });
 

@@ -1744,17 +1744,19 @@ const endJump = (emitter: Emitter): string => {
 
 /**
  * The expression that makes a loop's item keys (`metadata.grasp.key`,
- * `key` its source) at once: a list of the key of each of the items its
- * enter step recorded, which are `.` (stage `loopKeys`), in their order,
- * the key evaluated on its item with the item's variables (`each`, `at`)
- * bound as the loop binds them. One evaluation for every item, not one
+ * `key` its source) at once: for each of the items its enter step
+ * recorded, which are `.` (stage `loopKeys`), in their order, the list of
+ * what the key yields on its item with the item's variables (`each`, `at`)
+ * bound as the loop binds them. A list per item, not one flat list: jq's
+ * key may yield no value or several, and only per item can the host tell
+ * that each yielded exactly one. One evaluation for every item, not one
  * per item: a key per item would take one attempt's fuel for every few
  * hundred items, and a fresh jq for each. `key` is one expression of the
  * profile, which `|` takes whole (nothing of jq's grammar binds looser),
- * so it is the list's member as it is.
+ * so it is the inner list's member as it is.
  */
 export const keysSourceOf = (key: string, each: string, at: string): string =>
-  `[range(0; length) as $${at} | .[$${at}] as $${each} | $${each} | ${key}]`;
+  `[range(0; length) as $${at} | .[$${at}] as $${each} | [$${each} | ${key}]]`;
 
 /**
  * The statements of a `for` task: one call of the SDK's loop, whose enter

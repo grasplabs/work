@@ -2897,8 +2897,10 @@ export class ResourceRunHost
    * The keys of `items` (`metadata.grasp.key`), from sealed expression
    * `slot` (generate.ts, `keysSourceOf`): one evaluation for them all, on
    * the items, charged as one of what it reads, the items and the task's
-   * input together. One key for each item, in order, each a number or
-   * text of at most `maxItemKeyLength` (`workflow.item_keys_invalid`),
+   * input together. It yields, for each item in order, what the key
+   * yielded on it: exactly one key each, a number or text of at most
+   * `maxItemKeyLength` (`workflow.item_keys_invalid`), counted per item
+   * so that one item's extra key can't stand in for another's missing one,
    * and no two the same (`workflow.item_keys_duplicate`), judged before
    * any item runs: a loop never starts on items it can't tell apart.
    */
@@ -2919,19 +2921,23 @@ export class ResourceRunHost
       { input: passed.input, output: items },
       passed.size + sized.size
     );
-    const keys = z.array(itemKeySchema).length(items.length).safeParse(value);
-    if (!keys.success) {
+    const yielded = z
+      .array(z.tuple([itemKeySchema]))
+      .length(items.length)
+      .safeParse(value);
+    if (!yielded.success) {
       throw workflowResourceErrors.create("workflow.item_keys_invalid");
     }
+    const keys = yielded.data.map(([key]) => key);
     const seen = new Set<string>();
-    for (const key of keys.data) {
+    for (const key of keys) {
       const text = canonicalJson(key);
       if (seen.has(text)) {
         throw workflowResourceErrors.create("workflow.item_keys_duplicate");
       }
       seen.add(text);
     }
-    return keys.data;
+    return keys;
   }
 
   /** The descriptor text of `task`'s `which` schema, if it has one. */
