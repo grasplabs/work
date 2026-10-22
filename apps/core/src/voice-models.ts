@@ -1,3 +1,4 @@
+import { voiceModelProvider } from "@grasp-os/shared/deployment-config";
 import type { SpokenWord } from "@grasp-os/shared/voice";
 
 import type { ListPrices } from "./model-prices.ts";
@@ -7,8 +8,12 @@ import type { ListPrices } from "./model-prices.ts";
 // models. Each is priced per character it is asked to say, which is how
 // ElevenLabs bills speech.
 
-/** The provider of the gateway's voice models, by its AI Gateway path. */
-export const voiceProvider = "elevenlabs";
+/**
+ * The provider of the gateway's voice models, as the allowlist names
+ * them. The gateway path that reaches it is the deployment's
+ * (`voiceGatewayProviders` in @grasp-os/shared/deployment-config).
+ */
+export const voiceProvider = voiceModelProvider;
 
 /**
  * ElevenLabs's API prices for text to speech, in US dollars per 1,000

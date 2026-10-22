@@ -209,6 +209,10 @@ msgstr "{binding}: {actions} on {object}, waiting for an admin"
 msgid "{binding}: {actions} on {object}, waiting for an admin (asked by the agent)"
 msgstr "{binding}: {actions} on {object}, waiting for an admin (asked by the agent)"
 
+#: src/routes/_shell.settings.security.tsx
+msgid "{browser} on {system}"
+msgstr "{browser} on {system}"
+
 #: src/routes/_shell.onboarding.ai-use.tsx
 msgid "{cached} of them from a cache"
 msgstr "{cached} of them from a cache"
@@ -388,6 +392,10 @@ msgstr "{daily} a day"
 #: src/dashboard/signals.tsx
 msgid "{days, plural, one {# day} other {# days}}"
 msgstr "{days, plural, one {# day} other {# days}}"
+
+#: src/routes/_shell.settings.security.tsx
+msgid "{devices, plural, one {Signed in on # device. Sign out any you do not recognise.} other {Signed in on # devices. Sign out any you do not recognise.}}"
+msgstr "{devices, plural, one {Signed in on # device. Sign out any you do not recognise.} other {Signed in on # devices. Sign out any you do not recognise.}}"
 
 #: src/dashboard/signals.tsx
 msgid "{doc} in {where} is {late, plural, one {# day} other {# days}} past its review date."
@@ -2070,6 +2078,10 @@ msgstr "Applications in use on devices"
 msgid "Applications signed in to"
 msgstr "Applications signed in to"
 
+#: src/onboarding/review-parts.tsx
+msgid "Apply it if the sender’s domain is {domain}."
+msgstr "Apply it if the sender’s domain is {domain}."
+
 #: src/engines/screen-approval.tsx
 msgid "Approval"
 msgstr "Approval"
@@ -2200,6 +2212,10 @@ msgstr "Article"
 #: src/dashboard/pile-cards.tsx
 msgid "as {binding}"
 msgstr "as {binding}"
+
+#: src/onboarding/review-parts.tsx
+msgid "As its action, set the spam confidence level (SCL) to “Bypass spam filtering”, then save it."
+msgstr "As its action, set the spam confidence level (SCL) to “Bypass spam filtering”, then save it."
 
 #: src/dashboard/report.ts
 msgid "As of {date}."
@@ -2728,6 +2744,11 @@ msgid "change"
 msgstr "change"
 
 #: src/routes/_shell.settings.outcomes.tsx
+msgid "Change"
+msgstr "Change"
+
+#: src/onboarding/review-parts.tsx
+msgctxt "change how it was settled"
 msgid "Change"
 msgstr "Change"
 
@@ -3343,10 +3364,12 @@ msgid "Copenhagen"
 msgstr "Copenhagen"
 
 #: src/chat/thread.tsx
+#: src/onboarding/review-parts.tsx
 #: src/onboarding/setup-steps.tsx
 msgid "Copied"
 msgstr "Copied"
 
+#: src/onboarding/review-parts.tsx
 #: src/onboarding/setup-steps.tsx
 msgid "Copy"
 msgstr "Copy"
@@ -3670,6 +3693,10 @@ msgstr "Developer tools"
 #: src/settings/pulse-people.tsx
 msgid "Device"
 msgstr "Device"
+
+#: src/routes/_shell.settings.security.tsx
+msgid "Devices"
+msgstr "Devices"
 
 #: src/workflows/definition-editor.tsx
 msgid "Diagram"
@@ -5040,6 +5067,14 @@ msgstr "In Policies"
 msgid "In the brain"
 msgstr "In the brain"
 
+#: src/onboarding/review-parts.tsx
+msgid "In the Exchange admin center, go to Mail flow, then Rules, and add a rule."
+msgstr "In the Exchange admin center, go to Mail flow, then Rules, and add a rule."
+
+#: src/onboarding/review-parts.tsx
+msgid "In the Google Admin console, go to Apps, then Google Workspace, then Gmail, then Spam, phishing and malware."
+msgstr "In the Google Admin console, go to Apps, then Google Workspace, then Gmail, then Spam, phishing and malware."
+
 #: src/chat/builds.tsx
 msgid "In the proposer's words"
 msgstr "In the proposer's words"
@@ -5304,6 +5339,10 @@ msgstr "It was charged {amount} on {when}."
 msgid "It was released on {when}, charging nothing."
 msgstr "It was released on {when}, charging nothing."
 
+#: src/onboarding/review-parts.tsx
+msgid "It’s done"
+msgstr "It’s done"
+
 #: src/chat/cited-note.tsx
 msgid "It's gone, or you can't read it."
 msgstr "It's gone, or you can't read it."
@@ -5423,6 +5462,10 @@ msgstr "Jump to the newest message"
 #: src/connections/connect-dialog.tsx
 msgid "Just for you"
 msgstr "Just for you"
+
+#: src/onboarding/review-parts.tsx
+msgid "Keep “Require sender authentication” on, then save."
+msgstr "Keep “Require sender authentication” on, then save."
 
 #: src/workflows/definition-editor.tsx
 msgid "Keep my text"
@@ -5618,6 +5661,10 @@ msgstr "Let an AI app such as Claude or ChatGPT use Grasp. It reads what Grasp k
 #: src/onboarding/document-drop.tsx
 msgid "Let go to add them"
 msgstr "Let go to add them"
+
+#: src/onboarding/review-parts.tsx
+msgid "Let Grasp’s mail through"
+msgstr "Let Grasp’s mail through"
 
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Let the interviews run again"
@@ -8797,6 +8844,10 @@ msgstr "Set. Type a new value to replace it."
 msgid "Settings"
 msgstr "Settings"
 
+#: src/onboarding/review-parts.tsx
+msgid "Settled: {choice}"
+msgstr "Settled: {choice}"
+
 #: src/dashboard/standard-widgets.tsx
 msgid "Several workflows run with AI, across most of its work by hand."
 msgstr "Several workflows run with AI, across most of its work by hand."
@@ -8952,8 +9003,13 @@ msgid "Sign in with your organization's account."
 msgstr "Sign in with your organization's account."
 
 #: src/frame/person-menu.tsx
+#: src/routes/_shell.settings.security.tsx
 msgid "Sign out"
 msgstr "Sign out"
+
+#: src/routes/_shell.settings.security.tsx
+msgid "Sign out {device}, signed in {time}"
+msgstr "Sign out {device}, signed in {time}"
 
 #: src/routes/_shell.settings.members.tsx
 msgid "Sign out everywhere"
@@ -8989,6 +9045,10 @@ msgstr "Signals by kind"
 msgctxt "state of a data processing agreement"
 msgid "Signed"
 msgstr "Signed"
+
+#: src/routes/_shell.settings.security.tsx
+msgid "Signed in {time}"
+msgstr "Signed in {time}"
 
 #: src/activity/audit-words.ts
 msgid "Signed in to a connection again"
@@ -10325,6 +10385,10 @@ msgstr "This decision is for someone else to answer."
 msgid "This deployment allows no model."
 msgstr "This deployment allows no model."
 
+#: src/routes/_shell.settings.security.tsx
+msgid "This device"
+msgstr "This device"
+
 #: src/knowledge/document.tsx
 msgid "This document changed since you opened it. Version {newerVersion} is below; your text is kept. Start again from it, or replace it with your text."
 msgstr "This document changed since you opened it. Version {newerVersion} is below; your text is kept. Start again from it, or replace it with your text."
@@ -10680,6 +10744,10 @@ msgstr "Uncategorized"
 msgid "Under 5"
 msgstr "Under 5"
 
+#: src/onboarding/review-parts.tsx
+msgid "Under Spam, bypass spam filters for an approved senders list, and add {domain} to it."
+msgstr "Under Spam, bypass spam filters for an approved senders list, and add {domain} to it."
+
 #: src/dashboard/report.ts
 msgctxt "programme stage"
 msgid "Under way"
@@ -10737,6 +10805,10 @@ msgstr "Unknown"
 msgctxt "whether a tool has AI"
 msgid "Unknown"
 msgstr "Unknown"
+
+#: src/routes/_shell.settings.security.tsx
+msgid "Unknown device"
+msgstr "Unknown device"
 
 #: src/routes/_shell.settings.outcomes.tsx
 #: src/routes/_shell.settings.tsx
@@ -11977,6 +12049,10 @@ msgstr "Your organization’s account"
 #: src/onboarding/about-story.tsx
 msgid "Your people, documents and tools first. Then two weeks of short conversations with your team. At {threshold}%, your team can start."
 msgstr "Your people, documents and tools first. Then two weeks of short conversations with your team. At {threshold}%, your team can start."
+
+#: src/onboarding/review-parts.tsx
+msgid "Your people’s interview links come by email from Grasp’s sending domain. Allow it in your mail filter before they go out, so they don’t land in spam."
+msgstr "Your people’s interview links come by email from Grasp’s sending domain. Allow it in your mail filter before they go out, so they don’t land in spam."
 
 #: src/onboarding/setup-steps.tsx
 msgid "Your platform is open. We’ll walk you through it."
