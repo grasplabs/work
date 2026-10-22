@@ -107,12 +107,18 @@ describe("the sidebar's header", () => {
         await settled();
         return organizationNamed("Noordkade Finance");
       }),
+      // A header mounted anew, its read still out: nothing of the names
+      // the headers before it showed.
+      mountedAgain: await textWith(
+        async () => await Promise.withResolvers<Organization>().promise
+      ),
     }).toStrictEqual({
       named: "Noordkade Finance Grasp",
       unnamed: "Grasp",
       unanswered: "Grasp",
       renamed: "Noordkade Group Grasp",
       renamedFirst: "Noordkade Group Grasp",
+      mountedAgain: "Grasp",
     });
   });
 });

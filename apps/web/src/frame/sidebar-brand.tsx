@@ -5,7 +5,7 @@ import {
   SidebarMenuItem,
 } from "@grasp-os/ui/components/sidebar";
 import { Link } from "@tanstack/react-router";
-import { useEffect, useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 
 import { readWithin } from "../core-connection.ts";
 import type { CoreConnection } from "../core-connection.ts";
@@ -21,6 +21,9 @@ import { GraspMark } from "../grasp-mark.tsx";
 /** The organization's name as the header shows it, for the tab. */
 let shownName: string | undefined;
 
+/** How often that name was set: a header shows only one set since it mounted. */
+let shownVersion = 0;
+
 /** How many renames the page saved: a read begun before one doesn't undo it. */
 let renames = 0;
 
@@ -28,10 +31,8 @@ const listeners = new Set<() => void>();
 
 /** Shows `name` as the organization's: core's answer, or a rename just saved. */
 const showName = (name?: string): void => {
-  if (name === shownName) {
-    return;
-  }
   shownName = name;
+  shownVersion += 1;
   for (const listener of listeners) {
     listener();
   }
@@ -113,12 +114,15 @@ export const SidebarBrandOf = ({
 }: {
   organization: () => Promise<Organization>;
 }) => {
-  const name = useSyncExternalStore(subscribe, () => shownName);
+  // A header mounted anew (another session, say) shows no name set before
+  // it mounted, not even for its first paint: only one core says, or a
+  // rename, since.
+  // oxlint-disable-next-line react/hook-use-state -- fixed at mount, never set
+  const [mountedAt] = useState(() => shownVersion);
+  const version = useSyncExternalStore(subscribe, () => shownVersion);
+  const name = version > mountedAt ? shownName : undefined;
   useEffect(() => {
     const read = { current: true };
-    // A header mounted anew (another session, say) shows no name kept from
-    // before until core says this one's.
-    showName();
     void readName(organization, read);
     return () => {
       read.current = false;
