@@ -579,6 +579,18 @@ export const composioToolkitSchema = z
   .string()
   .regex(/^[a-z0-9][a-z0-9_-]{0,63}$/u);
 
+/**
+ * A catalog entry by its source and its ID there, as something other than
+ * a connection names it (an App's integrations): a native provider, or a
+ * Composio toolkit's slug. Checked for form only, so it stays valid while
+ * the catalog doesn't list it (Composio not answering, say).
+ */
+export const catalogEntryRefSchema = z.discriminatedUnion("source", [
+  z.strictObject({ source: z.literal("native"), id: connectorProviderSchema }),
+  z.strictObject({ source: z.literal("composio"), id: composioToolkitSchema }),
+]);
+export type CatalogEntryRef = z.infer<typeof catalogEntryRefSchema>;
+
 /** One thing that can be connected. */
 export interface CatalogEntry {
   source: CatalogSource;
