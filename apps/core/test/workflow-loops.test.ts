@@ -2,6 +2,7 @@
 import type { Role } from "@grasp-os/shared/roles";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import type { WorkflowResourceRun } from "@grasp-os/shared/workflow-resources";
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
@@ -32,8 +33,10 @@ import { unique } from "./sign-in.ts";
 // item's effect is keyed apart from another's and runs once; `while` ends
 // the items before any effect of the next; context carries from one item to
 // the next; `exit` ends an item and `end` the workflow; a collection past
-// the platform's 1,000 items fails the run before any item runs; and
-// generated code still has no loop statement.
+// the platform's 1,000 items fails the run before any item runs; items'
+// keys (`metadata.grasp.key`) are made once, on the recorded items, and
+// keys that don't tell every item apart fail the run before any item runs;
+// and generated code still has no loop statement.
 
 /** A builder of the organization, as their session has them. */
 const builder = async (role: Role = "builder"): Promise<Acting> => {
@@ -133,6 +136,18 @@ const completedSteps = async (runId: string): Promise<Map<string, number>> => {
   }
   return completed;
 };
+
+/** What step `name` of run `runId` recorded, as its journal keeps it. */
+const recordedText = async (runId: string, name: string): Promise<string> =>
+  await runInDurableObject(runObjectOf(env, runId), (_object, state) => {
+    const [row] = state.storage.sql
+      .exec<{ value: string | null }>(
+        "SELECT value FROM steps WHERE name = ? AND state = 'succeeded'",
+        name
+      )
+      .toArray();
+    return row?.value ?? "";
+  });
 
 /** Ends the list with a status of the context's `field`, as text. */
 const statusOf = (field: string) => ({
@@ -496,6 +511,110 @@ describe("sequential for loops of JSON workflows", { timeout: 60_000 }, () => {
     });
   });
 
+  it("key every item once, on the recorded items, before any item runs, and record the keys with the items", async () => {
+    const by = await builder();
+    const { workflow } = await published(by, [
+      initially("${ {seen: []} }"),
+      {
+        keyed: {
+          for: {
+            each: "invoice",
+            at: "i",
+            in: '${ [{id: "x", n: 1}, {id: "y", n: 2}] }',
+          },
+          // Its own item and index, and the task's input, as the loop
+          // binds them for its other expressions.
+          metadata: {
+            grasp: {
+              key: '${ $invoice.id + "-" + ($i | tostring) + $input.who }',
+            },
+          },
+          do: [
+            {
+              note: {
+                set: "${ {status: $invoice.id} }",
+                export: {
+                  as: "${ $context + {seen: ($context.seen + [$invoice.id])} }",
+                },
+              },
+            },
+          ],
+        },
+      },
+      { finished: { set: '${ {status: ($context.seen | join(","))} }' } },
+    ]);
+    const run = await ranFor(by, workflow.id);
+    // Cut off as its enter step starts: its keys are made, and recorded,
+    // by its retry alone, once.
+    const killed = await withCpuKills(
+      "enter:keyed",
+      (attempt) => attempt === 1,
+      async () => await ranFor(by, workflow.id)
+    );
+    const recorded = await recordedText(run.id, "enter:keyed");
+    const killedSteps = await completedSteps(killed.id);
+    expect({
+      end: endOf(run),
+      killed: endOf(killed),
+      // The journal's own encoding of the list: x-0Ada, y-1Ada.
+      keys: recorded.includes('"x-0Ada","y-1Ada"'),
+      enteredOnce: killedSteps.get("enter:keyed"),
+    }).toStrictEqual({
+      end: { status: "completed", output: { status: "x,y" } },
+      killed: { status: "completed", output: { status: "x,y" } },
+      keys: true,
+      enteredOnce: 1,
+    });
+  });
+
+  it("fail a run whose items' keys don't tell each apart, or aren't keys, before any item runs", async () => {
+    const by = await builder();
+    const keyedOver = (collection: string, key: string) => [
+      initially("${ {ran: false} }"),
+      {
+        over: {
+          for: { in: collection },
+          metadata: { grasp: { key } },
+          do: [{ mark: { set: "${ . }", export: { as: "${ {ran: true} }" } } }],
+        },
+      },
+      statusOf("ran"),
+    ];
+    // A thousand items, the last two alike: every key made in one step.
+    const duplicate = await published(
+      by,
+      keyedOver("${ [range(0; 999)] + [998] }", "${ $item }")
+    );
+    const notKeys = await published(
+      by,
+      keyedOver('${ [{id: "a"}, {id: {deep: 1}}] }', "${ .id }")
+    );
+    const missing = await published(
+      by,
+      keyedOver('${ [{id: "a"}, {other: 1}] }', "${ .id }")
+    );
+    const empty = await published(
+      by,
+      keyedOver('${ ["a", ""] }', "${ $item }")
+    );
+    const duplicateRun = await ranFor(by, duplicate.workflow.id);
+    const duplicateSteps = await completedSteps(duplicateRun.id);
+    expect({
+      duplicate: endOf(duplicateRun),
+      marked: duplicateSteps.get("task:mark@over.0") ?? 0,
+      notKeys: endOf(await ranFor(by, notKeys.workflow.id)),
+      missing: endOf(await ranFor(by, missing.workflow.id)),
+      empty: endOf(await ranFor(by, empty.workflow.id)),
+    }).toStrictEqual({
+      duplicate: { status: "failed", code: "workflow.item_keys_duplicate" },
+      marked: 0,
+      notKeys: { status: "failed", code: "workflow.item_keys_invalid" },
+      // `null` for an item without one: not a key.
+      missing: { status: "failed", code: "workflow.item_keys_invalid" },
+      empty: { status: "failed", code: "workflow.item_keys_invalid" },
+    });
+  });
+
   it("lower a loop to a call of the SDK's loop, with no loop statement in generated code", async () => {
     const by = await builder();
     const { workflow } = await published(by, [
@@ -514,7 +633,7 @@ describe("sequential for loops of JSON workflows", { timeout: 60_000 }, () => {
     }).toStrictEqual({ sdkLoop: true, statements: false });
   });
 
-  it("don't lower items at once, items' own keys or loops nested past eight levels yet", async () => {
+  it("don't lower items at once, loops nested past eight levels or keys too large to list yet", async () => {
     const by = await builder();
     const unsupportedOf = async (task: unknown) => {
       const { version } = await published(by, [task]);
@@ -525,13 +644,18 @@ describe("sequential for loops of JSON workflows", { timeout: 60_000 }, () => {
     expect({
       concurrent: await unsupportedOf(loop({ concurrency: 2 })),
       keyed: await unsupportedOf(loop({ key: "${ $item }" })),
+      // A key the profile takes, but not once listed for every item.
+      keyTooLarge: await unsupportedOf(
+        loop({ key: `\${ "${"k".repeat(4060)}" }` })
+      ),
       eight: await unsupportedOf(nested(8)),
       nine: await unsupportedOf(nested(9)),
       // Step names past what the engine takes, once every loop is named.
       longNames: await unsupportedOf(longNamed()),
     }).toStrictEqual({
       concurrent: ["for:concurrency"],
-      keyed: ["for:key"],
+      keyed: [],
+      keyTooLarge: ["for:key_too_large"],
       eight: [],
       nine: ["for:depth"],
       longNames: ["step:name_too_long"],
@@ -597,7 +721,10 @@ const hostOf = async (by: Acting, id: string): Promise<ResourceRunHost> => {
 const codeOf = (settled: Settled<unknown>): unknown =>
   settled.ok ? "ok" : settled.error.code;
 
-const itemsSchema = z.object({ ok: z.literal(true), value: z.array(z.json()) });
+const itemsSchema = z.object({
+  ok: z.literal(true),
+  value: z.object({ items: z.array(z.json()) }),
+});
 
 /** The loop the forged modules below run: three names, a while, a task. */
 const named = [
@@ -627,7 +754,7 @@ const entered = async (
       );
       return {
         ok: true,
-        value: { output: { who: "Ada" }, items: forge(items.value) },
+        value: { output: { who: "Ada" }, items: forge(items.value.items) },
       };
     })
   );

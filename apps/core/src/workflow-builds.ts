@@ -291,6 +291,8 @@ const sealedTaskSchema = z.discriminatedUnion("kind", [
      */
     loop: z.strictObject({
       in: templateSchema,
+      /** The slot of its items' keys, made on the recorded items. */
+      keys: z.int().min(0).optional(),
       each: z.string().min(1).max(64),
       at: z.string().min(1).max(64),
       while: z.int().min(0).optional(),
@@ -345,6 +347,7 @@ const sealedExpressionSchema = z.strictObject({
     "taskOutputAs",
     "taskExportAs",
     "workflowOutputAs",
+    "loopKeys",
   ]),
   /** What it must answer: a condition a boolean (generate.ts). */
   result: z.enum(["boolean", "duration", "json"]),

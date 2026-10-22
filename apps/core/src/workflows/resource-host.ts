@@ -612,6 +612,16 @@ const capturedSchema = z.strictObject({
 /** What the isolate passes with an evaluation: the task's data so far. */
 const frameSchema = z.strictObject({ input: z.json(), output: z.json() });
 
+/** The longest an item's key may be, as text: one line of run history. */
+const maxItemKeyLength = 256;
+
+/** An item's key (`metadata.grasp.key`): a number, or short text. */
+const itemKeySchema = z.union([
+  z.string().min(1).max(maxItemKeyLength),
+  z.number(),
+]);
+type ItemKey = z.infer<typeof itemKeySchema>;
+
 /** What a task's step records (the SDK's `readRecord`). */
 const recordSchema = z.union([
   z.strictObject({ skipped: z.literal(true) }),
@@ -622,6 +632,10 @@ const recordSchema = z.union([
     until: z.int().min(0).optional(),
     items: z
       .array(z.json())
+      .max(platformLimits.workflowCollectionItems)
+      .optional(),
+    keys: z
+      .array(itemKeySchema)
       .max(platformLimits.workflowCollectionItems)
       .optional(),
   }),
@@ -842,6 +856,8 @@ interface StepAttempt {
   untilAsked: boolean;
   /** The items it resolved for its `for` task, once (`items`). */
   items: Json[] | undefined;
+  /** Their keys, where its loop has them, made with its items (`items`). */
+  keys: ItemKey[] | undefined;
   /** Whether it asked for its items: once, however it went. */
   itemsAsked: boolean;
   /** What its `item` step's `while` answered, as the host evaluated it. */
@@ -1009,6 +1025,9 @@ const hostSlotsOf = (build: LoadedBuild): ReadonlySet<number> => {
       slotsOf(task.duration, slots);
     } else if (task.kind === "for") {
       slotsOf(task.loop.in, slots);
+      if (task.loop.keys !== undefined) {
+        slots.add(task.loop.keys);
+      }
     }
   }
   return slots;
@@ -1600,6 +1619,7 @@ export class ResourceRunHost
       until: undefined,
       untilAsked: false,
       items: undefined,
+      keys: undefined,
       itemsAsked: false,
       proceeds: undefined,
       held: false,
@@ -2044,6 +2064,21 @@ export class ResourceRunHost
       case "taskDefinition": {
         return {
           input: frame.input,
+          variables: {
+            context: data.context,
+            input: frame.input,
+            task,
+            workflow,
+            params,
+          },
+        };
+      }
+      case "loopKeys": {
+        // A loop's item keys, made on its recorded items (`#keysOf`),
+        // which the host passes as the frame's output: `.` is them, and
+        // `$input` the task's input, as for its other expressions.
+        return {
+          input: frame.output,
           variables: {
             context: data.context,
             input: frame.input,
@@ -2808,13 +2843,15 @@ export class ResourceRunHost
    * `ResourceAttemptHost.items`, for `attempt`: its `for` task's items,
    * once, in its enter step, built from the sealed collection on the
    * task's transformed input (`frame`): a list of at most the platform's
-   * items a collection holds (`workflow.collection_invalid`). The step
-   * records them, and its items run on exactly those, every replay too.
+   * items a collection holds (`workflow.collection_invalid`); and, where
+   * its loop has them, their keys (`#keysOf`), before any item runs. The
+   * step records both, and its items run on exactly those, every replay
+   * too.
    */
   async #itemsOf(
     attempt: StepAttempt,
     frame: unknown
-  ): Promise<Settled<Json[]>> {
+  ): Promise<Settled<{ items: Json[]; keys?: ItemKey[] }>> {
     return await settle(async () => {
       if (attempt.over) {
         throw executionErrors.create("execution.stale_attempt");
@@ -2846,9 +2883,55 @@ export class ResourceRunHost
       if (!items.success) {
         throw workflowResourceErrors.create("workflow.collection_invalid");
       }
+      const keys =
+        task.loop.keys === undefined
+          ? undefined
+          : await this.#keysOf(attempt, task.loop.keys, passed, items.data);
       attempt.items = items.data;
-      return items.data;
+      attempt.keys = keys;
+      return { items: items.data, ...(keys === undefined ? {} : { keys }) };
     });
+  }
+
+  /**
+   * The keys of `items` (`metadata.grasp.key`), from sealed expression
+   * `slot` (generate.ts, `keysSourceOf`): one evaluation for them all, on
+   * the items, charged as one of what it reads, the items and the task's
+   * input together. One key for each item, in order, each a number or
+   * text of at most `maxItemKeyLength` (`workflow.item_keys_invalid`),
+   * and no two the same (`workflow.item_keys_duplicate`), judged before
+   * any item runs: a loop never starts on items it can't tell apart.
+   */
+  async #keysOf(
+    attempt: StepAttempt,
+    slot: number,
+    passed: { input: Json; size: number },
+    items: Json[]
+  ): Promise<ItemKey[]> {
+    const expression = this.#expressionOf(attempt, slot, true);
+    const sized = boundedJson(items);
+    if (expression.stage !== "loopKeys" || sized === undefined) {
+      return this.#refuse("A loop's keys are made on its items.");
+    }
+    const value = await this.#evaluated(
+      attempt,
+      expression,
+      { input: passed.input, output: items },
+      passed.size + sized.size
+    );
+    const keys = z.array(itemKeySchema).length(items.length).safeParse(value);
+    if (!keys.success) {
+      throw workflowResourceErrors.create("workflow.item_keys_invalid");
+    }
+    const seen = new Set<string>();
+    for (const key of keys.data) {
+      const text = canonicalJson(key);
+      if (seen.has(text)) {
+        throw workflowResourceErrors.create("workflow.item_keys_duplicate");
+      }
+      seen.add(text);
+    }
+    return keys.data;
   }
 
   /** The descriptor text of `task`'s `which` schema, if it has one. */
@@ -2986,7 +3069,11 @@ export class ResourceRunHost
    */
   #acceptedLoopRecord(
     attempt: StepAttempt,
-    record: { output: Json; items?: Json[] | undefined }
+    record: {
+      output: Json;
+      items?: Json[] | undefined;
+      keys?: ItemKey[] | undefined;
+    }
   ): boolean {
     const { step } = attempt;
     const { task } = step;
@@ -3011,9 +3098,18 @@ export class ResourceRunHost
         ? attempt.items === undefined
         : attempt.items !== undefined &&
           canonicalJson(record.items) === canonicalJson(attempt.items);
-    if (!itemsRecorded || (resolvesItems && record.items === undefined)) {
+    const keysRecorded =
+      record.keys === undefined
+        ? attempt.keys === undefined
+        : attempt.keys !== undefined &&
+          canonicalJson(record.keys) === canonicalJson(attempt.keys);
+    if (
+      !itemsRecorded ||
+      !keysRecorded ||
+      (resolvesItems && record.items === undefined)
+    ) {
       this.#refuse(
-        `Task "${task.id}"'s step records the items the host resolved.`
+        `Task "${task.id}"'s step records the items, and their keys, the host resolved.`
       );
     }
     return false;
