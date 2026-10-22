@@ -28,12 +28,15 @@ interface RunCallHost {
  */
 type KillAt = "start" | "end";
 
+/** The steps whose attempts may be cut off: one, by name, or those it picks. */
+type KilledSteps = string | ((name: string) => boolean);
+
 /**
  * The `run` of a run's entrypoint `target`, with the Loader stopping the
- * isolate past its CPU time as each attempt of step `step` that `kills`
- * picks starts, or ends (`at`), counted from 1 across activations
- * (`counted`): that attempt's call, every other call into the isolate
- * still out, and the run's own call all reject with it.
+ * isolate past its CPU time as each attempt of a step of `step` that
+ * `kills` picks starts, or ends (`at`), counted from 1 for each step
+ * across activations (`counted`): that attempt's call, every other call
+ * into the isolate still out, and the run's own call all reject with it.
  */
 const killingRun =
   (
@@ -42,8 +45,8 @@ const killingRun =
       step,
       kills,
       at,
-    }: { step: string; kills: (attempt: number) => boolean; at: KillAt },
-    counted: { attempts: number }
+    }: { step: KilledSteps; kills: (attempt: number) => boolean; at: KillAt },
+    counted: Map<string, number>
   ) =>
   async (host: RunCallHost, input: unknown): Promise<unknown> => {
     const real: unknown = Reflect.get(target, "run");
@@ -63,7 +66,11 @@ const killingRun =
     const watched: RunCallHost = {
       do: async (stepName, stepOptions, fn) =>
         await host.do(stepName, stepOptions, async (attempt) => {
-          const killing = stepName === step && kills((counted.attempts += 1));
+          const picked =
+            typeof step === "string" ? stepName === step : step(stepName);
+          const attempts = (counted.get(stepName) ?? 0) + 1;
+          counted.set(stepName, attempts);
+          const killing = picked && kills(attempts);
           if (killing && at === "start") {
             kill();
           }
@@ -101,18 +108,18 @@ const killingRun =
 
 /**
  * What `run` returns while the Loader stops a run's isolate past its CPU
- * time as each attempt of step `step` that `kills` picks starts, or, with
- * `at` "end", once its code has returned (counted from 1 across
- * activations), as Cloudflare does (`killingRun`).
+ * time as each attempt of a step of `step` that `kills` picks starts, or,
+ * with `at` "end", once its code has returned (counted from 1 for each
+ * step across activations), as Cloudflare does (`killingRun`).
  */
 export const withCpuKills = async <Result>(
-  step: string,
+  step: KilledSteps,
   kills: (attempt: number) => boolean,
   run: () => Promise<Result>,
   at: KillAt = "start"
 ): Promise<Result> => {
   const loader = env.LOADER;
-  const counted = { attempts: 0 };
+  const counted = new Map<string, number>();
   const getWorker = (...args: Parameters<WorkerLoader["get"]>) =>
     new Proxy(loader.get(...args), {
       get: (worker, property): unknown =>

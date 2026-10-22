@@ -42,6 +42,7 @@ import type {
   SealedTask,
   SealedTemplate,
 } from "../workflow-builds.ts";
+import { betweenStepsBudgetOf } from "./between-steps.ts";
 import { settling } from "./code.ts";
 import type { RunHostCalls, Settled, StepError } from "./code.ts";
 import { emitEvent } from "./emitted-events.ts";
@@ -138,19 +139,24 @@ import { heldWakeType } from "./wakes.ts";
 //   step name, so a retry or replay of one is never another's.
 // - Items and branches at once running past what a run may (GRA-956).
 //   However many steps the module asks for at once, at most eight of the
-//   run's attempts run (`#inSlot`, spec 18); one past it waits, holding
-//   nothing, before the engine hears of it. Every attempt is admitted as
-//   ever, so a run's lineage only grows.
+//   run's attempts run (`#inSlot`, spec 18); one past it waits, admitted
+//   to nothing, its module not yet told. Only a running attempt holds a
+//   slot: a step parked on its retry or a wait holds none, so the steps
+//   behind it run. Every attempt is admitted as ever, so a run's lineage
+//   only grows.
 // - A run that does otherwise as its host is slower. Between the module
 //   asking for a step and the engine hearing of it, the host does I/O of
-//   its own (the person's check, a slot), and an answer travels back to
+//   its own (the person's check), and an answer travels back to
 //   the isolate before its next ask: the engine, seeing only parked waits
 //   out, would suspend the run meanwhile, the ask running in a later
 //   activation after the run slept, so a race's slower branch could win.
 //   The host holds the run busy with the engine (`#account`) from an
 //   ask's arrival until its engine call is made, and from each answer
 //   until the isolate says it went quiet with every ask it made since
-//   arrived (`quiet`); a replay hands back only outcomes of calls already
+//   arrived (`quiet`), for at most an activation's time between steps in
+//   all, so a module that never says it went quiet, or counts asks it
+//   never makes, can't keep its run from suspending on parked steps
+//   (`#account`); a replay hands back only outcomes of calls already
 //   made, in journaled order (workerflow's activation.ts), and a scope's
 //   admissions follow its settling, recorded with the run, never the order
 //   outcomes came back in (the SDK's `scoped`). Tests slow the host down
@@ -331,11 +337,17 @@ export class Run extends WorkerEntrypoint {
     // an ask), it tells the host once its code has gone quiet, a macrotask
     // later, with how many asks it has made in all: the host holds the run
     // busy until each has arrived, so the engine never suspends the run
-    // while one is on its way (resource-host.ts, \`quiet\`).
+    // while one is on its way (resource-host.ts, \`quiet\`). One that
+    // doesn't reach the host is sent again, a few times: the host holds the
+    // run busy for it until then, within a budget of its own.
     let made = 0;
-    const quiet = () => {
+    const quiet = (tries = 3) => {
       setTimeout(() => {
-        host.quiet(made).catch(() => null);
+        host.quiet(made).catch(() => {
+          if (tries > 1) {
+            quiet(tries - 1);
+          }
+        });
       }, 0);
     };
     const asked = async (ask) => {
@@ -590,6 +602,11 @@ const activationFences = (): ScopeFences => {
  * end before the engine hears of it.
  */
 const maxAttemptsAtOnce = platformLimits.workflowBranches;
+/**
+ * The most asks a run's isolate can have on their way to its host: no more
+ * than a run takes steps (`quiet`).
+ */
+const maxAsksOnTheirWay = platformLimits.workflowSteps;
 
 /** Marks of one activation's alone (`ResourceHostHooks.triedOnce` unset). */
 const activationMarks = (): TriedOnceMarks => {
@@ -1705,6 +1722,15 @@ export class ResourceRunHost
   #isolateDone = false;
   /** Ends the engine's count of the run busy (`#account`), while held. */
   #endBusy: (() => void) | undefined;
+  /**
+   * How much longer this activation may hold its run busy waiting on its
+   * isolate (`#account`), in all: its time between steps.
+   */
+  #isolateHoldLeftMs: number;
+  /** When the run began being held busy waiting on its isolate, if it is. */
+  #isolateHoldSince: number | undefined;
+  /** Ends that hold once its time is spent. */
+  #isolateHoldTimer: ReturnType<typeof setTimeout> | undefined;
   /** Attempts of this activation running, and those waiting for a slot. */
   #running = 0;
   readonly #waitingSlot: (() => void)[] = [];
@@ -1736,6 +1762,7 @@ export class ResourceRunHost
       JSON.stringify(this.#readableParams).length;
     this.#hostSlots = hostSlotsOf(run.build);
     this.#latency = hostLatency(env);
+    this.#isolateHoldLeftMs = betweenStepsBudgetOf(env);
   }
 
   /**
@@ -1837,9 +1864,12 @@ export class ResourceRunHost
   }
 
   /**
-   * `work`, once fewer than the run's most attempts at once
-   * (`maxAttemptsAtOnce`) of this activation run: one past it waits,
-   * holding nothing, for one to end.
+   * `work`, an attempt, once fewer than the run's most attempts at once
+   * (`maxAttemptsAtOnce`) of this activation run: one past it waits for
+   * one to end, before it is admitted or its module told, so it holds
+   * nothing of its lineage. It waits inside the engine's attempt, so its
+   * wait counts against the attempt's timeout: running attempts end, by
+   * their timeouts at the latest, so the wait does too.
    */
   async #inSlot<T>(work: () => Promise<T>): Promise<T> {
     await this.#latency();
@@ -2085,19 +2115,27 @@ export class ResourceRunHost
    * Holds the run busy with the engine (`RunStep.busy`) for as long as a
    * call of its step API may be on its way that the engine hasn't seen:
    * an ask of the run's code the host handles outside the engine (its
-   * person checked, a slot waited for); an answer the isolate got whose
+   * person checked); an answer the isolate got whose
    * code hasn't gone quiet yet, which may make its next ask; an ask the
    * isolate made that hasn't arrived. Otherwise the engine could suspend
    * the run as its parked waits are all it sees out, and the call would
    * run in a later activation, after the run slept: host latency would
-   * decide which of a race's branches wins, and replays would differ. A
-   * module that never says it went quiet holds its run's activation
-   * until the run's load ends, as one that never returns does.
+   * decide which of a race's branches wins, and replays would differ.
+   *
+   * Waiting on the isolate is held for at most the activation's time
+   * between steps, in all (between-steps.ts): its clock stops while a step
+   * call is out, parked ones too, so it can't bound a module that never
+   * says it went quiet, or counts asks it never makes, while another of
+   * its steps is parked. An honest module goes quiet a macrotask after
+   * each answer, far within it; past it, the engine may suspend the run
+   * on its parked steps, as for a module that is done.
    */
   #account(): void {
     const waitingOnIsolate =
       !this.#isolateDone &&
+      this.#isolateHoldLeftMs > 0 &&
       (this.#quieted < this.#handedBack || this.#arrived < this.#madeByIsolate);
+    this.#holdForIsolate(waitingOnIsolate);
     const busy = this.#asksInHost > 0 || waitingOnIsolate;
     if (busy && this.#endBusy === undefined) {
       this.#endBusy = this.#step.busy?.() ?? noBusy;
@@ -2114,6 +2152,27 @@ export class ResourceRunHost
    */
   get failureUntaken(): boolean {
     return this.#failure !== undefined;
+  }
+
+  /**
+   * Runs the clock of the time the run is held busy waiting on its
+   * isolate (`#account`) while `waiting`, and stops it otherwise; once it
+   * is spent, the run is no longer held for the isolate.
+   */
+  #holdForIsolate(waiting: boolean): void {
+    if (waiting && this.#isolateHoldSince === undefined) {
+      this.#isolateHoldSince = Date.now();
+      this.#isolateHoldTimer = setTimeout(() => {
+        this.#holdForIsolate(false);
+        this.#isolateHoldLeftMs = 0;
+        this.#account();
+      }, this.#isolateHoldLeftMs);
+    } else if (!waiting && this.#isolateHoldSince !== undefined) {
+      this.#isolateHoldLeftMs -= Date.now() - this.#isolateHoldSince;
+      this.#isolateHoldSince = undefined;
+      clearTimeout(this.#isolateHoldTimer);
+      this.#isolateHoldTimer = undefined;
+    }
   }
 
   /**
@@ -2159,7 +2218,9 @@ export class ResourceRunHost
    * The run's isolate went quiet after it last got control back, having
    * made `made` asks in all (`openRunMain`): every ask its code made since
    * then is on its way, and the host holds the run busy until each has
-   * arrived. Refused, failing the run, for anything but a count.
+   * arrived. Refused, failing the run, for anything but a count. A count
+   * past what a run could have on its way (more than its steps beyond
+   * those that arrived) is taken as that.
    */
   // oxlint-disable-next-line require-await -- an RPC method, answered at once
   async quiet(made: unknown): Promise<Settled<null>> {
@@ -2168,7 +2229,10 @@ export class ResourceRunHost
         return this.#refuse("A run's isolate counts the asks it made.");
       }
       this.#quieted += 1;
-      this.#madeByIsolate = Math.max(this.#madeByIsolate, made);
+      this.#madeByIsolate = Math.max(
+        this.#madeByIsolate,
+        Math.min(made, this.#arrived + maxAsksOnTheirWay)
+      );
       this.#account();
       return { ok: true, value: null };
     } catch (error) {
@@ -2308,18 +2372,27 @@ export class ResourceRunHost
     // A step of a branch another settled its scope over runs nothing:
     // the engine still replays what it recorded, and fails anything
     // else for good, so a replay reaches every step it journaled.
-    const attemptStep = async (context: unknown): Promise<unknown> => {
-      // Settled meanwhile too: checked again as the attempt starts.
-      if (step.fenced === true || this.#fencedOff(step.scope)) {
-        throw toStepError(
-          forIsolate(workflowResourceErrors.create("workflow.branch_cancelled"))
-        );
-      }
-      return await this.#attempt(run, context, fn, stepDone);
-    };
-    let recorded = await this.#inSlot(
-      async () =>
-        await this.#step.do(stepName, engineConfigOf(step), attemptStep)
+    // Only a running attempt holds one of the run's slots (`#inSlot`),
+    // taken as the engine hands it over: a step whose retry is parked
+    // never returns from the engine in this activation, so a slot taken
+    // around the engine's call would be held for good, and the steps
+    // waiting for one would hold the run busy until its load ended.
+    const attemptStep = async (context: unknown): Promise<unknown> =>
+      await this.#inSlot(async () => {
+        // Settled meanwhile too: checked again as the attempt starts.
+        if (step.fenced === true || this.#fencedOff(step.scope)) {
+          throw toStepError(
+            forIsolate(
+              workflowResourceErrors.create("workflow.branch_cancelled")
+            )
+          );
+        }
+        return await this.#attempt(run, context, fn, stepDone);
+      });
+    let recorded = await this.#step.do(
+      stepName,
+      engineConfigOf(step),
+      attemptStep
     );
     // Refused for load: the step runs again after a durable sleep, in
     // steps of core's own outside the run's step allowance, as an App
@@ -2351,13 +2424,10 @@ export class ResourceRunHost
         // oxlint-disable-next-line no-await-in-loop -- one round at a time
         await this.#requirePerson();
         // oxlint-disable-next-line no-await-in-loop -- one round at a time
-        recorded = await this.#inSlot(
-          async () =>
-            await this.#step.do(
-              `${stepName}:held:${round}:run`,
-              engineConfigOf(step),
-              attemptStep
-            )
+        recorded = await this.#step.do(
+          `${stepName}:held:${round}:run`,
+          engineConfigOf(step),
+          attemptStep
         );
         continue;
       }
@@ -2373,13 +2443,10 @@ export class ResourceRunHost
       // oxlint-disable-next-line no-await-in-loop -- one round at a time
       await loadRound(this.#step, prefix, stepName, marker, run.wait.sleepMs);
       // oxlint-disable-next-line no-await-in-loop -- one round at a time
-      recorded = await this.#inSlot(
-        async () =>
-          await this.#step.do(
-            `${prefix}:run`,
-            engineConfigOf(step),
-            attemptStep
-          )
+      recorded = await this.#step.do(
+        `${prefix}:run`,
+        engineConfigOf(step),
+        attemptStep
       );
     }
     let outcome = entering ? this.#entered(step, recorded) : recorded;
