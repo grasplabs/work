@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "271ee31e-a809-4e49-979a-dfbf6c7df27f",
+  "id": "c76e8e8f-9853-4031-8ae2-cf6fbd8ae4ba",
   "prevId": "fcb1c5d8-1fa0-46bb-9279-c1a6f4bdf4b4",
   "tables": {
     "answer_waits": {
@@ -202,6 +202,44 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
+    "interview_settings": {
+      "name": "interview_settings",
+      "columns": {
+        "person": {
+          "name": "person",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "mark": {
+          "name": "mark",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "interviewer": {
+          "name": "interviewer",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "locale": {
+          "name": "locale",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
     "interview_states": {
       "name": "interview_states",
       "columns": {
@@ -242,44 +280,6 @@
         },
         "updated_at": {
           "name": "updated_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "interview_texts": {
-      "name": "interview_texts",
-      "columns": {
-        "person": {
-          "name": "person",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "mark": {
-          "name": "mark",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "interviewer": {
-          "name": "interviewer",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "locale": {
-          "name": "locale",
           "type": "text",
           "primaryKey": false,
           "notNull": true,

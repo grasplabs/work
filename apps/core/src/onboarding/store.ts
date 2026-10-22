@@ -81,7 +81,7 @@ import {
   countedPeople,
   events,
   interviewStates,
-  interviewTexts,
+  interviewSettings,
   interviews,
   linkCodes,
   documents,
@@ -546,8 +546,8 @@ export class Onboarding extends DurableObject<Env> {
           .where(eq(interviewStates.person, person))
           .run();
         this.#db
-          .delete(interviewTexts)
-          .where(eq(interviewTexts.person, person))
+          .delete(interviewSettings)
+          .where(eq(interviewSettings.person, person))
           .run();
         dropMailAbout(this.ctx.storage.sql, person);
       }
@@ -1058,7 +1058,7 @@ export class Onboarding extends DurableObject<Env> {
    */
   turnRan(
     secretMark: string,
-    ran: Omit<typeof interviewTexts.$inferInsert, "person">,
+    ran: Omit<typeof interviewSettings.$inferInsert, "person">,
     waited?: number,
     at: string = new Date().toISOString()
   ): void {
@@ -1070,9 +1070,9 @@ export class Onboarding extends DurableObject<Env> {
     this.ctx.storage.transactionSync(() => {
       if (code !== undefined) {
         this.#db
-          .insert(interviewTexts)
+          .insert(interviewSettings)
           .values({ person: code.person, ...ran })
-          .onConflictDoUpdate({ target: interviewTexts.person, set: ran })
+          .onConflictDoUpdate({ target: interviewSettings.person, set: ran })
           .run();
       }
       if (waited !== undefined) {
@@ -1099,12 +1099,12 @@ export class Onboarding extends DurableObject<Env> {
    */
   interviewerFacts(): {
     interviews: AdminInterviewFacts[];
-    texts: (typeof interviewTexts.$inferSelect)[];
+    texts: (typeof interviewSettings.$inferSelect)[];
     waits: (typeof answerWaits.$inferSelect)[];
   } {
     return {
       interviews: this.adminFacts().interviews,
-      texts: this.#db.select().from(interviewTexts).all(),
+      texts: this.#db.select().from(interviewSettings).all(),
       waits: this.#db
         .select()
         .from(answerWaits)
@@ -2081,8 +2081,8 @@ export class Onboarding extends DurableObject<Env> {
       .where(eq(interviewStates.person, person))
       .run();
     this.#db
-      .delete(interviewTexts)
-      .where(eq(interviewTexts.person, person))
+      .delete(interviewSettings)
+      .where(eq(interviewSettings.person, person))
       .run();
     this.#noted(person, what, now, by);
   }

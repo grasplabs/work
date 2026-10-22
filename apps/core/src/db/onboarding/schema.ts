@@ -274,7 +274,7 @@ export const voiceUse = sqliteTable(
  * last turn had it: the text's mark, who held it, and in which language.
  * Nothing that was said. Goes with the interview.
  */
-export const interviewTexts = sqliteTable("interview_texts", {
+export const interviewSettings = sqliteTable("interview_settings", {
   person: text().primaryKey(),
   mark: text().notNull(),
   interviewer: text({ enum: ["stephen", "claire"] }).notNull(),

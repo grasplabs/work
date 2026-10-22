@@ -5,7 +5,7 @@ CREATE TABLE `answer_waits` (
 	PRIMARY KEY(`day`, `up_to`)
 );
 --> statement-breakpoint
-CREATE TABLE `interview_texts` (
+CREATE TABLE `interview_settings` (
 	`person` text PRIMARY KEY NOT NULL,
 	`mark` text NOT NULL,
 	`interviewer` text NOT NULL,
