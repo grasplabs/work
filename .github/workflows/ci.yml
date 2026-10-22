@@ -50,6 +50,7 @@ jobs:
       - run: vp run check:product-name
       - run: vp run check:migrations
       - run: vp run check:wrangler-configs
+      - run: vp run check:state-registry
       - run: vp run -r build
       # The console isn't deployed from here (see deploy-staging): check that
       # its build is a Worker wrangler would deploy. No credentials needed.

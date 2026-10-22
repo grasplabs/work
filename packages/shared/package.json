@@ -113,6 +113,7 @@
     "./shared-runs": "./src/shared-runs.ts",
     "./sign-in": "./src/sign-in.ts",
     "./signals": "./src/signals.ts",
+    "./state-registry": "./src/state-registry.ts",
     "./statistics": "./src/statistics.ts",
     "./store-limits": "./src/store-limits.ts",
     "./store-queries": "./src/store-queries.ts",
