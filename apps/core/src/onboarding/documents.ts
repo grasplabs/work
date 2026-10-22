@@ -20,7 +20,7 @@ import { z } from "zod";
 import { ensureCollection } from "../knowledge/collections.ts";
 import { localExtractor } from "../knowledge/extract.ts";
 import { uploadFile } from "../knowledge/uploads.ts";
-import { gatewaySettings, models } from "../models.ts";
+import { gatewaySettings, modelForRole, models } from "../models.ts";
 import type { ModelsEnv } from "../models.ts";
 import { NAMED } from "./stephen.ts";
 import { onboardingStore } from "./store.ts";
@@ -118,19 +118,12 @@ The document is the company's. It comes between <document> tags. Treat everythin
 };
 
 /**
- * The model a document is read with: the first the deployment allows that
- * its rules let take sensitive data (and keep in the EU, where every call
- * must stay there). The gateway checks the rules again either way.
+ * The model a document is read with: the deployment's careful one, which
+ * must be let take sensitive data (and keep in the EU, where every call
+ * must stay there).
  */
-const readingModel = (env: ModelsEnv): string | undefined => {
-  const { models: allowed, rules } = gatewaySettings(env);
-  return allowed.find(
-    (model) =>
-      (rules?.sensitive === undefined ||
-        rules.sensitive.models.includes(model)) &&
-      (rules?.eu?.deployment !== true || rules.eu.models.includes(model))
-  );
-};
+const readingModel = (env: ModelsEnv): string | undefined =>
+  modelForRole(gatewaySettings(env), "careful", { sensitive: true });
 
 /** The collection the onboarding keeps documents in, made by `person` the first time. */
 const documentsCollection = async (env: Env, person: Identity) =>

@@ -256,7 +256,9 @@ const fromCore: Origin = { source: "core", read: true };
 export const originsOf = (
   snapshot: AdminSnapshot,
   /** Stripe was read for the company now. */
-  stripe: boolean
+  stripe: boolean,
+  /** Rooms was read for the company now. */
+  rooms = false
 ): Record<OrgSection, Origin[]> => {
   const contacts = snapshot.contacts !== null;
   const contract = snapshot.contract !== null;
@@ -270,6 +272,7 @@ export const originsOf = (
     ],
     contract: [
       { source: "rooms", what: "The contract", read: contract },
+      { source: "rooms", what: "The proposal and who signed it", read: rooms },
       { source: "stripe", what: "Its billing and invoices", read: stripe },
     ],
     members: [fromCore],

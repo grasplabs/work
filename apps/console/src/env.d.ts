@@ -29,6 +29,12 @@ interface __BaseEnv_Env {
    */
   GRASP_CLIENT_ID?: string;
   /**
+   * Grasp's Rooms' team origin, e.g. `https://rooms.grasp.example`, which
+   * the proposal under Contract is read from (src/proposal/rooms.ts).
+   * Without it Rooms isn't read.
+   */
+  ROOMS_ORIGIN?: string;
+  /**
    * Grasp's admin's own hostname, e.g. `admin.grasp.example`
    * (src/admin-host.ts). Without it the admin stays at the console's `/admin`.
    */
