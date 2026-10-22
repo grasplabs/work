@@ -1677,21 +1677,6 @@ export const activePermissions = async (
 ): Promise<Permission[]> =>
   await permissionsIn(env, subject, ["active"], where);
 
-/**
- * An App's permissions that are active or asked for and not yet granted:
- * every binding name its code may be written against. Only for the env of
- * a draft's preview (preview-bindings.ts), whose stubs allow nothing
- * whatever a permission's status, never for an env that acts.
- */
-export const activeOrRequestedPermissions = async (
-  env: Env,
-  app: AppId
-): Promise<Permission[]> =>
-  await permissionsIn(env, { type: "app", appId: app }, [
-    "active",
-    "requested",
-  ]);
-
 /** A binding name's kind: the run's stub of it (bindings.ts, `runBindingsFor`). */
 export type WorkflowBindingKind = "connection" | "collection";
 

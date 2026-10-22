@@ -18,6 +18,7 @@ import {
   sdkReleaseManifests,
   sdkResourceBindings,
 } from "../src/db/core/schema.ts";
+import { deepFiles, fieldDepth } from "./deep-records.ts";
 import { appWith, artifactKey, person, seal } from "./sealed-apps.ts";
 import type { Fixture } from "./sealed-apps.ts";
 
@@ -718,6 +719,19 @@ describe("what a function answers", { timeout: 120_000 }, () => {
       "contract.invalid_return",
       "contract.invalid_return",
     ]);
+  });
+});
+
+describe("a record as deep as a store keeps", { timeout: 120_000 }, () => {
+  it("is written and read back through the operation channel, every level of it", async () => {
+    const deep = await sealedNotes(deepFiles);
+    const put = await call(deep, deep.owner, "deep.put", {});
+    const id = put.result.ok ? put.result.value : put.result.error.code;
+    const read = await call(deep, deep.owner, "deep.read", { id });
+    expect({
+      put: put.result.ok || put.result.error.code,
+      levels: read.result.ok ? read.result.value : read.result.error.code,
+    }).toStrictEqual({ put: true, levels: fieldDepth });
   });
 });
 
