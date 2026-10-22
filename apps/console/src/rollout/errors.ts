@@ -32,6 +32,11 @@ export const rolloutErrorCodes = [
    * rollout's, or the same one: its migrations only keep those working.
    */
   "too_far_back",
+  /**
+   * What the client ran before doesn't work with what it runs now, or
+   * declares nothing of what it works with (src/deploy/compatibility.ts).
+   */
+  "incompatible",
   /** The client's secrets rotated since, which its previous versions don't have. */
   "rotated_since",
   /** Another runner (provisioning, another rollout, a rollback) has the client. */

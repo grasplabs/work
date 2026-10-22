@@ -68,7 +68,13 @@ describe("the admin snapshot as the console reads it", () => {
       contacts: { sponsor: "Ann" },
       works: [{ name: "Quotes" }],
       contract: { signed: true },
-      integrations: [{ app: "hubspot" }],
+      integrations: {
+        connected: [],
+        personal: [],
+        needed: [],
+        requests: [],
+        builds: [{ app: "acme_erp" }],
+      },
       usage: [
         {
           day: "2026-10-16",
@@ -90,7 +96,15 @@ describe("the admin snapshot as the console reads it", () => {
 
     expect(adminSnapshotSchema.parse(newer)).toStrictEqual(
       adminSnapshotSchema.parse(
-        snapshot({ usage: [{ day: "2026-10-16", use: {} }] })
+        snapshot({
+          integrations: {
+            connected: [],
+            personal: [],
+            needed: [],
+            requests: [],
+          },
+          usage: [{ day: "2026-10-16", use: {} }],
+        })
       )
     );
   });
