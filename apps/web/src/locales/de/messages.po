@@ -209,6 +209,10 @@ msgstr "{binding}: {actions} auf {object}, wartet auf einen Admin"
 msgid "{binding}: {actions} on {object}, waiting for an admin (asked by the agent)"
 msgstr "{binding}: {actions} auf {object}, wartet auf einen Admin (vom Agenten angefragt)"
 
+#: src/routes/_shell.settings.security.tsx
+msgid "{browser} on {system}"
+msgstr "{browser} auf {system}"
+
 #: src/brain/brain.ts
 msgid "{category} by {vendor}"
 msgstr "{category} von {vendor}"
@@ -380,6 +384,10 @@ msgstr "{daily} pro Tag"
 #: src/dashboard/signals.tsx
 msgid "{days, plural, one {# day} other {# days}}"
 msgstr "{days, plural, one {# Tag} other {# Tagen}}"
+
+#: src/routes/_shell.settings.security.tsx
+msgid "{devices, plural, one {Signed in on # device. Sign out any you do not recognise.} other {Signed in on # devices. Sign out any you do not recognise.}}"
+msgstr "{devices, plural, one {Auf # Gerät angemeldet. Melden Sie jedes ab, das Sie nicht kennen.} other {Auf # Geräten angemeldet. Melden Sie jedes ab, das Sie nicht kennen.}}"
 
 #: src/dashboard/signals.tsx
 msgid "{doc} in {where} is {late, plural, one {# day} other {# days}} past its review date."
@@ -3580,6 +3588,10 @@ msgstr "Entwicklertools"
 #: src/settings/pulse-people.tsx
 msgid "Device"
 msgstr "Gerät"
+
+#: src/routes/_shell.settings.security.tsx
+msgid "Devices"
+msgstr "Geräte"
 
 #: src/workflows/definition-editor.tsx
 msgid "Diagram"
@@ -8707,8 +8719,13 @@ msgid "Sign in with your organization's account."
 msgstr "Melden Sie sich mit dem Konto Ihrer Organisation an."
 
 #: src/frame/person-menu.tsx
+#: src/routes/_shell.settings.security.tsx
 msgid "Sign out"
 msgstr "Abmelden"
+
+#: src/routes/_shell.settings.security.tsx
+msgid "Sign out {device}, signed in {time}"
+msgstr "{device} abmelden, angemeldet am {time}"
 
 #: src/routes/_shell.settings.members.tsx
 msgid "Sign out everywhere"
@@ -8744,6 +8761,10 @@ msgstr "Signale nach Art"
 msgctxt "state of a data processing agreement"
 msgid "Signed"
 msgstr "Unterschrieben"
+
+#: src/routes/_shell.settings.security.tsx
+msgid "Signed in {time}"
+msgstr "Angemeldet am {time}"
 
 #: src/activity/audit-words.ts
 msgid "Signed in to a connection again"
@@ -10041,6 +10062,10 @@ msgstr "Diese Entscheidung trifft jemand anderes."
 msgid "This deployment allows no model."
 msgstr "Diese Bereitstellung erlaubt kein Modell."
 
+#: src/routes/_shell.settings.security.tsx
+msgid "This device"
+msgstr "Dieses Gerät"
+
 #: src/knowledge/document.tsx
 msgid "This document changed since you opened it. Version {newerVersion} is below; your text is kept. Start again from it, or replace it with your text."
 msgstr "Dieses Dokument hat sich geändert, seit Sie es geöffnet haben. Version {newerVersion} steht unten; Ihr Text bleibt erhalten. Beginnen Sie von dieser Version neu oder ersetzen Sie sie durch Ihren Text."
@@ -10445,6 +10470,10 @@ msgstr "Unbekannt"
 msgctxt "whether a tool has AI"
 msgid "Unknown"
 msgstr "Unbekannt"
+
+#: src/routes/_shell.settings.security.tsx
+msgid "Unknown device"
+msgstr "Unbekanntes Gerät"
 
 #: src/routes/_shell.settings.outcomes.tsx
 #: src/routes/_shell.settings.tsx
