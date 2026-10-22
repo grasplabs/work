@@ -186,11 +186,19 @@ describe("company topics", { timeout: 60_000 }, () => {
       again: await outcome(
         admin.api.admission.retireTopic({ id: saved.id, ifRevision: 2 })
       ),
+      revived: await outcome(
+        admin.api.admission.saveTopic({
+          ...topicWith(term),
+          id: saved.id,
+          ifRevision: 2,
+        })
+      ),
       beforeEffect,
       afterEffect,
     }).toStrictEqual({
       retired: [2, true],
       again: "admission.retired",
+      revived: "admission.retired",
       beforeEffect: "knowledge.excluded",
       afterEffect: "ok",
     });

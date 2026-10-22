@@ -202,7 +202,11 @@ export const saveTopic = async (
   }
   const id = parsed.id ?? `company-${crypto.randomUUID()}`;
   if (parsed.id !== undefined) {
-    await companyTopicAt(env, parsed.id, parsed.ifRevision);
+    const latest = await companyTopicAt(env, parsed.id, parsed.ifRevision);
+    // A retired topic stays retired: saving over it would revive it.
+    if (latest.retired) {
+      throw admissionErrors.create("admission.retired");
+    }
   }
   const now = new Date();
   const terms = [...new Set(parsed.terms.map((term) => matchedAs(term)))];
