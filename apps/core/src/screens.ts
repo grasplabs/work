@@ -495,6 +495,38 @@ export const checkAppCode = async (
   );
 
 /**
+ * Type-checks a draft's server code of spec 8's layout as a seal does
+ * (`checkAppCode`, with every gate), but with the host's generated modules
+ * as the seal's first inspection has them: the constructors, and stand-ins
+ * for the references. The real ones are generated from what the App's
+ * registration answers when it runs, and a check runs none of a draft's
+ * code: so a draft that passes may still fail its seal, as its preview
+ * then reports. Whatever the draft holds under `.grasp/` is dropped, as
+ * for a workflow build (`workflowInputs`). Cached in R2 like the others.
+ */
+export const checkDraftAppCode = async (
+  env: BuildEnv,
+  appFiles: AppFiles,
+  /** Whose build it is: the App's ID. */
+  whose: string,
+  signal?: AbortSignal
+): Promise<AppCodeBuild> =>
+  await checkAppCode(
+    env,
+    {
+      ...Object.fromEntries(
+        Object.entries(appFiles).filter(
+          ([path]) => !path.startsWith(generatedFolder)
+        )
+      ),
+      ...symbolicModules(),
+      [generatedPaths.server]: serverModuleSource,
+    },
+    whose,
+    signal
+  );
+
+/**
  * Builds an App's tests (`tests/**.ts`) into ES modules, in the
  * compiler's isolate, each held to what a test may import. Only the test
  * files become modules: what they import of the App comes from its

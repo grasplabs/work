@@ -55,7 +55,7 @@ import { isPlainData } from "./plain-data.ts";
 import type { AppAnswer } from "./plain-data.ts";
 import { draftSealFailures } from "./preview-reports.ts";
 import { isRestricted } from "./restricted.ts";
-import { buildOnSave } from "./save-builds.ts";
+import { buildOnSave, draftServerBuild } from "./save-builds.ts";
 import { admitPreviewCall } from "./screens-rpc.ts";
 import { keepTests, reviewVersion } from "./version-review.ts";
 import {
@@ -76,8 +76,9 @@ import type { Draft } from "./workspace.ts";
 // never over a version that changed the same files since it began, so
 // the agent's edits and a builder's can't overwrite each other. It checks
 // a draft as a save does (screens and
-// workflows: type errors, @shadcn/lint and build errors; its server code
-// is sealed by the preview, which reports what fails)
+// workflows: type errors, @shadcn/lint and build errors), and its server
+// code as its seal type-checks it, none of it run (`draftServerBuild`);
+// what fails only once it runs, its preview reports
 // and runs its workflows' tests, and dry-runs them with the values it
 // gives. A workflow must call the App's bindings where its step list can
 // name each call (`checkWorkflowBindings`): the review of what the agent
@@ -320,6 +321,12 @@ export interface DraftCheck {
    */
   passed: boolean;
   screens: SavedBuild;
+  /**
+   * Its server code of spec 8's layout, type-checked with every gate its
+   * seal holds it to, none of it run (`draftServerBuild`): what fails
+   * only once it runs, its preview reports.
+   */
+  server: SavedBuild;
   workflows: SavedBuild;
   tests: {
     /** `not_run` while the workflows don't build. */
@@ -511,32 +518,34 @@ export const checkFiles = async (
   signal?: AbortSignal
 ): Promise<Omit<DraftCheck, "failedInARow" | "maxFailedChecks">> => {
   signal?.throwIfAborted();
-  const saved = await buildOnSave(
-    env,
-    // Typed by the App's permissions now, as a version committed from it
-    // would be.
-    {
-      app,
-      version: base ?? 0,
-      files,
-      bindings: await appBindingKinds(env, app),
-    },
-    signal
-  );
+  const version = base ?? 0;
+  // Its server code checked beside the save's builds, all at once.
+  const [saved, server] = await Promise.all([
+    buildOnSave(
+      env,
+      // Typed by the App's permissions now, as a version committed from it
+      // would be.
+      { app, version, files, bindings: await appBindingKinds(env, app) },
+      signal
+    ),
+    draftServerBuild(env, { app, version, files }, signal),
+  ]);
   signal?.throwIfAborted();
   const builds = {
     ...saved,
+    server,
     workflows: withBindingsRead(saved.workflows, files),
   };
   const tests = await testsOf(env, app, base, files, builds.workflows, signal);
   signal?.throwIfAborted();
   const built =
-    [builds.screens, builds.workflows].every(buildPassed) &&
+    [builds.screens, builds.server, builds.workflows].every(buildPassed) &&
     tests.status !== "failed";
   const preview = await previewOf(env, scope, app, revision, built);
   return {
     passed: built && preview.problems.length === 0,
     screens: reported(builds.screens),
+    server: reported(builds.server),
     workflows: reported(builds.workflows),
     tests,
     preview,
@@ -917,7 +926,7 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
 
   /**
    * Checks the chat's draft of `app`: builds its screens and workflows,
-   * and runs its workflows' tests. Refused once
+   * type-checks its server code, and runs its workflows' tests. Refused once
    * {@link maxFailedChecks} checks of it failed in a row this turn, those
    * still running counted.
    */
@@ -1383,7 +1392,9 @@ build: {
   discard(app: string): Promise<void>;
   /**
    * Builds the draft's screens and workflows (type errors, lint and build
-   * errors) and runs its workflows' tests, and reads what its
+   * errors), type-checks its server code (app.ts, schema.ts, values.ts,
+   * operations/, migrations/) as its seal does, without running it, and runs
+   * its workflows' tests, and reads what its
    * screens ran into so far in the person's preview (runtime errors). Fix what fails
    * and check again; after ${maxFailedChecks} checks in a row that didn't pass, checking
    * refuses: stop and tell the person what still fails.
@@ -1391,6 +1402,7 @@ build: {
   check(app: string): Promise<{
     passed: boolean;
     screens: Build;
+    server: Build;
     workflows: Build;
     tests: { status: "passed" | "failed" | "none" | "not_run"; failures: string[] };
     /**
@@ -1458,7 +1470,7 @@ build: {
    */
   propose(app: string, message: string): Promise<{
     version: number | null;
-    check: { passed: boolean; screens: Build; workflows: Build; tests: { status: string; failures: string[] }; preview: { problems: { at: string; message: string }[]; seen: boolean; note: string } };
+    check: { passed: boolean; screens: Build; server: Build; workflows: Build; tests: { status: string; failures: string[] }; preview: { problems: { at: string; message: string }[]; seen: boolean; note: string } };
     /** What the version changes, as its reviewer reads it; null when not proposed. */
     review: {
       current: number | null;

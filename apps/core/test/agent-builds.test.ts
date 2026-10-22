@@ -114,6 +114,13 @@ const repair = `export default async (self, env) => {
   };
 };`;
 
+/** A diagnostic of the App's layout about `file`, as a check reports it. */
+const layout = (file: string | null) => ({
+  file,
+  rule: "server",
+  category: "structure",
+});
+
 /** What a code step returned, as JSON. */
 const returned = (text: string | undefined): unknown =>
   z.unknown().parse(JSON.parse(text?.replace("Returned:\n", "") ?? "null"));
@@ -1431,6 +1438,64 @@ export default workflow("reading", { params: {}, input: z.unknown() }, async (st
       app,
       versions: await person.api.apps.versions.list(app.id),
     }).toMatchObject({ app: { pendingVersion: null }, versions: [] });
+  });
+
+  it("type-checks a draft's server code as its seal would, with no preview open, and proposes nothing that fails it", async () => {
+    const operations = notesFiles["operations/notes.ts"] ?? "";
+    const mistyped = operations.replace(
+      "import { AppError,",
+      'const total: number = "seven";\nvoid total;\nimport { AppError,'
+    );
+    const { person, chat, grant } = await setUp([
+      codeStep(`export default async (self, env) => {
+        const app = await env.build.create({ name: ${JSON.stringify(appName)} });
+        const server = async () => {
+          const checked = await env.build.check(app.id);
+          return { passed: checked.passed, status: checked.server.status, diagnostics: checked.server.diagnostics.map(({ file, rule, category }) => ({ file, rule, category })) };
+        };
+        await env.build.write(app.id, ${JSON.stringify(notesFiles)});
+        const sound = await server();
+        await env.build.write(app.id, ${JSON.stringify({ "operations/notes.ts": mistyped })});
+        const mistyped = await server();
+        const proposal = await env.build.propose(app.id, "Notes");
+        await env.build.write(app.id, ${JSON.stringify({ "operations/notes.ts": operations, "app/server.ts": "export {};\n", "app/exports.json": "{}" })});
+        const leftover = await server();
+        await env.build.write(app.id, ${JSON.stringify({ "app/server.ts": null, "app/exports.json": null, "app.ts": null })});
+        const unregistered = await server();
+        return { sound, mistyped, proposed: { version: proposal.version, passed: proposal.check.passed, server: proposal.check.server.status }, leftover, unregistered };
+      };`),
+      says("Checked."),
+    ]);
+    await grant();
+
+    await chat.ask("Build a notes App");
+
+    const [result] = await codeResults(chat.stub, chat.chat.id);
+    expect(returned(result?.text)).toMatchObject({
+      sound: { passed: true, status: "ok", diagnostics: [] },
+      mistyped: {
+        passed: false,
+        status: "failed",
+        diagnostics: [
+          { file: "operations/notes.ts", rule: "TS2322", category: "types" },
+        ],
+      },
+      proposed: { version: null, passed: false, server: "failed" },
+      leftover: {
+        passed: false,
+        status: "failed",
+        diagnostics: [layout("app/exports.json"), layout("app/server.ts")],
+      },
+      unregistered: {
+        passed: false,
+        status: "failed",
+        diagnostics: [layout(null)],
+      },
+    });
+    const app = await createdApp(person.api);
+    await expect(person.api.apps.versions.list(app.id)).resolves.toStrictEqual(
+      []
+    );
   });
 
   it("proposes over what builders committed since, and never undoes it", async () => {
