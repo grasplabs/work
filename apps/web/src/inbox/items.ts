@@ -1,6 +1,9 @@
 import type { PendingAction, UnknownOutcome } from "@grasp-os/shared/connect";
 import type { DependencyRequest } from "@grasp-os/shared/dependencies";
-import type { RunFailedNotification } from "@grasp-os/shared/notifications";
+import type {
+  GapAskedNotification,
+  RunFailedNotification,
+} from "@grasp-os/shared/notifications";
 import type { Permission } from "@grasp-os/shared/permissions";
 import type { ScreensWaiting } from "@grasp-os/shared/screen-trust";
 import { i18n } from "@lingui/core";
@@ -53,7 +56,8 @@ export type Target =
   | { kind: "workflow"; app: string; workflow: string }
   | { kind: "engine"; engine: string }
   | { kind: "integration"; integration: string }
-  | { kind: "chat"; chat: string };
+  | { kind: "chat"; chat: string }
+  | { kind: "brain" };
 
 /** What an item was made from: what its page shows of it and acts on. */
 export type InboxSource =
@@ -67,7 +71,8 @@ export type InboxSource =
       notification: RunFailedNotification;
       model: string | undefined;
     }
-  | { type: "reconnect"; integration: string };
+  | { type: "reconnect"; integration: string }
+  | { type: "asked"; notification: GapAskedNotification };
 
 export interface InboxItem {
   /** Stable from one read to the next: its kind and what it is about, e.g. "held:<id>". */
@@ -363,6 +368,32 @@ const failedItems = (failed: NotificationsPage, me: string): InboxItem[] =>
     return [item];
   });
 
+/** A question of the brain an admin asked the person, as the role that can answer it, while it is open. */
+const askedItems = (failed: NotificationsPage, me: string): InboxItem[] =>
+  failed.page.notifications.flatMap((notification): InboxItem[] => {
+    if (notification.type !== "gap_asked") {
+      return [];
+    }
+    const { question, owner, at } = notification;
+    return [
+      {
+        id: `asked:${notification.id}`,
+        kind: "openQuestion",
+        title: question,
+        context: owner,
+        body: [
+          t`You were asked this as the ${owner}. Answer it in the brain: everyone in the company reads the answer, with your name.`,
+        ],
+        facts: [{ label: t`Asked`, value: formatDateTime(at) }],
+        about: { kind: "brain" },
+        forWhom: { person: me },
+        date: at,
+        urgent: false,
+        source: { type: "asked", notification },
+      },
+    ];
+  });
+
 /** What is ready of a part of what waits; nothing of one that couldn't be read. */
 const readyOf = <T>(part: Loaded<T> | undefined): T | undefined =>
   part?.state === "ready" ? part.data : undefined;
@@ -421,6 +452,7 @@ export const inboxItems = (
       : packageItems(dependencies.requests, dependencies.policyGeneration)),
     ...screenItems(screens, readAt),
     ...(failed === undefined ? [] : failedItems(failed, me)),
+    ...(failed === undefined ? [] : askedItems(failed, me)),
     ...reconnect,
   ].toSorted(order);
 };
