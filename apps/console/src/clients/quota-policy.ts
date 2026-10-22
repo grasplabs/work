@@ -173,8 +173,11 @@ const stateOf = (
     return "in_sync";
   }
   // A change of the setting waiting for the next deploy may still bring
-  // core the console's generation.
-  return pending ? "pending" : "drifted";
+  // core the console's generation; under the one it has, the deploy brings
+  // nothing, as core refuses other limits for a generation it recorded.
+  return pending && inForce.generation !== set.generation
+    ? "pending"
+    : "drifted";
 };
 
 /**

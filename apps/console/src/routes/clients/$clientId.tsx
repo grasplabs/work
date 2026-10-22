@@ -304,10 +304,18 @@ export const Route = createFileRoute("/clients/$clientId")({
     if (!newClientIdSchema.safeParse(params.clientId).success) {
       throw notFound();
     }
-    // Not awaited: a slow or unreachable core never holds up the page.
-    const quotaPolicy = fetchClientQuotaPolicy({
-      data: { clientId: params.clientId },
-    });
+    // Not awaited: a slow or unreachable core never holds up the page. A
+    // read that fails (the database included) shows no card, never the
+    // route's error page in place of the client.
+    const quotaPolicy = (async () => {
+      try {
+        return await fetchClientQuotaPolicy({
+          data: { clientId: params.clientId },
+        });
+      } catch {
+        return null;
+      }
+    })();
     const [view, { releases }, { settings, history }] = await Promise.all([
       fetchProvisioning({ data: { clientId: params.clientId } }),
       fetchNewClientOptions(),

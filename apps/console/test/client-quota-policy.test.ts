@@ -190,6 +190,21 @@ describe("a client's quota policy", () => {
     });
   });
 
+  it("is drifted, not pending, when the other limits under a recorded generation haven't deployed yet", async () => {
+    const release = await importedRelease("feat(core): quota policy refused");
+    const { clientId } = await recordClient();
+    await setQuota(clientId, 4, 100);
+    await deploy(clientId, release);
+    // Changed since the deploy, and core would refuse it as it did before.
+    await setQuota(clientId, 4, 50);
+
+    await expect(clientQuotaPolicy(env, clientId)).resolves.toMatchObject({
+      set: { generation: 4, lowered: { workflowSteps: 50 } },
+      inForce: { generation: 4, lowered: { workflowSteps: 100 } },
+      state: "drifted",
+    });
+  });
+
   it("waits for the next deploy while a deploy of the console's generation failed before it went live", async () => {
     const release = await importedRelease("feat(core): quota policy not live");
     const { clientId } = await recordClient();
