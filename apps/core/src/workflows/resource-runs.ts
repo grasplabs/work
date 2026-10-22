@@ -77,6 +77,7 @@ import type {
 } from "./resource-host.ts";
 import { detailsRemoved, removedText } from "./retention.ts";
 import { tellQueryFollowers } from "./run-changes.ts";
+import { compensationFailedError } from "./runs.ts";
 import type { EngineStatus } from "./runs.ts";
 import { wakingOnSettle } from "./share-wakes.ts";
 
@@ -196,7 +197,7 @@ export interface RunAdmission {
  */
 export const runAdmitted = (db: DrizzleD1Database, run: RunAdmission) =>
   db.insert(workflowResourceRuns).select(
-    sql`SELECT ${run.receipt}, ${run.workflowId}, ${run.version}, ${run.manifestHash}, ${run.buildHash}, ${run.principal}, 'starting', 0, ${run.createdAt}, NULL, 0, NULL, NULL, 0, ${run.restricted ? 1 : 0}, NULL, 0, 0
+    sql`SELECT ${run.receipt}, ${run.workflowId}, ${run.version}, ${run.manifestHash}, ${run.buildHash}, ${run.principal}, 'starting', 0, ${run.createdAt}, NULL, 0, NULL, NULL, 0, ${run.restricted ? 1 : 0}, NULL, 0, 0, NULL
         WHERE EXISTS (SELECT 1 FROM ${workflowStartReceipts} WHERE ${workflowStartReceipts.id} = ${run.receipt})`
   );
 
@@ -308,7 +309,13 @@ export const projectResourceRun = async (
   if (row === undefined || !unended.includes(row.status)) {
     return;
   }
-  const status = projected[engine.status];
+  // Its compensation failed: failed, as that, however it ended (spec
+  // 10.7.3), a cancelled run's included.
+  const compensationFailed = engine.rollback === "errored";
+  const status = compensationFailed ? "failed" : projected[engine.status];
+  const failure = compensationFailed
+    ? compensationFailedError.code
+    : failureCode;
   const ended = !unended.includes(status);
   const action = endActions[status];
   const db = drizzle(env.DB);
@@ -321,7 +328,13 @@ export const projectResourceRun = async (
           ? {}
           : { engineSequence: engine.sequence }),
         ...(ended ? { endedAt: new Date(engine.at) } : {}),
-        ...(status === "failed" && failureCode !== null ? { failureCode } : {}),
+        ...(status === "failed" && failure !== null
+          ? { failureCode: failure }
+          : {}),
+        // While it rolls back, why: what its snapshot shows as compensating.
+        ...(engine.status === "rollingBack" && engine.compensation !== undefined
+          ? { compensation: JSON.stringify(engine.compensation) }
+          : {}),
       })
       .where(
         and(
@@ -339,7 +352,7 @@ export const projectResourceRun = async (
       : [
           outboxedIfChanged(
             db,
-            withFailure(runEntry(row, action), status, failureCode)
+            withFailure(runEntry(row, action), status, failure)
           ),
         ]),
     // Ended, it waits in the admission queue for nothing more: its places
@@ -362,7 +375,10 @@ export const projectResourceRun = async (
       await settleCancels(env, now);
     }
   }
-  if (status !== row.status) {
+  // Its compensation's start changes its snapshot too.
+  const compensating =
+    engine.status === "rollingBack" && row.compensation === null;
+  if (status !== row.status || compensating) {
     await tellQueryFollowers(env, id);
   }
 };

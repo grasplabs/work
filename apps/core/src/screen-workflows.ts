@@ -414,7 +414,8 @@ const stages = {
   queuedCancelling: 2,
   running: 3,
   runningCancelling: 4,
-  ended: 5,
+  compensating: 5,
+  ended: 6,
 } as const;
 
 /**
@@ -424,7 +425,7 @@ const stages = {
 const timerRevisions = 2 ** 20;
 
 /** How many stages a policy generation holds (`revisionOf`). */
-const stagesPerGeneration = 5;
+const stagesPerGeneration = 6;
 
 /**
  * The revision of a run at `stage` of its lifecycle under its workflow's
@@ -484,6 +485,23 @@ const waitsOf = (row: RunRow): Json[] => {
   ];
 };
 
+/** Why a run compensates, as its row keeps it (resource-runs.ts). */
+const compensationSchema = z.object({
+  cause: z.enum(["failure", "cancellation"]),
+  code: z.string().nullable(),
+});
+
+/**
+ * Run `row`'s compensation while the engine rolls it back (spec 10.7.3):
+ * why, from its row; none once it ended, or while it doesn't.
+ */
+const compensationOf = (
+  row: RunRow
+): z.infer<typeof compensationSchema> | undefined =>
+  row.status === "running" && row.compensation !== null
+    ? compensationSchema.safeParse(JSON.parse(row.compensation)).data
+    : undefined;
+
 /** Run `row`'s stage, a cancel asked of it or not. */
 const stageOf = (
   row: RunRow,
@@ -494,6 +512,9 @@ const stageOf = (
   }
   if (row.status === "starting") {
     return cancelling ? stages.queuedCancelling : stages.queued;
+  }
+  if (compensationOf(row) !== undefined) {
+    return stages.compensating;
   }
   return cancelling ? stages.runningCancelling : stages.running;
 };
@@ -595,6 +616,26 @@ export const failureOf = (
 };
 
 /**
+ * A compensating run's snapshot's compensation (spec 10.7.3): its cause,
+ * its cleanup's activity (the engine reports it running), and, after a
+ * failure, what it failed with, as a failed run says it; none otherwise.
+ */
+const compensationShown = (
+  compensation: z.infer<typeof compensationSchema> | undefined
+): { compensation?: Json } =>
+  compensation === undefined
+    ? {}
+    : {
+        compensation: {
+          cause: compensation.cause,
+          activity: "running",
+          ...(compensation.cause === "failure"
+            ? { originalError: failureOf({ code: compensation.code }) }
+            : {}),
+        },
+      };
+
+/**
  * What a completed run returned, projected by the output the App declared:
  * `contract.invalid_return` for anything else, `workflow.run_details_removed`
  * past its retention.
@@ -641,14 +682,19 @@ const runSnapshot = async (
   const ended = isEnded(row.status);
   const cancelling = !ended && (await cancelAsked(env, row.id));
   const mayStart = await holds(env, mayStartSql(asking, resolved.alias, pin));
-  const status = statusOf[row.status];
+  const compensation = compensationOf(row);
+  const status =
+    compensation === undefined ? statusOf[row.status] : "compensating";
   const contract = await startedContract(
     env,
     asking,
     resolved,
     originAppVersion
   );
-  const returned = row.status === "completed" || row.status === "failed";
+  const returned =
+    row.status === "completed" ||
+    row.status === "failed" ||
+    compensation?.cause === "failure";
   if (
     returned &&
     row.restricted &&
@@ -676,11 +722,16 @@ const runSnapshot = async (
     control: {
       canPause: false,
       canResume: false,
-      canCancel: !ended && !cancelling && mayStart,
+      // Nothing cuts its compensation short from an App (spec 10.7.3).
+      canCancel:
+        !ended && !cancelling && compensation === undefined && mayStart,
       pendingControl: cancelling ? { kind: "cancel", stage: "applying" } : null,
     },
     ...(output === undefined ? {} : { output }),
     ...(row.status === "failed" ? { error: failureOf(result.error) } : {}),
+    // Compensating after a failure: what it failed with, as a failed run
+    // says it; its cleanup's activity, which the engine reports as running.
+    ...compensationShown(compensation),
   };
   return {
     value,

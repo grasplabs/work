@@ -36,6 +36,7 @@ import {
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
+import type { SQLiteUpdateSetSource } from "drizzle-orm/sqlite-core";
 import { z } from "zod";
 
 import { appFor, versionFiles } from "../apps.ts";
@@ -1071,7 +1072,27 @@ export interface EngineStatus {
    * end core's own command confirmed.
    */
   startedAt?: number;
+  /**
+   * For a run that ended having rolled back (its steps' compensations,
+   * spec 10.7.3), how that went, from the engine's own record of it.
+   */
+  rollback?: "complete" | "errored";
+  /**
+   * For a run rolling back, why: its failure (with the code it failed
+   * with, if any) or a cancellation, from the engine's own record.
+   */
+  compensation?: { cause: "failure" | "cancellation"; code: string | null };
 }
+
+/**
+ * What a run whose compensation failed ends with (spec 10.7.3): failed,
+ * as `workflow.compensation_failed`, whatever it failed with or was ended
+ * by; both failures stay in its history, its step's and its compensation's.
+ */
+export const compensationFailedError = {
+  code: "workflow.compensation_failed",
+  message: workflowErrors.create("workflow.compensation_failed").message,
+};
 
 /**
  * What the projection of `engine` writes of the engine itself: its own
@@ -1082,6 +1103,10 @@ export interface EngineStatus {
  */
 const engineFields = (engine: EngineStatus) => ({
   engineStatus: engine.status,
+  // While it rolls back, why: what its summary says it compensates for.
+  ...(engine.status === "rollingBack" && engine.compensation !== undefined
+    ? { compensation: JSON.stringify(engine.compensation) }
+    : {}),
   summaryRevision: nextRevision,
   ...(engine.sequence === undefined ? {} : { engineSequence: engine.sequence }),
   ...(engine.startedAt === undefined
@@ -1090,6 +1115,54 @@ const engineFields = (engine: EngineStatus) => ({
         startedAt: sql`COALESCE(${workflowRuns.startedAt}, ${engine.startedAt})`,
       }),
 });
+
+/**
+ * What run `row` ends with, or is, as the engine says it is (`engine`), at
+ * `at`: its status, its failure report (none unless it failed), and what
+ * the projection writes of them. A cancelled run the engine ended
+ * otherwise than by terminating it ended for its cancel: its next
+ * activation refused to run on. Whether a cancel was asked for is decided
+ * in the write, as the row is then: a cancel written since `row` was read
+ * makes it cancelled, not failed. A run whose compensation failed ends
+ * failed, as that, however it ended (spec 10.7.3), a cancelled run's
+ * included.
+ */
+const outcomeOf = (
+  row: RunRow,
+  engine: EngineStatus,
+  at: Date
+): {
+  status: RunRow["status"];
+  report: RunFailure | null;
+  written: SQLiteUpdateSetSource<typeof workflowRuns>;
+} => {
+  if (engine.rollback === "errored") {
+    const report = {
+      ...stoppedReport(row, at),
+      error: compensationFailedError,
+    };
+    return {
+      status: "failed",
+      report,
+      written: { status: "failed", failure: report },
+    };
+  }
+  if (engine.status !== "errored") {
+    const status = projected[engine.status];
+    return { status, report: null, written: { status } };
+  }
+  const report = row.failure ?? stoppedReport(row, at);
+  return {
+    status: row.cancelRequestedAt === null ? "failed" : "cancelled",
+    report,
+    written: {
+      status: sql<
+        RunRow["status"]
+      >`CASE WHEN ${workflowRuns.cancelRequestedAt} IS NULL THEN 'failed' ELSE 'cancelled' END`,
+      failure: sql`CASE WHEN ${workflowRuns.cancelRequestedAt} IS NULL THEN ${JSON.stringify(report)} ELSE ${workflowRuns.failure} END`,
+    },
+  };
+};
 
 /**
  * Makes the run's row say where the engine says it is: the one writer of
@@ -1112,15 +1185,11 @@ export const projectStatus = async (
   if (row === undefined || !unended.includes(row.status)) {
     return;
   }
-  // A cancelled run the engine ended otherwise than by terminating it
-  // ended for its cancel: its next activation refused to run on. Whether
-  // a cancel was asked for is decided in the write, as the row is then:
-  // a cancel written since `row` was read makes it cancelled, not failed.
-  const errored = engine.status === "errored";
-  const status =
-    row.cancelRequestedAt !== null && errored
-      ? "cancelled"
-      : projected[engine.status];
+  const { status, report, written } = outcomeOf(
+    row,
+    engine,
+    new Date(engine.at)
+  );
   const at = new Date(engine.at);
   const db = drizzle(env.DB);
   const fenced = and(
@@ -1131,18 +1200,12 @@ export const projectStatus = async (
       : lt(workflowRuns.engineSequence, engine.sequence)
   );
   const ended = endedLive.has(engine.status);
-  const report = errored ? (row.failure ?? stoppedReport(row, at)) : null;
   const endedFailed = sql`EXISTS (SELECT 1 FROM ${workflowRuns} WHERE ${workflowRuns.id} = ${row.id} AND ${workflowRuns.status} = 'failed')`;
   const [[changed]] = await auditedBatch(env, db, [
     db
       .update(workflowRuns)
       .set({
-        ...(report === null
-          ? { status }
-          : {
-              status: sql`CASE WHEN ${workflowRuns.cancelRequestedAt} IS NULL THEN 'failed' ELSE 'cancelled' END`,
-              failure: sql`CASE WHEN ${workflowRuns.cancelRequestedAt} IS NULL THEN ${JSON.stringify(report)} ELSE ${workflowRuns.failure} END`,
-            }),
+        ...written,
         pendingStart: null,
         ...engineFields(engine),
         ...(ended ? { endedAt: at } : {}),

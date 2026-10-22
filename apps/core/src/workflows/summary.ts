@@ -1,4 +1,5 @@
 import { appErrors } from "@grasp-os/shared/apps";
+import { expectedMessageOf } from "@grasp-os/shared/errors";
 import { runIdSchema } from "@grasp-os/shared/ids";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { reviewedTaskOf, workflowErrors } from "@grasp-os/shared/workflows";
@@ -51,6 +52,7 @@ const rowSchema = z.object({
     "cancelled",
   ]),
   engine_status: z.string().nullable(),
+  compensation: z.string().nullable(),
   created_at: z.number(),
   started_at: z.number().nullable(),
   ended_at: z.number().nullable(),
@@ -199,6 +201,55 @@ const engineStatusSchema = z.enum([
   "terminated",
 ]);
 
+/** The words of a step's failure no platform code names. */
+const stepFailedMessage = workflowErrors.create("workflow.step_failed").message;
+
+/**
+ * A compensating run's compensation (spec 10.7.3): its cause, its
+ * cleanup's activity (the engine reports it running) and, after a
+ * failure, what it failed with (the report its run kept as it failed), to
+ * those who `sees` why a run failed, its message gone once its details
+ * are `removed`.
+ */
+const compensationOf = (
+  row: z.infer<typeof rowSchema>,
+  sees: boolean,
+  /** The words of a run whose details are removed: its message's, if so. */
+  removed: string | undefined
+): NonNullable<RunSummary["compensation"]> => {
+  // As the engine began to roll it back; a cancel asked of it otherwise.
+  const kept = z
+    .object({
+      cause: z.enum(["failure", "cancellation"]),
+      code: z.string().nullable(),
+    })
+    .safeParse(
+      row.compensation === null ? undefined : JSON.parse(row.compensation)
+    ).data;
+  const cause =
+    kept?.cause ??
+    (row.cancel_requested_at === null ? "failure" : "cancellation");
+  // Its report, as its run kept it failing; or the code the engine has it
+  // failing with, in the platform's own words for it.
+  const code = kept?.code ?? null;
+  const reported =
+    errorOf(row.failure) ??
+    (code === null
+      ? undefined
+      : { code, message: expectedMessageOf(code) ?? stepFailedMessage });
+  const failed = cause === "failure" && sees ? reported : undefined;
+  return {
+    cause,
+    activity: "running",
+    ...(failed === undefined
+      ? {}
+      : {
+          originalError:
+            removed === undefined ? failed : { ...failed, message: removed },
+        }),
+  };
+};
+
 /**
  * The summary of `app`'s run `run`, as `by` (anyone with a role in the
  * App) may see it: a failed run's error only for its person and admins;
@@ -220,7 +271,7 @@ export const runSummary = async (
     throw workflowErrors.create("workflow.invalid");
   }
   const read = await env.DB.prepare(
-    `SELECT r.id, r.workflow_id, r.version, r.status, r.engine_status,
+    `SELECT r.id, r.workflow_id, r.version, r.status, r.engine_status, r.compensation,
        r.created_at, r.started_at, r.ended_at, r.cancel_requested_at,
        r.failure, r.started_by, r.details_removed_at, r.summary_revision,
        (SELECT json_group_array(json_object('name', d.step, 'expiresAt', d.expires_at))
@@ -294,11 +345,11 @@ export const runSummary = async (
     finishedAt: live ? null : row.ended_at,
     ...(status === "compensating"
       ? {
-          compensation: {
-            cause:
-              row.cancel_requested_at === null ? "failure" : "cancellation",
-            activity: "running",
-          },
+          compensation: compensationOf(
+            row,
+            sees,
+            removed ? removedText(env) : undefined
+          ),
         }
       : {}),
     ...(error === undefined ? {} : { error }),

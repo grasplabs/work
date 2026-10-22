@@ -129,6 +129,7 @@ import type {
   InstanceStatus,
   RollbackOutcome,
   WorkflowDefinition,
+  WorkflowError,
 } from "./contracts.ts";
 import { errorRecord, namedError, parseError } from "./errors.ts";
 import {
@@ -1462,6 +1463,31 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
   status(): InstanceStatus | undefined {
     const run = this.#run();
     return run === undefined ? undefined : statusOf(run);
+  }
+
+  /**
+   * Why a run rolling back rolls back: its definition failed (`errored`,
+   * with that failure, which the run ends with), or it was terminated with
+   * `rollback: true` (`terminated`); undefined for a run that isn't rolling
+   * back. What a host projects a compensation's cause from.
+   */
+  protected rollbackCause():
+    | { readonly cause: "errored"; readonly error: WorkflowError }
+    | { readonly cause: "terminated" }
+    | undefined {
+    const run = this.#run();
+    if (run?.status !== "rollingBack") {
+      return undefined;
+    }
+    return run.rollback_end === "terminated"
+      ? { cause: "terminated" }
+      : {
+          cause: "errored",
+          error:
+            run.error === null
+              ? { name: "Error", message: "" }
+              : parseError(run.error),
+        };
   }
 
   /**

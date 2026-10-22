@@ -59,6 +59,8 @@ import {
 import { hostOrigin } from "./host-sockets.ts";
 import { mockIdp } from "./idp.ts";
 import { closeWhenTestEnds } from "./open-sockets.ts";
+import { gate, rollingBackRun, withRollbacks } from "./rollbacks.ts";
+import { runInstance, sleeping, woken } from "./runs.ts";
 import { appWith, seal } from "./sealed-apps.ts";
 import { clientOrigin } from "./sign-in-config.ts";
 import {
@@ -514,14 +516,14 @@ const failureShown = (error: { code: string | null; message: string }) => {
 
 /**
  * Where in its lifecycle a run's revision says it is: 1 queued, 2 queued
- * with a cancel asked, 3 running, 4 running with a cancel asked, 5 ended,
- * whatever policy generation it is under and however often its timers
- * opened and closed (the revision's low 20 bits).
+ * with a cancel asked, 3 running, 4 running with a cancel asked, 5
+ * compensating, 6 ended, whatever policy generation it is under and
+ * however often its timers opened and closed (the revision's low 20 bits).
  */
 const stageOf = (revision: number | undefined): number | undefined =>
   revision === undefined
     ? undefined
-    : ((Math.floor(revision / 2 ** 20) - 1) % 5) + 1;
+    : ((Math.floor(revision / 2 ** 20) - 1) % 6) + 1;
 
 /** A cancel receipt with its revision as the stage it names. */
 const staged = (receipt: unknown) => {
@@ -608,7 +610,7 @@ describe(
         again: first,
         handle: { workflowId: fixture.workflow, workflowVersion: 1 },
         shown: {
-          revision: 5,
+          revision: 6,
           output: { status: "Hello, Ada" },
           control: {
             canPause: false,
@@ -738,11 +740,11 @@ describe(
           pendingControl: null,
         },
         pause: "workflow.control_refused",
-        receipt: { kind: "cancel", state: "applied", revision: 5 },
-        resent: { kind: "cancel", state: "applied", revision: 5 },
+        receipt: { kind: "cancel", state: "applied", revision: 6 },
+        resent: { kind: "cancel", state: "applied", revision: 6 },
         settles: true,
         ended: {
-          revision: 5,
+          revision: 6,
           control: {
             canPause: false,
             canResume: false,
@@ -1198,7 +1200,7 @@ describe(
       };
       const first = await following(builder, app, lease, watch);
       await vi.waitFor(() => {
-        expect(stageOf(first.received.at(-1)?.revision)).toBe(5);
+        expect(stageOf(first.received.at(-1)?.revision)).toBe(6);
       }, settles);
       // Its details removed, as the retention sweep removes them.
       await env.DB.prepare(
@@ -1382,7 +1384,7 @@ describe(
         await vi.waitFor(() => {
           const last = watched.received.at(-1);
           expect(
-            typeof last?.outcome === "string" || stageOf(last?.revision) === 5
+            typeof last?.outcome === "string" || stageOf(last?.revision) === 6
           ).toBeTruthy();
         }, settles);
         await watched.subscription.release();
@@ -1715,12 +1717,130 @@ describe(
       }).toStrictEqual({
         same: outcomeOf(one),
         cancels: [
-          { kind: "cancel", state: "applied", revision: 5 },
-          { kind: "cancel", state: "applied", revision: 5 },
+          { kind: "cancel", state: "applied", revision: 6 },
+          { kind: "cancel", state: "applied", revision: 6 },
         ],
         receipts: ["applied"],
         reopened: false,
         deleted: false,
+      });
+    });
+  }
+);
+
+// A run whose engine rolls its steps back (spec 10.7.3), on the real
+// engine with a test's definition (rollbacks.ts): no definition Grasp
+// builds registers a rollback yet (GRA-984).
+describe(
+  "a screen's typed workflow run while it compensates",
+  { timeout: 120_000 },
+  () => {
+    withRollbacks();
+
+    /**
+     * A run of the Requests App's `followUp`, its next activation the
+     * test's (`compensated`), followed through its compensation: what the
+     * screen saw while the engine rolled it back, and as it ended.
+     */
+    const compensatedRun = async (
+      compensated: Omit<Parameters<typeof rollingBackRun>[1], "holds" | "held">,
+      end?: (runId: string) => Promise<void>
+    ) => {
+      const { builder, app, reference } = await requestsApp("PT1H");
+      const lease = await screenOf(builder, app);
+      const channel = workflowChannel(screenClient(builder, app, lease));
+      const read = readWorkflowReference(reference);
+      const handle = await channel.start(read, { who: "Ada" });
+      await sleeping(handle.runId, "task:hold");
+      const holds = gate();
+      rollingBackRun(handle.runId, {
+        ...compensated,
+        holds,
+        // Its `hold` task's hour.
+        held: { name: "task:hold", ms: 3_600_000 },
+      });
+      const stop = channel.followRun(read, handle.runId, () => {
+        // Read below.
+      });
+      await woken(handle.runId, "task:hold");
+      await end?.(handle.runId);
+      await vi.waitFor(() => {
+        expect(channel.peekRun(read, handle.runId).value?.status).toBe(
+          "compensating"
+        );
+      }, settles);
+      const compensating = channel.peekRun(read, handle.runId);
+      holds.open();
+      await vi.waitFor(() => {
+        expect(
+          channel.peekRun(read, handle.runId).value?.finishedAt
+        ).not.toBeNull();
+      }, settles);
+      const ended = channel.peekRun(read, handle.runId);
+      stop();
+      return {
+        compensating: {
+          status: compensating.value?.status,
+          compensation: compensating.value?.compensation,
+          finishedAt: compensating.value?.finishedAt,
+          canCancel: compensating.value?.control.canCancel,
+          stage: stageOf(compensating.revision),
+        },
+        ended: {
+          status: ended.value?.status,
+          error: ended.value?.error?.code,
+        },
+      };
+    };
+
+    it("shows a failed run compensating with what it failed with, then failed with that once its compensation is done", async () => {
+      await expect(
+        compensatedRun({ ends: { fails: "resource.declined" } })
+      ).resolves.toStrictEqual({
+        compensating: {
+          status: "compensating",
+          compensation: {
+            cause: "failure",
+            activity: "running",
+            originalError: {
+              code: "resource.declined",
+              message: expectedMessageOf("resource.declined"),
+              category: "domain",
+              retryable: false,
+              requestId: null,
+            },
+          },
+          // Not ended while its compensation runs.
+          finishedAt: null,
+          canCancel: false,
+          stage: 5,
+        },
+        ended: { status: "failed", error: "resource.declined" },
+      });
+    });
+
+    it("ends a run whose compensation failed as workflow.compensation_failed", async () => {
+      const shown = await compensatedRun({
+        ends: { fails: "resource.declined" },
+        rollbackFails: true,
+      });
+      expect(shown.ended).toStrictEqual({
+        status: "failed",
+        error: "workflow.compensation_failed",
+      });
+    });
+
+    it("shows a run cancelled with a rollback compensating for its cancellation, then cancelled", async () => {
+      const shown = await compensatedRun({ ends: "sleeps" }, async (runId) => {
+        await sleeping(runId, "after-charge");
+        await runInstance(runId).terminate({ rollback: true });
+      });
+      expect({
+        compensation: shown.compensating.compensation,
+        ended: shown.ended,
+      }).toStrictEqual({
+        compensation: { cause: "cancellation", activity: "running" },
+        ended: { status: "cancelled", error: undefined },
       });
     });
   }
