@@ -2,8 +2,9 @@
  * On-prem smoke run: bundles core and serves it on plain workerd (no
  * Wrangler, no Miniflare), checks it answers, and waits for its built-in
  * content to install: it fails on any failure core or workerd logs before
- * that. Keeps the code on-prem ready: only platform APIs that also run on
- * workerd.
+ * that. Then someone signs in, seals an App and calls one of its functions,
+ * which runs on the sandbox host (workerd-smoke-sealed.ts). Keeps the code
+ * on-prem ready: only platform APIs that also run on workerd.
  */
 import { execFileSync, spawn } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
@@ -21,19 +22,29 @@ import path from "node:path";
 import { createInterface } from "node:readline";
 import { PassThrough } from "node:stream";
 
+import { localSignIn } from "../apps/core/test/sign-in-config.ts";
 import { routerSecretHeader } from "../packages/shared/src/router.ts";
 import { d1DatabasesOf, writeD1Service } from "./workerd-d1.ts";
 import { writeR2Service } from "./workerd-r2.ts";
 import { nativeWorkerd, startSandboxSupervisor } from "./workerd-sandbox.ts";
 import type { SandboxSupervisor } from "./workerd-sandbox.ts";
-import { coreWranglerConfig, smokeConfig } from "./workerd-smoke-config.ts";
+import {
+  assetsWorkerSource,
+  coreWranglerConfig,
+  smokeConfig,
+} from "./workerd-smoke-config.ts";
+import { sealedCallOnWorkerd } from "./workerd-smoke-sealed.ts";
 import { coreStarted, installedOnWorkerd } from "./workerd-smoke-start.ts";
 import type { KnownGap } from "./workerd-smoke-start.ts";
+import { tapSocket } from "./workerd-socket-tap.ts";
+import type { SocketTap } from "./workerd-socket-tap.ts";
 
 const ROUTER_SECRET = "smoke-router-secret";
 const ATTEMPTS = 50;
 const RETRY_DELAY_MS = 100;
 const INSTALL_TIMEOUT_MS = 120_000;
+/** How long sign-in, the seal and the call may take, all told. */
+const SEALED_CALL_TIMEOUT_MS = 120_000;
 
 /**
  * What the on-prem profile can't do yet, so the install can't complete:
@@ -44,6 +55,8 @@ const INSTALL_TIMEOUT_MS = 120_000;
 const knownGaps: KnownGap[] = [];
 const core = path.join(import.meta.dirname, "../apps/core");
 const out = mkdtempSync(path.join(tmpdir(), "grasp-os-workerd-"));
+/** Where core's build puts the assets a seal reads (the compiler, SDK, kit). */
+const assets = path.join(import.meta.dirname, "../apps/web/dist");
 
 // The same build core's deploy runs, so the bundle below is what ships.
 execFileSync("vp", ["run", "build"], { cwd: core, stdio: "inherit" });
@@ -51,6 +64,13 @@ execFileSync("wrangler", ["deploy", "--dry-run", "--outdir", out], {
   cwd: core,
   stdio: "inherit",
 });
+// The fake IdP people sign in through, bundled the same way, beside core.
+const idpOut = path.join(out, "idp");
+execFileSync(
+  "wrangler",
+  ["deploy", "--dry-run", "-c", "test/idp.wrangler.jsonc", "--outdir", idpOut],
+  { cwd: core, stdio: "inherit" }
+);
 
 // A port nothing listens on now, picked by the OS and closed again for
 // workerd to take, so no other server answers the health check.
@@ -66,6 +86,9 @@ const freePort = async (): Promise<number> => {
   return address.port;
 };
 const PORT = await freePort();
+const IDP_PORT = await freePort();
+const origin = `http://127.0.0.1:${PORT}`;
+const idpOrigin = `http://127.0.0.1:${IDP_PORT}`;
 
 // Durable Object migrations and the Grasp skills are bundled next to
 // index.js as text modules, and WebAssembly (the jq evaluator) as wasm
@@ -95,20 +118,37 @@ mkdirSync(storage);
 // Everything from here runs inside the scope that stops the sandbox
 // supervisor and core and removes `out`, however the run ends.
 let sandbox: SandboxSupervisor | undefined;
+let tap: SocketTap | undefined;
 let server: ChildProcess | undefined;
 try {
   // The sandbox supervisor core's SANDBOX_HOST reaches, with its pool of
-  // workerd processes, as on-prem runs it beside core.
+  // workerd processes, as on-prem runs it beside core; through a tap that
+  // records whose sessions core asks it for.
   sandbox = await startSandboxSupervisor({ workerd: nativeWorkerd });
+  tap = await tapSocket(sandbox.socket, out);
 
+  writeFileSync(path.join(out, "assets.js"), assetsWorkerSource);
   writeFileSync(
     path.join(out, "config.capnp"),
     smokeConfig({
       port: PORT,
-      sandboxSocket: sandbox.socket,
+      sandboxSocket: tap.socket,
       routerSecret: ROUTER_SECRET,
       modules,
       storage,
+      signIn: {
+        idpPort: IDP_PORT,
+        idpModules: readdirSync(idpOut)
+          .filter((file) => file.endsWith(".js"))
+          .map((file) => `(name = "${file}", esModule = embed "idp/${file}")`),
+        assets,
+        // Only test values, for this machine (apps/core/test/sign-in-config.ts),
+        // and a session secret made for this run.
+        vars: {
+          ...localSignIn(origin, idpOrigin),
+          BETTER_AUTH_SECRET: crypto.randomUUID(),
+        },
+      },
     })
   );
 
@@ -152,8 +192,17 @@ try {
       ? "core runs on workerd, and its built-in content installed"
       : "core runs on workerd, and its built-in content installed but for the known gaps above"
   );
+  await sealedCallOnWorkerd(
+    { origin, idpOrigin, headers: { [routerSecretHeader]: ROUTER_SECRET } },
+    tap.owners,
+    SEALED_CALL_TIMEOUT_MS
+  );
+  console.info(
+    "a sealed App's function ran on the sandbox host, in a Worker Loader isolate"
+  );
 } finally {
   server?.kill();
+  await tap?.close();
   await sandbox?.stop();
   rmSync(out, { force: true, recursive: true });
 }

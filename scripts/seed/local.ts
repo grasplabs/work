@@ -8,11 +8,9 @@ import { existsSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
-import type { CoreApi } from "@grasp-os/shared/rpc";
-import { newWebSocketRpcSession } from "capnweb";
-import type { RpcStub } from "capnweb";
-
 import { localIdpOrigin } from "../../apps/core/test/sign-in-config.ts";
+import { cookieHeader, openSession, signInThrough } from "../core-session.ts";
+import type { CoreSite, Session } from "../core-session.ts";
 
 /**
  * The frontend `vp run dev` serves, which sends `/api` and `/rpc` on to
@@ -30,22 +28,8 @@ export const stateDir = path.resolve(
   process.env.DEV_PERSIST_TO ?? ".wrangler/state"
 );
 
-const sessionCookie = "__Host-grasp.session_token";
-
-/** The `name=value` pairs a response sets, as a `Cookie` header. */
-const cookiesOf = (response: Response): string =>
-  response.headers
-    .getSetCookie()
-    .map((cookie) => cookie.split(";")[0] ?? "")
-    .join("; ");
-
-const locationOf = (response: Response, step: string): string => {
-  const location = response.headers.get("location");
-  if (location === null) {
-    throw new Error(`${step} did not redirect (${response.status})`);
-  }
-  return location;
-};
+/** The stack `vp run dev` runs, and its fake IdP. */
+const site: CoreSite = { origin, idpOrigin: localIdpOrigin };
 
 /**
  * Signs in as `email` the way a browser does, and returns the session
@@ -56,106 +40,30 @@ const locationOf = (response: Response, step: string): string => {
  */
 export const signInAs = async (
   email: string,
-  {
-    providerId = "microsoft",
-    signal,
-  }: {
-    /** Grasp's own tenant (`grasp-staff`) for the stack's staff member. */
-    providerId?: "microsoft" | "grasp-staff";
-    /** Aborts each request of the sign-in, for a caller with a deadline. */
-    signal?: AbortSignal;
-  } = {}
+  options: Parameters<typeof signInThrough>[2] = {}
 ): Promise<string> => {
-  let started: Response;
   try {
-    started = await fetch(new URL("/api/auth/sign-in/sso", origin), {
-      method: "POST",
-      headers: { origin, "content-type": "application/json" },
-      signal,
-      body: JSON.stringify({
-        providerId,
-        callbackURL: "/",
-        errorCallbackURL: "/",
-        loginHint: email,
-      }),
-    });
-  } catch {
-    throw new Error(
-      `Nothing answers at ${origin}. Start the local stack with \`vp run dev\` first.`
-    );
+    return await signInThrough(site, email, options);
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      error.message === `Nothing answers at ${origin}.`
+    ) {
+      throw new Error(
+        `Nothing answers at ${origin}. Start the local stack with \`vp run dev\` first.`,
+        { cause: error }
+      );
+    }
+    throw error;
   }
-  const body: unknown = await started.json();
-  if (
-    !started.ok ||
-    typeof body !== "object" ||
-    body === null ||
-    !("url" in body) ||
-    typeof body.url !== "string"
-  ) {
-    throw new Error(`Sign-in as ${email} did not start (${started.status})`);
-  }
-  if (new URL(body.url).origin !== localIdpOrigin) {
-    throw new Error(
-      `Core at ${origin} signs people in at ${new URL(body.url).origin}, not the local fake IdP: the seed only fills the stack \`vp run dev\` runs.`
-    );
-  }
-  const atIdp = await fetch(body.url, { redirect: "manual", signal });
-  const finished = await fetch(locationOf(atIdp, "The IdP"), {
-    redirect: "manual",
-    signal,
-    headers: { cookie: cookiesOf(started) },
-  });
-  const session = cookiesOf(finished)
-    .split("; ")
-    .find((pair) => pair.startsWith(`${sessionCookie}=`));
-  if (session === undefined) {
-    throw new Error(
-      `Sign-in as ${email} refused: ${locationOf(finished, "Core")}`
-    );
-  }
-  return decodeURIComponent(session.slice(sessionCookie.length + 1));
 };
 
-/** The `Cookie` header of a session. */
-export const cookieHeader = (cookie: string): string =>
-  `${sessionCookie}=${encodeURIComponent(cookie)}`;
-
-/** A connection to `/rpc` from Node, with the session cookie. */
-const rpcSocket = (cookie: string): WebSocket => {
-  const url = new URL("/rpc", origin);
-  url.protocol = "ws:";
-  const headers = { origin, cookie: cookieHeader(cookie) };
-  // Node's WebSocket (undici) takes headers, which a browser's doesn't.
-  return new WebSocket(url, { headers });
-};
-
-export type Api = ReturnType<RpcStub<CoreApi>["authenticate"]>;
-
-/** Someone signed in, with their API over `/rpc`. */
-export interface Session {
-  email: string;
-  userId: string;
-  cookie: string;
-  api: Api;
-  close: () => void;
-}
+export { cookieHeader } from "../core-session.ts";
+export type { Api, Session } from "../core-session.ts";
 
 /** Signs `email` in and opens their API. */
-export const sessionOf = async (email: string): Promise<Session> => {
-  const cookie = await signInAs(email);
-  const core = newWebSocketRpcSession<CoreApi>(rpcSocket(cookie));
-  const api = core.authenticate();
-  const { userId } = await api.whoami();
-  return {
-    email,
-    userId,
-    cookie,
-    api,
-    close: () => {
-      core[Symbol.dispose]();
-    },
-  };
-};
+export const sessionOf = async (email: string): Promise<Session> =>
+  await openSession(site, email);
 
 /**
  * Calls one of Better Auth's endpoints under `/api/auth` as the session's
