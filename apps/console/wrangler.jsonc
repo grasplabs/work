@@ -86,6 +86,14 @@
       "binding": "APPLY_CLIENT",
       "class_name": "ApplyClient",
     },
+    // Provisions a client placed in a hosting destination
+    // (src/hosting/workflow.ts): an instance per attempt, each claimed in
+    // D1 first, all resuming the client's one operation.
+    {
+      "name": "grasp-os-provision-placed-client",
+      "binding": "PROVISION_PLACED_CLIENT",
+      "class_name": "ProvisionPlacedClient",
+    },
   ],
   // The router's hostname map, which a deploy writes (src/deploy/router.ts).
   // The router's first deploy creates it as grasp-os-router-hosts; `deploy`
@@ -160,6 +168,17 @@
       "binding": "STRIPE_RESTRICTED_KEY",
       "store_id": "account-secrets-store",
       "secret_name": "STRIPE_RESTRICTED_KEY",
+    },
+    // Grasp's Rooms' read-only service token (grasplabs/rooms,
+    // worker/service-read.ts), for the proposal under Contract
+    // (src/proposal/rooms.ts): it reads rooms and their signature requests
+    // and nothing else. The console's alone, never sent to the browser. Put
+    // in the store by hand; until it is, the proposal says Rooms isn't
+    // connected.
+    {
+      "binding": "ROOMS_READ_TOKEN",
+      "store_id": "account-secrets-store",
+      "secret_name": "ROOMS_READ_TOKEN",
     },
   ],
 }
