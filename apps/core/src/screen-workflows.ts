@@ -845,6 +845,11 @@ const controlled = async (
       }
       return await receiptAnswer(env, row, "applied");
     }
+    // Nothing cuts a compensation short from an App (spec 10.7.3): no
+    // receipt, no audit, as for any control refused.
+    if (compensationOf(row) !== undefined) {
+      throw workflowErrors.create("workflow.control_refused");
+    }
     const id = crypto.randomUUID();
     const now = Date.now();
     try {
@@ -857,7 +862,10 @@ const controlled = async (
         SELECT ${id}, ${row.id}, ${asking.app}, ${asking.by.userId},
           ${command.idempotencyKey}, 'cancel', 'admitted', ${now},
           ${now + cancelRepairAfterMs}
-        WHERE ${mayStartSql(asking, resolved.alias, pin)}`);
+        WHERE ${mayStartSql(asking, resolved.alias, pin)}
+          AND NOT EXISTS (SELECT 1 FROM ${workflowResourceRuns}
+            WHERE ${workflowResourceRuns.id} = ${row.id}
+              AND ${workflowResourceRuns.compensation} IS NOT NULL)`);
     } catch (error) {
       // The twin's receipt, written first: answered below.
       if (!isUniqueViolation(error)) {
@@ -866,7 +874,11 @@ const controlled = async (
     }
     receipt = await cancelOf(env, row.id);
     if (receipt === undefined) {
-      throw workflowResourceErrors.create("workflow.start_denied");
+      // Its compensation began as this was asked: refused as above.
+      const current = await runOf(env, row.id);
+      throw current !== undefined && compensationOf(current) !== undefined
+        ? workflowErrors.create("workflow.control_refused")
+        : workflowResourceErrors.create("workflow.start_denied");
     }
     if (receipt.id === id) {
       await tellQueryFollowers(env, row.id);

@@ -1347,7 +1347,11 @@ const stopResourceRun = async (
     }
     return;
   }
-  await runEngine(env).terminate(row.id);
+  // A run rolling back isn't cut short (spec 10.7.3): nothing was
+  // terminated, so nothing is audited as terminated.
+  if ((await runEngine(env).terminate(row.id)) === "rolling_back") {
+    throw workflowErrors.create("workflow.control_refused");
+  }
   // The engine took the terminate: audited below whatever this lookup
   // does, the row left to the end's notification if it can't be read.
   let live: Awaited<ReturnType<ReturnType<typeof runEngine>["status"]>>;

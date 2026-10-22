@@ -1744,9 +1744,17 @@ describe(
      */
     const compensatedRun = async (
       compensated: Omit<Parameters<typeof rollingBackRun>[1], "holds" | "held">,
-      end?: (runId: string) => Promise<void>
+      end?: (runId: string) => Promise<void>,
+      /** What is asked of it while it compensates: answered as `during`. */
+      meanwhile?: (asked: {
+        channel: ReturnType<typeof workflowChannel>;
+        read: ReturnType<typeof readWorkflowReference>;
+        runId: string;
+        builder: Person;
+        workflow: string;
+      }) => Promise<unknown>
     ) => {
-      const { builder, app, reference } = await requestsApp("PT1H");
+      const { builder, app, reference, workflow } = await requestsApp("PT1H");
       const lease = await screenOf(builder, app);
       const channel = workflowChannel(screenClient(builder, app, lease));
       const read = readWorkflowReference(reference);
@@ -1770,6 +1778,13 @@ describe(
         );
       }, settles);
       const compensating = channel.peekRun(read, handle.runId);
+      const during = await meanwhile?.({
+        channel,
+        read,
+        runId: handle.runId,
+        builder,
+        workflow,
+      });
       holds.open();
       await vi.waitFor(() => {
         expect(
@@ -1779,6 +1794,7 @@ describe(
       const ended = channel.peekRun(read, handle.runId);
       stop();
       return {
+        during,
         compensating: {
           status: compensating.value?.status,
           compensation: compensating.value?.compensation,
@@ -1797,6 +1813,7 @@ describe(
       await expect(
         compensatedRun({ ends: { fails: "resource.declined" } })
       ).resolves.toStrictEqual({
+        during: undefined,
         compensating: {
           status: "compensating",
           compensation: {
@@ -1841,6 +1858,50 @@ describe(
       }).toStrictEqual({
         compensation: { cause: "cancellation", activity: "running" },
         ended: { status: "cancelled", error: undefined },
+      });
+    });
+
+    it("refuses a cancel or a stop while a run compensates, with no receipt and nothing audited as terminated", async () => {
+      const shown = await compensatedRun(
+        { ends: { fails: "resource.declined" } },
+        undefined,
+        async ({ channel, read, runId, builder, workflow }) => {
+          let cancel: unknown;
+          let stop: unknown;
+          const events = await auditedDuring(async () => {
+            cancel = await refusalOf(
+              channel.control(read, runId, "cancel", () => {
+                // Never recovering.
+              })
+            );
+            stop = await refusalOf(
+              terminateResourceRun(env, builder.acting, workflow, runId)
+            );
+          });
+          const receipts = await env.DB.prepare(
+            "SELECT count(*) AS n FROM workflow_resource_run_controls WHERE run_id = ?"
+          )
+            .bind(runId)
+            .first<{ n: number }>();
+          return {
+            cancel,
+            stop,
+            receipts: receipts?.n,
+            terminated: events.filter(
+              ({ action }) => action === "workflow.run.terminated"
+            ).length,
+          };
+        }
+      );
+      expect({ during: shown.during, ended: shown.ended }).toStrictEqual({
+        during: {
+          cancel: "workflow.control_refused",
+          stop: "workflow.control_refused",
+          receipts: 0,
+          terminated: 0,
+        },
+        // Its compensation ran to its end, its failure as it failed.
+        ended: { status: "failed", error: "resource.declined" },
       });
     });
   }

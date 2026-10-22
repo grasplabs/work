@@ -1,5 +1,5 @@
 import { appErrors } from "@grasp-os/shared/apps";
-import { expectedMessageOf } from "@grasp-os/shared/errors";
+import { expectedMessageOf, isExpectedCode } from "@grasp-os/shared/errors";
 import { runIdSchema } from "@grasp-os/shared/ids";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { reviewedTaskOf, workflowErrors } from "@grasp-os/shared/workflows";
@@ -231,7 +231,13 @@ const compensationOf = (
     (row.cancel_requested_at === null ? "failure" : "cancellation");
   // Its report, as its run kept it failing; or the code the engine has it
   // failing with, in the platform's own words for it.
-  const code = kept?.code ?? null;
+  // Only a code the platform defines: any other could be made of what
+  // the run read, as a screen's snapshot says (screen-workflows.ts).
+  const keptCode = kept?.code ?? null;
+  const code =
+    keptCode === null || isExpectedCode(keptCode)
+      ? keptCode
+      : "workflow.step_failed";
   const reported =
     errorOf(row.failure) ??
     (code === null
