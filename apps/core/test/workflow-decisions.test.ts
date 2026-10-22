@@ -369,8 +369,47 @@ const asksOf = async (decision: string) => {
     )
     .map(({ detail, provenance }) => ({
       recipients: detail?.recipients,
+      listed: detail?.listed,
       whom: provenance,
     }));
+};
+
+/**
+ * A running independent run of workflow `workflow` acting for
+ * `principal`, as core keeps one, with an open decision for `deciders` at
+ * each of `steps`, opened `ago` milliseconds ago, latest last.
+ */
+const seededDecisions = async (
+  workflow: string,
+  principal: string,
+  deciders: string,
+  steps: number,
+  ago: number
+): Promise<string[]> => {
+  const runId = `seeded-${unique()}`;
+  const now = Date.now();
+  const ids = Array.from({ length: steps }, () => crypto.randomUUID());
+  await env.DB.batch([
+    env.DB.prepare(
+      "INSERT INTO workflow_start_receipts (id, invoker_type, invoker_id, idempotency_key, workflow_resource_id, workflow_resource_version, manifest_hash, principal_id, authority_generation, input, input_hash, params, params_revision, bindings, bindings_hash, created_at) VALUES (?, 'person', ?, ?, ?, 1, 'manifest', ?, 0, '{}', 'hash', '{}', 0, '[]', '', ?)"
+    ).bind(runId, principal, runId, workflow, principal, now - ago),
+    env.DB.prepare(
+      "INSERT INTO workflow_resource_runs (id, workflow_resource_id, version, manifest_hash, build_hash, principal_id, status, created_at) VALUES (?, ?, 1, 'manifest', 'build', ?, 'running', ?)"
+    ).bind(runId, workflow, principal, now - ago),
+    ...ids.map((id, index) =>
+      env.DB.prepare(
+        "INSERT INTO workflow_decisions (id, resource_run_id, step, deciders, starter_excluded, description, status, opened_at, expires_at, input) VALUES (?, ?, ?, ?, 1, 'Approve it?', 'open', ?, ?, '{}')"
+      ).bind(
+        id,
+        runId,
+        `task:ask@each.${index}`,
+        deciders,
+        now - ago + index,
+        now + 3_600_000
+      )
+    ),
+  ]);
+  return ids;
 };
 
 /** The IDs of the decisions waiting for `by` to answer (their inbox). */
@@ -667,12 +706,86 @@ describe("asking the people a JSON workflow's decision is for", () => {
       asksAfterReplay: asksAfterReplay.length,
       end: endOf(run),
     }).toStrictEqual({
-      asks: [{ recipients: 1, whom: [reviewer.userId] }],
+      asks: [{ recipients: 1, listed: true, whom: [reviewer.userId] }],
       waiting: { reviewer: true, owner: false, admin: false, other: false },
       afterAnswer: false,
       asksAfterReplay: 1,
       end: { status: "completed", output: { status: "approved" } },
     });
+  });
+
+  it("asks more people than one ask lists without failing the run, audited by count, and one of them answers", async () => {
+    const [route, , ...rest] = approvalTasks;
+    const toEveryone = {
+      "request-review": {
+        ...requestReview,
+        with: { ...requestReview.with, recipients: ["role:user"] },
+      },
+    };
+    const { owner, workflow } = await approvalWorkflow({
+      deciders: async () => await Promise.resolve(["role:user"]),
+      tasks: [route, toEveryone, ...rest],
+    });
+    const people = await Promise.all(
+      Array.from({ length: 51 }, async () => await person("user"))
+    );
+    const [answering] = people;
+    if (answering === undefined) {
+      throw new Error("No people");
+    }
+    const runId = await started(owner, workflow.id, 5000);
+    const decision = await openedBy(runId);
+    const [asked] = await vi.waitFor(
+      async () => {
+        const found = await asksOf(decision);
+        expect(found).not.toStrictEqual([]);
+        return found;
+      },
+      { timeout: 20_000, interval: 100 }
+    );
+    const waiting = await inboxOf(answering);
+    await confirmedAnswer(answering, decision, { approved: true });
+    const run = await ended(owner, workflow.id, runId);
+    expect({
+      listed: asked?.listed,
+      whom: asked?.whom,
+      manyAsked: Number(asked?.recipients) > 50,
+      inInbox: waiting.includes(decision),
+      end: endOf(run),
+    }).toStrictEqual({
+      listed: false,
+      whom: [],
+      manyAsked: true,
+      inInbox: true,
+      end: { status: "completed", output: { status: "approved" } },
+    });
+  });
+
+  it("finds the decisions waiting for someone past more newer ones they may not answer than a page holds", async () => {
+    const owner = await person("builder");
+    const asked = await person("user");
+    const workflow = await createWorkflowResource(
+      env,
+      owner,
+      `inbox-${unique()}`
+    );
+    // Older, theirs to answer: a run acting for someone else.
+    const [theirs] = await seededDecisions(
+      workflow.id,
+      owner.userId,
+      `person:${asked.userId}`,
+      1,
+      7_200_000
+    );
+    // Newer, naming them, but of runs acting for them: never theirs (R8).
+    await seededDecisions(
+      workflow.id,
+      asked.userId,
+      `person:${asked.userId}`,
+      250,
+      3_600_000
+    );
+    await expect(inboxOf(asked)).resolves.toStrictEqual([theirs]);
   });
 
   it("counts its decisions among the waits for people and the corrections the signals show", async () => {

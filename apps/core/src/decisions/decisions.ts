@@ -17,7 +17,7 @@ import {
 import type { Json } from "@grasp-os/shared/json";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { executionErrors } from "@grasp-os/shared/workflows";
-import { and, desc, eq, exists, gt, lte, sql } from "drizzle-orm";
+import { and, count, desc, eq, exists, gt, lte, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
@@ -543,6 +543,92 @@ const mayAnswer = (
   ) ?? sql`0`;
 
 /**
+ * Records that the run asked the people of its decision `row`, in the
+ * audit log (`workflow.decision.asked`), with whom by ID when they're
+ * listed: only while its run goes on, as the write finds it, and
+ * `execution.stale_attempt` once it doesn't.
+ */
+const recordAsk = async (
+  env: Env,
+  run: DecisionRun,
+  row: DecisionRow,
+  detail: Record<string, string | number | boolean>,
+  whom?: string[]
+): Promise<void> => {
+  const db = drizzle(env.DB);
+  const liveRun = liveRunOf(run);
+  const entry = decisionEntry(
+    actorOfRun(run),
+    "workflow.decision.asked",
+    run,
+    row,
+    detail
+  );
+  const [, live] = await auditedBatch(env, db, [
+    outboxedWhere(
+      db,
+      whom === undefined ? entry : { ...entry, provenance: whom },
+      liveRun
+    ),
+    db
+      .select({ id: workflowDecisions.id })
+      .from(workflowDecisions)
+      .where(and(eq(workflowDecisions.id, row.id), liveRun)),
+  ]);
+  if (live.length === 0) {
+    throw executionErrors.create("execution.stale_attempt");
+  }
+};
+
+/**
+ * Asks the people an independent run's open decision is for, who find it
+ * in their inbox (`waitingDecisions`): it never fails for how many they
+ * are. Up to {@link maxDeciders}, the ask is audited with whom, by ID, as
+ * `decisionRecipients` audits it; past that, with how many alone
+ * (`listed: false`), a list too long for the log. How many were asked;
+ * none once it was answered, closed or past its deadline.
+ */
+export const askDecision = async (
+  env: Env,
+  run: DecisionRun,
+  decision: string
+): Promise<number> => {
+  const row = await runDecision(env, run, decision);
+  if (row.status !== "open" || row.expiresAt.getTime() <= Date.now()) {
+    return 0;
+  }
+  const db = drizzle(env.DB);
+  const eligible = eligibleMembers(row.deciders, row, row.starterExcluded);
+  const people = await db
+    .select({ userId: members.userId })
+    .from(members)
+    .where(eligible)
+    .orderBy(members.userId)
+    .limit(maxDeciders + 1);
+  if (people.length <= maxDeciders) {
+    await recordAsk(
+      env,
+      run,
+      row,
+      { recipients: people.length, reminder: false, listed: true },
+      people.map(({ userId }) => userId)
+    );
+    return people.length;
+  }
+  const [counted] = await db
+    .select({ count: count() })
+    .from(members)
+    .where(eligible);
+  const recipients = counted?.count ?? people.length;
+  await recordAsk(env, run, row, {
+    recipients,
+    reminder: false,
+    listed: false,
+  });
+  return recipients;
+};
+
+/**
  * The people an open decision asks now, each with the decision's link:
  * the members who may answer it at this moment (`eligibleMembers`). An
  * answered or closed decision asks nobody, and nor does one past its
@@ -586,27 +672,13 @@ export const decisionRecipients = async (
   // its run cancelled or ended, which the write itself checks, so an ask
   // of a run that was cancelled meanwhile is never recorded.
   await stillAsking();
-  const liveRun = liveRunOf(run);
-  const [, live] = await auditedBatch(env, db, [
-    outboxedWhere(
-      db,
-      {
-        ...decisionEntry(actorOfRun(run), "workflow.decision.asked", run, row, {
-          recipients: people.length,
-          reminder,
-        }),
-        provenance: people.map(({ userId }) => userId),
-      },
-      liveRun
-    ),
-    db
-      .select({ id: workflowDecisions.id })
-      .from(workflowDecisions)
-      .where(and(eq(workflowDecisions.id, row.id), liveRun)),
-  ]);
-  if (live.length === 0) {
-    throw executionErrors.create("execution.stale_attempt");
-  }
+  await recordAsk(
+    env,
+    run,
+    row,
+    { recipients: people.length, reminder },
+    people.map(({ userId }) => userId)
+  );
   const link = new URL(`/decisions/${encodeURIComponent(row.id)}`, origin);
   return people.map((person) => ({ ...person, link: link.href }));
 };
@@ -934,14 +1006,23 @@ export const answerableBy = async (
  */
 export const maxWaitingDecisions = 50;
 
+/** Open decisions `waitingDecisions` reads at once. */
+const waitingPageRows = 100;
+
+/**
+ * The most open decisions `waitingDecisions` reads for one person: past
+ * that, older ones they may answer wait for newer ones to close.
+ */
+const waitingScanMax = 2000;
+
 /**
  * The open decisions `by` may answer now, latest first, at most
  * {@link maxWaitingDecisions}: an App's run's and an independent run's
  * alike, so a person asked by a JSON workflow, which has no App code of
  * its own to tell them, finds it waiting for them (their inbox). Read by
  * the deciders that could name them (themselves, their role, their teams),
- * then held to who may answer each now (`answerableBy`), as answering is;
- * none for Grasp staff.
+ * a page at a time, then held to who may answer each now (`answerableBy`),
+ * as answering is; none for Grasp staff.
  */
 export const waitingDecisions = async (
   env: Env,
@@ -956,24 +1037,51 @@ export const waitingDecisions = async (
     `role:${by.role}`,
     ...by.teams.map(({ id }) => `team:${id}`),
   ];
-  const open = await db
-    .select({ id: workflowDecisions.id, deciders: workflowDecisions.deciders })
-    .from(workflowDecisions)
-    .where(
-      and(
-        stillOpen(workflowDecisions, new Date()),
-        inList(workflowDecisions.deciders, naming),
-        runUnended()
+  const now = new Date();
+  const ids: string[] = [];
+  let after: { openedAt: Date; id: string } | undefined;
+  // A page at a time, latest first, until a page's worth they may answer:
+  // decisions naming them they don't answer (their own run's, R8) never
+  // hide older ones they do. At most `waitingScanMax` rows are read.
+  for (let scanned = 0; scanned < waitingScanMax;) {
+    // oxlint-disable-next-line no-await-in-loop -- one page after another
+    const page = await db
+      .select({
+        id: workflowDecisions.id,
+        deciders: workflowDecisions.deciders,
+        openedAt: workflowDecisions.openedAt,
+      })
+      .from(workflowDecisions)
+      .where(
+        and(
+          stillOpen(workflowDecisions, now),
+          inList(workflowDecisions.deciders, naming),
+          runUnended(),
+          after === undefined
+            ? undefined
+            : sql`(${workflowDecisions.openedAt}, ${workflowDecisions.id}) < (${after.openedAt.getTime()}, ${after.id})`
+        )
       )
-    )
-    .orderBy(desc(workflowDecisions.openedAt), desc(workflowDecisions.id))
-    // Past the page: some may be their own run's (R8), which they don't answer.
-    .limit(maxWaitingDecisions * 2);
-  const answerable = await answerableBy(env, by, open);
-  const ids = open
-    .filter(({ id }) => answerable.has(id))
-    .slice(0, maxWaitingDecisions)
-    .map(({ id }) => id);
+      .orderBy(desc(workflowDecisions.openedAt), desc(workflowDecisions.id))
+      .limit(waitingPageRows);
+    // oxlint-disable-next-line no-await-in-loop -- as its page was read
+    const answerable = await answerableBy(env, by, page);
+    for (const { id } of page) {
+      if (answerable.has(id) && ids.length < maxWaitingDecisions) {
+        ids.push(id);
+      }
+    }
+    scanned += page.length;
+    const last = page.at(-1);
+    if (
+      last === undefined ||
+      page.length < waitingPageRows ||
+      ids.length >= maxWaitingDecisions
+    ) {
+      break;
+    }
+    after = { openedAt: last.openedAt, id: last.id };
+  }
   const views = await Promise.all(
     ids.map(async (id) => {
       try {

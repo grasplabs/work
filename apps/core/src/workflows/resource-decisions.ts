@@ -15,8 +15,8 @@ import { organizationId } from "../auth/auth.ts";
 import { memberRole } from "../auth/identity.ts";
 import { teamMembers, teams } from "../db/core/schema.ts";
 import {
+  askDecision,
   decisionAsks,
-  decisionRecipients,
   openDecision,
 } from "../decisions/decisions.ts";
 import type {
@@ -402,25 +402,18 @@ export const openRunDecision = async (
 };
 
 /**
- * Asks the people `run`'s open decision `decision` is for, as an App's
- * run's are asked (`decisionRecipients`): who they are now is audited
- * (`workflow.decision.asked`), and the decision waits for them in their
- * inbox (`waitingDecisions`), with its link. How many were asked; none
+ * Asks the people `run`'s open decision `decision` is for (`askDecision`):
+ * who they are now is audited (`workflow.decision.asked`), and the
+ * decision waits for them in their inbox (`waitingDecisions`), with its
+ * link. However many they are, the ask never fails the run: past what one
+ * audit entry lists, it records how many alone. How many were asked; none
  * once it was answered or closed.
  */
 export const askDeciders = async (
   env: Env,
   run: CallingRun,
   decision: string
-): Promise<number> => {
-  const asked = await decisionRecipients(
-    env,
-    decisionRunOf(run),
-    decision,
-    false
-  );
-  return asked.length;
-};
+): Promise<number> => await askDecision(env, decisionRunOf(run), decision);
 
 /**
  * What `run`'s decision call of task `task`, through binding `alias`,
