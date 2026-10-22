@@ -2143,6 +2143,14 @@ msgid "Ask an admin if you need to see what happened here."
 msgstr "Demandez à un administrateur si vous devez voir ce qui s’est passé ici."
 
 #: src/chat/chat-dock.tsx
+msgid "Ask anything about the brain"
+msgstr "Posez n’importe quelle question sur le cerveau"
+
+#: src/chat/chat-dock.tsx
+msgid "Ask anything about what the brain holds"
+msgstr "Posez n’importe quelle question sur ce que le cerveau contient"
+
+#: src/chat/chat-dock.tsx
 #: src/chat/composer.tsx
 msgid "Ask anything, or describe a process"
 msgstr "Posez une question ou décrivez un processus"
@@ -2163,6 +2171,10 @@ msgstr "Demander à {role}"
 #: src/workflows/fix-in-chat.tsx
 msgid "Ask the agent to fix"
 msgstr "Demander à l’agent de corriger"
+
+#: src/chat/chat-dock.tsx
+msgid "Ask the brain"
+msgstr "Demander au cerveau"
 
 #: src/routes/_shell.onboarding.kickoff.tsx
 msgid "Ask the sponsor about {title}."

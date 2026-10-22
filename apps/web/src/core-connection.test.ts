@@ -219,6 +219,7 @@ describe("the tab's one connection to core", () => {
       const first = frameOn(core);
       const second = frameOn(core);
       setActiveChat("their-chat");
+      setActiveChat("their-brain-chat", "brain");
       // Into the same record as the page's reload, so the order is seen.
       const listening = core.onEnded(() => {
         ended.push("frame stopped");
@@ -232,13 +233,13 @@ describe("the tab's one connection to core", () => {
         order: ended,
         disposed: opened[1]?.disposed,
         waiting: await waiting,
-        chat: activeChat(),
+        chats: [activeChat(), activeChat("brain")],
       }).toStrictEqual({
         told: [[why], [why]],
         order: ["frame stopped", "page reloads"],
         disposed: true,
         waiting: code,
-        chat: undefined,
+        chats: [undefined, undefined],
       });
 
       // Nobody gets a stub after the end, a frame that joins late neither.
