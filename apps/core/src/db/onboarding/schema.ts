@@ -259,8 +259,22 @@ export const askedAbout = sqliteTable("asked_about", {
 });
 
 /**
- * Drawings that failed and wait to be tried again: what (`team:<id>`), how
- * often it failed, and when it may be tried again (ISO 8601).
+ * Each piece of work as drawn from what its people agreed to
+ * (work-drawing.ts), apart from `works`, which a map draws again. `agreed`
+ * is whose agreements it was drawn from, and when each last agreed, as
+ * JSON: someone agreeing to more since makes it due again.
+ */
+export const drawnWorks = sqliteTable("drawn_works", {
+  work: text().primaryKey(),
+  /** The drawing as JSON (`DrawnWork`); null when it was given up before any. */
+  drawn: text(),
+  agreed: text().notNull(),
+  at: text().notNull(),
+});
+
+/**
+ * Drawings that failed and wait to be tried again: what (`team:<id>` or
+ * `work:<id>`), how often it failed, and when it may be tried again (ISO 8601).
  */
 export const drawFailures = sqliteTable("draw_failures", {
   item: text().primaryKey(),
