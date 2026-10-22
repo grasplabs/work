@@ -216,10 +216,10 @@ jobs:
       # memory isn't held to Docker's 64 MB /dev/shm.
       options: --user 1001 --ipc=host
     runs-on: ubuntu-latest
-    # 11 to 20 minutes when it passed (October 2026): about 1 minute of
-    # setup, the browsers' system packages from the Ubuntu mirror (under a
-    # minute, but up to 12 when the mirror is slow), 2 minutes for the stack
-    # to build and start, and 8 to 14 minutes of tests.
+    # 11 to 20 minutes when it passed (October 2026), before the image: about
+    # 1 minute of setup, the browsers' system packages from the Ubuntu mirror
+    # (under a minute, but up to 12 when the mirror was slow), 2 minutes for
+    # the stack to build and start, and 8 to 14 minutes of tests.
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
