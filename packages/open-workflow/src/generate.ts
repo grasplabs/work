@@ -2146,11 +2146,22 @@ const lowerFor = (
   const looped = `looped${number}`;
   const flow = `flow${number}`;
   const state = `state${number}`;
+  const reached = `reached${number}`;
+  const thrown = `thrown${number}`;
   const { indent } = place;
+  // An item's list has a context of its own, which the loop passes on
+  // only when it returns: `reached` follows it as each item settles, so
+  // a failure out of the loop leaves the context its items had exported
+  // before it, for a catch around the loop. Each item settles from its
+  // recorded steps, so a replay reaches the same context.
   emitter.lines.push(
     `${indent}{`,
-    `${indent}  const ${looped} = await ${emitter.flow}.for(${literal(id)}, { input: output, context }, ${planCode(members)}, async (${flow}, ${state}) => {`,
-    `${indent}    let { output, context } = ${state};`
+    `${indent}  let ${reached}: FlowValue = context;`,
+    `${indent}  let ${looped};`,
+    `${indent}  try {`,
+    `${indent}    ${looped} = await ${emitter.flow}.for(${literal(id)}, { input: output, context }, ${planCode(members)}, async (${flow}, ${state}) => {`,
+    `${indent}      let { output, context } = ${state};`,
+    `${indent}      try {`
   );
   const outer = { flow: emitter.flow, scope: emitter.scope };
   emitter.flow = flow;
@@ -2160,14 +2171,21 @@ const lowerFor = (
     emitter,
     Array.isArray(task.do) ? task.do : [],
     pointerJoin(pointer, "do"),
-    `${indent}    `,
+    `${indent}        `,
     { label: `s${emitter.counter}`, number: emitter.counter }
   );
   emitter.flow = outer.flow;
   emitter.scope = outer.scope;
   emitter.lines.push(
-    `${indent}    return { output, context };`,
-    `${indent}  });`,
+    `${indent}      } finally {`,
+    `${indent}        ${reached} = context;`,
+    `${indent}      }`,
+    `${indent}      return { output, context };`,
+    `${indent}    });`,
+    `${indent}  } catch (${thrown}) {`,
+    `${indent}    context = ${reached};`,
+    `${indent}    throw ${thrown};`,
+    `${indent}  }`,
     `${indent}  ({ output, context } = ${looped});`,
     `${indent}  if (${looped}.end) {`,
     `${indent}    ${endJump(emitter)}`,

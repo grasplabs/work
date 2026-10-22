@@ -450,6 +450,98 @@ describe("raise and catch in JSON workflows", () => {
       output: { status: "Ada yes" },
     });
   });
+
+  it("gives a catch around a loop what its items exported before one of them failed", async () => {
+    await expect(
+      outcomeOf([
+        guarded(
+          [
+            {
+              each: {
+                for: { each: "n", in: '${ ["a", "b"] }' },
+                do: [
+                  {
+                    mark: {
+                      if: '${ $n == "a" }',
+                      set: "${ . }",
+                      export: { as: "${ $context + {marked: $n} }" },
+                    },
+                  },
+                  {
+                    deny: { if: '${ $n == "b" }', raise: { error: conflict } },
+                  },
+                ],
+              },
+            },
+          ],
+          {
+            when: '${ $context.marked == "a" }',
+            do: [{ report: { set: { status: "${ $context.marked }" } } }],
+          }
+        ),
+      ])
+    ).resolves.toStrictEqual({
+      status: "completed",
+      output: { status: "a" },
+    });
+  });
+
+  it("gives a catch around loops one inside another what their items exported before one failed", async () => {
+    await expect(
+      outcomeOf([
+        guarded(
+          [
+            {
+              outer: {
+                for: { each: "o", at: "oi", in: '${ ["o"] }' },
+                do: [
+                  {
+                    "mark-outer": {
+                      set: "${ . }",
+                      export: { as: "${ $context + {outer: $o} }" },
+                    },
+                  },
+                  {
+                    inner: {
+                      for: { each: "n", at: "ni", in: '${ ["a", "b"] }' },
+                      do: [
+                        {
+                          mark: {
+                            if: '${ $n == "a" }',
+                            set: "${ . }",
+                            export: { as: "${ $context + {inner: $n} }" },
+                          },
+                        },
+                        {
+                          deny: {
+                            if: '${ $n == "b" }',
+                            raise: { error: conflict },
+                          },
+                        },
+                      ],
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+          {
+            when: '${ $context.inner == "a" }',
+            do: [
+              {
+                report: {
+                  set: { status: "${ $context.outer + $context.inner }" },
+                },
+              },
+            ],
+          }
+        ),
+      ])
+    ).resolves.toStrictEqual({
+      status: "completed",
+      output: { status: "oa" },
+    });
+  });
 });
 
 describe("a recovery that fails", () => {
