@@ -13,7 +13,11 @@ import {
   releaseManifestSchema,
   sha256OfBytes,
 } from "@grasp-os/shared/release";
-import type { ReleaseManifest, WorkerEntry } from "@grasp-os/shared/release";
+import type {
+  ReleaseCompatibility,
+  ReleaseManifest,
+  WorkerEntry,
+} from "@grasp-os/shared/release";
 import { env } from "cloudflare:workers";
 
 const encoder = new TextEncoder();
@@ -35,7 +39,24 @@ export interface ReleaseSpec {
   coreSecrets?: string[];
   /** core's Durable Object migration tags, in order: `v1` by default. */
   durableObjectMigrations?: string[];
+  /**
+   * Whether core sends mail, binding `EMAIL` (`send_email`) as the real
+   * one does; without it, a deploy sets up no sending domain.
+   */
+  sendsMail?: boolean;
+  /** What its code works with: `declared` by default, none when null. */
+  compatibility?: ReleaseCompatibility | null;
 }
+
+/** What a test release's code works with unless its spec says otherwise. */
+export const declared: ReleaseCompatibility = {
+  interfaces: {
+    connect: { serves: 1, calls: {} },
+    core: { calls: { connect: { min: 1, max: 1 } } },
+  },
+  workflowJournal: { min: 8, max: 9 },
+  sdkProtocols: { min: 2, max: 2 },
+};
 
 /** A built release: its manifest and every blob, by R2 key. */
 export interface TestRelease {
@@ -203,6 +224,9 @@ export const buildRelease = async (
             bucket_name: "grasp-os-audit-archive",
             jurisdiction: "eu",
           },
+          ...(spec.sendsMail === true
+            ? [{ type: "send_email", name: "EMAIL" }]
+            : []),
         ],
         d1Databases: [
           { binding: "DB", databaseName: "grasp-os-core", migrations },
@@ -216,6 +240,9 @@ export const buildRelease = async (
       },
     },
     assets,
+    ...(spec.compatibility === null
+      ? {}
+      : { compatibility: spec.compatibility ?? declared }),
   });
   return {
     id,

@@ -1,6 +1,10 @@
 import { actorOf } from "@grasp-os/shared/audit";
-import type { AuditEntry } from "@grasp-os/shared/audit";
-import { fromBase64Url, toBase64Url } from "@grasp-os/shared/encoding";
+import type { AuditActor, AuditEntry } from "@grasp-os/shared/audit";
+import {
+  fromBase64Url,
+  sha256Hex,
+  toBase64Url,
+} from "@grasp-os/shared/encoding";
 import { canonicalJson } from "@grasp-os/shared/json";
 import {
   knowledgeErrors,
@@ -14,13 +18,20 @@ import { isAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { and, asc, count, eq, gt, inArray, lte, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
+import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import type { z } from "zod";
 
 import { auditedBatch, outboxed } from "../audit-outbox.ts";
+import {
+  countGapAnswers,
+  eraseGapAnswerer,
+  rewriteGapAnswers,
+} from "../brain-gaps.ts";
 import { inList } from "../db/d1.ts";
 import {
+  brainPayloads,
   collections,
   documents,
   links,
@@ -40,7 +51,18 @@ import {
 } from "./documents.ts";
 import type { DocumentRow } from "./documents.ts";
 import { parseBaseFields } from "./frontmatter.ts";
+import { requireCurrentIndexed } from "./indexing.ts";
 import { personalCollectionId } from "./memory-files.ts";
+import {
+  collectPayloads,
+  commitPayload,
+  committedKey,
+  isUncommitted,
+  readPayload,
+  releasing,
+  stagePayload,
+} from "./payloads.ts";
+import type { PayloadRef, StagedPayload } from "./payloads.ts";
 import {
   collectionPlan,
   eraseCollectionFromSearchIndex,
@@ -75,6 +97,13 @@ import { cleanUpOriginals, forgetUploads } from "./uploads.ts";
 //   saved as the next version, which makes its sections, links, search
 //   rows and the document's title and description again, and fails for
 //   anyone who saved meanwhile from text not yet purged.
+//
+// Both reach the brain's gap answers too (brain-gaps.ts): a personal
+// purge forgets the person as anyone's answerer, a content purge rewrites
+// every answer holding a term, whatever documents it names, before its
+// documents. Its plan counts them (`gapAnswers`), and its check counts
+// one still holding a term (answered after the rewrite read it) with the
+// documents a term still finds (`stillFound`).
 //
 // Both delete the originals of the files uploaded as the documents they
 // purge (uploads.ts), and forget those uploads: an original holds the data
@@ -343,8 +372,11 @@ const purgePersonal = async (
   const inCollection = documentsIn(db, collectionId);
   const secure = await secureDeleteReady(db);
   const plan = secure
-    ? await collectionPlan(db, collectionId, indexedValuesOf)
+    ? await collectionPlan(env, db, collectionId, indexedValuesOf)
     : ({ kind: "unknown" } as const);
+  // The versions' payloads, unreferenced once they go, are collected right
+  // after: erased from R2 too.
+  const released = releasing(db, inArray(versions.documentId, inCollection));
   await auditedBatch(env, db, [
     rebuildOwed(db, purgeId, { writesDone: true }),
     ...(plan.kind === "keys"
@@ -357,12 +389,14 @@ const purgePersonal = async (
           ),
         ]
       : []),
+    ...released.before,
     db.delete(sections).where(inArray(sections.documentId, inCollection)),
     db.delete(links).where(inArray(links.fromDocumentId, inCollection)),
     db.delete(versions).where(inArray(versions.documentId, inCollection)),
     ...forgetUploads(db, eq(uploads.collectionId, collectionId)),
     db.delete(documents).where(eq(documents.collectionId, collectionId)),
     db.delete(collections).where(eq(collections.id, collectionId)),
+    ...released.after,
     outboxed(
       db,
       purgeEntry(
@@ -376,9 +410,12 @@ const purgePersonal = async (
     ),
   ]);
   await cleanUpOriginals(env);
+  await collectPayloads(env, db);
   await cleanSearchIndex(async () => {
     await eraseCollectionFromSearchIndex(db, plan, { secure, id: purgeId });
   });
+  // The brain's gaps keep who answered them: never the person erased.
+  await eraseGapAnswerer(env, person, input.userId);
   return { purgeId, ...counts };
 };
 
@@ -596,6 +633,10 @@ const leftIn = (texts: (string | null)[], matcher: Matcher): number => {
   return total;
 };
 
+/** Whether a content purge would remove a term from `text`. */
+const holdsTerm = (text: string, matcher: Matcher): boolean =>
+  without(text, matcher) !== text;
+
 /** How often a term is removed from `text`, in every pass (`without`). */
 const removalsIn = (text: string, matcher: Matcher): number => {
   let removals = 0;
@@ -705,6 +746,44 @@ const rewritten = (
     : { text, message };
 };
 
+/**
+ * A version's text as a purge reads it: its payload's, or, when the object
+ * is missing or isn't that text (`knowledge.unavailable`), a tombstone
+ * (`purgedMarker`) marked `unreadable`, which the purge saves in its place:
+ * whatever the object holds can't be checked for the terms, so it goes.
+ */
+const purgeTextOf = async (
+  env: Env,
+  ref: PayloadRef
+): Promise<{ text: string; unreadable: boolean }> => {
+  try {
+    return { text: await readPayload(env, ref), unreadable: false };
+  } catch (error) {
+    if (knowledgeErrors.codeOf(error) !== "knowledge.unavailable") {
+      throw error;
+    }
+    return { text: purgedMarker, unreadable: true };
+  }
+};
+
+/**
+ * What a purge writes for a version (`purgeTextOf`): its tombstone when it
+ * couldn't be read, else its text and message rewritten, if they change.
+ */
+const purgeChangeOf = (
+  row: { text: string; message: string | null; unreadable: boolean },
+  matcher: Matcher
+):
+  | { text: string; message: string | null; unreadable: boolean }
+  | undefined => {
+  if (row.unreadable) {
+    const message = row.message === null ? null : without(row.message, matcher);
+    return { text: purgedMarker, message, unreadable: true };
+  }
+  const changed = rewritten(row, matcher);
+  return changed === undefined ? undefined : { ...changed, unreadable: false };
+};
+
 interface Named {
   document: DocumentRow;
   collection: CollectionRow;
@@ -749,19 +828,31 @@ const documentsNamed = async (
   return found;
 };
 
-/** The text and message of `document`'s version `number`. */
+/** The text (its payload's) and message of `document`'s version `number`. */
 const versionOf = async (
+  env: Env,
   db: DrizzleD1Database,
   document: DocumentRow,
   number: number
-) =>
-  await db
-    .select({ text: versions.text, message: versions.message })
+): Promise<
+  { text: string; message: string | null; unreadable: boolean } | undefined
+> => {
+  const row = await db
+    .select({
+      key: brainPayloads.key,
+      sha256: brainPayloads.sha256,
+      message: versions.message,
+    })
     .from(versions)
+    .innerJoin(brainPayloads, eq(brainPayloads.key, versions.payloadKey))
     .where(
       and(eq(versions.documentId, document.id), eq(versions.number, number))
     )
     .get();
+  return row === undefined
+    ? undefined
+    : { ...(await purgeTextOf(env, row)), message: row.message };
+};
 
 /**
  * Refuses with `knowledge.read_only` a purge of an App's entry while what
@@ -835,14 +926,14 @@ const requireSavable = async (
   { document, collection }: Named,
   matcher: Matcher
 ): Promise<string | undefined> => {
-  const current = await versionOf(db, document, document.currentVersion);
+  const current = await versionOf(env, db, document, document.currentVersion);
   if (current === undefined) {
     return undefined;
   }
   if (collection.source === "apps") {
     await requireIndexedWithout(env, document, matcher);
   }
-  const text = rewritten(current, matcher)?.text ?? current.text;
+  const text = purgeChangeOf(current, matcher)?.text ?? current.text;
   try {
     await checkedText(env, collection, document.path, text, false, true);
   } catch (error) {
@@ -881,19 +972,122 @@ const requireStorable = (
 };
 
 /**
- * Rewrites the versions of `document` up to `upTo` that hold a term, in
- * place, a page at a time; only counts them unless `write`. Returns how
+ * The audit event of a version a purge replaced by its tombstone because
+ * its payload couldn't be read: missing, or not the text its hash names.
+ */
+const replacedEntry = (
+  actor: AuditActor,
+  document: DocumentRow,
+  version: number
+): AuditEntry => ({
+  actor,
+  action: "knowledge.payload.replaced",
+  target: { type: "document", id: document.id },
+  detail: { version, reason: "unreadable" },
+});
+
+/**
+ * Points each of `changes`' versions of `document` at a payload of its
+ * rewritten text, and rewrites its message, in one batch that marks the
+ * payloads left unreferenced for collecting.
+ */
+const repointVersions = async (
+  env: Env,
+  db: DrizzleD1Database,
+  document: DocumentRow,
+  changes: {
+    number: number;
+    changed: { text: string; message: string | null; unreadable: boolean };
+  }[],
+  actor: AuditActor
+): Promise<void> => {
+  const stage = async () =>
+    await Promise.all(
+      changes.map(
+        async ({ changed }) =>
+          await stagePayload(env, db, document.collectionId, changed.text)
+      )
+    );
+  const released = releasing(
+    db,
+    and(
+      eq(versions.documentId, document.id),
+      inArray(
+        versions.number,
+        changes.map(({ number }) => number)
+      )
+    ) ?? sql`0`
+  );
+  const replaced = changes
+    .filter(({ changed }) => changed.unreadable)
+    .map(({ number }) => outboxed(db, replacedEntry(actor, document, number)));
+  const send = async (staged: StagedPayload[]): Promise<void> => {
+    const updates = changes.flatMap(({ number, changed }, index) => {
+      const payload = staged[index];
+      return payload === undefined
+        ? []
+        : [
+            ...commitPayload(db, payload),
+            db
+              .update(versions)
+              .set({
+                payloadKey: committedKey(payload),
+                message: changed.message,
+              })
+              .where(
+                and(
+                  eq(versions.documentId, document.id),
+                  eq(versions.number, number)
+                )
+              ),
+          ];
+    });
+    const [first, ...rest] = released.before;
+    if (first === undefined) {
+      return;
+    }
+    // Its audit events drain with the purge's own (`auditedBatch`, after).
+    await db.batch([
+      first,
+      ...rest,
+      ...updates,
+      ...released.after,
+      ...replaced,
+    ]);
+  };
+  // A payload it reuses can be let go of and collected before the batch
+  // (another purge, say): the batch is refused (`isUncommitted`), and the
+  // texts are stored again, once, as a save's are.
+  try {
+    await send(await stage());
+  } catch (error) {
+    if (!isUncommitted(error)) {
+      throw error;
+    }
+    await send(await stage());
+  }
+};
+
+/**
+ * Rewrites the versions of `document` up to `upTo` that hold a term, a
+ * page at a time: each one's text as a new payload, which it is pointed
+ * at, with its message rewritten in place; the payloads no version refers
+ * to any more are collected after (payloads.ts). A version whose payload
+ * can't be read is replaced by its tombstone, audited. Only counts them
+ * unless `write`. Returns how
  * many hold one, how often a term is removed from them (`removedFrom`)
  * and how often one is left in them (`leftIn`). Refuses with `knowledge.invalid`
  * when one would be too large to store (`requireStorable`): a purge scans
  * them all first, so one that can't be finished changes nothing.
  */
 const rewriteVersions = async (
+  env: Env,
   db: DrizzleD1Database,
   document: DocumentRow,
   upTo: number,
   matcher: Matcher,
-  write: boolean
+  /** Who the purge is by, to write; only counted without. */
+  write?: AuditActor
 ): Promise<{
   changed: number;
   removed: number;
@@ -906,13 +1100,15 @@ const rewriteVersions = async (
   let beside = false;
   for (let after = 0; ;) {
     // oxlint-disable-next-line no-await-in-loop -- a page at a time, to bound memory
-    const page = await db
+    const refs = await db
       .select({
         number: versions.number,
-        text: versions.text,
+        key: brainPayloads.key,
+        sha256: brainPayloads.sha256,
         message: versions.message,
       })
       .from(versions)
+      .innerJoin(brainPayloads, eq(brainPayloads.key, versions.payloadKey))
       .where(
         and(
           eq(versions.documentId, document.id),
@@ -922,7 +1118,18 @@ const rewriteVersions = async (
       )
       .orderBy(asc(versions.number))
       .limit(versionsPerPage);
-    const rows = page.map((row) => ({ row, changed: rewritten(row, matcher) }));
+    // oxlint-disable-next-line no-await-in-loop -- a page at a time, to bound memory
+    const page = await Promise.all(
+      refs.map(async (ref) => ({
+        number: ref.number,
+        message: ref.message,
+        ...(await purgeTextOf(env, ref)),
+      }))
+    );
+    const rows = page.map((row) => ({
+      row,
+      changed: purgeChangeOf(row, matcher),
+    }));
     beside ||= rows.some(({ row }) =>
       besideInIndexed(document.path, row.text, matcher)
     );
@@ -937,29 +1144,16 @@ const rewriteVersions = async (
       }),
       matcher
     );
-    const updates = rows.flatMap(({ row, changed }) => {
+    const changes = rows.flatMap(({ row, changed }) => {
       if (changed !== undefined) {
         requireStorable(document, row.number, changed);
       }
-      return changed === undefined
-        ? []
-        : [
-            db
-              .update(versions)
-              .set(changed)
-              .where(
-                and(
-                  eq(versions.documentId, document.id),
-                  eq(versions.number, row.number)
-                )
-              ),
-          ];
+      return changed === undefined ? [] : [{ number: row.number, changed }];
     });
-    changedVersions += updates.length;
-    const [first, ...rest] = updates;
-    if (write && first) {
+    changedVersions += changes.length;
+    if (write !== undefined && changes.length > 0) {
       // oxlint-disable-next-line no-await-in-loop -- a page at a time, to bound memory
-      await db.batch([first, ...rest]);
+      await repointVersions(env, db, document, changes, write);
     }
     const last = page.at(-1);
     if (last === undefined || page.length < versionsPerPage) {
@@ -988,11 +1182,11 @@ const countDocument = async (
   const { document } = named;
   const saved = await requireSavable(env, db, named, matcher);
   const inVersions = await rewriteVersions(
+    env,
     db,
     document,
     document.currentVersion,
-    matcher,
-    false
+    matcher
   );
   const changes = inVersions.changed > 0;
   // When anything changes, the purge saves the current text, rewritten,
@@ -1040,8 +1234,8 @@ const originalsOf = async (
  * held one, saves the current text, without them, as the next version
  * (`writeVersion`), which makes the sections, links, search rows, title,
  * description, owner and tags again, and gives memory cached by version a
- * new key. In the same batch, the current version is rewritten in place
- * too.
+ * new key. In the same batch, the current version is pointed at the new
+ * one's payload too, and what that leaves unreferenced is collected after.
  *
  * The save is from the version the purge started at, so anyone who saved
  * or restored meanwhile, from text the purge hadn't rewritten yet, makes
@@ -1059,9 +1253,17 @@ const purgeDocument = async (
 ): Promise<Counts> => {
   const { document, collection } = named;
   const at = document.currentVersion;
-  const earlier = await rewriteVersions(db, document, at - 1, matcher, true);
-  const current = await versionOf(db, document, at);
-  const changed = current && rewritten(current, matcher);
+  const actor = actorOf(person);
+  const earlier = await rewriteVersions(
+    env,
+    db,
+    document,
+    at - 1,
+    matcher,
+    actor
+  );
+  const current = await versionOf(env, db, document, at);
+  const changed = current && purgeChangeOf(current, matcher);
   const changedVersions = earlier.changed + (changed === undefined ? 0 : 1);
   const counts: Counts = {
     documents: changedVersions > 0 ? 1 : 0,
@@ -1072,9 +1274,41 @@ const purgeDocument = async (
     // an image in a PDF, which extraction never read): its originals go
     // all the same.
     await db.batch(forgetUploads(db, uploadsNamed(document)));
+    // Search may still hold an earlier generation, with the terms, while
+    // its current version waits for indexing (a purge that failed to
+    // publish, say): published now, or the purge fails.
+    await requireCurrentIndexed(env, db, document.id, actorOf(person));
     return counts;
   }
   const text = changed?.text ?? current.text;
+  const releasedCurrent = releasing(
+    db,
+    and(eq(versions.documentId, document.id), eq(versions.number, at)) ?? sql`0`
+  );
+  // The current version is pointed at the new version's payload, the
+  // same text, committed earlier in the same batch.
+  const pointCurrent: BatchItem<"sqlite">[] =
+    changed === undefined
+      ? []
+      : [
+          ...releasedCurrent.before,
+          db
+            .update(versions)
+            .set({
+              payloadKey: committedKey({
+                collectionId: document.collectionId,
+                sha256: await sha256Hex(text),
+              }),
+              message: changed.message,
+            })
+            .where(
+              and(eq(versions.documentId, document.id), eq(versions.number, at))
+            ),
+          ...releasedCurrent.after,
+          ...(changed.unreadable
+            ? [outboxed(db, replacedEntry(actor, document, at))]
+            : []),
+        ];
   await writeVersion(env, personWriter(person), {
     collection,
     path: document.path,
@@ -1087,22 +1321,7 @@ const purgeDocument = async (
     // longer knows, or whose frontmatter no longer fits its type, is
     // purged all the same (`parseBaseFields`).
     purge: true,
-    also: [
-      ...(changed === undefined
-        ? []
-        : [
-            db
-              .update(versions)
-              .set(changed)
-              .where(
-                and(
-                  eq(versions.documentId, document.id),
-                  eq(versions.number, at)
-                )
-              ),
-          ]),
-      ...forgetUploads(db, uploadsNamed(document)),
-    ],
+    also: [...pointCurrent, ...forgetUploads(db, uploadsNamed(document))],
   });
   return counts;
 };
@@ -1223,6 +1442,10 @@ const purgeContent = async (
   ]);
   const done: Counts[] = [];
   try {
+    // The brain's gap answers hold people's words too: every one is
+    // rewritten, whatever documents the purge names. First, so a document
+    // whose purge fails doesn't leave them holding a term.
+    await rewriteGapAnswers(env, person, (text) => without(text, matcher));
     for (const one of named) {
       // oxlint-disable-next-line no-await-in-loop -- one document at a time, to bound memory
       done.push(await purgeDocument(env, db, person, one, matcher));
@@ -1233,6 +1456,9 @@ const purgeContent = async (
     await owedWritesDone(db, purgeId);
   }
   await cleanUpOriginals(env);
+  // What the rewrites let go of leaves R2 now; a failure fails the purge,
+  // and running it again collects what's left (`collecting` rows).
+  await collectPayloads(env, db);
   await cleanSearchIndex(async () => {
     await eraseFromSearchIndex(db, input.terms, {
       secure,
@@ -1240,13 +1466,22 @@ const purgeContent = async (
       id: purgeId,
     });
   });
-  const stillFound = await stillFoundIn(
+  const inDocuments = await stillFoundIn(
     db,
     input.terms,
     named.map(({ document }) => document.id)
   );
+  // An answer given after the rewrite read it is left to a purge again.
+  const gapAnswers = await countGapAnswers(env, (text) =>
+    holdsTerm(text, matcher)
+  );
+  const stillFound = inDocuments + gapAnswers;
   if (stillFound > 0) {
-    log.warn("knowledge.purge_still_found", { purgeId, documents: stillFound });
+    log.warn("knowledge.purge_still_found", {
+      purgeId,
+      documents: inDocuments,
+      gapAnswers,
+    });
   }
   return { purgeId, ...sum(done), stillFound };
 };
@@ -1270,6 +1505,7 @@ export const preparePurge = async (
   // A personal purge deletes whole documents: nothing is left in a word.
   let removed = 0;
   let left = 0;
+  let gapAnswers = 0;
   if (parsed.type === "personal") {
     ({ counts, ...scope } = await personalScope(db, parsed));
     originals = await originalsOf(
@@ -1283,12 +1519,9 @@ export const preparePurge = async (
       or(...named.map(({ document }) => uploadsNamed(document)))
     );
     scope = { documentIds: named.map(({ document }) => document.id) };
-    ({ counts, removed, left } = await contentCounts(
-      env,
-      db,
-      named,
-      matcherOf(parsed.terms, { countLeft: true })
-    ));
+    const matcher = matcherOf(parsed.terms, { countLeft: true });
+    ({ counts, removed, left } = await contentCounts(env, db, named, matcher));
+    gapAnswers = await countGapAnswers(env, (text) => holdsTerm(text, matcher));
   }
   await auditedBatch(env, db, [
     outboxed(
@@ -1296,7 +1529,7 @@ export const preparePurge = async (
       purgeEntry(person, "knowledge.purge.prepared", parsed, scope, {
         ...counts,
         ...(parsed.type === "content"
-          ? { occurrences: removed, inLongerWords: left }
+          ? { occurrences: removed, inLongerWords: left, gapAnswers }
           : {}),
       })
     ),
@@ -1305,6 +1538,7 @@ export const preparePurge = async (
     ...counts,
     occurrences: removed,
     inLongerWords: left,
+    gapAnswers,
     originals,
     ...(await tokenFor(env, person, parsed)),
   };

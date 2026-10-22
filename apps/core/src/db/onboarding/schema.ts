@@ -5,6 +5,7 @@
 import { sql } from "drizzle-orm";
 import {
   check,
+  index,
   integer,
   primaryKey,
   real,
@@ -87,6 +88,12 @@ export const links = sqliteTable("links", {
   /** When they deleted their interview: a copy left open can't save it back. */
   deletedAt: text("deleted_at"),
   /**
+   * The team they led when their link went out; none when they led none.
+   * Only this makes theirs a lead's interview (rules.ts, `leadsTalked`):
+   * making someone a lead afterwards tells nobody about their interview.
+   */
+  ledTeam: text("led_team"),
+  /**
    * The version of what their interview holds: a save goes up by one, and
    * so does a delete or a new start, so no copy from before either ever
    * matches again. A save from a copy of another version is refused.
@@ -126,6 +133,12 @@ export const interviews = sqliteTable("interviews", {
 export const interviewStates = sqliteTable("interview_states", {
   person: text().primaryKey(),
   kind: text({ enum: ["own", "lead"] }).notNull(),
+  /**
+   * The team they gave a lead's interview for, as the roster said before
+   * they agreed; none for an employee's interview. Settled, with `kind`,
+   * once they agree.
+   */
+  leadOf: text("lead_of"),
   startedAt: text("started_at"),
   /** When they first agreed to what was read back (ISO 8601). */
   completedAt: text("completed_at"),
@@ -302,6 +315,22 @@ export const usage = sqliteTable(
 );
 
 /**
+ * Seconds of voice said today (`/api/speech`, onboarding/speech.ts), by
+ * whom they were said for: `link:<person>` for someone's interview link,
+ * `admin:<user>` for an admin. Only today's are kept: each count deletes
+ * the days before it.
+ */
+export const voiceUse = sqliteTable(
+  "voice_use",
+  {
+    who: text().notNull(),
+    day: text().notNull(),
+    seconds: real().notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.who, table.day] })]
+);
+
+/**
  * Audit events of changes here, each stored in the same transaction as its
  * change, until the object has delivered it to the audit log
  * (`drainObjectOutbox` in audit-outbox.ts).
@@ -311,3 +340,35 @@ export const auditOutbox = sqliteTable("audit_outbox", {
   event: text().notNull(),
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
 });
+
+/**
+ * Mail the onboarding sends (mail-outbox.ts), each once, by its key: a mail
+ * queued again under a key it holds already is not sent again. A mail with
+ * someone's link names whose (`fill`) and holds a slot for it, filled in
+ * only as it is sent, so the link's secret is kept here no more than
+ * anywhere else (link-secret.ts).
+ */
+export const mailOutbox = sqliteTable(
+  "mail_outbox",
+  {
+    key: text().primaryKey(),
+    /** Whom it is about, by person, for the log; null for nobody in particular. */
+    about: text(),
+    to: text("to_address").notNull(),
+    /** Subject, bodies and headers as JSON (`queuedMailSchema`), slots unfilled. */
+    mail: text().notNull(),
+    /** What fills its slots as it is sent: for a link's mail, whose link. */
+    fill: text(),
+    state: text({ enum: ["queued", "sent", "failed"] }).notNull(),
+    attempts: integer().notNull().default(0),
+    /** When it is tried next (ms since the epoch), while queued. */
+    nextAt: integer("next_at").notNull(),
+    queuedAt: text("queued_at").notNull(),
+    /** When it was sent, or ended failed (ISO 8601). */
+    settledAt: text("settled_at"),
+    /** Why its last try didn't send it: Email Sending's code, or core's. */
+    reason: text(),
+    messageId: text("message_id"),
+  },
+  (table) => [index("mail_outbox_due").on(table.state, table.nextAt)]
+);

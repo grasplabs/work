@@ -1,4 +1,5 @@
 import type { AuditActor } from "@grasp-os/shared/audit";
+import { sha256Hex } from "@grasp-os/shared/encoding";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import { knowledgeErrors } from "@grasp-os/shared/knowledge";
 import { errorFields, log } from "@grasp-os/shared/log";
@@ -9,7 +10,12 @@ import { stringify } from "yaml";
 
 import { versionFiles } from "../apps.ts";
 import { apps } from "../db/core/schema.ts";
-import { appEntries, documents, versions } from "../db/knowledge/schema.ts";
+import {
+  appEntries,
+  brainPayloads,
+  documents,
+  versions,
+} from "../db/knowledge/schema.ts";
 import { appEntryPath, appsCollectionId } from "./app-entries.ts";
 import { ensureCollection } from "./collections.ts";
 import type { CollectionRow } from "./collections.ts";
@@ -70,6 +76,15 @@ const refusedAsTooLarge: ReadonlySet<string> = new Set([
   "knowledge.too_many_links",
 ]);
 
+/**
+ * Admission's refusals of an App's AGENTS.md (admission.ts): its entry is
+ * then indexed without it, so the App can still be found.
+ */
+const refusedByAdmission: ReadonlySet<string> = new Set([
+  "knowledge.held",
+  "knowledge.excluded",
+]);
+
 const appsCollectionRow = (): CollectionRow => ({
   id: appsCollectionId,
   name: "Apps",
@@ -95,6 +110,38 @@ interface IndexedApp {
  */
 const entryText = (app: IndexedApp, body: string): string =>
   `---\n${stringify({ title: app.name, description: app.description, app: app.id })}---\n${body}`;
+
+/**
+ * Writes an App's entry with `body` in place of its AGENTS.md, which was
+ * refused: by its name and description, so it can still be found, or, if
+ * admission refuses those, without them, so its indexing doesn't fail run
+ * after run.
+ */
+const writeWithoutSensitive = async (
+  app: IndexedApp,
+  write: (entry: string) => Promise<unknown>,
+  body: string
+): Promise<void> => {
+  try {
+    await write(entryText(app, body));
+  } catch (error) {
+    const code = knowledgeErrors.codeOf(error);
+    if (code === undefined || !refusedByAdmission.has(code)) {
+      throw error;
+    }
+    await write(
+      entryText(
+        {
+          id: app.id,
+          name: "App",
+          description:
+            "This App's name and description can't be searched: they may contain sensitive personal data.",
+        },
+        body
+      )
+    );
+  }
+};
 
 /** The App `appId`, if it exists. */
 const appInUse = async (env: Env, appId: string) =>
@@ -179,7 +226,10 @@ const indexApp = async (env: Env, appId: string): Promise<void> => {
       .from(appEntries)
       .where(eq(appEntries.appId, appId)),
     knowledge
-      .select({ version: documents.currentVersion, text: versions.text })
+      .select({
+        version: documents.currentVersion,
+        sha256: brainPayloads.sha256,
+      })
       .from(documents)
       .innerJoin(
         versions,
@@ -188,6 +238,7 @@ const indexApp = async (env: Env, appId: string): Promise<void> => {
           eq(versions.number, documents.currentVersion)
         )
       )
+      .innerJoin(brainPayloads, eq(brainPayloads.key, versions.payloadKey))
       .where(
         and(
           eq(documents.collectionId, appsCollectionId),
@@ -202,7 +253,8 @@ const indexApp = async (env: Env, appId: string): Promise<void> => {
   }
   const text = entryText(app, await agentsOf(env, appId, version));
   const ifVersion = stored?.version ?? 0;
-  if (stored?.text === text) {
+  // Compared by hash: the entry's payload isn't read.
+  if (stored?.sha256 === (await sha256Hex(text))) {
     // The same text: only the version it holds, while it is as read.
     await noteVersion(
       knowledge,
@@ -231,10 +283,21 @@ const indexApp = async (env: Env, appId: string): Promise<void> => {
     await write(text);
   } catch (error) {
     const code = knowledgeErrors.codeOf(error);
-    if (code === undefined || !refusedAsTooLarge.has(code)) {
+    if (code !== undefined && refusedAsTooLarge.has(code)) {
+      await writeWithoutSensitive(
+        app,
+        write,
+        "This App's AGENTS.md is too large to search."
+      );
+    } else if (code !== undefined && refusedByAdmission.has(code)) {
+      await writeWithoutSensitive(
+        app,
+        write,
+        "This App's AGENTS.md can't be searched: it may contain sensitive personal data."
+      );
+    } else {
       throw error;
     }
-    await write(entryText(app, "This App's AGENTS.md is too large to search."));
   }
 };
 

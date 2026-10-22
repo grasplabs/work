@@ -73,6 +73,14 @@ export type CollectionId = z.infer<typeof collectionIdSchema>;
 export const documentIdSchema = idSchema<"DocumentId">();
 export type DocumentId = z.infer<typeof documentIdSchema>;
 
+/** A memory record in the Brain (brain-api.ts). */
+export const memoryIdSchema = idSchema<"MemoryId">();
+export type MemoryId = z.infer<typeof memoryIdSchema>;
+
+/** A Brain command's receipt (brain-api.ts). */
+export const brainReceiptIdSchema = idSchema<"BrainReceiptId">();
+export type BrainReceiptId = z.infer<typeof brainReceiptIdSchema>;
+
 /** A connection to an outside system, held by connect. */
 export const connectionIdSchema = idSchema<"ConnectionId">();
 export type ConnectionId = z.infer<typeof connectionIdSchema>;

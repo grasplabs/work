@@ -29,6 +29,11 @@ export interface InterviewState {
   person: string;
   startedAt: string | null;
   completedAt: string | null;
+  /**
+   * The team they led when their link went out, when they also talked as
+   * its lead; left out otherwise.
+   */
+  ledTeam?: string;
 }
 
 /** The Monday (UTC) of the week `day` falls in, as an ISO day. */
@@ -142,6 +147,45 @@ export interface TeamCount {
 }
 
 /**
+ * Who of each team talked as its lead, and the day they finished, by team
+ * id: someone who led the team when their link went out (`ledTeam`), never
+ * whoever leads it now, so making someone a lead afterwards tells the admin
+ * nothing about their interview. Only interviews finished before today, as
+ * `progressOf` tells the admin (`leadTalked`), which moves once a day; the
+ * first to finish when a team had two. The brain shows each as that team's
+ * stakeholder interview (brain-rpc.ts), never what was said in it.
+ */
+export const leadsTalked = (
+  roster: Roster,
+  interviews: ReadonlyMap<string, InterviewState>,
+  now: string
+): Map<string, { person: string; day: string }> => {
+  const asOf = dayOf(now);
+  const teams = new Set(roster.teams.map(({ id }) => id));
+  const talked = new Map<string, { person: string; completedAt: string }>();
+  for (const { person, completedAt, ledTeam } of interviews.values()) {
+    if (
+      ledTeam === undefined ||
+      !teams.has(ledTeam) ||
+      completedAt === null ||
+      dayOf(completedAt) >= asOf
+    ) {
+      continue;
+    }
+    const first = talked.get(ledTeam);
+    if (first === undefined || completedAt < first.completedAt) {
+      talked.set(ledTeam, { person, completedAt });
+    }
+  }
+  return new Map(
+    [...talked].map(([team, { person, completedAt }]) => [
+      team,
+      { person, day: dayOf(completedAt) },
+    ])
+  );
+};
+
+/**
  * Where the interviews stand, as the company's admin may see it: how many
  * were asked and how many talked, never who. The counts are tallies that
  * only grow, kept by the team someone was in when their link went out, so
@@ -170,11 +214,7 @@ export const progressOf = (
     }
     return sum;
   };
-  const leadDone = (lead: string | null): boolean => {
-    const completed =
-      lead === null ? null : (interviews.get(lead)?.completedAt ?? null);
-    return completed !== null && dayOf(completed) < asOf;
-  };
+  const leadDone = leadsTalked(roster, interviews, now);
   const teams = roster.teams.map((team): TeamProgress => {
     const { asked, talked } = tally(team.id);
     const shown = !team.off && asked >= minTeamShown;
@@ -183,7 +223,7 @@ export const progressOf = (
       name: team.name,
       people: roster.people.filter((person) => person.team === team.id).length,
       off: team.off,
-      leadTalked: leadDone(team.lead),
+      leadTalked: leadDone.has(team.id),
       talked: shown && talked >= minTalkedShown ? talked : null,
       asked: shown ? asked : null,
     };
@@ -193,7 +233,7 @@ export const progressOf = (
     teams,
     talked: teams.reduce((sum, team) => sum + (team.talked ?? 0), 0),
     asked: teams.reduce((sum, team) => sum + (team.asked ?? 0), 0),
-    leadsTalked: taking.filter((team) => leadDone(team.lead)).length,
+    leadsTalked: taking.filter((team) => leadDone.has(team.id)).length,
     leads: taking.length,
     asOf,
   };
