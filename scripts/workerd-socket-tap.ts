@@ -14,9 +14,12 @@ import path from "node:path";
 
 import { sandboxOwnerHeader } from "../apps/core/src/sandbox-headers.ts";
 
-/** The owner header, wherever a request's head carries it. */
+/**
+ * The owner header, wherever a request's head carries it: only once its
+ * line has ended, so a value split across two writes is read whole.
+ */
 const ownerLine = new RegExp(
-  `^${sandboxOwnerHeader}:[ \\t]*([^\\r\\n]+)`,
+  `^${sandboxOwnerHeader}:[ \\t]*([^\\r\\n]+)\\r?\\n`,
   "gimu"
 );
 
