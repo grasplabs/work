@@ -7,6 +7,7 @@
   "sideEffects": false,
   "exports": {
     "./binding": "./src/binding.ts",
+    "./clock": "./src/clock.ts",
     "./codec": "./src/codec.ts",
     "./contracts": "./src/contracts.ts",
     "./errors": "./src/errors.ts",
