@@ -23,15 +23,18 @@
  * isolate's code leaves uncaught from anything workerd served `--verbose`
  * reports for an isolate: a timer's callback that throws (the global
  * timers, `node:timers`' default export), a promise handed to a
- * `WorkerEntrypoint`'s `ctx.waitUntil` that rejects, and any other
+ * `WorkerEntrypoint`'s `this.ctx.waitUntil` that rejects, and any other
  * unhandled rejection or error (`quietErrors`).
  *
  * What it can't stop, workerd served `--verbose` still reports, message
  * and stack (GRA-939): an exception thrown out of an entrypoint's call (an
  * RPC method's, a fetch's), as it hands it to the caller as the call's
  * answer; what the callback of a timer imported by name from `node:timers`
- * throws (the binding is the module's own); and what a default export's
- * handler hands its own context's `waitUntil`. Without `--verbose` none of
+ * throws (the binding is the module's own); and what is handed to the
+ * `waitUntil` of any context other than an entrypoint's `this.ctx`, such
+ * as the one its constructor is given and keeps, or a default export's
+ * handler's (the runtime passes those itself, before anything of the
+ * quiet module's can wrap them). Without `--verbose` none of
  * it is printed. The supervisor refuses `--verbose`
  * (scripts/workerd-sandbox.ts); core loading isolates itself under
  * `SANDBOX_IN_PROCESS=unbounded` can't tell how its process was served, so
@@ -105,9 +108,10 @@ const timerNames = '["setTimeout", "setInterval", "setImmediate"]';
  *
  * - A timer's callback that throws is caught where it runs: the global
  *   timers, and `node:timers`' default export where the isolate has it.
- * - A promise handed to `ctx.waitUntil` of a `WorkerEntrypoint` (the
+ * - A promise handed to `this.ctx.waitUntil` of a `WorkerEntrypoint` (the
  *   classes core calls) that rejects is caught as it is handed over: the
- *   context's every other property is the runtime's own.
+ *   context's every other property is the runtime's own. Not the context
+ *   its constructor is given, which the runtime passes itself.
  * - An unhandled rejection or error has its default prevented.
  *
  * Its imports are the runtime's own modules, which no App's module can
