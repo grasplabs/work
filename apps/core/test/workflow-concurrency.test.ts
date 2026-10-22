@@ -1,4 +1,5 @@
 /* oxlint-disable no-template-curly-in-string, unicorn/no-thenable -- workflow expressions are written as ${ … } strings, and transitions as then */
+import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import type { RunStep } from "../src/workflows/host.ts";
@@ -10,6 +11,7 @@ import {
   completedSteps,
   endOf,
   hostOf,
+  objectSchema,
   published,
   ranFor,
 } from "./json-workflows.ts";
@@ -30,7 +32,7 @@ const initially = (value: string) => ({
 });
 
 /** A branch `id`: a wait of `wait`, then a status `status`. */
-const after = (id: string, wait: string, status: string) => ({
+const after = (id: string, wait: unknown, status: string) => ({
   [id]: {
     do: [
       { [`${id}-wait`]: { wait } },
@@ -328,6 +330,156 @@ describe("items and branches at once", { timeout: 60_000 }, () => {
       end: { status: "completed", output: { status: "a,b,c" } },
       notes: [1, 1, 1],
     });
+  });
+});
+
+/** Short waits, each a new activation that replays the run so far. */
+const replays = [1, 2, 3].map((round) => ({
+  [`rest-${round}`]: { wait: { milliseconds: 100 } },
+}));
+
+/**
+ * A race of a quick branch, one that fails after a chain of steps, and
+ * one whose first task is `long`; two at once, so the third starts only
+ * once the failing one has failed, before the quick one wins. Then waits,
+ * each replaying it, and a step `mark` among them.
+ */
+const raceBehindFailure = (long: unknown) => [
+  {
+    pick: {
+      fork: {
+        branches: [
+          after("quick", { milliseconds: 1500 }, "quick"),
+          {
+            broken: {
+              do: [
+                ...Array.from({ length: 10 }, (_, index) => ({
+                  [`broken-${index}`]: { set: '${ {status: "x"} }' },
+                })),
+                {
+                  "broken-out": {
+                    set: "${ {other: 1} }",
+                    output: {
+                      schema: objectSchema({ status: { type: "string" } }),
+                    },
+                  },
+                },
+              ],
+            },
+          },
+          {
+            long: {
+              do: [
+                { "long-first": long },
+                { "long-done": { set: '${ {status: "long"} }' } },
+              ],
+            },
+          },
+        ],
+        compete: true,
+      },
+      metadata: { grasp: { concurrency: 2 } },
+    },
+  },
+  replays[0],
+  { mark: { set: "${ . }" } },
+  ...replays.slice(1),
+];
+
+describe("replays of items and branches at once", { timeout: 60_000 }, () => {
+  // Every replay starts each item and branch the first run started, though
+  // their scope settled before the replay reached them: a wait or a retry
+  // of one the journal holds is reached again, so the run never strays.
+  // Each run here replays several times, once after a killed attempt.
+
+  it("race: replay the branch the pool started behind a failure, its long wait reached again, after the race settled", async () => {
+    const by = await builder();
+    const { workflow } = await published(
+      by,
+      raceBehindFailure({ wait: "PT1H" })
+    );
+    for (const round of [1, 2, 3]) {
+      // oxlint-disable-next-line no-await-in-loop -- one run at a time
+      const run = await withCpuKills(
+        "task:mark",
+        (attempt) => attempt === 1,
+        async () => await ranFor(by, workflow.id)
+      );
+      expect({ round, end: endOf(run) }).toStrictEqual({
+        round,
+        end: { status: "completed", output: { status: "quick" } },
+      });
+    }
+  });
+
+  it("race: replay the branch the pool started behind a failure, its step waiting to retry, after the race settled", async () => {
+    const by = await builder();
+    const { workflow } = await published(
+      by,
+      raceBehindFailure({ set: '${ {status: "first"} }' })
+    );
+    for (const round of [1, 2, 3]) {
+      // oxlint-disable-next-line no-await-in-loop -- one run at a time
+      const run = await withCpuKills(
+        "task:long-first@pick.2",
+        // Cut off once: its retry waits out a backoff of an hour.
+        (attempt) => attempt === 1,
+        async () => {
+          env.WORKFLOW_RETRY_DELAY_MS = "3600000";
+          return await ranFor(by, workflow.id);
+        }
+      );
+      expect({ round, end: endOf(run) }).toStrictEqual({
+        round,
+        end: { status: "completed", output: { status: "quick" } },
+      });
+    }
+  });
+
+  it("end from an item at once: replay the item the pool started after a sibling's chain, its long wait reached again", async () => {
+    const by = await builder();
+    const { workflow } = await published(by, [
+      {
+        each: {
+          // Three items, two at once: item 2 starts once item 1 is done,
+          // before item 0 ends the workflow.
+          for: { in: "${ [0, 1, 2] }" },
+          metadata: { grasp: { concurrency: 2 } },
+          input: { from: '${ {status: "ended"} }' },
+          do: [
+            {
+              gate: {
+                switch: [
+                  { first: { when: "${ $item == 0 }", then: "pause" } },
+                  { last: { when: "${ $item == 2 }", then: "long" } },
+                  { other: { then: "busy-0" } },
+                ],
+              },
+            },
+            ...busySteps(10),
+            { pause: { wait: { milliseconds: 1500 } } },
+            { halt: { set: "${ . }", then: "end" } },
+            { long: { wait: "PT1H" } },
+            { "end-of-item": { set: '${ {status: "item"} }' } },
+          ],
+        },
+      },
+    ]);
+    for (const round of [1, 2, 3]) {
+      // oxlint-disable-next-line no-await-in-loop -- one run at a time
+      const run = await withCpuKills(
+        // Its settling cut off once its code returned: the next
+        // activation replays the loop, the fence standing.
+        "task:each",
+        (attempt) => attempt === 1,
+        async () => await ranFor(by, workflow.id),
+        "end"
+      );
+      expect({ round, end: endOf(run) }).toStrictEqual({
+        round,
+        end: { status: "completed", output: { status: "ended" } },
+      });
+    }
   });
 });
 
