@@ -803,7 +803,6 @@ export const listScreens = async (
   });
 };
 
-
 /** An App's files at `version`, or at its latest version without one. */
 export const readFiles = async (
   env: Env,
@@ -918,7 +917,7 @@ export const commitFiles = async (
   if (tree === latest?.tree) {
     throw appErrors.create("app.nothing_to_commit");
   }
-  refuseV1Server(files);
+  refuseV1Server(files.keys());
   const workflowCalls = workflowCallsIn(Object.fromEntries(files));
   const workflowBindings = await appBindingKinds(env, appId);
   await storeTree(env, appId, { tree, json });
@@ -1122,7 +1121,7 @@ export const proposeDraft = async (
   if (tree === latest?.tree) {
     throw appErrors.create("app.nothing_to_commit");
   }
-  refuseV1Server(files);
+  refuseV1Server(files.keys());
   const workflowCalls = workflowCallsIn(Object.fromEntries(files));
   const workflowBindings = await appBindingKinds(env, appId);
   await storeTree(env, appId, { tree, json });
