@@ -11,6 +11,7 @@ import {
   runFileIdSchema,
   runFileNameSchema,
   runFileTypeOf,
+  isZip,
 } from "@grasp-os/shared/run-files";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import { writeJson } from "@grasp-os/workflow-expressions/bounded-json";
@@ -30,6 +31,7 @@ import {
 } from "../workflow-bindings.ts";
 import { resolveCatalogKeys } from "../workflow-catalog.ts";
 import { schemaOfDescriptor, takesExactly } from "./exact-values.ts";
+import { officeTypeOf } from "./office-files.ts";
 import {
   requireCallAuthority,
   runAuthority,
@@ -358,7 +360,8 @@ const unnamedFile = "attachment";
 /**
  * `answer`, a read that answers a file, with its bytes kept as a file of
  * the calling run (`keepFile`) and named in place of its content: its
- * type shown by its bytes (`runFileTypeOf`), never the label it came
+ * type shown by its bytes (`runFileTypeOf`, or for a ZIP its package's
+ * content types, `officeTypeOf`), never the label it came
  * with; its name only if a run file's may be it. What the call's receipt
  * says of the file: its ID, type, size and SHA-256, never its name.
  */
@@ -385,7 +388,10 @@ const keptAsFile = async (
   } catch {
     throw callInvalid("output: Its content isn't base64.");
   }
-  const type = runFileTypeOf(bytes, contentType);
+  // A ZIP is a Word or Excel document only by what its package declares.
+  const type = isZip(bytes)
+    ? await officeTypeOf(bytes)
+    : runFileTypeOf(bytes, contentType);
   if (type === undefined) {
     throw runFileErrors.create("file.run_type_unsupported");
   }

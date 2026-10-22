@@ -714,7 +714,7 @@ export const callFiles = async (
  * (GRA-886): opened, written in pieces of `callBytes` and finished as an
  * action's own writes are, each under a key of the call's own effect key,
  * so the same call again (a replay, a retry) answers the same file, and
- * its bytes must be the same. Every limit, the type check against the
+ * its bytes must be the same, all of them: never a prefix of them. Every limit, the type check against the
  * bytes and the SHA-256 apply as they do to an action's writes.
  */
 export const keepFile = async (
@@ -746,7 +746,20 @@ export const keepFile = async (
       content: toBase64(file.bytes.subarray(at, at + runFileLimits.callBytes)),
     });
   }
-  return await finish(env, as("finish"), { file: id });
+  // Every piece above replays only with its own bytes, but a shorter
+  // retried read would leave pieces of a longer first attempt after its
+  // own: the file must hold exactly these bytes before it is sealed, and
+  // a file a first attempt sealed must be of them.
+  const written = await fileOf(env, caller, id);
+  if (written?.state === "writing" && written.size !== file.bytes.length) {
+    throw workflowResourceErrors.create("workflow.call_invalid");
+  }
+  const finished = await finish(env, as("finish"), { file: id });
+  const sealed = z.object({ sha256: z.string() }).parse(finished.output);
+  if (sealed.sha256 !== (await sha256HexOfBytes(file.bytes))) {
+    throw workflowResourceErrors.create("workflow.call_invalid");
+  }
+  return finished;
 };
 
 /** Most chunks one sweep deletes at a time: R2's bound for one delete. */
