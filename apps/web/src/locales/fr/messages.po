@@ -12673,6 +12673,10 @@ msgstr "Cette app veut ouvrir une page d’un autre site dans un nouvel onglet. 
 msgid "This browser cannot listen. You can type your answers."
 msgstr "Ce navigateur ne peut pas écouter. Vous pouvez écrire vos réponses."
 
+#: src/screens/screen-frame.tsx
+msgid "This app's stored code no longer matches the code that was approved, so it wasn't opened. Tell an admin."
+msgstr "Le code enregistré de cette application ne correspond plus au code approuvé, elle n’a donc pas été ouverte. Prévenez un admin."
+
 #: src/engines/store-change-errors.ts
 msgid "This change is being applied again, so it can't be abandoned now. The page shows where it stands now."
 msgstr "Cette modification est de nouveau en cours d’application : elle ne peut donc pas être abandonnée maintenant. La page montre maintenant où elle en est."
@@ -12874,6 +12878,14 @@ msgstr "Cette version modifie les données du domaine, et la modification ne peu
 #: src/engines/store-change-errors.ts
 msgid "This version changes the domain's data, and the change can't be applied: filling in one of its new fields would make a record larger than a record may be."
 msgstr "Cette version modifie les données du domaine, et la modification ne peut pas être appliquée : remplir l’un de ses nouveaux champs rendrait un enregistrement plus grand qu’un enregistrement ne peut l’être."
+
+#: src/screens/screen-frame.tsx
+msgid "This version of the app hasn't been sealed, so it can't be opened. A builder can publish it again."
+msgstr "Cette version de l’application n’a pas été scellée, elle ne peut donc pas être ouverte. Un concepteur peut la publier de nouveau."
+
+#: src/screens/screen-frame.tsx
+msgid "This version of the app was revoked and no longer runs. An admin can make another version current."
+msgstr "Cette version de l’application a été révoquée et ne s’exécute plus. Un admin peut rendre une autre version actuelle."
 
 #: src/engines/store-change-errors.ts
 msgid "This version's data change is still being applied. Try again in a moment."

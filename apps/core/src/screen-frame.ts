@@ -1,9 +1,11 @@
 import {
   fromBase64Url,
   sha256Hex,
+  toBase64,
   toBase64Url,
 } from "@grasp-os/shared/encoding";
 import { canonicalJson } from "@grasp-os/shared/json";
+import { log } from "@grasp-os/shared/log";
 import { artifactSchema } from "@grasp-os/shared/screen-trust";
 import {
   screenFrameMessage,
@@ -170,13 +172,104 @@ export const hasFrameAccess = async (
   );
 };
 
+// What a frame runs is checked again each time core serves it, not only
+// as core opened the build. In between, the build sits in R2
+// (`stageFrame`), and the tokens say which build and which modules may be
+// asked for, not what bytes R2 hands back: anyone who can write the
+// bucket without core's secret could otherwise swap a module or a
+// manifest, and the frame would run it with the App's data. So:
+//
+// - A module is served only when its bytes, with the name it was staged
+//   under, hash to the address it is asked at, the one its token signs
+//   (`screenModuleResponse`). The name is kept beside it, in the object's
+//   metadata: a changed name passes no more than changed code does.
+// - A manifest is served only with core's MAC over it and the build it
+//   is for (`manifestMac`): it can't be written, edited, or moved to
+//   another build without core's secret.
+// - Either one that doesn't pass is refused, logged and deleted, so the
+//   next open stages the build again from the sealed bytes.
+//
+// On top of that, the import map names each module's sha384 (`integrity`,
+// Subresource Integrity), carried in the MAC'd manifest, so the browser
+// checks the bytes it got too, whatever sits between core and it. Both,
+// rather than SRI alone: a browser that doesn't read an import map's
+// `integrity` ignores it, and SRI alone would let a tampered object sit
+// in R2 until the build is staged again. The check on serve holds for
+// every browser, so it is the one this relies on.
+
+const moduleHashPattern = /^[0-9a-f]{64}$/u;
+
 /** What core keeps of a build for its frame: its modules by name, as the hashes they are served under. */
-interface FrameManifest {
-  entry: string;
-  runtime: string;
-  css: string;
-  imports: Record<string, string>;
-}
+const frameManifestSchema = z
+  .strictObject({
+    entry: z.string(),
+    runtime: z.string(),
+    css: z.string(),
+    imports: z.record(z.string(), z.string().regex(moduleHashPattern)),
+    /** Each module's Subresource Integrity, by its hash. */
+    integrity: z.record(z.string(), z.string().startsWith("sha384-")),
+  })
+  .refine(({ imports, integrity }) =>
+    Object.values(imports).every((hash) => Object.hasOwn(integrity, hash))
+  );
+
+type FrameManifest = z.infer<typeof frameManifestSchema>;
+
+/** What the manifests' MAC key is for: no other MAC of core's passes for one. */
+const manifestPurpose = "grasp-os screen frame manifest";
+
+/** What a manifest's MAC covers: its text, as the manifest of `artifact`. */
+const manifestSubject = (artifact: string, text: string): Uint8Array =>
+  encoder.encode(canonicalJson([artifact, text]));
+
+/** Core's MAC over `text` as the manifest of the build `artifact`. */
+const manifestMac = async (
+  env: Env,
+  artifact: string,
+  text: string
+): Promise<string> => {
+  const key = await derivedHmacKey(env, manifestPurpose, ["sign", "verify"]);
+  return toBase64Url(
+    new Uint8Array(
+      await crypto.subtle.sign("HMAC", key, manifestSubject(artifact, text))
+    )
+  );
+};
+
+/** Whether `mac` is core's for `text` as the manifest of `artifact`. */
+const isManifestOf = async (
+  env: Env,
+  artifact: string,
+  text: string,
+  mac: string | undefined
+): Promise<boolean> => {
+  if (mac === undefined) {
+    return false;
+  }
+  let bytes: Uint8Array<ArrayBuffer>;
+  try {
+    bytes = fromBase64Url(mac);
+  } catch {
+    return false;
+  }
+  const key = await derivedHmacKey(env, manifestPurpose, ["sign", "verify"]);
+  return await crypto.subtle.verify(
+    "HMAC",
+    key,
+    bytes,
+    manifestSubject(artifact, text)
+  );
+};
+
+/** The hash a module is served under: of its name and its code. */
+const moduleHash = async (name: string, code: string): Promise<string> =>
+  await sha256Hex(canonicalJson([name, code]));
+
+/** A module's Subresource Integrity: the sha384 of the bytes served. */
+const moduleIntegrity = async (code: string): Promise<string> =>
+  `sha384-${toBase64(
+    new Uint8Array(await crypto.subtle.digest("SHA-384", encoder.encode(code)))
+  )}`;
 
 const day = 24 * 60 * 60 * 1000;
 
@@ -218,7 +311,8 @@ const allStaged = async (env: Env, hashes: string[]): Promise<boolean> => {
 /**
  * Keeps a build where its frame loads it: each module under the hash of
  * its name and code (one name, one module: the same code under two names
- * stays two modules), and the build's manifest under its own hash. The
+ * stays two modules), with its name beside it, and the build's manifest
+ * under its own hash, with core's MAC (checked on serve, as above). The
  * modules go first, so a manifest is never there without them. A manifest
  * staged within `frameRefreshMs`, with every module of it still there, is
  * all of it; anything else is staged again in full, so the sweep never
@@ -237,7 +331,7 @@ export const stageFrame = async (
     Object.entries({ ...kit, ...modules }).map(async ([name, code]) => ({
       name,
       code,
-      hash: await sha256Hex(canonicalJson([name, code])),
+      hash: await moduleHash(name, code),
     }))
   );
   const staged = await env.FILES.head(frameKey(artifact));
@@ -252,8 +346,8 @@ export const stageFrame = async (
     return;
   }
   await Promise.all(
-    named.map(async ({ code, hash }) => {
-      await env.FILES.put(moduleKey(hash), code);
+    named.map(async ({ name, code, hash }) => {
+      await env.FILES.put(moduleKey(hash), code, { customMetadata: { name } });
     })
   );
   const manifest: FrameManifest = {
@@ -261,8 +355,18 @@ export const stageFrame = async (
     runtime,
     css,
     imports: Object.fromEntries(named.map(({ name, hash }) => [name, hash])),
+    integrity: Object.fromEntries(
+      await Promise.all(
+        named.map(
+          async ({ code, hash }) => [hash, await moduleIntegrity(code)] as const
+        )
+      )
+    ),
   };
-  await env.FILES.put(frameKey(artifact), JSON.stringify(manifest));
+  const text = JSON.stringify(manifest);
+  await env.FILES.put(frameKey(artifact), text, {
+    customMetadata: { mac: await manifestMac(env, artifact, text) },
+  });
 };
 
 /** Where the sweep left off: which prefix, and R2's cursor in it. */
@@ -355,7 +459,7 @@ const refused = (
 /**
  * A module of a build, as the frame imports it, or null when the path
  * isn't one: only with a token core made for that module that hasn't
- * expired (`frameAccess`).
+ * expired (`frameAccess`), and only bytes that hash to its address.
  */
 export const screenModuleResponse = async (
   env: Env,
@@ -373,7 +477,17 @@ export const screenModuleResponse = async (
   if (module === null) {
     return refused(404);
   }
-  return new Response(module.body, {
+  const code = await module.text();
+  const name = module.customMetadata?.name;
+  if (name === undefined || (await moduleHash(name, code)) !== hash) {
+    // Not what core staged under this address: never served. Gone, so
+    // the frame's document finds it missing and the next open stages the
+    // build again; meanwhile a miss nothing caches.
+    log.error("screen_frame.module_corrupt", { hash });
+    await env.FILES.delete(moduleKey(hash));
+    return refused(404, [], "no-store");
+  }
+  return new Response(code, {
     headers: {
       "content-type": "text/javascript; charset=utf-8",
       // The frame's origin is opaque, so its module requests are
@@ -459,7 +573,20 @@ export const screenFrameResponse = async (
   if (stored === null) {
     return refused(404);
   }
-  const manifest = await stored.json<FrameManifest>();
+  const text = await stored.text();
+  const parsed = frameManifestSchema.safeParse(
+    (await isManifestOf(env, artifact.data, text, stored.customMetadata?.mac))
+      ? JSON.parse(text)
+      : undefined
+  );
+  if (!parsed.success) {
+    // Not a manifest core staged for this build: it runs nothing, and
+    // goes, so the page's next open stages the build again.
+    log.error("screen_frame.manifest_corrupt", { artifact: artifact.data });
+    await env.FILES.delete(frameKey(artifact.data));
+    return refused(404, [], "no-store");
+  }
+  const manifest = parsed.data;
   if (!(await allStaged(env, Object.values(manifest.imports)))) {
     // A module the sweep took from under it: the manifest goes too, so
     // the page's next open stages the whole build again.
@@ -470,16 +597,25 @@ export const screenFrameResponse = async (
   const now = Date.now();
   const addressOf = (hash: string): string =>
     `${origin}${screenModulePath}/${hash}.js`;
-  const imports: Record<string, string> = Object.fromEntries(
-    await Promise.all(
-      Object.entries(manifest.imports).map(async ([name, hash]) => {
-        const access = await moduleAccess(env, hash, now);
-        const query = new URLSearchParams({ token: access }).toString();
-        return [name, `${addressOf(hash)}?${query}`] as const;
-      })
-    )
+  const addressed = await Promise.all(
+    Object.entries(manifest.imports).map(async ([name, hash]) => {
+      const access = await moduleAccess(env, hash, now);
+      const query = new URLSearchParams({ token: access }).toString();
+      return { name, hash, address: `${addressOf(hash)}?${query}` };
+    })
   );
-  const importMap = scriptJson({ imports });
+  const imports: Record<string, string> = Object.fromEntries(
+    addressed.map(({ name, address }) => [name, address])
+  );
+  // Keyed by the address a module resolves to, token and all, as the
+  // browser matches it.
+  const integrity: Record<string, string> = Object.fromEntries(
+    addressed.map(({ hash, address }) => [
+      address,
+      manifest.integrity[hash] ?? "",
+    ])
+  );
+  const importMap = scriptJson({ imports, integrity });
   const screen = scriptJson({
     artifact: artifact.data,
     entry: manifest.entry,
