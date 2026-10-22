@@ -10,6 +10,7 @@ import type {
   Tool,
 } from "@grasp-os/shared/brain";
 import {
+  brainGapSubjects,
   brainRecordErrors,
   brainRecordSchema,
   brainRecordsMaxPerType,
@@ -92,8 +93,13 @@ const heldOf = async (
   return new Map(rows.map(({ id, type, body }) => [id, { type, body }]));
 };
 
-/** What a reference must be: a record of a type, or of any type. */
-type ReferenceType = BrainRecordType | "any";
+/**
+ * What a reference must be: a record of a type, or a note (a record of
+ * one of `brainGapSubjects`), which is what a gap may be about.
+ */
+type ReferenceType = BrainRecordType | "note";
+
+const noteTypes: ReadonlySet<string> = new Set(brainGapSubjects);
 
 /** One thing a record names: a team may also be the onboarding's. */
 interface Reference {
@@ -145,7 +151,7 @@ const referencesOf = (record: BrainRecord): Reference[] => {
     case "gap": {
       return [
         { type: "source", id: record.sourceId },
-        ...record.about.map((id) => ({ type: "any" as const, id })),
+        ...record.about.map((id) => ({ type: "note" as const, id })),
       ];
     }
     default: {
@@ -269,7 +275,10 @@ const freshOf = (
   /** Whether `reference` is a record of its type, in the call or held. */
   const isRecord = ({ type, id }: Reference): boolean => {
     const found = before.get(id) ?? held.get(id)?.type;
-    return found !== undefined && (type === "any" || found === type);
+    return (
+      found !== undefined &&
+      (type === "note" ? noteTypes.has(found) : found === type)
+    );
   };
   const fresh: BrainRecord[] = [];
   for (const record of records) {
@@ -495,6 +504,21 @@ const collect = (held: HeldRecords, record: BrainRecord): void => {
   }
 };
 
+/** Oldest date first: a value added later for an earlier day goes before. */
+const byDate = <T extends { date: string }>(values: T[]): T[] =>
+  // A stable sort: values of one day keep the order they were added in,
+  // so the one added last counts, as the brain reads a history.
+  values.toSorted((a, b) => a.date.localeCompare(b.date));
+
+/**
+ * Puts `team`'s counts and stakeholders in date order, which is how the
+ * brain reads them (the last one counts), whatever order they came in.
+ */
+export const datedInOrder = (team: Team): void => {
+  team.counts = byDate(team.counts);
+  team.stakeholders = byDate(team.stakeholders);
+};
+
 /** Every record core keeps, in the order they were added. */
 export const readBrainRecords = async (env: Env): Promise<HeldRecords> => {
   const held: HeldRecords = {
@@ -534,5 +558,8 @@ export const readBrainRecords = async (env: Env): Promise<HeldRecords> => {
     teams.get(teamId)?.stakeholders.push(value);
     return !teams.has(teamId);
   });
+  for (const team of held.teams) {
+    datedInOrder(team);
+  }
   return held;
 };

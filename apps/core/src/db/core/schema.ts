@@ -2498,25 +2498,30 @@ export const platformVersions = sqliteTable("platform_versions", {
 });
 
 /**
- * What core tells a person in the product (src/notifications.ts): for
- * now, that a workflow failed while acting for them (`run_failed`). One
- * unread row per person, App and workflow: another failure while it is
- * unread counts on it (`failures`) and names the latest run (`run_id`), so
- * a workflow that fails every minute makes one row, not thousands. Once
- * read (`read_at`), the next failure makes a new one. The person's rows
- * read over 30 days ago go when they next read, and all of them when
- * they are removed from the organization.
+ * What core tells a person in the product (src/notifications.ts): that a
+ * workflow failed while acting for them (`run_failed`), or that an admin
+ * asked them one of the brain's open questions (`gap_asked`,
+ * src/brain-gaps.ts). A `run_failed` row has its App, workflow, run and
+ * failures, and no gap; a `gap_asked` row its gap alone, once per person
+ * and gap. One unread `run_failed` row per person, App and workflow:
+ * another failure while it is unread counts on it (`failures`) and names
+ * the latest run (`run_id`), so a workflow that fails every minute makes
+ * one row, not thousands. Once read (`read_at`), the next failure makes a
+ * new one. The person's rows read over 30 days ago go when they next
+ * read, and all of them when they are removed from the organization.
  */
 export const notifications = sqliteTable(
   "notifications",
   {
     id: text().primaryKey(),
     personId: text("person_id").notNull(),
-    type: text({ enum: ["run_failed"] }).notNull(),
-    appId: text("app_id").notNull(),
-    workflowId: text("workflow_id").notNull(),
-    runId: text("run_id").notNull(),
-    failures: integer().notNull(),
+    type: text({ enum: ["run_failed", "gap_asked"] }).notNull(),
+    appId: text("app_id"),
+    workflowId: text("workflow_id"),
+    runId: text("run_id"),
+    failures: integer(),
+    /** The gap a `gap_asked` row asks about: its brain record id. */
+    gapId: text("gap_id"),
     createdAt: timestamp("created_at").notNull(),
     /** When it last changed: the latest failure it counts. */
     updatedAt: timestamp("updated_at").notNull(),
@@ -2533,6 +2538,10 @@ export const notifications = sqliteTable(
     uniqueIndex("notifications_unread_idx")
       .on(table.personId, table.type, table.appId, table.workflowId)
       .where(sql`read_at IS NULL`),
+    // A person is asked about a gap once.
+    uniqueIndex("notifications_gap_idx")
+      .on(table.personId, table.gapId)
+      .where(sql`gap_id IS NOT NULL`),
   ]
 );
 

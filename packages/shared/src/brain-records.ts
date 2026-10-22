@@ -174,7 +174,7 @@ const teamRecordSchema = z.strictObject({
   type: z.literal("team"),
   // `team-` is the onboarding's (`team-<id>` for a roster team, now or
   // later): a team record's id never takes it, so one id is one team.
-  id: brainRecordIdSchema.refine(
+  id: ownIdSchema.refine(
     (id) => !id.startsWith("team-"),
     "Ids starting with team- are the onboarding's."
   ),
@@ -190,7 +190,7 @@ const teamRecordSchema = z.strictObject({
  */
 const teamCountRecordSchema = z.strictObject({
   type: z.literal("teamCount"),
-  id: brainRecordIdSchema,
+  id: ownIdSchema,
   teamId: brainTeamIdSchema,
   sourceId: brainRecordIdSchema,
   date: day,
@@ -210,7 +210,7 @@ const teamCountRecordSchema = z.strictObject({
 /** The role interviewed for a team, as one source named it: never the person. */
 const stakeholderRecordSchema = z.strictObject({
   type: z.literal("stakeholder"),
-  id: brainRecordIdSchema,
+  id: ownIdSchema,
   teamId: brainTeamIdSchema,
   sourceId: brainRecordIdSchema,
   date: day,
@@ -219,15 +219,31 @@ const stakeholderRecordSchema = z.strictObject({
 
 const gapRecordSchema = z.strictObject({
   type: z.literal("gap"),
-  id: brainRecordIdSchema,
+  id: ownIdSchema,
   question: z.string().trim().min(1).max(brainGapTextMaxLength),
   /** The role that can answer it. */
   owner: label,
   /** Where it was noticed. */
   sourceId: brainRecordIdSchema,
-  /** The brain's records it is about: statements, tools, candidates, teams. */
+  /**
+   * The brain's notes it is about: statements, tools, candidates and team
+   * records (`brainGapSubjects`), never a value such as a team's count.
+   */
   about: ids,
 });
+
+/**
+ * What a gap may be about: the records that are notes of their own, so
+ * each opens its page. A team's count or stakeholder is a value of its
+ * team, a source is where it was noticed (`sourceId`), and another gap
+ * is a question, not a note.
+ */
+export const brainGapSubjects = [
+  "statement",
+  "tool",
+  "candidate",
+  "team",
+] as const;
 
 /** One record `brain.addRecords` takes, on `type`. */
 export const brainRecordSchema = z.discriminatedUnion("type", [
@@ -281,4 +297,6 @@ export const brainGapErrors = defineErrorFamily({
   "brain.gap_not_found": "The brain has no such question.",
   "brain.gap_closed": "That question is closed already.",
   "brain.gap_invalid": "That isn't an answer the brain takes.",
+  "brain.gap_no_owner":
+    "Nobody who can sign in holds that question's role on the staff list, so there is no one to ask yet.",
 });

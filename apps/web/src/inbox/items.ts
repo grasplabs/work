@@ -1,6 +1,6 @@
 import type { PendingAction, UnknownOutcome } from "@grasp-os/shared/connect";
 import type { DependencyRequest } from "@grasp-os/shared/dependencies";
-import type { Notification } from "@grasp-os/shared/notifications";
+import type { RunFailedNotification } from "@grasp-os/shared/notifications";
 import type { Permission } from "@grasp-os/shared/permissions";
 import type { ScreensWaiting } from "@grasp-os/shared/screen-trust";
 import { i18n } from "@lingui/core";
@@ -62,7 +62,11 @@ export type InboxSource =
   | { type: "request"; request: Permission; pending: PendingRequests }
   | { type: "packages"; request: DependencyRequest; policyGeneration: number }
   | { type: "screens"; waiting: ScreensWaiting }
-  | { type: "failed"; notification: Notification; model: string | undefined }
+  | {
+      type: "failed";
+      notification: RunFailedNotification;
+      model: string | undefined;
+    }
   | { type: "reconnect"; integration: string };
 
 export interface InboxItem {
@@ -329,9 +333,12 @@ const screenItems = (
 
 /** A workflow that failed while acting for the person, with a way to ask the agent to fix it. */
 const failedItems = (failed: NotificationsPage, me: string): InboxItem[] =>
-  failed.page.notifications.map((notification) => {
+  failed.page.notifications.flatMap((notification): InboxItem[] => {
+    if (notification.type !== "run_failed") {
+      return [];
+    }
     const { app, appName, workflow, failures, at } = notification;
-    return {
+    const item: InboxItem = {
       id: `failed:${notification.id}`,
       kind: "failedRun",
       title: t`${workflow} in ${appName} failed`,
@@ -353,6 +360,7 @@ const failedItems = (failed: NotificationsPage, me: string): InboxItem[] =>
       urgent: false,
       source: { type: "failed", notification, model: failed.model },
     };
+    return [item];
   });
 
 /** What is ready of a part of what waits; nothing of one that couldn't be read. */

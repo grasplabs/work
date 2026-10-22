@@ -38,7 +38,11 @@ import {
   redactGapAnswer,
 } from "./brain-gaps.ts";
 import { brainNotes } from "./brain-notes.ts";
-import { addBrainRecords, readBrainRecords } from "./brain-records.ts";
+import {
+  addBrainRecords,
+  datedInOrder,
+  readBrainRecords,
+} from "./brain-records.ts";
 import type { HeldRecords } from "./brain-records.ts";
 import { catalogEntries, personOf } from "./connections.ts";
 import { organizations } from "./db/core/schema.ts";
@@ -593,8 +597,18 @@ const teamsOf = (onboarding: Team[], records: HeldRecords): Team[] => {
   for (const { teamId, value } of records.stakeholders) {
     byId.get(teamId)?.stakeholders.push(value);
   }
+  for (const team of onboarding) {
+    datedInOrder(team);
+  }
   return [...onboarding, ...records.teams];
 };
+
+/** The sources `team` names: where it was found, and each of its values. */
+const teamSources = ({ sourceId, counts, stakeholders }: Team): string[] => [
+  sourceId,
+  ...counts.map((count) => count.sourceId),
+  ...stakeholders.map((stakeholder) => stakeholder.sourceId),
+];
 
 /**
  * The Playbook's gaps, with what became of each, as every member reads
@@ -604,9 +618,11 @@ export const brainGaps = async (
   env: Env,
   // The one access point the brain page and an agent share: per-team gaps
   // would be filtered here for both. Today every member reads every gap.
-  _person: Pick<Identity, "userId" | "role" | "teams">
+  _person: Pick<Identity, "userId" | "role" | "teams">,
+  // The records `brain.read` loaded already, so it reads them once.
+  loaded?: HeldRecords
 ): Promise<Gap[]> => {
-  const { gaps } = await readBrainRecords(env);
+  const { gaps } = loaded ?? (await readBrainRecords(env));
   return await gapsWith(env, gaps);
 };
 
@@ -628,15 +644,17 @@ export const readBrain = async (
     people: facts?.view.roster?.people.length ?? 0,
   };
 
-  const teams = onboardingTeams(facts);
-  // A member reads the onboarding's sources only as the records naming
-  // them need: when each came in, so a fact shows where it came from.
+  const onboarding = onboardingTeams(facts);
+  const teams = teamsOf(onboarding, records);
+  // A member reads the onboarding's sources only as the records it reads
+  // name them: when each came in, so a fact shows where it came from.
   const named = new Set(
-    [...records.tools, ...records.statements].flatMap(({ sourceId }) =>
-      sourceId === kickoffSourceId || sourceId === rosterSourceId
-        ? [sourceId]
-        : []
-    )
+    [
+      ...[...records.tools, ...records.statements, ...records.gaps].map(
+        ({ sourceId }) => sourceId
+      ),
+      ...teams.flatMap(teamSources),
+    ].filter((id) => id === kickoffSourceId || id === rosterSourceId)
   );
   const sources =
     facts === null
@@ -647,12 +665,12 @@ export const readBrain = async (
     company,
     vision: visionOf(facts),
     goals: [],
-    teams: teamsOf(teams, records),
-    tools: [...documentTools(facts, teamsByName(teams)), ...records.tools],
+    teams,
+    tools: [...documentTools(facts, teamsByName(onboarding)), ...records.tools],
     sources: [...sources, ...records.sources],
     statements: records.statements,
     candidates: records.candidates,
-    gaps: await brainGaps(env, person),
+    gaps: await brainGaps(env, person, records),
     workflows: [],
     connections,
     landscape: [],

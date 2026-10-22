@@ -1,4 +1,4 @@
-import { actorOf } from "@grasp-os/shared/audit";
+import { actorOf, createAuditEvent } from "@grasp-os/shared/audit";
 import type { Gap } from "@grasp-os/shared/brain";
 import {
   brainGapAnswerSchema,
@@ -9,12 +9,25 @@ import {
 import { issuesOf } from "@grasp-os/shared/errors";
 import { isMemberAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
-import { auditedBatch, outboxed, outboxedIfChanged } from "./audit-outbox.ts";
+import {
+  auditedBatch,
+  outboxed,
+  outboxedEventWhere,
+  outboxedIfChanged,
+  storedEvent,
+} from "./audit-outbox.ts";
+import { activeMember } from "./auth/auth.ts";
 import type { GapRecord } from "./brain-records.ts";
-import { brainGapStates, brainRecords, users } from "./db/core/schema.ts";
+import {
+  brainGapStates,
+  brainRecords,
+  notifications,
+  users,
+} from "./db/core/schema.ts";
+import { onboardingStore } from "./onboarding/store.ts";
 
 // What became of the Playbook's gaps (`brain.askAboutGap`, `answerGap`,
 // `closeGap`): the gap record itself is never written over (brain-records
@@ -23,8 +36,7 @@ import { brainGapStates, brainRecords, users } from "./db/core/schema.ts";
 // (the design is on GRA-527, the chat that answers from it on GRA-531):
 //
 // - Someone asking about or closing a gap who shouldn't: the company's own
-//   admins alone ask (Grasp sends the question to its owner), close one
-//   unanswered and redact an answer; Grasp staff, admins too, never decide
+//   admins alone ask, close one unanswered and redact an answer; Grasp staff, admins too, never decide
 //   a client's gaps. Every member may answer, in their own words, as the
 //   brain is theirs to fill in; staff may not. Each answer is audited.
 // - An answerer's name frozen at write: an answer keeps who gave it by
@@ -38,6 +50,17 @@ import { brainGapStates, brainRecords, users } from "./db/core/schema.ts";
 // - An answer in the audit log: events name the gap, never its answer.
 // - An agent answering for a person: these are a person's own calls on
 //   `/rpc`, never on App or agent stubs.
+// - An ask that reaches nobody, shown as asked: an ask is delivered as a
+//   notification to each member holding the gap's role (`ownersOf`: the
+//   staff list's title, matched to the member by the email they sign in
+//   with), written in the batch that marks it asked, and only while one
+//   of them is a member; with nobody to ask it is refused
+//   (`brain.gap_no_owner`) and nothing is kept.
+// - An ask reaching the wrong person: only a member whose staff-list
+//   title is the gap's role, never someone removed (`activeMember`, in
+//   the batch), at most `maxAsked` of them. The notification carries the
+//   gap's id; its question, which every member reads anyway, is read
+//   from the record as it is listed, and only while the gap is open.
 
 type GapState = typeof brainGapStates.$inferSelect;
 
@@ -155,9 +178,57 @@ const requireMemberAdmin = (person: Identity): void => {
   }
 };
 
+/** Most people one ask reaches: those holding the role, by name. */
+const maxAsked = 20;
+
+/** A role or title as compared: case and spacing aside. */
+const roleKey = (role: string): string =>
+  role.trim().replaceAll(/\s+/gu, " ").toLowerCase();
+
 /**
- * Records that `gapId`'s owner was asked, once, as `person`: for admins.
- * Asking again changes nothing; a closed gap is refused.
+ * The members who hold `owner`, the role a gap names: those on the
+ * staff list (the onboarding's roster) with that title, found by the
+ * email they sign in with, while they are members. At most
+ * {@link maxAsked}, by name.
+ */
+const ownersOf = async (env: Env, owner: string): Promise<string[]> => {
+  const { roster } = await onboardingStore(env).view();
+  const emails = [
+    ...new Set(
+      (roster?.people ?? [])
+        .filter(
+          ({ title, email }) =>
+            email !== "" && roleKey(title) === roleKey(owner)
+        )
+        .map(({ email }) => email.toLowerCase())
+    ),
+  ];
+  if (emails.length === 0) {
+    return [];
+  }
+  const rows = await drizzle(env.DB)
+    .select({ id: users.id })
+    .from(users)
+    .where(
+      and(
+        // Every email as one bound parameter: D1 binds at most 100.
+        sql`lower(${users.email}) IN (SELECT value FROM json_each(${JSON.stringify(emails)}))`,
+        activeMember(users.id)
+      )
+    )
+    .orderBy(asc(users.name), asc(users.id))
+    .limit(maxAsked);
+  return rows.map(({ id }) => id);
+};
+
+/**
+ * Asks `gapId` of the members who hold its owner's role (`ownersOf`), as
+ * `person`, once: for admins. The ask is kept with a notification for
+ * each of them in one batch, so the gap shows as asked only once its
+ * question is theirs to read (notifications.ts): never when nobody holds
+ * the role, nor when none of them is a member by the time it is written.
+ * Asking an open gap again changes nothing; a closed gap is refused,
+ * closed before the ask or while it was made.
  */
 export const askAboutGap = async (
   env: Env,
@@ -170,23 +241,68 @@ export const askAboutGap = async (
   if (before.closedAt !== undefined) {
     throw brainGapErrors.create("brain.gap_closed");
   }
+  if (before.askedAt !== undefined) {
+    return before;
+  }
+  const owners = await ownersOf(env, gap.owner);
+  const [first, ...rest] = owners;
+  if (first === undefined) {
+    throw brainGapErrors.create("brain.gap_no_owner");
+  }
   const db = drizzle(env.DB);
-  await auditedBatch(env, db, [
+  const now = Date.now();
+  const anyOwner = sql.join(
+    owners.map((owner) => activeMember(owner)),
+    sql` OR `
+  );
+  const event = createAuditEvent(
+    {
+      actor: actorOf(person),
+      action: "brain.gap.asked",
+      target: { type: "brain_gap", id: gap.id },
+      // Whom it was asked of, by user id: never their emails.
+      provenance: owners,
+      detail: { asked: owners.length },
+    },
+    "core"
+  );
+  /** The notification that asks `owner`, once the ask is recorded. */
+  const notify = (owner: string) =>
+    db
+      .insert(notifications)
+      .select(
+        sql`SELECT ${crypto.randomUUID()}, ${owner}, 'gap_asked', NULL, NULL, NULL, NULL, ${gap.id}, ${now}, ${now}, NULL WHERE ${storedEvent(event.id)} AND ${activeMember(owner)}`
+      )
+      .onConflictDoNothing();
+  const [asked] = await auditedBatch(env, db, [
+    // The WHERE keeps SQLite from reading ON CONFLICT as a join.
     db
       .insert(brainGapStates)
-      .values({ gapId: gap.id, askedAt: new Date() })
+      .select(
+        sql`SELECT ${gap.id}, ${now}, NULL, NULL, NULL WHERE (${anyOwner})`
+      )
       .onConflictDoUpdate({
         target: brainGapStates.gapId,
         set: { askedAt: sql`excluded.asked_at` },
         setWhere: sql`${brainGapStates.askedAt} IS NULL AND ${brainGapStates.closedAt} IS NULL`,
       }),
-    outboxedIfChanged(db, {
-      actor: actorOf(person),
-      action: "brain.gap.asked",
-      target: { type: "brain_gap", id: gap.id },
-    }),
+    outboxedEventWhere(db, event, sql`changes() > 0`),
+    notify(first),
+    ...rest.map(notify),
   ]);
-  return await readGap(env, gap);
+  const after = await readGap(env, gap);
+  // Asked by this call only if its guarded write changed the row: an
+  // answer or close that landed first leaves it closed, and none of the
+  // owners a member any more leaves it unasked.
+  if (asked.meta.changes === 0) {
+    if (after.closedAt !== undefined) {
+      throw brainGapErrors.create("brain.gap_closed");
+    }
+    if (after.askedAt === undefined) {
+      throw brainGapErrors.create("brain.gap_no_owner");
+    }
+  }
+  return after;
 };
 
 /**

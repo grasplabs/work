@@ -35,6 +35,42 @@ const roster: RosterInput = {
   people: [{ id: "ann", name: "Ann", team: "finance", title: "Accountant" }],
 };
 
+type Signed = Awaited<ReturnType<typeof signedInApi>>;
+
+/**
+ * Saves a staff list on which each of `holders` has the title `role`, by
+ * the email they sign in with, and Ann is the Finance team's accountant.
+ */
+const rosterWith = async (
+  admin: Signed,
+  role: string,
+  ...holders: Signed[]
+): Promise<void> => {
+  await admin.api.onboarding.saveRoster({
+    teams: roster.teams,
+    people: [
+      ...roster.people,
+      ...holders.map(({ userId, person }, index) => ({
+        id: `p-${userId}`.replaceAll(/[^A-Za-z0-9_-]/gu, "").slice(0, 60),
+        name: `Holder ${index + 1}`,
+        email: String(person.email),
+        team: "finance",
+        title: role,
+      })),
+    ],
+  });
+};
+
+/** The questions `person` was asked, as their notifications list them. */
+const askedOf = async (person: Signed) => {
+  const { notifications } = await person.api.notifications.list();
+  return notifications.flatMap((notice) =>
+    notice.type === "gap_asked"
+      ? [{ gap: notice.gap, question: notice.question, owner: notice.owner }]
+      : []
+  );
+};
+
 /** Grasp's staff, signed in to the deployment. */
 const staff = async () => {
   const session = await signedIn(idp, "grasp-staff", staffPerson());
@@ -153,7 +189,7 @@ describe("the Playbook's teams and gaps", { timeout: 120_000 }, () => {
         id: `count-${tag}-2`,
         teamId: "team-finance",
         sourceId: `src-${tag}`,
-        date: "2026-10-21",
+        date: "2026-10-01",
         people: 2,
       },
     ]);
@@ -194,10 +230,11 @@ describe("the Playbook's teams and gaps", { timeout: 120_000 }, () => {
           { sourceId: `src-${tag}`, date: "2026-10-20", role: "Head of sales" },
         ],
       },
-      // The roster's own count, then the Playbook's, the newest counting.
+      // By date: the Playbook's of an earlier day, then the roster's own of
+      // today, the newest counting.
       financeCounts: [
-        { sourceId: "src-roster", people: 1 },
         { sourceId: `src-${tag}`, people: 2 },
+        { sourceId: "src-roster", people: 1 },
       ],
       // The onboarding's team is the admin's to see; the Playbook's isn't.
       memberTeams: [team],
@@ -290,20 +327,220 @@ describe("the Playbook's teams and gaps", { timeout: 120_000 }, () => {
     });
   });
 
-  it("are asked about once by an admin, answered once by any member in their own name, and audited without the answer", async () => {
+  it("refuse the onboarding's source ids as any record's own id, and a gap about what isn't a note", async () => {
+    const admin = await signedInApi(idp, "admin");
+    await admin.api.onboarding.saveRoster(roster);
+    const tag = unique();
+    const team = `team${tag}`;
+    await admin.api.brain.addRecords([
+      { type: "team", id: team, name: "Sales", sourceId: "src-roster" },
+      {
+        type: "teamCount",
+        id: `count-${tag}`,
+        teamId: team,
+        sourceId: "src-roster",
+        date: "2026-10-20",
+        people: 4,
+      },
+    ]);
+    const taking = (id: string): BrainRecordInput[] => [
+      { type: "team", id, name: "Legal", sourceId: "src-roster" },
+      {
+        type: "teamCount",
+        id,
+        teamId: team,
+        sourceId: "src-roster",
+        date: "2026-10-20",
+        people: 3,
+      },
+      {
+        type: "stakeholder",
+        id,
+        teamId: team,
+        sourceId: "src-roster",
+        date: "2026-10-20",
+        role: "Head of sales",
+      },
+      {
+        type: "gap",
+        id,
+        question: "Who signs off on invoices?",
+        owner: "Head of finance",
+        sourceId: "src-roster",
+        about: [],
+      },
+    ];
+    const gapAbout = async (about: string) =>
+      await outcome(
+        admin.api.brain.addRecords([
+          {
+            type: "gap",
+            id: `gap-${tag}-${about}`,
+            question: "How big is the team?",
+            owner: "Head of sales",
+            sourceId: "src-roster",
+            about: [about],
+          },
+        ])
+      );
+
+    const ownIds: Record<string, string> = {};
+    for (const record of [...taking("src-roster"), ...taking("src-kickoff")]) {
+      // oxlint-disable-next-line no-await-in-loop -- one call per record
+      ownIds[`${record.type}:${record.id}`] = await outcome(
+        admin.api.brain.addRecords([record])
+      );
+    }
+
+    expect({
+      ownIds,
+      aboutTeam: await gapAbout(team),
+      aboutCount: await gapAbout(`count-${tag}`),
+      aboutSource: await gapAbout("src-roster"),
+    }).toStrictEqual({
+      ownIds: {
+        "team:src-roster": "brain.record_invalid",
+        "teamCount:src-roster": "brain.record_invalid",
+        "stakeholder:src-roster": "brain.record_invalid",
+        "gap:src-roster": "brain.record_invalid",
+        "team:src-kickoff": "brain.record_invalid",
+        "teamCount:src-kickoff": "brain.record_invalid",
+        "stakeholder:src-kickoff": "brain.record_invalid",
+        "gap:src-kickoff": "brain.record_invalid",
+      },
+      // A team record is a note; its count and the source aren't.
+      aboutTeam: "ok",
+      aboutCount: "brain.record_missing",
+      aboutSource: "brain.record_missing",
+    });
+  });
+
+  it("show members the onboarding source a gap or team names, and each team's values in date order", async () => {
     const admin = await signedInApi(idp, "admin");
     const member = await signedInApi(idp, "user");
+    await admin.api.onboarding.saveRoster(roster);
+    const tag = unique();
+    const team = `team${tag}`;
+    const source = `src-${tag}`;
+    // The file's other tests share the database: none of their records
+    // may name the staff list here.
+    await env.DB.prepare(
+      "DELETE FROM brain_records WHERE body LIKE '%\"src-roster\"%'"
+    ).run();
+    const sourcesOf = async () => {
+      const read = await member.api.brain.read();
+      return read.sources
+        .map(({ id }) => id)
+        .filter((id) => id === "src-roster");
+    };
+    const before = await sourcesOf();
+    await admin.api.brain.addRecords([
+      {
+        type: "gap",
+        id: `gap-${tag}`,
+        question: "Who keeps the staff list?",
+        owner: "Head of finance",
+        sourceId: "src-roster",
+        about: [],
+      },
+    ]);
+    const withGap = await sourcesOf();
+    await admin.api.brain.addRecords([
+      {
+        type: "source",
+        id: source,
+        kind: "interview",
+        title: "Sales interview",
+        date: "2026-10-22",
+      },
+      { type: "team", id: team, name: "Sales", sourceId: source },
+      // Added out of date order: the brain reads them oldest first, a
+      // day's values in the order they were added.
+      ...[
+        ["late", "2026-10-21", 6],
+        ["early", "2026-10-20", 4],
+        ["early-again", "2026-10-20", 5],
+      ].map(([id, date, people]) => ({
+        type: "teamCount" as const,
+        id: `count-${tag}-${id}`,
+        teamId: team,
+        sourceId: source,
+        date: String(date),
+        people: Number(people),
+      })),
+      {
+        type: "stakeholder",
+        id: `holder-${tag}-late`,
+        teamId: team,
+        sourceId: source,
+        date: "2026-10-21",
+        role: "Head of sales",
+      },
+      {
+        type: "stakeholder",
+        id: `holder-${tag}-early`,
+        teamId: team,
+        sourceId: source,
+        date: "2026-10-20",
+        role: "Sales lead",
+      },
+      // Before the staff list was saved, for the roster's team.
+      {
+        type: "teamCount",
+        id: `count-${tag}-finance`,
+        teamId: "team-finance",
+        sourceId: source,
+        date: "2020-01-01",
+        people: 2,
+      },
+    ]);
+    const asMember = await member.api.brain.read();
+    const asAdmin = await admin.api.brain.read();
+    const sales = asMember.teams.find(({ id }) => id === team);
+
+    expect({
+      before,
+      withGap,
+      counts: sales?.counts.map(({ date, people }) => ({ date, people })),
+      stakeholders: sales?.stakeholders.map(({ role }) => role),
+      finance: asAdmin.teams
+        .find(({ id }) => id === "team-finance")
+        ?.counts.map(({ sourceId }) => sourceId)
+        .filter((id) => id === source || id === "src-roster"),
+    }).toStrictEqual({
+      before: [],
+      withGap: ["src-roster"],
+      counts: [
+        { date: "2026-10-20", people: 4 },
+        { date: "2026-10-20", people: 5 },
+        { date: "2026-10-21", people: 6 },
+      ],
+      stakeholders: ["Sales lead", "Head of sales"],
+      finance: [source, "src-roster"],
+    });
+  });
+
+  it("are asked by an admin once of who holds the role, answered once by any member in their own name, and audited without the answer", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const member = await signedInApi(idp, "user");
+    const owner = await signedInApi(idp, "user");
     const { ids, records } = gapRecords(unique());
     await admin.api.brain.addRecords(records);
+    // The question's role, as the staff list gives a title: case aside.
+    await rosterWith(admin, "head of Finance", owner);
     const { name } = await member.api.whoami();
 
     const refusedAsk = await outcome(member.api.brain.askAboutGap(ids.gap));
     const refusedClose = await outcome(member.api.brain.closeGap(ids.gap));
     let asked: unknown;
     let answered: unknown;
+    let toldOwner: unknown;
+    let toldMember: unknown;
     const events = await auditedDuring(async () => {
       asked = await admin.api.brain.askAboutGap(ids.gap);
       await admin.api.brain.askAboutGap(ids.gap);
+      toldOwner = await askedOf(owner);
+      toldMember = await askedOf(member);
       answered = await member.api.brain.answerGap(ids.gap, "About 400.");
     });
     const again = {
@@ -318,11 +555,20 @@ describe("the Playbook's teams and gaps", { timeout: 120_000 }, () => {
       refusedAsk,
       refusedClose,
       asked,
+      toldOwner,
+      toldMember,
       answered,
       events: events
         .filter(({ action }) => action.startsWith("brain.gap"))
-        .map(({ action, target, detail }) => ({ action, target, detail })),
+        .map(({ action, target, detail, provenance }) => ({
+          action,
+          target,
+          detail,
+          provenance,
+        })),
       again,
+      // An answered question is no longer the owner's to answer.
+      ownerAfter: await askedOf(owner),
       gap: read.gaps.find(({ id }) => id === ids.gap),
     }).toStrictEqual({
       refusedAsk: "role.forbidden",
@@ -335,6 +581,15 @@ describe("the Playbook's teams and gaps", { timeout: 120_000 }, () => {
         about: [ids.candidate],
         askedAt: today,
       },
+      // The owner is asked, once however often the admin asks; nobody else.
+      toldOwner: [
+        {
+          gap: ids.gap,
+          question: "How many invoices come in a month?",
+          owner: "Head of finance",
+        },
+      ],
+      toldMember: [],
       answered: {
         id: ids.gap,
         question: "How many invoices come in a month?",
@@ -346,17 +601,20 @@ describe("the Playbook's teams and gaps", { timeout: 120_000 }, () => {
         answer: "About 400.",
         answeredBy: name,
       },
-      // Asked once, however often; the answer itself isn't in the log.
+      // Asked once, however often, naming whom by id; the answer itself
+      // isn't in the log.
       events: [
         {
           action: "brain.gap.asked",
           target: { type: "brain_gap", id: ids.gap },
-          detail: {},
+          detail: { asked: 1 },
+          provenance: [owner.userId],
         },
         {
           action: "brain.gap.answered",
           target: { type: "brain_gap", id: ids.gap },
           detail: {},
+          provenance: [],
         },
       ],
       again: {
@@ -364,6 +622,7 @@ describe("the Playbook's teams and gaps", { timeout: 120_000 }, () => {
         close: "brain.gap_closed",
         ask: "brain.gap_closed",
       },
+      ownerAfter: [],
       gap: {
         id: ids.gap,
         question: "How many invoices come in a month?",
@@ -375,6 +634,99 @@ describe("the Playbook's teams and gaps", { timeout: 120_000 }, () => {
         answer: "About 400.",
         answeredBy: name,
       },
+    });
+  });
+
+  it("aren't asked, nor shown as asked, when nobody who can sign in holds the role", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const owner = await signedInApi(idp, "user");
+    const leaver = await signedInApi(idp, "user");
+    const { ids, records } = gapRecords(unique());
+    await admin.api.brain.addRecords(records);
+
+    // Nobody on the staff list has the role.
+    await rosterWith(admin, "Head of sales", owner);
+    const noTitle = await outcome(admin.api.brain.askAboutGap(ids.gap));
+    // The only one who has it was removed from the organization.
+    await rosterWith(admin, "Head of finance", leaver);
+    await admin.api.members.remove(leaver.userId);
+    const removed = await outcome(admin.api.brain.askAboutGap(ids.gap));
+    const read = await admin.api.brain.read();
+
+    expect({
+      noTitle,
+      removed,
+      askedAt: read.gaps.find(({ id }) => id === ids.gap)?.askedAt,
+      told: await askedOf(owner),
+    }).toStrictEqual({
+      noTitle: "brain.gap_no_owner",
+      removed: "brain.gap_no_owner",
+      askedAt: undefined,
+      told: [],
+    });
+  });
+
+  it("are refused as closed when an answer lands while the ask is made, and asked of the owner once when two admins ask at once", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const other = await signedInApi(idp, "admin");
+    const owner = await signedInApi(idp, "user");
+    await rosterWith(admin, "Head of finance", owner);
+    const answered = gapRecords(unique());
+    const twice = gapRecords(unique());
+    await admin.api.brain.addRecords([...answered.records, ...twice.records]);
+
+    /** Asks `gap` as the admin while `racing` lands just before its write. */
+    const racedBy = async (
+      gap: string,
+      racing: () => Promise<unknown>
+    ): Promise<unknown> => {
+      const prepare = env.DB.prepare.bind(env.DB);
+      const batch = env.DB.batch.bind(env.DB);
+      let writing = false;
+      let raced = false;
+      const prepared = vi
+        .spyOn(env.DB, "prepare")
+        .mockImplementation((query) => {
+          writing ||=
+            !raced && query.startsWith('insert into "brain_gap_states"');
+          return prepare(query);
+        });
+      const batched = vi
+        .spyOn(env.DB, "batch")
+        .mockImplementation(async (statements) => {
+          if (writing && !raced) {
+            raced = true;
+            await racing();
+          }
+          return await batch(statements);
+        });
+      try {
+        return await outcome(admin.api.brain.askAboutGap(gap));
+      } finally {
+        prepared.mockRestore();
+        batched.mockRestore();
+      }
+    };
+
+    const closed = await racedBy(
+      answered.ids.gap,
+      async () =>
+        await owner.api.brain.answerGap(answered.ids.gap, "About 400.")
+    );
+    const asked = await racedBy(
+      twice.ids.gap,
+      async () => await other.api.brain.askAboutGap(twice.ids.gap)
+    );
+
+    const told = await askedOf(owner);
+    expect({
+      closed,
+      asked,
+      told: told.map(({ gap }) => gap),
+    }).toStrictEqual({
+      closed: "brain.gap_closed",
+      asked: "ok",
+      told: [twice.ids.gap],
     });
   });
 
