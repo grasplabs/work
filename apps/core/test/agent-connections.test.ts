@@ -615,6 +615,85 @@ describe("a chat's connections", setUpTime, () => {
     ]);
   });
 
+  it("withhold what a connection returned from the model once the grant it was read under goes, though a narrower one stays, and audit it", async () => {
+    const person = await signedInApi(idp, "user");
+    const admin = await signedInApi(idp, "admin");
+    const marker = `MARK-${crypto.randomUUID().slice(0, 8)}`;
+    // Searches held to the query they name, as the admin's rule says.
+    const mail = await mailConnection(
+      [],
+      ["mail.send", { name: "mail.search", read: true, resource: "query" }]
+    );
+    const chat = await chatOf(
+      person.userId,
+      codeStep(
+        `export default async (self, env) => (await env.connections.call("ALL", "mail.search", { query: ${JSON.stringify(marker)} })).output;`
+      ),
+      says("Found it."),
+      says("Gone.")
+    );
+    const permissionFor = async (binding: string, resource?: string) =>
+      await requestGranted(idp, admin, {
+        subject: chat.agent,
+        object: {
+          type: "connection",
+          connectionId: mail.id,
+          ...(resource === undefined ? {} : { resource }),
+        },
+        actions: ["mail.search"],
+        binding,
+      });
+    // Read under the grant for the whole connection; one for that very
+    // query, and one to send, stay once it goes.
+    const all = await permissionFor("ALL");
+    await permissionFor("ONE", marker);
+    await requestGranted(idp, admin, {
+      subject: chat.agent,
+      object: { type: "connection", connectionId: mail.id },
+      actions: ["mail.send"],
+      binding: "SEND",
+    });
+
+    await chat.ask("Find the mail.");
+    await admin.api.permissions.revoke(all);
+    await chat.ask("And now?");
+
+    expect(
+      chat.gateway.requests.slice(1).map(({ body }) => {
+        const sent = JSON.stringify(body);
+        return {
+          found: sent.includes(`${marker}-1`),
+          withheld: sent.includes(withheldResult),
+        };
+      })
+    ).toStrictEqual([
+      // Its result, as the code read it.
+      { found: true, withheld: false },
+      { found: false, withheld: true },
+    ]);
+    // Audited by the agent for its person: the grant the read rested on.
+    const events = await eventsOf(chat.agent.agentId, (found) =>
+      found.some(({ action }) => action === "chat.history_withheld")
+    );
+    expect(
+      events
+        .filter(({ action }) => action === "chat.history_withheld")
+        .map(({ target, detail }) => ({
+          target,
+          connection: detail.connection,
+          action: detail.action,
+          resource: detail.resource,
+        }))
+    ).toStrictEqual([
+      {
+        target: { type: "chat", id: chat.chat.id },
+        connection: mail.id,
+        action: "mail.search",
+        resource: null,
+      },
+    ]);
+  });
+
   it("keep a chat that read an EU-only connection to EU models, in every later turn", async () => {
     const { mail, chat, grant } = await setUp(
       codeStep(

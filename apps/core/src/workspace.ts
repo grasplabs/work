@@ -133,7 +133,7 @@ import {
   dashboards,
   emailPreferences,
 } from "./db/workspace/schema.ts";
-import { readableSources } from "./history-access.ts";
+import { readableSources, withheldSourceDetail } from "./history-access.ts";
 import { readAsDelegate } from "./knowledge/binding.ts";
 import { forContext } from "./knowledge/memory.ts";
 import { catalog, noteListedSkills } from "./knowledge/tools.ts";
@@ -372,6 +372,18 @@ export interface CodeRunOpening {
  * a few collections or a connection, each an identifier.
  */
 const sourcesSchema = z.array(identifierSchema).max(auditProvenanceMaxItems);
+
+/**
+ * Longest source a run's result rests on: a connection call's names its
+ * connection, action and resource, each up to an identifier
+ * (`connectionRead` in agent-scope.ts).
+ */
+const runReadMaxLength = 1024;
+
+/** What one API call of a code run read, as the run keeps it. */
+const runReadsSchema = z
+  .array(z.string().min(1).max(runReadMaxLength))
+  .max(auditProvenanceMaxItems);
 
 /** Most documents one read hands a chat's code: a page of hits or links. */
 const givenMaxPerRead = 1000;
@@ -1862,7 +1874,9 @@ export class Workspace extends DurableObject<Env> {
     chatId: ChatId,
     runId: string,
     ids: readonly string[],
-    documentIds: readonly string[] = []
+    documentIds: readonly string[] = [],
+    /** What the run's result rests on, if not `ids` (a connection call's grant). */
+    runReads?: readonly string[]
   ): CodeRunAdmission["call"] {
     const { call } = this.admitFromCodeRun(chatId, runId);
     if (call !== "open") {
@@ -1870,11 +1884,13 @@ export class Workspace extends DurableObject<Env> {
     }
     const sources = sourcesSchema.parse(ids);
     const given = givenSchema.parse(documentIds);
+    const reads =
+      runReads === undefined ? sources : runReadsSchema.parse(runReads);
     this.ctx.storage.transactionSync(() => {
       this.#keepSources(chatId, sources);
       this.#keepGiven(chatId, given);
       // And with the run: what its result rests on (`#withheldRuns`).
-      this.#keepRunSources(chatId, runId, sources);
+      this.#keepRunSources(chatId, runId, reads);
     });
     return call;
   }
@@ -1946,7 +1962,7 @@ export class Workspace extends DurableObject<Env> {
   ): CodeRunAdmission["call"] {
     const { call } = this.admitFromCodeRun(chatId, runId);
     if (call === "open") {
-      this.#keepRunSources(chatId, runId, sourcesSchema.parse(ids));
+      this.#keepRunSources(chatId, runId, runReadsSchema.parse(ids));
     }
     return call;
   }
@@ -2030,7 +2046,7 @@ export class Workspace extends DurableObject<Env> {
             detail: {
               workspace: this.ctx.id.name ?? null,
               run: runId,
-              source: sourceId,
+              ...withheldSourceDetail(sourceId),
             },
           });
         }

@@ -1,10 +1,11 @@
 import type { AppRole } from "@grasp-os/shared/apps";
+import type { AuditDetailValue } from "@grasp-os/shared/audit";
 import type { Permission } from "@grasp-os/shared/permissions";
 import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { connectionGrants } from "./agent-connections.ts";
-import { chatAuthority, chatContext } from "./agent-scope.ts";
+import { chatAuthority, chatContext, connectionReadOf } from "./agent-scope.ts";
 import type { AgentScope } from "./agent-scope.ts";
 import { appFor } from "./apps.ts";
 import { memberOf } from "./auth/identity.ts";
@@ -17,13 +18,15 @@ import { grantedPermissions } from "./permissions.ts";
 
 // What a chat's earlier code results may still send to the model (GRA-690).
 // A result rests on what its run read, each recorded with the run:
-// collections and connections (`recordSources`), and an App's answer,
-// exports or files and the Knowledge catalog's collections
-// (`recordRunReads`). Before every model request the chat asks which of
-// those its agent may still read for its person, as a read made now would
-// be decided, and withholds the results of every run that read one it may
-// not (`withholdRuns` in agent.ts): a person who left a team or an App, an
-// agent whose grant was revoked, a collection or App deleted.
+// collections and each connection call, with the action and resource its
+// grant allowed (`recordSources`), and an App's answer, exports or files
+// and the Knowledge catalog's collections (`recordRunReads`). Before every
+// model request the chat asks which of those its agent may still read for
+// its person, as a read made now would be decided, and withholds the
+// results of every run that read one it may not (`withholdRuns` in
+// agent.ts): a person who left a team or an App, an agent whose grant was
+// revoked (the one a connection call was made under, whatever other grant
+// on that connection stays), a collection or App deleted.
 
 /** How a run read an App, each checked as a read made now would be. */
 const appReads = {
@@ -88,6 +91,86 @@ const appReadNeeds = (
   };
 };
 
+/**
+ * What the audit names of a withheld source: a connection call's
+ * connection, action and resource, each an identifier; any other source
+ * by its ID.
+ */
+export const withheldSourceDetail = (
+  source: string
+): Record<string, AuditDetailValue> => {
+  const read = connectionReadOf(source);
+  return read === undefined
+    ? { source }
+    : {
+        connection: read.connectionId,
+        action: read.action,
+        resource: read.resource,
+      };
+};
+
+/**
+ * Whether `grant` allows `read` now: the same connection and action, for
+ * the same resource or the whole connection. A grant for one resource
+ * never covers a read made under one for the whole connection.
+ */
+const covers = (
+  grant: Awaited<ReturnType<typeof connectionGrants>>[number],
+  read: { connectionId: string; action: string; resource: string | null }
+): boolean => {
+  const resource = grant.connection.resource ?? null;
+  return (
+    grant.connection.connectionId === read.connectionId &&
+    grant.actions.includes(read.action) &&
+    (resource === null || resource === read.resource)
+  );
+};
+
+/**
+ * Of the connection reads in `sources`, those the agent may make for its
+ * person now: a grant it holds in this chat now covers the read
+ * (`covers`), and the connection is not disconnected and is one the
+ * person may use themselves.
+ */
+const readableConnections = async (
+  env: Env,
+  scope: Omit<AgentScope, "runId">,
+  sources: readonly string[]
+): Promise<string[]> => {
+  const reads = sources.flatMap((source) => {
+    const read = connectionReadOf(source);
+    return read === undefined ? [] : [{ source, ...read }];
+  });
+  if (reads.length === 0) {
+    return [];
+  }
+  const granted = await connectionGrants(env, scope);
+  const covered = reads.filter((read) =>
+    granted.some((grant) => covers(grant, read))
+  );
+  if (covered.length === 0) {
+    return [];
+  }
+  // One the person may use themselves: shared, or their own personal one
+  // (as `ConnectionsApi.list` decides it).
+  const owners = await connectionOwnersOf(env, [
+    ...new Set(covered.map(({ connectionId }) => connectionId)),
+  ]);
+  const usable = new Set(
+    owners.flatMap(({ id, ownerUserId, status }) =>
+      // A disconnected one is gone, whoever owned it; one waiting to be
+      // signed in again changes nobody's access.
+      status !== "disconnected" &&
+      (ownerUserId === null || ownerUserId === scope.personId)
+        ? [id]
+        : []
+    )
+  );
+  return covered.flatMap(({ source, connectionId }) =>
+    usable.has(connectionId) ? [source] : []
+  );
+};
+
 /** Of the App reads in `sources`, those the agent may make for its person now. */
 const readableApps = async (
   env: Env,
@@ -130,13 +213,13 @@ const readableApps = async (
 /**
  * Of `sourceIds`, those the chat's agent may read for its person now: a
  * collection a Knowledge read would allow now (granted to the agent, and
- * readable by the person: `collectionsAllowed`); a connection the agent
- * holds a grant for in this chat now, not disconnected, that the person
- * may use themselves;
- * an App read the agent's grants and the person's role in the App allow
- * now. Anything else, an unknown source included, is not. Throws what the
- * reads throw (a person who left, a database away): the caller withholds
- * everything then.
+ * readable by the person: `collectionsAllowed`); a connection call a
+ * grant the agent holds in this chat now covers, on a connection not
+ * disconnected that the person may use themselves; an App read the
+ * agent's grants and the person's role in the App allow now. Anything
+ * else, an unknown source or a bare connection included, is not. Throws
+ * what the reads throw (a person who left, a database away): the caller
+ * withholds everything then.
  */
 export const readableSources = async (
   env: Env,
@@ -152,8 +235,6 @@ export const readableSources = async (
     authority: chatAuthority(scope),
     context: chatContext(scope),
   });
-  // Each collection among them, and whether it may be read: a collection
-  // never needs the connection lookup, readable or not.
   const known = await db
     .select({
       id: collections.id,
@@ -161,38 +242,13 @@ export const readableSources = async (
     })
     .from(collections)
     .where(inList(collections.id, sourceIds));
-  const found = new Set(
-    known.flatMap(({ id, readable }) => (readable === 1 ? [id] : []))
-  );
-  const isCollection = new Set(known.map(({ id }) => id));
-  for (const source of await readableApps(env, scope, sourceIds)) {
-    found.add(source);
-  }
-  const rest = sourceIds.filter(
-    (id) => !isCollection.has(id) && appReadOf(id) === undefined
-  );
-  if (rest.length === 0) {
-    return found;
-  }
-  // Granted, and one the person may use themselves: shared, or their own
-  // personal one (as `ConnectionsApi.list` decides it).
-  const granted = await connectionGrants(env, scope);
-  const owners = await connectionOwnersOf(env, [
-    ...new Set(
-      granted
-        .map(({ connection }) => connection.connectionId)
-        .filter((id) => rest.includes(id))
-    ),
+  const [apps, connections] = await Promise.all([
+    readableApps(env, scope, sourceIds),
+    readableConnections(env, scope, sourceIds),
   ]);
-  for (const { id, ownerUserId, status } of owners) {
-    // A disconnected one is gone, whoever owned it; one waiting to be
-    // signed in again changes nobody's access.
-    if (
-      status !== "disconnected" &&
-      (ownerUserId === null || ownerUserId === scope.personId)
-    ) {
-      found.add(id);
-    }
-  }
-  return found;
+  return new Set([
+    ...known.flatMap(({ id, readable }) => (readable === 1 ? [id] : [])),
+    ...apps,
+    ...connections,
+  ]);
 };
