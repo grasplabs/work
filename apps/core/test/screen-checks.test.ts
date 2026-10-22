@@ -311,7 +311,7 @@ export default function Escapes() {
     <div ref={box}>
       <link rel="stylesheet" href="https://cdn.example/theme.css" />
       <img alt="" src="https://cdn.example/logo.png" />
-      <img alt="" srcSet="data:image/png;base64,AAAA 1x, https://cdn.example/logo@2x.png 2x" />
+      <img alt="" srcSet="data:image/png;base64,AAAA 1x,https://cdn.example/logo@2x.png 2x" />
       <div className="!p-2 gap-2" />
       <div dangerouslySetInnerHTML={{ __html: "<b>hi</b>" }} />
       <div className={cn("gap-2", [{ "p-4!": true }])} />

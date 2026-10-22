@@ -37,19 +37,53 @@ const remote = /^\s*(?:[a-z][a-z\d+.-]*:|\/\/)/iu;
 /** A URL the frame's CSP serves from the page itself. */
 const local = /^\s*(?:data|blob):/iu;
 
+/** Whitespace, as HTML's srcset grammar reads it. */
+const srcSetSpace = /\s/u;
+
 /**
- * The URLs an attribute loads: a `srcSet`'s candidates each (HTML's
- * image candidate strings: a URL up to whitespace, then descriptors,
- * separated by commas, which a `data:` URL may itself hold), any other
- * attribute's value whole.
+ * A `srcSet`'s candidate URLs, as HTML parses them (§4.8.4.3.1): each a
+ * run up to whitespace, after any whitespace and commas, ending the
+ * candidate if it ends in commas; else its descriptors follow, up to the
+ * next comma outside parentheses. A `data:` URL keeps its own commas.
  */
+const srcSetUrls = (value: string): string[] => {
+  const urls: string[] = [];
+  let at = 0;
+  while (at < value.length) {
+    while (at < value.length && /[\s,]/u.test(value.charAt(at))) {
+      at += 1;
+    }
+    const start = at;
+    while (at < value.length && !srcSetSpace.test(value.charAt(at))) {
+      at += 1;
+    }
+    const url = value.slice(start, at);
+    const trimmed = url.replace(/,+$/u, "");
+    if (trimmed !== "") {
+      urls.push(trimmed);
+    }
+    if (trimmed === url) {
+      let depth = 0;
+      while (at < value.length) {
+        const char = value.charAt(at);
+        if (char === "," && depth === 0) {
+          break;
+        }
+        if (char === "(") {
+          depth += 1;
+        } else if (char === ")" && depth > 0) {
+          depth -= 1;
+        }
+        at += 1;
+      }
+    }
+  }
+  return urls;
+};
+
+/** The URLs an attribute loads: a `srcSet`'s candidates each, else its value. */
 const urlsOf = (attribute: string, value: string): string[] =>
-  attribute === "srcSet"
-    ? value
-        .split(/\s+/u)
-        .map((token) => token.replaceAll(/^,+|,+$/gu, ""))
-        .filter((token) => token !== "")
-    : [value];
+  attribute === "srcSet" ? srcSetUrls(value) : [value];
 
 /** DOM properties that write a stylesheet or styles directly. */
 const styleWrites = new Set(["cssText", "innerHTML", "outerHTML"]);
