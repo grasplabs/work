@@ -1,13 +1,13 @@
 // The ask of a run's code that a host is handling, as the host makes calls
 // of the engine's step API for it. An independent workflow's host
 // (resource-host.ts) does I/O of its own between its run's code asking for
-// a step and calling the step API (the check of the run's person, a wait
-// for one of the run's attempt slots, the step counting's own hashing), and
-// says the run busy meanwhile (workerflow's `step.busy`), so the engine
-// doesn't suspend the run while a call is on its way to it. It needs to
-// know the moment the call is made, which only the innermost step does
-// (`runStepOf`, dispatcher.ts): the ask rides in the async context, so no
-// step in between (`countedStep`, host.ts) has to pass it on.
+// a step and calling the step API (the check of the run's person, the step
+// counting's own hashing), and says the run busy meanwhile (workerflow's
+// `step.busy`), so the engine doesn't suspend the run while a call is on
+// its way to it. It needs to know the moment the call is made, which only
+// the innermost step does (`runStepOf`, dispatcher.ts): the ask rides in
+// the async context, so no step in between (`countedStep`, host.ts) has to
+// pass it on.
 import { AsyncLocalStorage } from "node:async_hooks";
 
 /** An ask a host handles, told when its engine calls are made and back. */
