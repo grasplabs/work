@@ -349,11 +349,14 @@ export function readJsonValue(
 /**
  * A JSON copy of `value` (null, strings, booleans, finite numbers, dense
  * arrays and plain objects of those, without prototype keys, at most
- * `valueDepth` deep), or undefined when it is anything else: what crosses
- * from App code is only ever read as JSON.
+ * `maxDepth` deep, `valueDepth` unless said), or undefined when it is
+ * anything else: what crosses from App code is only ever read as JSON.
  */
-export const jsonOf = (value: unknown, depth = 1): Json | undefined =>
-  readJsonValue(value, depth, valueDepth);
+export const jsonOf = (
+  value: unknown,
+  depth = 1,
+  maxDepth = valueDepth
+): Json | undefined => readJsonValue(value, depth, maxDepth);
 
 const encoder = new TextEncoder();
 

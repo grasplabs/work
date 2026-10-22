@@ -10,7 +10,8 @@ import {
   rpcCopyNodeBounds,
 } from "@grasp-os/shared/rpc-accounting";
 import { boundedRpcTarget } from "@grasp-os/shared/rpc-target";
-import { rpcArgumentDepth, screenLimits } from "@grasp-os/shared/screens";
+import { screenLimits } from "@grasp-os/shared/screens";
+import { isolateArgumentDepth } from "@grasp-os/shared/stores";
 import { RpcSession, WebSocketTransport } from "capnweb";
 import { z } from "zod";
 
@@ -332,7 +333,7 @@ const sessionsHeld = heldPool(4 * sessionHeldBytes);
 
 /** What a forwarder's methods take: as deep and big as one message makes. */
 const SessionTarget = boundedRpcTarget({
-  depth: rpcArgumentDepth,
+  depth: isolateArgumentDepth,
   size: sessionMessageSize,
 });
 
@@ -852,7 +853,9 @@ export const runInSession = async (
   );
   const session = new RpcSession(transport, undefined, {
     limits: {
-      maxDepth: screenLimits.rpc.maxDepth,
+      // App code's calls, each a message with its list of arguments
+      // around an argument as deep as `isolateArgumentDepth`.
+      maxDepth: isolateArgumentDepth + 1,
       maxBigIntDigits: screenLimits.rpc.maxBigIntDigits,
     },
   });

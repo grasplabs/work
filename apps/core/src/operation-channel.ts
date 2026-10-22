@@ -7,8 +7,10 @@ import { isAppErrorCode } from "@grasp-os/shared/operation-limits";
 import { jsonOf, operationErrors } from "@grasp-os/shared/operations";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { boundedRpcTarget } from "@grasp-os/shared/rpc-target";
-import { rpcArgumentDepth } from "@grasp-os/shared/screens";
-import { commitMaxInputBytes } from "@grasp-os/shared/stores";
+import {
+  isolateArgumentDepth,
+  commitMaxInputBytes,
+} from "@grasp-os/shared/stores";
 
 // The one authority an App's code is handed for one invocation of one of
 // its server functions (operations.ts): a read, a staged write, a call of
@@ -93,7 +95,9 @@ const plainArgs = (args: readonly unknown[]): unknown[] =>
   args.map((arg) => {
     let copy: Json | undefined;
     try {
-      copy = jsonOf(arg);
+      // As deep as the channel takes it: a write's request around a field
+      // as deep as a record keeps (`isolateArgumentDepth`).
+      copy = jsonOf(arg, 1, isolateArgumentDepth);
     } catch {
       copy = undefined;
     }
@@ -143,7 +147,7 @@ interface ChannelState {
  * commit, more than any request App code has reason to send.
  */
 const ChannelTarget = boundedRpcTarget({
-  depth: rpcArgumentDepth,
+  depth: isolateArgumentDepth,
   size: commitMaxInputBytes,
 });
 

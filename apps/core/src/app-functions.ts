@@ -307,6 +307,12 @@ export interface RunCaller {
     readonly workflow: WorkflowId;
     readonly runId: RunId;
     readonly rootRunId?: RunId;
+    /**
+     * The account the run is charged to, when another App's run in its
+     * lineage (workflows/host.ts, `HostedRun`): its model requests through
+     * the App's functions count there, as its steps' do (`runActorOf`).
+     */
+    readonly accountRunId?: RunId;
     /** The version the run is pinned to: the release that runs. */
     readonly version: number;
     /** Who the run acts for in this execution, in workflow mode. */

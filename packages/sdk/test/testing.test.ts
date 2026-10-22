@@ -370,6 +370,7 @@ describe("workflow tests", () => {
 
     const held = await runWorkflowTests(tests, {
       steps: { find: ["CRM"], tidy: [] },
+      kinds: { find: "exact", tidy: "exact" },
       all: ["CRM"],
     });
     const unheld = await runWorkflowTests(tests);
