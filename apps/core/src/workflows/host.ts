@@ -172,6 +172,13 @@ export interface RunStep {
     name: string,
     options: { type: string; timeout: WorkflowDuration }
   ) => Promise<{ payload: unknown }>;
+  /**
+   * Says the run busy outside the step API until the function returned is
+   * called (workerflow's `step.busy`): the engine doesn't suspend it
+   * meanwhile. The engine's step always can; a test's stand-in for it,
+   * which never suspends, needn't.
+   */
+  busy?: () => () => void;
 }
 
 /**
@@ -1146,6 +1153,7 @@ export const countedStep = (step: RunStep, stepLimit: number): RunStep => {
       take(name);
       return await step.waitForEvent(name, options);
     },
+    ...(step.busy === undefined ? {} : { busy: step.busy }),
   };
 };
 

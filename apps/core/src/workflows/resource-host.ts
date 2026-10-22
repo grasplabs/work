@@ -39,6 +39,8 @@ import type {
 } from "../workflow-builds.ts";
 import { settling } from "./code.ts";
 import type { RunHostCalls, Settled, StepError } from "./code.ts";
+import { engineAsks } from "./engine-asks.ts";
+import type { EngineAsk } from "./engine-asks.ts";
 import { takesExactly } from "./exact-values.ts";
 import { hostLatency } from "./host-latency.ts";
 import {
@@ -108,6 +110,20 @@ import { heldWakeType } from "./wakes.ts";
 //   run's attempts run (`#inSlot`, spec 18); one past it waits, holding
 //   nothing, before the engine hears of it. Every attempt is admitted as
 //   ever, so a run's lineage only grows.
+// - A run that does otherwise as its host is slower. Between the module
+//   asking for a step and the engine hearing of it, the host does I/O of
+//   its own (the person's check, a slot), and an answer travels back to
+//   the isolate before its next ask: the engine, seeing only parked waits
+//   out, would suspend the run meanwhile, the ask running in a later
+//   activation after the run slept, so a race's slower branch could win.
+//   The host holds the run busy with the engine (`#account`) from an
+//   ask's arrival until its engine call is made, and from each answer
+//   until the isolate says it went quiet with every ask it made since
+//   arrived (`quiet`); a replay hands back only outcomes of calls already
+//   made, in journaled order (workerflow's activation.ts), and a scope's
+//   admissions follow its settling, recorded with the run, never the order
+//   outcomes came back in (the SDK's `scoped`). Tests slow the host down
+//   at random (host-latency.ts).
 // - A branch acting after its scope settled. A race's winner, or the item
 //   or branch an `end` came from, settles its scope once, in the scope's
 //   own step (`settle`), in a fence kept with the run (`ScopeFences`,
@@ -200,6 +216,11 @@ import { heldWakeType } from "./wakes.ts";
 //   workflow's model calls are held to the lower of the build's sealed
 //   limit and the host's own (`configOf`, `HostedResourceRun`).
 
+/** What a step that can't say the run busy ends (`RunStep.busy`). */
+const noBusy = (): void => {
+  // Nothing was counted.
+};
+
 /** The main module of a run of a sealed build (`openRunMain`). */
 export const openRunModule = "grasp-open-run.js";
 
@@ -241,13 +262,33 @@ const unwrapped = (result) => {
 
 export class Run extends WorkerEntrypoint {
   async run(host, { input }) {
+    // Each time this isolate gets control back (its start, each answer to
+    // an ask), it tells the host once its code has gone quiet, a macrotask
+    // later, with how many asks it has made in all: the host holds the run
+    // busy until each has arrived, so the engine never suspends the run
+    // while one is on its way (resource-host.ts, \`quiet\`).
+    let made = 0;
+    const quiet = () => {
+      setTimeout(() => {
+        host.quiet(made).catch(() => null);
+      }, 0);
+    };
+    const asked = async (ask) => {
+      made += 1;
+      try {
+        return await ask();
+      } finally {
+        quiet();
+      }
+    };
+    quiet();
     return await settled(async () => {
       if (definition?.metadata?.profile !== "grasp-open-workflow/1" || typeof definition.run !== "function") {
         throw new Error("The generated module doesn't export its workflow.");
       }
       const engine = {
         do: async (name, data, fn) =>
-          unwrapped(await host.do(name, { input: data }, async (attempt) =>
+          unwrapped(await asked(async () => await host.do(name, { input: data }, async (attempt) =>
             await settled(async () =>
               await fn({
                 evaluate: async (slot, frame) => unwrapped(await attempt.evaluate(slot, frame)),
@@ -258,12 +299,12 @@ export class Run extends WorkerEntrypoint {
                 until: async (frame) => unwrapped(await attempt.until(frame)),
                 items: async (frame) => unwrapped(await attempt.items(frame)),
                 settle: async (settled) => unwrapped(await attempt.settle(settled)),
-              })))),
+              }))))),
         sleep: async (name, milliseconds) => {
-          unwrapped(await host.sleep(name, milliseconds));
+          unwrapped(await asked(async () => await host.sleep(name, milliseconds)));
         },
         sleepUntil: async (name, timestamp) => {
-          unwrapped(await host.sleepUntil(name, timestamp));
+          unwrapped(await asked(async () => await host.sleepUntil(name, timestamp)));
         },
       };
       return await definition.run(engine, input);
@@ -1193,6 +1234,31 @@ export class ResourceRunHost
   readonly #fences: ScopeFences;
   /** Tests only: the host's own I/O made slower (host-latency.ts). */
   readonly #latency: () => Promise<void>;
+  /**
+   * Asks of the run's code (`do`, `sleep`, `sleepUntil`) this host is
+   * handling outside the engine: arrived, and not yet at a call of the
+   * engine's step API, or back from one and not yet answered.
+   */
+  #asksInHost = 0;
+  /** The asks of the run's code that arrived. */
+  #arrived = 0;
+  /**
+   * The times the run's code got control back: its start, and each answer
+   * to an ask. Its isolate says when it has gone quiet after each
+   * (`quiet`), with how many asks it had made by then.
+   */
+  #handedBack = 1;
+  /** Of those, how many its isolate said it went quiet after. */
+  #quieted = 0;
+  /** The most asks its isolate said it had made, as it went quiet. */
+  #madeByIsolate = 0;
+  /**
+   * Whether the run's isolate is done: its run returned, or it was
+   * stopped (a CPU kill). Nothing more comes from it.
+   */
+  #isolateDone = false;
+  /** Ends the engine's count of the run busy (`#account`), while held. */
+  #endBusy: (() => void) | undefined;
   /** Attempts of this activation running, and those waiting for a slot. */
   #running = 0;
   readonly #waitingSlot: (() => void)[] = [];
@@ -1446,6 +1512,102 @@ export class ResourceRunHost
     }
   }
 
+  /**
+   * Holds the run busy with the engine (`RunStep.busy`) for as long as a
+   * call of its step API may be on its way that the engine hasn't seen:
+   * an ask of the run's code the host handles outside the engine (its
+   * person checked, a slot waited for); an answer the isolate got whose
+   * code hasn't gone quiet yet, which may make its next ask; an ask the
+   * isolate made that hasn't arrived. Otherwise the engine could suspend
+   * the run as its parked waits are all it sees out, and the call would
+   * run in a later activation, after the run slept: host latency would
+   * decide which of a race's branches wins, and replays would differ. A
+   * module that never says it went quiet holds its run's activation
+   * until the run's load ends, as one that never returns does.
+   */
+  #account(): void {
+    const waitingOnIsolate =
+      !this.#isolateDone &&
+      (this.#quieted < this.#handedBack || this.#arrived < this.#madeByIsolate);
+    const busy = this.#asksInHost > 0 || waitingOnIsolate;
+    if (busy && this.#endBusy === undefined) {
+      this.#endBusy = this.#step.busy?.() ?? noBusy;
+    } else if (!busy && this.#endBusy !== undefined) {
+      this.#endBusy();
+      this.#endBusy = undefined;
+    }
+  }
+
+  /**
+   * Handles an ask of the run's code by `work`, counted in the host
+   * (`#account`) from its arrival to its answer, but while a call of the
+   * engine's step API made for it is out (engine-asks.ts): the engine
+   * counts that one. An ask whose engine call never comes back (it
+   * parked) is never answered in this activation.
+   */
+  async #handling<T>(work: () => Promise<T>): Promise<T> {
+    this.#arrived += 1;
+    this.#asksInHost += 1;
+    this.#account();
+    let inEngine = 0;
+    const ask: EngineAsk = {
+      made: () => {
+        inEngine += 1;
+        if (inEngine === 1) {
+          this.#asksInHost -= 1;
+          this.#account();
+        }
+      },
+      back: () => {
+        inEngine -= 1;
+        if (inEngine === 0) {
+          this.#asksInHost += 1;
+          this.#account();
+        }
+      },
+    };
+    try {
+      return await engineAsks.run(ask, work);
+    } finally {
+      if (inEngine === 0) {
+        this.#asksInHost -= 1;
+      }
+      this.#handedBack += 1;
+      this.#account();
+    }
+  }
+
+  /**
+   * The run's isolate went quiet after it last got control back, having
+   * made `made` asks in all (`openRunMain`): every ask its code made since
+   * then is on its way, and the host holds the run busy until each has
+   * arrived. Refused, failing the run, for anything but a count.
+   */
+  // oxlint-disable-next-line require-await -- an RPC method, answered at once
+  async quiet(made: unknown): Promise<Settled<null>> {
+    try {
+      if (typeof made !== "number" || !Number.isSafeInteger(made) || made < 0) {
+        return this.#refuse("A run's isolate counts the asks it made.");
+      }
+      this.#quieted += 1;
+      this.#madeByIsolate = Math.max(this.#madeByIsolate, made);
+      this.#account();
+      return { ok: true, value: null };
+    } catch (error) {
+      return { ok: false, error: forIsolate(error) };
+    }
+  }
+
+  /**
+   * The run's isolate is done (its run settled, or it was stopped): the
+   * host no longer holds the run busy for what it may still ask
+   * (`#account`), so the engine can suspend the run on its parked steps.
+   */
+  isolateDone(): void {
+    this.#isolateDone = true;
+    this.#account();
+  }
+
   /** The person the run acts for must still be an active member. */
   async #requirePerson(): Promise<void> {
     const active = await memberRole(this.#env.DB, this.#run.principal);
@@ -1462,6 +1624,14 @@ export class ResourceRunHost
    * recorded result without calling it.
    */
   async do(
+    name: unknown,
+    options: unknown,
+    fn: (attempt: ResourceAttemptHost) => Promise<unknown>
+  ): Promise<Settled<unknown>> {
+    return await this.#handling(async () => await this.#do(name, options, fn));
+  }
+
+  async #do(
     name: unknown,
     options: unknown,
     fn: (attempt: ResourceAttemptHost) => Promise<unknown>
@@ -2026,6 +2196,10 @@ export class ResourceRunHost
 
   /** Runs a `wait` task: a durable sleep of exactly its sealed length. */
   async sleep(name: unknown, duration: unknown): Promise<Settled<null>> {
+    return await this.#handling(async () => await this.#sleep(name, duration));
+  }
+
+  async #sleep(name: unknown, duration: unknown): Promise<Settled<null>> {
     return await settle(async () => {
       const sleeping = this.#stepOf(name, true);
       const { task } = sleeping;
@@ -2052,6 +2226,12 @@ export class ResourceRunHost
    * exactly the deadline it recorded, at once when that has passed.
    */
   async sleepUntil(name: unknown, timestamp: unknown): Promise<Settled<null>> {
+    return await this.#handling(
+      async () => await this.#sleepUntil(name, timestamp)
+    );
+  }
+
+  async #sleepUntil(name: unknown, timestamp: unknown): Promise<Settled<null>> {
     return await settle(async () => {
       const sleeping = this.#stepOf(name, true);
       const { task } = sleeping;

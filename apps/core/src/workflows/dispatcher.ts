@@ -20,6 +20,7 @@ import type { AttemptCall } from "./attempt-calls.ts";
 import { runCandidateWorkflow } from "./candidate-runs.ts";
 import { declaredParams, loadRun } from "./code.ts";
 import type { Settled, StepError } from "./code.ts";
+import { engineCall } from "./engine-asks.ts";
 import { runParamsSchema } from "./engine.ts";
 import type { InternalWorkflow, PinnedRun, RunPin } from "./engine.ts";
 import {
@@ -184,23 +185,33 @@ const testRetryDelayOf = (env: Env): number | undefined => {
 /** The engine's `step`, as the host and core's own workflows take it. */
 const runStepOf = (env: Env, step: WorkflowStep): RunStep => {
   const delay = testRetryDelayOf(env);
+  // Each call told to the ask a host handles, if any, as it is made
+  // (engine-asks.ts).
   return {
     do: async (name, config, fn) =>
-      await step.do(
-        name,
-        delay === undefined || config.retries === undefined
-          ? config
-          : { ...config, retries: { ...config.retries, delay } },
-        fn
+      await engineCall(
+        async () =>
+          await step.do(
+            name,
+            delay === undefined || config.retries === undefined
+              ? config
+              : { ...config, retries: { ...config.retries, delay } },
+            fn
+          )
       ),
     sleep: async (name, duration) => {
-      await step.sleep(name, duration);
+      await engineCall(async () => {
+        await step.sleep(name, duration);
+      });
     },
     sleepUntil: async (name, timestamp) => {
-      await step.sleepUntil(name, timestamp);
+      await engineCall(async () => {
+        await step.sleepUntil(name, timestamp);
+      });
     },
     waitForEvent: async (name, options) =>
-      await step.waitForEvent(name, options),
+      await engineCall(async () => await step.waitForEvent(name, options)),
+    busy: () => step.busy(),
   };
 };
 

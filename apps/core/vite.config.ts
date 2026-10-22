@@ -316,6 +316,8 @@ export default coreProject({
     "test/brain-scale-sizes.test.ts",
     // The Brain baseline, in a group of its own: vite.brain.config.ts.
     "test/brain-baseline.test.ts",
+    // With the host made slower at random: vite.latency.config.ts.
+    "test/workflow-latency.test.ts",
     "build-blueprints.test.ts",
     "host-json.bundle.test.ts",
   ],

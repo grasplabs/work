@@ -874,7 +874,11 @@ export const runLoadedResource = async (
     try {
       return await code.run(host, { input: run.input });
     } catch (error) {
+      host.isolateDone();
       return await afterCpuKill(error, calls);
+    } finally {
+      // Nothing more comes from it (resource-host.ts, `#account`).
+      host.isolateDone();
     }
   });
   waking.open = false;
