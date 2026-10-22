@@ -2015,7 +2015,12 @@ export class ResourceRunHost
             : z.json().parse(envelopeOf(taken.stored, taken.timestamp))
         );
         // oxlint-disable-next-line no-await-in-loop -- one event at a time
-        await this.#correlate(task, resolved, taken.stored);
+        await this.#correlate(
+          task,
+          resolved,
+          taken.stored,
+          task.listen.strategy === "all" ? index : undefined
+        );
       }
       this.#listened.set(listening.place, events);
       return events;
@@ -2048,25 +2053,31 @@ export class ResourceRunHost
 
   /**
    * Records the correlations of the filter of listen task `task` that
-   * took `stored`: the first of its filters, as resolved (`resolved`, in
-   * the build's order), whose type and attributes it has. Each of that
+   * took `stored`: `taker` (an `all` listen's, which waits on one filter at
+   * a time), or the first of its filters, as resolved (`resolved`, in the
+   * build's order), whose type and attributes it has. Each of that
    * filter's correlations not yet held takes the event's attribute; one
    * the event lacks (an event with no subject) stays unheld.
    */
   async #correlate(
     task: Extract<SealedTask, { kind: "listen" }>,
     resolved: ResolvedListen,
-    stored: StoredEvent
+    stored: StoredEvent,
+    taker?: number
   ): Promise<void> {
     const type = await eventTypeKey(task.listen.binding, stored.type);
     const attributes = attributesOf(stored);
-    const index = resolved.findIndex(
-      (filter) =>
-        filter.type === type &&
-        Object.entries(filter.attributes).every(
-          ([name, value]) => attributes[name] === value
-        )
-    );
+    // An `all` listen waits on one filter at a time, so `taker` is the one
+    // that took it; `one` and `any` wait on all, the first matching took it.
+    const index =
+      taker ??
+      resolved.findIndex(
+        (filter) =>
+          filter.type === type &&
+          Object.entries(filter.attributes).every(
+            ([name, value]) => attributes[name] === value
+          )
+      );
     for (const { name, attribute } of task.listen.filters[index]?.correlate ??
       []) {
       const value = attributes[attribute];

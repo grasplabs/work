@@ -720,6 +720,52 @@ describe("listen tasks", { timeout: 120_000 }, () => {
     });
   });
 
+  it("correlate on the filter of an all listen that took the event, though an earlier filter matched it too", async () => {
+    const admin = await person("admin");
+    const { workflow } = await listening(admin, [
+      listen("await-both", {
+        all: [
+          {
+            with: { type: completed },
+            correlate: { job: { from: "${ .subject }" } },
+          },
+          {
+            with: { type: completed },
+            correlate: { origin: { from: "${ .source }" } },
+          },
+        ],
+      }),
+      { pause: { wait: "PT2S" } },
+      listen("await-origin", {
+        one: {
+          with: { type: timedOut },
+          correlate: { origin: { from: "${ .source }" } },
+        },
+      }),
+      { notes: { set: { notes: "${ [.[] | .note] }" } } },
+    ]);
+    const runId = await started(admin, workflow.id);
+    await waiting(runId);
+
+    const sent = [
+      delivery(workflow.id, runId, { note: "first" }),
+      delivery(workflow.id, runId, { note: "second", source: `${source}/b` }),
+      delivery(workflow.id, runId, { type: timedOut, note: "other origin" }),
+      delivery(workflow.id, runId, {
+        type: timedOut,
+        note: "same origin",
+        source: `${source}/b`,
+      }),
+    ];
+    for (const event of sent) {
+      // oxlint-disable-next-line no-await-in-loop -- in order: acceptance order matters
+      await admitRunEvent(env, event);
+    }
+    const run = await endOf(admin, workflow.id, runId);
+
+    expect(run.output).toStrictEqual({ notes: ["same origin"] });
+  });
+
   it("aren't lowered with a filter that correlates on an event's content, or on an attribute it names twice", async () => {
     const admin = await person("admin");
     const { version } = await listening(admin, [
