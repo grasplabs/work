@@ -52,12 +52,15 @@ describe("connect's clock", () => {
     expect(ranSince(backup, await runsByTask())).toStrictEqual(each(1));
   });
 
-  it("is armed when core asks, if nothing armed it", async () => {
+  it("is armed when core asks, if nothing armed it, and says so with its tasks", async () => {
     await runInDurableObject(clock(env), async (_, state) => {
       await state.storage.deleteAlarm();
     });
 
-    await exports.default.ensureClock();
+    await expect(exports.default.ensureClock()).resolves.toStrictEqual({
+      armed: true,
+      tasks: names,
+    });
 
     await runInDurableObject(clock(env), async (_, state) => {
       await expect(state.storage.getAlarm()).resolves.not.toBeNull();

@@ -17,6 +17,7 @@ import type { LogFields } from "@grasp-os/shared/log";
 import { mailIngressPath } from "@grasp-os/shared/mail-ingress";
 import { onboardingSummaryPath } from "@grasp-os/shared/onboarding-summary";
 import { platformUpdatePath } from "@grasp-os/shared/platform-change";
+import { provisionProbePath } from "@grasp-os/shared/provision-probe";
 import { quotaPolicyReportPath } from "@grasp-os/shared/quota-policy-report";
 import { screenFramePath } from "@grasp-os/shared/screens";
 import { speechPath } from "@grasp-os/shared/voice";
@@ -58,6 +59,7 @@ import {
 } from "./packages/serve.ts";
 import { platformUpdateResponse } from "./platform-updates.ts";
 import { liveConnectionApp, portableLiveResponse } from "./portable-live.ts";
+import { provisionProbeResponse } from "./provision-probe.ts";
 import { checkRouterSecret } from "./router-secret.ts";
 import { rpcResponse } from "./rpc.ts";
 import { screenFrameResponse, screenModuleResponse } from "./screen-frame.ts";
@@ -298,6 +300,14 @@ const route = async (
   }
   if (pathname === "/rpc") {
     return await rpcResponse(request, env, requestId);
+  }
+  // The console's alone: anyone else's request goes on as one to a path
+  // core has no route for (src/provision-probe.ts).
+  if (pathname === provisionProbePath) {
+    const probe = await provisionProbeResponse(request, env);
+    if (probe !== undefined) {
+      return probe;
+    }
   }
   if (pathname === screenFramePath) {
     return await screenFrameResponse(env, url);

@@ -55,6 +55,12 @@ interface __BaseEnv_Env {
    */
   RUNTIME_PROFILE?: string;
   /**
+   * The client this deployment is, as the console deploys it: what core
+   * answers the console's provisioning probe with (src/provision-probe.ts).
+   * Unset in local development and on-prem.
+   */
+  CLIENT_ID?: string;
+  /**
    * On-prem only: the sandbox supervisor (scripts/workerd-sandbox.ts), as an
    * external service, where untrusted isolates run in workerd processes of
    * their own with a deadline (src/sandboxed.ts). Plain workerd enforces no

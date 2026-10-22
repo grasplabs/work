@@ -83,6 +83,12 @@ export interface ClockTaskState {
   runningSince: number | null;
 }
 
+/** A clock as a probe finds it: whether its alarm is armed, and the tasks it runs, by name. */
+export interface ClockRegistration {
+  armed: boolean;
+  tasks: string[];
+}
+
 /** What a claim hands its runner: the tasks it may run, and the claim's time. */
 export interface ClockClaim {
   names: string[];
@@ -182,6 +188,18 @@ export abstract class ClockObject<E> extends DurableObject<E> {
     if ((await this.ctx.storage.getAlarm()) === null) {
       await this.ctx.storage.setAlarm(Date.now() + clockStartMs);
     }
+  }
+
+  /**
+   * Arms the alarm as `ensure` does, then reports what a deploy's probe
+   * checks: whether an alarm is armed, and the tasks this clock runs.
+   */
+  async ensureRegistered(): Promise<ClockRegistration> {
+    await this.ensure();
+    return {
+      armed: (await this.ctx.storage.getAlarm()) !== null,
+      tasks: this.clockTasks.map(({ name }) => name),
+    };
   }
 
   /**
