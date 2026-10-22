@@ -209,11 +209,14 @@ export const startRollout = async (
   // Refused rather than left to stop part way at Workflows' step limit.
   const manifest =
     releaseId === null ? null : await importedManifest(db, releaseId);
-  const steps = rolloutSteps(
-    new Set(targets.map(({ ring }) => ring)).size,
-    targets.length,
-    manifest === null ? mostWorkers : Object.keys(manifest.workers).length
-  );
+  const internal = targets.filter(({ ring }) => ring === first.ring).length;
+  const steps = rolloutSteps({
+    rings: new Set(targets.map(({ ring }) => ring)).size,
+    internal,
+    fleet: targets.length - internal,
+    apps:
+      manifest === null ? mostWorkers : Object.keys(manifest.workers).length,
+  });
   if (steps > stepBudget) {
     throw new RolloutError(
       "too_large",
@@ -432,6 +435,8 @@ export const retryRollout = async (
     row.releaseId === null ? null : await importedManifest(db, row.releaseId);
   const apps =
     manifest === null ? mostWorkers : Object.keys(manifest.workers).length;
+  const firstRingOf = Math.min(...targets.map(({ ring }) => ring));
+  const internal = targets.filter(({ ring }) => ring === firstRingOf).length;
   const earlier = await db
     .select({ detail: auditEvents.detail })
     .from(auditEvents)
@@ -442,21 +447,21 @@ export const retryRollout = async (
       )
     );
   const steps =
-    rolloutSteps(
-      new Set(targets.map(({ ring }) => ring)).size,
-      targets.length,
-      apps
-    ) +
+    rolloutSteps({
+      rings: new Set(targets.map(({ ring }) => ring)).size,
+      internal,
+      fleet: targets.length - internal,
+      apps,
+    }) +
     earlier.reduce(
       (sum, { detail }) =>
         sum +
         retrySteps(
-          retryDetailSchema.parse(JSON.parse(detail ?? "null")).clients,
-          apps
+          retryDetailSchema.parse(JSON.parse(detail ?? "null")).clients
         ),
       0
     ) +
-    retrySteps(failed.length, apps);
+    retrySteps(failed.length);
   if (steps > stepBudget) {
     throw new RolloutError(
       "too_large",
@@ -521,9 +526,11 @@ const isActive = (status: string): boolean =>
 
 /**
  * Pauses rollout `rolloutId`'s run, as `staff`, audited first: it stops
- * after the step it's in, holding a client's traffic where it is if it's
- * part way through one. Refused unless the rollout is running or waiting
- * and its run is going (`not_running`).
+ * after the step it's in, holding a client of its first ring's traffic
+ * where it is if it's part way through one. In the fleet it starts no
+ * further client, while each client a child is deploying already is
+ * finished (src/rollout/workflow.ts, `deployFleet`). Refused unless the
+ * rollout is running or waiting and its run is going (`not_running`).
  */
 export const pauseRollout = async (
   env: Env,

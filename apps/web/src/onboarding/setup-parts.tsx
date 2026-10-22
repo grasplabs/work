@@ -93,6 +93,16 @@ const useMadeWay = (
   return away;
 };
 
+/** Copies text, and says whether it worked: browsers refuse without focus or permission. */
+export const copyText = async (text: string): Promise<boolean> => {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 /** The way on, fading in once the step has been explained, and `ready` if it waits on something more. */
 export const Onward = ({
   children,
