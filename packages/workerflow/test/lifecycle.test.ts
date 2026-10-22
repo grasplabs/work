@@ -197,6 +197,32 @@ describe("pause", () => {
     }).toStrictEqual({ status: "complete", kept: deadline });
   });
 
+  it("lists the sleep a run is suspended in as what it waits on, and nothing once it has ended", async () => {
+    const id = newId();
+    await workflow("napper").create({ id });
+    const { deadline } = await suspendedOn("napper", id, "nap");
+    const object = runObject("napper", id);
+
+    const asleep = await object.pendingWaits();
+    await object.terminate({ rollback: false });
+    const over = await object.pendingWaits();
+
+    expect({
+      asleep: asleep?.map(({ type, name, eventType, deadline: due }) => ({
+        type,
+        name,
+        eventType,
+        due,
+      })),
+      opened: typeof asleep?.[0]?.openedAt,
+      over,
+    }).toStrictEqual({
+      asleep: [{ type: "sleep", name: "nap", eventType: null, due: deadline }],
+      opened: "number",
+      over: [],
+    });
+  });
+
   it("ignores a control older than the newest it took, so a late pause can't undo a newer resume", async () => {
     const id = newId();
     await workflow("napper").create({ id });
