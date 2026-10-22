@@ -28,8 +28,8 @@ Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
 let root: Root | undefined;
 
-const draftAt = (revision: number): ChatDraft => ({
-  app: "app-1",
+const draftAt = (revision: number, app = "app-1"): ChatDraft => ({
+  app,
   base: 1,
   changed: ["screens/desk.tsx"],
   deleted: [],
@@ -78,11 +78,21 @@ const shown = async (answer: () => ChatDraftVersion[]) => {
       <>
         <button
           onClick={() => {
-            setDraft(draftAt(draft.revision + 1));
+            setDraft(draftAt(draft.revision + 1, draft.app));
           }}
           type="button"
         >
           Agent writes
+        </button>
+        <button
+          onClick={() => {
+            setDraft(
+              draftAt(draft.revision, draft.app === "app-1" ? "app-2" : "app-1")
+            );
+          }}
+          type="button"
+        >
+          Switch app
         </button>
         <DraftVersionBar
           chatId="chat-1"
@@ -124,15 +134,21 @@ const shown = async (answer: () => ChatDraftVersion[]) => {
   return { asked };
 };
 
+/** The harness's own buttons: what the studio around the bar does. */
+const harness = new Set(["Agent writes", "Switch app"]);
+
+/** The harness's buttons' text, which comes first on the page. */
+const harnessText = /^Agent writesSwitch app/u;
+
 /** The bar's buttons, but the harness's own. */
 const barButtons = (): HTMLButtonElement[] =>
   [...document.querySelectorAll("button")].filter(
-    (button) => button.textContent !== "Agent writes"
+    (button) => !harness.has(button.textContent)
   );
 
 /** What the bar says, and which of its buttons are enabled. */
 const bar = () => ({
-  text: document.body.textContent.replace("Agent writes", ""),
+  text: document.body.textContent.replace(harnessText, ""),
   enabled: barButtons()
     .filter((button) => !button.disabled)
     .map((button) => button.getAttribute("aria-label") ?? button.textContent),
@@ -202,6 +218,29 @@ describe(DraftVersionBar, () => {
         enabled: ["Earlier version"],
       },
       asked: ["chat-1:app-1", "chat-1:app-1"],
+    });
+  });
+
+  it("keeps the way back to the latest when the versions don't load while an earlier one is open", async () => {
+    let reads = 0;
+    await shown(() => {
+      reads += 1;
+      if (reads > 1) {
+        throw new Error("Core is out of reach");
+      }
+      return versionsUpTo(3, 2);
+    });
+
+    await press("Earlier version");
+    // Away to another App's draft and back: both reads fail.
+    await press("Switch app");
+    await press("Switch app");
+    const unread = bar();
+    await press("Back to latest");
+
+    expect({ unread, back: bar() }).toStrictEqual({
+      unread: { text: "Read-onlyBack to latest", enabled: ["Back to latest"] },
+      back: { text: "", enabled: [] },
     });
   });
 

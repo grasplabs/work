@@ -53,6 +53,24 @@ export const shownVersion = (
     ? opened.number
     : undefined;
 
+/** What an earlier version open reads as: read-only, with the way back to the latest. */
+const ReadOnlyBack = ({ onShow }: { onShow: (version?: number) => void }) => (
+  <>
+    <Badge variant="secondary">
+      <Trans>Read-only</Trans>
+    </Badge>
+    <Button
+      onClick={() => {
+        onShow();
+      }}
+      size="sm"
+      variant="ghost"
+    >
+      <Trans>Back to latest</Trans>
+    </Button>
+  </>
+);
+
 /**
  * "Version N of M" for the chat's draft, with the way to an earlier or
  * later one (`onShow`, undefined for the latest). An earlier one reads as
@@ -92,7 +110,13 @@ export const DraftVersionBar = ({
   const versions = read?.key === key ? read.versions : [];
   const [newest] = versions;
   if (newest === undefined) {
-    return null;
+    // Unread (or not read yet), an earlier version still open keeps the
+    // way back to the latest.
+    return shown === undefined ? null : (
+      <div className="flex flex-none items-center gap-1">
+        <ReadOnlyBack onShow={onShow} />
+      </div>
+    );
   }
   const latest = newest.number;
   const number = shown ?? latest;
@@ -128,22 +152,7 @@ export const DraftVersionBar = ({
       >
         <ChevronRightIcon />
       </Button>
-      {earlier ? (
-        <>
-          <Badge variant="secondary">
-            <Trans>Read-only</Trans>
-          </Badge>
-          <Button
-            onClick={() => {
-              onShow();
-            }}
-            size="sm"
-            variant="ghost"
-          >
-            <Trans>Back to latest</Trans>
-          </Button>
-        </>
-      ) : null}
+      {earlier ? <ReadOnlyBack onShow={onShow} /> : null}
     </div>
   );
 };
