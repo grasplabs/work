@@ -1,4 +1,5 @@
 import { contractFingerprint, preferenceOperations } from "@grasp-os/sdk/host";
+import { agentErrors } from "@grasp-os/shared/agent";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
 import { env } from "cloudflare:workers";
@@ -184,6 +185,12 @@ interface RunOptions {
     actions: ("read" | "write")[];
     binding: string;
   }[];
+  /**
+   * The turn may stop with `agent.history_revoked`: `during` takes away
+   * something it read, and whether the turn's next model request comes
+   * before or after that is a race. Either way the test's checks hold.
+   */
+  mayStop?: boolean;
 }
 
 /** Asks a chat of the builder's to run `code`, with the agent granted `actions` on the App. */
@@ -191,7 +198,7 @@ const runIn = async (
   { builder, app }: Awaited<ReturnType<typeof notesApp>>,
   code: string,
   actions: ("read" | "write")[],
-  { before, during, personId, alsoGrant = [] }: RunOptions = {}
+  { before, during, personId, alsoGrant = [], mayStop = false }: RunOptions = {}
 ) => {
   const chat = await chatOf(
     personId ?? builder.userId,
@@ -217,7 +224,16 @@ const runIn = async (
     )
   );
   await before?.(chat);
-  await Promise.all([chat.ask("Use the Notes App."), during?.(chat, grants)]);
+  const asked = async (): Promise<void> => {
+    try {
+      await chat.ask("Use the Notes App.");
+    } catch (error) {
+      if (!mayStop || agentErrors.codeOf(error) !== "agent.history_revoked") {
+        throw error;
+      }
+    }
+  };
+  await Promise.all([asked(), during?.(chat, grants)]);
   return { chat, returned: async () => await returned(chat) };
 };
 
@@ -464,6 +480,7 @@ describe(
         tryEach({ held: `env.apps.call(${app}, stream(${held}))` }),
         ["read", "write"],
         {
+          mayStop: true,
           during: async (_chat, [grant]) => {
             await untilNoted(notes, "started");
             await admin.api.permissions.revoke(grant ?? "");
@@ -493,6 +510,7 @@ describe(
         tryEach({ held: `env.apps.call(${app}, stream(${held}))` }),
         ["read", "write"],
         {
+          mayStop: true,
           alsoGrant: [
             {
               object: { type: "app", appId: other.app },
