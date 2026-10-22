@@ -620,6 +620,24 @@ export const readBackRelease = async (
   return checked;
 };
 
+/**
+ * A digest of the artifacts a manifest names (path, hash and size of
+ * each): what a candidate's report records of a release read back, and
+ * what activation compares against read back again.
+ */
+export const artifactDigest = async (
+  manifest: ReleaseManifest
+): Promise<string> =>
+  await sha256Hex(
+    canonicalText(
+      manifest.artifacts.map(({ path, sha256, bytes }) => ({
+        path,
+        sha256,
+        bytes,
+      }))
+    )
+  );
+
 /** A draft release as its keeper stores it (sealed-previews.ts). */
 export interface StoredDraft {
   /** Its manifest's canonical text. */

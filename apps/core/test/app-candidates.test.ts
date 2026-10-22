@@ -170,6 +170,12 @@ const otherCompilerDb = (): D1Database => {
   };
 };
 
+/** Appends a byte to the stored artifact at `key`. */
+const appendByte = async (key: string): Promise<void> => {
+  const stored = await env.FILES.get(key);
+  await env.FILES.put(key, `${(await stored?.text()) ?? ""} `);
+};
+
 /** Runs `statement`, answering the error it was aborted with, or "ok". */
 const aborted = async (statement: string, ...binds: unknown[]) =>
   await failure(
@@ -231,7 +237,7 @@ describe(
             ),
           },
         },
-        passed: { appTests: [], workflowTests: [] },
+        selected: { appTests: [], workflowTests: [] },
         // As it was verified: no permission, not yet approved, no policy.
         authority: {
           permissions: await sha256Hex(canonicalText([])),
@@ -311,12 +317,12 @@ export default appTest({
       expect(
         z
           .object({
-            passed: z.object({
+            selected: z.object({
               appTests: z.array(z.string()),
               workflowTests: z.array(z.string()),
             }),
           })
-          .parse(JSON.parse(row?.report ?? "{}")).passed
+          .parse(JSON.parse(row?.report ?? "{}")).selected
       ).toStrictEqual({
         appTests: ["tests/hello.test.ts"],
         workflowTests: ["count"],
@@ -349,6 +355,35 @@ export default appTest({
         refused: "version.artifact_corrupt",
         outcome: ["rejected", "version.artifact_corrupt"],
         current: 1,
+      });
+    });
+
+    it("refuses to make a verified candidate current once an artifact of its release changed in storage", async () => {
+      const { owner, app } = await appWith(helloFiles("one"));
+      await committed(owner, app, helloFiles("two"));
+      await activateVersion(env, owner, app, 1);
+      // Verified, with its release read back whole.
+      const verified = await verifiedCandidate(owner, app, 2);
+      const { manifest } = await loadRelease(env, app, 2);
+      const entry = manifest.artifacts.find(({ path }) =>
+        path.startsWith("modules/")
+      );
+      const key = artifactKey(entry?.sha256 ?? "");
+      await appendByte(key);
+      // The isolate's cache of verified releases is warm from the load above.
+      const refused = await failure(
+        async () => await activateCandidate(env, owner, verified)
+      );
+      expect({
+        refused,
+        current: await currentOf(app),
+        state: await fieldOf(verified.id, "state"),
+        outcome: await fieldOf(verified.id, "outcome"),
+      }).toStrictEqual({
+        refused: "version.artifact_corrupt",
+        current: 1,
+        state: "rejected",
+        outcome: "version.artifact_corrupt",
       });
     });
 
@@ -401,6 +436,26 @@ export default appTest({
         "Leaks data"
       );
       await activateVersion(env, revoked.owner, revoked.app, 2);
+      // Its release flagged runnable, but an artifact of it gone bad in
+      // storage: read back, it couldn't run again.
+      const damaged = await appWith(helloFiles("one"));
+      await committed(damaged.owner, damaged.app, helloFiles("two"));
+      await activateVersion(env, damaged.owner, damaged.app, 1);
+      await sealRelease(env, {
+        app: damaged.app,
+        version: 2,
+        by: damaged.owner,
+      });
+      const first = await loadRelease(env, damaged.app, 1);
+      const next = await loadRelease(env, damaged.app, 2);
+      const keptHashes = new Set(next.manifest.artifacts.map((a) => a.sha256));
+      const own = first.manifest.artifacts.find(
+        ({ path, sha256 }) =>
+          path.startsWith("modules/") && !keptHashes.has(sha256)
+      );
+      const ownKey = artifactKey(own?.sha256 ?? "");
+      await appendByte(ownKey);
+      await activateVersion(env, damaged.owner, damaged.app, 2);
       const rollbackOf = async (app: AppId) => {
         const [, second] = await candidatesOf(app);
         const row = await drizzle(env.DB)
@@ -420,9 +475,11 @@ export default appTest({
       expect({
         kept: await rollbackOf(kept.app),
         revoked: await rollbackOf(revoked.app),
+        damaged: await rollbackOf(damaged.app),
       }).toStrictEqual({
         kept: { to: 1, eligible: true },
         revoked: { to: 1, eligible: false },
+        damaged: { to: 1, eligible: false },
       });
     });
 

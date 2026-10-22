@@ -14,7 +14,7 @@ import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { readBackRelease } from "./app-releases.ts";
+import { artifactDigest, readBackRelease } from "./app-releases.ts";
 import type { VerifiedObservations } from "./apps.ts";
 import {
   appFor,
@@ -126,6 +126,7 @@ const blockedCodes: ReadonlySet<string> = new Set([
  * a release revoked or unsupported, a store or migration given up on.
  */
 const rejectedCodes: ReadonlySet<string> = new Set([
+  "app.candidate_release_changed",
   "app.conflict",
   "app.not_found",
   "app.unreadable",
@@ -512,6 +513,34 @@ const authorityOf = async (env: Env, row: CandidateRow) => {
 };
 
 /**
+ * Whether `version` could be made current again: its release not
+ * revoked and its store live (`releaseRunnable`), and, for one of spec 8's
+ * layout, its release read back from storage, every artifact present and
+ * as sealed (`readBackRelease`), as the database flags alone can't tell.
+ */
+const rollbackEligible = async (
+  env: Env,
+  app: AppId,
+  version: number
+): Promise<boolean> => {
+  if (!(await releaseRunnable(env, app, version))) {
+    return false;
+  }
+  if (!isAppLayout(await versionFiles(env, app, version))) {
+    return true;
+  }
+  try {
+    await readBackRelease(env, app, version);
+    return true;
+  } catch (error) {
+    if (isExpectedError(error)) {
+      return false;
+    }
+    throw error;
+  }
+};
+
+/**
  * The report of the verified candidate `row`, whose gates observed
  * `observed`. Only what core computed, no verdict:
  * - its identities;
@@ -519,10 +548,12 @@ const authorityOf = async (env: Env, row: CandidateRow) => {
  *   what core recorded, with every artifact read back from storage and
  *   verified (`readBackRelease`), the evidence of its checks and its
  *   migrations, and the stores it binds;
- * - what the gates ran, each passing (`verifyVersion`);
+ * - the tests the gates selected to run, each passing (`verifyVersion`);
  * - the App's authority as it was (`authorityOf`);
  * - the environment: compiler, SDK protocol and platform release;
- * - whether the version it replaces could run again (`releaseRunnable`).
+ * - whether the version it replaces could run again: its release not
+ *   revoked and its store live (`releaseRunnable`), and, for one of spec
+ *   8's layout, read back from storage as this one is (`rollbackEligible`).
  */
 const reportOf = async (
   env: Env,
@@ -558,18 +589,13 @@ const reportOf = async (
             ),
             artifacts: {
               count: sealed.manifest.artifacts.length,
-              readBack: await sha256Hex(
-                canonicalText(
-                  sealed.manifest.artifacts.map(({ path, sha256, bytes }) => ({
-                    path,
-                    sha256,
-                    bytes,
-                  }))
-                )
-              ),
+              readBack: await artifactDigest(sealed.manifest),
             },
           },
-    passed: {
+    // What the gates selected from the version's files, not a record of
+    // what each runner executed: a runner that ran fewer, or none, refuses
+    // the version rather than report, so every one named here passed.
+    selected: {
       appTests: observed.appTests,
       workflowTests: observed.workflowTests,
     },
@@ -577,12 +603,19 @@ const reportOf = async (
     environment: {
       compilerVersion,
       sdkProtocolVersion,
+      // Recorded as evidence of where it was verified, and not compared
+      // when it is made current, by design: a platform release changes
+      // under a candidate without changing what it was verified against.
+      // The compiler and SDK protocol are compared (`verifiedHere`).
       platformRelease: env.CF_VERSION_METADATA?.id ?? null,
     },
     rollback:
       replaces === null
         ? { to: null, eligible: false }
-        : { to: replaces, eligible: await releaseRunnable(env, app, replaces) },
+        : {
+            to: replaces,
+            eligible: await rollbackEligible(env, app, replaces),
+          },
   });
 };
 
@@ -706,37 +739,55 @@ export const runCandidate = async (
   }
 };
 
-/** The environment a report records, as `reportOf` writes it. */
-const reportedEnvironmentSchema = z.object({
+/** The environment and release a report records, as `reportOf` writes it. */
+const reportedSchema = z.object({
   environment: z.object({
     compilerVersion: z.string(),
     sdkProtocolVersion: z.int(),
   }),
+  release: z
+    .object({
+      manifestHash: z.string(),
+      artifacts: z.object({ readBack: z.string() }),
+    })
+    .nullable(),
 });
 
 /**
- * Whether the verified `candidate` was verified by the compiler and SDK
- * protocol this release runs: a candidate verified by an earlier release
- * is checked again before it is made current, never trusted across it.
+ * What the report of the verified `candidate` records of its environment
+ * and release, or undefined if it records neither as it should.
  */
-const verifiedHere = async (
+const reportedOf = async (
   env: Env,
   candidate: CandidateRow
-): Promise<boolean> => {
+): Promise<z.infer<typeof reportedSchema> | undefined> => {
   const row = await drizzle(env.DB)
     .select({ report: appCandidateReports.report })
     .from(appCandidateReports)
     .where(eq(appCandidateReports.candidateId, candidate.id))
     .get();
-  const reported = reportedEnvironmentSchema.safeParse(
-    JSON.parse(row?.report ?? "null")
-  );
-  return (
-    reported.success &&
-    reported.data.environment.compilerVersion === compilerVersion &&
-    reported.data.environment.sdkProtocolVersion === sdkProtocolVersion
-  );
+  const reported = reportedSchema.safeParse(JSON.parse(row?.report ?? "null"));
+  return reported.success ? reported.data : undefined;
 };
+
+/**
+ * Whether the verified candidate was verified by the compiler and SDK
+ * protocol this release runs: a candidate verified by an earlier release
+ * is checked again before it is made current, never trusted across it.
+ */
+const verifiedHere = (reported: z.infer<typeof reportedSchema>): boolean =>
+  reported.environment.compilerVersion === compilerVersion &&
+  reported.environment.sdkProtocolVersion === sdkProtocolVersion;
+
+/**
+ * Refusals that the release `candidate` was verified on is no longer
+ * what is stored: it ends the candidate, which a new one verifies again.
+ */
+const releaseChangedCodes: ReadonlySet<string> = new Set([
+  "app.candidate_release_changed",
+  "version.artifact_corrupt",
+  "version.manifest_corrupt",
+]);
 
 /** Holds while nobody's activation claim on a candidate is live. */
 const unclaimed = (now: Date): SQL | undefined =>
@@ -872,8 +923,9 @@ const rejectStale = async (
  * Makes the verified `candidate` current for `by` (`makeCurrent`):
  * over the version it was based on, while it is still verified with its
  * report. A candidate whose base is no longer current is ended as
- * rejected (`app.conflict`): a new one, based on what is current now,
- * verifies it again.
+ * rejected (`app.conflict`), and so is one whose release, read back as it
+ * is made current, is not the one its report names: a new one, based on
+ * what is current now, verifies it again.
  */
 export const activateCandidate = async (
   env: Env,
@@ -883,7 +935,8 @@ export const activateCandidate = async (
   if (candidate.reportHash === null) {
     throw appErrors.create("app.conflict");
   }
-  if (!(await verifiedHere(env, candidate))) {
+  const reported = await reportedOf(env, candidate);
+  if (reported === undefined || !verifiedHere(reported)) {
     // Claimed by another activation, which goes on: this one waits.
     if (!(await retire(env, by, candidate, "app.candidate_environment"))) {
       throw appErrors.create("app.candidate_busy");
@@ -904,6 +957,13 @@ export const activateCandidate = async (
       id: candidate.id,
       reportHash: candidate.reportHash,
       basedOn: candidate.basedOn === 0 ? null : candidate.basedOn,
+      release:
+        reported.release === null
+          ? null
+          : {
+              manifestHash: reported.release.manifestHash,
+              artifactDigest: reported.release.artifacts.readBack,
+            },
     });
   } catch (error) {
     if (isExpectedError(error) && error.code === "app.conflict") {
@@ -911,6 +971,12 @@ export const activateCandidate = async (
         await releaseActivation(env, candidate, lease);
       }
       await rejectStale(env, by, candidate);
+    } else if (isExpectedError(error) && releaseChangedCodes.has(error.code)) {
+      // What was verified is not what is stored: never made current.
+      if (lease !== undefined) {
+        await releaseActivation(env, candidate, lease);
+      }
+      await retire(env, by, candidate, error.code);
     }
     throw error;
   } finally {
