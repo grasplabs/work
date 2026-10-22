@@ -340,10 +340,6 @@ const coreDb: D1State = {
     landscape_app_people: cache(`${core}landscape.ts`),
     landscape_staged_apps: transient(`${core}landscape.ts`),
     landscape_staged_people: transient(`${core}landscape.ts`),
-    admission_topics: exported(
-      `${core}knowledge/admission.ts`,
-      "The company's own topics its admins keep out of Knowledge."
-    ),
     brain_records: exported(`${core}brain-records.ts`, brainPending),
     brain_gap_states: exported(`${core}brain-gaps.ts`),
   },

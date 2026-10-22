@@ -238,8 +238,8 @@ export const rememberTextMaxLength = 8000;
 
 /**
  * Something to remember: an observation, preference, experience or lesson,
- * with the evidence it rests on. It is admitted, or held, by core's rules;
- * the caller never chooses its scope or audience.
+ * with the evidence it rests on. The caller never chooses its scope or
+ * audience.
  */
 export const rememberInputSchema = z.strictObject({
   kind: memoryKindSchema,
@@ -291,8 +291,8 @@ export type CommandStatus = z.infer<typeof commandStatusSchema>;
 
 /**
  * A command's durable receipt. A committed `remember` proves its input
- * was durably admitted for consideration: not that it is indexed (see
- * `indexingState`), nor that it is accepted as fact (`admissionState`).
+ * was durably kept: not that it is indexed (see `indexingState`), nor that
+ * it is accepted as fact.
  */
 export const commandReceiptSchema = z.strictObject({
   id: brainReceiptIdSchema,
@@ -303,7 +303,6 @@ export const commandReceiptSchema = z.strictObject({
   status: commandStatusSchema,
   resourceRefs: z.array(brainSourceRefSchema),
   indexingState: z.enum(["pending", "indexed", "failed"]),
-  admissionState: z.enum(["held", "admitted", "refused"]),
   /** Until when the receipt is kept; after it, the key is forgotten. */
   retentionUntil: instantSchema,
   createdAt: instantSchema,
