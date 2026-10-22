@@ -278,12 +278,22 @@ describe("the Playbook's records", { timeout: 120_000 }, () => {
       records: BrainRecordInput[],
       racing: BrainRecordInput[]
     ) => {
+      const prepare = env.DB.prepare.bind(env.DB);
       const batch = env.DB.batch.bind(env.DB);
+      // The batch to race is the first that writes records: background
+      // work (an outbox's drain) may batch first.
+      let writing = false;
       let raced = false;
-      const spy = vi
+      const prepared = vi
+        .spyOn(env.DB, "prepare")
+        .mockImplementation((query) => {
+          writing ||= !raced && query.startsWith('insert into "brain_records"');
+          return prepare(query);
+        });
+      const batched = vi
         .spyOn(env.DB, "batch")
         .mockImplementation(async (statements) => {
-          if (!raced) {
+          if (writing && !raced) {
             raced = true;
             await other.api.brain.addRecords(racing);
           }
@@ -292,7 +302,8 @@ describe("the Playbook's records", { timeout: 120_000 }, () => {
       try {
         return await admin.api.brain.addRecords(records);
       } finally {
-        spy.mockRestore();
+        prepared.mockRestore();
+        batched.mockRestore();
       }
     };
     const whole = interview(unique());
