@@ -9,6 +9,7 @@ import { platformLimits } from "@grasp-os/shared/platform-limits";
 import {
   runFileErrors,
   runFileIdSchema,
+  runFileLimits,
   runFileNameSchema,
   runFileTypeOf,
   isZip,
@@ -321,6 +322,28 @@ const fileAnswerSchema = z
   })
   .catchall(z.json());
 
+/** The most base64 text a run file's bytes take. */
+const fileContentMaxChars = Math.ceil(runFileLimits.fileBytes / 3) * 4;
+
+/**
+ * A file read's answer as its base64 content, at most a run file's worth,
+ * and the rest of it: the content is checked against the contract's shape
+ * as an empty string, so the step's bound applies to the rest alone.
+ */
+const fileContentOf = (
+  output: unknown
+): { content: string; rest: Record<string, unknown> } => {
+  const read = z
+    .object({ content: z.string().max(fileContentMaxChars) })
+    .catchall(z.unknown())
+    .safeParse(output);
+  if (!read.success) {
+    throw callInvalid("output: It isn't a file's content as base64.");
+  }
+  const { content, ...rest } = read.data;
+  return { content, rest };
+};
+
 /**
  * `input` of a read an action asked to have as a file: refused unless the
  * connection's connector declares the operation answers one (a native
@@ -489,16 +512,29 @@ const callConnector = async (
   } catch {
     throw callInvalid("output: Not JSON.");
   }
-  const answer = requireShape(shape.output, output, "output");
+  // A file's content becomes the run's file, never the step's record: it
+  // is bound by a run file's size, the rest of the answer by a step's.
+  const content = call.into === undefined ? undefined : fileContentOf(output);
+  const answer = requireShape(
+    shape.output,
+    content === undefined ? output : { ...content.rest, content: "" },
+    "output"
+  );
   // An answer that echoes a binding argument would put its sensitive
   // value in the step's record, and on into the run: refused, never
   // redacted, so nothing of it is recorded.
   if (echoes(answer, call.sensitive)) {
     throw callInvalid("output: It echoes a sensitive argument.");
   }
-  return call.into === undefined
-    ? { output: answer, detail: {} }
-    : await keptAsFile(env, run, effect, answer);
+  if (content === undefined) {
+    return { output: answer, detail: {} };
+  }
+  // The shape took the rest as it is: its content back in its place.
+  const fields = z.record(z.string(), z.json()).parse(answer);
+  return await keptAsFile(env, run, effect, {
+    ...fields,
+    content: content.content,
+  });
 };
 
 /**

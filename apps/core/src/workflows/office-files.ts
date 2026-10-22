@@ -147,6 +147,29 @@ const contentOf = async (entry: Entry): Promise<Uint8Array | undefined> => {
   return out;
 };
 
+/** What in XML is no element: comments, CDATA, processing instructions, DTDs. */
+const notElements =
+  /<!--[\s\S]*?-->|<!\[CDATA\[[\s\S]*?\]\]>|<\?[\s\S]*?\?>|<!DOCTYPE[^>]*>/gu;
+/** An `Override` element's tag. */
+const overrideTag = /<Override\s[^<>]*>/gu;
+/** Its `ContentType` attribute, quoted either way. */
+const contentTypeAttribute =
+  /\sContentType\s*=\s*(?:"(?<double>[^"<>]*)"|'(?<single>[^'<>]*)')/u;
+
+/**
+ * The content types `[Content_Types].xml`'s `Override` elements declare:
+ * from their tags alone, once comments, CDATA and processing instructions
+ * are left out, so text that only looks like one declares nothing.
+ */
+const overrideTypesOf = (xml: string): string[] =>
+  [...xml.replaceAll(notElements, " ").matchAll(overrideTag)].flatMap(
+    ([tag]) => {
+      const groups = contentTypeAttribute.exec(tag)?.groups;
+      const type = groups?.double ?? groups?.single;
+      return type === undefined ? [] : [type];
+    }
+  );
+
 /**
  * The Office document a ZIP's package declares itself to be: Word or
  * Excel, by the one main part `[Content_Types].xml` names; undefined for
@@ -168,8 +191,7 @@ export const officeTypeOf = async (
   } catch {
     return undefined;
   }
-  const declared = mainParts.filter(([, part]) =>
-    xml.includes(`ContentType="${part}"`)
-  );
-  return declared.length === 1 ? declared[0]?.[0] : undefined;
+  const declared = new Set(overrideTypesOf(xml));
+  const found = mainParts.filter(([, part]) => declared.has(part));
+  return found.length === 1 ? found[0]?.[0] : undefined;
 };
