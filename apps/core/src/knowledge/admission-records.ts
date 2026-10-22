@@ -25,7 +25,7 @@ import { auditedBatch, outboxed } from "../audit-outbox.ts";
 import { admissionTopics } from "../db/core/schema.ts";
 import { isUniqueViolation } from "../db/d1.ts";
 import { platformTopics } from "./admission-topics.ts";
-import { normalized, topicRows } from "./admission.ts";
+import { normalized, supersededSql, topicRows } from "./admission.ts";
 
 // Knowledge admission's topic records, for admins: every topic's revision
 // in effect and the next one to come, and a company's own topics saved,
@@ -153,7 +153,8 @@ const charsOf = (term: string): number => {
  * `topicMaxPending` still to take effect, and terms (`chars` of them)
  * past `companyMaxTermChars` across the topics in use and to come. A
  * topic's revision in effect counts until its next one is, as the gate
- * checks writes against both. A retirement is never refused: it ends a
+ * checks writes against both; a revision to come that a higher one
+ * supersedes never takes effect, and counts for nothing. A retirement is never refused: it ends a
  * topic. Two saves at once may both pass; the gate reads well over the
  * limits, and holds every write past that.
  */
@@ -171,13 +172,15 @@ const requireRoom = async (
          AND t.revision = (SELECT max(r.revision) FROM admission_topics r WHERE r.id = t.id)`
     ),
     env.DB.prepare(
-      "SELECT count(*) AS count FROM admission_topics WHERE owner = 'company' AND effective_at > ?"
+      `SELECT count(*) AS count FROM admission_topics t
+       WHERE t.owner = 'company' AND t.effective_at > ? AND NOT ${supersededSql("t")}`
     ).bind(at),
     env.DB.prepare(
       `SELECT coalesce(sum(length(j.value)), 0) AS count
        FROM admission_topics t, json_each(t.terms) j
        WHERE t.owner = 'company' AND t.retired = 0
-         AND (t.effective_at > ? OR t.revision = (SELECT max(r.revision) FROM admission_topics r WHERE r.id = t.id AND r.effective_at <= ?))`
+         AND ((t.effective_at > ? AND NOT ${supersededSql("t")})
+           OR t.revision = (SELECT max(r.revision) FROM admission_topics r WHERE r.id = t.id AND r.effective_at <= ?))`
     ).bind(at, at),
   ]);
   const full =

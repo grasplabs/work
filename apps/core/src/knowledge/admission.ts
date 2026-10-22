@@ -636,6 +636,14 @@ export const topicRows = async (env: Env): Promise<TopicRow[]> => {
 export const policyMaxRows = 1000;
 
 /**
+ * SQL for whether the revision in the `admission_topics` row named `row`
+ * (a table name or alias) never takes effect: a higher revision of its
+ * topic takes effect no later than it does (`superseded`).
+ */
+export const supersededSql = (row: string): string =>
+  `EXISTS (SELECT 1 FROM admission_topics h WHERE h.id = ${row}.id AND h.revision > ${row}.revision AND h.effective_at <= ${row}.effective_at)`;
+
+/**
  * The revisions a policy from `now` can apply, at most one more than
  * `policyMaxRows`: each topic's latest revision in effect, unless it
  * retires the topic, and every revision still to come that a higher one
@@ -653,7 +661,7 @@ const policyRows = async (env: Env, now: Date): Promise<TopicRow[]> => {
       .select()
       .from(admissionTopics)
       .where(
-        sql`(${admissionTopics.effectiveAt} > ${at} AND NOT EXISTS (SELECT 1 FROM admission_topics h WHERE h.id = ${admissionTopics.id} AND h.revision > ${admissionTopics.revision} AND h.effective_at <= ${admissionTopics.effectiveAt})) OR (${admissionTopics.retired} = 0 AND ${admissionTopics.revision} = (SELECT max(r.revision) FROM admission_topics r WHERE r.id = ${admissionTopics.id} AND r.effective_at <= ${at}))`
+        sql`(${admissionTopics.effectiveAt} > ${at} AND NOT ${sql.raw(supersededSql('"admission_topics"'))}) OR (${admissionTopics.retired} = 0 AND ${admissionTopics.revision} = (SELECT max(r.revision) FROM admission_topics r WHERE r.id = ${admissionTopics.id} AND r.effective_at <= ${at}))`
       )
       .limit(policyMaxRows + 1)
       .all();

@@ -666,6 +666,47 @@ describe("company topics", { timeout: 60_000 }, () => {
         .run();
     }
   });
+
+  it("count only the terms of revisions that will take effect toward the limit", async () => {
+    const admin = await personWithCollection();
+    const nextYear = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000);
+    const perTerm = Math.floor(topicMaxTermChars / topicMaxTerms);
+    // Topics for next year whose terms take up all the room there is.
+    const scheduled = await Promise.all(
+      Array.from(
+        { length: Math.ceil(companyMaxTermChars / topicMaxTermChars) },
+        async () => {
+          const word = codeName();
+          return await admin.api.admission.saveTopic({
+            ...topicWith(word),
+            terms: Array.from({ length: topicMaxTerms }, (_, index) =>
+              `${word}${index}`.padEnd(perTerm, "x")
+            ),
+            effectiveAt: nextYear.toISOString(),
+          });
+        }
+      )
+    );
+    const full = await outcome(
+      admin.api.admission.saveTopic(topicWith(codeName()))
+    );
+    // Each retirement takes effect long before next year: none of those
+    // revisions ever will.
+    await Promise.all(
+      scheduled.map(
+        async ({ id }) =>
+          await admin.api.admission.retireTopic({ id, ifRevision: 1 })
+      )
+    );
+    const retired = await outcome(
+      admin.api.admission.saveTopic(topicWith(codeName()))
+    );
+
+    expect({ full, retired }).toStrictEqual({
+      full: "admission.limit",
+      retired: "ok",
+    });
+  });
 });
 
 const special = /[.*+?^${}()|[\]\\]/gu;
