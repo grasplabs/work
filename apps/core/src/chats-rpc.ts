@@ -7,10 +7,12 @@ import {
   projectDocumentNameSchema,
   projectGoalSchema,
   projectNameSchema,
+  readOnlyRevision,
 } from "@grasp-os/shared/chat";
 import type {
   ChatConnectionRequest,
   ChatDraft,
+  ChatDraftVersion,
   ChatProject,
   ChatQuestion,
   ChatsApi,
@@ -70,6 +72,7 @@ import {
   withinAnswer,
 } from "./screens-rpc.ts";
 import { screenCode } from "./screens.ts";
+import { draftVersionReferences } from "./sealed-previews.ts";
 import type { PreviewAnswer } from "./sealed-previews.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
@@ -543,13 +546,56 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
   }
 
   /**
+   * Every version of the chat's draft of `app`, newest first: only while
+   * the person builds the App, as for its preview.
+   */
+  async draftVersions(
+    chatId: string,
+    app: string
+  ): Promise<ChatDraftVersion[]> {
+    return await withPerson(this.#check, async (by) => {
+      const { id } = await appFor(this.#env, by, app, "builder");
+      return await this.#chatsOf(by.userId).draftVersions(
+        chatIdOf(chatId),
+        by.userId,
+        id
+      );
+    });
+  }
+
+  /**
+   * Makes version `version` of the chat's draft of `app` the draft again,
+   * as a new version: only while the person builds the App.
+   */
+  async restoreDraftVersion(
+    chatId: string,
+    app: string,
+    version: number
+  ): Promise<ChatDraftVersion> {
+    return await withPerson(this.#check, async (by) => {
+      const { id } = await appFor(this.#env, by, app, "builder");
+      return await this.#chatsOf(by.userId).restoreDraftVersion(
+        chatIdOf(chatId),
+        by.userId,
+        id,
+        version,
+        actorOf(by)
+      );
+    });
+  }
+
+  /**
    * A screen of the chat's draft of `app`, to preview (preview.ts): only
-   * while the person builds the App, as the agent must to write it.
+   * while the person builds the App, as the agent must to write it. With
+   * `version`, of that version of the draft, read-only: built the same
+   * way, but at `readOnlyRevision`, so its calls are all refused
+   * (`app.preview_outdated`).
    */
   async preview(
     chatId: string,
     app: string,
-    screen?: string
+    screen?: string,
+    version?: number
   ): Promise<PreviewBundle> {
     return await withPerson(this.#check, async (by) => {
       const { id, name } = await appFor(this.#env, by, app, "builder");
@@ -587,7 +633,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
           chatId,
           id,
           name,
-          screen,
+          { screen, version },
           limit.signal
         );
         stopped = settledOf(loading);
@@ -635,20 +681,23 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     }
   }
 
-  /** The bundle of `chatId`'s preview of App `id`, built from its draft now, until `signal` stops it. */
+  /**
+   * The bundle of `chatId`'s preview of App `id`, built from its draft
+   * now, or from its draft's `version`, until `signal` stops it.
+   */
   async #loadPreview(
     by: Identity,
     chatId: string,
     id: AppId,
     name: string,
-    screen: string | undefined,
+    { screen, version }: { screen?: string; version?: number },
     signal: AbortSignal
   ): Promise<PreviewBundle> {
-    const draft = await this.#chatsOf(by.userId).previewDraft(
-      chatIdOf(chatId),
-      by.userId,
-      id
-    );
+    const chats = this.#chatsOf(by.userId);
+    const draft =
+      version === undefined
+        ? await chats.previewDraft(chatIdOf(chatId), by.userId, id)
+        : await chats.draftVersion(chatIdOf(chatId), by.userId, id, version);
     signal.throwIfAborted();
     const files = await draftFiles(this.#env, id, draft);
     signal.throwIfAborted();
@@ -661,12 +710,14 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     const withReferences = await withReferencesText(
       Object.fromEntries(files),
       async () =>
-        (await this.#chatsOf(by.userId).previewReferences(
-          chatIdOf(chatId),
-          by.userId,
-          id,
-          draft.revision
-        )) ?? undefined
+        (version === undefined
+          ? await chats.previewReferences(
+              chatIdOf(chatId),
+              by.userId,
+              id,
+              draft.revision
+            )
+          : await draftVersionReferences(this.#env, id, draft)) ?? undefined
     );
     signal.throwIfAborted();
     const built = await screenCode(
@@ -684,7 +735,9 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     return {
       app: id,
       name,
-      revision: draft.revision,
+      // A version opened read-only names no revision a draft is at, so
+      // nothing it calls runs, even when it is the draft as it is now.
+      revision: version === undefined ? draft.revision : readOnlyRevision,
       screens,
       screen: built.screen,
       artifact: built.artifact,

@@ -20,6 +20,7 @@ import {
 } from "@grasp-os/shared/chat";
 import type {
   ChatDraft,
+  ChatDraftVersion,
   ChatMessage,
   ChatProject,
   ChatOutput,
@@ -133,6 +134,7 @@ import {
   dashboards,
   emailPreferences,
 } from "./db/workspace/schema.ts";
+import { DraftVersions } from "./draft-versions.ts";
 import { readableSources, withheldSourceDetail } from "./history-access.ts";
 import { readAsDelegate } from "./knowledge/binding.ts";
 import { forContext } from "./knowledge/memory.ts";
@@ -646,6 +648,8 @@ export class Workspace extends DurableObject<Env> {
 
   /** The chats' build jobs (build-jobs.ts). */
   readonly #jobs = new BuildJobRecords(this.#db);
+  /** Every version of the chats' drafts (draft-versions.ts). */
+  readonly #versions = new DraftVersions(this.#db);
 
   /** The chats' previews of their drafts of spec 8 Apps (sealed-previews.ts). */
   readonly #sealedPreviews = new SealedPreviews(
@@ -916,7 +920,12 @@ export class Workspace extends DurableObject<Env> {
    */
   #outboxed(
     by: AuditActor,
-    action: "chat.created" | "chat.renamed" | "chat.deleted" | "chat.moved",
+    action:
+      | "chat.created"
+      | "chat.renamed"
+      | "chat.deleted"
+      | "chat.moved"
+      | "chat.draft_restored",
     chatId: ChatId,
     detail: Record<string, AuditDetailValue> = {}
   ): void {
@@ -2641,6 +2650,7 @@ export class Workspace extends DurableObject<Env> {
           eq(chatDraftFiles.chatId, id),
           eq(chatDrafts.chatId, id)
         );
+        this.#versions.deleteChat(id);
         this.#db.delete(chats).where(eq(chats.id, id)).run();
         this.#outboxed(by, "chat.deleted", id, { declined });
       });
@@ -2916,7 +2926,8 @@ export class Workspace extends DurableObject<Env> {
    * base has them), only over the revision `revision` the write read (0:
    * there was none): `false`, and nothing written, when another write
    * landed since, or the chat is gone. Refused, in the same transaction,
-   * once the code run `runId` that writes it has closed.
+   * once the code run `runId` that writes it has closed. Kept as the
+   * draft's next version, too (draft-versions.ts).
    */
   saveDraft(
     chatId: ChatId,
@@ -2990,6 +3001,13 @@ export class Workspace extends DurableObject<Env> {
           )
           .run();
       }
+      this.#versions.keep(
+        chatId,
+        appId,
+        this.draft(chatId, appId),
+        { callId },
+        updatedAt
+      );
       return true;
     });
     if (saved) {
@@ -3066,6 +3084,99 @@ export class Workspace extends DurableObject<Env> {
       this.#draftsChanged(chatId);
     }
     return dropped;
+  }
+
+  /**
+   * The versions of `personId`'s own chat's draft of App `appId`, newest
+   * first (draft-versions.ts).
+   */
+  draftVersions(
+    chatId: unknown,
+    personId: string,
+    appId: string
+  ): ChatDraftVersion[] {
+    const { id } = this.#ownChat(chatId, personId);
+    return this.#versions.list(id, appId);
+  }
+
+  /**
+   * Version `number` of `personId`'s own chat's draft of App `appId`, as
+   * a draft at the revision it made: to preview, read-only.
+   */
+  draftVersion(
+    chatId: unknown,
+    personId: string,
+    appId: string,
+    number: unknown
+  ): Draft {
+    const { id } = this.#ownChat(chatId, personId);
+    return this.#versions.read(id, appId, number).draft;
+  }
+
+  /**
+   * Makes version `number` of `personId`'s own chat's draft of App
+   * `appId` the draft again, as its next version, audited as `by`'s: no
+   * version is changed. Over whatever the draft is now, as the person
+   * chose it; a write of the agent's that read the draft before lands on
+   * nothing (`saveDraft`).
+   */
+  restoreDraftVersion(
+    chatId: unknown,
+    personId: string,
+    appId: string,
+    number: unknown,
+    by: AuditActor
+  ): ChatDraftVersion {
+    const { id } = this.#ownChat(chatId, personId);
+    const restored = this.ctx.storage.transactionSync(() => {
+      const { version, draft } = this.#versions.read(id, appId, number);
+      const revision = this.draft(id, appId).revision + 1;
+      const updatedAt = new Date();
+      this.#db
+        .insert(chatDrafts)
+        .values({
+          chatId: id,
+          appId,
+          base: draft.base,
+          revision,
+          updatedAt,
+          callId: null,
+        })
+        .onConflictDoUpdate({
+          target: [chatDrafts.chatId, chatDrafts.appId],
+          set: { base: draft.base, revision, updatedAt, callId: null },
+        })
+        .run();
+      this.#db
+        .delete(chatDraftFiles)
+        .where(
+          and(eq(chatDraftFiles.chatId, id), eq(chatDraftFiles.appId, appId))
+        )
+        .run();
+      for (const [path, content] of Object.entries(draft.changes)) {
+        this.#db
+          .insert(chatDraftFiles)
+          .values({ chatId: id, appId, path, content })
+          .run();
+      }
+      const kept = this.#versions.keep(
+        id,
+        appId,
+        { ...draft, revision },
+        { restoredFrom: version.number },
+        updatedAt
+      );
+      this.#outboxed(by, "chat.draft_restored", id, {
+        app: appId,
+        version: kept.number,
+        restoredFrom: version.number,
+      });
+      return kept;
+    });
+    this.#deliverAudit();
+    this.#dropPreview(id, appId);
+    this.#draftsChanged(id);
+    return restored;
   }
 
   /** Stops the chat's preview of App `appId`, and forgets its reports. */
