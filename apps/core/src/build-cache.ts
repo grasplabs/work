@@ -322,6 +322,8 @@ export const throughCache = async (
     signal?.throwIfAborted();
     // oxlint-disable-next-line no-await-in-loop -- waiting for the holder
     const now = await readVerified(env, key);
+    // Given up on while it read: it serves nothing, not even a shared build.
+    signal?.throwIfAborted();
     if (now.state === "hit") {
       return { text: now.text, outcome: "shared" };
     }
@@ -329,6 +331,7 @@ export const throughCache = async (
   try {
     // Kept by another holder between the first read and taking the lease.
     const kept = await readVerified(env, key);
+    signal?.throwIfAborted();
     if (kept.state === "hit") {
       return { text: kept.text, outcome: "shared" };
     }
