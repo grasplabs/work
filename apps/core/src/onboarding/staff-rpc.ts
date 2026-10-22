@@ -50,7 +50,8 @@ import { onboardingStore } from "./store.ts";
 
 // What only Grasp's staff do in the onboarding, over `/rpc`: pause the
 // interviews and let them run again, say where the agreements stand, give
-// someone who lost their device a new start, and Grasp's onboarding area
+// someone who lost their device a new start, send someone's mail that
+// failed again, and Grasp's onboarding area
 // (staff-area.ts): where it stands, what needs Grasp, notes, the log, and
 // someone's interview, whose every read is in the audit log; and the
 // kickoff, brought in, read for what Stephen needs (kickoff.ts), and the
@@ -152,6 +153,20 @@ export class OnboardingStaffRpc
       );
       if (!(await onboardingStore(this.#env).newStart(id, actorOf(staff)))) {
         throw onboardingErrors.create("onboarding.no_link");
+      }
+    });
+  }
+
+  async sendMailAgain(person: string): Promise<void> {
+    await withPerson(this.#check, async (staff) => {
+      requireStaff(staff);
+      const id = onboardingErrors.parse(
+        "onboarding.invalid",
+        rosterPersonSchema.shape.id,
+        person
+      );
+      if (!(await onboardingStore(this.#env).sendAgain(id, actorOf(staff)))) {
+        throw onboardingErrors.create("onboarding.no_failed_mail");
       }
     });
   }
