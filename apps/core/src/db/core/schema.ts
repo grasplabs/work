@@ -816,6 +816,7 @@ export const sdkResourceBindings = sqliteTable(
         "event",
         "knowledge",
         "template",
+        "files",
       ],
     }).notNull(),
     targetId: text("target_id").notNull(),
@@ -1141,7 +1142,8 @@ export const workflowRuns = sqliteTable(
      * root, so every descendant names the same one. Null for a run that
      * is its own root. Written once, with the row, and never from what the
      * run is given: the model gateway counts the lineage's model calls and
-     * spend by it (src/model-budgets.ts).
+     * spend by it, unless the run is charged to an account
+     * (`accountRunId`, src/model-budgets.ts).
      */
     rootRunId: text("root_run_id"),
     /**
@@ -1151,10 +1153,13 @@ export const workflowRuns = sqliteTable(
      * allowances its work is charged to, the first run of its kind in the
      * lineage (`run_lineage_accounts`). Its attempts, host
      * calls, model spend and share count there; its place (descendants,
-     * depth, age) stays the lineage's. Null for a root and a run of the
-     * root's App under its own runs, charged to the lineage's own
-     * (src/workflows/quotas.ts). Written once, with the row: never changed
-     * once set (migration 0112's trigger).
+     * depth, age) stays the lineage's. A run of the root's App whose parent
+     * is of that App too takes its parent's: so under a run of the root's
+     * App charged to an account (one under another App's run), it is
+     * charged there as well. Null for a root, and for a run of the root's
+     * App whose parent, of that App, is charged to the lineage's own
+     * (src/workflows/quotas.ts, `accountClaimed`). Written once, with the
+     * row: never changed once set (migration 0112's trigger).
      */
     accountRunId: text("account_run_id"),
     /**
@@ -2778,7 +2783,7 @@ export const workflowResources = sqliteTable(
      * When an admin released the name of this deleted workflow, and who: it
      * no longer holds the name, which a new workflow may take. Set once, on
      * a deleted row only, and never cleared; the row is never live again
-     * (migration 0105's triggers).
+     * (migration 0107's triggers).
      */
     nameReleasedAt: timestamp("name_released_at"),
     nameReleasedBy: text("name_released_by"),
@@ -3092,6 +3097,71 @@ export const workflowResourceRuns = sqliteTable(
 );
 
 /**
+ * A workflow run's own files (GRA-724, workflows/run-files.ts): what its
+ * actions write through a `files` binding and read back in later steps of
+ * the same run. Its bytes are in R2 (`FILES`, EU), one object per chunk;
+ * a file is its run's alone, found only with the run's ID, and goes with
+ * the run's details (`sweepWorkflowStartDetails` marks it deleted, then
+ * `sweepRunFiles` deletes its chunks and its row). No name or content of
+ * it reaches the audit log.
+ */
+export const workflowRunFiles = sqliteTable(
+  "workflow_run_files",
+  {
+    id: text().primaryKey(),
+    runId: text("run_id").notNull(),
+    workflowResourceId: text("workflow_resource_id").notNull(),
+    /** The step whose task opened it: only that task writes it. */
+    openedBy: text("opened_by").notNull(),
+    /** The open's effect key: opening again with it answers this file. */
+    openKey: text("open_key").notNull().unique(),
+    name: text().notNull(),
+    type: text().notNull(),
+    /** Its bytes so far, reserved before they are stored. */
+    size: integer().notNull().default(0),
+    sha256: text(),
+    state: text({ enum: ["writing", "done", "deleted"] }).notNull(),
+    createdAt: timestamp("created_at").notNull(),
+    finishedAt: timestamp("finished_at"),
+    deletedAt: timestamp("deleted_at"),
+  },
+  (table) => [
+    index("workflow_run_files_run_idx").on(table.runId, table.state),
+    index("workflow_run_files_workflow_idx").on(
+      table.workflowResourceId,
+      table.state
+    ),
+    // Unfinished files, oldest first, for the sweep.
+    index("workflow_run_files_writing_idx")
+      .on(table.createdAt)
+      .where(sql`${table.state} = 'writing'`),
+    // Deleted files, for the sweep that deletes their chunks.
+    index("workflow_run_files_deleted_idx")
+      .on(table.deletedAt)
+      .where(sql`${table.state} = 'deleted'`),
+  ]
+);
+
+/**
+ * The chunks of a run file, in order: each its own R2 object, written
+ * once with its SHA-256 and reserved (counted against the limits) before
+ * it is stored. The append's effect key makes adding it again answer it.
+ */
+export const workflowRunFileChunks = sqliteTable(
+  "workflow_run_file_chunks",
+  {
+    fileId: text("file_id").notNull(),
+    index: integer().notNull(),
+    key: text().notNull().unique(),
+    appendKey: text("append_key").notNull().unique(),
+    size: integer().notNull(),
+    sha256: text().notNull(),
+    stored: integer({ mode: "boolean" }).notNull().default(false),
+  },
+  (table) => [primaryKey({ columns: [table.fileId, table.index] })]
+);
+
+/**
  * Terminations core owes the engine for runs it ended while they were
  * still starting, cancelled or abandoned (workflows/resource-runs.ts):
  * the run's row ends at once and never changes again, so what is still
@@ -3189,6 +3259,7 @@ export const workflowCatalogContracts = sqliteTable(
         "event",
         "knowledge",
         "template",
+        "files",
       ],
     }).notNull(),
     contract: text().notNull(),
@@ -3225,6 +3296,7 @@ export const workflowBindingApprovals = sqliteTable(
         "event",
         "knowledge",
         "template",
+        "files",
       ],
     }).notNull(),
     contractId: text("contract_id").notNull(),
@@ -3439,5 +3511,137 @@ export const workflowCandidateRuns = sqliteTable(
     uniqueIndex("workflow_candidate_runs_reservation_idx").on(
       table.reservation
     ),
+  ]
+);
+
+/**
+ * The application landscape's syncs (src/landscape.ts), one row per
+ * landscape connection: the sync under way, or the last one. A sync reads
+ * the connection's grants a page at a time, `cursor` the next page's,
+ * each page written with the cursor that follows it, so a sync that
+ * stopped goes on from its last page. Every row of a sync is written as
+ * seen at `started_at`, so writing a page again writes the same.
+ */
+export const landscapeSyncs = sqliteTable("landscape_syncs", {
+  connectionId: text("connection_id").primaryKey(),
+  /** The UTC day it started, `YYYY-MM-DD`: one sync a day. */
+  day: text().notNull(),
+  startedAt: timestamp("started_at").notNull(),
+  cursor: text(),
+  reads: integer().notNull(),
+  state: text({
+    enum: ["running", "done", "partial", "failed"],
+  }).notNull(),
+  /** Why it failed, by code. */
+  reason: text(),
+  /** Throttled, or failed for now: not read again before. */
+  retryAt: timestamp("retry_at"),
+  finishedAt: timestamp("finished_at"),
+  /**
+   * When the last sync that read everything (`done`; never one stopped at
+   * its bound) started: what its rows were last seen at counts as current.
+   * Kept through later syncs until one of them reads everything; null
+   * before any did.
+   */
+  currentSince: timestamp("current_since"),
+});
+
+/**
+ * Each app a landscape connection's tenant granted access, as last seen:
+ * its name and publisher as the provider says (data, never an identifier:
+ * `app_id`, its client ID, is), and when an admin's consent for everyone
+ * was last seen, with its scopes.
+ */
+export const landscapeApps = sqliteTable(
+  "landscape_apps",
+  {
+    connectionId: text("connection_id").notNull(),
+    appId: text("app_id").notNull(),
+    name: text().notNull(),
+    /** As the provider verified it; null when unverified. */
+    publisher: text(),
+    /** The name an unverified app gives its publisher: its word only. */
+    unverifiedPublisher: text("unverified_publisher"),
+    verified: integer({ mode: "boolean" }).notNull(),
+    adminScopes: text("admin_scopes", { mode: "json" }).$type<string[]>(),
+    adminSeenAt: timestamp("admin_seen_at"),
+    firstSeen: timestamp("first_seen").notNull(),
+    lastSeen: timestamp("last_seen").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.connectionId, table.appId] }),
+    index("landscape_apps_last_seen_idx").on(table.lastSeen),
+  ]
+);
+
+/**
+ * Each person who granted an app access for themselves, by their ID at
+ * the provider, as last seen: dropped once not seen for the landscape's
+ * retention (src/landscape.ts).
+ */
+export const landscapeAppPeople = sqliteTable(
+  "landscape_app_people",
+  {
+    connectionId: text("connection_id").notNull(),
+    appId: text("app_id").notNull(),
+    personId: text("person_id").notNull(),
+    name: text(),
+    scopes: text({ mode: "json" }).$type<string[]>().notNull(),
+    firstSeen: timestamp("first_seen").notNull(),
+    lastSeen: timestamp("last_seen").notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.connectionId, table.appId, table.personId],
+    }),
+    index("landscape_app_people_last_seen_idx").on(table.lastSeen),
+  ]
+);
+
+/**
+ * The apps a landscape sync under way has read so far (src/landscape.ts):
+ * kept apart, by the sync's start, and published to `landscape_apps` all
+ * at once only when the sync has read everything, so a sync that stops
+ * part way changes nothing anyone sees.
+ */
+export const landscapeStagedApps = sqliteTable(
+  "landscape_staged_apps",
+  {
+    connectionId: text("connection_id").notNull(),
+    startedAt: timestamp("started_at").notNull(),
+    appId: text("app_id").notNull(),
+    name: text().notNull(),
+    publisher: text(),
+    unverifiedPublisher: text("unverified_publisher"),
+    verified: integer({ mode: "boolean" }).notNull(),
+    adminScopes: text("admin_scopes", { mode: "json" }).$type<string[]>(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.connectionId, table.startedAt, table.appId],
+    }),
+  ]
+);
+
+/** The people a landscape sync under way has read so far, published with its apps. */
+export const landscapeStagedPeople = sqliteTable(
+  "landscape_staged_people",
+  {
+    connectionId: text("connection_id").notNull(),
+    startedAt: timestamp("started_at").notNull(),
+    appId: text("app_id").notNull(),
+    personId: text("person_id").notNull(),
+    name: text(),
+    scopes: text({ mode: "json" }).$type<string[]>().notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [
+        table.connectionId,
+        table.startedAt,
+        table.appId,
+        table.personId,
+      ],
+    }),
   ]
 );

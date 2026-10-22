@@ -7,6 +7,7 @@ import type {
   AppManifest,
   OperationAccess,
   ScreenDefinition,
+  SurfaceDefinition,
   TableVerbs,
 } from "./app.ts";
 import { migration } from "./migration.ts";
@@ -273,6 +274,28 @@ const screensFrom = (input: unknown): ScreenDefinition[] =>
     } as ScreenDefinition;
   });
 
+/** The surfaces of the manifest, as a declaration lists them. */
+const surfacesFrom = (input: unknown): SurfaceDefinition[] =>
+  entriesOf(input, "surfaces").map(([name, surface]) => {
+    if (!hasExactly(surface, ["name", "kind", "screen", "title", "input"])) {
+      return refuse(
+        `Surface \`${name}\` isn't a surface as a manifest holds one.`
+      );
+    }
+    if (surface.name !== name) {
+      return refuse(`Surface \`${name}\` is filed under another name.`);
+    }
+    // SAFETY: `app` checks each part as it checks a declaration's.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    return {
+      name,
+      kind: surface.kind,
+      screen: surface.screen,
+      title: surface.title,
+      input: schemaFrom(surface.input),
+    } as SurfaceDefinition;
+  });
+
 /**
  * A manifest's fixtures as a declaration lists them: `expect` left out
  * where the manifest records null. Anything else is passed on as it is,
@@ -383,12 +406,13 @@ export const readAppManifest = (text: string): AppManifest => {
       "browserResources",
       "workflows",
       "screens",
+      "surfaces",
       "preferences",
       "migrations",
     ])
   ) {
     return refuse(
-      "An App's manifest is `{ name, schema, operations, resources, browserResources, workflows, screens, preferences, migrations }`."
+      "An App's manifest is `{ name, schema, operations, resources, browserResources, workflows, screens, surfaces, preferences, migrations }`."
     );
   }
   const { schema, manifest: schemaManifest } = readSchemaManifest(
@@ -463,6 +487,7 @@ export const readAppManifest = (text: string): AppManifest => {
       internalOperations,
       operationAccess: overrides,
       screens: screensFrom(data.screens),
+      surfaces: surfacesFrom(data.surfaces),
       ...(data.preferences === null
         ? {}
         : { preferences: schemaFrom(data.preferences) }),

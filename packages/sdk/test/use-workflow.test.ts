@@ -520,6 +520,73 @@ describe("what a hook shows", () => {
     });
   });
 
+  it("clears a run refused as unavailable, showing only why, and keeps following it until the host shows it again", async () => {
+    const page = host();
+    const hook = await showing(page, snapshotOf(), 2);
+    const subscription = page.one("run-1");
+    subscription.refuse(2, "workflow.run_unavailable", "domain");
+    const refused = { view: hook.view(), error: hook.error()?.code };
+    await vi.advanceTimersByTimeAsync(60_000);
+    const following = page.open("run-1").length;
+    subscription.push(2, snapshotOf());
+    expect({
+      refused,
+      following,
+      back: hook.view(),
+      commands: page.commands,
+    }).toMatchObject({
+      refused: {
+        view: {
+          status: "loading",
+          waits: [],
+          canPause: false,
+          canCancel: false,
+        },
+        error: "workflow.run_unavailable",
+      },
+      following: 1,
+      back: { status: "running", canPause: true, canCancel: true },
+      commands: [],
+    });
+  });
+
+  it("shows why a run never shown is unavailable, and the run once access comes back", async () => {
+    const page = host();
+    const hook = mount(page, "run-1");
+    await flush();
+    const subscription = page.one("run-1");
+    subscription.refuse(1, "workflow.run_unavailable", "domain");
+    const refused = hook.error()?.code;
+    subscription.push(1, snapshotOf());
+    expect({ refused, error: hook.error(), back: hook.view() }).toMatchObject({
+      refused: "workflow.run_unavailable",
+      error: undefined,
+      back: { status: "running", canCancel: true },
+    });
+  });
+
+  it("follows a run again, later, once its subscription is refused as unavailable", async () => {
+    const page = host();
+    const hook = await showing(page);
+    page.one("run-1").lose();
+    page.refuseNextWatch(
+      Object.assign(new Error("This run isn't available."), {
+        code: "workflow.run_unavailable",
+      })
+    );
+    // Refused as it follows again, then followed again after that.
+    await vi.advanceTimersByTimeAsync(62_000);
+    expect({
+      following: page.open("run-1").length,
+      view: hook.view(),
+      error: hook.error()?.code,
+    }).toMatchObject({
+      following: 1,
+      view: { status: "loading", canPause: false, canCancel: false },
+      error: "workflow.run_unavailable",
+    });
+  });
+
   it("shows no older revision over a newer one", async () => {
     const page = host();
     const hook = await showing(page, snapshotOf({ status: "paused" }), 5);

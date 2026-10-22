@@ -307,6 +307,12 @@ export interface RunCaller {
     readonly workflow: WorkflowId;
     readonly runId: RunId;
     readonly rootRunId?: RunId;
+    /**
+     * The account the run is charged to, when another App's run in its
+     * lineage (workflows/host.ts, `HostedRun`): its model requests through
+     * the App's functions count there, as its steps' do (`runActorOf`).
+     */
+    readonly accountRunId?: RunId;
     /** The version the run is pinned to: the release that runs. */
     readonly version: number;
     /** Who the run acts for in this execution, in workflow mode. */
@@ -642,14 +648,14 @@ export const refusalOf = (
 interface FunctionCallOptions {
   readonly deadline: number;
   /**
-   * Told of the call once it is resolved to `path`, a public function of
-   * `release`, before it runs (a screen's, to note its keyed submission).
-   */
-  /**
    * Told the fence of the receipt the call's mutation claimed, before its
    * handler runs (`Invocation.observeClaim`).
    */
   readonly observeClaim?: (fence: number) => void;
+  /**
+   * Told of the call once it is resolved to `path`, a public function of
+   * `release`, before it runs (a screen's, to note its keyed submission).
+   */
   readonly onAdmitted?: (
     release: Release,
     call: FunctionRequest,

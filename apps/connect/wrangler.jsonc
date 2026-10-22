@@ -26,8 +26,9 @@
   // Connecting accounts needs more, set by the console, but connect takes
   // calls without them, so they aren't required: TOKEN_ENCRYPTION_KEY, which
   // seals OAuth tokens (src/vault.ts), and each provider's app credentials,
-  // MICROSOFT_CLIENT_ID and _SECRET, GOOGLE_CLIENT_ID and _SECRET
-  // (src/providers.ts), and APP_OAUTH_CLIENTS, Grasp's OAuth apps at every
+  // MICROSOFT_CLIENT_ID and _SECRET, GOOGLE_CLIENT_ID and _SECRET,
+  // MICROSOFT_LANDSCAPE_CLIENT_ID and _SECRET for the application
+  // landscape's own Entra app (src/providers.ts), and APP_OAUTH_CLIENTS, Grasp's OAuth apps at every
   // other app, as JSON by provider. While one is unset, connecting that
   // provider is refused. So is COMPOSIO_API_KEY, Grasp's key for the client's Composio
   // project (src/composio.ts): while it is unset, nothing of Composio is

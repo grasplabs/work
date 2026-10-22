@@ -375,7 +375,8 @@ describe("the Brain baseline", { timeout: 300_000 }, () => {
       .filter(({ taskId, completed }) => current.includes(taskId) && !completed)
       .map(({ arm, taskId }) => `${arm} ${taskId}`);
     expect({ tasks: current.length, missed }).toStrictEqual({
-      tasks: 5,
+      // Withdrawal and removal in English, and again in Spanish and Dutch.
+      tasks: 7,
       missed: [],
     });
   });
@@ -485,6 +486,22 @@ describe("the Brain baseline", { timeout: 300_000 }, () => {
     });
   });
 
+  it("holds every arm to the proposed budgets: none misses a security budget, and what the stub can't meet is named", async () => {
+    const { budgets } = await run();
+    expect(budgets).toStrictEqual({
+      arms: brainArms.map((arm) => ({
+        arm,
+        hardMissed: [],
+        // Retrieval reads five sections: the agent and full-text arms
+        // abstain on the five- and six-contributor counts, in each language
+        // they are asked in. Every section reaches full context.
+        missed: arm === "fullContext" ? [] : ["quality.over-abstention"],
+        unmeasured: [],
+      })),
+      background: { missed: [] },
+    });
+  });
+
   it("covers every acceptance family and the five languages, and reports the probes it can't run yet", async () => {
     const { coverage } = await run();
     expect({
@@ -498,7 +515,8 @@ describe("the Brain baseline", { timeout: 300_000 }, () => {
     }).toStrictEqual({
       families: [],
       languages: [],
-      unsupported: [{ requires: "interview-admission", probes: 14 }],
+      // Every admission case, in every language.
+      unsupported: [{ requires: "interview-admission", probes: 55 }],
     });
   });
 });

@@ -135,6 +135,32 @@ export const chatSources = sqliteTable(
 );
 
 /**
+ * The Knowledge documents a chat's code was given, each once, with the
+ * chat's last message when it first was (`givenAfter`, 0 before any): a
+ * search's hits, a read's document, and what a follow resolved to a
+ * document. What its answers may cite (`ChatCitation`): an answer stored
+ * after that message. By message, not by clock, so an answer and a read
+ * in the same millisecond keep their order. Written only for a code run
+ * that is still open, with its sources (`recordSources` in workspace.ts);
+ * at most `chatDocumentsMax` a chat, the oldest dropped.
+ */
+export const chatDocuments = sqliteTable(
+  "chat_documents",
+  {
+    chatId: text("chat_id")
+      .$type<ChatId>()
+      .notNull()
+      .references(() => chats.id),
+    documentId: text("document_id").notNull(),
+    givenAfter: integer("given_after").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.chatId, table.documentId] }),
+    index("chat_documents_age").on(table.chatId, table.givenAfter),
+  ]
+);
+
+/**
  * A chat's drafts: one per App its agent writes to, over the version it
  * started from (`base`, null for an App with none). A draft is the chat's
  * own: it reaches the App only when the agent proposes it as a version

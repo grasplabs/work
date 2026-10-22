@@ -7,6 +7,8 @@ import { loadCoreStatus } from "../core-connection.ts";
 import { AppFrame } from "../frame/app-frame.tsx";
 import { PageError } from "../frame/page-states.tsx";
 import { RouteError } from "../route-error.tsx";
+import { AppPanelProvider } from "../screens/app-panel-context.tsx";
+import { AppPanelSlot } from "../screens/app-panel.tsx";
 import { signInErrorSearch } from "../sign-in-errors.ts";
 
 // The signed-in product: the app's sidebar beside the page, each page
@@ -16,10 +18,36 @@ import { signInErrorSearch } from "../sign-in-errors.ts";
 const Shell = () => {
   const { core, identity } = Route.useRouteContext();
   return (
-    <AppFrame aside={<ChatDock />} core={core} identity={identity}>
-      <Outlet />
-    </AppFrame>
+    // The panel slot beside every page (screens/app-panel.tsx): outside the
+    // page, so navigating the page leaves it open.
+    // Keyed by who is signed in: someone else signing in on the browser
+    // finds no panel of theirs open.
+    <AppPanelProvider key={identity.userId}>
+      <AppFrame
+        aside={
+          <>
+            <AppPanelSlot />
+            <ChatDock />
+          </>
+        }
+        core={core}
+        identity={identity}
+      >
+        <Outlet />
+      </AppFrame>
+    </AppPanelProvider>
   );
+};
+
+/**
+ * The page to come back to after signing in: its path and search, less
+ * `error`, which a refused sign-in adds and the sign-in page shows itself.
+ */
+const returnPathOf = (pathname: string, searchStr: string): string => {
+  const search = new URLSearchParams(searchStr);
+  search.delete("error");
+  const rest = search.toString();
+  return rest === "" ? pathname : `${pathname}?${rest}`;
 };
 
 /** Core failed or stayed out of reach while the shell asked who is in. */
@@ -63,7 +91,9 @@ export const Route = createFileRoute("/_shell")({
       throw redirect({
         to: "/sign-in",
         search: {
-          returnTo: location.pathname,
+          // Its search too, a deep link's input among it, but not a
+          // refused sign-in's error, which is the sign-in page's own.
+          returnTo: returnPathOf(location.pathname, location.searchStr),
           // A refused sign-in comes back here, as `error=<code>`.
           ...signInErrorSearch(location.search),
         },

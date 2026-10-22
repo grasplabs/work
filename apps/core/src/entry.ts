@@ -13,6 +13,7 @@ import { errorFields, log } from "@grasp-os/shared/log";
 import type { LogFields } from "@grasp-os/shared/log";
 import { onboardingSummaryPath } from "@grasp-os/shared/onboarding-summary";
 import { platformUpdatePath } from "@grasp-os/shared/platform-change";
+import { quotaPolicyReportPath } from "@grasp-os/shared/quota-policy-report";
 import { screenFramePath } from "@grasp-os/shared/screens";
 
 import { adminSnapshotResponse } from "./admin-snapshot.ts";
@@ -28,6 +29,7 @@ import { authBasePath } from "./auth/auth.ts";
 import { signInConfig } from "./auth/config.ts";
 import { handleAuthRequest } from "./auth/routes.ts";
 import { installBuiltinsOnce } from "./builtins.ts";
+import { ensureClockOnce } from "./clock.ts";
 import {
   catalogLogoResponse,
   handleConnectionCallback,
@@ -52,6 +54,7 @@ import {
   isRefusedToProductPage,
   setSecurityHeaders,
 } from "./security-headers.ts";
+import { quotaPolicyReportResponse } from "./workflows/quota-report.ts";
 
 const isUnder = (pathname: string, base: string): boolean =>
   pathname === base || pathname.startsWith(`${base}/`);
@@ -226,6 +229,17 @@ const appCallResponse = async (
     : await appFileResponse(request, env, fileRoute, requestId);
 };
 
+/** What the console alone asks core, each signed for its own purpose. */
+const consoleRoutes: ReadonlyMap<
+  string,
+  (request: Request, env: Env, requestId: string) => Promise<Response>
+> = new Map([
+  [onboardingSummaryPath, onboardingSummaryResponse],
+  [quotaPolicyReportPath, quotaPolicyReportResponse],
+  [adminSnapshotPath, adminSnapshotResponse],
+  [platformUpdatePath, platformUpdateResponse],
+]);
+
 /** Routes a request that has passed the router-secret check. */
 const route = async (
   request: Request,
@@ -275,14 +289,9 @@ const route = async (
   if (pathname === errorReportPath) {
     return await errorReportResponse(request, env, requestId);
   }
-  if (pathname === onboardingSummaryPath) {
-    return await onboardingSummaryResponse(request, env, requestId);
-  }
-  if (pathname === adminSnapshotPath) {
-    return await adminSnapshotResponse(request, env, requestId);
-  }
-  if (pathname === platformUpdatePath) {
-    return await platformUpdateResponse(request, env, requestId);
+  const fromConsole = consoleRoutes.get(pathname);
+  if (fromConsole !== undefined) {
+    return await fromConsole(request, env, requestId);
   }
   const appCall = await appCallResponse(pathname, request, env, requestId);
   if (appCall !== undefined) {
@@ -319,6 +328,7 @@ const respond = async (
     const checked = await checkRouterSecret(request, env);
     if (checked.ok) {
       installBuiltinsOnce(env, ctx);
+      ensureClockOnce(env, ctx);
       const response = await route(checked.request, env, requestId);
       return { response, level: "info" };
     }

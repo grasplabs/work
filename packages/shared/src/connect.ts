@@ -10,11 +10,27 @@ import {
   identifierSchema,
   workspaceIdSchema,
 } from "./ids.ts";
+import { landscapeProviderSchema } from "./landscape.ts";
 import type { PackageRegistryApi } from "./packages.ts";
 import { codeSubjectSchema, permissionActionSchema } from "./permissions.ts";
 import type { CodeSubject, WorkContext } from "./permissions.ts";
 import { roleSchema } from "./roles.ts";
 import { eventTypeSchema } from "./workflows.ts";
+
+/**
+ * The version of the interface connect serves core over the service
+ * binding (its entrypoint's methods, and the calls and answers in this
+ * file). A release's core and connect don't switch at once in a client
+ * (the console deploys connect first, and a rollback restores core
+ * first), so a change a core of the release before couldn't call
+ * correctly, or one that needs a connect of this release, is a new
+ * version, with the range below moved to say which cores work with
+ * which connects; a release declares both (scripts/release).
+ */
+export const connectInterfaceVersion = 1;
+
+/** The versions of connect's interface this core calls correctly. */
+export const connectInterfacesCoreCalls = { min: 1, max: 1 } as const;
 
 /**
  * One call from core to connect, over the service binding: an action on a
@@ -97,10 +113,13 @@ export type OAuthProvider = z.infer<typeof oauthProviderSchema>;
 
 /**
  * Names no app may take: the suites above, whose sign-in connect handles
- * itself, and Composio, whose connections are another kind.
+ * itself; the landscape's admin connections (`./landscape.ts`), which no
+ * connector's calls may use; and Composio, whose connections are another
+ * kind.
  */
 const reservedProviderIds: ReadonlySet<string> = new Set([
   ...oauthProviderSchema.options,
+  ...landscapeProviderSchema.options,
   "composio",
 ]);
 
@@ -163,7 +182,11 @@ export type ConnectionPerson = z.infer<typeof connectionPersonSchema>;
 /** Starts connecting an account through OAuth. */
 export const startConnectionSchema = z.strictObject({
   person: connectionPersonSchema,
-  provider: connectorProviderSchema,
+  /**
+   * A connector's provider, or the landscape's read-only admin connection
+   * of a suite, which no connector's calls use.
+   */
+  provider: z.union([connectorProviderSchema, landscapeProviderSchema]),
   scope: connectionScopeSchema,
   /** The deployment's origin, from its config: the provider returns there. */
   origin: z.url(),
@@ -261,6 +284,39 @@ export interface ConnectionSummary {
    * from a connect that predates it.
    */
   tools?: string[];
+}
+
+/**
+ * Whether Composio says a Composio connection's account still works:
+ * `stopped` once its account there isn't active (expired, failed, or gone),
+ * which connect's own status never shows, as Composio holds the tokens;
+ * `unread` when Composio couldn't be asked now.
+ */
+export type ComposioAccountState = "active" | "stopped" | "unread";
+
+/**
+ * One of the organization's connections, as Grasp's staff read it through
+ * core's admin snapshot (`ConnectApi.organizationConnections`): what it is
+ * and whether it works, never its tokens, its server's URL or what
+ * Composio knows it by. A personal one says nothing of its owner or
+ * account: only that someone connected their own.
+ */
+export interface OrganizationConnection {
+  id: string;
+  source: CatalogSource;
+  provider: string;
+  scope: ConnectionScope;
+  status: "active" | "needs_reauth";
+  /** Composio's word on a Composio connection; null for a native one. */
+  composio: ComposioAccountState | null;
+  /** Who connected a shared one; null for a personal one. */
+  connectedBy: string | null;
+  /** A shared one's account at the provider; null for a personal one. */
+  accountName: string | null;
+  /** ISO 8601. */
+  createdAt: string;
+  /** A shared Composio connection's allowed tools, by name; null otherwise. */
+  tools: string[] | null;
 }
 
 /** A connection as core lists it to people: who connected it, by name too. */
@@ -1252,6 +1308,12 @@ export interface ConnectApi extends PackageRegistryApi {
   /** The person's own connections and the shared ones. */
   listConnections: (person: ConnectionPerson) => Promise<ConnectionSummary[]>;
   /**
+   * Every connection that isn't disconnected, for core's staff-only admin
+   * snapshot, with Composio asked whether each Composio account still
+   * works: nothing in it is a token or a URL.
+   */
+  organizationConnections: () => Promise<OrganizationConnection[]>;
+  /**
    * Whose each of the connections `connectionIds` names is, disconnected
    * ones too: those that were ever registered, in no particular order.
    * Core checks against it that sharing an App reaches nobody who can't
@@ -1483,6 +1545,8 @@ export const connectionErrors = defineErrorFamily({
     "Grasp staff can't connect accounts in a client's deployment.",
   "connection.not_offered":
     "Your organization doesn't offer this connection. An admin can offer it.",
+  "connection.scopes_refused":
+    "The provider granted more or less access than this connection asks for, so it wasn't kept. Connect it with Grasp's landscape app, granting exactly what it asks.",
   "connection.own_auth_required":
     "Composio holds no sign-in app for this one: connecting it needs your organization's own, which Grasp can't take yet.",
 });

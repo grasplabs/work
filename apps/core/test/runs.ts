@@ -306,10 +306,15 @@ export const endLiveRuns = async (): Promise<void> => {
       .filter(({ id }) => !seenEnded.has(id))
       .map(async ({ id }) => {
         // A row whose run never started has no run object: its status is
-        // none, and terminating it does nothing. Terminating a run that
-        // ended meanwhile does nothing either.
+        // none, and there is nothing to terminate yet. It isn't skipped
+        // after: its start is still pending, and a later repair can send
+        // it (repairStarts), starting a run that would outlive its test.
+        // Terminating a run that ended meanwhile does nothing.
         const status = await runObject(id).status();
-        if (status !== undefined && !endedStatuses.has(status.status)) {
+        if (status === undefined) {
+          return;
+        }
+        if (!endedStatuses.has(status.status)) {
           await runObject(id).terminate({ rollback: false });
         }
         seenEnded.add(id);

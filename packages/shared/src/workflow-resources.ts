@@ -132,6 +132,8 @@ export const workflowResourceErrors = defineErrorFamily({
     "The workflow's result doesn't match its output schema, so the run failed.",
   "workflow.task_data_invalid":
     "A task's input, output or exported context doesn't match the task's schema, so the run failed.",
+  "workflow.collection_invalid":
+    "A for task's collection isn't a list of at most 1,000 items, so the run failed.",
   "workflow.run_unavailable": "This workflow has no such run.",
   "workflow.run_details_removed":
     "This run ended long enough ago that what it returned is no longer kept.",
@@ -213,8 +215,8 @@ export const workflowResourceErrors = defineErrorFamily({
 
 /**
  * The binding kinds the host catalog serves, beside other workflows. A
- * `knowledge` or `template` binding is reached only by the workflow's own
- * actions (GRA-700): no JSON task calls one.
+ * `knowledge`, `template` or `files` binding is reached only by the
+ * workflow's own actions (GRA-700, GRA-724): no JSON task calls one.
  */
 export const catalogBindingKinds = [
   "operation",
@@ -224,6 +226,7 @@ export const catalogBindingKinds = [
   "event",
   "knowledge",
   "template",
+  "files",
 ] as const;
 export type CatalogBindingKind = (typeof catalogBindingKinds)[number];
 
@@ -394,6 +397,11 @@ export const workflowBindingTargetSchema = z.discriminatedUnion("kind", [
     version: z.int().min(1),
     contentHash: z.string().regex(/^[0-9a-f]{64}$/u),
   }),
+  // The run's own files (GRA-724): what its actions write and read back,
+  // its own alone, gone with its details. Nothing outside the run serves
+  // it, so there is nothing to name: the admin approves that the version
+  // keeps run files at all.
+  z.strictObject({ kind: z.literal("files") }),
 ]);
 export type WorkflowBindingTarget = z.infer<typeof workflowBindingTargetSchema>;
 
@@ -705,7 +713,7 @@ export interface WorkflowBinders {
  * A version built for another one doesn't run
  * (`workflow.protocol_unsupported`): its sealed SDK speaks something else.
  */
-export const openWorkflowProtocol = 6;
+export const openWorkflowProtocol = 7;
 
 /**
  * Something of a definition the code generator doesn't lower yet: its
@@ -805,7 +813,7 @@ export const workflowDraftPublishSchema = z.strictObject({
 });
 
 /** Most bindings a test run's start answers for. */
-export const maxCandidateFixtures = 64;
+const maxCandidateFixtures = 64;
 
 /** Most bytes of a test run's fixtures, as JSON text, all answers together. */
 export const maxCandidateFixtureBytes = 256 * 1024;

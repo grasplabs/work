@@ -1,5 +1,9 @@
 import { GraspError } from "@grasp-os/sdk/client";
-import { GraspClient } from "@grasp-os/sdk/host";
+import {
+  contractFingerprint,
+  GraspClient,
+  preferenceOperations,
+} from "@grasp-os/sdk/host";
 import { errorPayloadSchema } from "@grasp-os/shared/errors";
 import type { Json } from "@grasp-os/shared/json";
 import type { Role } from "@grasp-os/shared/roles";
@@ -14,6 +18,7 @@ import type { ScreenSubmission } from "@grasp-os/shared/submissions";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
+import { z } from "zod";
 
 import { readFunctionRequest } from "../src/app-functions.ts";
 import { loadRelease } from "../src/app-releases.ts";
@@ -117,13 +122,14 @@ export const addThenFail = action({
   },
 });
 `,
-  "app.ts": `import { app } from "@grasp-os/sdk";
+  "app.ts": `import { app, v } from "@grasp-os/sdk";
 import { add, addThenFail, create, reject, slowAdd, slowCreate, titles } from "./operations/notes.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Notes",
   schema,
+  preferences: v.object({ compact: v.boolean().default(false) }),
   access: { tables: { notes: { read: "appMembers", write: "appMembers" } } },
   operations: { notes: { add, addThenFail, create, reject, slowAdd, slowCreate, titles } },
   internalOperations: {},
@@ -221,6 +227,64 @@ const statuses = async (
     status,
     failure,
   }));
+};
+
+/**
+ * A screen client of `approved` as its builder, over core's route, telling
+ * core each answer it acknowledges as the frame's way to core does, and
+ * keeping each in `received`.
+ */
+const clientOf = (approved: Approved, received: string[]): GraspClient =>
+  new GraspClient({
+    call: async (request) => {
+      const response = await routed(`${appFunctionPath}/${approved.app}`, {
+        method: "POST",
+        headers: {
+          origin: clientOrigin,
+          "content-type": "application/json",
+          cookie: approved.builder.session,
+          [screenPersonHeader]: approved.builder.userId,
+          [screenLeaseHeader]: approved.lease,
+        },
+        body: request,
+      });
+      const answer: unknown = await response.json();
+      if (response.ok) {
+        return answer;
+      }
+      // As the page does: core's refusal, by its code.
+      const { code, message } = errorPayloadSchema.parse(answer);
+      throw Object.assign(new Error(message), { code });
+    },
+    received: (request) => {
+      received.push(request);
+      void screenSubmissionReceived(
+        env,
+        approved.builder,
+        approved.app,
+        request
+      );
+    },
+    watch: async () => await Promise.reject(new Error("Nothing followed.")),
+  });
+
+/** The reference to the App's own `preferences.update`, as `#grasp` has it. */
+const preferencesUpdate = async ({ release }: Approved) => {
+  if (release.app.preferences === null) {
+    throw new Error("The App declares no preferences");
+  }
+  const operation = preferenceOperations(release.app.preferences).update;
+  return {
+    resourceId: release.manifest.resourceId,
+    resourceVersion: release.manifest.resourceVersion,
+    contractId: operation.path,
+    fingerprint: await contractFingerprint(operation),
+    kind: "mutation" as const,
+    visibility: "public" as const,
+    mode: "single" as const,
+    args: operation.args,
+    returns: operation.returns,
+  };
 };
 
 /**
@@ -431,42 +495,52 @@ describe("recovering a screen's submissions", { timeout: 120_000 }, () => {
     ]);
   });
 
+  it("acknowledges a keyed mutation of the App's, never a preference update, which the index doesn't hold", async () => {
+    const approved = await approvedApp();
+    const received: string[] = [];
+    const client = clientOf(approved, received);
+
+    const saved = await client.mutation(
+      await preferencesUpdate(approved),
+      { expectedRevision: 0, patch: { compact: true } },
+      { idempotencyKey: "compact-on" }
+    );
+    await client.mutation(
+      referenceTo<{ title: string }, string, "mutation">(
+        approved.release,
+        "notes.create"
+      ),
+      { title: "Kept" },
+      { idempotencyKey: "kept-note" }
+    );
+
+    const preferenceRows = await env.DB.prepare(
+      "SELECT count(*) AS n FROM screen_submissions WHERE idempotency_key = ?"
+    )
+      .bind("compact-on")
+      .first<{ n: number }>();
+    expect({
+      saved,
+      // Only the note's answer is acknowledged: a preference update costs
+      // the person no acknowledgement for a row core never wrote.
+      acknowledged: received.map(
+        (request) =>
+          z.object({ idempotencyKey: z.string() }).parse(JSON.parse(request))
+            .idempotencyKey
+      ),
+      // Nor does the index hold one, as it never did.
+      preferenceRows: preferenceRows?.n,
+    }).toStrictEqual({
+      saved: { compact: true, _rev: 1 },
+      acknowledged: ["kept-note"],
+      preferenceRows: 0,
+    });
+  });
+
   it("keeps the row of a change committed under a build revoked before its answer, and lists it saved", async () => {
     const approved = await approvedApp();
     const received: string[] = [];
-    const client = new GraspClient({
-      call: async (request) => {
-        const response = await routed(`${appFunctionPath}/${approved.app}`, {
-          method: "POST",
-          headers: {
-            origin: clientOrigin,
-            "content-type": "application/json",
-            cookie: approved.builder.session,
-            [screenPersonHeader]: approved.builder.userId,
-            [screenLeaseHeader]: approved.lease,
-          },
-          body: request,
-        });
-        const answer: unknown = await response.json();
-        if (response.ok) {
-          return answer;
-        }
-        // As the page does: core's refusal, by its code.
-        const { code, message } = errorPayloadSchema.parse(answer);
-        throw Object.assign(new Error(message), { code });
-      },
-      // As the frame's way to core does, but for what the client tells it.
-      received: (request) => {
-        received.push(request);
-        void screenSubmissionReceived(
-          env,
-          approved.builder,
-          approved.app,
-          request
-        );
-      },
-      watch: async () => await Promise.reject(new Error("Nothing followed.")),
-    });
+    const client = clientOf(approved, received);
     const saving = (async (): Promise<string> => {
       try {
         await client.mutation(

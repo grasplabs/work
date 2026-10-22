@@ -115,6 +115,17 @@ const hubspotAs = (status: string) => ({
   matches: ["HubSpot"],
 });
 
+/** The IDs of the sources among `person`'s brain changes since `since`, sorted. */
+const sourcesOf = async (
+  person: Awaited<ReturnType<typeof signedInApi>>,
+  since: string
+): Promise<string[]> => {
+  const { changes } = await person.api.brain.changes({ since });
+  return changes
+    .flatMap((change) => (change.kind === "source" ? [change.source.id] : []))
+    .toSorted();
+};
+
 describe("the brain's workspace", { timeout: 120_000 }, () => {
   it("is a valid empty workspace while the deployment holds nothing for it", async () => {
     const admin = await signedInApi(idp, "admin");
@@ -146,6 +157,28 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
       connections: true,
       landscape: [],
       policies: [],
+    });
+  });
+
+  it("gives the onboarding's sources to admins alone in its changes, since the moment asked about", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const member = await signedInApi(idp, "user");
+    const since = new Date(Date.now() - 1000).toISOString();
+    await bringInKickoff();
+    await admin.api.onboarding.saveRoster(roster);
+
+    expect({
+      admin: await sourcesOf(admin, since),
+      member: await sourcesOf(member, since),
+      // Nothing came in after now.
+      later: await sourcesOf(
+        admin,
+        new Date(Date.now() + 60_000).toISOString()
+      ),
+    }).toStrictEqual({
+      admin: ["src-kickoff", "src-roster"],
+      member: [],
+      later: [],
     });
   });
 
