@@ -3872,7 +3872,7 @@ msgstr "Beendet"
 
 #: src/routes/_shell.workflows.$workflow_.runs.$run.tsx
 msgid "Ended {ended}"
-msgstr "Beendet {ended}"
+msgstr "Beendet am {ended}"
 
 #: src/workflows/workflow-diagram.tsx
 msgid "Ends the workflow"
