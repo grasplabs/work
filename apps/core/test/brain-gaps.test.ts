@@ -520,12 +520,65 @@ describe("the Playbook's gap answers", { timeout: 120_000 }, () => {
     );
 
     expect({
+      planned: contentPlan.gapAnswers,
       contentAnswer: afterContent?.answer,
       answeredBy: afterPersonal?.answeredBy,
       answer: afterPersonal?.answer,
     }).toStrictEqual({
+      planned: 1,
       contentAnswer: `Ask ${purgedMarker}, she knows.`,
       answeredBy: undefined,
+      answer: `Ask ${purgedMarker}, she knows.`,
+    });
+  });
+
+  it("lose a purged term though a document's purge fails", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const tag = unique();
+    const name = `Visser${tag}`;
+    const { ids, records } = gapRecords(tag);
+    await admin.api.brain.addRecords(records);
+    await admin.api.brain.answerGap(ids.gap, `Ask ${name}, she knows.`);
+    const note = await noteOf(admin, `# Handover\n${name} hands over.`);
+    const input: PurgeInput = {
+      type: "content",
+      documentIds: [note.id],
+      terms: [name],
+      reason: "erasure_request",
+    };
+    const plan = await admin.api.knowledge.preparePurge(input);
+    // The Knowledge database records the purge, then refuses the batch
+    // that rewrites the document's versions.
+    const real = env.KNOWLEDGE;
+    let rewriting = false;
+    const knowledge: D1Database = {
+      prepare: (query) => {
+        rewriting ||= query.startsWith('update "versions"');
+        return real.prepare(query);
+      },
+      batch: async <T>(statements: D1PreparedStatement[]) => {
+        if (rewriting) {
+          throw new Error("D1 is unavailable");
+        }
+        return await real.batch<T>(statements);
+      },
+      exec: async (query) => await real.exec(query),
+      // oxlint-disable-next-line typescript/no-deprecated -- D1Database still has it
+      dump: async () => await real.dump(),
+      withSession: (constraint) => real.withSession(constraint),
+    };
+    const { core } = await openRpc(admin.session, {
+      coreEnv: { ...env, KNOWLEDGE: knowledge },
+    });
+    const failing = await core.authenticate();
+    const purged = await outcome(failing.knowledge.purge(input, plan.token));
+    const read = await admin.api.brain.read();
+
+    expect({
+      purged: purged === "ok",
+      answer: read.gaps.find(({ id }) => id === ids.gap)?.answer,
+    }).toStrictEqual({
+      purged: false,
       answer: `Ask ${purgedMarker}, she knows.`,
     });
   });

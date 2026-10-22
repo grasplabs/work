@@ -521,6 +521,7 @@ describe("a personal purge", setUpTime, () => {
         versions: 2,
         occurrences: 0,
         inLongerWords: 0,
+        gapAnswers: 0,
         originals: 0,
         token: "string",
         expiresAt: "string",
@@ -782,6 +783,7 @@ describe("a purge of content", setUpTime, () => {
             versions: 4,
             occurrences: 8,
             inLongerWords: 0,
+            gapAnswers: 0,
           },
         },
         {
