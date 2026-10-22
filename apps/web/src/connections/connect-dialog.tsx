@@ -7,6 +7,7 @@ import type {
   ConnectionScope,
   ListedConnection,
 } from "@grasp-os/shared/connect";
+import { failureText } from "@grasp-os/shared/errors";
 import { isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { Button } from "@grasp-os/ui/components/button";
@@ -20,14 +21,14 @@ import {
 import { Spinner } from "@grasp-os/ui/components/spinner";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { CheckIcon } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
+import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { LoadingLines } from "../frame/page-states.tsx";
 import { loadFromCore, notLoadedText } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
-import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
 import { AppLogo } from "./app-logo.tsx";
 import type { Integration } from "./integrations.ts";
@@ -151,7 +152,7 @@ const Step = ({
   last?: boolean;
   children: ReactNode;
 }) => (
-  <li className="flex gap-3">
+  <li className="flex gap-3" data-state={state}>
     <div className="flex w-6 flex-none flex-col items-center">
       <StepRing n={n} state={state} />
       {last ? null : (
@@ -181,6 +182,43 @@ const Step = ({
     </div>
   </li>
 );
+
+/**
+ * Starting the sign-in at core, which answers with the provider's address
+ * to send the browser to. "Try again" starts another attempt while one is
+ * still waiting: only the newest attempt counts, so an older one that
+ * answers late neither sends the browser away nor ends the wait. `attempt`
+ * numbers them, so the waiting row starts over with each.
+ */
+const useSignInStart = () => {
+  const core = useCore();
+  const [attempt, setAttempt] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState<string>();
+  const newest = useRef(0);
+  const begin = async (
+    action: (session: Session) => Promise<{ url: string }>
+  ): Promise<void> => {
+    newest.current += 1;
+    const mine = newest.current;
+    setAttempt(mine);
+    setBusy(true);
+    setFailure(undefined);
+    try {
+      const started = await core.withSession(action);
+      if (newest.current === mine) {
+        // Still busy: the browser leaves for the provider.
+        goTo(started);
+      }
+    } catch (error) {
+      if (newest.current === mine) {
+        setFailure(failureText(error));
+        setBusy(false);
+      }
+    }
+  };
+  return { attempt, begin, busy, failure };
+};
 
 /** How long a start may take before the dialog offers to try again. */
 const takingLongMs = 6000;
@@ -227,6 +265,7 @@ const Starting = ({ app, onRetry }: { app: string; onRetry: () => void }) => {
  */
 const Actions = ({
   app,
+  attempt,
   busy,
   disabled = false,
   onClose,
@@ -234,6 +273,8 @@ const Actions = ({
   children,
 }: {
   app: string;
+  /** Which attempt is waiting: each starts the waiting row over. */
+  attempt: number;
   busy: boolean;
   disabled?: boolean;
   onClose: () => void;
@@ -241,7 +282,7 @@ const Actions = ({
   children: ReactNode;
 }) =>
   busy ? (
-    <Starting app={app} onRetry={onStart} />
+    <Starting app={app} key={attempt} onRetry={onStart} />
   ) : (
     <div className="flex items-center gap-2">
       <Button disabled={disabled} onClick={onStart}>
@@ -291,6 +332,11 @@ const ScopeOption = ({
       className="accent-primary mt-1"
       name="scope"
       onChange={() => {
+        onScope(value);
+      }}
+      // A click on the option already chosen accepts it too, which
+      // changes nothing and so fires no change.
+      onClick={() => {
         onScope(value);
       }}
       type="radio"
@@ -387,12 +433,13 @@ const NativeFlow = ({
   returnTo: string;
   onClose: () => void;
 }) => {
-  const { busy, failure, run } = useCoreAction();
+  const { attempt, begin, busy, failure } = useSignInStart();
   const { t } = useLingui();
   const [scope, setScope] = useState<ConnectionScope>(
     again?.scope ?? "personal"
   );
-  // Done once the admin chose who uses it; it starts as just for them.
+  // Done once the admin chose who uses it, the default (just for them)
+  // included: by picking an option, or by going on to sign in with it.
   const [chose, setChose] = useState(false);
   const provider = oauthProviderSchema.safeParse(integration.id);
   const app = integration.name;
@@ -400,15 +447,14 @@ const NativeFlow = ({
     if (!provider.success) {
       return;
     }
-    goTo(
-      await run(
-        async (session) =>
-          await session.connections.start({
-            provider: provider.data,
-            scope,
-            returnTo,
-          })
-      )
+    setChose(true);
+    await begin(
+      async (session) =>
+        await session.connections.start({
+          provider: provider.data,
+          scope,
+          returnTo,
+        })
     );
   };
   const signIn = (
@@ -416,6 +462,7 @@ const NativeFlow = ({
       <SignInSteps app={app} />
       <Actions
         app={app}
+        attempt={attempt}
         busy={busy}
         onClose={onClose}
         onStart={() => {
@@ -447,7 +494,7 @@ const NativeFlow = ({
           scope={scope}
         />
       </Step>
-      <Step last n={2} state="active" title={t`Sign in`}>
+      <Step last n={2} state={chose ? "active" : "idle"} title={t`Sign in`}>
         {signIn}
       </Step>
     </ol>
@@ -470,7 +517,7 @@ const ComposioFlow = ({
   returnTo: string;
   onClose: () => void;
 }) => {
-  const { busy, failure, run } = useCoreAction();
+  const { attempt, begin, busy, failure } = useSignInStart();
   const core = useCore();
   const [listed, setListed] = useState<Loaded<CatalogTool[]>>();
   const [allowed, setAllowed] = useState<AllowedTool[]>([]);
@@ -496,16 +543,14 @@ const ComposioFlow = ({
   }, [core, source, id]);
   const tools = listed?.state === "ready" ? listed.data : undefined;
   const connect = async (): Promise<void> => {
-    goTo(
-      await run(
-        async (session) =>
-          await session.connections.connectToolkit({
-            toolkit: integration.id,
-            tools: toolRules(allowed),
-            consent: composioConsentText,
-            returnTo,
-          })
-      )
+    await begin(
+      async (session) =>
+        await session.connections.connectToolkit({
+          toolkit: integration.id,
+          tools: toolRules(allowed),
+          consent: composioConsentText,
+          returnTo,
+        })
     );
   };
   return (
@@ -566,6 +611,7 @@ const ComposioFlow = ({
         <SignInSteps app={app} />
         <Actions
           app={app}
+          attempt={attempt}
           busy={busy}
           disabled={allowed.length === 0}
           onClose={onClose}
