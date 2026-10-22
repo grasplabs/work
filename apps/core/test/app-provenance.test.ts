@@ -1,9 +1,11 @@
 import { connectionOwnersMax } from "@grasp-os/shared/connect";
+import { appIdSchema } from "@grasp-os/shared/ids";
 import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
+import { sourcesOfApps } from "../src/app-provenance.ts";
 import { mayRead } from "../src/knowledge/access.ts";
 import { outlook, requestGranted } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
@@ -1166,5 +1168,94 @@ describe("deciding many Apps at once past the walk's cap", () => {
       )
       .map(({ id }) => id);
     expect(new Set(listed)).toStrictEqual(new Set(grants.slice(0, -1)));
+  });
+});
+
+/** Apps shared at once that all reach one graph wider than the walk's cap. */
+const hubApps = 40;
+/** Workflows the App they all call follows: past the cap on its own. */
+const hubWorkflows = 600;
+/**
+ * Queries deciding them all may take: a walk again for each, querying the
+ * same graph, would take over a dozen apiece.
+ */
+const maxQueries = 30;
+
+/** `env`, counting the statements prepared on its core database. */
+const countingEnv = (): { counted: Env; queries: () => number } => {
+  let prepared = 0;
+  const db: D1Database = {
+    prepare: (query) => {
+      prepared += 1;
+      return env.DB.prepare(query);
+    },
+    batch: async (statements) => await env.DB.batch(statements),
+    exec: async (query) => await env.DB.exec(query),
+    withSession: (constraint) => env.DB.withSession(constraint),
+    // oxlint-disable-next-line typescript/no-deprecated -- the type still declares it; nothing calls it
+    dump: async () => await Promise.reject(new Error("Not counted")),
+  };
+  return { counted: { ...env, DB: db }, queries: () => prepared };
+};
+
+describe("deciding many Apps that reach one wide graph", () => {
+  it("queries each part of the graph once, however many Apps reach it, and still decides each App", async () => {
+    const owner = await personApi("builder");
+    const [hub, medium, wide, small] = await Promise.all([
+      newApp(owner),
+      newApp(owner),
+      newApp(owner),
+      newApp(owner),
+    ]);
+    const bound = await Promise.all(
+      Array.from({ length: hubApps }, async () => await newApp(owner))
+    );
+    // Every one of `bound` calls `hub`, which follows more workflows than
+    // the walk follows: none of them passes, alone or together.
+    await Promise.all(
+      bound.map(async (app) => {
+        await appBinding(app, hub);
+      })
+    );
+    await env.DB.batch(
+      Array.from({ length: hubWorkflows }, () =>
+        grantStatement(
+          "app",
+          hub,
+          "workflow",
+          `workflow_${unique().replaceAll("-", "")}`,
+          ["read"]
+        )
+      )
+    );
+    // `medium` calls an App following fewer: it passes on its own, once
+    // the batch has tripped the cap. `small` reaches nothing.
+    await appBinding(medium, wide);
+    await env.DB.batch(
+      Array.from({ length: workflowsEach }, () =>
+        grantStatement(
+          "app",
+          wide,
+          "workflow",
+          `workflow_${unique().replaceAll("-", "")}`,
+          ["read"]
+        )
+      )
+    );
+    const asked = [medium, small, ...bound].map((id) => appIdSchema.parse(id));
+    const { counted, queries } = countingEnv();
+
+    const sources = await sourcesOfApps(counted, asked);
+
+    expect(
+      Object.fromEntries(
+        asked.map((app) => [app, sources.get(app)?.unresolved])
+      )
+    ).toStrictEqual({
+      [medium]: [],
+      [small]: [],
+      ...Object.fromEntries(bound.map((app) => [app, ["app:*"]])),
+    });
+    expect(queries()).toBeLessThanOrEqual(maxQueries);
   });
 });

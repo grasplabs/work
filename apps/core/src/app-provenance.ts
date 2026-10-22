@@ -147,6 +147,13 @@ const maxDepth = 32;
 // own, with a cap of its own (`reachedThroughCalls`), so asking about many
 // Apps at once doesn't hide one that passes alone.
 const maxReached = 500;
+// Those walks again share one budget, whatever the number of Apps asked
+// about: this many levels that still had to be queried (each node's edges
+// are queried once a request, `Walked`), and this many nodes expanded.
+// Past it, the Apps not yet walked, and the rest of the walk it ran out
+// in, stay unresolved (`app:*`).
+const maxRetryLevels = 2 * maxDepth;
+const maxRetryNodes = 20 * maxReached;
 
 /** A workflow's place in the graph, apart from any App's ID. */
 const workflowPrefix = "workflow:";
@@ -207,20 +214,34 @@ interface Reach {
   stores: Set<string>;
 }
 
+/** A node's edges, as `edgesOf` finds them. */
+interface Edges {
+  edges: { from: string; to: string }[];
+  unowned: { holder: string; store: string; business: boolean }[];
+}
+
+/**
+ * What one request has queried of the graph, shared by all its walks: a
+ * node's edges and whether an App has a row don't change within it, so
+ * each is queried once, however many walks reach it.
+ */
+interface Walked {
+  edges: Map<string, Edges>;
+  known: Map<string, boolean>;
+}
+
 /**
  * The edges of one level of the graph of calls between Apps, from and to
  * `frontier` (its Apps and its workflows), as `reachedThroughCalls`
  * follows them: each `from` may hold the data of `to`. And what a store
  * grant names that no App owns, by the node that holds it: a business
- * store (`business`), or a store that exists nowhere.
+ * store (`business`), or a store that exists nowhere. By node of the
+ * frontier: each node's are those it alone would have found.
  */
 const edgesOf = async (
   env: Env,
   frontier: { apps: AppId[]; workflows: string[] }
-): Promise<{
-  edges: { from: string; to: string }[];
-  unowned: { holder: string; store: string; business: boolean }[];
-}> => {
+): Promise<Map<string, Edges>> => {
   const { apps: frontierApps, workflows } = frontier;
   const db = drizzle(env.DB);
   const everGranted = and(
@@ -329,19 +350,39 @@ const edgesOf = async (
         )
       ),
   ]);
-  const edges = [...called, ...writers].map(({ from, to }) => ({
-    from: appNode(from),
-    to: appNode(to),
-  }));
+  const found = new Map<string, Edges>(
+    [...frontierApps, ...workflows.map(workflowNode)].map((node) => [
+      node,
+      { edges: [], unowned: [] },
+    ])
+  );
+  // A row is the node's whose ID matched it: an App's as the frontier
+  // names it, before `appNode`.
+  const keyOf = (type: string, id: string): string =>
+    type === "workflow" ? workflowNode(id) : id;
+  const link = (
+    of: string[],
+    ...edges: { from: string; to: string }[]
+  ): void => {
+    for (const key of of) {
+      found.get(key)?.edges.push(...edges);
+    }
+  };
+  for (const { from, to } of called) {
+    link([from], { from: appNode(from), to: appNode(to) });
+  }
+  for (const { from, to } of writers) {
+    link([from], { from: appNode(from), to: appNode(to) });
+  }
   for (const { caller, callee: to } of bound) {
     const [a, b] = [appNode(caller), appNode(to)];
-    edges.push({ from: a, to: b }, { from: b, to: a });
+    link([caller, to], { from: a, to: b }, { from: b, to: a });
   }
   const nodeOf = (type: string, id: string): string =>
     type === "workflow" ? workflowNode(id) : appNode(id);
-  const unowned: { holder: string; store: string; business: boolean }[] = [];
   for (const { type, consumer, store, owner, business } of consumed) {
     const holder = nodeOf(type, consumer);
+    const key = keyOf(type, consumer);
     if (owner === null) {
       // A business store no App owns is a source, not a node: nothing
       // writes into it but whoever holds a grant on it, since a store grant
@@ -349,35 +390,85 @@ const edgesOf = async (
       // sealing claims the store for its App (`claimStore`). Should
       // anything else come to write into one, it must become a node of the
       // graph, so that what one holder wrote reaches the others.
-      unowned.push({ holder, store, business: business !== null });
+      found
+        .get(key)
+        ?.unowned.push({ holder, store, business: business !== null });
     } else {
       const to = appNode(owner);
-      edges.push({ from: holder, to }, { from: to, to: holder });
+      link([key], { from: holder, to }, { from: to, to: holder });
     }
   }
   for (const { type, consumer, owner } of served) {
     const holder = nodeOf(type, consumer);
     const to = appNode(owner);
-    edges.push({ from: holder, to }, { from: to, to: holder });
+    link([owner], { from: holder, to }, { from: to, to: holder });
   }
   for (const { app, workflow, actions } of run) {
     const [from, to] = [appNode(app), workflowNode(workflow)];
+    const of = [app, workflowNode(workflow)];
     // Following its runs brings its output in; starting it sends input out.
-    edges.push({ from, to });
+    link(of, { from, to });
     if (actionsSchema.parse(JSON.parse(actions)).includes("start")) {
-      edges.push({ from: to, to: from });
+      link(of, { from: to, to: from });
     }
   }
-  return { edges, unowned };
+  return found;
 };
 
 /**
+ * The edges of `nodes`, querying only those of the nodes `walked` doesn't
+ * hold yet, if `mayQuery` lets it. Undefined when it would have to query
+ * and may not.
+ */
+const edgesThrough = async (
+  env: Env,
+  walked: Walked,
+  nodes: readonly string[],
+  mayQuery: () => boolean
+): Promise<Edges | undefined> => {
+  const missing = nodes.filter((node) => !walked.edges.has(node));
+  if (missing.length > 0) {
+    if (!mayQuery()) {
+      return undefined;
+    }
+    const found = await edgesOf(env, {
+      // An ID an edge names that isn't an App's shape can't be one: it
+      // doesn't resolve (`walk`), and has no edges of its own.
+      apps: missing.flatMap((id) => {
+        const app = appIdSchema.safeParse(id);
+        return app.success ? [app.data] : [];
+      }),
+      workflows: missing.flatMap((id) =>
+        id.startsWith(workflowPrefix) ? [id.slice(workflowPrefix.length)] : []
+      ),
+    });
+    for (const node of missing) {
+      walked.edges.set(node, found.get(node) ?? { edges: [], unowned: [] });
+    }
+  }
+  const of = nodes.map((node) => walked.edges.get(node));
+  return {
+    edges: of.flatMap((one) => one?.edges ?? []),
+    unowned: of.flatMap((one) => one?.unowned ?? []),
+  };
+};
+
+/** What the walks again of a batch may still spend (`maxRetryLevels`). */
+interface Budget {
+  levels: number;
+  nodes: number;
+}
+
+/**
  * One walk of `reachedThroughCalls` for all of `apps` at once, and whether
- * it stopped at the width cap.
+ * it stopped at the width cap. It spends of `budget`, and stops where that
+ * runs out, as at a cap.
  */
 const walk = async (
   env: Env,
-  apps: readonly AppId[]
+  walked: Walked,
+  apps: readonly AppId[],
+  budget: Budget
 ): Promise<{ reach: Map<AppId, Reach>; capped: boolean }> => {
   const holds = new Map<string, Set<string>>();
   const unresolvedAt = new Map<string, Set<string>>();
@@ -391,22 +482,23 @@ const walk = async (
     depth < maxDepth &&
     explored.size + frontier.length <= apps.length + maxReached
   ) {
+    if (frontier.length > budget.nodes) {
+      break;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- one level at a time
+    const level = await edgesThrough(env, walked, frontier, () => {
+      budget.levels -= 1;
+      return budget.levels >= 0;
+    });
+    if (level === undefined) {
+      break;
+    }
+    budget.nodes -= frontier.length;
     depth += 1;
     for (const node of frontier) {
       explored.add(node);
     }
-    // oxlint-disable-next-line no-await-in-loop -- one level at a time
-    const { edges, unowned } = await edgesOf(env, {
-      // An ID an edge names that isn't an App's shape can't be one: it
-      // doesn't resolve (below), and has no edges of its own.
-      apps: frontier.flatMap((id) => {
-        const app = appIdSchema.safeParse(id);
-        return app.success ? [app.data] : [];
-      }),
-      workflows: frontier.flatMap((id) =>
-        id.startsWith(workflowPrefix) ? [id.slice(workflowPrefix.length)] : []
-      ),
-    });
+    const { edges, unowned } = level;
     const next = new Set<string>();
     for (const { from, to } of edges) {
       note(holds, from, to);
@@ -429,17 +521,19 @@ const walk = async (
   const unexpanded = new Set(frontier);
   // Every App an edge reached must be one: a binding's target without a
   // row (or of no App's shape) fails closed.
-  const reachedApps = [...explored].filter(
-    (id) => !id.startsWith(workflowPrefix)
+  const unknown = [...explored].filter(
+    (id) => !(id.startsWith(workflowPrefix) || walked.known.has(id))
   );
-  const knownRows =
-    reachedApps.length === 0
-      ? []
-      : await drizzle(env.DB)
-          .select({ id: appsTable.id })
-          .from(appsTable)
-          .where(inList(appsTable.id, reachedApps));
-  const known = new Set(knownRows.map(({ id }) => id));
+  if (unknown.length > 0) {
+    const rows = await drizzle(env.DB)
+      .select({ id: appsTable.id })
+      .from(appsTable)
+      .where(inList(appsTable.id, unknown));
+    const found = new Set(rows.map(({ id }) => id));
+    for (const id of unknown) {
+      walked.known.set(id, found.has(id));
+    }
+  }
   const reach = new Map<AppId, Reach>(
     apps.map((app) => {
       const reached = new Set<string>([app]);
@@ -467,7 +561,7 @@ const walk = async (
           unresolved.add(sourceId("app", "*"));
         } else if (
           id.startsWith(workflowPrefix) ||
-          (isApp && (id === app || known.has(id)))
+          (isApp && (id === app || walked.known.get(id) === true))
         ) {
           nodes.add(id);
         } else {
@@ -493,21 +587,30 @@ const reachedThroughCalls = async (
   env: Env,
   apps: readonly AppId[]
 ): Promise<Map<AppId, Reach>> => {
-  const { reach, capped } = await walk(env, apps);
+  const walked: Walked = { edges: new Map(), known: new Map() };
+  const { reach, capped } = await walk(env, walked, apps, {
+    levels: Infinity,
+    nodes: Infinity,
+  });
   if (!capped || apps.length === 1) {
     return reach;
   }
   // The batch's union tripped the cap: walk each App it left unresolved
-  // again on its own, as if asked about alone.
+  // again on its own, as if asked about alone, one after another so each
+  // finds what the others queried, within one budget for them all. One
+  // the budget doesn't reach keeps what the batch found: `app:*`.
   const again = apps.filter(
     (app) => reach.get(app)?.unresolved.has(sourceId("app", "*")) === true
   );
-  const alone = await Promise.all(
-    again.map(async (app) => await walk(env, [app]))
-  );
-  for (const one of alone) {
-    for (const [app, of] of one.reach) {
-      reach.set(app, of);
+  const budget: Budget = { levels: maxRetryLevels, nodes: maxRetryNodes };
+  for (const app of again) {
+    if (budget.levels < 0 || budget.nodes <= 0) {
+      break;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- each finds the others' edges
+    const one = await walk(env, walked, [app], budget);
+    for (const [walkedApp, of] of one.reach) {
+      reach.set(walkedApp, of);
     }
   }
   return reach;
