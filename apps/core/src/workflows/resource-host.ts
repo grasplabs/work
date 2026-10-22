@@ -133,6 +133,22 @@ import { heldWakeType } from "./wakes.ts";
 //   loops' recorded items, at most the platform's 1,000 a collection (and
 //   the run's own step ceiling). Each item's effects are keyed by its own
 //   step name, so a retry or replay of one is never another's.
+// - Items and branches at once running past what a run may (GRA-956).
+//   However many steps the module asks for at once, at most eight of the
+//   run's attempts run (`#inSlot`, spec 18); one past it waits, holding
+//   nothing, before the engine hears of it. Every attempt is admitted as
+//   ever, so a run's lineage only grows.
+// - A branch acting after its scope settled. A race's winner, or the item
+//   or branch an `end` came from, settles its scope once, in the scope's
+//   own step (`settle`), in a fence kept with the run (`ScopeFences`,
+//   run-object.ts), first writer's: a branch that finishes first in a
+//   later replay settles nothing new. A step of an item or branch another
+//   settled its scope over is refused before it starts
+//   (`workflow.branch_cancelled`), every activation; what it recorded
+//   before replays as recorded, and a step already out as the scope
+//   settled ends as it would, its effect standing. The branch a scope
+//   settled on is data the run carries, never authority: only one its
+//   scope has.
 // - An expression that isn't the build's, or another step's. An attempt
 //   evaluates only the sealed table's entries of its own task, of the
 //   stages its step runs (an enter step's if and input.from, say), by
@@ -257,6 +273,7 @@ export const resourceAttemptMethods = [
   "until",
   "items",
   "catches",
+  "settle",
 ] as const;
 
 /** The SDK module the generated code imports, by its flat name. */
@@ -304,6 +321,7 @@ export class Run extends WorkerEntrypoint {
                 until: async (frame) => unwrapped(await attempt.until(frame)),
                 items: async (frame) => unwrapped(await attempt.items(frame)),
                 catches: async () => unwrapped(await attempt.catches()),
+                settle: async (settled) => unwrapped(await attempt.settle(settled)),
               })))),
         sleep: async (name, milliseconds) => {
           unwrapped(await host.sleep(name, milliseconds));
@@ -426,6 +444,13 @@ export interface ResourceHostHooks {
    */
   triedOnce?: TriedOnceMarks;
   /**
+   * The settled scopes of the run's items and branches (a race's winner,
+   * the one an `end` came from), kept with the run across its activations
+   * (run-object.ts, `fencesIn`). Unset, a store of this activation's
+   * alone.
+   */
+  fences?: ScopeFences;
+  /**
    * The model calls the run's actions made, across its activations
    * (run-object.ts, `modelCallsIn`). Unset, a count of this activation's
    * alone.
@@ -484,6 +509,44 @@ export interface TriedOnceMarks {
 
 /** An attempt's ID among marks: its number, and its step's key. */
 const markId = (key: string, attempt: number): string => `${attempt}:${key}`;
+
+/**
+ * The scopes of a run's items and branches that settled, by the place of
+ * their `for` or `fork` task (`StepOf.place`): the one item or branch that
+ * settled it. Its others start no step after (`workflow.branch_cancelled`).
+ */
+export interface ScopeFences {
+  /**
+   * Settles scope `place` on `branch` unless it settled already: the
+   * branch it settled on, first writer's, in one write.
+   */
+  settle: (place: string, branch: number) => number;
+  /** The branch scope `place` settled on, if it did. */
+  settled: (place: string) => number | undefined;
+}
+
+/** Fences of one activation's alone (`ResourceHostHooks.fences` unset). */
+const activationFences = (): ScopeFences => {
+  const settled = new Map<string, number>();
+  return {
+    settle: (place, branch) => {
+      const first = settled.get(place);
+      if (first !== undefined) {
+        return first;
+      }
+      settled.set(place, branch);
+      return branch;
+    },
+    settled: (place) => settled.get(place),
+  };
+};
+
+/**
+ * The most attempts of a run that run at once (spec 18: eight simultaneous
+ * branches a run), whatever its module asks: one past it waits for one to
+ * end before the engine hears of it.
+ */
+const maxAttemptsAtOnce = platformLimits.workflowBranches;
 
 /** Marks of one activation's alone (`ResourceHostHooks.triedOnce` unset). */
 const activationMarks = (): TriedOnceMarks => {
@@ -1181,6 +1244,8 @@ interface StepAttempt {
   itemsAsked: boolean;
   /** What its `item` step's `while` answered, as the host evaluated it. */
   proceeds: boolean | undefined;
+  /** The branch it settled its task's scope on, once (`settle`). */
+  settled: number | undefined;
   /**
    * The filters it resolved for its listen task, with its deadline: what
    * the task's waits match, journaled beside its enter step's record.
@@ -1564,6 +1629,10 @@ export class ResourceRunHost
   readonly #raceFailures = new Map<string, Set<number>>();
   /** The branch each race recorded as its winner, by its place. */
   readonly #raceWinners = new Map<string, number>();
+  readonly #fences: ScopeFences;
+  /** Attempts of this activation running, and those waiting for a slot. */
+  #running = 0;
+  readonly #waitingSlot: (() => void)[] = [];
 
   constructor(
     env: Env,
@@ -1578,6 +1647,7 @@ export class ResourceRunHost
     this.#hooks = hooks;
     this.#activationFuel = hooks.activationFuel ?? activationFuel;
     this.#triedOnce = hooks.triedOnce ?? activationMarks();
+    this.#fences = hooks.fences ?? activationFences();
     this.#actionModelCalls = hooks.modelCalls ?? activationModelCalls();
     this.#readableParams = Object.fromEntries(
       run.build.params.flatMap((name) =>
@@ -1626,8 +1696,99 @@ export class ResourceRunHost
     if (loop === undefined) {
       return this.#refuse(`Step ${shown} runs in an item no loop recorded.`);
     }
+    // Not a refusal of the module: a branch another settled its scope over
+    // (a race's winner, an `end`) starts nothing more, every activation.
+    if (this.#fencedOff(step.scope)) {
+      throw workflowResourceErrors.create("workflow.branch_cancelled");
+    }
     this.#asked.add(name);
     return { ...step, loop };
+  }
+
+  /**
+   * Whether scope `scope` runs in an item or a branch whose `for` or
+   * `fork` settled on another (`#fences`): its steps start no more.
+   *
+   * For GRA-278 (#889, its run's pending failure): with items and branches
+   * at once, a failure no catch took is pending in the scope of the step
+   * that failed, and refuses only that scope's steps and those nested in
+   * it, never a sibling branch's; a catch reads its own scope's; and only
+   * a failure pending in the workflow's own scope fails the run, a
+   * branch's surfacing as its branch's failure, for its fork.
+   */
+  #fencedOff(scope: readonly { id: string; index: number }[]): boolean {
+    return scope.some(({ id, index }, depth) => {
+      const settled = this.#fences.settled(placeOf(id, scope.slice(0, depth)));
+      return settled !== undefined && settled !== index;
+    });
+  }
+
+  /**
+   * `ResourceAttemptHost.settle`, for `attempt`: settles its `for` or
+   * `fork` task's scope on `settled.branch`, once, in the task's own step,
+   * a branch it has (its items as its enter step recorded them, its
+   * branches as sealed): the branch it settled on, an earlier
+   * activation's first (`#fences`). The others start no step after.
+   */
+  #settleOf(attempt: StepAttempt, settled: unknown): Settled<number> {
+    try {
+      this.#requireCurrent(attempt);
+      const { step } = attempt;
+      const { task } = step;
+      const branch = z
+        .strictObject({ branch: z.int().min(0) })
+        .safeParse(settled).data?.branch;
+      let count: number | undefined;
+      if (task?.kind === "fork") {
+        count = task.fork.branches;
+      } else if (task?.kind === "for") {
+        count = this.#items.get(step.place)?.length;
+      }
+      if (
+        step.kind !== "task" ||
+        count === undefined ||
+        branch === undefined ||
+        branch >= count ||
+        attempt.settled !== undefined
+      ) {
+        return this.#refuse(
+          `Step of "${task?.id ?? "the workflow"}" settles no such scope, or settles it twice.`
+        );
+      }
+      attempt.settled = this.#fences.settle(step.place, branch);
+      return { ok: true, value: attempt.settled };
+    } catch (error) {
+      return { ok: false, error: forIsolate(error) };
+    }
+  }
+
+  /**
+   * `work`, once fewer than the run's most attempts at once
+   * (`maxAttemptsAtOnce`) of this activation run: one past it waits,
+   * holding nothing, for one to end.
+   */
+  async #inSlot<T>(work: () => Promise<T>): Promise<T> {
+    if (this.#running >= maxAttemptsAtOnce) {
+      const free = Promise.withResolvers<null>();
+      this.#waitingSlot.push(() => {
+        free.resolve(null);
+      });
+      // Handed over by the attempt that ends, still counted: nothing
+      // that comes meanwhile takes it.
+      await free.promise;
+    } else {
+      this.#running += 1;
+    }
+    try {
+      return await work();
+    } finally {
+      const waiter = this.#waitingSlot.shift();
+      if (waiter === undefined) {
+        this.#running -= 1;
+      } else {
+        waiter();
+      }
+    }
   }
 
   /**
@@ -1964,10 +2125,9 @@ export class ResourceRunHost
     }
     const attemptStep = async (context: unknown): Promise<unknown> =>
       await this.#attempt(run, context, fn, stepDone);
-    let recorded = await this.#step.do(
-      stepName,
-      engineConfigOf(step),
-      attemptStep
+    let recorded = await this.#inSlot(
+      async () =>
+        await this.#step.do(stepName, engineConfigOf(step), attemptStep)
     );
     // Refused for load: the step runs again after a durable sleep, in
     // steps of core's own outside the run's step allowance, as an App
@@ -1999,10 +2159,13 @@ export class ResourceRunHost
         // oxlint-disable-next-line no-await-in-loop -- one round at a time
         await this.#requirePerson();
         // oxlint-disable-next-line no-await-in-loop -- one round at a time
-        recorded = await this.#step.do(
-          `${stepName}:held:${round}:run`,
-          engineConfigOf(step),
-          attemptStep
+        recorded = await this.#inSlot(
+          async () =>
+            await this.#step.do(
+              `${stepName}:held:${round}:run`,
+              engineConfigOf(step),
+              attemptStep
+            )
         );
         continue;
       }
@@ -2018,10 +2181,13 @@ export class ResourceRunHost
       // oxlint-disable-next-line no-await-in-loop -- one round at a time
       await loadRound(this.#step, prefix, stepName, marker, run.wait.sleepMs);
       // oxlint-disable-next-line no-await-in-loop -- one round at a time
-      recorded = await this.#step.do(
-        `${prefix}:run`,
-        engineConfigOf(step),
-        attemptStep
+      recorded = await this.#inSlot(
+        async () =>
+          await this.#step.do(
+            `${prefix}:run`,
+            engineConfigOf(step),
+            attemptStep
+          )
       );
     }
     let outcome = entering ? this.#entered(step, recorded) : recorded;
@@ -2323,6 +2489,7 @@ export class ResourceRunHost
       decision: undefined,
       decided: run.decided,
       child: undefined,
+      settled: undefined,
       held: false,
       collecting: run.collecting,
       failure: run.failure,
@@ -2399,6 +2566,8 @@ export class ResourceRunHost
           besideCall() ??
             (await ResourceRunHost.#tracked(attempt, this.#catches(attempt)))
         ),
+      settle: async (settled) =>
+        await Promise.resolve(this.#settleOf(attempt, settled)),
     });
   }
 
@@ -4609,7 +4778,9 @@ export class ResourceRunHost
   /** Whether `step`, of task `taskId`, evaluates the task's `if`. */
   #hasIf(step: StepOf, taskId: string): boolean {
     // A race's record (a fork's `task` step) follows its enter step's `if`.
-    const race = step.kind === "task" && step.task?.kind === "fork";
+    const race =
+      step.kind === "task" &&
+      (step.task?.kind === "fork" || step.task?.kind === "for");
     return (
       !race &&
       stagesFor(step).includes("taskIf") &&
@@ -4659,24 +4830,23 @@ export class ResourceRunHost
   }
 
   /**
-   * Refuses `record` of race `task`'s own step `step` unless it names its
-   * winning branch alone: one it has, which the race reached past the
-   * failures before it and which didn't fail itself (`#raceGoesTo`). What
-   * each branch did its own steps recorded.
+   * Refuses `record` of the own step of `for` or `fork` task `task` (its
+   * settling) unless it records the branch the host settled its scope on
+   * in this attempt (`settle`), and nothing of its own: what each item or
+   * branch did its own steps recorded.
    */
-  #requireRaceRecord(
-    step: StepOf,
-    task: Extract<SealedTask, { kind: "fork" }>,
-    record: { branch?: number | undefined }
+  #requireSettledRecord(
+    attempt: StepAttempt,
+    task: SealedTask,
+    record: { output: Json; branch?: number | undefined }
   ): void {
-    const { branch } = record;
     if (
-      branch === undefined ||
-      branch >= task.fork.branches ||
-      !this.#raceGoesTo(step.place, branch) ||
+      attempt.settled === undefined ||
+      record.branch !== attempt.settled ||
+      record.output !== null ||
       Object.keys(record).length !== 2
     ) {
-      this.#refuse(`Task "${task.id}"'s race records its winning branch.`);
+      this.#refuse(`Task "${task.id}" records the branch its scope settled on.`);
     }
   }
 
@@ -4702,8 +4872,8 @@ export class ResourceRunHost
     if (task === undefined) {
       return false;
     }
-    if (task.kind === "fork" && step.kind === "task") {
-      this.#requireRaceRecord(step, task, record);
+    if ((task.kind === "fork" || task.kind === "for") && step.kind === "task") {
+      this.#requireSettledRecord(attempt, task, record);
       return true;
     }
     if (step.kind === "item") {

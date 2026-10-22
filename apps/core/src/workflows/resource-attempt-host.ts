@@ -11,6 +11,7 @@ export interface AttemptCalls {
   until: (frame: unknown) => Promise<Settled<number>>;
   items: (frame: unknown) => Promise<Settled<LoopItems>>;
   catches: () => Promise<Settled<boolean>>;
+  settle: (settled: unknown) => Promise<Settled<number>>;
 }
 
 /** A `for` task's items, and their keys where its loop has them. */
@@ -67,5 +68,10 @@ export class ResourceAttemptHost extends RpcTarget {
   /** Whether the try task's catch takes the failure that left its list. */
   async catches(): Promise<Settled<boolean>> {
     return await this.#calls.catches();
+  }
+
+  /** Settles a scope of items or branches on one of them, once. */
+  async settle(settled: unknown): Promise<Settled<number>> {
+    return await this.#calls.settle(settled);
   }
 }
