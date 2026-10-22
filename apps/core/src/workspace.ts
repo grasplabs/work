@@ -85,7 +85,6 @@ import type {
 } from "./agent-scope.ts";
 import { isMessage, runTurn } from "./agent.ts";
 import type { TurnContext, TurnResult } from "./agent.ts";
-import type { AppAnswer } from "./app.ts";
 import { draftFiles } from "./apps.ts";
 import { drainObjectOutbox } from "./audit-outbox.ts";
 import { memberRole } from "./auth/identity.ts";
@@ -98,7 +97,11 @@ import type {
   BuildJobRow,
 } from "./build-job-records.ts";
 import { revokeChatPermissions } from "./chat-connections.ts";
-import { chatMessageOf, partialOf } from "./chat-messages.ts";
+import {
+  chatMessageOf,
+  coreMessageProvider,
+  partialOf,
+} from "./chat-messages.ts";
 import { ChatWatch } from "./chat-watch.ts";
 import type { ChatListener, ChatState } from "./chat-watch.ts";
 import {
@@ -133,14 +136,9 @@ import { readAsDelegate } from "./knowledge/binding.ts";
 import { forContext } from "./knowledge/memory.ts";
 import { catalog, noteListedSkills } from "./knowledge/tools.ts";
 import { gatewaySettings, models } from "./models.ts";
-import {
-  functionProblem,
-  PreviewReports,
-  serverProblem,
-} from "./preview-reports.ts";
+import { functionProblem, PreviewReports } from "./preview-reports.ts";
 import type { Reports } from "./preview-reports.ts";
 import { PreviewUpdates } from "./preview-updates.ts";
-import { Previews } from "./preview.ts";
 import type { WorkContext } from "./restricted.ts";
 import { sessionHost } from "./sandboxed.ts";
 import { SealedPreviews } from "./sealed-previews.ts";
@@ -455,9 +453,9 @@ const interruptedMessage = (): AssistantMessage => ({
       text: "I was interrupted before I finished, so what I was doing may be incomplete. Ask again and I'll go on from here.",
     },
   ],
-  api: "grasp",
-  provider: "grasp",
-  model: "grasp",
+  api: coreMessageProvider,
+  provider: coreMessageProvider,
+  model: coreMessageProvider,
   usage: {
     input: 0,
     output: 0,
@@ -634,9 +632,6 @@ export class Workspace extends DurableObject<Env> {
 
   /** The chats' build jobs (build-jobs.ts). */
   readonly #jobs = new BuildJobRecords(this.#db);
-
-  /** The chats' previews of their drafts (preview.ts). */
-  readonly #previews = new Previews(this.ctx, this.env);
 
   /** The chats' previews of their drafts of spec 8 Apps (sealed-previews.ts). */
   readonly #sealedPreviews = new SealedPreviews(
@@ -2865,7 +2860,6 @@ export class Workspace extends DurableObject<Env> {
     if (saved) {
       // The preview of the revision before is over: its database goes now;
       // its problems are not the new revision's (preview-reports.ts).
-      this.#previews.drop(chatId, appId);
       this.#sealedPreviews.drop(chatId, appId);
       this.#draftsChanged(chatId);
     }
@@ -2941,12 +2935,11 @@ export class Workspace extends DurableObject<Env> {
 
   /** Stops the chat's preview of App `appId`, and forgets its reports. */
   #dropPreview(chatId: ChatId, appId: string): void {
-    this.#previews.drop(chatId, appId);
     this.#sealedPreviews.drop(chatId, appId);
     this.#previewReports.drop(chatId, appId);
   }
 
-  // A chat's preview of its draft of an App (preview.ts), for the chat's
+  // A chat's preview of its draft of an App (sealed-previews.ts), for the chat's
   // own person and the chat's agent acting for them: core checks the
   // person's role in the App first (chats-rpc.ts, agent-builds.ts).
 
@@ -3082,71 +3075,6 @@ export class Workspace extends DurableObject<Env> {
     logs: ServerLog[]
   ): void {
     this.#previewReports.log(chatId, appId, revision, logs);
-  }
-
-  /**
-   * Calls `method` of the server code of `personId`'s own chat's draft of
-   * App `appId` with `args`, in its preview, as the draft is now: for the
-   * chat's agent (`env.build.call`), which hears how it went, so nothing
-   * is kept of it.
-   */
-  async callDraft(
-    chatId: unknown,
-    personId: string,
-    appId: string,
-    method: string,
-    args: unknown[]
-  ): Promise<AppAnswer> {
-    // Not the side panel's: the preview doesn't count as open for it.
-    const { id, draft } = this.#draftToPreview(chatId, personId, appId);
-    return await this.#previews.call(
-      id,
-      personId,
-      appIdSchema.parse(appId),
-      draft,
-      method,
-      args
-    );
-  }
-
-  /**
-   * Calls `method` of the server code of `personId`'s own chat's draft of
-   * App `appId` with `args`, in its preview, as a screen of the draft at
-   * `revision` does: `app.preview_outdated` once it is at another. What
-   * the draft's code failed with is kept for the agent's next check.
-   */
-  async previewCall(
-    chatId: unknown,
-    personId: string,
-    appId: string,
-    revision: unknown,
-    method: string,
-    args: unknown[]
-  ): Promise<AppAnswer> {
-    const draft = this.previewDraft(chatId, personId, appId);
-    if (draft.revision !== revision) {
-      throw appErrors.create("app.preview_outdated");
-    }
-    const id = chatIdSchema.parse(chatId);
-    try {
-      return await this.#previews.call(
-        id,
-        personId,
-        appIdSchema.parse(appId),
-        draft,
-        method,
-        args
-      );
-    } catch (error) {
-      const problem = serverProblem(method, error);
-      if (problem !== undefined) {
-        this.#previewReports.report(id, appId, draft.revision, problem);
-      }
-      throw error;
-    } finally {
-      // Once the call ended, however: its failure is kept by then.
-      this.#previewReports.saw(id, appId, draft.revision);
-    }
   }
 
   /**

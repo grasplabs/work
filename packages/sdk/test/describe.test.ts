@@ -208,6 +208,7 @@ describe(describeWorkflow, () => {
     expect({
       outline,
       calls: reviewedCalls(source).steps,
+      kinds: reviewedCalls(source).kinds,
       kept: reviewedCalls(source).dynamic,
     }).toStrictEqual({
       outline: [
@@ -233,6 +234,13 @@ describe(describeWorkflow, () => {
       ],
       // Every step is still held to the review by name.
       calls: { fetch: [], review: [], "sign-off": [], "cool-off": [] },
+      // Each step's kind, which its runs are held to running it as.
+      kinds: {
+        fetch: "exact",
+        review: "decision",
+        "sign-off": "decision",
+        "cool-off": "wait",
+      },
       // What its runs are held to: which steps' options their input chose.
       kept: { review: ["from", "timeout"], "cool-off": ["duration"] },
     });
@@ -469,7 +477,11 @@ describe(describeWorkflow, () => {
 
     for (const [source, message] of cases) {
       expect(() => describeWorkflow(source)).toThrow(message);
-      expect(reviewedCalls(source)).toStrictEqual({ steps: null, all: [] });
+      expect(reviewedCalls(source)).toStrictEqual({
+        steps: null,
+        kinds: {},
+        all: [],
+      });
     }
   });
 

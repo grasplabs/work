@@ -71,14 +71,14 @@ jobs:
     name: test (${{ matrix.shard }}/${{ strategy.job-total }})
     if: github.event_name != 'push'
     runs-on: ubuntu-latest
-    # The test step's 16 minutes, and room for the steps around it.
-    timeout-minutes: 22
+    # The test step's 25 minutes, and room for the steps around it.
+    timeout-minutes: 31
     strategy:
       # A failing shard doesn't cancel the other: each says what failed in
       # it.
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5]
+        shard: [1, 2, 3, 4, 5, 6]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -106,8 +106,12 @@ jobs:
       # step's timeout: core's heaviest files could land together, and a
       # shard runs its project groups (core and the rest, then core's
       # screens, then on-prem) one after another. Five shards split by
-      # duration took 4 to 7 minutes each, leaving room for a runner twice
-      # as slow; four left the heaviest at about 9. Refresh the durations from the shards' test-progress
+      # duration took 4 to 7 minutes each at first, leaving room for a
+      # runner twice as slow; four left the heaviest at about 9. As tests
+      # grew, five reached the 16 minutes this step had, and 4 of 9 PR runs
+      # lost a shard to it (October 2026, GRA-981): six shards, durations
+      # refreshed from recent runs, and 25 minutes, so a slow runner still
+      # fits. Refresh the durations from the shards' test-progress
       # artifacts when the split drifts (scripts/test-durations.ts).
       # Vitest's default runs a worker per CPU but one, which left a third
       # of the runner's CPU idle; a worker per CPU measured about 6% faster.
@@ -127,11 +131,11 @@ jobs:
       # Reporters given here replace Vitest's defaults, so github-actions is
       # listed for the inline failure annotations.
       - run: vp test --shard=${{ matrix.shard }}/${{ strategy.job-total }} --maxWorkers=100% --reporter=default --reporter=github-actions --reporter=./scripts/stall-reporter.ts
-        timeout-minutes: 16
+        timeout-minutes: 25
         env:
           # Below the step's timeout, so the reporter says what still runs
           # before the step is killed.
-          GRASP_STALL_REPORT_AFTER_MINUTES: 14
+          GRASP_STALL_REPORT_AFTER_MINUTES: 23
           # Seconds past a test's own timeout (counted for each attempt):
           # room for the hooks around it, which have timeouts of their own.
           # The longest is 120 s, set by workerflow's process tests

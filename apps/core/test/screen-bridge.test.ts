@@ -1226,7 +1226,8 @@ describe("screens", { timeout: 60_000 }, () => {
       );
 
     // A run's input, passed straight: one level deeper than values nest
-    // gets in (screen-limits.ts, `rpcArgumentDepth`), to core's own code.
+    // gets in (screen-limits.ts, `rpcArgumentDepth`), to core's own code;
+    // one level more doesn't.
     const deepest = await echoed(built(valueDepth - 8, 9));
     const oneMore = await echoed(built(valueDepth - 8, 10));
     // Thousands of levels: refused as such, not by running out of stack.
