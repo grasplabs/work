@@ -392,9 +392,6 @@ export const addBrainRecords = async (
 ): Promise<BrainRecordsAdded> => {
   requireAdmin(person);
   const records = recordsOf(input);
-  // GRA-328: a record's free text (a statement's, a gap's question)
-  // is canonical Brain storage, so it should pass the knowledge admission gate
-  // here, before anything is kept; that gate is not built yet.
   const onboarding = await onboardingHeld(env, records);
   // Another call can add some of these ids between the read and the
   // write: the unique index then refuses the whole batch, and what is

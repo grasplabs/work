@@ -362,8 +362,6 @@ export const answerGap = async (
     });
   }
   const gap = await gapOf(env, gapId);
-  // GRA-328: an answer is canonical Brain storage, so it passes the
-  // admission gate (knowledge/admission.ts, #863) here, before it is kept.
   return await close(env, person, gap, parsed.data);
 };
 
