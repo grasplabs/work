@@ -3291,7 +3291,9 @@ export const workflowRunFileChunks = sqliteTable(
  * source is the emitting run, never what the workflow says. Delivery to
  * what consumes platform events (system triggers) marks it delivered; until
  * something consumes them, each waits here. Retention removes an event's
- * subject and data with its run's details (workflows/retention.ts).
+ * subject and data with its run's details (workflows/retention.ts), and
+ * closes one still undelivered then (its `delivered_at` the removal's
+ * time), so nothing delivers it without its data.
  */
 export const workflowEmittedEvents = sqliteTable(
   "workflow_emitted_events",

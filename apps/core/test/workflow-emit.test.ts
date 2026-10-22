@@ -166,7 +166,7 @@ const endStateOf = (run: WorkflowResourceRun) => ({
 /** The events run `runId` emitted, as core's outbox keeps them. */
 const emittedBy = async (runId: string) => {
   const rows = await env.DB.prepare(
-    "SELECT id, task_id AS task, binding, contract_id AS contract, source, type, subject, data, details_removed_at AS removed FROM workflow_emitted_events WHERE run_id = ? ORDER BY created_at"
+    "SELECT id, task_id AS task, binding, contract_id AS contract, source, type, subject, data, details_removed_at AS removed, delivered_at AS delivered FROM workflow_emitted_events WHERE run_id = ? ORDER BY created_at"
   )
     .bind(runId)
     .all<{
@@ -179,6 +179,7 @@ const emittedBy = async (runId: string) => {
       subject: string | null;
       data: string | null;
       removed: number | null;
+      delivered: number | null;
     }>();
   return rows.results;
 };
@@ -214,6 +215,7 @@ describe("emit tasks", { timeout: 120_000 }, () => {
       subject: "job-1",
       data: JSON.stringify({ jobId: "job-1" }),
       removed: null,
+      delivered: null,
     });
     expect(audited).toHaveLength(1);
   });
@@ -331,11 +333,14 @@ describe("emit tasks", { timeout: 120_000 }, () => {
       subject: event?.subject,
       data: event?.data,
       removed: event?.removed !== null,
+      // Closed undelivered with its details, never delivered without them.
+      closed: event?.delivered === event?.removed,
     }).toStrictEqual({
       type: timedOut,
       subject: null,
       data: null,
       removed: true,
+      closed: true,
     });
   });
 });

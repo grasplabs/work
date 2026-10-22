@@ -3205,7 +3205,9 @@ export class ResourceRunHost
     this.#requireCurrent(attempt);
     await emitEvent(this.#env, this.#run.calling, {
       taskId: task.id,
-      stepKey: stepIdempotencyKey(this.#run.runId, `task:${task.id}`),
+      // Its step's name, not its task's: a step the same task runs again
+      // under another name (a loop's iteration) emits an event of its own.
+      stepKey: stepIdempotencyKey(this.#run.runId, attempt.name),
       binding: call.binding,
       type: call.type,
       data: data ?? null,
