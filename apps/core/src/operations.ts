@@ -2935,15 +2935,18 @@ const forCaller = (error: unknown, run: Run): Error => {
     const details = structuredClone(domain.details) as JsonValue | undefined;
     return new AppError(domain.code, error.message, details);
   }
-  if (isExpectedError(error) && hostErrors.has(error)) {
-    return error;
-  }
   // What a draft's nested function threw, kept by a token App code is
-  // handed with it: told only if it throws on this very failure.
+  // handed with it: told only if it throws on this very failure. Read
+  // before a host error passes on as it is: a nested function that threw
+  // on one failure it caught fails with its channel's copy of the last
+  // one it was raised, whose token names that other failure.
   const said =
     typeof error === "object" && error !== null
       ? nestedSaid.get(error)
       : undefined;
+  if (said === undefined && isExpectedError(error) && hostErrors.has(error)) {
+    return error;
+  }
   const token = said === undefined ? undefined : crypto.randomUUID();
   if (said !== undefined && token !== undefined) {
     run.told.nested.set(token, said);

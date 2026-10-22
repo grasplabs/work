@@ -207,6 +207,41 @@ export const handledThenFailed = action({
 });
 
 /**
+ * Handles \`broken\`'s failure, then \`alsoBroken\`'s, and throws on
+ * \`broken\`'s: the failure it ends with isn't the last one it handled.
+ */
+export const throwsTheFirst = action({
+  args: {},
+  returns: v.null(),
+  uses: [broken, alsoBroken],
+  handler: async (ctx) => {
+    let first: unknown;
+    try {
+      await ctx.runQuery(broken, {});
+    } catch (error) {
+      first = error;
+    }
+    try {
+      await ctx.runQuery(alsoBroken, {});
+    } catch {
+      // Handled: the call goes on.
+    }
+    throw first;
+  },
+});
+
+/** Calls \`throwsTheFirst\`, and fails with what it failed with. */
+export const callsThrowsTheFirst = action({
+  args: {},
+  returns: v.null(),
+  uses: [throwsTheFirst],
+  handler: async (ctx) => {
+    await ctx.runAction(throwsTheFirst, {});
+    return null;
+  },
+});
+
+/**
  * Fails while there are no notes, a while after it read none: a note
  * written meanwhile makes that read stale, and its run again answers.
  */
@@ -262,14 +297,14 @@ export const consult = action({
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { alsoBroken, broken, chatty, consult, create, forgiving, handledThenFailed, late, list, oddly, patient, rethrows, sly, titles, writer } from "./operations/notes.ts";
+import { alsoBroken, broken, callsThrowsTheFirst, chatty, consult, create, forgiving, handledThenFailed, late, list, oddly, patient, rethrows, sly, throwsTheFirst, titles, writer } from "./operations/notes.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Notes",
   schema,
   access: { tables: { notes: { read: "appMembers", write: "appMembers" } } },
-  operations: { notes: { create, titles, late, consult, list, chatty, broken, oddly, sly, forgiving, rethrows, alsoBroken, handledThenFailed, patient } },
+  operations: { notes: { create, titles, late, consult, list, chatty, broken, oddly, sly, forgiving, rethrows, alsoBroken, handledThenFailed, patient, throwsTheFirst, callsThrowsTheFirst } },
   internalOperations: {},
   screens: [],
   uses: [writer],
@@ -704,6 +739,11 @@ describe("previewing a draft of spec 8's layout", { timeout: 180_000 }, () => {
     const second = outcome(await call("notes.handledThenFailed"));
     const secondReports = await chats.previewReports(chatId, app, revision, 0);
     const secondAgent = await asAgent("notes.handledThenFailed");
+    // A nested action handled two failures and threw on the first: its
+    // caller failed with that one, not the last one handled.
+    const first = outcome(await call("notes.callsThrowsTheFirst"));
+    const firstReports = await chats.previewReports(chatId, app, revision, 0);
+    const firstAgent = await asAgent("notes.callsThrowsTheFirst");
 
     const opening = "Error: Note 7 has no title.";
     expect({
@@ -718,6 +758,11 @@ describe("previewing a draft of spec 8's layout", { timeout: 180_000 }, () => {
       second,
       secondProblem: secondReports.problems.at(-1)?.message,
       secondAgent: secondAgent.thrown,
+      first,
+      firstProblem: firstReports.problems
+        .at(-1)
+        ?.message.slice(0, opening.length),
+      firstAgent: firstAgent.thrown?.slice(0, opening.length),
     }).toStrictEqual({
       forgiven: null,
       forgivenProblems: 0,
@@ -728,6 +773,9 @@ describe("previewing a draft of spec 8's layout", { timeout: 180_000 }, () => {
       second: "internal.unexpected",
       secondProblem: "Error: Note 8 has no body.",
       secondAgent: "Error: Note 8 has no body.",
+      first: "internal.unexpected",
+      firstProblem: opening,
+      firstAgent: opening,
     });
   });
 
