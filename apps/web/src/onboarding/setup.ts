@@ -6,6 +6,7 @@ import type {
 import type { KnownPart } from "@grasp-os/shared/onboarding-gate";
 
 import type { ShapeKey } from "../brain/dot-shapes.ts";
+import { lengthOf, readingTiming } from "../voice/timing.ts";
 import { addDays } from "./send-plan.ts";
 
 // The client onboarding a company's admin goes through until Grasp opens
@@ -228,19 +229,8 @@ export const dotsOf = (
  * pace per character, a breath after a comma and a longer one after a full
  * stop. With no voice to say it, a step's way on waits for most of that.
  */
-export const readingSeconds = (line: string): number => {
-  let at = 0;
-  for (const char of line) {
-    if (/[.?!…]/u.test(char)) {
-      at += 0.34;
-    } else if (/[,;:]/u.test(char)) {
-      at += 0.18;
-    } else {
-      at += 0.058;
-    }
-  }
-  return at;
-};
+export const readingSeconds = (line: string): number =>
+  lengthOf(readingTiming(line));
 
 /** How far the admin went before: the furthest step, as far as core says they are. */
 export const reachedOf = (
