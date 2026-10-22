@@ -100,6 +100,13 @@ export const clients = sqliteTable(
      * (src/billing/stripe.ts). Null until it is linked.
      */
     stripeCustomerId: text("stripe_customer_id"),
+    /**
+     * The client's proposal in Grasp's Rooms: its room's id, as someone at
+     * Grasp linked it by hand (src/proposal/link.ts), never matched by
+     * name. Only the id is kept; the room and what was signed in it are
+     * read each time (src/proposal/rooms.ts). Null until it is linked.
+     */
+    roomsProjectId: text("rooms_project_id"),
     /** The release it stays on while pinned, whatever the rollouts. */
     pinnedReleaseId: text("pinned_release_id").references(() => releases.id),
     createdAt: timestamp("created_at").notNull(),
@@ -132,8 +139,14 @@ export const clientRuns = sqliteTable("client_runs", {
   runId: text("run_id").notNull(),
   /** When it was claimed: a run not created yet counts as starting for a while. */
   claimedAt: timestamp("claimed_at").notNull(),
-  /** Which Workflow the runner is an instance of. */
-  kind: text({ enum: ["provision", "rollout", "rollback", "apply"] })
+  /**
+   * Which Workflow the runner is an instance of: `provision_placed`
+   * provisions a client placed in a hosting destination
+   * (src/hosting/workflow.ts).
+   */
+  kind: text({
+    enum: ["provision", "rollout", "rollback", "apply", "provision_placed"],
+  })
     .notNull()
     .default("provision"),
 });
@@ -479,3 +492,41 @@ export const clientResources = sqliteTable(
     ),
   ]
 );
+
+/**
+ * Provisioning a placed client (spec 40.2, src/hosting/operation.ts): one
+ * operation per client, however often it's retried, and how far it got.
+ * Every step can run again, so a retry resumes it from the start of the
+ * step it stopped in, and nothing is created twice or replaced.
+ */
+export const clientProvisions = sqliteTable("client_provisions", {
+  id: text().primaryKey(),
+  /** One operation per client: a retry resumes it, never starts another. */
+  clientId: text("client_id")
+    .notNull()
+    .unique()
+    .references(() => clients.id),
+  /** The release it provisions: fixed for the operation. */
+  releaseId: text("release_id")
+    .notNull()
+    .references(() => releases.id),
+  status: text({ enum: ["running", "failed", "done"] }).notNull(),
+  /** The last step that finished, such as `resources`; null before the first. */
+  step: text(),
+  /** Why it stopped: an error code staff act on, never a message or a response body. */
+  error: text(),
+  /**
+   * What its steps observed, to resume without repeating them: JSON
+   * (`progressSchema`, src/hosting/operation.ts): each Worker's upload
+   * fingerprint, its delivered secrets' fingerprint, and the core origin
+   * its probe passed at. Fingerprints are keyed hashes: they tell nothing
+   * of a secret.
+   */
+  progress: text(),
+  /** The runner that last recorded a step: a Workflow instance (src/runners.ts). */
+  runId: text("run_id"),
+  /** The staff member who started it. */
+  startedBy: text("started_by").notNull(),
+  createdAt: timestamp("created_at").notNull(),
+  updatedAt: timestamp("updated_at").notNull(),
+});

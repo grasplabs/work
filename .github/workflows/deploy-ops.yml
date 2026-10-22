@@ -156,6 +156,11 @@ jobs:
       # last one). So are ENTRA_CLIENT_ID and GOOGLE_CLIENT_ID, Grasp's
       # OAuth apps' client ids, which each client's core signs people in
       # with: a client whose sign-in names an IdP without one isn't deployed.
+      # So is GRASP_CLIENT_ID, Grasp's own client, whose core answers Ask
+      # Grasp with its model gateway: without it the chat isn't set up.
+      # So is ROOMS_ORIGIN, Grasp's Rooms' team origin, which the admin reads
+      # each company's proposal from with ROOMS_READ_TOKEN (Secrets Store):
+      # without it the proposal says Rooms isn't connected.
       # So is ADMIN_HOST, Grasp's admin's own hostname (admin.<domain>,
       # apps/console/src/admin-host.ts): a route of the console's Worker
       # and a hostname of its Access application, both set by hand.
@@ -167,6 +172,8 @@ jobs:
           CLIENT_DOMAIN: ${{ vars.CLIENT_DOMAIN }}
           ENTRA_CLIENT_ID: ${{ vars.ENTRA_CLIENT_ID }}
           GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
+          GRASP_CLIENT_ID: ${{ vars.GRASP_CLIENT_ID }}
+          ROOMS_ORIGIN: ${{ vars.ROOMS_ORIGIN }}
           ADMIN_HOST: ${{ vars.ADMIN_HOST }}
         run: |
           set -euo pipefail
@@ -175,7 +182,7 @@ jobs:
             exit 1
           fi
           vars=(--var "CF_ACCESS_AUD:$CF_ACCESS_AUD" --var "CF_ACCESS_ISS:$CF_ACCESS_ISS")
-          for name in CLIENT_DOMAIN ENTRA_CLIENT_ID GOOGLE_CLIENT_ID ADMIN_HOST; do
+          for name in CLIENT_DOMAIN ENTRA_CLIENT_ID GOOGLE_CLIENT_ID GRASP_CLIENT_ID ROOMS_ORIGIN ADMIN_HOST; do
             if [ -n "${!name}" ]; then
               vars+=(--var "$name:${!name}")
             fi

@@ -35,6 +35,7 @@ import type { ReactElement, ReactNode } from "react";
 import { EngineIcon } from "../engines/engine-icon.tsx";
 import { formatDateTime, formatNumber } from "../format.ts";
 import { handledOf, listsOf } from "./lists.ts";
+import { WorkflowOwnerPicker } from "./owner-picker.tsx";
 import { RunResult } from "./runs.tsx";
 
 // The workflows table, one line a workflow, as the prototype draws it
@@ -167,7 +168,8 @@ const Lead = ({ workflow }: { workflow: WorkflowSummary }) => {
 
 /**
  * A workflow's row: its name, the App it is in and its version under it,
- * when it last ran and where it stands. The whole row opens it.
+ * its owner, when it last ran and where it stands. The whole row opens
+ * it; the owner is changed in place, above the row's link.
  */
 const WorkflowRow = ({
   workflow,
@@ -233,6 +235,11 @@ const WorkflowRow = ({
       </TableCell>
       <TableCell className="hidden @2xl:table-cell" variant="roomy">
         <LastRun workflow={workflow} />
+      </TableCell>
+      <TableCell className="hidden @md:table-cell" variant="roomy">
+        <div className="relative z-10 w-fit">
+          <WorkflowOwnerPicker workflow={workflow} />
+        </div>
       </TableCell>
       <TableCell variant="roomy">
         <Status workflow={workflow} />
@@ -316,6 +323,9 @@ export const WorkflowsTable = ({
             </TableHead>
             <TableHead className="hidden w-44 @2xl:table-cell" variant="card">
               <Trans>Last run</Trans>
+            </TableHead>
+            <TableHead className="hidden w-20 @md:table-cell" variant="card">
+              <Trans context="column: who owns a workflow">Owner</Trans>
             </TableHead>
             <TableHead className="w-52" variant="card">
               <Trans context="column: where a workflow stands">Status</Trans>
