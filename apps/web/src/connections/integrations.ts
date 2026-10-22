@@ -360,10 +360,10 @@ const plain = (name: string): string =>
   name.toLocaleLowerCase().replaceAll(/[^\p{L}\p{N}]/gu, "");
 
 /**
- * The catalog's apps that the company has no connection to, leaving out one
- * that carries the name of an app it is connected to under another entry
- * (Microsoft's toolkit next to the native Microsoft provider), as the
- * prototype's `beyond` does.
+ * The catalog's apps that the company could connect and has no connection
+ * to: offered to it, and not carrying the name of an app it is connected
+ * to under another entry (Microsoft's toolkit next to the native Microsoft
+ * provider), as the prototype's `beyond` does.
  */
 export const beyond = (integrations: readonly Integration[]): Integration[] => {
   const own = new Set(
@@ -373,6 +373,7 @@ export const beyond = (integrations: readonly Integration[]): Integration[] => {
   );
   return integrations.filter(
     (integration) =>
+      integration.offered &&
       stateOf(integration) === "not_connected" &&
       !own.has(plain(integration.name))
   );
@@ -385,8 +386,8 @@ const shortestSought = 3;
 
 /**
  * The apps nearest to a name, to offer instead of a request: those whose
- * name holds it or is held by it, the shortest first. Too little typed
- * finds nothing.
+ * name holds it or is held by it, the one named exactly so first, then the
+ * shortest. Too little typed finds nothing.
  */
 export const nearestApps = (
   integrations: readonly Integration[],
@@ -405,6 +406,11 @@ export const nearestApps = (
         (name.length >= shortestHeld && wanted.includes(name))
       );
     })
-    .toSorted((one, other) => one.name.length - other.name.length)
+    .toSorted(
+      (one, other) =>
+        Number(plain(other.name) === wanted) -
+          Number(plain(one.name) === wanted) ||
+        one.name.length - other.name.length
+    )
     .slice(0, most);
 };

@@ -153,7 +153,7 @@ const Details = ({
         />
         {badUrl ? (
           <FieldError>
-            <Trans>Use an address that starts with https://.</Trans>
+            <Trans>Use an address that starts with http:// or https://.</Trans>
           </FieldError>
         ) : null}
       </Field>
@@ -233,13 +233,16 @@ const RequestFlow = ({
   }, [core]);
 
   const sought = name.trim();
-  const own = nearestApps(
-    integrations.filter((each) => stateOf(each) !== "not_connected"),
-    sought
+  const connected = integrations.filter(
+    (each) => stateOf(each) !== "not_connected"
   );
-  const others = nearestApps(beyond(integrations), sought);
+  const offered = beyond(integrations);
+  const own = nearestApps(connected, sought);
+  const others = nearestApps(offered, sought);
   const hasMatches = own.length + others.length > 0;
-  const exact = [...own, ...others].some(
+  // Over every app offered, not only those shown: one already here is
+  // never asked for.
+  const exact = [...connected, ...offered].some(
     (each) => asName(each.name) === asName(sought)
   );
   const before = askedBefore(asked, sought);
