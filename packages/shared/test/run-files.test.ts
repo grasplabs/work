@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { runFileTypeOf } from "../src/run-files.ts";
+import { isZip, runFileTypeOf } from "../src/run-files.ts";
 
 // The type a file someone else made shows (GRA-886): by its bytes, never
-// by the label it came with, which only picks between types the bytes are
-// both and names a text type for bytes with no signature. Pure logic.
+// by the label it came with, which only names a text type for bytes with
+// no signature. Pure logic.
 
 const bytes = (...values: number[]): Uint8Array => Uint8Array.from(values);
 const text = (value: string): Uint8Array => new TextEncoder().encode(value);
@@ -36,11 +36,17 @@ describe("the run-file type of a file someone else made", () => {
     });
   });
 
-  it("takes a ZIP as the Office document its label names, and as none otherwise", () => {
+  it("never takes a ZIP for an Office document by its label: only the package's content types tell them apart", () => {
     expect({
-      docx: runFileTypeOf(zip, docx),
+      docxLabel: runFileTypeOf(zip, docx),
       zip: runFileTypeOf(zip, "application/zip"),
-      unlabelled: runFileTypeOf(zip, null),
-    }).toStrictEqual({ docx, zip: undefined, unlabelled: undefined });
+      isZip: isZip(zip),
+      pdfIsZip: isZip(text("%PDF-")),
+    }).toStrictEqual({
+      docxLabel: undefined,
+      zip: undefined,
+      isZip: true,
+      pdfIsZip: false,
+    });
   });
 });
