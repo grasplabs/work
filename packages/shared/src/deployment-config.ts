@@ -183,14 +183,42 @@ const voiceGatewaySchema = z
  * `modelRef` checks one `<provider>/<model>` the gateway offers.
  */
 export const modelGatewayConfigSchema = (modelRef: z.ZodType<string>) =>
-  z.object({
-    /** The deployment's AI Gateway, in the deployment's own account. */
-    gateway: z.string().regex(gatewayIdPattern),
-    /** The models this deployment allows; every other model is refused. */
-    models: z.array(modelRef).min(1),
-    /** How the gateway reaches ElevenLabs: its native provider unless set. */
-    voice: voiceGatewaySchema,
-  });
+  z
+    .object({
+      /** The deployment's AI Gateway, in the deployment's own account. */
+      gateway: z.string().regex(gatewayIdPattern),
+      /** The models this deployment allows; every other model is refused. */
+      models: z.array(modelRef).min(1),
+      /**
+       * The model that plays each role (`modelRoles`), one of the allowed
+       * models. A role left out goes to the first allowed model the
+       * call's rules let it use, as every call did before roles.
+       */
+      roles: z
+        .strictObject({
+          quick: modelRef.optional(),
+          careful: modelRef.optional(),
+        } satisfies Record<ModelRole, z.ZodType>)
+        .optional(),
+      /** How the gateway reaches ElevenLabs: its native provider unless set. */
+      voice: voiceGatewaySchema,
+    })
+    .refine(
+      ({ models: allowed, roles }) =>
+        Object.values(roles ?? {}).every(
+          (ref) => ref === undefined || allowed.includes(ref)
+        ),
+      { message: "A role's model is an allowed model", path: ["roles"] }
+    );
+
+/**
+ * What core's own features ask the gateway for, rather than a model:
+ * `quick` for a line someone is waiting to hear, `careful` for reading and
+ * writing that must be right. The deployment names the model for each in
+ * `MODEL_GATEWAY`'s `roles`.
+ */
+export const modelRoles = ["quick", "careful"] as const;
+export type ModelRole = (typeof modelRoles)[number];
 
 /**
  * The models a new deployment allows until staff change its
