@@ -64,9 +64,6 @@ export interface FoundState {
   exists: (path: string) => boolean;
 }
 
-/** Wrangler config keys of state bindings the registry covers. */
-const coveredKeys = new Set(["d1_databases", "r2_buckets", "durable_objects"]);
-
 /**
  * Wrangler config keys that bind state of other kinds: a client Worker
  * that binds one holds state the registry has no place for yet.
@@ -89,6 +86,15 @@ const recordOf = (value: unknown): Record<string, unknown> =>
 
 const arrayOf = (value: unknown): readonly unknown[] =>
   Array.isArray(value) ? value : [];
+
+/**
+ * Whether a config value binds anything: a non-empty array, or an object
+ * of them, as `queues` has `producers` and `consumers`.
+ */
+const bindsAny = (value: unknown): boolean =>
+  Array.isArray(value)
+    ? value.length > 0
+    : Object.values(recordOf(value)).some((part) => arrayOf(part).length > 0);
 
 const stringOf = (value: unknown): string | undefined =>
   typeof value === "string" ? value : undefined;
@@ -151,9 +157,7 @@ export const workerBindingsOf = (text: string): WorkerBindings => {
       };
     }
   );
-  const otherState = otherStateKeys.filter(
-    (key) => !coveredKeys.has(key) && arrayOf(config[key]).length > 0
-  );
+  const otherState = otherStateKeys.filter((key) => bindsAny(config[key]));
   return {
     d1,
     r2,

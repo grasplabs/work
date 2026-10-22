@@ -312,6 +312,8 @@ class Helper extends Base {}`,
   "r2_buckets": [{ "binding": "FILES", "bucket_name": "files", "jurisdiction": "eu" }],
   "durable_objects": { "bindings": [{ "name": "RUNS", "class_name": "Runs" }] },
   "kv_namespaces": [{ "binding": "CACHE" }],
+  "queues": { "producers": [{ "binding": "JOBS", "queue": "jobs" }] },
+  "vectorize": [],
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["Runs", "Old", "Before"] },
     { "tag": "v2", "deleted_classes": ["Old"] },
@@ -329,7 +331,7 @@ class Helper extends Base {}`,
       r2: [{ binding: "FILES", bucket: "files" }],
       durableObjects: [{ binding: "RUNS", className: "Runs" }],
       registeredClasses: ["Runs", "After"],
-      otherState: ["kv_namespaces"],
+      otherState: ["kv_namespaces", "queues"],
     });
   });
 });
