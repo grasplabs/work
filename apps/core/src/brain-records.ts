@@ -311,7 +311,7 @@ export const addBrainRecords = async (
   requireAdmin(person);
   const records = recordsOf(input);
   // GRA-328: a record's free text (a statement's, a gap's question)
-  // is canonical Brain storage should pass the knowledge admission gate
+  // is canonical Brain storage, so it should pass the knowledge admission gate
   // here, before anything is kept; that gate is not built yet.
   const onboarding = await onboardingSourcesHeld(env, records);
   // Another call can add some of these ids between the read and the
