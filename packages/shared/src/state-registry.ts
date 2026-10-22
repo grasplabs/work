@@ -388,6 +388,11 @@ const knowledgeDb: D1State = {
       `${core}knowledge/payloads.ts`,
       "Empty between batches."
     ),
+    brain_memories: exported(`${core}knowledge/memories.ts`, brainPending),
+    brain_receipts: transient(
+      `${core}knowledge/memories.ts`,
+      "Command receipts for retries, swept a day after the command."
+    ),
     audit_outbox: exported(
       `${core}audit-outbox.ts`,
       "Made by the database's migrations, outside its Drizzle schema."
