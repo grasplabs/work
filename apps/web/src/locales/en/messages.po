@@ -3351,6 +3351,10 @@ msgstr "couldn't be read"
 msgid "Couldn't load this domain's workflows."
 msgstr "Couldn't load this domain's workflows."
 
+#: src/workflows/owner-picker.tsx
+msgid "Couldn't make {chosen} the owner of {named}"
+msgstr "Couldn't make {chosen} the owner of {named}"
+
 #: src/workflows/independent-workflows.tsx
 msgid "Create"
 msgstr "Create"
@@ -6272,6 +6276,10 @@ msgstr "No other domain serves every function it declares, public and exactly as
 msgid "No owner"
 msgstr "No owner"
 
+#: src/people/person-picker.tsx
+msgid "No owner yet"
+msgstr "No owner yet"
+
 #: src/engines/package-approvals.tsx
 msgid "No packages are approved for this domain."
 msgstr "No packages are approved for this domain."
@@ -6447,6 +6455,10 @@ msgstr "Nobody read or changed {doc} in {where} in the last {days, plural, one {
 #: src/dashboard/signals.tsx
 msgid "Nobody reads it"
 msgstr "Nobody reads it"
+
+#: src/people/person-picker.tsx
+msgid "Nobody with that name."
+msgstr "Nobody with that name."
 
 #: src/routes/_shell.landscape.$appId.usage.$userId.tsx
 msgid "Nobody with this link is connected to {appName}."
@@ -7232,10 +7244,23 @@ msgstr "Owned by you"
 msgid "Owner"
 msgstr "Owner"
 
+#: src/workflows/workflows-table.tsx
+msgctxt "column: who owns a workflow"
+msgid "Owner"
+msgstr "Owner"
+
 #: src/brain/brain.ts
 msgctxt "note property: the team that owns an application"
 msgid "Owner"
 msgstr "Owner"
+
+#: src/people/person-picker.tsx
+msgid "Owner: {owner}. Change owner"
+msgstr "Owner: {owner}. Change owner"
+
+#: src/people/person-picker.tsx
+msgid "Owner: nobody yet. Change owner"
+msgstr "Owner: nobody yet. Change owner"
 
 #: src/landscape/landscape-audit.ts
 msgctxt "category of an audit event"
@@ -7811,6 +7836,10 @@ msgstr "Reading what changed at a connection failed"
 #: src/routes/guest.tsx
 msgid "Reading what you wrote"
 msgstr "Reading what you wrote"
+
+#: src/people/person-picker.tsx
+msgid "Reading who can own it…"
+msgstr "Reading who can own it…"
 
 #: src/onboarding/setup-steps.tsx
 msgid "Reading your staff list"
@@ -8505,6 +8534,10 @@ msgstr "Search members"
 #: src/landscape/filter-menu.tsx
 msgid "Search owner"
 msgstr "Search owner"
+
+#: src/people/person-picker.tsx
+msgid "Search people"
+msgstr "Search people"
 
 #: src/settings/pulse-people.tsx
 msgid "Search people and devices"

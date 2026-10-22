@@ -100,6 +100,13 @@ export const clients = sqliteTable(
      * (src/billing/stripe.ts). Null until it is linked.
      */
     stripeCustomerId: text("stripe_customer_id"),
+    /**
+     * The client's proposal in Grasp's Rooms: its room's id, as someone at
+     * Grasp linked it by hand (src/proposal/link.ts), never matched by
+     * name. Only the id is kept; the room and what was signed in it are
+     * read each time (src/proposal/rooms.ts). Null until it is linked.
+     */
+    roomsProjectId: text("rooms_project_id"),
     /** The release it stays on while pinned, whatever the rollouts. */
     pinnedReleaseId: text("pinned_release_id").references(() => releases.id),
     createdAt: timestamp("created_at").notNull(),

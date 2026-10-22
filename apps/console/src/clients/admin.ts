@@ -26,7 +26,9 @@
  * Beside its core, each deployed client's customer in Grasp's Stripe is
  * read, when one is linked and Secrets Store has the key
  * (src/billing/billing.ts): in the same turn, within the same deadline, so
- * its billing never holds up the snapshot or another client.
+ * its billing never holds up the snapshot or another client. So is its
+ * proposal in Grasp's Rooms, when a room is linked and Rooms can be read
+ * (src/proposal/proposal.ts).
  */
 import {
   adminSnapshotPath,
@@ -56,6 +58,8 @@ import { errorCode } from "../deploy/deploy.ts";
 import { clientAuthSecret } from "../deploy/secrets.ts";
 import type { DeploySecrets } from "../deploy/secrets.ts";
 import { defaultLiveReadLimits, eachLimited } from "../live-reads.ts";
+import { proposalOf, roomsAccess, roomsLinks } from "../proposal/proposal.ts";
+import type { Proposal } from "../proposal/proposal.ts";
 import { clientGrid, healthTimeoutMs, ifStored, routeOf } from "./grid.ts";
 import type { GridRow } from "./grid.ts";
 
@@ -97,6 +101,8 @@ export type ClientAdmin =
       at: string;
       /** What it pays and whether it is paid, as Stripe says, or why that isn't read. */
       billing: Billing;
+      /** The proposal it was sent and what was signed, as Rooms says, or why that isn't read. */
+      proposal: Proposal;
     }
   | {
       client: GridRow;
@@ -355,12 +361,15 @@ export const clientAdmins = async (
   const db = consoleDatabase(env.DB);
   const grid = await clientGrid(env);
   const known = grid.filter(({ status }) => status !== "offboarded");
-  const [lastAnswered, secrets, key, links] = await Promise.all([
-    lastAnswers(db),
-    ifStored(async (): Promise<DeploySecrets> => await deploySecrets(env)),
-    stripeKey(env),
-    stripeLinks(db),
-  ]);
+  const [lastAnswered, secrets, key, links, rooms, roomLinks] =
+    await Promise.all([
+      lastAnswers(db),
+      ifStored(async (): Promise<DeploySecrets> => await deploySecrets(env)),
+      stripeKey(env),
+      stripeLinks(db),
+      roomsAccess(env),
+      roomsLinks(db),
+    ]);
   const askedAt = new Date();
   const sources: ReadSources = {
     env,
@@ -385,6 +394,14 @@ export const clientAdmins = async (
               timeoutMs: options.timeoutMs,
             })
           : null,
+        row.status === "active"
+          ? proposalOf({
+              access: rooms,
+              projectId: roomLinks.get(row.id) ?? null,
+              clientId: row.id,
+              timeoutMs: options.timeoutMs,
+            })
+          : null,
       ])
   );
   const outcomes = known.map(
@@ -393,7 +410,7 @@ export const clientAdmins = async (
   );
   await keepOutcomes(db, outcomes, askedAt);
   return known.map((client, index): ClientAdmin => {
-    const [outcome, billing] = read[index] ?? [];
+    const [outcome, billing, proposal] = read[index] ?? [];
     if (outcome !== undefined && "snapshot" in outcome) {
       return {
         client,
@@ -401,6 +418,7 @@ export const clientAdmins = async (
         snapshot: outcome.snapshot,
         at: outcome.at.toISOString(),
         billing: billing ?? { state: "not_linked" },
+        proposal: proposal ?? { state: "not_linked" },
       };
     }
     return {
