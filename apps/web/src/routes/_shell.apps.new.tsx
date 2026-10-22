@@ -2,7 +2,7 @@ import type { Blueprint } from "@grasp-os/shared/apps";
 import type { ModelEfforts } from "@grasp-os/shared/models";
 import { canBuild } from "@grasp-os/shared/roles";
 import { useLingui } from "@lingui/react/macro";
-import { createFileRoute } from "@tanstack/react-router";
+import { Await, createFileRoute } from "@tanstack/react-router";
 
 import { readPeople } from "../directory.ts";
 import { StartFromBlueprint } from "../engines/blueprints.tsx";
@@ -43,12 +43,19 @@ const NewAppRoute = () => {
       <SiteHeader crumbs={crumbs} />
       <div className="flex min-h-0 flex-1 text-sm">
         <NewApp efforts={page.data.efforts} models={page.data.models}>
-          {blueprints?.state === "ready" ? (
-            <StartFromBlueprint
-              blueprints={blueprints.data.blueprints}
-              people={blueprints.data.people}
-            />
-          ) : null}
+          {/* Offered once its list comes; the chat never waits for it. */}
+          {blueprints === undefined ? null : (
+            <Await fallback={null} promise={blueprints}>
+              {(listed) =>
+                listed.state === "ready" ? (
+                  <StartFromBlueprint
+                    blueprints={listed.data.blueprints}
+                    people={listed.data.people}
+                  />
+                ) : null
+              }
+            </Await>
+          )}
         </NewApp>
       </div>
     </>
@@ -57,28 +64,25 @@ const NewAppRoute = () => {
 
 export const Route = createFileRoute("/_shell/apps/new")({
   pendingComponent: PageLoading,
-  loader: async ({ context: { core, identity } }) => {
-    // Blueprints only for who builds, who may start from them; a list
-    // refused leaves the chat.
-    const [page, blueprints] = await Promise.all([
-      loadFromCore(core, async (session): Promise<NewAppPage> => {
-        const [models, efforts] = await Promise.all([
-          session.chats.models(),
-          session.chats.efforts(),
-        ]);
-        return { models, efforts };
-      }),
-      canBuild(identity.role)
-        ? loadFromCore(core, async (session): Promise<Blueprints> => {
-            const [listed, people] = await Promise.all([
-              session.apps.blueprints.list(),
-              readPeople(session),
-            ]);
-            return { blueprints: listed, people };
-          })
-        : undefined,
-    ]);
-    return { page, blueprints };
-  },
+  loader: async ({ context: { core, identity } }) => ({
+    page: await loadFromCore(core, async (session): Promise<NewAppPage> => {
+      const [models, efforts] = await Promise.all([
+        session.chats.models(),
+        session.chats.efforts(),
+      ]);
+      return { models, efforts };
+    }),
+    // Deferred, and only for who builds, who may start from them: a list
+    // slow or refused leaves the chat as it is.
+    blueprints: canBuild(identity.role)
+      ? loadFromCore(core, async (session): Promise<Blueprints> => {
+          const [listed, people] = await Promise.all([
+            session.apps.blueprints.list(),
+            readPeople(session),
+          ]);
+          return { blueprints: listed, people };
+        })
+      : undefined,
+  }),
   component: NewAppRoute,
 });
