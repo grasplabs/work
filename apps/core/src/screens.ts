@@ -48,7 +48,12 @@ import { sharedRun } from "@grasp-os/shared/shared-runs";
 import type { SharedRun } from "@grasp-os/shared/shared-runs";
 import { z } from "zod";
 
-import { forgetReceipts, keySchema, throughCache } from "./build-cache.ts";
+import {
+  forgetReceipts,
+  keySchema,
+  refreshKept,
+  throughCache,
+} from "./build-cache.ts";
 import type { CacheEnv } from "./build-cache.ts";
 import { PlatformBoundError, platformRunner } from "./platform-sandbox.ts";
 import type { PlatformEnv, PlatformRunner } from "./platform-sandbox.ts";
@@ -429,8 +434,8 @@ const cachedBuild = async <Build>(
     Date.now() - lastUsedOf(object) > buildRefreshMs
   ) {
     try {
-      // The same bytes: its receipt still holds.
-      await env.FILES.put(objectKey, text, usedNow());
+      // The same bytes, while its receipt still names them.
+      await refreshKept(env, cacheKey, objectKey, text, usedNow());
     } catch (error) {
       // The build is served all the same: a refresh that failed is tried
       // again at its next use, well before the sweep's limit.

@@ -176,6 +176,29 @@ export const readVerified = async (
   return { state: "hit", text, object, objectKey };
 };
 
+/**
+ * Writes `text` again under `objectKey`, `key`'s kept build, as used now:
+ * only while its receipt still names that object with those bytes, so a
+ * refresh never brings back an object a newer build replaced.
+ */
+export const refreshKept = async (
+  env: CacheEnv,
+  key: string,
+  objectKey: string,
+  text: string,
+  options: R2PutOptions
+): Promise<void> => {
+  const receipt = await receiptOf(env, key);
+  if (
+    receipt?.objectKey !== objectKey ||
+    receipt.sha256 !== (await sha256Hex(text)) ||
+    receipt.quarantinedAt !== null
+  ) {
+    return;
+  }
+  await env.FILES.put(objectKey, text, options);
+};
+
 /** The object `holder` keeps `key`'s bytes under: under the key's prefix, for the sweep. */
 export const objectKeyOf = (key: string, holder: string): string =>
   `${key}~${holder}`;
