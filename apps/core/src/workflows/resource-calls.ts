@@ -259,7 +259,7 @@ const echoes = (value: Json, sensitive: readonly Json[]): boolean => {
 };
 
 /** The catalog contract of `binding`, as its fingerprint pins it. */
-const contractOf = async (
+export const contractOf = async (
   env: Env,
   binding: Pick<FrozenCatalogBinding, "contractId" | "fingerprint">
 ) => {

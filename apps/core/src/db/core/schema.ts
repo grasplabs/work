@@ -1938,15 +1938,20 @@ export const workflowTriggers = sqliteTable(
  * ended. `status` moves from `open` once, in one conditional update, to an
  * answer (`approved`, `rejected`) or `timed_out`, so the first answer is
  * the only one. An answer keeps who gave it, when, and the payload they
- * sent (JSON), which the run gets.
+ * sent (JSON), which the run gets. The run is an App's (`run_id`) or an
+ * independent workflow's (`resource_run_id`, a JSON workflow's
+ * `grasp.decision` call), exactly one of them; an independent run's
+ * decision keeps what it is about (`input`), which its reviewer sees.
  */
 export const workflowDecisions = sqliteTable(
   "workflow_decisions",
   {
     id: text().primaryKey(),
-    runId: text("run_id")
-      .notNull()
-      .references(() => workflowRuns.id),
+    runId: text("run_id").references(() => workflowRuns.id),
+    resourceRunId: text("resource_run_id").references(
+      // oxlint-disable-next-line no-use-before-define -- declared with the independent runs, below
+      () => workflowResourceRuns.id
+    ),
     step: text().notNull(),
     deciders: text().notNull(),
     /**
@@ -1967,9 +1972,26 @@ export const workflowDecisions = sqliteTable(
     decidedBy: text("decided_by"),
     decidedAt: timestamp("decided_at"),
     payload: text({ mode: "json" }).$type<Json>(),
+    input: text({ mode: "json" }).$type<Json>(),
+    /**
+     * What an answer's payload must be, as the descriptor text of an
+     * independent run's decision contract's response schema: an answer
+     * it doesn't take is refused, never recorded. None takes any payload.
+     */
+    response: text(),
   },
   (table) => [
+    check(
+      "workflow_decisions_one_run",
+      // Unqualified: a check naming its table by name would keep the name
+      // of the table its migration made it in.
+      sql`(run_id IS NULL) <> (resource_run_id IS NULL)`
+    ),
     uniqueIndex("workflow_decisions_run_step_idx").on(table.runId, table.step),
+    uniqueIndex("workflow_decisions_resource_run_step_idx").on(
+      table.resourceRunId,
+      table.step
+    ),
     // A run's open decisions (src/workflows/overview.ts): whether it waits.
     index("workflow_decisions_run_status_idx").on(table.runId, table.status),
     // The improvement signals (src/signals.ts): open decisions, oldest

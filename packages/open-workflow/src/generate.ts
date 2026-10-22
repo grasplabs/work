@@ -89,6 +89,15 @@ import { literalDurationMs } from "./values.ts";
  *   it recorded, never by anything the code passes. A filter's
  *   `correlate`, which would evaluate expressions over each event's own
  *   content, is reported as unsupported.
+ * - A decision answered by the isolate. A `grasp.decision` call's binding,
+ *   recipients, prompt and input are sealed as any call's, and its task
+ *   runs as two steps the host checks: `enter:<id>`, in which the host
+ *   opens the decision and records its deadline (`until`), and
+ *   `task:<id>`, which the host runs only once the decision has an
+ *   outcome, read from the decision itself, and whose call answers that
+ *   outcome (core's resource-host.ts). Generated code waits for nothing
+ *   and passes nothing of it: between the two the run waits durably,
+ *   holding no isolate.
  * - Limits raising the host's ceilings. `document.metadata.grasp.limits`
  *   and a task's `timeout` (inline or from `use.timeouts`) are sealed as
  *   numbers, which the host only ever applies as the lower of them and its
@@ -221,6 +230,23 @@ export type GeneratedCall =
       readonly maxOutputTokens?: CallTemplate;
     }
   | { readonly name: "grasp.sleepUntil"; readonly timestamp: CallTemplate }
+  | {
+      /**
+       * A decision of the existing decision service: who answers it
+       * (`recipients`), what it asks (`prompt`) and what it is about
+       * (`input`), built by the host in the task's enter step.
+       */
+      readonly name: "grasp.decision";
+      readonly binding: string;
+      readonly recipients: CallTemplate;
+      readonly prompt: CallTemplate;
+      readonly input: CallTemplate;
+      /**
+       * How long it takes answers, from its task's `timeout`: the host's
+       * age limit for its runs without one (spec 13.7).
+       */
+      readonly timeoutMs?: number;
+    }
   | {
       readonly name: "grasp.compute";
       readonly binding: string;
@@ -445,9 +471,10 @@ const loweredKinds = new Set<string>([
  */
 export const maxListenMs = 365 * 86_400_000;
 
-/** Named calls lowered here; decisions come later. */
+/** Named calls lowered here. */
 const loweredCalls = new Set<string>([
   "grasp.compute",
+  "grasp.decision",
   "grasp.operation",
   "grasp.connector",
   "grasp.model",
@@ -1426,6 +1453,54 @@ const modelCallOf = (
 };
 
 /**
+ * The most recipients a decision has: a decision asks one person, team
+ * or role (core's decision service keeps one set of deciders a decision).
+ */
+export const maxDecisionRecipients = 1;
+
+/**
+ * A `grasp.decision` task's call: its parts' templates (`part`), and its
+ * deadline from the task's `timeout`, which bounds how long it takes
+ * answers rather than an attempt. A literal list of recipients longer
+ * than a decision takes is refused as `decision:recipients`; one that an
+ * expression builds is held to the same by the host.
+ */
+const decisionCallOf = (
+  emitter: Emitter,
+  item: ListTask,
+  binding: string,
+  part: (key: string) => CallTemplate | undefined
+): GeneratedCall | undefined => {
+  const args = isObject(item.task.with) ? item.task.with : {};
+  if (
+    Array.isArray(args.recipients) &&
+    args.recipients.length > maxDecisionRecipients
+  ) {
+    emitter.refusals.add(
+      pointerJoin(pointerJoin(item.pointer, "with"), "recipients"),
+      "decision:recipients",
+      item.id
+    );
+    return undefined;
+  }
+  const recipients = part("recipients");
+  const prompt = part("prompt");
+  const input = part("input");
+  if (recipients === undefined || prompt === undefined || input === undefined) {
+    return undefined;
+  }
+  const timeoutMs = timeoutOf(emitter.checked.definition, item.task.timeout);
+  return {
+    name: "grasp.decision",
+    binding,
+    recipients,
+    prompt,
+    input,
+    ...(timeoutMs === undefined ? {} : { timeoutMs }),
+  };
+};
+
+/**
  * Task `item`'s named call, as the build seals it: its binding and
  * operation as the literals validation checked, its arguments templates
  * the host builds. `undefined` once a part was refused.
@@ -1487,6 +1562,9 @@ const callOf = (
     }
     case "grasp.model": {
       return modelCallOf(emitter, item, binding, part);
+    }
+    case "grasp.decision": {
+      return decisionCallOf(emitter, item, binding, part);
     }
     default: {
       throw new Error(
@@ -1559,6 +1637,67 @@ const lowerCall = (
   const plan = planCode([...stages.enter, ...stages.leave]);
   emitter.lines.push(
     `${place.indent}({ output, context } = await ${emitter.flow}.call(${literal(item.id)}, { input: output, context }, ${plan}));`
+  );
+};
+
+/**
+ * The statements of a `grasp.decision` task: its enter step, in which the
+ * host opens the decision and records its deadline (`until`), then, unless
+ * its `if` skipped it, its call step, which the host runs once the
+ * decision has its outcome, the call answering that outcome, with the
+ * task's `output.as` and `export.as` after it. Its `timeout` is the
+ * decision's (`decisionCallOf`), never an attempt's.
+ */
+const lowerDecision = (
+  emitter: Emitter,
+  item: ListTask,
+  stages: Stages,
+  place: ListPlace,
+  sealed: TaskBase,
+  /** Where the task's expressions start, before its stages were compiled. */
+  taskBefore: number
+): void => {
+  const call = callOf(emitter, item);
+  if (call === undefined) {
+    return;
+  }
+  const { timeoutMs: _attempt, ...base } = sealed;
+  const inputFrom = inputFromOf(emitter, item);
+  const outputAs = sealedPartOf(emitter, item, "output", "as", "taskOutputAs");
+  const exportAs = sealedPartOf(emitter, item, "export", "as", "taskExportAs");
+  emitter.tasks.push({
+    ...base,
+    kind: "call",
+    call,
+    steps: ["enter", "task"],
+    ...(inputFrom === undefined ? {} : { inputFrom }),
+    ...(outputAs === undefined ? {} : { outputAs }),
+    ...(exportAs === undefined ? {} : { exportAs }),
+  });
+  // Each step within what one attempt evaluates: the enter step its if,
+  // its input.from and the call's parts; the call step its output.as and
+  // export.as.
+  const expressions = emitter.expressions.slice(taskBefore);
+  const leaving = expressions.filter(
+    ({ stage }) => stage === "taskOutputAs" || stage === "taskExportAs"
+  ).length;
+  if (
+    expressions.length - leaving > maxStepExpressions ||
+    leaving > maxStepExpressions
+  ) {
+    emitter.refusals.add(item.pointer, "step:expressions", item.id);
+  }
+  emitter.counter += 1;
+  const entered = `entered${emitter.counter}`;
+  const id = literal(item.id);
+  const { indent } = place;
+  emitter.lines.push(
+    `${indent}{`,
+    `${indent}  const ${entered} = await ${emitter.flow}.enter(${id}, { input: output, context }, ${planCode([...stages.enter, "until: true"])});`,
+    `${indent}  if (!${entered}.skipped) {`,
+    `${indent}    ({ output, context } = await ${emitter.flow}.call(${id}, { input: ${entered}.input, context }, ${planCode(stages.leave)}));`,
+    `${indent}  }`,
+    `${indent}}`
   );
 };
 
@@ -2065,6 +2204,26 @@ const lowerFor = (
   );
 };
 
+/** Lowers a set, a switch or a call that doesn't sleep: one step each. */
+const lowerOneStep = (
+  emitter: Emitter,
+  item: ListTask,
+  stages: Parameters<typeof lowerCall>[2],
+  place: ListPlace,
+  sealed: Parameters<typeof lowerCall>[4],
+  kind: "set" | "switch" | "call"
+): void => {
+  if (kind === "set") {
+    emitter.tasks.push({ ...sealed, kind, steps: ["task"] });
+    lowerSet(emitter, item, stages, place);
+  } else if (kind === "switch") {
+    emitter.tasks.push({ ...sealed, kind, steps: ["task"] });
+    lowerSwitch(emitter, item, stages, place);
+  } else {
+    lowerCall(emitter, item, stages, place, sealed);
+  }
+};
+
 /** Lowers one task, or says why it can't be. */
 const lowerTask = (
   emitter: Emitter,
@@ -2099,16 +2258,14 @@ const lowerTask = (
     scope: Object.freeze([...emitter.scope]),
     ...(timeoutMs === undefined ? {} : { timeoutMs }),
   };
-  if (kind === "set" || kind === "switch" || (kind === "call" && !sleeps)) {
-    if (kind === "set") {
-      emitter.tasks.push({ ...sealed, kind, steps: ["task"] });
-      lowerSet(emitter, item, stages, place);
-    } else if (kind === "switch") {
-      emitter.tasks.push({ ...sealed, kind, steps: ["task"] });
-      lowerSwitch(emitter, item, stages, place);
-    } else {
-      lowerCall(emitter, item, stages, place, sealed);
-    }
+  if (kind === "call" && task.call === "grasp.decision") {
+    lowerDecision(emitter, item, stages, place, sealed, before);
+  } else if (
+    kind === "set" ||
+    kind === "switch" ||
+    (kind === "call" && !sleeps)
+  ) {
+    lowerOneStep(emitter, item, stages, place, sealed, kind);
     // One step evaluates all of these. A durable task's enter and leave
     // steps hold two stages each, so never more than this.
     if (emitter.expressions.length - before > maxStepExpressions) {
