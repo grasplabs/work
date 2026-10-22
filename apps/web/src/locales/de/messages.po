@@ -3742,12 +3742,8 @@ msgstr "Erledigt"
 msgid "Download"
 msgstr "Herunterladen"
 
-#. placeholder {0}: file.name
-#: src/routes/_shell.workflows.$workflow_.runs.$run.tsx
-msgid "Download {0}"
-msgstr "{0} herunterladen"
-
 #: src/knowledge/uploads.tsx
+#: src/routes/_shell.workflows.$workflow_.runs.$run.tsx
 msgid "Download {name}"
 msgstr "{name} herunterladen"
 
@@ -3874,10 +3870,9 @@ msgstr "Interviews mit Mitarbeitenden"
 msgid "Ended"
 msgstr "Beendet"
 
-#. placeholder {0}: formatDateTime(summary.endedAt)
 #: src/routes/_shell.workflows.$workflow_.runs.$run.tsx
-msgid "Ended {0}"
-msgstr "Beendet {0}"
+msgid "Ended {ended}"
+msgstr "Beendet {ended}"
 
 #: src/workflows/workflow-diagram.tsx
 msgid "Ends the workflow"
