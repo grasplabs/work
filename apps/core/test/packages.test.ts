@@ -8,7 +8,10 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
-import { admitDependencies } from "../src/dependencies/requests.ts";
+import {
+  admitDependencies,
+  decideDependency,
+} from "../src/dependencies/requests.ts";
 import { sweepPackageFiles } from "../src/packages/cleanup.ts";
 import { resolveDependencies } from "../src/packages/resolve.ts";
 import { chatOf, codeResults, codeStep, says } from "./agent-chat.ts";
@@ -771,6 +774,55 @@ describe("the platform's own packages", () => {
       })
     );
     const advisedApproval = await decide(advisedRequest, true);
+    // connect failing outright, not as a refusal of its own: refused all
+    // the same, and audited as unexpected.
+    const fifth = await builderWithApp();
+    const broken = named("broken");
+    await publish(plain(broken, "1.0.0"));
+    const { request: brokenRequest } =
+      await fifth.builder.api.dependencies.resolve(
+        intentFor(fifth.app, { [broken]: "1.0.0" })
+      );
+    const failing = new Proxy(env.CONNECT, {
+      get: (target, property): unknown => {
+        if (property === "npmMalwareReports") {
+          return async () => {
+            await Promise.resolve();
+            throw new Error("connect went away");
+          };
+        }
+        // An RPC binding's methods are called on it, never bound.
+        return property === "npmAdvisories"
+          ? async (request: Parameters<typeof target.npmAdvisories>[0]) =>
+              await target.npmAdvisories(request)
+          : Reflect.get(target, property);
+      },
+    });
+    const { policyGeneration: brokenGeneration } =
+      await admin.api.dependencies.waiting();
+    const adminIdentity = await admin.api.whoami();
+    let uncoded = "approved";
+    const uncodedEvents = await auditedDuring(async () => {
+      try {
+        await decideDependency(
+          { ...env, CONNECT: failing },
+          adminIdentity,
+          brokenRequest.id,
+          {
+            approved: true,
+            reviewed: {
+              graphHash: brokenRequest.graphHash,
+              policyGeneration: brokenGeneration,
+            },
+          }
+        );
+      } catch (error) {
+        uncoded = error instanceof Error ? error.message : "thrown";
+      }
+    });
+    const afterUncoded = await fifth.builder.api.dependencies.status({
+      app: fifth.app,
+    });
     // A graph nobody reported is approved as before.
     const third = await builderWithApp();
     const clean = named("clean");
@@ -813,6 +865,20 @@ describe("the platform's own packages", () => {
       pendingWhileUnread,
       denial: decidedCode(denial),
       advisedApproval,
+      uncoded: {
+        refused: uncoded,
+        audited: uncodedEvents
+          .filter(({ action }) =>
+            ["dependency.approval_refused", "dependency.approved"].includes(
+              action
+            )
+          )
+          .map(({ action, detail }) => ({
+            action,
+            errorCode: detail.errorCode,
+          })),
+        stillPending: afterUncoded.pending?.id,
+      },
       approved: decidedCode(approved),
       again: decidedCode(again),
     }).toStrictEqual({
@@ -846,6 +912,16 @@ describe("the platform's own packages", () => {
       advisedApproval: {
         code: "dependency.malware",
         details: { packages: [`${advised}@1.0.0 (GHSA-mmmm-wwww-2026)`] },
+      },
+      uncoded: {
+        refused: "connect went away",
+        audited: [
+          {
+            action: "dependency.approval_refused",
+            errorCode: "internal.unexpected",
+          },
+        ],
+        stillPending: brokenRequest.id,
       },
       approved: "ok",
       again: "dependency.stale",
