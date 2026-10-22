@@ -22,7 +22,11 @@ import { appIdSchema, storeIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, StoreId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
-import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
+import {
+  functionRequestMaxBytes,
+  storeOperationPathMaxLength,
+  storeOperationPathPattern,
+} from "@grasp-os/shared/operation-limits";
 import { operationErrors } from "@grasp-os/shared/operations";
 import type { OperationResult } from "@grasp-os/shared/operations";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
@@ -320,9 +324,13 @@ const fixtureSchema = z
     /**
      * What each workflow the App binds runs with in its tests, by its alias
      * (`workflowTest`): its parameter values, a parameter not named here
-     * taking its declared default, never the organization's own values; and
+     * taking its declared default, never the organization's own values;
      * who may answer its decisions, by the decision binding's alias, as the
-     * fixture's principals (workflows/fixture-decisions.ts).
+     * fixture's principals (workflows/fixture-decisions.ts); what each of
+     * its model bindings answers, by alias, so no model is asked; and which
+     * public query or mutation of the App serves each of its operation
+     * bindings, by alias, run on the test's own store
+     * (workflows/fixture-calls.ts).
      */
     workflows: z
       .record(
@@ -333,6 +341,18 @@ const fixtureSchema = z
             .record(
               z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,63}$/u),
               z.array(z.string().regex(testNamePattern)).max(20)
+            )
+            .optional(),
+          models: z
+            .record(z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,63}$/u), z.json())
+            .optional(),
+          operations: z
+            .record(
+              z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,63}$/u),
+              z
+                .string()
+                .max(storeOperationPathMaxLength)
+                .regex(storeOperationPathPattern)
             )
             .optional(),
         })
@@ -930,6 +950,15 @@ class FixtureSession extends TestTarget {
           {
             paramsOf: (alias) => this.#workflowOf(alias)?.params ?? {},
             decidersOf: (alias) => this.#workflowOf(alias)?.deciders ?? {},
+            modelsOf: (alias) => this.#workflowOf(alias)?.models ?? {},
+            operationsOf: (alias) => this.#workflowOf(alias)?.operations ?? {},
+            storeOf: async () => {
+              if (this.#release.store === null) {
+                return null;
+              }
+              const store = await this.#storeOf();
+              return store.id;
+            },
             deadline: this.#endsAt,
             recorded: () => {
               recorded = true;

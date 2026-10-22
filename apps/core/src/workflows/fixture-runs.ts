@@ -25,6 +25,7 @@ import { acceptedInput, pinned } from "../workflow-starts.ts";
 import { runEngine } from "./engine.ts";
 import type { PinnedResourceRun } from "./engine.ts";
 import type { RunStep } from "./host.ts";
+import { quotaPolicy } from "./quotas.ts";
 import { runActivation } from "./resource-runs.ts";
 import type { ResourceRunMemory } from "./resource-runs.ts";
 
@@ -49,10 +50,13 @@ import type { ResourceRunMemory } from "./resource-runs.ts";
 //   version's contract, as a start's.
 // - It reaches what a test may not: the run acts for the fixture's
 //   principal, no member of anything, and its host refuses every call that
-//   leaves its own sealed modules (resource-host.ts, `fixture`): Apps,
-//   stores, models, connections, Knowledge, templates and actions. It
-//   holds no binding, approval or grant, and none is read or written. Its
-//   decisions ask its fixture's principals alone (fixture-decisions.ts).
+//   leaves its own sealed modules (resource-host.ts, `fixture`):
+//   connections, Knowledge, templates, files and actions. It holds no
+//   binding, approval or grant, and none is read or written. Its decisions
+//   ask its fixture's principals alone (fixture-decisions.ts); its model
+//   calls are answered by its fixture, and its store calls run on its
+//   test's own fixture store, never a real model or store
+//   (fixture-calls.ts).
 // - It takes the organization's quotas or shares: nothing of it is
 //   admitted against a lineage or the client's queue (`unadmitted`); its
 //   isolate takes a share of the sandbox of the App's test runs' own
@@ -135,6 +139,22 @@ export interface FixtureStart {
   readonly decidersOf: (
     alias: string
   ) => Readonly<Record<string, readonly string[]>>;
+  /**
+   * What its fixture answers each of its model bindings with, by the
+   * binding's alias (fixture-calls.ts).
+   */
+  readonly modelsOf: (alias: string) => Readonly<Record<string, unknown>>;
+  /**
+   * The public operation of the release under test its fixture names for
+   * each of its operation bindings, by the binding's alias
+   * (fixture-calls.ts).
+   */
+  readonly operationsOf: (alias: string) => Readonly<Record<string, string>>;
+  /**
+   * Its test's own fixture store, made if it isn't yet: the only store its
+   * operation calls run on. Null for an App with no store.
+   */
+  readonly storeOf: () => Promise<string | null>;
   /** When its test's time is up (ms since the epoch). */
   readonly deadline: number;
   /** Told once its record is written: from then on, it is a run to remove. */
@@ -185,6 +205,11 @@ export const startFixtureRun = async (
     pin.version,
     test.paramsOf(resolved.alias)
   );
+  const operations = test.operationsOf(resolved.alias);
+  // Its test's store, only when the fixture serves an operation binding
+  // from it: a test that calls no store makes none.
+  const storeId =
+    Object.keys(operations).length === 0 ? null : await test.storeOf();
   const runId = crypto.randomUUID();
   // Recorded before the engine hears of it, so nothing runs unrecorded.
   await drizzle(env.DB)
@@ -201,6 +226,9 @@ export const startFixtureRun = async (
       input,
       params,
       deciders: JSON.stringify(test.decidersOf(resolved.alias)),
+      models: JSON.stringify(test.modelsOf(resolved.alias)),
+      operations: JSON.stringify(operations),
+      storeId,
       createdAt: new Date(),
       deadline: new Date(test.deadline),
     });
@@ -283,6 +311,7 @@ export const runFixtureWorkflow = async (
   if (contract === undefined) {
     throw workflowResourceErrors.create("workflow.version_not_found");
   }
+  const { limits } = await quotaPolicy(env);
   return await runActivation(env, engineStep, memory, {
     run: {
       runId,
@@ -293,8 +322,9 @@ export const runFixtureWorkflow = async (
       params: jsonObjectSchema.parse(JSON.parse(row.params)),
       createdAt: row.createdAt.getTime(),
       build,
-      // Its calls go nowhere (resource-host.ts, `fixture`): it binds
-      // nothing, and acts for the fixture's principal alone.
+      // Its calls go nowhere real (resource-host.ts, `fixture`;
+      // fixture-calls.ts): it binds nothing, acts for the fixture's
+      // principal alone, and `makeCall` refuses every call of it.
       calling: {
         runId,
         // Its own lineage's root: a test's run starts no children.
@@ -305,8 +335,14 @@ export const runFixtureWorkflow = async (
         invoker: { type: "app", id: row.appId, appVersion: row.appVersion },
         bindings: new Map(),
         restricted: false,
+        fixture: true,
       },
-      maxModelCalls: 0,
+      // As many model calls as a run of the version may make: each is
+      // answered by its fixture, never a model's.
+      maxModelCalls: Math.min(
+        limits.lineageModelRequests,
+        build.limits.maxModelCalls ?? limits.lineageModelRequests
+      ),
     },
     output: JSON.stringify(contract.output),
     owner: testRunOwnerOf(row.appId),
