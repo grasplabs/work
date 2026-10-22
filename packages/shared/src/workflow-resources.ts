@@ -157,6 +157,8 @@ export const workflowResourceErrors = defineErrorFamily({
   "workflow.child_failed": "A child workflow this run started didn't complete.",
   "workflow.child_timeout":
     "A child workflow this run started didn't end while its lineage could still run.",
+  "workflow.run_paused":
+    "This run is paused. Resume it, then confirm what it holds.",
   "workflow.start_unconfirmed":
     "The run never started: the workflow engine didn't confirm its start in time, so nothing of it ran. Start the workflow again.",
   "workflow.protocol_unsupported":
@@ -606,6 +608,7 @@ export const maxLiveRunsPerPrincipal = 20;
 export type WorkflowRunStatus =
   | "starting"
   | "running"
+  | "paused"
   | "completed"
   | "failed"
   | "cancelled";

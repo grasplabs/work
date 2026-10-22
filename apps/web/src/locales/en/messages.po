@@ -9274,6 +9274,13 @@ msgid "Paused"
 msgstr "Paused"
 
 #: src/onboarding/interviews-progress.tsx
+
+#: src/workflows/resource-runs.tsx
+msgctxt "status of a workflow run"
+msgid "Paused"
+msgstr "Paused"
+
+#: src/onboarding/setup-steps.tsx
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Paused: no link opens and none goes out. The links that are due go out once they run again."
 msgstr "Paused: no link opens and none goes out. The links that are due go out once they run again."
@@ -12448,6 +12455,10 @@ msgstr "The run failed."
 #: src/workflows/test-run.tsx
 msgid "The run is going."
 msgstr "The run is going."
+
+#: src/workflows/test-run.tsx
+msgid "The run is paused."
+msgstr "The run is paused."
 
 #: src/workflows/test-run.tsx
 msgid "The run is starting."

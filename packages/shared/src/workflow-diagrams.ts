@@ -1,3 +1,4 @@
+import type { WorkflowRunStatus } from "./workflow-resources.ts";
 // A workflow's diagram (platform specification 13.10 and 22.7): drawn
 // only from a definition that passed the profile, never a second model of
 // it. Every declared path is in it, each task by its stable ID; showing it
@@ -63,7 +64,7 @@ export type TraceState = "reached" | "running" | "waiting" | "failed";
 export interface WorkflowRunTrace {
   runId: string;
   version: number;
-  status: "starting" | "running" | "completed" | "failed" | "cancelled";
+  status: WorkflowRunStatus;
   /** The diagram of the run's own version, as it was published. */
   diagram: WorkflowDiagram;
   tasks: { task: string; state: TraceState; attempts: number }[];

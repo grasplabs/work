@@ -9274,6 +9274,13 @@ msgid "Paused"
 msgstr "En pausa"
 
 #: src/onboarding/interviews-progress.tsx
+
+#: src/workflows/resource-runs.tsx
+msgctxt "status of a workflow run"
+msgid "Paused"
+msgstr "En pausa"
+
+#: src/onboarding/setup-steps.tsx
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Paused: no link opens and none goes out. The links that are due go out once they run again."
 msgstr "En pausa: ningún enlace se abre y ninguno sale. Los enlaces pendientes salen en cuanto se reanuden."
@@ -12448,6 +12455,10 @@ msgstr "La ejecución ha fallado."
 #: src/workflows/test-run.tsx
 msgid "The run is going."
 msgstr "La ejecución está en curso."
+
+#: src/workflows/test-run.tsx
+msgid "The run is paused."
+msgstr "La ejecución está en pausa."
 
 #: src/workflows/test-run.tsx
 msgid "The run is starting."
