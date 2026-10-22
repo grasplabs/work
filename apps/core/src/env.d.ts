@@ -62,12 +62,17 @@ interface __BaseEnv_Env {
   /**
    * `unbounded` where core may run untrusted isolates itself without
    * `SANDBOX_HOST` off Cloudflare, accepting that nothing bounds their CPU:
-   * tests and local development only, never on-prem (src/sandboxed.ts).
+   * meant for tests and local development (src/sandboxed.ts).
    * It accepts too that what App code with a tail writes (an App's server,
-   * a draft's preview) reaches the process's logs as well as its tail;
-   * every other isolate core loads prints nothing (@grasp-os/shared/quiet-loader),
-   * as long as the process isn't served `--verbose`, which core can't
-   * detect: an operator who sets this doesn't serve core so (GRA-939).
+   * a draft's preview) reaches the process's stdout as well as its tail,
+   * served `--verbose` or not; every other isolate core loads prints
+   * nothing (@grasp-os/shared/quiet-loader). On-prem runs Apps today only
+   * with this set (`requireBoundedHere`), so GRA-919, which delivers the tail's
+   * lines without the runtime's console, comes before on-prem Apps handle
+   * personal data.
+   * Served `--verbose`, a timer imported by name from `node:timers` in
+   * core's own Node code (the compiler, extraction) still has its throw
+   * reported: an operator who sets this doesn't serve core so (GRA-939).
    */
   SANDBOX_IN_PROCESS?: string;
   /** `none` where Durable Objects have no jurisdiction (src/durable-objects.ts). */

@@ -19,11 +19,11 @@ const controlValue = "control-value-91c2";
 
 /**
  * An App whose migration logs each record it gets every way it can: on
- * the console, with a console method it kept as it loaded, through
- * `node:console`, and through a console method it puts back itself.
+ * the console, with a console method it kept as it loaded, and through a
+ * console method it puts back itself (App code has no `node:console`: no
+ * Node.js, `isolateBase`).
  */
-const app = `import nodeConsole from "node:console";
-// Kept as the module loads, to log with later.
+const app = `// Kept as the module loads, to log with later.
 const kept = console.log;
 export default {
   migrate(rows) {
@@ -35,7 +35,6 @@ export default {
       console.error(row.fields.title);
       console.debug(row.fields.title);
       console.trace(row.fields.title);
-      nodeConsole.log(row.fields.title);
       console.log = (...args) => console.error(...args);
       console.log(row.fields.title);
     }

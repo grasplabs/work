@@ -22,23 +22,36 @@
  * the App puts back can only call the silenced ones), and keeps what the
  * isolate's code leaves uncaught from anything workerd served `--verbose`
  * reports for an isolate: a timer's callback that throws (the global
- * timers, `node:timers`' default export), a promise handed to a
- * `WorkerEntrypoint`'s `this.ctx.waitUntil` that rejects, and any other
+ * timers, `node:timers`' default export), a promise handed to a class's
+ * `this.ctx.waitUntil` that rejects, a `this.ctx.blockConcurrencyWhile`
+ * callback that throws (answered as a constant error), and any other
  * unhandled rejection or error (`quietErrors`).
  *
  * What it can't stop, workerd served `--verbose` still reports, message
- * and stack (GRA-939): an exception thrown out of an entrypoint's call (an
- * RPC method's, a fetch's), as it hands it to the caller as the call's
- * answer; what the callback of a timer imported by name from `node:timers`
- * throws (the binding is the module's own); and what is handed to the
- * `waitUntil` of any context other than an entrypoint's `this.ctx`, such
- * as the one its constructor is given and keeps, or a default export's
- * handler's (the runtime passes those itself, before anything of the
- * quiet module's can wrap them). Without `--verbose` none of
- * it is printed. The supervisor refuses `--verbose`
+ * and stack: an exception thrown out of an entrypoint's call (an RPC
+ * method's, a fetch's), as it hands it to the caller as the call's answer;
+ * what the callback of a timer imported by name from `node:timers` throws
+ * (the binding is the module's own); and what is handed to a context other
+ * than a class's `this.ctx`: the one its constructor is given and keeps,
+ * or a default export's handler's (the runtime passes those itself, before
+ * anything of the quiet module's can wrap them). Core's and connect's own
+ * Loader close the first and the last (quiet-loader.ts: the contexts it
+ * hands an entrypoint and a Durable Object's constructor are quiet ones)
+ * and give App code no Node.js (`isolateBase`, GRA-939). That covers what
+ * App code leaks by accident: a throw, a rejection, a failure. App code
+ * that sets out to print, or to reach the runtime's own context, isn't
+ * stopped, as its console isn't in a tailed isolate (GRA-919). Without
+ * `--verbose` none of it is printed. The supervisor refuses `--verbose`
  * (scripts/workerd-sandbox.ts); core loading isolates itself under
  * `SANDBOX_IN_PROCESS=unbounded` can't tell how its process was served, so
  * there not serving it `--verbose` is the operator's rule (GRA-939).
+ *
+ * An isolate with a tail keeps its console, and plain workerd prints what
+ * it writes to the process's stdout as the tail receives it, served
+ * `--verbose` or not (quiet-loader.ts). Only core loads one, under
+ * `SANDBOX_IN_PROCESS=unbounded`: there an App's console reaches the
+ * deployment's logs until GRA-919 delivers the tail's lines without the
+ * runtime's console.
  *
  * One kind of call keeps what it writes, bounded, for whom core says: a
  * draft's sealed preview, whose lines go to the agent's next check of
@@ -65,6 +78,12 @@ export const quietModule = "grasp-sandbox-quiet.js";
  */
 export interface QuietOptions {
   readonly nodejsCompat?: boolean;
+  /**
+   * Leave the console as it is: for an isolate with a tail, whose console
+   * is how its builder sees what it wrote (the module still keeps what the
+   * code leaves uncaught from being reported).
+   */
+  readonly keepConsole?: boolean;
 }
 
 /** The compatibility date from which workerd gives isolates `node:` modules. */
@@ -108,10 +127,13 @@ const timerNames = '["setTimeout", "setInterval", "setImmediate"]';
  *
  * - A timer's callback that throws is caught where it runs: the global
  *   timers, and `node:timers`' default export where the isolate has it.
- * - A promise handed to `this.ctx.waitUntil` of a `WorkerEntrypoint` (the
- *   classes core calls) that rejects is caught as it is handed over: the
+ * - A promise handed to `this.ctx.waitUntil` of a `WorkerEntrypoint` or a
+ *   Durable Object that rejects is caught as it is handed over, and a
+ *   `this.ctx.blockConcurrencyWhile` callback's throw becomes a constant
+ *   error (the object still breaks; workerd logs the constant): the
  *   context's every other property is the runtime's own. Not the context
- *   its constructor is given, which the runtime passes itself.
+ *   its constructor is given, which the runtime passes itself
+ *   (quiet-loader.ts makes that one quiet).
  * - An unhandled rejection or error has its default prevented.
  *
  * Its imports are the runtime's own modules, which no App's module can
@@ -120,13 +142,57 @@ const timerNames = '["setTimeout", "setInterval", "setImmediate"]';
 const quietErrors = (
   options: QuietOptions
 ): { imports: string; source: string } => ({
-  imports: `import { WorkerEntrypoint as QuietEntrypoint } from "cloudflare:workers";
+  imports: `import { DurableObject as QuietObject, WorkerEntrypoint as QuietEntrypoint } from "cloudflare:workers";
 ${options.nodejsCompat === true ? 'import quietNodeTimers from "node:timers";\n' : ""}`,
-  source: `const caught = (callback) =>
+  // Everything it uses is kept as it loads, before any of the isolate's
+  // own code can replace one, and every record it hands the runtime (a
+  // descriptor, a Proxy's handler) has no prototype: nothing the code puts
+  // on \`Object.prototype\` or a built-in later is read by it (GRA-939).
+  source: `const quietApply = Reflect.apply;
+const quietGet = Reflect.get;
+const quietDefine = Reflect.defineProperty;
+const quietCreate = Object.create;
+const quietBind = Function.prototype.bind;
+const quietResolve = Promise.resolve.bind(Promise);
+const quietThen = Promise.prototype.then;
+const quietPrevent = Event.prototype.preventDefault;
+const quietListen = globalThis.addEventListener;
+const quietRecord = (entries) => {
+  const record = quietCreate(null);
+  for (let index = 0; index < entries.length; index += 2) {
+    record[entries[index]] = entries[index + 1];
+  }
+  return record;
+};
+const quietSwallowed = () => undefined;
+// What a \`blockConcurrencyWhile\` callback's throw becomes: the object
+// still breaks, but workerd logs this, never the code's own message. Its
+// value crosses back boxed, in a record with no \`then\` for the runtime
+// to read as it settles the callback's promise.
+const quietBlockedError = new Error("A blockConcurrencyWhile callback threw.");
+const quietBlocked = () => {
+  throw quietBlockedError;
+};
+const quietUnboxed = (box) => box.value;
+const quietBlockedWhile = (block, target) => (callback) =>
+  quietApply(
+    quietThen,
+    quietApply(block, target, [
+      async () => {
+        try {
+          return quietRecord(["value", await quietApply(callback, undefined, [])]);
+        } catch {
+          return quietBlocked();
+        }
+      },
+    ]),
+    [quietUnboxed]
+  );
+const caught = (callback) =>
   typeof callback === "function"
     ? function (...args) {
         try {
-          return callback.apply(this, args);
+          return quietApply(callback, this, args);
         } catch {
           return undefined;
         }
@@ -136,7 +202,12 @@ const quietTimers = (timers) => {
   for (const name of ${timerNames}) {
     const timer = timers[name];
     if (typeof timer === "function") {
-      timers[name] = (callback, ...rest) => timer(caught(callback), ...rest);
+      timers[name] = function (...args) {
+        if (args.length > 0) {
+          args[0] = caught(args[0]);
+        }
+        return quietApply(timer, this, args);
+      };
     }
   }
 };
@@ -144,50 +215,70 @@ quietTimers(globalThis);
 ${options.nodejsCompat === true ? "quietTimers(quietNodeTimers);\n" : ""}const quietContext = (ctx) =>
   ctx === null || typeof ctx !== "object"
     ? ctx
-    : new Proxy(ctx, {
-        get: (target, property) => {
-          if (property === "waitUntil") {
-            return (promise) =>
-              target.waitUntil(Promise.resolve(promise).catch(() => undefined));
-          }
-          const value = Reflect.get(target, property, target);
-          return typeof value === "function" ? value.bind(target) : value;
-        },
-      });
-// The entrypoint's constructor sets its context: it takes the quiet one.
-Object.defineProperty(QuietEntrypoint.prototype, "ctx", {
-  configurable: true,
-  get() {
-    return undefined;
-  },
-  set(ctx) {
-    Object.defineProperty(this, "ctx", {
-      configurable: true,
-      enumerable: true,
-      writable: true,
-      value: quietContext(ctx),
-    });
-  },
-});
-addEventListener("unhandledrejection", (event) => {
-  event.preventDefault();
-});
-addEventListener("error", (event) => {
-  event.preventDefault();
-});
+    : new Proxy(
+        ctx,
+        quietRecord([
+          "get",
+          (target, property) => {
+            const value = quietGet(target, property, target);
+            if (property === "waitUntil" && typeof value === "function") {
+              return (promise) =>
+                quietApply(value, target, [
+                  quietApply(quietThen, quietResolve(promise), [undefined, quietSwallowed]),
+                ]);
+            }
+            if (property === "blockConcurrencyWhile" && typeof value === "function") {
+              return quietBlockedWhile(value, target);
+            }
+            return typeof value === "function" ? quietApply(quietBind, value, [target]) : value;
+          },
+        ])
+      );
+// An entrypoint's or a Durable Object's constructor sets its context: it
+// takes the quiet one. Not configurable, so the isolate's code can't put
+// an accessor of its own in its place.
+for (const quietBase of [QuietEntrypoint, QuietObject]) {
+  quietDefine(
+    quietBase.prototype,
+    "ctx",
+    quietRecord([
+      "configurable",
+      false,
+      "get",
+      () => undefined,
+      "set",
+      function (ctx) {
+        quietDefine(
+          this,
+          "ctx",
+          quietRecord(["configurable", true, "enumerable", true, "writable", true, "value", quietContext(ctx)])
+        );
+      },
+    ])
+  );
+}
+const quietUnhandled = (event) => {
+  quietApply(quietPrevent, event, []);
+};
+quietApply(quietListen, globalThis, ["unhandledrejection", quietUnhandled]);
+quietApply(quietListen, globalThis, ["error", quietUnhandled]);
 `,
 });
 
 /** Every console method silenced, and nothing else left for workerd to report. */
 const quietSource = (options: QuietOptions): string => {
   const errors = quietErrors(options);
-  return `${errors.imports}const silent = () => undefined;
+  const silencing =
+    options.keepConsole === true
+      ? ""
+      : `const silent = () => undefined;
 for (const name of Object.getOwnPropertyNames(console)) {
   if (typeof console[name] === "function") {
     console[name] = silent;
   }
 }
-${errors.source}`;
+`;
+  return `${errors.imports}${silencing}${errors.source}`;
 };
 
 /** Where a hashbang's line ends: at any line terminator JavaScript has. */

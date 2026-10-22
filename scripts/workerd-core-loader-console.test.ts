@@ -12,11 +12,17 @@
  */
 import { setTimeout as sleep } from "node:timers/promises";
 
+import { maxThrownMessage } from "@grasp-os/shared/quiet-loader";
 import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { bundle } from "./workerd-stand-in.ts";
-import { cleanUp, serveOnWorkerd, tempDir } from "./workerd-test-server.ts";
+import {
+  cleanUp,
+  serveOnWorkerd,
+  storageDir,
+  tempDir,
+} from "./workerd-test-server.ts";
 import type { Served } from "./workerd-test-server.ts";
 
 /** How long an isolate's last output may take to come through. */
@@ -34,18 +40,35 @@ const ranSchema = z.object({
   }),
 });
 
-describe("isolates core loads itself off Cloudflare, on a workerd served --verbose", () => {
-  let served: Served;
+/** "leaf" nested in `levels` objects, each under `value`. */
+const nestedOf = (levels: number): unknown => {
+  let value: unknown = "leaf";
+  for (let level = 0; level < levels; level += 1) {
+    value = { value };
+  }
+  return value;
+};
 
-  beforeAll(async () => {
-    const out = tempDir();
-    const modules = bundle(out, "core-loader-console-worker.ts");
-    served = await serveOnWorkerd(
-      out,
-      (address) => `using Workerd = import "/workerd/workerd.capnp";
+/** What a tailed App class's console wrote, on `on`'s stand-in core. */
+const consoleValue = async (on: Served): Promise<string> => {
+  const response = await fetch(new URL("/do/console/quiet", on.url));
+  return z.object({ value: z.string() }).parse(await response.json()).value;
+};
+
+/** The stand-in core on a workerd of its own, served with `flags`. */
+const serveCore = async (flags: readonly string[]): Promise<Served> => {
+  const out = tempDir();
+  const storage = storageDir();
+  const modules = bundle(out, "core-loader-console-worker.ts");
+  return await serveOnWorkerd(
+    out,
+    (address) => `using Workerd = import "/workerd/workerd.capnp";
 
 const config :Workerd.Config = (
-  services = [(name = "core", worker = .core)],
+  services = [
+    (name = "core", worker = .core),
+    (name = "storage", disk = (path = "${storage}", writable = true)),
+  ],
   sockets = [(name = "http", address = "${address}", http = (), service = "core")],
 );
 
@@ -57,13 +80,26 @@ const core :Workerd.Worker = (
     (name = "LOADER", workerLoader = ()),
     (name = "RUNTIME_PROFILE", text = "workerd"),
     (name = "SANDBOX_IN_PROCESS", text = "unbounded"),
+    (name = "HOST", durableObjectNamespace = "Host"),
   ],
+  durableObjectNamespaces = [(className = "Host", uniqueKey = "Host", enableSql = true)],
+  durableObjectStorage = (localDisk = "storage"),
 );
 `,
-      // The loader is experimental in workerd; an isolate's uncaught error
-      // is printed at info level only.
-      ["--experimental", "--verbose"]
-    );
+    flags
+  );
+};
+
+describe("isolates core loads itself off Cloudflare, on a workerd served --verbose", () => {
+  let served: Served;
+  // The same, not served `--verbose`.
+  let plain: Served;
+
+  beforeAll(async () => {
+    // The loader is experimental in workerd; an isolate's uncaught error
+    // is printed at info level only.
+    served = await serveCore(["--experimental", "--verbose"]);
+    plain = await serveCore(["--experimental"]);
   }, 120_000);
 
   afterAll(() => {
@@ -115,16 +151,193 @@ const core :Workerd.Worker = (
     });
   });
 
-  // What the quiet module can't stop: workerd served `--verbose` reports
-  // an exception thrown out of a call, as it hands it to the caller, and
-  // what a callback of a timer imported by name from `node:timers` throws
-  // (the binding is the module's own, which nothing loaded first can
-  // change). Pinned so a change to either is seen (GRA-939); without
-  // `--verbose`, as the supervisor and a deployment run, neither is
-  // printed.
-  it("still has a call's thrown error and a named node:timers timer's reported by a workerd served --verbose", async () => {
-    const thrown = await fetch(new URL("/thrown", served.url));
-    const { answered, values } = ranSchema.parse(await thrown.json());
+  // What an entrypoint's call throws crosses as a value and is thrown
+  // again host-side (GRA-939): of the same kind, with its code and its
+  // message, which is cut at `maxThrownMessage`. Workerd reports nothing of
+  // it, and the entrypoint's own calls of its methods throw as before.
+  it("throws an entrypoint's thrown error to its caller host-side, of its kind and code, with nothing of it reported", async () => {
+    const run = async (route: string) => {
+      const response = await fetch(new URL(route, served.url));
+      return z.object({ answered: z.unknown() }).parse(await response.json())
+        .answered;
+    };
+    const thrown = await run("/thrown");
+    const long = await run("/thrown-long");
+    const cached = await run("/thrown-cached");
+    const named = await run("/thrown-named");
+    const once = await run("/loaded-once");
+    await sleep(SETTLE_MS);
+
+    expect({
+      thrown,
+      long,
+      cached,
+      named,
+      once,
+      reported: served.logs().includes("record-value-c40b"),
+    }).toStrictEqual({
+      thrown: {
+        kind: "TypeError",
+        code: "app.failed",
+        length: "record-value-c40b".length,
+        start: "record-value-c40b",
+      },
+      long: {
+        kind: "TypeError",
+        code: "app.failed",
+        length: maxThrownMessage,
+        start: "record-value-c40brecord-value-c4",
+      },
+      cached: {
+        first: {
+          kind: "TypeError",
+          code: "app.failed",
+          length: "record-value-c40b".length,
+          start: "record-value-c40b",
+        },
+        second: {
+          kind: "TypeError",
+          code: "app.failed",
+          length: "record-value-c40b".length,
+          start: "record-value-c40b",
+        },
+      },
+      named: { kind: "other", code: "undefined", length: 5, start: "named" },
+      once: [1, 2],
+      reported: false,
+    });
+  });
+
+  // The other ways a call's answer or its throw could reach workerd, each
+  // answered inside the call (the security review of GRA-939): a getter in
+  // the answer, a constructor's throw, a method that is a throwing
+  // accessor. An answer of the call's own never reads as a thrown error,
+  // whatever its keys, and a thrown error's details cross with it.
+  it("answers each other way a call could throw inside the call, with nothing of it reported", async () => {
+    const run = async (route: string) => {
+      const response = await fetch(new URL(route, served.url));
+      return z.object({ answered: z.unknown() }).parse(await response.json())
+        .answered;
+    };
+    const thrown = {
+      kind: "TypeError",
+      message: "record-value-c40b",
+      details: null,
+    };
+    const answers = {
+      getter: await run("/thrown-getter"),
+      construction: await run("/thrown-constructor"),
+      accessor: await run("/thrown-accessor"),
+      hostile: await run("/answer-hostile"),
+      details: await run("/thrown-details"),
+      polluted: await run("/thrown-polluted"),
+      fetched: await run("/fetch-polluted"),
+      fetchThrown: await run("/fetch-polluted-thrown"),
+      notResponse: await run("/fetch-not-response"),
+      proxied: await run("/thrown-proxied"),
+      context: await run("/polluted-context"),
+      listener: await run("/polluted-listener"),
+      fetchPlain: await run("/fetch-thrown"),
+      kept: await run("/thrown-kept-context"),
+      unhandled: await run("/thrown-unhandled"),
+      deep: await run("/answer-deep"),
+      sparse: await run("/answer-sparse"),
+      fetchReplaced: await run("/fetch-errors-replaced"),
+      deepReplaced: await run("/deep-errors-replaced"),
+    };
+    // The same isolates loaded as they are: each way is read.
+    const loud: Record<string, boolean> = {};
+    for (const route of [
+      "getter",
+      "constructor",
+      "accessor",
+      "details",
+      "polluted",
+      "kept-context",
+      "unhandled",
+    ]) {
+      // oxlint-disable-next-line no-await-in-loop -- one at a time, so each one's output is its own
+      await run(`/loud/thrown-${route}`);
+      // oxlint-disable-next-line no-await-in-loop -- as above
+      await sleep(SETTLE_MS);
+      loud[route] = served.logs().includes(`loud-${route}-c40b`);
+    }
+    await run("/loud/fetch-thrown");
+    await sleep(SETTLE_MS);
+    loud.fetch = served.logs().includes("loud-fetch-thrown-c40b");
+    await sleep(SETTLE_MS);
+
+    expect({
+      ...answers,
+      loud,
+      reported: served.logs().includes("record-value-c40b"),
+    }).toStrictEqual({
+      loud: {
+        getter: true,
+        constructor: true,
+        accessor: true,
+        details: true,
+        polluted: true,
+        "kept-context": true,
+        // A rejection nothing handles isn't printed even unwrapped by this
+        // workerd (a Durable Object's neither): the quiet module's
+        // \`unhandledrejection\` listener is for one that does. Pinned, so
+        // a workerd that starts printing it is seen.
+        unhandled: false,
+        fetch: true,
+      },
+      getter: thrown,
+      construction: thrown,
+      accessor: thrown,
+      hostile: {
+        answered: {
+          "\u0000grasp:answer": true,
+          thrown: { name: "TypeError", message: "forged" },
+        },
+      },
+      details: { ...thrown, details: { retryAfterMs: 5 } },
+      polluted: thrown,
+      fetched: { answered: "hi" },
+      fetchThrown: thrown,
+      notResponse: {
+        kind: "TypeError",
+        message: "This fetch didn't answer a Response.",
+        details: null,
+      },
+      proxied: thrown,
+      context: { answered: true },
+      listener: { answered: "done" },
+      fetchPlain: thrown,
+      kept: { answered: "kept" },
+      unhandled: { answered: "unhandled" },
+      deep: { answered: nestedOf(65) },
+      sparse: {
+        answered: {
+          empty: { length: 3, has: [] },
+          holed: { length: 3, has: ["0", "2"] },
+        },
+      },
+      fetchReplaced: {
+        kind: "TypeError",
+        message: "This fetch didn't answer a Response.",
+        details: null,
+      },
+      deepReplaced: {
+        kind: "TypeError",
+        message: "The answer is nested too deeply to send.",
+        details: null,
+      },
+      reported: false,
+    });
+  });
+
+  // App code has no Node.js (`isolateBase`: `nodejs_compat` is the default
+  // from 2026-08-04 on, so it is turned off): a timer imported by name from
+  // `node:timers`, whose callback's throw nothing loaded first can catch,
+  // can't be had. Core's own code that needs Node turns it on, and its
+  // named timers are still reported: pinned so a change is seen (GRA-939).
+  it("loads no App code that imports node:timers, and still reports a named timer's throw in core's own Node code", async () => {
+    const refused = await fetch(new URL("/app-node-timers", served.url));
     const named = await fetch(new URL("/path/nodeNamedSetTimeout", served.url));
     const namedValue = z
       .object({ answered: z.string() })
@@ -132,10 +345,10 @@ const core :Workerd.Worker = (
     await sleep(SETTLE_MS);
 
     expect({
-      answered,
-      reported: served.logs().includes(values.thrown),
+      refused: z.object({ answered: z.unknown() }).parse(await refused.json())
+        .answered,
       named: served.logs().includes(namedValue),
-    }).toStrictEqual({ answered: "threw", reported: true, named: true });
+    }).toStrictEqual({ refused: "refused", named: true });
   });
 
   // Each way an isolate's code can have workerd report an error with its
@@ -177,5 +390,106 @@ const core :Workerd.Worker = (
     const { answered } = ranSchema.parse(await response.json());
 
     expect(answered).toBe("refused");
+  });
+
+  // An App's server class, as `loadServer` runs it: a facet of a host
+  // object, its class from an isolate with a tail. The tail already holds
+  // its console, so the quiet module leaves that, and everything the class
+  // throws or leaves uncaught is kept from workerd's report; the same
+  // class as the Loader gives it prints each (GRA-939). Not an alarm: workerd
+  // gives a facet none ("Facets currently cannot set alarms"), and an App's
+  // class runs only as one, so the wrapper's catching of `alarm` and the
+  // WebSocket handlers has no way to be reached to test here. When a facet
+  // can set one, note what the wrapper does then: a throwing `alarm`
+  // answers an envelope instead of throwing, so workerd takes it for done
+  // and doesn't retry it; a test of that belongs here.
+  it.each([
+    ["fail", "a method that throws"],
+    ["timer", "a timer that throws"],
+    ["constructor", "a constructor that throws"],
+    ["getter", "an accessor that throws"],
+    ["waitUntil", "this.ctx.waitUntil handed a rejection"],
+    ["kept", "the constructor's kept context's waitUntil handed a rejection"],
+    ["block", "a blockConcurrencyWhile callback that throws"],
+    // Code that sets out to keep the state the base sets: its class's own
+    // \`ctx\` setter, an accessor put in the quiet module's place, a class
+    // of its own on the base its class extends. Each still gets the quiet
+    // context alone. What isn't promised is code that deliberately prints:
+    // its console reaches the logs (GRA-919, below).
+    ["setter", "its class's own ctx setter's state handed a rejection"],
+    ["redefined", "an accessor in the quiet ctx's place handed a rejection"],
+    ["subclass", "a class of its own on its base handed a rejection"],
+  ])(
+    "prints nothing of %s (%s) in a tailed App class, where the class loaded as it is does",
+    async (name) => {
+      const objectSchema = z.object({
+        value: z.string(),
+        answered: z.unknown().optional(),
+        thrown: z.unknown().optional(),
+      });
+      const run = async (mode: string) => {
+        const response = await fetch(
+          new URL(`/do/${name}/${mode}`, served.url)
+        );
+        return objectSchema.parse(await response.json());
+      };
+      const quiet = await run("quiet");
+      const loud = await run("loud");
+      await sleep(SETTLE_MS);
+
+      // An App's error crosses as it is thrown, details and all; a
+      // blockConcurrencyWhile callback's throw as a constant error.
+      const thrown: Readonly<Record<string, unknown>> = {
+        fail: {
+          kind: "TypeError",
+          message: quiet.value,
+          details: { retryAfterMs: 5 },
+        },
+        constructor: { kind: "other", message: quiet.value, details: null },
+        getter: { kind: "TypeError", message: quiet.value, details: null },
+        block: {
+          kind: "other",
+          message: "A blockConcurrencyWhile callback threw.",
+          details: null,
+        },
+      };
+      expect({
+        quiet: served.logs().includes(quiet.value),
+        loud: served.logs().includes(loud.value),
+        thrown: quiet.thrown,
+      }).toStrictEqual({
+        quiet: false,
+        loud: true,
+        thrown: Object.hasOwn(thrown, name) ? thrown[name] : undefined,
+      });
+    }
+  );
+
+  // The one gap: a tailed class's console reaches the tail through the
+  // runtime's own console, which plain workerd prints to its own stdout,
+  // served \`--verbose\` or not. Pinned so a change is seen (quiet-loader.ts,
+  // GRA-919).
+  it("still prints a tailed App class's console on workerd, served --verbose or not", async () => {
+    const verbose = await consoleValue(served);
+    const quiet = await consoleValue(plain);
+    await sleep(SETTLE_MS);
+
+    expect({
+      verbose: served.logs().includes(verbose),
+      plain: plain.logs().includes(quiet),
+    }).toStrictEqual({ verbose: true, plain: true });
+  });
+
+  it("refuses an App class without a tail", async () => {
+    const response = await fetch(new URL("/do/fail/untailed", served.url));
+    const answer = z
+      .object({ thrown: z.object({ kind: z.string(), message: z.string() }) })
+      .parse(await response.json());
+
+    expect(answer.thrown).toStrictEqual({
+      kind: "TypeError",
+      message:
+        "A silenced isolate hands out a Durable Object class only with a tail: nothing else needs one.",
+    });
   });
 });

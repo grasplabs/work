@@ -24,7 +24,7 @@ import {
 import { operationErrors } from "@grasp-os/shared/operations";
 import type { Authority } from "@grasp-os/shared/permissions";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
-import { quietLoader } from "@grasp-os/shared/quiet-loader";
+import { openAnswer, quietLoader } from "@grasp-os/shared/quiet-loader";
 import {
   querySubscriptionLimits,
   screenErrors,
@@ -41,7 +41,7 @@ import {
 } from "@grasp-os/shared/statistics";
 import type { StatisticUse } from "@grasp-os/shared/statistics";
 import { TokenBuckets } from "@grasp-os/shared/token-bucket";
-import { passedBound } from "@grasp-os/shared/value-bounds";
+import { passedBound, plainDataBounds } from "@grasp-os/shared/value-bounds";
 import type { ValueBounds } from "@grasp-os/shared/value-bounds";
 import { executionErrors } from "@grasp-os/shared/workflows";
 import { DurableObject, exports } from "cloudflare:workers";
@@ -206,18 +206,6 @@ const restrictedKey = "restricted";
  * and workflows, and must not hand them a way into the App.
  */
 export type AppAnswer = Rpc.Serializable<unknown>;
-
-/**
- * How deep and how big plain data may be by default: as deep as Cap'n
- * Web reads a message by default, the deepest any reader of ours takes
- * (a browser's connection, a screen's frame), and as big as the longest
- * message workerd's RPC or Cap'n Web carries. A bound on the walk and the
- * clone after it, not on what an App may answer, which its readers bound.
- */
-export const plainDataBounds: ValueBounds = {
-  depth: 256,
-  size: 32 * 1024 * 1024,
-};
 
 /**
  * Whether a value is plain data, as structured clone carries it, within
@@ -508,7 +496,13 @@ export const invokeServer = async (
   let answer: AppAnswer;
   try {
     // Not `invoke.apply(...)`: on a stub, that calls a method "apply".
-    answer = await Reflect.apply(invoke, facet, [caller, ...args]);
+    // The server class is wrapped (`loadServer`): its answer is an
+    // envelope, a throw of the App's code a value opened here.
+    // SAFETY: `plainAnswer` checks it is plain data right below.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    answer = (await openAnswer(
+      await Reflect.apply(invoke, facet, [caller, ...args])
+    )) as AppAnswer;
   } catch (error) {
     throw appFailure(error, at);
   }

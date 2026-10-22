@@ -11,6 +11,10 @@
  */
 export const isolateSettings = {
   compatibilityDate: "2026-09-15",
-  compatibilityFlags: ["disallow_importable_env"],
+  compatibilityFlags: [
+    "disallow_importable_env",
+    "no_nodejs_compat",
+    "no_nodejs_compat_v2",
+  ],
   limits: { cpuMs: 10_000 },
 };
