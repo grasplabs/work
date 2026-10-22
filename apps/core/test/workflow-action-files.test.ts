@@ -1183,6 +1183,35 @@ describe("a workflow run's own files", () => {
     });
   });
 
+  it("keep nothing of a connector read whose attempt went stale while it was answered, and seal nothing once it goes stale mid-write", async () => {
+    const csv = { name: "report.csv", type: "text/csv" } as const;
+    const bytes = new TextEncoder().encode(bodyOf(runFileLimits.callBytes * 2));
+    // Stale before the answer is kept: no file, no reserved byte.
+    const expired = callerOf();
+    const before = await outcome(
+      keepFile(env, expired.next(staleFrom(1)), { ...csv, bytes })
+    );
+    // Stale after its pieces are written: never sealed, swept as unfinished.
+    const late = callerOf();
+    const midway = await outcome(
+      keepFile(env, late.next(staleFrom(6)), { ...csv, bytes })
+    );
+    // No row, so none of the run's limits (summed from its rows) moved.
+    expect({
+      before,
+      expiredRows: await rowsOf(expired.run),
+      expiredObjects: await objectsOf(expired.run),
+      midway,
+      lateRows: await rowsOf(late.run),
+    }).toStrictEqual({
+      before: "Error: The attempt went stale",
+      expiredRows: [],
+      expiredObjects: 0,
+      midway: "Error: The attempt went stale",
+      lateRows: ["writing"],
+    });
+  });
+
   it("hold every limit before bytes are stored: per call, open files, files and bytes per run, bytes per file, bytes per workflow", async () => {
     // Open at once: the ninth is refused.
     const opener = callerOf();
