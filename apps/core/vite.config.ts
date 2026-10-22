@@ -69,6 +69,7 @@ export const screenTests = [
   "test/portable-client.test.ts",
   "test/app-files.test.ts",
   "test/resource-bindings.test.ts",
+  "test/brain-app-recall.test.ts",
   "test/resource-connectors.test.ts",
   "test/store-operations.test.ts",
   "test/sealed-workflow-starts.test.ts",

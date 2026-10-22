@@ -15,6 +15,10 @@ import type { OperationChannel } from "@grasp-os/sdk/runner";
 import type { RunHandle } from "@grasp-os/sdk/server";
 import { fileErrors } from "@grasp-os/shared/app-files";
 import { appCallLimits } from "@grasp-os/shared/apps";
+import {
+  memoryPackSchema,
+  resourceRecallInputSchema,
+} from "@grasp-os/shared/brain-api";
 import { deadline as timeLimit, whenAborted } from "@grasp-os/shared/deadline";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { internalErrors, isExpectedError } from "@grasp-os/shared/errors";
@@ -1466,7 +1470,14 @@ const modelRequestSchema = z.strictObject({
 const knowledgeRequests = {
   search: knowledgeSearchSchema,
   read: knowledgeReadSchema,
+  recall: resourceRecallInputSchema,
 } as const;
+
+/** Whether `method` is an operation a knowledge resource serves. */
+const isKnowledgeOperation = (
+  method: unknown
+): method is keyof typeof knowledgeRequests =>
+  typeof method === "string" && Object.hasOwn(knowledgeRequests, method);
 
 /** A request a resource's declaration doesn't allow. */
 const notAllowed = () => operationErrors.create("resource.not_allowed");
@@ -1485,6 +1496,13 @@ const knowledgeDocumentSchema = z.strictObject({
   title: z.string(),
   text: z.string(),
 });
+
+/** What each knowledge operation answers: a recall, a Brain memory pack. */
+const knowledgeResults = {
+  search: knowledgeHitsSchema,
+  read: knowledgeDocumentSchema,
+  recall: memoryPackSchema,
+} as const;
 
 /**
  * Whether a statistics read of `query` reads one of the App's own measures,
@@ -1615,6 +1633,40 @@ const isNamedCall = (
 };
 
 /**
+ * Whether `declaration` allows knowledge operation `method` with `args`:
+ * one it declares, with one request. A declared operation asked with a
+ * request outside its contract (a search text past Knowledge's limit, or
+ * a recall naming a collection the declaration doesn't, say) is refused
+ * as arguments that don't fit.
+ */
+const allowsKnowledge = (
+  declaration: Extract<AnyResource, { "~resource": "knowledge" }>,
+  method: unknown,
+  args: readonly Json[]
+): boolean => {
+  const [first] = args;
+  const schema = isKnowledgeOperation(method)
+    ? knowledgeRequests[method]
+    : undefined;
+  const allowed =
+    schema !== undefined &&
+    declaration.operations.some((operation) => operation === method) &&
+    args.length === 1;
+  const names =
+    method === "recall" && isJsonObject(first) ? first.collections : [];
+  const undeclared =
+    Array.isArray(names) &&
+    names.some(
+      (name) =>
+        typeof name !== "string" || !declaration.collections.includes(name)
+    );
+  if (allowed && (!schema?.safeParse(first).success || undeclared)) {
+    throw operationErrors.create("contract.invalid_args");
+  }
+  return allowed;
+};
+
+/**
  * The request `method` with `args` makes of `declaration`, if the
  * declaration allows it: a connector one of its declared actions with an
  * object of arguments, knowledge one of its declared operations, a model
@@ -1632,19 +1684,7 @@ const allowedRequest = (
     const { actions } = declaration;
     allowed = isNamedCall(method, args, (name) => actions.includes(name));
   } else if (declaration["~resource"] === "knowledge") {
-    const schema =
-      method === "search" || method === "read"
-        ? knowledgeRequests[method]
-        : undefined;
-    allowed =
-      schema !== undefined &&
-      declaration.operations.some((operation) => operation === method) &&
-      args.length === 1;
-    // A declared operation asked with a request outside its contract (a
-    // search text past Knowledge's limit, say): arguments that don't fit.
-    if (allowed && schema?.safeParse(first).success !== true) {
-      throw operationErrors.create("contract.invalid_args");
-    }
+    allowed = allowsKnowledge(declaration, method, args);
   } else if (kind === "model") {
     allowed =
       method === "generate" &&
@@ -1725,7 +1765,9 @@ const checkedResourceResult = (
     valid = returnsDeclared(declaration.operations, args, result);
   } else if (declaration["~resource"] === "knowledge") {
     valid = (
-      method === "search" ? knowledgeHitsSchema : knowledgeDocumentSchema
+      isKnowledgeOperation(method)
+        ? knowledgeResults[method]
+        : knowledgeDocumentSchema
     ).safeParse(result).success;
   } else if (declaration["~resource"] === "guests") {
     valid =

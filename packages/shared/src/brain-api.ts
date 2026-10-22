@@ -128,6 +128,26 @@ export const recallInputSchema = z.strictObject({
 });
 export type RecallInput = z.input<typeof recallInputSchema>;
 
+/**
+ * A recall as an App asks it of a knowledge resource: collections by the
+ * names its declaration gives them, never by ID, since the App doesn't
+ * know which collections an admin bound them to.
+ */
+export const resourceRecallInputSchema = z.strictObject({
+  query: recallInputSchema.shape.query,
+  /** Only these of the declared collections; each once. */
+  collections: z
+    .array(z.string().min(1).max(64))
+    .min(1)
+    .max(recallCollectionsMax)
+    .refine((names) => new Set(names).size === names.length, {
+      message: "Name each collection once.",
+    })
+    .optional(),
+  budget: recallBudgetSchema.optional(),
+});
+export type ResourceRecallInput = z.input<typeof resourceRecallInputSchema>;
+
 /** What a memory item says it is. */
 export const memoryKindSchema = z.enum([
   "fact",
