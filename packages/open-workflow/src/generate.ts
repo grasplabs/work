@@ -1,6 +1,6 @@
 import type { ValueDescriptor } from "@grasp-os/sdk";
 import type { Stage } from "@grasp-os/workflow-expressions/evaluate";
-import { parseSlot } from "@grasp-os/workflow-expressions/source";
+import { checkSource, parseSlot } from "@grasp-os/workflow-expressions/source";
 
 import { pointerJoin } from "./diagnostics.ts";
 import { isObject } from "./json-text.ts";
@@ -108,7 +108,7 @@ export const maxTaskExpressions = 64;
 export const maxStepExpressions = 128;
 
 /** The generator's identity: part of every build it makes. */
-export const generatorVersion = "grasp-open-workflow-ts/7";
+export const generatorVersion = "grasp-open-workflow-ts/8";
 
 /** Where the generated module is among a version's files. */
 export const generatedPath = ".grasp/workflow.ts";
@@ -305,14 +305,15 @@ export interface GeneratedTask {
   readonly scope: readonly string[];
   /**
    * A `for` task's loop: its collection (`for.in`), which the host
-   * resolves in its enter step, and its items' keys
-   * (`metadata.grasp.key`), each built by the host on the item; the names
-   * its items' variables have; and the slot of its `while`, which each
-   * item's `item` step evaluates.
+   * resolves in its enter step; the slot of its items' keys
+   * (`metadata.grasp.key`, `keysSourceOf`), which the host evaluates once
+   * on the items in the same step, before any item runs; the names its
+   * items' variables have; and the slot of its `while`, which each item's
+   * `item` step evaluates.
    */
   readonly loop?: {
     readonly in: CallTemplate;
-    readonly key?: CallTemplate;
+    readonly keys?: number;
     readonly each: string;
     readonly at: string;
     readonly while?: number;
@@ -1655,9 +1656,8 @@ const graspMetadataOf = (task: JsonObject): JsonObject | undefined =>
 
 /**
  * Refuses what of `for` task `item` isn't lowered yet: items at once
- * (`metadata.grasp.concurrency` above 1, GRA-276's next slice) and items'
- * own keys (`metadata.grasp.key`): its items are identified by their
- * index in the collection its enter step records. Whether anything was.
+ * (`metadata.grasp.concurrency` above 1, GRA-276's next slice). Whether
+ * anything was.
  */
 const refusedLoop = (emitter: Emitter, item: ListTask): boolean => {
   const grasp = graspMetadataOf(item.task);
@@ -1676,10 +1676,6 @@ const refusedLoop = (emitter: Emitter, item: ListTask): boolean => {
       "for:concurrency",
       item.id
     );
-    refused = true;
-  }
-  if (grasp !== undefined && Object.hasOwn(grasp, "key")) {
-    emitter.refusals.add(pointerJoin(graspPointer, "key"), "for:key", item.id);
     refused = true;
   }
   // Loops inside one another, at most spec 18's eight levels: what the
@@ -1747,6 +1743,22 @@ const endJump = (emitter: Emitter): string => {
 };
 
 /**
+ * The expression that makes a loop's item keys (`metadata.grasp.key`,
+ * `key` its source) at once: for each of the items its enter step
+ * recorded, which are `.` (stage `loopKeys`), in their order, the list of
+ * what the key yields on its item with the item's variables (`each`, `at`)
+ * bound as the loop binds them. A list per item, not one flat list: jq's
+ * key may yield no value or several, and only per item can the host tell
+ * that each yielded exactly one. One evaluation for every item, not one
+ * per item: a key per item would take one attempt's fuel for every few
+ * hundred items, and a fresh jq for each. `key` is one expression of the
+ * profile, which `|` takes whole (nothing of jq's grammar binds looser),
+ * so it is the inner list's member as it is.
+ */
+export const keysSourceOf = (key: string, each: string, at: string): string =>
+  `[range(0; length) as $${at} | .[$${at}] as $${each} | [$${each} | ${key}]]`;
+
+/**
  * The statements of a `for` task: one call of the SDK's loop, whose enter
  * step records the items the host resolves from the sealed collection,
  * with its list as a function of the item's own flow and data, in which
@@ -1776,6 +1788,41 @@ const lowerFor = (
     id,
     "json"
   );
+  // Its items' keys, made once on the recorded items before any item runs.
+  let keysSlot: number | undefined;
+  const key = graspMetadataOf(task)?.key;
+  if (key !== undefined) {
+    const keyPointer = pointerJoin(
+      pointerJoin(pointerJoin(pointer, "metadata"), "grasp"),
+      "key"
+    );
+    const compiled = emitter.checked.expressions.get(keyPointer);
+    if (compiled === undefined) {
+      throw new Error(
+        `The checked workflow has no expression at ${keyPointer}`
+      );
+    }
+    const source = keysSourceOf(compiled.source, each, at);
+    // As the key is checked, but a list around it: too large or deep as
+    // that, refused here rather than at run time.
+    if (!checkSource(source).ok) {
+      emitter.refusals.add(keyPointer, "for:key_too_large", id);
+      return;
+    }
+    keysSlot = emitter.expressions.length;
+    emitter.expressions.push({
+      slot: keysSlot,
+      pointer: keyPointer,
+      taskId: id,
+      stage: "loopKeys",
+      result: "json",
+      source,
+      // The loops around this one: its own item's variables the list binds.
+      loopVariables: Object.freeze(
+        compiled.loopVariables.filter((name) => name !== each && name !== at)
+      ),
+    });
+  }
   const members = [...stages.enter];
   let whileSlot: number | undefined;
   if (Object.hasOwn(task, "while")) {
@@ -1805,6 +1852,7 @@ const lowerFor = (
     steps,
     loop: {
       in: collection,
+      ...(keysSlot === undefined ? {} : { keys: keysSlot }),
       each,
       at,
       ...(whileSlot === undefined ? {} : { while: whileSlot }),

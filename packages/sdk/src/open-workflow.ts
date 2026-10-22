@@ -274,9 +274,12 @@ export interface AttemptHost {
   readonly until: (frame: CallFrame) => Promise<number>;
   /**
    * Resolves a `for` task's collection, once, on its transformed input:
-   * its items, which the step records.
+   * its items, and their keys where its loop has them
+   * (`metadata.grasp.key`), which the step records.
    */
-  readonly items: (frame: CallFrame) => Promise<FlowValue[]>;
+  readonly items: (
+    frame: CallFrame
+  ) => Promise<{ items: FlowValue[]; keys?: FlowValue[] }>;
 }
 
 /**
@@ -406,7 +409,26 @@ interface StepRecord {
   readonly until?: number;
   /** The items a `for` task's enter step resolved. */
   readonly items?: readonly FlowValue[];
+  /** Their keys, where its loop has them, which run history shows. */
+  readonly keys?: readonly FlowValue[];
 }
+
+/** What a `for` task's enter step recorded of its items: them, and their keys. */
+const loopRecordOf = (
+  value: Record<string, FlowValue>
+): Pick<StepRecord, "items" | "keys"> => {
+  const { items, keys } = value;
+  if (items !== undefined && !isArray(items)) {
+    throw new TypeError("A for task's enter step records its items");
+  }
+  if (keys !== undefined && (!isArray(keys) || items === undefined)) {
+    throw new TypeError("A for task's enter step records keys with its items");
+  }
+  return {
+    ...(items === undefined ? {} : { items }),
+    ...(keys === undefined ? {} : { keys }),
+  };
+};
 
 const readRecord = (value: FlowValue): StepRecord => {
   if (!isRecord(value)) {
@@ -418,10 +440,8 @@ const readRecord = (value: FlowValue): StepRecord => {
   if (!hasOwn(value, "output")) {
     throw new TypeError("A task's step records its output");
   }
-  const { branch, until, items } = value;
-  if (items !== undefined && !isArray(items)) {
-    throw new TypeError("A for task's enter step records its items");
-  }
+  const { branch, until } = value;
+  const loop = loopRecordOf(value);
   if (
     branch !== undefined &&
     (typeof branch !== "number" || !isSafeInteger(branch) || branch < 0)
@@ -440,7 +460,7 @@ const readRecord = (value: FlowValue): StepRecord => {
     ...(hasOwn(value, "context") ? { context: value.context ?? null } : {}),
     ...(branch === undefined ? {} : { branch }),
     ...(until === undefined ? {} : { until }),
-    ...(items === undefined ? {} : { items }),
+    ...loop,
   };
 };
 
@@ -659,9 +679,13 @@ const flowOf = (engine: OpenWorkflowEngine, within = ""): Flow => {
             if (entered === null) {
               return { skipped: true };
             }
+            const { items, keys } = await attempt.items({
+              input: entered.input,
+            });
             return {
               output: entered.input,
-              items: await attempt.items({ input: entered.input }),
+              items,
+              ...(keys === undefined ? {} : { keys }),
             };
           }
         )
