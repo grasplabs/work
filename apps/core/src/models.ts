@@ -317,12 +317,15 @@ const modelRules = (env: ModelsEnv): ModelRules | undefined => {
 export const gatewaySettings = (
   env: ModelsEnv
 ): {
+  /** The deployment's AI Gateway; `undefined` while the config doesn't parse. */
+  gateway: string | undefined;
   models: string[];
   roles: Partial<Record<ModelRole, string>>;
   rules: ModelRules | undefined;
 } => {
   const config = modelGatewayConfig(env);
   return {
+    gateway: config?.gateway,
     models: config?.models ?? [],
     roles: config?.roles ?? {},
     rules: modelRules(env),
