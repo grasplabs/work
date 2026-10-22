@@ -2204,6 +2204,26 @@ const lowerFor = (
   );
 };
 
+/** Lowers a set, a switch or a call that doesn't sleep: one step each. */
+const lowerOneStep = (
+  emitter: Emitter,
+  item: ListTask,
+  stages: Parameters<typeof lowerCall>[2],
+  place: ListPlace,
+  sealed: Parameters<typeof lowerCall>[4],
+  kind: "set" | "switch" | "call"
+): void => {
+  if (kind === "set") {
+    emitter.tasks.push({ ...sealed, kind, steps: ["task"] });
+    lowerSet(emitter, item, stages, place);
+  } else if (kind === "switch") {
+    emitter.tasks.push({ ...sealed, kind, steps: ["task"] });
+    lowerSwitch(emitter, item, stages, place);
+  } else {
+    lowerCall(emitter, item, stages, place, sealed);
+  }
+};
+
 /** Lowers one task, or says why it can't be. */
 const lowerTask = (
   emitter: Emitter,
@@ -2245,15 +2265,7 @@ const lowerTask = (
     kind === "switch" ||
     (kind === "call" && !sleeps)
   ) {
-    if (kind === "set") {
-      emitter.tasks.push({ ...sealed, kind, steps: ["task"] });
-      lowerSet(emitter, item, stages, place);
-    } else if (kind === "switch") {
-      emitter.tasks.push({ ...sealed, kind, steps: ["task"] });
-      lowerSwitch(emitter, item, stages, place);
-    } else {
-      lowerCall(emitter, item, stages, place, sealed);
-    }
+    lowerOneStep(emitter, item, stages, place, sealed, kind);
     // One step evaluates all of these. A durable task's enter and leave
     // steps hold two stages each, so never more than this.
     if (emitter.expressions.length - before > maxStepExpressions) {

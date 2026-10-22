@@ -586,13 +586,6 @@ const workflowStep = (
       }
     : undefined;
 
-/**
- * Whether `task`'s enter step resolves a deadline: an expression wait's, a
- * `grasp.sleepUntil` call's, a listen's (its timeout from then).
- */
-const resolvesDeadline = (task: SealedTask): boolean =>
-  task.kind === "listen" || deadlineOf(task) !== undefined;
-
 /** The step of `build` that `name` names, as a `do` (`sleep` false) or a
  * sleeping task's sleep; `undefined` when the build has no such step.
  */
@@ -665,10 +658,12 @@ type DataCheck = "input" | "output" | "export";
 const dataCheckSchema = z.enum(["input", "output", "export"]);
 
 /**
- * Whether `task`'s enter step resolves a deadline: an expression wait's,
- * a `grasp.sleepUntil` call's, or its decision's, which it opens.
+ * Whether `task`'s enter step resolves a deadline: an expression wait's, a
+ * `grasp.sleepUntil` call's, a listen's (its timeout from then), or its
+ * decision's, which it opens.
  */
 const resolvesDeadline = (task: SealedTask): boolean =>
+  task.kind === "listen" ||
   deadlineOf(task) !== undefined ||
   (task.kind === "call" && task.call.name === "grasp.decision");
 
@@ -1582,21 +1577,7 @@ export class ResourceRunHost
             attemptStep
           );
         }
-        let outcome = recorded;
-        if (entering) {
-          // The host's own journal entry, fresh or replayed.
-          const journal = enteredSchema.parse(recorded);
-          outcome = journal.record;
-          if (step.task !== undefined) {
-            this.#taskStarts.set(step.place, journal.startedAt);
-            if (journal.listen !== undefined) {
-              this.#listens.set(step.place, journal.listen);
-            }
-            if (journal.decision !== undefined) {
-              this.#decisions.set(step.place, journal.decision);
-            }
-          }
-        }
+        const outcome = entering ? this.#entered(step, recorded) : recorded;
         // Fresh or replayed alike: what the run has reached, in order.
         this.#noteRecorded(step, outcome);
         return outcome;
@@ -1604,6 +1585,26 @@ export class ResourceRunHost
     } finally {
       stepDone.resolve(null);
     }
+  }
+
+  /**
+   * The record of enter step `step`, from the host's own journal entry
+   * `recorded`, fresh or replayed: what it keeps beside the record (when
+   * its task started, a listen's filters, a decision it opened) is kept
+   * for the steps after it.
+   */
+  #entered(step: StepOf, recorded: unknown): unknown {
+    const journal = enteredSchema.parse(recorded);
+    if (step.task !== undefined) {
+      this.#taskStarts.set(step.place, journal.startedAt);
+      if (journal.listen !== undefined) {
+        this.#listens.set(step.place, journal.listen);
+      }
+      if (journal.decision !== undefined) {
+        this.#decisions.set(step.place, journal.decision);
+      }
+    }
+    return journal.record;
   }
 
   /**
