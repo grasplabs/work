@@ -5,6 +5,8 @@ import {
   runFileErrors,
   runFileIdSchema,
   runFileLimits,
+  runFileNameFits,
+  runFileNamed,
   runFileNameSchema,
   runFileTextTypes,
   runFileTypeOfBytes,
@@ -101,7 +103,10 @@ export type FilesCallOperation = keyof typeof filesCallOperations;
 const contentChars = Math.ceil(runFileLimits.callBytes / 3) * 4;
 
 const argumentSchemas = {
-  open: z.strictObject({ name: runFileNameSchema, type: runFileTypeSchema }),
+  // A Word or Excel document is named with its extension, never another's.
+  open: z
+    .strictObject({ name: runFileNameSchema, type: runFileTypeSchema })
+    .refine(({ name, type }) => runFileNameFits(name, type)),
   append: z.strictObject({
     file: runFileIdSchema,
     content: z.base64().min(1).max(contentChars),
@@ -548,6 +553,8 @@ const finish = async (
   const now = new Date();
   if (!shown) {
     // Not what it says it is: gone, so it holds no place in the limits.
+    // The lease again first: hashing every chunk may have outlasted it.
+    caller.requireHolds();
     await db
       .update(workflowRunFiles)
       .set({ state: "deleted", deletedAt: now })
@@ -658,6 +665,7 @@ const remove = async (
   if (row.state === "deleted") {
     return { output: null, detail: detailOf(row) };
   }
+  caller.requireHolds();
   await drizzle(env.DB)
     .update(workflowRunFiles)
     .set({ state: "deleted", deletedAt: new Date() })
@@ -762,8 +770,10 @@ export const keepFile = async (
   // Each through `callFiles`, as an action's own calls are: its lease
   // checked before every one, so an attempt that went stale while Connect
   // was answering opens, reserves and seals nothing.
+  // Named with its type's extension: a document typed docx is never
+  // kept as `.docm`.
   const opened = await callFiles(env, as("open"), "open", {
-    name: file.name,
+    name: runFileNamed(file.name, file.type),
     type: file.type,
   });
   const id = runFileIdSchema.parse(
