@@ -22,7 +22,7 @@ const localToday = (): string => {
  * conversation shorter, never the page longer. "New chat" starts over.
  */
 const AskPage = () => {
-  const admins = adminRoute.useLoaderData();
+  const { admins } = adminRoute.useLoaderData();
   const { about } = Route.useSearch();
   const [chat, setChat] = useState(0);
   const name =
