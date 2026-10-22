@@ -154,6 +154,14 @@ msgstr "{answered} répondues"
 msgid "{app} has no tools."
 msgstr "{app} n’a aucun outil."
 
+#: src/connections/connected-dialog.tsx
+msgid "{app} is connected"
+msgstr "{app} est connecté"
+
+#: src/connections/connected-dialog.tsx
+msgid "{app} is connected again"
+msgstr "{app} est de nouveau connecté"
+
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "{app} isn't connected yet."
 msgstr "{app} n’est pas encore connecté."
@@ -3714,6 +3722,7 @@ msgid "Click to open Usage"
 msgstr "Cliquer pour ouvrir Utilisation"
 
 #: src/connections/connect-dialog.tsx
+#: src/connections/connected-dialog.tsx
 #: src/connections/connection-list.tsx
 #: src/dashboard/report-dialog.tsx
 #: src/dashboard/widget-block.tsx
@@ -4002,11 +4011,6 @@ msgstr "Connecté, en direct"
 #: src/brain/brain.ts
 msgid "Connected, via Composio"
 msgstr "Connecté, via Composio"
-
-#: src/routes/_shell.integrations.$integration.tsx
-#: src/routes/_shell.integrations.index.tsx
-msgid "Connected."
-msgstr "Connectée."
 
 #: src/connection-errors.ts
 msgid "Connecting didn't work. Try again, or ask an admin."
@@ -5502,6 +5506,7 @@ msgid "for every model call this month"
 msgstr "pour tous les appels de modèle ce mois-ci"
 
 #: src/connections/connect-dialog.tsx
+#: src/connections/connected-dialog.tsx
 msgid "For everyone"
 msgstr "Pour tout le monde"
 
@@ -5749,6 +5754,14 @@ msgstr "Grasp permet de l'envoyer une fois de plus, exactement comme avant, et u
 #: src/dashboard/pile-cards.tsx
 msgid "Grasp makes this change on {connection}, with exactly what is shown."
 msgstr "Grasp effectue cette modification dans {connection}, avec exactement ce qui est affiché."
+
+#: src/connections/connected-dialog.tsx
+msgid "Grasp may read and write in {app}, only for what you allow."
+msgstr "Grasp peut lire et écrire dans {app}, uniquement pour ce que vous autorisez."
+
+#: src/connections/connected-dialog.tsx
+msgid "Grasp may use {app} only through the tools you allowed."
+msgstr "Grasp ne peut utiliser {app} qu’avec les outils que vous avez autorisés."
 
 #: src/dashboard/outcome-card.tsx
 msgid "Grasp never sends it again. Nothing is changed or undone on {connection}."
@@ -6683,6 +6696,7 @@ msgid "Jump to the newest message"
 msgstr "Aller au message le plus récent"
 
 #: src/connections/connect-dialog.tsx
+#: src/connections/connected-dialog.tsx
 msgid "Just for you"
 msgstr "Rien que pour vous"
 
@@ -8865,6 +8879,7 @@ msgid "Only when a condition holds:"
 msgstr "Seulement si une condition est remplie :"
 
 #: src/connections/connect-dialog.tsx
+#: src/connections/connected-dialog.tsx
 msgid "Only you can use it."
 msgstr "Vous seul pouvez l’utiliser."
 
@@ -14117,6 +14132,10 @@ msgstr "Ce que nous faisons"
 msgid "What you agreed to is kept. Forgot something? This link works until {closes}."
 msgstr "Ce que vous avez validé est conservé. Vous avez oublié quelque chose ? Ce lien fonctionne jusqu’au {closes}."
 
+#: src/connections/connected-dialog.tsx
+msgid "What you chose"
+msgstr "Ce que vous avez choisi"
+
 #: src/landscape/data-tab.tsx
 msgid "What your identity provider granted {appName}."
 msgstr "Ce que votre fournisseur d’identité a accordé à {appName}."
@@ -14876,6 +14895,7 @@ msgid "your organization"
 msgstr "votre organisation"
 
 #: src/connections/connect-dialog.tsx
+#: src/connections/connected-dialog.tsx
 msgid "Your organization uses it through the permissions you grant."
 msgstr "Votre organisation l’utilise via les autorisations que vous accordez."
 

@@ -23,6 +23,7 @@ import type { LucideIcon } from "lucide-react";
 import { useState } from "react";
 
 import { connectionErrorMessage } from "../connection-errors.ts";
+import { ConnectedDialog } from "../connections/connected-dialog.tsx";
 import { groupIcon, groupLabel } from "../connections/groups.ts";
 import { IntegrationRow } from "../connections/integration-row.tsx";
 import { IntegrationsBanner } from "../connections/integrations-banner.tsx";
@@ -514,10 +515,13 @@ const Integrations = () => {
   );
   const filter = filterOf(search);
   // Only a connection the page lists: anyone can put an ID in a link.
-  const connected =
-    connection !== undefined &&
-    connections.state === "ready" &&
-    connections.data.some(({ id }) => id === connection);
+  const connectedTo =
+    connection === undefined
+      ? undefined
+      : integrations.find((integration) =>
+          integration.connections.some(({ id }) => id === connection)
+        );
+  const navigate = useNavigate({ from: "/integrations/" });
   const choices = useChoices(integrations);
   const sections = sectionsOf(integrations, filter, q);
   const shown = sections.reduce(
@@ -552,11 +556,19 @@ const Integrations = () => {
               }
               title={t`Integrations`}
             />
-            {connected ? (
-              <output>
-                <Trans>Connected.</Trans>
-              </output>
-            ) : null}
+            <ConnectedDialog
+              again={false}
+              app={connectedTo?.name ?? ""}
+              connection={connectedTo?.connections.find(
+                ({ id }) => id === connection
+              )}
+              onClose={() => {
+                void navigate({
+                  replace: true,
+                  search: (last) => ({ ...last, connection: undefined }),
+                });
+              }}
+            />
             {connectionError === undefined ? null : (
               <ErrorText>{connectionErrorMessage(connectionError)}</ErrorText>
             )}

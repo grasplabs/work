@@ -11,6 +11,7 @@ import type {
 import { failureText } from "@grasp-os/shared/errors";
 import { isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
+import { AutoHeight, FadeIn } from "@grasp-os/ui/components/auto-height";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
 import {
@@ -45,8 +46,12 @@ import type { AllowedTool } from "./tool-choices.ts";
 // for its provider and scope. Core and connect check every step: the page
 // offers only what the role can do.
 
-/** Where a flow sends the browser back to: the integration's own page. */
-export const returnToOf = (key: string): string => `/integrations/${key}`;
+/**
+ * Where a flow sends the browser back to: the integration's own page, which
+ * says the app is connected again when `again`.
+ */
+export const returnToOf = (key: string, again = false): string =>
+  again ? `/integrations/${key}?again=1` : `/integrations/${key}`;
 
 /** Sends the browser to the provider, once core started the flow. */
 export const goTo = (started: { url: string } | undefined): void => {
@@ -742,27 +747,37 @@ export const ConnectDialog = ({
             </DialogDescription>
           </div>
         </header>
-        {/* Only while open, so each opening starts from its first step. */}
-        {open && integration.source === "native" ? (
-          <NativeFlow
-            again={again}
-            identity={identity}
-            integration={integration}
-            returnTo={returnTo ?? returnToOf(integration.key)}
-            onClose={() => {
-              onOpenChange(false);
-            }}
-          />
-        ) : null}
-        {open && integration.source === "composio" ? (
-          <ComposioFlow
-            integration={integration}
-            returnTo={returnTo ?? returnToOf(integration.key)}
-            onClose={() => {
-              onOpenChange(false);
-            }}
-          />
-        ) : null}
+        {/* Only while open, so each opening starts from its first step.
+            The height eases as a step's content changes, and the steps
+            fade in (still, with reduced motion). */}
+        <AutoHeight>
+          {open && integration.source === "native" ? (
+            <FadeIn>
+              <NativeFlow
+                again={again}
+                identity={identity}
+                integration={integration}
+                onClose={() => {
+                  onOpenChange(false);
+                }}
+                returnTo={
+                  returnTo ?? returnToOf(integration.key, again !== undefined)
+                }
+              />
+            </FadeIn>
+          ) : null}
+          {open && integration.source === "composio" ? (
+            <FadeIn>
+              <ComposioFlow
+                integration={integration}
+                onClose={() => {
+                  onOpenChange(false);
+                }}
+                returnTo={returnTo ?? returnToOf(integration.key)}
+              />
+            </FadeIn>
+          ) : null}
+        </AutoHeight>
       </DialogContent>
     </Dialog>
   );
