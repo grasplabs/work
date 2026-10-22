@@ -27,6 +27,7 @@ import { revokeRelease } from "../src/release-retention.ts";
 import { racingDb } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { appWith, artifactKey, failure, person } from "./sealed-apps.ts";
+import { workflowFiles } from "./workflow-apps.ts";
 
 // Candidates (app-candidates.ts), from their threat model: a version is
 // made current only from a candidate verified with its report, over the
@@ -273,6 +274,53 @@ describe(
         ["building", "verifying"],
         ["verifying", "verified"],
       ]);
+    });
+
+    it("reports the App and workflow tests its verification ran", async () => {
+      const { owner, app } = await appWith({
+        ...helloFiles(),
+        "tests/fixtures/people.json": JSON.stringify({
+          principals: { reader: { role: "user" } },
+        }),
+        "tests/hello.test.ts": `import { appTest } from "@grasp-os/sdk/testing";
+import { api } from "#grasp";
+
+export default appTest({
+  fixtures: "people",
+  tests: {
+    "says hello": async (t) => {
+      const reader = await t.as("reader");
+      t.equal(await reader.query(api.hello.hello, {}), "hello");
+    },
+  },
+});
+`,
+        ...workflowFiles(
+          "count",
+          '  return await step.do("one", { description: "One" }, async () => 1);',
+          { one: 1 }
+        ),
+      });
+      await activateVersion(env, owner, app, 1);
+      const [made] = await candidatesOf(app);
+      const row = await drizzle(env.DB)
+        .select()
+        .from(appCandidateReports)
+        .where(eq(appCandidateReports.candidateId, made?.id ?? ""))
+        .get();
+      expect(
+        z
+          .object({
+            passed: z.object({
+              appTests: z.array(z.string()),
+              workflowTests: z.array(z.string()),
+            }),
+          })
+          .parse(JSON.parse(row?.report ?? "{}")).passed
+      ).toStrictEqual({
+        appTests: ["tests/hello.test.ts"],
+        workflowTests: ["count"],
+      });
     });
 
     it("refuses a candidate whose sealed artifact changed in storage, reading it back itself", async () => {
