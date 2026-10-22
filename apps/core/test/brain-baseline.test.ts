@@ -419,7 +419,7 @@ describe("the Brain baseline", { timeout: 300_000 }, () => {
         gateway: "grasp-os-test",
       },
       pinned: true,
-      run: ["dev", repeats, "7"],
+      run: ["dev", repeats, "8"],
       schedule: {
         arms: brainArms,
         controls: brainControls,
