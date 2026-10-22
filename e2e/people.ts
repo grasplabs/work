@@ -245,6 +245,7 @@ const cast = {
   brainChat: { member: "user" },
   contexts: { member: "user" },
   tour: { member: "user" },
+  setupVoice: { admin: "admin" },
 } as const satisfies Record<string, Record<string, Role>>;
 
 type Scene = keyof typeof cast;

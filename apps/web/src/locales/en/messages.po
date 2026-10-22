@@ -7239,6 +7239,10 @@ msgstr "Path"
 msgid "Path of a new module"
 msgstr "Path of a new module"
 
+#: src/voice/sound-controls.tsx
+msgid "Pause"
+msgstr "Pause"
+
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Pause the interviews"
 msgstr "Pause the interviews"
@@ -7435,6 +7439,10 @@ msgstr "Platform statistics. This domain can read run and signal counts for ever
 #: src/activity/audit-log.tsx
 msgid "Platform update"
 msgstr "Platform update"
+
+#: src/voice/sound-controls.tsx
+msgid "Play"
+msgstr "Play"
 
 #: src/routes/_shell.policies.documents.$policyId.tsx
 #: src/routes/_shell.policies.index.tsx
@@ -10363,6 +10371,14 @@ msgstr "Try another search, or clear the filters to see the whole trail."
 msgid "Trying again…"
 msgstr "Trying again…"
 
+#: src/voice/sound-controls.tsx
+msgid "Turn sound off"
+msgstr "Turn sound off"
+
+#: src/voice/sound-controls.tsx
+msgid "Turn sound on"
+msgstr "Turn sound on"
+
 #: src/onboarding/about-story.tsx
 msgid "Twenty minutes each, easily. About fifteen a week."
 msgstr "Twenty minutes each, easily. About fifteen a week."
@@ -10704,6 +10720,10 @@ msgstr "Vision page"
 #: src/brain/brain.ts
 msgid "Vision page confirmed"
 msgstr "Vision page confirmed"
+
+#: src/voice/sound-controls.tsx
+msgid "Volume"
+msgstr "Volume"
 
 #: src/workflows/workflow-diagram.tsx
 msgid "Waiting"

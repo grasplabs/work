@@ -67,6 +67,7 @@ import { formatDate, formatList } from "../format.ts";
 import { isLocale, localeNames } from "../i18n.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
+import { usePrepare } from "../voice/voice.ts";
 import { About } from "./about-story.tsx";
 import { DocumentDrop } from "./document-drop.tsx";
 import type { DocumentRow } from "./document-drop.tsx";
@@ -82,6 +83,7 @@ import {
   Asides,
   Callout,
   Cramped,
+  evenVoice,
   Explained,
   Figure,
   Heading,
@@ -90,9 +92,18 @@ import {
   MoreAbout,
   Onward,
   Primary,
+  stepLine,
   SupportLink,
+  tones,
 } from "./setup-parts.tsx";
-import { closesOn, documentSources, teamNumbersOf } from "./setup.ts";
+import type { StepVoice } from "./setup-parts.tsx";
+import {
+  closesOn,
+  documentSources,
+  stepIndex,
+  steps,
+  teamNumbersOf,
+} from "./setup.ts";
 import type { Listening, SetupStep } from "./setup.ts";
 import {
   csvRows,
@@ -178,13 +189,21 @@ const toolsIn = (documents: OnboardingDocument[]): string[] => [
   ...new Set(documents.flatMap((each) => each.reading.tools)),
 ];
 
-/** What each step says as it arrives: its title and sentence. */
+/** What Stephen says as a step arrives, and how; even, unless it says otherwise. */
+interface Headline {
+  title: string;
+  sentence: string;
+  voice?: StepVoice;
+}
+
+/**
+ * What each step says as it arrives, in one place: so the step before can
+ * fetch its voice ahead, and he starts the moment you arrive. "How this
+ * works" tells a story of its own instead (about-story.tsx).
+ */
 const useHeadlines = ({
   data,
-}: StepProps): Record<
-  Exclude<SetupStep, "about">,
-  { title: string; sentence: string }
-> => {
+}: Pick<StepProps, "data">): Record<Exclude<SetupStep, "about">, Headline> => {
   const { t } = useLingui();
   const { admin } = data;
   const named = toolsIn(data.documents).slice(0, 4);
@@ -197,6 +216,7 @@ const useHeadlines = ({
     welcome: {
       title: t`Hi ${admin}, I’m Stephen`,
       sentence: t`Before we start, which language do you prefer?`,
+      voice: { tone: tones.warm },
     },
     company: {
       title: t`Who’s who at your company?`,
@@ -230,6 +250,7 @@ const useHeadlines = ({
     listening: {
       title: t`That’s everything from you. Now I’ll talk to your team.`,
       sentence: t`You can close this page now. Come back here to see how far I am.`,
+      voice: { tone: tones.warm },
     },
     review: {
       title: plural(openCount, {
@@ -238,6 +259,7 @@ const useHeadlines = ({
         other: "# things for you",
       }),
       sentence: t`I’ve handled everything else.`,
+      voice: { tone: tones.even, quick: true },
     },
     open: {
       title: t`Thank you, ${admin}`,
@@ -245,6 +267,7 @@ const useHeadlines = ({
         one: "I talked with # person.",
         other: "I talked with # people.",
       }),
+      voice: { tone: tones.glad, quick: true },
     },
   };
 };
@@ -268,11 +291,13 @@ const Welcome = (props: StepProps) => {
           picked
             ? {
                 text: t`${chosen} it is. This takes about ${minutes} minutes. Ready to start?`,
+                cut: true,
               }
             : undefined
         }
         sentence={lines.sentence}
         title={lines.title}
+        voice={lines.voice}
       />
       <Onward>
         <LanguageChoice
@@ -1174,7 +1199,11 @@ const ListeningStep = (props: StepProps) => {
   const starts = plan === null ? "" : formatDay(plan.start);
   return (
     <>
-      <Heading sentence={lines.sentence} title={lines.title} />
+      <Heading
+        sentence={lines.sentence}
+        title={lines.title}
+        voice={lines.voice}
+      />
       <div className="flex w-full flex-col gap-4 text-left">
         <Waiting agreed={agreed} paused={paused} />
         <div className="flex flex-col gap-2">
@@ -1265,7 +1294,11 @@ const Review = (props: StepProps) => {
   const lines = useHeadlines(props).review;
   return (
     <>
-      <Heading sentence={lines.sentence} title={lines.title} />
+      <Heading
+        sentence={lines.sentence}
+        title={lines.title}
+        voice={lines.voice}
+      />
       <Primary
         onClick={() => {
           props.go("open");
@@ -1287,7 +1320,11 @@ const Open = (props: StepProps) => {
   const lines = useHeadlines(props).open;
   return (
     <>
-      <Heading sentence={lines.sentence} title={lines.title} />
+      <Heading
+        sentence={lines.sentence}
+        title={lines.title}
+        voice={lines.voice}
+      />
       <Callout
         text={
           props.data.gate.open
@@ -1299,6 +1336,11 @@ const Open = (props: StepProps) => {
   );
 };
 
+/**
+ * One screen per step. A step is a component of its own, given what the
+ * onboarding read from core and how to go on; it is made of the parts in
+ * setup-parts.tsx, and says its line from `useHeadlines`.
+ */
 const bodies: Record<SetupStep, ComponentType<StepProps>> = {
   welcome: Welcome,
   about: About,
@@ -1331,6 +1373,18 @@ export const SetupStepBody = ({
 }) => {
   // Each step is drawn anew, so this starts over with every step.
   const [explained, setExplained] = useState(false);
+  // This step's line and the next one's are fetched ahead, so he starts the moment a step arrives.
+  const headlines = useHeadlines(props);
+  const [here, ahead] = [step, steps[stepIndex(step) + 1]].map((each) => {
+    const headline =
+      each === undefined || each === "about" ? undefined : headlines[each];
+    return {
+      line: stepLine(headline?.title ?? "", headline?.sentence).line,
+      voice: headline?.voice ?? evenVoice,
+    };
+  });
+  usePrepare(here?.line ?? "", here?.voice);
+  usePrepare(ahead?.line ?? "", ahead?.voice);
   const onExplained = () => {
     setExplained(true);
   };
