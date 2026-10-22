@@ -264,6 +264,22 @@ describe("the Playbook's records", { timeout: 120_000 }, () => {
     });
   });
 
+  it("take a retry racing its first call as the retry it is", async () => {
+    const admin = await signedInApi(idp, "admin");
+    await admin.api.onboarding.saveRoster(roster);
+    const again = await signedInApi(idp, "admin");
+    const { records } = interview(unique());
+
+    const outcomes = await Promise.all([
+      admin.api.brain.addRecords(records),
+      again.api.brain.addRecords(records),
+    ]);
+
+    expect(
+      outcomes.map(({ added, unchanged }) => `${added}/${unchanged}`).toSorted()
+    ).toStrictEqual(["0/6", "6/0"]);
+  });
+
   it("refuse a reference to nothing, a pain on what doesn't hurt, and anything a record doesn't name", async () => {
     const admin = await signedInApi(idp, "admin");
     await admin.api.onboarding.saveRoster(roster);

@@ -143,7 +143,7 @@ const statementRecordSchema = z
   });
 
 /** One record `brain.addRecords` takes, on `type`. */
-export const brainRecordSchema = z.union([
+export const brainRecordSchema = z.discriminatedUnion("type", [
   sourceRecordSchema,
   toolRecordSchema,
   candidateRecordSchema,

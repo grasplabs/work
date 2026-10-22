@@ -310,6 +310,12 @@ export const addBrainRecords = async (
     // Another call added one of these ids since they were read: the unique
     // index refused the batch, so nothing in it was kept.
     if (isTakenId(error)) {
+      // A retry racing its first call is still a retry: read again, and
+      // refuse only a record held differently.
+      const now = await heldFor(env, records);
+      if (freshOf(records, now, onboarding).length === 0) {
+        return { added: 0, unchanged: records.length };
+      }
       throw brainRecordErrors.create("brain.record_conflict");
     }
     throw error;
