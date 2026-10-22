@@ -19,10 +19,10 @@ import { Table } from "@grasp-os/ui/components/table";
 import { toast } from "@grasp-os/ui/components/toast";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { CheckIcon, CopyIcon, DownloadIcon } from "lucide-react";
-import { useEffect, useState } from "react";
+import { createContext, use, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import Markdown from "react-markdown";
-import type { Components } from "react-markdown";
+import type { Components, Options } from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
 
@@ -36,6 +36,7 @@ import {
   textOf,
 } from "./answer-blocks.ts";
 import type { TableFormat } from "./answer-blocks.ts";
+import { CitedNote, citedNoteLink } from "./cited-note.tsx";
 
 // The agent's answers, as the prototype renders them with Streamdown
 // (grasplabs/prototype `components/ai-elements/message.tsx`): a code block
@@ -251,9 +252,46 @@ const LeavingLink = ({
   );
 };
 
+/** No note cited. */
+const noneCited: readonly string[] = [];
+
+/**
+ * The notes the answer being rendered cites. A context, not an argument to
+ * its components: those stay the same from render to render, so a block
+ * keeps its state (a menu open, a link's question, "Copied") as more of
+ * the answer streams in, rather than being drawn anew.
+ */
+const CitedNotes = createContext<readonly string[]>(noneCited);
+
+/**
+ * A link in an answer: to a note it cites, the note, here; to any other
+ * note, its text alone, whatever the answer says; anywhere else, out of
+ * Grasp, once the person says so.
+ */
+const AnswerLink = ({
+  href,
+  children,
+}: {
+  href?: string | undefined;
+  children?: ReactNode;
+}) => {
+  const cited = use(CitedNotes);
+  const documentId =
+    href === undefined ? undefined : citedNoteLink.exec(href)?.groups?.id;
+  if (documentId === undefined) {
+    return <LeavingLink href={href}>{children}</LeavingLink>;
+  }
+  return cited.includes(documentId) ? (
+    <CitedNote documentId={documentId}>{children}</CitedNote>
+  ) : (
+    <span>{children}</span>
+  );
+};
+
 /** The answer's components: the plain ones, with these in their place. */
-const answerComponents = (cited: readonly string[]): Components => ({
-  ...plainComponents(cited, LeavingLink),
+const answerComponents: Components = {
+  ...plainComponents(noneCited, LeavingLink),
+  a: ({ href, children }) => <AnswerLink href={href}>{children}</AnswerLink>,
   pre: ({ node, children }) => {
     const code = codeOf(node);
     return (
@@ -268,10 +306,13 @@ const answerComponents = (cited: readonly string[]): Components => ({
   table: ({ node, children }) => (
     <AnswerTable rows={cellsOf(node)}>{children}</AnswerTable>
   ),
-});
+};
 
-/** No note cited. */
-const noneCited: readonly string[] = [];
+/** Highlighting only a block that names its language. */
+const rehypePlugins: Options["rehypePlugins"] = [
+  [rehypeHighlight, { detect: false }],
+];
+const remarkPlugins: Options["remarkPlugins"] = [remarkGfm];
 
 /** An answer's Markdown; its links to the notes `cited` names open them. */
 export const AnswerMarkdown = ({
@@ -281,15 +322,17 @@ export const AnswerMarkdown = ({
   text: string;
   cited?: readonly string[];
 }) => (
-  <div className="flex min-w-0 flex-col gap-3">
-    <Markdown
-      components={answerComponents(cited)}
-      rehypePlugins={[[rehypeHighlight, { detect: false }]]}
-      remarkPlugins={[remarkGfm]}
-      skipHtml
-      urlTransform={plainUrl}
-    >
-      {text}
-    </Markdown>
-  </div>
+  <CitedNotes value={cited}>
+    <div className="flex min-w-0 flex-col gap-3">
+      <Markdown
+        components={answerComponents}
+        rehypePlugins={rehypePlugins}
+        remarkPlugins={remarkPlugins}
+        skipHtml
+        urlTransform={plainUrl}
+      >
+        {text}
+      </Markdown>
+    </div>
+  </CitedNotes>
 );
