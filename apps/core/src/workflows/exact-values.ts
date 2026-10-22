@@ -1,6 +1,9 @@
+import type { ValueSchema } from "@grasp-os/sdk";
 import { schemaFromDescriptor } from "@grasp-os/sdk/host";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { z } from "zod";
+
+import { envelopedSchema, readEnvelope } from "./connector-schemas.ts";
 
 // What a JSON workflow run's schemas and contracts check: a value as it
 // is. A task's schema (resource-host.ts) and a call's contract
@@ -30,7 +33,8 @@ export const schemaOfDescriptor = (
 };
 
 /**
- * Whether the schema of `descriptor` (its JSON text) takes `value`
+ * Whether the schema of `descriptor` (its JSON text, or a connector
+ * operation's JSON Schema envelope) takes `value`
  * exactly as it is: plain JSON its validator accepts, answering the same
  * value back, canonically. The validator gets a copy, and its answer is
  * compared with the text taken before it ran.
@@ -41,9 +45,20 @@ export const takesExactly = (descriptor: string, value: unknown): boolean => {
     return false;
   }
   const snapshot = canonicalJson(parsed.data);
-  const validated = schemaOfDescriptor(descriptor)["~standard"].validate(
-    JSON.parse(snapshot)
-  );
+  // A connector's own JSON Schema (connector-schemas.ts): its descriptor
+  // takes the value exactly, and the schema's full check, its patterns and
+  // formats, takes it too.
+  let schema: ValueSchema<unknown, unknown>;
+  if (envelopedSchema(descriptor) === undefined) {
+    schema = schemaOfDescriptor(descriptor);
+  } else {
+    const read = readEnvelope(descriptor);
+    if (read === undefined || !read.accepts(parsed.data)) {
+      return false;
+    }
+    ({ schema } = read);
+  }
+  const validated = schema["~standard"].validate(JSON.parse(snapshot));
   if ("then" in validated || validated.issues !== undefined) {
     return false;
   }

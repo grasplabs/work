@@ -1335,6 +1335,18 @@ export interface ConnectApi extends PackageRegistryApi {
     request: ConnectorContractRequest
   ) => Promise<ConnectorContract>;
   /**
+   * The native connector action of this release whose tool is
+   * `request.tool` and whose generated input and output JSON Schemas are
+   * exactly `request`'s, canonically compared: what lets a host catalog
+   * contract describe an operation by JSON Schema, every pattern in it
+   * then one a connector reviewed in this repository makes (GRA-982).
+   * Read from the release's manifests alone. `connect.contract_not_found`
+   * when no native action is exactly that; never a Composio tool's.
+   */
+  nativeOperation: (
+    request: NativeOperationRequest
+  ) => Promise<NativeOperation>;
+  /**
    * The held actions waiting for `person`, newest first (at most 200):
    * none for Grasp staff.
    */
@@ -1548,6 +1560,29 @@ export interface ConnectorContractAction {
    */
   input: string;
   output: string;
+}
+
+/**
+ * An operation a host catalog contract would describe by JSON Schema
+ * (GRA-982): its tool and the exact JSON Schemas of its input and output,
+ * as JSON text, for connect to confirm a native connector of this release
+ * generates them. 256 KiB each, as a catalog contract's schemas.
+ */
+export const nativeOperationRequestSchema = z.strictObject({
+  tool: z.string().min(1).max(256),
+  input: z.string().max(256 * 1024),
+  output: z.string().max(256 * 1024),
+});
+export type NativeOperationRequest = z.input<
+  typeof nativeOperationRequestSchema
+>;
+
+/** A native connector's action an operation's schemas are exactly. */
+export interface NativeOperation {
+  /** The generated contract that serves it, e.g. `microsoft-365.mail@1`. */
+  contract: string;
+  /** Whether it only reads, as the connector declares. */
+  readOnly: boolean;
 }
 
 /** A generated contract, as connect serves it now. */

@@ -59,6 +59,11 @@ for (const { manifest } of connectors.values()) {
 export const nativeConnector = (name: string): NativeConnector | undefined =>
   connectors.get(name);
 
+/** Every connector of this release. */
+export const nativeConnectors = (): readonly NativeConnector[] => [
+  ...connectors.values(),
+];
+
 /** The record of the app `provider`, if this release has its connector. */
 export const appRecord = (provider: string): AppRecord | undefined =>
   apps.get(provider);
