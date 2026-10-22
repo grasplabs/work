@@ -1973,6 +1973,12 @@ export const workflowDecisions = sqliteTable(
     decidedAt: timestamp("decided_at"),
     payload: text({ mode: "json" }).$type<Json>(),
     input: text({ mode: "json" }).$type<Json>(),
+    /**
+     * What an answer's payload must be, as the descriptor text of an
+     * independent run's decision contract's response schema: an answer
+     * it doesn't take is refused, never recorded. None takes any payload.
+     */
+    response: text(),
   },
   (table) => [
     check(

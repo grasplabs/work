@@ -46,6 +46,7 @@ import {
   workflowRuns,
 } from "../db/core/schema.ts";
 import { inList } from "../db/d1.ts";
+import { takesExactly } from "../workflows/exact-values.ts";
 import { removedText } from "../workflows/retention.ts";
 import { tellScreens } from "../workflows/run-changes.ts";
 import { oweWake, sendWake } from "../workflows/wakes.ts";
@@ -310,6 +311,11 @@ export const openDecision = async (
     starterExcluded: boolean;
     /** What it is about, shown with it: an independent run's only. */
     input?: Json;
+    /**
+     * The descriptor text of what an answer's payload must be (an
+     * independent run's contract's response schema): none takes any.
+     */
+    response?: string;
   }
 ): Promise<{ decision: string; deadline: number }> => {
   const db = drizzle(env.DB);
@@ -329,6 +335,7 @@ export const openDecision = async (
     decidedAt: null,
     payload: null,
     input: request.input ?? null,
+    response: request.response ?? null,
   };
   // Opened only for a run that goes on, as the batch finds it: a decision
   // of a run cancelled meanwhile is taken out again in the same batch, and
@@ -948,10 +955,16 @@ const auditRefusal = async (
 };
 
 /**
- * `answer` as an answer to a decision, normalized as it is recorded
- * (`normalizedAnswer`); `decision.invalid` for anything else.
+ * `answer` as an answer to decision `row`, normalized as it is recorded
+ * (`normalizedAnswer`); `decision.invalid` for anything else, and for a
+ * payload (none being `null`) the decision's response schema doesn't take
+ * exactly (an independent run's, from its contract): an answer its run
+ * couldn't take is never recorded, so it never closes the decision.
  */
-const answerOf = (answer: unknown): DecisionAnswerInput => {
+const answerOf = (
+  answer: unknown,
+  row: Pick<DecisionRow, "response">
+): DecisionAnswerInput => {
   const parsed: DecisionAnswerInput = decisionErrors.parse(
     "decision.invalid",
     answerSchema,
@@ -965,6 +978,14 @@ const answerOf = (answer: unknown): DecisionAnswerInput => {
   ) {
     throw decisionErrors.create("decision.invalid", {
       issues: [`payload: at most ${maxPayloadBytes} bytes of JSON`],
+    });
+  }
+  if (
+    row.response !== null &&
+    !takesExactly(row.response, normalized.payload ?? null)
+  ) {
+    throw decisionErrors.create("decision.invalid", {
+      issues: ["payload: Not what this decision takes as an answer."],
     });
   }
   return normalized;
@@ -1015,7 +1036,7 @@ export const reviewDecision = async (
   answer: unknown
 ): Promise<DecisionReview> => {
   const found = await allowedDecision(env, by, decision);
-  const response = answerOf(answer);
+  const response = answerOf(answer, found.decision);
   if (await recordedFor(found, by, response)) {
     return { state: "recorded", decision: await toView(env, found) };
   }
@@ -1052,7 +1073,7 @@ export const confirmDecision = async (
   if (!(await mayAnswerNow(env, by, found.decision))) {
     throw await refuse("decision.forbidden");
   }
-  const response = answerOf(answer);
+  const response = answerOf(answer, found.decision);
   const now = new Date();
   if (!takesAnswers(found, now)) {
     throw await refuse("decision.closed");
@@ -1160,7 +1181,7 @@ export const answerDecision = async (
   if (!(await mayAnswerNow(env, by, found.decision))) {
     throw await refuse("decision.forbidden");
   }
-  const response = answerOf(answer);
+  const response = answerOf(answer, found.decision);
   const row = found.decision;
   // Why the answer isn't taken, as the decision stands now, read afresh:
   // another request may have answered it meanwhile. Exactly this answer

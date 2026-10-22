@@ -353,6 +353,11 @@ export const openRunDecision = async (
       // have made it, never answers it (R8).
       starterExcluded: true,
       input,
+      // An answer its call couldn't take is refused as it is given, never
+      // recorded only to fail the run (`takeDecision` checks it again).
+      ...(contract.response === undefined
+        ? {}
+        : { response: contract.response }),
     });
   });
 };

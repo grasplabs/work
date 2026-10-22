@@ -188,6 +188,8 @@ interface Setup {
    */
   deciders?: (reviewer: Identity) => Promise<string[]>;
   tasks?: unknown[];
+  /** What its contract takes as an answer's payload. */
+  answers?: { descriptor: unknown };
 }
 
 /**
@@ -198,6 +200,7 @@ const approvalWorkflow = async ({
   deciders = async (reviewer) =>
     await Promise.resolve([`person:${reviewer.userId}`]),
   tasks = approvalTasks,
+  answers = response,
 }: Setup = {}) => {
   const admin = await person("admin");
   const owner = await person("builder");
@@ -207,7 +210,7 @@ const approvalWorkflow = async ({
     key: contract,
     kind: "decision",
     input: JSON.stringify(v.object({ amount: v.number() }).descriptor),
-    response: JSON.stringify(response.descriptor),
+    response: JSON.stringify(answers.descriptor),
   });
   const workflow = await createWorkflowResource(
     env,
@@ -477,6 +480,32 @@ describe("who answers a JSON workflow's decision", () => {
       },
       waitingAfterForgedWake: null,
       end: { status: "completed", output: { status: "rejected" } },
+    });
+  });
+
+  it("refuses an answer its contract doesn't take, leaving the decision open for one it does", async () => {
+    const { owner, reviewer, workflow } = await approvalWorkflow({
+      answers: v.object({ comment: v.string() }),
+    });
+    const runId = await started(owner, workflow.id, 5000);
+    const decision = await openedBy(runId);
+    const bare = await outcome(
+      confirmedAnswer(reviewer, decision, { approved: true })
+    );
+    const [stillOpen] = await decisionsOf(runId);
+    await confirmedAnswer(reviewer, decision, {
+      approved: true,
+      payload: { comment: "Matches the PO" },
+    });
+    const run = await ended(owner, workflow.id, runId);
+    expect({
+      bare,
+      status: stillOpen?.status,
+      end: endOf(run),
+    }).toStrictEqual({
+      bare: "decision.invalid",
+      status: "open",
+      end: { status: "completed", output: { status: "approved" } },
     });
   });
 
