@@ -9,7 +9,8 @@ import { keepAuditEvent } from "../audit-outbox.ts";
 import { admissionTopics } from "../db/core/schema.ts";
 import {
   personColumns,
-  personReferences,
+  personPronouns,
+  personRoles,
   platformTopics,
 } from "./admission-topics.ts";
 import type { TopicRecord } from "./admission-topics.ts";
@@ -64,8 +65,26 @@ const compiledTopics: readonly CompiledTopic[] = platformTopics.map(
   })
 );
 
-const personPattern = termsPattern(personReferences);
+const personPattern = termsPattern([...personPronouns, ...personRoles]);
 const personColumnPattern = termsPattern(personColumns);
+
+/**
+ * A role or honorific followed by a name: "Employee Jan Jansen", "Dhr.
+ * Jansen", "| Employee | Jan |". Read on text with its accents removed
+ * but its case kept, since a name is capitalized.
+ */
+const namedPattern = new RegExp(
+  String.raw`(?<![\p{L}\p{N}])(?:${personRoles
+    .map((term) => {
+      const stem = term.endsWith("*");
+      const body = (stem ? term.slice(0, -1) : term)
+        .replaceAll(/\p{L}/gu, (letter) => `[${letter}${letter.toUpperCase()}]`)
+        .replaceAll(" ", String.raw`\s+`);
+      return stem ? String.raw`${body}\p{L}*` : body;
+    })
+    .join("|")})[\s.:|*_]{1,6}\p{Lu}\p{Ll}`,
+  "u"
+);
 
 // Every pattern here runs on text anyone may save, so none may backtrack
 // over it: each repetition starts only where its match can (a word's
@@ -77,6 +96,13 @@ const possessive = /(?<!\p{L})\p{Lu}\p{L}+['’]s(?![\p{L}\p{N}])/u;
 
 /** An email address, which names a person. */
 const emailAddress = /(?<![^\s@])[^\s@]+@[^\s@]+\.[^\s@]+/u;
+
+/**
+ * An email address as one is written to name someone, "jan@example.com":
+ * not a package's version ("pnpm@10.18.0") or a handle in a link.
+ */
+const namedEmail =
+  /(?<![\p{L}\p{N}._%+@-])[\p{L}\p{N}._%+-]+@[\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)*\.\p{L}{2,}(?![\p{L}\p{N}-])/u;
 
 /** An amount of money: a currency next to a number. */
 const amount =
@@ -134,17 +160,18 @@ interface Unit {
   text: string;
   /** Its table's first row, which names its columns. */
   header?: string;
-  /** What its section and the preamble say. */
+  /** What the headings above it say, and whether its section names someone. */
   context?: Signals;
 }
 
 /**
- * What a text says, worked out once: whether it refers to a person, and
- * which topics' words it has. Carrying these instead of the text keeps a
- * long section over many blocks cheap.
+ * What a text says, worked out once: whether it refers to a person, names
+ * one, and which topics' words it has. Carrying these instead of the text
+ * keeps a long section over many blocks cheap.
  */
 interface Signals {
   person: boolean;
+  named: boolean;
   topics: ReadonlySet<number>;
 }
 
@@ -164,7 +191,10 @@ const signalsOf = (unit: Unit): Signals => {
       topics.add(index);
     }
   }
-  return { person: refersToPerson(unit, plain), topics };
+  const named =
+    namedEmail.test(unit.text) ||
+    namedPattern.test(unit.text.normalize("NFKD").replaceAll(accents, ""));
+  return { person: named || refersToPerson(unit, plain), named, topics };
 };
 
 const together = (
@@ -176,6 +206,7 @@ const together = (
   }
   return {
     person: first.person || second.person,
+    named: first.named || second.named,
     topics: new Set([...first.topics, ...second.topics]),
   };
 };
@@ -203,22 +234,8 @@ const leaves: ReadonlySet<string> = new Set([
   "tr_open",
 ]);
 
-/**
- * The text's units: each leaf block of its CommonMark structure (a
- * paragraph, heading, table row or code block), judged with what its
- * section says. A section is a heading and every block up to the next
- * heading of its level or higher, its subsections included; the blocks
- * before the first heading are the preamble, which is context for the
- * whole text. A person and a topic anywhere in one section, or in it and
- * the preamble, hold: "Employee Jan Jansen" over "## Notes", "## Status"
- * and "On sick leave" is about Jan. An amount stays certain only in its
- * own block. Each block's signals are read once and joined per outermost
- * section, which holds those of the sections in it, so this is linear.
- * Returns undefined for text nested deeper than the parser reads.
- */
-const unitsOf = (text: string): Unit[] | undefined => {
-  const tokens: Token[] = [];
-  markdown.block.parse(text, markdown, {}, tokens);
+/** Reads `text` from line `first` up to line `end`. */
+const linesOf = (text: string) => {
   // Each line's start, and the end of the text.
   const starts = [0];
   for (
@@ -229,12 +246,34 @@ const unitsOf = (text: string): Unit[] | undefined => {
     starts.push(at + 1);
   }
   starts.push(text.length + 1);
-  const source = (first: number, end: number): string =>
+  return (first: number, end: number): string =>
     text.slice(starts[first], (starts[end] ?? 0) - 1);
+};
+
+/**
+ * The text's units: each leaf block of its CommonMark structure (a
+ * paragraph, heading, table row or code block). A pronoun or a topic's
+ * word counts in its own block and for the blocks under its heading: "#
+ * Employee Jan" over "## Status" over "On sick leave" is about Jan. A
+ * person named by role or honorific, or by an email address, counts for
+ * the whole section: a top-level heading and every block up to the next
+ * heading of its level or higher, its subsections included. The blocks
+ * before the first heading are the preamble, a section for the whole
+ * text: "Employee Jan Jansen" over "## Notes", "## Status" and "On sick
+ * leave" is about Jan. A heading in a list or quote is a block inside its
+ * section. Each block's signals are read once, so this is linear. Returns
+ * undefined for text nested deeper than the parser reads.
+ */
+const unitsOf = (text: string): Unit[] | undefined => {
+  const tokens: Token[] = [];
+  markdown.block.parse(text, markdown, {}, tokens);
+  const source = linesOf(text);
   const units: Unit[] = [];
-  // Each unit's outermost section, 0 for the preamble, and their signals.
+  // Each unit's section, 0 for the preamble, and whether each names someone.
   const sectionOf: number[] = [];
-  const sections: (Signals | undefined)[] = [undefined];
+  const named = [false];
+  // Each depth's heading, with the signals of those above it.
+  const headings: (Signals | undefined)[] = [];
   let depth = 0;
   let header: string | undefined = undefined;
   for (const token of tokens) {
@@ -255,25 +294,37 @@ const unitsOf = (text: string): Unit[] | undefined => {
       text: source(first, end),
       header: token.type === "tr_open" ? header : undefined,
     };
-    // A heading in a list or quote is a block inside the section.
-    if (token.type === "heading_open" && token.level === 0) {
-      const level = Number(token.tag.slice(1));
+    const signals = signalsOf(unit);
+    const level =
+      token.type === "heading_open" && token.level === 0
+        ? Number(token.tag.slice(1))
+        : 0;
+    if (level > 0) {
       if (depth === 0 || level <= depth) {
         depth = level;
-        sections.push(undefined);
+        named.push(false);
       }
+      headings.length = level - 1;
     }
-    const section = sections.length - 1;
-    sections[section] = together(sections[section], signalsOf(unit));
+    const above = headings.findLast((heading) => heading !== undefined);
+    unit.context = above;
+    if (level > 0) {
+      headings[level - 1] = together(above, signals);
+    }
+    const section = named.length - 1;
+    named[section] ||= signals.named;
     sectionOf.push(section);
     units.push(unit);
   }
   for (const [index, unit] of units.entries()) {
     const section = sectionOf[index] ?? 0;
-    unit.context = together(
-      sections[0],
-      section > 0 ? sections[section] : undefined
-    );
+    if (named[0] === true || named[section] === true) {
+      unit.context = {
+        person: true,
+        named: true,
+        topics: unit.context?.topics ?? new Set(),
+      };
+    }
   }
   return units;
 };

@@ -15,9 +15,11 @@
 // - `strong`: phrases that only ever describe one person's sensitive data
 //   ("diagnosed with"): the text is excluded wherever they appear.
 // - `weak`: sensitive words that also appear in policy text ("salary",
-//   "sick leave"): held when the same sentence, or table, also refers to a
-//   person (`personReferences`); admitted otherwise, so a salary-band
-//   policy or "we don't discriminate on religion" can still be saved.
+//   "sick leave"): held when the same block, or a heading above it, also
+//   refers to a person (`personPronouns`, `personRoles`), or a person is
+//   named in its section (admission.ts); admitted otherwise, so a
+//   salary-band policy or "we don't discriminate on religion" can still
+//   be saved.
 // - `amounts`: for pay only: a pay word, an amount and a person together
 //   are excluded.
 // A trailing `*` matches any ending ("salar*": "salary", "salaries");
@@ -84,12 +86,11 @@ const platform = (
 });
 
 /**
- * Words that refer to a person: pronouns, roles and honorifics. A weak
- * word in the same sentence as one of these is about someone. Short,
- * common ones ("il", "su", "ze") make some policy sentences held: when
- * unsure, hold.
+ * Pronouns, which refer to a person. A weak word in the same block as one
+ * of these is about someone. Short, common ones ("il", "su", "ze") make
+ * some policy sentences held: when unsure, hold.
  */
-export const personReferences: readonly string[] = [
+export const personPronouns: readonly string[] = [
   // English ("me" is also Dutch, as in "bel me", so it isn't here)
   "i",
   "my",
@@ -103,22 +104,6 @@ export const personReferences: readonly string[] = [
   "they",
   "them",
   "their",
-  "employee*",
-  "colleague*",
-  "coworker*",
-  "co worker*",
-  "candidate*",
-  "applicant*",
-  "patient*",
-  "staff member*",
-  "team member*",
-  "intern",
-  "interns",
-  "contractor*",
-  "mr",
-  "mrs",
-  "ms",
-  "dr",
   // Dutch ("zijn" is also "to be", so it isn't here)
   "ik",
   "mij",
@@ -130,17 +115,6 @@ export const personReferences: readonly string[] = [
   "haar",
   "hen",
   "hun",
-  "medewerker*",
-  "werknemer*",
-  "collega*",
-  "kandidaat",
-  "kandidaten",
-  "sollicitant*",
-  "stagiair*",
-  "dhr",
-  "mevr",
-  "meneer",
-  "mevrouw",
   // German
   "ich",
   "mich",
@@ -154,17 +128,6 @@ export const personReferences: readonly string[] = [
   "sie",
   "ihr",
   "ihre*",
-  "mitarbeiter*",
-  "kollege*",
-  "kollegin*",
-  "bewerber*",
-  "kandidat",
-  "kandidatin*",
-  "angestellte*",
-  "praktikant*",
-  "herr",
-  "herrn",
-  "frau",
   // French ("je" alone is also Dutch "you", the voice handbooks are
   // written in, so only phrases Dutch can't have)
   "je suis",
@@ -185,17 +148,6 @@ export const personReferences: readonly string[] = [
   "ses",
   "leur",
   "leurs",
-  "employe*",
-  // "salariés" would read as English "salaries", a pay word.
-  "salarie",
-  "salariee*",
-  "collegue*",
-  "candidat",
-  "candidats",
-  "stagiaire*",
-  "mme",
-  "monsieur",
-  "madame",
   // Spanish ("el" is also "the", so "él" isn't here)
   "yo",
   "mi",
@@ -205,6 +157,66 @@ export const personReferences: readonly string[] = [
   "ellos",
   "su",
   "sus",
+];
+
+/**
+ * Roles and honorifics, which refer to a person too. Followed by a name
+ * ("Employee Jan Jansen", "Dhr. Jansen"), one names someone.
+ */
+export const personRoles: readonly string[] = [
+  // English
+  "employee*",
+  "colleague*",
+  "coworker*",
+  "co worker*",
+  "candidate*",
+  "applicant*",
+  "patient*",
+  "staff member*",
+  "team member*",
+  "intern",
+  "interns",
+  "contractor*",
+  "mr",
+  "mrs",
+  "ms",
+  "dr",
+  // Dutch
+  "medewerker*",
+  "werknemer*",
+  "collega*",
+  "kandidaat",
+  "kandidaten",
+  "sollicitant*",
+  "stagiair*",
+  "dhr",
+  "mevr",
+  "meneer",
+  "mevrouw",
+  // German
+  "mitarbeiter*",
+  "kollege*",
+  "kollegin*",
+  "bewerber*",
+  "kandidat",
+  "kandidatin*",
+  "angestellte*",
+  "praktikant*",
+  "herr",
+  "herrn",
+  "frau",
+  // French ("salariés" would read as English "salaries", a pay word)
+  "employe*",
+  "salarie",
+  "salariee*",
+  "collegue*",
+  "candidat",
+  "candidats",
+  "stagiaire*",
+  "mme",
+  "monsieur",
+  "madame",
+  // Spanish
   "empleado*",
   "empleada*",
   "companero*",

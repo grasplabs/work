@@ -216,6 +216,9 @@ describe("Knowledge admission", { timeout: 60_000 }, () => {
       // A table's rows, under its header.
       tableRows:
         "| Name | Note |\n| --- | --- |\n| Jan | Sales |\n| Piet | On sick leave |",
+      // A person named by role or email anywhere in a section.
+      namedInSection:
+        "## Status\n\nOn sick leave since May.\n\nColleague Piet is covering.",
       // A preamble that names a person, for the whole text.
       preamble:
         "Author: jan@example.com\n\n# Leave policy\n\n## Sick leave\n\nReport sick before nine.",
@@ -302,6 +305,7 @@ describe("Knowledge admission", { timeout: 60_000 }, () => {
       sectionUnderQuote: "held",
       sectionUnderTable: "held",
       tableRows: "held",
+      namedInSection: "held",
       preamble: "held",
       preambleList: "held",
       headingInQuote: "held",
@@ -354,6 +358,11 @@ describe("Knowledge admission", { timeout: 60_000 }, () => {
       "*a**".repeat(size / 4),
       "*_".repeat(size / 2),
       `${"[".repeat(size / 2)}${"]".repeat(size / 2)}`,
+      // Roles, separators and email-like runs the name patterns read.
+      "Employee ".repeat(size / 9),
+      "employee :::::: ".repeat(size / 16),
+      `a@b${".c".repeat(size / 2)}`,
+      `${"a.".repeat(size / 2)}@`,
       // Many sections under one list item.
       `- Employee Jan Jansen\n${"  ## Status\n  Ok.\n".repeat(size / 16)}`,
     ];
@@ -387,6 +396,11 @@ describe("Knowledge admission", { timeout: 60_000 }, () => {
       "# Leave policy\n## Sick leave\n### Reporting sick",
       // A topic heading beside a person's, not under it.
       "## Employee Jan Jansen\n## Sick leave policy",
+      // A pronoun, a possessive or a package's version names no one
+      // outside its own block.
+      "# Notes\n\nI wrote these down.\n\n## Sick leave policy\n\nReport sick before nine.",
+      "## Team\n\nJan's laptop is new.\n\nThe sick leave policy changed.",
+      "Install pnpm@10.18.0 first.\n\n## Sick leave policy\n\nReport sick before nine.",
       // Sibling sections, with no preamble.
       "## Employee Jan Jansen\n\nWorks in sales.\n\n## Sick leave policy\n\nReport sick before nine.",
       "Die Gehaltsbänder werden jährlich überprüft.",
