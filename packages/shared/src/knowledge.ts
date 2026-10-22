@@ -369,9 +369,28 @@ export interface DocumentSummary {
   /** When it should be reviewed (`YYYY-MM-DD`), if set. */
   reviewDate: string | null;
   currentVersion: number;
+  /**
+   * The version search holds: `currentVersion` once indexed, an older one
+   * (or `null`, for a new document) while indexing catches up.
+   */
+  indexedVersion: number | null;
+  /**
+   * Where indexing the current version stands. A save is done when it
+   * returns; search has it only once this is `indexed`.
+   */
+  indexing: DocumentIndexing;
   /** ISO 8601. */
   updatedAt: string;
 }
+
+/** Where indexing a document's current version stands. */
+export const documentIndexingStates = [
+  "queued",
+  "retrying",
+  "indexed",
+  "failed",
+] as const;
+export type DocumentIndexing = (typeof documentIndexingStates)[number];
 
 /** One version in a document's history, without its text. */
 export interface VersionSummary {
@@ -498,15 +517,35 @@ export interface SearchHit {
   description: string;
   /** The section's place in its document, from 0. */
   section: number;
+  /**
+   * The version the section is of: the document's indexed one, which can
+   * be older than its current one while indexing catches up.
+   */
+  version: number;
   /** The headings above and of the section, outermost first. */
   headings: string[];
   /** Plain text from the section, around what matched. */
   snippet: string;
 }
 
+/**
+ * What a search couldn't look at: readable documents in its scope whose
+ * current version isn't indexed yet (`pending`) or failed to be
+ * (`failed`), counted up to {@link searchCoverageCap}. Search finds them
+ * by the version it last indexed, if any.
+ */
+export interface SearchCoverage {
+  pending: number;
+  failed: number;
+}
+
+/** Most documents a search's coverage counts of each kind. */
+export const searchCoverageCap = 1000;
+
 /** A search's results, best first, and where they come from. */
 export interface SearchResults {
   hits: SearchHit[];
+  coverage: SearchCoverage;
   provenance: Provenance;
 }
 
@@ -529,6 +568,8 @@ export interface KnowledgeRead extends DocumentSummary {
   section: {
     /** Its place in its document, from 0. */
     position: number;
+    /** The version it is of, as a search hit's (`SearchHit.version`). */
+    version: number;
     /** The headings above and of the section, outermost first. */
     headings: string[];
   } | null;
