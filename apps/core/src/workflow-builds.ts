@@ -177,7 +177,7 @@ const taskBase = {
   id: z.string().min(1).max(64),
   pointer: z.string().max(maxSealedPointerLength),
   /** Its durable steps besides a wait's sleep (generate.ts, `TaskStep`). */
-  steps: z.array(z.enum(["task", "enter", "leave", "item"])).max(4),
+  steps: z.array(z.enum(["task", "enter", "leave", "item", "catch"])).max(4),
   /**
    * The `for` tasks around it, outermost first: each of its steps runs in
    * an item of each (generate.ts, `GeneratedTask.scope`).
@@ -276,8 +276,42 @@ const sealedCallSchema = z.discriminatedUnion("name", [
 
 export type SealedCall = z.infer<typeof sealedCallSchema>;
 
+/** A raise task's error, literal (generate.ts, `RaisedError`). */
+const raisedErrorSchema = z.strictObject({
+  type: z.string().min(1).max(2048),
+  status: z.int().min(400).max(599),
+  title: z.string().max(2000).optional(),
+  detail: z.string().max(2000).optional(),
+});
+
+/** A try task's catch (generate.ts, `GeneratedCatch`). */
+const sealedCatchSchema = z.strictObject({
+  variable: z.string().min(1).max(64),
+  errors: z
+    .strictObject({
+      type: z.string().max(2048).optional(),
+      status: z.int().optional(),
+      title: z.string().max(2000).optional(),
+      detail: z.string().max(2000).optional(),
+      instance: z.string().max(maxSealedPointerLength).optional(),
+    })
+    .optional(),
+  when: z.int().min(0).optional(),
+  exceptWhen: z.int().min(0).optional(),
+});
+
 /** One task the generated module runs, as the host checks its steps. */
 const sealedTaskSchema = z.discriminatedUnion("kind", [
+  z.strictObject({
+    ...taskBase,
+    kind: z.literal("raise"),
+    error: raisedErrorSchema,
+  }),
+  z.strictObject({
+    ...taskBase,
+    kind: z.literal("try"),
+    catch: sealedCatchSchema,
+  }),
   z.strictObject({ ...taskBase, kind: z.literal("set") }),
   z.strictObject({ ...taskBase, kind: z.literal("switch") }),
   z.strictObject({ ...taskBase, kind: z.literal("do") }),
@@ -351,6 +385,16 @@ const sealedExpressionSchema = z.strictObject({
   source: z.string().max(8192),
   /** The variables of the loops around its task, outermost first. */
   loopVariables: z.array(z.string().min(1).max(64)).max(2 * maxTaskScopes),
+  /** The caught errors it may read, innermost last (generate.ts). */
+  caught: z
+    .array(
+      z.strictObject({
+        variable: z.string().min(1).max(64),
+        taskId: z.string().min(1).max(64),
+      })
+    )
+    .max(16)
+    .optional(),
 });
 
 const tasksFileSchema = z.strictObject({
@@ -521,6 +565,8 @@ export const compileWorkflow = async (
             milliseconds,
             duration,
             call,
+            error,
+            catch: handler,
             inputFrom,
             outputAs,
             exportAs,
@@ -548,6 +594,12 @@ export const compileWorkflow = async (
             ...(call === undefined
               ? {}
               : { call: z.json().parse(structuredClone(call)) }),
+            ...(error === undefined
+              ? {}
+              : { error: z.json().parse(structuredClone(error)) }),
+            ...(handler === undefined
+              ? {}
+              : { catch: z.json().parse(structuredClone(handler)) }),
             ...(inputFrom === undefined
               ? {}
               : { inputFrom: z.json().parse(structuredClone(inputFrom)) }),
@@ -560,10 +612,14 @@ export const compileWorkflow = async (
             ...(timeoutMs === undefined ? {} : { timeoutMs }),
           })
         ),
-        expressions: generated.expressions.map((expression) => ({
-          ...expression,
-          loopVariables: [...expression.loopVariables],
-        })),
+        expressions: generated.expressions.map((expression) =>
+          z.json().parse(
+            structuredClone({
+              ...expression,
+              loopVariables: [...expression.loopVariables],
+            })
+          )
+        ),
         workflow: { ...generated.workflow },
         params: [...generated.params],
         limits: { ...generated.limits },

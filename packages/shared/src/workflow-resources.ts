@@ -211,6 +211,10 @@ export const workflowResourceErrors = defineErrorFamily({
     "This test run went on longer than a test run may, so it failed. Shorten what it waits for to test it.",
   "workflow.candidate_wait_limit":
     "This test run would wait longer than a test run may, so it failed. Shorten the wait to test it.",
+  "workflow.failed_after_effect":
+    "The task's call took effect, then the task failed. What the call did stands.",
+  "workflow.raised":
+    "The workflow raised an error of its own, and nothing in it caught that error.",
 });
 
 /**

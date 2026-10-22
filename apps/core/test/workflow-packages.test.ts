@@ -519,6 +519,7 @@ const activationOf = async (
     runEnv = env,
     attempts = {},
     activationFuel,
+    parks = false,
   }: {
     runId: string;
     runKey: string;
@@ -529,6 +530,11 @@ const activationOf = async (
     attempts?: Record<string, number>;
     /** The activation's fuel, if not the host's own. */
     activationFuel?: number;
+    /**
+     * Whether a step whose attempt fails as it may be tried again is
+     * parked, as the engine parks it: its call never settles.
+     */
+    parks?: boolean;
   }
 ): Promise<ResourceRunHost> => {
   const manifest = await env.DB.prepare(
@@ -551,6 +557,16 @@ const activationOf = async (
           name: error instanceof Error ? error.name : "unknown",
           code: code ?? null,
         });
+        if (
+          parks &&
+          error instanceof Error &&
+          error.name !== "NonRetryableError"
+        ) {
+          // oxlint-disable-next-line promise/avoid-new -- a parked step's call never settles
+          return await new Promise<never>(() => {
+            // Never settles.
+          });
+        }
         throw error;
       }
     },
@@ -1561,12 +1577,18 @@ describe("a workflow's modules importing approved packages", () => {
       failed,
       runEnv: { ...env, DB: policyUnreadable() },
       activationFuel: 2 ** 27,
+      parks: true,
     });
-    await host.do("task:doubled", adaData, async () => {
+    // Its check can't answer: tried again, the engine parks the step.
+    void host.do("task:doubled", adaData, async () => {
       ran.push("action");
       return await Promise.resolve({ ok: true, value: { output: null } });
     });
-    // The next step of the same activation: funded only if it came back.
+    await vi.waitFor(() => {
+      expect(failed).toHaveLength(1);
+    });
+    // The next step of the same activation (one of a branch still out):
+    // funded only if its share came back.
     await host.do("task:answer", adaData, async () => {
       ran.push("answer");
       return await Promise.resolve({ ok: true, value: { output: null } });
