@@ -11,17 +11,21 @@ describe("the build cache's lease", { timeout: 30_000 }, () => {
   it("keeps nothing of a holder that lost its lease over the build that took it over", async () => {
     const key = `screen-builds/test/${crypto.randomUUID()}.json`;
     const late = Promise.withResolvers<boolean>();
+    const building = Promise.withResolvers<boolean>();
     // A lease shorter than this build: it runs out while it builds.
     const slow = throughCache(
       env,
       key,
       200,
       async () => {
+        building.resolve(true);
         await late.promise;
         return { text: '{"ok":true,"by":"slow"}', cache: true };
       },
       () => ({})
     );
+    // It holds the lease and builds; then its lease runs out.
+    await building.promise;
     await scheduler.wait(400);
     // Its lease ran out: this one takes it over, and keeps its build.
     const fast = await throughCache(
