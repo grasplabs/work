@@ -565,31 +565,45 @@ const appBinding = async (
     .run();
 };
 
+/** A permission row's subject and object types, as permissions.ts names them. */
+type SubjectType = "app" | "workflow" | "store";
+type ObjectType = "store" | "connection" | "workflow";
+
+/** The statement inserting a permission row, as an admin's grant writes it. */
+const grantStatement = (
+  subjectType: SubjectType,
+  subject: string,
+  objectType: ObjectType,
+  object: string,
+  actions: string[]
+) =>
+  env.DB.prepare(
+    `INSERT INTO permissions (id, subject_type, subject_id, object_type, object_id,
+      actions, binding, status, requested_by, requested_at, granted_by, granted_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'active', 'test', 0, 'test', 0)`
+  ).bind(
+    crypto.randomUUID(),
+    subjectType,
+    subject,
+    objectType,
+    object,
+    JSON.stringify(actions),
+    `GRANT_${unique().toUpperCase().replaceAll("-", "_")}`
+  );
+
 /**
  * A permission row as an admin's grant writes it, for a subject the
  * request path would refuse here only for lack of the other resources it
  * checks (a workflow's builders, a store's owner).
  */
 const grantRow = async (
-  subjectType: "app" | "workflow",
+  subjectType: SubjectType,
   subject: string,
-  objectType: "store" | "connection",
-  object: string
+  objectType: ObjectType,
+  object: string,
+  actions = ["notes.list"]
 ): Promise<void> => {
-  await env.DB.prepare(
-    `INSERT INTO permissions (id, subject_type, subject_id, object_type, object_id,
-      actions, binding, status, requested_by, requested_at, granted_by, granted_at)
-     VALUES (?, ?, ?, ?, ?, '["notes.list"]', ?, 'active', 'test', 0, 'test', 0)`
-  )
-    .bind(
-      crypto.randomUUID(),
-      subjectType,
-      subject,
-      objectType,
-      object,
-      `GRANT_${unique().toUpperCase().replaceAll("-", "_")}`
-    )
-    .run();
+  await grantStatement(subjectType, subject, objectType, object, actions).run();
 };
 
 /**
@@ -975,5 +989,182 @@ describe("sharing an App granted a business store", () => {
       // Shared with them, but their role in the organization doesn't build.
       { sources: [`store:${store}`], people: [plain.userId] },
     ]);
+  });
+});
+
+describe("sharing an App granted an independent workflow", () => {
+  it("is refused when the workflow it starts or follows read a mailbox, and lets the mailbox's owner, the admin and the owner through", async () => {
+    const [owner, anna, ben, admin] = await Promise.all([
+      personApi("builder"),
+      personApi("builder"),
+      personApi("builder"),
+      personApi("admin"),
+    ]);
+    const team = await newTeam(admin, [anna, ben]);
+    const [starter, follower] = await Promise.all([
+      newApp(owner),
+      newApp(owner),
+    ]);
+    // Shared with the team before it reaches anything, as in the order
+    // that can't be refused up front.
+    await owner.api.apps.members.add(starter, {
+      type: "team",
+      id: team,
+      role: "user",
+    });
+    const mailbox = await mailboxOf(anna);
+    const workflow = `workflow_${unique().replaceAll("-", "")}`;
+    await grantRow("workflow", workflow, "connection", mailbox);
+    await grantRow("app", starter, "workflow", workflow, ["start"]);
+    await grantRow("app", follower, "workflow", workflow, ["read"]);
+
+    await expect(
+      Promise.all([
+        shareRefusal(owner, starter, { type: "person", id: ben.userId }),
+        shareRefusal(owner, follower, { type: "person", id: ben.userId }),
+        shareRefusal(owner, starter, { type: "person", id: anna.userId }),
+      ])
+    ).resolves.toStrictEqual([
+      { sources: [`connection:${mailbox}`], people: [ben.userId] },
+      { sources: [`connection:${mailbox}`], people: [ben.userId] },
+      "ok",
+    ]);
+    await expect(
+      Promise.all(
+        [anna, ben, admin, owner].map(
+          async (person) => await outcome(person.api.apps.get(starter))
+        )
+      )
+    ).resolves.toStrictEqual(["ok", "app.unreadable", "ok", "ok"]);
+  });
+
+  it("carries what an App sends the workflow it starts on to the App whose store the workflow writes", async () => {
+    const [owner, anna] = await Promise.all([
+      personApi("builder"),
+      personApi("builder"),
+    ]);
+    const [sender, storeOwner] = await Promise.all([
+      newApp(owner),
+      newApp(owner),
+    ]);
+    const mailbox = await mailboxOf(owner);
+    await grantConnection(owner, sender, mailbox);
+    const workflow = `workflow_${unique().replaceAll("-", "")}`;
+    await grantRow("app", sender, "workflow", workflow, ["start"]);
+    await storeGrant(workflow, storeOwner, "workflow");
+
+    await expect(
+      shareRefusal(owner, storeOwner, { type: "person", id: anna.userId })
+    ).resolves.toStrictEqual({
+      sources: [`connection:${mailbox}`],
+      people: [anna.userId],
+    });
+  });
+});
+
+describe("sharing an App whose store reads on its own", () => {
+  it("counts a store's own grants as its owner's, or a business store's as its holders'", async () => {
+    const [owner, anna] = await Promise.all([
+      personApi("builder"),
+      personApi("builder"),
+    ]);
+    const [storeOwner, holder] = await Promise.all([
+      newApp(owner),
+      newApp(owner),
+    ]);
+    const [mailbox, other] = await Promise.all([
+      mailboxOf(owner),
+      mailboxOf(owner),
+    ]);
+    const store = `store_${unique().replaceAll("-", "")}`;
+    await env.DB.prepare(
+      "INSERT INTO sdk_store_owners (store_id, app_id, claimed_at) VALUES (?, ?, 0)"
+    )
+      .bind(store, storeOwner)
+      .run();
+    await grantRow("store", store, "connection", mailbox);
+    // A business store Anna manages, which read a mailbox she can't.
+    const business = await businessStore(owner, [
+      { type: "person", id: anna.userId },
+    ]);
+    await grantRow("store", business, "connection", other);
+    await grantRow("app", holder, "store", business);
+    const anyone = { type: "person", id: anna.userId } as const;
+
+    await expect(
+      Promise.all([
+        shareRefusal(owner, storeOwner, anyone),
+        shareRefusal(owner, holder, anyone),
+      ])
+    ).resolves.toStrictEqual([
+      { sources: [`connection:${mailbox}`], people: [anna.userId] },
+      { sources: [`connection:${other}`], people: [anna.userId] },
+    ]);
+  });
+});
+
+/** Workflows enough that two Apps' together pass the walk's cap, one's alone don't. */
+const workflowsEach = 300;
+
+describe("deciding many Apps at once past the walk's cap", () => {
+  it("still shows each App that passes on its own, and hides the one that doesn't", async () => {
+    const [owner, anna] = await Promise.all([
+      personApi("builder"),
+      personApi("builder"),
+    ]);
+    const mail = await mailConnection();
+    const shared = await Promise.all(
+      Array.from({ length: 3 }, async () => await newApp(owner))
+    );
+    const mailbox = await mailboxOf(owner);
+    const grants: string[] = [];
+    for (const [index, app] of shared.entries()) {
+      // Shared before it reaches anything, as in the order that can't be
+      // refused up front.
+      // oxlint-disable-next-line no-await-in-loop -- one App at a time
+      await owner.api.apps.members.add(app, {
+        type: "person",
+        id: anna.userId,
+        role: "user",
+      });
+      // Each shared App calls an App of the owner's that follows many
+      // workflows of its own: wide, but nothing Anna can't read.
+      // oxlint-disable-next-line no-await-in-loop -- one App at a time
+      const wide = await newApp(owner);
+      // oxlint-disable-next-line no-await-in-loop -- one App at a time
+      await appBinding(app, wide);
+      const workflows = Array.from(
+        { length: workflowsEach },
+        () => `workflow_${unique().replaceAll("-", "")}`
+      );
+      // oxlint-disable-next-line no-await-in-loop -- one App at a time
+      await env.DB.batch(
+        workflows.map((workflow) =>
+          grantStatement("app", wide, "workflow", workflow, ["read"])
+        )
+      );
+      // But the last one's first workflow read the owner's mailbox.
+      if (index === shared.length - 1) {
+        // oxlint-disable-next-line no-await-in-loop -- one App at a time
+        await grantRow("workflow", workflows[0] ?? "", "connection", mailbox);
+      }
+      // oxlint-disable-next-line no-await-in-loop -- one App at a time
+      const grant = await storedGrant(
+        { type: "app", id: app },
+        { type: "connection", id: mail.id },
+        ["mail.list"],
+        "MAIL"
+      );
+      grants.push(grant);
+    }
+
+    const all = await anna.api.permissions.list();
+    const listed = all
+      .filter(
+        ({ subject }) =>
+          subject.type === "app" && shared.includes(subject.appId)
+      )
+      .map(({ id }) => id);
+    expect(new Set(listed)).toStrictEqual(new Set(grants.slice(0, -1)));
   });
 });
