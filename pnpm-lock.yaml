@@ -293,6 +293,9 @@ importers:
       '@grasp-os/shared':
         specifier: workspace:*
         version: link:packages/shared
+      '@grasp-os/workerflow':
+        specifier: workspace:*
+        version: link:packages/workerflow
       '@playwright/test':
         specifier: 'catalog:'
         version: 1.63.0
@@ -353,6 +356,9 @@ importers:
       '@grasp-os/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      '@grasp-os/workerflow':
+        specifier: workspace:*
+        version: link:../../packages/workerflow
       drizzle-orm:
         specifier: 'catalog:'
         version: 0.45.3(@cloudflare/workers-types@5.20261012.1)(kysely@0.29.6)
@@ -384,6 +390,9 @@ importers:
 
   apps/console:
     dependencies:
+      '@cfworker/json-schema':
+        specifier: 'catalog:'
+        version: 4.1.1
       '@fontsource-variable/geist':
         specifier: 'catalog:'
         version: 5.2.8
@@ -393,6 +402,9 @@ importers:
       '@grasp-os/ui':
         specifier: workspace:*
         version: link:../../packages/ui
+      '@modelcontextprotocol/sdk':
+        specifier: 'catalog:'
+        version: 1.30.0(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(zod@4.6.5)
       '@tanstack/react-router':
         specifier: 'catalog:'
         version: 1.170.38(react-dom@19.3.0(react@19.3.0))(react@19.3.0)

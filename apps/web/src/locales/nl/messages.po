@@ -133,6 +133,10 @@ msgstr "{alertAt} van een limiet"
 msgid "{alone} of {handled} items without a person"
 msgstr "{alone} van {handled} items zonder mens"
 
+#: src/dashboard/spend-widget.tsx
+msgid "{amount} in all"
+msgstr "{amount} in totaal"
+
 #: src/brain/brain-atlas.ts
 msgid "{answered} answered"
 msgstr "{answered} beantwoord"
@@ -417,6 +421,10 @@ msgstr "{done, plural, one {# vraag is beantwoord, door wie het wist.} other {# 
 #: src/brain/brain-atlas.ts
 msgid "{drawn} drawn in the builder"
 msgstr "{drawn} uitgetekend in de builder"
+
+#: src/dashboard/spend-widget.tsx
+msgid "{each} a run"
+msgstr "{each} per run"
 
 #: src/brain/brain-atlas.ts
 msgid "{employees, plural, one {# employee answered as well, by voice or chat.} other {# employees answered as well, by voice or chat.}}"
@@ -833,8 +841,8 @@ msgid "{people, plural, one {{sector}, # person.} other {{sector}, # people.}}"
 msgstr "{people, plural, one {{sector}, # persoon.} other {{sector}, # mensen.}}"
 
 #: src/routes/_shell.settings.members.tsx
-msgid "{people, plural, one {# person has access. Members join by signing in with your organization’s account; there are no invitations to send.} other {# people have access. Members join by signing in with your organization’s account; there are no invitations to send.}}"
-msgstr "{people, plural, one {# persoon heeft toegang. Leden komen erbij door in te loggen met het account van je organisatie; er zijn geen uitnodigingen te versturen.} other {# personen hebben toegang. Leden komen erbij door in te loggen met het account van je organisatie; er zijn geen uitnodigingen te versturen.}}"
+msgid "{people, plural, one {# person has access. People join by signing in with your organization’s account; invite them to give them a role from the start.} other {# people have access. People join by signing in with your organization’s account; invite them to give them a role from the start.}}"
+msgstr "{people, plural, one {# persoon heeft toegang. Mensen doen mee door in te loggen met het account van je organisatie; nodig ze uit om ze vanaf het begin een rol te geven.} other {# personen hebben toegang. Mensen doen mee door in te loggen met het account van je organisatie; nodig ze uit om ze vanaf het begin een rol te geven.}}"
 
 #: src/brain/brain.ts
 msgid "{people, plural, one {# person uses it, seen through {channels}. No team has named it yet.} other {# people use it, seen through {channels}. No team has named it yet.}}"
@@ -876,6 +884,10 @@ msgstr "{place} van {count}"
 #: src/routes/_shell.onboarding.open.tsx
 msgid "{points} of {weight}"
 msgstr "{points} van {weight}"
+
+#: src/tour/tour-layer.tsx
+msgid "{position} of {count}"
+msgstr "{position} van {count}"
 
 #: src/policies/policies-table.tsx
 msgid "{proposed, plural, one {# proposed} other {# proposed}}"
@@ -1745,6 +1757,15 @@ msgstr "AI is een hoofdfunctie van deze app. Het genereert, beslist of handelt o
 msgid "AI spend"
 msgstr "AI-uitgaven"
 
+#: src/dashboard/spend-widget.tsx
+msgid "AI spend in Settings"
+msgstr "AI-uitgaven in Instellingen"
+
+#: src/dashboard/widget-board.tsx
+msgctxt "dashboard widget"
+msgid "AI spend this month"
+msgstr "AI-uitgaven deze maand"
+
 #: src/policies/policy.ts
 msgid "AI tool"
 msgstr "AI-tool"
@@ -1851,8 +1872,8 @@ msgstr "Oké, dit is het plan."
 
 #. A time zone, by its city
 #: src/routes/_shell.settings.workspace.tsx
-msgid "Amsterdam (CET)"
-msgstr "Amsterdam (CET)"
+msgid "Amsterdam"
+msgstr "Amsterdam"
 
 #: src/connections/connection-list.tsx
 msgid "An admin"
@@ -1935,8 +1956,13 @@ msgid "Another version of this domain was made current since this list was read.
 msgstr "Sinds deze lijst is gelezen, is een andere versie van dit domein actueel gemaakt. De lijst toont die nu: beoordeel die versie en keur daarna opnieuw goed."
 
 #: src/brain/brain.ts
+#: src/chat/brain-questions.tsx
 msgid "Answer"
 msgstr "Antwoord"
+
+#: src/inbox/item-detail.tsx
+msgid "Answer in the brain"
+msgstr "Beantwoorden in het brein"
 
 #. Something that has not happened yet, on a timeline
 #: src/brain/brain.ts
@@ -2211,6 +2237,11 @@ msgstr "Zoals de lijst van het bedrijf ze hoort te hebben. Hun link blijft dezel
 msgid "As the kickoff suggests"
 msgstr "Zoals de kick-off voorstelt"
 
+#. placeholder {0}: gap.owner
+#: src/chat/brain-questions.tsx
+msgid "Ask {0}"
+msgstr "Vraag het aan {0}"
+
 #: src/chat/thread.tsx
 msgid "Ask again"
 msgstr "Opnieuw vragen"
@@ -2336,6 +2367,11 @@ msgstr "Bij {step}: {error}"
 msgid "At work"
 msgstr "Aan het werk"
 
+#. A time zone, by its city
+#: src/routes/_shell.settings.workspace.tsx
+msgid "Athens"
+msgstr "Athene"
+
 #: src/workflows/history-view.tsx
 msgid "Attempt {n}"
 msgstr "Poging {n}"
@@ -2382,6 +2418,7 @@ msgstr "Deze weken afwezig. Niets wacht op {first}."
 
 #: src/brain/atlas-overlays.tsx
 #: src/brain/back-button.tsx
+#: src/tour/tour-layer.tsx
 msgid "Back"
 msgstr "Terug"
 
@@ -2447,8 +2484,8 @@ msgstr "In opbouw"
 
 #. A time zone, by its city
 #: src/routes/_shell.settings.workspace.tsx
-msgid "Berlin (CET)"
-msgstr "Berlijn (CET)"
+msgid "Berlin"
+msgstr "Berlijn"
 
 #: src/routes/_shell.settings.tsx
 msgid "Billing"
@@ -2556,8 +2593,8 @@ msgstr "Browserextensie beschikbaar, niet in gebruik"
 
 #. A time zone, by its city
 #: src/routes/_shell.settings.workspace.tsx
-msgid "Brussels (CET)"
-msgstr "Brussel (CET)"
+msgid "Brussels"
+msgstr "Brussel"
 
 #: src/engines/resource-bindings.tsx
 msgid "Budget (optional)"
@@ -2659,12 +2696,14 @@ msgstr "Kwam naar voren in {source}"
 msgid "Can {verbs} company data"
 msgstr "Kan bedrijfsdata {verbs}"
 
+#: src/chat/brain-questions.tsx
 #: src/chat/project-dialog.tsx
 #: src/decision-confirmation.tsx
 #: src/engines/package-approvals.tsx
 #: src/inbox/item-detail.tsx
 #: src/knowledge/document.tsx
 #: src/onboarding/organization-dialogs.tsx
+#: src/settings/invitations.tsx
 msgid "Cancel"
 msgstr "Annuleren"
 
@@ -2757,10 +2796,6 @@ msgstr "Gegevens wijzigen"
 #: src/routes/_shell.settings.billing.tsx
 msgid "Change plan"
 msgstr "Abonnement wijzigen"
-
-#: src/routes/_shell.settings.members.tsx
-msgid "Change roles, sign people out and remove them"
-msgstr "Rollen wijzigen, mensen afmelden en verwijderen"
 
 #: src/onboarding/organization-dialogs.tsx
 msgid "Change this team"
@@ -3121,9 +3156,9 @@ msgstr "Compact"
 msgid "Company"
 msgstr "Bedrijf"
 
-#: src/routes/_shell.settings.workspace.tsx
-msgid "Company domain"
-msgstr "Bedrijfsdomein"
+#: src/activity/pending.tsx
+msgid "Company Brain, read only. This can read company Brain evidence and its open questions, from the collections it was granted and only what the person it works for may read too. It can never write to the Brain. Every read is recorded"
+msgstr "Company Brain, alleen lezen. Het kan bewijs en open vragen van het Company Brain lezen, uit de collecties die het kreeg en alleen wat de persoon voor wie het werkt ook mag lezen. Het kan nooit naar het Brain schrijven. Elke leesactie wordt vastgelegd"
 
 #: src/chat/builds.tsx
 msgid "Compared with version {current}, which runs now."
@@ -3363,6 +3398,11 @@ msgstr "Contracten, verwerkersovereenkomsten, juridische voorwaarden, inkoopclau
 #: src/brain/brain.ts
 msgid "Conversations"
 msgstr "Gesprekken"
+
+#. A time zone, by its city
+#: src/routes/_shell.settings.workspace.tsx
+msgid "Copenhagen"
+msgstr "Kopenhagen"
 
 #: src/chat/thread.tsx
 #: src/onboarding/setup-steps.tsx
@@ -3889,6 +3929,11 @@ msgctxt "inbox tab: what someone dealt with"
 msgid "Done"
 msgstr "Afgehandeld"
 
+#: src/tour/tour-layer.tsx
+msgctxt "tour"
+msgid "Done"
+msgstr "Klaar"
+
 #: src/routes/_shell.onboarding.organization.$team.tsx
 msgid "Done by {doers}"
 msgstr "Gedaan door {doers}"
@@ -3951,6 +3996,11 @@ msgstr "Een bewaarde build van goedgekeurde pakketten verwijderd"
 msgid "Dropped an event no workflow could take"
 msgstr "Een gebeurtenis laten vallen die geen workflow kon aannemen"
 
+#. A time zone, by its city
+#: src/routes/_shell.settings.workspace.tsx
+msgid "Dublin"
+msgstr "Dublin"
+
 #: src/chat/project-dialog.tsx
 msgid "Each document holds up to {maxKb} KB."
 msgstr "Elk document is maximaal {maxKb} KB."
@@ -4005,6 +4055,7 @@ msgstr "Project bewerken"
 #: src/routes/_shell.settings.notifications.tsx
 #: src/routes/_shell.settings.profile.tsx
 #: src/routes/_shell.settings.security.tsx
+#: src/settings/invitations.tsx
 msgid "Email"
 msgstr "E-mail"
 
@@ -4028,6 +4079,10 @@ msgstr "E-maildomeinen van medewerkers"
 #: src/brain/brain.ts
 msgid "Employee interviews"
 msgstr "Interviews met medewerkers"
+
+#: src/tour/tour-layer.tsx
+msgid "End the tour"
+msgstr "Rondleiding stoppen"
 
 #: src/workflows/resource-runs.tsx
 msgid "Ended"
@@ -4186,8 +4241,8 @@ msgid "Everything Grasp learned about {company}, each fact traceable to the conv
 msgstr "Alles wat Grasp over {company} heeft geleerd, elk feit terug te leiden tot het gesprek, document of de koppeling waar het vandaan komt."
 
 #: src/routes/_shell.settings.workspace.tsx
-msgid "Everything Grasp stores stays here."
-msgstr "Alles wat Grasp opslaat blijft hier."
+msgid "Everything Grasp stores for your organization stays here."
+msgstr "Alles wat Grasp voor je organisatie opslaat, blijft hier."
 
 #: src/landscape/insight.tsx
 msgid "Evidence"
@@ -4493,6 +4548,16 @@ msgstr "Volgt uit een andere gebeurtenis"
 msgid "Follows from: {parentTitle}"
 msgstr "Volgt uit: {parentTitle}"
 
+#. placeholder {0}: gap.owner
+#: src/chat/brain-questions.tsx
+msgid "For {0}"
+msgstr "Voor {0}"
+
+#. placeholder {0}: gap.owner
+#: src/chat/brain-questions.tsx
+msgid "For {0}, who was asked"
+msgstr "Voor {0}, die is gevraagd"
+
 #: src/inbox/item-detail.tsx
 msgid "For {person}"
 msgstr "Voor {person}"
@@ -4509,6 +4574,10 @@ msgstr "Voor elke {name}"
 msgid "For each {name}, while it holds"
 msgstr "Voor elke {name}, zolang het geldt"
 
+#: src/dashboard/spend-widget.tsx
+msgid "for every model call this month"
+msgstr "voor alle modelaanroepen deze maand"
+
 #: src/connections/connect-dialog.tsx
 msgid "For everyone"
 msgstr "Voor iedereen"
@@ -4520,6 +4589,10 @@ msgstr "Bijvoorbeeld: beantwoordt vragen van klanten"
 #: src/routes/_shell.onboarding.notes.tsx
 msgid "For Grasp's staff on this onboarding alone; the company doesn't see them."
 msgstr "Alleen voor Grasp-medewerkers bij deze onboarding; het bedrijf ziet ze niet."
+
+#: src/routes/_shell.settings.workspace.tsx
+msgid "For schedules and the times Grasp shows."
+msgstr "Voor schema’s en de tijden die Grasp toont."
 
 #: src/inbox/item-detail.tsx
 msgid "For the {role}"
@@ -4837,9 +4910,18 @@ msgstr "Gezondheidsinformatie van medewerkers of klanten die een nadere beoordel
 msgid "Held for review"
 msgstr "Vastgehouden voor beoordeling"
 
+#. A time zone, by its city
+#: src/routes/_shell.settings.workspace.tsx
+msgid "Helsinki"
+msgstr "Helsinki"
+
 #: src/onboarding/about-story.tsx
 msgid "Here’s the plan"
 msgstr "Dit is het plan"
+
+#: src/tour/tour-script.ts
+msgid "Hey, great to have you here. This can all be a little overwhelming, so I’ll bring you up to speed in just one minute. Are you ready?"
+msgstr "Hé, fijn dat je er bent. Dit kan allemaal wat veel lijken, dus ik praat je in één minuut bij. Ben je er klaar voor?"
 
 #: src/onboarding/setup-steps.tsx
 msgid "Hi {admin}, I’m Stephen"
@@ -4924,10 +5006,6 @@ msgstr "Hoeveel bekend moet zijn voordat het opengaat"
 msgid "How Stephen is set up here"
 msgstr "Hoe Stephen hier is ingesteld"
 
-#: src/routes/_shell.settings.workspace.tsx
-msgid "How the workspace is named across Grasp and in emails."
-msgstr "Hoe de werkruimte heet in Grasp en in e-mails."
-
 #: src/brain/brain.ts
 msgid "How they would notice: {notice}."
 msgstr "Hoe ze het zouden merken: {notice}."
@@ -4943,6 +5021,10 @@ msgstr "Hoe je in Grasp verschijnt: bij workflows waarvan je eigenaar bent, en i
 #: src/routes/_shell.settings.security.tsx
 msgid "How you get into Grasp. Passwords and two-step sign-in live with your organization’s account."
 msgstr "Hoe je in Grasp komt. Wachtwoorden en tweestapsverificatie lopen via het account van je organisatie."
+
+#: src/routes/_shell.settings.workspace.tsx
+msgid "How your organization is named in Grasp."
+msgstr "Hoe je organisatie in Grasp heet."
 
 #: src/connections/groups.ts
 msgctxt "kind of app"
@@ -4976,6 +5058,10 @@ msgstr "Ik heb het verstuurd"
 #: src/onboarding/setup-steps.tsx
 msgid "I talk to each team lead first, so they hear about me before their team does. Check who leads which team, and which teams take part."
 msgstr "Ik praat eerst met elke teamleider, zodat die over mij hoort voordat het team dat doet. Controleer wie welk team leidt, en welke teams meedoen."
+
+#: src/tour/tour-script.ts
+msgid "I’m ready"
+msgstr "Ik ben er klaar voor"
 
 #: src/onboarding/setup-steps.tsx
 msgid "I’ve handled everything else."
@@ -5095,13 +5181,33 @@ msgctxt "programme stage"
 msgid "Interviews"
 msgstr "Interviews"
 
+#: src/settings/invitations.tsx
+msgid "Invite"
+msgstr "Uitnodigen"
+
+#: src/routes/_shell.settings.members.tsx
+msgid "Invite people, change roles, sign them out and remove them"
+msgstr "Mensen uitnodigen, rollen wijzigen, ze afmelden en verwijderen"
+
+#: src/settings/invitations.tsx
+msgid "Invite someone"
+msgstr "Iemand uitnodigen"
+
 #: src/activity/audit-words.ts
 msgid "Invited a guest"
 msgstr "Een gast uitgenodigd"
 
+#: src/settings/invitations.tsx
+msgid "Invited as {role} by {inviter} on {date} · hasn’t signed in yet"
+msgstr "Uitgenodigd als {role} door {inviter} op {date} · nog niet ingelogd"
+
 #: src/brain/brain.ts
 msgid "Invited for step 2"
 msgstr "Uitgenodigd voor stap 2"
+
+#: src/activity/audit-words.ts
+msgid "Invited someone"
+msgstr "Heeft iemand uitgenodigd"
 
 #: src/routes/_shell.settings.billing.tsx
 msgid "Invoices"
@@ -5387,6 +5493,10 @@ msgstr "Het werk is in kaart gebracht; nog niets is herontworpen met AI."
 msgid "Job"
 msgstr "Functie"
 
+#: src/activity/audit-words.ts
+msgid "Joined through an invitation"
+msgstr "Is via een uitnodiging lid geworden"
+
 #: src/chat/thread.tsx
 msgid "Jump to the newest message"
 msgstr "Naar het nieuwste bericht"
@@ -5410,6 +5520,10 @@ msgstr "Behoud de regels die zeggen wat je beleid bedoelt, pas ze aan waar nodig
 #: src/dashboard/signals.tsx
 msgid "Keeps failing"
 msgstr "Mislukt steeds"
+
+#: src/activity/audit-words.ts
+msgid "Kept something the chat can no longer read from the model"
+msgstr "Iets wat de chat niet meer kan lezen, voor het model weggehouden"
 
 #: src/landscape/landscape.ts
 msgid "Keys, tokens, secrets, credentials or runbooks that could grant access."
@@ -5629,6 +5743,11 @@ msgstr "Links verstuurd: {count} van {of}"
 msgid "Links to"
 msgstr "Linkt naar"
 
+#. A time zone, by its city
+#: src/routes/_shell.settings.workspace.tsx
+msgid "Lisbon"
+msgstr "Lissabon"
+
 #: src/dashboard/standard-widgets.tsx
 msgctxt "how many of a goal's workflows are live, under the count"
 msgid "live"
@@ -5689,8 +5808,8 @@ msgstr "Logboek"
 
 #. A time zone, by its city
 #: src/routes/_shell.settings.workspace.tsx
-msgid "London (GMT)"
-msgstr "Londen (GMT)"
+msgid "London"
+msgstr "Londen"
 
 #: src/dashboard/dependency-requests.tsx
 msgctxt "kind of finding"
@@ -5726,6 +5845,11 @@ msgstr "Handmatig gemaakt door {createdBy} op {madeOn}."
 #: src/dashboard/report.ts
 msgid "Made with Grasp on {date}"
 msgstr "Gemaakt met Grasp op {date}"
+
+#. A time zone, by its city
+#: src/routes/_shell.settings.workspace.tsx
+msgid "Madrid"
+msgstr "Madrid"
 
 #: src/frame/app-sidebar.tsx
 msgid "Main"
@@ -6116,6 +6240,10 @@ msgctxt "inbox sort"
 msgid "Newest first"
 msgstr "Nieuwste eerst"
 
+#: src/tour/tour-layer.tsx
+msgid "Next"
+msgstr "Volgende"
+
 #: src/settings/pulse-people.tsx
 msgctxt "page"
 msgid "Next"
@@ -6457,6 +6585,7 @@ msgstr "Geen gebruik gezien"
 msgid "No watching rule catches an app."
 msgstr "Geen meekijkende regel treft een app."
 
+#: src/dashboard/spend-widget.tsx
 #: src/routes/_shell.settings.spend.tsx
 msgid "No workflow has called a model this month."
 msgstr "Geen enkele workflow heeft deze maand een model aangeroepen."
@@ -6726,6 +6855,10 @@ msgstr "Niet gemaakt door {vendors}"
 #: src/connections/connection-list.tsx
 msgid "Not named by the provider"
 msgstr "Niet benoemd door de provider"
+
+#: src/tour/tour-script.ts
+msgid "Not now"
+msgstr "Nu niet"
 
 #: src/connections/integration-row.tsx
 #: src/routes/_shell.integrations.$integration.tsx
@@ -7031,6 +7164,10 @@ msgctxt "links: drawn workflows, opened on the Workflows page"
 msgid "On the Workflows page"
 msgstr "Op de pagina Workflows"
 
+#: src/tour/tour-script.ts
+msgid "On this page you connect the applications your organization works in. They are the platform’s instruments to build what you need."
+msgstr "Op deze pagina koppel je de applicaties waar jullie organisatie mee werkt. Dat zijn de instrumenten waarmee het platform bouwt wat je nodig hebt."
+
 #: src/frame/app-sidebar.tsx
 #: src/routes/_shell.onboarding.tsx
 msgid "Onboarding"
@@ -7200,6 +7337,7 @@ msgctxt "inbox item kind"
 msgid "Open question"
 msgstr "Open vraag"
 
+#: src/chat/brain-questions.tsx
 #: src/routes/_shell.brain.$noteId.tsx
 msgid "Open questions"
 msgstr "Open vragen"
@@ -7265,6 +7403,11 @@ msgstr "of kies ze op je computer"
 msgctxt "onboarding area section"
 msgid "Organization"
 msgstr "Organisatie"
+
+#. A time zone, by its city
+#: src/routes/_shell.settings.workspace.tsx
+msgid "Oslo"
+msgstr "Oslo"
 
 #: src/connections/groups.ts
 msgctxt "kind of app"
@@ -7384,6 +7527,11 @@ msgstr "Pakketten voor {workflow}"
 msgctxt "tab of a workflow"
 msgid "Parameters"
 msgstr "Parameters"
+
+#. A time zone, by its city
+#: src/routes/_shell.settings.workspace.tsx
+msgid "Paris"
+msgstr "Parijs"
 
 #: src/routes/_shell.brain.sections.$sectionId.tsx
 msgid "Part of the brain not found"
@@ -7505,6 +7653,10 @@ msgstr "Mensen wezen {days, plural, one {de afgelopen dag} other {de afgelopen #
 #: src/onboarding/setup-steps.tsx
 msgid "People respond better when they know why I’m reaching out. I’ve drafted a message you can send yourself. Then pick the day the interviews start."
 msgstr "Mensen reageren beter als ze weten waarom ik contact opneem. Ik heb een bericht opgesteld dat je zelf kunt versturen. Kies daarna de dag waarop de gesprekken beginnen."
+
+#: src/routes/_shell.settings.workspace.tsx
+msgid "People sign in with an address in these domains, through your organization’s account."
+msgstr "Mensen loggen in met een adres in deze domeinen, via het account van je organisatie."
 
 #: src/routes/_shell.policies.index.tsx
 msgid "People using them"
@@ -7661,6 +7813,11 @@ msgstr "Beleid niet gevonden"
 #: src/activity/audit-log.tsx
 msgid "Position"
 msgstr "Positie"
+
+#. A time zone, by its city
+#: src/routes/_shell.settings.workspace.tsx
+msgid "Prague"
+msgstr "Praag"
 
 #: src/chat/studio.tsx
 msgid "Preview of {name}"
@@ -8298,6 +8455,7 @@ msgstr "Risicosignalen"
 
 #: src/routes/_shell.domains.$engine.index.tsx
 #: src/routes/_shell.settings.profile.tsx
+#: src/settings/invitations.tsx
 msgid "Role"
 msgstr "Rol"
 
@@ -8310,6 +8468,11 @@ msgstr "Rol van {who}"
 #: src/routes/_shell.settings.members.tsx
 msgid "Roles"
 msgstr "Rollen"
+
+#. A time zone, by its city
+#: src/routes/_shell.settings.workspace.tsx
+msgid "Rome"
+msgstr "Rome"
 
 #: src/routes/_shell.landscape.index.tsx
 msgid "Row height"
@@ -8666,6 +8829,10 @@ msgctxt "send the question"
 msgid "Send"
 msgstr "Versturen"
 
+#: src/chat/brain-questions.tsx
+msgid "Send answer"
+msgstr "Antwoord versturen"
+
 #: src/onboarding/organization-dialogs.tsx
 msgid "Send the link now"
 msgstr "Link nu versturen"
@@ -8909,6 +9076,10 @@ msgstr "Inloggen"
 msgid "Sign-in didn't work. Try again, or ask an admin."
 msgstr "Inloggen is niet gelukt. Probeer het opnieuw of vraag een beheerder."
 
+#: src/routes/_shell.settings.workspace.tsx
+msgid "Sign-in domains"
+msgstr "Inlogdomeinen"
+
 #: src/brain/brain-atlas.ts
 msgid "Sign-in shows the applications people log in to."
 msgstr "Inloggen laat zien bij welke applicaties mensen inloggen."
@@ -9067,6 +9238,10 @@ msgstr "Testrun starten"
 msgid "Start again from version {newerVersion}"
 msgstr "Opnieuw beginnen vanaf versie {newerVersion}"
 
+#: src/tour/tour-script.ts
+msgid "Start the tour"
+msgstr "Rondleiding starten"
+
 #: src/dashboard/runs-widget.tsx
 #: src/workflows/resource-runs.tsx
 msgid "Started"
@@ -9214,6 +9389,11 @@ msgstr "Nog open: {question} {who} kan het beantwoorden."
 msgid "Still waiting"
 msgstr "Wacht nog"
 
+#. A time zone, by its city
+#: src/routes/_shell.settings.workspace.tsx
+msgid "Stockholm"
+msgstr "Stockholm"
+
 #: src/chat/composer.tsx
 msgctxt "stop the answer"
 msgid "Stop"
@@ -9307,6 +9487,14 @@ msgstr "Uit het project halen"
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Take the go back"
 msgstr "Het startsein intrekken"
+
+#: src/frame/person-menu.tsx
+msgid "Take the tour"
+msgstr "Rondleiding volgen"
+
+#: src/frame/person-menu.tsx
+msgid "Take the tour again"
+msgstr "Rondleiding opnieuw volgen"
 
 #: src/workflows/definition-editor.tsx
 msgid "Take theirs"
@@ -9563,6 +9751,10 @@ msgstr "Die manier van inloggen is hier niet ingesteld."
 #: src/onboarding/setup-steps.tsx
 msgid "That’s everything from you. Now I’ll talk to your team."
 msgstr "Dat was alles van jou. Nu ga ik in gesprek met je team."
+
+#: src/tour/tour-script.ts
+msgid "That’s the tour. Ask me anything, on any page. You’ll find me right here."
+msgstr "Dat was de rondleiding. Je kunt me alles vragen, op elke pagina. Ik zit hier rechtsonder."
 
 #: src/brain/brain.ts
 msgid "the {role}"
@@ -10015,6 +10207,10 @@ msgstr "Het verzoek is mislukt."
 msgid "The risk assessment isn't done"
 msgstr "De risicobeoordeling is niet gedaan"
 
+#: src/settings/invitations.tsx
+msgid "The roles above say what each may do."
+msgstr "De rollen hierboven laten zien wat elke rol mag."
+
 #: src/routes/_shell.policies.rules.$ruleId.tsx
 msgid "The rule is paused, so it catches nothing."
 msgstr "De regel is gepauzeerd en treft dus niets."
@@ -10072,10 +10268,6 @@ msgstr "Het werk van het team, en wie te vragen"
 msgctxt "kickoff field"
 msgid "The teams"
 msgstr "De teams"
-
-#: src/routes/_shell.settings.workspace.tsx
-msgid "The time zone a schedule uses when it names none of its own."
-msgstr "De tijdzone die een planning gebruikt als die er zelf geen noemt."
 
 #: src/onboarding/staff-words.ts
 msgctxt "what Grasp knows, by source"
@@ -10163,6 +10355,10 @@ msgstr "Er is geen gegevensregel: elk toegestaan model mag gevoelige gegevens kr
 msgid "There is nobody in this list."
 msgstr "Er staat niemand in deze lijst."
 
+#: src/tour/tour-script.ts
+msgid "These are your domains. Each one is a part of your business, with its workflows, apps and integrations together."
+msgstr "Dit zijn jullie domeinen. Elk domein is een deel van het bedrijf, met zijn workflows, apps en integraties bij elkaar."
+
 #: src/engines/store-changes.tsx
 msgid "These fields stay reserved with their current meaning: {reserved}."
 msgstr "Deze velden blijven gereserveerd met hun huidige betekenis: {reserved}."
@@ -10182,6 +10378,10 @@ msgstr "Ze worden overal uitgelogd, hun persoonlijke koppelingen worden ontkoppe
 #: src/onboarding/organization-dialogs.tsx
 msgid "They get a link of their own when their team's links are due."
 msgstr "Ze krijgen een eigen link wanneer de links van hun team aan de beurt zijn."
+
+#: src/settings/invitations.tsx
+msgid "They get this role when they first sign in with your organization’s account. Grasp sends no email, so let them know."
+msgstr "Ze krijgen deze rol als ze voor het eerst inloggen met het account van je organisatie. Grasp stuurt geen e-mail, dus laat het ze weten."
 
 #: src/landscape/data-tab.tsx
 msgid "They show here once Grasp reads your identity provider's grants."
@@ -10297,9 +10497,17 @@ msgstr "Dit domein heeft nog geen versie om te draaien."
 msgid "This is right"
 msgstr "Dit klopt"
 
+#: src/tour/tour-script.ts
+msgid "This is the Brain. Everything I learn about your company comes together here. Every answer and every workflow is built on it."
+msgstr "Dit is het Brein. Alles wat ik over jullie bedrijf leer, komt hier samen. Elk antwoord en elke workflow bouwt hierop."
+
 #: src/connections/connection-list.tsx
 msgid "This is the consent as Grasp words it now. The audit log keeps a hash of the exact text they were shown."
 msgstr "Dit is de toestemming zoals Grasp die nu formuleert. Het auditlog bewaart een hash van de exacte tekst die werd getoond."
+
+#: src/tour/tour-script.ts
+msgid "This is the work itself, one workflow for each piece of work. You see where the time goes, and what I can take off your hands."
+msgstr "Dit is het werk zelf, één workflow per stuk werk. Je ziet waar de tijd heen gaat, en wat ik van je kan overnemen."
 
 #: src/routes/_shell.links.$app.$surface.tsx
 msgid "This link doesn't open anything you can open"
@@ -10537,6 +10745,10 @@ msgstr "Onderwerpen"
 #: src/policies/policy.ts
 msgid "Touches {kinds}"
 msgstr "Verwerkt {kinds}"
+
+#: src/tour/tour-layer.tsx
+msgid "Tour of Grasp"
+msgstr "Rondleiding door Grasp"
 
 #: src/policies/policy.ts
 msgid "Training not stated"
@@ -10807,6 +11019,11 @@ msgstr "Gebruikers"
 msgid "Users by team"
 msgstr "Gebruikers per team"
 
+#. A time zone
+#: src/routes/_shell.settings.workspace.tsx
+msgid "UTC"
+msgstr "UTC"
+
 #: src/routes/_shell.settings.billing.tsx
 msgid "VAT number"
 msgstr "Btw-nummer"
@@ -10896,6 +11113,11 @@ msgstr "Versies"
 #: src/landscape/landscape.ts
 msgid "Via Composio"
 msgstr "Via Composio"
+
+#. A time zone, by its city
+#: src/routes/_shell.settings.workspace.tsx
+msgid "Vienna"
+msgstr "Wenen"
 
 #: src/routes/_shell.landscape.index.tsx
 msgctxt "how the landscape is shown"
@@ -11005,6 +11227,11 @@ msgstr "Wacht op een persoon"
 msgid "Waiting on you"
 msgstr "Wacht op u"
 
+#. A time zone, by its city
+#: src/routes/_shell.settings.workspace.tsx
+msgid "Warsaw"
+msgstr "Warschau"
+
 #: src/brain/brain.ts
 msgid "Was {people}"
 msgstr "Eerder {people}"
@@ -11078,6 +11305,10 @@ msgstr "Week {week} van {weeks} · {stage}"
 #: src/routes/_shell.settings.notifications.tsx
 msgid "Weekly summary"
 msgstr "Wekelijkse samenvatting"
+
+#: src/tour/tour-script.ts
+msgid "Welcome to Grasp. Shall I show you around? It takes about a minute."
+msgstr "Welkom bij Grasp. Zal ik je even rondleiden? Het duurt maar een minuutje."
 
 #: src/routes/_shell.onboarding.log.tsx
 msgctxt "log filter"
@@ -11436,10 +11667,6 @@ msgstr "Wie keurt een nieuwe tool goed"
 msgid "Who can answer"
 msgstr "Wie kan antwoorden"
 
-#: src/routes/_shell.settings.workspace.tsx
-msgid "Who can be invited, and where the logo comes from."
-msgstr "Wie kan worden uitgenodigd, en waar het logo vandaan komt."
-
 #: src/routes/_shell.settings.pulse.tsx
 msgid "Who counts"
 msgstr "Wie telt mee"
@@ -11516,9 +11743,21 @@ msgstr "Met AI"
 msgid "With the board"
 msgstr "Met het bestuur"
 
+#: src/settings/invitations.tsx
+msgid "Withdraw"
+msgstr "Intrekken"
+
+#: src/settings/invitations.tsx
+msgid "Withdraw the invitation of {email}"
+msgstr "Uitnodiging van {email} intrekken"
+
 #: src/activity/audit-words.ts
 msgid "Withdrew a request for packages"
 msgstr "Een pakketaanvraag ingetrokken"
+
+#: src/activity/audit-words.ts
+msgid "Withdrew an invitation"
+msgstr "Heeft een uitnodiging ingetrokken"
 
 #: src/routes/_shell.onboarding.agreements.tsx
 msgid "Without all three, nobody is invited: the admin's links wait, and go out once all are in place."
@@ -11652,6 +11891,10 @@ msgstr "Bekende workflows"
 msgid "Workflows that failed"
 msgstr "Mislukte workflows"
 
+#: src/dashboard/spend-widget.tsx
+msgid "Workflows that spent most"
+msgstr "Workflows die het meest uitgaven"
+
 #: src/routes/_shell.settings.spend.tsx
 msgid "Workflows this month"
 msgstr "Workflows deze maand"
@@ -11673,12 +11916,16 @@ msgid "Works council heard, where there is one"
 msgstr "Ondernemingsraad gehoord, waar die er is"
 
 #: src/routes/_shell.settings.tsx
-#: src/routes/_shell.settings.workspace.tsx
 msgid "Workspace"
 msgstr "Werkruimte"
 
 #: src/routes/_shell.settings.tsx
 msgctxt "settings group"
+msgid "Workspace"
+msgstr "Werkruimte"
+
+#: src/routes/_shell.settings.workspace.tsx
+msgctxt "settings section"
 msgid "Workspace"
 msgstr "Werkruimte"
 
@@ -11769,6 +12016,10 @@ msgstr "Jij laat me zien wie wie is, waar de documenten staan en welke tools men
 msgid "You sign in on {app}’s own page."
 msgstr "Je meldt je aan op de eigen pagina van {app}."
 
+#: src/inbox/items.ts
+msgid "You were asked this as the {owner}. Answer it in the brain: everyone in the company reads the answer, with your name."
+msgstr "Dit is je gevraagd als {owner}. Beantwoord het in het brein: iedereen in het bedrijf leest het antwoord, met je naam."
+
 #: src/routes/guest.tsx
 msgid "You:"
 msgstr "Jij:"
@@ -11784,6 +12035,10 @@ msgstr "Je bent nog ingelogd. Probeer het zo opnieuw."
 #: src/routes/_shell.settings.tsx
 msgid "Your account"
 msgstr "Je account"
+
+#: src/chat/brain-questions.tsx
+msgid "Your answer"
+msgstr "Je antwoord"
 
 #: src/decision-confirmation.tsx
 msgctxt "the answer a person gives a decision"
@@ -11801,6 +12056,10 @@ msgstr "Je bedrijfsaccount. Na vertrek uit het bedrijf kun je niet opnieuw inlog
 #: src/routes/_shell.settings.workspace.tsx
 msgid "Your company’s name in Grasp."
 msgstr "De naam van je bedrijf in Grasp."
+
+#: src/routes/_shell.settings.workspace.tsx
+msgid "Your company’s name in Grasp. An admin changes it."
+msgstr "De naam van je bedrijf in Grasp. Een beheerder wijzigt hem."
 
 #: src/routes/_shell.settings.billing.tsx
 msgid "Your company’s VAT number, as invoices show it."
@@ -11871,3 +12130,8 @@ msgstr "Inzoomen"
 #: src/brain/atlas-overlays.tsx
 msgid "Zoom out"
 msgstr "Uitzoomen"
+
+#. A time zone, by its city
+#: src/routes/_shell.settings.workspace.tsx
+msgid "Zurich"
+msgstr "Zürich"

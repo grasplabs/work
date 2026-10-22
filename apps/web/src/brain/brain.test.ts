@@ -787,3 +787,129 @@ describe("a brain of a deployment that holds nothing yet", () => {
     });
   });
 });
+
+describe("a brain of the onboarding alone, as core reads it for an admin", () => {
+  // As core's `brain.read` gives an admin before the Playbook's records:
+  // the kickoff and the staff list, a team lead's finished interview as
+  // its team's stakeholder interview, a document shared and the tools it
+  // names, nothing said in any of them.
+  const onboarding: Workspace = {
+    company: { name: "Organization", sector: "An accounting firm.", people: 3 },
+    vision: {
+      ambition: "Every client gets their numbers within a week.",
+      whyNow: "Copying invoices by hand.",
+      inviteTeamIds: ["team-finance", "team-legal"],
+      budget: [],
+      toolApproval: [],
+      sourceId: "src-kickoff",
+      version: 1,
+    },
+    goals: [],
+    teams: [
+      {
+        id: "team-finance",
+        name: "Finance",
+        sourceId: "src-roster",
+        counts: [{ sourceId: "src-roster", date: "2026-10-01", people: 2 }],
+        stakeholders: [
+          {
+            role: "Head of finance",
+            sourceId: "src-roster",
+            date: "2026-10-01",
+          },
+        ],
+      },
+      {
+        id: "team-legal",
+        name: "Legal",
+        sourceId: "src-roster",
+        counts: [{ sourceId: "src-roster", date: "2026-10-01", people: 1 }],
+        stakeholders: [
+          { role: "Team lead", sourceId: "src-roster", date: "2026-10-01" },
+        ],
+      },
+    ],
+    tools: [
+      {
+        id: "tool.document-exact-online",
+        name: "Exact Online",
+        teamIds: ["team-finance"],
+        sourceId: "src.document-booking",
+      },
+    ],
+    sources: [
+      {
+        id: "src-kickoff",
+        kind: "interview",
+        title: "Kickoff",
+        date: "2026-09-28",
+        step: 1,
+      },
+      {
+        id: "src-roster",
+        kind: "import",
+        connection: "directory",
+        title: "Staff list",
+        date: "2026-10-01",
+        step: 2,
+      },
+      {
+        id: "src.lead-finance",
+        kind: "interview",
+        title: "Interview with Finance",
+        date: "2026-10-05",
+        who: "Head of finance",
+        step: 2,
+        interviewee: "stakeholder",
+        teamIds: ["team-finance"],
+      },
+      {
+        id: "src.document-booking",
+        kind: "document",
+        title: "booking.docx",
+        date: "2026-10-02",
+        step: 2,
+      },
+    ],
+    statements: [],
+    candidates: [],
+    gaps: [],
+    workflows: [],
+    connections: [],
+    landscape: [],
+    policies: [],
+  };
+
+  it("files the interview, the document and its tool, and counts only the interviewed team as interviewed", () => {
+    const { notes } = buildBrain(onboarding);
+    const ids = new Set(notes.map(({ id }) => id));
+    const at = (id: string) => noteIn(onboarding, id);
+    expect({
+      paths: Object.fromEntries(
+        [
+          "src.lead-finance",
+          "src.document-booking",
+          "tool.document-exact-online",
+        ].map((id) => [id, at(id).path])
+      ),
+      interviewed: words(at("team-finance"), "Interviewed"),
+      legal: at("team-legal").tags.includes("not-interviewed"),
+      dangling: notes
+        .flatMap(({ links }) => links)
+        .filter((id) => !ids.has(id)),
+    }).toStrictEqual({
+      paths: {
+        "src.lead-finance": [
+          "Sources",
+          "Conversations",
+          "Stakeholder interviews",
+        ],
+        "src.document-booking": ["Sources", "Documents"],
+        "tool.document-exact-online": ["2 Inventory", "Tools", "Mentioned"],
+      },
+      interviewed: "Head of finance, interviewed Oct 5, 2026",
+      legal: true,
+      dangling: [],
+    });
+  });
+});

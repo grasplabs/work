@@ -1,5 +1,6 @@
 import { actorOf } from "@grasp-os/shared/audit";
 import type { AuditActor } from "@grasp-os/shared/audit";
+import { sha256Hex } from "@grasp-os/shared/encoding";
 import { collectionIdSchema } from "@grasp-os/shared/ids";
 import type { CollectionId } from "@grasp-os/shared/ids";
 import {
@@ -22,11 +23,21 @@ import interviewAStakeholder from "../../skills/interview-a-stakeholder/SKILL.md
 import runABaseline from "../../skills/run-a-baseline/SKILL.md";
 import writeBoardPage from "../../skills/write-board-page/SKILL.md";
 import { outboxed } from "../audit-outbox.ts";
-import { collections, documents, versions } from "../db/knowledge/schema.ts";
+import {
+  brainPayloads,
+  collections,
+  documents,
+  versions,
+} from "../db/knowledge/schema.ts";
 import { allowedFor } from "./app-entries.ts";
 import { ensureCollection, requireWritable } from "./collections.ts";
 import type { CollectionRow } from "./collections.ts";
-import { personWriter, readableDocument, writeVersion } from "./documents.ts";
+import {
+  personWriter,
+  readableDocument,
+  versionText,
+  writeVersion,
+} from "./documents.ts";
 import type { Writer } from "./documents.ts";
 
 // Skills in two collections, both in every person's catalog, and in an
@@ -128,7 +139,7 @@ export const syncGraspSkills = async (
     .select({
       path: documents.path,
       currentVersion: documents.currentVersion,
-      text: versions.text,
+      sha256: brainPayloads.sha256,
     })
     .from(documents)
     .leftJoin(
@@ -138,10 +149,15 @@ export const syncGraspSkills = async (
         eq(versions.number, documents.currentVersion)
       )
     )
+    .leftJoin(brainPayloads, eq(brainPayloads.key, versions.payloadKey))
     .where(eq(documents.collectionId, graspSkillsCollectionId));
   const byPath = new Map(stored.map((row) => [row.path, row]));
+  // By hash: no payload is read to compare.
+  const hashes = await Promise.all(
+    skills.map(async (skill) => await sha256Hex(skill.text))
+  );
   const changed = skills.filter(
-    (skill) => byPath.get(skill.path)?.text !== skill.text
+    (skill, index) => byPath.get(skill.path)?.sha256 !== hashes[index]
   );
   if (changed.length === 0) {
     return true;
@@ -266,23 +282,19 @@ export const copySkill = async (
   // Versions never change once written (the Grasp skills are never
   // purged), so this is the text of the version the document was at when
   // read, whatever the sync wrote since.
-  const copied = await db
-    .select({ text: versions.text })
-    .from(versions)
-    .where(
-      and(
-        eq(versions.documentId, document.id),
-        eq(versions.number, document.currentVersion)
-      )
-    )
-    .get();
-  if (!copied) {
+  const copied = await versionText(
+    env,
+    db,
+    document.id,
+    document.currentVersion
+  );
+  if (copied === undefined) {
     throw knowledgeErrors.create("knowledge.not_found");
   }
   return await writeVersion(env, personWriter(person), {
     collection: target,
     path: document.path,
-    text: copied.text,
+    text: copied,
     ifVersion: 0,
     message: `Copied from Grasp skills, version ${document.currentVersion}`,
     restoredFrom: null,
