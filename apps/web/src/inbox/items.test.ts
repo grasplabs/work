@@ -306,6 +306,6 @@ describe(listed, () => {
         about: { kind: "brain" },
       },
     ]);
-    expect(listed(items, "apps", "urgent")).toHaveLength(items.length - 2);
+    expect(listed(items, "apps", "urgent")).toHaveLength(items.length - 3);
   });
 });

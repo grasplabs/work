@@ -2037,13 +2037,13 @@ msgstr "Sinds deze lijst is gelezen, is een andere versie van dit domein actueel
 msgid "Answer"
 msgstr "Antwoord"
 
-#: src/inbox/item-detail.tsx
-msgid "Answer in the brain"
-msgstr "Beantwoorden in het brein"
-
 #: src/inbox/items.ts
 msgid "Answer by"
 msgstr "Antwoorden vóór"
+
+#: src/inbox/item-detail.tsx
+msgid "Answer in the brain"
+msgstr "Beantwoorden in het brein"
 
 #. Something that has not happened yet, on a timeline
 #: src/brain/brain.ts

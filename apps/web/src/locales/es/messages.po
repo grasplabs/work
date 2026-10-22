@@ -2037,13 +2037,13 @@ msgstr "Desde que se leyó esta lista, otra versión de este dominio pasó a ser
 msgid "Answer"
 msgstr "Respuesta"
 
-#: src/inbox/item-detail.tsx
-msgid "Answer in the brain"
-msgstr "Responder en el cerebro"
-
 #: src/inbox/items.ts
 msgid "Answer by"
 msgstr "Responder antes de"
+
+#: src/inbox/item-detail.tsx
+msgid "Answer in the brain"
+msgstr "Responder en el cerebro"
 
 #. Something that has not happened yet, on a timeline
 #: src/brain/brain.ts

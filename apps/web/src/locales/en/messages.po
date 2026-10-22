@@ -2037,13 +2037,13 @@ msgstr "Another version of this domain was made current since this list was read
 msgid "Answer"
 msgstr "Answer"
 
-#: src/inbox/item-detail.tsx
-msgid "Answer in the brain"
-msgstr "Answer in the brain"
-
 #: src/inbox/items.ts
 msgid "Answer by"
 msgstr "Answer by"
+
+#: src/inbox/item-detail.tsx
+msgid "Answer in the brain"
+msgstr "Answer in the brain"
 
 #. Something that has not happened yet, on a timeline
 #: src/brain/brain.ts
