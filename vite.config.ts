@@ -124,6 +124,13 @@ export default defineConfig({
         rules: { "grasp/no-scrollbars": "error" },
       },
       {
+        // What clients and buyers read names the product Grasp Work
+        // (GRA-143): the apps' and packages' source, not their tests.
+        files: ["apps/*/src/**", "packages/*/src/**"],
+        excludeFiles: ["**/*.test.ts", "**/*.test.tsx"],
+        rules: { "grasp/no-old-product-name": "error" },
+      },
+      {
         // Workerflow is a generic engine: nothing of Grasp's domain (users,
         // Apps, connect, permissions) may reach it. Grasp imports it, never
         // the other way round.

@@ -75,11 +75,20 @@ export const screenRouteSchema = z
  * replaces its current entry. No URL, path, App or person: the page builds
  * the route itself, after core checked the target and the input.
  */
-export const screenNavigationSchema = z.strictObject({
-  screen: screenRouteSchema,
-  input: z.unknown().optional(),
-  replace: z.boolean().optional(),
-});
+export const screenNavigationSchema = z.union([
+  z.strictObject({
+    screen: screenRouteSchema,
+    input: z.unknown().optional(),
+    replace: z.boolean().optional(),
+  }),
+  // One of the screen's declared surfaces (spec 34.1): the host places
+  // it; only a route replaces an entry.
+  z.strictObject({
+    screen: screenRouteSchema,
+    input: z.unknown().optional(),
+    surface: screenRouteSchema,
+  }),
+]);
 export type ScreenNavigation = z.infer<typeof screenNavigationSchema>;
 
 /**
@@ -89,16 +98,69 @@ export type ScreenNavigation = z.infer<typeof screenNavigationSchema>;
 export interface ScreenRoute {
   route: string;
   input?: unknown;
+  /**
+   * One of that screen's declared surfaces (spec 34.1), whose own input
+   * schema the input is checked with first.
+   */
+  surface?: string;
+  /**
+   * Asked for by a deep link, which anyone can write: core opens only a
+   * surface the App declares as one (`kind: "deepLink"`).
+   */
+  deepLink?: true;
+}
+
+/** An App's sidebar entries (spec 34.1): its surfaces of kind `sidebar`. */
+export interface SidebarApp {
+  app: string;
+  name: string;
+  entries: SurfaceSummary[];
+}
+
+/** Where the host places a surface (spec 34.1). */
+export const surfaceKinds = [
+  "sidebar",
+  "panel",
+  "settings",
+  "deepLink",
+] as const;
+export type SurfaceKind = (typeof surfaceKinds)[number];
+
+/** A surface a navigation opens: its name, where the host places it, and its title. */
+export interface TargetSurface {
+  name: string;
+  kind: SurfaceKind;
+  title: string;
 }
 
 /**
  * Where core says a navigation goes: the file of the screen to open, the
- * route it was named by and its input as the route's schema normalized it.
+ * route it was named by, its input as the route's schema normalized it
+ * (a surface's: as the surface's own did, which opening checks with the
+ * screen's again), and the surface it opens in, if any.
  */
 export interface ScreenTarget {
   screen: string;
   route: string;
   input: Json;
+  surface?: TargetSurface;
+}
+
+/**
+ * One of an App's surfaces at its current version, as the host lists it
+ * to place it (spec 34.1): its name, kind and title, and the screen it
+ * opens by route name and file.
+ */
+export interface SurfaceSummary {
+  name: string;
+  kind: SurfaceKind;
+  title: string;
+  /** The route name of the screen it opens. */
+  route: string;
+  /** That screen's file name, as `ScreensApi.open` takes it. */
+  screen: string;
+  /** Whether it opens with nothing: its input takes `{}`. */
+  opensEmpty: boolean;
 }
 
 /** A screen's file, `screens/<name>.tsx`: its name is the `name` group. */
@@ -459,6 +521,17 @@ export interface ScreensApi {
    * of the person's requests of the App's screens.
    */
   navigate: (app: string, navigation: ScreenRoute) => Promise<ScreenTarget>;
+  /**
+   * The surfaces of the App's current version (spec 34.1), for someone
+   * with a role in it, to place them. Opening one is `open`'s, checked as
+   * any screen.
+   */
+  surfaces: (app: string) => Promise<SurfaceSummary[]>;
+  /**
+   * The sidebar entries of the Apps the person has a role in: each App
+   * with surfaces of kind `sidebar`, with those.
+   */
+  sidebar: () => Promise<SidebarApp[]>;
   /**
    * One frame's own way to the App (`ScreenFrameApi`), for the build the
    * lease `open` gave it: how frames that share a connection each get

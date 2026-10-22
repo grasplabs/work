@@ -6943,8 +6943,8 @@ export const resources: {
 });
 
 export const screens: {
-  readonly note: ScreenReference<"note", { id: Id<"notes"> }, { id: Id<"notes"> }>;
-  readonly notes: ScreenReference<"notes", Record<never, never>, Record<never, never>>;
+  readonly note: ScreenReference<"note", { id: Id<"notes"> }, { id: Id<"notes"> }, { readonly beside: { id: Id<"notes"> }; readonly shared: { id: Id<"notes"> } }>;
+  readonly notes: ScreenReference<"notes", Record<never, never>, Record<never, never>, { readonly all: Record<never, never> }>;
 } = frozen({
   note: {
     "input": {
@@ -6963,7 +6963,45 @@ export const screens: {
       "presence": "required"
     },
     "name": "note",
-    "path": "/notes/:id"
+    "path": "/notes/:id",
+    "surfaces": {
+      "beside": {
+        "input": {
+          "descriptorVersion": 1,
+          "fields": {
+            "id": {
+              "descriptorVersion": 1,
+              "kind": "id",
+              "nullable": false,
+              "presence": "required",
+              "tableName": "notes"
+            }
+          },
+          "kind": "object",
+          "nullable": false,
+          "presence": "required"
+        },
+        "kind": "panel"
+      },
+      "shared": {
+        "input": {
+          "descriptorVersion": 1,
+          "fields": {
+            "id": {
+              "descriptorVersion": 1,
+              "kind": "id",
+              "nullable": false,
+              "presence": "required",
+              "tableName": "notes"
+            }
+          },
+          "kind": "object",
+          "nullable": false,
+          "presence": "required"
+        },
+        "kind": "deepLink"
+      }
+    }
   },
   notes: {
     "input": {
@@ -6974,7 +7012,19 @@ export const screens: {
       "presence": "required"
     },
     "name": "notes",
-    "path": "/"
+    "path": "/",
+    "surfaces": {
+      "all": {
+        "input": {
+          "descriptorVersion": 1,
+          "fields": {},
+          "kind": "object",
+          "nullable": false,
+          "presence": "required"
+        },
+        "kind": "sidebar"
+      }
+    }
   },
 });
 

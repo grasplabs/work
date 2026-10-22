@@ -13,6 +13,7 @@ import type { DependenciesApi } from "./dependencies.ts";
 import type { EmailPreferencesApi } from "./email-preferences.ts";
 import type { KnowledgeSignalsApi } from "./knowledge-signals.ts";
 import type { KnowledgeApi } from "./knowledge.ts";
+import type { LandscapeApi } from "./landscape.ts";
 import type { MembersApi } from "./members.ts";
 import type { MemoryApi } from "./memory.ts";
 import type { ModelsApi } from "./models.ts";
@@ -122,6 +123,11 @@ export interface SessionApi {
    * (which only admins connect and disconnect).
    */
   readonly connections: ConnectionsApi;
+  /**
+   * The application landscape: the apps the organization's people granted
+   * access, read from its identity provider.
+   */
+  readonly landscape: LandscapeApi;
   /** Runs of Apps' workflows, for those with a role in the App. */
   readonly workflows: WorkflowsApi;
   /**

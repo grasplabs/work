@@ -363,12 +363,15 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
       ),
       // The first attempt's App call waits at the mail server past the
       // attempt's time: its code is stopped then, and the second
-      // attempt's call, waiting for the App behind it, runs.
+      // attempt's call, waiting for the App behind it, runs. The attempt
+      // that waits is the first to count a hit: on a busy runner the
+      // first attempt can be cut off before its hit lands, so the next
+      // waits instead, and one more retry completes the run.
       ...workflowFiles(
         "outlived",
         `  return await step.do(
     "count",
-    { description: "Count", timeout: "${attemptTimeout}", retries: { limit: 1, delay: 10 } },
+    { description: "Count", timeout: "${attemptTimeout}", retries: { limit: 2, delay: 10 } },
     async () => {
       if ((await ${hitCall(`"outlived"`)}) === 1) {
         await ${appCall("stats.pointAfter", "action", `{ measure: "outlived", execution: crypto.randomUUID() }`)};
@@ -574,7 +577,7 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
       // added either.
       silent: 0,
       // Its first attempt's code stopped with the attempt, before it got
-      // to its point; the second completed the run.
+      // to its point; a later one completed the run.
       outlived: {
         status: "completed",
         recorded: 0,

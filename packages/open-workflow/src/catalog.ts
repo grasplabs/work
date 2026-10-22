@@ -20,6 +20,7 @@ export const bindingKinds = [
   "event",
   "knowledge",
   "template",
+  "files",
 ] as const;
 export type BindingKind = (typeof bindingKinds)[number];
 
@@ -382,6 +383,8 @@ const requiredFields: Readonly<
   // content): an action's use is all that reaches one.
   knowledge: [],
   template: [],
+  // The run's own files (GRA-724): the host's own contract too.
+  files: [],
 };
 
 const checkComplete = (contract: ResolvedContract): void => {

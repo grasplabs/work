@@ -611,6 +611,8 @@ export const appErrors = defineErrorFamily({
     "The draft changed since this preview loaded it. Load the preview again.",
   "app.preview_superseded":
     "A newer load of this preview replaced this one while it waited. The newer one shows the draft.",
+  "app.preview_layout":
+    "A preview runs only an App of spec 8's layout: app.ts and schema.ts, with its functions in operations/. This draft has no app.ts or schema.ts.",
   "app.preview_side_effect":
     "A preview changes nothing and reaches nothing outside it: no connections, no other Apps, no workflows and no writes to Knowledge.",
 });

@@ -16,6 +16,7 @@ import type {
   ConnectionPerson,
   ConnectionScope,
   ConnectionSummary,
+  OrganizationConnection,
 } from "@grasp-os/shared/connect";
 import { randomToken, sha256Hex, toBase64Url } from "@grasp-os/shared/encoding";
 import { errorFields, log } from "@grasp-os/shared/log";
@@ -29,6 +30,7 @@ import type { AccountAddresses } from "./account-addresses.ts";
 import { recordEventIf, recordEvents } from "./audit.ts";
 import {
   abandonToolkitFlow,
+  composioAccountStates,
   disconnectCleanup,
   dropToolkitFlowsOf,
   revokeAtComposio,
@@ -49,7 +51,7 @@ import {
 import { exchangeCode, revokeToken } from "./oauth-client.ts";
 import type { TokenSet } from "./oauth-client.ts";
 import { dropPendingActions } from "./pending.ts";
-import { providerFor } from "./providers.ts";
+import { grantedAsAsked, providerFor } from "./providers.ts";
 import type {
   ApiKeyProviderConfig,
   OAuthClientCredentials,
@@ -209,6 +211,11 @@ export const startConnection = async (
     throw roleErrors.create("role.forbidden");
   }
   const { provider, client, vault } = await ready(env, providerId);
+  // The landscape's connection reads the whole tenant: the organization's,
+  // never a person's own.
+  if (provider.sharedOnly === true && scope !== "shared") {
+    throw connectionErrors.create("connection.invalid");
+  }
   // A suite's flow is pinned to the organization's tenant; an app's has
   // none, so it is always "" (`isTenant`).
   const tenant = provider.pinned ? (rest.tenant ?? "").toLowerCase() : "";
@@ -457,6 +464,7 @@ type Refuse = (
 ) => Promise<void>;
 
 type RefusalReason =
+  | "connection.scopes_refused"
   | "connection.wrong_account"
   | "connection.not_own_account"
   | "connection.already_connected"
@@ -586,6 +594,9 @@ const keepTokens = async (
         ? "connection.wrong_account"
         : "connection.provider_refused"
     );
+  }
+  if (!grantedAsAsked(provider, tokens)) {
+    return await refusal("connection.scopes_refused");
   }
   const { refreshToken } = tokens;
   if (refreshToken === undefined) {
@@ -881,6 +892,50 @@ export const listConnections = async (
     createdAt: row.createdAt.toISOString(),
     ...(row.serverKind === "composio" && { tools: allowedToolNames(row) }),
   }));
+};
+
+/**
+ * Every connection that isn't disconnected, for core's staff-only admin
+ * snapshot (`ConnectApi.organizationConnections`), with Composio's word on
+ * each Composio account. What a staff member may read of each, and no
+ * more: never a token, the server's URL (a Composio one names the
+ * account), nor anything Composio knows it by; of a personal one, not
+ * whose it is or which account, only that someone connected their own.
+ */
+export const organizationConnections = async (
+  env: Env
+): Promise<OrganizationConnection[]> => {
+  const rows = await drizzle(env.DB)
+    .select()
+    .from(connections)
+    .where(ne(connections.status, "disconnected"))
+    .orderBy(desc(connections.createdAt));
+  const composio = await composioAccountStates(
+    env,
+    rows.filter(({ serverKind }) => serverKind === "composio")
+  );
+  return rows.flatMap((row) => {
+    // Filtered above; the column's type doesn't know it.
+    if (row.status === "disconnected") {
+      return [];
+    }
+    const shared = row.scope === "shared";
+    const isComposio = row.serverKind === "composio";
+    return [
+      {
+        id: row.id,
+        source: row.serverKind,
+        provider: row.provider,
+        scope: row.scope,
+        status: row.status,
+        composio: isComposio ? (composio.get(row.id) ?? "unread") : null,
+        connectedBy: shared ? row.connectedBy : null,
+        accountName: shared ? row.accountName : null,
+        createdAt: row.createdAt.toISOString(),
+        tools: shared && isComposio ? allowedToolNames(row) : null,
+      },
+    ];
+  });
 };
 
 /**

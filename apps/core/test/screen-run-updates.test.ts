@@ -13,7 +13,7 @@ import { outcome, signedInApi } from "./sign-in.ts";
 import { appCall, appWith, workflowFiles } from "./workflow-apps.ts";
 
 // Run status, live: a screen follows its App's runs of a workflow
-// (`screens.watchRuns`), and core tells it each time one starts, waits for
+// (`ScreenFrameApi.watchRuns`), and core tells it each time one starts, waits for
 // a decision, has it answered, or ends, so it reads them again. The ways
 // this could go wrong, tried below: pushes reaching someone who has lost
 // their role in the App, a subscription to an App they have none in, a

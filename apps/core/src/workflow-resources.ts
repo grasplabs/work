@@ -3218,7 +3218,7 @@ const namedBySchema = z.object({
  * and records nothing.
  *
  * The old workflow keeps its row, its versions and its name in them: only
- * the unique index skips it (migration 0105). Its contract keys never
+ * the unique index skips it (migration 0107). Its contract keys never
  * resolve again, to it or to another: a workflow may not publish a
  * semantic version a released workflow of its name published
  * (`versionTaken`), so `workspace/<name>/<semver>` never

@@ -36,6 +36,7 @@ import type {
 } from "./client-portable.ts";
 import { DraftStore } from "./form-drafts.ts";
 import type { DraftPersistence } from "./form-drafts.ts";
+import { preferencePaths } from "./preference-operations.ts";
 import type {
   ArgsOf,
   OperationReference,
@@ -1191,6 +1192,18 @@ const showsStale = (settled: Settled, isAction: boolean): boolean =>
   (isAction && !ranNothing(settled, isAction)) ||
   (settled.kind === "failed" && settled.error.code === "data.conflict");
 
+/** The preference operations' paths: core answers them itself (preference-operations.ts). */
+const preferenceContracts = new Set<string>(Object.values(preferencePaths));
+
+/**
+ * Whether the host's recovery index holds a keyed submission of
+ * `reference`, so its answer is acknowledged: any of the App's own
+ * mutations and actions, never a preference update, whose receipt is the
+ * person's document revision and which core answers before indexing.
+ */
+const indexed = (reference: ReadReference): boolean =>
+  !preferenceContracts.has(reference.contractId);
+
 /**
  * Where a key left unknown is remembered: by App, operation and key, as
  * the host scopes a key's receipt; not by the App's version, so a resend
@@ -1480,13 +1493,17 @@ export class GraspClient {
    * Opens another of the App's screens through the trusted host (spec
    * 10.7.7, `useNavigate`): `screen` from the generated `screens`, its
    * route input (left out only for an empty or all-default input), and
-   * `{ replace }` to replace the current entry rather than push one.
-   * Resolves once the host accepted the navigation, not once the screen
-   * loaded. One function for the client's life, so a screen's callbacks
-   * can keep it.
+   * `{ replace }` to replace the current entry rather than push one, or
+   * `{ surface }` to open one of its declared surfaces with that
+   * surface's input (spec 34.1). Resolves once the host accepted the
+   * navigation, not once the screen loaded. One function for the client's
+   * life, so a screen's callbacks can keep it.
    */
-  readonly navigate: Navigate = async (screen, ...args) => {
-    const [input, options] = args;
+  readonly navigate: Navigate = async (
+    screen: unknown,
+    input?: unknown,
+    options?: unknown
+  ): Promise<void> => {
     await navigateThrough(this.#transport?.navigation, screen, input, options);
   };
 
@@ -3144,7 +3161,7 @@ export class GraspClient {
         : this.#send(reference, request, key, {
             scoped,
             input: inputText,
-            acknowledge: true,
+            acknowledge: indexed(reference),
           });
     return await waitFor(done, signal, () =>
       clientError("submission.cancelled", { sent: true })

@@ -18,6 +18,7 @@ export const actionUseKinds = [
   "model",
   "knowledge",
   "template",
+  "files",
 ] as const;
 export type ActionUseKind = (typeof actionUseKinds)[number];
 
@@ -84,6 +85,26 @@ export const knowledgeUseSchema = z.strictObject({
     .refine((operations) => new Set(operations).size === operations.length),
 });
 
+/**
+ * What an action may do with its run's files (GRA-724): write one (open,
+ * add to and finish it), read one, list them, delete one.
+ */
+export const filesUseOperations = ["write", "read", "list", "delete"] as const;
+
+/**
+ * A files binding's use: the operations on the run's own files the action
+ * calls, each once (GRA-724). The host refuses any other.
+ */
+export const filesUseSchema = z.strictObject({
+  alias: z.string().regex(actionUseAliasPattern),
+  kind: z.literal("files"),
+  operations: z
+    .array(z.enum(filesUseOperations))
+    .min(1)
+    .max(filesUseOperations.length)
+    .refine((operations) => new Set(operations).size === operations.length),
+});
+
 /** A template binding's use: reading its one pinned version (GRA-700). */
 export const templateUseSchema = z.strictObject({
   alias: z.string().regex(actionUseAliasPattern),
@@ -96,13 +117,15 @@ export const templateUseSchema = z.strictObject({
  * an operation binding's (an App export, one operation) with nothing more;
  * a model binding's with the shape its calls answer; a knowledge binding's
  * with the operations of its collection it calls; a template binding's
- * with nothing more. The host refuses a call of any other operation.
+ * with nothing more; a files binding's with the operations on the run's
+ * own files it calls. The host refuses a call of any other operation.
  */
 export const actionUseSchema = z.discriminatedUnion("kind", [
   connectorUseSchema,
   operationUseSchema,
   knowledgeUseSchema,
   templateUseSchema,
+  filesUseSchema,
   // A model binding's: the descriptor of what each of its calls answers,
   // as canonical JSON, sealed with the action's contract (GRA-700): the
   // host sends it, and checks every answer against it, never a shape the
@@ -131,7 +154,12 @@ export type SealedUse =
       readonly kind: "knowledge";
       readonly operations: readonly (typeof knowledgeUseOperations)[number][];
     }
-  | { readonly alias: string; readonly kind: "template" };
+  | { readonly alias: string; readonly kind: "template" }
+  | {
+      readonly alias: string;
+      readonly kind: "files";
+      readonly operations: readonly (typeof filesUseOperations)[number][];
+    };
 
 /** An action's uses: each alias once, at most `actionUses` of them. */
 export const actionUsesSchema = z

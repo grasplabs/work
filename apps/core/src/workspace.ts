@@ -64,7 +64,7 @@ import { redact } from "@grasp-os/shared/redact";
 import type { ScreenProblem, ServerLog } from "@grasp-os/shared/screens";
 import type { RunFailure } from "@grasp-os/shared/workflows";
 import { DurableObject } from "cloudflare:workers";
-import { and, asc, count, desc, eq, gt, isNull, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gt, isNull, max, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/durable-sqlite";
 import { z } from "zod";
@@ -85,7 +85,6 @@ import type {
 } from "./agent-scope.ts";
 import { isMessage, runTurn } from "./agent.ts";
 import type { TurnContext, TurnResult } from "./agent.ts";
-import type { AppAnswer } from "./app.ts";
 import { draftFiles } from "./apps.ts";
 import { drainObjectOutbox } from "./audit-outbox.ts";
 import { memberRole } from "./auth/identity.ts";
@@ -98,7 +97,11 @@ import type {
   BuildJobRow,
 } from "./build-job-records.ts";
 import { revokeChatPermissions } from "./chat-connections.ts";
-import { chatMessageOf, partialOf } from "./chat-messages.ts";
+import {
+  chatMessageOf,
+  coreMessageProvider,
+  partialOf,
+} from "./chat-messages.ts";
 import { ChatWatch } from "./chat-watch.ts";
 import type { ChatListener, ChatState } from "./chat-watch.ts";
 import {
@@ -118,6 +121,7 @@ import {
   chatCodeRuns,
   chatDraftFiles,
   maxToolCallIdChars,
+  chatDocuments,
   chatDrafts,
   chatMessages,
   chatProjectDocuments,
@@ -132,14 +136,9 @@ import { readAsDelegate } from "./knowledge/binding.ts";
 import { forContext } from "./knowledge/memory.ts";
 import { catalog, noteListedSkills } from "./knowledge/tools.ts";
 import { gatewaySettings, models } from "./models.ts";
-import {
-  functionProblem,
-  PreviewReports,
-  serverProblem,
-} from "./preview-reports.ts";
+import { functionProblem, PreviewReports } from "./preview-reports.ts";
 import type { Reports } from "./preview-reports.ts";
 import { PreviewUpdates } from "./preview-updates.ts";
-import { Previews } from "./preview.ts";
 import type { WorkContext } from "./restricted.ts";
 import { sessionHost } from "./sandboxed.ts";
 import { SealedPreviews } from "./sealed-previews.ts";
@@ -372,6 +371,24 @@ export interface CodeRunOpening {
  */
 const sourcesSchema = z.array(identifierSchema).max(auditProvenanceMaxItems);
 
+/** Most documents one read hands a chat's code: a page of hits or links. */
+const givenMaxPerRead = 1000;
+
+/**
+ * The documents one read hands a chat's code, by ID: the first
+ * {@link givenMaxPerRead}, as a read past them is still handed over (its
+ * answers then cite no more of it).
+ */
+const givenSchema = z
+  .array(identifierSchema)
+  .transform((ids) => ids.slice(0, givenMaxPerRead));
+
+/**
+ * Most documents a chat keeps as given (`chatDocuments`): its answers may
+ * cite those, the newest; an older one is dropped as a newer comes in.
+ */
+export const chatDocumentsMax = 500;
+
 /**
  * Most chats a person's list shows: their newest. Older ones are still
  * there, and open from a link.
@@ -436,9 +453,9 @@ const interruptedMessage = (): AssistantMessage => ({
       text: "I was interrupted before I finished, so what I was doing may be incomplete. Ask again and I'll go on from here.",
     },
   ],
-  api: "grasp",
-  provider: "grasp",
-  model: "grasp",
+  api: coreMessageProvider,
+  provider: coreMessageProvider,
+  model: coreMessageProvider,
   usage: {
     input: 0,
     output: 0,
@@ -616,9 +633,6 @@ export class Workspace extends DurableObject<Env> {
   /** The chats' build jobs (build-jobs.ts). */
   readonly #jobs = new BuildJobRecords(this.#db);
 
-  /** The chats' previews of their drafts (preview.ts). */
-  readonly #previews = new Previews(this.ctx, this.env);
-
   /** The chats' previews of their drafts of spec 8 Apps (sealed-previews.ts). */
   readonly #sealedPreviews = new SealedPreviews(
     this.ctx,
@@ -715,7 +729,12 @@ export class Workspace extends DurableObject<Env> {
       })
       .returning({ id: chatMessages.id, createdAt: chatMessages.createdAt })
       .get();
-    const shown = chatMessageOf(id, message, createdAt);
+    const shown = chatMessageOf(
+      id,
+      message,
+      createdAt,
+      message.role === "assistant" ? this.#givenBy(chatId)(id) : undefined
+    );
     // A step's result shows all it logged: its output goes in the same update.
     if (message.role === "toolResult") {
       const output = this.#outputs.get(chatId);
@@ -1839,14 +1858,73 @@ export class Workspace extends DurableObject<Env> {
   recordSources(
     chatId: ChatId,
     runId: string,
-    ids: readonly string[]
+    ids: readonly string[],
+    documentIds: readonly string[] = []
   ): CodeRunAdmission["call"] {
     const { call } = this.admitFromCodeRun(chatId, runId);
     if (call !== "open") {
       return call;
     }
-    this.#keepSources(chatId, sourcesSchema.parse(ids));
+    const sources = sourcesSchema.parse(ids);
+    const given = givenSchema.parse(documentIds);
+    this.ctx.storage.transactionSync(() => {
+      this.#keepSources(chatId, sources);
+      this.#keepGiven(chatId, given);
+    });
     return call;
+  }
+
+  /**
+   * Keeps `documentIds` as given to the chat's code: each once, after the
+   * chat's last message when it first was, then drops the oldest past
+   * {@link chatDocumentsMax}: given after an earlier message, or in an
+   * earlier read since the same one (insertion order, `rowid`).
+   */
+  #keepGiven(chatId: ChatId, documentIds: readonly string[]): void {
+    if (documentIds.length === 0) {
+      return;
+    }
+    const last = this.#db
+      .select({ id: max(chatMessages.id) })
+      .from(chatMessages)
+      .where(eq(chatMessages.chatId, chatId))
+      .get();
+    // The WHERE keeps SQLite from reading ON CONFLICT as a join.
+    this.#db
+      .insert(chatDocuments)
+      .select(
+        sql`SELECT ${chatId}, value, ${last?.id ?? 0} FROM json_each(${JSON.stringify([...new Set(documentIds)])}) WHERE true`
+      )
+      .onConflictDoNothing()
+      .run();
+    this.#db.run(
+      sql`DELETE FROM ${chatDocuments} WHERE ${chatDocuments.chatId} = ${chatId} AND ${chatDocuments.documentId} NOT IN (SELECT ${chatDocuments.documentId} FROM ${chatDocuments} WHERE ${chatDocuments.chatId} = ${chatId} ORDER BY ${chatDocuments.givenAfter} DESC, rowid DESC LIMIT ${chatDocumentsMax})`
+    );
+  }
+
+  /**
+   * Whether the chat's message `messageId` may cite a document: one given
+   * to the chat's code before it was stored (after an earlier message),
+   * that the chat still keeps.
+   */
+  #givenBy(
+    chatId: ChatId
+  ): (messageId: number) => (documentId: string) => boolean {
+    const given = new Map(
+      this.#db
+        .select({
+          documentId: chatDocuments.documentId,
+          givenAfter: chatDocuments.givenAfter,
+        })
+        .from(chatDocuments)
+        .where(eq(chatDocuments.chatId, chatId))
+        .all()
+        .map(({ documentId, givenAfter }) => [documentId, givenAfter])
+    );
+    return (messageId) => (documentId) => {
+      const givenAfter = given.get(documentId);
+      return givenAfter !== undefined && messageId > givenAfter;
+    };
   }
 
   /**
@@ -2415,6 +2493,10 @@ export class Workspace extends DurableObject<Env> {
         this.#jobs.deleteChat(id);
         this.#db.delete(chatMessages).where(eq(chatMessages.chatId, id)).run();
         this.#db.delete(chatSources).where(eq(chatSources.chatId, id)).run();
+        this.#db
+          .delete(chatDocuments)
+          .where(eq(chatDocuments.chatId, id))
+          .run();
         this.#db.delete(chatCodeRuns).where(eq(chatCodeRuns.chatId, id)).run();
         this.#db
           .delete(chatAttachments)
@@ -2778,7 +2860,6 @@ export class Workspace extends DurableObject<Env> {
     if (saved) {
       // The preview of the revision before is over: its database goes now;
       // its problems are not the new revision's (preview-reports.ts).
-      this.#previews.drop(chatId, appId);
       this.#sealedPreviews.drop(chatId, appId);
       this.#draftsChanged(chatId);
     }
@@ -2854,12 +2935,11 @@ export class Workspace extends DurableObject<Env> {
 
   /** Stops the chat's preview of App `appId`, and forgets its reports. */
   #dropPreview(chatId: ChatId, appId: string): void {
-    this.#previews.drop(chatId, appId);
     this.#sealedPreviews.drop(chatId, appId);
     this.#previewReports.drop(chatId, appId);
   }
 
-  // A chat's preview of its draft of an App (preview.ts), for the chat's
+  // A chat's preview of its draft of an App (sealed-previews.ts), for the chat's
   // own person and the chat's agent acting for them: core checks the
   // person's role in the App first (chats-rpc.ts, agent-builds.ts).
 
@@ -2995,71 +3075,6 @@ export class Workspace extends DurableObject<Env> {
     logs: ServerLog[]
   ): void {
     this.#previewReports.log(chatId, appId, revision, logs);
-  }
-
-  /**
-   * Calls `method` of the server code of `personId`'s own chat's draft of
-   * App `appId` with `args`, in its preview, as the draft is now: for the
-   * chat's agent (`env.build.call`), which hears how it went, so nothing
-   * is kept of it.
-   */
-  async callDraft(
-    chatId: unknown,
-    personId: string,
-    appId: string,
-    method: string,
-    args: unknown[]
-  ): Promise<AppAnswer> {
-    // Not the side panel's: the preview doesn't count as open for it.
-    const { id, draft } = this.#draftToPreview(chatId, personId, appId);
-    return await this.#previews.call(
-      id,
-      personId,
-      appIdSchema.parse(appId),
-      draft,
-      method,
-      args
-    );
-  }
-
-  /**
-   * Calls `method` of the server code of `personId`'s own chat's draft of
-   * App `appId` with `args`, in its preview, as a screen of the draft at
-   * `revision` does: `app.preview_outdated` once it is at another. What
-   * the draft's code failed with is kept for the agent's next check.
-   */
-  async previewCall(
-    chatId: unknown,
-    personId: string,
-    appId: string,
-    revision: unknown,
-    method: string,
-    args: unknown[]
-  ): Promise<AppAnswer> {
-    const draft = this.previewDraft(chatId, personId, appId);
-    if (draft.revision !== revision) {
-      throw appErrors.create("app.preview_outdated");
-    }
-    const id = chatIdSchema.parse(chatId);
-    try {
-      return await this.#previews.call(
-        id,
-        personId,
-        appIdSchema.parse(appId),
-        draft,
-        method,
-        args
-      );
-    } catch (error) {
-      const problem = serverProblem(method, error);
-      if (problem !== undefined) {
-        this.#previewReports.report(id, appId, draft.revision, problem);
-      }
-      throw error;
-    } finally {
-      // Once the call ended, however: its failure is kept by then.
-      this.#previewReports.saw(id, appId, draft.revision);
-    }
   }
 
   /**
@@ -3385,6 +3400,7 @@ export class Workspace extends DurableObject<Env> {
 
   /** The chat's messages stored after the one with ID `after`, as shown. */
   #shownAfter(chatId: ChatId, after: number): ChatMessage[] {
+    const givenBy = this.#givenBy(chatId);
     return this.#db
       .select()
       .from(chatMessages)
@@ -3395,7 +3411,8 @@ export class Workspace extends DurableObject<Env> {
         const shown = chatMessageOf(
           id,
           storedMessageSchema.parse(JSON.parse(message)),
-          createdAt
+          createdAt,
+          givenBy(id)
         );
         return shown === undefined ? [] : [shown];
       });

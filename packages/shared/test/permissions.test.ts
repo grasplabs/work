@@ -110,6 +110,7 @@ describe("reserved binding names", () => {
     "TOKEN_ENCRYPTION_KEY_PREVIOUS",
     "AUDIT_RETENTION_DAYS",
     "RUN_RETENTION_DAYS",
+    "INBOUND_MAIL_DOMAIN",
     "ENTRA_CLIENT_SECRET",
     "GOOGLE_CLIENT_SECRET",
   ])("refuses %s, which only the platform may use", (name) => {

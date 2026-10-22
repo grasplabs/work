@@ -8,7 +8,7 @@ import { resource } from "../src/action.ts";
 
 /** Why declaring `kind` use `docs` with `options` was refused. */
 const refusalOf = (
-  kind: "knowledge" | "connector",
+  kind: "knowledge" | "connector" | "files",
   options: unknown
 ): string => {
   try {
@@ -37,6 +37,14 @@ describe("an action's declared uses", () => {
     expect(refusalOf("knowledge", { operations: ["delete"] })).toMatch(
       /"search", "read" or both/u
     );
+  });
+
+  test.each([
+    ["no operations", []],
+    ["the same operation twice", ["read", "read"]],
+    ["an operation it has no such name for", ["append"]],
+  ])("a files use with %s is refused as a files use's", (_case, operations) => {
+    expect(refusalOf("files", { operations })).toMatch(/files use/u);
   });
 
   test("a connector use with no operations is refused as a connector use's", () => {

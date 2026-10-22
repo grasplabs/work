@@ -13,6 +13,7 @@ import { MemoryRpc } from "./knowledge/memory-rpc.ts";
 import { KnowledgeRpc } from "./knowledge/rpc.ts";
 import { KnowledgeSignalsRpc } from "./knowledge/signals-rpc.ts";
 import { UploadsRpc } from "./knowledge/uploads-rpc.ts";
+import { LandscapeRpc } from "./landscape.ts";
 import { MembersRpc } from "./members.ts";
 import { ModelsRpc } from "./models-rpc.ts";
 import { NotificationsRpc } from "./notifications.ts";
@@ -60,6 +61,7 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
   readonly #resourceBindings: ResourceBindingsRpc;
   readonly #templates: TemplatesRpc;
   readonly #connections: ConnectionsRpc;
+  readonly #landscape: LandscapeRpc;
   readonly #workflows: WorkflowsRpc;
   readonly #workflowResources: WorkflowResourcesRpc;
   readonly #decisions: DecisionsRpc;
@@ -100,6 +102,7 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
     this.#resourceBindings = new ResourceBindingsRpc(env, full);
     this.#templates = new TemplatesRpc(env, full);
     this.#connections = new ConnectionsRpc(env, full);
+    this.#landscape = new LandscapeRpc(env, full);
     this.#workflows = new WorkflowsRpc(env, full);
     this.#workflowResources = new WorkflowResourcesRpc(env, full);
     this.#decisions = new DecisionsRpc(env, full);
@@ -195,6 +198,10 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
 
   get connections(): ConnectionsRpc {
     return this.#connections;
+  }
+
+  get landscape(): LandscapeRpc {
+    return this.#landscape;
   }
 
   get workflows(): WorkflowsRpc {

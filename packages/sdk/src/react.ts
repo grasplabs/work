@@ -122,7 +122,11 @@ export type {
   WorkflowReference,
   WorkflowWait,
 } from "./references.ts";
-export type { Navigate, NavigateOptions } from "./client-navigation.ts";
+export type {
+  Navigate,
+  NavigateOptions,
+  SurfaceNavigateOptions,
+} from "./client-navigation.ts";
 export type {
   DeleteOptions,
   DownloadOptions,

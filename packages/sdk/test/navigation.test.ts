@@ -69,13 +69,9 @@ const unchecked = (value?: unknown): never =>
 const looseNavigate = (
   client: GraspClient
 ): ((screen: unknown, input: unknown) => Promise<void>) =>
-  // SAFETY: the same function, called with what its types refuse, on
-  // purpose: the client must refuse it at run time.
-  // oxlint-disable-next-line typescript/no-unsafe-type-assertion, anti-slop/no-chained-type-assertions -- see SAFETY
-  client.navigate as unknown as (
-    screen: unknown,
-    input: unknown
-  ) => Promise<void>;
+  // The same function: its implementation takes anything, and refuses at
+  // run time what its types refuse.
+  client.navigate;
 
 describe("navigating to another of the App's screens", () => {
   it("asks the host for a screen by its route name, with its input as its schema normalizes it, pushing unless told to replace", async () => {
@@ -105,9 +101,6 @@ describe("navigating to another of the App's screens", () => {
       forged: await outcome(
         looseNavigate(client)({ name: "note", path: "/notes/:id" }, {})
       ),
-      surface: await outcome(
-        client.navigate(screens.notes, {}, unchecked({ surface: "panel" }))
-      ),
       replaceNotBoolean: await outcome(
         client.navigate(screens.notes, {}, unchecked({ replace: "yes" }))
       ),
@@ -123,10 +116,64 @@ describe("navigating to another of the App's screens", () => {
         url: "navigation.invalid_screen",
         path: "navigation.invalid_screen",
         forged: "navigation.invalid_screen",
-        surface: "contract.invalid_args",
         replaceNotBoolean: "contract.invalid_args",
         nullInput: "contract.invalid_args",
         noHost: "navigation.unavailable",
+      },
+      sent: [],
+    });
+  });
+
+  it("asks the host for one of the screen's declared surfaces, with that surface's input normalized, never replacing", async () => {
+    const { client, sent } = hosted();
+    await client.navigate(screens.note, { id: noteId }, { surface: "beside" });
+    await client.navigate(screens.notes, {}, { surface: "all" });
+    expect(sent).toStrictEqual([
+      { screen: "note", input: { id: noteId }, surface: "beside" },
+      { screen: "notes", input: {}, surface: "all" },
+    ]);
+  });
+
+  it("refuses, sending nothing, a surface the screen doesn't declare, a surface with replace, and input the surface refuses", async () => {
+    const { client, sent } = hosted();
+    const results = {
+      otherScreens: await outcome(
+        client.navigate(screens.notes, {}, unchecked({ surface: "beside" }))
+      ),
+      undeclared: await outcome(
+        client.navigate(
+          screens.note,
+          { id: noteId },
+          unchecked({ surface: "panel" })
+        )
+      ),
+      prototypeName: await outcome(
+        client.navigate(
+          screens.note,
+          { id: noteId },
+          unchecked({ surface: "constructor" })
+        )
+      ),
+      withReplace: await outcome(
+        client.navigate(
+          screens.note,
+          { id: noteId },
+          unchecked({ surface: "beside", replace: true })
+        )
+      ),
+      wrongInput: await outcome(
+        client.navigate(screens.note, unchecked({ id: 7 }), {
+          surface: "beside",
+        })
+      ),
+    };
+    expect({ results, sent }).toStrictEqual({
+      results: {
+        otherScreens: "contract.invalid_args",
+        undeclared: "contract.invalid_args",
+        prototypeName: "contract.invalid_args",
+        withReplace: "contract.invalid_args",
+        wrongInput: "contract.invalid_args",
       },
       sent: [],
     });

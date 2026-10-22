@@ -80,10 +80,10 @@ export const tabLink = (core: CoreConnection, onEnded: Ended): Joined => {
 
 /**
  * A link of one frame's own, closed when the frame leaves: for a draft's
- * preview, as core keeps the callbacks its server calls pass
- * (`chats.previewCall`) per connection, with no capability of the frame's
- * own to let go of them, so only closing its connection when the preview
- * stops releases them. Ending it ends the preview alone.
+ * preview, as core keeps what the preview follows (its live queries, its
+ * streams) per connection, with no capability of the frame's own to let
+ * go of them, so only closing its connection when the preview stops
+ * releases them. Ending it ends the preview alone.
  */
 export const ownLink = (onEnded: Ended): Joined => {
   const link = new CoreLink(onEnded);

@@ -189,6 +189,10 @@ describe("audit event types", () => {
     expect(typeOf("model.budget.alert")).toBe("config");
   });
 
+  it("files core recording a new quota policy as configuration", () => {
+    expect(typeOf("quota_policy.recorded")).toBe("config");
+  });
+
   it("files a restricted context and a staff sign-in under permissions", () => {
     expect(typeOf("context.restricted")).toBe("permission");
     expect(typeOf("staff.session.started")).toBe("permission");

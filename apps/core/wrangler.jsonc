@@ -80,6 +80,11 @@
   // `RUN_RETENTION_DAYS` var (src/workflows/retention.ts), 30 days unless
   // set, from 1 to 30: the engine keeps an ended run's record no longer.
   //
+  // And the domain the deployment receives mail at, `INBOUND_MAIL_DOMAIN`
+  // (src/workflows/overview.ts): the one Email Routing's catch-all rule,
+  // set up outside core, sends to core. An email trigger's address shows
+  // whole with it, `<local part>@<domain>`, and as its local part without.
+  //
   // And the runtime profile, `RUNTIME_PROFILE` (src/code-mode.ts): only
   // `cloudflare` makes Code Mode's run record claim the CPU limit as
   // enforced. Not a var here, which local dev and tests read too: staging's
