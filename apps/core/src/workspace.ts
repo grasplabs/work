@@ -895,11 +895,11 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
-   * Stores `message` as the chat's next, and shows it to its watchers;
-   * its ID.
+   * Stores `message` as the chat's next, and marks the chat active then:
+   * every message moves it up its person's list.
    */
-  #keep(chatId: ChatId, message: Message): number {
-    const { id, createdAt } = this.#db
+  #store(chatId: ChatId, message: Message): { id: number; createdAt: Date } {
+    const stored = this.#db
       .insert(chatMessages)
       .values({
         chatId,
@@ -910,9 +910,18 @@ export class Workspace extends DurableObject<Env> {
       .get();
     this.#db
       .update(chats)
-      .set({ lastAt: createdAt })
+      .set({ lastAt: stored.createdAt })
       .where(eq(chats.id, chatId))
       .run();
+    return stored;
+  }
+
+  /**
+   * Stores `message` as the chat's next, and shows it to its watchers;
+   * its ID.
+   */
+  #keep(chatId: ChatId, message: Message): number {
+    const { id, createdAt } = this.#store(chatId, message);
     const shown = chatMessageOf(
       id,
       message,
@@ -3389,14 +3398,7 @@ export class Workspace extends DurableObject<Env> {
       content: `The change you asked for, "${action}" (pending ID ${id}), was decided. ${heldOutcomes[outcome]} Read how it ended, with what it returned, with \`env.connections.outcome("${id}")\`.`,
       timestamp: Date.now(),
     };
-    this.#db
-      .insert(chatMessages)
-      .values({
-        chatId: chat.id,
-        message: JSON.stringify(message),
-        createdAt: new Date(),
-      })
-      .run();
+    this.#store(chat.id, message);
   }
 
   /**
@@ -3420,14 +3422,7 @@ export class Workspace extends DurableObject<Env> {
           : `The connection you asked for as "${name}" was denied: this chat can't use it. Don't ask for it again unless the person says so.`,
       timestamp: Date.now(),
     };
-    this.#db
-      .insert(chatMessages)
-      .values({
-        chatId: chat.id,
-        message: JSON.stringify(message),
-        createdAt: new Date(),
-      })
-      .run();
+    this.#store(chat.id, message);
     this.heldChanged(chat.id);
   }
 
