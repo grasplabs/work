@@ -2,7 +2,7 @@
 // shards (scripts/test-shards.ts), from the shards' test-progress
 // artifacts (scripts/stall-reporter.ts writes them):
 //
-//   gh run download <run> -n test-progress-1-of-4 -D runs/<run>-1
+//   gh run download <run> -n test-progress-1-of-6 -D runs/<run>-1
 //   ...
 //   vp run test:durations runs/*/test-progress.log
 //
@@ -18,21 +18,44 @@ import { byKey } from "./test-shards.ts";
 
 /** A finished test in a progress log: when, how it ended, how long it took, and its file and name. */
 const progressLine =
-  /^\S+ \S+(?: (?<ms>\d+)ms)? (?<project>\S+) (?<file>\S+) > /u;
+  /^(?<at>\S+) \S+(?: (?<ms>\d+)ms)? (?<project>\S+) (?<file>\S+) > /u;
 
-/** Seconds per file, `<project> <file>`, as one progress log has them: the sum of its tests. */
+/**
+ * Seconds per file, `<project> <file>`, as one progress log has them: from
+ * the start of its first test (when it finished, less its time) to when
+ * its last finished, which counts the hooks between its tests too (a
+ * fresh store, a sign-in), or the sum of its tests' times when that is
+ * more (a log without readable times).
+ */
 export const fileSecondsIn = (log: string): Map<string, number> => {
-  const seconds = new Map<string, number>();
+  const files = new Map<string, { sum: number; from: number; to: number }>();
   for (const line of log.split("\n")) {
     const match = progressLine.exec(line);
     if (match?.groups === undefined) {
       continue;
     }
-    const { ms, project, file } = match.groups;
+    const { at, ms, project, file } = match.groups;
     const key = `${project} ${file}`;
-    seconds.set(key, (seconds.get(key) ?? 0) + Number(ms ?? 0) / 1000);
+    const took = Number(ms ?? 0);
+    const finished = Date.parse(at ?? "");
+    const seen = files.get(key) ?? {
+      sum: 0,
+      from: Number.POSITIVE_INFINITY,
+      to: Number.NEGATIVE_INFINITY,
+    };
+    seen.sum += took;
+    if (Number.isFinite(finished)) {
+      seen.from = Math.min(seen.from, finished - took);
+      seen.to = Math.max(seen.to, finished);
+    }
+    files.set(key, seen);
   }
-  return seconds;
+  return new Map(
+    [...files].map(([key, { sum, from, to }]) => [
+      key,
+      Math.max(sum, Number.isFinite(from) ? to - from : 0) / 1000,
+    ])
+  );
 };
 
 /** The durations as the file keeps them: seconds per `<project> <file>`. */

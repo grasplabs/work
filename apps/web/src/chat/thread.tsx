@@ -1,4 +1,5 @@
 import type {
+  ChatCitation,
   ChatCode,
   ChatMessage,
   ChatOutput,
@@ -248,7 +249,12 @@ const Reply = ({
   sign,
   onRetry,
 }: {
-  reply: ChatPartial & { end?: Answer["end"]; error?: string };
+  reply: ChatPartial & {
+    end?: Answer["end"];
+    error?: string;
+    /** A stored answer's citations; one being written has none. */
+    citations?: ChatCitation[];
+  };
   results: ReadonlyMap<string, Result>;
   /** What the running code step has logged so far. */
   output: ChatOutput | null;
@@ -269,7 +275,12 @@ const Reply = ({
       {top}
       <Message from="assistant">
         <MessageContent>
-          {answer === "" ? null : <MessageResponse text={reply.text} />}
+          {answer === "" ? null : (
+            <MessageResponse
+              cited={reply.citations?.map(({ documentId }) => documentId)}
+              text={reply.text}
+            />
+          )}
           {reply.code.map((code) => (
             <CodeStep
               code={code}

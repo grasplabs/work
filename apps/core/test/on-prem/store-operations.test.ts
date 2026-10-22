@@ -6,6 +6,7 @@ import type { Release } from "../../src/app-releases.ts";
 import { appFor, setCurrentVersion } from "../../src/apps.ts";
 import { grantPermission, requestPermission } from "../../src/permissions.ts";
 import { approveResourceBinding } from "../../src/resource-bindings.ts";
+import { deepFiles, fieldDepth } from "../deep-records.ts";
 import { appWith, person, seal } from "../sealed-apps.ts";
 import type { Fixture } from "../sealed-apps.ts";
 
@@ -163,5 +164,42 @@ describe("a shared store's operation on-prem", () => {
     await expect(Promise.all([list(desk), list(other)])).resolves.toStrictEqual(
       [[], []]
     );
+  });
+});
+
+/** What `sealed`'s owner gets calling `path` of its App with `input`. */
+const called = async (
+  { owner, app, release }: Sealed,
+  path: string,
+  kind: "query" | "mutation",
+  input: unknown
+): Promise<unknown> => {
+  const answer = await callAppFunction(
+    env,
+    owner,
+    app,
+    JSON.stringify({
+      reference: {
+        resourceId: release.manifest.resourceId,
+        resourceVersion: release.manifest.resourceVersion,
+        contractId: path,
+        fingerprint: release.fingerprints[path] ?? "",
+        kind,
+      },
+      input,
+    })
+  );
+  return answer.result.ok ? answer.result.value : answer.result.error.code;
+};
+
+describe("a record as deep as a store keeps, on-prem", () => {
+  it("is written and read back through the sandbox session, every level of it", async () => {
+    const deep = await sealedApp(deepFiles, "Deep");
+    const id = await called(deep, "deep.put", "mutation", {});
+    const levels = await called(deep, "deep.read", "query", { id });
+    expect({ written: typeof id, levels }).toStrictEqual({
+      written: "string",
+      levels: fieldDepth,
+    });
   });
 });

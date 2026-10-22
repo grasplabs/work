@@ -14,9 +14,9 @@ import { appHost, workspace } from "./durable-objects.ts";
 // - a live App's lines go to its error log (app-error-log.ts), in the
 //   App's own Durable Object, with its screens' problems;
 // - a draft's preview's lines go to the chat's Workspace object, for the
-//   agent's next check of the draft (preview-reports.ts): a v1 draft's
-//   facet (preview.ts), and each isolate a spec 8 draft's sealed preview
-//   runs a function in (sealed-previews.ts), named by that function. Its
+//   agent's next check of the draft (preview-reports.ts): each isolate a
+//   draft's sealed preview runs a function in (sealed-previews.ts), named
+//   by that function. Its
 //   props are core's, fixed as the isolate is made, never App code's: its
 //   lines reach only that chat's preview, at that revision.
 //

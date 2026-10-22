@@ -2,8 +2,12 @@ import { screenErrors } from "@grasp-os/shared/screens";
 import type { ScreenTarget } from "@grasp-os/shared/screens";
 import { describe, expect, it } from "vite-plus/test";
 
-import { navigationPolicy, stayCooldownMs } from "./navigation-policy.ts";
-import type { PageNavigate } from "./navigation-policy.ts";
+import {
+  navigationPolicy,
+  stayCooldownMs,
+  tabBudget,
+} from "./navigation-policy.ts";
+import type { PageNavigate, TabBudget } from "./navigation-policy.ts";
 
 // What one start of a screen's frame may do to the page: the person's own
 // moves win over the App's, a person who chose to stay isn't asked again
@@ -21,8 +25,8 @@ const answerOf = async (navigation: Promise<void>): Promise<string> => {
   }
 };
 
-/** A page at `/start`, the person active, and a clock to move. */
-const pageAt = () => {
+/** A page at `/start` in `tab`, the person active, and a clock to move. */
+const pageAt = (tab: TabBudget = tabBudget()) => {
   const state = {
     here: "/start",
     going: "/start",
@@ -39,11 +43,15 @@ const pageAt = () => {
       throw screenErrors.create("screen.navigation_cancelled");
     }
   };
-  const policy = navigationPolicy(go, {
-    location: () => ({ here: state.here, going: state.going }),
-    activated: () => state.activated,
-    now: () => state.now,
-  });
+  const policy = navigationPolicy(
+    go,
+    {
+      location: () => ({ here: state.here, going: state.going }),
+      activated: () => state.activated,
+      now: () => state.now,
+    },
+    tab
+  );
   const asked = async (replace = false): Promise<string> => {
     try {
       await policy.navigate(note, replace);
@@ -115,7 +123,8 @@ describe("a screen's navigation of the page", () => {
         location: () => ({ here: "/start", going: "/start" }),
         activated: () => true,
         now: () => 0,
-      }
+      },
+      tabBudget()
     );
     const waiting = answerOf(policy.navigate(note, false));
     await Promise.resolve();
@@ -177,6 +186,7 @@ describe("a screen's navigation of the page", () => {
         activated: () => true,
         now: () => 0,
       },
+      tabBudget(),
       "beside"
     );
     state.here = "/inbox";
@@ -204,6 +214,7 @@ describe("a screen's navigation of the page", () => {
         activated: () => acted,
         now: () => 0,
       },
+      tabBudget(),
       "beside"
     );
     const unprompted = await answerOf(policy.navigate(note, false));
@@ -213,6 +224,37 @@ describe("a screen's navigation of the page", () => {
       unprompted: "screen.navigation_cancelled",
       clicked: "went",
       went: 1,
+    });
+  });
+
+  it("goes once without the person acting across every start in the tab, so starts can't chain, until the person acts", async () => {
+    const tab = tabBudget();
+    // A screen that navigates as it mounts, started again each time it goes.
+    const first = pageAt(tab);
+    first.state.activated = false;
+    const mounted = await first.asked();
+    const next = pageAt(tab);
+    next.state.activated = false;
+    const chained = await next.asked();
+    const chainedInPlace = await next.asked(true);
+    // The person acts: the tab may go once more on its own after that.
+    next.state.activated = true;
+    const clicked = await next.asked();
+    const later = pageAt(tab);
+    later.state.activated = false;
+    const afterActing = await later.asked();
+    expect({
+      mounted,
+      chained,
+      chainedInPlace,
+      clicked,
+      afterActing,
+    }).toStrictEqual({
+      mounted: "went",
+      chained: "screen.navigation_cancelled",
+      chainedInPlace: "screen.navigation_cancelled",
+      clicked: "went",
+      afterActing: "went",
     });
   });
 
