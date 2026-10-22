@@ -197,13 +197,24 @@ export const verifiedCandidateStatements = (
 ): D1PreparedStatement[] => {
   const id = crypto.randomUUID();
   const hash = "0".repeat(64);
+  // Based on whatever is current when the batch runs, as the trigger
+  // requires; an open candidate already holding that key steps aside, as
+  // a newer candidate would supersede it.
+  const base = "(SELECT coalesce(current_version, 0) FROM apps WHERE id = ?)";
   return [
     db
       .prepare(
-        `INSERT INTO app_candidates (id, app_id, version, source_tree, based_on, state, created_by, created_at, updated_at)
-         VALUES (?, ?, ?, 'test', ?, 'frozen', 'test', 0, 0)`
+        `UPDATE app_candidates SET state = 'superseded'
+         WHERE app_id = ? AND version = ? AND based_on = ${base}
+           AND state IN ('frozen', 'checking', 'building', 'verifying', 'verified')`
       )
-      .bind(id, app, version, -1 - Math.floor(Math.random() * 1e9)),
+      .bind(app, version, app),
+    db
+      .prepare(
+        `INSERT INTO app_candidates (id, app_id, version, source_tree, based_on, state, created_by, created_at, updated_at)
+         VALUES (?, ?, ?, 'test', ${base}, 'frozen', 'test', 0, 0)`
+      )
+      .bind(id, app, version, app),
     ...["checking", "building", "verifying"].map((state) =>
       db
         .prepare("UPDATE app_candidates SET state = ? WHERE id = ?")

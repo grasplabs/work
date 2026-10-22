@@ -63,6 +63,10 @@ import { appCandidateReports, appCandidates } from "./db/core/schema.ts";
 // - Two runs, or a request made twice: one open candidate per version and
 //   base (a unique index); freezing again finds it, and one run at a time
 //   holds its lease.
+// - A rollout's newer Worker retiring a candidate (verified by the older
+//   one's compiler) after the older one switched a store for it, before
+//   making it current: an activation claims its candidate before anything
+//   switches, and retirement skips a claimed one (`claimActivation`).
 // - A crash mid-stage: the lease expires and the next request takes it
 //   over, one attempt more; each stage can run again (a sealed release is
 //   found sealed, and the gates read only what they read before). After
@@ -631,26 +635,36 @@ const verifiedHere = async (
   );
 };
 
-/** Ends the verified `candidate` as rejected, for `outcome`. */
+/** Holds while nobody's activation claim on a candidate is live. */
+const unclaimed = (now: Date): SQL | undefined =>
+  or(isNull(appCandidates.lease), lt(appCandidates.leaseUntil, now));
+
+/**
+ * Ends the verified `candidate` as rejected, for `outcome`, unless an
+ * activation claims it (`claimActivation`). Whether it ended.
+ */
 const retire = async (
   env: Env,
   by: Identity,
   candidate: CandidateRow,
   outcome: string,
   also?: SQL
-): Promise<void> => {
+): Promise<boolean> => {
   const db = drizzle(env.DB);
-  await auditedBatch(env, db, [
+  const now = new Date();
+  const [retired] = await auditedBatch(env, db, [
     db
       .update(appCandidates)
-      .set({ state: "rejected", outcome, updatedAt: new Date() })
+      .set({ state: "rejected", outcome, updatedAt: now })
       .where(
         and(
           eq(appCandidates.id, candidate.id),
           eq(appCandidates.state, "verified"),
+          unclaimed(now),
           also
         )
-      ),
+      )
+      .returning({ id: appCandidates.id }),
     outboxedIfChanged(
       db,
       changeEntry(
@@ -667,6 +681,70 @@ const retire = async (
       )
     ),
   ]);
+  return retired.length > 0;
+};
+
+/**
+ * Claims the verified `candidate` for one activation, until its lease
+ * ends: a verified candidate holds no run's lease (`move` lets it go), so
+ * its lease columns hold this claim. Undefined if it is no longer
+ * verified, or another activation's claim is live.
+ *
+ * Why: making a version current switches a ready migration's store
+ * first (`makeCurrent`), in a Durable Object that shares no transaction
+ * with D1, and then makes it current in one batch that requires the
+ * candidate still verified. During a rollout an older and a newer Worker
+ * overlap; the newer one retires a candidate the older one verified
+ * (`app.candidate_environment`). Landing between the older one's store
+ * switch and its batch, that retirement would refuse the batch and leave
+ * the version still current locked out of a store whose schema moved on.
+ * A claim taken in one statement before the switch, which retirement
+ * skips while it is live, closes that: retirement lands before the claim
+ * (and the activation switches nothing) or waits until the batch made the
+ * candidate active. The claim ends with that batch (it clears the lease)
+ * or, if the activation fails, as it returns; a crashed activation's claim
+ * expires.
+ */
+const claimActivation = async (
+  env: Env,
+  candidate: CandidateRow
+): Promise<string | undefined> => {
+  const lease = crypto.randomUUID();
+  const now = new Date();
+  const [claimed] = await drizzle(env.DB)
+    .update(appCandidates)
+    .set({
+      lease,
+      leaseUntil: new Date(now.getTime() + candidateLeaseMs),
+      updatedAt: now,
+    })
+    .where(
+      and(
+        eq(appCandidates.id, candidate.id),
+        eq(appCandidates.state, "verified"),
+        unclaimed(now)
+      )
+    )
+    .returning({ id: appCandidates.id });
+  return claimed === undefined ? undefined : lease;
+};
+
+/** Lets the activation claim `lease` on `candidate` go, if it still holds. */
+const releaseActivation = async (
+  env: Env,
+  candidate: CandidateRow,
+  lease: string
+): Promise<void> => {
+  await drizzle(env.DB)
+    .update(appCandidates)
+    .set({ lease: null, leaseUntil: null, updatedAt: new Date() })
+    .where(
+      and(
+        eq(appCandidates.id, candidate.id),
+        eq(appCandidates.state, "verified"),
+        eq(appCandidates.lease, lease)
+      )
+    );
 };
 
 /**
@@ -703,8 +781,20 @@ export const activateCandidate = async (
     throw appErrors.create("app.conflict");
   }
   if (!(await verifiedHere(env, candidate))) {
-    await retire(env, by, candidate, "app.candidate_environment");
+    // Claimed by another activation, which goes on: this one waits.
+    if (!(await retire(env, by, candidate, "app.candidate_environment"))) {
+      throw appErrors.create("app.candidate_busy");
+    }
     throw appErrors.create("app.candidate_environment");
+  }
+  const lease = await claimActivation(env, candidate);
+  if (lease === undefined) {
+    const now = await candidateOf(env, candidate.id);
+    if (now.state === "verified") {
+      throw appErrors.create("app.candidate_busy");
+    }
+    // Made current by another activation, or ended: `makeCurrent` answers
+    // the one and refuses the other, as it would have unclaimed.
   }
   try {
     return await makeCurrent(env, by, candidate.appId, candidate.version, {
@@ -714,9 +804,16 @@ export const activateCandidate = async (
     });
   } catch (error) {
     if (isExpectedError(error) && error.code === "app.conflict") {
+      if (lease !== undefined) {
+        await releaseActivation(env, candidate, lease);
+      }
       await rejectStale(env, by, candidate);
     }
     throw error;
+  } finally {
+    if (lease !== undefined) {
+      await releaseActivation(env, candidate, lease);
+    }
   }
 };
 

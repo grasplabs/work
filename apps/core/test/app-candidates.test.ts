@@ -143,6 +143,30 @@ const verifiedCandidate = async (
   return await runCandidate(env, by, frozen, sealing(by, app, version));
 };
 
+/**
+ * Core's database as a Worker running another compiler reads it: every
+ * report's environment is one it didn't verify under, as for the newer
+ * Worker of a rollout.
+ */
+const otherCompilerDb = (): D1Database => {
+  const real = env.DB;
+  return {
+    prepare: (query) =>
+      real.prepare(
+        query.replace(
+          /^select "report" from "app_candidate_reports"/u,
+          `select json_set("report", '$.environment.compilerVersion', 'other') from "app_candidate_reports"`
+        )
+      ),
+    batch: async <T>(statements: D1PreparedStatement[]) =>
+      await real.batch<T>(statements),
+    exec: async (query) => await real.exec(query),
+    // oxlint-disable-next-line typescript/no-deprecated -- D1Database still has it
+    dump: async () => await real.dump(),
+    withSession: (constraint) => real.withSession(constraint),
+  };
+};
+
 /** Runs `statement`, answering the error it was aborted with, or "ok". */
 const aborted = async (statement: string, ...binds: unknown[]) =>
   await failure(
@@ -420,6 +444,69 @@ describe(
         outcomes: [
           ["earlier", "rejected", "app.candidate_environment"],
           ["again", "active", null],
+        ],
+      });
+    });
+
+    it("lets an activation that claimed its candidate finish before a newer release retires it", async () => {
+      // An older and a newer Worker overlap in a rollout; the newer one
+      // retires what the older verified. Landing after the older one's
+      // claim (and so after any store it switched), the retirement waits,
+      // and the activation completes.
+      const { owner, app } = await appWith(helloFiles());
+      const verified = await verifiedCandidate(owner, app, 1);
+      let retirement = "";
+      const racing = racingDb(async () => {
+        retirement = await failure(
+          async () =>
+            await activateCandidate(
+              { ...env, DB: otherCompilerDb() },
+              owner,
+              verified
+            )
+        );
+      }, /^update "apps" set "current_version"/iu);
+      const activated = await activateCandidate(
+        { ...env, DB: racing },
+        owner,
+        verified
+      );
+      // Landing first, it retires the candidate, and nothing switches.
+      const other = await appWith(helloFiles());
+      const retired = await verifiedCandidate(other.owner, other.app, 1);
+      const newer = await failure(
+        async () =>
+          await activateCandidate(
+            { ...env, DB: otherCompilerDb() },
+            other.owner,
+            retired
+          )
+      );
+      const older = await failure(
+        async () => await activateCandidate(env, other.owner, retired)
+      );
+      const after = await candidate(verified.id);
+      expect({
+        retirement,
+        current: activated.currentVersion,
+        state: after?.state,
+        lease: after?.lease,
+        retiredFirst: [
+          newer,
+          older,
+          await fieldOf(retired.id, "state"),
+          await currentOf(other.app),
+        ],
+      }).toStrictEqual({
+        retirement: "app.candidate_busy",
+        current: 1,
+        state: "active",
+        lease: null,
+        retiredFirst: [
+          "app.candidate_environment",
+          "app.conflict",
+          "rejected",
+          null,
         ],
       });
     });

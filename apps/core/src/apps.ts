@@ -1411,10 +1411,16 @@ export const makeCurrent = async (
           )
           .returning(),
         outboxedEventWhere(db, event, sql`changes() > 0`),
-        // The candidate it was made current from is active from now on.
+        // The candidate it was made current from is active from now on,
+        // and the activation's claim on it ends (app-candidates.ts).
         db
           .update(appCandidates)
-          .set({ state: "active", lease: null, updatedAt: new Date() })
+          .set({
+            state: "active",
+            lease: null,
+            leaseUntil: null,
+            updatedAt: new Date(),
+          })
           .where(
             and(
               eq(appCandidates.id, candidate.id),
