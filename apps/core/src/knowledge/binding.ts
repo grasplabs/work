@@ -120,8 +120,7 @@ export const collectionReads = (
  * `await env.HANDBOOK.getDocument(id)`. Like a connection stub, it is a
  * loopback entrypoint whose props core sets, and each call reads the
  * permission records again (`collectionReads`). It acts for the one person
- * in its props; an App's stubs take the caller per call instead
- * (`AppCollectionBinding`).
+ * in its props.
  */
 export class CollectionBinding
   extends WorkerEntrypoint<Env, CollectionGrant & { authority: Authority }>

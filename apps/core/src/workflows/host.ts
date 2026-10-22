@@ -200,9 +200,8 @@ interface StepAttempt {
   /** The generation of the activation that claimed it. */
   generation: number;
   /**
-   * When the engine gives up on it, by the step's timeout: an App call it
-   * makes waits for the App no longer (`callApp`), and none of its calls
-   * acts after it.
+   * When the engine gives up on it, by the step's timeout: none of its
+   * calls acts after it.
    */
   deadline: number;
   /** Whether its function has returned: its host acts no more. */
