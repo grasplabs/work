@@ -181,6 +181,48 @@ export const sly = query({
   },
 });
 
+/** Throws text of its own, unlike \`broken\`'s. */
+export const alsoBroken = query({
+  args: {},
+  returns: v.null(),
+  handler: () => {
+    throw new Error("Note 8 has no body.");
+  },
+});
+
+/** Handles \`broken\`'s failure, then fails on \`alsoBroken\`'s. */
+export const handledThenFailed = action({
+  args: {},
+  returns: v.null(),
+  uses: [broken, alsoBroken],
+  handler: async (ctx) => {
+    try {
+      await ctx.runQuery(broken, {});
+    } catch {
+      // Handled: the call goes on.
+    }
+    await ctx.runQuery(alsoBroken, {});
+    return null;
+  },
+});
+
+/**
+ * Fails while there are no notes, a moment after it read none: a note
+ * written meanwhile makes that read stale, and its run again answers.
+ */
+export const patient = query({
+  args: {},
+  returns: v.array(v.string()),
+  handler: async (ctx) => {
+    const notes = await ctx.db.query("notes").take(100);
+    if (notes.length === 0) {
+      await wait(2000);
+      throw new Error("No notes yet.");
+    }
+    return notes.map((note) => note.title);
+  },
+});
+
 /** Calls \`broken\`, and answers anyway: nothing failed for its caller. */
 export const forgiving = action({
   args: {},
@@ -220,14 +262,14 @@ export const consult = action({
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { broken, chatty, consult, create, forgiving, late, list, oddly, rethrows, sly, titles, writer } from "./operations/notes.ts";
+import { alsoBroken, broken, chatty, consult, create, forgiving, handledThenFailed, late, list, oddly, patient, rethrows, sly, titles, writer } from "./operations/notes.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Notes",
   schema,
   access: { tables: { notes: { read: "appMembers", write: "appMembers" } } },
-  operations: { notes: { create, titles, late, consult, list, chatty, broken, oddly, sly, forgiving, rethrows } },
+  operations: { notes: { create, titles, late, consult, list, chatty, broken, oddly, sly, forgiving, rethrows, alsoBroken, handledThenFailed, patient } },
   internalOperations: {},
   screens: [],
   uses: [writer],
@@ -657,6 +699,11 @@ describe("previewing a draft of spec 8's layout", { timeout: 180_000 }, () => {
     const rethrown = outcome(await call("notes.rethrows"));
     const reports = await chats.previewReports(chatId, app, revision, 0);
     const rethrownAgent = await asAgent("notes.rethrows");
+    // It handled one nested failure, then failed on another: the one it
+    // failed on.
+    const second = outcome(await call("notes.handledThenFailed"));
+    const secondReports = await chats.previewReports(chatId, app, revision, 0);
+    const secondAgent = await asAgent("notes.handledThenFailed");
 
     const opening = "Error: Note 7 has no title.";
     expect({
@@ -668,6 +715,9 @@ describe("previewing a draft of spec 8's layout", { timeout: 180_000 }, () => {
         ({ at, message }) => `${at} ${message.slice(0, opening.length)}`
       ),
       rethrownAgent: rethrownAgent.thrown?.slice(0, opening.length),
+      second,
+      secondProblem: secondReports.problems.at(-1)?.message,
+      secondAgent: secondAgent.thrown,
     }).toStrictEqual({
       forgiven: null,
       forgivenProblems: 0,
@@ -675,6 +725,51 @@ describe("previewing a draft of spec 8's layout", { timeout: 180_000 }, () => {
       rethrown: "internal.unexpected",
       problems: [`notes.rethrows ${opening}`],
       rethrownAgent: opening,
+      second: "internal.unexpected",
+      secondProblem: "Error: Note 8 has no body.",
+      secondAgent: "Error: Note 8 has no body.",
+    });
+  });
+
+  it("tells the check nothing of a run its stale reads discarded, once the call answers", async () => {
+    const { builder, app, chatId, revision } = await setUp();
+    const chats = chatsOf(builder);
+    const create = await requestFor(
+      builder,
+      { chatId, app, revision },
+      "notes.create",
+      { title: "Invoice 7" }
+    );
+    // Reads no notes, and fails a moment later: a note written meanwhile
+    // makes that run stale, and its run again answers.
+    const asked = chats.callDraftFunction(
+      chatId,
+      builder.userId,
+      app,
+      "notes.patient",
+      {}
+    );
+    await scheduler.wait(500);
+    const created = outcome(
+      await builder.api.chats.previewFunction(chatId, app, revision, create)
+    );
+    const answered = z
+      .object({
+        result: z.object({ ok: z.boolean() }).loose(),
+        thrown: z.string().optional(),
+      })
+      .parse(JSON.parse(await asked));
+    const reports = await chats.previewReports(chatId, app, revision, 0);
+    expect({
+      created: typeof created,
+      ok: answered.result.ok,
+      thrown: answered.thrown,
+      problems: reports.problems.length,
+    }).toStrictEqual({
+      created: "string",
+      ok: true,
+      thrown: undefined,
+      problems: 0,
     });
   });
 
