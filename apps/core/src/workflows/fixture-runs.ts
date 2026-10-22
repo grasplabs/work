@@ -51,7 +51,8 @@ import type { ResourceRunMemory } from "./resource-runs.ts";
 //   principal, no member of anything, and its host refuses every call that
 //   leaves its own sealed modules (resource-host.ts, `fixture`): Apps,
 //   stores, models, connections, Knowledge, templates and actions. It
-//   holds no binding, approval or grant, and none is read or written.
+//   holds no binding, approval or grant, and none is read or written. Its
+//   decisions ask its fixture's principals alone (fixture-decisions.ts).
 // - It takes the organization's quotas or shares: nothing of it is
 //   admitted against a lineage or the client's queue (`unadmitted`); its
 //   isolate takes a share of the sandbox of the App's test runs' own
@@ -127,6 +128,13 @@ export const discardFixtureRuns = async (
 export interface FixtureStart {
   /** The parameter values its fixture declares for the workflow `alias` binds. */
   readonly paramsOf: (alias: string) => Readonly<Record<string, unknown>>;
+  /**
+   * Who its fixture lets answer each of its decisions, by the decision
+   * binding's alias: principals' names (fixture-decisions.ts).
+   */
+  readonly decidersOf: (
+    alias: string
+  ) => Readonly<Record<string, readonly string[]>>;
   /** When its test's time is up (ms since the epoch). */
   readonly deadline: number;
   /** Told once its record is written: from then on, it is a run to remove. */
@@ -192,6 +200,7 @@ export const startFixtureRun = async (
       principal,
       input,
       params,
+      deciders: JSON.stringify(test.decidersOf(resolved.alias)),
       createdAt: new Date(),
       deadline: new Date(test.deadline),
     });

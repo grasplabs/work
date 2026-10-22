@@ -131,6 +131,30 @@ export interface TestPrincipal {
     reference: Reference,
     input: WorkflowInputOf<Reference>
   ) => Promise<WorkflowTestRun<WorkflowOutputOf<Reference>>>;
+  /**
+   * Answers the decision `run` waits for in its task `task` (a
+   * `grasp.decision` call), as this principal: approved or declined, with
+   * `value` as the decision's contract takes it. Until the task first asks
+   * one, waits for the run to ask it, until the test's deadline; after
+   * that, answers the one it asks now, if any. Only the principal it asks
+   * answers it,
+   * one the fixture lets answer through its binding
+   * (`workflows.<alias>.deciders`), and only once, while the run goes on:
+   * anything else fails, as `t.rejectsCode` reads it (`decision.forbidden`,
+   * `decision.invalid`, `decision.closed`, `decision.not_found`).
+   */
+  respond: (
+    run: WorkflowTestRun,
+    task: string,
+    answer: TestDecisionAnswer
+  ) => Promise<void>;
+}
+
+/** How a test principal answers a run's decision (`respond`). */
+export interface TestDecisionAnswer {
+  readonly approved: boolean;
+  /** What the answer carries, as the decision's contract takes it. */
+  readonly value?: Json;
 }
 
 /**
@@ -418,6 +442,12 @@ export interface AppTestSession {
   runOutcome: (run: number) => Promise<string>;
   /** How many times run `run`'s task `task` completed its step. */
   completedCount: (run: number, task: string) => Promise<number>;
+  /**
+   * Answers, as principal `name`, the decision run `run` waits for:
+   * `request` is the answer's JSON text (`{ task, approved, value? }`), and
+   * the answer the JSON text of an `OperationResult` holding nothing.
+   */
+  respond: (name: string, run: number, request: string) => Promise<string>;
   /**
    * Ends the session: removes the runs its test started, releases the
    * live queries it left open, and discards its fixture store.
@@ -921,6 +951,23 @@ const principalOf = (run: RunningTest, name: string): TestPrincipal => {
       });
       return handle;
     }) as TestPrincipal["start"],
+    respond: async (
+      handle: WorkflowTestRun,
+      task: string,
+      { approved, value }: TestDecisionAnswer
+    ): Promise<void> => {
+      unwrapped(
+        await session.respond(
+          name,
+          numberOf(run, handle),
+          JSON.stringify({
+            task,
+            approved,
+            ...(value === undefined ? {} : { value }),
+          })
+        )
+      );
+    },
   });
 };
 

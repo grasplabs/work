@@ -1096,8 +1096,54 @@ export const appTestRuns = sqliteTable(
      * sweep removes it once it is past.
      */
     deadline: timestamp("deadline").notNull(),
+    /**
+     * Who each decision binding covers in its test, by the binding's
+     * alias: its fixture's principals, by name, as JSON
+     * (workflows/fixture-decisions.ts).
+     */
+    deciders: text().notNull().default("{}"),
   },
   (table) => [index("app_test_runs_deadline").on(table.deadline)]
+);
+
+/**
+ * The decisions a run an App's test started waits for
+ * (workflows/fixture-decisions.ts): its test's own, answered only by the
+ * fixture principal it asks, and removed with the run's record.
+ */
+export const appTestDecisions = sqliteTable(
+  "app_test_decisions",
+  {
+    id: text().primaryKey(),
+    runId: text("run_id")
+      .notNull()
+      .references(() => appTestRuns.runId, { onDelete: "cascade" }),
+    /** The task that asks it, and its step in the task's scope. */
+    task: text().notNull(),
+    step: text().notNull(),
+    /** The fixture principal it asks, by name. */
+    recipient: text().notNull(),
+    description: text().notNull(),
+    input: text({ mode: "json" }).$type<Json>().notNull(),
+    /** The descriptor text of what an answer's payload must be. */
+    response: text().notNull(),
+    status: text({
+      enum: ["open", "approved", "rejected", "timed_out"],
+    }).notNull(),
+    openedAt: timestamp("opened_at").notNull(),
+    expiresAt: timestamp("expires_at").notNull(),
+    decidedBy: text("decided_by"),
+    decidedAt: timestamp("decided_at"),
+    payload: text({ mode: "json" }).$type<Json>(),
+  },
+  (table) => [
+    uniqueIndex("app_test_decisions_run_step_idx").on(table.runId, table.step),
+    index("app_test_decisions_run_task_idx").on(
+      table.runId,
+      table.task,
+      table.status
+    ),
+  ]
 );
 
 /**

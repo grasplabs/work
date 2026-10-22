@@ -65,6 +65,7 @@ import {
 } from "./sandboxed.ts";
 import { buildAppTests } from "./screens.ts";
 import { codeSession, startFailure } from "./workflows/code.ts";
+import { answerFixtureDecision } from "./workflows/fixture-decisions.ts";
 import {
   discardFixtureRuns,
   fixtureRunOutcome,
@@ -261,6 +262,7 @@ const hostOf = (numbered) => ({
       start: async (who, request) => await numbered.start(session, who, request),
       runOutcome: async (run) => await numbered.runOutcome(session, run),
       completedCount: async (run, task) => await numbered.completedCount(session, run, task),
+      respond: async (who, run, request) => await numbered.respond(session, who, run, request),
       close: async () => await numbered.close(session),
     };
   },
@@ -300,32 +302,52 @@ const outcomeSchema = z.union([
 ]);
 
 /** A fixture as `tests/fixtures/<name>.json` declares it. */
-const fixtureSchema = z.strictObject({
-  /** Who the tests act as, by the name `t.as` takes, and their App role. */
-  principals: z
-    .record(
-      z.string().regex(testNamePattern),
-      z.strictObject({ role: z.enum(["user", "builder"]) })
-    )
-    .refine(
-      (principals) => {
-        const count = Object.keys(principals).length;
-        return count > 0 && count <= 20;
-      },
-      { message: "A fixture names between 1 and 20 principals." }
-    ),
-  /**
-   * The parameter values each workflow the App binds runs with in its
-   * tests, by its alias (`workflowTest`): a parameter not named here takes
-   * its declared default. Never the organization's own values.
-   */
-  workflows: z
-    .record(
-      z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,63}$/u),
-      z.strictObject({ params: z.record(z.string(), z.json()) })
-    )
-    .optional(),
-});
+const fixtureSchema = z
+  .strictObject({
+    /** Who the tests act as, by the name `t.as` takes, and their App role. */
+    principals: z
+      .record(
+        z.string().regex(testNamePattern),
+        z.strictObject({ role: z.enum(["user", "builder"]) })
+      )
+      .refine(
+        (principals) => {
+          const count = Object.keys(principals).length;
+          return count > 0 && count <= 20;
+        },
+        { message: "A fixture names between 1 and 20 principals." }
+      ),
+    /**
+     * What each workflow the App binds runs with in its tests, by its alias
+     * (`workflowTest`): its parameter values, a parameter not named here
+     * taking its declared default, never the organization's own values; and
+     * who may answer its decisions, by the decision binding's alias, as the
+     * fixture's principals (workflows/fixture-decisions.ts).
+     */
+    workflows: z
+      .record(
+        z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,63}$/u),
+        z.strictObject({
+          params: z.record(z.string(), z.json()).optional(),
+          deciders: z
+            .record(
+              z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,63}$/u),
+              z.array(z.string().regex(testNamePattern)).max(20)
+            )
+            .optional(),
+        })
+      )
+      .optional(),
+  })
+  .refine(
+    ({ principals, workflows = {} }) =>
+      Object.values(workflows).every(({ deciders = {} }) =>
+        Object.values(deciders).every((names) =>
+          names.every((name) => Object.hasOwn(principals, name))
+        )
+      ),
+    { message: "A workflow's deciders are principals the fixture names." }
+  );
 
 type Fixture = z.infer<typeof fixtureSchema>;
 
@@ -665,6 +687,22 @@ const sandboxRefusals: ReadonlySet<string> = new Set([
   "operation.ended",
 ]);
 
+/** The most of an answer's JSON text a test sends (`respond`). */
+const maxAnswerLength = 64 * 1024;
+
+/** The answer `request` (its JSON text) is; nothing for any other value. */
+const answerOf = (request: unknown): unknown => {
+  if (typeof request !== "string" || request.length > maxAnswerLength) {
+    return undefined;
+  }
+  try {
+    const parsed: unknown = JSON.parse(request);
+    return parsed;
+  } catch {
+    return undefined;
+  }
+};
+
 /** One test's session: its principals' calls, on a fixture store of its own. */
 class FixtureSession extends TestTarget {
   readonly #env: Env;
@@ -707,6 +745,12 @@ class FixtureSession extends TestTarget {
     this.#endsAt = Date.now() + context.testMs;
     this.#fixtures = fixtures;
     this.#fixture = fixture;
+  }
+
+  /** What the fixture gives the workflow the App binds as `alias`. */
+  #workflowOf(alias: string) {
+    const { workflows = {} } = this.#fixture;
+    return Object.hasOwn(workflows, alias) ? workflows[alias] : undefined;
   }
 
   /** The role principal `name` has in the fixture; throws for none. */
@@ -884,7 +928,8 @@ class FixtureSession extends TestTarget {
           `fixture-${String(name)}`,
           request,
           {
-            paramsOf: (alias) => this.#fixture.workflows?.[alias]?.params ?? {},
+            paramsOf: (alias) => this.#workflowOf(alias)?.params ?? {},
+            decidersOf: (alias) => this.#workflowOf(alias)?.deciders ?? {},
             deadline: this.#endsAt,
             recorded: () => {
               recorded = true;
@@ -956,6 +1001,38 @@ class FixtureSession extends TestTarget {
       this.#runOf(run).runId,
       task
     );
+  }
+
+  /**
+   * Answers, as principal `name`, the decision run `run` waits for, as
+   * `request` names it (`{ task, approved, value? }`), once the run asks
+   * it, waiting until the test's own time (fixture-decisions.ts). Answers
+   * the JSON text of an `OperationResult`: nothing, or why it was refused.
+   */
+  async respond(
+    name: unknown,
+    run: unknown,
+    request: unknown
+  ): Promise<string> {
+    if (this.#closed) {
+      throw sessionEnded();
+    }
+    this.#roleOf(name);
+    const requestId = crypto.randomUUID();
+    let result: OperationResult;
+    try {
+      await answerFixtureDecision(
+        this.#env,
+        this.#runOf(run).runId,
+        String(name),
+        answerOf(request),
+        { until: this.#endsAt, stopped: () => this.#closed }
+      );
+      result = { ok: true, value: null };
+    } catch (error) {
+      result = { ok: false, error: refusalOf(error, requestId) };
+    }
+    return JSON.stringify(result);
   }
 
   /**
@@ -1309,6 +1386,15 @@ class NumberedFixtureHost extends TestTarget {
     return await this.#session(id).completedCount(run, task);
   }
 
+  async respond(
+    id: unknown,
+    name: unknown,
+    run: unknown,
+    request: unknown
+  ): Promise<string> {
+    return await this.#session(id).respond(name, run, request);
+  }
+
   async close(id: unknown): Promise<void> {
     await this.#session(id).close();
   }
@@ -1324,6 +1410,7 @@ const numberedMethods = [
   "start",
   "runOutcome",
   "completedCount",
+  "respond",
   "close",
 ] as const;
 
