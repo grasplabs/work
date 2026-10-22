@@ -207,7 +207,7 @@ export const handledThenFailed = action({
 });
 
 /**
- * Fails while there are no notes, a moment after it read none: a note
+ * Fails while there are no notes, a while after it read none: a note
  * written meanwhile makes that read stale, and its run again answers.
  */
 export const patient = query({
@@ -216,7 +216,7 @@ export const patient = query({
   handler: async (ctx) => {
     const notes = await ctx.db.query("notes").take(100);
     if (notes.length === 0) {
-      await wait(2000);
+      await wait(5000);
       throw new Error("No notes yet.");
     }
     return notes.map((note) => note.title);
@@ -742,6 +742,7 @@ describe("previewing a draft of spec 8's layout", { timeout: 180_000 }, () => {
     );
     // Reads no notes, and fails a moment later: a note written meanwhile
     // makes that run stale, and its run again answers.
+    const started = Date.now();
     const asked = chats.callDraftFunction(
       chatId,
       builder.userId,
@@ -749,25 +750,34 @@ describe("previewing a draft of spec 8's layout", { timeout: 180_000 }, () => {
       "notes.patient",
       {}
     );
-    await scheduler.wait(500);
+    await scheduler.wait(2000);
     const created = outcome(
       await builder.api.chats.previewFunction(chatId, app, revision, create)
     );
     const answered = z
       .object({
-        result: z.object({ ok: z.boolean() }).loose(),
+        result: z
+          .object({ ok: z.boolean(), value: z.unknown().optional() })
+          .loose(),
         thrown: z.string().optional(),
       })
       .parse(JSON.parse(await asked));
+    const took = Date.now() - started;
     const reports = await chats.previewReports(chatId, app, revision, 0);
     expect({
       created: typeof created,
       ok: answered.result.ok,
+      value: answered.result.value,
+      // Its first run read no notes and waited out its 5 seconds, so the
+      // note came after that read: it ran again (no timing taken on trust).
+      waited: took >= 5000,
       thrown: answered.thrown,
       problems: reports.problems.length,
     }).toStrictEqual({
       created: "string",
       ok: true,
+      value: ["Invoice 7"],
+      waited: true,
       thrown: undefined,
       problems: 0,
     });
