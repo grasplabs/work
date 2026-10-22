@@ -1,7 +1,10 @@
 import { auditEventSchema } from "@grasp-os/shared/audit";
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import type { ImprovementSignal } from "@grasp-os/shared/signals";
-import { createScheduledController } from "cloudflare:test";
+import {
+  createExecutionContext,
+  createScheduledController,
+} from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import type { z } from "zod";
@@ -127,7 +130,11 @@ const racingWhen = (
 
 /** Runs core's cron trigger `schedule`, as Cloudflare does. */
 const cron = async (schedule: string): Promise<void> => {
-  await worker.scheduled(createScheduledController({ cron: schedule }), env);
+  await worker.scheduled(
+    createScheduledController({ cron: schedule }),
+    env,
+    createExecutionContext()
+  );
 };
 
 /** A claim of `day`'s computation, started `ago` before `day`, unfinished. */

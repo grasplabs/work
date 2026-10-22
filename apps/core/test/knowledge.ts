@@ -1,3 +1,4 @@
+import { sha256Hex } from "@grasp-os/shared/encoding";
 import type { CollectionInput, KnowledgeApi } from "@grasp-os/shared/knowledge";
 import type {
   PermissionRequest,
@@ -131,4 +132,76 @@ export const storedGrant = async (
     )
     .run();
   return id;
+};
+
+/** The text of `key`'s object in the Brain bucket, as stored. */
+const objectText = async (key: string): Promise<string> => {
+  const object = await env.BRAIN_OBJECTS.get(key);
+  if (object === null) {
+    throw new Error(`no object ${key}`);
+  }
+  return await object.text();
+};
+
+/**
+ * The text of every version of `documentId`, oldest first, as stored: each
+ * version's payload, read from R2 whoever may read it.
+ */
+export const storedVersionTexts = async (
+  documentId: string
+): Promise<string[]> => {
+  const { results } = await env.KNOWLEDGE.prepare(
+    "SELECT payload_key AS key FROM versions WHERE document_id = ? ORDER BY number"
+  )
+    .bind(documentId)
+    .all<{ key: string }>();
+  return await Promise.all(
+    results.map(async ({ key }) => await objectText(key))
+  );
+};
+
+/** Each current text of `collectionId`'s documents, by path, as stored. */
+export const storedCurrentTexts = async (
+  collectionId: string
+): Promise<Record<string, string>> => {
+  const { results } = await env.KNOWLEDGE.prepare(
+    "SELECT d.path AS path, v.payload_key AS key FROM documents d JOIN versions v ON v.document_id = d.id AND v.number = d.current_version WHERE d.collection_id = ?"
+  )
+    .bind(collectionId)
+    .all<{ path: string; key: string }>();
+  return Object.fromEntries(
+    await Promise.all(
+      results.map(async ({ path, key }): Promise<[string, string]> => [
+        path,
+        await objectText(key),
+      ])
+    )
+  );
+};
+
+/**
+ * Stores `text` as every version of `documentId` holds it, under the
+ * platform's back: a text no save of this release would write.
+ */
+export const storeTextUnderneath = async (
+  documentId: string,
+  text: string
+): Promise<D1PreparedStatement[]> => {
+  const sha256 = await sha256Hex(text);
+  const key = `payloads/${sha256}/${crypto.randomUUID()}`;
+  await env.BRAIN_OBJECTS.put(key, text);
+  return [
+    env.KNOWLEDGE.prepare(
+      "INSERT INTO brain_payloads (key, collection_id, sha256, bytes, state, created_at) SELECT ?, collection_id, ?, ?, 'committed', ? FROM documents WHERE id = ?"
+    ).bind(
+      key,
+      sha256,
+      new TextEncoder().encode(text).byteLength,
+      Date.now(),
+      documentId
+    ),
+    env.KNOWLEDGE.prepare(
+      "UPDATE versions SET payload_key = ? WHERE document_id = ?"
+    ).bind(key, documentId),
+  ];
 };

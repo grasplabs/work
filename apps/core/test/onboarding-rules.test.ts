@@ -2,7 +2,12 @@ import { addWorkingDays } from "@grasp-os/shared/admin/org-record";
 import type { Plan, Roster } from "@grasp-os/shared/onboarding";
 import { describe, expect, it } from "vite-plus/test";
 
-import { agreementsIn, dueLinks, progressOf } from "../src/onboarding/rules.ts";
+import {
+  agreementsIn,
+  dueLinks,
+  leadsTalked,
+  progressOf,
+} from "../src/onboarding/rules.ts";
 import type {
   InterviewState,
   LinkFacts,
@@ -146,6 +151,15 @@ const counts = (
 ): TeamCount[] =>
   rows.map(([team, day, asked, talked]) => ({ team, day, asked, talked }));
 
+/** `id`'s interview, finished at `completedAt`, as Sales's lead when their link went out. */
+const ledSales = (
+  id: string,
+  completedAt: string
+): [string, InterviewState] => [
+  id,
+  { person: id, startedAt: completedAt, completedAt, ledTeam: "sales" },
+];
+
 describe("what the company's admin sees", () => {
   it("shows a team its numbers once five were asked, and none before", () => {
     const progress = progressOf(
@@ -225,12 +239,62 @@ describe("what the company's admin sees", () => {
   it("says whether each lead talked, and counts the leads apart", () => {
     const progress = progressOf(
       roster,
-      completed(["lea", at("2026-10-12")]),
+      new Map([
+        [
+          "lea",
+          {
+            person: "lea",
+            startedAt: at("2026-10-12"),
+            completedAt: at("2026-10-12"),
+            ledTeam: "sales",
+          },
+        ],
+      ]),
       [],
       at("2026-10-13")
     );
     expect(progress.teams[0]?.leadTalked).toBeTruthy();
     expect(progress).toMatchObject({ leadsTalked: 1, leads: 1 });
+  });
+
+  it("takes the first of two leads of a team to finish, to the minute", () => {
+    const talked = leadsTalked(
+      roster,
+      new Map([
+        ledSales("sam", at("2026-10-12", "15:00:00")),
+        ledSales("lea", at("2026-10-12", "09:00:00")),
+      ]),
+      at("2026-10-13")
+    );
+    expect(talked.get("sales")).toStrictEqual({
+      person: "lea",
+      day: "2026-10-12",
+    });
+  });
+
+  it("tells nothing of someone made a lead after their link went out", () => {
+    // Sam talked as one of Sales; then the admin makes Sam the only
+    // member and lead of a team of their own.
+    const edited: Roster = {
+      ...roster,
+      teams: [
+        ...roster.teams,
+        { id: "solo", name: "Solo", lead: "sam", does: "", off: false },
+      ],
+      people: roster.people.map((one) =>
+        one.id === "sam" ? { ...one, team: "solo" } : one
+      ),
+    };
+    const progress = progressOf(
+      edited,
+      completed(["sam", at("2026-10-12")]),
+      [],
+      at("2026-10-14")
+    );
+    expect(progress.teams.find(({ id }) => id === "solo")).toMatchObject({
+      leadTalked: false,
+    });
+    expect(progress).toMatchObject({ leadsTalked: 0 });
   });
 });
 

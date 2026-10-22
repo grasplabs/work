@@ -111,6 +111,7 @@ describe("reserved binding names", () => {
     "AUDIT_RETENTION_DAYS",
     "RUN_RETENTION_DAYS",
     "INBOUND_MAIL_DOMAIN",
+    "MAIL_FROM",
     "ENTRA_CLIENT_SECRET",
     "GOOGLE_CLIENT_SECRET",
   ])("refuses %s, which only the platform may use", (name) => {
