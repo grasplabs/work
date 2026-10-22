@@ -23,6 +23,8 @@ const refusals: Readonly<Record<RolloutErrorCode, string>> = {
     "Something newer was deployed to that client since: roll out the release you want instead.",
   too_far_back:
     "That client ran an older release than the one right before this rollout's: roll out the release you want instead.",
+  incompatible:
+    "What that client ran before doesn't work with what it runs now, so going back could break it: roll out a release that does instead.",
   rotated_since:
     "That client's secrets rotated since, and its previous versions don't have the new ones: roll out instead.",
   client_busy:

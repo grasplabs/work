@@ -4,7 +4,12 @@
 // `callBytes`. A convenience, never the boundary: the host checks every
 // call against the sealed use, the file's run and the limits.
 
-/** Bytes one call moves, as the host takes them (shared run-files.ts). */
+// `callBytes` and `textTypes` are shared run-files.ts's own, written out:
+// the compute runner imports none of the platform's shared modules (and
+// with them zod) into an action's isolate. A test holds them equal
+// (test/run-files-client.test.ts).
+
+/** Bytes one call moves, as the host takes them: `runFileLimits.callBytes`. */
 export const callBytes = 512 * 1024;
 
 /** Characters of a binary string `btoa` and `atob` take at once. */
@@ -55,8 +60,8 @@ const bytesOf = (content: unknown): Uint8Array => {
   throw new TypeError("A file's content is text or bytes.");
 };
 
-/** The text types: the only ones a file may be empty of (shared run-files.ts). */
-const textTypes: ReadonlySet<string> = new Set([
+/** The text types, the only ones a file may be empty of: `runFileTextTypes`. */
+export const textTypes: ReadonlySet<string> = new Set([
   "text/plain",
   "text/csv",
   "text/markdown",

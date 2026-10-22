@@ -1,3 +1,4 @@
+import { runFileLimits, runFileTextTypes } from "@grasp-os/shared/run-files";
 import { describe, expect, test } from "vite-plus/test";
 
 import {
@@ -5,6 +6,7 @@ import {
   filesResource,
   fromBase64,
   piecesOf,
+  textTypes,
   toBase64,
 } from "../src/run-files-client.ts";
 
@@ -19,6 +21,16 @@ const fieldOf = (value: unknown, key: string): unknown =>
 // its pieces back; bytes survive base64 both ways.
 
 describe("a files use's client", () => {
+  test("splits and checks files by the host's own limits and text types", () => {
+    expect({
+      callBytes,
+      textTypes: [...textTypes].toSorted(),
+    }).toStrictEqual({
+      callBytes: runFileLimits.callBytes,
+      textTypes: [...runFileTextTypes].toSorted(),
+    });
+  });
+
   test("sends an empty text file, and refuses an empty binary one before anything is sent", async () => {
     const calls: string[] = [];
     const files = filesResource("files", async (_alias, call) => {

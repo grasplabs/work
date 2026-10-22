@@ -1,7 +1,7 @@
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
-import { rpcArgumentDepth } from "@grasp-os/shared/screens";
+import { isolateArgumentDepth } from "@grasp-os/shared/stores";
 import { passedBound } from "@grasp-os/shared/value-bounds";
 import type { SealedUse } from "@grasp-os/shared/workflow-modules";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
@@ -173,7 +173,7 @@ interface ActionHostState {
 
 /** How deep and big one call's arguments may be: a step's payload. */
 const callBounds = {
-  depth: rpcArgumentDepth,
+  depth: isolateArgumentDepth,
   size: platformLimits.stepPayloadBytes,
 };
 

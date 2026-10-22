@@ -1,6 +1,7 @@
 import type {
   BrainApi,
   BrainChangePage,
+  BrainNotePage,
   Company,
   Connection,
   Source,
@@ -21,6 +22,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { organizationId } from "./auth/auth.ts";
 import { brainChanges } from "./brain-changes.ts";
 import type { SourceChange } from "./brain-changes.ts";
+import { brainNotes } from "./brain-notes.ts";
 import { catalogEntries, personOf } from "./connections.ts";
 import { organizations } from "./db/core/schema.ts";
 import { onboardingStore } from "./onboarding/store.ts";
@@ -407,6 +409,13 @@ export class BrainRpc extends CoreRpcTarget implements BrainApi {
     return await withPerson(
       this.#check,
       async (person) => await readBrain(this.#env, person)
+    );
+  }
+
+  async notes(options?: unknown): Promise<BrainNotePage> {
+    return await withPerson(
+      this.#check,
+      async (person) => await brainNotes(this.#env, person, options)
     );
   }
 
