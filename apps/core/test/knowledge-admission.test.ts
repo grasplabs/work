@@ -169,6 +169,13 @@ describe("Knowledge admission", { timeout: 60_000 }, () => {
       // Headings of every level above it.
       headingStack: "# Employee Jan Jansen\n\n## Status\n\nOn sick leave.",
       setext: "Employee Jan Jansen\n===\n\nOn sick leave since May.",
+      // A heading under a person's, with no body.
+      headingsOnly: "# Employee Jan Jansen\n## Cancer",
+      deepHeadings: "# Employee Jan Jansen\n## Status\n### Sick leave",
+      setextHeadings: "Employee Jan Jansen\n===\nSick leave\n---",
+      headingAfterBody: "# Employee Jan Jansen\nWorks in sales.\n## Cancer",
+      // An amount in such a heading is certain, as in a sentence.
+      headingAmount: "# Employee Jan Jansen\n## Salary: €4,200",
       // Runs of lines, whatever their blocks.
       looseList: "- Employee: Jan Jansen\n\n- Status: sick leave",
       proseAndList: "Jan Jansen is an employee.\n- Status: sick leave",
@@ -217,6 +224,11 @@ describe("Knowledge admission", { timeout: 60_000 }, () => {
       headingTopic: "held",
       headingStack: "held",
       setext: "held",
+      headingsOnly: "held",
+      deepHeadings: "held",
+      setextHeadings: "held",
+      headingAfterBody: "held",
+      headingAmount: "excluded",
       looseList: "held",
       proseAndList: "held",
       tableAndList: "held",
@@ -283,6 +295,9 @@ describe("Knowledge admission", { timeout: 60_000 }, () => {
       "Meld je vóór negen uur ziek bij je leidinggevende en de arbodienst.",
       "Kun je me bellen als je ziek bent?",
       "# Leave policy\n\n## Sick leave\n\nReport sick before nine.\n\n- Call the office.\n\n- Rest.",
+      "# Leave policy\n## Sick leave\n### Reporting sick",
+      // A topic heading beside a person's, not under it.
+      "## Employee Jan Jansen\n## Sick leave policy",
       "Die Gehaltsbänder werden jährlich überprüft.",
       "La politique de rémunération est revue chaque année.",
       "La política salarial se revisa cada año.",

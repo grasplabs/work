@@ -225,7 +225,8 @@ const headingLevel = (line: string, next: string | undefined): number => {
  * first so a sentence wrapped over two lines is one; and each run of
  * non-blank lines, whatever its blocks, as a wide unit (prose above a
  * list, two tables). Each unit carries the headings above it, of every
- * level: "# Employee Jan" over "## Status" over "sick leave" is about Jan.
+ * level: "# Employee Jan" over "## Status" over "sick leave" is about Jan,
+ * and so is a heading under it, "## Sick leave".
  */
 const unitsOf = (text: string): Unit[] => {
   const units: Unit[] = [];
@@ -256,8 +257,9 @@ const unitsOf = (text: string): Unit[] => {
     endBlock();
     // Judged whole too when split into more than one unit: blocks, or
     // sentences split where an abbreviation ("Ph.D.", "e.g.") looked
-    // like a sentence's end.
-    if (units.length - runStart > 1) {
+    // like a sentence's end. Only a run of lines: `runStart` is stale
+    // when the lines since the last run were all headings.
+    if (run.length > 0 && units.length - runStart > 1) {
       units.push({
         text: run.join("\n"),
         header: runHeader,
@@ -280,7 +282,11 @@ const unitsOf = (text: string): Unit[] => {
         headings.findLast((h) => h !== undefined)
       );
       headings[level - 1] = heading;
-      units.push({ text: line });
+      // Judged with the headings above it, as a block under it would be:
+      // "# Employee Jan" over "## Cancer" is about Jan with no body at all.
+      // `heading` holds this line's own signals too, which judging its text
+      // finds anyway.
+      units.push({ text: line, heading });
       if (atxHeading.exec(line) === null) {
         // A setext heading's underline.
         index += 1;
