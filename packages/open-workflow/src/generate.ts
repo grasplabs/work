@@ -87,8 +87,10 @@ import { literalDurationMs } from "./values.ts";
  *   task's enter step. The generated code only asks the host to listen,
  *   by its task: the host matches events in the run's own inbox by what
  *   it recorded, never by anything the code passes. A filter's
- *   `correlate`, which would evaluate expressions over each event's own
- *   content, is reported as unsupported.
+ *   `correlate` is lowered only on an attribute the inbox keeps
+ *   (`${ .subject }`, say): sealed as the attribute and its correlation's
+ *   name, matched in the engine like any attribute, never an expression
+ *   over an event's content, which is reported as unsupported (GRA-947).
  * - Limits raising the host's ceilings. `document.metadata.grasp.limits`
  *   and a task's `timeout` (inline or from `use.timeouts`) are sealed as
  *   numbers, which the host only ever applies as the lower of them and its
@@ -178,6 +180,19 @@ export interface GeneratedListen {
 export interface GeneratedFilter {
   readonly type: string;
   readonly attributes: readonly (readonly [string, CallTemplate])[];
+  /**
+   * Its correlations, by name, each the inbox attribute it correlates on:
+   * one with an `expect` is in `attributes` too; one without matches the
+   * value the run's earlier listens correlated under its name, or any
+   * value (then correlating it) when none has. Absent when it has none.
+   */
+  readonly correlate?: readonly GeneratedCorrelation[];
+}
+
+/** One correlation of a listen's filter (`GeneratedFilter`). */
+export interface GeneratedCorrelation {
+  readonly name: string;
+  readonly attribute: string;
 }
 
 /**
@@ -1652,10 +1667,123 @@ const matchableAttributes = new Set([
   "datacontenttype",
 ]);
 
+/** A correlation's `from` that reads one top-level attribute: `.subject`. */
+const attributeRead = /^\.(?<name>[a-z]+)$/u;
+
+/**
+ * The inbox attribute correlation `from` reads, if it reads exactly one
+ * the inbox keeps (`${ .subject }`): anything else reads an event's
+ * content, which the engine never evaluates.
+ */
+const correlatedAttribute = (
+  from: JsonValue | undefined
+): string | undefined => {
+  const slot = typeof from === "string" ? parseSlot(from) : undefined;
+  const name =
+    slot?.kind === "expression"
+      ? attributeRead.exec(slot.source)?.groups?.name
+      : undefined;
+  return name !== undefined && matchableAttributes.has(name) ? name : undefined;
+};
+
+/**
+ * The correlations of filter `filter` at `pointer`, each on an attribute
+ * the inbox keeps (`correlatedAttribute`), and the attributes its
+ * `expect`s require: `undefined`, each refused by its pointer, when one
+ * reads an event's content, or correlates on an attribute `taken` (its
+ * `with`, or another correlation) already names, which would ask the
+ * engine for two values of one attribute.
+ */
+const correlationsOf = (
+  emitter: Emitter,
+  item: ListTask,
+  filter: JsonObject,
+  pointer: string,
+  taken: Set<string>
+):
+  | {
+      correlate: GeneratedCorrelation[];
+      attributes: (readonly [string, CallTemplate])[];
+    }
+  | undefined => {
+  if (!Object.hasOwn(filter, "correlate")) {
+    return { correlate: [], attributes: [] };
+  }
+  const correlatePointer = pointerJoin(pointer, "correlate");
+  if (!isObject(filter.correlate)) {
+    throw new Error(`The checked workflow has no correlate at ${pointer}`);
+  }
+  const correlate: GeneratedCorrelation[] = [];
+  const attributes: (readonly [string, CallTemplate])[] = [];
+  let refused = false;
+  for (const [name, entry] of Object.entries(filter.correlate)) {
+    const entryPointer = pointerJoin(correlatePointer, name);
+    if (!isObject(entry)) {
+      throw new Error(
+        `The checked workflow has no correlation at ${entryPointer}`
+      );
+    }
+    const attribute = correlatedAttribute(entry.from);
+    if (attribute === undefined || taken.has(attribute)) {
+      emitter.refusals.add(
+        pointerJoin(entryPointer, "from"),
+        "listen:correlate",
+        item.id
+      );
+      refused = true;
+      continue;
+    }
+    taken.add(attribute);
+    correlate.push({ name, attribute });
+    if (Object.hasOwn(entry, "expect")) {
+      attributes.push([
+        attribute,
+        templateOf(
+          emitter,
+          entry.expect ?? null,
+          pointerJoin(entryPointer, "expect"),
+          item.id,
+          "json"
+        ),
+      ]);
+    }
+  }
+  return refused ? undefined : { correlate, attributes };
+};
+
+/**
+ * Refuses, by its listen's pointer, a correlation without an `expect`
+ * named by two filters of one listen: what the first of them takes
+ * would have to decide what the second matches, which the enter step
+ * resolves before either takes anything. Whether one was.
+ */
+const unrecordedTwice = (
+  emitter: Emitter,
+  item: ListTask,
+  filters: readonly GeneratedFilter[],
+  pointer: string
+): boolean => {
+  const seen = new Set<string>();
+  for (const filter of filters) {
+    const expected = new Set(filter.attributes.map(([name]) => name));
+    for (const { name, attribute } of filter.correlate ?? []) {
+      if (expected.has(attribute)) {
+        continue;
+      }
+      if (seen.has(name)) {
+        emitter.refusals.add(pointer, "listen:correlate", item.id);
+        return true;
+      }
+      seen.add(name);
+    }
+  }
+  return false;
+};
+
 /**
  * The filters of listen task `item`, sealed: `undefined` once one was
- * refused. A filter's `correlate` (an expression over each event's own
- * content) isn't lowered: a filter matches by attribute equality alone.
+ * refused. A filter matches by attribute equality alone, its correlations
+ * included (`correlationsOf`).
  */
 const filtersOf = (
   emitter: Emitter,
@@ -1682,15 +1810,6 @@ const filtersOf = (
         : pointerJoin(strategyPointer, index);
     if (!isObject(filter) || !isObject(filter.with)) {
       throw new Error(`The checked workflow has no filter at ${pointer}`);
-    }
-    if (Object.hasOwn(filter, "correlate")) {
-      emitter.refusals.add(
-        pointerJoin(pointer, "correlate"),
-        "listen:correlate",
-        item.id
-      );
-      refused = true;
-      continue;
     }
     const withPointer = pointerJoin(pointer, "with");
     const { type, ...rest } = filter.with;
@@ -1729,7 +1848,27 @@ const filtersOf = (
           ),
         ] as const
     );
-    filters.push({ type, attributes });
+    const correlated = correlationsOf(
+      emitter,
+      item,
+      filter,
+      pointer,
+      new Set(Object.keys(rest))
+    );
+    if (correlated === undefined) {
+      refused = true;
+      continue;
+    }
+    filters.push({
+      type,
+      attributes: [...attributes, ...correlated.attributes],
+      ...(correlated.correlate.length === 0
+        ? {}
+        : { correlate: correlated.correlate }),
+    });
+  }
+  if (!refused && unrecordedTwice(emitter, item, filters, strategyPointer)) {
+    return undefined;
   }
   return refused ? undefined : filters;
 };

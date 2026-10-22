@@ -34,6 +34,18 @@ export const storedEventSchema = z.strictObject({
 });
 export type StoredEvent = z.infer<typeof storedEventSchema>;
 
+/**
+ * The attributes a listen's filter may match an event by, as the engine
+ * keeps them beside it: every attribute of its envelope but its type
+ * (which `eventTypeKey` keeps), its data and its time.
+ */
+export const attributesOf = (stored: StoredEvent): Record<string, string> => ({
+  id: stored.id,
+  source: stored.source,
+  datacontenttype: stored.datacontenttype,
+  ...(stored.subject === undefined ? {} : { subject: stored.subject }),
+});
+
 /** A CloudEvents envelope, as a listen reading envelopes answers it. */
 export type EventEnvelope = StoredEvent & {
   readonly specversion: typeof specVersion;
