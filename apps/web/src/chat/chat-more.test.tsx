@@ -12,6 +12,7 @@ import {
   createRootRoute,
   createRouter,
   RouterProvider,
+  useSearch,
 } from "@tanstack/react-router";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
@@ -84,16 +85,27 @@ const settled = async (): Promise<void> => {
   });
 };
 
-/** The menu over the chat `chat`, against a core that records its writes. */
-const opened = async (chat: ChatSummary) => {
+/**
+ * The menu over the chat the address names (`?chat=`), `chat` first and
+ * `others` to go to, against a core that records its writes; with `slow`,
+ * core answers the chat's watch only once `answer` is called.
+ */
+const opened = async (
+  chat: ChatSummary,
+  { others = [], slow = false }: { others?: ChatSummary[]; slow?: boolean } = {}
+) => {
   const writes: string[] = [];
+  const answered = Promise.withResolvers<boolean>();
+  if (!slow) {
+    answered.resolve(true);
+  }
   const chats = {
     watch: async (
       _chatId: string,
       _after: number | null,
       onUpdate: (update: ChatUpdate) => void
     ) => {
-      await Promise.resolve();
+      await answered.promise;
       onUpdate(firstUpdate);
       return {
         release: async () => {
@@ -122,16 +134,24 @@ const opened = async (chat: ChatSummary) => {
       action: (session: { chats: typeof chats }) => Promise<T>
     ): Promise<T> => await action({ chats }),
   };
-  const rootRoute = createRootRoute({
-    component: () => (
+  const all = [chat, ...others];
+  const Shown = () => {
+    const { chat: open } = useSearch({ strict: false });
+    const shown = all.find(({ id }) => id === open) ?? chat;
+    return (
       <Toaster>
-        <ChatMore chat={chat} projects={projects} sourceNames={new Map()} />
+        <ChatMore chat={shown} projects={projects} sourceNames={new Map()} />
       </Toaster>
-    ),
+    );
+  };
+  const rootRoute = createRootRoute({
+    component: Shown,
+    validateSearch: (search: Record<string, unknown>): { chat?: string } =>
+      typeof search.chat === "string" ? { chat: search.chat } : {},
   });
   const router = createRouter({
     routeTree: rootRoute,
-    history: createMemoryHistory({ initialEntries: ["/?chat=chat-1"] }),
+    history: createMemoryHistory({ initialEntries: [`/?chat=${chat.id}`] }),
     context: { core },
   });
   const host = document.createElement("div");
@@ -146,7 +166,14 @@ const opened = async (chat: ChatSummary) => {
     await router.load();
   });
   await settled();
-  return { writes, router };
+  return {
+    writes,
+    router,
+    answerWatch: async () => {
+      answered.resolve(true);
+      await settled();
+    },
+  };
 };
 
 /** The element of `role` whose text is `name`. */
@@ -199,11 +226,14 @@ const dialogButton = (name: string): HTMLButtonElement => {
 };
 
 describe("the open chat's menu", () => {
-  afterEach(() => {
+  afterEach(async () => {
     act(() => {
       root?.unmount();
     });
     root = undefined;
+    // The tab's watch of a chat stops a moment after its last reader goes:
+    // the next test follows the same chat afresh.
+    await settled();
     copied = [];
     setActiveChat(undefined);
     document.body.replaceChildren();
@@ -278,5 +308,36 @@ describe("the open chat's menu", () => {
     expect(writes).toStrictEqual(["remove chat-1"]);
     expect(activeChat()).toBeUndefined();
     expect(router.state.location.searchStr).toBe("");
+  });
+
+  it("copies and downloads nothing until the chat's messages are in", async () => {
+    const { answerWatch } = await opened(chatIn(null), { slow: true });
+    await openMenu();
+    const disabled = (name: string): string | null =>
+      byRole("menuitem", name).getAttribute("aria-disabled");
+    expect([disabled("Copy as Markdown"), disabled("Download")]).toStrictEqual([
+      "true",
+      "true",
+    ]);
+
+    await answerWatch();
+    expect([disabled("Copy as Markdown"), disabled("Download")]).toStrictEqual([
+      null,
+      null,
+    ]);
+  });
+
+  it("closes the rename dialog when another chat opens, renaming neither", async () => {
+    const other: ChatSummary = { ...chatIn(null), id: "chat-2", title: "Pay" };
+    const { writes, router } = await opened(chatIn(null), { others: [other] });
+    await choose("Rename");
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+
+    await act(async () => {
+      await router.navigate({ to: "/", search: { chat: "chat-2" } });
+    });
+    await settled();
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(writes).toStrictEqual([]);
   });
 });

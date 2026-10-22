@@ -362,6 +362,8 @@ const Chat = () => {
                 </Link>
                 <ChatMore
                   chat={chat}
+                  // Its own: copied, a dialog open, for this chat alone.
+                  key={chat.id}
                   projects={projects}
                   sourceNames={sourceNames}
                 />

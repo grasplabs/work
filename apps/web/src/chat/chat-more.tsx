@@ -157,8 +157,20 @@ export const ChatMore = ({
   // The same watch the thread reads, so what is copied is what is shown.
   const { view } = useFollowedChat(chat.id);
   const [copied, setCopied] = useState(false);
-  const [renaming, setRenaming] = useState(false);
-  const [deleting, setDeleting] = useState(false);
+  // Which chat a dialog was opened for: one opened for another chat, left
+  // by Back or a link while it was open, is closed, never acting on this one.
+  const [renamingId, setRenamingId] = useState<string>();
+  const [deletingId, setDeletingId] = useState<string>();
+  const renaming = renamingId === chat.id;
+  const deleting = deletingId === chat.id;
+  const onRenaming = (open: boolean): void => {
+    setRenamingId(open ? chat.id : undefined);
+  };
+  const onDeleting = (open: boolean): void => {
+    setDeletingId(open ? chat.id : undefined);
+  };
+  // Until the chat's first update is in, there is only its title to copy.
+  const ready = view.loaded;
   useEffect(() => {
     const timer = copied
       ? setTimeout(() => {
@@ -233,6 +245,7 @@ export const ChatMore = ({
           {/* It stays open for a moment to say that it is copied. */}
           <DropdownMenuItem
             closeOnClick={false}
+            disabled={!ready}
             onClick={() => {
               void copy();
             }}
@@ -241,7 +254,7 @@ export const ChatMore = ({
             {copied ? <Trans>Copied</Trans> : <Trans>Copy as Markdown</Trans>}
           </DropdownMenuItem>
           <DropdownMenuSub>
-            <DropdownMenuSubTrigger>
+            <DropdownMenuSubTrigger disabled={!ready}>
               <DownloadIcon />
               <Trans>Download</Trans>
             </DropdownMenuSubTrigger>
@@ -267,7 +280,7 @@ export const ChatMore = ({
           <DropdownMenuSeparator />
           <DropdownMenuItem
             onClick={() => {
-              setRenaming(true);
+              onRenaming(true);
             }}
           >
             <PencilIcon />
@@ -314,7 +327,7 @@ export const ChatMore = ({
           <DropdownMenuSeparator />
           <DropdownMenuItem
             onClick={() => {
-              setDeleting(true);
+              onDeleting(true);
             }}
             variant="destructive"
           >
@@ -325,13 +338,13 @@ export const ChatMore = ({
       </DropdownMenu>
       {/* Each mounts when it opens, so it starts from the chat as it is now. */}
       {renaming ? (
-        <RenameDialog chat={chat} onOpenChange={setRenaming} open={renaming} />
+        <RenameDialog chat={chat} onOpenChange={onRenaming} open={renaming} />
       ) : null}
       {deleting ? (
         <DeleteChatDialog
           active
           chat={chat}
-          onOpenChange={setDeleting}
+          onOpenChange={onDeleting}
           open={deleting}
         />
       ) : null}
