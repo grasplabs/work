@@ -129,13 +129,22 @@ const components: Components = {
     alt === undefined || alt === "" ? null : <span>{alt}</span>,
 };
 
+/** How a link that leaves the page is drawn: `OutsideLink`, unless one that asks first. */
+export type LeavingLink = (props: {
+  href: string | undefined;
+  children: ReactNode;
+}) => ReactNode;
+
 /**
  * The same, for text that isn't a document of a collection (the agent's
- * answers): every link leaves the page, but for a note `cited` names,
- * which opens it here (`CitedNote`). A note link to any other shows as its
- * text, whatever the answer says.
+ * answers): every link leaves the page (`Leaving` draws it), but for a
+ * note `cited` names, which opens it here (`CitedNote`). A note link to
+ * any other shows as its text, whatever the answer says.
  */
-const plainComponents = (cited: readonly string[]): Components => ({
+export const plainComponents = (
+  cited: readonly string[],
+  Leaving: LeavingLink = OutsideLink
+): Components => ({
   ...components,
   a: ({ href, children }) => {
     const note = href === undefined ? undefined : citedNoteLink.exec(href);
@@ -147,7 +156,7 @@ const plainComponents = (cited: readonly string[]): Components => ({
         <span>{children}</span>
       );
     }
-    return <OutsideLink href={href}>{children}</OutsideLink>;
+    return <Leaving href={href}>{children}</Leaving>;
   },
 });
 
@@ -158,7 +167,7 @@ const noneCited: readonly string[] = [];
  * A link's address as the page may follow it: a cited note's as it is,
  * any other as react-markdown keeps safe ones (`defaultUrlTransform`).
  */
-const plainUrl = (url: string): string =>
+export const plainUrl = (url: string): string =>
   citedNoteLink.test(url) ? url : defaultUrlTransform(url);
 
 /**
