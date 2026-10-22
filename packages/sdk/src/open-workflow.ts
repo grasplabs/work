@@ -425,47 +425,72 @@ const concurrencyOf = (concurrency: number | undefined): number => {
   return Math.min(concurrency, maxConcurrency);
 };
 
+/** Whether to start an item or a branch, or none from it on. */
+type Admission = "run" | "skip" | "stop";
+
 /**
- * Runs `count` items or branches, in order, at most `limit` at once, each
- * by `run`, which answers how it ended, or null when it didn't run
- * (its `while` was false), after which none later starts; `stopped` says
- * whether one that hasn't started yet still may. Waits for every one that
- * started to end before it answers: no item or branch is left running
- * untracked. Their outcomes, by index; none for one that never started.
+ * Starts `count` items or branches, in order, at most `limit` at once,
+ * each by `run`, which answers how it ended, or null when it didn't run
+ * (its `while` was false), after which none later starts; `admit` says
+ * whether to start each, skip it, or start none from it on. Answers when
+ * every one that started has ended (`all`), and each one's end, by index,
+ * as it comes (`ends`, one a started one resolves).
  */
-const pooled = async (
+const pooled = (
   count: number,
   limit: number,
   run: (index: number) => Promise<Outcome | null>,
-  stopped: () => boolean
-): Promise<(Outcome | undefined)[]> => {
-  const outcomes: (Outcome | undefined)[] = [];
+  admit: (index: number) => Promise<Admission>
+): {
+  all: Promise<void>;
+  ends: PromiseWithResolvers<Outcome | null>[];
+} => {
+  const ends = Array.from({ length: count }, () =>
+    Promise.withResolvers<Outcome | null>()
+  );
   let next = 0;
-  let ended = false;
+  let stopped = false;
   const worker = async (): Promise<void> => {
     for (;;) {
-      if (ended || stopped() || next >= count) {
+      if (stopped || next >= count) {
         return;
       }
       const index = next;
       next += 1;
       // One after another in each of the workers.
       // oxlint-disable-next-line no-await-in-loop -- see above
-      const outcome = await run(index);
-      if (outcome === null) {
-        ended = true;
+      const admitted = await admit(index);
+      if (admitted === "stop") {
+        stopped = true;
         return;
       }
-      outcomes[index] = outcome;
+      if (admitted === "run") {
+        // oxlint-disable-next-line no-await-in-loop -- see above
+        const outcome = await run(index);
+        ends[index]?.resolve(outcome);
+        if (outcome === null) {
+          stopped = true;
+          return;
+        }
+      }
     }
   };
-  await Promise.all(
-    Array.from({ length: Math.min(limit, count) }, async () => {
-      await worker();
-    })
-  );
-  return outcomes;
+  const all = (async (): Promise<void> => {
+    await Promise.all(
+      Array.from({ length: Math.min(limit, count) }, async () => {
+        await worker();
+      })
+    );
+  })();
+  return { all, ends };
 };
+
+/** Whether `error` is a step refused for a scope another settled over. */
+const fencedOff = (error: unknown): boolean =>
+  typeof error === "object" &&
+  error !== null &&
+  hasOwn(error, "code") &&
+  Reflect.get(error, "code") === "workflow.branch_cancelled";
 
 /** Whether `plan` has stages after its task's own work. */
 const leaves = (plan: LeavePlan): boolean =>
@@ -693,7 +718,8 @@ const flowOf = (engine: OpenWorkflowEngine, within = ""): Flow => {
       })();
       return await settling;
     };
-    const outcomes = await pooled(
+    const settled = Promise.withResolvers<number>();
+    const pool = pooled(
       count,
       limit,
       async (index) => {
@@ -701,7 +727,9 @@ const flowOf = (engine: OpenWorkflowEngine, within = ""): Flow => {
         try {
           done = await run(index, flowOf(engine, itemScope(within, id, index)));
         } catch (error) {
-          failing ||= !compete;
+          // A step refused for a scope another settled over fails nothing
+          // of the scope: the one that settled it still starts.
+          failing ||= !compete && !fencedOff(error);
           return { ok: false, error };
         }
         if (done === null) {
@@ -714,11 +742,40 @@ const flowOf = (engine: OpenWorkflowEngine, within = ""): Flow => {
           (compete || (settles && done.end === true)) &&
           settling === undefined
         ) {
-          await settle(index);
+          settled.resolve(await settle(index));
         }
         return { ok: true, done };
       },
-      () => settling !== undefined || failing || ending
+      async (index) => {
+        // Once settled, only the one it settled on starts (it may be an
+        // earlier activation's, not yet replayed to): none of the others.
+        if (settling !== undefined) {
+          return index === (await settling) ? "run" : "skip";
+        }
+        return failing || ending ? "stop" : "run";
+      }
+    );
+    // Every one that started has ended, or the scope settled and the one
+    // it settled on has: those it fenced off are left to the engine,
+    // their next steps run no attempt, and their sleeps wait for nothing.
+    const won = await Promise.race([
+      (async (): Promise<undefined> => {
+        await pool.all;
+        return undefined;
+      })(),
+      (async () => {
+        const branch = await settled.promise;
+        return { branch, outcome: await pool.ends[branch]?.promise };
+      })(),
+    ]);
+    const outcomes = await Promise.all(
+      pool.ends.map(async (end) => {
+        const outcome = await Promise.race([
+          end.promise,
+          Promise.resolve(null),
+        ]);
+        return outcome ?? undefined;
+      })
     );
     if (settling === undefined) {
       // One after another, an end stops the items after it by itself.
@@ -727,14 +784,14 @@ const flowOf = (engine: OpenWorkflowEngine, within = ""): Flow => {
       );
       return ender?.ok === true ? { outcomes, end: ender.done } : { outcomes };
     }
-    const branch = await settling;
-    const settled = outcomes[branch];
-    if (settled?.ok !== true) {
+    const branch = won?.branch ?? (await settling);
+    const winner = won?.outcome ?? outcomes[branch];
+    if (winner?.ok !== true) {
       throw new TypeError("A scope settles on one that succeeded");
     }
-    return settled.done.end === true
-      ? { outcomes, end: settled.done }
-      : { outcomes, won: settled.done };
+    return winner.done.end === true
+      ? { outcomes, end: winner.done }
+      : { outcomes, won: winner.done };
   };
   const flow: Flow = {
     input: async (input, from) => {

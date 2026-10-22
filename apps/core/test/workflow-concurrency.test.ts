@@ -39,6 +39,15 @@ const after = (id: string, wait: string, status: string) => ({
   },
 });
 
+/** `count` steps, one after another, the last leaving for the item's end. */
+const busySteps = (count: number) =>
+  Array.from({ length: count }, (_, index) => ({
+    [`busy-${index}`]: {
+      set: '${ {status: "x"} }',
+      ...(index === count - 1 ? { then: "end-of-item" } : {}),
+    },
+  }));
+
 describe("items and branches at once", { timeout: 60_000 }, () => {
   it("run a loop's items at once, each from the loop's context, and answer their outputs in item order", async () => {
     const by = await builder();
@@ -169,6 +178,89 @@ describe("items and branches at once", { timeout: 60_000 }, () => {
       end: { status: "completed", output: { status: "ended" } },
       settled: 1,
       late: 0,
+    });
+  });
+
+  it("keep an item's wait through a sibling's long chain of steps, the run finishing once it is due", async () => {
+    const by = await builder();
+    const { workflow } = await published(by, [
+      {
+        each: {
+          for: { in: "${ [0, 1] }" },
+          metadata: { grasp: { concurrency: 2 } },
+          do: [
+            {
+              gate: {
+                switch: [
+                  { first: { when: "${ $item == 0 }", then: "pause" } },
+                  { other: { then: "busy-0" } },
+                ],
+              },
+            },
+            ...busySteps(12),
+            { pause: { wait: { milliseconds: 400 } } },
+            { "end-of-item": { set: '${ {status: "item"} }' } },
+          ],
+          output: { as: '${ {status: "done"} }' },
+        },
+      },
+    ]);
+    const run = await ranFor(by, workflow.id);
+    expect(endOf(run)).toStrictEqual({
+      status: "completed",
+      output: { status: "done" },
+    });
+  });
+
+  it("end from an item the pool starts later, and finish though an earlier item's next step is refused, after the settling is lost once", async () => {
+    const by = await builder();
+    const { workflow } = await published(by, [
+      {
+        each: {
+          // Three items, two at once: item 2 starts only once item 1 ends.
+          for: { in: "${ [0, 1, 2] }" },
+          metadata: { grasp: { concurrency: 2 } },
+          input: { from: '${ {status: "ended"} }' },
+          do: [
+            {
+              gate: {
+                switch: [
+                  { stop: { when: "${ $item == 2 }", then: "end" } },
+                  { first: { when: "${ $item == 0 }", then: "pause" } },
+                  { other: { then: "busy-0" } },
+                ],
+              },
+            },
+            // Item 1 replays several steps; item 0 a wait, then a step
+            // its fenced-off item never runs.
+            ...busySteps(6),
+            { pause: { wait: { milliseconds: 100 } } },
+            { late: { set: '${ {status: "late"} }' } },
+            { "end-of-item": { set: '${ {status: "item"} }' } },
+          ],
+        },
+      },
+      { finished: { set: '${ {status: "finished"} }' } },
+    ]);
+    // Item 2's settling of the loop is cut off once its code returned:
+    // the fence it wrote stands, and the next activation replays the
+    // loop with item 0's wait due, so item 0's next step is refused
+    // before item 2 starts again.
+    const run = await withCpuKills(
+      "task:each",
+      (attempt) => attempt === 1,
+      async () => await ranFor(by, workflow.id),
+      "end"
+    );
+    const completed = await completedSteps(run.id);
+    expect({
+      end: endOf(run),
+      settled: completed.get("task:each") ?? 0,
+      item0Late: completed.get("task:late@each.0") ?? 0,
+    }).toStrictEqual({
+      end: { status: "completed", output: { status: "ended" } },
+      settled: 1,
+      item0Late: 0,
     });
   });
 

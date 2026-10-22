@@ -112,10 +112,11 @@ import { heldWakeType } from "./wakes.ts";
 //   own step (`settle`), in a fence kept with the run (`ScopeFences`,
 //   run-object.ts), first writer's: a branch that finishes first in a
 //   later replay settles nothing new. A step of an item or branch another
-//   settled its scope over is refused before it starts
-//   (`workflow.branch_cancelled`), every activation; what it recorded
-//   before replays as recorded, and a step already out as the scope
-//   settled ends as it would, its effect standing. The branch a scope
+//   settled its scope over runs no attempt (`workflow.branch_cancelled`,
+//   for good), every activation; what it recorded before replays as
+//   recorded, so a replay reaches every step it journaled, and a step
+//   already out as the scope settled ends as it would, its effect
+//   standing. Its sleeps sleep as recorded: nothing waits for them. The branch a scope
 //   settled on is data the run carries, never authority: only one its
 //   scope has.
 // - An expression that isn't the build's, or another step's. An attempt
@@ -514,6 +515,11 @@ interface StepOf {
    * recorded: never anything the isolate passes.
    */
   loop: Readonly<Record<string, Json>>;
+  /**
+   * Whether it runs in an item or a branch another settled its scope over
+   * (`#fencedOff`): no attempt of it runs.
+   */
+  fenced?: boolean;
 }
 
 /** Whether `task` sleeps: a wait, or a `grasp.sleepUntil` call. */
@@ -1249,13 +1255,11 @@ export class ResourceRunHost
     if (loop === undefined) {
       return this.#refuse(`Step ${shown} runs in an item no loop recorded.`);
     }
-    // Not a refusal of the module: a branch another settled its scope over
-    // (a race's winner, an `end`) starts nothing more, every activation.
-    if (this.#fencedOff(step.scope)) {
-      throw workflowResourceErrors.create("workflow.branch_cancelled");
-    }
     this.#asked.add(name);
-    return { ...step, loop };
+    // Not a refusal of the module: a branch another settled its scope over
+    // (a race's winner, an `end`) runs no attempt more (`do`), every
+    // activation, while what it recorded replays as recorded.
+    return { ...step, loop, fenced: this.#fencedOff(step.scope) };
   }
 
   /**
@@ -1488,8 +1492,20 @@ export class ResourceRunHost
           wait: loadWaitStart,
           collecting: false,
         };
-        const attemptStep = async (context: unknown): Promise<unknown> =>
-          await this.#attempt(run, context, fn, stepDone.promise);
+        // A step of a branch another settled its scope over runs nothing:
+        // the engine still replays what it recorded, and fails anything
+        // else for good, so a replay reaches every step it journaled.
+        const attemptStep = async (context: unknown): Promise<unknown> => {
+          // Settled meanwhile too: checked again as the attempt starts.
+          if (step.fenced === true || this.#fencedOff(step.scope)) {
+            throw toStepError(
+              forIsolate(
+                workflowResourceErrors.create("workflow.branch_cancelled")
+              )
+            );
+          }
+          return await this.#attempt(run, context, fn, stepDone.promise);
+        };
         let recorded = await this.#inSlot(
           async () =>
             await this.#step.do(stepName, engineConfigOf(step), attemptStep)
