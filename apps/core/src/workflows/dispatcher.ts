@@ -13,6 +13,7 @@ import { runBackfill } from "../backfill-run.ts";
 import { runBindingsFor } from "../bindings.ts";
 import { runBuildJob } from "../build-jobs.ts";
 import { runExtraction } from "../knowledge/extraction.ts";
+import { runIndexing } from "../knowledge/indexing.ts";
 import { stepModelBinding } from "../resource-bindings.ts";
 import type { WorkContext } from "../restricted.ts";
 import { afterCpuKill, trackAttemptCalls } from "./attempt-calls.ts";
@@ -400,6 +401,7 @@ const internalRuns: Record<
   extraction: runExtraction,
   build: runBuildJob,
   backfill: runBackfill,
+  indexing: runIndexing,
 };
 
 /**
