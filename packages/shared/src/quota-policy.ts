@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { sha256Hex } from "./encoding.ts";
 import { platformLimits } from "./platform-limits.ts";
 
 // A deployment's quota policy: the platform's limits (platform-limits.ts),
@@ -158,3 +159,27 @@ export const quotaPolicyOf = (
   }
   return { generation: configured.generation, limits };
 };
+
+/**
+ * `limits` as text that is the same for the same limits, in any order:
+ * what core records a generation's limits as, and hashes.
+ */
+export const canonicalLimits = (
+  limits: Readonly<Record<string, number | undefined>>
+): string =>
+  JSON.stringify(
+    Object.fromEntries(
+      Object.entries(limits)
+        .filter(([, value]) => value !== undefined)
+        .toSorted(([a], [b]) => a.localeCompare(b))
+    )
+  );
+
+/**
+ * The hash of a policy's limits (SHA-256 of `canonicalLimits`, hex): what
+ * core records with a generation, and what the console compares, so two
+ * policies under one generation with other limits never read as one.
+ */
+export const quotaLimitsHash = async (
+  limits: Readonly<Record<string, number | undefined>>
+): Promise<string> => await sha256Hex(canonicalLimits(limits));

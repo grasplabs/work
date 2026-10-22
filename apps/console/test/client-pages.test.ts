@@ -5,7 +5,12 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { setSignIn } from "../src/clients/settings.ts";
 import { act, audit, consoleDatabase } from "../src/db/act.ts";
-import { clientDeploys, clientRuns, clients } from "../src/db/schema.ts";
+import {
+  clientDeploys,
+  clientRuns,
+  clients,
+  settings,
+} from "../src/db/schema.ts";
 import { startProvisioning } from "../src/provision/control.ts";
 import { importReleases } from "../src/releases/import.ts";
 import { mockAccess } from "./access.ts";
@@ -237,8 +242,16 @@ describe("the client pages", () => {
     }).toStrictEqual({ settingUp: true, deploying: false });
   });
 
-  it("show an active client where it's live", async () => {
+  it("show an active client where it's live, and its quota policy as unknown while its core can't be asked, with what the console sets", async () => {
     const client = await recordClient("active");
+    const bare = await page(`/clients/${client.id}`);
+    await db.insert(settings).values({
+      clientId: client.id,
+      key: "QUOTA_LIMITS",
+      value: JSON.stringify({ generation: 2, limits: { workflowSteps: 7 } }),
+      updatedBy: staff.email,
+      updatedAt: new Date(),
+    });
 
     const { status, html } = await page(`/clients/${client.id}`);
 
@@ -248,7 +261,24 @@ describe("the client pages", () => {
         `Live at https://${client.id}.grasp.test, and passed its smoke check.`
       ),
       resume: html.includes("Resume"),
-    }).toStrictEqual({ status: 200, live: true, resume: false });
+      quotaNone: bare.html.includes(
+        "The console sets no policy. Core couldn&#x27;t be asked which it applies."
+      ),
+      quotaSet: html.includes(
+        "The console sets generation 2. Core couldn&#x27;t be asked which it applies."
+      ),
+      // What the console sets, its limits listed, beside nothing of core's.
+      setLimits: html.includes("workflowSteps: 7"),
+      inSync: html.includes("In sync"),
+    }).toStrictEqual({
+      status: 200,
+      live: true,
+      resume: false,
+      quotaNone: true,
+      quotaSet: true,
+      setLimits: true,
+      inSync: false,
+    });
   });
 
   it("offer to resume a client whose run is gone", async () => {

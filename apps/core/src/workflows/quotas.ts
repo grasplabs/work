@@ -1,9 +1,10 @@
 import { deploymentConfig } from "@grasp-os/shared/config";
-import { sha256Hex } from "@grasp-os/shared/encoding";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import {
+  canonicalLimits,
   lowerableLimits,
+  quotaLimitsHash,
   quotaLimitsSchema,
   quotaPolicyOf,
 } from "@grasp-os/shared/quota-policy";
@@ -148,16 +149,6 @@ import type { AdmissionScope, QueuePlace } from "./admission.ts";
 // time is held by attempts still under way, which a retry after the
 // seconds it names may find room in (`workflow.lineage_busy`).
 
-/** `limits` as text that is the same for the same limits, in any order. */
-const canonicalLimits = (limits: Record<string, number | undefined>): string =>
-  JSON.stringify(
-    Object.fromEntries(
-      Object.entries(limits)
-        .filter(([, value]) => value !== undefined)
-        .toSorted(([a], [b]) => a.localeCompare(b))
-    )
-  );
-
 /** Limits as `quota_policies` keeps them: names to whole numbers. */
 const storedLimitsSchema = z.record(z.string(), z.int().min(1));
 
@@ -260,7 +251,10 @@ const decidedPolicy = async (
   const db = drizzle(env.DB);
   const limits =
     configured === undefined ? undefined : canonicalLimits(configured.limits);
-  const hash = limits === undefined ? undefined : await sha256Hex(limits);
+  const hash =
+    configured === undefined
+      ? undefined
+      : await quotaLimitsHash(configured.limits);
   let highest = await highestRecorded(db);
   if (
     configured !== undefined &&
@@ -342,9 +336,12 @@ export const quotaPolicyReport = async (
         : []
     )
   );
+  // The recorded hash only when the recorded generation is the one that
+  // applies: the platform's own, none recorded, has none.
   return {
     generation: policy.generation,
     lowered,
+    limitsHash: recorded?.limitsHash ?? null,
     recordedAt: recorded?.recordedAt.toISOString() ?? null,
   };
 };

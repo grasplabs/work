@@ -109,6 +109,14 @@ export interface AccountState {
    */
   admin?: AdminSnapshot | "absent" | "ended" | "garbled";
   /**
+   * `absent` for a core from before the quota policy report, which answers
+   * it 404. Otherwise its core answers the policy it applies, as core does:
+   * the highest generation any of its versions went live with, with the
+   * limits it first went live with. `redirect` for one that answers
+   * with a redirect elsewhere.
+   */
+  quotaPolicy?: "absent" | "redirect";
+  /**
    * What its core does once a snapshot request arrives, before answering
    * it: waits, as a slow or hanging one does, or throws, as a dropped
    * connection does.

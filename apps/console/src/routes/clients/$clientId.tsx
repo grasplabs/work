@@ -8,6 +8,7 @@ import {
   CardTitle,
 } from "@grasp-os/ui/components/card";
 import {
+  Await,
   createFileRoute,
   Link,
   notFound,
@@ -16,7 +17,11 @@ import {
 import { useEffect } from "react";
 
 import { ClientSettings } from "../../clients/client-settings.tsx";
-import { fetchClientSettings } from "../../clients/functions.ts";
+import {
+  fetchClientQuotaPolicy,
+  fetchClientSettings,
+} from "../../clients/functions.ts";
+import { QuotaPolicyCard } from "../../clients/quota-policy-card.tsx";
 import {
   confirmClientWorkersPaid,
   fetchNewClientOptions,
@@ -220,7 +225,8 @@ const working: ReadonlySet<ProvisioningView["phase"]> = new Set([
 ]);
 
 const Client = () => {
-  const { view, releases, settings, history } = Route.useLoaderData();
+  const { view, releases, settings, history, quotaPolicy } =
+    Route.useLoaderData();
   const router = useRouter();
   const following = working.has(view.phase);
   useEffect(() => {
@@ -259,6 +265,15 @@ const Client = () => {
           releases={releases}
         />
       ) : null}
+      {view.client?.status === "active" ? (
+        // Its core read live, within the grid's deadline: the page shows
+        // without waiting for it, and the card once it answers.
+        <Await fallback={null} promise={quotaPolicy}>
+          {(policy) =>
+            policy === null ? null : <QuotaPolicyCard policy={policy} />
+          }
+        </Await>
+      ) : null}
       {settings === null ? null : (
         <ClientSettings
           clientId={view.clientId}
@@ -289,6 +304,18 @@ export const Route = createFileRoute("/clients/$clientId")({
     if (!newClientIdSchema.safeParse(params.clientId).success) {
       throw notFound();
     }
+    // Not awaited: a slow or unreachable core never holds up the page. A
+    // read that fails (the database included) shows no card, never the
+    // route's error page in place of the client.
+    const quotaPolicy = (async () => {
+      try {
+        return await fetchClientQuotaPolicy({
+          data: { clientId: params.clientId },
+        });
+      } catch {
+        return null;
+      }
+    })();
     const [view, { releases }, { settings, history }] = await Promise.all([
       fetchProvisioning({ data: { clientId: params.clientId } }),
       fetchNewClientOptions(),
@@ -297,7 +324,7 @@ export const Route = createFileRoute("/clients/$clientId")({
     if (view === null) {
       throw notFound();
     }
-    return { view, releases, settings, history };
+    return { view, releases, settings, history, quotaPolicy };
   },
   component: Client,
   notFoundComponent: NoSuchClient,

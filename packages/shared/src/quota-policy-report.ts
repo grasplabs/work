@@ -35,6 +35,15 @@ export const quotaPolicyReportSchema = z.strictObject({
   generation: z.int().min(0),
   /** What it lowers, each as applied (no higher than the platform's now). */
   lowered: z.partialRecord(z.enum(lowerableLimits), limitValue),
+  /**
+   * The hash of the limits core recorded for it (`quotaLimitsHash`), as
+   * deployed: the console compares it with its own, so another policy
+   * under the same generation reads as drift. Null for the platform's own.
+   */
+  limitsHash: z
+    .string()
+    .regex(/^[0-9a-f]{64}$/u)
+    .nullable(),
   /** When core recorded it (ISO 8601); null for the platform's own. */
   recordedAt: z.iso.datetime().nullable(),
 });

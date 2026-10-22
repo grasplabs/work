@@ -2,7 +2,10 @@ import { hkdfHmacKey } from "@grasp-os/shared/client-secrets";
 import { toHex } from "@grasp-os/shared/encoding";
 import { onboardingSummaryPurpose } from "@grasp-os/shared/onboarding-summary";
 import { platformUpdateSignatureHeader } from "@grasp-os/shared/platform-change";
-import { quotaLimitsSchema } from "@grasp-os/shared/quota-policy";
+import {
+  quotaLimitsHash,
+  quotaLimitsSchema,
+} from "@grasp-os/shared/quota-policy";
 import {
   quotaPolicyReportPath,
   quotaPolicyReportPurpose,
@@ -80,11 +83,16 @@ describe("the quota policy core applies", () => {
       status: answer.status,
       generation: answer.report.generation === answer.generation,
       lowered: answer.report.lowered,
+      // The hash the console computes of the limits it deployed.
+      limitsHash:
+        answer.report.limitsHash ===
+        (await quotaLimitsHash({ workflowSteps: 5 })),
       recorded: answer.report.recordedAt !== null,
     }).toStrictEqual({
       status: 200,
       generation: true,
       lowered: { workflowSteps: 5 },
+      limitsHash: true,
       recorded: true,
     });
   });
