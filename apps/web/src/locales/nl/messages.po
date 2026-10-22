@@ -3738,7 +3738,12 @@ msgctxt "inbox tab: what someone dealt with"
 msgid "Done"
 msgstr "Afgehandeld"
 
+#: src/routes/_shell.workflows.$workflow_.runs.$run.tsx
+msgid "Download"
+msgstr "Downloaden"
+
 #: src/knowledge/uploads.tsx
+#: src/routes/_shell.workflows.$workflow_.runs.$run.tsx
 msgid "Download {name}"
 msgstr "{name} downloaden"
 
@@ -3864,6 +3869,10 @@ msgstr "Interviews met medewerkers"
 #: src/workflows/resource-runs.tsx
 msgid "Ended"
 msgstr "Beëindigd"
+
+#: src/routes/_shell.workflows.$workflow_.runs.$run.tsx
+msgid "Ended {ended}"
+msgstr "Beëindigd {ended}"
 
 #: src/workflows/workflow-diagram.tsx
 msgid "Ends the workflow"
@@ -4158,6 +4167,7 @@ msgstr "Bestand"
 
 #: src/chat/builds.tsx
 #: src/routes/_shell.knowledge.$collection.tsx
+#: src/routes/_shell.workflows.$workflow_.runs.$run.tsx
 msgid "Files"
 msgstr "Bestanden"
 
@@ -4236,6 +4246,10 @@ msgstr "Vingerafdruk gekopieerd"
 #: src/routes/guest.tsx
 msgid "Finish"
 msgstr "Afronden"
+
+#: src/routes/_shell.workflows.$workflow_.runs.$run.tsx
+msgid "Finished"
+msgstr "Voltooid"
 
 #: src/onboarding/setup-steps.tsx
 msgid "First I need your staff list."
@@ -5713,6 +5727,7 @@ msgstr "Oude vermeldingen uit het auditlogboek verplaatst"
 #: src/routes/_shell.settings.packages.index.tsx
 #: src/routes/_shell.settings.profile.tsx
 #: src/routes/_shell.settings.workspace.tsx
+#: src/routes/_shell.workflows.$workflow_.runs.$run.tsx
 #: src/workflows/independent-workflows.tsx
 msgid "Name"
 msgstr "Naam"
@@ -8049,6 +8064,7 @@ msgid "Rules waiting for a decision"
 msgstr "Regels wachten op een besluit"
 
 #: src/routes/_shell.workflows.$app.$workflow_.runs.$run.tsx
+#: src/routes/_shell.workflows.$workflow_.runs.$run.tsx
 msgid "Run"
 msgstr "Run"
 
@@ -8083,8 +8099,13 @@ msgid "Run logs"
 msgstr "Runlogs"
 
 #: src/routes/_shell.workflows.$app.$workflow_.runs.$run.tsx
+#: src/routes/_shell.workflows.$workflow_.runs.$run.tsx
 msgid "Run not found"
 msgstr "Run niet gevonden"
+
+#: src/routes/_shell.workflows.$workflow_.runs.$run.tsx
+msgid "Run of {name}"
+msgstr "Run van {name}"
 
 #: src/routes/_shell.workflows.$app.$workflow_.runs.$run.tsx
 msgid "Run of {workflow}"
@@ -8620,6 +8641,10 @@ msgstr "Aanmelden gebeurt bij {app}. Het duurt ongeveer een minuut."
 #: src/frame/person-menu.tsx
 msgid "Signing out didn't work"
 msgstr "Uitloggen is niet gelukt"
+
+#: src/routes/_shell.workflows.$workflow_.runs.$run.tsx
+msgid "Size"
+msgstr "Grootte"
 
 #: src/brain/brain.ts
 msgid "Size changed to {people}"
@@ -9940,6 +9965,10 @@ msgstr "Dit beleid is er niet meer"
 msgid "This rule is not here any more"
 msgstr "Deze regel is er niet meer"
 
+#: src/routes/_shell.workflows.$workflow_.runs.$run.tsx
+msgid "This run kept no files."
+msgstr "Deze run heeft geen bestanden bewaard."
+
 #: src/routes/_shell.workflows.$app.$workflow_.runs.$run.tsx
 msgid "This run's details were removed once its retention was over, and its history with them."
 msgstr "De details van deze run zijn verwijderd toen de bewaartermijn voorbij was, en de geschiedenis met ze."
@@ -11130,6 +11159,7 @@ msgstr "Bepaald wat er beter kan"
 #: src/dashboard/standard-widgets.tsx
 #: src/inbox/items.ts
 #: src/routes/_shell.settings.packages.index.tsx
+#: src/routes/_shell.workflows.$workflow_.runs.$run.tsx
 #: src/routes/_shell.workflows.$workflow.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/workflows/runs.tsx
@@ -11170,6 +11200,7 @@ msgstr "workflow.json"
 #: src/routes/_shell.domains.$engine.index.tsx
 #: src/routes/_shell.workflows.$app.$workflow_.runs.$run.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
+#: src/routes/_shell.workflows.$workflow_.runs.$run.tsx
 #: src/routes/_shell.workflows.$workflow.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/routes/decisions.$decision.tsx

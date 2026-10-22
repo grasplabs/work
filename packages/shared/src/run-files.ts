@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { notInFileName } from "./app-file-limits.ts";
+import { notInFileName, savedNameOf } from "./app-file-limits.ts";
 import { defineErrorFamily } from "./errors.ts";
 
 // A workflow run's own files (GRA-724): what its actions write through a
@@ -58,6 +58,33 @@ export const runFileTypes = [
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 ] as const;
 export type RunFileType = (typeof runFileTypes)[number];
+
+/** The extensions a run file of each type is saved under, the first by default. */
+const runFileExtensions: Readonly<
+  Record<RunFileType, readonly [string, ...string[]]>
+> = {
+  "image/png": ["png"],
+  "image/jpeg": ["jpg", "jpeg"],
+  "image/gif": ["gif"],
+  "image/webp": ["webp"],
+  "application/pdf": ["pdf"],
+  "text/plain": ["txt"],
+  "text/csv": ["csv"],
+  "text/markdown": ["md"],
+  "application/json": ["json"],
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": [
+    "docx",
+  ],
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ["xlsx"],
+};
+
+/**
+ * The name a run file of `type` is saved under (`savedNameOf`): ending in
+ * its type's extension, so `report.html` of a text file saves as
+ * `report.html.txt`.
+ */
+export const runFileDownloadName = (name: string, type: RunFileType): string =>
+  savedNameOf(name, runFileExtensions[type]);
 
 /** The text types: UTF-8 with no NUL, and no binary signature. */
 export const runFileTextTypes: ReadonlySet<RunFileType> = new Set([
@@ -159,6 +186,31 @@ export interface RunFileRef {
   readonly type: RunFileType;
   readonly size: number;
   readonly sha256: string;
+}
+
+/**
+ * Where a run's finished files are downloaded from (GRA-888):
+ * `<runFilesPath>/<workflow>/<run>/<file>/content`, only for the run's
+ * person and, unless the run is restricted, the organization's admins.
+ */
+export const runFilesPath = "/api/run-files";
+
+/** The address of finished file `file` of run `run` of workflow `workflow`. */
+export const runFileContentPath = (
+  workflow: string,
+  run: string,
+  file: string
+): string =>
+  `${runFilesPath}/${encodeURIComponent(workflow)}/${encodeURIComponent(run)}/${encodeURIComponent(file)}/content`;
+
+/** A finished file of a run, as its run page lists it for those who may download it. */
+export interface RunFileListing {
+  readonly id: string;
+  readonly name: string;
+  readonly type: RunFileType;
+  readonly size: number;
+  /** When it was finished (ISO 8601). */
+  readonly finishedAt: string;
 }
 
 export const runFileErrors = defineErrorFamily({
