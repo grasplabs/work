@@ -19,6 +19,16 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
 
+import { sdkProtocolVersion } from "@grasp-os/shared/app-releases";
+import {
+  connectInterfacesCoreCalls,
+  connectInterfaceVersion,
+} from "@grasp-os/shared/connect";
+import type { ReleaseCompatibility } from "@grasp-os/shared/release";
+import {
+  journalSchemaVersion,
+  oldestJournalSchemaVersion,
+} from "@grasp-os/workerflow/journal-schema";
 import { z } from "zod";
 
 import { parseJsonc } from "../wrangler-config-rules.ts";
@@ -137,6 +147,21 @@ const buildWorker = async (
   };
 };
 
+// What the release's code works with, from where each is declared next
+// to the code it describes. Core accepts App releases of exactly its own
+// SDK protocol.
+const compatibility: ReleaseCompatibility = {
+  interfaces: {
+    connect: { serves: connectInterfaceVersion, calls: {} },
+    core: { calls: { connect: { ...connectInterfacesCoreCalls } } },
+  },
+  workflowJournal: {
+    min: oldestJournalSchemaVersion,
+    max: journalSchemaVersion,
+  },
+  sdkProtocols: { min: sdkProtocolVersion, max: sdkProtocolVersion },
+};
+
 const releaseId = args["release-id"] ?? defaultReleaseId();
 const wranglerVersion = readPackageJson(
   path.join(ROOT, "node_modules/wrangler")
@@ -177,6 +202,7 @@ const manifest = generateManifest(
     notes: run("git", ["log", "-1", "--format=%s", commit]),
     wranglerVersion,
     packages: packageVersions([...RELEASED_APPS, FRONTEND]),
+    compatibility,
   },
   workers
 );
