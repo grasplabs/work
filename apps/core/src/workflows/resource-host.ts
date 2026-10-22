@@ -40,10 +40,12 @@ import type {
 import { settling } from "./code.ts";
 import type { RunHostCalls, Settled, StepError } from "./code.ts";
 import {
+  attributesOf,
   envelopeOf,
   eventTypeKey,
   storedEventSchema,
 } from "./event-envelopes.ts";
+import type { StoredEvent } from "./event-envelopes.ts";
 import { takesExactly } from "./exact-values.ts";
 import {
   busyMarker,
@@ -1174,6 +1176,14 @@ export class ResourceRunHost
    */
   readonly #listens = new Map<string, ResolvedListen>();
   /**
+   * The value of each correlation the run's listens took an event under,
+   * by its name (GRA-947): the attribute's value on the first event a
+   * filter correlating under that name took, as this activation reached
+   * it, replays included, so the same on every replay. A later filter's
+   * correlation without an `expect` matches only that value.
+   */
+  readonly #correlated = new Map<string, string>();
+  /**
    * The input each listen task's enter step recorded, as transformed, by
    * place: what its leave step's transformations read as `$input`.
    */
@@ -1998,7 +2008,19 @@ export class ResourceRunHost
           index === 0 ? listening.name : `${listening.name}:${index + 1}`;
         // One at a time, in the filters' order: waits come one at a time.
         // oxlint-disable-next-line no-await-in-loop -- see above
-        events.push(await this.#taken(wait, match, deadline, task.listen.read));
+        const taken = await this.#taken(wait, match, deadline);
+        events.push(
+          task.listen.read === "data"
+            ? taken.stored.data
+            : z.json().parse(envelopeOf(taken.stored, taken.timestamp))
+        );
+        // oxlint-disable-next-line no-await-in-loop -- one event at a time
+        await this.#correlate(
+          task,
+          resolved,
+          taken.stored,
+          task.listen.strategy === "all" ? index : undefined
+        );
       }
       this.#listened.set(listening.place, events);
       return events;
@@ -2012,9 +2034,8 @@ export class ResourceRunHost
   async #taken(
     wait: string,
     match: ResolvedListen,
-    deadline: number,
-    read: "data" | "envelope"
-  ): Promise<Json> {
+    deadline: number
+  ): Promise<{ stored: StoredEvent; timestamp: Date }> {
     let event: { payload: unknown; timestamp: Date };
     try {
       event = await this.#step.waitForMatch(wait, { match, until: deadline });
@@ -2024,10 +2045,56 @@ export class ResourceRunHost
       }
       throw error;
     }
-    const stored = storedEventSchema.parse(event.payload);
-    return read === "data"
-      ? stored.data
-      : z.json().parse(envelopeOf(stored, event.timestamp));
+    return {
+      stored: storedEventSchema.parse(event.payload),
+      timestamp: event.timestamp,
+    };
+  }
+
+  /**
+   * Records the correlations of the filter of listen task `task` that
+   * took `stored`: `taker` (an `all` listen's, which waits on one filter at
+   * a time), or the first of its filters, as resolved (`resolved`, in the
+   * build's order), whose type and attributes it has. Each of that
+   * filter's correlations not yet held takes the event's attribute. An
+   * event that lacks one (an event with no subject) fails the listen
+   * (`workflow.call_invalid`): holding nothing would let a sender turn the
+   * correlation off, and later listens match any value. The same on every
+   * replay, as the event is.
+   */
+  async #correlate(
+    task: Extract<SealedTask, { kind: "listen" }>,
+    resolved: ResolvedListen,
+    stored: StoredEvent,
+    taker?: number
+  ): Promise<void> {
+    const type = await eventTypeKey(task.listen.binding, stored.type);
+    const attributes = attributesOf(stored);
+    // An `all` listen waits on one filter at a time, so `taker` is the one
+    // that took it; `one` and `any` wait on all, the first matching took it.
+    const index =
+      taker ??
+      resolved.findIndex(
+        (filter) =>
+          filter.type === type &&
+          Object.entries(filter.attributes).every(
+            ([name, value]) => attributes[name] === value
+          )
+      );
+    for (const { name, attribute } of task.listen.filters[index]?.correlate ??
+      []) {
+      const value = attributes[attribute];
+      if (value === undefined) {
+        throw workflowResourceErrors.create("workflow.call_invalid", {
+          issues: [
+            `listen: An event the listen took has no ${attribute}, which correlation ${name} reads.`,
+          ],
+        });
+      }
+      if (!this.#correlated.has(name)) {
+        this.#correlated.set(name, value);
+      }
+    }
   }
 
   /**
@@ -3140,6 +3207,14 @@ export class ResourceRunHost
           });
         }
         attributes[name] = value;
+      }
+      // A correlation without an `expect` matches what the run's listens
+      // took under its name before: nothing yet, any value.
+      for (const { name, attribute } of filter.correlate ?? []) {
+        const held = this.#correlated.get(name);
+        if (held !== undefined && !Object.hasOwn(attributes, attribute)) {
+          attributes[attribute] = held;
+        }
       }
       resolved.push({
         // oxlint-disable-next-line no-await-in-loop -- one hash per filter

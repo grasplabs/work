@@ -91,6 +91,12 @@ const jobData = JSON.stringify(
 const completed = "grasp.job.completed";
 const timedOut = "grasp.job.timeout";
 
+/** A filter on `type`, correlating on the event's subject as the job. */
+const byJob = (type: string) => ({
+  with: { type },
+  correlate: { job: { from: "${ .subject }" } },
+});
+
 /**
  * A workflow of `admin`'s whose input is `{ jobId }` and whose output is
  * `{ notes }`, running `tasks`, its event bindings `jobEvents` and
@@ -634,14 +640,186 @@ describe("listen tasks", { timeout: 120_000 }, () => {
     expect(journal?.events.map((row) => row.consumed_by)).toStrictEqual([null]);
   });
 
-  it("aren't lowered with a filter that correlates on an event's content", async () => {
+  it("take only an event whose correlated attribute is the one expected", async () => {
     const admin = await person("admin");
-    const { version } = await listening(admin, [
+    const { workflow, version } = await listening(admin, [
+      { pause: { wait: "PT2S" } },
       listen("await-job", {
         one: {
           with: { type: completed },
-          correlate: { job: { from: "${ .data.jobId }", expect: "job-1" } },
+          correlate: {
+            job: {
+              from: "${ .subject }",
+              expect: "${ $workflow.input.jobId }",
+            },
+          },
         },
+      }),
+      notes,
+    ]);
+    const runId = await started(admin, workflow.id);
+    await waiting(runId);
+
+    await admitRunEvent(
+      env,
+      delivery(workflow.id, runId, { subject: "job-2", note: "another job's" })
+    );
+    await admitRunEvent(env, delivery(workflow.id, runId, { note: "ours" }));
+    const run = await endOf(admin, workflow.id, runId);
+
+    expect({
+      executable: version.build.executable,
+      output: run.output,
+    }).toStrictEqual({ executable: true, output: { notes: ["ours"] } });
+  });
+
+  it("correlate a later listen on what an earlier one took, across activations, each event taken once", async () => {
+    const admin = await person("admin");
+    const { workflow } = await listening(admin, [
+      {
+        "await-done": {
+          ...listen("await-done", { one: byJob(completed) })["await-done"],
+          export: { as: "${ { first: [.[] | .note] } }" },
+        },
+      },
+      // The second listen's enter step runs in a later activation, which
+      // takes the first's event again, by replay, to know its job.
+      { pause: { wait: "PT2S" } },
+      listen("await-timeout", { one: byJob(timedOut) }),
+      { notes: { set: { notes: "${ $context.first + [.[] | .note] }" } } },
+    ]);
+    const runId = await started(admin, workflow.id, "job-7");
+    await waiting(runId);
+
+    const sent = [
+      delivery(workflow.id, runId, { subject: "job-7", note: "done" }),
+      delivery(workflow.id, runId, {
+        type: timedOut,
+        subject: "job-8",
+        note: "another job's",
+      }),
+      delivery(workflow.id, runId, {
+        type: timedOut,
+        subject: "job-7",
+        note: "timed out",
+      }),
+    ];
+    for (const event of sent) {
+      // oxlint-disable-next-line no-await-in-loop -- in order: acceptance order matters
+      await admitRunEvent(env, event);
+    }
+    const run = await endOf(admin, workflow.id, runId);
+    const journal = await runObject(runId).journal();
+
+    expect({
+      output: run.output,
+      consumed: journal?.events.map((event) => event.consumed_by !== null),
+    }).toStrictEqual({
+      output: { notes: ["done", "timed out"] },
+      consumed: [true, false, true],
+    });
+  });
+
+  it("correlate on the filter of an all listen that took the event, though an earlier filter matched it too", async () => {
+    const admin = await person("admin");
+    const { workflow } = await listening(admin, [
+      listen("await-both", {
+        all: [
+          {
+            with: { type: completed },
+            correlate: { job: { from: "${ .subject }" } },
+          },
+          {
+            with: { type: completed },
+            correlate: { origin: { from: "${ .source }" } },
+          },
+        ],
+      }),
+      { pause: { wait: "PT2S" } },
+      listen("await-origin", {
+        one: {
+          with: { type: timedOut },
+          correlate: { origin: { from: "${ .source }" } },
+        },
+      }),
+      { notes: { set: { notes: "${ [.[] | .note] }" } } },
+    ]);
+    const runId = await started(admin, workflow.id);
+    await waiting(runId);
+
+    const sent = [
+      delivery(workflow.id, runId, { note: "first" }),
+      delivery(workflow.id, runId, { note: "second", source: `${source}/b` }),
+      delivery(workflow.id, runId, { type: timedOut, note: "other origin" }),
+      delivery(workflow.id, runId, {
+        type: timedOut,
+        note: "same origin",
+        source: `${source}/b`,
+      }),
+    ];
+    for (const event of sent) {
+      // oxlint-disable-next-line no-await-in-loop -- in order: acceptance order matters
+      await admitRunEvent(env, event);
+    }
+    const run = await endOf(admin, workflow.id, runId);
+
+    expect(run.output).toStrictEqual({ notes: ["same origin"] });
+  });
+
+  it("fail the run when the event that took a correlated filter has no such attribute, so a sender can't turn the correlation off", async () => {
+    const admin = await person("admin");
+    const { workflow } = await listening(admin, [
+      listen("await-done", { one: byJob(completed) }),
+      listen("await-timeout", { one: byJob(timedOut) }),
+      notes,
+    ]);
+    const runId = await started(admin, workflow.id, "job-7");
+    await waiting(runId);
+
+    await admitRunEvent(
+      env,
+      delivery(workflow.id, runId, { subject: undefined, note: "no subject" })
+    );
+    const run = await endOf(admin, workflow.id, runId);
+
+    expect({ status: run.status, code: run.error?.code }).toStrictEqual({
+      status: "failed",
+      code: "workflow.call_invalid",
+    });
+  });
+
+  it("aren't lowered with one correlation name that one filter expects and another of the same listen records", async () => {
+    const admin = await person("admin");
+    const { version } = await listening(admin, [
+      listen("await-both", {
+        all: [
+          byJob(completed),
+          {
+            with: { type: timedOut },
+            correlate: { job: { from: "${ .subject }", expect: "job-1" } },
+          },
+        ],
+      }),
+      listen("await-both-reversed", {
+        all: [
+          {
+            with: { type: timedOut },
+            correlate: { job: { from: "${ .subject }", expect: "job-1" } },
+          },
+          byJob(completed),
+        ],
+      }),
+      listen("await-expected", {
+        all: [
+          {
+            with: { type: completed },
+            correlate: { job: { from: "${ .subject }", expect: "job-1" } },
+          },
+          {
+            with: { type: timedOut },
+            correlate: { job: { from: "${ .subject }", expect: "job-1" } },
+          },
+        ],
       }),
       notes,
     ]);
@@ -650,8 +828,88 @@ describe("listen tasks", { timeout: 120_000 }, () => {
       version.build.executable ? [] : version.build.unsupported
     ).toStrictEqual([
       {
-        pointer: "/do/0/await-job/listen/to/one/correlate",
+        pointer: "/do/0/await-both/listen/to/all",
+        taskId: "await-both",
+        feature: "listen:correlate",
+      },
+      {
+        pointer: "/do/1/await-both-reversed/listen/to/all",
+        taskId: "await-both-reversed",
+        feature: "listen:correlate",
+      },
+    ]);
+  });
+
+  it("refuse a correlation inside a fork when the workflow is published, and take a fork without one", async () => {
+    const admin = await person("admin");
+    const forked = (filter: Record<string, unknown>) => [
+      {
+        race: {
+          fork: {
+            branches: [
+              listen("await-job", { one: filter }),
+              { other: { set: { notes: [] } } },
+            ],
+          },
+        },
+      },
+      notes,
+    ];
+
+    await expect(
+      Promise.all([
+        outcome(listening(admin, forked(byJob(completed)))),
+        outcome(listening(admin, forked({ with: { type: completed } }))),
+      ])
+    ).resolves.toStrictEqual(["workflow.definition_invalid", "ok"]);
+  });
+
+  it("aren't lowered with a filter that correlates on an event's content, or on an attribute it names twice", async () => {
+    const admin = await person("admin");
+    const { version } = await listening(admin, [
+      listen("await-job", {
+        one: {
+          with: { type: completed },
+          correlate: { job: { from: "${ .data.jobId }", expect: "job-1" } },
+        },
+      }),
+      listen("await-twice", {
+        one: {
+          with: { type: completed, subject: "job-1" },
+          correlate: { job: { from: "${ .subject }" } },
+        },
+      }),
+      listen("await-both", {
+        all: [
+          {
+            with: { type: completed },
+            correlate: { job: { from: "${ .subject }" } },
+          },
+          {
+            with: { type: timedOut },
+            correlate: { job: { from: "${ .subject }" } },
+          },
+        ],
+      }),
+      notes,
+    ]);
+
+    expect(
+      version.build.executable ? [] : version.build.unsupported
+    ).toStrictEqual([
+      {
+        pointer: "/do/0/await-job/listen/to/one/correlate/job/from",
         taskId: "await-job",
+        feature: "listen:correlate",
+      },
+      {
+        pointer: "/do/1/await-twice/listen/to/one/correlate/job/from",
+        taskId: "await-twice",
+        feature: "listen:correlate",
+      },
+      {
+        pointer: "/do/2/await-both/listen/to/all",
+        taskId: "await-both",
         feature: "listen:correlate",
       },
     ]);

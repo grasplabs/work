@@ -4,6 +4,7 @@ import { member } from "./checker.ts";
 import type { Binding, Checker, Site } from "./checker.ts";
 import { pointerJoin } from "./diagnostics.ts";
 import type { JsonObject, JsonValue } from "./json-text.ts";
+import { profileLimits } from "./limits.ts";
 import {
   requireBinding,
   taskDefinition,
@@ -49,7 +50,7 @@ const filterAttributes = [
 
 const maxEventFilters = 16;
 
-const maxCorrelations = 16;
+const { maxCorrelations, maxCorrelationNameLength } = profileLimits;
 
 /** The attributes upstream types as a URI or a runtime expression. */
 const uriAttributes = new Set(["source", "dataschema"]);
@@ -205,6 +206,16 @@ const checkEventFilter = (
     return;
   }
   const correlatePointer = pointerJoin(pointer, "correlate");
+  if (checker.forkDepth > 0) {
+    // "What earlier listens took" is whatever the scheduler ran first
+    // between a fork's branches, which no replay may decide differently.
+    checker.report.error(
+      "profile.invalid_value",
+      at(site, correlatePointer),
+      "Correlate outside a fork: its branches run side by side, so which listens came earlier isn't fixed."
+    );
+    return;
+  }
   const correlate = objectAt(
     checker,
     filter.correlate,
@@ -225,6 +236,13 @@ const checkEventFilter = (
   }
   for (const [name, entry] of entries.slice(0, maxCorrelations)) {
     const entryPointer = pointerJoin(correlatePointer, name);
+    if (name.length === 0 || name.length > maxCorrelationNameLength) {
+      checker.report.error(
+        "profile.invalid_value",
+        at(site, entryPointer),
+        `Name a correlation in 1 to ${maxCorrelationNameLength} characters.`
+      );
+    }
     const correlation = objectAt(
       checker,
       entry,

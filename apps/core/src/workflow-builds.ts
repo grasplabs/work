@@ -13,6 +13,7 @@ import {
   maxTemplateKeyLength,
   taskAtLine,
 } from "@grasp-os/open-workflow/generate";
+import { profileLimits } from "@grasp-os/open-workflow/limits";
 import type { CheckedWorkflow } from "@grasp-os/open-workflow/validate";
 import { releaseArtifactSchema } from "@grasp-os/shared/app-releases";
 import type { ReleaseArtifact } from "@grasp-os/shared/app-releases";
@@ -281,7 +282,7 @@ export type SealedCall = z.infer<typeof sealedCallSchema>;
  * `GeneratedListen`): its event binding, its strategy, what of each event
  * it reads, and its filters, each a type and the CloudEvents attributes it
  * requires (by CloudEvents' rule for names), each a template the host
- * builds in the task's enter step.
+ * builds in the task's enter step, and its correlations.
  */
 const sealedListenSchema = z.strictObject({
   binding: aliasSchema,
@@ -296,6 +297,21 @@ const sealedListenSchema = z.strictObject({
             z.tuple([z.string().regex(/^[a-z0-9]{1,20}$/u), templateSchema])
           )
           .max(16),
+        // Each correlation by name, and the inbox attribute it correlates
+        // on (generate.ts, `GeneratedCorrelation`): never an expression.
+        correlate: z
+          .array(
+            z.strictObject({
+              name: z
+                .string()
+                .min(1)
+                .max(profileLimits.maxCorrelationNameLength),
+              attribute: z.enum(["id", "source", "subject", "datacontenttype"]),
+            })
+          )
+          .min(1)
+          .max(profileLimits.maxCorrelations)
+          .optional(),
       })
     )
     .min(1)

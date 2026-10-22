@@ -9,7 +9,7 @@ import { z } from "zod";
 
 import { resolveCatalogKeys } from "../workflow-catalog.ts";
 import { runEngine } from "./engine.ts";
-import { contentType, eventTypeKey } from "./event-envelopes.ts";
+import { attributesOf, contentType, eventTypeKey } from "./event-envelopes.ts";
 import type { StoredEvent } from "./event-envelopes.ts";
 import { quotaPolicy } from "./quotas.ts";
 import { callingRunOf, requireCallAuthority } from "./resource-authority.ts";
@@ -59,18 +59,6 @@ import { runOf } from "./resource-runs.ts";
 //   the same key, type, data and attributes again is the same event,
 //   accepted once, and answered with the same ID; the same key with
 //   another event is refused (`workflow.event_conflict`).
-
-/**
- * The attributes a listen's filter may match an event by, as the engine
- * keeps them beside it: every attribute of its envelope but its type
- * (which `eventTypeKey` keeps), its data and its time.
- */
-const attributesOf = (stored: StoredEvent): Record<string, string> => ({
-  id: stored.id,
-  source: stored.source,
-  datacontenttype: stored.datacontenttype,
-  ...(stored.subject === undefined ? {} : { subject: stored.subject }),
-});
 
 /** Text on one line: no control characters. */
 // oxlint-disable-next-line no-control-regex -- control characters are what it refuses
