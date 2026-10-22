@@ -767,6 +767,38 @@ describe("chats", () => {
     }).toStrictEqual({ end: "failed", usage: false });
   });
 
+  it("say why a reply failed by the model gateway's code, never its words or the provider's", async () => {
+    const ann = await person();
+    await answering(
+      ann,
+      { status: 400, errorType: "invalid_request_error" },
+      // Refused for its rate, the provider's SDK retries and all.
+      ...Array.from({ length: 3 }, () => ({
+        status: 429,
+        errorType: "rate_limit_error",
+        headers: { "retry-after": "1" },
+      }))
+    );
+    const failedReply = async (question: string) => {
+      const chat = await ann.chats.create(question);
+      const follower = await follow(ann.chats, chat.id);
+      await ann.chats.send(chat.id, { text: question, model });
+      await settled(follower);
+      return follower.messages().at(-1);
+    };
+
+    const refused = await failedReply("Hi.");
+    const limited = await failedReply("Hi again.");
+
+    expect([refused, limited]).toMatchObject([
+      { end: "failed", failure: "model.failed" },
+      { end: "failed", failure: "model.rate_limited" },
+    ]);
+    expect(JSON.stringify([refused, limited])).not.toMatch(
+      /invalid_request_error|rate_limit_error|400|429/u
+    );
+  });
+
   it("stream a reply as it is written: its code steps, their results, and the answer", async () => {
     const ann = await person();
     const { reply, release } = pausedReply(says("Two plus two is four."), 9);
@@ -1086,7 +1118,7 @@ describe("chats", () => {
     expect(answer?.role === "assistant" && "reasoning" in answer).toBeFalsy();
   });
 
-  it("show a failed answer with the gateway's reason, and nothing as stopped", async () => {
+  it("show a failed answer with the gateway's code for it, and nothing as stopped", async () => {
     const ann = await person();
     await answering(ann, { status: 500 });
     const chat = await ann.chats.create("Failed");
@@ -1095,8 +1127,8 @@ describe("chats", () => {
     await settled(follower);
     const last = follower.messages().at(-1);
     expect(
-      last?.role === "assistant" ? [last.end, typeof last.error] : last
-    ).toStrictEqual(["failed", "string"]);
+      last?.role === "assistant" ? [last.end, last.failure] : last
+    ).toStrictEqual(["failed", "model.failed"]);
     expect(follower.now()?.stopped).toBeNull();
   });
 
