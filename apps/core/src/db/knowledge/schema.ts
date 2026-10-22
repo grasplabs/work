@@ -12,7 +12,9 @@
  *
  * The full-text index (`search_rows`, `search_words`, `search_trigrams` and
  * the triggers that keep them) is FTS5, which Drizzle can't describe: it
- * lives in its own migration, `0001_search.sql`.
+ * lives in its own migrations: `0001_search.sql`, and
+ * `0017_search_one_content.sql`, where the trigram index reads the words
+ * index's content rather than keeping a copy of it.
  */
 import type { Json } from "@grasp-os/shared/json";
 import { knowledgeSignalKinds } from "@grasp-os/shared/knowledge-signals";
