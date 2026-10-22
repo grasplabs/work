@@ -456,13 +456,17 @@ describe("a journal of another schema", () => {
       const journal = await journalOf("napper", id);
       return journal.run.status === "waiting" ? journal : undefined;
     });
-    // As a version-8 journal is: its version, and no control fence.
+    // As a version-8 journal is: its version, no control fence and no
+    // order of settled outcomes.
     const exec = async (query: string): Promise<unknown[]> =>
       await runInDurableObject(runObject("napper", id), (_, state) =>
         state.storage.sql.exec(query).toArray()
       );
     await exec("UPDATE run SET schema = 8");
     await exec("ALTER TABLE run DROP COLUMN control_fence");
+    await exec("DROP TRIGGER steps_settled_order");
+    await exec("DROP INDEX steps_settled");
+    await exec("ALTER TABLE steps DROP COLUMN settled");
     const object = runObject("napper", id);
 
     const status = await object.status();

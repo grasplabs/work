@@ -61,6 +61,13 @@ const paramOf = (params: unknown, field: string): unknown =>
     ? Reflect.get(params, field)
     : undefined;
 
+/** Waits `ms` on a timer of the definition's own, outside any step. */
+const lag = async (ms: number): Promise<void> => {
+  if (ms > 0) {
+    await scheduler.wait(ms);
+  }
+};
+
 /** The `duration` in a run's params, or `fallback`. */
 const durationIn = (
   params: unknown,
@@ -990,6 +997,170 @@ export const definitions: Record<string, WorkflowDefinition> = {
       await checkpoint(instanceId, "nap");
       await step.sleep("nap", "1 hour");
       return await doing;
+    },
+  },
+  // Two sleeps awaited together: the first the duration the params say,
+  // the second a second longer.
+  naps: {
+    run: async (event, step) => {
+      const first = Number(durationIn(event.payload, 200));
+      await Promise.all([
+        step.sleep("first", first),
+        step.sleep("second", first + 1000),
+      ]);
+      return "slept";
+    },
+  },
+  // A wait for "go" beside a step the test holds out at its effect.
+  listens: {
+    run: async (event, step) => {
+      const [heard, done] = await Promise.all([
+        step.waitForEvent("go", { type: "go", timeout: "1 hour" }),
+        step.do(
+          "slow",
+          async (context) => await effect(event.instanceId, "slow", context)
+        ),
+      ]);
+      return { payload: heard.payload, done };
+    },
+  },
+  // A step that fails its first attempt and retries soon, beside a
+  // longer sleep.
+  "retry-nap": {
+    run: async (event, step) => {
+      const { instanceId } = event;
+      return await Promise.all([
+        step.do(
+          "flaky",
+          {
+            retries: {
+              limit: 1,
+              delay: "1 second",
+              backoff: "constant",
+            },
+          },
+          async (context) => {
+            const receipt = await effect(instanceId, "flaky", context);
+            if (context.attempt === 1) {
+              throw namedError("FlakyError", "attempt 1 failed");
+            }
+            return receipt;
+          }
+        ),
+        step.sleep("nap", 2500),
+      ]);
+    },
+  },
+  // A step whose callback starts another that fails and parks for a
+  // retry an hour away, then returns without it; then two sleeps, each a
+  // suspension of its own.
+  "nested-retry": {
+    run: async (_event, step) => {
+      await step.do("outer", async () => {
+        // Left to park: the outer step's outcome doesn't wait for it.
+        void step
+          .do("inner", { retries: { limit: 1, delay: "1 hour" } }, () => {
+            throw namedError("FlakyError", "attempt 1 failed");
+          })
+          .catch(() => null);
+        await scheduler.wait(100);
+        return "outer";
+      });
+      await step.sleep("first", 200);
+      await step.sleep("second", 200);
+      return "done";
+    },
+  },
+  // A sleep called from inside a step's callback.
+  "sleep-in-step": {
+    run: async (_event, step) =>
+      await step.do("outer", async () => {
+        await step.sleep("inside", 1000);
+        return "slept";
+      }),
+  },
+  // The author's own timer, then two sleeps one after the other: a pause
+  // sent during the timer finds a replay out before it reached either.
+  "timer-naps": {
+    run: async (_event, step) => {
+      await scheduler.wait(300);
+      await step.sleep("first", 100);
+      await step.sleep("second", "1 hour");
+      return "done";
+    },
+  },
+  // Two sleeps raced, the shorter first to land, then a third: the
+  // winner, witnessed on every replay, is what the run returns.
+  "sleep-race": {
+    run: async (event, step) => {
+      const named = async (name: string, ms: number): Promise<string> => {
+        await step.sleep(name, ms);
+        return name;
+      };
+      const winner = await Promise.race([
+        named("long", 600),
+        named("short", 100),
+      ]);
+      witness(event.instanceId, winner);
+      await step.sleep("after", 1200);
+      return winner;
+    },
+  },
+  // Two branches awaited together, then a sleep, so the run replays. The
+  // first run reaches step "a" at once and "b" lands later, so "a"'s
+  // outcome is journaled first; a replay reaches "a" only after a timer
+  // of the author's own, with "b" read back at once. With `jitter`, every
+  // call comes after a random delay of up to that many ms, as a host's
+  // I/O before its step would put it.
+  "late-branch": {
+    run: async (event, step) => {
+      const { instanceId } = event;
+      const jitter = Number(paramOf(event.payload, "jitter") ?? 0);
+      const first = (await checkpoint(instanceId, "late-branch")) === 1;
+      const a = async (): Promise<string> => {
+        await lag(first ? 0 : 300);
+        await lag(Math.random() * jitter);
+        return await step.do("a", async (context) => {
+          await effect(instanceId, "a", context);
+          return "a";
+        });
+      };
+      const b = async (): Promise<string> => {
+        await lag(Math.random() * jitter);
+        return await step.do("b", async (context) => {
+          await lag(first ? 100 : 0);
+          await effect(instanceId, "b", context);
+          return "b";
+        });
+      };
+      const both = await Promise.all([a(), b()]);
+      await step.sleep("after", 200);
+      return both;
+    },
+  },
+  // A sleep parked an hour away beside a branch that reaches its step
+  // only after 300 ms of I/O of its own, said busy (`busy`) or not.
+  "busy-branch": {
+    run: async (event, step) => {
+      const { instanceId } = event;
+      const busy = paramOf(event.payload, "busy") === true;
+      const work = async (): Promise<string> => {
+        const done = busy ? step.busy() : undefined;
+        await lag(300);
+        const made = step.do("work", async (context) => {
+          await effect(instanceId, "work", context);
+          return "work";
+        });
+        done?.();
+        // Once is enough.
+        done?.();
+        return await made;
+      };
+      const [, worked] = await Promise.all([
+        step.sleep("nap", "1 hour"),
+        work(),
+      ]);
+      return worked;
     },
   },
   // A wait raced against a sleep, inside the author's own handlers.
