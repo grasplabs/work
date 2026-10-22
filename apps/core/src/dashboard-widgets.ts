@@ -22,6 +22,7 @@ import type {
   WidgetState,
   WidgetWindow,
 } from "@grasp-os/shared/widgets";
+import type { RunActivityWorkflow } from "@grasp-os/shared/workflows";
 
 import type { Member } from "./auth/identity.ts";
 import type { KeptWidget } from "./custom-widgets.ts";
@@ -29,7 +30,7 @@ import { workspace } from "./durable-objects.ts";
 import { gatewaySettings, modelForRole, models } from "./models.ts";
 import { personalWorkspaceId } from "./personal-workspace.ts";
 import { runActivity } from "./workflows/activity.ts";
-import { workflowOverview } from "./workflows/overview.ts";
+import { appWorkflowOverview } from "./workflows/overview.ts";
 
 // Grasp's widgets from what a person asks (GRA-519), on their dashboard or
 // from a chat for them, as the prototype's "Ask Grasp for a widget"
@@ -126,12 +127,17 @@ export const widgetData = async (
   member: Member,
   days: WidgetWindow
 ): Promise<WidgetData> => {
+  // The engines' workflows: an independent workflow belongs to no engine.
   const [overview, activity] = await Promise.all([
-    workflowOverview(env, member),
+    appWorkflowOverview(env, member, () => true),
     runActivity(env, member, { days }),
   ]);
-  const ran = new Map(
-    activity.workflows.map((each) => [`${each.app}/${each.workflow}`, each])
+  const ran = new Map<string, RunActivityWorkflow>(
+    activity.workflows.flatMap((each) =>
+      each.type === "app"
+        ? [[`${each.app}/${each.workflow}`, each] as const]
+        : []
+    )
   );
   const rows = overview.map((summary): WidgetRow => {
     const workflow = `${summary.app}/${summary.workflow}`;

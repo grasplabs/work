@@ -323,7 +323,10 @@ const setOwners = async (
   for (const { id: workflow, owner: key } of workflows) {
     const userId = key === undefined ? undefined : sessions.get(key)?.userId;
     const summary = overview.find(
-      (listed) => listed.app === app && listed.workflow === workflow
+      (listed) =>
+        listed.type === "app" &&
+        listed.app === app &&
+        listed.workflow === workflow
     );
     if (
       userId !== undefined &&

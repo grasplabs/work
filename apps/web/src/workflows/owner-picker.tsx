@@ -15,7 +15,8 @@ import { useCore } from "../use-core.ts";
 // members for an admin, whom the App is shared with for its builders.
 // Core decides who may own it (a member who can open the App) and who may
 // change it (`changesOwner`: an admin or a builder of the App); a refusal
-// is said in a toast, and the line keeps the owner it had.
+// is said in a toast, and the line keeps the owner it had. An independent
+// workflow's owner is who created it, and isn't changed here.
 
 export const WorkflowOwnerPicker = ({
   workflow,
@@ -29,7 +30,7 @@ export const WorkflowOwnerPicker = ({
   const { owner } = workflow;
   const name = owner.name ?? owner.userId;
   const readPeople = async (): Promise<void> => {
-    if (people !== null) {
+    if (people !== null || workflow.type !== "app") {
       return;
     }
     const current = { id: owner.userId, name };
@@ -69,6 +70,9 @@ export const WorkflowOwnerPicker = ({
     setPeople(read.toSorted((a, b) => a.name.localeCompare(b.name)));
   };
   const pick = async (person: Pickable): Promise<void> => {
+    if (workflow.type !== "app") {
+      return;
+    }
     try {
       await core.withSession(async (session) => {
         await changeThenRefresh(
@@ -96,7 +100,7 @@ export const WorkflowOwnerPicker = ({
   return (
     <PersonPicker
       compact
-      disabled={!workflow.changesOwner}
+      disabled={workflow.type !== "app" || !workflow.changesOwner}
       onOpen={() => {
         void readPeople();
       }}

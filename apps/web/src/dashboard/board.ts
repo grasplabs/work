@@ -1,7 +1,7 @@
 import type { App } from "@grasp-os/shared/apps";
 import type { KnowledgeSignal } from "@grasp-os/shared/knowledge-signals";
 import type { ImprovementSignal } from "@grasp-os/shared/signals";
-import type { WorkflowSummary } from "@grasp-os/shared/workflows";
+import type { AppWorkflowSummary as WorkflowSummary } from "@grasp-os/shared/workflows";
 
 // What the dashboard's widget board works out from what core read
 // (`widget-board.tsx`): where each workflow stands, each engine's

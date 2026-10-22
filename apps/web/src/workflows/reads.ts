@@ -1,6 +1,7 @@
 import type { App } from "@grasp-os/shared/apps";
 import { roleErrors } from "@grasp-os/shared/roles";
 import type {
+  AppWorkflowSummary,
   RunFilter,
   RunsPage,
   WorkflowSummary,
@@ -40,6 +41,19 @@ export const listWorkflows = async (
     }
     throw error;
   }
+};
+
+/**
+ * The workflows of engines core lists for the person, for the views that
+ * show engines' workflows only (an engine's page, the dashboard's board).
+ */
+export const listAppWorkflows = async (
+  session: Session
+): Promise<AppWorkflowSummary[]> => {
+  const workflows = await listWorkflows(session);
+  return workflows.flatMap((workflow) =>
+    workflow.type === "app" ? [workflow] : []
+  );
 };
 
 /** The runs core lists for the person, as `filter` narrows them. */

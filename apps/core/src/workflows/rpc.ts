@@ -1,4 +1,5 @@
 import type {
+  AppWorkflowSummary,
   ConnectionWorkflows,
   RunActivity,
   RunActivityQuery,
@@ -135,7 +136,7 @@ export class WorkflowsRpc extends CoreRpcTarget implements WorkflowsApi {
     app: string,
     workflow: string,
     owner: string
-  ): Promise<WorkflowSummary> {
+  ): Promise<AppWorkflowSummary> {
     return await withPerson(
       this.#check,
       async (by) => await setOwner(this.#env, by, app, workflow, owner)
@@ -146,7 +147,7 @@ export class WorkflowsRpc extends CoreRpcTarget implements WorkflowsApi {
     app: string,
     workflow: string,
     team: string | null
-  ): Promise<WorkflowSummary> {
+  ): Promise<AppWorkflowSummary> {
     return await withPerson(
       this.#check,
       async (by) => await setTeam(this.#env, by, app, workflow, team)

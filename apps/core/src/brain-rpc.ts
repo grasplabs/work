@@ -60,7 +60,7 @@ import { onboardingStore } from "./onboarding/store.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
-import { visibleApps } from "./workflows/overview.ts";
+import { visibleApps } from "./workflows/run-view.ts";
 
 // The company brain's workspace (`brain.read`), assembled from what core
 // already holds, each part as the person may read it, so the brain shows
