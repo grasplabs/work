@@ -2,6 +2,7 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import { engineCall } from "../src/workflows/engine-asks.ts";
 import type { RunStep } from "../src/workflows/host.ts";
 import type { ScopeFences } from "../src/workflows/resource-host.ts";
 import { withCpuKills } from "./cpu-kills.ts";
@@ -381,6 +382,53 @@ describe("items and branches at once", { timeout: 60_000 }, () => {
       notes: [1, 1, 1],
     });
   });
+
+  it("finish a fork of loops at once, more steps out than slots, though each step's first attempt is cut off and its retry parked", async () => {
+    const by = await builder();
+    // Twelve items' steps asked for at once, past the run's eight slots.
+    const { workflow } = await published(by, [
+      {
+        pair: {
+          fork: {
+            branches: ["left", "right"].map((id) => ({
+              [id]: {
+                do: [
+                  {
+                    [`${id}-items`]: {
+                      for: { in: "${ [1, 2, 3, 4, 5, 6] }" },
+                      metadata: { grasp: { concurrency: 6 } },
+                      do: [{ [`${id}-note`]: { set: "${ {v: $item} }" } }],
+                    },
+                  },
+                ],
+              },
+            })),
+          },
+          metadata: { grasp: { concurrency: 2 } },
+          output: { as: '${ {status: "ok"} }' },
+        },
+      },
+    ]);
+    // A parked retry holds no slot: the steps behind it run, and the run
+    // suspends on the retries and finishes in later activations.
+    const run = await withCpuKills(
+      (name) => name.includes("-note@"),
+      (attempt) => attempt === 1,
+      async () => await ranFor(by, workflow.id)
+    );
+    const completed = await completedSteps(run.id);
+    const notes = ["left-note@pair.0", "right-note@pair.1"].flatMap((note) =>
+      [0, 1, 2, 3, 4, 5].map(
+        (index) =>
+          completed.get(`task:${note}/${note.split("-")[0]}-items.${index}`) ??
+          0
+      )
+    );
+    expect({ end: endOf(run), notes }).toStrictEqual({
+      end: { status: "completed", output: { status: "ok" } },
+      notes: Array.from({ length: 12 }, () => 1),
+    });
+  });
 });
 
 /** Short waits, each a new activation that replays the run so far. */
@@ -546,53 +594,145 @@ const tenAtOnce = [
   },
 ];
 
+/**
+ * The engine's steps, each task step's first attempt run and then parked
+ * for its retry, as the engine parks one: its call never returns in this
+ * activation. Counts the attempts run, and the engine's count of the run
+ * busy (`RunStep.busy`).
+ */
+const parkingEngine = () => {
+  const seen = { attempts: 0, busy: 0 };
+  let count = 0;
+  const step: RunStep = {
+    // Told to the ask the host handles, as the engine's innermost step does.
+    do: async (name, _config, fn) =>
+      await engineCall(async () => {
+        count += 1;
+        const ran = await fn({
+          attempt: 1,
+          idempotencyKey: `key:${name}:${count}`,
+        });
+        if (!name.startsWith("task:")) {
+          return ran;
+        }
+        seen.attempts += 1;
+        return await Promise.withResolvers<never>().promise;
+      }),
+    sleep: async () => {
+      await Promise.resolve();
+    },
+    sleepUntil: async () => {
+      await Promise.resolve();
+    },
+    waitForEvent: async () => await Promise.reject(new Error("No waits")),
+    busy: () => {
+      seen.busy += 1;
+      let ended = false;
+      return () => {
+        if (!ended) {
+          ended = true;
+          seen.busy -= 1;
+        }
+      };
+    },
+  };
+  return { step, seen };
+};
+
+/** The enter step of `tenAtOnce`'s loop, its items recorded. */
+const enterTen = async (host: Awaited<ReturnType<typeof hostOf>>) =>
+  await host.do("enter:each", ada, async (attempt) => {
+    const items = await attempt.items({ input: { who: "Ada" } });
+    return {
+      ok: true,
+      value: { output: { who: "Ada" }, items: items.ok ? items.value : [] },
+    };
+  });
+
+/** Asks for the step of item `index` of `tenAtOnce`'s loop. */
+const askItem = async (
+  host: Awaited<ReturnType<typeof hostOf>>,
+  index: number
+) =>
+  await host.do(`task:note@each.${index}`, ada, async () => {
+    await Promise.resolve();
+    return { ok: true, value: { output: { status: "x" } } };
+  });
+
 describe("a run's host, against a forged module at once", () => {
+  it("runs the steps behind ones parked on their retries, holding the run busy for none of them", async () => {
+    const by = await builder();
+    const { workflow } = await published(by, tenAtOnce);
+    const { step, seen } = parkingEngine();
+    const host = await hostOf(by, workflow.id, { step });
+    await host.quiet(0);
+    await enterTen(host);
+    // Ten items' steps asked for at once: each parks after its attempt.
+    for (const index of Array.from({ length: 10 }, (_, at) => at)) {
+      void askItem(host, index);
+    }
+    await host.quiet(11);
+    await scheduler.wait(200);
+    expect(seen).toStrictEqual({ attempts: 10, busy: 0 });
+  });
+
+  it("holds its run busy for an isolate that never says it went quiet, with a step parked, for no longer than its time between steps", async () => {
+    const by = await builder();
+    const { workflow } = await published(by, tenAtOnce);
+    const { step, seen } = parkingEngine();
+    env.WORKFLOW_BETWEEN_STEPS_MS = "300";
+    try {
+      const host = await hostOf(by, workflow.id, { step });
+      await host.quiet(0);
+      await enterTen(host);
+      // Answered, the module asks once more and says nothing after.
+      void askItem(host, 0);
+      await scheduler.wait(100);
+      const held = seen.busy;
+      await scheduler.wait(400);
+      expect({ held, after: seen.busy }).toStrictEqual({ held: 1, after: 0 });
+    } finally {
+      Reflect.deleteProperty(env, "WORKFLOW_BETWEEN_STEPS_MS");
+    }
+  });
+
+  it("holds its run busy for asks an isolate says it made but never sends, with a step parked, for no longer than its time between steps", async () => {
+    const by = await builder();
+    const { workflow } = await published(by, tenAtOnce);
+    const { step, seen } = parkingEngine();
+    env.WORKFLOW_BETWEEN_STEPS_MS = "300";
+    try {
+      const host = await hostOf(by, workflow.id, { step });
+      await host.quiet(0);
+      await enterTen(host);
+      void askItem(host, 0);
+      await host.quiet(Number.MAX_SAFE_INTEGER);
+      await scheduler.wait(100);
+      const held = seen.busy;
+      await scheduler.wait(400);
+      expect({ held, after: seen.busy }).toStrictEqual({ held: 1, after: 0 });
+    } finally {
+      Reflect.deleteProperty(env, "WORKFLOW_BETWEEN_STEPS_MS");
+    }
+  });
+
   it("runs at most eight of a run's attempts at once, whatever the module asks", async () => {
     const by = await builder();
     const { workflow } = await published(by, tenAtOnce);
     let running = 0;
     let most = 0;
     const gate = Promise.withResolvers<null>();
-    let count = 0;
-    const step: RunStep = {
-      do: async (name, _config, fn) => {
-        count += 1;
-        running += 1;
-        most = Math.max(most, running);
-        try {
-          if (name.startsWith("task:")) {
-            await gate.promise;
-          }
-          return await fn({
-            attempt: 1,
-            idempotencyKey: `key:${name}:${count}`,
-          });
-        } finally {
-          running -= 1;
-        }
-      },
-      sleep: async () => {
-        await Promise.resolve();
-      },
-      sleepUntil: async () => {
-        await Promise.resolve();
-      },
-      waitForEvent: async () => await Promise.reject(new Error("No waits")),
-    };
-    const host = await hostOf(by, workflow.id, { step });
-    await host.do("enter:each", ada, async (attempt) => {
-      const items = await attempt.items({ input: { who: "Ada" } });
-      return {
-        ok: true,
-        value: { output: { who: "Ada" }, items: items.ok ? items.value : [] },
-      };
-    });
-    // Ten items' steps asked for at once.
+    const host = await hostOf(by, workflow.id);
+    await enterTen(host);
+    // Ten items' steps asked for at once, each attempt held until let go.
     const asked = Array.from(
       { length: 10 },
       async (_, index) =>
         await host.do(`task:note@each.${index}`, ada, async () => {
-          await Promise.resolve();
+          running += 1;
+          most = Math.max(most, running);
+          await gate.promise;
+          running -= 1;
           return { ok: true, value: { output: { status: "x" } } };
         })
     );

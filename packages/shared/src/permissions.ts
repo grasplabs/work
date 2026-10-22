@@ -296,6 +296,8 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   "TOKEN_ENCRYPTION_KEY_PREVIOUS",
   "WORKFLOW_BETWEEN_STEPS_MS",
   "WORKFLOW_BUILD_READ_MS",
+  // Tests only: the run host's own I/O slowed (core's workflows/host-latency.ts).
+  "WORKFLOW_HOST_LATENCY_MS",
   "WORKFLOW_OFF_WAIT_MS",
   "WORKFLOW_RETRY_DELAY_MS",
   "WORKFLOW_RUNS",
