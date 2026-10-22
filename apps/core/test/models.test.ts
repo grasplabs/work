@@ -104,8 +104,9 @@ const newPerson = () =>
 
 // Efforts: Claude Opus 4.8 and GPT-5.6 Sol take all five levels; GPT-5.4 none
 // past xhigh, Claude Sonnet 4.5 none past high, Claude Opus 4.6 all but
-// xhigh, and GLM-5.3 Flash (a default model) low, high and max only.
-// Llama 3.3 doesn't think.
+// xhigh, GLM-5.3 Flash (a default model) low, high and max only, and
+// DeepSeek V4.1 Flash (the other) high and max only. Llama 3.3 doesn't
+// think.
 const opus = "anthropic/claude-opus-4-8";
 const opus46 = "anthropic/claude-opus-4-6";
 const sol = "openai/gpt-5.6-sol";

@@ -41,7 +41,7 @@ const sourceSchema = z.object({
 // JSON, and a run that fails however often it retries. So the model lists
 // fewer claims, with briefer quotes, than a person may add in review: 9 at
 // most, each a 200-character claim, six tags and a 150-character quote.
-// There is no Llama tokenizer here to count with, so the bound is
+// There is no model's tokenizer here to count with, so the bound is
 // estimated, on the safe side: every character one JSON writes escaped (a
 // quote or a backslash, two characters each), indented, at three
 // characters a token (fewer than English or Dutch text takes), fits the

@@ -224,10 +224,16 @@ export type ModelRole = (typeof modelRoles)[number];
  * The models a new deployment allows until staff change its
  * `MODEL_GATEWAY`, and core allows while none is set: Workers AI's, which
  * AI Gateway runs on the client's own account with no provider key, so a
- * client can call a model on day one.
+ * client can call a model on day one. The first is chat's default.
+ *
+ * Chosen on the Brain baseline's real-model runs: DeepSeek V4.1 Flash
+ * answered best and followed the answer protocol, well within the cost
+ * target; GLM 5.3 Flash is the cheapest to complete a task with. Both
+ * search Knowledge with tools, which Llama 3.3, the earlier default, never
+ * did.
  */
 export const defaultGatewayModels = [
-  "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+  "workers-ai/@cf/deepseek-ai/deepseek-v4.1-flash-1017",
   "workers-ai/@cf/zai-org/glm-5.3-flash",
 ] as const;
 

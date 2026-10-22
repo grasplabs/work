@@ -1,10 +1,10 @@
-import { defaultGatewayModels } from "@grasp-os/shared/deployment-config";
 import { expect } from "@playwright/test";
 import type { Page } from "@playwright/test";
 
 import { test } from "./csp.ts";
 import { apiOf, peopleIn } from "./people.ts";
 import type { Person } from "./people.ts";
+import { e2eModel } from "./stack.ts";
 
 // The intake, the built-in App, end to end: an admin creates an App from
 // it, takes an interview as a draft with its statements and tags, keeps
@@ -70,7 +70,7 @@ const intakeFor = async (admin: Person): Promise<string> => {
     await api.resourceBindings.approve({
       app: created.app.id,
       alias: "extractor",
-      target: { kind: "model", model: defaultGatewayModels[0] },
+      target: { kind: "model", model: e2eModel },
       reviewed: { version: 1 },
       budget: { perRequest: 0.01 },
     });
