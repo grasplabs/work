@@ -142,5 +142,15 @@
       "store_id": "account-secrets-store",
       "secret_name": "APP_OAUTH_CLIENTS",
     },
+    // A restricted Stripe key that can only read customers, subscriptions
+    // and invoices, for the admin's Billing under Contract
+    // (src/billing/stripe.ts). The console's alone: never copied to a
+    // client, never sent to the browser. Put in the store by hand; until
+    // it is, Billing says Stripe isn't connected.
+    {
+      "binding": "STRIPE_RESTRICTED_KEY",
+      "store_id": "account-secrets-store",
+      "secret_name": "STRIPE_RESTRICTED_KEY",
+    },
   ],
 }

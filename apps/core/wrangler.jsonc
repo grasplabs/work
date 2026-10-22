@@ -111,6 +111,9 @@
       // The one object that installs what ships with each release
       // (src/builtins.ts).
       { "name": "BUILTINS", "class_name": "Builtins" },
+      // The client's clock: maintenance, repair and schedule admission on
+      // its own alarm (src/clock.ts).
+      { "name": "CLOCK", "class_name": "Clock" },
       // The onboarding's one store (src/onboarding/store.ts).
       { "name": "ONBOARDING", "class_name": "Onboarding" },
       // The one ledger of what model requests reserve and spend
@@ -137,6 +140,7 @@
     { "tag": "v5", "new_sqlite_classes": ["DataStore"] },
     { "tag": "v6", "new_sqlite_classes": ["WorkflowRuns"] },
     { "tag": "v7", "new_sqlite_classes": ["ActionInvocation"] },
+    { "tag": "v8", "new_sqlite_classes": ["Clock"] },
   ],
   // Runs App sandboxes and the App compiler.
   "worker_loaders": [{ "binding": "LOADER" }],
