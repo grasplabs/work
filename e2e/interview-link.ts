@@ -41,6 +41,13 @@ const storeFiles = async (): Promise<string[]> => {
 const linkIdOf = (file: string, person: string): string | undefined => {
   const database = new DatabaseSync(file, { readOnly: true });
   try {
+    // A store that never opened has no tables yet.
+    const kept = database
+      .prepare("select name from sqlite_master where name = 'link_codes'")
+      .get();
+    if (kept === undefined) {
+      return undefined;
+    }
     const row = database
       .prepare("select link_id from link_codes where person = ?")
       .get(person);
