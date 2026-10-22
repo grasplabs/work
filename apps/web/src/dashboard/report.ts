@@ -16,6 +16,7 @@ import { msg, ph, plural } from "@lingui/core/macro";
 import { plainText } from "../chat/chat-markdown.ts";
 import { formatDate } from "../format.ts";
 import type { Loaded } from "../load-from-core.tsx";
+import { workflowName } from "../workflows/lists.ts";
 import { byKindOrder } from "./board.ts";
 import { signalKindLooks } from "./signals.tsx";
 
@@ -182,9 +183,16 @@ const workflowsSection = (
     return [heading, unread(i18n)];
   }
   const ran = runs.data.workflows.map((workflow) => {
-    const name = plainText(workflow.workflow);
-    const engine = plainText(workflow.appName);
+    const name = plainText(workflowName(workflow));
     const { started, completed, failed } = workflow;
+    if (workflow.type === "resource") {
+      return item(
+        i18n._(
+          msg`${name}: ${started} started, ${completed} completed, ${failed} failed`
+        )
+      );
+    }
+    const engine = plainText(workflow.appName);
     return item(
       i18n._(
         msg`${name} in ${ph({ domain: engine })}: ${started} started, ${completed} completed, ${failed} failed`

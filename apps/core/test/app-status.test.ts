@@ -121,7 +121,9 @@ const waysIn = async (person: Person, app: string) => {
     start: await outcome(person.api.workflows.start(app, "nap")),
     runs: await outcome(person.api.workflows.list(app)),
     listed: listed.some(({ id }) => id === app),
-    overview: overview.some((summary) => summary.app === app),
+    overview: overview.some(
+      (summary) => summary.type === "app" && summary.app === app
+    ),
   };
 };
 

@@ -6,7 +6,26 @@ import type { WorkflowSummary } from "@grasp-os/shared/workflows";
 
 /** Whether a workflow needs a person now: runs wait for a decision, failed lately, or its schedule stopped. */
 export const needsAttention = (workflow: WorkflowSummary): boolean =>
-  workflow.waiting > 0 || workflow.failed > 0 || workflow.scheduleStopped;
+  workflow.waiting > 0 ||
+  workflow.failed > 0 ||
+  (workflow.type === "app" && workflow.scheduleStopped);
+
+/** A workflow's name, as the lists show it: an App's ID, or an independent one's name. */
+export const workflowName = (
+  workflow:
+    | { type: "app"; workflow: string }
+    | { type: "resource"; name: string }
+): string => (workflow.type === "app" ? workflow.workflow : workflow.name);
+
+/** A key for a workflow among others of either kind. */
+export const workflowKey = (
+  workflow:
+    | { type: "app"; app: string; workflow: string }
+    | { type: "resource"; workflowId: string }
+): string =>
+  workflow.type === "app"
+    ? `app/${workflow.app}/${workflow.workflow}`
+    : `resource/${workflow.workflowId}`;
 
 /**
  * At work: those that have run, the ones that need a person first, each

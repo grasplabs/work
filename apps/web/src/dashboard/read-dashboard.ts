@@ -21,7 +21,7 @@ import type {
   WaitingPart,
 } from "@grasp-os/shared/waiting";
 import { handledRunDays } from "@grasp-os/shared/workflows";
-import type { WorkflowSummary } from "@grasp-os/shared/workflows";
+import type { AppWorkflowSummary as WorkflowSummary } from "@grasp-os/shared/workflows";
 
 import { readRequestNames } from "../activity/pending.tsx";
 import type { CoreConnection } from "../core-connection.ts";
@@ -29,7 +29,7 @@ import type { Session } from "../core.ts";
 import { listedOrNone } from "../directory.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
-import { listWorkflows, openableApps } from "../workflows/reads.ts";
+import { listAppWorkflows, openableApps } from "../workflows/reads.ts";
 import { activityShown } from "./activity.tsx";
 import type { LatestActivity } from "./activity.tsx";
 import { markShownRead } from "./failed-workflows.tsx";
@@ -378,7 +378,8 @@ export const readDashboard = async (
   identity: Identity
 ): Promise<Dashboard> => {
   // Not awaited: their blocks and cards wait for them.
-  const workflows = loadFromCore(core, listWorkflows);
+  // The board shows engines' workflows.
+  const workflows = loadFromCore(core, listAppWorkflows);
   const signals = loadFromCore(
     core,
     async (session) => await readSignals(session, identity)

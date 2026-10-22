@@ -1,4 +1,8 @@
-import type { RunActivity, RunActivityDay } from "@grasp-os/shared/workflows";
+import type {
+  RunActivity,
+  RunActivityDay,
+  RunActivityWorkflow,
+} from "@grasp-os/shared/workflows";
 import {
   Table,
   TableBody,
@@ -15,6 +19,7 @@ import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";
 import { useId } from "react";
 
+import { workflowKey } from "../workflows/lists.ts";
 import {
   columnsOf,
   fullDays,
@@ -279,6 +284,36 @@ const Decisions = ({ activity }: { activity: RunActivity }) => {
   );
 };
 
+/**
+ * A workflow that ran, opening it: an independent one, or an engine's one
+ * of its engine's current version (one a later version removed has no
+ * page).
+ */
+const ActivityWorkflow = ({ row }: { row: RunActivityWorkflow }) => {
+  if (row.type === "resource") {
+    return (
+      <Link
+        className="hover:underline"
+        params={{ workflow: row.workflowId }}
+        to="/workflows/$workflow"
+      >
+        {row.name}
+      </Link>
+    );
+  }
+  return row.current ? (
+    <Link
+      className="hover:underline"
+      params={{ app: row.app, workflow: row.workflow }}
+      to="/workflows/$app/$workflow"
+    >
+      {row.workflow}
+    </Link>
+  ) : (
+    row.workflow
+  );
+};
+
 /** Each workflow's runs over the window: how many started, completed and failed. */
 const Workflows = ({ activity }: { activity: RunActivity }) => {
   const id = useId();
@@ -312,21 +347,13 @@ const Workflows = ({ activity }: { activity: RunActivity }) => {
         </TableHeader>
         <TableBody>
           {activity.workflows.map((row) => (
-            <TableRow key={`${row.app}/${row.workflow}`}>
+            <TableRow key={workflowKey(row)}>
               <TableCell>
-                {row.current ? (
-                  <Link
-                    className="hover:underline"
-                    params={{ app: row.app, workflow: row.workflow }}
-                    to="/workflows/$app/$workflow"
-                  >
-                    {row.workflow}
-                  </Link>
-                ) : (
-                  row.workflow
-                )}
+                <ActivityWorkflow row={row} />
               </TableCell>
-              <TableCell>{row.appName}</TableCell>
+              <TableCell>
+                {row.type === "app" ? row.appName : <Trans>Independent</Trans>}
+              </TableCell>
               <TableCell className="text-right">{row.started}</TableCell>
               <TableCell className="text-right">{row.completed}</TableCell>
               <TableCell className="text-right">{row.failed}</TableCell>
