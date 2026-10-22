@@ -1,3 +1,4 @@
+import { addDays } from "@grasp-os/shared/admin/org-record";
 import type {
   BrainApi,
   BrainChangePage,
@@ -8,12 +9,14 @@ import type {
   Stakeholder,
   Team,
   TeamCount,
+  Tool,
   Vision,
   Workspace,
 } from "@grasp-os/shared/brain";
 import type { CatalogSource } from "@grasp-os/shared/connect";
 import type { KickoffView } from "@grasp-os/shared/kickoff";
 import type { OnboardingView } from "@grasp-os/shared/onboarding";
+import type { OnboardingDocument } from "@grasp-os/shared/onboarding-documents";
 import { isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { eq } from "drizzle-orm";
@@ -25,6 +28,7 @@ import type { SourceChange } from "./brain-changes.ts";
 import { brainNotes } from "./brain-notes.ts";
 import { catalogEntries, personOf } from "./connections.ts";
 import { organizations } from "./db/core/schema.ts";
+import { mondayOf } from "./onboarding/rules.ts";
 import { onboardingStore } from "./onboarding/store.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
@@ -41,23 +45,32 @@ import type { SessionCheck } from "./session-check.ts";
 // | vision             | the kickoff (`goals`, `pain`) and the roster's teams     |
 // |                    | taking part, for admins                                  |
 // | teams              | the roster and the kickoff's teams (admins)              |
-// | sources            | the kickoff and the roster (admins)                      |
+// | sources            | the kickoff, the roster, each team lead's finished       |
+// |                    | interview and the documents shared in the onboarding     |
+// |                    | (admins)                                                 |
+// | tools              | the tools those documents name (admins)                  |
 // | connections        | the catalog's offered entries and the person's           |
 // |                    | connections                                              |
-// | goals, tools,      | nothing core can read holds them yet: empty              |
-// | statements,        |                                                          |
+// | goals, statements, | nothing core can read holds them yet: empty              |
 // | workflows,         |                                                          |
 // | candidates, gaps,  |                                                          |
 // | landscape,         |                                                          |
 // | policies           |                                                          |
 //
-// The onboarding (who works where, the kickoff) is the admin's: its own
-// RPC shows the roster to admins alone, and the kickoff to Grasp's staff,
-// who are admins. The kickoff is the company's sponsor speaking for the
+// The onboarding (who works where, the kickoff, the interviews' progress,
+// the documents shared) is the admin's: its own RPC shows the roster, the
+// progress and the documents to admins alone, and the kickoff to Grasp's
+// staff, who are admins. The kickoff is the company's sponsor speaking for the
 // company, so its reading reaches the company's admins here too, never its
 // transcript. Everyone else gets the brain without them. No
 // interview's words reach the brain: the onboarding keeps them for staff
-// alone, so sources carry no transcript.
+// alone, so sources carry no transcript. A team lead's interview shows as
+// its team's stakeholder interview: only someone who led the team when
+// their link went out, as the admin's progress counts them, and only by
+// the week it finished in, from the week after. An employee's never does,
+// as the admin sees employees only as counts per team. A shared document shows by its name and date, and
+// the tools its reading names, used by the teams it names: what the
+// admin's own list of them shows, never its text.
 //
 // The Intake's statements and sources and the workflow map's workflows
 // are in each App's own store, which only its builders reach, since
@@ -77,6 +90,9 @@ const rosterSourceId = "src-roster";
 const ids = {
   rosterTeam: (id: string) => `team-${id}`,
   kickoffTeam: (position: number) => `team.kickoff-${position}`,
+  leadInterview: (rosterTeamId: string) => `src.lead-${rosterTeamId}`,
+  document: (id: string) => `src.document-${id}`,
+  documentTool: (slug: string) => `tool.document-${slug}`,
 };
 
 /** The day of an ISO 8601 moment: `YYYY-MM-DD`. */
@@ -85,12 +101,23 @@ const dayOf = (iso: string): string => iso.slice(0, 10);
 /** A team's name as two sources can both mean it: trimmed, any case. */
 const nameKey = (name: string): string => name.trim().toLowerCase();
 
+/** A tool's name as an id part: its letters and digits, any case, joined by `-`; empty when it has none. */
+const slugOf = (name: string): string =>
+  name
+    .toLowerCase()
+    .replaceAll(/[^\p{L}\p{N}]+/gu, "-")
+    .replaceAll(/^-+|-+$/gu, "");
+
 /** What the onboarding gives the brain, for an admin; nothing for anyone else. */
 interface OnboardingFacts {
   view: OnboardingView;
   kickoff: KickoffView;
   rosterSavedAt: string | null;
   sentLinks: { person: string; sentAt: string }[];
+  /** Who talked as each roster team's lead, and the day they finished, as the view counts them. */
+  leadsTalked: { team: string; person: string; day: string }[];
+  /** The documents shared in the onboarding, newest first. */
+  documents: OnboardingDocument[];
 }
 
 const onboardingFacts = async (
@@ -101,13 +128,16 @@ const onboardingFacts = async (
     return null;
   }
   const store = onboardingStore(env);
-  const [view, kickoff, rosterSavedAt, sentLinks] = await Promise.all([
-    store.view(),
-    store.kickoff(),
-    store.rosterSavedAt(),
-    store.sentLinks(),
-  ]);
-  return { view, kickoff, rosterSavedAt, sentLinks };
+  const [view, kickoff, rosterSavedAt, sentLinks, leadsTalked, documents] =
+    await Promise.all([
+      store.view(),
+      store.kickoff(),
+      store.rosterSavedAt(),
+      store.sentLinks(),
+      store.leadsTalked(),
+      store.documents(),
+    ]);
+  return { view, kickoff, rosterSavedAt, sentLinks, leadsTalked, documents };
 };
 
 /** What the kickoff said about `field` and what the sponsor answered, each on its own line; empty if neither. */
@@ -120,20 +150,172 @@ const kickoffSaid = (
     .filter((each) => each !== "")
     .join("\n");
 
-/** The onboarding's sources: the kickoff, and who works where. */
-const onboardingSources = (facts: OnboardingFacts | null): Source[] => {
+/** A team lead's role, never their name: their title, or "Team lead" without one. */
+const roleOf = (lead: { title: string }): string =>
+  lead.title === "" ? "Team lead" : lead.title;
+
+/** The brain's teams by name (`nameKey`), as a reading names them. */
+type TeamsByName = ReadonlyMap<string, string>;
+
+const teamsByName = (teams: readonly Team[]): TeamsByName =>
+  new Map(teams.map(({ id, name }) => [nameKey(name), id]));
+
+/** The ids of the brain's teams `names` name, once each; names it has no team for are left out. */
+const teamIdsNamed = (
+  names: readonly string[],
+  byName: TeamsByName
+): string[] => [
+  ...new Set(
+    names.flatMap((name) => {
+      const id = byName.get(nameKey(name));
+      return id === undefined ? [] : [id];
+    })
+  ),
+];
+
+/** A source the onboarding gives the brain, and when it came in (ISO 8601): when `brain.changes` shows it. */
+interface CameIn {
+  source: Source;
+  at: string;
+}
+
+/**
+ * Each roster team's lead's finished interview, as its stakeholder
+ * interview: for which team, by what role and in which week, never what
+ * was said. Only someone who led the team when their link went out and
+ * gave a lead's interview for that team counts (onboarding/rules.ts,
+ * `leadsTalked`): that is what keeps anyone else's interview out. The week
+ * is presentation, not a privacy bound (the admin's progress already shows
+ * the day): the interview is dated by the Monday of the week it finished
+ * in, and shown from the Monday after.
+ */
+const leadInterviews = (
+  facts: OnboardingFacts | null,
+  today: string
+): CameIn[] => {
+  const roster = facts?.view.roster;
+  if (facts === null || roster === null || roster === undefined) {
+    return [];
+  }
+  return facts.leadsTalked.flatMap(({ team: teamId, person, day }) => {
+    const team = roster.teams.find(({ id }) => id === teamId);
+    const week = mondayOf(day);
+    const shownFrom = addDays(week, 7);
+    if (team === undefined || today < shownFrom) {
+      return [];
+    }
+    const lead = roster.people.find(({ id }) => id === person);
+    return [
+      {
+        source: {
+          id: ids.leadInterview(team.id),
+          kind: "interview",
+          title: `Interview with ${team.name}`,
+          date: week,
+          who: lead === undefined ? "Team lead" : roleOf(lead),
+          step: 2,
+          interviewee: "stakeholder",
+          teamIds: [ids.rosterTeam(team.id)],
+        },
+        at: `${shownFrom}T00:00:00.000Z`,
+      },
+    ];
+  });
+};
+
+/**
+ * The documents shared in the onboarding, oldest first: their names and
+ * when they were shared. Not the teams their readings name: a source's
+ * teams are the teams it speaks for, which makes them interviewed, and a
+ * document isn't an interview. Those teams use the tools it names.
+ */
+const documentSources = (facts: OnboardingFacts | null): CameIn[] =>
+  (facts?.documents ?? []).toReversed().map((document) => ({
+    source: {
+      id: ids.document(document.id),
+      kind: "document",
+      title: document.name,
+      date: dayOf(document.at),
+      step: 2,
+    },
+    at: document.at,
+  }));
+
+/**
+ * The tools the shared documents' readings name, one per name as people
+ * mean it (`nameKey`: trimmed, any case), each with an id of its own,
+ * found in the oldest document naming it, used by every team a document
+ * naming it is about. Whether it has AI nobody said: left out.
+ */
+const documentTools = (
+  facts: OnboardingFacts | null,
+  byName: TeamsByName
+): Tool[] => {
+  const tools = new Map<string, Tool>();
+  // Two names whose letters and digits read alike ("Microsoft Project",
+  // "Microsoft.Project") are two tools: the later one's id takes a number.
+  // Documents are read oldest first, so an id never changes.
+  const slugs = new Set<string>();
+  const idFor = (name: string): string => {
+    const base = slugOf(name) || "tool";
+    let slug = base;
+    for (let count = 2; slugs.has(slug); count += 1) {
+      slug = `${base}-${count}`;
+    }
+    slugs.add(slug);
+    return ids.documentTool(slug);
+  };
+  for (const document of (facts?.documents ?? []).toReversed()) {
+    const teamIds = teamIdsNamed(document.reading.teams, byName);
+    for (const name of document.reading.tools) {
+      const key = nameKey(name);
+      if (key === "") {
+        continue;
+      }
+      const held = tools.get(key);
+      tools.set(
+        key,
+        held === undefined
+          ? {
+              id: idFor(name),
+              name: name.trim(),
+              teamIds,
+              sourceId: ids.document(document.id),
+            }
+          : { ...held, teamIds: [...new Set([...held.teamIds, ...teamIds])] }
+      );
+    }
+  }
+  return [...tools.values()];
+};
+
+/**
+ * The onboarding's sources, each with when it came in: the kickoff when
+ * its transcript came in, the staff list when it was last saved, the team
+ * leads' interviews and the documents shared. The one definition of which
+ * sources there are and what they are called, for `brain.read` and
+ * `brain.changes` alike; none for anyone but an admin, who alone has
+ * `facts`.
+ */
+const onboardingSources = (
+  facts: OnboardingFacts | null,
+  today: string = dayOf(new Date().toISOString())
+): CameIn[] => {
   const kickoffAt = facts?.kickoff.transcript?.at;
   return [
     ...(kickoffAt === undefined
       ? []
       : [
           {
-            id: kickoffSourceId,
-            kind: "interview",
-            title: "Kickoff",
-            date: dayOf(kickoffAt),
-            step: 1,
-          } satisfies Source,
+            source: {
+              id: kickoffSourceId,
+              kind: "interview",
+              title: "Kickoff",
+              date: dayOf(kickoffAt),
+              step: 1,
+            },
+            at: kickoffAt,
+          } satisfies CameIn,
         ]),
     // The roster is the list of who works where the admin gave: as the
     // brain reads a directory, the source of the teams' sizes and roles.
@@ -143,35 +325,29 @@ const onboardingSources = (facts: OnboardingFacts | null): Source[] => {
       ? []
       : [
           {
-            id: rosterSourceId,
-            kind: "import",
-            connection: "directory",
-            title: "Staff list",
-            date: dayOf(facts.rosterSavedAt),
-            step: 2,
-          } satisfies Source,
+            source: {
+              id: rosterSourceId,
+              kind: "import",
+              connection: "directory",
+              title: "Staff list",
+              date: dayOf(facts.rosterSavedAt),
+              step: 2,
+            },
+            at: facts.rosterSavedAt,
+          } satisfies CameIn,
         ]),
+    ...leadInterviews(facts, today),
+    ...documentSources(facts),
   ];
 };
 
-/**
- * The onboarding's sources as changes (brain-changes.ts): the kickoff when
- * its transcript came in, the staff list when it was last saved; none for
- * anyone but an admin, who alone has `facts`, as for `brain.read`.
- */
-const sourceChanges = (facts: OnboardingFacts | null): SourceChange[] => {
-  const kickoffAt = facts?.kickoff.transcript?.at;
-  return [
-    ...(kickoffAt === undefined
-      ? []
-      : [{ id: kickoffSourceId, title: "Kickoff", at: kickoffAt }]),
-    ...(facts === null ||
-    facts.view.roster === null ||
-    facts.rosterSavedAt === null
-      ? []
-      : [{ id: rosterSourceId, title: "Staff list", at: facts.rosterSavedAt }]),
-  ];
-};
+/** The onboarding's sources as changes (brain-changes.ts), with the ids and titles `brain.read` gives them. */
+const sourceChanges = (facts: OnboardingFacts | null): SourceChange[] =>
+  onboardingSources(facts).map(({ source: { id, title }, at }) => ({
+    id,
+    title,
+    at,
+  }));
 
 /**
  * The roster's and the kickoff's teams, one per name: a kickoff team the
@@ -219,7 +395,7 @@ const onboardingTeams = (facts: OnboardingFacts | null): Team[] => {
         : [
             {
               // A role, never the lead's name.
-              role: lead.title === "" ? "Team lead" : lead.title,
+              role: roleOf(lead),
               sourceId: rosterSourceId,
               date: rosterDay,
               ...(invitedAt === undefined
@@ -373,13 +549,15 @@ export const readBrain = async (
     people: facts?.view.roster?.people.length ?? 0,
   };
 
+  const teams = onboardingTeams(facts);
+
   return {
     company,
     vision: visionOf(facts),
     goals: [],
-    teams: onboardingTeams(facts),
-    tools: [],
-    sources: onboardingSources(facts),
+    teams,
+    tools: documentTools(facts, teamsByName(teams)),
+    sources: onboardingSources(facts).map(({ source }) => source),
     statements: [],
     candidates: [],
     gaps: [],
