@@ -330,6 +330,32 @@ describe("whom an App is made for", slow, () => {
       cleared: null,
     });
   });
+
+  it("isn't a team removed since it was checked", async () => {
+    const [owner, admin] = await Promise.all([
+      personApi("builder"),
+      personApi("admin"),
+    ]);
+    const team = await newTeam(admin, []);
+    const app = await newApp(owner);
+    const by = await owner.api.whoami();
+    // Removed just before the batch lands.
+    const racing = racingDb(
+      async (db) =>
+        await db.prepare("DELETE FROM teams WHERE id = ?").bind(team).run()
+    );
+
+    const refused = await outcome(
+      updateApp({ ...env, DB: racing }, by, app, {
+        audience: { type: "team", id: team },
+      })
+    );
+    const { audience } = await owner.api.apps.get(app);
+    expect({ refused, audience }).toStrictEqual({
+      refused: "app.conflict",
+      audience: null,
+    });
+  });
 });
 
 describe("an App's integrations", slow, () => {
