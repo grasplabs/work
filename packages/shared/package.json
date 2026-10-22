@@ -92,6 +92,8 @@
     "./platform-limits": "./src/platform-limits.ts",
     "./platform-measures": "./src/platform-measures.ts",
     "./portable": "./src/portable.ts",
+    "./quiet-isolate": "./src/quiet-isolate.ts",
+    "./quiet-loader": "./src/quiet-loader.ts",
     "./quota-policy": "./src/quota-policy.ts",
     "./quota-policy-report": "./src/quota-policy-report.ts",
     "./record-ids": "./src/record-ids.ts",

@@ -24,6 +24,7 @@ import {
 import { operationErrors } from "@grasp-os/shared/operations";
 import type { Authority } from "@grasp-os/shared/permissions";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
+import { quietLoader } from "@grasp-os/shared/quiet-loader";
 import {
   querySubscriptionLimits,
   screenErrors,
@@ -56,7 +57,6 @@ import type { Held, Hold } from "./app-waits-for.ts";
 import { findApp, versionFiles } from "./apps.ts";
 import { auditedBatch, outboxed } from "./audit-outbox.ts";
 import { appHost } from "./durable-objects.ts";
-import { quietLoader } from "./quiet-loader.ts";
 import { sandbox } from "./sandbox.ts";
 import { requireBoundedHere } from "./sandboxed.ts";
 import { buildFailed, buildServer } from "./screens.ts";

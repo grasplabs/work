@@ -65,7 +65,7 @@ interface __BaseEnv_Env {
    * tests and local development only, never on-prem (src/sandboxed.ts).
    * It accepts too that what App code with a tail writes (an App's server,
    * a draft's preview) reaches the process's logs as well as its tail;
-   * every other isolate core loads prints nothing (src/quiet-loader.ts),
+   * every other isolate core loads prints nothing (@grasp-os/shared/quiet-loader),
    * as long as the process isn't served `--verbose`, which core can't
    * detect: an operator who sets this doesn't serve core so (GRA-939).
    */

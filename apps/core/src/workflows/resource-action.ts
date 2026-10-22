@@ -1,6 +1,7 @@
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
+import { quietLoader } from "@grasp-os/shared/quiet-loader";
 import { isolateArgumentDepth } from "@grasp-os/shared/stores";
 import { passedBound } from "@grasp-os/shared/value-bounds";
 import type { SealedUse } from "@grasp-os/shared/workflow-modules";
@@ -9,7 +10,6 @@ import { RpcTarget } from "cloudflare:workers";
 import { z } from "zod";
 
 import { forSandbox } from "../bindings.ts";
-import { quietLoader } from "../quiet-loader.ts";
 import { capability, runInSession } from "../sandbox-session.ts";
 import { sandbox } from "../sandbox.ts";
 import {

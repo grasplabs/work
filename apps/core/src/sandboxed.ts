@@ -1,4 +1,5 @@
-import { quietLoader } from "./quiet-loader.ts";
+import { quietLoader } from "@grasp-os/shared/quiet-loader";
+
 import { sandboxDeadlineHeader, sandboxWaitHeader } from "./sandbox-headers.ts";
 import { sandbox } from "./sandbox.ts";
 

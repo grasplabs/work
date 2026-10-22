@@ -25,6 +25,14 @@
  * workerd refuses an RpcTarget in a loaded Worker's env ("Remote RPC
  * references can only be serialized for RPC").
  */
+
+import {
+  captureEntrypoint,
+  captureMethod,
+  capturedModules,
+  hasNodeModules,
+  quietModules,
+} from "@grasp-os/shared/quiet-isolate";
 import {
   // oxlint-disable-next-line no-restricted-imports -- its only caller is core, over the supervisor's private socket: nothing untrusted calls it
   RpcTarget as CapnwebTarget,
@@ -33,13 +41,6 @@ import {
 import type { RpcTarget } from "cloudflare:workers";
 
 import { sessionMaxRuns } from "../call-limits.ts";
-import {
-  captureEntrypoint,
-  captureMethod,
-  capturedModules,
-  hasNodeModules,
-  quietModules,
-} from "./quiet-isolate.ts";
 import {
   declaredMethodsOf,
   invoke,
@@ -94,7 +95,7 @@ interface SessionCall {
   /**
    * The function capability that takes what the call writes with
    * `console`, bounded, once it settled: a draft's sealed preview's, for
-   * the agent's check of it (quiet-isolate.ts, `capturedModules`). None
+   * the agent's check of it (@grasp-os/shared/quiet-isolate, `capturedModules`). None
    * for any other call, whose output is dropped.
    */
   consoleSink: string | undefined;
