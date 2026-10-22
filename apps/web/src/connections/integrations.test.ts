@@ -30,7 +30,10 @@ const entry = (
     group = "Other",
     description = null,
     name = id.toUpperCase(),
-  }: Partial<Pick<Entry, "source" | "group" | "description" | "name">> = {}
+    offered = true,
+  }: Partial<
+    Pick<Entry, "source" | "group" | "description" | "name" | "offered">
+  > = {}
 ): Entry => ({
   source,
   id,
@@ -41,7 +44,7 @@ const entry = (
   description,
   group,
   auth: "managed",
-  offered: true,
+  offered,
 });
 
 const connection = (
@@ -256,6 +259,32 @@ describe("beyond and nearestApps", () => {
       nearestApps(beyond(listed), "Google Sheets for finance")
     ).toHaveLength(1);
     expect(nearestApps(beyond(listed), "hu")).toStrictEqual([]);
+  });
+
+  it("leaves out an app that isn't offered", () => {
+    const unoffered = integrationsOf(
+      [
+        entry("hubspot", [], {
+          source: "composio",
+          name: "HubSpot",
+          offered: false,
+        }),
+      ],
+      []
+    );
+    expect(beyond(unoffered)).toStrictEqual([]);
+  });
+
+  it("keeps the app named exactly, however many shorter names it holds", () => {
+    const many = integrationsOf(
+      ["Sales", "Force", "Sale", "Salesforce"].map((name) =>
+        entry(name.toLowerCase(), [], { source: "composio", name })
+      ),
+      []
+    );
+    expect(
+      nearestApps(many, "salesforce", 1).map(({ name }) => name)
+    ).toStrictEqual(["Salesforce"]);
   });
 
   it("offers at most the number asked for", () => {

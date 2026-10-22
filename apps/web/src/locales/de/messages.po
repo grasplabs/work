@@ -13832,8 +13832,8 @@ msgid "Use a staff list instead"
 msgstr "Stattdessen eine Mitarbeiterliste verwenden"
 
 #: src/connections/request-app-dialog.tsx
-msgid "Use an address that starts with https://."
-msgstr ""
+msgid "Use an address that starts with http:// or https://."
+msgstr "Nutzen Sie eine Adresse, die mit http:// oder https:// beginnt."
 
 #: src/onboarding/setup-steps.tsx
 msgid "Use another list"
