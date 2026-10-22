@@ -25,6 +25,7 @@ const view = (paused: boolean): OnboardingView => ({
 const listening = (paused: boolean): string => {
   const data: SetupData = {
     admin: "Ada",
+    company: null,
     view: view(paused),
     documents: [],
     gate: {

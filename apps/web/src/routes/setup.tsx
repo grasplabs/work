@@ -1,3 +1,4 @@
+import type { Organization } from "@grasp-os/shared/organization";
 import { isAdmin } from "@grasp-os/shared/roles";
 import { cn } from "@grasp-os/ui/lib/utils";
 import { useLingui } from "@lingui/react/macro";
@@ -366,6 +367,21 @@ const Setup = () => {
   );
 };
 
+/**
+ * The organization's name, for the message to the team; none when it has
+ * none or core can't say, which leaves the rest of the onboarding as it is.
+ */
+const companyOf = async (
+  organization: () => Promise<Organization>
+): Promise<string | null> => {
+  try {
+    const { name } = await organization();
+    return name.trim() === "" ? null : name;
+  } catch {
+    return null;
+  }
+};
+
 export const Route = createFileRoute("/setup")({
   validateSearch: (search: Record<string, unknown>): { step?: SetupStep } =>
     isStep(search.step) ? { step: search.step } : {},
@@ -392,12 +408,13 @@ export const Route = createFileRoute("/setup")({
   },
   loader: async ({ context: { core } }) =>
     await loadFromCore(core, async (session) => {
-      const [view, documents, gate] = await Promise.all([
+      const [view, documents, gate, company] = await Promise.all([
         session.onboarding.view(),
         session.onboarding.documents(),
         session.onboardingGate.view(),
+        companyOf(async () => await session.organization.get()),
       ]);
-      return { view, documents, gate };
+      return { view, documents, gate, company };
     }),
   component: Setup,
 });

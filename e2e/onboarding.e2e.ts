@@ -177,7 +177,18 @@ test("the dashboard counts the programme's weeks from the plan, and exports its 
   expect(cspViolations).toStrictEqual([]);
 });
 
-test("the company's admin goes through their onboarding: the staff list, the leads and the day the interviews start", async ({
+/** What a line asked of the voice says, and in what tone. */
+const lineOf = (request: Request): { text: string; tone: unknown } => {
+  const body: unknown = request.postDataJSON();
+  return typeof body === "object" &&
+    body !== null &&
+    "text" in body &&
+    typeof body.text === "string"
+    ? { text: body.text, tone: "tone" in body ? body.tone : undefined }
+    : { text: "", tone: undefined };
+};
+
+test("the company's admin goes through their onboarding: the staff list, the organization as Stephen will interview it, and the plan", async ({
   page,
   cspViolations,
 }) => {
@@ -187,6 +198,17 @@ test("the company's admin goes through their onboarding: the staff list, the lea
   await signInTo(page.context(), admin);
   // The story on "How this works" is told at once.
   await page.emulateMedia({ reducedMotion: "reduce" });
+  // The voice isn't reached from the local stack: what the page asks of it is kept, and it says nothing.
+  const asked: { text: string; tone: unknown }[] = [];
+  await page.route("**/api/speech", async (route) => {
+    asked.push(lineOf(route.request()));
+    await route.fulfill({
+      status: 503,
+      json: { code: "speech.failed", message: "Not here" },
+    });
+  });
+  const toneOf = (text: string) =>
+    asked.find((line) => line.text === text)?.tone;
   await page.goto("/setup?step=welcome");
 
   await expect(
@@ -215,12 +237,13 @@ test("the company's admin goes through their onboarding: the staff list, the lea
         `Lea Bakker,lea.${run}@acme.test,Sales,Head of sales,yes`,
         `Sam Visser,sam.${run}@acme.test,Sales,Account manager,`,
         `Ona Smit,ona.${run}@acme.test,Ops,Planner,`,
+        `Kai de Wit,kai.${run}@acme.test,Legal,Counsel,`,
       ].join("\n")
     ),
   });
   await expect(
     page.getByText(
-      "Thank you. From your staff list I can see 3 people in 2 teams."
+      "Thank you. From your staff list I can see 4 people in 3 teams."
     )
   ).toBeVisible();
   await page.getByRole("button", { name: "Continue" }).click();
@@ -238,7 +261,7 @@ test("the company's admin goes through their onboarding: the staff list, the lea
   ).toBeVisible();
   await page.getByRole("button", { name: "Skip for now" }).click();
 
-  // The leads as the list said them; Ops gets Ona as its lead.
+  // The leads as the list said them; Ops gets Ona as its lead, and Legal does not take part.
   await expect(
     page.getByRole("heading", {
       name: "Almost done: is this your organization?",
@@ -246,13 +269,18 @@ test("the company's admin goes through their onboarding: the staff list, the lea
   ).toBeVisible();
   await page.getByRole("combobox", { name: "Lead of Ops" }).click();
   await page.getByRole("option", { name: "Ona Smit" }).click();
-  await page.getByRole("button", { name: "This is right" }).click();
+  await page.getByRole("switch", { name: "Legal takes part" }).click();
   await expect(
-    page.getByText("Thank you. I’ll start with these 2 leads.")
-  ).toBeVisible();
+    page.getByRole("combobox", { name: "Lead of Legal" })
+  ).toBeDisabled();
+  await page.getByRole("button", { name: "This is right" }).click();
+  const thanks = "Thank you. I’ll start with these 2 leads.";
+  await expect(page.getByText(thanks)).toBeVisible();
+  // Said on its own, warmly.
+  await expect.poll(() => toneOf(thanks)).toBe("warm");
   await page.getByRole("button", { name: "Continue" }).click();
 
-  // The message to send, and the day the first links go out.
+  // The message to send, the day the first links go out, and Ops later.
   await expect(
     page.getByRole("heading", {
       name: "Before I reach out, let your team know",
@@ -260,6 +288,21 @@ test("the company's admin goes through their onboarding: the staff list, the lea
   ).toBeVisible();
   await page.getByRole("button", { name: "The day after" }).click();
   const start = await page.getByLabel("Another day").inputValue();
+  // Only the teams that take part are there to hold back.
+  await expect(page.getByRole("checkbox", { name: /^Legal/u })).toHaveCount(0);
+  await page.getByRole("checkbox", { name: /^Ops/u }).click();
+  await page.getByRole("button", { name: "On a later day" }).click();
+  const later = await page
+    .getByLabel("The day the other teams get their links")
+    .inputValue();
+  const next = page
+    .getByRole("alert")
+    .filter({ hasText: "What happens next" })
+    .getByText(/^The lead of 1 team gets their link /u);
+  await expect(next).toBeVisible();
+  // Stephen says what happens next, as the plan has it now.
+  const said = await next.textContent();
+  await expect.poll(() => toneOf(said ?? "")).toBe("sincere, steady");
   await page.getByRole("button", { name: "I sent it" }).click();
 
   await expect(
@@ -269,20 +312,38 @@ test("the company's admin goes through their onboarding: the staff list, the lea
   ).toBeVisible();
   await expect(page.getByText(/^Starts /u)).toBeVisible();
 
-  // Core keeps what was set: the leads, and the plan from that day.
+  // Core keeps what was set: the leads, Legal off, the plan from that day
+  // with Ops on its own later day, and links for the three who take part.
   const { core, api } = apiOf(admin);
   try {
     const { roster, plan } = await api.onboarding.view();
+    const teamOf = (name: string) =>
+      roster?.teams.find((team) => team.name === name);
     const leadOf = (name: string) =>
-      roster?.people.find(
-        (person) =>
-          person.id === roster.teams.find((team) => team.name === name)?.lead
-      )?.name;
-    expect([leadOf("Sales"), leadOf("Ops")]).toStrictEqual([
-      "Lea Bakker",
-      "Ona Smit",
-    ]);
-    expect(plan?.start).toBe(start);
+      roster?.people.find((person) => person.id === teamOf(name)?.lead)?.name;
+    const ops = teamOf("Ops")?.id ?? "";
+    const opsAt = plan?.later?.[ops];
+    const { waiting } = await api.onboardingStaff.agreements();
+    expect({
+      leads: [leadOf("Sales"), leadOf("Ops")],
+      off: roster?.teams.filter((team) => team.off).map(({ name }) => name),
+      start: plan?.start,
+      held: Object.keys(plan?.later ?? {}),
+      // Its own moment, on the later day, after the first links.
+      opsLater:
+        later > start &&
+        typeof opsAt === "string" &&
+        plan?.at !== undefined &&
+        opsAt > plan.at,
+      waiting,
+    }).toStrictEqual({
+      leads: ["Lea Bakker", "Ona Smit"],
+      off: ["Legal"],
+      start,
+      held: [ops],
+      opsLater: true,
+      waiting: 3,
+    });
   } finally {
     core[Symbol.dispose]();
   }
@@ -302,22 +363,11 @@ const nineTeams = [
   "Marketing",
 ];
 
-/** What a line asked of the voice says, and in what tone. */
-const lineOf = (request: Request): { text: string; tone: unknown } => {
-  const body: unknown = request.postDataJSON();
-  return typeof body === "object" &&
-    body !== null &&
-    "text" in body &&
-    typeof body.text === "string"
-    ? { text: body.text, tone: "tone" in body ? body.tone : undefined }
-    : { text: "", tone: undefined };
-};
-
 test("a staff list of 170 people in 9 teams, from Excel, is kept; the same list again changes nothing", async ({
   page,
   cspViolations,
 }) => {
-  // After the journey above: its list of three is there as the step arrives.
+  // After the journey above: its list of four is there as the step arrives.
   const admin = await signInStaff();
   await signInTo(page.context(), admin);
   // The voice isn't reached from the local stack: what the page asks of it is kept, and it says nothing.
