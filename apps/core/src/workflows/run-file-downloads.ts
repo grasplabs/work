@@ -17,7 +17,7 @@ import {
 } from "@grasp-os/shared/run-files";
 import type { RunFileListing } from "@grasp-os/shared/run-files";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
-import { and, asc, eq, not } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import {
@@ -27,7 +27,6 @@ import {
 import {
   auditedBatch,
   outboxedEventWhere,
-  storedEvent,
   uuidFromHash,
 } from "../audit-outbox.ts";
 import type { Acting } from "../auth/identity.ts";
@@ -35,6 +34,7 @@ import { identifyFull } from "../auth/identity.ts";
 import {
   workflowResourceRuns,
   workflowRunFileChunks,
+  workflowRunFileReads,
   workflowRunFiles,
   workflowStartReceipts,
 } from "../db/core/schema.ts";
@@ -61,7 +61,12 @@ import { detailsRemoved } from "./retention.ts";
 //   the file's state are decided again, so a lost role, a removed run's
 //   details or a deleted file ends the stream; each chunk's bytes are
 //   checked against the SHA-256 recorded when they were written; and the
-//   whole download ends after `fileLimits.downloadMs`.
+//   whole download ends after `fileLimits.downloadMs`. Every check runs
+//   in full before every chunk, none cached: a file is at most 30 chunks
+//   (15 MiB of 512 KiB), so a download costs at most 30 times a few
+//   indexed reads, and only someone allowed to download the file gets
+//   past the first. No rate limit, then; a person's downloads are bounded
+//   by the files they may read.
 // - Another site: only a request the page itself sends, or a link the
 //   person opened themselves (`Sec-Fetch-Site` `same-origin` or `none`),
 //   and never read by another site (`Cross-Origin-Resource-Policy`, set
@@ -76,8 +81,10 @@ import { detailsRemoved } from "./retention.ts";
 //   `nosniff` and that policy: no browser renders it as HTML, and one
 //   opened anyway has an opaque origin and runs nothing.
 // - Who read it: each download is audited (`workflow.file.downloaded`),
-//   once a day per person and file, with the file's type and size, never
-//   its name.
+//   once a day per person and file, at the time of that day's first, with
+//   the file's type and size and whether the reader was the run's person
+//   or an admin, never its name; and so is an admin's listing of someone
+//   else's run (`workflow.files.listed`), whose names can say as much.
 
 /** The run's row, its receipt's details mark, and nothing for another. */
 const runRowOf = async (env: Env, workflowId: string, runId: string) => {
@@ -112,7 +119,16 @@ const mayDownload = async (
   by: Acting,
   workflowId: unknown,
   runId: unknown
-): Promise<{ workflow: string; run: string; may: boolean } | undefined> => {
+): Promise<
+  | {
+      workflow: string;
+      run: string;
+      may: boolean;
+      /** Whether `by` is the run's person, not an admin reading another's. */
+      own: boolean;
+    }
+  | undefined
+> => {
   if (typeof runId !== "string") {
     return undefined;
   }
@@ -144,7 +160,62 @@ const mayDownload = async (
     workflow,
     run: runId,
     may: allowed && !detailsRemoved(env, row),
+    own,
   };
+};
+
+/**
+ * Records that `reader` read run `run`'s files (`action`: a download of
+ * file `subject`, or a listing of the run, `subject` the run), once a day
+ * per person, subject and action: the day's first read inserts its row
+ * (`workflowRunFileReads`) and its audit event together, with the real
+ * time of that read and whether the reader was the run's person or an
+ * admin, never a file's name. Later reads that day write nothing, so the
+ * event is never sent again with other content.
+ */
+const recordRead = async (
+  env: Env,
+  reader: { userId: string; own: boolean },
+  read: {
+    action: "workflow.file.downloaded" | "workflow.files.listed";
+    subject: string;
+    workflow: string;
+    run: string;
+    detail: Record<string, string | number>;
+  }
+): Promise<void> => {
+  const now = new Date();
+  const day = now.toISOString().slice(0, 10);
+  const event = auditEventSchema.parse({
+    id: uuidFromHash(
+      await sha256Hex(`${read.action}:${read.subject}:${reader.userId}:${day}`)
+    ),
+    at: now.toISOString(),
+    source: "core",
+    actor: { type: "person", userId: reader.userId },
+    action: read.action,
+    target: { type: "workflow_resource", id: read.workflow },
+    detail: {
+      run: read.run,
+      ...read.detail,
+      as: reader.own ? "person" : "admin",
+    },
+  });
+  const db = drizzle(env.DB);
+  await auditedBatch(env, db, [
+    db
+      .insert(workflowRunFileReads)
+      .values({
+        subjectId: read.subject,
+        userId: reader.userId,
+        day,
+        action: read.action,
+        readAt: now,
+      })
+      .onConflictDoNothing(),
+    // Only with the day's first row: the insert above changed one.
+    outboxedEventWhere(db, event, sql`changes() > 0`),
+  ]);
 };
 
 /** Run `run`'s finished files, oldest first. */
@@ -178,6 +249,21 @@ export const runFilesFor = async (
     return null;
   }
   const rows = await finishedFiles(env, decided.run);
+  // An admin reading someone else's run's file names, which can say as
+  // much of the person as the files do: audited, once a day per run.
+  if (!decided.own) {
+    await recordRead(
+      env,
+      { userId: by.userId, own: false },
+      {
+        action: "workflow.files.listed",
+        subject: decided.run,
+        workflow: decided.workflow,
+        run: decided.run,
+        detail: { files: rows.length },
+      }
+    );
+  }
   return rows.map((row) => ({
     id: row.id,
     name: row.name,
@@ -197,7 +283,9 @@ const downloadable = async (
   workflowId: string,
   runId: string,
   fileId: string
-): Promise<typeof workflowRunFiles.$inferSelect | undefined> => {
+): Promise<
+  (typeof workflowRunFiles.$inferSelect & { own: boolean }) | undefined
+> => {
   const decided = await mayDownload(env, by, workflowId, runId);
   if (decided?.may !== true) {
     return undefined;
@@ -214,43 +302,7 @@ const downloadable = async (
       )
     )
     .get();
-  return row ?? undefined;
-};
-
-/**
- * Records that `reader` downloaded file `file` of run `run`: once a day
- * per person and file (the event's ID is derived from them), never its
- * name.
- */
-const auditDownload = async (
-  env: Env,
-  reader: string,
-  file: { id: string; runId: string; workflowResourceId: string },
-  shown: { type: string; size: number }
-): Promise<void> => {
-  const action = "workflow.file.downloaded";
-  const day = new Date().toISOString().slice(0, 10);
-  const event = auditEventSchema.parse({
-    id: uuidFromHash(await sha256Hex(`${action}:${file.id}:${reader}:${day}`)),
-    // The same event however often that day: one sent again after the
-    // first was logged is a duplicate the log drops.
-    at: `${day}T00:00:00.000Z`,
-    source: "core",
-    actor: { type: "person", userId: reader },
-    action,
-    target: { type: "workflow_resource", id: file.workflowResourceId },
-    detail: {
-      run: file.runId,
-      file: file.id,
-      type: shown.type,
-      size: shown.size,
-      day,
-    },
-  });
-  const db = drizzle(env.DB);
-  await auditedBatch(env, db, [
-    outboxedEventWhere(db, event, not(storedEvent(event.id))),
-  ]);
+  return row === undefined ? undefined : { ...row, own: decided.own };
 };
 
 const segment = /^[A-Za-z0-9_-]{1,64}$/u;
@@ -327,10 +379,17 @@ export const runFileResponse = async (
       .from(workflowRunFileChunks)
       .where(eq(workflowRunFileChunks.fileId, file.id))
       .orderBy(asc(workflowRunFileChunks.index));
-    await auditDownload(env, person.userId, file, {
-      type: file.type,
-      size: file.size,
-    });
+    await recordRead(
+      env,
+      { userId: person.userId, own: file.own },
+      {
+        action: "workflow.file.downloaded",
+        subject: file.id,
+        workflow: file.workflowResourceId,
+        run: file.runId,
+        detail: { file: file.id, type: file.type, size: file.size },
+      }
+    );
     const endsAt = Date.now() + fileLimits.downloadMs;
     let next = 0;
     const body = new ReadableStream<Uint8Array>(

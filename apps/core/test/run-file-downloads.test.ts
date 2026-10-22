@@ -269,6 +269,7 @@ describe(
       const id = await filesWorkflow(ada, admin);
       const { run, file } = await ranOnce(ada, id);
       const path = runFileContentPath(id, run, file);
+      const began = new Date().toISOString();
 
       const own = await download(ada.session, path);
       const headers = Object.fromEntries(
@@ -288,6 +289,23 @@ describe(
       const again = await download(ada.session, path);
       await again.text();
       const events = await downloadsOf(file);
+      // An admin listing someone else's run is audited, once a day; its
+      // person listing it isn't.
+      await admin.api.workflowResources.runFiles(id, run);
+      await admin.api.workflowResources.runFiles(id, run);
+      await ada.api.workflowResources.runFiles(id, run);
+      const all = await allEvents();
+      const listings = all
+        .filter(
+          (event) =>
+            event.action === "workflow.files.listed" &&
+            event.detail?.run === run
+        )
+        .map(({ actor, detail }) => ({
+          actor,
+          files: detail?.files,
+          as: detail?.as,
+        }));
 
       expect({
         status: own.status,
@@ -295,17 +313,21 @@ describe(
         ownBody,
         byAdmin,
         audited: events
-          .map(({ actor, target, detail }) => ({
+          .map(({ actor, target, detail, at }) => ({
             actor,
             target,
             run: detail?.run,
             type: detail?.type,
             size: detail?.size,
+            as: detail?.as,
+            // The time of that day's first download, not the day's start.
+            timed: at >= began,
           }))
           .toSorted((one, other) =>
             JSON.stringify(one).localeCompare(JSON.stringify(other))
           ),
         named: JSON.stringify(events).includes("notes"),
+        listings,
       }).toStrictEqual({
         status: 200,
         headers: {
@@ -323,18 +345,30 @@ describe(
         },
         ownBody: written,
         byAdmin: { status: 200, body: "ok" },
-        audited: [admin, ada]
-          .map((reader) => ({
+        audited: [
+          { reader: admin, as: "admin" },
+          { reader: ada, as: "person" },
+        ]
+          .map(({ reader, as }) => ({
             actor: { type: "person", userId: reader.userId },
             target: { type: "workflow_resource", id },
             run,
             type: "text/markdown",
             size: new TextEncoder().encode(written).byteLength,
+            as,
+            timed: true,
           }))
           .toSorted((one, other) =>
             JSON.stringify(one).localeCompare(JSON.stringify(other))
           ),
         named: false,
+        listings: [
+          {
+            actor: { type: "person", userId: admin.userId },
+            files: 1,
+            as: "admin",
+          },
+        ],
       });
     });
 
@@ -504,7 +538,7 @@ describe(
       });
     });
 
-    it("stop a download whose reader loses access partway, before the next chunk", async () => {
+    it("stop a download partway, before the next chunk, once its reader loses access, the file is deleted or the run's details go", async () => {
       const [admin, ada] = await Promise.all([
         member("admin"),
         member("builder"),
@@ -512,48 +546,80 @@ describe(
       const id = await filesWorkflow(ada, admin);
       // Three chunks: a call writes at most 512 KiB.
       const size = 1024 * 1024 + 7;
-      const { run, file } = await ranOnce(ada, id, undefined, size);
-      const chunks = await env.DB.prepare(
-        "SELECT count(*) AS n FROM workflow_run_file_chunks WHERE file_id = ?"
-      )
-        .bind(file)
-        .first<number>("n");
-      const response = await download(
-        admin.session,
-        runFileContentPath(id, run, file)
-      );
-      const body: ReadableStream<Uint8Array> | null = response.body;
-      const reader = body?.getReader();
-      const first = await reader?.read();
-      // No longer an admin: the run isn't theirs, so its files aren't either.
-      await env.DB.prepare("UPDATE members SET role = 'user' WHERE user_id = ?")
-        .bind(admin.userId)
-        .run();
-      const rest = await outcome(
-        (async () => {
-          let read = 0;
-          for (;;) {
-            // oxlint-disable-next-line no-await-in-loop -- one chunk after another
-            const next = await reader?.read();
-            if (next === undefined || next.done) {
-              return read;
+      /** A download by `reader` of a new run's file, `meanwhile` done after its first chunk. */
+      const partway = async (
+        reader: Member,
+        meanwhile: (made: { run: string; file: string }) => Promise<unknown>
+      ) => {
+        const made = await ranOnce(ada, id, undefined, size);
+        const chunks = await env.DB.prepare(
+          "SELECT count(*) AS n FROM workflow_run_file_chunks WHERE file_id = ?"
+        )
+          .bind(made.file)
+          .first<number>("n");
+        const response = await download(
+          reader.session,
+          runFileContentPath(id, made.run, made.file)
+        );
+        const body: ReadableStream<Uint8Array> | null = response.body;
+        const stream = body?.getReader();
+        const first = await stream?.read();
+        await meanwhile(made);
+        const rest = await outcome(
+          (async () => {
+            let read = 0;
+            for (;;) {
+              // oxlint-disable-next-line no-await-in-loop -- one chunk after another
+              const next = await stream?.read();
+              if (next === undefined || next.done) {
+                return read;
+              }
+              read += next.value.byteLength;
             }
-            read += next.value.byteLength;
-          }
-        })()
-      );
-
-      expect({
-        chunks,
-        status: response.status,
-        first: first?.value?.byteLength,
-        rest,
-      }).toStrictEqual({
+          })()
+        );
+        return {
+          chunks,
+          status: response.status,
+          first: first?.value?.byteLength,
+          rest,
+        };
+      };
+      const stopped = {
         chunks: 3,
         status: 200,
         first: 512 * 1024,
         rest: "file.not_found",
-      });
+      };
+
+      expect({
+        // Deleted while it came.
+        deleted: await partway(ada, async ({ file }) => {
+          await env.DB.prepare(
+            "UPDATE workflow_run_files SET state = 'deleted', deleted_at = ? WHERE id = ?"
+          )
+            .bind(Date.now(), file)
+            .run();
+        }),
+        // The run's details swept past their retention while it came.
+        swept: await partway(ada, async () => {
+          const now = new Date();
+          await sweepWorkflowStartDetails(
+            env,
+            new Date(now.getTime() + 1000),
+            new Date(now.getTime() - 2 * sweepGraceMs)
+          );
+        }),
+        // No longer an admin: the run isn't theirs, so its files aren't
+        // either. Last, as it changes who reads.
+        revoked: await partway(admin, async () => {
+          await env.DB.prepare(
+            "UPDATE members SET role = 'user' WHERE user_id = ?"
+          )
+            .bind(admin.userId)
+            .run();
+        }),
+      }).toStrictEqual({ deleted: stopped, swept: stopped, revoked: stopped });
     });
   }
 );
