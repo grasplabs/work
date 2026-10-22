@@ -84,6 +84,51 @@ const watchPublishes = (hooks: {
   };
 };
 
+/** A member of `target`, as a proxy passes it through. */
+const memberOf = (target: object, key: string | symbol): unknown => {
+  const value: unknown = Reflect.get(target, key, target);
+  return value;
+};
+
+const failsIndexing =
+  /^update "documents" set "index_state" = \?, "index_failure" = \?, "index_failed_at" = \?/iu;
+
+/**
+ * Runs `before` once, just before the sweep's statement that fails a
+ * document whose run ended: another writer that gets in between.
+ */
+const beforeSweepFails = (before: () => Promise<void>): (() => void) => {
+  const db = env.KNOWLEDGE;
+  const realPrepare = db.prepare.bind(db);
+  let done = false;
+  const prepare = vi.spyOn(db, "prepare").mockImplementation((query) => {
+    const statement = realPrepare(query);
+    if (done || !failsIndexing.test(query)) {
+      return statement;
+    }
+    done = true;
+    const bindRun = (bound: D1PreparedStatement): D1PreparedStatement =>
+      new Proxy(bound, {
+        get: (target, key) =>
+          key === "run"
+            ? async () => {
+                await before();
+                return await target.run();
+              }
+            : memberOf(target, key),
+      });
+    return new Proxy(statement, {
+      get: (target, key): unknown =>
+        key === "bind"
+          ? (...values: unknown[]) => bindRun(target.bind(...values))
+          : memberOf(target, key),
+    });
+  });
+  return () => {
+    prepare.mockRestore();
+  };
+};
+
 /** Fails the next batch that publishes sections: the save before it committed. */
 const failNextPublish = (): (() => void) =>
   watchPublishes({ fail: (nth) => nth === 1 });
@@ -705,5 +750,57 @@ describe("publishing search generations", () => {
       purgedEvents: ["knowledge.purge.index_pending"],
       otherEvents: ["knowledge.index_exhausted"],
     });
+  });
+
+  it("never fails a run the sweep didn't read, though a purge started the next one meanwhile", async () => {
+    const { api } = await knowledgeOf();
+    const { id: collectionId } = await api.createCollection(shared());
+    const document = await api.saveDocument({
+      collectionId,
+      path: "policy.md",
+      text: textOf(`Racing${unique()}`),
+      ifVersion: 0,
+    });
+    // Run 0 indexes nothing and ends: every publish fails.
+    const down = watchPublishes({ fail: () => true });
+    try {
+      await withRetriesAtOnce(async () => {
+        await api.saveDocument({
+          collectionId,
+          path: "policy.md",
+          text: textOf(`Again${unique()}`),
+          ifVersion: 1,
+        });
+        await settledIndexing(api, collectionId, document.id);
+      });
+    } finally {
+      down();
+    }
+    // The sweep finds it waiting on run 0, which has ended.
+    await env.KNOWLEDGE.prepare(
+      "UPDATE documents SET index_state = 'retrying', updated_at = ? WHERE id = ?"
+    )
+      .bind(Date.now() - 60 * 60_000, document.id)
+      .run();
+    // Just before the sweep fails run 0, a purge starts run 1.
+    const restore = beforeSweepFails(async () => {
+      await env.KNOWLEDGE.prepare(
+        "UPDATE documents SET index_run = 1, index_state = 'retrying' WHERE id = ?"
+      )
+        .bind(document.id)
+        .run();
+    });
+    try {
+      await runCron();
+    } finally {
+      restore();
+    }
+    const row = await env.KNOWLEDGE.prepare(
+      "SELECT index_state AS state, index_run AS run FROM documents WHERE id = ?"
+    )
+      .bind(document.id)
+      .first();
+
+    expect(row).toStrictEqual({ state: "retrying", run: 1 });
   });
 });

@@ -642,7 +642,9 @@ export const sweepIndexing = async (env: Env, now: Date): Promise<void> => {
             indexFailure: "internal.unexpected",
             indexFailedAt: now,
           })
-          .where(whileCurrent(id, version));
+          // Only while it is still the run read: a purge run again since
+          // may have started the next one, which this mustn't fail.
+          .where(and(whileCurrent(id, version), eq(documents.indexRun, run)));
       }
     } catch (error) {
       // One document's trouble doesn't keep the sweep from the rest.
