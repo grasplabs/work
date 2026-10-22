@@ -792,7 +792,58 @@ const forged = async (
     )
   );
 
+/** `named`, its items keyed by their name. */
+const keyedNames = [
+  {
+    names: {
+      ...named[0]?.names,
+      metadata: { grasp: { key: "${ $name }" } },
+    },
+  },
+];
+
+const keyedItemsSchema = z.object({
+  ok: z.literal(true),
+  value: z.object({ items: z.array(z.json()), keys: z.array(z.json()) }),
+});
+
+/**
+ * Enters the keyed loop `names` on `host`, its record the items and keys
+ * the host resolved, or `forge` of the keys.
+ */
+const enteredKeyed = async (
+  host: ResourceRunHost,
+  forge: (keys: unknown[]) => unknown = (keys) => keys
+) =>
+  codeOf(
+    await host.do("enter:names", ada, async (attempt) => {
+      const { items, keys } = keyedItemsSchema.parse(
+        await attempt.items({ input: { who: "Ada" } })
+      ).value;
+      return {
+        ok: true,
+        value: { output: { who: "Ada" }, items, keys: forge(keys) },
+      };
+    })
+  );
+
 describe("a run's host, against a forged module's loop", () => {
+  it("records only the keys the host made of the items, never other ones or none", async () => {
+    const by = await builder();
+    const { workflow } = await published(by, keyedNames);
+    expect({
+      made: await enteredKeyed(await hostOf(by, workflow.id)),
+      renamed: await enteredKeyed(await hostOf(by, workflow.id), (keys) =>
+        keys.map((key) => `${String(key)}!`)
+      ),
+      dropped: await enteredKeyed(await hostOf(by, workflow.id), () => {}),
+    }).toStrictEqual({
+      made: "ok",
+      renamed: "workflow.invalid",
+      dropped: "workflow.invalid",
+    });
+  });
+
   it("runs an item's steps only in an item the loop's enter step recorded", async () => {
     const by = await builder();
     const { workflow } = await published(by, named);
