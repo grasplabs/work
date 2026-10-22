@@ -1140,6 +1140,49 @@ describe("a workflow run's own files", () => {
     });
   });
 
+  it("keep nothing of a longer first attempt for a shorter retried read, sealed or not", async () => {
+    const piece = runFileLimits.callBytes;
+    const longer = new TextEncoder().encode(bodyOf(piece * 3));
+    const shorter = longer.subarray(0, piece * 2);
+    const csv = { name: "report.csv", type: "text/csv" } as const;
+    // A first attempt that wrote all its pieces, then lost its lease before
+    // sealing: the retry's own pieces replay, the first attempt's third stays.
+    const unsealed = callerOf();
+    const first = unsealed.next();
+    const as = (suffix: string): FilesCaller => ({
+      ...first,
+      effectKey: `${first.effectKey}#${suffix}`,
+    });
+    const opened = await callFiles(env, as("open"), "open", csv);
+    const id = String(fieldOf(opened.output, "file"));
+    for (let at = 0; at < 3; at += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- in order, as keepFile writes
+      await callFiles(env, as(`piece${String(at)}`), "append", {
+        file: id,
+        content: toBase64(longer.subarray(at * piece, (at + 1) * piece)),
+      });
+    }
+    const retried = await outcome(
+      keepFile(env, first, { ...csv, bytes: shorter })
+    );
+    // A first attempt that sealed the longer file: the retry can't answer it.
+    const sealed = callerOf();
+    const once = sealed.next();
+    await keepFile(env, once, { ...csv, bytes: longer });
+    const again = await outcome(
+      keepFile(env, once, { ...csv, bytes: shorter })
+    );
+    expect({
+      retried,
+      unsealedRows: await rowsOf(unsealed.run),
+      again,
+    }).toStrictEqual({
+      retried: "workflow.call_invalid",
+      unsealedRows: ["writing"],
+      again: "workflow.call_invalid",
+    });
+  });
+
   it("hold every limit before bytes are stored: per call, open files, files and bytes per run, bytes per file, bytes per workflow", async () => {
     // Open at once: the ninth is refused.
     const opener = callerOf();
