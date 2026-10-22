@@ -78,9 +78,26 @@ export type TableFormat = "markdown" | "csv" | "tsv";
 /** What has to be quoted in a CSV field: its quote, its comma, a line break. */
 const csvSpecial = /[",\r\n]/u;
 
-/** A CSV field: quoted when it must be, its quotes doubled (RFC 4180). */
-const csvField = (cell: string): string =>
-  csvSpecial.test(cell) ? `"${cell.replaceAll('"', '""')}"` : cell;
+/**
+ * What a spreadsheet would run as a formula: a cell that starts with one
+ * of these. An answer may repeat whatever the agent read, so a table may
+ * hold `=HYPERLINK(…)` meant for whoever opens the file.
+ */
+const csvFormula = /^[=+\-@\t\r]/u;
+
+/** A plain number, such as -5 or +1.5, which a spreadsheet reads as one. */
+const csvNumber = /^[+-]?\d+(?:[.,]\d+)*$/u;
+
+/**
+ * A CSV field: a would-be formula made text with a leading apostrophe
+ * (OWASP's CSV injection advice), then quoted when it must be, its quotes
+ * doubled (RFC 4180).
+ */
+const csvField = (cell: string): string => {
+  const text =
+    csvFormula.test(cell) && !csvNumber.test(cell) ? `'${cell}` : cell;
+  return csvSpecial.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+};
 
 /** Breaks and tabs, which a TSV field can't hold. */
 const tsvSpecial = /[\t\r\n]+/gu;
