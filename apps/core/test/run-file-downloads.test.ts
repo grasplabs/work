@@ -1,3 +1,4 @@
+/* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
 import { agentIdSchema } from "@grasp-os/shared/ids";
 import type { PermissionRequest } from "@grasp-os/shared/permissions";
 import type { Role } from "@grasp-os/shared/roles";
@@ -53,14 +54,14 @@ const filesModule = `import { action, resource, v } from "@grasp-os/sdk/action";
 const files = resource.files("files", { operations: ["write"] });
 
 export const writeFile = action({
-  args: {},
+  args: { size: v.number() },
   returns: v.object({ status: v.string() }),
   uses: [files],
-  handler: async (ctx) => {
+  handler: async (ctx, args) => {
     const done = await ctx.resources.files.write({
       name: "notes.html",
       type: "text/markdown",
-      content: ${JSON.stringify(written)},
+      content: args.size === 0 ? ${JSON.stringify(written)} : "a".repeat(args.size),
     });
     return { status: done.file };
   },
@@ -99,13 +100,16 @@ const definitionOf = (name: string, key: string): string =>
         },
       },
     },
-    input: { schema: objectSchema({}) },
+    input: { schema: objectSchema({ size: { type: "number" } }) },
     output: { schema: objectSchema({ status: { type: "string" } }) },
     do: [
       {
         write: {
           call: "grasp.operation",
-          with: { binding: "writeFile", arguments: {} },
+          with: {
+            binding: "writeFile",
+            arguments: { size: "${ $workflow.input.size }" },
+          },
         },
       },
     ],
@@ -154,13 +158,15 @@ const filesWorkflow = async (builder: Member, admin: Member) => {
 const ranOnce = async (
   by: Member,
   id: string,
-  invoker?: StartInvoker
+  invoker?: StartInvoker,
+  /** How many bytes the file holds, or none for `written`. */
+  size = 0
 ): Promise<{ run: string; file: string }> => {
   const { runId } = await startWorkflow(
     env,
     invoker ?? { type: "person", person: by.identity },
     id,
-    { version: 1, input: {}, key: unique() }
+    { version: 1, input: { size }, key: unique() }
   );
   if (runId === null) {
     throw new Error("The start admitted no run");
@@ -495,6 +501,58 @@ describe(
         writing: 404,
         deleted: 404,
         removed: 404,
+      });
+    });
+
+    it("stop a download whose reader loses access partway, before the next chunk", async () => {
+      const [admin, ada] = await Promise.all([
+        member("admin"),
+        member("builder"),
+      ]);
+      const id = await filesWorkflow(ada, admin);
+      // Three chunks: a call writes at most 512 KiB.
+      const size = 1024 * 1024 + 7;
+      const { run, file } = await ranOnce(ada, id, undefined, size);
+      const chunks = await env.DB.prepare(
+        "SELECT count(*) AS n FROM workflow_run_file_chunks WHERE file_id = ?"
+      )
+        .bind(file)
+        .first<number>("n");
+      const response = await download(
+        admin.session,
+        runFileContentPath(id, run, file)
+      );
+      const body: ReadableStream<Uint8Array> | null = response.body;
+      const reader = body?.getReader();
+      const first = await reader?.read();
+      // No longer an admin: the run isn't theirs, so its files aren't either.
+      await env.DB.prepare("UPDATE members SET role = 'user' WHERE user_id = ?")
+        .bind(admin.userId)
+        .run();
+      const rest = await outcome(
+        (async () => {
+          let read = 0;
+          for (;;) {
+            // oxlint-disable-next-line no-await-in-loop -- one chunk after another
+            const next = await reader?.read();
+            if (next === undefined || next.done) {
+              return read;
+            }
+            read += next.value.byteLength;
+          }
+        })()
+      );
+
+      expect({
+        chunks,
+        status: response.status,
+        first: first?.value?.byteLength,
+        rest,
+      }).toStrictEqual({
+        chunks: 3,
+        status: 200,
+        first: 512 * 1024,
+        rest: "file.not_found",
       });
     });
   }
