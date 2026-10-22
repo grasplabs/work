@@ -369,8 +369,8 @@ describe("the Platform page's data", () => {
         id: `system-${tag}`,
         at: later(4),
         actor: "system",
-        action: "rollout.done",
-        target: "rollout-1",
+        action: "rollout.approve",
+        target: rolloutId,
       },
       {
         id: `deploy-${tag}`,
@@ -393,5 +393,7 @@ describe("the Platform page's data", () => {
       `ops@grasp.test approved the next ring of the rollout of ${shipped.id}`,
       "ops@grasp.test pinned acme to r1",
     ]);
+    // The console's own job, even with an action staff take, isn't listed.
+    expect(events.map(({ id }) => id)).not.toContain(`system-${tag}`);
   });
 });
