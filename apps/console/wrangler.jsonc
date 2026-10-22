@@ -44,6 +44,18 @@
       "jurisdiction": "eu",
     },
   ],
+  // Questions to Grasp's Discord bot (src/admin/discord.ts), per Discord
+  // user: 10 a minute. A question reads every client's core once, so this
+  // bounds the reads one person can start from Discord. The namespace id is
+  // unique in grasp-os-ops, beside the router's 1001 to 1003 and the admin
+  // MCP's 1004.
+  "ratelimits": [
+    {
+      "name": "DISCORD_RATE_LIMIT",
+      "namespace_id": "1005",
+      "simple": { "limit": 10, "period": 60 },
+    },
+  ],
   // Imports newly published releases (src/releases/import.ts) every 5
   // minutes; on weekday mornings, posts the admin's digest to Discord
   // (src/admin/discord-digest.ts, `digestCron`).
