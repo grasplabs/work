@@ -103,6 +103,15 @@ const identifier = /^[A-Za-z_$][\w$]*$/u;
  * itself throw, or answer for it.
  */
 const builtinsSource = `import { WorkerEntrypoint } from "cloudflare:workers";
+function accessorOf(start, key) {
+  for (let at = start; at !== null; at = Reflect.getPrototypeOf(at)) {
+    const found = Reflect.getOwnPropertyDescriptor(at, key);
+    if (found !== undefined) {
+      return found.get;
+    }
+  }
+  return undefined;
+}
 export const builtins = Object.freeze({
   apply: Reflect.apply,
   get: Reflect.get,
@@ -129,12 +138,23 @@ export const builtins = Object.freeze({
   resolve: Promise.resolve.bind(Promise),
   then: Promise.prototype.then,
   bind: Function.prototype.bind,
+  EntrypointClass: WorkerEntrypoint,
   entrypointPrototype: WorkerEntrypoint.prototype,
+  responsePrototype: Response.prototype,
+  // Response's own getters, found up its chain as they are now: a subclass
+  // or an own property of an isolate's Response can't stand in for them.
+  responseHeaders: accessorOf(Response.prototype, "headers"),
+  responseBody: accessorOf(Response.prototype, "body"),
+  responseStatus: accessorOf(Response.prototype, "status"),
+  responseStatusText: accessorOf(Response.prototype, "statusText"),
 });
 `;
 
 /** The built-ins module's name: none the isolate's modules have. */
 const builtinsModule = "grasp-sandbox-builtins.js";
+
+/** The most characters of a thrown error's whole JSON text that are read. */
+const maxThrownText = 2 * (maxThrownMessage + 8192 + 1024);
 
 /** The deepest plain data the wrapper copies out of a call's answer. */
 const maxAnswerDepth = 64;
@@ -181,12 +201,22 @@ const entrySource = (
   entrypoint: string
 ): string => `import { builtins } from ${JSON.stringify(`./${builtins}`)};
 import * as main from ${JSON.stringify(`./${mainModule}`)};
-const { apply, get, define, ownKeys, descriptorOf, prototypeOf, create, isArray, isPrototypeOf, objectPrototype, stringOf, slice, stringify, parse, Map, mapGet, mapSet, Proxy, Response, Headers, headersHas, headersDelete, resolve, then, bind, entrypointPrototype } = builtins;
+const { apply, get, define, ownKeys, descriptorOf, prototypeOf, create, isArray, isPrototypeOf, objectPrototype, stringOf, slice, stringify, parse, Map, mapGet, mapSet, Proxy, Response, Headers, headersHas, headersDelete, resolve, then, bind, EntrypointClass, entrypointPrototype, responsePrototype, responseHeaders, responseBody, responseStatus, responseStatusText } = builtins;
 const envelopeKey = ${JSON.stringify(envelopeKey)};
 const thrownHeader = ${JSON.stringify(thrownHeader)};
 const cut = (text, most) => apply(slice, text, [0, most]);
+// Every record the wrapper hands the runtime (a descriptor, a Response's
+// init and headers) has no prototype, so nothing the isolate's code put on
+// \`Object.prototype\` is read from it.
+const recordOf = (entries) => {
+  const record = create(null);
+  for (let index = 0; index < entries.length; index += 2) {
+    record[entries[index]] = entries[index + 1];
+  }
+  return record;
+};
 const field = (target, key, value) =>
-  define(target, key, { configurable: true, enumerable: true, writable: true, value });
+  define(target, key, recordOf(["configurable", true, "enumerable", true, "writable", true, "value", value]));
 const plainOf = (value, depth, seen) => {
   if (value === null || typeof value !== "object") {
     return value;
@@ -219,9 +249,16 @@ const plainOf = (value, depth, seen) => {
     const key = names[index];
     const descriptor = typeof key === "string" ? descriptorOf(value, key) : undefined;
     if (descriptor !== undefined && get(descriptor, "enumerable") === true) {
-      const getter = get(descriptor, "get");
+      // A descriptor's own fields only: an accessor's has \`get\`, data's
+      // \`value\`, and nothing is read from \`Object.prototype\`.
+      const accessor = descriptorOf(descriptor, "get") !== undefined;
+      const getter = accessor ? get(descriptor, "get") : undefined;
       const read =
-        typeof getter === "function" ? apply(getter, value, []) : get(descriptor, "value");
+        typeof getter === "function"
+          ? apply(getter, value, [])
+          : accessor
+            ? undefined
+            : get(descriptor, "value");
       field(copy, key, plainOf(read, depth + 1, seen));
     }
   }
@@ -235,16 +272,21 @@ const textOf = (read, fallback) => {
     return fallback;
   }
 };
-const detailsOf = (error) => {
+// A thrown error's details as JSON text, checked and bounded, read once:
+// no \`toJSON\` or getter of the isolate's is left to run as it is sent.
+const detailsTextOf = (error) => {
   try {
     const details = plainOf(get(error, "details"), 1, new Map());
     if (details === null || typeof details !== "object") {
       return undefined;
     }
     const text = stringify(details);
-    // Parsed back from the text checked: plain JSON, read once, with no
-    // \`toJSON\` or getter of the isolate's left to run as it is sent.
-    return typeof text === "string" && text.length <= ${maxThrownDetails} ? parse(text) : undefined;
+    if (typeof text !== "string" || text.length > ${maxThrownDetails}) {
+      return undefined;
+    }
+    // Parsed and written again, so the text is JSON the wrapper made.
+    const again = stringify(parse(text));
+    return typeof again === "string" && again.length <= ${maxThrownDetails} ? again : undefined;
   } catch {
     return undefined;
   }
@@ -262,13 +304,35 @@ const thrownOf = (error) => {
   } catch {
     code = undefined;
   }
-  return {
-    name: cut(name, ${maxThrownName}),
-    message: cut(message, ${maxThrownMessage}),
+  return [
+    cut(name, ${maxThrownName}),
+    cut(message, ${maxThrownMessage}),
     code,
-    details: isObject ? detailsOf(error) : undefined,
-  };
+    isObject ? detailsTextOf(error) : undefined,
+  ];
 };
+// What crosses of a thrown error, as data: own properties only.
+const thrownData = (parts) => {
+  const data = {};
+  field(data, "name", parts[0]);
+  field(data, "message", parts[1]);
+  if (parts[2] !== undefined) {
+    field(data, "code", parts[2]);
+  }
+  if (parts[3] !== undefined) {
+    field(data, "details", parse(parts[3]));
+  }
+  return data;
+};
+// The same as JSON text, written from its parts: strings and numbers alone
+// are stringified, which reads nothing of any prototype.
+const thrownText = (parts) =>
+  "{" +
+  '"name":' + stringify(parts[0]) +
+  ',"message":' + stringify(parts[1]) +
+  (parts[2] === undefined ? "" : ',"code":' + stringify(parts[2])) +
+  (parts[3] === undefined ? "" : ',"details":' + parts[3]) +
+  "}";
 // An envelope whose own \`then\` is undefined: never a thenable, whatever the
 // isolate's code put on \`Object.prototype\`, so the call's promise settles
 // with it.
@@ -279,12 +343,30 @@ const envelopeOf = (key, value) => {
   field(envelope, key, value);
   return envelope;
 };
-const thrownAnswer = (error) => envelopeOf("thrown", thrownOf(error));
-const thrownResponse = (error) =>
-  new Response(stringify(thrownOf(error)), {
-    status: 500,
-    headers: { [thrownHeader]: "1" },
-  });
+const responseOf = (text) =>
+  new Response(text, recordOf(["status", 500, "headers", recordOf([thrownHeader, "1"])]));
+// What answers when even answering a throw fails: made now, from nothing
+// the isolate's code can reach.
+const failedText = '{"name":"Error","message":"The call failed."}';
+const failedAnswer = envelopeOf("thrown", thrownData(["Error", "The call failed.", undefined, undefined]));
+const thrownAnswer = (error) => {
+  try {
+    return envelopeOf("thrown", thrownData(thrownOf(error)));
+  } catch {
+    return failedAnswer;
+  }
+};
+const thrownResponse = (error) => {
+  try {
+    return responseOf(thrownText(thrownOf(error)));
+  } catch {
+    try {
+      return responseOf(failedText);
+    } catch {
+      return undefined;
+    }
+  }
+};
 const answered = (method, self, args) =>
   (async () => {
     try {
@@ -296,21 +378,26 @@ const answered = (method, self, args) =>
   })();
 // A Response of the entrypoint's own, without the header a thrown error's
 // crosses under, so it never reads as one.
+// Read through Response's own getters (\`builtinsSource\`), never one a
+// subclass or an own property puts in their place.
 const ownResponse = (response) => {
-  if (typeof response !== "object" || response === null || !apply(isPrototypeOf, Response.prototype, [response])) {
+  if (typeof response !== "object" || response === null || !apply(isPrototypeOf, responsePrototype, [response])) {
     return response;
   }
-  const headers = get(response, "headers");
+  const headers = apply(responseHeaders, response, []);
   if (!apply(headersHas, headers, [thrownHeader])) {
     return response;
   }
   const copied = new Headers(headers);
   apply(headersDelete, copied, [thrownHeader]);
-  return new Response(get(response, "body"), {
-    status: get(response, "status"),
-    statusText: get(response, "statusText"),
-    headers: copied,
-  });
+  return new Response(
+    apply(responseBody, response, []),
+    recordOf([
+      "status", apply(responseStatus, response, []),
+      "statusText", apply(responseStatusText, response, []),
+      "headers", copied,
+    ])
+  );
 };
 const fetched = (method, self, args) =>
   (async () => {
@@ -414,18 +501,64 @@ const quietHandlers = (handlers) => {
   }
   return quiet;
 };
+// What an export is: an entrypoint class, a handler object, or neither.
+// A class is read by its own chain (\`prototypeOf\`), and by its own
+// \`prototype\` data property's: where they disagree, or a read throws (a
+// Proxy can trap either), it is ambiguous, and refused.
+const chainHas = (start, wanted) => {
+  let at = start;
+  for (let step = 0; step < 64 && at !== null; step += 1) {
+    at = prototypeOf(at);
+    if (at === wanted) {
+      return true;
+    }
+  }
+  return false;
+};
+const kindOf = (value) => {
+  if (value !== null && typeof value === "object") {
+    return "handlers";
+  }
+  if (typeof value !== "function") {
+    return "other";
+  }
+  try {
+    const byClass = chainHas(value, EntrypointClass);
+    const own = descriptorOf(value, "prototype");
+    // A data property's own \`value\`: an accessor has none of its own.
+    const prototype =
+      own !== undefined && descriptorOf(own, "value") !== undefined ? get(own, "value") : undefined;
+    const byPrototype =
+      prototype !== null && typeof prototype === "object" && (prototype === entrypointPrototype || chainHas(prototype, entrypointPrototype));
+    if (byClass !== byPrototype) {
+      return "refused";
+    }
+    // A function that isn't an entrypoint class isn't an entrypoint.
+    return byClass ? "class" : "refused";
+  } catch {
+    return "refused";
+  }
+};
+const refusedError = new TypeError("This entrypoint can't be called.");
+const refusedClass = class extends EntrypointClass {
+  constructor(ctx, env) {
+    try {
+      super(ctx, env);
+    } catch {
+      // Answered as refused all the same.
+    }
+    return standIn(refusedError);
+  }
+};
 const quietEntrypoint = (value) => {
-  if (
-    typeof value === "function" &&
-    typeof get(value, "prototype") === "object" &&
-    apply(isPrototypeOf, entrypointPrototype, [get(value, "prototype")])
-  ) {
+  const kind = kindOf(value);
+  if (kind === "class") {
     return quietClass(value);
   }
-  if (value !== null && typeof value === "object") {
+  if (kind === "handlers") {
     return quietHandlers(value);
   }
-  return value;
+  return kind === "refused" ? refusedClass : value;
 };
 ${
   entrypoint === "default"
@@ -468,7 +601,9 @@ const rebuilt = (thrown: unknown): Error => {
     const kept =
       key === "code"
         ? typeof value === "string" || typeof value === "number"
-        : typeof value === "object" && value !== null;
+        : typeof value === "object" &&
+          value !== null &&
+          (JSON.stringify(value)?.length ?? Infinity) <= maxThrownDetails;
     if (kept) {
       Object.defineProperty(error, key, {
         configurable: true,
@@ -504,7 +639,17 @@ const rethrownFetch = async (answer: unknown): Promise<unknown> => {
     response instanceof Response &&
     response.headers.get(thrownHeader) === "1"
   ) {
-    throw rebuilt(await response.json());
+    // The wrapper's own answer, bounded here too: never more than its
+    // parts may be, whatever reached this far.
+    const text = await response.text();
+    let thrown: unknown;
+    try {
+      thrown =
+        text.length <= maxThrownText ? JSON.parse(text) : { name: "Error" };
+    } catch {
+      thrown = { name: "Error" };
+    }
+    throw rebuilt(thrown);
   }
   return response;
 };

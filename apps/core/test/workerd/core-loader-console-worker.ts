@@ -207,6 +207,31 @@ const reviewIsolates: Readonly<Record<string, string>> = {
     return { "\\u0000grasp:answer": true, thrown: { name: "TypeError", message: "forged" } };
   }
 }`,
+  // Object.prototype given throwing accessors for every name a descriptor,
+  // a Response's init or JSON reads, then a throw: answering it reads none.
+  "/thrown-polluted": `for (const name of ["get", "set", "value", "writable", "enumerable", "configurable", "toJSON", "status", "statusText", "headers", "cf", "encodeBody", "then"]) {
+  const throwing = () => { throw new TypeError(${JSON.stringify(values.thrown)}); };
+  Object.defineProperty(Object.prototype, name, Object.assign(Object.create(null), { configurable: true, get: throwing, set: throwing }));
+}
+export class App extends WorkerEntrypoint {
+  run() {
+    throw new TypeError(${JSON.stringify(values.thrown)});
+  }
+}`,
+  // An entrypoint behind a Proxy that says its prototype is no
+  // entrypoint's (a function's \`prototype\` is writable, so a Proxy may):
+  // wrapped all the same.
+  "/thrown-proxied": `function Real(ctx, env) {
+  return Reflect.construct(WorkerEntrypoint, [ctx, env], Real);
+}
+Object.setPrototypeOf(Real, WorkerEntrypoint);
+Real.prototype = Object.create(WorkerEntrypoint.prototype);
+Real.prototype.run = function () {
+  throw new TypeError(${JSON.stringify(values.thrown)});
+};
+export const App = new Proxy(Real, {
+  get: (target, property) => (property === "prototype" ? {} : Reflect.get(target, property)),
+});`,
   // A thrown error with details, as an App error carries them.
   "/thrown-details": `export class App extends WorkerEntrypoint {
   run() {

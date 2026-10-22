@@ -195,10 +195,18 @@ const core :Workerd.Worker = (
       accessor: await run("/thrown-accessor"),
       hostile: await run("/answer-hostile"),
       details: await run("/thrown-details"),
+      polluted: await run("/thrown-polluted"),
+      proxied: await run("/thrown-proxied"),
     };
     // The same isolates loaded as they are: each way is read.
     const loud: Record<string, boolean> = {};
-    for (const route of ["getter", "constructor", "accessor", "details"]) {
+    for (const route of [
+      "getter",
+      "constructor",
+      "accessor",
+      "details",
+      "polluted",
+    ]) {
       // oxlint-disable-next-line no-await-in-loop -- one at a time, so each one's output is its own
       await run(`/loud/thrown-${route}`);
       // oxlint-disable-next-line no-await-in-loop -- as above
@@ -212,7 +220,13 @@ const core :Workerd.Worker = (
       loud,
       reported: served.logs().includes("record-value-c40b"),
     }).toStrictEqual({
-      loud: { getter: true, constructor: true, accessor: true, details: true },
+      loud: {
+        getter: true,
+        constructor: true,
+        accessor: true,
+        details: true,
+        polluted: true,
+      },
       getter: thrown,
       construction: thrown,
       accessor: thrown,
@@ -223,6 +237,8 @@ const core :Workerd.Worker = (
         },
       },
       details: { ...thrown, details: { retryAfterMs: 5 } },
+      polluted: thrown,
+      proxied: thrown,
       reported: false,
     });
   });
