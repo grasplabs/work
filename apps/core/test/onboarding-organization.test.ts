@@ -351,6 +351,28 @@ describe("the organization, for Grasp's staff", { timeout: 60_000 }, () => {
     });
   });
 
+  it("forgets a team's own moment once the team is no longer on the list", async () => {
+    const ids = await running(10, true);
+    const store = onboardingStore(env);
+    const { change } = await asStaff();
+    await change({ kind: "takesPart", team: ids.sales, takes: true });
+    const asked = await store.view();
+    const { roster } = asked;
+    // The company's admin shares a list without Sales.
+    await store.saveRoster(
+      {
+        teams: roster?.teams.filter(({ id }) => id !== ids.sales) ?? [],
+        people: roster?.people.filter(({ team }) => team !== ids.sales) ?? [],
+      },
+      { type: "system" }
+    );
+    const after = await store.view();
+    expect({
+      asked: Object.keys(asked.plan?.later ?? {}),
+      after: Object.keys(after.plan?.later ?? {}),
+    }).toStrictEqual({ asked: [ids.sales], after: [] });
+  });
+
   it("puts the list right: a team added and renamed, a lead picked, someone added, away and taken off", async () => {
     const ids = await running(1);
     const { staff, change } = await asStaff();

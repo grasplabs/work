@@ -604,7 +604,7 @@ export class Onboarding extends DurableObject<Env> {
   async saveRoster(roster: Roster, by: AuditActor): Promise<OnboardingView> {
     const fresh = await this.#freshCodes(roster);
     this.ctx.storage.transactionSync(() => {
-      const { removed } = this.#writeRoster(roster, fresh);
+      const { removed } = this.#writeRoster(roster, fresh, { late: false });
       this.#changed(by, "onboarding.roster.saved", {
         teams: roster.teams.length,
         people: roster.people.length,
@@ -640,14 +640,17 @@ export class Onboarding extends DurableObject<Env> {
 
   /**
    * Writes who works where, in the caller's transaction. Whoever left the
-   * list keeps nothing; a team that takes part only now, once the team is
-   * told and its moment has passed, starts now, its lead first (`#lateTeams`);
+   * list keeps nothing; with `late`, as staff put the list right, a team
+   * that takes part only now, once the team is told and its moment has
+   * passed, starts now, its lead first (`#lateTeams`). The company's admin
+   * replaces the whole list, so for them no team is new that way;
    * whoever moved, or is new, in a team with a map is asked about its work
    * (`#askNewcomers`). Returns how many left.
    */
   #writeRoster(
     roster: Roster,
     fresh: readonly { person: string; linkId: string; mark: string }[],
+    { late }: { late: boolean },
     now: string = new Date().toISOString()
   ): { removed: number } {
     const kept = new Set(roster.people.map((person) => person.id));
@@ -720,7 +723,7 @@ export class Onboarding extends DurableObject<Env> {
         .run();
       dropMailAbout(this.ctx.storage.sql, person);
     }
-    this.#lateTeams(before, roster, now);
+    this.#lateTeams(late ? before : roster, roster, now);
     this.#askNewcomers(before, roster);
     return { removed: gone.length };
   }
@@ -729,7 +732,8 @@ export class Onboarding extends DurableObject<Env> {
    * A team that takes part only now (added, or asked in again) once the
    * team is told and its moment has passed starts now, as a team of its
    * own in the plan: its lead's link goes out first, and everyone else's
-   * waits for the lead, `leadWaitWorkingDays` at most from today.
+   * waits for the lead, `leadWaitWorkingDays` at most from today. A team
+   * no longer on the list leaves the plan's moments with it.
    */
   #lateTeams(before: Roster | null, roster: Roster, now: string): void {
     const [row] = this.#db
@@ -738,28 +742,35 @@ export class Onboarding extends DurableObject<Env> {
       .where(eq(onboarding.id, 1))
       .all();
     const { plan } = this.#row();
-    if (plan === null || (row?.toldAt ?? null) === null) {
+    if (plan === null) {
       return;
     }
+    // A team no longer on the list has no moment of its own any more.
+    const listed = new Set(roster.teams.map(({ id }) => id));
+    const later = Object.fromEntries(
+      Object.entries(plan.later ?? {}).filter(([team]) => listed.has(team))
+    );
     const took = new Set(
       (before?.teams ?? []).filter(({ off }) => !off).map(({ id }) => id)
     );
-    const late = roster.teams.filter(({ id, off }) => {
+    const told = (row?.toldAt ?? null) !== null;
+    for (const { id, off } of roster.teams) {
       const from = sendsFrom(plan, id);
-      return !off && !took.has(id) && from !== null && from <= now;
-    });
-    if (late.length === 0) {
-      return;
+      if (told && !off && !took.has(id) && from !== null && from <= now) {
+        later[id] = now;
+      }
     }
-    const later = { ...plan.later };
-    for (const { id } of late) {
-      later[id] = now;
+    const kept = Object.keys(plan.later ?? {});
+    const same =
+      kept.length === Object.keys(later).length &&
+      kept.every((team) => later[team] === plan.later?.[team]);
+    if (!same) {
+      this.#db
+        .update(onboarding)
+        .set({ plan: JSON.stringify({ ...plan, later }) })
+        .where(eq(onboarding.id, 1))
+        .run();
     }
-    this.#db
-      .update(onboarding)
-      .set({ plan: JSON.stringify({ ...plan, later }) })
-      .where(eq(onboarding.id, 1))
-      .run();
   }
 
   /**
@@ -1397,7 +1408,7 @@ export class Onboarding extends DurableObject<Env> {
       if (typeof after === "string" || before === null) {
         return typeof after === "string" ? after : "onboarding.no_roster";
       }
-      this.#writeRoster(after, fresh);
+      this.#writeRoster(after, fresh, { late: true });
       const { action, detail, about } = listChangeOf(change, before, id);
       this.#changed(by, action, detail, about);
       return null;
