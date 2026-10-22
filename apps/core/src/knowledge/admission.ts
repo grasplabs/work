@@ -47,25 +47,96 @@ const special = /[.*+?^${}()|[\]\\]/gu;
 /** A gap between a term's words, however it's written. */
 const wordGap = /[\s-]+/u;
 
+/** A gap between two of a term's words, however long, in the text. */
+const gapSource = String.raw`\s+`;
+
+/** A node of a prefix trie over terms' characters and the gaps between words. */
+interface TermNode {
+  /** What may come next: an escaped character, or `gapSource`. */
+  next: Map<string, TermNode>;
+  /** Whether a term ends here. */
+  end: boolean;
+  /** Whether a stem ends here: any letters may follow. */
+  stem: boolean;
+}
+
+const termNode = (): TermNode => ({ next: new Map(), end: false, stem: false });
+
+/**
+ * The trie below `node` as a regular expression. A run of nodes with one
+ * way on is written out in a loop, so it nests a group only where terms
+ * part, at most as deep as the longest term.
+ */
+const trieSource = (node: TermNode): string => {
+  let prefix = "";
+  let at = node;
+  while (at.next.size === 1 && !at.end && !at.stem) {
+    const [token, child] = at.next.entries().next().value ?? [];
+    if (token === undefined || child === undefined) {
+      break;
+    }
+    prefix += token;
+    at = child;
+  }
+  const alternatives = [...at.next].map(
+    ([token, child]) => `${token}${trieSource(child)}`
+  );
+  if (at.stem) {
+    alternatives.push(String.raw`\p{L}*`);
+  } else if (at.end) {
+    alternatives.push("");
+  }
+  return alternatives.length === 1
+    ? `${prefix}${alternatives[0]}`
+    : `${prefix}(?:${alternatives.join("|")})`;
+};
+
 /**
  * Matches any of `terms` as whole words (admission-topics.ts's syntax).
  * Each gap between a term's words, however many spaces or hyphens it was
  * written with, becomes exactly one `\s+`: two in a row could split a
  * run of whitespace between them in every way, and text anyone may save
  * would make that take polynomial time.
+ *
+ * The terms are compiled into a prefix trie, not a flat alternation: a
+ * flat one is tried term by term at every word's start, so terms sharing
+ * a long prefix ("a a … a z1", "a a … a z2") cost their total length per
+ * character of text. The trie reads a shared prefix once, so the work at
+ * each word's start is bounded by the longest term and the ways terms
+ * part along it. Which texts match, and where the first match starts,
+ * are the same as a flat alternation's.
  */
 export const termsPattern = (terms: readonly string[]): RegExp => {
-  const alternatives = terms.map((term) => {
+  const root = termNode();
+  for (const term of terms) {
     const stem = term.endsWith("*");
-    const body = (stem ? term.slice(0, -1) : term)
+    const words = (stem ? term.slice(0, -1) : term)
       .split(wordGap)
-      .filter((word) => word !== "")
-      .map((word) => word.replaceAll(special, String.raw`\$&`))
-      .join(String.raw`\s+`);
-    return stem ? String.raw`${body}\p{L}*` : body;
-  });
+      .filter((word) => word !== "");
+    let node = root;
+    for (const [index, word] of words.entries()) {
+      const tokens = index > 0 ? [gapSource] : [];
+      // By code point, as the `u` flag reads the pattern.
+      for (const character of word) {
+        tokens.push(character.replaceAll(special, String.raw`\$&`));
+      }
+      for (const token of tokens) {
+        let child = node.next.get(token);
+        if (child === undefined) {
+          child = termNode();
+          node.next.set(token, child);
+        }
+        node = child;
+      }
+    }
+    if (stem) {
+      node.stem = true;
+    } else {
+      node.end = true;
+    }
+  }
   return new RegExp(
-    String.raw`(?<![\p{L}\p{N}])(?:${alternatives.join("|")})(?![\p{L}\p{N}])`,
+    String.raw`(?<![\p{L}\p{N}])(?:${trieSource(root)})(?![\p{L}\p{N}])`,
     "u"
   );
 };
@@ -662,29 +733,44 @@ export const applying = <
 const termsSchema = z.array(z.string().min(1));
 
 /**
- * Most detectors kept per isolate: more than a policy can apply at once
- * (`policyMaxRows`), so a write rarely compiles one again.
+ * Most company detectors kept per isolate: one per set of company
+ * revisions applied, which changes only when an admin saves a topic.
  */
-const companyPatternsKept = 2 * policyMaxRows;
+const companyPatternsKept = 16;
 
 /**
- * Company topics' detectors, by `id@revision` (revisions never change),
- * the least recently used first.
+ * Company detectors, by the revisions they cover (`id@revision`, sorted:
+ * revisions never change), the least recently used first.
  */
 const companyPatterns = new Map<string, RegExp | null>();
 
-/** A company revision's detector; `null` if it lists no valid terms. */
-const companyPattern = (row: Revision): RegExp | null => {
-  const key = `${row.id}@${row.revision}`;
+/**
+ * One detector for all of `rows`, company revisions: their terms in one
+ * trie (`termsPattern`), so a write's check reads text once however many
+ * topics there are; `null` if one lists no valid terms.
+ */
+const companyPattern = (rows: readonly Revision[]): RegExp | null => {
+  const key = rows
+    .map((row) => `${row.id}@${row.revision}`)
+    .toSorted()
+    .join("\n");
   const cached = companyPatterns.get(key);
   if (cached !== undefined) {
     companyPatterns.delete(key);
     companyPatterns.set(key, cached);
     return cached;
   }
-  const parsed = termsSchema.safeParse(JSON.parse(row.terms));
-  const pattern =
-    parsed.success && parsed.data.length > 0 ? termsPattern(parsed.data) : null;
+  const terms: string[] = [];
+  let valid = true;
+  for (const row of rows) {
+    const parsed = termsSchema.safeParse(JSON.parse(row.terms));
+    if (parsed.success && parsed.data.length > 0) {
+      terms.push(...parsed.data);
+    } else {
+      valid = false;
+    }
+  }
+  const pattern = valid ? termsPattern(terms) : null;
   companyPatterns.set(key, pattern);
   for (const [oldest] of companyPatterns) {
     if (companyPatterns.size <= companyPatternsKept) {
@@ -714,17 +800,21 @@ const policyFrom = async (env: Env, now: Date): Promise<Policy> => {
   let unenforced =
     rows.length > policyMaxRows ||
     rows.some((row) => Number.isNaN(row.effectiveAt.getTime()));
+  const companyRows: TopicRow[] = [];
   for (const row of applied) {
     if (row.owner === "platform") {
       // Its own detector, or none this code knows: a newer revision.
       unenforced ||= enforced.get(row.id) !== row.revision;
     } else if (!row.retired) {
-      const pattern = companyPattern(row);
-      if (pattern === null) {
-        unenforced = true;
-      } else {
-        company.push(pattern);
-      }
+      companyRows.push(row);
+    }
+  }
+  if (companyRows.length > 0) {
+    const pattern = companyPattern(companyRows);
+    if (pattern === null) {
+      unenforced = true;
+    } else {
+      company.push(pattern);
     }
   }
   const revisions = new Set([

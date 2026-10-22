@@ -50,6 +50,13 @@ const lettersOf = (word: string): number =>
   word.replaceAll(notLetter, "").length;
 
 /**
+ * Most characters in one term, as written and as admission matches it
+ * (accents and ligatures taken apart may lengthen it): the work admission
+ * does at each word of a text is bounded by the longest term.
+ */
+export const topicTermMaxLength = 100;
+
+/**
  * A word or phrase a company topic is detected by, matched as whole words,
  * whatever their case or accents; a trailing `*` matches any ending
  * ("reorgani*": "reorganisation", "reorganization") of a stem of at least
@@ -62,7 +69,7 @@ export const topicTermSchema = z
   .string()
   .trim()
   .min(2)
-  .max(100)
+  .max(topicTermMaxLength)
   .regex(/^[\p{L}\p{N}][\p{L}\p{N}' .-]*\*?$/u)
   .transform((term) => {
     const stem = term.endsWith("*");
@@ -82,6 +89,16 @@ export const topicTermSchema = z
 
 /** Most terms one company topic lists. */
 export const topicMaxTerms = 200;
+
+/** Most characters in one company topic's terms, as admission matches them. */
+export const topicMaxTermChars = 5000;
+
+/**
+ * Most characters in the terms of all the company's topics a write is
+ * checked against: those in use and those still to take effect. Admission
+ * compiles them into one detector per set of revisions.
+ */
+export const companyMaxTermChars = 100_000;
 
 /** Most company topics in use at once: the gate reads them all per write. */
 export const topicMaxActive = 100;
@@ -158,5 +175,5 @@ export const admissionErrors = defineErrorFamily({
     "This topic changed since you opened it. Load it again and apply your change to it.",
   "admission.retired": "This topic is retired already.",
   "admission.limit":
-    "There are as many topics, or changes still to take effect, as Grasp allows. Retire a topic, or wait for a change to take effect.",
+    "There are as many topics, terms, or changes still to take effect as Grasp allows. Retire a topic, or wait for a change to take effect.",
 });

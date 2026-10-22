@@ -1,11 +1,14 @@
 import {
   admissionErrors,
+  companyMaxTermChars,
   topicExampleSchema,
   topicInputSchema,
   topicLeadMs,
   topicMaxActive,
   topicMaxPending,
+  topicMaxTermChars,
   topicRetireSchema,
+  topicTermMaxLength,
 } from "@grasp-os/shared/admission";
 import type {
   AdmissionTopic,
@@ -135,20 +138,33 @@ const matchedAs = (term: string): string => {
   return stem ? `${words}*` : words;
 };
 
+/** A term's characters, as SQLite's `length` counts them: code points. */
+const charsOf = (term: string): number => {
+  let chars = 0;
+  for (const _ of term) {
+    chars += 1;
+  }
+  return chars;
+};
+
 /**
  * Refuses a revision past the limits on what the gate reads per write:
- * a new topic past `topicMaxActive` in use, and any revision past
- * `topicMaxPending` still to take effect. A retirement is never refused:
- * it ends a topic. Two saves at once may both pass;
- * the gate reads well over the limits, and holds every write past that.
+ * a new topic past `topicMaxActive` in use, any revision past
+ * `topicMaxPending` still to take effect, and terms (`chars` of them)
+ * past `companyMaxTermChars` across the topics in use and to come. A
+ * topic's revision in effect counts until its next one is, as the gate
+ * checks writes against both. A retirement is never refused: it ends a
+ * topic. Two saves at once may both pass; the gate reads well over the
+ * limits, and holds every write past that.
  */
 const requireRoom = async (
   env: Env,
   now: Date,
-  creating: boolean
+  creating: boolean,
+  chars: number
 ): Promise<void> => {
   const at = now.getTime();
-  const [active, pending] = await env.DB.batch<{ count: number }>([
+  const [active, pending, terms] = await env.DB.batch<{ count: number }>([
     env.DB.prepare(
       `SELECT count(*) AS count FROM admission_topics t
        WHERE t.owner = 'company' AND t.retired = 0
@@ -157,10 +173,17 @@ const requireRoom = async (
     env.DB.prepare(
       "SELECT count(*) AS count FROM admission_topics WHERE owner = 'company' AND effective_at > ?"
     ).bind(at),
+    env.DB.prepare(
+      `SELECT coalesce(sum(length(j.value)), 0) AS count
+       FROM admission_topics t, json_each(t.terms) j
+       WHERE t.owner = 'company' AND t.retired = 0
+         AND (t.effective_at > ? OR t.revision = (SELECT max(r.revision) FROM admission_topics r WHERE r.id = t.id AND r.effective_at <= ?))`
+    ).bind(at, at),
   ]);
   const full =
     (creating && (active?.results[0]?.count ?? 0) >= topicMaxActive) ||
-    (pending?.results[0]?.count ?? 0) >= topicMaxPending;
+    (pending?.results[0]?.count ?? 0) >= topicMaxPending ||
+    (terms?.results[0]?.count ?? 0) + chars > companyMaxTermChars;
   if (full) {
     throw admissionErrors.create("admission.limit");
   }
@@ -263,9 +286,18 @@ export const saveTopic = async (
       throw admissionErrors.create("admission.retired");
     }
   }
-  const now = new Date();
-  await requireRoom(env, now, parsed.id === undefined);
   const terms = [...new Set(parsed.terms.map((term) => matchedAs(term)))];
+  // Measured as matched: taking accents and ligatures apart may lengthen
+  // a term past what its input schema allowed.
+  const chars = terms.reduce((sum, term) => sum + charsOf(term), 0);
+  if (
+    chars > topicMaxTermChars ||
+    terms.some((term) => charsOf(term) > topicTermMaxLength)
+  ) {
+    throw admissionErrors.create("admission.invalid");
+  }
+  const now = new Date();
+  await requireRoom(env, now, parsed.id === undefined, chars);
   return await writeRevision(
     env,
     person,

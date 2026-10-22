@@ -1,8 +1,11 @@
 import {
   admissionErrors,
+  companyMaxTermChars,
   topicLeadMs,
   topicMaxActive,
   topicMaxPending,
+  topicMaxTermChars,
+  topicMaxTerms,
   topicTermSchema,
 } from "@grasp-os/shared/admission";
 import type { TopicInput } from "@grasp-os/shared/admission";
@@ -11,6 +14,12 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { saveTopic } from "../src/knowledge/admission-records.ts";
 import {
+  personColumns,
+  personReferences,
+  platformTopics,
+} from "../src/knowledge/admission-topics.ts";
+import {
+  normalized,
   policyMaxRows,
   screen,
   termsPattern,
@@ -518,5 +527,277 @@ describe("company topics", { timeout: 60_000 }, () => {
         .bind(`${filler}-%`)
         .run();
     }
+  });
+
+  it("check a write against the company's topics in time linear in the text, however their terms share prefixes", async () => {
+    const admin = await personWithCollection();
+    const words = 45;
+    /** `count` terms sharing all but their last word: `a a … a z<i>`. */
+    const crafted = (prefix: string, count = topicMaxTerms) =>
+      Array.from(
+        { length: count },
+        (_, index) => `${"a ".repeat(words - 1)}${prefix}${index}`
+      );
+    // As many as fit in the characters a topic's terms may have.
+    const fitting = Math.floor(
+      topicMaxTermChars / (crafted("z").at(-1)?.length ?? topicMaxTermChars)
+    );
+    await Promise.all(
+      ["z", "y"].map(
+        async (prefix) =>
+          await admin.api.admission.saveTopic({
+            ...topicWith(codeName()),
+            terms: crafted(prefix, fitting),
+          })
+      )
+    );
+    const text = "a ".repeat(15_000);
+    // Topics' terms as the gate compiles them, together, and a topic's own.
+    const detectors = [
+      termsPattern([...crafted("z"), ...crafted("y")]),
+      termsPattern(crafted("z")),
+    ];
+    const started = performance.now();
+    const matches = detectors.map((detector) => screen(text, [detector]));
+    const screening = performance.now() - started;
+    const save = async (path: string, saved: string) =>
+      await outcome(
+        admin.api.knowledge.saveDocument({
+          collectionId: admin.collectionId,
+          path,
+          text: saved,
+          ifVersion: 0,
+        })
+      );
+
+    expect({
+      matches,
+      caught: detectors.map((detector) => screen(`${text}a y7.`, [detector])),
+      saved: await save("crafted.md", text),
+      excluded: await save("ending.md", `${text}a z${fitting - 1}.`),
+      // A few milliseconds; terms tried one by one, about 10 s a topic.
+      linear: screening < 500,
+    }).toStrictEqual({
+      matches: ["admitted", "admitted"],
+      caught: ["excluded", "admitted"],
+      saved: "ok",
+      excluded: "knowledge.excluded",
+      linear: true,
+    });
+  });
+
+  it("limit the characters of terms a topic lists, and those a write's check reads", async () => {
+    const admin = await personWithCollection();
+    const saved = await admin.api.admission.saveTopic(topicWith(codeName()));
+    const word = codeName();
+    /** `count` distinct terms of about `length` characters each. */
+    const termsOf = (count: number, length: number) =>
+      Array.from({ length: count }, (_, index) =>
+        `${word}${index}`.padEnd(length, "x")
+      );
+    const perTerm = Math.ceil(topicMaxTermChars / topicMaxTerms) + 1;
+    const perTopic = {
+      within: await outcome(
+        admin.api.admission.saveTopic({
+          ...topicWith(codeName()),
+          terms: termsOf(topicMaxTerms, perTerm - 2),
+        })
+      ),
+      past: await outcome(
+        admin.api.admission.saveTopic({
+          ...topicWith(codeName()),
+          terms: termsOf(topicMaxTerms, perTerm),
+        })
+      ),
+      // Six characters as written; each is 18 letters as matched.
+      lengthened: await outcome(
+        admin.api.admission.saveTopic({
+          ...topicWith(codeName()),
+          terms: ["\u{FDFA}".repeat(6)],
+        })
+      ),
+    };
+    const filler = `company-filler-${unique()}`;
+    const termLength = 100;
+    try {
+      // Topics in use whose terms take up all the room there is.
+      await env.DB.prepare(
+        `INSERT INTO admission_topics (id, revision, name, coverage, examples, owner, effective_at, created_at, terms)
+         VALUES (?, 1, 'Filler', 'Filler', '[]', 'company', ?, ?, ?)`
+      )
+        .bind(
+          `${filler}-1`,
+          Date.now() - 1000,
+          Date.now(),
+          JSON.stringify(termsOf(companyMaxTermChars / termLength, termLength))
+        )
+        .run();
+      const full = {
+        create: await outcome(
+          admin.api.admission.saveTopic(topicWith(codeName()))
+        ),
+        revise: await outcome(
+          admin.api.admission.saveTopic({
+            ...topicWith(codeName()),
+            id: saved.id,
+            ifRevision: 1,
+          })
+        ),
+        retire: await outcome(
+          admin.api.admission.retireTopic({ id: saved.id, ifRevision: 1 })
+        ),
+      };
+
+      expect({ perTopic, full }).toStrictEqual({
+        perTopic: {
+          within: "ok",
+          past: "admission.invalid",
+          lengthened: "admission.invalid",
+        },
+        full: {
+          create: "admission.limit",
+          revise: "admission.limit",
+          retire: "ok",
+        },
+      });
+    } finally {
+      await env.DB.prepare("DELETE FROM admission_topics WHERE id LIKE ?")
+        .bind(`${filler}-%`)
+        .run();
+    }
+  });
+});
+
+const special = /[.*+?^${}()|[\]\\]/gu;
+const termGap = /[\s-]+/u;
+const stemMark = /\*$/u;
+
+/**
+ * Terms as one flat alternation, each tried in turn: the detector the
+ * trie replaced, kept as the reference its matches must equal.
+ */
+const flatPattern = (terms: readonly string[]): RegExp => {
+  const alternatives = terms.map((term) => {
+    const stem = term.endsWith("*");
+    const body = (stem ? term.slice(0, -1) : term)
+      .split(termGap)
+      .filter((word) => word !== "")
+      .map((word) => word.replaceAll(special, String.raw`\$&`))
+      .join(String.raw`\s+`);
+    return stem ? String.raw`${body}\p{L}*` : body;
+  });
+  return new RegExp(
+    String.raw`(?<![\p{L}\p{N}])(?:${alternatives.join("|")})(?![\p{L}\p{N}])`,
+    "u"
+  );
+};
+
+/** A small seeded generator, so a failing text can be found again. */
+const seeded = (seed: number) => {
+  let state = seed;
+  return (below: number): number => {
+    state = (state * 1_103_515_245 + 12_345) % 2_147_483_648;
+    return state % below;
+  };
+};
+
+describe("company terms' detector", () => {
+  it("matches what a flat alternation of the terms matches, where it does", () => {
+    const termSets: Record<string, readonly string[]> = {
+      crafted: [
+        "pay",
+        "pay cut",
+        "pay cuts",
+        "payroll",
+        "pay*",
+        "payr*",
+        "reorgani*",
+        "covid 19",
+        "o'brien",
+        "a.b",
+        "a.b c",
+        "sick",
+        "sick*",
+        "sick leave",
+        "sick leave*",
+        "ab cd ef",
+        "ab cd*",
+        "ab",
+        "x",
+        "café",
+        "a a a b",
+        "a a b",
+        "a a a a c1",
+        "a a a a c2",
+      ],
+      platform: [
+        ...new Set(
+          platformTopics.flatMap(({ rules }) => [
+            ...rules.strong,
+            ...rules.weak,
+          ])
+        ),
+      ],
+      people: [...personReferences, ...personColumns],
+    };
+    const vocabulary = [
+      ...new Set(
+        Object.values(termSets).flatMap((terms) =>
+          terms.flatMap((term) => term.replace(stemMark, "").split(termGap))
+        )
+      ),
+      "payrolls",
+      "paycheck",
+      "reorganisation",
+      "reorganization2",
+      "sickness",
+      "o'briens",
+      "a.b.c",
+      "19",
+      "cafe",
+      "ABC",
+      "€5",
+      "",
+    ];
+    const separators = [
+      " ",
+      "  ",
+      "\n",
+      "\t",
+      "-",
+      " - ",
+      ".",
+      ",",
+      "'",
+      "_",
+      "/",
+    ];
+    const random = seeded(1019);
+    const pick = (items: readonly string[]): string =>
+      items[random(items.length)] ?? "";
+    const texts = Array.from({ length: 1500 }, () => {
+      let text = pick(vocabulary);
+      for (let words = random(12); words > 0; words -= 1) {
+        text += `${pick(separators)}${pick(vocabulary)}`;
+      }
+      return text;
+    });
+    const differences = Object.entries(termSets).flatMap(([name, terms]) => {
+      const trie = termsPattern(terms);
+      const flat = flatPattern(terms);
+      return texts
+        .flatMap((text) => [text, normalized(text)])
+        .filter((text) => trie.exec(text)?.index !== flat.exec(text)?.index)
+        .map((text) => `${name}: ${JSON.stringify(text)}`);
+    });
+    const matched = texts.filter((text) =>
+      termsPattern(termSets.crafted ?? []).test(normalized(text))
+    ).length;
+
+    expect({
+      differences,
+      // The corpus matches often, and not always.
+      varied: matched > texts.length / 10 && matched < texts.length,
+    }).toStrictEqual({ differences: [], varied: true });
   });
 });
