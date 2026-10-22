@@ -26,6 +26,7 @@ import { sweepGraceMs } from "../src/workflows/run-files.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import {
+  openRpc,
   outcome,
   routed,
   signedIn,
@@ -359,6 +360,9 @@ describe(
       );
       const staff = await signedIn(idp, "grasp-staff", staffPerson());
       const adaListed = await ada.api.workflowResources.runFiles(id, run);
+      const { core: staffCore } = await openRpc(staff);
+      const staffApi = staffCore.authenticate();
+      const staffListed = await staffApi.workflowResources.runFiles(id, run);
 
       expect({
         // A user of the workflow, not the run's person: the run isn't theirs.
@@ -387,6 +391,8 @@ describe(
             id,
             restricted.run
           ),
+          // Staff see the run, never its files.
+          staff: staffListed,
         },
       }).toStrictEqual({
         user: 404,
@@ -403,6 +409,7 @@ describe(
           carol: null,
           bob: "workflow.run_unavailable",
           restrictedAdmin: null,
+          staff: null,
         },
       });
     });

@@ -113,7 +113,7 @@ const mayDownload = async (
   workflowId: unknown,
   runId: unknown
 ): Promise<{ workflow: string; run: string; may: boolean } | undefined> => {
-  if (by.staff || typeof runId !== "string") {
+  if (typeof runId !== "string") {
     return undefined;
   }
   let workflow: string;
@@ -138,7 +138,8 @@ const mayDownload = async (
   if (!own && !builder) {
     return undefined;
   }
-  const allowed = own || (isAdmin(by.role) && !row.restricted);
+  // Grasp staff never, whatever they may see of the run.
+  const allowed = !by.staff && (own || (isAdmin(by.role) && !row.restricted));
   return {
     workflow,
     run: runId,
