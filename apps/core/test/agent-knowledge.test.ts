@@ -3,10 +3,11 @@ import type { ChatMessage } from "@grasp-os/shared/chat";
 import { workspaceIdSchema } from "@grasp-os/shared/ids";
 import { knowledgeErrors } from "@grasp-os/shared/knowledge";
 import type { CollectionInput } from "@grasp-os/shared/knowledge";
-import { evictDurableObject } from "cloudflare:test";
+import { evictDurableObject, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
+import { withheldResponse, withheldResult } from "../src/agent.ts";
 import { refreshDailySignals } from "../src/daily-signals.ts";
 import { workspace } from "../src/durable-objects.ts";
 import {
@@ -24,7 +25,13 @@ import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { collectionWithNote, newTeam, readCollection } from "./knowledge.ts";
-import { outcome, signedInApi, signedInWithRole, unique } from "./sign-in.ts";
+import {
+  callAuth,
+  outcome,
+  signedInApi,
+  signedInWithRole,
+  unique,
+} from "./sign-in.ts";
 
 // `env.knowledge` in a chat's code: the chat's agent reading Knowledge for
 // its person. These tests start from the ways it can fail: the agent reads
@@ -99,6 +106,10 @@ const overdueIn = async (
 
 const modelCalls = (events: AuditEvent[]) =>
   events.filter(({ action }) => action === "model.call");
+
+/** Code that returns the text of the document `documentId`. */
+const readCode = (documentId: string) =>
+  `export default async (self, env) => (await env.knowledge.read(${JSON.stringify(documentId)})).text;`;
 
 const leave = "# Parental leave\n\nParental leave lasts sixteen weeks.";
 
@@ -584,6 +595,209 @@ describe("a chat's Knowledge", setUpTime, () => {
     });
   });
 
+  it("withholds what an earlier turn read from every later request once its agent may no longer read it, and audits it once", async () => {
+    const admin = await newAdmin();
+    const person = await newPerson();
+    const secret = `CANARY-${unique()}`;
+    const kept = `KEPT-${unique()}`;
+    const [plans, handbook] = await Promise.all(
+      [
+        { name: "Plans", text: `# Route plan\n\nDeparts ${secret}.` },
+        { name: "Handbook", text: `# Leave\n\nLeave lasts ${kept}.` },
+      ].map(async ({ name, text }) => {
+        const { id: collectionId } = await admin.knowledge.createCollection({
+          name: `${name} ${unique()}`,
+          access: "everyone",
+        });
+        const { id: documentId } = await admin.knowledge.saveDocument({
+          collectionId,
+          path: "doc.md",
+          text,
+          ifVersion: 0,
+        });
+        return { collectionId, documentId };
+      })
+    );
+    const { stub, chat, gateway, ask, agent } = await chatOf(
+      person.userId,
+      codeStep(readCode(handbook?.documentId ?? "")),
+      says(`Leave lasts ${kept}.`),
+      codeStep(readCode(plans?.documentId ?? "")),
+      // What the model says after the read repeats it.
+      codeStep(`export default async () => ${JSON.stringify(secret)};`),
+      says(`It departs ${secret}.`),
+      says("I can't read that any more."),
+      says("Still not."),
+      says(`It departs ${secret}.`)
+    );
+    const grant = async (collectionId: string) =>
+      await requestGranted(
+        idp,
+        admin,
+        readCollection(agent, collectionId, `C${unique()}`.toUpperCase())
+      );
+    await grant(handbook?.collectionId ?? "");
+    const plansGrant = await grant(plans?.collectionId ?? "");
+
+    await ask("How long is leave?");
+    await ask("When does the route plan depart?");
+    const beforeRevoke = gateway.requests.length;
+    await admin.api.permissions.revoke(plansGrant);
+    await ask("And now?");
+    await ask("And now?");
+    const afterRevoke = gateway.requests.slice(beforeRevoke - 1);
+
+    // Sent while it could be read; never once it can't. The other
+    // turn's read, still readable, goes on as it was.
+    const sent = afterRevoke.map(({ body }) => JSON.stringify(body));
+    expect(
+      sent.map((body) => ({
+        secret: body.includes(secret),
+        kept: body.includes(kept),
+        result: body.includes(withheldResult),
+        response: body.includes(withheldResponse),
+      }))
+    ).toStrictEqual([
+      // The last request before the revocation.
+      { secret: true, kept: true, result: false, response: false },
+      { secret: false, kept: true, result: true, response: true },
+      { secret: false, kept: true, result: true, response: true },
+    ]);
+    // The transcript keeps it: the person still sees what was said.
+    await expect(codeResults(stub, chat.id)).resolves.toContainEqual({
+      isError: false,
+      text: `Returned:\n# Route plan\n\nDeparts ${secret}.`,
+    });
+
+    // Granted again, it may be sent again.
+    await grant(plans?.collectionId ?? "");
+    await ask("And now?");
+    expect(JSON.stringify(gateway.requests.at(-1)?.body)).toContain(secret);
+
+    // Audited once, by the agent for its person: the run and the source,
+    // never what it read.
+    const events = await eventsOf(agent.agentId, (all) =>
+      all.some(({ action }) => action === "chat.history_withheld")
+    );
+    const withheld = events.filter(
+      ({ action }) => action === "chat.history_withheld"
+    );
+    expect(
+      withheld.map((event) => ({
+        target: event.target,
+        source: event.detail.source,
+        run: typeof event.detail.run,
+        holdsSecret: JSON.stringify(event).includes(secret),
+      }))
+    ).toStrictEqual([
+      {
+        target: { type: "chat", id: chat.id },
+        source: plans?.collectionId,
+        run: "string",
+        holdsSecret: false,
+      },
+    ]);
+  });
+
+  it("stops a turn under way once something it read can't be read any more, before its next request", async () => {
+    const admin = await newAdmin();
+    const person = await newPerson();
+    const teamId = await newTeam(admin, [person]);
+    const secret = `CANARY-${unique()}`;
+    const { id: collectionId } = await admin.knowledge.createCollection({
+      name: `Plans ${unique()}`,
+      access: "teams",
+      teams: [teamId],
+    });
+    const { id: documentId } = await admin.knowledge.saveDocument({
+      collectionId,
+      path: "plan.md",
+      text: `# Route plan\n\nDeparts ${secret}.`,
+      ifVersion: 0,
+    });
+    // Reads the plan, then reads it again until it can't: the person left
+    // the team meanwhile. Leaving a team revokes no permission, so the run
+    // ends as it ran.
+    const { stub, gateway, ask, agent } = await chatOf(
+      person.userId,
+      codeStep(
+        `export default async (self, env) => {
+          const id = ${JSON.stringify(documentId)};
+          const first = (await env.knowledge.read(id)).text;
+          for (let tries = 0; tries < 100; tries += 1) {
+            try { await env.knowledge.read(id); } catch { return first; }
+            await new Promise((done) => setTimeout(done, 50));
+          }
+          return first;
+        };`
+      ),
+      says(`It departs ${secret}.`)
+    );
+    await requestGranted(
+      idp,
+      admin,
+      readCollection(agent, collectionId, `C${unique()}`.toUpperCase())
+    );
+    const recorded = async () =>
+      await runInDurableObject(
+        stub,
+        (_, state) =>
+          state.storage.sql
+            .exec("SELECT count(*) AS n FROM chat_run_sources")
+            .one().n
+      );
+
+    const asked = outcome(ask("When does the route plan depart?"));
+    await vi.waitFor(
+      async () => {
+        await expect(recorded()).resolves.toBe(1);
+      },
+      { timeout: 10_000, interval: 50 }
+    );
+    await callAuth("/organization/remove-team-member", admin.session, {
+      teamId,
+      userId: person.userId,
+    });
+
+    // The provider takes the turn's latest response whole, so nothing of
+    // it can be withheld: the turn stops, and nothing more is sent.
+    await expect(asked).resolves.toBe("agent.history_revoked");
+    expect(gateway.requests).toHaveLength(1);
+  });
+
+  it("sends only the latest of its memory and skills: a skill it can no longer read never reaches the model again", async () => {
+    const admin = await newAdmin();
+    const person = await newPerson();
+    const marker = `SKILL-${unique()}`;
+    const { id: collectionId } = await admin.knowledge.createCollection({
+      name: `Playbooks ${unique()}`,
+      access: "everyone",
+    });
+    await admin.knowledge.saveDocument({
+      collectionId,
+      path: "route-check/SKILL.md",
+      text: `---\nname: route-check\ndescription: Check routes with ${marker}.\n---\n# Route check`,
+      ifVersion: 0,
+    });
+    const { gateway, ask, agent } = await chatOf(
+      person.userId,
+      says("Noted."),
+      says("Noted again.")
+    );
+    const grant = await requestGranted(
+      idp,
+      admin,
+      readCollection(agent, collectionId, `C${unique()}`.toUpperCase())
+    );
+    await ask("Hello.");
+    await admin.api.permissions.revoke(grant);
+    await ask("Hello again.");
+
+    expect(
+      gateway.requests.map(({ body }) => JSON.stringify(body).includes(marker))
+    ).toStrictEqual([true, false]);
+  });
+
   it("records nothing for a code run that isn't open", async () => {
     const person = await newPerson();
     const { stub, chat, ask, agent } = await chatOf(person.userId, says("Hi."));
@@ -600,5 +814,72 @@ describe("a chat's Knowledge", setUpTime, () => {
     expect(
       modelCalls(events).map(({ provenance }) => provenance)
     ).toStrictEqual([[]]);
+  });
+
+  it("recalls for a chat only under the Brain permission, only from what its person may read, and labels the chat with every collection it read, found or not", async () => {
+    const admin = await newAdmin();
+    const person = await newPerson();
+    const word = `zq${crypto.randomUUID().replaceAll(/[^a-f]/gu, "")}`;
+    // Granted and readable by the person, but without the word.
+    const { id: handbook } = await admin.knowledge.createCollection({
+      name: `Handbook ${unique()}`,
+      access: "everyone",
+    });
+    await admin.knowledge.saveDocument({
+      collectionId: handbook,
+      path: "other.md",
+      text: "# Other\nNothing of it here.",
+      ifVersion: 0,
+    });
+    // Granted, holding the word, but a team's the person isn't in.
+    const team = await newTeam(admin, [admin]);
+    const { id: teamOnly } = await admin.knowledge.createCollection({
+      name: `Team ${unique()}`,
+      access: "teams",
+      teams: [team],
+    });
+    await admin.knowledge.saveDocument({
+      collectionId: teamOnly,
+      path: "plan.md",
+      text: `# Plan\n${word}`,
+      ifVersion: 0,
+    });
+    const recallStep = codeStep(
+      `export default async (self, env) => { const outcome = async (asked) => { try { const pack = await asked; return pack.items.length; } catch (error) { return error.code ?? String(error); } }; return [await outcome(env.knowledge.recall({ query: ${JSON.stringify(word)} })), await outcome(env.knowledge.recall({ query: ${JSON.stringify(word)}, filters: { collectionIds: [${JSON.stringify(handbook)}] } }))]; };`
+    );
+    const { stub, chat, ask, agent } = await chatOf(
+      person.userId,
+      recallStep,
+      says("Nothing."),
+      recallStep,
+      says("Still nothing.")
+    );
+    await grantRead(admin, agent, handbook);
+    await grantRead(admin, agent, teamOnly);
+    // Without the Brain permission: refused.
+    const before = await ask("What is the plan?");
+    await requestGranted(idp, admin, {
+      subject: agent,
+      object: { type: "platform" },
+      actions: ["brain"],
+      binding: "BRAIN",
+    });
+    const after = await ask("What is the plan, now?");
+    const results = await codeResults(stub, chat.id);
+    expect({
+      results: results.map(({ text }) => text),
+      before: before.provenance,
+      after: after.provenance,
+    }).toStrictEqual({
+      results: [
+        'Returned:\n["brain.denied","brain.denied"]',
+        "Returned:\n[0,0]",
+      ],
+      before: { sources: [], restricted: false },
+      // The word is only in a collection the person can't read; the
+      // collection it was told to read is the chat's source even though
+      // nothing was found there.
+      after: { sources: [handbook], restricted: false },
+    });
   });
 });

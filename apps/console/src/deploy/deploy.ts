@@ -1,6 +1,6 @@
 /**
- * Making a client's account run a release: its resources in the EU, its
- * database migrations, its Workers (each uploaded with its secrets and
+ * Making a client's account run a release: its resources in the EU and
+ * its sending domain for mail, its database migrations, its Workers (each uploaded with its secrets and
  * sent all traffic before the next: connect before core, which binds it),
  * a smoke check that core answers as the new version, as the router
  * reaches it, and the client's hostname in the router's map. A deploy is a `client_deploys` row that records how far it got, and
@@ -61,7 +61,13 @@ import {
 import type { ReleaseStore } from "../releases/import.ts";
 import { holdsClient, stillHolds } from "../runners.ts";
 import type { HeldClient } from "../runners.ts";
-import { checkDeployedConfig, derivedCoreConfig } from "./core-config.ts";
+import { currentReleases, incompatibility } from "./compatibility.ts";
+import {
+  checkDeployedConfig,
+  clientMailDomain,
+  derivedCoreConfig,
+  onboardingSender,
+} from "./core-config.ts";
 import type { SignInApps } from "./core-config.ts";
 import { DeployError } from "./errors.ts";
 import { migrateDatabases } from "./migrations.ts";
@@ -362,6 +368,13 @@ const coreApp = "core";
 
 const configVarNames: ReadonlySet<string> = new Set(deploymentConfigVars);
 
+/**
+ * The only address client `clientId`'s mail may be from: the onboarding
+ * sender's, which its `EMAIL` binding is locked to.
+ */
+const mailSenderOf = (context: DeployContext, clientId: string): string =>
+  onboardingSender(clientId, context.router.domain).address;
+
 /** Setting `key`'s value, stored as JSON; `setting_invalid` when it isn't. */
 const settingValue = (key: string, value: string): unknown => {
   try {
@@ -425,8 +438,13 @@ const coreVars = async (
     PLATFORM_CHANGE: change,
   };
   // The config that goes out, settings included: never a SIGN_IN no admin
-  // can sign in with, nor a var core can't parse.
-  checkDeployedConfig(deploy.clientId, vars);
+  // can sign in with, nor a var core can't parse, nor a MAIL_FROM its EMAIL
+  // binding won't send from.
+  checkDeployedConfig(
+    deploy.clientId,
+    vars,
+    mailSenderOf(context, deploy.clientId)
+  );
   return vars;
 };
 
@@ -614,11 +632,32 @@ const runPhase = async <T>(
 };
 
 /**
+ * Refuses (`release_undeclared`, `release_incompatible`) a release the
+ * client can't go to from what its Workers run, switched in the order a
+ * deploy makes them live (src/deploy/compatibility.ts).
+ */
+const assertCompatible = async (
+  db: ConsoleDatabase,
+  { deploy, manifest }: LoadedDeploy
+): Promise<void> => {
+  const refused = incompatibility(
+    await currentReleases(db, deploy.clientId),
+    manifest,
+    appsOf(manifest)
+  );
+  if (refused !== null) {
+    throw new DeployError(refused.code, refused.message);
+  }
+};
+
+/**
  * The first two steps: the account's resources, then the release's
  * database migrations. Returns its databases' ids, by name. Before either,
- * the config the deploy would set on core is checked (`coreVars`), so a
- * setting core wouldn't take, or a sign-in nobody could use, stops the
- * deploy before it changes anything in the client's account.
+ * the release is checked against what the client runs (`assertCompatible`)
+ * and the config the deploy would set on core (`coreVars`), so a release
+ * the client can't go to, a setting core wouldn't take, or a sign-in
+ * nobody could use, stops the deploy before it changes anything in the
+ * client's account.
  */
 const prepare = async (
   context: DeployContext,
@@ -628,11 +667,22 @@ const prepare = async (
   const { api, db, store } = context;
   const { deploy, manifest } = loaded;
   current("resources");
+  await assertCompatible(db, loaded);
   await coreVars(context, deploy);
-  const resources = await ensureResources(api, deploy.accountId, manifest);
+  const resources = await ensureResources(
+    api,
+    deploy.accountId,
+    manifest,
+    clientMailDomain(deploy.clientId, context.router.domain)
+  );
   await recordStep(db, loaded, "resources", {
     databases: resources.databases.size,
     buckets: resources.buckets.length,
+    // Mail sends only once the sending domain's zone is delegated, which
+    // happens outside the deploy: on record for staff to see.
+    ...(resources.mailDomainActive === undefined
+      ? {}
+      : { mailDomainActive: resources.mailDomainActive ? 1 : 0 }),
   });
 
   current("migrations");
@@ -704,12 +754,14 @@ const uploadApp = async (
   );
   const workerVars = app === coreApp ? vars : {};
   checkBindingNames(worker, workerVars, workerSecretValues);
+  const mailSender = mailSenderOf(context, clientId);
   const fingerprint = await uploadFingerprint(secrets.clientKey, {
     manifest,
     worker,
     databases,
     vars: workerVars,
     secrets: workerSecretValues,
+    mailSender,
   });
   const secretsPrint = await secretsFingerprint(
     secrets.clientKey,
@@ -726,7 +778,8 @@ const uploadApp = async (
     manifest,
     worker,
     databases,
-    workerVars
+    workerVars,
+    mailSender
   );
   // A script upload goes live at once.
   await assertLatest(context, id, clientId);

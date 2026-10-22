@@ -29,6 +29,7 @@ describe("frontmatter", () => {
     expect(parseFrontmatter("notes.md", "# Notes\n\nText.")).toStrictEqual({
       type: "doc",
       frontmatter: { description: "", tags: [] },
+      fields: {},
       body: "# Notes\n\nText.",
     });
   });
@@ -56,6 +57,16 @@ describe("frontmatter", () => {
         tags: ["storage", "eu"],
         review: "2027-01-31",
         status: "accepted",
+      },
+      fields: {
+        type: "decision",
+        title: "Use D1 for Knowledge",
+        description: "Read before choosing storage.",
+        owner: "jakob@acme.test",
+        tags: ["storage", "eu"],
+        review: "2027-01-31",
+        status: "accepted",
+        aliases: ["d1"],
       },
       body: "Body.",
     });

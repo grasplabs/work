@@ -1,3 +1,4 @@
+import type { MemoryPack, RecallInput } from "@grasp-os/shared/brain-api";
 import type {
   BacklinkPage,
   Collection,
@@ -39,6 +40,7 @@ import {
 } from "./documents.ts";
 import { copySkill, skillCollections } from "./grasp-skills.ts";
 import { preparePurge, purge } from "./purge.ts";
+import { recall } from "./recall.ts";
 import { search } from "./search.ts";
 import { catalog, follow, read } from "./tools.ts";
 
@@ -133,6 +135,12 @@ export class KnowledgeRpc extends CoreRpcTarget implements KnowledgeApi {
   async search(query: string, options?: SearchOptions): Promise<SearchResults> {
     return await this.#asReader(
       async (reader) => await search(this.#env, reader, query, options)
+    );
+  }
+
+  async recall(input: RecallInput): Promise<MemoryPack> {
+    return await this.#asReader(
+      async (reader) => await recall(this.#env, reader, input)
     );
   }
 

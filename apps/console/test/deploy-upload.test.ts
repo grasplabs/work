@@ -57,12 +57,14 @@ describe("Durable Object migrations to upload", () => {
 describe("a Worker's bindings", () => {
   const databases = new Map([["grasp-os-core", "uuid-core"]]);
   const d1 = [{ binding: "DB", databaseName: "grasp-os-core", migrations: [] }];
+  const sender = "onboarding@mail.acme.grasp.test";
 
   it("fills in each D1 database's id", () => {
     expect(
       renderBindings(
         worker("core", [{ type: "d1", name: "DB", id: "$D1_DB_ID" }], d1),
-        databases
+        databases,
+        sender
       )
     ).toStrictEqual([{ type: "d1", name: "DB", id: "uuid-core" }]);
   });
@@ -78,7 +80,7 @@ describe("a Worker's bindings", () => {
       [{ type: "d1", name: "LOGS", id: "$D1_LOGS_ID" }],
     ].map((bindings) => {
       try {
-        renderBindings(worker("core", bindings, d1), databases);
+        renderBindings(worker("core", bindings, d1), databases, sender);
         return "rendered";
       } catch (error) {
         return error instanceof Error && "code" in error ? error.code : "other";
@@ -89,6 +91,37 @@ describe("a Worker's bindings", () => {
       "unknown_placeholder",
       "unknown_placeholder",
       "unknown_placeholder",
+    ]);
+  });
+
+  it("locks every mail binding to the onboarding sender, whatever senders the release names, and keeps its limits on recipients", () => {
+    expect(
+      renderBindings(
+        worker("core", [
+          { type: "send_email", name: "EMAIL" },
+          {
+            type: "send_email",
+            name: "WIDE",
+            allowed_sender_addresses: ["ceo@acme.test", sender],
+          },
+          {
+            type: "send_email",
+            name: "OPS",
+            destination_address: "ops@acme.test",
+          },
+        ]),
+        databases,
+        sender
+      )
+    ).toStrictEqual([
+      { type: "send_email", name: "EMAIL", allowed_sender_addresses: [sender] },
+      { type: "send_email", name: "WIDE", allowed_sender_addresses: [sender] },
+      {
+        type: "send_email",
+        name: "OPS",
+        destination_address: "ops@acme.test",
+        allowed_sender_addresses: [sender],
+      },
     ]);
   });
 });

@@ -26,7 +26,7 @@ import { runEngine } from "../src/workflows/engine.ts";
 import { allEvents } from "./audit-events.ts";
 import { runCron } from "./cron.ts";
 import { mockIdp } from "./idp.ts";
-import { newTeam } from "./knowledge.ts";
+import { newTeam, storedVersionTexts } from "./knowledge.ts";
 import { finished } from "./runs.ts";
 import { signInConfig } from "./sign-in-config.ts";
 import {
@@ -289,14 +289,7 @@ const racingKnowledge = (first: () => Promise<unknown>): D1Database => {
 };
 
 /** The text of every version of `documentId`, oldest first. */
-const versionTexts = async (documentId: string): Promise<string[]> => {
-  const { results } = await env.KNOWLEDGE.prepare(
-    "SELECT text FROM versions WHERE document_id = ? ORDER BY number"
-  )
-    .bind(documentId)
-    .all<{ text: string }>();
-  return results.map(({ text }) => text);
-};
+const versionTexts = storedVersionTexts;
 
 /** A Word file of `document.xml` and `styles.xml` as given. */
 const wordFile = (document: string, styles: string): Uint8Array => {

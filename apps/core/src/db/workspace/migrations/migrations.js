@@ -15,6 +15,7 @@ import m0012 from './0012_preview_releases.sql';
 import m0013 from './0013_email_preferences.sql';
 import m0014 from './0014_chat_draft_call_id.sql';
 import m0015 from './0015_chat_documents.sql';
+import m0016 from './0016_chat_run_sources.sql';
 
   export default {
     journal,
@@ -34,7 +35,8 @@ m0011,
 m0012,
 m0013,
 m0014,
-m0015
+m0015,
+m0016
     }
   }
   
