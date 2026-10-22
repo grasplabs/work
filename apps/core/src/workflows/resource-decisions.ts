@@ -23,6 +23,7 @@ import type {
   DecisionOutcome,
   ResourceDecisionRun,
 } from "../decisions/decisions.ts";
+import { takesPageAnswers } from "./exact-values.ts";
 import { requireCallAuthority } from "./resource-authority.ts";
 import type {
   CallingRun,
@@ -225,12 +226,21 @@ const decisionBinding = (
 
 /**
  * The response schema of decision contract `contract`: what an answer's
- * payload must be. A contract without one could take no answer the run
- * takes: refused before any decision opens (`workflow.call_invalid`).
+ * payload must be. A contract without one, or with one taking nothing the
+ * decision page sends, could take no answer the run takes: refused before
+ * any decision opens (`workflow.call_invalid`).
  */
 const responseOf = (contract: { response?: string }): string => {
   if (contract.response === undefined) {
     throw callInvalid("binding: Its decision contract has no response schema.");
+  }
+  // The decision page answers with no payload, or with the person's
+  // comment (`{ comment }`): a schema taking neither could never be
+  // answered, and its run would wait out its deadline.
+  if (!takesPageAnswers(contract.response)) {
+    throw callInvalid(
+      "binding: Its decision contract's response schema takes neither no answer nor { comment }, the only answers a person can give."
+    );
   }
   return contract.response;
 };

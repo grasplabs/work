@@ -1487,10 +1487,13 @@ export class ResourceRunHost
         const stepName = String(name);
         // An enter step records when its task started beside its record,
         // and a leave step's expressions see that time, whatever separates
-        // them (a wait, a nested do, another activation).
+        // them (a wait, a nested do, another activation), as a decision's
+        // call step's do: its task started when it asked, not when the
+        // answer came, nor when a retry ran.
         const entering = step.kind === "enter" && step.task !== undefined;
         const taskStart =
-          step.kind === "leave" && step.task !== undefined
+          (step.kind === "leave" || takesDecision(step)) &&
+          step.task !== undefined
             ? this.#taskStarts.get(step.place)
             : undefined;
         // Its wait for load since its last admission, read off the markers

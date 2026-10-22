@@ -1,5 +1,7 @@
 /* oxlint-disable no-template-curly-in-string, unicorn/no-thenable -- workflow expressions are written as ${ … } strings, and transitions as then */
 import { v } from "@grasp-os/sdk";
+import { sha256Hex } from "@grasp-os/shared/encoding";
+import { canonicalJson } from "@grasp-os/shared/json";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
@@ -193,7 +195,26 @@ interface Setup {
   tasks?: unknown[];
   /** What its contract takes as an answer's payload. */
   answers?: { descriptor: unknown };
+  /**
+   * Its contract stored as it is, unchecked, as one published before
+   * publishing checked what a person can answer.
+   */
+  unchecked?: boolean;
 }
+
+/** Contract `contract` stored as it is, past `publishCatalogContract`'s checks. */
+const storedUnchecked = async (
+  by: Identity,
+  key: string,
+  contract: Record<string, string>
+): Promise<void> => {
+  const text = canonicalJson(contract);
+  await env.DB.prepare(
+    "INSERT INTO workflow_catalog_contracts (key, kind, contract, fingerprint, published_by, published_at) VALUES (?, 'decision', ?, ?, ?, ?)"
+  )
+    .bind(key, text, await sha256Hex(text), by.userId, Date.now())
+    .run();
+};
 
 /**
  * The approval workflow of `owner`'s, published from `tasks`, its decision
@@ -204,17 +225,20 @@ const approvalWorkflow = async ({
     await Promise.resolve([`person:${reviewer.userId}`]),
   tasks = approvalTasks,
   answers = response,
+  unchecked = false,
 }: Setup = {}) => {
   const admin = await person("admin");
   const owner = await person("builder");
   const reviewer = await person("user");
   const contract = `invoice-approval-${unique()}`;
-  await publishCatalogContract(env, admin, {
-    key: contract,
+  const published = {
     kind: "decision",
     input: JSON.stringify(v.object({ amount: v.number() }).descriptor),
     response: JSON.stringify(answers.descriptor),
-  });
+  };
+  await (unchecked
+    ? storedUnchecked(admin, contract, published)
+    : publishCatalogContract(env, admin, { key: contract, ...published }));
   const workflow = await createWorkflowResource(
     env,
     owner,
@@ -623,6 +647,35 @@ describe("who answers a JSON workflow's decision", () => {
       bare: "decision.invalid",
       status: "open",
       end: { status: "completed", output: { status: "approved" } },
+    });
+  });
+
+  it("refuses a decision contract whose response schema takes nothing a person can answer: at publication, and at the call", async () => {
+    const admin = await person("admin");
+    const reasons = v.object({ reason: v.string() });
+    const publishing = await outcome(
+      publishCatalogContract(env, admin, {
+        key: `invoice-approval-${unique()}`,
+        kind: "decision",
+        input: JSON.stringify(v.object({ amount: v.number() }).descriptor),
+        response: JSON.stringify(reasons.descriptor),
+      })
+    );
+    // One stored before publishing checked it: refused before it opens.
+    const { owner, workflow } = await approvalWorkflow({
+      answers: reasons,
+      unchecked: true,
+    });
+    const runId = await started(owner, workflow.id, 5000);
+    const run = await ended(owner, workflow.id, runId);
+    expect({
+      publishing,
+      end: endOf(run),
+      decisions: await decisionsOf(runId),
+    }).toStrictEqual({
+      publishing: "workflow.contract_invalid",
+      end: { status: "failed", code: "workflow.call_invalid" },
+      decisions: [],
     });
   });
 
@@ -1065,6 +1118,58 @@ describe("a JSON workflow's decision in a loop", () => {
 });
 
 describe("durability of a JSON workflow's decision", () => {
+  it("gives its output.as and export.as the time it asked as $task.startedAt, the same after a restart", async () => {
+    const stamped = {
+      "request-review": {
+        ...requestReview,
+        export: {
+          as: "${ $context + {review: ., askedAt: $task.startedAt.iso8601} }",
+        },
+      },
+    };
+    const { owner, reviewer, workflow } = await approvalWorkflow({
+      tasks: [
+        stamped,
+        { finished: { set: "${ {status: $context.askedAt} }" } },
+      ],
+    });
+    const runId = await started(owner, workflow.id, 5000);
+    const decision = await openedBy(runId);
+    const opened = await env.DB.prepare(
+      "SELECT opened_at AS openedAt FROM workflow_decisions WHERE id = ?"
+    )
+      .bind(decision)
+      .first<{ openedAt: number }>();
+    // Down while it waits, answered a while later, then back: its call
+    // step runs in another activation, long after the ask.
+    await stopped(runId);
+    await scheduler.wait(1500);
+    const answeredAt = Date.now();
+    await confirmedAnswer(reviewer, decision, { approved: true });
+    await resumed(runId);
+    const run = await ended(owner, workflow.id, runId);
+    const askedAt =
+      run.status === "completed" &&
+      typeof run.output === "object" &&
+      run.output !== null &&
+      "status" in run.output
+        ? Date.parse(String(run.output.status))
+        : Number.NaN;
+    expect({
+      status: run.status,
+      // Its enter step's start: up to the decision's opening, and well
+      // before its answer.
+      askedBeforeOpening: askedAt <= (opened?.openedAt ?? 0),
+      askedWithinASecond: (opened?.openedAt ?? 0) - askedAt < 1000,
+      beforeAnswer: askedAt < answeredAt - 1000,
+    }).toStrictEqual({
+      status: "completed",
+      askedBeforeOpening: true,
+      askedWithinASecond: true,
+      beforeAnswer: true,
+    });
+  });
+
   it("goes on only with the decision its step opened asking exactly what the step built", async () => {
     const { owner, reviewer, workflow } = await approvalWorkflow({
       tasks: [{ hold: { wait: "PT2S" } }, ...approvalTasks],
