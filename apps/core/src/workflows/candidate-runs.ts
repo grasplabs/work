@@ -55,7 +55,7 @@ import type { HostedResourceRun } from "./resource-host.ts";
 import {
   engineResultOf,
   keptFailureOf,
-  runLoadedResource,
+  runActivation,
 } from "./resource-runs.ts";
 import type { ResourceRunMemory } from "./resource-runs.ts";
 import type { EngineStatus } from "./runs.ts";
@@ -533,13 +533,20 @@ export const runCandidateWorkflow = async (
   runId: string,
   engineStep: RunStep,
   memory: ResourceRunMemory
-): Promise<unknown> =>
-  await runLoadedResource(
+): Promise<unknown> => {
+  const { run, output, subject, owner } = await loadedCandidateRun(
     env,
-    await loadedCandidateRun(env, pin, runId),
-    engineStep,
-    memory
+    pin,
+    runId
   );
+  return await runActivation(env, engineStep, memory, {
+    run,
+    output,
+    owner,
+    // The root of its own lineage, as an independent run is.
+    admission: { run: runId, root: runId, subject },
+  });
+};
 
 /**
  * Keeps test run `id`'s row in step with where the engine says it is

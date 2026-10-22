@@ -51,7 +51,13 @@ import { loadRunIsolate } from "./code.ts";
 import type { Settled, StepError } from "./code.ts";
 import { runEngine } from "./engine.ts";
 import type { PinnedResourceRun } from "./engine.ts";
-import { countedStep, fromIsolate, settle, stepLimitOf } from "./host.ts";
+import {
+  countedStep,
+  fromIsolate,
+  settle,
+  stepLimitOf,
+  unadmitted,
+} from "./host.ts";
 import type { RunStep } from "./host.ts";
 import { admitAttempt, quotaPolicy } from "./quotas.ts";
 import type { ResourceAttemptHost } from "./resource-attempt-host.ts";
@@ -777,32 +783,38 @@ const acceptedOutput = (descriptor: string, value: unknown): unknown => {
   return checked.value;
 };
 
+/** What one activation of a hosted run runs, and what holds it to account. */
+export interface HostedActivation {
+  readonly run: HostedResourceRun;
+  /** Its version's output schema's descriptor (`acceptedOutput`). */
+  readonly output: string;
+  /** Whose share of the sandbox its isolate takes, and of the client's attempts. */
+  readonly owner: string;
+  /**
+   * Its lineage, which admits each attempt against the quotas and the
+   * client's shares (quotas.ts); or, for a run an App's test started, the
+   * test's own admission, which counts nothing of the organization's
+   * (fixture-runs.ts), with the host's fixture checks (`fixture`).
+   */
+  readonly admission:
+    | { readonly run: string; readonly root: string; readonly subject: string }
+    | "fixture";
+}
+
 /**
- * Runs `loaded` (an independent workflow's run, or a test run of its
- * draft's checkpoint, candidate-runs.ts) in its sandbox, on the engine's
- * `engineStep`: its output, as its contract takes it, or the failure it
- * ended with, thrown for the engine.
+ * Runs one activation of `activation.run` (an independent workflow's run,
+ * a run an App's test started, fixture-runs.ts, or a test run of its draft's
+ * checkpoint, candidate-runs.ts): the build's generated module in an
+ * isolate of its own against a host of the run (resource-host.ts).
+ * Answers the run's output, once it matches its version's output schema.
  */
-export const runLoadedResource = async (
+export const runActivation = async (
   env: Env,
-  {
-    run,
-    output,
-    subject,
-    owner = ownerOf(run.workflowId),
-  }: {
-    run: HostedResourceRun;
-    output: string;
-    subject: string;
-    /**
-     * Whose its isolates and admissions are: the workflow's, or for a test
-     * run its own (candidate-runs.ts), so test runs never queue its runs.
-     */
-    owner?: string;
-  },
   engineStep: RunStep,
-  memory: ResourceRunMemory
+  memory: ResourceRunMemory,
+  activation: HostedActivation
 ): Promise<unknown> => {
+  const { run, output, owner, admission } = activation;
   const { runId } = run;
   // The workflow's own step limit only ever lowers the host's.
   const ceiling = await stepLimitOf(env);
@@ -830,21 +842,27 @@ export const runLoadedResource = async (
     tampered: (error) => {
       tampered ??= error;
     },
-    // The root of its own lineage: an independent run starts no runs.
-    admitAttempt: async (attempt) =>
-      wakingOnSettle(
-        env,
-        await admitAttempt(
-          env,
-          { run: runId, root: runId, subject, resource: owner },
-          attempt
-        ),
-        (wake) => {
-          if (waking.open) {
-            wakes.push(wake());
-          }
+    ...(admission === "fixture"
+      ? {
+          fixture: true,
+          admitAttempt: async () => await Promise.resolve(unadmitted),
         }
-      ),
+      : {
+          admitAttempt: async (attempt) =>
+            wakingOnSettle(
+              env,
+              await admitAttempt(
+                env,
+                { ...admission, resource: owner },
+                attempt
+              ),
+              (wake) => {
+                if (waking.open) {
+                  wakes.push(wake());
+                }
+              }
+            ),
+        }),
   });
   const code = loadRunIsolate<ResourceAttemptHost>(
     env,
@@ -900,13 +918,16 @@ export const runResourceWorkflow = async (
   runId: string,
   engineStep: RunStep,
   memory: ResourceRunMemory
-): Promise<unknown> =>
-  await runLoadedResource(
-    env,
-    await loadedRun(env, pin, runId),
-    engineStep,
-    memory
-  );
+): Promise<unknown> => {
+  const { run, output, subject } = await loadedRun(env, pin, runId);
+  return await runActivation(env, engineStep, memory, {
+    run,
+    output,
+    owner: ownerOf(pin.workflow),
+    // The root of its own lineage: an independent run starts no runs.
+    admission: { run: runId, root: runId, subject },
+  });
+};
 
 /** Where the engine has a run's result: its output, or why it failed. */
 export const engineResultOf = async (
