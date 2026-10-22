@@ -142,6 +142,16 @@ export const workflowResourceErrors = defineErrorFamily({
   "workflow.run_limit":
     "The person this start acts for already has as many runs of this workflow under way as one person may. Wait for one to end, or stop one.",
   "workflow.run_ended": "This run has already ended.",
+  "workflow.event_invalid":
+    "That event isn't one this run takes: its binding doesn't admit its type, or its data doesn't match the type's contract.",
+  "workflow.event_denied":
+    "This run may no longer take events through that binding: its approval, or the run's own access, was revoked.",
+  "workflow.event_refused":
+    "This run can't take that event now: its inbox is full, the event is too large, the run is too old, or it hasn't started yet. Nothing was accepted.",
+  "workflow.event_conflict":
+    "That delivery key was used for another event to this run. Send a new event under a new key.",
+  "workflow.event_timeout":
+    "A listen task's events didn't all arrive before its timeout.",
   "workflow.start_unconfirmed":
     "The run never started: the workflow engine didn't confirm its start in time, so nothing of it ran. Start the workflow again.",
   "workflow.protocol_unsupported":

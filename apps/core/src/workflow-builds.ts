@@ -276,6 +276,32 @@ const sealedCallSchema = z.discriminatedUnion("name", [
 
 export type SealedCall = z.infer<typeof sealedCallSchema>;
 
+/**
+ * A listen task's events, as the build seals them (generate.ts,
+ * `GeneratedListen`): its event binding, its strategy, what of each event
+ * it reads, and its filters, each a type and the CloudEvents attributes it
+ * requires (by CloudEvents' rule for names), each a template the host
+ * builds in the task's enter step.
+ */
+const sealedListenSchema = z.strictObject({
+  binding: aliasSchema,
+  strategy: z.enum(["one", "any", "all"]),
+  read: z.enum(["data", "envelope"]),
+  filters: z
+    .array(
+      z.strictObject({
+        type: z.string().min(1).max(256),
+        attributes: z
+          .array(
+            z.tuple([z.string().regex(/^[a-z0-9]{1,20}$/u), templateSchema])
+          )
+          .max(16),
+      })
+    )
+    .min(1)
+    .max(16),
+});
+
 /** One task the generated module runs, as the host checks its steps. */
 const sealedTaskSchema = z.discriminatedUnion("kind", [
   z.strictObject({ ...taskBase, kind: z.literal("set") }),
@@ -319,6 +345,16 @@ const sealedTaskSchema = z.discriminatedUnion("kind", [
     call: sealedCallSchema,
     // Its input.from, output.as and export.as, of the slots its module
     // evaluates (generate.ts).
+    inputFrom: templateSchema.optional(),
+    outputAs: templateSchema.optional(),
+    exportAs: templateSchema.optional(),
+  }),
+  z.strictObject({
+    ...taskBase,
+    kind: z.literal("listen"),
+    // Its timeout is its deadline: a listen never waits without one.
+    timeoutMs: z.int().positive(),
+    listen: sealedListenSchema,
     inputFrom: templateSchema.optional(),
     outputAs: templateSchema.optional(),
     exportAs: templateSchema.optional(),
@@ -521,6 +557,7 @@ export const compileWorkflow = async (
             milliseconds,
             duration,
             call,
+            listen,
             inputFrom,
             outputAs,
             exportAs,
@@ -548,6 +585,9 @@ export const compileWorkflow = async (
             ...(call === undefined
               ? {}
               : { call: z.json().parse(structuredClone(call)) }),
+            ...(listen === undefined
+              ? {}
+              : { listen: z.json().parse(structuredClone(listen)) }),
             ...(inputFrom === undefined
               ? {}
               : { inputFrom: z.json().parse(structuredClone(inputFrom)) }),
