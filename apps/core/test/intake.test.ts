@@ -729,7 +729,7 @@ describe("reading notes", { timeout: 60_000 }, () => {
 
   /**
    * Characters per token for a conservative estimate of an answer's
-   * tokens: there's no Llama tokenizer here to count them with. English
+   * tokens: there's no model's tokenizer here to count them with. English
    * and Dutch text, JSON's punctuation and indenting included, take more
    * characters a token than this, so the estimate comes out high.
    */
@@ -903,7 +903,7 @@ describe("reading notes", { timeout: 60_000 }, () => {
     });
   });
 
-  it("asks the default model for no more than it may answer, by a conservative estimate, and for as many claims as its schema takes", async () => {
+  it("asks its model for no more than it may answer, by a conservative estimate, and for as many claims as its schema takes", async () => {
     const admin = await signedInApi(idp, "admin");
     const app = await copyOf(admin);
     const { gateway } = await extracted(

@@ -323,11 +323,15 @@ describe("model settings", { timeout: 60_000 }, () => {
         default: "medium",
       },
     });
-    // A new deployment's: GLM-5.3 Flash has no medium, so a question that
-    // names no effort gets the next level up.
+    // A new deployment's: neither DeepSeek V4.1 Flash nor GLM-5.3 Flash
+    // has medium, so a question that names no effort gets the next level
+    // up.
     await expect(efforts(envWith())).resolves.toStrictEqual({
-      [defaultGatewayModels[0]]: { levels: [], default: null },
-      [defaultGatewayModels[1]]: {
+      "workers-ai/@cf/deepseek-ai/deepseek-v4.1-flash-1017": {
+        levels: ["high", "max"],
+        default: "high",
+      },
+      "workers-ai/@cf/zai-org/glm-5.3-flash": {
         levels: ["low", "high", "max"],
         default: "high",
       },
