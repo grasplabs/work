@@ -2,6 +2,8 @@ import type { AuditActor } from "@grasp-os/shared/audit";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { knowledgeErrors } from "@grasp-os/shared/knowledge";
 import { drizzle } from "drizzle-orm/d1";
+import markdownIt from "markdown-it";
+import type { Token } from "markdown-it";
 
 import { keepAuditEvent } from "../audit-outbox.ts";
 import { admissionTopics } from "../db/core/schema.ts";
@@ -127,57 +129,24 @@ const normalized = (text: string): string => {
   return `${plain}\n${lowered(spaced)}\n${lowered(joined)}`;
 };
 
-/**
- * A sentence's end: not the full stop of an abbreviation such as "Mr." or
- * "Dhr.", whose name belongs to the same sentence.
- */
-const sentenceEnd =
-  /(?<!(?<![\p{L}])(?:mr|mrs|ms|dr|dhr|mevr|sr|sra|mme|m|st|nr|no|vs|etc))[.!?](?=\s)/iu;
-
-const tableRow = /^\s*\|/u;
-/** A Markdown heading's level: not a hashtag or an issue number ("#42"). */
-const atxHeading = /^ {0,3}(?<marks>#{1,6})(?:\s|$)/u;
-/** The line under a setext heading: `===` for level 1, `---` for 2. */
-const setextUnderline = /^ {0,3}(?:=+|-+)[ \t]*$/u;
-const listLine = /^\s*(?:[-*+>]\s|\d+[.)]\s)/u;
-
-/** A unit to judge: a sentence, a table or list, or a run of lines. */
+/** A unit to judge: a leaf block, such as a paragraph, heading or table row. */
 interface Unit {
   text: string;
-  /** A table's first row, which names its columns. */
+  /** Its table's first row, which names its columns. */
   header?: string;
-  /** What the headings above it say, as signals: never their text again. */
-  heading?: Heading;
-  /**
-   * A run of blocks judged together: it may only hold, never exclude by
-   * an amount, which may belong to another of its sentences.
-   */
-  wide?: true;
+  /** What its containers and the headings above it say. */
+  context?: Signals;
 }
 
 /**
- * Headings' signals for the blocks under them, worked out once: whether
- * one refers to a person, and which topics' words they have. Carrying
- * these instead of their text keeps a long heading over many sentences
- * cheap.
+ * What a text says, worked out once: whether it refers to a person, and
+ * which topics' words it has. Carrying these instead of the text keeps a
+ * long heading or list over many blocks cheap.
  */
-interface Heading {
+interface Signals {
   person: boolean;
   topics: ReadonlySet<number>;
 }
-
-/** A block's lines: a run of table rows, list or quote lines, or prose. */
-type Block = "table" | "list" | "prose";
-
-const blockOf = (line: string): Block | "blank" => {
-  if (line.trim() === "") {
-    return "blank";
-  }
-  if (tableRow.test(line)) {
-    return "table";
-  }
-  return listLine.test(line) ? "list" : "prose";
-};
 
 /** Whether `unit` refers to a person. */
 const refersToPerson = (unit: Unit, plain: string): boolean =>
@@ -187,130 +156,131 @@ const refersToPerson = (unit: Unit, plain: string): boolean =>
   (unit.header !== undefined &&
     personColumnPattern.test(normalized(unit.header)));
 
-/** The signals of the heading `line`, with those of `above` it. */
-const headingOf = (line: string, above: Heading | undefined): Heading => {
-  const plain = normalized(line);
-  const topics = new Set<number>(above?.topics);
+const signalsOf = (unit: Unit): Signals => {
+  const plain = normalized(unit.text);
+  const topics = new Set<number>();
   for (const [index, topic] of compiledTopics.entries()) {
     if (topic.weak.test(plain)) {
       topics.add(index);
     }
   }
+  return { person: refersToPerson(unit, plain), topics };
+};
+
+const together = (
+  first: Signals | undefined,
+  second: Signals | undefined
+): Signals | undefined => {
+  if (first === undefined || second === undefined) {
+    return first ?? second;
+  }
   return {
-    person: above?.person === true || refersToPerson({ text: line }, plain),
-    topics,
+    person: first.person || second.person,
+    topics: new Set([...first.topics, ...second.topics]),
   };
 };
 
-/** The heading level `line` starts, with the line under it: 0 for none. */
-const headingLevel = (line: string, next: string | undefined): number => {
-  const marks = atxHeading.exec(line)?.groups?.marks;
-  if (marks !== undefined) {
-    return marks.length;
-  }
-  if (
-    next !== undefined &&
-    blockOf(line) === "prose" &&
-    setextUnderline.test(next)
-  ) {
-    return next.trimStart().startsWith("=") ? 1 : 2;
-  }
-  return 0;
-};
+/** The deepest nesting parsed; anything deeper is held. */
+const maxNesting = 100;
 
 /**
- * The text's units: each heading; each table and each run of list or
- * quote lines whole (an HR record's lines are one), list items one blank
- * line apart included; the sentences of each paragraph, its lines joined
- * first so a sentence wrapped over two lines is one; and each run of
- * non-blank lines, whatever its blocks, as a wide unit (prose above a
- * list, two tables). Each unit carries the headings above it, of every
- * level: "# Employee Jan" over "## Status" over "sick leave" is about Jan.
+ * CommonMark, with GFM's tables. Only its block parser runs: the units are
+ * the source's lines, which the detectors read with their markup. A link
+ * reference definition is read as the paragraph it is otherwise, since
+ * the parser keeps no block for it.
  */
-const unitsOf = (text: string): Unit[] => {
+const markdown = markdownIt("default", { html: true, maxNesting }).disable(
+  "reference"
+);
+
+/** The leaf blocks: everything else that opens a block contains others. */
+const leaves: ReadonlySet<string> = new Set([
+  "code_block",
+  "fence",
+  "heading_open",
+  "html_block",
+  "paragraph_open",
+  "tr_open",
+]);
+
+const lastOf = (headings: (Signals | undefined)[]) =>
+  headings.findLast((heading) => heading !== undefined);
+
+/**
+ * The text's units: each leaf block of its CommonMark structure (a
+ * paragraph, heading, table row or code block), judged with the text of
+ * its containers and its section headings. A list, list item, quote or
+ * table is context for everything in it: "- Employee Jan Jansen" over "
+ * On sick leave" is about Jan. Headings stack by depth: "# Employee Jan"
+ * over "## Status" over "On sick leave" is about Jan, and so is "##
+ * Cancer" under it; a container's headings are sections within it. The
+ * outermost container's text holds those of the containers in it, so only
+ * that one is read whole, keeping this linear. Returns undefined for text
+ * nested deeper than the parser reads.
+ */
+const unitsOf = (text: string): Unit[] | undefined => {
+  const tokens: Token[] = [];
+  markdown.block.parse(text, markdown, {}, tokens);
+  // Each line's start, and the end of the text.
+  const starts = [0];
+  for (
+    let at = text.indexOf("\n");
+    at !== -1;
+    at = text.indexOf("\n", at + 1)
+  ) {
+    starts.push(at + 1);
+  }
+  starts.push(text.length + 1);
+  const source = (first: number, end: number): string =>
+    text.slice(starts[first], (starts[end] ?? 0) - 1);
   const units: Unit[] = [];
-  const lines = text.split("\n");
-  // Each level's heading, with the signals of those above it.
-  const headings: (Heading | undefined)[] = [];
-  let heading: Heading | undefined = undefined;
-  let kind: Block | undefined = undefined;
-  let block: string[] = [];
-  let run: string[] = [];
-  let runHeader: string | undefined = undefined;
-  // How many units there were when the run began.
-  let runStart = 0;
-  const endBlock = () => {
-    if (kind === "prose") {
-      for (const sentence of block.join(" ").split(sentenceEnd)) {
-        units.push({ text: sentence, heading });
-      }
-    } else if (kind === "table") {
-      units.push({ text: block.join("\n"), header: block[0], heading });
-    } else if (kind === "list") {
-      units.push({ text: block.join("\n"), heading });
+  // Each depth's section heading, with the signals of those above it.
+  const sections: (Signals | undefined)[] = [];
+  let headings = sections;
+  let outside: Signals | undefined = undefined;
+  let header: string | undefined = undefined;
+  for (const token of tokens) {
+    if (token.level >= maxNesting - 1) {
+      return undefined;
     }
-    kind = undefined;
-    block = [];
-  };
-  const endRun = () => {
-    endBlock();
-    // Judged whole too when split into more than one unit: blocks, or
-    // sentences split where an abbreviation ("Ph.D.", "e.g.") looked
-    // like a sentence's end.
-    if (units.length - runStart > 1) {
-      units.push({
-        text: run.join("\n"),
-        header: runHeader,
-        heading,
-        wide: true,
+    const lines = token.map;
+    if (token.level === 0 && token.nesting === -1) {
+      outside = undefined;
+      headings = sections;
+    }
+    if (lines === null) {
+      continue;
+    }
+    const [first, end] = lines;
+    if (token.type === "table_open") {
+      header = source(first, first + 1);
+    }
+    if (token.level === 0 && token.nesting === 1 && !leaves.has(token.type)) {
+      const container = signalsOf({
+        text: source(first, end),
+        header: token.type === "table_open" ? header : undefined,
       });
+      outside = together(container, lastOf(sections));
+      headings = [];
     }
-    run = [];
-    runHeader = undefined;
-  };
-  for (let index = 0; index < lines.length; index += 1) {
-    const line = lines[index] ?? "";
-    const next = lines[index + 1];
-    const level = headingLevel(line, next);
-    if (level > 0) {
-      endRun();
-      headings.length = level - 1;
-      heading = headingOf(
-        line,
-        headings.findLast((h) => h !== undefined)
-      );
-      headings[level - 1] = heading;
-      units.push({ text: line });
-      if (atxHeading.exec(line) === null) {
-        // A setext heading's underline.
-        index += 1;
-      }
+    if (!leaves.has(token.type)) {
       continue;
     }
-    const lineKind = blockOf(line);
-    if (lineKind === "blank") {
-      // List items a blank line apart are one list.
-      const looseList =
-        kind === "list" && next !== undefined && blockOf(next) === "list";
-      if (!looseList) {
-        endRun();
-      }
-      continue;
+    const unit: Unit = {
+      text: source(first, end),
+      header: token.type === "tr_open" ? header : undefined,
+    };
+    const depth =
+      token.type === "heading_open" ? Number(token.tag.slice(1)) : 0;
+    if (depth > 0) {
+      headings.length = depth - 1;
     }
-    if (lineKind !== kind) {
-      endBlock();
-    }
-    kind = lineKind;
-    block.push(line);
-    if (run.length === 0) {
-      runStart = units.length;
-    }
-    run.push(line);
-    if (lineKind === "table") {
-      runHeader ??= line;
+    unit.context = together(outside, lastOf(headings));
+    units.push(unit);
+    if (depth > 0) {
+      headings[depth - 1] = together(lastOf(headings), signalsOf(unit));
     }
   }
-  endRun();
   return units;
 };
 
@@ -322,10 +292,10 @@ const judge = (unit: Unit): AdmissionOutcome => {
     if (topic.strong?.test(plain) === true) {
       return "excluded";
     }
-    if (topic.weak.test(plain) || unit.heading?.topics.has(index) === true) {
-      person ??= unit.heading?.person === true || refersToPerson(unit, plain);
+    if (topic.weak.test(plain) || unit.context?.topics.has(index) === true) {
+      person ??= unit.context?.person === true || refersToPerson(unit, plain);
       if (person) {
-        if (topic.amounts && unit.wide !== true && amount.test(plain)) {
+        if (topic.amounts && amount.test(plain)) {
           return "excluded";
         }
         outcome = "held";
@@ -433,8 +403,12 @@ const worse = (
 
 /** What the detectors decide for `text`, read as written. */
 const screenWritten = (text: string): AdmissionOutcome => {
+  const units = unitsOf(text);
+  if (units === undefined) {
+    return "held";
+  }
   let outcome: AdmissionOutcome = "admitted";
-  for (const unit of unitsOf(text)) {
+  for (const unit of units) {
     const judged = judge(unit);
     if (judged === "excluded") {
       return judged;

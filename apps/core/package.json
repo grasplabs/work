@@ -32,6 +32,7 @@
     "capnweb": "catalog:",
     "drizzle-orm": "catalog:",
     "fflate": "catalog:",
+    "markdown-it": "catalog:",
     "postal-mime": "catalog:",
     "semver": "catalog:",
     "unpdf": "catalog:",

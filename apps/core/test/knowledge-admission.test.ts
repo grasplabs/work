@@ -169,6 +169,57 @@ describe("Knowledge admission", { timeout: 60_000 }, () => {
       // Headings of every level above it.
       headingStack: "# Employee Jan Jansen\n\n## Status\n\nOn sick leave.",
       setext: "Employee Jan Jansen\n===\n\nOn sick leave since May.",
+      // A heading under a person's, with no body.
+      headingsOnly: "# Employee Jan Jansen\n## Cancer",
+      deepHeadings: "# Employee Jan Jansen\n## Status\n### Sick leave",
+      setextHeadings: "Employee Jan Jansen\n===\nSick leave\n---",
+      headingAfterBody: "# Employee Jan Jansen\nWorks in sales.\n## Cancer",
+      // An amount in such a heading is certain, as in a sentence.
+      headingAmount: "# Employee Jan Jansen\n## Salary: €4,200",
+      // Every line of the paragraph above a setext underline is its heading.
+      setextLines: "Employee Jan Jansen\nSick leave\n---",
+      setextLinesTopic: "Employee Jan Jansen\nCancer\n===",
+      setextLinesOver: "Employee\nJan Jansen\n===\n\nOn sick leave since May.",
+      // A heading inside a list item, with the item's text.
+      headingInListItem: "- Employee Jan Jansen\n  ## Cancer",
+      headingsInListItem: "- # Employee Jan Jansen\n  ## Cancer",
+      sectionInListItem:
+        "- Employee Jan Jansen\n  ## Status\n  On sick leave since May.",
+      setextSectionInListItem:
+        "- Employee Jan Jansen\n  Status\n  ---\n  On sick leave since May.",
+      looseSectionInListItem:
+        "- Employee Jan Jansen\n\n  ## Status\n\n  On sick leave since May.",
+      sectionThenListItem:
+        "- Employee Jan Jansen\n  ## Status\n- On sick leave since May.",
+      siblingSectionsInListItem:
+        "- Employee Jan Jansen\n  ## Notes\n  ## Status\n  On sick leave since May.",
+      looseSiblingSectionsInListItem:
+        "- Employee Jan Jansen\n\n  ## Notes\n\n  ## Status\n\n  On sick leave since May.",
+      siblingSectionsAfterBodyInListItem:
+        "- Employee Jan Jansen\n  ## Notes\n  Works in sales.\n  ## Status\n  On sick leave since May.",
+      tabSectionInListItem:
+        "- Employee Jan Jansen\n\t## Status\n\tOn sick leave since May.",
+      // A list item's paragraphs, a blank line apart.
+      continuedListItem: "- Employee Jan Jansen\n\n  On sick leave since May.",
+      // A quote's, too.
+      quoteParagraphs: "> Employee Jan Jansen\n>\n> On sick leave since May.",
+      // A section under a heading, after a top-level preamble.
+      headingUnderLine: "Employee Jan Jansen\n## Cancer",
+      sectionUnderLine:
+        "Employee Jan Jansen\n## Status\nOn sick leave since May.",
+      siblingSectionUnderLine:
+        "Employee Jan Jansen\n## Notes\n## Status\nOn sick leave since May.",
+      sectionUnderQuote:
+        "> Employee Jan Jansen\n## Status\nOn sick leave since May.",
+      sectionUnderTable:
+        "| Employee |\n| Jan Jansen |\n## Status\nOn sick leave since May.",
+      // A table's rows, under its header.
+      tableRows:
+        "| Name | Note |\n| --- | --- |\n| Jan | Sales |\n| Piet | On sick leave |",
+      // A link reference definition's title.
+      definition: '[jan]: https://hr.example "She has cancer"',
+      // Nested deeper than any document is: not read, so held.
+      deeplyNested: `${"> ".repeat(120)}Notes`,
       // Runs of lines, whatever their blocks.
       looseList: "- Employee: Jan Jansen\n\n- Status: sick leave",
       proseAndList: "Jan Jansen is an employee.\n- Status: sick leave",
@@ -217,6 +268,34 @@ describe("Knowledge admission", { timeout: 60_000 }, () => {
       headingTopic: "held",
       headingStack: "held",
       setext: "held",
+      headingsOnly: "held",
+      deepHeadings: "held",
+      setextHeadings: "held",
+      headingAfterBody: "held",
+      headingAmount: "excluded",
+      setextLines: "held",
+      setextLinesTopic: "held",
+      setextLinesOver: "held",
+      headingInListItem: "held",
+      headingsInListItem: "held",
+      sectionInListItem: "held",
+      setextSectionInListItem: "held",
+      looseSectionInListItem: "held",
+      sectionThenListItem: "held",
+      siblingSectionsInListItem: "held",
+      looseSiblingSectionsInListItem: "held",
+      siblingSectionsAfterBodyInListItem: "held",
+      tabSectionInListItem: "held",
+      continuedListItem: "held",
+      quoteParagraphs: "held",
+      headingUnderLine: "held",
+      sectionUnderLine: "held",
+      siblingSectionUnderLine: "held",
+      sectionUnderQuote: "held",
+      sectionUnderTable: "held",
+      tableRows: "held",
+      definition: "held",
+      deeplyNested: "held",
       looseList: "held",
       proseAndList: "held",
       tableAndList: "held",
@@ -255,6 +334,17 @@ describe("Knowledge admission", { timeout: 60_000 }, () => {
       "-\n".repeat(size / 2),
       // A long heading over many short sentences.
       `# ${"heading ".repeat(size / 16)}\n${"Ok. ".repeat(size / 4)}`,
+      // Inputs some Markdown parsers take quadratic time or more on.
+      ">".repeat(size),
+      "- ".repeat(size / 2),
+      "- x\n".repeat(size / 4),
+      "> > > > > > > > x\n".repeat(size / 18),
+      `> a\n${"b\n".repeat(size / 2)}`,
+      "*a**".repeat(size / 4),
+      "*_".repeat(size / 2),
+      `${"[".repeat(size / 2)}${"]".repeat(size / 2)}`,
+      // Many sections under one list item.
+      `- Employee Jan Jansen\n${"  ## Status\n  Ok.\n".repeat(size / 16)}`,
     ];
     const slowest = Math.max(
       ...crafted.map((text) => {
@@ -283,6 +373,13 @@ describe("Knowledge admission", { timeout: 60_000 }, () => {
       "Meld je vóór negen uur ziek bij je leidinggevende en de arbodienst.",
       "Kun je me bellen als je ziek bent?",
       "# Leave policy\n\n## Sick leave\n\nReport sick before nine.\n\n- Call the office.\n\n- Rest.",
+      "# Leave policy\n## Sick leave\n### Reporting sick",
+      // A topic heading beside a person's, not under it.
+      "## Employee Jan Jansen\n## Sick leave policy",
+      // A list item's heading ends with the item.
+      "- Employee Jan Jansen\n  ## Team\n\n## Sick leave policy\n\nReport sick before nine.",
+      // A person and a policy in separate lists.
+      "- Employee Jan Jansen\n\n## Sick leave policy\n\n- Report sick before nine.",
       "Die Gehaltsbänder werden jährlich überprüft.",
       "La politique de rémunération est revue chaque année.",
       "La política salarial se revisa cada año.",
