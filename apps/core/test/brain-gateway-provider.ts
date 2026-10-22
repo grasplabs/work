@@ -8,9 +8,11 @@
  * always do: the allowlist, the budget, the price and the charge are
  * theirs. Nothing here is a model client of its own.
  *
- * Only chat completions, the wire format of Workers AI's models, which a
- * deployment's gateway allows by default. The request goes without a
- * stream and the answer comes back whole: the stand-in streams it on.
+ * Chat completions, the wire format of Workers AI's models, which a
+ * deployment's gateway allows by default, and Anthropic's Messages API.
+ * The request goes without a stream and the answer comes back whole: the
+ * stand-in streams it on. Anthropic's thinking goes back with its real
+ * signature, which the next request of a tool loop must return unchanged.
  */
 import { z } from "zod";
 
@@ -70,6 +72,39 @@ const completionSchema = z.object({
   }),
 });
 
+const anthropicSchema = z.object({
+  content: z.array(
+    z.discriminatedUnion("type", [
+      z.object({ type: z.literal("text"), text: z.string() }),
+      z.object({
+        type: z.literal("thinking"),
+        thinking: z.string(),
+        signature: z.string(),
+      }),
+      z.object({
+        type: z.literal("tool_use"),
+        id: z.string(),
+        name: z.string(),
+        input: z.record(z.string(), z.unknown()),
+      }),
+      // Redacted thinking can't be handed on: the stand-in has no block
+      // for it. Refused below rather than dropped, which the next request
+      // of a tool loop would be refused for.
+      z.object({ type: z.literal("redacted_thinking") }).loose(),
+    ])
+  ),
+  stop_reason: z.string().nullish(),
+  usage: z.object({
+    input_tokens: z.number(),
+    output_tokens: z.number(),
+    cache_read_input_tokens: z.number().nullish(),
+    cache_creation_input_tokens: z.number().nullish(),
+    cache_creation: z
+      .object({ ephemeral_1h_input_tokens: z.number().nullish() })
+      .nullish(),
+  }),
+});
+
 /** A JSON object: a call's arguments, or a request's body. */
 const argumentsSchema = z.record(z.string(), z.unknown());
 
@@ -91,16 +126,26 @@ const argumentsOf = (
   }
 };
 
+/** The wire format of the route a request went to. */
+type WireFormat = "chat-completions" | "anthropic-messages";
+
+const formatOf = (url: string): WireFormat => {
+  const { pathname } = new URL(url);
+  if (pathname.endsWith("/chat/completions")) {
+    return "chat-completions";
+  }
+  if (pathname.endsWith("/v1/messages")) {
+    return "anthropic-messages";
+  }
+  throw new TypeError(
+    `The real-model provider speaks chat completions and Anthropic's Messages API only, not ${url}`
+  );
+};
+
 /** The request as sent on: whole, without a stream. */
 const unstreamed = (request: GatewayRequest): string => {
-  if (
-    !new URL(request.url).pathname.endsWith("/chat/completions") ||
-    typeof request.body !== "object" ||
-    request.body === null
-  ) {
-    throw new TypeError(
-      `The real-model provider speaks chat completions only, not ${request.url}`
-    );
+  if (typeof request.body !== "object" || request.body === null) {
+    throw new TypeError(`A request to ${request.url} without a JSON body`);
   }
   const { stream_options: _streamOptions, ...body } = argumentsSchema.parse(
     request.body
@@ -108,13 +153,79 @@ const unstreamed = (request: GatewayRequest): string => {
   return JSON.stringify({ ...body, stream: false });
 };
 
-const replyOf = async (
-  response: Response
-): Promise<{
+interface Replied {
   reply: GatewayReply;
   text: string;
   calls: ModelExchange["calls"];
-}> => {
+}
+
+const callsOf = (
+  calls: readonly { name: string; arguments: Record<string, unknown> }[]
+): ModelExchange["calls"] =>
+  calls.map((call) => ({
+    name: call.name,
+    arguments: JSON.stringify(call.arguments),
+  }));
+
+const anthropicReply = (raw: unknown): Replied => {
+  const parsed = anthropicSchema.parse(raw);
+  const text = parsed.content
+    .flatMap((block) => (block.type === "text" ? [block.text] : []))
+    .join("");
+  const toolCalls = parsed.content.flatMap((block) =>
+    block.type === "tool_use"
+      ? [{ id: block.id, name: block.name, arguments: block.input }]
+      : []
+  );
+  if (parsed.content.some(({ type }) => type === "redacted_thinking")) {
+    throw new TypeError(
+      "Anthropic redacted the model's thinking, which the stand-in can't hand on"
+    );
+  }
+  const thinking = parsed.content.flatMap((block) =>
+    block.type === "thinking" ? [block] : []
+  );
+  // One block the stand-in streams, under the one signature it carries.
+  if (thinking.length > 1) {
+    throw new TypeError(
+      "The model thought in more than one block, which the stand-in streams as one"
+    );
+  }
+  const [signed] = thinking;
+  const { usage } = parsed;
+  const cacheWrite1h = usage.cache_creation?.ephemeral_1h_input_tokens ?? 0;
+  return {
+    reply: {
+      text,
+      ...(toolCalls.length === 0 ? {} : { toolCalls }),
+      inputTokens: usage.input_tokens,
+      outputTokens: usage.output_tokens,
+      ...(signed === undefined
+        ? {}
+        : {
+            thinking: {
+              text: signed.thinking,
+              // Anthropic doesn't count thinking apart from the answer.
+              tokens: 0,
+              signature: signed.signature,
+            },
+          }),
+      cache: {
+        read: usage.cache_read_input_tokens ?? 0,
+        write: usage.cache_creation_input_tokens ?? 0,
+      },
+      ...(cacheWrite1h === 0 ? {} : { cacheWrite1h }),
+      ...(parsed.stop_reason === "max_tokens" ? { truncated: true } : {}),
+    },
+    text,
+    calls: callsOf(toolCalls),
+  };
+};
+
+const replyOf = async (
+  response: Response,
+  format: WireFormat
+): Promise<Replied> => {
   const raw: unknown = await response.json().catch(() => null);
   if (!response.ok) {
     return {
@@ -122,6 +233,9 @@ const replyOf = async (
       text: JSON.stringify(raw),
       calls: [],
     };
+  }
+  if (format === "anthropic-messages") {
+    return anthropicReply(raw);
   }
   const parsed = completionSchema.parse(raw);
   const [choice] = parsed.choices;
@@ -140,10 +254,7 @@ const replyOf = async (
       ...(choice?.finish_reason === "length" ? { truncated: true } : {}),
     },
     text,
-    calls: toolCalls.map((call) => ({
-      name: call.name,
-      arguments: JSON.stringify(call.arguments),
-    })),
+    calls: callsOf(toolCalls),
   };
 };
 
@@ -159,6 +270,7 @@ export const gatewayProvider =
     if (request === undefined) {
       throw new RangeError("No request to answer");
     }
+    const format = formatOf(request.url);
     const started = performance.now();
     const headers = new Headers(request.headers);
     headers.set("content-type", "application/json");
@@ -169,7 +281,7 @@ export const gatewayProvider =
       body: unstreamed(request),
       signal: request.signal,
     });
-    const { reply, text, calls } = await replyOf(response);
+    const { reply, text, calls } = await replyOf(response, format);
     const current = turn();
     log({
       phase: current.phase,
