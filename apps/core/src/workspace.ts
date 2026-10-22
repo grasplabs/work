@@ -126,12 +126,14 @@ import {
   chatMessages,
   chatProjectDocuments,
   chatProjects,
+  chatRunSources,
   chatSources,
   chats,
   dashboardWidgets,
   dashboards,
   emailPreferences,
 } from "./db/workspace/schema.ts";
+import { readableSources, withheldSourceDetail } from "./history-access.ts";
 import { readAsDelegate } from "./knowledge/binding.ts";
 import { forContext } from "./knowledge/memory.ts";
 import { catalog, noteListedSkills } from "./knowledge/tools.ts";
@@ -370,6 +372,18 @@ export interface CodeRunOpening {
  * a few collections or a connection, each an identifier.
  */
 const sourcesSchema = z.array(identifierSchema).max(auditProvenanceMaxItems);
+
+/**
+ * Longest source a run's result rests on: a connection call's names its
+ * connection, action and resource, each up to an identifier
+ * (`connectionRead` in agent-scope.ts).
+ */
+const runReadMaxLength = 1024;
+
+/** What one API call of a code run read, as the run keeps it. */
+const runReadsSchema = z
+  .array(z.string().min(1).max(runReadMaxLength))
+  .max(auditProvenanceMaxItems);
 
 /** Most documents one read hands a chat's code: a page of hits or links. */
 const givenMaxPerRead = 1000;
@@ -1110,6 +1124,7 @@ export class Workspace extends DurableObject<Env> {
         codeTimeoutMs: codeTimeoutMs(this.env),
         signal: cancel.signal,
         events: () => live.events.splice(0),
+        withheld: async () => await this.#withheldRuns(scope),
         keep: (message) => {
           // A job's notice is this turn's only (`LiveTurn`).
           if (
@@ -1859,7 +1874,9 @@ export class Workspace extends DurableObject<Env> {
     chatId: ChatId,
     runId: string,
     ids: readonly string[],
-    documentIds: readonly string[] = []
+    documentIds: readonly string[] = [],
+    /** What the run's result rests on, if not `ids` (a connection call's grant). */
+    runReads?: readonly string[]
   ): CodeRunAdmission["call"] {
     const { call } = this.admitFromCodeRun(chatId, runId);
     if (call !== "open") {
@@ -1867,9 +1884,13 @@ export class Workspace extends DurableObject<Env> {
     }
     const sources = sourcesSchema.parse(ids);
     const given = givenSchema.parse(documentIds);
+    const reads =
+      runReads === undefined ? sources : runReadsSchema.parse(runReads);
     this.ctx.storage.transactionSync(() => {
       this.#keepSources(chatId, sources);
       this.#keepGiven(chatId, given);
+      // And with the run: what its result rests on (`#withheldRuns`).
+      this.#keepRunSources(chatId, runId, reads);
     });
     return call;
   }
@@ -1925,6 +1946,116 @@ export class Workspace extends DurableObject<Env> {
       const givenAfter = given.get(documentId);
       return givenAfter !== undefined && messageId > givenAfter;
     };
+  }
+
+  /**
+   * Records with the run alone what an API call of it read (an App's
+   * answer or files, the Knowledge catalog), before the call hands it
+   * over: what the run's result rests on (`#withheldRuns`), never the
+   * chat's provenance, which the model rules judge (`recordSources`). The
+   * same refusal once the run isn't open.
+   */
+  recordRunReads(
+    chatId: ChatId,
+    runId: string,
+    ids: readonly string[]
+  ): CodeRunAdmission["call"] {
+    const { call } = this.admitFromCodeRun(chatId, runId);
+    if (call === "open") {
+      this.#keepRunSources(chatId, runId, runReadsSchema.parse(ids));
+    }
+    return call;
+  }
+
+  /** Keeps `sources` with run `runId`, each once. */
+  #keepRunSources(
+    chatId: ChatId,
+    runId: string,
+    sources: readonly string[]
+  ): void {
+    if (sources.length === 0) {
+      return;
+    }
+    this.#db
+      .insert(chatRunSources)
+      .select(
+        sql`SELECT ${chatId}, ${runId}, value, NULL FROM json_each(${JSON.stringify(sources)}) WHERE true`
+      )
+      .onConflictDoNothing()
+      .run();
+  }
+
+  /**
+   * The code runs of the chat whose results may not reach the model now
+   * (`withholdRuns` in agent.ts): its agent may no longer read, for its
+   * person, something one of them read (`readableSources`). A source
+   * newly found unreadable is marked and audited once, in one
+   * transaction, by the agent acting for the person, naming the run and
+   * the source, never what was read; one readable again is unmarked, so a
+   * later revocation is audited again. A check that fails withholds every
+   * run that read anything, unmarked: rather withheld than sent
+   * unchecked. Nothing is read from core for a chat whose runs read
+   * nothing.
+   */
+  async #withheldRuns(scope: Omit<AgentScope, "runId">): Promise<Set<string>> {
+    const { chatId } = scope;
+    const rows = this.#db
+      .select()
+      .from(chatRunSources)
+      .where(eq(chatRunSources.chatId, chatId))
+      .all();
+    if (rows.length === 0) {
+      return new Set();
+    }
+    let readable: Set<string>;
+    try {
+      readable = await readableSources(this.env, scope, [
+        ...new Set(rows.map(({ sourceId }) => sourceId)),
+      ]);
+    } catch (error) {
+      log.warn("agent.history_check_failed", { chatId, ...errorFields(error) });
+      return new Set(rows.map(({ runId }) => runId));
+    }
+    const withheld = rows.filter(({ sourceId }) => !readable.has(sourceId));
+    const fresh = withheld.filter(({ withheldAt }) => withheldAt === null);
+    const back = rows.filter(
+      ({ sourceId, withheldAt }) =>
+        withheldAt !== null && readable.has(sourceId)
+    );
+    if (fresh.length > 0 || back.length > 0) {
+      const actor = delegateActorOf(chatAuthority(scope));
+      this.ctx.storage.transactionSync(() => {
+        for (const { runId, sourceId, withheldAt } of [...fresh, ...back]) {
+          this.#db
+            .update(chatRunSources)
+            .set({ withheldAt: withheldAt === null ? new Date() : null })
+            .where(
+              and(
+                eq(chatRunSources.chatId, chatId),
+                eq(chatRunSources.runId, runId),
+                eq(chatRunSources.sourceId, sourceId)
+              )
+            )
+            .run();
+        }
+        for (const { runId, sourceId } of fresh) {
+          this.#outboxEntry({
+            actor,
+            action: "chat.history_withheld",
+            target: { type: "chat", id: chatId },
+            detail: {
+              workspace: this.ctx.id.name ?? null,
+              run: runId,
+              ...withheldSourceDetail(sourceId),
+            },
+          });
+        }
+      });
+      if (fresh.length > 0) {
+        this.#deliverAudit();
+      }
+    }
+    return new Set(withheld.map(({ runId }) => runId));
   }
 
   /**
@@ -2496,6 +2627,10 @@ export class Workspace extends DurableObject<Env> {
         this.#db
           .delete(chatDocuments)
           .where(eq(chatDocuments.chatId, id))
+          .run();
+        this.#db
+          .delete(chatRunSources)
+          .where(eq(chatRunSources.chatId, id))
           .run();
         this.#db.delete(chatCodeRuns).where(eq(chatCodeRuns.chatId, id)).run();
         this.#db

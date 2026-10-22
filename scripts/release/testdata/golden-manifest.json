@@ -212,6 +212,12 @@
           "type": "r2_bucket"
         },
         {
+          "bucket_name": "grasp-os-brain-objects",
+          "jurisdiction": "eu",
+          "name": "BRAIN_OBJECTS",
+          "type": "r2_bucket"
+        },
+        {
           "name": "AI",
           "type": "ai"
         },

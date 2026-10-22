@@ -88,6 +88,12 @@ export const links = sqliteTable("links", {
   /** When they deleted their interview: a copy left open can't save it back. */
   deletedAt: text("deleted_at"),
   /**
+   * The team they led when their link went out; none when they led none.
+   * Only this makes theirs a lead's interview (rules.ts, `leadsTalked`):
+   * making someone a lead afterwards tells nobody about their interview.
+   */
+  ledTeam: text("led_team"),
+  /**
    * The version of what their interview holds: a save goes up by one, and
    * so does a delete or a new start, so no copy from before either ever
    * matches again. A save from a copy of another version is refused.
@@ -127,6 +133,12 @@ export const interviews = sqliteTable("interviews", {
 export const interviewStates = sqliteTable("interview_states", {
   person: text().primaryKey(),
   kind: text({ enum: ["own", "lead"] }).notNull(),
+  /**
+   * The team they gave a lead's interview for, as the roster said before
+   * they agreed; none for an employee's interview. Settled, with `kind`,
+   * once they agree.
+   */
+  leadOf: text("lead_of"),
   startedAt: text("started_at"),
   /** When they first agreed to what was read back (ISO 8601). */
   completedAt: text("completed_at"),

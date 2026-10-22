@@ -6,6 +6,7 @@ import type { AuditEvent } from "@grasp-os/shared/audit";
 import type { Role } from "@grasp-os/shared/roles";
 import { routerSecretHeader } from "@grasp-os/shared/router";
 import type { CoreApi } from "@grasp-os/shared/rpc";
+import type { EndedSession } from "@grasp-os/shared/sign-in";
 import { newWebSocketRpcSession } from "capnweb";
 import { createExecutionContext } from "cloudflare:test";
 import { env } from "cloudflare:workers";
@@ -76,6 +77,8 @@ interface SignInOptions {
   callbackURL?: string;
   /** The page sign-in starts from; the client's own by default. */
   origin?: string;
+  /** The browser's user agent, as it sends it back from the IdP. */
+  userAgent?: string;
 }
 
 /** Asks core to start signing in; returns the IdP URL and the browser's cookies. */
@@ -115,11 +118,16 @@ export const startSignIn = async (
 /** Follows the IdP's redirect back to core, as the browser would. */
 export const finishSignIn = async (
   callback: URL,
-  { cookie = "", coreEnv = env }: SignInOptions = {}
+  { cookie = "", coreEnv = env, userAgent }: SignInOptions = {}
 ) =>
   await routed(
     `${callback.pathname}${callback.search}`,
-    { headers: { cookie } },
+    {
+      headers: {
+        cookie,
+        ...(userAgent === undefined ? {} : { "user-agent": userAgent }),
+      },
+    },
     coreEnv
   );
 
@@ -289,6 +297,26 @@ export const whoami = async (cookie?: string, coreEnv: Env = env) => {
   try {
     using session = core.authenticate();
     return await session.whoami();
+  } finally {
+    core[Symbol.dispose]();
+  }
+};
+
+/**
+ * Ends every other session of the person behind `cookie`, as they do from
+ * Settings → Security; what each ending came to.
+ */
+export const endOtherSessions = async (
+  cookie: string
+): Promise<EndedSession[]> => {
+  const { core } = await openRpc(cookie);
+  try {
+    using session = core.authenticate();
+    const listed = await session.sessions.list();
+    const others = listed.filter(({ current }) => !current);
+    return await Promise.all(
+      others.map(async ({ id }) => await session.sessions.end(id))
+    );
   } finally {
     core[Symbol.dispose]();
   }

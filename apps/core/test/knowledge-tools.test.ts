@@ -174,7 +174,11 @@ describe("an agent's Knowledge tools", setUpTime, () => {
     }).toStrictEqual({
       hit: { documentId, section: 28 },
       section: {
-        section: { position: 28, headings: ["Handbook", "Parental leave"] },
+        section: {
+          position: 28,
+          version: 1,
+          headings: ["Handbook", "Parental leave"],
+        },
         text: leave,
         title: "Handbook",
       },

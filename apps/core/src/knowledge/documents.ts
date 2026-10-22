@@ -37,14 +37,15 @@ import { z } from "zod";
 import { auditedBatch, outboxed } from "../audit-outbox.ts";
 import { isUniqueViolation } from "../db/d1.ts";
 import {
+  brainPayloads,
   collections,
   documents,
   links,
-  sections,
   versions,
 } from "../db/knowledge/schema.ts";
 import { allowedCollections, noteProvenance } from "./access.ts";
 import type { Reader } from "./access.ts";
+import { admitToKnowledge } from "./admission.ts";
 import { allowedFor } from "./app-entries.ts";
 import type { Allowed } from "./app-entries.ts";
 import { readableCollection, requireWritable } from "./collections.ts";
@@ -55,20 +56,32 @@ import {
   parseFrontmatter,
 } from "./frontmatter.ts";
 import type { ParsedDocument } from "./frontmatter.ts";
+import { publishInline } from "./indexing.ts";
 import { extractLinks, splitSections } from "./markdown.ts";
 import type { Link, Section } from "./markdown.ts";
 import { memoryFileOf, requireWithinLimit } from "./memory-files.ts";
+import {
+  commitPayload,
+  committedKey,
+  isUncommitted,
+  readPayload,
+  stagePayload,
+} from "./payloads.ts";
+import type { StagedPayload } from "./payloads.ts";
 
 // Saving a document: its frontmatter is read and checked (and a memory
 // file's size, memory-files.ts), its Markdown split into sections and its
-// links found, and then one D1 batch (a transaction)
-// adds the next version, replaces the sections and links, updates the
-// document and stores the audit event. The batch commits whole or not at
-// all, and a save from a version that is no longer current writes nothing.
+// links found, its text stored as an immutable payload in R2
+// (payloads.ts), and then one D1 batch (a transaction) commits the
+// payload, adds the next version, replaces the links, updates the document
+// (queued for indexing) and stores the audit event; its sections are then
+// published to search (indexing.ts). The batch commits whole or not
+// at all, and a save from a version that is no longer current writes
+// nothing (its payload, unreferenced, is collected later).
 
 /**
- * Largest document text, in bytes of UTF-8. D1 keeps a row to 2 MB; the
- * version holds the whole text, with room to spare.
+ * Largest document text, in bytes of UTF-8: the sections, which hold it
+ * all again, are rows in D1, which keeps a row to 2 MB.
  */
 const knowledgeTextMaxBytes = 1024 * 1024;
 
@@ -93,7 +106,29 @@ interface Prepared {
   reviewDate: string | null;
   sections: Section[];
   links: Link[];
+  /**
+   * Every string its frontmatter decodes to, keys included: what YAML's
+   * escapes (`\u0063ancer`) make of the text, and what is kept and shown.
+   */
+  decoded: string[];
 }
+
+/** The strings in `value`, as YAML decoded it: keys and values, nested. */
+const stringsIn = (value: unknown): string[] => {
+  if (typeof value === "string") {
+    return [value];
+  }
+  if (Array.isArray(value)) {
+    return value.flatMap(stringsIn);
+  }
+  if (value instanceof Date || value === null || typeof value !== "object") {
+    return [];
+  }
+  return Object.entries(value).flatMap(([key, field]) => [
+    key,
+    ...stringsIn(field),
+  ]);
+};
 
 const invalid = (issues: string[]) =>
   knowledgeErrors.create("knowledge.invalid", { issues });
@@ -173,7 +208,7 @@ const prepare = (path: string, text: string, purge: boolean): Prepared => {
     }
     throw error;
   }
-  const { type, frontmatter, body } = parsed;
+  const { type, frontmatter, fields, body } = parsed;
   const found = splitSections(body);
   if (found.length > documentMaxSections) {
     throw knowledgeErrors.create("knowledge.too_many_sections", {
@@ -197,6 +232,7 @@ const prepare = (path: string, text: string, purge: boolean): Prepared => {
     reviewDate: frontmatter.review ?? null,
     sections: found,
     links: linked,
+    decoded: stringsIn(fields),
   };
 };
 
@@ -240,15 +276,23 @@ export const toSummary = (row: DocumentRow): DocumentSummary => ({
   tags: tagsSchema.parse(JSON.parse(row.tags)),
   reviewDate: row.reviewDate,
   currentVersion: row.currentVersion,
+  indexedVersion: row.indexedVersion,
+  indexing: row.indexState,
   updatedAt: row.updatedAt.toISOString(),
 });
 
-const versionSummaryColumns = {
+const versionColumns = {
   number: versions.number,
   author: versions.author,
   message: versions.message,
   restoredFrom: versions.restoredFrom,
   createdAt: versions.createdAt,
+};
+
+/** A version's metadata, its payload's hash joined: never its text. */
+const versionSummaryColumns = {
+  ...versionColumns,
+  sha256: brainPayloads.sha256,
 };
 
 const toVersionSummary = (row: {
@@ -257,13 +301,36 @@ const toVersionSummary = (row: {
   message: string | null;
   restoredFrom: number | null;
   createdAt: Date;
+  sha256: string;
 }): VersionSummary => ({
   number: row.number,
   author: row.author,
   message: row.message,
   restoredFrom: row.restoredFrom,
+  sha256: row.sha256,
   createdAt: row.createdAt.toISOString(),
 });
+
+/**
+ * The text of `document`'s version `number`, read from its payload, or
+ * undefined when there's no such version.
+ */
+export const versionText = async (
+  env: Env,
+  db: DrizzleD1Database,
+  documentId: string,
+  number: number
+): Promise<string | undefined> => {
+  const ref = await db
+    .select({ key: brainPayloads.key, sha256: brainPayloads.sha256 })
+    .from(versions)
+    .innerJoin(brainPayloads, eq(brainPayloads.key, versions.payloadKey))
+    .where(
+      and(eq(versions.documentId, documentId), eq(versions.number, number))
+    )
+    .get();
+  return ref === undefined ? undefined : await readPayload(env, ref);
+};
 
 const conflict = (existing: DocumentRow | undefined) =>
   knowledgeErrors.create("knowledge.conflict", {
@@ -355,6 +422,89 @@ export interface Write {
 }
 
 /**
+ * Admits `write` into canonical Knowledge (admission.ts), or throws:
+ * its text, path, message, the title it gets and every string its
+ * frontmatter decodes to (`prepared`). A purge removes personal data and
+ * the Grasp skills' sync writes the release's own text: neither is
+ * screened.
+ */
+const admitted = async (
+  env: Env,
+  by: Writer,
+  write: Write,
+  prepared: Prepared
+): Promise<void> => {
+  if (write.purge === true || write.graspSync === true) {
+    return;
+  }
+  // Everything the version keeps, each as a paragraph of its own: its
+  // path and the title made from it, its message, its text as written,
+  // and its frontmatter as YAML decodes it, which is what its row keeps
+  // (title, description, tags) and a reader shows: an escape in the raw
+  // text must not hide a word from the gate.
+  const kept = [
+    write.path,
+    prepared.title,
+    write.message ?? "",
+    write.text,
+    ...prepared.decoded,
+  ];
+  await admitToKnowledge(env, by.actor, write.collection.id, kept.join("\n\n"));
+};
+
+/**
+ * `row`, just saved, once its sections are published (`publishInline`):
+ * marked indexed when search holds them, queued otherwise.
+ */
+const published = async (
+  env: Env,
+  db: DrizzleD1Database,
+  row: DocumentRow,
+  found: readonly Section[],
+  purgeBy: AuditActor | undefined
+): Promise<DocumentRow> =>
+  (await publishInline(env, db, row.id, row.currentVersion, found, purgeBy))
+    ? { ...row, indexedVersion: row.currentVersion, indexState: "indexed" }
+    : row;
+
+/**
+ * Stores `text` for `collectionId` and sends the save's batch with it. A
+ * payload collected between its staging and the batch refuses the batch
+ * (`isUncommitted`): the text is stored again, once.
+ */
+const stagedAndSent = async (
+  env: Env,
+  db: DrizzleD1Database,
+  collectionId: string,
+  text: string,
+  send: (staged: StagedPayload) => Promise<void>
+): Promise<void> => {
+  try {
+    await send(await stagePayload(env, db, collectionId, text));
+  } catch (error) {
+    if (!isUncommitted(error)) {
+      throw error;
+    }
+    await send(await stagePayload(env, db, collectionId, text));
+  }
+};
+
+/**
+ * The row a save leaves: `saved`, with what it keeps of the document as it
+ * was (`existing`, none for a new one): what search holds of it, whether a
+ * purge waits on its indexing, when it was created.
+ */
+const savedRow = (
+  existing: DocumentRow | undefined,
+  saved: Omit<DocumentRow, "indexedVersion" | "indexPurgePending" | "createdAt">
+): DocumentRow => ({
+  indexedVersion: existing?.indexedVersion ?? null,
+  indexPurgePending: existing?.indexPurgePending ?? false,
+  createdAt: existing?.createdAt ?? saved.updatedAt,
+  ...saved,
+});
+
+/**
  * Writes the next version, if the document is still at `ifVersion`
  * (0: it doesn't exist yet). Throws `knowledge.conflict`, with the version
  * it is at, and writes nothing otherwise.
@@ -390,15 +540,20 @@ export const writeVersion = async (
     tags: JSON.stringify(prepared.tags),
     reviewDate: prepared.reviewDate,
     currentVersion: number,
+    // The save is its version's indexing intent (indexing.ts).
+    indexState: "queued" as const,
+    indexAttempts: 0,
+    indexFailure: null,
+    indexRun: 0,
+    indexFailedAt: null,
     updatedAt: now,
   };
-  const row: DocumentRow = {
+  const row = savedRow(existing, {
     id: documentId,
     collectionId: collection.id,
     path,
-    createdAt: existing?.createdAt ?? now,
     ...changes,
-  };
+  });
   const entry: AuditEntry = {
     actor: by.actor,
     action:
@@ -413,28 +568,19 @@ export const writeVersion = async (
       ...(restoredFrom === null ? {} : { restoredFrom }),
     },
   };
-  const statements: BatchItem<"sqlite">[] = [
+  const statements = (staged: StagedPayload): BatchItem<"sqlite">[] => [
+    ...commitPayload(db, staged),
     // The version's primary key is the edit check: a save that got here
     // from the same version first has taken this number.
     db.insert(versions).values({
       documentId,
       number,
-      text,
+      payloadKey: committedKey(staged),
       author: by.userId,
       message,
       restoredFrom,
       createdAt: now,
     }),
-    db.delete(sections).where(eq(sections.documentId, documentId)),
-    ...inChunks(
-      prepared.sections.map((section, position) => ({
-        documentId,
-        version: number,
-        position,
-        headings: JSON.stringify(section.headings),
-        text: section.text,
-      }))
-    ).map((chunk) => db.insert(sections).values(chunk)),
     db.delete(links).where(eq(links.fromDocumentId, documentId)),
     ...inChunks(
       prepared.links.map((link) => ({
@@ -459,16 +605,37 @@ export const writeVersion = async (
           )
         )
     : db.insert(documents).values(row);
-  await write.lastCheck?.();
-  try {
-    await auditedBatch(env, db, [document, ...statements]);
-  } catch (error) {
-    if (isUniqueViolation(error)) {
-      throw conflict(await findByPath(db, collection.id, path));
+  // A payload collected between its staging and the batch refuses the
+  // batch (`isUncommitted`): the text is stored again, once.
+  const send = async (staged: StagedPayload): Promise<void> => {
+    await write.lastCheck?.();
+    try {
+      await auditedBatch(env, db, [document, ...statements(staged)]);
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        throw conflict(await findByPath(db, collection.id, path));
+      }
+      throw error;
     }
-    throw error;
-  }
-  return toSummary(row);
+  };
+  // Admitted against the policy in effect now, after everything else
+  // that could refuse the write, and before anything is stored: R2 only
+  // ever holds text that was admitted.
+  await admitted(env, by, write, prepared);
+  // Checked before the text is stored too: a write it refuses never
+  // uploads it.
+  await write.lastCheck?.();
+  await stagedAndSent(env, db, collection.id, text, send);
+  // Saved: search has it once published, here or by its indexing run.
+  return toSummary(
+    await published(
+      env,
+      db,
+      row,
+      prepared.sections,
+      write.purge === true ? by.actor : undefined
+    )
+  );
 };
 
 /**
@@ -538,20 +705,14 @@ export const restoreVersion = async (
     documentId
   );
   requireWritable(env, person, collection);
-  const restored = await db
-    .select({ text: versions.text })
-    .from(versions)
-    .where(
-      and(eq(versions.documentId, document.id), eq(versions.number, version))
-    )
-    .get();
-  if (!restored) {
+  const restored = await versionText(env, db, document.id, version);
+  if (restored === undefined) {
     throw knowledgeErrors.create("knowledge.not_found");
   }
   return await writeVersion(env, personWriter(person), {
     collection,
     path: document.path,
-    text: restored.text,
+    text: restored,
     ifVersion,
     message: null,
     restoredFrom: version,
@@ -572,14 +733,16 @@ export const getDocument = async (
   const db = drizzle(env.KNOWLEDGE);
   const allowed = await allowedFor(env, db, reader);
   const id = documentIdSchema.safeParse(documentId);
-  // The text is read in the same query as the access check, so it is never
-  // read from a collection that stopped being readable in between.
+  // The version's payload is found in the same query as the access check,
+  // so it is never read from a collection that stopped being readable in
+  // between: a later revocation doesn't take back a read already allowed.
   const found = id.success
     ? await db
         .select({
           document: documents,
           collection: collections,
-          version: { ...versionSummaryColumns, text: versions.text },
+          version: versionColumns,
+          payload: { key: brainPayloads.key, sha256: brainPayloads.sha256 },
         })
         .from(documents)
         .innerJoin(collections, eq(collections.id, documents.collectionId))
@@ -590,13 +753,14 @@ export const getDocument = async (
             eq(versions.number, number ?? documents.currentVersion)
           )
         )
+        .leftJoin(brainPayloads, eq(brainPayloads.key, versions.payloadKey))
         .where(and(eq(documents.id, id.data), allowed.documents()))
         .get()
     : undefined;
   if (!found) {
     throw knowledgeErrors.create("knowledge.not_found");
   }
-  const { document, collection, version: row } = found;
+  const { document, collection, version: row, payload } = found;
   // Recorded before a missing version is refused: that a version isn't
   // there says something of the document too, so a sensitive one
   // restricts the reader either way.
@@ -610,10 +774,14 @@ export const getDocument = async (
     },
     collection
   );
-  if (row === null) {
+  if (row === null || payload === null) {
     throw knowledgeErrors.create("knowledge.not_found");
   }
-  const read: Version = { ...toVersionSummary(row), text: row.text };
+  const text = await readPayload(env, payload);
+  const read: Version = {
+    ...toVersionSummary({ ...row, sha256: payload.sha256 }),
+    text,
+  };
   return { ...toSummary(document), version: read, provenance };
 };
 
@@ -687,6 +855,7 @@ export const history = async (
   const rows = await db
     .select(versionSummaryColumns)
     .from(versions)
+    .innerJoin(brainPayloads, eq(brainPayloads.key, versions.payloadKey))
     .innerJoin(documents, eq(documents.id, versions.documentId))
     .innerJoin(collections, eq(collections.id, documents.collectionId))
     .where(
