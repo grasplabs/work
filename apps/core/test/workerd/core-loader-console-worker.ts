@@ -289,6 +289,32 @@ Real.prototype.run = function () {
 export const App = new Proxy(Real, {
   get: (target, property) => (property === "prototype" ? {} : Reflect.get(target, property)),
 });`,
+  // A fetch that throws.
+  "/fetch-thrown": `export class App extends WorkerEntrypoint {
+  fetch() {
+    throw new TypeError(${JSON.stringify(values.thrown)});
+  }
+}`,
+  // The context its constructor is given, kept, handed a rejection: the
+  // runtime's own would report it.
+  "/thrown-kept-context": `export class App extends WorkerEntrypoint {
+  constructor(ctx, env) {
+    super(ctx, env);
+    this.kept = ctx;
+  }
+  async run() {
+    this.kept.waitUntil(Promise.reject(new TypeError(${JSON.stringify(values.thrown)})));
+    await scheduler.wait(50);
+    return "kept";
+  }
+}`,
+  // A rejection nothing handles, left as the call answers.
+  "/thrown-unhandled": `export class App extends WorkerEntrypoint {
+  run() {
+    Promise.reject(new TypeError(${JSON.stringify(values.thrown)}));
+    return "unhandled";
+  }
+}`,
   // A thrown error with details, as an App error carries them.
   "/thrown-details": `export class App extends WorkerEntrypoint {
   run() {
@@ -311,20 +337,23 @@ const answerOfReview = async (
   // `/loud/<route>`: the same isolate loaded as it is, which shows the way
   // is read.
   const loud = route.startsWith("/loud/");
-  const source = reviewIsolates[loud ? route.slice("/loud".length) : route];
+  const inner = loud ? route.slice("/loud".length) : route;
+  const source = reviewIsolates[inner];
   if (source === undefined) {
     return undefined;
   }
+  // `loud-<name>-c40b`, its name the route's without `thrown-`.
+  const loudValue = `loud-${inner.slice(1).replace(/^thrown-/u, "")}-c40b`;
   const code = {
     ...settings,
     mainModule: "app.js",
     modules: {
-      "app.js": `import { WorkerEntrypoint } from "cloudflare:workers";\n${loud ? source.replaceAll("record-value-c40b", `loud${route.slice("/loud/thrown".length)}-c40b`) : source}\n`,
+      "app.js": `import { WorkerEntrypoint } from "cloudflare:workers";\n${loud ? source.replaceAll("record-value-c40b", loudValue) : source}\n`,
     },
   };
   try {
     return {
-      answered: await (route.startsWith("/fetch-") ? fetchApp : runApp)(
+      answered: await (inner.startsWith("/fetch-") ? fetchApp : runApp)(
         loud ? env.LOADER.load(code) : quietLoader(env.LOADER).load(code)
       ),
     };

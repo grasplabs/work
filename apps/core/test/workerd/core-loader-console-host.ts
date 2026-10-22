@@ -17,7 +17,16 @@ const settings = {
 };
 
 /** What an App's class does, by route: each way it can have workerd report. Not an alarm: a facet can't set one. */
-export const objectCases = ["fail", "timer", "constructor", "console"] as const;
+export const objectCases = [
+  "fail",
+  "timer",
+  "constructor",
+  "console",
+  "getter",
+  "waitUntil",
+  "kept",
+  "block",
+] as const;
 
 export type ObjectCase = (typeof objectCases)[number];
 
@@ -30,11 +39,30 @@ const methodOf: Readonly<Record<ObjectCase, string>> = {
   timer: "timer",
   constructor: "fail",
   console: "console",
+  getter: "read",
+  waitUntil: "waitUntil",
+  kept: "keptWaitUntil",
+  block: "block",
+};
+
+/** What the App's class's constructor does beyond making its base, by case. */
+const constructorOf = (name: ObjectCase): string => {
+  if (name === "constructor") {
+    return "constructor(ctx, env) { super(ctx, env); throw new Error(value); }";
+  }
+  if (name === "kept") {
+    // The context its constructor is given, kept: the runtime's own would
+    // report what its waitUntil is handed.
+    return "constructor(ctx, env) { super(ctx, env); this.state = ctx; }";
+  }
+  return "";
 };
 
 /**
  * An App's server class, doing what `name` says with `value`: throwing from
- * a method, a timer or its constructor, or logging.
+ * a method, an accessor, a timer, its constructor or a
+ * `blockConcurrencyWhile` callback, rejecting what it hands a context's
+ * `waitUntil`, or logging.
  */
 const sourceOf = (
   name: ObjectCase,
@@ -42,7 +70,7 @@ const sourceOf = (
 ): string => `import { DurableObject } from "cloudflare:workers";
 const value = ${JSON.stringify(value)};
 export class App extends DurableObject {
-  ${name === "constructor" ? "constructor(ctx, env) { super(ctx, env); throw new Error(value); }" : ""}
+  ${constructorOf(name)}
   fail() {
     throw Object.assign(new TypeError(value), { details: { retryAfterMs: 5 } });
   }
@@ -54,6 +82,31 @@ export class App extends DurableObject {
   console() {
     console.log(value);
     return "logged";
+  }
+  // An accessor where workerd reads the method it calls. Workerd calls only
+  // what the class's prototype has: an instance's own property is no
+  // method of its ("does not implement the method"), so isn't a way.
+  get read() {
+    if (${JSON.stringify(name)} === "getter") {
+      throw new TypeError(value);
+    }
+    return () => "read";
+  }
+  async waitUntil() {
+    this.ctx.waitUntil(Promise.reject(new Error(value)));
+    await scheduler.wait(100);
+    return "waited";
+  }
+  async keptWaitUntil() {
+    this.state.waitUntil(Promise.reject(new Error(value)));
+    await scheduler.wait(100);
+    return "waited";
+  }
+  async block() {
+    await this.ctx.blockConcurrencyWhile(async () => {
+      throw new TypeError(value);
+    });
+    return "never";
   }
 }
 `;

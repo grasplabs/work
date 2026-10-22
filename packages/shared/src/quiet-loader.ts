@@ -19,8 +19,10 @@ import { hasNodeModules, quietModules } from "./quiet-isolate.ts";
 // reports for an isolate. What the module can't reach, `quietLoader` does
 // (GRA-939): the isolate's main is a wrapper (`entrySource`) that answers
 // whatever its entrypoint's call throws as a value, which the stub
-// `quietLoader` hands back throws again here, and a default export's own
-// context's `waitUntil` swallows a rejection. Isolates of App code,
+// `quietLoader` hands back throws again here, and every context it hands
+// the isolate's code (a constructor's, a default export's handler's) is a
+// quiet one: its `waitUntil` swallows a rejection, and its
+// `blockConcurrencyWhile` turns a callback's throw into a constant error. Isolates of App code,
 // connectors and packages have no Node.js (`isolateBase`), so no timer
 // imported by name from `node:timers`. What still reaches a workerd served
 // `--verbose` is that kind of timer's throw in the platform's own code that
@@ -34,15 +36,19 @@ import { hasNodeModules, quietModules } from "./quiet-isolate.ts";
 // as for any isolate: what it leaves uncaught is caught (quiet-isolate.ts),
 // and what its entrypoint or Durable Object class throws crosses as a
 // value (`entrySource`), so none of it is reported with its message. The
-// one gap is accepted and bounded: on plain workerd served `--verbose`,
-// with `SANDBOX_IN_PROCESS=unbounded` (core's env.d.ts), a tailed isolate's
-// `console` calls also print a raw line to the process's own output, as the
-// tail receives them. The tail takes its lines from the runtime's own
-// console, which an isolate can't reach one way and not the other, so no
-// replacement of `console` keeps the tail's lines and drops the print.
-// Without `--verbose` nothing prints, and on Cloudflare the tail alone gets
-// them. GRA-919 delivers the lines to the tail's destinations instead.
-// Connect attaches no tail.
+// one gap: on plain workerd, a tailed isolate's `console` calls also print
+// a raw line to the process's own stdout, as the tail receives them,
+// whether or not workerd is served `--verbose`. Core loads a tailed isolate
+// itself (an App's server, a draft's preview) only with
+// `SANDBOX_IN_PROCESS=unbounded` (core's env.d.ts), so that is where an
+// App's console reaches the deployment's logs. The tail takes its lines
+// from the runtime's own console, which an isolate can't reach one way and
+// not the other, so no replacement of `console` keeps the tail's lines and
+// drops the print. On Cloudflare the tail alone gets them. The fix is
+// GRA-919: deliver the tail's lines without the runtime's console. Until
+// then, on-prem runs Apps only with `unbounded` (`requireBoundedHere`,
+// core's sandboxed.ts), so GRA-919 is needed before on-prem Apps handle
+// personal data. Connect attaches no tail.
 
 /**
  * What `quietLoader` needs of a Loader's code: the Worker Loader's own
@@ -131,6 +137,7 @@ export const builtins = Object.freeze({
   ownKeys: Reflect.ownKeys,
   descriptorOf: Reflect.getOwnPropertyDescriptor,
   prototypeOf: Reflect.getPrototypeOf,
+  setPrototypeOf: Reflect.setPrototypeOf,
   create: Object.create,
   isArray: Array.isArray,
   isPrototypeOf: Object.prototype.isPrototypeOf,
@@ -142,6 +149,9 @@ export const builtins = Object.freeze({
   Map,
   mapGet: Map.prototype.get,
   mapSet: Map.prototype.set,
+  WeakMap,
+  weakGet: WeakMap.prototype.get,
+  weakSet: WeakMap.prototype.set,
   Proxy,
   Response,
   Headers,
@@ -193,8 +203,10 @@ const maxThrownDetails = 8192;
  *   accessor) answers that throw. A constructor that throws makes a stand-in
  *   whose every method answers it. The context it is given is quiet.
  * - A default export's handler object: its handlers wrapped, each called
- *   on the object, its context's `waitUntil` swallowing a rejection (the
- *   quiet module covers a `WorkerEntrypoint`'s own `this.ctx`).
+ *   on the object, its context quiet (the quiet module covers a class's
+ *   own `this.ctx`). A quiet context's `waitUntil` swallows a rejection,
+ *   and its `blockConcurrencyWhile` answers a callback's throw as a
+ *   constant error.
  * - `fetch` answers a thrown error as a Response under `thrownHeader`; a
  *   Response of the entrypoint's own never carries that header.
  * - Anything else is exported as it is.
@@ -204,7 +216,9 @@ const maxThrownDetails = 8192;
  *   own (`alarm`, `webSocketMessage`, `webSocketClose`,
  *   `webSocketError`, `fetch`) answers one too, so a throw of those
  *   is swallowed, not reported: a throwing `alarm` isn't retried. A
- *   constructor that throws makes the same stand-in.
+ *   constructor that throws makes the same stand-in. Its constructor is
+ *   given the quiet context too (`RealStateBase`), so the runtime's own
+ *   never reaches the App's code.
  *
  * A value answered is copied into plain data inside the call (`plainOf`),
  * so a getter or a proxy's trap in it runs, and throws, there, not as
@@ -225,7 +239,7 @@ const entrySource = (
   kind: ExportKind
 ): string => `import { builtins } from ${JSON.stringify(`./${builtins}`)};
 import * as main from ${JSON.stringify(`./${mainModule}`)};
-const { apply, get, define, ownKeys, descriptorOf, prototypeOf, create, isArray, isPrototypeOf, objectPrototype, stringOf, slice, stringify, parse, Map, mapGet, mapSet, Proxy, Response, Headers, headersHas, headersDelete, resolve, then, bind, EntrypointClass, entrypointPrototype, DurableClass, durablePrototype, responsePrototype, responseHeaders, responseBody, responseStatus, responseStatusText } = builtins;
+const { apply, get, define, ownKeys, descriptorOf, prototypeOf, setPrototypeOf, create, isArray, isPrototypeOf, objectPrototype, stringOf, slice, stringify, parse, Map, mapGet, mapSet, WeakMap, weakGet, weakSet, Proxy, Response, Headers, headersHas, headersDelete, resolve, then, bind, EntrypointClass, entrypointPrototype, DurableClass, durablePrototype, responsePrototype, responseHeaders, responseBody, responseStatus, responseStatusText } = builtins;
 const isDurable = ${JSON.stringify(kind === "durableObject")};
 const BaseClass = isDurable ? DurableClass : EntrypointClass;
 const basePrototype = isDurable ? durablePrototype : entrypointPrototype;
@@ -462,6 +476,25 @@ const call = (key, method, self, args) =>
 const thrownCall = (key, error) =>
   key === "fetch" ? async () => thrownResponse(error) : async () => thrownAnswer(error);
 const swallowed = () => undefined;
+// What a \`blockConcurrencyWhile\` callback's throw becomes: the object
+// still breaks, but workerd logs this, never the code's own message.
+const blockedError = new Error("A blockConcurrencyWhile callback threw.");
+const blocked = () => {
+  throw blockedError;
+};
+// Its value crosses back boxed: a record with no prototype has no \`then\`
+// for the runtime to read as it settles the callback's promise.
+const unboxed = (box) => box.value;
+const blockedWhile = (block, target) => (callback) =>
+  apply(then, apply(block, target, [
+    async () => {
+      try {
+        return recordOf(["value", await apply(callback, undefined, [])]);
+      } catch {
+        return blocked();
+      }
+    },
+  ]), [unboxed]);
 const quietContext = (ctx) => {
   if (ctx === null || typeof ctx !== "object") {
     return ctx;
@@ -473,9 +506,53 @@ const quietContext = (ctx) => {
       if (property === "waitUntil" && typeof value === "function") {
         return (promise) => apply(value, target, [apply(then, resolve(promise), [undefined, swallowed])]);
       }
+      if (property === "blockConcurrencyWhile" && typeof value === "function") {
+        return blockedWhile(value, target);
+      }
       return typeof value === "function" ? apply(bind, value, [target]) : value;
     },
   ]));
+};
+// A Durable Object's constructor is handed the quiet context too, so the
+// runtime's own never reaches the App's code (a constructor that keeps it
+// would hand its \`waitUntil\` what workerd reports). \`DurableObject\`'s
+// own constructor takes the real state alone, so \`RealStateBase\` stands
+// between the App's class and it, and swaps the quiet context back for the
+// state it stands for; the base then sets \`this.ctx\`, which the quiet
+// module's accessor makes a quiet one again.
+const realStates = new WeakMap();
+const RealStateBase = class extends DurableClass {
+  constructor(ctx, env) {
+    const real = ctx !== null && typeof ctx === "object" ? apply(weakGet, realStates, [ctx]) : undefined;
+    super(real === undefined ? ctx : real, env);
+  }
+};
+// Puts \`RealStateBase\` under the class in \`Base\`'s chain that extends
+// \`DurableObject\`: false where it can't (a frozen class).
+const takesQuietState = (Base) => {
+  try {
+    let at = Base;
+    for (let step = 0; step < 64 && at !== null; step += 1) {
+      const next = prototypeOf(at);
+      if (next === DurableClass) {
+        return setPrototypeOf(at, RealStateBase);
+      }
+      if (next === RealStateBase) {
+        return true;
+      }
+      at = next;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+};
+const contextFor = (ctx) => {
+  const quiet = quietContext(ctx);
+  if (isDurable && quiet !== ctx) {
+    apply(weakSet, realStates, [quiet, ctx]);
+  }
+  return quiet;
 };
 const methodOf = (property) =>
   typeof property === "string" && property !== "constructor" && property !== "then";
@@ -487,6 +564,9 @@ const standIn = (error) =>
       methodOf(property) ? thrownCall(property, error) : get(target, property, target),
   ]));
 const quietClass = (Base) => {
+  if (isDurable && !takesQuietState(Base)) {
+    return refusedClass;
+  }
   const handler = recordOf([
     "get",
     (target, property) => {
@@ -507,9 +587,7 @@ const quietClass = (Base) => {
       let failed = false;
       let thrown;
       try {
-        // A Durable Object's constructor takes its real state alone; the
-        // quiet module's accessor makes the context it keeps a quiet one.
-        super(isDurable ? ctx : quietContext(ctx), env);
+        super(contextFor(ctx), env);
       } catch (error) {
         failed = true;
         thrown = error;
@@ -864,13 +942,11 @@ const quietStub = <Stub extends QuietableStub>(
  * `webSocketClose`, `webSocketError`) or builds (the constructor) throws
  * nothing to it (a facet can set no alarm today, so `alarm` is caught for
  * when it can). The tail already holds the console of an App, so its
- * console stays as it is; what workerd served `--verbose` prints of it to
- * the process's own output is the one thing left (GRA-939): the lines the
- * tail is for, which plain workerd prints too. That holds only where
- * `SANDBOX_IN_PROCESS=unbounded` runs an App in core's own Loader, and
- * never without `--verbose`, which an operator of that mode must not
- * serve (quiet-isolate.ts). An isolate without a tail is refused: nothing
- * needs one.
+ * console stays as it is, and plain workerd prints those same lines to
+ * the process's own stdout, served `--verbose` or not: the one gap (see
+ * the header). It holds where `SANDBOX_IN_PROCESS=unbounded` runs an App
+ * in core's own Loader, which on-prem Apps need today; GRA-919 closes it.
+ * An isolate without a tail is refused: nothing needs one.
  */
 export const quietLoader = <
   Code extends QuietableCode,

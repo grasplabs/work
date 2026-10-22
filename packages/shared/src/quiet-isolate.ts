@@ -22,24 +22,33 @@
  * the App puts back can only call the silenced ones), and keeps what the
  * isolate's code leaves uncaught from anything workerd served `--verbose`
  * reports for an isolate: a timer's callback that throws (the global
- * timers, `node:timers`' default export), a promise handed to a
- * `WorkerEntrypoint`'s `this.ctx.waitUntil` that rejects, and any other
+ * timers, `node:timers`' default export), a promise handed to a class's
+ * `this.ctx.waitUntil` that rejects, a `this.ctx.blockConcurrencyWhile`
+ * callback that throws (answered as a constant error), and any other
  * unhandled rejection or error (`quietErrors`).
  *
  * What it can't stop, workerd served `--verbose` still reports, message
  * and stack: an exception thrown out of an entrypoint's call (an RPC
  * method's, a fetch's), as it hands it to the caller as the call's answer;
  * what the callback of a timer imported by name from `node:timers` throws
- * (the binding is the module's own); and what is handed to the `waitUntil`
- * of any context other than an entrypoint's `this.ctx`, such as the one its
- * constructor is given and keeps, or a default export's handler's (the
- * runtime passes those itself, before anything of the quiet module's can
- * wrap them). Core's and connect's own Loader close the first and the last
- * (quiet-loader.ts) and give App code no Node.js (`isolateBase`, GRA-939).
- * Without `--verbose` none of it is printed. The supervisor refuses `--verbose`
+ * (the binding is the module's own); and what is handed to a context other
+ * than a class's `this.ctx`: the one its constructor is given and keeps,
+ * or a default export's handler's (the runtime passes those itself, before
+ * anything of the quiet module's can wrap them). Core's and connect's own
+ * Loader close the first and the last (quiet-loader.ts: every context it
+ * hands App code, a Durable Object's constructor's too, is a quiet one)
+ * and give App code no Node.js (`isolateBase`, GRA-939). Without
+ * `--verbose` none of it is printed. The supervisor refuses `--verbose`
  * (scripts/workerd-sandbox.ts); core loading isolates itself under
  * `SANDBOX_IN_PROCESS=unbounded` can't tell how its process was served, so
  * there not serving it `--verbose` is the operator's rule (GRA-939).
+ *
+ * An isolate with a tail keeps its console, and plain workerd prints what
+ * it writes to the process's stdout as the tail receives it, served
+ * `--verbose` or not (quiet-loader.ts). Only core loads one, under
+ * `SANDBOX_IN_PROCESS=unbounded`: there an App's console reaches the
+ * deployment's logs until GRA-919 delivers the tail's lines without the
+ * runtime's console.
  *
  * One kind of call keeps what it writes, bounded, for whom core says: a
  * draft's sealed preview, whose lines go to the agent's next check of
@@ -115,10 +124,13 @@ const timerNames = '["setTimeout", "setInterval", "setImmediate"]';
  *
  * - A timer's callback that throws is caught where it runs: the global
  *   timers, and `node:timers`' default export where the isolate has it.
- * - A promise handed to `this.ctx.waitUntil` of a `WorkerEntrypoint` (the
- *   classes core calls) that rejects is caught as it is handed over: the
+ * - A promise handed to `this.ctx.waitUntil` of a `WorkerEntrypoint` or a
+ *   Durable Object that rejects is caught as it is handed over, and a
+ *   `this.ctx.blockConcurrencyWhile` callback's throw becomes a constant
+ *   error (the object still breaks; workerd logs the constant): the
  *   context's every other property is the runtime's own. Not the context
- *   its constructor is given, which the runtime passes itself.
+ *   its constructor is given, which the runtime passes itself
+ *   (quiet-loader.ts makes that one quiet).
  * - An unhandled rejection or error has its default prevented.
  *
  * Its imports are the runtime's own modules, which no App's module can
@@ -150,6 +162,29 @@ const quietRecord = (entries) => {
   return record;
 };
 const quietSwallowed = () => undefined;
+// What a \`blockConcurrencyWhile\` callback's throw becomes: the object
+// still breaks, but workerd logs this, never the code's own message. Its
+// value crosses back boxed, in a record with no \`then\` for the runtime
+// to read as it settles the callback's promise.
+const quietBlockedError = new Error("A blockConcurrencyWhile callback threw.");
+const quietBlocked = () => {
+  throw quietBlockedError;
+};
+const quietUnboxed = (box) => box.value;
+const quietBlockedWhile = (block, target) => (callback) =>
+  quietApply(
+    quietThen,
+    quietApply(block, target, [
+      async () => {
+        try {
+          return quietRecord(["value", await quietApply(callback, undefined, [])]);
+        } catch {
+          return quietBlocked();
+        }
+      },
+    ]),
+    [quietUnboxed]
+  );
 const caught = (callback) =>
   typeof callback === "function"
     ? function (...args) {
@@ -188,6 +223,9 @@ ${options.nodejsCompat === true ? "quietTimers(quietNodeTimers);\n" : ""}const q
                 quietApply(value, target, [
                   quietApply(quietThen, quietResolve(promise), [undefined, quietSwallowed]),
                 ]);
+            }
+            if (property === "blockConcurrencyWhile" && typeof value === "function") {
+              return quietBlockedWhile(value, target);
             }
             return typeof value === "function" ? quietApply(quietBind, value, [target]) : value;
           },
