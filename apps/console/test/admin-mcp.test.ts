@@ -595,6 +595,32 @@ describe("the admin's MCP", () => {
     });
   });
 
+  it("says a rollout that finished is the last one, never one going out now", async () => {
+    // Every earlier test's rollout ends, so this one is the latest and none goes out.
+    await db.update(rollouts).set({ status: "done" });
+    const release = await publishRelease({ notes: "feat(core): done" });
+    await importReleases(env.RELEASES, db);
+    const now = new Date(Date.now() + 60_000);
+    await db.insert(rollouts).values({
+      id: crypto.randomUUID(),
+      kind: "release",
+      releaseId: release.id,
+      status: "done",
+      ring: 2,
+      startedBy: staff.email,
+      createdAt: now,
+      updatedAt: now,
+    });
+    const { answer } = await asStaff(
+      rpc("tools/call", { name: "platforms", arguments: {} })
+    );
+    const text = answer.result?.content?.[0]?.text ?? "";
+    expect({
+      last: text.includes(`The last rollout: ${release.id}, done.`),
+      goingOut: text.includes("Going out now"),
+    }).toStrictEqual({ last: true, goingOut: false });
+  });
+
   it("serves no standing stream or session: only POST", async () => {
     const jwt = await accessJwt(staff.email);
     const statuses = await Promise.all(

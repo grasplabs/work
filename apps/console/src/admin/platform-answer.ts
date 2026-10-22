@@ -85,7 +85,7 @@ export const platformsAnswer = async (
   const goingOut =
     rollout === null
       ? "No release has gone out yet."
-      : `Going out now: ${rollout.releaseId ?? "settings only"}, ${rollout.status}${rollout.status === "waiting" ? " for someone at Grasp to approve the next ring" : ""}. ${rings.map((ring) => `Ring ${ring.ring}: ${ring.done} of ${ring.of} on it (${ring.state})`).join("; ")}.`;
+      : `${rollout.status === "running" || rollout.status === "waiting" ? "Going out now" : "The last rollout"}: ${rollout.releaseId ?? "settings only"}, ${rollout.status}${rollout.status === "waiting" ? " for someone at Grasp to approve the next ring" : ""}.${rings.map((ring) => ` Ring ${ring.ring}: ${ring.done} of ${ring.of} on it (${ring.state}).`).join("")}`;
   return {
     text:
       companies.length > 0
