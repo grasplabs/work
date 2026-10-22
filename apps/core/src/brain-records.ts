@@ -40,7 +40,7 @@ import { auditedBatch, outboxed } from "./audit-outbox.ts";
 import { brainRecords } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
 
-// The Playbook's records, as core keeps them (`brain_records`), and adding
+// The brain's records, as core keeps them (`brain_records`), and adding
 // them (`brain.addRecords`). Threat model, and how each is closed (the
 // design and its threat note are on GRA-527):
 //
@@ -386,7 +386,7 @@ const writeRecords = async (
     outboxed(db, {
       actor,
       action: "brain.records.added",
-      target: { type: "brain", id: "playbook" },
+      target: { type: "brain", id: "records" },
       provenance: fresh.map(keyOf),
       detail: { added: fresh.length },
     }),
@@ -560,7 +560,7 @@ interface ForTeam<T> {
   value: T;
 }
 
-/** The Playbook's records, as the brain reads them, oldest first. */
+/** The brain's records, as the brain reads them, oldest first. */
 export interface HeldRecords {
   sources: Source[];
   tools: Tool[];

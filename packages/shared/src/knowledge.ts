@@ -123,7 +123,7 @@ export type CollectionInput = z.input<typeof collectionInputSchema>;
  * ID of its own, the same in every deployment, which no collection a
  * person creates has (theirs are UUIDs): the install creates it, open to
  * everyone and changed by admins, if it isn't there yet, and every App
- * created from a blueprint that names it shares it, such as the Playbook.
+ * created from a blueprint that names it shares it.
  */
 export const declaredCollectionSchema = z.strictObject({
   id: collectionIdSchema.refine(
