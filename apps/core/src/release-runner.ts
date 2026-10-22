@@ -11,8 +11,10 @@ import {
   operationResultMaxBytes,
 } from "@grasp-os/shared/operation-limits";
 import { boundedRpcTarget } from "@grasp-os/shared/rpc-target";
-import { rpcArgumentDepth } from "@grasp-os/shared/screens";
-import { commitMaxInputBytes } from "@grasp-os/shared/stores";
+import {
+  isolateArgumentDepth,
+  commitMaxInputBytes,
+} from "@grasp-os/shared/stores";
 import type { RpcTarget } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -229,7 +231,7 @@ const settled = async (
  * whole, whatever RPC does with an error. Bounded as the channel is.
  */
 const IsolateChannelTarget = boundedRpcTarget({
-  depth: rpcArgumentDepth,
+  depth: isolateArgumentDepth,
   size: commitMaxInputBytes,
 });
 

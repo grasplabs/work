@@ -544,19 +544,6 @@ export interface ChatsApi {
     screen?: string
   ) => Promise<PreviewBundle>;
   /**
-   * Calls `method` of the draft's server code with `args`, as a screen's
-   * `call` does, in the draft's preview: nothing it does leaves the
-   * preview, and it reads no real data. `revision` is the preview's:
-   * `app.preview_outdated` once the draft changed.
-   */
-  previewCall: (
-    chatId: string,
-    app: string,
-    revision: number,
-    method: string,
-    args: unknown[]
-  ) => Promise<unknown>;
-  /**
    * Calls a function of the draft of an App of spec 8's layout, as a
    * screen's `callFunction` does, in the draft's preview: its draft
    * release, on a store of its own, with no resources, so it changes none

@@ -926,6 +926,12 @@ export interface WorkflowCalls {
    * be read, and every step is then held to `all`.
    */
   steps: Record<string, string[]> | null;
+  /**
+   * Each step's kind, by step name, as its outline names it
+   * (`StepOutline.kind`): what the host lets it run as (`stepRunsAs`).
+   * Empty when the steps can't be read.
+   */
+  kinds: Record<string, StepKind>;
   /** Every binding the workflow's code calls, in any step. */
   all: string[];
   /**
@@ -973,6 +979,80 @@ export const reviewerChosenAtRun = (
 ): boolean =>
   calls.steps === null ||
   (calls.dynamic?.[outlineNameOf(engineStep)]?.includes("from") ?? false);
+
+/**
+ * How the host is asked to run a step, by the SDK only in these ways for
+ * each kind (workflow.ts): `do` its function (an exact step, an AI step,
+ * a decision's opening, and its parts `name#…`); `sleep` (a wait);
+ * `waitForDecision` (a decision's `name#answer…`); and, inside a step's
+ * attempt, `model` (an AI step), `decision` (opening one) and
+ * `recipients` (who a decision asks, in its `#ask` or `#remind` part).
+ */
+export type StepUse =
+  | "do"
+  | "sleep"
+  | "waitForDecision"
+  | "model"
+  | "decision"
+  | "recipients";
+
+/** A decision's parts the SDK asks who it asks in (workflow.ts). */
+const decisionAskParts = new Set(["ask", "remind"]);
+
+/** A decision's parts the SDK runs as steps: asking, and when it asked. */
+const decisionDoParts = new Set(["ask", "remind", "asked", "reminded"]);
+
+/** A decision's parts the SDK waits for its answer in. */
+const decisionWaitParts = new Set(["answer", "answer-after-reminder"]);
+
+/**
+ * Each use, by the kind kept for a step and the decision part (`name#…`,
+ * null for none) its engine name runs.
+ */
+const runsAs: Record<
+  StepUse,
+  (kind: StepKind, part: string | null) => boolean
+> = {
+  do: (kind, part) =>
+    part === null
+      ? kind !== "wait"
+      : kind === "decision" && decisionDoParts.has(part),
+  sleep: (kind, part) => kind === "wait" && part === null,
+  waitForDecision: (kind, part) =>
+    kind === "decision" && part !== null && decisionWaitParts.has(part),
+  recipients: (kind, part) =>
+    kind === "decision" && part !== null && decisionAskParts.has(part),
+  decision: (kind, part) => kind === "decision" && part === null,
+  model: (kind, part) => kind === "ai" && part === null,
+};
+
+/**
+ * Whether a step of engine name `engineStep` may be run as `use`: as the
+ * kind its review keeps (`WorkflowCalls.kinds`) runs it, so a reviewed
+ * name is never run as another kind (a wait as code, an exact step asking
+ * a model or a person). Any use when the steps can't be read, as any name
+ * then; the SDK's `$params` only as a `do`. A reviewed name with no kept
+ * kind is refused.
+ */
+export const stepRunsAs = (
+  calls: WorkflowCalls,
+  engineStep: string,
+  use: StepUse
+): boolean => {
+  if (calls.steps === null) {
+    // Held to all its calls; a model only if its code has an AI step at
+    // all (`aiStepCalls`, kept as `kinds`).
+    return use !== "model" || Object.values(calls.kinds).includes("ai");
+  }
+  if (engineStep === paramsStep) {
+    return use === "do";
+  }
+  const name = outlineNameOf(engineStep);
+  const kind = Object.hasOwn(calls.kinds, name) ? calls.kinds[name] : undefined;
+  const hash = engineStep.indexOf("#");
+  const part = hash === -1 ? null : engineStep.slice(hash + 1);
+  return kind !== undefined && runsAs[use](kind, part);
+};
 
 /**
  * The task a step of engine name `engineStep` is, as `calls` (its
