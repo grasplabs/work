@@ -1,12 +1,17 @@
 import type { ConnectionOwner } from "@grasp-os/shared/connect";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
-import { and, eq, inArray, isNotNull, ne, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, ne, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { connectionOwnersOf } from "./connections.ts";
-import { permissions } from "./db/core/schema.ts";
+import {
+  appResourceBindings,
+  apps as appsTable,
+  permissions,
+  sdkStoreOwners,
+} from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
 import { collectionTeams, collections } from "./db/knowledge/schema.ts";
 import { mayRead } from "./knowledge/access.ts";
@@ -21,8 +26,15 @@ import type { CollectionAccess, PersonAccess } from "./knowledge/access.ts";
 // Apps, what the Apps it was ever granted to call may have read (their
 // answers carry it), and what the Apps ever granted to write into it may
 // have read (their input carries it), whatever the depth
-// (`reachedThroughCalls`). Once granted counts for
-// good, revoked or not: the App may still hold what it read. Who may read
+// (`reachedThroughCalls`). Calls between Apps are v1 grants on another
+// App's exports; sealed app bindings an admin approved (resource-apps.ts),
+// each counted both ways, since the functions an App declares live in its
+// releases, not the binding, so any call may write; and store grants on
+// another App's store (store-operations.ts), both ways too, since a store's
+// actions can't tell a read from a write. Once granted counts for
+// good, revoked or not: the App may still hold what it read. An app
+// binding to an App with no row, or a store grant on a store no App owns,
+// fails closed, as an unresolved source (`app:<id>`, `store:<id>`). Who may read
 // each: a personal connection (such as a mailbox) only its owner; a shared
 // connection everyone in the organization, who may all use it; a
 // collection whoever Knowledge lets read it now (`mayRead`, the rule of
@@ -60,8 +72,10 @@ import type { CollectionAccess, PersonAccess } from "./knowledge/access.ts";
 // read.
 
 /** A source as the audit log and refusals name it. */
-const sourceId = (type: "connection" | "collection", id: string): string =>
-  `${type}:${id}`;
+const sourceId = (
+  type: "connection" | "collection" | "app" | "store",
+  id: string
+): string => `${type}:${id}`;
 
 /** What an App may have read, as `sourcesOf` finds it. */
 export interface AppSources {
@@ -106,68 +120,176 @@ const accessOf = async (
   }));
 };
 
+/** Adds `value` to the set of `at` in `map`. */
+const note = (
+  map: Map<string, Set<string>>,
+  at: string,
+  value: string
+): void => {
+  map.set(at, (map.get(at) ?? new Set()).add(value));
+};
+
+/** What `reachedThroughCalls` finds of each App. */
+interface Reach {
+  /** The Apps whose data it may hold, itself included. */
+  apps: Set<AppId>;
+  /** Edges that don't resolve, as `sourceId` names them. */
+  unresolved: Set<string>;
+}
+
 /**
- * The Apps whose data each of `apps` may hold through calls between Apps
- * (app-calls.ts), itself included, following every permission on another
- * App's exports ever granted, as sources are: an App may hold what the
- * Apps it calls answered, so what they may have read; and what the Apps
- * that may write into it (any permission beyond `read`) sent it, so what
- * they may have read. Both on, whatever the depth. A few queries a level
- * of the graph, both directions at once; the permissions of an App
- * by their subject's index, and those on it by their object's.
+ * The edges of one level of the graph of calls between Apps, from and to
+ * `frontier`, as `reachedThroughCalls` follows them: each `from` may hold
+ * the data of `to`. And the edges that don't resolve, by the App that
+ * holds them: a store grant on a store no App owns.
  */
-const reachedThroughCalls = async (
+const edgesOf = async (
   env: Env,
-  apps: readonly AppId[]
-): Promise<Map<AppId, Set<AppId>>> => {
+  frontier: AppId[]
+): Promise<{
+  edges: { from: string; to: string }[];
+  unowned: { holder: string; store: string }[];
+}> => {
   const db = drizzle(env.DB);
-  const holds = new Map<AppId, Set<AppId>>();
-  const edge = (from: AppId, to: AppId): void => {
-    holds.set(from, (holds.get(from) ?? new Set()).add(to));
-  };
-  const explored = new Set<AppId>();
-  let frontier = [...new Set(apps)];
   const everGranted = and(
     eq(permissions.subjectType, "app"),
     eq(permissions.objectType, "app"),
     isNotNull(permissions.grantedAt)
   );
+  const callee = sql<string>`json_extract(${appResourceBindings.target}, '$.appId')`;
+  const storeGrant = and(
+    eq(permissions.subjectType, "app"),
+    eq(permissions.objectType, "store"),
+    isNotNull(permissions.grantedAt)
+  );
+  const [called, writers, bound, consumed, served] = await Promise.all([
+    // v1 grants on another App's exports: what it calls answers it.
+    db
+      .select({ from: permissions.subjectId, to: permissions.objectId })
+      .from(permissions)
+      .where(and(everGranted, inList(permissions.subjectId, frontier))),
+    // And what may write into it sends it.
+    db
+      .select({ from: permissions.objectId, to: permissions.subjectId })
+      .from(permissions)
+      .where(
+        and(
+          everGranted,
+          inList(permissions.objectId, frontier),
+          // Anything beyond reading, as permissions.ts's changesThingsSql.
+          sql`EXISTS (SELECT 1 FROM json_each(${permissions.actions}) WHERE value <> 'read')`
+        )
+      ),
+    // Sealed app bindings ever approved, active or revoked, either end in
+    // the frontier: counted both ways below.
+    db
+      .select({ caller: appResourceBindings.appId, callee })
+      .from(appResourceBindings)
+      .where(
+        and(
+          eq(appResourceBindings.kind, "app"),
+          or(
+            inList(appResourceBindings.appId, frontier),
+            inList(callee, frontier)
+          )
+        )
+      ),
+    // Store grants ever given to an App of the frontier, with the store's
+    // owning App, if any.
+    db
+      .select({
+        consumer: permissions.subjectId,
+        store: permissions.objectId,
+        owner: sdkStoreOwners.appId,
+      })
+      .from(permissions)
+      .leftJoin(
+        sdkStoreOwners,
+        eq(sdkStoreOwners.storeId, permissions.objectId)
+      )
+      .where(and(storeGrant, inList(permissions.subjectId, frontier))),
+    // And those on a store an App of the frontier owns.
+    db
+      .select({ consumer: permissions.subjectId, owner: sdkStoreOwners.appId })
+      .from(permissions)
+      .innerJoin(
+        sdkStoreOwners,
+        eq(sdkStoreOwners.storeId, permissions.objectId)
+      )
+      .where(and(storeGrant, inList(sdkStoreOwners.appId, frontier))),
+  ]);
+  const edges = [...called, ...writers];
+  for (const { caller, callee: to } of bound) {
+    edges.push({ from: caller, to }, { from: to, to: caller });
+  }
+  const unowned: { holder: string; store: string }[] = [];
+  for (const { consumer, store, owner } of consumed) {
+    if (owner === null) {
+      unowned.push({ holder: consumer, store });
+    } else {
+      edges.push({ from: consumer, to: owner }, { from: owner, to: consumer });
+    }
+  }
+  for (const { consumer, owner } of served) {
+    edges.push({ from: consumer, to: owner }, { from: owner, to: consumer });
+  }
+  return { edges, unowned };
+};
+
+/**
+ * The Apps whose data each of `apps` may hold through calls between Apps
+ * (app-calls.ts, resource-apps.ts, store-operations.ts), itself included,
+ * following every grant and binding ever given (`edgesOf`), as sources
+ * are, whatever the depth; and what of them doesn't resolve: a store no
+ * App owns, or an App bound that has no row. A few queries a level of the
+ * graph, both directions at once.
+ */
+const reachedThroughCalls = async (
+  env: Env,
+  apps: readonly AppId[]
+): Promise<Map<AppId, Reach>> => {
+  const holds = new Map<string, Set<string>>();
+  const unresolvedAt = new Map<string, Set<string>>();
+  const explored = new Set<string>();
+  let frontier = [...new Set<string>(apps)];
   while (frontier.length > 0) {
     for (const app of frontier) {
       explored.add(app);
     }
     // oxlint-disable-next-line no-await-in-loop -- one level at a time
-    const [called, writers] = await Promise.all([
-      db
-        .select({ from: permissions.subjectId, to: permissions.objectId })
-        .from(permissions)
-        .where(and(everGranted, inList(permissions.subjectId, frontier))),
-      db
-        .select({ from: permissions.objectId, to: permissions.subjectId })
-        .from(permissions)
-        .where(
-          and(
-            everGranted,
-            inList(permissions.objectId, frontier),
-            // Anything beyond reading, as permissions.ts's changesThingsSql.
-            sql`EXISTS (SELECT 1 FROM json_each(${permissions.actions}) WHERE value <> 'read')`
-          )
-        ),
-    ]);
-    const next = new Set<AppId>();
-    for (const { from, to } of [...called, ...writers]) {
-      const [holder, held] = [appIdSchema.parse(from), appIdSchema.parse(to)];
-      edge(holder, held);
-      if (!explored.has(held)) {
-        next.add(held);
+    const { edges, unowned } = await edgesOf(
+      env,
+      // An ID an edge names that isn't an App's shape can't be one: it
+      // doesn't resolve (below), and has no edges of its own.
+      frontier.flatMap((id) => {
+        const app = appIdSchema.safeParse(id);
+        return app.success ? [app.data] : [];
+      })
+    );
+    const next = new Set<string>();
+    for (const { from, to } of edges) {
+      note(holds, from, to);
+      if (!explored.has(to)) {
+        next.add(to);
       }
+    }
+    for (const { holder, store } of unowned) {
+      note(unresolvedAt, holder, sourceId("store", store));
     }
     frontier = [...next];
   }
+  // Every App an edge reached must be one: a binding's target without a
+  // row (or of no App's shape) fails closed.
+  const reachedIds = [...explored];
+  const knownRows = await drizzle(env.DB)
+    .select({ id: appsTable.id })
+    .from(appsTable)
+    .where(inList(appsTable.id, reachedIds));
+  const known = new Set(knownRows.map(({ id }) => id));
   return new Map(
     apps.map((app) => {
-      const reached = new Set<AppId>([app]);
-      const queue = [app];
+      const reached = new Set<string>([app]);
+      const queue: string[] = [app];
       for (let at = queue.shift(); at !== undefined; at = queue.shift()) {
         for (const held of holds.get(at) ?? []) {
           if (!reached.has(held)) {
@@ -176,7 +298,20 @@ const reachedThroughCalls = async (
           }
         }
       }
-      return [app, reached];
+      const unresolved = new Set<string>();
+      const resolved = new Set<AppId>();
+      for (const id of reached) {
+        for (const source of unresolvedAt.get(id) ?? []) {
+          unresolved.add(source);
+        }
+        const parsed = appIdSchema.safeParse(id);
+        if (parsed.success && (id === app || known.has(id))) {
+          resolved.add(parsed.data);
+        } else {
+          unresolved.add(sourceId("app", id));
+        }
+      }
+      return [app, { apps: resolved, unresolved }];
     })
   );
 };
@@ -195,9 +330,9 @@ export const sourcesOfApps = async (
 ): Promise<Map<AppId, AppSources>> => {
   const reach =
     apps.length === 0
-      ? new Map<AppId, Set<AppId>>()
+      ? new Map<AppId, Reach>()
       : await reachedThroughCalls(env, apps);
-  const all = [...new Set([...reach.values()].flatMap((of) => [...of]))];
+  const all = [...new Set([...reach.values()].flatMap((of) => [...of.apps]))];
   const rows =
     all.length === 0
       ? []
@@ -233,7 +368,7 @@ export const sourcesOfApps = async (
   }
   const granted = new Map(
     apps.map((app) => {
-      const reached = [...(reach.get(app) ?? [app])];
+      const reached = [...(reach.get(app)?.apps ?? [app])];
       return [
         app,
         {
@@ -266,7 +401,7 @@ export const sourcesOfApps = async (
       const sources: AppSources = {
         connections: [],
         collections: [],
-        unresolved: [],
+        unresolved: [...(reach.get(app)?.unresolved ?? [])],
       };
       for (const id of connected) {
         const owner = ownerOf.get(id);

@@ -535,3 +535,147 @@ describe("sharing an App", () => {
     expect(new Set(listed)).toStrictEqual(new Set(kept));
   });
 });
+
+/**
+ * An app binding `caller` holds of `callee`'s public functions, as an
+ * admin's approval writes it (resource-bindings.ts), revoked if asked:
+ * what sharing follows, whatever its declaration's functions.
+ */
+const appBinding = async (
+  caller: string,
+  callee: string,
+  status: "active" | "revoked" = "active"
+): Promise<void> => {
+  await env.DB.prepare(
+    `INSERT INTO app_resource_bindings (id, app_id, alias, kind, target,
+      declaration_hash, contract_id, fingerprint, reviewed_version, status,
+      approved_by, approved_at, revoked_by, revoked_at)
+     VALUES (?, ?, ?, 'app', ?, 'hash', ?, 'fingerprint', 1, ?, 'test', 0, ?, ?)`
+  )
+    .bind(
+      crypto.randomUUID(),
+      caller,
+      `peer${unique().replaceAll("-", "")}`.slice(0, 40),
+      JSON.stringify({ kind: "app", appId: callee }),
+      `apps.${callee}`,
+      status,
+      status === "revoked" ? "test" : null,
+      status === "revoked" ? 0 : null
+    )
+    .run();
+};
+
+/**
+ * A store grant `consumer` holds on a store `owner` owns (none: a store no
+ * App owns), as an admin's grant writes it.
+ */
+const storeGrant = async (
+  consumer: string,
+  owner?: string
+): Promise<string> => {
+  const store = `store_${unique().replaceAll("-", "")}`;
+  if (owner !== undefined) {
+    await env.DB.prepare(
+      "INSERT INTO sdk_store_owners (store_id, app_id, claimed_at) VALUES (?, ?, 0)"
+    )
+      .bind(store, owner)
+      .run();
+  }
+  await env.DB.prepare(
+    `INSERT INTO permissions (id, subject_type, subject_id, object_type, object_id,
+      actions, binding, status, requested_by, requested_at, granted_by, granted_at)
+     VALUES (?, 'app', ?, 'store', ?, '["notes.list"]', ?, 'active', 'test', 0, 'test', 0)`
+  )
+    .bind(
+      crypto.randomUUID(),
+      consumer,
+      store,
+      `STORE_${unique().toUpperCase().replaceAll("-", "_")}`
+    )
+    .run();
+  return store;
+};
+
+describe("sharing an App that reaches other Apps sealed", () => {
+  it("is refused when an App it calls through an approved binding read a mailbox, revoked or not, either end", async () => {
+    const [owner, anna] = await Promise.all([
+      personApi("builder"),
+      personApi("builder"),
+    ]);
+    const [caller, callee, revokedCaller] = await Promise.all([
+      newApp(owner),
+      newApp(owner),
+      newApp(owner),
+    ]);
+    const mailbox = await mailboxOf(owner);
+    await grantConnection(owner, callee, mailbox);
+    await appBinding(caller, callee);
+    await appBinding(revokedCaller, callee, "revoked");
+    // And the other way: the caller read a mailbox, its calls may carry it.
+    const [sender, receiver] = await Promise.all([
+      newApp(owner),
+      newApp(owner),
+    ]);
+    const sent = await mailboxOf(owner);
+    await grantConnection(owner, sender, sent);
+    await appBinding(sender, receiver);
+    const anyone = { type: "person", id: anna.userId } as const;
+
+    await expect(
+      Promise.all([
+        shareRefusal(owner, caller, anyone),
+        shareRefusal(owner, revokedCaller, anyone),
+        shareRefusal(owner, receiver, anyone),
+      ])
+    ).resolves.toStrictEqual([
+      { sources: [`connection:${mailbox}`], people: [anna.userId] },
+      { sources: [`connection:${mailbox}`], people: [anna.userId] },
+      { sources: [`connection:${sent}`], people: [anna.userId] },
+    ]);
+  });
+
+  it("is refused when a store it reads belongs to an App that read a mailbox, and fails closed for a store no App owns", async () => {
+    const [owner, anna] = await Promise.all([
+      personApi("builder"),
+      personApi("builder"),
+    ]);
+    const [consumer, storeOwner, orphaned] = await Promise.all([
+      newApp(owner),
+      newApp(owner),
+      newApp(owner),
+    ]);
+    const mailbox = await mailboxOf(owner);
+    await grantConnection(owner, storeOwner, mailbox);
+    await storeGrant(consumer, storeOwner);
+    const unowned = await storeGrant(orphaned);
+    const anyone = { type: "person", id: anna.userId } as const;
+
+    await expect(
+      Promise.all([
+        shareRefusal(owner, consumer, anyone),
+        // And the store's owner: what the consumer wrote may carry what it read.
+        shareRefusal(owner, orphaned, anyone),
+      ])
+    ).resolves.toStrictEqual([
+      { sources: [`connection:${mailbox}`], people: [anna.userId] },
+      { sources: [`store:${unowned}`], people: [anna.userId] },
+    ]);
+  });
+
+  it("fails closed for a binding to an App that doesn't exist", async () => {
+    const [owner, anna] = await Promise.all([
+      personApi("builder"),
+      personApi("builder"),
+    ]);
+    const app = await newApp(owner);
+    const ghost = `app_${unique().replaceAll("-", "")}`;
+    await appBinding(app, ghost);
+
+    await expect(
+      shareRefusal(owner, app, { type: "person", id: anna.userId })
+    ).resolves.toStrictEqual({
+      sources: [`app:${ghost}`],
+      people: [anna.userId],
+    });
+  });
+});
