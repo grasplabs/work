@@ -5,6 +5,15 @@
 export const deployErrorCodes = [
   /** The release isn't imported, or its manifest no longer parses. */
   "release_not_imported",
+  /** The release declares nothing of what its code works with. */
+  "release_undeclared",
+  /**
+   * The release doesn't work with what the client runs: a Worker would
+   * call one of its Workers, or one of its Workers another, at a version
+   * that one doesn't serve, or it doesn't read a workflow journal or run
+   * an App release the client's code may have left.
+   */
+  "release_incompatible",
   /** A blob in R2 is missing, or isn't what the imported manifest says. */
   "release_blob_mismatch",
   /** Two Workers give one database different migrations. */
