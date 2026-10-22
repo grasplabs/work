@@ -30,6 +30,8 @@ export { ConnectionBinding } from "./bindings.ts";
 export { AppCollectionBinding } from "./knowledge/app-binding.ts";
 export { CollectionBinding } from "./knowledge/binding.ts";
 export { KnowledgeBinding } from "./knowledge/tools-binding.ts";
+export { VectorCatalog } from "./knowledge/vector-catalog.ts";
+export { VectorShard } from "./knowledge/vector-shard.ts";
 export { ActionInvocation } from "./action-invocation.ts";
 export { WorkflowRuns } from "./workflows/run-object.ts";
 export { Workspace } from "./workspace.ts";

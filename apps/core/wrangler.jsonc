@@ -135,6 +135,11 @@
       // One object per foreground action invocation, streaming or not, named
       // by its person, App, contract and key (src/action-invocation.ts).
       { "name": "ACTION_INVOCATIONS", "class_name": "ActionInvocation" },
+      // Brain's vector index, the `sqlite` profile
+      // (src/knowledge/sqlite-vector-index.ts): one catalog per deployment,
+      // and one shard per generation, read-policy key and sub-shard.
+      { "name": "VECTOR_CATALOG", "class_name": "VectorCatalog" },
+      { "name": "VECTOR_SHARDS", "class_name": "VectorShard" },
     ],
   },
   "migrations": [
@@ -146,6 +151,7 @@
     { "tag": "v6", "new_sqlite_classes": ["WorkflowRuns"] },
     { "tag": "v7", "new_sqlite_classes": ["ActionInvocation"] },
     { "tag": "v8", "new_sqlite_classes": ["Clock"] },
+    { "tag": "v9", "new_sqlite_classes": ["VectorCatalog", "VectorShard"] },
   ],
   // Runs App sandboxes and the App compiler.
   "worker_loaders": [{ "binding": "LOADER" }],

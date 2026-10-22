@@ -1,6 +1,10 @@
 /**
  * Which vector index provider a deployment uses (vector-index.ts).
  *
+ * The default, in both deployment profiles, is the `sqlite` profile
+ * (sqlite-vector-index.ts): SQLite Durable Objects in `jurisdiction("eu")`
+ * on Cloudflare, on plain workerd on-prem.
+ *
  * Vectorize can't be confined to the EU: an index takes no jurisdiction or
  * location, and the Data Localization Suite doesn't cover it. So it serves
  * only a deployment whose model rules keep nothing in the EU. Under any EU
@@ -11,11 +15,8 @@
  */
 import { deploymentEuRule } from "../models.ts";
 import type { ModelsEnv } from "../models.ts";
-import {
-  refusingProvider,
-  unsupportedVectorIndexProvider,
-  VectorIndexError,
-} from "./vector-index.ts";
+import { sqliteVectorIndexProviderOf } from "./sqlite-vector-index.ts";
+import { refusingProvider, VectorIndexError } from "./vector-index.ts";
 import type { VectorIndexProvider } from "./vector-index.ts";
 import { vectorizeProvider } from "./vectorize-index.ts";
 import type {
@@ -32,7 +33,7 @@ const euRuleWords = {
 
 /**
  * The deployment's vector index provider: Vectorize over the bound
- * generations where the client's rules allow it, the `unsupported` profile
+ * generations where the client's rules allow it, the `sqlite` profile
  * where none is bound.
  */
 export const vectorIndexProviderOf = (
@@ -41,7 +42,7 @@ export const vectorIndexProviderOf = (
   options?: Pick<VectorizeOptions, "queryDeadlineMs" | "writeDeadlineMs">
 ): VectorIndexProvider => {
   if (vectorize === undefined) {
-    return unsupportedVectorIndexProvider();
+    return sqliteVectorIndexProviderOf(env, options);
   }
   const rule = deploymentEuRule(env);
   if (rule !== undefined) {

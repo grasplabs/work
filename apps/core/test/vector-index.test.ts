@@ -669,28 +669,25 @@ describe("the deployment's vector index provider", () => {
     }).toStrictEqual({ profile: "vectorize", found: ["plan"] });
   });
 
-  it("refuses every call where no vector index is bound, instead of answering empty", async () => {
-    for (const provider of [
-      unsupportedVectorIndexProvider(),
-      vectorIndexProviderOf(withRules({})),
-    ]) {
-      const index = provider.open(generation);
-      // oxlint-disable-next-line no-await-in-loop -- one provider at a time
-      const kinds = await Promise.all([
-        kindOf(index.query([1, 0, 0], { policies: ["policy:sales"], topK: 5 })),
-        kindOf(index.upsert([record("plan", "policy:sales")])),
-        kindOf(index.delete(["plan"])),
-        kindOf(index.ids()),
-        kindOf(index.status()),
-        kindOf(provider.create(generation)),
-        kindOf(provider.drop(generation)),
-        kindOf(provider.generations()),
-      ]);
-      expect({ profile: provider.profile, kinds }).toStrictEqual({
-        profile: "unsupported",
-        kinds: Array.from({ length: 8 }, () => "unsupported"),
-      });
-    }
+  it("refuses every call on the unsupported profile, instead of answering empty", async () => {
+    const provider = unsupportedVectorIndexProvider();
+    const index = provider.open(generation);
+
+    const kinds = await Promise.all([
+      kindOf(index.query([1, 0, 0], { policies: ["policy:sales"], topK: 5 })),
+      kindOf(index.upsert([record("plan", "policy:sales")])),
+      kindOf(index.delete(["plan"])),
+      kindOf(index.ids()),
+      kindOf(index.status()),
+      kindOf(provider.create(generation)),
+      kindOf(provider.drop(generation)),
+      kindOf(provider.generations()),
+    ]);
+
+    expect({ profile: provider.profile, kinds }).toStrictEqual({
+      profile: "unsupported",
+      kinds: Array.from({ length: 8 }, () => "unsupported"),
+    });
   });
 });
 

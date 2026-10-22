@@ -458,7 +458,8 @@ export const checkIds = (ids: readonly string[]): string[] => {
 
 /**
  * `call`'s answer, or {@link VectorIndexError} `unavailable` when it fails
- * or takes longer than `deadlineMs`.
+ * or takes longer than `deadlineMs`. A {@link VectorIndexError} `call`
+ * throws itself passes as it is.
  */
 export const fromProvider = async <Result>(
   what: string,
@@ -474,6 +475,10 @@ export const fromProvider = async <Result>(
         "unavailable",
         `The vector index didn't ${what} within ${deadlineMs} ms.`
       );
+    }
+    // The implementation's own answer, such as a generation it refused.
+    if (error instanceof VectorIndexError) {
+      throw error;
     }
     throw new VectorIndexError(
       "unavailable",
