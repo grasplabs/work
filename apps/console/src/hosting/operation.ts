@@ -86,7 +86,7 @@ import {
   uploadTargetScript,
 } from "../cloudflare/workers.ts";
 import type { ScriptTarget } from "../cloudflare/workers.ts";
-import { act, actIfChanged } from "../db/act.ts";
+import { actIfChanged } from "../db/act.ts";
 import type { Actor, ConsoleDatabase } from "../db/act.ts";
 import { clientProvisions, clients, clientWorkers } from "../db/schema.ts";
 import { currentReleases, incompatibility } from "../deploy/compatibility.ts";
@@ -154,6 +154,8 @@ export const provisionOperationErrorCodes = [
   "probe_unqualified",
   /** Another runner holds the client: this one changes nothing more. */
   "runner_replaced",
+  /** The operation's row is gone before it could be recorded done. */
+  "operation_gone",
 ] as const;
 
 export type ProvisionOperationErrorCode =
@@ -825,7 +827,13 @@ const deliverSecrets = async (
     // oxlint-disable-next-line no-await-in-loop -- one Worker at a time
     const progress = await progressNow(db, loaded.operation.id);
     if (progress.secrets[app] === print) {
-      continue;
+      // Delivered since the last upload, but a secret can be deleted
+      // since: skip only when every one is still there by name.
+      // oxlint-disable-next-line no-await-in-loop -- one Worker at a time
+      const present = new Set(await targetSecretNames(api, target));
+      if (secrets.every(({ name }) => present.has(name))) {
+        continue;
+      }
     }
     for (const secret of secrets) {
       // oxlint-disable-next-line no-await-in-loop -- one secret at a time
@@ -931,14 +939,22 @@ const complete = async (db: ConsoleDatabase, loaded: Loaded): Promise<void> => {
   const { operation, held } = loaded;
   await assertHolds(db, held);
   const now = new Date();
-  await act(
+  // Guarded, not merely checked first: a runner that loses its claim
+  // between the check and the batch records nothing.
+  const finished = await actIfChanged(
     db,
     "system",
+    db
+      .update(clientProvisions)
+      .set({ status: "done", updatedAt: now })
+      .where(and(eq(clientProvisions.id, operation.id), stillHolds(held))),
+    {
+      action: "provision.done",
+      clientId: held.clientId,
+      target: operation.releaseId,
+      detail: { operation: operation.id, run: held.runId },
+    },
     [
-      db
-        .update(clientProvisions)
-        .set({ status: "done", updatedAt: now })
-        .where(and(eq(clientProvisions.id, operation.id), stillHolds(held))),
       db
         .update(clients)
         .set({ status: "active", updatedAt: now })
@@ -950,14 +966,15 @@ const complete = async (db: ConsoleDatabase, loaded: Loaded): Promise<void> => {
           )
         ),
       releaseRun(db, held.clientId, held.runId),
-    ],
-    {
-      action: "provision.done",
-      clientId: held.clientId,
-      target: operation.releaseId,
-      detail: { operation: operation.id, run: held.runId },
-    }
+    ]
   );
+  if (!finished) {
+    await assertHolds(db, held);
+    throw new ProvisionOperationError(
+      "operation_gone",
+      `Operation ${operation.id} is gone`
+    );
+  }
 };
 
 /**

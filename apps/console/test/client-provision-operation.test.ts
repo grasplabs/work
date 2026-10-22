@@ -671,6 +671,26 @@ describe("provisioning a placed client", () => {
     });
   });
 
+  it("delivers a secret again on retry when it was deleted after its delivery", async () => {
+    const manifest = await importRelease("dedicated");
+    const { account, clientId, held } = await setUp("dedicated", manifest);
+    account.unhealthy = 1000;
+    await expect(failing(held)).resolves.toMatchObject({
+      code: "smoke_check_failed",
+    });
+    const { core } = await scriptsOf(clientId);
+    account.scripts.get(core)?.versions.at(-1)?.secrets.delete("ROUTER_SECRET");
+
+    account.unhealthy = 0;
+    await runClientProvision(context, held);
+    await expect(
+      Promise.all([operationOf(clientId), routed(clientId)])
+    ).resolves.toMatchObject([{ status: "done" }, true]);
+    expect(
+      account.scripts.get(core)?.versions.at(-1)?.secrets.get("ROUTER_SECRET")
+    ).toBe(await deriveRouterSecret(secrets.routerKey, clientId, 1));
+  });
+
   it.each(refusals)(
     "refuses $name before anything is created or uploaded",
     async ({ kind, spec, adjust, code }) => {
