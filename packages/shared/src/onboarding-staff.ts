@@ -140,6 +140,14 @@ export interface StaffTranscript {
   startedAt: string | null;
   completedAt: string | null;
   progress: InterviewProgress | null;
+  /** Who held it: whoever they chose on the way in; null before anything was kept. */
+  interviewer: Interviewer | null;
+  /**
+   * The marks of the interviewer's texts it was held with
+   * (`interviewerTextMarkSchema`), the first one first: one, unless the
+   * text changed while it went on.
+   */
+  texts: string[];
 }
 
 /** The longest note. */

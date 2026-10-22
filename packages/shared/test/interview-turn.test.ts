@@ -9,6 +9,7 @@ import {
   earlyPlainLine,
   fileCalled,
   leftOut,
+  markedPieces,
   mistakesIn,
   plainLine,
   turnAnswerMax,
@@ -537,5 +538,23 @@ describe("a shared file, as it is spoken of", () => {
     expect(fileCalled("Order_flow-2026.xml")).toBe("Order flow 2026");
     expect(fileCalled(".pdf")).toBe(".pdf");
     expect(fileCalled("notes")).toBe("notes");
+  });
+});
+
+describe("what Stephen marked in a line, as staff read it", () => {
+  it("marks each quote where it stands, whatever its capitals, and one mark per word", () => {
+    expect(
+      markedPieces("I open Exact, then I check the number.", [
+        { quote: "check the number", tag: "step" },
+        { quote: "i open exact", tag: "system" },
+        { quote: "the number", tag: "number" },
+        { quote: "never said", tag: "wish" },
+      ])
+    ).toStrictEqual([
+      { text: "I open Exact", tag: "system" },
+      { text: ", then I ", tag: null },
+      { text: "check the number", tag: "step" },
+      { text: ".", tag: null },
+    ]);
   });
 });

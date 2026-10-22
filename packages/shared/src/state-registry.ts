@@ -547,6 +547,7 @@ const onboarding: DurableObjectState = {
     kickoff: exported(`${core}onboarding/kickoff.ts`),
     documents: exported(`${core}onboarding/documents.ts`),
     usage: exported(`${core}onboarding/store.ts`),
+    interview_texts: exported(`${core}onboarding/store.ts`),
     works: exported(`${core}onboarding/store.ts`),
     asked_about: exported(`${core}onboarding/store.ts`),
     drawn_works: exported(`${core}onboarding/store.ts`),
