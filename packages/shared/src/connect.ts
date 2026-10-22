@@ -271,6 +271,39 @@ export interface ConnectionSummary {
   tools?: string[];
 }
 
+/**
+ * Whether Composio says a Composio connection's account still works:
+ * `stopped` once its account there isn't active (expired, failed, or gone),
+ * which connect's own status never shows, as Composio holds the tokens;
+ * `unread` when Composio couldn't be asked now.
+ */
+export type ComposioAccountState = "active" | "stopped" | "unread";
+
+/**
+ * One of the organization's connections, as Grasp's staff read it through
+ * core's admin snapshot (`ConnectApi.organizationConnections`): what it is
+ * and whether it works, never its tokens, its server's URL or what
+ * Composio knows it by. A personal one says nothing of its owner or
+ * account: only that someone connected their own.
+ */
+export interface OrganizationConnection {
+  id: string;
+  source: CatalogSource;
+  provider: string;
+  scope: ConnectionScope;
+  status: "active" | "needs_reauth";
+  /** Composio's word on a Composio connection; null for a native one. */
+  composio: ComposioAccountState | null;
+  /** Who connected a shared one; null for a personal one. */
+  connectedBy: string | null;
+  /** A shared one's account at the provider; null for a personal one. */
+  accountName: string | null;
+  /** ISO 8601. */
+  createdAt: string;
+  /** A shared Composio connection's allowed tools, by name; null otherwise. */
+  tools: string[] | null;
+}
+
 /** A connection as core lists it to people: who connected it, by name too. */
 export interface ListedConnection extends ConnectionSummary {
   /** `connectedBy`'s name, while core knows them. */
@@ -1259,6 +1292,12 @@ export interface ConnectApi extends PackageRegistryApi {
   ) => Promise<{ connectionId: string }>;
   /** The person's own connections and the shared ones. */
   listConnections: (person: ConnectionPerson) => Promise<ConnectionSummary[]>;
+  /**
+   * Every connection that isn't disconnected, for core's staff-only admin
+   * snapshot, with Composio asked whether each Composio account still
+   * works: nothing in it is a token or a URL.
+   */
+  organizationConnections: () => Promise<OrganizationConnection[]>;
   /**
    * Whose each of the connections `connectionIds` names is, disconnected
    * ones too: those that were ever registered, in no particular order.
