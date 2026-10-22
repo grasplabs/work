@@ -7,7 +7,11 @@ import {
   searchOptionsSchema,
   searchQuerySchema,
 } from "@grasp-os/shared/knowledge";
-import type { SearchHit, SearchResults } from "@grasp-os/shared/knowledge";
+import type {
+  Provenance,
+  SearchHit,
+  SearchResults,
+} from "@grasp-os/shared/knowledge";
 import { sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -212,7 +216,41 @@ const hitRowSchema = z.object({
   section: z.number(),
   headings: z.string(),
   snippet: z.string(),
+  version: z.number(),
+  updatedAt: z.number(),
+  text: z.string(),
 });
+
+/**
+ * The most of a section's text a search reads: a recall quotes no more
+ * (recall.ts), and a section can be as large as a document.
+ */
+export const sectionTextMax = 4000;
+
+/**
+ * Up to `sectionTextMax` characters of a section, around where it first
+ * holds one of `terms` (the first that it holds, in the query's order), so
+ * a match deep in a long section still comes with its words; from the
+ * start when none is found as typed (a typo or prefix match).
+ */
+const excerptSql = (terms: readonly string[]): SQL => {
+  const found = terms.map(
+    (term) => sql`nullif(instr(lower(sections.text), ${term}), 0)`
+  );
+  const at = sql`coalesce(${sql.join([...found, sql`1`], sql`, `)})`;
+  return sql`substr(sections.text, max(1, ${at} - ${sectionTextMax / 2}), ${sectionTextMax})`;
+};
+
+/** A section a search found, as Knowledge holds it: its hit, and more. */
+export interface FoundSection {
+  hit: SearchHit;
+  /** The document's version the section is of. */
+  version: number;
+  /** When the document last changed, in milliseconds. */
+  updatedAt: number;
+  /** The section's Markdown around its match, at most `sectionTextMax` characters. */
+  text: string;
+}
 
 const headingsSchema = z.array(z.string());
 
@@ -318,12 +356,24 @@ const searchRecord = async (
   terms: string[],
   collectionId: string | undefined,
   hits: { documentId: string }[],
-  nearest: readonly string[] = []
+  nearest: readonly string[] = [],
+  recall = false
 ): Promise<ReadRecord> => {
   const target =
     collectionId === undefined
       ? undefined
       : { type: "collection" as const, id: collectionId };
+  // A recall is recorded as a read of what it returned, marked as one:
+  // never as an empty search, which feeds owners' signals of what people
+  // couldn't find, and automated recalls would skew those.
+  if (recall) {
+    return {
+      action: "knowledge.search",
+      target,
+      documentIds: hits.map(({ documentId }) => documentId),
+      detail: { terms: terms.length, hits: hits.length, via: "recall" },
+    };
+  }
   if (hits.length === 0) {
     return {
       action: "knowledge.search.empty",
@@ -344,18 +394,22 @@ const searchRecord = async (
 };
 
 /**
- * The sections that match `query`, best first, in the collections `reader`
- * may read, or in the one `options` names, and of the document type it
- * names, if any. A collection's stub passes its
- * own as `only`, and its options can't name another.
+ * `search`, with each section's version, last change and whole text: what
+ * a recall (recall.ts) cites and quotes. The same reads, checks and audit.
  */
-export const search = async (
+export const searchSections = async (
   env: Env,
   reader: Reader,
   query: unknown,
   options?: unknown,
-  only?: string
-): Promise<SearchResults> => {
+  only?: string,
+  /**
+   * For a recall: only these collections, each refused as not found
+   * unless the reader may read it, read in one search; and recorded as a
+   * recall (`searchRecord`).
+   */
+  recall?: { among?: readonly string[] }
+): Promise<{ sections: FoundSection[]; provenance: Provenance }> => {
   const terms = termsOf(
     knowledgeErrors.parse("knowledge.invalid", searchQuerySchema, query)
   );
@@ -381,17 +435,19 @@ export const search = async (
   // among the read's sources, and a sensitive one restricts the reader
   // even when nothing is found, or a delegate could probe it word by word
   // and send out what it learned.
-  const scoped =
-    scope === undefined
-      ? []
-      : [await readableCollection(db, allowed.collections, scope)];
+  const among = recall?.among ?? [];
+  const scoped = await Promise.all(
+    [...(scope === undefined ? [] : [scope]), ...among].map(
+      async (id) => await readableCollection(db, allowed.collections, id)
+    )
+  );
   if (terms.length === 0) {
     return {
-      hits: [],
+      sections: [],
       provenance: await noteProvenance(
         env,
         reader,
-        await searchRecord(env, terms, scope, []),
+        await searchRecord(env, terms, scope, [], [], recall !== undefined),
         ...scoped
       ),
     };
@@ -422,6 +478,14 @@ export const search = async (
       JOIN collections ON collections.id = documents.collection_id
       WHERE ${allowed.documents()}
         ${scope === undefined ? sql`` : sql`AND collections.id = ${scope}`}
+        ${
+          among.length === 0
+            ? sql``
+            : sql`AND collections.id IN (${sql.join(
+                among.map((id) => sql`${id}`),
+                sql`, `
+              )})`
+        }
         ${type === undefined ? sql`` : sql`AND documents.type = ${type}`}
     ),
     found AS (
@@ -449,7 +513,9 @@ export const search = async (
       ranked.collection_id AS collectionId, ranked.sensitive,
       documents.path, documents.title, documents.type, documents.description,
       ranked.position AS section, sections.headings,
-      ${snippetSql(passes)} AS snippet
+      ${snippetSql(passes)} AS snippet,
+      documents.current_version AS version, documents.updated_at AS updatedAt,
+      ${recall === undefined ? sql`''` : excerptSql(terms)} AS text
     FROM top AS ranked
     JOIN documents ON documents.id = ranked.document_id
     JOIN sections ON sections.document_id = ranked.document_id
@@ -461,18 +527,52 @@ export const search = async (
   // A search of every collection that found nothing notes where it came
   // closest, for the usage signals. Nothing of it reaches the reader.
   const nearest =
-    scope === undefined && found.length === 0
+    scope === undefined &&
+    among.length === 0 &&
+    recall === undefined &&
+    found.length === 0
       ? await nearestCollections(db, allowed, terms)
       : [];
   const provenance = await noteProvenance(
     env,
     reader,
-    await searchRecord(env, terms, scope, found, nearest),
+    await searchRecord(env, terms, scope, found, nearest, recall !== undefined),
     ...scoped,
     ...found.map((row) => ({
       id: row.collectionId,
       sensitive: row.sensitive !== 0,
     }))
   );
-  return { hits: found.map(toHit), provenance };
+  return {
+    sections: found.map((row) => ({
+      hit: toHit(row),
+      version: row.version,
+      updatedAt: row.updatedAt,
+      text: row.text,
+    })),
+    provenance,
+  };
+};
+
+/**
+ * The sections that match `query`, best first, in the collections `reader`
+ * may read, or in the one `options` names, and of the document type it
+ * names, if any. A collection's stub passes its
+ * own as `only`, and its options can't name another.
+ */
+export const search = async (
+  env: Env,
+  reader: Reader,
+  query: unknown,
+  options?: unknown,
+  only?: string
+): Promise<SearchResults> => {
+  const { sections, provenance } = await searchSections(
+    env,
+    reader,
+    query,
+    options,
+    only
+  );
+  return { hits: sections.map(({ hit }) => hit), provenance };
 };

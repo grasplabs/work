@@ -15,6 +15,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import {
+  latestSections,
   maxRunsPerResponse,
   maxRunsPerTurn,
   maxSteps,
@@ -222,6 +223,58 @@ const refusalsIn = async (chatId: string, reason: string) => {
 const runEndedSchema = z.object({
   event: z.literal("agent.run_ended"),
   runId: z.string(),
+});
+
+describe("a request's system prompt", () => {
+  it("gives each section only where it was given last, so an earlier value never goes again", () => {
+    const at = 1;
+    expect(
+      latestSections([
+        {
+          role: "system",
+          content: "Instructions.",
+          sections: { apis: "A1", memory: "M1", skills: "S1" },
+          timestamp: at,
+        },
+        { role: "user", content: "Q1", timestamp: at },
+        {
+          role: "system",
+          content: "",
+          sections: { skills: "S2", memory: null },
+          timestamp: at,
+        },
+        { role: "user", content: "Q2", timestamp: at },
+        {
+          role: "system",
+          content: "",
+          sections: { skills: "S3" },
+          timestamp: at,
+        },
+      ])
+    ).toStrictEqual([
+      {
+        role: "system",
+        content: "Instructions.",
+        sections: { apis: "A1" },
+        timestamp: at,
+      },
+      { role: "user", content: "Q1", timestamp: at },
+      // Its skills are given again later: only the memory's removal is left.
+      {
+        role: "system",
+        content: "",
+        sections: { memory: null },
+        timestamp: at,
+      },
+      { role: "user", content: "Q2", timestamp: at },
+      {
+        role: "system",
+        content: "",
+        sections: { skills: "S3" },
+        timestamp: at,
+      },
+    ]);
+  });
 });
 
 describe("chat agent", () => {

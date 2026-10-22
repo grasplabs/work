@@ -136,6 +136,13 @@ const collectionObjectSchema = z.strictObject({
  * - `guests`: inviting people who aren't members to a short chat with a
  *   model, through a link, and reading back what they wrote
  *   (`@grasp-os/shared/guests`).
+ * - `brain`: reading the company Brain, and only reading: recall, reads of
+ *   its evidence and of its open questions (gaps). Apps, runs and agents
+ *   share this one permission, and start without it. A grant never
+ *   reaches past the person it acts for: every read is that person's
+ *   access intersected with the grant's, and is audited. Writing
+ *   (remember, proposals) will be an action of its own, with its own
+ *   consent, so an approved read grant never gains writes.
  */
 const platformObjectSchema = z.strictObject({ type: z.literal("platform") });
 
@@ -185,7 +192,7 @@ const connectionActionPattern = /^[A-Za-z][\w.-]{0,63}$/u;
 const platformActions = {
   collection: ["read", "write"],
   workflow: ["read", "start"],
-  platform: ["statistics", "guests"],
+  platform: ["statistics", "guests", "brain"],
 } as const;
 
 /**
@@ -240,11 +247,14 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   "AUDIT_LOG",
   "AUDIT_RETENTION_DAYS",
   "BETTER_AUTH_SECRET",
+  "BRAIN_OBJECTS",
   "BUILD_WAIT_MS",
   "BUILTINS",
   "CAPABILITY_SIGNING_KEY",
   "CAPABILITY_SIGNING_KEY_PREVIOUS",
   "CF_VERSION_METADATA",
+  // The client's clock (core's src/clock.ts).
+  "CLOCK",
   "COMPOSIO_API_KEY",
   "CONNECT",
   "DATA_STORES",
@@ -260,6 +270,8 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   "INBOUND_MAIL_DOMAIN",
   "KNOWLEDGE",
   "LOADER",
+  // Who core's mail is from (core's src/mail.ts).
+  "MAIL_FROM",
   "MEMORY_LIMITS",
   "MICROSOFT_CLIENT_ID",
   "MICROSOFT_CLIENT_SECRET",

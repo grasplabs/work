@@ -1,6 +1,8 @@
 /**
- * Knowledge D1 database: collections, documents, versions (text in the row),
- * sections, links and the full-text index (unicode61 plus trigram).
+ * Knowledge D1 database: collections, documents, versions (compact
+ * metadata: each one's text is an immutable payload in R2, see
+ * `brainPayloads`), sections, links and the full-text index (unicode61 plus
+ * trigram).
  *
  * Versions keep every text a document ever had, but for what a purge
  * removed (knowledge/purge.ts). Sections and links are those of the
@@ -102,9 +104,60 @@ export const documents = sqliteTable(
 );
 
 /**
- * Every version of every document, with its whole text, which only a purge
- * rewrites. The primary key is also the edit check: two saves from the
- * same version both write the next number, and the second one fails.
+ * The texts of versions, each an immutable object in the `BRAIN_OBJECTS`
+ * bucket under `key` (knowledge/payloads.ts), written once and never
+ * replaced. A row is `pending` from before its object is put until the
+ * batch that first refers to it marks it `committed`; at most one row per
+ * collection and hash is committed, so identical texts in a collection
+ * share one object. Never across collections: how fast a save is would
+ * otherwise tell its writer whether a text exists where they can't read. Collecting an
+ * unreferenced one marks it `collecting` first, which no save takes again,
+ * then deletes its object, then the row.
+ */
+export const brainPayloads = sqliteTable(
+  "brain_payloads",
+  {
+    /** The object's key in R2: core's own, never handed out. */
+    key: text().primaryKey(),
+    /** The collection whose documents' versions it may hold. */
+    collectionId: text("collection_id").notNull(),
+    /** The text's SHA-256, in hex, which every read checks again. */
+    sha256: text().notNull(),
+    /** The text's size, in bytes of UTF-8. */
+    bytes: integer().notNull(),
+    /**
+     * `broken`: committed, but its object turned out missing or not its
+     * text (knowledge/payloads.ts). Never taken by a save again; collected
+     * once no version refers to it.
+     */
+    state: text({
+      enum: ["pending", "committed", "broken", "collecting"],
+    }).notNull(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("brain_payloads_committed_sha256_idx")
+      .on(table.collectionId, table.sha256)
+      .where(sql`${table.state} = 'committed'`),
+    index("brain_payloads_state_idx").on(table.state, table.createdAt),
+  ]
+);
+
+/**
+ * Payloads that versions about to be deleted or pointed elsewhere refer
+ * to, noted earlier in the same batch: its end marks those no version
+ * refers to any more `collecting`, and clears the table
+ * (knowledge/payloads.ts). Empty between batches.
+ */
+export const brainPayloadReleases = sqliteTable("brain_payload_releases", {
+  key: text().primaryKey(),
+});
+
+/**
+ * Every version of every document, its text a payload (`brainPayloads`),
+ * which only a purge points elsewhere. The primary key is also the edit
+ * check: two saves from the same version both write the next number, and
+ * the second one fails.
  */
 export const versions = sqliteTable(
   "versions",
@@ -113,7 +166,10 @@ export const versions = sqliteTable(
       .notNull()
       .references(() => documents.id, { onDelete: "cascade" }),
     number: integer().notNull(),
-    text: text().notNull(),
+    /** Its text: a committed payload when written (knowledge/payloads.ts). */
+    payloadKey: text("payload_key")
+      .notNull()
+      .references(() => brainPayloads.key),
     /** User ID. */
     author: text().notNull(),
     message: text(),
@@ -121,7 +177,11 @@ export const versions = sqliteTable(
     restoredFrom: integer("restored_from"),
     createdAt: timestamp("created_at").notNull(),
   },
-  (table) => [primaryKey({ columns: [table.documentId, table.number] })]
+  (table) => [
+    primaryKey({ columns: [table.documentId, table.number] }),
+    // Collecting a payload asks whether any version still refers to it.
+    index("versions_payload_key_idx").on(table.payloadKey),
+  ]
 );
 
 /** The current version's sections, split by heading, in order. */

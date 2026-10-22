@@ -228,6 +228,48 @@ test("an admin signs someone out everywhere, then removes them, and is told what
   ).toBeFocused();
 });
 
+test("lets an admin rename the workspace and set its time zone, and shows them to everyone", async ({
+  browser,
+  context,
+  page,
+}) => {
+  const { admin, member } = peopleIn("workspaceSettings");
+  await signInTo(context, admin);
+  await page.goto("/settings/workspace");
+  const name = page.getByRole("textbox", { name: "Name" });
+  const zone = page.getByRole("combobox", { name: "Time zone" });
+  const before = await name.inputValue();
+  const renamed = `Acme ${crypto.randomUUID().slice(0, 6)}`;
+
+  await name.fill(renamed);
+  await name.press("Enter");
+  await zone.click();
+  await page.getByRole("option", { name: /^Amsterdam/u }).click();
+  await expect(zone).toHaveText(/^Amsterdam/u);
+  await expect(page.getByText("European Union")).toBeVisible();
+
+  const other = await browser.newContext();
+  const theirs = await other.newPage();
+  await signInTo(other, member);
+  await theirs.goto("/settings/workspace");
+  await expect(theirs.getByRole("textbox", { name: "Name" })).toHaveValue(
+    renamed
+  );
+  await expect(theirs.getByRole("textbox", { name: "Name" })).toBeDisabled();
+  await expect(theirs.getByRole("combobox", { name: "Time zone" })).toHaveText(
+    /^Amsterdam/u
+  );
+  await other.close();
+
+  await name.fill(before);
+  await name.press("Enter");
+  await expect(name).toHaveValue(before);
+  // Back to UTC, where every deployment starts.
+  await zone.click();
+  await page.getByRole("option", { name: "UTC", exact: true }).click();
+  await expect(zone).toHaveText(/^UTC/u);
+});
+
 test("invites someone with a role, says what each role may do, and withdraws the invitation", async ({
   context,
   page,

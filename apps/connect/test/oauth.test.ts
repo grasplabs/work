@@ -494,6 +494,8 @@ describe("whose account", () => {
         {
           id: personal,
           ownerUserId: anna.userId,
+          // Disconnected, and still hers.
+          status: "disconnected",
           source: "native",
           provider: "microsoft",
           accountId: ownAccount(anna).subject,
@@ -505,6 +507,7 @@ describe("whose account", () => {
         {
           id: shared,
           ownerUserId: null,
+          status: "active",
           source: "native",
           provider: "microsoft",
           accountId: mailbox.subject,

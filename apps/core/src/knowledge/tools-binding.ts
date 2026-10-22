@@ -1,3 +1,4 @@
+import type { MemoryPack } from "@grasp-os/shared/brain-api";
 import type {
   FollowResult,
   KnowledgeCatalog,
@@ -11,6 +12,7 @@ import { WorkerEntrypoint } from "cloudflare:workers";
 import type { WorkContext } from "../restricted.ts";
 import type { Reader } from "./access.ts";
 import { readAsDelegate } from "./binding.ts";
+import { recall } from "./recall.ts";
 import { search } from "./search.ts";
 import { catalog, follow, read } from "./tools.ts";
 
@@ -46,6 +48,13 @@ export class KnowledgeBinding
   async read(documentId: unknown, options?: unknown): Promise<KnowledgeRead> {
     return await this.#asDelegate(
       async (reader) => await read(this.env, reader, documentId, options)
+    );
+  }
+
+  /** The Brain's recall, across every collection the agent may read. */
+  async recall(input: unknown): Promise<MemoryPack> {
+    return await this.#asDelegate(
+      async (reader) => await recall(this.env, reader, input)
     );
   }
 
