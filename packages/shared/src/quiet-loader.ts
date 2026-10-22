@@ -117,6 +117,7 @@ export const builtins = Object.freeze({
   stringOf: String,
   slice: String.prototype.slice,
   stringify: JSON.stringify,
+  parse: JSON.parse,
   Map,
   mapGet: Map.prototype.get,
   mapSet: Map.prototype.set,
@@ -180,7 +181,7 @@ const entrySource = (
   entrypoint: string
 ): string => `import { builtins } from ${JSON.stringify(`./${builtins}`)};
 import * as main from ${JSON.stringify(`./${mainModule}`)};
-const { apply, get, define, ownKeys, descriptorOf, prototypeOf, create, isArray, isPrototypeOf, objectPrototype, stringOf, slice, stringify, Map, mapGet, mapSet, Proxy, Response, Headers, headersHas, headersDelete, resolve, then, bind, entrypointPrototype } = builtins;
+const { apply, get, define, ownKeys, descriptorOf, prototypeOf, create, isArray, isPrototypeOf, objectPrototype, stringOf, slice, stringify, parse, Map, mapGet, mapSet, Proxy, Response, Headers, headersHas, headersDelete, resolve, then, bind, entrypointPrototype } = builtins;
 const envelopeKey = ${JSON.stringify(envelopeKey)};
 const thrownHeader = ${JSON.stringify(thrownHeader)};
 const cut = (text, most) => apply(slice, text, [0, most]);
@@ -241,7 +242,9 @@ const detailsOf = (error) => {
       return undefined;
     }
     const text = stringify(details);
-    return typeof text === "string" && text.length <= ${maxThrownDetails} ? details : undefined;
+    // Parsed back from the text checked: plain JSON, read once, with no
+    // \`toJSON\` or getter of the isolate's left to run as it is sent.
+    return typeof text === "string" && text.length <= ${maxThrownDetails} ? parse(text) : undefined;
   } catch {
     return undefined;
   }
