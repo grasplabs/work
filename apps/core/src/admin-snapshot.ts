@@ -153,8 +153,15 @@ const usageOf = (
   return [...days].map(([day, use]) => ({ day, use }));
 };
 
-/** Everything the admin reads of this client, from what core holds, at `now`. */
-const snapshotOf = async (env: Env, now: string): Promise<AdminSnapshot> => {
+/**
+ * Everything the admin reads of this client, from what core holds, at
+ * `now`: for the console's read below, and staff's in the onboarding area
+ * (onboarding/staff-rpc.ts). Only what the schema names may leave core.
+ */
+export const snapshotOf = async (
+  env: Env,
+  now: string
+): Promise<AdminSnapshot> => {
   const store = onboardingStore(env);
   const view = await store.view(now);
   const [facts, agreements, usage, kickoff, gate, organization, members] =

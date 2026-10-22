@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { InterviewProgress } from "./interview-links.ts";
 import { answerMaxLength, kickoffTeamNameMaxLength } from "./kickoff.ts";
 import { interviewLocaleSchema } from "./onboarding.ts";
-import type { Agreements } from "./onboarding.ts";
+import type { Agreements, Interviewer } from "./onboarding.ts";
 
 // Grasp's onboarding area (core's onboarding/staff-area.ts): what a Grasp
 // consultant in a client's deployment sees of its onboarding. Where it
@@ -133,6 +133,14 @@ export interface StaffTranscript {
   startedAt: string | null;
   completedAt: string | null;
   progress: InterviewProgress | null;
+  /** Who held it: whoever they chose on the way in; null before anything was kept. */
+  interviewer: Interviewer | null;
+  /**
+   * The marks of the interviewer's texts it was held with
+   * (`interviewerTextMarkSchema`), the first one first: one, unless the
+   * text changed while it went on.
+   */
+  texts: string[];
 }
 
 /** The longest note. */

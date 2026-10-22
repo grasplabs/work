@@ -440,6 +440,45 @@ export const spanOf = (
   return at === -1 ? null : [at, at + wanted.length];
 };
 
+/** A piece of someone's line: what Stephen marked, with its tag, or what he didn't. */
+export interface MarkedPiece {
+  text: string;
+  tag: FactTag | null;
+}
+
+/**
+ * Someone's line in pieces, with what Stephen marked in it: each mark at
+ * the words it quotes. A mark whose words aren't there is left out, and so
+ * is one inside or across a mark already taken: one mark per word.
+ */
+export const markedPieces = (
+  said: string,
+  marks: readonly { quote: string; tag: FactTag }[] = []
+): MarkedPiece[] => {
+  const spans = marks
+    .flatMap(({ quote, tag }) => {
+      const span = spanOf(said, quote);
+      return span === null ? [] : [{ from: span[0], to: span[1], tag }];
+    })
+    .toSorted((a, b) => a.from - b.from || b.to - a.to);
+  const pieces: MarkedPiece[] = [];
+  let at = 0;
+  for (const span of spans) {
+    if (span.from < at) {
+      continue;
+    }
+    if (span.from > at) {
+      pieces.push({ text: said.slice(at, span.from), tag: null });
+    }
+    pieces.push({ text: said.slice(span.from, span.to), tag: span.tag });
+    at = span.to;
+  }
+  if (at < said.length) {
+    pieces.push({ text: said.slice(at), tag: null });
+  }
+  return pieces;
+};
+
 const asRecord = (value: unknown): Record<string, unknown> =>
   looseObject.safeParse(value).data ?? {};
 

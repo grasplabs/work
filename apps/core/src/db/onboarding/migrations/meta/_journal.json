@@ -57,6 +57,13 @@
       "when": 1792619422199,
       "tag": "0007_agreed",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1792656143669,
+      "tag": "0008_interview_texts",
+      "breakpoints": true
     }
   ]
 }

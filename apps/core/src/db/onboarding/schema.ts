@@ -141,6 +141,21 @@ export const interviewStates = sqliteTable("interview_states", {
 });
 
 /**
+ * The interviewer's texts each interview was held with, by their mark
+ * (onboarding/interviewer-text.ts), and when each first spoke in it: so
+ * staff, and the lab, know which Stephen they read. Gone with what was said.
+ */
+export const interviewTexts = sqliteTable(
+  "interview_texts",
+  {
+    person: text().notNull(),
+    mark: text().notNull(),
+    at: text().notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.person, table.mark] })]
+);
+
+/**
  * Everyone ever counted in the admin's numbers (`teamCounts`), once: the
  * team they were asked in, and whether their talking was counted. Kept when
  * they leave the roster, so taking someone off and on again can't count
