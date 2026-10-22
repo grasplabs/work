@@ -26,15 +26,17 @@ import { testBinding } from "./test-env.ts";
 
 // The Brain baseline against a real model (GRA-676), on request only:
 // vite.brain-model.config.ts says how to run it. The harness runs as in CI;
-// only the provider differs (brain-gateway-provider.ts), with the model a
-// deployment's gateway asks by default for chat, and the run's budget as
-// the ledger's deployment limit. The estimate first runs the dev split
-// against the stub, priced as that model, to project what a run costs.
-// Each reports on the run's output as JSON lines.
+// only the provider differs (brain-gateway-provider.ts), with the model the
+// run names (`BRAIN_MODEL`, the deployment default if unset) listed first
+// in its gateway, and the run's budget as the ledger's deployment limit.
+// The estimate first runs the dev split against the stub, priced as that
+// model, to project what a run costs. Each reports on the run's output as
+// JSON lines.
 
 const settings = z
   .object({
     mode: z.enum(["estimate", "run"]),
+    model: z.string().min(1),
     split: z.enum(["dev", "validation", "sealed"]),
     repeats: z.int().min(1),
     budgetUsd: z.number().positive().optional(),
@@ -63,8 +65,19 @@ const deploymentGateway = z
   .loose()
   .parse(jsonVar(Reflect.get(env, "MODEL_GATEWAY")));
 
-/** The model a deployment's chats ask by default: the first allowed. */
-const [defaultModel = ""] = gatewaySettings(env).models;
+/**
+ * The model under test, which the run's gateway lists first, so its chats
+ * ask it. One the gateway doesn't offer (not a ref of a provider it
+ * reaches, or not in its catalog, so without a price) is refused before
+ * anything is sent: the gateway would otherwise ask the next one listed.
+ */
+const [firstAllowed] = gatewaySettings(env).models;
+if (firstAllowed !== settings.model) {
+  throw new Error(
+    `The gateway doesn't offer ${settings.model}: name one of its catalog as <provider>/<model>`
+  );
+}
+const testedModel = settings.model;
 
 /** Micros in a US dollar. */
 const micros = 1_000_000;
@@ -101,7 +114,7 @@ describe("the Brain baseline against a real model", () => {
     "estimates a run's cost from the dev split, spending nothing",
     async () => {
       const setup: BrainModelSetup = {
-        model: defaultModel,
+        model: testedModel,
         config: deploymentGateway,
       };
       const requests: { arm: string; inputTokens: number }[] = [];
@@ -131,7 +144,7 @@ describe("the Brain baseline against a real model", () => {
         split: "dev",
         repeats: 1,
         respond,
-        providerName: "brain-stub-reader, priced as the default model",
+        providerName: "brain-stub-reader, priced as the model under test",
         modelSetup: setup,
         build: settings.build,
       });
@@ -149,11 +162,11 @@ describe("the Brain baseline against a real model", () => {
       const projectedUsd = (count: number) =>
         (count * perTrial * estimateMargin) / micros;
       const window = contextWindowOf(
-        defaultModel.slice(defaultModel.indexOf("/") + 1)
+        testedModel.slice(testedModel.indexOf("/") + 1)
       );
       const estimate = {
         identity: report.identity,
-        model: defaultModel,
+        model: testedModel,
         outputAllowance: settings.outputAllowance,
         margin: estimateMargin,
         dev: {
@@ -184,12 +197,12 @@ describe("the Brain baseline against a real model", () => {
         },
       };
       console.info(`BRAIN_MODEL_ESTIMATE ${JSON.stringify(estimate)}`);
-      expect(report.identity.model.id).toBe(defaultModel);
+      expect(report.identity.model.id).toBe(testedModel);
     }
   );
 
   it.runIf(settings.mode === "run")(
-    `runs the ${settings.split} split against the default model, within its budget`,
+    `runs the ${settings.split} split against ${testedModel}, within its budget`,
     async () => {
       const { budgetUsd } = settings;
       if (budgetUsd === undefined) {
@@ -208,7 +221,7 @@ describe("the Brain baseline against a real model", () => {
       }
       const exchanges: ModelExchange[] = [];
       const setup: BrainModelSetup = {
-        model: defaultModel,
+        model: testedModel,
         config: {
           ...deploymentGateway,
           // The run's budget, as the ledger enforces it on every request.
@@ -241,7 +254,7 @@ describe("the Brain baseline against a real model", () => {
         sha: report.identity.build?.sha,
         withinBudget: spent <= budgetUsd * micros,
       }).toStrictEqual({
-        model: defaultModel,
+        model: testedModel,
         sha: settings.build.sha,
         withinBudget: true,
       });
