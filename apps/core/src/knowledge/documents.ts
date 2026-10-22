@@ -46,6 +46,7 @@ import {
 } from "../db/knowledge/schema.ts";
 import { allowedCollections, noteProvenance } from "./access.ts";
 import type { Reader } from "./access.ts";
+import { admitToKnowledge } from "./admission.ts";
 import { allowedFor } from "./app-entries.ts";
 import type { Allowed } from "./app-entries.ts";
 import { readableCollection, requireWritable } from "./collections.ts";
@@ -104,7 +105,29 @@ interface Prepared {
   reviewDate: string | null;
   sections: Section[];
   links: Link[];
+  /**
+   * Every string its frontmatter decodes to, keys included: what YAML's
+   * escapes (`\u0063ancer`) make of the text, and what is kept and shown.
+   */
+  decoded: string[];
 }
+
+/** The strings in `value`, as YAML decoded it: keys and values, nested. */
+const stringsIn = (value: unknown): string[] => {
+  if (typeof value === "string") {
+    return [value];
+  }
+  if (Array.isArray(value)) {
+    return value.flatMap(stringsIn);
+  }
+  if (value instanceof Date || value === null || typeof value !== "object") {
+    return [];
+  }
+  return Object.entries(value).flatMap(([key, field]) => [
+    key,
+    ...stringsIn(field),
+  ]);
+};
 
 const invalid = (issues: string[]) =>
   knowledgeErrors.create("knowledge.invalid", { issues });
@@ -184,7 +207,7 @@ const prepare = (path: string, text: string, purge: boolean): Prepared => {
     }
     throw error;
   }
-  const { type, frontmatter, body } = parsed;
+  const { type, frontmatter, fields, body } = parsed;
   const found = splitSections(body);
   if (found.length > documentMaxSections) {
     throw knowledgeErrors.create("knowledge.too_many_sections", {
@@ -208,6 +231,7 @@ const prepare = (path: string, text: string, purge: boolean): Prepared => {
     reviewDate: frontmatter.review ?? null,
     sections: found,
     links: linked,
+    decoded: stringsIn(fields),
   };
 };
 
@@ -395,6 +419,37 @@ export interface Write {
 }
 
 /**
+ * Admits `write` into canonical Knowledge (admission.ts), or throws:
+ * its text, path, message, the title it gets and every string its
+ * frontmatter decodes to (`prepared`). A purge removes personal data and
+ * the Grasp skills' sync writes the release's own text: neither is
+ * screened.
+ */
+const admitted = async (
+  env: Env,
+  by: Writer,
+  write: Write,
+  prepared: Prepared
+): Promise<void> => {
+  if (write.purge === true || write.graspSync === true) {
+    return;
+  }
+  // Everything the version keeps, each as a paragraph of its own: its
+  // path and the title made from it, its message, its text as written,
+  // and its frontmatter as YAML decodes it, which is what its row keeps
+  // (title, description, tags) and a reader shows: an escape in the raw
+  // text must not hide a word from the gate.
+  const kept = [
+    write.path,
+    prepared.title,
+    write.message ?? "",
+    write.text,
+    ...prepared.decoded,
+  ];
+  await admitToKnowledge(env, by.actor, write.collection.id, kept.join("\n\n"));
+};
+
+/**
  * Writes the next version, if the document is still at `ifVersion`
  * (0: it doesn't exist yet). Throws `knowledge.conflict`, with the version
  * it is at, and writes nothing otherwise.
@@ -500,8 +555,6 @@ export const writeVersion = async (
           )
         )
     : db.insert(documents).values(row);
-  // GRA-328's admission gate (knowledge/admission.ts) belongs here, before
-  // anything is stored: R2 only ever holds text that was admitted.
   // A payload collected between its staging and the batch refuses the
   // batch (`isUncommitted`): the text is stored again, once.
   const send = async (staged: StagedPayload): Promise<void> => {
@@ -515,6 +568,10 @@ export const writeVersion = async (
       throw error;
     }
   };
+  // Admitted against the policy in effect now, after everything else
+  // that could refuse the write, and before anything is stored: R2 only
+  // ever holds text that was admitted.
+  await admitted(env, by, write, prepared);
   // Checked before the text is stored too: a write it refuses never
   // uploads it.
   await write.lastCheck?.();
