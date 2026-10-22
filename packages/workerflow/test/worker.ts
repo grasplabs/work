@@ -61,6 +61,13 @@ const paramOf = (params: unknown, field: string): unknown =>
     ? Reflect.get(params, field)
     : undefined;
 
+/** Waits `ms` on a timer of the definition's own, outside any step. */
+const lag = async (ms: number): Promise<void> => {
+  if (ms > 0) {
+    await scheduler.wait(ms);
+  }
+};
+
 /** The `duration` in a run's params, or `fallback`. */
 const durationIn = (
   params: unknown,
@@ -1097,6 +1104,38 @@ export const definitions: Record<string, WorkflowDefinition> = {
       witness(event.instanceId, winner);
       await step.sleep("after", 1200);
       return winner;
+    },
+  },
+  // Two branches awaited together, then a sleep, so the run replays. The
+  // first run reaches step "a" at once and "b" lands later, so "a"'s
+  // outcome is journaled first; a replay reaches "a" only after a timer
+  // of the author's own, with "b" read back at once. With `jitter`, every
+  // call comes after a random delay of up to that many ms, as a host's
+  // I/O before its step would put it.
+  "late-branch": {
+    run: async (event, step) => {
+      const { instanceId } = event;
+      const jitter = Number(paramOf(event.payload, "jitter") ?? 0);
+      const first = (await checkpoint(instanceId, "late-branch")) === 1;
+      const a = async (): Promise<string> => {
+        await lag(first ? 0 : 300);
+        await lag(Math.random() * jitter);
+        return await step.do("a", async (context) => {
+          await effect(instanceId, "a", context);
+          return "a";
+        });
+      };
+      const b = async (): Promise<string> => {
+        await lag(Math.random() * jitter);
+        return await step.do("b", async (context) => {
+          await lag(first ? 100 : 0);
+          await effect(instanceId, "b", context);
+          return "b";
+        });
+      };
+      const both = await Promise.all([a(), b()]);
+      await step.sleep("after", 200);
+      return both;
     },
   },
   // A wait raced against a sleep, inside the author's own handlers.

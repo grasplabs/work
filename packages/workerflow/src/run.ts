@@ -27,8 +27,8 @@
 // - A sleep or an event wait that isn't due suspends the run: in one write,
 //   its deadline (journaled when it was first reached), the status
 //   `waiting` and that deadline as the run's wake; then the alarm is set to
-//   that wake, and the activation ends (activation.ts). Waits come one at
-//   a time, so there is one deadline to wake for. Nothing of the run stays
+//   that wake, and the activation ends (activation.ts). Waits may wait
+//   together: the wake is the earliest deadline. Nothing of the run stays
 //   in memory. Every alarm and event replays to the wait, which reads its
 //   deadline back from the journal, so no duplicate, early or late alarm
 //   moves it.

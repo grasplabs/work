@@ -425,16 +425,6 @@ export const readSettled = (
     )
     .toArray()[0]?.settled ?? null;
 
-/** The numbers of the outcomes journaled after `after`, in order. */
-export const readSettledAfter = (sql: SqlStorage, after: number): number[] =>
-  sql
-    .exec<{ settled: number }>(
-      "SELECT settled FROM steps WHERE settled > ? ORDER BY settled",
-      after
-    )
-    .toArray()
-    .map((row) => row.settled);
-
 export const createJournal = (sql: SqlStorage): void => {
   sql.exec(`
     CREATE TABLE IF NOT EXISTS run (
