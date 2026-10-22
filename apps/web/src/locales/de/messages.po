@@ -1950,6 +1950,10 @@ msgctxt "log filter: who"
 msgid "Anyone"
 msgstr "Alle"
 
+#: src/engines/blueprints.tsx
+msgid "Anyone who builds and has a role in {name} can now start a new app from it. {name} itself stays as it is."
+msgstr "Wer baut und eine Rolle in {name} hat, kann jetzt eine neue App damit beginnen. {name} selbst bleibt, wie es ist."
+
 #: src/routes/_shell.onboarding.log.tsx
 msgctxt "log filter: what"
 msgid "Anything"
@@ -2439,6 +2443,10 @@ msgstr "Hindernis"
 msgid "Blockers"
 msgstr "Hindernisse"
 
+#: src/engines/blueprints.tsx
+msgid "Blueprints"
+msgstr "Blueprints"
+
 #: src/dashboard/widget-board.tsx
 msgctxt "dashboard widget"
 msgid "Board goals"
@@ -2593,6 +2601,7 @@ msgstr "Kann Unternehmensdaten {verbs}"
 #: src/chat/brain-questions.tsx
 #: src/chat/project-dialog.tsx
 #: src/decision-confirmation.tsx
+#: src/engines/blueprints.tsx
 #: src/engines/package-approvals.tsx
 #: src/inbox/item-detail.tsx
 #: src/knowledge/document.tsx
@@ -2911,6 +2920,7 @@ msgstr "Klicken, um die Nutzung zu öffnen"
 #: src/connections/connection-list.tsx
 #: src/dashboard/report-dialog.tsx
 #: src/dashboard/widget-block.tsx
+#: src/engines/blueprints.tsx
 #: src/engines/package-approvals.tsx
 #: src/engines/resource-bindings.tsx
 #: src/engines/store-changes.tsx
@@ -2987,6 +2997,10 @@ msgstr "Sammlungen enthalten die Dokumente, die Grasp und seine Agenten lesen d�
 #: src/landscape/columns-menu.tsx
 msgid "Columns"
 msgstr "Spalten"
+
+#: src/engines/blueprints.tsx
+msgid "Comes with Grasp"
+msgstr "Kommt mit Grasp"
 
 #: src/routes/_shell.landscape.index.tsx
 msgctxt "row height"
@@ -3785,6 +3799,7 @@ msgid "done"
 msgstr "erledigt"
 
 #: src/chat/thread.tsx
+#: src/engines/blueprints.tsx
 #: src/onboarding/setup-steps.tsx
 #: src/routes/_shell.workflows.index.tsx
 msgid "Done"
@@ -5960,6 +5975,10 @@ msgstr "Nie"
 msgid "New app"
 msgstr "Neue App"
 
+#: src/engines/blueprints.tsx
+msgid "New apps can start from version {version} of {name}, as a copy with none of its data. {name} itself stays as it is."
+msgstr "Neue Apps können mit Version {version} von {name} beginnen, als Kopie ohne seine Daten. {name} selbst bleibt, wie es ist."
+
 #: src/chat/chat-dock.tsx
 #: src/chat/chat-list.tsx
 #: src/routes/_shell.index.tsx
@@ -6077,6 +6096,10 @@ msgstr "Keine Apps entsprechen diesen Filtern."
 #: src/routes/_shell.domains.index.tsx
 msgid "No apps yet"
 msgstr "Noch keine Apps"
+
+#: src/engines/blueprints.tsx
+msgid "No blueprints yet"
+msgstr "Noch keine Blueprints"
 
 #: src/routes/_shell.settings.spend.tsx
 msgid "No budget is set for all calls together"
@@ -7924,6 +7947,10 @@ msgstr "{file} entfernen"
 msgid "Remove {name}?"
 msgstr "{name} entfernen?"
 
+#: src/engines/blueprints.tsx
+msgid "Remove the blueprint {name}"
+msgstr "Blueprint {name} entfernen"
+
 #: src/routes/_shell.onboarding.stephen.tsx
 msgid "Remove: {item}"
 msgstr "Entfernen: {item}"
@@ -8396,6 +8423,18 @@ msgstr "Gleiche Version, anderer Inhalt: {changed}"
 msgid "Save"
 msgstr "Speichern"
 
+#: src/engines/blueprints.tsx
+msgid "Save {name} as a blueprint"
+msgstr "{name} als Blueprint speichern"
+
+#: src/engines/blueprints.tsx
+msgid "Save an app as a blueprint from its domain, and it shows here."
+msgstr "Speichern Sie eine App in ihrer Domäne als Blueprint, dann erscheint sie hier."
+
+#: src/engines/blueprints.tsx
+msgid "Save as blueprint"
+msgstr "Als Blueprint speichern"
+
 #: src/dashboard/report-dialog.tsx
 msgid "Save as PDF"
 msgstr "Als PDF speichern"
@@ -8404,10 +8443,18 @@ msgstr "Als PDF speichern"
 msgid "Save the agreements"
 msgstr "Vereinbarungen speichern"
 
+#: src/engines/blueprints.tsx
+msgid "Saved as a blueprint"
+msgstr "Als Blueprint gespeichert"
+
 #. placeholder {0}: draft.revision
 #: src/workflows/definition-editor.tsx
 msgid "Saved as revision {0}."
 msgstr "Als Revision {0} gespeichert."
+
+#: src/engines/blueprints.tsx
+msgid "Saved by {person} on {date}"
+msgstr "Gespeichert von {person} am {date}"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 #: src/workflows/resource-params.tsx
@@ -8928,6 +8975,14 @@ msgstr "Testlauf starten"
 #: src/knowledge/document.tsx
 msgid "Start again from version {newerVersion}"
 msgstr "Neu beginnen ab Version {newerVersion}"
+
+#: src/engines/blueprints.tsx
+msgid "Start from {name}"
+msgstr "Mit {name} beginnen"
+
+#: src/engines/blueprints.tsx
+msgid "Start from a blueprint"
+msgstr "Mit einem Blueprint beginnen"
 
 #: src/tour/tour-script.ts
 msgid "Start the tour"
@@ -9778,6 +9833,10 @@ msgstr "Das Dringendste zuerst."
 #: src/brain/brain-atlas.ts
 msgid "The most used AI tool nobody mentioned is {name}, used by {people} people."
 msgstr "Das meistgenutzte KI-Tool, das niemand genannt hat, ist {name}, genutzt von {people} Personen."
+
+#: src/engines/blueprints.tsx
+msgid "The new app starts as a copy of it, with none of its data. Its access waits for an admin."
+msgstr "Die neue App beginnt als Kopie davon, ohne ihre Daten. Ihre Zugriffe warten auf einen Admin."
 
 #: src/engines/store-changes.tsx
 msgid "The new field {field} of the table {table} can't be filled in: the record {record} already holds a value under that name that the field doesn't accept."
