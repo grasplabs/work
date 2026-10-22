@@ -85,6 +85,12 @@ const typeRules: readonly {
   { action: "onboarding", type: "config" },
   // An admin adding records to the Playbook the brain is built from.
   { action: "brain.records", type: "action" },
+  // A gap's owner asked (Grasp's), and a person answering or closing it.
+  { action: "brain.gap.asked", type: "action" },
+  // A purge rewriting answers, or forgetting who gave them.
+  { action: "brain.gap.answers_purged", type: "action" },
+  { action: "brain.gap.answerer_erased", type: "action" },
+  { action: "brain.gap", type: "decision" },
   { action: "knowledge.search", type: "read" },
   { action: "knowledge.read", type: "read" },
   // Knowledge usage signals: the daily computation, an owner reading those
