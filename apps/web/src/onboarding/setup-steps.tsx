@@ -56,7 +56,7 @@ import {
   PenLineIcon,
   UploadIcon,
 } from "lucide-react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ComponentType } from "react";
 
 import type { BrainScene } from "../brain/dot-brain.tsx";
@@ -67,7 +67,7 @@ import { formatDate, formatList } from "../format.ts";
 import { isLocale, localeNames } from "../i18n.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
-import { usePrepare } from "../voice/voice.ts";
+import { speak, usePrepare } from "../voice/voice.ts";
 import { About } from "./about-story.tsx";
 import { DocumentDrop } from "./document-drop.tsx";
 import type { DocumentRow } from "./document-drop.tsx";
@@ -353,10 +353,12 @@ const shareDocument = async (
   core: ReturnType<typeof useCore>,
   file: File,
   locale: InterviewLocale
-): Promise<{ shared: true } | { shared: false; error: unknown }> => {
+): Promise<
+  { shared: true; kept: OnboardingDocument } | { shared: false; error: unknown }
+> => {
   try {
     const bytes = new Uint8Array(await file.arrayBuffer());
-    await core.withSession(
+    const kept = await core.withSession(
       async (session) =>
         await session.onboarding.shareDocument({
           locale,
@@ -364,7 +366,7 @@ const shareDocument = async (
           bytes,
         })
     );
-    return { shared: true };
+    return { shared: true, kept };
   } catch (error) {
     return { shared: false, error };
   }
@@ -583,11 +585,27 @@ const useProblemOf = (): ((error: unknown) => string) => {
   };
 };
 
+/** A document's question as Stephen asks it: with what the document is about. */
+const questionLine = ({ reading: { about, ask } }: OnboardingDocument) =>
+  `${about} ${ask?.question ?? ""}`.trim();
+
+/** What Stephen says when core could not read a document: an old format has a way out of its own. */
+const useSaidProblemOf = (): ((name: string, error: unknown) => string) => {
+  const { t } = useLingui();
+  return (name, error) =>
+    documentErrors.codeOf(error) === "document.old_format"
+      ? t`I can’t read ${name}: it’s in an old format. As a PDF or a newer file, I can.`
+      : t`I couldn’t read ${name}. Add it again, or as a PDF.`;
+};
+
 /**
  * Documents that explain how they work. Each is read the moment it is
- * dropped, for real, by core: every row says what it is about. Only what
- * nobody but the one who shared it can say, Stephen asks at once, with the
- * answers to pick from.
+ * dropped, for real, by core: Stephen thanks them at the drop, then says
+ * what he took from the first one, and every row says what it is about.
+ * Only what nobody but the one who shared it can say, he asks at once,
+ * with the answers to pick from. Such a question comes with what its
+ * document is about, so then he sums up nothing else first; and one
+ * answered on screen before he gets to it, he does not ask.
  */
 const Documents = (props: StepProps) => {
   const { t, i18n } = useLingui();
@@ -596,10 +614,49 @@ const Documents = (props: StepProps) => {
   const refresh = useRefresh();
   const { run, busy, failure } = useCoreAction();
   const problemOf = useProblemOf();
+  const saidProblemOf = useSaidProblemOf();
   const [pending, setPending] = useState<Pending[]>([]);
   const [fresh, setFresh] = useState(false);
+  // Whether the step is still on screen: a reading that ends after it is left is kept, but not said.
+  const here = useRef(true);
+  useEffect(() => {
+    here.current = true;
+    return () => {
+      here.current = false;
+    };
+  }, []);
+  // How many documents he has told about on this visit: the first he sums up out loud, the rest say it in their rows.
+  const told = useRef(0);
+  // His questions about documents read on this visit, by document, until they are answered.
+  const asking = useRef(new Set<string>());
   const kept = props.data.documents;
   const locale: InterviewLocale = isLocale(i18n.locale) ? i18n.locale : "en";
+  // His thanks and his "Got it." are fetched as the step opens, so each follows what was done without a pause.
+  const thanks = t`Thank you. I’m reading them now, and you can add more at any time.`;
+  const gotIt = t`Got it.`;
+  usePrepare(thanks, { tone: tones.warm });
+  usePrepare(gotIt, { tone: tones.plain });
+  const tell = (read: OnboardingDocument) => {
+    const { about, ask } = read.reading;
+    // A question only they can answer is always asked, with what its document is about, unless it was answered by then; otherwise only the first is summed up, and not while a question waits to be asked.
+    if (ask !== null && read.answer === null) {
+      asking.current.add(read.id);
+      speak(questionLine(read), {
+        after: true,
+        still: () => here.current && asking.current.has(read.id),
+        tone: tones.even,
+        quick: true,
+      });
+    } else if (told.current === 0) {
+      speak(about, {
+        after: true,
+        still: () => here.current && asking.current.size === 0,
+        tone: tones.even,
+        quick: true,
+      });
+    }
+    told.current += 1;
+  };
   // Core keeps two documents of the same name as two: each row is its own upload, by an id of its own.
   const take = (files: File[]) => {
     const added = files.map((file, at): Pending => ({
@@ -623,6 +680,9 @@ const Documents = (props: StepProps) => {
         if (result.shared) {
           await refresh();
           setPending((now) => now.filter((row) => row.key !== each.key));
+          if (here.current) {
+            tell(result.kept);
+          }
           return;
         }
         const problem = problemOf(result.error);
@@ -631,22 +691,42 @@ const Documents = (props: StepProps) => {
             row.key === each.key ? { ...row, state: "failed", problem } : row
           )
         );
+        speak(saidProblemOf(each.name, result.error), {
+          after: true,
+          still: () => here.current,
+          tone: tones.plain,
+          quick: true,
+        });
       })();
     }
   };
-  // His one question about a document, while it waits for an answer: answered with a press.
-  const open = kept.find(
+  // His one question about a document, while it waits for an answer: answered with a press. The first shared is asked first (core lists the newest first).
+  const open = kept.findLast(
     (each) => each.reading.ask !== null && each.answer === null
   );
   const answer = async (option: string) => {
     if (open === undefined) {
       return;
     }
+    asking.current.delete(open.id);
     const saved = await run(
       async (session) =>
         await session.onboarding.answerDocument(open.id, option)
     );
     if (saved !== undefined) {
+      // His answer cuts what waited to be said: a question still open comes with it.
+      const next = kept.findLast(
+        (each) => each.id !== open.id && asking.current.has(each.id)
+      );
+      if (next === undefined) {
+        speak(gotIt, { soon: true, tone: tones.plain });
+      } else {
+        speak(`${gotIt} ${questionLine(next)}`, {
+          soon: true,
+          tone: tones.even,
+          quick: true,
+        });
+      }
       await refresh();
     }
   };
@@ -668,13 +748,12 @@ const Documents = (props: StepProps) => {
       <Heading
         answer={
           fresh && count + reading.length > 0
-            ? {
-                text: t`Thank you. I’m reading them now, and you can add more at any time.`,
-              }
+            ? { text: thanks, tone: tones.warm }
             : undefined
         }
         sentence={lines.sentence}
         title={lines.title}
+        voice={lines.voice}
       />
       <Onward>
         <DocumentDrop

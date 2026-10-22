@@ -4548,6 +4548,10 @@ msgstr "Ziele, und warum jetzt KI"
 msgid "Google sign-in"
 msgstr "Google-Anmeldung"
 
+#: src/onboarding/setup-steps.tsx
+msgid "Got it."
+msgstr "Verstanden."
+
 #: src/inbox/items.ts
 msgid "Grant {who}?"
 msgstr "{who} erteilen?"
@@ -4878,6 +4882,10 @@ msgid "HR"
 msgstr "HR"
 
 #: src/onboarding/setup-steps.tsx
+msgid "I can’t read {name}: it’s in an old format. As a PDF or a newer file, I can."
+msgstr "{name} kann ich nicht lesen: Es ist in einem alten Format. Als PDF oder als neuere Datei kann ich es."
+
+#: src/onboarding/setup-steps.tsx
 msgid "I could not find the columns. The first row should name them: name, email, team and job."
 msgstr "Ich konnte die Spalten nicht finden. Die erste Zeile sollte sie benennen: Name, E-Mail, Team und Funktion."
 
@@ -4888,6 +4896,10 @@ msgstr "Ich konnte es nicht speichern. Versuchen Sie es gleich noch einmal."
 #: src/onboarding/setup-steps.tsx
 msgid "I could not read this file. A CSV or an Excel file works."
 msgstr "Ich konnte diese Datei nicht lesen. Eine CSV- oder Excel-Datei funktioniert."
+
+#: src/onboarding/setup-steps.tsx
+msgid "I couldn’t read {name}. Add it again, or as a PDF."
+msgstr "{name} konnte ich nicht lesen. Fügen Sie es noch einmal hinzu, oder als PDF."
 
 #: src/onboarding/setup-steps.tsx
 msgid "I couldn’t read this one"

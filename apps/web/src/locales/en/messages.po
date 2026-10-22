@@ -4548,6 +4548,10 @@ msgstr "Goals, and why AI now"
 msgid "Google sign-in"
 msgstr "Google sign-in"
 
+#: src/onboarding/setup-steps.tsx
+msgid "Got it."
+msgstr "Got it."
+
 #: src/inbox/items.ts
 msgid "Grant {who}?"
 msgstr "Grant {who}?"
@@ -4878,6 +4882,10 @@ msgid "HR"
 msgstr "HR"
 
 #: src/onboarding/setup-steps.tsx
+msgid "I can’t read {name}: it’s in an old format. As a PDF or a newer file, I can."
+msgstr "I can’t read {name}: it’s in an old format. As a PDF or a newer file, I can."
+
+#: src/onboarding/setup-steps.tsx
 msgid "I could not find the columns. The first row should name them: name, email, team and job."
 msgstr "I could not find the columns. The first row should name them: name, email, team and job."
 
@@ -4888,6 +4896,10 @@ msgstr "I could not keep it. Try again in a moment."
 #: src/onboarding/setup-steps.tsx
 msgid "I could not read this file. A CSV or an Excel file works."
 msgstr "I could not read this file. A CSV or an Excel file works."
+
+#: src/onboarding/setup-steps.tsx
+msgid "I couldn’t read {name}. Add it again, or as a PDF."
+msgstr "I couldn’t read {name}. Add it again, or as a PDF."
 
 #: src/onboarding/setup-steps.tsx
 msgid "I couldn’t read this one"
