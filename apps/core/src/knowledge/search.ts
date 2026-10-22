@@ -38,8 +38,11 @@ import { nearestCollectionsMax, nearestDetail } from "./usage-tally.ts";
 // that finds it: whole words first, then trigrams; and only when neither
 // finds anything, trigrams with room for one typo. Within a pass sections
 // rank by BM25 with field weights (title, then description, headings and
-// text) and by freshness. Every word of the query must match (AND): a
-// search narrows as it gets longer.
+// text) and by freshness. Every word of a search must match (AND): a
+// search narrows as it gets longer. A recall asks a question in its
+// person's words, which no section holds all of, so any of its words
+// matches (OR), and BM25 ranks the sections that hold more of them, and
+// the rarer ones, first: how search engines read a question.
 //
 // Access is part of the same statement (R11): a section of a collection
 // the reader can't read, or of an App's entry they may not find
@@ -135,9 +138,12 @@ interface Pass {
 }
 
 /** The FTS5 queries of each pass that has one, in order. */
-const passesOf = (terms: string[]): Pass[] => {
+/** How a pass joins a query's words: all of them, or any (a recall). */
+type Joiner = " AND " | " OR ";
+
+const passesOf = (terms: string[], joiner: Joiner): Pass[] => {
   const words = (list: string[]) =>
-    list.map((term) => `${quoted(term)}*`).join(" AND ");
+    list.map((term) => `${quoted(term)}*`).join(joiner);
   const letters = terms.map((term) => ({
     term,
     // Code points, as the trigram tokenizer counts them. Terms are letters
@@ -156,16 +162,19 @@ const passesOf = (terms: string[]): Pass[] => {
           table: "search_trigrams",
           pass: 0,
           match: query,
-          ...(short.length === 0 ? {} : { short: words(short) }),
+          // Each word counts only when every one must match.
+          ...(short.length === 0 || joiner === " OR "
+            ? {}
+            : { short: words(short) }),
         };
   const typo = long.map(({ term, chars }) =>
     chars.length < typoLength ? quoted(term) : `(${allowingTypo(chars)})`
   );
   return [
     { table: "search_words", pass: 0, match: words(terms) },
-    trigrams(long.map(({ term }) => quoted(term)).join(" AND ")),
+    trigrams(long.map(({ term }) => quoted(term)).join(joiner)),
     long.some(({ chars }) => chars.length >= typoLength)
-      ? trigrams(typo.join(" AND "))
+      ? trigrams(typo.join(joiner))
       : undefined,
   ].flatMap((pass, index) =>
     pass === undefined ? [] : [{ ...pass, pass: index }]
@@ -441,7 +450,8 @@ export const searchSections = async (
   only?: string,
   /**
    * For a recall: only these collections, each refused as not found
-   * unless the reader may read it, read in one search; and recorded as a
+   * unless the reader may read it, read in one search; matching any of
+   * the query's words, ranked by BM25 (`passesOf`); and recorded as a
    * recall (`searchRecord`).
    */
   recall?: { among?: readonly string[] }
@@ -510,7 +520,7 @@ export const searchSections = async (
   // Every section of a document repeats its title and description, so a
   // document ranks by its best section, and its sections follow one another
   // in the order their own headings and text match.
-  const passes = passesOf(terms);
+  const passes = passesOf(terms, recall === undefined ? " AND " : " OR ");
   const rows = await db.all(sql`
     WITH matches AS (${sql.join(passes.map(matchesSql), sql` UNION ALL `)}),
     readable AS (

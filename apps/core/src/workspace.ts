@@ -136,6 +136,7 @@ import {
 import { readableSources, withheldSourceDetail } from "./history-access.ts";
 import { readAsDelegate } from "./knowledge/binding.ts";
 import { forContext } from "./knowledge/memory.ts";
+import { hasBrainGrant } from "./knowledge/recall-store.ts";
 import { catalog, noteListedSkills } from "./knowledge/tools.ts";
 import { gatewaySettings, models } from "./models.ts";
 import { functionProblem, PreviewReports } from "./preview-reports.ts";
@@ -1122,6 +1123,9 @@ export class Workspace extends DurableObject<Env> {
         loader: this.env.LOADER,
         sandbox: () => sessionHost(this.env),
         codeTimeoutMs: codeTimeoutMs(this.env),
+        // The Brain's recall before the first request, under the agent's
+        // own grant, as its code would recall (GRA-1029).
+        recallFirst: await hasBrainGrant(this.env, authority),
         signal: cancel.signal,
         events: () => live.events.splice(0),
         withheld: async () => await this.#withheldRuns(scope),
