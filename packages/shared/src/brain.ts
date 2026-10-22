@@ -8,6 +8,7 @@
 
 import { z } from "zod";
 
+import type { BrainRecordInput, BrainRecordsAdded } from "./brain-records.ts";
 import { defineErrorFamily } from "./errors.ts";
 import { documentIdSchema } from "./ids.ts";
 import type { CollectionId, DocumentId } from "./ids.ts";
@@ -183,6 +184,14 @@ export interface Statement {
   toolIds: string[];
   /** The candidate process it is about, if any. */
   candidateId?: string;
+  /**
+   * The earlier statement this one follows up: the same blocker or time
+   * sink, said again later, perhaps with a different pain, or resolved.
+   * The earlier statement is never edited.
+   */
+  followsUp?: string;
+  /** How much it hurts, as the team said it: only for blockers, time sinks and handovers. */
+  pain?: "low" | "medium" | "high";
 }
 
 /** A process that might be worth turning into a workflow. */
@@ -327,6 +336,11 @@ export interface BrainApi {
    * time, as the person may read them.
    */
   notes: (options?: BrainNotesOptions) => Promise<BrainNotePage>;
+  /**
+   * Adds records to the Playbook (brain-records.ts), all or none: for
+   * admins. A record core holds already, exactly so, is left as it is.
+   */
+  addRecords: (records: BrainRecordInput[]) => Promise<BrainRecordsAdded>;
 }
 
 /** Why a brain call was refused. */

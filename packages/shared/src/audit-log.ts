@@ -83,6 +83,8 @@ const typeRules: readonly {
   // The onboarding: who works where, the plan, pausing it, the
   // agreements, and the gate that keeps the company out until Grasp's go.
   { action: "onboarding", type: "config" },
+  // An admin adding records to the Playbook the brain is built from.
+  { action: "brain.records", type: "action" },
   { action: "knowledge.search", type: "read" },
   { action: "knowledge.read", type: "read" },
   // Knowledge usage signals: the daily computation, an owner reading those
