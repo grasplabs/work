@@ -362,6 +362,7 @@ describe("the admin's frame", () => {
       tools: html.includes(">daily_digest</code>"),
       // The digest is today's, from the organizations that answered.
       digest: text.includes("Grasp, ") && text.includes("1 organization"),
+      // Rooms is read through its service route, so no MCP tools of its own.
       roomsTools: html.includes(">get_signature_receipt</code>"),
     }).toStrictEqual({
       status: 200,
@@ -371,7 +372,7 @@ describe("the admin's frame", () => {
       ownToCome: true,
       tools: true,
       digest: true,
-      roomsTools: true,
+      roomsTools: false,
     });
   });
 
@@ -792,9 +793,9 @@ describe("the admin's frame", () => {
         about: contract.html.includes(
           "What was signed, what it gives the company, and what is billed."
         ),
-        // Core holds no contract yet, from Rooms; nor is it linked in Stripe.
+        // Core holds no contract yet, from Rooms; nor is it linked in Rooms or Stripe.
         source: contract.html.includes(
-          "The contract: from Rooms, once it is connected. Its billing and invoices: from Stripe, once it is connected."
+          "The contract: from Rooms, once it is connected. The proposal and who signed it: from Rooms, once it is connected. Its billing and invoices: from Stripe, once it is connected."
         ),
         current: columnEntryOf(
           columnOf(contract.html, acme.name),
