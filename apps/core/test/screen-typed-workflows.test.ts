@@ -501,6 +501,28 @@ const following = async (
 /** How long a push or a run's change may take, and how often to look. */
 const settles = { timeout: 30_000, interval: 50 };
 
+/** A workflow that sleeps a moment, then an hour, then greets. */
+const twoSleepsOf = (name: string): string =>
+  JSON.stringify({
+    document: {
+      dsl: "1.0.3",
+      namespace: workflowNamespace,
+      name,
+      version: "1.0.0",
+      title: name,
+      metadata: {
+        grasp: { profile: "grasp-open-workflow/1", params: {}, bindings: {} },
+      },
+    },
+    input: { schema: objectSchema({ who: { type: "string" } }) },
+    output: { schema: objectSchema({ status: { type: "string" } }) },
+    do: [
+      { first: { wait: "PT1S" } },
+      { second: { wait: "PT1H" } },
+      { greet: { set: { status: '${ "Hello, " + $workflow.input.who }' } } },
+    ],
+  });
+
 /** What a failed run's snapshot says of `error`: its code and words. */
 const failureShown = (error: { code: string | null; message: string }) => {
   const { code, message } = failureOf(error);
@@ -512,6 +534,11 @@ const shownOf = (pushed: unknown): unknown =>
   typeof pushed === "string"
     ? pushed
     : z.object({ status: z.string() }).safeParse(pushed).data?.status;
+
+/** How many waits a pushed snapshot lists. */
+const waitsShown = (pushed: unknown): number | undefined =>
+  z.object({ waits: z.array(z.unknown()) }).safeParse(pushed).data?.waits
+    .length;
 
 /** A control's receipt, without its revision. */
 const staged = (receipt: unknown) => {
@@ -607,6 +634,103 @@ describe(
           waits: [],
         },
       });
+    });
+
+    it("publishes what a run waits on with its status: its task's sleep while it runs, nothing once it has ended", async () => {
+      const { builder, app, reference } = await requestsApp("PT1H");
+      const lease = await screenOf(builder, app);
+      const channel = workflowChannel(screenClient(builder, app, lease));
+      const read = readWorkflowReference(reference);
+      const handle = await channel.start(read, { who: "Ada" });
+      const stopRun = channel.followRun(read, handle.runId, () => {
+        // Read below.
+      });
+      // Running, and asleep in its `hold` task: one snapshot says both.
+      await vi.waitFor(() => {
+        expect(channel.peekRun(read, handle.runId).value?.waits).toHaveLength(
+          1
+        );
+      }, settles);
+      const asleep = channel.peekRun(read, handle.runId);
+      await channel.control(read, handle.runId, "cancel", () => {
+        // Answered below.
+      });
+      await vi.waitFor(() => {
+        expect(channel.peekRun(read, handle.runId).value?.status).toBe(
+          "cancelled"
+        );
+      }, settles);
+      const ended = channel.peekRun(read, handle.runId);
+      stopRun();
+      const [wait] = asleep.value?.waits ?? [];
+
+      expect({
+        status: asleep.value?.status,
+        wait:
+          wait === undefined
+            ? undefined
+            : {
+                kind: wait.kind,
+                purpose: "purpose" in wait ? wait.purpose : undefined,
+                key: wait.key,
+                taskId: wait.taskId,
+                // An hour's sleep (in seconds), from when it was first reached.
+                length:
+                  wait.deadline === null
+                    ? null
+                    : Math.round((wait.deadline - wait.openedAt) / 1000),
+              },
+        ended: {
+          waits: ended.value?.waits,
+          later: ended.revision > asleep.revision,
+        },
+      }).toStrictEqual({
+        status: "running",
+        wait: {
+          kind: "timer",
+          purpose: "sleep",
+          key: "hold",
+          taskId: "hold",
+          length: 3600,
+        },
+        ended: { waits: [], later: true },
+      });
+    });
+
+    it("shows a run's next wait at a revision of its own, though it was running all along", async () => {
+      const { builder, app, reference } = await requestsApp(
+        undefined,
+        undefined,
+        twoSleepsOf
+      );
+      const lease = await screenOf(builder, app);
+      const channel = workflowChannel(screenClient(builder, app, lease));
+      const read = readWorkflowReference(reference);
+      const handle = await channel.start(read, { who: "Ada" });
+      const shown: { revision: number; keys: string[] }[] = [];
+      const stopRun = channel.followRun(read, handle.runId, () => {
+        const now = channel.peekRun(read, handle.runId);
+        if (now.value !== undefined) {
+          shown.push({
+            revision: now.revision,
+            keys: now.value.waits.map(({ key }) => key),
+          });
+        }
+      });
+      await vi.waitFor(() => {
+        expect(shown.at(-1)?.keys).toStrictEqual(["second"]);
+      }, settles);
+      stopRun();
+      const first = shown.find(({ keys }) => keys.includes("first"));
+      const second = shown.find(({ keys }) => keys.includes("second"));
+
+      expect({
+        sawFirst: first !== undefined,
+        later:
+          first !== undefined &&
+          second !== undefined &&
+          second.revision > first.revision,
+      }).toStrictEqual({ sawFirst: true, later: true });
     });
 
     it("cancels a run with a receipt answered again under its key", async () => {
@@ -1876,6 +2000,7 @@ describe(
           .safeParse(binding.received.at(-1)?.outcome).data?.canRun;
       await vi.waitFor(() => {
         expect(shownOf(first.received.at(-1)?.outcome)).toBe("running");
+        expect(waitsShown(first.received.at(-1)?.outcome)).toBe(1);
         expect(canRun()).toBeTruthy();
       }, settles);
       // Rebound away: the screen is told at once, nothing else needed.
@@ -1916,12 +2041,13 @@ describe(
           .map(({ outcome: shown }) => shownOf(shown))
           .filter((shown) => shown !== "queued")
           .filter((shown, at, all) => at === 0 || shown !== all[at - 1]),
-        // Shown again at the revision it had before it was refused.
-        sameRevision: new Set(
-          [...first.received, ...second.received]
-            .filter(({ outcome: shown }) => shownOf(shown) === "running")
-            .map(({ revision }) => revision)
-        ).size,
+        // Shown again at the revision the run has now (it may have moved
+        // on while refused: a wait opening is a revision), the same to a
+        // screen that only now asks.
+        sameRevision: new Set([
+          first.received.at(-1)?.revision,
+          second.received.at(0)?.revision,
+        ]).size,
         second: second.received.map(({ outcome: shown }) => shownOf(shown)),
       }).toStrictEqual({
         first: ["running", "workflow.run_unavailable", "running"],
