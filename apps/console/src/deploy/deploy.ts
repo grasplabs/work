@@ -374,6 +374,46 @@ const settingValue = (key: string, value: string): unknown => {
 };
 
 /**
+ * Client `clientId`'s core vars from its `derived` config: each replaced
+ * by the client's setting of the same name, its other settings, and
+ * `change` as `PLATFORM_CHANGE`, checked as `coreVars` says. What a
+ * deploy sets, and what provisioning a placed client sets
+ * (src/hosting/operation.ts).
+ */
+export const configuredCoreVars = async (
+  db: ConsoleDatabase,
+  clientId: string,
+  derived: Readonly<Record<string, unknown>>,
+  change: PlatformChange
+): Promise<Record<string, unknown>> => {
+  const rows = await db
+    .select({ key: settings.key, value: settings.value })
+    .from(settings)
+    .where(eq(settings.clientId, clientId));
+  const unknown = rows.find(({ key }) => !configVarNames.has(key));
+  if (unknown !== undefined) {
+    throw new DeployError(
+      "unknown_setting",
+      `The setting ${unknown.key} isn't a deployment config var`
+    );
+  }
+  const vars = {
+    ...derived,
+    ...Object.fromEntries(
+      rows.map(({ key, value }): [string, unknown] => [
+        key,
+        settingValue(key, value),
+      ])
+    ),
+    PLATFORM_CHANGE: change,
+  };
+  // The config that goes out, settings included: never a SIGN_IN no admin
+  // can sign in with, nor a var core can't parse.
+  checkDeployedConfig(clientId, vars);
+  return vars;
+};
+
+/**
  * Core's vars: what every deploy derives for the client
  * (`derivedCoreConfig`): its model gateway and sign-in, each replaced by
  * the client's setting of the same name, if it has one, and its runtime
@@ -390,46 +430,24 @@ const settingValue = (key: string, value: string): unknown => {
 const coreVars = async (
   context: DeployContext,
   deploy: Deploy
-): Promise<Record<string, unknown>> => {
-  const { db } = context;
-  const rows = await db
-    .select({ key: settings.key, value: settings.value })
-    .from(settings)
-    .where(eq(settings.clientId, deploy.clientId));
-  const unknown = rows.find(({ key }) => !configVarNames.has(key));
-  if (unknown !== undefined) {
-    throw new DeployError(
-      "unknown_setting",
-      `The setting ${unknown.key} isn't a deployment config var`
-    );
-  }
-  const change: PlatformChange = {
-    by: deploy.startedBy,
-    what: deploy.kind,
-    release: deploy.releaseId,
-    // When the deploy started: the same however often it's resumed.
-    at: deploy.createdAt.toISOString(),
-  };
-  const vars = {
-    ...derivedCoreConfig({
+): Promise<Record<string, unknown>> =>
+  await configuredCoreVars(
+    context.db,
+    deploy.clientId,
+    derivedCoreConfig({
       clientId: deploy.clientId,
       signIn: deploy.signIn,
       domain: context.router.domain,
       apps: context.signInApps ?? {},
     }),
-    ...Object.fromEntries(
-      rows.map(({ key, value }): [string, unknown] => [
-        key,
-        settingValue(key, value),
-      ])
-    ),
-    PLATFORM_CHANGE: change,
-  };
-  // The config that goes out, settings included: never a SIGN_IN no admin
-  // can sign in with, nor a var core can't parse.
-  checkDeployedConfig(deploy.clientId, vars);
-  return vars;
-};
+    {
+      by: deploy.startedBy,
+      what: deploy.kind,
+      release: deploy.releaseId,
+      // When the deploy started: the same however often it's resumed.
+      at: deploy.createdAt.toISOString(),
+    }
+  );
 
 /** The deploy's runner lost the client: it stops. */
 const runnerReplaced = ({ clientId, runId }: HeldClient): DeployError =>

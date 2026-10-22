@@ -59,6 +59,11 @@ export interface AccountState {
   d1Reports?: string;
   gateways: Json[];
   scripts: Map<string, ScriptState>;
+  /**
+   * Its Workers for Platforms dispatch namespaces, each with its user
+   * Workers by script name. A test adds a namespace; uploads fill it.
+   */
+  namespaces: Map<string, Map<string, ScriptState>>;
   workflows: Map<string, { class_name: string; script_name: string }>;
   /** The hashes of the static files the account holds. */
   assets: Set<string>;

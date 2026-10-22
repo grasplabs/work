@@ -11,7 +11,8 @@
  * (src/provision/workflow.ts), `Rollout` the one that rolls a release
  * out to clients (src/rollout/workflow.ts), `RollbackClient` rolls a
  * client back from one, and `ApplyClient` applies a client's settings
- * now (src/clients/apply.ts).
+ * now (src/clients/apply.ts). `ProvisionPlacedClient` provisions a client
+ * placed in a hosting destination (src/hosting/workflow.ts).
  */
 import handler from "@tanstack/react-start/server-entry";
 
@@ -21,6 +22,7 @@ import { consoleDatabase } from "./db/act.ts";
 import { importReleases } from "./releases/import.ts";
 
 export { ApplyClient } from "./clients/apply.ts";
+export { ProvisionPlacedClient } from "./hosting/workflow.ts";
 export { ProvisionClient } from "./provision/workflow.ts";
 export { RollbackClient } from "./rollout/rollback.ts";
 export { Rollout } from "./rollout/workflow.ts";

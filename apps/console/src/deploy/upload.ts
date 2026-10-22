@@ -117,16 +117,14 @@ const readAssets = async (
   );
 
 /**
- * What `worker` of `manifest` is uploaded as: its metadata on the
- * release's compatibility date and flags, its bindings filled in and
- * `vars` added as JSON bindings, and its modules and static files, all
- * read from `store` and checked against the manifest.
+ * `workerUpload` with `bindings` rendered already: a placed client's,
+ * mapped onto its inventory (src/hosting/inventory.ts).
  */
-export const workerUpload = async (
+export const renderedWorkerUpload = async (
   store: ReleaseStore,
   manifest: ReleaseManifest,
   worker: WorkerEntry,
-  databases: ReadonlyMap<string, string>,
+  bindings: readonly Record<string, unknown>[],
   vars: Readonly<Record<string, unknown>>
 ): Promise<WorkerUpload> => {
   const modules = await Promise.all(
@@ -141,7 +139,7 @@ export const workerUpload = async (
     compatibility_date: manifest.compatibilityDate,
     compatibility_flags: worker.compatibilityFlags,
     bindings: [
-      ...renderBindings(worker, databases),
+      ...bindings,
       ...Object.entries(vars).map(([name, json]) => ({
         type: "json",
         name,
@@ -162,6 +160,27 @@ export const workerUpload = async (
       : { assets: await readAssets(store, worker) }),
   };
 };
+
+/**
+ * What `worker` of `manifest` is uploaded as: its metadata on the
+ * release's compatibility date and flags, its bindings filled in and
+ * `vars` added as JSON bindings, and its modules and static files, all
+ * read from `store` and checked against the manifest.
+ */
+export const workerUpload = async (
+  store: ReleaseStore,
+  manifest: ReleaseManifest,
+  worker: WorkerEntry,
+  databases: ReadonlyMap<string, string>,
+  vars: Readonly<Record<string, unknown>>
+): Promise<WorkerUpload> =>
+  await renderedWorkerUpload(
+    store,
+    manifest,
+    worker,
+    renderBindings(worker, databases),
+    vars
+  );
 
 /**
  * Throws `binding_name_taken` unless every binding, var and secret of

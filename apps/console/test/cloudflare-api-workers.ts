@@ -9,6 +9,7 @@ import { z } from "zod";
 import { envelope, notFound, refusal, text } from "./cloudflare-api-kit.ts";
 import type {
   AccountState,
+  ApiCall,
   DeploymentState,
   Json,
   Route,
@@ -234,51 +235,142 @@ const databaseOf = async (uuid: string): Promise<D1Database> => {
   return database;
 };
 
+/**
+ * A script upload into `scripts` (the account's own, or a dispatch
+ * namespace's): live at once, running the Durable Object migrations it
+ * carries only from the tag the script is at, as the API checks it.
+ */
+const putScript = async (
+  account: AccountState,
+  scripts: Map<string, ScriptState>,
+  name: string,
+  call: ApiCall
+): Promise<Response> => {
+  const upload = await readUpload(account, call.body);
+  if (upload instanceof Response) {
+    return upload;
+  }
+  account.scriptUploads.push({
+    script: name,
+    live: Object.fromEntries(
+      [...scripts].map(([other, state]) => [other, deployedVersion(state)?.id])
+    ),
+  });
+  const script = scripts.get(name) ?? {
+    versions: [],
+    deployments: [],
+    schedules: [],
+  };
+  const migrations = z
+    .object({ old_tag: z.string().optional(), new_tag: z.string() })
+    .loose()
+    .optional()
+    .parse(upload.metadata.migrations);
+  if (migrations !== undefined && migrations.old_tag !== script.migrationTag) {
+    return refusal(400, 10_079, "Migration tag precondition failed");
+  }
+  if (migrations !== undefined) {
+    script.migrationTag = migrations.new_tag;
+  }
+  scripts.set(name, script);
+  const version = newVersion(script, upload, secretsOf(script, upload));
+  deploy(script, [{ version_id: version.id, percentage: 100 }], {});
+  return envelope({ id: name });
+};
+
+/** Opens an assets upload session for the files `json`'s manifest lists that the account lacks. */
+const openAssetsSession = (account: AccountState, json: Json): Response => {
+  const { manifest } = z
+    .object({
+      manifest: z.record(
+        z.string(),
+        z.object({ hash: z.string(), size: z.number() })
+      ),
+    })
+    .parse(json);
+  const missing = [
+    ...new Set(
+      Object.values(manifest)
+        .map(({ hash }) => hash)
+        .filter((hash) => !account.assets.has(hash))
+    ),
+  ];
+  const jwt = `assets-${crypto.randomUUID()}`;
+  if (missing.length === 0) {
+    account.completions.add(jwt);
+    return envelope({ jwt, buckets: [] });
+  }
+  account.sessions.set(jwt, new Set(missing));
+  // Two files a bucket, so an upload takes several.
+  const buckets = Array.from(
+    { length: Math.ceil(missing.length / 2) },
+    (_, index) => missing.slice(index * 2, index * 2 + 2)
+  );
+  return envelope({ jwt, buckets });
+};
+
+/** Takes a bucket of an upload session's files; the last completes it. */
+const uploadAssetFiles = (account: AccountState, call: ApiCall): Response => {
+  const jwt = (call.headers.get("authorization") ?? "").replace(
+    /^Bearer /u,
+    ""
+  );
+  const pending = account.sessions.get(jwt);
+  if (
+    pending === undefined ||
+    call.query.get("base64") !== "true" ||
+    !(call.body instanceof FormData)
+  ) {
+    return refusal(400, 10_000, "Invalid upload");
+  }
+  for (const [hash, part] of call.body.entries()) {
+    if (part instanceof Blob && pending.delete(hash)) {
+      account.assets.add(hash);
+    }
+  }
+  if (pending.size > 0) {
+    return Response.json(
+      { success: true, errors: [], messages: [], result: { jwt: null } },
+      { status: 202 }
+    );
+  }
+  account.sessions.delete(jwt);
+  const completion = `complete-${crypto.randomUUID()}`;
+  account.completions.add(completion);
+  return Response.json(
+    { success: true, errors: [], messages: [], result: { jwt: completion } },
+    { status: 201 }
+  );
+};
+
+/** Sets a secret on `script`, as a new version deployed at once. */
+const putSecret = (script: ScriptState | Response, json: Json): Response => {
+  if (script instanceof Response) {
+    return script;
+  }
+  const name = text(json, "name");
+  return (
+    changeSecrets(script, (secrets) => {
+      secrets.set(name, text(json, "text"));
+    }) ?? envelope({ name, type: "secret_text" })
+  );
+};
+
+/** The names of `script`'s secrets, as the API lists them: never a value. */
+const secretNames = (script: ScriptState | Response): Response => {
+  if (script instanceof Response) {
+    return script;
+  }
+  const names = [...(script.versions.at(-1)?.secrets.keys() ?? [])];
+  return envelope(names.map((name) => ({ name, type: "secret_text" })));
+};
+
 export const workerRoutes: Route[] = [
   {
     method: "PUT",
     path: /^\/workers\/scripts\/(?<script>[^/]+)$/u,
-    answer: async ({ account, call, params }) => {
-      const upload = await readUpload(account, call.body);
-      if (upload instanceof Response) {
-        return upload;
-      }
-      const name = params.script ?? "";
-      account.scriptUploads.push({
-        script: name,
-        live: Object.fromEntries(
-          [...account.scripts].map(([other, state]) => [
-            other,
-            deployedVersion(state)?.id,
-          ])
-        ),
-      });
-      const script = account.scripts.get(name) ?? {
-        versions: [],
-        deployments: [],
-        schedules: [],
-      };
-      // A Durable Object migration runs only from the tag the script is
-      // at, as the API checks it.
-      const migrations = z
-        .object({ old_tag: z.string().optional(), new_tag: z.string() })
-        .loose()
-        .optional()
-        .parse(upload.metadata.migrations);
-      if (
-        migrations !== undefined &&
-        migrations.old_tag !== script.migrationTag
-      ) {
-        return refusal(400, 10_079, "Migration tag precondition failed");
-      }
-      if (migrations !== undefined) {
-        script.migrationTag = migrations.new_tag;
-      }
-      account.scripts.set(name, script);
-      const version = newVersion(script, upload, secretsOf(script, upload));
-      deploy(script, [{ version_id: version.id, percentage: 100 }], {});
-      return envelope({ id: name });
-    },
+    answer: async ({ account, call, params }) =>
+      await putScript(account, account.scripts, params.script ?? "", call),
   },
   {
     method: "GET",
@@ -400,105 +492,24 @@ export const workerRoutes: Route[] = [
   {
     method: "POST",
     path: /^\/workers\/scripts\/(?<script>[^/]+)\/assets-upload-session$/u,
-    answer: ({ account, json }) => {
-      const { manifest } = z
-        .object({
-          manifest: z.record(
-            z.string(),
-            z.object({ hash: z.string(), size: z.number() })
-          ),
-        })
-        .parse(json);
-      const missing = [
-        ...new Set(
-          Object.values(manifest)
-            .map(({ hash }) => hash)
-            .filter((hash) => !account.assets.has(hash))
-        ),
-      ];
-      const jwt = `assets-${crypto.randomUUID()}`;
-      if (missing.length === 0) {
-        account.completions.add(jwt);
-        return envelope({ jwt, buckets: [] });
-      }
-      account.sessions.set(jwt, new Set(missing));
-      // Two files a bucket, so an upload takes several.
-      const buckets = Array.from(
-        { length: Math.ceil(missing.length / 2) },
-        (_, index) => missing.slice(index * 2, index * 2 + 2)
-      );
-      return envelope({ jwt, buckets });
-    },
+    answer: ({ account, json }) => openAssetsSession(account, json),
   },
   {
     method: "POST",
     path: /^\/workers\/assets\/upload$/u,
     session: true,
-    answer: ({ account, call }) => {
-      const jwt = (call.headers.get("authorization") ?? "").replace(
-        /^Bearer /u,
-        ""
-      );
-      const pending = account.sessions.get(jwt);
-      if (
-        pending === undefined ||
-        call.query.get("base64") !== "true" ||
-        !(call.body instanceof FormData)
-      ) {
-        return refusal(400, 10_000, "Invalid upload");
-      }
-      for (const [hash, part] of call.body.entries()) {
-        if (part instanceof Blob && pending.delete(hash)) {
-          account.assets.add(hash);
-        }
-      }
-      if (pending.size > 0) {
-        return Response.json(
-          { success: true, errors: [], messages: [], result: { jwt: null } },
-          { status: 202 }
-        );
-      }
-      account.sessions.delete(jwt);
-      const completion = `complete-${crypto.randomUUID()}`;
-      account.completions.add(completion);
-      return Response.json(
-        {
-          success: true,
-          errors: [],
-          messages: [],
-          result: { jwt: completion },
-        },
-        { status: 201 }
-      );
-    },
+    answer: ({ account, call }) => uploadAssetFiles(account, call),
   },
   {
     method: "PUT",
     path: /^\/workers\/scripts\/(?<script>[^/]+)\/secrets$/u,
-    answer: ({ account, params, json }) => {
-      const script = scriptOf(account, params);
-      if (script instanceof Response) {
-        return script;
-      }
-      const name = text(json, "name");
-      return (
-        changeSecrets(script, (secrets) => {
-          secrets.set(name, text(json, "text"));
-        }) ?? envelope({ name, type: "secret_text" })
-      );
-    },
+    answer: ({ account, params, json }) =>
+      putSecret(scriptOf(account, params), json),
   },
   {
     method: "GET",
     path: /^\/workers\/scripts\/(?<script>[^/]+)\/secrets$/u,
-    answer: ({ account, params }) => {
-      const script = scriptOf(account, params);
-      if (script instanceof Response) {
-        return script;
-      }
-      const names = [...(script.versions.at(-1)?.secrets.keys() ?? [])];
-      return envelope(names.map((name) => ({ name, type: "secret_text" })));
-    },
+    answer: ({ account, params }) => secretNames(scriptOf(account, params)),
   },
   {
     method: "DELETE",
@@ -595,5 +606,90 @@ export const workerRoutes: Route[] = [
         );
       }
     },
+  },
+];
+
+/**
+ * A Workers for Platforms dispatch namespace's user Workers
+ * (`namespaces`), at the paths Cloudflare documents for them: the upload,
+ * the script's details (its last Durable Object migration), its assets
+ * upload session and its secrets. A namespace the account doesn't have is
+ * refused, as the API refuses it; a user Worker is never on workers.dev.
+ */
+const dispatchPath = (rest: string): RegExp =>
+  new RegExp(
+    `^/workers/dispatch/namespaces/(?<namespace>[^/]+)/scripts/(?<script>[^/]+)${rest}$`,
+    "u"
+  );
+
+/** The namespace a route names, or the API's refusal. */
+const namespaceOf = (
+  account: AccountState,
+  params: Record<string, string>
+): Map<string, ScriptState> | Response =>
+  account.namespaces.get(params.namespace ?? "") ??
+  refusal(404, 100_119, "Dispatch namespace not found");
+
+/** The user Worker a route names, or the API's refusal. */
+const userWorkerOf = (
+  account: AccountState,
+  params: Record<string, string>
+): ScriptState | Response => {
+  const scripts = namespaceOf(account, params);
+  if (scripts instanceof Response) {
+    return scripts;
+  }
+  return scripts.get(params.script ?? "") ?? notFound();
+};
+
+export const dispatchRoutes: Route[] = [
+  {
+    method: "PUT",
+    path: dispatchPath(""),
+    answer: async ({ account, call, params }) => {
+      const scripts = namespaceOf(account, params);
+      return scripts instanceof Response
+        ? scripts
+        : await putScript(account, scripts, params.script ?? "", call);
+    },
+  },
+  {
+    method: "GET",
+    path: dispatchPath(""),
+    answer: ({ account, params }) => {
+      const script = userWorkerOf(account, params);
+      if (script instanceof Response) {
+        return script;
+      }
+      return envelope({
+        dispatch_namespace: params.namespace,
+        script: {
+          id: params.script,
+          migration_tag: script.migrationTag ?? null,
+          etag: script.versions.at(-1)?.id,
+        },
+      });
+    },
+  },
+  {
+    method: "POST",
+    path: dispatchPath("/assets-upload-session"),
+    answer: ({ account, params, json }) => {
+      const scripts = namespaceOf(account, params);
+      return scripts instanceof Response
+        ? scripts
+        : openAssetsSession(account, json);
+    },
+  },
+  {
+    method: "PUT",
+    path: dispatchPath("/secrets"),
+    answer: ({ account, params, json }) =>
+      putSecret(userWorkerOf(account, params), json),
+  },
+  {
+    method: "GET",
+    path: dispatchPath("/secrets"),
+    answer: ({ account, params }) => secretNames(userWorkerOf(account, params)),
   },
 ];
