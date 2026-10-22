@@ -130,7 +130,11 @@ const Status = ({ workflow }: { workflow: WorkflowSummary }) => {
   );
 };
 
-/** Where a line begins: its engine's icon, which says the engine's name and opens it. */
+/**
+ * Where a line begins: its engine's icon, which says the engine's name and
+ * opens it, with the prototype's attention mark on its corner while a run
+ * waits for a decision. The mark only repeats what Status says in words.
+ */
 const Lead = ({ workflow }: { workflow: WorkflowSummary }) => {
   const { t } = useLingui();
   const name = workflow.appName;
@@ -147,6 +151,14 @@ const Lead = ({ workflow }: { workflow: WorkflowSummary }) => {
         }
       >
         <EngineIcon />
+        {workflow.waiting === 0 ? null : (
+          <span
+            aria-hidden="true"
+            className="bg-card absolute -top-1 -right-1 flex size-3 items-center justify-center rounded-full"
+          >
+            <span className="bg-status-attention size-2 rounded-full" />
+          </span>
+        )}
       </TooltipTrigger>
       <TooltipContent>{name}</TooltipContent>
     </Tooltip>
