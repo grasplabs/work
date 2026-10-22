@@ -140,21 +140,50 @@ const d1Schema = z.object({
 });
 export type D1DatabaseInfo = z.infer<typeof d1Schema>;
 
+/** The D1 database named exactly `name`, or undefined. */
+export const findD1Database = async (
+  api: CloudflareApi,
+  accountId: string,
+  name: string
+): Promise<D1DatabaseInfo | undefined> => {
+  // The API matches `name` as a substring: pick the exact one.
+  const matches = await listAll(
+    api,
+    `/accounts/${accountId}/d1/database`,
+    d1Schema,
+    { name }
+  );
+  return matches.find((found) => found.name === name);
+};
+
+/**
+ * Creates the D1 database `name` in `jurisdiction`. A POST, so it isn't
+ * retried after a lost answer: the caller finds what it made by its name.
+ */
+export const createD1Database = async (
+  api: CloudflareApi,
+  accountId: string,
+  name: string,
+  jurisdiction: string
+): Promise<D1DatabaseInfo> =>
+  await api.call(
+    {
+      method: "POST",
+      path: `/accounts/${accountId}/d1/database`,
+      json: { name, jurisdiction },
+    },
+    d1Schema
+  );
+
 /** The D1 database `name` in the EU, created if it's missing. */
 export const ensureD1Database = async (
   api: CloudflareApi,
   accountId: string,
   name: string
 ): Promise<D1DatabaseInfo> => {
-  const path = `/accounts/${accountId}/d1/database`;
-  // The API matches `name` as a substring: pick the exact one.
-  const matches = await listAll(api, path, d1Schema, { name });
   const database =
-    matches.find((found) => found.name === name) ??
-    (await api.call(
-      { method: "POST", path, json: { name, jurisdiction: eu } },
-      d1Schema
-    ));
+    (await findD1Database(api, accountId, name)) ??
+    (await createD1Database(api, accountId, name, eu));
   // Whichever call answered, only a database Cloudflare reports in the EU
   // is used.
   if (database.jurisdiction !== eu) {
@@ -174,32 +203,59 @@ const bucketSchema = z.object({
 export type R2BucketInfo = z.infer<typeof bucketSchema>;
 
 /**
- * The R2 bucket `name` in the EU, created if it's missing. A bucket's name
- * is unique per jurisdiction, so one of the same name elsewhere is another
- * bucket, and never used.
+ * The R2 bucket `name` in `jurisdiction`, or undefined. A bucket's name is
+ * unique per jurisdiction, so one of the same name elsewhere is another
+ * bucket, and isn't found.
  */
+export const findR2Bucket = async (
+  api: CloudflareApi,
+  accountId: string,
+  name: string,
+  jurisdiction: string
+): Promise<R2BucketInfo | undefined> => {
+  try {
+    return await api.call(
+      {
+        method: "GET",
+        path: `/accounts/${accountId}/r2/buckets/${name}`,
+        headers: { "cf-r2-jurisdiction": jurisdiction },
+      },
+      bucketSchema
+    );
+  } catch (error) {
+    if (isNotFound(error)) {
+      return undefined;
+    }
+    throw error;
+  }
+};
+
+/** Creates the R2 bucket `name` in `jurisdiction`. */
+export const createR2Bucket = async (
+  api: CloudflareApi,
+  accountId: string,
+  name: string,
+  jurisdiction: string
+): Promise<R2BucketInfo> =>
+  await api.call(
+    {
+      method: "POST",
+      path: `/accounts/${accountId}/r2/buckets`,
+      headers: { "cf-r2-jurisdiction": jurisdiction },
+      json: { name },
+    },
+    bucketSchema
+  );
+
+/** The R2 bucket `name` in the EU, created if it's missing. */
 export const ensureR2Bucket = async (
   api: CloudflareApi,
   accountId: string,
   name: string
 ): Promise<R2BucketInfo> => {
-  const headers = { "cf-r2-jurisdiction": eu };
-  const path = `/accounts/${accountId}/r2/buckets`;
-  let bucket: R2BucketInfo | undefined = undefined;
-  try {
-    bucket = await api.call(
-      { method: "GET", path: `${path}/${name}`, headers },
-      bucketSchema
-    );
-  } catch (error) {
-    if (!isNotFound(error)) {
-      throw error;
-    }
-  }
-  bucket ??= await api.call(
-    { method: "POST", path, headers, json: { name } },
-    bucketSchema
-  );
+  const bucket =
+    (await findR2Bucket(api, accountId, name, eu)) ??
+    (await createR2Bucket(api, accountId, name, eu));
   // Whichever call answered, only a bucket Cloudflare reports in the EU is
   // used.
   if (bucket.jurisdiction !== eu) {

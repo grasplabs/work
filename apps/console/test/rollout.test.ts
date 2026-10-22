@@ -21,7 +21,7 @@ import {
   rolloutTargets,
   settings,
 } from "../src/db/schema.ts";
-import { deployContext } from "../src/deploy/context.ts";
+import { clientDomain, deployContext } from "../src/deploy/context.ts";
 import { runDeploy, startDeploy } from "../src/deploy/deploy.ts";
 import { rotateClientSecrets } from "../src/deploy/rotation.ts";
 import { startProvisioning } from "../src/provision/control.ts";
@@ -32,6 +32,7 @@ import {
   pauseRollout,
   pinClient,
   resumeRollout,
+  retryRollout,
   startRollout,
 } from "../src/rollout/control.ts";
 import type { StartRolloutInput } from "../src/rollout/control.ts";
@@ -319,6 +320,23 @@ const deploymentsOf = (
 const releasesOf = async (clientId: string): Promise<(string | null)[]> => {
   const workers = await workersOf(clientId);
   return workers.map(({ releaseId }) => releaseId);
+};
+
+/** What a rollback of client `clientId` from rollout `rolloutId` puts back, as recorded. */
+const previousOf = async (
+  rolloutId: string,
+  clientId: string
+): Promise<string | null> => {
+  const [row] = await db
+    .select({ previous: rolloutTargets.previous })
+    .from(rolloutTargets)
+    .where(
+      and(
+        eq(rolloutTargets.rolloutId, rolloutId),
+        eq(rolloutTargets.clientId, clientId)
+      )
+    );
+  return row?.previous ?? null;
 };
 
 /** How many deployments each of the account's scripts has had. */
@@ -1237,7 +1255,52 @@ describe("rolling a release out", () => {
     });
   });
 
-  it("ends only a fleet client that fails, goes on to the clients after it, and ends the rollout failed", async () => {
+  it("finishes a fleet client's deploy on a retry when it failed after its Workers went live", async () => {
+    const before = await importedRelease("feat(core): the release before");
+    await activeClient(0, before);
+    const acme = await activeClient(1, before);
+    const release = await importedRelease("feat(core): live, then stopped");
+    // Another client has acme's hostname in the router's map: acme's
+    // deploy stops at its last step, after both Workers went live.
+    const hostname = `${acme.clientId}.${clientDomain(env) ?? ""}`;
+    const ours = await env.ROUTER_HOSTS.get(hostname);
+    await env.ROUTER_HOSTS.put(
+      hostname,
+      JSON.stringify({
+        clientId: "someone-else",
+        coreUrl: "https://grasp-os-core.elsewhere.workers.dev",
+        generation: 1,
+      })
+    );
+    await using run = await followRollouts();
+
+    const rolloutId = await rollOut(release, { scope: "all" });
+    await run.waitForStepResult({ name: "ring 1 approved" });
+    await approveRollout(env, staff, rolloutId);
+    await run.waitForStepResult({ name: "retry 1 asked" });
+    const failed = await targetsOf(rolloutId);
+    // Staff give the hostname back and retry: acme already runs the
+    // release, and its deploy still finishes rather than being skipped.
+    await env.ROUTER_HOSTS.put(hostname, ours ?? "");
+    await retryRollout(env, staff, rolloutId);
+    await run.waitForStatus("complete");
+    const entry = z
+      .object({ clientId: z.string() })
+      .parse(await env.ROUTER_HOSTS.get(hostname, "json"));
+
+    const retried = await targetsOf(rolloutId);
+    expect({
+      failed: failed[acme.clientId],
+      retried: retried[acme.clientId],
+      router: entry.clientId,
+    }).toStrictEqual({
+      failed: { ring: 1, status: "failed", error: "hostname_taken" },
+      retried: { ring: 1, status: "done", error: null },
+      router: acme.clientId,
+    });
+  });
+
+  it("ends only a fleet client that fails, goes on to the clients after it, and retries it in the same rollout", async () => {
     const before = await importedRelease("feat(core): the release before");
     const internal = await activeClient(0, before);
     const acme = await activeClient(1, before);
@@ -1258,17 +1321,23 @@ describe("rolling a release out", () => {
     const rolloutId = await rollOut(release, { scope: "all" });
     await run.waitForStepResult({ name: "ring 1 approved" });
     await approveRollout(env, staff, rolloutId);
-    await run.waitForStatus("complete");
+    await expect(
+      run.waitForStepResult({ name: "retry 1 asked" })
+    ).resolves.toBe("waiting");
 
     const betaWorkers = await workersOf(beta.clientId);
+    const acmePrevious = await previousOf(rolloutId, acme.clientId);
+    const betaCounts = deploymentCounts(beta.account);
     expect({
       rollout: await rolloutRow(rolloutId),
       targets: await targetsOf(rolloutId),
       acme: deploymentCounts(acme.account),
       runner: await runnerOf(acme.clientId),
       beta: betaWorkers.map(({ releaseId }) => releaseId),
+      // It waits for a retry, not an approval.
+      approve: await codeOf(approveRollout(env, staff, rolloutId)),
     }).toStrictEqual({
-      rollout: { status: "failed", ring: 2 },
+      rollout: { status: "waiting", ring: 2 },
       targets: {
         [internal.clientId]: { ring: 0, status: "done", error: null },
         [acme.clientId]: {
@@ -1281,6 +1350,35 @@ describe("rolling a release out", () => {
       acme: acmeCounts,
       runner: null,
       beta: [release, release],
+      approve: "not_waiting",
+    });
+
+    // Staff fix acme's settings and retry it.
+    await db.delete(settings).where(eq(settings.clientId, acme.clientId));
+    await retryRollout(env, staff, rolloutId);
+    await run.waitForStatus("complete");
+
+    const acmeWorkers = await workersOf(acme.clientId);
+    expect({
+      rollout: await rolloutRow(rolloutId),
+      targets: await targetsOf(rolloutId),
+      acme: acmeWorkers.map(({ releaseId }) => releaseId),
+      // What a rollback of acme puts back is what it ran before the
+      // rollout, and beta isn't deployed again.
+      acmePrevious: await previousOf(rolloutId, acme.clientId),
+      beta: deploymentCounts(beta.account),
+      again: await codeOf(retryRollout(env, staff, rolloutId)),
+    }).toStrictEqual({
+      rollout: { status: "done", ring: 2 },
+      targets: {
+        [internal.clientId]: { ring: 0, status: "done", error: null },
+        [acme.clientId]: { ring: 1, status: "done", error: null },
+        [beta.clientId]: { ring: 2, status: "done", error: null },
+      },
+      acme: [release, release],
+      acmePrevious,
+      beta: betaCounts,
+      again: "not_waiting",
     });
   });
 });

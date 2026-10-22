@@ -38,4 +38,11 @@ interface __BaseEnv_Env {
    * offered or reached.
    */
   COMPOSIO_API_KEY?: string;
+  /**
+   * `none` on workerd and on-prem, which have no Cloudflare jurisdiction:
+   * the clock's object is then taken from the plain namespace
+   * (src/clock.ts). Unset or any other value means the EU. Never set in
+   * wrangler.jsonc.
+   */
+  DURABLE_OBJECT_JURISDICTION?: string;
 }
