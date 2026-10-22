@@ -189,6 +189,7 @@ const cast = {
   decisionUnreachable: { decider: "user" },
   memberActions: { admin: "admin", one: "user", two: "user" },
   memberRemoval: { admin: "admin", leaving: "user" },
+  memberInvites: { admin: "admin" },
   roleChange: { admin: "admin", one: "user" },
   membersUnreachable: { admin: "admin" },
   membersRecover: { admin: "admin" },
@@ -242,6 +243,7 @@ const cast = {
   brain: { member: "user" },
   brainChat: { member: "user" },
   contexts: { member: "user" },
+  tour: { member: "user" },
 } as const satisfies Record<string, Record<string, Role>>;
 
 type Scene = keyof typeof cast;

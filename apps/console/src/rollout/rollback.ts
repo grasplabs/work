@@ -47,6 +47,7 @@ import {
   rollouts,
   rolloutTargets,
 } from "../db/schema.ts";
+import { currentReleases, incompatibility } from "../deploy/compatibility.ts";
 import { activityKeys, clientDomain, deployerApi } from "../deploy/context.ts";
 import { errorCode, latestDeployOf } from "../deploy/deploy.ts";
 import { importedManifest } from "../deploy/release.ts";
@@ -305,6 +306,45 @@ const movedOffPrevious = async (
 };
 
 /**
+ * Refuses (`incompatible`) going back to `previous` from release
+ * `releaseId`, the rollout's, when its code doesn't work with what client
+ * `clientId` runs now, with `workers` restored one at a time, in order
+ * (src/deploy/compatibility.ts). Each Worker it restores is taken to run
+ * the rollout's release, whatever its record says: a version can go live
+ * and the write after it fail, and the record lags what runs.
+ */
+const assertCompatible = async (
+  db: ConsoleDatabase,
+  clientId: string,
+  releaseId: string,
+  previous: PreviousRun,
+  workers: readonly RestoredWorker[]
+): Promise<void> => {
+  const [before, rolledOut] = await Promise.all([
+    previous.release === null ? null : importedManifest(db, previous.release),
+    importedManifest(db, releaseId),
+  ]);
+  if (before === null) {
+    return;
+  }
+  const current = await currentReleases(db, clientId);
+  for (const { app } of workers) {
+    current.set(app, rolledOut);
+  }
+  const refused = incompatibility(
+    current,
+    before,
+    workers.map(({ app }) => app)
+  );
+  if (refused !== null) {
+    throw new RolloutError(
+      "incompatible",
+      `${clientId} can't go back to ${previous.release ?? ""}: ${refused.message}`
+    );
+  }
+};
+
+/**
  * Checks that client `clientId` can be rolled back from rollout
  * `rolloutId`: the rollout reached it and recorded what it ran before,
  * and a Worker of the client isn't serving its previous version, read
@@ -312,7 +352,9 @@ const movedOffPrevious = async (
  * nothing to undo), the rollout's deploy is still its latest
  * (`superseded`) and past its resources and migrations
  * (`client_busy`: nothing of it is live before), what it ran before is the release right
- * before the rollout's, or the same one (`too_far_back`), and its secrets generation is
+ * before the rollout's, or the same one (`too_far_back`), whose code works
+ * with what the client runs now, restored in the rollback's order
+ * (`incompatible`, src/deploy/compatibility.ts), and its secrets generation is
  * the one the previous versions carry, in the console and the router's
  * map (`rotated_since`: the router would send a secret they don't have).
  */
@@ -387,6 +429,7 @@ const check = async (
       `${clientId} ran ${previous.release ?? "several releases"} before, not the release right before ${latest.releaseId}: roll out instead`
     );
   }
+  await assertCompatible(db, clientId, latest.releaseId, previous, workers);
   const mapped = await mappedGeneration(
     env.ROUTER_HOSTS,
     `${clientId}.${clientDomain(env) ?? ""}`

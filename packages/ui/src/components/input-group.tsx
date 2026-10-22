@@ -15,13 +15,16 @@ function InputGroup({
 }: React.ComponentProps<"div"> & {
   /**
    * `prompt`: the chat's box to ask in, as the prototype draws it: rounder,
-   * with more room around what is typed in it. `lg`: an interview's answer
+   * with more room around what is typed in it. `chat`: the one-line chat
+   * box, as the prototype's bottom right: rounder, with the same room on
+   * every side of what is in it, 12 pixels beside the text, its button as
+   * far from the right edge as from the top and foot, and rounder too. `lg`: an interview's answer
    * box at the bottom of the screen, tall and round, with room around what
    * is typed, so it reads at once as the place to talk or type. Its buttons
    * (`lg`, `icon-lg`) are 40 pixels in a bar of 56, in the middle of one
    * line, and at the foot of the box once what is typed runs to more lines.
    */
-  size?: "default" | "prompt" | "lg";
+  size?: "default" | "prompt" | "chat" | "lg";
 }) {
   return (
     <div
@@ -33,6 +36,8 @@ function InputGroup({
         size === "default" && "h-9 rounded-md",
         size === "prompt" &&
           "h-9 rounded-xl [&>textarea]:px-4.5 [&>textarea]:pt-3.5",
+        size === "chat" &&
+          "h-9 rounded-xl [&>[data-align=block-end]]:px-1.5 [&>[data-align=block-end]]:pt-0 [&>[data-align=block-end]]:pb-1.5 [&>[data-align=inline-end]]:pr-2.5 [&>[data-slot=input-group-addon]_button]:rounded-lg [&>textarea]:px-3",
         size === "lg" &&
           "text-foreground min-h-14 rounded-[1.75rem] px-1.5 text-sm font-medium shadow-sm [&>[data-slot=input-group-addon]]:py-2 [&>textarea]:px-3.5 [&>textarea]:py-4.5 [&>textarea]:font-medium",
         className
