@@ -518,8 +518,8 @@ export const clientProvisions = sqliteTable("client_provisions", {
   /**
    * What its steps observed, to resume without repeating them: JSON
    * (`progressSchema`, src/hosting/operation.ts): each Worker's upload
-   * fingerprint, its delivered secrets' fingerprint, and the core origin
-   * its probe passed at. Fingerprints are keyed hashes: they tell nothing
+   * fingerprint, its delivered secrets' fingerprint, the core origin its
+   * probe passed at, and its sending domain's zone. Fingerprints are keyed hashes: they tell nothing
    * of a secret.
    */
   progress: text(),
