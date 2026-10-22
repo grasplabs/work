@@ -100,6 +100,10 @@ const accountLine = (
   view: AdminView,
   held: Held
 ): string => {
+  // Stripe says so whether or not the contract is known.
+  if (signal.needs.includes("overdue")) {
+    return "An invoice is overdue";
+  }
   if (!held.contract) {
     return "Contract not known yet";
   }
