@@ -17,6 +17,12 @@ const browserPolicyTests = /(?:screen-attacks|product-page-scripts)\.e2e\.ts$/u;
  */
 const onboardingTests = /onboarding\.e2e\.ts$/u;
 /**
+ * Someone's own interview (e2e/interview.e2e.ts): its link goes out once
+ * the agreements are in, which tells the team, and the onboarding's tests
+ * expect links that wait. So it runs after them, one test at a time.
+ */
+const interviewTests = /interview\.e2e\.ts$/u;
+/**
  * What grants, retires or revokes package approvals: each bumps the
  * deployment's shared policy generation in the one database every worker
  * uses, so a decision another worker's browser already shows is refused as
@@ -61,7 +67,7 @@ export default defineConfig({
     {
       name: "chromium",
       use: { ...devices["Desktop Chrome"] },
-      testIgnore: [onboardingTests, packageApprovalTests],
+      testIgnore: [onboardingTests, packageApprovalTests, interviewTests],
     },
     {
       name: "package-approvals",
@@ -93,6 +99,13 @@ export default defineConfig({
       // undoes that (the agreements stay as they were), so a second try
       // would only fail on what the first one did. A failure shows as itself.
       retries: 0,
+    },
+    {
+      name: "interview",
+      use: { ...devices["Desktop Chrome"], trace: "retain-on-failure" },
+      testMatch: interviewTests,
+      dependencies: ["onboarding"],
+      workers: 1,
     },
   ],
   // Never a server already running: on this checkout's ports (e2e/stack.ts)
