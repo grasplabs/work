@@ -218,6 +218,24 @@ export class App extends WorkerEntrypoint {
     throw new TypeError(${JSON.stringify(values.thrown)});
   }
 }`,
+  // The same on the fetch path: a Response has no own \`then\`, so one an
+  // async \`fetch\` resolves with reads it up the chain, from the pollution,
+  // whether it answers or throws.
+  "/fetch-polluted": `Object.defineProperty(Object.prototype, "then", Object.assign(Object.create(null), { configurable: true, get() { throw new TypeError(${JSON.stringify(values.thrown)}); } }));
+export class App extends WorkerEntrypoint {
+  fetch() {
+    return new Response("hi");
+  }
+}`,
+  "/fetch-polluted-thrown": `for (const name of ["status", "statusText", "headers", "cf", "encodeBody", "then"]) {
+  const throwing = () => { throw new TypeError(${JSON.stringify(values.thrown)}); };
+  Object.defineProperty(Object.prototype, name, Object.assign(Object.create(null), { configurable: true, get: throwing, set: throwing }));
+}
+export class App extends WorkerEntrypoint {
+  fetch() {
+    throw new TypeError(${JSON.stringify(values.thrown)});
+  }
+}`,
   // The quiet module's own reads, after the isolate's code replaced what
   // they'd use: a Proxy trap its context's handler doesn't define, and the
   // event's \`preventDefault\`. Each still answers, and prints nothing.
@@ -261,6 +279,12 @@ export const App = new Proxy(Real, {
 }`,
 };
 
+/** What a fetch of the App entrypoint of `stub` answers, as text. */
+const fetchApp = async (stub: WorkerStub): Promise<unknown> => {
+  const response = await stub.getEntrypoint("App").fetch("http://app.test/");
+  return await response.text();
+};
+
 /** What a review route answers: the call's answer, or its error's parts. */
 const answerOfReview = async (
   route: string,
@@ -282,7 +306,7 @@ const answerOfReview = async (
   };
   try {
     return {
-      answered: await runApp(
+      answered: await (route.startsWith("/fetch-") ? fetchApp : runApp)(
         loud ? env.LOADER.load(code) : quietLoader(env.LOADER).load(code)
       ),
     };

@@ -345,8 +345,20 @@ const envelopeOf = (key, value) => {
   field(envelope, key, value);
   return envelope;
 };
+// A Response whose own \`then\` is undefined, for the same reason: an async
+// function resolving with one reads \`then\` up its chain, where the
+// isolate's code may have put a throwing getter that workerd would report
+// with its message. False when the Response won't take it (frozen, or an
+// own \`then\` it keeps).
+const unthenable = (response) =>
+  define(response, "then", recordOf(["configurable", true, "enumerable", false, "value", undefined, "writable", true]));
+const freshResponse = (body, init) => {
+  const response = new Response(body, init);
+  unthenable(response);
+  return response;
+};
 const responseOf = (text) =>
-  new Response(text, recordOf(["status", 500, "headers", recordOf([thrownHeader, "1"])]));
+  freshResponse(text, recordOf(["status", 500, "headers", recordOf([thrownHeader, "1"])]));
 // What answers when even answering a throw fails: made now, from nothing
 // the isolate's code can reach.
 const failedText = '{"name":"Error","message":"The call failed."}';
@@ -382,17 +394,19 @@ const answered = (method, self, args) =>
 // crosses under, so it never reads as one.
 // Read through Response's own getters (\`builtinsSource\`), never one a
 // subclass or an own property puts in their place.
+const isResponse = (value) =>
+  typeof value === "object" && value !== null && apply(isPrototypeOf, responsePrototype, [value]);
 const ownResponse = (response) => {
-  if (typeof response !== "object" || response === null || !apply(isPrototypeOf, responsePrototype, [response])) {
+  if (!isResponse(response)) {
     return response;
   }
   const headers = apply(responseHeaders, response, []);
-  if (!apply(headersHas, headers, [thrownHeader])) {
+  if (!apply(headersHas, headers, [thrownHeader]) && unthenable(response)) {
     return response;
   }
   const copied = new Headers(headers);
   apply(headersDelete, copied, [thrownHeader]);
-  return new Response(
+  return freshResponse(
     apply(responseBody, response, []),
     recordOf([
       "status", apply(responseStatus, response, []),
@@ -404,7 +418,10 @@ const ownResponse = (response) => {
 const fetched = (method, self, args) =>
   (async () => {
     try {
-      return ownResponse(await apply(method, self, args));
+      const result = apply(method, self, args);
+      // A Response returned as it is isn't awaited: awaiting reads its
+      // \`then\` up the chain, where the isolate's code may have put a getter.
+      return ownResponse(isResponse(result) ? result : await result);
     } catch (error) {
       return thrownResponse(error);
     }
