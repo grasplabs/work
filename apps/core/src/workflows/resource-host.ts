@@ -84,13 +84,22 @@ import { heldWakeType } from "./wakes.ts";
 // - A step the build doesn't have. Every step is named after a task of
 //   the sealed task table and one of the steps it was sealed with
 //   (`task:<id>` for a set or switch, or a wait's sleep; `enter:<id>` and
-//   `leave:<id>` around a wait or a do), or the workflow's own
-//   `workflow:input` and `workflow:output` when it has them; a wait lasts
-//   exactly what was sealed. Anything else is refused, and fails the run.
-// - A step run twice. Generated code has no loop, and each task runs at
-//   most once (generate.ts): an activation that asks for a step it already
-//   ran this activation is refused, so not even a forged module can loop
-//   tasks, and a run's steps are bounded by its tasks.
+//   `leave:<id>` around a wait, a do or a for; `item:<id>` for a for's
+//   `while`), or the workflow's own `workflow:input` and `workflow:output`
+//   when it has them; a wait lasts exactly what was sealed. Anything else
+//   is refused, and fails the run.
+// - A step run twice, or a loop's item it never had. Generated code has no
+//   loop statement, and each task runs at most once per item of the loops
+//   around it (generate.ts): a task inside `for` tasks names the item of
+//   each it runs in (`task:<id>@<for>.<index>/…`), exactly the loops the
+//   build sealed around it, and only an item of the items its loop's enter
+//   step recorded (`#items`), whose variables the host supplies from that
+//   record, never the isolate. An activation that asks for a step it
+//   already ran this activation is refused, so not even a forged module
+//   can loop tasks, and a run's steps are bounded by its tasks and its
+//   loops' recorded items, at most the platform's 1,000 a collection (and
+//   the run's own step ceiling). Each item's effects are keyed by its own
+//   step name, so a retry or replay of one is never another's.
 // - An expression that isn't the build's, or another step's. An attempt
 //   evaluates only the sealed table's entries of its own task, of the
 //   stages its step runs (an enter step's if and input.from, say), by
@@ -180,6 +189,7 @@ export const resourceAttemptMethods = [
   "check",
   "call",
   "until",
+  "items",
 ] as const;
 
 /** The SDK module the generated code imports, by its flat name. */
@@ -225,6 +235,7 @@ export class Run extends WorkerEntrypoint {
                 },
                 call: async (frame) => unwrapped(await attempt.call(frame)),
                 until: async (frame) => unwrapped(await attempt.until(frame)),
+                items: async (frame) => unwrapped(await attempt.items(frame)),
               })))),
         sleep: async (name, milliseconds) => {
           unwrapped(await host.sleep(name, milliseconds));
@@ -397,23 +408,47 @@ const stepErrorOf = (error: unknown): StepError => {
 
 /** A step's name, as the SDK names it. */
 const stepNamePattern =
-  /^(?:(?<kind>task|enter|leave):(?<id>[a-z][a-z0-9]*(?:-[a-z0-9]+)*)|workflow:(?<flow>input|output))$/u;
+  /^(?:(?<kind>task|enter|leave|item):(?<id>[a-z][a-z0-9]*(?:-[a-z0-9]+)*)(?:@(?<scope>[a-z][a-z0-9-]{0,63}\.(?:0|[1-9][0-9]{0,3})(?:\/[a-z][a-z0-9-]{0,63}\.(?:0|[1-9][0-9]{0,3})){0,7}))?|workflow:(?<flow>input|output))$/u;
+
+/** One scope of a step's name: an item, by index, of a `for` task. */
+const scopeSegmentPattern =
+  /^(?<id>[a-z][a-z0-9]*(?:-[a-z0-9]+)*)\.(?<index>0|[1-9][0-9]{0,3})$/u;
 
 /** The steps there are: a task's, or the workflow's own data flow. */
 type StepKind =
   | "task"
   | "enter"
   | "leave"
+  | "item"
   | "workflow-input"
   | "workflow-output";
 
-const taskStepSchema = z.enum(["task", "enter", "leave"]);
+const taskStepSchema = z.enum(["task", "enter", "leave", "item"]);
 
 /** The step an attempt belongs to: its kind and its task, if a task's. */
 interface StepOf {
   kind: StepKind;
   /** The sealed task; none for the workflow's own steps. */
   task: SealedTask | undefined;
+  /** Its name, as the SDK named it: what its effects are keyed by. */
+  name: string;
+  /**
+   * Its task in the scope it runs in (`<id>@<scope>`, `<id>` in the
+   * workflow's own list): what the host keeps of the task's steps by, so
+   * each item of a loop has its own.
+   */
+  place: string;
+  /**
+   * The scope it runs in, as its name says (`<for>.<index>/…`), outermost
+   * first; empty in the workflow's own list.
+   */
+  scope: readonly { id: string; index: number }[];
+  /**
+   * The values of the loop variables of each `for` around it (and, for an
+   * `item` step, of its own), from the items each one's enter step
+   * recorded: never anything the isolate passes.
+   */
+  loop: Readonly<Record<string, Json>>;
 }
 
 /** Whether `task` sleeps: a wait, or a `grasp.sleepUntil` call. */
@@ -437,6 +472,67 @@ const deadlineOf = (
   return undefined;
 };
 
+/**
+ * Whether `step` may evaluate slot `slot` as far as a `for` task's `while`
+ * goes: an `item` step evaluates its task's `while` alone, and no other
+ * step evaluates it.
+ */
+const whileFits = (step: StepOf, slot: number): boolean => {
+  const loopWhile =
+    step.task?.kind === "for" ? step.task.loop.while : undefined;
+  return step.kind === "item"
+    ? slot === loopWhile
+    : loopWhile === undefined || slot !== loopWhile;
+};
+
+/**
+ * The scope a step's name says it runs in (`text`, its part after `@`),
+ * if it is exactly the loops `expected`, outermost first; `undefined`
+ * otherwise.
+ */
+const scopeIn = (
+  text: string | undefined,
+  expected: readonly string[]
+): { id: string; index: number }[] | undefined => {
+  const scope: { id: string; index: number }[] = [];
+  for (const segment of text?.split("/") ?? []) {
+    const parts = scopeSegmentPattern.exec(segment)?.groups;
+    if (parts?.id === undefined || parts.index === undefined) {
+      return undefined;
+    }
+    scope.push({ id: parts.id, index: Number(parts.index) });
+  }
+  return scope.length === expected.length &&
+    scope.every(({ id }, depth) => id === expected[depth])
+    ? scope
+    : undefined;
+};
+
+/** Task `id` in scope `scope`: `<id>`, or `<id>@<for>.<index>/…`. */
+const placeOf = (
+  id: string,
+  scope: readonly { id: string; index: number }[]
+): string =>
+  scope.length === 0
+    ? id
+    : `${id}@${scope.map((segment) => `${segment.id}.${segment.index}`).join("/")}`;
+
+/** The workflow's own `flow` step of `build`, if it has one. */
+const workflowStep = (
+  build: LoadedBuild,
+  flow: "input" | "output"
+): StepOf | undefined =>
+  build.workflow[flow]
+    ? {
+        kind: flow === "input" ? "workflow-input" : "workflow-output",
+        task: undefined,
+        name: `workflow:${flow}`,
+        place: "",
+        scope: [],
+        loop: {},
+      }
+    : undefined;
+
 /** The step of `build` that `name` names, as a `do` (`sleep` false) or a
  * sleeping task's sleep; `undefined` when the build has no such step.
  */
@@ -448,20 +544,34 @@ const sealedStep = (
   const groups =
     typeof name === "string" ? stepNamePattern.exec(name)?.groups : undefined;
   if (groups?.flow === "input" || groups?.flow === "output") {
-    const kind = groups.flow === "input" ? "workflow-input" : "workflow-output";
-    return !sleep && build.workflow[groups.flow]
-      ? { kind, task: undefined }
-      : undefined;
+    return sleep ? undefined : workflowStep(build, groups.flow);
   }
   const kind = taskStepSchema.safeParse(groups?.kind);
   const task = build.tasks.find(({ id }) => id === groups?.id);
-  if (!kind.success || task === undefined) {
+  if (!kind.success || task === undefined || typeof name !== "string") {
     return undefined;
   }
   // A sleeping task's `task:` step is its sleep, never a `do`.
   const isSleep = kind.data === "task" && sleepsOf(task);
   const fits = sleep ? isSleep : task.steps.includes(kind.data) && !isSleep;
-  return fits ? { kind: kind.data, task } : undefined;
+  // Exactly the loops around it, as sealed: an `item` step runs in an
+  // item of its own `for` too.
+  const scope = scopeIn(
+    groups?.scope,
+    kind.data === "item" ? [...task.scope, task.id] : task.scope
+  );
+  if (!fits || scope === undefined) {
+    return undefined;
+  }
+  const outer = kind.data === "item" ? scope.slice(0, -1) : scope;
+  return {
+    kind: kind.data,
+    task,
+    name,
+    place: placeOf(task.id, outer),
+    scope,
+    loop: {},
+  };
 };
 
 /** The stages of a task's expressions each kind of step evaluates. */
@@ -475,6 +585,8 @@ const stagesOf: Readonly<Record<StepKind, readonly Stage[]>> = {
   ],
   enter: ["taskIf", "taskInputFrom"],
   leave: ["taskOutputAs", "taskExportAs"],
+  // A `for` task's `while`, before each item (`#expressionOf`).
+  item: ["taskDefinition"],
   "workflow-input": ["workflowInputFrom"],
   "workflow-output": ["workflowOutputAs"],
 };
@@ -484,6 +596,7 @@ const checksOf: Readonly<Record<StepKind, readonly DataCheck[]>> = {
   task: ["input", "output", "export"],
   enter: ["input"],
   leave: ["output", "export"],
+  item: [],
   "workflow-input": [],
   "workflow-output": [],
 };
@@ -507,6 +620,10 @@ const recordSchema = z.union([
     context: z.json().optional(),
     branch: z.int().min(0).optional(),
     until: z.int().min(0).optional(),
+    items: z
+      .array(z.json())
+      .max(platformLimits.workflowCollectionItems)
+      .optional(),
   }),
 ]);
 
@@ -723,6 +840,12 @@ interface StepAttempt {
   until: number | undefined;
   /** Whether it asked for its deadline: once, however it went. */
   untilAsked: boolean;
+  /** The items it resolved for its `for` task, once (`items`). */
+  items: Json[] | undefined;
+  /** Whether it asked for its items: once, however it went. */
+  itemsAsked: boolean;
+  /** What its `item` step's `while` answered, as the host evaluated it. */
+  proceeds: boolean | undefined;
   /**
    * Whether connect held its call for the run's person (`connect.held`):
    * the step then ends as held, whatever the isolate made of the answer.
@@ -884,6 +1007,8 @@ const hostSlotsOf = (build: LoadedBuild): ReadonlySet<number> => {
       }
     } else if (task.kind === "wait" && task.duration !== undefined) {
       slotsOf(task.duration, slots);
+    } else if (task.kind === "for") {
+      slotsOf(task.loop.in, slots);
     }
   }
   return slots;
@@ -971,6 +1096,12 @@ export class ResourceRunHost
    */
   readonly #deadlines = new Map<string, number>();
   /**
+   * The items each `for` task's enter step recorded, by its place, as this
+   * activation reached it (fresh or replayed): what its items' steps run
+   * on, and the only items they may name.
+   */
+  readonly #items = new Map<string, Json[]>();
+  /**
    * The model calls of the run's JSON model tasks: those its replayed steps
    * recorded, as this activation reached them, and those this activation
    * made itself, each counted as it is asked for (`#made`), before
@@ -1042,8 +1173,38 @@ export class ResourceRunHost
     if (typeof name !== "string" || this.#asked.has(name)) {
       return this.#refuse(`Step ${shown} runs once.`);
     }
+    const loop = this.#loopOf(step.scope);
+    if (loop === undefined) {
+      return this.#refuse(`Step ${shown} runs in an item no loop recorded.`);
+    }
     this.#asked.add(name);
-    return step;
+    return { ...step, loop };
+  }
+
+  /**
+   * The loop variables of scope `scope`: for each `for` around it, its
+   * item and index, from the items its enter step recorded in the scope
+   * around it (`#items`); `undefined` when one of them recorded none, or
+   * fewer than the index names.
+   */
+  #loopOf(
+    scope: readonly { id: string; index: number }[]
+  ): Record<string, Json> | undefined {
+    const loop: Record<string, Json> = {};
+    for (const [depth, { id, index }] of scope.entries()) {
+      const items = this.#items.get(placeOf(id, scope.slice(0, depth)));
+      const task = this.#run.build.tasks.find((one) => one.id === id);
+      if (
+        items === undefined ||
+        index >= items.length ||
+        task?.kind !== "for"
+      ) {
+        return undefined;
+      }
+      loop[task.loop.each] = items[index] ?? null;
+      loop[task.loop.at] = index;
+    }
+    return loop;
   }
 
   /**
@@ -1142,7 +1303,7 @@ export class ResourceRunHost
         const entering = step.kind === "enter" && step.task !== undefined;
         const taskStart =
           step.kind === "leave" && step.task !== undefined
-            ? this.#taskStarts.get(step.task.id)
+            ? this.#taskStarts.get(step.place)
             : undefined;
         // Its wait for load since its last admission, read off the markers
         // its attempts recorded, so every replay counts the same.
@@ -1230,7 +1391,7 @@ export class ResourceRunHost
           const journal = enteredSchema.parse(recorded);
           outcome = journal.record;
           if (step.task !== undefined) {
-            this.#taskStarts.set(step.task.id, journal.startedAt);
+            this.#taskStarts.set(step.place, journal.startedAt);
           }
         }
         // Fresh or replayed alike: what the run has reached, in order.
@@ -1438,6 +1599,9 @@ export class ResourceRunHost
       exportAs: new Map(),
       until: undefined,
       untilAsked: false,
+      items: undefined,
+      itemsAsked: false,
+      proceeds: undefined,
       held: false,
       collecting: run.collecting,
       admission,
@@ -1465,6 +1629,8 @@ export class ResourceRunHost
         await ResourceRunHost.#tracked(attempt, this.#call(attempt, frame)),
       until: async (frame) =>
         await ResourceRunHost.#tracked(attempt, this.#until(attempt, frame)),
+      items: async (frame) =>
+        await ResourceRunHost.#tracked(attempt, this.#itemsOf(attempt, frame)),
     });
   }
 
@@ -1571,14 +1737,17 @@ export class ResourceRunHost
       return;
     }
     if (step.kind === "enter" && record.data.until !== undefined) {
-      this.#deadlines.set(task.id, record.data.until);
+      this.#deadlines.set(step.place, record.data.until);
+    }
+    if (step.kind === "enter" && record.data.items !== undefined) {
+      this.#items.set(step.place, record.data.items);
     }
     if (
       step.kind === "task" &&
       task.kind === "call" &&
       task.call.name === "grasp.model" &&
       // Made in this activation: counted as it was asked for.
-      !this.#modelCallsMade.has(task.id)
+      !this.#modelCallsMade.has(step.place)
     ) {
       this.#modelCalls += 1;
     }
@@ -1646,7 +1815,8 @@ export class ResourceRunHost
   /** Runs a `wait` task: a durable sleep of exactly its sealed length. */
   async sleep(name: unknown, duration: unknown): Promise<Settled<null>> {
     return await settle(async () => {
-      const { task } = this.#stepOf(name, true);
+      const sleeping = this.#stepOf(name, true);
+      const { task } = sleeping;
       if (
         task?.kind !== "wait" ||
         task.milliseconds === undefined ||
@@ -1659,7 +1829,7 @@ export class ResourceRunHost
       // Its length alone, as sealed: the same on every replay.
       this.#requireShortSleep(task.milliseconds);
       await this.#requirePerson();
-      await this.#step.sleep(`task:${task.id}`, task.milliseconds);
+      await this.#step.sleep(sleeping.name, task.milliseconds);
       return null;
     });
   }
@@ -1671,9 +1841,10 @@ export class ResourceRunHost
    */
   async sleepUntil(name: unknown, timestamp: unknown): Promise<Settled<null>> {
     return await settle(async () => {
-      const { task } = this.#stepOf(name, true);
+      const sleeping = this.#stepOf(name, true);
+      const { task } = sleeping;
       const deadline =
-        task === undefined ? undefined : this.#deadlines.get(task.id);
+        task === undefined ? undefined : this.#deadlines.get(sleeping.place);
       if (
         task === undefined ||
         deadlineOf(task) === undefined ||
@@ -1687,7 +1858,7 @@ export class ResourceRunHost
       // From the run's start, both recorded: the same on every replay.
       this.#requireShortSleep(deadline - this.#run.createdAt);
       await this.#requirePerson();
-      await this.#step.sleepUntil(`task:${task.id}`, deadline);
+      await this.#step.sleepUntil(sleeping.name, deadline);
       return null;
     });
   }
@@ -1750,11 +1921,13 @@ export class ResourceRunHost
         ? build.expressions[slot]
         : undefined;
     const owner = ResourceRunHost.#ownerOf(attempt.step);
+    const { step } = attempt;
     if (
       expression === undefined ||
       expression.taskId !== owner ||
       this.#hostSlots.has(expression.slot) !== forHost ||
-      (!forHost && !stagesOf[attempt.step.kind].includes(expression.stage))
+      (!forHost && !stagesOf[step.kind].includes(expression.stage)) ||
+      !whileFits(step, expression.slot)
     ) {
       return this.#refuse(
         `Step of "${owner ?? "the workflow"}" has no expression ${String(slot).slice(0, 20)}.`
@@ -1787,6 +1960,7 @@ export class ResourceRunHost
             stage: expression.stage,
             scope: expression.taskId === null ? [] : [expression.taskId],
             pointer: expression.pointer,
+            loopVariables: expression.loopVariables,
           },
           true
         )
@@ -1804,6 +1978,31 @@ export class ResourceRunHost
    * its stage has, from the host's record, the step's capture and, for
    * what only the task's own work makes, `frame`.
    */
+  /**
+   * The loop variables `expression` was compiled with, from what its
+   * step's scope resolved (`StepOf.loop`): never the isolate's. Refused
+   * when its step runs in no such loop.
+   */
+  #loopScopeOf(
+    attempt: StepAttempt,
+    expression: SealedExpression
+  ): { loop?: Record<string, Json> } {
+    if (expression.loopVariables.length === 0) {
+      return {};
+    }
+    const values = attempt.step.loop;
+    const loop: Record<string, Json> = {};
+    for (const name of expression.loopVariables) {
+      if (!Object.hasOwn(values, name)) {
+        return this.#refuse(
+          `Expression ${expression.slot} reads a loop its step isn't in.`
+        );
+      }
+      loop[name] = values[name] ?? null;
+    }
+    return { loop };
+  }
+
   #scopeOf(
     attempt: StepAttempt,
     expression: SealedExpression,
@@ -1967,6 +2166,9 @@ export class ResourceRunHost
       if (expression.stage === "taskIf") {
         attempt.condition = value === true ? "held" : "failed";
       }
+      if (attempt.step.kind === "item") {
+        attempt.proceeds = value === true;
+      }
       if (expression.stage === "taskInputFrom") {
         attempt.inputFrom.set(expression.slot, value);
       }
@@ -1990,7 +2192,9 @@ export class ResourceRunHost
     task: SealedTask
   ): Json | undefined {
     const inputFrom =
-      task.kind === "call" || task.kind === "wait" ? task.inputFrom : undefined;
+      task.kind === "call" || task.kind === "wait" || task.kind === "for"
+        ? task.inputFrom
+        : undefined;
     return inputFrom === undefined
       ? attempt.data.input
       : filledFrom(inputFrom, attempt.inputFrom);
@@ -2070,7 +2274,10 @@ export class ResourceRunHost
     const expressionCompiled = await this.#compiled(expression);
     // Compiling awaited: an attempt over meanwhile evaluates nothing.
     this.#requireCurrent(attempt);
-    const scope = this.#scopeOf(attempt, expression, frame);
+    const scope = {
+      ...this.#scopeOf(attempt, expression, frame),
+      ...this.#loopScopeOf(attempt, expression),
+    };
     const value = await evaluateExpression(
       expressionCompiled,
       // SAFETY: #scopeOf gives exactly the variables of the expression's
@@ -2172,7 +2379,7 @@ export class ResourceRunHost
     attempt: StepAttempt,
     task: SealedTask,
     frame: unknown,
-    doing: "makes its call" | "resolves its deadline"
+    doing: "makes its call" | "resolves its deadline" | "resolves its items"
   ): void {
     const stages = new Set(
       this.#run.build.expressions
@@ -2298,7 +2505,7 @@ export class ResourceRunHost
         });
       }
       this.#modelCalls += 1;
-      this.#modelCallsMade.add(task.id);
+      this.#modelCallsMade.add(attempt.step.place);
     }
     if (call.name === "grasp.compute") {
       // Its modules' approved packages admitted again first, under the
@@ -2326,7 +2533,7 @@ export class ResourceRunHost
     }
     const built = await this.#builtCall(attempt, call, passed);
     return await makeCall(this.#env, this.#run.calling, task.id, built, {
-      key: stepIdempotencyKey(this.#run.runId, `task:${task.id}`),
+      key: stepIdempotencyKey(this.#run.runId, attempt.step.name),
       deadline: attempt.deadline,
       requireHolds: () => {
         this.#requireCurrent(attempt);
@@ -2396,7 +2603,7 @@ export class ResourceRunHost
     frame: { input: Json; output: Json; size: number }
   ): Promise<Json> {
     const input = await this.#built(attempt, call.arguments, frame, frame.size);
-    const stepKey = stepIdempotencyKey(this.#run.runId, `task:${task.id}`);
+    const stepKey = stepIdempotencyKey(this.#run.runId, attempt.step.name);
     return await callAction(
       this.#env,
       this.#run.build.compute,
@@ -2597,6 +2804,53 @@ export class ResourceRunHost
     });
   }
 
+  /**
+   * `ResourceAttemptHost.items`, for `attempt`: its `for` task's items,
+   * once, in its enter step, built from the sealed collection on the
+   * task's transformed input (`frame`): a list of at most the platform's
+   * items a collection holds (`workflow.collection_invalid`). The step
+   * records them, and its items run on exactly those, every replay too.
+   */
+  async #itemsOf(
+    attempt: StepAttempt,
+    frame: unknown
+  ): Promise<Settled<Json[]>> {
+    return await settle(async () => {
+      if (attempt.over) {
+        throw executionErrors.create("execution.stale_attempt");
+      }
+      const { step } = attempt;
+      const { task } = step;
+      if (step.kind !== "enter" || task?.kind !== "for") {
+        return this.#refuse(
+          `Step of "${task?.id ?? "the workflow"}" resolves no items.`
+        );
+      }
+      // Taken before anything is awaited: two asked at once resolve one.
+      if (attempt.itemsAsked || attempt.condition === "failed") {
+        return this.#refuse(`Task "${task.id}" resolves its items once.`);
+      }
+      attempt.itemsAsked = true;
+      this.#requireOpen(attempt, task, frame, "resolves its items");
+      const passed = this.#callFrame(frame);
+      const value = await this.#built(
+        attempt,
+        task.loop.in,
+        passed,
+        passed.size
+      );
+      const items = z
+        .array(z.json())
+        .max(platformLimits.workflowCollectionItems)
+        .safeParse(value);
+      if (!items.success) {
+        throw workflowResourceErrors.create("workflow.collection_invalid");
+      }
+      attempt.items = items.data;
+      return items.data;
+    });
+  }
+
   /** The descriptor text of `task`'s `which` schema, if it has one. */
   static #schemaOf(task: SealedTask, which: DataCheck): string | undefined {
     const descriptor = task.schemas[which];
@@ -2723,6 +2977,48 @@ export class ResourceRunHost
     }
   }
 
+  /**
+   * Accepts what of `record` a loop's steps record, whatever the isolate
+   * resolved: an `item` step only what its `while` answered, as the host
+   * evaluated it (whether it was the whole record); a `for` task's enter
+   * step exactly the items the host resolved in that attempt, and no
+   * other step any.
+   */
+  #acceptedLoopRecord(
+    attempt: StepAttempt,
+    record: { output: Json; items?: Json[] | undefined }
+  ): boolean {
+    const { step } = attempt;
+    const { task } = step;
+    if (task === undefined) {
+      return false;
+    }
+    if (step.kind === "item") {
+      if (
+        attempt.proceeds === undefined ||
+        record.output !== attempt.proceeds ||
+        Object.keys(record).length !== 1
+      ) {
+        this.#refuse(
+          `Task "${task.id}"'s item records what its while answered.`
+        );
+      }
+      return true;
+    }
+    const resolvesItems = step.kind === "enter" && task.kind === "for";
+    const itemsRecorded =
+      record.items === undefined
+        ? attempt.items === undefined
+        : attempt.items !== undefined &&
+          canonicalJson(record.items) === canonicalJson(attempt.items);
+    if (!itemsRecorded || (resolvesItems && record.items === undefined)) {
+      this.#refuse(
+        `Task "${task.id}"'s step records the items the host resolved.`
+      );
+    }
+    return false;
+  }
+
   #acceptRecord(attempt: StepAttempt, value: Json): void {
     const { step, data } = attempt;
     const { task } = step;
@@ -2753,6 +3049,9 @@ export class ResourceRunHost
       );
     }
     if (skipped) {
+      return;
+    }
+    if (this.#acceptedLoopRecord(attempt, record)) {
       return;
     }
     // A deadline is recorded exactly as the host resolved it in this

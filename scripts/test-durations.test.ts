@@ -9,7 +9,7 @@ import { fileSecondsIn, updatedDurations } from "./test-durations.ts";
 const log = (...lines: string[]): string => `${lines.join("\n")}\n`;
 
 describe("reading test files' durations from progress logs", () => {
-  it("adds up each file's tests, and counts a test without a time as none", () => {
+  it("times each file from its first test's start to its last's end, and counts a test without a time as none", () => {
     const seconds = fileSecondsIn(
       log(
         "2026-10-16T10:00:42.023Z passed 1500ms @grasp-os/core test/a.test.ts > a > does one thing",
@@ -20,9 +20,23 @@ describe("reading test files' durations from progress logs", () => {
     );
 
     expect(Object.fromEntries(seconds)).toStrictEqual({
-      "@grasp-os/core test/a.test.ts": 2,
+      // From 10:00:40.523, when the first began, to 10:00:43.023.
+      "@grasp-os/core test/a.test.ts": 2.5,
       "@grasp-os/workerflow test/b.test.ts": 0,
       "scripts scripts/c.test.ts": 2,
+    });
+  });
+
+  it("counts the time between a file's tests, its hooks, as the file's", () => {
+    const seconds = fileSecondsIn(
+      log(
+        "2026-10-16T10:00:10.000Z passed 1000ms @grasp-os/core test/slow.test.ts > s > one",
+        "2026-10-16T10:00:20.000Z passed 1000ms @grasp-os/core test/slow.test.ts > s > two"
+      )
+    );
+
+    expect(Object.fromEntries(seconds)).toStrictEqual({
+      "@grasp-os/core test/slow.test.ts": 11,
     });
   });
 
