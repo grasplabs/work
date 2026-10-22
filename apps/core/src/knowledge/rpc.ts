@@ -25,6 +25,7 @@ import type {
   SkillCollections,
 } from "@grasp-os/shared/knowledge";
 
+import { gapAnswerErasure } from "../brain-gaps.ts";
 import { CoreRpcTarget } from "../rpc-target.ts";
 import { withPerson } from "../session-check.ts";
 import type { SessionCheck } from "../session-check.ts";
@@ -182,14 +183,27 @@ export class KnowledgeRpc extends CoreRpcTarget implements KnowledgeApi {
   async preparePurge(input: PurgeInput): Promise<PurgePlan> {
     return await withPerson(
       this.#check,
-      async (person) => await preparePurge(this.#env, person, input)
+      async (person) =>
+        await preparePurge(
+          this.#env,
+          person,
+          input,
+          gapAnswerErasure(this.#env)
+        )
     );
   }
 
   async purge(input: PurgeInput, token: string): Promise<PurgeResult> {
     return await withPerson(
       this.#check,
-      async (person) => await purge(this.#env, person, input, token)
+      async (person) =>
+        await purge(
+          this.#env,
+          person,
+          input,
+          token,
+          gapAnswerErasure(this.#env)
+        )
     );
   }
 }

@@ -27,6 +27,7 @@ import {
   notifications,
   users,
 } from "./db/core/schema.ts";
+import type { OnErase } from "./knowledge/purge.ts";
 import { onboardingStore } from "./onboarding/store.ts";
 
 // What became of the Playbook's gaps (`brain.askAboutGap`, `answerGap`,
@@ -408,7 +409,7 @@ export const redactGapAnswer = async (
  * How many gap answers `holds` is true of: those a content purge's terms
  * are in, which it would rewrite (its plan) or failed to (its check).
  */
-export const countGapAnswers = async (
+const countGapAnswers = async (
   env: Env,
   holds: (text: string) => boolean
 ): Promise<number> => {
@@ -425,7 +426,7 @@ export const countGapAnswers = async (
  * replaced), as `person`; an answer it leaves as it is isn't written.
  * Returns how many it rewrote.
  */
-export const rewriteGapAnswers = async (
+const rewriteGapAnswers = async (
   env: Env,
   person: Identity,
   rewrite: (text: string) => string
@@ -471,7 +472,7 @@ export const rewriteGapAnswers = async (
  * Forgets `userId` as anyone's answerer (a personal purge), as `person`:
  * their answers stay, as the company's, said by no one.
  */
-export const eraseGapAnswerer = async (
+const eraseGapAnswerer = async (
   env: Env,
   person: Identity,
   userId: string
@@ -489,3 +490,17 @@ export const eraseGapAnswerer = async (
     }),
   ]);
 };
+
+/**
+ * The gap answers as a Knowledge purge reaches them: they hold people's
+ * words too, so a purge rewrites them and forgets who gave them.
+ */
+export const gapAnswerErasure = (env: Env): OnErase => ({
+  count: async (holds) => await countGapAnswers(env, holds),
+  rewrite: async (person, rewrite) => {
+    await rewriteGapAnswers(env, person, rewrite);
+  },
+  forgetActor: async (person, userId) => {
+    await eraseGapAnswerer(env, person, userId);
+  },
+});
