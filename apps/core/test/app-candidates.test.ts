@@ -176,6 +176,12 @@ const aborted = async (statement: string, ...binds: unknown[]) =>
         .run()
   );
 
+/** "refused" for the refusal of a version made current by hand, else what happened. */
+const madeCurrentRefusal = (outcome: string): string =>
+  outcome.includes("apps are made current from a verified candidate")
+    ? "refused"
+    : outcome;
+
 describe(
   "making a version current through a candidate",
   { timeout: 120_000 },
@@ -313,6 +319,39 @@ describe(
           ].map((key) => [key, expect.stringContaining("SQLITE_CONSTRAINT")])
         )
       );
+    });
+
+    it("refuses a row written already current, new or replacing an App, whoever writes", async () => {
+      const { owner, app } = await appWith(helloFiles());
+      await activateVersion(env, owner, app, 1);
+      await committed(owner, app, helloFiles("two"));
+      const forged = crypto.randomUUID();
+      expect({
+        inserted: madeCurrentRefusal(
+          await aborted(
+            `INSERT INTO apps (id, name, description, owner_id, current_version, created_at)
+           SELECT ?, 'Forged', '', owner_id, 1, 0 FROM apps WHERE id = ?`,
+            forged,
+            app
+          )
+        ),
+        replaced: madeCurrentRefusal(
+          await aborted(
+            `INSERT OR REPLACE INTO apps (id, name, description, owner_id, current_version, created_at)
+           SELECT id, name, description, owner_id, 2, created_at FROM apps WHERE id = ?`,
+            app
+          )
+        ),
+        forgedRow: await env.DB.prepare("SELECT id FROM apps WHERE id = ?")
+          .bind(forged)
+          .first(),
+        current: await currentOf(app),
+      }).toStrictEqual({
+        inserted: "refused",
+        replaced: "refused",
+        forgedRow: null,
+        current: 1,
+      });
     });
 
     it("refuses to verify a candidate without its report, whoever writes", async () => {

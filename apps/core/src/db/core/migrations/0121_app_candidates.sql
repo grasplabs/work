@@ -110,3 +110,13 @@ WHEN NEW.`current_version` IS NOT NULL
 BEGIN
 	SELECT RAISE(ABORT, 'apps are made current from a verified candidate');
 END;
+--> statement-breakpoint
+-- The trigger above sees only updates: a row inserted already current,
+-- new or replacing an App (INSERT OR REPLACE runs its inserts' triggers),
+-- would skip the candidate. An App starts with nothing current and is
+-- made current only by an update.
+CREATE TRIGGER `apps_inserted_not_current` BEFORE INSERT ON `apps`
+WHEN NEW.`current_version` IS NOT NULL
+BEGIN
+	SELECT RAISE(ABORT, 'apps are made current from a verified candidate');
+END;
