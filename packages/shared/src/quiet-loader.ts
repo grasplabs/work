@@ -189,7 +189,9 @@ const maxThrownDetails = 8192;
  * so a getter or a proxy's trap in it runs, and throws, there, not as
  * workerd serializes it. What isn't plain data (an RpcTarget, a stream, a
  * Date, a class's instance) crosses as it is: its methods and accessors run
- * after the call, outside the wrapper (GRA-939 lists it as open).
+ * after the call, outside the wrapper. So does every \`fetch\` Response's
+ * body, a stream read after the call: a body that errors as it is read
+ * isn't answered by the wrapper (GRA-939 lists both as open).
  *
  * It uses only the built-ins `builtinsSource` kept, never a global or a
  * prototype's method the isolate's code could have replaced: no spread,
