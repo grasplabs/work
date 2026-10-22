@@ -12,24 +12,29 @@ import type { RunFileType } from "@grasp-os/shared/run-files";
 // package Word, Excel, LibreOffice or Google Docs writes passes; anything
 // else is no Office document. The threats, each refused:
 // - A macro-enabled document passed off as macro-free (docm, xlsm): the
-//   type is read for the part `.rels` names only; a package declaring any
+//   type is read for the part `.rels` names only, by its Override or else
+//   its extension's Default, as OPC reads it; a package declaring any
 //   other main-document type (macro-enabled, a template, an add-in, a
 //   presentation) or a VBA project, or holding an entry whose name says
 //   VBA, is refused, whatever else it declares.
 // - Declarations a parser would read otherwise: XML is taken only as
-//   these two parts are written, an XML declaration, one root in its OPC
-//   namespace and its flat children with the attributes OPC gives them;
-//   no comment, CDATA, processing instruction, DTD, text or nesting, and
-//   no entity anywhere (`&`), so nothing hides behind one. A content type
-//   with parameters, a relationship type that is the main document's but
-//   for case or space, or a second main document, is refused.
+//   these two parts are written, an XML declaration (version 1.0, UTF-8
+//   if it names an encoding, so the bytes decode one way only), one root
+//   in its OPC namespace and its flat children with the attributes OPC
+//   gives them, double-quoted; no comment, CDATA, processing instruction,
+//   DTD, text or nesting, and no entity anywhere (`&`), so nothing hides
+//   behind one. A content type with parameters, a relationship type that
+//   is the main document's (transitional or Strict) but for case or space,
+//   or a second main document, is refused.
 // - Names that compare equal to one reader and not another: part and
 //   entry names are printable ASCII, folded for ASCII letters only (so no
 //   Kelvin sign is a K), each named once.
 // - A ZIP two readers would read differently: its end record must be its
 //   last 22 bytes (no comment, so none hides a second one), its central
-//   directory exactly before it, every record counted, each local header
-//   naming its entry as the central record does, none encrypted, and the
+//   directory exactly before it, no ZIP64 locator and no entry comment (in
+//   which another directory could sit), every record counted, each local
+//   header naming its entry as the central record does (flags alike but
+//   for the deflate-speed and UTF-8 bits), none encrypted, and the
 //   entries back to back from the start, so none hides outside the
 //   directory. An entry's size must be the bytes it holds or inflates to,
 //   within the bound.
@@ -58,9 +63,14 @@ const contentTypesNamespace =
   "http://schemas.openxmlformats.org/package/2006/content-types";
 const relationshipsNamespace =
   "http://schemas.openxmlformats.org/package/2006/relationships";
-/** The relationship that names the main document (a transitional one's). */
-const officeDocument =
-  "http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument";
+/**
+ * The relationship that names the main document, exactly as written: a
+ * transitional package's, or a Strict package's (ISO/IEC 29500 Strict).
+ */
+const officeDocuments: ReadonlySet<string> = new Set([
+  "http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument",
+  "http://purl.oclc.org/ooxml/officeDocument/relationships/officeDocument",
+]);
 
 /**
  * A main document's content type, of any package (`….main+xml`, a binary
@@ -76,6 +86,9 @@ const partMaxBytes = 64 * 1024;
 /** The ZIP records' signatures and their fixed sizes. */
 const endSignature = 0x06_05_4b_50;
 const endSize = 22;
+/** A ZIP64 end of central directory locator's signature, and its size. */
+const zip64LocatorSignature = 0x07_06_4b_50;
+const zip64LocatorSize = 20;
 const centralSignature = 0x02_01_4b_50;
 const centralSize = 46;
 const localSignature = 0x04_03_4b_50;
@@ -90,6 +103,22 @@ const sizesAfterFlag = 0x8;
 /** Whether `flags` has `flag`, a single bit, set. */
 const hasFlag = (flags: number, flag: number): boolean =>
   Math.floor(flags / flag) % 2 === 1;
+
+/**
+ * The flags a local header may give otherwise than its central record:
+ * deflate's speed (bits 1 and 2) and UTF-8 names (bit 11), which writers
+ * set in one header only. Every other bit, encryption and bit 3 among
+ * them, must be the same.
+ */
+const looseFlags: ReadonlySet<number> = new Set([0x2, 0x4, 0x8_00]);
+const flagBits = Array.from({ length: 16 }, (_, bit) => 2 ** bit);
+
+/** Whether a local header's `local` flags are its central record's `central`. */
+const sameFlags = (local: number, central: number): boolean =>
+  flagBits.every(
+    (flag) =>
+      looseFlags.has(flag) || hasFlag(local, flag) === hasFlag(central, flag)
+  );
 
 /** The bytes an entry holds, compressed, and how. */
 interface Entry {
@@ -134,6 +163,14 @@ const directoryOf = (
   if (end < 0 || view.getUint32(end, true) !== endSignature) {
     return undefined;
   }
+  // A ZIP64 locator just before it sends a ZIP64 reader to another
+  // directory: an Office package this size has none.
+  if (
+    end >= zip64LocatorSize &&
+    view.getUint32(end - zip64LocatorSize, true) === zip64LocatorSignature
+  ) {
+    return undefined;
+  }
   const count = view.getUint16(end + 10, true);
   const size = view.getUint32(end + 12, true);
   const start = view.getUint32(end + 16, true);
@@ -169,13 +206,9 @@ const centralsOf = (
       return undefined;
     }
     const nameLength = view.getUint16(at + 28, true);
-    const next =
-      at +
-      centralSize +
-      nameLength +
-      view.getUint16(at + 30, true) +
-      view.getUint16(at + 32, true);
-    if (next > end) {
+    const next = at + centralSize + nameLength + view.getUint16(at + 30, true);
+    // No entry has a comment: one could hold another directory.
+    if (next > end || view.getUint16(at + 32, true) !== 0) {
       return undefined;
     }
     const nameBytes = bytes.subarray(
@@ -230,7 +263,7 @@ const localOf = (
   );
   if (
     !sameBytes(name, central.nameBytes) ||
-    view.getUint16(local + 6, true) !== central.flags ||
+    !sameFlags(view.getUint16(local + 6, true), central.flags) ||
     view.getUint16(local + 8, true) !== central.method
   ) {
     return undefined;
@@ -364,9 +397,16 @@ const contentOf = async (entry: Entry): Promise<Uint8Array | undefined> => {
 const xmlName = "[A-Za-z][A-Za-z0-9]*";
 /** An attribute value: printable ASCII, and no entity, quote or `<`. */
 const valueChars = String.raw`[\u0020-\u0021\u0023-\u0025\u0028-\u003b\u003d-\u007e]*`;
-/** The XML declaration, only at the start, as these parts begin. */
+/** `name="value"` or `name='value'`, as only the XML declaration may quote. */
+const pseudoAttribute = (name: string, value: string): string =>
+  String.raw`[\t\n\r ]+${name}[\t\n\r ]*=[\t\n\r ]*(?:"${value}"|'${value}')`;
+/**
+ * The XML declaration, only at the start, as these parts begin: version
+ * 1.0, and UTF-8 if it names an encoding, so the bytes decode one way
+ * only (never UTF-7's `+ADw-` for `<`).
+ */
 const declaration = new RegExp(
-  String.raw`^<\?xml(?:[\t\n\r ]+${xmlName}[\t\n\r ]*=[\t\n\r ]*"${valueChars}")*[\t\n\r ]*\?>`,
+  String.raw`^<\?xml${pseudoAttribute("version", String.raw`1\.0`)}(?:${pseudoAttribute("encoding", "[Uu][Tt][Ff]-8")})?(?:${pseudoAttribute("standalone", "(?:yes|no)")})?[\t\n\r ]*\?>`,
   "u"
 );
 const startTag = new RegExp(
@@ -590,7 +630,7 @@ const namesMain = (type: string): boolean =>
  * The part name of the package's main document, as its one internal
  * `officeDocument` relationship in `_rels/.rels` names it; undefined for
  * none, several, one whose type is the main document's but spelt
- * otherwise (case, space, a strict package's), repeated IDs, or a target
+ * otherwise (case, space), repeated IDs, or a target
  * that leaves the package.
  */
 const mainPartOf = (rels: string): string | undefined => {
@@ -613,7 +653,8 @@ const mainPartOf = (rels: string): string | undefined => {
   if (
     ids.size !== relationships.length ||
     mains.length !== 1 ||
-    main?.attributes.get("Type") !== officeDocument ||
+    !officeDocuments.has(main?.attributes.get("Type") ?? "") ||
+    main === undefined ||
     (main.attributes.get("TargetMode") ?? "Internal") !== "Internal"
   ) {
     return undefined;
@@ -643,7 +684,13 @@ const overridePartOf = (given: string): string | undefined =>
  */
 const declarationsOf = (
   xml: string
-): { overrides: Map<string, string>; types: Set<string> } | undefined => {
+):
+  | {
+      overrides: Map<string, string>;
+      defaults: Map<string, string>;
+      types: Set<string>;
+    }
+  | undefined => {
   const children = childrenOf(xml, "Types", contentTypesNamespace, [
     "Default",
     "Override",
@@ -652,7 +699,7 @@ const declarationsOf = (
     return undefined;
   }
   const overrides = new Map<string, string>();
-  const extensions = new Set<string>();
+  const defaults = new Map<string, string>();
   const types = new Set<string>();
   for (const { name, attributes } of children) {
     const type = attributes.get("ContentType") ?? "";
@@ -660,18 +707,21 @@ const declarationsOf = (
       name === "Default"
         ? extensionOf(attributes.get("Extension") ?? "")
         : overridePartOf(attributes.get("PartName") ?? "");
-    const seen = name === "Default" ? extensions : overrides;
+    const seen = name === "Default" ? defaults : overrides;
     if (!contentTypePattern.test(type) || key === undefined || seen.has(key)) {
       return undefined;
     }
-    if (name === "Default") {
-      extensions.add(key);
-    } else {
-      overrides.set(key, folded(type));
-    }
+    (name === "Default" ? defaults : overrides).set(key, folded(type));
     types.add(folded(type));
   }
-  return { overrides, types };
+  return { overrides, defaults, types };
+};
+
+/** Part name `part`'s extension: after the last `.` of its last segment. */
+const extensionOfPart = (part: string): string | undefined => {
+  const segment = part.slice(part.lastIndexOf("/") + 1);
+  const dot = segment.lastIndexOf(".");
+  return dot === -1 ? undefined : extensionOf(segment.slice(dot + 1));
 };
 
 /** An entry whose name says it holds VBA, whatever the package declares. */
@@ -706,7 +756,10 @@ export const officeTypeOf = async (
   ) {
     return undefined;
   }
-  const type = declared.overrides.get(main);
+  // Its Override's type, or else its extension's Default's, as OPC says.
+  const type =
+    declared.overrides.get(main) ??
+    declared.defaults.get(extensionOfPart(main) ?? "");
   const others = [...declared.types].filter(
     (named) =>
       named !== type &&
