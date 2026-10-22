@@ -5,6 +5,7 @@ import {
 import type { CatalogContract } from "@grasp-os/open-workflow/catalog";
 import { actorOf } from "@grasp-os/shared/audit";
 import { sha256Hex } from "@grasp-os/shared/encoding";
+import { isExpectedError } from "@grasp-os/shared/errors";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { log } from "@grasp-os/shared/log";
 import { requireBuilder, roleErrors } from "@grasp-os/shared/roles";
@@ -26,12 +27,20 @@ import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import { workflowCatalogContracts } from "./db/core/schema.ts";
 import { inList, isUniqueViolation } from "./db/d1.ts";
 import { requireMemberAdmin, stillAdminSql } from "./permissions.ts";
+import {
+  envelopedSchema,
+  envelopedSchemaText,
+  forValidation,
+  readEnvelope,
+} from "./workflows/connector-schemas.ts";
 import { takesPageAnswers } from "./workflows/exact-values.ts";
 
 // The host catalog of contracts independent workflows bind besides each
 // other (platform specification 13.2): operation, connector, model,
 // decision and event contracts, each a key and the SDK descriptors of
-// what a call passes and returns, or of each event type's data. A workflow's validation resolves its bindings'
+// what a call passes and returns, or of each event type's data; a
+// connector's operation may instead carry a native connector's own JSON
+// Schemas, as connect confirms them (connector-schemas.ts). A workflow's validation resolves its bindings'
 // contract keys here; an admin's approval (workflow-bindings.ts) then names
 // what serves each. Threat model, and how each is closed:
 //
@@ -89,18 +98,86 @@ const entryOf = (row: typeof workflowCatalogContracts.$inferSelect) => ({
   publishedAt: row.publishedAt.toISOString(),
 });
 
+const contractInvalid = (issue: string) =>
+  workflowResourceErrors.create("workflow.contract_invalid", {
+    issues: [issue],
+  });
+
+/**
+ * Refuses (`workflow.contract_invalid`) an operation described by JSON
+ * Schema (connector-schemas.ts) unless it is a connector contract's, both
+ * its input and output are, each is one the allow-list admits, and connect
+ * confirms they are exactly a native action of this release by that tool.
+ * Nothing else may put a pattern where core runs it (GRA-982).
+ */
+const requireNativeOperations = async (
+  env: Env,
+  contract: {
+    kind: CatalogBindingKind;
+    operations?: Record<string, { input: string; output: string }>;
+  }
+): Promise<void> => {
+  for (const [operation, { input, output }] of Object.entries(
+    contract.operations ?? {}
+  )) {
+    const enveloped = [input, output].filter(
+      (text) => envelopedSchema(text) !== undefined
+    ).length;
+    if (enveloped === 0) {
+      continue;
+    }
+    if (contract.kind !== "connector" || enveloped !== 2) {
+      throw contractInvalid(
+        `operations.${operation}: Only a connector's operation is described by JSON Schema, its input and output both.`
+      );
+    }
+    const inputSchema = envelopedSchemaText(input);
+    const outputSchema = envelopedSchemaText(output);
+    if (
+      readEnvelope(input) === undefined ||
+      readEnvelope(output) === undefined ||
+      inputSchema === undefined ||
+      outputSchema === undefined
+    ) {
+      throw contractInvalid(
+        `operations.${operation}: Its JSON Schema uses something a connector call's check doesn't enforce.`
+      );
+    }
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- one confirmation per operation, each bounded
+      await env.CONNECT.nativeOperation({
+        tool: operation,
+        input: inputSchema,
+        output: outputSchema,
+      });
+    } catch (error) {
+      if (isExpectedError(error)) {
+        throw contractInvalid(
+          `operations.${operation}: Its JSON Schemas aren't exactly a native connector action's of this release.`
+        );
+      }
+      throw error;
+    }
+  }
+};
+
 /**
  * `input` as the catalog stores it: refused unless the profile's catalog
  * reader accepts it, and a decision contract's response schema takes what
  * a person can answer (`workflow.contract_invalid`).
  */
-const checkedContract = async (input: unknown) => {
+const checkedContract = async (env: Env, input: unknown) => {
   const { key, ...contract } = workflowResourceErrors.parse(
     "workflow.contract_invalid",
     catalogContractSchema,
     input
   );
-  const read = resolveContract(() => contract, key, createCatalogBudget());
+  await requireNativeOperations(env, contract);
+  const read = resolveContract(
+    () => forValidation(contract),
+    key,
+    createCatalogBudget()
+  );
   if (!read.found) {
     throw workflowResourceErrors.create("workflow.contract_invalid", {
       issues: [read.reason],
@@ -135,7 +212,7 @@ export const publishCatalogContract = async (
   input: unknown
 ): Promise<CatalogContractEntry> => {
   requireMemberAdmin(by);
-  const { key, kind, text, fingerprint } = await checkedContract(input);
+  const { key, kind, text, fingerprint } = await checkedContract(env, input);
   const publishedAt = new Date();
   const db = drizzle(env.DB);
   try {
@@ -194,7 +271,7 @@ export const ensureReleaseContract = async (
   /** What the audit event names it shipped with: the built-in. */
   detail: Readonly<Record<string, string>>
 ): Promise<void> => {
-  const { key, kind, text, fingerprint } = await checkedContract(input);
+  const { key, kind, text, fingerprint } = await checkedContract(env, input);
   const db = drizzle(env.DB);
   // Not an insert over the key's row, which the database refuses whatever
   // the conflict clause (migrations 0080 and 0101): one only while there is
