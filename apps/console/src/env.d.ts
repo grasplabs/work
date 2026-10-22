@@ -28,6 +28,11 @@ interface __BaseEnv_Env {
    * set up.
    */
   GRASP_CLIENT_ID?: string;
+  /**
+   * Grasp's admin's own hostname, e.g. `admin.grasp.example`
+   * (src/admin-host.ts). Without it the admin stays at the console's `/admin`.
+   */
+  ADMIN_HOST?: string;
   /** Local dev only, from .dev.vars: who requests to this machine come from (src/access.ts). */
   DEV_ACCESS_EMAIL?: string;
 }

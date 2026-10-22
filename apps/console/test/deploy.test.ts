@@ -815,6 +815,24 @@ describe("deploying safely", () => {
           eu: { models: ["mistral/mistral-large"] },
         }),
       ],
+      // A way to ElevenLabs the gateway has no path for.
+      [
+        "MODEL_GATEWAY",
+        JSON.stringify({
+          gateway: "grasp-os",
+          models: ["elevenlabs/eleven_v4"],
+          voice: { provider: "elevenlabs-us" },
+        }),
+      ],
+      // An EU voice model, reached at ElevenLabs's native host.
+      [
+        "MODEL_GATEWAY",
+        JSON.stringify({
+          gateway: "grasp-os",
+          models: ["elevenlabs/eleven_v4"],
+          eu: { models: ["elevenlabs/eleven_v4"] },
+        }),
+      ],
       ["MEMORY_LIMITS", JSON.stringify({ "USER.md": 0 })],
       ["AUDIT_RETENTION_DAYS", "7"],
       ["AUDIT_ARCHIVE_RETENTION_DAYS", "30"],
