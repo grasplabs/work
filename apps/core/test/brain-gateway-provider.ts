@@ -47,6 +47,9 @@ const completionSchema = z.object({
       z.object({
         message: z.object({
           content: z.string().nullish(),
+          // What a reasoning model thought, which some (DeepSeek's) must
+          // be sent back on the assistant messages of later requests.
+          reasoning_content: z.string().nullish(),
           tool_calls: z
             .array(
               z.object({
@@ -69,6 +72,9 @@ const completionSchema = z.object({
   usage: z.object({
     prompt_tokens: z.number(),
     completion_tokens: z.number(),
+    completion_tokens_details: z
+      .object({ reasoning_tokens: z.number().nullish() })
+      .nullish(),
   }),
 });
 
@@ -240,6 +246,7 @@ const replyOf = async (
   const parsed = completionSchema.parse(raw);
   const [choice] = parsed.choices;
   const text = choice?.message.content ?? "";
+  const reasoning = choice?.message.reasoning_content ?? "";
   const toolCalls = (choice?.message.tool_calls ?? []).map((call) => ({
     id: call.id ?? `call_${crypto.randomUUID()}`,
     name: call.function.name,
@@ -251,6 +258,15 @@ const replyOf = async (
       ...(toolCalls.length === 0 ? {} : { toolCalls }),
       inputTokens: parsed.usage.prompt_tokens,
       outputTokens: parsed.usage.completion_tokens,
+      ...(reasoning === ""
+        ? {}
+        : {
+            thinking: {
+              text: reasoning,
+              tokens:
+                parsed.usage.completion_tokens_details?.reasoning_tokens ?? 0,
+            },
+          }),
       ...(choice?.finish_reason === "length" ? { truncated: true } : {}),
     },
     text,
