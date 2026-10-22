@@ -248,6 +248,12 @@ export interface Flow {
    * reads it. A replay answers the events taken before.
    */
   readonly listen: (id: string) => Promise<FlowValue>;
+  /**
+   * Waits for the child workflow `run` task `id`'s enter step started to
+   * end, durably, holding no isolate: its output, as the host reads it;
+   * its failure, as the host says it. A replay answers the same.
+   */
+  readonly child: (id: string) => Promise<FlowValue>;
 }
 
 /** Which of a task's data the host checks against the task's schema. */
@@ -305,6 +311,8 @@ export interface OpenWorkflowEngine {
   readonly sleepUntil: (name: string, timestamp: number) => Promise<void>;
   /** A listen task's events, as the host takes them (`Flow.listen`). */
   readonly listen: (name: string) => Promise<FlowValue>;
+  /** A run task's child's output, as the host waits for it (`Flow.child`). */
+  readonly child: (name: string) => Promise<FlowValue>;
 }
 
 /** What `openWorkflow` makes: frozen, so nothing puts another `run` in place. */
@@ -752,6 +760,7 @@ const flowOf = (engine: OpenWorkflowEngine, within = ""): Flow => {
       await engine.sleepUntil(step, timestamp);
     },
     listen: async (id) => await engine.listen(named("task", id)),
+    child: async (id) => await engine.child(named("task", id)),
   };
   return freeze(flow);
 };

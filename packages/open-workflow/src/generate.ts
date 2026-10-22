@@ -98,6 +98,12 @@ import { literalDurationMs } from "./values.ts";
  *   outcome (core's resource-host.ts). Generated code waits for nothing
  *   and passes nothing of it: between the two the run waits durably,
  *   holding no isolate.
+ * - A child workflow other than the one its source named. A `run` task's
+ *   binding is a literal sealed in the task table (`GeneratedRun`), and
+ *   validation matched the task's namespace, name and version to the
+ *   binding's pinned workflow; the host starts exactly the version the
+ *   run's start froze for that binding, with its own grant, and the
+ *   generated code only asks it to, by its task.
  * - Limits raising the host's ceilings. `document.metadata.grasp.limits`
  *   and a task's `timeout` (inline or from `use.timeouts`) are sealed as
  *   numbers, which the host only ever applies as the lower of them and its
@@ -164,9 +170,22 @@ export type LoweredKind =
   | "do"
   | "for"
   | "listen"
+  | "run"
   | "set"
   | "switch"
   | "wait";
+
+/**
+ * A `run` task's child, as the build seals it: the workflow binding its
+ * `metadata.grasp.binding` names (validation matched the task's namespace,
+ * name and version to the binding's pinned workflow), and its input, a
+ * template the host builds in the task's enter step; `{}` when the task
+ * gives none.
+ */
+export interface GeneratedRun {
+  readonly binding: string;
+  readonly input: CallTemplate;
+}
 
 /**
  * A `listen` task's events, as the build seals them: the event binding
@@ -342,6 +361,8 @@ export interface GeneratedTask {
   readonly call?: GeneratedCall;
   /** A `listen` task's events. */
   readonly listen?: GeneratedListen;
+  /** A `run` task's child workflow. */
+  readonly run?: GeneratedRun;
   /**
    * A `call` or `wait` task's `input.from`, as a template of the
    * expressions its module evaluates for it (their slots) and its
@@ -460,6 +481,7 @@ const loweredKinds = new Set<string>([
   "do",
   "for",
   "listen",
+  "run",
   "set",
   "switch",
   "wait",
@@ -1954,6 +1976,77 @@ const lowerListen = (
   );
 };
 
+/**
+ * The statements of a `run` task: its enter step starts its child, once,
+ * from what the build sealed (its binding and its input, built by the
+ * host on the task's transformed input), and records it; then the host
+ * waits for the child to end, durably, holding no isolate, and answers
+ * its output; then its leave step, if it has stages after.
+ */
+const lowerRun = (
+  emitter: Emitter,
+  item: ListTask,
+  stages: Stages,
+  place: ListPlace,
+  sealed: TaskBase,
+  /** Where the task's expressions start, before its stages were compiled. */
+  taskBefore: number
+): void => {
+  const { id, task, pointer } = item;
+  const metadata = isObject(task.metadata) ? task.metadata.grasp : undefined;
+  const binding = isObject(metadata) ? metadata.binding : undefined;
+  const run = isObject(task.run) ? task.run : {};
+  const workflow = isObject(run.workflow) ? run.workflow : undefined;
+  if (typeof binding !== "string" || workflow === undefined) {
+    throw new Error(`The checked workflow's run at ${pointer} is incomplete`);
+  }
+  const inputPointer = pointerJoin(
+    pointerJoin(pointerJoin(pointer, "run"), "workflow"),
+    "input"
+  );
+  const input = Object.hasOwn(workflow, "input")
+    ? templateOf(emitter, workflow.input ?? null, inputPointer, id, "json")
+    : { literal: {} };
+  // The enter step evaluates everything of the task but its leave stages:
+  // its if, its input.from and its child's input.
+  const entering = emitter.expressions
+    .slice(taskBefore)
+    .filter(
+      ({ stage }) => stage !== "taskOutputAs" && stage !== "taskExportAs"
+    ).length;
+  if (entering > maxStepExpressions) {
+    emitter.refusals.add(pointer, "step:expressions", id);
+  }
+  const inputFrom = inputFromOf(emitter, item);
+  const outputAs = sealedPartOf(emitter, item, "output", "as", "taskOutputAs");
+  const exportAs = sealedPartOf(emitter, item, "export", "as", "taskExportAs");
+  // Its `task:` step is the host's wait for its child.
+  const steps: TaskStep[] = ["task"];
+  emitter.tasks.push({
+    ...sealed,
+    kind: "run",
+    run: { binding, input },
+    steps,
+    ...(inputFrom === undefined ? {} : { inputFrom }),
+    ...(outputAs === undefined ? {} : { outputAs }),
+    ...(exportAs === undefined ? {} : { exportAs }),
+  });
+  steps.push(
+    ...lowerDurable(
+      emitter,
+      item,
+      stages,
+      place,
+      (indent) => {
+        emitter.lines.push(
+          `${indent}output = await ${emitter.flow}.child(${literal(id)});`
+        );
+      },
+      true
+    )
+  );
+};
+
 /** Lowers a task list: `lowerList`, passed to the tasks it lowers. */
 type ListLowerer = (
   emitter: Emitter,
@@ -2277,6 +2370,8 @@ const lowerTask = (
     lowerFor(emitter, item, stages, place, sealed, lowerList);
   } else if (kind === "listen") {
     lowerListen(emitter, item, stages, place, sealed, before);
+  } else if (kind === "run") {
+    lowerRun(emitter, item, stages, place, sealed, before);
   } else {
     const steps: TaskStep[] = [];
     emitter.tasks.push({ ...sealed, kind: "do", steps });

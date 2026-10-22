@@ -993,6 +993,7 @@ const evaluatedWith = async (
       build,
       calling: {
         runId,
+        rootRunId: runId,
         workflowId: id,
         version: 1,
         principal: by.userId,
@@ -1123,6 +1124,7 @@ describe("an activation's share of core's CPU", () => {
           build,
           calling: {
             runId,
+            rootRunId: runId,
             workflowId: workflow.id,
             version: 1,
             principal: by.userId,
@@ -2203,6 +2205,7 @@ describe(
           build,
           calling: {
             runId,
+            rootRunId: runId,
             workflowId: workflow.id,
             version: 1,
             principal: by.userId,
