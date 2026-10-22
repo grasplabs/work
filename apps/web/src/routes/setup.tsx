@@ -1,3 +1,4 @@
+import { directorySuiteSchema } from "@grasp-os/shared/directory";
 import { isAdmin } from "@grasp-os/shared/roles";
 import { cn } from "@grasp-os/ui/lib/utils";
 import { useLingui } from "@lingui/react/macro";
@@ -32,6 +33,9 @@ import { resumeVoice, stopSpeaking, voiceLevel } from "../voice/voice.ts";
 // arrives (setup-parts.tsx). Admins only: core refuses
 // everyone else, and anyone else is taken home. Grasp's staff have their
 // own side of it at /onboarding.
+
+/** The suites whose directory the company step offers, in order. */
+const directorySuites = directorySuiteSchema.options;
 
 /** How wide the column is by step, and how large the brain: roomier where there is more to read. */
 const layout: Record<SetupStep, { width: string; brain: number }> = {
@@ -273,7 +277,7 @@ const useVoiceBetweenSteps = (step: SetupStep): void => {
 const Setup = () => {
   const { t, i18n } = useLingui();
   const navigate = useNavigate();
-  const { identity } = Route.useRouteContext();
+  const { identity, suites } = Route.useRouteContext();
   const loaded = Route.useLoaderData();
   const { step: asked } = Route.useSearch();
   const data = loaded.state === "ready" ? loaded.data : null;
@@ -345,7 +349,7 @@ const Setup = () => {
           >
             <SetupStepBody
               cramped={cramped}
-              data={{ ...data, admin }}
+              data={{ ...data, admin, suites }}
               go={go}
               listening={listening}
               message={kept.message}
@@ -367,10 +371,17 @@ const Setup = () => {
 };
 
 export const Route = createFileRoute("/setup")({
-  validateSearch: (search: Record<string, unknown>): { step?: SetupStep } =>
-    isStep(search.step) ? { step: search.step } : {},
+  // `connection`: a connection's flow, started on a step, came back to it.
+  validateSearch: (
+    search: Record<string, unknown>
+  ): { step?: SetupStep; connection?: string } => ({
+    ...(isStep(search.step) && { step: search.step }),
+    ...(typeof search.connection === "string" && {
+      connection: search.connection,
+    }),
+  }),
   beforeLoad: async ({ context: { core }, location }) => {
-    const { connected, identity } = await loadCoreStatus(core);
+    const { connected, identity, signInOptions } = await loadCoreStatus(core);
     if (!connected) {
       throw new Error("Grasp can't be reached right now.");
     }
@@ -388,16 +399,21 @@ export const Route = createFileRoute("/setup")({
       // oxlint-disable-next-line typescript/only-throw-error -- the router redirects on a thrown redirect
       throw redirect({ to: "/", replace: true });
     }
-    return { identity };
+    // The suites people sign in with here: their directories can be connected.
+    const suites = directorySuites.filter((suite) =>
+      signInOptions.some(({ providerId }) => providerId === suite)
+    );
+    return { identity, suites };
   },
   loader: async ({ context: { core } }) =>
     await loadFromCore(core, async (session) => {
-      const [view, documents, gate] = await Promise.all([
+      const [view, documents, gate, directory] = await Promise.all([
         session.onboarding.view(),
         session.onboarding.documents(),
         session.onboardingGate.view(),
+        session.onboarding.directory(),
       ]);
-      return { view, documents, gate };
+      return { view, documents, gate, directory };
     }),
   component: Setup,
 });

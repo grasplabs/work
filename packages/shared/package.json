@@ -58,6 +58,7 @@
     "./dependencies": "./src/dependencies.ts",
     "./deployment-config": "./src/deployment-config.ts",
     "./diagnostics": "./src/diagnostics.ts",
+    "./directory": "./src/directory.ts",
     "./email-preferences": "./src/email-preferences.ts",
     "./encoding": "./src/encoding.ts",
     "./error-namespaces": "./src/error-namespaces.ts",

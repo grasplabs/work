@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import type { OutboxedAuditEvent, OutboxRejected } from "./audit.ts";
 import type { HeldBinding } from "./capability.ts";
+import { directoryProviderSchema } from "./directory.ts";
 import { defineErrorFamily, isExpectedError } from "./errors.ts";
 import type { CodedError } from "./errors.ts";
 import {
@@ -113,13 +114,14 @@ export type OAuthProvider = z.infer<typeof oauthProviderSchema>;
 
 /**
  * Names no app may take: the suites above, whose sign-in connect handles
- * itself; the landscape's admin connections (`./landscape.ts`), which no
- * connector's calls may use; and Composio, whose connections are another
- * kind.
+ * itself; the landscape's and the directory's admin connections
+ * (`./landscape.ts`, `./directory.ts`), which no connector's calls may use;
+ * and Composio, whose connections are another kind.
  */
 const reservedProviderIds: ReadonlySet<string> = new Set([
   ...oauthProviderSchema.options,
   ...landscapeProviderSchema.options,
+  ...directoryProviderSchema.options,
   "composio",
 ]);
 
@@ -183,10 +185,14 @@ export type ConnectionPerson = z.infer<typeof connectionPersonSchema>;
 export const startConnectionSchema = z.strictObject({
   person: connectionPersonSchema,
   /**
-   * A connector's provider, or the landscape's read-only admin connection
-   * of a suite, which no connector's calls use.
+   * A connector's provider, or a read-only admin connection of a suite
+   * (the landscape's, the directory's), which no connector's calls use.
    */
-  provider: z.union([connectorProviderSchema, landscapeProviderSchema]),
+  provider: z.union([
+    connectorProviderSchema,
+    landscapeProviderSchema,
+    directoryProviderSchema,
+  ]),
   scope: connectionScopeSchema,
   /** The deployment's origin, from its config: the provider returns there. */
   origin: z.url(),
@@ -1546,7 +1552,7 @@ export const connectionErrors = defineErrorFamily({
   "connection.not_offered":
     "Your organization doesn't offer this connection. An admin can offer it.",
   "connection.scopes_refused":
-    "The provider granted more or less access than this connection asks for, so it wasn't kept. Connect it with Grasp's landscape app, granting exactly what it asks.",
+    "The provider granted more or less access than this connection asks for, so it wasn't kept. Connect it again, granting exactly what it asks.",
   "connection.own_auth_required":
     "Composio holds no sign-in app for this one: connecting it needs your organization's own, which Grasp can't take yet.",
 });

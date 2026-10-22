@@ -407,6 +407,8 @@ const supportUrl = "https://support.joingrasp.com";
 
 /** The pages the onboarding links to, by what is connected on a step. */
 const connectionPages = {
+  /** The Microsoft or Google sign-in that tells who works where. */
+  directory: "connections/sign-in",
   /** A staff list shared as a file. */
   staffList: "connections/staff-list",
   /** The places where documents live: SharePoint, Google Drive, Notion and the like. */

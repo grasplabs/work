@@ -957,6 +957,10 @@ msgstr "{shared, plural, one {# document was shared or found, and read.} other {
 msgid "{shown, plural, one {# integration shown} other {# integrations shown}}"
 msgstr "{shown, plural, one {# integration shown} other {# integrations shown}}"
 
+#: src/onboarding/setup-steps.tsx
+msgid "{signIn} is connected. I can see {people} people in {teams} teams."
+msgstr "{signIn} is connected. I can see {people} people in {teams} teams."
+
 #: src/brain/brain.ts
 msgid "{sources, plural, one {Time-consuming work that could be automated, raised in # source by {teams}.} other {Time-consuming work that could be automated, raised in # sources by {teams}.}}"
 msgstr "{sources, plural, one {Time-consuming work that could be automated, raised in # source by {teams}.} other {Time-consuming work that could be automated, raised in # sources by {teams}.}}"
@@ -3240,6 +3244,10 @@ msgstr "Context"
 msgid "Continue"
 msgstr "Continue"
 
+#: src/onboarding/setup-steps.tsx
+msgid "Continue with {signIn}"
+msgstr "Continue with {signIn}"
+
 #: src/engines/resource-bindings.tsx
 msgid "Contract"
 msgstr "Contract"
@@ -4834,8 +4842,20 @@ msgid "I could not keep it. Try again in a moment."
 msgstr "I could not keep it. Try again in a moment."
 
 #: src/onboarding/setup-steps.tsx
+msgid "I could not reach {signIn} just now. Try again in a moment, or use a staff list."
+msgstr "I could not reach {signIn} just now. Try again in a moment, or use a staff list."
+
+#: src/onboarding/setup-steps.tsx
+msgid "I could not read {signIn} just now. Try again in a moment, or use a staff list."
+msgstr "I could not read {signIn} just now. Try again in a moment, or use a staff list."
+
+#: src/onboarding/setup-steps.tsx
 msgid "I could not read this file. A CSV or an Excel file works."
 msgstr "I could not read this file. A CSV or an Excel file works."
+
+#: src/onboarding/setup-steps.tsx
+msgid "I could not read who works where from {signIn}. Connect it again with an administrator’s account."
+msgstr "I could not read who works where from {signIn}. Connect it again with an administrator’s account."
 
 #: src/onboarding/setup-steps.tsx
 msgid "I couldn’t read this one"
@@ -4844,6 +4864,10 @@ msgstr "I couldn’t read this one"
 #: src/onboarding/about-story.tsx
 msgid "I do every interview myself. Here’s what that sounds like."
 msgstr "I do every interview myself. Here’s what that sounds like."
+
+#: src/onboarding/setup-steps.tsx
+msgid "I found nobody in {signIn}."
+msgstr "I found nobody in {signIn}."
 
 #: src/onboarding/setup-steps.tsx
 msgid "I sent it"
@@ -5764,6 +5788,10 @@ msgstr "More about the staff list"
 msgid "More about these connections"
 msgstr "More about these connections"
 
+#: src/onboarding/setup-steps.tsx
+msgid "More about this connection"
+msgstr "More about this connection"
+
 #: src/chat/chat-list.tsx
 msgid "More for {title}"
 msgstr "More for {title}"
@@ -6000,6 +6028,10 @@ msgstr "Next week"
 msgid "No"
 msgstr "No"
 
+#: src/onboarding/setup-steps.tsx
+msgid "No {onlySignIn}? A staff list works too."
+msgstr "No {onlySignIn}? A staff list works too."
+
 #: src/landscape/landscape.ts
 #: src/policies/policy.ts
 msgid "No AI"
@@ -6172,6 +6204,10 @@ msgstr "No matches"
 #: src/routes/_shell.knowledge.index.tsx
 msgid "No memory files are written yet."
 msgstr "No memory files are written yet."
+
+#: src/onboarding/setup-steps.tsx
+msgid "No Microsoft or Google? A staff list works too."
+msgstr "No Microsoft or Google? A staff list works too."
 
 #: src/chat/chat-dock.tsx
 #: src/chat/composer.tsx
@@ -9792,6 +9828,14 @@ msgstr "The person the run acts for says what happened on their dashboard"
 msgid "The platform is open to everyone at the company: it was never closed for the onboarding."
 msgstr "The platform is open to everyone at the company: it was never closed for the onboarding."
 
+#: src/onboarding/setup-steps.tsx
+msgid "The quickest way is to connect your {signIn} sign-in. I’ll only see names, teams and roles. Your email, chats and calendars stay closed."
+msgstr "The quickest way is to connect your {signIn} sign-in. I’ll only see names, teams and roles. Your email, chats and calendars stay closed."
+
+#: src/onboarding/setup-steps.tsx
+msgid "The quickest way is to connect your Microsoft or Google sign-in. I’ll only see names, teams and roles. Your email, chats and calendars stay closed."
+msgstr "The quickest way is to connect your Microsoft or Google sign-in. I’ll only see names, teams and roles. Your email, chats and calendars stay closed."
+
 #: src/workflows/chosen-at-run-time.tsx
 msgid "the reminder"
 msgstr "the reminder"
@@ -9923,6 +9967,10 @@ msgstr "Then {task}"
 #: src/onboarding/about-story.tsx
 msgid "Then I talk to your team myself: short conversations, over two weeks. That’s where I learn the most."
 msgstr "Then I talk to your team myself: short conversations, over two weeks. That’s where I learn the most."
+
+#: src/onboarding/setup-steps.tsx
+msgid "There are more people in {signIn} than I can take: up to {peopleMost} people in up to {teamsMost} teams. A staff list of those taking part works."
+msgstr "There are more people in {signIn} than I can take: up to {peopleMost} people in up to {teamsMost} teams. A staff list of those taking part works."
 
 #: src/routes/_shell.knowledge.index.tsx
 msgid "There are no collections you can read yet."
@@ -10543,6 +10591,10 @@ msgid "Usage unknown"
 msgstr "Usage unknown"
 
 #: src/onboarding/setup-steps.tsx
+msgid "Use a staff list instead"
+msgstr "Use a staff list instead"
+
+#: src/onboarding/setup-steps.tsx
 msgid "Use another list"
 msgstr "Use another list"
 
@@ -10738,6 +10790,10 @@ msgstr "Waiting"
 msgctxt "dashboard: what waits on you, settled on its own page"
 msgid "Waiting elsewhere"
 msgstr "Waiting elsewhere"
+
+#: src/onboarding/setup-steps.tsx
+msgid "Waiting for {signIn}"
+msgstr "Waiting for {signIn}"
 
 #: src/routes/_shell.workflows.index.tsx
 #: src/workflows/history-view.tsx

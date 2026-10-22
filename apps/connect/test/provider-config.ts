@@ -16,6 +16,15 @@ export const clients = {
     id: "grasp-landscape-entra",
     secret: "entra-landscape-secret",
   },
+  /** The directory's own Entra app and Google client. */
+  microsoftDirectory: {
+    id: "grasp-directory-entra",
+    secret: "entra-directory-secret",
+  },
+  googleDirectory: {
+    id: "grasp-directory-google",
+    secret: "google-directory-secret",
+  },
 } as const;
 
 /** Grasp's key for Composio, as set on connect in the tests. */

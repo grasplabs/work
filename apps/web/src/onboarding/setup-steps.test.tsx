@@ -38,6 +38,8 @@ const listening = (paused: boolean): string => {
       openedAt: null,
       staff: null,
     },
+    directory: null,
+    suites: [],
   };
   return renderToStaticMarkup(
     <I18nProvider i18n={i18n}>

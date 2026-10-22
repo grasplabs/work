@@ -37,6 +37,10 @@ import type {
   UnknownOutcome,
   UnknownOutcomeListing,
 } from "@grasp-os/shared/connect";
+import type {
+  DirectoryConnection,
+  DirectoryRead,
+} from "@grasp-os/shared/directory";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import type { ErrorPayload } from "@grasp-os/shared/errors";
 import type {
@@ -64,6 +68,7 @@ import {
 import { connectionOwners } from "./connections.ts";
 import { connectorContract } from "./contracts.ts";
 import { requireDecision } from "./decisions.ts";
+import { directoryConnections, readDirectory } from "./directory.ts";
 import {
   ackConnectorEvents,
   syncEventSources,
@@ -396,6 +401,16 @@ export default class Connect
 
   async readLandscape(request: unknown): Promise<LandscapeRead> {
     return await readLandscape(this.env, request);
+  }
+
+  // The directory (src/directory.ts): for the onboarding, in core, only.
+
+  async directoryConnections(): Promise<DirectoryConnection[]> {
+    return await directoryConnections(this.env);
+  }
+
+  async readDirectory(request: unknown): Promise<DirectoryRead> {
+    return await readDirectory(this.env, request);
   }
 
   // Generated connector contracts (src/contracts.ts): what an App's
