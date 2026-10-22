@@ -1,5 +1,5 @@
 import { Badge } from "@grasp-os/ui/components/badge";
-import { buttonVariants } from "@grasp-os/ui/components/button";
+import { Button, buttonVariants } from "@grasp-os/ui/components/button";
 import { Progress } from "@grasp-os/ui/components/progress";
 import {
   Table,
@@ -10,7 +10,7 @@ import {
   TableRow,
 } from "@grasp-os/ui/components/table";
 import { cn } from "@grasp-os/ui/lib/utils";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
 import { ChevronRightIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
@@ -37,7 +37,10 @@ import { formatDate, formatPercent, whole } from "../../admin/words.ts";
 import { fetchClientGrid, fetchGridLive } from "../../clients/functions.ts";
 import type { GridRow, LiveStatus } from "../../clients/grid.ts";
 import type { ReleaseSummary } from "../../releases/queries.ts";
+import { approveRolloutFn } from "../../rollout/functions.ts";
 import type { RolloutView } from "../../rollout/queries.ts";
+import { useRolloutAction } from "../../rollout/use-action.ts";
+import { thenRefresh } from "../../use-action.ts";
 
 const usd = new Intl.NumberFormat("en", {
   style: "currency",
@@ -78,6 +81,49 @@ const rolloutBadgeWords = (
     : `Waits for ring ${next}`;
 };
 
+/**
+ * Approving ring `next` of a waiting rollout: the console's own approval
+ * (`approveRolloutFn`), as the rollout's page has it, staff-only and
+ * audited as `rollout.approve`. The page is read again either way, and a
+ * refusal (another staff member approved first, say) is said under it.
+ */
+const ApproveRing = ({
+  rolloutId,
+  next,
+}: {
+  rolloutId: string;
+  next: number;
+}) => {
+  const router = useRouter();
+  const { busy, failure, run } = useRolloutAction();
+  return (
+    <div className="flex flex-col items-end gap-1">
+      <Button
+        disabled={busy}
+        onClick={() => {
+          void run(
+            async () =>
+              await thenRefresh(
+                async () => await approveRolloutFn({ data: { rolloutId } }),
+                async () => {
+                  await router.invalidate({ sync: true });
+                }
+              )
+          );
+        }}
+        size="sm"
+      >
+        {`Approve ring ${next}`}
+      </Button>
+      {failure === null ? null : (
+        <p className="text-destructive text-sm" role="alert">
+          {failure}
+        </p>
+      )}
+    </div>
+  );
+};
+
 /** The rollout going out, ring by ring, and each company in it. */
 const GoingOut = ({
   rollout,
@@ -101,14 +147,20 @@ const GoingOut = ({
   const what =
     rollout.kind === "secrets" ? "new secrets" : (rollout.releaseId ?? "");
   const status = rolloutBadgeWords(rollout, next);
+  // A paused run takes no approval until staff resume it (its own page).
+  const approvable = next !== null && rollout.run !== "paused";
   return (
     <Panel
       action={
-        <Badge
-          variant={rollout.status === "failed" ? "destructive" : "secondary"}
-        >
-          {status}
-        </Badge>
+        approvable ? (
+          <ApproveRing next={next} rolloutId={rollout.id} />
+        ) : (
+          <Badge
+            variant={rollout.status === "failed" ? "destructive" : "secondary"}
+          >
+            {status}
+          </Badge>
+        )
       }
       description={`Started by ${rollout.startedBy} on ${dayOf(rollout.createdAt)}.`}
       title={`Going out now: ${what}`}
@@ -382,8 +434,8 @@ const readLive = async (): Promise<Record<string, LiveStatus> | "failed"> => {
  * the prototype (grasplabs/prototype `routes/admin/platform.tsx`): the
  * release going out now, ring by ring, with who has it and who waits;
  * which company runs which release; and every company in one table, the
- * ones that need a look first, each opening its Setup. Read only for now:
- * approving the next ring is the rollout page's.
+ * ones that need a look first, each opening its Setup. Approving the next
+ * ring is the one thing done here.
  */
 const PlatformPage = () => {
   const { rows, platform } = Route.useLoaderData();

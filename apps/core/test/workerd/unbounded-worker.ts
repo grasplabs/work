@@ -1,15 +1,9 @@
-import {
-  appIdSchema,
-  chatIdSchema,
-  workflowIdSchema,
-  workspaceIdSchema,
-} from "@grasp-os/shared/ids";
+import { appIdSchema, workflowIdSchema } from "@grasp-os/shared/ids";
 
 import { loadServer } from "../../src/app.ts";
 import type { Acting } from "../../src/auth/identity.ts";
 import { buildDependencies } from "../../src/packages/build.ts";
 import { resolveDependencies } from "../../src/packages/resolve.ts";
-import { loadPreview } from "../../src/preview.ts";
 import { buildScreens } from "../../src/screens.ts";
 import {
   declaredParams,
@@ -105,25 +99,6 @@ export default {
               workflowIdSchema.parse("intake"),
               {},
               {}
-            )
-        )
-      );
-    }
-    if (pathname === "/preview") {
-      return new Response(
-        await refusal(
-          async () =>
-            await loadPreview(
-              env,
-              {
-                app: appIdSchema.parse(crypto.randomUUID()),
-                preview: {
-                  workspaceId: workspaceIdSchema.parse(crypto.randomUUID()),
-                  chatId: chatIdSchema.parse(crypto.randomUUID()),
-                  revision: 1,
-                },
-              },
-              { base: 1, changes: {}, revision: 1 }
             )
         )
       );

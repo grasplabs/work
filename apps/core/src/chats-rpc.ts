@@ -66,8 +66,6 @@ import { frameAccess, stageFrame } from "./screen-frame.ts";
 import {
   admitPreviewCall,
   admitWindow,
-  argumentsFor,
-  stillHasRole,
   windowCharger,
   withinAnswer,
 } from "./screens-rpc.ts";
@@ -692,52 +690,6 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
       artifact: built.artifact,
       frameToken: await frameAccess(this.#env, built.artifact),
     };
-  }
-
-  /**
-   * Calls a method of the draft's server code in its preview, with plain
-   * data and the screen's callbacks, as a screen's call does
-   * (screens-rpc.ts); each push through a callback checks again, with each
-   * reading of the session, what the call itself needs: the session and
-   * a builder's role in the App. Once either is gone, the callback is
-   * released and forwards nothing more.
-   */
-  async previewCall(
-    chatId: string,
-    app: string,
-    revision: number,
-    method: string,
-    args: unknown[]
-  ): Promise<unknown> {
-    return await withPerson(this.#check, async (by) => {
-      const { id } = await appFor(this.#env, by, app, "builder");
-      await admitPreviewCall(this.#env, by, id);
-      if (typeof method !== "string" || !Array.isArray(args)) {
-        throw screenErrors.create("screen.invalid");
-      }
-      const { passed, callbacks } = argumentsFor(
-        args,
-        stillHasRole(this.#env, this.#check, id, "builder")
-      );
-      try {
-        return withinAnswer(
-          await this.#chatsOf(by.userId).previewCall(
-            chatIdOf(chatId),
-            by.userId,
-            id,
-            revision,
-            method,
-            passed
-          )
-        );
-      } catch (error) {
-        // A failed call keeps no callback.
-        for (const callback of callbacks) {
-          callback[Symbol.dispose]();
-        }
-        throw error;
-      }
-    });
   }
 
   /**

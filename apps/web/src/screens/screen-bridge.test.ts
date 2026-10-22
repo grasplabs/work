@@ -613,7 +613,7 @@ describe("the page's bridge to a screen", () => {
       deepest: "started",
       tooDeep: "refused",
       // Whole, every level of it: an argument passed straight may be one
-      // level deeper than values nest (screen-limits.ts, `rpcArgumentDepth`).
+      // level deeper than values nest (`rpcArgumentDepth`).
       reached: [{ workflow: "notes", input: nested(valueDepth + 1) }],
       broken: 1,
     });
