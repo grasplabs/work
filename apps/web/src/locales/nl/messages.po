@@ -209,6 +209,10 @@ msgstr "{binding}: {actions} op {object}, wacht op een beheerder"
 msgid "{binding}: {actions} on {object}, waiting for an admin (asked by the agent)"
 msgstr "{binding}: {actions} op {object}, wacht op een beheerder (gevraagd door de agent)"
 
+#: src/routes/_shell.settings.security.tsx
+msgid "{browser} on {system}"
+msgstr "{browser} op {system}"
+
 #: src/brain/brain.ts
 msgid "{category} by {vendor}"
 msgstr "{category} van {vendor}"
@@ -380,6 +384,10 @@ msgstr "{daily} per dag"
 #: src/dashboard/signals.tsx
 msgid "{days, plural, one {# day} other {# days}}"
 msgstr "{days, plural, one {# dag} other {# dagen}}"
+
+#: src/routes/_shell.settings.security.tsx
+msgid "{devices, plural, one {Signed in on # device. Sign out any you do not recognise.} other {Signed in on # devices. Sign out any you do not recognise.}}"
+msgstr "{devices, plural, one {Ingelogd op # apparaat. Log elk apparaat uit dat je niet herkent.} other {Ingelogd op # apparaten. Log elk apparaat uit dat je niet herkent.}}"
 
 #: src/dashboard/signals.tsx
 msgid "{doc} in {where} is {late, plural, one {# day} other {# days}} past its review date."
@@ -1891,8 +1899,13 @@ msgid "Another version of this domain was made current since this list was read.
 msgstr "Sinds deze lijst is gelezen, is een andere versie van dit domein actueel gemaakt. De lijst toont die nu: beoordeel die versie en keur daarna opnieuw goed."
 
 #: src/brain/brain.ts
+#: src/chat/brain-questions.tsx
 msgid "Answer"
 msgstr "Antwoord"
+
+#: src/inbox/item-detail.tsx
+msgid "Answer in the brain"
+msgstr "Beantwoorden in het brein"
 
 #. Something that has not happened yet, on a timeline
 #: src/brain/brain.ts
@@ -2011,6 +2024,10 @@ msgstr "Applicaties in gebruik op apparaten"
 #: src/brain/brain-source-contents.tsx
 msgid "Applications signed in to"
 msgstr "Applicaties waarop wordt ingelogd"
+
+#: src/onboarding/review-parts.tsx
+msgid "Apply it if the sender’s domain is {domain}."
+msgstr "Laat hem gelden als het domein van de afzender {domain} is."
 
 #: src/engines/screen-approval.tsx
 msgid "Approval"
@@ -2143,6 +2160,10 @@ msgstr "Artikel"
 msgid "as {binding}"
 msgstr "als {binding}"
 
+#: src/onboarding/review-parts.tsx
+msgid "As its action, set the spam confidence level (SCL) to “Bypass spam filtering”, then save it."
+msgstr "Stel als actie het spamvertrouwensniveau (SCL) in op ‘Spamfilters omzeilen’ en sla de regel op."
+
 #: src/dashboard/report.ts
 msgid "As of {date}."
 msgstr "Stand van {date}."
@@ -2154,6 +2175,11 @@ msgstr "Zoals het bedrijf ze noemde, tot de personeelslijst binnen is."
 #: src/routes/_shell.onboarding.stephen.tsx
 msgid "As the kickoff suggests"
 msgstr "Zoals de kick-off voorstelt"
+
+#. placeholder {0}: gap.owner
+#: src/chat/brain-questions.tsx
+msgid "Ask {0}"
+msgstr "Vraag het aan {0}"
 
 #: src/chat/thread.tsx
 msgid "Ask again"
@@ -2580,6 +2606,7 @@ msgstr "Kwam naar voren in {source}"
 msgid "Can {verbs} company data"
 msgstr "Kan bedrijfsdata {verbs}"
 
+#: src/chat/brain-questions.tsx
 #: src/chat/project-dialog.tsx
 #: src/decision-confirmation.tsx
 #: src/engines/package-approvals.tsx
@@ -2650,6 +2677,11 @@ msgstr "wijzigen"
 #: src/routes/_shell.settings.outcomes.tsx
 msgid "Change"
 msgstr "Wijziging"
+
+#: src/onboarding/review-parts.tsx
+msgctxt "change how it was settled"
+msgid "Change"
+msgstr "Wijzigen"
 
 #: src/onboarding/send-plan-form.tsx
 msgctxt "change which teams"
@@ -3014,6 +3046,10 @@ msgstr "Compact"
 msgid "Company"
 msgstr "Bedrijf"
 
+#: src/activity/pending.tsx
+msgid "Company Brain, read only. This can read company Brain evidence and its open questions, from the collections it was granted and only what the person it works for may read too. It can never write to the Brain. Every read is recorded"
+msgstr "Company Brain, alleen lezen. Het kan bewijs en open vragen van het Company Brain lezen, uit de collecties die het kreeg en alleen wat de persoon voor wie het werkt ook mag lezen. Het kan nooit naar het Brain schrijven. Elke leesactie wordt vastgelegd"
+
 #: src/chat/builds.tsx
 msgid "Compared with version {current}, which runs now."
 msgstr "Vergeleken met versie {current}, die nu draait."
@@ -3259,10 +3295,12 @@ msgid "Copenhagen"
 msgstr "Kopenhagen"
 
 #: src/chat/thread.tsx
+#: src/onboarding/review-parts.tsx
 #: src/onboarding/setup-steps.tsx
 msgid "Copied"
 msgstr "Gekopieerd"
 
+#: src/onboarding/review-parts.tsx
 #: src/onboarding/setup-steps.tsx
 msgid "Copy"
 msgstr "Kopiëren"
@@ -3580,6 +3618,10 @@ msgstr "Ontwikkeltools"
 #: src/settings/pulse-people.tsx
 msgid "Device"
 msgstr "Apparaat"
+
+#: src/routes/_shell.settings.security.tsx
+msgid "Devices"
+msgstr "Apparaten"
 
 #: src/workflows/definition-editor.tsx
 msgid "Diagram"
@@ -4361,6 +4403,16 @@ msgstr "Volgt uit een andere gebeurtenis"
 msgid "Follows from: {parentTitle}"
 msgstr "Volgt uit: {parentTitle}"
 
+#. placeholder {0}: gap.owner
+#: src/chat/brain-questions.tsx
+msgid "For {0}"
+msgstr "Voor {0}"
+
+#. placeholder {0}: gap.owner
+#: src/chat/brain-questions.tsx
+msgid "For {0}, who was asked"
+msgstr "Voor {0}, die is gevraagd"
+
 #: src/inbox/item-detail.tsx
 msgid "For {person}"
 msgstr "Voor {person}"
@@ -4889,6 +4941,14 @@ msgstr "In Beleid"
 msgid "In the brain"
 msgstr "In Brain"
 
+#: src/onboarding/review-parts.tsx
+msgid "In the Exchange admin center, go to Mail flow, then Rules, and add a rule."
+msgstr "Ga in het Exchange-beheercentrum naar Berichtenstroom en dan Regels, en voeg een regel toe."
+
+#: src/onboarding/review-parts.tsx
+msgid "In the Google Admin console, go to Apps, then Google Workspace, then Gmail, then Spam, phishing and malware."
+msgstr "Ga in de Google Beheerdersconsole naar Apps, dan Google Workspace, dan Gmail en dan Spam, phishing en malware."
+
 #: src/chat/builds.tsx
 msgid "In the proposer's words"
 msgstr "In de woorden van de indiener"
@@ -5139,6 +5199,10 @@ msgstr "Er is op {when} {amount} voor in rekening gebracht."
 msgid "It was released on {when}, charging nothing."
 msgstr "Het is op {when} vrijgegeven, zonder kosten."
 
+#: src/onboarding/review-parts.tsx
+msgid "It’s done"
+msgstr "Gedaan"
+
 #: src/chat/cited-note.tsx
 msgid "It's gone, or you can't read it."
 msgstr "Ze bestaat niet meer, of je mag ze niet lezen."
@@ -5259,6 +5323,10 @@ msgstr "Naar het nieuwste bericht"
 msgid "Just for you"
 msgstr "Alleen voor jou"
 
+#: src/onboarding/review-parts.tsx
+msgid "Keep “Require sender authentication” on, then save."
+msgstr "Laat ‘Afzenderverificatie vereisen’ aan staan en sla op."
+
 #: src/workflows/definition-editor.tsx
 msgid "Keep my text"
 msgstr "Mijn tekst houden"
@@ -5274,6 +5342,10 @@ msgstr "Behoud de regels die zeggen wat je beleid bedoelt, pas ze aan waar nodig
 #: src/dashboard/signals.tsx
 msgid "Keeps failing"
 msgstr "Mislukt steeds"
+
+#: src/activity/audit-words.ts
+msgid "Kept something the chat can no longer read from the model"
+msgstr "Iets wat de chat niet meer kan lezen, voor het model weggehouden"
 
 #: src/landscape/landscape.ts
 msgid "Keys, tokens, secrets, credentials or runbooks that could grant access."
@@ -5445,6 +5517,10 @@ msgstr "Laat een AI-app zoals Claude of ChatGPT met Grasp werken. Die leest wat 
 #: src/onboarding/document-drop.tsx
 msgid "Let go to add them"
 msgstr "Laat los om ze toe te voegen"
+
+#: src/onboarding/review-parts.tsx
+msgid "Let Grasp’s mail through"
+msgstr "Laat de mails van Grasp door"
 
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Let the interviews run again"
@@ -7022,6 +7098,7 @@ msgctxt "inbox item kind"
 msgid "Open question"
 msgstr "Open vraag"
 
+#: src/chat/brain-questions.tsx
 #: src/routes/_shell.brain.$noteId.tsx
 msgid "Open questions"
 msgstr "Open vragen"
@@ -8492,6 +8569,10 @@ msgctxt "send the question"
 msgid "Send"
 msgstr "Versturen"
 
+#: src/chat/brain-questions.tsx
+msgid "Send answer"
+msgstr "Antwoord versturen"
+
 #: src/knowledge/collection-markers.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 #: src/workflows/resource-params.tsx
@@ -8559,6 +8640,10 @@ msgstr "Ingesteld. Typ een nieuwe waarde om deze te vervangen."
 #: src/routes/_shell.settings.tsx
 msgid "Settings"
 msgstr "Instellingen"
+
+#: src/onboarding/review-parts.tsx
+msgid "Settled: {choice}"
+msgstr "Geregeld: {choice}"
 
 #: src/dashboard/standard-widgets.tsx
 msgid "Several workflows run with AI, across most of its work by hand."
@@ -8715,8 +8800,13 @@ msgid "Sign in with your organization's account."
 msgstr "Log in met het account van je organisatie."
 
 #: src/frame/person-menu.tsx
+#: src/routes/_shell.settings.security.tsx
 msgid "Sign out"
 msgstr "Uitloggen"
+
+#: src/routes/_shell.settings.security.tsx
+msgid "Sign out {device}, signed in {time}"
+msgstr "{device} uitloggen, ingelogd op {time}"
 
 #: src/routes/_shell.settings.members.tsx
 msgid "Sign out everywhere"
@@ -8752,6 +8842,10 @@ msgstr "Signalen per soort"
 msgctxt "state of a data processing agreement"
 msgid "Signed"
 msgstr "Getekend"
+
+#: src/routes/_shell.settings.security.tsx
+msgid "Signed in {time}"
+msgstr "Ingelogd op {time}"
 
 #: src/activity/audit-words.ts
 msgid "Signed in to a connection again"
@@ -10049,6 +10143,10 @@ msgstr "Deze beslissing is aan iemand anders."
 msgid "This deployment allows no model."
 msgstr "Deze installatie staat geen model toe."
 
+#: src/routes/_shell.settings.security.tsx
+msgid "This device"
+msgstr "Dit apparaat"
+
 #: src/knowledge/document.tsx
 msgid "This document changed since you opened it. Version {newerVersion} is below; your text is kept. Start again from it, or replace it with your text."
 msgstr "Dit document is gewijzigd sinds je het opende. Versie {newerVersion} staat hieronder; je tekst blijft bewaard. Begin opnieuw vanaf die versie, of vervang die door jouw tekst."
@@ -10404,6 +10502,10 @@ msgstr "Zonder categorie"
 msgid "Under 5"
 msgstr "Onder de 5"
 
+#: src/onboarding/review-parts.tsx
+msgid "Under Spam, bypass spam filters for an approved senders list, and add {domain} to it."
+msgstr "Laat onder Spam de spamfilters omzeilen voor een lijst met goedgekeurde afzenders, en voeg {domain} eraan toe."
+
 #: src/dashboard/report.ts
 msgctxt "programme stage"
 msgid "Under way"
@@ -10461,6 +10563,10 @@ msgstr "Onbekend"
 msgctxt "whether a tool has AI"
 msgid "Unknown"
 msgstr "Onbekend"
+
+#: src/routes/_shell.settings.security.tsx
+msgid "Unknown device"
+msgstr "Onbekend apparaat"
 
 #: src/routes/_shell.settings.outcomes.tsx
 #: src/routes/_shell.settings.tsx
@@ -11577,6 +11683,10 @@ msgstr "Jij laat me zien wie wie is, waar de documenten staan en welke tools men
 msgid "You sign in on {app}’s own page."
 msgstr "Je meldt je aan op de eigen pagina van {app}."
 
+#: src/inbox/items.ts
+msgid "You were asked this as the {owner}. Answer it in the brain: everyone in the company reads the answer, with your name."
+msgstr "Dit is je gevraagd als {owner}. Beantwoord het in het brein: iedereen in het bedrijf leest het antwoord, met je naam."
+
 #: src/routes/guest.tsx
 msgid "You:"
 msgstr "Jij:"
@@ -11592,6 +11702,10 @@ msgstr "Je bent nog ingelogd. Probeer het zo opnieuw."
 #: src/routes/_shell.settings.tsx
 msgid "Your account"
 msgstr "Je account"
+
+#: src/chat/brain-questions.tsx
+msgid "Your answer"
+msgstr "Je antwoord"
 
 #: src/decision-confirmation.tsx
 msgctxt "the answer a person gives a decision"
@@ -11645,6 +11759,10 @@ msgstr "Het account van je organisatie"
 #: src/onboarding/about-story.tsx
 msgid "Your people, documents and tools first. Then two weeks of short conversations with your team. At {threshold}%, your team can start."
 msgstr "Eerst je mensen, documenten en tools. Dan twee weken korte gesprekken met je team. Bij {threshold}% kan je team beginnen."
+
+#: src/onboarding/review-parts.tsx
+msgid "Your people’s interview links come by email from Grasp’s sending domain. Allow it in your mail filter before they go out, so they don’t land in spam."
+msgstr "De interviewlinks van je mensen komen per mail van het verzenddomein van Grasp. Sta het toe in je mailfilter voordat ze verstuurd worden, zodat ze niet in de spam belanden."
 
 #: src/onboarding/setup-steps.tsx
 msgid "Your platform is open. We’ll walk you through it."

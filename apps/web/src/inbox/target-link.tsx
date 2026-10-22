@@ -5,7 +5,7 @@ import type { Target } from "./items.ts";
 
 // A link to what an inbox item is about, as the prototype's
 // (`components/target-link.tsx`): here a workflow, an engine, an
-// integration's account, or a chat.
+// integration's account, a chat, or the brain.
 
 export const TargetLink = ({
   destination,
@@ -38,6 +38,9 @@ export const TargetLink = ({
         {...props}
       />
     );
+  }
+  if (destination.kind === "brain") {
+    return <Link to="/brain" {...props} />;
   }
   return <Link search={{ chat: destination.chat }} to="/" {...props} />;
 };
