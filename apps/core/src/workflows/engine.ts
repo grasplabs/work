@@ -164,10 +164,10 @@ const pinSchema = z.union([
     .transform(([, workflow, manifest]): RunPin => ({
       type: "candidate",
       workflow,
-        manifest,
-      })),
-    z
-      .tuple([
+      manifest,
+    })),
+  z
+    .tuple([
       z.literal("fixture"),
       workflowResourceIdSchema,
       z.int().positive(),
