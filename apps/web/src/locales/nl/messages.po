@@ -1524,6 +1524,10 @@ msgstr "Een widget toevoegen"
 msgid "Add a word"
 msgstr "Een woord toevoegen"
 
+#: src/chat/model-picker.tsx
+msgid "Add another provider"
+msgstr "Nog een provider toevoegen"
+
 #: src/chat/project-dialog.tsx
 msgid "Add documents"
 msgstr "Documenten toevoegen"
@@ -3492,6 +3496,11 @@ msgctxt "row height"
 msgid "Default"
 msgstr "Standaard"
 
+#: src/chat/model-picker.tsx
+msgctxt "the default model"
+msgid "Default"
+msgstr "Standaard"
+
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Default: {fallback}"
 msgstr "Standaard: {fallback}"
@@ -4149,7 +4158,7 @@ msgstr "Exports"
 msgid "Exports of {domain}: {covered}"
 msgstr "Exports van {domain}: {covered}"
 
-#: src/chat/composer.tsx
+#: src/chat/model-picker.tsx
 msgctxt "thinking effort"
 msgid "Extra high"
 msgstr "Extra hoog"
@@ -4750,7 +4759,7 @@ msgctxt "severity of a finding"
 msgid "High"
 msgstr "Hoog"
 
-#: src/chat/composer.tsx
+#: src/chat/model-picker.tsx
 msgctxt "thinking effort"
 msgid "High"
 msgstr "Hoog"
@@ -4783,10 +4792,6 @@ msgstr "Gehost buiten {regions}"
 #: src/landscape/app-cells.tsx
 msgid "How Grasp knows about {appName}"
 msgstr "Hoe Grasp weet van {appName}"
-
-#: src/chat/composer.tsx
-msgid "How hard it thinks"
-msgstr "Hoe grondig het nadenkt"
 
 #: src/onboarding/about-story.tsx
 msgid "How long does one of those take you, Tim?"
@@ -5569,7 +5574,7 @@ msgctxt "severity of a finding"
 msgid "Low"
 msgstr "Laag"
 
-#: src/chat/composer.tsx
+#: src/chat/model-picker.tsx
 msgctxt "thinking effort"
 msgid "Low"
 msgstr "Laag"
@@ -5645,7 +5650,7 @@ msgctxt "kind of app"
 msgid "Marketing"
 msgstr "Marketing"
 
-#: src/chat/composer.tsx
+#: src/chat/model-picker.tsx
 msgctxt "thinking effort"
 msgid "Max"
 msgstr "Maximaal"
@@ -5663,7 +5668,7 @@ msgstr "Kan iets buiten Grasp wijzigen"
 msgid "Measured return"
 msgstr "Gemeten opbrengst"
 
-#: src/chat/composer.tsx
+#: src/chat/model-picker.tsx
 msgctxt "thinking effort"
 msgid "Medium"
 msgstr "Gemiddeld"
@@ -5709,6 +5714,7 @@ msgctxt "state of a data processing agreement"
 msgid "Missing"
 msgstr "Ontbreekt"
 
+#: src/chat/model-picker.tsx
 #: src/engines/resource-bindings.tsx
 #: src/routes/_shell.settings.models.tsx
 msgid "Model"
@@ -5726,11 +5732,11 @@ msgstr "Modelkosten"
 msgid "Model training"
 msgstr "Modeltraining"
 
-#: src/chat/composer.tsx
+#: src/chat/model-picker.tsx
 msgid "Model: {name}, thinking {effort, select, low {low} medium {medium} high {high} xhigh {extra high} other {max}}. Change model or thinking"
 msgstr "Model: {name}, denkniveau {effort, select, low {laag} medium {gemiddeld} high {hoog} xhigh {extra hoog} other {maximaal}}. Model of denkniveau wijzigen"
 
-#: src/chat/composer.tsx
+#: src/chat/model-picker.tsx
 msgid "Model: {name}. Change model"
 msgstr "Model: {name}. Model wijzigen"
 
@@ -5742,10 +5748,6 @@ msgstr "Modellen"
 #: src/routes/_shell.settings.models.tsx
 msgid "Models aren't set up for this deployment yet, so no model call can be made. Grasp sets them up."
 msgstr "Er zijn nog geen modellen ingesteld voor deze omgeving, dus er kan geen model worden aangeroepen. Grasp stelt ze in."
-
-#: src/chat/composer.tsx
-msgid "Models for your organization"
-msgstr "Modellen voor je organisatie"
 
 #: src/dashboard/dependency-requests.tsx
 msgctxt "severity of a finding"
@@ -9529,10 +9531,6 @@ msgstr "De dag waarop de andere teams hun links krijgen"
 msgid "the deadline"
 msgstr "de deadline"
 
-#: src/chat/composer.tsx
-msgid "The default, {each}"
-msgstr "Standaard, {each}"
-
 #: src/workflows/test-run.tsx
 msgid "The details of this run were removed when its retention ended."
 msgstr "De details van deze run zijn verwijderd toen de bewaartermijn afliep."
@@ -9977,6 +9975,7 @@ msgstr "Wat ze ons vertelden"
 msgid "They use"
 msgstr "Ze gebruiken"
 
+#: src/chat/model-picker.tsx
 #: src/chat/thread.tsx
 msgid "Thinking"
 msgstr "Denkt na"
