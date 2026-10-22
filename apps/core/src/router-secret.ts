@@ -42,7 +42,9 @@ const matchesSecret = async (
  * map changed (the router's 30 s cache plus KV's propagation, about 60 s).
  * Optional, so it isn't in `secrets.required`.
  */
-const acceptedSecrets = (env: Env): string[] =>
+export const acceptedSecrets = (
+  env: Pick<Env, "ROUTER_SECRET" | "ROUTER_SECRET_PREVIOUS">
+): string[] =>
   [env.ROUTER_SECRET, env.ROUTER_SECRET_PREVIOUS].filter(
     (secret): secret is string => typeof secret === "string" && secret !== ""
   );

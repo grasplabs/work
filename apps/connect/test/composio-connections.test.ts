@@ -1,6 +1,7 @@
 import { composioConsentText } from "@grasp-os/shared/connect";
 import type {
   ConnectionPerson,
+  OrganizationConnection,
   StartToolkitConnection,
 } from "@grasp-os/shared/connect";
 import { sha256Hex } from "@grasp-os/shared/encoding";
@@ -842,6 +843,56 @@ describe("a Composio connection", () => {
       failed: true,
       held: { authConfigs: 1, accounts: 1, servers: 1 },
       calls: "ok",
+    });
+  });
+
+  it("tells Grasp's staff whether Composio says its account still works, and nothing Composio knows it by", async () => {
+    const connectionId = await connectHubSpot(someone("admin"));
+    const held = await stored(connectionId);
+    const accountId = held?.accountId ?? "";
+    /** What staff read of it now, through `connect`. */
+    const read = async (
+      list: () => Promise<OrganizationConnection[]> = async () =>
+        await exports.default.organizationConnections()
+    ) => {
+      const listed = await list();
+      return {
+        text: JSON.stringify(listed),
+        composio: listed.find(({ id }) => id === connectionId)?.composio,
+      };
+    };
+    const active = await read();
+    const account = composio.state.holds.accounts.get(accountId);
+    if (account !== undefined) {
+      account.status = "FAILED";
+    }
+    const failed = await read();
+    composio.state.failing = "GET /connected_accounts/";
+    const unanswered = await read();
+    composio.state.failing = undefined;
+    composio.state.holds.accounts.delete(accountId);
+    const gone = await read();
+    const keyless = await read(
+      async () =>
+        await connectWith({
+          COMPOSIO_API_KEY: undefined,
+        }).organizationConnections()
+    );
+    expect({
+      states: [active, failed, unanswered, gone, keyless].map(
+        ({ composio: state }) => state
+      ),
+      leaked: [held?.server, held?.serverId, accountId].filter(
+        (secret) =>
+          secret !== undefined &&
+          secret !== "" &&
+          [active, failed, gone].some(({ text }) => text.includes(secret))
+      ),
+    }).toStrictEqual({
+      // Expired or failed at Composio, or gone from it, it stopped; while
+      // Composio can't be asked, or connect has no key, nobody can say.
+      states: ["active", "stopped", "unread", "stopped", "unread"],
+      leaked: [],
     });
   });
 
