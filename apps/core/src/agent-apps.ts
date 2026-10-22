@@ -234,9 +234,18 @@ export class AppsApi extends WorkerEntrypoint<Env, AgentScope> {
               }
               // Recorded with the run before it is handed over: withheld
               // from the model once the agent or the person loses the App.
-              await recordRunReads(this.env, scope, [
-                appRead(action === "read" ? "query" : "write", appId),
-              ]);
+              // A refusal of the platform's own (no such App, no role, no
+              // release, a call not allowed: `refusalOf`) hands over nothing
+              // of the App, and no release answered it, so it isn't: the
+              // model may explain it or try elsewhere. A failure the App's
+              // release answered may carry its data, and is.
+              const refusedByPlatform =
+                !answer.result.ok && answer.manifestHash === null;
+              if (!refusedByPlatform) {
+                await recordRunReads(this.env, scope, [
+                  appRead(action === "read" ? "query" : "write", appId),
+                ]);
+              }
               return answer;
             }
           );
