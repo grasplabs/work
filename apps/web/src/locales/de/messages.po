@@ -4225,15 +4225,15 @@ msgstr "AVV-Status"
 msgid "Draft"
 msgstr "Entwurf"
 
-#: src/onboarding/staff-words.ts
-msgctxt "what AI was used for"
-msgid "Drawing"
-msgstr "Zeichnen"
-
 #: src/engines/app-status.tsx
 msgctxt "a domain still being made"
 msgid "Draft"
 msgstr "Entwurf"
+
+#: src/onboarding/staff-words.ts
+msgctxt "what AI was used for"
+msgid "Drawing"
+msgstr "Zeichnen"
 
 #: src/brain/brain.ts
 msgctxt "workflow status"

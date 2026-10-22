@@ -4225,15 +4225,15 @@ msgstr "DPA status"
 msgid "Draft"
 msgstr "Draft"
 
-#: src/onboarding/staff-words.ts
-msgctxt "what AI was used for"
-msgid "Drawing"
-msgstr "Drawing"
-
 #: src/engines/app-status.tsx
 msgctxt "a domain still being made"
 msgid "Draft"
 msgstr "Draft"
+
+#: src/onboarding/staff-words.ts
+msgctxt "what AI was used for"
+msgid "Drawing"
+msgstr "Drawing"
 
 #: src/brain/brain.ts
 msgctxt "workflow status"
