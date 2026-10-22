@@ -1,5 +1,9 @@
 import { deriveClientSecret } from "@grasp-os/shared/client-secrets";
-import { defaultGatewayModels } from "@grasp-os/shared/deployment-config";
+import { deploymentConfig } from "@grasp-os/shared/config";
+import {
+  defaultGatewayModels,
+  mailFromSchema,
+} from "@grasp-os/shared/deployment-config";
 import { deriveRouterSecret } from "@grasp-os/shared/router";
 import { env } from "cloudflare:workers";
 import { and, asc, eq, sql } from "drizzle-orm";
@@ -1463,6 +1467,162 @@ describe("rotating a client's secrets", () => {
       tooSoon: false,
       eightDaysOn: false,
       later: true,
+    });
+  });
+});
+
+/** Client `clientId`'s sending domain, and the one address it sends from. */
+const mailOf = (clientId: string) => {
+  const mailDomain = `mail.${clientId}.${domain}`;
+  return { mailDomain, address: `onboarding@${mailDomain}` };
+};
+
+/** Core's `MAIL_FROM` in `account`'s live version, as core parses it. */
+const mailFromOf = (account: AccountState) =>
+  deploymentConfig(
+    mailFromSchema,
+    "MAIL_FROM",
+    bindingsOf(liveVersionOf(account, "grasp-os-core")).get("MAIL_FROM")?.json
+  );
+
+/** Every zone in `account`, with the domains Email Sending sends from there. */
+const zonesOf = (account: AccountState) =>
+  account.zones.map(({ name, sending }) => ({
+    name,
+    sending: sending.map((entry) => ({
+      name: entry.name,
+      enabled: entry.enabled,
+    })),
+  }));
+
+/** The client's settings: `MAIL_FROM` set to `value`. */
+const setMailFrom = async (clientId: string, value: unknown) => {
+  await db
+    .insert(settings)
+    .values({
+      clientId,
+      key: "MAIL_FROM",
+      value: JSON.stringify(value),
+      updatedBy: staff.email,
+      updatedAt: new Date(),
+    })
+    .onConflictDoUpdate({
+      target: [settings.clientId, settings.key],
+      set: { value: JSON.stringify(value) },
+    });
+};
+
+describe("sending a client's onboarding mail", () => {
+  it("verifies the client's sending domain in its own account once, however often it deploys, and locks core's EMAIL to the onboarding sender its MAIL_FROM names", async () => {
+    const { account, clientId, deployId } = await setUp({
+      notes: "feat(core): send mail",
+      sendsMail: true,
+    });
+    const { mailDomain, address } = mailOf(clientId);
+
+    await runDeploy(context, deployId);
+    await runDeploy(
+      context,
+      await nextDeploy(clientId, {
+        notes: "fix(core): send it again",
+        sendsMail: true,
+      })
+    );
+
+    const creates = cloudflare.calls.filter(
+      ({ method, path }) =>
+        method === "POST" &&
+        (path === "/zones" || path.endsWith("/email/sending/subdomains"))
+    );
+    const events = await deployEvents(clientId);
+    const resources = events.filter(
+      ({ action }) => action === "deploy.resources"
+    );
+    expect({
+      zones: zonesOf(account),
+      creates: creates.length,
+      email: bindingsOf(liveVersionOf(account, "grasp-os-core")).get("EMAIL"),
+      from: mailFromOf(account),
+      // Not yet delegated, so not yet sending: on record for staff.
+      active: resources.map(
+        ({ detail }) =>
+          z
+            .object({ mailDomainActive: z.number() })
+            .parse(JSON.parse(detail ?? "null")).mailDomainActive
+      ),
+    }).toStrictEqual({
+      zones: [
+        { name: mailDomain, sending: [{ name: mailDomain, enabled: true }] },
+      ],
+      creates: 2,
+      email: {
+        type: "send_email",
+        name: "EMAIL",
+        allowed_sender_addresses: [address],
+      },
+      from: { name: "Grasp Work", address },
+      active: [0, 0],
+    });
+  });
+
+  it("turns sending on again where it was turned off, and sets up no sending domain for a release that sends no mail", async () => {
+    const { account, clientId, deployId } = await setUp();
+    const { mailDomain } = mailOf(clientId);
+    await runDeploy(context, deployId);
+    const without = zonesOf(account);
+    await runDeploy(
+      context,
+      await nextDeploy(clientId, { notes: "feat(core): mail", sendsMail: true })
+    );
+    for (const zone of account.zones) {
+      for (const entry of zone.sending) {
+        entry.enabled = false;
+      }
+    }
+
+    await runDeploy(
+      context,
+      await nextDeploy(clientId, { notes: "fix(core): mail", sendsMail: true })
+    );
+
+    expect({ without, now: zonesOf(account) }).toStrictEqual({
+      without: [],
+      now: [
+        { name: mailDomain, sending: [{ name: mailDomain, enabled: true }] },
+      ],
+    });
+  });
+
+  it("takes a MAIL_FROM setting at the onboarding sender's address under another name, and refuses one at any other address before changing anything", async () => {
+    const { account, clientId, deployId } = await setUp({
+      notes: "feat(core): send mail",
+      sendsMail: true,
+    });
+    const { address } = mailOf(clientId);
+    const named = { name: "Acme onboarding", address };
+    await setMailFrom(clientId, named);
+    await runDeploy(context, deployId);
+    const taken = mailFromOf(account);
+    const versions = account.scripts.get("grasp-os-core")?.versions.length;
+    await setMailFrom(clientId, { name: "Acme", address: "ceo@acme.test" });
+    const refused = await nextDeploy(clientId, {
+      notes: "fix(core): mail",
+      sendsMail: true,
+    });
+
+    await failingDeploy(refused);
+
+    const row = await deployRow(refused);
+    expect({
+      taken,
+      error: row?.error,
+      from: mailFromOf(account),
+      versions: account.scripts.get("grasp-os-core")?.versions.length,
+    }).toStrictEqual({
+      taken: named,
+      error: "mail_sender_locked",
+      from: named,
+      versions,
     });
   });
 });
