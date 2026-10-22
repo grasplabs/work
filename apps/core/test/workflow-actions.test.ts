@@ -189,6 +189,10 @@ export const notify = action({
 const connector = (operations: string[]): string =>
   `resource.connector("mail", { operations: ${JSON.stringify(operations)} })`;
 
+/** The `files` use of the run's own files declaring `operations`. */
+const filesUse = (operations: string): string =>
+  `resource.files("files", { operations: ${operations} })`;
+
 /** The flag of workflow `id`'s version as `by` lists it. */
 const listed = async (id: string, by: Identity) => {
   const [version] = await workflowVersions(env, by, id);
@@ -341,6 +345,8 @@ const notifyCall = {
 interface DefinitionParts {
   readonly before?: readonly unknown[];
   readonly mail?: { readonly kind: string; readonly contract: string };
+  /** A files binding of the run's own files, if the workflow has one. */
+  readonly files?: { readonly kind: "files"; readonly contract: string };
 }
 
 const definitionOf = (
@@ -348,6 +354,7 @@ const definitionOf = (
   {
     before = [],
     mail = { kind: "connector", contract: "" },
+    files,
   }: DefinitionParts = {}
 ): string =>
   JSON.stringify({
@@ -367,6 +374,7 @@ const definitionOf = (
               contract: "local:code/notify.ts#notify",
             },
             mail,
+            ...(files === undefined ? {} : { files }),
           },
         },
       },
@@ -396,14 +404,20 @@ const actingWorkflow = async (
   by: Identity,
   admin: Identity,
   module: string,
-  before: unknown[] = []
+  before: unknown[] = [],
+  { files = false }: { files?: boolean } = {}
 ) => {
   const key = await mailContract(admin);
+  const filesKey = `files-${unique()}`;
+  if (files) {
+    await publishCatalogContract(env, admin, { key: filesKey, kind: "files" });
+  }
   const workflow = await createWorkflowResource(env, by, `act-${unique()}`);
   const published = await publishWorkflowVersion(env, by, workflow.id, {
     definition: definitionOf(workflow.name, {
       before,
       mail: { kind: "connector", contract: key },
+      ...(files ? { files: { kind: "files", contract: filesKey } } : {}),
     }),
     basedOn: null,
     modules: { "code/notify.ts": module },
@@ -421,6 +435,13 @@ const actingWorkflow = async (
     target: { kind: "connector", permissionId, contract: "composio.mail@1" },
     reviewed: { version: 1 },
   });
+  if (files) {
+    await approveWorkflowBinding(env, admin, workflow.id, {
+      alias: "files",
+      target: { kind: "files" },
+      reviewed: { version: 1 },
+    });
+  }
   return { workflow, mail, serving, approval, key, published };
 };
 
@@ -587,6 +608,64 @@ describe("a JSON workflow's own actions", () => {
       receipts: ["workflow.call_denied"],
       evidence: [],
     });
+  });
+
+  it("keeps a connector's answer as a file only for a read its connector declares answers one, into a files use the action declared to write", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const into = `try {
+      await ctx.resources.mail.call("mail.send", { to: args.to, subject: "one" }, { into: "files" });
+    } catch {
+      // Swallowed: the refusal stands all the same.
+    }
+    return { status: "caught" };`;
+    const mailUse = connector(["mail.send"]);
+    const cases = [
+      // A files use to write: but mail.send answers no file (a Composio
+      // tool never declares one), refused before anything is sent.
+      { uses: `[${mailUse}, ${filesUse('["write"]')}]`, files: true },
+      // No files use declared: refused by the action's host.
+      { uses: `[${mailUse}]`, files: false },
+      // A files use that only reads: refused by the action's host.
+      { uses: `[${mailUse}, ${filesUse('["read"]')}]`, files: true },
+    ];
+    const results = await Promise.all(
+      cases.map(async ({ uses, files }) => {
+        const { workflow, mail, serving } = await actingWorkflow(
+          ada,
+          admin,
+          notifyModule(into, uses),
+          [],
+          { files }
+        );
+        const runId = await started(ada, workflow.id, serving);
+        const end = await ended(ada, workflow.id, runId);
+        const kept = await env.DB.prepare(
+          "SELECT count(*) AS n FROM workflow_run_files WHERE run_id = ?"
+        )
+          .bind(runId)
+          .first<{ n: number }>();
+        const sent = await mail.did();
+        return { end, sent: sent.calls, kept: kept?.n };
+      })
+    );
+    expect(results).toStrictEqual([
+      {
+        end: { status: "failed", code: "workflow.call_invalid" },
+        sent: 0,
+        kept: 0,
+      },
+      {
+        end: { status: "failed", code: "workflow.call_denied" },
+        sent: 0,
+        kept: 0,
+      },
+      {
+        end: { status: "failed", code: "workflow.call_denied" },
+        sent: 0,
+        kept: 0,
+      },
+    ]);
   });
 
   it("shows what each action may call in its version, as sealed, to every role alike", async () => {
