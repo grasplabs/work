@@ -5,10 +5,12 @@
  * in, and only to the accounts it holds. A test can plan failures (the
  * Nth call answers 429 or 500) and read every call it got.
  *
- * It replaces `fetch` in the tests' isolate, which is also where the
- * console's Workflow steps run. D1 queries run on real D1 databases, one
+ * It answers in place of `fetch` in the isolate the console runs in, which
+ * is also where its Workflow steps run: the tests' isolate, for each test
+ * (test/cloudflare-api-mock.ts), and the browser journeys' console, for its
+ * whole run (test/e2e-worker.ts). D1 queries run on real D1 databases, one
  * for each database the fake holds at once (`CLIENT_D1_<n>`,
- * vite.test.config.ts).
+ * vite.test.config.ts and vite.e2e.config.ts).
  */
 import {
   adminAskPath,
@@ -36,7 +38,6 @@ import {
   platformUpdatePurpose,
   platformUpdateSignatureHeader,
 } from "@grasp-os/shared/platform-change";
-import { afterEach, beforeEach, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import {
@@ -606,10 +607,11 @@ const analyticsMisread = (
 /**
  * A fake Cloudflare API that lets `token` (the deployer's) and
  * `tenantToken` (a tenant admin's, which alone creates accounts) in, each
- * to the accounts its user is an accepted member of, for each test in the
- * file. Add accounts with `addAccount`; plan failures with `failCall`.
+ * to the accounts its user is an accepted member of. It answers what it's
+ * sent in place of `fetch` (`fetch`), until it's emptied (`reset`). Add
+ * accounts with `addAccount`; plan failures with `failCall`.
  */
-export const mockCloudflareApi = (
+export const fakeCloudflareApi = (
   token: string,
   tenantToken = `${token}-tenant-admin`
 ) => {
@@ -1019,61 +1021,64 @@ export const mockCloudflareApi = (
       : new Response("Not found", { status: 404 });
   };
 
-  beforeEach(() => {
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
-      const request = new Request(input, init);
-      const served = await workersDev(request);
-      if (served !== undefined) {
-        return served;
-      }
-      if (!request.url.startsWith(`${base}/`)) {
-        throw new Error(`Unexpected outbound request to ${request.url}`);
-      }
-      load.now += 1;
-      load.peak = Math.max(load.peak, load.now);
-      const accountId = accountRoute.exec(
-        new URL(request.url).pathname.slice(new URL(base).pathname.length)
-      )?.groups?.id;
-      if (accountId !== undefined) {
-        busyAccounts.set(accountId, (busyAccounts.get(accountId) ?? 0) + 1);
-        load.peakAccounts = Math.max(load.peakAccounts, busyAccounts.size);
-      }
-      try {
-        // As fetch does: a request whose signal aborts before it's answered
-        // rejects at once, whatever the fake was doing with it.
-        let answered = false;
-        return await Promise.race([
-          (async () => {
-            const response = await answer(request);
-            answered = true;
-            return response;
-          })(),
-          (async () => {
-            try {
-              return await whenAborted(request.signal);
-            } catch (error) {
-              if (!answered) {
-                aborted.count += 1;
-              }
-              throw error;
+  /** What the API, or a Worker on workers.dev, answers `fetch(input, init)` with. */
+  const answerFetch = async (
+    input: RequestInfo | URL,
+    init?: RequestInit
+  ): Promise<Response> => {
+    const request = new Request(input, init);
+    const served = await workersDev(request);
+    if (served !== undefined) {
+      return served;
+    }
+    if (!request.url.startsWith(`${base}/`)) {
+      throw new Error(`Unexpected outbound request to ${request.url}`);
+    }
+    load.now += 1;
+    load.peak = Math.max(load.peak, load.now);
+    const accountId = accountRoute.exec(
+      new URL(request.url).pathname.slice(new URL(base).pathname.length)
+    )?.groups?.id;
+    if (accountId !== undefined) {
+      busyAccounts.set(accountId, (busyAccounts.get(accountId) ?? 0) + 1);
+      load.peakAccounts = Math.max(load.peakAccounts, busyAccounts.size);
+    }
+    try {
+      // As fetch does: a request whose signal aborts before it's answered
+      // rejects at once, whatever the fake was doing with it.
+      let answered = false;
+      return await Promise.race([
+        (async () => {
+          const response = await answer(request);
+          answered = true;
+          return response;
+        })(),
+        (async () => {
+          try {
+            return await whenAborted(request.signal);
+          } catch (error) {
+            if (!answered) {
+              aborted.count += 1;
             }
-          })(),
-        ]);
-      } finally {
-        load.now -= 1;
-        if (accountId !== undefined) {
-          const left = (busyAccounts.get(accountId) ?? 1) - 1;
-          if (left === 0) {
-            busyAccounts.delete(accountId);
-          } else {
-            busyAccounts.set(accountId, left);
+            throw error;
           }
+        })(),
+      ]);
+    } finally {
+      load.now -= 1;
+      if (accountId !== undefined) {
+        const left = (busyAccounts.get(accountId) ?? 1) - 1;
+        if (left === 0) {
+          busyAccounts.delete(accountId);
+        } else {
+          busyAccounts.set(accountId, left);
         }
       }
-    });
-  });
-  afterEach(() => {
-    vi.restoreAllMocks();
+    }
+  };
+
+  /** Empties the fake: no accounts, calls or plans left. */
+  const reset = (): void => {
     accounts.clear();
     forgetDatabases();
     calls.length = 0;
@@ -1087,9 +1092,13 @@ export const mockCloudflareApi = (
     aborted.count = 0;
     adminReads.now = 0;
     adminReads.peak = 0;
-  });
+  };
 
   return {
+    /** Answers in place of `fetch`. */
+    fetch: answerFetch,
+    /** Empties the fake. */
+    reset,
     /** Every call the fake got in this test, in order. */
     calls,
     /** The most calls it was answering at once in this test. */

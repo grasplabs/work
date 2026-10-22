@@ -31,7 +31,7 @@ import { provisionPlacedClient } from "../src/hosting/workflow.ts";
 import { claimRun } from "../src/runners.ts";
 import type { HeldClient } from "../src/runners.ts";
 import type { AccountState, ApiCall } from "./cloudflare-api-kit.ts";
-import { mockCloudflareApi } from "./cloudflare-api.ts";
+import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { db, destination, placedClient, staff } from "./hosting.ts";
 import { buildRelease, putBlobs } from "./releases.ts";
 import type { ReleaseSpec } from "./releases.ts";

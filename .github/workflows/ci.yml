@@ -241,6 +241,36 @@ jobs:
           path: test-results/
           retention-days: 14
 
+  # The staff console's journeys (playwright.console.config.ts): a stack of
+  # their own, the console on the fake Cloudflare API, so apart from e2e's.
+  # Chromium only, in e2e's image.
+  console-e2e:
+    name: console-e2e
+    if: github.event_name != 'push'
+    container:
+      image: mcr.microsoft.com/playwright:v1.63.0-noble
+      options: --user 1001 --ipc=host
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: voidzero-dev/setup-vp@3754dd7dbdb32bd8f6d28b6043de13ad3a75f21f # v1.21.1
+        with:
+          node-version-file: .node-version
+          cache: true
+          run-install: |
+            - args: ["--frozen-lockfile"]
+      - run: vp run e2e:console
+      # A failing journey keeps its trace (playwright.console.config.ts).
+      - if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: console-playwright-traces
+          path: test-results/
+          retention-days: 14
+
   # On-prem ready: core must boot on plain workerd.
   workerd:
     name: workerd
