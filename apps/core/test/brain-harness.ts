@@ -107,7 +107,7 @@ import { newTeam, readCollection } from "./knowledge.ts";
 import { callAuth, openRpc, signedInApi } from "./sign-in.ts";
 
 /** Bumped with any change to how the harness runs or measures a trial. */
-export const brainHarnessVersion = "3";
+export const brainHarnessVersion = "4";
 
 export const brainArms = ["agent", "fullContext", "fullText"] as const;
 export type BrainArm = (typeof brainArms)[number];
@@ -149,7 +149,13 @@ export const minimumMeaningfulGain = 0.05;
 /** The most characters of sources the full-context arm hands the model. */
 export const fullContextChars = 60_000;
 
-/** The instructions every arm's question carries, so all answer alike. */
+/**
+ * The instructions every arm answers by, so all answer alike: the
+ * company's AGENTS.md, in every chat's memory (the system prompt), never
+ * in the question. The person's message is what they typed, as in the
+ * product, so whatever the platform reads from it (a recall's query)
+ * reads only that.
+ */
 export const answerProtocol = [
   "Answer from what you can read in this chat: your memory, this conversation and Knowledge.",
   "Cite each source you used in square brackets: [path#heading], [memory] or [session].",
@@ -168,9 +174,7 @@ interface Source {
 
 const renderPrompt = (question: string, sources?: readonly Source[]) =>
   [
-    answerProtocol,
-    "",
-    `Question: ${question}`,
+    question,
     ...(sources === undefined
       ? []
       : [
@@ -530,6 +534,17 @@ export const setUpBrainCompany = async (idp: Idp): Promise<BrainCompany> => {
     });
     documents.set(key, { id: saved.id, version: saved.currentVersion });
   }
+  // The answer protocol, as the company's rules every chat follows.
+  const { memory } = await admin.api.memory.collections();
+  if (memory === null) {
+    throw new Error("The admin's Memory collection wasn't set up");
+  }
+  await admin.api.knowledge.saveDocument({
+    collectionId: memory,
+    path: "AGENTS.md",
+    text: answerProtocol,
+    ifVersion: 0,
+  });
   for (const persona of brainPersonas) {
     const person = people[persona];
     // oxlint-disable-next-line no-await-in-loop -- one person at a time
@@ -1981,8 +1996,13 @@ const fieldOf = (request: GatewayRequest, field: string): unknown =>
     ? Reflect.get(request.body, field)
     : null;
 
-/** The person's memory and the listed skills: theirs and this run's own. */
-const ownSections = /<(?<section>memory|skills)>[\s\S]*?<\/\k<section>>/gu;
+/**
+ * The person's memory and the listed skills: theirs and this run's own.
+ * Memory is a section of one block per file (`<memory source=… file=…>`):
+ * each goes, whichever files there are.
+ */
+const ownSections =
+  /<(?<section>memory|skills)(?: [^>]*)?>[\s\S]*?<\/\k<section>>/gu;
 
 /**
  * What each request told the model before the chat: the agent's
