@@ -234,7 +234,9 @@ export class AppsApi extends WorkerEntrypoint<Env, AgentScope> {
               }
               // Recorded with the run before it is handed over: withheld
               // from the model once the agent or the person loses the App.
-              await recordRunReads(this.env, scope, [appRead("call", appId)]);
+              await recordRunReads(this.env, scope, [
+                appRead(action === "read" ? "query" : "write", appId),
+              ]);
               return answer;
             }
           );

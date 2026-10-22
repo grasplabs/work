@@ -27,8 +27,13 @@ import { grantedPermissions } from "./permissions.ts";
 
 /** How a run read an App, each checked as a read made now would be. */
 const appReads = {
-  /** One of its functions answered: the agent's grant on it, the person's role. */
-  call: "app-call",
+  /**
+   * One of its queries answered: the agent's `read` grant on it, the
+   * person's role, as the call needed.
+   */
+  query: "app-query",
+  /** A mutation or action answered: the agent's `write` grant, the person's role. */
+  write: "app-write",
   /** Its exports: the Apps collection granted, the person's role. */
   exports: "app-exports",
   /** Its files or versions: the Apps collection granted, the person builds it. */
@@ -44,7 +49,7 @@ export const appRead = (read: AppRead, appId: string): string =>
 const appReadOf = (
   source: string
 ): { read: AppRead; appId: string } | undefined => {
-  for (const read of ["call", "exports", "build"] as const) {
+  for (const read of ["query", "write", "exports", "build"] as const) {
     const prefix = `${appReads[read]}:`;
     if (source.startsWith(prefix)) {
       return { read, appId: source.slice(prefix.length) };
@@ -59,13 +64,15 @@ const appReadNeeds = (
   appId: string,
   permissions: readonly Permission[]
 ): { granted: boolean; role: AppRole } => {
-  if (read === "call") {
+  if (read === "query" || read === "write") {
+    // The action the call itself needed (`actionFor` in agent-apps.ts).
+    const action = read === "query" ? "read" : "write";
     return {
       granted: permissions.some(
         ({ object, actions }) =>
           object.type === "app" &&
           object.appId === appId &&
-          (actions.includes("read") || actions.includes("write"))
+          actions.includes(action)
       ),
       role: "user",
     };

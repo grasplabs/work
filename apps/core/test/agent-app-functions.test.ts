@@ -602,7 +602,7 @@ describe(
       });
     });
 
-    it("withholds an App's earlier answer from the model once the agent loses the App", async () => {
+    it("withholds an App's earlier answer from the model once the agent loses what the call needed, though it may still write", async () => {
       const notes = await notesApp();
       const secret = `CANARY-${crypto.randomUUID().slice(0, 8)}`;
       await noteAs(notes, secret);
@@ -620,6 +620,13 @@ describe(
         object: { type: "app", appId: notes.app },
         actions: ["read"],
         binding: "NOTES",
+      });
+      // Writing doesn't let it read: the query needed `read`.
+      await requestGranted(idp, notes.builder, {
+        subject: chat.agent,
+        object: { type: "app", appId: notes.app },
+        actions: ["write"],
+        binding: "NOTES_WRITE",
       });
       await chat.ask("What's in the Notes App?");
       const admin = await signedInApi(idp, "admin");
