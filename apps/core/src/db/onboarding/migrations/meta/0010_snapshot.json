@@ -1,48 +1,9 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "c76e8e8f-9853-4031-8ae2-cf6fbd8ae4ba",
+  "id": "213073ff-ec31-40b2-a6f1-509fe107b080",
   "prevId": "fcb1c5d8-1fa0-46bb-9279-c1a6f4bdf4b4",
   "tables": {
-    "answer_waits": {
-      "name": "answer_waits",
-      "columns": {
-        "day": {
-          "name": "day",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "up_to": {
-          "name": "up_to",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "answers": {
-          "name": "answers",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {
-        "answer_waits_day_up_to_pk": {
-          "columns": [
-            "day",
-            "up_to"
-          ],
-          "name": "answer_waits_day_up_to_pk"
-        }
-      },
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
     "audit_outbox": {
       "name": "audit_outbox",
       "columns": {
@@ -202,44 +163,6 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "interview_settings": {
-      "name": "interview_settings",
-      "columns": {
-        "person": {
-          "name": "person",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "mark": {
-          "name": "mark",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "interviewer": {
-          "name": "interviewer",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "locale": {
-          "name": "locale",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
     "interview_states": {
       "name": "interview_states",
       "columns": {
@@ -273,6 +196,20 @@
         },
         "completed_at": {
           "name": "completed_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "agreed_at": {
+          "name": "agreed_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "drawn_at": {
+          "name": "drawn_at",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
