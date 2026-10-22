@@ -9,14 +9,14 @@ import { appErrors, appV1ServerFolder } from "@grasp-os/shared/apps";
 /** Most paths the refusal names: enough to find them, bounded to send. */
 const namedPathsMax = 20;
 
-/** Refuses with `app.v1_server` files under `app/`, naming them. */
-export const refuseV1Server = (files: ReadonlyMap<string, string>): void => {
-  const paths = [...files.keys()]
+/** Refuses with `app.v1_server` paths under `app/`, naming them. */
+export const refuseV1Server = (paths: Iterable<string>): void => {
+  const v1 = [...paths]
     .filter((path) => path.startsWith(appV1ServerFolder))
     .toSorted();
-  if (paths.length > 0) {
+  if (v1.length > 0) {
     throw appErrors.create("app.v1_server", {
-      issues: paths.slice(0, namedPathsMax),
+      issues: v1.slice(0, namedPathsMax),
     });
   }
 };
