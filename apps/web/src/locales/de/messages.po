@@ -5951,6 +5951,10 @@ msgstr "Dateien und Dokumente"
 msgid "Files its runs wrote"
 msgstr "Dateien, die seine Läufe geschrieben haben"
 
+#: src/chat/builds.tsx
+msgid "Files to workflows"
+msgstr "Dateien an Workflows"
+
 #: src/engines/store-changes.tsx
 msgid "Filling in the new field {field} of the table {table} would make the record {record} larger than a record may be."
 msgstr "Das Ausfüllen des neuen Felds {field} der Tabelle {table} würde den Datensatz {record} größer machen, als ein Datensatz sein darf."
@@ -7441,6 +7445,10 @@ msgstr "Ihr Budget kann nicht gelesen werden, daher bedient sie nichts, statt oh
 msgid "Its budget can't be read, so it serves nothing."
 msgstr "Ihr Budget kann nicht gelesen werden, daher bedient sie nichts."
 
+#: src/chat/builds.tsx
+msgid "Its code can't be read: its screens and server code may hand files people can read to the workflows it binds"
+msgstr "Sein Code kann nicht gelesen werden: Seine Bildschirme und sein Servercode dürfen Dateien, die Personen lesen können, an die verknüpften Workflows übergeben"
+
 #: src/engines/app-integrations.tsx
 msgctxt "why an integration is one of a domain's"
 msgid "Its code uses it"
@@ -7545,6 +7553,10 @@ msgstr "Seine Läufe ließen sich immer wieder nicht starten, darum startet er n
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Its schedule stopped: its run failed to start {maxFailedStarts} times in a row. It starts again when its schedule is set under Parameters, or when a new version of the domain is made current."
 msgstr "Sein Zeitplan wurde gestoppt: Sein Lauf konnte {maxFailedStarts}-mal hintereinander nicht starten. Er startet wieder, wenn der Zeitplan unter Parameter gesetzt wird oder eine neue Version der Domäne aktuell wird."
+
+#: src/chat/builds.tsx
+msgid "Its screens and server code may hand files people can read to the workflows it binds"
+msgstr "Seine Bildschirme und sein Servercode dürfen Dateien, die Personen lesen können, an die verknüpften Workflows übergeben"
 
 #: src/chat/builds.tsx
 msgid "Its steps can't be read from its code, so any step may do anything its code does, calling {tools}."

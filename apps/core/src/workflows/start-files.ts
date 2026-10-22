@@ -76,7 +76,7 @@ const objectOf = (value: Json | undefined): JsonObject | undefined =>
     : value;
 
 /** Whether a value under `descriptor` can hold a `file` value anywhere. */
-const holdsFile = (descriptor: ValueDescriptor): boolean => {
+export const holdsFile = (descriptor: ValueDescriptor): boolean => {
   if (descriptor.kind === "file") {
     return true;
   }

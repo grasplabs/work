@@ -5951,6 +5951,10 @@ msgstr "Files and documents"
 msgid "Files its runs wrote"
 msgstr "Files its runs wrote"
 
+#: src/chat/builds.tsx
+msgid "Files to workflows"
+msgstr "Files to workflows"
+
 #: src/engines/store-changes.tsx
 msgid "Filling in the new field {field} of the table {table} would make the record {record} larger than a record may be."
 msgstr "Filling in the new field {field} of the table {table} would make the record {record} larger than a record may be."
@@ -7441,6 +7445,10 @@ msgstr "Its budget can't be read, so it serves nothing rather than run without o
 msgid "Its budget can't be read, so it serves nothing."
 msgstr "Its budget can't be read, so it serves nothing."
 
+#: src/chat/builds.tsx
+msgid "Its code can't be read: its screens and server code may hand files people can read to the workflows it binds"
+msgstr "Its code can't be read: its screens and server code may hand files people can read to the workflows it binds"
+
 #: src/engines/app-integrations.tsx
 msgctxt "why an integration is one of a domain's"
 msgid "Its code uses it"
@@ -7545,6 +7553,10 @@ msgstr "Its runs kept failing to start, so it starts no more. Fix what stopped t
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Its schedule stopped: its run failed to start {maxFailedStarts} times in a row. It starts again when its schedule is set under Parameters, or when a new version of the domain is made current."
 msgstr "Its schedule stopped: its run failed to start {maxFailedStarts} times in a row. It starts again when its schedule is set under Parameters, or when a new version of the domain is made current."
+
+#: src/chat/builds.tsx
+msgid "Its screens and server code may hand files people can read to the workflows it binds"
+msgstr "Its screens and server code may hand files people can read to the workflows it binds"
 
 #: src/chat/builds.tsx
 msgid "Its steps can't be read from its code, so any step may do anything its code does, calling {tools}."
