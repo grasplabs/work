@@ -9,7 +9,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { budgetDay } from "../src/model-budgets.ts";
 import { modelLedger } from "../src/model-ledger.ts";
 import type { LedgerScope } from "../src/model-ledger.ts";
-import { models } from "../src/models.ts";
+import { gatewaySettings, modelForRole, models } from "../src/models.ts";
 import type { ModelCall, ModelsEnv } from "../src/models.ts";
 import { fakeGateway } from "./ai-gateway.ts";
 import { allEvents } from "./audit-events.ts";
@@ -52,6 +52,12 @@ const newMonth = (): string => {
 };
 
 /** Core's env with `config` as the gateway's, counting in its own month. */
+/** The model each onboarding role gets, for calls that carry sensitive data. */
+const roleIn = (settings: ReturnType<typeof gatewaySettings>) => ({
+  quick: modelForRole(settings, "quick", { sensitive: true }),
+  careful: modelForRole(settings, "careful", { sensitive: true }),
+});
+
 const envWith = (config?: unknown) => {
   const coreEnv: ModelsEnv & Env = {
     ...env,
@@ -335,6 +341,35 @@ describe("model settings", { timeout: 60_000 }, () => {
         levels: ["low", "high", "max"],
         default: "high",
       },
+    });
+  });
+
+  it("give a deployment that names no roles DeepSeek V4.1 Flash for chat and careful work, and GLM 5.3 Flash, at low effort, for quick lines", async () => {
+    const deepSeek = "workers-ai/@cf/deepseek-ai/deepseek-v4.1-flash-1017";
+    const glm = "workers-ai/@cf/zai-org/glm-5.3-flash";
+    const coreEnv = envWith();
+    const { session } = await signedInWithRole(idp, "user");
+    const { core } = await openRpc(session, { coreEnv });
+    const { chats } = core.authenticate();
+    const [chat] = await chats.models();
+    const { [glm]: quickEfforts } = await chats.efforts();
+
+    expect({
+      chat,
+      ...roleIn(gatewaySettings(coreEnv)),
+      quickTakesLow: quickEfforts?.levels.includes("low"),
+      // Where GLM isn't allowed, quick lines go to the first allowed model.
+      withoutGlm: roleIn(
+        gatewaySettings(
+          envWith({ gateway: "grasp-os-test", models: [deepSeek] })
+        )
+      ),
+    }).toStrictEqual({
+      chat: deepSeek,
+      quick: glm,
+      careful: deepSeek,
+      quickTakesLow: true,
+      withoutGlm: { quick: deepSeek, careful: deepSeek },
     });
   });
 
