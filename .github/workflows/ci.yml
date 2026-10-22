@@ -202,7 +202,11 @@ jobs:
     name: e2e
     if: github.event_name != 'push'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # 11 to 20 minutes when it passed (October 2026): about 1 minute of
+    # setup, the browsers' system packages from the Ubuntu mirror (under a
+    # minute, but up to 12 when the mirror is slow), 2 minutes for the stack
+    # to build and start, and 8 to 14 minutes of tests.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
