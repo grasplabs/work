@@ -134,14 +134,14 @@ interface Unit {
   text: string;
   /** Its table's first row, which names its columns. */
   header?: string;
-  /** What its containers and the headings above it say. */
+  /** What its section and the preamble say. */
   context?: Signals;
 }
 
 /**
  * What a text says, worked out once: whether it refers to a person, and
  * which topics' words it has. Carrying these instead of the text keeps a
- * long heading or list over many blocks cheap.
+ * long section over many blocks cheap.
  */
 interface Signals {
   person: boolean;
@@ -203,20 +203,18 @@ const leaves: ReadonlySet<string> = new Set([
   "tr_open",
 ]);
 
-const lastOf = (headings: (Signals | undefined)[]) =>
-  headings.findLast((heading) => heading !== undefined);
-
 /**
  * The text's units: each leaf block of its CommonMark structure (a
- * paragraph, heading, table row or code block), judged with the text of
- * its containers and its section headings. A list, list item, quote or
- * table is context for everything in it: "- Employee Jan Jansen" over "
- * On sick leave" is about Jan. Headings stack by depth: "# Employee Jan"
- * over "## Status" over "On sick leave" is about Jan, and so is "##
- * Cancer" under it; a container's headings are sections within it. The
- * outermost container's text holds those of the containers in it, so only
- * that one is read whole, keeping this linear. Returns undefined for text
- * nested deeper than the parser reads.
+ * paragraph, heading, table row or code block), judged with what its
+ * section says. A section is a heading and every block up to the next
+ * heading of its level or higher, its subsections included; the blocks
+ * before the first heading are the preamble, which is context for the
+ * whole text. A person and a topic anywhere in one section, or in it and
+ * the preamble, hold: "Employee Jan Jansen" over "## Notes", "## Status"
+ * and "On sick leave" is about Jan. An amount stays certain only in its
+ * own block. Each block's signals are read once and joined per outermost
+ * section, which holds those of the sections in it, so this is linear.
+ * Returns undefined for text nested deeper than the parser reads.
  */
 const unitsOf = (text: string): Unit[] | undefined => {
   const tokens: Token[] = [];
@@ -234,34 +232,21 @@ const unitsOf = (text: string): Unit[] | undefined => {
   const source = (first: number, end: number): string =>
     text.slice(starts[first], (starts[end] ?? 0) - 1);
   const units: Unit[] = [];
-  // Each depth's section heading, with the signals of those above it.
-  const sections: (Signals | undefined)[] = [];
-  let headings = sections;
-  let outside: Signals | undefined = undefined;
+  // Each unit's outermost section, 0 for the preamble, and their signals.
+  const sectionOf: number[] = [];
+  const sections: (Signals | undefined)[] = [undefined];
+  let depth = 0;
   let header: string | undefined = undefined;
   for (const token of tokens) {
     if (token.level >= maxNesting - 1) {
       return undefined;
     }
-    const lines = token.map;
-    if (token.level === 0 && token.nesting === -1) {
-      outside = undefined;
-      headings = sections;
-    }
-    if (lines === null) {
+    if (token.map === null) {
       continue;
     }
-    const [first, end] = lines;
+    const [first, end] = token.map;
     if (token.type === "table_open") {
       header = source(first, first + 1);
-    }
-    if (token.level === 0 && token.nesting === 1 && !leaves.has(token.type)) {
-      const container = signalsOf({
-        text: source(first, end),
-        header: token.type === "table_open" ? header : undefined,
-      });
-      outside = together(container, lastOf(sections));
-      headings = [];
     }
     if (!leaves.has(token.type)) {
       continue;
@@ -270,16 +255,25 @@ const unitsOf = (text: string): Unit[] | undefined => {
       text: source(first, end),
       header: token.type === "tr_open" ? header : undefined,
     };
-    const depth =
-      token.type === "heading_open" ? Number(token.tag.slice(1)) : 0;
-    if (depth > 0) {
-      headings.length = depth - 1;
+    // A heading in a list or quote is a block inside the section.
+    if (token.type === "heading_open" && token.level === 0) {
+      const level = Number(token.tag.slice(1));
+      if (depth === 0 || level <= depth) {
+        depth = level;
+        sections.push(undefined);
+      }
     }
-    unit.context = together(outside, lastOf(headings));
+    const section = sections.length - 1;
+    sections[section] = together(sections[section], signalsOf(unit));
+    sectionOf.push(section);
     units.push(unit);
-    if (depth > 0) {
-      headings[depth - 1] = together(lastOf(headings), signalsOf(unit));
-    }
+  }
+  for (const [index, unit] of units.entries()) {
+    const section = sectionOf[index] ?? 0;
+    unit.context = together(
+      sections[0],
+      section > 0 ? sections[section] : undefined
+    );
   }
   return units;
 };

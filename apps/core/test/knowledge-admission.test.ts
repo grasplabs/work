@@ -216,6 +216,14 @@ describe("Knowledge admission", { timeout: 60_000 }, () => {
       // A table's rows, under its header.
       tableRows:
         "| Name | Note |\n| --- | --- |\n| Jan | Sales |\n| Piet | On sick leave |",
+      // A preamble that names a person, for the whole text.
+      preamble:
+        "Author: jan@example.com\n\n# Leave policy\n\n## Sick leave\n\nReport sick before nine.",
+      preambleList:
+        "- Employee Jan Jansen\n  ## Team\n\n## Sick leave policy\n\nReport sick before nine.",
+      // A heading in a list or quote doesn't end its section.
+      headingInQuote:
+        "## Employee Jan Jansen\n\n> # Notes\n\nOn sick leave since May.",
       // A link reference definition's title.
       definition: '[jan]: https://hr.example "She has cancer"',
       // Nested deeper than any document is: not read, so held.
@@ -294,6 +302,9 @@ describe("Knowledge admission", { timeout: 60_000 }, () => {
       sectionUnderQuote: "held",
       sectionUnderTable: "held",
       tableRows: "held",
+      preamble: "held",
+      preambleList: "held",
+      headingInQuote: "held",
       definition: "held",
       deeplyNested: "held",
       looseList: "held",
@@ -376,10 +387,8 @@ describe("Knowledge admission", { timeout: 60_000 }, () => {
       "# Leave policy\n## Sick leave\n### Reporting sick",
       // A topic heading beside a person's, not under it.
       "## Employee Jan Jansen\n## Sick leave policy",
-      // A list item's heading ends with the item.
-      "- Employee Jan Jansen\n  ## Team\n\n## Sick leave policy\n\nReport sick before nine.",
-      // A person and a policy in separate lists.
-      "- Employee Jan Jansen\n\n## Sick leave policy\n\n- Report sick before nine.",
+      // Sibling sections, with no preamble.
+      "## Employee Jan Jansen\n\nWorks in sales.\n\n## Sick leave policy\n\nReport sick before nine.",
       "Die Gehaltsbänder werden jährlich überprüft.",
       "La politique de rémunération est revue chaque année.",
       "La política salarial se revisa cada año.",
