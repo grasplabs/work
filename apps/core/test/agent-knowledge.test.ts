@@ -815,4 +815,71 @@ describe("a chat's Knowledge", setUpTime, () => {
       modelCalls(events).map(({ provenance }) => provenance)
     ).toStrictEqual([[]]);
   });
+
+  it("recalls for a chat only under the Brain permission, only from what its person may read, and labels the chat with every collection it read, found or not", async () => {
+    const admin = await newAdmin();
+    const person = await newPerson();
+    const word = `zq${crypto.randomUUID().replaceAll(/[^a-f]/gu, "")}`;
+    // Granted and readable by the person, but without the word.
+    const { id: handbook } = await admin.knowledge.createCollection({
+      name: `Handbook ${unique()}`,
+      access: "everyone",
+    });
+    await admin.knowledge.saveDocument({
+      collectionId: handbook,
+      path: "other.md",
+      text: "# Other\nNothing of it here.",
+      ifVersion: 0,
+    });
+    // Granted, holding the word, but a team's the person isn't in.
+    const team = await newTeam(admin, [admin]);
+    const { id: teamOnly } = await admin.knowledge.createCollection({
+      name: `Team ${unique()}`,
+      access: "teams",
+      teams: [team],
+    });
+    await admin.knowledge.saveDocument({
+      collectionId: teamOnly,
+      path: "plan.md",
+      text: `# Plan\n${word}`,
+      ifVersion: 0,
+    });
+    const recallStep = codeStep(
+      `export default async (self, env) => { const outcome = async (asked) => { try { const pack = await asked; return pack.items.length; } catch (error) { return error.code ?? String(error); } }; return [await outcome(env.knowledge.recall({ query: ${JSON.stringify(word)} })), await outcome(env.knowledge.recall({ query: ${JSON.stringify(word)}, filters: { collectionIds: [${JSON.stringify(handbook)}] } }))]; };`
+    );
+    const { stub, chat, ask, agent } = await chatOf(
+      person.userId,
+      recallStep,
+      says("Nothing."),
+      recallStep,
+      says("Still nothing.")
+    );
+    await grantRead(admin, agent, handbook);
+    await grantRead(admin, agent, teamOnly);
+    // Without the Brain permission: refused.
+    const before = await ask("What is the plan?");
+    await requestGranted(idp, admin, {
+      subject: agent,
+      object: { type: "platform" },
+      actions: ["brain"],
+      binding: "BRAIN",
+    });
+    const after = await ask("What is the plan, now?");
+    const results = await codeResults(stub, chat.id);
+    expect({
+      results: results.map(({ text }) => text),
+      before: before.provenance,
+      after: after.provenance,
+    }).toStrictEqual({
+      results: [
+        'Returned:\n["brain.denied","brain.denied"]',
+        "Returned:\n[0,0]",
+      ],
+      before: { sources: [], restricted: false },
+      // The word is only in a collection the person can't read; the
+      // collection it was told to read is the chat's source even though
+      // nothing was found there.
+      after: { sources: [handbook], restricted: false },
+    });
+  });
 });
