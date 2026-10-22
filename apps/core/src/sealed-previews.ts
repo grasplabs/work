@@ -1,4 +1,8 @@
-import { manifestText } from "@grasp-os/sdk/host";
+import {
+  generatedPaths,
+  generateModules,
+  manifestText,
+} from "@grasp-os/sdk/host";
 import { appErrors } from "@grasp-os/shared/apps";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { storeIdSchema, workspaceIdSchema } from "@grasp-os/shared/ids";
@@ -404,6 +408,42 @@ export interface PreviewCallOptions {
    */
   readonly chargeWindow?: (pages: number, whole: number) => Promise<void>;
 }
+
+/** The version a draft's release is sealed as: the one it would become. */
+const sealedAs = (draft: Pick<Draft, "base">): number => (draft.base ?? 0) + 1;
+
+/**
+ * The `#grasp` references the screens of `draft`, a kept version of a
+ * chat's draft of `app`, import: generated from its draft release, sealed
+ * as the preview's is (`sealDraftRelease`) and loaded back through the
+ * same checks, every hash, but kept nowhere: that version's preview is
+ * read-only, so nothing runs on the release. Null when it generates none.
+ */
+export const draftVersionReferences = async (
+  env: Env,
+  app: AppId,
+  draft: Draft
+): Promise<string | null> => {
+  const version = sealedAs(draft);
+  const sealed = await sealDraftRelease(
+    env,
+    { app, version },
+    await draftFiles(env, app, draft)
+  );
+  const release = await loadDraftRelease(
+    { app, version },
+    sealed,
+    async (sha256) =>
+      await Promise.resolve(
+        sealed.artifacts.find((artifact) => artifact.sha256 === sha256)?.bytes
+      )
+  );
+  const generated = await generateModules(release.app, {
+    resourceId: app,
+    resourceVersion: version,
+  });
+  return generated[generatedPaths.references] ?? null;
+};
 
 /** The key of one chat's preview of one App. */
 const nameOf = (chatId: ChatId, app: string): string => `${chatId}:${app}`;
@@ -1036,7 +1076,7 @@ export class SealedPreviews {
     if (known !== undefined) {
       this.drop(chatId, app);
     }
-    const version = (draft.base ?? 0) + 1;
+    const version = sealedAs(draft);
     const running: Running = {
       revision: draft.revision,
       version,

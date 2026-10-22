@@ -134,6 +134,31 @@ export interface ChatDraft {
 }
 
 /**
+ * One write of the chat's draft of an App, kept as it left the draft
+ * (`ChatsApi.draftVersions`): never changed, and restored only as a new
+ * one.
+ */
+export interface ChatDraftVersion {
+  /** Its place among the draft's versions, from 1, in the order they landed. */
+  number: number;
+  /** The draft's revision it made: its preview's calls name it. */
+  revision: number;
+  /** The version of the App it is over; null for an App with none yet. */
+  base: number | null;
+  /** The SHA-256 of what it holds: two versions alike hold the same. */
+  contentHash: string;
+  /**
+   * The code step (`ChatCode.callId`) whose code wrote it, when the
+   * chat's agent did; null when the person restored an earlier one.
+   */
+  callId: string | null;
+  /** The version the person restored as this one, if they did. */
+  restoredFrom: number | null;
+  /** When it was written (ISO 8601). */
+  createdAt: string;
+}
+
+/**
  * A screen of the chat's draft of an App, ready for a frame, as
  * `ScreenBundle` is for a running App (`ChatsApi.preview`): at the draft's
  * revision instead of a version, with the names of the draft's screens.
@@ -534,14 +559,30 @@ export interface ChatsApi {
    */
   drafts: (chatId: string) => Promise<ChatDraft[]>;
   /**
+   * Every version of the chat's draft of `app`, newest first: for the
+   * person while they build the App.
+   */
+  draftVersions: (chatId: string, app: string) => Promise<ChatDraftVersion[]>;
+  /**
+   * Makes version `version` of the chat's draft of `app` the draft again,
+   * as a new version: for the person while they build the App.
+   */
+  restoreDraftVersion: (
+    chatId: string,
+    app: string,
+    version: number
+  ) => Promise<ChatDraftVersion>;
+  /**
    * Screen `screen` of the chat's draft of `app` (its first screen when
    * none is named), built, to preview: for the person while they build
-   * the App.
+   * the App. With `version`, of that version of the draft, read-only:
+   * its calls are refused once the draft is past it.
    */
   preview: (
     chatId: string,
     app: string,
-    screen?: string
+    screen?: string,
+    version?: number
   ) => Promise<PreviewBundle>;
   /**
    * Calls a function of the draft of an App of spec 8's layout, as a

@@ -242,6 +242,85 @@ export const chatDraftFiles = sqliteTable(
 );
 
 /**
+ * Every write of a chat's draft of an App, kept as it left the draft and
+ * never changed: its `number`, counting up from 1 per chat and App in the
+ * order the writes landed, the draft's revision it made, the version it
+ * is over (`base`), and the SHA-256 of what it holds (`contentHash`, of
+ * the canonical JSON of `base` and each path's content hash). Who wrote
+ * it: the chat's agent, in the code step `callId`, or the chat's person,
+ * restoring version `restoredFrom`. The draft's row and files hold only
+ * the latest; these hold every one, to list, preview and restore. Deleted
+ * with the chat, whose drafts they are.
+ */
+export const chatDraftVersions = sqliteTable(
+  "chat_draft_versions",
+  {
+    chatId: text("chat_id")
+      .$type<ChatId>()
+      .notNull()
+      .references(() => chats.id),
+    appId: text("app_id").notNull(),
+    number: integer().notNull(),
+    revision: integer().notNull(),
+    base: integer(),
+    contentHash: text("content_hash").notNull(),
+    callId: text("call_id"),
+    restoredFrom: integer("restored_from"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.chatId, table.appId, table.number] }),
+  ]
+);
+
+/**
+ * What a draft version (`chatDraftVersions`) changes over its base: each
+ * path's content by its SHA-256 (`chatDraftContents`), or null to delete
+ * the file, a row each.
+ */
+export const chatDraftVersionFiles = sqliteTable(
+  "chat_draft_version_files",
+  {
+    chatId: text("chat_id").$type<ChatId>().notNull(),
+    appId: text("app_id").notNull(),
+    number: integer().notNull(),
+    path: text().notNull(),
+    sha256: text(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.chatId, table.appId, table.number, table.path],
+    }),
+    foreignKey({
+      columns: [table.chatId, table.appId, table.number],
+      foreignColumns: [
+        chatDraftVersions.chatId,
+        chatDraftVersions.appId,
+        chatDraftVersions.number,
+      ],
+    }),
+  ]
+);
+
+/**
+ * The contents a chat's draft versions of an App name, each once, by its
+ * SHA-256: most writes change a file or two, so the versions share the
+ * rest.
+ */
+export const chatDraftContents = sqliteTable(
+  "chat_draft_contents",
+  {
+    chatId: text("chat_id").$type<ChatId>().notNull(),
+    appId: text("app_id").notNull(),
+    sha256: text().notNull(),
+    content: text().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.chatId, table.appId, table.sha256] }),
+  ]
+);
+
+/**
  * Audit events of changes to this object's chats (made, renamed, deleted,
  * started to fix a failed run, restricted from the start),
  * each stored in the same transaction as its change, until the object has
