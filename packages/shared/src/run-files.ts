@@ -146,6 +146,34 @@ export const runFileNameSchema = z
 
 export const runFileTypeSchema = z.enum(runFileTypes);
 
+/**
+ * The run-file type a file someone else made shows (GRA-886), from its
+ * bytes: a binary type by its signature, never by the label it came with,
+ * which only picks between types the bytes are both (an Office document
+ * is a ZIP either way) and names a text type, for bytes with no signature.
+ * Undefined when the bytes show none a run file may be (whether all of a
+ * text file is UTF-8 is checked as the file is finished).
+ */
+export const runFileTypeOf = (
+  bytes: Uint8Array,
+  label: string | null
+): RunFileType | undefined => {
+  const head = bytes.subarray(0, 16);
+  const signed = signatures
+    .filter(([, matches]) => matches(head))
+    .map(([type]) => type);
+  const said = (label ?? "").split(";")[0]?.trim().toLowerCase() ?? "";
+  if (signed.length > 0) {
+    return signed.length === 1
+      ? signed[0]
+      : signed.find((type) => type === said);
+  }
+  const text = runFileTypeSchema.safeParse(said);
+  return text.success && runFileTextTypes.has(text.data)
+    ? text.data
+    : undefined;
+};
+
 /** A run file's ID: a random UUID, which grants nothing outside its run. */
 export const runFileIdSchema = z.uuid();
 

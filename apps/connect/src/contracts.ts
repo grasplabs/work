@@ -68,6 +68,7 @@ const nativeContract = (
       readOnly: declared.readOnly,
       input: JSON.stringify(declared.contract.input),
       output: JSON.stringify(declared.contract.output),
+      ...(declared.answersFile === true ? { answersFile: true as const } : {}),
     };
   }
   return { contract, actions };

@@ -97,6 +97,14 @@ export interface ToolDefinition<
     }[];
   };
   /**
+   * The tool reads a file and answers its content as `contentAs` makes it:
+   * input `as` (text or base64), output `name`, `contentType`, `encoding`
+   * and `content`. A workflow action may then ask core to keep the answer
+   * as a file of its run (GRA-886) instead of passing the bytes on. Only a
+   * read-only tool declares it.
+   */
+  answersFile?: true;
+  /**
    * Carries the call out. `effect.key` is the call's effect key
    * (`effectKeyMetaKey`), for a side effect connect sent one for; null
    * otherwise. A tool that can recover gives it to its provider.
@@ -441,6 +449,26 @@ const issuesOf = (error: z.ZodError): string =>
     })
     .join("; ");
 
+/** The properties a tool that answers a file answers it with (`contentAs`). */
+const fileAnswerFields = ["name", "contentType", "encoding", "content"];
+
+/**
+ * Whether a tool declaring `answersFile` has its shape: read-only, an `as`
+ * input, and the file answer's fields among its output's.
+ */
+const answersFileShape = ({
+  readOnly,
+  input,
+  output,
+}: {
+  readOnly: boolean;
+  input: z.ZodObject;
+  output: z.ZodObject;
+}): boolean =>
+  readOnly &&
+  Object.hasOwn(input.shape, "as") &&
+  fileAnswerFields.every((field) => Object.hasOwn(output.shape, field));
+
 /**
  * A tool. Throws if it breaks the connector contract: input that isn't
  * strict everywhere, a resource that isn't one of its string properties.
@@ -457,6 +485,11 @@ export const defineTool = <
   const outputSchema = z.toJSONSchema(output, { io: "output" });
   if (!isClosed(inputSchema)) {
     throw new Error(`${name}: its input must be strict objects throughout`);
+  }
+  if (definition.answersFile === true && !answersFileShape(definition)) {
+    throw new Error(
+      `${name}: a tool that answers a file is read-only, takes \`as\`, and answers \`name\`, \`contentType\`, \`encoding\` and \`content\``
+    );
   }
   const resourceProperty: unknown =
     resource === undefined ? undefined : inputSchema.properties?.[resource];
@@ -478,6 +511,9 @@ export const defineTool = <
       recovery,
       resource: resource ?? null,
       input: Object.keys(inputSchema.properties ?? {}),
+      ...(definition.answersFile === true
+        ? { answersFile: true as const }
+        : {}),
       contract: {
         input: contractSchemaOf(inputSchema),
         output: contractSchemaOf(outputSchema),

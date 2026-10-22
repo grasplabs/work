@@ -94,13 +94,28 @@ export interface Use<
 /** Any declared use. */
 export type AnyUse = Use<string, UseKind, string>;
 
+/** How a connector call's answer comes back. */
+export interface ConnectorCallOptions {
+  /**
+   * For a read that answers a file (`mail.readAttachment`, say): the alias
+   * of the action's own files use, declared with `write`, to keep it in as
+   * a file of the run. The answer then names the file (`file`) in place of
+   * its content, so a file larger than a step holds can be read.
+   */
+  readonly into?: string;
+}
+
 /** A connector binding, as an action calls it. */
 export interface ConnectorResource<Operation extends string = string> {
   /**
    * Calls `operation` of the connector the binding serves, with `args`:
    * one the use declared, or the host refuses it.
    */
-  readonly call: (operation: Operation, args: JsonValue) => Promise<JsonValue>;
+  readonly call: (
+    operation: Operation,
+    args: JsonValue,
+    options?: ConnectorCallOptions
+  ) => Promise<JsonValue>;
 }
 
 /** An operation binding (an approved App export), as an action calls it. */

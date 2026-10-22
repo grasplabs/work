@@ -28,6 +28,7 @@ import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { sweepWorkflowStartDetails } from "../src/workflows/retention.ts";
 import {
   callFiles,
+  keepFile,
   sweepGraceMs,
   sweepRunFiles,
 } from "../src/workflows/run-files.ts";
@@ -1069,6 +1070,73 @@ describe("a workflow run's own files", () => {
       nul: "file.content_mismatch",
       docx: "ok",
       unlisted: "workflow.call_invalid",
+    });
+  });
+
+  it("keep a connector's answer as one finished file of the run, whatever its size, and the same call again as the same file, only of the same bytes", async () => {
+    const caller = callerOf();
+    // Past one call's bytes: written in pieces, as an action's own writes are.
+    const text = bodyOf(runFileLimits.callBytes * 2 + 10);
+    const bytes = new TextEncoder().encode(text);
+    const keeping = caller.next();
+    const kept = await keepFile(env, keeping, {
+      name: "report.csv",
+      type: "text/csv",
+      bytes,
+    });
+    const file = String(fieldOf(kept.output, "file"));
+    // A replay, a retry: the same call, its effect key the same.
+    const again = await keepFile(env, keeping, {
+      name: "report.csv",
+      type: "text/csv",
+      bytes,
+    });
+    const other = await outcome(
+      keepFile(env, keeping, {
+        name: "report.csv",
+        type: "text/csv",
+        bytes: new TextEncoder().encode(bodyOf(10)),
+      })
+    );
+    const read = await callFiles(env, caller.next(), "read", {
+      file,
+      offset: 0,
+      length: runFileLimits.callBytes,
+    });
+    // Not text it says it is: refused, and it holds no place in the run.
+    const notText = await outcome(
+      keepFile(env, caller.next(), {
+        name: "x.txt",
+        type: "text/plain",
+        bytes: Uint8Array.from([0x61, 0xff, 0xfe]),
+      })
+    );
+    expect({
+      ref: {
+        file: file.length > 0,
+        name: fieldOf(kept.output, "name"),
+        type: fieldOf(kept.output, "type"),
+        size: fieldOf(kept.output, "size"),
+        sha256: fieldOf(kept.output, "sha256"),
+      },
+      again: fieldOf(again.output, "file") === file,
+      other,
+      size: fieldOf(read.output, "size"),
+      notText,
+      rows: await rowsOf(caller.run),
+    }).toStrictEqual({
+      ref: {
+        file: true,
+        name: "report.csv",
+        type: "text/csv",
+        size: bytes.length,
+        sha256: await sha256HexOfBytes(bytes),
+      },
+      again: true,
+      other: "workflow.call_invalid",
+      size: bytes.length,
+      notText: "file.content_mismatch",
+      rows: ["done", "deleted"],
     });
   });
 

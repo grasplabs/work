@@ -1560,6 +1560,12 @@ export interface ConnectorContractAction {
    */
   input: string;
   output: string;
+  /**
+   * It reads a file and answers its content (connector-kit's `contentAs`),
+   * which a workflow action may have core keep as a file of its run
+   * (GRA-886). Only a native connector's read declares it; never Composio's.
+   */
+  answersFile?: true;
 }
 
 /**

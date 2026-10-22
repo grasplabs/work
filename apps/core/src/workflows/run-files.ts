@@ -708,6 +708,47 @@ export const callFiles = async (
   }
 };
 
+/**
+ * Keeps `bytes` as a finished file of `caller`'s run, named `name` and of
+ * `type`, for a connector read an action asked to have as a file
+ * (GRA-886): opened, written in pieces of `callBytes` and finished as an
+ * action's own writes are, each under a key of the call's own effect key,
+ * so the same call again (a replay, a retry) answers the same file, and
+ * its bytes must be the same. Every limit, the type check against the
+ * bytes and the SHA-256 apply as they do to an action's writes.
+ */
+export const keepFile = async (
+  env: Env,
+  caller: FilesCaller,
+  file: { name: string; type: RunFileType; bytes: Uint8Array }
+): Promise<FilesAnswer> => {
+  // Keys of the call's own step: `<step key>:<ordinal>#…`, so the task
+  // that opens the file is the one that writes and finishes it.
+  const as = (suffix: string): FilesCaller => ({
+    ...caller,
+    effectKey: `${caller.effectKey}#${suffix}`,
+  });
+  const opened = await open(env, as("open"), {
+    name: file.name,
+    type: file.type,
+  });
+  const id = runFileIdSchema.parse(
+    z.object({ file: z.string() }).parse(opened.output).file
+  );
+  for (
+    let at = 0, piece = 0;
+    at < file.bytes.length;
+    at += runFileLimits.callBytes, piece += 1
+  ) {
+    // oxlint-disable-next-line no-await-in-loop -- in order: each piece follows the last
+    await append(env, as(`piece${String(piece)}`), {
+      file: id,
+      content: toBase64(file.bytes.subarray(at, at + runFileLimits.callBytes)),
+    });
+  }
+  return await finish(env, as("finish"), { file: id });
+};
+
 /** Most chunks one sweep deletes at a time: R2's bound for one delete. */
 const chunksPerDelete = 1000;
 /** Most deletes one sweep makes, so a cron run stays bounded. */

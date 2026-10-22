@@ -316,6 +316,11 @@ const actionManifestSchema = z.strictObject({
   input: z.array(z.string().min(1).max(128)).max(128),
   describe: actionDescribeSchema.optional(),
   /**
+   * It reads a file and answers its content (`contentAs`), which a
+   * workflow action may ask core to keep as a file of its run (GRA-886).
+   */
+  answersFile: z.literal(true).optional(),
+  /**
    * Its input and its output, as the JSON Schemas the connector's own
    * schemas make: the generated contract an App's resource binding is
    * checked against (spec 12), in both directions. Data only: connect
@@ -400,6 +405,13 @@ export const connectorManifestSchema = z
               describe.fields.length)
       ),
     "An action describes only its own input properties, each once"
+  )
+  .refine(
+    ({ actions }) =>
+      Object.values(actions).every(
+        ({ answersFile, readOnly }) => answersFile !== true || readOnly
+      ),
+    "Only a read-only action answers a file"
   )
   .refine(
     ({ actions }) =>

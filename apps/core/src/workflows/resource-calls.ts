@@ -6,7 +6,12 @@ import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
-import { runFileIdSchema } from "@grasp-os/shared/run-files";
+import {
+  runFileErrors,
+  runFileIdSchema,
+  runFileNameSchema,
+  runFileTypeOf,
+} from "@grasp-os/shared/run-files";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import { writeJson } from "@grasp-os/workflow-expressions/bounded-json";
 import { evaluatorLimits } from "@grasp-os/workflow-expressions/limits";
@@ -40,8 +45,8 @@ import {
   callTemplate,
   requireKnowledgeRequest,
 } from "./resource-reads.ts";
-import { callFiles, requireFilesArguments } from "./run-files.ts";
-import type { FilesCallOperation } from "./run-files.ts";
+import { callFiles, keepFile, requireFilesArguments } from "./run-files.ts";
+import type { FilesAnswer, FilesCallOperation } from "./run-files.ts";
 
 // The effects of a run of an independent workflow's sealed build
 // (platform specification 13.6): its `grasp.connector`, `grasp.operation`
@@ -130,6 +135,12 @@ export type BuiltCall =
       readonly arguments: Json;
       /** The values of the binding arguments the host put in. */
       readonly sensitive: readonly Json[];
+      /**
+       * The files binding a read that answers a file keeps it in, as a
+       * file of the run (GRA-886): asked by an action that declared that
+       * files use, to write.
+       */
+      readonly into?: string;
     }
   | {
       readonly name: "grasp.model";
@@ -295,6 +306,106 @@ const workflowPermission = async (env: Env, run: CallingRun, id: string) => {
   return row;
 };
 
+/** How Composio toolkits' contracts are named: `composio.<toolkit>@1`. */
+const composioContractPrefix = "composio.";
+
+/** A read that answers a file's own fields, as connector-kit's `contentAs` makes them. */
+const fileAnswerSchema = z
+  .object({
+    name: z.string().nullable(),
+    contentType: z.string().nullable(),
+    encoding: z.literal("base64"),
+    content: z.string(),
+  })
+  .catchall(z.json());
+
+/**
+ * `input` of a read an action asked to have as a file: refused unless the
+ * connection's connector declares the operation answers one (a native
+ * connector's manifest, never a Composio tool's), and asked for as base64.
+ */
+const asFileRead = async (
+  env: Env,
+  contract: string,
+  connectionId: string,
+  call: Extract<BuiltCall, { name: "grasp.connector" }>,
+  input: Json
+): Promise<Json> => {
+  // A Composio toolkit's tools never answer a file: not asked of connect.
+  if (contract.startsWith(composioContractPrefix)) {
+    throw callInvalid("into: This operation doesn't answer a file.");
+  }
+  const served = await env.CONNECT.connectorContract({
+    contract,
+    connectionId,
+  });
+  const action = Object.values(served.actions).find(
+    ({ tool }) => tool === call.operation
+  );
+  const fields = z.record(z.string(), z.json()).safeParse(input);
+  if (action?.answersFile !== true || !fields.success) {
+    throw callInvalid("into: This operation doesn't answer a file.");
+  }
+  if (fields.data.as !== undefined && fields.data.as !== "base64") {
+    throw callInvalid("arguments.as: A file is read as base64.");
+  }
+  return { ...fields.data, as: "base64" };
+};
+
+/** How a kept file is named when the name it came with can't be a run file's. */
+const unnamedFile = "attachment";
+
+/**
+ * `answer`, a read that answers a file, with its bytes kept as a file of
+ * the calling run (`keepFile`) and named in place of its content: its
+ * type shown by its bytes (`runFileTypeOf`), never the label it came
+ * with; its name only if a run file's may be it. What the call's receipt
+ * says of the file: its ID, type, size and SHA-256, never its name.
+ */
+const keptAsFile = async (
+  env: Env,
+  run: CallingRun,
+  effect: Effect,
+  answer: Json
+): Promise<FilesAnswer> => {
+  const read = fileAnswerSchema.safeParse(answer);
+  if (!read.success) {
+    throw callInvalid("output: It isn't a file's content as base64.");
+  }
+  const { content, contentType } = read.data;
+  // Its other fields as they are; its content and encoding become the file.
+  const rest = Object.fromEntries(
+    Object.entries(read.data).filter(
+      ([key]) => key !== "content" && key !== "encoding"
+    )
+  );
+  let bytes: Uint8Array;
+  try {
+    bytes = Uint8Array.from(atob(content), (char) => char.codePointAt(0) ?? 0);
+  } catch {
+    throw callInvalid("output: Its content isn't base64.");
+  }
+  const type = runFileTypeOf(bytes, contentType);
+  if (type === undefined) {
+    throw runFileErrors.create("file.run_type_unsupported");
+  }
+  const named = runFileNameSchema.safeParse(read.data.name);
+  const kept = await keepFile(
+    env,
+    {
+      runId: run.runId,
+      workflowId: run.workflowId,
+      effectKey: effect.key,
+      requireHolds: effect.requireHolds,
+    },
+    { name: named.success ? named.data : unnamedFile, type, bytes }
+  );
+  return {
+    output: { ...rest, file: kept.output },
+    detail: kept.detail,
+  };
+};
+
 /**
  * Calls connector action `operation` through `binding`'s connection
  * permission, with `args` (binding arguments in), under the effect's key,
@@ -306,7 +417,7 @@ const callConnector = async (
   binding: FrozenCatalogBinding,
   call: Extract<BuiltCall, { name: "grasp.connector" }>,
   effect: Effect
-): Promise<Json> => {
+): Promise<FilesAnswer> => {
   const { target } = binding;
   if (target.kind !== "connector") {
     throw workflowResourceErrors.create("workflow.call_denied");
@@ -318,11 +429,17 @@ const callConnector = async (
   if (shape === undefined) {
     throw callInvalid("operation: The contract has no such operation.");
   }
-  const input = requireShape(shape.input, call.arguments, "arguments");
+  const asked = requireShape(shape.input, call.arguments, "arguments");
   const row = await workflowPermission(env, run, target.permissionId);
   if (row.objectType !== "connection") {
     throw workflowResourceErrors.create("workflow.call_denied");
   }
+  // Kept as a file of the run: only of a read its connector declares
+  // answers a file, which it is asked for as base64, the bytes as they are.
+  const input =
+    call.into === undefined
+      ? asked
+      : await asFileRead(env, target.contract, row.objectId, call, asked);
   const result = await runStubCall(
     env,
     // Refused at once, before any check, for a key other than the step's.
@@ -373,7 +490,9 @@ const callConnector = async (
   if (echoes(answer, call.sensitive)) {
     throw callInvalid("output: It echoes a sensitive argument.");
   }
-  return answer;
+  return call.into === undefined
+    ? { output: answer, detail: {} }
+    : await keptAsFile(env, run, effect, answer);
 };
 
 /**
@@ -803,12 +922,23 @@ export const makeCall = async (
       fileDetail = filesCallDetail(call.operation, call.arguments);
     }
     await requireCallAuthority(env, run, binding);
+    // A read kept as a file needs the files binding it goes into, and its
+    // authority now, as the files call it stands for would (GRA-886).
+    if (call.name === "grasp.connector" && call.into !== undefined) {
+      const files = run.bindings.get(call.into);
+      if (files?.kind !== "files") {
+        throw workflowResourceErrors.create("workflow.call_denied");
+      }
+      await requireCallAuthority(env, run, files);
+    }
     // Kept before the call goes out, or it doesn't go: a call that took
     // effect always has its receipt, whatever happens after.
     await audited(env, receipt("started"));
     switch (call.name) {
       case "grasp.connector": {
-        output = await callConnector(env, run, binding, call, effect);
+        const answer = await callConnector(env, run, binding, call, effect);
+        fileDetail = { ...fileDetail, ...answer.detail };
+        ({ output } = answer);
         break;
       }
       case "grasp.operation": {
