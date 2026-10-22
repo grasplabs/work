@@ -35,7 +35,7 @@ import { testBinding } from "./test-env.ts";
 const settings = z
   .object({
     mode: z.enum(["estimate", "run"]),
-    split: z.enum(["validation", "sealed"]),
+    split: z.enum(["dev", "validation", "sealed"]),
     repeats: z.int().min(1),
     budgetUsd: z.number().positive().optional(),
     outputAllowance: z.int().min(0),
