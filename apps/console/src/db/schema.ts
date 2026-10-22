@@ -91,6 +91,14 @@ export const clients = sqliteTable(
      * already (src/rollout/targets.ts); null while nothing changed.
      */
     configChangedAt: timestamp("config_changed_at"),
+    /**
+     * The client's customer in Grasp's Stripe (`cus_...`), as someone at
+     * Grasp linked it by hand (src/billing/link.ts): never matched by name
+     * or email, so the admin never shows one company another's invoices.
+     * Only the id is kept; what Stripe holds is read each time
+     * (src/billing/stripe.ts). Null until it is linked.
+     */
+    stripeCustomerId: text("stripe_customer_id"),
     /** The release it stays on while pinned, whatever the rollouts. */
     pinnedReleaseId: text("pinned_release_id").references(() => releases.id),
     createdAt: timestamp("created_at").notNull(),
