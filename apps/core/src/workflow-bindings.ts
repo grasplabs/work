@@ -315,7 +315,9 @@ const requireConnectorServes = async (
         action !== undefined &&
         allowed.includes(action.tool) &&
         sameShape(action.input, connectorShapeOf(shape.input)) &&
-        sameShape(action.output, connectorShapeOf(shape.output))
+        sameShape(action.output, connectorShapeOf(shape.output)) &&
+        // A file answer the contract records is the connector's too.
+        (shape.answersFile ?? false) === (action.answersFile ?? false)
       );
     });
   if (!serves) {
