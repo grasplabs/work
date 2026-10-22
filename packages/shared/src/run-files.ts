@@ -269,5 +269,5 @@ export const runFileErrors = defineErrorFamily({
   "file.not_finished": "That file isn't finished yet.",
   "file.start_files": `A start hands its run at most ${runFileLimits.startFiles} files, each only from the App's screen that starts it.`,
   "file.attach_too_large":
-    "A write attaches at most 10 files, 3 MB each and 3.5 MB together, each once.",
+    "A write attaches at most 10 files, 2.75 MB together, each once.",
 });
