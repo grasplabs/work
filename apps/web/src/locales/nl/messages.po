@@ -3307,6 +3307,10 @@ msgstr "kon niet worden gelezen"
 msgid "Couldn't load this domain's workflows."
 msgstr "De workflows van dit domein konden niet worden geladen."
 
+#: src/workflows/owner-picker.tsx
+msgid "Couldn't make {chosen} the owner of {named}"
+msgstr "{chosen} kon geen eigenaar van {named} worden"
+
 #: src/workflows/independent-workflows.tsx
 msgid "Create"
 msgstr "Aanmaken"
@@ -6166,6 +6170,10 @@ msgstr "Geen ander domein stelt elke functie beschikbaar die het declareert, als
 msgid "No owner"
 msgstr "Geen eigenaar"
 
+#: src/people/person-picker.tsx
+msgid "No owner yet"
+msgstr "Nog geen eigenaar"
+
 #: src/engines/package-approvals.tsx
 msgid "No packages are approved for this domain."
 msgstr "Voor dit domein zijn geen pakketten goedgekeurd."
@@ -6341,6 +6349,10 @@ msgstr "Niemand heeft {doc} in {where} {days, plural, one {de afgelopen dag} oth
 #: src/dashboard/signals.tsx
 msgid "Nobody reads it"
 msgstr "Niemand leest het"
+
+#: src/people/person-picker.tsx
+msgid "Nobody with that name."
+msgstr "Niemand met die naam."
 
 #: src/routes/_shell.landscape.$appId.usage.$userId.tsx
 msgid "Nobody with this link is connected to {appName}."
@@ -7120,10 +7132,23 @@ msgstr "Jij bent eigenaar"
 msgid "Owner"
 msgstr "Eigenaar"
 
+#: src/workflows/workflows-table.tsx
+msgctxt "column: who owns a workflow"
+msgid "Owner"
+msgstr "Eigenaar"
+
 #: src/brain/brain.ts
 msgctxt "note property: the team that owns an application"
 msgid "Owner"
 msgstr "Eigenaar"
+
+#: src/people/person-picker.tsx
+msgid "Owner: {owner}. Change owner"
+msgstr "Eigenaar: {owner}. Eigenaar wijzigen"
+
+#: src/people/person-picker.tsx
+msgid "Owner: nobody yet. Change owner"
+msgstr "Eigenaar: nog niemand. Eigenaar wijzigen"
 
 #: src/landscape/landscape-audit.ts
 msgctxt "category of an audit event"
@@ -7685,6 +7710,10 @@ msgstr "Lezen wat er bij een verbinding veranderd is, is mislukt"
 #: src/routes/guest.tsx
 msgid "Reading what you wrote"
 msgstr "Je antwoord wordt gelezen"
+
+#: src/people/person-picker.tsx
+msgid "Reading who can own it…"
+msgstr "Lezen wie eigenaar kan zijn…"
 
 #: src/onboarding/setup-steps.tsx
 msgid "Reading your staff list"
@@ -8374,6 +8403,10 @@ msgstr "Leden zoeken"
 #: src/landscape/filter-menu.tsx
 msgid "Search owner"
 msgstr "Eigenaar zoeken"
+
+#: src/people/person-picker.tsx
+msgid "Search people"
+msgstr "Personen zoeken"
 
 #: src/settings/pulse-people.tsx
 msgid "Search people and devices"

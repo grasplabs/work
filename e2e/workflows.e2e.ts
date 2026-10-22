@@ -351,6 +351,56 @@ test("someone an App is shared with reads its workflow, with nothing to change o
   await expect(page.getByRole("combobox", { name: "Workflow" })).toBeDisabled();
 });
 
+test("a builder hands a workflow to someone the App is shared with, from its line, and they see it as theirs", async ({
+  pageOf,
+}) => {
+  const { builder, user } = peopleIn("workflows");
+  const name = `Invoices ${crypto.randomUUID()}`;
+  const app = await appWithWaitingRun(builder, user, name);
+  const members = await withApi(
+    builder,
+    async (api) => await api.members.list()
+  );
+  const names = new Map(members.map((member) => [member.userId, member.name]));
+  const builderName = names.get(builder.userId) ?? builder.userId;
+  const userName = names.get(user.userId) ?? user.userId;
+
+  const page = await pageOf(builder);
+  await page.goto("/workflows");
+  const line = page
+    .getByRole("row")
+    .filter({ has: page.getByRole("link", { name: "approval" }) })
+    .filter({ hasText: name });
+  // Nobody set an owner: the App's, its builder.
+  const owner = line.getByRole("button", { name: /^Owner: /u });
+  await expect(owner).toHaveAccessibleName(
+    `Owner: ${builderName}. Change owner`,
+    pageRead
+  );
+  await owner.click();
+  await page.getByPlaceholder("Search people").fill(userName);
+  await page.getByRole("option", { name: userName }).click();
+  await expect(owner).toHaveAccessibleName(
+    `Owner: ${userName}. Change owner`,
+    pageRead
+  );
+  // Core holds it: read back, not just shown.
+  await withApi(builder, async (api) => {
+    const workflow = await api.workflows.get(app, "approval");
+    expect(workflow.summary.owner.userId).toBe(user.userId);
+  });
+
+  // The new owner sees it, and, a user of the App, can't hand it on.
+  const theirs = await pageOf(user);
+  await theirs.goto("/workflows");
+  const their = theirs
+    .getByRole("row")
+    .filter({ has: theirs.getByRole("link", { name: "approval" }) })
+    .filter({ hasText: name })
+    .getByRole("button", { name: userName });
+  await expect(their).toBeDisabled(pageRead);
+});
+
 /** A workflow whose runs sleep a day: a run that goes on, with no decision. */
 const idle = `import { workflow, z } from "@grasp-os/sdk/workflow";
 
