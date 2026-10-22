@@ -1698,6 +1698,18 @@ export const aiStepCalls = (source: string): AiStepCall[] | null => {
 };
 
 /**
+ * The AI steps of a workflow whose outline can't be read, as kinds: each
+ * by its name, one whose name can't be read as `$ai`; none when it has
+ * none (`aiStepCalls`). Its runs may ask a model only if it has one.
+ */
+const aiKindsOf = (source: string): WorkflowCalls["kinds"] =>
+  Object.fromEntries(
+    (aiStepCalls(source) ?? []).map(
+      ({ name }) => [name ?? "$ai", "ai"] as const
+    )
+  );
+
+/**
  * The App's bindings the workflow in `source` calls, as a review shows
  * them and its runs are held to: by step, as its outline names them, and
  * all together. A workflow whose steps can't be read (a step in a `try`,
@@ -1714,7 +1726,7 @@ export const reviewedCalls = (source: string): WorkflowCalls => {
     context = readContext(source);
   } catch (error) {
     if (error instanceof WorkflowError) {
-      return { steps: null, all: [] };
+      return { steps: null, kinds: {}, all: [] };
     }
     throw error;
   }
@@ -1731,6 +1743,10 @@ export const reviewedCalls = (source: string): WorkflowCalls => {
       outline === null
         ? null
         : Object.fromEntries(steps.map(({ name, env }) => [name, env ?? []])),
+    kinds:
+      outline === null
+        ? aiKindsOf(source)
+        : Object.fromEntries(steps.map(({ name, kind }) => [name, kind])),
     all: envCallsIn(bindings, [run.body]),
     ...(dynamic.length === 0 ? {} : { dynamic: Object.fromEntries(dynamic) }),
   };
