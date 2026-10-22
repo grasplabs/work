@@ -2532,7 +2532,8 @@ const concurrencyOf = (task: JsonObject): number => {
 
 /**
  * Refuses what of `for` task `item` isn't lowered yet: loops nested past
- * the scopes a step's name holds. Whether anything was.
+ * the scopes a step's name holds, and a `while` on items at once.
+ * Whether anything was.
  */
 const refusedLoop = (emitter: Emitter, item: ListTask): boolean => {
   let refused = false;
@@ -2540,6 +2541,17 @@ const refusedLoop = (emitter: Emitter, item: ListTask): boolean => {
   // host reads of a step's name.
   if (emitter.scope.length >= maxLoopDepth) {
     emitter.refusals.add(item.pointer, "for:depth", item.id);
+    refused = true;
+  }
+  // A `while` stops the items after the one it fails at; with items at
+  // once, those already started would run past it, and which are started
+  // depends on timing.
+  if (Object.hasOwn(item.task, "while") && concurrencyOf(item.task) > 1) {
+    emitter.refusals.add(
+      pointerJoin(item.pointer, "while"),
+      "for:while_concurrency",
+      item.id
+    );
     refused = true;
   }
   return refused;
