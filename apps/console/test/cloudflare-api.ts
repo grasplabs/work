@@ -36,6 +36,12 @@ import {
   platformUpdatePurpose,
   platformUpdateSignatureHeader,
 } from "@grasp-os/shared/platform-change";
+import {
+  provisionProbePath,
+  provisionProbePurpose,
+  provisionProbeRequestSchema,
+} from "@grasp-os/shared/provision-probe";
+import type { ProvisionProbe } from "@grasp-os/shared/provision-probe";
 import { afterEach, beforeEach, vi } from "vite-plus/test";
 import { z } from "zod";
 
@@ -104,6 +110,86 @@ const takeNotice = async (
   }
   account.notices.push(notice.data);
   return new Response(null, { status: 204 });
+};
+
+/** What core answers a path it has no route for: its frontend's page. */
+const frontendPage = (): Response =>
+  new Response("<!doctype html><title>Grasp</title>", {
+    headers: { "content-type": "text/html" },
+  });
+
+/** The binding kinds core's probe asks (core's src/provision-probe.ts). */
+const probedKinds = new Set(["d1", "r2_bucket", "service"]);
+
+/** A few of each clock's tasks, as core's and connect's src/clock.ts name them. */
+const clockTaskNames = {
+  core: ["audit.drain", "workflows.schedules", "connect.clock"],
+  connect: ["oauth.flows", "vault.tokens"],
+};
+
+/**
+ * What a client's core answers the console's provisioning probe with, as
+ * core does (core's src/provision-probe.ts), once the signature checks
+ * out with the key its live version's auth secret gives and the request
+ * parses: the version answering, the `CLIENT_ID` its live version runs
+ * with, each of its private bindings answering, and both clocks armed,
+ * unless the account says otherwise (`coreProbe`). Anything else, and
+ * any request to a core from before the probe, gets its frontend's page.
+ */
+const answerProbe = async (
+  account: AccountState,
+  live: VersionState,
+  request: Request
+): Promise<Response> => {
+  const probe = account.coreProbe ?? {};
+  if (probe === "absent") {
+    return frontendPage();
+  }
+  const body = await request.text();
+  const key = await hkdfHmacKey(
+    live.secrets.get("BETTER_AUTH_SECRET") ?? "",
+    provisionProbePurpose,
+    ["sign"]
+  );
+  const expected = toHex(
+    new Uint8Array(
+      await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(body))
+    )
+  );
+  if (
+    request.headers.get(platformUpdateSignatureHeader) !== expected ||
+    !provisionProbeRequestSchema.safeParse(JSON.parse(body)).success
+  ) {
+    return frontendPage();
+  }
+  const bindings = z
+    .array(
+      z
+        .object({
+          type: z.string(),
+          name: z.string(),
+          json: z.unknown().optional(),
+        })
+        .loose()
+    )
+    .parse(live.metadata.bindings ?? []);
+  const clientId = bindings.find(({ name }) => name === "CLIENT_ID")?.json;
+  const down = new Set(probe.down);
+  const clock = (name: "core" | "connect") =>
+    probe.clocksDown?.includes(name) === true
+      ? null
+      : { armed: true, tasks: clockTaskNames[name] };
+  return Response.json({
+    version: account.answeringVersion ?? live.id,
+    clientId:
+      probe.asClient ?? (typeof clientId === "string" ? clientId : null),
+    bindings: Object.fromEntries(
+      bindings
+        .filter(({ type }) => probedKinds.has(type))
+        .map(({ name }) => [name, !down.has(name)])
+    ),
+    clocks: { core: clock("core"), connect: clock("connect") },
+  } satisfies ProvisionProbe);
 };
 
 /** None begun: what a core answers that has no onboarding. */
@@ -940,8 +1026,9 @@ export const mockCloudflareApi = (
   /**
    * What a Worker on an account's workers.dev subdomain answers: its live
    * version's `/health`, as core answers it, to a request carrying the
-   * router secret that version has, and the platform update notices it
-   * takes. Undefined for any other host.
+   * router secret that version has, the platform update notices it
+   * takes, and the console's signed requests it answers, its
+   * provisioning probe among them. Undefined for any other host.
    */
   /**
    * The account and live version of the Worker a workers.dev `host`
@@ -993,6 +1080,9 @@ export const mockCloudflareApi = (
     }
     if (url.pathname === onboardingSummaryPath && request.method === "POST") {
       return await answerSummary(account, live, request);
+    }
+    if (url.pathname === provisionProbePath && request.method === "POST") {
+      return await answerProbe(account, live, request);
     }
     if (url.pathname === adminAskPath && request.method === "POST") {
       return await answerAsk(account, live, request);

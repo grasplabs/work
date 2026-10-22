@@ -17,7 +17,10 @@
  * 5. `secrets`: the client's derived secrets and the shared ones its
  *    Workers need, delivered by name to each script, then observed.
  * 7. `probe`: core answers its health check as the version live, with the
- *    router secret the router will send (`smokeCheck`).
+ *    router secret the router will send (`smokeCheck`), then the
+ *    console's signed probe (src/hosting/probe.ts): it runs as this
+ *    client, each private binding the release gives it answers, and its
+ *    clock and connect's are armed.
  * 8. `route`: only then the client's hostname in the router's map.
  * 9. `done`: the operation recorded complete, the client active and the
  *    runner's claim released, in one batch.
@@ -46,10 +49,8 @@
  * holds the client next finds and reconciles what it left (spec 39.1).
  *
  * Not here, on purpose:
- * - Durable clocks (40.2 step 7) and probes beyond core's health check
- *   (identity, private resources, connect capability, a sandbox call, an
- *   owned workflow) need authenticated probe endpoints core doesn't have
- *   yet: the probe stops at the smoke check deploys make.
+ * - Probes beyond identity, private resources and clocks (a sandbox call,
+ *   an owned workflow): core's probe doesn't make them yet.
  * - The model-spend admission ceiling (40.5) waits for a product decision
  *   (GRA-141), and the shared AI Gateway reference for a destination (37.5)
  *   isn't recorded yet. Until both exist, a release whose Worker binds
@@ -106,7 +107,7 @@ import {
   workersSubdomain,
 } from "../deploy/router.ts";
 import type { RouterHosts, SmokeOptions } from "../deploy/router.ts";
-import { workerSecrets } from "../deploy/secrets.ts";
+import { clientAuthSecret, workerSecrets } from "../deploy/secrets.ts";
 import type { DeploySecrets } from "../deploy/secrets.ts";
 import {
   checkBindingNames,
@@ -127,6 +128,7 @@ import {
   renderClientWorker,
 } from "./inventory.ts";
 import type { ClientPlacement, ClientResource } from "./inventory.ts";
+import { privateBindings, probeCore, probeFault } from "./probe.ts";
 import { ensureClientResources } from "./provision.ts";
 
 export const provisionOperationErrorCodes = [
@@ -157,6 +159,14 @@ export const provisionOperationErrorCodes = [
   "secrets_unobserved",
   /** No qualified way to probe core in this destination (Workers for Platforms, until GRA-430). */
   "probe_unqualified",
+  /** Core didn't answer the console's signed probe, as a core from before it doesn't. */
+  "probe_unanswered",
+  /** Core answered the probe as another client, or another version than the one live. */
+  "probe_identity_mismatch",
+  /** A private binding the release gives core didn't answer the probe. */
+  "probe_binding_unanswered",
+  /** Core's clock or connect's isn't armed with tasks after the probe. */
+  "probe_clock_unarmed",
   /** Another runner holds the client: this one changes nothing more. */
   "runner_replaced",
   /** The operation's row is gone before it could be recorded done. */
@@ -877,9 +887,14 @@ const deliverSecrets = async (
   await recordStep(db, loaded, "secrets", { delivered });
 };
 
+/** How long core's signed probe may take, its body included. */
+const probeTimeoutMs = 10_000;
+
 /**
  * Step 7: core answers its health check, as the version live, to the
- * router secret the router will send. Returns its origin.
+ * router secret the router will send, then the console's signed probe as
+ * this client at that version, each of its private bindings answering
+ * and both clocks armed. Returns its origin.
  */
 const probe = async (
   context: ProvisionContext,
@@ -908,16 +923,42 @@ const probe = async (
       `${target.scriptName} has no version live`
     );
   }
+  const routerSecret = await deriveRouterSecret(
+    context.secrets.routerKey,
+    held.clientId,
+    loaded.client.generation
+  );
   const attempts = await smokeCheck(
     origin,
-    await deriveRouterSecret(
-      context.secrets.routerKey,
-      held.clientId,
-      loaded.client.generation
-    ),
+    routerSecret,
     version,
     context.router.smoke
   );
+  const answer = await probeCore({
+    origin,
+    routerSecret,
+    authSecret: await clientAuthSecret(
+      context.secrets,
+      held.clientId,
+      loaded.client.generation
+    ),
+    fetch: context.router.smoke?.fetch ?? fetch,
+    timeoutMs: context.router.smoke?.attemptTimeoutMs ?? probeTimeoutMs,
+  });
+  if (answer === undefined) {
+    throw new ProvisionOperationError(
+      "probe_unanswered",
+      `Core at ${origin} didn't answer the console's probe`
+    );
+  }
+  const fault = probeFault(answer, {
+    clientId: held.clientId,
+    version,
+    bindings: privateBindings(workerOf(loaded.manifest, "core")),
+  });
+  if (fault !== null) {
+    throw new ProvisionOperationError(fault.code, fault.message);
+  }
   const progress = await progressNow(db, loaded.operation.id);
   await recordStep(db, loaded, "probe", { attempts }, { ...progress, origin });
   return origin;
