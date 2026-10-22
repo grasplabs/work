@@ -208,6 +208,7 @@ const cast = {
   intake: { admin: "admin" },
   models: { admin: "admin", builder: "builder" },
   settings: { admin: "admin", member: "user" },
+  ownSessions: { member: "user" },
   workflows: { builder: "builder", user: "user" },
   activity: { admin: "admin", builder: "builder" },
   activityAgain: { admin: "admin", builder: "builder" },
