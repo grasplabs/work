@@ -108,19 +108,23 @@ const lowered = (text: string): string =>
 
 /**
  * `text` as the detectors read it (`lowered`). Text with markup is read
- * twice, joined: as written, and with its tags removed and its links
+ * three times, joined: as written; with its tags as spaces and its links
  * reduced to their text, so a word a tag or link splits ("trade
  * <span>union</span>") is seen, and so is one inside what only looks like
- * a tag ("hours < 8, on sick leave > 5 days") or in a link's address. A
- * word either reading has counts: when unsure, hold.
+ * a tag ("hours < 8, on sick leave > 5 days") or in a link's address; and
+ * with its tags and comments removed, as the Knowledge reader drops raw
+ * HTML and shows the halves around it joined ("can<b></b>cer"). A word
+ * any reading has counts: when unsure, hold.
  */
 const normalized = (text: string): string => {
   const plain = lowered(text);
   if (!text.includes("<") && !text.includes("](")) {
     return plain;
   }
-  const unmarked = text.replaceAll(tag, " ").replaceAll(link, "$<text>");
-  return `${plain}\n${lowered(unmarked)}`;
+  const linked = text.replaceAll(link, "$<text>");
+  const spaced = linked.replaceAll(tag, " ");
+  const joined = linked.replaceAll(tag, "");
+  return `${plain}\n${lowered(spaced)}\n${lowered(joined)}`;
 };
 
 /**
@@ -443,19 +447,35 @@ const screenWritten = (text: string): AdmissionOutcome => {
 };
 
 /**
+ * A hyphen that breaks a word at a line's end, as PDF text keeps it:
+ * "diag-\nnosed". Only before a lowercase letter, which continues a word.
+ */
+const lineEndHyphen = /-[ \t]*\n[ \t]*(?=\p{Ll})/gu;
+
+/**
  * What the platform minimum's detectors decide for `text`: excluded if any
  * sentence or table certainly holds a person's sensitive data, held if one
- * might, admitted otherwise. Text with HTML character references is read
- * twice, as written and as rendered (`&#99;ancer` is "cancer"), and the
- * worse reading decides. Pure: the topics in effect are the gate's.
+ * might, admitted otherwise. The text is also read as rendered, with its
+ * HTML character references decoded (`&#99;ancer` is "cancer"), and with
+ * words a line-end hyphen breaks joined ("can-\ncer"); the worst reading
+ * decides. Pure: the topics in effect are the gate's.
  */
 export const screen = (text: string): AdmissionOutcome => {
-  const written = screenWritten(text);
-  if (written === "excluded" || !text.includes("&")) {
-    return written;
+  const rendered = text.includes("&") ? decodedReferences(text) : text;
+  const readings = new Set([
+    text,
+    rendered,
+    text.replaceAll(lineEndHyphen, ""),
+    rendered.replaceAll(lineEndHyphen, ""),
+  ]);
+  let outcome: AdmissionOutcome = "admitted";
+  for (const reading of readings) {
+    outcome = worse(outcome, screenWritten(reading));
+    if (outcome === "excluded") {
+      return outcome;
+    }
   }
-  const rendered = decodedReferences(text);
-  return rendered === text ? written : worse(written, screenWritten(rendered));
+  return outcome;
 };
 
 /** The topics in effect, and whether this code enforces all of them. */

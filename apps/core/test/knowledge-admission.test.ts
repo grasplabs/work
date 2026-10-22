@@ -155,6 +155,12 @@ describe("Knowledge admission", { timeout: 60_000 }, () => {
       // Markup inside the words.
       tagged: 'She is a trade <span class="x">union</span> member.',
       linked: "She is a trade [union](https://hr.example) member.",
+      // Markup the Knowledge reader drops, joining the halves of a word.
+      emptyTag: "She has can<b></b>cer.",
+      comment: "She is preg<!-- x -->nant.",
+      // A word a line-end hyphen breaks, as PDF text keeps it.
+      lineBreakHyphen: "She has can-\ncer.",
+      lineBreakPay: "Her sal- \nary is €4,200.",
       // An abbreviation's full stop, read as a sentence's end.
       abbreviation: "She has a Ph.D. and is on sick leave.",
       abbreviations: "E.g. she is on sick leave, i.e. off work.",
@@ -194,6 +200,10 @@ describe("Knowledge admission", { timeout: 60_000 }, () => {
       tableAndList: "held",
       tagged: "held",
       linked: "held",
+      emptyTag: "held",
+      comment: "excluded",
+      lineBreakHyphen: "held",
+      lineBreakPay: "excluded",
       comparison: "held",
       abbreviation: "held",
       abbreviations: "held",
@@ -219,6 +229,8 @@ describe("Knowledge admission", { timeout: 60_000 }, () => {
       "<a".repeat(size / 2),
       `<${"a".repeat(size)}`,
       "[a](".repeat(size / 4),
+      `-${" ".repeat(size)}a`,
+      "-\n".repeat(size / 2),
       // A long heading over many short sentences.
       `# ${"heading ".repeat(size / 16)}\n${"Ok. ".repeat(size / 4)}`,
     ];
