@@ -184,6 +184,21 @@ describe("Knowledge admission", { timeout: 60_000 }, () => {
       headingUnderLine: "Employee Jan Jansen\n## Cancer",
       headingInListItem: "- Employee Jan Jansen\n  ## Cancer",
       headingsInListItem: "- # Employee Jan Jansen\n  ## Cancer",
+      // The lines a heading joins, for the section under it.
+      sectionInListItem:
+        "- Employee Jan Jansen\n  ## Status\n  On sick leave since May.",
+      setextSectionInListItem:
+        "- Employee Jan Jansen\n  Status\n  ---\n  On sick leave since May.",
+      looseSectionInListItem:
+        "- Employee Jan Jansen\n\n  ## Status\n\n  On sick leave since May.",
+      sectionThenListItem:
+        "- Employee Jan Jansen\n  ## Status\n- On sick leave since May.",
+      sectionUnderLine:
+        "Employee Jan Jansen\n## Status\nOn sick leave since May.",
+      sectionUnderQuote:
+        "> Employee Jan Jansen\n## Status\nOn sick leave since May.",
+      sectionUnderTable:
+        "| Employee |\n| Jan Jansen |\n## Status\nOn sick leave since May.",
       // Runs of lines, whatever their blocks.
       looseList: "- Employee: Jan Jansen\n\n- Status: sick leave",
       proseAndList: "Jan Jansen is an employee.\n- Status: sick leave",
@@ -243,6 +258,13 @@ describe("Knowledge admission", { timeout: 60_000 }, () => {
       headingUnderLine: "held",
       headingInListItem: "held",
       headingsInListItem: "held",
+      sectionInListItem: "held",
+      setextSectionInListItem: "held",
+      looseSectionInListItem: "held",
+      sectionThenListItem: "held",
+      sectionUnderLine: "held",
+      sectionUnderQuote: "held",
+      sectionUnderTable: "held",
       looseList: "held",
       proseAndList: "held",
       tableAndList: "held",
@@ -312,6 +334,8 @@ describe("Knowledge admission", { timeout: 60_000 }, () => {
       "# Leave policy\n## Sick leave\n### Reporting sick",
       // A topic heading beside a person's, not under it.
       "## Employee Jan Jansen\n## Sick leave policy",
+      // A sibling heading ends the section of the lines a heading joined.
+      "- Employee Jan Jansen\n  ## Team\n\n## Sick leave policy\n\nReport sick before nine.",
       "Die Gehaltsbänder werden jährlich überprüft.",
       "La politique de rémunération est revue chaque année.",
       "La política salarial se revisa cada año.",

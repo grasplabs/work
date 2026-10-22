@@ -140,6 +140,8 @@ const atxHeading = /^ {0,3}(?<marks>#{1,6})(?:\s|$)/u;
 /** The line under a setext heading: `===` for level 1, `---` for 2. */
 const setextUnderline = /^ {0,3}(?:=+|-+)[ \t]*$/u;
 const listLine = /^\s*(?:[-*+>]\s|\d+[.)]\s)/u;
+/** A line indented under a list item, continuing it. */
+const indented = /^[ \t]/u;
 
 /** A unit to judge: a sentence, a table or list, or a run of lines. */
 interface Unit {
@@ -240,6 +242,9 @@ const unitsOf = (text: string): Unit[] => {
   let runHeader: string | undefined = undefined;
   // How many units there were when the run began.
   let runStart = 0;
+  // The last run's lines when it ended in a list, until the next run: an
+  // indented heading after blank lines continues its last item.
+  let listAbove: string | undefined = undefined;
   const endBlock = () => {
     if (kind === "prose") {
       for (const sentence of block.join(" ").split(sentenceEnd)) {
@@ -254,8 +259,10 @@ const unitsOf = (text: string): Unit[] => {
     block = [];
   };
   // `joined`: a heading ended the run with no blank line before it, and
-  // is its last line.
-  const endRun = (joined = false) => {
+  // is its last line. Returns the run's lines when it ended in a list.
+  const endRun = (joined = false): string | undefined => {
+    const list =
+      run.length > 0 && kind === "list" && !joined ? run.join("\n") : undefined;
     endBlock();
     // Judged whole too when split into more than one unit: blocks, or
     // sentences split where an abbreviation ("Ph.D.", "e.g.") looked
@@ -273,6 +280,7 @@ const unitsOf = (text: string): Unit[] => {
     }
     run = [];
     runHeader = undefined;
+    return list;
   };
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index] ?? "";
@@ -285,13 +293,22 @@ const unitsOf = (text: string): Unit[] => {
       const title =
         setext && kind === "prose" ? [...block, line].join(" ") : line;
       const joined = run.length > 0;
+      // A heading's signals, for the blocks under it, include the lines
+      // it joins: "- Employee Jan Jansen" over "  ## Status" over "On sick
+      // leave" is about Jan. Each run joins one heading at most, so this
+      // stays linear.
+      let context = title;
       if (joined) {
         run.push(line);
+        context = run.join("\n");
+      } else if (listAbove !== undefined && indented.test(line)) {
+        context = `${listAbove}\n${title}`;
       }
+      listAbove = undefined;
       endRun(joined);
       headings.length = level - 1;
       heading = headingOf(
-        title,
+        context,
         headings.findLast((h) => h !== undefined)
       );
       headings[level - 1] = heading;
@@ -312,7 +329,7 @@ const unitsOf = (text: string): Unit[] => {
       const looseList =
         kind === "list" && next !== undefined && blockOf(next) === "list";
       if (!looseList) {
-        endRun();
+        listAbove = endRun() ?? listAbove;
       }
       continue;
     }
@@ -323,6 +340,7 @@ const unitsOf = (text: string): Unit[] => {
     block.push(line);
     if (run.length === 0) {
       runStart = units.length;
+      listAbove = undefined;
     }
     run.push(line);
     if (lineKind === "table") {
