@@ -4166,6 +4166,10 @@ msgctxt "kind of app"
 msgid "Files and documents"
 msgstr "Bestanden en documenten"
 
+#: src/chat/builds.tsx
+msgid "Files to workflows"
+msgstr "Bestanden naar workflows"
+
 #: src/engines/store-changes.tsx
 msgid "Filling in the new field {field} of the table {table} would make the record {record} larger than a record may be."
 msgstr "Het invullen van het nieuwe veld {field} van de tabel {table} zou het record {record} groter maken dan een record mag zijn."
@@ -5077,6 +5081,10 @@ msgstr "Het budget kan niet worden gelezen, dus hij bedient niets in plaats van 
 msgid "Its budget can't be read, so it serves nothing."
 msgstr "Het budget kan niet worden gelezen, dus de koppeling bedient niets."
 
+#: src/chat/builds.tsx
+msgid "Its code can't be read: its screens and server code may hand files people can read to the workflows it binds"
+msgstr "De code kan niet worden gelezen: de schermen en servercode mogen bestanden die mensen kunnen lezen doorgeven aan de gekoppelde workflows"
+
 #: src/routes/_shell.domains.index.tsx
 msgid "Its contents couldn't be read."
 msgstr "De inhoud kon niet worden gelezen."
@@ -5132,6 +5140,10 @@ msgstr "de nieuwe pogingen"
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Its schedule stopped: its run failed to start {maxFailedStarts} times in a row. It starts again when its schedule is set under Parameters, or when a new version of the domain is made current."
 msgstr "Het schema is gestopt: de run kon {maxFailedStarts} keer achter elkaar niet starten. Het start weer zodra het schema onder Parameters wordt ingesteld, of zodra een nieuwe versie van het domein actueel wordt."
+
+#: src/chat/builds.tsx
+msgid "Its screens and server code may hand files people can read to the workflows it binds"
+msgstr "De schermen en servercode mogen bestanden die mensen kunnen lezen doorgeven aan de gekoppelde workflows"
 
 #: src/chat/builds.tsx
 msgid "Its steps can't be read from its code, so any step may do anything its code does, calling {tools}."

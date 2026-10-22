@@ -669,7 +669,10 @@ const started = async (
     undefined,
     null,
     // The App's files the person may read now, which its run gets copies of.
-    appStartFiles(env, asking.by.userId, asking.app, asking.release)
+    appStartFiles(env, asking.by.userId, asking.app, asking.release, {
+      kind: "screen",
+      agent: null,
+    })
   );
   return {
     runId: start.id,

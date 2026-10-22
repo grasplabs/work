@@ -340,6 +340,21 @@ const ReviewDetails = ({
           )}
         </section>
       )}
+      {review.handsFilesToWorkflows === false ? null : (
+        <section
+          aria-label={t`Files to workflows`}
+          className="flex flex-col gap-1"
+        >
+          <h4 className="font-medium">
+            <Trans>Files to workflows</Trans>
+          </h4>
+          <Badge variant="destructive">
+            {review.handsFilesToWorkflows === null
+              ? t`Its code can't be read: its screens and server code may hand files people can read to the workflows it binds`
+              : t`Its screens and server code may hand files people can read to the workflows it binds`}
+          </Badge>
+        </section>
+      )}
       {review.workflows.length === 0 ? null : (
         <section aria-label={t`Workflows`} className="flex flex-col gap-1">
           <h4 className="font-medium">

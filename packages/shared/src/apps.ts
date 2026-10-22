@@ -294,6 +294,14 @@ export interface VersionReview {
     accessBefore: "read" | "write" | null;
   }[];
   /**
+   * Whether its server code may hand files people can read to the
+   * workflows it binds (GRA-976): it declares a files resource with
+   * `read` and a bound workflow whose input can hold a file. Its
+   * screens' and server code's starts then copy the person's file into
+   * the run, as they may read it. Null when its manifest can't be read.
+   */
+  handsFilesToWorkflows: boolean | null;
+  /**
    * What the App asks for that no admin has granted yet: each waits for
    * an admin, whether the version is made current or not.
    */
