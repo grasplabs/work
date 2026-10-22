@@ -1,4 +1,5 @@
 import { hasNodeModules, quietModules } from "./quiet-isolate.ts";
+import { plainDataBounds } from "./value-bounds.ts";
 
 // What an isolate core or connect loads itself may print (GRA-910,
 // GRA-940). On Cloudflare a Loader isolate's console output is dropped
@@ -147,6 +148,8 @@ export const builtins = Object.freeze({
   slice: String.prototype.slice,
   stringify: JSON.stringify,
   parse: JSON.parse,
+  Error,
+  TypeError,
   Map,
   mapGet: Map.prototype.get,
   mapSet: Map.prototype.set,
@@ -181,8 +184,12 @@ const builtinsModule = "grasp-sandbox-builtins.js";
 /** The most characters of a thrown error's whole JSON text that are read. */
 const maxThrownText = 2 * (maxThrownMessage + 8192 + 1024);
 
-/** The deepest plain data the wrapper copies out of a call's answer. */
-const maxAnswerDepth = 64;
+/**
+ * The deepest plain data the wrapper copies out of a call's answer: as
+ * deep as an App call takes (`plainDataBounds`), so the copy never refuses
+ * an answer the call would carry.
+ */
+const maxAnswerDepth = plainDataBounds.depth;
 
 /** The most characters of a thrown error's details, as JSON, that cross. */
 const maxThrownDetails = 8192;
@@ -243,7 +250,10 @@ const entrySource = (
   kind: ExportKind
 ): string => `import { builtins } from ${JSON.stringify(`./${builtins}`)};
 import * as main from ${JSON.stringify(`./${mainModule}`)};
-const { apply, get, define, ownKeys, descriptorOf, prototypeOf, setPrototypeOf, construct, create, isArray, isPrototypeOf, objectPrototype, stringOf, slice, stringify, parse, Map, mapGet, mapSet, WeakMap, weakGet, weakSet, Proxy, Response, Headers, headersHas, headersDelete, resolve, then, bind, EntrypointClass, entrypointPrototype, DurableClass, durablePrototype, responsePrototype, responseHeaders, responseBody, responseStatus, responseStatusText } = builtins;
+// \`Error\` and \`TypeError\` here are the ones kept as the isolate loaded:
+// the wrapper's own errors are made after the App's module ran, and never
+// with a constructor it put on \`globalThis\`.
+const { apply, get, define, ownKeys, descriptorOf, prototypeOf, setPrototypeOf, construct, create, isArray, isPrototypeOf, objectPrototype, stringOf, slice, stringify, parse, Error, TypeError, Map, mapGet, mapSet, WeakMap, weakGet, weakSet, Proxy, Response, Headers, headersHas, headersDelete, resolve, then, bind, EntrypointClass, entrypointPrototype, DurableClass, durablePrototype, responsePrototype, responseHeaders, responseBody, responseStatus, responseStatusText } = builtins;
 const isDurable = ${JSON.stringify(kind === "durableObject")};
 const BaseClass = isDurable ? DurableClass : EntrypointClass;
 const basePrototype = isDurable ? durablePrototype : entrypointPrototype;
@@ -274,11 +284,22 @@ const plainOf = (value, depth, seen) => {
     throw new TypeError("The answer is nested too deeply to send.");
   }
   if (isArray(value)) {
+    // Only the entries it has, so a hole stays one (\`new Array(3)\` is
+    // sent as sparse as it is), and its length as it is. Its own keys, not
+    // every index up to its length, which may be billions.
     const copy = [];
     apply(mapSet, seen, [value, copy]);
     const length = get(value, "length");
-    for (let index = 0; index < length; index += 1) {
-      field(copy, index, plainOf(get(value, index), depth + 1, seen));
+    copy.length = length;
+    const names = ownKeys(value);
+    for (let index = 0; index < names.length; index += 1) {
+      const key = names[index];
+      const at = typeof key === "string" ? +key : -1;
+      // An index's canonical text alone: not \`length\`, nor a named
+      // property, nor "01" or "-0".
+      if (at >= 0 && at < length && stringOf(at) === key) {
+        field(copy, key, plainOf(get(value, key), depth + 1, seen));
+      }
     }
     return copy;
   }

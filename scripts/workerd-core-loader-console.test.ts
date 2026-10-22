@@ -40,6 +40,15 @@ const ranSchema = z.object({
   }),
 });
 
+/** "leaf" nested in `levels` objects, each under `value`. */
+const nestedOf = (levels: number): unknown => {
+  let value: unknown = "leaf";
+  for (let level = 0; level < levels; level += 1) {
+    value = { value };
+  }
+  return value;
+};
+
 /** What a tailed App class's console wrote, on `on`'s stand-in core. */
 const consoleValue = async (on: Served): Promise<string> => {
   const response = await fetch(new URL("/do/console/quiet", on.url));
@@ -231,6 +240,10 @@ describe("isolates core loads itself off Cloudflare, on a workerd served --verbo
       fetchPlain: await run("/fetch-thrown"),
       kept: await run("/thrown-kept-context"),
       unhandled: await run("/thrown-unhandled"),
+      deep: await run("/answer-deep"),
+      sparse: await run("/answer-sparse"),
+      fetchReplaced: await run("/fetch-errors-replaced"),
+      deepReplaced: await run("/deep-errors-replaced"),
     };
     // The same isolates loaded as they are: each way is read.
     const loud: Record<string, boolean> = {};
@@ -297,6 +310,23 @@ describe("isolates core loads itself off Cloudflare, on a workerd served --verbo
       fetchPlain: thrown,
       kept: { answered: "kept" },
       unhandled: { answered: "unhandled" },
+      deep: { answered: nestedOf(65) },
+      sparse: {
+        answered: {
+          empty: { length: 3, has: [] },
+          holed: { length: 3, has: ["0", "2"] },
+        },
+      },
+      fetchReplaced: {
+        kind: "TypeError",
+        message: "This fetch didn't answer a Response.",
+        details: null,
+      },
+      deepReplaced: {
+        kind: "TypeError",
+        message: "The answer is nested too deeply to send.",
+        details: null,
+      },
       reported: false,
     });
   });

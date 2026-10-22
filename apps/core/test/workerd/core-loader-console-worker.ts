@@ -182,6 +182,11 @@ export class App extends WorkerEntrypoint {
  * What GRA-939's routes answer (`/thrown`, `/thrown-long`,
  * `/app-node-timers`), or undefined for any other.
  */
+/** Module code replacing the global error constructors with throwing ones. */
+const replacedErrors = `for (const name of ["Error", "TypeError"]) {
+  globalThis[name] = function () { throw new RangeError(${JSON.stringify(values.thrown)}); };
+}`;
+
 /**
  * The isolates of the routes that each try one more way to have a call's
  * answer, or its throw, reported (the security review of GRA-939): each
@@ -315,6 +320,43 @@ export const App = new Proxy(Real, {
     return "unhandled";
   }
 }`,
+  // An answer as deep as an App call takes, past what the wrapper once
+  // copied (64 levels).
+  "/answer-deep": `export class App extends WorkerEntrypoint {
+  run() {
+    let value = "leaf";
+    for (let level = 0; level < 65; level += 1) {
+      value = { value };
+    }
+    return value;
+  }
+}`,
+  // Arrays with holes: each crosses as sparse as it is.
+  "/answer-sparse": `export class App extends WorkerEntrypoint {
+  run() {
+    return { empty: new Array(3), holed: [1, , 3] };
+  }
+}`,
+  // The global error constructors replaced as the App's module loads, with
+  // functions that throw: the wrapper's own errors (a fetch that answered
+  // no Response, an answer nested too deeply) are still made, and nothing
+  // of the replacement's throw is reported.
+  "/fetch-errors-replaced": `${replacedErrors}
+export class App extends WorkerEntrypoint {
+  fetch() {
+    return {};
+  }
+}`,
+  "/deep-errors-replaced": `${replacedErrors}
+export class App extends WorkerEntrypoint {
+  run() {
+    let value = "leaf";
+    for (let level = 0; level < 300; level += 1) {
+      value = { value };
+    }
+    return value;
+  }
+}`,
   // A thrown error with details, as an App error carries them.
   "/thrown-details": `export class App extends WorkerEntrypoint {
   run() {
@@ -328,6 +370,12 @@ const fetchApp = async (stub: WorkerStub): Promise<unknown> => {
   const response = await stub.getEntrypoint("App").fetch("http://app.test/");
   return await response.text();
 };
+
+/** An array's length and the indexes it has, which JSON can't show. */
+const shapeOf = (array: unknown): unknown =>
+  Array.isArray(array)
+    ? { length: array.length, has: Object.keys(array) }
+    : null;
 
 /** What a review route answers: the call's answer, or its error's parts. */
 const answerOfReview = async (
@@ -352,11 +400,22 @@ const answerOfReview = async (
     },
   };
   try {
-    return {
-      answered: await (inner.startsWith("/fetch-") ? fetchApp : runApp)(
-        loud ? env.LOADER.load(code) : quietLoader(env.LOADER).load(code)
-      ),
-    };
+    const answered = await (inner.startsWith("/fetch-") ? fetchApp : runApp)(
+      loud ? env.LOADER.load(code) : quietLoader(env.LOADER).load(code)
+    );
+    if (inner === "/answer-sparse") {
+      // JSON would write a hole as null: each array's length and the
+      // indexes it has, read here.
+      const answer =
+        typeof answered === "object" && answered !== null ? answered : {};
+      return {
+        answered: {
+          empty: shapeOf(Reflect.get(answer, "empty")),
+          holed: shapeOf(Reflect.get(answer, "holed")),
+        },
+      };
+    }
+    return { answered };
   } catch (error) {
     const details: unknown =
       error instanceof Error ? Reflect.get(error, "details") : undefined;
