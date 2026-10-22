@@ -186,6 +186,32 @@ describe("chats", () => {
     );
   });
 
+  it("are listed by their latest message: a chat just continued comes first", async () => {
+    const ann = await person();
+    const older = await ann.chats.create("Invoices");
+    const newer = await ann.chats.create("Travel");
+    // Before any message, each is as active as it is old.
+    const made = await ann.chats.list();
+    expect(new Map(made.map(({ id, lastAt }) => [id, lastAt]))).toStrictEqual(
+      new Map([
+        [newer.id, newer.createdAt],
+        [older.id, older.createdAt],
+      ])
+    );
+
+    await answering(ann, says("Noted."));
+    const follower = await follow(ann.chats, older.id);
+    await ann.chats.send(older.id, { text: "Any news?", model });
+    await settled(follower);
+    const answered = follower.messages().at(-1)?.at;
+
+    const listed = await ann.chats.list();
+    expect(listed).toMatchObject([
+      { id: older.id, createdAt: older.createdAt, lastAt: answered },
+      { id: newer.id, lastAt: newer.createdAt },
+    ]);
+  });
+
   it("are recorded as their person makes, renames and deletes them, and a deleted one's held writes are rejected", async () => {
     const ann = await person();
     const ben = await person();
@@ -1055,7 +1081,7 @@ describe("chats", () => {
     const ann = await person();
     const plans = await runInDurableObject(objectOf(ann), (_instance, state) =>
       [
-        "SELECT id, title, created_at FROM chats WHERE person_id = 'p' ORDER BY created_at DESC LIMIT 200",
+        "SELECT id, title, last_at FROM chats WHERE person_id = 'p' ORDER BY last_at DESC LIMIT 200",
         "SELECT * FROM chat_messages WHERE chat_id = 'c' AND id > 7 ORDER BY id",
       ].map((query) =>
         state.storage.sql

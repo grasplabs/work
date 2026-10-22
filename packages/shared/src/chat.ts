@@ -22,6 +22,11 @@ export interface ChatSummary {
   title: string;
   /** When it was made (ISO 8601). */
   createdAt: string;
+  /**
+   * When it last had a message, or when it was made before it had any
+   * (ISO 8601): what `ChatsApi.list` orders by, the most recent first.
+   */
+  lastAt: string;
   /** Whether its agent is working on a question now. */
   running: boolean;
   /** The project it is in (`ChatsApi.projects`), or null for none. */
@@ -464,7 +469,7 @@ export interface ChatsApi {
    * none is offered for it.
    */
   efforts: () => Promise<Record<string, ModelEfforts>>;
-  /** The person's chats, newest first. */
+  /** The person's chats, the most recently active first. */
   list: () => Promise<ChatSummary[]>;
   /** Makes a chat, in project `projectId` when one is named. */
   create: (title: string, projectId?: string | null) => Promise<ChatSummary>;

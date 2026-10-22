@@ -334,6 +334,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
         id: chat.id,
         title: chat.title,
         createdAt: chat.createdAt.toISOString(),
+        lastAt: chat.lastAt.toISOString(),
         running: false,
         projectId: chat.projectId,
       };
@@ -516,6 +517,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
         id: chat.id,
         title: chat.title,
         createdAt: chat.createdAt.toISOString(),
+        lastAt: chat.lastAt.toISOString(),
         projectId: chat.projectId,
       };
       try {

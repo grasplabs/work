@@ -62,7 +62,8 @@ import { ProjectDialog } from "./project-dialog.tsx";
 // The person's chats beside the open one, in the page sidebar
 // (grasplabs/prototype `components/chat/chat-list.tsx`): a new chat with
 // the fold beside it, the person's projects with their chats, then the
-// other chats by when they were started; folded, a rail of icons. Each
+// other chats by when they were last active, so one just continued is
+// under Today (`lib/chat-history.ts`); folded, a rail of icons. Each
 // chat's menu renames it, moves it into a project or out of one, or
 // deletes it; a chat dragged onto a project goes into it, and onto the
 // chats by date out of it. Read from core alone: nothing about them is
@@ -96,14 +97,17 @@ const periodOf = (days: number): Period => {
   return days < 7 ? "week" : "earlier";
 };
 
-/** The chats by period, each newest first, in the order core lists them. */
+/**
+ * The chats by the period they were last active in, each the most recent
+ * first, in the order core lists them.
+ */
 const groupChats = (
   chats: readonly ChatSummary[],
   now: Date
 ): { period: Period; chats: ChatSummary[] }[] => {
   const groups = new Map<Period, ChatSummary[]>();
   for (const chat of chats) {
-    const period = periodOf(daysAgo(chat.createdAt, now));
+    const period = periodOf(daysAgo(chat.lastAt, now));
     groups.set(period, [...(groups.get(period) ?? []), chat]);
   }
   return (["today", "week", "earlier"] as const).flatMap((period) => {
@@ -869,7 +873,7 @@ const ProjectGroup = ({
 };
 
 /**
- * The chats by when they were started: a chat dragged anywhere here
+ * The chats by when they were last active: a chat dragged anywhere here
  * comes out of its project.
  */
 const DatedChats = ({
@@ -935,7 +939,7 @@ const DatedChats = ({
 /**
  * The list itself: a new chat with the fold beside it, the person's
  * projects with their chats, then the other chats by when they were
- * started. In the sheet on a narrow screen there is no fold, and a pick
+ * last active. In the sheet on a narrow screen there is no fold, and a pick
  * closes the sheet.
  */
 export const ChatList = ({
