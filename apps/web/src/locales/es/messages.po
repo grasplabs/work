@@ -2575,9 +2575,17 @@ msgstr "Pedido de nuevo después de que la versión {version} pasara a ser la ac
 msgid "Asked by"
 msgstr "Solicitado por"
 
+#: src/connections/requested-apps.tsx
+msgid "Asked by {asker}"
+msgstr "Solicitado por {asker}"
+
 #: src/dashboard/pile-cards.tsx
 msgid "Asked by {requester} on {date}"
 msgstr "Solicitado por {requester} el {date}"
+
+#: src/connections/requested-apps.tsx
+msgid "Asked by a former member"
+msgstr "Solicitado por un antiguo miembro"
 
 #: src/onboarding/connect-steps.tsx
 msgid "Asked for"
@@ -9279,6 +9287,15 @@ msgstr "Informe"
 #: src/landscape/landscape.ts
 msgid "Repository content, snippets, editor context, build logs or engineering documentation."
 msgstr "Contenido de repositorios, fragmentos de código, contexto del editor, registros de compilación o documentación técnica."
+
+#: src/connections/requested-apps.tsx
+msgctxt "apps someone asked for"
+msgid "Requested"
+msgstr "Solicitadas"
+
+#: src/connections/requested-apps.tsx
+msgid "Requested {date}"
+msgstr "Solicitada el {date}"
 
 #: src/settings/pulse-people.tsx
 msgid "Reset"
