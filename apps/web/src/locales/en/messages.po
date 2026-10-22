@@ -5279,6 +5279,10 @@ msgstr "Keep the rules that say what your policy means, edit them where needed, 
 msgid "Keeps failing"
 msgstr "Keeps failing"
 
+#: src/activity/audit-words.ts
+msgid "Kept something the chat can no longer read from the model"
+msgstr "Kept something the chat can no longer read from the model"
+
 #: src/landscape/landscape.ts
 msgid "Keys, tokens, secrets, credentials or runbooks that could grant access."
 msgstr "Keys, tokens, secrets, credentials or runbooks that could grant access."
