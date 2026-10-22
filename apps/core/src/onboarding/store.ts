@@ -72,6 +72,7 @@ import {
 import type { SQL } from "drizzle-orm";
 import { drizzle as drizzleD1 } from "drizzle-orm/d1";
 import { drizzle } from "drizzle-orm/durable-sqlite";
+import { z } from "zod";
 
 import { drainObjectOutbox } from "../audit-outbox.ts";
 import { signInConfig } from "../auth/config.ts";
@@ -79,9 +80,11 @@ import { organizations } from "../db/core/schema.ts";
 import { migrateOnWake } from "../db/migrate.ts";
 import migrations from "../db/onboarding/migrations/migrations.js";
 import {
+  askedAbout,
   answerWaits,
   auditOutbox,
   countedPeople,
+  drawFailures,
   events,
   interviewStates,
   interviewSettings,
@@ -97,6 +100,7 @@ import {
   teams,
   usage,
   voiceUse,
+  works,
 } from "../db/onboarding/schema.ts";
 import { inJurisdiction } from "../durable-objects.ts";
 import {
@@ -129,6 +133,7 @@ import {
 } from "./rules.ts";
 import type { InterviewState, TeamCount } from "./rules.ts";
 import { interviewBrief, setupView } from "./stephen-setup.ts";
+import { assignWork, companyName, drawTeamMap } from "./team-map.ts";
 
 // The onboarding's store: one Durable Object per deployment holds who works
 // where, the plan, everyone's link and where each interview stands, the log
@@ -237,6 +242,12 @@ interface MailContext {
 
 /** How long the alarm waits, at most, before it looks for due links again. */
 const linkCheckMs = 60 * 60 * 1000;
+/** How long after someone agrees before the alarm draws what they said. */
+const drawAfterMs = 15_000;
+/** How long a drawing that failed waits before it's tried again, each time; then it's given up. */
+const drawRetryMs = [60_000, 5 * 60_000, 30 * 60_000] as const;
+/** And how soon the alarm goes on drawing the next thing. */
+const drawNextMs = 500;
 /** And how long before it retries delivering audit events, first and at most. */
 const auditRetryMs = { first: 5000, most: 15 * 60 * 1000 };
 
@@ -260,6 +271,24 @@ export interface DrawInput {
   agreedAt: string;
   facts: { tag: FactTag; record: string }[];
 }
+
+/** One of a team's pieces of work, and who is asked about it. */
+export interface TeamWork {
+  id: string;
+  name: string;
+  local: string;
+  one: string;
+  many: string;
+  doers: string[];
+  share: number;
+  asked: string[];
+}
+
+const doersSchema = z.array(z.string());
+
+/** Who does a piece of work, as the store keeps it. */
+const doersOf = (stored: string): string[] =>
+  doersSchema.safeParse(JSON.parse(stored)).data ?? [];
 
 export interface TurnContext {
   kind: InterviewKind;
@@ -549,6 +578,30 @@ export class Onboarding extends DurableObject<Env> {
         .all()
         .map(({ person }) => person)
         .filter((person) => !kept.has(person));
+      // A piece of work goes with its team, and who is asked about it goes
+      // with them, or when they move to another team.
+      const teamOf = new Map(roster.people.map(({ id, team }) => [id, team]));
+      const teamIds = new Set(roster.teams.map(({ id }) => id));
+      const workTeam = new Map(
+        this.#db
+          .select({ id: works.id, team: works.team })
+          .from(works)
+          .all()
+          .map(({ id, team }) => [id, team])
+      );
+      for (const [id, team] of workTeam) {
+        if (!teamIds.has(team)) {
+          this.#db.delete(works).where(eq(works.id, id)).run();
+        }
+      }
+      for (const { person, work } of this.#db.select().from(askedAbout).all()) {
+        if (teamOf.get(person) !== workTeam.get(work)) {
+          this.#db
+            .delete(askedAbout)
+            .where(eq(askedAbout.person, person))
+            .run();
+        }
+      }
       for (const person of new Set([...gone, ...stale])) {
         this.#db.delete(linkCodes).where(eq(linkCodes.person, person)).run();
         this.#db.delete(links).where(eq(links.person, person)).run();
@@ -832,6 +885,9 @@ export class Onboarding extends DurableObject<Env> {
           .run();
       }
     });
+    if (newlyAgreed) {
+      this.ctx.waitUntil(this.#alarmBy(Date.parse(now) + drawAfterMs));
+    }
     return answered({ saved: true, version: next });
   }
 
@@ -884,7 +940,7 @@ export class Onboarding extends DurableObject<Env> {
       name: firstName(person.name),
       team: teamName,
       lead: lead === undefined ? null : firstName(lead.name),
-      work: "",
+      work: kind === "lead" ? "" : this.#workOf(person.id),
       known: known.join("\n\n"),
       terms: [...new Set(terms)],
     });
@@ -946,6 +1002,104 @@ export class Onboarding extends DurableObject<Env> {
       .set({ drawnAt: agreedAt })
       .where(eq(interviewStates.person, person))
       .run();
+  }
+
+  /**
+   * Draws the next thing due, one at a time, so a failure leaves the rest
+   * for the next go: the map of a team whose lead agreed to something new.
+   * What fails is tried again after a minute, five and thirty; then it's
+   * given up and logged, and the team gets its links as a team without a
+   * lead does, until staff draw it again. Returns what it drew, or null.
+   */
+  async drawNext(now: number = Date.now()): Promise<string | null> {
+    const team = this.#teamsToMap(now).find(({ after }) => after <= now);
+    if (team === undefined) {
+      return null;
+    }
+    const item = `team:${team.id}`;
+    const at = new Date(now).toISOString();
+    try {
+      await this.#mapTeam(team.id, at);
+      this.#db.delete(drawFailures).where(eq(drawFailures.item, item)).run();
+    } catch (error) {
+      const tries = team.tries + 1;
+      log.error("onboarding.draw_failed", {
+        item,
+        tries,
+        error: error instanceof Error ? error.name : "unknown",
+      });
+      const wait = drawRetryMs[tries - 1];
+      if (wait === undefined) {
+        this.#giveUp(team.id, team.lead, at);
+      } else {
+        const after = new Date(now + wait).toISOString();
+        this.#db
+          .insert(drawFailures)
+          .values({ item, tries, after })
+          .onConflictDoUpdate({
+            target: drawFailures.item,
+            set: { tries, after },
+          })
+          .run();
+        this.#noted(team.lead, "map.failed", at, "grasp");
+      }
+    }
+    return item;
+  }
+
+  /**
+   * Draws a team's map again, as staff ask: after it was given up, or to
+   * draw it from what its lead agreed to once more. False when its lead
+   * hasn't agreed to anything yet.
+   */
+  async drawAgain(team: string, by: AuditActor): Promise<boolean> {
+    const lead = this.#roster()?.teams.find(({ id }) => id === team)?.lead;
+    if (lead === undefined || lead === null || this.drawInput(lead) === null) {
+      return false;
+    }
+    const now = new Date().toISOString();
+    this.ctx.storage.transactionSync(() => {
+      this.#db
+        .delete(drawFailures)
+        .where(eq(drawFailures.item, `team:${team}`))
+        .run();
+      this.#db
+        .update(interviewStates)
+        .set({ agreedAt: now })
+        .where(eq(interviewStates.person, lead))
+        .run();
+      this.#noted(lead, "map.again", now, whoIs(by));
+      this.#changed(by, "onboarding.team.redrawn", {});
+    });
+    this.#deliverAudit();
+    await this.#alarmBy(Date.now() + drawAfterMs);
+    return true;
+  }
+
+  /**
+   * A team's pieces of work, as its map holds them, and who is asked about
+   * each: for staff, and for the drawing of each piece (GRA-366).
+   */
+  teamWorks(team: string): TeamWork[] {
+    const asked = this.#db.select().from(askedAbout).all();
+    return this.#db
+      .select()
+      .from(works)
+      .where(eq(works.team, team))
+      .orderBy(asc(works.position))
+      .all()
+      .map((row) => ({
+        id: row.id,
+        name: row.name,
+        local: row.local,
+        one: row.one,
+        many: row.many,
+        doers: doersOf(row.doers),
+        share: row.share,
+        asked: asked
+          .filter(({ work }) => work === row.id)
+          .map(({ person }) => person),
+      }));
   }
 
   /**
@@ -1672,10 +1826,15 @@ export class Onboarding extends DurableObject<Env> {
   override async alarm(): Promise<void> {
     await this.#drainAudit();
     await this.releaseDue();
+    // A team's map opens its links.
+    if ((await this.drawNext()) !== null) {
+      await this.releaseDue();
+    }
     await this.remindDue();
     await this.sendUpdate();
     await this.deliverMail();
     await this.#armLinks();
+    await this.#armDrawing();
   }
 
   /**
@@ -2066,6 +2225,244 @@ export class Onboarding extends DurableObject<Env> {
       .map((moment) => Date.parse(moment))
       .filter((moment) => moment > now);
     await this.#alarmBy(Math.min(now + linkCheckMs, ...moments));
+  }
+
+  /**
+   * The teams whose map is due: a lead who agreed to something not drawn
+   * yet. With when each may be drawn, and how often it failed so far.
+   */
+  #teamsToMap(
+    now: number
+  ): { id: string; lead: string; after: number; tries: number }[] {
+    const roster = this.#roster();
+    if (roster === null) {
+      return [];
+    }
+    const due = new Set(this.drawsDue());
+    const failures = new Map(
+      this.#db
+        .select()
+        .from(drawFailures)
+        .all()
+        .map((row) => [row.item, row])
+    );
+    return roster.teams.flatMap(({ id, lead, off }) => {
+      if (off || lead === null || !due.has(lead)) {
+        return [];
+      }
+      const failed = failures.get(`team:${id}`);
+      return [
+        {
+          id,
+          lead,
+          after: failed === undefined ? now : Date.parse(failed.after),
+          tries: failed?.tries ?? 0,
+        },
+      ];
+    });
+  }
+
+  /** Sets the alarm for the next map to draw, when there is one. */
+  async #armDrawing(): Promise<void> {
+    const now = Date.now();
+    const afters = this.#teamsToMap(now).map(({ after }) => after);
+    if (afters.length > 0) {
+      await this.#alarmBy(Math.max(Math.min(...afters), now + drawNextMs));
+    }
+  }
+
+  /**
+   * Draws a team's map from what its lead agreed to, then asks everyone in
+   * it about a piece of work. Drawn again, a piece keeps its id while its
+   * name stays, and one someone was asked about stays; whoever was asked
+   * about one keeps it, and only who has none gets one. What changed while
+   * it was drawn stands: the store is read again after, and only this
+   * team's part changes. Mapped, unless the lead agreed to more meanwhile:
+   * then it's drawn once more.
+   */
+  async #mapTeam(teamId: string, at: string): Promise<void> {
+    const roster = this.#roster();
+    const team = roster?.teams.find(({ id }) => id === teamId);
+    const input =
+      team?.lead === null || team?.lead === undefined
+        ? null
+        : this.drawInput(team.lead);
+    if (roster === null || team === undefined) {
+      return;
+    }
+    if (input === null) {
+      // Due with nothing agreed to draw from (agreed before facts were
+      // marked agreed): drawn as it is, so it isn't due again and again.
+      const agreedAt = team.lead === null ? null : this.#agreedAt(team.lead);
+      if (team.lead !== null && agreedAt !== null) {
+        this.drawn(team.lead, agreedAt);
+      }
+      return;
+    }
+    const company = await companyName(this.env);
+    const map = await drawTeamMap(
+      this.env,
+      {
+        company,
+        team: team.name,
+        locale: this.#teamLocale(),
+        people: roster.people
+          .filter(
+            (person) =>
+              person.team === team.id &&
+              (person.id === team.lead || !person.away)
+          )
+          .map(({ id, name, title }) => ({
+            id,
+            name,
+            title,
+            lead: id === team.lead,
+          })),
+        facts: input.facts,
+        documents: this.documentsBrief(team.name),
+      },
+      (took) => {
+        this.meter(took, at);
+      }
+    );
+    this.ctx.storage.transactionSync(() => {
+      const now = this.#roster();
+      const still = now?.teams.find(({ id }) => id === teamId);
+      if (now === null || still === undefined) {
+        return;
+      }
+      const members = now.people.filter(({ team: of }) => of === teamId);
+      const before = this.teamWorks(teamId);
+      const asked = new Map(
+        this.#db
+          .select()
+          .from(askedAbout)
+          .all()
+          .map(({ person, work }) => [person, work])
+      );
+      const drawn = map.works.map((work) => ({
+        ...work,
+        id:
+          before.find(({ name }) => name.toLowerCase() === work.name)?.id ??
+          `w-${crypto.randomUUID().slice(0, 8)}`,
+        doers: [...work.doers],
+      }));
+      // A piece someone was asked about stays, though the map no longer names it.
+      for (const old of before) {
+        if (
+          !drawn.some(({ id }) => id === old.id) &&
+          members.some(({ id }) => asked.get(id) === old.id)
+        ) {
+          drawn.push({ ...old, doers: [...old.doers] });
+        }
+      }
+      const open = members.filter(
+        ({ id, away }) =>
+          id !== still.lead &&
+          !away &&
+          !drawn.some((work) => work.id === asked.get(id))
+      );
+      const assigned = assignWork(open, drawn, members);
+      // Whoever is asked about a piece of work also does it, as far as the record goes.
+      for (const work of drawn) {
+        for (const { id } of members) {
+          const theirs = assigned.has(id) ? assigned.get(id) : asked.get(id);
+          if (theirs === work.id && !work.doers.includes(id)) {
+            work.doers.push(id);
+          }
+        }
+      }
+      this.#db.delete(works).where(eq(works.team, teamId)).run();
+      for (const [position, work] of drawn.entries()) {
+        this.#db
+          .insert(works)
+          .values({
+            id: work.id,
+            team: teamId,
+            position,
+            name: work.name,
+            local: work.local,
+            one: work.one,
+            many: work.many,
+            doers: JSON.stringify(work.doers),
+            share: work.share,
+          })
+          .run();
+      }
+      for (const [person, work] of assigned) {
+        if (work !== null) {
+          this.#db
+            .insert(askedAbout)
+            .values({ person, work })
+            .onConflictDoUpdate({ target: askedAbout.person, set: { work } })
+            .run();
+        }
+      }
+      const agreedAt = this.#agreedAt(input.person);
+      this.drawn(input.person, input.agreedAt);
+      this.#db
+        .update(teams)
+        .set({
+          does: map.does === "" ? still.does : map.does,
+          ...(agreedAt === input.agreedAt
+            ? { mappedAt: sql`coalesce(${teams.mappedAt}, ${at})` }
+            : {}),
+        })
+        .where(eq(teams.id, teamId))
+        .run();
+      this.#noted(input.person, "map.drawn", at, "grasp");
+    });
+  }
+
+  /**
+   * Stops drawing a team's map that keeps failing, until its lead agrees to
+   * something new or staff draw it again: its people get their links all
+   * the same, and Stephen asks each what work they do.
+   */
+  #giveUp(teamId: string, lead: string, at: string): void {
+    this.ctx.storage.transactionSync(() => {
+      this.#db
+        .delete(drawFailures)
+        .where(eq(drawFailures.item, `team:${teamId}`))
+        .run();
+      const agreedAt = this.#agreedAt(lead);
+      if (agreedAt !== null) {
+        this.drawn(lead, agreedAt);
+      }
+      this.#db
+        .update(teams)
+        .set({ mappedAt: sql`coalesce(${teams.mappedAt}, ${at})` })
+        .where(eq(teams.id, teamId))
+        .run();
+      this.#noted(lead, "map.gave_up", at, "grasp");
+    });
+  }
+
+  #agreedAt(person: string): string | null {
+    const [state] = this.#db
+      .select({ agreedAt: interviewStates.agreedAt })
+      .from(interviewStates)
+      .where(eq(interviewStates.person, person))
+      .all();
+    return state?.agreedAt ?? null;
+  }
+
+  /** The piece of work someone is asked about, in their team's language; empty before the map. */
+  #workOf(person: string): string {
+    const [row] = this.#db
+      .select({ local: works.local })
+      .from(askedAbout)
+      .innerJoin(works, eq(works.id, askedAbout.work))
+      .where(eq(askedAbout.person, person))
+      .all();
+    return row?.local ?? "";
+  }
+
+  /** The language the teams speak: the first Stephen interviews in. */
+  #teamLocale(): InterviewLocale {
+    return (
+      setupView(this.#stephen(), this.kickoff()).setup.languages[0] ?? "en"
+    );
   }
 
   /** Sets the alarm to go at `time` at the latest, never later than it was. */

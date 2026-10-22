@@ -243,6 +243,45 @@ export const documents = sqliteTable("documents", {
 });
 
 /**
+ * The teams' pieces of work, from their leads' maps (team-map.ts): a whole
+ * job that comes back, named in English and in the team's language. Drawn
+ * again, a piece keeps its id while its name stays.
+ */
+export const works = sqliteTable("works", {
+  id: text().primaryKey(),
+  team: text().notNull(),
+  position: integer().notNull(),
+  name: text().notNull(),
+  local: text().notNull(),
+  /** What one of them is called, and several. */
+  one: text().notNull(),
+  many: text().notNull(),
+  /** Who does it, by person, as JSON. */
+  doers: text().notNull(),
+  /** Roughly how much of the team's time it takes, 0 to 1. */
+  share: real().notNull(),
+});
+
+/**
+ * Which piece of work each person is asked about. Apart from the roster,
+ * so saving who works where keeps it; it goes with the person.
+ */
+export const askedAbout = sqliteTable("asked_about", {
+  person: text().primaryKey(),
+  work: text().notNull(),
+});
+
+/**
+ * Drawings that failed and wait to be tried again: what (`team:<id>`), how
+ * often it failed, and when it may be tried again (ISO 8601).
+ */
+export const drawFailures = sqliteTable("draw_failures", {
+  item: text().primaryKey(),
+  tries: integer().notNull(),
+  after: text().notNull(),
+});
+
+/**
  * The AI the onboarding used, by day, purpose and model: calls, tokens
  * read new and from a cache, tokens written, and seconds of voice.
  */
