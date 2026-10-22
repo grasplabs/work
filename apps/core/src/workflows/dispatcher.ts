@@ -45,7 +45,11 @@ import type {
 } from "./host.ts";
 import { paramValues } from "./param-values.ts";
 import { accountOf, admitAttempt } from "./quotas.ts";
-import type { ActionModelCalls, TriedOnceMarks } from "./resource-host.ts";
+import type {
+  ActionModelCalls,
+  ScopeFences,
+  TriedOnceMarks,
+} from "./resource-host.ts";
 import { runResourceWorkflow } from "./resource-runs.ts";
 import { childRunsOf } from "./run-children.ts";
 import { requireRunEvidenceReadable } from "./run-evidence.ts";
@@ -242,6 +246,8 @@ export interface RunMemory {
   busyRefusals: BusyRefusals;
   /** What it keeps of its JSON workflow's tried-once attempts (resource-host.ts). */
   triedOnce?: TriedOnceMarks;
+  /** The settled scopes of its JSON workflow's items and branches (resource-host.ts). */
+  fences?: ScopeFences;
   /** The model calls its JSON workflow's actions made (resource-host.ts). */
   modelCalls?: ActionModelCalls;
   /** Its AI calls in flight and answers no attempt took (host.ts). */
