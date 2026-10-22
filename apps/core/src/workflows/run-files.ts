@@ -135,6 +135,23 @@ const stepOf = (effectKey: string): string =>
 
 const notFound = () => fileErrors.create("file.not_found");
 
+/**
+ * A subquery for the bytes of a run's live files (not deleted), the run
+ * named by the statement's parameter `parameter` (`?7`, say): what its
+ * 100 MB holds. A deleted file's bytes are back at once, though its
+ * chunks stay in R2 until the sweep takes them.
+ */
+export const runLiveBytes = (parameter: `?${number}`): string =>
+  `(SELECT coalesce(sum(size), 0) FROM workflow_run_files WHERE run_id = ${parameter} AND state <> 'deleted')`;
+
+/**
+ * A subquery for the bytes of a workflow's live run files (not deleted),
+ * the workflow named by parameter `parameter`: what its 5 GB holds
+ * (`runFileLimits.workflowBytes`, GRA-950). Counted as the run's are.
+ */
+export const workflowLiveBytes = (parameter: `?${number}`): string =>
+  `(SELECT coalesce(sum(size), 0) FROM workflow_run_files WHERE workflow_resource_id = ${parameter} AND state <> 'deleted')`;
+
 type FileRow = typeof workflowRunFiles.$inferSelect;
 
 /** A finished file, as its run's actions hand it on. */
@@ -258,9 +275,7 @@ const limitPassed = async (
   if (row.size + bytes > runFileLimits.fileBytes) {
     return runFileErrors.create("file.run_too_large");
   }
-  const run = await env.DB.prepare(
-    "SELECT coalesce(sum(size), 0) AS bytes FROM workflow_run_files WHERE run_id = ? AND state <> 'deleted'"
-  )
+  const run = await env.DB.prepare(`SELECT ${runLiveBytes("?1")} AS bytes`)
     .bind(caller.runId)
     .first<{ bytes: number }>();
   if ((run?.bytes ?? 0) + bytes > runFileLimits.runBytes) {
@@ -380,10 +395,8 @@ const append = async (
         ?2, ?3, ?4, ?5, 0
       WHERE (SELECT state FROM workflow_run_files WHERE id = ?1) = 'writing'
         AND (SELECT size FROM workflow_run_files WHERE id = ?1) + ?4 <= ?6
-        AND (SELECT coalesce(sum(size), 0) FROM workflow_run_files
-          WHERE run_id = ?7 AND state <> 'deleted') + ?4 <= ?8
-        AND (SELECT coalesce(sum(size), 0) FROM workflow_run_files
-          WHERE workflow_resource_id = ?9) + ?4 <= ?10
+        AND ${runLiveBytes("?7")} + ?4 <= ?8
+        AND ${workflowLiveBytes("?9")} + ?4 <= ?10
       ON CONFLICT(append_key) DO NOTHING`
     ).bind(
       row.id,

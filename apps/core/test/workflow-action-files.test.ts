@@ -1129,16 +1129,24 @@ describe("a workflow run's own files", () => {
     const earlier = callerOf(crypto.randomUUID(), workflowId);
     const earlierFile = await written(earlier, "x");
     await grow(runFileLimits.workflowBytes - 2, earlierFile.file);
-    // Deleted, but not yet swept: its bytes still count.
-    await callFiles(env, earlier.next(), "delete", { file: earlierFile.file });
     const later = callerOf(crypto.randomUUID(), workflowId);
     const laterOpened = await callFiles(env, later.next(), "open", {
       name: "later",
       type: "text/plain",
     });
+    const laterFile = String(fieldOf(laterOpened.output, "file"));
     const pastWorkflow = await outcome(
       callFiles(env, later.next(), "append", {
-        file: String(fieldOf(laterOpened.output, "file")),
+        file: laterFile,
+        content: base64Of("xx"),
+      })
+    );
+    // Deleted, though not yet swept: only live files count, so its space
+    // is back at once (GRA-950).
+    await callFiles(env, earlier.next(), "delete", { file: earlierFile.file });
+    const afterDelete = await outcome(
+      callFiles(env, later.next(), "append", {
+        file: laterFile,
         content: base64Of("xx"),
       })
     );
@@ -1149,6 +1157,7 @@ describe("a workflow run's own files", () => {
       pastFile,
       pastRun,
       pastWorkflow,
+      afterDelete,
       // Refused before anything reached R2.
       storedPastFile: await objectsOf(big.run),
     }).toStrictEqual({
@@ -1158,6 +1167,7 @@ describe("a workflow run's own files", () => {
       pastFile: "file.run_too_large",
       pastRun: "file.run_full",
       pastWorkflow: "file.workflow_quota",
+      afterDelete: "ok",
       storedPastFile: 0,
     });
   }, 120_000);
