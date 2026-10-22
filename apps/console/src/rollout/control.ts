@@ -1,7 +1,8 @@
 /**
  * What staff do with rollouts (src/rollout/workflow.ts): start one,
- * approve its next ring, pause and resume its run, cancel it between
- * rings, and pin a client to a release. Rolling a client back is
+ * approve its fleet once its first ring passed, pause and resume its
+ * run, cancel it while it waits for that approval, and pin a client to a
+ * release (which its rollouts then skip). Rolling a client back is
  * src/rollout/rollback.ts.
  *
  * One rollout runs at a time: a rollout waiting for approval still owns
@@ -313,8 +314,9 @@ const resendApproval = async (
 };
 
 /**
- * Approves rollout `rolloutId`'s next ring, as `staff`: moves it on to
- * that ring, audited, then tells its run. Of two staff approving at
+ * Approves rollout `rolloutId`'s fleet, as `staff`: moves it on to the
+ * first ring after the one it passed, audited, then tells its run, which
+ * then reaches every ring after without asking again. Of two staff approving at
  * once, one does. Approving again once the rollout moved on sends the
  * approval again if its run still waits for it (`resendApproval`), so an
  * approval whose event was lost can be given again. Refused otherwise.
@@ -471,7 +473,7 @@ export const resumeRollout = async (
 /**
  * Cancels rollout `rolloutId`, as `staff`, while it waits for approval:
  * it deploys no further ring, and no longer holds the console's one
- * rollout. Only then: between rings it holds no client, whereas part way
+ * rollout. Only then: waiting it holds no client, whereas part way
  * through one a client is rolled back instead (src/rollout/rollback.ts).
  * Refused otherwise (`not_waiting`).
  */
