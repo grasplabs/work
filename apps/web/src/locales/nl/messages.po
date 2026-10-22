@@ -209,6 +209,10 @@ msgstr "{binding}: {actions} op {object}, wacht op een beheerder"
 msgid "{binding}: {actions} on {object}, waiting for an admin (asked by the agent)"
 msgstr "{binding}: {actions} op {object}, wacht op een beheerder (gevraagd door de agent)"
 
+#: src/routes/_shell.settings.security.tsx
+msgid "{browser} on {system}"
+msgstr "{browser} op {system}"
+
 #: src/brain/brain.ts
 msgid "{category} by {vendor}"
 msgstr "{category} van {vendor}"
@@ -380,6 +384,10 @@ msgstr "{daily} per dag"
 #: src/dashboard/signals.tsx
 msgid "{days, plural, one {# day} other {# days}}"
 msgstr "{days, plural, one {# dag} other {# dagen}}"
+
+#: src/routes/_shell.settings.security.tsx
+msgid "{devices, plural, one {Signed in on # device. Sign out any you do not recognise.} other {Signed in on # devices. Sign out any you do not recognise.}}"
+msgstr "{devices, plural, one {Ingelogd op # apparaat. Log elk apparaat uit dat je niet herkent.} other {Ingelogd op # apparaten. Log elk apparaat uit dat je niet herkent.}}"
 
 #: src/dashboard/signals.tsx
 msgid "{doc} in {where} is {late, plural, one {# day} other {# days}} past its review date."
@@ -3595,6 +3603,10 @@ msgstr "Ontwikkeltools"
 #: src/settings/pulse-people.tsx
 msgid "Device"
 msgstr "Apparaat"
+
+#: src/routes/_shell.settings.security.tsx
+msgid "Devices"
+msgstr "Apparaten"
 
 #: src/workflows/definition-editor.tsx
 msgid "Diagram"
@@ -8741,8 +8753,13 @@ msgid "Sign in with your organization's account."
 msgstr "Log in met het account van je organisatie."
 
 #: src/frame/person-menu.tsx
+#: src/routes/_shell.settings.security.tsx
 msgid "Sign out"
 msgstr "Uitloggen"
+
+#: src/routes/_shell.settings.security.tsx
+msgid "Sign out {device}, signed in {time}"
+msgstr "{device} uitloggen, ingelogd op {time}"
 
 #: src/routes/_shell.settings.members.tsx
 msgid "Sign out everywhere"
@@ -8778,6 +8795,10 @@ msgstr "Signalen per soort"
 msgctxt "state of a data processing agreement"
 msgid "Signed"
 msgstr "Getekend"
+
+#: src/routes/_shell.settings.security.tsx
+msgid "Signed in {time}"
+msgstr "Ingelogd op {time}"
 
 #: src/activity/audit-words.ts
 msgid "Signed in to a connection again"
@@ -10075,6 +10096,10 @@ msgstr "Deze beslissing is aan iemand anders."
 msgid "This deployment allows no model."
 msgstr "Deze installatie staat geen model toe."
 
+#: src/routes/_shell.settings.security.tsx
+msgid "This device"
+msgstr "Dit apparaat"
+
 #: src/knowledge/document.tsx
 msgid "This document changed since you opened it. Version {newerVersion} is below; your text is kept. Start again from it, or replace it with your text."
 msgstr "Dit document is gewijzigd sinds je het opende. Versie {newerVersion} staat hieronder; je tekst blijft bewaard. Begin opnieuw vanaf die versie, of vervang die door jouw tekst."
@@ -10479,6 +10504,10 @@ msgstr "Onbekend"
 msgctxt "whether a tool has AI"
 msgid "Unknown"
 msgstr "Onbekend"
+
+#: src/routes/_shell.settings.security.tsx
+msgid "Unknown device"
+msgstr "Onbekend apparaat"
 
 #: src/routes/_shell.settings.outcomes.tsx
 #: src/routes/_shell.settings.tsx
