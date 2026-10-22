@@ -173,7 +173,7 @@ test("the dashboard counts the programme's weeks from the plan, and exports its 
   expect(cspViolations).toStrictEqual([]);
 });
 
-test("the company's admin goes through their onboarding: the staff list, the leads and the day the interviews start", async ({
+test("the company's admin goes through their onboarding: the staff list, the leads, the day the interviews start and letting Grasp's mail through", async ({
   page,
   cspViolations,
 }) => {
@@ -264,6 +264,27 @@ test("the company's admin goes through their onboarding: the staff list, the lea
     })
   ).toBeVisible();
   await expect(page.getByText(/^Starts /u)).toBeVisible();
+
+  // Before the links go out: let Grasp's mail through the mail filter,
+  // its sending domain named, with the steps for either suite.
+  await expect(page.getByText("Let Grasp’s mail through")).toBeVisible();
+  await expect(page.getByText("mail.localhost", { exact: true })).toBeVisible();
+  await page.getByRole("tab", { name: "Google Workspace" }).click();
+  await expect(
+    page.getByText(
+      "Under Spam, bypass spam filters for an approved senders list, and add mail.localhost to it."
+    )
+  ).toBeVisible();
+  await page.getByRole("button", { name: "It’s done" }).click();
+  await expect(page.getByText("Settled: It’s done")).toBeVisible();
+  // Done, it no longer asks, and nothing needs the admin.
+  await page.reload();
+  await expect(page.getByText(/^Starts /u)).toBeVisible();
+  await expect(page.getByText("Let Grasp’s mail through")).toBeHidden();
+  await page.goto("/setup?step=review");
+  await expect(
+    page.getByRole("heading", { name: "Nothing needs you" })
+  ).toBeVisible();
 
   // Core keeps what was set: the leads, and the plan from that day.
   const { core, api } = apiOf(admin);
