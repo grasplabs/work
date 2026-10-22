@@ -309,9 +309,6 @@ const workflowPermission = async (env: Env, run: CallingRun, id: string) => {
   return row;
 };
 
-/** How Composio toolkits' contracts are named: `composio.<toolkit>@1`. */
-const composioContractPrefix = "composio.";
-
 /** A read that answers a file's own fields, as connector-kit's `contentAs` makes them. */
 const fileAnswerSchema = z
   .object({
@@ -346,29 +343,14 @@ const fileContentOf = (
 
 /**
  * `input` of a read an action asked to have as a file: refused unless the
- * connection's connector declares the operation answers one (a native
- * connector's manifest, never a Composio tool's), and asked for as base64.
+ * operation answers one as its sealed contract records it (`answersFile`,
+ * which only a native connector's confirmed operation may, and which its
+ * approval compared with what the connection serves), and asked for as
+ * base64.
  */
-const asFileRead = async (
-  env: Env,
-  contract: string,
-  connectionId: string,
-  call: Extract<BuiltCall, { name: "grasp.connector" }>,
-  input: Json
-): Promise<Json> => {
-  // A Composio toolkit's tools never answer a file: not asked of connect.
-  if (contract.startsWith(composioContractPrefix)) {
-    throw callInvalid("into: This operation doesn't answer a file.");
-  }
-  const served = await env.CONNECT.connectorContract({
-    contract,
-    connectionId,
-  });
-  const action = Object.values(served.actions).find(
-    ({ tool }) => tool === call.operation
-  );
+const asFileRead = (operation: { answersFile?: true }, input: Json): Json => {
   const fields = z.record(z.string(), z.json()).safeParse(input);
-  if (action?.answersFile !== true || !fields.success) {
+  if (operation.answersFile !== true || !fields.success) {
     throw callInvalid("into: This operation doesn't answer a file.");
   }
   if (fields.data.as !== undefined && fields.data.as !== "base64") {
@@ -465,10 +447,7 @@ const callConnector = async (
   }
   // Kept as a file of the run: only of a read its connector declares
   // answers a file, which it is asked for as base64, the bytes as they are.
-  const input =
-    call.into === undefined
-      ? asked
-      : await asFileRead(env, target.contract, row.objectId, call, asked);
+  const input = call.into === undefined ? asked : asFileRead(shape, asked);
   const result = await runStubCall(
     env,
     // Refused at once, before any check, for a key other than the step's.

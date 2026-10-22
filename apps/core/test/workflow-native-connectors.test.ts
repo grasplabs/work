@@ -264,6 +264,7 @@ const nativeContract = async () => {
         input: enveloped(read.input),
         output: enveloped(read.output),
         readOnly: true,
+        answersFile: true,
       },
     },
   });
@@ -336,7 +337,12 @@ describe("a workflow binding a native connector's operation", () => {
     const publish = async (
       operations: Record<
         string,
-        { input: string; output: string; readOnly?: boolean }
+        {
+          input: string;
+          output: string;
+          readOnly?: boolean;
+          answersFile?: true;
+        }
       >,
       kind: "connector" | "operation" = "connector"
     ) =>
@@ -353,6 +359,7 @@ describe("a workflow binding a native connector's operation", () => {
       input: enveloped(read.input),
       output: enveloped(read.output),
       readOnly: true,
+      answersFile: true as const,
     };
     const descriptor = JSON.stringify({
       descriptorVersion: 1,
@@ -406,6 +413,24 @@ describe("a workflow binding a native connector's operation", () => {
           output: enveloped(send.output),
         },
       }),
+      // A file answer is the connector's to declare, both ways (GRA-886).
+      fileUndeclared: await publish({
+        "mail.readAttachment": { ...exact, answersFile: undefined },
+      }),
+      writeAnswersFile: await publish({
+        "mail.send": {
+          input: enveloped(send.input),
+          output: enveloped(send.output),
+          answersFile: true,
+        },
+      }),
+      descriptorAnswersFile: await publish({
+        "mail.readAttachment": {
+          input: descriptor,
+          output: descriptor,
+          answersFile: true,
+        },
+      }),
       exact: await publish({ "mail.readAttachment": exact }),
     }).toStrictEqual({
       backtracking: "workflow.contract_invalid",
@@ -416,6 +441,9 @@ describe("a workflow binding a native connector's operation", () => {
       notReadOnly: "workflow.contract_invalid",
       writeAsRead: "workflow.contract_invalid",
       write: "ok",
+      fileUndeclared: "workflow.contract_invalid",
+      writeAnswersFile: "workflow.contract_invalid",
+      descriptorAnswersFile: "workflow.contract_invalid",
       exact: "ok",
     });
   });

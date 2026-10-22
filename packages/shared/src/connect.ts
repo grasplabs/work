@@ -1589,6 +1589,8 @@ export interface NativeOperation {
   contract: string;
   /** Whether it only reads, as the connector declares. */
   readOnly: boolean;
+  /** That it answers a file, as the connector declares (GRA-886). */
+  answersFile?: true;
 }
 
 /** A generated contract, as connect serves it now. */
