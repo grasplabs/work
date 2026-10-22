@@ -230,6 +230,11 @@ export const getClientHosting = async (
 export const placementErrorCodes = [
   /** No destination was chosen, and there's no clear one to pick (`automaticChoice`). */
   "no_automatic_destination",
+  /**
+   * The client's last run was another kind's (provisioning in an account of
+   * its own): placing it would take that run's claim, so it could never resume.
+   */
+  "other_run_held",
 ] as const;
 
 export type PlacementErrorCode = (typeof placementErrorCodes)[number];
@@ -302,6 +307,14 @@ export const placeAndProvision = async (
     throw new ProvisionError(
       "already_running",
       `Client ${clientId} is being worked on already`
+    );
+  }
+  // An ended run of placed provisioning is this path's own, for a retry to
+  // take over; any other kind's is left for its own path to resume.
+  if (run !== null && run.kind !== "provision_placed") {
+    throw new PlacementError(
+      "other_run_held",
+      `Client ${clientId}'s last run, ${run.runId}, is a ${run.kind} run`
     );
   }
   if ((await importedManifest(db, releaseId)) === null) {

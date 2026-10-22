@@ -7,6 +7,7 @@ import {
   auditEvents,
   clientPlacements,
   clientProvisions,
+  clientRuns,
   hostingDestinations,
   releases,
 } from "../src/db/schema.ts";
@@ -270,6 +271,35 @@ describe("placing a client and provisioning it, through the console's entry", ()
         problems: [],
       },
       placement: undefined,
+    });
+  });
+
+  it("leaves a client whose run ended while provisioning it in an account of its own unplaced, for that run to resume", async () => {
+    await destination();
+    const clientId = await client();
+    const releaseId = await importedRelease();
+    // Its account-per-client run ended without saying so, long enough ago
+    // that it's no longer starting.
+    await db.insert(clientRuns).values({
+      clientId,
+      runId: `${clientId}-own-account`,
+      kind: "provision",
+      claimedAt: new Date(Date.now() - 3_600_000),
+    });
+
+    expect({
+      refused: await place(clientId, releaseId, null),
+      placement: await placementOf(clientId),
+      operation: await operationOf(clientId),
+      run: await db
+        .select({ runId: clientRuns.runId, kind: clientRuns.kind })
+        .from(clientRuns)
+        .where(eq(clientRuns.clientId, clientId)),
+    }).toStrictEqual({
+      refused: { runId: null, refused: "other_run_held", problems: [] },
+      placement: undefined,
+      operation: undefined,
+      run: [{ runId: `${clientId}-own-account`, kind: "provision" }],
     });
   });
 

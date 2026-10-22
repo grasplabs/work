@@ -129,6 +129,8 @@ export const placeRefusals: Readonly<Record<PlaceRefusal, string>> = {
   ...operationWords,
   no_automatic_destination:
     "There's no one shared destination to pick by itself: choose one.",
+  other_run_held:
+    "The client was being provisioned in an account of its own: resume or end that first.",
   already_running:
     "Something is working on the client already: wait for it to end.",
   not_provisioning:
