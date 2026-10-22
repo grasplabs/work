@@ -325,6 +325,26 @@ export const inboundMailDomainSchema = domainSchema
     }
   );
 
+// MAIL_FROM (core's src/mail.ts)
+
+/**
+ * `MAIL_FROM`: who the mail core sends is from, `"<name>" <<address>>`:
+ * an address on the deployment's sending domain, set up for Email Sending
+ * outside core, and the name shown with it. The name is one line with no
+ * quotes or angle brackets, so it can't change the header it goes in.
+ * Unset, core sends no mail: each one fails, and says why.
+ */
+export const mailFromSchema = z.strictObject({
+  name: z
+    .string()
+    .trim()
+    .min(1)
+    .max(80)
+    .regex(/^[^"<>\r\n]+$/u, "One line, without quotes or angle brackets"),
+  address: z.email().max(254),
+});
+export type MailFrom = z.infer<typeof mailFromSchema>;
+
 /**
  * The names of the deployment config vars above, the only settings the
  * console sets on core as vars. `PLATFORM_CHANGE` is the console's own, set
@@ -339,4 +359,5 @@ export const deploymentConfigVars = [
   "RUN_RETENTION_DAYS",
   "QUOTA_LIMITS",
   "INBOUND_MAIL_DOMAIN",
+  "MAIL_FROM",
 ] as const;

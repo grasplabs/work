@@ -5,6 +5,7 @@
 import { sql } from "drizzle-orm";
 import {
   check,
+  index,
   integer,
   primaryKey,
   real,
@@ -250,3 +251,35 @@ export const auditOutbox = sqliteTable("audit_outbox", {
   event: text().notNull(),
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
 });
+
+/**
+ * Mail the onboarding sends (mail-outbox.ts), each once, by its key: a mail
+ * queued again under a key it holds already is not sent again. A mail with
+ * someone's link names whose (`fill`) and holds a slot for it, filled in
+ * only as it is sent, so the link's secret is kept here no more than
+ * anywhere else (link-secret.ts).
+ */
+export const mailOutbox = sqliteTable(
+  "mail_outbox",
+  {
+    key: text().primaryKey(),
+    /** Whom it is about, by person, for the log; null for nobody in particular. */
+    about: text(),
+    to: text("to_address").notNull(),
+    /** Subject, bodies and headers as JSON (`queuedMailSchema`), slots unfilled. */
+    mail: text().notNull(),
+    /** What fills its slots as it is sent: for a link's mail, whose link. */
+    fill: text(),
+    state: text({ enum: ["queued", "sent", "failed"] }).notNull(),
+    attempts: integer().notNull().default(0),
+    /** When it is tried next (ms since the epoch), while queued. */
+    nextAt: integer("next_at").notNull(),
+    queuedAt: text("queued_at").notNull(),
+    /** When it was sent, or ended failed (ISO 8601). */
+    settledAt: text("settled_at"),
+    /** Why its last try didn't send it: Email Sending's code, or core's. */
+    reason: text(),
+    messageId: text("message_id"),
+  },
+  (table) => [index("mail_outbox_due").on(table.state, table.nextAt)]
+);
