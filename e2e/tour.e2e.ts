@@ -85,6 +85,28 @@ test("offers the tour on first sign-in, takes it to its end, and starts it again
     ).toHaveCount(0);
   }
 
+  // Nor do the page's own shortcuts, which it listens for on the window:
+  // the Brain's arrow keys and Enter, from nowhere in particular or from
+  // his card, and the sidebar's Cmd/Ctrl+B.
+  const sidebar = page.locator('[data-slot="sidebar"]:not([data-mobile])');
+  const folded = await sidebar.getAttribute("data-state");
+  await page.evaluate(() => {
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
+  });
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("Enter");
+  await tour.getByRole("button", { name: "Next" }).focus();
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("ControlOrMeta+b");
+  await expect(page).toHaveURL(stops[0][0]);
+  await expect(tour).toContainText(stops[0][1]);
+  await expect(sidebar).toHaveAttribute("data-state", folded ?? "");
+
   await page.keyboard.press("Escape");
   await expect(tour).toHaveCount(0);
+  // Once it is over, they work again.
+  await page.keyboard.press("ControlOrMeta+b");
+  await expect(sidebar).not.toHaveAttribute("data-state", folded ?? "");
 });
