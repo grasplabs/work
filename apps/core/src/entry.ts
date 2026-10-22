@@ -29,6 +29,7 @@ import { authBasePath } from "./auth/auth.ts";
 import { signInConfig } from "./auth/config.ts";
 import { handleAuthRequest } from "./auth/routes.ts";
 import { installBuiltinsOnce } from "./builtins.ts";
+import { ensureClockOnce } from "./clock.ts";
 import {
   catalogLogoResponse,
   handleConnectionCallback,
@@ -327,6 +328,7 @@ const respond = async (
     const checked = await checkRouterSecret(request, env);
     if (checked.ok) {
       installBuiltinsOnce(env, ctx);
+      ensureClockOnce(env, ctx);
       const response = await route(checked.request, env, requestId);
       return { response, level: "info" };
     }
