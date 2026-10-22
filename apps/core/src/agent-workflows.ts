@@ -4,13 +4,16 @@ import { appIdSchema } from "@grasp-os/shared/ids";
 import type { Permission } from "@grasp-os/shared/permissions";
 import { roleErrors } from "@grasp-os/shared/roles";
 import { workflowErrors } from "@grasp-os/shared/workflows";
-import type { WorkflowRun, WorkflowSummary } from "@grasp-os/shared/workflows";
+import type {
+  AppWorkflowSummary,
+  WorkflowRun,
+} from "@grasp-os/shared/workflows";
 import { WorkerEntrypoint, exports } from "cloudflare:workers";
 
 import { asPerson } from "./agent-person.ts";
 import type { AgentApi, AgentScope } from "./agent-scope.ts";
 import { appHost } from "./durable-objects.ts";
-import { listAllRuns, workflowOverview } from "./workflows/overview.ts";
+import { appWorkflowOverview, listAllRuns } from "./workflows/overview.ts";
 import { runStatus } from "./workflows/runs.ts";
 
 // Workflows for a chat's code: `await env.workflows.runs("app-1",
@@ -117,13 +120,13 @@ const hidden = (error: unknown): unknown => {
 /** Workflows, as a chat's code reads them. */
 export class WorkflowsApi extends WorkerEntrypoint<Env, AgentScope> {
   /** The workflows the agent may read, of Apps the person sees. */
-  async list(): Promise<WorkflowSummary[]> {
+  async list(): Promise<AppWorkflowSummary[]> {
     return await asPerson(this.env, this.ctx.props, {
       allowed: () => true,
       method: "workflows.list",
       // Only the workflows the agent may read are summed up at all.
       read: async (person, permissions) =>
-        await workflowOverview(this.env, person, (app, workflow) =>
+        await appWorkflowOverview(this.env, person, (app, workflow) =>
           readsWorkflow(app, workflow)(permissions)
         ),
       detail: (listed) => ({ workflows: listed.length }),
@@ -136,8 +139,12 @@ export class WorkflowsApi extends WorkerEntrypoint<Env, AgentScope> {
       allowed: readsWorkflow(app, workflow),
       method: "workflows.runs",
       read: async (person) => {
-        const { runs } = await listAllRuns(this.env, person, { app, workflow });
-        // All of one App's: its restricted mode, read once.
+        const listed = await listAllRuns(this.env, person, { app, workflow });
+        // All of one App's, as the filter names it: its restricted mode,
+        // read once.
+        const runs = listed.runs.flatMap((run) =>
+          run.type === "app" ? [run] : []
+        );
         const [first] = runs;
         const restricted =
           first !== undefined && (await appRestricted(this.env, first.app));

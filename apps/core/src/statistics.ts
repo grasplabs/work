@@ -22,7 +22,7 @@ import type {
   StatisticGroup,
 } from "@grasp-os/shared/statistics";
 import { runOfStepKey } from "@grasp-os/shared/workflows";
-import { and, asc, count, eq, gte, lte, max, min, sql, sum } from "drizzle-orm";
+import { and, asc, count, eq, gte, max, min, sql, sum } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
@@ -34,12 +34,13 @@ import { memberRole, teamsOf } from "./auth/identity.ts";
 import {
   apps as appsTable,
   appStatistics,
+  appWorkflowBindings,
   improvementSignalComputations,
   improvementSignals,
-  workflowRuns,
 } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
 import { authorize } from "./permissions.ts";
+import { runView } from "./workflows/run-view.ts";
 
 // Statistics (@grasp-os/shared/statistics): an App's server code records
 // named measures with a few dimensions, and reads aggregates of them over
@@ -311,7 +312,14 @@ const ownMeasure = async (
 /** A column a platform measure's dimension is read from. */
 type Columns = Readonly<Record<string, SQLiteColumn>>;
 
-/** The runs of the Apps `apps` started from `start` to `now`, as `query` asks. */
+/**
+ * The runs of the Apps `apps` started from `start` to `now`, as `query`
+ * asks: their own workflows' runs, by workflow ID, and the runs of the
+ * independent workflows each binds now (`app_workflow_bindings`), by the
+ * alias the App binds it under, whoever started them: the App's workflows,
+ * whichever kind. Read through the run view (workflows/run-view.ts), each
+ * arm by the index of its App's or workflow's runs.
+ */
 const workflowRunsMeasure = async (
   env: Env,
   apps: readonly string[],
@@ -319,25 +327,63 @@ const workflowRunsMeasure = async (
   start: Date,
   now: Date
 ) => {
-  const columns: Columns = {
-    app: workflowRuns.appId,
-    workflow: workflowRuns.workflowId,
+  const db = drizzle(env.DB);
+  const bindings = await db
+    .select({ workflow: appWorkflowBindings.workflowResourceId })
+    .from(appWorkflowBindings)
+    .where(
+      and(
+        inList(appWorkflowBindings.appId, apps),
+        eq(appWorkflowBindings.status, "active")
+      )
+    );
+  const run = runView(
+    db,
+    {
+      apps,
+      workflows: [...new Set(bindings.map(({ workflow }) => workflow))],
+      ownWorkflows: [],
+      principal: "",
+    },
+    now,
+    (arm) =>
+      and(
+        // An App's workflow by its own index; a bound one by its alias, below.
+        arm.kind === "app" && where.workflow !== undefined
+          ? sql`${arm.workflow} = ${where.workflow}`
+          : undefined,
+        sql`${arm.createdAt} >= ${start.getTime()}`,
+        sql`${arm.createdAt} <= ${now.getTime()}`
+      )
+  );
+  if (run === undefined) {
+    return [];
+  }
+  // A bound workflow's run counts for each App binding it, under its alias.
+  const bound = and(
+    sql`${run.app} IS NULL`,
+    eq(appWorkflowBindings.workflowResourceId, sql`${run.workflow}`),
+    eq(appWorkflowBindings.status, "active"),
+    inList(appWorkflowBindings.appId, apps)
+  );
+  const columns: Readonly<Record<string, SQL>> = {
+    app: sql`coalesce(${run.app}, ${appWorkflowBindings.appId})`,
+    workflow: sql`coalesce(${appWorkflowBindings.alias}, ${run.workflow})`,
   };
   const grouped = groupBy.flatMap((name) => columns[name] ?? []);
-  const rows = await drizzle(env.DB)
+  const rows = await db
     .select({
       groups: groupsOf(grouped),
       count: count(),
     })
-    .from(workflowRuns)
+    .from(run)
+    .leftJoin(appWorkflowBindings, bound)
     .where(
       and(
-        inList(workflowRuns.appId, apps),
+        sql`(${run.app} IS NOT NULL OR ${appWorkflowBindings.appId} IS NOT NULL)`,
         where.workflow === undefined
           ? undefined
-          : eq(workflowRuns.workflowId, where.workflow),
-        gte(workflowRuns.createdAt, start),
-        lte(workflowRuns.createdAt, now)
+          : sql`${columns.workflow} = ${where.workflow}`
       )
     )
     .groupBy(...grouped)

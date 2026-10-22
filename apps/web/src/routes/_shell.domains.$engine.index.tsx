@@ -4,7 +4,7 @@ import { canBuild } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import type { ScreenTrustReview } from "@grasp-os/shared/screen-trust";
 import type { SurfaceSummary } from "@grasp-os/shared/screens";
-import type { RunsPage, WorkflowSummary } from "@grasp-os/shared/workflows";
+import type { AppWorkflowSummary, RunsPage } from "@grasp-os/shared/workflows";
 import {
   Table,
   TableBody,
@@ -59,7 +59,7 @@ import {
   useScreenOpening,
 } from "../screens/screen-navigate.ts";
 import { useCore } from "../use-core.ts";
-import { listRuns, listWorkflows } from "../workflows/reads.ts";
+import { listAppWorkflows, listRuns } from "../workflows/reads.ts";
 import { RunsLog } from "../workflows/runs.tsx";
 import { WorkflowsTable } from "../workflows/workflows-table.tsx";
 
@@ -163,7 +163,7 @@ const Workflows = ({
   identity,
 }: {
   engine: string;
-  workflows: OnFirstUse<WorkflowSummary[]>;
+  workflows: OnFirstUse<AppWorkflowSummary[]>;
   runs: OnFirstUse<RunsPage>;
   identity: Identity;
 }) => {
@@ -741,7 +741,9 @@ export const Route = createFileRoute("/_shell/domains/$engine/")({
     // Not awaited: only their tabs wait for them. Core lists every
     // engine's workflows at once (there is no read of one engine's), so
     // that read, and the runs, wait until Workflows is opened.
-    workflows: onFirstUse(async () => await loadFromCore(core, listWorkflows)),
+    workflows: onFirstUse(
+      async () => await loadFromCore(core, listAppWorkflows)
+    ),
     runs: onFirstUse(
       async () =>
         await loadFromCore(

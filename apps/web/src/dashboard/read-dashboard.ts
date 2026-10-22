@@ -8,7 +8,10 @@ import type {
 import { canBuild, isAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import type { ImprovementSignals } from "@grasp-os/shared/signals";
-import type { RunActivity, WorkflowSummary } from "@grasp-os/shared/workflows";
+import type {
+  AppWorkflowSummary as WorkflowSummary,
+  RunActivity,
+} from "@grasp-os/shared/workflows";
 
 import { readPendingRequests } from "../activity/pending.tsx";
 import { integrationsOf } from "../connections/integrations.ts";
@@ -17,7 +20,7 @@ import type { Session } from "../core.ts";
 import { listedOrNone } from "../directory.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
-import { listWorkflows, openableApps } from "../workflows/reads.ts";
+import { listAppWorkflows, openableApps } from "../workflows/reads.ts";
 import { activityShown } from "./activity.tsx";
 import type { LatestActivity } from "./activity.tsx";
 import { readNotifications } from "./failed-workflows.tsx";
@@ -313,7 +316,8 @@ export const readDashboard = async (
   identity: Identity
 ): Promise<Dashboard> => {
   // Not awaited: their blocks and cards wait for them.
-  const workflows = loadFromCore(core, listWorkflows);
+  // The board shows engines' workflows.
+  const workflows = loadFromCore(core, listAppWorkflows);
   const signals = loadFromCore(
     core,
     async (session) => await readSignals(session, identity)

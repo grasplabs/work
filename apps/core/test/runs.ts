@@ -404,3 +404,61 @@ export const withPolicyReadFailingOnce = async <Result>(
     env.DB = database;
   }
 };
+
+/**
+ * The rows of an App's workflows or runs among `rows`, which list
+ * independent workflows' too.
+ */
+export const ofApps = <Row extends { type: "app" | "resource" }>(
+  rows: readonly Row[]
+): Extract<Row, { type: "app" }>[] =>
+  rows.filter(
+    (row): row is Extract<Row, { type: "app" }> => row.type === "app"
+  );
+
+/** A run of an independent workflow, as core keeps it. */
+export interface SeededResourceRun {
+  workflow: string;
+  principal: string;
+  status: "starting" | "running" | "completed" | "failed" | "cancelled";
+  createdAt: number;
+  /** When it ended; when it started, for one that ended, unless given. */
+  endedAt?: number | null;
+}
+
+/**
+ * A run of an independent workflow, with the start receipt it was admitted
+ * on, as core keeps them: its ID.
+ */
+export const seedResourceRun = async (
+  run: SeededResourceRun
+): Promise<string> => {
+  const id = crypto.randomUUID();
+  const ended =
+    run.status === "starting" || run.status === "running"
+      ? null
+      : run.createdAt;
+  await env.DB.batch([
+    env.DB.prepare(
+      "INSERT INTO workflow_start_receipts (id, invoker_type, invoker_id, idempotency_key, workflow_resource_id, workflow_resource_version, manifest_hash, principal_id, authority_generation, input_hash, created_at) VALUES (?, 'person', ?, ?, ?, 1, 'm', ?, 1, 'h', ?)"
+    ).bind(
+      id,
+      run.principal,
+      `key-${id}`,
+      run.workflow,
+      run.principal,
+      run.createdAt
+    ),
+    env.DB.prepare(
+      "INSERT INTO workflow_resource_runs (id, workflow_resource_id, version, manifest_hash, build_hash, principal_id, status, created_at, ended_at) VALUES (?, ?, 1, 'm', 'b', ?, ?, ?, ?)"
+    ).bind(
+      id,
+      run.workflow,
+      run.principal,
+      run.status,
+      run.createdAt,
+      run.endedAt === undefined ? ended : run.endedAt
+    ),
+  ]);
+  return id;
+};

@@ -2,17 +2,23 @@ import {
   appIdSchema,
   runIdSchema,
   workflowIdSchema,
+  workflowResourceIdSchema,
 } from "@grasp-os/shared/ids";
-import type { WorkflowSummary } from "@grasp-os/shared/workflows";
+import type {
+  AppWorkflowSummary,
+  ResourceWorkflowSummary,
+  WorkflowSummary,
+} from "@grasp-os/shared/workflows";
 import { describe, expect, it } from "vite-plus/test";
 
-import { handledOf, listsOf, needsAttention } from "./lists.ts";
+import { handledOf, listsOf, needsAttention, workflowName } from "./lists.ts";
 
 /** A workflow that ran and needs nobody, changed by `change`. */
 const workflow = (
   name: string,
-  change: Partial<WorkflowSummary> = {}
-): WorkflowSummary => ({
+  change: Partial<AppWorkflowSummary> = {}
+): AppWorkflowSummary => ({
+  type: "app",
   app: appIdSchema.parse("invoices"),
   appName: "Invoices",
   workflow: workflowIdSchema.parse(name),
@@ -37,8 +43,29 @@ const failed = workflow("failed", { failed: 2 });
 const stopped = workflow("stopped", { scheduleStopped: true });
 const never = workflow("never", { lastRun: null });
 
+/** An independent workflow that ran and needs nobody, changed by `change`. */
+const independent = (
+  name: string,
+  change: Partial<ResourceWorkflowSummary> = {}
+): ResourceWorkflowSummary => ({
+  type: "resource",
+  workflowId: workflowResourceIdSchema.parse(`id-${name}`),
+  name,
+  version: 1,
+  owner: { userId: "owner", name: null },
+  lastRun: {
+    id: runIdSchema.parse(`run-${name}`),
+    status: "completed",
+    createdAt: "2026-10-08T09:00:00.000Z",
+  },
+  waiting: 0,
+  failed: 0,
+  handled: 0,
+  ...change,
+});
+
 const names = (rows: readonly WorkflowSummary[]): string[] =>
-  rows.map(({ workflow: name }) => name);
+  rows.map((row) => workflowName(row));
 
 describe("the Workflows page's lists", () => {
   it("needs a person for a run waiting, a recent failure or a stopped schedule, and not otherwise", () => {
@@ -47,20 +74,30 @@ describe("the Workflows page's lists", () => {
     ).toStrictEqual([false, true, true, true, false]);
   });
 
-  it("has those that ran at work, the ones that need a person first, and the rest on the way", () => {
+  it("has those that ran at work, the ones that need a person first, and the rest on the way, independent ones among them", () => {
     const { atWork, onTheWay } = listsOf([
       healthy,
       never,
+      independent("alone"),
       waiting,
       failed,
+      independent("alone-failed", { failed: 1 }),
       stopped,
+      independent("alone-new", { version: null, lastRun: null }),
     ]);
     expect({
       atWork: names(atWork),
       onTheWay: names(onTheWay),
     }).toStrictEqual({
-      atWork: ["waiting", "failed", "stopped", "healthy"],
-      onTheWay: ["never"],
+      atWork: [
+        "waiting",
+        "failed",
+        "alone-failed",
+        "stopped",
+        "healthy",
+        "alone",
+      ],
+      onTheWay: ["never", "alone-new"],
     });
   });
 

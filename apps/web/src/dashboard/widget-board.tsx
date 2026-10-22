@@ -1,7 +1,10 @@
 import type { App } from "@grasp-os/shared/apps";
 import type { StandardWidgetId } from "@grasp-os/shared/dashboard";
 import type { ModelMonthSpend } from "@grasp-os/shared/models";
-import type { RunActivity, WorkflowSummary } from "@grasp-os/shared/workflows";
+import type {
+  AppWorkflowSummary as WorkflowSummary,
+  RunActivity,
+} from "@grasp-os/shared/workflows";
 import { Button, buttonVariants } from "@grasp-os/ui/components/button";
 import {
   Popover,

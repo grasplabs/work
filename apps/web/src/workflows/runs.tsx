@@ -25,7 +25,9 @@ import { AskToFix } from "./fix-in-chat.tsx";
 // prototype's runs log (grasplabs/prototype `components/runs-log.tsx`):
 // when, the workflow, who started it, and what happened, with a dot in
 // the status colours. A run waiting for a decision links to where it is
-// answered; a failed one says why and offers a fix in chat.
+// answered; a failed one says why and offers a fix in chat. An independent
+// workflow's run says what its workflow's page lists of it: what it
+// returned or why it failed stays on the run.
 
 const statusLabels: Readonly<Record<RunStatus, MessageDescriptor>> = {
   queued: msg`Queued`,
@@ -140,6 +142,9 @@ const RunOutcome = ({
   model: string | undefined;
 }) => {
   const { t } = useLingui();
+  if (run.type === "resource") {
+    return <RunResult queued={run.queued} status={run.status} />;
+  }
   return (
     <div className="flex flex-col items-start gap-1">
       <RunResult queued={run.queued} status={run.status} />
@@ -175,6 +180,55 @@ const RunOutcome = ({
     </div>
   );
 };
+
+/**
+ * When a run started: for an engine's run, a link to its own page, with
+ * its step history. An independent workflow's run has no page of its own.
+ */
+const RunTime = ({ run }: { run: ListedRun }) => {
+  const { t } = useLingui();
+  const time = formatDateTime(run.createdAt);
+  return run.type === "app" ? (
+    <Link
+      aria-label={t`Run history, ${ph({ time })}`}
+      className="text-muted-foreground tabular-nums underline-offset-4 hover:underline"
+      params={{ app: run.app, workflow: run.workflow, run: run.id }}
+      to="/workflows/$app/$workflow/runs/$run"
+    >
+      {time}
+    </Link>
+  ) : (
+    <span className="text-muted-foreground tabular-nums">{time}</span>
+  );
+};
+
+/** A run's workflow, opening it, over its engine or that it is independent. */
+const RunWorkflow = ({ run }: { run: ListedRun }) =>
+  run.type === "app" ? (
+    <div className="flex flex-col">
+      <Link
+        className="underline-offset-4 hover:underline"
+        params={{ app: run.app, workflow: run.workflow }}
+        to="/workflows/$app/$workflow"
+      >
+        {run.workflow}
+      </Link>
+      <span className="text-muted-foreground">{run.appName}</span>
+    </div>
+  ) : (
+    <div className="flex flex-col">
+      <Link
+        className="underline-offset-4 hover:underline"
+        params={{ workflow: run.workflowId }}
+        to="/workflows/$workflow"
+      >
+        {run.name}
+      </Link>
+      <span className="text-muted-foreground">
+        <Trans>Independent</Trans>
+      </span>
+    </div>
+  );
 
 /**
  * The runs log, in the order core lists them (waiting runs first); with
@@ -232,34 +286,11 @@ export const RunsLog = ({
             {runs.map((run) => (
               <TableRow key={run.id}>
                 <TableCell className="align-top" variant="card">
-                  {/* The run's own page, with its step history. */}
-                  <Link
-                    aria-label={t`Run history, ${ph({ time: formatDateTime(run.createdAt) })}`}
-                    className="text-muted-foreground tabular-nums underline-offset-4 hover:underline"
-                    params={{
-                      app: run.app,
-                      workflow: run.workflow,
-                      run: run.id,
-                    }}
-                    to="/workflows/$app/$workflow/runs/$run"
-                  >
-                    {formatDateTime(run.createdAt)}
-                  </Link>
+                  <RunTime run={run} />
                 </TableCell>
                 {withWorkflow ? (
                   <TableCell className="align-top" variant="card">
-                    <div className="flex flex-col">
-                      <Link
-                        className="underline-offset-4 hover:underline"
-                        params={{ app: run.app, workflow: run.workflow }}
-                        to="/workflows/$app/$workflow"
-                      >
-                        {run.workflow}
-                      </Link>
-                      <span className="text-muted-foreground">
-                        {run.appName}
-                      </span>
-                    </div>
+                    <RunWorkflow run={run} />
                   </TableCell>
                 ) : null}
                 <TableCell className="align-top" variant="card">
