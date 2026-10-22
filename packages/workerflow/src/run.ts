@@ -143,6 +143,7 @@ import {
   recordStartIn,
 } from "./history.ts";
 import type { HistoryRecord, StepIdentity } from "./history.ts";
+import { eventAttributesOf, eventMatches, readEventMatch } from "./identity.ts";
 import type { Schedule } from "./identity.ts";
 import {
   createJournal,
@@ -267,6 +268,11 @@ export interface EventCommand {
   payload: string;
   /** The sender's delivery key, or null for an event with none. */
   key: string | null;
+  /**
+   * What it is sent with, for a `waitForMatch` to match (identity.ts,
+   * `eventAttributesOf`); none when missing or null.
+   */
+  attributes?: Readonly<Record<string, string>> | null;
 }
 
 /**
@@ -635,9 +641,10 @@ const forgetIn = (
     ...forget.values
   );
   sql.exec(`DELETE FROM steps WHERE ${forget.clause}`, ...forget.values);
-  // Bytes as the inbox counts them: the payload's UTF-8 encoding.
+  // Bytes as the inbox counts them: the payload's and the attributes'
+  // UTF-8 encodings.
   sql.exec(
-    "UPDATE run SET event_count = (SELECT COUNT(*) FROM events), event_bytes = (SELECT COALESCE(SUM(LENGTH(CAST(payload AS BLOB))), 0) FROM events), stream_bytes = (SELECT COALESCE(SUM(LENGTH(bytes)), 0) FROM stream_chunks)"
+    "UPDATE run SET event_count = (SELECT COUNT(*) FROM events), event_bytes = (SELECT COALESCE(SUM(LENGTH(CAST(payload AS BLOB)) + COALESCE(LENGTH(CAST(attributes AS BLOB)), 0)), 0) FROM events), stream_bytes = (SELECT COALESCE(SUM(LENGTH(bytes)), 0) FROM stream_chunks)"
   );
 };
 
@@ -2435,6 +2442,8 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
       return "missing";
     }
     const now = Date.now();
+    // Checked before anything is read: this method is the run's boundary.
+    const attributes = eventAttributesOf(command.attributes);
     const decision = storage.transactionSync((): EventDecision => {
       const run = readRun(storage.sql);
       if (run === undefined) {
@@ -2447,16 +2456,18 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
           .exec<{
             type: string;
             payload: string;
+            attributes: string | null;
             accepted_at: number;
             consumed_by: number | null;
           }>(
-            "SELECT type, payload, accepted_at, consumed_by FROM events WHERE key = ?",
+            "SELECT type, payload, attributes, accepted_at, consumed_by FROM events WHERE key = ?",
             command.key
           )
           .toArray();
         if (sent !== undefined) {
           const same =
             sent.type === command.type &&
+            sent.attributes === attributes &&
             // The same payload, whatever order a retry put its keys in, and
             // whichever of its parts it shared.
             equivalent(sent.payload, command.payload);
@@ -2468,8 +2479,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
           // event still untaken, by a wait still in time for it, wakes
           // the run again.
           const wake =
-            sent.consumed_by === null &&
-            this.#wakeFor(run, sent.type, sent.accepted_at, now);
+            sent.consumed_by === null && this.#wakeFor(run, sent, now);
           return { outcome: "duplicate", wake };
         }
       }
@@ -2479,29 +2489,40 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
       // Measured on the encoded text the journal keeps, here as well as
       // in the binding: this method is the run's boundary.
       const bytes = new TextEncoder().encode(command.payload).byteLength;
+      // What the inbox holds of it: its attributes too.
+      const held =
+        bytes +
+        (attributes === null
+          ? 0
+          : new TextEncoder().encode(attributes).byteLength);
       if (bytes > maxEventPayloadBytes) {
         return { outcome: "too_large", wake: false };
       }
       if (
         run.event_count >= maxInboxEvents ||
-        run.event_bytes + bytes > maxInboxBytes
+        run.event_bytes + held > maxInboxBytes
       ) {
         return { outcome: "full", wake: false };
       }
       storage.sql.exec(
-        "INSERT INTO events (type, payload, key, accepted_at) VALUES (?, ?, ?, ?)",
+        "INSERT INTO events (type, payload, key, attributes, accepted_at) VALUES (?, ?, ?, ?, ?)",
         command.type,
         command.payload,
         command.key,
+        attributes,
         now
       );
       storage.sql.exec(
         "UPDATE run SET event_count = event_count + 1, event_bytes = event_bytes + ?",
-        bytes
+        held
       );
       return {
         outcome: "accepted",
-        wake: this.#wakeFor(run, command.type, now, now),
+        wake: this.#wakeFor(
+          run,
+          { type: command.type, attributes, accepted_at: now },
+          now
+        ),
       };
     });
     if (decision.wake) {
@@ -2512,29 +2533,39 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
   }
 
   /**
-   * Whether an event of `type` accepted at `acceptedAt` should wake the
-   * run now, journaling the wake if so. Only a suspended run needs waking:
-   * a live activation reaches the wait itself, and a dead one has its
-   * watchdog. The wait must be in time for the event and not yet over.
+   * Whether `event` should wake the run now, journaling the wake if so.
+   * Only a suspended run needs waking: a live activation reaches the wait
+   * itself, and a dead one has its watchdog. The wait must take the event
+   * (its type, or its match), be in time for it and not yet be over.
    * Called inside the transaction that accepted (or found) the event.
    */
   #wakeFor(
     run: RunRow,
-    type: string,
-    acceptedAt: number,
+    event: { type: string; attributes: string | null; accepted_at: number },
     now: number
   ): boolean {
     const { sql } = this.ctx.storage;
-    const wake =
-      run.status === "waiting" &&
-      sql
-        .exec(
-          "SELECT 1 FROM steps WHERE state = 'waiting' AND type = 'waitForEvent' AND event_type = ? AND deadline > ? AND deadline > ?",
-          type,
-          now,
-          acceptedAt
-        )
-        .toArray().length > 0;
+    // Waits come one at a time: at most one row.
+    const waits =
+      run.status === "waiting"
+        ? sql
+            .exec<{ event_type: string | null; event_match: string | null }>(
+              "SELECT event_type, event_match FROM steps WHERE state = 'waiting' AND type = 'waitForEvent' AND deadline > ? AND deadline > ?",
+              now,
+              event.accepted_at
+            )
+            .toArray()
+        : [];
+    const wake = waits.some((wait) =>
+      wait.event_type === null
+        ? wait.event_match !== null &&
+          eventMatches(
+            readEventMatch(wait.event_match),
+            event.type,
+            event.attributes
+          )
+        : wait.event_type === event.type
+    );
     if (wake) {
       sql.exec("UPDATE run SET wake_at = ?", now);
     }

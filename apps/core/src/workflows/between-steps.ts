@@ -228,6 +228,19 @@ export class BoundedRunHost<Attempt extends object>
     );
   }
 
+  async listen(name: unknown): Promise<Settled<unknown>> {
+    const { listen } = this.#host;
+    if (listen === undefined) {
+      return {
+        ok: false,
+        error: { name: "Error", message: "This run has no listen tasks." },
+      };
+    }
+    return await this.#clock.around(
+      async () => await listen.call(this.#host, name)
+    );
+  }
+
   async waitForDecision(
     name: unknown,
     options: unknown
