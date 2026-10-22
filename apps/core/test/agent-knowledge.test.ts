@@ -876,8 +876,9 @@ describe("a chat's Knowledge", setUpTime, () => {
     }).toStrictEqual({
       results: [
         'Returned:\n["brain.denied","brain.denied"]',
-        // Once granted, the turn recalls for the question first.
-        expect.stringContaining('"evidence":[]'),
+        // Once granted, the turn recalls for the question first: never
+        // from the plan its person can't read.
+        expect.not.stringContaining(word),
         "Returned:\n[0,0]",
       ],
       before: { sources: [], restricted: false },

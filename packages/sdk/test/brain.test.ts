@@ -34,7 +34,7 @@ const unchecked = (value: unknown): never =>
 const pack: MemoryPack = {
   id: "pack-1",
   contractVersion: 1,
-  retrievalPolicyVersion: "fulltext@1",
+  retrievalPolicyVersion: "fulltext@2",
   items: [],
   sourceVersions: [],
   conflicts: [],
