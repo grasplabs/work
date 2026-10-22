@@ -81,6 +81,8 @@ export default defineProject({
           DEV_ACCESS_EMAIL: "",
           // Where provisioned clients are served (src/deploy/context.ts).
           CLIENT_DOMAIN: "grasp.test",
+          // Grasp's Rooms, which test/admin-proposal.test.ts stands in for.
+          ROOMS_ORIGIN: "https://rooms.grasp.test",
           // Where TanStack Start answers server functions: the build sets
           // it; here the Worker reads it from process.env, which workerd
           // fills from its vars, so tests can call them through the entry.

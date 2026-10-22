@@ -152,5 +152,16 @@
       "store_id": "account-secrets-store",
       "secret_name": "STRIPE_RESTRICTED_KEY",
     },
+    // Grasp's Rooms' read-only service token (grasplabs/rooms,
+    // worker/service-read.ts), for the proposal under Contract
+    // (src/proposal/rooms.ts): it reads rooms and their signature requests
+    // and nothing else. The console's alone, never sent to the browser. Put
+    // in the store by hand; until it is, the proposal says Rooms isn't
+    // connected.
+    {
+      "binding": "ROOMS_READ_TOKEN",
+      "store_id": "account-secrets-store",
+      "secret_name": "ROOMS_READ_TOKEN",
+    },
   ],
 }
