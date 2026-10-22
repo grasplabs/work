@@ -357,41 +357,34 @@ test("a builder hands a workflow to someone the App is shared with, from its lin
   const { builder, user } = peopleIn("workflows");
   const name = `Invoices ${crypto.randomUUID()}`;
   const app = await appWithWaitingRun(builder, user, name);
-  // A builder lists whom the App is shared with, not the organization.
-  const shared = await withApi(
-    builder,
-    async (api) => await api.apps.members.list(app)
-  );
-  const userName =
-    shared.find((member) => member.id === user.userId)?.name ?? user.userId;
-
   const page = await pageOf(builder);
   await page.goto("/workflows");
   const line = page
     .getByRole("row")
     .filter({ has: page.getByRole("link", { name: "approval" }) })
     .filter({ hasText: name });
-  // Nobody set an owner: the App's, its builder.
-  const owner = line.getByRole("button", { name: /^Owner: /u });
-  await expect(owner).toHaveAccessibleName(
-    /^Owner: .+\. Change owner$/u,
-    pageRead
-  );
-  await expect(owner).not.toHaveAccessibleName(
-    `Owner: ${userName}. Change owner`
-  );
-  await owner.click();
-  await page.getByPlaceholder("Search people").fill(userName);
-  await page.getByRole("option", { name: userName }).click();
-  await expect(owner).toHaveAccessibleName(
-    `Owner: ${userName}. Change owner`,
-    pageRead
-  );
-  // Core holds it: read back, not just shown.
-  await withApi(builder, async (api) => {
-    const workflow = await api.workflows.get(app, "approval");
-    expect(workflow.summary.owner.userId).toBe(user.userId);
+  const owner = line.getByRole("button", {
+    name: /^Owner: .+\. Change owner$/u,
   });
+  await expect(owner).toBeEnabled(pageRead);
+  // Nobody set an owner: the App's, its builder, ticked in the list. A
+  // builder is offered whom the App is shared with: the user, unticked.
+  // (The test people share one name, so they are told apart by the tick.)
+  await owner.click();
+  const options = page.locator('[data-slot="command-item"]');
+  await expect(options).toHaveCount(2, pageRead);
+  await expect(options.and(page.locator('[data-checked="true"]'))).toHaveCount(
+    1
+  );
+  await options.and(page.locator(':not([data-checked="true"])')).click();
+  // Core holds it: read back, not just shown.
+  await expect(async () => {
+    const owned = await withApi(
+      builder,
+      async (api) => await api.workflows.get(app, "approval")
+    );
+    expect(owned.summary.owner.userId).toBe(user.userId);
+  }).toPass(pageRead);
 
   // The new owner sees it, and, a user of the App, can't hand it on.
   const theirs = await pageOf(user);
@@ -400,7 +393,8 @@ test("a builder hands a workflow to someone the App is shared with, from its lin
     .getByRole("row")
     .filter({ has: theirs.getByRole("link", { name: "approval" }) })
     .filter({ hasText: name })
-    .getByRole("button", { name: userName });
+    .getByRole("button")
+    .filter({ has: theirs.locator('[data-slot="avatar"]') });
   await expect(their).toBeDisabled(pageRead);
 });
 
