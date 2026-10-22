@@ -4352,14 +4352,6 @@ msgstr "De vos domaines"
 msgid "From your HR or payroll system. Microsoft 365 or Google can be connected later, with us."
 msgstr "Depuis votre outil RH ou de paie. Microsoft 365 ou Google pourront être connectés plus tard, avec nous."
 
-#: src/activity/pending.tsx
-msgid "Functions of {domain}, reading and changing its data"
-msgstr "Fonctions de {domain}, qui lisent et modifient ses données"
-
-#: src/activity/pending.tsx
-msgid "Functions of {domain}, reading its data"
-msgstr "Fonctions de {domain}, qui lisent ses données"
-
 #: src/brain/brain.ts
 msgid "Gap"
 msgstr "Lacune"
@@ -5692,6 +5684,10 @@ msgstr "Déplacer vers un projet"
 #: src/activity/audit-words.ts
 msgid "Moved old entries out of the audit trail"
 msgstr "A déplacé d’anciennes entrées hors du journal d’audit"
+
+#: src/activity/pending.tsx
+msgid "Mutations and actions of {domain}"
+msgstr "Mutations et actions de {domain}"
 
 #: src/chat/project-dialog.tsx
 #: src/routes/_shell.settings.packages.index.tsx
@@ -7435,6 +7431,14 @@ msgstr "Pulse sur les appareils de l’entreprise. Ajoute les applications, serv
 #: src/brain/brain-atlas.ts
 msgid "Pulse shows what runs on the laptops, AI tools included."
 msgstr "Pulse montre ce qui tourne sur les ordinateurs, outils d’IA compris."
+
+#: src/activity/pending.tsx
+msgid "Queries of {domain}"
+msgstr "Requêtes de {domain}"
+
+#: src/activity/pending.tsx
+msgid "Queries, mutations and actions of {domain}"
+msgstr "Requêtes, mutations et actions de {domain}"
 
 #: src/workflows/runs.tsx
 msgid "Queued"
