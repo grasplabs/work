@@ -1412,7 +1412,12 @@ export const openPreview = async <T>(
 
 export const runPreview = (
   frame: HTMLIFrameElement,
-  { chatId, app, screen }: { chatId: string; app: string; screen?: string },
+  {
+    chatId,
+    app,
+    screen,
+    version,
+  }: { chatId: string; app: string; screen?: string; version?: number },
   onState: (state: ScreenState) => void,
   onOpened: (appName: string) => void
 ): (() => void) =>
@@ -1421,7 +1426,7 @@ export const runPreview = (
     {
       open: async (session) =>
         await openPreview(
-          async () => await session.chats.preview(chatId, app, screen)
+          async () => await session.chats.preview(chatId, app, screen, version)
         ),
       // A connection of its own: core keeps a preview's callbacks (its
       // server calls') per connection, with no way of the frame's own to
