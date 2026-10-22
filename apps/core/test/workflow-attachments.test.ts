@@ -444,7 +444,8 @@ describe("a connector write that attaches files of its run", () => {
       anotherRunsFile: await attempt({ reuse: otherFile }),
       noSuchFile: await attempt({ reuse: crypto.randomUUID() }),
       twice: await attempt({ twice: "yes" }),
-      tooLarge: await attempt({ size: 3 * mib }),
+      // Its content is "0:" and `size` bytes: just past the cap.
+      tooLarge: await attempt({ size: 2.75 * mib }),
       tooLargeTogether: await attempt({ count: 2, size: 2 * mib }),
     };
     const sentFirst = await sentFor(mailbox);

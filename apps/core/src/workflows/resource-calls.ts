@@ -115,8 +115,8 @@ import type { FilesAnswer, FilesCallOperation } from "./run-files.ts";
 //   connection serves), only from a files use the action declared to read
 //   (`from`, through that binding's own authority), and only files of the
 //   calling run, looked up by their ID and the run's (`attachRunFiles`):
-//   another run's, or one deleted or unfinished, is refused. At most ten,
-//   3 MiB each and 3.5 MiB together, each named once, checked from core's
+//   another run's, or one deleted or unfinished, is refused. At most ten
+//   files and 2.75 MiB of them, each named once, checked from core's
 //   records before a byte is read. The action gives IDs and nothing else:
 //   the name, type, size and SHA-256 connect is sent come from core's own
 //   record, the bytes go beside the input and are checked against its

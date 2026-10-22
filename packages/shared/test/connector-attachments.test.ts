@@ -69,6 +69,7 @@ describe("attachments", () => {
       ]),
       unknownType: accepted([{ ...ok, type: "text/html" }]),
       extraField: accepted([{ ...ok, path: "/etc" }]),
+      oneAtTheTotal: accepted([{ ...ok, size: attachmentLimits.totalBytes }]),
       eleven: accepted(
         Array.from({ length: attachmentLimits.files + 1 }, () => ok)
       ),
@@ -89,6 +90,7 @@ describe("attachments", () => {
       bidi: false,
       unknownType: false,
       extraField: false,
+      oneAtTheTotal: true,
       eleven: false,
       together: false,
     });
