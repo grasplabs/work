@@ -11,9 +11,8 @@ import { Skeleton } from "@grasp-os/ui/components/skeleton";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useRouter, useRouterState } from "@tanstack/react-router";
 import { SearchXIcon, TriangleAlertIcon } from "lucide-react";
-import type { LucideIcon } from "lucide-react";
 import { use } from "react";
-import type { ReactNode } from "react";
+import type { ComponentType, ReactNode, SVGProps } from "react";
 
 import { ErrorText } from "../error-text.tsx";
 import { notLoadedText } from "../load-from-core.tsx";
@@ -21,6 +20,9 @@ import type { Loaded } from "../load-from-core.tsx";
 import { InFrame } from "./in-frame.ts";
 import { SiteHeader } from "./site-header.tsx";
 import type { Crumb } from "./site-header.tsx";
+
+/** What wasn't found, as the sidebar draws it: a Lucide icon or one of Grasp's own. */
+type StateIcon = ComponentType<SVGProps<SVGSVGElement>>;
 
 // How every page finds nothing, fails and loads, the same on each: the
 // prototype's not-found pattern (an empty state under the page's crumbs,
@@ -62,7 +64,7 @@ export const NotFoundState = ({
 }: {
   title?: string;
   /** What wasn't found, as the sidebar draws it: a workflow's icon, say. */
-  icon?: LucideIcon;
+  icon?: StateIcon;
   /** Its title's level: the page's own heading unless it sits in a section that has one. */
   heading?: StateHeading;
 }) => {
@@ -96,7 +98,7 @@ export const NotFound = ({
 }: {
   crumbs?: readonly Crumb[];
   title?: string;
-  icon?: LucideIcon;
+  icon?: StateIcon;
 }) => {
   const { t } = useLingui();
   return (
@@ -208,7 +210,7 @@ export const PageNotLoaded = ({
   crumbs: readonly Crumb[];
   notFound?: string;
   /** What wasn't found, as the sidebar draws it. */
-  icon?: LucideIcon;
+  icon?: StateIcon;
 }) => {
   const { i18n, t } = useLingui();
   if (page.state === "missing") {
@@ -232,7 +234,7 @@ export const NotLoadedState = ({
 }: {
   page: Exclude<Loaded<unknown>, { state: "ready" }>;
   notFound?: string;
-  icon?: LucideIcon;
+  icon?: StateIcon;
   heading?: StateHeading;
 }) => {
   const { i18n } = useLingui();

@@ -10,14 +10,18 @@ import {
   TabsTrigger,
 } from "@grasp-os/ui/components/tabs";
 import type { MessageDescriptor } from "@lingui/core";
-import { msg } from "@lingui/core/macro";
+import { msg, plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Await, createFileRoute, useNavigate } from "@tanstack/react-router";
-import { BlocksIcon, EyeIcon, PenLineIcon } from "lucide-react";
+import { EyeIcon, PenLineIcon } from "lucide-react";
 import { useState } from "react";
 
 import { AppLogo } from "../connections/app-logo.tsx";
-import { canConnect, ConnectDialog } from "../connections/connect-dialog.tsx";
+import {
+  canConnect,
+  canReconnect,
+  ConnectDialog,
+} from "../connections/connect-dialog.tsx";
 import { ConnectionList } from "../connections/connection-list.tsx";
 import type { HeldPermissions } from "../connections/connection-list.tsx";
 import { loadIntegrations } from "../connections/integrations-data.ts";
@@ -33,6 +37,7 @@ import type {
 import { OfferSwitch } from "../connections/offer-switch.tsx";
 import { ErrorText } from "../error-text.tsx";
 import { formatDate, formatDayMonth } from "../format.ts";
+import { IntegrationsIcon } from "../frame/integrations-icon.tsx";
 import {
   LoadingLines,
   NotFound,
@@ -59,11 +64,13 @@ interface IntegrationSearch {
   connection?: string;
 }
 
-const stateText: Record<IntegrationState, MessageDescriptor> = {
+const stateText: Record<
+  Exclude<IntegrationState, "not_connected">,
+  MessageDescriptor
+> = {
   needs_reauth: msg`Needs someone to sign in again`,
   shared: msg`Active, for the whole company`,
   personal: msg`Active, only for you`,
-  not_connected: msg`Not connected`,
 };
 
 /** Why the permissions Apps and agents hold can't be shown; nothing once they can. */
@@ -219,6 +226,111 @@ const Tools = ({
   );
 };
 
+/**
+ * What its connections reach: the tools a Composio connection's admin
+ * allowed, or, for a native one, every tool, as domains and agents are
+ * granted them.
+ */
+const Reaches = ({ integration }: { integration: Integration }) => {
+  const { t } = useLingui();
+  const allowed = allowedToolsOf(integration);
+  if (allowed === undefined) {
+    return (
+      <Trans>
+        Every tool it has: domains and agents use only what they are granted.
+      </Trans>
+    );
+  }
+  const total = integration.toolCount;
+  const count = allowed.size;
+  return total === undefined
+    ? t`${plural(count, { one: "# tool allowed", other: "# tools allowed" })}`
+    : t`${plural(total, { one: `${count} of its # tool allowed`, other: `${count} of its # tools allowed` })}`;
+};
+
+/**
+ * Where its account stands, once it is connected: signing in again to a
+ * connection whose access ran out (else reconnecting its newest), who
+ * connected it, and what it reaches. Each connection's own card is on
+ * Account.
+ */
+const AccountCard = ({
+  integration,
+  identity,
+}: {
+  integration: Integration;
+  identity: Identity;
+}) => {
+  const { i18n } = useLingui();
+  const [signingIn, setSigningIn] = useState(false);
+  const state = stateOf(integration);
+  const ranOut = integration.connections.find(
+    ({ status }) => status === "needs_reauth"
+  );
+  const target = ranOut ?? newestOf(integration);
+  const reconnectable =
+    target !== undefined && canReconnect(target, integration.offered, identity);
+  return (
+    <section
+      aria-labelledby="integration-status"
+      className="flex flex-col gap-3"
+    >
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="font-medium" id="integration-status">
+          <Trans>Account</Trans>
+        </h2>
+        {reconnectable ? (
+          <Button
+            onClick={() => {
+              setSigningIn(true);
+            }}
+            size="sm"
+            variant={ranOut === undefined ? "outline" : "default"}
+          >
+            {ranOut === undefined ? (
+              <Trans>Reconnect</Trans>
+            ) : (
+              <Trans>Sign in again</Trans>
+            )}
+          </Button>
+        ) : null}
+      </div>
+      <dl className="bg-card grid grid-cols-[auto_minmax(0,1fr)] gap-x-8 gap-y-3 rounded-xl border p-4">
+        <dt className="text-muted-foreground">
+          <Trans>Status</Trans>
+        </dt>
+        <dd className="flex items-center gap-2">
+          <span
+            aria-hidden="true"
+            className={
+              state === "needs_reauth"
+                ? "bg-status-attention size-1.75 rounded-full"
+                : "bg-status-agreed size-1.75 rounded-full"
+            }
+          />
+          {state === "not_connected" ? null : i18n._(stateText[state])}
+        </dd>
+        <dt className="text-muted-foreground">
+          <Trans>Reaches</Trans>
+        </dt>
+        <dd>
+          <Reaches integration={integration} />
+        </dd>
+        <ConnectedBy integration={integration} />
+      </dl>
+      {reconnectable ? (
+        <ConnectDialog
+          again={target}
+          identity={identity}
+          integration={integration}
+          onOpenChange={setSigningIn}
+          open={signingIn}
+        />
+      ) : null}
+    </section>
+  );
+};
+
 const Overview = ({
   integration,
   tools,
@@ -229,67 +341,39 @@ const Overview = ({
   tools: Promise<Loaded<CatalogTool[]>> | undefined;
   catalog: Loaded<unknown>;
   identity: Identity;
-}) => {
-  const { i18n } = useLingui();
-  const state = stateOf(integration);
-  return (
-    <div className="flex flex-col gap-8">
-      <section
-        aria-labelledby="integration-status"
-        className="flex flex-col gap-3"
-      >
-        <h2 className="font-medium" id="integration-status">
-          <Trans>Account</Trans>
+}) => (
+  <div className="flex flex-col gap-8">
+    {integration.connections.length === 0 ? null : (
+      <AccountCard identity={identity} integration={integration} />
+    )}
+    <section
+      aria-labelledby="integration-tools"
+      className="flex flex-col gap-3"
+    >
+      <div className="flex flex-col gap-0.5">
+        <h2 className="font-medium" id="integration-tools">
+          <Trans>What Grasp may do</Trans>
         </h2>
-        <dl className="bg-card grid grid-cols-[auto_minmax(0,1fr)] gap-x-8 gap-y-3 rounded-xl border p-4">
-          <dt className="text-muted-foreground">
-            <Trans>Status</Trans>
-          </dt>
-          <dd className="flex items-center gap-2">
-            {state === "not_connected" ? null : (
-              <span
-                aria-hidden="true"
-                className={
-                  state === "needs_reauth"
-                    ? "bg-status-attention size-1.75 rounded-full"
-                    : "bg-status-agreed size-1.75 rounded-full"
-                }
-              />
-            )}
-            {i18n._(stateText[state])}
-          </dd>
-          <ConnectedBy integration={integration} />
-        </dl>
-      </section>
-      <section
-        aria-labelledby="integration-tools"
-        className="flex flex-col gap-3"
-      >
-        <div className="flex flex-col gap-0.5">
-          <h2 className="font-medium" id="integration-tools">
-            <Trans>What Grasp may do</Trans>
-          </h2>
-          <p className="text-muted-foreground">
-            <Trans>
-              What its tools do, as its provider declares them. Domains and
-              agents use only what they are granted, and a tool that changes
-              something waits for its person to confirm it.
-            </Trans>
-          </p>
-        </div>
-        <Tools
-          allowed={allowedToolsOf(integration)}
-          app={integration.name}
-          catalog={catalog}
-          tools={tools}
-        />
-      </section>
-      {isAdmin(identity.role) && integration.listed ? (
-        <OfferSwitch integration={integration} staff={identity.staff} />
-      ) : null}
-    </div>
-  );
-};
+        <p className="text-muted-foreground">
+          <Trans>
+            What its tools do, as its provider declares them. Domains and agents
+            use only what they are granted, and a tool that changes something
+            waits for its person to confirm it.
+          </Trans>
+        </p>
+      </div>
+      <Tools
+        allowed={allowedToolsOf(integration)}
+        app={integration.name}
+        catalog={catalog}
+        tools={tools}
+      />
+    </section>
+    {isAdmin(identity.role) && integration.listed ? (
+      <OfferSwitch integration={integration} staff={identity.staff} />
+    ) : null}
+  </div>
+);
 
 const Account = ({
   integration,
@@ -591,8 +675,8 @@ const IntegrationRoute = () => {
     return (
       <PageNotLoaded
         crumbs={[integrations, { label: parsed?.id ?? t`Integration` }]}
-        icon={BlocksIcon}
-        notFound={t`Integration not found`}
+        icon={IntegrationsIcon}
+        notFound={t`App not found`}
         page={catalog}
       />
     );
@@ -601,8 +685,8 @@ const IntegrationRoute = () => {
     return (
       <NotFound
         crumbs={[integrations, { label: t`Not found` }]}
-        icon={BlocksIcon}
-        title={t`Integration not found`}
+        icon={IntegrationsIcon}
+        title={t`App not found`}
       />
     );
   }
