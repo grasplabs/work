@@ -1019,8 +1019,15 @@ export const resultOf = async (
  * isn't a child or hasn't ended.
  */
 /**
+ * The most a child's end may take, encoded, as its parent is told it: so
+ * a lineage's ends, past its parent's inbox limits, take at most its
+ * descendant runs times this.
+ */
+export const maxChildEndBytes = 256 * 1024;
+
+/**
  * How ended child run `row` ended, as its parent is told (`ChildEnd`): an
- * output too large for an event told as a failure, never dropped.
+ * output past `maxChildEndBytes` told as a failure, never dropped.
  */
 const childEndOf = async (env: Env, row: RunRow): Promise<ChildEnd> => {
   const { output, error } = await resultOf(env, row);
@@ -1034,12 +1041,16 @@ const childEndOf = async (env: Env, row: RunRow): Promise<ChildEnd> => {
     status: "completed",
     output: z.json().parse(output ?? null),
   };
+  // Within what its parent's inbox takes of a child's end, which isn't
+  // held to the inbox's limits: told as a failure past it.
   try {
-    encode(end);
-    return end;
+    if (new TextEncoder().encode(encode(end)).byteLength <= maxChildEndBytes) {
+      return end;
+    }
   } catch {
-    return { status: "failed", code: "workflow.child_output_too_large" };
+    // Past what the journal keeps at all: past the cap too.
   }
+  return { status: "failed", code: "workflow.child_output_too_large" };
 };
 
 export const tellParentOfEnd = async (env: Env, row: RunRow): Promise<void> => {

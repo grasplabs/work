@@ -31,6 +31,7 @@ import { startWorkflow } from "../src/workflow-starts.ts";
 import type { RunStep } from "../src/workflows/host.ts";
 import { ResourceRunHost } from "../src/workflows/resource-host.ts";
 import {
+  maxChildEndBytes,
   resourceRunFor,
   terminateResourceRun,
 } from "../src/workflows/resource-runs.ts";
@@ -330,16 +331,6 @@ const childWaiting = async (parentId: string): Promise<string> =>
     { timeout: 30_000, interval: 100 }
   );
 
-/** Whether the engine keeps `value` as a step's record or an event. */
-const encodes = (value: unknown): boolean => {
-  try {
-    encode(value);
-    return true;
-  } catch {
-    return false;
-  }
-};
-
 describe("run tasks", { timeout: 180_000 }, () => {
   it("start the exact version their binding pins, as a child in the parent's lineage, and take its output", async () => {
     const admin = await person("admin");
@@ -571,50 +562,32 @@ describe("run tasks", { timeout: 180_000 }, () => {
     });
   });
 
-  it("tell the parent a child's end whose output is too large for an event as a failure, never drop it", async () => {
+  it("tell the parent a child's end past what an end may carry as a failure, never drop it, and one within it as it is", async () => {
     const admin = await person("admin");
-    // The longest greeting whose end, beside its status, an event holds.
-    let low = 1;
-    let high = 1_100_000;
-    while (low < high) {
-      const mid = Math.ceil((low + high) / 2);
-      if (
-        encodes({ status: "completed", output: { greeting: "a".repeat(mid) } })
-      ) {
-        low = mid;
-      } else {
-        high = mid - 1;
-      }
-    }
-    // One past the longest end an event holds: still a step's record.
-    const length = low + 1;
-    const greeting = "a".repeat(length);
-    // Built by the child's own expression: a definition that long isn't
-    // one a builder can publish.
-    const child = await workflowOf(admin, "child", [
-      (name) =>
-        definitionOf(name, [
-          { greet: { set: { greeting: `\${ "a" * ${length} }` } } },
-        ]),
-    ]);
-    const { parent } = await parentOf(admin, child, [
-      runChild("greet-child", child.name),
-    ]);
-
-    const runId = await started(admin, parent.id);
-    const run = await endOf(admin, parent.id, runId);
-    const [ended] = await childrenOf(runId);
+    // A child greeting with `length` characters, built by its own
+    // expression: a definition that long isn't one a builder publishes.
+    const ending = async (length: number) => {
+      const child = await workflowOf(admin, "child", [
+        (name) =>
+          definitionOf(name, [
+            { greet: { set: { greeting: `\${ "a" * ${length} }` } } },
+          ]),
+      ]);
+      const { parent } = await parentOf(admin, child, [
+        runChild("greet-child", child.name),
+      ]);
+      const runId = await started(admin, parent.id);
+      const run = await endOf(admin, parent.id, runId);
+      const [ended] = await childrenOf(runId);
+      return { end: run.status, child: ended?.status };
+    };
 
     expect({
-      endTooLarge: !encodes({ status: "completed", output: { greeting } }),
-      recordFits: encodes({ output: { greeting } }),
-      end: endStateOf(run),
-      child: ended?.status,
+      within: await ending(maxChildEndBytes - 1024),
+      past: await ending(maxChildEndBytes + 1024),
     }).toStrictEqual({
-      endTooLarge: true,
-      recordFits: true,
-      end: { status: "failed", code: "workflow.child_failed" },
-      child: "completed",
+      within: { end: "completed", child: "completed" },
+      past: { end: "failed", child: "completed" },
     });
   });
 
