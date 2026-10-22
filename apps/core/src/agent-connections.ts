@@ -5,7 +5,10 @@ import type {
   PendingReference,
 } from "@grasp-os/shared/connect";
 import { errorFields, log } from "@grasp-os/shared/log";
-import { permissionErrors } from "@grasp-os/shared/permissions";
+import {
+  permissionActionSchema,
+  permissionErrors,
+} from "@grasp-os/shared/permissions";
 import { WorkerEntrypoint, exports } from "cloudflare:workers";
 import { z } from "zod";
 
@@ -15,6 +18,7 @@ import {
   auditedCall,
   chatAuthority,
   chatContext,
+  connectionRead,
   recordSources,
   requireOpenRun,
 } from "./agent-scope.ts";
@@ -111,9 +115,9 @@ const callOutcome = (outcome: HeldOutcome): AgentCallOutcome => {
 const pendingIdSchema = z.uuid();
 
 /** The chat's connection grants, as its agent holds them now. */
-const connectionGrants = async (
+export const connectionGrants = async (
   env: Env,
-  scope: AgentScope
+  scope: Omit<AgentScope, "runId">
 ): Promise<(ConnectionGrant & { name: string; actions: string[] })[]> => {
   const context = chatContext(scope);
   const grantOf = connectionGrantOf(context);
@@ -310,7 +314,22 @@ export class ConnectionsApi extends WorkerEntrypoint<Env, AgentScope> {
       await heldInChat(this.env, scope);
       return { output: null, pending: result.pending };
     }
-    await recordSources(this.env, scope, [grant.connection.connectionId]);
+    // The run's result rests on this grant's action and resource, not on
+    // the connection: another grant left on it doesn't let it through.
+    const { connectionId, resource } = grant.connection;
+    await recordSources(
+      this.env,
+      scope,
+      [connectionId],
+      [],
+      [
+        connectionRead(
+          connectionId,
+          permissionActionSchema.parse(action),
+          resource ?? null
+        ),
+      ]
+    );
     return { output: JSON.parse(result.output), pending: null };
   }
 
@@ -329,7 +348,7 @@ export class ConnectionsApi extends WorkerEntrypoint<Env, AgentScope> {
     const scope = this.ctx.props;
     await requireOpenRun(this.env, scope, "connections.outcome");
     const id = pendingIdSchema.safeParse(pendingId);
-    const request = await (async () => {
+    const { request, read } = await (async () => {
       if (!id.success) {
         throw connectErrors.create("connect.invalid");
       }
@@ -358,7 +377,11 @@ export class ConnectionsApi extends WorkerEntrypoint<Env, AgentScope> {
         { ...grant, authority: chatAuthority(scope) },
         { action: held.action, idempotencyKey: held.idempotencyKey }
       );
-      return { capability, ...call, idempotencyKey: held.idempotencyKey };
+      return {
+        request: { capability, ...call, idempotencyKey: held.idempotencyKey },
+        // The grant it was allowed under, exactly as the call needed.
+        read: connectionRead(held.connectionId, held.action, held.resource),
+      };
     })().catch(
       async (error: unknown) =>
         await auditRefusal(
@@ -378,7 +401,7 @@ export class ConnectionsApi extends WorkerEntrypoint<Env, AgentScope> {
       throw forSandbox(error);
     }
     if (outcome.state === "done" || outcome.state === "failed") {
-      await recordSources(this.env, scope, [request.connectionId]);
+      await recordSources(this.env, scope, [request.connectionId], [], [read]);
     }
     return callOutcome(outcome);
   }

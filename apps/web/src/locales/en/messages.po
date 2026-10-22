@@ -1894,6 +1894,10 @@ msgstr "Another version of this domain was made current since this list was read
 msgid "Answer"
 msgstr "Answer"
 
+#: src/inbox/item-detail.tsx
+msgid "Answer in the brain"
+msgstr "Answer in the brain"
+
 #. Something that has not happened yet, on a timeline
 #: src/brain/brain.ts
 msgid "Answered"
@@ -3013,6 +3017,10 @@ msgstr "Compact"
 #: src/routes/_shell.settings.billing.tsx
 msgid "Company"
 msgstr "Company"
+
+#: src/activity/pending.tsx
+msgid "Company Brain, read only. This can read company Brain evidence and its open questions, from the collections it was granted and only what the person it works for may read too. It can never write to the Brain. Every read is recorded"
+msgstr "Company Brain, read only. This can read company Brain evidence and its open questions, from the collections it was granted and only what the person it works for may read too. It can never write to the Brain. Every read is recorded"
 
 #: src/chat/builds.tsx
 msgid "Compared with version {current}, which runs now."
@@ -5274,6 +5282,10 @@ msgstr "Keep the rules that say what your policy means, edit them where needed, 
 #: src/dashboard/signals.tsx
 msgid "Keeps failing"
 msgstr "Keeps failing"
+
+#: src/activity/audit-words.ts
+msgid "Kept something the chat can no longer read from the model"
+msgstr "Kept something the chat can no longer read from the model"
 
 #: src/landscape/landscape.ts
 msgid "Keys, tokens, secrets, credentials or runbooks that could grant access."
@@ -11556,6 +11568,10 @@ msgstr "You show me who’s who, where the documents are, and which tools people
 #: src/connections/connect-dialog.tsx
 msgid "You sign in on {app}’s own page."
 msgstr "You sign in on {app}’s own page."
+
+#: src/inbox/items.ts
+msgid "You were asked this as the {owner}. Answer it in the brain: everyone in the company reads the answer, with your name."
+msgstr "You were asked this as the {owner}. Answer it in the brain: everyone in the company reads the answer, with your name."
 
 #: src/routes/guest.tsx
 msgid "You:"

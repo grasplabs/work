@@ -1894,6 +1894,10 @@ msgstr "Seit diese Liste geladen wurde, ist eine andere Version dieser Domäne a
 msgid "Answer"
 msgstr "Antwort"
 
+#: src/inbox/item-detail.tsx
+msgid "Answer in the brain"
+msgstr "Im Gehirn beantworten"
+
 #. Something that has not happened yet, on a timeline
 #: src/brain/brain.ts
 msgid "Answered"
@@ -3013,6 +3017,10 @@ msgstr "Kompakt"
 #: src/routes/_shell.settings.billing.tsx
 msgid "Company"
 msgstr "Unternehmen"
+
+#: src/activity/pending.tsx
+msgid "Company Brain, read only. This can read company Brain evidence and its open questions, from the collections it was granted and only what the person it works for may read too. It can never write to the Brain. Every read is recorded"
+msgstr "Company Brain, nur lesend. Es kann Belege und offene Fragen des Company Brain lesen, aus den freigegebenen Sammlungen und nur das, was auch die Person lesen darf, für die es arbeitet. Es kann nie in das Brain schreiben. Jeder Lesezugriff wird protokolliert"
 
 #: src/chat/builds.tsx
 msgid "Compared with version {current}, which runs now."
@@ -5274,6 +5282,10 @@ msgstr "Behalten Sie die Regeln, die ausdrücken, was Ihre Richtlinie meint, pas
 #: src/dashboard/signals.tsx
 msgid "Keeps failing"
 msgstr "Schlägt immer wieder fehl"
+
+#: src/activity/audit-words.ts
+msgid "Kept something the chat can no longer read from the model"
+msgstr "Etwas, das der Chat nicht mehr lesen darf, vom Modell ferngehalten"
 
 #: src/landscape/landscape.ts
 msgid "Keys, tokens, secrets, credentials or runbooks that could grant access."
@@ -11556,6 +11568,10 @@ msgstr "Sie zeigen mir, wer wer ist, wo die Dokumente liegen und welche Tools di
 #: src/connections/connect-dialog.tsx
 msgid "You sign in on {app}’s own page."
 msgstr "Sie melden sich auf der Seite von {app} an."
+
+#: src/inbox/items.ts
+msgid "You were asked this as the {owner}. Answer it in the brain: everyone in the company reads the answer, with your name."
+msgstr "Sie wurden dies als {owner} gefragt. Beantworten Sie es im Gehirn: Alle im Unternehmen lesen die Antwort, mit Ihrem Namen."
 
 #: src/routes/guest.tsx
 msgid "You:"

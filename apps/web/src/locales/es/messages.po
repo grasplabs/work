@@ -1894,6 +1894,10 @@ msgstr "Desde que se leyó esta lista, otra versión de este dominio pasó a ser
 msgid "Answer"
 msgstr "Respuesta"
 
+#: src/inbox/item-detail.tsx
+msgid "Answer in the brain"
+msgstr "Responder en el cerebro"
+
 #. Something that has not happened yet, on a timeline
 #: src/brain/brain.ts
 msgid "Answered"
@@ -3013,6 +3017,10 @@ msgstr "Compacta"
 #: src/routes/_shell.settings.billing.tsx
 msgid "Company"
 msgstr "Empresa"
+
+#: src/activity/pending.tsx
+msgid "Company Brain, read only. This can read company Brain evidence and its open questions, from the collections it was granted and only what the person it works for may read too. It can never write to the Brain. Every read is recorded"
+msgstr "Company Brain, solo lectura. Puede leer evidencias y preguntas abiertas del Company Brain, de las colecciones que se le concedieron y solo lo que también puede leer la persona para la que trabaja. Nunca puede escribir en el Brain. Cada lectura queda registrada"
 
 #: src/chat/builds.tsx
 msgid "Compared with version {current}, which runs now."
@@ -5274,6 +5282,10 @@ msgstr "Conserva las reglas que expresan lo que dice tu política, edítalas don
 #: src/dashboard/signals.tsx
 msgid "Keeps failing"
 msgstr "Falla una y otra vez"
+
+#: src/activity/audit-words.ts
+msgid "Kept something the chat can no longer read from the model"
+msgstr "Ocultó al modelo algo que el chat ya no puede leer"
 
 #: src/landscape/landscape.ts
 msgid "Keys, tokens, secrets, credentials or runbooks that could grant access."
@@ -11556,6 +11568,10 @@ msgstr "Tú me enseñas quién es quién, dónde están los documentos y qué he
 #: src/connections/connect-dialog.tsx
 msgid "You sign in on {app}’s own page."
 msgstr "Inicias sesión en la propia página de {app}."
+
+#: src/inbox/items.ts
+msgid "You were asked this as the {owner}. Answer it in the brain: everyone in the company reads the answer, with your name."
+msgstr "Te lo preguntaron como {owner}. Respóndelo en el cerebro: todos en la empresa leen la respuesta, con tu nombre."
 
 #: src/routes/guest.tsx
 msgid "You:"

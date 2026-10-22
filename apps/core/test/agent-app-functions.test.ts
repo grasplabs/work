@@ -5,6 +5,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
+import { withheldResult } from "../src/agent.ts";
 import { callAppFunction } from "../src/app-functions.ts";
 import { loadRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
@@ -30,13 +31,23 @@ export default defineSchema({
   notes: defineTable({ title: v.string().min(1).max(200) }),
 });
 `,
-  "operations/notes.ts": `import { v } from "@grasp-os/sdk";
+  "operations/notes.ts": `import { AppError, v } from "@grasp-os/sdk";
 import { action, mutation, query } from "#grasp/server";
 
 export const create = mutation({
   args: { title: v.string().min(1).max(200) },
   returns: v.id("notes"),
   handler: async (ctx, args) => await ctx.db.insert("notes", args),
+});
+
+/** Fails with the first note's title: an App's failure carries its data. */
+export const failWithFirst = query({
+  args: {},
+  returns: v.null(),
+  handler: async (ctx) => {
+    const [first] = await ctx.db.query("notes").take(1);
+    throw new AppError("note.first", first?.title ?? "No notes.");
+  },
 });
 
 export const titles = query({
@@ -68,14 +79,14 @@ export const holdThenCreate = action({
 });
 `,
   "app.ts": `import { app, v } from "@grasp-os/sdk";
-import { create, holdThenCreate, titles } from "./operations/notes.ts";
+import { create, failWithFirst, holdThenCreate, titles } from "./operations/notes.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Notes",
   schema,
   access: { tables: { notes: { read: "appMembers", write: "appMembers" } } },
-  operations: { notes: { create, holdThenCreate, titles } },
+  operations: { notes: { create, failWithFirst, holdThenCreate, titles } },
   internalOperations: {},
   screens: [],
   preferences: v.object({ compact: v.boolean().default(false) }),
@@ -599,6 +610,134 @@ describe(
         text: "contract.invalid_request",
         padded: "contract.input_too_large",
       });
+    });
+
+    it("lets the model answer a call refused before the App ran, though the person can't open the App", async () => {
+      const notes = await notesApp();
+      const outsider = await signedInApi(idp, "user");
+      const titles = JSON.stringify(callOf(notes.release, "notes.titles", {}));
+      const chat = await chatOf(
+        outsider.userId,
+        codeStep(
+          `export default async (self, env) => (await env.apps.call(${JSON.stringify(notes.app)}, new Blob([${titles}]).stream())).result;`
+        ),
+        says("That App isn't one you can open.")
+      );
+      await requestGranted(idp, notes.builder, {
+        subject: chat.agent,
+        object: { type: "app", appId: notes.app },
+        actions: ["read"],
+        binding: "NOTES",
+      });
+
+      await chat.ask("What's in the Notes App?");
+
+      // The refusal reached the model, which answered: the turn didn't
+      // stop on a read that handed nothing over.
+      const [, after] = chat.gateway.requests;
+      const sent = JSON.stringify(after?.body);
+      expect({
+        requests: chat.gateway.requests.length,
+        refusal: sent.includes("app.not_found"),
+        withheld: sent.includes(withheldResult),
+        stopped: JSON.stringify(
+          await codeResults(chat.stub, chat.chat.id)
+        ).includes("agent.history_revoked"),
+      }).toStrictEqual({
+        requests: 2,
+        refusal: true,
+        withheld: false,
+        stopped: false,
+      });
+    });
+
+    it("withholds an App's earlier failure from the model once the agent loses the App: the App ran, and its failure may carry its data", async () => {
+      const notes = await notesApp();
+      const secret = `CANARY-${crypto.randomUUID().slice(0, 8)}`;
+      await noteAs(notes, secret);
+      const fails = JSON.stringify(
+        callOf(notes.release, "notes.failWithFirst", {})
+      );
+      const chat = await chatOf(
+        notes.builder.userId,
+        codeStep(
+          `export default async (self, env) => (await env.apps.call(${JSON.stringify(notes.app)}, new Blob([${fails}]).stream())).result;`
+        ),
+        says("It failed."),
+        says("I can't see it any more.")
+      );
+      const grant = await requestGranted(idp, notes.builder, {
+        subject: chat.agent,
+        object: { type: "app", appId: notes.app },
+        actions: ["read"],
+        binding: "NOTES",
+      });
+      await chat.ask("What's in the Notes App?");
+      const admin = await signedInApi(idp, "admin");
+      await admin.api.permissions.revoke(grant);
+      await chat.ask("And now?");
+
+      expect(
+        chat.gateway.requests.map(({ body }) => {
+          const sent = JSON.stringify(body);
+          return {
+            secret: sent.includes(secret),
+            withheld: sent.includes(withheldResult),
+          };
+        })
+      ).toStrictEqual([
+        { secret: false, withheld: false },
+        { secret: true, withheld: false },
+        { secret: false, withheld: true },
+      ]);
+    });
+
+    it("withholds an App's earlier answer from the model once the agent loses what the call needed, though it may still write", async () => {
+      const notes = await notesApp();
+      const secret = `CANARY-${crypto.randomUUID().slice(0, 8)}`;
+      await noteAs(notes, secret);
+      const titles = JSON.stringify(callOf(notes.release, "notes.titles", {}));
+      const chat = await chatOf(
+        notes.builder.userId,
+        codeStep(
+          `export default async (self, env) => (await env.apps.call(${JSON.stringify(notes.app)}, new Blob([${titles}]).stream())).result;`
+        ),
+        says(`The App holds ${secret}.`),
+        says("I can't see it any more.")
+      );
+      const grant = await requestGranted(idp, notes.builder, {
+        subject: chat.agent,
+        object: { type: "app", appId: notes.app },
+        actions: ["read"],
+        binding: "NOTES",
+      });
+      // Writing doesn't let it read: the query needed `read`.
+      await requestGranted(idp, notes.builder, {
+        subject: chat.agent,
+        object: { type: "app", appId: notes.app },
+        actions: ["write"],
+        binding: "NOTES_WRITE",
+      });
+      await chat.ask("What's in the Notes App?");
+      const admin = await signedInApi(idp, "admin");
+      await admin.api.permissions.revoke(grant);
+      await chat.ask("And now?");
+
+      // The answer reached the model while the agent held the App, and no
+      // request after the revocation carries it.
+      expect(
+        chat.gateway.requests.map(({ body }) => {
+          const sent = JSON.stringify(body);
+          return {
+            secret: sent.includes(secret),
+            withheld: sent.includes(withheldResult),
+          };
+        })
+      ).toStrictEqual([
+        { secret: false, withheld: false },
+        { secret: true, withheld: false },
+        { secret: false, withheld: true },
+      ]);
     });
   }
 );
