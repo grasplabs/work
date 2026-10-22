@@ -20,9 +20,8 @@ import { auditedDuring, outcome, signedInApi, unique } from "./sign-in.ts";
 // 3. One person reads or replays another's: keys, receipts and records
 //    are the caller's own, and anyone else's answer `brain.not_found`; a
 //    request's hash says nothing across people.
-// 4. Sensitive text gets stored by way of a memory: admission refuses it,
-//    and only a receipt survives, with nothing of what was said, and
-//    never without its refusal's audit event.
+// 4. A remember is stored without its audit event, or its receipt
+//    without its record: all three commit together or not at all.
 // 5. A memory cites what its author can't read, or a section its version
 //    doesn't have, so a later reader learns it exists: such a reference
 //    refuses the whole command.
@@ -32,7 +31,6 @@ import { auditedDuring, outcome, signedInApi, unique } from "./sign-in.ts";
 // 8. Listing is unbounded or leaks across people: pages are bounded and
 //    the cursor is the person's own walk, which no one else can follow.
 // 9. A runaway caller fills the store: a person's remembers are bounded.
-// 10. A record stored before the policy refused its text is served.
 
 const idp = mockIdp();
 
@@ -43,7 +41,6 @@ const key = () => `remember-${unique()}-${unique()}`;
 
 const committed = (receipt: CommandReceipt) => ({
   status: receipt.status,
-  admissionState: receipt.admissionState,
   indexingState: receipt.indexingState,
   refs: receipt.resourceRefs.map((ref) => ref.kind),
 });
@@ -68,10 +65,10 @@ const plantReceipts = async (
   await env.KNOWLEDGE.prepare(
     `WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ?1)
      INSERT INTO brain_receipts
-       (id, key_hash, caller, operation, request_hash, status, admission_state,
+       (id, key_hash, caller, operation, request_hash, status,
         indexing_state, resource_refs, created_at, retention_until)
-     SELECT ?2 || i, ?2 || i, ?3, 'remember', 'x', 'failed', 'refused',
-       'failed', '[]', ?4, ?5
+     SELECT ?2 || i, ?2 || i, ?3, 'remember', 'x', 'committed',
+       'pending', '[]', ?4, ?5
      FROM n`
   )
     .bind(rows, `planted-${unique()}-`, caller, createdAt, retentionUntil)
@@ -137,7 +134,6 @@ describe("the Brain's memory commands", setUpTime, () => {
     }).toStrictEqual({
       first: {
         status: "committed",
-        admissionState: "admitted",
         indexingState: "pending",
         refs: ["memory"],
       },
@@ -227,71 +223,11 @@ describe("the Brain's memory commands", setUpTime, () => {
     });
   });
 
-  it("refuse sensitive text at admission, keeping only a receipt that holds none of it", async () => {
-    const person = await signedInApi(idp, "user");
-    const brain = person.api.knowledge;
-    const excludedKey = key();
-    const excludedText = "Dhr. Jansen verdient €4.000 per maand.";
-    const excluded = await brain.remember(
-      { kind: "fact", text: excludedText },
-      { idempotencyKey: excludedKey }
-    );
-    const held = await brain.remember(
-      {
-        kind: "fact",
-        text: "Ask jan@example.com: back from sick leave next week.",
-      },
-      { idempotencyKey: key() }
-    );
-    // A retry answers alike, from the receipt alone.
-    const retried = await brain.remember(
-      { kind: "fact", text: excludedText },
-      { idempotencyKey: excludedKey }
-    );
-    const stored = await env.KNOWLEDGE.prepare(
-      "SELECT * FROM brain_receipts WHERE id IN (?, ?)"
-    )
-      .bind(excluded.id, held.id)
-      .all();
-    const records = await env.KNOWLEDGE.prepare(
-      "SELECT COUNT(*) AS count FROM brain_memories WHERE owner_id = ?"
-    )
-      .bind(person.userId)
-      .first<{ count: number }>();
-    expect({
-      excluded: committed(excluded),
-      held: committed(held),
-      retried: retried.id === excluded.id,
-      records: records?.count,
-      // Nothing it said, in any column.
-      leaked: JSON.stringify(stored.results).includes("Jansen"),
-    }).toStrictEqual({
-      excluded: {
-        status: "failed",
-        admissionState: "refused",
-        indexingState: "failed",
-        refs: [],
-      },
-      held: {
-        status: "failed",
-        admissionState: "held",
-        indexingState: "failed",
-        refs: [],
-      },
-      retried: true,
-      records: 0,
-      leaked: false,
-    });
-  });
-
-  it("keep a refused remember's receipt only with its refusal's audit event", async () => {
+  it("keep a remember's receipt and record only with its audit event", async () => {
     const person = await signedInApi(idp, "user");
     const brain = person.api.knowledge;
     const idempotencyKey = key();
-    const input = {
-      kind: "fact" as const,
-      text: "Dhr. Jansen verdient €4.000 per maand.",
-    };
+    const input = { kind: "fact" as const, text: "I keep my bike inside." };
     // The event's write fails, as if core stopped right after the receipt.
     const database: D1Database = env.KNOWLEDGE;
     const prepare = database.prepare.bind(database);
@@ -310,22 +246,28 @@ describe("the Brain's memory commands", setUpTime, () => {
       failing.mockRestore();
     }
     const left = await receiptsOf(callerOf(person.userId));
+    const records = await brain.memoriesList();
     let retried: CommandReceipt | undefined;
     const events = await auditedDuring(async () => {
       retried = await brain.remember(input, { idempotencyKey });
     });
+    const [ref] = retried?.resourceRefs ?? [];
     expect({
       interrupted: interrupted === "ok",
       left,
-      retried: retried?.admissionState,
+      records: records.records.length,
+      retried: retried?.status,
       events: events
-        .filter(({ target }) => target?.id === retried?.id)
+        .filter(
+          ({ target }) => ref?.kind === "memory" && target?.id === ref.memoryId
+        )
         .map(({ action }) => action),
     }).toStrictEqual({
       interrupted: false,
       left: 0,
-      retried: "refused",
-      events: ["knowledge.admission.refused"],
+      records: 0,
+      retried: "committed",
+      events: ["knowledge.memory.remember"],
     });
   });
 
@@ -581,42 +523,6 @@ describe("the Brain's memory commands", setUpTime, () => {
       records: 2,
       retry: first.id,
       others: "committed",
-    });
-  });
-
-  it("withhold a record whose text the policy in effect no longer admits", async () => {
-    const person = await signedInApi(idp, "user");
-    const brain = person.api.knowledge;
-    const fine = await brain.remember(
-      { kind: "fact", text: "I sit by the window." },
-      { idempotencyKey: key() }
-    );
-    // A record from before the gate refused its text, as a database
-    // restored from then would hold it.
-    const memoryId = crypto.randomUUID();
-    await env.KNOWLEDGE.prepare(
-      `INSERT INTO brain_memories
-         (id, revision, scope, owner_id, kind, statement, source_refs, state,
-          indexing_state, recorded_at, updated_at)
-       VALUES (?, 1, 'person', ?, 'fact', ?, '[]', 'proposed', 'pending', ?, ?)`
-    )
-      .bind(
-        memoryId,
-        person.userId,
-        "He was convicted of fraud.",
-        Date.now(),
-        Date.now()
-      )
-      .run();
-    const listed = await brain.memoriesList();
-    expect({
-      record: await outcome(brain.memoriesGet({ memoryId })),
-      listed: listed.records.map(({ statement }) => statement),
-      fine: fine.status,
-    }).toStrictEqual({
-      record: "brain.not_found",
-      listed: ["I sit by the window."],
-      fine: "committed",
     });
   });
 

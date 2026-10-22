@@ -34,7 +34,6 @@ import {
 import { derivedHmacKey } from "../derived-keys.ts";
 import { collectionsAllowed, readerActor } from "./access.ts";
 import type { Reader } from "./access.ts";
-import { admissionOf, admissionScreen } from "./admission.ts";
 import { sectionCountOf, versionText } from "./documents.ts";
 
 // The Brain's memory commands (GRA-297; the Brain design's "Brain SDK and
@@ -49,18 +48,13 @@ import { sectionCountOf, versionText } from "./documents.ts";
 // intent (`indexing_state: pending`) commit in one batch on the one
 // database, so a lost reply never leaves a record without its receipt.
 //
-// Every remember passes Knowledge's admission gate (admission.ts) before
-// anything is stored. Text it excludes or holds is refused, and only the
-// receipt is kept: its request's hash, never the text, so a retry
-// answers alike and nothing of what was said survives. A remembered
-// record is `proposed`, never an accepted fact.
+// The Brain is content-agnostic: what a person asks it to remember is
+// stored as they said it. A remembered record is `proposed`, never an
+// accepted fact.
 //
 // A person's records and receipts are personal data: a personal purge
 // (purge.ts) deletes them with the rest (`forgetPerson`), and the clock
-// deletes receipts past their retention (`sweepBrainReceipts`). A record
-// is screened again by the policy in effect when it is read, so a record
-// admitted under an older policy that now refuses it is withheld, as a
-// restore of such a version is refused.
+// deletes receipts past their retention (`sweepBrainReceipts`).
 //
 // This slice serves a signed-in person, for their own `person`-scoped
 // records. An App or agent can't remember yet: writing will be a
@@ -192,7 +186,6 @@ const receiptOf = (row: typeof brainReceipts.$inferSelect): CommandReceipt => ({
   status: row.status,
   resourceRefs: refsSchema.parse(JSON.parse(row.resourceRefs)),
   indexingState: row.indexingState,
-  admissionState: row.admissionState,
   retentionUntil: row.retentionUntil.toISOString(),
   createdAt: row.createdAt.toISOString(),
 });
@@ -302,17 +295,10 @@ const keptReceipt = async (
   return undefined;
 };
 
-/** A receipt's admission state, for what the gate decided. */
-const admissionStates = {
-  admitted: "admitted",
-  held: "held",
-  excluded: "refused",
-} as const;
-
 /**
  * Refuses, as `brain.budget_exceeded`, a remember by `caller` past
  * `rememberPerWindow` in the window up to `now`: early, before the
- * admission gate's work. The batch checks again as it writes
+ * citations are checked. The batch checks again as it writes
  * (`withinBound`), so calls in flight together can't pass it.
  */
 const requireWithinBound = async (
@@ -411,81 +397,54 @@ export const remember = async (
   // After the replay, so a retry of a kept command still answers.
   await requireWithinBound(env, caller, now);
   await requireCitable(env, reader, ownerId, sourceRefs);
-  const { outcome, policy } = await admissionOf(env, request.text);
   const db = drizzle(env.KNOWLEDGE);
   const receiptId = crypto.randomUUID();
   const memoryId = crypto.randomUUID();
-  const admitted = outcome === "admitted";
   const receipt = {
     id: receiptId,
     keyHash,
     caller,
     operation: "remember" as const,
     requestHash,
-    status: admitted ? ("committed" as const) : ("failed" as const),
-    admissionState: admissionStates[outcome],
-    indexingState: admitted ? ("pending" as const) : ("failed" as const),
-    resourceRefs: JSON.stringify(
-      admitted ? [{ kind: "memory", memoryId, revision: 1 }] : []
-    ),
+    status: "committed" as const,
+    indexingState: "pending" as const,
+    resourceRefs: JSON.stringify([{ kind: "memory", memoryId, revision: 1 }]),
     createdAt: now,
     retentionUntil: new Date(now.getTime() + receiptRetentionMs),
   };
-  const actor = readerActor(reader);
   // The receipt, if the caller is within the bound as it is written; the
   // record and the event only if the receipt was: one batch, so never one
   // without the others, and calls in flight together can't pass the bound.
-  const insertReceipt = db
-    .insert(brainReceipts)
-    .select(
-      sql`SELECT ${receipt.id}, ${receipt.keyHash}, ${receipt.caller}, ${receipt.operation}, ${receipt.requestHash}, ${receipt.status}, ${receipt.admissionState}, ${receipt.indexingState}, ${receipt.resourceRefs}, ${receipt.createdAt.getTime()}, ${receipt.retentionUntil.getTime()} WHERE ${withinBound(caller, now)}`
-    )
-    .returning({ id: brainReceipts.id });
   let stored: { id: string }[];
   try {
-    // A refusal's event names its outcome and policy revision only: never
-    // the text, or what it matched (admission.ts).
-    [stored] = await auditedBatch(
-      env,
-      db,
-      admitted
-        ? [
-            insertReceipt,
-            db
-              .insert(brainMemories)
-              .select(
-                sql`SELECT ${memoryId}, 1, 'person', ${ownerId}, ${request.kind}, ${request.text}, ${JSON.stringify(sourceRefs)}, 'proposed', 'pending', ${now.getTime()}, ${now.getTime()} WHERE ${receiptStored(receiptId)}`
-              ),
-            outboxedWhere(
-              db,
-              {
-                actor,
-                action: "knowledge.memory.remember",
-                target: { type: "memory", id: memoryId },
-                provenance: sourceRefs
-                  .map((ref) =>
-                    ref.kind === "document" ? ref.documentId : ref.memoryId
-                  )
-                  .slice(0, 20),
-                detail: { kind: request.kind, receipt: receiptId },
-              },
-              receiptStored(receiptId)
-            ),
-          ]
-        : [
-            insertReceipt,
-            outboxedWhere(
-              db,
-              {
-                actor,
-                action: "knowledge.admission.refused",
-                target: { type: "receipt", id: receiptId },
-                detail: { outcome, policy },
-              },
-              receiptStored(receiptId)
-            ),
-          ]
-    );
+    [stored] = await auditedBatch(env, db, [
+      db
+        .insert(brainReceipts)
+        .select(
+          sql`SELECT ${receipt.id}, ${receipt.keyHash}, ${receipt.caller}, ${receipt.operation}, ${receipt.requestHash}, ${receipt.status}, ${receipt.indexingState}, ${receipt.resourceRefs}, ${receipt.createdAt.getTime()}, ${receipt.retentionUntil.getTime()} WHERE ${withinBound(caller, now)}`
+        )
+        .returning({ id: brainReceipts.id }),
+      db
+        .insert(brainMemories)
+        .select(
+          sql`SELECT ${memoryId}, 1, 'person', ${ownerId}, ${request.kind}, ${request.text}, ${JSON.stringify(sourceRefs)}, 'proposed', 'pending', ${now.getTime()}, ${now.getTime()} WHERE ${receiptStored(receiptId)}`
+        ),
+      outboxedWhere(
+        db,
+        {
+          actor: readerActor(reader),
+          action: "knowledge.memory.remember",
+          target: { type: "memory", id: memoryId },
+          provenance: sourceRefs
+            .map((ref) =>
+              ref.kind === "document" ? ref.documentId : ref.memoryId
+            )
+            .slice(0, 20),
+          detail: { kind: request.kind, receipt: receiptId },
+        },
+        receiptStored(receiptId)
+      ),
+    ]);
   } catch (error) {
     // Another call with the same key committed first: answer as its retry.
     const raced = await keptReceipt(env, keyHash, now);
@@ -538,9 +497,7 @@ export const receiptsGet = async (
 };
 
 /**
- * One of the person's own records; anyone else's is `brain.not_found`,
- * and so is one the policy in effect no longer admits (its statement is
- * withheld, never served).
+ * One of the person's own records; anyone else's is `brain.not_found`.
  */
 export const memoriesGet = async (
   env: Env,
@@ -561,10 +518,6 @@ export const memoriesGet = async (
     )
     .get();
   if (row === undefined) {
-    throw brainErrors.create("brain.not_found");
-  }
-  const { decide } = await admissionScreen(env);
-  if (decide(row.statement) !== "admitted") {
     throw brainErrors.create("brain.not_found");
   }
   return recordOf(row);
@@ -632,9 +585,7 @@ const readCursor = async (
 
 /**
  * The person's own records, newest first, a bounded page at a time, of
- * one kind if asked: the next page starts after `cursor`. A record the
- * policy in effect no longer admits is left out, so a page may hold
- * fewer than asked and still have a next one.
+ * one kind if asked: the next page starts after `cursor`.
  */
 export const memoriesList = async (
   env: Env,
@@ -674,11 +625,8 @@ export const memoriesList = async (
     .limit(size + 1);
   const page = rows.slice(0, size);
   const last = page.at(-1);
-  const { decide } = await admissionScreen(env);
   return {
-    records: page
-      .filter(({ statement }) => decide(statement) === "admitted")
-      .map(recordOf),
+    records: page.map(recordOf),
     cursor:
       rows.length > size && last !== undefined
         ? await writeCursor(env, scope, last)

@@ -461,8 +461,8 @@ export const knowledgeSignalDismissals = sqliteTable(
 
 /**
  * The Brain's memory records (knowledge/memories.ts): what a person, or
- * later an App or agent acting for one, asked the Brain to remember, once
- * admission let it in. A record starts `proposed`, never an accepted fact.
+ * later an App or agent acting for one, asked the Brain to remember, as
+ * they said it. A record starts `proposed`, never an accepted fact.
  * Its scope decides who reads it; `owner_id` is the person whose it is.
  */
 export const brainMemories = sqliteTable(
@@ -510,8 +510,7 @@ export const brainMemories = sqliteTable(
  * The Brain's command receipts: one per command key, so a retry after a
  * lost reply answers the recorded result. `key_hash` is the key keyed to
  * the deployment and scoped to the caller and operation, never the key
- * itself; `request_hash` is the validated request's, never its text. A
- * refused remember keeps a receipt and nothing of what it said.
+ * itself; `request_hash` is the validated request's, never its text.
  */
 export const brainReceipts = sqliteTable(
   "brain_receipts",
@@ -524,9 +523,6 @@ export const brainReceipts = sqliteTable(
     requestHash: text("request_hash").notNull(),
     status: text({
       enum: ["committed", "proposed", "queued", "completed", "failed"],
-    }).notNull(),
-    admissionState: text("admission_state", {
-      enum: ["held", "admitted", "refused"],
     }).notNull(),
     indexingState: text("indexing_state", {
       enum: ["pending", "indexed", "failed"],
