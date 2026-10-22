@@ -174,6 +174,7 @@ export const TestRun = ({
               {
                 starting: t`The run is starting.`,
                 running: t`The run is going.`,
+                paused: t`The run is paused.`,
                 completed: t`The run completed.`,
                 failed: t`The run failed.`,
                 cancelled: t`The run was stopped.`,

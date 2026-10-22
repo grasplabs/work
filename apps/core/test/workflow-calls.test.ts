@@ -72,6 +72,7 @@ import { appWorkflowStarts } from "../src/workflow-start-intents.ts";
 import type { CallingAgent } from "../src/workflow-start-intents.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import type { Settled, StepError } from "../src/workflows/code.ts";
+import { runEngine } from "../src/workflows/engine.ts";
 import { cpuLimitKill } from "../src/workflows/host.ts";
 import type { RunStep } from "../src/workflows/host.ts";
 import type { FrozenCatalogBinding } from "../src/workflows/resource-authority.ts";
@@ -1701,6 +1702,58 @@ describe("runs started by a restricted App", () => {
       laterPinned: { receipt: 0, run: 0 },
       laterEnd: { status: "completed", output: { status: "message-2" } },
       sent: 2,
+    });
+  });
+
+  it("refuse confirming a side effect while its run is paused, then send it once and complete once resumed", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const { workflow, mail, serving } = await mailingWorkflow(ada, admin, {
+      before: [hold],
+    });
+    const starter = await startingApp(ada, admin, workflow.id, {
+      restricted: true,
+    });
+    const runId = await starter.start(serving);
+    const held = await heldFor(ada, runId);
+    // Paused while it waits for its person, as a screen's pause asks it.
+    await runEngine(env).pause(runId, 1);
+    await vi.waitFor(
+      async () => {
+        await expect(
+          resourceRunFor(env, ada, workflow.id, runId)
+        ).resolves.toMatchObject({ status: "paused" });
+      },
+      { timeout: 30_000, interval: 50 }
+    );
+    const whilePaused = await settledCode(
+      confirmPendingAction(env, ada, held.id, held.inputHash)
+    );
+    const { calls: sentWhilePaused } = await mail.did();
+    // Resumed: its next activation may read its row before it hears of the
+    // resume, and goes on all the same.
+    await runEngine(env).resume(runId, 2);
+    await vi.waitFor(
+      async () => {
+        await expect(
+          resourceRunFor(env, ada, workflow.id, runId)
+        ).resolves.not.toMatchObject({ status: "paused" });
+      },
+      { timeout: 30_000, interval: 50 }
+    );
+    await confirmPendingAction(env, ada, held.id, held.inputHash);
+    const run = await ended(ada, workflow.id, runId);
+    const { calls: sent } = await mail.did();
+    expect({
+      whilePaused,
+      sentWhilePaused,
+      end: endOf(run),
+      sent,
+    }).toStrictEqual({
+      whilePaused: "workflow.run_paused",
+      sentWhilePaused: 0,
+      end: { status: "completed", output: { status: "message-1" } },
+      sent: 1,
     });
   });
 

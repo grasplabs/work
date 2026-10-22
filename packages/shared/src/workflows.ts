@@ -47,6 +47,8 @@ export const workflowErrors = defineErrorFamily({
     "Another pause, resume or cancel of this run is still being applied, or the run is being cancelled: wait for it, then try again.",
   "workflow.control_refused":
     "The run has ended, so it can't be paused, resumed or cancelled.",
+  "workflow.control_rolling_back":
+    "The run is rolling back what it did, so it can't be paused, resumed or cancelled until that's done.",
   "workflow.too_many_steps":
     "This run has taken as many steps as a workflow run may: split the work over more runs.",
   "workflow.too_many_attempts":
