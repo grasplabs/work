@@ -8,7 +8,9 @@
  *
  * Grasp's admin can have a hostname of its own (src/admin-host.ts).
  *
- * The cron imports newly published releases (src/releases/import.ts).
+ * The cron imports newly published releases (src/releases/import.ts);
+ * the digest's own cron posts the admin's morning digest to Discord
+ * (src/admin/discord-digest.ts).
  * `ProvisionClient` is the Workflow that onboards a client
  * (src/provision/workflow.ts), `Rollout` the one that rolls a release
  * out to clients (src/rollout/workflow.ts), `RolloutClient` deploys one
@@ -22,6 +24,7 @@ import handler from "@tanstack/react-start/server-entry";
 import { withAccess } from "./access.ts";
 import type { Staff } from "./access.ts";
 import { adminHostRedirect } from "./admin-host.ts";
+import { digestCron, sendMorningDigest } from "./admin/discord-digest.ts";
 import { consoleDatabase } from "./db/act.ts";
 import { importReleases } from "./releases/import.ts";
 
@@ -47,7 +50,11 @@ export default {
   // hostname (src/admin-host.ts), so nothing about it shows to anyone else.
   fetch: async (request: Request, env: Env) =>
     await withStaff(request, env, () => adminHostRedirect(request, env)),
-  scheduled: async (_controller, env) => {
+  scheduled: async (controller, env) => {
+    if (controller.cron === digestCron) {
+      await sendMorningDigest(env, new Date(controller.scheduledTime));
+      return;
+    }
     await importReleases(env.RELEASES, consoleDatabase(env.DB));
   },
 } satisfies ExportedHandler<Env>;

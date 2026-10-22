@@ -235,9 +235,12 @@ const writtenMeanwhile = async (
   expect(saved).toBeTruthy();
 };
 
-/** A job's check, building the draft's screens: no code run builds them. */
+/**
+ * A job's check, building the draft's screens: no code run builds them.
+ * Held where it reads a kept build, or keeps the one it built.
+ */
 const screenBuilds = (method: string, key: unknown): boolean =>
-  method === "get" &&
+  (method === "get" || method === "put") &&
   typeof key === "string" &&
   key.startsWith("screen-builds/");
 

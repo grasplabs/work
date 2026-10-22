@@ -1957,15 +1957,20 @@ export const workflowTriggers = sqliteTable(
  * ended. `status` moves from `open` once, in one conditional update, to an
  * answer (`approved`, `rejected`) or `timed_out`, so the first answer is
  * the only one. An answer keeps who gave it, when, and the payload they
- * sent (JSON), which the run gets.
+ * sent (JSON), which the run gets. The run is an App's (`run_id`) or an
+ * independent workflow's (`resource_run_id`, a JSON workflow's
+ * `grasp.decision` call), exactly one of them; an independent run's
+ * decision keeps what it is about (`input`), which its reviewer sees.
  */
 export const workflowDecisions = sqliteTable(
   "workflow_decisions",
   {
     id: text().primaryKey(),
-    runId: text("run_id")
-      .notNull()
-      .references(() => workflowRuns.id),
+    runId: text("run_id").references(() => workflowRuns.id),
+    resourceRunId: text("resource_run_id").references(
+      // oxlint-disable-next-line no-use-before-define -- declared with the independent runs, below
+      () => workflowResourceRuns.id
+    ),
     step: text().notNull(),
     deciders: text().notNull(),
     /**
@@ -1986,9 +1991,26 @@ export const workflowDecisions = sqliteTable(
     decidedBy: text("decided_by"),
     decidedAt: timestamp("decided_at"),
     payload: text({ mode: "json" }).$type<Json>(),
+    input: text({ mode: "json" }).$type<Json>(),
+    /**
+     * What an answer's payload must be, as the descriptor text of an
+     * independent run's decision contract's response schema: an answer
+     * it doesn't take is refused, never recorded. None takes any payload.
+     */
+    response: text(),
   },
   (table) => [
+    check(
+      "workflow_decisions_one_run",
+      // Unqualified: a check naming its table by name would keep the name
+      // of the table its migration made it in.
+      sql`(run_id IS NULL) <> (resource_run_id IS NULL)`
+    ),
     uniqueIndex("workflow_decisions_run_step_idx").on(table.runId, table.step),
+    uniqueIndex("workflow_decisions_resource_run_step_idx").on(
+      table.resourceRunId,
+      table.step
+    ),
     // A run's open decisions (src/workflows/overview.ts): whether it waits.
     index("workflow_decisions_run_status_idx").on(table.runId, table.status),
     // The improvement signals (src/signals.ts): open decisions, oldest
@@ -2244,6 +2266,39 @@ export const packageCleanups = sqliteTable(
     index("package_cleanups_created_at_idx").on(table.createdAt),
   ]
 );
+
+/**
+ * The trusted record of each compiler build core keeps in R2
+ * (src/build-cache.ts), by its cache key: the SHA-256 and size of the
+ * bytes the build that passed its gates wrote, which a cached object must
+ * hash to before it is served. Only core writes it, and only the build
+ * that holds the key's lease. Also the key's lease (`holder`,
+ * `lease_expires_at`), so builds of the same files in any isolate run
+ * once, and its integrity failures: past a few, the key is quarantined
+ * (`quarantined_at`) and nothing is served from or written to the cache
+ * for it.
+ */
+export const buildReceipts = sqliteTable("build_receipts", {
+  key: text().primaryKey(),
+  /**
+   * The R2 object holding the bytes: the key and the holder that kept
+   * them, so a holder that lost its lease writes only an object of its
+   * own, which no receipt names.
+   */
+  objectKey: text("object_key"),
+  sha256: text(),
+  bytes: integer(),
+  builtAt: timestamp("built_at"),
+  holder: text(),
+  leaseExpiresAt: timestamp("lease_expires_at"),
+  integrityFailures: integer("integrity_failures").notNull().default(0),
+  /**
+   * The `built_at` of the build whose bytes last failed their check: each
+   * kept build counts one failure at most, however many read it.
+   */
+  failedBuiltAt: timestamp("failed_built_at"),
+  quarantinedAt: timestamp("quarantined_at"),
+});
 
 /**
  * The one build under way of each target of an App's graph
@@ -3006,7 +3061,7 @@ export const workflowStartReceipts = sqliteTable(
   {
     id: text().primaryKey(),
     invokerType: text("invoker_type", {
-      enum: ["person", "app", "agent", "trigger"],
+      enum: ["person", "app", "agent", "trigger", "workflow"],
     }).notNull(),
     invokerId: text("invoker_id").notNull(),
     idempotencyKey: text("idempotency_key").notNull(),
@@ -3131,8 +3186,21 @@ export const workflowResourceRuns = sqliteTable(
      * it here (restricted.ts), so no step, retry or replay runs without it.
      */
     restricted: integer({ mode: "boolean" }).notNull().default(false),
+    /**
+     * For a child run (a `run` task's, workflows/run-children.ts): the run
+     * that started it, its lineage's root and its depth under it (quotas.ts,
+     * `admitChild`), pinned with it. Null, null and 0 for a run its own
+     * start admitted, the root of its own lineage.
+     */
+    parentRunId: text("parent_run_id"),
+    rootRunId: text("root_run_id"),
+    depth: integer().notNull().default(0),
   },
   (table) => [
+    // A run's children that haven't ended, for its end to stop them.
+    index("workflow_resource_runs_parent_idx")
+      .on(table.parentRunId, table.status)
+      .where(sql`${table.parentRunId} IS NOT NULL`),
     // A workflow's runs that haven't ended, for its deletion check.
     index("workflow_resource_runs_workflow_idx").on(
       table.workflowResourceId,

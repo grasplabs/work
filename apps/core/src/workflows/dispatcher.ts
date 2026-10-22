@@ -43,6 +43,7 @@ import { paramValues } from "./param-values.ts";
 import { accountOf, admitAttempt } from "./quotas.ts";
 import type { ActionModelCalls, TriedOnceMarks } from "./resource-host.ts";
 import { runResourceWorkflow } from "./resource-runs.ts";
+import { childRunsOf } from "./run-children.ts";
 import { appRecord, findRun, recordFailure, recordWaiting } from "./runs.ts";
 import type { RunRow, Stopped } from "./runs.ts";
 import { wakingOnSettle } from "./share-wakes.ts";
@@ -426,7 +427,10 @@ export const runPinned = async (
   }
   if (pin.type === "resource") {
     // An independent workflow's sealed build: its input is its receipt's.
-    return await runResourceWorkflow(env, pin, event.instanceId, step, memory);
+    return await runResourceWorkflow(env, pin, event.instanceId, step, {
+      ...memory,
+      children: childRunsOf(env),
+    });
   }
   if (pin.type === "candidate") {
     // A test run of a draft checkpoint: its input is its row's.

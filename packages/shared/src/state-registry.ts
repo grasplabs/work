@@ -242,6 +242,10 @@ const coreDb: D1State = {
     app_members: exported(`${core}app-access.ts`),
     screen_artifacts: exported(`${core}screen-trust.ts`),
     screen_builds: cache(`${core}screen-builds.ts`),
+    build_receipts: cache(
+      `${core}build-cache.ts`,
+      "What vouches for a kept build's bytes, and the lease of the build making it: without it every build compiles again."
+    ),
     screen_policies: exported(`${core}screen-trust.ts`),
     blueprints: exported(`${core}app-blueprints.ts`),
     app_versions: exported(`${core}apps.ts`),
@@ -750,6 +754,10 @@ const files: R2State = {
     "app-tests-builds/": cache(`${core}screens.ts`),
     "open-workflow-builds/": cache(`${core}screens.ts`),
     "compute-builds/": cache(`${core}screens.ts`),
+    "build-quarantine/": cache(
+      `${core}build-cache.ts`,
+      "Builds whose bytes failed their receipt's hash, kept a day to look into."
+    ),
     "builds-sweep.json": cache(`${core}screens.ts`),
     "screen-frames/": cache(`${core}screen-frame.ts`),
     "screen-modules/": cache(`${core}screen-frame.ts`),

@@ -195,7 +195,9 @@ const DecisionCard = ({ decision }: { decision: DecisionView }) => {
                     <Trans context="where a decision comes from">From</Trans>
                   </dt>
                   <dd className="truncate">
-                    {current.app.name} · {current.workflow}
+                    {current.app === undefined
+                      ? current.workflow
+                      : `${current.app.name} · ${current.workflow}`}
                   </dd>
                   <dt className="text-muted-foreground">
                     <Trans context="the run of a workflow a decision is for">
@@ -205,6 +207,20 @@ const DecisionCard = ({ decision }: { decision: DecisionView }) => {
                   <dd className="truncate font-mono text-xs leading-5">
                     {current.run}
                   </dd>
+                  {current.input === undefined ? null : (
+                    <>
+                      <dt className="text-muted-foreground">
+                        <Trans context="what a decision is about, as its workflow run passed it">
+                          About
+                        </Trans>
+                      </dt>
+                      <dd className="min-w-0">
+                        <pre className="max-h-48 overflow-auto font-mono text-xs break-all whitespace-pre-wrap">
+                          {JSON.stringify(current.input, undefined, 2)}
+                        </pre>
+                      </dd>
+                    </>
+                  )}
                   {open ? (
                     <>
                       <dt className="text-muted-foreground">
@@ -382,17 +398,18 @@ const Decision = () => {
     );
   }
   const { decision } = page;
-  return (
-    <DecisionInFrame
-      crumbs={[
-        workflows,
-        {
+  // An independent workflow's decision has no App page to lead to.
+  const source: Crumb =
+    decision.app === undefined
+      ? { label: decision.workflow }
+      : {
           label: decision.workflow,
           to: "/workflows/$app/$workflow",
           params: { app: decision.app.id, workflow: decision.workflow },
-        },
-        { label: t`Decision` },
-      ]}
+        };
+  return (
+    <DecisionInFrame
+      crumbs={[workflows, source, { label: t`Decision` }]}
       identity={page.identity}
     >
       <DecisionCard decision={decision} />

@@ -250,6 +250,15 @@ const sealedCallSchema = z.discriminatedUnion("name", [
     timestamp: templateSchema,
   }),
   z.strictObject({
+    name: z.literal("grasp.decision"),
+    binding: aliasSchema,
+    recipients: templateSchema,
+    prompt: templateSchema,
+    input: templateSchema,
+    // How long it takes answers, from its task's timeout (generate.ts).
+    timeoutMs: z.int().positive().optional(),
+  }),
+  z.strictObject({
     name: z.literal("grasp.compute"),
     binding: aliasSchema,
     // The workflow's own module and export its binding names, as the
@@ -345,6 +354,15 @@ const sealedTaskSchema = z.discriminatedUnion("kind", [
     call: sealedCallSchema,
     // Its input.from, output.as and export.as, of the slots its module
     // evaluates (generate.ts).
+    inputFrom: templateSchema.optional(),
+    outputAs: templateSchema.optional(),
+    exportAs: templateSchema.optional(),
+  }),
+  z.strictObject({
+    ...taskBase,
+    kind: z.literal("run"),
+    // Its child: the workflow binding it starts, and its input's template.
+    run: z.strictObject({ binding: aliasSchema, input: templateSchema }),
     inputFrom: templateSchema.optional(),
     outputAs: templateSchema.optional(),
     exportAs: templateSchema.optional(),
@@ -558,6 +576,7 @@ export const compileWorkflow = async (
             duration,
             call,
             listen,
+            run,
             inputFrom,
             outputAs,
             exportAs,
@@ -588,6 +607,9 @@ export const compileWorkflow = async (
             ...(listen === undefined
               ? {}
               : { listen: z.json().parse(structuredClone(listen)) }),
+            ...(run === undefined
+              ? {}
+              : { run: z.json().parse(structuredClone(run)) }),
             ...(inputFrom === undefined
               ? {}
               : { inputFrom: z.json().parse(structuredClone(inputFrom)) }),
