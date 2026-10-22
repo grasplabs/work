@@ -6,7 +6,7 @@ import type { App, CandidateState } from "@grasp-os/shared/apps";
 import { createAuditEvent } from "@grasp-os/shared/audit";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { isExpectedError } from "@grasp-os/shared/errors";
-import { appIdSchema } from "@grasp-os/shared/ids";
+import { appIdSchema, storeIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { canonicalText } from "@grasp-os/shared/json";
 import type { Identity } from "@grasp-os/shared/rpc";
@@ -38,6 +38,7 @@ import {
   permissions,
   screenPolicies,
 } from "./db/core/schema.ts";
+import { survivesMigration } from "./store-backfill.ts";
 
 // Candidates (spec 22.1, 22.2): one frozen version of an App on its way to
 // being made current. A candidate pins the version, its source tree and
@@ -519,26 +520,39 @@ type RollbackEligibility =
   | { readonly eligible: false; readonly reason: string };
 
 /**
- * Whether `candidate` moves a store `replaced` binds on to another schema
- * through one of its explicit migrations: made current, it switches that
- * store (`makeCurrent`), and the version it replaces is refused there
- * from then on (`migration.rollback_incompatible`, store-backfill.ts).
+ * Whether `candidate` leaves behind the schema `replaced` binds a store
+ * on: the candidate binds that store under another schema, reached by one
+ * of its explicit migrations, and the store's contract once that
+ * migration takes over no longer covers `replaced`'s schema
+ * (`survivesMigration`, the check the store makes as it takes over). Made
+ * current, it switches the store (`makeCurrent`), and the version it
+ * replaces is refused there from then on (`migration.rollback_incompatible`,
+ * store-backfill.ts). A migration that only adds to what the old schema
+ * holds leaves it in force, and a rollback possible.
  */
-const migratesPast = (
+const migratesPast = async (
+  env: Env,
   candidate: ReleaseManifest,
   replaced: ReleaseManifest
-): boolean =>
-  candidate.dataStoreBindings.some(
-    (bound) =>
-      replaced.dataStoreBindings.some(
-        (before) =>
-          before.storeId === bound.storeId &&
-          before.schemaHash !== bound.schemaHash
-      ) &&
-      candidate.migrationEvidence.some(
-        ({ toSchema }) => toSchema === bound.schemaHash
-      )
+): Promise<boolean> => {
+  const moved = replaced.dataStoreBindings.filter((before) =>
+    candidate.dataStoreBindings.some(
+      (bound) =>
+        bound.storeId === before.storeId &&
+        bound.schemaHash !== before.schemaHash &&
+        candidate.migrationEvidence.some(
+          ({ toSchema }) => toSchema === bound.schemaHash
+        )
+    )
   );
+  const survives = await Promise.all(
+    moved.map(
+      async ({ storeId, schemaHash }) =>
+        await survivesMigration(env, storeIdSchema.parse(storeId), schemaHash)
+    )
+  );
+  return survives.includes(false);
+};
 
 /**
  * Whether `version` could be made current again once `candidate` (its
@@ -569,7 +583,10 @@ const rollbackEligible = async (
     }
     throw error;
   }
-  if (candidate !== undefined && migratesPast(candidate, replaced)) {
+  if (
+    candidate !== undefined &&
+    (await migratesPast(env, candidate, replaced))
+  ) {
     return { eligible: false, reason: "migration.rollback_incompatible" };
   }
   return { eligible: true };

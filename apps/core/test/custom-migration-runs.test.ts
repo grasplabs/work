@@ -20,6 +20,38 @@ import { codeOf, commit } from "./pending-stores.ts";
 import { seal } from "./sealed-apps.ts";
 import { newRecordId } from "./store-schemas.ts";
 
+/** Notes whose category is optional: version 1's notes fit it as they are. */
+const optionalCategorySchema = `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+
+export const noteFields = {
+  title: v.string().min(1).max(200),
+  category: v.enum(["launch", "general"]).optional(),
+};
+
+export default defineSchema({ notes: defineTable(noteFields) });
+`;
+
+/** What the report of `version`'s candidate says of rolling back from it. */
+const reportedRollback = async (
+  app: string,
+  version: number
+): Promise<unknown> => {
+  const row = await drizzle(env.DB)
+    .select({ report: appCandidateReports.report })
+    .from(appCandidateReports)
+    .innerJoin(
+      appCandidates,
+      eq(appCandidates.id, appCandidateReports.candidateId)
+    )
+    .where(
+      and(eq(appCandidates.appId, app), eq(appCandidates.version, version))
+    )
+    .get();
+  return z
+    .object({ rollback: z.unknown() })
+    .parse(JSON.parse(row?.report ?? "{}")).rollback;
+};
+
 // An explicit migration run end to end (spec 17.2): an App's release
 // declares it, the seal hands it to the App's store as its pending
 // target, core's backfill workflow runs on the engine, each batch through
@@ -221,6 +253,34 @@ export default appTest({
     });
   });
 
+  it("keeps a rollback open past a migration that leaves the old schema in force", async () => {
+    // The migration only derives a field the old schema may go without:
+    // the store's contract still covers version 1's schema after it.
+    const { fixture, store, release } = await migrated(5, deriving, {
+      firstCurrent: true,
+      next: optionalCategorySchema,
+    });
+    const object = env.DATA_STORES.getByName(store.id);
+    await vi.waitFor(
+      async () => {
+        await expect(
+          object.schemaStatus(store.id, release.manifest.schemaHash, {
+            resourceId: fixture.app,
+            resourceVersion: 3,
+          })
+        ).resolves.toMatchObject({ state: "ready" });
+      },
+      { timeout: 120_000, interval: 500 }
+    );
+    await setCurrentVersion(env, fixture.owner, fixture.app, 3);
+    const rollback = await reportedRollback(fixture.app, 3);
+    const back = await setCurrentVersion(env, fixture.owner, fixture.app, 1);
+    expect({ rollback, back: back.currentVersion }).toStrictEqual({
+      rollback: { to: 1, eligible: true },
+      back: 1,
+    });
+  });
+
   it("refuses a rollback past the migration, naming the versions that still fit", async () => {
     const { fixture, store, release } = await migrated(5, deriving, {
       firstCurrent: true,
@@ -239,20 +299,7 @@ export default appTest({
     );
     await setCurrentVersion(env, fixture.owner, fixture.app, 3);
     // Its candidate's report said so before it was made current.
-    const report = await drizzle(env.DB)
-      .select({ report: appCandidateReports.report })
-      .from(appCandidateReports)
-      .innerJoin(
-        appCandidates,
-        eq(appCandidates.id, appCandidateReports.candidateId)
-      )
-      .where(
-        and(eq(appCandidates.appId, fixture.app), eq(appCandidates.version, 3))
-      )
-      .get();
-    const { rollback } = z
-      .object({ rollback: z.unknown() })
-      .parse(JSON.parse(report?.report ?? "{}"));
+    const rollback = await reportedRollback(fixture.app, 3);
     const toFirst = await refusalOf(
       async () => await setCurrentVersion(env, fixture.owner, fixture.app, 1)
     );
