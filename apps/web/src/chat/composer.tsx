@@ -406,7 +406,7 @@ export const Composer = ({
     >
       {compact ? (
         // One line, its button beside it: the chat dock and the guest page.
-        <InputGroup>
+        <InputGroup size="chat">
           <QuestionField
             compact={compact}
             label={label}
