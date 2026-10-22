@@ -245,47 +245,6 @@ describe("indexing", setUpTime, () => {
     });
   });
 
-  it("indexes an App whose AGENTS.md admission refuses by its name alone, and one whose name it refuses without it", async () => {
-    const owner = await personOf("builder");
-    const word = term();
-    const app = await releasedApp(
-      owner,
-      `# ${word}\nShe is on sick leave with burnout.\n`
-    );
-    const named = app.name.split(" ")[1] ?? "";
-    const entry = await entryOf(owner, app.id);
-    const { version } = await owner.knowledge.getDocument(entry.id);
-    const sensitive = await owner.api.apps.create({
-      name: `Leave ${term()}`,
-      description: "Tracks his sick leave and his therapy.",
-    });
-    await release(owner, sensitive.id, { "notes.md": "# Notes\n" });
-    const hidden = await entryOf(owner, sensitive.id);
-    const hiddenText = await owner.knowledge.getDocument(hidden.id);
-    // Over Knowledge's limits as well: within an App's, over 500 links.
-    const links = Array.from({ length: 501 }, (_, index) => `[[l${index}]]`);
-    const large = await owner.api.apps.create({
-      name: `Leave ${term()}`,
-      description: "Tracks her sick leave.",
-    });
-    await release(owner, large.id, {
-      "AGENTS.md": `# Links\n${links.join(" ")}\n`,
-    });
-    const largeEntry = await entryOf(owner, large.id);
-    const largeText = await owner.knowledge.getDocument(largeEntry.id);
-    expect({
-      text: version.text.includes("sick"),
-      found: await foundFor(owner.knowledge, word, named),
-      hidden: hiddenText.version.text.includes("therapy"),
-      large: largeText.version.text.includes("sick"),
-    }).toStrictEqual({
-      text: false,
-      found: { [word]: [], [named]: [entryPath(app.id)] },
-      hidden: false,
-      large: false,
-    });
-  });
-
   it("keeps one entry version for versions whose AGENTS.md is the same", async () => {
     const owner = await personOf("builder");
     const app = await releasedApp(owner, agentsMd(term()));

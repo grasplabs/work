@@ -75,8 +75,6 @@ const typeByFileName: Readonly<Record<string, BuiltinDocumentType>> = {
 interface ParsedFrontmatter {
   type: BuiltinDocumentType;
   frontmatter: Frontmatter;
-  /** Every field, as YAML decodes it: the keys the schema drops too. */
-  fields: Record<string, unknown>;
   body: string;
 }
 
@@ -158,7 +156,7 @@ export const parseFrontmatter = (
   if (!parsed.success) {
     throw new FrontmatterError(issuesOf(parsed.error, "frontmatter"));
   }
-  return { type: type.data, frontmatter: parsed.data, fields, body };
+  return { type: type.data, frontmatter: parsed.data, body };
 };
 
 /** The fields every type has, as `baseSchema` reads them. */
@@ -168,8 +166,6 @@ type BaseFields = z.infer<typeof baseSchema>;
 export interface ParsedDocument {
   type: DocumentType;
   frontmatter: BaseFields & Record<string, unknown>;
-  /** Every field, as YAML decodes it. */
-  fields: Record<string, unknown>;
   body: string;
 }
 
@@ -196,7 +192,6 @@ export const parseBaseFields = (path: string, text: string): ParsedDocument => {
   return {
     type: type ?? "doc",
     frontmatter: { ...rest, ...base.data },
-    fields,
     body,
   };
 };
