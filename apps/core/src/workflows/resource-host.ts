@@ -2743,8 +2743,6 @@ export class ResourceRunHost
     const inputFrom =
       task.kind === "call" ||
       task.kind === "wait" ||
-task.kind === "call" ||
-      task.kind === "wait" ||
       task.kind === "for" ||
       task.kind === "listen" ||
       task.kind === "run"
