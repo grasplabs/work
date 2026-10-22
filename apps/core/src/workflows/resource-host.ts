@@ -79,6 +79,7 @@ import { auditAdmissionRefusal, makeCall } from "./resource-calls.ts";
 import type { BuiltCall } from "./resource-calls.ts";
 import { callCompute } from "./resource-compute.ts";
 import {
+  askDeciders,
   candidateDecision,
   checkCandidateDecision,
   decisionRunOf,
@@ -2034,7 +2035,8 @@ export class ResourceRunHost
    * `data`, for the outcome of the decision its enter step opened, and
    * answers it: none for a test run, which opened nothing. The step runs
    * only on the input that enter step recorded, after its deadline, both
-   * as this activation reached them. Each look at the decision is a step
+   * as this activation reached them. Its people are asked first, once, in
+   * a step of their own (`askDeciders`). Each look at the decision is a step
    * of its own, whether it was answered and when recorded, so a replay
    * waits as the first activation did; between them, a durable wait for
    * the decision's wake (decisions.ts), holding no isolate, until its
@@ -2069,6 +2071,13 @@ export class ResourceRunHost
     if (decision === undefined) {
       return this.#refuse(`Task "${task.id}" takes the decision it opened.`);
     }
+    // Its people asked once, the ask a step of its own: a replay asks
+    // nobody again.
+    await this.#step.do(
+      `${stepName}:decision:asked`,
+      {},
+      async () => await askDeciders(this.#env, this.#run.calling, decision)
+    );
     const run = decisionRunOf(this.#run.calling);
     const look = async (name: string) =>
       lookSchema.parse(

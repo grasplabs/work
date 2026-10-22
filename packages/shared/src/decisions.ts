@@ -137,6 +137,12 @@ export interface DecisionConfirmation {
  * starter, unless `from` is exactly `person:<them>`.
  */
 export interface DecisionsApi {
+  /**
+   * The open decisions the person may answer now, latest first: what waits
+   * for their answer (their inbox), an App's workflow's or an independent
+   * one's.
+   */
+  waiting: () => Promise<DecisionView[]>;
   /** A decision the person may answer. */
   get: (decision: string) => Promise<DecisionView>;
   /** What the person confirms before `answer` takes it. */

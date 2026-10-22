@@ -1460,6 +1460,10 @@ msgstr "Un cas récent"
 msgid "A retry of this change already started, so it wasn't abandoned. The page shows where it stands now."
 msgstr "Une nouvelle tentative de cette modification a déjà commencé : elle n’a donc pas été abandonnée. La page montre maintenant où elle en est."
 
+#: src/inbox/items.ts
+msgid "A run of {name} waits for your answer. Nothing more happens in it until someone answers, or until it stops waiting."
+msgstr "Une exécution de {name} attend votre réponse. Rien d'autre ne s'y passe tant que personne ne répond ou qu'elle n'arrête pas d'attendre."
+
 #: src/routes/decisions.$decision.tsx
 msgid "A run of a workflow asked for this answer."
 msgstr "Une exécution d’un workflow a demandé cette réponse."
@@ -2036,6 +2040,10 @@ msgstr "Réponse"
 #: src/inbox/item-detail.tsx
 msgid "Answer in the brain"
 msgstr "Répondre dans le cerveau"
+
+#: src/inbox/items.ts
+msgid "Answer by"
+msgstr "Répondre avant le"
 
 #. Something that has not happened yet, on a timeline
 #: src/brain/brain.ts
@@ -3745,6 +3753,11 @@ msgstr "A statué sur une action en attente"
 #: src/activity/audit-log.tsx
 #: src/labels.ts
 #: src/routes/decisions.$decision.tsx
+msgid "Decision"
+msgstr "Décision"
+
+#: src/inbox/inbox-kind.tsx
+msgctxt "inbox item kind"
 msgid "Decision"
 msgstr "Décision"
 
@@ -8950,6 +8963,10 @@ msgstr "gain par mois, mesuré"
 #: src/inbox/item-detail.tsx
 msgid "Review"
 msgstr "Examiner"
+
+#: src/inbox/item-detail.tsx
+msgid "Review and answer"
+msgstr "Examiner et répondre"
 
 #: src/knowledge/document.tsx
 msgid "Review by"

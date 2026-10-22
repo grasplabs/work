@@ -7,12 +7,15 @@ import type { WorkflowResourceRun } from "@grasp-os/shared/workflow-resources";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
+import { refreshDailySignals } from "../src/daily-signals.ts";
 import {
   answerDecision,
   confirmDecision,
   decisionEventType,
   reviewDecision,
+  waitingDecisions,
 } from "../src/decisions/decisions.ts";
+import { listSignals } from "../src/signals-rpc.ts";
 import {
   approveWorkflowBinding,
   revokeWorkflowBinding,
@@ -356,6 +359,81 @@ const openings = async (decision: string): Promise<number> => {
   ).length;
 };
 
+/** The asks of decision `decision`, as the audit log has them. */
+const asksOf = async (decision: string) => {
+  const events = await allEvents();
+  return events
+    .filter(
+      ({ action, target }) =>
+        action === "workflow.decision.asked" && target?.id === decision
+    )
+    .map(({ detail, provenance }) => ({
+      recipients: detail?.recipients,
+      whom: provenance,
+    }));
+};
+
+/** The IDs of the decisions waiting for `by` to answer (their inbox). */
+const inboxOf = async (by: Identity): Promise<string[]> => {
+  const waiting = await waitingDecisions(env, by);
+  return waiting.map(({ id }) => id);
+};
+
+/**
+ * Answers run `runId`'s decisions in turn, as each opens: the first open
+ * one not answered yet gets the next of `answers`. Their IDs, in order.
+ */
+const answerInTurn = async (
+  reviewer: Identity,
+  runId: string,
+  answers: readonly boolean[]
+): Promise<string[]> => {
+  const answered: string[] = [];
+  for (const approved of answers) {
+    // One decision after another: each opens once the one before it is answered.
+    // oxlint-disable-next-line no-await-in-loop
+    const next = await vi.waitFor(
+      async () => {
+        const rows = await decisionsOf(runId);
+        const open = rows.find(
+          ({ id, status }) => status === "open" && !answered.includes(id)
+        );
+        if (open === undefined) {
+          throw new Error("No decision open yet");
+        }
+        return open.id;
+      },
+      { timeout: 20_000, interval: 100 }
+    );
+    // oxlint-disable-next-line no-await-in-loop
+    await confirmedAnswer(reviewer, next, { approved });
+    answered.push(next);
+  }
+  return answered;
+};
+
+/** A loop asking `requestReview`'s decision of each item, collecting the answers. */
+const askEach = (input: string) => ({
+  ask: {
+    ...requestReview,
+    with: { ...requestReview.with, input },
+    export: {
+      as: "${ $context + {answers: ($context.answers + [.approved])} }",
+    },
+  },
+});
+
+/** Tasks that end with the answers collected, as a comma-separated status. */
+const collecting = (loop: unknown) => [
+  { init: { set: "${ . }", export: { as: "${ {answers: []} }" } } },
+  loop,
+  {
+    finished: {
+      set: '${ {status: ($context.answers | map(tostring) | join(","))} }',
+    },
+  },
+];
+
 describe("spec 13.9's approval example", () => {
   it("publishes as written, executable, against the build its run loads", async () => {
     const { version } = await approvalWorkflow();
@@ -552,6 +630,105 @@ describe("who answers a JSON workflow's decision", () => {
   });
 });
 
+describe("asking the people a JSON workflow's decision is for", () => {
+  it("asks its recipient once, audited, the decision waiting in their inbox and nobody else's", async () => {
+    const { admin, owner, reviewer, workflow } = await approvalWorkflow();
+    const other = await person("user");
+    const runId = await started(owner, workflow.id, 5000);
+    const decision = await openedBy(runId);
+    const asks = await vi.waitFor(
+      async () => {
+        const found = await asksOf(decision);
+        expect(found).not.toStrictEqual([]);
+        return found;
+      },
+      { timeout: 20_000, interval: 100 }
+    );
+    const waiting = {
+      reviewer: await inboxOf(reviewer),
+      owner: await inboxOf(owner),
+      admin: await inboxOf(admin),
+      other: await inboxOf(other),
+    };
+    await confirmedAnswer(reviewer, decision, { approved: true });
+    const run = await ended(owner, workflow.id, runId);
+    const afterAnswer = await inboxOf(reviewer);
+    const asksAfterReplay = await asksOf(decision);
+    expect({
+      asks,
+      waiting: {
+        reviewer: waiting.reviewer.includes(decision),
+        owner: waiting.owner.includes(decision),
+        admin: waiting.admin.includes(decision),
+        other: waiting.other.includes(decision),
+      },
+      // Answered, it waits for nobody; and a replay asked nobody again.
+      afterAnswer: afterAnswer.includes(decision),
+      asksAfterReplay: asksAfterReplay.length,
+      end: endOf(run),
+    }).toStrictEqual({
+      asks: [{ recipients: 1, whom: [reviewer.userId] }],
+      waiting: { reviewer: true, owner: false, admin: false, other: false },
+      afterAnswer: false,
+      asksAfterReplay: 1,
+      end: { status: "completed", output: { status: "approved" } },
+    });
+  });
+
+  it("counts its decisions among the waits for people and the corrections the signals show", async () => {
+    const { admin, owner, reviewer, workflow } = await approvalWorkflow();
+    const declined = await started(owner, workflow.id, 5000);
+    await confirmedAnswer(reviewer, await openedBy(declined), {
+      approved: false,
+    });
+    await ended(owner, workflow.id, declined);
+    const waiting = await started(owner, workflow.id, 6000);
+    const open = await openedBy(waiting);
+    await refreshDailySignals(env, new Date());
+    const { signals } = await listSignals(env, admin, {});
+    const ours = signals
+      .filter((signal) => signal.workflow === workflow.name)
+      .map(({ kind, app, subject, evidence }) => ({
+        kind,
+        app,
+        subject,
+        evidence:
+          "oldest" in evidence
+            ? evidence.oldest?.map(({ decision, run, step }) => ({
+                decision,
+                run,
+                step,
+              }))
+            : evidence,
+      }))
+      .map(({ evidence, ...signal }) => ({
+        ...signal,
+        evidence:
+          evidence !== undefined &&
+          !Array.isArray(evidence) &&
+          "answered" in evidence
+            ? { answered: evidence.answered, rejected: evidence.rejected }
+            : evidence,
+      }));
+    expect(ours).toStrictEqual(
+      expect.arrayContaining([
+        {
+          kind: "waiting_for_person",
+          app: null,
+          subject: `person:${reviewer.userId}`,
+          evidence: [{ decision: open, run: waiting, step: "request-review" }],
+        },
+        {
+          kind: "correction",
+          app: null,
+          subject: "request-review",
+          evidence: { answered: 1, rejected: 1 },
+        },
+      ])
+    );
+  });
+});
+
 describe("authority behind a JSON workflow's decision", () => {
   it("refuses the outcome once the binding is revoked while the run waits, never taking it as approved", async () => {
     const { admin, owner, reviewer, workflow, approval } =
@@ -671,9 +848,144 @@ describe("a JSON workflow's decision in a loop", () => {
       inputs: ['{"amount":100}', '{"amount":200}'],
     });
   });
+
+  it("opens one decision per item of nested loops, each in its own item's scope", async () => {
+    const { owner, reviewer, workflow } = await approvalWorkflow({
+      tasks: collecting({
+        "each-batch": {
+          for: { each: "batch", at: "batchIndex", in: "${ [1, 2] }" },
+          do: [
+            {
+              "each-invoice": {
+                for: {
+                  each: "amount",
+                  at: "amountIndex",
+                  in: "${ [100, 200] }",
+                },
+                do: [askEach("${ {amount: ($batch * $amount)} }")],
+              },
+            },
+          ],
+        },
+      }),
+    });
+    const runId = await started(owner, workflow.id, 5000);
+    const asked = await answerInTurn(reviewer, runId, [
+      true,
+      false,
+      false,
+      true,
+    ]);
+    const run = await ended(owner, workflow.id, runId);
+    const rows = await decisionsOf(runId);
+    expect({
+      end: endOf(run),
+      // In the order they were asked: each item's own input.
+      inputs: asked.map((id) => rows.find((row) => row.id === id)?.input),
+      decisions: rows.length,
+    }).toStrictEqual({
+      end: {
+        status: "completed",
+        output: { status: "true,false,false,true" },
+      },
+      inputs: [
+        '{"amount":100}',
+        '{"amount":200}',
+        '{"amount":200}',
+        '{"amount":400}',
+      ],
+      decisions: 4,
+    });
+  });
+
+  it("keeps an item waiting for its own decision when an earlier item's decision wakes the run again", async () => {
+    const { owner, reviewer, workflow } = await approvalWorkflow({
+      tasks: collecting({
+        "each-invoice": {
+          for: { each: "amount", in: "${ [100, 200] }" },
+          do: [askEach("${ {amount: $amount} }")],
+        },
+      }),
+    });
+    const runId = await started(owner, workflow.id, 5000);
+    // Items run one after another: the second item's decision opens only
+    // once the first's is answered.
+    const [first] = await answerInTurn(reviewer, runId, [true]);
+    if (first === undefined) {
+      throw new Error("No first decision");
+    }
+    const second = await vi.waitFor(
+      async () => {
+        const rows = await decisionsOf(runId);
+        const next = rows.find(({ id }) => id !== first);
+        if (next === undefined) {
+          throw new Error("No second decision yet");
+        }
+        return next.id;
+      },
+      { timeout: 20_000, interval: 100 }
+    );
+    // The first item's wake again, while the second item's decision is
+    // open: the run looks at its own item's decision, finds it open, and
+    // waits on.
+    await runEngine(env).sendEvent(
+      runId,
+      decisionEventType(first),
+      `again:${unique()}`
+    );
+    await scheduler.wait(1000);
+    const meanwhile = await resourceRunFor(env, owner, workflow.id, runId);
+    const rowsMeanwhile = await decisionsOf(runId);
+    const secondRow = rowsMeanwhile.find(({ id }) => id === second);
+    await confirmedAnswer(reviewer, second, { approved: false });
+    const run = await ended(owner, workflow.id, runId);
+    expect({
+      waitingMeanwhile: meanwhile.endedAt,
+      secondMeanwhile: secondRow?.status,
+      end: endOf(run),
+    }).toStrictEqual({
+      waitingMeanwhile: null,
+      secondMeanwhile: "open",
+      end: { status: "completed", output: { status: "true,false" } },
+    });
+  });
 });
 
 describe("durability of a JSON workflow's decision", () => {
+  it("goes on only with the decision its step opened asking exactly what the step built", async () => {
+    const { owner, reviewer, workflow } = await approvalWorkflow({
+      tasks: [{ hold: { wait: "PT2S" } }, ...approvalTasks],
+    });
+    const runId = await started(owner, workflow.id, 5000);
+    // As an attempt cut off after opening its decision leaves it: open,
+    // under the step's name, though asking something else than the
+    // attempt run again builds.
+    const planted = crypto.randomUUID();
+    await env.DB.prepare(
+      "INSERT INTO workflow_decisions (id, resource_run_id, step, deciders, starter_excluded, description, status, opened_at, expires_at, input) VALUES (?, ?, 'task:request-review', ?, 1, 'Approve this other invoice?', 'open', ?, ?, ?)"
+    )
+      .bind(
+        planted,
+        runId,
+        `person:${reviewer.userId}`,
+        Date.now(),
+        Date.now() + 3_600_000,
+        JSON.stringify({ amount: 1 })
+      )
+      .run();
+    const run = await ended(owner, workflow.id, runId);
+    const rows = await decisionsOf(runId);
+    expect({
+      end: endOf(run),
+      decisions: rows.map(({ id }) => id),
+      asks: await asksOf(planted),
+    }).toStrictEqual({
+      end: { status: "failed", code: "workflow.call_invalid" },
+      decisions: [planted],
+      asks: [],
+    });
+  });
+
   it("goes on with the answer once when its wake is lost and the run restarts, asking nothing twice", async () => {
     const { owner, reviewer, workflow } = await approvalWorkflow();
     const runId = await started(owner, workflow.id, 5000);

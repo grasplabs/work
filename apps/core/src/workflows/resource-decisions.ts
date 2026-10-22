@@ -1,6 +1,7 @@
 import type { AuditEntry } from "@grasp-os/shared/audit";
 import { decidersSchema } from "@grasp-os/shared/decisions";
 import { isExpectedError } from "@grasp-os/shared/errors";
+import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
@@ -13,7 +14,11 @@ import { auditedBatch, outboxed } from "../audit-outbox.ts";
 import { organizationId } from "../auth/auth.ts";
 import { memberRole } from "../auth/identity.ts";
 import { teamMembers, teams } from "../db/core/schema.ts";
-import { openDecision } from "../decisions/decisions.ts";
+import {
+  decisionAsks,
+  decisionRecipients,
+  openDecision,
+} from "../decisions/decisions.ts";
 import type {
   DecisionOutcome,
   ResourceDecisionRun,
@@ -357,7 +362,8 @@ export const openRunDecision = async (
     }
     // Decided again last, nothing awaited of the call after it.
     await requireCallAuthority(env, run, binding);
-    return await openDecision(env, decisionRunOf(run), {
+    const decisionRun = decisionRunOf(run);
+    const opened = await openDecision(env, decisionRun, {
       step,
       from: recipient,
       description,
@@ -370,7 +376,43 @@ export const openRunDecision = async (
       // recorded only to fail the run (`takeDecision` checks it again).
       response,
     });
+    // A step run again after a crash finds the decision its first attempt
+    // opened, as that attempt built it: the run goes on only if it asks
+    // exactly what this attempt built, so what its reviewer answers is
+    // what the run asked.
+    const asks = await decisionAsks(env, decisionRun, opened.decision);
+    if (
+      asks.deciders !== recipient ||
+      asks.description !== description ||
+      canonicalJson(asks.input) !== canonicalJson(input)
+    ) {
+      throw callInvalid(
+        "input: The decision this step opened before asks something else."
+      );
+    }
+    return opened;
   });
+};
+
+/**
+ * Asks the people `run`'s open decision `decision` is for, as an App's
+ * run's are asked (`decisionRecipients`): who they are now is audited
+ * (`workflow.decision.asked`), and the decision waits for them in their
+ * inbox (`waitingDecisions`), with its link. How many were asked; none
+ * once it was answered or closed.
+ */
+export const askDeciders = async (
+  env: Env,
+  run: CallingRun,
+  decision: string
+): Promise<number> => {
+  const asked = await decisionRecipients(
+    env,
+    decisionRunOf(run),
+    decision,
+    false
+  );
+  return asked.length;
 };
 
 /**

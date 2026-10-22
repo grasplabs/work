@@ -17,7 +17,7 @@ import {
 import type { Json } from "@grasp-os/shared/json";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { executionErrors } from "@grasp-os/shared/workflows";
-import { and, eq, exists, gt, lte, sql } from "drizzle-orm";
+import { and, desc, eq, exists, gt, lte, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
@@ -400,6 +400,23 @@ const runDecision = async (
     throw notFound();
   }
   return row;
+};
+
+/**
+ * What the run's decision `decision` asks, as its row keeps it: whom, what
+ * and about what. Its reviewer sees exactly this.
+ */
+export const decisionAsks = async (
+  env: Env,
+  run: DecisionRun,
+  decision: string
+): Promise<{ deciders: string; description: string; input: Json | null }> => {
+  const { deciders, description, input } = await runDecision(
+    env,
+    run,
+    decision
+  );
+  return { deciders, description, input: input ?? null };
 };
 
 /** The deadline of the run's decision `decision`, in milliseconds. */
@@ -909,6 +926,57 @@ export const answerableBy = async (
   }
   const found = await db.batch([first, ...rest]);
   return new Set(found.flat().map(({ id }) => id));
+};
+
+/**
+ * The decisions waiting for `by` (`waitingDecisions`): the latest that many
+ * listed at once, each its own read.
+ */
+export const maxWaitingDecisions = 50;
+
+/**
+ * The open decisions `by` may answer now, latest first, at most
+ * {@link maxWaitingDecisions}: an App's run's and an independent run's
+ * alike, so a person asked by a JSON workflow, which has no App code of
+ * its own to tell them, finds it waiting for them (their inbox). Read by
+ * the deciders that could name them (themselves, their role, their teams),
+ * then held to who may answer each now (`answerableBy`), as answering is;
+ * none for Grasp staff.
+ */
+export const waitingDecisions = async (
+  env: Env,
+  by: Identity
+): Promise<DecisionView[]> => {
+  if (by.staff) {
+    return [];
+  }
+  const db = drizzle(env.DB);
+  const naming = [
+    `person:${by.userId}`,
+    `role:${by.role}`,
+    ...by.teams.map(({ id }) => `team:${id}`),
+  ];
+  const open = await db
+    .select({ id: workflowDecisions.id, deciders: workflowDecisions.deciders })
+    .from(workflowDecisions)
+    .where(
+      and(
+        stillOpen(workflowDecisions, new Date()),
+        inList(workflowDecisions.deciders, naming),
+        runUnended()
+      )
+    )
+    .orderBy(desc(workflowDecisions.openedAt), desc(workflowDecisions.id))
+    // Past the page: some may be their own run's (R8), which they don't answer.
+    .limit(maxWaitingDecisions * 2);
+  const answerable = await answerableBy(env, by, open);
+  const ids = open
+    .filter(({ id }) => answerable.has(id))
+    .slice(0, maxWaitingDecisions)
+    .map(({ id }) => id);
+  return await Promise.all(
+    ids.map(async (id) => await toView(env, await decisionWithRun(env, id)))
+  );
 };
 
 /** Why an answer, or its confirmation, was refused, as audited. */
