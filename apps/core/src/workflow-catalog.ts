@@ -103,17 +103,21 @@ const contractInvalid = (issue: string) =>
  * Refuses (`workflow.contract_invalid`) an operation described by JSON
  * Schema (connector-schemas.ts) unless it is a connector contract's, both
  * its input and output are, each is one the allow-list admits, and connect
- * confirms they are exactly a native action of this release by that tool.
+ * confirms they are exactly a native action of this release by that tool,
+ * its `readOnly` as the connector declares it.
  * Nothing else may put a pattern where core runs it (GRA-982).
  */
 const requireNativeOperations = async (
   env: Env,
   contract: {
     kind: CatalogBindingKind;
-    operations?: Record<string, { input: string; output: string }>;
+    operations?: Record<
+      string,
+      { input: string; output: string; readOnly?: boolean }
+    >;
   }
 ): Promise<void> => {
-  for (const [operation, { input, output }] of Object.entries(
+  for (const [operation, { input, output, readOnly }] of Object.entries(
     contract.operations ?? {}
   )) {
     const enveloped = [input, output].filter(
@@ -139,9 +143,10 @@ const requireNativeOperations = async (
         `operations.${operation}: Its JSON Schema uses something a connector call's check doesn't enforce.`
       );
     }
+    let confirmed: { readOnly: boolean };
     try {
       // oxlint-disable-next-line no-await-in-loop -- one confirmation per operation, each bounded
-      await env.CONNECT.nativeOperation({
+      confirmed = await env.CONNECT.nativeOperation({
         tool: operation,
         input: inputSchema,
         output: outputSchema,
@@ -153,6 +158,14 @@ const requireNativeOperations = async (
         );
       }
       throw error;
+    }
+    // Whether it only reads is the connector's to say, not the admin's: a
+    // write published as a read would leave the writes a model may steer
+    // out of a version's review (GRA-718).
+    if ((readOnly ?? false) !== confirmed.readOnly) {
+      throw contractInvalid(
+        `operations.${operation}: readOnly must be what its connector declares (${String(confirmed.readOnly)}).`
+      );
     }
   }
 };

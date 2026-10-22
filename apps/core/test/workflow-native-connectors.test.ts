@@ -331,9 +331,13 @@ const ran = async (
 
 describe("a workflow binding a native connector's operation", () => {
   it("publishes a connector's own JSON Schemas only when connect confirms they're exactly a native action's", async () => {
-    const { admin, read } = await nativeContract();
+    const { admin, read, connectionId } = await nativeContract();
+    const send = await servedAction(connectionId, "mail.send");
     const publish = async (
-      operations: Record<string, { input: string; output: string }>,
+      operations: Record<
+        string,
+        { input: string; output: string; readOnly?: boolean }
+      >,
       kind: "connector" | "operation" = "connector"
     ) =>
       await refusal(
@@ -348,6 +352,7 @@ describe("a workflow binding a native connector's operation", () => {
     const exact = {
       input: enveloped(read.input),
       output: enveloped(read.output),
+      readOnly: true,
     };
     const descriptor = JSON.stringify({
       descriptorVersion: 1,
@@ -382,6 +387,25 @@ describe("a workflow binding a native connector's operation", () => {
       }),
       // On a contract that isn't a connector's.
       notConnector: await publish({ op: exact }, "operation"),
+      // A read published as a write: readOnly is the connector's to say.
+      notReadOnly: await publish({
+        "mail.readAttachment": { ...exact, readOnly: false },
+      }),
+      // A write published as a read, which would leave it out of the
+      // writes a version's review says a model may steer.
+      writeAsRead: await publish({
+        "mail.send": {
+          input: enveloped(send.input),
+          output: enveloped(send.output),
+          readOnly: true,
+        },
+      }),
+      write: await publish({
+        "mail.send": {
+          input: enveloped(send.input),
+          output: enveloped(send.output),
+        },
+      }),
       exact: await publish({ "mail.readAttachment": exact }),
     }).toStrictEqual({
       backtracking: "workflow.contract_invalid",
@@ -389,6 +413,9 @@ describe("a workflow binding a native connector's operation", () => {
       otherName: "workflow.contract_invalid",
       half: "workflow.contract_invalid",
       notConnector: "workflow.contract_invalid",
+      notReadOnly: "workflow.contract_invalid",
+      writeAsRead: "workflow.contract_invalid",
+      write: "ok",
       exact: "ok",
     });
   });
