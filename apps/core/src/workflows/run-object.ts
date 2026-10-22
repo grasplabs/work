@@ -702,7 +702,7 @@ export class WorkflowRuns extends WorkflowRun<Env> {
           status: latest.status,
           at: latest.timestamp,
           sequence: latest.sequence,
-          ...this.#compensationOf(),
+          ...this.#compensationOf(latest.status),
         },
         live?.status === "errored" ? (live.error.code ?? null) : null
       );
@@ -753,11 +753,18 @@ export class WorkflowRuns extends WorkflowRun<Env> {
    * The run's compensation as its journal has it now (spec 10.7.3): while
    * it rolls back, why (its failure and the code it failed with, or a
    * cancellation); once it ended having rolled back, how that went. Read
-   * from the run's own journal, never a notification, which may be older:
-   * a projection only ever applies it with the status it is newer than.
+   * from the run's own journal, and given only with a notification of the
+   * same state (`notified`): a rollback's end only with an end, its cause
+   * only while it rolls back, so a late notification never carries what a
+   * newer state says.
    */
-  #compensationOf(): Pick<EngineStatus, "rollback" | "compensation"> {
+  #compensationOf(
+    notified: RunNotification["status"]
+  ): Pick<EngineStatus, "rollback" | "compensation"> {
     const live = this.status();
+    if (live?.status !== notified) {
+      return {};
+    }
     const rollback =
       live !== undefined && "rollback" in live ? live.rollback : undefined;
     const cause = this.rollbackCause();
@@ -796,7 +803,7 @@ export class WorkflowRuns extends WorkflowRun<Env> {
       ...(latest.firstActivatedAt === null
         ? {}
         : { startedAt: latest.firstActivatedAt }),
-      ...this.#compensationOf(),
+      ...this.#compensationOf(latest.status),
     });
     // A pause or resume settles from where the engine has the run now,
     // and which controls it took, read together here from its journal,

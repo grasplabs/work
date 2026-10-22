@@ -1263,7 +1263,10 @@ export const projectStatus = async (
   if (!changed) {
     return;
   }
-  if (shownStatus(row.status) !== changed.status) {
+  // Its compensation's start changes its summary too.
+  const compensating =
+    row.compensation === null && engine.compensation !== undefined;
+  if (shownStatus(row.status) !== changed.status || compensating) {
     await tellScreens(env, row);
   }
 };
