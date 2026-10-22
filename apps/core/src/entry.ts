@@ -10,6 +10,7 @@ import {
   interviewApiPath,
   interviewPagePath,
 } from "@grasp-os/shared/interview-links";
+import { interviewTurnPath } from "@grasp-os/shared/interview-turn";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { LogFields } from "@grasp-os/shared/log";
 import { mailIngressPath } from "@grasp-os/shared/mail-ingress";
@@ -44,6 +45,7 @@ import { errorResponse } from "./errors.ts";
 import { guestResponse } from "./guests.ts";
 import { originalResponse } from "./knowledge/uploads.ts";
 import { mailIngressResponse } from "./mail-ingress.ts";
+import { interviewTurnResponse } from "./onboarding/interview.ts";
 import { interviewResponse } from "./onboarding/links.ts";
 import { speechResponse } from "./onboarding/speech.ts";
 import { onboardingSummaryResponse } from "./onboarding/summary.ts";
@@ -140,13 +142,17 @@ const linkResponse = async (
   pathname: string,
   request: Request,
   env: Env,
-  requestId: string
+  requestId: string,
+  ctx: Pick<ExecutionContext, "waitUntil">
 ): Promise<Response | undefined> => {
   if (pathname === guestApiPath) {
     return await guestResponse(request, env, requestId);
   }
   if (pathname === interviewApiPath) {
     return await interviewResponse(request, env, requestId);
+  }
+  if (pathname === interviewTurnPath) {
+    return await interviewTurnResponse(request, env, requestId, ctx);
   }
   if (pathname === speechPath) {
     return await speechResponse(request, env, requestId);
@@ -259,7 +265,8 @@ const pathHandlers: ReadonlyMap<
 const route = async (
   request: Request,
   env: Env,
-  requestId: string
+  requestId: string,
+  ctx: Pick<ExecutionContext, "waitUntil">
 ): Promise<Response> => {
   const url = new URL(request.url);
   const { pathname } = url;
@@ -298,7 +305,7 @@ const route = async (
   if (handler !== undefined) {
     return await handler(request, env, requestId);
   }
-  const linked = await linkResponse(pathname, request, env, requestId);
+  const linked = await linkResponse(pathname, request, env, requestId, ctx);
   if (linked !== undefined) {
     return linked;
   }
@@ -338,7 +345,7 @@ const respond = async (
     if (checked.ok) {
       installBuiltinsOnce(env, ctx);
       ensureClockOnce(env, ctx);
-      const response = await route(checked.request, env, requestId);
+      const response = await route(checked.request, env, requestId, ctx);
       return { response, level: "info" };
     }
     const response = errorResponse(

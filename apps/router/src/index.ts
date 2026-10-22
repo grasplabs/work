@@ -8,6 +8,7 @@ import {
   strictTransportSecurity,
 } from "@grasp-os/shared/http";
 import { interviewApiPath } from "@grasp-os/shared/interview-links";
+import { interviewTurnPath } from "@grasp-os/shared/interview-turn";
 import { errorFields, log } from "@grasp-os/shared/log";
 import {
   mailFromHeader,
@@ -216,11 +217,14 @@ export default {
     ) {
       return rateLimited(url, host);
     }
-    // An interview link's endpoint (core's src/onboarding/links.ts), and
-    // where its lines are said (src/onboarding/speech.ts), the same, from
-    // one budget; core counts per link too.
+    // An interview link's endpoints (core's src/onboarding/links.ts, its
+    // turns, src/onboarding/interview.ts, and where its lines are said,
+    // src/onboarding/speech.ts), the same, from one budget; core counts per
+    // link too.
     if (
-      (pathname === interviewApiPath || pathname === speechPath) &&
+      (pathname === interviewApiPath ||
+        pathname === interviewTurnPath ||
+        pathname === speechPath) &&
       !(await withinLimit(env.INTERVIEW_RATE_LIMIT, request, host))
     ) {
       return rateLimited(url, host);
