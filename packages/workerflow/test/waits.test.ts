@@ -715,6 +715,71 @@ describe("waits raced or awaited together", () => {
     expect(witnessed(id)).toStrictEqual(["finally"]);
   });
 
+  it("hand a race the same winner on every replay, as its outcomes were first journaled, across a kill", async () => {
+    const id = newId();
+    await workflow("sleep-race").create({ id });
+    // The short sleep won; the long one comes due while "after" waits.
+    await until("the long sleep to be due and journaled", async () => {
+      const { steps } = await journalOf("sleep-race", id);
+      return steps.find(({ name }) => name === "long")?.state === "succeeded"
+        ? true
+        : undefined;
+    });
+    // Replays with both outcomes read back from the journal, then one
+    // after the object is killed.
+    await deliverAlarm("sleep-race", id);
+    await deliverAlarm("sleep-race", id);
+    await runInDurableObject(runObject("sleep-race", id), (_, state) => {
+      state.abort("killed");
+    }).catch(() => null);
+
+    const status = await ended("sleep-race", id);
+
+    const { activations } = await journalOf("sleep-race", id);
+    expect(status).toStrictEqual({ status: "complete", output: "short" });
+    expect(activations.length).toBeGreaterThanOrEqual(5);
+    // One witness for every activation from the short sleep's wake on.
+    expect(witnessed(id)).toStrictEqual(
+      Array.from({ length: activations.length - 1 }, () => "short")
+    );
+  });
+
+  it("pause a replay cut short at a sleep it already slept, rather than take the sleeps after it for a stray, and go on after resuming", async () => {
+    const id = newId();
+    await workflow("timer-naps").create({ id });
+    await suspendedOn("timer-naps", id, "second");
+    // A replay, out at the author's own timer when the pause comes: the
+    // sleep it reaches next parks at the pause, and "second" isn't reached.
+    const replay = deliverAlarm("timer-naps", id);
+    await until("the replay to start", async () => {
+      const { activations } = await journalOf("timer-naps", id);
+      return activations.length === 3 ? true : undefined;
+    });
+    const run = await instance("timer-naps", id);
+    await run.pause();
+    await replay;
+
+    await expect(statusOf("timer-naps", id)).resolves.toMatchObject({
+      status: "paused",
+    });
+    await run.resume();
+    const journal = await until("the run to replay to the sleep", async () => {
+      const after = await journalOf("timer-naps", id);
+      return after.activations.length === 4 &&
+        after.activations[3]?.ended === "suspended"
+        ? after
+        : undefined;
+    });
+
+    expect(journal.run.status).toBe("waiting");
+    expect(
+      journal.steps.map(({ name, state }) => ({ name, state }))
+    ).toStrictEqual([
+      { name: "first", state: "succeeded" },
+      { name: "second", state: "waiting" },
+    ]);
+  });
+
   it.each(["step", "sleep"])(
     "run a step started beside a sleep (%s first) to its outcome, once, before the run suspends on the sleep",
     async (first) => {

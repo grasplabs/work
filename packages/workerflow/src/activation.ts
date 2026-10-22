@@ -46,6 +46,15 @@
 // a parked wait while the activation still ran wakes the run at once. A
 // wait reached inside a step's callback ends the run with a
 // WorkflowParallelWaitError: its step would stay out while it waits. A
+// Outcomes reach the definition in the order they were first journaled
+// (journal.ts, `createSettledOrder`): a replay holds one back until every
+// outcome journaled before it has been handed over, one per macrotask, so
+// a race (`Promise.race`, the first of several to land) has the same
+// winner on every replay, whether its outcomes are read back from the
+// journal or come due again at once. Should the definition never reach an
+// earlier one (it took another way, or reaches it only after a timer or
+// I/O of its own), the held ones go on in order once nothing else is out.
+// A
 // replay that reaches a wait other than the one the journal holds (another
 // event type or duration), or that would suspend without reaching a wait
 // or a retry the journal holds still waiting, ends with a
@@ -132,6 +141,8 @@ import {
   readNextEvent,
   readRollbackWorklist,
   readRun,
+  readSettled,
+  readSettledAfter,
   readStep,
   startRetentionIn,
 } from "./journal.ts";
@@ -669,6 +680,30 @@ export class Activation {
   #parkedWake = Number.POSITIVE_INFINITY;
   /** Whether a check for quiet waits for its macrotask. */
   #quietCheckDue = false;
+  /**
+   * Whether a step or a wait parked at a pause, unresolved: the replay was
+   * cut short there, so what comes after it may not have been reached.
+   */
+  #cutShort = false;
+  /**
+   * The numbers (`settled`) of the outcomes journaled for the
+   * definition's own steps, in order, as far as this activation has
+   * learnt them; read once an outcome is first handed over. Each is
+   * handed over once every one before it was (`#inTurn`).
+   */
+  #settled: number[] | undefined;
+  /** Where in `#settled` the first outcome not yet handed over is. */
+  #nextSettled = 0;
+  /** The numbers of the outcomes handed over, or passed over as missed. */
+  readonly #handedOver = new Set<number>();
+  /**
+   * Outcomes held back until those journaled before them are handed over,
+   * by number. Their calls count among those out, never parked: the
+   * activation doesn't suspend while one is held.
+   */
+  readonly #held = new Map<number, () => void>();
+  /** Whether `#handOver` is handing outcomes over. */
+  #handingOver = false;
   /** When this activation's alarm handler started: its wall time's start. */
   /** Whether this activation has claimed an attempt yet. */
   #claimed = false;
@@ -1031,6 +1066,7 @@ export class Activation {
       const { sql } = this.#storage;
       const now = Date.now();
       if (this.#pausedHere()) {
+        this.#cutShort = true;
         return { park: now };
       }
       const step = readStep(sql, identity);
@@ -1715,6 +1751,9 @@ export class Activation {
   }
 
   #suspendIfParked(): void {
+    if (this.#passOverMissed()) {
+      return;
+    }
     const quiet =
       !this.#over &&
       this.#parkedCount + this.#parkedWaits > 0 &&
@@ -1737,7 +1776,11 @@ export class Activation {
           this.#pauseIn(this.#storage.sql, now);
           return "paused";
         }
-        const strayed = this.#strayedIn(this.#storage.sql);
+        // So does one called off after a step or a wait parked at it: what
+        // parked is due at once, and the next activation reaches the rest.
+        const strayed = this.#cutShort
+          ? undefined
+          : this.#strayedIn(this.#storage.sql);
         if (strayed !== undefined) {
           return { strayed };
         }
@@ -1775,6 +1818,119 @@ export class Activation {
       await (letGo === "paused" ? this.#disarm() : this.#arm(wake));
       this.#stop(suspended);
     })();
+  }
+
+  /**
+   * Waits for the turn of the outcome journaled for `identity` to reach
+   * the definition: once every outcome journaled before it has, and a
+   * macrotask after the last, so whatever the definition does with that
+   * one in microtasks (a race settling) is done first. The last await
+   * before an outcome is handed back: nothing after it waits on I/O. An
+   * outcome without a number (a nested step's) goes at once.
+   */
+  async #inTurn(identity: StepIdentity): Promise<void> {
+    const settled = this.#write(() => {
+      const { sql } = this.#storage;
+      const number = readSettled(sql, identity);
+      if (number !== null) {
+        this.#learnSettled(sql, number);
+      }
+      return number;
+    });
+    if (settled === failed) {
+      return await never();
+    }
+    if (settled === null) {
+      return;
+    }
+    const turn = Promise.withResolvers<true>();
+    this.#held.set(settled, () => {
+      turn.resolve(true);
+    });
+    void this.#handOver();
+    await turn.promise;
+  }
+
+  /** Learns the outcomes journaled up to `number`, if it doesn't know it. */
+  #learnSettled(sql: SqlStorage, number: number): void {
+    if (this.#settled === undefined) {
+      this.#settled = readSettledAfter(sql, 0);
+      return;
+    }
+    const last = this.#settled.at(-1) ?? 0;
+    if (number > last) {
+      this.#settled.push(...readSettledAfter(sql, last));
+    }
+  }
+
+  /** The number of the first outcome not yet handed over, if any. */
+  #firstOwed(): number | undefined {
+    const settled = this.#settled ?? [];
+    while (
+      this.#nextSettled < settled.length &&
+      this.#handedOver.has(settled[this.#nextSettled] ?? 0)
+    ) {
+      this.#nextSettled += 1;
+    }
+    return settled[this.#nextSettled];
+  }
+
+  /**
+   * Hands held outcomes over in their order, one per macrotask, for as
+   * long as the next one owed is held. Runs once at a time.
+   */
+  async #handOver(): Promise<void> {
+    if (this.#handingOver) {
+      return;
+    }
+    this.#handingOver = true;
+    try {
+      for (;;) {
+        const next = this.#firstOwed();
+        const release = next === undefined ? undefined : this.#held.get(next);
+        if (this.#over || next === undefined || release === undefined) {
+          break;
+        }
+        this.#held.delete(next);
+        this.#handedOver.add(next);
+        release();
+        // oxlint-disable-next-line no-await-in-loop -- one outcome per macrotask, in order
+        await scheduler.wait(0);
+      }
+    } finally {
+      this.#handingOver = false;
+    }
+    if (this.#held.size > 0) {
+      // The one owed may never be reached: a check, once quiet, passes
+      // over it (`#passOverMissed`).
+      this.#checkWhenQuiet();
+    }
+  }
+
+  /**
+   * Passes over the outcomes owed before the first one held, once nothing
+   * of this activation is out but held and parked calls: the definition
+   * no longer reaches them, or not without a timer or I/O of its own, and
+   * the held ones go on in their order. True when it did.
+   */
+  #passOverMissed(): boolean {
+    if (this.#over || this.#handingOver || this.#held.size === 0) {
+      return false;
+    }
+    const out = this.#callsOut + this.#waitsOut;
+    const settledOut = this.#parkedCount + this.#parkedWaits + this.#held.size;
+    if (out !== settledOut) {
+      return false;
+    }
+    const first = Math.min(...this.#held.keys());
+    for (const number of this.#settled ?? []) {
+      if (number >= first) {
+        break;
+      }
+      this.#handedOver.add(number);
+    }
+    void this.#handOver();
+    return true;
   }
 
   async #do(name: string, rest: unknown[]): Promise<unknown> {
@@ -1821,9 +1977,12 @@ export class Activation {
     if (journaled?.state === "succeeded" && journaled.value !== null) {
       // What this step's work returned, through the codec or from storage,
       // as the attempt that journaled it returned it.
-      return await this.#result(journaled.ordinal, journaled.value);
+      const value = await this.#result(journaled.ordinal, journaled.value);
+      await this.#inTurn(identity);
+      return value;
     }
     if (journaled?.state === "failed" && journaled.error !== null) {
+      await this.#inTurn(identity);
       throw rebuild(journaled.error);
     }
     if (journaled?.state === "fatal" && journaled.error !== null) {
@@ -1906,9 +2065,12 @@ export class Activation {
     }
     await this.#renewWatchdog();
     if ("failed" in landed) {
+      await this.#inTurn(identity);
       throw rebuild(landed.failed);
     }
-    return await this.#result(landed.ordinal, landed.value);
+    const value = await this.#result(landed.ordinal, landed.value);
+    await this.#inTurn(identity);
+    return value;
   }
 
   /**
@@ -1981,6 +2143,7 @@ export class Activation {
         // event: it parks, due at once, and the run pauses once nothing
         // else of this activation is out (`#suspendIfParked`). Should the
         // pause be called off first, the next activation reaches it again.
+        this.#cutShort = true;
         return { park: now, eventType: null, deadline: now };
       }
       let step = readStep(sql, identity);
@@ -2118,6 +2281,7 @@ export class Activation {
       return await never();
     }
     await this.#renewWatchdog();
+    await this.#inTurn(identity);
     if (!outcome.ok) {
       throw rebuild(outcome.error);
     }

@@ -1072,6 +1072,33 @@ export const definitions: Record<string, WorkflowDefinition> = {
         return "slept";
       }),
   },
+  // The author's own timer, then two sleeps one after the other: a pause
+  // sent during the timer finds a replay out before it reached either.
+  "timer-naps": {
+    run: async (_event, step) => {
+      await scheduler.wait(300);
+      await step.sleep("first", 100);
+      await step.sleep("second", "1 hour");
+      return "done";
+    },
+  },
+  // Two sleeps raced, the shorter first to land, then a third: the
+  // winner, witnessed on every replay, is what the run returns.
+  "sleep-race": {
+    run: async (event, step) => {
+      const named = async (name: string, ms: number): Promise<string> => {
+        await step.sleep(name, ms);
+        return name;
+      };
+      const winner = await Promise.race([
+        named("long", 600),
+        named("short", 100),
+      ]);
+      witness(event.instanceId, winner);
+      await step.sleep("after", 1200);
+      return winner;
+    },
+  },
   // A wait raced against a sleep, inside the author's own handlers.
   races: {
     run: async (event, step) => {

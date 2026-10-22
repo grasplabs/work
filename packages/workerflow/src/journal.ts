@@ -50,6 +50,35 @@ export class JournalSchemaError extends Error {
 export { journalSchemaVersion } from "./journal-schema.ts";
 
 /**
+ * Numbers the definition's own steps (not a rollback, nor one called
+ * from inside another step's attempt) in the order their outcomes were
+ * journaled: `settled`, 1 up, set in the write that journals the outcome.
+ * A replay hands outcomes back to the definition in this order
+ * (activation.ts, `#inTurn`), so a race it ran (`Promise.race`, `any`,
+ * the first of several to land) has the same winner on every replay,
+ * however the outcomes are read back. Only an outcome the definition is
+ * handed counts: a success or a failure, never a step's fatal end, which
+ * ends the run.
+ */
+const createSettledOrder = (sql: SqlStorage): void => {
+  sql.exec(`
+    CREATE INDEX IF NOT EXISTS steps_settled
+      ON steps (settled) WHERE settled IS NOT NULL;
+    CREATE TRIGGER IF NOT EXISTS steps_settled_order
+    AFTER UPDATE OF state ON steps
+    WHEN new.state IN ('succeeded', 'failed')
+      AND old.state NOT IN ('succeeded', 'failed')
+      AND new.type <> 'rollback'
+      AND new.nested = 0
+    BEGIN
+      UPDATE steps
+        SET settled = (SELECT COALESCE(MAX(settled), 0) + 1 FROM steps)
+        WHERE ordinal = new.ordinal;
+    END;
+  `);
+};
+
+/**
  * The journal's version, once upgraded to this engine's where it was the
  * one before (`journalSchemaVersion`): each upgrade in one write, as the
  * journal is first read by an engine that knows it. Of a version it
@@ -61,14 +90,23 @@ const upgradedSchema = (
   const [stored] = sql
     .exec<{ schema: number | string | null }>("SELECT schema FROM run")
     .toArray();
-  if (stored?.schema === 8) {
-    // In one turn, so in one of the object's atomic writes: the column and
-    // the version move together.
+  let schema = stored?.schema;
+  // Each in one turn, so in one of the object's atomic writes: the columns
+  // and the version move together.
+  if (schema === 8) {
     sql.exec("ALTER TABLE run ADD COLUMN control_fence INTEGER");
     sql.exec("UPDATE run SET schema = 9");
-    return 9;
+    schema = 9;
   }
-  return stored?.schema;
+  if (schema === 9) {
+    // Outcomes journaled before keep no order: they are handed back as
+    // they are reached, as they were.
+    sql.exec("ALTER TABLE steps ADD COLUMN settled INTEGER");
+    createSettledOrder(sql);
+    sql.exec("UPDATE run SET schema = 10");
+    schema = 10;
+  }
+  return schema;
 };
 
 /**
@@ -368,6 +406,35 @@ export interface Journal {
   events: EventRow[];
 }
 
+/**
+ * The order the outcome of the step `step` was journaled in among the
+ * definition's own (`createSettledOrder`), or null: none journaled yet,
+ * or not one of the definition's own steps, or journaled before outcomes
+ * were numbered.
+ */
+export const readSettled = (
+  sql: SqlStorage,
+  step: { type: StepType; name: string; occurrence: number }
+): number | null =>
+  sql
+    .exec<{ settled: number | null }>(
+      "SELECT settled FROM steps WHERE type = ? AND name = ? AND occurrence = ?",
+      step.type,
+      step.name,
+      step.occurrence
+    )
+    .toArray()[0]?.settled ?? null;
+
+/** The numbers of the outcomes journaled after `after`, in order. */
+export const readSettledAfter = (sql: SqlStorage, after: number): number[] =>
+  sql
+    .exec<{ settled: number }>(
+      "SELECT settled FROM steps WHERE settled > ? ORDER BY settled",
+      after
+    )
+    .toArray()
+    .map((row) => row.settled);
+
 export const createJournal = (sql: SqlStorage): void => {
   sql.exec(`
     CREATE TABLE IF NOT EXISTS run (
@@ -431,6 +498,7 @@ export const createJournal = (sql: SqlStorage): void => {
       config TEXT,
       has_rollback INTEGER NOT NULL DEFAULT 0,
       nested INTEGER NOT NULL DEFAULT 0,
+      settled INTEGER,
       UNIQUE (type, name, occurrence)
     );
     CREATE TABLE IF NOT EXISTS attempts (
@@ -463,6 +531,7 @@ export const createJournal = (sql: SqlStorage): void => {
     CREATE INDEX IF NOT EXISTS steps_pending
       ON steps (state) WHERE state IN ('waiting', 'retrying');
   `);
+  createSettledOrder(sql);
   createStreamChunks(sql);
   createHistory(sql);
   createNotifications(sql);

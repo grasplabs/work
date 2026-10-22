@@ -10,8 +10,11 @@
  *
  * - 9: `run.control_fence`, the newest fence a control came with (run.ts,
  *   `ControlFence`).
+ * - 10: `steps.settled`, the order the definition's steps' outcomes were
+ *   journaled in, which a replay hands them back in (journal.ts,
+ *   `createSettledOrder`).
  */
-export const journalSchemaVersion = 9;
+export const journalSchemaVersion = 10;
 
 /**
  * The oldest journal this engine reads, upgrading it as it first reads
