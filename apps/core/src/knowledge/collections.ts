@@ -20,6 +20,7 @@ import { inList } from "../db/d1.ts";
 import { collectionTeams, collections } from "../db/knowledge/schema.ts";
 import { allowedCollections, canCreate, canWrite } from "./access.ts";
 import type { Reader } from "./access.ts";
+import { admitToKnowledge } from "./admission.ts";
 
 export type CollectionRow = typeof collections.$inferSelect;
 
@@ -173,8 +174,16 @@ export const createCollection = async (
       issues: unknown.map((id) => `teams: there's no team ${id}`),
     });
   }
+  const id = crypto.randomUUID();
+  // Its name and description are kept, and shown, as its documents are.
+  await admitToKnowledge(
+    env,
+    actorOf(person),
+    id,
+    `${name}\n\n${description ?? ""}`
+  );
   const row: CollectionRow = {
-    id: crypto.randomUUID(),
+    id,
     name,
     description,
     owner: person.userId,

@@ -1,4 +1,4 @@
-import { dayOf } from "@grasp-os/shared/admin/org-record";
+import { addWorkingDays, dayOf } from "@grasp-os/shared/admin/org-record";
 import { createAuditEvent } from "@grasp-os/shared/audit";
 import type { AuditActor, AuditDetailValue } from "@grasp-os/shared/audit";
 import { randomToken, sha256Hex } from "@grasp-os/shared/encoding";
@@ -20,11 +20,16 @@ import type {
   KickoffView,
   VisionField,
 } from "@grasp-os/shared/kickoff";
-import { log } from "@grasp-os/shared/log";
-import { agreementsSchema, planSchema } from "@grasp-os/shared/onboarding";
+import { errorFields, log } from "@grasp-os/shared/log";
+import {
+  agreementsSchema,
+  planSchema,
+  remindAfterWorkingDays,
+} from "@grasp-os/shared/onboarding";
 import type {
   Agreements,
   InterviewKind,
+  InterviewLocale,
   OnboardingView,
   Plan,
   Roster,
@@ -65,9 +70,12 @@ import {
   sql,
 } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
+import { drizzle as drizzleD1 } from "drizzle-orm/d1";
 import { drizzle } from "drizzle-orm/durable-sqlite";
 
 import { drainObjectOutbox } from "../audit-outbox.ts";
+import { signInConfig } from "../auth/config.ts";
+import { organizations } from "../db/core/schema.ts";
 import { migrateOnWake } from "../db/migrate.ts";
 import migrations from "../db/onboarding/migrations/migrations.js";
 import {
@@ -86,8 +94,19 @@ import {
   teamCounts,
   teams,
   usage,
+  voiceUse,
 } from "../db/onboarding/schema.ts";
 import { inJurisdiction } from "../durable-objects.ts";
+import {
+  deliverMail,
+  dropMailAbout,
+  mailAbout,
+  mailState,
+  queueAgain,
+  queueMail,
+} from "../mail-outbox.ts";
+import type { MailState, MailToQueue } from "../mail-outbox.ts";
+import { sendMail } from "../mail.ts";
 import { storedDocumentReadingSchema } from "./document-reading.ts";
 import {
   kickoffBrief,
@@ -95,11 +114,13 @@ import {
   storedReadingSchema,
 } from "./kickoff.ts";
 import { linkSecretOf } from "./link-secret.ts";
+import { linkMail, reminderMail, updateMail } from "./mail-text.ts";
 import {
   agreementsIn,
   closesOn,
   dueLinks,
   leads,
+  leadsTalked,
   progressOf,
   sendsFrom,
   takingPart,
@@ -130,6 +151,11 @@ import { interviewBrief, setupView } from "./stephen-setup.ts";
 //   What each person does on their link is in the onboarding's own log,
 //   which only staff read, never in the audit log, which the company's
 //   admin reads: it would tell them who talked, and when.
+// - A mail going twice, or a link's secret kept or logged: mail goes
+//   through the outbox (mail-outbox.ts), once by its key, the link filled
+//   in only as the mail is sent. Each link goes by email on its day, and
+//   one reminder after `remindAfterWorkingDays`; the admin's update twice
+//   a week holds the admin's own numbers, never a name (mail-text.ts).
 
 /** The one store of a deployment, by the name it is reached under. */
 const storeName = "onboarding";
@@ -183,6 +209,29 @@ const teamKnown = (
           .join("; ")}.`,
       ]),
 ];
+
+/**
+ * Waits for `promise`, and logs it failing instead of throwing: for the
+ * delivery of mail after it, which runs all the same.
+ */
+const quietly = async (promise: Promise<unknown>): Promise<void> => {
+  try {
+    await promise;
+  } catch (error) {
+    log.error("mail.delivery_failed", errorFields(error));
+  }
+};
+
+/** The days of the week the admin's update goes out: Monday and Thursday. */
+const updateWeekdays: ReadonlySet<number> = new Set([1, 4]);
+
+/** What every onboarding mail is written with (`#mailContext`). */
+interface MailContext {
+  company: string;
+  locale: InterviewLocale;
+  /** The company's onboarding admin, whom replies reach. */
+  replyTo: string | undefined;
+}
 
 /** How long the alarm waits, at most, before it looks for due links again. */
 const linkCheckMs = 60 * 60 * 1000;
@@ -371,6 +420,8 @@ export class Onboarding extends DurableObject<Env> {
   #auditRetryMs = auditRetryMs.first;
   /** Calls per link in the current minute: the store counts per link, never per address. */
   readonly #calls = new Map<string, { minute: string; count: number }>();
+  /** The delivery of mail running now: the next waits for it. */
+  #mailing: Promise<unknown> = Promise.resolve();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -408,6 +459,22 @@ export class Onboarding extends DurableObject<Env> {
       .limit(1)
       .all();
     return row?.at ?? null;
+  }
+
+  /**
+   * The day each team's lead finished their interview, for the teams the
+   * admin's view already counts as talked (rules.ts, `leadsTalked`): the
+   * brain's stakeholder interviews, without anything said in them.
+   */
+  leadsTalked(
+    now: string = new Date().toISOString()
+  ): { team: string; person: string; day: string }[] {
+    const roster = this.#roster();
+    return roster === null
+      ? []
+      : [...leadsTalked(roster, this.#interviews(), now)].map(
+          ([team, { person, day }]) => ({ team, person, day })
+        );
   }
 
   /** Whether interviews may happen now: not paused, and the agreements in. */
@@ -485,6 +552,7 @@ export class Onboarding extends DurableObject<Env> {
           .delete(interviewStates)
           .where(eq(interviewStates.person, person))
           .run();
+        dropMailAbout(this.ctx.storage.sql, person);
       }
       this.#changed(by, "onboarding.roster.saved", {
         teams: roster.teams.length,
@@ -929,6 +997,30 @@ export class Onboarding extends DurableObject<Env> {
     return true;
   }
 
+  /**
+   * Sends someone's latest mail that failed again, from its first try:
+   * staff do it once what stopped it is put right. The audit log has that
+   * they did, and which kind of mail, not for whom. False when none failed.
+   */
+  sendAgain(person: string, by: AuditActor): boolean {
+    const failed = mailAbout(this.ctx.storage.sql, person).find(
+      ({ state }) => state === "failed"
+    );
+    if (failed === undefined) {
+      return false;
+    }
+    const now = new Date().toISOString();
+    const [kind = "mail"] = failed.key.split("/");
+    this.ctx.storage.transactionSync(() => {
+      queueAgain(this.ctx.storage.sql, failed.key);
+      this.#noted(person, `mail.${kind}.again`, now, whoIs(by));
+      this.#changed(by, "onboarding.mail.resent", { kind });
+    });
+    this.#deliverAudit();
+    this.#deliverMailSoon();
+    return true;
+  }
+
   /** People whose link went out, and when: for the links themselves (GRA-287) and the admin's list. */
   sentLinks(): { person: string; sentAt: string }[] {
     return this.#db
@@ -962,6 +1054,66 @@ export class Onboarding extends DurableObject<Env> {
         },
       })
       .run();
+  }
+
+  /**
+   * Whom a line said on someone's link is for, from the device it is on,
+   * while their interview may be saved: `link:<person>`, the key its
+   * voice is counted under (`countVoice`), and the seconds said under it
+   * today. Counted within the link's limit, as every call on it.
+   */
+  speechOnLink(
+    secretMark: string,
+    keyMark: string,
+    now: string = new Date().toISOString()
+  ): LinkAnswer<{ who: string; said: number }> {
+    const found = this.#onLink(secretMark, now, "save");
+    if (!found.ok) {
+      return found;
+    }
+    const { person, link } = found.value;
+    if (link.keyMark === null || link.keyMark !== keyMark) {
+      return refused("interview.elsewhere");
+    }
+    const who = `link:${person.id}`;
+    return answered({ who, said: this.voiceSaid(who, now) });
+  }
+
+  /** Seconds of voice said for `who` today. */
+  voiceSaid(who: string, now: string = new Date().toISOString()): number {
+    const [row] = this.#db
+      .select({ seconds: voiceUse.seconds })
+      .from(voiceUse)
+      .where(and(eq(voiceUse.who, who), eq(voiceUse.day, now.slice(0, 10))))
+      .all();
+    return row?.seconds ?? 0;
+  }
+
+  /**
+   * Counts a line said for `who`: its seconds today, which its budget
+   * goes by, and the onboarding's use of voice by purpose (`meter`).
+   * The days before today go.
+   */
+  countVoice(
+    who: string,
+    purpose: Took["purpose"],
+    seconds: number,
+    now: string = new Date().toISOString()
+  ): void {
+    const day = now.slice(0, 10);
+    const add = counted(seconds);
+    this.ctx.storage.transactionSync(() => {
+      this.#db.delete(voiceUse).where(lt(voiceUse.day, day)).run();
+      this.#db
+        .insert(voiceUse)
+        .values({ who, day, seconds: add })
+        .onConflictDoUpdate({
+          target: [voiceUse.who, voiceUse.day],
+          set: { seconds: sql`${voiceUse.seconds} + ${add}` },
+        })
+        .run();
+      this.meter({ purpose, model: "voice", seconds: add }, now);
+    });
   }
 
   /** The AI used, by day, purpose and model. */
@@ -1370,7 +1522,7 @@ export class Onboarding extends DurableObject<Env> {
   adminFacts(): {
     told: boolean;
     mapped: string[];
-    links: Omit<typeof links.$inferSelect, "keyMark" | "version">[];
+    links: Omit<typeof links.$inferSelect, "keyMark" | "version" | "ledTeam">[];
     interviews: AdminInterviewFacts[];
   } {
     // Only the counts are kept, read a page of interviews at a time, so a
@@ -1446,12 +1598,65 @@ export class Onboarding extends DurableObject<Env> {
    */
   override async alarm(): Promise<void> {
     await this.#drainAudit();
-    this.releaseDue();
+    await this.releaseDue();
+    await this.remindDue();
+    await this.sendUpdate();
+    await this.deliverMail();
     await this.#armLinks();
   }
 
-  /** Releases every link due by `now`, while the interviews are open. Returns whose. */
-  releaseDue(now: string = new Date().toISOString()): string[] {
+  /**
+   * Queues a mail (mail-outbox.ts) and sends it in the background: once
+   * by its key, which starts with its kind (`link/…`), so queuing it again
+   * sends nothing. False when its key was queued already.
+   */
+  sendMail(mail: MailToQueue): boolean {
+    const queued = this.ctx.storage.transactionSync(() =>
+      queueMail(this.ctx.storage.sql, mail)
+    );
+    this.#deliverMailSoon();
+    return queued;
+  }
+
+  /** What became of the mail `key`; null for none queued. */
+  mailOf(key: string): MailState | null {
+    return mailState(this.ctx.storage.sql, key);
+  }
+
+  /**
+   * Sends the mail due by `now`, after any delivery already running, and
+   * sets the alarm for the next mail due. Returns when that is, or null.
+   */
+  async deliverMail(now: number = Date.now()): Promise<number | null> {
+    const before = this.#mailing;
+    const run = (async () => {
+      await before;
+      return await deliverMail(this.ctx.storage.sql, {
+        send: async (mail) => await sendMail(this.env, mail),
+        fill: async (person) => await this.#linkFill(person),
+        settled: (state) => {
+          this.#mailSettled(state, now);
+        },
+        now,
+      });
+    })();
+    this.#mailing = quietly(run);
+    const next = await run;
+    if (next !== null) {
+      await this.#alarmBy(next);
+    }
+    return next;
+  }
+
+  /**
+   * Releases every link due by `now`, while the interviews are open, and
+   * emails each to whoever has an address (the others' are handed to them).
+   * Returns whose.
+   */
+  async releaseDue(now: string = new Date().toISOString()): Promise<string[]> {
+    // First: no other call comes in between what is read below and the
+    // transaction that sends.
+    const said = await this.#mailContext();
     const roster = this.#roster();
     const { plan } = this.#row();
     if (roster === null || plan === null || !this.isOpen()) {
@@ -1469,10 +1674,17 @@ export class Onboarding extends DurableObject<Env> {
         .where(eq(onboarding.id, 1))
         .run();
       for (const person of due) {
-        this.#db.insert(links).values({ person, sentAt: now }).run();
+        // Whether they lead a team is kept as it is now, when their link
+        // goes out: a lead named later never makes theirs a lead's interview.
+        const ledTeam =
+          roster.teams.find(({ lead: led }) => led === person)?.id ?? null;
+        this.#db.insert(links).values({ person, sentAt: now, ledTeam }).run();
+        this.#queuePersonMail(
+          { roster, plan, said, person, sentAt: now },
+          "link"
+        );
         const team = roster.people.find(({ id }) => id === person)?.team;
-        const lead = roster.teams.some(({ lead: led }) => led === person);
-        if (team !== undefined && !lead) {
+        if (team !== undefined && ledTeam === null) {
           // Asked once ever: a person taken off and on again isn't asked twice.
           const added = this.#db
             .insert(countedPeople)
@@ -1490,7 +1702,246 @@ export class Onboarding extends DurableObject<Env> {
       });
     });
     this.#deliverAudit();
+    this.#deliverMailSoon();
     return due;
+  }
+
+  /**
+   * Sends the one reminder to everyone who hasn't finished
+   * `remindAfterWorkingDays` after their link went out, while the
+   * interviews run: never to someone who deleted their interview, and
+   * never twice. Returns whom.
+   */
+  async remindDue(now: string = new Date().toISOString()): Promise<string[]> {
+    const said = await this.#mailContext();
+    const roster = this.#roster();
+    const { plan } = this.#row();
+    if (
+      roster === null ||
+      plan === null ||
+      !this.isOpen() ||
+      dayOf(now) > closesOn(plan)
+    ) {
+      return [];
+    }
+    const due = this.#remindable(roster, now);
+    if (due.length === 0) {
+      return [];
+    }
+    this.ctx.storage.transactionSync(() => {
+      for (const { person, sentAt } of due) {
+        this.#db
+          .update(links)
+          .set({ remindedAt: now })
+          .where(eq(links.person, person))
+          .run();
+        this.#queuePersonMail(
+          { roster, plan, said, person, sentAt },
+          "reminder",
+          now
+        );
+      }
+    });
+    this.#deliverMailSoon();
+    return due.map(({ person }) => person);
+  }
+
+  /**
+   * Sends the company's onboarding admin their update, on a Monday or a
+   * Thursday after the interviews started and until they close, once a
+   * day: the numbers they see themselves (`view()`), nothing more. False
+   * when none goes, or it went already.
+   */
+  async sendUpdate(now: string = new Date().toISOString()): Promise<boolean> {
+    const { replyTo: to, ...said } = await this.#mailContext();
+    const { plan } = this.#row();
+    const day = dayOf(now);
+    const weekday = new Date(`${day}T12:00:00Z`).getUTCDay();
+    if (
+      plan === null ||
+      !this.isOpen() ||
+      !updateWeekdays.has(weekday) ||
+      day <= plan.start ||
+      day > closesOn(plan)
+    ) {
+      return false;
+    }
+    const { progress } = this.view(now);
+    if (progress === null || to === undefined) {
+      return false;
+    }
+    const queued = this.ctx.storage.transactionSync(() =>
+      queueMail(
+        this.ctx.storage.sql,
+        {
+          key: `update/${day}`,
+          to,
+          about: null,
+          fill: null,
+          mail: updateMail({
+            ...said,
+            closes: closesOn(plan),
+            numbers: progress,
+          }),
+        },
+        Date.parse(now)
+      )
+    );
+    this.#deliverMailSoon();
+    return queued;
+  }
+
+  /**
+   * What every onboarding mail is written with: the company's name (its
+   * sign-in domain while it has none), the language Stephen interviews in
+   * first, and the company's onboarding admin, the first admin its
+   * sign-in names. The roster has no language of each person's own: they
+   * choose theirs once their link opens.
+   */
+  async #mailContext(): Promise<MailContext> {
+    const config = signInConfig(this.env);
+    // The deployment's one organization (organization.ts), read here
+    // without it: its module reaches sign-in, which reaches this store.
+    const [row] = await drizzleD1(this.env.DB)
+      .select({ name: organizations.name })
+      .from(organizations)
+      .limit(1);
+    const name = row?.name ?? "";
+    return {
+      company: name === "" ? (config?.domains[0] ?? "") : name,
+      locale: this.stephen().setup.languages[0] ?? "en",
+      replyTo: config?.admins[0],
+    };
+  }
+
+  /**
+   * Whose reminder is due by `now`: their link out by email, and not
+   * finished. A link handed over on paper is the admin's to remind about.
+   */
+  #remindable(
+    roster: Roster,
+    now: string
+  ): { person: string; sentAt: string }[] {
+    const states = this.#interviews();
+    const taking = new Set(
+      roster.people
+        .filter((person) => takingPart(roster, person) && person.email !== "")
+        .map(({ id }) => id)
+    );
+    return this.#db
+      .select()
+      .from(links)
+      .orderBy(asc(links.sentAt), asc(links.person))
+      .all()
+      .filter(
+        (link) =>
+          link.remindedAt === null &&
+          link.deletedAt === null &&
+          (states.get(link.person)?.completedAt ?? null) === null &&
+          taking.has(link.person) &&
+          dayOf(now) >=
+            addWorkingDays(dayOf(link.sentAt), remindAfterWorkingDays)
+      )
+      .map(({ person, sentAt }) => ({ person, sentAt }));
+  }
+
+  /**
+   * Queues someone's link mail or reminder, keyed by when their link went
+   * out, in the transaction that sends it; none for someone without an
+   * address. Their link fills in as it is sent.
+   */
+  #queuePersonMail(
+    {
+      roster,
+      plan,
+      said,
+      person: id,
+      sentAt,
+    }: {
+      roster: Roster;
+      plan: Plan;
+      said: MailContext;
+      person: string;
+      sentAt: string;
+    },
+    kind: "link" | "reminder",
+    now: string = sentAt
+  ): void {
+    const person = roster.people.find((each) => each.id === id);
+    if (person === undefined || person.email === "") {
+      return;
+    }
+    const words = {
+      ...said,
+      name: firstName(person.name),
+      closes: closesOn(plan),
+    };
+    queueMail(
+      this.ctx.storage.sql,
+      {
+        key: `${kind}/${person.id}/${sentAt}`,
+        to: person.email,
+        about: person.id,
+        fill: person.id,
+        mail:
+          kind === "link"
+            ? linkMail({
+                ...words,
+                kind: leads(roster, person.id) ? "lead" : "own",
+              })
+            : reminderMail(words),
+      },
+      Date.parse(now)
+    );
+  }
+
+  /** Sends the mail due now in the background; the alarm retries what is left. */
+  #deliverMailSoon(): void {
+    this.ctx.waitUntil(this.deliverMail());
+  }
+
+  /**
+   * What fills the `{{link}}` slot of a mail with someone's link: the
+   * link, made as the mail goes. Null once it can't be: they are off the
+   * roster, or their link isn't out; or the deployment has no address.
+   */
+  async #linkFill(person: string): Promise<Record<string, string> | null> {
+    const origin = signInConfig(this.env)?.origin;
+    const [sent] = this.#db
+      .select({ person: links.person })
+      .from(links)
+      .where(eq(links.person, person))
+      .all();
+    if (origin === undefined || sent === undefined) {
+      return null;
+    }
+    const path = await this.linkOf(person);
+    return path === null ? null : { link: `${origin}${path}` };
+  }
+
+  /**
+   * Records in the log that a mail was sent or ended failed, and why, by
+   * its kind: `mail.link.sent`, `mail.link.failed.recipient_suppressed`.
+   * Never its words or its address.
+   */
+  #mailSettled(state: MailState, now: number): void {
+    const [kind = "mail"] = state.key.split("/");
+    const reason = (state.reason ?? "unknown")
+      .replace(/^E_|^mail\./u, "")
+      .toLowerCase();
+    const what =
+      state.state === "sent"
+        ? `mail.${kind}.sent`
+        : `mail.${kind}.failed.${reason}`;
+    this.#db
+      .insert(events)
+      .values({
+        at: new Date(now).toISOString(),
+        by: whoIs({ type: "system" }),
+        what,
+        about: state.about,
+      })
+      .run();
   }
 
   #linkFacts() {
@@ -1516,8 +1967,9 @@ export class Onboarding extends DurableObject<Env> {
 
   /**
    * Sets the alarm for the next team moment still to come, and at most an
-   * hour out while anyone's link is still to go: a lead's map can make a
-   * team's links due at any time.
+   * hour out while anyone's link is still to go, or the interviews run: a
+   * lead's map can make a team's links due at any time, and reminders and
+   * the admin's update fall due by the day.
    */
   async #armLinks(): Promise<void> {
     const roster = this.#roster();
@@ -1529,7 +1981,9 @@ export class Onboarding extends DurableObject<Env> {
     const waiting = roster.people.filter(
       (person) => takingPart(roster, person) && !sent.has(person.id)
     );
-    if (waiting.length === 0) {
+    // While the interviews run, reminders and the admin's update fall due.
+    const running = dayOf(new Date().toISOString()) <= closesOn(plan);
+    if (waiting.length === 0 && !running) {
       return;
     }
     const now = Date.now();
@@ -1665,13 +2119,37 @@ export class Onboarding extends DurableObject<Env> {
     },
     updatedAt: string = new Date().toISOString()
   ): void {
+    const [held] = this.#db
+      .select({
+        kind: interviewStates.kind,
+        leadOf: interviewStates.leadOf,
+        completedAt: interviewStates.completedAt,
+      })
+      .from(interviewStates)
+      .where(eq(interviewStates.person, state.person))
+      .all();
+    // Once they agreed, whose interview it was, and of which team, is
+    // settled: a lead named, moved or replaced afterwards changes nothing.
+    // Before that, a lead's interview is of the team they lead now.
+    const settled =
+      held === undefined || held.completedAt === null
+        ? {
+            kind: state.kind,
+            leadOf:
+              state.kind === "lead"
+                ? (this.#roster()?.teams.find(
+                    ({ lead }) => lead === state.person
+                  )?.id ?? null)
+                : null,
+          }
+        : { kind: held.kind, leadOf: held.leadOf };
     this.#db
       .insert(interviewStates)
-      .values({ ...state, updatedAt })
+      .values({ ...state, ...settled, updatedAt })
       .onConflictDoUpdate({
         target: interviewStates.person,
         set: {
-          kind: state.kind,
+          ...settled,
           startedAt: state.startedAt,
           completedAt: state.completedAt,
           updatedAt,
@@ -1790,12 +2268,27 @@ export class Onboarding extends DurableObject<Env> {
   #interviews(): Map<string, InterviewState> {
     return new Map(
       this.#db
-        .select()
+        .select({
+          person: interviewStates.person,
+          leadOf: interviewStates.leadOf,
+          startedAt: interviewStates.startedAt,
+          completedAt: interviewStates.completedAt,
+          ledTeam: links.ledTeam,
+        })
         .from(interviewStates)
+        .leftJoin(links, eq(links.person, interviewStates.person))
         .all()
-        .map(({ person, startedAt, completedAt }) => [
+        .map(({ person, leadOf, startedAt, completedAt, ledTeam }) => [
           person,
-          { person, startedAt, completedAt },
+          {
+            person,
+            startedAt,
+            completedAt,
+            // A lead's interview only if they led the team when their link
+            // went out and talked as the lead of that same team: a lead
+            // replaced or moved before they talked counts as nobody's lead.
+            ...(ledTeam !== null && ledTeam === leadOf ? { ledTeam } : {}),
+          },
         ])
     );
   }
