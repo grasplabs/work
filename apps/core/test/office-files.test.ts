@@ -1,3 +1,4 @@
+import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { officeTypeOf } from "../src/workflows/office-files.ts";
@@ -5,6 +6,7 @@ import {
   body,
   contentTypes,
   contentTypesNs,
+  defaultOf,
   docxOf,
   excel,
   officeDocument,
@@ -12,12 +14,32 @@ import {
   relationship,
   relsOf,
   relsWith,
+  strictOfficeDocument,
   types,
+  typesXml,
   word,
   zipOf,
 } from "./office-packages.ts";
 
 const encoder = new TextEncoder();
+
+/** `[Content_Types].xml` of `children` alone, after `head`. */
+const only = (head: string, ...children: string[]) =>
+  typesXml(
+    `${head}<Types xmlns="${contentTypesNs}">${children.join("")}</Types>`
+  );
+
+/** What each of `cases` is typed as. */
+const typed = async (
+  cases: Record<string, Uint8Array>
+): Promise<Record<string, string | undefined>> => {
+  const named: Record<string, string | undefined> = {};
+  for (const [label, bytes] of Object.entries(cases)) {
+    // oxlint-disable-next-line no-await-in-loop -- each case on its own
+    named[label] = await officeTypeOf(bytes);
+  }
+  return named;
+};
 
 describe(officeTypeOf, () => {
   it("names a package by the one main part its content types declare, stored or deflated", async () => {
@@ -400,6 +422,164 @@ describe(officeTypeOf, () => {
         Object.keys(cases).map((label) => [label, undefined])
       ),
     });
+  });
+
+  it("types the main part the OPC way, by its Override or else its extension's Default, and reads only a declaration that decodes one way", async () => {
+    const wordMain = `${word}.main+xml`;
+    const docm = "application/vnd.ms-word.document.macroEnabled.main+xml";
+    const vba = "application/vnd.ms-office.vbaProject";
+    const declaration = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>`;
+    const document = (name: string) => ({
+      name,
+      content: encoder.encode("<w/>"),
+    });
+    const fetched = await env.ASSETS.fetch(
+      "https://assets/uploads/travel-policy.docx"
+    );
+    const travelPolicy = new Uint8Array(await fetched.arrayBuffer());
+    const accepted = {
+      // Typed by the Default for its extension, as ClosedXML and the Open
+      // XML SDK write it, in either case.
+      byDefault: await zipOf([
+        only(declaration, defaultOf("xml", wordMain)),
+        body,
+      ]),
+      byUpperCaseDefault: await zipOf([
+        only(declaration, defaultOf("XML", wordMain)),
+        relsOf("Main.XML"),
+        document("Main.XML"),
+      ]),
+      // A declaration in single quotes, as python-docx writes it.
+      singleQuotedDeclaration: await zipOf([
+        only(
+          `<?xml version='1.0' encoding='UTF-8' standalone='yes'?>`,
+          override("/main.xml", wordMain)
+        ),
+        body,
+      ]),
+      // A Strict package's main relationship.
+      strict: await zipOf([
+        types(override("/main.xml", wordMain)),
+        relsWith(relationship("rId1", "main.xml", strictOfficeDocument)),
+        body,
+      ]),
+      // A real document of the repo's.
+      travelPolicy,
+    };
+    const refused = {
+      macroDefault: await zipOf([
+        only(declaration, defaultOf("xml", docm)),
+        body,
+      ]),
+      macroOverOfficeDefault: await zipOf([
+        only(
+          declaration,
+          defaultOf("xml", wordMain),
+          override("/main.xml", docm)
+        ),
+        body,
+      ]),
+      vbaDefault: await zipOf([
+        only(declaration, defaultOf("xml", wordMain), defaultOf("bin", vba)),
+        body,
+      ]),
+      noExtension: await zipOf([
+        only(declaration, defaultOf("xml", wordMain)),
+        relsOf("main"),
+        document("main"),
+      ]),
+      mixedQuotes: await zipOf([
+        only(
+          `<?xml version="1.0' encoding="UTF-8"?>`,
+          override("/main.xml", wordMain)
+        ),
+        body,
+      ]),
+      // A declaration that runs on over the root's start tag.
+      swallowingDeclaration: await zipOf([
+        typesXml(
+          `<?xml version="1.0" encoding="UTF-8" <Types xmlns="${contentTypesNs}">?>${override("/main.xml", wordMain)}</Types>`
+        ),
+        body,
+      ]),
+      strictAndTransitional: await zipOf([
+        types(
+          override("/main.xml", wordMain),
+          override("/other.xml", wordMain)
+        ),
+        relsWith(
+          relationship("rId1", "main.xml", strictOfficeDocument),
+          relationship("rId2", "other.xml")
+        ),
+        body,
+        document("other.xml"),
+      ]),
+      strictMacro: await zipOf([
+        types(override("/main.xml", docm)),
+        relsWith(relationship("rId1", "main.xml", strictOfficeDocument)),
+        body,
+      ]),
+      utf7: await zipOf([
+        only(
+          `<?xml version="1.0" encoding="UTF-7"?>`,
+          override("/main.xml", wordMain)
+        ),
+        body,
+      ]),
+      version11: await zipOf([
+        only(`<?xml version="1.1"?>`, override("/main.xml", wordMain)),
+        body,
+      ]),
+    };
+    expect({
+      accepted: await typed(accepted),
+      refused: await typed(refused),
+    }).toStrictEqual({
+      accepted: Object.fromEntries(
+        Object.keys(accepted).map((label) => [label, word])
+      ),
+      refused: Object.fromEntries(
+        Object.keys(refused).map((label) => [label, undefined])
+      ),
+    });
+  });
+
+  it("refuses a ZIP64 locator before the end record and an entry's comment, either of which can hold another directory", async () => {
+    const whole = await zipOf([
+      types(override("/main.xml", `${word}.main+xml`)),
+      body,
+    ]);
+    // A locator in the last 20 bytes before the end record: in a comment
+    // the record says there is none of, or past the directory's end.
+    const locator = new Uint8Array(20);
+    new DataView(locator.buffer).setUint32(0, 0x07_06_4b_50, true);
+    const end = whole.length - 22;
+    const view = new DataView(whole.buffer);
+    const directoryAt = view.getUint32(whole.length - 6, true);
+    const directorySize = view.getUint32(whole.length - 10, true);
+    const withLocator = new Uint8Array(whole.length + 20);
+    withLocator.set(whole.subarray(0, end), 0);
+    withLocator.set(locator, end);
+    withLocator.set(whole.subarray(end), end + 20);
+    // ...and the directory grown over it, through its last entry's comment.
+    const grown = new DataView(withLocator.buffer);
+    grown.setUint32(withLocator.length - 10, directorySize + 20, true);
+    let last = directoryAt;
+    for (let at = directoryAt; at < end;) {
+      last = at;
+      at +=
+        46 +
+        view.getUint16(at + 28, true) +
+        view.getUint16(at + 30, true) +
+        view.getUint16(at + 32, true);
+    }
+    grown.setUint16(last + 32, 20, true);
+    const commentOnly = new Uint8Array(withLocator);
+    // A comment that holds no locator: still a comment.
+    commentOnly.fill(0x20, end, end + 20);
+    await expect(officeTypeOf(whole)).resolves.toBe(word);
+    await expect(officeTypeOf(withLocator)).resolves.toBeUndefined();
+    await expect(officeTypeOf(commentOnly)).resolves.toBeUndefined();
   });
 
   it("names no type for a package whose content types inflate past the bound, or a broken ZIP", async () => {
