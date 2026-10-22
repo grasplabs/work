@@ -7274,8 +7274,8 @@ msgid "Models aren't set up for this deployment yet, so no model call can be mad
 msgstr "Aucun modèle n’est encore configuré pour ce déploiement : aucun appel de modèle n’est possible. Grasp s’en charge."
 
 #: src/chat/failure.ts
-msgid "Models aren't set up yet. Ask your admin to set them up."
-msgstr "Les modèles ne sont pas encore configurés. Demandez à votre admin de les configurer."
+msgid "Models aren't set up yet. Ask your admin to have Grasp set them up."
+msgstr "Les modèles ne sont pas encore configurés. Demandez à votre admin de les faire configurer par Grasp."
 
 #: src/chat/composer.tsx
 msgid "Models for your organization"
@@ -12252,8 +12252,8 @@ msgid "the migration threw an error"
 msgstr "la migration a levé une erreur"
 
 #: src/chat/failure.ts
-msgid "The model budget is used up. Ask your admin to raise it."
-msgstr "Le budget de modèles est épuisé. Demandez à votre admin de l’augmenter."
+msgid "The model budget is used up. Ask your admin to have Grasp raise it."
+msgstr "Le budget de modèles est épuisé. Demandez à votre admin de le faire augmenter par Grasp."
 
 #: src/chat/failure.ts
 msgid "The model couldn't answer. Try again."
@@ -14803,8 +14803,8 @@ msgid "Your organization’s account"
 msgstr "Le compte de votre organisation"
 
 #: src/chat/failure.ts
-msgid "Your organization's model limits need a check. Ask your admin."
-msgstr "Les limites de modèles de votre organisation doivent être vérifiées. Demandez à votre admin."
+msgid "Your organization's model limits need a check. Ask your admin to have Grasp look at them."
+msgstr "Les limites de modèles de votre organisation doivent être vérifiées. Demandez à votre admin de les faire vérifier par Grasp."
 
 #: src/onboarding/about-story.tsx
 msgid "Your people, documents and tools first. Then two weeks of short conversations with your team. At {threshold}%, your team can start."

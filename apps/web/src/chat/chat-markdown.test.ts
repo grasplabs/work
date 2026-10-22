@@ -107,7 +107,7 @@ describe(chatMarkdown, () => {
         "**You:**\n\nc",
         "**Grasp:**\n\nStopped.",
         "**You:**\n\nd",
-        "**Grasp:**\n\nThe model budget is used up. Ask your admin to raise it.",
+        "**Grasp:**\n\nThe model budget is used up. Ask your admin to have Grasp raise it.",
         "## Sources",
         "**Restricted**",
       ].join("\n\n")

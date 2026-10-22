@@ -9,11 +9,11 @@ import { msg } from "@lingui/core/macro";
 
 const failureWords: Readonly<Record<ModelErrorCode, MessageDescriptor>> = {
   "model.invalid_call": msg`Grasp couldn't put this question to the model. Try again.`,
-  "model.unconfigured": msg`Models aren't set up yet. Ask your admin to set them up.`,
+  "model.unconfigured": msg`Models aren't set up yet. Ask your admin to have Grasp set them up.`,
   "model.not_allowed": msg`Your organization doesn't allow this model. Pick another one.`,
   "model.eu_only": msg`This chat stays in the EU, and this model isn't hosted there. Pick another one.`,
   "model.sensitive_data": msg`This chat holds sensitive data this model may not see. Pick another one.`,
-  "model.over_budget": msg`The model budget is used up. Ask your admin to raise it.`,
+  "model.over_budget": msg`The model budget is used up. Ask your admin to have Grasp raise it.`,
   "model.run_limit": msg`This run has made all the model calls it may make.`,
   "model.budget_busy": msg`Other questions are using what's left of the model budget. Try again in a minute.`,
   "model.queued": msg`Grasp is busy with other questions. Try again in a minute.`,
@@ -22,7 +22,7 @@ const failureWords: Readonly<Record<ModelErrorCode, MessageDescriptor>> = {
   "model.answer_too_long": msg`This model can't give an answer that long. Pick another model, or ask for less.`,
   "model.ledger_unavailable": msg`Grasp can't count model spend right now. Try again later.`,
   "model.quota_policy_unavailable": msg`Grasp can't read your organization's model limits right now. Try again later.`,
-  "model.quota_policy_behind": msg`Your organization's model limits need a check. Ask your admin.`,
+  "model.quota_policy_behind": msg`Your organization's model limits need a check. Ask your admin to have Grasp look at them.`,
   "model.failed": msg`The model couldn't answer. Try again.`,
   "model.invalid_output": msg`The model's answer came back in the wrong shape. Try again.`,
 };
