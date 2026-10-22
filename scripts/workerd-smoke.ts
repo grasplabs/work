@@ -3,9 +3,11 @@
  * Wrangler, no Miniflare), checks it answers, and waits for its built-in
  * content to install: it fails on any failure core or workerd logs before
  * that. Then opens the frontend through the on-prem profile's assets
- * service, and delivers signed raw mail to core's ingress, as the router
- * does in the cloud and a mail bridge on-prem. Keeps the code on-prem
- * ready: only platform APIs that also run on workerd.
+ * service, delivers signed raw mail to core's ingress, as the router does
+ * in the cloud and a mail bridge on-prem, and has someone sign in, seal an
+ * App and call one of its functions, which runs on the sandbox host
+ * (workerd-smoke-sealed.ts). Keeps the code on-prem ready: only platform
+ * APIs that also run on workerd.
  */
 import { execFileSync, spawn } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
@@ -23,6 +25,7 @@ import path from "node:path";
 import { createInterface } from "node:readline";
 import { PassThrough } from "node:stream";
 
+import { localSignIn } from "../apps/core/test/sign-in-config.ts";
 import {
   mailIngressRequest,
   mailRejectedStatus,
@@ -36,13 +39,12 @@ import { d1DatabasesOf, writeD1Service } from "./workerd-d1.ts";
 import { writeR2Service } from "./workerd-r2.ts";
 import { nativeWorkerd, startSandboxSupervisor } from "./workerd-sandbox.ts";
 import type { SandboxSupervisor } from "./workerd-sandbox.ts";
-import {
-  coreWranglerConfig,
-  smokeConfig,
-  smokeHostname,
-} from "./workerd-smoke-config.ts";
+import { coreWranglerConfig, smokeConfig } from "./workerd-smoke-config.ts";
+import { sealedCallOnWorkerd } from "./workerd-smoke-sealed.ts";
 import { coreStarted, installedOnWorkerd } from "./workerd-smoke-start.ts";
 import type { KnownGap } from "./workerd-smoke-start.ts";
+import { tapSocket } from "./workerd-socket-tap.ts";
+import type { SocketTap } from "./workerd-socket-tap.ts";
 
 const ROUTER_SECRET = "smoke-router-secret";
 const ATTEMPTS = 50;
@@ -65,6 +67,13 @@ execFileSync("wrangler", ["deploy", "--dry-run", "--outdir", out], {
   cwd: core,
   stdio: "inherit",
 });
+// The fake IdP people sign in through, bundled the same way, beside core.
+const idpOut = path.join(out, "idp");
+execFileSync(
+  "wrangler",
+  ["deploy", "--dry-run", "-c", "test/idp.wrangler.jsonc", "--outdir", idpOut],
+  { cwd: core, stdio: "inherit" }
+);
 
 // A port nothing listens on now, picked by the OS and closed again for
 // workerd to take, so no other server answers the health check.
@@ -80,6 +89,9 @@ const freePort = async (): Promise<number> => {
   return address.port;
 };
 const PORT = await freePort();
+const IDP_PORT = await freePort();
+const origin = `http://127.0.0.1:${PORT}`;
+const idpOrigin = `http://127.0.0.1:${IDP_PORT}`;
 
 // Durable Object migrations and the Grasp skills are bundled next to
 // index.js as text modules, and WebAssembly (the jq evaluator) as wasm
@@ -150,11 +162,11 @@ const expectAnswer = async (
  * has no workflow receiving mail, so what core takes bounces with
  * `receiveEmail`'s reason, as Email Routing would bounce it.
  */
-const mailDelivered = async (origin: string): Promise<void> => {
+const mailDelivered = async (coreOrigin: string): Promise<void> => {
   const own = await mailIngressRequest(
-    origin,
+    coreOrigin,
     ROUTER_SECRET,
-    rawMail(`invoices@${smokeHostname}`)
+    rawMail(`invoices@${new URL(coreOrigin).hostname}`)
   );
   await expectAnswer("signed mail to the client", await fetch(own.request), {
     status: mailRejectedStatus,
@@ -163,9 +175,9 @@ const mailDelivered = async (origin: string): Promise<void> => {
 
   // The same message, signed with a key derived from another secret.
   const forged = await mailIngressRequest(
-    origin,
+    coreOrigin,
     ROUTER_SECRET,
-    rawMail(`invoices@${smokeHostname}`)
+    rawMail(`invoices@${new URL(coreOrigin).hostname}`)
   );
   forged.request.headers.set(
     mailSignatureHeader,
@@ -189,10 +201,10 @@ const pageScript = /<script[^>]*\ssrc="(?<src>\/[^"]+\.js)"/u;
  * own routes (the single-page-app fallback core's entry relies on), and a
  * script the page loads, typed as JavaScript.
  */
-const frontendServed = async (origin: string): Promise<void> => {
+const frontendServed = async (coreOrigin: string): Promise<void> => {
   const headers = { [routerSecretHeader]: ROUTER_SECRET };
   const page = async (pathname: string) => {
-    const response = await fetch(new URL(pathname, origin), { headers });
+    const response = await fetch(new URL(pathname, coreOrigin), { headers });
     const type = response.headers.get("content-type") ?? "";
     const body = await response.text();
     if (!(response.ok && type.startsWith("text/html"))) {
@@ -210,7 +222,7 @@ const frontendServed = async (origin: string): Promise<void> => {
   if (src === undefined) {
     throw new Error("the frontend's index page loads no script of its own");
   }
-  const script = await fetch(new URL(src, origin), { headers });
+  const script = await fetch(new URL(src, coreOrigin), { headers });
   await script.body?.cancel();
   const type = script.headers.get("content-type") ?? "";
   if (!(script.ok && type.includes("javascript"))) {
@@ -223,20 +235,35 @@ const frontendServed = async (origin: string): Promise<void> => {
 // Everything from here runs inside the scope that stops the sandbox
 // supervisor and core and removes `out`, however the run ends.
 let sandbox: SandboxSupervisor | undefined;
+let tap: SocketTap | undefined;
 let server: ChildProcess | undefined;
 try {
   // The sandbox supervisor core's SANDBOX_HOST reaches, with its pool of
-  // workerd processes, as on-prem runs it beside core.
+  // workerd processes, as on-prem runs it beside core; through a tap that
+  // records whose sessions core asks it for.
   sandbox = await startSandboxSupervisor({ workerd: nativeWorkerd });
+  tap = await tapSocket(sandbox.socket, out);
 
   writeFileSync(
     path.join(out, "config.capnp"),
     smokeConfig({
       port: PORT,
-      sandboxSocket: sandbox.socket,
+      sandboxSocket: tap.socket,
       routerSecret: ROUTER_SECRET,
       modules,
       storage,
+      signIn: {
+        idpPort: IDP_PORT,
+        idpModules: readdirSync(idpOut)
+          .filter((file) => file.endsWith(".js"))
+          .map((file) => `(name = "${file}", esModule = embed "idp/${file}")`),
+        // Only test values, for this machine (apps/core/test/sign-in-config.ts),
+        // and a session secret made for this run.
+        vars: {
+          ...localSignIn(origin, idpOrigin),
+          BETTER_AUTH_SECRET: crypto.randomUUID(),
+        },
+      },
     })
   );
 
@@ -282,8 +309,16 @@ try {
       ? "core runs on workerd, its built-in content installed, it serves the frontend, and it takes signed mail"
       : "core runs on workerd, its built-in content installed but for the known gaps above, it serves the frontend, and it takes signed mail"
   );
+  await sealedCallOnWorkerd(
+    { origin, idpOrigin, headers: { [routerSecretHeader]: ROUTER_SECRET } },
+    tap.owners
+  );
+  console.info(
+    "a sealed App's function ran on the sandbox host, in a Worker Loader isolate"
+  );
 } finally {
   server?.kill();
+  await tap?.close();
   await sandbox?.stop();
   rmSync(out, { force: true, recursive: true });
 }

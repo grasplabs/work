@@ -50,10 +50,10 @@ const coreDurableObjects = (): { name: string; className: string }[] =>
 export const smokeHostname = "acme.grasp.test";
 
 /**
- * Its sign-in config: an Entra tenant that isn't one, and no client secret
- * for it, so nobody signs in.
+ * Its sign-in config without the sealed-call step's: an Entra tenant that
+ * isn't one, and no client secret for it, so nobody signs in.
  */
-const signIn = {
+const nobodySignsIn = {
   origin: `https://${smokeHostname}`,
   domains: [smokeHostname],
   entra: {
@@ -77,7 +77,28 @@ export interface SmokeConfigInputs {
    * and the D1 service's: workerd has no SQLite in memory.
    */
   storage: string;
+  /**
+   * What the sealed-call step (workerd-smoke-sealed.ts) adds: the fake IdP
+   * people sign in through, as a Worker of its own on `idpPort`, and core's
+   * sign-in vars, for this machine only.
+   */
+  signIn?: {
+    idpPort: number;
+    idpModules: readonly string[];
+    vars: Readonly<Record<string, unknown>>;
+  };
 }
+
+/** A capnp text literal of `value`. */
+const capnpText = (value: string): string => JSON.stringify(value);
+
+/** A binding of core's for each sign-in var: text, or JSON for anything else. */
+const varBindings = (vars: Readonly<Record<string, unknown>>): string[] =>
+  Object.entries(vars).map(([name, value]) =>
+    typeof value === "string"
+      ? `(name = "${name}", text = ${capnpText(value)})`
+      : `(name = "${name}", json = ${capnpText(JSON.stringify(value))})`
+  );
 
 /** The `config.capnp` text that serves core on plain workerd. */
 export const smokeConfig = ({
@@ -86,6 +107,7 @@ export const smokeConfig = ({
   routerSecret,
   modules,
   storage,
+  signIn,
 }: SmokeConfigInputs): string => {
   const assets = assetsOf(coreWranglerConfig);
   const durableObjects = coreDurableObjects();
@@ -97,6 +119,31 @@ export const smokeConfig = ({
     ({ className }) =>
       `(className = "${className}", uniqueKey = "${className}", enableSql = true)`
   );
+  const signInServices =
+    signIn === undefined
+      ? ""
+      : `
+    # The fake IdP people sign in through (apps/core/test/idp-worker.ts),
+    # never deployed: core sends sign-in here only while both it and core
+    # are on this machine (apps/core/src/auth/config.ts devIdpOrigin).
+    (name = "idp", worker = .idp),
+    # Core's fetches reach the fake IdP on this machine, which workerd's
+    # default outbound refuses as a private address.
+    (name = "internet", network = (allow = ["public", "local"])),`;
+  const signInSockets =
+    signIn === undefined
+      ? ""
+      : `, (name = "idp", address = "127.0.0.1:${signIn.idpPort}", http = (), service = "idp")`;
+  const signInBindings = signIn === undefined ? [] : varBindings(signIn.vars);
+  const idpWorker =
+    signIn === undefined
+      ? ""
+      : `
+const idp :Workerd.Worker = (
+  modules = [${signIn.idpModules.join(", ")}],
+  compatibilityDate = "2026-09-15",
+);
+`;
   return `using Workerd = import "/workerd/workerd.capnp";
 
 const config :Workerd.Config = (
@@ -118,9 +165,9 @@ const config :Workerd.Config = (
     # files a seal, a build and a workflow run read), on the on-prem
     # profile's assets service: workerd has no assets binding
     # (apps/core/src/on-prem/assets.ts).
-    ${assetsServices(assets.directory).join(",\n    ")},
+    ${assetsServices(assets.directory).join(",\n    ")},${signInServices}
   ],
-  sockets = [(name = "http", address = "127.0.0.1:${port}", http = (), service = "core")],
+  sockets = [(name = "http", address = "127.0.0.1:${port}", http = (), service = "core")${signInSockets}],
 );
 
 const core :Workerd.Worker = (
@@ -131,14 +178,16 @@ const core :Workerd.Worker = (
     (name = "ROUTER_SECRET", text = "${routerSecret}"),
     (name = "DURABLE_OBJECT_JURISDICTION", text = "none"),
     (name = "RUNTIME_PROFILE", text = "workerd"),
-    (name = "SIGN_IN", text = ${JSON.stringify(JSON.stringify(signIn))}),
+    ${signIn === undefined ? `(name = "SIGN_IN", text = ${JSON.stringify(JSON.stringify(nobodySignsIn))}),` : "# SIGN_IN: the sign-in vars below."}
     (name = "SANDBOX_HOST", service = "sandbox"),
     ${assetsBinding(assets.binding)},
     ${durableObjectBindings.join(",\n    ")},
     ${d1Bindings(d1DatabasesOf(coreWranglerConfig)).join(",\n    ")},
     ${r2Bindings(r2BucketsOf(coreWranglerConfig)).join(",\n    ")},
-    # No LOADER (experimental in workerd): apps, screens and App workflow
-    # runs need workerd's --experimental. The workflow engine itself is a
+    ${signInBindings.map((binding) => `${binding},`).join("\n    ")}
+    # No LOADER (experimental in workerd) in core itself: on-prem, App
+    # functions and builds run on the sandbox host, whose workerd
+    # processes have one (workerd-sandbox.ts). The workflow engine is a
     # Durable Object (WORKFLOW_RUNS), bound with the others.
   ],
   durableObjectNamespaces = [
@@ -148,5 +197,5 @@ const core :Workerd.Worker = (
   # storage aborts workerd when an alarm fires (the audit log's retention).
   durableObjectStorage = (localDisk = "storage"),
 );
-`;
+${idpWorker}`;
 };
