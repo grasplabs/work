@@ -751,6 +751,10 @@ msgstr "{name} in {domain}"
 msgid "{name} in {domain}: {started} started, {completed} completed, {failed} failed"
 msgstr "{name} in {domain}: {started} gestartet, {completed} abgeschlossen, {failed} fehlgeschlagen"
 
+#: src/chat/builds.tsx
+msgid "{name} is a draft: only its builders open it, and its triggers don't fire, until it is published."
+msgstr "{name} ist ein Entwurf: Nur seine Builder öffnen ihn, und seine Auslöser greifen nicht, bis er veröffentlicht ist."
+
 #: src/brain/brain-atlas.ts
 msgid "{name} is invited but not interviewed yet."
 msgstr "{name} ist eingeladen, aber noch nicht interviewt."
@@ -1418,6 +1422,10 @@ msgstr "Eine Datenmigration hat die Datensätze dieser Domäne nach dieser Versi
 msgid "A decision was put to people, or answered"
 msgstr "Eine Entscheidung wurde Personen vorgelegt oder beantwortet"
 
+#: src/engines/app-status.tsx
+msgid "A draft: only its builders open it, and its triggers don't fire, until it is published."
+msgstr "Ein Entwurf: Nur seine Builder öffnen ihn, und seine Auslöser greifen nicht, bis er veröffentlicht ist."
+
 #: src/screens/screen-files.ts
 msgid "A file is downloaded only when you ask for it, with a click."
 msgstr "Eine Datei wird nur heruntergeladen, wenn Sie mit einem Klick darum bitten."
@@ -2044,6 +2052,10 @@ msgstr "Einer App, die niemand genehmigt hat, wurden die Daten der Domäne verwe
 msgid "An app runs only once an admin approved its code. That happens on the domain's page."
 msgstr "Eine App läuft erst, wenn ein Admin ihren Code genehmigt hat. Das geschieht auf der Seite der Domäne."
 
+#: src/engines/app-status.tsx
+msgid "An archived domain is kept as it is and goes offline: nobody opens its apps, its triggers stop and its unfinished runs are cancelled. A builder can restore it later, as a draft."
+msgstr "Eine archivierte Domäne bleibt, wie sie ist, und geht offline: Niemand öffnet ihre Apps, ihre Auslöser stoppen und ihre unfertigen Läufe werden abgebrochen. Ein Builder kann sie später als Entwurf wiederherstellen."
+
 #: src/onboarding/setup-steps.tsx
 msgid "An old format: save it as PDF or a newer file"
 msgstr "Ein altes Format: als PDF oder neuere Datei speichern"
@@ -2347,6 +2359,23 @@ msgstr "Apps mit Verstößen"
 #: src/dashboard/to-do.tsx
 msgid "Apps to approve"
 msgstr "Zu genehmigende Apps"
+
+#: src/engines/app-status.tsx
+msgid "Archive"
+msgstr "Archivieren"
+
+#: src/engines/app-status.tsx
+msgid "Archive {name}?"
+msgstr "{name} archivieren?"
+
+#: src/engines/app-status.tsx
+msgctxt "a domain put away"
+msgid "Archived"
+msgstr "Archiviert"
+
+#: src/engines/app-status.tsx
+msgid "Archived: nobody opens its apps and nothing runs, until a builder restores it."
+msgstr "Archiviert: Niemand öffnet ihre Apps und nichts läuft, bis ein Builder sie wiederherstellt."
 
 #: src/brain/brain-markdown.ts
 msgid "Article"
@@ -2863,6 +2892,7 @@ msgstr "Kann Unternehmensdaten {verbs}"
 #: src/chat/brain-questions.tsx
 #: src/chat/project-dialog.tsx
 #: src/decision-confirmation.tsx
+#: src/engines/app-status.tsx
 #: src/engines/package-approvals.tsx
 #: src/inbox/item-detail.tsx
 #: src/knowledge/document.tsx
@@ -4199,6 +4229,11 @@ msgstr "Entwurf"
 msgctxt "what AI was used for"
 msgid "Drawing"
 msgstr "Zeichnen"
+
+#: src/engines/app-status.tsx
+msgctxt "a domain still being made"
+msgid "Draft"
+msgstr "Entwurf"
 
 #: src/brain/brain.ts
 msgctxt "workflow status"
@@ -6308,6 +6343,10 @@ msgstr "Zum Admin machen"
 msgid "Make version {version} current"
 msgstr "Version {version} aktuell machen"
 
+#: src/chat/builds.tsx
+msgid "Make version {version} current and publish"
+msgstr "Version {version} aktuell machen und veröffentlichen"
+
 #: src/connections/integration-row.tsx
 msgid "Manage"
 msgstr "Verwalten"
@@ -6846,6 +6885,10 @@ msgstr "Keine Daten"
 msgid "No domain has a model bound to it."
 msgstr "An keine Domäne ist ein Modell gebunden."
 
+#: src/routes/_shell.domains.index.tsx
+msgid "No domain is published yet: publish one from its page, and the people it is shared with can open it."
+msgstr "Noch keine Domäne ist veröffentlicht: Veröffentlichen Sie eine auf ihrer Seite, dann können die Personen, mit denen sie geteilt ist, sie öffnen."
+
 #: src/chat/side-panel.tsx
 #: src/routes/_shell.domains.index.tsx
 msgid "No domains yet"
@@ -6854,6 +6897,10 @@ msgstr "Noch keine Domänen"
 #: src/dashboard/widget-board.tsx
 msgid "No domains yet. Domains are made in chat."
 msgstr "Noch keine Domänen. Domänen entstehen im Chat."
+
+#: src/routes/_shell.domains.index.tsx
+msgid "No drafts."
+msgstr "Keine Entwürfe."
 
 #: src/landscape/audit-trail.tsx
 msgid "No events in the latest stretch of the log"
@@ -7463,6 +7510,10 @@ msgstr "Notizen"
 msgctxt "onboarding area section"
 msgid "Notes"
 msgstr "Notizen"
+
+#: src/routes/_shell.domains.index.tsx
+msgid "Nothing archived."
+msgstr "Nichts archiviert."
 
 #: src/routes/_shell.integrations.index.tsx
 msgid "Nothing connected yet."
@@ -8539,6 +8590,10 @@ msgstr "Vorgeschlagene Regeln"
 msgid "Provided by Grasp, not installed again: {provided}"
 msgstr "Von Grasp bereitgestellt, nicht erneut installiert: {provided}"
 
+#: src/engines/app-status.tsx
+msgid "Publish"
+msgstr "Veröffentlichen"
+
 #: src/engines/resource-bindings.tsx
 msgid "Publish a version of {contract}"
 msgstr "Eine Version von {contract} veröffentlichen"
@@ -8553,6 +8608,11 @@ msgid "Publish revision {0}"
 msgstr "Revision {0} veröffentlichen"
 
 #: src/routes/_shell.workflows.$workflow.tsx
+msgid "Published"
+msgstr "Veröffentlicht"
+
+#: src/engines/app-status.tsx
+msgctxt "a domain open to the people it is shared with"
 msgid "Published"
 msgstr "Veröffentlicht"
 
@@ -8999,6 +9059,7 @@ msgstr "Ressource"
 msgid "Resources"
 msgstr "Ressourcen"
 
+#: src/engines/app-status.tsx
 #: src/knowledge/timeline.tsx
 msgid "Restore"
 msgstr "Wiederherstellen"
@@ -11904,6 +11965,10 @@ msgstr "Unbekannte Ergebnisse"
 #: src/brain/brain.ts
 msgid "Unknown source"
 msgstr "Unbekannte Quelle"
+
+#: src/engines/app-status.tsx
+msgid "Unpublish"
+msgstr "Veröffentlichung aufheben"
 
 #: src/activity/audit-log.tsx
 #: src/dashboard/activity.tsx

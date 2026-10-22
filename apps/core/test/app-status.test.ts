@@ -162,7 +162,7 @@ const statusOf = async (run: string) =>
 describe("an App's status", () => {
   afterEach(endLiveRuns);
 
-  it("keeps a draft and an archived App from those who only use them, as an App that isn't there", async () => {
+  it("opens a published App to those who only use it, and keeps a draft and an archived App from them, as an App that isn't there", async () => {
     const [builder, user] = await Promise.all([
       signedInApi(idp, "builder"),
       signedInApi(idp, "user"),
@@ -173,19 +173,33 @@ describe("an App's status", () => {
     const draft = await waysIn(user, app);
     const nothing = await waysIn(user, missing);
     await builder.api.apps.publish(app);
-    const published = await user.api.apps.get(app);
+    const { status } = await user.api.apps.get(app);
+    const published = await waysIn(user, app);
     await builder.api.apps.archive(app);
     const archived = await waysIn(user, app);
 
     expect({
       draft,
       nothing,
-      published: published.status,
+      status,
+      published,
       archived,
     }).toStrictEqual({
       draft: noSuchApp,
       nothing: noSuchApp,
-      published: "published",
+      status: "published",
+      // Published, it opens for the people it is shared with, every way in.
+      published: {
+        get: "ok",
+        contents: "ok",
+        exports: "ok",
+        open: "ok",
+        version: "ok",
+        start: "ok",
+        runs: "ok",
+        listed: true,
+        overview: true,
+      },
       archived: noSuchApp,
     });
   });
