@@ -844,10 +844,6 @@ msgstr "{name} ist eingeladen, aber noch nicht interviewt."
 msgid "{name} is named, but not seen in use yet."
 msgstr "{name} wird genannt, ist aber noch nicht im Einsatz gesehen."
 
-#: src/connections/connect-dialog.tsx
-msgid "{name} is read-only"
-msgstr "{name} liest nur"
-
 #: src/routes/_shell.settings.members.tsx
 msgid "{name} is removed. {count, plural, one {# personal connection was disconnected.} other {# personal connections were disconnected.}}"
 msgstr "{name} ist entfernt. {count, plural, one {# persönliche Verbindung wurde getrennt.} other {# persönliche Verbindungen wurden getrennt.}}"
@@ -867,6 +863,10 @@ msgstr "{name} ändert die Daten der Domäne nicht mehr (schreiben → lesen)"
 #: src/chat/builds-state.ts
 msgid "{name} now changes the domain's data (read → write)"
 msgstr "{name} ändert jetzt die Daten der Domäne (lesen → schreiben)"
+
+#: src/connections/connect-dialog.tsx
+msgid "{name} only reads"
+msgstr ""
 
 #: src/onboarding/setup-steps.tsx
 msgid "{name} takes part"
@@ -1788,6 +1788,10 @@ msgstr "Ein Schritt"
 #: src/onboarding/setup-steps.tsx
 msgid "A team without a lead gets its links on the first day, and I ask each person what they do."
 msgstr "Ein Team ohne Teamleitung bekommt seine Links am ersten Tag, und ich frage jede Person, was sie macht."
+
+#: src/connections/connect-dialog.tsx
+msgid "A tool switched on starts as Read where Composio says it only reads; Grasp doesn't check that. A Read tool runs without asking. A call of a Write tool from chat, or from a person using a domain, waits for that person to confirm it; a workflow's run makes it as one of its steps. Press a tool's badge to change it. Mark a tool Read only if it changes nothing: marked wrongly, it changes things without asking."
+msgstr "Ein eingeschaltetes Werkzeug beginnt mit Lesen, wo Composio angibt, dass es nur liest; Grasp prüft das nicht. Ein Werkzeug mit Lesen läuft ohne Nachfrage. Ein Aufruf eines Werkzeugs mit Schreiben aus einem Chat oder durch eine Person, die eine Domäne nutzt, wartet auf deren Bestätigung; ein Workflow-Lauf führt ihn als einen seiner Schritte aus. Klicken Sie auf das Abzeichen eines Werkzeugs, um es zu ändern. Setzen Sie ein Werkzeug nur auf Lesen, wenn es nichts ändert: falsch markiert, ändert es Dinge ohne Nachfrage."
 
 #: src/dashboard/standard-widgets.tsx
 msgid "A workflow is redesigned with AI and waits for its test."
@@ -7527,6 +7531,11 @@ msgstr "Braucht eigene Anmelde-App"
 msgid "Never"
 msgstr "Nie"
 
+#: src/connections/connect-dialog.tsx
+msgctxt "what a tool may do"
+msgid "Never"
+msgstr "Nie"
+
 #: src/settings/pulse.ts
 msgctxt "when Pulse may report"
 msgid "Never"
@@ -9790,6 +9799,11 @@ msgctxt "button: read a transcript"
 msgid "Read"
 msgstr "Lesen"
 
+#: src/connections/connect-dialog.tsx
+msgctxt "what a tool may do"
+msgid "Read"
+msgstr "Lesen"
+
 #: src/activity/audit-words.ts
 msgid "Read a domain's statistics"
 msgstr "Die Statistiken einer Domäne gelesen"
@@ -9856,14 +9870,9 @@ msgstr "Gelesen, was sich bei einer Verbindung geändert hat"
 msgid "Read what could be improved"
 msgstr "Gelesen, was sich verbessern ließe"
 
-#: src/connections/connect-dialog.tsx
 #: src/knowledge/collection-markers.tsx
 msgid "Read-only"
 msgstr "Nur lesen"
-
-#: src/connections/connect-dialog.tsx
-msgid "Read-only is ticked where Composio says a tool only reads; Grasp doesn't check that. A read-only tool runs without asking. A call of any other tool from chat, or from a person using a domain, waits for that person to confirm it; a workflow's run makes it as one of its steps. Mark a tool read-only only if it changes nothing: marked wrongly, it changes things without asking."
-msgstr "„Nur lesen“ ist angehakt, wo Composio angibt, dass ein Werkzeug nur liest; Grasp prüft das nicht. Ein Werkzeug, das nur liest, läuft ohne Nachfrage. Ein Aufruf jedes anderen Werkzeugs aus einem Chat oder durch eine Person, die eine Domäne nutzt, wartet auf deren Bestätigung; ein Workflow-Lauf führt ihn als einen seiner Schritte aus. Markieren Sie ein Werkzeug nur als „Nur lesen“, wenn es nichts ändert: Falsch markiert, ändert es Dinge ohne Nachfrage."
 
 #: src/onboarding/document-drop.tsx
 msgid "Reading"
@@ -14662,6 +14671,11 @@ msgstr "Würde greifen"
 msgid "Would run after approval"
 msgstr "Würde nach der Genehmigung laufen"
 
+#: src/connections/connect-dialog.tsx
+msgctxt "what a tool may do"
+msgid "Write"
+msgstr "Schreiben"
+
 #: src/routes/guest.tsx
 msgid "Write your answer"
 msgstr "Schreiben Sie Ihre Antwort"
@@ -14764,6 +14778,11 @@ msgstr "Sie haben diesen Chat beendet. Vielen Dank für Ihre Zeit."
 #: src/onboarding/about-story.tsx
 msgid "You show me who’s who, where the documents are, and which tools people use."
 msgstr "Sie zeigen mir, wer wer ist, wo die Dokumente liegen und welche Tools die Leute nutzen."
+
+#. {host} is the web address of the sign-in page, e.g. login.microsoftonline.com.
+#: src/connections/connect-dialog.tsx
+msgid "You sign in at <0>{host}</0>"
+msgstr "Sie melden sich bei <0>{host}</0> an"
 
 #: src/connections/connect-dialog.tsx
 msgid "You sign in on {app}’s own page."
