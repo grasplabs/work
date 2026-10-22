@@ -35,27 +35,20 @@ import { openTo } from "./workflows/owners.ts";
 const holds = (column: SQLiteColumn, value: string | null): SQL =>
   sql`${column} IS ${value}`;
 
-/** `app.audience_invalid` unless `audience` is a member or team of the organization now. */
+/** That `audience` is a member or a team of the organization now, as SQL. */
+const ofOrganization = (audience: AppMemberRef): SQL =>
+  audience.type === "team"
+    ? sql`EXISTS (SELECT 1 FROM ${teams} WHERE ${teams.id} = ${audience.id} AND ${teams.organizationId} = ${organizationId})`
+    : activeMember(audience.id);
+
+/** `app.audience_invalid` unless `audience` is of the organization now. */
 const requireAudience = async (
   env: Env,
   audience: AppMemberRef
 ): Promise<void> => {
-  const db = drizzle(env.DB);
-  const found =
-    audience.type === "team"
-      ? await db
-          .select({ id: teams.id })
-          .from(teams)
-          .where(
-            and(
-              eq(teams.id, audience.id),
-              eq(teams.organizationId, organizationId)
-            )
-          )
-          .get()
-      : await db.get<{ member: number } | undefined>(
-          sql`SELECT 1 AS member WHERE ${activeMember(audience.id)}`
-        );
+  const found = await drizzle(env.DB).get<{ ok: number } | undefined>(
+    sql`SELECT 1 AS ok WHERE ${ofOrganization(audience)}`
+  );
   if (found === undefined) {
     throw appErrors.create("app.audience_invalid");
   }
@@ -143,6 +136,7 @@ const planAudience = async (
   }
   if (audience !== null) {
     await requireAudience(env, audience);
+    plan.guards.push(ofOrganization(audience));
   }
   plan.set.audienceType = audience?.type ?? null;
   plan.set.audienceId = audience?.id ?? null;
