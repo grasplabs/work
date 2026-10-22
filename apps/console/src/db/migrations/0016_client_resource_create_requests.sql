@@ -1,0 +1,1 @@
+ALTER TABLE `client_resources` ADD `create_requested_by` text;

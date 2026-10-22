@@ -30,7 +30,11 @@ import {
   releaseManifestSchema,
   verifyReleaseBlobs,
 } from "@grasp-os/shared/release";
-import type { ReleaseManifest, WorkerEntry } from "@grasp-os/shared/release";
+import type {
+  ReleaseCompatibility,
+  ReleaseManifest,
+  WorkerEntry,
+} from "@grasp-os/shared/release";
 import { z } from "zod";
 
 import { stableStringify } from "./hash-lib.ts";
@@ -294,7 +298,48 @@ export interface ReleaseInfo {
   notes: string;
   wranglerVersion: string;
   packages: Record<string, string>;
+  /** What its code works with (`checkCompatibility` checks it covers the build). */
+  compatibility: ReleaseCompatibility;
 }
+
+/**
+ * Throws unless `compatibility` declares every Worker of `workers`, and
+ * each service binding one has to another: the range of the other's
+ * interface it calls, which the other must serve.
+ */
+const checkCompatibility = (
+  { interfaces }: ReleaseCompatibility,
+  workers: readonly WorkerBuild[]
+): void => {
+  const appByName = new Map(workers.map((w) => [w.config.name, w.key]));
+  const declared = Object.keys(interfaces).toSorted();
+  const built = workers.map((w) => w.key).toSorted();
+  if (JSON.stringify(declared) !== JSON.stringify(built)) {
+    throw new Error(
+      `The release's compatibility declares ${declared.join(", ")}, but it builds ${built.join(", ")}`
+    );
+  }
+  for (const worker of workers) {
+    const calls = interfaces[worker.key]?.calls ?? {};
+    const bound = new Set(
+      worker.config.services.flatMap(
+        ({ service }) => appByName.get(service) ?? []
+      )
+    );
+    for (const callee of new Set([...bound, ...Object.keys(calls)])) {
+      if (!(bound.has(callee) && callee in calls)) {
+        throw new Error(
+          `${worker.key} binds ${callee} exactly when it declares the versions of ${callee} it calls`
+        );
+      }
+      if (interfaces[callee]?.serves === undefined) {
+        throw new Error(
+          `${worker.key} calls ${callee}, which declares no version it serves`
+        );
+      }
+    }
+  }
+};
 
 /** Assembles the manifest from each Worker's build. */
 export const generateManifest = (
@@ -309,6 +354,10 @@ export const generateManifest = (
     );
   }
   const releaseNames = new Set(workers.map((w) => w.config.name));
+  const entries = Object.fromEntries(
+    workers.map((w) => [w.key, workerEntry(w, releaseNames)])
+  );
+  checkCompatibility(info.compatibility, workers);
   const assets: ReleaseManifest["assets"] = {};
   for (const [hash, bytes] of workers.flatMap((w) => [
     ...(w.assets?.blobs ?? []),
@@ -319,9 +368,7 @@ export const generateManifest = (
     manifestVersion: MANIFEST_VERSION,
     ...info,
     compatibilityDate,
-    workers: Object.fromEntries(
-      workers.map((w) => [w.key, workerEntry(w, releaseNames)])
-    ),
+    workers: entries,
     assets,
   });
 };

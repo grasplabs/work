@@ -71,6 +71,8 @@ export default defineProject({
       remoteBindings: false,
       miniflare: {
         bindings: {
+          // workerd has no Cloudflare jurisdiction (src/clock.ts).
+          DURABLE_OBJECT_JURISDICTION: "none",
           CAPABILITY_SIGNING_KEY:
             "test-capability-signing-key-of-32-chars-or-more",
           // As while rotating keys.

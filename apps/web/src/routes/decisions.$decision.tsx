@@ -190,37 +190,33 @@ const DecisionCard = ({ decision }: { decision: DecisionView }) => {
                     <Trans>A run of a workflow asked for this answer.</Trans>
                   )}
                 </p>
-              </div>
-              <dl className="flex flex-col gap-1">
-                <div className="flex gap-4">
-                  <dt className="text-muted-foreground w-24 flex-none">
+                <dl className="mt-1 grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-0.5">
+                  <dt className="text-muted-foreground">
                     <Trans context="where a decision comes from">From</Trans>
                   </dt>
-                  <dd className="min-w-0 truncate">
+                  <dd className="truncate">
                     {current.app.name} · {current.workflow}
                   </dd>
-                </div>
-                <div className="flex gap-4">
-                  <dt className="text-muted-foreground w-24 flex-none">
+                  <dt className="text-muted-foreground">
                     <Trans context="the run of a workflow a decision is for">
                       Run
                     </Trans>
                   </dt>
-                  <dd className="min-w-0 truncate font-mono text-xs leading-5">
+                  <dd className="truncate font-mono text-xs leading-5">
                     {current.run}
                   </dd>
-                </div>
-                {open ? (
-                  <div className="flex gap-4">
-                    <dt className="text-muted-foreground w-24 flex-none">
-                      <Trans context="until when a decision can be answered">
-                        Open until
-                      </Trans>
-                    </dt>
-                    <dd>{formatDateTime(current.expiresAt)}</dd>
-                  </div>
-                ) : null}
-              </dl>
+                  {open ? (
+                    <>
+                      <dt className="text-muted-foreground">
+                        <Trans context="until when a decision can be answered">
+                          Open until
+                        </Trans>
+                      </dt>
+                      <dd>{formatDateTime(current.expiresAt)}</dd>
+                    </>
+                  ) : null}
+                </dl>
+              </div>
               {open ? (
                 <div className="flex flex-col gap-3">
                   <div className="flex flex-col gap-2">
@@ -298,7 +294,7 @@ const DecisionInFrame = ({
   return (
     <AppFrame core={core} identity={identity}>
       <SiteHeader crumbs={crumbs} />
-      <div className="flex flex-col items-center gap-4 p-6 text-sm">
+      <div className="pb-chat flex flex-col items-center gap-4 px-6 pt-7 text-sm">
         {children}
       </div>
     </AppFrame>
