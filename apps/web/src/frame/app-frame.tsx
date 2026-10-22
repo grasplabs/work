@@ -13,7 +13,9 @@ import { InFrame } from "./in-frame.ts";
 
 /**
  * The signed-in product's frame: the app's sidebar beside the page, which
- * scrolls inside it so its site header stays in view. The shell's pages
+ * scrolls inside it so its site header stays in view. It scrolls only up
+ * and down: what is wider than the page is cut at its edge, rather than
+ * sliding the whole page, header and all, sideways. The shell's pages
  * are in it, and a page outside the shell for someone signed in, such as
  * a decision opened from a link.
  */
@@ -45,7 +47,7 @@ export const AppFrame = ({
           open={open}
         >
           <AppSidebar core={core} identity={identity} />
-          <SidebarInset className="min-h-0 min-w-0 overflow-y-auto">
+          <SidebarInset className="min-h-0 min-w-0 overflow-x-clip overflow-y-auto">
             <InFrame value>{children}</InFrame>
           </SidebarInset>
           {aside}
