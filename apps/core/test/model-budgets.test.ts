@@ -779,7 +779,7 @@ describe("model budgets", { timeout: 60_000 }, () => {
     });
   });
 
-  it("keep an answer cancelled midway reserved in full, so cancelling is never free, and its audit event says what it used was estimated", async () => {
+  it("charge an answer cancelled midway what it used, never nothing, and say on its audit event that it was estimated", async () => {
     // The answer stops after its first 12 characters, until released: the
     // provider's count, which comes with the answer's end, never arrives.
     const rest = Promise.withResolvers<boolean>();
@@ -791,8 +791,9 @@ describe("model budgets", { timeout: 60_000 }, () => {
     };
     // Some 50,000 tokens at four characters each, and as many bytes: Llama
     // 3.3 reserves some $0.059 for it (pi caps its answer at a token, as
-    // the prompt leaves no room in its window), so a budget of $0.06 has
-    // no room left beside it for a request of 10,000 bytes.
+    // the prompt leaves no room in its window). Charged that prompt's
+    // bound, a budget of $0.06 has no room left for a request of 10,000
+    // bytes.
     const limited = withRules({ budgets: { user: { limit: 0.06 } } }, [
       cut,
       pricedAnswer,
@@ -840,23 +841,33 @@ describe("model budgets", { timeout: 60_000 }, () => {
       const after = await outcome(
         limited.call(hello({ trigger: ada, input: nextPrompt }))
       );
-      const [[adas], [bens]] = [await eventsOf(ada), await eventsOf(ben)];
+      // Its spend now alerts admins too.
+      const adaEvents = await eventsOf(ada);
+      const adas = adaEvents.find(({ action }) => action === "model.call");
+      const [bens] = await eventsOf(ben);
       const tokens = adas?.model?.inputTokens ?? 0;
       expect({
         stopped,
-        held: held.spentMicros === 0 && held.reservedMicros > 58_000,
+        charged: held.spentMicros > 58_000 && held.reservedMicros === 0,
         after,
         ada: [adas?.action, adas?.detail, adas?.model?.outputTokens],
         prompt: tokens >= prompt.length / 4 && tokens < prompt.length / 4 + 200,
         ben: [bens?.action, bens?.detail, bens?.model],
       }).toMatchObject({
         stopped: ["aborted", "aborted"],
-        // Its whole reservation stays held: no room for another request.
-        held: true,
+        // Chat completions count nothing before their end: the prompt is
+        // charged at its bound, so cancelling is never free.
+        charged: true,
         after: "model.over_budget",
         ada: [
           "model.call",
-          { outcome: "cancelled", errorType: "cancelled", estimated: true },
+          {
+            outcome: "cancelled",
+            errorType: "cancelled",
+            estimated: true,
+            ledger: "settled",
+            ledgerHeld: 0,
+          },
           // "Hello there," at four characters a token.
           3,
         ],
@@ -877,6 +888,70 @@ describe("model budgets", { timeout: 60_000 }, () => {
         (1000 * 3 + 3 * 15) / 1_000_000,
         6
       );
+    } finally {
+      rest.resolve(true);
+    }
+  });
+
+  it("give back what a cancelled answer didn't use at once, so the person's next call fits beside it", async () => {
+    // Claude Sonnet 4.5 reserves some $0.56 for a short prompt and its
+    // default answer and thinking, at its dearest tier: two such requests
+    // don't fit in $1 together, but one beside what a cancelled one used
+    // does.
+    const rest = Promise.withResolvers<boolean>();
+    const { agent, call, month } = withRules(
+      { budgets: { user: { limit: 1 } } },
+      [
+        {
+          text: "Hello there, how are you today?",
+          inputTokens: 1000,
+          outputTokens: 100,
+          pause: { at: 12, until: rest.promise },
+        },
+        pricedAnswer,
+      ]
+    );
+    const ada = newPerson();
+    try {
+      const session = await agent({
+        model: anthropic,
+        purpose: "chat.turn",
+        trigger: ada,
+        work: requireWork(),
+      });
+      const cancel = new AbortController();
+      const stream = session.stream(
+        session.model,
+        normalizeContext({
+          messages: [{ role: "user", content: "Hi.", timestamp: Date.now() }],
+        }),
+        { signal: cancel.signal }
+      );
+      // The person talks on once the answer's first words came.
+      for await (const event of stream) {
+        if (event.type === "text_delta") {
+          cancel.abort();
+        }
+      }
+      const { stopReason } = await stream.result();
+      const used = await ledgerOf(month, ada.userId);
+      const next = await outcome(
+        call(hello({ trigger: ada, model: anthropic, maxTokens: undefined }))
+      );
+      const [cancelled] = await eventsOf(ada);
+      expect({
+        stopReason,
+        used,
+        next,
+        settled: said(cancelled),
+      }).toStrictEqual({
+        stopReason: "aborted",
+        // The prompt as Anthropic counted it at the start, at $3 a million,
+        // and "Hello there," at four characters a token, at $15.
+        used: { key: ada.userId, spentMicros: 3000 + 45, reservedMicros: 0 },
+        next: "ok",
+        settled: ["settled", 1, 3000 + 45, 0],
+      });
     } finally {
       rest.resolve(true);
     }
@@ -1037,7 +1112,7 @@ describe("model budgets", { timeout: 60_000 }, () => {
     });
   });
 
-  it("estimate a cancelled answer at its tier's prices, and say on its event what the ledger holds for it", async () => {
+  it("charge a cancelled answer at its tier's prices, as its audit event estimates it", async () => {
     const rest = Promise.withResolvers<boolean>();
     const { agent, month } = withRules({ budgets: { user: { limit: 10 } } }, [
       {
@@ -1077,13 +1152,17 @@ describe("model budgets", { timeout: 60_000 }, () => {
           Math.abs(
             (event?.cost?.amount ?? 0) - (250_000 * 6 + 3 * 22.5) / 1e6
           ) < 1e-9,
-        settled: [
-          event?.detail.ledger,
-          Math.round(Number(event?.detail.ledgerHeld) * 1_000_000),
-        ],
+        settled: said(event),
+        held,
       }).toStrictEqual({
         audited: true,
-        settled: ["unknown", held.reservedMicros],
+        // The ledger rounds each kind up to a micro.
+        settled: ["settled", 1, 250_000 * 6 + 68, 0],
+        held: {
+          key: ada.userId,
+          spentMicros: 250_000 * 6 + 68,
+          reservedMicros: 0,
+        },
       });
     } finally {
       rest.resolve(true);
