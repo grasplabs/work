@@ -3,8 +3,11 @@ import { visionFields } from "@grasp-os/shared/kickoff";
 import type { VisionField } from "@grasp-os/shared/kickoff";
 import type { RosterInput } from "@grasp-os/shared/onboarding";
 import { env } from "cloudflare:workers";
+import { zipSync } from "fflate";
 import { describe, expect, it, vi } from "vite-plus/test";
 
+import { mondayOf } from "../src/onboarding/rules.ts";
+import { onboardingStore } from "../src/onboarding/store.ts";
 import { fakeGateway } from "./ai-gateway.ts";
 import { mockIdp } from "./idp.ts";
 import { mailConnection } from "./mail-connection.ts";
@@ -17,9 +20,11 @@ import { connectDb } from "./test-env.ts";
 // staff bring in the kickoff, the admin gives the roster. AI Gateway is
 // the outside system, a fake behind the AI binding. What can go wrong,
 // tried here: a team counted twice when two sources name it; the
-// onboarding, which only admins see, reaching anyone else; a hidden
-// entry's connection lost; an empty deployment failing to give the brain
-// anything to build from.
+// onboarding, which only admins see, reaching anyone else; an interview
+// shown before the admin's progress counts it, an employee's shown at
+// all, or anything said in one reaching the brain; a tool counted twice
+// when two documents name it; a hidden entry's connection lost; an empty
+// deployment failing to give the brain anything to build from.
 
 const idp = mockIdp();
 
@@ -105,6 +110,89 @@ const roster: RosterInput = {
     { id: "cas", name: "Cas", team: "finance", title: "Accountant" },
     { id: "dee", name: "Dee", team: "ops" },
   ],
+};
+
+/** Who works where: Finance, Legal, Ops and HR, each with a lead, and Sales without one. */
+const twoLeads: RosterInput = {
+  teams: [
+    { id: "finance", name: "Finance", lead: "ann" },
+    { id: "legal", name: "Legal", lead: "lea" },
+    { id: "ops", name: "Ops", lead: "olu" },
+    { id: "hr", name: "HR", lead: "hal" },
+    { id: "sales", name: "Sales", lead: null },
+  ],
+  people: [
+    { id: "ann", name: "Ann", team: "finance", title: "Head of finance" },
+    { id: "ben", name: "Ben", team: "finance", title: "Accountant" },
+    { id: "lea", name: "Lea", team: "legal", title: "" },
+    { id: "olu", name: "Olu", team: "ops", title: "Ops lead" },
+    { id: "hal", name: "Hal", team: "hr", title: "HR lead" },
+    { id: "sam", name: "Sam", team: "sales", title: "Seller" },
+  ],
+};
+
+/** The roster after the links went out: Hal moved to lead Sales, HR left without a lead. */
+const halMoved: RosterInput = {
+  teams: twoLeads.teams.map((team) => {
+    if (team.id === "hr") {
+      return { ...team, lead: null };
+    }
+    return team.id === "sales" ? { ...team, lead: "hal" } : team;
+  }),
+  people: twoLeads.people.map((one) =>
+    one.id === "hal" ? { ...one, team: "sales" } : one
+  ),
+};
+
+/** A Word file holding one paragraph of `text`. */
+const wordFile = (text: string): Uint8Array<ArrayBuffer> => {
+  const encoder = new TextEncoder();
+  const namespace =
+    "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+  return Uint8Array.from(
+    zipSync({
+      "word/document.xml": encoder.encode(
+        `<?xml version="1.0"?><w:document xmlns:w="${namespace}"><w:body><w:p><w:r><w:t>${text}</w:t></w:r></w:p></w:body></w:document>`
+      ),
+      "word/styles.xml": encoder.encode(
+        `<?xml version="1.0"?><w:styles xmlns:w="${namespace}"/>`
+      ),
+    })
+  );
+};
+
+/** The admin shares a document the fake gateway reads as naming `tools` and `teams`. */
+const shareDocument = async (
+  admin: Awaited<ReturnType<typeof signedInApi>>,
+  name: string,
+  tools: string[],
+  teams: string[]
+) => {
+  const fake = fakeGateway({
+    text: JSON.stringify({
+      about: "How invoices are booked.",
+      tools,
+      teams,
+      unclear: ["Who checks the booking."],
+      question: "",
+      options: [],
+    }),
+    inputTokens: 1200,
+    outputTokens: 150,
+  });
+  const ai: AiBinding = env.AI;
+  const spy = vi.spyOn(ai, "fetch").mockImplementation(fake.binding.fetch);
+  try {
+    return await admin.api.onboarding.shareDocument({
+      locale: "en",
+      name,
+      bytes: wordFile(
+        "Invoices are typed into Exact Online by Finance, after a check in ClaimsPro."
+      ),
+    });
+  } finally {
+    spy.mockRestore();
+  }
 };
 
 /** HubSpot, the catalog's one toolkit, as the brain lists it. */
@@ -311,6 +399,157 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
       teams: [],
       sources: [],
       mail: workspace.connections.filter(({ name }) => name === "mail"),
+    });
+  });
+
+  it("shows each team lead's interview by its week and the documents shared, with their tools, to admins alone", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const member = await signedInApi(idp, "user");
+    await admin.api.onboarding.saveRoster(twoLeads);
+    const day = 24 * 60 * 60 * 1000;
+    const daysAgo = (count: number) =>
+      new Date(Date.now() - count * day).toISOString();
+    const store = onboardingStore(env);
+    const by = { type: "system" } as const;
+    await store.savePlan({ start: daysAgo(20).slice(0, 10), days: 28 }, by);
+    await store.setAgreements(
+      { processing: true, assessment: true, council: "none" },
+      by
+    );
+    // Every link goes out now: Ann and Lea as their teams' leads, Ben as
+    // one of Finance.
+    await store.releaseDue();
+    // Hal, HR's lead when the links went out, moves to lead Sales before
+    // he talks: his lead's interview is for Sales, and neither team counts
+    // it as its lead's.
+    await admin.api.onboarding.saveRoster(halMoved);
+    // Finance's lead finished two weeks ago, in a week that is over;
+    // Legal's lead today, in this week; Ben, an employee, two weeks ago;
+    // Olu, Ops's lead when the links went out, two weeks ago, but as an
+    // employee, as he was no longer its lead when he talked.
+    const finished = [
+      ["ann", daysAgo(14), "lead"],
+      ["lea", new Date().toISOString(), "lead"],
+      ["ben", daysAgo(14), "own"],
+      ["olu", daysAgo(14), "own"],
+      ["hal", daysAgo(14), "lead"],
+    ] as const;
+    for (const [person, at, kind] of finished) {
+      // oxlint-disable-next-line no-await-in-loop -- one at a time
+      await store.noteInterview({
+        person,
+        kind,
+        startedAt: at,
+        completedAt: at,
+      });
+    }
+    // Then the admin makes Ben the only member and lead of a team of his
+    // own: it tells them nothing about his interview.
+    await admin.api.onboarding.saveRoster({
+      ...halMoved,
+      teams: [...halMoved.teams, { id: "solo", name: "Solo", lead: "ben" }],
+      people: halMoved.people.map((one) =>
+        one.id === "ben" ? { ...one, team: "solo" } : one
+      ),
+    });
+    const first = await shareDocument(
+      admin,
+      `booking-${crypto.randomUUID()}.docx`,
+      ["Exact Online", "ClaimsPro", "Microsoft Project", "Microsoft.Project"],
+      ["finance", "Nobody"]
+    );
+    const second = await shareDocument(
+      admin,
+      `contracts-${crypto.randomUUID()}.docx`,
+      ["claimspro"],
+      ["Legal"]
+    );
+
+    const workspace = await admin.api.brain.read();
+    const asMember = await member.api.brain.read();
+    const { progress } = await admin.api.onboarding.view();
+    const since = daysAgo(15);
+    const adminChanges = await sourcesOf(admin, since);
+    const finishedWeek = mondayOf(daysAgo(14));
+
+    expect({
+      leadTalked: progress?.teams.map(({ id, leadTalked }) => [id, leadTalked]),
+      sources: workspace.sources.filter(({ id }) => id.startsWith("src.")),
+      tools: workspace.tools,
+      changes: adminChanges.filter((id) => id.startsWith("src.")),
+      member: {
+        sources: asMember.sources,
+        tools: asMember.tools,
+        changes: await sourcesOf(member, since),
+      },
+    }).toStrictEqual({
+      leadTalked: [
+        ["finance", true],
+        ["legal", false],
+        ["ops", false],
+        ["hr", false],
+        ["sales", false],
+        ["solo", false],
+      ],
+      sources: [
+        {
+          id: "src.lead-finance",
+          kind: "interview",
+          title: "Interview with Finance",
+          date: finishedWeek,
+          who: "Head of finance",
+          step: 2,
+          interviewee: "stakeholder",
+          teamIds: ["team-finance"],
+        },
+        {
+          id: `src.document-${first.id}`,
+          kind: "document",
+          title: first.name,
+          date: today(),
+          step: 2,
+        },
+        {
+          id: `src.document-${second.id}`,
+          kind: "document",
+          title: second.name,
+          date: today(),
+          step: 2,
+        },
+      ],
+      tools: [
+        {
+          id: "tool.document-exact-online",
+          name: "Exact Online",
+          teamIds: ["team-finance"],
+          sourceId: `src.document-${first.id}`,
+        },
+        {
+          id: "tool.document-claimspro",
+          name: "ClaimsPro",
+          teamIds: ["team-finance", "team-legal"],
+          sourceId: `src.document-${first.id}`,
+        },
+        // Two names whose letters read alike stay two tools.
+        {
+          id: "tool.document-microsoft-project",
+          name: "Microsoft Project",
+          teamIds: ["team-finance"],
+          sourceId: `src.document-${first.id}`,
+        },
+        {
+          id: "tool.document-microsoft-project-2",
+          name: "Microsoft.Project",
+          teamIds: ["team-finance"],
+          sourceId: `src.document-${first.id}`,
+        },
+      ],
+      changes: [
+        "src.lead-finance",
+        `src.document-${first.id}`,
+        `src.document-${second.id}`,
+      ].toSorted(),
+      member: { sources: [], tools: [], changes: [] },
     });
   });
 
