@@ -1729,8 +1729,18 @@ describe("deploying only a release that works with what the client runs", () => 
     });
   });
 
-  it("refuses a release that doesn't read every workflow journal and run every App the client's code may have left", async () => {
-    const { account, clientId, deployId } = await setUp();
+  it("refuses a release that doesn't read every workflow journal, run every App, or run on every database schema the client's code may have left", async () => {
+    // Its second migration contracts core's database: no code from before
+    // it runs on it.
+    const contracted = {
+      "0000_init.sql": "CREATE TABLE a (id TEXT, old TEXT);",
+      "0001_drop_old.sql": "ALTER TABLE a DROP COLUMN old;",
+    };
+    const { account, clientId, deployId } = await setUp({
+      notes: "feat(core): stop using a.old and drop it",
+      migrations: contracted,
+      compatibleFrom: { "grasp-os-core": 1 },
+    });
     await runDeploy(context, deployId);
 
     const journals = await refusal(
@@ -1747,8 +1757,17 @@ describe("deploying only a release that works with what the client runs", () => 
       }),
       account
     );
+    const schemas = await refusal(
+      await startNext(clientId, {
+        notes: "revert: use a.old again",
+        compatibleFrom: {},
+      }),
+      account
+    );
     const wider = await startNext(clientId, {
       notes: "feat(core): read journal 10 and run protocol 3 too",
+      migrations: contracted,
+      compatibleFrom: { "grasp-os-core": 1 },
       compatibility: {
         ...declared,
         workflowJournal: { min: 8, max: 10 },
@@ -1758,9 +1777,10 @@ describe("deploying only a release that works with what the client runs", () => 
     await runDeploy(context, wider);
 
     const widerRow = await deployRow(wider);
-    expect({ journals, apps, wider: widerRow?.status }).toStrictEqual({
+    expect({ journals, apps, schemas, wider: widerRow?.status }).toStrictEqual({
       journals: refused("release_incompatible"),
       apps: refused("release_incompatible"),
+      schemas: refused("schema_incompatible"),
       wider: "done",
     });
   });

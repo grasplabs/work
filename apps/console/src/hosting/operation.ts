@@ -89,7 +89,11 @@ import type { ScriptTarget } from "../cloudflare/workers.ts";
 import { actIfChanged } from "../db/act.ts";
 import type { Actor, ConsoleDatabase } from "../db/act.ts";
 import { clientProvisions, clients, clientWorkers } from "../db/schema.ts";
-import { currentReleases, incompatibility } from "../deploy/compatibility.ts";
+import {
+  appliedSchema,
+  currentReleases,
+  incompatibility,
+} from "../deploy/compatibility.ts";
 import { derivedCoreConfig } from "../deploy/core-config.ts";
 import type { SignInApps } from "../deploy/core-config.ts";
 import {
@@ -138,6 +142,8 @@ export const provisionOperationErrorCodes = [
   "release_undeclared",
   /** The release doesn't work with what the client runs, or with itself, Worker by Worker. */
   "release_incompatible",
+  /** The release's code doesn't run on a database's schema as the client's migrations left it. */
+  "schema_incompatible",
   /** The operation provisions another release: it's fixed for the operation. */
   "operation_release_changed",
   /** The release has a Worker other than core and connect. */
@@ -614,7 +620,8 @@ const validate = async (
   const refused = incompatibility(
     await currentReleases(db, held.clientId),
     manifest,
-    order
+    order,
+    await appliedSchema(db, held.clientId)
   );
   if (refused !== null) {
     throw new ProvisionOperationError(refused.code, refused.message);

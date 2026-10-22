@@ -3140,6 +3140,37 @@ describe("controlling a rollout", () => {
     });
   });
 
+  it("refuses a rollback to a release whose code doesn't run on the database schema the rollout's migrations left", async () => {
+    const before = await importedRelease("feat(core): reads table a", {
+      compatibleFrom: {},
+    });
+    const internal = await activeClient(0, before);
+    const release = await importedRelease(
+      "feat(core): stop reading table a and drop it",
+      {
+        migrations: {
+          "0000_init.sql": "CREATE TABLE a (id TEXT);",
+          "0001_drop_a.sql": "DROP TABLE a;",
+        },
+        compatibleFrom: { "grasp-os-core": 1 },
+      }
+    );
+    await using run = await followRollouts();
+    const rolloutId = await rollOut(release, { scope: "ring", ring: 0 });
+    await run.waitForStatus("complete");
+    const counts = deploymentCounts(internal.account);
+
+    const refused = await codeOf(
+      rollbackClient(env, staff, rolloutId, internal.clientId)
+    );
+
+    expect({
+      refused,
+      counts: deploymentCounts(internal.account),
+      runner: await runnerOf(internal.clientId),
+    }).toStrictEqual({ refused: "schema_incompatible", counts, runner: null });
+  });
+
   it("refuses a rollback while the rollout is still preparing the client, with nothing of it live", async () => {
     const before = await importedRelease("feat(core): the release before");
     const internal = await activeClient(0, before);

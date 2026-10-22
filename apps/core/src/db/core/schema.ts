@@ -33,6 +33,23 @@ import {
 
 const timestamp = (name: string) => integer(name, { mode: "timestamp_ms" });
 
+/**
+ * The oldest migration whose code still runs on this database's schema,
+ * which each release declares (scripts/release): the console won't put
+ * the code of a release whose newest migration is older on it, by a
+ * rollback or a deploy.
+ *
+ * Migrations expand, then contract in a later release (AGENTS.md), so the
+ * code of the release before keeps working on a new schema, and a
+ * migration that only expands leaves this where it is. One that drops or
+ * renames what older code still uses raises it: to the migration of the
+ * first release whose code no longer used it, or, when the code stopped
+ * in the same release, to that migration's own number.
+ *
+ * 0120 dropped `admission_topics` in the release that stopped using it.
+ */
+export const compatibleFromMigration = 120;
+
 /** A person. Found by their IdP account, never by email alone. */
 export const users = sqliteTable("users", {
   id: text().primaryKey(),

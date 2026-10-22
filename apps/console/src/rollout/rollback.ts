@@ -7,7 +7,9 @@
  * on the database the release left, as long as the previous release is
  * the one right before it (or the same one, after a secrets rollout,
  * which puts the previous shared secrets back); a client further back
- * isn't rolled back. Crons and Workflows stay as the release set them.
+ * isn't rolled back, and neither is one whose databases a migration
+ * since contracted for the previous code, as its release declares
+ * (src/deploy/compatibility.ts). Crons and Workflows stay as the release set them.
  *
  * A rollback is a runner like the others (src/runners.ts): a Workflow
  * instance, `RollbackClient`, that claims the client, taking it from the
@@ -47,7 +49,11 @@ import {
   rollouts,
   rolloutTargets,
 } from "../db/schema.ts";
-import { currentReleases, incompatibility } from "../deploy/compatibility.ts";
+import {
+  appliedSchema,
+  currentReleases,
+  incompatibility,
+} from "../deploy/compatibility.ts";
 import { activityKeys, clientDomain, deployerApi } from "../deploy/context.ts";
 import { errorCode, latestDeployOf } from "../deploy/deploy.ts";
 import { importedManifest } from "../deploy/release.ts";
@@ -306,10 +312,11 @@ const movedOffPrevious = async (
 };
 
 /**
- * Refuses (`incompatible`) going back to `previous` from release
- * `releaseId`, the rollout's, when its code doesn't work with what client
- * `clientId` runs now, with `workers` restored one at a time, in order
- * (src/deploy/compatibility.ts). Each Worker it restores is taken to run
+ * Refuses (`incompatible`, `schema_incompatible`) going back to
+ * `previous` from release `releaseId`, the rollout's, when its code
+ * doesn't work with what client `clientId` runs now, with `workers`
+ * restored one at a time, in order, or on the schemas its databases are
+ * at (src/deploy/compatibility.ts). Each Worker it restores is taken to run
  * the rollout's release, whatever its record says: a version can go live
  * and the write after it fail, and the record lags what runs.
  */
@@ -334,11 +341,14 @@ const assertCompatible = async (
   const refused = incompatibility(
     current,
     before,
-    workers.map(({ app }) => app)
+    workers.map(({ app }) => app),
+    await appliedSchema(db, clientId)
   );
   if (refused !== null) {
     throw new RolloutError(
-      "incompatible",
+      refused.code === "schema_incompatible"
+        ? "schema_incompatible"
+        : "incompatible",
       `${clientId} can't go back to ${previous.release ?? ""}: ${refused.message}`
     );
   }
@@ -354,7 +364,8 @@ const assertCompatible = async (
  * (`client_busy`: nothing of it is live before), what it ran before is the release right
  * before the rollout's, or the same one (`too_far_back`), whose code works
  * with what the client runs now, restored in the rollback's order
- * (`incompatible`, src/deploy/compatibility.ts), and its secrets generation is
+ * (`incompatible`, src/deploy/compatibility.ts), and runs on its
+ * databases' schemas (`schema_incompatible`), and its secrets generation is
  * the one the previous versions carry, in the console and the router's
  * map (`rotated_since`: the router would send a secret they don't have).
  */
