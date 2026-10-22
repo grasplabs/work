@@ -2,7 +2,7 @@ import { Trans, useLingui } from "@lingui/react/macro";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 
 import { GraspBuddy } from "../buddy/grasp-buddy.tsx";
-import { setActiveChat } from "../chat/active-chat.ts";
+import { forgetActiveChats } from "../chat/active-chat.ts";
 import { loadCoreStatus } from "../core-connection.ts";
 import { ErrorText } from "../error-text.tsx";
 import { OnboardingFrame } from "../frame/onboarding-frame.tsx";
@@ -91,7 +91,7 @@ export const Route = createFileRoute("/sign-in")({
     // starts without the last person's open chat, which isn't theirs to
     // open. Not while core can't be reached, when nobody knows who is in.
     if (status.connected) {
-      setActiveChat(undefined);
+      forgetActiveChats();
     }
     return status;
   },

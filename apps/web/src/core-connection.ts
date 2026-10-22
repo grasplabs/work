@@ -4,7 +4,7 @@ import { authErrors } from "@grasp-os/shared/errors";
 import type { CoreApi, Identity, SignInOption } from "@grasp-os/shared/rpc";
 import type { RpcStub } from "capnweb";
 
-import { setActiveChat } from "./chat/active-chat.ts";
+import { forgetActiveChats } from "./chat/active-chat.ts";
 import {
   connectCore,
   CoreTimeoutError,
@@ -257,9 +257,9 @@ export class CoreConnection {
         failures.push(error);
       }
     }
-    // The open chat was this person's: whoever signs in next starts
-    // without it, however the session ended.
-    setActiveChat(undefined);
+    // The open chats were this person's: whoever signs in next starts
+    // without them, however the session ended.
+    forgetActiveChats();
     this.#onSessionEnded();
     if (failures.length > 0) {
       throw new AggregateError(failures, "Stopping a frame failed.");
