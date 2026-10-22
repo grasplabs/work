@@ -305,6 +305,28 @@ const downloadable = async (
   return row === undefined ? undefined : { ...row, own: decided.own };
 };
 
+/**
+ * What `read` answers, if it answers before `endsAt`; refused as the file
+ * not being there once that passes, whatever it still waits for.
+ */
+const byDeadline = async <T>(
+  endsAt: number,
+  read: () => Promise<T>
+): Promise<T> => {
+  const { promise: late, reject } = Promise.withResolvers<never>();
+  const timer = setTimeout(
+    () => {
+      reject(fileErrors.create("file.not_found"));
+    },
+    Math.max(0, endsAt - Date.now())
+  );
+  try {
+    return await Promise.race([read(), late]);
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
 const segment = /^[A-Za-z0-9_-]{1,64}$/u;
 
 /** The workflow, run and file a download path names; undefined for another path. */
@@ -417,9 +439,14 @@ export const runFileResponse = async (
           if (still === undefined || Date.now() > endsAt) {
             throw fileErrors.create("file.not_found");
           }
-          const object = await env.FILES.get(chunk.key);
-          const bytes =
-            object === null ? undefined : new Uint8Array(await object.bytes());
+          // Read within what is left of the download's time: a read still
+          // pending then delivers nothing.
+          const bytes = await byDeadline(endsAt, async () => {
+            const object = await env.FILES.get(chunk.key);
+            return object === null
+              ? undefined
+              : new Uint8Array(await object.bytes());
+          });
           // The bytes written, or none: a chunk changed in R2 ends it.
           if (
             bytes === undefined ||
