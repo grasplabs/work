@@ -1,3 +1,4 @@
+import { readOnlyRevision } from "@grasp-os/shared/chat";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, ChatId } from "@grasp-os/shared/ids";
 import { runInDurableObject } from "cloudflare:test";
@@ -167,20 +168,25 @@ describe("versions of a chat's draft", { timeout: 180_000 }, () => {
     const builder = await signedInApi(idp, "builder");
     const { app, chatId, revision } = await twoVersions(builder);
     const { chats } = builder.api;
-    const [, one] = await chats.draftVersions(chatId, app);
 
     const now = await chats.preview(chatId, app);
     const first = await chats.preview(chatId, app, undefined, 1);
     const second = await chats.preview(chatId, app, undefined, 2);
-    // A call of the earlier version's screen: refused, as it is past.
+    // Calls of a version's screen, the latest's (the draft as it is
+    // now) too: refused, as nothing a version opened read-only runs.
     const request = await requestFor(
       builder,
       { chatId, app, revision },
       "notes.titles"
     );
-    const call = await failure(
-      async () =>
-        await chats.previewFunction(chatId, app, first.revision, request)
+    const calls = await Promise.all(
+      [first, second].map(
+        async (bundle) =>
+          await failure(
+            async () =>
+              await chats.previewFunction(chatId, app, bundle.revision, request)
+          )
+      )
     );
     await chats.restoreDraftVersion(chatId, app, 1);
     const restored = await chats.preview(chatId, app);
@@ -189,16 +195,16 @@ describe("versions of a chat's draft", { timeout: 180_000 }, () => {
       first: { revision: first.revision, screens: first.screens },
       differs: first.artifact !== now.artifact,
       secondIsNow: second.artifact === now.artifact,
-      call,
+      calls,
       restoredIsFirst: restored.artifact === first.artifact,
       missing: await failure(
         async () => await chats.preview(chatId, app, undefined, 9)
       ),
     }).toStrictEqual({
-      first: { revision: one?.revision, screens: ["desk"] },
+      first: { revision: readOnlyRevision, screens: ["desk"] },
       differs: true,
       secondIsNow: true,
-      call: "app.preview_outdated",
+      calls: ["app.preview_outdated", "app.preview_outdated"],
       restoredIsFirst: true,
       missing: "app.version_not_found",
     });

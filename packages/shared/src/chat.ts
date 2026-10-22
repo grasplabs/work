@@ -134,6 +134,14 @@ export interface ChatDraft {
 }
 
 /**
+ * The revision a preview of a version of the draft carries
+ * (`ChatsApi.preview` with `version`): no draft is ever at it, so every
+ * call of that preview (function, query, stream, report) is refused as
+ * out of date, the latest version's too. Read-only by construction.
+ */
+export const readOnlyRevision = 0;
+
+/**
  * One write of the chat's draft of an App, kept as it left the draft
  * (`ChatsApi.draftVersions`): never changed, and restored only as a new
  * one.
@@ -167,7 +175,10 @@ export interface PreviewBundle extends Omit<
   ScreenBundle,
   "version" | "lease" | "route" | "input"
 > {
-  /** Which write of the draft it was built from: its calls name it. */
+  /**
+   * Which write of the draft it was built from: its calls name it.
+   * `readOnlyRevision` for a version of the draft opened read-only.
+   */
   revision: number;
   /** The draft's screens, sorted. */
   screens: string[];
@@ -576,7 +587,7 @@ export interface ChatsApi {
    * Screen `screen` of the chat's draft of `app` (its first screen when
    * none is named), built, to preview: for the person while they build
    * the App. With `version`, of that version of the draft, read-only:
-   * its calls are refused once the draft is past it.
+   * at `readOnlyRevision`, so its calls are all refused.
    */
   preview: (
     chatId: string,

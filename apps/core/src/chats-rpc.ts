@@ -7,6 +7,7 @@ import {
   projectDocumentNameSchema,
   projectGoalSchema,
   projectNameSchema,
+  readOnlyRevision,
 } from "@grasp-os/shared/chat";
 import type {
   ChatConnectionRequest,
@@ -587,8 +588,8 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
    * A screen of the chat's draft of `app`, to preview (preview.ts): only
    * while the person builds the App, as the agent must to write it. With
    * `version`, of that version of the draft, read-only: built the same
-   * way, at the revision it made, so its calls are refused
-   * (`app.preview_outdated`) once the draft is past it.
+   * way, but at `readOnlyRevision`, so its calls are all refused
+   * (`app.preview_outdated`).
    */
   async preview(
     chatId: string,
@@ -734,7 +735,9 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     return {
       app: id,
       name,
-      revision: draft.revision,
+      // A version opened read-only names no revision a draft is at, so
+      // nothing it calls runs, even when it is the draft as it is now.
+      revision: version === undefined ? draft.revision : readOnlyRevision,
       screens,
       screen: built.screen,
       artifact: built.artifact,
