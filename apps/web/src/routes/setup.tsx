@@ -408,13 +408,14 @@ export const Route = createFileRoute("/setup")({
   },
   loader: async ({ context: { core } }) =>
     await loadFromCore(core, async (session) => {
-      const [view, documents, gate, company] = await Promise.all([
+      const [view, links, documents, gate, company] = await Promise.all([
         session.onboarding.view(),
+        session.onboarding.links(),
         session.onboarding.documents(),
         session.onboardingGate.view(),
         companyOf(async () => await session.organization.get()),
       ]);
-      return { view, documents, gate, company };
+      return { view, links, documents, gate, company };
     }),
   component: Setup,
 });

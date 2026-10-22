@@ -8,6 +8,7 @@ import m0005 from './0005_stephen_setup.sql';
 import m0006 from './0006_told.sql';
 import m0007 from './0007_mail_outbox.sql';
 import m0008 from './0008_voice_use.sql';
+import m0009 from './0009_links_taken.sql';
 
   export default {
     journal,
@@ -20,7 +21,8 @@ m0004,
 m0005,
 m0006,
 m0007,
-m0008
+m0008,
+m0009
     }
   }
   

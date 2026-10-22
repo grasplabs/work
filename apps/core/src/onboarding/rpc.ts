@@ -1,12 +1,14 @@
 import { dayOf } from "@grasp-os/shared/admin/org-record";
 import { actorOf } from "@grasp-os/shared/audit";
 import {
+  linksTakenSchema,
   onboardingErrors,
   planSchema,
   programmeWeeks,
   rosterSchema,
 } from "@grasp-os/shared/onboarding";
 import type {
+  LinkToSend,
   OnboardingApi,
   OnboardingView,
   PlanInput,
@@ -37,7 +39,9 @@ import { summaryOf } from "./summary.ts";
 
 // The onboarding over `/rpc`. The company's admin (and Grasp's staff,
 // whose access is the admin role) gives the store who works where and the
-// plan, and reads back numbers per team, never anyone's words. What only
+// plan, and reads back numbers per team, never anyone's words; and takes
+// everyone's own link, to send themselves as well (the threat model's L3:
+// a link opens on the first device only, whoever holds it). What only
 // Grasp's staff do is in staff-rpc.ts. The admin also shares documents,
 // each read at once (documents.ts). Everything that comes in is checked
 // against the shared schemas before the store sees it. Its programme
@@ -121,6 +125,25 @@ export class OnboardingRpc extends CoreRpcTarget implements OnboardingApi {
         throw onboardingErrors.create("onboarding.no_roster");
       }
       return await store.savePlan(parsed, actorOf(person));
+    });
+  }
+
+  async links(): Promise<LinkToSend[]> {
+    return await withPerson(this.#check, async (person) => {
+      requireAdmin(person);
+      return await onboardingStore(this.#env).linksToSend();
+    });
+  }
+
+  async linksTaken(people: string[]): Promise<void> {
+    await withPerson(this.#check, async (person) => {
+      requireAdmin(person);
+      const parsed = onboardingErrors.parse(
+        "onboarding.invalid",
+        linksTakenSchema,
+        people
+      );
+      await onboardingStore(this.#env).linksTaken(parsed, actorOf(person));
     });
   }
 

@@ -1205,6 +1205,11 @@
   grid-template-columns: 8.5rem minmax(0, 1fr) 5rem;
 }
 
+/* Someone's link to send: their name and team, and its copy button. */
+@utility setup-link-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
 /* A document in the onboarding's list: its icon, its name and state, its button. */
 @utility document-row {
   grid-template-columns: 2.5rem minmax(0, 1fr) auto;

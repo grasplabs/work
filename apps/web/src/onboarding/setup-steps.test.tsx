@@ -27,6 +27,7 @@ const listening = (paused: boolean): string => {
     admin: "Ada",
     company: null,
     view: view(paused),
+    links: [],
     documents: [],
     gate: {
       open: false,
