@@ -570,6 +570,8 @@ export const shadcnComponents = {
       "PopoverTitle",
       "PopoverTrigger",
     ],
+    changes:
+      "The content is never taller than the room beside its anchor (`--available-height`) and scrolls, as the kit's menus and selects do.",
   },
   progress: {
     status: "supported",
