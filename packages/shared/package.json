@@ -66,6 +66,7 @@
     "./connect": "./src/connect.ts",
     "./connect-gateway": "./src/connect-gateway.ts",
     "./connect-names": "./src/connect-names.ts",
+    "./connector-attachments": "./src/connector-attachments.ts",
     "./dashboard": "./src/dashboard.ts",
     "./deadline": "./src/deadline.ts",
     "./decisions": "./src/decisions.ts",

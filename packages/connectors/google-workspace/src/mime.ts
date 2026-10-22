@@ -57,7 +57,51 @@ interface OutgoingMessage {
    * (`stampPattern`), never text a caller wrote, so it can't add headers.
    */
   stamp?: string | null;
+  /**
+   * Files to attach (GRA-887): the name and type of a run file, and its
+   * bytes. The name has no control, invisible-formatting or folder
+   * character and the type is one of a closed list (core checked both),
+   * and both are still encoded here, never joined into a header as they
+   * are.
+   */
+  attachments?: readonly {
+    name: string;
+    type: string;
+    bytes: Uint8Array;
+  }[];
 }
+
+/** A file name as an ASCII fallback: anything outside a safe set is `_`. */
+const asciiName = (name: string): string =>
+  name.replaceAll(/[^A-Za-z0-9._ -]/gu, "_");
+
+/** A file name as RFC 5987 percent-encodes a parameter value (UTF-8). */
+const encodedName = (name: string): string =>
+  encodeURIComponent(name).replaceAll(
+    /['()*]/gu,
+    (character) =>
+      `%${(character.codePointAt(0) ?? 0).toString(16).toUpperCase()}`
+  );
+
+/** One attachment as a MIME part: its headers, then its base64 content. */
+const attachmentPart = ({
+  name,
+  type,
+  bytes,
+}: {
+  name: string;
+  type: string;
+  bytes: Uint8Array;
+}): string[] => [
+  // The type is one of a closed list, with no parameter in it.
+  `Content-Type: ${type}`,
+  // RFC 2231: the name in UTF-8, percent-encoded, with a plain ASCII one
+  // for readers that don't read that.
+  `Content-Disposition: attachment; filename="${asciiName(name)}"; filename*=UTF-8''${encodedName(name)}`,
+  "Content-Transfer-Encoding: base64",
+  "",
+  folded(toBase64(bytes)),
+];
 
 /**
  * The message as Gmail's `raw` takes it: base64url of its bytes. Addresses
@@ -73,11 +117,39 @@ export const rawMessage = ({
   bcc,
   replyTo,
   stamp,
+  attachments = [],
 }: OutgoingMessage): string => {
   const addresses = (name: string, values: readonly string[]): string[] =>
     values.length === 0 ? [] : [`${name}: ${values.join(`,${crlf} `)}`];
   // Every line break in the body becomes CRLF, as RFC 5322 has it.
   const text = body.replaceAll(/\r\n|\r|\n/gu, crlf);
+  const textType = `text/${bodyType === "html" ? "html" : "plain"}; charset="UTF-8"`;
+  const textBody = folded(toBase64(new TextEncoder().encode(text)));
+  // A boundary no part can hold: every part's content is base64 or a
+  // header, so none has a line of `--` and `=_`.
+  const boundary = `=_grasp_${crypto.randomUUID()}`;
+  const content =
+    attachments.length === 0
+      ? [
+          `Content-Type: ${textType}`,
+          "Content-Transfer-Encoding: base64",
+          "",
+          textBody,
+        ]
+      : [
+          `Content-Type: multipart/mixed; boundary="${boundary}"`,
+          "",
+          `--${boundary}`,
+          `Content-Type: ${textType}`,
+          "Content-Transfer-Encoding: base64",
+          "",
+          textBody,
+          ...attachments.flatMap((attachment) => [
+            `--${boundary}`,
+            ...attachmentPart(attachment),
+          ]),
+          `--${boundary}--`,
+        ];
   const lines = [
     `From: ${from}`,
     ...addresses("To", to),
@@ -89,10 +161,7 @@ export const rawMessage = ({
       : []),
     subject === "" ? "Subject: " : `Subject: ${encodedWords(subject)}`,
     "MIME-Version: 1.0",
-    `Content-Type: text/${bodyType === "html" ? "html" : "plain"}; charset="UTF-8"`,
-    "Content-Transfer-Encoding: base64",
-    "",
-    folded(toBase64(new TextEncoder().encode(text))),
+    ...content,
   ];
   return toBase64Url(new TextEncoder().encode(lines.join(crlf)));
 };
