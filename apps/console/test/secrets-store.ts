@@ -79,6 +79,8 @@ export const useStoreSecrets = (tokens: {
     [env.STRIPE_RESTRICTED_KEY, ""],
     // Rooms' token likewise (test/admin-proposal.test.ts).
     [env.ROOMS_READ_TOKEN, ""],
+    // Empty too: the digest's tests set it (test/discord-digest.test.ts).
+    [env.DISCORD_DIGEST_WEBHOOK, ""],
   ];
   const stored: { admin: SecretsStoreAdmin; id: string }[] = [];
   beforeEach(async () => {
