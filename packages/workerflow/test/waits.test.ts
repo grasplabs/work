@@ -777,6 +777,24 @@ describe("waits raced or awaited together", () => {
     }
   );
 
+  it.each([
+    [true, 1],
+    [false, 0],
+  ])(
+    "make a call the definition reaches after I/O of its own, said busy (%s), before suspending beside a sleep",
+    async (busy, before) => {
+      const id = newId();
+      await workflow("busy-branch").create({ id, params: { busy } });
+
+      const { journal } = await suspendedOn("busy-branch", id, "nap");
+
+      // Said busy, the step runs before the run sleeps an hour; otherwise
+      // it is left to the next activation.
+      expect(effectsOf(id, "work")).toHaveLength(before);
+      expect(journal.activations).toHaveLength(1);
+    }
+  );
+
   it("pause a replay cut short at a sleep it already slept, rather than take the sleeps after it for a stray, and go on after resuming", async () => {
     const id = newId();
     await workflow("timer-naps").create({ id });

@@ -308,6 +308,25 @@ export interface WorkflowStep {
     name: string,
     options: { type: string; timeout?: WorkflowDuration }
   ) => Promise<WorkflowStepEvent<Payload>>;
+  /**
+   * Workerflow's own, beyond Cloudflare's API: says the definition is at
+   * work outside the step API, and will make a call of it, until the
+   * function returned is called (once is enough; later calls do nothing).
+   * Meanwhile the run doesn't suspend, though every call it has out is
+   * waiting.
+   *
+   * The run suspends once every call still out waits (a sleep, an event
+   * wait, a step's retry) and the definition has gone quiet: a macrotask
+   * after its last call landed or parked. A call it makes only after I/O
+   * of its own (a query, a round trip to another isolate) comes after
+   * that, and would run in a later activation, after the run slept for
+   * the others: late enough to lose a race to a sibling due later. A host
+   * that does such I/O between its caller asking for a step and calling
+   * the step API marks it busy from when the ask arrives until the call is
+   * made, so latency can't decide what the run does. Called from a step's
+   * callback, it changes nothing: that step is out.
+   */
+  busy: () => () => void;
 }
 
 /** A workflow: what the host resolves a run's definition to. */

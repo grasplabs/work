@@ -26,7 +26,9 @@
 // A sibling it reaches only after a timer or I/O of its own (say `await
 // scheduler.wait(1)` before a `do`) isn't seen in time: the run suspends
 // without it, until the earliest parked step, and the next activation
-// runs it then. Such a step runs late, never early. Likewise a parked
+// runs it then. Such a step runs late, never early, unless the
+// definition says it is at work towards it (`step.busy`): then the
+// activation waits for it. Likewise a parked
 // step's retry may wait past its time for siblings still out to land:
 // the step out is never cut off for it.
 //
@@ -687,6 +689,12 @@ export class Activation {
    */
   readonly #parkedEventWaits: { eventType: string; deadline: number }[] = [];
   /**
+   * The definition's work outside the step API that it said will reach
+   * the step API again (`step.busy`), not yet ended: the activation
+   * doesn't suspend while there is any.
+   */
+  #busy = 0;
+  /**
    * `do` calls of this activation that haven't returned: out at their
    * effect, parked, or handing their outcome back to a continuation that
    * may reach another step. The activation suspends only once the parked
@@ -785,6 +793,28 @@ export class Activation {
         await this.#toAuthor(
           async () => await this.#waitForEvent<Payload>(name, options)
         ),
+      busy: () => this.#busyUntil(),
+    };
+  }
+
+  /**
+   * Counts the definition busy outside the step API until the function
+   * returned is called (once; later calls do nothing): the activation
+   * doesn't suspend meanwhile, so a call it reaches only after I/O of its
+   * own (a host's query, a sandbox's round trip) is made in this
+   * activation, as one reached through microtasks is. A quiet check for
+   * suspending follows its end.
+   */
+  #busyUntil(): () => void {
+    this.#busy += 1;
+    let ended = false;
+    return () => {
+      if (ended) {
+        return;
+      }
+      ended = true;
+      this.#busy -= 1;
+      this.#checkWhenQuiet();
     };
   }
 
@@ -1734,6 +1764,7 @@ export class Activation {
     const quiet =
       !this.#over &&
       this.#parkedCount + this.#parkedWaits > 0 &&
+      this.#busy === 0 &&
       this.#callsOut === this.#parkedCount &&
       this.#waitsOut === this.#parkedWaits;
     if (!quiet) {

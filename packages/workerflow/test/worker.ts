@@ -1138,6 +1138,31 @@ export const definitions: Record<string, WorkflowDefinition> = {
       return both;
     },
   },
+  // A sleep parked an hour away beside a branch that reaches its step
+  // only after 300 ms of I/O of its own, said busy (`busy`) or not.
+  "busy-branch": {
+    run: async (event, step) => {
+      const { instanceId } = event;
+      const busy = paramOf(event.payload, "busy") === true;
+      const work = async (): Promise<string> => {
+        const done = busy ? step.busy() : undefined;
+        await lag(300);
+        const made = step.do("work", async (context) => {
+          await effect(instanceId, "work", context);
+          return "work";
+        });
+        done?.();
+        // Once is enough.
+        done?.();
+        return await made;
+      };
+      const [, worked] = await Promise.all([
+        step.sleep("nap", "1 hour"),
+        work(),
+      ]);
+      return worked;
+    },
+  },
   // A wait raced against a sleep, inside the author's own handlers.
   races: {
     run: async (event, step) => {
