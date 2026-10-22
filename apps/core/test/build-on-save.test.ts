@@ -12,6 +12,7 @@ import {
   buildWorkflows,
   screenCode,
 } from "../src/screens.ts";
+import { holdingBuilds } from "./build-holds.ts";
 import { mockIdp } from "./idp.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
 import { workflowFiles } from "./workflow-apps.ts";
@@ -198,21 +199,8 @@ export class App {}
     const files = screen(crypto.randomUUID());
     const held = Promise.withResolvers<boolean>();
     // The build cache, which answers only once the test lets it: the
-    // build waits on it before it starts.
-    const holding = new Proxy(env.FILES, {
-      get: (target, property) => {
-        const value: unknown = Reflect.get(target, property);
-        if (property === "get" && typeof value === "function") {
-          return async (...args: unknown[]): Promise<unknown> => {
-            await held.promise;
-            return Reflect.apply(value, target, args);
-          };
-        }
-        return typeof value === "function"
-          ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
-          : value;
-      },
-    });
+    // build waits on its receipt before it starts.
+    const holding = holdingBuilds(env.DB, held.promise);
 
     // The compiler, counting the builds that start it.
     let built = 0;
@@ -228,7 +216,7 @@ export class App {}
     };
 
     const builds = await buildOnSave(
-      { ...env, FILES: holding, BUILD_WAIT_MS: "50" },
+      { ...env, DB: holding, BUILD_WAIT_MS: "50" },
       {
         app: appIdSchema.parse(crypto.randomUUID()),
         version: 1,
@@ -268,27 +256,14 @@ export class App {}
     const app = await newApp(builder);
     const by = await builder.api.whoami();
     const held = Promise.withResolvers<boolean>();
-    // The build cache answers reads only once the test lets it: every
-    // build waits on it, a second one too.
-    const holding = new Proxy(env.FILES, {
-      get: (target, property) => {
-        const value: unknown = Reflect.get(target, property);
-        if (property === "get" && typeof value === "function") {
-          return async (...args: unknown[]): Promise<unknown> => {
-            await held.promise;
-            return Reflect.apply(value, target, args);
-          };
-        }
-        return typeof value === "function"
-          ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
-          : value;
-      },
-    });
+    // The build cache answers only once the test lets it: every build
+    // waits on its receipt, a second one too.
+    const holding = holdingBuilds(env.DB, held.promise);
 
     // Answers while the cache is still held: a second build would wait on
     // it, and the commit with it, until the test timed out.
     const committed = await commitFiles(
-      { ...env, FILES: holding, BUILD_WAIT_MS: "50" },
+      { ...env, DB: holding, BUILD_WAIT_MS: "50" },
       by,
       app,
       screen(crypto.randomUUID()),
@@ -319,26 +294,13 @@ export class App {}
     const held = Promise.withResolvers<boolean>();
     // Screen builds answer only once the test lets them: making the
     // version current reads its files and workflows, never a screen build.
-    const holding = new Proxy(env.FILES, {
-      get: (target, property) => {
-        const value: unknown = Reflect.get(target, property);
-        if (property === "get" && typeof value === "function") {
-          return async (key: string, ...rest: unknown[]): Promise<unknown> => {
-            if (key.startsWith("screen-builds/")) {
-              await held.promise;
-            }
-            return Reflect.apply(value, target, [key, ...rest]);
-          };
-        }
-        return typeof value === "function"
-          ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
-          : value;
-      },
-    });
+    const holding = holdingBuilds(env.DB, held.promise, (key) =>
+      key.startsWith("screen-builds/")
+    );
 
     // Answers while screen builds are still held.
     const made = await setCurrentVersion(
-      { ...env, FILES: holding },
+      { ...env, DB: holding },
       by,
       app,
       version
@@ -351,25 +313,12 @@ export class App {}
   it("answers a screen whose build doesn't finish within the build wait as still building, rather than wait on", async () => {
     const files = screen(crypto.randomUUID());
     const held = Promise.withResolvers<boolean>();
-    const holding = new Proxy(env.FILES, {
-      get: (target, property) => {
-        const value: unknown = Reflect.get(target, property);
-        if (property === "get" && typeof value === "function") {
-          return async (...args: unknown[]): Promise<unknown> => {
-            await held.promise;
-            return Reflect.apply(value, target, args);
-          };
-        }
-        return typeof value === "function"
-          ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
-          : value;
-      },
-    });
+    const holding = holdingBuilds(env.DB, held.promise);
 
     // What an open, a review or a preview builds through.
     const slow = await outcome(
       screenCode(
-        { ...env, FILES: holding, BUILD_WAIT_MS: "50" },
+        { ...env, DB: holding, BUILD_WAIT_MS: "50" },
         files,
         "desk",
         1,
