@@ -243,6 +243,15 @@ export const triedOnceIn = (sql: SqlStorage): TriedOnceMarks => ({
   markUnstarted: (key, attempt) => {
     writeTriedOnce(sql, key, attempt, { unstarted: 1 });
   },
+  markStarted: (key, attempt) => {
+    if (hasTriedOnce(sql)) {
+      sql.exec(
+        `UPDATE ${triedOnceTable} SET unstarted = 0 WHERE key = ? AND attempt = ?`,
+        key,
+        attempt
+      );
+    }
+  },
   unstarted: (key, attempt) => triedOnceRow(sql, key, attempt)?.unstarted === 1,
   keepFailure: (key, attempt, error) => {
     writeTriedOnce(sql, key, attempt, { failure: JSON.stringify(error) });

@@ -472,6 +472,9 @@ const keptMarks = (): TriedOnceMarks => {
     markUnstarted: (key, attempt) => {
       unstarted.add(`${attempt}:${key}`);
     },
+    markStarted: (key, attempt) => {
+      unstarted.delete(`${attempt}:${key}`);
+    },
     unstarted: (key, attempt) => unstarted.has(`${attempt}:${key}`),
     keepFailure: (key, attempt, error) => {
       failures.set(`${attempt}:${key}`, error);
