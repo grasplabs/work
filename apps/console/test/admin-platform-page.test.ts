@@ -124,6 +124,10 @@ describe("the admin's Platform page", () => {
         companies.indexOf("Laggard") < companies.indexOf("Earlyco") &&
         companies.indexOf("Laggard") < companies.indexOf("Firstco"),
       opensSetup: html.includes(`href="/admin/organizations/${first}/setup"`),
+      // Beside Platform in the sidebar: the laggard, and the waiting rollout.
+      sidebarCount: text.includes(
+        "1 company needs a look; a rollout waits for approval"
+      ),
     }).toMatchObject({
       status: 200,
       release: true,
@@ -134,6 +138,7 @@ describe("the admin's Platform page", () => {
       laggardBehind: true,
       laggardFirst: true,
       opensSetup: true,
+      sidebarCount: true,
     });
     const [a, b, c] = [
       spread.indexOf(newest.id),

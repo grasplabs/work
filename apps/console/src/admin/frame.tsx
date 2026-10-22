@@ -9,10 +9,11 @@
  *
  * Beside each organization, as the prototype has it, how many things need
  * Grasp there, as the admin's model works it out of what its core answered
- * (src/admin/views.ts). Not yet here: how many integrations wait on Grasp
- * and how many companies' platforms need a look, for the console has no
- * source for them yet; those places show no number rather than a made-up
- * one.
+ * (src/admin/views.ts). Beside Platform, how many companies' platforms
+ * need a look and a rollout waiting for approval, as the console recorded
+ * them (`platformCounts`). Not yet here: how many integrations wait on
+ * Grasp, for the console has no source for them yet; that place shows no
+ * number rather than a made-up one.
  */
 import {
   Sidebar,
@@ -54,6 +55,7 @@ import type { ComponentType, SVGProps } from "react";
 
 import type { ClientAdmin } from "../clients/admin.ts";
 import { GraspMark } from "./grasp-mark.tsx";
+import type { PlatformCounts } from "./platform.ts";
 import { organizationsOf, unreadWords } from "./views.ts";
 import type { Organization } from "./views.ts";
 
@@ -115,7 +117,38 @@ const tooltipOf = (
   return `${name}: ${needs} ${needs === 1 ? "thing needs" : "things need"} Grasp`;
 };
 
-const PlaceItem = ({ place }: { place: Place }) => {
+/** What a place says beside its name: a count, and what it counts in words. */
+interface PlaceBadge {
+  count: number;
+  words: string;
+}
+
+/** Platform's badge: companies that need a look, and a rollout that waits, as one count. */
+const platformBadge = ({
+  needLook,
+  waiting,
+}: PlatformCounts): PlaceBadge | null => {
+  const count = needLook + (waiting ? 1 : 0);
+  if (count === 0) {
+    return null;
+  }
+  const look =
+    needLook === 0
+      ? []
+      : [
+          `${needLook} ${needLook === 1 ? "company needs" : "companies need"} a look`,
+        ];
+  const waits = waiting ? ["a rollout waits for approval"] : [];
+  return { count, words: [...look, ...waits].join("; ") };
+};
+
+const PlaceItem = ({
+  place,
+  badge = null,
+}: {
+  place: Place;
+  badge?: PlaceBadge | null;
+}) => {
   const matchRoute = useMatchRoute();
   const { to, label, icon: Icon } = place;
   // The overview is only itself; any other place holds the pages under it.
@@ -125,11 +158,18 @@ const PlaceItem = ({ place }: { place: Place }) => {
       <SidebarMenuButton
         isActive={active}
         render={<Link to={to} />}
-        tooltip={label}
+        // The folded sidebar hides the badge, so its tooltip says the count.
+        tooltip={badge === null ? label : `${label}: ${badge.words}`}
       >
         <Icon />
         <span>{label}</span>
       </SidebarMenuButton>
+      {badge === null ? null : (
+        <SidebarMenuBadge>
+          {badge.count}
+          <span className="sr-only">{`: ${badge.words}`}</span>
+        </SidebarMenuBadge>
+      )}
     </SidebarMenuItem>
   );
 };
@@ -189,7 +229,13 @@ const OrganizationItem = ({ organization }: { organization: Organization }) => {
   );
 };
 
-const AdminSidebar = ({ admins }: { admins: readonly ClientAdmin[] }) => {
+const AdminSidebar = ({
+  admins,
+  platform,
+}: {
+  admins: readonly ClientAdmin[];
+  platform: PlatformCounts;
+}) => {
   const router = useRouter();
   const organizations = organizationsOf(admins);
   const { setOpenMobile } = useSidebar();
@@ -231,7 +277,15 @@ const AdminSidebar = ({ admins }: { admins: readonly ClientAdmin[] }) => {
             <nav aria-label="Admin">
               <SidebarMenu>
                 {places.map((place) => (
-                  <PlaceItem key={place.to} place={place} />
+                  <PlaceItem
+                    badge={
+                      place.to === "/admin/platform"
+                        ? platformBadge(platform)
+                        : null
+                    }
+                    key={place.to}
+                    place={place}
+                  />
                 ))}
               </SidebarMenu>
             </nav>
@@ -274,10 +328,16 @@ const AdminSidebar = ({ admins }: { admins: readonly ClientAdmin[] }) => {
  * The admin's frame around its pages: its sidebar beside the page, which
  * scrolls inside it so its bar stays in view, as the platform's frame does.
  */
-export const AdminFrame = ({ admins }: { admins: readonly ClientAdmin[] }) => (
+export const AdminFrame = ({
+  admins,
+  platform,
+}: {
+  admins: readonly ClientAdmin[];
+  platform: PlatformCounts;
+}) => (
   <TooltipProvider>
     <SidebarProvider className="h-svh">
-      <AdminSidebar admins={admins} />
+      <AdminSidebar admins={admins} platform={platform} />
       <SidebarInset className="min-h-0 min-w-0 overflow-y-auto">
         <Outlet />
       </SidebarInset>
