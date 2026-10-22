@@ -17,6 +17,7 @@ import { onboardingSummaryPath } from "@grasp-os/shared/onboarding-summary";
 import { platformUpdatePath } from "@grasp-os/shared/platform-change";
 import { quotaPolicyReportPath } from "@grasp-os/shared/quota-policy-report";
 import { screenFramePath } from "@grasp-os/shared/screens";
+import { speechPath } from "@grasp-os/shared/voice";
 
 import { adminSnapshotResponse } from "./admin-snapshot.ts";
 import { appFileResponse, fileRouteOf } from "./app-file-route.ts";
@@ -44,6 +45,7 @@ import { originalResponse } from "./knowledge/uploads.ts";
 import { mailIngressResponse } from "./mail-ingress.ts";
 import { interviewTurnResponse } from "./onboarding/interview.ts";
 import { interviewResponse } from "./onboarding/links.ts";
+import { speechResponse } from "./onboarding/speech.ts";
 import { onboardingSummaryResponse } from "./onboarding/summary.ts";
 import {
   packageArtifactResponse,
@@ -130,7 +132,9 @@ const originalPath = /^\/api\/knowledge\/uploads\/(?<id>[\w-]+)\/original$/u;
 /**
  * The pages a link opens, which have no session: the link's secret in the
  * body is all they have. A guest's (src/guests.ts), and someone's own
- * interview, with the device's key too (src/onboarding/links.ts).
+ * interview, with the device's key too (src/onboarding/links.ts), whose
+ * lines are said at the speech endpoint, also for an admin signed in
+ * (src/onboarding/speech.ts).
  */
 const linkResponse = async (
   pathname: string,
@@ -147,6 +151,9 @@ const linkResponse = async (
   }
   if (pathname === interviewTurnPath) {
     return await interviewTurnResponse(request, env, requestId, ctx);
+  }
+  if (pathname === speechPath) {
+    return await speechResponse(request, env, requestId);
   }
   return undefined;
 };

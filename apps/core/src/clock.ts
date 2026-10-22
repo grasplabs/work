@@ -29,6 +29,7 @@ import { sweepScreenFrames } from "./screen-frame.ts";
 import { sweepScreenSubmissions } from "./screen-submissions.ts";
 import { sweepBuilds } from "./screens.ts";
 import { sweepPreviewStores } from "./sealed-previews.ts";
+import { sweepSpokenLines } from "./speech-cache.ts";
 import { sweepStatistics } from "./statistics.ts";
 import { sweepCandidateRuns } from "./workflows/candidate-runs.ts";
 import { pumpConnectorEvents } from "./workflows/connector-events.ts";
@@ -157,6 +158,11 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     run: sweepPreviewStores,
   },
   { name: "screens.builds", period: "quarterHour", run: sweepBuilds },
+  {
+    name: "speech.spoken_lines",
+    period: "quarterHour",
+    run: sweepSpokenLines,
+  },
   {
     name: "packages.files",
     period: "quarterHour",
