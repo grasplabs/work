@@ -1,4 +1,5 @@
 import type { ModelEffort, ModelEfforts } from "@grasp-os/shared/models";
+import { isAdmin } from "@grasp-os/shared/roles";
 import {
   useNavigate,
   useRouteContext,
@@ -146,6 +147,8 @@ export const useAsk = (
       onEffort: (chosen: ModelEffort) => {
         choose({ model, effort: chosen });
       },
+      // Only an admin opens the models' settings, where providers are added.
+      addProvider: isAdmin(identity.role),
       busy,
       failure,
       onSend: () => {
