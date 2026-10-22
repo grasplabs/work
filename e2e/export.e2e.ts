@@ -6,10 +6,11 @@ import type { Download, Page } from "@playwright/test";
 import { test } from "./csp.ts";
 import { apiOf, peopleIn } from "./people.ts";
 
-// Every export offers Markdown or PDF (export/export-menu.tsx): a document
-// and a chat each download as Markdown, and each prints as a page of their
-// own, under the app's Content Security Policy (the `test` here fails on
-// any violation).
+// Every export offers Markdown or PDF (export/export-menu.tsx, and the
+// open chat's menu, chat/chat-more.tsx): a document and a chat each
+// download as Markdown, and each prints as a page of their own, under
+// the app's Content Security Policy (the `test` here fails on any
+// violation).
 
 const pageRead = { timeout: 15_000 };
 
@@ -21,6 +22,22 @@ const choose = async (
 ): Promise<void> => {
   await page.getByRole("button", { name: label, exact: true }).click();
   await page.getByRole("menuitem", { name: format }).click();
+};
+
+/** Chooses `format` from Download in the open chat's menu, in the header. */
+const downloadChat = async (
+  page: Page,
+  format: "Markdown (.md)" | "PDF"
+): Promise<void> => {
+  await page.getByRole("button", { name: "More for this chat" }).click();
+  // By the keyboard: the submenu also opens as the pointer rests on its
+  // item, so a click there may close it again, and the test would race.
+  await page.getByRole("menuitem", { name: "Download" }).focus();
+  await page.keyboard.press("ArrowRight");
+  const item = page.getByRole("menuitem", { name: format });
+  await item.focus();
+  await expect(item).toBeFocused();
+  await page.keyboard.press("Enter");
 };
 
 const textOf = async (download: Download): Promise<string> =>
@@ -140,7 +157,7 @@ test("a document and a chat each export as Markdown and as a page to print", asy
   // stand-in title: the export is named once the chat's own title is in.
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(question);
   const chat = page.waitForEvent("download");
-  await choose(page, "Export this chat", "Markdown (.md)");
+  await downloadChat(page, "Markdown (.md)");
   const chatFile = await chat;
   // Named after the chat, whose title is its first question here.
   expect(chatFile.suggestedFilename()).toBe(`How-long-is-leave-${tag}.md`);
@@ -149,7 +166,7 @@ test("a document and a chat each export as Markdown and as a page to print", asy
   expect(markdown).toContain(`**You:**\n\n${question}`);
 
   await countPrints(page);
-  await choose(page, "Export this chat", "PDF");
+  await downloadChat(page, "PDF");
   await expect
     .poll(async () => await page.evaluate(() => window.printed))
     .toBe(1);

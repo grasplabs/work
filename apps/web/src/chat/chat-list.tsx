@@ -55,8 +55,9 @@ import {
   usePageSidebarFold,
 } from "../frame/page-sidebar.tsx";
 import { useCoreAction } from "../use-core-action.ts";
-import { activeChat, setActiveChat } from "./active-chat.ts";
+import { setActiveChat } from "./active-chat.ts";
 import { chatsByProject } from "./chat-projects.ts";
+import { DeleteChatDialog } from "./delete-chat-dialog.tsx";
 import { ProjectDialog } from "./project-dialog.tsx";
 
 // The person's chats beside the open one, in the page sidebar
@@ -213,71 +214,6 @@ const useClickOrDoubleClick = (
       onDoubleClick();
     },
   };
-};
-
-/** Deletes a chat, once the person confirms. */
-const DeleteDialog = ({
-  chat,
-  active,
-  open,
-  onOpenChange,
-}: {
-  chat: ChatSummary;
-  /** Whether it is the open chat: then the page leaves it for a new one. */
-  active: boolean;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-}) => {
-  const router = useRouter();
-  const navigate = useNavigate();
-  const { busy, failure, run } = useCoreAction();
-  const { title } = chat;
-  const remove = async (): Promise<void> => {
-    const removed = await run(async (session) => {
-      await session.chats.remove(chat.id);
-      return true;
-    });
-    if (removed === true) {
-      onOpenChange(false);
-      // A deleted chat is nobody's open chat any more.
-      if (activeChat() === chat.id) {
-        setActiveChat(undefined);
-      }
-      if (active) {
-        await navigate({ to: "/", search: {} });
-      }
-      await router.invalidate();
-    }
-  };
-  return (
-    <Dialog onOpenChange={onOpenChange} open={open}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>
-            <Trans>Delete “{title}”?</Trans>
-          </DialogTitle>
-        </DialogHeader>
-        <p className="text-sm">
-          <Trans>
-            Its messages are deleted for good, and every change its agent holds
-            for you is rejected. What the agent did stays in the audit log.
-          </Trans>
-        </p>
-        <ErrorText>{failure}</ErrorText>
-        <DialogFooter showCloseButton>
-          <Button
-            disabled={busy}
-            onClick={() => {
-              void remove();
-            }}
-            variant="destructive"
-          >
-            <Trans>Delete</Trans>
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
 };
 
 /**
@@ -530,7 +466,7 @@ const ChatItem = ({
       )}
       <ErrorText>{failure}</ErrorText>
       {deleting ? (
-        <DeleteDialog
+        <DeleteChatDialog
           active={active}
           chat={chat}
           onOpenChange={setDeleting}
