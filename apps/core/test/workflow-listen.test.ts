@@ -550,6 +550,28 @@ describe("listen tasks", { timeout: 120_000 }, () => {
       },
     ]);
   });
+
+  it("aren't lowered with a filter on an attribute the inbox doesn't keep", async () => {
+    const admin = await person("admin");
+    const { version } = await listening(admin, [
+      listen("await-job", {
+        one: {
+          with: { type: completed, dataschema: "https://example.com/job" },
+        },
+      }),
+      notes,
+    ]);
+
+    expect(
+      version.build.executable ? [] : version.build.unsupported
+    ).toStrictEqual([
+      {
+        pointer: "/do/0/await-job/listen/to/one/with/dataschema",
+        taskId: "await-job",
+        feature: "listen:dataschema",
+      },
+    ]);
+  });
 });
 
 /** A host of a run of `workflowId`'s version 1, its waits `waits`. */

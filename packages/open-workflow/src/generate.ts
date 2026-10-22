@@ -1644,6 +1644,14 @@ const lowerSleep = (
   );
 };
 
+/** The event attributes a run's inbox keeps, which a listen's filter may match. */
+const matchableAttributes = new Set([
+  "id",
+  "source",
+  "subject",
+  "datacontenttype",
+]);
+
 /**
  * The filters of listen task `item`, sealed: `undefined` once one was
  * refused. A filter's `correlate` (an expression over each event's own
@@ -1690,6 +1698,23 @@ const filtersOf = (
       throw new TypeError(
         `The checked workflow's filter at ${pointer} has no type`
       );
+    }
+    // Only what the run's inbox keeps of each event can match: its id,
+    // source, subject and content type (core's run-events.ts). A filter on
+    // anything else (`dataschema`) would never match, so isn't lowered.
+    const unmatchable = Object.keys(rest).filter(
+      (name) => !matchableAttributes.has(name)
+    );
+    if (unmatchable.length > 0) {
+      for (const name of unmatchable) {
+        emitter.refusals.add(
+          pointerJoin(withPointer, name),
+          `listen:${name}`,
+          item.id
+        );
+      }
+      refused = true;
+      continue;
     }
     const attributes = Object.entries(rest).map(
       ([name, value]) =>
