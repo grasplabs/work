@@ -22,7 +22,7 @@ import { consoleSigned } from "./console-signed.ts";
 import { errorResponse } from "./errors.ts";
 import { membersOf } from "./members.ts";
 import { gateView, staffAccessEnded } from "./onboarding/gate.ts";
-import { closesOn } from "./onboarding/rules.ts";
+import { closesOn, talkingMs } from "./onboarding/rules.ts";
 import { onboardingStore } from "./onboarding/store.ts";
 import type { AdminInterviewFacts } from "./onboarding/store.ts";
 import { readOrganization } from "./organization.ts";
@@ -50,9 +50,6 @@ import { readOrganization } from "./organization.ts";
 //   refused too, until the console opens a new staff window. It names
 //   people and their emails, and ending staff access is the company's
 //   one way to say no.
-
-/** How long after its last save an interview still counts as going on. */
-const talkingMs = 15 * 60 * 1000;
 
 /**
  * Where someone stands, as the prototype's admin says it

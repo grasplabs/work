@@ -67,10 +67,12 @@ import { drainObjectOutbox } from "../audit-outbox.ts";
 import { migrateOnWake } from "../db/migrate.ts";
 import migrations from "../db/onboarding/migrations/migrations.js";
 import {
+  answerWaits,
   auditOutbox,
   countedPeople,
   events,
   interviewStates,
+  interviewTexts,
   interviews,
   linkCodes,
   documents,
@@ -312,6 +314,9 @@ const logWhere = (filter: LogFilter, about: string[] | undefined) =>
       : eq(sql`substr(${events.at}, 1, 10)`, filter.day)
   );
 
+/** The waits for his voice are kept to the tenth of a second, rounded up. */
+const waitStepMs = 100;
+
 /** A count as given, when it is one: a number from nothing up. */
 const counted = (value: number | undefined): number =>
   typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
@@ -471,6 +476,10 @@ export class Onboarding extends DurableObject<Env> {
         this.#db
           .delete(interviewStates)
           .where(eq(interviewStates.person, person))
+          .run();
+        this.#db
+          .delete(interviewTexts)
+          .where(eq(interviewTexts.person, person))
           .run();
       }
       this.#changed(by, "onboarding.roster.saved", {
@@ -885,6 +894,70 @@ export class Onboarding extends DurableObject<Env> {
       .from(usage)
       .orderBy(asc(usage.day), asc(usage.purpose), asc(usage.model))
       .all();
+  }
+
+  /**
+   * Notes what one turn of an interview ran on, for the staff's numbers:
+   * the text that spoke, kept with the interview of the link's person,
+   * and how long they waited for his voice the answer before, when their
+   * page measured it, kept by day alone. The turn checked the link and
+   * the device first (`turnContext`).
+   */
+  turnRan(
+    secretMark: string,
+    ran: Omit<typeof interviewTexts.$inferInsert, "person">,
+    waited?: number,
+    at: string = new Date().toISOString()
+  ): void {
+    const [code] = this.#db
+      .select({ person: linkCodes.person })
+      .from(linkCodes)
+      .where(eq(linkCodes.mark, secretMark))
+      .all();
+    this.ctx.storage.transactionSync(() => {
+      if (code !== undefined) {
+        this.#db
+          .insert(interviewTexts)
+          .values({ person: code.person, ...ran })
+          .onConflictDoUpdate({ target: interviewTexts.person, set: ran })
+          .run();
+      }
+      if (waited !== undefined) {
+        this.#db
+          .insert(answerWaits)
+          .values({
+            day: dayOf(at),
+            upTo: Math.ceil(waited / waitStepMs) * waitStepMs,
+            answers: 1,
+          })
+          .onConflictDoUpdate({
+            target: [answerWaits.day, answerWaits.upTo],
+            set: { answers: sql`${answerWaits.answers} + 1` },
+          })
+          .run();
+      }
+    });
+  }
+
+  /**
+   * What the staff's numbers on Stephen and Claire are made from: each
+   * interview as numbers (`adminFacts`), the text each ran on, and the
+   * waits for his voice by day. Never anything that was said.
+   */
+  interviewerFacts(): {
+    interviews: AdminInterviewFacts[];
+    texts: (typeof interviewTexts.$inferSelect)[];
+    waits: (typeof answerWaits.$inferSelect)[];
+  } {
+    return {
+      interviews: this.adminFacts().interviews,
+      texts: this.#db.select().from(interviewTexts).all(),
+      waits: this.#db
+        .select()
+        .from(answerWaits)
+        .orderBy(asc(answerWaits.day), asc(answerWaits.upTo))
+        .all(),
+    };
   }
 
   /** Where the agreements stand, as staff last said; none before they did. */
@@ -1551,6 +1624,10 @@ export class Onboarding extends DurableObject<Env> {
     this.#db
       .delete(interviewStates)
       .where(eq(interviewStates.person, person))
+      .run();
+    this.#db
+      .delete(interviewTexts)
+      .where(eq(interviewTexts.person, person))
       .run();
     this.#noted(person, what, now, by);
   }

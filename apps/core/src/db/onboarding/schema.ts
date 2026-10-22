@@ -241,6 +241,34 @@ export const usage = sqliteTable(
 );
 
 /**
+ * The text each interview ran on (onboarding/interviewer-text.ts), as its
+ * last turn had it: the text's mark, who held it, and in which language.
+ * Nothing that was said. Goes with the interview.
+ */
+export const interviewTexts = sqliteTable("interview_texts", {
+  person: text().primaryKey(),
+  mark: text().notNull(),
+  interviewer: text({ enum: ["stephen", "claire"] }).notNull(),
+  locale: text().notNull(),
+});
+
+/**
+ * How long people waited for Stephen's voice, from the end of what they
+ * said to his first sound, as their page measured it: by day, how many
+ * answers took up to each tenth of a second (`upTo`, in ms). Whose
+ * answers they were isn't kept.
+ */
+export const answerWaits = sqliteTable(
+  "answer_waits",
+  {
+    day: text().notNull(),
+    upTo: integer("up_to").notNull(),
+    answers: integer().notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.day, table.upTo] })]
+);
+
+/**
  * Audit events of changes here, each stored in the same transaction as its
  * change, until the object has delivered it to the audit log
  * (`drainObjectOutbox` in audit-outbox.ts).

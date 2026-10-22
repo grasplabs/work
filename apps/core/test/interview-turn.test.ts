@@ -12,6 +12,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
+import { interviewerText } from "../src/onboarding/interviewer-text.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { fakeGateway } from "./ai-gateway.ts";
 import type { GatewayReply, GatewayRequest } from "./ai-gateway.ts";
@@ -399,6 +400,41 @@ describe("an interview turn", { timeout: 60_000 }, () => {
       calls: after.calls - before.calls,
       read: after.tokensIn - before.tokensIn,
     }).toStrictEqual({ cutOff: true, calls: 1, read: 1500 });
+  });
+
+  it("keeps the text a turn ran on, and how long they waited for the voice, for Grasp's staff", async () => {
+    const link = await opened();
+    await answering(
+      [
+        line("Okay. And who checks it after you?"),
+        notes({ facts: [], changes: [] }),
+      ],
+      async () =>
+        await eventsOf(
+          await ask(link, {
+            event: "answer",
+            interviewer: "claire",
+            locale: "de",
+            lines: [{ from: "person", text: "Ich prüfe sie." }],
+            facts: [],
+            phase: "steps",
+            minutes: 5,
+            waited: 1340,
+          })
+        )
+    );
+    const { mark } = await interviewerText("claire", "own", "de");
+    const { texts, waits } = await onboardingStore(env).interviewerFacts();
+    const today = isoDay(Date.now());
+    expect({
+      text: texts
+        .filter((text) => text.mark === mark)
+        .map(({ interviewer, locale }) => ({ interviewer, locale })),
+      waits: waits.filter(({ day }) => day === today),
+    }).toStrictEqual({
+      text: [{ interviewer: "claire", locale: "de" }],
+      waits: [{ day: today, upTo: 1400, answers: 1 }],
+    });
   });
 
   it("gives no turn to a link that opens nothing, or to a device that isn't the link's", async () => {
