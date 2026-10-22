@@ -73,6 +73,8 @@ import { Route as ShellLandscapeAppIdConnectionsRouteImport } from './routes/_sh
 import { Route as ShellLandscapeAppIdDataRouteImport } from './routes/_shell.landscape.$appId.data'
 import { Route as ShellLandscapeAppIdOverviewRouteImport } from './routes/_shell.landscape.$appId.overview'
 import { Route as ShellLinksAppSurfaceRouteImport } from './routes/_shell.links.$app.$surface'
+import { Route as ShellOnboardingOrganizationIndexRouteImport } from './routes/_shell.onboarding.organization.index'
+import { Route as ShellOnboardingOrganizationTeamRouteImport } from './routes/_shell.onboarding.organization.$team'
 import { Route as ShellPoliciesDocumentsPolicyIdRouteImport } from './routes/_shell.policies.documents.$policyId'
 import { Route as ShellPoliciesRulesRuleIdRouteImport } from './routes/_shell.policies.rules.$ruleId'
 import { Route as ShellSettingsPackagesIndexRouteImport } from './routes/_shell.settings.packages.index'
@@ -415,6 +417,18 @@ const ShellLinksAppSurfaceRoute = ShellLinksAppSurfaceRouteImport.update({
   path: '/links/$app/$surface',
   getParentRoute: () => ShellRoute,
 } as any)
+const ShellOnboardingOrganizationIndexRoute =
+  ShellOnboardingOrganizationIndexRouteImport.update({
+    id: '/organization/',
+    path: '/organization/',
+    getParentRoute: () => ShellOnboardingRoute,
+  } as any)
+const ShellOnboardingOrganizationTeamRoute =
+  ShellOnboardingOrganizationTeamRouteImport.update({
+    id: '/organization/$team',
+    path: '/organization/$team',
+    getParentRoute: () => ShellOnboardingRoute,
+  } as any)
 const ShellPoliciesDocumentsPolicyIdRoute =
   ShellPoliciesDocumentsPolicyIdRouteImport.update({
     id: '/policies/documents/$policyId',
@@ -554,6 +568,7 @@ export interface FileRoutesByFullPath {
   '/landscape/$appId/data': typeof ShellLandscapeAppIdDataRoute
   '/landscape/$appId/overview': typeof ShellLandscapeAppIdOverviewRoute
   '/links/$app/$surface': typeof ShellLinksAppSurfaceRoute
+  '/onboarding/organization/$team': typeof ShellOnboardingOrganizationTeamRoute
   '/policies/documents/$policyId': typeof ShellPoliciesDocumentsPolicyIdRoute
   '/policies/rules/$ruleId': typeof ShellPoliciesRulesRuleIdRoute
   '/workflows/$app/$workflow': typeof ShellWorkflowsAppWorkflowRoute
@@ -561,6 +576,7 @@ export interface FileRoutesByFullPath {
   '/domains/$engine/': typeof ShellDomainsEngineIndexRoute
   '/engines/$engine/': typeof ShellEnginesEngineIndexRoute
   '/landscape/$appId/': typeof ShellLandscapeAppIdIndexRoute
+  '/onboarding/organization/': typeof ShellOnboardingOrganizationIndexRoute
   '/settings/packages/': typeof ShellSettingsPackagesIndexRoute
   '/domains/$engine/apps/$screen': typeof ShellDomainsEngineAppsScreenRoute
   '/engines/$engine/apps/$screen': typeof ShellEnginesEngineAppsScreenRoute
@@ -628,6 +644,7 @@ export interface FileRoutesByTo {
   '/landscape/$appId/data': typeof ShellLandscapeAppIdDataRoute
   '/landscape/$appId/overview': typeof ShellLandscapeAppIdOverviewRoute
   '/links/$app/$surface': typeof ShellLinksAppSurfaceRoute
+  '/onboarding/organization/$team': typeof ShellOnboardingOrganizationTeamRoute
   '/policies/documents/$policyId': typeof ShellPoliciesDocumentsPolicyIdRoute
   '/policies/rules/$ruleId': typeof ShellPoliciesRulesRuleIdRoute
   '/workflows/$app/$workflow': typeof ShellWorkflowsAppWorkflowRoute
@@ -635,6 +652,7 @@ export interface FileRoutesByTo {
   '/domains/$engine': typeof ShellDomainsEngineIndexRoute
   '/engines/$engine': typeof ShellEnginesEngineIndexRoute
   '/landscape/$appId': typeof ShellLandscapeAppIdIndexRoute
+  '/onboarding/organization': typeof ShellOnboardingOrganizationIndexRoute
   '/settings/packages': typeof ShellSettingsPackagesIndexRoute
   '/domains/$engine/apps/$screen': typeof ShellDomainsEngineAppsScreenRoute
   '/engines/$engine/apps/$screen': typeof ShellEnginesEngineAppsScreenRoute
@@ -708,6 +726,7 @@ export interface FileRoutesById {
   '/_shell/landscape/$appId/data': typeof ShellLandscapeAppIdDataRoute
   '/_shell/landscape/$appId/overview': typeof ShellLandscapeAppIdOverviewRoute
   '/_shell/links/$app/$surface': typeof ShellLinksAppSurfaceRoute
+  '/_shell/onboarding/organization/$team': typeof ShellOnboardingOrganizationTeamRoute
   '/_shell/policies/documents/$policyId': typeof ShellPoliciesDocumentsPolicyIdRoute
   '/_shell/policies/rules/$ruleId': typeof ShellPoliciesRulesRuleIdRoute
   '/_shell/workflows/$app/$workflow': typeof ShellWorkflowsAppWorkflowRoute
@@ -715,6 +734,7 @@ export interface FileRoutesById {
   '/_shell/domains/$engine/': typeof ShellDomainsEngineIndexRoute
   '/_shell/engines/$engine/': typeof ShellEnginesEngineIndexRoute
   '/_shell/landscape/$appId/': typeof ShellLandscapeAppIdIndexRoute
+  '/_shell/onboarding/organization/': typeof ShellOnboardingOrganizationIndexRoute
   '/_shell/settings/packages/': typeof ShellSettingsPackagesIndexRoute
   '/_shell/domains/$engine/apps/$screen': typeof ShellDomainsEngineAppsScreenRoute
   '/_shell/engines/$engine/apps/$screen': typeof ShellEnginesEngineAppsScreenRoute
@@ -788,6 +808,7 @@ export interface FileRouteTypes {
     | '/landscape/$appId/data'
     | '/landscape/$appId/overview'
     | '/links/$app/$surface'
+    | '/onboarding/organization/$team'
     | '/policies/documents/$policyId'
     | '/policies/rules/$ruleId'
     | '/workflows/$app/$workflow'
@@ -795,6 +816,7 @@ export interface FileRouteTypes {
     | '/domains/$engine/'
     | '/engines/$engine/'
     | '/landscape/$appId/'
+    | '/onboarding/organization/'
     | '/settings/packages/'
     | '/domains/$engine/apps/$screen'
     | '/engines/$engine/apps/$screen'
@@ -862,6 +884,7 @@ export interface FileRouteTypes {
     | '/landscape/$appId/data'
     | '/landscape/$appId/overview'
     | '/links/$app/$surface'
+    | '/onboarding/organization/$team'
     | '/policies/documents/$policyId'
     | '/policies/rules/$ruleId'
     | '/workflows/$app/$workflow'
@@ -869,6 +892,7 @@ export interface FileRouteTypes {
     | '/domains/$engine'
     | '/engines/$engine'
     | '/landscape/$appId'
+    | '/onboarding/organization'
     | '/settings/packages'
     | '/domains/$engine/apps/$screen'
     | '/engines/$engine/apps/$screen'
@@ -941,6 +965,7 @@ export interface FileRouteTypes {
     | '/_shell/landscape/$appId/data'
     | '/_shell/landscape/$appId/overview'
     | '/_shell/links/$app/$surface'
+    | '/_shell/onboarding/organization/$team'
     | '/_shell/policies/documents/$policyId'
     | '/_shell/policies/rules/$ruleId'
     | '/_shell/workflows/$app/$workflow'
@@ -948,6 +973,7 @@ export interface FileRouteTypes {
     | '/_shell/domains/$engine/'
     | '/_shell/engines/$engine/'
     | '/_shell/landscape/$appId/'
+    | '/_shell/onboarding/organization/'
     | '/_shell/settings/packages/'
     | '/_shell/domains/$engine/apps/$screen'
     | '/_shell/engines/$engine/apps/$screen'
@@ -1423,6 +1449,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShellLinksAppSurfaceRouteImport
       parentRoute: typeof ShellRoute
     }
+    '/_shell/onboarding/organization/': {
+      id: '/_shell/onboarding/organization/'
+      path: '/organization'
+      fullPath: '/onboarding/organization/'
+      preLoaderRoute: typeof ShellOnboardingOrganizationIndexRouteImport
+      parentRoute: typeof ShellOnboardingRoute
+    }
+    '/_shell/onboarding/organization/$team': {
+      id: '/_shell/onboarding/organization/$team'
+      path: '/organization/$team'
+      fullPath: '/onboarding/organization/$team'
+      preLoaderRoute: typeof ShellOnboardingOrganizationTeamRouteImport
+      parentRoute: typeof ShellOnboardingRoute
+    }
     '/_shell/policies/documents/$policyId': {
       id: '/_shell/policies/documents/$policyId'
       path: '/policies/documents/$policyId'
@@ -1541,6 +1581,8 @@ interface ShellOnboardingRouteChildren {
   ShellOnboardingOpenRoute: typeof ShellOnboardingOpenRoute
   ShellOnboardingStephenRoute: typeof ShellOnboardingStephenRoute
   ShellOnboardingIndexRoute: typeof ShellOnboardingIndexRoute
+  ShellOnboardingOrganizationTeamRoute: typeof ShellOnboardingOrganizationTeamRoute
+  ShellOnboardingOrganizationIndexRoute: typeof ShellOnboardingOrganizationIndexRoute
 }
 
 const ShellOnboardingRouteChildren: ShellOnboardingRouteChildren = {
@@ -1551,6 +1593,8 @@ const ShellOnboardingRouteChildren: ShellOnboardingRouteChildren = {
   ShellOnboardingOpenRoute: ShellOnboardingOpenRoute,
   ShellOnboardingStephenRoute: ShellOnboardingStephenRoute,
   ShellOnboardingIndexRoute: ShellOnboardingIndexRoute,
+  ShellOnboardingOrganizationTeamRoute: ShellOnboardingOrganizationTeamRoute,
+  ShellOnboardingOrganizationIndexRoute: ShellOnboardingOrganizationIndexRoute,
 }
 
 const ShellOnboardingRouteWithChildren = ShellOnboardingRoute._addFileChildren(

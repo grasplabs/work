@@ -20,6 +20,11 @@ import type {
   OnboardingStaffApi,
   OnboardingView,
 } from "@grasp-os/shared/onboarding";
+import { organizationChangeSchema } from "@grasp-os/shared/onboarding-organization";
+import type {
+  OrganizationChangeInput,
+  StaffOrganization,
+} from "@grasp-os/shared/onboarding-organization";
 import {
   logFilterSchema,
   noteMaxLength,
@@ -39,6 +44,7 @@ import type { Identity } from "@grasp-os/shared/rpc";
 import { z } from "zod";
 
 import { appendAuditEvent } from "../audit-outbox.ts";
+import { organizationId } from "../auth/auth.ts";
 import { CoreRpcTarget } from "../rpc-target.ts";
 import { withPerson } from "../session-check.ts";
 import type { SessionCheck } from "../session-check.ts";
@@ -55,7 +61,9 @@ import { onboardingStore } from "./store.ts";
 // someone's interview, whose every read is in the audit log; and the
 // kickoff, brought in, read for what Stephen needs (kickoff.ts), and the
 // sponsor's answers to what it left open; and how Stephen is set up for
-// this deployment (stephen-setup.ts), in every interview turn's context.
+// this deployment (stephen-setup.ts), in every interview turn's context;
+// and the organization, team by team, and the list put right
+// (organization.ts), whose every read names people, so is in the audit log.
 // Until the agreements are in and while the interviews are paused, no link
 // opens and none goes out; once they are in and the interviews run, the
 // links that are due go out at once, not at the store's next alarm. The client's admin sees both (`view()`), and
@@ -226,6 +234,39 @@ export class OnboardingStaffRpc
         detail: {},
       });
       return transcript;
+    });
+  }
+
+  async organization(): Promise<StaffOrganization> {
+    return await withPerson(this.#check, async (person) => {
+      requireStaff(person);
+      const organization = await onboardingStore(this.#env).staffOrganization();
+      // It names people: on record before it is read.
+      await appendAuditEvent(this.#env, {
+        actor: actorOf(person),
+        action: "onboarding.organization.read",
+        target: { type: "organization", id: organizationId },
+        detail: {},
+      });
+      return organization;
+    });
+  }
+
+  async changeOrganization(change: OrganizationChangeInput): Promise<void> {
+    await withPerson(this.#check, async (person) => {
+      requireStaff(person);
+      const parsed = onboardingErrors.parse(
+        "onboarding.invalid",
+        organizationChangeSchema,
+        change
+      );
+      const store = onboardingStore(this.#env);
+      const refusal = await store.changeOrganization(parsed, actorOf(person));
+      if (refusal !== null) {
+        throw onboardingErrors.create(refusal);
+      }
+      // A link sent now, or a team asked in, may make links due at once.
+      await store.releaseDue();
     });
   }
 

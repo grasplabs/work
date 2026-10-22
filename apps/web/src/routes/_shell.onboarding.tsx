@@ -9,6 +9,7 @@ import {
   useLocation,
 } from "@tanstack/react-router";
 import {
+  Building2Icon,
   FileSignatureIcon,
   HistoryIcon,
   LayoutDashboardIcon,
@@ -41,6 +42,7 @@ type AreaPath =
   | "/onboarding/kickoff"
   | "/onboarding/agreements"
   | "/onboarding/stephen"
+  | "/onboarding/organization"
   | "/onboarding/open"
   | "/onboarding/notes"
   | "/onboarding/log";
@@ -73,6 +75,14 @@ const sections: readonly AreaSection[] = [
     to: "/onboarding/stephen",
     label: msg({ message: "Stephen", context: "onboarding area section" }),
     icon: UserRoundIcon,
+  },
+  {
+    to: "/onboarding/organization",
+    label: msg({
+      message: "Organization",
+      context: "onboarding area section",
+    }),
+    icon: Building2Icon,
   },
   {
     to: "/onboarding/open",

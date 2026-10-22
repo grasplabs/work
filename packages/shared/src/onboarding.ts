@@ -4,6 +4,10 @@ import { defineErrorFamily } from "./errors.ts";
 import type { KickoffApi } from "./kickoff.ts";
 import type { OnboardingDocumentsApi } from "./onboarding-documents.ts";
 import type {
+  OrganizationChangeInput,
+  StaffOrganization,
+} from "./onboarding-organization.ts";
+import type {
   LogFilter,
   StaffAgreements,
   StaffLog,
@@ -307,6 +311,13 @@ export interface OnboardingStaffApi extends KickoffApi {
   addNote: (text: string) => Promise<StaffNote>;
   /** Someone's interview; every read is in the audit log, without its words. */
   transcript: (person: string) => Promise<StaffTranscript>;
+  /**
+   * The organization as Grasp knows it, team by team: it names people, so
+   * every read is in the audit log.
+   */
+  organization: () => Promise<StaffOrganization>;
+  /** Puts the list right, one change at a time; each is in the log. */
+  changeOrganization: (change: OrganizationChangeInput) => Promise<void>;
 }
 
 /** Why the onboarding refused something. */
@@ -317,4 +328,11 @@ export const onboardingErrors = defineErrorFamily({
   "onboarding.past": "The interviews can't start in the past.",
   "onboarding.no_link": "That person has no link out yet.",
   "onboarding.not_found": "Nobody on the list by that id.",
+  "onboarding.no_team": "No team on the list by that id.",
+  "onboarding.team_taken": "There is a team with this name already.",
+  "onboarding.no_work": "That piece of work isn't on their team's map.",
+  "onboarding.not_now":
+    "No link goes out while the interviews are paused, before the agreements are in, or to someone who doesn't take part.",
+  "onboarding.no_map":
+    "The team's lead hasn't agreed to anything to draw its map from yet.",
 });

@@ -1,3 +1,4 @@
+import { addWorkingDays } from "@grasp-os/shared/admin/org-record";
 import { expect } from "@playwright/test";
 
 import { test } from "./csp.ts";
@@ -7,7 +8,8 @@ import type { Person } from "./people.ts";
 // What only Grasp's staff do in a client's onboarding (GRA-320), end to
 // end: they put the agreements in place, and the links that waited for
 // them go out; they give the go, and the company's people sign in, and
-// see the programme's week on the dashboard, from the plan. Its
+// see the programme's week on the dashboard, from the plan; they put the
+// organization's list right, someone moved and a team asked in late. Its
 // own Playwright project, after all the others: taking the go back signs
 // out everyone the other tests signed in (playwright.config.ts).
 
@@ -170,6 +172,102 @@ test("the dashboard counts the programme's weeks from the plan, and exports its 
     `grasp-report-week-1-${today()}.md`
   );
   await expect(dialog).toBeHidden();
+  expect(cspViolations).toStrictEqual([]);
+});
+
+test("staff move someone to another team, and ask a team in late, its lead first", async ({
+  page,
+  cspViolations,
+}) => {
+  const staff = await signInStaff();
+  const run = crypto.randomUUID().slice(0, 8);
+  const { core, api } = apiOf(staff);
+  try {
+    // The agreements are in since the first test: links go out by the plan.
+    await api.onboarding.saveRoster({
+      teams: [
+        { id: `sales-${run}`, name: "Sales", lead: `lea-${run}` },
+        { id: `ops-${run}`, name: "Ops", lead: `ona-${run}` },
+        {
+          id: `support-${run}`,
+          name: "Support",
+          lead: `sol-${run}`,
+          off: true,
+        },
+      ],
+      people: [
+        { id: `lea-${run}`, name: "Lea Lind", team: `sales-${run}` },
+        { id: `sam-${run}`, name: "Sam Smit", team: `sales-${run}` },
+        { id: `ona-${run}`, name: "Ona Olsen", team: `ops-${run}` },
+        { id: `sol-${run}`, name: "Sol Sand", team: `support-${run}` },
+        { id: `sid-${run}`, name: "Sid Stam", team: `support-${run}` },
+      ],
+    });
+    await api.onboarding.savePlan({ start: today() });
+  } finally {
+    core[Symbol.dispose]();
+  }
+
+  // The test's own page, whose CSP violations are recorded (e2e/csp.ts).
+  await signInTo(page.context(), staff);
+  await page.goto("/onboarding");
+  await page
+    .getByRole("complementary", { name: "Onboarding sections" })
+    .getByRole("link", { name: "Organization" })
+    .click();
+
+  // Sam moves from Sales to Ops.
+  await page.getByRole("link", { name: "Open Sales" }).click();
+  await page.getByRole("button", { name: "Open Sam Smit" }).click();
+  await page.getByRole("button", { name: "Change details" }).click();
+  await page.getByLabel("Team", { exact: true }).selectOption({ label: "Ops" });
+  await expect(
+    page.getByText(
+      "In another team, Sam is asked about that team's work from now on."
+    )
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Save" }).click();
+  await expect(
+    page.getByRole("button", { name: "Open Sam Smit" })
+  ).toBeHidden();
+
+  // In Ops, he is asked about Ops' work, once Ona has named it.
+  await page.getByRole("link", { name: "All teams" }).click();
+  await page.getByRole("link", { name: "Open Ops" }).click();
+  await expect(
+    page
+      .getByRole("button", { name: "Open Sam Smit" })
+      .getByText("Asked about the team's work once its lead has named it")
+  ).toBeVisible();
+
+  // Support is asked in late: Sol's link goes out now, Sid's waits for Sol.
+  await page.getByRole("link", { name: "All teams" }).click();
+  const filters = page.getByRole("group", { name: "Which teams to show" });
+  await filters.getByRole("button", { name: /^Left out/u }).click();
+  await page.getByRole("button", { name: "Ask it in" }).click();
+  await expect(page.getByRole("button", { name: "Ask it in" })).toBeHidden();
+  await filters.getByRole("button", { name: /^All/u }).click();
+  await page.getByRole("link", { name: "Open Support" }).click();
+  const by = new Intl.DateTimeFormat("en", {
+    dateStyle: "medium",
+    timeZone: "UTC",
+  }).format(new Date(`${addWorkingDays(today(), 3)}T00:00:00Z`));
+  await expect(
+    page.getByText(
+      `Sol Sand talks first. Everyone else's link waits for that, until ${by} at the latest.`
+    )
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Open Sol Sand" }).getByText("Link out")
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Open Sid Stam" }).getByText("No link yet")
+  ).toBeVisible();
+
+  // Both changes are in the log, as staff made them.
+  await page.goto("/onboarding/log?actor=staff");
+  await expect(page.getByText("onboarding.person.moved")).toBeVisible();
+  await expect(page.getByText("onboarding.team.asked_in")).toBeVisible();
   expect(cspViolations).toStrictEqual([]);
 });
 
