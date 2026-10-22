@@ -1,3 +1,4 @@
+import { sha256Hex } from "@grasp-os/shared/encoding";
 import { knowledgeErrors } from "@grasp-os/shared/knowledge";
 import type { SessionApi } from "@grasp-os/shared/rpc";
 import type { Upload } from "@grasp-os/shared/uploads";
@@ -39,19 +40,40 @@ const personWithCollection = async () => {
   return { ...person, collectionId: collection.id };
 };
 
+/** Every text in the Brain bucket, as stored: each version's payload. */
+const storedObjectTexts = async (): Promise<string[]> => {
+  const texts: string[] = [];
+  let cursor: string | undefined = undefined;
+  do {
+    // oxlint-disable-next-line no-await-in-loop -- one page at a time
+    const page: R2Objects = await env.BRAIN_OBJECTS.list({ cursor });
+    // oxlint-disable-next-line no-await-in-loop -- one page at a time
+    const read = await Promise.all(
+      page.objects.map(async ({ key }) => {
+        const object = await env.BRAIN_OBJECTS.get(key);
+        return object === null ? "" : await object.text();
+      })
+    );
+    texts.push(...read);
+    cursor = page.truncated ? page.cursor : undefined;
+  } while (cursor !== undefined);
+  return texts;
+};
+
 /** Every stored version, section and document title holding `marker`. */
 const storedWith = async (marker: string): Promise<number> => {
   const like = `%${marker}%`;
   const row = await env.KNOWLEDGE.prepare(
     `SELECT
-       (SELECT count(*) FROM versions WHERE text LIKE ?1)
-       + (SELECT count(*) FROM sections WHERE text LIKE ?1)
+       (SELECT count(*) FROM sections WHERE text LIKE ?1)
        + (SELECT count(*) FROM documents WHERE title LIKE ?1 OR path LIKE ?1)
        AS stored`
   )
     .bind(like)
     .first<{ stored: number }>();
-  return row?.stored ?? 0;
+  const texts = await storedObjectTexts();
+  const objects = texts.filter((text) => text.includes(marker));
+  return (row?.stored ?? 0) + objects.length;
 };
 
 /** A Word file whose one paragraph is `text`. */
@@ -356,17 +378,26 @@ describe("Knowledge admission", { timeout: 60_000 }, () => {
     // A version from before the gate, as a database restored from then
     // would hold it.
     const marker = `marker${unique()}`;
-    await env.KNOWLEDGE.prepare(
-      `INSERT INTO versions (document_id, number, text, author, created_at)
-       VALUES (?, 99, ?, ?, ?)`
-    )
-      .bind(
-        saved.id,
-        `# Team\n${marker}: he was convicted of fraud.`,
-        person.userId,
+    const before = `# Team\n${marker}: he was convicted of fraud.`;
+    const sha256 = await sha256Hex(before);
+    const key = `payloads/${sha256}/${crypto.randomUUID()}`;
+    await env.BRAIN_OBJECTS.put(key, before);
+    await env.KNOWLEDGE.batch([
+      env.KNOWLEDGE.prepare(
+        `INSERT INTO brain_payloads (key, collection_id, sha256, bytes, state, created_at)
+         VALUES (?, ?, ?, ?, 'committed', ?)`
+      ).bind(
+        key,
+        person.collectionId,
+        sha256,
+        new TextEncoder().encode(before).byteLength,
         Date.now()
-      )
-      .run();
+      ),
+      env.KNOWLEDGE.prepare(
+        `INSERT INTO versions (document_id, number, payload_key, author, created_at)
+         VALUES (?, 99, ?, ?, ?)`
+      ).bind(saved.id, key, person.userId, Date.now()),
+    ]);
     const restored = await outcome(
       person.api.knowledge.restoreVersion({
         documentId: saved.id,
