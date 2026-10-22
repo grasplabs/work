@@ -1030,7 +1030,10 @@ const writeReceipt = async (
           ...(entry === undefined ? [] : [outboxedWhere(db, entry, written)]),
         ]));
   } catch (error) {
-    // A twin's cancel, written first: answered by the caller.
+    // A twin written first (a cancel under any key, a pause or resume
+    // under this one): answered by the caller, its audit with it unwritten.
+    // The unique indexes are the guard, as the generation is none for a
+    // request the run is already past.
     if (!isUniqueViolation(error)) {
       throw error;
     }
@@ -1069,6 +1072,14 @@ const decide = async (
   command: Extract<WorkflowCommand, { command: "pause" | "resume" | "cancel" }>
 ): Promise<Decided> => {
   const kind = command.command;
+  // The receipts before the engine, both after `row`: a control admitted
+  // since `row` moved the run's generation on, so the write below fails;
+  // one admitted before it is either unresolved here (joined or a
+  // conflict) or settled, which only happens once the engine took it, so
+  // the status read after shows it. Read the other way round, a control
+  // settling between the two reads would make the run look already past
+  // a request it isn't, and that request be applied at once unsent.
+  const receipts = await receiptsOf(env, row.id);
   let live: Live;
   if (!isEnded(row.status)) {
     try {
@@ -1083,7 +1094,7 @@ const decide = async (
   }
   const admission = admissionOf(
     row,
-    await receiptsOf(env, row.id),
+    receipts,
     kind,
     command.idempotencyKey,
     live
@@ -1106,11 +1117,11 @@ const decide = async (
     command.idempotencyKey,
     admission.type === "done"
   );
-  const receipts = await receiptsOf(env, row.id);
+  const after = await receiptsOf(env, row.id);
   const receipt =
-    receipts.find(({ id }) => id === written) ??
+    after.find(({ id }) => id === written) ??
     // A twin written first, under this key or (a cancel's) another.
-    receipts.find(
+    after.find(
       (each) =>
         each.kind === kind &&
         (kind === "cancel" ||
