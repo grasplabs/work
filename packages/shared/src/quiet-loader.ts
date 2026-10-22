@@ -28,12 +28,21 @@ import { hasNodeModules, quietModules } from "./quiet-isolate.ts";
 // bundle's. That holds on either profile; on Cloudflare it drops nothing
 // the runtime wouldn't.
 //
-// An isolate with a tail is left as it is: its tail (core's server-logs.ts)
-// is how a builder sees what the App's server code wrote, and a silenced
-// console would hand the tail nothing. On plain workerd that output still
-// reaches the process's logs too, which `SANDBOX_IN_PROCESS=unbounded`
-// accepts (core's env.d.ts); GRA-919 delivers it to the tail's destinations
-// instead. Connect attaches no tail.
+// An isolate with a tail keeps its console: its tail (core's
+// server-logs.ts) is how a builder sees what the App's server code wrote,
+// and a silenced console would hand the tail nothing. Everything else is
+// as for any isolate: what it leaves uncaught is caught (quiet-isolate.ts),
+// and what its entrypoint or Durable Object class throws crosses as a
+// value (`entrySource`), so none of it is reported with its message. The
+// one gap is accepted and bounded: on plain workerd served `--verbose`,
+// with `SANDBOX_IN_PROCESS=unbounded` (core's env.d.ts), a tailed isolate's
+// `console` calls also print a raw line to the process's own output, as the
+// tail receives them. The tail takes its lines from the runtime's own
+// console, which an isolate can't reach one way and not the other, so no
+// replacement of `console` keeps the tail's lines and drops the print.
+// Without `--verbose` nothing prints, and on Cloudflare the tail alone gets
+// them. GRA-919 delivers the lines to the tail's destinations instead.
+// Connect attaches no tail.
 
 /**
  * What `quietLoader` needs of a Loader's code: the Worker Loader's own
@@ -91,6 +100,9 @@ const freeModuleName = (
   return candidate;
 };
 
+/** What an export is wrapped as: an entrypoint, or a Durable Object's class. */
+type ExportKind = "entrypoint" | "durableObject";
+
 /** An export's name a wrapper can declare, or `default`. */
 const identifier = /^[A-Za-z_$][\w$]*$/u;
 
@@ -102,7 +114,7 @@ const identifier = /^[A-Za-z_$][\w$]*$/u;
  * and the like), so nothing the code does as it loads makes the wrapper
  * itself throw, or answer for it.
  */
-const builtinsSource = `import { WorkerEntrypoint } from "cloudflare:workers";
+const builtinsSource = `import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
 function accessorOf(start, key) {
   for (let at = start; at !== null; at = Reflect.getPrototypeOf(at)) {
     const found = Reflect.getOwnPropertyDescriptor(at, key);
@@ -140,6 +152,8 @@ export const builtins = Object.freeze({
   bind: Function.prototype.bind,
   EntrypointClass: WorkerEntrypoint,
   entrypointPrototype: WorkerEntrypoint.prototype,
+  DurableClass: DurableObject,
+  durablePrototype: DurableObject.prototype,
   responsePrototype: Response.prototype,
   // Response's own getters, found up its chain as they are now: a subclass
   // or an own property of an isolate's Response can't stand in for them.
@@ -184,6 +198,13 @@ const maxThrownDetails = 8192;
  * - `fetch` answers a thrown error as a Response under `thrownHeader`; a
  *   Response of the entrypoint's own never carries that header.
  * - Anything else is exported as it is.
+ * - A Durable Object's class (`kind` `durableObject`, a class of
+ *   `DurableObject` alone) is wrapped the same way as an entrypoint's
+ *   class: its RPC methods answer envelopes, and what workerd calls on its
+ *   own (`alarm`, `webSocketMessage`, `webSocketClose`,
+ *   `webSocketError`, `fetch`) answers one too, so a throw of those
+ *   is swallowed, not reported: a throwing `alarm` isn't retried. A
+ *   constructor that throws makes the same stand-in.
  *
  * A value answered is copied into plain data inside the call (`plainOf`),
  * so a getter or a proxy's trap in it runs, and throws, there, not as
@@ -200,10 +221,14 @@ const maxThrownDetails = 8192;
 const entrySource = (
   mainModule: string,
   builtins: string,
-  entrypoint: string
+  entrypoint: string,
+  kind: ExportKind
 ): string => `import { builtins } from ${JSON.stringify(`./${builtins}`)};
 import * as main from ${JSON.stringify(`./${mainModule}`)};
-const { apply, get, define, ownKeys, descriptorOf, prototypeOf, create, isArray, isPrototypeOf, objectPrototype, stringOf, slice, stringify, parse, Map, mapGet, mapSet, Proxy, Response, Headers, headersHas, headersDelete, resolve, then, bind, EntrypointClass, entrypointPrototype, responsePrototype, responseHeaders, responseBody, responseStatus, responseStatusText } = builtins;
+const { apply, get, define, ownKeys, descriptorOf, prototypeOf, create, isArray, isPrototypeOf, objectPrototype, stringOf, slice, stringify, parse, Map, mapGet, mapSet, Proxy, Response, Headers, headersHas, headersDelete, resolve, then, bind, EntrypointClass, entrypointPrototype, DurableClass, durablePrototype, responsePrototype, responseHeaders, responseBody, responseStatus, responseStatusText } = builtins;
+const isDurable = ${JSON.stringify(kind === "durableObject")};
+const BaseClass = isDurable ? DurableClass : EntrypointClass;
+const basePrototype = isDurable ? durablePrototype : entrypointPrototype;
 const envelopeKey = ${JSON.stringify(envelopeKey)};
 const thrownHeader = ${JSON.stringify(thrownHeader)};
 const cut = (text, most) => apply(slice, text, [0, most]);
@@ -456,7 +481,7 @@ const methodOf = (property) =>
   typeof property === "string" && property !== "constructor" && property !== "then";
 // An entrypoint whose constructor threw: every method answers that throw.
 const standIn = (error) =>
-  new Proxy(create(entrypointPrototype), recordOf([
+  new Proxy(create(basePrototype), recordOf([
     "get",
     (target, property) =>
       methodOf(property) ? thrownCall(property, error) : get(target, property, target),
@@ -482,7 +507,9 @@ const quietClass = (Base) => {
       let failed = false;
       let thrown;
       try {
-        super(quietContext(ctx), env);
+        // A Durable Object's constructor takes its real state alone; the
+        // quiet module's accessor makes the context it keeps a quiet one.
+        super(isDurable ? ctx : quietContext(ctx), env);
       } catch (error) {
         failed = true;
         thrown = error;
@@ -550,13 +577,13 @@ const kindOf = (value) => {
     return "other";
   }
   try {
-    const byClass = chainHas(value, EntrypointClass);
+    const byClass = chainHas(value, BaseClass);
     const own = descriptorOf(value, "prototype");
     // A data property's own \`value\`: an accessor has none of its own.
     const prototype =
       own !== undefined && descriptorOf(own, "value") !== undefined ? get(own, "value") : undefined;
     const byPrototype =
-      prototype !== null && typeof prototype === "object" && (prototype === entrypointPrototype || chainHas(prototype, entrypointPrototype));
+      prototype !== null && typeof prototype === "object" && (prototype === basePrototype || chainHas(prototype, basePrototype));
     if (byClass !== byPrototype) {
       return "refused";
     }
@@ -567,7 +594,7 @@ const kindOf = (value) => {
   }
 };
 const refusedError = new TypeError("This entrypoint can't be called.");
-const refusedClass = class extends EntrypointClass {
+const refusedClass = class extends BaseClass {
   constructor(ctx, env) {
     try {
       super(ctx, env);
@@ -582,8 +609,12 @@ const quietEntrypoint = (value) => {
   if (kind === "class") {
     return quietClass(value);
   }
-  if (kind === "handlers") {
+  // A Durable Object is a class alone: a handler object is no object's.
+  if (kind === "handlers" && !isDurable) {
     return quietHandlers(value);
+  }
+  if (isDurable) {
+    return refusedClass;
   }
   return kind === "refused" ? refusedClass : value;
 };
@@ -644,7 +675,7 @@ const rebuilt = (thrown: unknown): Error => {
 };
 
 /** What a quiet entrypoint's call answered: its envelope opened. */
-const rethrown = async (answer: unknown): Promise<unknown> => {
+export const openAnswer = async (answer: unknown): Promise<unknown> => {
   const value: unknown = await answer;
   if (
     typeof value !== "object" ||
@@ -705,7 +736,7 @@ const rethrowing = (entry: object): object =>
         const answer: unknown = Reflect.apply(value, target, args);
         return property === "fetch"
           ? await rethrownFetch(answer)
-          : await rethrown(answer);
+          : await openAnswer(answer);
       };
     },
   });
@@ -716,17 +747,19 @@ const hasTail = (code: QuietableCode): boolean =>
 
 const noDurableObjectClass = (): TypeError =>
   new TypeError(
-    "A silenced isolate hands out a Durable Object class only with a tail: its methods' throws aren't wrapped."
+    "A silenced isolate hands out a Durable Object class only with a tail: nothing else needs one."
   );
 
 /**
  * `code` with its console silenced first, unless it has a tail (whose
- * tail is how a builder sees what it wrote), and its main module wrapped
- * so entrypoint `entrypoint`'s call throws nothing to workerd, tail or not.
+ * tail is how a builder sees what it wrote), what it leaves uncaught
+ * caught either way, and its main module wrapped so export `entrypoint`'s
+ * call throws nothing to workerd, tail or not.
  */
 const quietCode = <Code extends QuietableCode>(
   code: Code,
-  entrypoint: string
+  entrypoint: string,
+  kind: ExportKind = "entrypoint"
 ): Code => {
   const tailed = hasTail(code);
   const main = code.modules[code.mainModule];
@@ -744,19 +777,19 @@ const quietCode = <Code extends QuietableCode>(
       `An isolate's main module must be an ES module to be silenced: ${code.mainModule} isn't one.`
     );
   }
-  const modules = tailed
-    ? { ...code.modules }
-    : quietModules(
-        code.mainModule,
-        { ...code.modules, [code.mainModule]: given },
-        // Its `node:timers` caught too, where it has them.
-        {
-          nodejsCompat: hasNodeModules({
-            compatibilityDate: code.compatibilityDate ?? "",
-            compatibilityFlags: code.compatibilityFlags,
-          }),
-        }
-      );
+  const modules = quietModules(
+    code.mainModule,
+    { ...code.modules, [code.mainModule]: given },
+    {
+      // Its `node:timers` caught too, where it has them.
+      nodejsCompat: hasNodeModules({
+        compatibilityDate: code.compatibilityDate ?? "",
+        compatibilityFlags: code.compatibilityFlags,
+      }),
+      // A tail is how its builder sees what it wrote.
+      keepConsole: tailed,
+    }
+  );
   const quieted = modules[code.mainModule];
   const builtins = freeModuleName(modules, builtinsModule);
   const entry = freeModuleName({ ...modules, [builtins]: "" }, entryModule);
@@ -768,7 +801,7 @@ const quietCode = <Code extends QuietableCode>(
         ? modules
         : { ...modules, [code.mainModule]: { js: quieted } }),
       [builtins]: builtinsSource,
-      [entry]: entrySource(code.mainModule, builtins, entrypoint),
+      [entry]: entrySource(code.mainModule, builtins, entrypoint, kind),
     },
   };
 };
@@ -793,8 +826,8 @@ const entrypointOf = (entrypoint = "default"): string => {
  * A stub of the isolate `load` loads for the entrypoint it is asked for,
  * with each call's envelope opened host-side (`rethrowing`). The isolate
  * is loaded once a caller names the entrypoint, since its wrapper main
- * exports that one (`entrySource`). A Durable Object class is not wrapped
- * (`durableObjectClass` gives it, or refuses): see `quietLoader`.
+ * exports that one (`entrySource`). A Durable Object class is the wrapped
+ * class `durableObjectClass` gives, or refuses: see `quietLoader`.
  */
 const quietStub = <Stub extends QuietableStub>(
   load: (entrypoint: string) => Stub,
@@ -823,17 +856,21 @@ const quietStub = <Stub extends QuietableStub>(
  * caches is cached per entrypoint: its wrapper main is that entrypoint's.
  *
  * A Durable Object class (an App's server object, the only one core or
- * connect loads) is handed out only for an isolate with a tail, and then
- * the isolate is loaded as given, not wrapped: the wrapper makes an
- * entrypoint's throws values, which a Durable Object's methods can't
- * answer, since a caller reads its errors as they are thrown (an App's
- * error and its details). That is honest for a tailed isolate alone: its
- * console already goes to the tail and not to the deployment's logs, so
- * nothing the wrapper silences is lost, and an error its methods throw
- * is reported to the tail, as the header says an isolate with a tail is
- * left as it is. An isolate without a tail would print its console, and
- * report its throws, to the deployment's logs through a class we can't
- * wrap, so it is refused: nothing needs one.
+ * connect loads) is handed out only for an isolate with a tail, wrapped as
+ * an entrypoint's class is (`entrySource`): its RPC methods answer
+ * envelopes, which the caller opens with `openAnswer` (core's
+ * `invokeServer`) so an App's error and its details reach it as thrown,
+ * and what workerd calls on its own (`alarm`, `webSocketMessage`,
+ * `webSocketClose`, `webSocketError`) or builds (the constructor) throws
+ * nothing to it (a facet can set no alarm today, so `alarm` is caught for
+ * when it can). The tail already holds the console of an App, so its
+ * console stays as it is; what workerd served `--verbose` prints of it to
+ * the process's own output is the one thing left (GRA-939): the lines the
+ * tail is for, which plain workerd prints too. That holds only where
+ * `SANDBOX_IN_PROCESS=unbounded` runs an App in core's own Loader, and
+ * never without `--verbose`, which an operator of that mode must not
+ * serve (quiet-isolate.ts). An isolate without a tail is refused: nothing
+ * needs one.
  */
 export const quietLoader = <
   Code extends QuietableCode,
@@ -850,13 +887,16 @@ export const quietLoader = <
         ),
       (className) =>
         loader
-          .get(name === null ? null : `${name}\u0000quiet-class`, async () => {
-            const code = await getCode();
-            if (!hasTail(code)) {
-              throw noDurableObjectClass();
+          .get(
+            name === null ? null : `${name}\u0000quiet-class:${className}`,
+            async () => {
+              const code = await getCode();
+              if (!hasTail(code)) {
+                throw noDurableObjectClass();
+              }
+              return quietCode(code, entrypointOf(className), "durableObject");
             }
-            return code;
-          })
+          )
           .getDurableObjectClass?.(className)
     ),
   load: (code) => {
@@ -879,7 +919,9 @@ export const quietLoader = <
         if (!hasTail(code)) {
           throw noDurableObjectClass();
         }
-        return loader.load(code).getDurableObjectClass?.(className);
+        return loader
+          .load(quietCode(code, entrypointOf(className), "durableObject"))
+          .getDurableObjectClass?.(className);
       }
     );
   },

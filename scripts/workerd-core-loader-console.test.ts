@@ -17,7 +17,12 @@ import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { bundle } from "./workerd-stand-in.ts";
-import { cleanUp, serveOnWorkerd, tempDir } from "./workerd-test-server.ts";
+import {
+  cleanUp,
+  serveOnWorkerd,
+  storageDir,
+  tempDir,
+} from "./workerd-test-server.ts";
 import type { Served } from "./workerd-test-server.ts";
 
 /** How long an isolate's last output may take to come through. */
@@ -40,13 +45,17 @@ describe("isolates core loads itself off Cloudflare, on a workerd served --verbo
 
   beforeAll(async () => {
     const out = tempDir();
+    const storage = storageDir();
     const modules = bundle(out, "core-loader-console-worker.ts");
     served = await serveOnWorkerd(
       out,
       (address) => `using Workerd = import "/workerd/workerd.capnp";
 
 const config :Workerd.Config = (
-  services = [(name = "core", worker = .core)],
+  services = [
+    (name = "core", worker = .core),
+    (name = "storage", disk = (path = "${storage}", writable = true)),
+  ],
   sockets = [(name = "http", address = "${address}", http = (), service = "core")],
 );
 
@@ -58,7 +67,10 @@ const core :Workerd.Worker = (
     (name = "LOADER", workerLoader = ()),
     (name = "RUNTIME_PROFILE", text = "workerd"),
     (name = "SANDBOX_IN_PROCESS", text = "unbounded"),
+    (name = "HOST", durableObjectNamespace = "Host"),
   ],
+  durableObjectNamespaces = [(className = "Host", uniqueKey = "Host", enableSql = true)],
+  durableObjectStorage = (localDisk = "storage"),
 );
 `,
       // The loader is experimental in workerd; an isolate's uncaught error
@@ -316,5 +328,82 @@ const core :Workerd.Worker = (
     const { answered } = ranSchema.parse(await response.json());
 
     expect(answered).toBe("refused");
+  });
+
+  // An App's server class, as `loadServer` runs it: a facet of a host
+  // object, its class from an isolate with a tail. The tail already holds
+  // its console, so the quiet module leaves that, and everything the class
+  // throws or leaves uncaught is kept from workerd's report; the same
+  // class as the Loader gives it prints each (GRA-939). Not an alarm: workerd
+  // gives a facet none ("Facets currently cannot set alarms"), and an App's
+  // class runs only as one, so the wrapper's catching of `alarm` and the
+  // WebSocket handlers has no way to be reached to test here.
+  it.each([
+    ["fail", "a method that throws"],
+    ["timer", "a timer that throws"],
+    ["constructor", "a constructor that throws"],
+  ])(
+    "prints nothing of %s (%s) in a tailed App class, where the class loaded as it is does",
+    async (name) => {
+      const objectSchema = z.object({
+        value: z.string(),
+        answered: z.unknown().optional(),
+        thrown: z.unknown().optional(),
+      });
+      const run = async (mode: string) => {
+        const response = await fetch(
+          new URL(`/do/${name}/${mode}`, served.url)
+        );
+        return objectSchema.parse(await response.json());
+      };
+      const quiet = await run("quiet");
+      const loud = await run("loud");
+      await sleep(SETTLE_MS);
+
+      const fails = name === "fail" || name === "constructor";
+      expect({
+        quiet: served.logs().includes(quiet.value),
+        loud: served.logs().includes(loud.value),
+        // An App's error crosses as it is thrown, details and all.
+        thrown: fails ? quiet.thrown : undefined,
+      }).toStrictEqual({
+        quiet: false,
+        loud: true,
+        thrown: fails
+          ? {
+              kind: name === "fail" ? "TypeError" : "other",
+              message: quiet.value,
+              details: name === "fail" ? { retryAfterMs: 5 } : null,
+            }
+          : undefined,
+      });
+    }
+  );
+
+  // The one gap: a tailed class's console reaches the tail through the
+  // runtime's own console, which plain workerd served `--verbose` also
+  // prints. Pinned so a change is seen (quiet-loader.ts).
+  it("still prints a tailed App class's console on workerd served --verbose, for its tail", async () => {
+    const run = async (mode: string) => {
+      const response = await fetch(new URL(`/do/console/${mode}`, served.url));
+      return z.object({ value: z.string() }).parse(await response.json());
+    };
+    const quiet = await run("quiet");
+    await sleep(SETTLE_MS);
+
+    expect(served.logs()).toContain(quiet.value);
+  });
+
+  it("refuses an App class without a tail", async () => {
+    const response = await fetch(new URL("/do/fail/untailed", served.url));
+    const answer = z
+      .object({ thrown: z.object({ kind: z.string(), message: z.string() }) })
+      .parse(await response.json());
+
+    expect(answer.thrown).toStrictEqual({
+      kind: "TypeError",
+      message:
+        "A silenced isolate hands out a Durable Object class only with a tail: nothing else needs one.",
+    });
   });
 });

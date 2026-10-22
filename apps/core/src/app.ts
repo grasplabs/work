@@ -24,7 +24,7 @@ import {
 import { operationErrors } from "@grasp-os/shared/operations";
 import type { Authority } from "@grasp-os/shared/permissions";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
-import { quietLoader } from "@grasp-os/shared/quiet-loader";
+import { openAnswer, quietLoader } from "@grasp-os/shared/quiet-loader";
 import {
   querySubscriptionLimits,
   screenErrors,
@@ -508,7 +508,13 @@ export const invokeServer = async (
   let answer: AppAnswer;
   try {
     // Not `invoke.apply(...)`: on a stub, that calls a method "apply".
-    answer = await Reflect.apply(invoke, facet, [caller, ...args]);
+    // The server class is wrapped (`loadServer`): its answer is an
+    // envelope, a throw of the App's code a value opened here.
+    // SAFETY: `plainAnswer` checks it is plain data right below.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    answer = (await openAnswer(
+      await Reflect.apply(invoke, facet, [caller, ...args])
+    )) as AppAnswer;
   } catch (error) {
     throw appFailure(error, at);
   }

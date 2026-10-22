@@ -66,6 +66,12 @@ export const quietModule = "grasp-sandbox-quiet.js";
  */
 export interface QuietOptions {
   readonly nodejsCompat?: boolean;
+  /**
+   * Leave the console as it is: for an isolate with a tail, whose console
+   * is how its builder sees what it wrote (the module still keeps what the
+   * code leaves uncaught from being reported).
+   */
+  readonly keepConsole?: boolean;
 }
 
 /** The compatibility date from which workerd gives isolates `node:` modules. */
@@ -121,7 +127,7 @@ const timerNames = '["setTimeout", "setInterval", "setImmediate"]';
 const quietErrors = (
   options: QuietOptions
 ): { imports: string; source: string } => ({
-  imports: `import { WorkerEntrypoint as QuietEntrypoint } from "cloudflare:workers";
+  imports: `import { DurableObject as QuietObject, WorkerEntrypoint as QuietEntrypoint } from "cloudflare:workers";
 ${options.nodejsCompat === true ? 'import quietNodeTimers from "node:timers";\n' : ""}`,
   // Everything it uses is kept as it loads, before any of the isolate's
   // own code can replace one, and every record it hands the runtime (a
@@ -187,25 +193,28 @@ ${options.nodejsCompat === true ? "quietTimers(quietNodeTimers);\n" : ""}const q
           },
         ])
       );
-// The entrypoint's constructor sets its context: it takes the quiet one.
-quietDefine(
-  QuietEntrypoint.prototype,
-  "ctx",
-  quietRecord([
-    "configurable",
-    true,
-    "get",
-    () => undefined,
-    "set",
-    function (ctx) {
-      quietDefine(
-        this,
-        "ctx",
-        quietRecord(["configurable", true, "enumerable", true, "writable", true, "value", quietContext(ctx)])
-      );
-    },
-  ])
-);
+// An entrypoint's or a Durable Object's constructor sets its context: it
+// takes the quiet one.
+for (const quietBase of [QuietEntrypoint, QuietObject]) {
+  quietDefine(
+    quietBase.prototype,
+    "ctx",
+    quietRecord([
+      "configurable",
+      true,
+      "get",
+      () => undefined,
+      "set",
+      function (ctx) {
+        quietDefine(
+          this,
+          "ctx",
+          quietRecord(["configurable", true, "enumerable", true, "writable", true, "value", quietContext(ctx)])
+        );
+      },
+    ])
+  );
+}
 const quietUnhandled = (event) => {
   quietApply(quietPrevent, event, []);
 };
@@ -217,13 +226,17 @@ quietApply(quietListen, globalThis, ["error", quietUnhandled]);
 /** Every console method silenced, and nothing else left for workerd to report. */
 const quietSource = (options: QuietOptions): string => {
   const errors = quietErrors(options);
-  return `${errors.imports}const silent = () => undefined;
+  const silencing =
+    options.keepConsole === true
+      ? ""
+      : `const silent = () => undefined;
 for (const name of Object.getOwnPropertyNames(console)) {
   if (typeof console[name] === "function") {
     console[name] = silent;
   }
 }
-${errors.source}`;
+`;
+  return `${errors.imports}${silencing}${errors.source}`;
 };
 
 /** Where a hashbang's line ends: at any line terminator JavaScript has. */

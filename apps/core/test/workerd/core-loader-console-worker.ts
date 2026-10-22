@@ -2,6 +2,11 @@ import { quietLoader } from "@grasp-os/shared/quiet-loader";
 
 import { callSandboxed } from "../../src/sandboxed.ts";
 import type { SandboxedEnv } from "../../src/sandboxed.ts";
+import type { Host } from "./core-loader-console-host.ts";
+import { isMode, isObjectCase } from "./core-loader-console-host.ts";
+
+export { Host } from "./core-loader-console-host.ts";
+export { TestTail } from "./core-loader-console-tail.ts";
 
 // Isolates core loads in its own Loader off Cloudflare
 // (scripts/workerd-core-loader-console.test.ts, GRA-910): no `SANDBOX_HOST`,
@@ -30,6 +35,10 @@ import type { SandboxedEnv } from "../../src/sandboxed.ts";
 // - `/cjs`: a main module that can't import the quiet module first.
 // - `/control`: the same code in the Loader as it is, which shows workerd's
 //   output is read at all.
+// - `/do/<case>/<mode>`: an App's Durable Object class, as `loadServer`
+//   runs it: a facet of a host object, the class from a Loader isolate with
+//   a tail (`quiet`: through `quietLoader`; `loud`: as the Loader gives it;
+//   `untailed`: through `quietLoader`, with no tail).
 
 /** What an isolate holds that no log may carry, by route. */
 const values = {
@@ -530,7 +539,26 @@ const answerOf = async (route: string, env: SandboxedEnv): Promise<unknown> => {
 export default {
   async fetch(request, env) {
     const { pathname } = new URL(request.url);
+    const object = /^\/do\/(?<name>\w+)\/(?<mode>quiet|loud|untailed)$/u.exec(
+      pathname
+    )?.groups;
+    if (
+      object?.name !== undefined &&
+      isObjectCase(object.name) &&
+      object.mode !== undefined &&
+      isMode(object.mode)
+    ) {
+      const answer = await env.HOST.getByName("host").run(
+        object.name,
+        object.mode
+      );
+      return new Response(answer, {
+        headers: { "content-type": "application/json" },
+      });
+    }
     const answered = await answerOf(pathname, env);
     return Response.json({ answered, values });
   },
-} satisfies ExportedHandler<SandboxedEnv>;
+} satisfies ExportedHandler<
+  SandboxedEnv & { HOST: DurableObjectNamespace<Host> }
+>;
