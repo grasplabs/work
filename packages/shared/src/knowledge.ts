@@ -964,10 +964,6 @@ export const knowledgeErrors = defineErrorFamily({
     "This document has too many headings to save. Split it into several documents.",
   "knowledge.too_many_links":
     "This document has too many links to save. Split it into several documents.",
-  "knowledge.excluded":
-    "This wasn't saved: it contains sensitive personal data, such as someone's health, pay or beliefs, which Grasp doesn't keep. Remove it and save again.",
-  "knowledge.held":
-    "This wasn't saved: it may contain sensitive personal data, such as someone's health, pay or beliefs, which Grasp doesn't keep. Remove it and save again.",
   "knowledge.conflict":
     "This document changed since you opened it. Load the latest version and apply your change to it.",
   "knowledge.purge_expired":
