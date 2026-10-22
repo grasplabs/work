@@ -13,6 +13,7 @@ import {
   maxTemplateKeyLength,
   taskAtLine,
 } from "@grasp-os/open-workflow/generate";
+import { profileLimits } from "@grasp-os/open-workflow/limits";
 import type { CheckedWorkflow } from "@grasp-os/open-workflow/validate";
 import { releaseArtifactSchema } from "@grasp-os/shared/app-releases";
 import type { ReleaseArtifact } from "@grasp-os/shared/app-releases";
@@ -301,12 +302,15 @@ const sealedListenSchema = z.strictObject({
         correlate: z
           .array(
             z.strictObject({
-              name: z.string().min(1).max(64),
+              name: z
+                .string()
+                .min(1)
+                .max(profileLimits.maxCorrelationNameLength),
               attribute: z.enum(["id", "source", "subject", "datacontenttype"]),
             })
           )
           .min(1)
-          .max(16)
+          .max(profileLimits.maxCorrelations)
           .optional(),
       })
     )
