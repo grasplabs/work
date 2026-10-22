@@ -3742,12 +3742,8 @@ msgstr "Traité"
 msgid "Download"
 msgstr "Télécharger"
 
-#. placeholder {0}: file.name
-#: src/routes/_shell.workflows.$workflow_.runs.$run.tsx
-msgid "Download {0}"
-msgstr "Télécharger {0}"
-
 #: src/knowledge/uploads.tsx
+#: src/routes/_shell.workflows.$workflow_.runs.$run.tsx
 msgid "Download {name}"
 msgstr "Télécharger {name}"
 
@@ -3874,10 +3870,9 @@ msgstr "Entretiens avec les employés"
 msgid "Ended"
 msgstr "Terminé"
 
-#. placeholder {0}: formatDateTime(summary.endedAt)
 #: src/routes/_shell.workflows.$workflow_.runs.$run.tsx
-msgid "Ended {0}"
-msgstr "Terminé {0}"
+msgid "Ended {ended}"
+msgstr "Terminé {ended}"
 
 #: src/workflows/workflow-diagram.tsx
 msgid "Ends the workflow"

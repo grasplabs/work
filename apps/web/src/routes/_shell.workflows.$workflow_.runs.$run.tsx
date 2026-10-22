@@ -59,27 +59,30 @@ const RunFiles = ({
         </TableRow>
       </TableHeader>
       <TableBody>
-        {files.map((file) => (
-          <TableRow key={file.id}>
-            <TableCell>{file.name}</TableCell>
-            <TableCell>{formatFileSize(file.size)}</TableCell>
-            <TableCell>{formatDateTime(file.finishedAt)}</TableCell>
-            <TableCell>
-              {/* Core serves it as an attachment only, to those who may download it. */}
-              <a
-                aria-label={t`Download ${file.name}`}
-                className={buttonVariants({
-                  size: "icon-sm",
-                  variant: "ghost",
-                })}
-                download
-                href={runFileContentPath(workflow, run, file.id)}
-              >
-                <DownloadIcon />
-              </a>
-            </TableCell>
-          </TableRow>
-        ))}
+        {files.map((file) => {
+          const { name } = file;
+          return (
+            <TableRow key={file.id}>
+              <TableCell>{file.name}</TableCell>
+              <TableCell>{formatFileSize(file.size)}</TableCell>
+              <TableCell>{formatDateTime(file.finishedAt)}</TableCell>
+              <TableCell>
+                {/* Core serves it as an attachment only, to those who may download it. */}
+                <a
+                  aria-label={t`Download ${name}`}
+                  className={buttonVariants({
+                    size: "icon-sm",
+                    variant: "ghost",
+                  })}
+                  download
+                  href={runFileContentPath(workflow, run, file.id)}
+                >
+                  <DownloadIcon />
+                </a>
+              </TableCell>
+            </TableRow>
+          );
+        })}
       </TableBody>
     </Table>
   );
@@ -110,6 +113,8 @@ const ResourceRunPage = () => {
     );
   }
   const { data: summary } = status;
+  const ended =
+    summary.endedAt === null ? null : formatDateTime(summary.endedAt);
   return (
     <>
       <SiteHeader crumbs={crumbs} />
@@ -123,9 +128,9 @@ const ResourceRunPage = () => {
             <span className="tabular-nums">
               {formatDateTime(summary.createdAt)}
             </span>
-            {summary.endedAt === null ? null : (
+            {ended === null ? null : (
               <span className="tabular-nums">
-                <Trans>Ended {formatDateTime(summary.endedAt)}</Trans>
+                <Trans>Ended {ended}</Trans>
               </span>
             )}
           </div>
