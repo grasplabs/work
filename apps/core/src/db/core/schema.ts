@@ -3658,6 +3658,29 @@ export const workflowResourceRunControls = sqliteTable(
 );
 
 /**
+ * The keys a screen's pause or resume of an independent run was asked
+ * under (screen-workflows.ts), each with the receipt it was answered: its
+ * own, or, for one that joined a pause or resume already unresolved, that
+ * one's. One per run, kind and key, so a request sent again under a key
+ * is answered the receipt it was first, never decided anew: a retry of a
+ * request that joined another can't undo a control admitted since.
+ */
+export const workflowResourceRunControlKeys = sqliteTable(
+  "workflow_resource_run_control_keys",
+  {
+    runId: text("run_id")
+      .notNull()
+      .references(() => workflowResourceRuns.id),
+    kind: text({ enum: ["pause", "resume"] }).notNull(),
+    key: text().notNull(),
+    receiptId: text("receipt_id")
+      .notNull()
+      .references(() => workflowResourceRunControls.id),
+  },
+  (table) => [primaryKey({ columns: [table.runId, table.kind, table.key] })]
+);
+
+/**
  * The host catalog of contracts independent workflows bind besides each
  * other (spec 13.2; src/workflow-catalog.ts): operation, connector, model
  * and decision contracts, each published once by an admin and never

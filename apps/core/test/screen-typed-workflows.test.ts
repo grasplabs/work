@@ -982,6 +982,92 @@ describe(
       });
     });
 
+    it("answers a retry of a pause that joined another that pause's receipt, never undoing a resume admitted since", async () => {
+      const { builder, app, reference } = await requestsApp("PT1H");
+      const lease = await screenOf(builder, app);
+      const channel = workflowChannel(screenClient(builder, app, lease));
+      const read = readWorkflowReference(reference);
+      const handle = await channel.start(read, { who: "Ada" });
+      const stopRun = channel.followRun(read, handle.runId, () => {
+        // Read below.
+      });
+      const statusIs = async (status: string): Promise<void> => {
+        await vi.waitFor(() => {
+          expect(channel.peekRun(read, handle.runId).value?.status).toBe(
+            status
+          );
+        }, settles);
+      };
+      await statusIs("running");
+      const asked = async (command: "pause" | "resume", key: string) =>
+        outcomeOf(
+          await called(
+            builder,
+            app,
+            lease,
+            JSON.stringify({
+              workflow: wireOf(reference),
+              command,
+              runId: handle.runId,
+              idempotencyKey: key,
+            })
+          )
+        );
+      // Pause A, admitted a while ago and not yet sent: stalled.
+      await env.DB.batch([
+        env.DB.prepare(
+          "UPDATE workflow_resource_runs SET control_generation = control_generation + 1, summary_revision = summary_revision + 1 WHERE id = ?"
+        ).bind(handle.runId),
+        env.DB.prepare(
+          "INSERT INTO workflow_resource_run_controls (id, run_id, app_id, principal_id, key, kind, state, generation, created_at, next_at) SELECT ?, id, ?, ?, ?, 'pause', 'admitted', control_generation, ?, ? FROM workflow_resource_runs WHERE id = ?"
+        ).bind(
+          crypto.randomUUID(),
+          app,
+          builder.userId,
+          keyOf(),
+          Date.now() - 120_000,
+          Date.now() + 3_600_000,
+          handle.runId
+        ),
+      ]);
+      await tellQueryFollowers(env, handle.runId);
+      await vi.waitFor(() => {
+        expect(
+          channel.peekRun(read, handle.runId).value?.control.pendingControl
+        ).toStrictEqual({ kind: "pause", stage: "applying" });
+      }, settles);
+
+      // Pause B joins A, which settles; B's answer is lost. Another
+      // screen resumes the run; then B is sent again under its key.
+      const keyB = keyOf();
+      const joined = await asked("pause", keyB);
+      await statusIs("paused");
+      const resumed = await asked("resume", keyOf());
+      await statusIs("running");
+      const retried = await asked("pause", keyB);
+      stopRun();
+      const receipts = await env.DB.prepare(
+        "SELECT kind, state FROM workflow_resource_run_controls WHERE run_id = ? ORDER BY generation"
+      )
+        .bind(handle.runId)
+        .all<{ kind: string; state: string }>();
+
+      expect({
+        joined: staged(joined),
+        resumed: staged(resumed),
+        retried: staged(retried),
+        receipts: receipts.results,
+      }).toStrictEqual({
+        joined: { kind: "pause", state: "applied" },
+        resumed: { kind: "resume", state: "applied" },
+        retried: { kind: "pause", state: "applied" },
+        receipts: [
+          { kind: "pause", state: "applied" },
+          { kind: "resume", state: "applied" },
+        ],
+      });
+    });
+
     it("supersedes a stalled pause a newer control overtook, never sending it", async () => {
       const { builder, app, reference } = await requestsApp("PT1H");
       const lease = await screenOf(builder, app);
