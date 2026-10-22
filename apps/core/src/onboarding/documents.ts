@@ -259,7 +259,7 @@ export const shareDocument = async (
     purpose: "reading",
     model,
     tokensIn: answered.usage.inputTokens,
-    tokensCached: 0,
+    tokensCached: answered.usage.cacheRead,
     tokensOut: answered.usage.outputTokens,
     seconds: 0,
   });

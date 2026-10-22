@@ -111,7 +111,6 @@ import {
   charactersOf,
   parseVoiceRef,
   voicePricesOf,
-  voiceProvider,
   wordsOf,
 } from "./voice-models.ts";
 import type { VoiceRef } from "./voice-models.ts";
@@ -626,8 +625,17 @@ export interface ModelAnswer<Output> {
   output: Output;
   /** The model hit its output limit, so the text may stop short. */
   truncated: boolean;
-  /** Across every request the call made. */
-  usage: { inputTokens: number; outputTokens: number };
+  /**
+   * Across every request the call made. `inputTokens` counts the whole
+   * prompt, cached or not; `cacheRead` and `cacheWrite` say how much of it
+   * was read from the provider's prompt cache, and written to it.
+   */
+  usage: {
+    inputTokens: number;
+    outputTokens: number;
+    cacheRead: number;
+    cacheWrite: number;
+  };
   /** In US dollars, at the provider's list prices. */
   cost: number;
 }
@@ -929,6 +937,10 @@ interface GatewayResponse {
 interface Admission {
   id: string;
   reservedMicros: number;
+  /** The most tokens its prompt can be, as reserved: its body's bytes and more. */
+  promptTokens: number;
+  /** The most tokens its answer can be: the cap its body sets. */
+  answerCap: number;
 }
 
 interface Sent extends GatewayResponse {
@@ -1497,7 +1509,12 @@ const admitRequest = async (
       if (perRequest !== undefined) {
         perRequest.heldMicros += reservedMicros;
       }
-      return { id, reservedMicros };
+      return {
+        id,
+        reservedMicros,
+        promptTokens: bound.inputTokens,
+        answerCap: bound.outputTokens,
+      };
     }
     return { held: heldBecause(call, admitted, route.disclose) };
   } catch (error) {
@@ -1819,6 +1836,8 @@ interface Failure {
    * `cancelled` when it was stopped here.
    */
   errorType: string | undefined;
+  /** Why it was stopped here, if it was: cut off before it ended. */
+  stopped: Stopped | undefined;
 }
 
 const providerErrorType = (text: string): string | undefined => {
@@ -1848,13 +1867,14 @@ const failureOf = (
   stopped: Stopped | undefined
 ): Failure => {
   if (stopped !== undefined) {
-    return { status, errorType: stopped };
+    return { status, errorType: stopped, stopped };
   }
   const text = answer.errorMessage?.trim() ?? "";
   const quoted = failedStatusPattern.exec(text)?.groups?.status;
   return {
     status: quoted === undefined ? status : Number(quoted),
     errorType: providerErrorType(text),
+    stopped: undefined,
   };
 };
 
@@ -2204,6 +2224,60 @@ const countedTokens = ({
     : undefined;
 
 /**
+ * What a request cut off mid-answer, by its caller or its deadline, is
+ * known to have used by then. The prompt as the provider counted it at
+ * the start (Anthropic's `message_start`); where it sent no count yet
+ * (chat completions count in their last chunk), the prompt's bound, as
+ * its admission reserved it: never an estimate below what it may bill.
+ * The answer as far as it was relayed, at {@link estimatedCharsPerToken}
+ * characters a token where that is more than was counted, but never an
+ * estimate past the answer's cap, which the provider stops at. None where
+ * the counts that came aren't counts, or hold one-hour cache writes,
+ * which the catalog doesn't price.
+ */
+const cutTokens = (
+  { promptTokens, answerCap }: Admission,
+  answer: AssistantMessage
+): TokenCounts | undefined => {
+  const { input, output, cacheRead, cacheWrite, cacheWrite1h } = answer.usage;
+  if (
+    ![input, output, cacheRead, cacheWrite].every(isCount) ||
+    (cacheWrite1h ?? 0) !== 0
+  ) {
+    return undefined;
+  }
+  const relayed = Math.max(
+    output,
+    Math.min(estimatedTokens(receivedChars(answer)), answerCap)
+  );
+  return input + cacheRead + cacheWrite > 0
+    ? { input, output: relayed, cacheRead, cacheWrite }
+    : { input: promptTokens, output: relayed, cacheRead: 0, cacheWrite: 0 };
+};
+
+/**
+ * How the ledger settles the provider request whose answer streamed: at
+ * the provider's count once it ended whole; at what it is known to have
+ * used once it was cut off here (`cutTokens`), so a caller who talks on
+ * pays for what it used, and its reservation goes back at once; and
+ * otherwise (it failed, or answered with no usage at all) not at all:
+ * it keeps its whole reservation, never an estimate below what the
+ * provider may bill.
+ */
+const settlementOf = (
+  pending: Admission,
+  answer: AssistantMessage,
+  failure: Failure | undefined
+): Settlement => {
+  if (failure?.stopped !== undefined) {
+    const tokens = cutTokens(pending, answer);
+    return tokens === undefined ? { by: "unknown" } : { by: "cut", tokens };
+  }
+  const tokens = hasFailed(answer) ? undefined : countedTokens(answer.usage);
+  return tokens === undefined ? { by: "unknown" } : { by: "usage", tokens };
+};
+
+/**
  * Records one request in the audit log, however it ended, with what it
  * used as the provider counted it, or an estimate where a request that
  * failed mid-answer has no count (`usedBy`); and settles its provider
@@ -2219,21 +2293,14 @@ const record = async (
   failure?: Failure
 ): Promise<void> => {
   // Settled first, so nothing that goes wrong with the audit event keeps
-  // the provider request from being charged what it used. The one whose
-  // answer streamed is charged the provider's count; one that ended
-  // without a whole count (failed, timed out or cancelled once accepted,
-  // or answered with no usage at all) keeps its whole reservation, never
-  // an estimate below what the provider may bill.
+  // the provider request from being charged what it used (`settlementOf`).
   const { pending, logId, status } = sent;
   let settled: Settled | undefined = undefined;
   if (pending !== undefined) {
-    const tokens = hasFailed(sent.answer)
-      ? undefined
-      : countedTokens(sent.answer.usage);
     ({ settled } = await settleAdmitted(
       admitted,
       pending,
-      tokens === undefined ? { by: "unknown" } : { by: "usage", tokens }
+      settlementOf(pending, sent.answer, failure)
     ));
   }
   const used = usedBy(admitted, sent);
@@ -2526,7 +2593,12 @@ const answerCall = async <Output>(
   askAgain = true
 ): Promise<ModelAnswer<Output>> => {
   const { call } = request;
-  const usage = { inputTokens: 0, outputTokens: 0 };
+  const usage = {
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
+  };
   let cost = 0;
   // A call with a schema asks once more when the answer doesn't fit it.
   const attempts = schema === undefined || !askAgain ? 1 : 2;
@@ -2543,6 +2615,8 @@ const answerCall = async <Output>(
     const { answer } = sent;
     usage.inputTokens += inputTokens(answer.usage);
     usage.outputTokens += answer.usage.output;
+    usage.cacheRead += answer.usage.cacheRead;
+    usage.cacheWrite += answer.usage.cacheWrite;
     cost += pricedCost(request.price, answer.usage);
     const text = answerText(answer);
     const truncated = answer.stopReason === "length";
@@ -2873,6 +2947,9 @@ const relayOrFail = async (
 // request against the budgets, at its price per character, and the audit
 // log records it, never the line. ElevenLabs is reached through AI Gateway
 // over the AI binding, with the key AI Gateway stores: core sends none.
+// The gateway reaches it at the path the deployment's config names
+// (`voice.provider`): ElevenLabs's native host, or its EU host through a
+// custom provider. Nothing reaches ElevenLabs but through the gateway.
 
 /** Text without anything a URL's path would read apart: a voice's ID. */
 const voiceIdPattern = /^[A-Za-z0-9]{1,64}$/u;
@@ -3016,6 +3093,9 @@ const largestSpeech: SpeechRecord = {
   ledger: largestRecord.ledger,
 };
 
+/** The gateway path to ElevenLabs's native host, unless the config names another. */
+const nativeVoiceProvider = "elevenlabs";
+
 /** A line's way to the voice model at the deployment's gateway. */
 interface SpeechRoute extends Admitting {
   call: SpeechSession;
@@ -3086,7 +3166,7 @@ const admitSpeech = async (
     judged: verdict.judged,
     price,
     transport: createAiBindingFetch(env.AI),
-    url: `https://workers-binding.ai/ai-gateway/gateways/${config.gateway}/${voiceProvider}/v1/text-to-speech/${call.voice}/with-timestamps?${query.toString()}`,
+    url: `https://workers-binding.ai/ai-gateway/gateways/${config.gateway}/${config.voice?.provider ?? nativeVoiceProvider}/v1/text-to-speech/${call.voice}/with-timestamps?${query.toString()}`,
     body: JSON.stringify({
       text: call.text,
       model_id: ref.id,
@@ -3108,7 +3188,14 @@ const admitSpeech = async (
   };
 };
 
-/** The provider request for a line, as the ledger admitted it (`id`). */
+/**
+ * The provider request for a line, as the ledger admitted it (`id`). It
+ * carries the deployment's gateway token where one is set
+ * (`AI_GATEWAY_TOKEN`) in place of the binding's placeholder: an
+ * authenticated gateway asks for it on a realtime WebSocket, which
+ * doesn't go over the AI binding, and strips it from the binding's
+ * requests, which need none. Never logged.
+ */
 const speechRequest = (
   route: SpeechRoute,
   id: string,
@@ -3124,6 +3211,10 @@ const speechRequest = (
     if (value !== null) {
       headers[name] = value;
     }
+  }
+  const token = route.env.AI_GATEWAY_TOKEN;
+  if (token !== undefined && token !== "") {
+    headers["cf-aig-authorization"] = `Bearer ${token}`;
   }
   return withRequestId(
     { method: "POST", headers, body: route.body, signal },

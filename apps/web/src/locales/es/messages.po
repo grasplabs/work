@@ -209,6 +209,10 @@ msgstr "{binding}: {actions} sobre {object}, a la espera de un administrador"
 msgid "{binding}: {actions} on {object}, waiting for an admin (asked by the agent)"
 msgstr "{binding}: {actions} sobre {object}, a la espera de un administrador (pedido por el agente)"
 
+#: src/routes/_shell.settings.security.tsx
+msgid "{browser} on {system}"
+msgstr "{browser} en {system}"
+
 #: src/brain/brain.ts
 msgid "{category} by {vendor}"
 msgstr "{category} de {vendor}"
@@ -380,6 +384,10 @@ msgstr "{daily} al día"
 #: src/dashboard/signals.tsx
 msgid "{days, plural, one {# day} other {# days}}"
 msgstr "{days, plural, one {# día} other {# días}}"
+
+#: src/routes/_shell.settings.security.tsx
+msgid "{devices, plural, one {Signed in on # device. Sign out any you do not recognise.} other {Signed in on # devices. Sign out any you do not recognise.}}"
+msgstr "{devices, plural, one {Sesión iniciada en # dispositivo. Cierra la sesión en cualquiera que no reconozcas.} other {Sesión iniciada en # dispositivos. Cierra la sesión en cualquiera que no reconozcas.}}"
 
 #: src/dashboard/signals.tsx
 msgid "{doc} in {where} is {late, plural, one {# day} other {# days}} past its review date."
@@ -1891,6 +1899,7 @@ msgid "Another version of this domain was made current since this list was read.
 msgstr "Desde que se leyó esta lista, otra versión de este dominio pasó a ser la actual. La lista ya la muestra: revisa esa versión y vuelve a aprobar."
 
 #: src/brain/brain.ts
+#: src/chat/brain-questions.tsx
 msgid "Answer"
 msgstr "Respuesta"
 
@@ -2015,6 +2024,10 @@ msgstr "Aplicaciones en uso en los dispositivos"
 #: src/brain/brain-source-contents.tsx
 msgid "Applications signed in to"
 msgstr "Aplicaciones con inicio de sesión"
+
+#: src/onboarding/review-parts.tsx
+msgid "Apply it if the sender’s domain is {domain}."
+msgstr "Aplícala si el dominio del remitente es {domain}."
 
 #: src/engines/screen-approval.tsx
 msgid "Approval"
@@ -2147,6 +2160,10 @@ msgstr "Artículo"
 msgid "as {binding}"
 msgstr "como {binding}"
 
+#: src/onboarding/review-parts.tsx
+msgid "As its action, set the spam confidence level (SCL) to “Bypass spam filtering”, then save it."
+msgstr "Como acción, establece el nivel de confianza de correo no deseado (SCL) en «Omitir el filtrado de correo no deseado» y guárdala."
+
 #: src/dashboard/report.ts
 msgid "As of {date}."
 msgstr "A fecha de {date}."
@@ -2158,6 +2175,11 @@ msgstr "Como los nombró la empresa, hasta que llegue la lista de personal."
 #: src/routes/_shell.onboarding.stephen.tsx
 msgid "As the kickoff suggests"
 msgstr "Como propone el arranque"
+
+#. placeholder {0}: gap.owner
+#: src/chat/brain-questions.tsx
+msgid "Ask {0}"
+msgstr "Preguntar a {0}"
 
 #: src/chat/thread.tsx
 msgid "Ask again"
@@ -2584,6 +2606,7 @@ msgstr "Surgió en {source}"
 msgid "Can {verbs} company data"
 msgstr "Puede {verbs} datos de la empresa"
 
+#: src/chat/brain-questions.tsx
 #: src/chat/project-dialog.tsx
 #: src/decision-confirmation.tsx
 #: src/engines/package-approvals.tsx
@@ -2654,6 +2677,11 @@ msgstr "modificar"
 #: src/routes/_shell.settings.outcomes.tsx
 msgid "Change"
 msgstr "Cambio"
+
+#: src/onboarding/review-parts.tsx
+msgctxt "change how it was settled"
+msgid "Change"
+msgstr "Cambiar"
 
 #: src/onboarding/send-plan-form.tsx
 msgctxt "change which teams"
@@ -3267,10 +3295,12 @@ msgid "Copenhagen"
 msgstr "Copenhague"
 
 #: src/chat/thread.tsx
+#: src/onboarding/review-parts.tsx
 #: src/onboarding/setup-steps.tsx
 msgid "Copied"
 msgstr "Copiado"
 
+#: src/onboarding/review-parts.tsx
 #: src/onboarding/setup-steps.tsx
 msgid "Copy"
 msgstr "Copiar"
@@ -3588,6 +3618,10 @@ msgstr "Herramientas de desarrollo"
 #: src/settings/pulse-people.tsx
 msgid "Device"
 msgstr "Dispositivo"
+
+#: src/routes/_shell.settings.security.tsx
+msgid "Devices"
+msgstr "Dispositivos"
 
 #: src/workflows/definition-editor.tsx
 msgid "Diagram"
@@ -4369,6 +4403,16 @@ msgstr "Deriva de otro evento"
 msgid "Follows from: {parentTitle}"
 msgstr "Deriva de: {parentTitle}"
 
+#. placeholder {0}: gap.owner
+#: src/chat/brain-questions.tsx
+msgid "For {0}"
+msgstr "Para {0}"
+
+#. placeholder {0}: gap.owner
+#: src/chat/brain-questions.tsx
+msgid "For {0}, who was asked"
+msgstr "Para {0}, a quien ya se preguntó"
+
 #: src/inbox/item-detail.tsx
 msgid "For {person}"
 msgstr "Para {person}"
@@ -4897,6 +4941,14 @@ msgstr "En Políticas"
 msgid "In the brain"
 msgstr "En el Brain"
 
+#: src/onboarding/review-parts.tsx
+msgid "In the Exchange admin center, go to Mail flow, then Rules, and add a rule."
+msgstr "En el Centro de administración de Exchange, ve a Flujo de correo y luego a Reglas, y agrega una regla."
+
+#: src/onboarding/review-parts.tsx
+msgid "In the Google Admin console, go to Apps, then Google Workspace, then Gmail, then Spam, phishing and malware."
+msgstr "En la Consola del administrador de Google, ve a Aplicaciones, luego a Google Workspace, luego a Gmail y luego a Spam, phishing y software malicioso."
+
 #: src/chat/builds.tsx
 msgid "In the proposer's words"
 msgstr "En palabras de quien lo propone"
@@ -5147,6 +5199,10 @@ msgstr "Se cobraron {amount} el {when}."
 msgid "It was released on {when}, charging nothing."
 msgstr "Se liberó el {when}, sin cobrar nada."
 
+#: src/onboarding/review-parts.tsx
+msgid "It’s done"
+msgstr "Hecho"
+
 #: src/chat/cited-note.tsx
 msgid "It's gone, or you can't read it."
 msgstr "Ya no existe o no puedes leerla."
@@ -5266,6 +5322,10 @@ msgstr "Ir al mensaje más reciente"
 #: src/connections/connect-dialog.tsx
 msgid "Just for you"
 msgstr "Solo para ti"
+
+#: src/onboarding/review-parts.tsx
+msgid "Keep “Require sender authentication” on, then save."
+msgstr "Deja activada la opción «Requerir autenticación del remitente» y guarda."
 
 #: src/workflows/definition-editor.tsx
 msgid "Keep my text"
@@ -5457,6 +5517,10 @@ msgstr "Deja que una app de IA como Claude o ChatGPT use Grasp. Lee lo que Grasp
 #: src/onboarding/document-drop.tsx
 msgid "Let go to add them"
 msgstr "Suelta para añadirlos"
+
+#: src/onboarding/review-parts.tsx
+msgid "Let Grasp’s mail through"
+msgstr "Deja pasar los correos de Grasp"
 
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Let the interviews run again"
@@ -7034,6 +7098,7 @@ msgctxt "inbox item kind"
 msgid "Open question"
 msgstr "Pregunta abierta"
 
+#: src/chat/brain-questions.tsx
 #: src/routes/_shell.brain.$noteId.tsx
 msgid "Open questions"
 msgstr "Preguntas abiertas"
@@ -8496,6 +8561,10 @@ msgctxt "send the question"
 msgid "Send"
 msgstr "Enviar"
 
+#: src/chat/brain-questions.tsx
+msgid "Send answer"
+msgstr "Enviar respuesta"
+
 #: src/knowledge/collection-markers.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 #: src/workflows/resource-params.tsx
@@ -8563,6 +8632,10 @@ msgstr "Establecido. Escribe un valor nuevo para reemplazarlo."
 #: src/routes/_shell.settings.tsx
 msgid "Settings"
 msgstr "Ajustes"
+
+#: src/onboarding/review-parts.tsx
+msgid "Settled: {choice}"
+msgstr "Resuelto: {choice}"
 
 #: src/dashboard/standard-widgets.tsx
 msgid "Several workflows run with AI, across most of its work by hand."
@@ -8719,8 +8792,13 @@ msgid "Sign in with your organization's account."
 msgstr "Inicia sesión con la cuenta de tu organización."
 
 #: src/frame/person-menu.tsx
+#: src/routes/_shell.settings.security.tsx
 msgid "Sign out"
 msgstr "Cerrar sesión"
+
+#: src/routes/_shell.settings.security.tsx
+msgid "Sign out {device}, signed in {time}"
+msgstr "Cerrar la sesión en {device}, iniciada el {time}"
 
 #: src/routes/_shell.settings.members.tsx
 msgid "Sign out everywhere"
@@ -8756,6 +8834,10 @@ msgstr "Señales por tipo"
 msgctxt "state of a data processing agreement"
 msgid "Signed"
 msgstr "Firmado"
+
+#: src/routes/_shell.settings.security.tsx
+msgid "Signed in {time}"
+msgstr "Sesión iniciada el {time}"
 
 #: src/activity/audit-words.ts
 msgid "Signed in to a connection again"
@@ -10053,6 +10135,10 @@ msgstr "Esta decisión le corresponde a otra persona."
 msgid "This deployment allows no model."
 msgstr "Esta implementación no permite ningún modelo."
 
+#: src/routes/_shell.settings.security.tsx
+msgid "This device"
+msgstr "Este dispositivo"
+
 #: src/knowledge/document.tsx
 msgid "This document changed since you opened it. Version {newerVersion} is below; your text is kept. Start again from it, or replace it with your text."
 msgstr "Este documento cambió desde que lo abriste. La versión {newerVersion} está abajo; tu texto se conserva. Empieza de nuevo a partir de ella o sustitúyela por tu texto."
@@ -10400,6 +10486,10 @@ msgstr "Sin categoría"
 msgid "Under 5"
 msgstr "Menos de 5"
 
+#: src/onboarding/review-parts.tsx
+msgid "Under Spam, bypass spam filters for an approved senders list, and add {domain} to it."
+msgstr "En Spam, omite los filtros de spam para una lista de remitentes aprobados y añade {domain} a ella."
+
 #: src/dashboard/report.ts
 msgctxt "programme stage"
 msgid "Under way"
@@ -10457,6 +10547,10 @@ msgstr "Desconocido"
 msgctxt "whether a tool has AI"
 msgid "Unknown"
 msgstr "Desconocido"
+
+#: src/routes/_shell.settings.security.tsx
+msgid "Unknown device"
+msgstr "Dispositivo desconocido"
 
 #: src/routes/_shell.settings.outcomes.tsx
 #: src/routes/_shell.settings.tsx
@@ -11589,6 +11683,10 @@ msgstr "Sigues con la sesión iniciada. Vuelve a intentarlo en un momento."
 msgid "Your account"
 msgstr "Tu cuenta"
 
+#: src/chat/brain-questions.tsx
+msgid "Your answer"
+msgstr "Tu respuesta"
+
 #: src/decision-confirmation.tsx
 msgctxt "the answer a person gives a decision"
 msgid "Your answer"
@@ -11641,6 +11739,10 @@ msgstr "La cuenta de tu organización"
 #: src/onboarding/about-story.tsx
 msgid "Your people, documents and tools first. Then two weeks of short conversations with your team. At {threshold}%, your team can start."
 msgstr "Primero tu gente, tus documentos y tus herramientas. Después, dos semanas de conversaciones cortas con tu equipo. Al {threshold} %, tu equipo puede empezar."
+
+#: src/onboarding/review-parts.tsx
+msgid "Your people’s interview links come by email from Grasp’s sending domain. Allow it in your mail filter before they go out, so they don’t land in spam."
+msgstr "Los enlaces de entrevista de tu gente llegan por correo desde el dominio de envío de Grasp. Permítelo en tu filtro de correo antes de que se envíen, para que no acaben en spam."
 
 #: src/onboarding/setup-steps.tsx
 msgid "Your platform is open. We’ll walk you through it."
