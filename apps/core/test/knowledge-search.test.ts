@@ -459,7 +459,7 @@ const vocabulary = [
   "kwartaal",
   "leidinggevende",
   "loon",
-  "medewerker",
+  "werkoverleg",
   "overleg",
   "opleiding",
   "pensioen",

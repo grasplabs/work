@@ -112,16 +112,17 @@ export const brainArms = ["agent", "fullContext", "fullText"] as const;
 export type BrainArm = (typeof brainArms)[number];
 
 /**
- * Arms built to test the gate, to prove it holds. All but one break it:
+ * Arms built to test the gate, to prove it holds. All but two break it:
  * one hands the model a section its person may not read; on a task that
  * revokes access, one hands it what its person could read before the
- * revocation, as a cache that outlived it would, and one reads it in an
- * earlier turn of the same chat, which the chat's history sends again
- * after the revocation; the others change stored state mid-trial, in
- * Knowledge, in core, in R2, in the chat's object and in an earlier
- * chat's history. One must not break it: `readElsewhereFirst` reads what
- * the task revokes in another chat, before the revocation, while it was
- * allowed, so the gate's cut at the revocation is where it should be.
+ * revocation, as a cache that outlived it would; the others change stored
+ * state mid-trial, in Knowledge, in core, in R2, in the chat's object and
+ * in an earlier chat's history. Two must not break it, as they read what
+ * the task revokes before the revocation, while it was allowed:
+ * `readElsewhereFirst` in another chat, so the gate's cut at the
+ * revocation is where it should be; `historyAfterRevocation` in an earlier
+ * turn of the same chat, whose history withholds it from every request
+ * after the revocation (GRA-690).
  */
 export const brainControls = [
   "leakyContext",

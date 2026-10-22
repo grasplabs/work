@@ -30,6 +30,7 @@ import type { Staff } from "../access.ts";
 import { actIfChanged, audit, consoleDatabase } from "../db/act.ts";
 import type { ConsoleDatabase } from "../db/act.ts";
 import {
+  auditEvents,
   clients,
   clientWorkers,
   releases,
@@ -49,7 +50,14 @@ import { goOnToStop } from "./rollback.ts";
 import { storePrints } from "./shared-secrets.ts";
 import type { SharedPrints } from "./shared-secrets.ts";
 import { firstRing, rolloutScopeSchema, targetsOf } from "./targets.ts";
-import { approvalEvent, rolloutSteps, stepBudget } from "./workflow.ts";
+import {
+  approvalEvent,
+  fleetTargets,
+  retryEvent,
+  retrySteps,
+  rolloutSteps,
+  stepBudget,
+} from "./workflow.ts";
 import type { RolloutParams } from "./workflow.ts";
 
 /**
@@ -381,6 +389,112 @@ export const approveRollout = async (
   }
   const instance = await env.ROLLOUT.get(rolloutId);
   await instance.sendEvent({ type: approvalEvent(next), payload: {} });
+};
+
+const retryDetailSchema = z.object({ clients: z.int().nonnegative() });
+
+/**
+ * Retries rollout `rolloutId`'s failed fleet clients, as `staff`, once it
+ * reached every client and waits for it: each target set going again,
+ * the rollout running, audited, then its run told. The rollout keeps what
+ * a rollback of each puts back, resumes each one's deploy, and deploys
+ * none of the others again. Refused unless it waits with failed fleet
+ * clients (`not_waiting`), and when its run would pass the step budget
+ * (`too_large`: roll those clients out in a new rollout instead). Of two
+ * staff retrying at once, one does.
+ */
+export const retryRollout = async (
+  env: Env,
+  staff: Staff,
+  rolloutId: string
+): Promise<void> => {
+  const db = consoleDatabase(env.DB);
+  const notWaiting = new RolloutError(
+    "not_waiting",
+    `Rollout ${rolloutId} isn't waiting for a retry`
+  );
+  const [row] = await db
+    .select({ status: rollouts.status, releaseId: rollouts.releaseId })
+    .from(rollouts)
+    .where(eq(rollouts.id, rolloutId));
+  const failed =
+    row?.status === "waiting"
+      ? await fleetTargets(db, rolloutId, "failed")
+      : [];
+  if (row === undefined || failed.length === 0) {
+    throw notWaiting;
+  }
+  const targets = await db
+    .select({ ring: rolloutTargets.ring })
+    .from(rolloutTargets)
+    .where(eq(rolloutTargets.rolloutId, rolloutId));
+  const manifest =
+    row.releaseId === null ? null : await importedManifest(db, row.releaseId);
+  const apps =
+    manifest === null ? mostWorkers : Object.keys(manifest.workers).length;
+  const earlier = await db
+    .select({ detail: auditEvents.detail })
+    .from(auditEvents)
+    .where(
+      and(
+        eq(auditEvents.target, rolloutId),
+        eq(auditEvents.action, "rollout.retry")
+      )
+    );
+  const steps =
+    rolloutSteps(
+      new Set(targets.map(({ ring }) => ring)).size,
+      targets.length,
+      apps
+    ) +
+    earlier.reduce(
+      (sum, { detail }) =>
+        sum +
+        retrySteps(
+          retryDetailSchema.parse(JSON.parse(detail ?? "null")).clients,
+          apps
+        ),
+      0
+    ) +
+    retrySteps(failed.length, apps);
+  if (steps > stepBudget) {
+    throw new RolloutError(
+      "too_large",
+      `Retrying ${failed.length} clients would take the run to about ${steps} steps, over ${stepBudget}: roll them out in a new rollout instead`
+    );
+  }
+  const round = earlier.length + 1;
+  const retried = await actIfChanged(
+    db,
+    staff,
+    db
+      .update(rollouts)
+      .set({ status: "running", updatedAt: new Date() })
+      .where(and(eq(rollouts.id, rolloutId), eq(rollouts.status, "waiting"))),
+    {
+      action: "rollout.retry",
+      target: rolloutId,
+      detail: { clients: failed.length, round },
+    },
+    [
+      db
+        .update(rolloutTargets)
+        .set({ status: "pending", error: null, updatedAt: new Date() })
+        .where(
+          and(
+            eq(rolloutTargets.rolloutId, rolloutId),
+            inArray(rolloutTargets.clientId, failed),
+            eq(rolloutTargets.status, "failed"),
+            sql`EXISTS (SELECT 1 FROM ${rollouts} WHERE ${rollouts.id} = ${rolloutId} AND ${rollouts.status} = 'running')`
+          )
+        ),
+    ]
+  );
+  if (!retried) {
+    throw notWaiting;
+  }
+  const instance = await env.ROLLOUT.get(rolloutId);
+  await instance.sendEvent({ type: retryEvent(round), payload: {} });
 };
 
 /** Rollout `rolloutId`'s row and where its run is; null when there's no such rollout. */

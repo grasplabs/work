@@ -650,7 +650,12 @@ const requireObjectFits = (
   object: PermissionObject,
   actions: readonly string[]
 ): void => {
-  if (object.type === "platform" && subject.type !== "app") {
+  // The Brain is the one platform offer an agent or an independent
+  // workflow may hold too: Apps, runs and agents share its permission.
+  const brainReader =
+    actions.includes("brain") &&
+    (subject.type === "agent" || subject.type === "workflow");
+  if (object.type === "platform" && subject.type !== "app" && !brainReader) {
     refuseRequest("subject: Only an App uses what the platform offers.");
   }
   if (
