@@ -27,7 +27,7 @@ import {
 
 // Purging personal data from Knowledge. These tests start from the ways a
 // purge can fail or be abused: the text survives somewhere (an earlier
-// version, a section, a title, the search index's pages, memory cached
+// version, a section, a title, the search index's pages, a Brain memory, memory cached
 // by version); the purge record in the audit log,
 // which can't be purged, carries the text it removed; a purge reaches
 // documents it wasn't aimed at; someone other than the client's admins
@@ -484,6 +484,16 @@ describe("a personal purge", setUpTime, () => {
     });
     const memory = await admin.api.memory.collections();
     await saveOver(admin, memory.memory ?? "", "MEMORY.md", "# Company");
+    // What each asked the Brain to remember: the leaver's goes, with its
+    // receipt; the one who stays keeps theirs.
+    const remembered = await leaver.api.knowledge.remember(
+      { kind: "fact", text: `I am ${secret}.` },
+      { idempotencyKey: `purge-${unique()}-${unique()}` }
+    );
+    await stays.api.knowledge.remember(
+      { kind: "fact", text: `I work with ${secret}.` },
+      { idempotencyKey: `purge-${unique()}-${unique()}` }
+    );
     // Cached, keyed by the USER.md's version.
     const before = await forContext(env, asLeaver, work, own);
     const { personal } = await leaver.api.memory.collections();
@@ -502,6 +512,8 @@ describe("a personal purge", setUpTime, () => {
     const after = await forContext(env, asLeaver, work, own);
     const staysAfter = await forContext(env, asStays, work, own);
     const { plan, result } = outcomeOf ?? {};
+    const leaversMemories = await leaver.api.knowledge.memoriesList();
+    const staysMemories = await stays.api.knowledge.memoriesList();
     expect({
       plan: {
         ...plan,
@@ -516,6 +528,11 @@ describe("a personal purge", setUpTime, () => {
       leaversCollection: await outcome(
         leaver.api.knowledge.listDocuments(personal)
       ),
+      leaversMemories: leaversMemories.records,
+      leaversReceipt: await outcome(
+        leaver.api.knowledge.receiptsGet({ receiptId: remembered.id })
+      ),
+      staysMemories: staysMemories.records.map(({ statement }) => statement),
     }).toStrictEqual({
       plan: {
         documents: 1,
@@ -537,11 +554,15 @@ describe("a personal purge", setUpTime, () => {
       afterFiles: ["MEMORY.md"],
       stays: true,
       leaversCollection: "knowledge.not_found",
+      leaversMemories: [],
+      leaversReceipt: "brain.not_found",
+      staysMemories: [`I work with ${secret}.`],
     });
     // The one who stays still has the name in their own USER.md; the
     // leaver's text is gone from every table, the index's pages too.
     expect(heldBefore).toStrictEqual([
       "BRAIN_OBJECTS",
+      "brain_memories.statement",
       "search_trigrams.c3",
       "search_words.text",
       "search_words_content.c3",
@@ -586,6 +607,8 @@ describe("a personal purge", setUpTime, () => {
             userId: leaver.userId,
             documents: 1,
             versions: 2,
+            memories: 1,
+            receipts: 1,
           },
         },
         {
@@ -599,6 +622,8 @@ describe("a personal purge", setUpTime, () => {
             userId: leaver.userId,
             documents: 1,
             versions: 2,
+            memories: 1,
+            receipts: 1,
           },
         },
       ],
