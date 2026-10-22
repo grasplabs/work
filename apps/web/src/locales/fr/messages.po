@@ -3466,6 +3466,10 @@ msgstr "n’a pas pu être lu"
 msgid "Couldn't load this domain's workflows."
 msgstr "Impossible de charger les workflows de ce domaine."
 
+#: src/workflows/owner-picker.tsx
+msgid "Couldn't make {chosen} the owner of {named}"
+msgstr "Impossible de faire de {chosen} le responsable de {named}"
+
 #: src/workflows/independent-workflows.tsx
 msgid "Create"
 msgstr "Créer"
@@ -6547,6 +6551,10 @@ msgstr "Aucun autre domaine ne sert chaque fonction qu'il déclare, publique et 
 msgid "No owner"
 msgstr "Sans responsable"
 
+#: src/people/person-picker.tsx
+msgid "No owner yet"
+msgstr "Pas encore de responsable"
+
 #: src/engines/package-approvals.tsx
 msgid "No packages are approved for this domain."
 msgstr "Aucun paquet n’est approuvé pour ce domaine."
@@ -6735,6 +6743,10 @@ msgstr "Personne n’a lu ni modifié {doc} dans {where} {days, plural, one {ces
 #: src/dashboard/signals.tsx
 msgid "Nobody reads it"
 msgstr "Personne ne le lit"
+
+#: src/people/person-picker.tsx
+msgid "Nobody with that name."
+msgstr "Personne de ce nom."
 
 #: src/routes/_shell.landscape.$appId.usage.$userId.tsx
 msgid "Nobody with this link is connected to {appName}."
@@ -7565,10 +7577,23 @@ msgstr "Vous en êtes responsable"
 msgid "Owner"
 msgstr "Responsable"
 
+#: src/workflows/workflows-table.tsx
+msgctxt "column: who owns a workflow"
+msgid "Owner"
+msgstr "Responsable"
+
 #: src/brain/brain.ts
 msgctxt "note property: the team that owns an application"
 msgid "Owner"
 msgstr "Responsable"
+
+#: src/people/person-picker.tsx
+msgid "Owner: {owner}. Change owner"
+msgstr "Responsable : {owner}. Changer de responsable"
+
+#: src/people/person-picker.tsx
+msgid "Owner: nobody yet. Change owner"
+msgstr "Responsable : personne pour l’instant. Changer de responsable"
 
 #: src/landscape/landscape-audit.ts
 msgctxt "category of an audit event"
@@ -7648,6 +7673,10 @@ msgstr "Chemin"
 #: src/workflows/module-files.tsx
 msgid "Path of a new module"
 msgstr "Chemin d'un nouveau module"
+
+#: src/voice/sound-controls.tsx
+msgid "Pause"
+msgstr "Mettre en pause"
 
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Pause the interviews"
@@ -7859,6 +7888,10 @@ msgstr "Statistiques de la plateforme. Ce domaine peut lire le nombre d’exécu
 #: src/activity/audit-log.tsx
 msgid "Platform update"
 msgstr "Mise à jour de la plateforme"
+
+#: src/voice/sound-controls.tsx
+msgid "Play"
+msgstr "Lire"
 
 #: src/routes/_shell.policies.documents.$policyId.tsx
 #: src/routes/_shell.policies.index.tsx
@@ -8181,6 +8214,10 @@ msgstr "La lecture de ce qui a changé sur une connexion a échoué"
 #: src/routes/guest.tsx
 msgid "Reading what you wrote"
 msgstr "Lecture de ce que vous avez écrit"
+
+#: src/people/person-picker.tsx
+msgid "Reading who can own it…"
+msgstr "Lecture de qui peut en être responsable…"
 
 #: src/onboarding/setup-steps.tsx
 msgid "Reading your staff list"
@@ -8890,6 +8927,7 @@ msgid "Search owner"
 msgstr "Rechercher un responsable"
 
 #: src/onboarding/interview-people.tsx
+#: src/people/person-picker.tsx
 msgid "Search people"
 msgstr "Rechercher des personnes"
 
@@ -11005,6 +11043,14 @@ msgstr "Essayez une autre recherche, ou effacez les filtres pour voir tout le jo
 msgid "Trying again…"
 msgstr "Nouvel essai…"
 
+#: src/voice/sound-controls.tsx
+msgid "Turn sound off"
+msgstr "Couper le son"
+
+#: src/voice/sound-controls.tsx
+msgid "Turn sound on"
+msgstr "Activer le son"
+
 #: src/onboarding/about-story.tsx
 msgid "Twenty minutes each, easily. About fifteen a week."
 msgstr "Vingt minutes chacune, facilement. Une quinzaine par semaine."
@@ -11366,6 +11412,10 @@ msgstr "Page Vision"
 #: src/brain/brain.ts
 msgid "Vision page confirmed"
 msgstr "Page Vision confirmée"
+
+#: src/voice/sound-controls.tsx
+msgid "Volume"
+msgstr "Volume"
 
 #: src/workflows/workflow-diagram.tsx
 msgid "Waiting"

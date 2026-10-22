@@ -25,12 +25,14 @@ import {
 } from "../onboarding/setup.ts";
 import type { Kept, ReviewItemId, SetupStep } from "../onboarding/setup.ts";
 import { signInErrorSearch } from "../sign-in-errors.ts";
+import { resumeVoice, stopSpeaking, voiceLevel } from "../voice/voice.ts";
 
 // The client onboarding (prototype `routes/onboarding.tsx`): what a
 // company's admin goes through until Grasp opens, full screen and outside
 // the app. The brain on top, taking a new figure for each step, and one
 // step at a time below it, each fading in; the step is in the address, so
-// the browser's back and forward work too. Admins only: core refuses
+// the browser's back and forward work too. Stephen says each step as it
+// arrives (setup-parts.tsx). Admins only: core refuses
 // everyone else, and anyone else is taken home. Grasp's staff have their
 // own side of it at /onboarding.
 
@@ -256,6 +258,28 @@ const useBrainRoom = (step: SetupStep) => {
   };
 };
 
+/**
+ * Leaving the onboarding, Stephen stops mid-sentence rather than talk over
+ * the app; every step that follows is a new start, so a pause from the
+ * last one lets go.
+ */
+const useVoiceBetweenSteps = (step: SetupStep): void => {
+  useEffect(
+    () => () => {
+      stopSpeaking();
+      resumeVoice();
+    },
+    []
+  );
+  const last = useRef(step);
+  useEffect(() => {
+    if (last.current !== step) {
+      last.current = step;
+      resumeVoice();
+    }
+  }, [step]);
+};
+
 const Setup = () => {
   const { t, i18n } = useLingui();
   const navigate = useNavigate();
@@ -287,6 +311,7 @@ const Setup = () => {
     void navigate({ to: "/setup", search: { step: next } });
   };
   useArrowKeys(index, reached, go);
+  useVoiceBetweenSteps(step);
   const { body, cramped, brainSize, onMadeWay } = useBrainRoom(step);
 
   if (data === null) {
@@ -318,6 +343,7 @@ const Setup = () => {
                 className={cn("transition-all duration-500", brainSize)}
                 label={t`The company brain: ${percent}% known. Dark dots are what I know, grey dots what I still need to learn.`}
                 scene={scene}
+                voice={voiceLevel}
               />
             </div>
           )}
