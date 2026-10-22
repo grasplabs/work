@@ -197,6 +197,8 @@ const core :Workerd.Worker = (
       details: await run("/thrown-details"),
       polluted: await run("/thrown-polluted"),
       proxied: await run("/thrown-proxied"),
+      context: await run("/polluted-context"),
+      listener: await run("/polluted-listener"),
     };
     // The same isolates loaded as they are: each way is read.
     const loud: Record<string, boolean> = {};
@@ -239,6 +241,8 @@ const core :Workerd.Worker = (
       details: { ...thrown, details: { retryAfterMs: 5 } },
       polluted: thrown,
       proxied: thrown,
+      context: { answered: true },
+      listener: { answered: "done" },
       reported: false,
     });
   });

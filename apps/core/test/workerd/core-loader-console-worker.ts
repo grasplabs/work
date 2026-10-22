@@ -218,6 +218,27 @@ export class App extends WorkerEntrypoint {
     throw new TypeError(${JSON.stringify(values.thrown)});
   }
 }`,
+  // The quiet module's own reads, after the isolate's code replaced what
+  // they'd use: a Proxy trap its context's handler doesn't define, and the
+  // event's \`preventDefault\`. Each still answers, and prints nothing.
+  "/polluted-context": `export class App extends WorkerEntrypoint {
+  run() {
+    const throwing = () => { throw new TypeError(${JSON.stringify(values.thrown)}); };
+    for (const name of ["has", "set", "deleteProperty", "ownKeys", "getOwnPropertyDescriptor", "defineProperty"]) {
+      Object.defineProperty(Object.prototype, name, Object.assign(Object.create(null), { configurable: true, get: throwing }));
+    }
+    this.ctx.waitUntil(Promise.reject(new TypeError(${JSON.stringify(values.thrown)})));
+    return "waitUntil" in this.ctx;
+  }
+}`,
+  "/polluted-listener": `export class App extends WorkerEntrypoint {
+  async run() {
+    Event.prototype.preventDefault = () => { throw new TypeError(${JSON.stringify(values.thrown)}); };
+    Promise.reject(new TypeError(${JSON.stringify(values.thrown)}));
+    await scheduler.wait(50);
+    return "done";
+  }
+}`,
   // An entrypoint behind a Proxy that says its prototype is no
   // entrypoint's (a function's \`prototype\` is writable, so a Proxy may):
   // wrapped all the same.

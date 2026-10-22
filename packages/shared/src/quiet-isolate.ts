@@ -123,11 +123,32 @@ const quietErrors = (
 ): { imports: string; source: string } => ({
   imports: `import { WorkerEntrypoint as QuietEntrypoint } from "cloudflare:workers";
 ${options.nodejsCompat === true ? 'import quietNodeTimers from "node:timers";\n' : ""}`,
-  source: `const caught = (callback) =>
+  // Everything it uses is kept as it loads, before any of the isolate's
+  // own code can replace one, and every record it hands the runtime (a
+  // descriptor, a Proxy's handler) has no prototype: nothing the code puts
+  // on \`Object.prototype\` or a built-in later is read by it (GRA-939).
+  source: `const quietApply = Reflect.apply;
+const quietGet = Reflect.get;
+const quietDefine = Reflect.defineProperty;
+const quietCreate = Object.create;
+const quietBind = Function.prototype.bind;
+const quietResolve = Promise.resolve.bind(Promise);
+const quietThen = Promise.prototype.then;
+const quietPrevent = Event.prototype.preventDefault;
+const quietListen = globalThis.addEventListener;
+const quietRecord = (entries) => {
+  const record = quietCreate(null);
+  for (let index = 0; index < entries.length; index += 2) {
+    record[entries[index]] = entries[index + 1];
+  }
+  return record;
+};
+const quietSwallowed = () => undefined;
+const caught = (callback) =>
   typeof callback === "function"
     ? function (...args) {
         try {
-          return callback.apply(this, args);
+          return quietApply(callback, this, args);
         } catch {
           return undefined;
         }
@@ -137,7 +158,12 @@ const quietTimers = (timers) => {
   for (const name of ${timerNames}) {
     const timer = timers[name];
     if (typeof timer === "function") {
-      timers[name] = (callback, ...rest) => timer(caught(callback), ...rest);
+      timers[name] = function (...args) {
+        if (args.length > 0) {
+          args[0] = caught(args[0]);
+        }
+        return quietApply(timer, this, args);
+      };
     }
   }
 };
@@ -145,37 +171,46 @@ quietTimers(globalThis);
 ${options.nodejsCompat === true ? "quietTimers(quietNodeTimers);\n" : ""}const quietContext = (ctx) =>
   ctx === null || typeof ctx !== "object"
     ? ctx
-    : new Proxy(ctx, {
-        get: (target, property) => {
-          if (property === "waitUntil") {
-            return (promise) =>
-              target.waitUntil(Promise.resolve(promise).catch(() => undefined));
-          }
-          const value = Reflect.get(target, property, target);
-          return typeof value === "function" ? value.bind(target) : value;
-        },
-      });
+    : new Proxy(
+        ctx,
+        quietRecord([
+          "get",
+          (target, property) => {
+            const value = quietGet(target, property, target);
+            if (property === "waitUntil" && typeof value === "function") {
+              return (promise) =>
+                quietApply(value, target, [
+                  quietApply(quietThen, quietResolve(promise), [undefined, quietSwallowed]),
+                ]);
+            }
+            return typeof value === "function" ? quietApply(quietBind, value, [target]) : value;
+          },
+        ])
+      );
 // The entrypoint's constructor sets its context: it takes the quiet one.
-Object.defineProperty(QuietEntrypoint.prototype, "ctx", {
-  configurable: true,
-  get() {
-    return undefined;
-  },
-  set(ctx) {
-    Object.defineProperty(this, "ctx", {
-      configurable: true,
-      enumerable: true,
-      writable: true,
-      value: quietContext(ctx),
-    });
-  },
-});
-addEventListener("unhandledrejection", (event) => {
-  event.preventDefault();
-});
-addEventListener("error", (event) => {
-  event.preventDefault();
-});
+quietDefine(
+  QuietEntrypoint.prototype,
+  "ctx",
+  quietRecord([
+    "configurable",
+    true,
+    "get",
+    () => undefined,
+    "set",
+    function (ctx) {
+      quietDefine(
+        this,
+        "ctx",
+        quietRecord(["configurable", true, "enumerable", true, "writable", true, "value", quietContext(ctx)])
+      );
+    },
+  ])
+);
+const quietUnhandled = (event) => {
+  quietApply(quietPrevent, event, []);
+};
+quietApply(quietListen, globalThis, ["unhandledrejection", quietUnhandled]);
+quietApply(quietListen, globalThis, ["error", quietUnhandled]);
 `,
 });
 

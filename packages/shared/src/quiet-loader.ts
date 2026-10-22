@@ -419,27 +419,30 @@ const quietContext = (ctx) => {
   if (ctx === null || typeof ctx !== "object") {
     return ctx;
   }
-  return new Proxy(ctx, {
-    get: (target, property) => {
+  return new Proxy(ctx, recordOf([
+    "get",
+    (target, property) => {
       const value = get(target, property, target);
       if (property === "waitUntil" && typeof value === "function") {
         return (promise) => apply(value, target, [apply(then, resolve(promise), [undefined, swallowed])]);
       }
       return typeof value === "function" ? apply(bind, value, [target]) : value;
     },
-  });
+  ]));
 };
 const methodOf = (property) =>
   typeof property === "string" && property !== "constructor" && property !== "then";
 // An entrypoint whose constructor threw: every method answers that throw.
 const standIn = (error) =>
-  new Proxy(create(entrypointPrototype), {
-    get: (target, property) =>
+  new Proxy(create(entrypointPrototype), recordOf([
+    "get",
+    (target, property) =>
       methodOf(property) ? thrownCall(property, error) : get(target, property, target),
-  });
+  ]));
 const quietClass = (Base) => {
-  const handler = {
-    get: (target, property) => {
+  const handler = recordOf([
+    "get",
+    (target, property) => {
       let value;
       try {
         value = get(target, property, target);
@@ -451,7 +454,7 @@ const quietClass = (Base) => {
       }
       return (...args) => call(property, value, target, args);
     },
-  };
+  ]);
   return class extends Base {
     constructor(ctx, env) {
       let failed = false;
