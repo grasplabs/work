@@ -596,6 +596,58 @@ describe("test runs of a workflow's draft", () => {
     );
   });
 
+  it("starts no child workflow from a run task: a test run's child would run for real", async () => {
+    const ada = await person("builder");
+    const child = await createWorkflowResource(env, ada, `child-${unique()}`);
+    await publishWorkflowVersion(env, ada, child.id, {
+      definition: definitionOf(child.name, {
+        tasks: [{ done: { set: { status: "done" } } }],
+      }),
+      basedOn: null,
+    });
+    const { workflow, revision } = await drafted(ada, {
+      bindings: {
+        child: {
+          kind: "workflow",
+          contract: `${workflowNamespace}/${child.name}/1.0.0`,
+        },
+      },
+      tasks: [
+        {
+          "run-child": {
+            run: {
+              workflow: {
+                namespace: workflowNamespace,
+                name: child.name,
+                version: "1.0.0",
+                input: { who: "${ $workflow.input.who }" },
+              },
+            },
+            metadata: { grasp: { binding: "child" } },
+          },
+        },
+      ],
+    });
+    const { runId } = await startCandidateRun(env, ada, workflow.id, {
+      revision,
+      input: { who: "Ada" },
+      fixtures: {},
+    });
+    const children = await env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM workflow_resource_runs WHERE workflow_resource_id = ?"
+    )
+      .bind(child.id)
+      .first<{ n: number }>();
+
+    expect({
+      end: endOf(await ended(ada, workflow.id, runId)),
+      children: children?.n,
+    }).toStrictEqual({
+      end: { status: "failed", code: "workflow.child_unavailable" },
+      children: 0,
+    });
+  });
+
   it("refuses a files call a real call would refuse, its fixture notwithstanding, and keeps no file", async () => {
     const admin = await person("admin");
     const ada = await person("builder");

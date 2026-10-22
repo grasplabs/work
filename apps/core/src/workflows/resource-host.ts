@@ -339,14 +339,15 @@ export interface HostedResourceRun {
  */
 export interface ChildRuns {
   /**
-   * Starts `parent`'s child of task `taskId` through its workflow binding
-   * `alias`, with `input`, once: the same child however often asked. Its
-   * run's ID.
+   * Starts `parent`'s child through its workflow binding `alias`, with
+   * `input`, for its step `stepName` (the run task's enter step, as the
+   * engine names it), once: the same child however often that step asks.
+   * Its run's ID.
    */
   start: (
     parent: HostedResourceRun,
     alias: string,
-    taskId: string,
+    stepName: string,
     input: Json
   ) => Promise<string>;
   /**
@@ -959,6 +960,8 @@ const activationFuel = 16 * attemptFuel;
 /** One attempt of a step, from when the engine claims it. */
 interface StepAttempt {
   step: StepOf;
+  /** Its step's name, as the engine journals it: what keys its child. */
+  name: string;
   data: { input: Json; context: Json };
   /** When it started, in ms: `$task.startedAt`. */
   startedAt: number;
@@ -1838,6 +1841,7 @@ export class ResourceRunHost
   ): StepAttempt {
     return {
       step: run.step,
+      name: run.name,
       data: run.data,
       startedAt: run.taskStart ?? Date.now(),
       key: told.idempotencyKey,
@@ -3651,11 +3655,13 @@ task.kind === "call" ||
     // nothing.
     this.#requireCurrent(attempt);
     await ResourceRunHost.#hostCall(attempt);
+    // Keyed by its step's name, not its task's: a step the same task runs
+    // again under another name (a loop's item, a retry of its scope) starts
+    // a child of its own.
     return await children.start(
       this.#run,
       task.run.binding,
-      // Its place, so each item of a loop starts a child of its own.
-      attempt.step.place,
+      attempt.step.name,
       input
     );
   }

@@ -36,9 +36,10 @@ import { runOf, tellParentOfEnd } from "./resource-runs.ts";
 //   nesting limit. Each task runs at most once a run, so a run starts at
 //   most one child per `run` task.
 // - A start retried, or its answer lost. The child's lineage slot is
-//   keyed by the parent run and the task, and its start by the task under
-//   the parent run as invoker (`childKeyOf`): a retry, a restart or a
-//   replay that starts it again gets the same child, in the same slot.
+//   keyed by the parent run and the step that starts it, and its start by
+//   that step under the parent run as invoker (`childKeyOf`): a retry, a
+//   restart or a replay that starts it again gets the same child, in the
+//   same slot.
 // - A child outliving its parent. A parent that ends stops its children
 //   that haven't (resource-runs.ts, `projectResourceRun`), and every call a
 //   child makes asks that its parent is still going (resource-authority.ts).
@@ -52,19 +53,24 @@ import { runOf, tellParentOfEnd } from "./resource-runs.ts";
 //   journals the event, so every replay reads the same, however long after
 //   the child's own details are gone.
 
-/** The start key of the child task `taskId` starts: one per task of a run. */
-const childKeyOf = (taskId: string): string =>
-  `${coreStartKeyPrefix}child:${taskId}`;
+/**
+ * The start key of the child step `stepName` starts: one per step of a
+ * run. The step's name, not its task's ID, so a task run again under
+ * another step name (a loop's iteration, a retried scope) starts a child
+ * of its own, while a retry or a replay of the same step gets the same.
+ */
+const childKeyOf = (stepName: string): string =>
+  `${coreStartKeyPrefix}child:${stepName}`;
 
 /**
- * Starts the child of `parent`'s task `taskId` through its workflow binding
- * `alias`, with `input`, once: its run's ID.
+ * Starts the child of `parent`'s step `stepName` through its workflow
+ * binding `alias`, with `input`, once: its run's ID.
  */
 const startChild = async (
   env: Env,
   parent: HostedResourceRun,
   alias: string,
-  taskId: string,
+  stepName: string,
   input: Json
 ): Promise<string> => {
   const binding = parent.calling.workflows?.get(alias);
@@ -81,7 +87,7 @@ const startChild = async (
           : parent.rootRunId,
       depth: parent.depth ?? 0,
     },
-    `child:${parent.runId}:${taskId}`
+    `child:${parent.runId}:${stepName}`
   );
   const start = await startWorkflow(
     env,
@@ -99,7 +105,15 @@ const startChild = async (
     {
       version: binding.resourceVersion,
       input,
-      key: childKeyOf(taskId),
+      key: childKeyOf(stepName),
+    },
+    undefined,
+    // Its audit names the run that started it and its step, besides the
+    // invoker (that run) and the person it acts for.
+    {
+      parentRun: parent.runId,
+      parentWorkflow: parent.workflowId,
+      step: stepName,
     }
   );
   if (start.runId === null) {
@@ -110,8 +124,8 @@ const startChild = async (
 
 /** Child runs as core starts them and reads how they ended. */
 export const childRunsOf = (env: Env): ChildRuns => ({
-  start: async (parent, alias, taskId, input) =>
-    await startChild(env, parent, alias, taskId, input),
+  start: async (parent, alias, stepName, input) =>
+    await startChild(env, parent, alias, stepName, input),
   remind: async (childId) => {
     const row = await runOf(env, childId);
     if (row !== undefined) {

@@ -122,6 +122,8 @@ export interface CallingRun {
     readonly type: "person" | "app" | "agent" | "trigger" | "workflow";
     readonly id: string;
     readonly appVersion: number | null;
+    /** For a child run (`workflow`): its parent run's workflow. */
+    readonly parentWorkflowId?: string | null;
   };
   /** The catalog bindings its start froze, by alias. */
   readonly bindings: ReadonlyMap<string, FrozenCatalogBinding>;
@@ -222,9 +224,14 @@ const invokerSql = (run: CallingRun): SQL => {
       )})`;
     }
     case "workflow": {
-      // A child run: its parent still going, and the parent workflow's own
-      // grant to start this one still active (run-children.ts).
-      return sql`EXISTS (SELECT 1 FROM workflow_resource_runs AS parent_run
+      // A child run: its person still in its parent's workflow, its parent
+      // still going, and the parent workflow's own grant to start this one
+      // still active (run-children.ts).
+      const parentWorkflow = invoker.parentWorkflowId;
+      if (parentWorkflow === undefined || parentWorkflow === null) {
+        return sql`0`;
+      }
+      return sql`${workflowRoleSql(run.principal, parentWorkflow)} AND EXISTS (SELECT 1 FROM workflow_resource_runs AS parent_run
         JOIN permissions AS held
           ON held.subject_type = 'workflow'
             AND held.subject_id = parent_run.workflow_resource_id
@@ -233,6 +240,7 @@ const invokerSql = (run: CallingRun): SQL => {
           AND held.object_type = 'workflow' AND held.object_id = ${run.workflowId}
           AND held.resource IS NULL
           AND held.status = 'active'
+          AND parent_run.workflow_resource_id = ${parentWorkflow}
           AND EXISTS (SELECT 1 FROM json_each(held.actions) WHERE value = 'start'))`;
     }
     case "agent": {
@@ -311,6 +319,12 @@ export const callingRunOf = async (
       invokerId: workflowStartReceipts.invokerId,
       originAppVersion: workflowStartReceipts.originAppVersion,
       bindings: workflowStartReceipts.bindings,
+      // A child's parent's workflow, read from the parent's own row.
+      parentWorkflowId: sql<
+        string | null
+      >`(SELECT parent_run.workflow_resource_id FROM workflow_resource_runs AS parent_run
+        WHERE ${workflowStartReceipts.invokerType} = 'workflow'
+          AND parent_run.id = ${workflowStartReceipts.invokerId})`,
     })
     .from(workflowResourceRuns)
     .innerJoin(
@@ -335,6 +349,7 @@ export const callingRunOf = async (
       type: row.invokerType,
       id: row.invokerId,
       appVersion: row.originAppVersion,
+      parentWorkflowId: row.parentWorkflowId,
     },
     bindings: frozenBindingsOf(row.bindings),
     workflows: frozenWorkflowsOf(row.bindings),

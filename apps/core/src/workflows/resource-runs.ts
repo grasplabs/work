@@ -11,6 +11,7 @@ import type {
   WorkflowResourceRun,
   WorkflowRunStatus,
 } from "@grasp-os/shared/workflow-resources";
+import { encode } from "@grasp-os/workerflow/codec";
 import type { InstanceStatus } from "@grasp-os/workerflow/contracts";
 import { namedError } from "@grasp-os/workerflow/errors";
 import { writeJson } from "@grasp-os/workflow-expressions/bounded-json";
@@ -974,30 +975,60 @@ export const resultOf = async (
 /**
  * Tells child run `row`'s parent that it ended, and how (`ChildEnd`): an
  * event under the child's ID as its key, which the parent's wait for it
- * takes, once, and journals. Told again, it is the same event; a parent
- * that ended takes none, and an event the parent can no longer take the
- * same (the child's details gone since) is refused, which is no error:
- * what was told first stands. Nothing for a run that isn't a child or
- * hasn't ended.
+ * takes, once, and journals, in the room of the parent's inbox kept for
+ * what core owes a run (`reserved`), so no sender can crowd it out. An
+ * output too large for an event is told as a failure
+ * (`workflow.child_output_too_large`), never dropped. Told again, it is
+ * the same event; a parent that ended takes none. An event already under
+ * its key that isn't the same (the child's details gone since it was
+ * first told) is what the parent takes: what was told first stands.
+ * Throws for anything else (a full inbox, a parent the engine has no
+ * record of), so the engine tells the end again. Nothing for a run that
+ * isn't a child or hasn't ended.
  */
 export const tellParentOfEnd = async (env: Env, row: RunRow): Promise<void> => {
   if (row.parentRunId === null || unended.includes(row.status)) {
     return;
   }
   const { output, error } = await resultOf(env, row);
-  const end: ChildEnd =
-    row.status === "completed"
-      ? { status: "completed", output: z.json().parse(output ?? null) }
-      : {
-          status: row.status === "cancelled" ? "cancelled" : "failed",
-          code: error?.code ?? null,
-        };
-  await runEngine(env).admitEvent(row.parentRunId, {
-    type: childEndType(row.id),
-    payload: end,
-    key: row.id,
-    attributes: {},
-  });
+  const failed: ChildEnd = {
+    status: row.status === "cancelled" ? "cancelled" : "failed",
+    code: error?.code ?? null,
+  };
+  let end: ChildEnd = failed;
+  if (row.status === "completed") {
+    end = { status: "completed", output: z.json().parse(output ?? null) };
+    try {
+      encode(end);
+    } catch {
+      end = { status: "failed", code: "workflow.child_output_too_large" };
+    }
+  }
+  const tell = async (told: ChildEnd) =>
+    await runEngine(env).admitEvent(row.parentRunId ?? "", {
+      type: childEndType(row.id),
+      payload: told,
+      key: row.id,
+      attributes: {},
+      reserved: true,
+    });
+  let outcome = await tell(end);
+  if (outcome === "too_large" && end.status === "completed") {
+    outcome = await tell({
+      status: "failed",
+      code: "workflow.child_output_too_large",
+    });
+  }
+  if (
+    outcome !== "accepted" &&
+    outcome !== "duplicate" &&
+    outcome !== "conflict" &&
+    outcome !== "ended"
+  ) {
+    throw new Error(
+      `Run ${row.parentRunId} didn't take its child ${row.id}'s end: ${outcome}`
+    );
+  }
 };
 
 /**

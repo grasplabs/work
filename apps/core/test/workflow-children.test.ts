@@ -5,6 +5,9 @@ import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import type { WorkflowResourceRun } from "@grasp-os/shared/workflow-resources";
+import { encode } from "@grasp-os/workerflow/codec";
+import { WorkflowRun } from "@grasp-os/workerflow/run";
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
@@ -21,6 +24,8 @@ import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import {
   createWorkflowResource,
   publishWorkflowVersion,
+  shareWorkflowResource,
+  unshareWorkflowResource,
 } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import type { RunStep } from "../src/workflows/host.ts";
@@ -30,7 +35,13 @@ import {
   terminateResourceRun,
 } from "../src/workflows/resource-runs.ts";
 import { withQuotas } from "./quota-policies.ts";
-import { admittedFreely, liveStatus, resumed, stopped } from "./runs.ts";
+import {
+  admittedFreely,
+  liveStatus,
+  resumed,
+  runObject,
+  stopped,
+} from "./runs.ts";
 import { unique } from "./sign-in.ts";
 
 // Child runs of JSON workflows (`run` tasks: run-children.ts,
@@ -263,6 +274,72 @@ const endStateOf = (run: WorkflowResourceRun) => ({
     : { code: run.error?.code }),
 });
 
+/**
+ * A child of `admin`'s that waits, then listens through an approved event
+ * binding of its own: each listen asks that the authority behind the child
+ * still holds.
+ */
+const listeningChild = async (admin: Identity) => {
+  const contract = `job-events-${unique()}`;
+  await publishCatalogContract(env, admin, {
+    key: contract,
+    kind: "event",
+    events: {
+      "grasp.job.completed": {
+        data: JSON.stringify(v.object({ greeting: v.string() }).descriptor),
+        browser: false,
+      },
+    },
+  });
+  const child = await workflowOf(admin, "child", [
+    (name) =>
+      definitionOf(
+        name,
+        [
+          { linger: { wait: "PT3S" } },
+          {
+            "await-job": {
+              listen: {
+                to: { one: { with: { type: "grasp.job.completed" } } },
+              },
+              timeout: { after: { minutes: 5 } },
+              metadata: { grasp: { binding: "jobEvents" } },
+              output: { as: "${ .[0] }" },
+            },
+          },
+        ],
+        { bindings: { jobEvents: { kind: "event", contract } } }
+      ),
+  ]);
+  await approveWorkflowBinding(env, admin, child.id, {
+    alias: "jobEvents",
+    target: { kind: "event" },
+    reviewed: { version: 1 },
+  });
+  return child;
+};
+
+/** Once run `parentId`'s child is waiting, as the engine says. */
+const childWaiting = async (parentId: string): Promise<string> =>
+  await vi.waitFor(
+    async () => {
+      const [running] = await childrenOf(parentId);
+      await expect(liveStatus(running?.id ?? "")).resolves.toBe("waiting");
+      return running?.id ?? "";
+    },
+    { timeout: 30_000, interval: 100 }
+  );
+
+/** Whether the engine keeps `value` as a step's record or an event. */
+const encodes = (value: unknown): boolean => {
+  try {
+    encode(value);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 describe("run tasks", { timeout: 180_000 }, () => {
   it("start the exact version their binding pins, as a child in the parent's lineage, and take its output", async () => {
     const admin = await person("admin");
@@ -435,6 +512,148 @@ describe("run tasks", { timeout: 180_000 }, () => {
     }).toStrictEqual({
       parent: { status: "failed", code: "workflow.child_failed" },
       child: { status: "failed", code: "workflow.event_denied" },
+    });
+  });
+
+  it("stop a running child's work once its person no longer has a role in the parent's workflow", async () => {
+    const admin = await person("admin");
+    const bob = await person("user");
+    const child = await listeningChild(admin);
+    const { parent } = await parentOf(admin, child, [
+      runChild("greet-child", child.name),
+    ]);
+    for (const id of [parent.id, child.id]) {
+      // oxlint-disable-next-line no-await-in-loop -- two shares, in turn
+      await shareWorkflowResource(env, admin, id, {
+        type: "person",
+        id: bob.userId,
+        role: "user",
+      });
+    }
+
+    const runId = await started(bob, parent.id);
+    const childId = await childWaiting(runId);
+    await unshareWorkflowResource(env, admin, parent.id, {
+      type: "person",
+      id: bob.userId,
+    });
+    const childRun = await endOf(admin, child.id, childId);
+
+    expect(endStateOf(childRun)).toStrictEqual({
+      status: "failed",
+      code: "workflow.event_denied",
+    });
+  });
+
+  it("start no child for a person with no role in the child's workflow", async () => {
+    const admin = await person("admin");
+    const bob = await person("user");
+    const child = await greeter(admin);
+    const { parent } = await parentOf(admin, child, [
+      runChild("greet-child", child.name),
+    ]);
+    // A role in the parent alone.
+    await shareWorkflowResource(env, admin, parent.id, {
+      type: "person",
+      id: bob.userId,
+      role: "user",
+    });
+
+    const runId = await started(bob, parent.id);
+    const run = await endOf(admin, parent.id, runId);
+
+    expect({
+      end: endStateOf(run),
+      children: await childrenOf(runId),
+    }).toStrictEqual({
+      end: { status: "failed", code: "workflow.start_denied" },
+      children: [],
+    });
+  });
+
+  it("tell the parent a child's end whose output is too large for an event as a failure, never drop it", async () => {
+    const admin = await person("admin");
+    // The longest greeting whose end, beside its status, an event holds.
+    let low = 1;
+    let high = 1_100_000;
+    while (low < high) {
+      const mid = Math.ceil((low + high) / 2);
+      if (
+        encodes({ status: "completed", output: { greeting: "a".repeat(mid) } })
+      ) {
+        low = mid;
+      } else {
+        high = mid - 1;
+      }
+    }
+    // One past the longest end an event holds: still a step's record.
+    const length = low + 1;
+    const greeting = "a".repeat(length);
+    // Built by the child's own expression: a definition that long isn't
+    // one a builder can publish.
+    const child = await workflowOf(admin, "child", [
+      (name) =>
+        definitionOf(name, [
+          { greet: { set: { greeting: `\${ "a" * ${length} }` } } },
+        ]),
+    ]);
+    const { parent } = await parentOf(admin, child, [
+      runChild("greet-child", child.name),
+    ]);
+
+    const runId = await started(admin, parent.id);
+    const run = await endOf(admin, parent.id, runId);
+    const [ended] = await childrenOf(runId);
+
+    expect({
+      endTooLarge: !encodes({ status: "completed", output: { greeting } }),
+      recordFits: encodes({ output: { greeting } }),
+      end: endStateOf(run),
+      child: ended?.status,
+    }).toStrictEqual({
+      endTooLarge: true,
+      recordFits: true,
+      end: { status: "failed", code: "workflow.child_failed" },
+      child: "completed",
+    });
+  });
+
+  it("tell the parent its child's end though senders filled the parent's inbox", async () => {
+    const admin = await person("admin");
+    const child = await workflowOf(admin, "child", [
+      (name) =>
+        definitionOf(name, [
+          { linger: { wait: "PT3S" } },
+          { greet: { set: { greeting: '${ "Hello, " + .who }' } } },
+        ]),
+    ]);
+    const { parent } = await parentOf(admin, child, [
+      runChild("greet-child", child.name),
+    ]);
+
+    const runId = await started(admin, parent.id);
+    await childWaiting(runId);
+    // A sender's events, until the parent's inbox takes no more of them.
+    const filled = await runInDurableObject(
+      runObject(runId),
+      async (run: unknown) => {
+        if (!(run instanceof WorkflowRun)) {
+          throw new TypeError("the object isn't a run object");
+        }
+        const payload = encode("x".repeat(1_000_000));
+        let outcome = "accepted";
+        while (outcome === "accepted") {
+          // oxlint-disable-next-line no-await-in-loop -- until it is full
+          outcome = await run.sendEvent({ type: "spam", payload, key: null });
+        }
+        return outcome;
+      }
+    );
+    const run = await endOf(admin, parent.id, runId);
+
+    expect({ filled, end: endStateOf(run) }).toStrictEqual({
+      filled: "full",
+      end: { status: "completed", output: { greeting: "Hello, Ada" } },
     });
   });
 
@@ -617,8 +836,8 @@ const hostOf = async (
       tampered: () => {},
       admitAttempt: admittedFreely,
       children: {
-        start: async (_parent, alias, taskId, input) => {
-          asked.push({ alias, taskId, input });
+        start: async (_parent, alias, stepName, input) => {
+          asked.push({ alias, stepName, input });
           return await Promise.resolve("child-run");
         },
         remind: async () => {
@@ -658,7 +877,13 @@ describe("a run task's host", { timeout: 60_000 }, () => {
     }).toStrictEqual({
       tooEarly: "workflow.invalid",
       output: { greeting: "Hello, Ada" },
-      asked: [{ alias: "child", taskId: "greet-child", input: { who: "Ada" } }],
+      asked: [
+        {
+          alias: "child",
+          stepName: "enter:greet-child",
+          input: { who: "Ada" },
+        },
+      ],
     });
   });
 });
