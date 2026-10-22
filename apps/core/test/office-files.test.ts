@@ -126,6 +126,55 @@ describe(officeTypeOf, () => {
           ),
         },
       ]),
+      // The main part named only in a comment never finished.
+      await zipOf([
+        {
+          name: "[Content_Types].xml",
+          content: encoder.encode(
+            `<?xml version="1.0"?><Types><!-- <Override PartName="/a" ContentType="${word}.main+xml"/></Types>`
+          ),
+        },
+      ]),
+      // ...in CDATA, finished or not.
+      ...(await Promise.all(
+        ["]]>", ""].map(
+          async (close) =>
+            await zipOf([
+              {
+                name: "[Content_Types].xml",
+                content: encoder.encode(
+                  `<Types><![CDATA[<Override PartName="/a" ContentType="${word}.main+xml"/>${close}</Types>`
+                ),
+              },
+            ])
+        )
+      )),
+      // Declarations in XML that doesn't parse: unbalanced, two roots,
+      // a DTD, `--` inside a comment, a stray `<`.
+      ...(await Promise.all(
+        [
+          `<Types><Override PartName="/a" ContentType="${word}.main+xml"/>`,
+          `<Types/><Types><Override PartName="/a" ContentType="${word}.main+xml"/></Types>`,
+          `<!DOCTYPE Types><Types><Override PartName="/a" ContentType="${word}.main+xml"/></Types>`,
+          `<Types><!-- a -- b --><Override PartName="/a" ContentType="${word}.main+xml"/></Types>`,
+          `<Types>< <Override PartName="/a" ContentType="${word}.main+xml"/></Types>`,
+          `<Types><Override PartName="/a" ContentType="${word}.main+xml" ContentType="x"/></Types>`,
+        ].map(
+          async (xml) =>
+            await zipOf([
+              { name: "[Content_Types].xml", content: encoder.encode(xml) },
+            ])
+        )
+      )),
+      // An `Override` that isn't a child of the root `Types`.
+      await zipOf([
+        {
+          name: "[Content_Types].xml",
+          content: encoder.encode(
+            `<Types><Other><Override PartName="/a" ContentType="${word}.main+xml"/></Other></Types>`
+          ),
+        },
+      ]),
       // Both main parts: neither one.
       await zipOf([
         { name: "[Content_Types].xml", content: contentTypes(word, excel) },
@@ -172,6 +221,30 @@ describe(officeTypeOf, () => {
     const centralAt = view.getUint32(bomb.length - 6, true);
     view.setUint32(centralAt + 24, 100, true);
     await expect(officeTypeOf(bomb)).resolves.toBeUndefined();
+
+    // A stored entry claiming a small size while carrying far more, and a
+    // deflated one inflating to other than the size it claims.
+    const padded = encoder.encode(
+      `${new TextDecoder().decode(contentTypes(word))}${" ".repeat(200 * 1024)}`
+    );
+    const stored = await zipOf([
+      { name: "[Content_Types].xml", content: padded },
+    ]);
+    const storedView = new DataView(stored.buffer);
+    const storedCentral = storedView.getUint32(stored.length - 6, true);
+    storedView.setUint32(storedCentral + 24, contentTypes(word).length, true);
+    await expect(officeTypeOf(stored)).resolves.toBeUndefined();
+    const short = await zipOf([
+      {
+        name: "[Content_Types].xml",
+        content: contentTypes(word),
+        deflate: true,
+      },
+    ]);
+    const shortView = new DataView(short.buffer);
+    const shortCentral = shortView.getUint32(short.length - 6, true);
+    shortView.setUint32(shortCentral + 24, contentTypes(word).length + 1, true);
+    await expect(officeTypeOf(short)).resolves.toBeUndefined();
 
     const whole = await zipOf([
       { name: "[Content_Types].xml", content: contentTypes(word) },

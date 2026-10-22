@@ -714,8 +714,9 @@ export const callFiles = async (
  * (GRA-886): opened, written in pieces of `callBytes` and finished as an
  * action's own writes are, each under a key of the call's own effect key,
  * so the same call again (a replay, a retry) answers the same file, and
- * its bytes must be the same, all of them: never a prefix of them. Every limit, the type check against the
- * bytes and the SHA-256 apply as they do to an action's writes.
+ * its bytes must be the same, all of them: never a prefix of them. Every
+ * limit, the lease check, the type check against the bytes and the
+ * SHA-256 apply as they do to an action's writes.
  */
 export const keepFile = async (
   env: Env,
@@ -728,7 +729,10 @@ export const keepFile = async (
     ...caller,
     effectKey: `${caller.effectKey}#${suffix}`,
   });
-  const opened = await open(env, as("open"), {
+  // Each through `callFiles`, as an action's own calls are: its lease
+  // checked before every one, so an attempt that went stale while Connect
+  // was answering opens, reserves and seals nothing.
+  const opened = await callFiles(env, as("open"), "open", {
     name: file.name,
     type: file.type,
   });
@@ -741,7 +745,7 @@ export const keepFile = async (
     at += runFileLimits.callBytes, piece += 1
   ) {
     // oxlint-disable-next-line no-await-in-loop -- in order: each piece follows the last
-    await append(env, as(`piece${String(piece)}`), {
+    await callFiles(env, as(`piece${String(piece)}`), "append", {
       file: id,
       content: toBase64(file.bytes.subarray(at, at + runFileLimits.callBytes)),
     });
@@ -754,7 +758,7 @@ export const keepFile = async (
   if (written?.state === "writing" && written.size !== file.bytes.length) {
     throw workflowResourceErrors.create("workflow.call_invalid");
   }
-  const finished = await finish(env, as("finish"), { file: id });
+  const finished = await callFiles(env, as("finish"), "finish", { file: id });
   const sealed = z.object({ sha256: z.string() }).parse(finished.output);
   if (sealed.sha256 !== (await sha256HexOfBytes(file.bytes))) {
     throw workflowResourceErrors.create("workflow.call_invalid");
