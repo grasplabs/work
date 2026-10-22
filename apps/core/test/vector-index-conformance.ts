@@ -35,6 +35,12 @@ export interface VectorIndexFaults {
   hang: () => void;
   /** The next write applies part of its records, then fails. */
   partialWrite: () => void;
+  /**
+   * Deletes from now on apply `ms` later, as a provider that applies
+   * writes asynchronously does. Absent where deletes apply at once.
+   */
+  delayDeletes?: (ms: number) => void;
+  /** Ends every fault; deletes already delayed still apply when due. */
   heal: () => void;
 }
 
@@ -512,6 +518,42 @@ export const vectorIndexConformance = (
         dropped,
         kept: idsOf(await listAll(made.provider.open(nextGeneration))),
       }).toStrictEqual({ dropped: [], kept: ["new"] });
+    });
+
+    it("drops only once the deletes have applied", async () => {
+      const { provider, faults, index } = await ready();
+      await index.upsert([
+        record("plan", "policy:sales"),
+        record("notes", "policy:sales"),
+      ]);
+      faults.delayDeletes?.(100);
+
+      await provider.drop(generation);
+
+      faults.heal();
+      const dropped = await listAll(provider.open(generation)).catch(
+        (error: unknown) => {
+          if (error instanceof VectorIndexError && error.kind === "invalid") {
+            return [];
+          }
+          throw error;
+        }
+      );
+      expect(dropped).toStrictEqual([]);
+    });
+
+    it("fails a drop whose deletes don't apply in time, and completes it when repeated", async () => {
+      const { provider, faults, index } = await ready({ deadlineMs: 200 });
+      await index.upsert([record("plan", "policy:sales")]);
+      // A provider whose deletes apply at once has nothing to wait for.
+      const late = faults.delayDeletes !== undefined;
+      faults.delayDeletes?.(400);
+
+      const first = await kindOf(provider.drop(generation));
+      faults.heal();
+      await provider.drop(generation);
+
+      expect(first).toBe(late ? "unavailable" : "answered");
     });
 
     it("reconciles an index with its canonical records", async () => {

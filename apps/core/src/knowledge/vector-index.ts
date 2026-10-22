@@ -107,7 +107,12 @@ export interface VectorQuery {
 /** A record as listed: what reconciling an index needs of it. */
 export interface VectorIdEntry {
   id: string;
-  sourceVersion: string;
+  /**
+   * `null` for a damaged record, whose source version the index doesn't
+   * hold: it is listed all the same, so an audit or a reconciliation sees
+   * it, and a drop removes it.
+   */
+  sourceVersion: string | null;
 }
 
 export interface VectorIdPage {
@@ -244,7 +249,12 @@ export const reservedPrefix = "!";
 
 const bytesOf = (text: string): number => new TextEncoder().encode(text).length;
 
-/** The ID {@link vectorGeneration} gives a spec. */
+/**
+ * The ID {@link vectorGeneration} gives a spec: its fields as a JSON array,
+ * readable, and unambiguous whatever characters a model or route name
+ * holds, where joining them with a separator would let two specs share an
+ * ID.
+ */
 const generationIdOf = ({
   route,
   model,
@@ -252,7 +262,7 @@ const generationIdOf = ({
   dimensions,
   metric,
 }: VectorGenerationSpec): string =>
-  `${route}|${model}@${revision}|${dimensions}|${metric}`;
+  JSON.stringify([route, model, revision, dimensions, metric]);
 
 /** A generation, named by everything that makes its vectors comparable. */
 export const vectorGeneration = (

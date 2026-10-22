@@ -67,9 +67,15 @@ export const fillStepKey = async (
 export interface Reconciliation {
   /** Canonical records the index doesn't list. */
   missing: string[];
-  /** Records the index lists at another source version. */
+  /**
+   * Records the index lists at another source version, or damaged
+   * (listed without one): filling them again replaces them.
+   */
   stale: string[];
-  /** Records the index lists that no canonical record has. */
+  /**
+   * Records the index lists that no canonical record has, damaged ones
+   * included: they are deleted.
+   */
   extra: string[];
 }
 

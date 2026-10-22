@@ -64,6 +64,13 @@ const maxWriteBatch = 1000;
 /** IDs read back per `getByIds`: small, so a read stays well within limits. */
 const readBatch = 20;
 const queryDeadlineMs = 5000;
+/**
+ * How often `drop` asks whether its deletes have applied: about this many
+ * times within the write deadline, within these bounds.
+ */
+const dropPolls = 20;
+const minDropPollMs = 10;
+const maxDropPollMs = 1000;
 const writeDeadlineMs = 15_000;
 
 /**
@@ -139,7 +146,10 @@ const vectorizeGeneration = (
     }
   };
 
-  const ids = async (cursor?: string): Promise<VectorIdPage> => {
+  /** A page of every ID the index holds, the sentinel's included. */
+  const listed = async (
+    cursor?: string
+  ): Promise<{ ids: string[]; cursor?: string }> => {
     const { list } = options;
     if (list === undefined) {
       throw new VectorIndexError(
@@ -147,14 +157,18 @@ const vectorizeGeneration = (
         "A Vectorize binding can't list its vectors: listing needs Vectorize's REST list-vectors route, through connect."
       );
     }
-    const page = await fromProvider(
+    return await fromProvider(
       "list vectors",
       queryDeadline,
       async () => await list(cursor)
     );
-    const listed = page.ids.filter((id) => !id.startsWith(reservedPrefix));
+  };
+
+  const ids = async (cursor?: string): Promise<VectorIdPage> => {
+    const page = await listed(cursor);
+    const callers = page.ids.filter((id) => !id.startsWith(reservedPrefix));
     const read = await Promise.all(
-      inBatches(listed, readBatch).map(
+      inBatches(callers, readBatch).map(
         async (batch) =>
           await fromProvider(
             "read vectors",
@@ -163,15 +177,26 @@ const vectorizeGeneration = (
           )
       )
     );
-    // A vector deleted since it was listed isn't read back: it is left out.
     const versions = new Map(
       read
         .flat()
         .map(({ id, metadata }) => [id, metadata?.[versionField]] as const)
     );
-    const entries = listed.flatMap((id) => {
+    // A vector deleted since it was listed isn't read back: it is left
+    // out. One read back without a string version is damaged: listed, with
+    // none.
+    const entries = callers.flatMap((id) => {
+      if (!versions.has(id)) {
+        return [];
+      }
       const sourceVersion = versions.get(id);
-      return typeof sourceVersion === "string" ? [{ id, sourceVersion }] : [];
+      return [
+        {
+          id,
+          sourceVersion:
+            typeof sourceVersion === "string" ? sourceVersion : null,
+        },
+      ];
     });
     return page.cursor === undefined
       ? { entries }
@@ -296,16 +321,43 @@ const vectorizeGeneration = (
     };
   };
 
+  /**
+   * Deletes every ID the index lists, whatever its records hold, and the
+   * sentinel; then waits until Vectorize has applied the deletes and lists
+   * nothing, for at most the write deadline, or fails `unavailable`.
+   */
   const drop = async (): Promise<void> => {
     let cursor: string | undefined;
     do {
       // oxlint-disable-next-line no-await-in-loop -- page after page, each deleted before the next is listed
-      const page = await ids(cursor);
-      // oxlint-disable-next-line no-await-in-loop -- see above
-      await remove(page.entries.map(({ id }) => id));
+      const page = await listed(cursor);
+      for (const batch of inBatches(page.ids, maxWriteBatch)) {
+        // oxlint-disable-next-line no-await-in-loop -- one batch at a time
+        await erase(batch);
+      }
       ({ cursor } = page);
     } while (cursor !== undefined);
     await erase([probeId]);
+    const endsAt = Date.now() + writeDeadline;
+    const interval = Math.min(
+      maxDropPollMs,
+      Math.max(minDropPollMs, writeDeadline / dropPolls)
+    );
+    for (;;) {
+      // oxlint-disable-next-line no-await-in-loop -- polls until the deletes apply
+      const left = await listed();
+      if (left.ids.length === 0) {
+        return;
+      }
+      if (Date.now() + interval > endsAt) {
+        throw new VectorIndexError(
+          "unavailable",
+          `The vector index didn't apply its deletes within ${writeDeadline} ms; drop it again.`
+        );
+      }
+      // oxlint-disable-next-line no-await-in-loop -- see above
+      await scheduler.wait(interval);
+    }
   };
 
   return {

@@ -17,6 +17,7 @@ import type {
   VectorIndex,
   VectorRecord,
 } from "../src/knowledge/vector-index.ts";
+import { reconcileGeneration } from "../src/knowledge/vector-rebuild.ts";
 import {
   vectorizeIndex,
   vectorizeProvider,
@@ -78,6 +79,8 @@ interface FakeBehaviour {
    * filter on `p`, as Vectorize documents.
    */
   metadataIndex: "string" | "number" | "none";
+  /** How long after `deleteByIds` its deletes apply. */
+  deleteDelayMs: number;
   /** An index that reports no applied write yet. */
   noAppliedMutation: boolean;
 }
@@ -96,6 +99,17 @@ const fakeVectorize = (
     afterQuery: (): void => undefined,
     metadataIndex: "string",
     noAppliedMutation: false,
+    deleteDelayMs: 0,
+  };
+  /** Deletes accepted but not applied yet, and when they apply. */
+  const pendingDeletes: { ids: string[]; at: number }[] = [];
+  const applyDueDeletes = (): void => {
+    for (const pending of pendingDeletes.filter(({ at }) => at <= Date.now())) {
+      for (const id of pending.ids) {
+        vectors.delete(id);
+      }
+      pendingDeletes.splice(pendingDeletes.indexOf(pending), 1);
+    }
   };
   let upsertBatches = 0;
   const never = Promise.withResolvers<never>().promise;
@@ -109,6 +123,7 @@ const fakeVectorize = (
       throw new Error("VECTOR_ERROR (code = 40000): upstream unavailable");
     }
     await Promise.resolve();
+    applyDueDeletes();
   };
 
   const matchesFilter = (
@@ -228,9 +243,8 @@ const fakeVectorize = (
     },
     deleteByIds: async (ids: string[]) => {
       await reach();
-      for (const id of ids) {
-        vectors.delete(id);
-      }
+      pendingDeletes.push({ ids, at: Date.now() + behaviour.deleteDelayMs });
+      applyDueDeletes();
       return { mutationId: crypto.randomUUID() };
     },
   };
@@ -258,7 +272,11 @@ const fakeVectorize = (
     partialWrite: () => {
       behaviour.failUpsertAfterBatches = upsertBatches + 1;
     },
+    delayDeletes: (ms) => {
+      behaviour.deleteDelayMs = ms;
+    },
     heal: () => {
+      behaviour.deleteDelayMs = 0;
       behaviour.outage = false;
       behaviour.hang = false;
       behaviour.failUpsertAfterBatches = Number.POSITIVE_INFINITY;
@@ -277,11 +295,12 @@ vectorIndexConformance("vectorize", ({ generations, deadlineMs }) => {
     deadlineMs === undefined
       ? {}
       : { queryDeadlineMs: deadlineMs, writeDeadlineMs: deadlineMs };
-  const faultOf = (fault: keyof VectorIndexFaults) => (): void => {
-    for (const { fake } of fakes) {
-      fake.faults[fault]();
-    }
-  };
+  const faultOf =
+    (fault: Exclude<keyof VectorIndexFaults, "delayDeletes">) => (): void => {
+      for (const { fake } of fakes) {
+        fake.faults[fault]();
+      }
+    };
   return {
     provider: vectorizeProvider(
       fakes.map(({ of, fake }) => ({
@@ -295,6 +314,11 @@ vectorIndexConformance("vectorize", ({ generations, deadlineMs }) => {
       outage: faultOf("outage"),
       hang: faultOf("hang"),
       partialWrite: faultOf("partialWrite"),
+      delayDeletes: (ms) => {
+        for (const { fake } of fakes) {
+          fake.faults.delayDeletes?.(ms);
+        }
+      },
       heal: faultOf("heal"),
     },
   };
@@ -359,6 +383,50 @@ describe("a Vectorize search", () => {
     const index = vectorizeIndex(fakeVectorize(1024).binding, generation);
 
     await expect(kindOf(index.status())).resolves.toBe("invalid");
+  });
+
+  it("lists a damaged record, reconciles it away and drops it", async () => {
+    const provider = fakeVectorize();
+    const index = await provenIndex(provider);
+    await index.upsert([record("plan", "policy:sales")]);
+    // Written around the adapter: no source version, or not a string.
+    for (const [id, v] of [
+      ["orphan", undefined],
+      ["plan-2", 2],
+    ] as const) {
+      provider.vectors.set(id, {
+        values: [1, 0, 0],
+        metadata:
+          v === undefined ? { p: "policy:sales" } : { p: "policy:sales", v },
+        filterable: new Set(["p"]),
+      });
+    }
+
+    const listed = await index.ids();
+    const reconciled = await reconcileGeneration(
+      index,
+      new Map([
+        ["plan", "plan@1"],
+        ["plan-2", "plan-2@1"],
+      ])
+    );
+    await vectorizeProvider([
+      { generation, binding: provider.binding, list: provider.list },
+    ]).drop(generation);
+
+    expect({
+      listed: listed.entries,
+      reconciled,
+      left: [...provider.vectors.keys()],
+    }).toStrictEqual({
+      listed: [
+        { id: "orphan", sourceVersion: null },
+        { id: "plan", sourceVersion: "plan@1" },
+        { id: "plan-2", sourceVersion: null },
+      ],
+      reconciled: { missing: [], stale: ["plan-2"], extra: ["orphan"] },
+      left: [],
+    });
   });
 
   it("can't list without the REST route, and says why", async () => {
@@ -628,6 +696,29 @@ describe("the deployment's vector index provider", () => {
 
 const filterBytes = (keys: readonly string[]): number =>
   new TextEncoder().encode(JSON.stringify({ p: { $in: keys } })).length;
+
+describe("generation IDs", () => {
+  it("differ whenever what the vectors were made with differs", () => {
+    const base = {
+      model: "org/model",
+      revision: "a@b",
+      route: "local|tei",
+      dimensions: 3,
+      metric: "cosine",
+    } as const;
+    // Each pair would share an ID if its fields were joined by a separator.
+    const specs = [
+      base,
+      { ...base, model: "org/model@a", revision: "b" },
+      { ...base, route: "local", model: "tei|org/model" },
+      { ...base, revision: "a", model: "org/model", route: "local|tei" },
+    ];
+
+    const ids = specs.map((spec) => vectorGeneration(spec).id);
+
+    expect(new Set(ids).size).toBe(specs.length);
+  });
+});
 
 describe("policy batches", () => {
   it("fit the provider's filter size with long keys that grow in JSON", () => {
