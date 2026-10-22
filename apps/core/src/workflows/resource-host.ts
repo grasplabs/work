@@ -272,15 +272,17 @@ export class Run extends WorkerEntrypoint {
     // an ask), it tells the host once its code has gone quiet, a macrotask
     // later, with how many asks it has made in all: the host holds the run
     // busy until each has arrived, so the engine never suspends the run
-    // while one is on its way (resource-host.ts, \`quiet\`). One that
-    // doesn't reach the host is sent again, a few times: the host holds the
-    // run busy for it until then, within a budget of its own.
+    // while one is on its way (resource-host.ts, \`quiet\`). Each is
+    // numbered by the time it got control back, so one that doesn't reach
+    // the host can be sent again, a few times, under its number, and the
+    // host counts it once however often it arrives.
     let made = 0;
-    const quiet = (tries = 3) => {
+    let times = 0;
+    const quiet = (time = (times += 1), tries = 3) => {
       setTimeout(() => {
-        host.quiet(made).catch(() => {
+        host.quiet(made, time).catch(() => {
           if (tries > 1) {
-            quiet(tries - 1);
+            quiet(time, tries - 1);
           }
         });
       }, 0);
@@ -436,6 +438,11 @@ const activationModelCalls = (): ActionModelCalls => {
 export interface TriedOnceMarks {
   /** Marks an attempt as one whose module never ran: its call never went out. */
   markUnstarted: (key: string, attempt: number) => void;
+  /**
+   * Takes that mark back: the attempt may run its module from now on (it
+   * was marked only while it waited for a slot, `#onceAtMost`).
+   */
+  markStarted: (key: string, attempt: number) => void;
   /** Whether that attempt was so marked. */
   unstarted: (key: string, attempt: number) => boolean;
   /** Keeps what an attempt that ran its module failed with. */
@@ -498,6 +505,9 @@ const activationMarks = (): TriedOnceMarks => {
   return {
     markUnstarted: (key, attempt) => {
       unstarted.add(id(key, attempt));
+    },
+    markStarted: (key, attempt) => {
+      unstarted.delete(id(key, attempt));
     },
     unstarted: (key, attempt) => unstarted.has(id(key, attempt)),
     keepFailure: (key, attempt, error) => {
@@ -1265,8 +1275,8 @@ export class ResourceRunHost
    * (`quiet`), with how many asks it had made by then.
    */
   #handedBack = 1;
-  /** Of those, how many its isolate said it went quiet after. */
-  #quieted = 0;
+  /** Of those, the times its isolate said it went quiet after, each once. */
+  readonly #quieted = new Set<number>();
   /** The most asks its isolate said it had made, as it went quiet. */
   #madeByIsolate = 0;
   /**
@@ -1510,7 +1520,10 @@ export class ResourceRunHost
    * one to fail with too; one that fails never having called it (cut off
    * in an isolate already stopped, refused its admission) is marked as
    * never run, so a later attempt may run it. Only that branch, where the
-   * module was never called, ever writes the mark.
+   * module was never called, ever writes the mark, and the wait for a slot
+   * (`#inSlot`) the attempt runs in: marked as never run while it waits,
+   * and unmarked once it holds one, so an activation that dies meanwhile
+   * leaves a later attempt free to run it.
    */
   async #onceAtMost<T>(
     once: boolean,
@@ -1518,19 +1531,26 @@ export class ResourceRunHost
     attempt: (ran: () => void) => Promise<T>
   ): Promise<T> {
     if (!once) {
-      return await attempt(() => {
-        // Only a step tried once keeps what it did.
-      });
+      return await this.#inSlot(
+        async () =>
+          await attempt(() => {
+            // Only a step tried once keeps what it did.
+          })
+      );
     }
     const { idempotencyKey: key, attempt: number } = told;
     const earlier = this.#ranBefore(key, number);
     if (earlier !== undefined) {
       throw toStepError(this.#triedOnce.failureOf(key, earlier) ?? leftOpen);
     }
+    this.#triedOnce.markUnstarted(key, number);
     let ranModule = false;
     try {
-      return await attempt(() => {
-        ranModule = true;
+      return await this.#inSlot(async () => {
+        this.#triedOnce.markStarted(key, number);
+        return await attempt(() => {
+          ranModule = true;
+        });
       });
     } catch (error) {
       if (ranModule) {
@@ -1565,7 +1585,8 @@ export class ResourceRunHost
     const waitingOnIsolate =
       !this.#isolateDone &&
       this.#isolateHoldLeftMs > 0 &&
-      (this.#quieted < this.#handedBack || this.#arrived < this.#madeByIsolate);
+      (this.#quieted.size < this.#handedBack ||
+        this.#arrived < this.#madeByIsolate);
     this.#holdForIsolate(waitingOnIsolate);
     const busy = this.#asksInHost > 0 || waitingOnIsolate;
     if (busy && this.#endBusy === undefined) {
@@ -1638,19 +1659,31 @@ export class ResourceRunHost
 
   /**
    * The run's isolate went quiet after it last got control back, having
-   * made `made` asks in all (`openRunMain`): every ask its code made since
+   * made `made` asks in all, the `time`th time it got control back
+   * (`openRunMain`; its start the first): every ask its code made since
    * then is on its way, and the host holds the run busy until each has
-   * arrived. Refused, failing the run, for anything but a count. A count
+   * arrived. Refused, failing the run, for anything but counts. A count
    * past what a run could have on its way (more than its steps beyond
-   * those that arrived) is taken as that.
+   * those that arrived) is taken as that. Each time counts once, however
+   * often it is said (a quiet sent again), and only one the host handed
+   * back control for.
    */
   // oxlint-disable-next-line require-await -- an RPC method, answered at once
-  async quiet(made: unknown): Promise<Settled<null>> {
+  async quiet(made: unknown, time: unknown): Promise<Settled<null>> {
     try {
-      if (typeof made !== "number" || !Number.isSafeInteger(made) || made < 0) {
+      if (
+        typeof made !== "number" ||
+        !Number.isSafeInteger(made) ||
+        made < 0 ||
+        typeof time !== "number" ||
+        !Number.isSafeInteger(time) ||
+        time < 1
+      ) {
         return this.#refuse("A run's isolate counts the asks it made.");
       }
-      this.#quieted += 1;
+      if (time <= this.#handedBack) {
+        this.#quieted.add(time);
+      }
       this.#madeByIsolate = Math.max(
         this.#madeByIsolate,
         Math.min(made, this.#arrived + maxAsksOnTheirWay)
@@ -1738,22 +1771,13 @@ export class ResourceRunHost
         // the engine still replays what it recorded, and fails anything
         // else for good, so a replay reaches every step it journaled.
         // Only a running attempt holds one of the run's slots (`#inSlot`),
-        // taken as the engine hands it over: a step whose retry is parked
-        // never returns from the engine in this activation, so a slot taken
-        // around the engine's call would be held for good, and the steps
-        // waiting for one would hold the run busy until its load ended.
+        // taken as the engine hands it over (`#onceAtMost`): a step whose
+        // retry is parked never returns from the engine in this activation,
+        // so a slot taken around the engine's call would be held for good,
+        // and the steps waiting for one would hold the run busy until its
+        // load ended.
         const attemptStep = async (context: unknown): Promise<unknown> =>
-          await this.#inSlot(async () => {
-            // Settled meanwhile too: checked again as the attempt starts.
-            if (step.fenced === true || this.#fencedOff(step.scope)) {
-              throw toStepError(
-                forIsolate(
-                  workflowResourceErrors.create("workflow.branch_cancelled")
-                )
-              );
-            }
-            return await this.#attempt(run, context, fn, stepDone.promise);
-          });
+          await this.#attempt(run, context, fn, stepDone.promise);
         let recorded = await this.#step.do(
           stepName,
           engineConfigOf(step),
@@ -1878,11 +1902,16 @@ export class ResourceRunHost
     stepDone: Promise<unknown>
   ): Promise<unknown> {
     const told = attemptContextSchema.parse(context);
-    return await this.#onceAtMost(
-      configOf(run.step).once,
-      told,
-      async (ran) => await this.#attemptOf(run, told, fn, stepDone, ran)
-    );
+    const { step } = run;
+    return await this.#onceAtMost(configOf(step).once, told, async (ran) => {
+      // Settled meanwhile too: checked again as the attempt starts.
+      if (step.fenced === true || this.#fencedOff(step.scope)) {
+        throw toStepError(
+          forIsolate(workflowResourceErrors.create("workflow.branch_cancelled"))
+        );
+      }
+      return await this.#attemptOf(run, told, fn, stepDone, ran);
+    });
   }
 
   /** One attempt of step `run` (`#attempt`), `ran` told just before its module is. */

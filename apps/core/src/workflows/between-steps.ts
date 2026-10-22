@@ -238,11 +238,11 @@ export class BoundedRunHost<Attempt extends object>
   }
 
   /** Not a step: it passes outside the clock, as it takes no time. */
-  async quiet(made: unknown): Promise<Settled<null>> {
+  async quiet(made: unknown, time: unknown): Promise<Settled<null>> {
     const { quiet } = this.#host;
     if (quiet === undefined) {
       return { ok: true, value: null };
     }
-    return await quiet.call(this.#host, made);
+    return await quiet.call(this.#host, made, time);
   }
 }

@@ -665,13 +665,13 @@ describe("a run's host, against a forged module at once", () => {
     const { workflow } = await published(by, tenAtOnce);
     const { step, seen } = parkingEngine();
     const host = await hostOf(by, workflow.id, { step });
-    await host.quiet(0);
+    await host.quiet(0, 1);
     await enterTen(host);
     // Ten items' steps asked for at once: each parks after its attempt.
     for (const index of Array.from({ length: 10 }, (_, at) => at)) {
       void askItem(host, index);
     }
-    await host.quiet(11);
+    await host.quiet(11, 2);
     await scheduler.wait(200);
     expect(seen).toStrictEqual({ attempts: 10, busy: 0 });
   });
@@ -683,7 +683,7 @@ describe("a run's host, against a forged module at once", () => {
     env.WORKFLOW_BETWEEN_STEPS_MS = "300";
     try {
       const host = await hostOf(by, workflow.id, { step });
-      await host.quiet(0);
+      await host.quiet(0, 1);
       await enterTen(host);
       // Answered, the module asks once more and says nothing after.
       void askItem(host, 0);
@@ -696,6 +696,24 @@ describe("a run's host, against a forged module at once", () => {
     }
   });
 
+  it("counts a quiet its isolate sent again once, holding the run busy until the next one comes", async () => {
+    const by = await builder();
+    const { workflow } = await published(by, tenAtOnce);
+    const { step, seen } = parkingEngine();
+    const host = await hostOf(by, workflow.id, { step });
+    await host.quiet(0, 1);
+    await enterTen(host);
+    // The quiet after its start, delivered again: not the one after the
+    // answer it has had since.
+    await host.quiet(0, 1);
+    const afterAgain = seen.busy;
+    await host.quiet(1, 2);
+    expect({ afterAgain, afterNext: seen.busy }).toStrictEqual({
+      afterAgain: 1,
+      afterNext: 0,
+    });
+  });
+
   it("holds its run busy for asks an isolate says it made but never sends, with a step parked, for no longer than its time between steps", async () => {
     const by = await builder();
     const { workflow } = await published(by, tenAtOnce);
@@ -703,10 +721,10 @@ describe("a run's host, against a forged module at once", () => {
     env.WORKFLOW_BETWEEN_STEPS_MS = "300";
     try {
       const host = await hostOf(by, workflow.id, { step });
-      await host.quiet(0);
+      await host.quiet(0, 1);
       await enterTen(host);
       void askItem(host, 0);
-      await host.quiet(Number.MAX_SAFE_INTEGER);
+      await host.quiet(Number.MAX_SAFE_INTEGER, 2);
       await scheduler.wait(100);
       const held = seen.busy;
       await scheduler.wait(400);
