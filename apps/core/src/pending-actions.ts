@@ -5,6 +5,7 @@ import type {
   PendingAction,
   PendingActionsApi,
 } from "@grasp-os/shared/connect";
+import type { AttachmentBytes } from "@grasp-os/shared/connector-attachments";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { operationErrors } from "@grasp-os/shared/operations";
@@ -36,6 +37,7 @@ import {
   requireCallAuthority,
 } from "./workflows/resource-authority.ts";
 import type { CallingRun } from "./workflows/resource-authority.ts";
+import { attachedAgain } from "./workflows/run-files.ts";
 import { wakingHeld } from "./workflows/wakes.ts";
 import type { HeldOutcome } from "./workspace.ts";
 
@@ -134,6 +136,34 @@ const heldAliasOf = async (
 };
 
 /**
+ * Refuses (`workflow.call_denied`) the release of a held write that
+ * attaches files (GRA-887) unless the files use they came from, as the
+ * call recorded it (`filesFrom`), is one of the run's and allowed now, as
+ * the call itself would need.
+ */
+const requireHeldFilesAllowed = async (
+  env: Env,
+  run: CallingRun,
+  held: {
+    readonly context: WorkContext;
+    readonly attachments?: readonly unknown[] | undefined;
+  }
+): Promise<void> => {
+  const { context } = held;
+  const filesFrom =
+    context.type === "workflowRun" ? context.filesFrom : undefined;
+  if (filesFrom === undefined && (held.attachments?.length ?? 0) === 0) {
+    return;
+  }
+  const files =
+    filesFrom === undefined ? undefined : run.bindings.get(filesFrom);
+  if (files?.kind !== "files") {
+    throw workflowResourceErrors.create("workflow.call_denied");
+  }
+  await requireCallAuthority(env, run, files);
+};
+
+/**
  * Refuses (`workflow.call_denied`) a decision on a connector call a run
  * of an independent workflow held for its person (pending-actions.ts)
  * unless that run is still going, acts for `person`, its call's key names
@@ -141,7 +171,8 @@ const heldAliasOf = async (
  * through, as the run's sealed build names it, is the call's permission's
  * and allowed now (`requireCallAuthority`): confirming sends the call, so
  * it is decided as the call itself would be, through its own alias only,
- * never another that shares the permission.
+ * never another that shares the permission; and a write that attaches
+ * files, only while the files use they come from (`filesFrom`) is too.
  */
 const requireHeldRunCallAllowed = async (
   env: Env,
@@ -150,6 +181,7 @@ const requireHeldRunCallAllowed = async (
     readonly context: WorkContext;
     readonly idempotencyKey: string;
     readonly permissionId: string;
+    readonly attachments?: readonly unknown[] | undefined;
   },
   person: string
 ): Promise<void> => {
@@ -179,6 +211,7 @@ const requireHeldRunCallAllowed = async (
     throw workflowResourceErrors.create("workflow.call_denied");
   }
   await requireCallAuthority(env, run, binding);
+  await requireHeldFilesAllowed(env, run, held);
 };
 
 /** Whether connect still holds the held action `id` for `person`. */
@@ -239,6 +272,10 @@ const confirmHeld = async (
 ): Promise<ConnectResult> => {
   const { person } = request;
   let capability: string;
+  // The bytes of the files a held write attaches (GRA-887): connect keeps
+  // only their digests, so they are read again from the run, each by the
+  // name, type, size and digest the person was shown.
+  let attachments: AttachmentBytes | undefined;
   try {
     // A binding connect can no longer read is refused, never skipped.
     if (held.binding === "unreadable") {
@@ -258,6 +295,12 @@ const confirmHeld = async (
       },
       { kind: "confirm", pendingActionId: held.id }
     );
+    if (held.attachments !== undefined) {
+      attachments =
+        held.context.type === "workflowRun"
+          ? await attachedAgain(env, held.context.runId, held.attachments)
+          : undefined;
+    }
   } catch (error) {
     // Refused here (the permission is gone, the person has left, the
     // context is invalid): recorded as connect records its own refusals,
@@ -287,7 +330,11 @@ const confirmHeld = async (
   }
   let result: ConnectResult;
   try {
-    result = await env.CONNECT.confirmAction({ ...request, capability });
+    result = await env.CONNECT.confirmAction({
+      ...request,
+      capability,
+      ...(attachments === undefined ? {} : { attachments }),
+    });
   } catch (error) {
     // Only when this confirmation took it (`markTaken`): a refused one
     // tells nothing, whatever another decision did meanwhile.

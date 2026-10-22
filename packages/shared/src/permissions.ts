@@ -560,6 +560,12 @@ export const workContextSchema = z.discriminatedUnion("type", [
     type: z.literal("workflowRun"),
     workflowId: workflowResourceIdSchema,
     runId: runIdSchema,
+    /**
+     * The files use a write's attachments are read through (GRA-887),
+     * set by core for that call only: kept with a held write, so its
+     * release decides that use's authority again.
+     */
+    filesFrom: z.string().min(1).max(128).optional(),
   }),
 ]);
 export type WorkContext = z.infer<typeof workContextSchema>;

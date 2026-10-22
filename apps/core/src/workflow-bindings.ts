@@ -316,8 +316,10 @@ const requireConnectorServes = async (
         allowed.includes(action.tool) &&
         sameShape(action.input, connectorShapeOf(shape.input)) &&
         sameShape(action.output, connectorShapeOf(shape.output)) &&
-        // A file answer the contract records is the connector's too.
-        (shape.answersFile ?? false) === (action.answersFile ?? false)
+        // A file answer the contract records is the connector's too, and
+        // so is attaching files (GRA-887).
+        (shape.answersFile ?? false) === (action.answersFile ?? false) &&
+        (shape.takesFiles ?? false) === (action.takesFiles ?? false)
       );
     });
   if (!serves) {

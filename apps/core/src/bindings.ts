@@ -5,6 +5,7 @@ import type {
 } from "@grasp-os/shared/capability";
 import { connectCallSchema, connectErrors } from "@grasp-os/shared/connect";
 import type { ConnectCall, ConnectResult } from "@grasp-os/shared/connect";
+import type { AttachmentBytes } from "@grasp-os/shared/connector-attachments";
 import { isExpectedError, toOpaqueError } from "@grasp-os/shared/errors";
 import type { AppId, PermissionId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
@@ -298,7 +299,8 @@ export const runStubCall = async (
   env: Env,
   authority: StubAuthority,
   grant: ConnectionGrant,
-  call: unknown[]
+  call: unknown[],
+  files?: AttachmentBytes
 ): Promise<ConnectResult> => {
   const { request, stillAllowed, stamping } = await signedStub(
     env,
@@ -316,7 +318,12 @@ export const runStubCall = async (
         ? request
         : { ...request, ...(await stampedMail(env, stamping, request)) };
     await stillAllowed?.();
-    return await env.CONNECT.call(sent);
+    // The bytes of the files the call attaches (GRA-887) come from core's
+    // workflow host alone, as a parameter here: no stub's `call` options
+    // can carry them, so App and agent code attach nothing of its own.
+    return await env.CONNECT.call(
+      files === undefined ? sent : { ...sent, attachments: files }
+    );
   } catch (error) {
     throw forSandbox(error);
   }

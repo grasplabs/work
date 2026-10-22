@@ -895,9 +895,12 @@ describe("every native tool", { timeout: 60_000 }, () => {
         },
         { [field]: "a@acme.test", [extra[2] ?? "z"]: "b@acme.test" },
       ];
-      // Nor nested under a property it does declare.
+      // Nor nested under a property it does declare. Connect itself refuses
+      // a nested selector under the attachments of a tool that takes files
+      // (GRA-887), before the tool: checked apart below.
+      const filesField = tool?.takesFiles === true ? "attachments" : undefined;
       const nested = [...declared]
-        .filter((other) => other !== field)
+        .filter((other) => other !== field && other !== filesField)
         .map((other) => ({
           [field]: "a@acme.test",
           [other]: { [field]: "b@acme.test" },
@@ -922,6 +925,23 @@ describe("every native tool", { timeout: 60_000 }, () => {
           .slice(undeclared.length)
           .every((text) => String(text).includes("Invalid input"))
       ).toBeTruthy();
+      const refusedByConnect =
+        filesField === undefined
+          ? undefined
+          : await outcome(
+              call(
+                connection,
+                action,
+                {
+                  [field]: "a@acme.test",
+                  [filesField]: { [field]: "b@acme.test" },
+                },
+                { idempotencyKey: crypto.randomUUID() }
+              )
+            );
+      expect(refusedByConnect).toBe(
+        filesField === undefined ? undefined : "connect.invalid"
+      );
       expect(api.sent).toStrictEqual([]);
     }
   );

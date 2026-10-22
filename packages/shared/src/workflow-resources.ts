@@ -287,6 +287,12 @@ export const catalogContractSchema = z
            * native connector's JSON Schemas, as connect confirms it.
            */
           answersFile: z.literal(true).optional(),
+          /**
+           * That the operation attaches files an action names from its run
+           * (GRA-887): only on an operation described by its native
+           * connector's JSON Schemas, as connect confirms it.
+           */
+          takesFiles: z.literal(true).optional(),
         })
       )
       .optional(),

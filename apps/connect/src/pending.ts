@@ -25,6 +25,12 @@ import type {
   PendingAction,
   PendingReference,
 } from "@grasp-os/shared/connect";
+import {
+  attachmentsProperty,
+  attachmentsSchema,
+  shownAttachment,
+} from "@grasp-os/shared/connector-attachments";
+import type { AttachmentEntry } from "@grasp-os/shared/connector-attachments";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import {
@@ -78,6 +84,14 @@ import type { DecidedCall } from "./decisions.ts";
 // row and its call claiming the idempotency key finds neither, and is
 // held again. Confirming that one only answers with the first call's
 // stored answer (or its unknown outcome): the key runs it once.
+//
+// A held write that attaches files (GRA-887) keeps their digests only,
+// as the rest of its input: name, type, size and SHA-256 of each, which is
+// all its person is shown (`heldFilesOf`). The bytes are dropped when it is
+// held and come again with the confirmation, read from the run by core;
+// connect checks them against the digests before it takes the action, so
+// bytes that differ (a file deleted or not the same) leave it waiting, and
+// the only bytes sent are those its person was shown.
 //
 // The account fence (CN15) compares the connection's provider account; a
 // Composio connection has none recorded, so it never trips there.
@@ -134,6 +148,36 @@ const shownValue = (value: Json): string | string[] => {
 };
 
 /**
+ * The files a held call attaches (GRA-887), by digest: those its input
+ * names, if it is a native action that takes files; nothing for any other
+ * call; `unreadable` for an input that doesn't name them as the
+ * platform's schema has them, which can't be confirmed.
+ */
+export const heldFilesOf = (
+  call: Pick<ConnectCall, "action" | "input">,
+  connection: ShownConnection
+): AttachmentEntry[] | "unreadable" | undefined => {
+  if (connection?.serverKind !== "native") {
+    return undefined;
+  }
+  const manifest = nativeConnector(connection.server)?.manifest;
+  if (
+    manifest?.provider !== connection.provider ||
+    !Object.hasOwn(manifest.actions, call.action) ||
+    manifest.actions[call.action]?.takesFiles !== true
+  ) {
+    return undefined;
+  }
+  const { input } = call;
+  const named =
+    typeof input === "object" && input !== null && !Array.isArray(input)
+      ? input[attachmentsProperty]
+      : undefined;
+  const entries = attachmentsSchema.safeParse(named ?? []);
+  return entries.success ? entries.data : "unreadable";
+};
+
+/**
  * The held call as its tool describes it: only a native connector's tool
  * does, in this release's manifest, which is ours and reviewed. The values
  * are the stored input's own, so the person reads what will run; whatever
@@ -163,21 +207,30 @@ export const descriptionOf = (
   }
   const held: Readonly<Record<string, Json | undefined>> = input;
   const shown = new Set(describe.fields.map((field) => field.input));
+  const files = heldFilesOf(call, connection);
   return {
     title: describe.title,
     fields: describe.fields.flatMap((field) => {
       const value = Object.hasOwn(held, field.input)
         ? held[field.input]
         : undefined;
-      return value === undefined
-        ? []
-        : [
-            {
-              input: field.input,
-              label: field.label,
-              value: shownValue(value),
-            },
-          ];
+      if (value === undefined) {
+        return [];
+      }
+      // Each attached file by name, type, size and digest, never its content.
+      const shownValueOf =
+        field.input === attachmentsProperty &&
+        files !== undefined &&
+        files !== "unreadable"
+          ? files.map(shownAttachment)
+          : shownValue(value);
+      return [
+        {
+          input: field.input,
+          label: field.label,
+          value: shownValueOf,
+        },
+      ];
     }),
     complete: Object.keys(held).every((key) => shown.has(key)),
   };
@@ -251,7 +304,9 @@ const summaryOf = ({
   row: Row;
   connection: ShownConnection;
 }): PendingAction => {
-  const description = descriptionOf(callOf(row), connection);
+  const call = callOf(row);
+  const description = descriptionOf(call, connection);
+  const attachments = heldFilesOf(call, connection);
   return {
     id: row.id,
     subject: subjectOf(row),
@@ -265,6 +320,9 @@ const summaryOf = ({
     resource: row.resource,
     action: row.action,
     ...(description === undefined ? {} : { description }),
+    ...(attachments === undefined || attachments === "unreadable"
+      ? {}
+      : { attachments }),
     idempotencyKey: row.idempotencyKey,
     input: row.input,
     inputHash: row.inputHash,

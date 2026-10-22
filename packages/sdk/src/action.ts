@@ -94,7 +94,7 @@ export interface Use<
 /** Any declared use. */
 export type AnyUse = Use<string, UseKind, string>;
 
-/** How a connector call's answer comes back. */
+/** How a connector call is made: where its files are kept, or read from. */
 export interface ConnectorCallOptions {
   /**
    * For a read that answers a file (`mail.readAttachment`, say): the alias
@@ -103,6 +103,15 @@ export interface ConnectorCallOptions {
    * its content, so a file larger than a step holds can be read.
    */
   readonly into?: string;
+  /**
+   * For a write that attaches run files (`mail.send`'s `attachments`, say):
+   * the alias of the action's own files use, declared with `read`, whose
+   * files the arguments' `attachments` name by ID (`{ file }`). Core
+   * resolves each to a file of this run only, sends its bytes with the
+   * write, and a held write shows each by name, type, size and digest.
+   * Without it, a call naming files is refused.
+   */
+  readonly from?: string;
 }
 
 /** A connector binding, as an action calls it. */

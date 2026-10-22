@@ -2,6 +2,8 @@ import { z } from "zod";
 
 import type { OutboxedAuditEvent, OutboxRejected } from "./audit.ts";
 import type { HeldBinding } from "./capability.ts";
+import { attachmentBytesSchema } from "./connector-attachments.ts";
+import type { AttachmentEntry } from "./connector-attachments.ts";
 import { defineErrorFamily, isExpectedError } from "./errors.ts";
 import type { CodedError } from "./errors.ts";
 import {
@@ -46,6 +48,16 @@ export const connectCallSchema = z.strictObject({
     .string()
     .regex(/^[0-9a-f]{32}$/u)
     .optional(),
+  /**
+   * The bytes of the files the input attaches, by SHA-256 (GRA-887): core
+   * resolves a workflow's files and sends them here, beside an input that
+   * names each by digest only. Connect checks them against the input's
+   * digests, hands them to the connector's tool, and keeps none: a held
+   * action stores the digests, and its bytes are sent again with the
+   * confirmation (`confirmActionSchema`). Never in App or agent code's
+   * hands: only core's workflow host sets it.
+   */
+  attachments: attachmentBytesSchema.optional(),
 });
 export type ConnectCall = z.infer<typeof connectCallSchema>;
 
@@ -829,6 +841,12 @@ export interface PendingAction {
    * the person was shown runs.
    */
   inputHash: string;
+  /**
+   * The files it attaches, each by name, type, size and digest (GRA-887):
+   * only a native action that takes files has any. Confirming it needs
+   * their bytes again, read from the run by these digests.
+   */
+  attachments?: AttachmentEntry[];
   /** ISO 8601. */
   requestedAt: string;
   /**
@@ -847,6 +865,12 @@ export const confirmActionSchema = z.strictObject({
   person: connectionPersonSchema,
   id: z.uuid(),
   inputHash: inputHashSchema,
+  /**
+   * The bytes of the files the held input attaches, read again from the
+   * run by their digests (GRA-887); connect accepts only bytes that match
+   * the digests the person was shown.
+   */
+  attachments: attachmentBytesSchema.optional(),
 });
 export type ConfirmAction = z.input<typeof confirmActionSchema>;
 
@@ -906,7 +930,7 @@ export interface HeldCall {
  * capability core made for exactly that call, as for carrying it out.
  */
 export const heldOutcomeRequestSchema = connectCallSchema
-  .omit({ input: true, stamp: true })
+  .omit({ input: true, stamp: true, attachments: true })
   .required({ idempotencyKey: true });
 export type HeldOutcomeRequest = z.input<typeof heldOutcomeRequestSchema>;
 
@@ -1566,6 +1590,13 @@ export interface ConnectorContractAction {
    * (GRA-886). Only a native connector's read declares it; never Composio's.
    */
   answersFile?: true;
+  /**
+   * It attaches files (connector-kit's `takesFiles`): its input has an
+   * `attachments` property, which in this contract names run files by ID
+   * and which core turns into digests and bytes for a workflow's call
+   * (GRA-887). Only a native connector's write declares it.
+   */
+  takesFiles?: true;
 }
 
 /**
@@ -1591,6 +1622,8 @@ export interface NativeOperation {
   readOnly: boolean;
   /** That it answers a file, as the connector declares (GRA-886). */
   answersFile?: true;
+  /** That it attaches files, as the connector declares (GRA-887). */
+  takesFiles?: true;
 }
 
 /** A generated contract, as connect serves it now. */
@@ -1645,6 +1678,8 @@ export const connectErrors = defineErrorFamily({
     "There's no such action waiting for you: it was confirmed or declined, or it isn't yours.",
   "connect.pending_changed":
     "This isn't the action you were shown, so nothing was done. Look at it again.",
+  "connect.files_changed":
+    "The files this action attaches aren't the ones you were shown (a file was deleted, or isn't the same), so nothing was done.",
   "connect.held":
     "This action waits for the person it acts for to confirm it. Try again once they have.",
   "connect.run_ended":

@@ -424,15 +424,38 @@ describe("time, randomness and deadlines of JSON workflows", () => {
   });
 });
 
-/** A catalog contract of mail.send: `{ to, subject }` in, `{ messageId }` out. */
-const mailContract = async (admin: Identity): Promise<string> => {
+/** What mail.send takes: `{ to, subject }`. */
+const mailInput = v.object({ to: v.string(), subject: v.string() });
+
+/**
+ * What a mail.send of its own takes that also names `attachments`, as a
+ * native write that takes files does, though it takes none (GRA-887).
+ */
+const mailInputWithAttachments = v.object({
+  to: v.string(),
+  subject: v.string(),
+  attachments: v.array(
+    v.object({
+      name: v.string(),
+      type: v.string(),
+      size: v.number(),
+      sha256: v.string(),
+    })
+  ),
+});
+
+/** A catalog contract of mail.send: `input` in, `{ messageId }` out. */
+const mailContract = async (
+  admin: Identity,
+  input: { descriptor: unknown } = mailInput
+): Promise<string> => {
   const key = `mail-${unique()}`;
   await publishCatalogContract(env, admin, {
     key,
     kind: "connector",
     operations: {
       "mail.send": {
-        input: descriptorOf(v.object({ to: v.string(), subject: v.string() })),
+        input: descriptorOf(input),
         output: descriptorOf(v.object({ messageId: v.string() })),
       },
     },
@@ -441,18 +464,14 @@ const mailContract = async (admin: Identity): Promise<string> => {
 };
 
 /** `env`, its connect serving `contract` as that connection's contract. */
-const servingMail = (): Env => {
+const servingMail = (input: { descriptor: unknown } = mailInput): Env => {
   const contract: ConnectorContract = {
     contract: "composio.mail@1",
     actions: {
       send: {
         tool: "mail.send",
         readOnly: false,
-        input: JSON.stringify(
-          shapeOf(
-            descriptorOf(v.object({ to: v.string(), subject: v.string() }))
-          )
-        ),
+        input: JSON.stringify(shapeOf(descriptorOf(input))),
         output: JSON.stringify(
           shapeOf(descriptorOf(v.object({ messageId: v.string() })))
         ),
@@ -486,6 +505,7 @@ const mailingWorkflow = async (
     plan = [],
     sharing,
     plain = false,
+    attachments,
   }: {
     before?: unknown[];
     to?: string;
@@ -497,9 +517,13 @@ const mailingWorkflow = async (
      * run's output: nothing after the send is admitted or evaluated.
      */
     plain?: boolean;
+    /** Files it names to attach, to an operation that takes none. */
+    attachments?: unknown[];
   } = {}
 ) => {
-  const key = await mailContract(admin);
+  const input =
+    attachments === undefined ? mailInput : mailInputWithAttachments;
+  const key = await mailContract(admin, input);
   const { workflow, executable } = await published(by, {
     bindings: {
       mail: { kind: "connector", contract: key },
@@ -539,7 +563,11 @@ const mailingWorkflow = async (
           with: {
             binding: "mail",
             operation: "mail.send",
-            arguments: { to, subject: "${ $params.token }" },
+            arguments: {
+              to,
+              subject: "${ $params.token }",
+              ...(attachments === undefined ? {} : { attachments }),
+            },
           },
           ...(plain
             ? { output: { as: "${ {status: .messageId} }" } }
@@ -558,7 +586,7 @@ const mailingWorkflow = async (
     actions: ["mail.send"],
     binding: `MAIL_${unique().toUpperCase().replaceAll("-", "_")}`,
   });
-  const serving = servingMail();
+  const serving = servingMail(input);
   const approval = await approveWorkflowBinding(serving, admin, workflow.id, {
     alias: "mail",
     target: { kind: "connector", permissionId, contract: "composio.mail@1" },
@@ -714,6 +742,31 @@ describe("grasp.connector calls of JSON workflows", () => {
       hostCalls: 3,
       // Each attempt made its call; the mail's went no further.
       byAttempt: [1, 1, 1],
+    });
+  });
+
+  it("refuses files named to attach to an operation whose contract takes none, sending nothing", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const { workflow, mail, serving } = await mailingWorkflow(ada, admin, {
+      attachments: [
+        {
+          name: "a.txt",
+          type: "text/plain",
+          size: 1,
+          sha256: "0".repeat(64),
+        },
+      ],
+    });
+    const runId = await started(ada, workflow.id, serving);
+    const run = await ended(ada, workflow.id, runId);
+    const sent = await mail.did();
+    expect({
+      end: endOf(run),
+      calls: sent.calls,
+    }).toStrictEqual({
+      end: { status: "failed", code: "workflow.call_invalid" },
+      calls: 0,
     });
   });
 

@@ -1,5 +1,10 @@
 import { jsonSchemaOf } from "@grasp-os/sdk/host";
 import type { AuditEntry } from "@grasp-os/shared/audit";
+import {
+  attachmentRefsSchema,
+  attachmentsProperty,
+} from "@grasp-os/shared/connector-attachments";
+import type { AttachmentBytes } from "@grasp-os/shared/connector-attachments";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { connectionIdSchema, permissionIdSchema } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
@@ -48,7 +53,12 @@ import {
   callTemplate,
   requireKnowledgeRequest,
 } from "./resource-reads.ts";
-import { callFiles, keepFile, requireFilesArguments } from "./run-files.ts";
+import {
+  attachRunFiles,
+  callFiles,
+  keepFile,
+  requireFilesArguments,
+} from "./run-files.ts";
 import type { FilesAnswer, FilesCallOperation } from "./run-files.ts";
 
 // The effects of a run of an independent workflow's sealed build
@@ -99,6 +109,21 @@ import type { FilesAnswer, FilesCallOperation } from "./run-files.ts";
 //   by the gateway's data rules; and the App owning a store it calls an
 //   operation of is restricted before the input reaches it, audited with
 //   the run as provenance (`callApprovedStoreOperation`).
+// - A run's files leaving through a connector write (GRA-887). A write
+//   attaches files only where the operation's sealed contract records it
+//   takes them (`takesFiles`, which its approval compared with what the
+//   connection serves), only from a files use the action declared to read
+//   (`from`, through that binding's own authority), and only files of the
+//   calling run, looked up by their ID and the run's (`attachRunFiles`):
+//   another run's, or one deleted or unfinished, is refused. At most ten
+//   files and 2.75 MiB of them, each named once, checked from core's
+//   records before a byte is read. The action gives IDs and nothing else:
+//   the name, type, size and SHA-256 connect is sent come from core's own
+//   record, the bytes go beside the input and are checked against its
+//   digests by connect and again by the connector, and none is kept
+//   (a held write keeps the digests only; its release reads the files
+//   again, pending-actions.ts). The call's receipts list each file's ID,
+//   type, size and digest, never its name or content.
 // - Sensitive values in what a run records. A binding argument (a
 //   sensitive parameter's value, put in by the host) is sent to connect
 //   only, and a connector's answer that echoes one is refused
@@ -144,6 +169,11 @@ export type BuiltCall =
        * files use, to write.
        */
       readonly into?: string;
+      /**
+       * The files binding a write's attachments are run files of (GRA-887):
+       * asked by an action that declared that files use, to read.
+       */
+      readonly from?: string;
     }
   | {
       readonly name: "grasp.model";
@@ -417,6 +447,98 @@ const keptAsFile = async (
   };
 };
 
+/** What a write's attachments become on their way to connect. */
+interface Attached {
+  /** The call's input, its `attachments` as digests (`AttachmentEntry`). */
+  readonly input: Json;
+  /** The files' bytes beside it, by SHA-256; none if it attaches nothing. */
+  readonly files: AttachmentBytes | undefined;
+  /** What the call's receipt says of them: IDs, types, sizes, digests. */
+  readonly detail: Readonly<Record<string, string | number>>;
+}
+
+/**
+ * `input` of a write as connect is sent it (GRA-887): refused unless it
+ * attaches files only where its sealed contract records the operation
+ * takes them (`takesFiles`, which only a native connector's confirmed
+ * operation may, and which its approval compared with what the connection
+ * serves) and from a files use the action named (`from`); then its run
+ * files named by ID become digests and bytes (`attachRunFiles`).
+ */
+const attachedTo = async (
+  env: Env,
+  run: CallingRun,
+  operation: { takesFiles?: true },
+  call: Extract<BuiltCall, { name: "grasp.connector" }>,
+  input: Json
+): Promise<Attached> => {
+  const takes = operation.takesFiles === true;
+  if (call.from !== undefined && !takes) {
+    throw callInvalid("from: This operation attaches no files.");
+  }
+  const fields = z.record(z.string(), z.json()).safeParse(input);
+  // Never passed on to an operation that takes no files, whatever its own
+  // schema allows: run files leave only where the contract says they may.
+  if (
+    !takes &&
+    fields.success &&
+    Object.hasOwn(fields.data, attachmentsProperty)
+  ) {
+    throw callInvalid(
+      "arguments.attachments: This operation attaches no files."
+    );
+  }
+  const named =
+    takes && fields.success && Object.hasOwn(fields.data, attachmentsProperty)
+      ? attachmentRefsSchema.safeParse(fields.data[attachmentsProperty])
+      : undefined;
+  if (named === undefined || !fields.success) {
+    return { input, files: undefined, detail: {} };
+  }
+  if (!named.success) {
+    throw callInvalid("arguments.attachments: Name run files by ID.");
+  }
+  if (named.data.length > 0 && call.from === undefined) {
+    throw callInvalid(
+      "arguments.attachments: Name the files use they come from."
+    );
+  }
+  const attached = await attachRunFiles(
+    env,
+    { runId: run.runId },
+    named.data.map(({ file }) => file)
+  );
+  return {
+    input: { ...fields.data, [attachmentsProperty]: attached.entries },
+    files: attached.bytes,
+    detail: attached.detail,
+  };
+};
+
+/**
+ * Refuses (`workflow.call_denied`) a connector call that names a files
+ * binding (`aliases`: where a read is kept, where a write's attachments
+ * are read from) unless the run's start froze that alias as a files
+ * binding and its authority holds now, as the files call it stands for
+ * would (GRA-886, GRA-887).
+ */
+const requireFilesBindings = async (
+  env: Env,
+  run: CallingRun,
+  aliases: readonly (string | undefined)[]
+): Promise<void> => {
+  for (const alias of aliases) {
+    if (alias !== undefined) {
+      const files = run.bindings.get(alias);
+      if (files?.kind !== "files") {
+        throw workflowResourceErrors.create("workflow.call_denied");
+      }
+      // oxlint-disable-next-line no-await-in-loop -- at most two, each decided in turn
+      await requireCallAuthority(env, run, files);
+    }
+  }
+};
+
 /**
  * Calls connector action `operation` through `binding`'s connection
  * permission, with `args` (binding arguments in), under the effect's key,
@@ -427,7 +549,8 @@ const callConnector = async (
   run: CallingRun,
   binding: FrozenCatalogBinding,
   call: Extract<BuiltCall, { name: "grasp.connector" }>,
-  effect: Effect
+  effect: Effect,
+  onFiles: (detail: Readonly<Record<string, string | number>>) => void
 ): Promise<FilesAnswer> => {
   const { target } = binding;
   if (target.kind !== "connector") {
@@ -447,7 +570,14 @@ const callConnector = async (
   }
   // Kept as a file of the run: only of a read its connector declares
   // answers a file, which it is asked for as base64, the bytes as they are.
-  const input = call.into === undefined ? asked : asFileRead(shape, asked);
+  const read = call.into === undefined ? asked : asFileRead(shape, asked);
+  // Files attached: only to a write its connector declares takes them, as
+  // its sealed contract records it, from a files use the action declared;
+  // each a finished file of this run, named by ID, whose name, type, size
+  // and digest are core's own and whose bytes go beside the input.
+  const attached = await attachedTo(env, run, shape, call, read);
+  onFiles(attached.detail);
+  const { input } = attached;
   const result = await runStubCall(
     env,
     // Refused at once, before any check, for a key other than the step's.
@@ -464,12 +594,17 @@ const callConnector = async (
         // authority again, then its attempt, nothing awaited after.
         stillAllowed: async () => {
           await requireCallAuthority(env, run, binding);
+          // And the files uses it keeps a read in or attaches files from.
+          await requireFilesBindings(env, run, [call.into, call.from]);
           effect.requireHolds();
         },
       };
     },
     {
-      context: runContext(run),
+      // A write that attaches files names the files use they come from,
+      // so a held one's release decides that use's authority again
+      // (pending-actions.ts).
+      context: runContext(run, call.from),
       permissionId: permissionIdSchema.parse(target.permissionId),
       connection: {
         type: "connection",
@@ -477,7 +612,8 @@ const callConnector = async (
         ...(row.resource === null ? {} : { resource: row.resource }),
       },
     },
-    [call.operation, input, { idempotencyKey: effect.key }]
+    [call.operation, input, { idempotencyKey: effect.key }],
+    attached.files
   );
   if (result.pending !== undefined) {
     // Connect answers a workflow's held side effect (a restricted run's)
@@ -943,21 +1079,30 @@ export const makeCall = async (
       fileDetail = filesCallDetail(call.operation, call.arguments);
     }
     await requireCallAuthority(env, run, binding);
-    // A read kept as a file needs the files binding it goes into, and its
-    // authority now, as the files call it stands for would (GRA-886).
-    if (call.name === "grasp.connector" && call.into !== undefined) {
-      const files = run.bindings.get(call.into);
-      if (files?.kind !== "files") {
-        throw workflowResourceErrors.create("workflow.call_denied");
-      }
-      await requireCallAuthority(env, run, files);
+    // A read kept as a file needs the files binding it goes into, and a
+    // write that attaches files the one they come from (GRA-887), each
+    // with its authority now, as the files call it stands for would
+    // (GRA-886).
+    if (call.name === "grasp.connector") {
+      await requireFilesBindings(env, run, [call.into, call.from]);
     }
     // Kept before the call goes out, or it doesn't go: a call that took
     // effect always has its receipt, whatever happens after.
     await audited(env, receipt("started"));
     switch (call.name) {
       case "grasp.connector": {
-        const answer = await callConnector(env, run, binding, call, effect);
+        const answer = await callConnector(
+          env,
+          run,
+          binding,
+          call,
+          effect,
+          // Said of the files a write attaches as soon as they are chosen,
+          // so even a call that fails after leaves them in its receipt.
+          (detail) => {
+            fileDetail = { ...fileDetail, ...detail };
+          }
+        );
         fileDetail = { ...fileDetail, ...answer.detail };
         ({ output } = answer);
         break;
