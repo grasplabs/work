@@ -5,6 +5,7 @@ import {
 } from "@grasp-os/sdk/host";
 import { sha256HexOfBytes } from "@grasp-os/shared/encoding";
 import { errorPayloadSchema } from "@grasp-os/shared/errors";
+import type { Json } from "@grasp-os/shared/json";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { runFileLimits } from "@grasp-os/shared/run-files";
@@ -15,20 +16,25 @@ import {
   screenPersonHeader,
 } from "@grasp-os/shared/screens";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
+import { callAppFunction } from "../src/app-functions.ts";
 import { loadRelease } from "../src/app-releases.ts";
+import { appStartFiles } from "../src/app-start-files.ts";
 import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
 import { appFor, setCurrentVersion } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import { grantPermission, requestPermission } from "../src/permissions.ts";
+import { StoreHost } from "../src/store-host.ts";
 import {
   createWorkflowResource,
   publishWorkflowVersion,
 } from "../src/workflow-resources.ts";
+import { storeOutboxConsumers } from "../src/workflow-start-intents.ts";
 import { resultOf, runOf } from "../src/workflows/resource-runs.ts";
 import { copyIntoRun, sweepRunFiles } from "../src/workflows/run-files.ts";
 import { handFiles } from "../src/workflows/start-files.ts";
@@ -55,25 +61,46 @@ export default defineSchema({
 });
 `,
   "operations/review.ts": `import { resource, v } from "@grasp-os/sdk";
+import { action, mutation } from "#grasp/server";
 
 export const review = resource.workflow("review", {
   input: v.object({ doc: v.file() }),
   output: v.object({ status: v.string() }),
 });
+
+/** Starts the review now, with the file the screen names. */
+export const startReview = action({
+  args: { file: v.string() },
+  returns: v.object({ startId: v.string(), runId: v.string().nullable(), version: v.number().integer() }),
+  uses: [review],
+  handler: async (ctx, args) => await ctx.startWorkflow(review, { doc: { id: args.file } }),
+});
+
+/** Notes the file, and has the review started once that commits. */
+export const stageReview = mutation({
+  args: { file: v.string() },
+  returns: v.null(),
+  uses: [review],
+  handler: async (ctx, args) => {
+    await ctx.db.insert("notes", { title: args.file });
+    await ctx.afterCommit.start(review, { doc: { id: args.file } });
+    return null;
+  },
+});
 `,
   "app.ts": `import { app, resource } from "@grasp-os/sdk";
-import { review } from "./operations/review.ts";
+import { review, stageReview, startReview } from "./operations/review.ts";
 import schema from "./schema.ts";
 
 export const attachments = resource.files("attachments", {
-  operations: ["upload", "read"],
+  operations: ["upload", "read", "delete"],
 });
 
 export default app({
   name: "Reviews",
   schema,
   access: { tables: { notes: { read: "appMembers", write: "appMembers" } } },
-  operations: {},
+  operations: { review: { startReview, stageReview } },
   screens: [{ name: "desk", path: "/", source: "screens/desk.tsx" }],
   uses: [attachments, review],
 });
@@ -202,6 +229,7 @@ const reviewsApp = async () => {
     builder,
     app: fixture.app,
     workflow: workflow.id,
+    release,
     reference: {
       resourceId: release.manifest.resourceId,
       resourceVersion: release.manifest.resourceVersion,
@@ -357,6 +385,52 @@ const endOf = async (runId: string) =>
     { timeout: 30_000, interval: 100 }
   );
 
+/** Calls `path` of the fixture's App as `by`: its answer, or its refusal's code. */
+const calledAs = async (
+  by: Person,
+  fixture: Awaited<ReturnType<typeof reviewsApp>>,
+  path: string,
+  input: Json
+): Promise<unknown> => {
+  const { release } = fixture;
+  const { result } = await callAppFunction(
+    env,
+    by.acting,
+    release.manifest.resourceId,
+    JSON.stringify({
+      reference: {
+        resourceId: release.manifest.resourceId,
+        resourceVersion: release.manifest.resourceVersion,
+        contractId: path,
+        fingerprint: release.fingerprints[path],
+        kind: release.app.operations[path]?.kind,
+      },
+      input,
+    })
+  );
+  return result.ok ? result.value : { refused: result.error.code };
+};
+
+/** Dispatches the App store's staged starts, as its outbox does. */
+const dispatched = async (
+  fixture: Awaited<ReturnType<typeof reviewsApp>>
+): Promise<{ undeliverable: string | null }[]> => {
+  const storeId = fixture.release.store?.storeId ?? "";
+  return await runInDurableObject(
+    env.DATA_STORES.getByName(storeId),
+    async (_instance, state) => {
+      await new StoreHost(state, env).drainOutbox(storeOutboxConsumers(env), {
+        now: new Date(),
+      });
+      return state.storage.sql
+        .exec<{ undeliverable: string | null }>(
+          "SELECT undeliverable FROM sdk_change_outbox ORDER BY rowid"
+        )
+        .toArray();
+    }
+  );
+};
+
 describe(
   "a screen's start handing its run a file",
   { timeout: 120_000 },
@@ -399,6 +473,7 @@ describe(
           run: detail?.run,
           workflow: detail?.workflow,
           uploadedBy: detail?.uploadedBy,
+          via: detail?.via,
         })),
       }).toStrictEqual({
         again: first,
@@ -424,6 +499,7 @@ describe(
             run: first.runId,
             workflow: fixture.workflow,
             uploadedBy: fixture.builder.userId,
+            via: "screen",
           },
         ],
       });
@@ -647,6 +723,182 @@ describe(
           ["task file", "writing"],
           ["start copy", "deleted"],
         ],
+      });
+    });
+
+    it("hands a run the person's file from an action's start and from a commit's start dispatched later, as each reads it then", async () => {
+      const fixture = await reviewsApp();
+      const screen = await screenOf(fixture.builder, fixture.app);
+      const bytes = png(150);
+      const file = await uploaded(screen, bytes);
+
+      const now = z.object({ runId: z.string() }).parse(
+        await calledAs(fixture.builder, fixture, "review.startReview", {
+          file,
+        })
+      );
+      const fromAction = await endOf(now.runId);
+      await calledAs(fixture.builder, fixture, "review.stageReview", { file });
+      const entries = await dispatched(fixture);
+      const staged = await env.DB.prepare(
+        "SELECT id FROM workflow_start_receipts WHERE invoker_id = ? AND idempotency_key LIKE '%after-commit:%'"
+      )
+        .bind(fixture.app)
+        .first<{ id: string }>();
+      const fromCommit = await endOf(staged?.id ?? "");
+      const copies = [
+        ...(await runFiles(now.runId)),
+        ...(await runFiles(staged?.id ?? "")),
+      ];
+
+      const logged = await allEvents();
+      const vias = logged
+        .filter(
+          ({ action, target }) =>
+            action === "file.sent_to_run" && target?.id === file
+        )
+        .map(({ actor, detail }) => [actor, detail?.via]);
+      expect({
+        vias,
+        entries,
+        fromAction: fromAction.output,
+        fromCommit: fromCommit.output,
+        copies: copies.map(({ sha256, state, id }) => ({
+          sha256,
+          state,
+          own: id !== file,
+        })),
+      }).toStrictEqual({
+        // The person each acts for, and which code chose the file.
+        vias: [
+          [{ type: "person", userId: fixture.builder.userId }, "action"],
+          [{ type: "person", userId: fixture.builder.userId }, "commit"],
+        ],
+        entries: [{ undeliverable: null }],
+        fromAction: { status: copies[0]?.id },
+        fromCommit: { status: copies[1]?.id },
+        copies: [
+          { sha256: await sha256HexOfBytes(bytes), state: "done", own: true },
+          { sha256: await sha256HexOfBytes(bytes), state: "done", own: true },
+        ],
+      });
+    });
+
+    it("refuses an action's start with another person's file, and a commit's start whose file was deleted before its dispatch, settling it undeliverable", async () => {
+      const fixture = await reviewsApp();
+      const builderScreen = await screenOf(fixture.builder, fixture.app);
+      const theirs = await uploaded(builderScreen, png(110));
+      const colleague = await signedIn("user");
+      await fixture.builder.api.apps.members.add(fixture.app, {
+        type: "person",
+        id: colleague.userId,
+        role: "user",
+      });
+
+      const anotherPersons = await calledAs(
+        colleague,
+        fixture,
+        "review.startReview",
+        { file: theirs }
+      );
+      // Staged while the file is there, deleted before it is dispatched.
+      await calledAs(fixture.builder, fixture, "review.stageReview", {
+        file: theirs,
+      });
+      await builderScreen.channel.delete("attachments", theirs);
+      const entries = await dispatched(fixture);
+      const runs = await env.DB.prepare(
+        "SELECT count(*) AS runs FROM workflow_resource_runs WHERE workflow_resource_id = ?"
+      )
+        .bind(fixture.workflow)
+        .first<{ runs: number }>();
+      const events = await allEvents();
+
+      expect({
+        anotherPersons,
+        entries,
+        runs: runs?.runs,
+        refusal: events
+          .filter(
+            ({ action, target }) =>
+              action === "workflow.start_intent.refused" &&
+              target?.id === fixture.app
+          )
+          .map(({ detail }) => detail?.reason),
+      }).toStrictEqual({
+        // App code learns only that the input names no file it can hand.
+        anotherPersons: { refused: "resource.invalid_args" },
+        entries: [{ undeliverable: "file.not_found" }],
+        runs: 0,
+        refusal: ["file.not_found"],
+      });
+    });
+
+    it("tells the version's reviewer it may hand files people can read to its bound workflows, and no longer once it can't read files", async () => {
+      const fixture = await reviewsApp();
+      const handing = await fixture.builder.api.apps.versions.review(
+        fixture.app,
+        1
+      );
+      const withoutRead = Object.fromEntries(
+        Object.entries(files()).map(([path, text]) => [
+          path,
+          path === "app.ts"
+            ? text.replace(
+                'operations: ["upload", "read", "delete"]',
+                'operations: ["upload", "delete"]'
+              )
+            : text,
+        ])
+      );
+      const { version } = await fixture.builder.api.apps.files.commit(
+        fixture.app,
+        withoutRead,
+        "Uploads only"
+      );
+      const notHanding = await fixture.builder.api.apps.versions.review(
+        fixture.app,
+        version
+      );
+
+      expect({
+        handing: handing.handsFilesToWorkflows,
+        notHanding: notHanding.handsFilesToWorkflows,
+      }).toStrictEqual({ handing: true, notHanding: false });
+    });
+
+    it("refuses a commit's start once the person it acts for left the App before its dispatch, their file read as missing, never as the App", async () => {
+      const fixture = await reviewsApp();
+      const colleague = await signedIn("user");
+      const member = {
+        type: "person" as const,
+        id: colleague.userId,
+        role: "user" as const,
+      };
+      await fixture.builder.api.apps.members.add(fixture.app, member);
+      const screen = await screenOf(colleague, fixture.app);
+      const own = await uploaded(screen, png(100));
+      await calledAs(colleague, fixture, "review.stageReview", { file: own });
+      // Out of the App before the start is dispatched.
+      await fixture.builder.api.apps.members.remove(fixture.app, {
+        type: "person",
+        id: colleague.userId,
+      });
+
+      const entries = await dispatched(fixture);
+      // Read as they are now, should their role go between the start's
+      // decision and its read: a missing file, never the App.
+      const read = await outcome(
+        appStartFiles(env, colleague.userId, fixture.app, fixture.release, {
+          kind: "commit",
+          agent: null,
+        }).read(own)
+      );
+
+      expect({ entries, read }).toStrictEqual({
+        // Refused as the start is decided: they may no longer use the App.
+        entries: [{ undeliverable: "workflow.start_denied" }],
+        read: "file.not_found",
       });
     });
   }

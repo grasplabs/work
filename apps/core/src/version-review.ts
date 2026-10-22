@@ -43,6 +43,7 @@ import {
   workflowIdsIn,
   workflowTestOutcome,
 } from "./workflows/code.ts";
+import { takesFile } from "./workflows/start-files.ts";
 
 // What a version changes, for the builder who reviews it before making
 // it current: worked out here from the version and the App as they are
@@ -59,6 +60,43 @@ import {
 // the App asks for that no admin granted yet, what it holds and which of
 // that making it current would ask an admin for again, and its workflows'
 // tests, kept per version's files so they run once.
+
+/**
+ * Whether version `proposed` may hand files people can read to the
+ * workflows it binds (`VersionReview.handsFilesToWorkflows`): a boundary
+ * its reviewer sees, whatever else changed. Null when its manifest can't
+ * be read.
+ */
+const handsFilesOf = async (
+  env: Env,
+  app: AppId,
+  proposed: { version: number; files: Readonly<Record<string, string>> }
+): Promise<boolean | null> => {
+  let manifest: AppManifest | undefined;
+  try {
+    manifest = await versionManifest(
+      env,
+      app,
+      proposed.version,
+      proposed.files
+    );
+  } catch (error) {
+    log.warn("version_review.manifest_unread", errorFields(error));
+    return null;
+  }
+  // No App layout: no App, nothing to hand.
+  if (manifest === undefined) {
+    return false;
+  }
+  const readsFiles = Object.values(manifest.browserResources).some(
+    (resource) =>
+      resource["~resource"] === "files" && resource.operations.includes("read")
+  );
+  return (
+    readsFiles &&
+    Object.values(manifest.workflows).some(({ input }) => takesFile(input))
+  );
+};
 
 /**
  * The explicit migrations of version `proposed` the current version
@@ -765,6 +803,10 @@ export const reviewVersion = async (
     })),
     migrations,
     workflows,
+    handsFilesToWorkflows: await handsFilesOf(env, found.id, {
+      version: row.version,
+      files,
+    }),
     // As the permissions API shows them to this reviewer, no more.
     permissions: await permissionsOpenTo(
       env,
