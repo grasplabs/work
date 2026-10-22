@@ -75,6 +75,13 @@ interface __BaseEnv_Env {
    */
   WORKFLOW_BUILD_READ_MS?: string;
   /**
+   * Tests only: a random delay of up to this many ms where a JSON
+   * workflow's host does I/O of its own before a step reaches the engine
+   * (src/workflows/host-latency.ts). Honoured only with
+   * `SANDBOX_IN_PROCESS` set to `unbounded`.
+   */
+  WORKFLOW_HOST_LATENCY_MS?: string;
+  /**
    * Tests only: a shorter wait between a run's checks of a held side
    * effect (src/workflows/host.ts).
    */

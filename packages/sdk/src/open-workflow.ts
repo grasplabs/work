@@ -664,12 +664,14 @@ const flowOf = (engine: OpenWorkflowEngine, within = ""): Flow => {
   /**
    * Runs the `count` items or branches of task `id` (on `data`), at most
    * `limit` at once, each by `run` on a flow of its own scope. A race
-   * (`compete`) settles on its first that succeeds; where `settles`, an
-   * `end` in one settles the scope too. A scope settles in the task's own
+   * (`compete`) settles on its first that succeeds; where `settles` (at
+   * once), an `end` in one, or outside a race a failure, settles the
+   * scope too. A scope settles in the task's own
    * step (`task:<id>`), once: the host fences the others off, so none of
    * them starts another step, and answers the one that settled it, an
-   * earlier activation's included. Once settled, or once one failed
-   * outside a race, none that hasn't started does. Answers how each ended,
+   * earlier activation's included. Once settled (one after another, once
+   * one failed outside a race), none that hasn't started does but the one
+   * it settled on. Answers how each ended,
    * and the one that won or ended it.
    */
   const scoped = async ({
@@ -695,7 +697,8 @@ const flowOf = (engine: OpenWorkflowEngine, within = ""): Flow => {
     end?: ScopeEnd;
   }> => {
     let settling: Promise<number> | undefined;
-    // Outside a race, a failure fails the scope: none starts after it.
+    // One after another, outside a race, a failure fails the scope: none
+    // starts after it. At once, it settles the scope instead.
     let failing = false;
     // One after another, an end stops the items after it.
     let ending = false;
@@ -744,7 +747,19 @@ const flowOf = (engine: OpenWorkflowEngine, within = ""): Flow => {
           done = await run(index, flowOf(engine, itemScope(within, id, index)));
         } catch (error) {
           if (!fencedOff(error)) {
-            failing ||= !compete;
+            if (compete) {
+              return { ok: false, error };
+            }
+            // At once, a failure settles the scope on the item or branch
+            // that failed, as an end does, the first writer's: which
+            // failed first is then the run's record, never how this
+            // activation's outcomes came back, and the host fences the
+            // others off. One after another, none starts after it.
+            if (!settles) {
+              failing = true;
+            } else if (settling === undefined) {
+              fenced = !(await settledOn(index));
+            }
             return { ok: false, error };
           }
           // A step refused for a fence fails nothing of the scope. The
@@ -777,14 +792,16 @@ const flowOf = (engine: OpenWorkflowEngine, within = ""): Flow => {
         return { ok: true, done };
       },
       async (index) => {
-        // Each answer here comes from what this activation has seen so
-        // far: the outcomes of the items and branches before it. A replay
-        // asks the same at the same points, as the engine hands a run's
-        // outcomes back in the order they were journaled, each before the
-        // next. So it starts every item and branch the first run started,
-        // one started behind a failure before the scope settled included,
-        // and reaches each wait and retry the journal holds of them: its
-        // steps the fence refuses replay as recorded, and run nothing.
+        // Answered from the scope's settling, which the run records (the
+        // host's fence, the first writer's), never from the order this
+        // activation's outcomes came back in: a replay hears of them in
+        // whatever order its host's and sandbox's I/O lets it. Until the
+        // scope settles every one starts; once it has, only the one it
+        // settled on, an earlier activation's included, so a replay that
+        // starts one more than the first run did, or one fewer, has the
+        // same outcome: the host refuses the extra one's steps for the
+        // fence, and the engine wakes for a missing one's waits. One
+        // after another, a failure or an end stops the rest.
         if (fenced) {
           return "stop";
         }
@@ -834,6 +851,10 @@ const flowOf = (engine: OpenWorkflowEngine, within = ""): Flow => {
     }
     const branch = won?.branch ?? (await settling);
     const winner = won?.outcome ?? outcomes[branch];
+    // Settled on a failure (outside a race): the scope fails with it.
+    if (winner?.ok === false && !compete) {
+      throw winner.error;
+    }
     if (winner?.ok !== true) {
       throw new TypeError("A scope settles on one that succeeded");
     }

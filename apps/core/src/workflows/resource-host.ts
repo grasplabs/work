@@ -40,6 +40,7 @@ import type {
 import { settling } from "./code.ts";
 import type { RunHostCalls, Settled, StepError } from "./code.ts";
 import { takesExactly } from "./exact-values.ts";
+import { hostLatency } from "./host-latency.ts";
 import {
   busyMarker,
   loadRound,
@@ -1190,6 +1191,8 @@ export class ResourceRunHost
   /** What the run keeps of its tried-once steps' attempts. */
   readonly #triedOnce: TriedOnceMarks;
   readonly #fences: ScopeFences;
+  /** Tests only: the host's own I/O made slower (host-latency.ts). */
+  readonly #latency: () => Promise<void>;
   /** Attempts of this activation running, and those waiting for a slot. */
   #running = 0;
   readonly #waitingSlot: (() => void)[] = [];
@@ -1220,6 +1223,7 @@ export class ResourceRunHost
       JSON.stringify(run.input).length +
       JSON.stringify(this.#readableParams).length;
     this.#hostSlots = hostSlotsOf(run.build);
+    this.#latency = hostLatency(env);
   }
 
   /**
@@ -1325,6 +1329,7 @@ export class ResourceRunHost
    * holding nothing, for one to end.
    */
   async #inSlot<T>(work: () => Promise<T>): Promise<T> {
+    await this.#latency();
     if (this.#running >= maxAttemptsAtOnce) {
       const free = Promise.withResolvers<null>();
       this.#waitingSlot.push(() => {
@@ -1337,6 +1342,7 @@ export class ResourceRunHost
       this.#running += 1;
     }
     try {
+      await this.#latency();
       return await work();
     } finally {
       const waiter = this.#waitingSlot.shift();
@@ -1442,7 +1448,9 @@ export class ResourceRunHost
 
   /** The person the run acts for must still be an active member. */
   async #requirePerson(): Promise<void> {
-    if (!(await memberRole(this.#env.DB, this.#run.principal))) {
+    const active = await memberRole(this.#env.DB, this.#run.principal);
+    await this.#latency();
+    if (!active) {
       throw permissionErrors.create("permission.person_inactive");
     }
   }
