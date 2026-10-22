@@ -54,7 +54,11 @@ import type {
   Route,
   VersionState,
 } from "./cloudflare-api-kit.ts";
-import { forgetDatabases, workerRoutes } from "./cloudflare-api-workers.ts";
+import {
+  dispatchRoutes,
+  forgetDatabases,
+  workerRoutes,
+} from "./cloudflare-api-workers.ts";
 
 /** The R2 jurisdiction a call names, as the API reads its header. */
 const jurisdictionOf = (call: ApiCall): string =>
@@ -449,7 +453,12 @@ const memberRoutes: Route[] = [
   },
 ];
 
-const routes = [...accountRoutes, ...memberRoutes, ...workerRoutes];
+const routes = [
+  ...accountRoutes,
+  ...memberRoutes,
+  ...workerRoutes,
+  ...dispatchRoutes,
+];
 
 /** Whether `caller` is an accepted member of `account`. */
 const isMember = (account: AccountState, caller: string | undefined) =>
@@ -633,6 +642,7 @@ export const mockCloudflareApi = (
       gateways: [],
       zones: [],
       scripts: new Map(),
+      namespaces: new Map(),
       workflows: new Map(),
       assets: new Set(),
       sessions: new Map(),
