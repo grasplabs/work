@@ -250,6 +250,15 @@ const sealedCallSchema = z.discriminatedUnion("name", [
     timestamp: templateSchema,
   }),
   z.strictObject({
+    name: z.literal("grasp.decision"),
+    binding: aliasSchema,
+    recipients: templateSchema,
+    prompt: templateSchema,
+    input: templateSchema,
+    // How long it takes answers, from its task's timeout (generate.ts).
+    timeoutMs: z.int().positive().optional(),
+  }),
+  z.strictObject({
     name: z.literal("grasp.compute"),
     binding: aliasSchema,
     // The workflow's own module and export its binding names, as the

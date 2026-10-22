@@ -61,6 +61,7 @@ export const readWaiting = async (
     requests,
     dependencies,
     screens,
+    decisions,
   ] = await Promise.all([
     loadFromCore(core, async (session) => await session.pendingActions.list()),
     loadEveryPage(
@@ -79,6 +80,7 @@ export const readWaiting = async (
           async (session) => await session.screenTrust.waiting()
         )
       : undefined,
+    loadFromCore(core, async (session) => await session.decisions.waiting()),
   ]);
   return {
     held,
@@ -88,6 +90,7 @@ export const readWaiting = async (
     requests,
     dependencies,
     screens,
+    decisions,
   };
 };
 

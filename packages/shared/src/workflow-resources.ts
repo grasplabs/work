@@ -191,6 +191,8 @@ export const workflowResourceErrors = defineErrorFamily({
     "A task's call, or what it answered, doesn't match the binding's contract, so the run failed.",
   "workflow.call_release_not_current":
     "The App release this call's approval pins is no longer the App's current version, so the call can't run. Approve the binding for the App's current release, then start the workflow again.",
+  "workflow.decision_timed_out":
+    "Nobody answered the run's decision before its deadline, so the run failed.",
   "workflow.model_call_limit":
     "The run made as many model calls as its workflow allows, so it failed.",
   "workflow.modules_invalid":
