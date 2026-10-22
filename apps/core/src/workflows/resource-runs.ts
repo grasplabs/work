@@ -1009,31 +1009,43 @@ export const resultOf = async (
  * what core owes a run (`reserved`), so no sender can crowd it out. An
  * output too large for an event is told as a failure
  * (`workflow.child_output_too_large`), never dropped. Told again, it is
- * the same event; a parent that ended takes none. An event already under
+ * the same event; a parent that ended, or that the engine removed after it
+ * ended, takes none. An event already under
  * its key that isn't the same (the child's details gone since it was
  * first told) is what the parent takes: what was told first stands.
  * Throws for anything else (a full inbox, a parent the engine has no
  * record of), so the engine tells the end again. Nothing for a run that
  * isn't a child or hasn't ended.
  */
+/**
+ * How ended child run `row` ended, as its parent is told (`ChildEnd`): an
+ * output too large for an event told as a failure, never dropped.
+ */
+const childEndOf = async (env: Env, row: RunRow): Promise<ChildEnd> => {
+  const { output, error } = await resultOf(env, row);
+  if (row.status !== "completed") {
+    return {
+      status: row.status === "cancelled" ? "cancelled" : "failed",
+      code: error?.code ?? null,
+    };
+  }
+  const end: ChildEnd = {
+    status: "completed",
+    output: z.json().parse(output ?? null),
+  };
+  try {
+    encode(end);
+    return end;
+  } catch {
+    return { status: "failed", code: "workflow.child_output_too_large" };
+  }
+};
+
 export const tellParentOfEnd = async (env: Env, row: RunRow): Promise<void> => {
   if (row.parentRunId === null || unended.includes(row.status)) {
     return;
   }
-  const { output, error } = await resultOf(env, row);
-  const failed: ChildEnd = {
-    status: row.status === "cancelled" ? "cancelled" : "failed",
-    code: error?.code ?? null,
-  };
-  let end: ChildEnd = failed;
-  if (row.status === "completed") {
-    end = { status: "completed", output: z.json().parse(output ?? null) };
-    try {
-      encode(end);
-    } catch {
-      end = { status: "failed", code: "workflow.child_output_too_large" };
-    }
-  }
+  const end = await childEndOf(env, row);
   const tell = async (told: ChildEnd) =>
     await runEngine(env).admitEvent(row.parentRunId ?? "", {
       type: childEndType(row.id),
@@ -1048,6 +1060,23 @@ export const tellParentOfEnd = async (env: Env, row: RunRow): Promise<void> => {
       status: "failed",
       code: "workflow.child_output_too_large",
     });
+  }
+  if (outcome === "missing") {
+    // A parent the engine no longer holds (removed with its retention) takes
+    // nothing, ever: done. One that hasn't ended is still to come.
+    const parent = await runOf(env, row.parentRunId);
+    if (parent === undefined || !unended.includes(parent.status)) {
+      return;
+    }
+  }
+  if (outcome === "missing") {
+    // The engine has no record of the parent: removed once it ended (its
+    // retention), so nothing is left to tell. A parent core still has
+    // going is one the engine must have, so that is tried again.
+    const parent = await runOf(env, row.parentRunId);
+    if (parent === undefined || !unended.includes(parent.status)) {
+      return;
+    }
   }
   if (
     outcome !== "accepted" &&
