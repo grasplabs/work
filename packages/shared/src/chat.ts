@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import type { ModelEffort, ModelEfforts } from "./models.ts";
+import type { ModelEffort, ModelEfforts, ModelErrorCode } from "./models.ts";
 import type {
   QuerySnapshotPush,
   RunSubscriptionApi,
@@ -254,8 +254,11 @@ export type ChatMessage =
       /** The code it asked to run, each run in a code step. */
       code: ChatCode[];
       end: ChatReplyEnd;
-      /** Why it failed, in the model gateway's words. */
-      error?: string;
+      /**
+       * Why it failed, as one of the model gateway's error codes: the page
+       * says it in people's words, never the gateway's or a provider's.
+       */
+      failure?: ModelErrorCode;
       /**
        * What the reply used, as the model gateway counted it; none for one
        * no model wrote (core's own words, after a restart).

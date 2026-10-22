@@ -9,7 +9,7 @@ import type {
   ChatReplyUsage,
 } from "@grasp-os/shared/chat";
 
-import { contextWindowOf } from "./models.ts";
+import { contextWindowOf, modelFailureOf } from "./models.ts";
 
 // A chat's transcript as pi keeps it (workspace.ts), shown as the person
 // reads it: their questions, the agent's answers with the code it ran,
@@ -318,8 +318,8 @@ export const chatMessageOf = (
       ...citedIn(textOf(message.content), given),
       code: codeOf(message),
       end: ends[message.stopReason],
-      ...(message.stopReason === "error" && message.errorMessage !== undefined
-        ? { error: message.errorMessage }
+      ...(message.stopReason === "error"
+        ? { failure: modelFailureOf(message.errorMessage) }
         : {}),
       ...(usage === undefined ? {} : { usage }),
       at,

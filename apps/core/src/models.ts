@@ -59,7 +59,11 @@ import {
   modelErrors,
   overBudgetMessage,
 } from "@grasp-os/shared/models";
-import type { ModelEffort, ModelEfforts } from "@grasp-os/shared/models";
+import type {
+  ModelEffort,
+  ModelEfforts,
+  ModelErrorCode,
+} from "@grasp-os/shared/models";
 import {
   authoritySchema,
   permissionErrors,
@@ -1922,6 +1926,22 @@ const failureMessage = ({ status, errorType }: Failure): string => {
     : `The model call failed (${cause.join(" ")}).`;
 };
 
+/** The model error code a failed answer's message names, as "(model.over_budget)". */
+const namedFailure = /\((?<code>model\.[a-z_]+)\)/u;
+
+/**
+ * Why a model call failed, from the message the gateway put on its failed
+ * answer: the code of {@link modelErrors} it names, or `model.failed` for
+ * one that names none (the provider failed it). Never the message itself,
+ * which may hold a provider's status and error type.
+ */
+export const modelFailureOf = (
+  errorMessage: string | undefined
+): ModelErrorCode =>
+  modelErrors.codeOf({
+    code: namedFailure.exec(errorMessage ?? "")?.groups?.code,
+  }) ?? "model.failed";
+
 /** How one request ended, as the audit log records it. */
 type Outcome =
   | "answered"
@@ -2842,7 +2862,7 @@ const relayEvents = async (
       const rateLimited =
         response.rateLimited === undefined || stopped !== undefined
           ? undefined
-          : `The model's provider is taking no more requests for now. Try again in ${response.rateLimited} seconds.`;
+          : `The model's provider is taking no more requests for now (model.rate_limited). Try again in ${response.rateLimited} seconds.`;
       out.push({
         ...event,
         error: {
