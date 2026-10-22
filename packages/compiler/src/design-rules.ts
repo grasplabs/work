@@ -197,59 +197,145 @@ const unwrap = (node: unknown): unknown =>
     ? unwrap(get(node, "expression"))
     : node;
 
-/** The identifier or value a member chain starts from (`a` of `a.b.c`). */
-const rootOf = (node: unknown): unknown => {
-  const value = unwrap(node);
-  return get(value, "type") === "MemberExpression"
-    ? rootOf(get(value, "object"))
-    : value;
+/** A property's key, when written as a name or string. */
+const keyOf = (property: unknown): string | undefined => {
+  const key = get(property, "key");
+  const name = get(key, "name");
+  const value = get(key, "value");
+  if (get(property, "computed") !== true && typeof name === "string") {
+    return name;
+  }
+  return typeof value === "string" ? value : undefined;
+};
+
+/** The definition in scope of the variable `name`, if any. */
+const definitionOf = (
+  context: Rule.RuleContext,
+  node: Rule.Node,
+  name: string
+) => {
+  let scope: ReturnType<typeof context.sourceCode.getScope> | null =
+    context.sourceCode.getScope(node);
+  while (scope !== null && !scope.set.has(name)) {
+    scope = scope.upper;
+  }
+  return scope?.set.get(name)?.defs[0];
+};
+
+/** What an identifier is bound to, when declared as `const x = value`. */
+const bindingOf = (
+  context: Rule.RuleContext,
+  node: Rule.Node,
+  identifier: unknown
+): unknown => {
+  const name = get(identifier, "name");
+  if (get(identifier, "type") !== "Identifier" || typeof name !== "string") {
+    return undefined;
+  }
+  const definition = definitionOf(context, node, name);
+  const declarator = definition?.node;
+  return definition?.type === "Variable" &&
+    get(declarator, "id") === definition.name
+    ? unwrap(get(declarator, "init"))
+    : undefined;
+};
+
+/** What a value is known to be: plain data, or a variable of a declared type. */
+type Known = "plain" | "element-typed" | "data-typed" | undefined;
+
+/** How many bindings and properties `knownOf` follows before giving up. */
+const maxSteps = 8;
+
+/** A property of an object literal named `name`, written as a name or string. */
+const propertyNamed = (object: unknown, name: string): unknown => {
+  const properties = get(object, "properties");
+  if (!Array.isArray(properties)) {
+    return undefined;
+  }
+  // The last one wins, as at run time; a spread after it may override it.
+  for (const property of properties.toReversed()) {
+    if (get(property, "type") !== "Property") {
+      return undefined;
+    }
+    if (keyOf(property) === name) {
+      return property;
+    }
+  }
+  return undefined;
 };
 
 /**
- * Whether the object whose `style` is written may be a DOM element. The
+ * What a value is known to be, read from the source: a literal; a
+ * variable bound directly to one or annotated with a type; or a property,
+ * written as a name, of an object literal reached that way. Anything
+ * else, a call or a property of something unknown, is unknown.
+ */
+const knownOf = (
+  context: Rule.RuleContext,
+  node: Rule.Node,
+  value: unknown,
+  steps = 0
+): Known => {
+  const bare = unwrap(value);
+  const type = get(bare, "type");
+  if (steps > maxSteps) {
+    return undefined;
+  }
+  if (plainValues.has(String(type))) {
+    return "plain";
+  }
+  if (type === "MemberExpression") {
+    const name = memberName(bare);
+    const object = unwrap(get(bare, "object"));
+    if (name === undefined) {
+      return undefined;
+    }
+    const literal =
+      get(object, "type") === "ObjectExpression"
+        ? object
+        : bindingOf(context, node, object);
+    const property = propertyNamed(literal, name);
+    return property === undefined
+      ? undefined
+      : knownOf(context, node, get(property, "value"), steps + 1);
+  }
+  const name = get(bare, "name");
+  if (type !== "Identifier" || typeof name !== "string") {
+    return undefined;
+  }
+  const definition = definitionOf(context, node, name);
+  const annotation = get(
+    get(definition?.name, "typeAnnotation"),
+    "typeAnnotation"
+  );
+  if (isRuleNode(annotation)) {
+    return elementType.test(context.sourceCode.getText(annotation))
+      ? "element-typed"
+      : "data-typed";
+  }
+  const init = bindingOf(context, node, bare);
+  return init === undefined
+    ? undefined
+    : knownOf(context, node, init, steps + 1);
+};
+
+/**
+ * Whether the value whose `style` is written may be a DOM element. The
  * lint has no type information, so this reads what the source says: no
- * when the chain starts from an object, array or string literal, or a
- * variable declared as one or annotated with a type that isn't a DOM
- * one (`const options = { style: "compact" }`, `(page: Page)`); yes
- * otherwise (`ref.current`, `event.currentTarget`, an unannotated
- * parameter, `document.querySelector(…)`), since that is how element
- * styles are written.
+ * when that value itself is known to be plain data (a literal, a
+ * variable bound to one or typed as something other than the DOM, or a
+ * property of an object literal holding a literal), as with
+ * `const options = { style: "compact" }; options.style = "expanded"`;
+ * yes otherwise, so `ref.current.style`, an unannotated parameter's, or
+ * `elements.button.style` where `button` holds `document.querySelector`.
  */
 const mayBeElement = (
   context: Rule.RuleContext,
   node: Rule.Node,
   object: unknown
 ): boolean => {
-  const root = rootOf(object);
-  if (plainValues.has(String(get(root, "type")))) {
-    return false;
-  }
-  const name = get(root, "name");
-  if (get(root, "type") !== "Identifier" || typeof name !== "string") {
-    return true;
-  }
-  let scope: ReturnType<typeof context.sourceCode.getScope> | null =
-    context.sourceCode.getScope(node);
-  while (scope !== null && !scope.set.has(name)) {
-    scope = scope.upper;
-  }
-  const definition = scope?.set.get(name)?.defs[0];
-  if (definition === undefined) {
-    return true;
-  }
-  const annotation = get(
-    get(definition.name, "typeAnnotation"),
-    "typeAnnotation"
-  );
-  if (isRuleNode(annotation)) {
-    return elementType.test(context.sourceCode.getText(annotation));
-  }
-  const declarator = definition.node;
-  return !(
-    definition.type === "Variable" &&
-    get(declarator, "id") === definition.name &&
-    plainValues.has(String(get(unwrap(get(declarator, "init")), "type")))
-  );
+  const known = knownOf(context, node, object);
+  return known === undefined || known === "element-typed";
 };
 
 const noStyleEscapes: Rule.RuleModule = {
@@ -441,17 +527,6 @@ interface Passed {
   role: "key" | "value";
   key: string | undefined;
 }
-
-/** A property's key, when written as a name or string. */
-const keyOf = (property: unknown): string | undefined => {
-  const key = get(property, "key");
-  const name = get(key, "name");
-  const value = get(key, "value");
-  if (get(property, "computed") !== true && typeof name === "string") {
-    return name;
-  }
-  return typeof value === "string" ? value : undefined;
-};
 
 /** cva's keys whose string values are classes. */
 const cvaClassKeys = new Set(["class", "className"]);

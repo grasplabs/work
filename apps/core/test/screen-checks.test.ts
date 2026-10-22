@@ -306,6 +306,8 @@ export default function Escapes() {
     const sheet = document.createElement("style");
     document.head.append(sheet);
     document.adoptedStyleSheets = [new CSSStyleSheet()];
+    const elements = { button: document.createElement("button") };
+    elements.button.style.color = "red";
   }, []);
   return (
     <div ref={box}>
@@ -338,14 +340,15 @@ export default function Escapes() {
       "13 grasp/no-style-escapes",
       "14 grasp/no-style-escapes",
       "14 grasp/no-style-escapes",
-      "18 grasp/no-remote-resources",
-      "19 grasp/no-remote-resources",
+      "16 grasp/no-style-escapes",
       "20 grasp/no-remote-resources",
       "21 grasp/no-remote-resources",
-      "22 grasp/no-important",
-      "23 grasp/no-style-escapes",
+      "22 grasp/no-remote-resources",
+      "23 grasp/no-remote-resources",
       "24 grasp/no-important",
-      "25 grasp/no-important",
+      "25 grasp/no-style-escapes",
+      "26 grasp/no-important",
+      "27 grasp/no-important",
     ]);
     // Each says what to do instead.
     expect(
