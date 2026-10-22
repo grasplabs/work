@@ -1,5 +1,5 @@
 import { expectedMessageOf } from "@grasp-os/shared/errors";
-import { categoryOf } from "@grasp-os/shared/operations";
+import { categoryOf, isRetryableCode } from "@grasp-os/shared/operations";
 
 import type { SealedTask } from "../workflow-builds.ts";
 import type { StepError } from "./code.ts";
@@ -79,7 +79,12 @@ export interface CaughtError {
 
 /** A step's failure as a catch sees it: an error, or nothing it may take. */
 export type Failure =
-  | { readonly catchable: true; readonly error: CaughtError }
+  | {
+      readonly catchable: true;
+      readonly error: CaughtError;
+      /** The host's code for it, as bounded metadata: never the catch's. */
+      readonly code?: string;
+    }
   | { readonly catchable: false };
 
 const uncatchable: Failure = Object.freeze({ catchable: false });
@@ -90,6 +95,9 @@ const neverCaught: ReadonlySet<string> = new Set([
   "execution.stale_attempt",
   // Its call took effect: a catch would take it as one that didn't.
   "workflow.failed_after_effect",
+  // A test run's limit on its waits (a retry's backoff past it): the
+  // run's own bound, as a sleep's refusal is never a catch's.
+  "workflow.candidate_wait_limit",
   "connect.outcome_unknown",
   "connect.outcome_unknown_unresolved",
 ]);
@@ -186,6 +194,7 @@ export const failureOf = (
     const { type, status, title, detail } = task.error;
     return Object.freeze({
       catchable: true,
+      code,
       error: Object.freeze({
         type,
         status,
@@ -198,6 +207,7 @@ export const failureOf = (
   const type = typeOf(error);
   return Object.freeze({
     catchable: true,
+    ...(code === undefined ? {} : { code }),
     error: Object.freeze({
       type: `${standardTypes}${type}`,
       status: standard[type],
@@ -229,4 +239,63 @@ export const matchesFilter = (
   return Object.entries(filter).every(
     ([key, value]) => value === undefined || own.get(key) === value
   );
+};
+
+/** The standard types whose failures trying again may fix. */
+const transientTypes: ReadonlySet<string> = new Set(
+  (["timeout", "communication", "runtime"] as const).map(
+    (type) => `${standardTypes}${type}`
+  )
+);
+
+/**
+ * Failures trying again never fixes, however a retry policy reads (spec
+ * 13.7): a conflict, a decline, and every budget or limit spent.
+ */
+const permanentCodes: ReadonlySet<string> = new Set([
+  "data.conflict",
+  "resource.idempotency_conflict",
+  "resource.declined",
+  "connect.declined",
+  "resource.budget_exhausted",
+  "resource.limit_reached",
+  "workflow.model_call_limit",
+  "workflow.action_call_limit",
+  "workflow.too_many_steps",
+  "workflow.too_many_attempts",
+  "workflow.lineage_limit",
+  "workflow.between_steps_limit",
+  "workflow.queue_timeout",
+  "workflow.queue_full",
+  "workflow.candidate_time_limit",
+  "workflow.candidate_wait_limit",
+]);
+
+/**
+ * Whether a step of `task` that failed with `failure` may be tried again
+ * under a catch's retry policy (spec 13.7): a failure a catch may take, of
+ * a type trying again may fix (a timeout, a call outside the platform that
+ * failed, a failure of the task's work), never a conflict, a decline, a
+ * denial, invalid data, the workflow's own error (a permanent domain
+ * error) or a budget spent; for a call that runs its effect once, only one
+ * that says nothing was sent. No policy overrides this.
+ */
+export const retryable = (failure: Failure, task: SealedTask): boolean => {
+  if (!failure.catchable || !transientTypes.has(failure.error.type)) {
+    return false;
+  }
+  const { code } = failure;
+  if (
+    failure.error.status === 409 ||
+    code === raisedCode ||
+    (code !== undefined && permanentCodes.has(code))
+  ) {
+    return false;
+  }
+  // A call whose effect runs once runs again only after a failure that
+  // says nothing was sent, as a busy store or a provider's rate limit do.
+  if (task.kind === "call" && onceCalls.has(task.call.name)) {
+    return code !== undefined && isRetryableCode(code);
+  }
+  return true;
 };

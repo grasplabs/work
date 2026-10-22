@@ -70,7 +70,11 @@ import {
   resourceAttemptMethods,
   ResourceRunHost,
 } from "./resource-host.ts";
-import type { HostedResourceRun, ResourceHostHooks } from "./resource-host.ts";
+import type {
+  HostedResourceRun,
+  ResourceHostHooks,
+  RunTimer,
+} from "./resource-host.ts";
 import { detailsRemoved, removedText } from "./retention.ts";
 import { tellQueryFollowers } from "./run-changes.ts";
 import type { EngineStatus } from "./runs.ts";
@@ -192,7 +196,7 @@ export interface RunAdmission {
  */
 export const runAdmitted = (db: DrizzleD1Database, run: RunAdmission) =>
   db.insert(workflowResourceRuns).select(
-    sql`SELECT ${run.receipt}, ${run.workflowId}, ${run.version}, ${run.manifestHash}, ${run.buildHash}, ${run.principal}, 'starting', 0, ${run.createdAt}, NULL, 0, NULL, NULL, 0, ${run.restricted ? 1 : 0}
+    sql`SELECT ${run.receipt}, ${run.workflowId}, ${run.version}, ${run.manifestHash}, ${run.buildHash}, ${run.principal}, 'starting', 0, ${run.createdAt}, NULL, 0, NULL, NULL, 0, ${run.restricted ? 1 : 0}, NULL, 0, 0
         WHERE EXISTS (SELECT 1 FROM ${workflowStartReceipts} WHERE ${workflowStartReceipts.id} = ${run.receipt})`
   );
 
@@ -360,6 +364,123 @@ export const projectResourceRun = async (
   }
   if (status !== row.status) {
     await tellQueryFollowers(env, id);
+  }
+};
+
+/** How many of run `id`'s timers have passed (`timers_passed`). */
+const timersPassed = async (env: Env, id: string): Promise<number> => {
+  try {
+    const row = await env.DB.prepare(
+      "SELECT timers_passed AS passed FROM workflow_resource_runs WHERE id = ?"
+    )
+      .bind(id)
+      .first<{ passed: number }>();
+    return row?.passed ?? 0;
+  } catch (error) {
+    // Best effort, as the timers are: none passed, each write's own guard
+    // (`timers_passed < index`) still keeps a past one from being kept.
+    log.warn("workflow.timer_not_kept", { runId: id, ...errorFields(error) });
+    return 0;
+  }
+};
+
+/** The longest title a screen shows of a wait (the SDK's bound). */
+const maxWaitTitle = 200;
+
+/**
+ * The label task `pointer` of run `id`'s version declares
+ * (`metadata.grasp.label`): what a screen shows of a wait in it, or
+ * nothing, never a task's ID. Read from the definition as published.
+ */
+const labelOf = async (
+  env: Env,
+  id: string,
+  pointer: string
+): Promise<string> => {
+  const row = await env.DB.prepare(
+    `SELECT v.definition AS definition FROM workflow_resource_runs r
+       JOIN workflow_resource_versions v
+         ON v.workflow_resource_id = r.workflow_resource_id AND v.version = r.version
+       WHERE r.id = ?`
+  )
+    .bind(id)
+    .first<{ definition: string }>();
+  let value: unknown = row === null ? undefined : JSON.parse(row.definition);
+  for (const raw of pointer.split("/").slice(1)) {
+    const key = raw.replaceAll("~1", "/").replaceAll("~0", "~");
+    value =
+      typeof value === "object" && value !== null && Object.hasOwn(value, key)
+        ? Reflect.get(value, key)
+        : undefined;
+  }
+  const label = z
+    .object({
+      metadata: z.object({ grasp: z.object({ label: z.string() }) }),
+    })
+    .safeParse(value).data?.metadata.grasp.label;
+  return (label ?? "").slice(0, maxWaitTitle);
+};
+
+/**
+ * Keeps `timer`, the `index`th the run's code reached, as what running run
+ * `id` waits on now, for its snapshot's waits (screen-workflows.ts), with
+ * its task's declared label as its title. Each change is a revision of its
+ * own (`timer_revision`), which the run's App's followers are told of. Best
+ * effort: it never fails the run.
+ */
+const keepTimer = async (
+  env: Env,
+  id: string,
+  timer: RunTimer
+): Promise<void> => {
+  try {
+    const { pointer, ...kept } = timer;
+    const text = JSON.stringify({
+      ...kept,
+      title: await labelOf(env, id, pointer),
+      openedAt: Date.now(),
+    });
+    const { meta } = await env.DB.prepare(
+      `UPDATE workflow_resource_runs
+         SET timer = ?1, timer_revision = timer_revision + 1
+         WHERE id = ?2 AND status = 'running' AND timers_passed < ?3
+           AND (timer IS NULL OR json_extract(timer, '$.id') IS NOT ?4)`
+    )
+      .bind(text, id, timer.index, timer.id)
+      .run();
+    if (meta.changes > 0) {
+      await tellQueryFollowers(env, id);
+    }
+  } catch (error) {
+    log.warn("workflow.timer_not_kept", { runId: id, ...errorFields(error) });
+  }
+};
+
+/**
+ * Lets run `id`'s timer go once it has passed (`keepTimer`), counting it
+ * among those passed, so no replay keeps it again.
+ */
+const letTimerGo = async (
+  env: Env,
+  id: string,
+  timer: Pick<RunTimer, "id" | "index">
+): Promise<void> => {
+  try {
+    const { meta } = await env.DB.prepare(
+      `UPDATE workflow_resource_runs
+         SET timers_passed = ?3,
+           timer = CASE WHEN json_extract(timer, '$.id') = ?2 THEN NULL ELSE timer END,
+           timer_revision = timer_revision
+             + CASE WHEN json_extract(timer, '$.id') = ?2 THEN 1 ELSE 0 END
+         WHERE id = ?1 AND timers_passed < ?3`
+    )
+      .bind(id, timer.id, timer.index)
+      .run();
+    if (meta.changes > 0) {
+      await tellQueryFollowers(env, id);
+    }
+  } catch (error) {
+    log.warn("workflow.timer_not_kept", { runId: id, ...errorFields(error) });
   }
 };
 
@@ -836,6 +957,15 @@ export const runLoadedResource = async (
     attemptCall: trackAttemptCalls(calls),
     tampered: (error) => {
       tampered ??= error;
+    },
+    timers: {
+      passed: async () => await timersPassed(env, runId),
+      opened: async (timer) => {
+        await keepTimer(env, runId, timer);
+      },
+      closed: async (timer) => {
+        await letTimerGo(env, runId, timer);
+      },
     },
     // The root of its own lineage: an independent run starts no runs.
     admitAttempt: async (attempt) =>

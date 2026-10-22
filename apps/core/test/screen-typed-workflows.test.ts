@@ -142,7 +142,16 @@ const definitionOf = (
     input: { schema: objectSchema({ who: { type: "string" } }) },
     output: { schema: objectSchema({ status: { type: "string" } }) },
     do: [
-      ...(hold === undefined ? [] : [{ hold: { wait: hold } }]),
+      ...(hold === undefined
+        ? []
+        : [
+            {
+              hold: {
+                wait: hold,
+                metadata: { grasp: { label: "Cooling off" } },
+              },
+            },
+          ]),
       { greet: { set: { status: '${ "Hello, " + $workflow.input.who }' } } },
     ],
   });
@@ -506,10 +515,13 @@ const failureShown = (error: { code: string | null; message: string }) => {
 /**
  * Where in its lifecycle a run's revision says it is: 1 queued, 2 queued
  * with a cancel asked, 3 running, 4 running with a cancel asked, 5 ended,
- * whatever policy generation it is under.
+ * whatever policy generation it is under and however often its timers
+ * opened and closed (the revision's low 20 bits).
  */
 const stageOf = (revision: number | undefined): number | undefined =>
-  revision === undefined ? undefined : ((revision - 1) % 5) + 1;
+  revision === undefined
+    ? undefined
+    : ((Math.floor(revision / 2 ** 20) - 1) % 5) + 1;
 
 /** A cancel receipt with its revision as the stage it names. */
 const staged = (receipt: unknown) => {
@@ -606,6 +618,65 @@ describe(
           },
           waits: [],
         },
+      });
+    });
+
+    it("shows the timer a run sleeps on as its wait, a revision of its own, and none once it has ended", async () => {
+      const { builder, app, reference } = await requestsApp("PT1H");
+      const lease = await screenOf(builder, app);
+      const channel = workflowChannel(screenClient(builder, app, lease));
+      const read = readWorkflowReference(reference);
+      const handle = await channel.start(read, { who: "Ada" });
+      const stopRun = channel.followRun(read, handle.runId, () => {
+        // Read below.
+      });
+      await vi.waitFor(() => {
+        expect(channel.peekRun(read, handle.runId).value?.waits).toHaveLength(
+          1
+        );
+      }, settles);
+      const asleep = channel.peekRun(read, handle.runId);
+      await channel.control(read, handle.runId, "cancel", () => {
+        // Read below.
+      });
+      await vi.waitFor(() => {
+        expect(channel.peekRun(read, handle.runId).value?.status).toBe(
+          "cancelled"
+        );
+      }, settles);
+      const ended = channel.peekRun(read, handle.runId);
+      stopRun();
+      const [wait] = asleep.value?.waits ?? [];
+      expect({
+        status: asleep.value?.status,
+        wait: {
+          ...wait,
+          openedAt: typeof wait?.openedAt,
+          // An hour's sleep, from when it opened.
+          inAnHour:
+            wait !== undefined &&
+            wait.deadline !== null &&
+            Math.abs(wait.deadline - wait.openedAt - 3_600_000) < 60_000,
+          deadline: typeof wait?.deadline,
+        },
+        stage: stageOf(asleep.revision),
+        endedWaits: ended.value?.waits,
+      }).toStrictEqual({
+        status: "running",
+        wait: {
+          id: "task:hold",
+          taskId: "hold",
+          key: "hold",
+          // Its task's declared label: never a task's ID.
+          title: "Cooling off",
+          openedAt: "number",
+          deadline: "number",
+          inAnHour: true,
+          kind: "timer",
+          purpose: "sleep",
+        },
+        stage: 3,
+        endedWaits: [],
       });
     });
 

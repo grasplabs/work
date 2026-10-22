@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import type { SealedTask } from "../src/workflow-builds.ts";
-import { failureOf } from "../src/workflows/resource-errors.ts";
+import { failureOf, retryable } from "../src/workflows/resource-errors.ts";
 
 // What a catch may take of a step's failure, and as what (spec 13.7): the
 // mapping of the host's failures to upstream errors, pure logic, so tested
@@ -15,6 +15,10 @@ const task: SealedTask = {
   scope: [],
   schemas: {},
 };
+
+/** Whether a retry policy may try again `error` of a step of `of`. */
+const retries = (error: { name: string; code?: string }, of: SealedTask) =>
+  retryable(failureOf({ ...error, message: "" }, of, false), of);
 
 /** A call task of `name`, a call whose effect runs once. */
 const onceTask = (
@@ -220,6 +224,7 @@ describe("a step's failure, as a catch sees it", () => {
     }).toStrictEqual({
       raise: {
         catchable: true,
+        code: "workflow.raised",
         error: {
           type: "urn:grasp:error:denied",
           status: 409,
@@ -228,6 +233,65 @@ describe("a step's failure, as a catch sees it", () => {
         },
       },
       other: { catchable: false },
+    });
+  });
+
+  it("lets a retry policy try again only what trying again may fix", () => {
+    const raise: SealedTask = {
+      id: "deny",
+      pointer: "/do/0/guard/try/0/deny",
+      kind: "raise",
+      steps: ["task"],
+      scope: [],
+      schemas: {},
+      error: { type: "urn:grasp:error:denied", status: 409 },
+    };
+    expect({
+      timeout: retries({ name: "TimeoutError" }, task),
+      connector: retries({ name: "Error", code: "connect.unavailable" }, task),
+      raised: retries({ name: "Error", code: "workflow.raised" }, raise),
+      // Of a status trying again might fix: still the workflow's own.
+      raisedServerError: retries(
+        { name: "Error", code: "workflow.raised" },
+        { ...raise, error: { type: "urn:grasp:error:upstream", status: 503 } }
+      ),
+      testRunWaitLimit: failureOf(
+        { name: "Error", message: "", code: "workflow.candidate_wait_limit" },
+        task,
+        false
+      ).catchable,
+      conflict: retries({ name: "Error", code: "data.conflict" }, task),
+      denied: retries({ name: "Error", code: "permission.denied" }, task),
+      invalid: retries(
+        { name: "Error", code: "workflow.task_data_invalid" },
+        task
+      ),
+      spent: retries(
+        { name: "Error", code: "resource.budget_exhausted" },
+        task
+      ),
+      busyStore: retries(
+        { name: "Error", code: "resource.busy" },
+        onceTask("grasp.operation")
+      ),
+      failedStore: retries(
+        { name: "Error", code: "resource.operation_failed" },
+        onceTask("grasp.operation")
+      ),
+      modelTimedOut: retries({ name: "TimeoutError" }, onceTask("grasp.model")),
+    }).toStrictEqual({
+      timeout: true,
+      connector: true,
+      raised: false,
+      raisedServerError: false,
+      testRunWaitLimit: false,
+      conflict: false,
+      denied: false,
+      invalid: false,
+      spent: false,
+      busyStore: true,
+      failedStore: false,
+      modelTimedOut: false,
     });
   });
 });

@@ -298,6 +298,21 @@ const sealedCatchSchema = z.strictObject({
     .optional(),
   when: z.int().min(0).optional(),
   exceptWhen: z.int().min(0).optional(),
+  /** Its retry policy (generate.ts, `GeneratedRetry`), in milliseconds. */
+  retry: z
+    .strictObject({
+      attempts: z.int().min(1).max(5),
+      delayMs: z.int().min(0),
+      backoff: z.enum(["constant", "linear", "exponential"]),
+      jitter: z
+        .strictObject({ fromMs: z.int().min(0), toMs: z.int().min(0) })
+        .optional(),
+      limitMs: z.int().min(0).optional(),
+      attemptMs: z.int().positive().optional(),
+      when: z.int().min(0).optional(),
+      exceptWhen: z.int().min(0).optional(),
+    })
+    .optional(),
 });
 
 /** One task the generated module runs, as the host checks its steps. */

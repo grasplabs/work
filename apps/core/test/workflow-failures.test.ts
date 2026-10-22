@@ -196,6 +196,24 @@ const attemptsOf = async (runId: string, steps: readonly string[]) => {
   }
 };
 
+/** The sleeps of ended run `runId` whose names start with `prefix`, in order. */
+const sleepsOf = async (runId: string, prefix: string) => {
+  using events = await runInstance(runId).subscribe({
+    filter: ["sleep_started"],
+  });
+  const names: string[] = [];
+  for (;;) {
+    // oxlint-disable-next-line no-await-in-loop -- one event at a time, in order
+    const { done, value } = await events.next();
+    if (done === true) {
+      return names;
+    }
+    if (value.type === "sleep_started" && value.stepName.startsWith(prefix)) {
+      names.push(value.stepName);
+    }
+  }
+};
+
 /** A try `guard` around `tried`, its catch `handler`. */
 const guarded = (tried: unknown[], handler: Record<string, unknown>) => ({
   guard: { try: tried, catch: handler },
@@ -704,14 +722,19 @@ describe("raise and catch, as the build seals them", () => {
     });
   });
 
-  it("doesn't lower a catch that retries yet: it runs nothing", async () => {
+  it("doesn't lower a reusable retry policy with conditions: no catch's error was in scope as they compiled", async () => {
     const by = await builder();
     const { version } = await published(by, (name) =>
-      definitionOf(name, [
-        guarded([deny], {
-          retry: { limit: { attempt: { count: 3 } } },
-        }),
-      ])
+      definitionOf(name, [guarded([deny], { retry: "transient" })], {
+        use: {
+          retries: {
+            transient: {
+              when: "${ true }",
+              limit: { attempt: { count: 3 } },
+            },
+          },
+        },
+      })
     );
     expect(version.build).toStrictEqual({
       executable: false,
@@ -719,7 +742,7 @@ describe("raise and catch, as the build seals them", () => {
         {
           pointer: "/do/0/guard/catch/retry",
           taskId: "guard",
-          feature: "catch.retry",
+          feature: "use.retries:when",
         },
       ],
     });
@@ -737,7 +760,9 @@ const hostOf = async (
   /** The attempt the engine claims of step `name`: the first, unless given. */
   attemptOf: (name: string) => number = () => 1,
   /** Steps the engine times out, as it ends an attempt it gave up on. */
-  timesOut: ReadonlySet<string> = new Set()
+  timesOut: ReadonlySet<string> = new Set(),
+  /** Gets the name of each step and sleep the host asks the engine for. */
+  asked: string[] = []
 ): Promise<ResourceRunHost> => {
   const manifest = await env.DB.prepare(
     "SELECT manifest_hash AS hash FROM workflow_resource_versions WHERE workflow_resource_id = ? AND version = 1"
@@ -749,6 +774,7 @@ const hostOf = async (
   const step: RunStep = {
     do: async (name, _config, fn) => {
       count += 1;
+      asked.push(name);
       if (timesOut.has(name)) {
         throw namedError("TimeoutError", "The step ran out of time.");
       }
@@ -757,7 +783,8 @@ const hostOf = async (
         idempotencyKey: `key:${name}:${count}`,
       });
     },
-    sleep: async () => {
+    sleep: async (name, duration) => {
+      asked.push(`${name} ${String(duration)}`);
       await Promise.resolve();
     },
     sleepUntil: async () => {
@@ -793,6 +820,17 @@ const hostOf = async (
       leaseOf: () => ({ generation: 1, deadline: Date.now() + 60_000 }),
       tampered: () => {},
       admitAttempt: admittedFreely,
+      timers: {
+        passed: async () => await Promise.resolve(0),
+        opened: async (timer) => {
+          asked.push(`opened ${timer.id} ${timer.purpose}`);
+          await Promise.resolve();
+        },
+        closed: async (timer) => {
+          asked.push(`closed ${timer.id}`);
+          await Promise.resolve();
+        },
+      },
     }
   );
 };
@@ -1277,5 +1315,275 @@ describe("a run's host, against a forged module's calls", () => {
       return { ok: true, value: null };
     });
     expect(called).toBe("workflow.invalid");
+  });
+});
+
+/** A compute module whose `fail` always fails, as a flaky dependency's. */
+const failingModule = `import { compute, v } from "@grasp-os/sdk/compute";
+
+export const fail = compute({
+  input: v.string(),
+  output: v.string(),
+  handler: () => {
+    throw new Error("The rates service didn't answer.");
+  },
+});
+`;
+
+/** Publishes `tasks` with the failing compute as binding `rates`. */
+const publishedFailing = async (
+  by: Acting,
+  tasks: unknown[],
+  more: Record<string, unknown> = {}
+) => {
+  const workflow = await createWorkflowResource(env, by, `flow-${unique()}`);
+  const version = await publishWorkflowVersion(env, by, workflow.id, {
+    definition: definitionOf(workflow.name, tasks, more, {
+      rates: { kind: "compute", contract: "local:code/rates.ts#fail" },
+    }),
+    basedOn: null,
+    modules: { "code/rates.ts": failingModule },
+  });
+  return { workflow, version };
+};
+
+/** A task calling the failing compute. */
+const fetchRates = {
+  "fetch-rates": {
+    call: "grasp.compute",
+    with: { binding: "rates", arguments: "${ .who }" },
+  },
+};
+
+describe("retries of a try's failed step", () => {
+  afterEach(endLiveRuns);
+
+  it("tries a failed step again in its place, after a recorded backoff, then lets its catch take the failure", async () => {
+    const by = await builder();
+    const { workflow } = await publishedFailing(by, [
+      { before: { set: { who: "${ .who }" } } },
+      guarded(
+        [{ "inside-before": { set: { who: "${ .who }" } } }, fetchRates],
+        {
+          retry: {
+            delay: { milliseconds: 50 },
+            backoff: { exponential: {} },
+            limit: { attempt: { count: 3 } },
+          },
+          do: [{ "fell-back": { set: { status: "fallback" } } }],
+        }
+      ),
+    ]);
+    const runId = await startFor(by, workflow.id);
+    const run = await endedRun(by, workflow.id, runId);
+    expect({
+      end: endOf(run),
+      attempts: await attemptsOf(runId, [
+        "task:before",
+        "task:inside-before",
+        "task:fetch-rates:retry:2:decide",
+        "task:fetch-rates:retry:3:decide",
+        "task:fetch-rates:retry:2",
+        "task:fetch-rates:retry:3",
+        "task:fetch-rates:retry:4",
+        "catch:guard",
+      ]),
+      backoffs: await sleepsOf(runId, "task:fetch-rates:retry:"),
+    }).toStrictEqual({
+      end: { status: "completed", output: { status: "fallback" } },
+      attempts: {
+        // Siblings that finished ran once: only the failed step again.
+        "task:before": 1,
+        "task:inside-before": 1,
+        "task:fetch-rates:retry:2:decide": 1,
+        "task:fetch-rates:retry:3:decide": 1,
+        "task:fetch-rates:retry:2": 1,
+        "task:fetch-rates:retry:3": 1,
+        // Three attempts in all: no fourth, nor a decision of one.
+        "task:fetch-rates:retry:4": 0,
+        "catch:guard": 1,
+      },
+      // Each backoff a durable timer of its own (the engine counts each name).
+      backoffs: [
+        "task:fetch-rates:retry:2:wait-1",
+        "task:fetch-rates:retry:3:wait-1",
+      ],
+    });
+  });
+
+  it("retries a loop's item on its own, each item's rounds named after its own", async () => {
+    const by = await builder();
+    const { workflow } = await publishedFailing(by, [
+      {
+        each: {
+          for: { each: "n", in: "${ [1, 2] }" },
+          do: [
+            guarded([fetchRates], {
+              retry: {
+                delay: { milliseconds: 10 },
+                limit: { attempt: { count: 2 } },
+              },
+              do: [{ "fell-back": { set: { status: "fallback" } } }],
+            }),
+          ],
+        },
+      },
+    ]);
+    const runId = await startFor(by, workflow.id);
+    const run = await endedRun(by, workflow.id, runId);
+    expect({
+      end: endOf(run),
+      attempts: await attemptsOf(runId, [
+        "task:fetch-rates@each.0:retry:2:decide",
+        "task:fetch-rates@each.0:retry:2",
+        "task:fetch-rates@each.0:retry:3",
+        "task:fetch-rates@each.1:retry:2:decide",
+        "task:fetch-rates@each.1:retry:2",
+        "task:fetch-rates@each.1:retry:3",
+      ]),
+    }).toStrictEqual({
+      end: { status: "completed", output: { status: "fallback" } },
+      attempts: {
+        "task:fetch-rates@each.0:retry:2:decide": 1,
+        "task:fetch-rates@each.0:retry:2": 1,
+        // Two attempts in all, for each item.
+        "task:fetch-rates@each.0:retry:3": 0,
+        "task:fetch-rates@each.1:retry:2:decide": 1,
+        "task:fetch-rates@each.1:retry:2": 1,
+        "task:fetch-rates@each.1:retry:3": 0,
+      },
+    });
+  });
+
+  it("doesn't try again a failure its catch doesn't take, nor one its exceptWhen excludes, nor a permanent one", async () => {
+    const by = await builder();
+    const policy = {
+      delay: { milliseconds: 10 },
+      limit: { attempt: { count: 3 } },
+    };
+    const caught = [{ caught: { set: { status: "caught" } } }];
+    const retriedOf = async (tasks: unknown[]) => {
+      const { workflow } = await publishedFailing(by, tasks);
+      const runId = await startFor(by, workflow.id);
+      const run = await endedRun(by, workflow.id, runId);
+      // A decision counts apart: only a step's run again is a retry.
+      const attempts = await attemptsOf(runId, [
+        "task:fetch-rates:retry:2:decide",
+        "task:fetch-rates:retry:2",
+        "task:deny:retry:2",
+      ]);
+      return {
+        status: run.status,
+        retries:
+          (attempts["task:fetch-rates:retry:2"] ?? 0) +
+          (attempts["task:deny:retry:2"] ?? 0),
+      };
+    };
+    expect({
+      filtered: await retriedOf([
+        guarded([fetchRates], {
+          errors: { with: { status: 404 } },
+          retry: policy,
+          do: caught,
+        }),
+      ]),
+      excepted: await retriedOf([
+        guarded([fetchRates], {
+          as: "failure",
+          retry: { ...policy, exceptWhen: "${ $failure.status == 500 }" },
+          do: caught,
+        }),
+      ]),
+      permanent: await retriedOf([
+        guarded([deny], { retry: policy, do: caught }),
+      ]),
+    }).toStrictEqual({
+      filtered: { status: "failed", retries: 0 },
+      excepted: { status: "completed", retries: 0 },
+      permanent: { status: "completed", retries: 0 },
+    });
+  });
+});
+
+describe("a run's timers, through its activations", () => {
+  afterEach(endLiveRuns);
+
+  it("keeps each timer once, however often a later activation replays it", async () => {
+    const by = await builder();
+    const { workflow } = await published(by, (name) =>
+      definitionOf(name, [
+        { first: { wait: "PT1S" } },
+        { second: { wait: "PT1S" } },
+        { finish: { set: { status: "done" } } },
+      ])
+    );
+    // Each sleep suspends the run: the activations after it replay it.
+    const run = await ranFor(by, workflow.id);
+    const kept = await env.DB.prepare(
+      "SELECT timer, timer_revision AS revision, timers_passed AS passed FROM workflow_resource_runs WHERE id = ?"
+    )
+      .bind(run.id)
+      .first();
+    expect({ end: endOf(run), kept }).toStrictEqual({
+      end: { status: "completed", output: { status: "done" } },
+      // Two timers, each opened and closed once: never again on a replay.
+      kept: { timer: null, revision: 4, passed: 2 },
+    });
+  });
+});
+
+describe("a run's host, retrying a step", () => {
+  it("runs a step that ran out of time again under a step of its own, after the backoff its decision recorded, and goes on", async () => {
+    const by = await builder();
+    const { workflow } = await published(by, (name) =>
+      definitionOf(name, [
+        guarded([{ count: { set: { status: "counted" } } }], {
+          retry: {
+            delay: { seconds: 2 },
+            backoff: { linear: {} },
+            limit: { attempt: { count: 2 } },
+          },
+        }),
+      ])
+    );
+    const asked: string[] = [];
+    const host = await hostOf(
+      by,
+      workflow.id,
+      () => 1,
+      new Set(["task:count"]),
+      asked
+    );
+    // The try's own input, as its enter step records it.
+    await host.do(
+      "enter:guard",
+      data,
+      async () => await Promise.resolve({ ok: true, value: { output: input } })
+    );
+    const counted = answerOf(
+      await host.do(
+        "task:count",
+        data,
+        async () =>
+          await Promise.resolve({
+            ok: true,
+            value: { output: { status: "counted" } },
+          })
+      )
+    );
+    expect({ counted, asked, untaken: host.failureUntaken }).toStrictEqual({
+      counted: { output: { status: "counted" } },
+      asked: [
+        "enter:guard",
+        "task:count",
+        "task:count:retry:2:decide",
+        // The backoff, the run's timer while it lasts: a retry's.
+        "opened task:count:retry:2:wait retry",
+        "task:count:retry:2:wait 2000",
+        "closed task:count:retry:2:wait",
+        "task:count:retry:2",
+      ],
+      untaken: false,
+    });
   });
 });

@@ -207,6 +207,28 @@ export interface GeneratedCatch {
   >;
   readonly when?: number;
   readonly exceptWhen?: number;
+  /** Its retry policy, inline or of `use.retries`, if it retries. */
+  readonly retry?: GeneratedRetry;
+}
+
+/**
+ * A catch's retry policy, its durations in milliseconds (spec 13.7): the
+ * host runs a step of a task in the try's list that failed with a failure
+ * the catch would take, and that may be tried again, again in its place,
+ * after a durable backoff, up to `attempts` attempts in all (the first
+ * included), while its `when` holds and its `exceptWhen` doesn't (host
+ * expressions with the error in scope), within `limitMs` of the first.
+ * Each attempt of the step is bounded by `attemptMs`, if given.
+ */
+export interface GeneratedRetry {
+  readonly attempts: number;
+  readonly delayMs: number;
+  readonly backoff: "constant" | "linear" | "exponential";
+  readonly jitter?: { readonly fromMs: number; readonly toMs: number };
+  readonly limitMs?: number;
+  readonly attemptMs?: number;
+  readonly when?: number;
+  readonly exceptWhen?: number;
 }
 
 /**
@@ -446,7 +468,7 @@ const supportedRoot = new Set([
 ]);
 
 /** What `use` may hold: reusable timeouts and errors, which tasks name. */
-const supportedUse = new Set(["timeouts", "errors"]);
+const supportedUse = new Set(["timeouts", "errors", "retries"]);
 
 /** What a lowered task may hold besides its kind (`with`: a call's). */
 const supportedTaskKeys = new Set([
@@ -734,6 +756,8 @@ interface Emitter {
   readonly usedLabels: Set<string>;
   /** The caught errors in scope where the walk is, innermost last. */
   readonly caught: CaughtVariable[];
+  /** How many tries that retry hold the list the walk is in. */
+  retrying: number;
   /** Counts lists and tasks, for labels and variables of their own. */
   counter: number;
   /** The flow the code being written runs its tasks on: its variable. */
@@ -1294,7 +1318,9 @@ const lowerDurable = (
   stages: Stages,
   place: ListPlace,
   body: (indent: string, entered: string) => void,
-  until = false
+  until = false,
+  /** Whether it enters whatever its stages: a try that retries does. */
+  alwaysEnter = false
 ): TaskStep[] => {
   const steps: TaskStep[] = [];
   const hasLeave = stages.leave.length > 0;
@@ -1302,7 +1328,7 @@ const lowerDurable = (
   // a leave step's `$task.startedAt` is the time its enter step recorded,
   // so a task with stages after its body always enters, with nothing to
   // evaluate if it has nothing before it.
-  const hasEnter = until || stages.enter.length > 0 || hasLeave;
+  const hasEnter = until || alwaysEnter || stages.enter.length > 0 || hasLeave;
   emitter.counter += 1;
   // Of this task alone: a nested task's are numbered after it.
   const raw = `raw${emitter.counter}`;
@@ -1808,6 +1834,104 @@ const catchConditionOf = (
   return template.slot;
 };
 
+/** Reusable retry policy `name` of `use.retries`, as validation left it. */
+const reusableRetryOf = (
+  definition: JsonValue,
+  name: string
+): JsonObject | undefined => {
+  const use = isObject(definition) ? definition.use : undefined;
+  const retries = isObject(use) ? use.retries : undefined;
+  const policy =
+    isObject(retries) && Object.hasOwn(retries, name)
+      ? retries[name]
+      : undefined;
+  return isObject(policy) ? policy : undefined;
+};
+
+/** The milliseconds of a literal duration validation checked. */
+const durationMsOf = (value: JsonValue | undefined): number => {
+  const ms = literalDurationMs(value);
+  if (ms === undefined) {
+    throw new Error("The checked workflow has a retry of no duration");
+  }
+  return ms;
+};
+
+/**
+ * The slot of an inline retry policy's condition `key`, sealed as a host
+ * expression of the try's, with the error in scope; `undefined` without.
+ */
+const retryConditionOf = (
+  emitter: Emitter,
+  item: ListTask,
+  inline: JsonObject | undefined,
+  key: "when" | "exceptWhen"
+): number | undefined => {
+  if (inline === undefined || !Object.hasOwn(inline, key)) {
+    return undefined;
+  }
+  const catchPointer = pointerJoin(item.pointer, "catch");
+  const template = templateOf(
+    emitter,
+    inline[key] ?? null,
+    pointerJoin(pointerJoin(catchPointer, "retry"), key),
+    item.id,
+    "boolean"
+  );
+  if (!("slot" in template)) {
+    throw new Error(`The checked workflow's retry ${key} isn't an expression`);
+  }
+  return template.slot;
+};
+
+/**
+ * A catch's retry policy, sealed (`GeneratedRetry`): its own, or the one of
+ * `use.retries` it names; `undefined` when it doesn't retry. Upstream's
+ * defaults: a second's delay, constant backoff.
+ */
+const retryOf = (
+  emitter: Emitter,
+  item: ListTask,
+  handler: JsonObject
+): GeneratedRetry | undefined => {
+  const inline = isObject(handler.retry) ? handler.retry : undefined;
+  const policy =
+    typeof handler.retry === "string"
+      ? reusableRetryOf(emitter.checked.definition, handler.retry)
+      : inline;
+  if (policy === undefined) {
+    return undefined;
+  }
+  const limit = isObject(policy.limit) ? policy.limit : {};
+  const attempt = isObject(limit.attempt) ? limit.attempt : {};
+  const [backoff] = isObject(policy.backoff) ? Object.keys(policy.backoff) : [];
+  const jitter = isObject(policy.jitter) ? policy.jitter : undefined;
+  const when = retryConditionOf(emitter, item, inline, "when");
+  const exceptWhen = retryConditionOf(emitter, item, inline, "exceptWhen");
+  return Object.freeze({
+    attempts: typeof attempt.count === "number" ? attempt.count : 1,
+    delayMs: Object.hasOwn(policy, "delay") ? durationMsOf(policy.delay) : 1000,
+    backoff:
+      backoff === "linear" || backoff === "exponential" ? backoff : "constant",
+    ...(jitter === undefined
+      ? {}
+      : {
+          jitter: Object.freeze({
+            fromMs: durationMsOf(jitter.from),
+            toMs: durationMsOf(jitter.to),
+          }),
+        }),
+    ...(Object.hasOwn(limit, "duration")
+      ? { limitMs: durationMsOf(limit.duration) }
+      : {}),
+    ...(Object.hasOwn(attempt, "duration")
+      ? { attemptMs: durationMsOf(attempt.duration) }
+      : {}),
+    ...(when === undefined ? {} : { when }),
+    ...(exceptWhen === undefined ? {} : { exceptWhen }),
+  });
+};
+
 /**
  * The statements of a `try` task: its list in a JavaScript `try`, and,
  * on a failure, its catch step, in which the host decides whether its
@@ -1833,6 +1957,7 @@ const lowerTry = (
   emitter.caught.push({ variable, taskId: id });
   const when = catchConditionOf(emitter, item, handler, "when");
   const exceptWhen = catchConditionOf(emitter, item, handler, "exceptWhen");
+  const retry = retryOf(emitter, item, handler);
   emitter.caught.pop();
   const errors = errorFilterOf(handler);
   const steps: TaskStep[] = [];
@@ -1844,6 +1969,7 @@ const lowerTry = (
       ...(errors === undefined ? {} : { errors }),
       ...(when === undefined ? {} : { when }),
       ...(exceptWhen === undefined ? {} : { exceptWhen }),
+      ...(retry === undefined ? {} : { retry }),
     }),
     steps,
   });
@@ -1854,40 +1980,57 @@ const lowerTry = (
     emitter.lines.push(`${place.indent}let ${flag} = false;`);
   }
   steps.push(
-    ...lowerDurable(emitter, item, stages, place, (indent) => {
-      const tried = `tried${number}`;
-      const thrown = `thrown${number}`;
-      emitter.lines.push(`${indent}const ${tried} = output;`, `${indent}try {`);
-      emitter.counter += 1;
-      lowerList(
-        emitter,
-        Array.isArray(task.try) ? task.try : [],
-        pointerJoin(pointer, "try"),
-        `${indent}  `,
-        { label: `s${emitter.counter}`, number: emitter.counter }
-      );
-      emitter.lines.push(
-        `${indent}} catch (${thrown}) {`,
-        `${indent}  if (!(await ${emitter.flow}.catch(${literal(id)}, { input: ${tried}, context }))) {`,
-        `${indent}    throw ${thrown};`,
-        `${indent}  }`,
-        ...(flag === undefined ? [] : [`${indent}  ${flag} = true;`]),
-        `${indent}  output = ${tried};`
-      );
-      if (Array.isArray(handler.do)) {
-        emitter.caught.push({ variable, taskId: id });
+    ...lowerDurable(
+      emitter,
+      item,
+      stages,
+      place,
+      (indent) => {
+        const tried = `tried${number}`;
+        const thrown = `thrown${number}`;
+        emitter.lines.push(
+          `${indent}const ${tried} = output;`,
+          `${indent}try {`
+        );
         emitter.counter += 1;
+        const retries = retry === undefined ? 0 : 1;
+        emitter.retrying += retries;
         lowerList(
           emitter,
-          handler.do,
-          pointerJoin(pointerJoin(pointer, "catch"), "do"),
+          Array.isArray(task.try) ? task.try : [],
+          pointerJoin(pointer, "try"),
           `${indent}  `,
           { label: `s${emitter.counter}`, number: emitter.counter }
         );
-        emitter.caught.pop();
-      }
-      emitter.lines.push(`${indent}}`);
-    }),
+        emitter.retrying -= retries;
+        emitter.lines.push(
+          `${indent}} catch (${thrown}) {`,
+          `${indent}  if (!(await ${emitter.flow}.catch(${literal(id)}, { input: ${tried}, context }))) {`,
+          `${indent}    throw ${thrown};`,
+          `${indent}  }`,
+          ...(flag === undefined ? [] : [`${indent}  ${flag} = true;`]),
+          `${indent}  output = ${tried};`
+        );
+        if (Array.isArray(handler.do)) {
+          emitter.caught.push({ variable, taskId: id });
+          emitter.counter += 1;
+          lowerList(
+            emitter,
+            handler.do,
+            pointerJoin(pointerJoin(pointer, "catch"), "do"),
+            `${indent}  `,
+            { label: `s${emitter.counter}`, number: emitter.counter }
+          );
+          emitter.caught.pop();
+        }
+        emitter.lines.push(`${indent}}`);
+      },
+      false,
+      // The host decides a retry of a failed step in its list on the input
+      // of each try around it, as its catch sees it: the enter steps of a
+      // try that retries, and of every try inside one, record it.
+      retry !== undefined || emitter.retrying > 0
+    ),
     "catch"
   );
   return flag;
@@ -1987,27 +2130,35 @@ const refusedLoop = (emitter: Emitter, item: ListTask): boolean => {
 };
 
 /**
- * Refuses what of a `try` or `raise` task `item` isn't lowered: a catch
- * that retries (GRA-278's next slice brings the durable timers it needs;
- * until then it is never run without them), and a raise's output or
- * export, as a raise never produces an output: nothing after its work
- * ever runs. Whether anything was.
+ * Refuses what of a `try` or `raise` task (of `kind`) isn't lowered: a
+ * reusable retry policy with conditions, a raise's output or export.
+ * Whether anything was.
  */
-const refusedFailureTask = (
+const refusedPartsOf = (
   emitter: Emitter,
   { id, task, pointer }: ListTask,
   kind: string
 ): boolean => {
   let refused = false;
+  // A reusable policy's conditions were compiled outside any catch, with
+  // no error in scope: only an inline policy's are lowered.
   const handler = kind === "try" && isObject(task.catch) ? task.catch : {};
-  if (Object.hasOwn(handler, "retry")) {
+  const reusable =
+    typeof handler.retry === "string"
+      ? reusableRetryOf(emitter.checked.definition, handler.retry)
+      : undefined;
+  if (
+    reusable !== undefined &&
+    (Object.hasOwn(reusable, "when") || Object.hasOwn(reusable, "exceptWhen"))
+  ) {
     emitter.refusals.add(
       pointerJoin(pointerJoin(pointer, "catch"), "retry"),
-      "catch.retry",
+      "use.retries:when",
       id
     );
     refused = true;
   }
+  // A raise never produces an output: nothing after its work ever runs.
   for (const key of ["output", "export"]) {
     if (kind === "raise" && Object.hasOwn(task, key)) {
       emitter.refusals.add(pointerJoin(pointer, key), `raise:${key}`, id);
@@ -2050,7 +2201,9 @@ const refusedOf = (emitter: Emitter, item: ListTask, kind: string): boolean => {
   if (kind === "for") {
     refused = refusedLoop(emitter, item) || refused;
   }
-  refused = refusedFailureTask(emitter, item, kind) || refused;
+  if (refusedPartsOf(emitter, item, kind)) {
+    refused = true;
+  }
   const timed = timedKinds.has(kind) && !sleepsOf(task, kind);
   if (Object.hasOwn(task, "timeout") && !timed) {
     emitter.refusals.add(
@@ -2520,6 +2673,7 @@ export const generateWorkflow = (checked: CheckedWorkflow): Generation => {
     spans: [],
     usedLabels: new Set(),
     caught: [],
+    retrying: 0,
     counter: 0,
     flow: "flow",
     scope: [],
