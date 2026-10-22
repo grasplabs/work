@@ -1891,6 +1891,7 @@ msgid "Another version of this domain was made current since this list was read.
 msgstr "Seit diese Liste geladen wurde, ist eine andere Version dieser Domäne aktuell geworden. Die Liste zeigt sie jetzt: Prüfen Sie diese Version und genehmigen Sie dann erneut."
 
 #: src/brain/brain.ts
+#: src/chat/brain-questions.tsx
 msgid "Answer"
 msgstr "Antwort"
 
@@ -2158,6 +2159,11 @@ msgstr "Wie das Unternehmen sie genannt hat, bis die Personalliste vorliegt."
 #: src/routes/_shell.onboarding.stephen.tsx
 msgid "As the kickoff suggests"
 msgstr "Wie der Kickoff es vorschlägt"
+
+#. placeholder {0}: gap.owner
+#: src/chat/brain-questions.tsx
+msgid "Ask {0}"
+msgstr "{0} fragen"
 
 #: src/chat/thread.tsx
 msgid "Ask again"
@@ -2584,6 +2590,7 @@ msgstr "Erwähnt in {source}"
 msgid "Can {verbs} company data"
 msgstr "Kann Unternehmensdaten {verbs}"
 
+#: src/chat/brain-questions.tsx
 #: src/chat/project-dialog.tsx
 #: src/decision-confirmation.tsx
 #: src/engines/package-approvals.tsx
@@ -4368,6 +4375,16 @@ msgstr "Folgt aus einem anderen Ereignis"
 #: src/landscape/audit-trail.tsx
 msgid "Follows from: {parentTitle}"
 msgstr "Folgt aus: {parentTitle}"
+
+#. placeholder {0}: gap.owner
+#: src/chat/brain-questions.tsx
+msgid "For {0}"
+msgstr "Für {0}"
+
+#. placeholder {0}: gap.owner
+#: src/chat/brain-questions.tsx
+msgid "For {0}, who was asked"
+msgstr "Für {0}, die oder der gefragt wurde"
 
 #: src/inbox/item-detail.tsx
 msgid "For {person}"
@@ -7034,6 +7051,7 @@ msgctxt "inbox item kind"
 msgid "Open question"
 msgstr "Offene Frage"
 
+#: src/chat/brain-questions.tsx
 #: src/routes/_shell.brain.$noteId.tsx
 msgid "Open questions"
 msgstr "Offene Fragen"
@@ -8495,6 +8513,10 @@ msgstr "Erkannt, nie erwähnt"
 msgctxt "send the question"
 msgid "Send"
 msgstr "Senden"
+
+#: src/chat/brain-questions.tsx
+msgid "Send answer"
+msgstr "Antwort senden"
 
 #: src/knowledge/collection-markers.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
@@ -11588,6 +11610,10 @@ msgstr "Sie sind noch angemeldet. Versuchen Sie es gleich noch einmal."
 #: src/routes/_shell.settings.tsx
 msgid "Your account"
 msgstr "Ihr Konto"
+
+#: src/chat/brain-questions.tsx
+msgid "Your answer"
+msgstr "Ihre Antwort"
 
 #: src/decision-confirmation.tsx
 msgctxt "the answer a person gives a decision"
