@@ -134,7 +134,14 @@ export const openSession = async (
   });
   const core = newWebSocketRpcSession<CoreApi>(socket);
   const api = core.authenticate();
-  const { userId } = await api.whoami();
+  let userId: string;
+  try {
+    ({ userId } = await api.whoami());
+  } catch (error) {
+    // Nothing returned closes it: close the session here.
+    core[Symbol.dispose]();
+    throw error;
+  }
   return {
     email,
     userId,
