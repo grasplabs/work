@@ -24,7 +24,8 @@ import type { ShownVersion } from "./draft-versions.tsx";
 
 /**
  * The preview of a draft: its first screen, or one it changes the person
- * picks; of the draft's earlier `version` when they opened one, read-only.
+ * picks; of the draft's earlier `version` when they opened one, read-only,
+ * at that version's first screen (the screens to pick are the latest's).
  * Loaded afresh at each of the draft's writes, as its key says.
  */
 const DraftPreview = ({
@@ -41,13 +42,13 @@ const DraftPreview = ({
   const [picked, setPicked] = useState<string>();
   const { t } = useLingui();
   const screens = changedScreens(draft);
-  const screen = previewedScreen(screens, picked);
+  const screen = previewedScreen(screens, picked, version);
   return (
     <section
       aria-label={t`Preview of ${name}`}
       className="bg-background flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border"
     >
-      {screens.length > 1 ? (
+      {screens.length > 1 && version === undefined ? (
         <div className="flex flex-wrap gap-1 border-b p-2">
           {screens.map((one) => (
             <Button

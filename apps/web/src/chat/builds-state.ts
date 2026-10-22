@@ -273,10 +273,17 @@ export const changedScreens = ({
  * The screen a draft's preview shows: the one the person picked while the
  * draft still changes it, otherwise the first it changes; none when it
  * changes no screen, or only deletes some (core then shows the draft's
- * first).
+ * first). None either for an earlier `version` of the draft: the screens
+ * are the latest's, which that version may not have, so core shows the
+ * version's first.
  */
 export const previewedScreen = (
   changed: readonly string[],
-  picked?: string
-): string | undefined =>
-  picked !== undefined && changed.includes(picked) ? picked : changed[0];
+  picked?: string,
+  version?: number
+): string | undefined => {
+  if (version !== undefined) {
+    return undefined;
+  }
+  return picked !== undefined && changed.includes(picked) ? picked : changed[0];
+};

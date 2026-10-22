@@ -254,12 +254,16 @@ describe("the screen a draft's preview shows", () => {
       // A later write no longer changes the picked screen.
       gone: previewedScreen(["zeta"], "alpha"),
       none: previewedScreen([], "alpha"),
+      // An earlier version may not have the screen picked, nor the latest's
+      // first: core shows that version's first.
+      version: previewedScreen(changed, "alpha", 1),
     }).toStrictEqual({
       changed: ["zeta", "alpha"],
       unpicked: "zeta",
       picked: "alpha",
       gone: "zeta",
       none: undefined,
+      version: undefined,
     });
   });
 
