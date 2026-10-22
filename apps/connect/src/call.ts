@@ -1,4 +1,5 @@
 import {
+  attachmentsMetaKey,
   effectKeyMetaKey,
   findMetaKey,
   stampMetaKey,
@@ -12,6 +13,13 @@ import type {
   HeldOutcome,
   PendingReference,
 } from "@grasp-os/shared/connect";
+import {
+  attachmentsMatch,
+  attachmentsProperty,
+  attachmentsSchema,
+} from "@grasp-os/shared/connector-attachments";
+import type { AttachmentBytes } from "@grasp-os/shared/connector-attachments";
+import { toBase64 } from "@grasp-os/shared/encoding";
 import type { Json } from "@grasp-os/shared/json";
 import { log } from "@grasp-os/shared/log";
 import { redact } from "@grasp-os/shared/redact";
@@ -46,7 +54,7 @@ import type {
   McpTool,
   McpToolResult,
 } from "./mcp.ts";
-import { hold, waitingUnder } from "./pending.ts";
+import { heldFilesOf, hold, waitingUnder } from "./pending.ts";
 import type { HeldAction } from "./pending.ts";
 import {
   checkResourceScope,
@@ -232,6 +240,8 @@ const actionFor = async (
   recovery: RecoveryMode;
   /** The native connector build that serves it (`nativeRelease`). */
   release: string | null;
+  /** It attaches files (GRA-887): only a native connector's write does. */
+  takesFiles: boolean;
   open: () => Promise<McpServer>;
   openLookup: () => Promise<McpServer>;
 }> => {
@@ -240,6 +250,7 @@ const actionFor = async (
     return {
       tool: native.tool,
       recovery: native.declared.recovery,
+      takesFiles: native.declared.takesFiles === true,
       release: await nativeRelease(native.connector),
       open: async () => await nativeServer(env, connection, native, claims),
       openLookup: async () =>
@@ -266,6 +277,7 @@ const actionFor = async (
     tool,
     recovery: "none",
     release: null,
+    takesFiles: false,
     open: async () => await Promise.resolve(server),
     openLookup: async () => await Promise.resolve(server),
   };
@@ -570,6 +582,12 @@ interface Sent {
   input: Input;
   /** The call's `_meta`: its effect key, for a native connector. */
   meta: Record<string, Json> | undefined;
+  /**
+   * The bytes of the files it attaches, checked against its input's
+   * digests: sent with the call itself, never with a lookup, and kept
+   * nowhere.
+   */
+  files: AttachmentBytes;
   store: Store;
   open: () => Promise<McpServer>;
   /** Its server for a lookup (`find`): the action's GET routes only. */
@@ -577,12 +595,33 @@ interface Sent {
 }
 
 /**
+ * `meta` with the files a call attaches (`attachmentsMetaKey`): their
+ * bytes in base64 by digest, for the tool to check against its input's.
+ * `meta` itself when there are none.
+ */
+const withFiles = (
+  meta: Record<string, Json> | undefined,
+  files: AttachmentBytes
+): Record<string, Json> | undefined => {
+  const parts = Object.entries(files);
+  if (meta === undefined || parts.length === 0) {
+    return meta;
+  }
+  return {
+    ...meta,
+    [attachmentsMetaKey]: Object.fromEntries(
+      parts.map(([sha256, bytes]) => [sha256, toBase64(bytes)])
+    ),
+  };
+};
+
+/**
  * Sends a side effect whose key this call claimed, once, and reads how it
  * ended: its answer, stored with its audit events; the key spent when the
  * outcome is unknown; freed only when the call certainly did nothing.
  */
 const sendClaimed = async (
-  { callId, connection, tool, input, meta, store }: Sent,
+  { callId, connection, tool, input, meta, files, store }: Sent,
   server: McpServer,
   recovering = false
 ): Promise<Omit<CallDone, "sideEffect">> => {
@@ -591,7 +630,7 @@ const sendClaimed = async (
     done = withProvenance(
       connection,
       tool.name,
-      await server.call(tool.name, input, meta)
+      await server.call(tool.name, input, withFiles(meta, files))
     );
   } catch {
     // However the request failed, it may have reached the tool, and the
@@ -745,6 +784,65 @@ const nativeMetaOf = async (
     : undefined;
 
 /**
+ * The files a call attaches (GRA-887), checked before it is held or sent:
+ * only a native write that takes files is given any, its input names them
+ * all by digest (`attachments`, exactly the platform's schema), and the
+ * bytes beside it are those and no others, of the length and the SHA-256
+ * each digest says. Refused as invalid otherwise, with nothing held or
+ * sent. What is held keeps the digests only; the bytes are dropped here.
+ */
+const requireFiles = async (
+  takesFiles: boolean,
+  input: Input,
+  supplied: AttachmentBytes | undefined
+): Promise<AttachmentBytes> => {
+  if (!takesFiles) {
+    if (supplied !== undefined) {
+      throw connectErrors.create("connect.invalid");
+    }
+    return {};
+  }
+  const named = Object.hasOwn(input, attachmentsProperty)
+    ? attachmentsSchema.safeParse(input[attachmentsProperty])
+    : undefined;
+  if (named?.success === false) {
+    throw connectErrors.create("connect.invalid");
+  }
+  const bytes = supplied ?? {};
+  if (!(await attachmentsMatch(named?.data ?? [], bytes))) {
+    throw connectErrors.create("connect.invalid");
+  }
+  return bytes;
+};
+
+/**
+ * Refuses the confirmation of a held action unless the bytes it comes
+ * with (`supplied`) are those of the files its input attaches, by the
+ * digests its person was shown (`connect.files_changed`); and unless it
+ * comes with none when it attaches none. Asked before the action is taken,
+ * so a refusal leaves it waiting.
+ */
+export const requireHeldFiles = async (
+  connection: Connection,
+  call: Pick<ConnectCall, "action" | "input">,
+  supplied: AttachmentBytes | undefined
+): Promise<void> => {
+  const entries = heldFilesOf(call, connection);
+  if (entries === undefined) {
+    if (supplied !== undefined) {
+      throw connectErrors.create("connect.invalid");
+    }
+    return;
+  }
+  if (
+    entries === "unreadable" ||
+    !(await attachmentsMatch(entries, supplied ?? {}))
+  ) {
+    throw connectErrors.create("connect.files_changed");
+  }
+};
+
+/**
  * Carries out one call whose capability is verified: `claims` say exactly
  * this connection, resource, action and idempotency key, for this subject
  * and person. A side effect a person is there for, or of a restricted
@@ -791,12 +889,8 @@ export const carryOut = async (
     return { ...stored, sideEffect: true, replayed: true };
   }
 
-  const { tool, recovery, release, open, openLookup } = await actionFor(
-    env,
-    connection,
-    claims,
-    call.action
-  );
+  const { tool, recovery, release, takesFiles, open, openLookup } =
+    await actionFor(env, connection, claims, call.action);
   const sideEffect = hasSideEffect(
     tool,
     connection.serverKind,
@@ -805,6 +899,7 @@ export const carryOut = async (
   progress.sideEffect = sideEffect;
   requireAllowedEffect(claims, sideEffect);
   checkResourceScope(resource, tool, input);
+  const files = await requireFiles(takesFiles, input, call.attachments);
   if (recovering !== undefined) {
     // Recovered only as the call itself would run now: every check above
     // has passed again (the capability core signed for this caller now,
@@ -851,6 +946,7 @@ export const carryOut = async (
     tool,
     input,
     meta,
+    files,
     store,
     open,
     openLookup,

@@ -1,4 +1,6 @@
 import {
+  attachedFiles,
+  attachmentsInput,
   defineTool,
   invalidCode,
   ToolError,
@@ -525,6 +527,9 @@ const draftInput = z.strictObject({
   cc: recipientsSchema.optional(),
   bcc: recipientsSchema.optional(),
   replyTo: recipientsSchema.optional(),
+  // Run files a workflow attaches (GRA-887), each by digest; their bytes
+  // come beside the input, checked by the kit before the tool runs.
+  attachments: attachmentsInput,
 });
 
 /**
@@ -540,6 +545,7 @@ const draftFields = [
   { label: "Subject", input: "subject" },
   { label: "Body", input: "body" },
   { label: "Body format", input: "bodyType" },
+  { label: "Attachments", input: "attachments" },
 ] as const;
 
 /**
@@ -548,7 +554,7 @@ const draftFields = [
  * keeps it, so the copy a watched mailbox receives names the run that sent
  * it (core's workflows/mail-stamps.ts).
  */
-const rawOf = (input: z.output<typeof draftInput>, { stamp }: Effect): string =>
+const rawOf = (input: z.output<typeof draftInput>, effect: Effect): string =>
   rawMessage({
     from: input.mailbox,
     subject: input.subject,
@@ -558,7 +564,8 @@ const rawOf = (input: z.output<typeof draftInput>, { stamp }: Effect): string =>
     cc: input.cc ?? [],
     bcc: input.bcc ?? [],
     replyTo: input.replyTo ?? [],
-    stamp,
+    stamp: effect.stamp,
+    attachments: attachedFiles(input.attachments, effect),
   });
 
 const sentMessage = z.object({
@@ -579,6 +586,7 @@ const sendMail = defineTool({
   }),
   readOnly: false,
   destructive: false,
+  takesFiles: true,
   resource: "mailbox",
   routes: [post("/messages/send")],
   describe: { title: "Send an email", fields: draftFields },
@@ -611,6 +619,7 @@ const createDraft = defineTool({
   }),
   readOnly: false,
   destructive: false,
+  takesFiles: true,
   resource: "mailbox",
   routes: [post("/drafts")],
   describe: { title: "Create a draft email", fields: draftFields },

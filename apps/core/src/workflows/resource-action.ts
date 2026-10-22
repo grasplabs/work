@@ -92,13 +92,16 @@ const jsonSchema = z.json();
 
 /**
  * What an action asks of a connector binding: an operation, and its args;
- * and, for a read that answers a file, the files use of its own that keeps
- * it as a file of the run (`into`, GRA-886).
+ * for a read that answers a file, the files use of its own that keeps it
+ * as a file of the run (`into`, GRA-886); and, for a write that attaches
+ * run files, the files use of its own they are read through (`from`,
+ * GRA-887).
  */
 const connectorRequestSchema = z.strictObject({
   operation: z.string().min(1).max(256),
   arguments: jsonSchema,
   into: z.string().min(1).max(128).optional(),
+  from: z.string().min(1).max(128).optional(),
 });
 
 /** What an action asks of an operation binding: its args. */
@@ -303,12 +306,17 @@ class ActionHost extends RpcTarget {
       );
     }
     // Kept as a file only in a files use the action declared, to write:
-    // what its approval shows it keeps (GRA-886).
-    const { into } = parsed.data;
-    const files = into === undefined ? undefined : this.#uses.get(into);
+    // what its approval shows it keeps (GRA-886). Attached from a files
+    // use it declared, to read: what its approval shows it sends out
+    // (GRA-887).
+    const { into, from } = parsed.data;
+    const declares = (use: string | undefined, operation: string): boolean => {
+      const files = use === undefined ? undefined : this.#uses.get(use);
+      return files?.kind === "files" && files.operations.has(operation);
+    };
     if (
-      into !== undefined &&
-      (files?.kind !== "files" || !files.operations.has("write"))
+      (into !== undefined && !declares(into, "write")) ||
+      (from !== undefined && !declares(from, "read"))
     ) {
       return this.#refuse(
         "operation_undeclared",
@@ -325,6 +333,7 @@ class ActionHost extends RpcTarget {
         // An action passes its own values only: no parameter of the run.
         sensitive: [],
         ...(into === undefined ? {} : { into }),
+        ...(from === undefined ? {} : { from }),
       },
       ordinal
     );

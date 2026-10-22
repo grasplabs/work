@@ -51,6 +51,7 @@
     "./client-secrets": "./src/client-secrets.ts",
     "./config": "./src/config.ts",
     "./connect": "./src/connect.ts",
+    "./connector-attachments": "./src/connector-attachments.ts",
     "./dashboard": "./src/dashboard.ts",
     "./deadline": "./src/deadline.ts",
     "./decisions": "./src/decisions.ts",

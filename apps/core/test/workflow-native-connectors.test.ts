@@ -342,6 +342,7 @@ describe("a workflow binding a native connector's operation", () => {
           output: string;
           readOnly?: boolean;
           answersFile?: true;
+          takesFiles?: true;
         }
       >,
       kind: "connector" | "operation" = "connector"
@@ -405,12 +406,32 @@ describe("a workflow binding a native connector's operation", () => {
           input: enveloped(send.input),
           output: enveloped(send.output),
           readOnly: true,
+          takesFiles: true,
         },
       }),
+      // A write that attaches files says so, as its connector declares it
+      // (GRA-887), and no other does.
       write: await publish({
         "mail.send": {
           input: enveloped(send.input),
           output: enveloped(send.output),
+          takesFiles: true,
+        },
+      }),
+      writeFilesUndeclared: await publish({
+        "mail.send": {
+          input: enveloped(send.input),
+          output: enveloped(send.output),
+        },
+      }),
+      readTakesFiles: await publish({
+        "mail.readAttachment": { ...exact, takesFiles: true },
+      }),
+      descriptorTakesFiles: await publish({
+        "mail.send": {
+          input: descriptor,
+          output: descriptor,
+          takesFiles: true,
         },
       }),
       // A file answer is the connector's to declare, both ways (GRA-886).
@@ -422,6 +443,7 @@ describe("a workflow binding a native connector's operation", () => {
           input: enveloped(send.input),
           output: enveloped(send.output),
           answersFile: true,
+          takesFiles: true,
         },
       }),
       descriptorAnswersFile: await publish({
@@ -441,6 +463,9 @@ describe("a workflow binding a native connector's operation", () => {
       notReadOnly: "workflow.contract_invalid",
       writeAsRead: "workflow.contract_invalid",
       write: "ok",
+      writeFilesUndeclared: "workflow.contract_invalid",
+      readTakesFiles: "workflow.contract_invalid",
+      descriptorTakesFiles: "workflow.contract_invalid",
       fileUndeclared: "workflow.contract_invalid",
       writeAnswersFile: "workflow.contract_invalid",
       descriptorAnswersFile: "workflow.contract_invalid",

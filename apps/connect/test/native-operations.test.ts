@@ -120,7 +120,12 @@ describe("a native operation's schemas", () => {
         readOnly: true,
         answersFile: true,
       },
-      write: { contract: "microsoft-365.mail@1", readOnly: false },
+      // A write that attaches files says so (GRA-887).
+      write: {
+        contract: "microsoft-365.mail@1",
+        readOnly: false,
+        takesFiles: true,
+      },
       backtracking: "connect.contract_not_found",
       loosened: "connect.contract_not_found",
       keywordAdded: "connect.contract_not_found",

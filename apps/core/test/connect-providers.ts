@@ -54,8 +54,9 @@ export const graphControlUrl = "https://graph-control.test/receive";
 
 /**
  * Where tests read the mail Microsoft Graph sent for them (`sendMail`), in
- * order: `{ mailbox, subject, to, replyTo, headers }` each (`headers` its
- * `internetMessageHeaders`), and the drafts it made (`draft: true`).
+ * order: `{ mailbox, subject, to, replyTo, headers, attachments }` each
+ * (`headers` its `internetMessageHeaders`, `attachments` the file
+ * attachments it was given), and the drafts it made (`draft: true`).
  */
 export const graphSentUrl = "https://graph-control.test/sent";
 
@@ -206,6 +207,8 @@ export default {
           to: message.toRecipients.map((recipient) => recipient.emailAddress.address),
           replyTo: (message.replyTo ?? []).map((recipient) => recipient.emailAddress.address),
           headers: message.internetMessageHeaders ?? [],
+          // The files attached (\`attachments\`), as Graph was given them.
+          attachments: message.attachments ?? [],
           // The tag a native connector puts on what it sends: its effect key.
           effectKey: (message.singleValueExtendedProperties ?? [])[0]?.value ?? null,
         });
@@ -228,6 +231,7 @@ export default {
           to: message.toRecipients.map((recipient) => recipient.emailAddress.address),
           replyTo: (message.replyTo ?? []).map((recipient) => recipient.emailAddress.address),
           headers: message.internetMessageHeaders ?? [],
+          attachments: message.attachments ?? [],
           draft: true,
         });
         return Response.json({ id: "draft-" + graphSent.length, conversationId: null, webLink: null });

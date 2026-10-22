@@ -1,7 +1,16 @@
 import type { ConnectorProvider } from "@grasp-os/shared/connect";
+import {
+  attachmentRefsSchema,
+  attachmentsMatch,
+  attachmentsProperty,
+  attachmentsSchema,
+  sha256Pattern,
+} from "@grasp-os/shared/connector-attachments";
+import { canonicalJson } from "@grasp-os/shared/json";
 import { z } from "zod";
 
 import {
+  attachmentsMetaKey,
   connectorManifestSchema,
   effectAbsentMetaKey,
   effectKeyMetaKey,
@@ -105,6 +114,20 @@ export interface ToolDefinition<
    */
   answersFile?: true;
   /**
+   * The write attaches files (GRA-887): its input has an `attachments`
+   * property, exactly {@link attachmentsSchema}, naming each file by name,
+   * type, size and digest. The bytes come beside the input, and
+   * `effect.files` holds them, by digest, only after the kit checked every
+   * part against the input; none is ever missing or extra. In its
+   * generated contract the property names run files by ID instead: a
+   * workflow's action gives those, and core turns them into digests and
+   * bytes. A message's name and type for a file are the input's, which
+   * core took from its own record of the run's file; build the provider's
+   * request from them with the provider's own encoding, never by joining
+   * text.
+   */
+  takesFiles?: true;
+  /**
    * Carries the call out. `effect.key` is the call's effect key
    * (`effectKeyMetaKey`), for a side effect connect sent one for; null
    * otherwise. A tool that can recover gives it to its provider.
@@ -139,12 +162,47 @@ export interface ToolDefinition<
 export interface Effect {
   key: string | null;
   /**
+   * The bytes of the files the input attaches (`takesFiles`), by the
+   * SHA-256 of each: exactly those the input's digests name. Empty for any
+   * other call.
+   */
+  files: ReadonlyMap<string, Uint8Array>;
+  /**
    * The stamp core recorded for a workflow run's mail (`stampMetaKey`),
    * for a mail tool to put on what it sends as `stampHeader`; null
    * otherwise.
    */
   stamp: string | null;
 }
+
+/**
+ * The `attachments` input of a tool that takes files (`takesFiles`): what a
+ * write attaches, by digest, within the platform's limits. A tool's input
+ * has exactly this, which `defineTool` checks.
+ */
+export const attachmentsInput = attachmentsSchema.optional();
+
+/** A file a write attaches: its entry, and the bytes the kit checked. */
+export type AttachedFile = z.output<typeof attachmentsSchema>[number] & {
+  bytes: Uint8Array;
+};
+
+/**
+ * The files `attachments` (a tool's `attachments` input) names, each with
+ * its bytes from `effect.files`, which the kit checked against the input
+ * before the tool ran: none is missing, so one that is can only be a bug.
+ */
+export const attachedFiles = (
+  attachments: z.output<typeof attachmentsSchema> | undefined,
+  effect: Pick<Effect, "files">
+): AttachedFile[] =>
+  (attachments ?? []).map((entry) => {
+    const bytes = effect.files.get(entry.sha256);
+    if (bytes === undefined) {
+      throw new Error("An attached file's bytes are missing");
+    }
+    return { ...entry, bytes };
+  });
 
 /** What went wrong in a tool's error, for code to act on. */
 export type ToolErrorCode =
@@ -251,15 +309,24 @@ export interface Tool {
   call: (args: unknown, meta?: unknown) => Promise<CallResult>;
 }
 
+const isObject = (value: unknown): value is JsonObject =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
 /**
  * What a call's `_meta` asks: its effect key, its stamp, and whether to
  * find it.
  */
 const callMetaOf = (
   meta: unknown
-): { key: string | null; stamp: string | null; find: boolean } => {
+): {
+  key: string | null;
+  stamp: string | null;
+  find: boolean;
+  /** The files' bytes as sent (base64 by digest), unchecked. */
+  attachments: unknown;
+} => {
   if (typeof meta !== "object" || meta === null) {
-    return { key: null, stamp: null, find: false };
+    return { key: null, stamp: null, find: false, attachments: undefined };
   }
   const key: unknown = Reflect.get(meta, effectKeyMetaKey);
   const stamp: unknown = Reflect.get(meta, stampMetaKey);
@@ -267,7 +334,56 @@ const callMetaOf = (
     key: typeof key === "string" && effectKeyPattern.test(key) ? key : null,
     stamp: typeof stamp === "string" && stampPattern.test(stamp) ? stamp : null,
     find: Reflect.get(meta, findMetaKey) === true,
+    attachments: Reflect.get(meta, attachmentsMetaKey),
   };
+};
+
+/** The attachments an input names, if it has any. */
+const attachmentsOf = (input: unknown): z.output<typeof attachmentsSchema> => {
+  const named: unknown =
+    isObject(input) && attachmentsProperty in input
+      ? input[attachmentsProperty]
+      : undefined;
+  return named === undefined ? [] : attachmentsSchema.parse(named);
+};
+
+/** The files a call sent, base64 by digest, as bytes; undefined if not so. */
+const sentFilesOf = (sent: unknown): Map<string, Uint8Array> | undefined => {
+  if (sent === undefined) {
+    return new Map();
+  }
+  const parsed = z
+    .record(z.string().regex(sha256Pattern), z.string())
+    .safeParse(sent);
+  if (!parsed.success) {
+    return undefined;
+  }
+  try {
+    return new Map(
+      Object.entries(parsed.data).map(([sha256, base64]) => [
+        sha256,
+        Uint8Array.from(atob(base64), (char) => char.codePointAt(0) ?? 0),
+      ])
+    );
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * The files of a call of a tool that takes files, checked against the
+ * input's digests: every part, and no other, of the length and the SHA-256
+ * its entry says. Undefined when they aren't.
+ */
+const checkedFilesOf = async (
+  entries: readonly z.output<typeof attachmentsSchema>[number][],
+  sent: unknown
+): Promise<Map<string, Uint8Array> | undefined> => {
+  const files = sentFilesOf(sent);
+  return files !== undefined &&
+    (await attachmentsMatch(entries, Object.fromEntries(files)))
+    ? files
+    : undefined;
 };
 
 /** The recovery a tool's definition declares (`recoveryModes`). */
@@ -303,8 +419,50 @@ const contractSchemaOf = (
   return z.record(z.string(), z.json()).parse(structuredClone(rest));
 };
 
-const isObject = (value: unknown): value is JsonObject =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
+/** A schema as plain JSON, without the `$schema` marker. */
+const plainSchemaOf = (schema: z.ZodType): JsonObject => {
+  const { $schema: _marker, ...rest } = z.toJSONSchema(schema, {
+    io: "input",
+  });
+  return rest;
+};
+
+/**
+ * Whether a tool's `attachments` input is exactly
+ * {@link attachmentsSchema}, as JSON Schema: the limits a connector
+ * declares are the platform's, whatever its code does with them.
+ */
+const takesAttachmentsExactly = (inputSchema: JsonObject): boolean => {
+  const property = isObject(inputSchema.properties)
+    ? inputSchema.properties[attachmentsProperty]
+    : undefined;
+  return (
+    isObject(property) &&
+    canonicalJson(z.json().parse(property)) ===
+      canonicalJson(z.json().parse(plainSchemaOf(attachmentsSchema)))
+  );
+};
+
+/**
+ * `contract` with its `attachments` property as a workflow's action names
+ * its files, by run file ID (`attachmentRefsSchema`): the shape core
+ * resolves into the digests the tool's own input holds.
+ */
+const withFileRefs = (
+  contract: ActionManifest["contract"]["input"]
+): ActionManifest["contract"]["input"] => {
+  const { properties } = contract;
+  if (!isObject(properties)) {
+    return contract;
+  }
+  return {
+    ...contract,
+    properties: z.record(z.string(), z.json()).parse({
+      ...properties,
+      [attachmentsProperty]: plainSchemaOf(attachmentRefsSchema),
+    }),
+  };
+};
 
 /** The keywords that say what a JSON Schema node allows. */
 const typeKeywords = ["type", "anyOf", "oneOf", "allOf", "const", "enum"];
@@ -486,6 +644,16 @@ export const defineTool = <
   if (!isClosed(inputSchema)) {
     throw new Error(`${name}: its input must be strict objects throughout`);
   }
+  if (definition.takesFiles === true) {
+    if (readOnly) {
+      throw new Error(`${name}: only a write takes files`);
+    }
+    if (!takesAttachmentsExactly(inputSchema)) {
+      throw new Error(
+        `${name}: a tool that takes files has an optional \`attachments\` input of exactly the platform's attachments schema`
+      );
+    }
+  }
   if (definition.answersFile === true && !answersFileShape(definition)) {
     throw new Error(
       `${name}: a tool that answers a file is read-only, takes \`as\`, and answers \`name\`, \`contentType\`, \`encoding\` and \`content\``
@@ -514,8 +682,12 @@ export const defineTool = <
       ...(definition.answersFile === true
         ? { answersFile: true as const }
         : {}),
+      ...(definition.takesFiles === true ? { takesFiles: true as const } : {}),
       contract: {
-        input: contractSchemaOf(inputSchema),
+        input:
+          definition.takesFiles === true
+            ? withFileRefs(contractSchemaOf(inputSchema))
+            : contractSchemaOf(inputSchema),
         output: contractSchemaOf(outputSchema),
       },
       ...(definition.describe === undefined
@@ -545,6 +717,25 @@ export const defineTool = <
         return failure(`Invalid input: ${issuesOf(parsed.error)}`);
       }
       const effect = callMetaOf(callMeta);
+      // The files of a write that takes them, checked against the input's
+      // digests before anything is used: a part missing, extra, of another
+      // length or hashing to another digest fails the call, whatever sent
+      // it. A tool that takes none is sent none.
+      let files = new Map<string, Uint8Array>();
+      if (!effect.find) {
+        if (definition.takesFiles === true) {
+          const checkedFiles = await checkedFilesOf(
+            attachmentsOf(parsed.data),
+            effect.attachments
+          );
+          if (checkedFiles === undefined) {
+            return failure("Invalid input: the attached files don't match");
+          }
+          files = checkedFiles;
+        } else if (effect.attachments !== undefined) {
+          return failure("Invalid input: this tool takes no files");
+        }
+      }
       let result: ToolResult<z.input<Output>>;
       if (effect.find) {
         const looked = await lookUp(definition.find, parsed.data, effect.key);
@@ -557,6 +748,7 @@ export const defineTool = <
           result = await definition.run(parsed.data, {
             key: effect.key,
             stamp: effect.stamp,
+            files,
           });
         } catch (error) {
           return runFailure(error, readOnly);
