@@ -396,6 +396,9 @@ importers:
       '@fontsource-variable/geist':
         specifier: 'catalog:'
         version: 5.2.8
+      '@grasp-os/connector-kit':
+        specifier: workspace:*
+        version: link:../../packages/connector-kit
       '@grasp-os/shared':
         specifier: workspace:*
         version: link:../../packages/shared

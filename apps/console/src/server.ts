@@ -28,6 +28,7 @@ import { digestCron, sendMorningDigest } from "./admin/discord-digest.ts";
 import { consoleDatabase } from "./db/act.ts";
 import { importReleases } from "./releases/import.ts";
 
+export { IntegrationBuild } from "./builds/workflow.ts";
 export { ApplyClient } from "./clients/apply.ts";
 export { ProvisionPlacedClient } from "./hosting/workflow.ts";
 export { ProvisionClient } from "./provision/workflow.ts";
