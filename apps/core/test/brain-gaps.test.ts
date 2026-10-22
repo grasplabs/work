@@ -872,7 +872,7 @@ describe("the Playbook's gap answers", { timeout: 120_000 }, () => {
     );
 
     expect({
-      planned: contentPlan.gapAnswers,
+      planned: contentPlan.hostCopies,
       contentAnswer: afterContent?.answer,
       answeredBy: afterPersonal?.answeredBy,
       answer: afterPersonal?.answer,
