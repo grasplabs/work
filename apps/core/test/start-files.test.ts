@@ -472,6 +472,7 @@ describe(
           run: detail?.run,
           workflow: detail?.workflow,
           uploadedBy: detail?.uploadedBy,
+          via: detail?.via,
         })),
       }).toStrictEqual({
         again: first,
@@ -497,6 +498,7 @@ describe(
             run: first.runId,
             workflow: fixture.workflow,
             uploadedBy: fixture.builder.userId,
+            via: "screen",
           },
         ],
       });
@@ -748,7 +750,15 @@ describe(
         ...(await runFiles(staged?.id ?? "")),
       ];
 
+      const logged = await allEvents();
+      const vias = logged
+        .filter(
+          ({ action, target }) =>
+            action === "file.sent_to_run" && target?.id === file
+        )
+        .map(({ actor, detail }) => [actor, detail?.via]);
       expect({
+        vias,
         entries,
         fromAction: fromAction.output,
         fromCommit: fromCommit.output,
@@ -758,6 +768,11 @@ describe(
           own: id !== file,
         })),
       }).toStrictEqual({
+        // The person each acts for, and which code chose the file.
+        vias: [
+          [{ type: "person", userId: fixture.builder.userId }, "action"],
+          [{ type: "person", userId: fixture.builder.userId }, "commit"],
+        ],
         entries: [{ undeliverable: null }],
         fromAction: { status: copies[0]?.id },
         fromCommit: { status: copies[1]?.id },
@@ -816,6 +831,39 @@ describe(
         runs: 0,
         refusal: ["file.not_found"],
       });
+    });
+
+    it("tells the version's reviewer it may hand files people can read to its bound workflows, and no longer once it can't read files", async () => {
+      const fixture = await reviewsApp();
+      const handing = await fixture.builder.api.apps.versions.review(
+        fixture.app,
+        1
+      );
+      const withoutRead = Object.fromEntries(
+        Object.entries(files()).map(([path, text]) => [
+          path,
+          path === "app.ts"
+            ? text.replace(
+                'operations: ["upload", "read", "delete"]',
+                'operations: ["upload", "delete"]'
+              )
+            : text,
+        ])
+      );
+      const { version } = await fixture.builder.api.apps.files.commit(
+        fixture.app,
+        withoutRead,
+        "Uploads only"
+      );
+      const notHanding = await fixture.builder.api.apps.versions.review(
+        fixture.app,
+        version
+      );
+
+      expect({
+        handing: handing.handsFilesToWorkflows,
+        notHanding: notHanding.handsFilesToWorkflows,
+      }).toStrictEqual({ handing: true, notHanding: false });
     });
   }
 );

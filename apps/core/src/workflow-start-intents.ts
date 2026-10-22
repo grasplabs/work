@@ -191,7 +191,14 @@ const startAsApp = async (
           env,
           authority.onBehalfOf,
           appId,
-          async () => await loadRelease(env, appId, appVersion)
+          async () => await loadRelease(env, appId, appVersion),
+          {
+            // Which code chose its files: told by the key core derived.
+            kind: request.key.startsWith(coreStartKey("after-commit", ""))
+              ? "commit"
+              : "action",
+            agent: agent?.agentId ?? null,
+          }
         )
   );
 };

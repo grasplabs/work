@@ -33,7 +33,16 @@ export const appStartFiles = (
   principal: string,
   app: AppId,
   /** The release, loaded only once a start holds a file. */
-  release: Release | (() => Promise<Release>)
+  release: Release | (() => Promise<Release>),
+  /**
+   * What chose the files, for the audit log: the App's screen, its
+   * action's code or its commit's, and the agent whose call made it, if
+   * any. The person stays who the start acts for.
+   */
+  via: {
+    readonly kind: "screen" | "action" | "commit";
+    readonly agent: string | null;
+  }
 ): StartFiles => {
   let loaded = typeof release === "function" ? undefined : release;
   const releaseOf = async (): Promise<Release> => {
@@ -94,6 +103,8 @@ export const appStartFiles = (
             workflow: workflowId,
             run: runId,
             uploadedBy: file.ownerId,
+            via: via.kind,
+            ...(via.agent === null ? {} : { agent: via.agent }),
           },
         },
         admitted
