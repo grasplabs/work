@@ -24,15 +24,19 @@ const mib = 1024 * 1024;
 
 /**
  * What one write attaches, at most (GRA-887): inside the provider's
- * request bound for a message that carries its files inline.
+ * request bound for a message that carries its files inline. Microsoft
+ * Graph's `sendMail` takes a JSON body of about 4 MB, where each file is
+ * base64 (4 bytes for every 3): 2.75 MiB of files is about 3.67 MiB of
+ * base64, which leaves room for the message itself. A larger file needs
+ * an upload session, a later path.
  */
 export const attachmentLimits = {
   /** Files in one write. */
   files: 10,
   /** One file's bytes. */
-  fileBytes: 3 * mib,
+  fileBytes: 2.75 * mib,
   /** All of one write's files' bytes together. */
-  totalBytes: 3.5 * mib,
+  totalBytes: 2.75 * mib,
 } as const;
 
 /** A SHA-256 as lowercase hex. */
@@ -72,7 +76,7 @@ export const attachmentsSchema = z
   .array(attachmentEntrySchema)
   .max(attachmentLimits.files)
   .refine((entries) => totalOf(entries) <= attachmentLimits.totalBytes, {
-    message: "A write attaches at most 3.5 MiB together",
+    message: "A write attaches at most 2.75 MiB together",
   });
 
 /** Run file IDs are random UUIDs, lowercase as `crypto.randomUUID` writes them. */
