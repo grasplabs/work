@@ -28,7 +28,7 @@ const through = async (socket: string, chunks: string[]): Promise<string> => {
 };
 
 describe("the tap in front of the sandbox supervisor", () => {
-  it("passes every byte on both ways, and records each session's owner, even a header split across writes", async () => {
+  it("passes every byte on both ways, and records each session's owner, even a header or its value split across writes", async () => {
     const dir = mkdtempSync(path.join(tmpdir(), "tap-"));
     // The supervisor's place: answers whatever it reads, as it reads it.
     const upstream = createServer((socket) => {
@@ -40,6 +40,8 @@ describe("the tap in front of the sandbox supervisor", () => {
       const sent = [
         "POST /session HTTP/1.1\r\nhost: sandbox\r\nx-grasp-sandbox-ow",
         "ner: app-1\r\ncontent-length: 2\r\n\r\n{}",
+        "POST /session HTTP/1.1\r\nx-grasp-sandbox-owner: ap",
+        "p-2\r\n\r\n",
         "POST /session HTTP/1.1\r\nX-Grasp-Sandbox-Owner: platform:builder\r\n\r\n",
       ];
 
@@ -50,7 +52,7 @@ describe("the tap in front of the sandbox supervisor", () => {
         owners: [...tap.owners()].toSorted(),
       }).toStrictEqual({
         answered: sent.join(""),
-        owners: ["app-1", "platform:builder"],
+        owners: ["app-1", "app-2", "platform:builder"],
       });
     } finally {
       await tap.close();
