@@ -1286,9 +1286,14 @@ const endCancelledStart = async (env: Env, row: RunRow): Promise<void> => {
     await engine.terminate(row.id);
     const live = await engine.status(row.id);
     if (live === undefined || endedLive.has(live.status)) {
+      // With how its rollback went, if it rolled back: one that failed
+      // ends the run failed (spec 10.7.3), whatever ended it.
+      const rollback =
+        live !== undefined && "rollback" in live ? live.rollback : undefined;
       await projectStatus(env, row.id, {
         status: live?.status ?? "terminated",
         at: Date.now(),
+        ...(rollback === undefined ? {} : { rollback: rollback.status }),
       });
     }
   } catch (error) {

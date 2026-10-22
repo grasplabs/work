@@ -22,13 +22,52 @@ type Run = WorkflowDefinition["run"];
 /** The test definitions, by the run they replace the definition of. */
 const replaced = new Map<string, Run>();
 
+/** The runs whose end the engine can't tell core of yet (`heldEnd`). */
+const endsHeld = new Set<string>();
+
+/** The statuses a run ends in, as the engine notifies them. */
+const ends: ReadonlySet<string> = new Set([
+  "complete",
+  "errored",
+  "terminated",
+]);
+
+/** What of a notification the hold reads. */
+interface Notified {
+  readonly instanceId: string;
+  readonly status: string;
+}
+
 /**
  * Replaces the definition of the runs `rollingBackRun` names with theirs
  * for the test file's tests; every other run runs as ever.
  */
 export const withRollbacks = (): void => {
   const original: unknown = Reflect.get(WorkflowRuns.prototype, "definition");
+  const notify: unknown = Reflect.get(WorkflowRuns.prototype, "notify");
   beforeAll(() => {
+    // A held run's end fails to reach core, as a host that can't take
+    // it: the engine hands it over again after its backoff.
+    Reflect.set(
+      WorkflowRuns.prototype,
+      "notify",
+      async function notified(
+        this: WorkflowRuns,
+        notifications: readonly Notified[]
+      ): Promise<void> {
+        const latest = notifications.at(-1);
+        if (
+          latest !== undefined &&
+          endsHeld.has(latest.instanceId) &&
+          ends.has(latest.status)
+        ) {
+          throw new Error("The test holds this run's end back");
+        }
+        if (typeof notify === "function") {
+          await Reflect.apply(notify, this, [notifications]);
+        }
+      }
+    );
     Reflect.set(
       WorkflowRuns.prototype,
       "definition",
@@ -55,8 +94,22 @@ export const withRollbacks = (): void => {
   });
   afterAll(() => {
     Reflect.set(WorkflowRuns.prototype, "definition", original);
+    Reflect.set(WorkflowRuns.prototype, "notify", notify);
     replaced.clear();
+    endsHeld.clear();
   });
+};
+
+/**
+ * Holds back the notification of run `run`'s end, whatever else of it the
+ * engine tells core, until the answer is called: core hears of its end
+ * late.
+ */
+export const heldEnd = (run: string): (() => void) => {
+  endsHeld.add(run);
+  return () => {
+    endsHeld.delete(run);
+  };
 };
 
 /** A gate a test opens: what a rollback waits on, so its run stays rolling back. */

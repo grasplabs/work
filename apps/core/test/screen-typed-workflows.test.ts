@@ -59,7 +59,7 @@ import {
 import { hostOrigin } from "./host-sockets.ts";
 import { mockIdp } from "./idp.ts";
 import { closeWhenTestEnds } from "./open-sockets.ts";
-import { gate, rollingBackRun, withRollbacks } from "./rollbacks.ts";
+import { gate, heldEnd, rollingBackRun, withRollbacks } from "./rollbacks.ts";
 import { runInstance, sleeping, woken } from "./runs.ts";
 import { appWith, seal } from "./sealed-apps.ts";
 import { clientOrigin } from "./sign-in-config.ts";
@@ -1858,6 +1858,53 @@ describe(
       }).toStrictEqual({
         compensation: { cause: "cancellation", activity: "running" },
         ended: { status: "cancelled", error: undefined },
+      });
+    });
+
+    it("ends a cancelled run whose compensation failed as workflow.compensation_failed, though a stop comes before its end is told", async () => {
+      const { builder, app, reference, workflow } = await requestsApp("PT1H");
+      const lease = await screenOf(builder, app);
+      const channel = workflowChannel(screenClient(builder, app, lease));
+      const read = readWorkflowReference(reference);
+      const { runId } = await channel.start(read, { who: "Ada" });
+      await sleeping(runId, "task:hold");
+      const holds = gate();
+      rollingBackRun(runId, {
+        ends: "sleeps",
+        rollbackFails: true,
+        holds,
+        held: { name: "task:hold", ms: 3_600_000 },
+      });
+      await woken(runId, "task:hold");
+      await sleeping(runId, "after-charge");
+      const release = heldEnd(runId);
+      await runInstance(runId).terminate({ rollback: true });
+      holds.open();
+      // Ended in the engine, its refund failed; core not told of it yet.
+      await vi.waitFor(async () => {
+        await expect(runInstance(runId).status()).resolves.toMatchObject({
+          status: "terminated",
+          rollback: { status: "errored" },
+        });
+      }, settles);
+      const rowOf = async () =>
+        await env.DB.prepare(
+          "SELECT status, failure_code AS failureCode FROM workflow_resource_runs WHERE id = ?"
+        )
+          .bind(runId)
+          .first<{ status: string; failureCode: string | null }>();
+      const before = await rowOf();
+      await terminateResourceRun(env, builder.acting, workflow, runId);
+      const stopped = await rowOf();
+      release();
+      expect({ before: before?.status, stopped }).toStrictEqual({
+        before: "running",
+        // Ended as the engine has it: an ended row never changes again,
+        // so the late end can't put a failed compensation right.
+        stopped: {
+          status: "failed",
+          failureCode: "workflow.compensation_failed",
+        },
       });
     });
 

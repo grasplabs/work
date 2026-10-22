@@ -1369,9 +1369,15 @@ const stopResourceRun = async (
     // notification can be newer. A run that ended on its own first is
     // left to its end's notification, which carries when it ended: the
     // status doesn't, and taken now its row would say this call's time.
+    // With how its rollback went, if it rolled back: a cancellation whose
+    // compensation failed ends failed (spec 10.7.3), and the late end's
+    // notification can't change an ended row.
     await projectResourceRun(env, row.id, {
       status: live.status,
       at: Date.now(),
+      ...(live.rollback === undefined
+        ? {}
+        : { rollback: live.rollback.status }),
     });
   }
   if (!audited) {
