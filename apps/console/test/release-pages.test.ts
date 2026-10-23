@@ -54,7 +54,7 @@ describe("the release pages", () => {
   });
 
   it("list every imported release with its note, newest first", async () => {
-    const { status, html } = await page("/releases");
+    const { status, html } = await page("/admin/platform/releases");
 
     expect(status).toBe(200);
     const positions = [third, second, first].map((release) =>
@@ -66,7 +66,9 @@ describe("the release pages", () => {
   });
 
   it("show a release's Workers, modules and migrations", async () => {
-    const { status, html } = await page(`/releases/${second.id}`);
+    const { status, html } = await page(
+      `/admin/platform/releases/${second.id}`
+    );
 
     expect(status).toBe(200);
     for (const text of [
@@ -84,7 +86,7 @@ describe("the release pages", () => {
 
   it("show what changed between two releases, with the notes in between", async () => {
     const { status, html } = await page(
-      `/releases/diff?from=${first.id}&to=${third.id}`
+      `/admin/platform/releases/diff?from=${first.id}&to=${third.id}`
     );
 
     expect(status).toBe(200);
@@ -110,10 +112,10 @@ describe("the release pages", () => {
   it("answer 404 for a release that isn't imported, or isn't a release id", async () => {
     const statuses = await Promise.all(
       [
-        "/releases/r000000-0000000",
-        "/releases/not-a-release",
-        `/releases/diff?from=${first.id}&to=r000000-0000000`,
-        "/releases/diff?from=..&to=x",
+        "/admin/platform/releases/r000000-0000000",
+        "/admin/platform/releases/not-a-release",
+        `/admin/platform/releases/diff?from=${first.id}&to=r000000-0000000`,
+        "/admin/platform/releases/diff?from=..&to=x",
       ].map(async (path) => {
         const { status } = await page(path);
         return status;
@@ -145,7 +147,7 @@ describe("the release pages", () => {
     }
     await db.batch([statement, ...statements]);
 
-    const { html } = await page("/releases");
+    const { html } = await page("/admin/platform/releases");
 
     expect(html).toContain(`The newest ${RELEASE_LIST_LIMIT} releases.`);
     // The list shows the newest 97 old ones (and the three above): its
@@ -154,7 +156,9 @@ describe("the release pages", () => {
 
     // From the oldest: the other 100 old ones and the three above lie
     // between, and the notes show the newest 100 of them.
-    const diff = await page(`/releases/diff?from=${ids[0]}&to=${third.id}`);
+    const diff = await page(
+      `/admin/platform/releases/diff?from=${ids[0]}&to=${third.id}`
+    );
     expect(diff.status).toBe(200);
     expect(diff.html).toContain("and 3 more");
   });

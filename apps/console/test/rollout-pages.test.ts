@@ -136,11 +136,11 @@ describe("the rollout pages", () => {
     const pending = await recordClient(1);
     const rolloutId = await waitingRollout(release, reached, pending);
 
-    const { status, html } = await page("/rollouts");
+    const { status, html } = await page("/admin/platform/rollouts");
 
     expect({
       status,
-      listed: html.includes(`href="/rollouts/${rolloutId}"`),
+      listed: html.includes(`href="/admin/platform/rollouts/${rolloutId}"`),
       release: html.includes(release),
       form: html.includes("Start rollout"),
       newest: html.includes(`value="${release}"`),
@@ -162,9 +162,9 @@ describe("the rollout pages", () => {
       .where(eq(clients.status, "active"));
     await recordClient(0);
     await recordClient(0);
-    const ringZeroOnly = await page("/rollouts");
+    const ringZeroOnly = await page("/admin/platform/rollouts");
     await recordClient(2);
-    const withRingTwo = await page("/rollouts");
+    const withRingTwo = await page("/admin/platform/rollouts");
 
     expect({
       ringZeroOnly: {
@@ -266,17 +266,21 @@ describe("the rollout pages", () => {
     const pending = await recordClient(1);
     const rolloutId = await waitingRollout(release, reached, pending);
 
-    const { status, html } = await page(`/rollouts/${rolloutId}`);
+    const { status, html } = await page(
+      `/admin/platform/rollouts/${rolloutId}`
+    );
 
     expect({
       status,
-      waiting: html.includes("ring 0 passed: waiting for approval"),
+      waiting: html.includes("Ring 0 passed: waiting for approval"),
       approve: html.includes("Approve every other client"),
       cancel: html.includes("Cancel"),
       rings: html.includes("Ring 0") && html.includes("Ring 1"),
+      // Each named, opening its Setup in the admin.
       clients:
-        html.includes(`href="/clients/${reached}"`) &&
-        html.includes(`href="/clients/${pending}"`),
+        html.includes(`href="/admin/organizations/${reached}/setup"`) &&
+        html.includes(`href="/admin/organizations/${pending}/setup"`) &&
+        html.includes(`Acme ${reached}`),
       // Only the client the rollout reached, and its ring, can be rolled back.
       rollBackClient: count(html, ">Roll back<"),
       rollBackRing: [
@@ -346,15 +350,17 @@ describe("the rollout pages", () => {
     const rolloutId = await waitingRollout(null, reached, pending);
 
     const [list, own] = await Promise.all([
-      page("/rollouts"),
-      page(`/rollouts/${rolloutId}`),
+      page("/admin/platform/rollouts"),
+      page(`/admin/platform/rollouts/${rolloutId}`),
     ]);
 
     expect({
       // The form's choice, and the listed rollout: the only secrets
       // rollout this file starts.
       shown: count(list.html, ">Secrets only<"),
-      listed: list.html.includes(`href="/rollouts/${rolloutId}"`),
+      listed: list.html.includes(
+        `href="/admin/platform/rollouts/${rolloutId}"`
+      ),
       own: {
         says: own.html.includes(
           "Secrets only, on each client&#x27;s own release"
@@ -370,8 +376,8 @@ describe("the rollout pages", () => {
 
   it("answer 404 for a rollout that doesn't exist, or can't be one", async () => {
     const pages = await Promise.all([
-      page(`/rollouts/${crypto.randomUUID()}`),
-      page("/rollouts/not-a-rollout"),
+      page(`/admin/platform/rollouts/${crypto.randomUUID()}`),
+      page("/admin/platform/rollouts/not-a-rollout"),
     ]);
 
     expect(
