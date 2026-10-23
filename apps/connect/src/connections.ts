@@ -109,12 +109,21 @@ export const allowedToolNames = (connection: Pick<Connection, "tools">) =>
 /**
  * What connect takes a tool the admin allowed on a Composio connection to
  * be: whether it only reads, which input property names its resource
- * (`ComposioToolRule`), and its class.
+ * (`ComposioToolRule`), and its class: the one it is taken to be, and the
+ * one Grasp gave it.
  */
 export interface ToolRule {
   read: boolean;
   resource: string | undefined;
+  /** What a call of it is: Grasp's class, a change unless both say read. */
   class: Exclude<ToolClass, "never">;
+  /**
+   * The class Grasp gave it (composio-classes.ts), as reviewed. It goes in
+   * the contract, not `class`: a reclass the admin's rule hides (a read
+   * turned change, for a tool the admin never marked as a read) is still
+   * a changed contract an admin approves again.
+   */
+  reviewed: Exclude<ToolClass, "never">;
 }
 
 /** Whom each class a tool can be given reaches. */
@@ -179,6 +188,7 @@ export const allowedTool = (
     read,
     resource: rule.resource,
     class: toolClassOf({ readOnly: read, reach: reachOf[reviewed] }),
+    reviewed,
   };
 };
 

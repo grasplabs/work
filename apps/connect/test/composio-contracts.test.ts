@@ -232,6 +232,14 @@ const contractOf = async (
 const parsed = (text: string | undefined): unknown =>
   text === undefined ? undefined : JSON.parse(text);
 
+/** The class and read flag a contract serves the list tool with. */
+const listOf = ({
+  actions: { HUBSPOT_LIST_CONTACTS: list },
+}: Awaited<ReturnType<typeof contractOf>>) => ({
+  class: list?.class,
+  readOnly: list?.readOnly,
+});
+
 describe("a Composio connection's generated contract", () => {
   beforeEach(() => {
     // The list tool as its server first lists it: tests change it.
@@ -297,26 +305,35 @@ describe("a Composio connection's generated contract", () => {
   });
 
   it("carries each tool's class: a release that reclasses one is a changed contract, a read no more", async () => {
-    const connectionId = await hubspot([
-      { name: "HUBSPOT_LIST_CONTACTS", read: true },
-    ]);
-    const before = await contractOf(connectionId);
+    // Marked as a read, and allowed by name alone: for this one, the
+    // admin's rule already made it a change before the reclass.
+    const connections = await Promise.all(
+      [
+        [{ name: "HUBSPOT_LIST_CONTACTS", read: true }],
+        ["HUBSPOT_LIST_CONTACTS"],
+      ].map(async (allowed) => await hubspot(allowed))
+    );
+    const before = await Promise.all(
+      connections.map(async (id) => await contractOf(id))
+    );
     const { hubspot: classed } = composioClasses;
     if (classed === undefined) {
       throw new Error("Expected HubSpot's classes");
     }
     classed.HUBSPOT_LIST_CONTACTS = "change-company";
     try {
-      const after = await contractOf(connectionId);
-      const [was, is] = [before, after].map(
-        ({ actions: { HUBSPOT_LIST_CONTACTS: list } }) => ({
-          class: list?.class,
-          readOnly: list?.readOnly,
-        })
+      const after = await Promise.all(
+        connections.map(async (id) => await contractOf(id))
       );
-      expect({ was, is }).toStrictEqual({
-        was: { class: "read-company", readOnly: true },
-        is: { class: "change-company", readOnly: false },
+      expect({ was: before.map(listOf), is: after.map(listOf) }).toStrictEqual({
+        was: [
+          { class: "read-company", readOnly: true },
+          { class: "read-company", readOnly: false },
+        ],
+        is: [
+          { class: "change-company", readOnly: false },
+          { class: "change-company", readOnly: false },
+        ],
       });
     } finally {
       classed.HUBSPOT_LIST_CONTACTS = "read-company";

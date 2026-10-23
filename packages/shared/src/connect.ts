@@ -1670,10 +1670,11 @@ export interface ConnectorContractAction {
    */
   readOnly: boolean;
   /**
-   * A Composio tool's class (`toolClassOf`), from the class Grasp gave it
-   * and the admin's rule (connect's composio-classes.ts): in the contract,
-   * so a release that reclasses a tool is a changed contract an admin
-   * approves again. A native action's class is in its connector's
+   * The class Grasp gave a Composio tool (connect's composio-classes.ts),
+   * as reviewed: a call of it is a read only when `readOnly` says so too.
+   * In the contract, so a release that reclasses a tool is a changed
+   * contract an admin approves again, even where the admin's rule already
+   * made it a change. A native action's class is in its connector's
    * manifest, so its contract carries none: one more field would change
    * every native contract bound now.
    */

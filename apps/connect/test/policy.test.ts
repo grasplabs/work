@@ -54,11 +54,13 @@ describe("a tool", () => {
     const byName = composioTool(serverTool, {
       read: false,
       class: "change-company",
+      reviewed: "change-company",
       resource: undefined,
     });
     const asRead = composioTool(serverTool, {
       read: true,
       class: "read-company",
+      reviewed: "read-company",
       resource: "sharedMailbox",
     });
     expect([
@@ -73,6 +75,7 @@ describe("a tool", () => {
     const asRead = composioTool(serverTool, {
       read: true,
       class: "read-company",
+      reviewed: "read-company",
       resource: undefined,
     });
     expect([
@@ -128,6 +131,7 @@ describe("a call for one resource", () => {
       read: true,
       resource: undefined,
       class: "read-company",
+      reviewed: "read-company",
     });
     expect(scope({ mailbox: resource }, tool)).toBe(
       "connect.resource_out_of_scope"
@@ -139,6 +143,7 @@ describe("a call for one resource", () => {
       read: true,
       resource: "mailbox",
       class: "read-company",
+      reviewed: "read-company",
     });
     expect([
       scope({ mailbox: resource }, tool),

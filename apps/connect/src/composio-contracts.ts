@@ -251,7 +251,7 @@ export const composioContract = async (
       actions[name] = {
         tool: name,
         readOnly: rule.read,
-        class: rule.class,
+        class: rule.reviewed,
         input,
         output,
       };
