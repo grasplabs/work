@@ -201,8 +201,9 @@ import type { WorkBrief, WorkKnown } from "./work-drawing.ts";
 //   one person's interview for the one device that opened it first.
 //   What each person does on their link is in the onboarding's own log,
 //   which only staff read, never in the audit log, which the company's
-//   admin reads: it would tell them who talked, and when. A delete alone
-//   is in the audit log too, as the system's, never whose (GRA-368).
+//   admin reads: it would tell them who talked, and when. A delete from
+//   the link too: the admin sees each lead's status, so its moment alone
+//   would tell them which lead it was (GRA-368).
 // - A deleted interview left anywhere (GRA-368): deleting one, from its
 //   link, by staff, with a new start or by taking someone off the roster,
 //   takes out at once what they said, where it stood, every drawing it
@@ -2169,8 +2170,8 @@ export class Onboarding extends DurableObject<Env> {
    * Deletes someone's interview, from the device it is on, at any time
    * their link opens there: what they said, and everything drawn from it,
    * is gone at once (`#forget`), and a copy left open elsewhere can't save
-   * it back. The audit log has that an interview was deleted, as the
-   * system's: never whose, nor anything of it.
+   * it back. Only the onboarding's own log has it (`#forget`), never the
+   * audit log: its moment would tell the admin whose it was.
    */
   async deleteInterview(
     secretMark: string,
@@ -2197,10 +2198,8 @@ export class Onboarding extends DurableObject<Env> {
         .set({ deletedAt: now, version: link.version + 1 })
         .where(eq(links.person, person.id))
         .run();
-      this.#changed({ type: "system" }, "onboarding.interview.deleted", {});
       return forgotten;
     });
-    this.#deliverAudit();
     await this.#afterForget([said]);
     return answered({ deleted: true });
   }

@@ -52,7 +52,9 @@ import {
 // - D4: Stephen's lines from it, kept for their sound.
 // - L7: someone taken off the list leaving what they said behind.
 // - W5: a team falling under three people in the brain by a delete.
-// - W7: the deletion in the audit log with who, or with their words.
+// - W7: the deletion in the audit log with who, or with their words, or
+//   a delete from the link there at all: its moment would tell the admin
+//   which lead it was.
 // - A delete while the same work is drawn, the lead's map is drawn, or the
 //   team given to the brain.
 
@@ -251,7 +253,8 @@ const ways: {
   {
     way: "from their link",
     remove: async (ids) => await deleteOnLink(ids.max),
-    audited: ["brain.records.purged", "onboarding.interview.deleted"],
+    // Never in the audit log: its moment would tell the admin whose it was.
+    audited: ["brain.records.purged"],
   },
   {
     way: "by Grasp's staff, on their request",
@@ -392,6 +395,44 @@ describe("deleting an interview", { timeout: 180_000 }, () => {
       });
     }
   );
+
+  it.each([
+    {
+      way: "from their link is only in staff's own log, never the audit log",
+      remove: async (ids: Ids) => await deleteOnLink(ids.max),
+      audited: [],
+      by: "person",
+    },
+    {
+      way: "by Grasp's staff is in the audit log as theirs, and in staff's own log",
+      remove: async (ids: Ids) => {
+        const staff = await asStaff();
+        await staff.onboardingStaff.deleteInterview(ids.max);
+      },
+      audited: ["onboarding.interview.deleted"],
+      by: "staff",
+    },
+  ])("$way (W7)", async ({ remove, audited, by }) => {
+    const ids = await team();
+    await inTheBrain(ids, sentinels());
+    const events = await auditedDuring(async () => {
+      await remove(ids);
+    });
+    const { entries } = await onboardingStore(env).staffLog({
+      what: "interview.deleted",
+    });
+    expect({
+      audited: events
+        .map(({ action }) => action)
+        .filter((action) => action.startsWith("onboarding.")),
+      logged: entries
+        .filter(({ person }) => person?.id === ids.max)
+        .map(({ actor }) => actor),
+    }).toStrictEqual({
+      audited,
+      logged: [by],
+    });
+  });
 
   it("of a team's lead draws all of its work again without their facts, and keeps none of their drawings", async () => {
     const store = onboardingStore(env);
