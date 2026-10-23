@@ -144,6 +144,16 @@ const inTheBrain = async (ids: Ids, said: Said) => {
   await onboardingStore(env).intakeNext();
 };
 
+/**
+ * Takes the store's alarm away, so that what is due is given to the brain
+ * only when the test asks: the alarm would otherwise give it first.
+ */
+const withoutAlarm = async (): Promise<void> => {
+  await runInDurableObject(onboardingStore(env), async (_instance, state) => {
+    await state.storage.deleteAlarm();
+  });
+};
+
 /** Every value in the store's tables, by table, as text. */
 const storeTables = async (): Promise<Record<string, string>> =>
   await runInDurableObject(onboardingStore(env), (_instance, state) => {
@@ -418,6 +428,9 @@ describe("deleting an interview", { timeout: 180_000 }, () => {
     const events = await auditedDuring(async () => {
       await remove(ids);
     });
+    // The team given to the brain again, so none of it waits for the next test.
+    await drawAll(ids);
+    await onboardingStore(env).intakeNext();
     const { entries } = await onboardingStore(env).staffLog({
       what: "interview.deleted",
     });
@@ -572,6 +585,8 @@ describe("deleting an interview", { timeout: 180_000 }, () => {
       },
       async () => await store.drawNext()
     );
+    // The team her delete made due for the brain, so it waits for no later test.
+    await store.intakeNext();
     expect({
       drew,
       deleted,
@@ -595,6 +610,7 @@ describe("deleting an interview", { timeout: 180_000 }, () => {
     await mapped(ids);
     await toldWith(ids, said);
     await drawAll(ids);
+    await withoutAlarm();
     // Max deletes his interview as the brain is about to keep the team.
     let deleting: Promise<number> | undefined;
     const batch = env.DB.batch.bind(env.DB);
