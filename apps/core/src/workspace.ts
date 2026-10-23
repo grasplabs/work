@@ -1173,7 +1173,8 @@ export class Workspace extends DurableObject<Env> {
           sources: this.#sources(chat.id),
           restricted: this.isChatRestricted(chat.id) === true,
         },
-        cited: answer === undefined ? [] : await this.#cited(scope, answer),
+        cited:
+          answer === undefined ? [] : await this.#citedOrNone(scope, answer),
       };
     } finally {
       this.ctx.storage.kv.delete(`${turnKeyPrefix}${chat.id}`);
@@ -2036,6 +2037,28 @@ export class Workspace extends DurableObject<Env> {
       undefined,
       async (reader) => await cited(this.env, reader, documentIds)
     );
+  }
+
+  /**
+   * `#cited` for a turn that has answered: the answer is stored and shown
+   * by then, so documents that can't be looked up now (Knowledge's
+   * database, or what the agent may read, failing) leave the turn's result
+   * without any, and never fail an answered turn. The page asks again
+   * (`cited`).
+   */
+  async #citedOrNone(
+    scope: Pick<AgentScope, "workspaceId" | "agentId" | "chatId" | "personId">,
+    messageId: number
+  ): Promise<ChatCitedDocument[]> {
+    try {
+      return await this.#cited(scope, messageId);
+    } catch (error) {
+      log.warn("agent.cited_failed", {
+        chatId: scope.chatId,
+        ...errorFields(error),
+      });
+      return [];
+    }
   }
 
   /**

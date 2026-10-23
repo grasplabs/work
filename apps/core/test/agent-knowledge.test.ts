@@ -24,6 +24,7 @@ import {
   codeStep,
   gatewayConfig,
   model,
+  pausedReply,
   pointAtGateway,
   says,
   setObjectEnv,
@@ -696,6 +697,90 @@ describe("a chat's Knowledge", setUpTime, () => {
         leaveCited,
       ],
       again: [leaveCited],
+    });
+  });
+
+  it("answers when the documents its answer cites can't be looked up, and the page finds them once they can", async () => {
+    const admin = await newAdmin();
+    const person = await signedInApi(idp, "user");
+    const { id: collectionId } = await admin.knowledge.createCollection({
+      name: `Handbook ${unique()}`,
+      access: "everyone",
+    });
+    const { id: documentId } = await admin.knowledge.saveDocument({
+      collectionId,
+      path: "leave.md",
+      text: leave,
+      ifVersion: 0,
+    });
+    const answer = `Sixteen weeks [Parental leave](grasp:note/${documentId}).`;
+    const { reply, release } = pausedReply(says(answer), 1);
+    const { agent, gateway, newChat } = await personalChatsOf(
+      person.userId,
+      codeStep(readCode(documentId)),
+      reply
+    );
+    await grantRead(admin, agent, collectionId);
+    const { chat, ask } = await newChat();
+
+    const turn = ask("How long is parental leave?");
+    await vi.waitFor(
+      () => {
+        expect(gateway.requests).toHaveLength(2);
+      },
+      { timeout: 10_000 }
+    );
+    // Knowledge's database fails while the model is still answering.
+    await env.KNOWLEDGE.prepare(
+      "ALTER TABLE sections RENAME TO sections_away"
+    ).run();
+    try {
+      release();
+      await expect(turn).resolves.toStrictEqual({
+        outcome: "answered",
+        answer,
+        provenance: { sources: [collectionId], restricted: false },
+        cited: [],
+      });
+    } finally {
+      await env.KNOWLEDGE.prepare(
+        "ALTER TABLE sections_away RENAME TO sections"
+      ).run();
+    }
+
+    // The answer was kept, and its page finds what it cites now.
+    const sent: ChatMessage[] = [];
+    const subscription = await person.api.chats.watch(
+      chat.id,
+      null,
+      (update) => {
+        sent.push(...update.messages);
+      }
+    );
+    await vi.waitFor(() => {
+      expect(sent.some(({ role }) => role === "assistant")).toBeTruthy();
+    });
+    await subscription.release();
+    const shown = sent.find(
+      (message) => message.role === "assistant" && message.text !== ""
+    );
+    expect({
+      text: shown?.role === "assistant" ? shown.text : undefined,
+      cited:
+        shown === undefined
+          ? []
+          : await person.api.chats.cited(chat.id, shown.id),
+    }).toStrictEqual({
+      text: answer,
+      cited: [
+        {
+          documentId,
+          collectionId,
+          title: "Parental leave",
+          path: "leave.md",
+          snippet: "Parental leave lasts sixteen weeks.",
+        },
+      ],
     });
   });
 
