@@ -89,6 +89,21 @@ export default {
 };
 `;
 
+// App code that tries to reach a URL by every way out an isolate has.
+const netApp = `
+import { WorkerEntrypoint } from "cloudflare:workers";
+export class App extends WorkerEntrypoint {
+  async reach(url) {
+    const out = {};
+    try { const r = await fetch(url); out.fetch = { status: r.status }; } catch (e) { out.fetch = String(e); }
+    try { const { connect } = await import("cloudflare:sockets"); const s = connect({ hostname: new URL(url).hostname, port: 443 }); await s.opened; out.socket = "opened"; } catch (e) { out.socket = String(e); }
+    out.env = Object.keys(this.env ?? {});
+    return out;
+  }
+}
+export default { async fetch() { return new Response("app"); } };
+`;
+
 class Host extends RpcTarget {
   readonly log: { step: number; ms: number; ok: boolean; error?: string }[] =
     [];
@@ -146,6 +161,19 @@ const cpuIsolate = (env: Env, id: string | null, cpuMs: number) =>
     modules: { "busy.js": cpuApp },
     env: {},
   }));
+
+const netRoute = async (env: Env, url: URL): Promise<unknown> => {
+  const target = url.searchParams.get("url") ?? "";
+  const app = env.LOADER.get(null, () => ({
+    ...sandbox,
+    mainModule: "net.js",
+    modules: { "net.js": netApp },
+    env: {},
+  })).getEntrypoint("App") as unknown as {
+    reach: (target: string) => Promise<unknown>;
+  };
+  return await app.reach(target);
+};
 
 const cacheRoutes = async (env: Env, url: URL): Promise<unknown> => {
   const key = url.searchParams.get("key") ?? "none";
@@ -254,6 +282,13 @@ export default {
       return new Response("no", { status: 403 });
     }
     const url = new URL(request.url);
+    if (url.pathname === "/net") {
+      return Response.json({
+        path: url.pathname,
+        query: url.search,
+        body: await netRoute(env, url),
+      });
+    }
     const body = url.pathname.startsWith("/cache/")
       ? await cacheRoutes(env, url)
       : await cpuRoutes(env, url);

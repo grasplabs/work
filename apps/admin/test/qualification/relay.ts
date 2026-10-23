@@ -25,6 +25,20 @@ export interface RelayOptions {
   logFile: string;
 }
 
+/** Whether `text` is an API envelope that says it failed, as a 200 can. */
+const failedEnvelope = (text: string): boolean => {
+  try {
+    const parsed: unknown = JSON.parse(text);
+    return (
+      typeof parsed === "object" &&
+      parsed !== null &&
+      Reflect.get(parsed, "success") === false
+    );
+  } catch {
+    return false;
+  }
+};
+
 const refuse = (reason: string): Response =>
   Response.json(
     {
@@ -36,6 +50,7 @@ const refuse = (reason: string): Response =>
 
 export const relay = (options: RelayOptions) => {
   const ours = new Set<string>();
+  const sessionTokens = new Set<string>();
   const accountPath = `/client/v4/accounts/${options.accountId}/`;
   const log = (entry: Record<string, unknown>): void => {
     appendFileSync(
@@ -95,7 +110,16 @@ export const relay = (options: RelayOptions) => {
         });
         return refuse("workers.dev host not ours");
       }
-      const response = await fetch(new Request(request));
+      const sent =
+        method === "GET" || method === "HEAD"
+          ? undefined
+          : await request.arrayBuffer();
+      const response = await fetch(url, {
+        method,
+        headers: request.headers,
+        body: sent,
+        redirect: "manual",
+      });
       log({
         method,
         host: url.hostname,
@@ -122,22 +146,57 @@ export const relay = (options: RelayOptions) => {
       // Writes: only in this account, only to what this run named or made.
       // Zones (the mail step's sending domain) are never created here.
       // A create names its resource in the body, at a collection's path.
+      // An assets upload names no script: the session JWT one of ours was
+      // handed authorises it.
+      const uploads =
+        method === "POST" &&
+        url.pathname === `${accountPath}workers/assets/upload` &&
+        sessionTokens.has(
+          (request.headers.get("authorization") ?? "").replace(/^Bearer /u, "")
+        );
       const creates =
         method === "POST" &&
         collections.test(url.pathname) &&
         namesOurs(bodyText);
-      if (!inAccount || !(namesOurs(url.pathname) || creates)) {
+      if (!inAccount || !(namesOurs(url.pathname) || creates || uploads)) {
         log({ method, path: where, refused: "write not ours" });
         return refuse(
           `${method} ${url.pathname} names nothing this run created`
         );
       }
     }
+    // As the console sent it: the deployer token it holds is a placeholder
+    // the proxy replaces; an asset upload's JWT is its own.
     const headers = new Headers(request.headers);
-    // The proxy puts the real token in.
-    headers.set("authorization", "Bearer placeholder");
-    const response = await fetch(url, { method, headers, body });
-    const text = await response.text();
+    let response: Response;
+    let text: string;
+    try {
+      response = await fetch(url, { method, headers, body });
+      text = await response.text();
+    } catch (error) {
+      const cause = error instanceof Error ? error.cause : undefined;
+      log({ method, path: where, error: String(error), cause: String(cause) });
+      throw error;
+    }
+    if (
+      method === "POST" &&
+      response.ok &&
+      url.pathname.endsWith("/assets-upload-session") &&
+      namesOurs(url.pathname)
+    ) {
+      const parsed: unknown = JSON.parse(text);
+      const result: unknown =
+        typeof parsed === "object" && parsed !== null
+          ? Reflect.get(parsed, "result")
+          : undefined;
+      const jwt: unknown =
+        typeof result === "object" && result !== null
+          ? Reflect.get(result, "jwt")
+          : undefined;
+      if (typeof jwt === "string") {
+        sessionTokens.add(jwt);
+      }
+    }
     if (
       method === "POST" &&
       response.ok &&
@@ -150,11 +209,17 @@ export const relay = (options: RelayOptions) => {
       method,
       path: where,
       status: response.status,
-      ...(response.ok ? {} : { response: text.slice(0, 2000) }),
+      ...(response.ok && !failedEnvelope(text)
+        ? {}
+        : { response: text.slice(0, 2000) }),
     });
+    // Fetch decoded the body: its upstream length and encoding no longer hold.
     return new Response(text, {
       status: response.status,
-      headers: response.headers,
+      headers: {
+        "content-type":
+          response.headers.get("content-type") ?? "application/json",
+      },
     });
   };
 };
