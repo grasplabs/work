@@ -2506,6 +2506,7 @@ msgstr "Überall"
 #: src/dashboard/dependency-requests.tsx
 #: src/engines/screen-approval.tsx
 #: src/inbox/items.ts
+#: src/routes/_shell.apps.$app.tsx
 #: src/routes/_shell.settings.packages.index.tsx
 msgid "App"
 msgstr "App"
@@ -2539,6 +2540,7 @@ msgstr "App-Genehmigung"
 msgid "App name"
 msgstr "App-Name"
 
+#: src/routes/_shell.apps.$app.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 #: src/routes/_shell.landscape.$appId.tsx
 msgid "App not found"
@@ -2981,6 +2983,10 @@ msgstr "Zurück"
 #: src/brain/atlas-overlays.tsx
 msgid "Back to {destination}"
 msgstr "Zurück zu {destination}"
+
+#: src/engines/app-page.tsx
+msgid "Back to a draft, for its builders alone"
+msgstr "Zurück zum Entwurf, nur für seine Ersteller"
 
 #: src/dashboard/widget-board.tsx
 msgid "Back to how it began"
@@ -4450,6 +4456,10 @@ msgctxt "kind of app"
 msgid "Design and media"
 msgstr "Design und Medien"
 
+#: src/engines/app-page.tsx
+msgid "Design it in the chat"
+msgstr "Im Chat entwerfen"
+
 #: src/brain/brain.ts
 msgctxt "workflow status"
 msgid "Designed"
@@ -4672,6 +4682,7 @@ msgstr "Domänen-Verknüpfungen"
 #: src/dashboard/widget-board.tsx
 #: src/frame/app-sidebar.tsx
 #: src/landscape/app-cells.tsx
+#: src/routes/_shell.apps.$app.tsx
 #: src/routes/_shell.domains.$engine.apps.$screen.tsx
 #: src/routes/_shell.domains.$engine.index.tsx
 #: src/routes/_shell.domains.index.tsx
@@ -4839,6 +4850,7 @@ msgstr "Früher"
 msgid "Earlier versions"
 msgstr "Frühere Versionen"
 
+#: src/engines/app-page.tsx
 #: src/knowledge/document.tsx
 #: src/onboarding/setup-steps.tsx
 msgid "Edit"
@@ -5490,6 +5502,10 @@ msgstr "Für: {role}"
 #: src/onboarding/work-record.tsx
 msgid "For the next interview about it."
 msgstr "Für das nächste Interview dazu."
+
+#: src/engines/app-page.tsx
+msgid "For the people it is shared with"
+msgstr "Für die Personen, mit denen sie geteilt ist"
 
 #: src/onboarding/work-rules.tsx
 msgid "For this organization only. Every organization starts with the same values, and Grasp tunes them as its interviews come in."
@@ -8769,6 +8785,10 @@ msgstr "Online"
 msgid "Only admins can read the audit trail"
 msgstr "Nur Admins können den Audit-Trail lesen"
 
+#: src/engines/app-page.tsx
+msgid "Only described"
+msgstr "Nur beschrieben"
+
 #: src/brain/brain-transcript.tsx
 msgid "Only highlighted turns"
 msgstr "Nur markierte Wortbeiträge"
@@ -9614,6 +9634,7 @@ msgstr "Vorgeschlagene Regeln"
 msgid "Provided by Grasp, not installed again: {provided}"
 msgstr "Von Grasp bereitgestellt, nicht erneut installiert: {provided}"
 
+#: src/engines/app-page.tsx
 #: src/engines/app-status.tsx
 msgid "Publish"
 msgstr "Veröffentlichen"
@@ -9631,6 +9652,7 @@ msgstr "Veröffentlichen als"
 msgid "Publish revision {0}"
 msgstr "Revision {0} veröffentlichen"
 
+#: src/engines/app-page.tsx
 #: src/routes/_shell.workflows.$workflow.tsx
 msgid "Published"
 msgstr "Veröffentlicht"
@@ -10102,6 +10124,7 @@ msgstr "Ressource"
 msgid "Resources"
 msgstr "Ressourcen"
 
+#: src/engines/app-page.tsx
 #: src/engines/app-status.tsx
 #: src/knowledge/timeline.tsx
 msgid "Restore"
@@ -10562,6 +10585,10 @@ msgstr "Skalieren"
 msgid "Schedule stopped"
 msgstr "Zeitplan gestoppt"
 
+#: src/engines/app-page.tsx
+msgid "Screens"
+msgstr "Bildschirme"
+
 #: src/routes/_shell.settings.members.tsx
 msgid "Search"
 msgstr "Suchen"
@@ -10744,11 +10771,16 @@ msgstr "Im Verzeichnis Ihrer Organisation festgelegt."
 msgid "Set. Type a new value to replace it."
 msgstr "Festgelegt. Geben Sie einen neuen Wert ein, um ihn zu ersetzen."
 
+#: src/engines/app-page.tsx
 #: src/frame/person-menu.tsx
 #: src/routes/_shell.domains.$engine.index.tsx
 #: src/routes/_shell.settings.tsx
 msgid "Settings"
 msgstr "Einstellungen"
+
+#: src/engines/app-page.tsx
+msgid "Settings of {name}"
+msgstr "Einstellungen von {name}"
 
 #: src/onboarding/review-parts.tsx
 msgid "Settled: {choice}"
@@ -12657,6 +12689,14 @@ msgstr "Diese App ist nicht rechtzeitig gestartet."
 msgid "This app doesn't build. Ask a builder to fix it."
 msgstr "Diese App lässt sich nicht erstellen. Bitten Sie einen Builder, sie zu beheben."
 
+#: src/engines/app-page.tsx
+msgid "This app has no screen yet. Grasp designs it with you in the chat."
+msgstr "Diese App hat noch keinen Bildschirm. Grasp entwirft ihn mit Ihnen im Chat."
+
+#: src/engines/app-page.tsx
+msgid "This app is archived. It is kept as it was, and nobody works on it."
+msgstr "Diese App ist archiviert. Sie bleibt, wie sie war, und niemand arbeitet daran."
+
 #: src/screens/screen-frame.tsx
 msgid "This app left its frame and was stopped."
 msgstr "Diese App hat ihren Rahmen verlassen und wurde gestoppt."
@@ -13261,6 +13301,7 @@ msgstr "Unbekannte Ergebnisse"
 msgid "Unknown source"
 msgstr "Unbekannte Quelle"
 
+#: src/engines/app-page.tsx
 #: src/engines/app-status.tsx
 msgid "Unpublish"
 msgstr "Veröffentlichung aufheben"
