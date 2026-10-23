@@ -61,6 +61,12 @@ export interface AdmittedEngineEvent {
   readonly payload: Json;
   readonly key: string;
   readonly attributes: Readonly<Record<string, string>>;
+  /**
+   * Whether it may take the inbox's reserve (@grasp-os/workerflow's
+   * `reservedInboxEvents`): only for what core owes the run itself, a
+   * child's end, so no sender can crowd it out.
+   */
+  readonly reserved?: boolean;
 }
 
 /** What an App's run is pinned to: the dispatcher loads it by these. */
@@ -117,6 +123,12 @@ export type RunPin =
   | ({ type: "app" } & PinnedRun)
   | ({ type: "resource" } & PinnedResourceRun)
   | ({ type: "candidate" } & PinnedCandidateRun)
+  /**
+   * A run an App's test started of a workflow its release binds
+   * (fixture-runs.ts): the same sealed version, run on the same engine,
+   * with nothing of the organization's around it.
+   */
+  | ({ type: "fixture" } & PinnedResourceRun)
   | { type: "internal"; workflow: InternalWorkflow };
 
 /** The one definition every run is a run of. */
@@ -161,6 +173,19 @@ const pinSchema = z.union([
       manifest,
     })),
   z
+    .tuple([
+      z.literal("fixture"),
+      workflowResourceIdSchema,
+      z.int().positive(),
+      z.string().regex(/^[0-9a-f]{64}$/u),
+    ])
+    .transform(([, workflow, version, manifest]): RunPin => ({
+      type: "fixture",
+      workflow,
+      version,
+      manifest,
+    })),
+  z
     .tuple([z.literal("internal"), z.enum(internalWorkflows)])
     .transform(([, workflow]): RunPin => ({ type: "internal", workflow })),
 ]);
@@ -181,6 +206,14 @@ const versionOf = (pin: RunPin): string => {
     }
     case "candidate": {
       return JSON.stringify(["candidate", pin.workflow, pin.manifest]);
+    }
+    case "fixture": {
+      return JSON.stringify([
+        "fixture",
+        pin.workflow,
+        pin.version,
+        pin.manifest,
+      ]);
     }
     case "internal": {
       return JSON.stringify(["internal", pin.workflow]);
@@ -236,6 +269,21 @@ export interface RunEngine {
     pinned: PinnedCandidateRun;
     input: Json;
   }) => Promise<void>;
+  /**
+   * As `createResource`, for a run an App's test started
+   * (fixture-runs.ts): kept a day at most once it ended, as nothing
+   * reads it after its test.
+   */
+  createFixture: (run: {
+    id: string;
+    pinned: PinnedResourceRun;
+    input: Json;
+  }) => Promise<void>;
+  /**
+   * How many steps named `name` run `id` completed, each once however it
+   * was replayed; nothing when the engine has no such run.
+   */
+  succeededSteps: (id: string, name: string) => Promise<number | undefined>;
   /** As `create`, for a run of one of core's own workflows. */
   createInternal: (run: {
     id: string;
@@ -335,6 +383,14 @@ const retentionOf = (
   return { retention: { successRetention: kept, errorRetention: kept } };
 };
 
+/**
+ * How long the engine keeps a test's run once it ended: a day, the least a
+ * deployment keeps any; its test removes it sooner (fixture-runs.ts).
+ */
+const fixtureRetention: Pick<WorkflowOptions, "retention"> = {
+  retention: { successRetention: "1 day", errorRetention: "1 day" },
+};
+
 const runs = (
   env: Pick<Env, "WORKFLOW_RUNS" | "DURABLE_OBJECT_JURISDICTION">
 ) => inJurisdiction(env, env.WORKFLOW_RUNS);
@@ -396,7 +452,7 @@ const admit = async (
 ): Promise<void> => {
   const binding = new Workflow<{ input?: Json }>(runs(env), runDefinition, {
     version: versionOf(pin),
-    ...retentionOf(env),
+    ...(pin.type === "fixture" ? fixtureRetention : retentionOf(env)),
   });
   await binding.admit({
     id,
@@ -416,6 +472,11 @@ export const runEngine = (env: Env): RunEngine => ({
   createCandidate: async ({ id, pinned, input }) => {
     await admit(env, id, { type: "candidate", ...pinned }, input);
   },
+  createFixture: async ({ id, pinned, input }) => {
+    await admit(env, id, { type: "fixture", ...pinned }, input);
+  },
+  succeededSteps: async (id, name) =>
+    await runStub(env, id).succeededSteps(name),
   createInternal: async ({ id, workflow, input }) => {
     await admit(env, id, { type: "internal", workflow }, input);
   },
@@ -444,6 +505,7 @@ export const runEngine = (env: Env): RunEngine => ({
       payload: encode(event.payload),
       key: event.key,
       attributes: event.attributes,
+      reserved: event.reserved === true,
     }),
   sendEvent: async (id, type, key) => {
     const outcome = await runStub(env, id).sendEvent({

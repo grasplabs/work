@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "1373e5cd-a6ec-405c-955b-ade440a02a2d",
+  "id": "fe4130aa-65a4-4b0a-8720-9d107e3d3eff",
   "prevId": "76550816-140d-4351-8cbc-ac0bb633230a",
   "tables": {
     "audit_events": {
@@ -841,6 +841,13 @@
           "notNull": false,
           "autoincrement": false
         },
+        "attio_company_id": {
+          "name": "attio_company_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "pinned_release_id": {
           "name": "pinned_release_id",
           "type": "text",
@@ -887,124 +894,6 @@
           "tableTo": "releases",
           "columnsFrom": [
             "pinned_release_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "destination_capability_evidence": {
-      "name": "destination_capability_evidence",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "integer",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": true
-        },
-        "destination_id": {
-          "name": "destination_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "capability": {
-          "name": "capability",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "status": {
-          "name": "status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "subject_kind": {
-          "name": "subject_kind",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "subject_id": {
-          "name": "subject_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "procedure": {
-          "name": "procedure",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "observed_at": {
-          "name": "observed_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "recorded_by": {
-          "name": "recorded_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "record": {
-          "name": "record",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "declared_by": {
-          "name": "declared_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "declared_at": {
-          "name": "declared_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "destination_capability_evidence_idx": {
-          "name": "destination_capability_evidence_idx",
-          "columns": [
-            "destination_id",
-            "capability",
-            "id"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "destination_capability_evidence_destination_id_hosting_destinations_id_fk": {
-          "name": "destination_capability_evidence_destination_id_hosting_destinations_id_fk",
-          "tableFrom": "destination_capability_evidence",
-          "tableTo": "hosting_destinations",
-          "columnsFrom": [
-            "destination_id"
           ],
           "columnsTo": [
             "id"

@@ -536,7 +536,12 @@ const payloadOf = (bytes: number): string =>
   JSON.stringify([1, "x".repeat(bytes - '[1,""]'.length)]);
 
 /** Sends straight to the run object, past the binding's own checks. */
-const sendAll = async (id: string, payloads: string[]): Promise<string[]> =>
+const sendAll = async (
+  id: string,
+  payloads: string[],
+  reserved = false,
+  type = "spam"
+): Promise<string[]> =>
   await runInDurableObject(runObject("approval", id), async (run) => {
     if (!(run instanceof WorkflowRun)) {
       throw new TypeError("the object isn't a run object");
@@ -544,7 +549,12 @@ const sendAll = async (id: string, payloads: string[]): Promise<string[]> =>
     const outcomes: string[] = [];
     for (const payload of payloads) {
       // oxlint-disable-next-line no-await-in-loop -- in order, as a sender would
-      const outcome = await run.sendEvent({ type: "spam", payload, key: null });
+      const outcome = await run.sendEvent({
+        type,
+        payload,
+        key: null,
+        reserved,
+      });
       outcomes.push(outcome);
     }
     return outcomes;
@@ -563,7 +573,7 @@ describe("an inbox", () => {
     expect(outcomes).toStrictEqual(["accepted", "too_large"]);
   });
 
-  it("stops taking events at its byte limit, and the caller hears why", async () => {
+  it("stops taking events at its byte limit, and the caller hears why; a reserved delivery still fits", async () => {
     const id = newId();
     await workflow("approval").create({ id });
     const bytes = 1_000_000;
@@ -588,9 +598,13 @@ describe("an inbox", () => {
     await expect(
       send("approval", id, { type: "spam", payload: "x".repeat(bytes) })
     ).rejects.toThrow(/^instance\.inbox_full/u);
+    // What the run's host owes it still finds room.
+    await expect(sendAll(id, [payloadOf(bytes)], true)).resolves.toStrictEqual([
+      "accepted",
+    ]);
   });
 
-  it("stops taking events at its count limit", async () => {
+  it("stops taking events at its count limit, and takes reserved deliveries past it however many", async () => {
     const id = newId();
     await workflow("approval").create({ id });
 
@@ -598,9 +612,57 @@ describe("an inbox", () => {
       id,
       Array.from({ length: maxInboxEvents + 1 }, () => encode(null))
     );
+    // As many as a lineage's children: each past the limit.
+    const reserved = await sendAll(
+      id,
+      Array.from({ length: 8 }, () => encode(null)),
+      true
+    );
 
     expect(outcomes.lastIndexOf("accepted")).toBe(maxInboxEvents - 1);
     expect(outcomes.at(-1)).toBe("full");
+    expect(reserved).toStrictEqual(Array.from({ length: 8 }, () => "accepted"));
+  });
+
+  it("counts only what senders sent against its limits: a reserved delivery at the limit leaves ordinary ones their room", async () => {
+    const id = newId();
+    await workflow("approval").create({ id });
+
+    const filled = await sendAll(
+      id,
+      Array.from({ length: maxInboxEvents - 1 }, () => encode(null))
+    );
+    const reserved = await sendAll(id, [encode(null)], true);
+    const after = await sendAll(id, [encode(null), encode(null)]);
+
+    expect({
+      filled: filled.every((outcome) => outcome === "accepted"),
+      reserved,
+      after,
+    }).toStrictEqual({
+      filled: true,
+      reserved: ["accepted"],
+      after: ["accepted", "full"],
+    });
+  });
+
+  it("leaves reserved deliveries out of its counts when a restart counts them again", async () => {
+    const id = newId();
+    await workflow("approval").create({ id });
+    await suspendedOn("approval", id, "approval");
+    const payload = encode("yes");
+    await sendAll(id, [payload], true, "approved");
+    await ended("approval", id);
+
+    const run = await instance("approval", id);
+    await run.restart({ from: { name: "after" } });
+    await ended("approval", id);
+    const { run: row, events } = await journalOf("approval", id);
+
+    expect({
+      kept: events.length,
+      counts: [row.event_count, row.event_bytes],
+    }).toStrictEqual({ kept: 1, counts: [0, 0] });
   });
 });
 

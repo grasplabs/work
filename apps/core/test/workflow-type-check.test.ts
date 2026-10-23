@@ -7,7 +7,7 @@ import { z } from "zod";
 
 import { buildWorkflows } from "../src/screens.ts";
 import { startRun } from "../src/workflows/runs.ts";
-import { requestGranted } from "./apps.ts";
+import { requestGranted, verifiedCandidate } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { mailConnection } from "./mail-connection.ts";
 import { endLiveRuns, finished } from "./runs.ts";
@@ -803,6 +803,7 @@ export {};
         "Unchecked"
       );
       // Made current behind the gate's back, as no API does.
+      await verifiedCandidate(app, version);
       await env.DB.prepare("UPDATE apps SET current_version = ? WHERE id = ?")
         .bind(version, app)
         .run();

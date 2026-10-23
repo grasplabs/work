@@ -242,9 +242,15 @@ const coreDb: D1State = {
     app_members: exported(`${core}app-access.ts`),
     screen_artifacts: exported(`${core}screen-trust.ts`),
     screen_builds: cache(`${core}screen-builds.ts`),
+    build_receipts: cache(
+      `${core}build-cache.ts`,
+      "What vouches for a kept build's bytes, and the lease of the build making it: without it every build compiles again."
+    ),
     screen_policies: exported(`${core}screen-trust.ts`),
     blueprints: exported(`${core}app-blueprints.ts`),
     app_versions: exported(`${core}apps.ts`),
+    app_candidates: exported(`${core}app-candidates.ts`),
+    app_candidate_reports: exported(`${core}app-candidates.ts`),
     sdk_release_manifests: exported(`${core}app-releases.ts`),
     sdk_release_artifacts: exported(`${core}app-releases.ts`),
     sdk_artifact_deletions: transient(`${core}release-retention.ts`),
@@ -256,6 +262,7 @@ const coreDb: D1State = {
     sdk_store_owners: exported(`${core}app-releases.ts`),
     app_default_stores: exported(`${core}app-activation.ts`),
     app_test_fixtures: transient(`${core}app-tests.ts`),
+    app_test_runs: transient(`${core}workflows/fixture-runs.ts`),
     screen_submissions: exported(`${core}screen-submissions.ts`),
     preview_fixture_stores: transient(`${core}sealed-previews.ts`),
     resource_templates: exported(`${core}resource-bindings.ts`),
@@ -318,6 +325,10 @@ const coreDb: D1State = {
     trigger_resource_versions: exported(`${core}trigger-resources.ts`),
     workflow_start_receipts: exported(`${core}workflow-starts.ts`),
     workflow_resource_runs: exported(`${core}workflows/resource-runs.ts`),
+    workflow_emitted_events: exported(
+      `${core}workflows/emitted-events.ts`,
+      "The events JSON workflows' emit tasks wrote: an outbox, its undelivered rows still owed."
+    ),
     workflow_run_files: exported(`${core}workflows/run-files.ts`),
     workflow_run_file_chunks: exported(`${core}workflows/run-files.ts`),
     workflow_resource_run_terminations: exported(
@@ -378,6 +389,11 @@ const knowledgeDb: D1State = {
     brain_payload_releases: transient(
       `${core}knowledge/payloads.ts`,
       "Empty between batches."
+    ),
+    brain_memories: exported(`${core}knowledge/memories.ts`, brainPending),
+    brain_receipts: transient(
+      `${core}knowledge/memories.ts`,
+      "Command receipts for retries, swept a day after the command."
     ),
     audit_outbox: exported(
       `${core}audit-outbox.ts`,
@@ -649,9 +665,10 @@ const workflowRuns: DurableObjectState = {
       "core-db/workflow_runs",
       "core-db/workflow_resource_runs",
       "core-db/workflow_candidate_runs",
+      "core-db/app_test_runs",
       "workspaces/chat_build_jobs",
     ],
-    note: "Runs of core's own workflows (extraction, backfills) are found only through the rows that started them.",
+    note: "Runs of core's own workflows (extraction, backfills) are found only through the rows that started them. Runs an App's tests start are transient, removed with their test.",
   },
   runtimeTables: {
     run: exported(`${workerflow}journal.ts`, "The workflow journal."),
@@ -747,6 +764,10 @@ const files: R2State = {
     "app-tests-builds/": cache(`${core}screens.ts`),
     "open-workflow-builds/": cache(`${core}screens.ts`),
     "compute-builds/": cache(`${core}screens.ts`),
+    "build-quarantine/": cache(
+      `${core}build-cache.ts`,
+      "Builds whose bytes failed their receipt's hash, kept a day to look into."
+    ),
     "builds-sweep.json": cache(`${core}screens.ts`),
     "screen-frames/": cache(`${core}screen-frame.ts`),
     "screen-modules/": cache(`${core}screen-frame.ts`),

@@ -577,6 +577,7 @@ const hostOf = async (by: Acting, id: string): Promise<ResourceRunHost> => {
       build,
       calling: {
         runId,
+        rootRunId: runId,
         workflowId: id,
         version: 1,
         principal: by.userId,

@@ -50,3 +50,16 @@ export const takesExactly = (descriptor: string, value: unknown): boolean => {
   const answer = z.json().safeParse(validated.value);
   return answer.success && canonicalJson(answer.data) === snapshot;
 };
+
+/** What the decision page answers with a comment: `{ comment }`. */
+const commented = { comment: "Answered" };
+
+/**
+ * Whether a decision whose answers must be what `descriptor` (a decision
+ * contract's response schema) takes can be answered at all: its page
+ * sends no payload (`null`), or the person's comment (`{ comment }`), and
+ * nothing else. One taking neither would leave its run waiting out its
+ * deadline, every answer refused.
+ */
+export const takesPageAnswers = (descriptor: string): boolean =>
+  takesExactly(descriptor, null) || takesExactly(descriptor, commented);

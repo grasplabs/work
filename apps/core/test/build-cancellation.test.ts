@@ -78,8 +78,9 @@ describe("a build given up on", { timeout: 60_000 }, () => {
     );
     expect(watched).toStrictEqual({
       outcome: lostLease.message,
-      // Its cache read, and nothing written: no compile ran.
-      touched: ["get"],
+      // Nothing written: no compile ran. (The cache read is its receipt in
+      // core's database: with none, no object is read.)
+      touched: [],
     });
   });
 
@@ -170,26 +171,38 @@ describe("a build given up on", { timeout: 60_000 }, () => {
   it("starts no workflow compile when it is given up on during the build's cache read", async () => {
     const giveUp = new AbortController();
     const touched: string[] = [];
-    const { FILES: files } = env;
+    const { FILES: files, DB: db } = env;
     env.FILES = new Proxy(files, {
       get: (target, property) => {
         const value: unknown = Reflect.get(target, property);
         if (typeof property === "string" && typeof value === "function") {
           return async (...args: unknown[]): Promise<unknown> => {
             touched.push(property);
-            const answer: unknown = await Reflect.apply(value, target, args);
-            // Its lease lost while the build's cache was read.
-            if (
-              property === "get" &&
-              typeof args[0] === "string" &&
-              args[0].startsWith("workflow-builds/")
-            ) {
-              giveUp.abort(lostLease);
-            }
-            return answer;
+            return await Reflect.apply(value, target, args);
           };
         }
         return value;
+      },
+    });
+    // Its lease lost while the build's cache was read: its receipt, in
+    // core's database (build-cache.ts).
+    env.DB = new Proxy(db, {
+      get: (target, property) => {
+        const value: unknown = Reflect.get(target, property);
+        if (property === "prepare" && typeof value === "function") {
+          return (query: string): unknown => {
+            if (
+              query.includes("build_receipts") &&
+              query.startsWith("select")
+            ) {
+              giveUp.abort(lostLease);
+            }
+            return Reflect.apply(value, target, [query]);
+          };
+        }
+        return typeof value === "function"
+          ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+          : value;
       },
     });
     let outcome: string;
@@ -209,6 +222,7 @@ describe("a build given up on", { timeout: 60_000 }, () => {
       outcome = error instanceof Error ? error.message : String(error);
     } finally {
       env.FILES = files;
+      env.DB = db;
     }
     expect({ outcome, compiled: touched.includes("put") }).toStrictEqual({
       outcome: lostLease.message,

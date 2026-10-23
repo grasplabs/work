@@ -82,6 +82,8 @@ export interface ProvisionParams {
    * a client already recorded.
    */
   signIn?: ClientSignIn;
+  /** Its company in Grasp's Attio, recorded on the client; left out when there is none. */
+  attioCompanyId?: string;
   /** The staff member who started it. */
   startedBy: Staff;
 }
@@ -303,6 +305,7 @@ const recordClient = async (
         ring: params.ring,
         signIn:
           params.signIn === undefined ? null : JSON.stringify(params.signIn),
+        attioCompanyId: params.attioCompanyId ?? null,
         createdBy: params.startedBy.email,
         createdAt: now,
         updatedAt: now,

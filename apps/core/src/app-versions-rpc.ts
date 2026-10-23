@@ -66,15 +66,25 @@ export class AppVersionsRpc extends CoreRpcTarget implements AppVersionsApi {
   }
 
   /**
-   * Makes a version current (sealed first when it is of spec 8's layout,
-   * app-activation.ts), then indexes the App into the Apps collection
+   * Makes a version current through a verified candidate, over `expected`
+   * when given (app-activation.ts, app-candidates.ts), then indexes the App into the Apps collection
    * (knowledge/apps-collection.ts): its entry holds the new version once
    * this returns, unless indexing failed or raced another; the cron
    * trigger then heals it within 15 minutes.
    */
-  async setCurrent(app: string, version: number): Promise<App> {
+  async setCurrent(
+    app: string,
+    version: number,
+    expected?: number | null
+  ): Promise<App> {
     return await withPerson(this.#check, async (by) => {
-      const current = await activateVersion(this.#env, by, app, version);
+      const current = await activateVersion(
+        this.#env,
+        by,
+        app,
+        version,
+        expected
+      );
       await indexAppNow(this.#env, current.id);
       return current;
     });
