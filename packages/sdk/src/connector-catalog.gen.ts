@@ -115,6 +115,10 @@ export interface ConnectorCatalog {
       readonly input: { list: string; mailbox: string; task: string };
       readonly output: { listId: string; mailbox: string; task: { completedAt: { dateTime: string; timeZone: string } | null; createdAt: string | null; due: { dateTime: string; timeZone: string } | null; id: string; importance: string | null; lastModifiedAt: string | null; status: string | null; title: string | null } };
     };
+    readonly create: {
+      readonly input: { due?: string; list: string; mailbox: string; note?: string; title: string };
+      readonly output: { listId: string; mailbox: string; task: { completedAt: { dateTime: string; timeZone: string } | null; createdAt: string | null; due: { dateTime: string; timeZone: string } | null; id: string; importance: string | null; lastModifiedAt: string | null; status: string | null; title: string | null } };
+    };
     readonly lists: {
       readonly input: { mailbox: string; page?: string; top?: number };
       readonly output: { lists: Array<{ id: string; name: string | null; wellknownName: string | null }>; mailbox: string; nextPage: string | null };

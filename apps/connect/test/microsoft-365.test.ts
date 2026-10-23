@@ -1017,6 +1017,25 @@ describe("the Microsoft 365 connector's To Do tools", () => {
     ).toStrictEqual([taskIdOf(found)]);
   });
 
+  it("refuse a due day that doesn't exist before anything goes out", async () => {
+    const connection = await connected();
+    const sent = graph.sent.length;
+    await expect(
+      toolError(
+        call(
+          connection,
+          "todo.create",
+          { mailbox: ownMailbox(connection), ...followUp, due: "2026-02-30" },
+          {
+            resource: ownMailbox(connection),
+            idempotencyKey: "run-7:follow-up",
+          }
+        )
+      )
+    ).resolves.toBe("Invalid input: custom at due");
+    expect(graph.sent).toHaveLength(sent);
+  });
+
   it("read no task of a list the person shared after its answer was lost", async () => {
     const connection = await connected();
     graph.loseWriteAnswer();

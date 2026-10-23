@@ -282,6 +282,22 @@ const findByEffect = async (
   );
 };
 
+/** A day's form, `2026-10-30`. */
+const dayPattern = /^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])$/u;
+
+/**
+ * A day of the calendar, as `2026-10-30`. Its JSON Schema is a pattern,
+ * not `format: date`, which core can't check, so the tool stays bindable;
+ * that the day exists (no 30 February) is checked here.
+ */
+const daySchema = z
+  .string()
+  .regex(dayPattern)
+  .refine(
+    (day) => new Date(`${day}T00:00:00Z`).toISOString().startsWith(day),
+    "No such day"
+  );
+
 const createTask = defineTool({
   name: "todo.create",
   description:
@@ -294,7 +310,7 @@ const createTask = defineTool({
       .string()
       .max(32 * 1024)
       .optional(),
-    due: z.iso.date().optional(),
+    due: daySchema.optional(),
   }),
   output: createOutput,
   readOnly: false,
