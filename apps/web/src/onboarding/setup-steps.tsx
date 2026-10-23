@@ -9,15 +9,19 @@ import type {
   OnboardingPlaces,
   PlacesSuite,
 } from "@grasp-os/shared/document-places";
+import type { OnboardingHr } from "@grasp-os/shared/hr";
 import {
   onboardingPeopleMax,
   onboardingTeamsMax,
   planDays,
 } from "@grasp-os/shared/onboarding";
 import type {
+  Difference,
   InterviewLocale,
   LinkToSend,
+  OnboardingReview,
   OnboardingView,
+  SettleChoice,
   Roster,
   RosterInput,
 } from "@grasp-os/shared/onboarding";
@@ -75,11 +79,13 @@ import {
 } from "./connect-steps.tsx";
 import { DocumentDrop } from "./document-drop.tsx";
 import type { DocumentRow } from "./document-drop.tsx";
+import { HrLeads } from "./hr-leads.tsx";
 import { InterviewsProgress } from "./interviews-progress.tsx";
 import { LanguageChoice } from "./language-choice.tsx";
 import { PlacePicker } from "./place-picker.tsx";
 import type { PickedFile } from "./place-picker.tsx";
-import { MailItem } from "./review-parts.tsx";
+import { useReveal, useWayIn } from "./platform-reveal.tsx";
+import { DifferenceItem, MailItem } from "./review-parts.tsx";
 import { SendPlanForm, useSendWords } from "./send-plan-form.tsx";
 import { choiceHolds, choiceShown, replanOf } from "./send-plan.ts";
 import {
@@ -120,8 +126,10 @@ import { XlsxError, xlsxMost, xlsxRows } from "./xlsx.ts";
 // a step keeps goes to core: who works where, who leads which team and
 // which teams take part, the documents and the answers to their questions,
 // what the admin chose about what Grasp may connect (connect-steps.tsx),
-// and when the interviews run. What needs the admin settled, this browser
-// keeps.
+// and when the interviews run. What needs the admin: the steps people told
+// two ways and nobody could explain, settled in core, and letting Grasp's
+// mail through, which this browser keeps. At the end, the way into the
+// platform (platform-reveal.tsx).
 
 /** What the onboarding reads from core, and who is going through it. */
 export interface SetupData {
@@ -138,10 +146,14 @@ export interface SetupData {
   directory: OnboardingDirectory | null;
   /** The suites this deployment signs in with, whose directory and documents can be connected. */
   suites: DirectorySuite[];
+  /** The HR platform connected for the onboarding; null before one is. */
+  hr: OnboardingHr | null;
   /** Where the documents live, connected for the onboarding; null before it is. */
   places: OnboardingPlaces | null;
   /** Grasp's sending domain, which the admin lets through their mail filter. */
   sendingDomain: string;
+  /** The steps people told two ways and nobody could explain, and how much of the work is mapped. */
+  review: OnboardingReview;
   /** What the admin chose about what Grasp may connect. */
   choices: SetupChoices;
   /** The suites the company signs in with. */
@@ -239,7 +251,10 @@ const useHeadlines = ({
   const tools = formatList(named);
   const { progress } = data.view;
   const talked = (progress?.talked ?? 0) + (progress?.leadsTalked ?? 0);
-  const openCount = openItems(settled).length;
+  const { differences, mapped } = data.review;
+  const openCount =
+    openItems(settled).length +
+    differences.filter(({ holds }) => holds === null).length;
   // A sign-in to connect where the deployment signs in with one; else a staff list.
   const [onlySuite, ...otherSuites] = data.suites;
   const signIn = onlySuite === undefined ? "" : suiteNames[onlySuite];
@@ -311,10 +326,20 @@ const useHeadlines = ({
     },
     open: {
       title: t`Thank you, ${admin}`,
-      sentence: plural(talked, {
-        one: "I talked with # person.",
-        other: "I talked with # people.",
-      }),
+      sentence: [
+        plural(talked, {
+          one: "I talked with # person.",
+          other: "I talked with # people.",
+        }),
+        mapped === 0
+          ? ""
+          : plural(mapped, {
+              one: "One piece of work is mapped and ready for you.",
+              other: "# pieces of work are mapped and ready for you.",
+            }),
+      ]
+        .join(" ")
+        .trim(),
       voice: { tone: tones.glad, quick: true },
     },
   };
@@ -1307,6 +1332,8 @@ const ConfirmOrg = (props: StepProps & { roster: Roster }) => {
   const refresh = useRefresh();
   const [draft, setDraft] = useState<Roster>(props.roster);
   const [saved, setSaved] = useState(false);
+  // What Stephen says of the HR platform, once it was read or could not be.
+  const [fromHr, setFromHr] = useState<Answer>();
   const teams = draft.teams
     .map((team) => ({
       team,
@@ -1339,7 +1366,7 @@ const ConfirmOrg = (props: StepProps & { roster: Roster }) => {
         tone: tones.warm,
         quick: true,
       }
-    : undefined;
+    : fromHr;
   return (
     <>
       <Heading
@@ -1449,6 +1476,15 @@ const ConfirmOrg = (props: StepProps & { roster: Roster }) => {
           {t`This is right`}
         </Primary>
       )}
+      <HrLeads
+        hr={props.data.hr}
+        onAnswer={setFromHr}
+        onRoster={(roster) => {
+          setSaved(false);
+          setDraft(roster);
+        }}
+        roster={draft}
+      />
     </>
   );
 };
@@ -1457,7 +1493,8 @@ const ConfirmOrg = (props: StepProps & { roster: Roster }) => {
  * The organization as Stephen will interview it, on one screen: every
  * team with its head count, who leads it, and whether it takes part. A lead
  * is picked from the team's own people; a team that is off gets no links.
- * What the staff list guessed, the admin puts right here.
+ * What the staff list guessed, the admin puts right here, or takes from
+ * the HR platform (hr-leads.tsx) and checks.
  */
 const Leads = (props: StepProps) => {
   const { t } = useLingui();
@@ -1718,14 +1755,71 @@ const ListeningStep = (props: StepProps) => {
 };
 
 /**
- * What only the admin can settle, each with a way to settle it. Nothing
- * moves on by itself: they read what they settled, and go on once nothing
- * is open.
+ * The steps people told two ways and nobody could explain, each settled
+ * in core: both ways kept, or which one holds. `changing` are the settled
+ * ones being decided again.
+ */
+const Differences = ({
+  differences,
+  changing,
+  onChanging,
+}: {
+  differences: Difference[];
+  changing: string[];
+  onChanging: (changing: string[]) => void;
+}) => {
+  const { run, busy, failure } = useCoreAction();
+  const refresh = useRefresh();
+  const settle = async (work: string, holds: SettleChoice) => {
+    if (busy) {
+      return;
+    }
+    const settled = await run(async (session) => {
+      await session.onboarding.settle(work, holds);
+      await refresh();
+      return true;
+    });
+    if (settled === true) {
+      onChanging(changing.filter((each) => each !== work));
+    }
+  };
+  return (
+    <>
+      <ErrorText>{failure}</ErrorText>
+      {differences.map((difference) => (
+        <DifferenceItem
+          difference={difference}
+          key={difference.work}
+          onReopen={() => {
+            onChanging([...changing, difference.work]);
+          }}
+          onSettle={(holds) => {
+            void settle(difference.work, holds);
+          }}
+          open={changing.includes(difference.work)}
+        />
+      ))}
+    </>
+  );
+};
+
+/**
+ * What only the admin can settle, each with a way to settle it: the steps
+ * people told two ways and nobody could explain, settled in core, and
+ * letting Grasp's mail through. Nothing moves on by itself: they read what
+ * they settled, and go on once nothing is open.
  */
 const Review = (props: StepProps) => {
   const { t } = useLingui();
   const lines = useHeadlines(props).review;
-  const open = openItems(props.settled).length;
+  // Settled differences being decided again: open here until they are.
+  const [changing, setChanging] = useState<string[]>([]);
+  const { differences } = props.data.review;
+  const open =
+    openItems(props.settled).length +
+    differences.filter(
+      ({ work, holds }) => holds === null || changing.includes(work)
+    ).length;
   return (
     <>
       <Heading
@@ -1733,9 +1827,16 @@ const Review = (props: StepProps) => {
         title={lines.title}
         voice={lines.voice}
       />
-      <div className="w-full">
+      <section aria-label={t`What needs you`} className="w-full">
+        {differences.length === 0 ? null : (
+          <Differences
+            changing={changing}
+            differences={differences}
+            onChanging={setChanging}
+          />
+        )}
         <Mail {...props} />
-      </div>
+      </section>
       {open === 0 ? (
         <Primary
           onClick={() => {
@@ -1750,24 +1851,35 @@ const Review = (props: StepProps) => {
 };
 
 /**
- * The end of the onboarding: what Stephen heard, and that Grasp opens the
- * platform once it gives its go. Nothing to press; the admin hears from
- * Grasp.
+ * The end of the onboarding: who Stephen talked with and how much of the
+ * work is mapped. Until Grasp gives its go, that it opens the platform
+ * once it has checked everything with the admin; after, the way in.
+ * Nothing to press.
  */
 const Open = (props: StepProps) => {
   const { t } = useLingui();
   const lines = useHeadlines(props).open;
+  const { open } = props.data.gate;
+  const { explained } = useContext(Explained);
+  const { phase } = useReveal();
+  const building = t`Let me put it all together for you.`;
+  useWayIn({ open, explained, line: building });
   return (
     <>
       <Heading
+        answer={
+          phase === "idle"
+            ? undefined
+            : { text: building, cut: true, tone: tones.glad }
+        }
         sentence={lines.sentence}
         title={lines.title}
         voice={lines.voice}
       />
       <Callout
         text={
-          props.data.gate.open
-            ? t`Your platform is open. We’ll walk you through it.`
+          open
+            ? t`Your platform is open.`
             : t`We open your platform once we’ve checked everything with you. You’ll hear from us.`
         }
       />

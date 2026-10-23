@@ -13,20 +13,29 @@ import type {
   PlacesSuite,
   SharePlaceFileInput,
 } from "@grasp-os/shared/document-places";
+import type {
+  HrCredentials,
+  HrPeople,
+  HrPlatform,
+  OnboardingHr,
+} from "@grasp-os/shared/hr";
 import {
   linksTakenSchema,
   onboardingErrors,
   planSchema,
   programmeWeeks,
   rosterSchema,
+  settleSchema,
 } from "@grasp-os/shared/onboarding";
 import type {
   LinkToSend,
   OnboardingApi,
+  OnboardingReview,
   OnboardingView,
   PlanInput,
   Programme,
   RosterInput,
+  SettleChoice,
 } from "@grasp-os/shared/onboarding";
 import { setupChoicesSchema } from "@grasp-os/shared/onboarding-choices";
 import type {
@@ -63,6 +72,7 @@ import {
 } from "./document-places.ts";
 import { shareDocument } from "./documents.ts";
 import { gateView } from "./gate.ts";
+import { connectHr, onboardingHr, readOnboardingHr } from "./hr.ts";
 import { mondayOf } from "./rules.ts";
 import { onboardingStore } from "./store.ts";
 import { summaryOf } from "./summary.ts";
@@ -71,16 +81,19 @@ import { summaryOf } from "./summary.ts";
 // whose access is the admin role) gives the store who works where and the
 // plan, and reads back numbers per team, never anyone's words; and takes
 // everyone's own link, to send themselves as well (the threat model's L3:
-// a link opens on the first device only, whoever holds it). What only
-// Grasp's staff do is in staff-rpc.ts. The admin also shares documents,
+// a link opens on the first device only, whoever holds it). At the end it
+// settles the steps people told two ways and nobody could explain, never
+// told who said which. What only Grasp's staff do is in staff-rpc.ts. The
+// admin also shares documents,
 // each read at once (documents.ts). Everything that comes in is checked
 // against the shared schemas before the store sees it. Its programme
 // (when it began, and where it stands) is for everyone signed in, for the
 // dashboard: the plan's first week and the stage, and nothing of the plan
 // or the roster past them. Who works where can also come from the
 // organization's directory, connected here and read for the admin's
-// browser to make the roster of (directory.ts); and documents from where
-// they live, picked in the admin's browser (document-places.ts).
+// browser to make the roster of (directory.ts); documents from where
+// they live, picked in the admin's browser (document-places.ts); and who
+// leads which team from its HR platform, the same way (hr.ts).
 
 /** The admin's answer to a document's question. */
 const answerSchema = z.strictObject({
@@ -208,6 +221,31 @@ export class OnboardingRpc extends CoreRpcTarget implements OnboardingApi {
     );
   }
 
+  async hrPlatform(): Promise<OnboardingHr | null> {
+    return await withPerson(
+      this.#check,
+      async (person) => await onboardingHr(this.#env, person)
+    );
+  }
+
+  async connectHrPlatform(
+    platform: HrPlatform,
+    credentials: HrCredentials
+  ): Promise<OnboardingHr> {
+    return await withPerson(
+      this.#check,
+      async (person) =>
+        await connectHr(this.#env, person, platform, credentials)
+    );
+  }
+
+  async readHrPlatform(): Promise<HrPeople> {
+    return await withPerson(
+      this.#check,
+      async (person) => await readOnboardingHr(this.#env, person)
+    );
+  }
+
   async savePlan(plan: PlanInput): Promise<OnboardingView> {
     return await withPerson(this.#check, async (person) => {
       requireAdmin(person);
@@ -225,6 +263,33 @@ export class OnboardingRpc extends CoreRpcTarget implements OnboardingApi {
         throw onboardingErrors.create("onboarding.no_roster");
       }
       return await store.savePlan(parsed, actorOf(person));
+    });
+  }
+
+  async review(): Promise<OnboardingReview> {
+    return await withPerson(this.#check, async (person) => {
+      requireAdmin(person);
+      return await onboardingStore(this.#env).review();
+    });
+  }
+
+  async settle(work: string, holds: SettleChoice): Promise<OnboardingReview> {
+    return await withPerson(this.#check, async (person) => {
+      requireAdmin(person);
+      const parsed = onboardingErrors.parse(
+        "onboarding.invalid",
+        settleSchema,
+        { work, holds }
+      );
+      const review = await onboardingStore(this.#env).settle(
+        parsed.work,
+        parsed.holds,
+        actorOf(person)
+      );
+      if (review === null) {
+        throw onboardingErrors.create("onboarding.no_difference");
+      }
+      return review;
     });
   }
 

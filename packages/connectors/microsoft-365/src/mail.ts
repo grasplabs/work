@@ -33,7 +33,10 @@ import {
 // Mail, in one mailbox per call: a person's own or a shared one (such as
 // invoices@), always as `/users/{mailbox}`, so a call's capability binds
 // every request to its mailbox. Each result names its mailbox and the IDs
-// of the messages it came from.
+// of the messages it came from. Reading, filing and drafting stay in the
+// mailbox, but the mailbox may be a shared one or a colleague's the
+// connection may open (`Mail.ReadWrite.Shared`), so they reach `company`;
+// sending reaches whoever the message goes to (`others`).
 
 const users = `${v1}/users/{mailbox}`;
 
@@ -196,6 +199,7 @@ const listMessages = defineTool({
     nextPage: z.string().nullable(),
   }),
   readOnly: true,
+  reach: "company",
   resource: "mailbox",
   routes: [get("/messages"), get("/mailFolders/{folder}/messages")],
   run: async ({
@@ -433,6 +437,7 @@ const getMessage = defineTool({
     }),
   }),
   readOnly: true,
+  reach: "company",
   resource: "mailbox",
   routes: [get("/messages/{message}"), get("/messages/{message}/attachments")],
   run: async ({ mailbox, message: id, bodyType }) => {
@@ -489,6 +494,7 @@ const readAttachment = defineTool({
     content: z.string().nullable(),
   }),
   readOnly: true,
+  reach: "company",
   resource: "mailbox",
   routes: [get("/messages/{message}/attachments/{attachment}")],
   run: async ({ mailbox, message, attachment, as }) => {
@@ -539,6 +545,7 @@ const moveMessage = defineTool({
     folderId: z.string().nullable(),
   }),
   readOnly: false,
+  reach: "company",
   destructive: true,
   resource: "mailbox",
   routes: [get("/mailFolders/{destination}"), post("/messages/{message}/move")],
@@ -682,6 +689,7 @@ const sendMail = defineTool({
   input: draftInput,
   output: z.strictObject({ mailbox: z.string(), sent: z.literal(true) }),
   readOnly: false,
+  reach: "others",
   destructive: false,
   resource: "mailbox",
   // Recovery `none`: a sent email of unknown outcome stays unknown. Not
@@ -720,6 +728,7 @@ const createDraft = defineTool({
     webLink: z.string().nullable(),
   }),
   readOnly: false,
+  reach: "company",
   destructive: false,
   resource: "mailbox",
   routes: [get("/messages"), post("/messages")],
