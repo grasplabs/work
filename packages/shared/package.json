@@ -48,7 +48,6 @@
     "./audit": "./src/audit.ts",
     "./audit-log": "./src/audit-log.ts",
     "./brain": "./src/brain.ts",
-    "./brain-api": "./src/brain-api.ts",
     "./brain-records": "./src/brain-records.ts",
     "./capability": "./src/capability.ts",
     "./channel-accounts": "./src/channel-accounts.ts",
@@ -150,6 +149,7 @@
     "./workflows": "./src/workflows.ts"
   },
   "dependencies": {
+    "@grasp-os/brain": "workspace:*",
     "capnweb": "catalog:",
     "croner": "catalog:",
     "zod": "catalog:"

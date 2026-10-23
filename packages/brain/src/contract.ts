@@ -1,14 +1,13 @@
 import { z } from "zod";
 
-import { defineErrorFamily } from "./errors.ts";
+import { errorFamily } from "./errors.ts";
 import {
   brainReceiptIdSchema,
   collectionIdSchema,
   documentIdSchema,
-  identifierSchema,
+  idSchema,
   memoryIdSchema,
 } from "./ids.ts";
-import { searchQueryMaxLength } from "./knowledge.ts";
 
 // The Brain's general contract (GRA-294a; the Brain design's "Brain SDK and
 // API"): what callers ask of it and what it answers, the same for an App,
@@ -34,6 +33,13 @@ import { searchQueryMaxLength } from "./knowledge.ts";
 
 /** This contract's version: what a pack and a receipt say they follow. */
 export const brainContractVersion = 1;
+
+/**
+ * The longest a search or recall query may be: a question, not a
+ * document. Hosts that take queries for the Brain refuse a longer one up
+ * front (core's operation limits).
+ */
+export const searchQueryMaxLength = 500;
 
 /** A version number of a document or memory: 1 and up. */
 const revisionSchema = z.int().min(1);
@@ -148,7 +154,7 @@ export type AuthorityState = z.infer<typeof authorityStateSchema>;
 /** One piece of evidence in a pack: what it says, and where from. */
 export const memoryItemSchema = z.strictObject({
   /** Stable within the pack; a memory's ID once memory records exist. */
-  id: identifierSchema,
+  id: idSchema,
   /** The evidence's revision: its document's version, or its memory's. */
   revision: revisionSchema,
   kind: memoryKindSchema,
@@ -170,7 +176,7 @@ export type MemoryItem = z.infer<typeof memoryItemSchema>;
 
 /** Two items of the pack that disagree, unresolved. */
 export const memoryConflictSchema = z.strictObject({
-  itemIds: z.array(identifierSchema).min(2),
+  itemIds: z.array(idSchema).min(2),
   /** What they disagree on. */
   about: z.string(),
 });
@@ -205,7 +211,7 @@ export type Coverage = z.infer<typeof coverageSchema>;
  * would be its own operation.
  */
 export const memoryPackSchema = z.strictObject({
-  id: identifierSchema,
+  id: idSchema,
   contractVersion: z.literal(brainContractVersion),
   /** The retrieval policy that chose the evidence, such as `fulltext@2`. */
   retrievalPolicyVersion: z.string().min(1),
@@ -405,7 +411,7 @@ export const brainOperations = {
  * source text. Where existence is restricted, `brain.not_found` is the
  * answer whether the thing is missing or the caller can't see it.
  */
-export const brainErrors = defineErrorFamily({
+export const brainErrors = errorFamily({
   "brain.invalid": "That isn't a valid request to the Brain.",
   "brain.not_found":
     "There's no such memory, source or receipt, or you can't see it.",

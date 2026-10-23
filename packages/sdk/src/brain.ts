@@ -8,7 +8,7 @@ import {
   receiptsGetInputSchema,
   recallInputSchema,
   rememberInputSchema,
-} from "@grasp-os/shared/brain-api";
+} from "@grasp-os/brain/contract";
 import type {
   ChangeOptions,
   CommandOptions,
@@ -22,7 +22,7 @@ import type {
   ReceiptsGetInput,
   RecallInput,
   RememberInput,
-} from "@grasp-os/shared/brain-api";
+} from "@grasp-os/brain/contract";
 import type { z } from "zod";
 
 export type {
@@ -37,8 +37,8 @@ export type {
   MemoryRecord,
   RecallInput,
   RememberInput,
-} from "@grasp-os/shared/brain-api";
-export { brainErrors } from "@grasp-os/shared/brain-api";
+} from "@grasp-os/brain/contract";
+export { brainErrors } from "@grasp-os/brain/contract";
 
 // Typed calls to the Brain (the Brain design's "Brain SDK and API"):
 // `brain(env.HANDBOOK)` over a binding the host gave the caller. The
