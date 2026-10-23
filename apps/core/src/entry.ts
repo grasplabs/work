@@ -302,7 +302,7 @@ const route = async (
   const url = new URL(request.url);
   const { pathname } = url;
   if (pathname === "/health") {
-    // The version answering, where there is version metadata: the console's
+    // The version answering, where there is version metadata: the admin's
     // smoke check compares it with the version it just deployed. Behind the
     // router-secret check, as every route is.
     const version = env.CF_VERSION_METADATA?.id;
@@ -313,7 +313,7 @@ const route = async (
   if (pathname === "/rpc") {
     return await rpcResponse(request, env, requestId);
   }
-  // The console's alone: anyone else's request goes on as one to a path
+  // The admin's alone: anyone else's request goes on as one to a path
   // core has no route for (src/provision-probe.ts).
   if (pathname === provisionProbePath) {
     const probe = await provisionProbeResponse(request, env);
@@ -345,7 +345,7 @@ const route = async (
     return await handler(request, env, requestId);
   }
   if (pathname === labPath) {
-    return await labResponse(request, env, requestId);
+    return await labResponse(request, env, requestId, ctx);
   }
   const linked = await linkResponse(pathname, request, env, requestId, ctx);
   if (linked !== undefined) {

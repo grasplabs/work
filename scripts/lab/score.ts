@@ -12,7 +12,6 @@
 import path from "node:path";
 
 import type { InterviewFact } from "@grasp-os/shared/interview-links";
-import type { InterviewPhase } from "@grasp-os/shared/interview-turn";
 import type { StaffTranscript } from "@grasp-os/shared/onboarding-staff";
 
 import {
@@ -23,7 +22,8 @@ import {
   totalOf,
 } from "./card.ts";
 import type { Judged, RealCard, ScoreCard } from "./card.ts";
-import { inTurns, spentLine } from "./core.ts";
+import type { Transcript } from "./cases.ts";
+import { contextOf, inTurns, spentLine } from "./core.ts";
 import type { Core } from "./core.ts";
 import { hardTurns, judge, judgeTruth } from "./judge.ts";
 import { folderOf, keepJson } from "./kept.ts";
@@ -169,12 +169,14 @@ const table = (rows: string[][]): string => {
 const share = (count: number, of: number): number =>
   of === 0 ? 0 : count / of;
 
-/** One interview, scored. */
+/** One interview, scored, with what was said and written: what the check of the judge asks people about (check.ts). */
 interface Scored {
   person: PracticePerson;
   card: ScoreCard;
   judged: Judged;
   real: RealCard | null;
+  lines: Said[];
+  facts: InterviewFact[];
 }
 
 const scoreOne = async (
@@ -219,7 +221,7 @@ const scoreOne = async (
           ).length,
           left: played.left,
         };
-  return { person, card, judged, real };
+  return { person, card, judged, real, lines, facts };
 };
 
 /** Who played the people of a set of interviews, for the result. */
@@ -331,27 +333,6 @@ export const score = async (
   log(`\nKept as ${result.id}: ${file}`);
 };
 
-/** An interview kept as fixed input for the benches. */
-export interface Transcript {
-  id: string;
-  key: string;
-  employee: string;
-  locale: Practice["locale"];
-  by: "model" | "person";
-  lines: Said[];
-  /** How many lines there were when the read-back began; none when that is not known. */
-  readbackFrom: number | null;
-  /** The facts of their slice the person said, by id: judged once, when the transcript was kept. */
-  said: string[];
-  /** The notes Stephen had at the end, in the order he made them. */
-  notes: Pick<InterviewFact, "id" | "tag" | "text">[];
-  /** For each line of the person: how many notes he had before it, and the part he was in. None when a person played on the page. */
-  notesAt: number[] | null;
-  phaseAt: InterviewPhase[] | null;
-  /** The mark of the text that held this interview. */
-  stephen: string;
-}
-
 /**
  * Keeps the agreed interviews of a practice company as fixed input: those
  * a model played in git (`scripts/lab/fixtures/`), those a person played
@@ -384,6 +365,7 @@ export const keepTranscripts = async (
       employee: person.employee,
       locale: practice.locale,
       by,
+      who: await contextOf(core, person.id),
       lines,
       readbackFrom: played?.readbackFrom ?? null,
       said: judged.known.filter((each) => each.said).map((each) => each.id),

@@ -3,12 +3,12 @@ import { z } from "zod";
 import { identifierSchema } from "./ids.ts";
 
 /**
- * What the console sets as core's `PLATFORM_CHANGE` var on every version
+ * What the admin sets as core's `PLATFORM_CHANGE` var on every version
  * it deploys: who made the change, what it was (a release, a setting),
  * the release the version runs and when it was made. Core records it in
  * the deployment's audit log as `platform.updated`, once per version
  * (core's src/platform-updates.ts). A rollback, which makes no version,
- * the console sends in a notice instead (`platformUpdatePath`).
+ * the admin sends in a notice instead (`platformUpdatePath`).
  * Identifiers only, as every audit detail is.
  */
 export const platformChangeSchema = z.object({
@@ -23,13 +23,13 @@ export const platformChangeSchema = z.object({
   what: identifierSchema,
   /** The release the version runs, e.g. `r000123-abcdef0`. */
   release: identifierSchema,
-  /** When the console made the change. */
+  /** When the admin made the change. */
   at: z.iso.datetime(),
 });
 export type PlatformChange = z.infer<typeof platformChangeSchema>;
 
 /**
- * Where the console tells core of a platform update that made no new
+ * Where the admin tells core of a platform update that made no new
  * version, a rollback to one core has run before, which the cron would
  * never record again: core records it as `platform.updated` (core's
  * src/platform-updates.ts). Behind the router-secret check like every
@@ -57,12 +57,12 @@ export const platformUpdateMaxBytes = 4096;
  */
 export const platformUpdateMaxSkewMs = 5 * 60 * 1000;
 
-/** What the console tells core: the version now running, and the change. */
+/** What the admin tells core: the version now running, and the change. */
 export const platformUpdateNoticeSchema = z.object({
   /** The version of core all traffic goes to now. */
   versionId: identifierSchema,
   change: platformChangeSchema,
-  /** When the console sent it. */
+  /** When the admin sent it. */
   sentAt: z.iso.datetime(),
 });
 export type PlatformUpdateNotice = z.infer<typeof platformUpdateNoticeSchema>;

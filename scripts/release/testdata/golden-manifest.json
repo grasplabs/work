@@ -200,6 +200,11 @@
           "type": "durable_object_namespace"
         },
         {
+          "class_name": "ChatState",
+          "name": "CHAT_STATE",
+          "type": "durable_object_namespace"
+        },
+        {
           "name": "LOADER",
           "type": "worker_loader"
         },
@@ -336,6 +341,12 @@
             "Clock"
           ],
           "tag": "v8"
+        },
+        {
+          "new_sqlite_classes": [
+            "ChatState"
+          ],
+          "tag": "v9"
         }
       ],
       "keepVars": true,

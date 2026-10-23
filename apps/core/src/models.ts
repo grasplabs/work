@@ -295,7 +295,7 @@ const gatewayVar = (env: ModelsEnv): unknown =>
 
 /**
  * The deployment's model gateway config: deployment config, set by the
- * console as the `MODEL_GATEWAY` var, never an in-product setting, so an
+ * admin as the `MODEL_GATEWAY` var, never an in-product setting, so an
  * admin session can't allow a model the client didn't agree to; the
  * default config while none is set. One that doesn't parse counts as none
  * at all: `undefined`, and every call fails closed.
@@ -693,7 +693,7 @@ const gatewayHeaders = (call: Session): ProviderHeaders => ({
   // The gateway logs metadata, never prompts or answers.
   "cf-aig-collect-log-payload": "false",
   // Never an answer from the gateway's cache, whatever the gateway is set
-  // to (one the console adopted keeps its settings): a cached answer is
+  // to (one the admin adopted keeps its settings): a cached answer is
   // one person's, and would be served to another.
   "cf-aig-skip-cache": "true",
   // So the gateway's log can be searched by why and for what kind of

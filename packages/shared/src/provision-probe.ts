@@ -1,19 +1,19 @@
 import { z } from "zod";
 
-// What the console asks a client's core before it publishes the client's
+// What the admin asks a client's core before it publishes the client's
 // hostname (spec 40.2 step 7; core's src/provision-probe.ts): that core
 // runs as this client, that each of its private bindings answers, and that
-// its durable clocks are armed. Only the console may ask: the request is
+// its durable clocks are armed. Only the admin may ask: the request is
 // signed with the key both derive from the client's auth secret, as the
 // onboarding summary is (`onboarding-summary.ts`), and carries the router
 // secret, as every request to core does. The router adds that secret to
 // every public request it forwards, so it alone says nothing of who asks.
 //
 // The answer carries no secret, no resource id and nothing a client's
-// people entered: a version id, the client id the console deployed, and
+// people entered: a version id, the client id the admin deployed, and
 // binding and task names from core's own code, each with a yes or no.
 
-/** Where the console asks. Behind the router-secret check. */
+/** Where the admin asks. Behind the router-secret check. */
 export const provisionProbePath = "/platform/probe";
 
 /** The purpose the request's signing key is derived for (`hkdfHmacKey`). */
@@ -25,7 +25,7 @@ export const provisionProbeMaxSkewMs = 5 * 60 * 1000;
 /** The most bytes a request's body may have. */
 export const provisionProbeMaxBytes = 1024;
 
-/** What the console sends: when, so a request caught on its way can't be sent later. */
+/** What the admin sends: when, so a request caught on its way can't be sent later. */
 export const provisionProbeRequestSchema = z.strictObject({
   sentAt: z.iso.datetime(),
 });

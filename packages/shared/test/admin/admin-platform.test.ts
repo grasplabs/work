@@ -162,7 +162,7 @@ describe("the samples", () => {
       const signed =
         adminViewOf(org, org.seed, "2026-10-02").contract.status === "signed";
       expect(platform.status === "active").toBe(signed);
-      // Every release a sample runs or ran is one the console imported.
+      // Every release a sample runs or ran is one the admin imported.
       expect(
         platform.deploys.every((deploy) => releases.has(deploy.release))
       ).toBeTruthy();

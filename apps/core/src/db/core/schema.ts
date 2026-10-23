@@ -40,7 +40,7 @@ const timestamp = (name: string) => integer(name, { mode: "timestamp_ms" });
 
 /**
  * The oldest migration whose code still runs on this database's schema,
- * which each release declares (scripts/release): the console won't put
+ * which each release declares (scripts/release): the admin won't put
  * the code of a release whose newest migration is older on it, by a
  * rollback or a deploy.
  *
@@ -2306,7 +2306,7 @@ export const onboardingGate = sqliteTable("onboarding_gate", {
   openedAt: timestamp("opened_at"),
   /**
    * When the company's admin last ended Grasp's staff access: a staff
-   * window the console opened before then lets nobody in.
+   * window the admin opened before then lets nobody in.
    */
   staffEndedAt: timestamp("staff_ended_at"),
 });

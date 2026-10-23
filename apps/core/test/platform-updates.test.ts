@@ -20,7 +20,7 @@ import { runCron } from "./cron.ts";
 import { routed } from "./sign-in.ts";
 
 // Platform updates: the every-minute cron records each version of core it
-// hasn't seen running as `platform.updated`, with the change the console
+// hasn't seen running as `platform.updated`, with the change the admin
 // set on it, once per version ever, however many cron runs see it and
 // however often versions alternate.
 
@@ -140,7 +140,7 @@ describe("platform updates", () => {
 
     await expect(updatesOf(next)).resolves.toHaveLength(1);
     // A rollback to a version already recorded isn't recorded again here:
-    // the console tells core of it instead (a notice, below).
+    // the admin tells core of it instead (a notice, below).
     await expect(updatesOf(earlier)).resolves.toHaveLength(1);
   });
 
@@ -230,7 +230,7 @@ describe("platform updates", () => {
   });
 });
 
-/** A rollback's change, as the console sends it. */
+/** A rollback's change, as the admin sends it. */
 const rollback: PlatformChange = {
   by: "staff@grasp.test",
   what: "rollback",
@@ -244,7 +244,7 @@ const noticeBody = (
   sentAt = new Date().toISOString()
 ): string => JSON.stringify({ versionId, change: rollback, sentAt });
 
-/** `body`'s signature as the console makes it, with the key `secret` gives. */
+/** `body`'s signature as the admin makes it, with the key `secret` gives. */
 const signatureOf = async (
   body: string,
   secret = env.BETTER_AUTH_SECRET

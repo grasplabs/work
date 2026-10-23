@@ -76,6 +76,7 @@
     "./interview-story": "./src/interview-story.ts",
     "./interview-turn": "./src/interview-turn.ts",
     "./kickoff": "./src/kickoff.ts",
+    "./hr": "./src/hr.ts",
     "./http": "./src/http.ts",
     "./identifier": "./src/identifier.ts",
     "./ids": "./src/ids.ts",

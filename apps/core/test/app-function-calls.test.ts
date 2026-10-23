@@ -1420,10 +1420,10 @@ export default workflowTests(definition, [{ name: "runs", mocks: { kick: null },
       "workflows/retry.ts": `import { workflow, z } from "@grasp-os/sdk/workflow";
 
 export default workflow("retry", { params: {}, input: z.unknown() }, async (step, { env }) =>
-  await step.do("note", { description: "Note", sideEffect: true, input: null, timeout: "1 second", retries: { limit: 1, delay: "1 second" } }, async () => {
+  await step.do("note", { description: "Note", sideEffect: true, input: null, timeout: "6 seconds", retries: { limit: 1, delay: "1 second" } }, async () => {
     await env.APP.callFunction(${reference}, { text: "once" });
     // Every attempt runs out of time after its call: retried once.
-    await new Promise((resolve) => setTimeout(resolve, 3000));
+    await new Promise((resolve) => setTimeout(resolve, 10_000));
     return null;
   })
 );
@@ -1442,7 +1442,12 @@ export default workflowTests(definition, [{ name: "runs", mocks: { note: null },
       reviewed: { version: 1 },
     });
     const run = await builder.api.workflows.start(id, "retry");
-    await finished(run.id);
+    // Both attempts run out of their time: a timeout, not a throw, is what
+    // runs a side effect's step again. Each has six seconds, well past
+    // what reaching its call takes (the Apps' sandboxes loaded for it) on a
+    // runner busy with other tests; an attempt cut off before its call
+    // never makes it.
+    await finished(run.id, 60_000);
     const ended = await builder.api.workflows.status(run.id);
     expect({
       status: ended.status,

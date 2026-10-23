@@ -13,6 +13,29 @@ import { uploadNameSchema } from "./uploads.ts";
 // (core's chats-rpc.ts). Each chat belongs to the person who made it: only
 // they list, rename, delete, ask in or follow it.
 
+/**
+ * A chat app a person talks to the agent through, by the name of its Chat
+ * SDK adapter (`teams` first, any platform after): lowercase, so it reads
+ * the same in a chat, an audit event and the door it came through
+ * (`/api/channels/<platform>`). Never `web`, which is Grasp's own.
+ */
+export const chatPlatformSchema = z
+  .string()
+  .regex(/^[a-z][a-z0-9-]{0,31}$/u)
+  .refine((platform) => platform !== "web", {
+    message: "web is Grasp's own channel, not a chat platform",
+  });
+
+/**
+ * Which channel a chat came through: Grasp's own app (`web`), or a chat
+ * platform.
+ */
+export const chatChannelSchema = z.union([
+  z.literal("web"),
+  chatPlatformSchema,
+]);
+export type ChatChannel = z.infer<typeof chatChannelSchema>;
+
 /** A chat's title: what the person, or their first question, named it. */
 export const chatTitleSchema = z.string().trim().min(1).max(200);
 
