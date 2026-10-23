@@ -477,6 +477,20 @@ export const versionTree = async (
   return { tree: await sha256Hex(json), json };
 };
 
+/**
+ * The hash of `files`' code: their tree without AGENTS.md, which an App's
+ * agents write as they learn and nothing builds or runs. Two versions of
+ * the same code have the same hash, whatever their AGENTS.md: what the
+ * release vouches for in a built-in blueprint (app-blueprints.ts).
+ */
+export const codeIdentity = async (
+  files: ReadonlyMap<string, string>
+): Promise<string> => {
+  const code = new Map(files);
+  code.delete(appMemoryPath);
+  return await sha256Hex(canonicalJson(Object.fromEntries(code)));
+};
+
 /** Stores a tree under its hash, before any version row names it. */
 export const storeTree = async (
   env: Env,
@@ -814,6 +828,7 @@ export const commitFiles = async (
     version: (latest?.version ?? 0) + 1,
     parent: latest?.version ?? null,
     tree,
+    code: await codeIdentity(files),
     files: files.size,
     authorId: by.userId,
     message: text,
@@ -1009,6 +1024,7 @@ export const proposeDraft = async (
     version: (parent ?? 0) + 1,
     parent,
     tree,
+    code: await codeIdentity(files),
     files: files.size,
     authorId: by.userId,
     message: text,

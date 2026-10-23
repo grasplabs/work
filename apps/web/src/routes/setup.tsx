@@ -1,6 +1,7 @@
 import { oauthProviderSchema } from "@grasp-os/shared/connect";
 import { directorySuiteSchema } from "@grasp-os/shared/directory";
 import type { OnboardingDirectory } from "@grasp-os/shared/directory";
+import type { OnboardingPlaces } from "@grasp-os/shared/document-places";
 import type { LinkToSend, OnboardingView } from "@grasp-os/shared/onboarding";
 import { noChoices } from "@grasp-os/shared/onboarding-choices";
 import type { SetupChoices } from "@grasp-os/shared/onboarding-choices";
@@ -428,6 +429,7 @@ interface Loaded {
   /** The organization's name, as the message to the team is addressed; null when it has none. */
   company: string | null;
   directory: OnboardingDirectory | null;
+  places: OnboardingPlaces | null;
 }
 
 export const Route = createFileRoute("/setup")({
@@ -464,7 +466,7 @@ export const Route = createFileRoute("/setup")({
       const suite = oauthProviderSchema.safeParse(providerId);
       return suite.success ? [suite.data] : [];
     });
-    // The suites people sign in with here: their directories can be connected.
+    // The suites people sign in with here: their directories, and where their documents live, can be connected.
     const suites = directorySuites.filter((suite) =>
       signInOptions.some(({ providerId }) => providerId === suite)
     );
@@ -472,17 +474,35 @@ export const Route = createFileRoute("/setup")({
   },
   loader: async ({ context: { core } }) =>
     await loadFromCore(core, async (session): Promise<Loaded> => {
-      const [view, links, documents, gate, choices, company, directory] =
-        await Promise.all([
-          session.onboarding.view(),
-          session.onboarding.links(),
-          session.onboarding.documents(),
-          session.onboardingGate.view(),
-          session.onboarding.choices(),
-          companyOf(async () => await session.organization.get()),
-          session.onboarding.directory(),
-        ]);
-      return { view, links, documents, gate, choices, company, directory };
+      const [
+        view,
+        links,
+        documents,
+        gate,
+        choices,
+        company,
+        directory,
+        places,
+      ] = await Promise.all([
+        session.onboarding.view(),
+        session.onboarding.links(),
+        session.onboarding.documents(),
+        session.onboardingGate.view(),
+        session.onboarding.choices(),
+        companyOf(async () => await session.organization.get()),
+        session.onboarding.directory(),
+        session.onboarding.documentPlaces(),
+      ]);
+      return {
+        view,
+        links,
+        documents,
+        gate,
+        choices,
+        company,
+        directory,
+        places,
+      };
     }),
   component: Setup,
 });
