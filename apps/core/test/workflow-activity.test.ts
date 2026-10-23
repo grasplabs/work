@@ -4,6 +4,7 @@ import type { RunActivity } from "@grasp-os/shared/workflows";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import { verifiedCandidate } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { fullScan, planOf, recordedQueries } from "./query-plans.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
@@ -116,6 +117,7 @@ describe("runs over time", () => {
       { "workflows/approve.ts": "export default {};\n" },
       "Workflows"
     );
+    await verifiedCandidate(app, version);
     await env.DB.prepare("UPDATE apps SET current_version = ? WHERE id = ?")
       .bind(version, app)
       .run();
