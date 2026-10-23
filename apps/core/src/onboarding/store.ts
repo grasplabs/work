@@ -80,6 +80,7 @@ import {
   desc,
   eq,
   gt,
+  gte,
   inArray,
   isNotNull,
   isNull,
@@ -96,8 +97,12 @@ import { z } from "zod";
 
 import { drainObjectOutbox } from "../audit-outbox.ts";
 import { signInConfig } from "../auth/config.ts";
-import { keepOnboardingRecords } from "../brain-records.ts";
+import {
+  keepOnboardingRecords,
+  purgeOnboardingDrawings,
+} from "../brain-records.ts";
 import { organizations } from "../db/core/schema.ts";
+import { inList } from "../db/d1.ts";
 import { migrateOnWake } from "../db/migrate.ts";
 import migrations from "../db/onboarding/migrations/migrations.js";
 import {
@@ -201,6 +206,11 @@ import type { WorkBrief, WorkKnown } from "./work-drawing.ts";
 //   in only as the mail is sent. Each link goes by email on its day, and
 //   one reminder after `remindAfterWorkingDays`; the admin's update twice
 //   a week holds the admin's own numbers, never a name (mail-text.ts).
+// - A purged document living on in its reading (GRA-970): a Knowledge
+//   purge that reaches a shared document forgets its reading here, every
+//   drawing that may have had it for context, and those drawings in the
+//   brain (`forgetDocuments`). A drawing under way when it goes is thrown
+//   away as it ends, and drawn again.
 
 /** The one store of a deployment, by the name it is reached under. */
 const storeName = "onboarding";
@@ -264,6 +274,18 @@ const quietly = async (promise: Promise<unknown>): Promise<void> => {
     await promise;
   } catch (error) {
     log.error("mail.delivery_failed", errorFields(error));
+  }
+};
+
+/**
+ * Waits for `promise`, whatever became of it: for the brain's work after
+ * it, which runs all the same. Whoever started it heard how it went.
+ */
+const whatever = async (promise: Promise<unknown>): Promise<void> => {
+  try {
+    await promise;
+  } catch {
+    // Its caller was told.
   }
 };
 
@@ -638,6 +660,12 @@ export class Onboarding extends DurableObject<Env> {
   readonly #calls = new Map<string, { minute: string; count: number }>();
   /** The delivery of mail running now: the next waits for it. */
   #mailing: Promise<unknown> = Promise.resolve();
+  /**
+   * What the store is doing with the brain now, giving it a team or
+   * taking drawings out of it: the next waits for it, so neither loses
+   * track of what the other wrote.
+   */
+  #braining: Promise<unknown> = Promise.resolve();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -1465,6 +1493,10 @@ export class Onboarding extends DurableObject<Env> {
    * what it gave (`brain:<team>`), or null.
    */
   async intakeNext(now: number = Date.now()): Promise<string | null> {
+    return await this.#withBrain(async () => await this.#intakeDue(now));
+  }
+
+  async #intakeDue(now: number): Promise<string | null> {
     const drawing = new Set(
       this.#dueToDraw(now).map(({ id, work }) => work?.team ?? id)
     );
@@ -2602,6 +2634,112 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
+   * Forgets shared documents' readings for good, as a Knowledge purge
+   * reached them (documents.ts `documentReadingErasure`): each reading,
+   * its question and the admin's answer, so neither Stephen's context nor
+   * the brain's sources and tools (brain-rpc.ts) show them again; every
+   * drawing made since the first of them was shared, which may have had
+   * it for context, to be drawn again without it; and every drawing the
+   * brain was given since (`purgeOnboardingDrawings`), each of which is
+   * given again once drawn again. The brain first: when that fails,
+   * nothing here has changed, and running the purge again finds the
+   * readings still here. In the audit log by counts alone. Within
+   * `#withBrain`, so no intake lands between. Returns how many readings
+   * it forgot.
+   */
+  async forgetDocuments(
+    ids: readonly string[],
+    by: AuditActor
+  ): Promise<number> {
+    return await this.#withBrain(async () => {
+      const rows = this.#db
+        .select({ id: documents.id, at: documents.at })
+        .from(documents)
+        .where(inList(documents.id, ids))
+        .all();
+      const [first] = rows.map(({ at }) => at).toSorted();
+      if (first === undefined) {
+        return 0;
+      }
+      const purged = await purgeOnboardingDrawings(this.env, new Date(first));
+      const now = new Date().toISOString();
+      this.ctx.storage.transactionSync(() => {
+        this.#db
+          .delete(documents)
+          .where(
+            inList(
+              documents.id,
+              rows.map(({ id }) => id)
+            )
+          )
+          .run();
+        const forgotten = this.#db
+          .select({ work: drawnWorks.work })
+          .from(drawnWorks)
+          .where(gte(drawnWorks.at, first))
+          .all()
+          .map(({ work }) => work);
+        this.#db
+          .delete(drawnWorks)
+          .where(inList(drawnWorks.work, forgotten))
+          .run();
+        this.#db
+          .delete(drawFailures)
+          .where(
+            inList(
+              drawFailures.item,
+              forgotten.map((work) => `work:${work}`)
+            )
+          )
+          .run();
+        // A drawing given since but drawn before is given again as it is.
+        const given = this.#db
+          .selectDistinct({ team: brainSent.team })
+          .from(brainSent)
+          .where(inList(brainSent.record, purged))
+          .all();
+        this.#db
+          .delete(brainSent)
+          .where(inList(brainSent.record, purged))
+          .run();
+        for (const { team } of given) {
+          this.#brainDue(team, now);
+        }
+        this.#changed(by, "onboarding.document.purged", {
+          documents: rows.length,
+          drawings: forgotten.length,
+          records: purged.length,
+        });
+      });
+      this.#deliverAudit();
+      await this.#armDrawing();
+      return rows.length;
+    });
+  }
+
+  /** The shared documents' ids: what a drawing has for context as it starts. */
+  #sharedIds(): string[] {
+    return this.#db
+      .select({ id: documents.id })
+      .from(documents)
+      .all()
+      .map(({ id }) => id);
+  }
+
+  /** Whether any of `ids` (`#sharedIds`) was forgotten since (`forgetDocuments`). */
+  #anyForgotten(ids: readonly string[]): boolean {
+    if (ids.length === 0) {
+      return false;
+    }
+    const left = this.#db
+      .select({ id: documents.id })
+      .from(documents)
+      .where(inList(documents.id, ids))
+      .all();
+    return left.length < ids.length;
+  }
+
+  /**
    * What the documents give Stephen's context for an interview with
    * `team` (by its name): each document about it, or about no team in
    * particular, with what it leaves open and the admin's answer.
@@ -3662,6 +3800,7 @@ export class Onboarding extends DurableObject<Env> {
       return;
     }
     const { brief, lead } = briefed;
+    const shared = this.#sharedIds();
     const drawn = await drawWork(this.env, brief, (took) => {
       this.meter(took, at);
     });
@@ -3669,7 +3808,9 @@ export class Onboarding extends DurableObject<Env> {
       const gone = [...drawn.from, ...(lead === null ? [] : [lead])].some(
         (person) => this.#agreedAt(person) === null
       );
-      if (gone) {
+      // A document it had for context purged meanwhile: drawn again
+      // without it, as the work is still due.
+      if (gone || this.#anyForgotten(shared)) {
         return;
       }
       this.#keepDrawing(due, drawn, at);
@@ -3988,6 +4129,17 @@ export class Onboarding extends DurableObject<Env> {
         .run();
       this.#brainSettled(teamId, dueAt);
     });
+  }
+
+  /** Runs `work` with the brain once what it is doing with it now is done. */
+  async #withBrain<T>(work: () => Promise<T>): Promise<T> {
+    const before = this.#braining;
+    const run = (async () => {
+      await before;
+      return await work();
+    })();
+    this.#braining = whatever(run);
+    return await run;
   }
 
   /**

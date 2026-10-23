@@ -37,6 +37,7 @@ import type {
 } from "@grasp-os/shared/knowledge";
 
 import { gapAnswerErasure } from "../brain-gaps.ts";
+import { documentReadingErasure } from "../onboarding/documents.ts";
 import { CoreRpcTarget } from "../rpc-target.ts";
 import { withPerson } from "../session-check.ts";
 import type { SessionCheck } from "../session-check.ts";
@@ -58,9 +59,30 @@ import {
   remember,
 } from "./memories.ts";
 import { preparePurge, purge } from "./purge.ts";
+import type { OnErase } from "./purge.ts";
 import { recall } from "./recall.ts";
 import { search } from "./search.ts";
 import { catalog, follow, read } from "./tools.ts";
+
+/**
+ * What a purge reaches of core's own copies (purge.ts `OnErase`): the
+ * brain's gap answers, and the onboarding's readings of the documents
+ * shared in it, with what was drawn from them.
+ */
+const coreErasure = (env: Env): OnErase => {
+  const answers = gapAnswerErasure(env);
+  const readings = documentReadingErasure(env);
+  return {
+    count: async (holds) =>
+      (await answers.count(holds)) + (await readings.count(holds)),
+    rewrite: async (person, rewrite) => {
+      await answers.rewrite(person, rewrite);
+      await readings.rewrite(person, rewrite);
+    },
+    forgetActor: answers.forgetActor,
+    forgetDocuments: readings.forgetDocuments,
+  };
+};
 
 /**
  * Knowledge for a signed-in person over `/rpc`. Like the session API, it
@@ -228,12 +250,7 @@ export class KnowledgeRpc extends CoreRpcTarget implements KnowledgeApi {
     return await withPerson(
       this.#check,
       async (person) =>
-        await preparePurge(
-          this.#env,
-          person,
-          input,
-          gapAnswerErasure(this.#env)
-        )
+        await preparePurge(this.#env, person, input, coreErasure(this.#env))
     );
   }
 
@@ -241,13 +258,7 @@ export class KnowledgeRpc extends CoreRpcTarget implements KnowledgeApi {
     return await withPerson(
       this.#check,
       async (person) =>
-        await purge(
-          this.#env,
-          person,
-          input,
-          token,
-          gapAnswerErasure(this.#env)
-        )
+        await purge(this.#env, person, input, token, coreErasure(this.#env))
     );
   }
 }
