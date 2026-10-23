@@ -211,8 +211,8 @@ export const startConnection = async (
     throw roleErrors.create("role.forbidden");
   }
   const { provider, client, vault } = await ready(env, providerId);
-  // The landscape's and the directory's connections read the whole
-  // tenant: the organization's, never a person's own.
+  // The landscape's, the directory's and the documents' connections read
+  // for the organization: its own, never a person's.
   if (provider.sharedOnly === true && scope !== "shared") {
     throw connectionErrors.create("connection.invalid");
   }

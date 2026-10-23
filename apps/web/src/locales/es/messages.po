@@ -374,6 +374,10 @@ msgstr "{count, plural, one {# versión} other {# versiones}}"
 msgid "{count, plural, one {# wish} other {# wishes}}"
 msgstr "{count, plural, one {# deseo} other {# deseos}}"
 
+#: src/onboarding/place-picker.tsx
+msgid "{count, plural, one {Add # document} other {Add # documents}}"
+msgstr "{count, plural, one {Añadir # documento} other {Añadir # documentos}}"
+
 #: src/chat/sources.tsx
 msgid "{count, plural, one {Answers draw on # source} other {Answers draw on # sources}}"
 msgstr "{count, plural, one {Las respuestas se basan en # fuente} other {Las respuestas se basan en # fuentes}}"
@@ -2925,6 +2929,10 @@ msgstr "Surgió en {source}"
 msgid "Can {verbs} company data"
 msgstr "Puede {verbs} datos de la empresa"
 
+#: src/onboarding/place-picker.tsx
+msgid "Can’t be read"
+msgstr "No se puede leer"
+
 #: src/chat/brain-questions.tsx
 #: src/chat/project-dialog.tsx
 #: src/decision-confirmation.tsx
@@ -2933,6 +2941,7 @@ msgstr "Puede {verbs} datos de la empresa"
 #: src/inbox/item-detail.tsx
 #: src/knowledge/document.tsx
 #: src/link-confirmation.tsx
+#: src/onboarding/place-picker.tsx
 #: src/settings/invitations.tsx
 msgid "Cancel"
 msgstr "Cancelar"
@@ -3238,6 +3247,18 @@ msgstr "Elige una colección"
 msgid "Choose a file"
 msgstr "Elegir un archivo"
 
+#: src/onboarding/place-picker.tsx
+msgid "Choose documents"
+msgstr "Elegir documentos"
+
+#: src/onboarding/setup-steps.tsx
+msgid "Choose from Google Drive"
+msgstr "Elegir de Google Drive"
+
+#: src/onboarding/setup-steps.tsx
+msgid "Choose from SharePoint or OneDrive"
+msgstr "Elegir de SharePoint o OneDrive"
+
 #: src/interview/before.tsx
 msgid "Choose who you want to be interviewed by."
 msgstr "Elige quién quieres que te entreviste."
@@ -3282,6 +3303,7 @@ msgstr "Haz clic para abrir Uso"
 #: src/engines/store-changes.tsx
 #: src/knowledge/frame.tsx
 #: src/onboarding/interview-people.tsx
+#: src/onboarding/place-picker.tsx
 #: src/routes/_shell.index.tsx
 #: src/screens/app-panel.tsx
 msgid "Close"
@@ -3494,6 +3516,10 @@ msgstr "Conectar {name}"
 #: src/routes/_shell.settings.members.tsx
 msgid "Connect accounts of their own"
 msgstr "Conectar cuentas propias"
+
+#: src/onboarding/place-picker.tsx
+msgid "Connect again"
+msgstr "Volver a conectar"
 
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Connect another account"
@@ -4986,6 +5012,14 @@ msgstr "Con todo eso, averiguo dónde la IA le ahorra más tiempo a tu equipo."
 msgid "From before marks were kept"
 msgstr "De antes de que se guardaran las marcas"
 
+#: src/onboarding/place-picker.tsx
+msgid "From Google Drive. I read only the files you add."
+msgstr "De Google Drive. Solo leo los archivos que añadas."
+
+#: src/onboarding/place-picker.tsx
+msgid "From SharePoint or OneDrive. I read only the files you add."
+msgstr "De SharePoint o OneDrive. Solo leo los archivos que añadas."
+
 #: src/routes/_shell.onboarding.interviewers.tsx
 msgid "From the end of what someone said to the first sound of the answer, measured on their own page while they talk by voice: the middle answer of each day, and the one nine in ten were faster than."
 msgstr "Desde que alguien termina de hablar hasta el primer sonido de la respuesta, medido en su propia página mientras habla: la respuesta del medio de cada día, y aquella que nueve de cada diez superaron en rapidez."
@@ -5477,12 +5511,24 @@ msgid "I cannot find a microphone. Plug one in and try again."
 msgstr "No encuentro ningún micrófono. Conecta uno y vuelve a intentarlo."
 
 #: src/onboarding/setup-steps.tsx
+msgid "I could not connect where your documents live. Try again with an administrator’s account, or add them here."
+msgstr "No pude conectar el lugar donde están tus documentos. Vuelve a intentarlo con una cuenta de administrador o añádelos aquí."
+
+#: src/onboarding/setup-steps.tsx
 msgid "I could not find the columns. The first row should name them: name, email, team and job."
 msgstr "No encontré las columnas. La primera fila debe nombrarlas: nombre, correo, equipo y puesto."
 
 #: src/onboarding/setup-steps.tsx
 msgid "I could not keep it. Try again in a moment."
 msgstr "No pude guardarlo. Vuelve a intentarlo en un momento."
+
+#: src/onboarding/place-picker.tsx
+msgid "I could not open this just now. Try again in a moment."
+msgstr "No pude abrir esto ahora. Vuelve a intentarlo en un momento."
+
+#: src/onboarding/setup-steps.tsx
+msgid "I could not reach {signIn} just now. Try again in a moment, or add the documents here."
+msgstr "No pude llegar a {signIn} ahora. Vuelve a intentarlo en un momento o añade los documentos aquí."
 
 #: src/onboarding/setup-steps.tsx
 msgid "I could not reach {signIn} just now. Try again in a moment, or use a staff list."
@@ -6334,6 +6380,10 @@ msgstr "Volver a cargar la revisión"
 msgid "Load the server code again"
 msgstr "Volver a cargar el código del servidor"
 
+#: src/onboarding/place-picker.tsx
+msgid "Loading"
+msgstr "Cargando"
+
 #: src/activity/audit-log.tsx
 #: src/chat/thread.tsx
 #: src/frame/page-states.tsx
@@ -7071,6 +7121,10 @@ msgstr "Ya no se ejecuta {how}"
 msgid "No longer used: {removed}"
 msgstr "Ya no se usa: {removed}"
 
+#: src/onboarding/setup-steps.tsx
+msgid "No longer where it was"
+msgstr "Ya no está donde estaba"
+
 #: src/brain/brain-transcript.tsx
 msgid "No matches"
 msgstr "Sin coincidencias"
@@ -7530,6 +7584,10 @@ msgid "Not read: add it again"
 msgstr "Sin leer: añádelo de nuevo"
 
 #: src/onboarding/setup-steps.tsx
+msgid "Not read: connect it again"
+msgstr "Sin leer: vuelve a conectar"
+
+#: src/onboarding/setup-steps.tsx
 msgid "Not read: no connection"
 msgstr "Sin leer: sin conexión"
 
@@ -7630,6 +7688,10 @@ msgstr "Aún no hay nada conectado."
 msgid "Nothing dealt with yet. What you decide here shows up in this list, and in the audit trail."
 msgstr "Aún no hay nada resuelto. Lo que decidas aquí aparece en esta lista y en el registro de auditoría."
 
+#: src/onboarding/place-picker.tsx
+msgid "Nothing found"
+msgstr "No se encontró nada"
+
 #: src/landscape/faceted-filter.tsx
 #: src/landscape/filter-menu.tsx
 #: src/settings/filter-menu.tsx
@@ -7647,6 +7709,10 @@ msgstr "Aún no ha pasado nada."
 #: src/workflows/runs.tsx
 msgid "Nothing has run yet."
 msgstr "Todavía no se ha ejecutado nada."
+
+#: src/onboarding/place-picker.tsx
+msgid "Nothing here"
+msgstr "Aquí no hay nada"
 
 #: src/brain/brain-transcript.tsx
 msgid "Nothing here matches the filter."
@@ -8538,6 +8604,10 @@ msgstr "Tarea"
 #: src/onboarding/setup-steps.tsx
 msgid "pieces of work found"
 msgstr "trabajos encontrados"
+
+#: src/onboarding/place-picker.tsx
+msgid "Places"
+msgstr "Lugares"
 
 #: src/routes/_shell.settings.billing.tsx
 msgid "Plan"
@@ -9625,6 +9695,10 @@ msgstr "Programación detenida"
 msgid "Search"
 msgstr "Buscar"
 
+#: src/onboarding/place-picker.tsx
+msgid "Search {name}"
+msgstr "Buscar en {name}"
+
 #: src/landscape/filter-menu.tsx
 msgid "Search application"
 msgstr "Buscar aplicación"
@@ -9867,6 +9941,7 @@ msgstr "Mostrar menos"
 
 #: src/knowledge/nav.tsx
 #: src/onboarding/connect-steps.tsx
+#: src/onboarding/place-picker.tsx
 #: src/routes/_shell.settings.packages.index.tsx
 msgid "Show more"
 msgstr "Mostrar más"
@@ -11583,6 +11658,10 @@ msgstr "Este chat leyó datos restringidos: esto puede enviarlos fuera"
 #: src/routes/_shell.knowledge.$collection.tsx
 msgid "This collection has no files yet."
 msgstr "Esta colección aún no tiene archivos."
+
+#: src/onboarding/place-picker.tsx
+msgid "This connection needs to be connected again."
+msgstr "Esta conexión tiene que volver a conectarse."
 
 #: src/dashboard/report.ts
 msgid "This couldn't be read when the report was made."
