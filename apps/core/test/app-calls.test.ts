@@ -641,6 +641,29 @@ describe("calls between Apps", { timeout: 60_000 }, () => {
     });
   });
 
+  it("reach another App's export only while that App is published", async () => {
+    const { admin, clerk, invoicing, crm } = await setUp();
+    await grantCalls(admin, invoicing, crm, ["read"], "CRM");
+    const find = async () =>
+      answered(
+        await via(invoicing, clerk.userId, "CRM", "findCustomers", {
+          query: "BV",
+        })
+      );
+
+    const published = await find();
+    await admin.api.apps.unpublish(crm);
+    const draft = await find();
+    await admin.api.apps.archive(crm);
+    const archived = await find();
+
+    expect({ published, draft, archived }).toMatchObject({
+      published: { ok: [{ name: "Acme BV" }] },
+      draft: { refused: "app.not_published" },
+      archived: { refused: "app.archived" },
+    });
+  });
+
   it("allow only what the grant allows, and say why they refuse", async () => {
     const { admin, clerk, invoicing, crm } = await setUp();
     const permission = await grantCalls(admin, invoicing, crm, ["read"], "CRM");

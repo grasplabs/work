@@ -51,8 +51,21 @@ export const ordinaryData = async (app: string): Promise<void> => {
 };
 
 /**
- * Commits `files` as the App's next version and makes it current, with
- * the App's data classified as ordinary (`ordinaryData`).
+ * Marks the App published, as its builders would publish it
+ * (app-status.ts), whether or not a version of it is current: for tests
+ * of what people it is shared with do, which aren't about its status
+ * (app-status.test.ts is).
+ */
+export const published = async (app: string): Promise<void> => {
+  await env.DB.prepare("UPDATE apps SET status = 'published' WHERE id = ?")
+    .bind(app)
+    .run();
+};
+
+/**
+ * Commits `files` as the App's next version, makes it current and
+ * publishes the App, with its data classified as ordinary
+ * (`ordinaryData`).
  */
 export const release = async (
   builder: Builder,
@@ -65,6 +78,12 @@ export const release = async (
     "Release"
   );
   await builder.api.apps.versions.setCurrent(app, version);
+  // Published, for the people it is shared with: a draft is its builders'.
+  // Once is enough, and Grasp staff, who release too, never publish.
+  const { status } = await builder.api.apps.get(app);
+  if (status !== "published") {
+    await builder.api.apps.publish(app);
+  }
   await ordinaryData(app);
   return version;
 };

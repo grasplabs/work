@@ -20,6 +20,7 @@ import type { VerifiedObservations } from "./apps.ts";
 import {
   appFor,
   changeEntry,
+  editableApp,
   findVersion,
   makeCurrent,
   releaseRunnable,
@@ -198,7 +199,7 @@ export const freezeCandidate = async (
   /** Whether this is the one more try after an open candidate ended. */
   again = false
 ): Promise<CandidateRow> => {
-  await appFor(env, by, app, "builder");
+  await editableApp(env, by, app);
   const { tree } = await findVersion(env, app, version);
   const db = drizzle(env.DB);
   const id = crypto.randomUUID();
@@ -1068,7 +1069,8 @@ export const activateThroughCandidate = async (
   version: unknown,
   { expected, seal }: { expected?: unknown; seal?: Sealer } = {}
 ): Promise<App> => {
-  const found = await appFor(env, by, app, "builder");
+  // An archived App is read-only until a builder restores it (app-status.ts).
+  const found = await editableApp(env, by, app);
   const { version: number } = await findVersion(env, found.id, version);
   if (found.currentVersion === number) {
     return found;

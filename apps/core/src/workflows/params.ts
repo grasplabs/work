@@ -14,7 +14,7 @@ import type { ParamValue, WorkflowParam } from "@grasp-os/shared/workflows";
 import { and, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
-import { appFor, versionFiles } from "../apps.ts";
+import { appFor, editableApp, versionFiles } from "../apps.ts";
 import { auditedBatch, outboxedIfChanged } from "../audit-outbox.ts";
 import {
   apps,
@@ -54,14 +54,21 @@ interface CurrentWorkflow {
   files: AppFiles;
 }
 
-/** The workflow `workflow` of App `app`'s current version, for `by`. */
+/**
+ * The workflow `workflow` of App `app`'s current version, for `by`, one of
+ * its builders: to read, or with `change`, to change, which an archived
+ * App refuses (app-status.ts).
+ */
 const currentWorkflow = async (
   env: Env,
   by: Identity,
   app: unknown,
-  workflow: unknown
+  workflow: unknown,
+  change = false
 ): Promise<CurrentWorkflow> => {
-  const found = await appFor(env, by, app, "builder");
+  const found = change
+    ? await editableApp(env, by, app)
+    : await appFor(env, by, app, "builder");
   const workflowId = workflowErrors.parse(
     "workflow.invalid",
     workflowIdSchema,
@@ -160,6 +167,7 @@ const setDirectly = async (
             SELECT 1 FROM ${apps}
             WHERE ${apps.id} = ${current.app}
               AND ${apps.currentVersion} = ${current.version}
+              AND ${apps.status} != 'archived'
           )`
       )
       .onConflictDoUpdate({
@@ -205,6 +213,9 @@ const setDirectly = async (
     ),
   ]);
   if (set.length === 0) {
+    // Archived since it was let in (app-status.ts), or another version
+    // made current.
+    await editableApp(env, by, current.app);
     throw workflowErrors.create("workflow.param_conflict");
   }
 };
@@ -221,7 +232,7 @@ export const setParam = async (
   if (by.staff) {
     throw roleErrors.create("role.forbidden");
   }
-  const current = await currentWorkflow(env, by, app, workflow);
+  const current = await currentWorkflow(env, by, app, workflow, true);
   const param = current.params.find((declared) => declared.name === name);
   if (!param) {
     throw workflowErrors.create("workflow.param_not_found");
