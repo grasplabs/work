@@ -336,6 +336,31 @@ describe("a client's Teams bot secret", () => {
     });
   });
 
+  it("audits only one of two first sets made together as the first, and the other as replacing it", async () => {
+    const acme = await liveClient();
+    const set = async (by: typeof staff, value: string) =>
+      await setSealedSecret(env, by, {
+        clientId: acme.clientId,
+        name: "TEAMS_BOT_SECRET",
+        value,
+      });
+
+    await Promise.all([set(staff, botSecret()), set(setup, botSecret())]);
+
+    const events = await sealedEventsOf(acme.clientId);
+    const rows = await sealedRowsOf(acme.clientId);
+    expect({
+      details: events.map(({ detail }) => detail),
+      rows: rows.length,
+    }).toStrictEqual({
+      details: [
+        JSON.stringify({ replaced: false }),
+        JSON.stringify({ replaced: true }),
+      ],
+      rows: 1,
+    });
+  });
+
   it("refuses what isn't a secret, a client the admin doesn't have, and a store without CLIENT_KEY, keeping nothing and answering no value back", async () => {
     const acme = await liveClient();
     const spaced = `${botSecret()} ${botSecret()}`;

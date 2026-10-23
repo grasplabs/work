@@ -30,6 +30,7 @@ import {
   missingSignInApp,
 } from "../deploy/core-config.ts";
 import { sealSecret } from "../deploy/sealed-secrets.ts";
+import type { SealedSecretName } from "../deploy/sealed-secrets.ts";
 import { keyedHash } from "../deploy/upload.ts";
 import { currentRun, hasEnded } from "../runners.ts";
 
@@ -264,6 +265,91 @@ export const sealedSecretInputSchema = z.object({
  */
 const secretValuePattern = /^[\u0021-\u007E]{8,256}$/u;
 
+/** How often a set is tried while other sets of the same secret race it. */
+const sealAttempts = 3;
+
+/**
+ * Writes `sealed` as client `clientId`'s secret `name` for
+ * `setSealedSecret`, with its event, in one batch, only while what it
+ * read still holds: false when another set of the same secret got there
+ * in between, so the event's `replaced` would be wrong and it's read
+ * again. Refused (`client_busy`) while a rollback holds the client.
+ *
+ * A rollback checks, once it holds the client, that the versions it puts
+ * back carry the sealed secrets the admin holds (src/rollout/rollback.ts),
+ * then puts them back: one replaced in between would come back with them.
+ * So none is set while a rollback holds the client, in the same batch as
+ * the set, as a rollback that claims the client after it reads the new
+ * one.
+ */
+const writeSealed = async (
+  env: Env,
+  staff: Staff,
+  {
+    clientId,
+    name,
+    sealed,
+  }: { clientId: string; name: SealedSecretName; sealed: string }
+): Promise<boolean> => {
+  const db = adminDatabase(env.DB);
+  const ofThis = and(
+    eq(clientSealedSecrets.clientId, clientId),
+    eq(clientSealedSecrets.name, name)
+  );
+  const [[had], run] = await Promise.all([
+    db
+      .select({ sealed: clientSealedSecrets.sealed })
+      .from(clientSealedSecrets)
+      .where(ofThis),
+    currentRun(env, clientId),
+  ]);
+  const rollback = run?.kind === "rollback" ? run : null;
+  if (rollback !== null && !hasEnded(rollback.status)) {
+    throw new SettingsError(
+      "client_busy",
+      `${clientId} is being rolled back: set its ${name} once that's done`
+    );
+  }
+  const noRollback = sql`NOT EXISTS (SELECT 1 FROM ${clientRuns} WHERE ${clientRuns.clientId} = ${clientId} AND ${clientRuns.kind} = ${"rollback"}${
+    rollback === null
+      ? sql``
+      : sql` AND ${clientRuns.runId} <> ${rollback.runId}`
+  })`;
+  // Each seal has a fresh nonce, so what was read is told apart from any
+  // other set's.
+  const unchanged =
+    had === undefined
+      ? sql`NOT EXISTS (SELECT 1 FROM ${clientSealedSecrets} WHERE ${ofThis})`
+      : sql`EXISTS (SELECT 1 FROM ${clientSealedSecrets} WHERE ${ofThis} AND ${clientSealedSecrets.sealed} = ${had.sealed})`;
+  const now = new Date();
+  return await actIfChanged(
+    db,
+    staff,
+    db
+      .update(clients)
+      .set({ configChangedAt: now, updatedAt: now })
+      .where(and(eq(clients.id, clientId), noRollback, unchanged)),
+    {
+      action: "client.sealed_secret",
+      clientId,
+      target: name,
+      detail: { replaced: had !== undefined },
+    },
+    [
+      // Only once the event is recorded: `changes()` reads its insert.
+      db
+        .insert(clientSealedSecrets)
+        .select(
+          sql`SELECT ${clientId}, ${name}, ${sealed}, ${staff.email}, ${now.getTime()} WHERE changes() > 0`
+        )
+        .onConflictDoUpdate({
+          target: [clientSealedSecrets.clientId, clientSealedSecrets.name],
+          set: { sealed, setBy: staff.email, setAt: now },
+        }),
+    ]
+  );
+};
+
 /**
  * Seals `value` as client `clientId`'s secret `name`, such as its Teams
  * bot's (`TEAMS_BOT_SECRET`), as `staff`, replacing the one it had:
@@ -272,8 +358,9 @@ const secretValuePattern = /^[\u0021-\u007E]{8,256}$/u;
  * (`configChangedAt`) so its next deploy gives it to its connect. Refused
  * as `secret_invalid` for a value that isn't one, as
  * `store_secret_missing` while Secrets Store has no `CLIENT_KEY` to seal
- * it with, and as `client_busy` while a rollback holds the client. Every set is a change: a sealed value can't be compared
- * without opening it, and nothing here opens one.
+ * it with, and as `client_busy` while a rollback holds the client
+ * (`writeSealed`). Every set is a change: a sealed value can't be
+ * compared without opening it, and nothing here opens one.
  *
  * Nothing reads it back: what staff see of it is who set it and when
  * (src/clients/setup.ts), and only a deploy opens it
@@ -302,64 +389,14 @@ export const setSealedSecret = async (
     );
   }
   const sealed = await sealSecret(key, clientId, name, trimmed);
-  const [had] = await db
-    .select({ setAt: clientSealedSecrets.setAt })
-    .from(clientSealedSecrets)
-    .where(
-      and(
-        eq(clientSealedSecrets.clientId, clientId),
-        eq(clientSealedSecrets.name, name)
-      )
-    );
-  const busy = new SettingsError(
+  for (let attempt = 0; attempt < sealAttempts; attempt += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- again only after a race
+    if (await writeSealed(env, staff, { clientId, name, sealed })) {
+      return true;
+    }
+  }
+  throw new SettingsError(
     "client_busy",
-    `${clientId} is being rolled back: set its ${name} once that's done`
+    `${clientId}'s ${name} kept changing while it was set: try again`
   );
-  // A rollback checks, once it holds the client, that the versions it
-  // puts back carry the sealed secrets the admin holds
-  // (src/rollout/rollback.ts), then puts them back: one replaced in
-  // between would come back with them. So none is set while a rollback
-  // holds the client, in the same batch as the set, as a rollback that
-  // claims the client after it reads the new one.
-  const run = await currentRun(env, clientId);
-  const rollback = run?.kind === "rollback" ? run : null;
-  if (rollback !== null && !hasEnded(rollback.status)) {
-    throw busy;
-  }
-  const noRollback = sql`NOT EXISTS (SELECT 1 FROM ${clientRuns} WHERE ${clientRuns.clientId} = ${clientId} AND ${clientRuns.kind} = ${"rollback"}${
-    rollback === null
-      ? sql``
-      : sql` AND ${clientRuns.runId} <> ${rollback.runId}`
-  })`;
-  const now = new Date();
-  const set = await actIfChanged(
-    db,
-    staff,
-    db
-      .update(clients)
-      .set({ configChangedAt: now, updatedAt: now })
-      .where(and(eq(clients.id, clientId), noRollback)),
-    {
-      action: "client.sealed_secret",
-      clientId,
-      target: name,
-      detail: { replaced: had !== undefined },
-    },
-    [
-      // Only once the event is recorded: `changes()` reads its insert.
-      db
-        .insert(clientSealedSecrets)
-        .select(
-          sql`SELECT ${clientId}, ${name}, ${sealed}, ${staff.email}, ${now.getTime()} WHERE changes() > 0`
-        )
-        .onConflictDoUpdate({
-          target: [clientSealedSecrets.clientId, clientSealedSecrets.name],
-          set: { sealed, setBy: staff.email, setAt: now },
-        }),
-    ]
-  );
-  if (!set) {
-    throw busy;
-  }
-  return true;
 };
