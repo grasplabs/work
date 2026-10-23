@@ -296,12 +296,18 @@ export interface ConnectionSummary {
   /** ISO 8601. */
   createdAt: string;
   /**
-   * A Composio connection's tools on offer, by name: those the admin who
-   * connected it consented to that Grasp classed (a tool nobody classed
-   * is never offered). Absent for a native connection, and from a connect
-   * that predates it.
+   * A Composio connection's allowed tools, by name, as the admin who
+   * connected it consented to them. Absent for a native connection, and
+   * from a connect that predates it.
    */
   tools?: string[];
+  /**
+   * Those of `tools` on offer: the ones Grasp classed (connect's
+   * composio-classes.ts). A tool nobody classed is never offered or run,
+   * whatever the admin allowed. Absent for a native connection, and from
+   * a connect that predates it, which runs every allowed tool.
+   */
+  offeredTools?: string[];
 }
 
 /**

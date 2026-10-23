@@ -147,18 +147,23 @@ describe("a Composio tool Grasp didn't class", () => {
       )
     );
     const listed = await exports.default.listConnections(someone());
+    const connection = listed.find(({ id }) => id === connectionId);
+    const classed = [
+      "HUBSPOT_LIST_CONTACTS",
+      "HUBSPOT_GET_CONTACT",
+      "HUBSPOT_CREATE_CONTACT",
+    ];
     expect({
       ends,
-      offered: listed.find(({ id }) => id === connectionId)?.tools,
+      allowed: connection?.tools,
+      offered: connection?.offeredTools,
       requests: composio.state.mcp.requests - requestsBefore,
       ran: composio.state.mcp.ran,
     }).toStrictEqual({
       ends: ["connect.action_not_found", "connect.action_not_found"],
-      offered: [
-        "HUBSPOT_LIST_CONTACTS",
-        "HUBSPOT_GET_CONTACT",
-        "HUBSPOT_CREATE_CONTACT",
-      ],
+      // The admin's consent stays as they gave it.
+      allowed: [...classed, "HUBSPOT_UNCLASSED", "HUBSPOT_REFUSED"],
+      offered: classed,
       requests: 0,
       ran: [],
     });

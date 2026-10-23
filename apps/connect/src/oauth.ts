@@ -895,7 +895,10 @@ export const listConnections = async (
     connectedBy: row.connectedBy,
     accountName: row.accountName,
     createdAt: row.createdAt.toISOString(),
-    ...(row.serverKind === "composio" && { tools: offeredToolNames(row) }),
+    ...(row.serverKind === "composio" && {
+      tools: allowedToolNames(row),
+      offeredTools: offeredToolNames(row),
+    }),
   }));
 };
 
