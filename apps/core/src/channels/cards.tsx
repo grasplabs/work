@@ -178,6 +178,9 @@ export const answerCard = ({
     left: outsideBytes - (outsideBytes / 2 - sourcesRoom.left),
   };
   const answer = fit(text, Number.POSITIVE_INFINITY, room);
+  // Grasp has what the card leaves out: the rest of the answer, or the
+  // sources past the first few.
+  const whole = answer.whole && sources.length <= maxSources;
   const card = (
     <Card>
       <CardText>{answer.text}</CardText>
@@ -196,7 +199,7 @@ export const answerCard = ({
           )}
         </Section>
       )}
-      {answer.whole ? null : (
+      {whole ? null : (
         <Actions>
           <LinkButton url={ownLink(chatUrl)}>
             {say("openInGrasp", locale)}

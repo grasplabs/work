@@ -661,7 +661,11 @@ const words: Record<ChannelLocale, ReadonlySet<string>> = {
   ]),
 };
 
-/** Letters only one of the languages writes: each counts as much as a word. */
+/**
+ * Letters only one of the languages writes. They only settle a tie between
+ * languages the words already point to: names carry them too ("Jörg
+ * Müller", "Dijkstra") and must not turn an English message German.
+ */
 const letters: Partial<Record<ChannelLocale, RegExp>> = {
   de: /[ßäöü]/gu,
   es: /[ñ¿¡]/gu,
@@ -700,14 +704,21 @@ export const languageOf = (
       }
     }
   }
-  for (const locale of channelLocales) {
-    const pattern = letters[locale];
-    if (pattern !== undefined) {
-      count(locale, lower.match(pattern)?.length ?? 0);
-    }
+  const top = Math.max(...scores.values());
+  if (top === 0) {
+    return fallback;
   }
-  const ranked = [...scores].toSorted(([, a], [, b]) => b - a);
-  const [first, second] = ranked;
+  const tied = channelLocales.filter((locale) => scores.get(locale) === top);
+  if (tied.length === 1) {
+    return tied[0] ?? fallback;
+  }
+  const byLetters = tied
+    .map((locale): [ChannelLocale, number] => [
+      locale,
+      lower.match(letters[locale] ?? /$^/u)?.length ?? 0,
+    ])
+    .toSorted(([, a], [, b]) => b - a);
+  const [first, second] = byLetters;
   if (first === undefined || first[1] === 0 || first[1] === second?.[1]) {
     return fallback;
   }

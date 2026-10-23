@@ -455,6 +455,25 @@ describe("Stephen's cards in Teams", () => {
     });
   });
 
+  it("links to the answer in Grasp when it lists only some of its sources", () => {
+    const { texts, actions } = inTeams(
+      answerCard({
+        locale: "en",
+        text: "Here is the answer.",
+        sources: Array.from({ length: maxSources + 1 }, (_, index) => ({
+          title: `Doc ${index + 1}`,
+          url: `${grasp}/knowledge/${index}`,
+        })),
+        chatUrl: `${grasp}/chat/1`,
+      })
+    );
+
+    expect({
+      listed: texts.filter((text) => text.startsWith("[")).length,
+      links: actions.map(({ url }) => url),
+    }).toStrictEqual({ listed: maxSources, links: [`${grasp}/chat/1`] });
+  });
+
   it("presses only what a card of held writes carries", () => {
     expect({
       none: pressOf(),
@@ -539,6 +558,9 @@ describe("the language of a message", () => {
       ["Wie geht es dir?", "de"],
       ["Summarize AI news", "en"],
       ["Meeting Mon 3pm", "en"],
+      // Letters in names don't outweigh the words around them.
+      ["Show me the report from Jörg Müller", "en"],
+      ["Send the Dijkstra file to Jan", "en"],
     ];
 
     expect(cases.map(([text]) => [text, languageOf(text, "en")])).toStrictEqual(
@@ -548,9 +570,16 @@ describe("the language of a message", () => {
 
   it("stays what it was when the words don't tell", () => {
     expect(
-      ["👍", "ok", "Thanks!", "SharePoint", "Q3", "", "Jan de Vries"].map(
-        (text) => languageOf(text, "nl")
-      )
-    ).toStrictEqual(["nl", "nl", "nl", "nl", "nl", "nl", "nl"]);
+      [
+        "👍",
+        "ok",
+        "Thanks!",
+        "SharePoint",
+        "Q3",
+        "",
+        "Jan de Vries",
+        "Jörg Müller",
+      ].map((text) => languageOf(text, "nl"))
+    ).toStrictEqual(["nl", "nl", "nl", "nl", "nl", "nl", "nl", "nl"]);
   });
 });
