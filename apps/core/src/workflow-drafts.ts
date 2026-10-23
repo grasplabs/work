@@ -457,7 +457,9 @@ export const editWorkflowDraft = async (
   env: Env,
   by: Acting,
   id: unknown,
-  input: unknown
+  input: unknown,
+  /** Admits the write, right before it commits: throws to write nothing. */
+  admit?: () => Promise<void>
 ): Promise<WorkflowDraft> => {
   requireNotStaff(by);
   const workflow = await requireWorkflowRole(env, by, id, "builder");
@@ -481,6 +483,8 @@ export const editWorkflowDraft = async (
   const editedAt = new Date();
   const db = drizzle(env.DB);
   let checkpoint: DraftRow | undefined;
+  // After its modules were built and its text checked.
+  await admit?.();
   try {
     const [, checkpoints] = await auditedBatch(env, db, [
       db.insert(workflowResourceDrafts).values({
@@ -613,7 +617,9 @@ export const publishWorkflowDraft = async (
   env: Env,
   by: Acting,
   id: unknown,
-  input: unknown
+  input: unknown,
+  /** Admits the write, right before the version commits (`publishWorkflowVersion`). */
+  admit?: () => Promise<void>
 ): Promise<WorkflowResourceVersion> => {
   const workflow = await requireWorkflowRole(env, by, id, "builder");
   const { revision, basedOn } = workflowResourceErrors.parse(
@@ -632,9 +638,16 @@ export const publishWorkflowDraft = async (
     throw workflowResourceErrors.create("workflow.draft_unchecked");
   }
   // With its modules, which publication builds and checks again.
-  return await publishWorkflowVersion(env, by, workflow.id, {
-    definition: latest.source,
-    basedOn,
-    ...(Object.keys(modules).length === 0 ? {} : { modules }),
-  });
+  return await publishWorkflowVersion(
+    env,
+    by,
+    workflow.id,
+    {
+      definition: latest.source,
+      basedOn,
+      ...(Object.keys(modules).length === 0 ? {} : { modules }),
+    },
+    undefined,
+    admit
+  );
 };

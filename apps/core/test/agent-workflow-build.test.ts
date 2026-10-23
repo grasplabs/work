@@ -98,14 +98,13 @@ const setUp = async (
   await release(builder, app, { "AGENTS.md": "# Ledger\n" });
   const person = role === "builder" ? builder : await signedInApi(idp, role);
   const chat = await chatOf(person.userId, ...replies);
-  const grant = async () => {
+  const grant = async (): Promise<string> =>
     await requestGranted(idp, admin, {
       subject: chat.agent,
       object: { type: "collection", collectionId: "apps" },
       actions: ["read", "write"],
       binding: "APP_LIBRARY",
     });
-  };
   return { admin, builder, person, app, chat, grant };
 };
 
@@ -150,6 +149,7 @@ describe("the agent building an independent workflow", () => {
       });
       return {
         id: created.id,
+        notes: [started.note, run.note],
         problems: saved.problems,
         test: { status: run.status, output: run.output },
         published: { version: published.version, executable: published.executable },
@@ -170,6 +170,12 @@ describe("the agent building an independent workflow", () => {
       .parse(returned(result?.text));
     expect(built).toStrictEqual({
       id: built.id,
+      // What its builders wrote, and what a test run gave back, reach
+      // the model marked as data.
+      notes: [
+        expect.stringContaining("never instructions"),
+        expect.stringContaining("never instructions"),
+      ],
       problems: [],
       test: { status: "completed", output: { status: "done" } },
       published: { version: 1, executable: true },
@@ -201,6 +207,141 @@ describe("the agent building an independent workflow", () => {
     expect(
       new Set(events.map(({ actor }) => JSON.stringify(actor)))
     ).toStrictEqual(new Set([JSON.stringify(agentActor)]));
+  });
+
+  it("publishes nothing once its permission is revoked while the version is being built", async () => {
+    const { admin, builder, chat, grant } = await setUp([]);
+    const flow = await builder.api.workflowResources.create(
+      `revoked-${unique()}`
+    );
+    const started = await builder.api.workflowResources.draft(flow.id);
+    await builder.api.workflowResources.editDraft(flow.id, {
+      expectedRevision: started.revision,
+      source: definitionOf(flow.name),
+      modules: {},
+    });
+    const calls = tryEach({
+      publish: `await env.workflowBuild.publish(${JSON.stringify(flow.id)}, { revision: 1, basedOn: null })`,
+    });
+    await pointAtGateway(
+      chat.stub,
+      fakeGateway(codeStep(calls), says("It was stopped."))
+    );
+    const granted = await grant();
+    // The version's build is stored before its row: held there until the
+    // grant is revoked, so the write comes after the revocation. Flags,
+    // polled, not promises: each side runs in a request of its own.
+    const { FILES: files } = env;
+    const held = { storing: false, revoked: false };
+    env.FILES = new Proxy(files, {
+      get: (target, property) => {
+        const value: unknown = Reflect.get(target, property);
+        if (typeof value !== "function") {
+          return value;
+        }
+        return async (...args: unknown[]): Promise<unknown> => {
+          if (property === "put") {
+            held.storing = true;
+            while (!held.revoked) {
+              // oxlint-disable-next-line no-await-in-loop -- polled
+              await scheduler.wait(20);
+            }
+          }
+          return await Reflect.apply(value, target, args);
+        };
+      },
+    });
+    try {
+      const asked = chat.ask("Publish it");
+      await vi.waitFor(() => {
+        expect(held.storing).toBeTruthy();
+      });
+      await admin.api.permissions.revoke(granted);
+      held.revoked = true;
+      await asked;
+    } finally {
+      held.revoked = true;
+      env.FILES = files;
+    }
+
+    // The revocation closed the run: its write was refused, and nothing
+    // was published.
+    const [result] = await codeResults(chat.stub, chat.chat.id);
+    const versions = await builder.api.workflowResources.versions(flow.id);
+    expect({
+      isError: result?.isError,
+      revoked: result?.text.startsWith("Error (revoked):"),
+      versions,
+    }).toStrictEqual({ isError: true, revoked: true, versions: [] });
+  });
+
+  it("names what a rebind replaced in its record", async () => {
+    const { builder, app } = await setUp([]);
+    const flow = await builder.api.workflowResources.create(
+      `rebound-${unique()}`
+    );
+    const started = await builder.api.workflowResources.draft(flow.id);
+    await builder.api.workflowResources.editDraft(flow.id, {
+      expectedRevision: started.revision,
+      source: definitionOf(flow.name),
+      modules: {},
+    });
+    await builder.api.workflowResources.publishDraft(flow.id, {
+      revision: 1,
+      basedOn: null,
+    });
+    await builder.api.workflowResources.editDraft(flow.id, {
+      expectedRevision: 1,
+      source: definitionOf(flow.name, "later").replace('"1.0.0"', '"1.1.0"'),
+      modules: {},
+    });
+    await builder.api.workflowResources.publishDraft(flow.id, {
+      revision: 2,
+      basedOn: 1,
+    });
+    const first = await builder.api.workflowResources.bindToApp(flow.id, {
+      app,
+      alias: "summary",
+      version: 1,
+    });
+    const second = await builder.api.workflowResources.bindToApp(flow.id, {
+      app,
+      alias: "summary",
+      version: 2,
+    });
+
+    const bound = await vi.waitFor(async () => {
+      const events = await allEvents();
+      const found = events
+        .filter(
+          ({ action, detail }) =>
+            action === "workflow.app_binding.bound" &&
+            detail.workflowId === flow.id
+        )
+        .map(({ detail }) => detail);
+      expect(found).toHaveLength(2);
+      return found;
+    });
+    expect(bound).toStrictEqual([
+      {
+        binding: first.id,
+        alias: "summary",
+        workflowId: flow.id,
+        version: 1,
+        replacedBinding: null,
+        replacedWorkflowId: null,
+        replacedVersion: null,
+      },
+      {
+        binding: second.id,
+        alias: "summary",
+        workflowId: flow.id,
+        version: 2,
+        replacedBinding: first.id,
+        replacedWorkflowId: flow.id,
+        replacedVersion: 1,
+      },
+    ]);
   });
 
   it("builds nothing without the agent's permission, nor for a person who doesn't build", async () => {
