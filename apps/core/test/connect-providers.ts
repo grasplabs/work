@@ -34,6 +34,19 @@ export const landscapeClient = clients.microsoftLandscape;
  */
 export const landscapeControlUrl = "https://graph-control.test/landscape";
 
+/** Grasp's Entra app for the directory's connection, as set on connect. */
+export const directoryClient = clients.microsoftDirectory;
+
+/**
+ * Where tests set who is in the tenant's directory, for the directory's
+ * reads: POST `{ users }` as Graph has them (`/users` with `$select` and
+ * `$expand=manager`), a hundred to a page.
+ */
+export const directoryControlUrl = "https://graph-control.test/directory";
+
+/** What the directory's Entra app is granted, as Entra's token answer says. */
+export const directoryGranted = "openid profile email User.Read User.Read.All";
+
 /** What the landscape's Entra app is granted, as Entra's token answer says. */
 export const landscapeGranted =
   "openid profile email Application.Read.All DelegatedPermissionGrant.Read.All User.Read User.ReadBasic.All";
@@ -119,6 +132,19 @@ const losesAnswer = (mailbox) => {
 };
 const npm = (${npmRegistryFake.toString()})();
 const landscape = { grants: [], apps: [], people: [], throttle: null, failing: false };
+const directory = { users: [] };
+/** Graph's users, as the directory's reads ask for them, a page at a time. */
+const directoryGraph = (url) => {
+  const top = Number(url.searchParams.get("$top") ?? "100");
+  const from = Number(url.searchParams.get("$skiptoken") ?? "0");
+  const next = from + top;
+  return Response.json({
+    value: directory.users.slice(from, next),
+    ...(next < directory.users.length
+      ? { "@odata.nextLink": "https://graph.microsoft.com/v1.0/users?$top=" + top + "&$skiptoken=" + next }
+      : {}),
+  });
+};
 const landscapeIds = (url) =>
   [...(url.searchParams.get("$filter") ?? "").matchAll(/'([^']*)'/gu)].map((match) => match[1]);
 /** Graph's grants of the tenant, a page at a time, with their apps and people. */
@@ -168,6 +194,13 @@ export default {
     if (request.method === "POST" && url.href === ${JSON.stringify(landscapeControlUrl)}) {
       Object.assign(landscape, await request.json());
       return new Response(null, { status: 204 });
+    }
+    if (request.method === "POST" && url.href === ${JSON.stringify(directoryControlUrl)}) {
+      Object.assign(directory, await request.json());
+      return new Response(null, { status: 204 });
+    }
+    if (url.hostname === "graph.microsoft.com" && request.method === "GET" && url.pathname === "/v1.0/users" && url.searchParams.has("$expand")) {
+      return directoryGraph(url);
     }
     if (url.hostname === "graph.microsoft.com" && request.method === "GET") {
       const answered = landscapeGraph(url);
@@ -284,9 +317,14 @@ export default {
     const digest = base64Url(
       new Uint8Array(await crypto.subtle.digest("SHA-256", verifier))
     );
-    // The landscape's own app, or the one for every other connection.
+    // The landscape's or the directory's own app, or the one for every other connection.
     const forLandscape = form.get("client_id") === ${JSON.stringify(landscapeClient.id)};
-    const client = forLandscape ? ${JSON.stringify(landscapeClient)} : ${JSON.stringify(connectClient)};
+    const forDirectory = form.get("client_id") === ${JSON.stringify(directoryClient.id)};
+    const client = forLandscape
+      ? ${JSON.stringify(landscapeClient)}
+      : forDirectory
+        ? ${JSON.stringify(directoryClient)}
+        : ${JSON.stringify(connectClient)};
     if (form.get("client_secret") !== client.secret || digest !== challenge) {
       return Response.json({ error: "invalid_grant" }, { status: 400 });
     }
@@ -308,6 +346,7 @@ export default {
       expires_in: 3600,
       id_token: [encoded({ alg: "RS256" }), encoded(claims), "signature"].join("."),
       ...(forLandscape ? { scope: ${JSON.stringify(landscapeGranted)} } : {}),
+      ...(forDirectory ? { scope: ${JSON.stringify(directoryGranted)} } : {}),
     });
   },
 };
