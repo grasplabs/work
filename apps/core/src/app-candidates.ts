@@ -1,25 +1,38 @@
 import { compilerVersion, isAppLayout } from "@grasp-os/compiler";
-import { sdkProtocolVersion } from "@grasp-os/shared/app-releases";
+import {
+  sdkProtocolVersion,
+  versionErrors,
+} from "@grasp-os/shared/app-releases";
+import type { ReleaseManifest } from "@grasp-os/shared/app-releases";
 import { appErrors, openCandidateStates } from "@grasp-os/shared/apps";
 import type { App, CandidateState } from "@grasp-os/shared/apps";
 import { createAuditEvent } from "@grasp-os/shared/audit";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { isExpectedError } from "@grasp-os/shared/errors";
-import { appIdSchema } from "@grasp-os/shared/ids";
+import { appIdSchema, storeIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { canonicalText } from "@grasp-os/shared/json";
 import type { Identity } from "@grasp-os/shared/rpc";
+import { screenPath } from "@grasp-os/shared/screens";
 import { and, desc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { checkedReleaseManifest } from "./app-releases.ts";
+import {
+  artifactDigest,
+  readBackRelease,
+  sealedScreen,
+  sealedScreenNames,
+} from "./app-releases.ts";
+import type { VerifiedObservations } from "./apps.ts";
 import {
   appFor,
   changeEntry,
+  editableApp,
   findVersion,
   makeCurrent,
+  releaseRunnable,
   verifyVersion,
   versionFiles,
 } from "./apps.ts";
@@ -28,7 +41,14 @@ import {
   outboxedEventWhere,
   outboxedIfChanged,
 } from "./audit-outbox.ts";
-import { appCandidateReports, appCandidates } from "./db/core/schema.ts";
+import {
+  appCandidateReports,
+  appCandidates,
+  appVersions,
+  permissions,
+  screenPolicies,
+} from "./db/core/schema.ts";
+import { survivesMigration } from "./store-backfill.ts";
 
 // Candidates (spec 22.1, 22.2): one frozen version of an App on its way to
 // being made current. A candidate pins the version, its source tree and
@@ -89,7 +109,7 @@ export const candidateLeaseMs = 10 * 60_000;
 export const maxCandidateAttempts = 3;
 
 /** The format of a candidate's report. */
-const reportFormatVersion = 1;
+const reportFormatVersion = 2;
 
 /** A candidate, as core keeps it. */
 export type CandidateRow = typeof appCandidates.$inferSelect;
@@ -118,6 +138,7 @@ const blockedCodes: ReadonlySet<string> = new Set([
  * a release revoked or unsupported, a store or migration given up on.
  */
 const rejectedCodes: ReadonlySet<string> = new Set([
+  "app.candidate_release_changed",
   "app.conflict",
   "app.not_found",
   "app.unreadable",
@@ -187,7 +208,7 @@ export const freezeCandidate = async (
   /** Whether this is the one more try after an open candidate ended. */
   again = false
 ): Promise<CandidateRow> => {
-  await appFor(env, by, app, "builder");
+  await editableApp(env, by, app);
   const { tree } = await findVersion(env, app, version);
   const db = drizzle(env.DB);
   const id = crypto.randomUUID();
@@ -441,25 +462,211 @@ const endUnlessLost = async (
 };
 
 /**
- * The report of the verified candidate `row`: its identities, and for a
- * version of spec 8's layout its sealed manifest, checked against the
- * hash and store binding core recorded (`checkedReleaseManifest`), with the
- * evidence of its checks and the stores it binds. Only what core
- * computed; no verdict. Reading its artifacts back into the report is
- * GRA-394's next slice.
+ * What held of the App's authority as `row` was verified: a hash of its
+ * active permissions (each as granted), whether an admin approved the
+ * version, and its screens' data policy. Evidence of what held then,
+ * never a decision: making it current and every call read their own.
+ */
+const authorityOf = async (env: Env, row: CandidateRow) => {
+  const db = drizzle(env.DB);
+  const [granted, version, policy] = await Promise.all([
+    db
+      .select({
+        id: permissions.id,
+        objectType: permissions.objectType,
+        objectId: permissions.objectId,
+        resource: permissions.resource,
+        actions: permissions.actions,
+        binding: permissions.binding,
+        grantedAt: permissions.grantedAt,
+      })
+      .from(permissions)
+      .where(
+        and(
+          eq(permissions.subjectType, "app"),
+          eq(permissions.subjectId, row.appId),
+          eq(permissions.status, "active")
+        )
+      )
+      .orderBy(permissions.id)
+      .all(),
+    db
+      .select({ approved: appVersions.approved })
+      .from(appVersions)
+      .where(
+        and(
+          eq(appVersions.appId, row.appId),
+          eq(appVersions.version, row.version)
+        )
+      )
+      .get(),
+    db
+      .select({
+        output: screenPolicies.output,
+        generation: screenPolicies.generation,
+      })
+      .from(screenPolicies)
+      .where(eq(screenPolicies.appId, row.appId))
+      .get(),
+  ]);
+  return {
+    permissions: await sha256Hex(
+      canonicalText(
+        granted.map((grant) => ({
+          ...grant,
+          grantedAt: grant.grantedAt?.getTime() ?? null,
+        }))
+      )
+    ),
+    permissionCount: granted.length,
+    approved: version?.approved ?? null,
+    screenPolicy: policy ?? null,
+  };
+};
+
+/** Whether the version a report says it replaces could run again, and why not. */
+type RollbackEligibility =
+  | { readonly eligible: true }
+  | { readonly eligible: false; readonly reason: string };
+
+/**
+ * Whether `candidate` leaves behind the schema `replaced` binds a store
+ * on: the candidate binds that store under another schema, reached by one
+ * of its explicit migrations, and the store's contract once that
+ * migration takes over no longer covers `replaced`'s schema
+ * (`survivesMigration`, the check the store makes as it takes over). Made
+ * current, it switches the store (`makeCurrent`), and the version it
+ * replaces is refused there from then on (`migration.rollback_incompatible`,
+ * store-backfill.ts). A migration that only adds to what the old schema
+ * holds leaves it in force, and a rollback possible.
+ */
+const migratesPast = async (
+  env: Env,
+  candidate: ReleaseManifest,
+  replaced: ReleaseManifest
+): Promise<boolean> => {
+  const moved = replaced.dataStoreBindings.filter((before) =>
+    candidate.dataStoreBindings.some(
+      (bound) =>
+        bound.storeId === before.storeId &&
+        bound.schemaHash !== before.schemaHash &&
+        candidate.migrationEvidence.some(
+          ({ toSchema }) => toSchema === bound.schemaHash
+        )
+    )
+  );
+  const survives = await Promise.all(
+    moved.map(
+      async ({ storeId, schemaHash }) =>
+        await survivesMigration(env, storeIdSchema.parse(storeId), schemaHash)
+    )
+  );
+  return survives.includes(false);
+};
+
+/**
+ * Whether `version` could be made current again once `candidate` (its
+ * sealed manifest, for one of spec 8's layout) is: its release not
+ * revoked and its store live (`releaseRunnable`); for one of spec 8's
+ * layout, its release read back from storage, every artifact present and
+ * as sealed (`readBackRelease`), as the database flags alone can't tell;
+ * and its store not migrated past it by the candidate (`migratesPast`).
+ */
+const rollbackEligible = async (
+  env: Env,
+  app: AppId,
+  version: number,
+  candidate: ReleaseManifest | undefined
+): Promise<RollbackEligibility> => {
+  if (!(await releaseRunnable(env, app, version))) {
+    return { eligible: false, reason: "release_not_runnable" };
+  }
+  if (!isAppLayout(await versionFiles(env, app, version))) {
+    return { eligible: true };
+  }
+  let replaced: ReleaseManifest;
+  try {
+    ({ manifest: replaced } = await readBackRelease(env, app, version));
+  } catch (error) {
+    if (isExpectedError(error)) {
+      return { eligible: false, reason: error.code };
+    }
+    throw error;
+  }
+  if (
+    candidate !== undefined &&
+    (await migratesPast(env, candidate, replaced))
+  ) {
+    return { eligible: false, reason: "migration.rollback_incompatible" };
+  }
+  return { eligible: true };
+};
+
+/**
+ * The screens `app`'s sealed `version` carries, each as the hash its build
+ * is approved by, read back from the release (`sealedScreen`): the screens
+ * of its `files`, no more and no fewer, or the release is refused
+ * (`version.artifact_corrupt`), as a release that sealed other screens
+ * than its source holds can't have been sealed by this release.
+ */
+const sealedScreensOf = async (
+  env: Env,
+  app: AppId,
+  version: number,
+  files: Record<string, string>
+): Promise<{ screen: string; artifact: string }[]> => {
+  const sealedNames = await sealedScreenNames(env, app, version);
+  const named = sealedNames.toSorted();
+  const wanted = Object.keys(files)
+    .flatMap((path) => {
+      const name = screenPath.exec(path)?.groups?.name;
+      return name === undefined ? [] : [name];
+    })
+    .toSorted();
+  if (canonicalText(named) !== canonicalText(wanted)) {
+    throw versionErrors.create("version.artifact_corrupt", {
+      path: "screens/",
+    });
+  }
+  return await Promise.all(
+    named.map(async (name) => {
+      const { screen, artifact } = await sealedScreen(env, app, version, name);
+      return { screen, artifact };
+    })
+  );
+};
+
+/**
+ * The report of the verified candidate `row`, whose gates observed
+ * `observed`. Only what core computed, no verdict:
+ * - its identities;
+ * - for a version of spec 8's layout, its sealed manifest checked against
+ *   what core recorded, with every artifact read back from storage and
+ *   verified (`readBackRelease`), the evidence of its checks and its
+ *   migrations, and the stores it binds;
+ * - the tests the gates selected to run, each passing (`verifyVersion`);
+ * - the App's authority as it was (`authorityOf`);
+ * - the environment: compiler, SDK protocol and platform release;
+ * - whether the version it replaces could run again: its release not
+ *   revoked and its store live (`releaseRunnable`), for one of spec 8's
+ *   layout read back from storage as this one is, and its store not
+ *   migrated past it by this one (`rollbackEligible`), with why not.
  */
 const reportOf = async (
   env: Env,
   row: CandidateRow,
-  files: Record<string, string>
+  files: Record<string, string>,
+  observed: VerifiedObservations
 ): Promise<string> => {
+  const app = appIdSchema.parse(row.appId);
   const sealed = isAppLayout(files)
-    ? await checkedReleaseManifest(
-        env,
-        appIdSchema.parse(row.appId),
-        row.version
-      )
+    ? await readBackRelease(env, app, row.version)
     : undefined;
+  const replaces = row.basedOn === 0 ? null : row.basedOn;
+  const screens =
+    sealed === undefined
+      ? []
+      : await sealedScreensOf(env, app, row.version, files);
   return canonicalText({
     formatVersion: reportFormatVersion,
     candidate: {
@@ -478,8 +685,44 @@ const reportOf = async (
             sourceTreeHash: sealed.manifest.sourceTreeHash,
             verificationReportHash: sealed.manifest.verificationReportHash,
             dataStoreBindings: sealed.manifest.dataStoreBindings,
+            migrationEvidence: await sha256Hex(
+              canonicalText(sealed.manifest.migrationEvidence)
+            ),
+            // What each screen was built to and sealed as: the hash an
+            // admin approves, read back from the release.
+            screens,
+            artifacts: {
+              count: sealed.manifest.artifacts.length,
+              // A digest of the manifest's entries (path, sha256, size),
+              // not of the bytes read: `readBackRelease` above re-hashed
+              // every artifact's bytes against them (`verifiedRelease`).
+              readBack: await artifactDigest(sealed.manifest),
+            },
           },
-    environment: { compilerVersion, sdkProtocolVersion },
+    // What the gates selected from the version's files, not a record of
+    // what each runner executed: a runner that ran fewer, or none, refuses
+    // the version rather than report, so every one named here passed.
+    selected: {
+      appTests: observed.appTests,
+      workflowTests: observed.workflowTests,
+    },
+    authority: await authorityOf(env, row),
+    environment: {
+      compilerVersion,
+      sdkProtocolVersion,
+      // Recorded as evidence of where it was verified, and not compared
+      // when it is made current, by design: a platform release changes
+      // under a candidate without changing what it was verified against.
+      // The compiler and SDK protocol are compared (`verifiedHere`).
+      platformRelease: env.CF_VERSION_METADATA?.id ?? null,
+    },
+    rollback:
+      replaces === null
+        ? { to: null, eligible: false }
+        : {
+            to: replaces,
+            ...(await rollbackEligible(env, app, replaces, sealed?.manifest)),
+          },
   });
 };
 
@@ -522,8 +765,8 @@ const verify = async (
   if (at !== "verifying") {
     await move(env, by, held, { from: "building", to: "verifying" });
   }
-  await verifyVersion(env, app, version, files);
-  const text = await reportOf(env, held.row, files);
+  const observed = await verifyVersion(env, app, version, files);
+  const text = await reportOf(env, held.row, files, observed);
   const hash = await sha256Hex(text);
   await move(
     env,
@@ -603,37 +846,55 @@ export const runCandidate = async (
   }
 };
 
-/** The environment a report records, as `reportOf` writes it. */
-const reportedEnvironmentSchema = z.object({
+/** The environment and release a report records, as `reportOf` writes it. */
+const reportedSchema = z.object({
   environment: z.object({
     compilerVersion: z.string(),
     sdkProtocolVersion: z.int(),
   }),
+  release: z
+    .object({
+      manifestHash: z.string(),
+      artifacts: z.object({ readBack: z.string() }),
+    })
+    .nullable(),
 });
 
 /**
- * Whether the verified `candidate` was verified by the compiler and SDK
- * protocol this release runs: a candidate verified by an earlier release
- * is checked again before it is made current, never trusted across it.
+ * What the report of the verified `candidate` records of its environment
+ * and release, or undefined if it records neither as it should.
  */
-const verifiedHere = async (
+const reportedOf = async (
   env: Env,
   candidate: CandidateRow
-): Promise<boolean> => {
+): Promise<z.infer<typeof reportedSchema> | undefined> => {
   const row = await drizzle(env.DB)
     .select({ report: appCandidateReports.report })
     .from(appCandidateReports)
     .where(eq(appCandidateReports.candidateId, candidate.id))
     .get();
-  const reported = reportedEnvironmentSchema.safeParse(
-    JSON.parse(row?.report ?? "null")
-  );
-  return (
-    reported.success &&
-    reported.data.environment.compilerVersion === compilerVersion &&
-    reported.data.environment.sdkProtocolVersion === sdkProtocolVersion
-  );
+  const reported = reportedSchema.safeParse(JSON.parse(row?.report ?? "null"));
+  return reported.success ? reported.data : undefined;
 };
+
+/**
+ * Whether the verified candidate was verified by the compiler and SDK
+ * protocol this release runs: a candidate verified by an earlier release
+ * is checked again before it is made current, never trusted across it.
+ */
+const verifiedHere = (reported: z.infer<typeof reportedSchema>): boolean =>
+  reported.environment.compilerVersion === compilerVersion &&
+  reported.environment.sdkProtocolVersion === sdkProtocolVersion;
+
+/**
+ * Refusals that the release `candidate` was verified on is no longer
+ * what is stored: it ends the candidate, which a new one verifies again.
+ */
+const releaseChangedCodes: ReadonlySet<string> = new Set([
+  "app.candidate_release_changed",
+  "version.artifact_corrupt",
+  "version.manifest_corrupt",
+]);
 
 /** Holds while nobody's activation claim on a candidate is live. */
 const unclaimed = (now: Date): SQL | undefined =>
@@ -769,8 +1030,9 @@ const rejectStale = async (
  * Makes the verified `candidate` current for `by` (`makeCurrent`):
  * over the version it was based on, while it is still verified with its
  * report. A candidate whose base is no longer current is ended as
- * rejected (`app.conflict`): a new one, based on what is current now,
- * verifies it again.
+ * rejected (`app.conflict`), and so is one whose release, read back as it
+ * is made current, is not the one its report names: a new one, based on
+ * what is current now, verifies it again.
  */
 export const activateCandidate = async (
   env: Env,
@@ -780,7 +1042,8 @@ export const activateCandidate = async (
   if (candidate.reportHash === null) {
     throw appErrors.create("app.conflict");
   }
-  if (!(await verifiedHere(env, candidate))) {
+  const reported = await reportedOf(env, candidate);
+  if (reported === undefined || !verifiedHere(reported)) {
     // Claimed by another activation, which goes on: this one waits.
     if (!(await retire(env, by, candidate, "app.candidate_environment"))) {
       throw appErrors.create("app.candidate_busy");
@@ -801,6 +1064,13 @@ export const activateCandidate = async (
       id: candidate.id,
       reportHash: candidate.reportHash,
       basedOn: candidate.basedOn === 0 ? null : candidate.basedOn,
+      release:
+        reported.release === null
+          ? null
+          : {
+              manifestHash: reported.release.manifestHash,
+              artifactDigest: reported.release.artifacts.readBack,
+            },
     });
   } catch (error) {
     if (isExpectedError(error) && error.code === "app.conflict") {
@@ -808,6 +1078,12 @@ export const activateCandidate = async (
         await releaseActivation(env, candidate, lease);
       }
       await rejectStale(env, by, candidate);
+    } else if (isExpectedError(error) && releaseChangedCodes.has(error.code)) {
+      // What was verified is not what is stored: never made current.
+      if (lease !== undefined) {
+        await releaseActivation(env, candidate, lease);
+      }
+      await retire(env, by, candidate, error.code);
     }
     throw error;
   } finally {
@@ -843,7 +1119,8 @@ export const activateThroughCandidate = async (
   version: unknown,
   { expected, seal }: { expected?: unknown; seal?: Sealer } = {}
 ): Promise<App> => {
-  const found = await appFor(env, by, app, "builder");
+  // An archived App is read-only until a builder restores it (app-status.ts).
+  const found = await editableApp(env, by, app);
   const { version: number } = await findVersion(env, found.id, version);
   if (found.currentVersion === number) {
     return found;

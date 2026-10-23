@@ -13,6 +13,29 @@ import { uploadNameSchema } from "./uploads.ts";
 // (core's chats-rpc.ts). Each chat belongs to the person who made it: only
 // they list, rename, delete, ask in or follow it.
 
+/**
+ * A chat app a person talks to the agent through, by the name of its Chat
+ * SDK adapter (`teams` first, any platform after): lowercase, so it reads
+ * the same in a chat, an audit event and the door it came through
+ * (`/api/channels/<platform>`). Never `web`, which is Grasp's own.
+ */
+export const chatPlatformSchema = z
+  .string()
+  .regex(/^[a-z][a-z0-9-]{0,31}$/u)
+  .refine((platform) => platform !== "web", {
+    message: "web is Grasp's own channel, not a chat platform",
+  });
+
+/**
+ * Which channel a chat came through: Grasp's own app (`web`), or a chat
+ * platform.
+ */
+export const chatChannelSchema = z.union([
+  z.literal("web"),
+  chatPlatformSchema,
+]);
+export type ChatChannel = z.infer<typeof chatChannelSchema>;
+
 /** A chat's title: what the person, or their first question, named it. */
 export const chatTitleSchema = z.string().trim().min(1).max(200);
 
@@ -210,6 +233,24 @@ export interface ChatCitation {
 
 /** Most citations one answer carries: the first it links to. */
 export const chatCitationsMax = 50;
+
+/**
+ * A document an answer cites (`ChatCitation`), as the chat's agent may
+ * read it for the chat's person now: where it is, what it is called, and
+ * the start of what it says (its description, or else its first section),
+ * cut to {@link citedSnippetMax} characters. A document either of them can
+ * no longer read, or that is gone, is never one.
+ */
+export interface ChatCitedDocument {
+  documentId: string;
+  collectionId: string;
+  title: string;
+  path: string;
+  snippet: string;
+}
+
+/** Longest snippet of a cited document (`ChatCitedDocument`). */
+export const citedSnippetMax = 200;
 
 /**
  * One stored message of a chat, oldest first by `id`. The agent's
@@ -533,6 +574,12 @@ export interface ChatsApi {
    * proposed, most recently written first.
    */
   drafts: (chatId: string) => Promise<ChatDraft[]>;
+  /**
+   * The documents the chat's answer `messageId` cites, in the order it
+   * first links to them, each only while the chat's agent may still read
+   * it for the person; none for a message that isn't an answer.
+   */
+  cited: (chatId: string, messageId: number) => Promise<ChatCitedDocument[]>;
   /**
    * Screen `screen` of the chat's draft of `app` (its first screen when
    * none is named), built, to preview: for the person while they build

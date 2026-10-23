@@ -27,6 +27,7 @@ import {
   CreditCardIcon,
   HistoryIcon,
   KeyRoundIcon,
+  MessagesSquareIcon,
   PackageIcon,
   SparklesIcon,
   UserRoundIcon,
@@ -41,9 +42,9 @@ import { SiteHeader } from "../frame/site-header.tsx";
 // The workspace's sections are for admins (Members and roles, and calls of
 // unknown outcome, never for Grasp staff); Packages for all but Grasp staff
 // (its list is for who may approve packages); the account's for everyone.
-// Core checks the role on every call whatever is listed. The prototype's
-// Onboarding section is not here: in Grasp OS the onboarding is Grasp
-// staff's own area (`/onboarding`).
+// Core checks the role on every call whatever is listed. Onboarding is the
+// company admin's own view of the interviews, as their onboarding shows
+// it; what only Grasp's staff do there is their own area (`/onboarding`).
 
 type SettingsPath =
   | "/settings/workspace"
@@ -51,6 +52,7 @@ type SettingsPath =
   | "/settings/models"
   | "/settings/spend"
   | "/settings/pulse"
+  | "/settings/onboarding"
   | "/settings/audit"
   | "/settings/outcomes"
   | "/settings/billing"
@@ -104,6 +106,11 @@ const groupsFor = ({
         { label: msg`Models`, to: "/settings/models", icon: SparklesIcon },
         { label: msg`AI spend`, to: "/settings/spend", icon: CoinsIcon },
         { label: "Pulse", to: "/settings/pulse", icon: ActivityIcon },
+        {
+          label: msg`Onboarding`,
+          to: "/settings/onboarding",
+          icon: MessagesSquareIcon,
+        },
         { label: msg`Audit trail`, to: "/settings/audit", icon: HistoryIcon },
         ...(staff
           ? []

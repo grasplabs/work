@@ -42,7 +42,7 @@ const coreDurableObjects = (): { name: string; className: string }[] =>
     }));
 
 /**
- * The deployment's own hostname, as the console sets it (`SIGN_IN.origin`):
+ * The deployment's own hostname, as the admin sets it (`SIGN_IN.origin`):
  * the domain the router sorts its mail to it by.
  */
 export const smokeHostname = "acme.grasp.test";

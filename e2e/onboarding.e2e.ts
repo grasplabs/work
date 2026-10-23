@@ -1,23 +1,41 @@
+import { readdirSync } from "node:fs";
+import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
+
+import { addWorkingDays } from "@grasp-os/shared/admin/org-record";
 import { interviewApiPath } from "@grasp-os/shared/interview-links";
 import type { InterviewProgress } from "@grasp-os/shared/interview-links";
 import { expect } from "@playwright/test";
+import type { Request } from "@playwright/test";
 
 import { test } from "./csp.ts";
 import { apiOf, peopleIn, signInAs, signInStaff, signInTo } from "./people.ts";
 import type { Person } from "./people.ts";
-import { origin } from "./stack.ts";
+import { origin, stateDir } from "./stack.ts";
+import { workbookOf } from "./staff-workbook.ts";
 
 // What only Grasp's staff do in a client's onboarding (GRA-320), end to
 // end: they put the agreements in place, and the links that waited for
 // them go out; they give the go, and the company's people sign in, and
-// see the programme's week on the dashboard, from the plan. Its
+// see the programme's week on the dashboard, from the plan; they put the
+// organization's list right, someone moved and a team asked in late. Its
 // own Playwright project, after all the others: taking the go back signs
-// out everyone the other tests signed in (playwright.config.ts).
+// out everyone the other tests signed in (playwright.config.ts). The
+// admin's own steps come last, as each replaces the deployment's roster:
+// their journey through the wizard, a large staff list from Excel, and
+// last, with interviews seeded, what they see while Stephen talks to the
+// team.
 
 test.describe.configure({ mode: "serial" });
 
 /** Today, as core's plan reads it (UTC). */
 const today = (): string => new Date().toISOString().slice(0, 10);
+
+const dayMs = 24 * 60 * 60 * 1000;
+
+/** The day `days` from today, as core's plan reads it (UTC). */
+const daysFromToday = (days: number): string =>
+  new Date(Date.now() + days * dayMs).toISOString().slice(0, 10);
 
 test("staff put the agreements in place, and the links that waited go out", async ({
   page,
@@ -139,10 +157,10 @@ const interviewCall = async (body: object): Promise<unknown> => {
 
 /** Keeps `progress` on a person's link, from a device that opens it as their page does. */
 const interviewOn = async (
-  path: string,
+  link: string,
   progress: InterviewProgress
 ): Promise<void> => {
-  const secret = path.split("#")[1] ?? "";
+  const secret = link.split("#")[1] ?? "";
   const session = await interviewCall({ action: "session", secret });
   const key =
     typeof session === "object" &&
@@ -345,16 +363,145 @@ test("the dashboard counts the programme's weeks from the plan, and exports its 
   expect(cspViolations).toStrictEqual([]);
 });
 
-test("the company's admin goes through their onboarding: the staff list, the leads, the day the interviews start and letting Grasp's mail through", async ({
+test("staff move someone to another team, and ask a team in late, its lead first", async ({
   page,
   cspViolations,
 }) => {
-  // Last of the serial run: what it keeps replaces the roster and the plan
+  const staff = await signInStaff();
+  const run = crypto.randomUUID().slice(0, 8);
+  const { core, api } = apiOf(staff);
+  try {
+    // The agreements are in since the first test: links go out by the plan.
+    await api.onboarding.saveRoster({
+      teams: [
+        { id: `sales-${run}`, name: "Sales", lead: `lea-${run}` },
+        { id: `ops-${run}`, name: "Ops", lead: `ona-${run}` },
+        {
+          id: `support-${run}`,
+          name: "Support",
+          lead: `sol-${run}`,
+          off: true,
+        },
+      ],
+      people: [
+        { id: `lea-${run}`, name: "Lea Lind", team: `sales-${run}` },
+        { id: `sam-${run}`, name: "Sam Smit", team: `sales-${run}` },
+        { id: `ona-${run}`, name: "Ona Olsen", team: `ops-${run}` },
+        { id: `sol-${run}`, name: "Sol Sand", team: `support-${run}` },
+        { id: `sid-${run}`, name: "Sid Stam", team: `support-${run}` },
+      ],
+    });
+    await api.onboarding.savePlan({ start: today() });
+  } finally {
+    core[Symbol.dispose]();
+  }
+
+  // The test's own page, whose CSP violations are recorded (e2e/csp.ts).
+  await signInTo(page.context(), staff);
+  await page.goto("/onboarding");
+  await page
+    .getByRole("complementary", { name: "Onboarding sections" })
+    .getByRole("link", { name: "Organization" })
+    .click();
+
+  // Sam moves from Sales to Ops.
+  await page.getByRole("link", { name: "Open Sales" }).click();
+  await page.getByRole("button", { name: "Open Sam Smit" }).click();
+  await page.getByRole("button", { name: "Change details" }).click();
+  await page.getByLabel("Team", { exact: true }).selectOption({ label: "Ops" });
+  await expect(
+    page.getByText(
+      "In another team, Sam is asked about that team's work from now on."
+    )
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Save" }).click();
+  await expect(
+    page.getByRole("button", { name: "Open Sam Smit" })
+  ).toBeHidden();
+
+  // In Ops, he is asked about Ops' work, once Ona has named it.
+  await page.getByRole("link", { name: "All teams" }).click();
+  await page.getByRole("link", { name: "Open Ops" }).click();
+  await expect(
+    page
+      .getByRole("button", { name: "Open Sam Smit" })
+      .getByText("Asked about the team's work once its lead has named it")
+  ).toBeVisible();
+
+  // Support is asked in late: Sol's link goes out now, Sid's waits for Sol.
+  await page.getByRole("link", { name: "All teams" }).click();
+  const filters = page.getByRole("group", { name: "Which teams to show" });
+  await filters.getByRole("button", { name: /^Left out/u }).click();
+  await page.getByRole("button", { name: "Ask it in" }).click();
+  await expect(page.getByRole("button", { name: "Ask it in" })).toBeHidden();
+  await filters.getByRole("button", { name: /^All/u }).click();
+  await page.getByRole("link", { name: "Open Support" }).click();
+  const by = new Intl.DateTimeFormat("en", {
+    dateStyle: "medium",
+    timeZone: "UTC",
+  }).format(new Date(`${addWorkingDays(today(), 3)}T00:00:00Z`));
+  await expect(
+    page.getByText(
+      `Sol Sand talks first. Everyone else's link waits for that, until ${by} at the latest.`
+    )
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Open Sol Sand" }).getByText("Link out")
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Open Sid Stam" }).getByText("No link yet")
+  ).toBeVisible();
+
+  // Both changes are in the log, as staff made them.
+  await page.goto("/onboarding/log?actor=staff");
+  await expect(page.getByText("onboarding.person.moved")).toBeVisible();
+  await expect(page.getByText("onboarding.team.asked_in")).toBeVisible();
+  expect(cspViolations).toStrictEqual([]);
+});
+
+/** What a line asked of the voice says, and in what tone. */
+const lineOf = (request: Request): { text: string; tone: unknown } => {
+  const body: unknown = request.postDataJSON();
+  return typeof body === "object" &&
+    body !== null &&
+    "text" in body &&
+    typeof body.text === "string"
+    ? { text: body.text, tone: "tone" in body ? body.tone : undefined }
+    : { text: "", tone: undefined };
+};
+
+test("the company's admin goes through their onboarding: the staff list, the organization as Stephen will interview it, the plan and letting Grasp's mail through", async ({
+  page,
+  cspViolations,
+}) => {
+  // Late in the serial run: what it keeps replaces the roster and the plan
   // the tests before it read.
   const admin = await signInStaff();
+  // The first test's plan runs from today with the agreements in, so the
+  // store's alarm would send the links due under it to the staff list saved
+  // below before its organization is confirmed and its own plan made. A
+  // start still to come holds every link back, as before an onboarding's
+  // first plan.
+  const held = apiOf(admin);
+  try {
+    await held.api.onboarding.savePlan({ start: daysFromToday(2) });
+  } finally {
+    held.core[Symbol.dispose]();
+  }
   await signInTo(page.context(), admin);
   // The story on "How this works" is told at once.
   await page.emulateMedia({ reducedMotion: "reduce" });
+  // The voice isn't reached from the local stack: what the page asks of it is kept, and it says nothing.
+  const asked: { text: string; tone: unknown }[] = [];
+  await page.route("**/api/speech", async (route) => {
+    asked.push(lineOf(route.request()));
+    await route.fulfill({
+      status: 503,
+      json: { code: "speech.failed", message: "Not here" },
+    });
+  });
+  const toneOf = (text: string) =>
+    asked.find((line) => line.text === text)?.tone;
   await page.goto("/setup?step=welcome");
 
   await expect(
@@ -383,17 +530,18 @@ test("the company's admin goes through their onboarding: the staff list, the lea
         `Lea Bakker,lea.${run}@acme.test,Sales,Head of sales,yes`,
         `Sam Visser,sam.${run}@acme.test,Sales,Account manager,`,
         `Ona Smit,ona.${run}@acme.test,Ops,Planner,`,
+        `Kai de Wit,kai.${run}@acme.test,Legal,Counsel,`,
       ].join("\n")
     ),
   });
   await expect(
     page.getByText(
-      "Thank you. From your staff list I can see 3 people in 2 teams."
+      "Thank you. From your staff list I can see 4 people in 3 teams."
     )
   ).toBeVisible();
   await page.getByRole("button", { name: "Continue" }).click();
 
-  // Where the documents live and Pulse: core keeps nothing of them yet, so both are skipped.
+  // Where the documents live and Pulse are skipped (e2e/setup-voice.e2e.ts notes them).
   await page.getByRole("button", { name: "Skip for now" }).click();
   await expect(
     page.getByRole("heading", {
@@ -405,8 +553,11 @@ test("the company's admin goes through their onboarding: the staff list, the lea
     page.getByRole("heading", { name: "Which tools do people actually use?" })
   ).toBeVisible();
   await page.getByRole("button", { name: "Skip for now" }).click();
+  await page
+    .getByRole("button", { name: "We don’t use an HR platform" })
+    .click();
 
-  // The leads as the list said them; Ops gets Ona as its lead.
+  // The leads as the list said them; Ops gets Ona as its lead, and Legal does not take part.
   await expect(
     page.getByRole("heading", {
       name: "Almost done: is this your organization?",
@@ -414,13 +565,18 @@ test("the company's admin goes through their onboarding: the staff list, the lea
   ).toBeVisible();
   await page.getByRole("combobox", { name: "Lead of Ops" }).click();
   await page.getByRole("option", { name: "Ona Smit" }).click();
-  await page.getByRole("button", { name: "This is right" }).click();
+  await page.getByRole("switch", { name: "Legal takes part" }).click();
   await expect(
-    page.getByText("Thank you. I’ll start with these 2 leads.")
-  ).toBeVisible();
+    page.getByRole("combobox", { name: "Lead of Legal" })
+  ).toBeDisabled();
+  await page.getByRole("button", { name: "This is right" }).click();
+  const thanks = "Thank you. I’ll start with these 2 leads.";
+  await expect(page.getByText(thanks)).toBeVisible();
+  // Said on its own, warmly.
+  await expect.poll(() => toneOf(thanks)).toBe("warm");
   await page.getByRole("button", { name: "Continue" }).click();
 
-  // The message to send, and the day the first links go out.
+  // The message to send, the day the first links go out, and Ops later.
   await expect(
     page.getByRole("heading", {
       name: "Before I reach out, let your team know",
@@ -428,6 +584,21 @@ test("the company's admin goes through their onboarding: the staff list, the lea
   ).toBeVisible();
   await page.getByRole("button", { name: "The day after" }).click();
   const start = await page.getByLabel("Another day").inputValue();
+  // Only the teams that take part are there to hold back.
+  await expect(page.getByRole("checkbox", { name: /^Legal/u })).toHaveCount(0);
+  await page.getByRole("checkbox", { name: /^Ops/u }).click();
+  await page.getByRole("button", { name: "On a later day" }).click();
+  const later = await page
+    .getByLabel("The day the other teams get their links")
+    .inputValue();
+  const next = page
+    .getByRole("alert")
+    .filter({ hasText: "What happens next" })
+    .getByText(/^The lead of 1 team gets their link /u);
+  await expect(next).toBeVisible();
+  // Stephen says what happens next, as the plan has it now.
+  const nextLine = await next.textContent();
+  await expect.poll(() => toneOf(nextLine ?? "")).toBe("sincere, steady");
   await page.getByRole("button", { name: "I sent it" }).click();
 
   await expect(
@@ -458,22 +629,421 @@ test("the company's admin goes through their onboarding: the staff list, the lea
     page.getByRole("heading", { name: "Nothing needs you" })
   ).toBeVisible();
 
-  // Core keeps what was set: the leads, and the plan from that day.
+  // Core keeps what was set: the leads, Legal off, the plan from that day
+  // with Ops on its own later day, and links for the three who take part,
+  // none out before the start.
   const { core, api } = apiOf(admin);
   try {
     const { roster, plan } = await api.onboarding.view();
+    const teamOf = (name: string) =>
+      roster?.teams.find((team) => team.name === name);
     const leadOf = (name: string) =>
-      roster?.people.find(
-        (person) =>
-          person.id === roster.teams.find((team) => team.name === name)?.lead
-      )?.name;
-    expect([leadOf("Sales"), leadOf("Ops")]).toStrictEqual([
-      "Lea Bakker",
-      "Ona Smit",
-    ]);
-    expect(plan?.start).toBe(start);
+      roster?.people.find((person) => person.id === teamOf(name)?.lead)?.name;
+    const ops = teamOf("Ops")?.id ?? "";
+    const opsAt = plan?.later?.[ops];
+    const { waiting } = await api.onboardingStaff.agreements();
+    expect({
+      leads: [leadOf("Sales"), leadOf("Ops")],
+      off: roster?.teams.filter((team) => team.off).map(({ name }) => name),
+      start: plan?.start,
+      held: Object.keys(plan?.later ?? {}),
+      // Its own moment, on the later day, after the first links.
+      opsLater:
+        later > start &&
+        typeof opsAt === "string" &&
+        plan?.at !== undefined &&
+        opsAt > plan.at,
+      waiting,
+    }).toStrictEqual({
+      leads: ["Lea Bakker", "Ona Smit"],
+      off: ["Legal"],
+      start,
+      held: [ops],
+      opsLater: true,
+      waiting: 3,
+    });
   } finally {
     core[Symbol.dispose]();
   }
+  expect(cspViolations).toStrictEqual([]);
+});
+
+/** The teams of a staff list of a company that size. */
+const nineTeams = [
+  "Sales",
+  "Customer service",
+  "Planning",
+  "Field service",
+  "Warehouse",
+  "Finance",
+  "HR",
+  "IT",
+  "Marketing",
+];
+
+test("a staff list of 170 people in 9 teams, from Excel, is kept; the same list again changes nothing", async ({
+  page,
+  cspViolations,
+}) => {
+  // After the journey above: its list of four is there as the step arrives.
+  const admin = await signInStaff();
+  await signInTo(page.context(), admin);
+  // The voice isn't reached from the local stack: what the page asks of it is kept, and it says nothing.
+  const asked: { text: string; tone: unknown }[] = [];
+  await page.route("**/api/speech", async (route) => {
+    asked.push(lineOf(route.request()));
+    await route.fulfill({
+      status: 503,
+      json: { code: "speech.failed", message: "Not here" },
+    });
+  });
+  const run = crypto.randomUUID().slice(0, 8);
+  const rows = Array.from({ length: 170 }, (_, at) => {
+    const team = nineTeams[at % nineTeams.length] ?? "Sales";
+    return [
+      `Person ${at + 1}`,
+      `person${at + 1}.${run}@acme.test`,
+      team,
+      at < nineTeams.length ? `Head of ${team}` : "Employee",
+      at < nineTeams.length ? "yes" : "",
+    ];
+  });
+  const list = {
+    name: "staff.xlsx",
+    mimeType:
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    buffer: workbookOf([
+      ["Name", "Email", "Team", "Job title", "Team lead"],
+      ...rows,
+    ]),
+  };
+  const counted =
+    "Thank you. From your staff list I can see 170 people in 9 teams.";
+  const saidAlone = () =>
+    asked.filter((line) => line.text === counted).map(({ tone }) => tone);
+
+  await page.goto("/setup?step=company");
+  await expect(
+    page.getByRole("heading", { name: "Who’s who at your company?" })
+  ).toBeVisible();
+  await page.locator('input[type="file"]').setInputFiles(list);
+  await expect(page.getByText(counted)).toBeVisible();
+  // Read on this visit, Stephen says so on its own, plainly.
+  await expect.poll(saidAlone).toStrictEqual(["clear, measured pace"]);
+
+  const { core, api } = apiOf(admin);
+  try {
+    const { roster: kept } = await api.onboarding.view();
+    expect({
+      people: kept?.people.length,
+      teams: kept?.teams.map(({ name }) => name).toSorted(),
+      led: kept?.teams.every(({ lead }) => lead !== null),
+    }).toStrictEqual({
+      people: 170,
+      teams: nineTeams.toSorted(),
+      led: true,
+    });
+
+    // The same list again, on another visit: said again once read, and nothing changes.
+    await page.reload();
+    await expect(page.getByText(counted)).toBeVisible();
+    await page.locator('input[type="file"]').setInputFiles(list);
+    await expect.poll(() => saidAlone().length).toBe(2);
+    const again = await api.onboarding.view();
+    expect(again.roster).toStrictEqual(kept);
+  } finally {
+    core[Symbol.dispose]();
+  }
+  expect(cspViolations).toStrictEqual([]);
+});
+
+/** A call the page makes to core, as Cap'n Web writes it: its pushes are numbered from 1. */
+const makesCall = /^\["(?:push|stream)",/u;
+
+/** The way the admin settled the difference, in a call to settle it. */
+const settleChoice = /"tickets","(?<holds>both|first|other)"/u;
+
+/** A message on the page's connection, as its fields. */
+const fieldsOf = (message: string | Buffer): unknown[] => {
+  const parsed: unknown = JSON.parse(String(message));
+  if (!Array.isArray(parsed)) {
+    return [];
+  }
+  const fields: unknown[] = parsed;
+  return fields;
+};
+
+/** A piece of work told two ways that nobody could explain, as core would draw it. */
+const ticketsDifference = {
+  work: "tickets",
+  name: "nieuwe tickets afhandelen",
+  team: "Ops",
+  way: "Look up the customer in the client sheet.",
+  other: "Look up the customer in Salesforce.",
+};
+
+test("the admin settles what needs them, and once Grasp gives its go, goes in through the way in", async ({
+  page,
+  cspViolations,
+}) => {
+  const staff = await signInStaff();
+  const { core, api } = apiOf(staff);
+  try {
+    // Waiting for Grasp's go.
+    await api.onboardingGate.close();
+  } finally {
+    core[Symbol.dispose]();
+  }
+
+  // The local stack reaches no model, so it draws no work: core's answer
+  // to what needs the admin is given a difference as the drawing leaves
+  // one, and the admin's settling of it answered as core keeps it
+  // (apps/core/test/onboarding-review.test.ts settles a drawn one).
+  let holds: string | null = null;
+  const settled: string[] = [];
+  const review = () => ({
+    differences: [[{ ...ticketsDifference, holds }]],
+    mapped: 3,
+  });
+  await page.routeWebSocket("**/rpc", (socket) => {
+    const server = socket.connectToServer();
+    let calls = 0;
+    const reviews = new Set<number>();
+    const settles = new Set<number>();
+    socket.onMessage((message) => {
+      const text = String(message);
+      if (makesCall.test(text)) {
+        calls += 1;
+        if (text.includes('"onboarding","review"')) {
+          reviews.add(calls);
+        }
+        const choice = text.includes('"onboarding","settle"')
+          ? settleChoice.exec(text)?.groups?.holds
+          : undefined;
+        if (choice !== undefined) {
+          settles.add(calls);
+          settled.push(choice);
+          holds = choice;
+        }
+      }
+      server.send(message);
+    });
+    server.onMessage((message) => {
+      const [kind, id] = fieldsOf(message);
+      const answers = kind === "resolve" || kind === "reject";
+      if (
+        answers &&
+        typeof id === "number" &&
+        (reviews.has(id) || settles.has(id))
+      ) {
+        socket.send(JSON.stringify(["resolve", id, review()]));
+        return;
+      }
+      socket.send(message);
+    });
+  });
+  await signInTo(page.context(), staff);
+  await page.goto("/setup?step=review");
+
+  // The difference, and letting Grasp's mail through, which this new
+  // browser hasn't settled.
+  await expect(
+    page.getByRole("heading", { name: "2 things for you" })
+  ).toBeVisible();
+  const needs = page.getByRole("region", { name: "What needs you" });
+  await expect(
+    needs.getByText("People do “nieuwe tickets afhandelen” in two ways")
+  ).toBeVisible();
+  // The two ways side by side, never who told which.
+  await expect(
+    needs.getByText("Look up the customer in Salesforce.")
+  ).toBeVisible();
+  await needs.getByRole("button", { name: "Keep both" }).click();
+  await expect(needs.getByText("Settled: Keep both")).toBeVisible();
+  expect(settled).toStrictEqual(["both"]);
+  await needs.getByRole("button", { name: "It’s done" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Nothing needs you" })
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Continue" }).click();
+
+  // Stephen's thanks, and until Grasp's go, that it opens once checked.
+  await expect(
+    page.getByRole("heading", { name: /^Thank you, /u })
+  ).toBeVisible();
+  await expect(
+    page.getByText(/3 pieces of work are mapped and ready for you\.$/u)
+  ).toBeVisible();
+  await expect(
+    page.getByText(
+      "We open your platform once we’ve checked everything with you. You’ll hear from us."
+    )
+  ).toBeVisible();
+
+  const giving = apiOf(staff);
+  try {
+    await giving.api.onboardingGate.open();
+  } finally {
+    giving.core[Symbol.dispose]();
+  }
+  // The page asks again on its own, and the way in begins: the brain's
+  // dots build the dashboard, then let it be.
+  await expect(page.getByText("Your platform is open.")).toBeVisible({
+    timeout: 30_000,
+  });
+  await expect(page).toHaveURL(/\/dashboard$/u, { timeout: 15_000 });
+  await expect(page.getByRole("region", { name: "Workflows" })).toBeVisible();
+  await expect(page.getByText("Opening Grasp")).toHaveCount(0, {
+    timeout: 15_000,
+  });
+  expect(cspViolations).toStrictEqual([]);
+});
+
+/**
+ * Writes the onboarding's state straight into its object's local SQLite,
+ * as the seed does (scripts/seed/local.ts): what no API can backdate, the
+ * interviews of days before today, which the admin's numbers move by.
+ */
+const onboardingSql = (write: (db: DatabaseSync) => void): void => {
+  const dir = path.join(stateDir, "v3/do/grasp-os-core-Onboarding");
+  const file = readdirSync(dir).find((name) => name.endsWith(".sqlite"));
+  if (file === undefined) {
+    throw new Error(`No Onboarding object under ${dir}`);
+  }
+  const db = new DatabaseSync(path.join(dir, file));
+  try {
+    db.exec("PRAGMA busy_timeout = 10000");
+    write(db);
+  } finally {
+    db.close();
+  }
+};
+
+test("while Stephen talks to the team, the admin sees the numbers, no team under five, the quiet team, and the links to send", async ({
+  page,
+  cspViolations,
+}) => {
+  // Last in the serial run: it replaces the roster, and moves the plan back.
+  const admin = await signInStaff();
+  const run = crypto.randomUUID().slice(0, 8);
+  const sales = `sales-${run}`;
+  const service = `service-${run}`;
+  const ops = `ops-${run}`;
+  const member = (id: string, name: string, team: string) => ({
+    id: `${id}-${run}`,
+    name,
+    team,
+  });
+  const { core, api } = apiOf(admin);
+  try {
+    await api.onboarding.saveRoster({
+      teams: [
+        { id: sales, name: "Sales", lead: `lea-${run}` },
+        { id: service, name: "Service", lead: `lisa-${run}` },
+        { id: ops, name: "Ops", lead: `ona-${run}` },
+      ],
+      people: [
+        member("lea", "Lea Bakker", sales),
+        ...["Sam", "Sid", "Sue", "Sy", "Saar", "Sem"].map((name) =>
+          member(name.toLowerCase(), name, sales)
+        ),
+        member("lisa", "Lisa de Vries", service),
+        ...["Vic", "Vera", "Vos", "Vin", "Val"].map((name) =>
+          member(name.toLowerCase(), name, service)
+        ),
+        // A team of four: it shows only whether its lead talked.
+        member("ona", "Ona Smit", ops),
+        ...["Oli", "Oz", "Otto"].map((name) =>
+          member(name.toLowerCase(), name, ops)
+        ),
+      ],
+    });
+    await api.onboarding.savePlan({ start: today() });
+    await api.onboardingStaff.setAgreements({
+      processing: true,
+      assessment: true,
+      council: "none",
+    });
+  } finally {
+    core[Symbol.dispose]();
+  }
+  // Seeded interviews: the plan began six days ago, and by yesterday Sales
+  // had heard from five of its six, Service from none of its five, and
+  // Ops from its three; Lea and Ona talked, Lisa didn't.
+  const yesterday = daysFromToday(-1);
+  onboardingSql((db) => {
+    db.prepare("UPDATE onboarding SET plan = ? WHERE id = 1").run(
+      JSON.stringify({ start: daysFromToday(-6), days: 14 })
+    );
+    const count = db.prepare(
+      "INSERT OR REPLACE INTO team_counts (team, day, asked, talked) VALUES (?, ?, ?, ?)"
+    );
+    count.run(sales, yesterday, 6, 5);
+    count.run(service, yesterday, 5, 0);
+    count.run(ops, yesterday, 3, 3);
+    const talked = db.prepare(
+      "INSERT OR REPLACE INTO interview_states (person, kind, lead_of, started_at, completed_at, updated_at) VALUES (?, 'lead', ?, ?, ?, ?)"
+    );
+    const at = `${yesterday}T10:00:00.000Z`;
+    // Each as the lead of the team they led when their link went out.
+    for (const [lead, team] of [
+      [`lea-${run}`, sales],
+      [`ona-${run}`, ops],
+    ] as const) {
+      talked.run(lead, team, at, at, at);
+    }
+  });
+
+  await signInTo(page.context(), admin);
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  // The voice isn't reached from the local stack: it says nothing.
+  await page.route("**/api/speech", async (route) => {
+    await route.fulfill({
+      status: 503,
+      json: { code: "speech.failed", message: "Not here" },
+    });
+  });
+  await page.goto("/setup?step=listening");
+  await expect(page.getByText("Day 7 of 14")).toBeVisible();
+  const figure = (label: string) =>
+    page.locator("div.rounded-xl").filter({ hasText: label });
+  await expect(figure("team leads talked")).toContainText("2 of 3");
+  await expect(figure("colleagues talked")).toContainText("5");
+  await expect(
+    page.getByText(
+      "Service has been quiet so far. A short message from Lisa, their lead, usually helps. I’ll remind everyone once myself."
+    )
+  ).toBeVisible();
+
+  // Team by team: numbers for Sales, too few for Service, none for Ops.
+  await page.getByRole("button", { name: "By team" }).click();
+  const panel = page.getByRole("dialog");
+  await expect(panel).toContainText(/Sales\D*5 of 6/u);
+  await expect(panel).toContainText("ServiceLead not yetFewer than 3 of 5");
+  await expect(panel).toContainText("OpsLead talkedUnder 5");
+  await page.keyboard.press("Escape");
+
+  // Everyone's link is out by now: Lea's and the others' after three working days.
+  await page.reload();
+  const links = page.getByRole("button", { name: /^\d+ new links to send$/u });
+  await expect(links).toBeVisible();
+  await links.click();
+  const downloading = page.waitForEvent("download");
+  await page
+    .getByRole("button", { name: /^The \d+ new links, as a list$/u })
+    .click();
+  const download = await downloading;
+  expect(download.suggestedFilename()).toBe("grasp-links.csv");
+  // Taken: none are new any more.
+  await expect(
+    page.getByRole("button", { name: "Links to send" })
+  ).toBeVisible();
+
+  // The same, under Settings, Onboarding.
+  await page.goto("/settings/onboarding");
+  await expect(page.getByText("Day 7 of 14")).toBeVisible();
+  await expect(
+    page.getByText(/^Service has been quiet so far\./u)
+  ).toBeVisible();
   expect(cspViolations).toStrictEqual([]);
 });

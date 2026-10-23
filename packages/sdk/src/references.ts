@@ -688,3 +688,51 @@ export const referenceData = (value: unknown): ReferenceData | undefined => {
   >;
   return { path: contractId, ...read };
 };
+
+/** An event reference as server code lists it in `uses`, read as data. */
+export interface EventReferenceData {
+  /** The alias of the App's workflow it belongs to (`workflows.<alias>`). */
+  readonly workflow: string;
+  /** The event binding's alias in the workflow. */
+  readonly alias: string;
+  readonly type: string;
+  readonly fingerprint: string;
+}
+
+const workflowContractPattern =
+  /^workflows\.(?<alias>[A-Za-z][A-Za-z0-9_]{0,63})$/u;
+const eventAliasPattern = /^[A-Za-z][A-Za-z0-9_]{0,63}$/u;
+const eventFingerprintPattern = /^[0-9a-f]{64}$/u;
+
+/**
+ * The event reference `value` is, read as data (`workflows.<workflow>.
+ * events.<alias>`, spec 10.7.4), or undefined when it isn't one. Nothing
+ * about it is trusted: the host checks its workflow, alias, type and
+ * fingerprint against the release it runs, and refuses one that doesn't
+ * match.
+ */
+export const eventReferenceData = (
+  value: unknown
+): EventReferenceData | undefined => {
+  if (!isPlainObject(value) || value.kind !== "workflowEvent") {
+    return undefined;
+  }
+  const { workflow, alias, type, fingerprint } = value;
+  const workflowAlias =
+    typeof workflow === "string"
+      ? workflowContractPattern.exec(workflow)?.groups?.alias
+      : undefined;
+  if (
+    workflowAlias === undefined ||
+    typeof alias !== "string" ||
+    !eventAliasPattern.test(alias) ||
+    typeof type !== "string" ||
+    type.length === 0 ||
+    type.length > workflowReferenceLimits.eventTypeLength ||
+    typeof fingerprint !== "string" ||
+    !eventFingerprintPattern.test(fingerprint)
+  ) {
+    return undefined;
+  }
+  return { workflow: workflowAlias, alias, type, fingerprint };
+};

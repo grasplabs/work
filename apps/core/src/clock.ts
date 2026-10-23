@@ -36,7 +36,7 @@ import { sweepSpokenLines } from "./speech-cache.ts";
 import { sweepStatistics } from "./statistics.ts";
 import { sweepCandidateRuns } from "./workflows/candidate-runs.ts";
 import { pumpConnectorEvents } from "./workflows/connector-events.ts";
-import { repairControls } from "./workflows/controls.ts";
+import { cancelArchivedRuns, repairControls } from "./workflows/controls.ts";
 import { deleteExpiredEmail } from "./workflows/kept-email.ts";
 import {
   repairResourceStarts,
@@ -71,7 +71,7 @@ export const clockTasks: readonly ClockTask<Env>[] = [
   // Documents whose indexing never started or ended unfinished, and failed
   // ones due another run (src/knowledge/indexing.ts).
   { name: "knowledge.indexing", period: "minute", run: sweepIndexing },
-  // Deploys apply migrations first (CI's db:migrate, and the console's
+  // Deploys apply migrations first (CI's db:migrate, and the admin's
   // deploy), so `platform_versions` exists. A version running before it
   // does records nothing, and the first run after the migration records
   // the version then running: only a version that came and went in
@@ -104,6 +104,14 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     run: repairResourceTerminations,
   },
   { name: "workflows.controls", period: "minute", run: repairControls },
+  {
+    // An archived App's runs, cancelled in bounded passes (app-status.ts).
+    name: "apps.archived_runs",
+    period: "minute",
+    run: async (env) => {
+      await cancelArchivedRuns(env);
+    },
+  },
   { name: "workflows.wakes", period: "minute", run: repairWakes },
   {
     name: "workflows.connector_events",

@@ -140,9 +140,12 @@ export interface Session {
   close: () => void;
 }
 
-/** Signs `email` in and opens their API. */
-export const sessionOf = async (email: string): Promise<Session> => {
-  const cookie = await signInAs(email);
+/** Signs `email` in and opens their API; through Grasp's tenant for the stack's staff member. */
+export const sessionOf = async (
+  email: string,
+  { providerId }: { providerId?: "microsoft" | "grasp-staff" } = {}
+): Promise<Session> => {
+  const cookie = await signInAs(email, { providerId });
   const core = newWebSocketRpcSession<CoreApi>(rpcSocket(cookie));
   const api = core.authenticate();
   const { userId } = await api.whoami();

@@ -24,6 +24,7 @@ const view: OnboardingView = {
   progress: null,
   agreed: false,
   paused: false,
+  sponsor: null,
 };
 
 const gate: GateView = {

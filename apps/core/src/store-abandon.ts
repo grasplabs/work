@@ -22,6 +22,7 @@ import {
   uuidFromHash,
 } from "./audit-outbox.ts";
 import type { Member } from "./auth/identity.ts";
+import { requireStoreChangeable } from "./data-stores.ts";
 import {
   appDefaultStores,
   apps,
@@ -352,6 +353,7 @@ export const abandonStoreBackfill = async (
     input
   );
   await liveStore(env, store);
+  await requireStoreChangeable(env, store);
   const object = storeObject(env, store);
   const abandonment = await object.abandonBackfill(
     store,

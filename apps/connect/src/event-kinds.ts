@@ -28,13 +28,13 @@ export interface RequestBudget {
 }
 
 /**
- * What a read reaches a provider with: the connection's access token,
- * for the provider's own hosts only, and the sync's request budget.
+ * What a read reaches a provider with: the connection's access token, or
+ * its API key in the header its provider takes it in, for the provider's
+ * own hosts only, and the sync's request budget.
  */
-export interface ProviderAccess {
-  token: string;
-  budget: RequestBudget;
-}
+export type ProviderAccess =
+  | { token: string; budget: RequestBudget }
+  | { credential: { header: string; value: string }; budget: RequestBudget };
 
 /** What one read of a source has to go on. */
 export interface SourceRead {
@@ -256,28 +256,33 @@ interface ProviderSpec {
  * Sends one request to a provider with the connection's token: only to
  * its `hosts`, over HTTPS, never following a redirect (it would take the
  * token along), counted against the sync's budget. Its answer's bytes,
- * at most `answerMaxBytes`, and content type. A throttled answer says
- * how long to wait; a gone cursor (410, or a status of `resyncStatuses`)
- * starts the source over.
+ * at most `maxBytes` (`answerMaxBytes` unless said), and content type. A
+ * throttled answer says how long to wait; a gone cursor (410, or a status
+ * of `resyncStatuses`) starts the source over.
  */
 const requestProvider = async (
   { name, hosts, headers = {}, resyncStatuses = [] }: ProviderSpec,
-  { token, budget }: ProviderAccess,
+  access: ProviderAccess,
   url: string,
-  post?: { body: string; contentType: string }
-): Promise<{ text: string; contentType: string }> => {
+  post?: { body: string; contentType: string },
+  maxBytes: number = answerMaxBytes
+): Promise<{ bytes: ArrayBuffer; contentType: string }> => {
   if (!isProviderUrl(url, hosts)) {
     throw new SourceError(`${name} handed back a link to another host`, {
       resync: true,
     });
   }
-  budget.spend();
+  access.budget.spend();
+  const credential =
+    "credential" in access
+      ? access.credential
+      : { header: "authorization", value: `Bearer ${access.token}` };
   const response = await fetch(url, {
     method: post === undefined ? "GET" : "POST",
     headers: {
       ...headers,
       ...(post === undefined ? {} : { "content-type": post.contentType }),
-      authorization: `Bearer ${token}`,
+      [credential.header]: credential.value,
     },
     ...(post === undefined ? {} : { body: post.body }),
     redirect: "manual",
@@ -300,11 +305,11 @@ const requestProvider = async (
     throw new SourceError(`${name} answered ${status}`, { status });
   }
   const bytes = await response.arrayBuffer();
-  if (bytes.byteLength > answerMaxBytes) {
+  if (bytes.byteLength > maxBytes) {
     throw new SourceError(`${name}'s answer is too large`);
   }
   return {
-    text: new TextDecoder().decode(bytes),
+    bytes,
     contentType: response.headers.get("content-type") ?? "",
   };
 };
@@ -323,8 +328,29 @@ export const providerJson = (name: string, text: string): unknown => {
 export const readFromProvider =
   (spec: ProviderSpec) =>
   async (access: ProviderAccess, url: string): Promise<unknown> => {
-    const { text } = await requestProvider(spec, access, url);
-    return providerJson(spec.name, text);
+    const { bytes } = await requestProvider(spec, access, url);
+    return providerJson(spec.name, new TextDecoder().decode(bytes));
+  };
+
+/**
+ * Fetches a file's bytes from a provider, as `requestProvider` sends it:
+ * at most `maxBytes`, larger is refused.
+ */
+export const bytesFromProvider =
+  (spec: ProviderSpec) =>
+  async (
+    access: ProviderAccess,
+    url: string,
+    maxBytes: number
+  ): Promise<Uint8Array> => {
+    const { bytes } = await requestProvider(
+      spec,
+      access,
+      url,
+      undefined,
+      maxBytes
+    );
+    return new Uint8Array(bytes);
   };
 
 /**
@@ -338,5 +364,13 @@ export const postToProvider =
     url: string,
     body: string,
     contentType: string
-  ): Promise<{ text: string; contentType: string }> =>
-    await requestProvider(spec, access, url, { body, contentType });
+  ): Promise<{ text: string; contentType: string }> => {
+    const answer = await requestProvider(spec, access, url, {
+      body,
+      contentType,
+    });
+    return {
+      text: new TextDecoder().decode(answer.bytes),
+      contentType: answer.contentType,
+    };
+  };

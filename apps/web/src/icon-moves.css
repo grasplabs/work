@@ -911,6 +911,13 @@
   --icon-time: 0.7s;
 }
 
+/* The cloud drifts a little and comes back. */
+.lucide-cloud > * {
+  --icon-move: icon-there;
+  --icon-x: 1.5px;
+  --icon-time: 0.6s;
+}
+
 /* The brackets step apart and back. */
 .lucide-code > :nth-child(1) {
   --icon-move: icon-there;
@@ -1317,6 +1324,17 @@
   --icon-turn: 12deg;
   --icon-origin: 50% 85%;
   --icon-time: 0.6s;
+}
+
+/* The two lights blink, one after the other. */
+.lucide-hard-drive > :nth-child(4) {
+  --icon-move: icon-flash;
+  --icon-time: 0.6s;
+}
+.lucide-hard-drive > :nth-child(1) {
+  --icon-move: icon-flash;
+  --icon-time: 0.6s;
+  --icon-wait: 0.15s;
 }
 
 /* The four lines are drawn one by one. */
@@ -2239,6 +2257,14 @@
 .lucide-refresh-ccw {
   --icon-move: icon-to;
   --icon-turn: -180deg;
+  --icon-time: 0.6s;
+  --icon-ease: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Turns on half a turn, where it looks the same again. */
+.lucide-refresh-cw {
+  --icon-move: icon-to;
+  --icon-turn: 180deg;
   --icon-time: 0.6s;
   --icon-ease: cubic-bezier(0.4, 0, 0.2, 1);
 }

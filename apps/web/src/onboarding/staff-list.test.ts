@@ -1,3 +1,4 @@
+import type { DirectoryPerson } from "@grasp-os/shared/directory";
 import {
   onboardingPeopleMax,
   onboardingTeamsMax,
@@ -8,9 +9,11 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   csvRows,
+  directoryListOf,
   exampleList,
   StaffListError,
   staffListOf,
+  withLeadsFrom,
   withSaved,
 } from "./staff-list.ts";
 
@@ -325,5 +328,212 @@ describe("a staff list shared again", () => {
 
   it("is the list itself when nothing was saved before", () => {
     expect(withSaved(first, null)).toStrictEqual(first);
+  });
+});
+
+/** Someone in a directory, as connect reads them. */
+const inDirectory = (
+  id: string,
+  fields: Partial<DirectoryPerson> = {}
+): DirectoryPerson => ({
+  id,
+  name: `Person ${id}`,
+  email: `${id}@acme.test`,
+  department: "",
+  title: "",
+  manager: null,
+  ...fields,
+});
+
+describe("the teams and people in a directory", () => {
+  it("makes teams of departments, leads of who most of a team reports to, and puts people in no department under Other, as a roster core takes", () => {
+    const list = directoryListOf(
+      [
+        // The head of customer service reports outside it: still its lead.
+        inDirectory("daan", {
+          name: "Daan Bakker",
+          department: "Customer service",
+          title: "Head of customer service",
+          manager: "ceo",
+        }),
+        inDirectory("lisa", {
+          name: "Lisa Jansen",
+          department: "Customer service",
+          manager: "daan",
+        }),
+        // Google names a manager by their email address.
+        inDirectory("tim", {
+          name: "Tim de Vries",
+          department: "Customer service",
+          manager: "daan@acme.test",
+        }),
+        inDirectory("ceo", { name: "Eva Visser", title: "Managing director" }),
+        inDirectory("sofia", {
+          name: "Sofia Garcia",
+          department: "Finance",
+          title: "Finance lead",
+          manager: "ceo",
+        }),
+      ],
+      "Other"
+    );
+    const teams = list.roster.teams.map(({ name, lead }) => ({
+      name,
+      lead: list.roster.people.find((person) => person.id === lead)?.name,
+      people: list.roster.people
+        .filter(
+          (person) =>
+            list.roster.teams.find((team) => team.name === name)?.id ===
+            person.team
+        )
+        .map((person) => person.name),
+    }));
+    expect({
+      teams,
+      leadsFrom: list.leadsFrom,
+      taken: rosterSchema.safeParse(list.roster).success,
+    }).toStrictEqual({
+      teams: [
+        {
+          name: "Customer service",
+          lead: "Daan Bakker",
+          people: ["Daan Bakker", "Lisa Jansen", "Tim de Vries"],
+        },
+        { name: "Other", lead: "Eva Visser", people: ["Eva Visser"] },
+        { name: "Finance", lead: "Sofia Garcia", people: ["Sofia Garcia"] },
+      ],
+      leadsFrom: "manager",
+      taken: true,
+    });
+  });
+
+  it("gives everyone the id the same person has from a staff list, so their link stays whichever way they came in", () => {
+    const fromList = staffListOf(
+      [
+        ["Name", "Email", "Team", "Job title"],
+        ["Daan Bakker", "Daan@acme.test", "Customer service", "Team lead"],
+        ["Lisa Jansen", "", "Customer service", "Agent"],
+      ],
+      "Other"
+    );
+    const fromDirectory = directoryListOf(
+      [
+        inDirectory("1", {
+          name: "Daan Bakker",
+          email: "daan@acme.test",
+          department: "Customer service",
+          title: "Team lead",
+        }),
+        inDirectory("2", {
+          name: "Lisa Jansen",
+          email: "",
+          department: "Customer service",
+          title: "Agent",
+          manager: "1",
+        }),
+      ],
+      "Other"
+    );
+    expect(fromDirectory.roster).toStrictEqual(fromList.roster);
+  });
+
+  it("is refused with nobody in it, or more people than an onboarding takes", () => {
+    const tooMany = Array.from(
+      { length: onboardingPeopleMax + 1 },
+      (_, index) => inDirectory(String(index))
+    );
+    expect(() => directoryListOf([], "Other")).toThrow(
+      new StaffListError("empty")
+    );
+    expect(() => directoryListOf(tooMany, "Other")).toThrow(
+      new StaffListError("large")
+    );
+  });
+});
+
+describe("the leads from the HR platform", () => {
+  it("come before the leads the roster had, while what the admin set stays: a team switched off, someone away, a lead where the platform names none", () => {
+    // From the directory: one manager for all, so its leads were guessed by job.
+    const before = directoryListOf(
+      [
+        inDirectory("daan", {
+          name: "Daan Bakker",
+          department: "Customer service",
+        }),
+        inDirectory("lisa", {
+          name: "Lisa Jansen",
+          department: "Customer service",
+          title: "Team lead",
+        }),
+        inDirectory("sofia", { name: "Sofia Garcia", department: "Finance" }),
+        inDirectory("joost", { name: "Joost Smit", department: "Finance" }),
+      ],
+      "Other"
+    ).roster;
+    const [service, finance] = before.teams;
+    const saved: Roster = {
+      teams: before.teams.map((team) =>
+        team.id === finance?.id
+          ? {
+              ...team,
+              lead:
+                before.people.find(({ name }) => name === "Joost Smit")?.id ??
+                null,
+              off: true,
+            }
+          : team
+      ),
+      people: before.people.map((person) =>
+        person.name === "Lisa Jansen" ? { ...person, away: true } : person
+      ),
+    };
+    // HiBob knows who reports to whom in customer service, not in finance.
+    const fromHr = directoryListOf(
+      [
+        inDirectory("1", {
+          name: "Daan Bakker",
+          email: "daan@acme.test",
+          department: "Customer service",
+        }),
+        inDirectory("2", {
+          name: "Lisa Jansen",
+          email: "lisa@acme.test",
+          department: "Customer service",
+          manager: "1",
+        }),
+        inDirectory("3", {
+          name: "Sofia Garcia",
+          email: "sofia@acme.test",
+          department: "Finance",
+        }),
+        inDirectory("4", {
+          name: "Joost Smit",
+          email: "joost@acme.test",
+          department: "Finance",
+        }),
+      ],
+      "Other"
+    ).roster;
+    const merged = withLeadsFrom(fromHr, saved);
+    const nameOf = (id: string | null) =>
+      merged.people.find((person) => person.id === id)?.name;
+    expect({
+      teams: merged.teams.map((team) => ({
+        id: team.id,
+        lead: nameOf(team.lead),
+        off: team.off,
+      })),
+      away: merged.people
+        .filter((person) => person.away)
+        .map((person) => person.name),
+      taken: rosterSchema.safeParse(merged).success,
+    }).toStrictEqual({
+      teams: [
+        { id: service?.id, lead: "Daan Bakker", off: false },
+        { id: finance?.id, lead: "Joost Smit", off: true },
+      ],
+      away: ["Lisa Jansen"],
+      taken: true,
+    });
   });
 });

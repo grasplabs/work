@@ -2,7 +2,7 @@ import type { PermissionRequest } from "@grasp-os/shared/permissions";
 import type { Role } from "@grasp-os/shared/roles";
 import { describe, expect, it } from "vite-plus/test";
 
-import { grantReviewed, release } from "./apps.ts";
+import { grantReviewed, published, release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { auditedDuring, outcome, signedInApi, unique } from "./sign-in.ts";
 
@@ -35,6 +35,7 @@ const exportsOf = (
 /** A new App of `owner`'s. */
 const newApp = async (owner: Person, name = "App"): Promise<string> => {
   const { id } = await owner.api.apps.create({ name: `${name} ${unique()}` });
+  await published(id);
   return id;
 };
 

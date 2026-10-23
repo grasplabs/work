@@ -4,7 +4,7 @@ import type { AuditEvent } from "@grasp-os/shared/audit";
 import { applyOutput } from "@grasp-os/shared/chat";
 import type { ChatOutput, ChatUpdate } from "@grasp-os/shared/chat";
 import type { WorkspaceId } from "@grasp-os/shared/ids";
-import { chatIdSchema } from "@grasp-os/shared/ids";
+import { chatIdSchema, workspaceIdSchema } from "@grasp-os/shared/ids";
 import { memoryMaxLimit } from "@grasp-os/shared/memory";
 import { modelErrors } from "@grasp-os/shared/models";
 import { permissionErrors } from "@grasp-os/shared/permissions";
@@ -294,6 +294,7 @@ describe("chat agent", () => {
       answer: "You are the person this chat belongs to.",
       // It read nothing: nothing to label it with.
       provenance: { sources: [], restricted: false },
+      cited: [],
     });
     // The code ran with the API core gave it, which knows whom it acts for.
     await expect(codeResults(stub, chat.id)).resolves.toStrictEqual([
@@ -344,6 +345,33 @@ describe("chat agent", () => {
     ]);
     // Metadata only: never the question or the code.
     expect(JSON.stringify(events)).not.toContain("1 + 1");
+  });
+
+  it("names the chat platform a chat came through in the audit of its turns", async () => {
+    const { userId } = await signedInWithRole(idp, "user");
+    const id = workspaceIdSchema.parse(crypto.randomUUID());
+    const stub = workspace(env, id);
+    const chat = await stub.createChat(
+      "Questions",
+      userId,
+      id,
+      undefined,
+      undefined,
+      undefined,
+      "teams"
+    );
+    await pointAtGateway(stub, fakeGateway(says("Hello.")));
+
+    await stub.ask(chat.id, { text: "Hi.", model });
+
+    const [event] = await modelCallsBy(userId, 1);
+    expect(chat.via).toBe("teams");
+    expect(event?.actor).toStrictEqual({
+      type: "agent",
+      agentId: id,
+      onBehalfOf: userId,
+      via: "teams",
+    });
   });
 
   it("hands what the code throws back to the model, which goes on", async () => {
@@ -2294,6 +2322,60 @@ describe("chat agent code output", () => {
             outcome: "refused",
             reason: "agent.revocation_read_failed",
           },
+        ]);
+      },
+      { timeout: 10_000, interval: 100 }
+    );
+  });
+
+  it("names the chat platform a chat came through in the record of a run's output it withheld", async () => {
+    const { userId } = await signedInWithRole(idp, "user");
+    const id = workspaceIdSchema.parse(crypto.randomUUID());
+    const stub = workspace(env, id);
+    const chat = await stub.createChat(
+      "Questions",
+      userId,
+      id,
+      undefined,
+      undefined,
+      undefined,
+      "teams"
+    );
+    await pointAtGateway(
+      stub,
+      fakeGateway(
+        codeStep(
+          "export default async () => { console.log('read'); await scheduler.wait(1_500); return 'secret'; };"
+        ),
+        says("Done.")
+      )
+    );
+
+    await withRevocationReads(
+      stub,
+      async () => {
+        await Promise.resolve();
+        throw new Error("D1 is down for a moment");
+      },
+      async () => {
+        await stub.ask(chat.id, { text: "Log it.", model });
+      }
+    );
+
+    await vi.waitFor(
+      async () => {
+        const events = await allEvents();
+        expect(
+          events
+            .filter(
+              ({ action, detail }) =>
+                action === "agent.call" &&
+                detail.chat === chat.id &&
+                detail.method === "output"
+            )
+            .map(({ actor }) => actor)
+        ).toStrictEqual([
+          { type: "agent", agentId: id, onBehalfOf: userId, via: "teams" },
         ]);
       },
       { timeout: 10_000, interval: 100 }

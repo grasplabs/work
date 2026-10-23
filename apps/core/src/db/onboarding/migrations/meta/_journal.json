@@ -117,8 +117,36 @@
     {
       "idx": 16,
       "version": "6",
-      "when": 1792739938505,
-      "tag": "0016_brain_sent_parent",
+      "when": 1792745842083,
+      "tag": "0016_setup_choices",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1792753241203,
+      "tag": "0017_links_taken",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1792760263292,
+      "tag": "0018_counted_works",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "6",
+      "when": 1792781986426,
+      "tag": "0019_settled_works",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "6",
+      "when": 1792791489492,
+      "tag": "0020_brain_sent_parent",
       "breakpoints": true
     }
   ]

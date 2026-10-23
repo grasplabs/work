@@ -1,19 +1,25 @@
-import type { ChatProvenance } from "@grasp-os/shared/chat";
+import type { ChatCitedDocument, ChatProvenance } from "@grasp-os/shared/chat";
 import { Badge } from "@grasp-os/ui/components/badge";
-import { Plural, Trans } from "@lingui/react/macro";
+import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";
 import {
   BookIcon,
   BookOpenIcon,
   CableIcon,
   ChevronDownIcon,
+  FileTextIcon,
 } from "lucide-react";
+import { useEffect, useState } from "react";
+
+import { loadFromCore } from "../load-from-core.tsx";
+import { useCore } from "../use-core.ts";
 
 // What the chat's answers may hold, in the prototype's sources look
 // (grasplabs/prototype `components/ai-elements/sources.tsx`): the
 // collections and connections core says the chat read from, each
-// collection one link away in Knowledge. Only what core reports: the page
-// never guesses a source.
+// collection one link away in Knowledge; and under each answer, the
+// documents it cites. Only what core reports: the page never guesses a
+// source.
 
 /** A source the chat read, as the page names it. */
 export interface SourceName {
@@ -87,5 +93,79 @@ export const ChatSources = ({
         </details>
       )}
     </div>
+  );
+};
+
+/**
+ * The documents a stored answer cites, numbered under it in the order it
+ * first links to them, each with its path and the start of what it says,
+ * and each opening on its collection's page (`?doc=`). Core looks them up
+ * as the chat's agent for the person, when the answer shows: a document
+ * either can no longer read isn't among them. Nothing shows until core
+ * answers, nor when it can't: the answer's own links still open each.
+ */
+export const AnswerSources = ({
+  chatId,
+  messageId,
+}: {
+  chatId: string;
+  messageId: number;
+}) => {
+  const { t } = useLingui();
+  const core = useCore();
+  const [cited, setCited] = useState<ChatCitedDocument[]>([]);
+  useEffect(() => {
+    let current = true;
+    const read = async (): Promise<void> => {
+      const found = await loadFromCore(
+        core,
+        async (session) => await session.chats.cited(chatId, messageId)
+      );
+      if (current && found.state === "ready") {
+        setCited(found.data);
+      }
+    };
+    void read();
+    return () => {
+      current = false;
+    };
+  }, [core, chatId, messageId]);
+  if (cited.length === 0) {
+    return null;
+  }
+  return (
+    <ol aria-label={t`Sources`} className="flex flex-col gap-2 text-xs">
+      {cited.map(
+        ({ documentId, collectionId, title, path, snippet }, index) => (
+          <li key={documentId}>
+            <Link
+              className="group flex items-start gap-2"
+              params={{ collection: collectionId }}
+              search={{ doc: documentId }}
+              to="/knowledge/$collection"
+            >
+              <span className="text-muted-foreground w-4 flex-none text-right tabular-nums">
+                {index + 1}
+              </span>
+              <FileTextIcon
+                aria-hidden="true"
+                className="text-muted-foreground mt-px size-3.5 flex-none"
+              />
+              <span className="flex min-w-0 flex-col gap-0.5">
+                <span className="text-primary font-medium group-hover:underline">
+                  {title}
+                </span>
+                <span className="text-muted-foreground truncate">{path}</span>
+                {snippet === "" ? null : (
+                  <span className="text-muted-foreground line-clamp-2">
+                    {snippet}
+                  </span>
+                )}
+              </span>
+            </Link>
+          </li>
+        )
+      )}
+    </ol>
   );
 };

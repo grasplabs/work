@@ -307,6 +307,8 @@ test("the sidebar shows everyone the sections, and Settings each person the sect
         "Models",
         "AI spend",
         "Pulse",
+        // The company admin's view of the onboarding interviews.
+        "Onboarding",
         "Audit trail",
         // Every person's calls of unknown outcome, read only, for admins.
         "Unknown outcomes",
@@ -390,7 +392,9 @@ test("an engine whose contents can't be read, or never come, keeps its card, and
   pageOf,
 }) => {
   const brokenName = `Broken ${crypto.randomUUID()}`;
-  const broken = await newApp(builder, brokenName, {});
+  // Released, so published: on the Published tab with the others, as a
+  // draft is on a tab of its own.
+  const broken = await newApp(builder, brokenName);
   const page = await pageOf(builder);
   // The page asks core for this engine's contents as for an App core
   // doesn't have, which core refuses.
@@ -418,7 +422,7 @@ test("an engine whose contents can't be read, or never come, keeps its card, and
   // list shows, where a page waiting on every read would say core can't
   // be reached.
   const hangingName = `Hanging ${crypto.randomUUID()}`;
-  const hanging = await newApp(builder, hangingName, {});
+  const hanging = await newApp(builder, hangingName);
   const waiting = await pageOf(builder);
   const gate = await callGate(waiting, hanging);
   gate.hold();

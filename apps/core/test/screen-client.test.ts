@@ -31,7 +31,7 @@ import { buildScreens } from "../src/screens.ts";
 import { sessionRecheckMs } from "../src/session-check.ts";
 import { StoreHost } from "../src/store-host.ts";
 import { storeMaxWatches } from "../src/store-watches.ts";
-import { pastAccessRecheck, requestGranted } from "./apps.ts";
+import { pastAccessRecheck, published, requestGranted } from "./apps.ts";
 import { runCron } from "./cron.ts";
 import { mockIdp } from "./idp.ts";
 import { newTeam, readCollection } from "./knowledge.ts";
@@ -71,6 +71,7 @@ const openedApp = async (appFiles: Record<string, string> = files) => {
   const builder = await personApi("builder");
   const admin = await personApi("admin");
   const { id } = await builder.api.apps.create({ name: "Notes" });
+  await published(id);
   const { version } = await builder.api.apps.files.commit(
     id,
     appFiles,
@@ -830,6 +831,7 @@ describe("a screen's build", { timeout: 120_000 }, () => {
     // either is sealed yet, so the references come from the files.
     const builder = await personApi("builder");
     const { id } = await builder.api.apps.create({ name: "Notes" });
+    await published(id);
     const { builds } = await builder.api.apps.files.commit(id, files, "First");
     expect(builds.screens).toMatchObject({ status: "ok", diagnostics: [] });
     const broken = await builder.api.apps.files.commit(
@@ -852,6 +854,7 @@ describe("a screen's build", { timeout: 120_000 }, () => {
     const own = { ...files, "operations/notes.ts": operations };
     const before = await inspections();
     const { id } = await builder.api.apps.create({ name: "Notes" });
+    await published(id);
     await builder.api.apps.files.commit(id, own, "First");
     // A screen changed, the server code not: what was inspected is kept.
     await builder.api.apps.files.commit(
@@ -881,6 +884,7 @@ describe("a screen's build", { timeout: 120_000 }, () => {
   ): Promise<string[]> => {
     const builder = await personApi("builder");
     const { id } = await builder.api.apps.create({ name: "Notes" });
+    await published(id);
     const { version } = await builder.api.apps.files.commit(
       id,
       appFiles,

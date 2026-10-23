@@ -153,6 +153,7 @@ const failures: Readonly<Record<string, FailureReason>> = {
   "screen.input_too_large": "bad-input",
   "app.not_running": "not-running",
   "screen.build_failed": "broken",
+  "screen.not_sealed": "broken",
   "screen.build_slow": "timed-out",
   // Asked again until the page's wait for a build was spent (`openPreview`).
   "app.preview_superseded": "timed-out",

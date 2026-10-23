@@ -295,7 +295,7 @@ const gatewayVar = (env: ModelsEnv): unknown =>
 
 /**
  * The deployment's model gateway config: deployment config, set by the
- * console as the `MODEL_GATEWAY` var, never an in-product setting, so an
+ * admin as the `MODEL_GATEWAY` var, never an in-product setting, so an
  * admin session can't allow a model the client didn't agree to; the
  * default config while none is set. One that doesn't parse counts as none
  * at all: `undefined`, and every call fails closed.
@@ -337,6 +337,8 @@ const modelRules = (env: ModelsEnv): ModelRules | undefined => {
 export const gatewaySettings = (
   env: ModelsEnv
 ): {
+  /** The deployment's AI Gateway; `undefined` while the config doesn't parse. */
+  gateway: string | undefined;
   models: string[];
   voices: string[];
   roles: Partial<Record<ModelRole, string>>;
@@ -345,6 +347,7 @@ export const gatewaySettings = (
   const config = modelGatewayConfig(env);
   const allowed = config?.models ?? [];
   return {
+    gateway: config?.gateway,
     models: allowed.filter((ref) => parseModelRef(ref) !== undefined),
     voices: allowed.filter((ref) => parseVoiceRef(ref) !== undefined),
     roles: config?.roles ?? {},
@@ -690,7 +693,7 @@ const gatewayHeaders = (call: Session): ProviderHeaders => ({
   // The gateway logs metadata, never prompts or answers.
   "cf-aig-collect-log-payload": "false",
   // Never an answer from the gateway's cache, whatever the gateway is set
-  // to (one the console adopted keeps its settings): a cached answer is
+  // to (one the admin adopted keeps its settings): a cached answer is
   // one person's, and would be served to another.
   "cf-aig-skip-cache": "true",
   // So the gateway's log can be searched by why and for what kind of

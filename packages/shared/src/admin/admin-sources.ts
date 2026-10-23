@@ -67,7 +67,7 @@ export interface AdminSource {
 export const ADMIN_SOURCES: readonly AdminSource[] = [
   {
     // The admin's own MCP: what every chat about Grasp's companies asks.
-    // Its tools are written (admin-tools.ts); it is live once the console
+    // Its tools are written (admin-tools.ts); it is live once the admin
     // serves them to Grasp's staff (GRA-656).
     id: "grasp",
     ours: true,
@@ -79,7 +79,7 @@ export const ADMIN_SOURCES: readonly AdminSource[] = [
     tools: [],
   },
   {
-    // Each company's own platform, deployed into its own Cloudflare account by the console.
+    // Each company's own platform, deployed into its own Cloudflare account by the admin.
     id: "console",
     ours: true,
     state: "planned",

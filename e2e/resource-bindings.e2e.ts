@@ -97,6 +97,9 @@ const engineOf = async (
     const { id } = await api.apps.create({ name });
     const { version } = await api.apps.files.commit(id, files, name);
     await api.apps.versions.setCurrent(id, version);
+    // Published, for the people it is shared with (a draft is its
+    // builders' alone).
+    await api.apps.publish(id);
     return id;
   } finally {
     core[Symbol.dispose]();

@@ -1,35 +1,35 @@
 /**
  * The release manifest: the contract between CI, which builds core and
- * connect once per commit (scripts/release), and the console, which imports
+ * connect once per commit (scripts/release), and the admin, which imports
  * each release and deploys those exact bytes into client accounts.
  *
  * Blobs are content-addressed, in two schemes on purpose:
  * - Worker modules and D1 migrations by their full SHA-256 (hex): our own
- *   scheme, for deduplication in R2 and for checking that what the console
+ *   scheme, for deduplication in R2 and for checking that what the admin
  *   deploys is what CI built.
  * - Static assets by the content key of Cloudflare's assets-upload API:
  *   SHA-256 of base64(contents) plus the file's extension, hex, cut to 32
  *   characters. The API treats it as an opaque key per file (Wrangler
- *   computes the same shape with BLAKE3), so CI and the console only have to
+ *   computes the same shape with BLAKE3), so CI and the admin only have to
  *   agree with each other, byte for byte.
  *
  * Account-specific values in a Worker's bindings are placeholders the
- * console fills in for the Worker it deploys:
+ * admin fills in for the Worker it deploys:
  *
  *   $D1_<BINDING>_ID   the id of the D1 database that binding names
  *
- * The placeholder list is closed: the console refuses a `$` token it doesn't
- * know, so the generator and the console change together, behind
+ * The placeholder list is closed: the admin refuses a `$` token it doesn't
+ * know, so the generator and the admin change together, behind
  * MANIFEST_VERSION.
  *
- * Nothing but Web APIs, so CI (Node) and the console (workerd) verify a
+ * Nothing but Web APIs, so CI (Node) and the admin (workerd) verify a
  * release with the same code.
  */
 import { z } from "zod";
 
 import { toHex } from "./encoding.ts";
 
-/** The manifest shape the console must understand (see the header comment). */
+/** The manifest shape the admin must understand (see the header comment). */
 export const MANIFEST_VERSION = 1;
 
 /** A binding's name, as wrangler.jsonc and the Workers API take it. */
@@ -106,7 +106,7 @@ const workerEntrySchema = z.strictObject({
   crons: z.array(z.string()),
   /** Secrets that must be set before this Worker can be deployed. */
   requiredSecrets: z.array(bindingNameSchema),
-  /** Keep the vars the console set on the previous version. */
+  /** Keep the vars the admin set on the previous version. */
   keepVars: z.boolean(),
   workersDev: z.boolean(),
   previewUrls: z.boolean(),
@@ -134,15 +134,44 @@ const versionRangeSchema = z
   .refine(({ min, max }) => min <= max, "A range's min is at most its max");
 
 /**
- * What a release's code works with, which the console checks before it
+ * A D1 database's schema, by migration number: the `0016` of
+ * `0016_pending_action_keys.sql`. Migrations are numbered in the order
+ * they're applied, so a schema is its newest migration's number.
+ */
+const migrationNumberSchema = z.int().nonnegative();
+
+/** What a release's code needs of one D1 database, and what its schema keeps. */
+const databaseSchemaSchema = z
+  .strictObject({
+    /**
+     * The schema its code needs: its newest migration, which a deploy
+     * applies before any of its code runs.
+     */
+    schema: migrationNumberSchema,
+    /**
+     * The oldest schema whose code still runs on this one: code of a
+     * release whose newest migration is older doesn't. A migration that
+     * only expands leaves it where it is; one that contracts (drops or
+     * renames what an older release's code uses) raises it.
+     */
+    compatibleFrom: migrationNumberSchema,
+  })
+  .refine(
+    ({ schema, compatibleFrom }) => compatibleFrom <= schema,
+    "A schema is compatible from no later than itself"
+  );
+
+/**
+ * What a release's code works with, which the admin checks before it
  * makes the release live in a client (spec 40.3): every Worker that
  * calls another must call the version that one serves, at each step of a
  * deploy or rollback, since a client's Workers switch one at a time; and
  * the release must read every workflow journal and run every App
- * release the client's current code may have left. Database schemas are
- * the release's migrations themselves: they only expand for the code of
- * the release before, so a deploy applies them first, and a rollback
- * goes back no further than that release.
+ * release the client's current code may have left, and run on every D1
+ * database's schema the client's migrations left: a deploy applies the
+ * release's migrations first, but a rollback applies none, and a
+ * release's code may run on the schema of a later one only as far as
+ * that one's migrations kept it working.
  */
 export const releaseCompatibilitySchema = z.strictObject({
   /**
@@ -161,6 +190,13 @@ export const releaseCompatibilitySchema = z.strictObject({
   workflowJournal: versionRangeSchema,
   /** The SDK protocol versions of the App releases core runs. */
   sdkProtocols: versionRangeSchema,
+  /**
+   * By name, each D1 database it ships migrations for. Releases built
+   * before it was declared have none, and the admin checks their
+   * schemas only by the old rule: migrations only expand for the release
+   * before, and a rollback goes back no further than that release.
+   */
+  databases: z.record(workerNameSchema, databaseSchemaSchema).optional(),
 });
 
 export type ReleaseCompatibility = z.infer<typeof releaseCompatibilitySchema>;
@@ -188,7 +224,7 @@ export const releaseManifestSchema = z.strictObject({
   assets: z.record(assetHash, z.strictObject({ size, r2Key: z.string() })),
   /**
    * What its code works with. Releases built before it was declared
-   * have none, and the console makes none of those live.
+   * have none, and the admin makes none of those live.
    */
   compatibility: releaseCompatibilitySchema.optional(),
 });

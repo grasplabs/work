@@ -2,8 +2,11 @@ import { z } from "zod";
 
 import type { OutboxedAuditEvent, OutboxRejected } from "./audit.ts";
 import type { HeldBinding } from "./capability.ts";
+import { directoryProviderSchema } from "./directory.ts";
+import { placesProviderSchema } from "./document-places.ts";
 import { defineErrorFamily, isExpectedError } from "./errors.ts";
 import type { CodedError } from "./errors.ts";
+import { hrProviderSchema } from "./hr.ts";
 import {
   chatIdSchema,
   connectionIdSchema,
@@ -21,7 +24,7 @@ import { eventTypeSchema } from "./workflows.ts";
  * The version of the interface connect serves core over the service
  * binding (its entrypoint's methods, and the calls and answers in this
  * file). A release's core and connect don't switch at once in a client
- * (the console deploys connect first, and a rollback restores core
+ * (the admin deploys connect first, and a rollback restores core
  * first), so a change a core of the release before couldn't call
  * correctly, or one that needs a connect of this release, is a new
  * version, with the range below moved to say which cores work with
@@ -113,13 +116,17 @@ export type OAuthProvider = z.infer<typeof oauthProviderSchema>;
 
 /**
  * Names no app may take: the suites above, whose sign-in connect handles
- * itself; the landscape's admin connections (`./landscape.ts`), which no
- * connector's calls may use; and Composio, whose connections are another
- * kind.
+ * itself; the landscape's, the directory's, the documents' and the HR
+ * platform's admin connections (`./landscape.ts`, `./directory.ts`,
+ * `./document-places.ts`, `./hr.ts`), which no connector's calls may use;
+ * and Composio, whose connections are another kind.
  */
 const reservedProviderIds: ReadonlySet<string> = new Set([
   ...oauthProviderSchema.options,
   ...landscapeProviderSchema.options,
+  ...directoryProviderSchema.options,
+  ...placesProviderSchema.options,
+  ...hrProviderSchema.options,
   "composio",
 ]);
 
@@ -183,10 +190,16 @@ export type ConnectionPerson = z.infer<typeof connectionPersonSchema>;
 export const startConnectionSchema = z.strictObject({
   person: connectionPersonSchema,
   /**
-   * A connector's provider, or the landscape's read-only admin connection
-   * of a suite, which no connector's calls use.
+   * A connector's provider, or a read-only admin connection of a suite
+   * (the landscape's, the directory's, the documents'), which no
+   * connector's calls use.
    */
-  provider: z.union([connectorProviderSchema, landscapeProviderSchema]),
+  provider: z.union([
+    connectorProviderSchema,
+    landscapeProviderSchema,
+    directoryProviderSchema,
+    placesProviderSchema,
+  ]),
   scope: connectionScopeSchema,
   /** The deployment's origin, from its config: the provider returns there. */
   origin: z.url(),
@@ -222,7 +235,11 @@ export const apiKeyMaxLength = 4096;
  */
 export const connectWithKeySchema = z.strictObject({
   person: connectionPersonSchema,
-  provider: appProviderSchema,
+  /**
+   * An app's provider, or an HR platform's read-only admin connection,
+   * which no connector's calls use.
+   */
+  provider: z.union([appProviderSchema, hrProviderSchema]),
   scope: connectionScopeSchema,
   /** Printable ASCII only: it goes into a request header as it is. */
   key: z
@@ -720,6 +737,58 @@ export interface CatalogTool {
    */
   readOnly: boolean;
 }
+
+/**
+ * Whom a tool reaches: only the person it acts for (`own`: their mail,
+ * their calendar, a draft in their mailbox), what the company keeps
+ * together (`company`: a SharePoint library, a shared drive), or other
+ * people (`others`: anything that reaches someone else, such as sending
+ * an email). A tool that can reach further than its usual call says the
+ * furthest: a drive tool that takes a person's OneDrive or a SharePoint
+ * library is `company`.
+ */
+export const toolReaches = ["own", "company", "others"] as const;
+export const toolReachSchema = z.enum(toolReaches);
+export type ToolReach = z.infer<typeof toolReachSchema>;
+
+/**
+ * The classes a company turns on or off, rather than tool by tool. `never`
+ * is the platform's own rule, for what Grasp never does whatever a company
+ * turns on: no tool's reach makes one.
+ */
+export const toolClasses = [
+  "read-own",
+  "read-company",
+  "change-own",
+  "change-company",
+  "reach-others",
+  "never",
+] as const;
+export type ToolClass = (typeof toolClasses)[number];
+
+/**
+ * A tool's class, from what it declares. Reaching others is its own class
+ * whatever the flags say: a read that reaches someone (a read receipt, a
+ * meeting's attendees told) still reaches them. Otherwise a read-only tool
+ * reads and any other changes something. Whether a change destroys
+ * anything doesn't move it to another class: it decides how a held call
+ * reads, not whether the class is on.
+ */
+export const toolClassOf = ({
+  readOnly,
+  reach,
+}: {
+  readOnly: boolean;
+  reach: ToolReach;
+}): Exclude<ToolClass, "never"> => {
+  if (reach === "others") {
+    return "reach-others";
+  }
+  if (readOnly) {
+    return reach === "own" ? "read-own" : "read-company";
+  }
+  return reach === "own" ? "change-own" : "change-company";
+};
 
 /**
  * What an admin consents to before connecting a Composio toolkit: shown to
@@ -1551,7 +1620,7 @@ export const connectionErrors = defineErrorFamily({
   "connection.not_offered":
     "Your organization doesn't offer this connection. An admin can offer it.",
   "connection.scopes_refused":
-    "The provider granted more or less access than this connection asks for, so it wasn't kept. Connect it with Grasp's landscape app, granting exactly what it asks.",
+    "The provider granted more or less access than this connection asks for, so it wasn't kept. Connect it again, granting exactly what it asks.",
   "connection.own_auth_required":
     "Composio holds no sign-in app for this one: connecting it needs your organization's own, which Grasp can't take yet.",
 });
