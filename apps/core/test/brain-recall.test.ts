@@ -4,6 +4,7 @@ import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import { brainOf } from "../src/knowledge/ports.ts";
 import { d1BrainStore } from "../src/knowledge/recall-store.ts";
 import { recall } from "../src/knowledge/recall.ts";
 import { requestGranted } from "./apps.ts";
@@ -474,7 +475,7 @@ describe("the Brain's recall", setUpTime, () => {
     const word = rareWord();
     await collectionSaying(admin, "everyone", `# Onboarding\n${word}`);
     const person = await admin.api.whoami();
-    const store = d1BrainStore(env);
+    const store = d1BrainStore(brainOf(env));
     let searched = false;
     const slowAccess = {
       ...store,
@@ -491,7 +492,7 @@ describe("the Brain's recall", setUpTime, () => {
     };
     const started = Date.now();
     const pack = await recall(
-      env,
+      brainOf(env),
       { type: "person", person },
       { query: word, budget: { deadlineMs: 200 } },
       undefined,

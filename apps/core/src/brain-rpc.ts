@@ -47,6 +47,7 @@ import {
 import type { HeldRecords, OnboardingHeld } from "./brain-records.ts";
 import { catalogEntries, personOf } from "./connections.ts";
 import { organizations } from "./db/core/schema.ts";
+import { brainOf } from "./knowledge/ports.ts";
 import { intakeIds } from "./onboarding/brain-intake.ts";
 import { mondayOf } from "./onboarding/rules.ts";
 import { onboardingStore } from "./onboarding/store.ts";
@@ -841,7 +842,7 @@ export class BrainRpc extends CoreRpcTarget implements BrainApi {
   async notes(options?: unknown): Promise<BrainNotePage> {
     return await withPerson(
       this.#check,
-      async (person) => await brainNotes(this.#env, person, options)
+      async (person) => await brainNotes(brainOf(this.#env), person, options)
     );
   }
 
@@ -850,7 +851,7 @@ export class BrainRpc extends CoreRpcTarget implements BrainApi {
       this.#check,
       async (person) =>
         await brainChanges(
-          this.#env,
+          brainOf(this.#env),
           person,
           options,
           sourceChanges(await onboardingFacts(this.#env, person))
