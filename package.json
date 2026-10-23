@@ -25,7 +25,8 @@
     "release:build": "node scripts/release/build-release.ts",
     "release:upload": "node scripts/release/upload-release.ts",
     "package:definition": "node scripts/package-definition.ts",
-    "parity": "node scripts/parity/run.ts"
+    "parity": "node scripts/parity/run.ts",
+    "discord:commands": "node scripts/discord-commands.ts"
   },
   "devDependencies": {
     "@commitlint/cli": "catalog:",
