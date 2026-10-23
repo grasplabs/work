@@ -202,6 +202,28 @@ describe("audit event bounds", () => {
   });
 
   it.each([
+    { type: "agent", agentId: "a", onBehalfOf: "u", via: "teams" },
+    { type: "agent", agentId: "a", onBehalfOf: "u" },
+    { type: "person", userId: "u", via: "google-chat" },
+    { type: "person", userId: "u" },
+  ])("keeps the chat platform an actor came through, if any: %o", (actor) => {
+    expect(auditEventSchema.parse({ ...event, actor }).actor).toStrictEqual(
+      actor
+    );
+  });
+
+  it.each([
+    ["Grasp's own app", "web"],
+    ["free text", "Microsoft Teams"],
+    ["an uppercase letter", "Teams"],
+    ["a name over 32 characters", `t${"x".repeat(32)}`],
+  ])("refuses as the chat platform %s", (_case, via) => {
+    expect(
+      valid({ actor: { type: "agent", agentId: "a", onBehalfOf: "u", via } })
+    ).toBeFalsy();
+  });
+
+  it.each([
     ["one word", "login"],
     ["an uppercase letter", "Model.call"],
     ["a space", "model.call now"],

@@ -52,7 +52,12 @@ import { appHost } from "./durable-objects.ts";
 //   (`sensitiveAgain`).
 // - What an admin decided about the exact build (`artifact`, the hash of
 //   the code a frame runs): `approved`, `revoked`, or nothing yet. A
-//   revoked build gets nothing, however the data is classified.
+//   revoked build gets nothing, however the data is classified. The one
+//   approval no admin gives is the release's, for a copy of a built-in
+//   blueprint built from exactly the code the release vouches for, with
+//   the kit it vouches for it with (screen-builds.ts, app-blueprints.ts):
+//   recorded as Grasp's (`decided_by` `grasp`), never over an admin's
+//   decision, and taken back by an admin as any approval.
 //
 // What could go wrong, and what stops it:
 //

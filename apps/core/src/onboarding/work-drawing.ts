@@ -10,6 +10,9 @@ import {
 } from "@grasp-os/shared/admin/onboarding-admin";
 import type { OrgRules } from "@grasp-os/shared/admin/onboarding-admin";
 import type { DrawnWork, Told } from "@grasp-os/shared/admin/org-record";
+import type { SettleChoice } from "@grasp-os/shared/onboarding";
+import { orgRulesSchema } from "@grasp-os/shared/onboarding-staff";
+import type { StaffWorks } from "@grasp-os/shared/onboarding-staff";
 import { z } from "zod";
 
 import { gatewaySettings, modelForRole, models } from "../models.ts";
@@ -475,6 +478,29 @@ export const drawnWorkSchema = z.object({
 }) satisfies z.ZodType<DrawnWork>;
 
 /**
+ * Every piece of work as staff read it (`StaffWorks`), checked on its way
+ * out: only what the schema names leaves core.
+ */
+export const staffWorksSchema = z.object({
+  works: z.array(
+    z.object({
+      id: z.string(),
+      team: z.string(),
+      name: z.string(),
+      local: z.string().optional(),
+      item: z.tuple([z.string(), z.string()]),
+      doers: z.array(z.string()),
+      share: z.number(),
+      from: z.enum(["lead", "grasp"]),
+      drawn: drawnWorkSchema.nullable(),
+      stale: z.boolean(),
+    })
+  ),
+  rules: orgRulesSchema,
+  counted: z.array(z.string()),
+}) satisfies z.ZodType<StaffWorks>;
+
+/**
  * What the people a piece of work was drawn from told of it, in the order
  * they agreed: how many told each step, which ways a step told two ways
  * was told, and how many facts each added and how many of those were new.
@@ -507,6 +533,40 @@ const heardOf = (drawn: DrawnWork | null, talked: readonly string[]) => {
   return { described, ways, added };
 };
 
+/**
+ * Whether a step is told two ways, and whether why is known, once the
+ * admin settled it (`holds`): both ways kept are explained, and one way
+ * holding leaves one way.
+ */
+const settledOf = (
+  drawn: DrawnWork | null,
+  ways: ReadonlySet<boolean>,
+  holds: SettleChoice | null
+): { differs: boolean; explained: boolean } => ({
+  differs: ways.size === 2 && (holds === null || holds === "both"),
+  explained: drawn?.differs?.why !== "conflict" || holds === "both",
+});
+
+/**
+ * Where a piece of work stands with what Grasp counted as known by hand:
+ * that holds, unless people tell a step two ways and nobody can say why.
+ */
+const withHand = (
+  byRules: WorkflowState,
+  variants: number,
+  counted: boolean
+): { state: WorkflowState; byHand: boolean } => {
+  const byHand =
+    counted &&
+    byRules !== "complete" &&
+    byRules !== "variants" &&
+    byRules !== "blocked";
+  if (!byHand) {
+    return { state: byRules, byHand };
+  }
+  return { state: variants > 0 ? "variants" : "complete", byHand };
+};
+
 /** How far a piece of work is known, under the organization's rules. */
 export interface WorkKnown extends WorkflowEvidence {
   state: WorkflowState;
@@ -514,6 +574,8 @@ export interface WorkKnown extends WorkflowEvidence {
   everyone: boolean;
   /** So many interviews without settling that it is better split in two. */
   split: boolean;
+  /** Grasp counts it as known by hand, before the rules say so. */
+  byHand: boolean;
 }
 
 /**
@@ -525,7 +587,11 @@ export interface WorkKnown extends WorkflowEvidence {
  * blocks it; and more than the most interviews without settling means two
  * pieces of work in one. `told` is who it was drawn from, in the order
  * they agreed; `doers` who does it, away people left out; `lead` the
- * team's lead, whose overview alone never makes it known.
+ * team's lead, whose overview alone never makes it known; `holds` how the
+ * admin settled a difference nobody could explain: both ways kept makes
+ * them variants, and one way holding leaves no difference at all.
+ * `counted`: Grasp counts it as known by hand, which holds unless people
+ * tell a step two ways and nobody can say why.
  */
 export const knownOf = (
   drawn: DrawnWork | null,
@@ -535,12 +601,16 @@ export const knownOf = (
     told,
     doers,
     lead,
+    holds = null,
+    counted = false,
   }: {
     id: string;
     team: string;
     told: readonly string[];
     doers: readonly string[];
     lead: string | null;
+    holds?: SettleChoice | null;
+    counted?: boolean;
   },
   rules: OrgRules = STARTING_ORG_RULES
 ): WorkKnown => {
@@ -551,8 +621,7 @@ export const knownOf = (
   const { described, ways, added } = heardOf(drawn, talked);
   const recent = added.slice(-own.run);
   const said = recent.reduce((sum, { all }) => sum + all, 0);
-  const differs = ways.size === 2;
-  const explained = drawn?.differs?.why !== "conflict";
+  const { differs, explained } = settledOf(drawn, ways, holds);
   const everyone =
     doers.length > 0 &&
     doers.every((person) => talked.includes(person)) &&
@@ -574,17 +643,19 @@ export const knownOf = (
     unexplained: differs && !explained ? 1 : 0,
   };
   // With nobody left to ask, more interviews can't add facts: it is as known as it gets. Without a step drawn it isn't known at all.
-  let state: WorkflowState = "mapping";
+  let byRules: WorkflowState = "mapping";
   if (steps.length > 0) {
-    state = workflowState(
+    byRules = workflowState(
       everyone ? { ...evidence, lastNew: 0 } : evidence,
       own
     );
   }
+  const { state, byHand } = withHand(byRules, evidence.variants, counted);
   return {
     ...evidence,
     state,
     everyone,
-    split: !everyone && needsSplit(evidence, own),
+    split: !byHand && !everyone && needsSplit(evidence, own),
+    byHand,
   };
 };

@@ -477,6 +477,20 @@ export const versionTree = async (
   return { tree: await sha256Hex(json), json };
 };
 
+/**
+ * The hash of `files`' code: their tree without AGENTS.md, which an App's
+ * agents write as they learn and nothing builds or runs. Two versions of
+ * the same code have the same hash, whatever their AGENTS.md: what the
+ * release vouches for in a built-in blueprint (app-blueprints.ts).
+ */
+export const codeIdentity = async (
+  files: ReadonlyMap<string, string>
+): Promise<string> => {
+  const code = new Map(files);
+  code.delete(appMemoryPath);
+  return await sha256Hex(canonicalJson(Object.fromEntries(code)));
+};
+
 /** Stores a tree under its hash, before any version row names it. */
 export const storeTree = async (
   env: Env,
@@ -814,6 +828,7 @@ export const commitFiles = async (
     version: (latest?.version ?? 0) + 1,
     parent: latest?.version ?? null,
     tree,
+    code: await codeIdentity(files),
     files: files.size,
     authorId: by.userId,
     message: text,
@@ -1009,6 +1024,7 @@ export const proposeDraft = async (
     version: (parent ?? 0) + 1,
     parent,
     tree,
+    code: await codeIdentity(files),
     files: files.size,
     authorId: by.userId,
     message: text,
@@ -1719,19 +1735,20 @@ export const makeCurrent = async (
     // is left is a conflict: the base moved, or the candidate ended.
     throw appErrors.create("app.conflict");
   }
-  // What its screens build to with this release's kit, which may not be
-  // the one it was committed under, and with the references they import,
-  // read back from its release, checked above (screen-builds.ts): in the
-  // background, never something making it current waits on. Bounded by
-  // the build wait; what doesn't get recorded now is when it is opened or
+  // What its screens build to, for what waits on an admin
+  // (screen-builds.ts), in the background: read from the release, which
+  // sealed them (screen-references.ts), checked above, so nothing is
+  // compiled. What doesn't get recorded now is when it is opened or
   // reviewed.
   waitUntil(
     recordVersionBuilds(env, appId, number, files, {
-      // Imported here, not at the top: the references reach releases,
-      // which reach back into this module for App lookups.
-      withReferences: async (built) => {
-        const { withScreenReferences } = await import("./screen-references.ts");
-        return await withScreenReferences(env, appId, number, built);
+      // Imported here, not at the top: the screens reach releases, which
+      // reach back into this module for App lookups.
+      codesOf: async () => {
+        const { versionScreenCodes } = await import("./screen-references.ts");
+        return await versionScreenCodes(env, appId, number, files, {
+          unsealed: "refuse",
+        });
       },
     })
   );

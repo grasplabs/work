@@ -35,7 +35,9 @@ const said = (
 ): string => {
   const data: SetupData = {
     admin: "Ada",
+    company: null,
     view: view(paused, sponsor),
+    links: [],
     documents: [],
     sendingDomain: "mail.example.test",
     gate: {
@@ -49,6 +51,11 @@ const said = (
       openedAt: null,
       staff: null,
     },
+    review: { differences: [], mapped: 0 },
+    directory: null,
+    hr: null,
+    suites: [],
+    places: null,
     choices: noChoices,
     signIn: ["microsoft"],
     identity: {

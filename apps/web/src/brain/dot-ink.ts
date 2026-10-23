@@ -206,3 +206,64 @@ export const bucketOf = (alpha: number, heat: number): number => {
   const h = Math.min(HEATS - 1, Math.round(heat * (HEATS - 1)));
   return h * ALPHAS + a;
 };
+
+/** A brain on screen: its canvas, the size it is drawn at, and per dot where it is drawn, how large, and its bucket. */
+interface LiveBrain {
+  element: HTMLCanvasElement;
+  size: number;
+  x: Float32Array;
+  y: Float32Array;
+  radius: Float32Array;
+  bucket: Uint16Array;
+}
+
+/** Every brain on screen, the newest last: one that goes leaves the ones before it standing. */
+let live: LiveBrain[] = [];
+
+/**
+ * A brain says it is on screen, so the way into the platform can take its
+ * very dots over (`brainDots`); the function it gets back says it has gone.
+ */
+export const showBrain = (brain: LiveBrain): (() => void) => {
+  live = [...live, brain];
+  return () => {
+    live = live.filter((each) => each !== brain);
+  };
+};
+
+/**
+ * The dots of the brain on screen right now, in page pixels, or null when
+ * there is none: the newest one. Only the dots that are printed.
+ */
+export const brainDots = (): BrainDots | null => {
+  const brain = live.findLast((each) => each.element.isConnected);
+  const box = brain?.element.getBoundingClientRect();
+  if (brain === undefined || box === undefined || box.width === 0) {
+    return null;
+  }
+  const scale = box.width / brain.size;
+  const printed: number[] = [];
+  for (const [index, bucket] of brain.bucket.entries()) {
+    if (bucket % ALPHAS > 0) {
+      printed.push(index);
+    }
+  }
+  const dots: BrainDots = {
+    count: printed.length,
+    x: new Float32Array(printed.length),
+    y: new Float32Array(printed.length),
+    r: new Float32Array(printed.length),
+    alpha: new Float32Array(printed.length),
+    heat: new Float32Array(printed.length),
+    middle: { x: box.left + box.width / 2, y: box.top + box.height / 2 },
+  };
+  for (const [at, index] of printed.entries()) {
+    const bucket = brain.bucket[index] ?? 0;
+    dots.x[at] = box.left + (brain.x[index] ?? 0) * scale;
+    dots.y[at] = box.top + (brain.y[index] ?? 0) * scale;
+    dots.r[at] = (brain.radius[index] ?? 0) * scale;
+    dots.alpha[at] = (bucket % ALPHAS) / (ALPHAS - 1);
+    dots.heat[at] = Math.floor(bucket / ALPHAS) / (HEATS - 1);
+  }
+  return dots;
+};

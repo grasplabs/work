@@ -144,7 +144,7 @@ interface KnowledgeHooks {
   /** Before each statement is made. */
   prepare?: (query: string) => void;
   /** Before each batch runs: throwing fails it. */
-  beforeBatch?: () => void;
+  beforeBatch?: () => void | Promise<void>;
   /** After each batch ran, before the caller gets its results. */
   afterBatch?: () => Promise<void>;
 }
@@ -161,7 +161,7 @@ const apiWith = async (person: Person, hooks: KnowledgeHooks) => {
       return real.prepare(query);
     },
     batch: async <T>(statements: D1PreparedStatement[]) => {
-      hooks.beforeBatch?.();
+      await hooks.beforeBatch?.();
       const results = await real.batch<T>(statements);
       await hooks.afterBatch?.();
       return results;
@@ -539,6 +539,7 @@ describe("a personal purge", setUpTime, () => {
         versions: 2,
         occurrences: 0,
         inLongerWords: 0,
+        memories: 1,
         hostCopies: 0,
         originals: 0,
         token: "string",
@@ -808,6 +809,7 @@ describe("a purge of content", setUpTime, () => {
             versions: 4,
             occurrences: 8,
             inLongerWords: 0,
+            memories: 0,
             hostCopies: 0,
           },
         },
@@ -824,6 +826,39 @@ describe("a purge of content", setUpTime, () => {
         },
       ],
       carriesText: false,
+    });
+  });
+
+  it("removes a term typed with a combining accent from text typed the same way", async () => {
+    const admin = await personOf("admin");
+    const decomposed = `Rene\u0301${unique()}`;
+    const handbook = await admin.api.knowledge.createCollection({
+      name: "Handbook",
+      access: "everyone",
+    });
+    const document = await saveOver(
+      admin,
+      handbook.id,
+      "team.md",
+      `# Team\n${decomposed} runs payroll.`
+    );
+    const { plan, result } = await purged(admin, {
+      type: "content",
+      documentIds: [document.id],
+      terms: [decomposed],
+      reason: "erasure_request",
+    });
+    expect({
+      occurrences: plan.occurrences,
+      stillFound: result.stillFound,
+      texts: await versionTexts(document.id),
+    }).toStrictEqual({
+      occurrences: 1,
+      stillFound: 0,
+      texts: [
+        "# Team\n(removed) runs payroll.",
+        "# Team\n(removed) runs payroll.",
+      ],
     });
   });
 
@@ -1671,66 +1706,71 @@ describe("a purge of content", setUpTime, () => {
     });
   });
 
-  it("removes a term wherever the search index keeps it as a token of its own, so no search finds it after", async () => {
-    const admin = await personOf("admin");
-    const handbook = await admin.api.knowledge.createCollection({
-      name: "Handbook",
-      access: "everyone",
-    });
-    // The index's tokenizer ends a token at each of these, where a name is
-    // still the name: an underscore, a dot, an at sign, a soft hyphen, a
-    // zero-width joiner, a spacing vowel sign, a combining grapheme joiner,
-    // a variation selector, an Arabic tanween, a Devanagari vowel sign
-    // that is a combining mark. It drops a combining acute from the token,
-    // so the name with one after it is the name: both go. A private-use
-    // character it keeps in the token, which the name goes from too.
-    const name = `Visser${unique()}`;
-    const [
-      softHyphen,
-      joiner,
-      visarga,
-      graphemeJoiner,
-      variation,
-      tanween,
-      vowelSign,
-      acute,
-      privateUse,
-    ] = [
-      0xad, 0x20_0d, 0x9_03, 0x3_4f, 0xfe_0f, 0x6_4b, 0x9_41, 0x3_01, 0xe0_00,
-    ].map((codePoint) => String.fromCodePoint(codePoint));
-    const marks = [graphemeJoiner, variation, tanween, vowelSign];
-    const document = await saveOver(
-      admin,
-      handbook.id,
-      "team.md",
-      `# Team\n${name}_jan, Tom.${name}, ${name.toLowerCase()}@acme.test, ${name}${softHyphen}jan, ${name}${joiner}jan and ${name}${visarga} left.\n${marks.map((mark) => `${name}${mark}jan`).join(", ")}, ${name}${acute} and ${name}${privateUse} left.`
-    );
-    const heldBefore = await holding(name);
-    const { plan, result } = await purged(admin, {
-      type: "content",
-      documentIds: [document.id],
-      terms: [name],
-      reason: "offboarding",
-    });
-    const read = await admin.api.knowledge.getDocument(document.id);
-    const found = await admin.api.knowledge.search(name);
-    expect({
-      heldBefore: heldBefore.includes("search_words_data.block"),
-      occurrences: plan.occurrences,
-      text: read.version.text,
-      held: await holding(name),
-      found: found.hits.length,
-      stillFound: result.stillFound,
-    }).toStrictEqual({
-      heldBefore: true,
-      // Twelve in the version saved.
-      occurrences: 12,
-      text: `# Team\n(removed)_jan, Tom.(removed), (removed)@acme.test, (removed)${softHyphen}jan, (removed)${joiner}jan and (removed)${visarga} left.\n${marks.map((mark) => `(removed)${mark}jan`).join(", ")}, (removed) and (removed)${privateUse} left.`,
-      held: [],
-      found: 0,
-      stillFound: 0,
-    });
-  });
+  // Ending in "e", the acute after it merges with it into one character
+  // ("é"), which the index splits apart again; ending in "x", it can't.
+  it.each(["e", "x"])(
+    "removes a term wherever the search index keeps it as a token of its own, so no search finds it after, for a name ending in %s",
+    async (ending) => {
+      const admin = await personOf("admin");
+      const handbook = await admin.api.knowledge.createCollection({
+        name: "Handbook",
+        access: "everyone",
+      });
+      // The index's tokenizer ends a token at each of these, where a name is
+      // still the name: an underscore, a dot, an at sign, a soft hyphen, a
+      // zero-width joiner, a spacing vowel sign, a combining grapheme joiner,
+      // a variation selector, an Arabic tanween, a Devanagari vowel sign
+      // that is a combining mark. It drops a combining acute from the token,
+      // so the name with one after it is the name: both go. A private-use
+      // character it keeps in the token, which the name goes from too.
+      const name = `Visser${unique()}${ending}`;
+      const [
+        softHyphen,
+        joiner,
+        visarga,
+        graphemeJoiner,
+        variation,
+        tanween,
+        vowelSign,
+        acute,
+        privateUse,
+      ] = [
+        0xad, 0x20_0d, 0x9_03, 0x3_4f, 0xfe_0f, 0x6_4b, 0x9_41, 0x3_01, 0xe0_00,
+      ].map((codePoint) => String.fromCodePoint(codePoint));
+      const marks = [graphemeJoiner, variation, tanween, vowelSign];
+      const document = await saveOver(
+        admin,
+        handbook.id,
+        "team.md",
+        `# Team\n${name}_jan, Tom.${name}, ${name.toLowerCase()}@acme.test, ${name}${softHyphen}jan, ${name}${joiner}jan and ${name}${visarga} left.\n${marks.map((mark) => `${name}${mark}jan`).join(", ")}, ${name}${acute} and ${name}${privateUse} left.`
+      );
+      const heldBefore = await holding(name);
+      const { plan, result } = await purged(admin, {
+        type: "content",
+        documentIds: [document.id],
+        terms: [name],
+        reason: "offboarding",
+      });
+      const read = await admin.api.knowledge.getDocument(document.id);
+      const found = await admin.api.knowledge.search(name);
+      expect({
+        heldBefore: heldBefore.includes("search_words_data.block"),
+        occurrences: plan.occurrences,
+        text: read.version.text,
+        held: await holding(name),
+        found: found.hits.length,
+        stillFound: result.stillFound,
+      }).toStrictEqual({
+        heldBefore: true,
+        // Twelve in the version saved.
+        occurrences: 12,
+        text: `# Team\n(removed)_jan, Tom.(removed), (removed)@acme.test, (removed)${softHyphen}jan, (removed)${joiner}jan and (removed)${visarga} left.\n${marks.map((mark) => `(removed)${mark}jan`).join(", ")}, (removed) and (removed)${privateUse} left.`,
+        held: [],
+        found: 0,
+        stillFound: 0,
+      });
+    }
+  );
 
   it("removes a name with a hyphen in it", async () => {
     const admin = await personOf("admin");
@@ -1878,9 +1918,10 @@ describe("a purge of content", setUpTime, () => {
     });
     // "José" twice: once with its accent as one character, which only a
     // Unicode-aware boundary keeps from ending "Jos", and once as an e and
-    // a combining acute, which the search index drops from the token, so
-    // it is "Jose" to the index and goes with it. A soft hyphen and a
-    // zero-width non-joiner end a word, as they end the index's token.
+    // a combining acute. The index drops the accent from both, so both are
+    // "Jose" to it, and go with that term. "Renée" is a longer word than
+    // "René" and stays. A soft hyphen and a zero-width non-joiner end a
+    // word, as they end the index's token.
     const decomposed = `Jose${String.fromCodePoint(0x3_01)}`;
     const softHyphen = String.fromCodePoint(0xad);
     const nonJoiner = String.fromCodePoint(0x20_0c);
@@ -1888,7 +1929,7 @@ describe("a purge of content", setUpTime, () => {
       admin,
       handbook.id,
       "team.md",
-      `# Team\nRené, rené and RENÉ left; Renée stays.\nJos, Jose and ${decomposed} left; José stays.\nTom left; Tom${softHyphen}my and Tom${nonJoiner}s go.`
+      `# Team\nRené, rené and RENÉ left; Renée stays.\nJos, Jose, ${decomposed} and José left.\nTom left; Tom${softHyphen}my and Tom${nonJoiner}s go.`
     );
     await purged(admin, {
       type: "content",
@@ -1898,7 +1939,7 @@ describe("a purge of content", setUpTime, () => {
     });
     const read = await admin.api.knowledge.getDocument(document.id);
     expect(read.version.text).toBe(
-      `# Team\n(removed), (removed) and (removed) left; Renée stays.\n(removed), (removed) and (removed) left; José stays.\n(removed) left; (removed)${softHyphen}my and (removed)${nonJoiner}s go.`
+      `# Team\n(removed), (removed) and (removed) left; Renée stays.\n(removed), (removed), (removed) and (removed) left.\n(removed) left; (removed)${softHyphen}my and (removed)${nonJoiner}s go.`
     );
   });
 
@@ -2147,6 +2188,507 @@ describe("a purge of content", setUpTime, () => {
       first: "# Log\nQz was here.",
       hugeKept: true,
       versions: 3,
+    });
+  });
+});
+
+/** Remembers `text` as `person`, under a key of its own. */
+const rememberAs = async (person: Person, text: string) =>
+  await person.api.knowledge.remember(
+    { kind: "fact", text },
+    { idempotencyKey: `purge-${unique()}-${unique()}` }
+  );
+
+/** The memory record a remember's receipt names. */
+const memoryIdOf = ({
+  resourceRefs,
+}: Awaited<ReturnType<typeof rememberAs>>): string => {
+  const [ref] = resourceRefs;
+  return ref?.kind === "memory" ? ref.memoryId : "";
+};
+
+/** `person`'s own memory statements, sorted. */
+const statementsOf = async (person: Person): Promise<string[]> => {
+  const { records } = await person.api.knowledge.memoriesList();
+  return records.map(({ statement }) => statement).toSorted();
+};
+
+/** Whether a statement of the purge's batch writes or deletes records. */
+const writesRecords = (query: string): boolean =>
+  /^(?:update|delete from) "brain_memories"/iu.test(query);
+
+describe("a purge of content's memory records", setUpTime, () => {
+  it("redacts or deletes every record holding a term, whoever's, audited without the text", async () => {
+    const admin = await personOf("admin");
+    const leaver = await personOf("user");
+    const colleague = await personOf("user");
+    const name = `Visser${unique()}`;
+    const handbook = await admin.api.knowledge.createCollection({
+      name: "Handbook",
+      access: "everyone",
+    });
+    const document = await saveOver(
+      admin,
+      handbook.id,
+      "team.md",
+      `# Team\n${name} runs payroll.`
+    );
+    const key = `purge-${unique()}-${unique()}`;
+    const redacted = await leaver.api.knowledge.remember(
+      { kind: "fact", text: `I report to ${name}.` },
+      { idempotencyKey: key }
+    );
+    const deleted = await rememberAs(colleague, `${name.toUpperCase()}!`);
+    await rememberAs(colleague, "I work in payroll.");
+    const input: PurgeInput = {
+      type: "content",
+      documentIds: [document.id],
+      terms: [name],
+      reason: "erasure_request",
+    };
+    let outcomeOf: Awaited<ReturnType<typeof purged>> | undefined;
+    const events = await auditedDuring(async () => {
+      outcomeOf = await purged(admin, input);
+    });
+    // A retry of the remember answers its receipt: it never stores the
+    // statement again.
+    const retried = await leaver.api.knowledge.remember(
+      { kind: "fact", text: `I report to ${name}.` },
+      { idempotencyKey: key }
+    );
+    const leavers = await leaver.api.knowledge.memoriesList();
+    const colleagues = await colleague.api.knowledge.memoriesList();
+    const purgeId = outcomeOf?.result.purgeId;
+    expect({
+      planned: outcomeOf?.plan.memories,
+      stillFound: outcomeOf?.result.stillFound,
+      leavers: leavers.records.map(({ statement, revision }) => ({
+        statement,
+        revision,
+      })),
+      colleagues: colleagues.records.map(({ statement }) => statement),
+      deleted: await outcome(
+        colleague.api.knowledge.memoriesGet({ memoryId: memoryIdOf(deleted) })
+      ),
+      receipts: [
+        await outcome(
+          leaver.api.knowledge.receiptsGet({ receiptId: redacted.id })
+        ),
+        await outcome(
+          colleague.api.knowledge.receiptsGet({ receiptId: deleted.id })
+        ),
+      ],
+      retried: retried.id === redacted.id,
+      held: await holding(name),
+      memoryEvents: events
+        .filter(({ action }) => action === "knowledge.memory.purged")
+        .map(({ actor, target, detail }) => ({ actor, target, detail }))
+        .toSorted((one, other) =>
+          (one.target?.id ?? "").localeCompare(other.target?.id ?? "")
+        ),
+      prepared: events.find(
+        ({ action }) => action === "knowledge.purge.prepared"
+      )?.detail.memories,
+      carriesText: JSON.stringify(events)
+        .toLowerCase()
+        .includes(name.toLowerCase()),
+    }).toStrictEqual({
+      planned: 2,
+      stillFound: 0,
+      leavers: [{ statement: "I report to (removed).", revision: 2 }],
+      colleagues: ["I work in payroll."],
+      deleted: "brain.not_found",
+      receipts: ["ok", "ok"],
+      retried: true,
+      held: [],
+      memoryEvents: [
+        {
+          actor: { type: "person", userId: admin.userId },
+          target: { type: "memory", id: memoryIdOf(redacted) },
+          detail: { purgeId, change: "redacted", revision: 1 },
+        },
+        {
+          actor: { type: "person", userId: admin.userId },
+          target: { type: "memory", id: memoryIdOf(deleted) },
+          detail: { purgeId, change: "deleted", revision: 1 },
+        },
+      ].toSorted((one, other) => one.target.id.localeCompare(other.target.id)),
+      prepared: 2,
+      carriesText: false,
+    });
+  });
+
+  it("changes neither records nor documents when its batch of records fails, and finishes when run again", async () => {
+    const admin = await personOf("admin");
+    const teammate = await personOf("user");
+    const name = `Bakker${unique()}`;
+    const handbook = await admin.api.knowledge.createCollection({
+      name: "Handbook",
+      access: "everyone",
+    });
+    const document = await saveOver(
+      admin,
+      handbook.id,
+      "team.md",
+      `# Team\n${name} runs payroll.`
+    );
+    await rememberAs(teammate, `${name} approves leave.`);
+    await rememberAs(teammate, `Ask ${name} first.`);
+    let failNext = false;
+    const failing = await apiWith(admin, {
+      prepare: (query) => {
+        failNext ||= writesRecords(query);
+      },
+      beforeBatch: () => {
+        if (failNext) {
+          failNext = false;
+          throw new Error("D1 is unavailable");
+        }
+      },
+    });
+    const input: PurgeInput = {
+      type: "content",
+      documentIds: [document.id],
+      terms: [name],
+      reason: "erasure_request",
+    };
+    const plan = await failing.knowledge.preparePurge(input);
+    const refused = await outcome(failing.knowledge.purge(input, plan.token));
+    const afterFailure = {
+      memories: await statementsOf(teammate),
+      document: await versionTexts(document.id),
+    };
+    const again = await purged(admin, input);
+    expect({
+      refused: refused === "ok",
+      afterFailure,
+      again: again.result.stillFound,
+      memories: await statementsOf(teammate),
+      held: await holding(name),
+    }).toStrictEqual({
+      refused: false,
+      afterFailure: {
+        memories: [`${name} approves leave.`, `Ask ${name} first.`].toSorted(),
+        document: [`# Team\n${name} runs payroll.`],
+      },
+      again: 0,
+      memories: [
+        "(removed) approves leave.",
+        "Ask (removed) first.",
+      ].toSorted(),
+      held: [],
+    });
+  });
+
+  it("reports a record remembered after it read them, which a run again erases", async () => {
+    const admin = await personOf("admin");
+    const teammate = await personOf("user");
+    const name = `Smit${unique()}`;
+    const handbook = await admin.api.knowledge.createCollection({
+      name: "Handbook",
+      access: "everyone",
+    });
+    const document = await saveOver(
+      admin,
+      handbook.id,
+      "team.md",
+      `# Team\n${name} runs payroll.`
+    );
+    await rememberAs(teammate, `${name} approves leave.`);
+    // Another remember lands between the purge's read of the records and
+    // its batch rewriting them.
+    let raceNext = false;
+    let raced = false;
+    const racing = await apiWith(admin, {
+      prepare: (query) => {
+        raceNext ||= !raced && writesRecords(query);
+      },
+      beforeBatch: async () => {
+        if (raceNext) {
+          raceNext = false;
+          raced = true;
+          await rememberAs(teammate, `Thank ${name}.`);
+        }
+      },
+    });
+    const input: PurgeInput = {
+      type: "content",
+      documentIds: [document.id],
+      terms: [name],
+      reason: "erasure_request",
+    };
+    const plan = await racing.knowledge.preparePurge(input);
+    const first = await racing.knowledge.purge(input, plan.token);
+    const afterRace = await statementsOf(teammate);
+    const again = await purged(admin, input);
+    expect({
+      raced,
+      stillFound: first.stillFound,
+      afterRace,
+      again: again.result.stillFound,
+      memories: await statementsOf(teammate),
+      held: await holding(name),
+    }).toStrictEqual({
+      raced: true,
+      stillFound: 1,
+      afterRace: ["(removed) approves leave.", `Thank ${name}.`].toSorted(),
+      again: 0,
+      memories: ["(removed) approves leave.", "Thank (removed)."].toSorted(),
+      held: [],
+    });
+  });
+
+  it("finds a term typed with a combining accent or in another case as the same word", async () => {
+    const admin = await personOf("admin");
+    const teammate = await personOf("user");
+    const suffix = unique();
+    const term = `Ren\u00E9${suffix}`;
+    const decomposed = `Rene\u0301${suffix}`;
+    const handbook = await admin.api.knowledge.createCollection({
+      name: "Handbook",
+      access: "everyone",
+    });
+    const document = await saveOver(
+      admin,
+      handbook.id,
+      "team.md",
+      `# Team\n${term} runs payroll.`
+    );
+    await rememberAs(teammate, `I report to ${term}.`);
+    await rememberAs(teammate, `Ask ${term.toUpperCase()} first.`);
+    await rememberAs(teammate, `I met ${decomposed} today.`);
+    // Typed decomposed as a term too: the same word.
+    const { plan, result } = await purged(admin, {
+      type: "content",
+      documentIds: [document.id],
+      terms: [decomposed],
+      reason: "erasure_request",
+    });
+    expect({
+      planned: plan.memories,
+      stillFound: result.stillFound,
+      memories: await statementsOf(teammate),
+    }).toStrictEqual({
+      planned: 3,
+      stillFound: 0,
+      memories: [
+        "Ask (removed) first.",
+        "I met (removed) today.",
+        "I report to (removed).",
+      ].toSorted(),
+    });
+  });
+
+  it("counts the forms it leaves on purpose, as the index would find them, in its plan and its check", async () => {
+    const admin = await personOf("admin");
+    const teammate = await personOf("user");
+    const suffix = unique();
+    const term = `Ren\u00E9${suffix}`;
+    const pair = `fiona${suffix} visser`;
+    const handbook = await admin.api.knowledge.createCollection({
+      name: "Handbook",
+      access: "everyone",
+    });
+    const document = await saveOver(
+      admin,
+      handbook.id,
+      "team.md",
+      `# Team\n${term} and ${pair} run payroll.`
+    );
+    // Without its accent, joined by a hyphen, and with a ligature: not
+    // the term as typed, so left, but the same tokens to the index.
+    const left = [
+      `Ask Rene${suffix} first.`,
+      `Ask fiona${suffix}-visser first.`,
+      `Ask \uFB01ona${suffix} visser first.`,
+    ];
+    for (const text of left) {
+      // oxlint-disable-next-line no-await-in-loop -- in order
+      await rememberAs(teammate, text);
+    }
+    await rememberAs(teammate, `Ask ${term} first.`);
+    // Inside a longer word: another token, never counted.
+    await rememberAs(teammate, `Ask Renes${suffix}x first.`);
+    const { plan, result } = await purged(admin, {
+      type: "content",
+      documentIds: [document.id],
+      terms: [term, pair],
+      reason: "erasure_request",
+    });
+    expect({
+      planned: plan.memories,
+      stillFound: result.stillFound,
+      memories: await statementsOf(teammate),
+    }).toStrictEqual({
+      planned: 4,
+      stillFound: 3,
+      memories: [
+        ...left,
+        "Ask (removed) first.",
+        `Ask Renes${suffix}x first.`,
+      ].toSorted(),
+    });
+  });
+
+  it("leaves a record changed between its read and its batch, unrecorded, and reports it", async () => {
+    const admin = await personOf("admin");
+    const teammate = await personOf("user");
+    const other = await personOf("user");
+    const name = `Jansen${unique()}`;
+    const handbook = await admin.api.knowledge.createCollection({
+      name: "Handbook",
+      access: "everyone",
+    });
+    const document = await saveOver(
+      admin,
+      handbook.id,
+      "team.md",
+      `# Team\n${name} runs payroll.`
+    );
+    await rememberAs(teammate, `${name} approves leave.`);
+    await rememberAs(other, `Ask ${name}.`);
+    // The teammate's record gets a new revision once the purge has read
+    // it: a concurrent change, which the purge must not overwrite.
+    let changeNext = false;
+    let changed = false;
+    const racing = await apiWith(admin, {
+      prepare: (query) => {
+        changeNext ||= !changed && writesRecords(query);
+      },
+      beforeBatch: async () => {
+        if (changeNext) {
+          changeNext = false;
+          changed = true;
+          await env.KNOWLEDGE.prepare(
+            "UPDATE brain_memories SET statement = statement || ' Again.', revision = revision + 1 WHERE owner_id = ?"
+          )
+            .bind(teammate.userId)
+            .run();
+        }
+      },
+    });
+    const input: PurgeInput = {
+      type: "content",
+      documentIds: [document.id],
+      terms: [name],
+      reason: "erasure_request",
+    };
+    let stillFound: number | undefined;
+    const events = await auditedDuring(async () => {
+      const plan = await racing.knowledge.preparePurge(input);
+      ({ stillFound } = await racing.knowledge.purge(input, plan.token));
+    });
+    expect({
+      changed,
+      stillFound,
+      teammate: await statementsOf(teammate),
+      other: await statementsOf(other),
+      events: events.filter(
+        ({ action }) => action === "knowledge.memory.purged"
+      ).length,
+    }).toStrictEqual({
+      changed: true,
+      stillFound: 1,
+      teammate: [`${name} approves leave. Again.`],
+      other: ["Ask (removed)."],
+      events: 1,
+    });
+  });
+
+  it("counts what it removes, where the index's tokens differ: a script without spaces, an emoji, a final sigma", async () => {
+    const admin = await personOf("admin");
+    const teammate = await personOf("user");
+    const tag = unique();
+    const cjk = `\u7530\u4E2D${tag}`;
+    const handbook = await admin.api.knowledge.createCollection({
+      name: "Handbook",
+      access: "everyone",
+    });
+    const document = await saveOver(
+      admin,
+      handbook.id,
+      "team.md",
+      "# Team\nNothing."
+    );
+    await rememberAs(teammate, `${cjk}\u3055\u3093\u306B\u805E\u304F`);
+    await rememberAs(teammate, `Ask Tom${tag}\u{1F642} now`);
+    await rememberAs(
+      teammate,
+      `Ask X${tag}\u039F\u0394\u03A5\u03A3\u03A3\u0395\u03A5\u03A3 now`
+    );
+    const { plan, result } = await purged(admin, {
+      type: "content",
+      documentIds: [document.id],
+      terms: [
+        cjk,
+        `Tom${tag}`,
+        `x${tag}\u03BF\u03B4\u03C5\u03C3\u03C3\u03B5\u03C5\u03C2`,
+      ],
+      reason: "erasure_request",
+    });
+    expect({
+      planned: plan.memories,
+      stillFound: result.stillFound,
+      memories: await statementsOf(teammate),
+    }).toStrictEqual({
+      planned: 3,
+      stillFound: 0,
+      memories: [
+        "(removed)\u3055\u3093\u306B\u805E\u304F",
+        "Ask (removed)\u{1F642} now",
+        "Ask (removed) now",
+      ].toSorted(),
+    });
+  });
+
+  it("reports a record in a script without spaces remembered after it read them", async () => {
+    const admin = await personOf("admin");
+    const teammate = await personOf("user");
+    const cjk = `\u7530\u4E2D${unique()}`;
+    const handbook = await admin.api.knowledge.createCollection({
+      name: "Handbook",
+      access: "everyone",
+    });
+    const document = await saveOver(
+      admin,
+      handbook.id,
+      "team.md",
+      "# Team\nNothing."
+    );
+    await rememberAs(teammate, `${cjk}\u3055\u3093\u306B\u805E\u304F`);
+    let raceNext = false;
+    let raced = false;
+    const racing = await apiWith(admin, {
+      prepare: (query) => {
+        raceNext ||= !raced && writesRecords(query);
+      },
+      beforeBatch: async () => {
+        if (raceNext) {
+          raceNext = false;
+          raced = true;
+          await rememberAs(teammate, `${cjk}\u3055\u3093\u306B\u611F\u8B1D`);
+        }
+      },
+    });
+    const input: PurgeInput = {
+      type: "content",
+      documentIds: [document.id],
+      terms: [cjk],
+      reason: "erasure_request",
+    };
+    const plan = await racing.knowledge.preparePurge(input);
+    const first = await racing.knowledge.purge(input, plan.token);
+    expect({
+      raced,
+      stillFound: first.stillFound,
+      memories: await statementsOf(teammate),
+    }).toStrictEqual({
+      raced: true,
+      stillFound: 1,
+      memories: [
+        "(removed)\u3055\u3093\u306B\u805E\u304F",
+        `${cjk}\u3055\u3093\u306B\u611F\u8B1D`,
+      ].toSorted(),
     });
   });
 });

@@ -1,3 +1,4 @@
+import type { DirectoryPerson } from "@grasp-os/shared/directory";
 import {
   onboardingPeopleMax,
   onboardingTeamsMax,
@@ -11,11 +12,13 @@ import type {
 import { z } from "zod";
 
 // A company's staff list, as its admin shares it in the onboarding: a CSV
-// or Excel file with a row per person. It is read in the browser and only
-// names, email addresses, teams and jobs are kept: enough to know who to
-// talk to and who leads which team. Its columns are found by their
-// headings, in any of the languages Grasp speaks, wherever they are. Pure.
-// From the prototype's `lib/staff-list.ts`.
+// or Excel file with a row per person; or its directory, read from the
+// Microsoft or Google sign-in it connected, which comes to a roster the
+// same way. It is read in the browser and only names, email addresses,
+// teams and jobs are kept: enough to know who to talk to and who leads
+// which team. Its columns are found by their headings, in any of the
+// languages Grasp speaks, wherever they are. Pure. From the prototype's
+// `lib/staff-list.ts`.
 
 type Column =
   | "name"
@@ -290,39 +293,37 @@ const leadOf = (
 
 const rank = { none: 0, title: 1, manager: 2, column: 3 } as const;
 
+/** One person as a list or a directory gives them, before they are on a roster. */
+interface Entry {
+  name: string;
+  email: string;
+  /** Their team's name; empty for none. */
+  team: string;
+  title: string;
+  /** Whether the list says they lead their team. */
+  lead: boolean;
+  /** Who they report to, by name or email address, in lower case; empty for nobody. */
+  manager: string;
+}
+
 /**
- * The teams and their people in a staff list. People without a team go in
- * one named `noTeam`. A team's lead is the one the list says leads it;
- * else the one most of the team reports to; else the one whose job says
- * they lead. The company's admin checks it on the next screen.
+ * The teams and their people, from the people a staff list or a directory
+ * gives, in order: the one path into a roster, so people keep their ids
+ * whichever way they come in. People without a team go in one named
+ * `noTeam`. A team's lead is the one the list says leads it; else the one
+ * most of the team reports to; else the one whose job says they lead.
  */
-export const staffListOf = (rows: string[][], noTeam: string): StaffList => {
-  const at = rows.slice(0, 10).findIndex((row) => columnsOf(row) !== null);
-  const found = at === -1 ? null : columnsOf(rows[at] ?? []);
-  if (found === null) {
-    throw new StaffListError("headings");
-  }
-  const cell = (row: string[], column: Column): string => {
-    const index = found[column];
-    return index === undefined
-      ? ""
-      : (row[index] ?? "").replaceAll(spaces, " ").trim();
-  };
+const rosterOf = (
+  entries: Iterable<Entry>,
+  noTeam: string
+): Pick<StaffList, "roster" | "leadsFrom"> => {
   const teams = new Map<string, RosterTeam>();
   const teamIdIn = teamIds();
   const people: RosterPerson[] = [];
   const said: Said[] = [];
-  let skipped = 0;
-  for (const row of rows.slice(at + 1)) {
-    const name = (
-      cell(row, "name") ||
-      [cell(row, "first"), cell(row, "last")].filter(Boolean).join(" ")
-    ).slice(0, textMost);
-    if (name === "") {
-      skipped += 1;
-      continue;
-    }
-    const teamName = (cell(row, "team") || noTeam).slice(0, textMost);
+  for (const entry of entries) {
+    const name = entry.name.slice(0, textMost);
+    const teamName = (entry.team || noTeam).slice(0, textMost);
     const { id: team, fresh } = teamIdIn(teamName);
     if (fresh) {
       if (teams.size >= onboardingTeamsMax) {
@@ -337,14 +338,14 @@ export const staffListOf = (rows: string[][], noTeam: string): StaffList => {
       });
     }
     // Only an email address is one: "n/a" or "-" in many rows would make them all one person.
-    const written = cell(row, "email").toLowerCase();
+    const written = entry.email.toLowerCase();
     const email = emailSchema.safeParse(written).success ? written : "";
     const person: RosterPerson = {
       id: personIdOf({ email, name, team }),
       name,
       email,
       team,
-      title: cell(row, "title").slice(0, textMost),
+      title: entry.title.slice(0, textMost),
       away: false,
     };
     if (people.some((each) => each.id === person.id)) {
@@ -354,12 +355,7 @@ export const staffListOf = (rows: string[][], noTeam: string): StaffList => {
       throw new StaffListError("large");
     }
     people.push(person);
-    // A "leidinggevende" column holds a name in one company and a yes in the next: a yes means they lead.
-    said.push({
-      person,
-      lead: yes.test(cell(row, "lead")) || yes.test(cell(row, "manager")),
-      manager: cell(row, "manager").toLowerCase(),
-    });
+    said.push({ person, lead: entry.lead, manager: entry.manager });
   }
   if (people.length === 0) {
     throw new StaffListError("empty");
@@ -374,7 +370,82 @@ export const staffListOf = (rows: string[][], noTeam: string): StaffList => {
       }
     }
   }
-  return { roster: { teams: [...teams.values()], people }, skipped, leadsFrom };
+  return { roster: { teams: [...teams.values()], people }, leadsFrom };
+};
+
+/**
+ * The teams and their people in a staff list, by its rows: those without
+ * a name are left out. The company's admin checks it on the next screen.
+ */
+export const staffListOf = (rows: string[][], noTeam: string): StaffList => {
+  const at = rows.slice(0, 10).findIndex((row) => columnsOf(row) !== null);
+  const found = at === -1 ? null : columnsOf(rows[at] ?? []);
+  if (found === null) {
+    throw new StaffListError("headings");
+  }
+  const cell = (row: string[], column: Column): string => {
+    const index = found[column];
+    return index === undefined
+      ? ""
+      : (row[index] ?? "").replaceAll(spaces, " ").trim();
+  };
+  let skipped = 0;
+  const entries: Entry[] = [];
+  for (const row of rows.slice(at + 1)) {
+    const name =
+      cell(row, "name") ||
+      [cell(row, "first"), cell(row, "last")].filter(Boolean).join(" ");
+    if (name === "") {
+      skipped += 1;
+      continue;
+    }
+    entries.push({
+      name,
+      email: cell(row, "email"),
+      team: cell(row, "team"),
+      title: cell(row, "title"),
+      // A "leidinggevende" column holds a name in one company and a yes in the next: a yes means they lead.
+      lead: yes.test(cell(row, "lead")) || yes.test(cell(row, "manager")),
+      manager: cell(row, "manager").toLowerCase(),
+    });
+  }
+  return { ...rosterOf(entries, noTeam), skipped };
+};
+
+/**
+ * The teams and their people in the organization's directory: teams from
+ * departments, leads from who reports to whom (else from jobs), and people
+ * in no department in the team named `noTeam`. A manager is named by
+ * their ID or email address in the directory, and found by either.
+ */
+export const directoryListOf = (
+  people: readonly DirectoryPerson[],
+  noTeam: string
+): StaffList => {
+  const byKey = new Map<string, DirectoryPerson>();
+  for (const person of people) {
+    byKey.set(person.id, person);
+    if (person.email !== "") {
+      byKey.set(person.email, person);
+    }
+  }
+  const entries = people.map((person): Entry => {
+    const manager =
+      person.manager === null ? undefined : byKey.get(person.manager);
+    return {
+      name: person.name,
+      email: person.email,
+      team: person.department,
+      title: person.title,
+      lead: false,
+      // As a staff list names them, so the lead is found the same way.
+      manager:
+        manager === undefined
+          ? ""
+          : manager.email || manager.name.toLowerCase(),
+    };
+  });
+  return { ...rosterOf(entries, noTeam), skipped: 0 };
 };
 
 /**
@@ -418,6 +489,28 @@ export const withSaved = (
       const before = savedPeople.get(person.id);
       return before === undefined ? person : { ...person, away: before.away };
     }),
+  };
+};
+
+/**
+ * The organization from the HR platform, with what the admin set on the
+ * roster before kept as `withSaved` keeps it, except who leads which
+ * team: the lead the platform names, by who reports to whom, comes before
+ * the one before, which a staff list or a directory may only have
+ * guessed. A team the platform names no lead of keeps the one it had.
+ */
+export const withLeadsFrom = (
+  roster: StaffList["roster"],
+  saved: Roster | null
+): StaffList["roster"] => {
+  const kept = withSaved(roster, saved);
+  const named = new Map(roster.teams.map((team) => [team.id, team.lead]));
+  return {
+    ...kept,
+    teams: kept.teams.map((team) => ({
+      ...team,
+      lead: named.get(team.id) ?? team.lead,
+    })),
   };
 };
 

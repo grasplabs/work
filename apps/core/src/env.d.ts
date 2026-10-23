@@ -1,5 +1,5 @@
 // What core reads from its env besides wrangler.jsonc's bindings, which
-// `wrangler types` can't see: deployment config the console sets per
+// `wrangler types` can't see: deployment config the admin sets per
 // deployment, and switches local dev, tests and on-prem pass. Every one is
 // optional: core works, or fails closed, without it. Merged into the
 // interface worker-configuration.d.ts generates, which both `Env` and
@@ -27,7 +27,7 @@ interface __BaseEnv_Env {
   PACKAGE_LIMITS?: unknown;
   /**
    * The change that made this version (src/platform-updates.ts): JSON,
-   * `{by, what, release, at}`, set by the console on every version it
+   * `{by, what, release, at}`, set by the admin on every version it
    * deploys.
    */
   PLATFORM_CHANGE?: unknown;
@@ -54,6 +54,12 @@ interface __BaseEnv_Env {
    * on-prem say `workerd`.
    */
   RUNTIME_PROFILE?: string;
+  /**
+   * The client this deployment is, as the admin deploys it: what core
+   * answers the admin's provisioning probe with (src/provision-probe.ts).
+   * Unset in local development and on-prem.
+   */
+  CLIENT_ID?: string;
   /**
    * On-prem only: the sandbox supervisor (scripts/workerd-sandbox.ts), as an
    * external service, where untrusted isolates run in workerd processes of

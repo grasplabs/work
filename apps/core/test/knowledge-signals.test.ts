@@ -367,6 +367,8 @@ describe("Knowledge usage signals", () => {
     // Nothing has both words; one has one of them.
     await asker.api.knowledge.search("quarterly marzipan");
     await asker.api.knowledge.search("marzipan quarterly");
+    // Only words too short or too numeric for trigrams: "is" comes close.
+    await asker.api.knowledge.search("is 2099");
     // Nothing has either.
     await asker.api.knowledge.search("xylophone yodel");
     await asker.api.knowledge.search("yodel xylophone");
@@ -400,6 +402,7 @@ describe("Knowledge usage signals", () => {
       ),
     }).toStrictEqual({
       details: [
+        { terms: 2, nearest: budgets, sensitive: false },
         { terms: 2, nearest: budgets, sensitive: false },
         { terms: 2, nearest: budgets, sensitive: false },
         { terms: 2, sensitive: false },

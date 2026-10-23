@@ -1,3 +1,4 @@
+import type { AuditActor } from "@grasp-os/shared/audit";
 import {
   brainContractVersion,
   brainErrors,
@@ -54,8 +55,10 @@ import { portsOf } from "./ports.ts";
 // accepted fact.
 //
 // A person's records and receipts are personal data: a personal purge
-// (purge.ts) deletes them with the rest (`forgetPerson`), and the clock
-// deletes receipts past their retention (`sweepBrainReceipts`).
+// (purge.ts) deletes them with the rest (`forgetPerson`), a content purge
+// redacts or deletes every record holding its terms, whoever's
+// (`eraseStatements`), and the clock deletes receipts past their
+// retention (`sweepBrainReceipts`).
 //
 // This slice serves a signed-in person, for their own `person`-scoped
 // records. An App or agent can't remember yet: writing will be a
@@ -144,6 +147,153 @@ export const personCounts = async (
       .where(eq(brainReceipts.caller, callerKey(userId))),
   ]);
   return { memories: memories?.count ?? 0, receipts: receipts?.count ?? 0 };
+};
+
+/** Records one page of a content purge's scan of every record reads. */
+const recordsPerScanPage = 200;
+
+/**
+ * Records one batch of a content purge rewrites or deletes: each is an
+ * audit event and a write, so a batch stays well within D1's statements
+ * per invocation.
+ */
+const recordsPerEraseBatch = 50;
+
+interface StatementRow {
+  id: string;
+  revision: number;
+  statement: string;
+}
+
+/**
+ * Hands `visit` every record's statement, a page at a time in ID order,
+ * whoever's it is and whatever its scope: what a content purge reaches.
+ */
+const scanStatements = async (
+  db: DrizzleD1Database,
+  visit: (page: StatementRow[]) => void
+): Promise<void> => {
+  for (let after = ""; ;) {
+    // oxlint-disable-next-line no-await-in-loop -- a page at a time, to bound memory
+    const page = await db
+      .select({
+        id: brainMemories.id,
+        revision: brainMemories.revision,
+        statement: brainMemories.statement,
+      })
+      .from(brainMemories)
+      .where(gt(brainMemories.id, after))
+      .orderBy(brainMemories.id)
+      .limit(recordsPerScanPage);
+    visit(page);
+    const last = page.at(-1);
+    if (last === undefined || page.length < recordsPerScanPage) {
+      return;
+    }
+    after = last.id;
+  }
+};
+
+/**
+ * How many records' statements `holds` is true of, everyone's: those a
+ * content purge's terms are in, which it would erase (its plan) or failed
+ * to (its check).
+ */
+export const countStatements = async (
+  env: Env,
+  holds: (statement: string) => boolean
+): Promise<number> => {
+  let total = 0;
+  await scanStatements(drizzle(env.KNOWLEDGE), (page) => {
+    total += page.filter(({ statement }) => holds(statement)).length;
+  });
+  return total;
+};
+
+/**
+ * Erases what a content purge removes from every record's statement,
+ * whoever's it is (GRA-1027): `erase` says, for each statement, what it
+ * becomes (itself when it holds nothing to remove), or `null` when
+ * nothing worth keeping is left, and the record is deleted. A redacted
+ * record gets its next revision and is pending indexing again, so search,
+ * when it holds records, indexes the redacted statement in place of the
+ * old one. Each change is audited, with `purgeId`, never the text, in the
+ * batch that makes it; a batch makes all of its changes or none.
+ *
+ * A write is conditional on the revision read, so a record changed since
+ * (deleted by a personal purge, say) is left as it is, unrecorded. A
+ * record remembered after its page was read isn't reached: the purge's
+ * check counts it (`countStatements`), and running the purge again
+ * erases it.
+ *
+ * Receipts stay: they hold no text (the request's hash is keyed to the
+ * deployment), and a retry of the remember they answer must replay them
+ * rather than store the statement again. Returns how many records it
+ * redacted and deleted.
+ */
+export const eraseStatements = async (
+  env: Env,
+  actor: AuditActor,
+  purgeId: string,
+  erase: (statement: string) => string | null
+): Promise<{ redacted: number; deleted: number }> => {
+  const db = drizzle(env.KNOWLEDGE);
+  const changes: { id: string; revision: number; now: string | null }[] = [];
+  await scanStatements(db, (page) => {
+    for (const { id, revision, statement } of page) {
+      const now = erase(statement);
+      if (now !== statement) {
+        changes.push({ id, revision, now });
+      }
+    }
+  });
+  const updatedAt = new Date();
+  const write = ({ id, revision, now }: (typeof changes)[number]) => {
+    const asRead = and(
+      eq(brainMemories.id, id),
+      eq(brainMemories.revision, revision)
+    );
+    const event = outboxedWhere(
+      db,
+      {
+        actor,
+        action: "knowledge.memory.purged",
+        target: { type: "memory", id },
+        detail: {
+          purgeId,
+          change: now === null ? "deleted" : "redacted",
+          revision,
+        },
+      },
+      sql`EXISTS (SELECT 1 FROM ${brainMemories} WHERE ${asRead})`
+    );
+    return [
+      // Before the write, on the same condition: recorded only if made.
+      event,
+      now === null
+        ? db.delete(brainMemories).where(asRead)
+        : db
+            .update(brainMemories)
+            .set({
+              statement: now,
+              revision: revision + 1,
+              indexingState: "pending",
+              updatedAt,
+            })
+            .where(asRead),
+    ] as const;
+  };
+  for (let at = 0; at < changes.length; at += recordsPerEraseBatch) {
+    const [first, ...rest] = changes
+      .slice(at, at + recordsPerEraseBatch)
+      .flatMap(write);
+    if (first !== undefined) {
+      // oxlint-disable-next-line no-await-in-loop -- one bounded batch after another
+      await auditedBatch(env, db, [first, ...rest]);
+    }
+  }
+  const deleted = changes.filter(({ now }) => now === null).length;
+  return { redacted: changes.length - deleted, deleted };
 };
 
 /**
