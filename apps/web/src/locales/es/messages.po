@@ -5031,6 +5031,10 @@ msgstr "Bien. Ahora di algo, para que yo también te oiga."
 msgid "Google sign-in"
 msgstr "Inicio de sesión de Google"
 
+#: src/onboarding/setup-steps.tsx
+msgid "Got it."
+msgstr "Entendido."
+
 #: src/inbox/items.ts
 msgid "Grant {who}?"
 msgstr "¿Conceder {who}?"
@@ -5417,6 +5421,10 @@ msgctxt "kind of app"
 msgid "HR"
 msgstr "RR. HH."
 
+#: src/onboarding/setup-steps.tsx
+msgid "I can’t read {name}: it’s in an old format. As a PDF or a newer file, I can."
+msgstr "No puedo leer {name}: está en un formato antiguo. Como PDF o en un archivo más reciente, sí puedo."
+
 #: src/interview/sound-check.tsx
 msgid "I cannot find a microphone. Plug one in and try again."
 msgstr "No encuentro ningún micrófono. Conecta uno y vuelve a intentarlo."
@@ -5432,6 +5440,10 @@ msgstr "No pude guardarlo. Vuelve a intentarlo en un momento."
 #: src/onboarding/setup-steps.tsx
 msgid "I could not read this file. A CSV or an Excel file works."
 msgstr "No pude leer este archivo. Sirve un archivo CSV o Excel."
+
+#: src/onboarding/setup-steps.tsx
+msgid "I couldn’t read {name}. Add it again, or as a PDF."
+msgstr "No pude leer {name}. Añádelo de nuevo, o como PDF."
 
 #: src/onboarding/setup-steps.tsx
 msgid "I couldn’t read this one"
