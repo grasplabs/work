@@ -20,11 +20,10 @@ import { z } from "zod";
 import { setCurrentVersion } from "../src/apps.ts";
 import worker from "../src/index.ts";
 import { workflowDetail } from "../src/workflows/overview.ts";
-import { release } from "./apps.ts";
+import { racingDb as racingAppsDb, release } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { runQuarterHourCron } from "./cron.ts";
 import { mockIdp } from "./idp.ts";
-import { racingDb } from "./racing-db.ts";
 import { aroundEngine, endLiveRuns, finished } from "./runs.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
 import { appWith } from "./workflow-apps.ts";
@@ -920,15 +919,16 @@ describe("email triggers", () => {
       "Raced"
     );
     // The first App takes the address just before the second's batch
-    // lands: after the second checked it was free.
-    const racing = racingDb(
-      async (db) =>
-        await db
-          .prepare(
-            "UPDATE workflow_triggers SET address = 'raced' WHERE app_id = ?"
-          )
+    // lands: after the second checked it was free. Only that batch: its
+    // candidate's own batches come before it (app-candidates.ts).
+    const racing = racingAppsDb(
+      async () =>
+        await env.DB.prepare(
+          "UPDATE workflow_triggers SET address = 'raced' WHERE app_id = ?"
+        )
           .bind(first)
-          .run()
+          .run(),
+      /update "apps" set "current_version"/iu
     );
 
     const refused = await outcome(

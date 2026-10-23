@@ -1,4 +1,9 @@
-import { isAppLayout, workflowIdOf } from "@grasp-os/compiler";
+import {
+  isAppLayout,
+  isAppTestSuite,
+  workflowIdOf,
+  workflowPaths,
+} from "@grasp-os/compiler";
 import { appLimits } from "@grasp-os/shared/app-limits";
 import { versionErrors } from "@grasp-os/shared/app-releases";
 import {
@@ -35,6 +40,7 @@ import { and, asc, desc, eq, inArray, lt, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
+import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { appsFoundBy, requireAppRole } from "./app-access.ts";
@@ -49,6 +55,8 @@ import {
 } from "./audit-outbox.ts";
 import type { Acting, Member } from "./auth/identity.ts";
 import {
+  appCandidateReports,
+  appCandidates,
   appVersions,
   apps,
   auditOutbox,
@@ -63,7 +71,11 @@ import { buildOnSave } from "./save-builds.ts";
 import { recordVersionBuilds } from "./screen-builds.ts";
 import { requireStoreSchemaActive } from "./store-backfill.ts";
 import { liveStoreSql } from "./store-deletion.ts";
-import { requireWorkflowTestsPass, workflowCallsIn } from "./workflows/code.ts";
+import {
+  requireWorkflowTestsPass,
+  workflowCallsIn,
+  workflowIdsIn,
+} from "./workflows/code.ts";
 import {
   registerTriggers,
   registrationHolds,
@@ -171,6 +183,10 @@ export const changeEntry = (
     | "app.committed"
     | "app.version.proposed"
     | "app.version.current"
+    | "app.candidates.superseded"
+    | "app.candidate.frozen"
+    | "app.candidate.moved"
+    | "app.candidate.claimed"
     | "app.blueprint.marked"
     | "app.blueprint.unmarked",
   app: AppId,
@@ -677,6 +693,48 @@ export const applyChanges = (
 };
 
 /**
+ * Ends every candidate of `app` for a version before `version` that is
+ * still being checked as superseded, for `by`'s commit of `version`: the
+ * statements, with their audit event, for the commit's batch.
+ */
+const supersededBy = (
+  db: DrizzleD1Database,
+  by: Identity,
+  app: AppId,
+  version: number
+) =>
+  [
+    db
+      .update(appCandidates)
+      .set({
+        state: "superseded",
+        outcome: "app.committed",
+        lease: null,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(appCandidates.appId, app),
+          lt(appCandidates.version, version),
+          // Not a verified one: its checks are done, and it may be on its
+          // way to current right now, its store switched already. A base
+          // that moved is `makeCurrent`'s to refuse (app-candidates.ts,
+          // `rejectStale`).
+          inArray(appCandidates.state, [
+            "frozen",
+            "checking",
+            "building",
+            "verifying",
+          ])
+        )
+      ),
+    outboxedIfChanged(
+      db,
+      changeEntry(by, "app.candidates.superseded", app, { by: version })
+    ),
+  ] as const;
+
+/**
  * Commits changes (new content by path, or null to delete a file) over an
  * App's latest version as its next version, by `by` with `message`.
  * Refused as a whole when the version would be over the App's limits. A
@@ -732,6 +790,10 @@ export const commitFiles = async (
           files: row.files,
         })
       ),
+      // A person's newer edit supersedes the open candidates of the
+      // versions before it (spec 22.1): whatever runs one finds it ended
+      // at its next move, and none is made current (app-candidates.ts).
+      ...supersededBy(db, by, appId, row.version),
     ]);
   } catch (error) {
     if (isUniqueViolation(error)) {
@@ -1117,48 +1179,53 @@ const retriedBatch = async <Result>(
 };
 
 /**
- * Makes a version the one that runs: the pending one after review, or any
- * other, such as an earlier one to roll back. The pending version is
- * cleared once it is current. Made current by someone who couldn't grant
- * them, the version is unapproved and the App's permissions that change
- * things for the person using it are asked for again (`madeCurrent`), but
- * for an App's first version copied from a blueprint, the first time:
- * version 1 existed and was immutable when the admin granted its
- * requests.
+ * Makes `version` of `app` the one that runs, for one of its builders,
+ * through a candidate (app-candidates.ts) frozen over the version current
+ * now, or over `expected` when given: verified (`verifyVersion`), then
+ * made current (`makeCurrent`). Nothing is sealed here: a version of spec
+ * 8's layout is refused unless its release is (`activateVersion` seals
+ * it, app-activation.ts).
  */
 export const setCurrentVersion = async (
   env: Env,
   by: Identity,
   app: unknown,
-  version: unknown
+  version: unknown,
+  expected?: unknown
 ): Promise<App> => {
-  const found = await appFor(env, by, app, "builder");
-  const appId = found.id;
-  const { version: number, approved } = await findVersion(env, appId, version);
-  if (found.currentVersion === number) {
-    return found;
-  }
-  const files = await versionFiles(env, appId, number);
-  // A version of spec 8's layout runs only from its release: activation
-  // seals it first (app-activation.ts), and nothing makes one current
-  // unsealed or revoked: checked here for a clear refusal, and again as
-  // the version is made current, so neither a revocation nor the
-  // retention sweep's deletion lands in between.
-  const sealedLayout = isAppLayout(files);
-  let sampleGate: SQL | undefined;
-  if (sealedLayout) {
+  // Imported here, not at the top: candidates reach back into this module.
+  const { activateThroughCandidate } = await import("./app-candidates.ts");
+  return await activateThroughCandidate(env, by, app, version, { expected });
+};
+
+/**
+ * Runs the gates a version must pass before it is made current, those
+ * whose answer doesn't change once given for its files: a candidate's
+ * verifying stage (app-candidates.ts), which records the report that
+ * `setCurrentVersion` then requires. A version of spec 8's layout must
+ * have a runnable release, migrations that passed their fixtures, a store
+ * whose contract holds its schema (or a ready explicit migration to it),
+ * and passing App tests; every version, AI steps through declared models
+ * only and passing workflow tests.
+ */
+export const verifyVersion = async (
+  env: Env,
+  appId: AppId,
+  number: number,
+  files: Record<string, string>
+): Promise<VerifiedObservations> => {
+  const layout = isAppLayout(files);
+  if (layout) {
     await requireRunnableRelease(env, appId, number);
     // Its migrations passed on their fixtures as it was sealed, even where
     // the store had nothing to transform; asked before its store, whose
     // backfill such a migration fails, so the refusal names the fixture.
     // Imported here for the same reason as the tests' runner below.
-    const { noFailedSampleSql, requireMigrationEvidence } =
+    const { requireMigrationEvidence } =
       await import("./migration-evidence.ts");
     await requireMigrationEvidence(env, appId, number);
-    // And again as the version is made current, below.
-    sampleGate = noFailedSampleSql(appId, number);
     // Its store's contract holds its schema, or it waits; a ready explicit
-    // migration passes here and takes over below, once every gate passed.
+    // migration passes here and takes over as the version is made current.
     await requireStoreSchemaActive(env, appId, number);
     // Its App tests, on fixture stores of their own (app-tests.ts),
     // whoever makes it current. Imported here, not at the top: the
@@ -1167,13 +1234,218 @@ export const setCurrentVersion = async (
     const { requireAppTestsPass } = await import("./app-tests.ts");
     await requireAppTestsPass(env, appId, number, files);
   }
+  // Its workflows' AI steps go only through models its release declares
+  // (app-activation.ts): for every candidate, however it was frozen, so
+  // one verified here is never made current without it. Imported here:
+  // activation reaches back into this module.
+  const { requireDeclaredModels } = await import("./app-activation.ts");
+  await requireDeclaredModels(env, appId, number, files);
   await requireWorkflowTestsPass(env, appId, number, files);
+  // What the gates selected to run, each with no failure, or they had
+  // refused. The runners' own lists of what they ran aren't returned.
+  return {
+    appTests: layout
+      ? Object.keys(files).filter(isAppTestSuite).toSorted()
+      : [],
+    workflowTests: workflowIdsIn(files)
+      .filter((id) => Object.hasOwn(files, workflowPaths(id).tests))
+      .toSorted(),
+  };
+};
+
+/**
+ * What `verifyVersion` selected to run, all passing: the App test suites
+ * by path and the workflows with tests by ID, as the version's files list
+ * them. Not a record of what each runner executed.
+ */
+export interface VerifiedObservations {
+  readonly appTests: readonly string[];
+  readonly workflowTests: readonly string[];
+}
+
+/**
+ * Whether `version` of `app` could run if made current now: a version of
+ * spec 8's layout only with a release that is sealed, not revoked, and
+ * on a store that lives (`runnableReleaseSql`, as making it current asks);
+ * one of the earlier layout, which runs from its files, always.
+ */
+export const releaseRunnable = async (
+  env: Env,
+  app: AppId,
+  version: number
+): Promise<boolean> => {
+  if (!isAppLayout(await versionFiles(env, app, version))) {
+    return true;
+  }
+  const row = await drizzle(env.DB).get<{ runnable: number }>(
+    sql`SELECT (${runnableReleaseSql(app, version)}) AS runnable`
+  );
+  return row?.runnable === 1;
+};
+
+/**
+ * The candidate a version is made current from (app-candidates.ts):
+ * verified, with the report `reportHash` names, and based on the version
+ * current until now (null for none).
+ */
+export interface VerifiedCandidate {
+  readonly id: string;
+  readonly reportHash: string;
+  readonly basedOn: number | null;
+  /**
+   * The release its report names, for a version of spec 8's layout: its
+   * manifest's hash and the digest of the artifacts read back
+   * (`artifactDigest`). Read back again as it is made current.
+   */
+  readonly release: {
+    readonly manifestHash: string;
+    readonly artifactDigest: string;
+  } | null;
+}
+
+/**
+ * Holds while `candidate` is verified for `version` of `app`, with its
+ * report stored under the hash it pins, as the statement runs: so a
+ * candidate superseded, ended or reported otherwise since it was read
+ * makes nothing current.
+ */
+const verifiedCandidateSql = (
+  app: AppId,
+  version: number,
+  candidate: VerifiedCandidate
+) =>
+  sql`EXISTS (SELECT 1 FROM ${appCandidates} AS candidate
+    JOIN ${appCandidateReports} AS report
+      ON report.candidate_id = candidate.id AND report.hash = candidate.report_hash
+    WHERE candidate.id = ${candidate.id} AND candidate.app_id = ${app}
+      AND candidate.version = ${version} AND candidate.state = 'verified'
+      AND candidate.report_hash = ${candidate.reportHash})`;
+
+/**
+ * Refuses `candidate` unless it is still verified with the report it
+ * pins: superseded by a person's commit (`app.candidate_superseded`), or
+ * ended or reported otherwise since it was read (`app.conflict`). Asked
+ * before anything is switched for it, as the store's contract is; the
+ * statement that makes it current asks again (`verifiedCandidateSql`).
+ */
+const requireCandidateVerified = async (
+  env: Env,
+  candidate: VerifiedCandidate
+): Promise<void> => {
+  const row = await drizzle(env.DB)
+    .select({
+      state: appCandidates.state,
+      reportHash: appCandidates.reportHash,
+    })
+    .from(appCandidates)
+    .where(eq(appCandidates.id, candidate.id))
+    .get();
+  if (row?.state === "superseded") {
+    throw appErrors.create("app.candidate_superseded");
+  }
+  if (row?.state !== "verified" || row.reportHash !== candidate.reportHash) {
+    throw appErrors.create("app.conflict");
+  }
+};
+
+/**
+ * Holds while the sealed manifest stored for `version` of `app` is the
+ * one the candidate's report names, as the statement runs.
+ */
+const releaseAsReportedSql = (
+  app: AppId,
+  version: number,
+  candidate: VerifiedCandidate
+) =>
+  candidate.release === null
+    ? sql`0`
+    : sql`EXISTS (SELECT 1 FROM sdk_release_manifests
+    WHERE app_id = ${app} AND version = ${version}
+      AND manifest_hash = ${candidate.release.manifestHash})`;
+
+/**
+ * Refuses `candidate` unless the release of `version` of `app`, read back
+ * from storage now, is the one its report names: the same manifest and
+ * the same artifacts (`app.candidate_release_changed`), or an artifact
+ * missing or changed (`version.artifact_corrupt`).
+ */
+const requireReleaseAsReported = async (
+  env: Env,
+  app: AppId,
+  version: number,
+  candidate: VerifiedCandidate
+): Promise<void> => {
+  if (candidate.release === null) {
+    throw appErrors.create("app.candidate_release_changed");
+  }
+  // Imported here, not at the top: releases reach back into this module.
+  const { artifactDigest, readBackRelease } = await import("./app-releases.ts");
+  const { manifest, hash } = await readBackRelease(env, app, version);
+  if (
+    hash !== candidate.release.manifestHash ||
+    (await artifactDigest(manifest)) !== candidate.release.artifactDigest
+  ) {
+    throw appErrors.create("app.candidate_release_changed");
+  }
+};
+
+/**
+ * Makes a version the one that runs, from its verified candidate
+ * (app-candidates.ts): the pending one after review, or any other, such
+ * as an earlier one to roll back. Only over the version the candidate was
+ * based on, and only while the candidate is verified with its report, in
+ * the statement that makes it current, which also marks the candidate
+ * active. The pending version is
+ * cleared once it is current. Made current by someone who couldn't grant
+ * them, the version is unapproved and the App's permissions that change
+ * things for the person using it are asked for again (`madeCurrent`), but
+ * for an App's first version copied from a blueprint, the first time:
+ * version 1 existed and was immutable when the admin granted its
+ * requests.
+ */
+export const makeCurrent = async (
+  env: Env,
+  by: Identity,
+  app: unknown,
+  version: unknown,
+  candidate: VerifiedCandidate
+): Promise<App> => {
+  const found = await appFor(env, by, app, "builder");
+  const appId = found.id;
+  const { version: number, approved } = await findVersion(env, appId, version);
+  if (found.currentVersion === number) {
+    return found;
+  }
+  // Verified over the version current then: any other since is a change
+  // the verification never saw.
+  if (found.currentVersion !== candidate.basedOn) {
+    throw appErrors.create("app.conflict");
+  }
+  const files = await versionFiles(env, appId, number);
+  // A version of spec 8's layout runs only from its release: activation
+  // seals it first (app-candidates.ts), and nothing makes one current
+  // unsealed or revoked: checked here for a clear refusal, and again as
+  // the version is made current, so neither a revocation nor the
+  // retention sweep's deletion lands in between. Its tests passed as its
+  // candidate was verified (`verifyVersion`), on the same files.
+  const sealedLayout = isAppLayout(files);
+  let sampleGate: SQL | undefined;
+  if (sealedLayout) {
+    await requireRunnableRelease(env, appId, number);
+    const { noFailedSampleSql, requireMigrationEvidence } =
+      await import("./migration-evidence.ts");
+    await requireMigrationEvidence(env, appId, number);
+    // And again as the version is made current, below.
+    sampleGate = noFailedSampleSql(appId, number);
+    await requireStoreSchemaActive(env, appId, number);
+  }
   const triggers = await triggerRegistration(env, appId, number, files);
   const previous = found.currentVersion;
   const event = createAuditEvent(
     changeEntry(by, "app.version.current", appId, {
       version: number,
       previous,
+      candidate: candidate.id,
       ...triggerSummary(triggers),
     }),
     "core"
@@ -1204,6 +1476,15 @@ export const setCurrentVersion = async (
     const { requireMigrationEvidence } =
       await import("./migration-evidence.ts");
     await requireMigrationEvidence(env, appId, number);
+    // Its candidate still verified, superseded by no commit meanwhile:
+    // asked here, before the store switches, so a candidate refused below
+    // never leaves the version current locked out of its store.
+    await requireCandidateVerified(env, candidate);
+    // Its release read back from storage once more, bypassing the cache of
+    // verified releases (`readBackRelease`): the report was written when
+    // the candidate was verified, and a verified candidate never expires,
+    // so an artifact changed in storage since must refuse it here.
+    await requireReleaseAsReported(env, appId, number, candidate);
     if (
       await requireStoreSchemaActive(env, appId, number, { activate: true })
     ) {
@@ -1229,11 +1510,32 @@ export const setCurrentVersion = async (
               sql`${apps.currentVersion} IS ${previous}`,
               registrationHolds(appId, triggers),
               sealedLayout ? runnableReleaseSql(appId, number) : undefined,
-              sampleGate
+              sealedLayout
+                ? releaseAsReportedSql(appId, number, candidate)
+                : undefined,
+              sampleGate,
+              verifiedCandidateSql(appId, number, candidate)
             )
           )
           .returning(),
         outboxedEventWhere(db, event, sql`changes() > 0`),
+        // The candidate it was made current from is active from now on,
+        // and the activation's claim on it ends (app-candidates.ts).
+        db
+          .update(appCandidates)
+          .set({
+            state: "active",
+            lease: null,
+            leaseUntil: null,
+            updatedAt: new Date(),
+          })
+          .where(
+            and(
+              eq(appCandidates.id, candidate.id),
+              eq(appCandidates.state, "verified"),
+              storedEvent(event.id)
+            )
+          ),
         ...madeCurrent(env, by, {
           app: appId,
           version: number,
@@ -1316,6 +1618,8 @@ export const setCurrentVersion = async (
         await requireMigrationEvidence(env, appId, number);
       }
     }
+    // A verified candidate is never superseded (`supersededBy`), so what
+    // is left is a conflict: the base moved, or the candidate ended.
     throw appErrors.create("app.conflict");
   }
   // What its screens build to with this release's kit, which may not be

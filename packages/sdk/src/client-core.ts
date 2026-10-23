@@ -26,6 +26,8 @@ import {
 import type { Settled } from "./client-error.ts";
 import { ClientFiles } from "./client-files.ts";
 import type { FileTransport } from "./client-files.ts";
+import { ClientLinks } from "./client-links.ts";
+import type { LinkTransport } from "./client-links.ts";
 import { PortableLive } from "./client-live.ts";
 import { navigateThrough } from "./client-navigation.ts";
 import type { Navigate, NavigationTransport } from "./client-navigation.ts";
@@ -220,6 +222,8 @@ export interface ClientTransport {
   drafts?: DraftPersistence;
   /** How files move (client-files.ts); a client without it moves none. */
   files?: FileTransport;
+  /** How links open (client-links.ts); a client without it opens none. */
+  links?: LinkTransport;
   /**
    * How the client asks the trusted host to open another of the App's
    * screens (client-navigation.ts); a client without it navigates nowhere.
@@ -1515,6 +1519,12 @@ export class GraspClient {
   readonly files: ClientFiles;
 
   /**
+   * The App's external links: opening a URL through a links resource the
+   * App declares, by the host, with no opener or referrer (spec 10.7.7).
+   */
+  readonly links: ClientLinks;
+
+  /**
    * A portable host's client (`{ url, getToken }`, spec 10.7.1): its
    * bootstrap makes one per App session and mounts it with
    * `GraspProvider`; generated App code never makes one.
@@ -1573,6 +1583,8 @@ export class GraspClient {
     } else {
       throw new TypeError("A client takes { url, getToken }.");
     }
+    // A portable host opens no links yet: only a screen's page does.
+    this.links = new ClientLinks(this.#transport?.links);
     // A portable host moves no files yet: only a screen's page does.
     // A refusal fences the client only if no fence came since its request
     // started: a late one would undo what the screen recovered since.

@@ -352,6 +352,11 @@ export const connectionOwnersSchema = z
 export interface ConnectionOwner {
   id: string;
   ownerUserId: string | null;
+  /**
+   * Whether it takes calls (`active`), waits to be signed in again
+   * (`needs_reauth`), or was disconnected: its owner is kept either way.
+   */
+  status: "active" | "needs_reauth" | "disconnected";
   /** Who carries out its actions: a native connector, or Composio. */
   source: CatalogSource;
   /** A native provider (`microsoft`), or a Composio toolkit's slug. */

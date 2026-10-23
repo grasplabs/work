@@ -15,6 +15,8 @@ const document = (path: string): DocumentSummary => ({
   tags: [],
   reviewDate: null,
   currentVersion: 1,
+  indexedVersion: 1,
+  indexing: "indexed",
   updatedAt: "2026-10-01T00:00:00.000Z",
 });
 

@@ -26,7 +26,7 @@ import type { DeploySecrets } from "../src/deploy/secrets.ts";
 import { importReleases } from "../src/releases/import.ts";
 import type { ReleaseStore } from "../src/releases/import.ts";
 import type { AccountState } from "./cloudflare-api-kit.ts";
-import { mockCloudflareApi } from "./cloudflare-api.ts";
+import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { declared, publishRelease } from "./releases.ts";
 import type { ReleaseSpec } from "./releases.ts";
 
@@ -813,6 +813,24 @@ describe("deploying safely", () => {
           gateway: "grasp-os",
           models: ["anthropic/claude-sonnet-4-5"],
           eu: { models: ["mistral/mistral-large"] },
+        }),
+      ],
+      // A way to ElevenLabs the gateway has no path for.
+      [
+        "MODEL_GATEWAY",
+        JSON.stringify({
+          gateway: "grasp-os",
+          models: ["elevenlabs/eleven_v4"],
+          voice: { provider: "elevenlabs-us" },
+        }),
+      ],
+      // An EU voice model, reached at ElevenLabs's native host.
+      [
+        "MODEL_GATEWAY",
+        JSON.stringify({
+          gateway: "grasp-os",
+          models: ["elevenlabs/eleven_v4"],
+          eu: { models: ["elevenlabs/eleven_v4"] },
         }),
       ],
       ["MEMORY_LIMITS", JSON.stringify({ "USER.md": 0 })],
