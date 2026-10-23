@@ -50,6 +50,8 @@ const said = (
       staff: null,
     },
     review: { differences: [], mapped: 0 },
+    directory: null,
+    suites: [],
     choices: noChoices,
     signIn: ["microsoft"],
     identity: {

@@ -28,6 +28,7 @@ export const familyNamespaces = [
   "data",
   "decision",
   "dependency",
+  "directory",
   "document",
   "effect",
   "email_preferences",
