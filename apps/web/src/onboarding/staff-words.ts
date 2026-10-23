@@ -1,6 +1,8 @@
+import type { InterviewPhase } from "@grasp-os/shared/interview-turn";
 import type { VisionField } from "@grasp-os/shared/kickoff";
 import type { KnownSource } from "@grasp-os/shared/onboarding-gate";
 import type {
+  AiPurpose,
   LogActor,
   StaffNeed,
   StaffStage,
@@ -160,4 +162,42 @@ export const knownSourceTitles: Record<KnownSource, MessageDescriptor> = {
     message: "Workflows known",
     context: "what Grasp knows, by source",
   }),
+};
+
+/** The parts of an interview, as the person's page names them. */
+export const phaseTitles: Record<InterviewPhase, MessageDescriptor> = {
+  open: msg({ message: "Hello", context: "part of an interview" }),
+  you: msg({ message: "You and AI", context: "part of an interview" }),
+  anchor: msg({ message: "One real case", context: "part of an interview" }),
+  story: msg({ message: "Your story", context: "part of an interview" }),
+  steps: msg({ message: "Step by step", context: "part of an interview" }),
+  exceptions: msg({
+    message: "When it goes differently",
+    context: "part of an interview",
+  }),
+  numbers: msg({ message: "The numbers", context: "part of an interview" }),
+  result: msg({ message: "Done right", context: "part of an interview" }),
+  readback: msg({
+    message: "Reading it back",
+    context: "part of an interview",
+  }),
+};
+
+/** What the onboarding uses AI for: in a word, and in a line. */
+export const purposeTitles: Record<
+  AiPurpose,
+  { label: MessageDescriptor; what: MessageDescriptor }
+> = {
+  reading: {
+    label: msg({ message: "Reading", context: "what AI was used for" }),
+    what: msg`The kickoff, and the documents the company shared.`,
+  },
+  interviews: {
+    label: msg({ message: "Interviews", context: "what AI was used for" }),
+    what: msg`Every interview Stephen and Claire held, by voice or typed.`,
+  },
+  drawing: {
+    label: msg({ message: "Drawing", context: "what AI was used for" }),
+    what: msg`The work, drawn from what people agreed to.`,
+  },
 };

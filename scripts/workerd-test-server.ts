@@ -85,7 +85,7 @@ export interface Served {
   stop: () => Promise<void>;
   /** Kills workerd at once (SIGKILL), as a crash would, mid-request too. */
   kill: () => Promise<void>;
-  /** What workerd logged so far: its info lines too when served `--verbose`. */
+  /** What workerd printed so far, on stdout and stderr: its info lines too when served `--verbose`. */
   logs: () => string;
 }
 
@@ -105,16 +105,20 @@ export const serveOnWorkerd = async (
   const workerd = spawn(
     workerdBinary,
     ["serve", ...flags, path.join(out, "config.capnp")],
-    { stdio: ["ignore", "ignore", "pipe"] }
+    { stdio: ["ignore", "pipe", "pipe"] }
   );
   running.push(workerd);
-  // What workerd says when it can't start: a startup failure names it.
-  let stderr = "";
-  workerd.stderr?.on("data", (chunk: Buffer) => {
-    stderr += chunk.toString();
-  });
+  // What workerd says, on either stream: a startup failure names it, and a
+  // Worker's or an isolate's console reaches one or the other.
+  let output = "";
+  const read = (chunk: string) => {
+    output += chunk;
+  };
+  // Decoded as streams, so a character split between chunks stays whole.
+  workerd.stdout?.setEncoding("utf-8").on("data", read);
+  workerd.stderr?.setEncoding("utf-8").on("data", read);
   const url = `http://${address}/`;
-  await waitUntilServing(url, workerd, () => stderr);
+  await waitUntilServing(url, workerd, () => output);
   return {
     url,
     stop: async () => {
@@ -125,6 +129,6 @@ export const serveOnWorkerd = async (
       workerd.kill("SIGKILL");
       await once(workerd, "exit");
     },
-    logs: () => stderr,
+    logs: () => output,
   };
 };

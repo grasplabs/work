@@ -1,3 +1,4 @@
+import { adminAskPath } from "@grasp-os/shared/admin-ask";
 import { adminSnapshotPath } from "@grasp-os/shared/admin-snapshot";
 import { auditExportPath } from "@grasp-os/shared/audit-log";
 import { connectionCallbackPath } from "@grasp-os/shared/connect";
@@ -9,6 +10,8 @@ import {
   interviewApiPath,
   interviewPagePath,
 } from "@grasp-os/shared/interview-links";
+import { interviewStoryPath } from "@grasp-os/shared/interview-story";
+import { interviewTurnPath } from "@grasp-os/shared/interview-turn";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { LogFields } from "@grasp-os/shared/log";
 import { mailIngressPath } from "@grasp-os/shared/mail-ingress";
@@ -18,6 +21,7 @@ import { quotaPolicyReportPath } from "@grasp-os/shared/quota-policy-report";
 import { screenFramePath } from "@grasp-os/shared/screens";
 import { speechPath } from "@grasp-os/shared/voice";
 
+import { adminAskResponse } from "./admin-ask.ts";
 import { adminSnapshotResponse } from "./admin-snapshot.ts";
 import { appFileResponse, fileRouteOf } from "./app-file-route.ts";
 import {
@@ -25,6 +29,7 @@ import {
   portableCallApp,
   portableFunctionResponse,
 } from "./app-function-route.ts";
+import { appLinkResponse, linkRouteOf } from "./app-link-route.ts";
 import { appTokenResponse, tokenRequestApp } from "./app-token-route.ts";
 import { auditExportResponse } from "./audit-rpc.ts";
 import { authBasePath } from "./auth/auth.ts";
@@ -42,8 +47,10 @@ import { errorResponse } from "./errors.ts";
 import { guestResponse } from "./guests.ts";
 import { originalResponse } from "./knowledge/uploads.ts";
 import { mailIngressResponse } from "./mail-ingress.ts";
+import { interviewTurnResponse } from "./onboarding/interview.ts";
 import { interviewResponse } from "./onboarding/links.ts";
 import { speechResponse } from "./onboarding/speech.ts";
+import { interviewStoryResponse } from "./onboarding/story.ts";
 import { onboardingSummaryResponse } from "./onboarding/summary.ts";
 import {
   packageArtifactResponse,
@@ -138,13 +145,20 @@ const linkResponse = async (
   pathname: string,
   request: Request,
   env: Env,
-  requestId: string
+  requestId: string,
+  ctx: Pick<ExecutionContext, "waitUntil">
 ): Promise<Response | undefined> => {
   if (pathname === guestApiPath) {
     return await guestResponse(request, env, requestId);
   }
   if (pathname === interviewApiPath) {
     return await interviewResponse(request, env, requestId);
+  }
+  if (pathname === interviewTurnPath) {
+    return await interviewTurnResponse(request, env, requestId, ctx);
+  }
+  if (pathname === interviewStoryPath) {
+    return await interviewStoryResponse(request, env, requestId, ctx);
   }
   if (pathname === speechPath) {
     return await speechResponse(request, env, requestId);
@@ -225,6 +239,17 @@ const appCallResponse = async (
   if (tokenApp !== undefined) {
     return await appTokenResponse(request, env, tokenApp, requestId);
   }
+  const linkRoute = linkRouteOf(pathname, request.method);
+  if (linkRoute === "not_found") {
+    return errorResponse(
+      404,
+      requestErrors.create("request.not_found"),
+      requestId
+    );
+  }
+  if (linkRoute !== undefined) {
+    return await appLinkResponse(request, env, linkRoute, requestId);
+  }
   const fileRoute = fileRouteOf(pathname, request.method);
   if (fileRoute === "not_found") {
     return errorResponse(
@@ -248,6 +273,7 @@ const pathHandlers: ReadonlyMap<
   [onboardingSummaryPath, onboardingSummaryResponse],
   [quotaPolicyReportPath, quotaPolicyReportResponse],
   [adminSnapshotPath, adminSnapshotResponse],
+  [adminAskPath, adminAskResponse],
   [platformUpdatePath, platformUpdateResponse],
   [mailIngressPath, mailIngressResponse],
 ]);
@@ -256,7 +282,8 @@ const pathHandlers: ReadonlyMap<
 const route = async (
   request: Request,
   env: Env,
-  requestId: string
+  requestId: string,
+  ctx: Pick<ExecutionContext, "waitUntil">
 ): Promise<Response> => {
   const url = new URL(request.url);
   const { pathname } = url;
@@ -295,7 +322,7 @@ const route = async (
   if (handler !== undefined) {
     return await handler(request, env, requestId);
   }
-  const linked = await linkResponse(pathname, request, env, requestId);
+  const linked = await linkResponse(pathname, request, env, requestId, ctx);
   if (linked !== undefined) {
     return linked;
   }
@@ -335,7 +362,7 @@ const respond = async (
     if (checked.ok) {
       installBuiltinsOnce(env, ctx);
       ensureClockOnce(env, ctx);
-      const response = await route(checked.request, env, requestId);
+      const response = await route(checked.request, env, requestId, ctx);
       return { response, level: "info" };
     }
     const response = errorResponse(

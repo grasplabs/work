@@ -102,6 +102,7 @@ import type {
   WorkflowError,
   WorkflowDuration,
   WorkflowEvent,
+  EventMatch,
   WorkflowStep,
   WorkflowStepEvent,
 } from "./contracts.ts";
@@ -115,12 +116,15 @@ import { errorRecord, isNonRetryable, namedError, rebuild } from "./errors.ts";
 import {
   assertEventType,
   assertStepName,
+  eventMatchOf,
+  readEventMatch,
   scheduleOf,
   stepKey,
 } from "./identity.ts";
 import {
   readAttempt,
   readConsumedEvent,
+  readMatchingEvent,
   readNextEvent,
   readRollbackWorklist,
   readRun,
@@ -448,6 +452,8 @@ interface WaitPlan {
   name: string;
   deadline: (now: number) => number;
   eventType: string | null;
+  /** What a `waitForMatch` takes, as `eventMatchOf` journals it. */
+  eventMatch: string | null;
   /**
    * A sleep's duration or a wait's timeout, journaled to compare a replay
    * with; null for `sleepUntil`, whose time a definition may compute
@@ -532,6 +538,25 @@ const contextOf = (
   config: structuredClone(config.context),
 });
 
+/**
+ * The event the waiting `step` takes, if the run accepted one for it
+ * before `deadline`: by its type for a `waitForEvent`, by its match for a
+ * `waitForMatch`; none for a sleep.
+ */
+const eventFor = (
+  sql: SqlStorage,
+  step: StepRow,
+  deadline: number
+): EventRow | undefined => {
+  if (step.event_type !== null) {
+    return readNextEvent(sql, step.event_type, deadline);
+  }
+  if (step.event_match !== null) {
+    return readMatchingEvent(sql, readEventMatch(step.event_match), deadline);
+  }
+  return undefined;
+};
+
 const stepEvent = <Payload>(event: EventRow): WorkflowStepEvent<Payload> => ({
   // SAFETY: what the sender sent, through the codec; the payload's type is
   // the author's claim, as it is on Cloudflare.
@@ -579,6 +604,9 @@ const mismatchIn = (
     // while the one the run suspended on waits is every replay's way.
     if (step.event_type !== plan.eventType) {
       return `${named} was for events of type ${JSON.stringify(step.event_type)}, and is now for ${JSON.stringify(plan.eventType)}`;
+    }
+    if (step.event_match !== plan.eventMatch) {
+      return `${named} matched ${String(step.event_match).slice(0, 200)}, and now matches ${String(plan.eventMatch).slice(0, 200)}`;
     }
     if (step.duration_ms !== plan.durationMs) {
       return `${named} was given ${String(step.duration_ms)}ms, and is now given ${String(plan.durationMs)}ms`;
@@ -708,6 +736,13 @@ export class Activation {
       ): Promise<WorkflowStepEvent<Payload>> =>
         await this.#toAuthor(
           async () => await this.#waitForEvent<Payload>(name, options)
+        ),
+      waitForMatch: async <Payload>(
+        name: string,
+        options: { match: readonly EventMatch[]; until: Date | number }
+      ): Promise<WorkflowStepEvent<Payload>> =>
+        await this.#toAuthor(
+          async () => await this.#waitForMatch<Payload>(name, options)
         ),
     };
   }
@@ -1931,13 +1966,14 @@ export class Activation {
       }
       if (step === undefined) {
         sql.exec(
-          "INSERT INTO steps (type, name, occurrence, idempotency_key, state, attempt, deadline, event_type, duration_ms) VALUES (?, ?, ?, ?, 'waiting', 1, ?, ?, ?)",
+          "INSERT INTO steps (type, name, occurrence, idempotency_key, state, attempt, deadline, event_type, event_match, duration_ms) VALUES (?, ?, ?, ?, 'waiting', 1, ?, ?, ?, ?)",
           identity.type,
           identity.name,
           identity.occurrence,
           stepKey(this.#run.execution_uid, identity),
           plan.deadline(now),
           plan.eventType,
+          plan.eventMatch,
           plan.durationMs
         );
         step = readStep(sql, identity);
@@ -1953,10 +1989,7 @@ export class Activation {
       }
       // An event accepted before the deadline is on time, however late the
       // activation that hands it over runs.
-      const event =
-        step.event_type === null
-          ? undefined
-          : readNextEvent(sql, step.event_type, step.deadline);
+      const event = eventFor(sql, step, step.deadline);
       if (event !== undefined) {
         sql.exec(
           "UPDATE events SET consumed_by = ? WHERE seq = ?",
@@ -1981,9 +2014,7 @@ export class Activation {
         this.#renewLease(now);
         return { ok: true, event: undefined };
       }
-      const error = JSON.stringify(
-        errorRecord(waitTimedOut(step.duration_ms ?? 0))
-      );
+      const error = JSON.stringify(errorRecord(waitTimedOut(step.duration_ms)));
       sql.exec(
         "UPDATE steps SET state = 'failed', error = ? WHERE ordinal = ?",
         error,
@@ -2075,6 +2106,7 @@ export class Activation {
       name,
       deadline: (now) => now + ms,
       eventType: null,
+      eventMatch: null,
       durationMs: ms,
     });
   }
@@ -2098,6 +2130,7 @@ export class Activation {
       // A time already past is due at once.
       deadline: () => until,
       eventType: null,
+      eventMatch: null,
       durationMs: null,
     });
   }
@@ -2122,7 +2155,42 @@ export class Activation {
       name,
       deadline: (now) => now + timeoutMs,
       eventType,
+      eventMatch: null,
       durationMs: timeoutMs,
+    });
+    if (event === undefined) {
+      throw new Error(`The journal holds no event for the wait ${name}`);
+    }
+    return stepEvent<Payload>(event);
+  }
+
+  async #waitForMatch<Payload>(
+    name: string,
+    options: { match: readonly EventMatch[]; until: Date | number }
+  ): Promise<WorkflowStepEvent<Payload>> {
+    assertStepName(name);
+    if (typeof options !== "object" || options === null) {
+      throw new TypeError("waitForMatch takes a name and { match, until }");
+    }
+    const eventMatch = eventMatchOf(options.match);
+    const time = timeOf(options.until);
+    if (
+      time === undefined ||
+      !Number.isFinite(time) ||
+      time - Date.now() > maxWaitMs
+    ) {
+      throw new TypeError(
+        `waitForMatch waits until a Date or a time in milliseconds, at most 365 days ahead: ${String(options.until)}`
+      );
+    }
+    const until = Math.ceil(time);
+    const event = await this.#wait({
+      type: "waitForEvent",
+      name,
+      deadline: () => until,
+      eventType: null,
+      eventMatch,
+      durationMs: null,
     });
     if (event === undefined) {
       throw new Error(`The journal holds no event for the wait ${name}`);

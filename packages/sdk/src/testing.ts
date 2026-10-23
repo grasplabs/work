@@ -35,6 +35,7 @@ export {
   runAppSuite,
   TestDefinitionError,
   testNamePattern,
+  workflowTest,
 } from "./app-test.ts";
 export type {
   AppTestContext,
@@ -48,7 +49,15 @@ export type {
   AppTestSuite,
   LiveQuery,
   PublicReference,
+  TestEffects,
   TestPrincipal,
+  TestRunOutcome,
+  TestRuns,
+  WorkflowTestContext,
+  WorkflowTestDefinition,
+  WorkflowTestFunction,
+  WorkflowTestRun,
+  WorkflowTestSuite,
 } from "./app-test.ts";
 
 /**

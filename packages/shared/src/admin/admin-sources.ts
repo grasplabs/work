@@ -31,6 +31,7 @@ export type SourceReads =
   | "signatures"
   | "companies"
   | "people"
+  | "deals"
   | "calls"
   | "customers"
   | "subscriptions"
@@ -89,7 +90,9 @@ export const ADMIN_SOURCES: readonly AdminSource[] = [
     tools: [],
   },
   {
-    // Where Grasp writes its proposals and the company signs them.
+    // Where Grasp writes its proposals and the company signs them. Read
+    // through Rooms' read-only service route with one token, not its MCP
+    // server, whose OAuth grant would need renewing every week.
     id: "rooms",
     ours: true,
     state: "planned",
@@ -97,22 +100,19 @@ export const ADMIN_SOURCES: readonly AdminSource[] = [
     direction: "in",
     reads: ["proposals", "signatures"],
     feeds: ["contract", "log"],
-    tools: [
-      "list_projects",
-      "get_project",
-      "get_content",
-      "get_signature_requests",
-      "get_signature_receipt",
-    ],
+    tools: [],
   },
   {
-    // The CRM: every call with a company is there, with who was in it.
+    // The CRM: every call with a company is there, with who was in it, and
+    // the deals Grasp won, to start an organization from. Read through
+    // Attio's REST API with one read-only key, as Stripe is, not its MCP
+    // server, whose OAuth grant would be a person's to renew.
     id: "attio",
     ours: false,
     state: "planned",
     order: 3,
     direction: "in",
-    reads: ["companies", "people", "calls"],
+    reads: ["companies", "people", "deals", "calls"],
     feeds: ["details", "portfolio", "log"],
     tools: [],
   },

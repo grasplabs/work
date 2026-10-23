@@ -134,6 +134,7 @@ export type {
   FileView,
   UploadOptions,
 } from "./client-files.ts";
+export type { OpenLinkOptions } from "./client-links.ts";
 export type { UploadView } from "./upload-transfer.ts";
 export type {
   FieldChange,

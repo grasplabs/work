@@ -8,7 +8,11 @@
 
 import { z } from "zod";
 
-import type { BrainRecordInput, BrainRecordsAdded } from "./brain-records.ts";
+import type {
+  BrainRecordInput,
+  BrainRecordsAdded,
+  WorkflowVersionRecord,
+} from "./brain-records.ts";
 import { defineErrorFamily } from "./errors.ts";
 import { documentIdSchema } from "./ids.ts";
 import type { CollectionId, DocumentId } from "./ids.ts";
@@ -222,8 +226,14 @@ export interface Gap {
 
 /** One step of a drawn workflow, as far as the brain reads it. */
 export interface Step {
+  /** What is done, as an instruction. */
+  text?: string;
+  /** The role that does it, never a name. */
+  who?: string;
   /** The tools it uses, comma-separated as the client names them. */
   tool?: string;
+  /** How long one takes, as estimated. */
+  minutes?: WorkflowDrawing["steps"][number]["minutes"];
   /** Not every item goes the same way after this step: the paths, each with its own steps. */
   split?: { paths: { steps: Step[] }[] };
 }
@@ -249,7 +259,17 @@ export interface Workflow {
   target?: Version;
   /** Measured periods, the first from when it went live. */
   results?: { period: { from: string } }[];
+  /** Its name in the language its people speak. */
+  local?: string;
+  /** Each time it was drawn from the interviews, oldest first: the newest is its baseline. */
+  drawings?: WorkflowDrawing[];
 }
+
+/** One drawing of a workflow from the onboarding's interviews: never who told what. */
+export type WorkflowDrawing = Omit<
+  WorkflowVersionRecord,
+  "type" | "workflowId"
+>;
 
 /** A connector Grasp has, or could have, for a system. */
 export interface Connection {

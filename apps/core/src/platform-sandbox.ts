@@ -8,6 +8,7 @@ import {
 } from "@grasp-os/compiler";
 import type { PlatformCode } from "@grasp-os/compiler";
 
+import { quietLoader } from "./quiet-loader.ts";
 import {
   functionCapability,
   noPlaceOf,
@@ -338,7 +339,7 @@ const inCore = (env: PlatformEnv): PlatformRunner => {
   ): Promise<unknown> => {
     try {
       return await loaderCall(
-        startAppCompiler(env.LOADER, env.ASSETS),
+        startAppCompiler(quietLoader(env.LOADER), env.ASSETS),
         method,
         args
       );
@@ -347,7 +348,7 @@ const inCore = (env: PlatformEnv): PlatformRunner => {
         throw error;
       }
       return await loaderCall(
-        await loadAppCompiler(env.LOADER, env.ASSETS),
+        await loadAppCompiler(quietLoader(env.LOADER), env.ASSETS),
         method,
         args
       );
@@ -359,7 +360,7 @@ const inCore = (env: PlatformEnv): PlatformRunner => {
       if (program === "compiler") {
         return await compile(method, args);
       }
-      builder ??= startPackageBuilder(env.LOADER, env.ASSETS);
+      builder ??= startPackageBuilder(quietLoader(env.LOADER), env.ASSETS);
       return await loaderCall(await builder, method, args);
     },
     // No wall-clock bound in core: the runtime bounds each call's CPU.

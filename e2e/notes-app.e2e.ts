@@ -6,6 +6,7 @@ import type { FrameLocator, Page } from "@playwright/test";
 import { test } from "./csp.ts";
 import {
   fileViewFiles,
+  linksFiles,
   notesAppFiles,
   unaskedDownloadFiles,
 } from "./notes-app.ts";
@@ -814,4 +815,103 @@ test("a file whose screen lost the App's data shows the refusal, and isn't read 
   );
   await page.waitForTimeout(3000);
   expect(reads).toBe(0);
+});
+
+/**
+ * How long the links screen's later open waits after its click (6 s),
+ * with room for its check: past any activation the click left.
+ */
+const laterOpenWaitMs = 9000;
+
+/** Opens the links screen of `app`, its heading shown. */
+const openLinks = async (page: Page, app: string): Promise<FrameLocator> => {
+  await page.goto(`/engines/${app}/apps/notes/full`);
+  const screen = page.frameLocator('iframe[title="notes app"]');
+  await expect(screen.getByRole("heading", { name: "Links" })).toBeVisible({
+    timeout: 20_000,
+  });
+  return screen;
+};
+
+test("a screen opens its declared help site on a click, with no opener or referrer, and only with the person's say otherwise", async ({
+  pageOf,
+}) => {
+  const { builder } = peopleIn("notesApp");
+  const app = await notesApp(builder, undefined, linksFiles());
+  const page = await pageOf(builder);
+  // The help site, as the browser reaches it: what each visit sent.
+  const visits: { url: string; referer: string | undefined }[] = [];
+  await page.context().route("https://help.example.com/**", async (route) => {
+    visits.push({
+      url: route.request().url(),
+      referer: route.request().headers().referer,
+    });
+    await route.fulfill({
+      contentType: "text/html",
+      body: "<title>Help</title><p>Help</p>",
+    });
+  });
+  const screen = await openLinks(page, app);
+  // The activation Playwright gave the page as it opened is the page's
+  // own: it admits no link for as long as it can last (screen-files.ts).
+  await page.waitForTimeout(openingActivationMs);
+  const dialog = page.getByRole("alertdialog");
+
+  // A click in the screen: opened at once, in a tab of its own.
+  const opening = page.context().waitForEvent("page");
+  await screen.getByRole("button", { name: "Open help", exact: true }).click();
+  const tab = await opening;
+  await tab.waitForLoadState();
+  await expect(screen.getByRole("status", { name: "Link" })).toHaveText(
+    "opened"
+  );
+  await expect(dialog).toBeHidden();
+  expect({
+    url: tab.url(),
+    opener: await tab.evaluate(() => window.opener === null),
+    referrer: await tab.evaluate(() => document.referrer),
+  }).toStrictEqual({
+    url: "https://help.example.com/guide",
+    opener: true,
+    referrer: "",
+  });
+  await tab.close();
+
+  // Long after the click: the page asks, naming the origin; turned down,
+  // nothing opens. Nothing touches the page while the screen waits to
+  // open: Playwright runs its checks with a user gesture, which the page
+  // would take for the person's.
+  await screen.getByRole("button", { name: "Open help later" }).click();
+  await page.waitForTimeout(laterOpenWaitMs);
+  await expect(dialog).toBeVisible({ timeout: 15_000 });
+  await expect(dialog).toContainText("https://help.example.com");
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(screen.getByRole("status", { name: "Link" })).toHaveText(
+    "link.declined"
+  );
+
+  // Asked again (after the pause a turned-down link starts), confirmed:
+  // opened.
+  await page.waitForTimeout(5000);
+  await screen.getByRole("button", { name: "Open help later" }).click();
+  await page.waitForTimeout(laterOpenWaitMs);
+  await expect(dialog).toBeVisible({ timeout: 15_000 });
+  const confirmed = page.context().waitForEvent("page");
+  await dialog.getByRole("button", { name: "Open", exact: true }).click();
+  const later = await confirmed;
+  await later.waitForLoadState();
+  expect(later.url()).toBe("https://help.example.com/later");
+  await expect(screen.getByRole("status", { name: "Link" })).toHaveText(
+    "opened"
+  );
+
+  // A site it didn't declare, written to pass for its own: refused.
+  await screen.getByRole("button", { name: "Open elsewhere" }).click();
+  await expect(screen.getByRole("status", { name: "Link" })).toHaveText(
+    "link.not_allowed"
+  );
+  expect(visits).toStrictEqual([
+    { url: "https://help.example.com/guide", referer: undefined },
+    { url: "https://help.example.com/later", referer: undefined },
+  ]);
 });

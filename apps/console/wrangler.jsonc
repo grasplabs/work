@@ -44,8 +44,22 @@
       "jurisdiction": "eu",
     },
   ],
-  // Imports newly published releases (src/releases/import.ts).
-  "triggers": { "crons": ["*/5 * * * *"] },
+  // Questions to Grasp's Discord bot (src/admin/discord.ts), per Discord
+  // user: 10 a minute. A question reads every client's core once, so this
+  // bounds the reads one person can start from Discord. The namespace id is
+  // unique in grasp-os-ops, beside the router's 1001 to 1003 and the admin
+  // MCP's 1004.
+  "ratelimits": [
+    {
+      "name": "DISCORD_RATE_LIMIT",
+      "namespace_id": "1005",
+      "simple": { "limit": 10, "period": 60 },
+    },
+  ],
+  // Imports newly published releases (src/releases/import.ts) every 5
+  // minutes; on weekday mornings, posts the admin's digest to Discord
+  // (src/admin/discord-digest.ts, `digestCron`).
+  "triggers": { "crons": ["*/5 * * * *", "0 6,7 * * 1-5"] },
   // Onboards a client (src/provision/workflow.ts): an instance per attempt,
   // each claimed in D1 first (src/runners.ts), so two runs for one
   // client can't overlap.
@@ -85,6 +99,22 @@
       "name": "grasp-os-apply-client",
       "binding": "APPLY_CLIENT",
       "class_name": "ApplyClient",
+    },
+    // Follows a build of an integration by Grasp's agent through its
+    // stages and waits (src/builds/workflow.ts): an instance per build,
+    // one build per app.
+    {
+      "name": "grasp-os-integration-build",
+      "binding": "INTEGRATION_BUILD",
+      "class_name": "IntegrationBuild",
+    },
+    // Provisions a client placed in a hosting destination
+    // (src/hosting/workflow.ts): an instance per attempt, each claimed in
+    // D1 first, all resuming the client's one operation.
+    {
+      "name": "grasp-os-provision-placed-client",
+      "binding": "PROVISION_PLACED_CLIENT",
+      "class_name": "ProvisionPlacedClient",
     },
   ],
   // The router's hostname map, which a deploy writes (src/deploy/router.ts).
@@ -160,6 +190,36 @@
       "binding": "STRIPE_RESTRICTED_KEY",
       "store_id": "account-secrets-store",
       "secret_name": "STRIPE_RESTRICTED_KEY",
+    },
+    // Grasp's Rooms' read-only service token (grasplabs/rooms,
+    // worker/service-read.ts), for the proposal under Contract
+    // (src/proposal/rooms.ts): it reads rooms and their signature requests
+    // and nothing else. The console's alone, never sent to the browser. Put
+    // in the store by hand; until it is, the proposal says Rooms isn't
+    // connected.
+    {
+      "binding": "ROOMS_READ_TOKEN",
+      "store_id": "account-secrets-store",
+      "secret_name": "ROOMS_READ_TOKEN",
+    },
+    // The Discord webhook the admin's morning digest is posted to, which
+    // names the channel (src/admin/discord-digest.ts). The console's alone.
+    // Put in the store by hand; until it is, no digest is sent.
+    {
+      "binding": "DISCORD_DIGEST_WEBHOOK",
+      "store_id": "account-secrets-store",
+      "secret_name": "DISCORD_DIGEST_WEBHOOK",
+    },
+    // A read-only Attio API key (records, object configuration, notes and
+    // meetings read; user management read to name deal owners), for the
+    // company, its people, deals and calls under Details and the won deals
+    // a new organization starts from (src/crm/attio.ts). The console's
+    // alone: never copied to a client, never sent to the browser. Put in
+    // the store by hand; until it is, Details says Attio isn't connected.
+    {
+      "binding": "ATTIO_READ_KEY",
+      "store_id": "account-secrets-store",
+      "secret_name": "ATTIO_READ_KEY",
     },
   ],
 }

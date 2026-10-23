@@ -93,6 +93,7 @@ const workflows: Readonly<Record<RunKind, (env: Env) => Workflow>> = {
   rollout: (env) => env.ROLLOUT,
   rollback: (env) => env.ROLLBACK_CLIENT,
   apply: (env) => env.APPLY_CLIENT,
+  provision_placed: (env) => env.PROVISION_PLACED_CLIENT,
 };
 
 /**

@@ -26,7 +26,7 @@ import type { DeploySecrets } from "../src/deploy/secrets.ts";
 import { importReleases } from "../src/releases/import.ts";
 import type { ReleaseStore } from "../src/releases/import.ts";
 import type { AccountState } from "./cloudflare-api-kit.ts";
-import { mockCloudflareApi } from "./cloudflare-api.ts";
+import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { declared, publishRelease } from "./releases.ts";
 import type { ReleaseSpec } from "./releases.ts";
 
