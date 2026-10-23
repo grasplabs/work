@@ -609,15 +609,16 @@ describe("screen trust", { timeout: 60_000 }, () => {
       role: "user",
     });
     const real = await builder.api.screens.open(approved, "notes");
-    const [, mac] = real.lease.split(".");
+    // A lease is `hash.version.mac`.
+    const mac = real.lease.split(".")[2] ?? "";
 
     const forgeries: Record<string, string> = {
       // The approved App's lease, for the App nobody approved.
       "another App's lease": real.lease,
       // The same hash, which is approved over there, with a made-up MAC.
-      "an approved hash, unsigned": `${real.artifact}.${"A".repeat(43)}`,
+      "an approved hash, unsigned": `${real.artifact}.${real.version}.${"A".repeat(43)}`,
       "an approved hash alone": real.artifact,
-      "a made-up hash, with a real MAC": `${"0".repeat(64)}.${mac}`,
+      "a made-up hash, with a real MAC": `${"0".repeat(64)}.${real.version}.${mac}`,
       "a trust flag": "approved",
       "nothing at all": "",
     };
@@ -652,13 +653,45 @@ describe("screen trust", { timeout: 60_000 }, () => {
     ];
     // A forgery of their own lease names no build: its frame runs one
     // nobody approved, whatever another frame of theirs runs.
-    const forged = other.api.screens.frame(approved, `${own.artifact}.forged`);
+    const forged = other.api.screens.frame(
+      approved,
+      `${own.artifact}.${own.version}.forged`
+    );
     const afterForgery = [
       await forged.delivery(),
       await outcome(forged.runs("invoices")),
     ];
+    // The builder's real lease on the approved App, changed only in the
+    // version it was opened on, or in the two-part form leases had before
+    // they signed the version: neither names a build.
+    const reshaped: Record<string, unknown> = {};
+    for (const [name, lease] of Object.entries({
+      "another version, with the real MAC": `${real.artifact}.${real.version + 1}.${mac}`,
+      "the two-part form, with the real MAC": `${real.artifact}.${mac}`,
+    })) {
+      // oxlint-disable-next-line no-await-in-loop -- one forgery at a time
+      const forger = await openRpc(builder.session);
+      const api = forger.core.authenticate();
+      reshaped[name] = [
+        // oxlint-disable-next-line no-await-in-loop -- see above
+        await api.screens.frame(approved, lease).delivery(),
+        // oxlint-disable-next-line no-await-in-loop -- see above
+        await outcome(called(builder, approved, { lease })),
+      ];
+    }
+    // While the real lease, unchanged, names the approved build.
+    const unchanged = await builder.api.screens
+      .frame(approved, real.lease)
+      .delivery();
 
-    expect({ presented, borrowed, withOwn, afterForgery }).toStrictEqual({
+    expect({
+      presented,
+      borrowed,
+      withOwn,
+      afterForgery,
+      reshaped,
+      unchanged,
+    }).toStrictEqual({
       presented: Object.fromEntries(
         Object.keys(forgeries).map((name) => [
           name,
@@ -668,6 +701,17 @@ describe("screen trust", { timeout: 60_000 }, () => {
       borrowed: ["unreviewed", "screen.unreviewed"],
       withOwn: [data, "ok"],
       afterForgery: ["unreviewed", "screen.unreviewed"],
+      reshaped: {
+        "another version, with the real MAC": [
+          "unreviewed",
+          "screen.unreviewed",
+        ],
+        "the two-part form, with the real MAC": [
+          "unreviewed",
+          "screen.unreviewed",
+        ],
+      },
+      unchanged: "open",
     });
   });
 
