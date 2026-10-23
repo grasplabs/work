@@ -576,7 +576,10 @@ export const createFromBlueprint = async (
           id: binding,
           appId: app,
           alias,
-          workflowResourceId: workflowId,
+          // Only while the workflow is live, as any binding: otherwise
+          // NULL, which fails the batch.
+          workflowResourceId: sql`(SELECT id FROM workflow_resources
+            WHERE id = ${workflowId} AND deleted_at IS NULL)`,
           workflowResourceVersion: version,
           status: "active",
           boundBy: by.userId,
