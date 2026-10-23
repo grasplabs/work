@@ -7,9 +7,9 @@ import type {
 } from "../../../src/admin/admin-platform.ts";
 
 /**
- * What the console holds about the sample organizations' own platforms, made up like the
+ * What the admin holds about the sample organizations' own platforms, made up like the
  * organizations themselves, and the releases every company shares: so the admin's tools say how
- * every company's platform stands once the admin reads the console.
+ * every company's platform stands once the admin reads its own records.
  */
 
 export const SAMPLE_RELEASES: Release[] = [

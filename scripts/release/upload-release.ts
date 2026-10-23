@@ -10,7 +10,7 @@
  * checksum R2 reports, or, for an object stored without one, the hash of
  * its bytes. One that doesn't match fails the upload, before the manifest.
  *
- * The manifest goes up last, to `releases/<id>/manifest.json`: the console
+ * The manifest goes up last, to `releases/<id>/manifest.json`: the admin
  * imports only releases whose manifest exists, so an upload that stops
  * halfway never leaves a manifest pointing at missing blobs. It's
  * written only if absent, so a published release never changes, not even

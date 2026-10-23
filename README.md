@@ -11,7 +11,7 @@ Built on Cloudflare Workers with TypeScript, React and Vite+.
 | `apps/core` | Core Worker: sign-in, knowledge, Apps, workflows, model gateway, audit |
 | `apps/connect` | Connector Worker: access to outside systems |
 | `apps/web` | The frontend |
-| `apps/console` | Internal console for deployments and releases |
+| `apps/admin` | Grasp's admin: clients, deployments and releases |
 | `apps/router` | Routes each deployment's hostname |
 | `packages/sdk` | `@grasp-os/sdk`: the API for workflows and screens |
 | `packages/ui` | `@grasp-os/ui`: the UI kit |

@@ -71,7 +71,7 @@ export const clockTasks: readonly ClockTask<Env>[] = [
   // Documents whose indexing never started or ended unfinished, and failed
   // ones due another run (src/knowledge/indexing.ts).
   { name: "knowledge.indexing", period: "minute", run: sweepIndexing },
-  // Deploys apply migrations first (CI's db:migrate, and the console's
+  // Deploys apply migrations first (CI's db:migrate, and the admin's
   // deploy), so `platform_versions` exists. A version running before it
   // does records nothing, and the first run after the migration records
   // the version then running: only a version that came and went in

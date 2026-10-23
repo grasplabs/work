@@ -13,30 +13,30 @@ import type {
 import { clock } from "./clock.ts";
 import { consoleSigned } from "./console-signed.ts";
 
-// The console's provisioning probe (spec 40.2 step 7,
+// The admin's provisioning probe (spec 40.2 step 7,
 // @grasp-os/shared/provision-probe): before it publishes a client's
-// hostname, the console asks core whether it runs as that client, whether
+// hostname, the admin asks core whether it runs as that client, whether
 // each private binding answers, and arms both durable clocks. Threat
 // model, each tried in test/provision-probe.test.ts:
 //
 // - Anyone reaching core through the router: the router adds its secret to
-//   every public request, so the probe also wants the console's signature
+//   every public request, so the probe also wants the admin's signature
 //   (console-signed.ts), with a key derived from this client's auth secret
 //   for the probe alone. A signature for another client, or for the
 //   onboarding summary or a platform update, is made with another key and
 //   doesn't verify.
 // - A signed request caught and sent again: taken only within
 //   `provisionProbeMaxSkewMs` of when it was signed, and all it can do
-//   then is what the console asked anyway: no-op reads and arming clocks
+//   then is what the admin asked anyway: no-op reads and arming clocks
 //   that are armed.
-// - Telling the endpoint exists: a request that isn't the console's gets
+// - Telling the endpoint exists: a request that isn't the admin's gets
 //   what any other unknown path gets, so no answer, status or header sets
 //   it apart. The signature is compared in constant time.
 // - Making core work for nobody: nothing is read, armed or called before
 //   the signature verifies.
 // - Leaking what the answer is about: binding and task names from core's
 //   own code, each with a yes or no, the version id and the client id the
-//   console deployed. No resource id, no error message, no secret and
+//   admin deployed. No resource id, no error message, no secret and
 //   nothing a client's people entered.
 
 /** What a bucket is asked for: a key nothing writes, so the answer is "none". */
@@ -115,7 +115,7 @@ const probed = async (env: Env): Promise<ProvisionProbe> => {
 };
 
 /**
- * The console's signed probe: 200 with what it found, once the request is
+ * The admin's signed probe: 200 with what it found, once the request is
  * signed, fresh and well formed. Undefined for anything else, which core
  * then answers as it answers any path it has no route for. The body is
  * read from a copy, so that answer gets the request as it came.

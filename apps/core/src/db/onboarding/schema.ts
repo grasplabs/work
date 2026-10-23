@@ -40,6 +40,11 @@ export const onboarding = sqliteTable(
      */
     toldAt: text("told_at"),
     /**
+     * When a piece of work counts as known here, as JSON
+     * (`orgRulesSchema`), or `null` while the starting values hold.
+     */
+    rules: text(),
+    /**
      * What the admin chose about what Grasp may connect, as JSON
      * (`setupChoicesSchema`), or `null` before anything.
      */
@@ -308,6 +313,28 @@ export const drawnWorks = sqliteTable("drawn_works", {
   drawn: text(),
   agreed: text().notNull(),
   at: text().notNull(),
+});
+
+/**
+ * How the company's admin settled a piece of work told two ways that
+ * nobody could explain: both ways kept, or which way holds, the way most
+ * told it (`first`) or the other. Apart from the drawing, so drawing it
+ * again keeps it; it goes with the piece of work.
+ */
+export const settledWorks = sqliteTable("settled_works", {
+  work: text().primaryKey(),
+  holds: text({ enum: ["both", "first", "other"] }).notNull(),
+  at: text().notNull(),
+});
+
+/**
+ * The pieces of work Grasp counts as known by hand, before the rules say
+ * so: when, and by which staff member. Goes with the piece of work.
+ */
+export const countedWorks = sqliteTable("counted_works", {
+  work: text().primaryKey(),
+  at: text().notNull(),
+  by: text().notNull(),
 });
 
 /**

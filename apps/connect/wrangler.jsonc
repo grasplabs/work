@@ -23,7 +23,7 @@
   // dev loads only these from .dev.vars. CAPABILITY_SIGNING_KEY is shared
   // with core, which signs a capability for every call connect gets.
   //
-  // Connecting accounts needs more, set by the console, but connect takes
+  // Connecting accounts needs more, set by the admin, but connect takes
   // calls without them, so they aren't required: TOKEN_ENCRYPTION_KEY, which
   // seals OAuth tokens (src/vault.ts), and each provider's app credentials,
   // MICROSOFT_CLIENT_ID and _SECRET, GOOGLE_CLIENT_ID and _SECRET,
@@ -37,7 +37,7 @@
   // project (src/composio.ts): while it is unset, nothing of Composio is
   // offered or reached. Their types are in src/env.d.ts.
   "secrets": { "required": ["CAPABILITY_SIGNING_KEY"] },
-  // Vars the console set through the API survive a deploy (keep_vars).
+  // Vars the admin set through the API survive a deploy (keep_vars).
   "keep_vars": true,
   // Loads a native connector into an isolate of its own for each call
   // (src/connectors.ts); a new connector needs no entry here.
