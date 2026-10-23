@@ -18,8 +18,9 @@ import {
 } from "./google.ts";
 
 // Calendars, one per call, as `/calendar/v3/calendars/{calendar}` with the
-// calendar's ID, so a call's capability binds every request to it. Times
-// come back in UTC.
+// calendar's ID, so a call's capability binds every request to it. The
+// calendar may be a group's or a colleague's shared with the person, so
+// these tools reach `company`. Times come back in UTC.
 //
 // Which calendars. A calendar's ID is an address: a person's own calendar
 // is their email address, other calendars `...@group.calendar.google.com`.
@@ -173,7 +174,7 @@ const listEvents = defineTool({
     nextPage: z.string().nullable(),
   }),
   readOnly: true,
-  reach: "own",
+  reach: "company",
   resource: "calendar",
   routes: [{ method: "GET", host: apisHost, path: `${calendars}/events` }],
   run: async ({ calendar, start, end, top, page }) => {
@@ -231,7 +232,7 @@ const getEvent = defineTool({
     }),
   }),
   readOnly: true,
-  reach: "own",
+  reach: "company",
   resource: "calendar",
   routes: [
     { method: "GET", host: apisHost, path: `${calendars}/events/{event}` },

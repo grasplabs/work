@@ -132,6 +132,14 @@ const probe = async (
 /** A probe's report of a request the egress handler refused. */
 const refused = { status: 403, error: null };
 
+/** Each tool of a bundled suite, by its class. */
+const classesOf = (suite: string) =>
+  Object.fromEntries(
+    Object.entries(nativeConnector(suite)?.manifest.actions ?? {}).map(
+      ([action, declared]) => [action, toolClassOf(declared)]
+    )
+  );
+
 describe("a native connector", () => {
   it("can't write from a lookup of a call's effect: only the action's GETs leave", async () => {
     const connection = await connectionTo("sample");
@@ -487,28 +495,41 @@ describe("a native connector", () => {
     }
   });
 
-  it("of each suite gives every tool a class, and only sending mail reaches others", () => {
-    for (const suite of ["microsoft-365", "google-workspace"]) {
-      // A suite with a tool that doesn't say whom it reaches isn't loaded.
-      const actions = Object.entries(
-        nativeConnector(suite)?.manifest.actions ?? {}
-      );
-      const classes = Object.fromEntries(
-        actions.map(([action, declared]) => [action, toolClassOf(declared)])
-      );
-      expect(actions.length).toBeGreaterThan(0);
-      expect(classes).toMatchObject({
-        "mail.list": "read-own",
-        "mail.createDraft": "change-own",
-        "mail.send": "reach-others",
-        "files.read": "read-company",
-      });
-      expect(
-        Object.keys(classes).filter(
-          (action) => classes[action] === "reach-others"
-        )
-      ).toStrictEqual(["mail.send"]);
-    }
+  it("of each suite gives every tool the class of the furthest it reaches", () => {
+    // Microsoft opens shared and colleagues' mailboxes and calendars, and
+    // Google colleagues' and groups' calendars, so those reach the company;
+    // a Google token reaches only its own mailbox. A suite with a tool
+    // that doesn't say whom it reaches isn't loaded.
+    const calendar = {
+      "calendar.list": "read-company",
+      "calendar.get": "read-company",
+    };
+    const files = {
+      "files.list": "read-company",
+      "files.search": "read-company",
+      "files.read": "read-company",
+    };
+    expect(classesOf("microsoft-365")).toStrictEqual({
+      "mail.list": "read-company",
+      "mail.get": "read-company",
+      "mail.readAttachment": "read-company",
+      "mail.move": "change-company",
+      "mail.send": "reach-others",
+      "mail.createDraft": "change-company",
+      ...calendar,
+      ...files,
+    });
+    expect(classesOf("google-workspace")).toStrictEqual({
+      "mail.list": "read-own",
+      "mail.get": "read-own",
+      "mail.readAttachment": "read-own",
+      "mail.labels": "read-own",
+      "mail.label": "change-own",
+      "mail.send": "reach-others",
+      "mail.createDraft": "change-own",
+      ...calendar,
+      ...files,
+    });
   });
 });
 

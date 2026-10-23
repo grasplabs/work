@@ -22,7 +22,9 @@ import {
 
 // Calendars, of one mailbox per call, as `/users/{mailbox}` like mail: the
 // same resource, so a permission for invoices@ covers its calendar too.
-// Times come back in UTC.
+// Like mail, the mailbox may be a shared one or a colleague's
+// (`Calendars.Read.Shared`), so these tools reach `company`. Times come
+// back in UTC.
 
 const users = `${v1}/users/{mailbox}`;
 
@@ -138,7 +140,7 @@ const listEvents = defineTool({
     nextPage: z.string().nullable(),
   }),
   readOnly: true,
-  reach: "own",
+  reach: "company",
   resource: "mailbox",
   routes: [{ method: "GET", host: graphHost, path: `${users}/calendarView` }],
   run: async ({ mailbox, start, end, top, page }) => {
@@ -196,7 +198,7 @@ const getEvent = defineTool({
     }),
   }),
   readOnly: true,
-  reach: "own",
+  reach: "company",
   resource: "mailbox",
   routes: [{ method: "GET", host: graphHost, path: `${users}/events/{event}` }],
   run: async ({ mailbox, event: id }) => {

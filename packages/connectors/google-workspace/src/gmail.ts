@@ -39,8 +39,9 @@ import type { Part } from "./mime.ts";
 // mailbox only; the binding still holds each call to the one a permission
 // names. Each result names its mailbox and the IDs of the messages it came
 // from. Labels aren't a scope: a permission is for a whole mailbox.
-// Reading, labelling and drafting stay in the mailbox (`own`); sending
-// reaches whoever the message goes to (`others`).
+// Reading, labelling and drafting stay in the person's own mailbox
+// (`own`), unlike Microsoft's shared mailboxes; sending reaches whoever the
+// message goes to (`others`).
 
 const users = "/gmail/v1/users/{mailbox}";
 
