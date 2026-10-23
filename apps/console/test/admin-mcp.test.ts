@@ -156,6 +156,10 @@ const mcpCalls = async () => {
   }));
 };
 
+/** A streamed body's pieces, and how long it would be in all: 4 MiB. */
+const chunkBytes = 16 * 1024;
+const streamedBytes = 4 * 1024 * 1024;
+
 /** A stand-in for Cloudflare's rate limiter that lets `allowed` calls through. */
 const limiterAllowing = (allowed: number): RateLimit => {
   let left = allowed;
@@ -453,6 +457,45 @@ describe("the admin's MCP", () => {
       readers: acme.account.adminReaders,
       audited: await mcpCalls(),
     }).toStrictEqual({ status: 400, readers: [], audited: [] });
+  });
+
+  it("refuses a body past its limit without holding it, though it declares no length, reading nothing", async () => {
+    const acme = await liveClient();
+    acme.account.admin = readySnapshot("Acme");
+    // A stream far longer than the limit, with no Content-Length: only as
+    // much of it is pulled as it takes to see it is too long.
+    const chunk = new TextEncoder().encode(" ".repeat(chunkBytes));
+    let pulled = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull: (controller) => {
+        if (pulled >= streamedBytes) {
+          controller.close();
+          return;
+        }
+        pulled += chunk.byteLength;
+        controller.enqueue(chunk);
+      },
+    });
+    const response = await exports.default.fetch(`${origin}/mcp`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        accept: "application/json, text/event-stream",
+        "cf-access-jwt-assertion": await accessJwt(staff.email),
+      },
+      body,
+    });
+    expect({
+      status: response.status,
+      heldWhole: pulled >= streamedBytes,
+      readers: acme.account.adminReaders,
+      audited: await mcpCalls(),
+    }).toStrictEqual({
+      status: 413,
+      heldWhole: false,
+      readers: [],
+      audited: [],
+    });
   });
 
   it("names no person and gives a company's names only as data", async () => {
