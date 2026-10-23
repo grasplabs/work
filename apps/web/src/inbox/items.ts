@@ -1,4 +1,5 @@
 import type { PendingAction, UnknownOutcome } from "@grasp-os/shared/connect";
+import type { DecisionView } from "@grasp-os/shared/decisions";
 import type { DependencyRequest } from "@grasp-os/shared/dependencies";
 import type {
   GapAskedNotification,
@@ -49,7 +50,8 @@ export type InboxKind =
   | "permissionRequest"
   | "packages"
   | "appApproval"
-  | "failedRun";
+  | "failedRun"
+  | "decision";
 
 /** Where an item can be opened: the page of what it is about. */
 export type Target =
@@ -57,7 +59,8 @@ export type Target =
   | { kind: "engine"; engine: string }
   | { kind: "integration"; integration: string }
   | { kind: "chat"; chat: string }
-  | { kind: "brain" };
+  | { kind: "brain" }
+  | { kind: "decision"; decision: string };
 
 /** What an item was made from: what its page shows of it and acts on. */
 export type InboxSource =
@@ -72,7 +75,8 @@ export type InboxSource =
       model: string | undefined;
     }
   | { type: "reconnect"; integration: string }
-  | { type: "asked"; notification: GapAskedNotification };
+  | { type: "asked"; notification: GapAskedNotification }
+  | { type: "decision"; decision: DecisionView };
 
 export interface InboxItem {
   /** Stable from one read to the next: its kind and what it is about, e.g. "held:<id>". */
@@ -121,6 +125,7 @@ export const groupOf: Record<InboxKind, Exclude<Group, "all">> = {
   packages: "apps",
   appApproval: "apps",
   failedRun: "workflows",
+  decision: "workflows",
 };
 
 export type Sort = "urgent" | "newest" | "oldest";
@@ -394,6 +399,42 @@ const askedItems = (failed: NotificationsPage, me: string): InboxItem[] =>
     ];
   });
 
+/**
+ * A decision a workflow's run waits for the person to answer: answered on
+ * its own page, where they review what it is about and confirm.
+ */
+const decisionItems = (
+  decisions: readonly DecisionView[],
+  me: string,
+  readAt: string
+): InboxItem[] =>
+  decisions.map((decision) => {
+    const name =
+      decision.app?.name ??
+      decision.workflowResource?.name ??
+      decision.workflow;
+    return {
+      id: `decision:${decision.id}`,
+      kind: "decision",
+      title: decision.description,
+      context: name,
+      body: [
+        t`A run of ${name} waits for your answer. Nothing more happens in it until someone answers, or until it stops waiting.`,
+      ],
+      facts: [
+        { label: t`Workflow`, value: name },
+        { label: t`Answer by`, value: formatDateTime(decision.expiresAt) },
+      ],
+      about: { kind: "decision", decision: decision.id },
+      forWhom: { person: me },
+      // Core says what waits now, not since when: as of the read.
+      date: readAt,
+      // Its run waits on the answer.
+      urgent: true,
+      source: { type: "decision", decision },
+    };
+  });
+
 /** What is ready of a part of what waits; nothing of one that couldn't be read. */
 const readyOf = <T>(part: Loaded<T> | undefined): T | undefined =>
   part?.state === "ready" ? part.data : undefined;
@@ -417,6 +458,7 @@ export const inboxItems = (
   const dependencies = readyOf(waiting.dependencies);
   const screens = readyOf(waiting.screens) ?? [];
   const failed = readyOf(waiting.failed);
+  const decisions = readyOf(waiting.decisions) ?? [];
   const integrations = readyOf(waiting.integrations);
   const reconnect = (
     integrations === undefined ? [] : toReconnect(integrations, viewer)
@@ -444,6 +486,7 @@ export const inboxItems = (
     };
   });
   return [
+    ...decisionItems(decisions, me, readAt),
     ...heldItems(held, me),
     ...outcomeItems(outcomes, me),
     ...(requests === undefined ? [] : requestItems(requests)),
@@ -467,6 +510,7 @@ export const unread = (waiting: Waiting): Loaded<unknown>[] => {
     waiting.screens,
     waiting.failed,
     waiting.integrations,
+    waiting.decisions,
   ];
   return parts.filter(
     (part): part is Loaded<unknown> =>

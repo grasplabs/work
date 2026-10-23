@@ -396,7 +396,7 @@ const start = (event) => {
     data?.type !== "${screenFrameMessage}" ||
     data.load !== load ||
     data.artifact !== screen.artifact ||
-    ports.length !== 2
+    ports.length !== 3
   ) {
     return;
   }
@@ -409,7 +409,8 @@ const start = (event) => {
       ports[0],
       screen.entry,
       { load, artifact: screen.artifact, generation: data.generation },
-      ports[1]
+      ports[1],
+      ports[2]
     )
   );
 };

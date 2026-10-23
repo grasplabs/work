@@ -228,6 +228,32 @@ export class BoundedRunHost<Attempt extends object>
     );
   }
 
+  async listen(name: unknown): Promise<Settled<unknown>> {
+    const { listen } = this.#host;
+    if (listen === undefined) {
+      return {
+        ok: false,
+        error: { name: "Error", message: "This run has no listen tasks." },
+      };
+    }
+    return await this.#clock.around(
+      async () => await listen.call(this.#host, name)
+    );
+  }
+
+  async child(name: unknown): Promise<Settled<unknown>> {
+    const { child } = this.#host;
+    if (child === undefined) {
+      return {
+        ok: false,
+        error: { name: "Error", message: "This run has no child workflows." },
+      };
+    }
+    return await this.#clock.around(
+      async () => await child.call(this.#host, name)
+    );
+  }
+
   async waitForDecision(
     name: unknown,
     options: unknown

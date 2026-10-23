@@ -9,6 +9,7 @@ import react from "@vitejs/plugin-react";
 import { defineProject } from "vite-plus";
 
 import { accessTeam } from "./test/access-config.ts";
+import { discordTest } from "./test/discord-config.ts";
 
 const migrations = await readD1Migrations(
   `${import.meta.dirname}/src/db/migrations`
@@ -79,8 +80,14 @@ export default defineProject({
           // Off whatever a developer's .dev.vars sets: the tests of the
           // bypass set it themselves.
           DEV_ACCESS_EMAIL: "",
+          // Grasp's Discord application, which test/discord.test.ts stands
+          // in for (src/admin/discord.ts).
+          DISCORD_PUBLIC_KEY: discordTest.publicKey,
+          DISCORD_STAFF_IDS: discordTest.staffIds.join(","),
           // Where provisioned clients are served (src/deploy/context.ts).
           CLIENT_DOMAIN: "grasp.test",
+          // Grasp's Rooms, which test/admin-proposal.test.ts stands in for.
+          ROOMS_ORIGIN: "https://rooms.grasp.test",
           // Where TanStack Start answers server functions: the build sets
           // it; here the Worker reads it from process.env, which workerd
           // fills from its vars, so tests can call them through the entry.
