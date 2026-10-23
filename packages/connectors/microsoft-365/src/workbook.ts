@@ -206,7 +206,8 @@ const sameCell = (a: Cell, b: Cell): boolean =>
   JSON.stringify(a) === JSON.stringify(b);
 
 /**
- * Whether a cell as read now stands as `wanted`: the same value; text
+ * Whether a cell as read now stands as `wanted`, as it would once written:
+ * the same value; empty, for `""`, which reads as an empty cell; text
  * Excel took for a number when it was typed (`"12"` and 12); or, for a
  * formula, the formula Excel holds there.
  */
@@ -217,6 +218,9 @@ const stands = (
 ): boolean => {
   if (wanted !== null && typeof wanted === "object" && "formula" in wanted) {
     return formula === wanted.formula;
+  }
+  if (wanted === "") {
+    return now === null;
   }
   if (typeof wanted === "string" && typeof now === "number") {
     return String(now) === wanted;
@@ -509,11 +513,9 @@ const updateRow = defineTool({
       const stood = writtenRow(columns, wanted, cells);
       return { output: { ...output, after: stood } };
     }
-    if (
-      !was.every((cell, index) =>
-        stands(cells[index] ?? null, formulas[index], cell)
-      )
-    ) {
+    // What was read is checked as it was read, its type too: text that
+    // has since become a number is a change, the old value kept with it.
+    if (!was.every((cell, index) => sameCell(cells[index] ?? null, cell))) {
       throw new ToolError(
         "The row no longer holds what was read: read it again",
         { code: "conflict" }

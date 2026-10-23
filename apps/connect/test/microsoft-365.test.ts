@@ -1188,6 +1188,49 @@ describe("the Microsoft 365 connector's Excel tools", () => {
     });
   });
 
+  it("refuse a change whose read cell has since changed type, though it reads the same", async () => {
+    const connection = await connected();
+    // Read as text "1200", it now holds the number 1200.
+    await expect(
+      toolError(
+        onRegister(
+          connection,
+          "excel.updateRow",
+          {
+            row: 0,
+            before: withAmount(northwind, "1200"),
+            after: withAmount(northwind, 1350),
+          },
+          "run-7:typed"
+        )
+      )
+    ).resolves.toMatchObject({ error: { code: "conflict" } });
+    expect(sentAs("PATCH")).toBe(0);
+  });
+
+  it("recover a change that empties a cell, finding the row as it was asked to stand", async () => {
+    const connection = await connected();
+    const iban = "NL20INGB0001234567";
+    const update = async () =>
+      await onRegister(
+        connection,
+        "excel.updateRow",
+        {
+          row: 0,
+          before: northwind,
+          after: withIban(withAmount(northwind, ""), iban),
+        },
+        "run-7:clear"
+      );
+    graph.loseWriteAnswer();
+    await expect(outcome(update())).resolves.toBe("connect.outcome_unknown");
+    await claimedAgo(connection);
+    await expect(outputOf(update())).resolves.toMatchObject({
+      after: withIban(withAmount(northwind, null), iban),
+    });
+    expect(sentAs("PATCH")).toBe(1);
+  });
+
   it("never write a formula's value over it: a change keeps the formula a cell holds, unconfirmed, or is refused", async () => {
     const connection = await connected();
     graph.typeFormula(register, {
