@@ -9,6 +9,7 @@ import type { Reader } from "./access.ts";
 import { authorize } from "./app-entries.ts";
 import type { Readable, ReadRecord } from "./authorize.ts";
 import type { CollectionRow } from "./collections.ts";
+import { recallKey, requireRecall } from "./recall-grants.ts";
 import { checkWrite } from "./write-rules.ts";
 
 // What Knowledge asks of its host, in one place: the rest of Knowledge
@@ -53,6 +54,16 @@ export interface KnowledgePorts {
     text: string;
     sync: boolean;
   }) => Promise<void>;
+  /** Who may recall, as the host decides it (recall.ts). */
+  recall: {
+    /** Refuses a reader who may not recall at all. */
+    require: (reader: Reader) => Promise<void>;
+    /**
+     * Who `reader` is, as a string that changes when what the host lets
+     * them read changes: part of a recall's access revision.
+     */
+    key: (reader: Reader) => Promise<string>;
+  };
   /** Who `reader` is, as the host's audit log names them. */
   actorOf: (reader: Reader) => AuditActor;
   /** Payloads (payloads.ts), in a bucket whose jurisdiction the host set. */
@@ -99,6 +110,12 @@ export const portsOf = (env: Env): KnowledgePorts => ({
   onRead: async (reader, record, ...sources) =>
     await noteProvenance(env, reader, record, ...sources),
   actorOf: readerActor,
+  recall: {
+    require: async (reader) => {
+      await requireRecall(env, reader);
+    },
+    key: async (reader) => await recallKey(env, reader),
+  },
   onWrite: async (write) => {
     await checkWrite(env, write);
   },
