@@ -48,6 +48,14 @@ import { sharedRun } from "@grasp-os/shared/shared-runs";
 import type { SharedRun } from "@grasp-os/shared/shared-runs";
 import { z } from "zod";
 
+import {
+  forgetReceipts,
+  keySchema,
+  refreshKept,
+  sweepReceipts,
+  throughCache,
+} from "./build-cache.ts";
+import type { CacheEnv } from "./build-cache.ts";
 import { PlatformBoundError, platformRunner } from "./platform-sandbox.ts";
 import type { PlatformEnv, PlatformRunner } from "./platform-sandbox.ts";
 import type { FrameCode } from "./screen-frame.ts";
@@ -134,10 +142,14 @@ interface FailedBuild {
 }
 
 /** What building reads from core's env. */
-export type BuildEnv = PlatformEnv & {
-  /** Where builds are cached: core's R2 bucket, in the EU. */
-  FILES: Pick<R2Bucket, "get" | "put">;
-};
+export type BuildEnv = PlatformEnv &
+  CacheEnv & {
+    /** Where builds are cached: core's R2 bucket, in the EU. */
+    FILES: Pick<R2Bucket, "get" | "put">;
+  };
+
+/** How much longer than a build may take a build's lease is held. */
+const leaseSlackMs = 30_000;
 
 /**
  * What the compiler (`AppCompiler`) runs for each kind of build: its
@@ -252,10 +264,14 @@ const buildSweepKey = "builds-sweep.json";
 /** The most objects one run of the builds' sweep reads. */
 const buildSweepBatch = 500;
 
-/** The prefix each kind of build is cached under. */
-const buildPrefixes = Object.keys(compilerCalls).map(
-  (kind) => `${kind}-builds/`
-);
+/**
+ * The prefix each kind of build is cached under, and the bad bytes kept
+ * for operators (build-cache.ts), which go after the same time.
+ */
+const buildPrefixes = [
+  ...Object.keys(compilerCalls).map((kind) => `${kind}-builds/`),
+  "build-quarantine/",
+];
 
 const buildSweepSchema = z.object({
   prefix: z
@@ -318,11 +334,13 @@ export const sweepBuilds = async (env: Env, now: Date): Promise<void> => {
   const keys = stillUnused.flat();
   if (keys.length > 0) {
     await env.FILES.delete(keys);
+    await forgetReceipts(env, keys);
   }
   const next = listed.truncated
     ? { prefix: state.prefix, cursor: listed.cursor }
     : { prefix: (state.prefix + 1) % buildPrefixes.length };
   await env.FILES.put(buildSweepKey, JSON.stringify(next));
+  await sweepReceipts(env, now);
 };
 
 /**
@@ -334,7 +352,69 @@ export const sweepBuilds = async (env: Env, now: Date): Promise<void> => {
  * settles, so it is waited for only as long as a build may take
  * (`sharedRun`).
  */
-const buildsRunning = new Map<string, SharedRun<unknown>>();
+const buildsRunning = new Map<string, SharedRun<CachedAnswer>>();
+
+/** What a build through the cache answered, as the requests sharing it get it. */
+type CachedAnswer = Awaited<ReturnType<typeof throughCache>>;
+
+/**
+ * A shared build's starter gave up on it before it compiled: those who
+ * shared it, still waiting, start their own.
+ */
+class StarterGaveUpError extends Error {
+  override name = "StarterGaveUpError";
+}
+
+/**
+ * `key`'s build through the cache, shared by every request of this
+ * isolate that asks for it while it runs: the lease holder's answer,
+ * cacheable or not (a quarantined key, a stop the load caused), goes to
+ * them all, so concurrent views of one screen compile once. A request
+ * given up on stops; one that shared another's build that was given up on
+ * before it compiled starts its own.
+ */
+const sharedThroughCache = async (
+  key: string,
+  abandonAfterMs: number,
+  run: (signal?: AbortSignal) => Promise<CachedAnswer>,
+  signal?: AbortSignal
+): Promise<CachedAnswer> => {
+  for (let tries = 0; ; tries += 1) {
+    signal?.throwIfAborted();
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- once more only if its starter gave up
+      return await sharedRun(
+        buildsRunning,
+        key,
+        abandonAfterMs,
+        async () => {
+          try {
+            return await run(signal);
+          } catch (error) {
+            if (signal?.aborted === true) {
+              throw new StarterGaveUpError("Its starter gave up on the build", {
+                cause: error,
+              });
+            }
+            throw error;
+          }
+        },
+        signal
+      );
+    } catch (error) {
+      if (!(error instanceof StarterGaveUpError)) {
+        throw error;
+      }
+      // Ours given up on: why it was.
+      if (signal?.aborted === true) {
+        throw error.cause;
+      }
+      if (tries >= 2) {
+        throw error;
+      }
+    }
+  }
+};
 
 /**
  * A build of the files `select` picks, the only ones it reads: limited
@@ -343,9 +423,10 @@ const buildsRunning = new Map<string, SharedRun<unknown>>();
  * cached too, where the files alone failed it (`compiled`): the same
  * files fail the same way with the same compiler, so an App that doesn't
  * build can't start the compiler on every request. A build that throws
- * isn't cached. Two requests in one isolate for a build that isn't cached
- * yet share one (`buildsRunning`); in two isolates they may both build
- * it, and build the same thing. A cached build is kept `buildKeepMs` past
+ * isn't cached. A cached build is served only as its trusted receipt
+ * says it was built, and builds of the same files run once in any
+ * isolate, under the key's lease (build-cache.ts); two requests in one
+ * isolate also share one compile (`buildsRunning`). A cached build is kept `buildKeepMs` past
  * its last use (`sweepBuilds`): one read older than `buildRefreshMs` is
  * written again, so a build in use is never as old as the sweep's limit.
  */
@@ -374,49 +455,56 @@ const cachedBuild = async <Build>(
   // compiler call a kind makes (`compilerCalls`) builds again, rather than
   // serving what the old call built for as long as it is kept.
   const [callMethod, callTarget] = compilerCalls[kind];
-  const cacheKey = `${kind}-builds/${callMethod}.${callTarget}/${await buildKey(files)}.json`;
+  const cacheKey = `${kind}-builds/${callMethod}.${callTarget}/${keySchema}/${await buildKey(files)}.json`;
   const isBuild = (value: unknown): value is Build | FailedBuild =>
     isBuildShaped(value);
-  const cached = await env.FILES.get(cacheKey);
-  if (cached) {
-    const text = await cached.text();
-    if (Date.now() - lastUsedOf(cached) > buildRefreshMs) {
-      try {
-        await env.FILES.put(cacheKey, text, usedNow());
-      } catch (error) {
-        // The build is served all the same: a refresh that failed is
-        // tried again at its next use, well before the sweep's limit.
-        log.warn("build.refresh_failed", errorFields(error));
-      }
-    }
-    return await new Response(text).json<Build>();
-  }
-  // Given up on (a build job's lease lost): it starts no compile, nor
-  // after waiting on another's (`sharedRun`). One already running goes
-  // on, shared by whoever else waits for it and bounded by the compiler's
-  // own time, and lands in the cache whole.
-  signal?.throwIfAborted();
-  const built = await sharedRun(
-    buildsRunning,
+  const started = Date.now();
+  const leaseMs = runner.callMs("compiler") + leaseSlackMs;
+  const { text, outcome, object, objectKey } = await sharedThroughCache(
     // One sub-owner's: another App building the same files builds them in
     // its own part of the builder's share, never on this one's (or with
     // its refusal). The cache itself is by content alone.
     `${whose}\n${cacheKey}`,
-    runner.callMs("compiler"),
-    async () => {
-      const answer = await compiled(runner, kind, files);
-      if (!isBuild(answer.built)) {
-        throw new TypeError(
-          "The compiler answered something else than a build."
-        );
-      }
-      if (answer.cache) {
-        await env.FILES.put(cacheKey, JSON.stringify(answer.built), usedNow());
-      }
-      return answer.built;
-    },
+    // Waited on as long as a lease, and the wait for one, may take.
+    leaseMs * 2,
+    async (given) =>
+      await throughCache(
+        env,
+        cacheKey,
+        // Held as long as a build may take, and a little more.
+        leaseMs,
+        async () => {
+          const answer = await compiled(runner, kind, files);
+          if (!isBuild(answer.built)) {
+            throw new TypeError(
+              "The compiler answered something else than a build."
+            );
+          }
+          return { text: JSON.stringify(answer.built), cache: answer.cache };
+        },
+        usedNow,
+        given
+      ),
     signal
   );
+  // Assembly, transforms and execution are the compiler's own; this is
+  // the cache's part: how a build came about, and how long it took.
+  log.info("build.cache", { kind, outcome, ms: Date.now() - started });
+  if (
+    object !== undefined &&
+    objectKey !== undefined &&
+    Date.now() - lastUsedOf(object) > buildRefreshMs
+  ) {
+    try {
+      // The same bytes, while its receipt still names them.
+      await refreshKept(env, cacheKey, objectKey, text, usedNow());
+    } catch (error) {
+      // The build is served all the same: a refresh that failed is tried
+      // again at its next use, well before the sweep's limit.
+      log.warn("build.refresh_failed", errorFields(error));
+    }
+  }
+  const built: unknown = JSON.parse(text);
   if (!isBuild(built)) {
     throw new TypeError("The compiler answered something else than a build.");
   }

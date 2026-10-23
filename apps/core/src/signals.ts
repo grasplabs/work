@@ -13,6 +13,7 @@ import {
   gte,
   inArray,
   lt,
+  or,
   sql,
 } from "drizzle-orm";
 import type { SQL, SQLWrapper } from "drizzle-orm";
@@ -34,6 +35,8 @@ import {
   improvementSignalComputations as computations,
   improvementSignals,
   workflowDecisions,
+  workflowResourceRuns,
+  workflowResources,
   workflowRuns,
 } from "./db/core/schema.ts";
 import { chunks, inList } from "./db/d1.ts";
@@ -111,6 +114,27 @@ const unended: (typeof workflowRuns.$inferSelect)["status"][] = [
   "paused",
 ];
 
+/** Statuses of an independent workflow's run that hasn't ended. */
+const resourceUnended: (typeof workflowResourceRuns.$inferSelect)["status"][] =
+  ["starting", "running"];
+
+/**
+ * A decision's run, as the signals name it: an App's workflow, or an
+ * independent workflow (a JSON workflow's `grasp.decision`), of no App
+ * (`app_id` empty) and by its name, as its decisions' page names it.
+ * Decisions of a run that is gone have none: they're skipped.
+ */
+const decisionRun = {
+  runId: sql<
+    string | null
+  >`coalesce(${workflowDecisions.runId}, ${workflowDecisions.resourceRunId})`,
+  appId: sql<string>`coalesce(${workflowRuns.appId}, '')`,
+  workflowId: sql<
+    string | null
+  >`coalesce(${workflowRuns.workflowId}, ${workflowResources.name})`,
+  independent: sql<number>`${workflowDecisions.resourceRunId} IS NOT NULL`,
+};
+
 /** One signal as it is stored: `app_id` and `workflow_id` empty for none. */
 interface SignalRow {
   kind: SignalKind;
@@ -148,6 +172,19 @@ const dollars = (amount: number): number => Math.round(amount * 1e6) / 1e6;
  */
 const stepName = (step: string | null): string =>
   /^[A-Za-z][\w-]{0,63}(?=$|[:#])/u.exec(step ?? "")?.[0] ?? "";
+
+/** The task of an independent run's decision step: `task:<id>`, or in a loop `task:<id>@…`. */
+const independentTask = /^task:(?<task>[A-Za-z][\w-]{0,63})(?=$|@)/u;
+
+/**
+ * A decision's step as a signal names it: an App's step (`stepName`), or
+ * the task of an independent run's decision (`task:<id>`, `task:<id>@…`
+ * in a loop), whatever item of a loop it was.
+ */
+const decisionStep = (row: { step: string; independent: number }): string =>
+  row.independent === 1
+    ? (independentTask.exec(row.step)?.groups?.task ?? "")
+    : stepName(row.step);
 
 /** The entries of `counts`, most first, then by name. */
 const mostFirst = (counts: ReadonlyMap<string, number>) =>
@@ -236,6 +273,8 @@ const waitingForPeople = (
 /**
  * Runs waiting longest for a person: each workflow's open decisions, by
  * the deciders they're from, valued at how long the oldest has waited.
+ * An App's workflow's runs and an independent workflow's alike
+ * (`decisionRun`).
  */
 const waitingSignals = async (
   db: DrizzleD1Database,
@@ -256,15 +295,21 @@ const waitingSignals = async (
       await db
         .select({
           id: workflowDecisions.id,
-          runId: workflowDecisions.runId,
+          ...decisionRun,
           step: workflowDecisions.step,
           deciders: workflowDecisions.deciders,
           openedAt: workflowDecisions.openedAt,
-          appId: workflowRuns.appId,
-          workflowId: workflowRuns.workflowId,
         })
         .from(workflowDecisions)
-        .innerJoin(workflowRuns, eq(workflowRuns.id, workflowDecisions.runId))
+        .leftJoin(workflowRuns, eq(workflowRuns.id, workflowDecisions.runId))
+        .leftJoin(
+          workflowResourceRuns,
+          eq(workflowResourceRuns.id, workflowDecisions.resourceRunId)
+        )
+        .leftJoin(
+          workflowResources,
+          eq(workflowResources.id, workflowResourceRuns.workflowResourceId)
+        )
         // Every decision still open, however long ago it opened: not only
         // the window's. This is a snapshot of who is waited for now, and a
         // decision open for months is the worst wait there is, the one
@@ -274,7 +319,10 @@ const waitingSignals = async (
           and(
             eq(workflowDecisions.status, "open"),
             gt(workflowDecisions.expiresAt, now),
-            inArray(workflowRuns.status, unended),
+            or(
+              inArray(workflowRuns.status, unended),
+              inArray(workflowResourceRuns.status, resourceUnended)
+            ),
             pastCursor(
               workflowDecisions.openedAt,
               workflowDecisions.id,
@@ -285,11 +333,14 @@ const waitingSignals = async (
         )
         .orderBy(asc(workflowDecisions.openedAt), asc(workflowDecisions.id))
         .limit(pageRows),
-    (row) => {
-      const key = JSON.stringify([row.appId, row.workflowId, row.deciders]);
+    ({ workflowId, ...row }) => {
+      if (workflowId === null || row.runId === null) {
+        return;
+      }
+      const key = JSON.stringify([row.appId, workflowId, row.deciders]);
       const group = groups.get(key) ?? {
         appId: row.appId,
-        workflowId: row.workflowId,
+        workflowId,
         deciders: row.deciders,
         open: 0,
         oldest: [],
@@ -300,7 +351,7 @@ const waitingSignals = async (
         group.oldest.push({
           decision: row.id,
           run: runIdSchema.parse(row.runId),
-          step: stepName(row.step),
+          step: decisionStep(row),
           openedAt: row.openedAt.toISOString(),
         });
       }
@@ -497,15 +548,21 @@ const correctionSignals = async (
       await db
         .select({
           id: workflowDecisions.id,
-          runId: workflowDecisions.runId,
+          ...decisionRun,
           step: workflowDecisions.step,
           status: workflowDecisions.status,
           decidedAt: workflowDecisions.decidedAt,
-          appId: workflowRuns.appId,
-          workflowId: workflowRuns.workflowId,
         })
         .from(workflowDecisions)
-        .innerJoin(workflowRuns, eq(workflowRuns.id, workflowDecisions.runId))
+        .leftJoin(workflowRuns, eq(workflowRuns.id, workflowDecisions.runId))
+        .leftJoin(
+          workflowResourceRuns,
+          eq(workflowResourceRuns.id, workflowDecisions.resourceRunId)
+        )
+        .leftJoin(
+          workflowResources,
+          eq(workflowResources.id, workflowResourceRuns.workflowResourceId)
+        )
         .where(
           and(
             // Only an answer sets it (approved or rejected), and so the
@@ -523,15 +580,18 @@ const correctionSignals = async (
         )
         .orderBy(desc(workflowDecisions.decidedAt), desc(workflowDecisions.id))
         .limit(pageRows),
-    (row) => {
-      if (row.status !== "approved" && row.status !== "rejected") {
+    ({ workflowId, ...row }) => {
+      if (
+        (row.status !== "approved" && row.status !== "rejected") ||
+        workflowId === null
+      ) {
         return;
       }
-      const step = stepName(row.step);
-      const key = JSON.stringify([row.appId, row.workflowId, step]);
+      const step = decisionStep(row);
+      const key = JSON.stringify([row.appId, workflowId, step]);
       const group = groups.get(key) ?? {
         appId: row.appId,
-        workflowId: row.workflowId,
+        workflowId,
         step,
         answered: 0,
         rejected: 0,

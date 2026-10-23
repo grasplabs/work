@@ -54,6 +54,7 @@ import {
   packagesHoldSql,
   sealedPackagesSchema,
 } from "./workflows/package-seal.ts";
+import type { ChildPlace } from "./workflows/quotas.ts";
 import { runAdmitted, startResourceRun } from "./workflows/resource-runs.ts";
 import { tellQueryFollowers } from "./workflows/run-changes.ts";
 
@@ -176,7 +177,25 @@ export type StartInvoker =
    * (inbound-email.ts, connector-events.ts), or it opens a lineage of its
    * own past the run's limits (GRA-692).
    */
-  | { type: "trigger"; triggerId: string };
+  | { type: "trigger"; triggerId: string }
+  /**
+   * A run's `run` task starting its child (workflows/run-children.ts):
+   * only with the parent workflow's own `start` grant on the child's
+   * workflow, for the parent run's person, while the parent run is still
+   * going; never with the authority that started the parent. `place` is
+   * where its lineage admitted the child already (quotas.ts, `admitChild`).
+   */
+  | { type: "workflow"; parent: ParentRun; place: ChildPlace };
+
+/** The run whose `run` task starts a child, as its host knows it. */
+export interface ParentRun {
+  readonly runId: string;
+  readonly workflowId: string;
+  /** The person it acts for, whom the child acts for too. */
+  readonly principal: string;
+  /** Whether it runs restricted: its children do then too. */
+  readonly restricted: boolean;
+}
 
 /**
  * A new start the host decided on: what it freezes, and what admitting it
@@ -213,6 +232,11 @@ export interface StartAuthorization {
   buildHash: string | null;
   /** For the audit log: who started it. */
   actor: AuditActor;
+  /**
+   * For a child run: its parent and where it sits in its lineage, pinned
+   * with its row (resource-runs.ts, `RunAdmission.lineage`).
+   */
+  lineage?: { parentRunId: string; rootRunId: string; depth: number };
   /**
    * That it still holds, as SQL, read as the admitting statement runs: of
    * a fixed size whatever the version binds, as `required` holds the
@@ -688,6 +712,40 @@ const ruleOf = async (
           )})`,
       };
     }
+    case "workflow": {
+      const { parent } = invoker;
+      const parentWorkflow = workflowResourceIdSchema.safeParse(
+        parent.workflowId
+      );
+      if (!parentWorkflow.success) {
+        throw denied();
+      }
+      return {
+        invoker: { type: "workflow", id: parent.runId },
+        originAppVersion: null,
+        triggerVersion: null,
+        principal: parent.principal,
+        actor: { type: "system" },
+        // The parent workflow's own grant to start this one, never its
+        // builders' nor its invoker's; for a person who still has a role
+        // in both; while the parent run is still going.
+        holds: sql`(${workflowRoleSql(parent.principal, id)}
+          AND ${workflowRoleSql(parent.principal, parent.workflowId)}
+          AND EXISTS (SELECT 1 FROM workflow_resource_runs AS parent_run
+            WHERE parent_run.id = ${parent.runId}
+              AND parent_run.workflow_resource_id = ${parent.workflowId}
+              AND parent_run.principal_id = ${parent.principal}
+              AND parent_run.status IN ('starting', 'running'))
+          AND ${grantSql(
+            allowingPermissionSql(
+              { type: "workflow", workflowId: parentWorkflow.data },
+              undefined,
+              object,
+              "start"
+            )
+          )})`,
+      };
+    }
     default: {
       return invoker satisfies never;
     }
@@ -905,6 +963,10 @@ const restrictedStart = async (
     case "trigger": {
       return false;
     }
+    case "workflow": {
+      // Restricted only ever spreads down a lineage, never lifts.
+      return invoker.parent.restricted;
+    }
     default: {
       return invoker satisfies never;
     }
@@ -1096,6 +1158,15 @@ export const decideWorkflowStart = async (
       restricted,
       buildHash,
       actor: rule.actor,
+      ...(invoker.type === "workflow"
+        ? {
+            lineage: {
+              parentRunId: invoker.parent.runId,
+              rootRunId: invoker.place.rootRunId,
+              depth: invoker.place.depth,
+            },
+          }
+        : {}),
       holds,
       packages,
     },
@@ -1211,6 +1282,9 @@ export const admitWorkflowStart = async (
               principal: authorization.principal,
               restricted: authorization.restricted,
               createdAt: createdAt.getTime(),
+              ...(authorization.lineage === undefined
+                ? {}
+                : { lineage: authorization.lineage }),
             }),
           ]),
       // Only once the receipt is written, read as such: never inferred from

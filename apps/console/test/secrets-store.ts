@@ -81,6 +81,8 @@ export const useStoreSecrets = (tokens: {
     [env.ROOMS_READ_TOKEN, ""],
     // Empty too: the digest's tests set it (test/discord-digest.test.ts).
     [env.DISCORD_DIGEST_WEBHOOK, ""],
+    // Attio's key likewise (test/admin-crm.test.ts).
+    [env.ATTIO_READ_KEY, ""],
   ];
   const stored: { admin: SecretsStoreAdmin; id: string }[] = [];
   beforeEach(async () => {

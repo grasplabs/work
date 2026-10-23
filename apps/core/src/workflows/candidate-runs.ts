@@ -490,6 +490,8 @@ const loadedCandidateRun = async (
       build,
       calling: {
         runId,
+        // Its own lineage's root: a test run starts no children.
+        rootRunId: runId,
         workflowId: pin.workflow,
         version: 0,
         principal: row.principalId,

@@ -1460,6 +1460,10 @@ msgstr "Ein aktueller Fall"
 msgid "A retry of this change already started, so it wasn't abandoned. The page shows where it stands now."
 msgstr "Ein neuer Versuch dieser Änderung hat bereits begonnen, daher wurde sie nicht verworfen. Die Seite zeigt jetzt den aktuellen Stand."
 
+#: src/inbox/items.ts
+msgid "A run of {name} waits for your answer. Nothing more happens in it until someone answers, or until it stops waiting."
+msgstr "Ein Lauf von {name} wartet auf Ihre Antwort. Bis jemand antwortet oder er nicht mehr wartet, geschieht darin nichts weiter."
+
 #: src/routes/decisions.$decision.tsx
 msgid "A run of a workflow asked for this answer."
 msgstr "Ein Lauf eines Workflows hat um diese Antwort gebeten."
@@ -1516,6 +1520,12 @@ msgstr "Diese Änderung verwerfen?"
 msgctxt "note property: what a note is about"
 msgid "About"
 msgstr "Thema"
+
+#: src/decision-confirmation.tsx
+#: src/routes/decisions.$decision.tsx
+msgctxt "what a decision is about, as its workflow run passed it"
+msgid "About"
+msgstr "Worum es geht"
 
 #: src/routes/_shell.settings.spend.tsx
 msgid "About {ending}"
@@ -2026,6 +2036,10 @@ msgstr "Seit diese Liste geladen wurde, ist eine andere Version dieser Domäne a
 #: src/chat/brain-questions.tsx
 msgid "Answer"
 msgstr "Antwort"
+
+#: src/inbox/items.ts
+msgid "Answer by"
+msgstr "Antworten bis"
 
 #: src/inbox/item-detail.tsx
 msgid "Answer in the brain"
@@ -3739,6 +3753,11 @@ msgstr "Über eine zurückgehaltene Aktion entschieden"
 #: src/activity/audit-log.tsx
 #: src/labels.ts
 #: src/routes/decisions.$decision.tsx
+msgid "Decision"
+msgstr "Entscheidung"
+
+#: src/inbox/inbox-kind.tsx
+msgctxt "inbox item kind"
 msgid "Decision"
 msgstr "Entscheidung"
 
@@ -8944,6 +8963,10 @@ msgstr "Ertrag pro Monat, gemessen"
 #: src/inbox/item-detail.tsx
 msgid "Review"
 msgstr "Prüfen"
+
+#: src/inbox/item-detail.tsx
+msgid "Review and answer"
+msgstr "Prüfen und antworten"
 
 #: src/knowledge/document.tsx
 msgid "Review by"

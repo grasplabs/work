@@ -202,5 +202,16 @@
       "store_id": "account-secrets-store",
       "secret_name": "DISCORD_DIGEST_WEBHOOK",
     },
+    // A read-only Attio API key (records, object configuration, notes and
+    // meetings read; user management read to name deal owners), for the
+    // company, its people, deals and calls under Details and the won deals
+    // a new organization starts from (src/crm/attio.ts). The console's
+    // alone: never copied to a client, never sent to the browser. Put in
+    // the store by hand; until it is, Details says Attio isn't connected.
+    {
+      "binding": "ATTIO_READ_KEY",
+      "store_id": "account-secrets-store",
+      "secret_name": "ATTIO_READ_KEY",
+    },
   ],
 }
