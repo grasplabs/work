@@ -44,6 +44,9 @@
             "context": "e2e"
           },
           {
+            "context": "console-e2e"
+          },
+          {
             "context": "workerd"
           },
           {
