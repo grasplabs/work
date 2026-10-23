@@ -20,6 +20,7 @@ import {
   endLiveRuns,
   finished,
   liveStatus,
+  ofApps,
   whileEngineRefuses,
 } from "./runs.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
@@ -395,7 +396,7 @@ const shownStopped = async (builder: Person, app: string) => {
   const overview = await builder.api.workflows.overview();
   const { summary, triggers } = await builder.api.workflows.get(app, "weekly");
   return [
-    overview.find((workflow) => workflow.app === app)?.scheduleStopped,
+    ofApps(overview).find((workflow) => workflow.app === app)?.scheduleStopped,
     summary.scheduleStopped,
     triggers.map((trigger) => trigger.type === "schedule" && trigger.stopped),
   ];

@@ -1,12 +1,12 @@
 import { connectionIdSchema } from "@grasp-os/shared/ids";
 import { workflowErrors } from "@grasp-os/shared/workflows";
-import type { WorkflowSummary } from "@grasp-os/shared/workflows";
+import type { AppWorkflowSummary } from "@grasp-os/shared/workflows";
 import { and, eq, isNotNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import type { Member } from "../auth/identity.ts";
 import { apps, appVersions, permissions } from "../db/core/schema.ts";
-import { workflowOverview } from "./overview.ts";
+import { appWorkflowOverview } from "./overview.ts";
 
 // Which workflows use a connection, for its integration's page: those of
 // the current version of an App that holds an active permission on it,
@@ -14,7 +14,7 @@ import { workflowOverview } from "./overview.ts";
 // it (`app_versions.workflow_calls`, what a run's calls are held to). The
 // permission is the App's, and only a workflow that calls its binding can
 // reach the connection through it. Only workflows of Apps `by` can open,
-// as the Workflows page lists them (`workflowOverview`).
+// as the Workflows page lists them (`appWorkflowOverview`).
 
 /** A workflow, as one key: its App and its ID. */
 const keyOf = (app: string, workflow: string): string =>
@@ -28,7 +28,7 @@ export const connectionWorkflows = async (
   env: Env,
   by: Member,
   connection: unknown
-): Promise<WorkflowSummary[]> => {
+): Promise<AppWorkflowSummary[]> => {
   const connectionId = workflowErrors.parse(
     "workflow.invalid",
     connectionIdSchema,
@@ -67,7 +67,7 @@ export const connectionWorkflows = async (
         .map(([workflow]) => keyOf(app, workflow))
     )
   );
-  return await workflowOverview(env, by, (app, workflow) =>
+  return await appWorkflowOverview(env, by, (app, workflow) =>
     using.has(keyOf(app, workflow))
   );
 };

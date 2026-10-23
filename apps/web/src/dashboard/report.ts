@@ -2,13 +2,17 @@ import type {
   OnboardingProgress,
   Programme,
 } from "@grasp-os/shared/onboarding";
-import type { RunActivity, WorkflowSummary } from "@grasp-os/shared/workflows";
+import type {
+  AppWorkflowSummary as WorkflowSummary,
+  RunActivity,
+} from "@grasp-os/shared/workflows";
 import type { I18n, MessageDescriptor } from "@lingui/core";
 import { msg, ph, plural } from "@lingui/core/macro";
 
 import { plainText } from "../chat/chat-markdown.ts";
 import { formatDate } from "../format.ts";
 import type { Loaded } from "../load-from-core.tsx";
+import { workflowKey, workflowName } from "../workflows/lists.ts";
 import { signalKinds } from "./board.ts";
 import { inProgramme, programmeWeek } from "./programme.ts";
 import type { NextReport } from "./programme.ts";
@@ -149,23 +153,27 @@ const workflowsSection = (
     return [heading, unread(i18n)];
   }
   const ran = runs.data.workflows.map((workflow) => {
-    const name = plainText(workflow.workflow);
-    const engine = plainText(workflow.appName);
+    const name = plainText(workflowName(workflow));
     const { started, completed, failed } = workflow;
+    if (workflow.type === "resource") {
+      return item(
+        i18n._(
+          msg`${name}: ${started} started, ${completed} completed, ${failed} failed`
+        )
+      );
+    }
+    const engine = plainText(workflow.appName);
     return item(
       i18n._(
         msg`${name} in ${ph({ domain: engine })}: ${started} started, ${completed} completed, ${failed} failed`
       )
     );
   });
-  const ranNames = new Set(
-    runs.data.workflows.map(({ app, workflow }) => `${app}/${workflow}`)
-  );
+  const ranNames = new Set(runs.data.workflows.map(workflowKey));
   const idle =
     overview.state === "ready"
-      ? overview.data.filter(
-          ({ app, workflow }) => !ranNames.has(`${app}/${workflow}`)
-        ).length
+      ? overview.data.filter((workflow) => !ranNames.has(workflowKey(workflow)))
+          .length
       : 0;
   const listed =
     ran.length === 0

@@ -18,7 +18,7 @@ import { release, requestGranted } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { mailConnection } from "./mail-connection.ts";
 import { fullScan, recordedQueries } from "./query-plans.ts";
-import { sleeping } from "./runs.ts";
+import { ofApps, seedResourceRun, sleeping } from "./runs.ts";
 import {
   auditedDuring,
   openRpc,
@@ -180,9 +180,33 @@ const idsOf = async (page: Promise<RunsPage>): Promise<string[]> => {
 const shown = (run: ListedRun) => ({
   id: run.id,
   status: run.status,
-  decision: run.decision ?? null,
-  failedAt: run.failure?.step ?? null,
+  decision: run.type === "app" ? (run.decision ?? null) : null,
+  failedAt: run.type === "app" ? (run.failure?.step ?? null) : null,
 });
+
+/**
+ * The independent workflows `person` sees summed up, each with its owner's
+ * ID for its owner.
+ */
+const independent = async (person: Person) => {
+  const all = await person.api.workflows.overview();
+  return all.flatMap((row) =>
+    row.type === "resource" ? [{ ...row, owner: row.owner.userId }] : []
+  );
+};
+
+/**
+ * What the Runs list shows of each run of `page`: an independent
+ * workflow's with its workflow's name and whom it acts for.
+ */
+const listedOf = async (page: Promise<RunsPage>) => {
+  const { runs } = await page;
+  return runs.map((run) =>
+    run.type === "resource"
+      ? [run.id, run.status, run.name, run.startedBy]
+      : [run.id, run.status]
+  );
+};
 
 /** A run's status, and the share it waits for while queued. */
 const queueOf = (run: { status: string; queued?: unknown }) => ({
@@ -384,10 +408,11 @@ describe("the Workflows page", buildTime, () => {
     });
 
     const listed = async (person: Person) => {
-      const all = await person.api.workflows.overview();
+      const all = ofApps(await person.api.workflows.overview());
       return all.filter(({ app }) => app === invoices || app === payroll);
     };
     const owned = {
+      type: "app",
       app: invoices,
       appName,
       version: 1,
@@ -444,6 +469,165 @@ describe("the Workflows page", buildTime, () => {
     ]);
   });
 
+  it("lists the independent workflows a person has a role in after the Apps', each summed up from the runs its page lists them", async () => {
+    const [owner, user, stranger] = await Promise.all([
+      personApi("builder"),
+      personApi("user"),
+      personApi("builder"),
+    ]);
+    const workflow = await owner.api.workflowResources.create(
+      `intake-${unique()}`
+    );
+    await owner.api.workflowResources.share(workflow.id, {
+      type: "person",
+      id: user.userId,
+      role: "user",
+    });
+    const now = Date.now();
+    const runs = await Promise.all([
+      seedResourceRun({
+        workflow: workflow.id,
+        principal: owner.userId,
+        status: "completed",
+        createdAt: now - day,
+      }),
+      // Failed, but before the failures counted.
+      seedResourceRun({
+        workflow: workflow.id,
+        principal: owner.userId,
+        status: "failed",
+        createdAt: now - (failedRunDays + 1) * day,
+      }),
+      seedResourceRun({
+        workflow: workflow.id,
+        principal: user.userId,
+        status: "failed",
+        createdAt: now - minute * 2,
+      }),
+      seedResourceRun({
+        workflow: workflow.id,
+        principal: owner.userId,
+        status: "running",
+        createdAt: now - minute,
+      }),
+    ]);
+    const [usersLatest, ownersLatest] = runs.slice(2);
+    const summary = (change: object) => ({
+      type: "resource",
+      workflowId: workflow.id,
+      name: workflow.name,
+      version: null,
+      owner: owner.userId,
+      waiting: 0,
+      ...change,
+    });
+    expect({
+      owner: await independent(owner),
+      user: await independent(user),
+      stranger: await independent(stranger),
+    }).toStrictEqual({
+      // Its builder sees every run.
+      owner: [
+        summary({
+          lastRun: {
+            id: ownersLatest,
+            status: "running",
+            createdAt: new Date(now - minute).toISOString(),
+          },
+          failed: 1,
+          handled: 1,
+        }),
+      ],
+      // Its user, their own alone.
+      user: [
+        summary({
+          lastRun: {
+            id: usersLatest,
+            status: "failed",
+            createdAt: new Date(now - minute * 2).toISOString(),
+          },
+          failed: 1,
+          handled: 0,
+        }),
+      ],
+      stranger: [],
+    });
+  });
+
+  it("lists independent workflows' runs among the Apps' as their pages list them, and none once the filter names an App", async () => {
+    const [owner, user] = await Promise.all([
+      personApi("builder"),
+      personApi("user"),
+    ]);
+    const app = await appOf(owner, `Invoices ${unique()}`, approveFiles);
+    const workflow = await owner.api.workflowResources.create(
+      `intake-${unique()}`
+    );
+    await owner.api.workflowResources.share(workflow.id, {
+      type: "person",
+      id: user.userId,
+      role: "user",
+    });
+    const now = Date.now();
+    const appFailed = await seedRun(app, {
+      workflow: "approve",
+      status: "failed",
+      createdAt: now - minute * 6,
+      endedAt: now - minute * 3,
+    });
+    const [ownersDone, usersFailed, usersRunning] = await Promise.all([
+      seedResourceRun({
+        workflow: workflow.id,
+        principal: owner.userId,
+        status: "completed",
+        createdAt: now - minute * 5,
+      }),
+      seedResourceRun({
+        workflow: workflow.id,
+        principal: user.userId,
+        status: "failed",
+        createdAt: now - minute * 4,
+        endedAt: now - minute * 2,
+      }),
+      seedResourceRun({
+        workflow: workflow.id,
+        principal: user.userId,
+        status: "running",
+        createdAt: now - minute,
+      }),
+    ]);
+    const mine = { type: "person", userId: owner.userId };
+    const theirs = { type: "person", userId: user.userId };
+    expect({
+      all: await listedOf(owner.api.workflows.runs()),
+      failed: await listedOf(owner.api.workflows.runs({ status: "failed" })),
+      running: await listedOf(owner.api.workflows.runs({ status: "running" })),
+      done: await listedOf(owner.api.workflows.runs({ status: "done" })),
+      oneApp: await listedOf(owner.api.workflows.runs({ app })),
+      asUser: await listedOf(user.api.workflows.runs()),
+    }).toStrictEqual({
+      // Failed first, latest ended first; then the rest, newest first.
+      all: [
+        [usersFailed, "failed", workflow.name, theirs],
+        [appFailed.id, "failed"],
+        [usersRunning, "running", workflow.name, theirs],
+        [ownersDone, "completed", workflow.name, mine],
+      ],
+      failed: [
+        [usersFailed, "failed", workflow.name, theirs],
+        [appFailed.id, "failed"],
+      ],
+      running: [[usersRunning, "running", workflow.name, theirs]],
+      done: [[ownersDone, "completed", workflow.name, mine]],
+      oneApp: [[appFailed.id, "failed"]],
+      // Its user sees their own runs, and none of the App they can't open.
+      asUser: [
+        [usersFailed, "failed", workflow.name, theirs],
+        [usersRunning, "running", workflow.name, theirs],
+      ],
+    });
+  });
+
   it("lists workflows from their versions' rows, reading no App's files", async () => {
     const owner = await personApi("builder");
     const id = unique();
@@ -465,7 +649,7 @@ describe("the Workflows page", buildTime, () => {
         await env.FILES.put(`apps/${app}/trees/${tree}.json`, "damaged");
       })
     );
-    const rows = await owner.api.workflows.overview();
+    const rows = ofApps(await owner.api.workflows.overview());
     expect(rows.map(({ app, workflow }) => [app, workflow])).toStrictEqual([
       [first, "pay"],
       [second, "remind"],
@@ -662,7 +846,7 @@ describe("the Workflows page", buildTime, () => {
       owner.api.workflows.runs({ app, status: "running" }),
       owner.api.workflows.overview(),
     ]);
-    const approve = overview.find((row) => row.app === app);
+    const approve = ofApps(overview).find((row) => row.app === app);
     expect({
       all: all.runs.map(shown),
       waiting: waiting.runs.length,
@@ -792,7 +976,7 @@ describe("the Workflows page", buildTime, () => {
       const listed = byRun(appRuns);
       const onScreen = byRun(screenRuns);
       const last = (workflow: string) => {
-        const found = overview.find(
+        const found = ofApps(overview).find(
           (row) => row.app === app && row.workflow === workflow
         )?.lastRun;
         return found === undefined || found === null ? null : queueOf(found);
@@ -900,6 +1084,20 @@ describe("the Workflows page", buildTime, () => {
       createdAt: now,
       endedAt: now,
     });
+    const workflow = await owner.api.workflowResources.create(
+      `intake-${unique()}`
+    );
+    await Promise.all(
+      (["running", "failed", "completed"] as const).map(
+        async (status) =>
+          await seedResourceRun({
+            workflow: workflow.id,
+            principal: owner.userId,
+            status,
+            createdAt: now,
+          })
+      )
+    );
     // A fresh D1 has no statistics: SQLite goes by the queries alone.
     const stats = await env.DB.prepare(
       "SELECT name FROM sqlite_master WHERE name LIKE 'sqlite_stat%'"
@@ -929,6 +1127,7 @@ describe("the Workflows page", buildTime, () => {
           .filter(
             ({ query }) =>
               query.includes('"workflow_runs"') ||
+              query.includes('"workflow_resource_runs"') ||
               query.includes('"workflow_triggers"')
           )
           .map(async ({ query, values }) => {
@@ -963,7 +1162,11 @@ describe("the Workflows page", buildTime, () => {
       walks: plans.filter(
         ({ call, plan }) =>
           narrow.has(call) &&
-          plan.some((step) => step.includes("workflow_runs_created_idx"))
+          plan.some(
+            (step) =>
+              step.includes("workflow_runs_created_idx") ||
+              step.includes("workflow_resource_runs_created_idx")
+          )
       ),
     }).toStrictEqual({
       stats: [],

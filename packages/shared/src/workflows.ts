@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import { defineErrorFamily } from "./errors.ts";
 import { connectionIdSchema, identifierSchema } from "./ids.ts";
-import type { AppId, RunId, WorkflowId } from "./ids.ts";
+import type { AppId, RunId, WorkflowId, WorkflowResourceId } from "./ids.ts";
 import type { Json } from "./json.ts";
 import { isRetryableCode } from "./operations.ts";
 import { permissionActionSchema } from "./permissions.ts";
@@ -1111,10 +1111,20 @@ export interface RunFilter {
 }
 
 /**
- * A run as the Runs list has it, with its App's name. While it waits for
- * a decision its `status` is `waiting`.
+ * The workflow a run, a summary or a count is of: an App's, by its App and
+ * ID, or an independent one (platform specification 13), by its ID and
+ * name. The run lists, the overview and the activity read both alike.
  */
-export interface ListedRun extends WorkflowRun {
+export type RunWorkflowRef =
+  | { type: "app"; app: AppId; appName: string; workflow: WorkflowId }
+  | { type: "resource"; workflowId: WorkflowResourceId; name: string };
+
+/**
+ * A run of an App's workflow as the Runs list has it, with its App's
+ * name. While it waits for a decision its `status` is `waiting`.
+ */
+export interface AppListedRun extends WorkflowRun {
+  type: "app";
   appName: string;
   /**
    * An open decision it waits for that the person may answer now (the
@@ -1123,6 +1133,31 @@ export interface ListedRun extends WorkflowRun {
    */
   decision?: string;
 }
+
+/**
+ * A run of an independent workflow as the Runs list has it: what its
+ * workflow's page lists of it, for the same people (every run for the
+ * workflow's builders, their own for its users). What it returned or why
+ * it failed stays on the run itself.
+ */
+export interface ResourceListedRun {
+  type: "resource";
+  id: RunId;
+  workflowId: WorkflowResourceId;
+  name: string;
+  /** The workflow version it runs, whatever version is current now. */
+  version: number;
+  /** The person it acts for: who started it, or whom its start named. */
+  startedBy: { type: "person"; userId: string };
+  status: RunStatus;
+  /** While it is `queued`: the share it waits for, and when it asks again. */
+  queued?: RunQueue;
+  createdAt: string;
+  endedAt: string | null;
+}
+
+/** A run as the Runs list has it, of an App's workflow or an independent one. */
+export type ListedRun = AppListedRun | ResourceListedRun;
 
 /** Most runs one `runs` call returns. */
 export const runsPageSize = 100;
@@ -1142,36 +1177,30 @@ export const failedRunDays = 7;
  */
 export const handledRunDays = 7;
 
-/** A workflow of an App's current version, as the Workflows page lists it. */
-export interface WorkflowSummary {
-  app: AppId;
-  appName: string;
-  workflow: WorkflowId;
-  /** The App's current version, which new runs run. */
-  version: number;
+/** A workflow's latest run, as the Workflows page shows it. */
+export interface LatestRun {
+  id: RunId;
+  status: RunStatus;
+  /** While it is `queued`: the share it waits for. */
+  queued?: RunQueue;
+  createdAt: string;
+}
+
+/** What the Workflows page shows of any workflow, an App's or independent. */
+interface WorkflowRunCounts {
   /**
-   * Who owns it: the person who answers for it, and is told when a run a
-   * trigger started fails. Its App's owner unless someone set another.
-   * Not whom its runs act for: a run no person started acts for the App's
-   * owner.
+   * Who owns it: the person who answers for it. For an App's workflow, and
+   * told when a run a trigger started fails, its App's owner unless
+   * someone set another; for an independent one, who created it. Not whom
+   * its runs act for: a run of an App no person started acts for the
+   * App's owner.
    */
   owner: { userId: string; name: string | null };
-  /**
-   * Whether the person may change its owner (`setOwner`): an admin, or a
-   * builder of the App; never Grasp staff.
-   */
-  changesOwner: boolean;
   /**
    * Its latest run, of any version, `waiting` while it waits for a
    * decision; null before its first.
    */
-  lastRun: {
-    id: RunId;
-    status: RunStatus;
-    /** While it is `queued`: the share it waits for. */
-    queued?: RunQueue;
-    createdAt: string;
-  } | null;
+  lastRun: LatestRun | null;
   /** Its runs waiting for a decision now. */
   waiting: number;
   /** Its runs that failed in the last {@link failedRunDays} days. */
@@ -1181,6 +1210,21 @@ export interface WorkflowSummary {
    * in the last {@link handledRunDays} days.
    */
   handled: number;
+}
+
+/** A workflow of an App's current version, as the Workflows page lists it. */
+export interface AppWorkflowSummary extends WorkflowRunCounts {
+  type: "app";
+  app: AppId;
+  appName: string;
+  workflow: WorkflowId;
+  /** The App's current version, which new runs run. */
+  version: number;
+  /**
+   * Whether the person may change its owner (`setOwner`): an admin, or a
+   * builder of the App; never Grasp staff.
+   */
+  changesOwner: boolean;
   /**
    * A schedule of it stopped: its run failed to start
    * {@link maxFailedStarts} times in a row. It starts again once its
@@ -1190,12 +1234,28 @@ export interface WorkflowSummary {
 }
 
 /**
+ * An independent workflow the person has a role in, as the Workflows page
+ * lists it. Its counts are of the runs its page lists them: every run for
+ * its builders, their own for its users.
+ */
+export interface ResourceWorkflowSummary extends WorkflowRunCounts {
+  type: "resource";
+  workflowId: WorkflowResourceId;
+  name: string;
+  /** The version published last, which new runs run; null before the first. */
+  version: number | null;
+}
+
+/** A workflow as the Workflows page lists it. */
+export type WorkflowSummary = AppWorkflowSummary | ResourceWorkflowSummary;
+
+/**
  * One workflow, as its view shows it: its summary, its steps as its code
  * reads (or why they can't be read), and, for the App's builders, its
  * parameters.
  */
 export interface WorkflowDetail {
-  summary: WorkflowSummary;
+  summary: AppWorkflowSummary;
   /**
    * For anyone who doesn't build the App, the outline without its code:
    * no conditions, loop heads, per-item keys, parameters read or literal
@@ -1278,23 +1338,29 @@ export interface RunActivityDay {
 }
 
 /** A workflow's runs started in the window, and how many of them ended how. */
-export interface RunActivityWorkflow {
-  app: AppId;
-  appName: string;
-  workflow: WorkflowId;
-  /**
-   * It is a workflow of its App's current version, so its page opens; a
-   * workflow a later version removed or renamed has runs here but no page.
-   */
-  current: boolean;
+export type RunActivityWorkflow = (
+  | {
+      type: "app";
+      app: AppId;
+      appName: string;
+      workflow: WorkflowId;
+      /**
+       * It is a workflow of its App's current version, so its page opens; a
+       * workflow a later version removed or renamed has runs here but no
+       * page.
+       */
+      current: boolean;
+    }
+  | { type: "resource"; workflowId: WorkflowResourceId; name: string }
+) & {
   started: number;
   completed: number;
   failed: number;
-}
+};
 
 /**
- * The runs of the Apps a person can open, started over the last days, and
- * the people they needed. Everything counts the runs started in the
+ * The runs a person can list (`WorkflowsApi.runs`), started over the last
+ * days, and the people they needed. Everything counts the runs started in the
  * window, by the UTC day they started, and stands as they are now.
  */
 export interface RunActivity {
@@ -1356,8 +1422,9 @@ export interface WorkflowsApi {
   cancel: (run: string) => Promise<WorkflowRun>;
   /**
    * Every workflow of the current version of every App the person can
-   * open, with its latest run and its waiting and failed runs, by App
-   * name and workflow.
+   * open, by App name and workflow, then every independent workflow they
+   * have a role in, by name: each with its latest run and its waiting and
+   * failed runs.
    */
   overview: () => Promise<WorkflowSummary[]>;
   /**
@@ -1365,16 +1432,19 @@ export interface WorkflowsApi {
    * each one whose App holds an active permission on it and whose code
    * calls that permission's binding, summed up as in `overview`.
    */
-  ofConnection: (connection: string) => Promise<WorkflowSummary[]>;
+  ofConnection: (connection: string) => Promise<AppWorkflowSummary[]>;
   /**
-   * Runs of the Apps the person can open, as `filter` narrows them:
+   * Runs of the Apps the person can open, and of the independent workflows
+   * they have a role in (every run for a builder, their own for a user),
+   * as `filter` narrows them (an App or its workflow: that App's runs
+   * alone):
    * waiting first (latest to wait first), then failed (latest ended
    * first), then the rest, newest first; at most {@link runsPageSize},
    * with `more` when more matched.
    */
   runs: (filter?: RunFilter) => Promise<RunsPage>;
   /**
-   * The runs of the Apps the person can open started over the last days
+   * The runs `runs` lists started over the last days
    * (`runActivityQuerySchema`), by day and how they stand, and the
    * decisions they asked people for.
    */
@@ -1390,7 +1460,7 @@ export interface WorkflowsApi {
     app: string,
     workflow: string,
     owner: string
-  ) => Promise<WorkflowSummary>;
+  ) => Promise<AppWorkflowSummary>;
   /**
    * Dry-runs a workflow's tests at the App's current version, with the
    * parameter values set now; for the App's builders.

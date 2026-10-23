@@ -16,9 +16,10 @@ const through = (target: object, key: PropertyKey): unknown => {
 
 /**
  * A plan's step that reads a table whole: a scan by no index, of neither
- * a list of values (`json_each`) nor a subquery.
+ * a list of values (`json_each`) nor a subquery (the run view's is named
+ * `run`, workflows/run-view.ts).
  */
-export const fullScan = /^SCAN (?!\(|.* (?:USING|VIRTUAL TABLE))/u;
+export const fullScan = /^SCAN (?!\(|run$|.* (?:USING|VIRTUAL TABLE))/u;
 
 /** A database of core's: its own, or Knowledge's. */
 type Database = "DB" | "KNOWLEDGE";
