@@ -906,11 +906,13 @@ export class ModelLedger extends DurableObject<Env> {
    * time a request of theirs counts against the person scope there: what
    * they spent before this release counted it still counts against the
    * limit admins set. Only requests admitted before then can hold a
-   * reservation on the user scope at that moment, and they settle against
-   * the user scope alone, so what they hold is carried as spent: the most
-   * they can still be charged. Inside the transaction that admits.
+   * reservation on the user scope at that moment: each still open is
+   * attached to the person scope too, its hold reserved there, so its
+   * settlement charges the person scope what it cost, as any request's
+   * does. Inside the transaction that admits.
    */
   #carryPersonSpend(person: string, period: string): void {
+    const personPeriod = periodOf("person", period);
     const earlier = this.#spendOf(
       {
         scope: "user",
@@ -921,18 +923,50 @@ export class ModelLedger extends DurableObject<Env> {
       },
       period
     );
-    this.#db
+    const started = this.#db
       .insert(spend)
       .values({
         scope: "person",
         key: person,
-        period: periodOf("person", period),
-        spentMicros: earlier.spentMicros + earlier.reservedMicros,
-        reservedMicros: 0,
+        period: personPeriod,
+        spentMicros: earlier.spentMicros,
+        reservedMicros: earlier.reservedMicros,
         requests: earlier.requests,
       })
       .onConflictDoNothing()
-      .run();
+      .returning({ key: spend.key })
+      .all();
+    if (started.length === 0) {
+      return;
+    }
+    const open = this.#db
+      .select({ id: requests.id })
+      .from(requests)
+      .innerJoin(requestScopes, eq(requestScopes.requestId, requests.id))
+      .where(
+        and(
+          inArray(requests.state, ["dispatched", "unknown", "quarantined"]),
+          eq(requestScopes.scope, "user"),
+          eq(requestScopes.key, person),
+          sql`${reservedPeriodSql} = ${period}`
+        )
+      )
+      .all();
+    for (const { id } of open) {
+      this.#db
+        .insert(requestScopes)
+        .values({
+          requestId: id,
+          scope: "person",
+          key: person,
+          limitMicros: null,
+          alertMicros: null,
+          names: JSON.stringify({ user: person }),
+          period: personPeriod,
+          limitRequests: null,
+        })
+        .run();
+    }
   }
 
   /**

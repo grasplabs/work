@@ -1240,10 +1240,11 @@ describe("the model ledger", () => {
     const ledger = newLedger();
     // Before this release, requests counted against the user scope alone:
     // one settled at 20, one still under way holding 40.
-    const settled = admission(80, [budget(1000)], {
+    const pinned = {
       price: { ...price, output: 2_000_000, version: "pinned" },
-    });
-    const open = admission(40, [budget(1000)]);
+    };
+    const settled = admission(80, [budget(1000)], pinned);
+    const open = admission(40, [budget(1000)], pinned);
     await ledger.admit(settled);
     await ledger.admit(open);
     await ledger.settle(settled.id, {
@@ -1262,14 +1263,23 @@ describe("the model ledger", () => {
     // too, a request waits on her limit.
     const fits = await ledger.admit(admission(40, [budget(1000)], ada));
     const over = await ledger.admit(admission(1, [budget(1000)], ada));
+    const before = await ledger.spendOfKeys("2400-01", "person", ["ada"]);
+    // The earlier request settles for 20 of the 40 it held: Ada's limit
+    // is charged what it cost, as her user scope is.
+    await ledger.settle(open.id, {
+      by: "usage",
+      tokens: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0 },
+    });
     expect({
       fits,
       over,
-      person: await ledger.spendOfKeys("2400-01", "person", ["ada"]),
+      before,
+      after: await ledger.spendOfKeys("2400-01", "person", ["ada"]),
     }).toMatchObject({
       fits: { ok: true },
       over: { ok: false, scope: "person" },
-      person: [{ key: "ada", spentMicros: 60, reservedMicros: 40 }],
+      before: [{ key: "ada", spentMicros: 20, reservedMicros: 80 }],
+      after: [{ key: "ada", spentMicros: 40, reservedMicros: 40 }],
     });
   });
 
