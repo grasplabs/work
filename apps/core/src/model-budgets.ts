@@ -114,6 +114,11 @@ type Budget = NonNullable<NonNullable<Budgets>["deployment"]>;
 /** What budgets count a call by. */
 export interface BudgetInput {
   trigger: AuditActor;
+  /**
+   * For an independent workflow's run, whose trigger names no App's run:
+   * its lineage's root (models.ts, `lineage`).
+   */
+  lineage?: { rootRunId: string };
   work?: { authority: Authority } | { onboarding: true };
 }
 
@@ -155,14 +160,29 @@ interface Scoped {
   requests?: number;
 }
 
-/** The workflow and run lineage scopes of a workflow's call. */
+/**
+ * The workflow and run lineage scopes of a workflow's call: an App run's,
+ * by its trigger; an independent workflow's run, by its lineage's root
+ * alone, as it has no App's workflow to count under. Either way its
+ * lineage's requests are held to `requests`, every run of it together.
+ */
 const workflowScopes = (
   budgets: Budgets,
-  trigger: AuditActor,
+  { trigger, lineage: independent }: BudgetInput,
   requests: number
 ): Scoped[] => {
   if (trigger.type !== "workflow") {
-    return [];
+    return independent === undefined
+      ? []
+      : [
+          {
+            scope: "run",
+            key: independent.rootRunId,
+            budget: budgets?.run,
+            names: { run: independent.rootRunId },
+            requests,
+          },
+        ];
   }
   const lineage = trigger.accountRunId ?? trigger.rootRunId ?? trigger.runId;
   return [
@@ -205,7 +225,7 @@ export const scopesFor = (
     },
     ...workflowScopes(
       budgets,
-      input.trigger,
+      input,
       Math.min(lineageRequests, lineageModelRequests)
     ),
     ...(person === undefined

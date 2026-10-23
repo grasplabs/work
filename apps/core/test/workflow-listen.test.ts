@@ -727,6 +727,7 @@ const hostOf = async (
       build,
       calling: {
         runId,
+        rootRunId: runId,
         workflowId,
         version: 1,
         principal: by.userId,

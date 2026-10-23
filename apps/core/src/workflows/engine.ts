@@ -61,6 +61,12 @@ export interface AdmittedEngineEvent {
   readonly payload: Json;
   readonly key: string;
   readonly attributes: Readonly<Record<string, string>>;
+  /**
+   * Whether it may take the inbox's reserve (@grasp-os/workerflow's
+   * `reservedInboxEvents`): only for what core owes the run itself, a
+   * child's end, so no sender can crowd it out.
+   */
+  readonly reserved?: boolean;
 }
 
 /** What an App's run is pinned to: the dispatcher loads it by these. */
@@ -499,6 +505,7 @@ export const runEngine = (env: Env): RunEngine => ({
       payload: encode(event.payload),
       key: event.key,
       attributes: event.attributes,
+      reserved: event.reserved === true,
     }),
   sendEvent: async (id, type, key) => {
     const outcome = await runStub(env, id).sendEvent({

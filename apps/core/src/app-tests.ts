@@ -52,6 +52,7 @@ import type {
   Reader,
   SnapshotCallback,
 } from "./query-subscriptions.ts";
+import { quietLoader } from "./quiet-loader.ts";
 import { hostedRelease, noStore } from "./release-runner.ts";
 import { RunSubscription } from "./run-subscription.ts";
 import { capability, noPlaceOf } from "./sandbox-session.ts";
@@ -76,7 +77,8 @@ import type { FixtureRunStarted } from "./workflows/fixture-runs.ts";
 // The trusted test runner for an App's tests (spec 28.2): every suite in
 // `tests/**.test.ts` runs whenever a version of the App is made current,
 // rollbacks included, and a failing test refuses it (`requireAppTestsPass`,
-// called by `setCurrentVersion` in apps.ts). The suites are
+// called by `verifyVersion` in apps.ts, as a candidate is verified,
+// app-candidates.ts). The suites are
 // App code, written with `appTest` (`@grasp-os/sdk/testing`); the host
 // they call is core's, and real. Threat model, and how each is closed:
 //
@@ -1524,12 +1526,14 @@ const suiteFailures = async (
   let answer: unknown;
   try {
     if (sandboxHost === undefined) {
-      const entry = env.LOADER.get(null, () => ({
-        ...testSandbox,
-        mainModule,
-        modules: { ...modules, [mainModule]: testsMain(path, testMs) },
-        env: {},
-      })).getEntrypoint<AppTestsEntrypoint>("AppTests");
+      const entry = quietLoader(env.LOADER)
+        .get(null, () => ({
+          ...testSandbox,
+          mainModule,
+          modules: { ...modules, [mainModule]: testsMain(path, testMs) },
+          env: {},
+        }))
+        .getEntrypoint<AppTestsEntrypoint>("AppTests");
       const { ms, overran } = suiteDeadline({ suiteMs, runMs, runEndsAt });
       answer = await within(entry.run(host), ms, overran);
     } else {

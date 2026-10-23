@@ -16,7 +16,10 @@ import {
   clients,
   releases,
 } from "../src/db/schema.ts";
-import { onboardingSender } from "../src/deploy/core-config.ts";
+import {
+  clientMailDomain,
+  onboardingSender,
+} from "../src/deploy/core-config.ts";
 import { mappedRoute } from "../src/deploy/router.ts";
 import type { DeploySecrets } from "../src/deploy/secrets.ts";
 import {
@@ -240,6 +243,21 @@ const holdings = (account: AccountState) => ({
   scripts: [...account.scripts.keys()].toSorted(),
 });
 
+/** Every zone in `account`, with the domains Email Sending sends from there. */
+const zonesOf = (account: AccountState) =>
+  account.zones.map(({ name, sending }) => ({
+    name,
+    sending: sending.map((entry) => ({
+      name: entry.name,
+      enabled: entry.enabled,
+    })),
+  }));
+
+/** A call that creates a zone or turns Email Sending on for a domain. */
+const isMailCreate = ({ method, path }: ApiCall): boolean =>
+  method === "POST" &&
+  (path === "/zones" || path.endsWith("/email/sending/subdomains"));
+
 const isUpload = (script: string) => (call: ApiCall) =>
   call.method === "PUT" && call.path.endsWith(`/scripts/${script}`);
 
@@ -302,6 +320,7 @@ const provisioned = async (account: AccountState, clientId: string) => {
       .where(eq(clientRuns.clientId, clientId)),
     route: await mappedRoute(env.ROUTER_HOSTS, `${clientId}.${domain}`),
     holdings: holdings(account),
+    zones: zonesOf(account),
     uploads: account.scriptUploads.map(({ script }) => script),
     coreMigrations: await migrationsRun(core),
     applied: Object.values(await appliedMigrations(account)).map(
@@ -322,12 +341,14 @@ const provisioned = async (account: AccountState, clientId: string) => {
   };
 };
 
-/** What `provisioned` says of a client provisioned once, uploads aside. */
+/** What `provisioned` says of a client provisioned once with a release that sends no mail, uploads aside. */
 const once = (clientId: string) => ({
   operation: { status: "done", step: "route", error: null },
   status: "active",
   claims: [],
   route: { clientId, generation: 1 },
+  // No mail, so no sending domain.
+  zones: [],
   coreMigrations: 1,
   applied: [1, 1, 1],
   missingSecrets: [],
@@ -504,6 +525,16 @@ const refusals: Refusal[] = [
     }),
     code: "wfp_binding_unqualified",
   },
+  {
+    // Whether a user Worker can send mail at all is a spike of its own.
+    name: "a release that sends mail into Workers for Platforms",
+    kind: "workers_for_platforms",
+    adjust: (core) => ({
+      ...core,
+      bindings: [...core.bindings, { type: "send_email", name: "EMAIL" }],
+    }),
+    code: "wfp_binding_unqualified",
+  },
 ];
 
 describe("provisioning a placed client", () => {
@@ -551,6 +582,7 @@ describe("provisioning a placed client", () => {
       "provision.core",
       "provision.secrets",
       "provision.probe",
+      "provision.mail",
       "provision.route",
       "provision.done",
     ]);
@@ -569,7 +601,7 @@ describe("provisioning a placed client", () => {
     ).toStrictEqual([]);
   });
 
-  it("locks a placed client's mail to its onboarding sender, whatever the release allows", async () => {
+  it("sets up a placed client's sending domain in its destination's account before publishing it, and locks its mail to the onboarding sender, whatever the release allows", async () => {
     const manifest = await importRelease(
       "dedicated",
       { sendsMail: true },
@@ -587,10 +619,66 @@ describe("provisioning a placed client", () => {
     await runClientProvision(context, held);
 
     const { core } = await scriptsOf(clientId);
-    expect(liveBindings(account, core).EMAIL).toStrictEqual({
-      type: "send_email",
-      name: "EMAIL",
-      allowed_sender_addresses: [onboardingSender(clientId, domain).address],
+    const mailDomain = clientMailDomain(clientId, domain);
+    const actions = await actionsOf(clientId);
+    const operation = await operationOf(clientId);
+    const progress: unknown = JSON.parse(operation?.progress ?? "{}");
+    expect({
+      zones: zonesOf(account),
+      email: liveBindings(account, core).EMAIL,
+      progress,
+      mailThenRoute: actions.slice(-3),
+    }).toMatchObject({
+      zones: [
+        { name: mailDomain, sending: [{ name: mailDomain, enabled: true }] },
+      ],
+      email: {
+        type: "send_email",
+        name: "EMAIL",
+        allowed_sender_addresses: [onboardingSender(clientId, domain).address],
+      },
+      // Not yet delegated, so not yet sending: on record for staff.
+      progress: { mail: { zoneId: account.zones[0]?.id, active: false } },
+      mailThenRoute: ["provision.mail", "provision.route", "provision.done"],
+    });
+  });
+
+  it("sets up a placed client's sending domain once, resumed after its answer was lost", async () => {
+    const manifest = await importRelease("dedicated", { sendsMail: true });
+    const { account, clientId, held } = await setUp("dedicated", manifest);
+    // Email Sending is turned on, and the answer never arrives.
+    cloudflare.failNext(
+      ({ method, path }) =>
+        method === "POST" && path.endsWith("/email/sending/subdomains"),
+      "lost"
+    );
+
+    await failing(held);
+    await expect(
+      Promise.all([operationOf(clientId), routed(clientId)])
+    ).resolves.toMatchObject([
+      { status: "failed", step: "probe", error: "cloudflare_0" },
+      false,
+    ]);
+
+    await runClientProvision(context, held);
+    const mailDomain = clientMailDomain(clientId, domain);
+    expect({
+      operation: await operationOf(clientId),
+      routed: await routed(clientId),
+      zones: zonesOf(account),
+      // The zone's and the domain's, each once across both runs.
+      creates: cloudflare.calls.filter(isMailCreate).map(({ path }) => path),
+    }).toMatchObject({
+      operation: { status: "done", step: "route" },
+      routed: true,
+      zones: [
+        { name: mailDomain, sending: [{ name: mailDomain, enabled: true }] },
+      ],
+      creates: [
+        "/zones",
+        `/zones/${account.zones[0]?.id}/email/sending/subdomains`,
+      ],
     });
   });
 
@@ -797,11 +885,13 @@ describe("provisioning a placed client", () => {
       expect({
         operation: await operationOf(clientId),
         databases: account.d1.length,
+        zones: account.zones.length,
         uploads: account.scriptUploads.length,
         inventory: await clientInventory(db, clientId),
       }).toMatchObject({
         operation: { status: "failed", step: null, error: code },
         databases: 0,
+        zones: 0,
         uploads: 0,
         inventory: [],
       });

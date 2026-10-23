@@ -78,6 +78,11 @@ interface __BaseEnv_Env {
    * `unbounded` where core may run untrusted isolates itself without
    * `SANDBOX_HOST` off Cloudflare, accepting that nothing bounds their CPU:
    * tests and local development only, never on-prem (src/sandboxed.ts).
+   * It accepts too that what App code with a tail writes (an App's server,
+   * a draft's preview) reaches the process's logs as well as its tail;
+   * every other isolate core loads prints nothing (src/quiet-loader.ts),
+   * as long as the process isn't served `--verbose`, which core can't
+   * detect: an operator who sets this doesn't serve core so (GRA-939).
    */
   SANDBOX_IN_PROCESS?: string;
   /** `none` where Durable Objects have no jurisdiction (src/durable-objects.ts). */

@@ -11,9 +11,8 @@
  * Grasp there, as the admin's model works it out of what its core answered
  * (src/admin/views.ts). Beside Platform, how many companies' platforms
  * need a look and a rollout waiting for approval, as the console recorded
- * them (`platformCounts`). Not yet here: how many integrations wait on
- * Grasp, for the console has no source for them yet; that place shows no
- * number rather than a made-up one.
+ * them (`platformCounts`). Beside Integrations to build, how many apps
+ * the companies asked for wait on Grasp (`askedApps`).
  */
 import {
   Sidebar,
@@ -55,6 +54,7 @@ import type { ComponentType, SVGProps } from "react";
 
 import type { ClientAdmin } from "../clients/admin.ts";
 import { GraspMark } from "./grasp-mark.tsx";
+import { askedApps } from "./integrations-asked.ts";
 import type { PlatformCounts } from "./platform.ts";
 import { organizationsOf, unreadWords } from "./views.ts";
 import type { Organization } from "./views.ts";
@@ -140,6 +140,27 @@ const platformBadge = ({
         ];
   const waits = waiting ? ["a rollout waits for approval"] : [];
   return { count, words: [...look, ...waits].join("; ") };
+};
+
+/** Integrations to build's badge: the apps asked for, each waiting on Grasp to start its build. */
+const integrationsBadge = (asked: number): PlaceBadge | null =>
+  asked === 0
+    ? null
+    : {
+        count: asked,
+        words: `${asked} ${asked === 1 ? "app waits" : "apps wait"} on Grasp`,
+      };
+
+/** What a place says beside its name, if anything. */
+const badgeOf = (
+  to: Place["to"],
+  platform: PlatformCounts,
+  asked: number
+): PlaceBadge | null => {
+  if (to === "/admin/platform") {
+    return platformBadge(platform);
+  }
+  return to === "/admin/integrations" ? integrationsBadge(asked) : null;
 };
 
 const PlaceItem = ({
@@ -238,6 +259,7 @@ const AdminSidebar = ({
 }) => {
   const router = useRouter();
   const organizations = organizationsOf(admins);
+  const asked = askedApps(admins).length;
   const { setOpenMobile } = useSidebar();
   // On a phone the sidebar is a sheet over the page: going anywhere from it
   // closes it, so the page it went to is in view.
@@ -278,11 +300,7 @@ const AdminSidebar = ({
               <SidebarMenu>
                 {places.map((place) => (
                   <PlaceItem
-                    badge={
-                      place.to === "/admin/platform"
-                        ? platformBadge(platform)
-                        : null
-                    }
+                    badge={badgeOf(place.to, platform, asked)}
                     key={place.to}
                     place={place}
                   />

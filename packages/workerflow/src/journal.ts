@@ -77,6 +77,13 @@ const upgradedSchema = (
     sql.exec("UPDATE run SET schema = 10");
     schema = 10;
   }
+  if (schema === 10) {
+    sql.exec(
+      "ALTER TABLE events ADD COLUMN reserved INTEGER NOT NULL DEFAULT 0"
+    );
+    sql.exec("UPDATE run SET schema = 11");
+    schema = 11;
+  }
   return schema;
 };
 
@@ -466,7 +473,8 @@ export const createJournal = (sql: SqlStorage): void => {
       key TEXT UNIQUE,
       accepted_at INTEGER NOT NULL,
       consumed_by INTEGER UNIQUE REFERENCES steps (ordinal),
-      attributes TEXT
+      attributes TEXT,
+      reserved INTEGER NOT NULL DEFAULT 0
     );
     CREATE INDEX IF NOT EXISTS events_unconsumed
       ON events (type, seq) WHERE consumed_by IS NULL;

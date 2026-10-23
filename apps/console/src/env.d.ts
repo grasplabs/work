@@ -39,6 +39,17 @@ interface __BaseEnv_Env {
    * (src/admin-host.ts). Without it the admin stays at the console's `/admin`.
    */
   ADMIN_HOST?: string;
+  /**
+   * Grasp's Discord application's public key, hex: what every interaction
+   * Discord posts to the bot is signed with (src/admin/discord.ts). Not a
+   * secret. Without it the bot refuses everything.
+   */
+  DISCORD_PUBLIC_KEY?: string;
+  /**
+   * The Discord user ids of Grasp's staff, comma-separated: the only people
+   * the bot answers (src/admin/discord.ts).
+   */
+  DISCORD_STAFF_IDS?: string;
   /** Local dev only, from .dev.vars: who requests to this machine come from (src/access.ts). */
   DEV_ACCESS_EMAIL?: string;
 }

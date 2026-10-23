@@ -288,6 +288,8 @@ export const runFixtureWorkflow = async (
       // nothing, and acts for the fixture's principal alone.
       calling: {
         runId,
+        // Its own lineage's root: a test's run starts no children.
+        rootRunId: runId,
         workflowId: pin.workflow,
         version: pin.version,
         principal: row.principal,

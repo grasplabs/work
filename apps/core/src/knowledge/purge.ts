@@ -47,6 +47,7 @@ import {
 import type { DocumentRow } from "./documents.ts";
 import { parseBaseFields } from "./frontmatter.ts";
 import { requireCurrentIndexed } from "./indexing.ts";
+import { forgetPerson, personCounts } from "./memories.ts";
 import { personalCollectionId } from "./memory-files.ts";
 import {
   collectPayloads,
@@ -77,7 +78,8 @@ import { cleanUpOriginals, forgetUploads } from "./uploads.ts";
 //
 // - `personal`: the person's Personal collection (their USER.md and
 //   whatever else is in it) is deleted with every version, section, link
-//   and search row. One batch, with its audit event.
+//   and search row, and so are their Brain memories and command receipts
+//   (memories.ts). One batch, with its audit event, which counts them.
 // - `content`: every occurrence of some terms (a name, an email address, a
 //   passage), in any case and as a whole word as the search index's
 //   tokenizer draws words (never inside a longer word, except in scripts
@@ -314,7 +316,11 @@ const purgeEntry = (
   action: "knowledge.purge.prepared" | "knowledge.purged",
   input: PurgeInput,
   scope: { collectionId?: string; documentIds: string[] },
-  counts: Partial<Counts> & { inLongerWords?: number },
+  counts: Partial<Counts> & {
+    inLongerWords?: number;
+    memories?: number;
+    receipts?: number;
+  },
   purgeId?: string
 ): AuditEntry => ({
   actor: actorOf(person),
@@ -365,8 +371,9 @@ const personalScope = async (
 };
 
 /**
- * Deletes `userId`'s Personal collection and everything in it, with the
- * audit event, in one batch: all or nothing.
+ * Deletes `userId`'s Personal collection and everything in it, and their
+ * Brain memories and receipts, with the audit event, in one batch: all or
+ * nothing.
  * The sections go first, row by row, so the triggers take them out of the
  * search index; the rest in the order they refer to one another. The
  * originals of files uploaded to it are recorded for deleting in the same
@@ -386,6 +393,7 @@ const purgePersonal = async (
 ): Promise<PurgeResult> => {
   const db = drizzle(env.KNOWLEDGE);
   const { collectionId, documentIds, counts } = await personalScope(db, input);
+  const brain = await personCounts(db, input.userId);
   const purgeId = crypto.randomUUID();
   const inCollection = documentsIn(db, collectionId);
   const secure = await secureDeleteReady(db);
@@ -415,6 +423,7 @@ const purgePersonal = async (
     db.delete(documents).where(eq(documents.collectionId, collectionId)),
     db.delete(collections).where(eq(collections.id, collectionId)),
     ...released.after,
+    ...forgetPerson(db, input.userId),
     outboxed(
       db,
       purgeEntry(
@@ -422,7 +431,7 @@ const purgePersonal = async (
         "knowledge.purged",
         input,
         { collectionId, documentIds },
-        counts,
+        { ...counts, ...brain },
         purgeId
       )
     ),
@@ -1548,7 +1557,7 @@ export const preparePurge = async (
         ...counts,
         ...(parsed.type === "content"
           ? { occurrences: removed, inLongerWords: left, hostCopies }
-          : {}),
+          : await personCounts(db, parsed.userId)),
       })
     ),
   ]);

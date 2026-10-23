@@ -491,27 +491,30 @@ describe("An App's next version", { timeout: 60_000 }, () => {
       "Reviewed"
     );
     // The admin makes it current after the builder's request read the
-    // App, and before its batch lands: that batch changes nothing.
+    // App, and before it freezes its candidate: the builder's request
+    // finds it current, answers as one made after the admin's would, and
+    // writes nothing. (Once the builder holds its candidate to make it
+    // current, the admin's request is the one turned away, as busy.)
     const racing: Env = {
       ...env,
       DB: racingDb(async () => {
         await admin.api.apps.versions.setCurrent(app, version);
-      }, /^update "apps"/iu),
+      }, /^insert into "app_candidates"/iu),
     };
 
-    let refused = "";
+    let answered = "";
     const events = await auditedDuring(async () => {
-      refused = await outcome(
+      answered = await outcome(
         setCurrentVersion(racing, await builder.api.whoami(), app, version)
       );
     });
 
     expect({
-      refused,
+      answered,
       permissions: await permissionsOf(admin, app),
       audited: events.filter(({ action }) => action.startsWith("permission.")),
     }).toStrictEqual({
-      refused: "app.conflict",
+      answered: "ok",
       permissions: granted,
       audited: [],
     });
