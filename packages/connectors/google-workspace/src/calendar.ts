@@ -173,6 +173,7 @@ const listEvents = defineTool({
     nextPage: z.string().nullable(),
   }),
   readOnly: true,
+  reach: "own",
   resource: "calendar",
   routes: [{ method: "GET", host: apisHost, path: `${calendars}/events` }],
   run: async ({ calendar, start, end, top, page }) => {
@@ -230,6 +231,7 @@ const getEvent = defineTool({
     }),
   }),
   readOnly: true,
+  reach: "own",
   resource: "calendar",
   routes: [
     { method: "GET", host: apisHost, path: `${calendars}/events/{event}` },

@@ -138,6 +138,7 @@ const listEvents = defineTool({
     nextPage: z.string().nullable(),
   }),
   readOnly: true,
+  reach: "own",
   resource: "mailbox",
   routes: [{ method: "GET", host: graphHost, path: `${users}/calendarView` }],
   run: async ({ mailbox, start, end, top, page }) => {
@@ -195,6 +196,7 @@ const getEvent = defineTool({
     }),
   }),
   readOnly: true,
+  reach: "own",
   resource: "mailbox",
   routes: [{ method: "GET", host: graphHost, path: `${users}/events/{event}` }],
   run: async ({ mailbox, event: id }) => {

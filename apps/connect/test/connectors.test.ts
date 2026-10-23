@@ -1,5 +1,6 @@
 import { connectorManifestSchema } from "@grasp-os/connector-kit/manifest";
 import { signCapability } from "@grasp-os/shared/capability";
+import { toolClassOf } from "@grasp-os/shared/connect";
 import type { ConnectionPerson } from "@grasp-os/shared/connect";
 import { env, exports } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
@@ -446,6 +447,28 @@ describe("a native connector", () => {
     expect(api.sent).toStrictEqual([]);
   });
 
+  it("isn't loaded when a tool of its manifest doesn't say whom it reaches", async () => {
+    // A copy of the sample connector, but its items.list has no reach
+    // (test/global-setup.ts): none of its tools runs, that one or another.
+    const connection = await connectionTo("sample-unreached");
+    const outcomes = await Promise.all([
+      outcome(call(connection, "items.list", { mailbox: "a@acme.test" })),
+      outcome(
+        call(
+          connection,
+          "items.send",
+          { mailbox: "a@acme.test", subject: "Paid" },
+          { idempotencyKey: "run-1:send" }
+        )
+      ),
+    ]);
+    expect(outcomes).toStrictEqual([
+      "connect.server_unavailable",
+      "connect.server_unavailable",
+    ]);
+    expect(api.sent).toStrictEqual([]);
+  });
+
   it("isn't loaded for an action it doesn't declare", async () => {
     const connection = await connectionTo("sample");
     await expect(
@@ -461,6 +484,30 @@ describe("a native connector", () => {
       expect(config.scopes).toStrictEqual(
         expect.arrayContaining([...(connector?.manifest.scopes ?? [])])
       );
+    }
+  });
+
+  it("of each suite gives every tool a class, and only sending mail reaches others", () => {
+    for (const suite of ["microsoft-365", "google-workspace"]) {
+      // A suite with a tool that doesn't say whom it reaches isn't loaded.
+      const actions = Object.entries(
+        nativeConnector(suite)?.manifest.actions ?? {}
+      );
+      const classes = Object.fromEntries(
+        actions.map(([action, declared]) => [action, toolClassOf(declared)])
+      );
+      expect(actions.length).toBeGreaterThan(0);
+      expect(classes).toMatchObject({
+        "mail.list": "read-own",
+        "mail.createDraft": "change-own",
+        "mail.send": "reach-others",
+        "files.read": "read-company",
+      });
+      expect(
+        Object.keys(classes).filter(
+          (action) => classes[action] === "reach-others"
+        )
+      ).toStrictEqual(["mail.send"]);
     }
   });
 });
@@ -863,7 +910,12 @@ describe("the egress handler", () => {
 // the top or nested, gets past it. Connect sees only top-level keys; the
 // connector refuses the rest itself, before anything goes out.
 const tools = bundled.flatMap(({ manifest }) => {
-  const { name, provider, actions } = connectorManifestSchema.parse(manifest);
+  const parsed = connectorManifestSchema.safeParse(manifest);
+  if (!parsed.success) {
+    // `sample-unreached`, which connect refuses whole (above).
+    return [];
+  }
+  const { name, provider, actions } = parsed.data;
   return Object.keys(actions).map((action) => ({
     connector: name,
     provider,
