@@ -14,9 +14,18 @@ import {
   requestBuild,
   sendBackPlan,
 } from "../src/builds/builds.ts";
+import {
+  approvePlanFn,
+  confirmCredentialsFn,
+  fetchIntegrationBuilds,
+  requestBuildFn,
+  sendBackPlanFn,
+} from "../src/builds/functions.ts";
 import type { BuildPlan } from "../src/builds/plan.ts";
 import { consoleDatabase } from "../src/db/act.ts";
 import { auditEvents, integrationBuilds } from "../src/db/schema.ts";
+import { mockAccess } from "./access.ts";
+import { callServerFn } from "./pages.ts";
 
 // How a build can go wrong, and what each test holds it to:
 // - Two people press Build it for one app: one build, one run.
@@ -29,6 +38,9 @@ import { auditEvents, integrationBuilds } from "../src/db/schema.ts";
 // - Nobody acts: the wait runs out and the build stops for a person.
 // - The audit log records identifiers and counts, never the plan's or a
 //   person's words.
+
+// Access's keys are served for the tests through the console's entry.
+mockAccess();
 
 const db = consoleDatabase(env.DB);
 const staff = { email: "staff@grasp.test", sub: "sub-staff" };
@@ -461,6 +473,207 @@ describe("integration builds", () => {
         stoppedAt: "researching",
         reason: "researching_timed_out",
       },
+    });
+  });
+});
+
+// Through the console's entry, as the Integrations to build page moves a
+// build: each move is the staff member's Access vouches for, audited as
+// them, and only from the stage it is for; anyone else is refused before
+// anything moves.
+describe("integration builds, through the console's entry", () => {
+  /** The staff member Access vouches for, who presses each button. */
+  const caller = "ops@grasp.test";
+
+  /** Where the build of `app` stands. */
+  const stageOf = async (app: string) => {
+    const build = await buildOf(db, app);
+    return build?.stage;
+  };
+
+  /** What staff did to the build of `app`, as the audit log has it. */
+  const staffMovesOf = async (app: string) => {
+    const trail = await trailOf(app);
+    return trail.filter(({ actor }) => actor !== "system");
+  };
+
+  /** A build of a new app, its run started through the entry and researching. */
+  const researching = async (
+    runs: Awaited<ReturnType<typeof followBuilds>>
+  ) => {
+    const app = newApp();
+    const started = await callServerFn(
+      requestBuildFn,
+      { app, name: "Example HR" },
+      { email: caller }
+    );
+    const run = await onlyRun(runs);
+    await run.waitForStepResult({ name: "plan 1 check" });
+    return { app, run, started };
+  };
+
+  it("moves a build from Build it to writing, each move audited as the staff member who pressed it", async () => {
+    await using runs = await followBuilds();
+    const { app, run, started } = await researching(runs);
+    await recordPlan(env, app, planFor(app));
+    await run.waitForStepResult({ name: "decision 1 check" });
+    const sentBack = await callServerFn(
+      sendBackPlanFn,
+      { app, round: 1, note: "Only what reads employees." },
+      { email: caller }
+    );
+    const afterSendBack = await stageOf(app);
+    await run.waitForStepResult({ name: "plan 2 check" });
+    await recordPlan(env, app, planFor(app));
+    const approved = await callServerFn(
+      approvePlanFn,
+      { app, round: 2 },
+      { email: caller }
+    );
+    const afterApproval = await stageOf(app);
+    const credentials = await callServerFn(
+      confirmCredentialsFn,
+      { app },
+      { email: caller }
+    );
+
+    const build = await buildOf(db, app);
+    const all = await callServerFn(fetchIntegrationBuilds, undefined, {
+      email: caller,
+    });
+    const listed = all.find((each) => each.app === app);
+    const staffMoves = await staffMovesOf(app);
+    expect({
+      refused: [started, sentBack, approved, credentials].map(
+        ({ refused }) => refused
+      ),
+      stages: [afterSendBack, afterApproval, build?.stage],
+      listed: {
+        stage: listed?.stage,
+        approvedBy: listed?.approvedBy,
+        approvedAt: typeof listed?.approvedAt,
+        planRound: listed?.planRound,
+        // The run's id stays in the console.
+        runId: listed !== undefined && "runId" in listed,
+      },
+      staffMoves: staffMoves.map(({ actor, action }) => ({ actor, action })),
+    }).toStrictEqual({
+      refused: [null, null, null, null],
+      stages: ["researching", "credentials", "writing"],
+      listed: {
+        stage: "writing",
+        approvedBy: caller,
+        approvedAt: "string",
+        planRound: 2,
+        runId: false,
+      },
+      staffMoves: [
+        { actor: caller, action: "build.request" },
+        { actor: caller, action: "build.send_back" },
+        { actor: caller, action: "build.approve" },
+        { actor: caller, action: "build.credentials" },
+      ],
+    });
+  });
+
+  it("refuses the action that doesn't fit where the build stands, moving and auditing nothing", async () => {
+    await using runs = await followBuilds();
+    const { app } = await researching(runs);
+    const as = { email: caller };
+
+    const whileResearching = {
+      approve: await callServerFn(approvePlanFn, { app, round: 1 }, as),
+      sendBack: await callServerFn(
+        sendBackPlanFn,
+        { app, round: 1, note: "Fewer actions." },
+        as
+      ),
+      credentials: await callServerFn(confirmCredentialsFn, { app }, as),
+    };
+    await recordPlan(env, app, planFor(app, "api_key"));
+    const withPlan = {
+      credentials: await callServerFn(confirmCredentialsFn, { app }, as),
+      // The plan the person read is round 1; there is no round 2.
+      newerRound: await callServerFn(approvePlanFn, { app, round: 2 }, as),
+      emptyNote: await callServerFn(
+        sendBackPlanFn,
+        { app, round: 1, note: "  " },
+        as
+      ),
+    };
+    const unknown = await callServerFn(
+      confirmCredentialsFn,
+      { app: newApp() },
+      as
+    );
+
+    const build = await buildOf(db, app);
+    const staffMoves = await staffMovesOf(app);
+    expect({
+      whileResearching: Object.values(whileResearching).map(
+        ({ refused }) => refused
+      ),
+      withPlan: Object.values(withPlan).map(({ refused }) => refused),
+      unknown: unknown.refused,
+      stage: build?.stage,
+      staffMoves: staffMoves.map(({ action }) => action),
+    }).toStrictEqual({
+      whileResearching: ["wrong_stage", "wrong_stage", "wrong_stage"],
+      withPlan: ["wrong_stage", "wrong_stage", "note_required"],
+      unknown: "unknown_build",
+      stage: "plan_ready",
+      staffMoves: ["build.request"],
+    });
+  });
+
+  it("refuses anyone Access doesn't vouch for, or another site's page, before a build starts or moves", async () => {
+    await using runs = await followBuilds();
+    const app = newApp();
+    const { app: started } = await researching(runs);
+    await recordPlan(env, started, planFor(started));
+
+    const answers = await Promise.allSettled([
+      callServerFn(
+        requestBuildFn,
+        { app, name: "Example HR" },
+        { email: null }
+      ),
+      callServerFn(
+        requestBuildFn,
+        { app, name: "Example HR" },
+        { email: caller, from: "https://elsewhere.test" }
+      ),
+      callServerFn(approvePlanFn, { app: started, round: 1 }, { email: null }),
+      callServerFn(
+        sendBackPlanFn,
+        { app: started, round: 1, note: "Again." },
+        { email: caller, from: "https://elsewhere.test" }
+      ),
+      callServerFn(confirmCredentialsFn, { app: started }, { email: null }),
+      callServerFn(fetchIntegrationBuilds, undefined, { email: null }),
+    ]);
+
+    const allRuns = await runs.get();
+    const staffMoves = await staffMovesOf(started);
+    expect({
+      answers: answers.map((answer) =>
+        answer.status === "rejected" && answer.reason instanceof Error
+          ? answer.reason.message
+          : "answered"
+      ),
+      notStarted: await buildOf(db, app),
+      stage: await stageOf(started),
+      runs: allRuns.length,
+      staffMoves: staffMoves.map(({ action }) => action),
+    }).toStrictEqual({
+      answers: Array.from(
+        { length: 6 },
+        () => "The server function answered 403"
+      ),
+      notStarted: null,
+      stage: "plan_ready",
+      runs: 1,
+      staffMoves: ["build.request"],
     });
   });
 });
