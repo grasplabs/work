@@ -235,6 +235,24 @@ export interface ChatCitation {
 export const chatCitationsMax = 50;
 
 /**
+ * A document an answer cites (`ChatCitation`), as the chat's agent may
+ * read it for the chat's person now: where it is, what it is called, and
+ * the start of what it says (its description, or else its first section),
+ * cut to {@link citedSnippetMax} characters. A document either of them can
+ * no longer read, or that is gone, is never one.
+ */
+export interface ChatCitedDocument {
+  documentId: string;
+  collectionId: string;
+  title: string;
+  path: string;
+  snippet: string;
+}
+
+/** Longest snippet of a cited document (`ChatCitedDocument`). */
+export const citedSnippetMax = 200;
+
+/**
  * One stored message of a chat, oldest first by `id`. The agent's
  * instructions and the APIs it was shown aren't among them.
  */
@@ -556,6 +574,12 @@ export interface ChatsApi {
    * proposed, most recently written first.
    */
   drafts: (chatId: string) => Promise<ChatDraft[]>;
+  /**
+   * The documents the chat's answer `messageId` cites, in the order it
+   * first links to them, each only while the chat's agent may still read
+   * it for the person; none for a message that isn't an answer.
+   */
+  cited: (chatId: string, messageId: number) => Promise<ChatCitedDocument[]>;
   /**
    * Screen `screen` of the chat's draft of `app` (its first screen when
    * none is named), built, to preview: for the person while they build

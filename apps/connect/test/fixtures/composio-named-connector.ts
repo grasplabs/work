@@ -23,6 +23,7 @@ export default defineConnector({
       input: z.strictObject({ mailbox: z.string().min(1) }),
       output: z.strictObject({ items: z.array(z.string()) }),
       readOnly: true,
+      reach: "own",
       resource: "mailbox",
       routes: [{ method: "GET", host, path: "/v1/mailboxes/{mailbox}/items" }],
       run: async () => await Promise.resolve({ output: { items: [] } }),

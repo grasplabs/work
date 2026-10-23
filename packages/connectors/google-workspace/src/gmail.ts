@@ -39,6 +39,9 @@ import type { Part } from "./mime.ts";
 // mailbox only; the binding still holds each call to the one a permission
 // names. Each result names its mailbox and the IDs of the messages it came
 // from. Labels aren't a scope: a permission is for a whole mailbox.
+// Reading, labelling and drafting stay in the person's own mailbox
+// (`own`), unlike Microsoft's shared mailboxes; sending reaches whoever the
+// message goes to (`others`).
 
 const users = "/gmail/v1/users/{mailbox}";
 
@@ -176,6 +179,7 @@ const listMessages = defineTool({
     nextPage: z.string().nullable(),
   }),
   readOnly: true,
+  reach: "own",
   resource: "mailbox",
   // Gmail lists IDs only; each message's metadata is one more request.
   routes: [get("/messages"), get("/messages/{message}")],
@@ -313,6 +317,7 @@ const getMessage = defineTool({
     }),
   }),
   readOnly: true,
+  reach: "own",
   resource: "mailbox",
   routes: [
     get("/messages/{message}"),
@@ -375,6 +380,7 @@ const readAttachment = defineTool({
     content: z.string().nullable(),
   }),
   readOnly: true,
+  reach: "own",
   resource: "mailbox",
   routes: [
     get("/messages/{message}"),
@@ -425,6 +431,7 @@ const listLabels = defineTool({
     ),
   }),
   readOnly: true,
+  reach: "own",
   resource: "mailbox",
   routes: [get("/labels")],
   run: async ({ mailbox }) => {
@@ -471,6 +478,7 @@ const labelMessage = defineTool({
     labelIds: z.array(z.string()),
   }),
   readOnly: false,
+  reach: "own",
   destructive: true,
   // Adding labels a message has and removing ones it lacks changes
   // nothing: sent again, it leaves the same labels (within the recovery
@@ -576,6 +584,7 @@ const sendMail = defineTool({
     threadId: z.string().nullable(),
   }),
   readOnly: false,
+  reach: "others",
   destructive: false,
   resource: "mailbox",
   routes: [post("/messages/send")],
@@ -608,6 +617,7 @@ const createDraft = defineTool({
     threadId: z.string().nullable(),
   }),
   readOnly: false,
+  reach: "own",
   destructive: false,
   resource: "mailbox",
   routes: [post("/drafts")],

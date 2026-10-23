@@ -581,6 +581,7 @@ const onboarding: DurableObjectState = {
     works: exported(`${core}onboarding/store.ts`),
     asked_about: exported(`${core}onboarding/store.ts`),
     drawn_works: exported(`${core}onboarding/store.ts`),
+    settled_works: exported(`${core}onboarding/store.ts`),
     counted_works: exported(`${core}onboarding/store.ts`),
     brain_teams: exported(`${core}onboarding/store.ts`),
     brain_sent: exported(
