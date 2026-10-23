@@ -104,10 +104,12 @@ import { cleanUpOriginals, forgetUploads } from "./uploads.ts";
 // A content purge reaches the Brain's memory records too, everyone's,
 // whatever documents it names (memories.ts, `eraseStatements`): each
 // statement holding a term is redacted as text is, and deleted when no
-// word is left of it but the markers (`erasedStatement`). Its plan counts
-// them (`memories`), each change is audited, and its check counts one
-// still holding a term (remembered after the purge read it) with the
-// documents a term still finds (`stillFound`).
+// word is left of it but the markers (`erasedStatement`), compared
+// composed (NFC). Its plan counts them (`memories`), each change is
+// audited, and its check counts one still holding a term with the
+// documents a term still finds (`stillFound`): remembered after the purge
+// read it, or a form it leaves on purpose, as the index would find it
+// (`foldedHolds`: "Rene" for "René", "tom-visser" for "tom visser").
 //
 // Both reach the copies of people's words the host keeps outside
 // Knowledge too, through its `OnErase` hook (core's: the brain's gap
@@ -683,16 +685,72 @@ const wordCharacter = /[\p{L}\p{N}]/u;
  * that says nothing is deleted rather than kept as a husk. Whether what
  * is left still means what the person meant can't be told without
  * reading it, so any word left keeps it, redacted, as a document is.
+ * Compared composed (NFC), as the terms are (`purgeInputSchema`), so a
+ * term typed with a combining accent ("René" as "e" and U+0301) is found
+ * as the same word; a statement holding no term is left as it was.
  */
 const erasedStatement = (
   statement: string,
   matcher: Matcher
 ): string | null => {
-  const now = without(statement, matcher);
-  return now === statement ||
-    wordCharacter.test(now.replaceAll(purgedMarker, ""))
-    ? now
-    : null;
+  const composed = statement.normalize("NFC");
+  const now = without(composed, matcher);
+  if (now === composed) {
+    return statement;
+  }
+  return wordCharacter.test(now.replaceAll(purgedMarker, "")) ? now : null;
+};
+
+const keptCharacter = new RegExp(`^[${classOf(unicode61Kept)}]$`, "u");
+const droppedCharacter = new RegExp(`^${dropped}$`, "u");
+
+/**
+ * `text`'s tokens as the search index's tokenizer folds them (unicode61,
+ * `remove_diacritics 2`): runs of the characters it keeps, its dropped
+ * diacritics left out, in lower case. Decomposed for compatibility first
+ * (NFKD), so a precomposed accent is a dropped diacritic and a ligature
+ * ("ﬁ") its letters: a check counts a little more than the index finds,
+ * never less.
+ */
+const foldedTokens = (text: string): string[] => {
+  const tokens: string[] = [];
+  let token = "";
+  for (const character of text.normalize("NFKD")) {
+    if (droppedCharacter.test(character)) {
+      continue;
+    }
+    if (keptCharacter.test(character)) {
+      token += character.toLowerCase();
+    } else if (token !== "") {
+      tokens.push(token);
+      token = "";
+    }
+  }
+  if (token !== "") {
+    tokens.push(token);
+  }
+  return tokens;
+};
+
+/**
+ * Whether a text holds a term as the search index would find it: its
+ * folded tokens (`foldedTokens`), in order, among the text's, as a phrase
+ * query matches. So a form a content purge leaves on purpose is counted
+ * too: spelled without its accents ("Rene" for "René"), joined otherwise
+ * ("tom-visser" for "tom visser"), or with a ligature. A term with no
+ * token (punctuation only) is never found. For a plan's and a check's
+ * counts of memory records, which no index holds yet.
+ */
+const foldedHolds = (terms: readonly string[]): ((text: string) => boolean) => {
+  const phrases = terms.map(foldedTokens).filter((phrase) => phrase.length > 0);
+  return (text) => {
+    const tokens = foldedTokens(text);
+    return phrases.some((phrase) =>
+      tokens.some((_, start) =>
+        phrase.every((token, at) => tokens[start + at] === token)
+      )
+    );
+  };
 };
 
 /** Whether a content purge would remove a term from `text`. */
@@ -1542,9 +1600,7 @@ const purgeContent = async (
   );
   // A record or copy written after the purge read it is left to a purge
   // again.
-  const memories = await countStatements(env, (text) =>
-    holdsTerm(text, matcher)
-  );
+  const memories = await countStatements(env, foldedHolds(input.terms));
   const hostCopies = await onErase.count((text) => holdsTerm(text, matcher));
   const stillFound = inDocuments + memories + hostCopies;
   if (stillFound > 0) {
@@ -1597,7 +1653,7 @@ export const preparePurge = async (
     const matcher = matcherOf(parsed.terms, { countLeft: true });
     ({ counts, removed, left } = await contentCounts(env, db, named, matcher));
     brain = {
-      memories: await countStatements(env, (text) => holdsTerm(text, matcher)),
+      memories: await countStatements(env, foldedHolds(parsed.terms)),
     };
     hostCopies = await onErase.count((text) => holdsTerm(text, matcher));
   }

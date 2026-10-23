@@ -2398,6 +2398,163 @@ describe("a purge of content's memory records", setUpTime, () => {
       held: [],
     });
   });
+
+  it("finds a term typed with a combining accent or in another case as the same word", async () => {
+    const admin = await personOf("admin");
+    const teammate = await personOf("user");
+    const suffix = unique();
+    const term = `Ren\u00E9${suffix}`;
+    const decomposed = `Rene\u0301${suffix}`;
+    const handbook = await admin.api.knowledge.createCollection({
+      name: "Handbook",
+      access: "everyone",
+    });
+    const document = await saveOver(
+      admin,
+      handbook.id,
+      "team.md",
+      `# Team\n${term} runs payroll.`
+    );
+    await rememberAs(teammate, `I report to ${term}.`);
+    await rememberAs(teammate, `Ask ${term.toUpperCase()} first.`);
+    await rememberAs(teammate, `I met ${decomposed} today.`);
+    // Typed decomposed as a term too: the same word.
+    const { plan, result } = await purged(admin, {
+      type: "content",
+      documentIds: [document.id],
+      terms: [decomposed],
+      reason: "erasure_request",
+    });
+    expect({
+      planned: plan.memories,
+      stillFound: result.stillFound,
+      memories: await statementsOf(teammate),
+    }).toStrictEqual({
+      planned: 3,
+      stillFound: 0,
+      memories: [
+        "Ask (removed) first.",
+        "I met (removed) today.",
+        "I report to (removed).",
+      ].toSorted(),
+    });
+  });
+
+  it("counts the forms it leaves on purpose, as the index would find them, in its plan and its check", async () => {
+    const admin = await personOf("admin");
+    const teammate = await personOf("user");
+    const suffix = unique();
+    const term = `Ren\u00E9${suffix}`;
+    const pair = `fiona${suffix} visser`;
+    const handbook = await admin.api.knowledge.createCollection({
+      name: "Handbook",
+      access: "everyone",
+    });
+    const document = await saveOver(
+      admin,
+      handbook.id,
+      "team.md",
+      `# Team\n${term} and ${pair} run payroll.`
+    );
+    // Without its accent, joined by a hyphen, and with a ligature: not
+    // the term as typed, so left, but the same tokens to the index.
+    const left = [
+      `Ask Rene${suffix} first.`,
+      `Ask fiona${suffix}-visser first.`,
+      `Ask \uFB01ona${suffix} visser first.`,
+    ];
+    for (const text of left) {
+      // oxlint-disable-next-line no-await-in-loop -- in order
+      await rememberAs(teammate, text);
+    }
+    await rememberAs(teammate, `Ask ${term} first.`);
+    // Inside a longer word: another token, never counted.
+    await rememberAs(teammate, `Ask Renes${suffix}x first.`);
+    const { plan, result } = await purged(admin, {
+      type: "content",
+      documentIds: [document.id],
+      terms: [term, pair],
+      reason: "erasure_request",
+    });
+    expect({
+      planned: plan.memories,
+      stillFound: result.stillFound,
+      memories: await statementsOf(teammate),
+    }).toStrictEqual({
+      planned: 4,
+      stillFound: 3,
+      memories: [
+        ...left,
+        "Ask (removed) first.",
+        `Ask Renes${suffix}x first.`,
+      ].toSorted(),
+    });
+  });
+
+  it("leaves a record changed between its read and its batch, unrecorded, and reports it", async () => {
+    const admin = await personOf("admin");
+    const teammate = await personOf("user");
+    const other = await personOf("user");
+    const name = `Jansen${unique()}`;
+    const handbook = await admin.api.knowledge.createCollection({
+      name: "Handbook",
+      access: "everyone",
+    });
+    const document = await saveOver(
+      admin,
+      handbook.id,
+      "team.md",
+      `# Team\n${name} runs payroll.`
+    );
+    await rememberAs(teammate, `${name} approves leave.`);
+    await rememberAs(other, `Ask ${name}.`);
+    // The teammate's record gets a new revision once the purge has read
+    // it: a concurrent change, which the purge must not overwrite.
+    let changeNext = false;
+    let changed = false;
+    const racing = await apiWith(admin, {
+      prepare: (query) => {
+        changeNext ||= !changed && writesRecords(query);
+      },
+      beforeBatch: async () => {
+        if (changeNext) {
+          changeNext = false;
+          changed = true;
+          await env.KNOWLEDGE.prepare(
+            "UPDATE brain_memories SET statement = statement || ' Again.', revision = revision + 1 WHERE owner_id = ?"
+          )
+            .bind(teammate.userId)
+            .run();
+        }
+      },
+    });
+    const input: PurgeInput = {
+      type: "content",
+      documentIds: [document.id],
+      terms: [name],
+      reason: "erasure_request",
+    };
+    let stillFound: number | undefined;
+    const events = await auditedDuring(async () => {
+      const plan = await racing.knowledge.preparePurge(input);
+      ({ stillFound } = await racing.knowledge.purge(input, plan.token));
+    });
+    expect({
+      changed,
+      stillFound,
+      teammate: await statementsOf(teammate),
+      other: await statementsOf(other),
+      events: events.filter(
+        ({ action }) => action === "knowledge.memory.purged"
+      ).length,
+    }).toStrictEqual({
+      changed: true,
+      stillFound: 1,
+      teammate: [`${name} approves leave. Again.`],
+      other: ["Ask (removed)."],
+      events: 1,
+    });
+  });
 });
 
 describe("a purge whose index cleanup fails", setUpTime, () => {
