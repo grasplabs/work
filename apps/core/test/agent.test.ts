@@ -15,6 +15,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import {
+  latestSections,
   maxRunsPerResponse,
   maxRunsPerTurn,
   maxSteps,
@@ -59,11 +60,12 @@ import { signedInApi, signedInWithRole } from "./sign-in.ts";
 const idp = mockIdp();
 
 /**
- * Models of different context windows, as pi's catalog gives them: the
- * tests' own, of 1,000,000 tokens, one of 200,000 and one of 24,000. Each
- * request keeps 16,384 of them for the answer, or a quarter of a window
- * too small for that (6,000 of the 24,000).
+ * Models of different context windows, as pi's catalog gives them: one of
+ * 1,000,000 tokens, one of 200,000 and one of 24,000. Each request keeps
+ * 16,384 of them for the answer, or a quarter of a window too small for that
+ * (6,000 of the 24,000).
  */
+const largeModel = "anthropic/claude-sonnet-5-5";
 const smallModel = "anthropic/claude-haiku-4-5";
 const tinyModel = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 const answerTokens = 16_384;
@@ -75,7 +77,7 @@ const inputTokens = {
 /** A deployment that allows them all. */
 const bothModels = {
   ...gatewayConfig,
-  models: [model, smallModel, tinyModel],
+  models: [model, largeModel, smallModel, tinyModel],
 };
 
 /**
@@ -222,6 +224,58 @@ const refusalsIn = async (chatId: string, reason: string) => {
 const runEndedSchema = z.object({
   event: z.literal("agent.run_ended"),
   runId: z.string(),
+});
+
+describe("a request's system prompt", () => {
+  it("gives each section only where it was given last, so an earlier value never goes again", () => {
+    const at = 1;
+    expect(
+      latestSections([
+        {
+          role: "system",
+          content: "Instructions.",
+          sections: { apis: "A1", memory: "M1", skills: "S1" },
+          timestamp: at,
+        },
+        { role: "user", content: "Q1", timestamp: at },
+        {
+          role: "system",
+          content: "",
+          sections: { skills: "S2", memory: null },
+          timestamp: at,
+        },
+        { role: "user", content: "Q2", timestamp: at },
+        {
+          role: "system",
+          content: "",
+          sections: { skills: "S3" },
+          timestamp: at,
+        },
+      ])
+    ).toStrictEqual([
+      {
+        role: "system",
+        content: "Instructions.",
+        sections: { apis: "A1" },
+        timestamp: at,
+      },
+      { role: "user", content: "Q1", timestamp: at },
+      // Its skills are given again later: only the memory's removal is left.
+      {
+        role: "system",
+        content: "",
+        sections: { memory: null },
+        timestamp: at,
+      },
+      { role: "user", content: "Q2", timestamp: at },
+      {
+        role: "system",
+        content: "",
+        sections: { skills: "S3" },
+        timestamp: at,
+      },
+    ]);
+  });
 });
 
 describe("chat agent", () => {
@@ -446,7 +500,7 @@ describe("chat agent sandbox", () => {
 
     expect(result).toStrictEqual({
       isError: false,
-      text: `Returned:\n${JSON.stringify({ given: ["chat", "knowledge", "connections", "apps", "build", "workflows", "memory"], imported: [], exports: [] })}`,
+      text: `Returned:\n${JSON.stringify({ given: ["chat", "knowledge", "connections", "apps", "build", "workflows", "memory", "brain"], imported: [], exports: [] })}`,
     });
   });
 
@@ -457,7 +511,7 @@ describe("chat agent sandbox", () => {
 
     expect(result?.isError).toBeTruthy();
     expect(result?.text).toContain(
-      "This chat has no API named env.mailbox. It has: env.chat, env.knowledge, env.connections, env.apps, env.build, env.workflows, env.memory."
+      "This chat has no API named env.mailbox. It has: env.chat, env.knowledge, env.connections, env.apps, env.build, env.workflows, env.memory, env.brain."
     );
   });
 
@@ -1110,7 +1164,7 @@ describe("chat agent turns", () => {
     };
 
     const small = await sentTo(smallModel, "And now?", "Still here.");
-    const large = await sentTo(model, "And again?", "All here.");
+    const large = await sentTo(largeModel, "And again?", "All here.");
 
     expect({
       small: { ...small, chars: undefined },

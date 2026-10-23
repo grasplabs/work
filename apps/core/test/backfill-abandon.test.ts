@@ -7,6 +7,7 @@ import { documentMaxBytes } from "@grasp-os/shared/stores";
 import type { StoreFields } from "@grasp-os/shared/stores";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
+import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -20,6 +21,7 @@ import {
 } from "../src/store-abandon.ts";
 import { requireStoreSchemaActive } from "../src/store-backfill.ts";
 import { StoreHost } from "../src/store-host.ts";
+import { verifiedCandidate } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import {
   codeOf,
@@ -110,7 +112,11 @@ const bind = async (
  * failed on a note whose `category` is a number, under a key release 1
  * doesn't declare: the case no App can mend.
  */
-/** Registers `app` with its current and pending versions, as apps.ts keeps them. */
+/**
+ * Registers `app` with its current and pending versions, as apps.ts keeps
+ * them: created with nothing current, then made current from a verified
+ * candidate, as the database requires.
+ */
 const registerApp = async (
   app: AppId,
   currentVersion: number | null,
@@ -121,10 +127,16 @@ const registerApp = async (
     name: "Notes",
     description: "",
     ownerId: admin.userId,
-    currentVersion,
     pendingVersion,
     createdAt: new Date(),
   });
+  if (currentVersion !== null) {
+    await verifiedCandidate(app, currentVersion);
+    await drizzle(env.DB)
+      .update(apps)
+      .set({ currentVersion })
+      .where(eq(apps.id, app));
+  }
 };
 
 const failedStore = async (extra?: StoreFields, boundAs = 2) => {

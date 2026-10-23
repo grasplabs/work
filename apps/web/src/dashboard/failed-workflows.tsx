@@ -1,5 +1,6 @@
 import type {
   Notification,
+  RunFailedNotification,
   NotificationCursor,
   NotificationPage,
 } from "@grasp-os/shared/notifications";
@@ -68,7 +69,7 @@ const FailedWorkflow = ({
   notification,
   model,
 }: {
-  notification: Notification;
+  notification: RunFailedNotification;
   model: string | undefined;
 }) => {
   const { app, appName, workflow, run, failures, at, read } = notification;
@@ -138,12 +139,17 @@ export const FailedWorkflows = ({
   older: OlderFailures;
   onOlder: (older: OlderFailures) => void;
 }) => {
-  const shown = [...page.page.notifications, ...older.rows];
+  const listed = [...page.page.notifications, ...older.rows];
+  // Only failures here: a question asked of the person shows in the inbox.
+  const shown = listed.filter(
+    (notification): notification is RunFailedNotification =>
+      notification.type === "run_failed"
+  );
   const more = older.more ?? page.page.more;
   const { busy, failure, run } = useCoreAction();
   const { t } = useLingui();
   const showOlder = async (): Promise<void> => {
-    const last = shown.at(-1);
+    const last = listed.at(-1);
     if (last === undefined) {
       return;
     }

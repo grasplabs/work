@@ -188,6 +188,12 @@ interface SealRequest {
   readonly store?: StoreId;
   /** Who seals it: they must manage `store`, if one is given. */
   readonly by: Acting;
+  /**
+   * Called once its code is inspected and checked, before it is built
+   * and stored: a candidate's move from checking to building
+   * (app-candidates.ts). Not called for a version sealed already.
+   */
+  readonly building?: () => Promise<void>;
 }
 
 /** A release as the host runs it: verified, every hash checked. */
@@ -594,6 +600,19 @@ export const loadRelease = async (
     ));
   return { ...kept, manifestHash: hash };
 };
+
+/**
+ * The sealed manifest of `version` of `app` and its hash, checked against
+ * the hash and the store binding core recorded as `loadRelease` checks
+ * them, without reading its artifacts or keeping anything: what a
+ * candidate's report names (app-candidates.ts).
+ */
+export const checkedReleaseManifest = async (
+  env: Env,
+  app: AppId,
+  version: number
+): Promise<{ manifest: ReleaseManifest; hash: string }> =>
+  await checkedManifest(env, app, version);
 
 /** A draft release as its keeper stores it (sealed-previews.ts). */
 export interface StoredDraft {
@@ -1389,6 +1408,7 @@ export const sealRelease = async (
   const built = await inspectForSeal(env, { app, version }, files);
   const bound = await boundStore(env, request, built.manifest, built.schema);
   const store = bound?.binding ?? null;
+  await request.building?.();
   const { artifacts, releaseManifest, text, hash } = await packaged(
     env,
     { app, version },

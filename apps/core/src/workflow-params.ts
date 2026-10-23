@@ -155,6 +155,7 @@ const acceptedValue = (
 };
 
 /**
+/**
  * The parameter values a test run of a draft's checkpoint runs with
  * (workflows/candidate-runs.ts), frozen as a start freezes them, against
  * the checkpoint's own contract: each one `given` names, else its default.
@@ -166,7 +167,7 @@ const acceptedValue = (
  */
 export const candidateParams = (
   contract: VersionContract,
-  given: Record<string, unknown>
+  given: Readonly<Record<string, unknown>>
 ): string => {
   for (const name of Object.keys(given)) {
     acceptedValue(contract, name, given[name]);
@@ -182,6 +183,26 @@ export const candidateParams = (
     );
   }
   return boundedJson(frozen);
+};
+
+/**
+ * The parameter values a run an App's test starts (workflows/fixture-runs.ts)
+ * runs version `version` of workflow `id` with: `given`, the values the
+ * test's fixture declares, and for every other parameter its declared
+ * default; never a value the organization set. Refused as `candidateParams`
+ * refuses.
+ */
+export const fixtureParams = async (
+  env: Env,
+  id: string,
+  version: number,
+  given: Readonly<Record<string, unknown>>
+): Promise<string> => {
+  const contract = await versionContract(env, id, version);
+  if (contract === undefined) {
+    throw workflowResourceErrors.create("workflow.version_not_found");
+  }
+  return candidateParams(contract, given);
 };
 
 /**

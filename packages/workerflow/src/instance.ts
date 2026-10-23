@@ -10,6 +10,7 @@ import { isEventType } from "./history.ts";
 import {
   assertEventType,
   assertStepName,
+  eventAttributesOf,
   maxEventKeyLength,
 } from "./identity.ts";
 import {
@@ -183,6 +184,11 @@ const readSubscribe = (options: unknown): SubscribeCommand => {
 export interface InstanceEvent {
   type: string;
   payload?: unknown;
+  /**
+   * What a `waitForMatch` matches it by, beside its type: Workerflow's
+   * own (identity.ts, `eventAttributesOf`).
+   */
+  attributes?: Readonly<Record<string, string>>;
 }
 
 /** A run, as its caller holds it: Cloudflare Workflows' instance. */
@@ -318,6 +324,9 @@ export class WorkflowInstance {
 
   async #send(event: InstanceEvent, key: string | null): Promise<boolean> {
     const type = assertEventType(event.type);
+    // Checked here too, so attributes the run refuses fail the caller as
+    // the type does.
+    eventAttributesOf(event.attributes);
     // Encoded here, so a payload the journal can't keep fails the caller
     // before the run sees it.
     const payload = encode(event.payload);
@@ -325,6 +334,7 @@ export class WorkflowInstance {
       type,
       payload,
       key,
+      attributes: event.attributes ?? null,
     });
     switch (outcome) {
       case "accepted":
@@ -333,7 +343,7 @@ export class WorkflowInstance {
       }
       case "conflict": {
         throw new Error(
-          `The event ${JSON.stringify(key)} sent to workflow instance ${JSON.stringify(this.id)} was sent before with another type or payload`
+          `The event ${JSON.stringify(key)} sent to workflow instance ${JSON.stringify(this.id)} was sent before with another type or payload, or other attributes`
         );
       }
       case "too_large": {

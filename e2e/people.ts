@@ -208,6 +208,7 @@ const cast = {
   intake: { admin: "admin" },
   models: { admin: "admin", builder: "builder" },
   settings: { admin: "admin", member: "user" },
+  ownSessions: { member: "user" },
   workflows: { builder: "builder", user: "user" },
   activity: { admin: "admin", builder: "builder" },
   activityAgain: { admin: "admin", builder: "builder" },
@@ -244,6 +245,7 @@ const cast = {
   brain: { member: "user" },
   brainChat: { member: "user" },
   contexts: { member: "user" },
+  staffInterviews: { admin: "admin" },
   tour: { member: "user" },
   setupVoice: { admin: "admin" },
 } as const satisfies Record<string, Record<string, Role>>;

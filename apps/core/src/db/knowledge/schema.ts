@@ -1,6 +1,8 @@
 /**
- * Knowledge D1 database: collections, documents, versions (text in the row),
- * sections, links and the full-text index (unicode61 plus trigram).
+ * Knowledge D1 database: collections, documents, versions (compact
+ * metadata: each one's text is an immutable payload in R2, see
+ * `brainPayloads`), sections, links and the full-text index (unicode61 plus
+ * trigram).
  *
  * Versions keep every text a document ever had, but for what a purge
  * removed (knowledge/purge.ts). Sections and links are those of the
@@ -10,7 +12,9 @@
  *
  * The full-text index (`search_rows`, `search_words`, `search_trigrams` and
  * the triggers that keep them) is FTS5, which Drizzle can't describe: it
- * lives in its own migration, `0001_search.sql`.
+ * lives in its own migrations: `0001_search.sql`, and
+ * `0017_search_one_content.sql`, where the trigram index reads the words
+ * index's content rather than keeping a copy of it.
  */
 import type { Json } from "@grasp-os/shared/json";
 import { knowledgeSignalKinds } from "@grasp-os/shared/knowledge-signals";
@@ -84,10 +88,46 @@ export const documents = sqliteTable(
     /** `YYYY-MM-DD`. */
     reviewDate: text("review_date"),
     currentVersion: integer("current_version").notNull(),
+    /**
+     * The version whose sections search holds (knowledge/indexing.ts):
+     * the current one once indexed, an older one while it catches up.
+     */
+    indexedVersion: integer("indexed_version"),
+    /**
+     * Where indexing the current version stands: set `queued` by the save
+     * that makes it current, in the same batch, so the save is its durable
+     * intent; `indexed` by the batch that publishes its sections.
+     */
+    indexState: text("index_state", {
+      enum: ["queued", "retrying", "indexed", "failed"],
+    })
+      .notNull()
+      .default("queued"),
+    /** Failed attempts at indexing the current version. */
+    indexAttempts: integer("index_attempts").notNull().default(0),
+    /** The code of the error indexing the current version last failed with. */
+    indexFailure: text("index_failure"),
+    /**
+     * Which run indexes the current version: 0 for the first, one more for
+     * each the cron trigger starts again after the one before failed.
+     */
+    indexRun: integer("index_run").notNull().default(0),
+    /** When indexing the current version last failed for good. */
+    indexFailedAt: timestamp("index_failed_at"),
+    /**
+     * Set when a purge couldn't wait for indexing: search may still hold
+     * a generation with what it removed, so its runs are started again for
+     * as long as it takes. Cleared once indexed.
+     */
+    indexPurgePending: integer("index_purge_pending", { mode: "boolean" })
+      .notNull()
+      .default(false),
     createdAt: timestamp("created_at").notNull(),
     updatedAt: timestamp("updated_at").notNull(),
   },
   (table) => [
+    // The repair sweep, and search's coverage, find what isn't indexed.
+    index("documents_index_state_idx").on(table.indexState, table.updatedAt),
     uniqueIndex("documents_collection_path_idx").on(
       table.collectionId,
       table.path
@@ -102,9 +142,60 @@ export const documents = sqliteTable(
 );
 
 /**
- * Every version of every document, with its whole text, which only a purge
- * rewrites. The primary key is also the edit check: two saves from the
- * same version both write the next number, and the second one fails.
+ * The texts of versions, each an immutable object in the `BRAIN_OBJECTS`
+ * bucket under `key` (knowledge/payloads.ts), written once and never
+ * replaced. A row is `pending` from before its object is put until the
+ * batch that first refers to it marks it `committed`; at most one row per
+ * collection and hash is committed, so identical texts in a collection
+ * share one object. Never across collections: how fast a save is would
+ * otherwise tell its writer whether a text exists where they can't read. Collecting an
+ * unreferenced one marks it `collecting` first, which no save takes again,
+ * then deletes its object, then the row.
+ */
+export const brainPayloads = sqliteTable(
+  "brain_payloads",
+  {
+    /** The object's key in R2: core's own, never handed out. */
+    key: text().primaryKey(),
+    /** The collection whose documents' versions it may hold. */
+    collectionId: text("collection_id").notNull(),
+    /** The text's SHA-256, in hex, which every read checks again. */
+    sha256: text().notNull(),
+    /** The text's size, in bytes of UTF-8. */
+    bytes: integer().notNull(),
+    /**
+     * `broken`: committed, but its object turned out missing or not its
+     * text (knowledge/payloads.ts). Never taken by a save again; collected
+     * once no version refers to it.
+     */
+    state: text({
+      enum: ["pending", "committed", "broken", "collecting"],
+    }).notNull(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("brain_payloads_committed_sha256_idx")
+      .on(table.collectionId, table.sha256)
+      .where(sql`${table.state} = 'committed'`),
+    index("brain_payloads_state_idx").on(table.state, table.createdAt),
+  ]
+);
+
+/**
+ * Payloads that versions about to be deleted or pointed elsewhere refer
+ * to, noted earlier in the same batch: its end marks those no version
+ * refers to any more `collecting`, and clears the table
+ * (knowledge/payloads.ts). Empty between batches.
+ */
+export const brainPayloadReleases = sqliteTable("brain_payload_releases", {
+  key: text().primaryKey(),
+});
+
+/**
+ * Every version of every document, its text a payload (`brainPayloads`),
+ * which only a purge points elsewhere. The primary key is also the edit
+ * check: two saves from the same version both write the next number, and
+ * the second one fails.
  */
 export const versions = sqliteTable(
   "versions",
@@ -113,7 +204,10 @@ export const versions = sqliteTable(
       .notNull()
       .references(() => documents.id, { onDelete: "cascade" }),
     number: integer().notNull(),
-    text: text().notNull(),
+    /** Its text: a committed payload when written (knowledge/payloads.ts). */
+    payloadKey: text("payload_key")
+      .notNull()
+      .references(() => brainPayloads.key),
     /** User ID. */
     author: text().notNull(),
     message: text(),
@@ -121,10 +215,18 @@ export const versions = sqliteTable(
     restoredFrom: integer("restored_from"),
     createdAt: timestamp("created_at").notNull(),
   },
-  (table) => [primaryKey({ columns: [table.documentId, table.number] })]
+  (table) => [
+    primaryKey({ columns: [table.documentId, table.number] }),
+    // Collecting a payload asks whether any version still refers to it.
+    index("versions_payload_key_idx").on(table.payloadKey),
+  ]
 );
 
-/** The current version's sections, split by heading, in order. */
+/**
+ * The sections search holds of each document: those of its indexed version
+ * (`documents.indexed_version`), split by heading, in order, replaced
+ * whole by each published generation (knowledge/indexing.ts).
+ */
 export const sections = sqliteTable(
   "sections",
   {
@@ -354,5 +456,88 @@ export const knowledgeSignalDismissals = sqliteTable(
   },
   (table) => [
     primaryKey({ columns: [table.kind, table.collectionId, table.subject] }),
+  ]
+);
+
+/**
+ * The Brain's memory records (knowledge/memories.ts): what a person, or
+ * later an App or agent acting for one, asked the Brain to remember, as
+ * they said it. A record starts `proposed`, never an accepted fact.
+ * Its scope decides who reads it; `owner_id` is the person whose it is.
+ */
+export const brainMemories = sqliteTable(
+  "brain_memories",
+  {
+    id: text().primaryKey(),
+    revision: integer().notNull(),
+    scope: text({ enum: ["person", "session", "team", "company"] }).notNull(),
+    /** User ID of the person whose record it is. */
+    ownerId: text("owner_id").notNull(),
+    kind: text({
+      enum: ["fact", "experience", "lesson", "preference"],
+    }).notNull(),
+    statement: text().notNull(),
+    /** JSON array of the Brain's source references (brain-api.ts). */
+    sourceRefs: text("source_refs").notNull(),
+    state: text({ enum: ["proposed", "accepted", "retired"] }).notNull(),
+    /** Whether search has it yet: written `pending` with the record. */
+    indexingState: text("indexing_state", {
+      enum: ["pending", "indexed", "failed"],
+    }).notNull(),
+    recordedAt: timestamp("recorded_at").notNull(),
+    updatedAt: timestamp("updated_at").notNull(),
+  },
+  (table) => [
+    // A person's records, newest first, of one kind or all, paged by
+    // `(recorded_at, id)` (memories.ts): each index ends in the cursor's
+    // order, so a page is a range scan. The first also serves a personal
+    // purge's delete by owner.
+    index("brain_memories_owner_idx").on(
+      table.ownerId,
+      table.recordedAt,
+      table.id
+    ),
+    index("brain_memories_owner_kind_idx").on(
+      table.ownerId,
+      table.kind,
+      table.recordedAt,
+      table.id
+    ),
+  ]
+);
+
+/**
+ * The Brain's command receipts: one per command key, so a retry after a
+ * lost reply answers the recorded result. `key_hash` is the key keyed to
+ * the deployment and scoped to the caller and operation, never the key
+ * itself; `request_hash` is the validated request's, never its text.
+ */
+export const brainReceipts = sqliteTable(
+  "brain_receipts",
+  {
+    id: text().primaryKey(),
+    keyHash: text("key_hash").notNull(),
+    /** Who may read it back: the same caller, as `callerKey` names it. */
+    caller: text().notNull(),
+    operation: text({ enum: ["remember", "memories.proposeChange"] }).notNull(),
+    requestHash: text("request_hash").notNull(),
+    status: text({
+      enum: ["committed", "proposed", "queued", "completed", "failed"],
+    }).notNull(),
+    indexingState: text("indexing_state", {
+      enum: ["pending", "indexed", "failed"],
+    }).notNull(),
+    /** JSON array of the Brain's source references it committed. */
+    resourceRefs: text("resource_refs").notNull(),
+    createdAt: timestamp("created_at").notNull(),
+    retentionUntil: timestamp("retention_until").notNull(),
+  },
+  (table) => [
+    uniqueIndex("brain_receipts_key_idx").on(table.keyHash),
+    // The clock's sweep of expired receipts (`sweepBrainReceipts`).
+    index("brain_receipts_retention_idx").on(table.retentionUntil),
+    // A caller's recent commands, for the per-person bound on remember,
+    // and a personal purge's delete by caller.
+    index("brain_receipts_caller_idx").on(table.caller, table.createdAt),
   ]
 );

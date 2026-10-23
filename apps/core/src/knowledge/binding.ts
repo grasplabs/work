@@ -1,3 +1,4 @@
+import type { MemoryPack } from "@grasp-os/shared/brain-api";
 import type { CollectionId, PermissionId } from "@grasp-os/shared/ids";
 import type {
   BacklinkPage,
@@ -16,6 +17,7 @@ import { forSandbox } from "../bindings.ts";
 import type { WorkContext } from "../restricted.ts";
 import type { Reader } from "./access.ts";
 import { backlinks, getDocument, history, listDocuments } from "./documents.ts";
+import { recall } from "./recall.ts";
 import { search } from "./search.ts";
 import { follow, read } from "./tools.ts";
 
@@ -39,6 +41,7 @@ interface CollectionReads {
   search: (query: unknown, options?: unknown) => Promise<SearchResults>;
   read: (documentId: unknown, options?: unknown) => Promise<KnowledgeRead>;
   follow: (documentId: unknown) => Promise<FollowResult>;
+  recall: (input: unknown) => Promise<MemoryPack>;
 }
 
 /**
@@ -112,6 +115,10 @@ export const collectionReads = (
       ),
     follow: async (documentId) =>
       await asDelegate(async (reader) => await follow(env, reader, documentId)),
+    recall: async (input) =>
+      await asDelegate(
+        async (reader) => await recall(env, reader, input, collectionId)
+      ),
   };
 };
 
@@ -164,5 +171,9 @@ export class CollectionBinding
 
   async follow(documentId: unknown): Promise<FollowResult> {
     return await this.#reads.follow(documentId);
+  }
+
+  async recall(input: unknown): Promise<MemoryPack> {
+    return await this.#reads.recall(input);
   }
 }

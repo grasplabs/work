@@ -30,6 +30,8 @@ export interface ReviewContext {
   deciders: string;
   description: string;
   expiresAt: Date;
+  /** What it is about: an independent run's call `input`, else null. */
+  input: Json;
 }
 
 /**
@@ -51,6 +53,7 @@ export const contextFingerprint = async (
       deciders: context.deciders,
       description: context.description,
       expiresAt: context.expiresAt.getTime(),
+      input: context.input,
     })
   );
 
