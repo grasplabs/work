@@ -291,6 +291,15 @@ const calls = {
     await page.pushed;
     return subscription;
   },
+  "authenticate.screens.watchVersion": async (screens, { app, held }) => {
+    const page = pageStub();
+    const subscription = holding(
+      held,
+      await screens.watchVersion(app, page.stub)
+    );
+    await page.pushed;
+    return subscription;
+  },
   "authenticate.screens.frame": async (screens, { app, held }) =>
     holding(held, await screens.frame(app, "")),
   "authenticate.screens.frame.watchRuns": async (frame, { held }) =>
@@ -529,6 +538,7 @@ describe("what a browser reaches over core's connection", () => {
         "authenticate.chats.watch: RunSubscription",
         "authenticate.screens.frame: ScreenFrameRpc",
         "authenticate.screens.frame.watchRuns: RunSubscription",
+        "authenticate.screens.watchVersion: RunSubscription",
         "authenticate.chats.previewWatchQuery: RunSubscription",
         "authenticate.chats.previewStream: RunSubscription",
       ])

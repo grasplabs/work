@@ -36,6 +36,7 @@ import {
 } from "@grasp-os/shared/screens";
 import type {
   AppErrorLog,
+  AppVersionPush,
   QuerySnapshotPush,
   RunChange,
   ScreenBundle,
@@ -156,6 +157,14 @@ import { runSummary } from "./workflows/summary.ts";
  * Apps' hosts.
  */
 const maxRunSubscriptions = 20;
+
+/**
+ * Most Apps one connection follows the current version of at once
+ * (`watchVersion`): the page follows each App its tab's frames run once,
+ * however many frames of it are open, so this only bounds a page that
+ * follows over and over.
+ */
+const maxVersionSubscriptions = 20;
 
 /**
  * The App `app` names, for the person, once the App's host has counted
@@ -975,6 +984,126 @@ const watchRuns = async (
 };
 
 /**
+ * Follows `app`'s current version for `by`'s page (`ScreensApi.watchVersion`,
+ * spec 11.5), through the connection's way to the App's host
+ * (`QuerySubscriptions.follow`), which tells it when another version was
+ * made current and when the person's access may have dropped. Threat
+ * model, and how each is closed:
+ *
+ * - Someone without a role in the App learns its version: every push is
+ *   read as the person behind the connection then (its session read again
+ *   and the App's rules, `getApp`), never from the event; once they lost
+ *   the App (or their session, or it is someone else's) the refusal is
+ *   the last push and the page's callback is let go of.
+ * - An event that is forged, late or twice: it only makes core read the
+ *   version again; only core reaches an App's host.
+ * - A missed event: the version is pushed at once, and again on every
+ *   look the host's restart or a revocation causes; a page that connects
+ *   again follows anew, and gets it at once.
+ * - Pushes out of order: one at a time, each read when its turn comes,
+ *   so the last the page gets is the newest.
+ * - A page that follows without end: at most `maxVersionSubscriptions`
+ *   per connection, each let go of when it is released, its callback is
+ *   gone, or the connection closes.
+ */
+const followVersion = (
+  env: Env,
+  check: SessionCheck,
+  by: Identity,
+  app: AppId,
+  stub: PageCallback,
+  queries: QuerySubscriptions,
+  subscriptions: Set<Disposable>
+): RunSubscription => {
+  const toPage = stub.dup();
+  const state: { live: boolean; following?: Disposable; turn: Promise<void> } =
+    { live: true, turn: Promise.resolve() };
+  const held: Disposable = {
+    [Symbol.dispose]: () => {
+      if (!state.live) {
+        return;
+      }
+      state.live = false;
+      subscriptions.delete(held);
+      state.following?.[Symbol.dispose]();
+      toPage[Symbol.dispose]();
+    },
+  };
+  const release = (): void => {
+    held[Symbol.dispose]();
+  };
+  /** What to push now: the version as the person may read it, if read. */
+  const read = async (
+    recheck: boolean
+  ): Promise<AppVersionPush | undefined> => {
+    try {
+      const person = await check();
+      if (person.userId !== by.userId) {
+        throw authErrors.create("auth.principal_changed");
+      }
+      const { currentVersion } = await usableApp(env, person, app);
+      return { type: "current", version: currentVersion, recheck };
+    } catch (error) {
+      if (!isExpectedError(error)) {
+        // Read again at the next event: the database away for a moment
+        // is no lost role.
+        log.warn("screen.version_read_failed", {
+          appId: app,
+          ...errorFields(error),
+        });
+        return undefined;
+      }
+      return {
+        type: "refused",
+        error: { code: error.code, message: error.message },
+      };
+    }
+  };
+  const pushNow = async (recheck: boolean): Promise<void> => {
+    const sent = state.live ? await read(recheck) : undefined;
+    if (sent === undefined || !state.live) {
+      return;
+    }
+    try {
+      await toPage(sent);
+    } catch {
+      // The page didn't take it: gone, or its callback failed.
+      release();
+      return;
+    }
+    if (sent.type === "refused") {
+      release();
+    }
+  };
+  const push = async (recheck: boolean): Promise<void> => {
+    const before = state.turn;
+    const mine = (async (): Promise<void> => {
+      await before;
+      await pushNow(recheck);
+    })();
+    state.turn = mine;
+    await mine;
+  };
+  subscriptions.add(held);
+  state.following = queries.follow(
+    by,
+    app,
+    async () => {
+      await push(true);
+    },
+    release,
+    async () => {
+      await push(false);
+    }
+  );
+  void push(false);
+  return new RunSubscription(async () => {
+    release();
+    await Promise.resolve();
+  });
+};
+
+/**
  * Whether `by` has a role in `app` now, for a live query's gate before
  * each push (query-subscriptions.ts): false when refused, while a failure
  * nobody expected (the database away for a moment) is thrown, so the gate
@@ -1474,6 +1603,9 @@ export class ScreensRpc extends CoreRpcTarget implements ScreensApi {
   /** This connection's run subscriptions that haven't been released. */
   readonly #runSubscriptions = new Set<Disposable>();
 
+  /** This connection's version subscriptions that haven't been released. */
+  readonly #versionSubscriptions = new Set<Disposable>();
+
   /** Each build's standing being read for a look, by App and build. */
   readonly #standings = new Map<string, Promise<Standing>>();
 
@@ -1594,10 +1726,27 @@ export class ScreensRpc extends CoreRpcTarget implements ScreensApi {
     });
   }
 
-  async version(app: string): Promise<number | null> {
+  async watchVersion(
+    app: string,
+    onVersion: (push: AppVersionPush) => void
+  ): Promise<RunSubscription> {
     return await withPerson(this.#check, async (by) => {
-      const { currentVersion } = await usableApp(this.#env, by, app);
-      return currentVersion;
+      const { id } = await usableApp(this.#env, by, app);
+      if (!isStub(onVersion)) {
+        throw screenErrors.create("screen.invalid");
+      }
+      if (this.#versionSubscriptions.size >= maxVersionSubscriptions) {
+        throw screenErrors.create("screen.too_many_subscriptions");
+      }
+      return followVersion(
+        this.#env,
+        this.#check,
+        by,
+        id,
+        onVersion,
+        this.#queries,
+        this.#versionSubscriptions
+      );
     });
   }
 

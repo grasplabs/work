@@ -618,6 +618,40 @@ export const publicOperationOf = (
   return operation.path;
 };
 
+/**
+ * `reference` as a screen pins it (spec 11.5): a screen opened on an
+ * earlier version of the App keeps calling with that version's references
+ * until it switches, a dirty editor among them saving before it does. One
+ * of an earlier version of the same App, whose release isn't revoked
+ * (`version.revoked`, `version.not_sealed` otherwise), names the current
+ * release instead, and the resolution that follows compares its contract
+ * as it would any reference's: the same fingerprint as the current
+ * release's function, and the call runs on the current handler, which
+ * takes and answers exactly what the screen's contract says; another one,
+ * and it is refused (`version.mismatch`), never run on a handler of
+ * another contract. Only for a screen's calls (`FunctionCallOptions.pinned`,
+ * `invokeAppAction`): anyone else names the version that runs.
+ */
+export const pinnedReference = async (
+  env: Env,
+  release: Release,
+  reference: FunctionRequest["reference"]
+): Promise<FunctionRequest["reference"]> => {
+  const { resourceId, resourceVersion } = release.manifest;
+  if (
+    reference.resourceId !== resourceId ||
+    reference.resourceVersion >= resourceVersion
+  ) {
+    return reference;
+  }
+  await requireNotRevoked(
+    env,
+    appIdSchema.parse(resourceId),
+    reference.resourceVersion
+  );
+  return { ...reference, resourceVersion };
+};
+
 /** What a call answers (spec 32.6). */
 export interface FunctionAnswer {
   readonly result: OperationResult;
@@ -681,6 +715,11 @@ interface FunctionCallOptions {
   readonly parentSession?: string;
   /** Only this kind of function may be called (a live query's). */
   readonly kind?: FunctionRequest["reference"]["kind"];
+  /**
+   * A screen's call: a reference of an earlier version than the one that
+   * runs is held to its contract there (`pinnedReference`).
+   */
+  readonly pinned?: boolean;
   /**
    * Given, the call may read a paginated list's window (a screen's): what
    * charges the person for its pages past what the caller paid
@@ -994,6 +1033,7 @@ const callFunction = async (
     observeReads,
     observeClaim,
     chargeWindow,
+    pinned = false,
     agent,
     chain,
     fromRun,
@@ -1032,6 +1072,12 @@ const callFunction = async (
     // The release of the App's current version: its manifest names the
     // App and the version the reference must name.
     release = await loadRelease(env, found.id, found.currentVersion);
+    if (pinned) {
+      call = {
+        ...call,
+        reference: await pinnedReference(env, release, call.reference),
+      };
+    }
     ({ path, workflowQuery, preference } = await referenceIn(
       release,
       call.reference
@@ -1261,6 +1307,7 @@ export const callScreenFunction = async (
     : await callFunction(env, by, app, request, {
         deadline,
         chargeWindow,
+        pinned: true,
         ...recovery,
       });
 
@@ -1352,6 +1399,7 @@ export const evaluateAppQuery = async (
     deadline,
     kind: "query",
     chargeWindow,
+    pinned: true,
     observeReads: (storeId, readSet) => {
       reads = { storeId, readSet };
     },
@@ -1397,7 +1445,11 @@ export const invokeAppAction = async (
       throw versionErrors.create("version.not_sealed");
     }
     const release = await loadRelease(env, found.id, found.currentVersion);
-    const path = publicOperationOf(release, call.reference);
+    // A screen's, or a portable host's: held to its contract as pinned.
+    const path = publicOperationOf(
+      release,
+      await pinnedReference(env, release, call.reference)
+    );
     const invocation = await invocationFor(env, release, {
       by,
       requestId,
