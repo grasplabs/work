@@ -35,6 +35,11 @@ export interface SentRequest {
 export interface Failure {
   status: number;
   headers?: HeadersInit;
+  /**
+   * The request was carried out before the failure, as when a gateway
+   * times out on a send Teams went on to post.
+   */
+  carriedOut?: boolean;
 }
 
 const activityPath =
@@ -52,6 +57,8 @@ export const fakeBotConnector = () => {
   let failures: Failure[] = [];
   let expiresIn = 3600;
   let activities = 0;
+  // The activities posted, as the conversation shows them.
+  const posted: string[] = [];
 
   const token = async (request: Request, url: URL): Promise<Response> => {
     const form = new URLSearchParams(
@@ -78,14 +85,7 @@ export const fakeBotConnector = () => {
     });
   };
 
-  const botConnector = (request: Request, url: URL): Response => {
-    const failure = failures.shift();
-    if (failure !== undefined) {
-      return Response.json(
-        { error: { code: "Failure" } },
-        { status: failure.status, headers: failure.headers }
-      );
-    }
+  const carryOut = async (request: Request, url: URL): Promise<Response> => {
     const bearer = request.headers.get("authorization") ?? "";
     if (!issued.has(bearer.replace(/^Bearer /u, ""))) {
       return Response.json({ message: "Unauthorized" }, { status: 401 });
@@ -104,11 +104,30 @@ export const fakeBotConnector = () => {
       return Response.json({ id: found.activity });
     }
     activities += 1;
+    posted.push(await request.text());
     return Response.json({ id: `activity-${activities}` }, { status: 201 });
+  };
+
+  const botConnector = async (
+    request: Request,
+    url: URL
+  ): Promise<Response> => {
+    const failure = failures.shift();
+    if (failure?.carriedOut === true) {
+      await carryOut(request, url);
+    }
+    if (failure !== undefined) {
+      return Response.json(
+        { error: { code: "Failure" } },
+        { status: failure.status, headers: failure.headers }
+      );
+    }
+    return await carryOut(request, url);
   };
 
   beforeEach(() => {
     sent.length = 0;
+    posted.length = 0;
     tokenRequests.length = 0;
     removed.clear();
     failures = [];
@@ -131,7 +150,7 @@ export const fakeBotConnector = () => {
         return Response.json({ issuer: `https://${loginHost}/` });
       }
       if (url.hostname === botConnectorHost) {
-        return botConnector(request, url);
+        return await botConnector(request, url);
       }
       return new Response("Taken");
     });
@@ -143,6 +162,8 @@ export const fakeBotConnector = () => {
   return {
     /** Every request but the token's, Microsoft's or not. */
     sent,
+    /** The activities the Bot Connector posted, as their bodies. */
+    posted,
     /** The token requests Entra got, as their forms. */
     tokenRequests,
     /** The tokens Entra issued. */

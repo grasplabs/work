@@ -2690,6 +2690,10 @@ msgstr "vom Agenten angefragt, in dessen Chat"
 msgid "Asked the agent to fix a run"
 msgstr "Den Agenten gebeten, einen Lauf zu beheben"
 
+#: src/activity/audit-words.ts
+msgid "Asked to send, edit or delete a chat app message as the company's bot"
+msgstr "Das Senden, Bearbeiten oder Löschen einer Chat-App-Nachricht als Bot des Unternehmens angefragt"
+
 #: src/routes/_shell.onboarding.organization.$team.tsx
 msgid "Asked which work they do"
 msgstr "Wird gefragt, welche Arbeit sie macht"
@@ -10211,10 +10215,6 @@ msgstr "Gesendet"
 #: src/dashboard/outcome-card.tsx
 msgid "Sent <0>{sent}</0>"
 msgstr "Gesendet <0>{sent}</0>"
-
-#: src/activity/audit-words.ts
-msgid "Sent a chat app message as the company's bot"
-msgstr "Eine Chat-App-Nachricht als Bot des Unternehmens gesendet"
 
 #: src/decision-confirmation.tsx
 msgctxt "what an App's screen sends with an answer to a decision"

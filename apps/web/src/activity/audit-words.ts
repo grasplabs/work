@@ -17,7 +17,9 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
   { action: "connection.connect", text: msg`Connected an account` },
   {
     action: "channel.call",
-    text: msg`Sent a chat app message as the company's bot`,
+    // Recorded for refusals and failures too: the words say what was
+    // asked, and the entry's outcome says how it ended.
+    text: msg`Asked to send, edit or delete a chat app message as the company's bot`,
   },
   {
     action: "connection.reconnected",

@@ -2690,6 +2690,10 @@ msgstr "gevraagd door de agent, in hun chat"
 msgid "Asked the agent to fix a run"
 msgstr "De agent gevraagd een run te herstellen"
 
+#: src/activity/audit-words.ts
+msgid "Asked to send, edit or delete a chat app message as the company's bot"
+msgstr "Gevraagd een chat-appbericht te versturen, bewerken of verwijderen als de bot van het bedrijf"
+
 #: src/routes/_shell.onboarding.organization.$team.tsx
 msgid "Asked which work they do"
 msgstr "Krijgt de vraag welk werk hij doet"
@@ -10211,10 +10215,6 @@ msgstr "Verstuurd"
 #: src/dashboard/outcome-card.tsx
 msgid "Sent <0>{sent}</0>"
 msgstr "Verstuurd <0>{sent}</0>"
-
-#: src/activity/audit-words.ts
-msgid "Sent a chat app message as the company's bot"
-msgstr "Een chat-appbericht verstuurd als de bot van het bedrijf"
 
 #: src/decision-confirmation.tsx
 msgctxt "what an App's screen sends with an answer to a decision"

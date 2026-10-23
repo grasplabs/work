@@ -408,8 +408,23 @@ const retryWaitMs = (header: string | null, attempt: number): number => {
   return Number.isFinite(date) ? Math.max(date - Date.now(), 0) : backoff;
 };
 
-const isRetried = (status: number): boolean =>
-  status === 429 || (status >= 500 && status <= 599);
+/**
+ * Whether a send is tried again. A 429, and a 503 that names its wait,
+ * say the platform turned the request away. Any other 5xx leaves it open
+ * whether the platform carried it out: an edit or a removal is the same
+ * done twice, but a POST would post the message twice, so it is passed
+ * back instead.
+ */
+const isRetried = (method: string, response: Response): boolean => {
+  const { status } = response;
+  if (status === 429) {
+    return true;
+  }
+  if (method === "POST") {
+    return status === 503 && response.headers.has("retry-after");
+  }
+  return status >= 500 && status <= 599;
+};
 
 /**
  * The adapter's token request, answered here: with the placeholder as the
@@ -455,7 +470,8 @@ const isTyping = (body: Uint8Array): boolean => {
 
 /**
  * Sends one request on to the Bot Connector with the bot's token, tried
- * again while it is throttled or failing and the wait is short, and once
+ * again while it is throttled or failing (`isRetried`) and the wait is
+ * short, and once
  * more with a new token if the cached one is no longer taken.
  */
 const sendToBotConnector = async (
@@ -497,7 +513,7 @@ const sendToBotConnector = async (
       await Promise.all([response.body?.cancel(), dropToken(bot)]);
       continue;
     }
-    if (!isRetried(response.status) || attempts >= maxAttempts) {
+    if (!isRetried(method, response) || attempts >= maxAttempts) {
       return { response, attempts };
     }
     const waitMs = retryWaitMs(response.headers.get("retry-after"), attempts);

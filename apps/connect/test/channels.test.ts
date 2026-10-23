@@ -504,11 +504,36 @@ describe("sending as the bot", () => {
     );
     const failing = await connect.channelFetch(
       "teams",
-      adapterRequest(activities())
+      adapterRequest(activities("activity-1"), { method: "PUT" })
     );
     expect(failing.status).toBe(502);
     expect(failing.headers.get(channelHeader)).toBeNull();
     expect(toBotConnector()).toHaveLength(3);
+  });
+
+  it("posts a message at most once when Teams fails without saying it refused", async () => {
+    const connect = connectForBot();
+    for (const failure of [
+      { status: 502, carriedOut: true },
+      { status: 504, carriedOut: true },
+      { status: 500, carriedOut: true },
+      // A 503 that names no wait doesn't say Teams turned the send away.
+      { status: 503, carriedOut: true },
+    ]) {
+      microsoft.fail(failure);
+      // oxlint-disable-next-line no-await-in-loop -- one send after another
+      const failing = await connect.channelFetch(
+        "teams",
+        adapterRequest(activities())
+      );
+      expect(failing.status).toBe(failure.status);
+    }
+    expect(microsoft.posted).toStrictEqual(
+      Array.from({ length: 4 }, () =>
+        JSON.stringify({ type: "message", text: "Your report is ready" })
+      )
+    );
+    expect(toBotConnector()).toHaveLength(4);
   });
 
   it("drops a platform's own answer-kind header, so it can't pass as connect's", async () => {
