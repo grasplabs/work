@@ -6,7 +6,9 @@
  * are served before the Worker, behind Access at the edge only: they hold
  * nothing but the open-source app's code.
  *
- * Grasp's admin can have a hostname of its own (src/admin-host.ts).
+ * Grasp's admin can have a hostname of its own (src/admin-host.ts). The
+ * console's Releases and Rollouts pages moved under its Platform, and
+ * their old addresses redirect there (src/moved-pages.ts).
  *
  * `POST /discord/interactions` is the one route outside Access: Discord
  * posts Grasp's bot's interactions there (src/admin/discord.ts), so it
@@ -41,6 +43,7 @@ import {
 } from "./admin/discord.ts";
 import { adminMcp, adminMcpPath } from "./admin/mcp.ts";
 import { consoleDatabase } from "./db/act.ts";
+import { movedPageRedirect } from "./moved-pages.ts";
 import { importReleases } from "./releases/import.ts";
 
 export { IntegrationBuild } from "./builds/workflow.ts";
@@ -65,12 +68,17 @@ const withStaff = withAccess(async (request, staff) =>
 
 export default {
   // Past the Access check, a page may move to or from the admin's own
-  // hostname (src/admin-host.ts), so nothing about it shows to anyone else.
+  // hostname (src/admin-host.ts), or from where it was to the admin
+  // (src/moved-pages.ts), so nothing about it shows to anyone else.
   fetch: async (request: Request, env: Env) => {
     if (new URL(request.url).pathname === discordInteractionsPath) {
       return await discordInteraction(request, env, waitUntil);
     }
-    return await withStaff(request, env, () => adminHostRedirect(request, env));
+    return await withStaff(
+      request,
+      env,
+      () => movedPageRedirect(request) ?? adminHostRedirect(request, env)
+    );
   },
   scheduled: async (controller, env) => {
     if (controller.cron === digestCron) {

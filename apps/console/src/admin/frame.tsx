@@ -11,7 +11,8 @@
  * Grasp there, as the admin's model works it out of what its core answered
  * (src/admin/views.ts). Beside Platform, how many companies' platforms
  * need a look and a rollout waiting for approval, as the console recorded
- * them (`platformCounts`). Beside Integrations to build, how many apps
+ * them (`platformCounts`), and under it its releases and rollouts.
+ * Beside Integrations to build, how many apps
  * the companies asked for wait on Grasp (`askedApps`).
  */
 import {
@@ -27,6 +28,9 @@ import {
   SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarMenuSub,
+  SidebarMenuSubButton,
+  SidebarMenuSubItem,
   SidebarProvider,
   useSidebar,
 } from "@grasp-os/ui/components/sidebar";
@@ -70,6 +74,14 @@ interface Place {
     | "/admin/lab";
   label: string;
   icon: ComponentType<SVGProps<SVGSVGElement>>;
+  /** The pages under it, nested beneath its entry. */
+  under?: readonly SubPlace[];
+}
+
+/** A page under one of the admin's places, nested beneath its entry. */
+interface SubPlace {
+  to: "/admin/platform/releases" | "/admin/platform/rollouts";
+  label: string;
 }
 
 const places: readonly Place[] = [
@@ -79,7 +91,15 @@ const places: readonly Place[] = [
     label: "Integrations to build",
     icon: WrenchIcon,
   },
-  { to: "/admin/platform", label: "Platform", icon: ServerIcon },
+  {
+    to: "/admin/platform",
+    label: "Platform",
+    icon: ServerIcon,
+    under: [
+      { to: "/admin/platform/releases", label: "Releases" },
+      { to: "/admin/platform/rollouts", label: "Rollouts" },
+    ],
+  },
   { to: "/admin/ask", label: "Ask Grasp", icon: SparklesIcon },
   { to: "/admin/sources", label: "Sources", icon: CableIcon },
   { to: "/admin/lab", label: "Stephen Lab", icon: FlaskConicalIcon },
@@ -171,7 +191,7 @@ const PlaceItem = ({
   badge?: PlaceBadge | null;
 }) => {
   const matchRoute = useMatchRoute();
-  const { to, label, icon: Icon } = place;
+  const { to, label, icon: Icon, under = [] } = place;
   // The overview is only itself; any other place holds the pages under it.
   const active = matchRoute({ to, fuzzy: to !== "/admin" }) !== false;
   return (
@@ -190,6 +210,21 @@ const PlaceItem = ({
           {badge.count}
           <span className="sr-only">{`: ${badge.words}`}</span>
         </SidebarMenuBadge>
+      )}
+      {under.length === 0 ? null : (
+        // Hidden while the sidebar is folded to icons: its entry leads there.
+        <SidebarMenuSub>
+          {under.map((sub) => (
+            <SidebarMenuSubItem key={sub.to}>
+              <SidebarMenuSubButton
+                isActive={matchRoute({ to: sub.to, fuzzy: true }) !== false}
+                render={<Link to={sub.to} />}
+              >
+                <span>{sub.label}</span>
+              </SidebarMenuSubButton>
+            </SidebarMenuSubItem>
+          ))}
+        </SidebarMenuSub>
       )}
     </SidebarMenuItem>
   );
