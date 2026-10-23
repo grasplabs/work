@@ -543,7 +543,7 @@ test("Stephen says his line a sentence at a time, without a gap, its words light
     page.getByRole("button", { name: "Type instead" })
   ).toBeVisible();
   await expect(page.getByText(line)).toBeVisible();
-  await expect(page.getByText("Listening")).toBeVisible({
+  await expect(page.getByText("Listening", { exact: true })).toBeVisible({
     timeout: 30_000,
   });
 

@@ -355,7 +355,15 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
     expect({
       ...result,
       path: opened?.url.pathname,
-      query: Object.fromEntries(opened?.url.searchParams ?? []),
+      query: Object.fromEntries(
+        [...(opened?.url.searchParams ?? [])].filter(
+          ([name]) => name !== "keyterms"
+        )
+      ),
+      // What to listen out for is the store's: the team, and its people.
+      keyterms: ["Ops", "Person"].every((term) =>
+        (opened?.url.searchParams.getAll("keyterms") ?? []).includes(term)
+      ),
       upgrade: opened?.upgrade,
       apiKey: opened?.apiKey,
       audio: upstream.audio.map((bytes) => bytes.length),
@@ -379,6 +387,7 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
         include_timestamps: "true",
         enable_logging: "false",
       },
+      keyterms: true,
       upgrade: "websocket",
       apiKey: null,
       audio: [3200],

@@ -295,10 +295,13 @@ class Relay {
   async #open(start: Start, hearer: Hearer): Promise<void> {
     let session: TranscriptionSession;
     try {
+      // The page names none: what to listen out for is the store's.
+      const keyterms = await onboardingStore(this.#env).listeningTerms(
+        hearer.person
+      );
       session = await gatewayTranscription(this.#env).open({
         language: start.language,
-        // The page names none: what to listen out for is the server's.
-        keyterms: [],
+        keyterms,
         sampleRate: start.sampleRate,
         ...(start.previousText === undefined
           ? {}

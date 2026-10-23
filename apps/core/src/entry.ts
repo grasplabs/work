@@ -6,6 +6,7 @@ import { errorReportPath } from "@grasp-os/shared/error-reports";
 import { internalErrors, requestErrors } from "@grasp-os/shared/errors";
 import { guestApiPath } from "@grasp-os/shared/guests";
 import { requestIdHeader } from "@grasp-os/shared/http";
+import { interviewHearPath } from "@grasp-os/shared/interview-hear";
 import {
   interviewApiPath,
   interviewPagePath,
@@ -49,6 +50,7 @@ import { errorResponse } from "./errors.ts";
 import { guestResponse } from "./guests.ts";
 import { originalResponse } from "./knowledge/uploads.ts";
 import { mailIngressResponse } from "./mail-ingress.ts";
+import { hearResponse } from "./onboarding/hear.ts";
 import { interviewTurnResponse } from "./onboarding/interview.ts";
 import { labResponse } from "./onboarding/lab.ts";
 import { interviewResponse } from "./onboarding/links.ts";
@@ -171,6 +173,9 @@ const linkResponse = async (
   }
   if (pathname === transcriptionPath) {
     return transcriptionResponse(request, env, requestId, ctx);
+  }
+  if (pathname === interviewHearPath) {
+    return await hearResponse(request, env, requestId);
   }
   return undefined;
 };
