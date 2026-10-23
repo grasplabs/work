@@ -11,6 +11,20 @@
   },
   "commit": "0000000000000000000000000000000000000000",
   "compatibility": {
+    "databases": {
+      "grasp-os-connect": {
+        "compatibleFrom": 0,
+        "schema": 0
+      },
+      "grasp-os-core": {
+        "compatibleFrom": 0,
+        "schema": 0
+      },
+      "grasp-os-knowledge": {
+        "compatibleFrom": 0,
+        "schema": 0
+      }
+    },
     "interfaces": {
       "connect": {
         "calls": {},

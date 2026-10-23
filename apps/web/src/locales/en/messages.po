@@ -538,6 +538,10 @@ msgstr "{gaps, plural, one {# gap} other {# gaps}}"
 msgid "{goals, plural, one {# goal} other {# goals}}"
 msgstr "{goals, plural, one {# goal} other {# goals}}"
 
+#: src/onboarding/setup-steps.tsx
+msgid "{going, plural, one {The lead of # team gets their link {when}. Everyone else right after their lead has talked to me.} other {The leads of # teams get their link {when}. Everyone else right after their lead has talked to me.}}"
+msgstr "{going, plural, one {The lead of # team gets their link {when}. Everyone else right after their lead has talked to me.} other {The leads of # teams get their link {when}. Everyone else right after their lead has talked to me.}}"
+
 #: src/onboarding/send-plan-form.tsx
 msgid "{going} of {count}"
 msgstr "{going} of {count}"
@@ -11166,10 +11170,6 @@ msgstr "The kickoff, and the documents the company shared."
 msgid "The latest runs, newest first."
 msgstr "The latest runs, newest first."
 
-#: src/onboarding/setup-steps.tsx
-msgid "The leads of {going} teams get their link {when}. Everyone else right after their lead has talked to me."
-msgstr "The leads of {going} teams get their link {when}. Everyone else right after their lead has talked to me."
-
 #: src/screens/screen-links.ts
 msgid "The link wasn't opened."
 msgstr "The link wasn't opened."
@@ -11849,6 +11849,10 @@ msgstr "To do"
 #: src/onboarding/setup-steps.tsx
 msgid "To everyone"
 msgstr "To everyone"
+
+#: src/onboarding/setup-steps.tsx
+msgid "To everyone at {company}"
+msgstr "To everyone at {company}"
 
 #: src/dashboard/report.ts
 msgid "To keep who spoke private, a team is left out until five of its people were asked, and its count until three were heard. Neither means nobody took part."

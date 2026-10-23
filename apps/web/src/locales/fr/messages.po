@@ -538,6 +538,10 @@ msgstr "{gaps, plural, one {# lacune} other {# lacunes}}"
 msgid "{goals, plural, one {# goal} other {# goals}}"
 msgstr "{goals, plural, one {# objectif} other {# objectifs}}"
 
+#: src/onboarding/setup-steps.tsx
+msgid "{going, plural, one {The lead of # team gets their link {when}. Everyone else right after their lead has talked to me.} other {The leads of # teams get their link {when}. Everyone else right after their lead has talked to me.}}"
+msgstr "{going, plural, one {Le responsable de # équipe reçoit son lien {when}. Tous les autres juste après que leur responsable m’a parlé.} other {Les responsables de # équipes reçoivent leur lien {when}. Tous les autres juste après que leur responsable m’a parlé.}}"
+
 #: src/onboarding/send-plan-form.tsx
 msgid "{going} of {count}"
 msgstr "{going} sur {count}"
@@ -11166,10 +11170,6 @@ msgstr "Le kickoff, et les documents partagés par l’entreprise."
 msgid "The latest runs, newest first."
 msgstr "Les dernières exécutions, les plus récentes en premier."
 
-#: src/onboarding/setup-steps.tsx
-msgid "The leads of {going} teams get their link {when}. Everyone else right after their lead has talked to me."
-msgstr "Les responsables de {going} équipes reçoivent leur lien {when}. Tous les autres juste après que leur responsable m’a parlé."
-
 #: src/screens/screen-links.ts
 msgid "The link wasn't opened."
 msgstr "Le lien n’a pas été ouvert."
@@ -11849,6 +11849,10 @@ msgstr "À faire"
 #: src/onboarding/setup-steps.tsx
 msgid "To everyone"
 msgstr "À tous"
+
+#: src/onboarding/setup-steps.tsx
+msgid "To everyone at {company}"
+msgstr "À tous chez {company}"
 
 #: src/dashboard/report.ts
 msgid "To keep who spoke private, a team is left out until five of its people were asked, and its count until three were heard. Neither means nobody took part."

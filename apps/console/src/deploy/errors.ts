@@ -14,6 +14,11 @@ export const deployErrorCodes = [
    * an App release the client's code may have left.
    */
   "release_incompatible",
+  /**
+   * The release's code doesn't run on a database's schema as the
+   * client's migrations left it: a later release's contracted it.
+   */
+  "schema_incompatible",
   /** A blob in R2 is missing, or isn't what the imported manifest says. */
   "release_blob_mismatch",
   /** Two Workers give one database different migrations. */
