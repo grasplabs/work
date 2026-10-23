@@ -7,7 +7,14 @@ import type { QueueEntry } from "chat";
 // threads remembered, and what expired cleared from storage.
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vite-plus/test";
 
 import { durableObjectState } from "../src/state.ts";
 
@@ -16,9 +23,9 @@ const state = durableObjectState(env.CHAT_STATE);
 /** A thread or key no other test uses. */
 const fresh = (kind: string) => `${kind}-${crypto.randomUUID()}`;
 
-/** Waits `ms`, for what expires after it. */
-const pause = async (ms: number) => {
-  await scheduler.wait(ms);
+/** Moves the clock on `ms`, past what expires before then. */
+const later = (ms: number) => {
+  vi.setSystemTime(Date.now() + ms);
 };
 
 /** A message queued in `thread` while a handler ran, as the SDK queues one. */
@@ -62,6 +69,17 @@ const storedIn = async (name: string) => {
 };
 
 describe("Chat SDK's state on Durable Objects", () => {
+  // The objects read the time from `Date.now()`, in the same isolate as
+  // the tests: a test moves the clock on (`later`) instead of waiting, so
+  // nothing expires between two calls that run slowly, and what should
+  // have expired has, however fast the calls ran.
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("gives a thread's lock to one holder at a time, and lets only its token extend or release it", async () => {
     const thread = fresh("thread");
     const first = await state.acquireLock(thread, 60_000);
@@ -99,7 +117,7 @@ describe("Chat SDK's state on Durable Objects", () => {
   it("frees a lock once it expires, and never brings an expired one back", async () => {
     const thread = fresh("thread");
     const lapsed = await state.acquireLock(thread, 20);
-    await pause(40);
+    later(40);
     const extended =
       lapsed === null ? true : await state.extendLock(lapsed, 60_000);
     const next = await state.acquireLock(thread, 60_000);
@@ -132,7 +150,7 @@ describe("Chat SDK's state on Durable Objects", () => {
     const once = await state.setIfNotExists(key, { seen: 2 });
     const kept = await state.get(key);
     await state.set(lasting, ["for", "good"]);
-    await pause(50);
+    later(50);
     const expired = await state.get(key);
     const again = await state.setIfNotExists(key, { seen: 3 }, 60_000);
     const replaced = await state.get(key);
@@ -167,7 +185,7 @@ describe("Chat SDK's state on Durable Objects", () => {
     const newest = await state.getList(key);
     const short = fresh("list");
     await state.appendToList(short, "soon gone", { ttlMs: 20 });
-    await pause(40);
+    later(40);
 
     expect({
       newest,
@@ -234,7 +252,7 @@ describe("Chat SDK's state on Durable Objects", () => {
       { ...queued(abandoned, "never taken"), expiresAt: Date.now() + 20 },
       5
     );
-    await pause(40);
+    later(40);
 
     expect({
       deleted: await storedIn(`key:${key}`),
@@ -246,7 +264,7 @@ describe("Chat SDK's state on Durable Objects", () => {
   it("clears an object from storage once all it held expired", async () => {
     const key = fresh("key");
     await state.set(key, "brief", 20);
-    await pause(40);
+    later(40);
 
     expect({
       stored: await storedIn(`key:${key}`),
