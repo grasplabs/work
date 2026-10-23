@@ -1,16 +1,13 @@
-import type {
-  AuditActor,
-  AuditDetailValue,
-  AuditEntry,
-} from "@grasp-os/shared/audit";
-import { collectionIdSchema, documentIdSchema } from "@grasp-os/shared/ids";
+import type { BrainEvent, DetailValue } from "@grasp-os/brain/events";
+import { collectionIdSchema, documentIdSchema } from "@grasp-os/brain/ids";
+import type { Json } from "@grasp-os/brain/json";
 import {
   documentTypeOf,
   historyOptionsSchema,
   knowledgeErrors,
   listDocumentsOptionsSchema,
   versionInputSchema,
-} from "@grasp-os/shared/knowledge";
+} from "@grasp-os/brain/knowledge";
 import type {
   Backlink,
   BacklinkPage,
@@ -21,14 +18,13 @@ import type {
   HistoryPage,
   Version,
   VersionSummary,
-} from "@grasp-os/shared/knowledge";
+} from "@grasp-os/brain/knowledge";
 import { and, asc, desc, eq, gt, lt, ne } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { alias } from "drizzle-orm/sqlite-core";
 import { z } from "zod";
 
-import { outboxed } from "../audit-outbox.ts";
 import { isUniqueViolation } from "../db/d1.ts";
 import {
   brainPayloads,
@@ -37,7 +33,7 @@ import {
   links,
   versions,
 } from "../db/knowledge/schema.ts";
-import { auditedBatch } from "./audit.ts";
+import { auditedBatch, outboxed } from "./audit.ts";
 import { allowedFor } from "./authorize.ts";
 import type { Allowed } from "./authorize.ts";
 import type { Brain } from "./brain.ts";
@@ -353,9 +349,9 @@ export const checkedText = async <C>(
  * version, which its actor doesn't name.
  */
 export interface Writer {
-  actor: AuditActor;
+  actor: Json;
   userId: string;
-  detail?: Record<string, AuditDetailValue>;
+  detail?: Record<string, DetailValue>;
 }
 
 /** A new version of the document at `path` in `collection`. */
@@ -399,7 +395,7 @@ const published = async <C>(
   db: DrizzleD1Database,
   row: DocumentRow,
   found: readonly Section[],
-  purgeBy: AuditActor | undefined
+  purgeBy: Json | undefined
 ): Promise<DocumentRow> =>
   (await publishInline(brain, db, row.id, row.currentVersion, found, purgeBy))
     ? { ...row, indexedVersion: row.currentVersion, indexState: "indexed" }
@@ -492,7 +488,7 @@ export const writeVersion = async <C>(
     path,
     ...changes,
   });
-  const entry: AuditEntry = {
+  const entry: BrainEvent = {
     actor: by.actor,
     action:
       restoredFrom === null
@@ -528,7 +524,7 @@ export const writeVersion = async <C>(
         label: link.label,
       }))
     ).map((chunk) => db.insert(links).values(chunk)),
-    outboxed(db, entry),
+    outboxed(brain, entry),
     ...also,
   ];
   // A new document's row goes first: its version refers to it.

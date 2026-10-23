@@ -1,4 +1,4 @@
-import { actorOf } from "@grasp-os/shared/audit";
+import { actorOf, auditActorSchema } from "@grasp-os/shared/audit";
 import { collectionIdSchema } from "@grasp-os/shared/ids";
 import { knowledgeErrors } from "@grasp-os/shared/knowledge";
 import type { InterviewLocale } from "@grasp-os/shared/onboarding";
@@ -316,7 +316,7 @@ export const documentReadingErasure = (
       if (holding.length > 0) {
         await store.forgetDocuments(
           holding.map(({ id }) => id),
-          by.actor
+          auditActorSchema.parse(by.actor)
         );
       }
     },
@@ -334,7 +334,7 @@ export const documentReadingErasure = (
       if (of.length > 0) {
         await store.forgetDocuments(
           of.map(({ id }) => id),
-          by.actor
+          auditActorSchema.parse(by.actor)
         );
       }
     },
