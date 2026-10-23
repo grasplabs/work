@@ -6,13 +6,56 @@ import { CheckIcon } from "lucide-react";
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 import type { ReactNode, RefObject } from "react";
 
+import { SpokenText } from "../voice/spoken-text.tsx";
+import { narrationOf } from "../voice/timing.ts";
+import { useSay, useVoice } from "../voice/voice.ts";
+import type { Tone } from "../voice/voice.ts";
 import { readingSeconds } from "./setup.ts";
 
 // The parts every step of the client onboarding is made of (prototype
 // `components/onboarding/onboarding-steps.tsx`): one title, one sentence,
-// one small action, one main button. Grasp has no voice here yet, so each
-// step goes as the prototype's does with the sound off: its way on waits
-// for most of the time its line takes to read, then fades in.
+// one small action, one main button. Stephen says each step's title and
+// sentence as it arrives, the sentence lighting up as he goes, and its way
+// on fades in once he has said it; with the sound off, once there was time
+// to read it.
+
+/**
+ * How Stephen sounds in the onboarding, from the tones he may use. He is
+ * professional and even: the same calm voice whether he explains, asks,
+ * or says that something is done. Warmth is for the welcome and a
+ * thank-you, reassurance for where he is trusted with something, and only
+ * the end, when it is all in, is said with more feeling. A tone directs
+ * an English line only: in another language it would turn the first word
+ * English (core's src/onboarding/speech.ts).
+ */
+export const tones = {
+  /** Explaining, asking, moving on: most of what he says. */
+  even: "sincere, steady",
+  /** That something is done, or cannot be done: said plainly. */
+  plain: "clear, measured pace",
+  /** What he will do with what he is given, and what he will not. */
+  sure: "sincere, steady, reassuring",
+  /** The welcome, and a thank-you. */
+  warm: "warm",
+  /** The last step: everything is in. */
+  glad: "warm, grateful",
+} as const satisfies Record<string, Tone>;
+
+/**
+ * How Stephen says a step's line: its tone, and `quick` when it holds
+ * something only known as it is said, such as a count.
+ */
+export interface StepVoice {
+  tone?: Tone;
+  quick?: boolean;
+}
+
+/** How a step's line is said unless it says otherwise. */
+export const evenVoice: StepVoice = { tone: tones.even };
+
+/** A step's title and sentence as Stephen says them: one line. */
+export const stepLine = (title: string, sentence: string | undefined) =>
+  narrationOf(title, sentence ?? "");
 
 /**
  * Whether a step has been explained yet: given its reading time. Its way
@@ -43,23 +86,48 @@ export const Cramped = createContext<{
   },
 });
 
-/** Explained once there was time to read `line`: most of its reading time, never more than four seconds. */
+/** How long to wait for a line to be explained, in ms: by the sound, by whether it was said, and by how long it is. */
+const explainedWait = (line: string, on: boolean, heard: boolean): number => {
+  const reading = readingSeconds(line) * 1000;
+  if (!on) {
+    return Math.min(reading * 0.7, 4000);
+  }
+  // Said: a beat after it ends. Waiting on the voice: never forever.
+  return heard ? 200 : reading + 3500;
+};
+
+/**
+ * Explained once `line` has been said, or, with the sound off, once there
+ * was time to read it: most of its reading time, never more than four
+ * seconds.
+ */
 export const useExplainedAfter = (line: string): void => {
   const { onExplained } = useContext(Explained);
+  const voice = useVoice();
+  const saying = voice.line?.text === line;
+  const heard = useRef(false);
   useEffect(() => {
-    const wait = Math.min(readingSeconds(line) * 1000 * 0.7, 4000);
-    const id = window.setTimeout(onExplained, wait);
+    if (saying) {
+      heard.current = true;
+    }
+    const id = saying
+      ? undefined
+      : window.setTimeout(
+          onExplained,
+          explainedWait(line, voice.on, heard.current)
+        );
     return () => {
       window.clearTimeout(id);
     };
-  }, [line, onExplained]);
+  }, [line, saying, voice.on, onExplained]);
 };
 
 /**
  * Whether a step's sentence has made way for what the step shows, `when`
  * nothing else stands in its place: on a phone where the step does not fit,
- * once there was time to read it all. Gone, it stays gone on this visit, so
- * it never comes and goes as the room it leaves changes.
+ * once it has been said, or with the sound off, once there was time to read
+ * it all. Gone, it stays gone on this visit, so it never comes and goes as
+ * the room it leaves changes.
  */
 const useMadeWay = (
   line: string,
@@ -68,6 +136,7 @@ const useMadeWay = (
 ): boolean => {
   const { cramped, onMadeWay } = useContext(Cramped);
   const { explained } = useContext(Explained);
+  const { on } = useVoice();
   const arrived = useRef(0);
   const [away, setAway] = useState(false);
   useEffect(() => {
@@ -75,7 +144,8 @@ const useMadeWay = (
   }, []);
   useEffect(() => {
     const due = !away && when && cramped && explained;
-    const reading = readingSeconds(line) * 1000 * 0.7;
+    // Said, it was explained once it ended; read, it waits for the time to read it all.
+    const reading = on ? 0 : readingSeconds(line) * 1000 * 0.7;
     const id = due
       ? window.setTimeout(
           () => {
@@ -89,8 +159,18 @@ const useMadeWay = (
     return () => {
       window.clearTimeout(id);
     };
-  }, [away, when, cramped, explained, line, onMadeWay, sentence]);
+  }, [away, when, cramped, explained, on, line, onMadeWay, sentence]);
   return away;
+};
+
+/** Copies text, and says whether it worked: browsers refuse without focus or permission. */
+export const copyText = async (text: string): Promise<boolean> => {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    return false;
+  }
 };
 
 /** The way on, fading in once the step has been explained, and `ready` if it waits on something more. */
@@ -116,31 +196,83 @@ export const Onward = ({
   );
 };
 
-/** What Grasp says back to what was just done on a step, in place of its sentence. */
-export interface Answer {
+/**
+ * What Grasp says back to what was just done on a step, in place of its
+ * sentence: said as soon as what he is saying reaches a natural break, or
+ * at once with `cut`. `tone` and `quick` as for a step's line.
+ */
+export interface Answer extends StepVoice {
   text: string;
+  cut?: boolean;
 }
 
 /**
- * A step's title and sentence. Once something is done, Grasp's answer
+ * A step's title and sentence. Stephen says both as the step arrives, and
+ * the sentence lights up as he goes. Once something is done, his answer
  * takes the sentence's place, as in a conversation: the sentence fades at
- * once and the answer comes in. The sentence keeps its room, so nothing
- * below moves. On a phone where the step does not fit, the sentence makes
- * way once read, giving its room to what the step shows; an answer then
- * takes only the room it needs.
+ * once and the answer comes in, lit as he says it. The sentence keeps its
+ * room, so nothing below moves. On a phone where the step does not fit,
+ * the sentence makes way once said, giving its room to what the step
+ * shows; an answer then takes only the room it needs.
  */
+/**
+ * What Stephen says of a step's heading: the line he arrives with (the
+ * answer instead of the sentence, if it is already there when you come
+ * back), said as the step fades in, a breath rather than a wait; said
+ * again in another language, unless an answer came since, when only the
+ * answer is. An answer that comes is said as one.
+ */
+const useHeadingSaid = ({
+  title,
+  sentence,
+  answer,
+  voice,
+}: {
+  title: string;
+  sentence: string | undefined;
+  answer: Answer | undefined;
+  voice: StepVoice;
+}) => {
+  // oxlint-disable-next-line react/hook-use-state -- as it was on arrival, never set
+  const [answeredOnArrival] = useState(answer !== undefined);
+  const arrivingWith = answeredOnArrival ? answer : undefined;
+  const { line, from } = stepLine(title, arrivingWith?.text ?? sentence);
+  // oxlint-disable-next-line react/hook-use-state -- as it was on arrival, never set
+  const [arrived] = useState(line);
+  useSay(line, {
+    delay: 120,
+    when: answer === undefined || answeredOnArrival || arrived === line,
+    tone: arrivingWith?.tone ?? voice.tone,
+    quick: arrivingWith === undefined ? voice.quick : arrivingWith.quick,
+  });
+  useSay(answer?.text ?? "", {
+    when: answer !== undefined && !answeredOnArrival,
+    soon: answer?.cut !== true,
+    tone: answer?.tone ?? voice.tone,
+    quick: answer?.quick ?? false,
+  });
+  return { line, from, answeredOnArrival };
+};
+
 export const Heading = ({
   title,
   sentence,
   answer,
+  voice = evenVoice,
 }: {
   title: string;
   sentence?: string;
   answer?: Answer;
+  voice?: StepVoice;
 }) => {
   const heading = useRef<HTMLHeadingElement>(null);
   const paragraph = useRef<HTMLParagraphElement>(null);
-  const line = sentence === undefined ? title : `${title} ${sentence}`;
+  const { line, from, answeredOnArrival } = useHeadingSaid({
+    title,
+    sentence,
+    answer,
+    voice,
+  });
   // A new step moves focus to its title, so a screen reader starts there, and the keys go on from it.
   useEffect(() => {
     heading.current?.focus({ preventScroll: true });
@@ -176,14 +308,19 @@ export const Heading = ({
               away && answer !== undefined && "hidden"
             )}
           >
-            {sentence}
+            <SpokenText from={from} line={line} text={sentence} />
           </span>
           {answer === undefined ? null : (
             <span
               className="animate-in fade-in slide-in-from-bottom-1 col-start-1 row-start-1 self-center duration-500"
               key={answer.text}
             >
-              {answer.text}
+              {/* Said on its own, or as the end of the line he arrived with. */}
+              <SpokenText
+                from={answeredOnArrival ? from : 0}
+                line={answeredOnArrival ? line : answer.text}
+                text={answer.text}
+              />
             </span>
           )}
         </p>
@@ -320,10 +457,21 @@ export const Asides = ({ children }: { children: ReactNode }) => (
   </Onward>
 );
 
-/** A line that turns up on a step later on. */
-export const Callout = ({ text }: { text: string }) => (
-  <p className="animate-in fade-in duration-500">{text}</p>
-);
+/** A line that turns up on a step later on, said when it does, after what he is saying. */
+export const Callout = ({
+  text,
+  tone = tones.even,
+}: {
+  text: string;
+  tone?: Tone;
+}) => {
+  useSay(text, { after: true, tone });
+  return (
+    <p className="animate-in fade-in duration-500">
+      <SpokenText from={0} line={text} text={text} />
+    </p>
+  );
+};
 
 /** A number with what it counts. */
 export const Figure = ({ value, label }: { value: string; label: string }) => (

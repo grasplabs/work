@@ -2830,6 +2830,13 @@
   --icon-fade: 0;
 }
 
+/* The second person steps out from behind the first. */
+.lucide-users-round > :nth-child(3) {
+  --icon-move: icon-from;
+  --icon-x: -3px;
+  --icon-fade: 0;
+}
+
 /* The camera's lens comes out of it. */
 .lucide-video > :nth-child(1) {
   --icon-move: icon-from;

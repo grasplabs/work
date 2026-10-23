@@ -3,6 +3,8 @@ import { generatedImport } from "@grasp-os/open-workflow/generate";
 import { connectErrors } from "@grasp-os/shared/connect";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
+import { errorFields, log } from "@grasp-os/shared/log";
+import { operationErrors } from "@grasp-os/shared/operations";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
@@ -29,6 +31,8 @@ import { RpcTarget } from "cloudflare:workers";
 import { z } from "zod";
 
 import { memberRole } from "../auth/identity.ts";
+import { decisionEventType, decisionOutcome } from "../decisions/decisions.ts";
+import type { DecisionOutcome } from "../decisions/decisions.ts";
 import { generatedModule } from "../workflow-builds.ts";
 import type {
   LoadedBuild,
@@ -39,6 +43,14 @@ import type {
 } from "../workflow-builds.ts";
 import { settling } from "./code.ts";
 import type { RunHostCalls, Settled, StepError } from "./code.ts";
+import { emitEvent } from "./emitted-events.ts";
+import {
+  childEndSchema,
+  childEndType,
+  envelopeOf,
+  eventTypeKey,
+  storedEventSchema,
+} from "./event-envelopes.ts";
 import { takesExactly } from "./exact-values.ts";
 import {
   busyMarker,
@@ -62,13 +74,23 @@ import {
   waitStep,
 } from "./host.ts";
 import type { Busy, LoadWait, RunStep } from "./host.ts";
+import { quotaPolicy } from "./quotas.ts";
 import type { AttemptAdmission, QuotaAttempt } from "./quotas.ts";
 import { callAction } from "./resource-action.ts";
 import { ResourceAttemptHost } from "./resource-attempt-host.ts";
 import type { CallingRun } from "./resource-authority.ts";
+import { requireCallAuthority } from "./resource-authority.ts";
 import { auditAdmissionRefusal, makeCall } from "./resource-calls.ts";
 import type { BuiltCall } from "./resource-calls.ts";
 import { callCompute } from "./resource-compute.ts";
+import {
+  askDeciders,
+  candidateDecision,
+  checkCandidateDecision,
+  decisionRunOf,
+  openRunDecision,
+  takeDecision,
+} from "./resource-decisions.ts";
 import { requirePackagesAdmitted } from "./sealed-packages.ts";
 import { heldWakeType } from "./wakes.ts";
 
@@ -83,8 +105,9 @@ import { heldWakeType } from "./wakes.ts";
 //
 // - A step the build doesn't have. Every step is named after a task of
 //   the sealed task table and one of the steps it was sealed with
-//   (`task:<id>` for a set or switch, or a wait's sleep; `enter:<id>` and
-//   `leave:<id>` around a wait, a do or a for; `item:<id>` for a for's
+//   (`task:<id>` for a set or switch, or a wait's sleep or a listen's
+//   waits; `enter:<id>` and `leave:<id>` around a wait, a listen, a do or a
+//   for; `item:<id>` for a for's
 //   `while`), or the workflow's own `workflow:input` and `workflow:output`
 //   when it has them; a wait lasts exactly what was sealed. Anything else
 //   is refused, and fails the run.
@@ -170,6 +193,16 @@ import { heldWakeType } from "./wakes.ts";
 //   `grasp.sleepUntil`'s) are made by the host within a step that records
 //   them; a sleep must be until exactly the deadline its task's enter step
 //   recorded (`#deadlines`), however it was reached.
+// - A listen taking events the build didn't name, or the isolate made up.
+//   A listen's enter step resolves its filters (the engine's type for its
+//   sealed binding and each filter's type, and the attributes each
+//   requires, from the sealed templates) with its deadline, and journals
+//   them beside its record; its waits match exactly those, in the run's
+//   own inbox (`listen`), whatever the isolate passes. Its leave step
+//   transforms, and records, only the events the host took
+//   (`#requireListened`, `#requireRecordedEvents`). Each listen asks
+//   again that the run may still take events through its binding
+//   (`#requireListenAuthority`).
 // - A held side effect taken for a failure, or run twice. A restricted
 //   run's connector call that connect holds for its person
 //   (`connect.held`) ends its step as held, using no retry, whatever the
@@ -179,6 +212,17 @@ import { heldWakeType } from "./wakes.ts";
 // - Limits raising the host's ceilings. A task's timeout and the
 //   workflow's model calls are held to the lower of the build's sealed
 //   limit and the host's own (`configOf`, `HostedResourceRun`).
+// - A decision answered by anyone but its recipient, or by the isolate.
+//   A `grasp.decision` task opens its decision in its enter step, the
+//   host building it from the build's seal (resource-decisions.ts), and
+//   records its deadline, the decision's ID in the host's own journal
+//   entry beside it. Its call step runs only on the input that enter step
+//   recorded, and only once the host has waited, durably and in steps of
+//   its own, for the decision's outcome (`#awaitDecision`), read from the
+//   decision itself, never from the event that wakes the run; its call
+//   answers that outcome, its authority decided again, and its record,
+//   output.as and export.as are held to it as any call's are. A decision
+//   nobody answered fails the call: no outcome is made up for it.
 
 /** The main module of a run of a sealed build (`openRunMain`). */
 export const openRunModule = "grasp-open-run.js";
@@ -243,6 +287,8 @@ export class Run extends WorkerEntrypoint {
         sleepUntil: async (name, timestamp) => {
           unwrapped(await host.sleepUntil(name, timestamp));
         },
+        listen: async (name) => unwrapped(await host.listen(name)),
+        child: async (name) => unwrapped(await host.child(name)),
       };
       return await definition.run(engine, input);
     });
@@ -263,6 +309,18 @@ export interface HostedResourceRun {
   params: Record<string, Json>;
   /** When it was admitted, in ms: `$workflow.startedAt`. */
   createdAt: number;
+  /**
+   * For a child run (run-children.ts): its lineage's root and its depth
+   * under it, as its row pins them. Unset, the run is its own root, at 0.
+   */
+  rootRunId?: string;
+  depth?: number;
+  /**
+   * When its lineage's root was admitted, in ms, as the root's row says:
+   * no wait of the run's outlasts the lineage's age from then. Unset, the
+   * run is its own root: `createdAt`.
+   */
+  lineageStartedAt?: number;
   /** Its sealed build, verified. */
   build: LoadedBuild;
   /** What its calls go by: its principal, invoker and frozen bindings. */
@@ -281,6 +339,34 @@ export interface HostedResourceRun {
   maxSleepMs?: number;
 }
 
+/**
+ * Child runs, as the host's `run` tasks start them and read how they ended
+ * (run-children.ts): given by the dispatcher, so a host without them (a
+ * test run's) starts none.
+ */
+export interface ChildRuns {
+  /**
+   * Starts `parent`'s child through its workflow binding `alias`, with
+   * `input`, for its step `stepName` (the run task's enter step, as the
+   * engine names it), once: the same child however often that step asks.
+   * Its run's ID.
+   */
+  start: (
+    parent: HostedResourceRun,
+    alias: string,
+    stepName: string,
+    input: Json
+  ) => Promise<string>;
+  /**
+   * Tells child `childId`'s parent again that it ended, and how, if it
+   * has (resource-runs.ts, `tellParentOfEnd`).
+   */
+  remind: (childId: string) => Promise<void>;
+}
+
+/** A task whose own work's output is the host's: a listen's, a run's. */
+type TakenTask = Extract<SealedTask, { kind: "listen" | "run" }>;
+
 /** How the host reaches back into the dispatcher. */
 export interface ResourceHostHooks {
   /** The engine's lease of a step's attempt, while it holds. */
@@ -298,6 +384,8 @@ export interface ResourceHostHooks {
    * sessions its actions run in (resource-action.ts).
    */
   sessionId?: () => string | undefined;
+  /** Child runs, for `run` tasks; unset, a `run` task starts none. */
+  children?: ChildRuns;
   /** The activation's fuel for expressions: {@link activationFuel} if unset. */
   activationFuel?: number;
   /**
@@ -319,6 +407,14 @@ export interface ResourceHostHooks {
    * alone.
    */
   modelCalls?: ActionModelCalls;
+  /**
+   * A run an App's test started (fixture-runs.ts): it acts for a fixture's
+   * principal, no member of the organization, and reaches nothing outside
+   * its own code and sealed modules. Every call that would (an App's, a
+   * store's, a model's, a connection's, Knowledge's, a template's, an
+   * action's) is refused (`resource.unavailable`) before it is built.
+   */
+  fixture?: true;
 }
 
 /**
@@ -451,9 +547,15 @@ interface StepOf {
   loop: Readonly<Record<string, Json>>;
 }
 
-/** Whether `task` sleeps: a wait, or a `grasp.sleepUntil` call. */
-const sleepsOf = (task: SealedTask): boolean =>
+/**
+ * Whether `task`'s own step is a durable wait the host makes, not a `do`:
+ * a wait's sleep, a `grasp.sleepUntil` call's, a listen's waits for its
+ * events.
+ */
+const waitsOf = (task: SealedTask): boolean =>
   task.kind === "wait" ||
+  task.kind === "listen" ||
+  task.kind === "run" ||
   (task.kind === "call" && task.call.name === "grasp.sleepUntil");
 
 /**
@@ -551,8 +653,8 @@ const sealedStep = (
   if (!kind.success || task === undefined || typeof name !== "string") {
     return undefined;
   }
-  // A sleeping task's `task:` step is its sleep, never a `do`.
-  const isSleep = kind.data === "task" && sleepsOf(task);
+  // A waiting task's `task:` step is its wait, never a `do`.
+  const isSleep = kind.data === "task" && waitsOf(task);
   const fits = sleep ? isSleep : task.steps.includes(kind.data) && !isSleep;
   // Exactly the loops around it, as sealed: an `item` step runs in an
   // item of its own `for` too.
@@ -604,6 +706,42 @@ const checksOf: Readonly<Record<StepKind, readonly DataCheck[]>> = {
 type DataCheck = "input" | "output" | "export";
 const dataCheckSchema = z.enum(["input", "output", "export"]);
 
+/**
+ * Whether `task`'s enter step resolves a deadline: an expression wait's, a
+ * `grasp.sleepUntil` call's, a listen's (its timeout from then), a run
+ * task's (its child's, until its lineage's age is up), or its decision's,
+ * which it opens.
+ */
+const resolvesDeadline = (task: SealedTask): boolean =>
+  task.kind === "listen" ||
+  task.kind === "run" ||
+  deadlineOf(task) !== undefined ||
+  (task.kind === "call" && task.call.name === "grasp.decision");
+
+/** A `grasp.decision` call task, whose decision the host opens and takes. */
+type DecisionTask = Extract<SealedTask, { kind: "call" }> & {
+  call: Extract<SealedCall, { name: "grasp.decision" }>;
+};
+
+const isDecisionTask = (task: SealedTask | undefined): task is DecisionTask =>
+  task?.kind === "call" && task.call.name === "grasp.decision";
+
+/**
+ * Whether `step` is a decision task's call step: its enter step took the
+ * task's if and input, so it runs only what comes after its call, as a
+ * leave step does.
+ */
+const takesDecision = (step: StepOf): boolean =>
+  step.kind === "task" && isDecisionTask(step.task);
+
+/** The stages of its task's expressions `step` evaluates (`stagesOf`). */
+const stagesFor = (step: StepOf): readonly Stage[] =>
+  takesDecision(step) ? stagesOf.leave : stagesOf[step.kind];
+
+/** The schemas of its task `step` checks (`checksOf`). */
+const checksFor = (step: StepOf): readonly DataCheck[] =>
+  takesDecision(step) ? checksOf.leave : checksOf[step.kind];
+
 /** What a step captures: its raw input and the context. */
 const capturedSchema = z.strictObject({
   input: z.strictObject({ input: z.json(), context: z.json() }),
@@ -627,11 +765,48 @@ const recordSchema = z.union([
   }),
 ]);
 
-/** What an enter step journals: its record, and when its task started. */
+/**
+ * A listen task's filters as its enter step resolved them: each the
+ * engine's type for its binding and type (run-events.ts, `eventTypeKey`)
+ * and the attributes an event must have been sent with.
+ */
+const resolvedListenSchema = z
+  .array(
+    z.strictObject({
+      type: z.string().min(1).max(100),
+      attributes: z.record(z.string(), z.string()),
+    })
+  )
+  .min(1)
+  .max(16);
+type ResolvedListen = z.infer<typeof resolvedListenSchema>;
+
+/**
+ * What an enter step journals: its record, when its task started, a
+ * listen's filters, as the host resolved them, and for a decision task,
+ * the decision it opened: never the isolate's.
+ */
 const enteredSchema = z.strictObject({
   record: z.json(),
   startedAt: z.number(),
+  listen: resolvedListenSchema.optional(),
+  decision: z.string().min(1).max(128).optional(),
+  child: z.string().min(1).max(128).optional(),
 });
+
+/** What a decision's look recorded: when, and whether it was answered. */
+const lookSchema = z.strictObject({ at: z.number(), answered: z.boolean() });
+
+/** How a decision ended, as its step recorded it (`DecisionOutcome`). */
+const outcomeSchema = z.discriminatedUnion("answered", [
+  z.strictObject({
+    answered: z.literal(true),
+    approved: z.boolean(),
+    by: z.string(),
+    payload: z.json().nullable(),
+  }),
+  z.strictObject({ answered: z.literal(false) }),
+]);
 
 /**
  * The most a step's capture or an evaluation's data may take as JSON: two
@@ -728,9 +903,12 @@ const triedOnce = new Set<SealedCall["name"]>([
  */
 const configOf = (step: StepOf) => {
   const { task } = step;
+  // A listen's timeout is how long it waits for its events, never how
+  // long an attempt of its steps may take.
+  const ownTimeout = task?.kind === "listen" ? undefined : task?.timeoutMs;
   const timeout = Math.min(
     stepConfig.timeout,
-    task?.timeoutMs ?? stepConfig.timeout
+    ownTimeout ?? stepConfig.timeout
   );
   const once =
     step.kind === "task" &&
@@ -789,6 +967,8 @@ const activationFuel = 16 * attemptFuel;
 /** One attempt of a step, from when the engine claims it. */
 interface StepAttempt {
   step: StepOf;
+  /** Its step's name, as the engine journals it: what keys its child. */
+  name: string;
   data: { input: Json; context: Json };
   /** When it started, in ms: `$task.startedAt`. */
   startedAt: number;
@@ -838,6 +1018,14 @@ interface StepAttempt {
   exportAs: Map<number, Json>;
   /** The deadline it resolved for its task, once (`until`). */
   until: number | undefined;
+  /** The decision it opened for its decision task, with that deadline. */
+  decision: string | undefined;
+  /**
+   * For a decision task's call step: how its decision ended, as the host
+   * recorded it before the step ran (`#awaitDecision`); none for a test
+   * run, whose start's fixtures answer it.
+   */
+  decided: DecisionOutcome | undefined;
   /** Whether it asked for its deadline: once, however it went. */
   untilAsked: boolean;
   /** The items it resolved for its `for` task, once (`items`). */
@@ -846,6 +1034,13 @@ interface StepAttempt {
   itemsAsked: boolean;
   /** What its `item` step's `while` answered, as the host evaluated it. */
   proceeds: boolean | undefined;
+  /**
+   * The filters it resolved for its listen task, with its deadline: what
+   * the task's waits match, journaled beside its enter step's record.
+   */
+  listen: ResolvedListen | undefined;
+  /** The child its run task's enter step started, once. */
+  child: string | undefined;
   /**
    * Whether connect held its call for the run's person (`connect.held`):
    * the step then ends as held, whatever the isolate made of the answer.
@@ -877,6 +1072,8 @@ interface StepRun {
    * though it has none left (quotas.ts, `QuotaAttempt.collecting`).
    */
   collecting: boolean;
+  /** For a decision task's call step: its decision's outcome. */
+  decided: DecisionOutcome | undefined;
 }
 
 /** Expressions compiled once per build, by build hash and slot. */
@@ -951,6 +1148,12 @@ const templatesOf = (call: SealedCall): SealedTemplate[] => {
     case "grasp.sleepUntil": {
       return [call.timestamp];
     }
+    case "grasp.decision": {
+      return [call.recipients, call.prompt, call.input];
+    }
+    case "grasp.emit": {
+      return [call.data, ...(call.subject === undefined ? [] : [call.subject])];
+    }
     default: {
       return call satisfies never;
     }
@@ -1009,6 +1212,14 @@ const hostSlotsOf = (build: LoadedBuild): ReadonlySet<number> => {
       slotsOf(task.duration, slots);
     } else if (task.kind === "for") {
       slotsOf(task.loop.in, slots);
+    } else if (task.kind === "run") {
+      slotsOf(task.run.input, slots);
+    } else if (task.kind === "listen") {
+      for (const filter of task.listen.filters) {
+        for (const [, template] of filter.attributes) {
+          slotsOf(template, slots);
+        }
+      }
     }
   }
   return slots;
@@ -1016,6 +1227,9 @@ const hostSlotsOf = (build: LoadedBuild): ReadonlySet<number> => {
 
 /** The furthest a deadline may be, as the engine sleeps: 365 days. */
 const maxDeadlineMs = 365 * 86_400_000;
+
+/** The longest value a listen's filter matches an attribute by. */
+const maxAttributeLength = 1024;
 
 /**
  * The deadline, in ms since the epoch, that a deadline template's `value`
@@ -1101,6 +1315,34 @@ export class ResourceRunHost
    * on, and the only items they may name.
    */
   readonly #items = new Map<string, Json[]>();
+  /**
+   * The filters each listen task's enter step resolved, by place, as this
+   * activation reached it: what its waits match, exactly.
+   */
+  readonly #listens = new Map<string, ResolvedListen>();
+  /**
+   * The input each listen or run task's enter step recorded, as
+   * transformed, by place: what its leave step's transformations read as
+   * `$input`.
+   */
+  readonly #enteredInputs = new Map<string, Json>();
+  /**
+   * What each listen or run task's own work answered, by place (the events
+   * a listen took, as its output holds them; a child's output), as this
+   * activation took or replayed it: what its leave step transforms, never
+   * what the isolate passes.
+   */
+  readonly #takenOutputs = new Map<string, Json>();
+  /** The child each run task's enter step started, by place. */
+  readonly #children = new Map<string, string>();
+  /**
+   * The decision each decision task's enter step opened, and the input it
+   * recorded, by its place, as this activation reached it (fresh or
+   * replayed): its call step takes that decision, on exactly that input,
+   * so each item of a loop takes its own.
+   */
+  readonly #decisions = new Map<string, string>();
+  readonly #decisionInputs = new Map<string, Json>();
   /**
    * The model calls of the run's JSON model tasks: those its replayed steps
    * recorded, as this activation reached them, and those this activation
@@ -1265,8 +1507,14 @@ export class ResourceRunHost
     }
   }
 
-  /** The person the run acts for must still be an active member. */
+  /**
+   * The person the run acts for must still be an active member: a test's
+   * run acts for its fixture's principal, whose role nothing changes.
+   */
   async #requirePerson(): Promise<void> {
+    if (this.#hooks.fixture === true) {
+      return;
+    }
     if (!(await memberRole(this.#env.DB, this.#run.principal))) {
       throw permissionErrors.create("permission.person_inactive");
     }
@@ -1299,10 +1547,13 @@ export class ResourceRunHost
         const stepName = String(name);
         // An enter step records when its task started beside its record,
         // and a leave step's expressions see that time, whatever separates
-        // them (a wait, a nested do, another activation).
+        // them (a wait, a nested do, another activation), as a decision's
+        // call step's do: its task started when it asked, not when the
+        // answer came, nor when a retry ran.
         const entering = step.kind === "enter" && step.task !== undefined;
         const taskStart =
-          step.kind === "leave" && step.task !== undefined
+          (step.kind === "leave" || takesDecision(step)) &&
+          step.task !== undefined
             ? this.#taskStarts.get(step.place)
             : undefined;
         // Its wait for load since its last admission, read off the markers
@@ -1316,7 +1567,13 @@ export class ResourceRunHost
           entering,
           wait: loadWaitStart,
           collecting: false,
+          decided: undefined,
         };
+        // A decision task's call step runs once its decision has an
+        // outcome, waited for durably before it, fresh or replayed.
+        if (isDecisionTask(step.task) && takesDecision(step)) {
+          run.decided = await this.#awaitDecision(step, step.task, data);
+        }
         const attemptStep = async (context: unknown): Promise<unknown> =>
           await this.#attempt(run, context, fn, stepDone.promise);
         let recorded = await this.#step.do(
@@ -1385,15 +1642,7 @@ export class ResourceRunHost
             attemptStep
           );
         }
-        let outcome = recorded;
-        if (entering) {
-          // The host's own journal entry, fresh or replayed.
-          const journal = enteredSchema.parse(recorded);
-          outcome = journal.record;
-          if (step.task !== undefined) {
-            this.#taskStarts.set(step.place, journal.startedAt);
-          }
-        }
+        const outcome = entering ? this.#entered(step, recorded) : recorded;
         // Fresh or replayed alike: what the run has reached, in order.
         this.#noteRecorded(step, outcome);
         return outcome;
@@ -1401,6 +1650,30 @@ export class ResourceRunHost
     } finally {
       stepDone.resolve(null);
     }
+  }
+
+  /**
+   * The record of enter step `step`, from the host's own journal entry
+   * `recorded`, fresh or replayed: what it keeps beside the record (when
+   * its task started, a listen's filters, a decision it opened, a child
+   * it started) is kept
+   * for the steps after it.
+   */
+  #entered(step: StepOf, recorded: unknown): unknown {
+    const journal = enteredSchema.parse(recorded);
+    if (step.task !== undefined) {
+      this.#taskStarts.set(step.place, journal.startedAt);
+      if (journal.listen !== undefined) {
+        this.#listens.set(step.place, journal.listen);
+      }
+      if (journal.decision !== undefined) {
+        this.#decisions.set(step.place, journal.decision);
+      }
+      if (journal.child !== undefined) {
+        this.#children.set(step.place, journal.child);
+      }
+    }
+    return journal.record;
   }
 
   /**
@@ -1578,6 +1851,7 @@ export class ResourceRunHost
   ): StepAttempt {
     return {
       step: run.step,
+      name: run.name,
       data: run.data,
       startedAt: run.taskStart ?? Date.now(),
       key: told.idempotencyKey,
@@ -1588,7 +1862,9 @@ export class ResourceRunHost
       evaluated: new Set(),
       checked: new Set(),
       capturedSize: run.capturedSize,
-      condition: "unevaluated",
+      // A decision task's call step runs only once its enter step took the
+      // task's if (`#awaitDecision`): it holds.
+      condition: takesDecision(run.step) ? "held" : "unevaluated",
       inputFrom: new Map(),
       checkedInput: undefined,
       budget: { fuel: attemptFuel },
@@ -1602,6 +1878,10 @@ export class ResourceRunHost
       items: undefined,
       itemsAsked: false,
       proceeds: undefined,
+      listen: undefined,
+      decision: undefined,
+      decided: run.decided,
+      child: undefined,
       held: false,
       collecting: run.collecting,
       admission,
@@ -1673,7 +1953,15 @@ export class ResourceRunHost
     if (!run.entering) {
       return value;
     }
-    const journaled = { record: value, startedAt: attempt.startedAt };
+    const journaled = {
+      record: value,
+      startedAt: attempt.startedAt,
+      ...(attempt.listen === undefined ? {} : { listen: attempt.listen }),
+      // The decision it opened, beside the deadline its record holds: the
+      // host's own, never the isolate's.
+      ...(attempt.decision === undefined ? {} : { decision: attempt.decision }),
+      ...(attempt.child === undefined ? {} : { child: attempt.child }),
+    };
     // Measured as the engine measures what a step returns: the
     // record fit, but with its start beside it may not.
     try {
@@ -1741,6 +2029,15 @@ export class ResourceRunHost
     }
     if (step.kind === "enter" && record.data.items !== undefined) {
       this.#items.set(step.place, record.data.items);
+    }
+    if (
+      step.kind === "enter" &&
+      (task.kind === "listen" || task.kind === "run")
+    ) {
+      this.#enteredInputs.set(step.place, record.data.output);
+    }
+    if (step.kind === "enter" && isDecisionTask(task)) {
+      this.#decisionInputs.set(step.place, record.data.output);
     }
     if (
       step.kind === "task" &&
@@ -1812,6 +2109,95 @@ export class ResourceRunHost
     }
   }
 
+  /**
+   * Waits, before the call step `stepName` of decision task `task` runs on
+   * `data`, for the outcome of the decision its enter step opened, and
+   * answers it: none for a test run, which opened nothing. The step runs
+   * only on the input that enter step recorded, after its deadline, both
+   * as this activation reached them. Its people are asked first, once, in
+   * a step of their own (`askDeciders`). Each look at the decision is a step
+   * of its own, whether it was answered and when recorded, so a replay
+   * waits as the first activation did; between them, a durable wait for
+   * the decision's wake (decisions.ts), holding no isolate, until its
+   * deadline. A wake only makes the run look again: a stray or forged
+   * event of its type, which answered nothing, makes it wait again for the
+   * time it had left. Then the outcome, read from the decision and
+   * recorded, a decision still open closed as timed out in the same
+   * conditional update an answer uses, so an answer that lands first is
+   * the outcome instead.
+   */
+  async #awaitDecision(
+    step: StepOf,
+    task: DecisionTask,
+    data: { input: Json }
+  ): Promise<DecisionOutcome | undefined> {
+    const { name: stepName, place } = step;
+    const entered = this.#decisionInputs.get(place);
+    const deadline = this.#deadlines.get(place);
+    if (
+      entered === undefined ||
+      deadline === undefined ||
+      canonicalJson(entered) !== canonicalJson(data.input)
+    ) {
+      return this.#refuse(
+        `Task "${task.id}" takes its decision on the input its enter step recorded.`
+      );
+    }
+    if (this.#run.calling.candidate !== undefined) {
+      return undefined;
+    }
+    const decision = this.#decisions.get(place);
+    if (decision === undefined) {
+      return this.#refuse(`Task "${task.id}" takes the decision it opened.`);
+    }
+    // Its people asked once, the ask a step of its own: a replay asks
+    // nobody again.
+    await this.#step.do(
+      `${stepName}:decision:asked`,
+      {},
+      async () => await askDeciders(this.#env, this.#run.calling, decision)
+    );
+    const run = decisionRunOf(this.#run.calling);
+    const look = async (name: string) =>
+      lookSchema.parse(
+        await this.#step.do(name, {}, async () => {
+          const at = Date.now();
+          const { answered } = await decisionOutcome(
+            this.#env,
+            run,
+            decision,
+            false
+          );
+          return { at, answered };
+        })
+      );
+    let seen = await look(`${stepName}:decision:reached`);
+    for (let round = 0; !seen.answered && seen.at < deadline; round += 1) {
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- one wait at a time
+        await this.#step.waitForEvent(`${stepName}:decision:wait:${round}`, {
+          type: decisionEventType(decision),
+          timeout: deadline - seen.at,
+        });
+      } catch (error) {
+        if (!isTimeout(error)) {
+          throw error;
+        }
+        break;
+      }
+      // oxlint-disable-next-line no-await-in-loop -- one look per wake
+      seen = await look(`${stepName}:decision:woken:${round}`);
+    }
+    // Recorded: an answer after it can't change what a replay hears.
+    return outcomeSchema.parse(
+      await this.#step.do(
+        `${stepName}:decision:outcome`,
+        {},
+        async () => await decisionOutcome(this.#env, run, decision, true)
+      )
+    );
+  }
+
   /** Runs a `wait` task: a durable sleep of exactly its sealed length. */
   async sleep(name: unknown, duration: unknown): Promise<Settled<null>> {
     return await settle(async () => {
@@ -1861,6 +2247,174 @@ export class ResourceRunHost
       await this.#step.sleepUntil(sleeping.name, deadline);
       return null;
     });
+  }
+
+  /**
+   * Takes the events of a listen task, as its enter step recorded what it
+   * waits for: in its run's inbox, by the filters and the deadline the
+   * step journaled, never by anything the isolate passes. `one` and `any`
+   * take the first event that matches a filter, `all` one event for each
+   * filter, in the filters' order, each wait taking none another took.
+   * Answers them in order, each its data or its envelope, as the task
+   * reads them; a replay answers the events taken before. Past the
+   * deadline, `workflow.event_timeout`.
+   */
+  async listen(name: unknown): Promise<Settled<Json>> {
+    return await settle(async () => {
+      const listening = this.#stepOf(name, true);
+      const { task } = listening;
+      const resolved =
+        task === undefined ? undefined : this.#listens.get(listening.place);
+      const deadline =
+        task === undefined ? undefined : this.#deadlines.get(listening.place);
+      if (
+        task?.kind !== "listen" ||
+        resolved === undefined ||
+        deadline === undefined
+      ) {
+        return this.#refuse(
+          `Task "${task?.id ?? ""}" listens as its enter step recorded.`
+        );
+      }
+      // From the run's start, both recorded: the same on every replay.
+      this.#requireShortSleep(deadline - this.#run.createdAt);
+      await this.#requirePerson();
+      await this.#requireListenAuthority(task.listen.binding);
+      const groups =
+        task.listen.strategy === "all"
+          ? resolved.map((filter) => [filter])
+          : [resolved];
+      const events: Json[] = [];
+      for (const [index, match] of groups.entries()) {
+        const wait =
+          index === 0 ? listening.name : `${listening.name}:${index + 1}`;
+        // One at a time, in the filters' order: waits come one at a time.
+        // oxlint-disable-next-line no-await-in-loop -- see above
+        events.push(await this.#taken(wait, match, deadline, task.listen.read));
+      }
+      this.#takenOutputs.set(listening.place, events);
+      return events;
+    });
+  }
+
+  /**
+   * Waits for the child a run task's enter step started to end, durably,
+   * holding no isolate, until the deadline the step recorded: the child's
+   * output once it completed; `workflow.child_failed` once it didn't;
+   * `workflow.child_timeout` past the deadline. The child's end is told
+   * again before the wait, so an end told while no one waited is taken.
+   */
+  async child(name: unknown): Promise<Settled<Json>> {
+    return await settle(async () => {
+      const waiting = this.#stepOf(name, true);
+      const { task } = waiting;
+      const child =
+        task === undefined ? undefined : this.#children.get(waiting.place);
+      const deadline =
+        task === undefined ? undefined : this.#deadlines.get(waiting.place);
+      const { children } = this.#hooks;
+      if (
+        task?.kind !== "run" ||
+        child === undefined ||
+        deadline === undefined ||
+        children === undefined
+      ) {
+        return this.#refuse(
+          `Task "${task?.id ?? ""}" waits for the child its enter step started.`
+        );
+      }
+      await this.#requirePerson();
+      try {
+        // A nudge, in case its end was told while nobody waited: the
+        // engine's own telling of the end, again until core takes it,
+        // stands whether or not this gets through.
+        await children.remind(child);
+      } catch (error) {
+        log.warn("workflow.child_remind_failed", {
+          runId: this.#run.runId,
+          child,
+          ...errorFields(error),
+        });
+      }
+      let ended: { payload: unknown };
+      try {
+        ended = await this.#step.waitForMatch(waiting.name, {
+          match: [{ type: childEndType(child) }],
+          until: deadline,
+        });
+      } catch (error) {
+        if (isTimeout(error)) {
+          throw workflowResourceErrors.create("workflow.child_timeout");
+        }
+        throw error;
+      }
+      // How it ended, as its end's event said and the wait journaled: the
+      // same on every replay.
+      const end = childEndSchema.parse(ended.payload);
+      if (end.status !== "completed") {
+        throw workflowResourceErrors.create("workflow.child_failed", {
+          child,
+          status: end.status,
+          code: end.code,
+        });
+      }
+      this.#takenOutputs.set(waiting.place, end.output);
+      return end.output;
+    });
+  }
+
+  /**
+   * The event wait `wait` takes, durably: the oldest in the run's inbox
+   * matching `match`, accepted before `deadline`, as the task reads it.
+   */
+  async #taken(
+    wait: string,
+    match: ResolvedListen,
+    deadline: number,
+    read: "data" | "envelope"
+  ): Promise<Json> {
+    let event: { payload: unknown; timestamp: Date };
+    try {
+      event = await this.#step.waitForMatch(wait, { match, until: deadline });
+    } catch (error) {
+      if (isTimeout(error)) {
+        throw workflowResourceErrors.create("workflow.event_timeout");
+      }
+      throw error;
+    }
+    const stored = storedEventSchema.parse(event.payload);
+    return read === "data"
+      ? stored.data
+      : z.json().parse(envelopeOf(stored, event.timestamp));
+  }
+
+  /**
+   * Refuses a listen through `alias` unless the run may still take its
+   * events: an event binding its start froze, its authority holding now
+   * (resource-authority.ts, `requireCallAuthority`), as a call's must
+   * (`workflow.event_denied`). A test run's binding is its checkpoint's,
+   * and nothing outside it is asked.
+   */
+  async #requireListenAuthority(alias: string): Promise<void> {
+    const { calling } = this.#run;
+    if (calling.candidate !== undefined) {
+      if (calling.candidate.get(alias)?.kind !== "event") {
+        throw workflowResourceErrors.create("workflow.event_denied");
+      }
+      return;
+    }
+    const binding = calling.bindings.get(alias);
+    if (binding?.kind !== "event") {
+      throw workflowResourceErrors.create("workflow.event_denied");
+    }
+    try {
+      await requireCallAuthority(this.#env, calling, binding);
+    } catch (error) {
+      if (workflowResourceErrors.codeOf(error) === "workflow.call_denied") {
+        throw workflowResourceErrors.create("workflow.event_denied");
+      }
+      throw error;
+    }
   }
 
   /**
@@ -1926,7 +2480,7 @@ export class ResourceRunHost
       expression === undefined ||
       expression.taskId !== owner ||
       this.#hostSlots.has(expression.slot) !== forHost ||
-      (!forHost && !stagesOf[step.kind].includes(expression.stage)) ||
+      (!forHost && !stagesFor(step).includes(expression.stage)) ||
       !whileFits(step, expression.slot)
     ) {
       return this.#refuse(
@@ -2191,8 +2745,17 @@ export class ResourceRunHost
     attempt: StepAttempt,
     task: SealedTask
   ): Json | undefined {
+    // A decision's call step captured the input its enter step made
+    // (`#awaitDecision`): its input.from ran there.
+    if (takesDecision(attempt.step)) {
+      return attempt.data.input;
+    }
     const inputFrom =
-      task.kind === "call" || task.kind === "wait" || task.kind === "for"
+      task.kind === "call" ||
+      task.kind === "wait" ||
+      task.kind === "for" ||
+      task.kind === "listen" ||
+      task.kind === "run"
         ? task.inputFrom
         : undefined;
     return inputFrom === undefined
@@ -2230,6 +2793,10 @@ export class ResourceRunHost
     const transforms =
       expression.stage === "taskOutputAs" ||
       expression.stage === "taskExportAs";
+    if (transforms && (task?.kind === "listen" || task?.kind === "run")) {
+      this.#requireListened(attempt, task, expression, { input, output });
+      return;
+    }
     if (
       !transforms ||
       task?.kind !== "call" ||
@@ -2251,6 +2818,48 @@ export class ResourceRunHost
       canonicalJson(transformed) !== canonicalJson(input)
     ) {
       this.#refuse(`Task "${task.id}" transforms only its call's answer.`);
+    }
+  }
+
+  /**
+   * The output a listen task's leave step of `attempt` records, as the
+   * host built it: the events it took, transformed by its sealed
+   * `output.as` from the host's own evaluations, where it has one;
+   * `undefined` until it can be.
+   */
+  #shapedEvents(attempt: StepAttempt, task: TakenTask): Json | undefined {
+    const events = this.#takenOutputs.get(attempt.step.place);
+    return task.outputAs === undefined || events === undefined
+      ? events
+      : filledFrom(task.outputAs, attempt.outputAs);
+  }
+
+  /**
+   * Refuses an `output.as` or `export.as` evaluation of `attempt`'s listen
+   * task unless it reads what the host has: the events the task took for
+   * `output.as`, the output as its `output.as` made it for `export.as`,
+   * and the input its enter step recorded. So a forged module can't put
+   * events the run never took into what the task records.
+   */
+  #requireListened(
+    attempt: StepAttempt,
+    task: TakenTask,
+    expression: SealedExpression,
+    { input, output }: { input: Json; output: Json }
+  ): void {
+    const expected =
+      expression.stage === "taskOutputAs"
+        ? this.#takenOutputs.get(attempt.step.place)
+        : this.#shapedEvents(attempt, task);
+    const entered = this.#enteredInputs.get(attempt.step.place);
+    if (
+      attempt.step.kind !== "leave" ||
+      expected === undefined ||
+      entered === undefined ||
+      canonicalJson(expected) !== canonicalJson(output) ||
+      canonicalJson(entered) !== canonicalJson(input)
+    ) {
+      this.#refuse(`Task "${task.id}" transforms only the events it took.`);
     }
   }
 
@@ -2379,8 +2988,24 @@ export class ResourceRunHost
     attempt: StepAttempt,
     task: SealedTask,
     frame: unknown,
-    doing: "makes its call" | "resolves its deadline" | "resolves its items"
+    doing:
+      | "makes its call"
+      | "resolves its deadline"
+      | "resolves its items"
+      | "opens its decision"
   ): void {
+    // A decision's call step: its enter step took the task's if, input
+    // schema and input.from, and recorded the input it made, which the
+    // step captured (`#awaitDecision`). Its call is on exactly that.
+    if (takesDecision(attempt.step)) {
+      if (
+        canonicalJson(this.#callFrame(frame).input) !==
+        canonicalJson(attempt.data.input)
+      ) {
+        this.#refuse(`Task "${task.id}" ${doing} on its own input.`);
+      }
+      return;
+    }
     const stages = new Set(
       this.#run.build.expressions
         .filter(({ taskId }) => taskId === task.id)
@@ -2498,6 +3123,10 @@ export class ResourceRunHost
     if (call.name === "grasp.sleepUntil") {
       return this.#refuse(`Task "${task.id}" makes no call.`);
     }
+    // A test's run reaches only its own sealed modules (`fixture`).
+    if (this.#hooks.fixture === true && call.name !== "grasp.compute") {
+      throw operationErrors.create("resource.unavailable");
+    }
     if (call.name === "grasp.model") {
       if (this.#modelCallsUsed() >= this.#run.maxModelCalls) {
         throw workflowResourceErrors.create("workflow.model_call_limit", {
@@ -2531,6 +3160,12 @@ export class ResourceRunHost
     if (call.name === "grasp.action") {
       return await this.#action(attempt, task, call, passed);
     }
+    if (call.name === "grasp.decision") {
+      return await this.#decided(attempt, task, call);
+    }
+    if (call.name === "grasp.emit") {
+      return await this.#emitted(attempt, task, call, passed);
+    }
     const built = await this.#builtCall(attempt, call, passed);
     return await makeCall(this.#env, this.#run.calling, task.id, built, {
       key: stepIdempotencyKey(this.#run.runId, attempt.step.name),
@@ -2539,6 +3174,52 @@ export class ResourceRunHost
         this.#requireCurrent(attempt);
       },
     });
+  }
+
+  /**
+   * `#made`'s work for an emit task: its event, built from what the build
+   * sealed on the task's transformed input, emitted once (emitted-events.ts)
+   * under its step's key. A test run emits nothing. Its answer is its
+   * transformed input: an emit passes its input on.
+   */
+  async #emitted(
+    attempt: StepAttempt,
+    task: Extract<SealedTask, { kind: "call" }>,
+    call: Extract<SealedCall, { name: "grasp.emit" }>,
+    frame: { input: Json; output: Json; size: number }
+  ): Promise<Json> {
+    const build = async (template: SealedTemplate | undefined) =>
+      template === undefined
+        ? undefined
+        : await this.#built(attempt, template, frame, frame.size);
+    const data = await build(call.data);
+    const subject = await build(call.subject);
+    const { dataschema } = call;
+    if (this.#run.calling.candidate !== undefined) {
+      return frame.input;
+    }
+    this.#requireCurrent(attempt);
+    await emitEvent(
+      this.#env,
+      this.#run.calling,
+      {
+        taskId: task.id,
+        // Its step's name, not its task's: a step the same task runs again
+        // under another name (a loop's iteration) emits an event of its own.
+        stepKey: stepIdempotencyKey(this.#run.runId, attempt.name),
+        binding: call.binding,
+        type: call.type,
+        data: data ?? null,
+        ...(subject === undefined ? {} : { subject }),
+        ...(dataschema === undefined ? {} : { dataschema }),
+      },
+      // Asked again just before the event is written: an attempt the
+      // engine let go of, or a run cancelled meanwhile, writes nothing.
+      () => {
+        this.#requireCurrent(attempt);
+      }
+    );
+    return frame.input;
   }
 
   /**
@@ -2716,7 +3397,9 @@ export class ResourceRunHost
           | "grasp.random"
           | "grasp.sleepUntil"
           | "grasp.compute"
-          | "grasp.action";
+          | "grasp.action"
+          | "grasp.decision"
+          | "grasp.emit";
       }
     >,
     frame: { input: Json; output: Json; size: number }
@@ -2764,6 +3447,133 @@ export class ResourceRunHost
   }
 
   /**
+   * What decision task `task`'s call answers in `attempt` of its call
+   * step: its decision's outcome, as the host waited for it before the
+   * step ran, its authority decided again (resource-decisions.ts); for a
+   * test run, the outcome its start gave the binding.
+   */
+  async #decided(
+    attempt: StepAttempt,
+    task: Extract<SealedTask, { kind: "call" }>,
+    call: Extract<SealedCall, { name: "grasp.decision" }>
+  ): Promise<Json> {
+    const { calling } = this.#run;
+    const { candidate } = calling;
+    let answer: Awaited<ReturnType<typeof takeDecision>>;
+    if (candidate !== undefined) {
+      answer = await candidateDecision(this.#env, candidate, call.binding);
+    } else if (attempt.decided === undefined) {
+      return this.#refuse(`Task "${task.id}" takes its decision's outcome.`);
+    } else {
+      answer = await takeDecision(
+        this.#env,
+        calling,
+        task.id,
+        call.binding,
+        attempt.decided
+      );
+    }
+    this.#requireCurrent(attempt);
+    const { approved, by, value } = answer;
+    return { answered: true, approved, by, value };
+  }
+
+  /**
+   * Opens decision task `task`'s decision in `attempt` of its enter step,
+   * once, as the build sealed its call, its parts built on the task's
+   * transformed input (`frame`), and answers its deadline, which the step
+   * records, with the decision's ID in the host's own journal entry beside
+   * it (resource-decisions.ts). A test run opens nothing: its deadline is
+   * now, and its call answers what its start gave the binding.
+   */
+  async #opened(
+    attempt: StepAttempt,
+    task: DecisionTask,
+    frame: unknown
+  ): Promise<number> {
+    if (attempt.untilAsked || attempt.condition === "failed") {
+      return this.#refuse(`Task "${task.id}" opens its decision once.`);
+    }
+    attempt.untilAsked = true;
+    this.#requireOpen(attempt, task, frame, "opens its decision");
+    const passed = this.#callFrame(frame);
+    this.#requireCurrent(attempt);
+    // One of its lineage's host calls, before anything of it is built.
+    await ResourceRunHost.#hostCall(attempt);
+    this.#requireCurrent(attempt);
+    const { call } = task;
+    const part = async (template: SealedTemplate) =>
+      await this.#built(attempt, template, passed, passed.size);
+    const built = {
+      binding: call.binding,
+      recipients: await part(call.recipients),
+      prompt: await part(call.prompt),
+      input: await part(call.input),
+      ...(call.timeoutMs === undefined ? {} : { timeoutMs: call.timeoutMs }),
+    };
+    const { candidate } = this.#run.calling;
+    if (candidate !== undefined) {
+      await checkCandidateDecision(
+        this.#env,
+        candidate,
+        built,
+        this.#run.calling.principal
+      );
+      attempt.until = Date.now();
+      return attempt.until;
+    }
+    this.#requireCurrent(attempt);
+    const opened = await openRunDecision(
+      this.#env,
+      { ...this.#run.calling, createdAt: this.#run.createdAt },
+      task.id,
+      // Its call step's name, in its scope: one decision per item of a loop.
+      attempt.step.name.replace(/^enter:/u, "task:"),
+      built
+    );
+    this.#requireCurrent(attempt);
+    attempt.decision = opened.decision;
+    attempt.until = opened.deadline;
+    return attempt.until;
+  }
+
+  /**
+   * `#until`'s work for a listen task's enter step: its filters with its
+   * deadline, journaled beside its record.
+   */
+  async #listenUntil(
+    attempt: StepAttempt,
+    listening: Extract<SealedTask, { kind: "listen" }>,
+    passed: { input: Json; output: Json; size: number }
+  ): Promise<number> {
+    attempt.listen = await this.#resolvedListen(attempt, listening, passed);
+    attempt.until = Date.now() + listening.timeoutMs;
+    return attempt.until;
+  }
+
+  /**
+   * `#until`'s work for a run task's enter step: its child, started once,
+   * journaled beside its record, and how long the run waits for it: only
+   * while its lineage may still run, from its root's start, never a whole
+   * age from now. Past it the wait times out, the run fails and stops the
+   * child (resource-runs.ts), so no child keeps a lineage going past its
+   * age.
+   */
+  async #childUntil(
+    attempt: StepAttempt,
+    running: Extract<SealedTask, { kind: "run" }>,
+    passed: { input: Json; output: Json; size: number }
+  ): Promise<number> {
+    attempt.child = await this.#startedChild(attempt, running, passed);
+    const { limits } = await quotaPolicy(this.#env);
+    const lineageEnds =
+      (this.#run.lineageStartedAt ?? this.#run.createdAt) +
+      limits.workflowAgeMs;
+    attempt.until = Math.min(Date.now() + maxDeadlineMs, lineageEnds);
+    return attempt.until;
+  }
+
+  /**
    * `ResourceAttemptHost.until`, for `attempt`: its task's deadline, once,
    * in its enter step: an expression wait's duration from now, or a
    * `grasp.sleepUntil` call's timestamp, built from what the build sealed
@@ -2777,22 +3587,36 @@ export class ResourceRunHost
       }
       const { step } = attempt;
       const { task } = step;
-      const deadline =
-        step.kind === "enter" && task !== undefined
-          ? deadlineOf(task)
-          : undefined;
-      if (task === undefined || deadline === undefined) {
+      // A decision's deadline is its decision's, which its enter step opens.
+      if (step.kind === "enter" && isDecisionTask(task)) {
+        return await this.#opened(attempt, task, frame);
+      }
+      // What its enter step resolves: a deadline, a listen's, a child's.
+      const entered = step.kind === "enter" ? task : undefined;
+      const deadline = entered && deadlineOf(entered);
+      const listening = entered?.kind === "listen" ? entered : undefined;
+      const running = entered?.kind === "run" ? entered : undefined;
+      if (entered === undefined || !resolvesDeadline(entered)) {
         return this.#refuse(
           `Step of "${task?.id ?? "the workflow"}" resolves no deadline.`
         );
       }
       // Taken before anything is awaited: two asked at once resolve one.
       if (attempt.untilAsked || attempt.condition === "failed") {
-        return this.#refuse(`Task "${task.id}" resolves its deadline once.`);
+        return this.#refuse(`Task "${entered.id}" resolves its deadline once.`);
       }
       attempt.untilAsked = true;
-      this.#requireOpen(attempt, task, frame, "resolves its deadline");
+      this.#requireOpen(attempt, entered, frame, "resolves its deadline");
       const passed = this.#callFrame(frame);
+      if (running !== undefined) {
+        return await this.#childUntil(attempt, running, passed);
+      }
+      if (listening !== undefined) {
+        return await this.#listenUntil(attempt, listening, passed);
+      }
+      if (deadline === undefined) {
+        return this.#refuse(`Task "${entered.id}" resolves no deadline.`);
+      }
       const value = await this.#built(
         attempt,
         deadline.template,
@@ -2851,6 +3675,78 @@ export class ResourceRunHost
     });
   }
 
+  /**
+   * The filters of listen task `task`, for `attempt`'s enter step: each
+   * the engine's type for the task's binding and the filter's type, and
+   * its attributes, each built from what the build sealed on the task's
+   * transformed input (`frame`), and held to text. The step journals
+   * them, so a replay waits for exactly the same events.
+   */
+  async #resolvedListen(
+    attempt: StepAttempt,
+    task: Extract<SealedTask, { kind: "listen" }>,
+    frame: { input: Json; output: Json; size: number }
+  ): Promise<ResolvedListen> {
+    if (task.timeoutMs > maxDeadlineMs) {
+      return this.#refuse(`Task "${task.id}" waits at most a year.`);
+    }
+    const resolved: ResolvedListen = [];
+    for (const filter of task.listen.filters) {
+      const attributes: Record<string, string> = {};
+      for (const [name, template] of filter.attributes) {
+        // One at a time, in order: as the build sealed them.
+        // oxlint-disable-next-line no-await-in-loop -- see above
+        const value = await this.#built(attempt, template, frame, frame.size);
+        if (typeof value !== "string" || value.length > maxAttributeLength) {
+          throw workflowResourceErrors.create("workflow.call_invalid", {
+            issues: [
+              `listen: A filter's ${name} is text of at most ${maxAttributeLength} characters.`,
+            ],
+          });
+        }
+        attributes[name] = value;
+      }
+      resolved.push({
+        // oxlint-disable-next-line no-await-in-loop -- one hash per filter
+        type: await eventTypeKey(task.listen.binding, filter.type),
+        attributes,
+      });
+    }
+    return resolved;
+  }
+
+  /**
+   * Starts the child of run task `task`, for `attempt`'s enter step, once:
+   * its input built from what the build sealed on the task's transformed
+   * input (`frame`), the binding the build sealed, the version the run's
+   * start froze for it. A test run, and a host given no child runs, start
+   * none (`workflow.child_unavailable`).
+   */
+  async #startedChild(
+    attempt: StepAttempt,
+    task: Extract<SealedTask, { kind: "run" }>,
+    frame: { input: Json; output: Json; size: number }
+  ): Promise<string> {
+    const { children } = this.#hooks;
+    if (children === undefined || this.#run.calling.candidate !== undefined) {
+      throw workflowResourceErrors.create("workflow.child_unavailable");
+    }
+    const input = await this.#built(attempt, task.run.input, frame, frame.size);
+    // Its lease once more, just before the start: a stale attempt starts
+    // nothing.
+    this.#requireCurrent(attempt);
+    await ResourceRunHost.#hostCall(attempt);
+    // Keyed by its step's name, not its task's: a step the same task runs
+    // again under another name (a loop's item, a retry of its scope) starts
+    // a child of its own.
+    return await children.start(
+      this.#run,
+      task.run.binding,
+      attempt.step.name,
+      input
+    );
+  }
+
   /** The descriptor text of `task`'s `which` schema, if it has one. */
   static #schemaOf(task: SealedTask, which: DataCheck): string | undefined {
     const descriptor = task.schemas[which];
@@ -2905,7 +3801,7 @@ export class ResourceRunHost
     const schema =
       kind.success &&
       task !== undefined &&
-      checksOf[attempt.step.kind].includes(kind.data)
+      checksFor(attempt.step).includes(kind.data)
         ? ResourceRunHost.#schemaOf(task, kind.data)
         : undefined;
     if (!kind.success || schema === undefined) {
@@ -2931,7 +3827,7 @@ export class ResourceRunHost
   /** Whether `step`, of task `taskId`, evaluates the task's `if`. */
   #hasIf(step: StepOf, taskId: string): boolean {
     return (
-      stagesOf[step.kind].includes("taskIf") &&
+      stagesFor(step).includes("taskIf") &&
       this.#run.build.expressions.some(
         (expression) =>
           expression.taskId === taskId && expression.stage === "taskIf"
@@ -3019,6 +3915,61 @@ export class ResourceRunHost
     return false;
   }
 
+  /**
+   * Refuses `record` of `attempt`'s listen task's leave step unless it is
+   * what the host built from the events the task took: its output, as its
+   * `output.as` made it, and its context, as its `export.as` made it
+   * (none without one).
+   */
+  #requireRecordedEvents(
+    attempt: StepAttempt,
+    task: TakenTask,
+    record: { output: Json; context?: Json | undefined }
+  ): void {
+    const output = this.#shapedEvents(attempt, task);
+    const context =
+      task.exportAs === undefined
+        ? undefined
+        : filledFrom(task.exportAs, attempt.exportAs);
+    const sameContext =
+      context === undefined
+        ? record.context === undefined && task.exportAs === undefined
+        : record.context !== undefined &&
+          canonicalJson(context) === canonicalJson(record.context);
+    if (
+      output === undefined ||
+      canonicalJson(output) !== canonicalJson(record.output) ||
+      !sameContext
+    ) {
+      this.#refuse(`Task "${task.id}"'s step records the events it took.`);
+    }
+  }
+
+  /**
+   * Refuses `record` of `attempt`'s step of `task` unless what it records
+   * of the task's work outside the isolate is the host's: a call task's
+   * step its call's answer (a record without one, or after the call failed
+   * or before it answered, would let the isolate answer for the effect),
+   * and a listen's leave step the events the task took.
+   */
+  #requireRecordedWork(
+    attempt: StepAttempt,
+    task: SealedTask,
+    record: { output: Json; context?: Json | undefined }
+  ): void {
+    const { kind } = attempt.step;
+    if (
+      kind === "task" &&
+      task.kind === "call" &&
+      task.call.name !== "grasp.sleepUntil"
+    ) {
+      this.#requireRecordedAnswer(attempt, task, record);
+    }
+    if (kind === "leave" && (task.kind === "listen" || task.kind === "run")) {
+      this.#requireRecordedEvents(attempt, task, record);
+    }
+  }
+
   #acceptRecord(attempt: StepAttempt, value: Json): void {
     const { step, data } = attempt;
     const { task } = step;
@@ -3063,24 +4014,15 @@ export class ResourceRunHost
     }
     if (
       step.kind === "enter" &&
-      deadlineOf(task) !== undefined &&
+      resolvesDeadline(task) &&
       record.until === undefined
     ) {
       return this.#refuse(
         `Task "${task.id}"'s enter step resolves its deadline.`
       );
     }
-    // A call task's step records its call's answer: a record without one,
-    // or after the call failed or before it answered, would let the
-    // isolate answer for the effect.
-    const callTask =
-      step.kind === "task" &&
-      task.kind === "call" &&
-      task.call.name !== "grasp.sleepUntil";
-    if (callTask) {
-      this.#requireRecordedAnswer(attempt, task, record);
-    }
-    const checks = checksOf[step.kind];
+    this.#requireRecordedWork(attempt, task, record);
+    const checks = checksFor(step);
     const against: [DataCheck, Json][] = [
       ["input", data.input],
       ["output", record.output],

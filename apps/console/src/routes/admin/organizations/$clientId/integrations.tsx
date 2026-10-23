@@ -17,6 +17,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 
 import {
+  AskedOfGraspRows,
   ConnectedRows,
   StillToConnectRows,
 } from "../../../../admin/connections.tsx";
@@ -86,9 +87,13 @@ const Connected = () => {
   );
 };
 
-/** What the workflows need that the company hasn't connected, once core reports it. */
+/**
+ * What the workflows need that the company hasn't connected, once core
+ * reports it, and the apps it asked Grasp to add, each leading to its
+ * build.
+ */
 const StillToConnect = () => {
-  const { integrations } = useOrganization().admin.snapshot;
+  const { integrations, asked } = useOrganization().admin.snapshot;
   return (
     <Panel
       action={<Badge variant="outline">{sourceNames.composio}</Badge>}
@@ -103,6 +108,7 @@ const StillToConnect = () => {
       ) : (
         <StillToConnectRows integrations={integrations} />
       )}
+      {asked.length > 0 ? <AskedOfGraspRows asked={asked} /> : null}
     </Panel>
   );
 };

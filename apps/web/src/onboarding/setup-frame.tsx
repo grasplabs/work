@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 
 import { GraspMark } from "../grasp-mark.tsx";
 import { LanguageButton } from "../language-picker.tsx";
+import { SoundControls } from "../voice/sound-controls.tsx";
 import { KnowledgeCorner } from "./knowledge-bar.tsx";
 import type { Knowledge } from "./knowledge-bar.tsx";
 import { stepIndex, steps, wizardSteps } from "./setup.ts";
@@ -12,8 +13,9 @@ import type { SetupStep } from "./setup.ts";
 // The frame of every onboarding screen (prototype
 // `components/onboarding/onboarding-frame.tsx`), with as little as possible
 // around the step: from the third step, what Grasp knows, top centre; one
-// centred column; where you are, bottom centre; the language bottom right
-// on every step after the first, where it is chosen. The dots go back, and
+// centred column; where you are, bottom centre; bottom right, pause and the
+// sound, with the language before them on every step after the first,
+// where it is chosen. The dots go back, and
 // forward again as far as you have been; so do the arrow keys; Escape
 // leaves. After the wizard, a word says where things stand.
 
@@ -134,13 +136,14 @@ export const SetupFrame = ({
             </span>
           )}
         </nav>
-        {/* The language, once chosen. */}
+        {/* The language, once chosen, then pause and the sound. */}
         <div className="flex items-center justify-end gap-1">
           {step === "welcome" ? null : (
             <span className="animate-in fade-in duration-500">
               <LanguageButton />
             </span>
           )}
+          <SoundControls />
         </div>
       </footer>
     </div>

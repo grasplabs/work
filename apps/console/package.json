@@ -16,6 +16,7 @@
   "dependencies": {
     "@cfworker/json-schema": "catalog:",
     "@fontsource-variable/geist": "catalog:",
+    "@grasp-os/connector-kit": "workspace:*",
     "@grasp-os/shared": "workspace:*",
     "@grasp-os/ui": "workspace:*",
     "@modelcontextprotocol/sdk": "catalog:",

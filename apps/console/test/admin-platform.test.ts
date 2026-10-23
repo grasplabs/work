@@ -2,17 +2,24 @@ import { env } from "cloudflare:workers";
 import { ne } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
-import { platformData } from "../src/admin/platform-data.ts";
+import { platformData, staffEvents } from "../src/admin/platform-data.ts";
+import { eventWords } from "../src/admin/platform-parts.tsx";
 import {
   companiesOf,
   goingOut,
   nextRing,
+  platformCounts,
   ringsOf,
   spreadOf,
 } from "../src/admin/platform.ts";
 import type { GridRow, LiveStatus } from "../src/clients/grid.ts";
 import { consoleDatabase } from "../src/db/act.ts";
-import { clients, rollouts, rolloutTargets } from "../src/db/schema.ts";
+import {
+  auditEvents,
+  clients,
+  rollouts,
+  rolloutTargets,
+} from "../src/db/schema.ts";
 import { importReleases } from "../src/releases/import.ts";
 import type { ReleaseSummary } from "../src/releases/queries.ts";
 import type { RolloutSummary, TargetView } from "../src/rollout/queries.ts";
@@ -20,6 +27,8 @@ import { publishRelease } from "./releases.ts";
 
 const db = consoleDatabase(env.DB);
 const day = (n: number) => new Date(Date.UTC(2026, 9, n));
+/** `ms` past a moment after any event a test makes now, so its events are the latest. */
+const later = (ms: number) => new Date(Date.UTC(2099, 0, 1) + ms);
 
 const summary = (
   id: string,
@@ -147,6 +156,28 @@ describe("the Platform page's model", () => {
         target("beta", 1, "pending"),
       ]).map(({ state }) => state)
     ).toStrictEqual(["done", "todo"]);
+  });
+
+  it("counts for the sidebar the companies that need a look by what was recorded alone, and a rollout that waits", () => {
+    const releases = [release("r1", 1), release("r2", 2), release("r3", 3)];
+    const rows = [
+      row("fine"),
+      row("behind", { release: "r1" }),
+      row("failed", {
+        lastDeploy: { releaseId: "r3", status: "failed", at: day(3) },
+      }),
+      row("gone", { status: "offboarded", release: "r1" }),
+    ];
+
+    expect(
+      platformCounts(rows, releases, [summary("w", "waiting")])
+    ).toStrictEqual({ needLook: 2, waiting: true });
+    expect(
+      platformCounts([row("fine")], releases, [
+        summary("d", "done"),
+        summary("c", "cancelled"),
+      ])
+    ).toStrictEqual({ needLook: 0, waiting: false });
   });
 
   it("says which active companies run each release, the newest first, then the ones the page doesn't list", () => {
@@ -317,5 +348,75 @@ describe("the Platform page's data", () => {
         { clientId: clientIds[1], ring: 1, status: "pending" },
       ],
     });
+  });
+
+  it("lists what staff did to the platform, the latest first, naming each rollout by its release, and none of the console's own jobs or a deploy's steps", async () => {
+    const tag = crypto.randomUUID().slice(0, 8);
+    const shipped = await publishRelease({ notes: "feat(core): shipped" });
+    await importReleases(env.RELEASES, db);
+    const rolloutId = crypto.randomUUID();
+    await db.insert(rollouts).values({
+      id: rolloutId,
+      kind: "release",
+      releaseId: shipped.id,
+      status: "waiting",
+      ring: 0,
+      startedBy: "ops@grasp.test",
+      createdAt: later(0),
+      updatedAt: later(0),
+    });
+    await db.insert(auditEvents).values([
+      {
+        id: `pin-${tag}`,
+        at: later(2),
+        actor: "ops@grasp.test",
+        action: "client.pin",
+        clientId: `acme-${tag}`,
+        target: "r1",
+      },
+      {
+        id: `approve-${tag}`,
+        at: later(3),
+        actor: "ops@grasp.test",
+        action: "rollout.approve",
+        target: rolloutId,
+      },
+      {
+        id: `cancel-${tag}`,
+        at: later(6),
+        actor: "ops@grasp.test",
+        action: "rollout.cancel",
+        target: `gone-${tag}`,
+      },
+      {
+        id: `system-${tag}`,
+        at: later(4),
+        actor: "system",
+        action: "rollout.approve",
+        target: rolloutId,
+      },
+      {
+        id: `deploy-${tag}`,
+        at: later(5),
+        actor: "ops@grasp.test",
+        action: "deploy.start",
+        clientId: `acme-${tag}`,
+      },
+    ]);
+
+    const events = await staffEvents(db);
+
+    expect(
+      events
+        .slice(0, 3)
+        .map((event) => eventWords(event, (id) => id.split("-")[0] ?? id))
+    ).toStrictEqual([
+      // A rollout the console no longer has is still a rollout.
+      "ops@grasp.test cancelled a rollout",
+      `ops@grasp.test approved the next ring of the rollout of ${shipped.id}`,
+      "ops@grasp.test pinned acme to r1",
+    ]);
+    // The console's own job, even with an action staff take, isn't listed.
+    expect(events.map(({ id }) => id)).not.toContain(`system-${tag}`);
   });
 });

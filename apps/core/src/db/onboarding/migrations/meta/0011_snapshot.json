@@ -1,22 +1,29 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "524b9380-8232-4e27-8031-d8cb90d04910",
+  "id": "88a1ced4-de7b-4e31-95fd-cc1b0a575790",
   "prevId": "213073ff-ec31-40b2-a6f1-509fe107b080",
   "tables": {
-    "asked_about": {
-      "name": "asked_about",
+    "answer_waits": {
+      "name": "answer_waits",
       "columns": {
-        "person": {
-          "name": "person",
+        "day": {
+          "name": "day",
           "type": "text",
-          "primaryKey": true,
+          "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
-        "work": {
-          "name": "work",
-          "type": "text",
+        "up_to": {
+          "name": "up_to",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "answers": {
+          "name": "answers",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
@@ -24,7 +31,15 @@
       },
       "indexes": {},
       "foreignKeys": {},
-      "compositePrimaryKeys": {},
+      "compositePrimaryKeys": {
+        "answer_waits_day_up_to_pk": {
+          "columns": [
+            "day",
+            "up_to"
+          ],
+          "name": "answer_waits_day_up_to_pk"
+        }
+      },
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
@@ -142,37 +157,6 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "draw_failures": {
-      "name": "draw_failures",
-      "columns": {
-        "item": {
-          "name": "item",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "tries": {
-          "name": "tries",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "after": {
-          "name": "after",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
     "events": {
       "name": "events",
       "columns": {
@@ -209,6 +193,44 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "interview_settings": {
+      "name": "interview_settings",
+      "columns": {
+        "person": {
+          "name": "person",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "mark": {
+          "name": "mark",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "interviewer": {
+          "name": "interviewer",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "locale": {
+          "name": "locale",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
           "autoincrement": false
         }
       },
@@ -960,79 +982,6 @@
           "name": "voice_use_who_day_pk"
         }
       },
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "works": {
-      "name": "works",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "team": {
-          "name": "team",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "position": {
-          "name": "position",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "local": {
-          "name": "local",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "one": {
-          "name": "one",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "many": {
-          "name": "many",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "doers": {
-          "name": "doers",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "share": {
-          "name": "share",
-          "type": "real",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {}
     }

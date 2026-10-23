@@ -11,7 +11,7 @@ import type { ClientResource } from "../src/hosting/inventory.ts";
 import { ensureClientResources } from "../src/hosting/provision.ts";
 import { claimRun } from "../src/runners.ts";
 import type { AccountState, ApiCall } from "./cloudflare-api-kit.ts";
-import { mockCloudflareApi } from "./cloudflare-api.ts";
+import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { db, destination, placedClient, release, staff } from "./hosting.ts";
 
 const token = "test-deployer-token-0123456789";

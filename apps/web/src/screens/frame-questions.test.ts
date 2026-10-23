@@ -4,7 +4,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import type { PendingConfirmation } from "../decision-confirmation.tsx";
 import { cancelPauseMs, frameQuestions } from "./frame-questions.ts";
-import type { Asked } from "./frame-questions.ts";
+import type { Asked, PageQuestions } from "./frame-questions.ts";
 
 // The answers one frame's screen asks the person to confirm, from the ways
 // a screen could abuse the dialog: stacking questions, asking again as
@@ -28,15 +28,20 @@ const outcome = async (asking: Promise<boolean>): Promise<unknown> => {
   }
 };
 
-/** Questions with a clock the test moves, and what the dialog shows. */
-const questions = () => {
+/**
+ * Questions with a clock the test moves, and what the dialog shows, on a
+ * page of their own unless `page` is given.
+ */
+const questions = (page?: PageQuestions) => {
   let clock = 0;
   let shown: Asked | null = null;
   const asked = frameQuestions(
     (next) => {
       shown = next;
     },
-    () => clock
+    () => clock,
+    () => decisionErrors.create("decision.asking_paused"),
+    page ?? { waiting: 0 }
   );
   return {
     ...asked,
@@ -119,6 +124,22 @@ describe("a frame's questions", () => {
       waiting: false,
       hidden: true,
       after: "decision.asking_paused",
+    });
+  });
+
+  it("shows one question on the whole page: another frame's waits refuse this one's, until it is answered", async () => {
+    const page: PageQuestions = { waiting: 0 };
+    const one = questions(page);
+    const other = questions(page);
+    const waiting = one.confirm(review("a"));
+    const refused = await outcome(other.confirm(review("b")));
+    one.shown().settle(true);
+    await waiting;
+    const asked = other.confirm(review("c"));
+    other.shown().settle(true);
+    expect({ refused, asked: await asked }).toStrictEqual({
+      refused: "decision.asking_paused",
+      asked: true,
     });
   });
 });

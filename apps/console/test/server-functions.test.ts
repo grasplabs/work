@@ -24,7 +24,7 @@ import {
   rollbackRingFn,
 } from "../src/rollout/functions.ts";
 import { mockAccess } from "./access.ts";
-import { mockCloudflareApi } from "./cloudflare-api.ts";
+import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { callServerFn } from "./pages.ts";
 import { publishRelease } from "./releases.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
@@ -387,6 +387,8 @@ describe("the console's changes, through its entry", () => {
     "%s is audited as the staff member Access vouches for, about its client and target",
     async (_name, arrange) => {
       await using rolloutRuns = await follow(env.ROLLOUT);
+      // An approved rollout deploys its fleet clients in runs of their own.
+      await using _fleetRuns = await follow(env.ROLLOUT_CLIENT);
       await using applyRuns = await follow(env.APPLY_CLIENT);
       const { make, audited, settled } = await arrange({
         rolloutRuns,

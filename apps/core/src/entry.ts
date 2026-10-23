@@ -1,3 +1,4 @@
+import { adminAskPath } from "@grasp-os/shared/admin-ask";
 import { adminSnapshotPath } from "@grasp-os/shared/admin-snapshot";
 import { auditExportPath } from "@grasp-os/shared/audit-log";
 import { connectionCallbackPath } from "@grasp-os/shared/connect";
@@ -20,6 +21,7 @@ import { quotaPolicyReportPath } from "@grasp-os/shared/quota-policy-report";
 import { screenFramePath } from "@grasp-os/shared/screens";
 import { speechPath } from "@grasp-os/shared/voice";
 
+import { adminAskResponse } from "./admin-ask.ts";
 import { adminSnapshotResponse } from "./admin-snapshot.ts";
 import { appFileResponse, fileRouteOf } from "./app-file-route.ts";
 import {
@@ -27,6 +29,7 @@ import {
   portableCallApp,
   portableFunctionResponse,
 } from "./app-function-route.ts";
+import { appLinkResponse, linkRouteOf } from "./app-link-route.ts";
 import { appTokenResponse, tokenRequestApp } from "./app-token-route.ts";
 import { auditExportResponse } from "./audit-rpc.ts";
 import { authBasePath } from "./auth/auth.ts";
@@ -236,6 +239,17 @@ const appCallResponse = async (
   if (tokenApp !== undefined) {
     return await appTokenResponse(request, env, tokenApp, requestId);
   }
+  const linkRoute = linkRouteOf(pathname, request.method);
+  if (linkRoute === "not_found") {
+    return errorResponse(
+      404,
+      requestErrors.create("request.not_found"),
+      requestId
+    );
+  }
+  if (linkRoute !== undefined) {
+    return await appLinkResponse(request, env, linkRoute, requestId);
+  }
   const fileRoute = fileRouteOf(pathname, request.method);
   if (fileRoute === "not_found") {
     return errorResponse(
@@ -259,6 +273,7 @@ const pathHandlers: ReadonlyMap<
   [onboardingSummaryPath, onboardingSummaryResponse],
   [quotaPolicyReportPath, quotaPolicyReportResponse],
   [adminSnapshotPath, adminSnapshotResponse],
+  [adminAskPath, adminAskResponse],
   [platformUpdatePath, platformUpdateResponse],
   [mailIngressPath, mailIngressResponse],
 ]);

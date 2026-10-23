@@ -27,6 +27,24 @@ const voice = "s3TPKV1kjDlVtZbl4Ksh";
 
 const said: GatewayReply = { speech: { audio: "mp3 bytes" } };
 
+/** The deployment's AI Gateway token, a Worker secret. */
+const gatewayToken = "aig-token-for-tests-only";
+
+/** The EU host's custom provider, as the gateway config names it. */
+const euHost = { voice: { provider: "custom-elevenlabs-eu" } };
+
+const busy: GatewayReply = { status: 429, headers: { "retry-after": "7" } };
+
+/** What `promise` threw, or `undefined` if it didn't. */
+const thrown = async (promise: Promise<unknown>): Promise<unknown> => {
+  try {
+    await promise;
+    return undefined;
+  } catch (error) {
+    return error;
+  }
+};
+
 /** 17 characters: at Eleven v4's $0.08 per 1,000, 80 micros each. */
 const line = "Hello there, Ada.";
 const lineMicros = 17 * 80;
@@ -160,6 +178,59 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
       "Bearer cloudflare-gateway-binding"
     );
     expect(headers.get("cf-aig-collect-log-payload")).toBe("false");
+  });
+
+  it.each([
+    ["ElevenLabs natively", {}, "elevenlabs"],
+    ["ElevenLabs's EU host", euHost, "custom-elevenlabs-eu"],
+  ])(
+    "reaches %s through the gateway, every request with the gateway token and no ElevenLabs key",
+    async (_, config, path) => {
+      const { gateway, gatewayEnv } = withGateway([busy, said], config);
+
+      await stephen(
+        { ...gatewayEnv, AI_GATEWAY_TOKEN: gatewayToken },
+        newPerson()
+      ).speak({ text: line, voice, language: "de" });
+
+      // Asked once more after the busy answer: both requests alike.
+      const sent = gateway.requests.map(({ url, headers }) => ({
+        route: new URL(url).pathname,
+        token: headers.get("cf-aig-authorization"),
+        keys: [headers.get("xi-api-key"), headers.get("authorization")],
+      }));
+      const request = {
+        route: `/ai-gateway/gateways/grasp-os-test/${path}/v1/text-to-speech/${voice}/with-timestamps`,
+        token: `Bearer ${gatewayToken}`,
+        keys: [null, null],
+      };
+      expect(sent).toStrictEqual([request, request]);
+    }
+  );
+
+  it("never logs the gateway token, nor hands it back, however a line ends", async () => {
+    const lines: string[] = [];
+    for (const level of ["info", "warn", "error"] as const) {
+      vi.spyOn(console, level).mockImplementation((...args: unknown[]) => {
+        lines.push(JSON.stringify(args));
+      });
+    }
+    const { gatewayEnv } = withGateway([said, busy, busy], euHost);
+    const tokenEnv = { ...gatewayEnv, AI_GATEWAY_TOKEN: gatewayToken };
+    const person = newPerson();
+    const request = { text: line, voice, language: "en" };
+
+    const speech = await stephen(tokenEnv, person).speak(request);
+    const failed = await thrown(stephen(tokenEnv, person).speak(request));
+
+    const events = await auditedFor(person.userId, 2);
+    const seen = JSON.stringify([speech.words, failed, String(failed), events]);
+    expect({
+      // The failed line was logged, without the token.
+      logged: lines.some((logged) => logged.includes("model.failed")),
+      inLogs: lines.some((logged) => logged.includes(gatewayToken)),
+      handedBack: seen.includes(gatewayToken),
+    }).toStrictEqual({ logged: true, inLogs: false, handedBack: false });
   });
 
   it("charges the line's characters against the budgets, and audits it as a model call", async () => {
@@ -308,8 +379,9 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
     }
   );
 
-  it("says an onboarding line in a voice model the rules list for sensitive data and the EU", async () => {
+  it("says an onboarding line in a voice model the rules list for sensitive data and the EU, at ElevenLabs's EU host", async () => {
     const { gateway, gatewayEnv } = withGateway([said], {
+      ...euHost,
       sensitive: { models: [voiceModel] },
       eu: { models: [voiceModel], deployment: true },
     });
@@ -322,12 +394,32 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
       model: voiceModel,
     });
 
-    expect(gateway.requests).toHaveLength(1);
+    expect(
+      gateway.requests.map(({ url }) => new URL(url).pathname.split("/")[4])
+    ).toStrictEqual(["custom-elevenlabs-eu"]);
     const [event] = await auditedFor(person.userId, 1);
     expect(event?.detail).toMatchObject({
       euOnly: "deployment",
       sensitive: "restricted",
     });
+  });
+
+  it("says nothing while the rules list a voice model for the EU that the gateway reaches at ElevenLabs's native host", async () => {
+    const { gateway, gatewayEnv } = withGateway([said], {
+      eu: { models: [voiceModel], deployment: true },
+    });
+
+    await expect(
+      outcome(
+        stephen(gatewayEnv, newPerson()).speak({
+          text: line,
+          voice,
+          language: "fr",
+          model: voiceModel,
+        })
+      )
+    ).resolves.toBe("model.unconfigured");
+    expect(gateway.requests).toStrictEqual([]);
   });
 
   it("asks once more when the provider is busy, charging only the line it said", async () => {
@@ -357,10 +449,6 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
   });
 
   it("gives up after asking once more, and says when to try again", async () => {
-    const busy: GatewayReply = {
-      status: 429,
-      headers: { "retry-after": "7" },
-    };
     const { gateway, gatewayEnv } = withGateway([busy, busy, said]);
 
     await expect(
