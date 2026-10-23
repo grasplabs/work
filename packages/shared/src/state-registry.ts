@@ -441,6 +441,7 @@ const connectDb: D1State = {
     ),
     audit_outbox: exported(`${connect}audit.ts`),
     audit_outbox_rejected: exported(`${connect}audit.ts`),
+    call_changes: exported(`${connect}changes.ts`),
     event_sources: exported(`${connect}events.ts`),
     connector_events: exported(`${connect}events.ts`),
   },

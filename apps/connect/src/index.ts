@@ -67,6 +67,7 @@ import type { CallOutcome, CallRecord } from "./audit.ts";
 import { carryOut, connectionFor, heldOutcome } from "./call.ts";
 import type { CallDone, CallProgress } from "./call.ts";
 import { catalog, catalogTools } from "./catalog.ts";
+import { keptChange } from "./changes.ts";
 import { clock, tickClock } from "./clock.ts";
 import {
   finishToolkitFlow,
@@ -733,6 +734,8 @@ export default class Connect
     // doesn't have: a side effect's answer is stored with its events. If
     // that fails, the call happened but went unrecorded: its key is spent,
     // and it is recorded, as far as possible, with an unknown outcome.
+    // What it changed is kept with its answer and events, its hash in them.
+    const kept = await keptChange(this.env, claims, call, done.change);
     const record: CallRecord = {
       call: stated,
       claims,
@@ -743,13 +746,13 @@ export default class Connect
       recovery: done.recovery,
       provenance: done.result.provenance,
       pendingActionId: done.pending?.id ?? held?.id,
+      changeHash: kept.hash,
     };
     try {
-      await auditCall(
-        this.env,
-        record,
-        done.commit === undefined ? [] : [done.commit]
-      );
+      await auditCall(this.env, record, [
+        ...(done.commit === undefined ? [] : [done.commit]),
+        ...kept.writes,
+      ]);
     } catch (error) {
       log.error("audit.record_failed", errorFields(error));
       await done.spend?.().catch((spendError: unknown) => {
@@ -757,6 +760,8 @@ export default class Connect
       });
       await auditFailure(this.env, {
         ...record,
+        // Its values went with the batch that failed.
+        changeHash: undefined,
         outcome: "unknown",
         reason: "connect.outcome_unknown",
       });

@@ -1,4 +1,5 @@
 import {
+  confirmedMetaKey,
   effectKeyMetaKey,
   findMetaKey,
   stampMetaKey,
@@ -20,6 +21,8 @@ import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
+import { changeOf } from "./changes.ts";
+import type { CallChange } from "./changes.ts";
 import {
   allowedTool,
   composioServer,
@@ -151,6 +154,8 @@ export interface CallDone extends StoredAnswer {
   recovery?: RecoveryMode;
   /** Its effect was found (recovery `find`): the answer is the original's. */
   reconciled?: boolean;
+  /** What it changed, as its native connector said: kept with its answer. */
+  change?: CallChange;
 }
 
 /** What a held call answers: nothing done yet. */
@@ -561,6 +566,24 @@ const readOnce = async (
   return { ...answerOf(read), replayed: false };
 };
 
+/**
+ * What a write that went through changed, as its native connector says;
+ * one it reports in a way that can't be kept leaves the call of unknown
+ * outcome, as an answer that can't be read does: never kept without it.
+ */
+const changeAfterWrite = async (
+  connection: Connection,
+  done: McpToolResult,
+  store: Store
+): Promise<CallChange | undefined> => {
+  try {
+    return changeOf(connection, done);
+  } catch {
+    await store.spend();
+    throw connectErrors.create("connect.outcome_unknown");
+  }
+};
+
 /** A side effect about to go out under its claimed key. */
 interface Sent {
   /** The call's capability ID, for what is logged of it. */
@@ -634,6 +657,7 @@ const sendClaimed = async (
     replayed: false,
     commit: store.completion(answer),
     spend: store.spend,
+    change: await changeAfterWrite(connection, done, store),
   };
 };
 
@@ -651,7 +675,7 @@ const findEffect = async (
   meta: Record<string, Json>,
   server: McpServer,
   store: Store
-): Promise<StoredAnswer | undefined> => {
+): Promise<(StoredAnswer & { change?: CallChange }) | undefined> => {
   let found: McpToolResult;
   try {
     found = withProvenance(
@@ -664,7 +688,10 @@ const findEffect = async (
     throw connectErrors.create("connect.outcome_unknown");
   }
   if (!found.isError) {
-    return answerOf(found);
+    return {
+      ...answerOf(found),
+      change: await changeAfterWrite(connection, found, store),
+    };
   }
   // Only "certainly not there", never "the lookup did nothing" (a
   // throttled GET), lets the call go out again.
@@ -728,19 +755,22 @@ const recover = async (
 
 /**
  * The `_meta` a side effect is sent with: for a native connector, its
- * effect key and a workflow run's mail stamp (`stamp`); nothing for any
- * other server, whose tools are code we don't review, and where nothing
- * is recovered.
+ * effect key, a workflow run's mail stamp (`stamp`), and whether it is
+ * the held action its person just confirmed (`confirmed`); nothing for
+ * any other server, whose tools are code we don't review, and where
+ * nothing is recovered.
  */
 const nativeMetaOf = async (
   connection: Connection,
   scope: Parameters<typeof effectKeyOf>[0],
-  stamp: string | null
+  stamp: string | null,
+  confirmed: boolean
 ): Promise<Record<string, Json> | undefined> =>
   connection.serverKind === "native"
     ? {
         [effectKeyMetaKey]: await effectKeyOf(scope),
         ...(stamp === null ? {} : { [stampMetaKey]: stamp }),
+        ...(confirmed ? { [confirmedMetaKey]: true } : {}),
       }
     : undefined;
 
@@ -844,7 +874,12 @@ export const carryOut = async (
   if (store === undefined || scope === undefined) {
     throw connectErrors.create("connect.idempotency_key_required");
   }
-  const meta = await nativeMetaOf(connection, scope, call.stamp ?? null);
+  const meta = await nativeMetaOf(
+    connection,
+    scope,
+    call.stamp ?? null,
+    held !== undefined
+  );
   const sent: Sent = {
     callId: claims.jti,
     connection,
