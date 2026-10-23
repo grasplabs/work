@@ -18,6 +18,7 @@ import {
   agree,
   fact,
   kept,
+  mapReply,
   mapped,
   openLink,
   rosterOf,
@@ -52,7 +53,8 @@ import {
 // - L7: someone taken off the list leaving what they said behind.
 // - W5: a team falling under three people in the brain by a delete.
 // - W7: the deletion in the audit log with who, or with their words.
-// - A delete while the same work is drawn, or the team given to the brain.
+// - A delete while the same work is drawn, the lead's map is drawn, or the
+//   team given to the brain.
 
 const idp = mockIdp();
 
@@ -277,6 +279,17 @@ const ways: {
     },
     audited: ["brain.records.purged", "onboarding.roster.saved"],
   },
+  {
+    way: "by Grasp's staff taking them off the list (L7)",
+    remove: async (ids) => {
+      const staff = await asStaff();
+      await staff.onboardingStaff.changeOrganization({
+        kind: "removePerson",
+        person: ids.max,
+      });
+    },
+    audited: ["brain.records.purged", "onboarding.person.removed"],
+  },
 ];
 
 /** A fake AI binding for the duration of `run`, answering as `respond` does. */
@@ -492,6 +505,45 @@ describe("deleting an interview", { timeout: 180_000 }, () => {
       drawnFrom: [ids.mia, ids.mo].toSorted(),
       left: { words: [], person: [] },
       restsOn: [],
+    });
+  });
+
+  it("of a team's lead while their map is being drawn throws the map away", async () => {
+    const store = onboardingStore(env);
+    const ids = await team();
+    const said = sentinels();
+    await store.releaseDue();
+    await agree(
+      ids.lea,
+      [
+        fact("l1", "work", "Max, Mia and Mo handle new tickets."),
+        fact("l9", "rule", `The rota lives in ${said.lea}.`),
+      ],
+      0,
+      linesWith(said.lea)
+    );
+    let deleted: number | undefined;
+    const drew = await answeringWith(
+      async () => {
+        // Lea deletes her interview while her team's map is drawn from it.
+        deleted ??= await deleteOnLink(ids.lea);
+        return mapReply(ids);
+      },
+      async () => await store.drawNext()
+    );
+    expect({
+      drew,
+      deleted,
+      works: await store.teamWorks(ids.team),
+      // What the map would have said the team does, from her facts.
+      does: await leftOf(ids.lea, "Answers customers' questions"),
+      left: await leftOf(ids.lea, said.lea),
+    }).toStrictEqual({
+      drew: `team:${ids.team}`,
+      deleted: 200,
+      works: [],
+      does: { words: [], person: [] },
+      left: { words: [], person: [] },
     });
   });
 

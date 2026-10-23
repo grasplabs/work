@@ -4334,7 +4334,8 @@ export class Onboarding extends DurableObject<Env> {
    * about one keeps it, and only who has none gets one. What changed while
    * it was drawn stands: the store is read again after, and only this
    * team's part changes. Mapped, unless the lead agreed to more meanwhile:
-   * then it's drawn once more.
+   * then it's drawn once more. A lead whose interview went while it was
+   * drawn takes the map with them: nothing drawn from it is kept.
    */
   async #mapTeam(teamId: string, at: string): Promise<void> {
     const roster = this.#roster();
@@ -4355,6 +4356,7 @@ export class Onboarding extends DurableObject<Env> {
       }
       return;
     }
+    const began = this.#interviewsOf([input.person]);
     const company = await companyName(this.env);
     const map = await drawTeamMap(
       this.env,
@@ -4384,7 +4386,12 @@ export class Onboarding extends DurableObject<Env> {
     this.ctx.storage.transactionSync(() => {
       const now = this.#roster();
       const still = now?.teams.find(({ id }) => id === teamId);
-      if (now === null || still === undefined) {
+      // The lead's interview deleted meanwhile, or deleted and begun anew.
+      if (
+        now === null ||
+        still === undefined ||
+        this.#goneSince(began).length > 0
+      ) {
         return;
       }
       const members = now.people.filter(({ team: of }) => of === teamId);
