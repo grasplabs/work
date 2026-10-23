@@ -6,7 +6,9 @@ import { log } from "@grasp-os/shared/log";
 import bundled from "#connectors";
 
 // The native connectors of this release, as build.ts bundled them, each
-// checked again here: one whose manifest is broken is left out. An app's
+// checked again here: one whose manifest is broken is left out, and none
+// of its tools runs. A tool that doesn't say whom it reaches breaks it: it
+// has no class, so nothing could say whether a company allows it. An app's
 // connector carries its provider record (the connector kit's sign-in.ts),
 // which is all connect knows of how to sign in to the app.
 
