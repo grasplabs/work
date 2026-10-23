@@ -254,6 +254,8 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   "CAPABILITY_SIGNING_KEY",
   "CAPABILITY_SIGNING_KEY_PREVIOUS",
   "CF_VERSION_METADATA",
+  // The client this deployment is (core's src/provision-probe.ts).
+  "CLIENT_ID",
   // The client's clock (core's src/clock.ts).
   "CLOCK",
   "COMPOSIO_API_KEY",
@@ -270,6 +272,9 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   // The directory's Google client (connect's providers.ts).
   "GOOGLE_DIRECTORY_CLIENT_ID",
   "GOOGLE_DIRECTORY_CLIENT_SECRET",
+  // The documents' Google client (connect's providers.ts).
+  "GOOGLE_DOCUMENTS_CLIENT_ID",
+  "GOOGLE_DOCUMENTS_CLIENT_SECRET",
   // Where the deployment receives mail (core's src/workflows/overview.ts).
   "INBOUND_MAIL_DOMAIN",
   "KNOWLEDGE",
@@ -282,6 +287,9 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   // The directory's Entra app (connect's providers.ts).
   "MICROSOFT_DIRECTORY_CLIENT_ID",
   "MICROSOFT_DIRECTORY_CLIENT_SECRET",
+  // The documents' Entra app (connect's providers.ts).
+  "MICROSOFT_DOCUMENTS_CLIENT_ID",
+  "MICROSOFT_DOCUMENTS_CLIENT_SECRET",
   // The landscape's Entra app (connect's providers.ts).
   "MICROSOFT_LANDSCAPE_CLIENT_ID",
   "MICROSOFT_LANDSCAPE_CLIENT_SECRET",

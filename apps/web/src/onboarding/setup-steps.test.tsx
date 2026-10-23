@@ -37,6 +37,7 @@ const said = (
     admin: "Ada",
     company: null,
     view: view(paused, sponsor),
+    links: [],
     documents: [],
     sendingDomain: "mail.example.test",
     gate: {
@@ -53,6 +54,7 @@ const said = (
     review: { differences: [], mapped: 0 },
     directory: null,
     suites: [],
+    places: null,
     choices: noChoices,
     signIn: ["microsoft"],
     identity: {

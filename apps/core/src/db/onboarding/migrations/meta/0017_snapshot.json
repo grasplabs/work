@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "d14755c1-2a39-4cf0-8e52-446166e50806",
+  "id": "ed702478-9d90-408a-804a-c2d7c27336ff",
   "prevId": "ac866191-a00c-4c0c-b58a-ab4358abcce8",
   "tables": {
     "answer_waits": {
@@ -710,6 +710,13 @@
           "notNull": false,
           "autoincrement": false
         },
+        "taken_at": {
+          "name": "taken_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "version": {
           "name": "version",
           "type": "integer",
@@ -979,37 +986,6 @@
         "away": {
           "name": "away",
           "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "settled_works": {
-      "name": "settled_works",
-      "columns": {
-        "work": {
-          "name": "work",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "holds": {
-          "name": "holds",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "at": {
-          "name": "at",
-          "type": "text",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false

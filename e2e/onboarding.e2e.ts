@@ -1,3 +1,7 @@
+import { readdirSync } from "node:fs";
+import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
+
 import { interviewApiPath } from "@grasp-os/shared/interview-links";
 import type { InterviewProgress } from "@grasp-os/shared/interview-links";
 import { expect } from "@playwright/test";
@@ -6,7 +10,7 @@ import type { Request } from "@playwright/test";
 import { test } from "./csp.ts";
 import { apiOf, peopleIn, signInAs, signInStaff, signInTo } from "./people.ts";
 import type { Person } from "./people.ts";
-import { origin } from "./stack.ts";
+import { origin, stateDir } from "./stack.ts";
 import { workbookOf } from "./staff-workbook.ts";
 
 // What only Grasp's staff do in a client's onboarding (GRA-320), end to
@@ -16,7 +20,9 @@ import { workbookOf } from "./staff-workbook.ts";
 // own Playwright project, after all the others: taking the go back signs
 // out everyone the other tests signed in (playwright.config.ts). The
 // admin's own steps come last, as each replaces the deployment's roster:
-// their journey through the wizard, and a large staff list from Excel.
+// their journey through the wizard, a large staff list from Excel, and
+// last, with interviews seeded, what they see while Stephen talks to the
+// team.
 
 test.describe.configure({ mode: "serial" });
 
@@ -149,10 +155,10 @@ const interviewCall = async (body: object): Promise<unknown> => {
 
 /** Keeps `progress` on a person's link, from a device that opens it as their page does. */
 const interviewOn = async (
-  path: string,
+  link: string,
   progress: InterviewProgress
 ): Promise<void> => {
-  const secret = path.split("#")[1] ?? "";
+  const secret = link.split("#")[1] ?? "";
   const session = await interviewCall({ action: "session", secret });
   const key =
     typeof session === "object" &&
@@ -792,5 +798,154 @@ test("the admin settles what needs them, and once Grasp gives its go, goes in th
   await expect(page.getByText("Opening Grasp")).toHaveCount(0, {
     timeout: 15_000,
   });
+  expect(cspViolations).toStrictEqual([]);
+});
+
+/**
+ * Writes the onboarding's state straight into its object's local SQLite,
+ * as the seed does (scripts/seed/local.ts): what no API can backdate, the
+ * interviews of days before today, which the admin's numbers move by.
+ */
+const onboardingSql = (write: (db: DatabaseSync) => void): void => {
+  const dir = path.join(stateDir, "v3/do/grasp-os-core-Onboarding");
+  const file = readdirSync(dir).find((name) => name.endsWith(".sqlite"));
+  if (file === undefined) {
+    throw new Error(`No Onboarding object under ${dir}`);
+  }
+  const db = new DatabaseSync(path.join(dir, file));
+  try {
+    db.exec("PRAGMA busy_timeout = 10000");
+    write(db);
+  } finally {
+    db.close();
+  }
+};
+
+test("while Stephen talks to the team, the admin sees the numbers, no team under five, the quiet team, and the links to send", async ({
+  page,
+  cspViolations,
+}) => {
+  // Last in the serial run: it replaces the roster, and moves the plan back.
+  const admin = await signInStaff();
+  const run = crypto.randomUUID().slice(0, 8);
+  const sales = `sales-${run}`;
+  const service = `service-${run}`;
+  const ops = `ops-${run}`;
+  const member = (id: string, name: string, team: string) => ({
+    id: `${id}-${run}`,
+    name,
+    team,
+  });
+  const { core, api } = apiOf(admin);
+  try {
+    await api.onboarding.saveRoster({
+      teams: [
+        { id: sales, name: "Sales", lead: `lea-${run}` },
+        { id: service, name: "Service", lead: `lisa-${run}` },
+        { id: ops, name: "Ops", lead: `ona-${run}` },
+      ],
+      people: [
+        member("lea", "Lea Bakker", sales),
+        ...["Sam", "Sid", "Sue", "Sy", "Saar", "Sem"].map((name) =>
+          member(name.toLowerCase(), name, sales)
+        ),
+        member("lisa", "Lisa de Vries", service),
+        ...["Vic", "Vera", "Vos", "Vin", "Val"].map((name) =>
+          member(name.toLowerCase(), name, service)
+        ),
+        // A team of four: it shows only whether its lead talked.
+        member("ona", "Ona Smit", ops),
+        ...["Oli", "Oz", "Otto"].map((name) =>
+          member(name.toLowerCase(), name, ops)
+        ),
+      ],
+    });
+    await api.onboarding.savePlan({ start: today() });
+    await api.onboardingStaff.setAgreements({
+      processing: true,
+      assessment: true,
+      council: "none",
+    });
+  } finally {
+    core[Symbol.dispose]();
+  }
+  // Seeded interviews: the plan began six days ago, and by yesterday Sales
+  // had heard from five of its six, Service from none of its five, and
+  // Ops from its three; Lea and Ona talked, Lisa didn't.
+  const yesterday = daysFromToday(-1);
+  onboardingSql((db) => {
+    db.prepare("UPDATE onboarding SET plan = ? WHERE id = 1").run(
+      JSON.stringify({ start: daysFromToday(-6), days: 14 })
+    );
+    const count = db.prepare(
+      "INSERT OR REPLACE INTO team_counts (team, day, asked, talked) VALUES (?, ?, ?, ?)"
+    );
+    count.run(sales, yesterday, 6, 5);
+    count.run(service, yesterday, 5, 0);
+    count.run(ops, yesterday, 3, 3);
+    const talked = db.prepare(
+      "INSERT OR REPLACE INTO interview_states (person, kind, lead_of, started_at, completed_at, updated_at) VALUES (?, 'lead', ?, ?, ?, ?)"
+    );
+    const at = `${yesterday}T10:00:00.000Z`;
+    // Each as the lead of the team they led when their link went out.
+    for (const [lead, team] of [
+      [`lea-${run}`, sales],
+      [`ona-${run}`, ops],
+    ] as const) {
+      talked.run(lead, team, at, at, at);
+    }
+  });
+
+  await signInTo(page.context(), admin);
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  // The voice isn't reached from the local stack: it says nothing.
+  await page.route("**/api/speech", async (route) => {
+    await route.fulfill({
+      status: 503,
+      json: { code: "speech.failed", message: "Not here" },
+    });
+  });
+  await page.goto("/setup?step=listening");
+  await expect(page.getByText("Day 7 of 14")).toBeVisible();
+  const figure = (label: string) =>
+    page.locator("div.rounded-xl").filter({ hasText: label });
+  await expect(figure("team leads talked")).toContainText("2 of 3");
+  await expect(figure("colleagues talked")).toContainText("5");
+  await expect(
+    page.getByText(
+      "Service has been quiet so far. A short message from Lisa, their lead, usually helps. I’ll remind everyone once myself."
+    )
+  ).toBeVisible();
+
+  // Team by team: numbers for Sales, too few for Service, none for Ops.
+  await page.getByRole("button", { name: "By team" }).click();
+  const panel = page.getByRole("dialog");
+  await expect(panel).toContainText(/Sales\D*5 of 6/u);
+  await expect(panel).toContainText("ServiceLead not yetFewer than 3 of 5");
+  await expect(panel).toContainText("OpsLead talkedUnder 5");
+  await page.keyboard.press("Escape");
+
+  // Everyone's link is out by now: Lea's and the others' after three working days.
+  await page.reload();
+  const links = page.getByRole("button", { name: /^\d+ new links to send$/u });
+  await expect(links).toBeVisible();
+  await links.click();
+  const downloading = page.waitForEvent("download");
+  await page
+    .getByRole("button", { name: /^The \d+ new links, as a list$/u })
+    .click();
+  const download = await downloading;
+  expect(download.suggestedFilename()).toBe("grasp-links.csv");
+  // Taken: none are new any more.
+  await expect(
+    page.getByRole("button", { name: "Links to send" })
+  ).toBeVisible();
+
+  // The same, under Settings, Onboarding.
+  await page.goto("/settings/onboarding");
+  await expect(page.getByText("Day 7 of 14")).toBeVisible();
+  await expect(
+    page.getByText(/^Service has been quiet so far\./u)
+  ).toBeVisible();
   expect(cspViolations).toStrictEqual([]);
 });
