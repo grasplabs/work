@@ -20,6 +20,17 @@ import { outcome, signedInApi } from "./sign-in.ts";
 // answers in each provider's own wire format. Everything else is real,
 // down to the audit log.
 
+/**
+ * The most core's own work may add before an answer's first words reach
+ * its caller: the rules, the quota policy read from D1, and admission by
+ * the model ledger, with the provider answering at once. Stephen's whole
+ * turn has 2.3 seconds to his first sound, most of it the
+ * model's; core, in workerd, takes a few tens of milliseconds, so this
+ * leaves room for a slow CI runner while still failing on a new round
+ * trip, or a wait, before the first token.
+ */
+const firstTokenBudgetMs = 500;
+
 const workersAi = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 const anthropic = "anthropic/claude-sonnet-4-5";
 const openai = "openai/gpt-5.4";
@@ -1015,6 +1026,41 @@ describe("model gateway", { timeout: 30_000 }, () => {
   });
 });
 
+/**
+ * How long a streamed turn took to bring its first words to the caller,
+ * in milliseconds; `release` lets the provider write the rest.
+ */
+const firstWordsMs = async (
+  gatewayEnv: ModelsEnv,
+  question: string,
+  release: () => void
+): Promise<number | undefined> => {
+  const agent = await models(gatewayEnv).agent({
+    model: anthropic,
+    purpose: "chat.turn",
+    trigger: newPerson(),
+    work: work(),
+  });
+  const started = performance.now();
+  const stream = agent.stream(
+    agent.model,
+    normalizeContext({
+      messages: [{ role: "user", content: question, timestamp: Date.now() }],
+    })
+  );
+  let firstMs: number | undefined = undefined;
+  for await (const event of stream) {
+    if (firstMs === undefined && event.type === "text_delta") {
+      firstMs = performance.now() - started;
+      // Only now does the provider go on: an answer core held back until
+      // its end would never get here.
+      release();
+    }
+  }
+  await stream.result();
+  return firstMs;
+};
+
 describe("model gateway for agents", () => {
   beforeEach(makeWork);
 
@@ -1354,5 +1400,31 @@ describe("model gateway for agents", () => {
       },
       cost: { amount: 0 },
     });
+  });
+
+  it("relays an answer's first words while the provider is still writing, with little of core's own work before them", async () => {
+    const warm = Promise.withResolvers<boolean>();
+    const measured = Promise.withResolvers<boolean>();
+    const { gatewayEnv } = withGateway([
+      {
+        ...answer("Warming up the ledger."),
+        pause: { at: 7, until: warm.promise },
+      },
+      {
+        ...answer("Good morning. What does your team do first?"),
+        pause: { at: 13, until: measured.promise },
+      },
+    ]);
+
+    // The first turn starts the ledger and the rest; the second is a turn
+    // as a conversation has them.
+    await firstWordsMs(gatewayEnv, "Hello.", () => {
+      warm.resolve(true);
+    });
+    const firstMs = await firstWordsMs(gatewayEnv, "Good morning.", () => {
+      measured.resolve(true);
+    });
+
+    expect(firstMs).toBeLessThan(firstTokenBudgetMs);
   });
 });

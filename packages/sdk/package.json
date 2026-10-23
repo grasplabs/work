@@ -20,6 +20,7 @@
     "./open-workflow": "./src/open-workflow.ts",
     "./compute": "./src/compute.ts",
     "./action": "./src/action.ts",
+    "./brain": "./src/brain.ts",
     "./compute-runner": "./src/compute-runner.ts",
     "./engine": "./src/engine.ts",
     "./params": "./src/params.ts",

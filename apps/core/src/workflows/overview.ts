@@ -562,7 +562,8 @@ const answerableDecisions = async (
   const answerable = await answerableBy(env, by, open);
   const byRun = new Map<string, string>();
   for (const { id, runId } of open) {
-    if (answerable.has(id) && !byRun.has(runId)) {
+    // Each an App's run's, read by its ID.
+    if (runId !== null && answerable.has(id) && !byRun.has(runId)) {
       byRun.set(runId, id);
     }
   }

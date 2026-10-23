@@ -21,12 +21,16 @@ const view = (paused: boolean): OnboardingView => ({
   paused,
 });
 
-/** What the listening step says, as text without its markup. */
-const listening = (paused: boolean): string => {
+/** What a step says, as text without its markup. */
+const said = (
+  step: "listening" | "review",
+  { paused = false, settled = [] }: { paused?: boolean; settled?: "mail"[] }
+): string => {
   const data: SetupData = {
     admin: "Ada",
     view: view(paused),
     documents: [],
+    sendingDomain: "mail.example.test",
     gate: {
       open: false,
       closedSince: null,
@@ -54,10 +58,12 @@ const listening = (paused: boolean): string => {
         message={null}
         onMadeWay={() => {}}
         onMessage={() => {}}
+        onSettle={() => {}}
         onStory={() => {}}
         parts={[]}
         percent={10}
-        step="listening"
+        settled={settled}
+        step={step}
         today={today}
       />
     </I18nProvider>
@@ -68,13 +74,44 @@ const listening = (paused: boolean): string => {
 
 describe("the step while Stephen talks to the team", () => {
   it("says the interviews are paused, while Grasp paused them", () => {
-    const paused = listening(true);
+    const paused = said("listening", { paused: true });
     expect(paused).toContain(
       "Paused: no link opens and none goes out. The links that are due go out once they run again."
     );
     expect(paused.indexOf("Paused:")).toBeLessThan(
       paused.indexOf("Day 3 of 14")
     );
-    expect(listening(false)).not.toContain("Paused:");
+    expect(said("listening", {})).not.toContain("Paused:");
+  });
+
+  it("asks the admin to let Grasp's mail through, naming the sending domain, until they say it's done", () => {
+    const open = said("listening", {});
+    expect({
+      asked: open.includes("Let Grasp’s mail through"),
+      named: open.includes(
+        "Apply it if the sender’s domain is mail.example.test."
+      ),
+      done: said("listening", { settled: ["mail"] }).includes(
+        "Let Grasp’s mail through"
+      ),
+    }).toStrictEqual({ asked: true, named: true, done: false });
+  });
+});
+
+describe("what needs the admin", () => {
+  it("counts letting Grasp's mail through, and lets them go on once it's done", () => {
+    const open = said("review", {});
+    const done = said("review", { settled: ["mail"] });
+    expect({
+      open: [
+        open.includes("Just one thing for you"),
+        open.includes("Continue"),
+      ],
+      done: [
+        done.includes("Nothing needs you"),
+        done.includes("Settled: It’s done"),
+        done.includes("Continue"),
+      ],
+    }).toStrictEqual({ open: [true, false], done: [true, true, true] });
   });
 });

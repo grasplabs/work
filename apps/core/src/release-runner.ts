@@ -27,6 +27,7 @@ import type { OpenStore } from "./data-stores.ts";
 import { sdkReleaseManifests } from "./db/core/schema.ts";
 import { hostJsonModule, hostJsonSource } from "./host-json.ts";
 import type { HostedApp, Runner } from "./operations.ts";
+import { quietLoader } from "./quiet-loader.ts";
 import {
   capability,
   runInSession,
@@ -467,13 +468,14 @@ export const releaseRunner =
     const answer = settledSchema.safeParse(
       host === undefined
         ? await Promise.race([
-            env.LOADER.get(null, () => ({
-              ...sandbox,
-              mainModule: runModule,
-              modules,
-              env: {},
-              ...(tailOf === undefined ? {} : { tails: [tailOf(path)] }),
-            }))
+            quietLoader(env.LOADER)
+              .get(null, () => ({
+                ...sandbox,
+                mainModule: runModule,
+                modules,
+                env: {},
+                ...(tailOf === undefined ? {} : { tails: [tailOf(path)] }),
+              }))
               .getEntrypoint<RunEntrypoint>("Run")
               .run(path, args, isolateChannel),
             // Given up on: settled at once, its isolate left to the

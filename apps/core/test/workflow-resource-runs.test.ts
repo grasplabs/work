@@ -975,6 +975,7 @@ const evaluatedWith = async (
       await Promise.resolve();
     },
     waitForEvent: async () => await Promise.reject(new Error("No waits here")),
+    waitForMatch: async () => await Promise.reject(new Error("No waits here")),
   };
   let reads = 0;
   const runId = crypto.randomUUID();
@@ -992,6 +993,7 @@ const evaluatedWith = async (
       build,
       calling: {
         runId,
+        rootRunId: runId,
         workflowId: id,
         version: 1,
         principal: by.userId,
@@ -1102,6 +1104,8 @@ describe("an activation's share of core's CPU", () => {
       },
       waitForEvent: async () =>
         await Promise.reject(new Error("No waits here")),
+      waitForMatch: async () =>
+        await Promise.reject(new Error("No waits here")),
     };
     // Room for one attempt's worth: the first runs and spends some of it.
     const hostWithOneShare = () => {
@@ -1120,6 +1124,7 @@ describe("an activation's share of core's CPU", () => {
           build,
           calling: {
             runId,
+            rootRunId: runId,
             workflowId: workflow.id,
             version: 1,
             principal: by.userId,
@@ -2183,6 +2188,8 @@ describe(
           },
           waitForEvent: async () =>
             await Promise.reject(new Error("No waits here")),
+          waitForMatch: async () =>
+            await Promise.reject(new Error("No waits here")),
           sleepUntil: async () => {
             await Promise.resolve();
           },
@@ -2198,6 +2205,7 @@ describe(
           build,
           calling: {
             runId,
+            rootRunId: runId,
             workflowId: workflow.id,
             version: 1,
             principal: by.userId,

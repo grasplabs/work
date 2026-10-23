@@ -34,6 +34,8 @@ export const agentErrors = defineErrorFamily({
     "There's no such document in the project.",
   "agent.run_revoked":
     "A permission of this chat's agent was revoked while this code run was under way, so its APIs don't answer any more.",
+  "agent.history_revoked":
+    "This turn read something its chat can no longer read, so it stopped. Ask again to go on without it.",
   "agent.run_calls_spent":
     "This code run has made all the API calls one run may. Run the rest in another code step.",
   "agent.job_not_found": "This chat has no such build job.",

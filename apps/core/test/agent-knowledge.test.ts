@@ -1,30 +1,45 @@
+import { agentErrors } from "@grasp-os/shared/agent";
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import type { ChatMessage } from "@grasp-os/shared/chat";
 import { workspaceIdSchema } from "@grasp-os/shared/ids";
 import { knowledgeErrors } from "@grasp-os/shared/knowledge";
 import type { CollectionInput } from "@grasp-os/shared/knowledge";
-import { evictDurableObject } from "cloudflare:test";
+import { evictDurableObject, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
+import { z } from "zod";
 
+import {
+  requestChars,
+  withheldResponse,
+  withheldResult,
+} from "../src/agent.ts";
 import { refreshDailySignals } from "../src/daily-signals.ts";
 import { workspace } from "../src/durable-objects.ts";
 import {
   chatOf,
   personalChatsOf,
   codeResults,
+  codeStatuses,
   codeStep,
   gatewayConfig,
   model,
   pointAtGateway,
   says,
+  setObjectEnv,
 } from "./agent-chat.ts";
 import { fakeGateway } from "./ai-gateway.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { collectionWithNote, newTeam, readCollection } from "./knowledge.ts";
-import { outcome, signedInApi, signedInWithRole, unique } from "./sign-in.ts";
+import {
+  callAuth,
+  outcome,
+  signedInApi,
+  signedInWithRole,
+  unique,
+} from "./sign-in.ts";
 
 // `env.knowledge` in a chat's code: the chat's agent reading Knowledge for
 // its person. These tests start from the ways it can fail: the agent reads
@@ -99,6 +114,10 @@ const overdueIn = async (
 
 const modelCalls = (events: AuditEvent[]) =>
   events.filter(({ action }) => action === "model.call");
+
+/** Code that returns the text of the document `documentId`. */
+const readCode = (documentId: string) =>
+  `export default async (self, env) => (await env.knowledge.read(${JSON.stringify(documentId)})).text;`;
 
 const leave = "# Parental leave\n\nParental leave lasts sixteen weeks.";
 
@@ -584,6 +603,209 @@ describe("a chat's Knowledge", setUpTime, () => {
     });
   });
 
+  it("withholds what an earlier turn read from every later request once its agent may no longer read it, and audits it once", async () => {
+    const admin = await newAdmin();
+    const person = await newPerson();
+    const secret = `CANARY-${unique()}`;
+    const kept = `KEPT-${unique()}`;
+    const [plans, handbook] = await Promise.all(
+      [
+        { name: "Plans", text: `# Route plan\n\nDeparts ${secret}.` },
+        { name: "Handbook", text: `# Leave\n\nLeave lasts ${kept}.` },
+      ].map(async ({ name, text }) => {
+        const { id: collectionId } = await admin.knowledge.createCollection({
+          name: `${name} ${unique()}`,
+          access: "everyone",
+        });
+        const { id: documentId } = await admin.knowledge.saveDocument({
+          collectionId,
+          path: "doc.md",
+          text,
+          ifVersion: 0,
+        });
+        return { collectionId, documentId };
+      })
+    );
+    const { stub, chat, gateway, ask, agent } = await chatOf(
+      person.userId,
+      codeStep(readCode(handbook?.documentId ?? "")),
+      says(`Leave lasts ${kept}.`),
+      codeStep(readCode(plans?.documentId ?? "")),
+      // What the model says after the read repeats it.
+      codeStep(`export default async () => ${JSON.stringify(secret)};`),
+      says(`It departs ${secret}.`),
+      says("I can't read that any more."),
+      says("Still not."),
+      says(`It departs ${secret}.`)
+    );
+    const grant = async (collectionId: string) =>
+      await requestGranted(
+        idp,
+        admin,
+        readCollection(agent, collectionId, `C${unique()}`.toUpperCase())
+      );
+    await grant(handbook?.collectionId ?? "");
+    const plansGrant = await grant(plans?.collectionId ?? "");
+
+    await ask("How long is leave?");
+    await ask("When does the route plan depart?");
+    const beforeRevoke = gateway.requests.length;
+    await admin.api.permissions.revoke(plansGrant);
+    await ask("And now?");
+    await ask("And now?");
+    const afterRevoke = gateway.requests.slice(beforeRevoke - 1);
+
+    // Sent while it could be read; never once it can't. The other
+    // turn's read, still readable, goes on as it was.
+    const sent = afterRevoke.map(({ body }) => JSON.stringify(body));
+    expect(
+      sent.map((body) => ({
+        secret: body.includes(secret),
+        kept: body.includes(kept),
+        result: body.includes(withheldResult),
+        response: body.includes(withheldResponse),
+      }))
+    ).toStrictEqual([
+      // The last request before the revocation.
+      { secret: true, kept: true, result: false, response: false },
+      { secret: false, kept: true, result: true, response: true },
+      { secret: false, kept: true, result: true, response: true },
+    ]);
+    // The transcript keeps it: the person still sees what was said.
+    await expect(codeResults(stub, chat.id)).resolves.toContainEqual({
+      isError: false,
+      text: `Returned:\n# Route plan\n\nDeparts ${secret}.`,
+    });
+
+    // Granted again, it may be sent again.
+    await grant(plans?.collectionId ?? "");
+    await ask("And now?");
+    expect(JSON.stringify(gateway.requests.at(-1)?.body)).toContain(secret);
+
+    // Audited once, by the agent for its person: the run and the source,
+    // never what it read.
+    const events = await eventsOf(agent.agentId, (all) =>
+      all.some(({ action }) => action === "chat.history_withheld")
+    );
+    const withheld = events.filter(
+      ({ action }) => action === "chat.history_withheld"
+    );
+    expect(
+      withheld.map((event) => ({
+        target: event.target,
+        source: event.detail.source,
+        run: typeof event.detail.run,
+        holdsSecret: JSON.stringify(event).includes(secret),
+      }))
+    ).toStrictEqual([
+      {
+        target: { type: "chat", id: chat.id },
+        source: plans?.collectionId,
+        run: "string",
+        holdsSecret: false,
+      },
+    ]);
+  });
+
+  it("stops a turn under way once something it read can't be read any more, before its next request", async () => {
+    const admin = await newAdmin();
+    const person = await newPerson();
+    const teamId = await newTeam(admin, [person]);
+    const secret = `CANARY-${unique()}`;
+    const { id: collectionId } = await admin.knowledge.createCollection({
+      name: `Plans ${unique()}`,
+      access: "teams",
+      teams: [teamId],
+    });
+    const { id: documentId } = await admin.knowledge.saveDocument({
+      collectionId,
+      path: "plan.md",
+      text: `# Route plan\n\nDeparts ${secret}.`,
+      ifVersion: 0,
+    });
+    // Reads the plan, then reads it again until it can't: the person left
+    // the team meanwhile. Leaving a team revokes no permission, so the run
+    // ends as it ran.
+    const { stub, gateway, ask, agent } = await chatOf(
+      person.userId,
+      codeStep(
+        `export default async (self, env) => {
+          const id = ${JSON.stringify(documentId)};
+          const first = (await env.knowledge.read(id)).text;
+          for (let tries = 0; tries < 100; tries += 1) {
+            try { await env.knowledge.read(id); } catch { return first; }
+            await new Promise((done) => setTimeout(done, 50));
+          }
+          return first;
+        };`
+      ),
+      says(`It departs ${secret}.`)
+    );
+    await requestGranted(
+      idp,
+      admin,
+      readCollection(agent, collectionId, `C${unique()}`.toUpperCase())
+    );
+    const recorded = async () =>
+      await runInDurableObject(
+        stub,
+        (_, state) =>
+          state.storage.sql
+            .exec("SELECT count(*) AS n FROM chat_run_sources")
+            .one().n
+      );
+
+    const asked = outcome(ask("When does the route plan depart?"));
+    await vi.waitFor(
+      async () => {
+        await expect(recorded()).resolves.toBe(1);
+      },
+      { timeout: 10_000, interval: 50 }
+    );
+    await callAuth("/organization/remove-team-member", admin.session, {
+      teamId,
+      userId: person.userId,
+    });
+
+    // The provider takes the turn's latest response whole, so nothing of
+    // it can be withheld: the turn stops, and nothing more is sent.
+    await expect(asked).resolves.toBe("agent.history_revoked");
+    expect(gateway.requests).toHaveLength(1);
+  });
+
+  it("sends only the latest of its memory and skills: a skill it can no longer read never reaches the model again", async () => {
+    const admin = await newAdmin();
+    const person = await newPerson();
+    const marker = `SKILL-${unique()}`;
+    const { id: collectionId } = await admin.knowledge.createCollection({
+      name: `Playbooks ${unique()}`,
+      access: "everyone",
+    });
+    await admin.knowledge.saveDocument({
+      collectionId,
+      path: "route-check/SKILL.md",
+      text: `---\nname: route-check\ndescription: Check routes with ${marker}.\n---\n# Route check`,
+      ifVersion: 0,
+    });
+    const { gateway, ask, agent } = await chatOf(
+      person.userId,
+      says("Noted."),
+      says("Noted again.")
+    );
+    const grant = await requestGranted(
+      idp,
+      admin,
+      readCollection(agent, collectionId, `C${unique()}`.toUpperCase())
+    );
+    await ask("Hello.");
+    await admin.api.permissions.revoke(grant);
+    await ask("Hello again.");
+
+    expect(
+      gateway.requests.map(({ body }) => JSON.stringify(body).includes(marker))
+    ).toStrictEqual([true, false]);
+  });
+
   it("records nothing for a code run that isn't open", async () => {
     const person = await newPerson();
     const { stub, chat, ask, agent } = await chatOf(person.userId, says("Hi."));
@@ -600,5 +822,387 @@ describe("a chat's Knowledge", setUpTime, () => {
     expect(
       modelCalls(events).map(({ provenance }) => provenance)
     ).toStrictEqual([[]]);
+  });
+
+  it("recalls for a chat only under the Brain permission, only from what its person may read, and labels the chat with every collection it read, found or not", async () => {
+    const admin = await newAdmin();
+    const person = await newPerson();
+    const word = `zq${crypto.randomUUID().replaceAll(/[^a-f]/gu, "")}`;
+    // Granted and readable by the person, but without the word.
+    const { id: handbook } = await admin.knowledge.createCollection({
+      name: `Handbook ${unique()}`,
+      access: "everyone",
+    });
+    await admin.knowledge.saveDocument({
+      collectionId: handbook,
+      path: "other.md",
+      text: "# Other\nNothing of it here.",
+      ifVersion: 0,
+    });
+    // Granted, holding the word, but a team's the person isn't in.
+    const team = await newTeam(admin, [admin]);
+    const { id: teamOnly } = await admin.knowledge.createCollection({
+      name: `Team ${unique()}`,
+      access: "teams",
+      teams: [team],
+    });
+    await admin.knowledge.saveDocument({
+      collectionId: teamOnly,
+      path: "plan.md",
+      text: `# Plan\n${word}`,
+      ifVersion: 0,
+    });
+    const recallStep = codeStep(
+      `export default async (self, env) => { const outcome = async (asked) => { try { const pack = await asked; return pack.items.length; } catch (error) { return error.code ?? String(error); } }; return [await outcome(env.knowledge.recall({ query: ${JSON.stringify(word)} })), await outcome(env.knowledge.recall({ query: ${JSON.stringify(word)}, filters: { collectionIds: [${JSON.stringify(handbook)}] } }))]; };`
+    );
+    const { stub, chat, ask, agent } = await chatOf(
+      person.userId,
+      recallStep,
+      says("Nothing."),
+      recallStep,
+      says("Still nothing.")
+    );
+    await grantRead(admin, agent, handbook);
+    await grantRead(admin, agent, teamOnly);
+    // Without the Brain permission: refused.
+    const before = await ask("What is the plan?");
+    await requestGranted(idp, admin, {
+      subject: agent,
+      object: { type: "platform" },
+      actions: ["brain"],
+      binding: "BRAIN",
+    });
+    const after = await ask("What is the plan, now?");
+    const results = await codeResults(stub, chat.id);
+    expect({
+      results: results.map(({ text }) => text),
+      before: before.provenance,
+      after: after.provenance,
+    }).toStrictEqual({
+      results: [
+        'Returned:\n["brain.denied","brain.denied"]',
+        // Once granted, the turn recalls for the question first: never
+        // from the plan its person can't read.
+        expect.not.stringContaining(word),
+        "Returned:\n[0,0]",
+      ],
+      before: { sources: [], restricted: false },
+      // The word is only in a collection the person can't read; the
+      // collection it was told to read is the chat's source even though
+      // nothing was found there.
+      after: { sources: [handbook], restricted: false },
+    });
+  });
+});
+
+/** Grants `agent` the Brain permission, as an admin would. */
+const grantBrain = async (
+  admin: Admin,
+  agent: { type: "agent"; agentId: string }
+) =>
+  await requestGranted(idp, admin, {
+    subject: agent,
+    object: { type: "platform" },
+    actions: ["brain"],
+    binding: "BRAIN",
+  });
+
+/** A message of an Anthropic request, as the gateway was sent it. */
+const requestMessagesSchema = z.object({
+  messages: z.array(
+    z.object({
+      role: z.string(),
+      content: z.union([z.string(), z.array(z.unknown())]),
+    })
+  ),
+});
+
+/**
+ * What a request handed the model as code results (tool results), and
+ * everything else it sent: the system prompt, the question, the calls.
+ */
+const splitRequest = (body: unknown) => {
+  const parsed = requestMessagesSchema.parse(body);
+  const results: unknown[] = [];
+  const rest: unknown[] = [];
+  for (const { content } of parsed.messages) {
+    for (const block of typeof content === "string" ? [content] : content) {
+      const isResult =
+        typeof block === "object" &&
+        block !== null &&
+        "type" in block &&
+        block.type === "tool_result";
+      (isResult ? results : rest).push(block);
+    }
+  }
+  const { messages: _messages, ...envelope } = z
+    .looseObject({ messages: z.unknown() })
+    .parse(body);
+  return {
+    results: JSON.stringify(results),
+    rest: JSON.stringify([envelope, rest]),
+  };
+};
+
+describe("a chat's recall before a question", setUpTime, () => {
+  it("hands the model what the Brain recalls for the question, as a code result it reads as data, before its first request", async () => {
+    const admin = await newAdmin();
+    const person = await newPerson();
+    const word = `zq${crypto.randomUUID().replaceAll(/[^a-f]/gu, "")}`;
+    const fact = "The depot opens at seven";
+    const { id: collectionId } = await admin.knowledge.createCollection({
+      name: `Handbook ${unique()}`,
+      access: "everyone",
+    });
+    const { id: documentId } = await admin.knowledge.saveDocument({
+      collectionId,
+      path: "depot.md",
+      text: `# Depot ${word}\n\n${fact}.`,
+      ifVersion: 0,
+    });
+    const { stub, chat, gateway, ask, agent } = await chatOf(
+      person.userId,
+      says("Seven.")
+    );
+    await grantRead(admin, agent, collectionId);
+    await grantBrain(admin, agent);
+
+    const reply = await ask(word);
+
+    const [request] = gateway.requests.map(({ body }) => splitRequest(body));
+    const [result] = await codeResults(stub, chat.id);
+    expect({
+      answer: reply.answer,
+      requests: gateway.requests.length,
+      inResult: request?.results.includes(fact),
+      elsewhere: request?.rest.includes(fact),
+      cites: result?.text.includes(documentId),
+      provenance: reply.provenance,
+    }).toStrictEqual({
+      answer: "Seven.",
+      // Answered from the evidence, without a search of its own.
+      requests: 1,
+      inResult: true,
+      elsewhere: false,
+      cites: true,
+      provenance: { sources: [collectionId], restricted: false },
+    });
+    // Audited as the agent's recall: a read of what it returned.
+    const events = await eventsOf(agent.agentId, (all) =>
+      all.some(({ action }) => action === "knowledge.search")
+    );
+    expect(
+      events
+        .filter(({ action }) => action === "knowledge.search")
+        .map(({ detail }) => detail)
+    ).toStrictEqual([expect.objectContaining({ via: "recall", hits: 1 })]);
+  });
+
+  it("never hands the model what the person or the agent may not read", async () => {
+    const admin = await newAdmin();
+    const person = await newPerson();
+    const word = `zq${crypto.randomUUID().replaceAll(/[^a-f]/gu, "")}`;
+    const teamCanary = `team canary ${unique()}`;
+    const ungrantedCanary = `ungranted canary ${unique()}`;
+    // Granted to the agent, but a team's the person isn't in.
+    const team = await newTeam(admin, [admin]);
+    const { id: teamOnly } = await admin.knowledge.createCollection({
+      name: `Team ${unique()}`,
+      access: "teams",
+      teams: [team],
+    });
+    await admin.knowledge.saveDocument({
+      collectionId: teamOnly,
+      path: "plan.md",
+      text: `# Plan ${word}\n\n${teamCanary}`,
+      ifVersion: 0,
+    });
+    // Readable by the person, but not granted to the agent.
+    const { id: ungranted } = await admin.knowledge.createCollection({
+      name: `Open ${unique()}`,
+      access: "everyone",
+    });
+    await admin.knowledge.saveDocument({
+      collectionId: ungranted,
+      path: "plan.md",
+      text: `# Plan ${word}\n\n${ungrantedCanary}`,
+      ifVersion: 0,
+    });
+    const { stub, chat, gateway, ask, agent } = await chatOf(
+      person.userId,
+      says("I can't find it.")
+    );
+    await grantRead(admin, agent, teamOnly);
+    await grantBrain(admin, agent);
+
+    const reply = await ask(word);
+
+    const sent = JSON.stringify(gateway.requests.map(({ body }) => body));
+    const [result] = await codeResults(stub, chat.id);
+    expect({
+      team: sent.includes(teamCanary),
+      ungranted: sent.includes(ungrantedCanary),
+      recalled: result?.text.includes('"evidence":[]'),
+      provenance: reply.provenance,
+    }).toStrictEqual({
+      team: false,
+      ungranted: false,
+      recalled: true,
+      provenance: { sources: [], restricted: false },
+    });
+  });
+
+  it("recalls nothing without the Brain permission", async () => {
+    const admin = await newAdmin();
+    const person = await newPerson();
+    const word = `zq${crypto.randomUUID().replaceAll(/[^a-f]/gu, "")}`;
+    const fact = `The code is ${unique()}`;
+    const { id: collectionId } = await admin.knowledge.createCollection({
+      name: `Handbook ${unique()}`,
+      access: "everyone",
+    });
+    await admin.knowledge.saveDocument({
+      collectionId,
+      path: "code.md",
+      text: `# Code ${word}\n\n${fact}.`,
+      ifVersion: 0,
+    });
+    const { stub, chat, gateway, ask, agent } = await chatOf(
+      person.userId,
+      says("Let me look.")
+    );
+    await grantRead(admin, agent, collectionId);
+
+    const reply = await ask(word);
+
+    expect({
+      steps: await codeResults(stub, chat.id),
+      sent: JSON.stringify(gateway.requests.map(({ body }) => body)).includes(
+        fact
+      ),
+      provenance: reply.provenance,
+    }).toStrictEqual({
+      steps: [],
+      sent: false,
+      provenance: { sources: [], restricted: false },
+    });
+  });
+
+  it("keeps the recall within what the model takes, for a question near its limit", async () => {
+    const admin = await newAdmin();
+    const person = await newPerson();
+    const word = `zq${crypto.randomUUID().replaceAll(/[^a-f]/gu, "")}`;
+    const { id: collectionId } = await admin.knowledge.createCollection({
+      name: `Handbook ${unique()}`,
+      access: "everyone",
+    });
+    // Five long sections the question's word matches: more evidence than
+    // a question near the limit leaves room for.
+    for (const index of [1, 2, 3, 4, 5]) {
+      // oxlint-disable-next-line no-await-in-loop -- one document at a time
+      await admin.knowledge.saveDocument({
+        collectionId,
+        path: `long-${index}.md`,
+        text: `# Long ${index}\n\n${`The ${word} rule applies. `.repeat(40)}`,
+        ifVersion: 0,
+      });
+    }
+    // The model that takes 18,000 tokens: its window of 24,000 less a
+    // quarter kept for the answer (agent.test.ts).
+    const tiny = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+    const { stub, chat, gateway, agent } = await chatOf(
+      person.userId,
+      says("Near the limit."),
+      says("With room.")
+    );
+    await pointAtGateway(stub, gateway, {
+      config: { ...gatewayConfig, models: [model, tiny] },
+    });
+    await grantRead(admin, agent, collectionId);
+    await grantBrain(admin, agent);
+    const question = (chars: number) =>
+      `${word} ${"x".repeat(chars - word.length - 1)}`;
+    // The longest question the model takes, to within a thousand
+    // characters: a longer one is refused before anything runs.
+    let chars = 54_000;
+    let near: Awaited<ReturnType<typeof stub.ask>> | undefined;
+    const refusals = new Set<string | undefined>();
+    while (near === undefined) {
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- shorter until one fits
+        near = await stub.ask(chat.id, { text: question(chars), model: tiny });
+      } catch (error) {
+        refusals.add(agentErrors.codeOf(error));
+        chars -= 1000;
+      }
+    }
+    const nearSteps = await codeResults(stub, chat.id);
+    const withRoom = await stub.ask(chat.id, {
+      text: question(chars - 12_000),
+      model: tiny,
+    });
+    const steps = await codeResults(stub, chat.id);
+    const window = requestChars(18_000);
+    expect({
+      refusals: [...refusals],
+      near: near.outcome,
+      nearSteps,
+      nearFits: JSON.stringify(gateway.requests[0]?.body).length <= window,
+      withRoom: withRoom.outcome,
+      recalled: steps.at(-1)?.text.includes(`"evidence":[{`),
+      fits: JSON.stringify(gateway.requests[1]?.body).length <= window,
+    }).toStrictEqual({
+      refusals: ["agent.question_too_long"],
+      near: "answered",
+      // No room left for evidence: no recall.
+      nearSteps: [],
+      nearFits: true,
+      withRoom: "answered",
+      // Evidence, as much as fits.
+      recalled: true,
+      fits: true,
+    });
+  });
+
+  it("answers without evidence, told why, when the recall runs out of time", async () => {
+    const admin = await newAdmin();
+    const person = await newPerson();
+    const word = `zq${crypto.randomUUID().replaceAll(/[^a-f]/gu, "")}`;
+    const fact = `The code is ${unique()}`;
+    const { id: collectionId } = await admin.knowledge.createCollection({
+      name: `Handbook ${unique()}`,
+      access: "everyone",
+    });
+    await admin.knowledge.saveDocument({
+      collectionId,
+      path: "code.md",
+      text: `# Code ${word}\n\n${fact}.`,
+      ifVersion: 0,
+    });
+    const { stub, chat, gateway, ask, agent } = await chatOf(
+      person.userId,
+      says("I couldn't read Knowledge in time.")
+    );
+    await grantRead(admin, agent, collectionId);
+    await grantBrain(admin, agent);
+    // Too short for any run to finish.
+    await setObjectEnv(stub, { CODE_RUN_TIMEOUT_MS: "1" });
+
+    const reply = await ask(word);
+
+    const [request] = gateway.requests.map(({ body }) => splitRequest(body));
+    expect({
+      outcome: reply.outcome,
+      statuses: await codeStatuses(stub, chat.id),
+      told: request?.results.includes("wall_expired"),
+      sent: JSON.stringify(gateway.requests.map(({ body }) => body)).includes(
+        fact
+      ),
+    }).toStrictEqual({
+      outcome: "answered",
+      statuses: ["wall_expired"],
+      told: true,
+      sent: false,
+    });
   });
 });

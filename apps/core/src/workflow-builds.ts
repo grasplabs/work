@@ -250,6 +250,15 @@ const sealedCallSchema = z.discriminatedUnion("name", [
     timestamp: templateSchema,
   }),
   z.strictObject({
+    name: z.literal("grasp.decision"),
+    binding: aliasSchema,
+    recipients: templateSchema,
+    prompt: templateSchema,
+    input: templateSchema,
+    // How long it takes answers, from its task's timeout (generate.ts).
+    timeoutMs: z.int().positive().optional(),
+  }),
+  z.strictObject({
     name: z.literal("grasp.compute"),
     binding: aliasSchema,
     // The workflow's own module and export its binding names, as the
@@ -260,6 +269,21 @@ const sealedCallSchema = z.discriminatedUnion("name", [
       .regex(/^[A-Za-z_$][A-Za-z0-9_$]*$/u)
       .max(256),
     arguments: templateSchema,
+  }),
+  z.strictObject({
+    name: z.literal("grasp.emit"),
+    binding: aliasSchema,
+    type: z.string().min(1).max(256),
+    subject: templateSchema.optional(),
+    dataschema: z
+      .string()
+      .max(1024)
+      .refine((text) => {
+        const url = URL.canParse(text) ? new URL(text) : undefined;
+        return url?.protocol === "http:" || url?.protocol === "https:";
+      })
+      .optional(),
+    data: templateSchema,
   }),
   z.strictObject({
     name: z.literal("grasp.action"),
@@ -275,6 +299,32 @@ const sealedCallSchema = z.discriminatedUnion("name", [
 ]);
 
 export type SealedCall = z.infer<typeof sealedCallSchema>;
+
+/**
+ * A listen task's events, as the build seals them (generate.ts,
+ * `GeneratedListen`): its event binding, its strategy, what of each event
+ * it reads, and its filters, each a type and the CloudEvents attributes it
+ * requires (by CloudEvents' rule for names), each a template the host
+ * builds in the task's enter step.
+ */
+const sealedListenSchema = z.strictObject({
+  binding: aliasSchema,
+  strategy: z.enum(["one", "any", "all"]),
+  read: z.enum(["data", "envelope"]),
+  filters: z
+    .array(
+      z.strictObject({
+        type: z.string().min(1).max(256),
+        attributes: z
+          .array(
+            z.tuple([z.string().regex(/^[a-z0-9]{1,20}$/u), templateSchema])
+          )
+          .max(16),
+      })
+    )
+    .min(1)
+    .max(16),
+});
 
 /** One task the generated module runs, as the host checks its steps. */
 const sealedTaskSchema = z.discriminatedUnion("kind", [
@@ -319,6 +369,25 @@ const sealedTaskSchema = z.discriminatedUnion("kind", [
     call: sealedCallSchema,
     // Its input.from, output.as and export.as, of the slots its module
     // evaluates (generate.ts).
+    inputFrom: templateSchema.optional(),
+    outputAs: templateSchema.optional(),
+    exportAs: templateSchema.optional(),
+  }),
+  z.strictObject({
+    ...taskBase,
+    kind: z.literal("run"),
+    // Its child: the workflow binding it starts, and its input's template.
+    run: z.strictObject({ binding: aliasSchema, input: templateSchema }),
+    inputFrom: templateSchema.optional(),
+    outputAs: templateSchema.optional(),
+    exportAs: templateSchema.optional(),
+  }),
+  z.strictObject({
+    ...taskBase,
+    kind: z.literal("listen"),
+    // Its timeout is its deadline: a listen never waits without one.
+    timeoutMs: z.int().positive(),
+    listen: sealedListenSchema,
     inputFrom: templateSchema.optional(),
     outputAs: templateSchema.optional(),
     exportAs: templateSchema.optional(),
@@ -521,6 +590,8 @@ export const compileWorkflow = async (
             milliseconds,
             duration,
             call,
+            listen,
+            run,
             inputFrom,
             outputAs,
             exportAs,
@@ -548,6 +619,12 @@ export const compileWorkflow = async (
             ...(call === undefined
               ? {}
               : { call: z.json().parse(structuredClone(call)) }),
+            ...(listen === undefined
+              ? {}
+              : { listen: z.json().parse(structuredClone(listen)) }),
+            ...(run === undefined
+              ? {}
+              : { run: z.json().parse(structuredClone(run)) }),
             ...(inputFrom === undefined
               ? {}
               : { inputFrom: z.json().parse(structuredClone(inputFrom)) }),

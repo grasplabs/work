@@ -8,6 +8,11 @@
 
 import { z } from "zod";
 
+import type {
+  BrainRecordInput,
+  BrainRecordsAdded,
+  WorkflowVersionRecord,
+} from "./brain-records.ts";
 import { defineErrorFamily } from "./errors.ts";
 import { documentIdSchema } from "./ids.ts";
 import type { CollectionId, DocumentId } from "./ids.ts";
@@ -183,6 +188,14 @@ export interface Statement {
   toolIds: string[];
   /** The candidate process it is about, if any. */
   candidateId?: string;
+  /**
+   * The earlier statement this one follows up: the same blocker or time
+   * sink, said again later, perhaps with a different pain, or resolved.
+   * The earlier statement is never edited.
+   */
+  followsUp?: string;
+  /** How much it hurts, as the team said it: only for blockers, time sinks and handovers. */
+  pain?: "low" | "medium" | "high";
 }
 
 /** A process that might be worth turning into a workflow. */
@@ -203,6 +216,8 @@ export interface Gap {
   sourceId: string;
   /** Brain note ids, statement ids or workflow ids this gap is about. */
   about: string[];
+  /** ISO date Grasp asked the owner. Empty while nobody was asked. */
+  askedAt?: string;
   closedAt?: string;
   /** The answer in the words of who gave it, and who that was. */
   answer?: string;
@@ -211,8 +226,14 @@ export interface Gap {
 
 /** One step of a drawn workflow, as far as the brain reads it. */
 export interface Step {
+  /** What is done, as an instruction. */
+  text?: string;
+  /** The role that does it, never a name. */
+  who?: string;
   /** The tools it uses, comma-separated as the client names them. */
   tool?: string;
+  /** How long one takes, as estimated. */
+  minutes?: WorkflowDrawing["steps"][number]["minutes"];
   /** Not every item goes the same way after this step: the paths, each with its own steps. */
   split?: { paths: { steps: Step[] }[] };
 }
@@ -238,7 +259,17 @@ export interface Workflow {
   target?: Version;
   /** Measured periods, the first from when it went live. */
   results?: { period: { from: string } }[];
+  /** Its name in the language its people speak. */
+  local?: string;
+  /** Each time it was drawn from the interviews, oldest first: the newest is its baseline. */
+  drawings?: WorkflowDrawing[];
 }
+
+/** One drawing of a workflow from the onboarding's interviews: never who told what. */
+export type WorkflowDrawing = Omit<
+  WorkflowVersionRecord,
+  "type" | "workflowId"
+>;
 
 /** A connector Grasp has, or could have, for a system. */
 export interface Connection {
@@ -327,6 +358,26 @@ export interface BrainApi {
    * time, as the person may read them.
    */
   notes: (options?: BrainNotesOptions) => Promise<BrainNotePage>;
+  /**
+   * Adds records to the Playbook (brain-records.ts), all or none: for
+   * admins. A record core holds already, exactly so, is left as it is.
+   */
+  addRecords: (records: BrainRecordInput[]) => Promise<BrainRecordsAdded>;
+  /** Records that the gap's owner was asked, once: for the company's admins. */
+  askAboutGap: (gapId: string) => Promise<Gap>;
+  /**
+   * Answers an open gap in the person's own words, and closes it, the
+   * brain showing their name as it is now: for every member, not Grasp's
+   * staff.
+   */
+  answerGap: (gapId: string, answer: string) => Promise<Gap>;
+  /** Closes an open gap without an answer: for the company's admins. */
+  closeGap: (gapId: string) => Promise<Gap>;
+  /**
+   * Takes a gap's answer away, and who gave it, keeping the gap closed:
+   * for the company's admins.
+   */
+  redactGapAnswer: (gapId: string) => Promise<Gap>;
 }
 
 /** Why a brain call was refused. */

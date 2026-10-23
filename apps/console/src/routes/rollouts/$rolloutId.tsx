@@ -17,12 +17,15 @@ import {
 import { useEffect, useState } from "react";
 import { z } from "zod";
 
+import { Cost, usd } from "../../clients/cost.tsx";
 import { formatTime } from "../../releases/format.ts";
+import type { RolloutCost } from "../../rollout/cost.ts";
 import {
   approveRolloutFn,
   checkRevocationFn,
   cancelRolloutFn,
   fetchRollout,
+  fetchRolloutCost,
   pauseRolloutFn,
   resumeRolloutFn,
   retryRolloutFn,
@@ -303,13 +306,66 @@ const Revocation = ({ rolloutId }: { rolloutId: string }) => {
   );
 };
 
+/**
+ * The rollout's clients' cost: read (`RolloutCost`), still being read
+ * (null), or not read (`failed`).
+ */
+type CostRead = RolloutCost | "failed" | null;
+
+/** Rollout `rolloutId`'s clients' cost, or `failed` when it couldn't be read. Never throws. */
+const readCost = async (rolloutId: string): Promise<RolloutCost | "failed"> => {
+  try {
+    return await fetchRolloutCost({ data: { rolloutId } });
+  } catch {
+    return "failed";
+  }
+};
+
+/** The clients' total cost, in words: all of it, its AI share, and how many aren't in it. */
+const totalWords = (cost: CostRead): string => {
+  if (cost === null) {
+    return "reading…";
+  }
+  if (cost === "failed") {
+    return "unknown";
+  }
+  const { total, unknown } = cost;
+  const left =
+    unknown === 0
+      ? ""
+      : `, ${unknown} ${unknown === 1 ? "client" : "clients"} unknown`;
+  return `${usd.format(total.workers + total.ai)} (AI ${usd.format(total.ai)}${left})`;
+};
+
+/** Client `clientId`'s cost cell. */
+const TargetCost = ({
+  cost,
+  clientId,
+}: {
+  cost: CostRead;
+  clientId: string;
+}) => {
+  if (cost === null) {
+    return <span className="text-muted-foreground">reading…</span>;
+  }
+  return (
+    <Cost cost={cost === "failed" ? null : (cost.clients[clientId] ?? null)} />
+  );
+};
+
 /** A rollback staff asked for: of one client, or of a ring. */
 type PendingRollback =
   | { clientId: string; ring?: never }
   | { ring: number; clientId?: never };
 
 /** The rollout's clients, ring by ring, each rolled back on its own or with its ring. */
-const Targets = ({ rollout }: { rollout: RolloutView }) => {
+const Targets = ({
+  rollout,
+  cost,
+}: {
+  rollout: RolloutView;
+  cost: CostRead;
+}) => {
   const { busy, failure, act } = useControl();
   // The clients a ring's rollback left, and why: the rest were rolled back.
   const [left, setLeft] = useState<string | null>(null);
@@ -430,6 +486,7 @@ const Targets = ({ rollout }: { rollout: RolloutView }) => {
                   <TableHead>Status</TableHead>
                   <TableHead>Why</TableHead>
                   <TableHead>Updated (UTC)</TableHead>
+                  <TableHead>Cost this month</TableHead>
                   <TableHead>
                     <span className="sr-only">Actions</span>
                   </TableHead>
@@ -452,6 +509,9 @@ const Targets = ({ rollout }: { rollout: RolloutView }) => {
                       <span className="font-mono">{target.error ?? ""}</span>
                     </TableCell>
                     <TableCell>{formatTime(target.updatedAt)}</TableCell>
+                    <TableCell>
+                      <TargetCost cost={cost} clientId={target.clientId} />
+                    </TableCell>
                     <TableCell>
                       {reached.has(target.status) ? (
                         <Button
@@ -491,6 +551,28 @@ const Rollout = () => {
       clearInterval(timer);
     };
   }, [going, router]);
+  // Read once the page shows, from the clients' accounts, and not again
+  // as the page refreshes: a month's cost doesn't move in seconds. An
+  // answer is the rollout's it was read for, so another rollout's page
+  // shows its own as reading until it comes.
+  const [costRead, setCostRead] = useState<{
+    rolloutId: string;
+    cost: RolloutCost | "failed";
+  } | null>(null);
+  useEffect(() => {
+    let current = true;
+    void (async () => {
+      const cost = await readCost(rollout.id);
+      // A page left before its answer came doesn't take it.
+      if (current) {
+        setCostRead({ rolloutId: rollout.id, cost });
+      }
+    })();
+    return () => {
+      current = false;
+    };
+  }, [rollout.id]);
+  const cost = costRead?.rolloutId === rollout.id ? costRead.cost : null;
   const facts: [string, string][] = [
     [
       "Release",
@@ -500,6 +582,7 @@ const Rollout = () => {
     ],
     ["Started by", rollout.startedBy],
     ["Started (UTC)", formatTime(rollout.createdAt)],
+    ["Its clients' cost this month", totalWords(cost)],
   ];
   return (
     <main className="flex max-w-4xl flex-col gap-6 p-6">
@@ -523,7 +606,12 @@ const Rollout = () => {
       {rollout.kind === "secrets" ? (
         <Revocation rolloutId={rollout.id} />
       ) : null}
-      <Targets rollout={rollout} />
+      <Targets rollout={rollout} cost={cost} />
+      <p className="text-muted-foreground text-sm">
+        Cost is each client&apos;s for the calendar month so far, estimated as
+        on the client grid and read from its account after the page shows: what
+        the client costs, not what this rollout did.
+      </p>
     </main>
   );
 };
