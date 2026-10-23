@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "bf818f6e-2eda-4f0f-a11d-f119bcc70efc",
+  "id": "ac866191-a00c-4c0c-b58a-ab4358abcce8",
   "prevId": "4f81abd5-ae08-4eac-b3af-11a5239f5f0e",
   "tables": {
     "answer_waits": {
@@ -203,37 +203,6 @@
         "talked": {
           "name": "talked",
           "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "counted_works": {
-      "name": "counted_works",
-      "columns": {
-        "work": {
-          "name": "work",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "at": {
-          "name": "at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "by": {
-          "name": "by",
-          "type": "text",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
@@ -943,8 +912,8 @@
           "notNull": false,
           "autoincrement": false
         },
-        "rules": {
-          "name": "rules",
+        "choices": {
+          "name": "choices",
           "type": "text",
           "primaryKey": false,
           "notNull": false,

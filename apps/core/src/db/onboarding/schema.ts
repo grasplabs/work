@@ -44,6 +44,11 @@ export const onboarding = sqliteTable(
      * (`orgRulesSchema`), or `null` while the starting values hold.
      */
     rules: text(),
+    /**
+     * What the admin chose about what Grasp may connect, as JSON
+     * (`setupChoicesSchema`), or `null` before anything.
+     */
+    choices: text(),
   },
   (table) => [check("onboarding_one_row", sql`${table.id} = 1`)]
 );
