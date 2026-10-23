@@ -533,8 +533,9 @@ test("Stephen says his line a sentence at a time, without a gap, its words light
   await page.getByRole("button", { name: "Yes, I can hear you" }).click();
   const start = page.getByRole("button", { name: "Start", exact: true });
   await expect(start).toBeVisible({ timeout: 30_000 });
-  const startedAt = await page.evaluate(() => performance.now());
   await start.click();
+  // From here: the sound check's own line may still be ending as Start shows.
+  const startedAt = await page.evaluate(() => performance.now());
 
   // While he talks, the box is a voice bar; once he asks, it is the box to answer in.
   await expect(page.getByText("Stephen is talking")).toBeVisible();
