@@ -16,8 +16,7 @@ import type { PurgePlan, PurgeResult } from "@grasp-os/shared/knowledge";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { isAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { and, asc, count, eq, gt, inArray, lte, or, sql } from "drizzle-orm";
-import type { SQL } from "drizzle-orm";
+import { and, asc, count, eq, gt, inArray, lte, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
@@ -31,7 +30,6 @@ import {
   documents,
   links,
   sections,
-  uploads,
   versions,
 } from "../db/knowledge/schema.ts";
 import { appOfEntry } from "./app-entries.ts";
@@ -71,7 +69,6 @@ import {
   secureDeleteReady,
 } from "./search-erasure.ts";
 import { unicode61Dropped, unicode61Kept } from "./unicode61.ts";
-import { cleanUpOriginals, forgetUploads } from "./uploads.ts";
 
 // Purging personal data from Knowledge, for good, when someone leaves or
 // asks (GDPR erasure): an admin prepares a purge, which says how much it
@@ -105,14 +102,13 @@ import { cleanUpOriginals, forgetUploads } from "./uploads.ts";
 // term (written after the rewrite read it) with the documents a term
 // still finds (`stillFound`).
 //
-// Both delete the originals of the files uploaded as the documents they
-// purge (uploads.ts), and forget those uploads: an original holds the data
-// too. A content purge does so for every document it names, whether or
-// not it finds a term in the text, since a file can hold one where
-// extraction never read it (an image in a PDF). Preparing one says how
-// many originals it deletes (`originals`). Recorded in the purge's batch,
-// and deleted from R2 right after, or by the cron trigger when that fails
-// or an upload may still be storing its original.
+// Both have the host forget the files it keeps as the documents they
+// purge (`OnErase` `forgetFiles`; core's: the originals of uploaded files,
+// uploads.ts), before anything of a document changes: a file holds the
+// data too. A content purge does so for every document it names, whether
+// or not it finds a term in the text, since a file can hold one where
+// Knowledge never read it (an image in a PDF). Preparing one says how
+// many it erases (`originals`).
 //
 // Then nothing of it is left in the search index (search-erasure.ts): a
 // content purge's deletes are secure ones, which take a row's terms out of
@@ -200,9 +196,18 @@ const sum = (all: Counts[]): Counts => {
  * client's data, whatever their role.
  */
 /**
+ * Files a host keeps as Knowledge documents, which a purge erases whole:
+ * a collection's, or those under one document's path.
+ */
+export type ErasedFiles =
+  | { collectionId: string }
+  | { collectionId: string; path: string };
+
+/**
  * How a purge reaches the copies of people's words a host keeps outside
- * Knowledge, so Knowledge itself names none of them. Core's is the
- * brain's gap answers (brain-gaps.ts).
+ * Knowledge, so Knowledge itself names none of them. Core's are the
+ * brain's gap answers (brain-gaps.ts) and the originals of uploaded files
+ * (uploads.ts).
  */
 export interface OnErase {
   /** How many copies `holds` is true of: those holding a purged term. */
@@ -217,6 +222,15 @@ export interface OnErase {
   ) => Promise<void>;
   /** Forgets `userId` as the author of any copy (a personal purge). */
   forgetActor: (person: Identity, userId: string) => Promise<void>;
+  /** How many files the host keeps for `scopes` (a plan's `originals`). */
+  countFiles: (scopes: readonly ErasedFiles[]) => Promise<number>;
+  /**
+   * Forgets the files of `scope`, as `person`, before the purge writes
+   * anything of it. May refuse (`knowledge.conflict`, for one the host is
+   * saving as a document now), which fails the purge before it changes the
+   * document: running it again finishes it.
+   */
+  forgetFiles: (person: Identity, scope: ErasedFiles) => Promise<void>;
 }
 
 const requirePurger = (person: Identity): void => {
@@ -377,8 +391,8 @@ const personalScope = async (
  * nothing.
  * The sections go first, row by row, so the triggers take them out of the
  * search index; the rest in the order they refer to one another. The
- * originals of files uploaded to it are recorded for deleting in the same
- * batch, and deleted from R2 right after (uploads.ts). Nothing of the
+ * host forgets the files it keeps as its documents first (`OnErase`
+ * `forgetFiles`: core deletes the uploads' originals). Nothing of the
  * collection is left in the search index after (search-erasure.ts): every
  * version of its documents is read before the batch, and the tokens they
  * gave the index checked after, also when nothing was left to delete. The batch records
@@ -404,6 +418,7 @@ const purgePersonal = async (
   // The versions' payloads, unreferenced once they go, are collected right
   // after: erased from R2 too.
   const released = releasing(db, inArray(versions.documentId, inCollection));
+  await onErase.forgetFiles(person, { collectionId });
   await auditedBatch(portsOf(env), db, [
     rebuildOwed(db, purgeId, { writesDone: true }),
     ...(plan.kind === "keys"
@@ -420,7 +435,6 @@ const purgePersonal = async (
     db.delete(sections).where(inArray(sections.documentId, inCollection)),
     db.delete(links).where(inArray(links.fromDocumentId, inCollection)),
     db.delete(versions).where(inArray(versions.documentId, inCollection)),
-    ...forgetUploads(db, eq(uploads.collectionId, collectionId)),
     db.delete(documents).where(eq(documents.collectionId, collectionId)),
     db.delete(collections).where(eq(collections.id, collectionId)),
     ...released.after,
@@ -437,7 +451,6 @@ const purgePersonal = async (
       )
     ),
   ]);
-  await cleanUpOriginals(env);
   await collectPayloads(env, db);
   await cleanSearchIndex(async () => {
     await eraseCollectionFromSearchIndex(db, plan, { secure, id: purgeId });
@@ -1233,28 +1246,15 @@ const countDocument = async (
 };
 
 /**
- * The uploads under a document's name, whose originals a content purge
- * deletes, whatever it finds in the text: the files may hold the terms
- * where extraction never read them (an image in a PDF, say). One still
- * being extracted too: forgotten, it isn't saved.
+ * The files the host keeps as a document, which a content purge erases,
+ * whatever it finds in the text: they may hold the terms where Knowledge
+ * never read them (an image in an uploaded PDF, say). One still being
+ * saved as the document too: forgotten, it isn't saved.
  */
-const uploadsNamed = (document: DocumentRow) =>
-  and(
-    eq(uploads.collectionId, document.collectionId),
-    eq(uploads.path, document.path)
-  );
-
-/** How many uploaded originals `where` names, which a purge deletes. */
-const originalsOf = async (
-  db: DrizzleD1Database,
-  where: SQL | undefined
-): Promise<number> => {
-  const [found] = await db
-    .select({ count: count() })
-    .from(uploads)
-    .where(where);
-  return found?.count ?? 0;
-};
+const filesNamed = (document: DocumentRow): ErasedFiles => ({
+  collectionId: document.collectionId,
+  path: document.path,
+});
 
 /**
  * Purges the terms from `named`, as `person`: rewrites the earlier
@@ -1277,9 +1277,13 @@ const purgeDocument = async (
   db: DrizzleD1Database,
   person: Identity,
   named: Named,
-  matcher: Matcher
+  matcher: Matcher,
+  onErase: OnErase
 ): Promise<Counts> => {
   const { document, collection } = named;
+  // Before anything of it changes: one the host is saving now refuses, and
+  // the purge fails here.
+  await onErase.forgetFiles(person, filesNamed(document));
   const at = document.currentVersion;
   const actor = actorOf(person);
   const earlier = await rewriteVersions(
@@ -1298,10 +1302,6 @@ const purgeDocument = async (
     versions: changedVersions,
   };
   if (current === undefined || counts.documents === 0) {
-    // Nothing in its text, but maybe in a file uploaded as it (a term in
-    // an image in a PDF, which extraction never read): its originals go
-    // all the same.
-    await db.batch(forgetUploads(db, uploadsNamed(document)));
     // Search may still hold an earlier generation, with the terms, while
     // its current version waits for indexing (a purge that failed to
     // publish, say): published now, or the purge fails.
@@ -1349,7 +1349,7 @@ const purgeDocument = async (
     // longer knows, or whose frontmatter no longer fits its type, is
     // purged all the same (`parseBaseFields`).
     purge: true,
-    also: [...pointCurrent, ...forgetUploads(db, uploadsNamed(document))],
+    also: pointCurrent,
   });
   return counts;
 };
@@ -1477,14 +1477,13 @@ const purgeContent = async (
     await onErase.rewrite(person, (text) => without(text, matcher));
     for (const one of named) {
       // oxlint-disable-next-line no-await-in-loop -- one document at a time, to bound memory
-      done.push(await purgeDocument(env, db, person, one, matcher));
+      done.push(await purgeDocument(env, db, person, one, matcher, onErase));
     }
   } finally {
     // A rebuild from now on covers this purge's writes, also when one of
     // them failed: it writes no more.
     await owedWritesDone(db, purgeId);
   }
-  await cleanUpOriginals(env);
   // What the rewrites let go of leaves R2 now; a failure fails the purge,
   // and running it again collects what's left (`collecting` rows).
   await collectPayloads(env, db);
@@ -1536,15 +1535,14 @@ export const preparePurge = async (
   let hostCopies = 0;
   if (parsed.type === "personal") {
     ({ counts, ...scope } = await personalScope(db, parsed));
-    originals = await originalsOf(
-      db,
-      eq(uploads.collectionId, scope.collectionId ?? "")
-    );
+    originals =
+      scope.collectionId === undefined
+        ? 0
+        : await onErase.countFiles([{ collectionId: scope.collectionId }]);
   } else {
     const named = await documentsNamed(db, parsed);
-    originals = await originalsOf(
-      db,
-      or(...named.map(({ document }) => uploadsNamed(document)))
+    originals = await onErase.countFiles(
+      named.map(({ document }) => filesNamed(document))
     );
     scope = { documentIds: named.map(({ document }) => document.id) };
     const matcher = matcherOf(parsed.terms, { countLeft: true });

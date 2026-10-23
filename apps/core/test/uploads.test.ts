@@ -171,7 +171,7 @@ const leftPending = async (
   const id = crypto.randomUUID();
   const extension = uploadExtensionOf(name) ?? "docx";
   await env.FILES.put(originalKey(person.collectionId, id), bytes);
-  await env.KNOWLEDGE.prepare(
+  await env.DB.prepare(
     `INSERT INTO uploads (id, collection_id, path, media_type, bytes, sha256,
        uploaded_by, actor, status, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`
@@ -193,7 +193,7 @@ const leftPending = async (
     )
     .run();
   // Its cleanup, recorded with it, as core records one with each upload.
-  await env.KNOWLEDGE.prepare(
+  await env.DB.prepare(
     "INSERT INTO upload_cleanups (key, upload_id, created_at) VALUES (?, ?, ?)"
   )
     .bind(originalKey(person.collectionId, id), id, createdAt)
@@ -205,7 +205,7 @@ const leftPending = async (
 const statusOf = async (
   uploadId: string
 ): Promise<{ status: string; failure: string | null }> => {
-  const row = await env.KNOWLEDGE.prepare(
+  const row = await env.DB.prepare(
     "SELECT status, failure FROM uploads WHERE id = ?"
   )
     .bind(uploadId)
@@ -263,13 +263,15 @@ export default class extends WorkerEntrypoint {
 };
 
 /**
- * Knowledge's database, with `first` run once, just before the first
- * batch lands: a change made by someone else between a read and the write
- * it allowed.
+ * `database`, with `first` run once, just before the first batch lands: a
+ * change made by someone else between a read and the write it allowed.
  */
-const racingKnowledge = (first: () => Promise<unknown>): D1Database => {
+const racing = (
+  database: D1Database,
+  first: () => Promise<unknown>
+): D1Database => {
   let raced = false;
-  return new Proxy(env.KNOWLEDGE, {
+  return new Proxy(database, {
     get: (target, property) => {
       if (property === "batch") {
         return async (statements: D1PreparedStatement[]) => {
@@ -470,7 +472,8 @@ describe("uploads", { timeout: 60_000 }, () => {
     });
     // Someone saves the document between the extraction's read of its
     // version and its save.
-    const racing = racingKnowledge(
+    const knowledge = racing(
+      env.KNOWLEDGE,
       async () =>
         await person.api.knowledge.saveDocument({
           collectionId: person.collectionId,
@@ -480,7 +483,7 @@ describe("uploads", { timeout: 60_000 }, () => {
         })
     );
     const raced = await outcome(
-      extractUpload({ ...env, KNOWLEDGE: racing }, second)
+      extractUpload({ ...env, KNOWLEDGE: knowledge }, second)
     );
     // The step's retry.
     await extractUpload(env, second);
@@ -845,19 +848,19 @@ export default class extends WorkerEntrypoint {
     });
     // Its extraction saves it after the failure read it, before the
     // failure's batch lands.
-    const racing = racingKnowledge(async () => {
-      await env.KNOWLEDGE.batch([
-        env.KNOWLEDGE.prepare(
-          "UPDATE uploads SET status = 'ready' WHERE id = ?"
-        ).bind(id),
-        env.KNOWLEDGE.prepare(
-          "DELETE FROM upload_cleanups WHERE upload_id = ?"
-        ).bind(id),
+    const core = racing(env.DB, async () => {
+      await env.DB.batch([
+        env.DB.prepare("UPDATE uploads SET status = 'ready' WHERE id = ?").bind(
+          id
+        ),
+        env.DB.prepare("DELETE FROM upload_cleanups WHERE upload_id = ?").bind(
+          id
+        ),
       ]);
     });
-    await failUpload({ ...env, KNOWLEDGE: racing }, id, "internal.unexpected");
+    await failUpload({ ...env, DB: core }, id, "internal.unexpected");
     await runCron();
-    const cleanups = await env.KNOWLEDGE.prepare(
+    const cleanups = await env.DB.prepare(
       "SELECT count(*) AS n FROM upload_cleanups WHERE upload_id = ?"
     )
       .bind(id)
@@ -917,7 +920,7 @@ export default class extends WorkerEntrypoint {
     });
     const storedAtFirst = await originalStored(person.collectionId, again.id);
     // Once nothing can still be storing it, the cron trigger deletes it.
-    await env.KNOWLEDGE.prepare(
+    await env.DB.prepare(
       "UPDATE upload_cleanups SET created_at = 0 WHERE upload_id = ?"
     )
       .bind(again.id)
@@ -1134,14 +1137,59 @@ export default class extends WorkerEntrypoint {
     const texts = await versionTexts(saved.documentId ?? "");
 
     expect({
-      refused: raced !== "ok",
+      // Its claim for the save finds the upload forgotten: it saves
+      // nothing, and leaves it.
+      raced,
       upload: await outcome(person.api.uploads.get(inFlight)),
       versions: texts.length,
       purged: texts.every((text) => !text.includes("facilities@example.com")),
     }).toStrictEqual({
-      refused: true,
+      raced: "ok",
       upload: "upload.not_found",
       versions: 2,
+      purged: true,
+    });
+  });
+
+  it("refuse a purge of a document while an upload is being saved as it, and purge it after", async () => {
+    const person = await personWithCollection();
+    const admin = await signedInApi(idp, "admin");
+    const saved = await uploaded(person, "offices.xlsx");
+    const saving = await leftPending(person, "offices.xlsx", {
+      createdAt: Date.now(),
+    });
+    // Claimed for its save, as an extraction claims it just before.
+    await env.DB.prepare("UPDATE uploads SET status = 'saving' WHERE id = ?")
+      .bind(saving)
+      .run();
+    const input: PurgeInput = {
+      type: "content",
+      documentIds: [saved.documentId ?? ""],
+      terms: ["facilities@example.com"],
+      reason: "erasure_request",
+    };
+    const purgeOnce = async () => {
+      const { token } = await admin.api.knowledge.preparePurge(input);
+      return await outcome(admin.api.knowledge.purge(input, token));
+    };
+    const whileSaving = await purgeOnce();
+    const textsWhileSaving = await versionTexts(saved.documentId ?? "");
+    // Its extraction saves it: the purge then goes through.
+    await extractUpload(env, saving);
+    const after = await purgeOnce();
+    const texts = await versionTexts(saved.documentId ?? "");
+
+    expect({
+      whileSaving,
+      unchanged: textsWhileSaving.length,
+      after,
+      upload: await outcome(person.api.uploads.get(saving)),
+      purged: texts.every((text) => !text.includes("facilities@example.com")),
+    }).toStrictEqual({
+      whileSaving: "knowledge.conflict",
+      unchanged: 1,
+      after: "ok",
+      upload: "upload.not_found",
       purged: true,
     });
   });
@@ -1308,7 +1356,7 @@ export default class extends WorkerEntrypoint {
     const person = await personWithCollection();
     const id = await leftPending(person, "travel-policy.docx");
     // A run that ended before the upload was there to see.
-    await env.KNOWLEDGE.prepare("UPDATE uploads SET id = ? WHERE id = ?")
+    await env.DB.prepare("UPDATE uploads SET id = ? WHERE id = ?")
       .bind(`${id}-moved`, id)
       .run();
     await runEngine(env).createInternal({
@@ -1317,7 +1365,7 @@ export default class extends WorkerEntrypoint {
       input: { uploadId: id },
     });
     await finished(extractionRunId(id));
-    await env.KNOWLEDGE.prepare("UPDATE uploads SET id = ? WHERE id = ?")
+    await env.DB.prepare("UPDATE uploads SET id = ? WHERE id = ?")
       .bind(id, `${id}-moved`)
       .run();
     await runCron();
@@ -1344,7 +1392,7 @@ export default class extends WorkerEntrypoint {
           down.mockRestore();
         })
     );
-    const { results } = await env.KNOWLEDGE.prepare(
+    const { results } = await env.DB.prepare(
       "SELECT status, failure FROM uploads WHERE collection_id = ?"
     )
       .bind(person.collectionId)

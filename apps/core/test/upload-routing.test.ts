@@ -279,7 +279,7 @@ describe("upload routing", { timeout: 60_000 }, () => {
     const id = crypto.randomUUID();
     const now = Date.now();
     await env.FILES.put(originalKey(collectionId, id), bytes);
-    await env.KNOWLEDGE.prepare(
+    await env.DB.prepare(
       `INSERT INTO uploads (id, collection_id, path, media_type, bytes, sha256,
          uploaded_by, actor, status, created_at, updated_at)
        VALUES (?, ?, 'held.docx', ?, ?, 'x', ?, ?, 'pending', ?, ?)`
@@ -295,8 +295,8 @@ describe("upload routing", { timeout: 60_000 }, () => {
         now
       )
       .run();
-    // Knowledge's database refusing every batch: the record's too.
-    const refusing = new Proxy(env.KNOWLEDGE, {
+    // Core's database refusing every batch: the record's too.
+    const refusing = new Proxy(env.DB, {
       get: (target, property) => {
         if (property === "batch") {
           return async () =>
@@ -312,9 +312,7 @@ describe("upload routing", { timeout: 60_000 }, () => {
     const sent = await withWorkersAi(
       ({ name }) => converted(name, "# Sent"),
       async () => {
-        refused = await outcome(
-          extractUpload({ ...env, KNOWLEDGE: refusing }, id)
-        );
+        refused = await outcome(extractUpload({ ...env, DB: refusing }, id));
       }
     );
 
