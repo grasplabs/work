@@ -26,11 +26,8 @@ import { accountName } from "../src/provision/workflow.ts";
 import { importReleases } from "../src/releases/import.ts";
 import { startingMs } from "../src/runners.ts";
 import type { AccountState } from "./cloudflare-api-kit.ts";
-import {
-  deployerEmail,
-  mockCloudflareApi,
-  tenantEmail,
-} from "./cloudflare-api.ts";
+import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
+import { deployerEmail, tenantEmail } from "./cloudflare-api.ts";
 import { publishRelease } from "./releases.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
 
