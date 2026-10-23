@@ -24,6 +24,7 @@ import { identify } from "../auth/identity.ts";
 import { errorResponse } from "../errors.ts";
 import { jsonOf } from "../request-body.ts";
 import { isOwnOrigin } from "../rpc.ts";
+import { sessionRecheckMs } from "../session-check.ts";
 import { gatewayTranscription } from "../transcription.ts";
 import { onboardingStore } from "./store.ts";
 import type { Took } from "./store.ts";
@@ -67,15 +68,20 @@ import type { Took } from "./store.ts";
 //   person's link, an unknown one and a removed person's answer as at the
 //   speech endpoint. Nothing reaches the upstream before that, and nothing
 //   but `start` is read until it.
+// - Keep listening once that no longer holds (GRA-361, L7, L8): the link
+//   or the admin's session is checked again every `sessionRecheckMs`
+//   while the socket is open, as `/rpc`'s connections are, and a socket
+//   ends once it fails, or once the check can't be made.
 // - Lend an admin's cookie to another site: browsers send cookies with
 //   any WebSocket upgrade, so the upgrade must come from the deployment's
 //   own origin (`isOwnOrigin`), as `/rpc`'s.
 // - Keep the audio (A1): each frame is passed on and dropped; only its
 //   length is counted. Nothing heard is logged, counted or audited.
 // - Run up the bill (C1): a socket hears at most `maxSessionSeconds` of
-//   audio, then ends, so a link is checked again before more; each link
-//   and each admin has minutes a day (`heardBudgets`); the router limits
-//   sockets opened per address, and the store counts them per link.
+//   audio, and is open at most `maxOpenMs`, then ends; each link and each
+//   admin has minutes a day (`heardBudgets`), which a socket holds as it
+//   opens (the store's `transcriptionOpened`), so sockets opened side by
+//   side share one budget; the router limits sockets opened per address.
 // - Tell the company who talked, and when: a session on a link is noted
 //   in the onboarding's own log, which only staff read; an admin's is in
 //   the audit log, opened and closed, with its ID and seconds.
@@ -85,6 +91,12 @@ const startWaitMs = 10_000;
 
 /** The most audio one socket takes, in seconds: then the page opens another. */
 export const maxSessionSeconds = 15 * 60;
+
+/**
+ * The longest one socket stays open, audio or not: twice the audio it may
+ * hear, for the pauses of someone talking.
+ */
+export const maxOpenMs = 2 * maxSessionSeconds * 1000;
 
 /**
  * Seconds of audio heard a day: on someone's link, more than an hour's
@@ -107,7 +119,35 @@ interface Hearer {
   by: AuditActor;
   /** The person whose link it is on, for the onboarding's own log. */
   person?: string;
+  /** Checks again that it may still listen: why not, or `undefined`. */
+  still: () => Promise<CodedError | undefined>;
 }
+
+/** Why someone's link no longer lets them listen, or `undefined`. */
+const linkStill = async (
+  env: Env,
+  secretMark: string,
+  keyMark: string
+): Promise<CodedError | undefined> => {
+  const found = await onboardingStore(env).transcriptionStill(
+    secretMark,
+    keyMark
+  );
+  return found.ok ? undefined : interviewErrors.create(found.code);
+};
+
+/** Why an admin no longer may listen, or `undefined`. */
+const adminStill = async (
+  env: Env,
+  headers: Headers,
+  userId: string
+): Promise<CodedError | undefined> => {
+  const person = await identify(env, headers);
+  if (person?.userId !== userId) {
+    return authErrors.create("auth.unauthenticated");
+  }
+  return isAdmin(person.role) ? undefined : roleErrors.create("role.forbidden");
+};
 
 /** Whom a session on someone's link is for, or why their link refuses it. */
 const onLink = async (
@@ -115,9 +155,11 @@ const onLink = async (
   link: NonNullable<Start["link"]>,
   requestId: string
 ): Promise<Hearer | CodedError> => {
+  const secretMark = await sha256Hex(link.secret);
+  const keyMark = await sha256Hex(link.key);
   const found = await onboardingStore(env).transcriptionOnLink(
-    await sha256Hex(link.secret),
-    await sha256Hex(link.key)
+    secretMark,
+    keyMark
   );
   if (!found.ok) {
     if (found.code === "interview.link_invalid") {
@@ -135,6 +177,7 @@ const onLink = async (
     // As a line said on a link: by the system, never in anyone's name.
     by: { type: "system" },
     person,
+    still: async () => await linkStill(env, secretMark, keyMark),
   };
 };
 
@@ -161,6 +204,7 @@ const forAdmin = async (
     // The admin's own onboarding, as their lines said are counted.
     counted: "reading",
     by: actorOf(person),
+    still: async () => await adminStill(env, headers, person.userId),
   };
 };
 
@@ -205,6 +249,10 @@ class Relay {
   #deadline: ReturnType<typeof setTimeout> | undefined = undefined;
   #session: TranscriptionSession | undefined = undefined;
   #hearer: Hearer | undefined = undefined;
+  /** Seconds this socket holds of its budget, and the day it holds them on. */
+  #held = 0;
+  #day = "";
+  #recheck: ReturnType<typeof setInterval> | undefined = undefined;
   #rate = 0;
   /** Bytes of audio passed on, and the most this socket may. */
   #bytes = 0;
@@ -293,6 +341,32 @@ class Relay {
   }
 
   async #open(start: Start, hearer: Hearer): Promise<void> {
+    let held: { held: number; day: string };
+    try {
+      held = await onboardingStore(this.#env).transcriptionOpened({
+        ...this.#note(hearer),
+        who: hearer.who,
+        budget: hearer.budget,
+        most: maxSessionSeconds,
+      });
+    } catch {
+      log.error("transcription.note_failed", { requestId: this.#requestId });
+      this.#fail(transcriptionErrors.create("transcription.failed"));
+      return;
+    }
+    if (held.held <= 0) {
+      // Spent meanwhile, by another socket.
+      this.#refuse(transcriptionErrors.create("transcription.limited"));
+      return;
+    }
+    this.#hearer = hearer;
+    this.#held = held.held;
+    this.#day = held.day;
+    if (this.#isEnded()) {
+      // Ended while it was held, which `#end` couldn't give back yet.
+      this.#ctx.waitUntil(this.#count("page"));
+      return;
+    }
     let session: TranscriptionSession;
     try {
       session = await gatewayTranscription(this.#env).open({
@@ -316,32 +390,40 @@ class Relay {
       return;
     }
     this.#session = session;
-    try {
-      await onboardingStore(this.#env).transcriptionOpened(this.#note(hearer));
-    } catch {
-      log.error("transcription.note_failed", { requestId: this.#requestId });
-      this.#fail(transcriptionErrors.create("transcription.failed"));
-      return;
-    }
-    this.#hearer = hearer;
-    if (this.#isEnded()) {
-      // Ended while it was noted, which `#end` couldn't count yet.
-      this.#ctx.waitUntil(this.#count("page"));
-      return;
-    }
     this.#rate = start.sampleRate;
-    const left = hearer.budget - hearer.heard;
-    this.#byBudget = left < maxSessionSeconds;
-    this.#maxBytes = Math.floor(
-      Math.min(left, maxSessionSeconds) * bytesPerSecond(this.#rate)
-    );
+    this.#byBudget = held.held < maxSessionSeconds;
+    this.#maxBytes = held.held * bytesPerSecond(this.#rate);
     this.#state = "open";
     tell(this.#socket, {
       type: "ready",
       session: this.#id,
-      maxSeconds: Math.min(maxSessionSeconds, Math.floor(left)),
+      maxSeconds: held.held,
     });
+    const openedAt = Date.now();
+    this.#recheck = setInterval(() => {
+      void this.#checkAgain(hearer, openedAt);
+    }, sessionRecheckMs);
     void this.#relay(session);
+  }
+
+  /** Ends the session once it has been open too long, or may no longer listen. */
+  async #checkAgain(hearer: Hearer, openedAt: number): Promise<void> {
+    if (Date.now() - openedAt >= maxOpenMs) {
+      this.#end("expired", transcriptionErrors.create("transcription.expired"));
+      return;
+    }
+    let why: CodedError | undefined = undefined;
+    try {
+      why = await hearer.still();
+    } catch {
+      // Fails closed: a check that can't be made doesn't let it go on.
+      log.error("transcription.check_failed", { requestId: this.#requestId });
+      this.#fail(transcriptionErrors.create("transcription.failed"));
+      return;
+    }
+    if (why !== undefined) {
+      this.#refuse(why);
+    }
   }
 
   /** Passes on what the upstream hears, until it ends. */
@@ -427,6 +509,7 @@ class Relay {
     }
     this.#state = "ended";
     clearTimeout(this.#deadline);
+    clearInterval(this.#recheck);
     this.#session?.close();
     if (error !== undefined) {
       tell(this.#socket, {
@@ -453,6 +536,8 @@ class Relay {
         purpose: hearer.counted,
         seconds:
           this.#rate === 0 ? 0 : this.#bytes / bytesPerSecond(this.#rate),
+        held: this.#held,
+        day: this.#day,
         ended,
       });
     } catch {
