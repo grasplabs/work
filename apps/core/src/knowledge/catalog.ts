@@ -1,5 +1,8 @@
+import { allowedFor } from "@grasp-os/brain/authorize";
+import type { Brain } from "@grasp-os/brain/brain";
 import { collectionIdSchema, documentIdSchema } from "@grasp-os/brain/ids";
 import type { Provenance } from "@grasp-os/brain/knowledge";
+import { collections, documents } from "@grasp-os/brain/schema";
 import type {
   CatalogCollection,
   CatalogSkill,
@@ -8,9 +11,6 @@ import type {
 import { and, asc, eq } from "drizzle-orm";
 
 import { inList } from "../db/d1.ts";
-import { collections, documents } from "../db/knowledge/schema.ts";
-import { allowedFor } from "./authorize.ts";
-import type { Brain } from "./brain.ts";
 
 // The agent's catalog of Knowledge: the collections it may read and the
 // skills in them, always in its context within a fixed size, and noting

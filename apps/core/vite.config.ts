@@ -30,7 +30,7 @@ const coreMigrations = await readD1Migrations(
   `${import.meta.dirname}/src/db/core/migrations`
 );
 const knowledgeMigrations = await readD1Migrations(
-  `${import.meta.dirname}/src/db/knowledge/migrations`
+  `${import.meta.dirname}/../../packages/brain/src/db/migrations`
 );
 const connectMigrations = await readD1Migrations(
   `${import.meta.dirname}/../connect/src/db/migrations`

@@ -1,12 +1,12 @@
 import type { CommandReceipt } from "@grasp-os/brain/contract";
-import { env } from "cloudflare:workers";
-import { describe, expect, it, vi } from "vite-plus/test";
-
 import {
   receiptRetentionMs,
   receiptsSweptPerStatement,
   rememberPerWindow,
-} from "../src/knowledge/memories.ts";
+} from "@grasp-os/brain/memories";
+import { env } from "cloudflare:workers";
+import { describe, expect, it, vi } from "vite-plus/test";
+
 import { release } from "./apps.ts";
 import { runQuarterHourCron } from "./cron.ts";
 import { mockIdp } from "./idp.ts";

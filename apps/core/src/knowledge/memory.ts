@@ -1,3 +1,13 @@
+import { ensureCollection } from "@grasp-os/brain/collections";
+import type { CollectionRow } from "@grasp-os/brain/collections";
+import { writeVersion } from "@grasp-os/brain/documents";
+import { readPayload } from "@grasp-os/brain/payloads";
+import {
+  brainPayloads,
+  collections,
+  documents,
+  versions,
+} from "@grasp-os/brain/schema";
 import { actorOf, delegateActorOf } from "@grasp-os/shared/audit";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import {
@@ -30,18 +40,9 @@ import { drizzle } from "drizzle-orm/d1";
 
 import { appFor, versionFiles } from "../apps.ts";
 import { memberRole, teamsOf } from "../auth/identity.ts";
-import {
-  brainPayloads,
-  collections,
-  documents,
-  versions,
-} from "../db/knowledge/schema.ts";
 import { isRestricted } from "../restricted.ts";
 import type { WorkContext } from "../restricted.ts";
 import { noteProvenance, readableForPerson } from "./access.ts";
-import { ensureCollection } from "./collections.ts";
-import type { CollectionRow } from "./collections.ts";
-import { writeVersion } from "./documents.ts";
 import {
   agentMemoryPath,
   appMemoryPath,
@@ -49,7 +50,6 @@ import {
   memoryLimit,
   personalCollectionId,
 } from "./memory-files.ts";
-import { readPayload } from "./payloads.ts";
 import { brainOf } from "./ports.ts";
 
 // An agent's memory: the files it always has in its context, by where it

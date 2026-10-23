@@ -1,3 +1,5 @@
+import type { Readable } from "@grasp-os/brain/authorize";
+import { collections } from "@grasp-os/brain/schema";
 import { collectionIdSchema } from "@grasp-os/shared/ids";
 import type { CollectionId } from "@grasp-os/shared/ids";
 import { isAdmin } from "@grasp-os/shared/roles";
@@ -7,10 +9,8 @@ import { appsFoundBy, appsReadableBy } from "../app-access.ts";
 import type { Person } from "../app-access.ts";
 import { memberOf } from "../auth/identity.ts";
 import { apps } from "../db/core/schema.ts";
-import { collections } from "../db/knowledge/schema.ts";
 import { collectionsAllowed } from "./access.ts";
 import type { Reader } from "./access.ts";
-import type { Readable } from "./authorize.ts";
 
 // Who finds what in the Apps collection (apps-collection.ts): one entry
 // per App, found exactly by those who may open the App, as

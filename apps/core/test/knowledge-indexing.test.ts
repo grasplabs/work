@@ -1,3 +1,4 @@
+import { indexRunId, maxIndexReruns } from "@grasp-os/brain/indexing";
 import type {
   CollectionInput,
   DocumentSummary,
@@ -7,7 +8,6 @@ import { knowledgeErrors } from "@grasp-os/shared/knowledge";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { indexRunId, maxIndexReruns } from "../src/knowledge/indexing.ts";
 import { runEngine } from "../src/workflows/engine.ts";
 import { allEvents } from "./audit-events.ts";
 import { runCron } from "./cron.ts";

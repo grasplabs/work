@@ -1,3 +1,4 @@
+import { ensureCollection } from "@grasp-os/brain/collections";
 import { compilerVersion } from "@grasp-os/compiler";
 import {
   acceptedUpdateSchema,
@@ -64,7 +65,6 @@ import {
   blueprints,
   permissions,
 } from "./db/core/schema.ts";
-import { ensureCollection } from "./knowledge/collections.ts";
 import { appMemoryPath } from "./knowledge/memory-files.ts";
 import { brainOf } from "./knowledge/ports.ts";
 import {

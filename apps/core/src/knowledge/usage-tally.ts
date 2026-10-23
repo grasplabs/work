@@ -1,7 +1,7 @@
+import { nearestCollectionsMax } from "@grasp-os/brain/search-detail";
 import type { AuditDetailValue, AuditEvent } from "@grasp-os/shared/audit";
 
 import { askerOf } from "../signal-tally.ts";
-import { nearestCollectionsMax } from "./search-detail.ts";
 
 // What the Knowledge usage signals (signals.ts) need of the audit log: the
 // documents read, and the searches that found nothing, per collection, key

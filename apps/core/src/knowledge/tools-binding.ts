@@ -1,4 +1,7 @@
 import type { MemoryPack } from "@grasp-os/brain/contract";
+import { recall } from "@grasp-os/brain/recall";
+import { search } from "@grasp-os/brain/search";
+import { follow, read } from "@grasp-os/brain/tools";
 import type {
   FollowResult,
   KnowledgeCatalog,
@@ -14,9 +17,6 @@ import type { Reader } from "./access.ts";
 import { readAsDelegate } from "./binding.ts";
 import { catalog } from "./catalog.ts";
 import { brainOf } from "./ports.ts";
-import { recall } from "./recall.ts";
-import { search } from "./search.ts";
-import { follow, read } from "./tools.ts";
 
 /**
  * Knowledge as an agent holds it, across every collection it may read:

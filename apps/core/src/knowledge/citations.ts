@@ -1,11 +1,11 @@
+import { allowedFor } from "@grasp-os/brain/authorize";
+import type { Brain } from "@grasp-os/brain/brain";
+import { collections, documents, sections } from "@grasp-os/brain/schema";
 import { citedSnippetMax } from "@grasp-os/shared/chat";
 import type { ChatCitedDocument } from "@grasp-os/shared/chat";
 import { and, asc, eq, lt, sql } from "drizzle-orm";
 
 import { inList } from "../db/d1.ts";
-import { collections, documents, sections } from "../db/knowledge/schema.ts";
-import { allowedFor } from "./authorize.ts";
-import type { Brain } from "./brain.ts";
 import { cut } from "./catalog.ts";
 
 // The documents a chat's answer cites, as the person it is for sees them:

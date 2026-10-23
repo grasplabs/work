@@ -1,3 +1,4 @@
+import type { OnErase } from "@grasp-os/brain/purge";
 import {
   actorOf,
   auditActorSchema,
@@ -32,7 +33,6 @@ import {
   notifications,
   users,
 } from "./db/core/schema.ts";
-import type { OnErase } from "./knowledge/purge.ts";
 import { onboardingStore } from "./onboarding/store.ts";
 
 // What became of the Playbook's gaps (`brain.askAboutGap`, `answerGap`,

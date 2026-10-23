@@ -1,3 +1,4 @@
+import { runIndexing } from "@grasp-os/brain/indexing";
 import { appIdSchema, runIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, RunId } from "@grasp-os/shared/ids";
 import type { Authority } from "@grasp-os/shared/permissions";
@@ -13,7 +14,6 @@ import { runBackfill } from "../backfill-run.ts";
 import { runBindingsFor } from "../bindings.ts";
 import { runBuildJob } from "../build-jobs.ts";
 import { runExtraction } from "../knowledge/extraction.ts";
-import { runIndexing } from "../knowledge/indexing.ts";
 import { brainOf } from "../knowledge/ports.ts";
 import { stepModelBinding } from "../resource-bindings.ts";
 import type { WorkContext } from "../restricted.ts";

@@ -9,6 +9,8 @@
  * client's export, and an entry for state that is gone would make the
  * export look for something that isn't there.
  */
+import path from "node:path";
+
 import type {
   ClientStateRegistry,
   StateEntry,
@@ -476,12 +478,15 @@ const bindingErrors = (
     );
     const config = registry.workers[database.worker]?.config ?? "";
     const appDir = config.slice(0, config.lastIndexOf("/"));
-    if (
-      declared?.migrationsDir !== undefined &&
-      `${appDir}/${declared.migrationsDir}` !== `${database.schema}/migrations`
-    ) {
+    // Normalized: a package's database is applied from the app by a
+    // relative path (`../../packages/...`).
+    const applied =
+      declared?.migrationsDir === undefined
+        ? undefined
+        : path.posix.normalize(`${appDir}/${declared.migrationsDir}`);
+    if (applied !== undefined && applied !== `${database.schema}/migrations`) {
       errors.push(
-        `D1 database ${database.worker}: ${database.binding} applies migrations from ${appDir}/${declared.migrationsDir}, not its registered schema ${database.schema}.`
+        `D1 database ${database.worker}: ${database.binding} applies migrations from ${applied}, not its registered schema ${database.schema}.`
       );
     }
   }

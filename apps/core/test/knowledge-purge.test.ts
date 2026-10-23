@@ -1,3 +1,4 @@
+import { rebuildSearchIndex } from "@grasp-os/brain/search-erasure";
 import {
   purgeMaxDocuments,
   purgeMaxTerms,
@@ -11,7 +12,6 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import { drainAuditOutboxes } from "../src/audit-outbox.ts";
 import { forContext, saveUserMemory } from "../src/knowledge/memory.ts";
-import { rebuildSearchIndex } from "../src/knowledge/search-erasure.ts";
 import { actingFor, newChat } from "./contexts.ts";
 import { mockIdp } from "./idp.ts";
 import { storedVersionTexts, storeTextUnderneath } from "./knowledge.ts";

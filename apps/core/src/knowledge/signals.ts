@@ -1,3 +1,4 @@
+import { collections, documents } from "@grasp-os/brain/schema";
 import { actorOf } from "@grasp-os/shared/audit";
 import { toHex } from "@grasp-os/shared/encoding";
 import { collectionIdSchema, documentIdSchema } from "@grasp-os/shared/ids";
@@ -58,7 +59,6 @@ import {
   knowledgeSignals,
 } from "../db/core/schema.ts";
 import { chunks, inList } from "../db/d1.ts";
-import { collections, documents } from "../db/knowledge/schema.ts";
 import { allowedCollections } from "./access.ts";
 import type { Reader } from "./access.ts";
 import type { KnowledgeTally } from "./usage-tally.ts";
