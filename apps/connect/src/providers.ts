@@ -239,7 +239,8 @@ const microsoft: OAuthProviderConfig = {
     `${microsoftLogin}/${tenant}/oauth2/v2.0/authorize`,
   tokenEndpoint: (tenant) => `${microsoftLogin}/${tenant}/oauth2/v2.0/token`,
   // What the Microsoft 365 connector needs: mail (the person's own and
-  // shared mailboxes), calendars, and files in OneDrive and SharePoint.
+  // shared mailboxes), calendars, files in OneDrive and SharePoint, and
+  // drafts in the person's own OneDrive.
   scopes: [
     "openid",
     "profile",
@@ -253,6 +254,9 @@ const microsoft: OAuthProviderConfig = {
     "Calendars.Read",
     "Calendars.Read.Shared",
     "Files.Read.All",
+    // Writes only a draft in the person's own OneDrive: the connector's
+    // routes hold every file write to /me/drive (files.createDraft).
+    "Files.ReadWrite.All",
     "Sites.Read.All",
   ],
   scopeSeparator: " ",

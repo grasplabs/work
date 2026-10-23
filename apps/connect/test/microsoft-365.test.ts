@@ -105,7 +105,7 @@ const driveInputs: Record<string, Input> = {
 };
 
 describe("the Microsoft 365 connector's scoping", () => {
-  it("binds every route of every tool to its mailbox or drive, never /me", () => {
+  it("binds every route of every tool to its mailbox or drive, never /me but for drafts in the person's own OneDrive", () => {
     const unbound = Object.entries(manifest.actions).flatMap(
       ([name, { resource, routes }]) =>
         routes
@@ -115,7 +115,10 @@ describe("the Microsoft 365 connector's scoping", () => {
                 (resource === "mailbox" &&
                   path.startsWith("/v1.0/users/{mailbox}/")) ||
                 (resource === "drive" &&
-                  path.startsWith("/v1.0/drives/{drive}/"))
+                  path.startsWith("/v1.0/drives/{drive}/")) ||
+                (name === "files.createDraft" &&
+                  resource === null &&
+                  path.startsWith("/v1.0/me/drive/root:/{folder}/{name}"))
               )
           )
           .map(({ path }) => `${name} ${path}`)
@@ -125,7 +128,11 @@ describe("the Microsoft 365 connector's scoping", () => {
       Object.keys(manifest.actions).toSorted(),
       "every tool is tested for scoping below"
     ).toStrictEqual(
-      [...Object.keys(mailboxInputs), ...Object.keys(driveInputs)].toSorted()
+      [
+        ...Object.keys(mailboxInputs),
+        ...Object.keys(driveInputs),
+        "files.createDraft",
+      ].toSorted()
     );
     expect(manifest.hosts).toStrictEqual(["graph.microsoft.com"]);
   });
