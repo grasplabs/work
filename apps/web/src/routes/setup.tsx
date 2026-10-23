@@ -2,7 +2,12 @@ import { oauthProviderSchema } from "@grasp-os/shared/connect";
 import { directorySuiteSchema } from "@grasp-os/shared/directory";
 import type { OnboardingDirectory } from "@grasp-os/shared/directory";
 import type { OnboardingPlaces } from "@grasp-os/shared/document-places";
-import type { LinkToSend, OnboardingView } from "@grasp-os/shared/onboarding";
+import type { OnboardingHr } from "@grasp-os/shared/hr";
+import type {
+  LinkToSend,
+  OnboardingReview,
+  OnboardingView,
+} from "@grasp-os/shared/onboarding";
 import { noChoices } from "@grasp-os/shared/onboarding-choices";
 import type { SetupChoices } from "@grasp-os/shared/onboarding-choices";
 import type { OnboardingDocument } from "@grasp-os/shared/onboarding-documents";
@@ -19,6 +24,7 @@ import type { BrainScene } from "../brain/dot-brain.tsx";
 import { loadCoreStatus } from "../core-connection.ts";
 import { PageError } from "../frame/page-states.tsx";
 import { loadFromCore, notLoadedText } from "../load-from-core.tsx";
+import { useReveal } from "../onboarding/platform-reveal.tsx";
 import { SetupFrame } from "../onboarding/setup-frame.tsx";
 import { SetupStepBody } from "../onboarding/setup-steps.tsx";
 import {
@@ -293,6 +299,21 @@ const useVoiceBetweenSteps = (step: SetupStep): void => {
   }, [step]);
 };
 
+/**
+ * On the way into the platform the brain fills up and charges, and
+ * everything around it fades: the scene the brain takes then, whether the
+ * way in is on, and whether the rest is fading.
+ */
+const useWayIn = (figure: BrainScene) => {
+  const { phase } = useReveal();
+  const revealing = phase !== "idle";
+  return {
+    scene: revealing ? { ...figure, fill: 1, charge: true } : figure,
+    revealing,
+    clearing: phase === "clearing" || phase === "building",
+  };
+};
+
 /** What the steps read of what was loaded, or nothing while it could not be. */
 const readOf = (data: Loaded | null) => ({
   roster: data?.view.roster ?? null,
@@ -328,7 +349,9 @@ const Setup = () => {
     known: percent,
     choices,
   });
-  const scene = step === "about" && story !== null ? story : told;
+  const { scene, revealing, clearing } = useWayIn(
+    step === "about" && story !== null ? story : told
+  );
   const go = (next: SetupStep) => {
     void navigate({ to: "/setup", search: { step: next } });
   };
@@ -345,7 +368,9 @@ const Setup = () => {
     <SetupFrame
       knowledge={{ parts, percent, threshold: data.gate.threshold }}
       onExit={() => {
-        void navigate({ to: "/" });
+        if (!revealing) {
+          void navigate({ to: "/" });
+        }
       }}
       onGo={go}
       reached={reached}
@@ -370,8 +395,15 @@ const Setup = () => {
             </div>
           )}
         </div>
-        {/* One step fades out, the next fades in: nothing slides. */}
-        <div className="flex w-full flex-col items-center" ref={body}>
+        {/* One step fades out, the next fades in: nothing slides. On the way in, the step fades and only the brain stays. */}
+        <div
+          className={cn(
+            "flex w-full flex-col items-center transition-all duration-450",
+            { "opacity-0 blur-sm": clearing }
+          )}
+          inert={revealing}
+          ref={body}
+        >
           <div
             className="animate-in fade-in flex w-full flex-col items-center gap-6 duration-500"
             key={step}
@@ -426,10 +458,13 @@ interface Loaded {
   documents: OnboardingDocument[];
   gate: GateView;
   choices: SetupChoices;
+  /** The steps people told two ways and nobody could explain, and how much of the work is mapped. */
+  review: OnboardingReview;
   /** The organization's name, as the message to the team is addressed; null when it has none. */
   company: string | null;
   directory: OnboardingDirectory | null;
   places: OnboardingPlaces | null;
+  hr: OnboardingHr | null;
 }
 
 export const Route = createFileRoute("/setup")({
@@ -483,6 +518,8 @@ export const Route = createFileRoute("/setup")({
         company,
         directory,
         places,
+        review,
+        hr,
       ] = await Promise.all([
         session.onboarding.view(),
         session.onboarding.links(),
@@ -492,6 +529,8 @@ export const Route = createFileRoute("/setup")({
         companyOf(async () => await session.organization.get()),
         session.onboarding.directory(),
         session.onboarding.documentPlaces(),
+        session.onboarding.review(),
+        session.onboarding.hrPlatform(),
       ]);
       return {
         view,
@@ -502,6 +541,8 @@ export const Route = createFileRoute("/setup")({
         company,
         directory,
         places,
+        review,
+        hr,
       };
     }),
   component: Setup,

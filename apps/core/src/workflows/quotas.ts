@@ -323,7 +323,7 @@ export const quotaPolicy = async (env: QuotaEnv): Promise<QuotaPolicy> => {
 };
 
 /**
- * The policy core applies now, as the console reads it (GRA-600): its
+ * The policy core applies now, as the admin reads it (GRA-600): its
  * generation, each limit it lowers below the platform's, as applied
  * (where its audit event holds them as deployed), and when core recorded
  * it. Read as any admission reads it (`quotaPolicy`), so a

@@ -49,6 +49,7 @@ import type {
 } from "@grasp-os/shared/document-places";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import type { ErrorPayload } from "@grasp-os/shared/errors";
+import type { HrConnection, HrRead } from "@grasp-os/shared/hr";
 import type {
   LandscapeConnection,
   LandscapeRead,
@@ -87,6 +88,7 @@ import {
   syncEventSources,
   takeConnectorEvents,
 } from "./events.ts";
+import { hrConnections, readHr } from "./hr.ts";
 import { landscapeConnections, readLandscape } from "./landscape.ts";
 import { catalogLogo } from "./logos.ts";
 import {
@@ -273,7 +275,7 @@ export default class Connect
    * Arms connect's clock if nothing has: core's clock asks every minute
    * (core's src/clock.ts), the repair path that starts it on a new
    * deployment and after anything cleared its alarm. Reports it as it
-   * left it, for the console's provisioning probe (core's
+   * left it, for the admin's provisioning probe (core's
    * src/provision-probe.ts).
    */
   async ensureClock(): Promise<ClockRegistration> {
@@ -426,6 +428,16 @@ export default class Connect
 
   async readDirectory(request: unknown): Promise<DirectoryRead> {
     return await readDirectory(this.env, request);
+  }
+
+  // The HR platform (src/hr.ts): for the onboarding, in core, only.
+
+  async hrConnections(): Promise<HrConnection[]> {
+    return await hrConnections(this.env);
+  }
+
+  async readHr(request: unknown): Promise<HrRead> {
+    return await readHr(this.env, request);
   }
 
   // Where the documents live (src/document-places.ts): for the

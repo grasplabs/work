@@ -59,7 +59,7 @@ export interface GateView {
   /**
    * Grasp's staff access, as the company's admin sees it: whether staff
    * may come in now, what they reach, and until when; null when the
-   * console opened no window.
+   * admin opened no window.
    */
   staff: {
     open: boolean;
@@ -79,7 +79,7 @@ export interface OnboardingGateApi {
   setThreshold: (threshold: GateThreshold) => Promise<GateView>;
   /**
    * Ends Grasp's staff access, as the company's admin (never staff): every
-   * staff session ends now, and the window the console opened lets nobody
+   * staff session ends now, and the window the admin opened lets nobody
    * in again.
    */
   endStaffAccess: () => Promise<GateView>;
