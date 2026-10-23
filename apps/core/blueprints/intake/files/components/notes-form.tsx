@@ -19,7 +19,7 @@ const runInputMax = 128 * 1024;
 /** The largest file read as notes: its text is bounded again after. */
 const fileMaxBytes = 1024 * 1024;
 
-/** What the `extract` workflow takes: the source, and its notes. */
+/** Notes to read: the source they are from, and the notes. */
 export interface NotesInput {
   source: Omit<DraftSource, "notes">;
   notes: string;

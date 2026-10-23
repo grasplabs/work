@@ -18,7 +18,10 @@ import { z } from "zod";
 
 import type { BuiltinBlueprint } from "#blueprints";
 
-import { installBuiltinBlueprint } from "../src/app-blueprints.ts";
+import {
+  createFromBlueprint,
+  installBuiltinBlueprint,
+} from "../src/app-blueprints.ts";
 import { startAppBinding } from "../src/app-workflow-bindings.ts";
 import {
   builtins,
@@ -873,6 +876,42 @@ describe("the built-in blueprints", () => {
       workflows: [],
       apps: [],
     });
+
+    await reinstall();
+  });
+
+  it("delete the workflows they made for a copy whose App is refused", async () => {
+    await reinstall();
+    const builder = await signedInApi(idp, "builder");
+    const contract = `fixture/greeter-${unique()}`;
+    await expect(install(shippingGreeter(contract))).resolves.toBeTruthy();
+    // The built-in gone just before the batch that creates the App lands:
+    // the App is refused after its workflow was made.
+    const racing = racingDb(
+      async () =>
+        await env.DB.prepare("DELETE FROM blueprints WHERE id = 'hello'").run(),
+      /^insert into "apps"/iu
+    );
+    const refused = await outcome(
+      createFromBlueprint(
+        { ...env, DB: racing },
+        await builder.api.whoami(),
+        "hello",
+        { name: "Raced" }
+      )
+    );
+    const deleted = await env.DB.prepare(
+      "SELECT count(*) AS made, count(*) FILTER (WHERE deleted_at IS NULL) AS live FROM workflow_resources WHERE owner_id = ?"
+    )
+      .bind(builder.userId)
+      .first<{ made: number; live: number }>();
+    expect({ refused, made: deleted?.made, live: deleted?.live }).toStrictEqual(
+      {
+        refused: "app.blueprint_not_found",
+        made: 1,
+        live: 0,
+      }
+    );
 
     await reinstall();
   });

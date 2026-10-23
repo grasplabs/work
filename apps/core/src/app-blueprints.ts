@@ -7,6 +7,7 @@ import type {
 } from "@grasp-os/shared/apps";
 import { actorOf } from "@grasp-os/shared/audit";
 import type { AuditEntry } from "@grasp-os/shared/audit";
+import { sha256Hex } from "@grasp-os/shared/encoding";
 import { appIdSchema, blueprintIdSchema } from "@grasp-os/shared/ids";
 import type { BlueprintId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
@@ -66,6 +67,7 @@ import { ensureReleaseContract } from "./workflow-catalog.ts";
 import {
   createWorkflowResource,
   definitionProblems,
+  deleteWorkflowResource,
   publishWorkflowVersion,
 } from "./workflow-resources.ts";
 import { workflowCallsIn } from "./workflows/code.ts";
@@ -126,8 +128,10 @@ import { workflowCallsIn } from "./workflows/code.ts";
 // - A failure halfway: every definition is checked as publication checks
 //   it before any workflow is made, so a definition that wouldn't publish
 //   makes none. The workflows are created and published before the App's
-//   batch; if the batch is refused, they stay, the creator's own, bound
-//   to nothing and allowed nothing, for them to delete.
+//   batch; if the batch is refused, they are deleted (`discardShipped`),
+//   and one a deletion misses stays the creator's own, bound to nothing
+//   and allowed nothing. Either way each counts toward the creator's
+//   quota, which deleted workflows do too.
 //
 // Marking, unmarking, installing and creating are audited, each in the
 // same batch as its change. Grasp staff neither mark, unmark nor create
@@ -266,6 +270,30 @@ const createShippedWorkflows = async (
     });
   }
   return created;
+};
+
+/**
+ * Deletes the workflows made for a copy whose batch was refused, which
+ * nothing binds and nothing may start: best-effort, as the creator may
+ * delete one left behind themselves. Each still counts toward their quota,
+ * as any deleted workflow does.
+ */
+const discardShipped = async (
+  env: Env,
+  by: Acting,
+  workflows: readonly ShippedWorkflow[]
+): Promise<void> => {
+  for (const { workflowId } of workflows) {
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- a few, one at a time
+      await deleteWorkflowResource(env, by, workflowId);
+    } catch (error) {
+      log.warn("blueprints.workflow_discard_failed", {
+        workflowId,
+        ...errorFields(error),
+      });
+    }
+  }
 };
 
 const toBlueprint = (row: Row): Blueprint => ({
@@ -481,6 +509,8 @@ export const createFromBlueprint = async (
     blueprint.permissions,
     blueprint.id
   );
+  const tree = await versionTree(files);
+  await storeTree(env, app, tree);
   // What the blueprint ships, as the release stored it: refused whole if
   // any of it isn't, with nothing made.
   const shipped = blueprintWorkflowSchema.array().parse(blueprint.workflows);
@@ -495,8 +525,6 @@ export const createFromBlueprint = async (
     shipped
   );
   const starts = workflowStartRequests(by, app, workflows, blueprint.id);
-  const tree = await versionTree(files);
-  await storeTree(env, app, tree);
 
   const now = new Date();
   const appRow: AppRow = {
@@ -639,6 +667,7 @@ export const createFromBlueprint = async (
     await admit?.();
     await auditedBatch(env, db, statements);
   } catch (error) {
+    await discardShipped(env, by, workflows);
     if (!(await blueprintRow(env, blueprintIdSchema.parse(blueprint.id)))) {
       throw appErrors.create("app.blueprint_not_found");
     }
@@ -782,6 +811,9 @@ export const installBuiltinBlueprint = async (
             name,
             description,
             tree: tree.tree,
+            // What copies ask for and get, by the SHA-256 of each as stored.
+            permissions: await sha256Hex(JSON.stringify(declared)),
+            workflows: await sha256Hex(JSON.stringify(shipped)),
           })
         ),
       ]

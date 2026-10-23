@@ -9,16 +9,16 @@ import { reviewer } from "./drafts.ts";
 // member to a short chat about their work, through the platform's guest
 // chats (the `guests` resource, which an admin binds to the `GUESTS`
 // permission), guided by the Grasp skill `interview-a-stakeholder`. What
-// they write comes back as notes (`notes`), which the `extract` workflow
-// reads like any other, into a draft someone reviews. Their words are
-// untrusted: the draft and the source it becomes are marked a guest's,
-// which only `extract` proposing it from a chat sets (drafts.ts).
+// they write comes back as notes (`notes`), which the screen has the
+// `extract` workflow read like any other, into a draft someone reviews.
+// Their words are untrusted: the draft and the source it becomes are
+// marked a guest's, as the screen proposes a chat's (drafts.ts).
 //
 // The intake is its builders' (an admin is one on every App): each action
 // here first reads whether the caller may review drafts (`reviewer`), which
 // the store refuses anyone else, so no one else invites, lists, reads or
-// revokes a chat. A workflow run reads a chat as the person who started
-// it, under the same check.
+// revokes a chat. The workflow reads no chat itself: only what the screen
+// read here and gave it.
 
 export const guests = resource.guests("guests", {
   operations: ["invite", "list", "read", "revoke"],
@@ -151,7 +151,7 @@ export const revoke = action({
 });
 
 /**
- * A finished chat as notes, for `extract` to read: its source, its text as
+ * A finished chat as notes, for the screen to have `extract` read: its source, its text as
  * people read it, and its lines as the model reads them, each said by
  * whom, as data, so nothing the guest writes can pass for a question. A
  * chat without an answer of the guest's has nothing to read

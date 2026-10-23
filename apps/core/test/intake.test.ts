@@ -2,17 +2,18 @@ import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding"
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import type { OperationResult } from "@grasp-os/shared/operations";
+import type { WorkflowResourceRun } from "@grasp-os/shared/workflow-resources";
 import { env } from "cloudflare:workers";
-import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
+import { startAppBinding } from "../src/app-workflow-bindings.ts";
 import { builtins, fingerprintOf, release } from "../src/builtins.ts";
 import { fakeGateway } from "./ai-gateway.ts";
 import { grantReviewed, ordinaryData } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
-import { endLiveRuns, finished as runEnded } from "./runs.ts";
 import { calledAs } from "./sealed-apps.ts";
-import { routed, signedInApi, unique } from "./sign-in.ts";
+import { outcome, routed, signedInApi, unique } from "./sign-in.ts";
 
 // The intake, the built-in App (apps/core/blueprints/intake/): drafts of
 // a source and its statements, typed in or taken out of notes or a
@@ -194,10 +195,21 @@ const created = async (
     valueOf(await call(person, app, "drafts.create", "mutation", draft))
   );
 
+/** The `extract` workflow copy `app` got: the one it asks to start. */
+const workflowOf = async (admin: Person, app: AppId): Promise<string> => {
+  const asked = await admin.api.permissions.list({ type: "app", appId: app });
+  const start = asked.find(({ binding }) => binding === "EXTRACT");
+  if (start?.object.type !== "workflow") {
+    throw new Error("Expected the copy to ask to start its workflow");
+  }
+  return start.object.workflowId;
+};
+
 /**
- * An App created from the intake by `admin`, its `extractor` bound to the
- * test's model unless `model` is false, and its `guests` to the guest
- * chats permission it asks for when `guests` is true.
+ * An App created from the intake by `admin`, its requests granted: to
+ * start its `extract` workflow, whose `extractor` an admin approves for
+ * the test's model unless `model` is false, and the guest chats
+ * permission, which its `guests` is bound to when `guests` is true.
  */
 const copyOf = async (
   admin: Person,
@@ -213,17 +225,21 @@ const copyOf = async (
   }
   await admin.api.apps.versions.setCurrent(made.app.id, 1);
   await admin.api.apps.publish(made.app.id);
-  // The resources it uses, bound by an admin, as on the engine's
-  // Resources tab.
+  // The model the workflow reads with, approved by an admin on the
+  // workflow's page, for the version the copy got.
   if (model) {
-    await admin.api.resourceBindings.approve({
-      app: made.app.id,
-      alias: "extractor",
-      target: { kind: "model", model: testModel },
-      reviewed: { version: 1 },
-    });
+    await admin.api.workflowResources.approveBinding(
+      await workflowOf(admin, appIdSchema.parse(made.app.id)),
+      {
+        alias: "extractor",
+        target: { kind: "model", model: testModel },
+        reviewed: { version: 1 },
+      }
+    );
   }
-  const [permission] = made.permissions;
+  const permission = made.permissions.find(
+    ({ binding }) => binding === "GUESTS"
+  );
   if (guests && permission !== undefined) {
     await admin.api.resourceBindings.approve({
       app: made.app.id,
@@ -673,25 +689,64 @@ describe("the intake", { timeout: 60_000 }, () => {
   });
 });
 
-/** Runs `extract` with `input` as `admin`, its model `gateway`. */
+/** What a run of `extract` ended as, and what its model was asked. */
+interface Reading {
+  run: WorkflowResourceRun;
+  gateway: ReturnType<typeof fakeGateway>;
+}
+
+/**
+ * Starts `extract` for `person` through copy `app`'s binding, as its
+ * screen starts it, with `input`, its model `gateway`, and waits for the
+ * run to end, as `admin` (who sees every workflow) reads it.
+ */
 const extracted = async (
   admin: Person,
+  person: Person,
   app: AppId,
   input: unknown,
   gateway: ReturnType<typeof fakeGateway>
-) => {
+): Promise<Reading> => {
+  const workflow = await workflowOf(admin, app);
   const ai: AiBinding = env.AI;
   const spied = vi.spyOn(ai, "fetch").mockImplementation(gateway.binding.fetch);
   try {
-    const run = await admin.api.screens
-      .frame(app, "")
-      .startRun("extract", input);
-    await runEnded(run.id);
-    return { run: await admin.api.screens.frame(app, "").run(run.id), gateway };
+    const { runId } = await startAppBinding(
+      env,
+      {
+        subject: { type: "app", appId: app },
+        onBehalfOf: person.userId,
+        mode: "interactive",
+        appVersion: 1,
+      },
+      "extract",
+      { input, key: crypto.randomUUID() }
+    );
+    if (runId === null) {
+      throw new Error("Expected the start to start a run");
+    }
+    await vi.waitFor(
+      async () => {
+        const run = await admin.api.workflowResources.run(workflow, runId);
+        expect(run.endedAt).not.toBeNull();
+      },
+      { timeout: 30_000, interval: 100 }
+    );
+    return {
+      run: await admin.api.workflowResources.run(workflow, runId),
+      gateway,
+    };
   } finally {
     spied.mockRestore();
   }
 };
+
+/** What a finished reading found. */
+const foundSchema = z.object({
+  statements: z.array(
+    z.object({ text: z.string(), tags: z.array(z.string()), quote: z.string() })
+  ),
+});
 
 /** An interview's source, as someone describes it before it is read. */
 const interviewSource = (title: string, date = "2026-09-22") => ({
@@ -702,8 +757,6 @@ const interviewSource = (title: string, date = "2026-09-22") => ({
 });
 
 describe("reading notes", { timeout: 60_000 }, () => {
-  afterEach(endLiveRuns);
-
   /** The notes of an interview, with a line that tries to steer the model. */
   const notes = [
     "Anna closes the month. It takes three days, every month.",
@@ -727,71 +780,6 @@ describe("reading notes", { timeout: 60_000 }, () => {
     ],
   };
 
-  /**
-   * Characters per token for a conservative estimate of an answer's
-   * tokens: there's no Llama tokenizer here to count them with. English
-   * and Dutch text, JSON's punctuation and indenting included, take more
-   * characters a token than this, so the estimate comes out high.
-   */
-  const estimatedCharactersPerToken = 3;
-
-  /** How many claims the extract step's instructions ask for at most. */
-  const listedAtMost = /List at most (?<count>\d+)/u;
-
-  /**
-   * A quote and a backslash: characters JSON writes escaped, two for
-   * each, so text of them is the longest JSON text of its length.
-   */
-  const escapedPair = '"\\';
-
-  const jsonSchemaSchema = z
-    .object({
-      type: z.string().optional(),
-      enum: z.array(z.string()).optional(),
-      maxLength: z.number().optional(),
-      maxItems: z.number().optional(),
-      items: z.unknown().optional(),
-      properties: z.record(z.string(), z.unknown()).optional(),
-    })
-    .loose();
-
-  /**
-   * The longest JSON value `schema`, a JSON Schema, accepts: each string
-   * at its longest, of characters JSON escapes, each array at its most
-   * items. Throws for a string or an array it doesn't bound, which no
-   * answer's cap could hold.
-   */
-  const largestAnswer = (schema: unknown): unknown => {
-    const {
-      type,
-      enum: values,
-      maxLength,
-      maxItems,
-      items,
-      properties,
-    } = jsonSchemaSchema.parse(schema);
-    if (values !== undefined) {
-      return values.toSorted((one, other) => other.length - one.length)[0];
-    }
-    if (type === "string" && maxLength !== undefined) {
-      return escapedPair
-        .repeat(Math.ceil(maxLength / escapedPair.length))
-        .slice(0, maxLength);
-    }
-    if (type === "array" && maxItems !== undefined) {
-      return Array.from({ length: maxItems }, () => largestAnswer(items));
-    }
-    if (type === "object") {
-      return Object.fromEntries(
-        Object.entries(properties ?? {}).map(([key, value]) => [
-          key,
-          largestAnswer(value),
-        ])
-      );
-    }
-    throw new Error(`No bound on ${JSON.stringify(schema)}`);
-  };
-
   /** What the scripted model answers when it is asked to read. */
   const answering = () =>
     fakeGateway({
@@ -800,61 +788,55 @@ describe("reading notes", { timeout: 60_000 }, () => {
       outputTokens: 80,
     });
 
-  it("reads no notes until an admin binds the model it reads with", async () => {
+  it("reads no notes until an admin approves the model its workflow reads with", async () => {
     const admin = await signedInApi(idp, "admin");
     const app = await copyOf(admin, { model: false });
-    const { run, gateway } = await extracted(
-      admin,
-      app,
-      { source: interviewSource(`Unbound ${unique()}`), notes },
-      fakeGateway()
+    const gateway = fakeGateway();
+    const refused = await outcome(
+      extracted(admin, admin, app, { notes, lines: [] }, gateway)
     );
-    const review = await admin.api.resourceBindings.review(app);
+    const approvals = await admin.api.workflowResources.bindings(
+      await workflowOf(admin, app)
+    );
     expect({
-      run: { status: run.status, code: run.failure?.error.code },
+      refused,
       asked: gateway.requests.length,
-      extractor: review.resources
-        .filter(({ alias }) => alias === "extractor")
-        .map(({ alias, state, kind, usedBy }) => ({
-          alias,
-          state,
-          kind,
-          usedBy,
-        })),
+      approvals,
     }).toStrictEqual({
-      run: { status: "failed", code: "resource.unavailable" },
+      refused: "workflow.binding_unapproved",
       asked: 0,
-      // Shown to its admin to bind, as used by the step that reads with it.
-      extractor: [
-        {
-          alias: "extractor",
-          state: "unbound",
-          kind: "model",
-          usedBy: ["workflow:extract/extract"],
-        },
-      ],
+      approvals: [],
     });
   });
 
-  it("has a model take tagged statements out of pasted notes, as a draft reviewed before it is saved", async () => {
+  it("has a model take tagged statements out of pasted notes, kept as a draft reviewed before it is saved", async () => {
     const admin = await signedInApi(idp, "admin");
     const app = await copyOf(admin);
     const source = interviewSource(`Close ${unique()}`);
     const { run, gateway } = await extracted(
       admin,
+      admin,
       app,
-      { source, notes },
+      { notes, lines: [] },
       answering()
     );
-    const output = z
-      .object({ draft: z.string(), statements: z.number() })
-      .parse(run.output);
-    const opened = await draftOf(admin, app, output.draft);
+    const output = foundSchema.parse(run.output);
+    // The screen keeps what the run found, as the builder reviewing it.
+    const draft = idSchema.parse(
+      valueOf(
+        await call(admin, app, "drafts.propose", "mutation", {
+          source: { ...source, notes },
+          statements: output.statements,
+          guest: false,
+        })
+      )
+    );
+    const opened = await draftOf(admin, app, draft);
     const before = await sourcesOf(admin, app);
     const saved = savedSchema.parse(
       valueOf(
         await call(admin, app, "drafts.save", "mutation", {
-          id: output.draft,
+          id: draft,
           expectedRevision: 1,
           source: opened?.source,
           // Reviewed: the second statement loses its blocker tag.
@@ -866,12 +848,9 @@ describe("reading notes", { timeout: 60_000 }, () => {
       )
     );
     const sent = JSON.stringify(gateway.requests[0]?.body);
-    const { params } = await admin.api.workflows.get(app, "extract");
 
     expect({
-      // Its model is the binding's: nothing to set on the workflow.
-      params: params?.map(({ name }) => name),
-      output: output.statements,
+      status: run.status,
       origin: opened?.origin,
       source: opened?.source,
       statements: opened?.statements,
@@ -884,8 +863,7 @@ describe("reading notes", { timeout: 60_000 }, () => {
         listed.map(({ text, tags }) => ({ text, tags }))
       ),
     }).toStrictEqual({
-      params: [],
-      output: 2,
+      status: "completed",
       origin: "notes",
       source: { ...source, notes },
       statements: found.statements,
@@ -903,130 +881,59 @@ describe("reading notes", { timeout: 60_000 }, () => {
     });
   });
 
-  it("asks the default model for no more than it may answer, by a conservative estimate, and for as many claims as its schema takes", async () => {
+  it("asks the model for at most as many claims as it may answer in one answer", async () => {
     const admin = await signedInApi(idp, "admin");
     const app = await copyOf(admin);
     const { gateway } = await extracted(
       admin,
+      admin,
       app,
-      { source: interviewSource(`Close ${unique()}`), notes },
+      { notes, lines: [] },
       answering()
     );
-    // What the model was told to answer, and how long it may: as sent.
-    const { messages, max_completion_tokens: answerCap } = z
-      .object({
-        messages: z.array(z.object({ role: z.string(), content: z.unknown() })),
-        max_completion_tokens: z.number(),
-      })
+    const { max_completion_tokens: answerCap } = z
+      .object({ max_completion_tokens: z.number() })
       .parse(gateway.requests[0]?.body);
-    const system = messages.find(({ role }) => role === "system")?.content;
-    const schemaLine =
-      typeof system === "string"
-        ? system.split("\n").find((line) => line.startsWith("{"))
-        : undefined;
-    // The largest answer the schema accepts, escaped and indented as JSON:
-    // an estimate of its tokens, on the high side, not a count.
-    const largest = JSON.stringify(
-      largestAnswer(JSON.parse(schemaLine ?? "null")),
-      null,
-      2
-    );
-    const estimatedTokens = Math.ceil(
-      largest.length / estimatedCharactersPerToken
-    );
-    // The claims the instructions ask for at most, and the schema takes:
-    // more than it takes is an answer refused and asked for again.
-    const told =
-      typeof system === "string"
-        ? listedAtMost.exec(system)?.groups?.count
-        : undefined;
-    const { properties } = z
-      .object({
-        properties: z.object({
-          statements: z.object({ maxItems: z.number() }),
-        }),
-      })
-      .parse(JSON.parse(schemaLine ?? "null"));
-
+    const sent = JSON.stringify(gateway.requests[0]?.body);
     expect({
       answerCap,
-      estimateFits: estimatedTokens <= answerCap,
-      told: Number(told),
-    }).toStrictEqual({
-      answerCap: 3000,
-      estimateFits: true,
-      told: properties.statements.maxItems,
-    });
+      told: sent.includes("List at most 9"),
+    }).toStrictEqual({ answerCap: 3000, told: true });
   });
 
-  it("shows its steps as its code runs them, where its runs are reviewed", async () => {
-    const admin = await signedInApi(idp, "admin");
-    const app = await copyOf(admin);
-    const { steps } = await admin.api.workflows.get(app, "extract");
-    expect(steps).toMatchObject({
-      ok: true,
-      outline: {
-        steps: [
-          { type: "step", name: "may-review", kind: "exact", locked: true },
-          {
-            type: "branch",
-            condition: '"chat" in input',
-            steps: [
-              { type: "step", name: "read-chat", kind: "exact", locked: true },
-            ],
-            otherwise: [],
-          },
-          { type: "step", name: "extract", kind: "ai", params: [] },
-          { type: "step", name: "propose", kind: "exact", sideEffect: true },
-        ],
-      },
-    });
-  });
-
-  it("reads nothing for someone who may not review drafts: their run stops before the model is asked", async () => {
+  it("reads nothing for someone with no role in its workflow, and keeps them no draft", async () => {
     const admin = await signedInApi(idp, "admin");
     const app = await copyOf(admin);
     const member = await memberOf(admin, app, "user", "user");
+    // A role in the App starts a run, as any start of its screen's; the
+    // workflow's model is called only for someone with a role in the
+    // workflow, which an App's roles never give (workflow-resources.ts).
     const { run, gateway } = await extracted(
+      admin,
       member,
       app,
-      { source: interviewSource(`Not theirs ${unique()}`), notes },
+      { notes, lines: [] },
       answering()
+    );
+    const kept = codeOf(
+      await call(member, app, "drafts.propose", "mutation", {
+        source: { ...interviewSource(`Not theirs ${unique()}`), notes },
+        statements: found.statements,
+        guest: false,
+      })
     );
     expect({
       status: run.status,
-      code: run.failure?.error.code,
-      step: run.failure?.step,
+      code: run.error?.code,
       modelCalls: gateway.requests.length,
+      kept,
       drafts: await draftsOf(admin, app),
     }).toStrictEqual({
       status: "failed",
-      code: "data.access_denied",
-      step: "may-review",
+      code: "workflow.call_denied",
       modelCalls: 0,
+      kept: "data.write_denied",
       drafts: [],
-    });
-  });
-
-  it("refuses notes of a date that doesn't exist at the run's input, before any model reads them", async () => {
-    const admin = await signedInApi(idp, "admin");
-    const app = await copyOf(admin);
-    const { run, gateway } = await extracted(
-      admin,
-      app,
-      { source: interviewSource(`Leap ${unique()}`, "2026-02-30"), notes },
-      fakeGateway()
-    );
-    expect({
-      status: run.status,
-      code: run.failure?.error.code,
-      step: run.failure?.step ?? null,
-      modelCalls: gateway.requests.length,
-    }).toStrictEqual({
-      status: "failed",
-      code: "workflow.invalid_input",
-      step: null,
-      modelCalls: 0,
     });
   });
 });
@@ -1041,9 +948,19 @@ const guest = async (body: unknown): Promise<unknown> => {
   return await response.json();
 };
 
-describe("stakeholder chats", { timeout: 90_000 }, () => {
-  afterEach(endLiveRuns);
+/** A chat as `chats.notes` reads it, for the screen to have it read. */
+const chatNotesSchema = z.object({
+  source: z.object({
+    title: z.string(),
+    medium: z.string(),
+    date: z.string(),
+    from: z.string(),
+  }),
+  notes: z.string(),
+  lines: z.array(z.object({ role: z.string(), text: z.string() })),
+});
 
+describe("stakeholder chats", { timeout: 90_000 }, () => {
   it("invites a stakeholder whose chat, once they finished it, a model takes statements out of, as a guest's draft reviewed before it is saved", async () => {
     const admin = await signedInApi(idp, "admin");
     const app = await copyOf(admin, { guests: true });
@@ -1063,17 +980,14 @@ describe("stakeholder chats", { timeout: 90_000 }, () => {
         },
       ],
     };
-    const gateway = fakeGateway(
+    const chatting = fakeGateway(
       { text: "What slows your work down?", inputTokens: 40, outputTokens: 8 },
-      { text: "Thank you. Press Finish.", inputTokens: 60, outputTokens: 6 },
-      { text: JSON.stringify(found), inputTokens: 200, outputTokens: 60 }
+      { text: "Thank you. Press Finish.", inputTokens: 60, outputTokens: 6 }
     );
     const ai: AiBinding = env.AI;
     const answering = vi
       .spyOn(ai, "fetch")
-      .mockImplementation(gateway.binding.fetch);
-    let listed: unknown;
-    let run: { id: string };
+      .mockImplementation(chatting.binding.fetch);
     try {
       await guest({ action: "open", token });
       await guest({ action: "send", token, text: "I approve invoices." });
@@ -1083,18 +997,39 @@ describe("stakeholder chats", { timeout: 90_000 }, () => {
         text: "They wait a week for the second signature.",
       });
       await guest({ action: "finish", token });
-      listed = valueOf(await call(admin, app, "chats.overview", "action"));
-      run = await admin.api.screens.frame(app, "").startRun("extract", {
-        chat: invited.chat.id,
-      });
-      await runEnded(run.id);
     } finally {
       answering.mockRestore();
     }
-    const ran = await admin.api.screens.frame(app, "").run(run.id);
-    const { draft: draftId } = z
-      .object({ draft: z.string() })
-      .parse(ran.output);
+    const listed = valueOf(await call(admin, app, "chats.overview", "action"));
+    // The screen reads the chat as notes through the App's own action,
+    // then has the workflow read them.
+    const read = chatNotesSchema.parse(
+      valueOf(
+        await call(admin, app, "chats.notes", "action", {
+          chat: invited.chat.id,
+        })
+      )
+    );
+    const { run, gateway } = await extracted(
+      admin,
+      admin,
+      app,
+      { notes: read.notes, lines: read.lines },
+      fakeGateway({
+        text: JSON.stringify(found),
+        inputTokens: 200,
+        outputTokens: 60,
+      })
+    );
+    const draftId = idSchema.parse(
+      valueOf(
+        await call(admin, app, "drafts.propose", "mutation", {
+          source: { ...read.source, notes: read.notes },
+          statements: foundSchema.parse(run.output).statements,
+          guest: true,
+        })
+      )
+    );
     const opened = await draftOf(admin, app, draftId);
     const saved = savedSchema.parse(
       valueOf(
@@ -1107,7 +1042,7 @@ describe("stakeholder chats", { timeout: 90_000 }, () => {
       )
     );
     const [source] = await sourcesOf(admin, app);
-    const extraction = JSON.stringify(gateway.requests[2]?.body);
+    const extraction = JSON.stringify(gateway.requests[0]?.body);
 
     expect({
       listed: z
@@ -1127,8 +1062,8 @@ describe("stakeholder chats", { timeout: 90_000 }, () => {
       },
       // The chat, read as notes: the questions and the guest's answers.
       notes: opened?.source.notes,
-      // The chat's lines, as data, each said by whom.
-      read: extraction.includes(
+      // The chat's lines, as data, each said by whom, and not its text.
+      lines: extraction.includes(
         '{\\"role\\":\\"guest\\",\\"text\\":\\"They wait a week for the second signature.\\"}'
       ),
       statements: opened?.statements,
@@ -1149,7 +1084,7 @@ describe("stakeholder chats", { timeout: 90_000 }, () => {
         `${name}: They wait a week for the second signature.`,
         "Question: Thank you. Press Finish.",
       ].join("\n\n"),
-      read: true,
+      lines: true,
       statements: found.statements,
       guest: [true, true],
     });
