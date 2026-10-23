@@ -51,6 +51,7 @@ const said = (
       openedAt: null,
       staff: null,
     },
+    review: { differences: [], mapped: 0 },
     directory: null,
     hr: null,
     suites: [],
