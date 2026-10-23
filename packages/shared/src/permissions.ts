@@ -410,6 +410,25 @@ export const declaredPermissionSchema = z
   });
 export type DeclaredPermission = z.infer<typeof declaredPermissionSchema>;
 
+/** Longest workflow definition a blueprint ships, as JSON text. */
+export const blueprintWorkflowMaxLength = 256 * 1024;
+
+/**
+ * An independent workflow a built-in blueprint ships (core's
+ * app-blueprints.ts): each App created from it gets a workflow of its
+ * creator's own, published from `definition` (grasp-open-workflow/1 JSON)
+ * and bound to the App under `alias`, and asks, under `binding`, for the
+ * permission to start it. Never a grant: the request waits for an admin,
+ * and each of the version's catalog bindings for an admin's approval.
+ * The alias is lowercase, as it also names the workflow.
+ */
+export const blueprintWorkflowSchema = z.strictObject({
+  alias: z.string().regex(/^[a-z][a-z0-9]{0,31}$/u),
+  binding: bindingNameSchema,
+  definition: z.string().min(1).max(blueprintWorkflowMaxLength),
+});
+export type BlueprintWorkflow = z.infer<typeof blueprintWorkflowSchema>;
+
 /**
  * Requested: asked for, allows nothing yet. Active: granted, allows its
  * actions. Revoked: allows nothing, for good (ask again for a new one).
