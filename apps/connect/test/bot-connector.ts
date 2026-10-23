@@ -40,7 +40,21 @@ export interface Failure {
    * times out on a send Teams went on to post.
    */
   carriedOut?: boolean;
+  /**
+   * The answer's body breaks off after its headers, as when the
+   * connection drops mid-answer.
+   */
+  breaksOff?: boolean;
 }
+
+/** A body that sends one chunk, then fails. */
+const brokenBody = (): ReadableStream<Uint8Array> =>
+  new ReadableStream({
+    pull: (controller) => {
+      controller.enqueue(new TextEncoder().encode('{"id":'));
+      controller.error(new Error("The connection was reset"));
+    },
+  });
 
 const activityPath =
   /\/v3\/conversations\/(?<conversation>[^/]+)\/activities(?:\/(?<activity>[^/]+))?$/u;
@@ -115,6 +129,12 @@ export const fakeBotConnector = () => {
     const failure = failures.shift();
     if (failure?.carriedOut === true) {
       await carryOut(request, url);
+    }
+    if (failure?.breaksOff === true) {
+      return new Response(brokenBody(), {
+        status: failure.status,
+        headers: { "content-type": "application/json" },
+      });
     }
     if (failure !== undefined) {
       return Response.json(

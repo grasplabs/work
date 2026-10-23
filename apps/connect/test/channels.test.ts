@@ -536,6 +536,18 @@ describe("sending as the bot", () => {
     expect(toBotConnector()).toHaveLength(4);
   });
 
+  it("answers failed when Teams' answer breaks off after its headers", async () => {
+    const connect = connectForBot();
+    microsoft.fail({ status: 201, carriedOut: true, breaksOff: true });
+    const response = await connect.channelFetch(
+      "teams",
+      adapterRequest(activities())
+    );
+    expect(response.status).toBe(502);
+    expect(response.headers.get(channelHeader)).toBe(channelAnswer.failed);
+    expect(microsoft.posted).toHaveLength(1);
+  });
+
   it("drops a platform's own answer-kind header, so it can't pass as connect's", async () => {
     const connect = connectForBot();
     microsoft.fail({
@@ -551,6 +563,7 @@ describe("sending as the bot", () => {
   });
 
   it("records each send, edit and removal, but not typing", async () => {
+    const typing = { body: { type: "typing" } };
     const connect = connectForBot();
     await connect.channelFetch("teams", tokenRequest());
     await connect.channelFetch("teams", adapterRequest(activities()));
@@ -562,12 +575,24 @@ describe("sending as the bot", () => {
       "teams",
       adapterRequest(activities("activity-1"), { method: "PUT" })
     );
+    // Only a POST shows typing: an edit or a removal whose body claims to
+    // is still recorded.
+    await connect.channelFetch(
+      "teams",
+      adapterRequest(activities("activity-1"), { method: "PUT", ...typing })
+    );
+    await connect.channelFetch(
+      "teams",
+      adapterRequest(activities("activity-1"), { method: "DELETE", ...typing })
+    );
     microsoft.remove(conversation);
     await connect.channelFetch("teams", adapterRequest(activities()));
     const events = await audit.events();
     expect(events.map(({ detail }) => detail)).toStrictEqual([
       { outcome: "ok", method: "POST", host: botConnectorHost, status: 201 },
       { outcome: "ok", method: "PUT", host: botConnectorHost, status: 200 },
+      { outcome: "ok", method: "PUT", host: botConnectorHost, status: 200 },
+      { outcome: "ok", method: "DELETE", host: botConnectorHost, status: 200 },
       {
         outcome: "removed",
         method: "POST",

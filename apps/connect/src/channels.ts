@@ -317,13 +317,20 @@ const readCapped = async (
 /**
  * The platform's answer, passed back with its body read to the limit and
  * without headers that no longer hold or that connect's own answers use;
- * `kind` marks it, for one connect reads as removed.
+ * `kind` marks it, for one connect reads as removed. A body that breaks
+ * off after its headers (a timeout, a dropped connection) is a failed
+ * answer too, not an error thrown back over RPC.
  */
 const passedBack = async (
   response: Response,
   kind?: ChannelAnswer
 ): Promise<Response> => {
-  const body = await readCapped(response.body, maxChannelResponseBytes);
+  let body: Uint8Array | undefined;
+  try {
+    body = await readCapped(response.body, maxChannelResponseBytes);
+  } catch {
+    return failed();
+  }
   if (body === undefined) {
     return failed();
   }
@@ -453,8 +460,15 @@ const answerTokenRequest = async (
   );
 };
 
-/** Whether a Teams request only shows typing: logged, not recorded. */
-const isTyping = (body: Uint8Array): boolean => {
+/**
+ * Whether a Teams request only shows typing: logged, not recorded. Only a
+ * POST posts a typing activity; an edit or a removal is recorded whatever
+ * its body says, or a caller could hide one behind `{"type":"typing"}`.
+ */
+const isTyping = (method: string, body: Uint8Array): boolean => {
+  if (method !== "POST") {
+    return false;
+  }
   try {
     const parsed: unknown = JSON.parse(new TextDecoder().decode(body));
     return (
@@ -649,7 +663,7 @@ const botConnectorFetch = async (
     headers,
     method === "GET" ? null : body
   );
-  const recorded = writeMethods.has(method) && !isTyping(body);
+  const recorded = writeMethods.has(method) && !isTyping(method, body);
   if (sent.response === undefined) {
     log.warn("channel.failed", { platform, ...stated });
     if (recorded) {
