@@ -26,6 +26,7 @@ import { appHost, inJurisdiction } from "./durable-objects.ts";
 import { windowPages } from "./query-windows.ts";
 import { RunSubscription } from "./run-subscription.ts";
 import { delivering } from "./screen-trust.ts";
+import type { LeasedBuild } from "./screen-trust.ts";
 import type { SessionCheck } from "./session-check.ts";
 
 // Live queries (spec 11): what one page's connection to core (one browser
@@ -250,7 +251,7 @@ interface Listener {
 interface Evaluation {
   readonly key: string;
   readonly app: AppId;
-  readonly artifact: string | undefined;
+  readonly build: LeasedBuild | undefined;
   readonly request: string;
   readonly listeners: Set<Listener>;
   /** How many pushes it made: each push's `Snapshot.seq`. */
@@ -327,7 +328,7 @@ interface Following {
 export type AccessCheck<By = Identity> = (
   by: By,
   app: AppId,
-  artifact: string | undefined
+  build: LeasedBuild | undefined
 ) => Promise<"open" | "role" | "revoked" | "unreviewed">;
 
 /** Whoever a connection's live queries are read for, by `userId`. */
@@ -381,14 +382,14 @@ export interface LiveReads<By extends Reader> {
   /** Drops the latest reading of who reads, so `check` reads now. */
   forget: () => void;
   /**
-   * Reads the query `request` names as `by`, as build `artifact`, by
+   * Reads the query `request` names as `by`, as `build`, by
    * `deadline`, a window's pages past what its read paid charged through
    * `chargePages`; a throw is a refusal that ends the subscription.
    */
   evaluate: (
     by: By,
     app: AppId,
-    artifact: string | undefined,
+    build: LeasedBuild | undefined,
     request: string,
     deadline: number,
     chargePages: (pages: number) => Promise<void>
@@ -415,15 +416,23 @@ export const screenReads = (
   forget: () => {
     check.forget?.();
   },
-  evaluate: async (by, app, artifact, request, deadline, chargePages) => {
+  evaluate: async (by, app, build, request, deadline, chargePages) => {
     const { answer, reads, revision } = await delivering(
       env,
       by,
       app,
-      artifact,
+      build,
       "watchQuery",
       async () =>
-        await evaluateAppQuery(env, by, app, request, deadline, chargePages)
+        await evaluateAppQuery(
+          env,
+          by,
+          app,
+          request,
+          deadline,
+          chargePages,
+          build?.version
+        )
     );
     return {
       result: answer.result,
@@ -444,7 +453,7 @@ const storeOf = (env: Env, storeId: StoreId) =>
  */
 const keyOf = (
   app: AppId,
-  artifact: string | undefined,
+  build: LeasedBuild | undefined,
   userId: string,
   request: string
 ): string => {
@@ -456,7 +465,13 @@ const keyOf = (
   } catch {
     // Keyed by its text.
   }
-  return canonicalJson([app, artifact ?? null, userId, call]);
+  return canonicalJson([
+    app,
+    build?.artifact ?? null,
+    build?.version ?? null,
+    userId,
+    call,
+  ]);
 };
 
 /**
@@ -556,14 +571,14 @@ export class QuerySubscriptions<By extends Reader = Identity> {
 
   /**
    * Follows the query `request` names of `app` for `by`, its results
-   * pushed to `onSnapshot`, as the build `artifact` the subscribing
+   * pushed to `onSnapshot`, as the build `build` the subscribing
    * frame's lease names (see the header). The caller admitted the
    * request and checked the build's trust.
    */
   subscribe(
     by: By,
     app: AppId,
-    artifact: string | undefined,
+    build: LeasedBuild | undefined,
     request: string,
     onSnapshot: SnapshotCallback,
     /**
@@ -576,9 +591,9 @@ export class QuerySubscriptions<By extends Reader = Identity> {
     if (this.#count >= querySubscriptionLimits.perConnection) {
       throw screenErrors.create("screen.too_many_queries");
     }
-    const key = keyOf(app, artifact, by.userId, request);
+    const key = keyOf(app, build, by.userId, request);
     const evaluation =
-      this.#evaluations.get(key) ?? this.#start(key, app, artifact, request);
+      this.#evaluations.get(key) ?? this.#start(key, app, build, request);
     const listener: Listener = {
       toPage: onSnapshot.dup(),
       sent: 0,
@@ -632,13 +647,13 @@ export class QuerySubscriptions<By extends Reader = Identity> {
   #start(
     key: string,
     app: AppId,
-    artifact: string | undefined,
+    build: LeasedBuild | undefined,
     request: string
   ): Evaluation {
     const evaluation: Evaluation = {
       key,
       app,
-      artifact,
+      build,
       request,
       listeners: new Set(),
       revision: 0,
@@ -743,7 +758,7 @@ export class QuerySubscriptions<By extends Reader = Identity> {
   }
 
   async #readAndPush(evaluation: Evaluation): Promise<void> {
-    const { app, artifact, request } = evaluation;
+    const { app, build, request } = evaluation;
     // Nothing of the App is read before the connection follows its
     // revocations (see the header).
     await this.#followed(app);
@@ -781,7 +796,7 @@ export class QuerySubscriptions<By extends Reader = Identity> {
       evaluated = await this.#reads.evaluate(
         before.by,
         app,
-        artifact,
+        build,
         request,
         Date.now() + evaluationMs,
         // Pages past what this read paid, and every read again, are
@@ -969,21 +984,25 @@ export class QuerySubscriptions<By extends Reader = Identity> {
   async #gate(
     evaluation: Evaluation
   ): Promise<{ refusal: Result } | { roles: string; by: By }> {
-    const { app, artifact } = evaluation;
+    const { app, build } = evaluation;
     let by: By;
     try {
       by = await this.#reads.check();
     } catch (error) {
       return { refusal: refusalResult(error) };
     }
-    const key = canonicalJson([app, artifact ?? null]);
+    const key = canonicalJson([
+      app,
+      build?.artifact ?? null,
+      build?.version ?? null,
+    ]);
     const now = Date.now();
     let cached = this.#cleared.get(key);
     if (cached === undefined || cached.by !== by || cached.until <= now) {
       cached = {
         by,
         until: now + accessCacheMs,
-        access: this.#reads.access(by, app, artifact),
+        access: this.#reads.access(by, app, build),
         roles: this.#reads.roles(by, app),
       };
       this.#cleared.set(key, cached);

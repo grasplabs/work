@@ -729,7 +729,8 @@ describe("the session client", { timeout: 120_000 }, () => {
       category: "uncertain",
       details: {
         idempotencyKey: keyed.idempotencyKey,
-        refusal: "version.revoked",
+        // Its frame was opened on version 1: its build is revoked with it.
+        refusal: "screen.revoked",
       },
     });
   });

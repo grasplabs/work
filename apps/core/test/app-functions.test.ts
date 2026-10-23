@@ -19,6 +19,7 @@ import {
   sdkResourceBindings,
 } from "../src/db/core/schema.ts";
 import { revokeRelease } from "../src/release-retention.ts";
+import { deliveryOf, standingOf } from "../src/screen-trust.ts";
 import { deepFiles, fieldDepth } from "./deep-records.ts";
 import { appWith, artifactKey, person, seal } from "./sealed-apps.ts";
 import type { Fixture } from "./sealed-apps.ts";
@@ -722,7 +723,9 @@ describe(
             Date.now() + 30_000,
             async () => {
               // A window's pages cost nothing here.
-            }
+            },
+            // Opened on version 1, as its lease says.
+            { pinnedVersion: 1 }
           )
         );
       const before = {
@@ -748,14 +751,29 @@ describe(
       );
       expect({
         before,
-        revoked: await fromScreen(pinned.same, {}),
+        revoked: {
+          pinned: await fromScreen(pinned.same, {}),
+          // The screen's own word for its version counts for nothing.
+          forged: await fromScreen({ ...pinned.same, resourceVersion: 2 }, {}),
+          // And its build, opened on version 1, gets nothing more either.
+          delivery: deliveryOf(
+            await standingOf(env, notes.app, {
+              artifact: "a".repeat(64),
+              version: 1,
+            })
+          ),
+        },
       }).toStrictEqual({
         before: {
           same: "ok",
           changed: "version.mismatch",
           agent: "version.mismatch",
         },
-        revoked: "version.revoked",
+        revoked: {
+          pinned: "version.revoked",
+          forged: "version.revoked",
+          delivery: "revoked",
+        },
       });
     });
 

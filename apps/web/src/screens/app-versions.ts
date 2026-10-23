@@ -23,6 +23,9 @@ import { isTransient, reconnectDelay, wait } from "../core.ts";
 //   current then at once, so nothing that changed meanwhile is missed.
 // - A frame opens after the subscription started: it is told the last
 //   version core pushed at once, and shares the subscription.
+// - Core asks the page to wait (too many requests, or subscriptions at
+//   once): it follows again once that wait is over, never giving up the
+//   App, so its frames still hear of a revocation.
 // - The person lost the App: every frame of it hears the refusal, and
 //   nothing is followed for it until a frame opens it again.
 // - The session ended: core's refusal of the connection ends the frames
@@ -41,6 +44,29 @@ interface Followed {
   /** Failed attempts since the last that held, for the pause. */
   attempt: number;
 }
+
+/**
+ * Core's refusals of following an App that pass with time: too many of
+ * the person's requests of the App, or of the connection's subscriptions
+ * at once. Followed again, after at least as long as core says to wait.
+ */
+const waitedOut: ReadonlySet<string> = new Set([
+  "screen.rate_limited",
+  "screen.too_many_subscriptions",
+]);
+
+/** How long core said to wait before asking again, if it said. */
+const retryAfterOf = (error: unknown): number => {
+  const details: unknown =
+    typeof error === "object" && error !== null
+      ? Reflect.get(error, "details")
+      : undefined;
+  const after: unknown =
+    typeof details === "object" && details !== null
+      ? Reflect.get(details, "retryAfterMs")
+      : undefined;
+  return typeof after === "number" && after > 0 ? after : 0;
+};
 
 /** The code and message of a refusal, as a push carries it. */
 const refusalOf = (
@@ -133,27 +159,38 @@ export class VersionFeed {
       return;
     }
     let renewed = false;
-    // Core let go of the callback, or the connection dropped: once.
-    const renew = (): void => {
+    // Core let go of the callback, or the connection dropped, or core
+    // asked to wait (`atLeastMs`): once.
+    const renew = (atLeastMs = 0): void => {
       if (renewed || this.#apps.get(app) !== followed) {
         return;
       }
       renewed = true;
       followed.hold = undefined;
-      void this.#again(app, followed);
+      void this.#again(app, followed, atLeastMs);
     };
     const onVersion = Object.assign(
       (push: AppVersionPush): void => {
         followed.attempt = 0;
         this.#tell(app, followed, push);
       },
-      { [Symbol.dispose]: renew }
+      {
+        [Symbol.dispose]: () => {
+          renew();
+        },
+      }
     );
     let hold: RunSubscriptionApi;
     try {
       hold = await session.screens.watchVersion(app, onVersion);
     } catch (error) {
       const refusal = refusalOf(error);
+      // Too much asked for now: the frames keep following, later, so
+      // they still hear of a revocation; never dropped for good.
+      if (refusal !== undefined && waitedOut.has(refusal.code)) {
+        renew(retryAfterOf(error));
+        return;
+      }
       if (refusal !== undefined && !isTransient(error)) {
         this.#tell(app, followed, { type: "refused", error: refusal });
         return;
@@ -169,13 +206,22 @@ export class VersionFeed {
     followed.hold = hold;
     const stub: unknown = hold;
     if (stub instanceof RpcStub) {
-      stub.onRpcBroken(renew);
+      stub.onRpcBroken(() => {
+        renew();
+      });
     }
   }
 
-  /** Follows `app` again after a pause that grows with each failure. */
-  async #again(app: string, followed: Followed): Promise<void> {
-    await wait(reconnectDelay(followed.attempt));
+  /**
+   * Follows `app` again after a pause that grows with each failure, and
+   * lasts at least `atLeastMs`.
+   */
+  async #again(
+    app: string,
+    followed: Followed,
+    atLeastMs: number
+  ): Promise<void> {
+    await wait(Math.max(atLeastMs, reconnectDelay(followed.attempt)));
     followed.attempt += 1;
     await this.#subscribe(app, followed);
   }

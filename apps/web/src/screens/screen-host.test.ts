@@ -647,6 +647,49 @@ describe("a running screen as its App's version changes", () => {
     expect(unasked).toStrictEqual([]);
   });
 
+  it.each(["screen.rate_limited", "screen.too_many_subscriptions"])(
+    "follows the App again once core's wait for %s is over, never dropping it",
+    async (code) => {
+      vi.useFakeTimers();
+      let asked = 0;
+      const link = linkAsAda(
+        async () => await Promise.resolve("open"),
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        async () => {
+          asked += 1;
+          if (asked === 1) {
+            throw Object.assign(new Error("Wait."), {
+              code,
+              details: { retryAfterMs: 60_000 },
+            });
+          }
+          return await Promise.resolve({
+            release: async () => {
+              await Promise.resolve();
+            },
+          });
+        }
+      );
+      const told: AppVersionPush[] = [];
+      const stop = link.followVersion("notes", (push) => {
+        told.push(push);
+      });
+      await vi.advanceTimersByTimeAsync(59_000);
+      const early = asked;
+      await vi.advanceTimersByTimeAsync(2000);
+      stop();
+      vi.useRealTimers();
+      expect({ early, later: asked, told }).toStrictEqual({
+        early: 1,
+        later: 2,
+        told: [],
+      });
+    }
+  );
+
   it("shares one subscription of the App among the frames of a tab, the last version told to one that opens later", async () => {
     let followed = 0;
     let pushVersion: ((push: AppVersionPush) => void) | undefined;
