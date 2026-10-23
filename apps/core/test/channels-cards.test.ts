@@ -535,6 +535,10 @@ describe("the language of a message", () => {
       ["¿Qué tengo mañana en mi agenda?", "es"],
       ["Envíame el Excel de ventas, por favor", "es"],
       ["que tengo manana", "es"],
+      // Words two languages write count for neither.
+      ["Wie geht es dir?", "de"],
+      ["Summarize AI news", "en"],
+      ["Meeting Mon 3pm", "en"],
     ];
 
     expect(cases.map(([text]) => [text, languageOf(text, "en")])).toStrictEqual(

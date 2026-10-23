@@ -546,6 +546,8 @@ const words: Record<ChannelLocale, ReadonlySet<string>> = {
     "zeig",
     "zeigen",
     "danke",
+    "geht",
+    "dir",
   ]),
   fr: new Set([
     "les",
@@ -556,7 +558,7 @@ const words: Record<ChannelLocale, ReadonlySet<string>> = {
     "sont",
     "j",
     "vous",
-    "mon",
+    // Not "mon", which is English for Monday too ("Meeting Mon 3pm").
     "ma",
     "votre",
     "vos",
@@ -592,7 +594,7 @@ const words: Record<ChannelLocale, ReadonlySet<string>> = {
     "quelle",
     "quels",
     "quelles",
-    "ai",
+    // Not "ai", English for AI too: "j'ai" counts by its "j".
     "avez",
     "avons",
     "qu",
@@ -607,7 +609,7 @@ const words: Record<ChannelLocale, ReadonlySet<string>> = {
     "las",
     "una",
     "y",
-    "es",
+    // Not "es", which is German too ("Wie geht es dir?").
     "está",
     "esta",
     "están",
