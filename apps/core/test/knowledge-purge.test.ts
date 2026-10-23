@@ -144,7 +144,7 @@ interface KnowledgeHooks {
   /** Before each statement is made. */
   prepare?: (query: string) => void;
   /** Before each batch runs: throwing fails it. */
-  beforeBatch?: () => void;
+  beforeBatch?: () => void | Promise<void>;
   /** After each batch ran, before the caller gets its results. */
   afterBatch?: () => Promise<void>;
 }
@@ -161,7 +161,7 @@ const apiWith = async (person: Person, hooks: KnowledgeHooks) => {
       return real.prepare(query);
     },
     batch: async <T>(statements: D1PreparedStatement[]) => {
-      hooks.beforeBatch?.();
+      await hooks.beforeBatch?.();
       const results = await real.batch<T>(statements);
       await hooks.afterBatch?.();
       return results;
@@ -539,6 +539,7 @@ describe("a personal purge", setUpTime, () => {
         versions: 2,
         occurrences: 0,
         inLongerWords: 0,
+        memories: 1,
         hostCopies: 0,
         originals: 0,
         token: "string",
@@ -808,6 +809,7 @@ describe("a purge of content", setUpTime, () => {
             versions: 4,
             occurrences: 8,
             inLongerWords: 0,
+            memories: 0,
             hostCopies: 0,
           },
         },
@@ -2147,6 +2149,253 @@ describe("a purge of content", setUpTime, () => {
       first: "# Log\nQz was here.",
       hugeKept: true,
       versions: 3,
+    });
+  });
+});
+
+/** Remembers `text` as `person`, under a key of its own. */
+const rememberAs = async (person: Person, text: string) =>
+  await person.api.knowledge.remember(
+    { kind: "fact", text },
+    { idempotencyKey: `purge-${unique()}-${unique()}` }
+  );
+
+/** The memory record a remember's receipt names. */
+const memoryIdOf = ({
+  resourceRefs,
+}: Awaited<ReturnType<typeof rememberAs>>): string => {
+  const [ref] = resourceRefs;
+  return ref?.kind === "memory" ? ref.memoryId : "";
+};
+
+/** `person`'s own memory statements, sorted. */
+const statementsOf = async (person: Person): Promise<string[]> => {
+  const { records } = await person.api.knowledge.memoriesList();
+  return records.map(({ statement }) => statement).toSorted();
+};
+
+/** Whether a statement of the purge's batch writes or deletes records. */
+const writesRecords = (query: string): boolean =>
+  /^(?:update|delete from) "brain_memories"/iu.test(query);
+
+describe("a purge of content's memory records", setUpTime, () => {
+  it("redacts or deletes every record holding a term, whoever's, audited without the text", async () => {
+    const admin = await personOf("admin");
+    const leaver = await personOf("user");
+    const colleague = await personOf("user");
+    const name = `Visser${unique()}`;
+    const handbook = await admin.api.knowledge.createCollection({
+      name: "Handbook",
+      access: "everyone",
+    });
+    const document = await saveOver(
+      admin,
+      handbook.id,
+      "team.md",
+      `# Team\n${name} runs payroll.`
+    );
+    const key = `purge-${unique()}-${unique()}`;
+    const redacted = await leaver.api.knowledge.remember(
+      { kind: "fact", text: `I report to ${name}.` },
+      { idempotencyKey: key }
+    );
+    const deleted = await rememberAs(colleague, `${name.toUpperCase()}!`);
+    await rememberAs(colleague, "I work in payroll.");
+    const input: PurgeInput = {
+      type: "content",
+      documentIds: [document.id],
+      terms: [name],
+      reason: "erasure_request",
+    };
+    let outcomeOf: Awaited<ReturnType<typeof purged>> | undefined;
+    const events = await auditedDuring(async () => {
+      outcomeOf = await purged(admin, input);
+    });
+    // A retry of the remember answers its receipt: it never stores the
+    // statement again.
+    const retried = await leaver.api.knowledge.remember(
+      { kind: "fact", text: `I report to ${name}.` },
+      { idempotencyKey: key }
+    );
+    const leavers = await leaver.api.knowledge.memoriesList();
+    const colleagues = await colleague.api.knowledge.memoriesList();
+    const purgeId = outcomeOf?.result.purgeId;
+    expect({
+      planned: outcomeOf?.plan.memories,
+      stillFound: outcomeOf?.result.stillFound,
+      leavers: leavers.records.map(({ statement, revision }) => ({
+        statement,
+        revision,
+      })),
+      colleagues: colleagues.records.map(({ statement }) => statement),
+      deleted: await outcome(
+        colleague.api.knowledge.memoriesGet({ memoryId: memoryIdOf(deleted) })
+      ),
+      receipts: [
+        await outcome(
+          leaver.api.knowledge.receiptsGet({ receiptId: redacted.id })
+        ),
+        await outcome(
+          colleague.api.knowledge.receiptsGet({ receiptId: deleted.id })
+        ),
+      ],
+      retried: retried.id === redacted.id,
+      held: await holding(name),
+      memoryEvents: events
+        .filter(({ action }) => action === "knowledge.memory.purged")
+        .map(({ actor, target, detail }) => ({ actor, target, detail }))
+        .toSorted((one, other) =>
+          (one.target?.id ?? "").localeCompare(other.target?.id ?? "")
+        ),
+      prepared: events.find(
+        ({ action }) => action === "knowledge.purge.prepared"
+      )?.detail.memories,
+      carriesText: JSON.stringify(events)
+        .toLowerCase()
+        .includes(name.toLowerCase()),
+    }).toStrictEqual({
+      planned: 2,
+      stillFound: 0,
+      leavers: [{ statement: "I report to (removed).", revision: 2 }],
+      colleagues: ["I work in payroll."],
+      deleted: "brain.not_found",
+      receipts: ["ok", "ok"],
+      retried: true,
+      held: [],
+      memoryEvents: [
+        {
+          actor: { type: "person", userId: admin.userId },
+          target: { type: "memory", id: memoryIdOf(redacted) },
+          detail: { purgeId, change: "redacted", revision: 1 },
+        },
+        {
+          actor: { type: "person", userId: admin.userId },
+          target: { type: "memory", id: memoryIdOf(deleted) },
+          detail: { purgeId, change: "deleted", revision: 1 },
+        },
+      ].toSorted((one, other) => one.target.id.localeCompare(other.target.id)),
+      prepared: 2,
+      carriesText: false,
+    });
+  });
+
+  it("changes neither records nor documents when its batch of records fails, and finishes when run again", async () => {
+    const admin = await personOf("admin");
+    const teammate = await personOf("user");
+    const name = `Bakker${unique()}`;
+    const handbook = await admin.api.knowledge.createCollection({
+      name: "Handbook",
+      access: "everyone",
+    });
+    const document = await saveOver(
+      admin,
+      handbook.id,
+      "team.md",
+      `# Team\n${name} runs payroll.`
+    );
+    await rememberAs(teammate, `${name} approves leave.`);
+    await rememberAs(teammate, `Ask ${name} first.`);
+    let failNext = false;
+    const failing = await apiWith(admin, {
+      prepare: (query) => {
+        failNext ||= writesRecords(query);
+      },
+      beforeBatch: () => {
+        if (failNext) {
+          failNext = false;
+          throw new Error("D1 is unavailable");
+        }
+      },
+    });
+    const input: PurgeInput = {
+      type: "content",
+      documentIds: [document.id],
+      terms: [name],
+      reason: "erasure_request",
+    };
+    const plan = await failing.knowledge.preparePurge(input);
+    const refused = await outcome(failing.knowledge.purge(input, plan.token));
+    const afterFailure = {
+      memories: await statementsOf(teammate),
+      document: await versionTexts(document.id),
+    };
+    const again = await purged(admin, input);
+    expect({
+      refused: refused === "ok",
+      afterFailure,
+      again: again.result.stillFound,
+      memories: await statementsOf(teammate),
+      held: await holding(name),
+    }).toStrictEqual({
+      refused: false,
+      afterFailure: {
+        memories: [`${name} approves leave.`, `Ask ${name} first.`].toSorted(),
+        document: [`# Team\n${name} runs payroll.`],
+      },
+      again: 0,
+      memories: [
+        "(removed) approves leave.",
+        "Ask (removed) first.",
+      ].toSorted(),
+      held: [],
+    });
+  });
+
+  it("reports a record remembered after it read them, which a run again erases", async () => {
+    const admin = await personOf("admin");
+    const teammate = await personOf("user");
+    const name = `Smit${unique()}`;
+    const handbook = await admin.api.knowledge.createCollection({
+      name: "Handbook",
+      access: "everyone",
+    });
+    const document = await saveOver(
+      admin,
+      handbook.id,
+      "team.md",
+      `# Team\n${name} runs payroll.`
+    );
+    await rememberAs(teammate, `${name} approves leave.`);
+    // Another remember lands between the purge's read of the records and
+    // its batch rewriting them.
+    let raceNext = false;
+    let raced = false;
+    const racing = await apiWith(admin, {
+      prepare: (query) => {
+        raceNext ||= !raced && writesRecords(query);
+      },
+      beforeBatch: async () => {
+        if (raceNext) {
+          raceNext = false;
+          raced = true;
+          await rememberAs(teammate, `Thank ${name}.`);
+        }
+      },
+    });
+    const input: PurgeInput = {
+      type: "content",
+      documentIds: [document.id],
+      terms: [name],
+      reason: "erasure_request",
+    };
+    const plan = await racing.knowledge.preparePurge(input);
+    const first = await racing.knowledge.purge(input, plan.token);
+    const afterRace = await statementsOf(teammate);
+    const again = await purged(admin, input);
+    expect({
+      raced,
+      stillFound: first.stillFound,
+      afterRace,
+      again: again.result.stillFound,
+      memories: await statementsOf(teammate),
+      held: await holding(name),
+    }).toStrictEqual({
+      raced: true,
+      stillFound: 1,
+      afterRace: ["(removed) approves leave.", `Thank ${name}.`].toSorted(),
+      again: 0,
+      memories: ["(removed) approves leave.", "Thank (removed)."].toSorted(),
+      held: [],
     });
   });
 });

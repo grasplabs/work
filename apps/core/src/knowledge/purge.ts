@@ -47,7 +47,12 @@ import {
 import type { DocumentRow } from "./documents.ts";
 import { parseBaseFields } from "./frontmatter.ts";
 import { requireCurrentIndexed } from "./indexing.ts";
-import { forgetPerson, personCounts } from "./memories.ts";
+import {
+  countStatements,
+  eraseStatements,
+  forgetPerson,
+  personCounts,
+} from "./memories.ts";
 import { personalCollectionId } from "./memory-files.ts";
 import {
   collectPayloads,
@@ -95,6 +100,14 @@ import { cleanUpOriginals, forgetUploads } from "./uploads.ts";
 //   saved as the next version, which makes its sections, links, search
 //   rows and the document's title and description again, and fails for
 //   anyone who saved meanwhile from text not yet purged.
+//
+// A content purge reaches the Brain's memory records too, everyone's,
+// whatever documents it names (memories.ts, `eraseStatements`): each
+// statement holding a term is redacted as text is, and deleted when no
+// word is left of it but the markers (`erasedStatement`). Its plan counts
+// them (`memories`), each change is audited, and its check counts one
+// still holding a term (remembered after the purge read it) with the
+// documents a term still finds (`stillFound`).
 //
 // Both reach the copies of people's words the host keeps outside
 // Knowledge too, through its `OnErase` hook (core's: the brain's gap
@@ -659,6 +672,27 @@ const leftIn = (texts: (string | null)[], matcher: Matcher): number => {
     }
   }
   return total;
+};
+
+/** A letter or a digit: what makes a word. */
+const wordCharacter = /[\p{L}\p{N}]/u;
+
+/**
+ * A memory statement with the terms removed (`without`), or `null` when
+ * nothing of it is left but the markers, punctuation and spaces: a record
+ * that says nothing is deleted rather than kept as a husk. Whether what
+ * is left still means what the person meant can't be told without
+ * reading it, so any word left keeps it, redacted, as a document is.
+ */
+const erasedStatement = (
+  statement: string,
+  matcher: Matcher
+): string | null => {
+  const now = without(statement, matcher);
+  return now === statement ||
+    wordCharacter.test(now.replaceAll(purgedMarker, ""))
+    ? now
+    : null;
 };
 
 /** Whether a content purge would remove a term from `text`. */
@@ -1471,6 +1505,12 @@ const purgeContent = async (
   ]);
   const done: Counts[] = [];
   try {
+    // The Brain's records hold people's words too, everyone's, whatever
+    // documents the purge names: before its documents, so one whose purge
+    // fails doesn't leave them holding a term.
+    await eraseStatements(env, actorOf(person), purgeId, (statement) =>
+      erasedStatement(statement, matcher)
+    );
     // The host's copies hold people's words too: every one is rewritten,
     // whatever documents the purge names. First, so a document whose
     // purge fails doesn't leave them holding a term.
@@ -1500,13 +1540,18 @@ const purgeContent = async (
     input.terms,
     named.map(({ document }) => document.id)
   );
-  // A copy written after the rewrite read it is left to a purge again.
+  // A record or copy written after the purge read it is left to a purge
+  // again.
+  const memories = await countStatements(env, (text) =>
+    holdsTerm(text, matcher)
+  );
   const hostCopies = await onErase.count((text) => holdsTerm(text, matcher));
-  const stillFound = inDocuments + hostCopies;
+  const stillFound = inDocuments + memories + hostCopies;
   if (stillFound > 0) {
     log.warn("knowledge.purge_still_found", {
       purgeId,
       documents: inDocuments,
+      memories,
       hostCopies,
     });
   }
@@ -1534,8 +1579,10 @@ export const preparePurge = async (
   let removed = 0;
   let left = 0;
   let hostCopies = 0;
+  let brain: { memories: number; receipts?: number };
   if (parsed.type === "personal") {
     ({ counts, ...scope } = await personalScope(db, parsed));
+    brain = await personCounts(db, parsed.userId);
     originals = await originalsOf(
       db,
       eq(uploads.collectionId, scope.collectionId ?? "")
@@ -1549,6 +1596,9 @@ export const preparePurge = async (
     scope = { documentIds: named.map(({ document }) => document.id) };
     const matcher = matcherOf(parsed.terms, { countLeft: true });
     ({ counts, removed, left } = await contentCounts(env, db, named, matcher));
+    brain = {
+      memories: await countStatements(env, (text) => holdsTerm(text, matcher)),
+    };
     hostCopies = await onErase.count((text) => holdsTerm(text, matcher));
   }
   await auditedBatch(portsOf(env), db, [
@@ -1558,7 +1608,8 @@ export const preparePurge = async (
         ...counts,
         ...(parsed.type === "content"
           ? { occurrences: removed, inLongerWords: left, hostCopies }
-          : await personCounts(db, parsed.userId)),
+          : {}),
+        ...brain,
       })
     ),
   ]);
@@ -1566,6 +1617,7 @@ export const preparePurge = async (
     ...counts,
     occurrences: removed,
     inLongerWords: left,
+    memories: brain.memories,
     hostCopies,
     originals,
     ...(await tokenFor(env, person, parsed)),
