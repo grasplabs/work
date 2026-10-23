@@ -91,14 +91,16 @@ const share = (some: number, of: number): number => (of === 0 ? 0 : some / of);
  * From what the admin chose (`choices`): where the documents live once a
  * place is noted or connected (one only asked for by name is not), the
  * tools once Pulse is to be set up, and the leads from an HR platform
- * named, as from every team taking part having one. The review comes in
- * with its own issue (GRA-304) and counts nothing until then.
+ * named, as from every team taking part having one. The review by how
+ * much of what needs the admin is settled and how much of the work is
+ * known (`review`, 0 to 1).
  */
 export const knownParts = (
   view: OnboardingView,
   kickoff = 0,
   documents = 0,
-  choices: SetupChoices = noChoices
+  choices: SetupChoices = noChoices,
+  review = 0
 ): KnownPart[] => {
   const { roster, progress } = view;
   const taking = roster?.teams.filter((team) => !team.off) ?? [];
@@ -121,7 +123,7 @@ export const knownParts = (
         : 0
     ),
     part("conversations", conversations),
-    part("review", 0),
+    part("review", review),
   ];
 };
 
@@ -210,7 +212,8 @@ export const gateView = async (
     view,
     await store.kickoffKnown(),
     shared.length > 0 ? 1 : 0,
-    await store.choices()
+    await store.choices(),
+    await store.reviewKnown()
   );
   let sum = 0;
   for (const { weight, known } of parts) {
