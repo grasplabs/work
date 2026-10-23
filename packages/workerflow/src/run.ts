@@ -2467,23 +2467,26 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
   }
 
   /**
-   * Whether the run's inbox took an event under delivery key `key`, taken
-   * by a wait or not, ended or not: how a sender whose answer was lost
-   * learns its event was accepted once the run can take no more. Read
-   * only: it accepts nothing.
+   * The event the run's inbox took under delivery key `key`, taken by a
+   * wait or not, ended or not: its type and encoded payload, for a sender
+   * whose answer was lost to learn whether that event, or another under
+   * the same key, was accepted once the run can take no more. Null for
+   * none. Read only: it accepts nothing.
    */
-  hasEvent(key: string): boolean {
+  eventOf(key: string): { type: string; payload: string } | null {
     const storage = this.#store;
     if (!hasJournal(storage.sql)) {
-      return false;
+      return null;
     }
     const [found] = storage.sql
-      .exec<{ found: number }>(
-        "SELECT 1 AS found FROM events WHERE key = ?",
+      .exec<{ type: string; payload: string }>(
+        "SELECT type, payload FROM events WHERE key = ?",
         key
       )
       .toArray();
-    return found !== undefined;
+    return found === undefined
+      ? null
+      : { type: found.type, payload: found.payload };
   }
 
   /**

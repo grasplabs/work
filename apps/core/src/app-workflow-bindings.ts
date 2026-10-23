@@ -1,6 +1,7 @@
 import { actorOf } from "@grasp-os/shared/audit";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { appIdSchema } from "@grasp-os/shared/ids";
+import type { AppId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { Authority } from "@grasp-os/shared/permissions";
 import {
@@ -324,3 +325,19 @@ export const startAppBinding = async (
     beforeAdmit
   );
 };
+
+/**
+ * That App `app`'s active binding of `alias` names exactly workflow
+ * version `pin`, as SQL: what a screen's run, and a run a mutation
+ * notifies, are read through (screen-workflows.ts,
+ * workflow-notifications.ts).
+ */
+export const bindingPinnedSql = (
+  app: AppId,
+  alias: string,
+  pin: { readonly workflowId: string; readonly version: number }
+): SQL =>
+  sql`EXISTS (SELECT 1 FROM app_workflow_bindings
+    WHERE app_id = ${app} AND alias = ${alias} AND status = 'active'
+      AND workflow_resource_id = ${pin.workflowId}
+      AND workflow_resource_version = ${pin.version})`;

@@ -446,6 +446,13 @@ const sendText = (
     ...fields,
   });
 
+/** A raw send's text `text`, under its key, with `data` instead. */
+const withData = (text: string, data: unknown): string =>
+  JSON.stringify({
+    ...z.record(z.string(), z.unknown()).parse(JSON.parse(text)),
+    data,
+  });
+
 /** The status run `runId` ended with. */
 const runStatus = async (runId: string): Promise<unknown> =>
   await vi.waitFor(
@@ -479,9 +486,20 @@ describe("a screen's typed send", { timeout: 180_000 }, () => {
       const again = outcomeOf(await called(builder, app, lease, text));
       ended = await runStatus(runId);
       const afterEnd = outcomeOf(await called(builder, app, lease, text));
-      expect({ again, afterEnd, minted: isEvent(first) }).toStrictEqual({
+      // Its key again with other data, once the run ended: another event
+      // under a key already used, never the first one's ID.
+      const otherData = outcomeOf(
+        await called(builder, app, lease, withData(text, { jobId: "job-2" }))
+      );
+      expect({
+        again,
+        afterEnd,
+        otherData,
+        minted: isEvent(first),
+      }).toStrictEqual({
         again: first,
         afterEnd: first,
+        otherData: "workflow.event_conflict",
         minted: true,
       });
     });
@@ -649,17 +667,22 @@ describe("a screen's typed send", { timeout: 180_000 }, () => {
     // A send the run took before the revocation, its answer lost: still
     // the event it was.
     const resent = outcomeOf(await called(builder, app, lease, accepted));
+    const resentOther = outcomeOf(
+      await called(builder, app, lease, withData(accepted, { jobId: "job-9" }))
+    );
 
     expect({
       withoutSend,
       withSend: isEvent(withSend),
       revoked,
       resent,
+      resentOther,
     }).toStrictEqual({
       withoutSend: "workflow.event_denied",
       withSend: true,
       revoked: "workflow.event_denied",
       resent: withSend,
+      resentOther: "workflow.event_conflict",
     });
   });
 

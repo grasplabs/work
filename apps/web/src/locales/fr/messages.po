@@ -5166,6 +5166,10 @@ msgstr "Bien. Dites quelque chose, pour que je vous entende aussi."
 msgid "Google sign-in"
 msgstr "Connexion Google"
 
+#: src/onboarding/setup-steps.tsx
+msgid "Got it."
+msgstr "Compris."
+
 #: src/inbox/items.ts
 msgid "Grant {who}?"
 msgstr "Accorder {who} ?"
@@ -5562,6 +5566,10 @@ msgid "I cannot find a microphone. Plug one in and try again."
 msgstr "Je ne trouve pas de micro. Branchez-en un et réessayez."
 
 #: src/onboarding/setup-steps.tsx
+msgid "I can’t read {name}: it’s in an old format. As a PDF or a newer file, I can."
+msgstr "Je ne peux pas lire {name} : il est dans un ancien format. En PDF ou dans un fichier plus récent, je peux."
+
+#: src/onboarding/setup-steps.tsx
 msgid "I could not find the columns. The first row should name them: name, email, team and job."
 msgstr "Je n’ai pas trouvé les colonnes. La première ligne doit les nommer : nom, e-mail, équipe et poste."
 
@@ -5572,6 +5580,10 @@ msgstr "Je n’ai pas pu l’enregistrer. Réessayez dans un instant."
 #: src/onboarding/setup-steps.tsx
 msgid "I could not read this file. A CSV or an Excel file works."
 msgstr "Je n’ai pas pu lire ce fichier. Un fichier CSV ou Excel fonctionne."
+
+#: src/onboarding/setup-steps.tsx
+msgid "I couldn’t read {name}. Add it again, or as a PDF."
+msgstr "Je n’ai pas pu lire {name}. Ajoutez-le à nouveau, ou en PDF."
 
 #: src/onboarding/setup-steps.tsx
 msgid "I couldn’t read this one"

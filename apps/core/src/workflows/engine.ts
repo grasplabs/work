@@ -350,11 +350,14 @@ export interface RunEngine {
    */
   admitEvent: (id: string, event: AdmittedEngineEvent) => Promise<EventOutcome>;
   /**
-   * Whether the run's inbox took an event under delivery key `key`, taken
-   * or not, the run ended or not; false for a run the engine has no record
-   * of. Accepts nothing.
+   * The event the run's inbox took under delivery key `key` (its engine
+   * type and encoded payload), taken or not, the run ended or not; null
+   * for none, or a run the engine has no record of. Accepts nothing.
    */
-  hasEvent: (id: string, key: string) => Promise<boolean>;
+  eventOf: (
+    id: string,
+    key: string
+  ) => Promise<{ type: string; payload: string } | null>;
   /**
    * Removes the run, with all the engine kept of it, whether or not it has
    * ended; one it has no record of stays as it is. For a run core ended
@@ -520,7 +523,7 @@ export const runEngine = (env: Env): RunEngine => ({
       reserved: event.reserved === true,
       sender: event.sender ?? null,
     }),
-  hasEvent: async (id, key) => await runStub(env, id).hasEvent(key),
+  eventOf: async (id, key) => await runStub(env, id).eventOf(key),
   sendEvent: async (id, type, key) => {
     const outcome = await runStub(env, id).sendEvent({
       type,
