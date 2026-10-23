@@ -53,7 +53,7 @@ export interface BuildCheck {
 }
 
 /**
- * Where the release with the build stands at one company that asked, as the console's rollout has
+ * Where the release with the build stands at one company that asked, as the admin's rollout has
  * it: the company's ring, its status in the rollout, and the day it went live there.
  */
 export interface OrgRollout {
@@ -74,7 +74,7 @@ export interface BuildWork {
   cost: number;
   tests?: { passed: number; total: number };
   pr?: { number: number; url: string; checks: BuildCheck[]; reviewer: string };
-  /** The release the merge went into, as the console names it: `r<run>-<sha7>`. */
+  /** The release the merge went into, as the admin names it: `r<run>-<sha7>`. */
   release?: string;
   rollout?: OrgRollout[];
 }
@@ -188,7 +188,7 @@ export const sortBuilds = (
   );
 
 /**
- * The build as the console's rollout has it, when its merge is in the release that rollout takes
+ * The build as the admin's rollout has it, when its merge is in the release that rollout takes
  * out: each company that asked stands where the rollout's target for it stands, so the admin's
  * integrations and its platforms say the same. Once every one of them runs it, the build is live.
  * A build in another release, or none, is as it was.

@@ -743,7 +743,7 @@ export const buildLine = (
   return `- app ${build.id}: ${BUILD_STAGE[build.stage]}; ${WAITER[waitsOn(build.stage)]}. Asked by ${asked.join("; ")}.${pr}${release}${declined}`;
 };
 
-/** What the console holds about every company's own platform, and the release going out: none until the admin reads it. */
+/** What the admin holds about every company's own platform, and the release going out: none until the admin reads it. */
 export interface Fleet {
   platforms: { org: string; platform: Platform }[];
   releases: Release[];

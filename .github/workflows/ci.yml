@@ -3,9 +3,9 @@
 # requests and in the merge queue; a push to main only deploys what those
 # checks already tested: it builds the release once, deploys those bytes
 # to grasp-os-staging, and once staging accepts them publishes the same
-# bytes as a release for the console. grasp-os-ops is deployed by hand
+# bytes as a release for the admin. grasp-os-ops is deployed by hand
 # with the Deploy grasp-os-ops workflow. Jobs with secrets never run for pull
-# requests from forks. CI never deploys to a client account: the console
+# requests from forks. CI never deploys to a client account: the admin
 # rolls releases out.
 name: CI
 
@@ -54,10 +54,10 @@ jobs:
       - run: vp run check:state-registry
       - run: vp run check:playwright-image
       - run: vp run -r build
-      # The console isn't deployed from here (see deploy-staging): check that
+      # The admin isn't deployed from here (see deploy-staging): check that
       # its build is a Worker wrangler would deploy. No credentials needed.
       - run: vp exec wrangler deploy --dry-run
-        working-directory: apps/console
+        working-directory: apps/admin
       # Generated files (Worker types, route trees, migrations, the
       # frontend's translation catalogs) must be committed.
       - run: vp run -r typegen && vp run -r db:generate && vp run -r i18n:extract
@@ -242,11 +242,11 @@ jobs:
           path: test-results/
           retention-days: 14
 
-  # The staff console's journeys (playwright.console.config.ts): a stack of
-  # their own, the console on the fake Cloudflare API, so apart from e2e's.
+  # The admin's journeys (playwright.admin.config.ts): a stack of
+  # their own, the admin on the fake Cloudflare API, so apart from e2e's.
   # Chromium only, in e2e's image.
-  console-e2e:
-    name: console-e2e
+  admin-e2e:
+    name: admin-e2e
     if: github.event_name != 'push'
     container:
       image: mcr.microsoft.com/playwright:v1.63.0-noble
@@ -263,12 +263,12 @@ jobs:
           cache: true
           run-install: |
             - args: ["--frozen-lockfile"]
-      - run: vp run e2e:console
-      # A failing journey keeps its trace (playwright.console.config.ts).
+      - run: vp run e2e:admin
+      # A failing journey keeps its trace (playwright.admin.config.ts).
       - if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: console-playwright-traces
+          name: admin-playwright-traces
           path: test-results/
           retention-days: 14
 
@@ -298,7 +298,7 @@ jobs:
   # every blob against the manifest. For a pull request or the merge queue,
   # that's all. On a push to main it's the commit's only build: the bundle
   # is the run's `release` artifact, which deploy-staging deploys and
-  # publish-release publishes as it is, so the release the console rolls
+  # publish-release publishes as it is, so the release the admin rolls
   # out is the one staging ran and accepted, byte for byte.
   release:
     name: release
@@ -432,10 +432,10 @@ jobs:
         env:
           CORE_VERSION: ${{ steps.core.outputs.version }}
           ROUTER_SECRET: ${{ steps.router.outputs.ROUTER_SECRET }}
-      # The console is deliberately not deployed to staging: it has no route
+      # The admin is deliberately not deployed to staging: it has no route
       # there and refuses every request without an Access application
-      # (apps/console/src/access.ts). It deploys only to grasp-os-ops, with
-      # deploy-ops. A real staging console would need a route and its own
+      # (apps/admin/src/access.ts). It deploys only to grasp-os-ops, with
+      # deploy-ops. A real staging admin would need a route and its own
       # Access application first. The static job still proves it builds.
 
   # The router on its own: its deploy needs the account's Secrets Store
@@ -472,11 +472,11 @@ jobs:
 
   # Every merge to main is a release: built once (the release job), verified
   # against its manifest and published to R2 in grasp-os-ops, where the
-  # console imports it. It publishes the bundle staging ran, never a build
+  # admin imports it. It publishes the bundle staging ran, never a build
   # of its own. Deploys nothing itself, and runs only once deploy-staging
   # has deployed that bundle and staging accepted it: a release whose
   # staging migrations, deploys or acceptance fail is never published, so
-  # the console can't roll it out to a client. When deploy-staging fails,
+  # the admin can't roll it out to a client. When deploy-staging fails,
   # is cancelled or is skipped, this job is skipped too, and the commit's
   # changes ship in the next release that passes staging. The R2 key is
   # loaded after the download and passed only to the upload step; all

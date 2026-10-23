@@ -381,7 +381,7 @@ describe("email triggers", () => {
 
     const { triggers } = await builder.api.workflows.get(app, "intake");
 
-    // The deployment's inbound mail domain, set by the console, makes the
+    // The deployment's inbound mail domain, set by the admin, makes the
     // whole address; unset, or not a domain, the local part stands alone.
     const by = await builder.api.whoami();
     const detail = async (domain: unknown) =>

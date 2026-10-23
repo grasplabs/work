@@ -48,7 +48,7 @@ describe("the release manifest", () => {
     ).toMatchFileSnapshot("testdata/golden-manifest.json");
   });
 
-  it("leaves only placeholders the console knows", () => {
+  it("leaves only placeholders the admin knows", () => {
     const { workers } = generateManifest(info, fixture);
     const tokens = Object.values(workers)
       .flatMap((worker) => stringsIn(worker.bindings))

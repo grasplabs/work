@@ -273,7 +273,7 @@ export default class Connect
    * Arms connect's clock if nothing has: core's clock asks every minute
    * (core's src/clock.ts), the repair path that starts it on a new
    * deployment and after anything cleared its alarm. Reports it as it
-   * left it, for the console's provisioning probe (core's
+   * left it, for the admin's provisioning probe (core's
    * src/provision-probe.ts).
    */
   async ensureClock(): Promise<ClockRegistration> {

@@ -181,7 +181,7 @@ export const coreProject = (
             BETTER_AUTH_SECRET: "test-better-auth-secret-of-32-chars-or-more",
             CAPABILITY_SIGNING_KEY: capabilitySigningKey,
             // The audit log works out when to purge archives from its own
-            // env: the shortest archive retention the console may set.
+            // env: the shortest archive retention the admin may set.
             AUDIT_ARCHIVE_RETENTION_DAYS: "365",
             ...testSignIn,
             // Few enough statistics points to reach each bound in a test.

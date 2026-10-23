@@ -41,7 +41,7 @@ import { present } from "./present.ts";
  *   the admin shows it closed.
  */
 
-/** Who the console knows the client as. */
+/** Who the admin knows the client as. */
 export interface AdminClient {
   id: string;
   name?: string;
@@ -150,7 +150,7 @@ const membersOf = (snapshot: AdminSnapshot): Member[] =>
     joined: member.joinedAt.slice(0, 10),
   }));
 
-/** When Grasp added it: the console's day, or else core's clock, as nothing earlier is known. */
+/** When Grasp added it: the admin's day, or else core's clock, as nothing earlier is known. */
 const createdOf = (snapshot: AdminSnapshot, client: AdminClient): string =>
   client.created ?? snapshot.now;
 

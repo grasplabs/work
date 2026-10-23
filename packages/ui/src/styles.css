@@ -1,4 +1,4 @@
-/* Grasp OS theme. Shared by the frontend, the console and every App screen. */
+/* Grasp OS theme. Shared by the frontend, the admin and every App screen. */
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
@@ -192,7 +192,7 @@
 }
 
 /*
- * Geist where the page loads it (the frontend and the console bundle it);
+ * Geist where the page loads it (the frontend and the admin bundle it);
  * the system's own sans elsewhere, such as in App screens, whose frame
  * loads no fonts.
  */
