@@ -340,6 +340,49 @@ describe("Grasp's staff in the onboarding", () => {
     ]);
   });
 
+  it("send the links already due as the admin plans them, from a moment that has passed", async () => {
+    const { api } = await signedInApi(idp, "admin");
+    const staff = await asStaff();
+    const store = onboardingStore(env);
+    const run = crypto.randomUUID().slice(0, 8);
+    const [lead, member, alone] = [`lea-${run}`, `sam-${run}`, `oli-${run}`];
+    await api.onboarding.saveRoster({
+      teams: [
+        { id: `sales-${run}`, name: "Sales", lead },
+        { id: `ops-${run}`, name: "Ops", lead: null },
+      ],
+      people: [
+        person(lead, `sales-${run}`),
+        person(member, `sales-${run}`),
+        person(alone, `ops-${run}`),
+      ],
+    });
+    // Agreed first, with the interviews a week off: nothing is due yet.
+    const weekOn = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    await api.onboarding.savePlan({
+      start: weekOn.toISOString().slice(0, 10),
+      days: 14,
+    });
+    await staff.onboardingStaff.resume();
+    await staff.onboardingStaff.setAgreements({
+      processing: true,
+      assessment: true,
+      council: "none",
+    });
+    // Then today, from its first moment: the lead's and Ops' are due, and go.
+    await api.onboarding.savePlan({
+      start: today(),
+      days: 14,
+      at: `${today()}T00:00:00.000Z`,
+    });
+    const sent = await store.sentLinks();
+    expect(
+      [lead, member, alone].filter((id) =>
+        sent.some(({ person: one }) => one === id)
+      )
+    ).toStrictEqual([lead, alone]);
+  });
+
   it("put every change in the audit log, as who made it, with no name in it", async () => {
     const { api, userId } = await signedInApi(idp, "admin");
     const staff = await asStaff();
