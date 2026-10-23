@@ -17,7 +17,7 @@ import {
 } from "../src/hosting/functions.ts";
 import { getClientHosting } from "../src/hosting/placement.ts";
 import { mockAccess } from "./access.ts";
-import { mockCloudflareApi } from "./cloudflare-api.ts";
+import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { client, db, destination, release, verified } from "./hosting.ts";
 import { callServerFn, page } from "./pages.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
