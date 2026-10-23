@@ -268,19 +268,31 @@ const functionCall = (text: string): DraftCall => {
       note: callNote,
     };
   }
-  return parsed.data.ok
-    ? {
-        ok: true,
-        // SAFETY: parsed from JSON, so plain data RPC carries.
-        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-        answer: parsed.data.value as AppAnswer,
-      }
-    : {
-        ok: false,
-        code: parsed.data.error.code,
-        message: parsed.data.error.message,
-        note: callNote,
-      };
+  if (parsed.data.ok) {
+    return {
+      ok: true,
+      // SAFETY: parsed from JSON, so plain data RPC carries.
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+      answer: parsed.data.value as AppAnswer,
+    };
+  }
+  // What the draft's own code threw, which its caller hears only as
+  // `internal.unexpected` (workspace.ts, `callDraftFunction`): the
+  // agent's to fix, as data in its tool's result.
+  const thrown: unknown =
+    typeof answered === "object" && answered !== null
+      ? Reflect.get(answered, "thrown")
+      : undefined;
+  return {
+    ok: false,
+    code: parsed.data.error.code,
+    message:
+      parsed.data.error.code === "internal.unexpected" &&
+      typeof thrown === "string"
+        ? thrown
+        : parsed.data.error.message,
+    note: callNote,
+  };
 };
 
 /** Whether the agent may build Apps: `write` on the Apps collection. */

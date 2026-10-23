@@ -38,7 +38,7 @@ import type { GraspSkill } from "./knowledge/grasp-skills.ts";
 // deployment lists the versions in the same order as the one before and
 // only raises the new version's share, Cloudflare never moves an object
 // back to a version it left, so the installed text changes once when the
-// object moves to the new release, never back and forth. The console's
+// object moves to the new release, never back and forth. The admin's
 // rollouts must keep to that. A rollback installs the older release
 // again, as it should. On-prem runs one version.
 //

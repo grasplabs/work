@@ -12,10 +12,10 @@
  *   created, `grasp-os-router-hosts`, from the Cloudflare API. The router
  *   deploys first (deploy-ops).
  *
- * A Worker built with the Cloudflare Vite plugin (the console) deploys the
+ * A Worker built with the Cloudflare Vite plugin (the admin) deploys the
  * config its build wrote, which `.wrangler/deploy/config.json` points to;
  * any other deploys its wrangler.jsonc. Arguments are passed on to
- * `wrangler deploy`, such as the console's `--var`s.
+ * `wrangler deploy`, such as the admin's `--var`s.
  *
  * The lookups need CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN (with
  * Secrets Store and Workers KV read), as the deploy jobs set them.

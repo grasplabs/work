@@ -1,0 +1,1 @@
+ALTER TABLE `chats` ADD `via` text DEFAULT 'web' NOT NULL;

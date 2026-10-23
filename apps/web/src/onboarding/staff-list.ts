@@ -492,6 +492,28 @@ export const withSaved = (
   };
 };
 
+/**
+ * The organization from the HR platform, with what the admin set on the
+ * roster before kept as `withSaved` keeps it, except who leads which
+ * team: the lead the platform names, by who reports to whom, comes before
+ * the one before, which a staff list or a directory may only have
+ * guessed. A team the platform names no lead of keeps the one it had.
+ */
+export const withLeadsFrom = (
+  roster: StaffList["roster"],
+  saved: Roster | null
+): StaffList["roster"] => {
+  const kept = withSaved(roster, saved);
+  const named = new Map(roster.teams.map((team) => [team.id, team.lead]));
+  return {
+    ...kept,
+    teams: kept.teams.map((team) => ({
+      ...team,
+      lead: named.get(team.id) ?? team.lead,
+    })),
+  };
+};
+
 /** An example staff list to fill in, as CSV: the headings Grasp reads, and two rows. */
 export const exampleList = [
   "Name,Email,Team,Job title,Team lead",

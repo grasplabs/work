@@ -193,7 +193,7 @@ const record = async (env: Env, entry: AuditEntry): Promise<void> => {
 };
 
 /**
- * Makes a configured admin (deployment config, from the console) an admin
+ * Makes a configured admin (deployment config, from Grasp's admin) an admin
  * again when the organization has none left, so a deployment can always
  * be recovered by signing in. Never someone removed. The change and its
  * audit event are one batch: both are kept, or neither.

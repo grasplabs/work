@@ -1,5 +1,8 @@
 import { z } from "zod";
 
+import { SETTLERS } from "./admin/onboarding-admin.ts";
+import type { OrgRules } from "./admin/onboarding-admin.ts";
+import type { WorkRecord } from "./admin/org-record.ts";
 import type { InterviewProgress } from "./interview-links.ts";
 import type { InterviewPhase } from "./interview-turn.ts";
 import { answerMaxLength, kickoffTeamNameMaxLength } from "./kickoff.ts";
@@ -291,4 +294,34 @@ export interface StaffAiUseRow {
   tokensOut: number;
   /** Seconds of voice. */
   seconds: number;
+}
+
+/**
+ * When a piece of work counts as known at this organization, as staff set
+ * it (`OrgRules`): how many people must have told a step, how many
+ * interviews before it is checked, the share of new facts under which it
+ * stops, after how many it is better split in two, how many of the last
+ * interviews are looked at, and who settles a difference nobody can
+ * explain.
+ */
+export const orgRulesSchema = z.strictObject({
+  people: z.int().min(1).max(10),
+  minInterviews: z.int().min(1).max(30),
+  stopShare: z.number().min(0).max(1),
+  maxInterviews: z.int().min(1).max(50),
+  run: z.int().min(1).max(10),
+  settles: z.enum(SETTLERS),
+}) satisfies z.ZodType<OrgRules>;
+
+/**
+ * Every piece of work as staff see it: as each team's map holds it, with
+ * its drawing (each person's own numbers in `drawn.told`, and what the
+ * next interviews still need to ask in `drawn.open`), this organization's
+ * rules, and the pieces Grasp counts as known by hand.
+ */
+export interface StaffWorks {
+  works: WorkRecord[];
+  rules: OrgRules;
+  /** Pieces of work Grasp counts as known by hand, by id. */
+  counted: string[];
 }

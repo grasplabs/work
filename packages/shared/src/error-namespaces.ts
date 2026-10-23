@@ -37,6 +37,7 @@ export const familyNamespaces = [
   "expression",
   "file",
   "guest",
+  "hr",
   "internal",
   "interview",
   "kickoff",
