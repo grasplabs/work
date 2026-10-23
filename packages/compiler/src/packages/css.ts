@@ -667,3 +667,17 @@ export const cssFetches = (css: string): CssFetch[] => {
   }
   return reading.found;
 };
+
+/** Every token of a stylesheet, as CSS Syntax Level 3 reads it (§4). */
+export const cssTokens = (css: string): CssToken[] => {
+  const tokens: CssToken[] = [];
+  const tokenizer = new Tokenizer(css);
+  for (
+    let token = tokenizer.next();
+    token !== undefined;
+    token = tokenizer.next()
+  ) {
+    tokens.push(token);
+  }
+  return tokens;
+};

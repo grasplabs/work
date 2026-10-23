@@ -19,11 +19,12 @@ import { publishRelease } from "./releases.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
 import { longStream } from "./streamed-body.ts";
 
-// Grasp's Discord bot (GRA-663), from its threat model: only what Discord's
-// signature vouches for gets past the route outside Access; only Grasp's
-// staff get an answer, the rest a refusal that reads nothing; a question is
-// audited before it reads, limited per Discord user, and answered from the
-// admin's tools without a person's name, interview text or a team's name.
+// Grasp's Discord bot (GRA-663, on the Chat SDK since GRA-1060), from its
+// threat model: only what Discord's signature vouches for gets past the
+// route outside Access; only Grasp's staff get an answer, the rest a refusal
+// only they see that reads nothing; a question is audited before it reads,
+// limited per Discord user, and answered from the admin's tools without a
+// person's name, interview text or a team's name.
 
 const token = "test-deployer-token-discord-6c2f91";
 const tenantToken = "test-tenant-admin-token-discord-0b7d35";
@@ -135,7 +136,9 @@ const command = (
   id: "2",
   application_id: "999",
   token: `token-${crypto.randomUUID()}`,
-  member: { user: { id: user } },
+  guild_id: "444444444444444444",
+  channel_id: "555555555555555555",
+  member: { user: { id: user, username: "staff" } },
   data: { name: "grasp", options: [{ name: sub, type: 1, options }] },
 });
 
@@ -393,11 +396,8 @@ describe("Grasp's Discord bot", () => {
       audited: await discordCalls(),
     }).toStrictEqual({
       status: 200,
-      reply: {
-        type: 4,
-        data: { content: "Only Grasp's staff can ask Grasp here.", flags: 64 },
-      },
-      later: [],
+      reply: { type: 5, data: { flags: 64 } },
+      later: ["Only Grasp's staff can ask Grasp here."],
       readers: [],
       audited: [],
     });
@@ -442,7 +442,11 @@ describe("Grasp's Discord bot", () => {
       ],
       toWebhook: true,
       method: "PATCH",
-      body: { content: firstOf(later), allowed_mentions: { parse: [] } },
+      body: {
+        content: firstOf(later),
+        allowed_mentions: { parse: [] },
+        flags: 64,
+      },
     });
   });
 
@@ -564,14 +568,8 @@ describe("Grasp's Discord bot", () => {
       audited: audited.length,
     }).toStrictEqual({
       first: 5,
-      second: {
-        type: 4,
-        data: {
-          content: "Too many questions: wait a minute and ask again.",
-          flags: 64,
-        },
-      },
-      later: [],
+      second: { type: 5, data: { flags: 64 } },
+      later: ["Too many questions: wait a minute and ask again."],
       readsAfter: 0,
       audited: 1,
     });

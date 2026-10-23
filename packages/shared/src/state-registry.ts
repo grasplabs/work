@@ -167,6 +167,7 @@ export interface ClientStateRegistry {
 const core = "apps/core/src/";
 const connect = "apps/connect/src/";
 const workerflow = "packages/workerflow/src/";
+const chat = "packages/chat/src/";
 
 const exported = (owner: string, note?: string): StateEntry => ({
   owner,
@@ -750,6 +751,29 @@ const connectClock: DurableObjectState = {
   runtimeTables: { clock_tasks: clockTasks },
 };
 
+const chatState: DurableObjectState = {
+  role: "chat-state",
+  worker: "core",
+  binding: "CHAT_STATE",
+  className: "ChatState",
+  owner: `${chat}state.ts`,
+  objects: {
+    kind: "named",
+    name: "`key:<key>` for a key the Chat SDK keeps, `thread:<thread ID>` for a conversation (`durableObjectState`).",
+    inventories: [],
+    note: "The Chat SDK's working state for chat apps: locks, messages queued while a handler runs, resent webhooks already taken, the threads the bot follows. Nothing lists the objects; each clears itself once what it holds expires, and a destination starts with none.",
+  },
+  runtimeTables: {
+    entry: transient(
+      `${chat}state.ts`,
+      "A key's value or list, with its expiry."
+    ),
+    lock: transient(`${chat}state.ts`),
+    queue: transient(`${chat}state.ts`),
+    subscribed: transient(`${chat}state.ts`),
+  },
+};
+
 const files: R2State = {
   role: "files",
   worker: "core",
@@ -846,6 +870,7 @@ export const clientStateRegistry: ClientStateRegistry = {
     actionInvocations,
     coreClock,
     connectClock,
+    chatState,
   ],
   r2: [files, brainObjects, auditArchive],
   carriers: [

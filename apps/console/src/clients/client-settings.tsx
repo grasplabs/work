@@ -179,7 +179,7 @@ const History = ({ history }: { history: HistoryEntry[] }) =>
                   <span className="font-mono">{entry.target ?? ""}</span>
                 ) : (
                   <Link
-                    to="/rollouts/$rolloutId"
+                    to="/admin/platform/rollouts/$rolloutId"
                     params={{ rolloutId }}
                     className="font-mono underline-offset-4 hover:underline"
                   >

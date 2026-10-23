@@ -249,13 +249,15 @@ export interface WorkToAsk {
  * about the one fewest others are asked about. Someone the lead did not
  * name is asked about work that people with their job do, when the lead
  * named any of them. Null when the team has no work on its map.
+ * `heard` says how many are asked about each piece already, when some are.
  */
 export const assignWork = (
   people: readonly Pick<RosterPerson, "id" | "name" | "title">[],
   works: readonly WorkToAsk[],
-  everyone: readonly Pick<RosterPerson, "id" | "title">[] = people
+  everyone: readonly Pick<RosterPerson, "id" | "title">[] = people,
+  heard: ReadonlyMap<string, number> = new Map()
 ): Map<string, string | null> => {
-  const asked = new Map(works.map(({ id }) => [id, 0]));
+  const asked = new Map(works.map(({ id }) => [id, heard.get(id) ?? 0]));
   const assigned = new Map<string, string | null>();
   const named = (person: string) =>
     works.filter(({ doers }) => doers.includes(person));
@@ -278,7 +280,7 @@ export const assignWork = (
     (a, b) =>
       named(a.id).length - named(b.id).length || a.name.localeCompare(b.name)
   );
-  const heard = (work: WorkToAsk) =>
+  const heardOf = (work: WorkToAsk) =>
     (asked.get(work.id) ?? 0) / Math.max(work.share, 0.05);
   for (const person of order) {
     const theirs = named(person.id);
@@ -291,7 +293,7 @@ export const assignWork = (
     }
     // The least heard so far, weighed by how much of the team's time it takes.
     const [pick] = pool.toSorted(
-      (a, b) => heard(a) - heard(b) || b.share - a.share
+      (a, b) => heardOf(a) - heardOf(b) || b.share - a.share
     );
     assigned.set(person.id, pick?.id ?? null);
     if (pick !== undefined) {

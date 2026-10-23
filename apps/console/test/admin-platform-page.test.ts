@@ -29,6 +29,10 @@ const spaces = /\s+/gu;
 const textOf = (html: string): string =>
   html.replaceAll(tags, " ").replaceAll("&#x27;", "'").replaceAll(spaces, " ");
 
+/** How many times `text` appears in `html`. */
+const count = (html: string, text: string): number =>
+  html.split(text).length - 1;
+
 /** The part of the page a panel titled `title` holds: from its title to the next panel's. */
 const panelOf = (text: string, title: string, next: string): string =>
   text.slice(text.indexOf(title), text.indexOf(next, text.indexOf(title) + 1));
@@ -125,6 +129,21 @@ describe("the admin's Platform page", () => {
         companies.indexOf("Laggard") < companies.indexOf("Earlyco") &&
         companies.indexOf("Laggard") < companies.indexOf("Firstco"),
       opensSetup: html.includes(`href="/admin/organizations/${first}/setup"`),
+      // The rollout, each release and starting one open their own pages under Platform.
+      opensRollout: html.includes(
+        `href="/admin/platform/rollouts/${rolloutId}"`
+      ),
+      opensRelease: html.includes(
+        `href="/admin/platform/releases/${older.id}"`
+      ),
+      startsRollout: html.includes(
+        'href="/admin/platform/rollouts#start-a-rollout"'
+      ),
+      // Its releases and rollouts, under it in the sidebar and the page.
+      underPlatform: [
+        count(html, 'href="/admin/platform/releases"'),
+        count(html, 'href="/admin/platform/rollouts"'),
+      ],
       // What staff did, as the audit log keeps it: adding a company, never a deploy's steps.
       doneHere: text
         .slice(text.indexOf("Done here"))
@@ -143,6 +162,10 @@ describe("the admin's Platform page", () => {
       laggardBehind: true,
       laggardFirst: true,
       opensSetup: true,
+      opensRollout: true,
+      opensRelease: true,
+      startsRollout: true,
+      underPlatform: [2, 2],
       doneHere: true,
       sidebarCount: true,
     });

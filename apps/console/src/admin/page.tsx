@@ -16,13 +16,29 @@ import { Separator } from "@grasp-os/ui/components/separator";
 import { SidebarTrigger } from "@grasp-os/ui/components/sidebar";
 import { cn } from "@grasp-os/ui/lib/utils";
 import { Link } from "@tanstack/react-router";
-import type { ReactNode } from "react";
+import { Fragment } from "react";
+import type { ReactElement, ReactNode } from "react";
+
+/** A page above this one in the bar: its name, and a link to it to render as. */
+export interface Crumb {
+  label: string;
+  link: ReactElement;
+}
+
+const noParents: readonly Crumb[] = [];
 
 /**
  * The bar above an admin page: the sidebar's trigger, then the admin and,
- * below its overview, the page. It stays in view while the page scrolls.
+ * below its overview, the pages above it (`parents`) and the page. It
+ * stays in view while the page scrolls.
  */
-export const AdminHeader = ({ page }: { page: string | null }) => (
+export const AdminHeader = ({
+  page,
+  parents = noParents,
+}: {
+  page: string | null;
+  parents?: readonly Crumb[];
+}) => (
   <header className="bg-background sticky top-0 z-30 flex h-(--header-height) shrink-0 items-center border-b">
     {/* A square of its own, so the line beside it continues a column's edge. */}
     <div className="flex h-full w-12 flex-none items-center justify-center">
@@ -47,6 +63,16 @@ export const AdminHeader = ({ page }: { page: string | null }) => (
                 </BreadcrumbLink>
               </BreadcrumbItem>
               <BreadcrumbSeparator />
+              {parents.map((parent) => (
+                <Fragment key={parent.label}>
+                  <BreadcrumbItem className="hidden flex-none sm:inline-flex">
+                    <BreadcrumbLink render={parent.link}>
+                      {parent.label}
+                    </BreadcrumbLink>
+                  </BreadcrumbItem>
+                  <BreadcrumbSeparator className="hidden sm:block" />
+                </Fragment>
+              ))}
               <BreadcrumbItem className="min-w-8">
                 <BreadcrumbPage>{page}</BreadcrumbPage>
               </BreadcrumbItem>
@@ -81,23 +107,26 @@ export const PageHeading = ({
  * An admin page titled `title`, with what it is for under it when there is
  * a `description` and its `action` on the right when it has one: the
  * overview when `overview` (as wide as the prototype's, for its table),
- * otherwise a page under it, with `children` below its title.
+ * otherwise a page under it, below the pages in `parents`, with `children`
+ * below its title.
  */
 export const AdminPage = ({
   title,
   description,
   action,
   overview = false,
+  parents,
   children,
 }: {
   title: string;
   description?: string;
   action?: ReactNode;
   overview?: boolean;
+  parents?: readonly Crumb[];
   children?: ReactNode;
 }) => (
   <>
-    <AdminHeader page={overview ? null : title} />
+    <AdminHeader page={overview ? null : title} parents={parents} />
     <div
       className={cn(
         "mx-auto flex w-full flex-col gap-6 px-6 pt-7 pb-6",
