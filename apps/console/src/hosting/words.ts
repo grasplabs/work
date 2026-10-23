@@ -90,6 +90,8 @@ const operationWords: Readonly<Record<ProvisionOperationErrorCode, string>> = {
     "The release declares nothing of what its code works with.",
   release_incompatible:
     "The release doesn't work with what the client runs, or with itself.",
+  schema_incompatible:
+    "The release's code doesn't run on the client's databases as its migrations left them.",
   operation_release_changed:
     "Its provisioning is with another release: that release stays for the operation.",
   unknown_worker: "The release has a Worker other than core and connect.",
