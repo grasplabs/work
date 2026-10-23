@@ -266,7 +266,10 @@ export class ChannelAccountsRpc
               isNull(channelLinks.usedAt),
               isNull(channelLinks.replacedAt),
               gt(channelLinks.expiresAt, now),
-              notTakenFrom(person.userId)
+              notTakenFrom(person.userId),
+              // A removal deletes their accounts; a call on a connection
+              // checked just before it mustn't link one back.
+              activeMember(person.userId)
             )
           )
           .returning({
@@ -292,10 +295,12 @@ export class ChannelAccountsRpc
       const [link] = taken;
       if (link === undefined) {
         const row = await this.#linkOf(parsed.data);
-        return {
-          state: "refused",
-          reason: (await this.#refusalOf(row, person.userId)) ?? "used",
-        };
+        const reason = await this.#refusalOf(row, person.userId);
+        if (reason === null) {
+          // The link would link: it is they who are no longer a member.
+          throw roleErrors.create("role.forbidden");
+        }
+        return { state: "refused", reason };
       }
       // Linked now, or by them already through an earlier link.
       const [account] = await db

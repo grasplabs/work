@@ -223,14 +223,19 @@ describe("linking a chat account", { timeout: 60_000 }, () => {
     ).resolves.toBeNull();
   });
 
-  it("forget a removed person's accounts: the platform account is a stranger again", async () => {
+  it("forget a removed person's accounts, and link none back on a connection checked before the removal", async () => {
     const admin = await signedInApi(idp, "admin");
     const leaves = await signedInApi(idp, "user");
     const { platformUserId, secret } = await sentLink();
     await leaves.api.channelAccounts.link(secret);
+    const later = await sentLink();
+    // Their connection's latest reading still says they are a member.
+    await leaves.api.whoami();
 
     await admin.api.members.remove(leaves.userId);
+    const linked = await outcome(leaves.api.channelAccounts.link(later.secret));
 
+    expect(["role.forbidden", "auth.unauthenticated"]).toContain(linked);
     await expect(
       personOnChannel(env, "slack", platformUserId)
     ).resolves.toBeNull();
