@@ -29,7 +29,7 @@ import { z } from "zod";
 
 import { loadRelease } from "./app-releases.ts";
 import type { Release } from "./app-releases.ts";
-import { startAppBinding } from "./app-workflow-bindings.ts";
+import { bindingPinnedSql, startAppBinding } from "./app-workflow-bindings.ts";
 import { appFor } from "./apps.ts";
 import { auditedBatch, outboxed } from "./audit-outbox.ts";
 import {
@@ -365,13 +365,6 @@ export const pinOf = (resolved: Resolved): WorkflowPin => {
   }
   return resolved.pinned;
 };
-
-/** That the App's active binding of `alias` names exactly `pin`, as SQL. */
-const bindingPinnedSql = (app: AppId, alias: string, pin: WorkflowPin): SQL =>
-  sql`EXISTS (SELECT 1 FROM app_workflow_bindings
-    WHERE app_id = ${app} AND alias = ${alias} AND status = 'active'
-      AND workflow_resource_id = ${pin.workflowId}
-      AND workflow_resource_version = ${pin.version})`;
 
 /**
  * That the asking person may start `pin` through the App's binding of
