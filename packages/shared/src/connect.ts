@@ -296,9 +296,10 @@ export interface ConnectionSummary {
   /** ISO 8601. */
   createdAt: string;
   /**
-   * A Composio connection's allowed tools, by name, as the admin who
-   * connected it consented to them. Absent for a native connection, and
-   * from a connect that predates it.
+   * A Composio connection's tools on offer, by name: those the admin who
+   * connected it consented to that Grasp classed (a tool nobody classed
+   * is never offered). Absent for a native connection, and from a connect
+   * that predates it.
    */
   tools?: string[];
 }
@@ -1668,6 +1669,15 @@ export interface ConnectorContractAction {
    * admin's rule for a Composio tool says (never Composio's hint).
    */
   readOnly: boolean;
+  /**
+   * A Composio tool's class (`toolClassOf`), from the class Grasp gave it
+   * and the admin's rule (connect's composio-classes.ts): in the contract,
+   * so a release that reclasses a tool is a changed contract an admin
+   * approves again. A native action's class is in its connector's
+   * manifest, so its contract carries none: one more field would change
+   * every native contract bound now.
+   */
+  class?: Exclude<ToolClass, "never">;
   /**
    * The JSON Schemas of its input and output, as the connector makes them
    * or a Composio server lists them (closed, composio-contracts.ts), each

@@ -69,6 +69,20 @@ const composio = fakeComposioApi(
         inputs: ["owner_id", "email"],
         run: () => ({ output: { id: "contact-3" } }),
       },
+      // Tools the server would run, that Grasp never classed or turned
+      // down (test/fixtures/composio-classes.ts), both claiming to read.
+      {
+        name: "HUBSPOT_UNCLASSED",
+        readOnly: true,
+        inputs: ["owner_id"],
+        run: () => ({ output: { ran: "unclassed" } }),
+      },
+      {
+        name: "HUBSPOT_REFUSED",
+        readOnly: true,
+        inputs: ["owner_id"],
+        run: () => ({ output: { ran: "refused" } }),
+      },
     ],
   }
 );
@@ -108,6 +122,85 @@ const read = (
   action: string,
   input: Call["input"] = {}
 ): Call => ({ connectionId, action, input });
+
+describe("a Composio tool Grasp didn't class", () => {
+  it("is neither offered nor run, whatever the admin allowed, and nothing goes out", async () => {
+    const connectionId = await addConnection({
+      provider: "hubspot",
+      server: `https://backend.composio.dev/v3/mcp/${crypto.randomUUID()}?connected_account_id=ca_1`,
+      tools: JSON.stringify([
+        ...rules,
+        { name: "HUBSPOT_UNCLASSED", read: true },
+        { name: "HUBSPOT_REFUSED", read: true },
+      ]),
+    });
+    const requestsBefore = composio.state.mcp.requests;
+    const ends = await Promise.all(
+      ["HUBSPOT_UNCLASSED", "HUBSPOT_REFUSED"].map(
+        async (action) =>
+          await outcome(
+            callAs(agentFor("user-anna"), {
+              ...read(connectionId, action, { owner_id: owner }),
+              idempotencyKey: crypto.randomUUID(),
+            })
+          )
+      )
+    );
+    const listed = await exports.default.listConnections(someone());
+    expect({
+      ends,
+      offered: listed.find(({ id }) => id === connectionId)?.tools,
+      requests: composio.state.mcp.requests - requestsBefore,
+      ran: composio.state.mcp.ran,
+    }).toStrictEqual({
+      ends: ["connect.action_not_found", "connect.action_not_found"],
+      offered: [
+        "HUBSPOT_LIST_CONTACTS",
+        "HUBSPOT_GET_CONTACT",
+        "HUBSPOT_CREATE_CONTACT",
+      ],
+      requests: 0,
+      ran: [],
+    });
+  });
+});
+
+describe("a Composio tool Grasp classed as a change", () => {
+  it("is held as a side effect even when the admin marked it as a read", async () => {
+    const connectionId = await addConnection({
+      provider: "hubspot",
+      server: `https://backend.composio.dev/v3/mcp/${crypto.randomUUID()}?connected_account_id=ca_1`,
+      tools: JSON.stringify([{ name: "HUBSPOT_CREATE_CONTACT", read: true }]),
+    });
+    const anna = someone();
+    const inChat = agentFor(anna.userId, "agent-chat", "interactive");
+    const create = read(connectionId, "HUBSPOT_CREATE_CONTACT", {
+      owner_id: owner,
+      email: "new@acme.test",
+    });
+    const withoutKey = await outcome(
+      callAs(agentFor(anna.userId), create, { origin: runOrigin })
+    );
+    const answer = await callAs(
+      inChat,
+      { ...create, idempotencyKey: crypto.randomUUID() },
+      { origin: chatOrigin }
+    );
+    const recorded = await events();
+    const held = recorded.find(({ detail }) => detail.outcome === "held");
+    expect({
+      withoutKey,
+      pending: answer.pending === undefined ? "ran" : "held",
+      audited: held?.detail.sideEffect,
+      ran: composio.state.mcp.ran,
+    }).toStrictEqual({
+      withoutKey: "connect.idempotency_key_required",
+      pending: "held",
+      audited: true,
+      ran: [],
+    });
+  });
+});
 
 describe("a Composio tool the admin marked as a read", () => {
   it("runs without an idempotency key, from chat too, without waiting for anyone", async () => {

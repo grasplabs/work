@@ -21,9 +21,12 @@ import type { McpListedTool } from "./mcp.ts";
 // is made, not Composio's version of the toolkit.
 //
 // Everything the server lists is untrusted (threat model on GRA-504):
-// - only tools on the admin's allowlist are served, a read only if the
-//   admin said so (`ToolRule.read`), never by Composio's hint; nothing of
-//   any other tool is even read;
+// - only tools on the admin's allowlist that Grasp classed are served
+//   (composio-classes.ts), each with its class, a read only if both the
+//   class and the admin say so (`ToolRule`), never by Composio's hint;
+//   nothing of any other tool is even read. The class is fingerprinted
+//   with the rest, so a release that reclasses a tool stops the binding
+//   until an admin approves it again;
 // - a tool is served only by a name an App can declare, once: a name
 //   listed twice is ambiguous, and left out;
 // - the list is read up to `maxListedTools`, and each schema is checked for
@@ -245,7 +248,13 @@ export const composioContract = async (
         ? textAnswer
         : servedSchema(outputSchema);
     if (rule !== undefined && input !== undefined && output !== undefined) {
-      actions[name] = { tool: name, readOnly: rule.read, input, output };
+      actions[name] = {
+        tool: name,
+        readOnly: rule.read,
+        class: rule.class,
+        input,
+        output,
+      };
     }
   }
   if (Object.keys(actions).length === 0) {

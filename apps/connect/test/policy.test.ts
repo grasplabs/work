@@ -53,10 +53,12 @@ describe("a tool", () => {
   it("on a Composio server is what the admin's rule says", () => {
     const byName = composioTool(serverTool, {
       read: false,
+      class: "change-company",
       resource: undefined,
     });
     const asRead = composioTool(serverTool, {
       read: true,
+      class: "read-company",
       resource: "sharedMailbox",
     });
     expect([
@@ -70,6 +72,7 @@ describe("a tool", () => {
   it("on a Composio server is a side effect from a restricted context, even a read", () => {
     const asRead = composioTool(serverTool, {
       read: true,
+      class: "read-company",
       resource: undefined,
     });
     expect([
@@ -121,14 +124,22 @@ describe("a call for one resource", () => {
   });
 
   it("is refused on a Composio tool whose rule names no resource", () => {
-    const tool = composioTool(serverTool, { read: true, resource: undefined });
+    const tool = composioTool(serverTool, {
+      read: true,
+      resource: undefined,
+      class: "read-company",
+    });
     expect(scope({ mailbox: resource }, tool)).toBe(
       "connect.resource_out_of_scope"
     );
   });
 
   it("goes through on a Composio tool held by the property its rule names", () => {
-    const tool = composioTool(serverTool, { read: true, resource: "mailbox" });
+    const tool = composioTool(serverTool, {
+      read: true,
+      resource: "mailbox",
+      class: "read-company",
+    });
     expect([
       scope({ mailbox: resource }, tool),
       scope({ mailbox: "ceo@acme.test" }, tool),

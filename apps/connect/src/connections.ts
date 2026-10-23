@@ -3,11 +3,18 @@ import {
   composioToolsSchema,
   connectErrors,
   connectionOwnersSchema,
+  toolClassOf,
 } from "@grasp-os/shared/connect";
-import type { ConnectionOwner } from "@grasp-os/shared/connect";
+import type {
+  ConnectionOwner,
+  ToolClass,
+  ToolReach,
+} from "@grasp-os/shared/connect";
 import { eq, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
+
+import { composioClasses } from "#composio-classes";
 
 import { composioKey } from "./composio.ts";
 import { connections } from "./db/schema.ts";
@@ -100,34 +107,91 @@ export const allowedToolNames = (connection: Pick<Connection, "tools">) =>
   storedTools(connection).map(composioToolName);
 
 /**
- * What the admin said about a tool they allowed on a Composio connection
- * (`ComposioToolRule`): whether it only reads, and which input property
- * names its resource.
+ * What connect takes a tool the admin allowed on a Composio connection to
+ * be: whether it only reads, which input property names its resource
+ * (`ComposioToolRule`), and its class.
  */
 export interface ToolRule {
   read: boolean;
   resource: string | undefined;
+  class: Exclude<ToolClass, "never">;
 }
 
+/** Whom each class a tool can be given reaches. */
+const reachOf = {
+  "read-own": "own",
+  "read-company": "company",
+  "change-own": "own",
+  "change-company": "company",
+  "reach-others": "others",
+} as const satisfies Record<Exclude<ToolClass, "never">, ToolReach>;
+
 /**
- * The admin's rule for `action` on a Composio connection, if they allowed
- * it. One whose tools aren't recorded, or can't be read, allows none. A
- * tool allowed by name alone is a side effect with no resource.
+ * The class Grasp gave `tool` of `toolkit` (composio-classes.ts), if it
+ * was given one other than `never`. Both names are Composio's and the
+ * admin's, so only the table's own entries are read: a tool named
+ * `constructor` or `__proto__` has no class.
+ */
+const reviewedClass = (
+  toolkit: string,
+  tool: string
+): Exclude<ToolClass, "never"> | undefined => {
+  const tools = Object.hasOwn(composioClasses, toolkit)
+    ? composioClasses[toolkit]
+    : undefined;
+  const reviewed =
+    tools !== undefined && Object.hasOwn(tools, tool) ? tools[tool] : undefined;
+  return reviewed === "never" ? undefined : reviewed;
+};
+
+/**
+ * The rule for `action` on a Composio connection, if the admin allowed it
+ * and Grasp classed it: a tool nobody classed is never offered, served in
+ * a contract or run, whatever the admin allowed. One whose tools aren't
+ * recorded, or can't be read, allows none. A tool allowed by name alone
+ * is a side effect with no resource.
+ *
+ * A call is a read only when both say so: the class Grasp gave the tool
+ * and the admin's rule. Neither alone makes a change a read: a classed
+ * read the admin didn't mark is held as a change of the same reach, and a
+ * tool the admin marked as a read is held when its class changes
+ * something. The class it is then taken to be follows (`toolClassOf`).
  */
 export const allowedTool = (
-  connection: Connection,
+  connection: Pick<Connection, "provider" | "tools">,
   action: string
 ): ToolRule | undefined => {
   const tool = storedTools(connection).find(
     (each) => composioToolName(each) === action
   );
-  if (tool === undefined) {
+  const reviewed =
+    tool === undefined ? undefined : reviewedClass(connection.provider, action);
+  if (tool === undefined || reviewed === undefined) {
     return undefined;
   }
-  return typeof tool === "string"
-    ? { read: false, resource: undefined }
-    : { read: tool.read === true, resource: tool.resource };
+  const rule =
+    typeof tool === "string"
+      ? { read: false, resource: undefined }
+      : { read: tool.read === true, resource: tool.resource };
+  const read =
+    rule.read && (reviewed === "read-own" || reviewed === "read-company");
+  return {
+    read,
+    resource: rule.resource,
+    class: toolClassOf({ readOnly: read, reach: reachOf[reviewed] }),
+  };
 };
+
+/**
+ * The names of the tools a Composio connection offers: those the admin
+ * allowed that Grasp classed (`allowedTool`).
+ */
+export const offeredToolNames = (
+  connection: Pick<Connection, "provider" | "tools">
+): string[] =>
+  allowedToolNames(connection).filter(
+    (name) => allowedTool(connection, name) !== undefined
+  );
 
 /**
  * The Composio MCP server behind the connection, if its URL is one, with

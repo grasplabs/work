@@ -12,6 +12,7 @@ import {
   connectWith,
   outcome,
 } from "./connect.ts";
+import { composioClasses } from "./fixtures/composio-classes.ts";
 import type { FakeTool } from "./mcp-server.ts";
 import { testComposioKey } from "./provider-config.ts";
 
@@ -293,6 +294,33 @@ describe("a Composio connection's generated contract", () => {
     expect(after.actions.HUBSPOT_LIST_CONTACTS?.input).not.toBe(
       before.actions.HUBSPOT_LIST_CONTACTS?.input
     );
+  });
+
+  it("carries each tool's class: a release that reclasses one is a changed contract, a read no more", async () => {
+    const connectionId = await hubspot([
+      { name: "HUBSPOT_LIST_CONTACTS", read: true },
+    ]);
+    const before = await contractOf(connectionId);
+    const { hubspot: classed } = composioClasses;
+    if (classed === undefined) {
+      throw new Error("Expected HubSpot's classes");
+    }
+    classed.HUBSPOT_LIST_CONTACTS = "change-company";
+    try {
+      const after = await contractOf(connectionId);
+      const [was, is] = [before, after].map(
+        ({ actions: { HUBSPOT_LIST_CONTACTS: list } }) => ({
+          class: list?.class,
+          readOnly: list?.readOnly,
+        })
+      );
+      expect({ was, is }).toStrictEqual({
+        was: { class: "read-company", readOnly: true },
+        is: { class: "change-company", readOnly: false },
+      });
+    } finally {
+      classed.HUBSPOT_LIST_CONTACTS = "read-company";
+    }
   });
 
   it("follows the admin's allowlist as it stands: a tool taken off it is gone", async () => {
