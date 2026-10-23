@@ -466,7 +466,8 @@ const AnsweredPage = ({
                   originsOf(
                     admin.snapshot,
                     admin.billing.state === "read",
-                    admin.proposal.state === "read"
+                    admin.proposal.state === "read",
+                    admin.crm.state === "read"
                   )[section]
                 }
               />

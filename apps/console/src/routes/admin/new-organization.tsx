@@ -23,10 +23,15 @@ import { useState } from "react";
 
 import {
   domainsOrAdmins,
-  startingPoints,
+  prefillOf,
+  startingPointsOf,
 } from "../../admin/new-organization.ts";
+import type { StartingPoint } from "../../admin/new-organization.ts";
 import { AdminPage } from "../../admin/page.tsx";
+import { formatDate } from "../../admin/words.ts";
 import { signInOf, textOf } from "../../clients/sign-in-fields.tsx";
+import type { WonDeal } from "../../crm/attio.ts";
+import { fetchWonDeals } from "../../crm/functions.ts";
 import { clientIdProblem } from "../../provision/client-id.ts";
 import {
   fetchNewClientOptions,
@@ -35,16 +40,33 @@ import {
 import { useProvisionAction } from "../../provision/use-action.ts";
 import { InvalidFieldError } from "../../use-action.ts";
 
-/** Where the organization starts from: by hand, until the console reads Attio and Rooms. */
-const StartFrom = () => (
+/** Where the organization starts from: by hand, or a deal won in Attio; Rooms is still to come. */
+const StartFrom = ({
+  starts,
+  value,
+  onChange,
+}: {
+  starts: readonly StartingPoint[];
+  value: StartingPoint["id"];
+  onChange: (value: StartingPoint["id"]) => void;
+}) => (
   <FieldSet>
     <FieldLegend variant="label">Start from</FieldLegend>
     <FieldDescription>
       What a deal or a proposal knows is filled in below, to put right before it
       is added.
     </FieldDescription>
-    <RadioGroup defaultValue="hand" name="startFrom">
-      {startingPoints.map((start) => (
+    <RadioGroup
+      name="startFrom"
+      onValueChange={(next) => {
+        const start = starts.find((each) => each.id === next);
+        if (start !== undefined) {
+          onChange(start.id);
+        }
+      }}
+      value={value}
+    >
+      {starts.map((start) => (
         <FieldLabel htmlFor={`start-${start.id}`} key={start.id}>
           <Field
             data-disabled={start.unavailable !== null}
@@ -66,6 +88,47 @@ const StartFrom = () => (
       ))}
     </RadioGroup>
   </FieldSet>
+);
+
+/** A won deal in a line: what it is called, its company and the day it was won. */
+const dealLabel = (deal: WonDeal): string =>
+  [
+    deal.title === "" ? deal.name : `${deal.title}, ${deal.name}`,
+    deal.on === null ? "" : `won ${formatDate(deal.on)}`,
+  ]
+    .filter((part) => part !== "")
+    .join(" · ");
+
+/** Which won deal it starts from: its company fills in the fields below. */
+const DealChoice = ({
+  deals,
+  dealId,
+  onChange,
+}: {
+  deals: readonly WonDeal[];
+  dealId: string;
+  onChange: (dealId: string) => void;
+}) => (
+  <Field>
+    <FieldLabel htmlFor="org-deal">The deal</FieldLabel>
+    <NativeSelect
+      className="w-full"
+      id="org-deal"
+      onChange={(event) => {
+        onChange(event.currentTarget.value);
+      }}
+      value={dealId}
+    >
+      {deals.map((deal) => (
+        <NativeSelectOption key={deal.dealId} value={deal.dealId}>
+          {dealLabel(deal)}
+        </NativeSelectOption>
+      ))}
+    </NativeSelect>
+    <FieldDescription>
+      Its company is linked to the organization, so Details reads it from Attio.
+    </FieldDescription>
+  </Field>
 );
 
 /** Started: where its provisioning is followed, as the prototype's dialog ends on the way in. */
@@ -118,7 +181,23 @@ const Started = ({ clientId, name }: { clientId: string; name: string }) => {
  * what it is, its language, who decided on Grasp, and marking it a test.
  */
 const NewOrganization = () => {
-  const { releases } = Route.useLoaderData();
+  const { releases, won } = Route.useLoaderData();
+  const starts = startingPointsOf(won);
+  const deals = won.state === "read" ? won.deals : [];
+  // A deal won and not added yet is what an organization most likely
+  // starts from: the latest is chosen, to change or put right.
+  const [startFrom, setStartFrom] = useState<StartingPoint["id"]>(
+    deals.length > 0 ? "attio" : "hand"
+  );
+  const [dealId, setDealId] = useState(deals[0]?.dealId ?? "");
+  const deal =
+    startFrom === "attio"
+      ? deals.find((each) => each.dealId === dealId)
+      : undefined;
+  const prefill =
+    deal === undefined
+      ? { name: "", clientId: "", domains: "" }
+      : prefillOf(deal);
   const { busy, failure, run } = useProvisionAction();
   const [started, setStarted] = useState<{
     clientId: string;
@@ -146,6 +225,7 @@ const NewOrganization = () => {
           ring: Number(textOf(form, "ring")),
           signIn: signInOf(form),
           ...(accountId === "" ? {} : { accountId }),
+          ...(deal === undefined ? {} : { attioCompanyId: deal.companyId }),
         },
       });
       if (result.clientId !== null) {
@@ -180,17 +260,39 @@ const NewOrganization = () => {
           }}
         >
           <FieldGroup>
-            <StartFrom />
+            <StartFrom
+              onChange={setStartFrom}
+              starts={starts}
+              value={startFrom}
+            />
+            {startFrom === "attio" ? (
+              <DealChoice dealId={dealId} deals={deals} onChange={setDealId} />
+            ) : null}
             <Field>
               <FieldLabel htmlFor="org-name">Name</FieldLabel>
-              <Input id="org-name" maxLength={100} name="name" required />
+              <Input
+                defaultValue={prefill.name}
+                id="org-name"
+                // Keyed by the deal: the field starts again from the one chosen.
+                key={`name-${deal?.dealId ?? ""}`}
+                maxLength={100}
+                name="name"
+                required
+              />
               <FieldDescription>
                 The company, as Grasp&apos;s staff know it.
               </FieldDescription>
             </Field>
             <Field>
               <FieldLabel htmlFor="org-id">Its address</FieldLabel>
-              <Input id="org-id" maxLength={50} name="clientId" required />
+              <Input
+                defaultValue={prefill.clientId}
+                id="org-id"
+                key={`id-${deal?.dealId ?? ""}`}
+                maxLength={50}
+                name="clientId"
+                required
+              />
               <FieldDescription>
                 Its hostname: lowercase letters, digits and dashes. It
                 can&apos;t change.
@@ -210,7 +312,12 @@ const NewOrganization = () => {
               </Field>
               <Field>
                 <FieldLabel htmlFor="org-domains">Email domains</FieldLabel>
-                <Input id="org-domains" name="domains" />
+                <Input
+                  defaultValue={prefill.domains}
+                  id="org-domains"
+                  key={`domains-${deal?.dealId ?? ""}`}
+                  name="domains"
+                />
                 <FieldDescription>
                   The domains its people sign in with, separated by commas. Left
                   empty, the admins&apos; own.
@@ -312,7 +419,13 @@ const NewOrganization = () => {
  * organizations/, where `new` could be a client's id.
  */
 export const Route = createFileRoute("/admin/new-organization")({
-  loader: async () => await fetchNewClientOptions(),
+  loader: async () => {
+    const [options, won] = await Promise.all([
+      fetchNewClientOptions(),
+      fetchWonDeals(),
+    ]);
+    return { ...options, won };
+  },
   head: () => ({ meta: [{ title: "New organization" }] }),
   component: NewOrganization,
 });

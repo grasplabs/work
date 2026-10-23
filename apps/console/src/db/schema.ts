@@ -107,6 +107,13 @@ export const clients = sqliteTable(
      * read each time (src/proposal/rooms.ts). Null until it is linked.
      */
     roomsProjectId: text("rooms_project_id"),
+    /**
+     * The client's company in Grasp's Attio: its record's id, as someone at
+     * Grasp linked it by hand (src/crm/link.ts), never matched by name or
+     * domain. Only the id is kept; the company, its people and its deals
+     * are read each time (src/crm/attio.ts). Null until it is linked.
+     */
+    attioCompanyId: text("attio_company_id"),
     /** The release it stays on while pinned, whatever the rollouts. */
     pinnedReleaseId: text("pinned_release_id").references(() => releases.id),
     createdAt: timestamp("created_at").notNull(),

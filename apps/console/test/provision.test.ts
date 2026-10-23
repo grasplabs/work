@@ -426,6 +426,33 @@ describe("provisioning a new client", () => {
     });
   });
 
+  it("links a client started from a deal won in Attio to the deal's company, refusing an id that isn't one", async () => {
+    const companyId = crypto.randomUUID();
+    const { clientId, input } = await setUp({
+      attioCompanyId: companyId.toUpperCase(),
+    });
+    const bad = await setUp({ attioCompanyId: "Noordkade Finance" });
+    await using run = await followRuns();
+
+    await startProvisioning(env, staff, input);
+    await run.waitForStepResult({ name: "client" });
+    const refused = await startProvisioning(env, staff, bad.input).then(
+      () => "started",
+      () => "refused"
+    );
+
+    const row = await clientRow(clientId);
+    expect({
+      linked: row?.attioCompanyId,
+      refused,
+      other: await clientRow(bad.clientId),
+    }).toStrictEqual({
+      linked: companyId,
+      refused: "refused",
+      other: undefined,
+    });
+  });
+
   it("adopts an account the deployer is a member of by its id, creating none", async () => {
     const account = cloudflare.addAccount("Acme's own");
     const { clientId, input } = await setUp({ accountId: account.id });
