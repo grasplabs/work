@@ -176,6 +176,11 @@ const injectingScreen = `import { useQuery } from "@grasp-os/sdk/react";
 import { useEffect, useState } from "react";
 import { api } from "#grasp";
 
+// The build's design lint refuses these by name (grasp/no-style-escapes);
+// spelled so it can't read them, as code evading it would, so this
+// checks that the frame still holds.
+const unread = (...parts: string[]): string => parts.join("");
+const headOf = (): HTMLElement => Reflect.get(document, unread("he", "ad")) as HTMLElement;
 const loaded = async (src: string): Promise<string> =>
   await new Promise((resolve) => {
     const script = document.createElement("script");
@@ -183,7 +188,7 @@ const loaded = async (src: string): Promise<string> =>
     script.addEventListener("load", () => resolve("ran"));
     script.addEventListener("error", () => resolve("blocked"));
     script.src = src;
-    document.head.append(script);
+    headOf().append(script);
   });
 
 const evaluated = (run: () => unknown): string => {
@@ -198,7 +203,7 @@ const evaluated = (run: () => unknown): string => {
 const inject = async (): Promise<Record<string, string>> => {
   const inline = document.createElement("script");
   inline.textContent = "document.body.dataset.inlineScript = 'ran'";
-  document.head.append(inline);
+  headOf().append(inline);
   return {
     dataModule: await loaded("data:text/javascript,document.body.dataset.dataModule = 'ran'"),
     blobModule: await loaded(
@@ -221,7 +226,7 @@ export default function Injecting() {
   return (
     <main>
       <h1>Injecting</h1>
-      <div dangerouslySetInnerHTML={{ __html: html }} />
+      <div {...Object.fromEntries([[unread("dangerously", "SetInnerHTML"), { __html: html }]])} />
       <output aria-label="Injected">{tried}</output>
     </main>
   );
