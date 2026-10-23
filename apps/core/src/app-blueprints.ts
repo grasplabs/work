@@ -14,7 +14,10 @@ import { blueprintWorkflowSchema } from "@grasp-os/shared/permissions";
 import type { BlueprintWorkflow } from "@grasp-os/shared/permissions";
 import { canBuild, requireBuilder, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
+import {
+  workflowNamespace,
+  workflowResourceErrors,
+} from "@grasp-os/shared/workflow-resources";
 import { and, asc, desc, eq, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
@@ -61,6 +64,7 @@ import type { SessionCheck } from "./session-check.ts";
 import { ensureReleaseContract } from "./workflow-catalog.ts";
 import {
   createWorkflowResource,
+  definitionProblems,
   publishWorkflowVersion,
 } from "./workflow-resources.ts";
 import { workflowCallsIn } from "./workflows/code.ts";
@@ -118,9 +122,11 @@ import { workflowCallsIn } from "./workflows/code.ts";
 //   creator's quota (`workflowResourcesPerPerson`), and is audited as
 //   any creation and publication; its name is the blueprint's and the
 //   alias's with a random suffix, so copies never collide.
-// - A failure halfway: the workflows are created and published before the
-//   App's batch. If the batch is refused, they stay, the creator's own,
-//   bound to nothing and allowed nothing, for them to delete.
+// - A failure halfway: every definition is checked as publication checks
+//   it before any workflow is made, so a definition that wouldn't publish
+//   makes none. The workflows are created and published before the App's
+//   batch; if the batch is refused, they stay, the creator's own, bound
+//   to nothing and allowed nothing, for them to delete.
 //
 // Marking, unmarking, installing and creating are audited, each in the
 // same batch as its change. Grasp staff neither mark, unmark nor create
@@ -219,14 +225,36 @@ const createShippedWorkflows = async (
   blueprint: string,
   shipped: readonly BlueprintWorkflow[]
 ): Promise<ShippedWorkflow[]> => {
-  const created: ShippedWorkflow[] = [];
-  for (const { alias, binding, definition } of shipped) {
+  const named = shipped.map(({ alias, binding, definition }) => {
     const name = shippedWorkflowName(blueprint, alias);
+    return {
+      alias,
+      binding,
+      name,
+      definition: definitionNamed(definition, name),
+    };
+  });
+  // Every definition checked as its publication will check it, before any
+  // workflow is made: a creation counts toward the creator's quota for
+  // good, deleted or not, so none is made for a definition that wouldn't
+  // publish.
+  for (const { name, definition } of named) {
+    // oxlint-disable-next-line no-await-in-loop -- a few, one at a time
+    const problems = await definitionProblems(env, by, { name }, definition);
+    if (problems.length > 0) {
+      throw workflowResourceErrors.create("workflow.definition_invalid", {
+        // Each a code, a pointer and fixed text, as publication refuses it.
+        problems: problems.map((problem) => ({ ...problem })),
+      });
+    }
+  }
+  const created: ShippedWorkflow[] = [];
+  for (const { alias, binding, name, definition } of named) {
     // oxlint-disable-next-line no-await-in-loop -- a few, one at a time
     const workflow = await createWorkflowResource(env, by, name);
     // oxlint-disable-next-line no-await-in-loop -- after its creation
     const published = await publishWorkflowVersion(env, by, workflow.id, {
-      definition: definitionNamed(definition, workflow.name),
+      definition,
       basedOn: null,
     });
     created.push({

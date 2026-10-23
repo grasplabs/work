@@ -849,6 +849,34 @@ describe("the built-in blueprints", () => {
     await reinstall();
   });
 
+  it("make no workflow, and no App, for a definition that wouldn't publish", async () => {
+    await reinstall();
+    const builder = await signedInApi(idp, "builder");
+    const contract = `fixture/greeter-${unique()}`;
+    // The definition binds a contract the catalog doesn't hold.
+    const unpublishable = releaseWith({
+      workflows: [
+        { alias: "greet", binding: "GREET", definition: greeter(contract) },
+      ],
+    });
+    await expect(install(unpublishable)).resolves.toBeTruthy();
+    const refused = await outcome(
+      builder.api.apps.blueprints.create("hello", { name: "Refused" })
+    );
+    const listed = await builder.api.apps.list();
+    expect({
+      refused,
+      workflows: await builder.api.workflowResources.list(),
+      apps: listed.filter(({ name }) => name === "Refused"),
+    }).toStrictEqual({
+      refused: "workflow.definition_invalid",
+      workflows: [],
+      apps: [],
+    });
+
+    await reinstall();
+  });
+
   it("are installed again as blueprints, with no App of the previous install left, by the first install after the migrations that make them records", async () => {
     const admin = await signedInApi(idp, "admin");
     const builder = await signedInApi(idp, "builder");
