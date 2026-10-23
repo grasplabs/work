@@ -77,6 +77,13 @@ const liveStatusSchema = z.object({
 });
 export type LiveStatus = z.infer<typeof liveStatusSchema>;
 
+/** What a client cost this month so far, in USD, estimated (`monthCostUsd`). */
+export type MonthCost = NonNullable<LiveStatus["costUsd"]>;
+
+/** What `used` costs this month; null when its account's usage is unknown. */
+const costOf = (used: AccountUsage | undefined): MonthCost | null =>
+  used === undefined ? null : monthCostUsd(used);
+
 /** A client as the grid shows it at once, from what the console recorded. */
 export interface GridRow {
   id: string;
@@ -371,7 +378,7 @@ const liveOf = async (
       used === undefined
         ? null
         : { requests: used.dayRequests, errors: used.dayErrors },
-    costUsd: used === undefined ? null : monthCostUsd(used),
+    costUsd: costOf(used),
     onboarding,
   };
 };
@@ -449,6 +456,48 @@ const keep = async (clientId: string, live: LiveStatus): Promise<void> => {
   }
 };
 
+/**
+ * The deployer's API, its calls stopped by the signal each is made with,
+ * from its token read once; null when the token can't be read.
+ */
+const deployerApiFor = async (
+  env: Env,
+  waitBudgetMs: number
+): Promise<((signal: AbortSignal) => CloudflareApi) | null> => {
+  const token = await ifStored(async () => await deployerToken(env));
+  return token === null
+    ? null
+    : (signal) => cloudflareApi({ token, waitBudgetMs, signal });
+};
+
+/**
+ * What each of `rows` cost this month so far, as of `now`, by client id,
+ * as the grid reads it: every account in as few analytics requests as it
+ * can, within `limits.rowDeadlineMs`. A client whose account the
+ * analytics don't answer for is null, and the others stand.
+ */
+export const monthCosts = async (
+  env: Env,
+  rows: readonly { id: string; accountId: string }[],
+  now: Date,
+  limits: LiveReadLimits = defaultLiveReadLimits
+): Promise<Record<string, MonthCost | null>> => {
+  const apiFor =
+    rows.length === 0 ? null : await deployerApiFor(env, limits.waitBudgetMs);
+  const usage =
+    apiFor === null
+      ? null
+      : await usageWithin(
+          limits.rowDeadlineMs,
+          apiFor,
+          rows.map(({ accountId }) => accountId),
+          now
+        );
+  return Object.fromEntries(
+    rows.map(({ id, accountId }) => [id, costOf(usage?.get(accountId))])
+  );
+};
+
 /** Every client, as the console recorded it, for the grid to show at once. */
 export const clientGrid = async (env: Env): Promise<GridRow[]> => {
   const domain = clientDomain(env);
@@ -488,16 +537,7 @@ export const gridLive = async (
   if (toRead.length > 0) {
     // The token is read once, here: every client's reads, and the
     // analytics', make their API from it, each stopped by its own deadline.
-    const token = await ifStored(async () => await deployerToken(env));
-    const apiFor =
-      token === null
-        ? null
-        : (signal: AbortSignal): CloudflareApi =>
-            cloudflareApi({
-              token,
-              waitBudgetMs: options.waitBudgetMs,
-              signal,
-            });
+    const apiFor = await deployerApiFor(env, options.waitBudgetMs);
     const secrets = await ifStored(
       async (): Promise<DeploySecrets> => await deploySecrets(env)
     );
