@@ -16,6 +16,7 @@ import { beforeEach } from "vite-plus/test";
 import { z } from "zod";
 
 import {
+  accessDenied,
   attachment,
   attachmentPage,
   childrenPage,
@@ -32,11 +33,16 @@ import {
   messagePage,
   moved,
   notFound,
+  procedureTexts,
+  procedureVersion,
   reportText,
   searchResults,
   sharePointHost,
   spoofedId,
   throttled,
+  versionAt,
+  versionDownloadUrl,
+  versionPage,
 } from "./fixtures/graph.ts";
 import { fakeProvider, json, route as routeOn } from "./internet.ts";
 import type { ProviderRoute } from "./internet.ts";
@@ -44,7 +50,7 @@ import type { ProviderRoute } from "./internet.ts";
 const users = String.raw`^/v1\.0/users/(?<mailbox>[^/]+)`;
 const drives = String.raw`^/v1\.0/drives/(?<drive>[^/]+)`;
 
-const parts = ["mailbox", "drive", "id"] as const;
+const parts = ["mailbox", "drive", "id", "version"] as const;
 
 type Part = (typeof parts)[number];
 
@@ -190,7 +196,33 @@ const graphRoutes: ProviderRoute<Part>[] = [
     json(searchResults(drive))
   ),
   route("GET", `${drives}/items/(?<id>[^/]+)`, ({ drive, id }) =>
-    json(item(drive, id))
+    id === itemIds.locked ? json(accessDenied, 403) : json(item(drive, id))
+  ),
+  route("GET", `${drives}/items/(?<id>[^/]+)/versions`, ({ drive, id }) => {
+    if (id === itemIds.locked) {
+      return json(accessDenied, 403);
+    }
+    return id === itemIds.procedure
+      ? json(versionPage(drive, id))
+      : json(notFound, 404);
+  }),
+  route(
+    "GET",
+    `${drives}/items/(?<id>[^/]+)/versions/(?<version>[^/]+)`,
+    ({ id, version }) => {
+      const found =
+        id === itemIds.procedure ? procedureVersion(version) : undefined;
+      return found === undefined ? json(notFound, 404) : json(found);
+    }
+  ),
+  route(
+    "GET",
+    `${drives}/items/(?<id>[^/]+)/versions/(?<version>[^/]+)/content`,
+    ({ version }) =>
+      new Response(null, {
+        status: 302,
+        headers: { location: versionDownloadUrl(version) },
+      })
   ),
   route(
     "GET",
@@ -205,6 +237,12 @@ const graphRoutes: ProviderRoute<Part>[] = [
 
 /** SharePoint's answer to a download: the file, or a second redirect. */
 const sharePointAnswer = (url: URL): Response => {
+  const version = versionAt(url.pathname);
+  if (version !== undefined) {
+    return new Response(new TextEncoder().encode(procedureTexts[version]), {
+      headers: { "content-type": "application/octet-stream" },
+    });
+  }
   const id = url.searchParams.get("UniqueId");
   if (id === itemIds.twice) {
     return Response.redirect(downloadUrl(itemIds.report), 302);
@@ -212,6 +250,7 @@ const sharePointAnswer = (url: URL): Response => {
   const content = {
     [itemIds.pdf]: invoicePdf,
     [itemIds.controls]: new TextEncoder().encode(controlText),
+    [itemIds.procedure]: new TextEncoder().encode(procedureTexts["3.0"]),
   }[id ?? ""];
   return new Response(content ?? new TextEncoder().encode(reportText), {
     headers: { "content-type": "application/octet-stream" },

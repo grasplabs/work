@@ -306,7 +306,89 @@ export const itemIds = {
   controls: "01BYE5RZ5CONTROLSAAAAAAAAAAAAAAAAA",
   /** Shared into search results from another drive. */
   foreign: "01BYE5RZ4FOREIGNAAAAAAAAAAAAAAAAAA",
+  /** A procedure saved three times: its versions are `procedureVersions`. */
+  procedure: "01BYE5RZ6PROCEDUREAAAAAAAAAAAAAAAA",
+  /** A file the person may not open: Graph refuses it. */
+  locked: "01BYE5RZ3LOCKEDAAAAAAAAAAAAAAAAAA",
 } as const;
+
+/** The procedure's text at each of its versions, by version ID. */
+export const procedureTexts: Readonly<Record<string, string>> = {
+  "1.0": "Advice procedure\nCheck the client's income against two payslips.\n",
+  "2.0":
+    "Advice procedure\nCheck the client's income against three payslips.\n",
+  "3.0":
+    "Advice procedure\nCheck the client's income against three payslips and the employer's statement.\n",
+};
+
+const savedBy = (displayName: string, email: string, id: string) => ({
+  user: { displayName, email, id },
+});
+
+const byteLength = (text: string | undefined): number =>
+  new TextEncoder().encode(text ?? "").byteLength;
+
+/** Where SharePoint keeps a version of the procedure: 512 per major version. */
+const versionPath = (version: string): string =>
+  `/sites/Finance/_vti_history/${Math.trunc(Number(version)) * 512}/Shared%20Documents/Advice%20procedure.txt`;
+
+/** Where Graph sends a version's download, on the tenant's SharePoint. */
+export const versionDownloadUrl = (version: string): string =>
+  `https://${sharePointHost}${versionPath(version)}?tempauth=v1.eyJ0eXAi`;
+
+/** The version of the procedure a SharePoint path holds, if it holds one. */
+export const versionAt = (path: string): string | undefined =>
+  Object.keys(procedureTexts).find((version) => versionPath(version) === path);
+
+/**
+ * The procedure's versions, as Graph lists them: newest first, each with
+ * a pre-authenticated download link.
+ */
+export const procedureVersions = [
+  {
+    id: "3.0",
+    lastModifiedDateTime: "2026-10-12T09:41:07Z",
+    lastModifiedBy: savedBy(
+      "Sanne Visser",
+      "sanne.visser@example.com",
+      "5f1c2e9a-7b3d-4e8f-9a0b-1c2d3e4f5a6b"
+    ),
+    size: byteLength(procedureTexts["3.0"]),
+  },
+  {
+    id: "2.0",
+    lastModifiedDateTime: "2026-06-03T14:20:55Z",
+    lastModifiedBy: savedBy(
+      "Daan Bakker",
+      "daan.bakker@example.com",
+      "8a7b6c5d-4e3f-4a1b-9c8d-7e6f5a4b3c2d"
+    ),
+    size: byteLength(procedureTexts["2.0"]),
+  },
+  {
+    id: "1.0",
+    lastModifiedDateTime: "2025-11-18T08:05:30Z",
+    lastModifiedBy: savedBy(
+      "Sanne Visser",
+      "sanne.visser@example.com",
+      "5f1c2e9a-7b3d-4e8f-9a0b-1c2d3e4f5a6b"
+    ),
+    size: byteLength(procedureTexts["1.0"]),
+  },
+].map((version) => ({
+  "@microsoft.graph.downloadUrl": versionDownloadUrl(version.id),
+  ...version,
+}));
+
+/** A page of an item's versions: all of the procedure's. */
+export const versionPage = (drive: string, id: string) => ({
+  "@odata.context": `https://graph.microsoft.com/v1.0/$metadata#drives('${drive}')/items('${id}')/versions`,
+  value: procedureVersions,
+});
+
+/** One of the procedure's versions, as `GET /versions/{id}` returns it. */
+export const procedureVersion = (version: string) =>
+  procedureVersions.find(({ id }) => id === version);
 
 /** The controls file's content: 2 MiB of one control character. */
 export const controlText = "\u0001".repeat(2 * 1024 * 1024);
@@ -358,6 +440,18 @@ const driveItem = (drive: string, id: string) => {
         size: controlText.length,
         webUrl:
           "https://example.sharepoint.com/sites/Finance/Shared%20Documents/Export.txt",
+        file: { mimeType: "text/plain" },
+      };
+    }
+    case itemIds.procedure: {
+      return {
+        ...base,
+        id,
+        name: "Advice procedure.txt",
+        size: byteLength(procedureTexts["3.0"]),
+        lastModifiedDateTime: procedureVersions[0]?.lastModifiedDateTime,
+        webUrl:
+          "https://example.sharepoint.com/sites/Finance/Shared%20Documents/Advice%20procedure.txt",
         file: { mimeType: "text/plain" },
       };
     }
@@ -447,6 +541,14 @@ export const throttled = {
 
 /** A message Graph answers for with a header only connect's egress sets. */
 export const spoofedId = "AAMkSpoofedEgressHeader=";
+
+/** Graph's answer for an item the person may not open. */
+export const accessDenied = {
+  error: {
+    code: "accessDenied",
+    message: "Access denied",
+  },
+};
 
 /** Graph's answer for an ID it doesn't know. */
 export const notFound = {
