@@ -85,6 +85,7 @@ const snapshot: AdminSnapshot = {
   contract: null,
   members: [],
   integrations: null,
+  asked: [],
   usage: [],
 };
 

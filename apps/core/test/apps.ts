@@ -51,8 +51,21 @@ export const ordinaryData = async (app: string): Promise<void> => {
 };
 
 /**
- * Commits `files` as the App's next version and makes it current, with
- * the App's data classified as ordinary (`ordinaryData`).
+ * Marks the App published, as its builders would publish it
+ * (app-status.ts), whether or not a version of it is current: for tests
+ * of what people it is shared with do, which aren't about its status
+ * (app-status.test.ts is).
+ */
+export const published = async (app: string): Promise<void> => {
+  await env.DB.prepare("UPDATE apps SET status = 'published' WHERE id = ?")
+    .bind(app)
+    .run();
+};
+
+/**
+ * Commits `files` as the App's next version, makes it current and
+ * publishes the App, with its data classified as ordinary
+ * (`ordinaryData`).
  */
 export const release = async (
   builder: Builder,
@@ -65,6 +78,12 @@ export const release = async (
     "Release"
   );
   await builder.api.apps.versions.setCurrent(app, version);
+  // Published, for the people it is shared with: a draft is its builders'.
+  // Once is enough, and Grasp staff, who release too, never publish.
+  const { status } = await builder.api.apps.get(app);
+  if (status !== "published") {
+    await builder.api.apps.publish(app);
+  }
   await ordinaryData(app);
   return version;
 };
@@ -181,4 +200,62 @@ export const racingDb = (
     dump: async () => await real.dump(),
     withSession: (constraint) => real.withSession(constraint),
   };
+};
+
+/**
+ * Statements leaving a verified candidate (src/app-candidates.ts) for
+ * `version` of `app`, with its report, as making it current requires
+ * (migration 0126): for tests that make a version current by hand, as
+ * another writer would, to race or bypass the real path. Each move is one
+ * the triggers allow.
+ */
+export const verifiedCandidateStatements = (
+  db: D1Database,
+  app: string,
+  version: number
+): D1PreparedStatement[] => {
+  const id = crypto.randomUUID();
+  const hash = "0".repeat(64);
+  // Based on whatever is current when the batch runs, as the trigger
+  // requires; an open candidate already holding that key steps aside, as
+  // a newer candidate would supersede it.
+  const base = "(SELECT coalesce(current_version, 0) FROM apps WHERE id = ?)";
+  return [
+    db
+      .prepare(
+        `UPDATE app_candidates SET state = 'superseded'
+         WHERE app_id = ? AND version = ? AND based_on = ${base}
+           AND state IN ('frozen', 'checking', 'building', 'verifying', 'verified')`
+      )
+      .bind(app, version, app),
+    db
+      .prepare(
+        `INSERT INTO app_candidates (id, app_id, version, source_tree, based_on, state, created_by, created_at, updated_at)
+         VALUES (?, ?, ?, 'test', ${base}, 'frozen', 'test', 0, 0)`
+      )
+      .bind(id, app, version, app),
+    ...["checking", "building", "verifying"].map((state) =>
+      db
+        .prepare("UPDATE app_candidates SET state = ? WHERE id = ?")
+        .bind(state, id)
+    ),
+    db
+      .prepare(
+        "INSERT INTO app_candidate_reports (candidate_id, report, hash, created_at) VALUES (?, '{}', ?, 0)"
+      )
+      .bind(id, hash),
+    db
+      .prepare(
+        "UPDATE app_candidates SET state = 'verified', report_hash = ? WHERE id = ?"
+      )
+      .bind(hash, id),
+  ];
+};
+
+/** Leaves a verified candidate for `version` of `app` (`verifiedCandidateStatements`). */
+export const verifiedCandidate = async (
+  app: string,
+  version: number
+): Promise<void> => {
+  await env.DB.batch(verifiedCandidateStatements(env.DB, app, version));
 };

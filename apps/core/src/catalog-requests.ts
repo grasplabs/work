@@ -7,7 +7,7 @@ import {
 import type { AppRequest } from "@grasp-os/shared/connect";
 import { roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { desc, eq } from "drizzle-orm";
+import { asc, desc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
@@ -108,4 +108,28 @@ export const listAppRequests = async (env: Env): Promise<AppRequest[]> => {
     .orderBy(desc(appRequests.requestedAt), desc(appRequests.id))
     .limit(appRequestsListed);
   return rows.map(requestOf);
+};
+
+/**
+ * The apps people asked for, oldest first, as Grasp's admin reads them
+ * (admin-snapshot.ts): each by its name and when, never why, its link or
+ * who asked.
+ */
+export const appsAsked = async (
+  env: Env
+): Promise<{ id: string; name: string; askedAt: string }[]> => {
+  const rows = await drizzle(env.DB)
+    .select({
+      id: appRequests.id,
+      name: appRequests.name,
+      requestedAt: appRequests.requestedAt,
+    })
+    .from(appRequests)
+    .orderBy(asc(appRequests.requestedAt), asc(appRequests.id))
+    .limit(appRequestsListed);
+  return rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    askedAt: row.requestedAt.toISOString(),
+  }));
 };

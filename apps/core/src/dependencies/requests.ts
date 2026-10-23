@@ -687,7 +687,7 @@ const propose = async (
   }
   // Its own builders only; a workflow's targets are checked by the schema
   // (`computation` alone).
-  const subject = await builtSubject(env, by, subjectOfRef(proposal));
+  const subject = await builtSubject(env, by, subjectOfRef(proposal), true);
   const graph = canonicalGraph(proposal.graph);
   // The total too: a resolve finding more or fewer below the kept ones
   // is another review, never taken for the one waiting.
@@ -738,7 +738,7 @@ const propose = async (
       }
       // Or the subject went as it ran (`stillThere`): refused as gone.
       // oxlint-disable-next-line no-await-in-loop
-      await builtSubject(env, by, subject);
+      await builtSubject(env, by, subject, true);
     }
   }
   throw dependencyErrors.create("dependency.stale");

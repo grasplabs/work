@@ -82,6 +82,7 @@ import { z } from "zod";
 
 import { drainObjectOutbox } from "../audit-outbox.ts";
 import { signInConfig } from "../auth/config.ts";
+import { keepOnboardingRecords } from "../brain-records.ts";
 import { organizations } from "../db/core/schema.ts";
 import { migrateOnWake } from "../db/migrate.ts";
 import migrations from "../db/onboarding/migrations/migrations.js";
@@ -89,6 +90,8 @@ import {
   askedAbout,
   answerWaits,
   auditOutbox,
+  brainSent,
+  brainTeams,
   countedPeople,
   countedWorks,
   drawFailures,
@@ -122,6 +125,13 @@ import {
 } from "../mail-outbox.ts";
 import type { MailState, MailToQueue } from "../mail-outbox.ts";
 import { sendMail } from "../mail.ts";
+import {
+  brainFloor,
+  intakeIds,
+  intakeOf,
+  rosterSource,
+} from "./brain-intake.ts";
+import type { TeamIntake } from "./brain-intake.ts";
 import { storedDocumentReadingSchema } from "./document-reading.ts";
 import {
   kickoffBrief,
@@ -527,7 +537,19 @@ export class Onboarding extends DurableObject<Env> {
           : progressOf(roster, this.#interviews(), this.#counts(), now),
       agreed: agreementsIn(row.agreements),
       paused: row.pausedAt !== null,
+      sponsor: this.#sponsor(),
     };
+  }
+
+  /** The sponsor's first name, when the kickoff named them: read without its transcript. */
+  #sponsor(): string | null {
+    const [row] = this.#db
+      .select({ reading: kickoff.reading })
+      .from(kickoff)
+      .all();
+    return row === undefined
+      ? null
+      : (storedReadingSchema.parse(JSON.parse(row.reading)).sponsor ?? null);
   }
 
   /**
@@ -938,6 +960,7 @@ export class Onboarding extends DurableObject<Env> {
           .set({ agreedAt: now })
           .where(eq(interviewStates.person, person.id))
           .run();
+        this.#brainDue(person.team, now);
       }
     });
     if (newlyAgreed) {
@@ -1152,6 +1175,122 @@ export class Onboarding extends DurableObject<Env> {
     this.#deliverAudit();
     await this.#alarmBy(Date.now() + drawAfterMs);
     return true;
+  }
+
+  /**
+   * Gives the brain what the next team waiting for it learned (GRA-367):
+   * one whose drawings are all done, so what its people agreed to goes in
+   * together. What fails is tried again after a minute, five and thirty;
+   * then it's given up and logged until something new is agreed. Returns
+   * what it gave (`brain:<team>`), or null.
+   */
+  async intakeNext(now: number = Date.now()): Promise<string | null> {
+    const drawing = new Set(
+      this.#dueToDraw(now).map(({ id, work }) => work?.team ?? id)
+    );
+    const due = this.#brainDueAt(now).find(
+      ({ team, after }) => after <= now && !drawing.has(team)
+    );
+    if (due === undefined) {
+      return null;
+    }
+    const item = `brain:${due.team}`;
+    try {
+      await this.#intakeTeam(due.team, due.dueAt, new Date(now).toISOString());
+      this.#db.delete(drawFailures).where(eq(drawFailures.item, item)).run();
+    } catch (error) {
+      const tries = due.tries + 1;
+      log.error("onboarding.brain_failed", {
+        item,
+        tries,
+        error: error instanceof Error ? error.name : "unknown",
+      });
+      const wait = drawRetryMs[tries - 1];
+      this.ctx.storage.transactionSync(() => {
+        if (wait === undefined) {
+          this.#db
+            .delete(drawFailures)
+            .where(eq(drawFailures.item, item))
+            .run();
+          this.#brainSettled(due.team, due.dueAt);
+          return;
+        }
+        const after = new Date(now + wait).toISOString();
+        this.#db
+          .insert(drawFailures)
+          .values({ item, tries, after })
+          .onConflictDoUpdate({
+            target: drawFailures.item,
+            set: { tries, after },
+          })
+          .run();
+      });
+    }
+    return item;
+  }
+
+  /**
+   * The records the onboarding gave the brain that rest on someone's
+   * interview (brain-intake.ts): what deleting it has to take out of the
+   * brain (GRA-368). For staff and the store alone; the brain never names
+   * anyone.
+   */
+  sentFor(person: string): { record: string; type: string; team: string }[] {
+    return this.#db
+      .select({
+        record: brainSent.record,
+        type: brainSent.type,
+        team: brainSent.team,
+      })
+      .from(brainSent)
+      .where(eq(brainSent.person, person))
+      .orderBy(asc(brainSent.type), asc(brainSent.record))
+      .all();
+  }
+
+  /**
+   * Each team the brain has interviews of: one source for all of them
+   * (brain-intake.ts), with how many of its people agreed and the day the
+   * first of them did, never who. A team that left the roster has none.
+   */
+  interviewSources(): {
+    team: string;
+    name: string;
+    people: number;
+    since: string;
+  }[] {
+    const roster = this.#roster();
+    const states = this.#db
+      .select({
+        person: interviewStates.person,
+        completedAt: interviewStates.completedAt,
+      })
+      .from(interviewStates)
+      .where(isNotNull(interviewStates.agreedAt))
+      .all();
+    return this.#db
+      .select({ team: brainTeams.team })
+      .from(brainTeams)
+      .where(isNotNull(brainTeams.sentAt))
+      .orderBy(asc(brainTeams.sentAt), asc(brainTeams.team))
+      .all()
+      .flatMap(({ team: id }) => {
+        const team = roster?.teams.find((each) => each.id === id);
+        const members = new Set(
+          roster?.people
+            .filter((person) => person.team === id)
+            .map((person) => person.id)
+        );
+        const agreed = states.filter(({ person }) => members.has(person));
+        const [since] = agreed
+          .flatMap(({ completedAt }) =>
+            completedAt === null ? [] : [dayOf(completedAt)]
+          )
+          .toSorted();
+        return team === undefined || since === undefined
+          ? []
+          : [{ team: id, name: team.name, people: agreed.length, since }];
+      });
   }
 
   /**
@@ -2234,6 +2373,7 @@ export class Onboarding extends DurableObject<Env> {
     if ((await this.drawNext()) !== null) {
       await this.releaseDue();
     }
+    await this.intakeNext();
     await this.remindDue();
     await this.sendUpdate();
     await this.deliverMail();
@@ -2928,7 +3068,151 @@ export class Onboarding extends DurableObject<Env> {
     }
     if (drawn !== null) {
       this.#noted(due.about, "work.drawn", at, "grasp");
+      this.#brainDue(due.team, at);
     }
+  }
+
+  /** Notes that something new of a team waits to be given to the brain. */
+  #brainDue(team: string, at: string): void {
+    this.#db
+      .insert(brainTeams)
+      .values({ team, dueAt: at })
+      .onConflictDoUpdate({ target: brainTeams.team, set: { dueAt: at } })
+      .run();
+  }
+
+  /** Notes a team given to the brain as it was at `dueAt`: unless something new came since. */
+  #brainSettled(team: string, dueAt: string): void {
+    this.#db
+      .update(brainTeams)
+      .set({ dueAt: null })
+      .where(and(eq(brainTeams.team, team), eq(brainTeams.dueAt, dueAt)))
+      .run();
+  }
+
+  /** The teams waiting to be given to the brain, the longest first, with when each may be and how often it failed. */
+  #brainDueAt(
+    now: number
+  ): { team: string; dueAt: string; after: number; tries: number }[] {
+    const failures = new Map(
+      this.#db
+        .select()
+        .from(drawFailures)
+        .where(like(drawFailures.item, "brain:%"))
+        .all()
+        .map((row) => [row.item, row])
+    );
+    return this.#db
+      .select({ team: brainTeams.team, dueAt: brainTeams.dueAt })
+      .from(brainTeams)
+      .where(isNotNull(brainTeams.dueAt))
+      .orderBy(asc(brainTeams.dueAt), asc(brainTeams.team))
+      .all()
+      .flatMap(({ team, dueAt }) => {
+        if (dueAt === null) {
+          return [];
+        }
+        const failed = failures.get(`brain:${team}`);
+        return [
+          {
+            team,
+            dueAt,
+            after: failed === undefined ? now : Date.parse(failed.after),
+            tries: failed?.tries ?? 0,
+          },
+        ];
+      });
+  }
+
+  /**
+   * What a team gives the brain, from the store: its name, everyone's
+   * names (for none to reach it), the facts each person who told their
+   * own work agreed to, and its pieces of work as drawn. Never the lead's
+   * facts, whose role alone says who they are, nor a piece of work drawn
+   * from the lead alone. None while fewer than `brainFloor` of its people
+   * agreed: it waits.
+   */
+  #teamIntake(teamId: string): TeamIntake | null {
+    const roster = this.#roster();
+    const team = roster?.teams.find(({ id }) => id === teamId);
+    if (roster === null || team === undefined || team.off) {
+      return null;
+    }
+    const members = roster.people.filter((person) => person.team === teamId);
+    const agreed = members.filter(({ id }) => this.#agreedAt(id) !== null);
+    if (agreed.length < brainFloor) {
+      return null;
+    }
+    const { lead } = team;
+    const leadAgreed =
+      lead !== null && this.#agreedAt(lead) !== null ? [lead] : [];
+    return {
+      team: { id: team.id, name: team.name },
+      names: roster.people.map(({ name }) => name),
+      tellers: agreed.flatMap(({ id }) => {
+        const input = this.drawInput(id);
+        return input === null || input.kind !== "own" || id === lead
+          ? []
+          : [{ person: id, facts: input.facts }];
+      }),
+      works: this.teamWorks(teamId).flatMap((work) => {
+        const { drawn } = work;
+        if (
+          drawn === null ||
+          drawn.from.length === 0 ||
+          drawn.from.every((person) => person === lead)
+        ) {
+          return [];
+        }
+        return [
+          {
+            id: work.id,
+            name: work.name,
+            local: work.local,
+            one: work.one,
+            drawn,
+            state: work.known.state,
+            namedBy: leadAgreed,
+            context: leadAgreed.filter((id) => !drawn.from.includes(id)),
+          },
+        ];
+      }),
+    };
+  }
+
+  /**
+   * Gives the brain what a team learned, as it was due at `dueAt`
+   * (brain-intake.ts), as the onboarding, which owns those records: kept
+   * once each, so giving it again adds only what is new. Then notes who
+   * each rests on, here alone.
+   */
+  async #intakeTeam(teamId: string, dueAt: string, at: string): Promise<void> {
+    const intake = this.#teamIntake(teamId);
+    if (intake === null || this.rosterSavedAt() === null) {
+      this.#brainSettled(teamId, dueAt);
+      return;
+    }
+    const { records, rests } = await intakeOf(intake);
+    await keepOnboardingRecords(this.env, records, {
+      sources: new Set([rosterSource, await intakeIds.interviews(teamId)]),
+      teams: new Set([intakeIds.team(teamId)]),
+    });
+    this.ctx.storage.transactionSync(() => {
+      // One row a statement: within SQLite's bound parameters.
+      for (const rest of rests) {
+        this.#db
+          .insert(brainSent)
+          .values({ ...rest, team: teamId })
+          .onConflictDoNothing()
+          .run();
+      }
+      this.#db
+        .update(brainTeams)
+        .set({ sentAt: sql`coalesce(${brainTeams.sentAt}, ${at})` })
+        .where(eq(brainTeams.team, teamId))
+        .run();
+      this.#brainSettled(teamId, dueAt);
+    });
   }
 
   /**
@@ -2974,7 +3258,15 @@ export class Onboarding extends DurableObject<Env> {
   /** Sets the alarm for the next thing to draw, when there is one. */
   async #armDrawing(): Promise<void> {
     const now = Date.now();
-    const afters = this.#dueToDraw(now).map(({ after }) => after);
+    const drawing = this.#dueToDraw(now);
+    const drawn = new Set(drawing.map(({ id, work }) => work?.team ?? id));
+    // A team still being drawn goes to the brain once it is drawn.
+    const afters = [
+      ...drawing.map(({ after }) => after),
+      ...this.#brainDueAt(now).flatMap(({ team, after }) =>
+        drawn.has(team) ? [] : [after]
+      ),
+    ];
     if (afters.length > 0) {
       await this.#alarmBy(Math.max(Math.min(...afters), now + drawNextMs));
     }

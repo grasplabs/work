@@ -1,4 +1,3 @@
-import { sha256HexOfBytes } from "@grasp-os/shared/encoding";
 import { requestErrors } from "@grasp-os/shared/errors";
 import type { ErrorPayload } from "@grasp-os/shared/errors";
 import { guestApiPath } from "@grasp-os/shared/guests";
@@ -12,17 +11,11 @@ import { interviewStoryPath } from "@grasp-os/shared/interview-story";
 import { interviewTurnPath } from "@grasp-os/shared/interview-turn";
 import { errorFields, log } from "@grasp-os/shared/log";
 import {
-  mailFromHeader,
   mailIngressHeaders,
   mailIngressMaxBytes,
   mailIngressPath,
+  mailIngressRequest,
   mailRejectedStatus,
-  mailSentAtHeader,
-  mailSha256Header,
-  mailSignatureHeader,
-  mailSizeHeader,
-  mailToHeader,
-  signMail,
 } from "@grasp-os/shared/mail-ingress";
 import {
   deriveRouterSecret,
@@ -298,28 +291,17 @@ export default {
       message.setReject("The message is too large.");
       return;
     }
-    const mail = {
-      to: message.to,
-      from: message.from,
-      sha256: await sha256HexOfBytes(raw),
-      size: raw.byteLength,
-      sentAt: new Date().toISOString(),
-    };
-    const response = await fetch(`${route.origin}${mailIngressPath}`, {
-      method: "POST",
-      headers: {
-        "content-type": "message/rfc822",
-        [routerSecretHeader]: route.secret,
-        [mailToHeader]: mail.to,
-        [mailFromHeader]: mail.from,
-        [mailSha256Header]: mail.sha256,
-        [mailSizeHeader]: String(mail.size),
-        [mailSentAtHeader]: mail.sentAt,
-        [mailSignatureHeader]: await signMail(route.secret, mail),
-      },
-      body: raw,
-      redirect: "manual",
-    });
+    const { mail, request } = await mailIngressRequest(
+      route.origin,
+      route.secret,
+      {
+        to: message.to,
+        from: message.from,
+        raw,
+        sentAt: new Date().toISOString(),
+      }
+    );
+    const response = await fetch(request);
     const fields = {
       host,
       message: mail.sha256,

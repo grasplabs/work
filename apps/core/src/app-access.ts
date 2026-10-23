@@ -35,6 +35,13 @@ import {
 // while it has read data they can't read where it comes from
 // (app-provenance.ts).
 //
+// An App's status narrows that (app-status.ts): while it is a draft or
+// archived, it is open to its builders and the admins alone. Someone whose
+// role in it is `user` has none then, and is answered as for an App that
+// isn't there, so a draft's existence never shows to its future users.
+// What an archived App still allows its builders is the caller's to
+// refuse (`requireNotArchived`, apps.ts).
+//
 // Roles in an App are read from the database on every call, so unsharing
 // applies to the next call. The person's session, role and teams come from
 // their connection's latest reading (auth/identity.ts, rpc.ts), at most a
@@ -52,11 +59,61 @@ const rowsOf = (by: Pick<Identity, "userId" | "teams">): SQL =>
   memberRowsOf(appMembers, by);
 
 /**
- * `by`'s role in `app`, and whether it comes from whom the App is shared
- * with (`shared`), rather than from being an admin or its owner; undefined
- * when they have none.
+ * That an App's status lets `by` in, as a condition on `apps`, beside
+ * their role in it (`appRole`): a published App for anyone with a role,
+ * any other for its builders alone (its owner, or someone it is shared
+ * with as a builder), when their role in the organization builds. Not for
+ * admins, whom every App is open to.
  */
-const appRole = async (
+const openInItsStatus = (by: Person): SQL => {
+  if (!canBuild(by.role)) {
+    return sql`${apps.status} = 'published'`;
+  }
+  return sql`(${apps.status} = 'published' OR ${apps.ownerId} = ${by.userId} OR EXISTS (SELECT 1 FROM ${appMembers} WHERE ${appMembers.appId} = ${apps.id} AND ${appMembers.role} = 'builder' AND ${rowsOf(by)}))`;
+};
+
+/**
+ * Refuses an archived App with `app.archived`: what its builders may
+ * still read of it doesn't make it usable. For whatever opens its
+ * screens, calls it or starts its runs.
+ */
+export const requireNotArchived = (app: Pick<App, "status">): void => {
+  if (app.status === "archived") {
+    throw appErrors.create("app.archived");
+  }
+};
+
+/**
+ * Refuses a call into App `app` its status doesn't serve, read now: an
+ * archived App serves nobody (`app.archived`), and only a published App
+ * serves other Apps' calls of its exports and independent workflows' runs
+ * (`app.not_published`), so a draft's code never runs for them. For the
+ * App's host, as a call begins and before each stub call its code makes
+ * (app.ts, app-bindings.ts), whoever let the call in.
+ */
+export const requireServes = async (
+  env: Env,
+  app: AppId,
+  admission: { type: string } | undefined
+): Promise<void> => {
+  const row = await drizzle(env.DB)
+    .select({ status: apps.status })
+    .from(apps)
+    .where(eq(apps.id, app))
+    .get();
+  if (row === undefined) {
+    throw appErrors.create("app.not_found");
+  }
+  requireNotArchived(row);
+  const forOthers =
+    admission?.type === "export" || admission?.type === "workflowRun";
+  if (forOthers && row.status !== "published") {
+    throw appErrors.create("app.not_published");
+  }
+};
+
+/** `appRole`, as if the App were published. */
+const roleRegardlessOfStatus = async (
   env: Env,
   by: Person,
   app: Pick<App, "id" | "owner">
@@ -79,6 +136,24 @@ const appRole = async (
 };
 
 /**
+ * `by`'s role in `app`, and whether it comes from whom the App is shared
+ * with (`shared`), rather than from being an admin or its owner; undefined
+ * when they have none.
+ */
+const appRole = async (
+  env: Env,
+  by: Person,
+  app: Pick<App, "id" | "owner" | "status">
+): Promise<{ role: AppRole; shared: boolean } | undefined> => {
+  const found = await roleRegardlessOfStatus(env, by, app);
+  // Only a published App is open to those who don't build it.
+  if (found?.role === "user" && app.status !== "published") {
+    return undefined;
+  }
+  return found;
+};
+
+/**
  * Refuses `by` unless they have `needed` or more in `app`: an App they
  * have no role in with `app.not_found`, as one that isn't there, and too
  * low a role with `role.forbidden`. Someone it is shared with is also
@@ -88,7 +163,7 @@ const appRole = async (
 export const requireAppRole = async (
   env: Env,
   by: Person,
-  app: Pick<App, "id" | "owner">,
+  app: Pick<App, "id" | "owner" | "status">,
   needed: AppRole
 ): Promise<AppRole> => {
   const found = await appRole(env, by, app);
@@ -131,7 +206,7 @@ export const requireStillOpen = async (
   app: AppId
 ): Promise<void> => {
   const row = await drizzle(env.DB)
-    .select({ id: apps.id, owner: apps.ownerId })
+    .select({ id: apps.id, owner: apps.ownerId, status: apps.status })
     .from(apps)
     .where(eq(apps.id, app))
     .get();
@@ -141,9 +216,10 @@ export const requireStillOpen = async (
   await requireAppRole(
     env,
     { ...by, teams: await teamsOf(env.DB, by.userId) },
-    { id: appIdSchema.parse(row.id), owner: row.owner },
+    { id: appIdSchema.parse(row.id), owner: row.owner, status: row.status },
     "user"
   );
+  requireNotArchived(row);
 };
 
 /**
@@ -242,14 +318,17 @@ export const appsFoundBy = (env: Env, by: Person): SQL | undefined => {
     return undefined;
   }
   const db = drizzle(env.DB);
-  return or(
-    eq(apps.ownerId, by.userId),
-    exists(
-      db
-        .select({ one: sql`1` })
-        .from(appMembers)
-        .where(and(eq(appMembers.appId, apps.id), rowsOf(by)))
-    )
+  return and(
+    or(
+      eq(apps.ownerId, by.userId),
+      exists(
+        db
+          .select({ one: sql`1` })
+          .from(appMembers)
+          .where(and(eq(appMembers.appId, apps.id), rowsOf(by)))
+      )
+    ),
+    openInItsStatus(by)
   );
 };
 
@@ -276,7 +355,13 @@ export const stillOpenTo = (by: Person, app: AppId): SQL => {
   if (isAdmin(by.role)) {
     return sql`1`;
   }
-  return sql`(EXISTS (SELECT 1 FROM ${apps} WHERE ${apps.id} = ${app} AND ${apps.ownerId} = ${by.userId}) OR EXISTS (SELECT 1 FROM ${appMembers} WHERE ${appMembers.appId} = ${app} AND ((${appMembers.memberType} = 'person' AND ${appMembers.memberId} = ${by.userId}) OR (${appMembers.memberType} = 'team' AND ${appMembers.memberId} IN (SELECT ${teamMembers.teamId} FROM ${teamMembers} WHERE ${teamMembers.userId} = ${by.userId})))))`;
+  const theirs = sql`((${appMembers.memberType} = 'person' AND ${appMembers.memberId} = ${by.userId}) OR (${appMembers.memberType} = 'team' AND ${appMembers.memberId} IN (SELECT ${teamMembers.teamId} FROM ${teamMembers} WHERE ${teamMembers.userId} = ${by.userId})))`;
+  const role = sql`(EXISTS (SELECT 1 FROM ${apps} WHERE ${apps.id} = ${app} AND ${apps.ownerId} = ${by.userId}) OR EXISTS (SELECT 1 FROM ${appMembers} WHERE ${appMembers.appId} = ${app} AND ${theirs}))`;
+  // As `openInItsStatus`, read when the statement runs.
+  const builds = canBuild(by.role)
+    ? sql` OR EXISTS (SELECT 1 FROM ${apps} WHERE ${apps.id} = ${app} AND ${apps.ownerId} = ${by.userId}) OR EXISTS (SELECT 1 FROM ${appMembers} WHERE ${appMembers.appId} = ${app} AND ${appMembers.role} = 'builder' AND ${theirs})`
+    : sql``;
+  return sql`(${role} AND (EXISTS (SELECT 1 FROM ${apps} WHERE ${apps.id} = ${app} AND ${apps.status} = 'published')${builds}))`;
 };
 
 /**
@@ -290,10 +375,16 @@ export const stillOpenTo = (by: Person, app: AppId): SQL => {
 export const operationRoles = async (
   env: Env,
   by: Pick<Identity, "userId" | "role">,
-  app: AppId
+  app: AppId,
+  /**
+   * For a run already in flight, which goes on when its App is taken back
+   * to a draft (app-status.ts): the person's role as if it were published.
+   * An archived App still refuses it.
+   */
+  inFlight = false
 ): Promise<{ appMember: boolean; appBuilder: boolean }> => {
   const row = await drizzle(env.DB)
-    .select({ id: apps.id, owner: apps.ownerId })
+    .select({ id: apps.id, owner: apps.ownerId, status: apps.status })
     .from(apps)
     .where(eq(apps.id, app))
     .get();
@@ -303,8 +394,14 @@ export const operationRoles = async (
   const role = await requireAppRole(
     env,
     { ...by, teams: await teamsOf(env.DB, by.userId) },
-    { id: appIdSchema.parse(row.id), owner: row.owner },
+    {
+      id: appIdSchema.parse(row.id),
+      owner: row.owner,
+      status: inFlight ? "published" : row.status,
+    },
     "user"
   );
+  // Nobody calls an archived App's functions, its builders included.
+  requireNotArchived(row);
   return { appMember: true, appBuilder: role === "builder" };
 };

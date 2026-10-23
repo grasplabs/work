@@ -54,6 +54,7 @@ import {
   packagesHoldSql,
   sealedPackagesSchema,
 } from "./workflows/package-seal.ts";
+import type { ChildPlace } from "./workflows/quotas.ts";
 import { runAdmitted, startResourceRun } from "./workflows/resource-runs.ts";
 import { tellQueryFollowers } from "./workflows/run-changes.ts";
 
@@ -176,7 +177,25 @@ export type StartInvoker =
    * (inbound-email.ts, connector-events.ts), or it opens a lineage of its
    * own past the run's limits (GRA-692).
    */
-  | { type: "trigger"; triggerId: string };
+  | { type: "trigger"; triggerId: string }
+  /**
+   * A run's `run` task starting its child (workflows/run-children.ts):
+   * only with the parent workflow's own `start` grant on the child's
+   * workflow, for the parent run's person, while the parent run is still
+   * going; never with the authority that started the parent. `place` is
+   * where its lineage admitted the child already (quotas.ts, `admitChild`).
+   */
+  | { type: "workflow"; parent: ParentRun; place: ChildPlace };
+
+/** The run whose `run` task starts a child, as its host knows it. */
+export interface ParentRun {
+  readonly runId: string;
+  readonly workflowId: string;
+  /** The person it acts for, whom the child acts for too. */
+  readonly principal: string;
+  /** Whether it runs restricted: its children do then too. */
+  readonly restricted: boolean;
+}
 
 /**
  * A new start the host decided on: what it freezes, and what admitting it
@@ -213,6 +232,11 @@ export interface StartAuthorization {
   buildHash: string | null;
   /** For the audit log: who started it. */
   actor: AuditActor;
+  /**
+   * For a child run: its parent and where it sits in its lineage, pinned
+   * with its row (resource-runs.ts, `RunAdmission.lineage`).
+   */
+  lineage?: { parentRunId: string; rootRunId: string; depth: number };
   /**
    * That it still holds, as SQL, read as the admitting statement runs: of
    * a fixed size whatever the version binds, as `required` holds the
@@ -280,9 +304,35 @@ const contractInputSchema = z.object({ input: z.json() });
 const activeSql = (person: string): SQL => activeMember(person);
 
 /**
+ * That App `app`'s status lets `person` in now, as SQL, beside their role
+ * (`appRoleSql`), as `stillOpenTo` decides it (app-access.ts): never an
+ * archived App, and a draft only for its builders, in a role that builds.
+ */
+const appStatusAdmitsSql = (person: string, app: string): SQL => sql`(
+  EXISTS (SELECT 1 FROM apps AS lived
+    WHERE lived.id = ${app} AND lived.status != 'archived')
+  AND (EXISTS (SELECT 1 FROM apps AS out
+      WHERE out.id = ${app} AND out.status = 'published')
+    OR (${activeMember(person, ["admin", "builder"])}
+      AND (${activeMember(person, ["admin"])}
+        OR EXISTS (SELECT 1 FROM apps AS owned
+          WHERE owned.id = ${app} AND owned.owner_id = ${person})
+        OR EXISTS (SELECT 1 FROM app_members AS shared
+          WHERE shared.app_id = ${app} AND shared.role = 'builder'
+            AND shared.member_type = 'person' AND shared.member_id = ${person})
+        OR EXISTS (SELECT 1 FROM app_members AS shared
+          JOIN teams ON teams.id = shared.member_id
+            AND teams.organization_id = ${organizationId}
+          JOIN team_members ON team_members.team_id = shared.member_id
+            AND team_members.user_id = ${person}
+          WHERE shared.app_id = ${app} AND shared.role = 'builder'
+            AND shared.member_type = 'team')))))`;
+
+/**
  * That `person` has a role in App `app` now, as SQL: an admin of the
  * organization, its owner, or someone it is shared with, as a person or
- * through a team they are in now. Only while they are an active member.
+ * through a team they are in now, while its status lets them in
+ * (`appStatusAdmitsSql`). Only while they are an active member.
  */
 const appRoleSql = (
   person: string,
@@ -299,11 +349,37 @@ const appRoleSql = (
         AND teams.organization_id = ${organizationId}
       JOIN team_members ON team_members.team_id = shared.member_id
         AND team_members.user_id = ${person}
-      WHERE shared.app_id = ${app} AND shared.member_type = 'team')))`;
+      WHERE shared.app_id = ${app} AND shared.member_type = 'team'))
+  AND ${appStatusAdmitsSql(person, app)})`;
 
 /** That a permission allowing `start` on `id` for the invoker holds, as SQL. */
 const grantSql = (allowing: SQL): SQL =>
   sql`EXISTS (SELECT 1 FROM ${permissions} WHERE ${allowing})`;
+
+/**
+ * That App `app`, at `appVersion`, holds its grant of `action` on
+ * workflow `workflow` for `person` now, as SQL (`appStartHoldsSql`).
+ */
+const appGrantHoldsSql = (
+  app: AppId,
+  appVersion: number,
+  person: string,
+  workflow: WorkflowResourceId,
+  action: "start" | "send"
+): SQL => sql`(${appRoleSql(person, app)}
+  AND EXISTS (SELECT 1 FROM app_versions AS code
+    WHERE code.app_id = ${app} AND code.version = ${appVersion})
+  AND NOT EXISTS (SELECT 1 FROM sdk_release_manifests AS sealed
+    WHERE sealed.app_id = ${app} AND sealed.version = ${appVersion}
+      AND sealed.revoked_at IS NOT NULL)
+  AND ${grantSql(
+    allowingPermissionSql(
+      { type: "app", appId: app },
+      appVersion,
+      { type: "workflow", workflowId: workflow },
+      action
+    )
+  )})`;
 
 /**
  * That App `app`, at `appVersion`, may start workflow `workflow` for
@@ -318,20 +394,19 @@ export const appStartHoldsSql = (
   appVersion: number,
   person: string,
   workflow: WorkflowResourceId
-): SQL => sql`(${appRoleSql(person, app)}
-  AND EXISTS (SELECT 1 FROM app_versions AS code
-    WHERE code.app_id = ${app} AND code.version = ${appVersion})
-  AND NOT EXISTS (SELECT 1 FROM sdk_release_manifests AS sealed
-    WHERE sealed.app_id = ${app} AND sealed.version = ${appVersion}
-      AND sealed.revoked_at IS NOT NULL)
-  AND ${grantSql(
-    allowingPermissionSql(
-      { type: "app", appId: app },
-      appVersion,
-      { type: "workflow", workflowId: workflow },
-      "start"
-    )
-  )})`;
+): SQL => appGrantHoldsSql(app, appVersion, person, workflow, "start");
+
+/**
+ * That App `app`, at `appVersion`, may send events to `person`'s runs of
+ * workflow `workflow` now, as SQL: as `appStartHoldsSql`, by the App's own
+ * `send` grant, which its `start` grant doesn't imply (spec 10.4.6).
+ */
+export const appSendHoldsSql = (
+  app: AppId,
+  appVersion: number,
+  person: string,
+  workflow: WorkflowResourceId
+): SQL => appGrantHoldsSql(app, appVersion, person, workflow, "send");
 
 /** Where a version's manifest seals the approved packages its modules import. */
 const manifestPackagesSchema = z.object({
@@ -372,7 +447,7 @@ const packagesHolding = async (
  * `workflow.resource_unavailable`; a version it never published
  * `workflow.version_not_found`.
  */
-const pinned = async (
+export const pinned = async (
   env: Env,
   id: string,
   version: number
@@ -688,6 +763,40 @@ const ruleOf = async (
           )})`,
       };
     }
+    case "workflow": {
+      const { parent } = invoker;
+      const parentWorkflow = workflowResourceIdSchema.safeParse(
+        parent.workflowId
+      );
+      if (!parentWorkflow.success) {
+        throw denied();
+      }
+      return {
+        invoker: { type: "workflow", id: parent.runId },
+        originAppVersion: null,
+        triggerVersion: null,
+        principal: parent.principal,
+        actor: { type: "system" },
+        // The parent workflow's own grant to start this one, never its
+        // builders' nor its invoker's; for a person who still has a role
+        // in both; while the parent run is still going.
+        holds: sql`(${workflowRoleSql(parent.principal, id)}
+          AND ${workflowRoleSql(parent.principal, parent.workflowId)}
+          AND EXISTS (SELECT 1 FROM workflow_resource_runs AS parent_run
+            WHERE parent_run.id = ${parent.runId}
+              AND parent_run.workflow_resource_id = ${parent.workflowId}
+              AND parent_run.principal_id = ${parent.principal}
+              AND parent_run.status IN ('starting', 'running'))
+          AND ${grantSql(
+            allowingPermissionSql(
+              { type: "workflow", workflowId: parentWorkflow.data },
+              undefined,
+              object,
+              "start"
+            )
+          )})`,
+      };
+    }
     default: {
       return invoker satisfies never;
     }
@@ -905,6 +1014,10 @@ const restrictedStart = async (
     case "trigger": {
       return false;
     }
+    case "workflow": {
+      // Restricted only ever spreads down a lineage, never lifts.
+      return invoker.parent.restricted;
+    }
     default: {
       return invoker satisfies never;
     }
@@ -1096,6 +1209,15 @@ export const decideWorkflowStart = async (
       restricted,
       buildHash,
       actor: rule.actor,
+      ...(invoker.type === "workflow"
+        ? {
+            lineage: {
+              parentRunId: invoker.parent.runId,
+              rootRunId: invoker.place.rootRunId,
+              depth: invoker.place.depth,
+            },
+          }
+        : {}),
       holds,
       packages,
     },
@@ -1211,6 +1333,9 @@ export const admitWorkflowStart = async (
               principal: authorization.principal,
               restricted: authorization.restricted,
               createdAt: createdAt.getTime(),
+              ...(authorization.lineage === undefined
+                ? {}
+                : { lineage: authorization.lineage }),
             }),
           ]),
       // Only once the receipt is written, read as such: never inferred from

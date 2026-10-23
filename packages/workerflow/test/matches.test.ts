@@ -9,6 +9,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { encode } from "../src/codec.ts";
 import type { EventMatch } from "../src/contracts.ts";
 import type { InstanceEvent } from "../src/instance.ts";
+import { journalSchemaVersion } from "../src/journal.ts";
 import {
   alarmOf,
   ended,
@@ -362,6 +363,9 @@ describe("a wait for a match", () => {
       sql.exec("UPDATE run SET schema = 9");
       sql.exec("ALTER TABLE events DROP COLUMN attributes");
       sql.exec("ALTER TABLE steps DROP COLUMN event_match");
+      sql.exec("DROP INDEX events_sender");
+      sql.exec("ALTER TABLE events DROP COLUMN sender");
+      sql.exec("ALTER TABLE events DROP COLUMN reserved");
     });
 
     const approval = await workflow("approval").get(id);
@@ -376,6 +380,6 @@ describe("a wait for a match", () => {
       output: { approved: { payload: "yes" } },
     });
     const { run } = await journalOf("approval", id);
-    expect(run.schema).toBe(10);
+    expect(run.schema).toBe(journalSchemaVersion);
   });
 });

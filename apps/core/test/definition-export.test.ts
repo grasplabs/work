@@ -25,6 +25,7 @@ import {
   shareWorkflowResource,
 } from "../src/workflow-resources.ts";
 import { sealPackages } from "../src/workflows/sealed-packages.ts";
+import { published as publishedApp } from "./apps.ts";
 import { publish } from "./npm.ts";
 import { appWith, person, seal } from "./sealed-apps.ts";
 import { auditedDuring, outcome, refusal, unique } from "./sign-in.ts";
@@ -729,6 +730,7 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
     const { owner, app } = fixture;
     await seal(fixture);
     await setCurrentVersion(env, owner, app, 1);
+    await publishedApp(app);
     const user = await person("user");
     await env.DB.prepare(
       "INSERT INTO app_members (app_id, member_type, member_id, role, added_by, added_at) VALUES (?, 'person', ?, 'user', ?, ?)"

@@ -80,6 +80,7 @@
     "./landscape": "./src/landscape.ts",
     "./knowledge": "./src/knowledge.ts",
     "./knowledge-signals": "./src/knowledge-signals.ts",
+    "./lab": "./src/lab.ts",
     "./log": "./src/log.ts",
     "./mail-ingress": "./src/mail-ingress.ts",
     "./members": "./src/members.ts",

@@ -337,6 +337,8 @@ const modelRules = (env: ModelsEnv): ModelRules | undefined => {
 export const gatewaySettings = (
   env: ModelsEnv
 ): {
+  /** The deployment's AI Gateway; `undefined` while the config doesn't parse. */
+  gateway: string | undefined;
   models: string[];
   voices: string[];
   roles: Partial<Record<ModelRole, string>>;
@@ -345,6 +347,7 @@ export const gatewaySettings = (
   const config = modelGatewayConfig(env);
   const allowed = config?.models ?? [];
   return {
+    gateway: config?.gateway,
     models: allowed.filter((ref) => parseModelRef(ref) !== undefined),
     voices: allowed.filter((ref) => parseVoiceRef(ref) !== undefined),
     roles: config?.roles ?? {},
@@ -511,6 +514,14 @@ const sessionShape = {
       step: z.string().min(1).max(512),
     })
     .optional(),
+  /**
+   * For a call of an independent workflow's run, whose trigger names no
+   * App's run (`system`): the run lineage its requests count against, by
+   * its root, with every other run of the lineage's (model-budgets.ts,
+   * `scopesFor`), so children never start the lineage's requests afresh.
+   * From the run's row; set by core's host only, never by App code.
+   */
+  lineage: z.strictObject({ rootRunId: z.string().min(1).max(128) }).optional(),
   /**
    * For a workflow run's call: whose person share of the model requests in
    * flight it takes (model-admission.ts), from the run's row: who started
@@ -2469,7 +2480,9 @@ const scopesNowOf = (
     // A run lineage's request limit, as the policy stands for this
     // request: lowered for runs already under way too (model-budgets.ts).
     const lineage =
-      call.trigger.type === "workflow" ? await readPolicy(env) : undefined;
+      call.trigger.type === "workflow" || call.lineage !== undefined
+        ? await readPolicy(env)
+        : undefined;
     // The shares, as the policy stands too; for a call with no lineage,
     // the last read or the platform's own should the policy not be read.
     const policy = lineage ?? (await policyOrPlatform(env));

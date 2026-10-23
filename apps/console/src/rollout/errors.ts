@@ -39,6 +39,12 @@ export const rolloutErrorCodes = [
   "incompatible",
   /** The client's secrets rotated since, which its previous versions don't have. */
   "rotated_since",
+  /**
+   * A shared secret the client's previous versions run was replaced in
+   * Secrets Store since, or what they run isn't on record: going back
+   * could bring a retired provider key back.
+   */
+  "shared_secret_replaced",
   /** Another runner (provisioning, another rollout, a rollback) has the client. */
   "client_busy",
   /** The rollback's run failed or was ended before it finished. */

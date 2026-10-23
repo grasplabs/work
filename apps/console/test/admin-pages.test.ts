@@ -10,7 +10,8 @@ import { deployContext } from "../src/deploy/context.ts";
 import { runDeploy, startDeploy } from "../src/deploy/deploy.ts";
 import { importReleases } from "../src/releases/import.ts";
 import { mockAccess } from "./access.ts";
-import { emptyAdminSnapshot, mockCloudflareApi } from "./cloudflare-api.ts";
+import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
+import { emptyAdminSnapshot } from "./cloudflare-api.ts";
 import { page } from "./pages.ts";
 import { publishRelease } from "./releases.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
@@ -318,6 +319,76 @@ describe("the admin's frame", () => {
       table: false,
       buttons: false,
       firstByHand: false,
+    });
+  });
+
+  it("lists every app the companies asked Grasp for once, most asked first, each opening its build, and every company's request leading to it", async () => {
+    const acme = await liveClient();
+    const globex = await liveClient();
+    const asked = (name: string, ago: number) => ({
+      id: crypto.randomUUID(),
+      name,
+      askedAt: daysAgo(ago),
+    });
+    // Two companies ask for Exact Online, spelled their own way; one asks
+    // for Twinfield first.
+    acme.account.admin = {
+      ...readySnapshot("Acme"),
+      asked: [asked("Twinfield", 9), asked("Exact Online", 4)],
+    };
+    globex.account.admin = {
+      ...readySnapshot("Globex"),
+      asked: [asked("exact  online", 2)],
+    };
+
+    const { status, html } = await page("/admin/integrations");
+    const company = await page(
+      `/admin/organizations/${globex.clientId}/integrations`
+    );
+    const text = html.replaceAll(tags, " ").replaceAll(spaces, " ");
+    const exact = text.indexOf("Exact Online");
+    const twinfield = text.indexOf("Twinfield");
+    const rowText = (key: string) => {
+      const at = html.indexOf(`href="/admin/integrations?app=${key}"`);
+      return at === -1
+        ? ""
+        : html
+            .slice(html.lastIndexOf("<tr", at), html.indexOf("</tr>", at))
+            .replaceAll(tags, " ")
+            .replaceAll(spaces, " ");
+    };
+
+    expect({
+      status: [status, company.status],
+      // Once each, the one two companies asked for first.
+      rows: (html.match(/<tr/gu) ?? []).length - 1,
+      order: exact !== -1 && twinfield > exact,
+      exact: [
+        rowText("exact-online").includes(
+          `Acme ${acme.clientId} and Acme ${globex.clientId}`
+        ),
+        rowText("exact-online").includes("Waiting for Grasp to start it"),
+      ],
+      twinfield: rowText("twinfield").includes(`Acme ${acme.clientId}`),
+      badge: text.includes("2 wait on Grasp"),
+      sidebar: sidebarOf(html).includes("2 apps wait on Grasp"),
+      nothingToBuild: html.includes("Nothing to build yet"),
+      // Its own request, on the company's Integrations, leads to the build.
+      companyAsked: company.html.includes(
+        `href="/admin/integrations?app=exact-online"`
+      ),
+      companyWords: company.html.includes("Asked of Grasp"),
+    }).toStrictEqual({
+      status: [200, 200],
+      rows: 2,
+      order: true,
+      exact: [true, true],
+      twinfield: true,
+      badge: true,
+      sidebar: true,
+      nothingToBuild: false,
+      companyAsked: true,
+      companyWords: true,
     });
   });
 

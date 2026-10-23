@@ -188,6 +188,12 @@ interface SealRequest {
   readonly store?: StoreId;
   /** Who seals it: they must manage `store`, if one is given. */
   readonly by: Acting;
+  /**
+   * Called once its code is inspected and checked, before it is built
+   * and stored: a candidate's move from checking to building
+   * (app-candidates.ts). Not called for a version sealed already.
+   */
+  readonly building?: () => Promise<void>;
 }
 
 /** A release as the host runs it: verified, every hash checked. */
@@ -594,6 +600,43 @@ export const loadRelease = async (
     ));
   return { ...kept, manifestHash: hash };
 };
+
+/**
+ * The sealed manifest of `version` of `app` and its hash, checked against
+ * the hash and the store binding core recorded, with every artifact it
+ * names read back from storage and verified as `loadRelease` verifies
+ * them (`verifiedRelease`), but never from or into the isolate's cache of
+ * verified releases, so a later load still reads storage: what a
+ * candidate's report names (app-candidates.ts). `version.artifact_corrupt`
+ * for an artifact missing or changed.
+ */
+export const readBackRelease = async (
+  env: Env,
+  app: AppId,
+  version: number
+): Promise<{ manifest: ReleaseManifest; hash: string }> => {
+  const checked = await checkedManifest(env, app, version);
+  await verifiedRelease(storedArtifacts(env), checked.manifest);
+  return checked;
+};
+
+/**
+ * A digest of the artifacts a manifest names (path, hash and size of
+ * each): what a candidate's report records of a release read back, and
+ * what activation compares against read back again.
+ */
+export const artifactDigest = async (
+  manifest: ReleaseManifest
+): Promise<string> =>
+  await sha256Hex(
+    canonicalText(
+      manifest.artifacts.map(({ path, sha256, bytes }) => ({
+        path,
+        sha256,
+        bytes,
+      }))
+    )
+  );
 
 /** A draft release as its keeper stores it (sealed-previews.ts). */
 export interface StoredDraft {
@@ -1389,6 +1432,7 @@ export const sealRelease = async (
   const built = await inspectForSeal(env, { app, version }, files);
   const bound = await boundStore(env, request, built.manifest, built.schema);
   const store = bound?.binding ?? null;
+  await request.building?.();
   const { artifacts, releaseManifest, text, hash } = await packaged(
     env,
     { app, version },
