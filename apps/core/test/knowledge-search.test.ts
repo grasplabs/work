@@ -113,6 +113,43 @@ describe("searching Dutch documents", () => {
     expect(found).toStrictEqual(queries);
   });
 
+  it("finds a code by its parts as words, never by a digit's prefix or digits inside a number", async () => {
+    const person = await personOf("user");
+    const { collectionId } = await collectionWith(person, [
+      {
+        path: "incidenten/7.md",
+        text: "# Storing\nINC-7: de server lag eruit.",
+      },
+      {
+        path: "incidenten/71.md",
+        text: "# Storing\nINC-71: het net lag eruit.",
+      },
+      {
+        path: "wijzigingen/118.md",
+        text: "# Wijziging\nCR-2024-118 is goedgekeurd.",
+      },
+      {
+        path: "wijzigingen/2118.md",
+        text: "# Wijziging\nCR-12024-2118 wacht nog.",
+      },
+    ]);
+    const queries = ["INC-7", "INC-71", "CR-2024-118", "2024"];
+    const found: Record<string, string[]> = {};
+    for (const query of queries) {
+      // oxlint-disable-next-line no-await-in-loop -- one search at a time
+      const results = await person.knowledge.search(query, { collectionId });
+      found[query] = places(results);
+    }
+    expect(found).toStrictEqual({
+      // A single character is a whole word: 7 isn't the start of 71.
+      "INC-7": ["incidenten/7.md#Storing"],
+      "INC-71": ["incidenten/71.md#Storing"],
+      // Digits are words, not trigrams: 2024 isn't inside 12024.
+      "CR-2024-118": ["wijzigingen/118.md#Wijziging"],
+      "2024": ["wijzigingen/118.md#Wijziging"],
+    });
+  });
+
   it("returns each hit with its document, section and a snippet of its text", async () => {
     const { person, collectionId, documents } = await setUp();
     const { hits, provenance } = await person.knowledge.search(

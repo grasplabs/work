@@ -1,8 +1,11 @@
 import { z } from "zod";
 
 import type { AdminSnapshot } from "./admin-snapshot.ts";
+import type { OnboardingDirectoryApi } from "./directory.ts";
+import type { OnboardingPlacesApi } from "./document-places.ts";
 import { defineErrorFamily } from "./errors.ts";
 import type { KickoffApi } from "./kickoff.ts";
+import type { OnboardingChoicesApi } from "./onboarding-choices.ts";
 import type { OnboardingDocumentsApi } from "./onboarding-documents.ts";
 import type {
   OrganizationChangeInput,
@@ -179,6 +182,9 @@ export const rosterSchema = z
 export type Roster = z.output<typeof rosterSchema>;
 export type RosterInput = z.input<typeof rosterSchema>;
 
+/** Whose links the admin took to send, by person. */
+export const linksTakenSchema = z.array(idSchema).max(onboardingPeopleMax);
+
 /**
  * When the interviews run: from the start day, for so many days. The leads'
  * links go out at `at` (by default the start of the start day); a team in
@@ -265,6 +271,25 @@ export interface OnboardingView {
   sponsor: string | null;
 }
 
+/**
+ * Someone's own link, as the company's admin takes it to send themselves:
+ * from their own email or chat, or on paper to whoever has no address.
+ * Grasp emails each link on its day as well; the admin's list is for
+ * whoever they would rather reach themselves.
+ */
+export interface LinkToSend {
+  person: string;
+  name: string;
+  /** Their team's name. */
+  team: string;
+  /** Empty when they have none. */
+  email: string;
+  /** The link's path, its secret after the `#`; null while it isn't out. */
+  path: string | null;
+  /** Out, and not taken by the admin since: new since they last took links. */
+  fresh: boolean;
+}
+
 /** How many weeks the programme with Grasp runs. */
 export const programmeWeeks = 8;
 
@@ -290,7 +315,12 @@ export interface Programme {
  * The onboarding, for the client's admin (Grasp staff included); its
  * programme for everyone signed in.
  */
-export interface OnboardingApi extends OnboardingDocumentsApi {
+export interface OnboardingApi
+  extends
+    OnboardingDocumentsApi,
+    OnboardingDirectoryApi,
+    OnboardingChoicesApi,
+    OnboardingPlacesApi {
   /** The programme, for the dashboard; null without a plan. Any role. */
   programme: () => Promise<Programme | null>;
   view: () => Promise<OnboardingView>;
@@ -298,6 +328,10 @@ export interface OnboardingApi extends OnboardingDocumentsApi {
   saveRoster: (roster: RosterInput) => Promise<OnboardingView>;
   /** Sets when the interviews run; links go out by it. */
   savePlan: (plan: PlanInput) => Promise<OnboardingView>;
+  /** Everyone who takes part, with their link once it is out. */
+  links: () => Promise<LinkToSend[]>;
+  /** The admin took these people's links to send: they are new no more. */
+  linksTaken: (people: string[]) => Promise<void>;
 }
 
 /** What only Grasp's staff do in an onboarding, the kickoff included. */

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   choiceHolds,
   choiceOfPlan,
+  choiceShown,
   dayChoices,
   firstChoice,
   momentOf,
@@ -86,6 +87,13 @@ describe("a choice", () => {
     const later = { ...choice, held: ["b"], heldDay: "2026-10-12" };
     expect(choiceOfPlan(planOf(later, 14))).toStrictEqual(later);
     expect(choiceOfPlan({ start: "2026-10-06" })).toStrictEqual(choice);
+  });
+
+  it("holds back no team that no longer takes part", () => {
+    const later = { ...choice, held: ["b", "legal"], heldDay: "2026-10-12" };
+    expect(
+      choiceShown(planOf(later, 14), "2026-10-05", ["a", "b"])
+    ).toStrictEqual({ ...later, held: ["b"] });
   });
 });
 

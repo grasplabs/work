@@ -78,6 +78,8 @@ const inventoryWords: Readonly<Record<InventoryErrorCode, string>> = {
   resource_outside_jurisdiction:
     "Cloudflare reports a resource outside the jurisdiction the inventory records.",
   runner_replaced: "Another attempt took the client over.",
+  evidence_subject_unknown:
+    "Evidence names a release, commit, candidate or runtime profile the console can't check.",
 };
 
 /** Why an operation stopped, by its own code. */
@@ -88,6 +90,8 @@ const operationWords: Readonly<Record<ProvisionOperationErrorCode, string>> = {
     "The release declares nothing of what its code works with.",
   release_incompatible:
     "The release doesn't work with what the client runs, or with itself.",
+  schema_incompatible:
+    "The release's code doesn't run on the client's databases as its migrations left them.",
   operation_release_changed:
     "Its provisioning is with another release: that release stays for the operation.",
   unknown_worker: "The release has a Worker other than core and connect.",
@@ -102,6 +106,14 @@ const operationWords: Readonly<Record<ProvisionOperationErrorCode, string>> = {
   secrets_unobserved: "A script lacks a secret after it was delivered.",
   probe_unqualified:
     "There's no qualified way to probe core in a Workers for Platforms namespace yet, so its hostname stays unpublished.",
+  probe_unanswered:
+    "Core didn't answer the console's signed probe, as a core from a release before the probe doesn't.",
+  probe_identity_mismatch:
+    "Core answered the probe as another client or another version than the one live.",
+  probe_binding_unanswered:
+    "A private binding the release gives core didn't answer the probe.",
+  probe_clock_unarmed:
+    "Core's clock or connect's isn't armed with tasks after the probe.",
   runner_replaced: "Another attempt took the client over.",
   operation_gone: "The operation's record was gone before it was done.",
 };

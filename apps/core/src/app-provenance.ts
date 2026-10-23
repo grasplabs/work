@@ -6,9 +6,9 @@ import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { connectionOwnersOf } from "./connections.ts";
-import { permissions } from "./db/core/schema.ts";
+import { collectionTeams, permissions } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
-import { collectionTeams, collections } from "./db/knowledge/schema.ts";
+import { collections } from "./db/knowledge/schema.ts";
 import { mayRead } from "./knowledge/access.ts";
 import type { CollectionAccess, PersonAccess } from "./knowledge/access.ts";
 
@@ -83,9 +83,8 @@ const accessOf = async (
   env: Env,
   ids: string[]
 ): Promise<AppSources["collections"]> => {
-  const db = drizzle(env.KNOWLEDGE);
-  const [rows, shared] = await db.batch([
-    db
+  const [rows, shared] = await Promise.all([
+    drizzle(env.KNOWLEDGE)
       .select({
         id: collections.id,
         access: collections.access,
@@ -93,7 +92,7 @@ const accessOf = async (
       })
       .from(collections)
       .where(and(inList(collections.id, ids), ne(collections.source, "apps"))),
-    db
+    drizzle(env.DB)
       .select()
       .from(collectionTeams)
       .where(inList(collectionTeams.collectionId, ids)),

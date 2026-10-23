@@ -8,6 +8,7 @@
     "prepare": "vp config --no-agent",
     "dev": "node scripts/dev.ts",
     "seed": "node scripts/seed.ts",
+    "seed:console": "node scripts/seed-console.ts",
     "e2e": "playwright test",
     "e2e:console": "playwright test -c playwright.console.config.ts",
     "smoke:workerd": "node scripts/workerd-smoke.ts",
@@ -29,7 +30,8 @@
     "release:accept": "node scripts/release/accept-release.ts",
     "package:definition": "node scripts/package-definition.ts",
     "parity": "node scripts/parity/run.ts",
-    "discord:commands": "node scripts/discord-commands.ts"
+    "discord:commands": "node scripts/discord-commands.ts",
+    "lab": "node scripts/lab/run.ts"
   },
   "devDependencies": {
     "@commitlint/cli": "catalog:",

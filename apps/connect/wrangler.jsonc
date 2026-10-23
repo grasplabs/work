@@ -28,7 +28,10 @@
   // seals OAuth tokens (src/vault.ts), and each provider's app credentials,
   // MICROSOFT_CLIENT_ID and _SECRET, GOOGLE_CLIENT_ID and _SECRET,
   // MICROSOFT_LANDSCAPE_CLIENT_ID and _SECRET for the application
-  // landscape's own Entra app (src/providers.ts), and APP_OAUTH_CLIENTS, Grasp's OAuth apps at every
+  // landscape's own Entra app, MICROSOFT_DIRECTORY_CLIENT_ID and _SECRET
+  // and GOOGLE_DIRECTORY_CLIENT_ID and _SECRET for the directory's own apps,
+  // MICROSOFT_DOCUMENTS_CLIENT_ID and _SECRET and GOOGLE_DOCUMENTS_CLIENT_ID
+  // and _SECRET for the documents' own apps (src/providers.ts), and APP_OAUTH_CLIENTS, Grasp's OAuth apps at every
   // other app, as JSON by provider. While one is unset, connecting that
   // provider is refused. So is COMPOSIO_API_KEY, Grasp's key for the client's Composio
   // project (src/composio.ts): while it is unset, nothing of Composio is
