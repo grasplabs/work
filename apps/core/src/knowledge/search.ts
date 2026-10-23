@@ -20,10 +20,9 @@ import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { noteProvenance } from "./access.ts";
-import type { Reader, ReadRecord } from "./access.ts";
+import type { Reader } from "./access.ts";
+import type { ReadRecord, Allowed } from "./authorize.ts";
 import { allowedFor } from "./authorize.ts";
-import type { Allowed } from "./authorize.ts";
 import { readableCollection } from "./collections.ts";
 import { portsOf } from "./ports.ts";
 import { nearestCollectionsMax, nearestDetail } from "./usage-tally.ts";
@@ -503,8 +502,7 @@ export const searchSections = async (
     return {
       sections: [],
       coverage,
-      provenance: await noteProvenance(
-        env,
+      provenance: await portsOf(env).onRead(
         reader,
         await searchRecord(env, terms, scope, [], [], recall !== undefined),
         ...scoped
@@ -597,8 +595,7 @@ export const searchSections = async (
     found.length === 0
       ? await nearestCollections(db, allowed, terms)
       : [];
-  const provenance = await noteProvenance(
-    env,
+  const provenance = await portsOf(env).onRead(
     reader,
     await searchRecord(env, terms, scope, found, nearest, recall !== undefined),
     ...scoped,
