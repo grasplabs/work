@@ -58,7 +58,8 @@ export class ChatState extends DurableObject {
         );
         CREATE TABLE IF NOT EXISTS queue (
           seq INTEGER PRIMARY KEY AUTOINCREMENT,
-          json TEXT NOT NULL
+          json TEXT NOT NULL,
+          expires_at INTEGER NOT NULL
         );
         CREATE TABLE IF NOT EXISTS subscribed (
           id INTEGER PRIMARY KEY CHECK (id = 1)
@@ -107,8 +108,9 @@ export class ChatState extends DurableObject {
   }
 
   /** Forgets the key. */
-  delete(): void {
+  async delete(): Promise<void> {
     this.sql.exec("DELETE FROM entry WHERE id = 1");
+    await this.clearIfEmpty();
   }
 
   /**
@@ -181,27 +183,44 @@ export class ChatState extends DurableObject {
   }
 
   /** Lets the lock go, if `token` still holds it. */
-  releaseLock(token: string): void {
+  async releaseLock(token: string): Promise<void> {
     this.sql.exec("DELETE FROM lock WHERE id = 1 AND token = ?", token);
+    await this.clearIfEmpty();
   }
 
   /** Lets the lock go whoever holds it; their release then does nothing. */
-  forceReleaseLock(): void {
+  async forceReleaseLock(): Promise<void> {
     this.sql.exec("DELETE FROM lock WHERE id = 1");
+    await this.clearIfEmpty();
   }
 
-  /** Adds `json` to the thread's queue, keeping the newest `maxSize`; the queue's depth. */
-  enqueue(json: string, maxSize: number): number {
-    this.sql.exec("INSERT INTO queue (json) VALUES (?)", json);
+  /**
+   * Adds `json` to the thread's queue until `expiresAt`, keeping the newest
+   * `maxSize`; the queue's depth.
+   */
+  async enqueue(
+    json: string,
+    maxSize: number,
+    expiresAt: number
+  ): Promise<number> {
+    this.sql.exec(
+      "INSERT INTO queue (json, expires_at) VALUES (?, ?)",
+      json,
+      expiresAt
+    );
     this.sql.exec(
       "DELETE FROM queue WHERE seq NOT IN (SELECT seq FROM queue ORDER BY seq DESC LIMIT ?)",
       Math.max(maxSize, 0)
     );
+    await this.expireAt(expiresAt);
     return this.queueDepth();
   }
 
-  /** Takes the oldest entry off the thread's queue, or null when it's empty. */
-  dequeue(): string | null {
+  /**
+   * Takes the oldest entry off the thread's queue, or null when it's empty.
+   * The SDK drops one past its expiry itself.
+   */
+  async dequeue(): Promise<string | null> {
     const [row] = this.sql
       .exec<{
         seq: number;
@@ -212,6 +231,7 @@ export class ChatState extends DurableObject {
       return null;
     }
     this.sql.exec("DELETE FROM queue WHERE seq = ?", row.seq);
+    await this.clearIfEmpty();
     return row.json;
   }
 
@@ -228,8 +248,9 @@ export class ChatState extends DurableObject {
   }
 
   /** Stops following the thread. */
-  unsubscribe(): void {
+  async unsubscribe(): Promise<void> {
     this.sql.exec("DELETE FROM subscribed WHERE id = 1");
+    await this.clearIfEmpty();
   }
 
   /** Whether the thread is followed. */
@@ -242,7 +263,8 @@ export class ChatState extends DurableObject {
 
   /**
    * Clears what expired, and the whole object once it holds nothing, so
-   * keys and locks that are never read again don't stay stored.
+   * keys, locks and queued messages that are never read again don't stay
+   * stored.
    */
   override async alarm(): Promise<void> {
     const now = Date.now();
@@ -251,9 +273,10 @@ export class ChatState extends DurableObject {
       now
     );
     this.sql.exec("DELETE FROM lock WHERE expires_at <= ?", now);
+    this.sql.exec("DELETE FROM queue WHERE expires_at <= ?", now);
     const next = this.sql
       .exec<{ at: number | null }>(
-        "SELECT min(at) AS at FROM (SELECT expires_at AS at FROM entry UNION ALL SELECT expires_at FROM lock)"
+        "SELECT min(at) AS at FROM (SELECT expires_at AS at FROM entry UNION ALL SELECT expires_at FROM lock UNION ALL SELECT expires_at FROM queue)"
       )
       .one().at;
     if (next !== null) {
@@ -270,6 +293,15 @@ export class ChatState extends DurableObject {
       await this.ctx.storage.deleteAll();
       this.hasTables = false;
     }
+  }
+
+  /**
+   * Wakes the object now, after a removal that may have left it empty, so
+   * a key without a lifetime, a drained queue or a thread no longer
+   * followed doesn't keep the object's storage for good.
+   */
+  private async clearIfEmpty(): Promise<void> {
+    await this.expireAt(Date.now());
   }
 
   /** Wakes the object when something expires, if nothing wakes it sooner. */
@@ -351,7 +383,11 @@ export const durableObjectState = (
       await thread(threadId).forceReleaseLock();
     },
     enqueue: async (threadId, entry: QueueEntry, maxSize) =>
-      await thread(threadId).enqueue(JSON.stringify(entry), maxSize),
+      await thread(threadId).enqueue(
+        JSON.stringify(entry),
+        maxSize,
+        entry.expiresAt
+      ),
     dequeue: async (threadId): Promise<QueueEntry | null> => {
       const json = await thread(threadId).dequeue();
       if (json === null) {

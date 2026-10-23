@@ -43,6 +43,24 @@ const queued = (thread: string, text: string): QueueEntry => ({
   }),
 });
 
+/**
+ * What an object still stores once its alarm has run (it may have already):
+ * its keys and its tables.
+ */
+const storedIn = async (name: string) => {
+  const object = env.CHAT_STATE.getByName(name);
+  await runDurableObjectAlarm(object);
+  return await runInDurableObject(object, async (_instance, ctx) => {
+    const keys = await ctx.storage.list();
+    const tables = ctx.storage.sql
+      .exec<{ n: number }>(
+        "SELECT count(*) AS n FROM sqlite_master WHERE type = 'table' AND name NOT LIKE '_cf_%' ESCAPE '\\'"
+      )
+      .one().n;
+    return keys.size + tables;
+  });
+};
+
 describe("Chat SDK's state on Durable Objects", () => {
   it("gives a thread's lock to one holder at a time, and lets only its token extend or release it", async () => {
     const thread = fresh("thread");
@@ -203,26 +221,36 @@ describe("Chat SDK's state on Durable Objects", () => {
     }).toStrictEqual({ followed: true, left: false, never: false });
   });
 
+  it("clears an object from storage once what it held is removed or its queued messages expire", async () => {
+    const key = fresh("key");
+    await state.set(key, "for good");
+    await state.delete(key);
+    const followed = fresh("thread");
+    await state.subscribe(followed);
+    await state.unsubscribe(followed);
+    const abandoned = fresh("thread");
+    await state.enqueue(
+      abandoned,
+      { ...queued(abandoned, "never taken"), expiresAt: Date.now() + 20 },
+      5
+    );
+    await pause(40);
+
+    expect({
+      deleted: await storedIn(`key:${key}`),
+      unsubscribed: await storedIn(`thread:${followed}`),
+      abandoned: await storedIn(`thread:${abandoned}`),
+    }).toStrictEqual({ deleted: 0, unsubscribed: 0, abandoned: 0 });
+  });
+
   it("clears an object from storage once all it held expired", async () => {
     const key = fresh("key");
     await state.set(key, "brief", 20);
-    const object = env.CHAT_STATE.getByName(`key:${key}`);
     await pause(40);
-    // Its alarm may have run already; if not, it runs now.
-    await runDurableObjectAlarm(object);
-    const stored = await runInDurableObject(object, async (_instance, ctx) => {
-      const keys = await ctx.storage.list();
-      const tables = ctx.storage.sql
-        .exec<{ n: number }>(
-          "SELECT count(*) AS n FROM sqlite_master WHERE type = 'table' AND name NOT LIKE '_cf_%' ESCAPE '\\'"
-        )
-        .one().n;
-      return keys.size + tables;
-    });
 
-    expect({ stored, read: await state.get(key) }).toStrictEqual({
-      stored: 0,
-      read: null,
-    });
+    expect({
+      stored: await storedIn(`key:${key}`),
+      read: await state.get(key),
+    }).toStrictEqual({ stored: 0, read: null });
   });
 });
