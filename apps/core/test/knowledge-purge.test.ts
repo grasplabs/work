@@ -1706,66 +1706,71 @@ describe("a purge of content", setUpTime, () => {
     });
   });
 
-  it("removes a term wherever the search index keeps it as a token of its own, so no search finds it after", async () => {
-    const admin = await personOf("admin");
-    const handbook = await admin.api.knowledge.createCollection({
-      name: "Handbook",
-      access: "everyone",
-    });
-    // The index's tokenizer ends a token at each of these, where a name is
-    // still the name: an underscore, a dot, an at sign, a soft hyphen, a
-    // zero-width joiner, a spacing vowel sign, a combining grapheme joiner,
-    // a variation selector, an Arabic tanween, a Devanagari vowel sign
-    // that is a combining mark. It drops a combining acute from the token,
-    // so the name with one after it is the name: both go. A private-use
-    // character it keeps in the token, which the name goes from too.
-    const name = `Visser${unique()}`;
-    const [
-      softHyphen,
-      joiner,
-      visarga,
-      graphemeJoiner,
-      variation,
-      tanween,
-      vowelSign,
-      acute,
-      privateUse,
-    ] = [
-      0xad, 0x20_0d, 0x9_03, 0x3_4f, 0xfe_0f, 0x6_4b, 0x9_41, 0x3_01, 0xe0_00,
-    ].map((codePoint) => String.fromCodePoint(codePoint));
-    const marks = [graphemeJoiner, variation, tanween, vowelSign];
-    const document = await saveOver(
-      admin,
-      handbook.id,
-      "team.md",
-      `# Team\n${name}_jan, Tom.${name}, ${name.toLowerCase()}@acme.test, ${name}${softHyphen}jan, ${name}${joiner}jan and ${name}${visarga} left.\n${marks.map((mark) => `${name}${mark}jan`).join(", ")}, ${name}${acute} and ${name}${privateUse} left.`
-    );
-    const heldBefore = await holding(name);
-    const { plan, result } = await purged(admin, {
-      type: "content",
-      documentIds: [document.id],
-      terms: [name],
-      reason: "offboarding",
-    });
-    const read = await admin.api.knowledge.getDocument(document.id);
-    const found = await admin.api.knowledge.search(name);
-    expect({
-      heldBefore: heldBefore.includes("search_words_data.block"),
-      occurrences: plan.occurrences,
-      text: read.version.text,
-      held: await holding(name),
-      found: found.hits.length,
-      stillFound: result.stillFound,
-    }).toStrictEqual({
-      heldBefore: true,
-      // Twelve in the version saved.
-      occurrences: 12,
-      text: `# Team\n(removed)_jan, Tom.(removed), (removed)@acme.test, (removed)${softHyphen}jan, (removed)${joiner}jan and (removed)${visarga} left.\n${marks.map((mark) => `(removed)${mark}jan`).join(", ")}, (removed) and (removed)${privateUse} left.`,
-      held: [],
-      found: 0,
-      stillFound: 0,
-    });
-  });
+  // Ending in "e", the acute after it merges with it into one character
+  // ("é"), which the index splits apart again; ending in "x", it can't.
+  it.each(["e", "x"])(
+    "removes a term wherever the search index keeps it as a token of its own, so no search finds it after, for a name ending in %s",
+    async (ending) => {
+      const admin = await personOf("admin");
+      const handbook = await admin.api.knowledge.createCollection({
+        name: "Handbook",
+        access: "everyone",
+      });
+      // The index's tokenizer ends a token at each of these, where a name is
+      // still the name: an underscore, a dot, an at sign, a soft hyphen, a
+      // zero-width joiner, a spacing vowel sign, a combining grapheme joiner,
+      // a variation selector, an Arabic tanween, a Devanagari vowel sign
+      // that is a combining mark. It drops a combining acute from the token,
+      // so the name with one after it is the name: both go. A private-use
+      // character it keeps in the token, which the name goes from too.
+      const name = `Visser${unique()}${ending}`;
+      const [
+        softHyphen,
+        joiner,
+        visarga,
+        graphemeJoiner,
+        variation,
+        tanween,
+        vowelSign,
+        acute,
+        privateUse,
+      ] = [
+        0xad, 0x20_0d, 0x9_03, 0x3_4f, 0xfe_0f, 0x6_4b, 0x9_41, 0x3_01, 0xe0_00,
+      ].map((codePoint) => String.fromCodePoint(codePoint));
+      const marks = [graphemeJoiner, variation, tanween, vowelSign];
+      const document = await saveOver(
+        admin,
+        handbook.id,
+        "team.md",
+        `# Team\n${name}_jan, Tom.${name}, ${name.toLowerCase()}@acme.test, ${name}${softHyphen}jan, ${name}${joiner}jan and ${name}${visarga} left.\n${marks.map((mark) => `${name}${mark}jan`).join(", ")}, ${name}${acute} and ${name}${privateUse} left.`
+      );
+      const heldBefore = await holding(name);
+      const { plan, result } = await purged(admin, {
+        type: "content",
+        documentIds: [document.id],
+        terms: [name],
+        reason: "offboarding",
+      });
+      const read = await admin.api.knowledge.getDocument(document.id);
+      const found = await admin.api.knowledge.search(name);
+      expect({
+        heldBefore: heldBefore.includes("search_words_data.block"),
+        occurrences: plan.occurrences,
+        text: read.version.text,
+        held: await holding(name),
+        found: found.hits.length,
+        stillFound: result.stillFound,
+      }).toStrictEqual({
+        heldBefore: true,
+        // Twelve in the version saved.
+        occurrences: 12,
+        text: `# Team\n(removed)_jan, Tom.(removed), (removed)@acme.test, (removed)${softHyphen}jan, (removed)${joiner}jan and (removed)${visarga} left.\n${marks.map((mark) => `(removed)${mark}jan`).join(", ")}, (removed) and (removed)${privateUse} left.`,
+        held: [],
+        found: 0,
+        stillFound: 0,
+      });
+    }
+  );
 
   it("removes a name with a hyphen in it", async () => {
     const admin = await personOf("admin");
@@ -1913,9 +1918,10 @@ describe("a purge of content", setUpTime, () => {
     });
     // "José" twice: once with its accent as one character, which only a
     // Unicode-aware boundary keeps from ending "Jos", and once as an e and
-    // a combining acute, the same text composed (NFC), so it stays with
-    // the other: neither is the word "Jose". A soft hyphen and a
-    // zero-width non-joiner end a word, as they end the index's token.
+    // a combining acute. The index drops the accent from both, so both are
+    // "Jose" to it, and go with that term. "Renée" is a longer word than
+    // "René" and stays. A soft hyphen and a zero-width non-joiner end a
+    // word, as they end the index's token.
     const decomposed = `Jose${String.fromCodePoint(0x3_01)}`;
     const softHyphen = String.fromCodePoint(0xad);
     const nonJoiner = String.fromCodePoint(0x20_0c);
@@ -1923,7 +1929,7 @@ describe("a purge of content", setUpTime, () => {
       admin,
       handbook.id,
       "team.md",
-      `# Team\nRené, rené and RENÉ left; Renée stays.\nJos, Jose and ${decomposed} left; José stays.\nTom left; Tom${softHyphen}my and Tom${nonJoiner}s go.`
+      `# Team\nRené, rené and RENÉ left; Renée stays.\nJos, Jose, ${decomposed} and José left.\nTom left; Tom${softHyphen}my and Tom${nonJoiner}s go.`
     );
     await purged(admin, {
       type: "content",
@@ -1933,7 +1939,7 @@ describe("a purge of content", setUpTime, () => {
     });
     const read = await admin.api.knowledge.getDocument(document.id);
     expect(read.version.text).toBe(
-      `# Team\n(removed), (removed) and (removed) left; Renée stays.\n(removed), (removed) and José left; José stays.\n(removed) left; (removed)${softHyphen}my and (removed)${nonJoiner}s go.`
+      `# Team\n(removed), (removed) and (removed) left; Renée stays.\n(removed), (removed), (removed) and (removed) left.\n(removed) left; (removed)${softHyphen}my and (removed)${nonJoiner}s go.`
     );
   });
 

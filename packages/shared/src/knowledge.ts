@@ -745,9 +745,6 @@ const overlapsMarker = (term: string): boolean => {
 const purgeTermSchema = z
   .string()
   .trim()
-  // Composed, as text usually is: a term typed with a combining accent
-  // ("René" as "e" and U+0301) is the same word as one typed composed.
-  .normalize("NFC")
   .min(2)
   .max(purgeTermMaxLength)
   .refine((term) => !overlapsMarker(term), {

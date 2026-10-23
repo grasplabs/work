@@ -104,8 +104,8 @@ import { cleanUpOriginals, forgetUploads } from "./uploads.ts";
 // A content purge reaches the Brain's memory records too, everyone's,
 // whatever documents it names (memories.ts, `eraseStatements`): each
 // statement holding a term is redacted as text is, and deleted when no
-// word is left of it but the markers (`erasedStatement`), compared
-// composed (NFC). Its plan counts them (`memories`), each change is
+// word is left of it but the markers (`erasedStatement`), matched
+// decomposed (NFD) as text is. Its plan counts them (`memories`), each change is
 // audited, and its check counts one still holding a term with the
 // documents a term still finds (`stillFound`): remembered after the purge
 // read it, or a form it leaves on purpose, as the index would find it
@@ -161,9 +161,9 @@ import { cleanUpOriginals, forgetUploads } from "./uploads.ts";
 // it again), collection names and
 // descriptions, other documents that quote the text, a term split by
 // Markdown or a line break, a term spelled otherwise (a variant, an
-// accent left out: "Rene" for "René", which the index folds to the same
-// token; one typed with a combining accent is the same word, as text and
-// terms are compared composed, NFC), a term joined to more of a word
+// accent left out of the text: "Rene" for the term "René", which the
+// index folds to the same token; a term without one removes the accented
+// form, as text and terms are matched decomposed, NFD), a term joined to more of a word
 // ("Toms", "tomVisser", "automated": not removed, only counted; the words
 // index keeps those as other tokens, the trigram index finds the term
 // inside them), an address or a domain inside a longer one
@@ -602,8 +602,23 @@ const anyOf = (alternatives: string[]): RegExp =>
  * preparing a purge, finds every occurrence anywhere, to count those the
  * purge leaves (inside a longer word or address, which the trigram index
  * still finds). Longest first, so a term inside a longer one doesn't
- * leave the rest of the longer one behind.
+ * leave the rest of the longer one behind. Of the terms decomposed (NFD),
+ * as the texts are matched (`decomposed`).
  */
+/**
+ * A term or a text decomposed (NFD), as the search index's tokenizer reads
+ * it (`remove_diacritics 2`): an accent is a combining character after its
+ * letter, which the pattern of each character of a term skips
+ * (`literal`), as the index drops it from the token. So "Visser" with an
+ * accent after its last letter is the name, whether the accent was typed
+ * apart or merged with the letter ("é"), and a term without an accent
+ * ("Jose") removes the accented form ("José") too, as the index finds
+ * both by it: erasing more, the safe side. A term with an accent
+ * ("René") keeps it: "Rene" is another word to it, which the index still
+ * finds by the term (`stillFound`).
+ */
+const decomposed = (text: string): string => text.normalize("NFD");
+
 interface Matcher {
   anywhere: RegExp;
   remove: RegExp;
@@ -614,9 +629,9 @@ const matcherOf = (
   terms: string[],
   { countLeft }: { countLeft: boolean }
 ): Matcher => {
-  const longestFirst = terms.toSorted(
-    (one, other) => other.length - one.length
-  );
+  const longestFirst = terms
+    .map(decomposed)
+    .toSorted((one, other) => other.length - one.length);
   return {
     // Not global: `test` would carry `lastIndex` from one text to the next.
     anywhere: new RegExp(longestFirst.map(literal).join("|"), "iu"),
@@ -633,21 +648,20 @@ const matcherOf = (
  * a term can't overlap the marker (`purgeTermSchema`), so each pass
  * replaces text outside the markers, or markers with fewer of them.
  *
- * Compared composed (NFC), as the terms are (`purgeTermSchema`), so a
- * term typed with a combining accent ("René" as "e" and U+0301) is the
- * same word, however the text or the term was typed. Text holding a term
- * comes back composed; text holding none, as it was, byte for byte.
+ * Matched decomposed (`decomposed`), as the terms are. Text holding a
+ * term comes back composed (NFC); text holding none, as it was, byte for
+ * byte. `visit` sees the decomposed text.
  */
 const without = (
   text: string,
   matcher: Matcher,
   visit?: (current: string, index: number, length: number) => void
 ): string => {
-  const composed = text.normalize("NFC");
-  if (!matcher.anywhere.test(composed)) {
+  const apart = decomposed(text);
+  if (!matcher.anywhere.test(apart)) {
     return text;
   }
-  let current = composed;
+  let current = apart;
   for (;;) {
     let next = "";
     let end = 0;
@@ -658,7 +672,7 @@ const without = (
     }
     next += current.slice(end);
     if (next === current) {
-      return current === composed ? text : current;
+      return current === apart ? text : current.normalize("NFC");
     }
     current = next;
   }
@@ -676,8 +690,9 @@ const leftIn = (texts: (string | null)[], matcher: Matcher): number => {
   }
   let total = 0;
   for (const text of texts) {
-    if (text !== null && anywhere.test(text)) {
-      total += [...text.matchAll(left)].length;
+    const apart = text === null ? "" : decomposed(text);
+    if (anywhere.test(apart)) {
+      total += [...apart.matchAll(left)].length;
     }
   }
   return total;
@@ -865,7 +880,7 @@ const besideInIndexed = (
       "name" in frontmatter ? frontmatter.name : undefined,
     ];
   } catch {
-    return matcher.anywhere.test(text);
+    return matcher.anywhere.test(decomposed(text));
   }
   return [text, ...decoded].some(
     (value) => typeof value === "string" && besideLongerToken(value, matcher)
