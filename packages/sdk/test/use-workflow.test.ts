@@ -1541,3 +1541,113 @@ describe("losing access", () => {
     expect(store.error("run-1")?.code).toBe("workflow.unavailable");
   });
 });
+
+const style = workflows.summarizeNote.events.styleChosen;
+
+/** The host's answer to a send: the ID it minted; any other command refused. */
+const sent = (command: Command): Reply =>
+  command.command === "send"
+    ? { value: { eventId: `evt_${command.idempotencyKey}` } }
+    : { failed: "workflow.control_refused" };
+
+describe("sending the selected run an event", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("refuses to send to a run that isn't shown yet", async () => {
+    const page = host();
+    const idle = mount(page, null);
+    const loading = mount(page, "run-1");
+    const codes = [
+      await codeOf(idle.store.send(style, { style: "short" })),
+      await codeOf(loading.store.send(style, { style: "short" })),
+    ];
+    expect(codes).toStrictEqual([
+      "workflow.not_attached",
+      "workflow.not_attached",
+    ]);
+    expect(page.commands).toStrictEqual([]);
+  });
+
+  it("resolves once the host committed it, recovers a lost answer under the same key, and sends each call as its own event", async () => {
+    const page = host();
+    let attempts = 0;
+    page.answer((command) => {
+      attempts += 1;
+      return attempts === 1 ? "lost" : sent(command);
+    });
+    const hook = await showing(page);
+    const first = hook.store.send(style, { style: "short" });
+    await vi.advanceTimersByTimeAsync(1000);
+    await first;
+    await hook.store.send(style, { style: "short" });
+    const [lost, recovered, second] = page.commands;
+    expect({
+      commands: page.commands.map(({ command, runId }) => ({ command, runId })),
+      recoveredSameKey: recovered?.idempotencyKey === lost?.idempotencyKey,
+      secondFresh: second?.idempotencyKey !== lost?.idempotencyKey,
+      view: hook.view().pendingControl,
+    }).toStrictEqual({
+      commands: Array.from({ length: 3 }, () => ({
+        command: "send",
+        runId: "run-1",
+      })),
+      recoveredSameKey: true,
+      secondFresh: true,
+      view: null,
+    });
+  });
+
+  it("sends nothing for another workflow's event, one made up, or data its event doesn't take", async () => {
+    const page = host();
+    page.answer(sent);
+    const hook = await showing(page);
+    const codes = {
+      otherWorkflow: await codeOf(
+        hook.store.send(workflows.archiveNotes.events.confirmed, {
+          confirmed: true,
+        })
+      ),
+      madeUp: await codeOf(
+        hook.store.send(
+          { ...style, fingerprint: "0".repeat(64) },
+          {
+            style: "short",
+          }
+        )
+      ),
+      byName: await codeOf(hook.store.send("styleChosen", { style: "short" })),
+      extraField: await codeOf(
+        hook.store.send(style, { style: "short", source: "urn:forged" })
+      ),
+      wrongValue: await codeOf(hook.store.send(style, { style: "medium" })),
+    };
+    expect({ codes, commands: page.commands }).toStrictEqual({
+      codes: {
+        otherWorkflow: "contract.invalid_request",
+        madeUp: "contract.invalid_request",
+        byName: "contract.invalid_request",
+        extraField: "contract.invalid_args",
+        wrongValue: "contract.invalid_args",
+      },
+      commands: [],
+    });
+  });
+
+  it("keeps sending to the run it was called for once the selection moves on", async () => {
+    const page = host();
+    const answered = Promise.withResolvers<Reply>();
+    page.answer(async () => await answered.promise);
+    const hook = await showing(page);
+    const sending = hook.store.send(style, { style: "long" });
+    await flush();
+    hook.select("run-2");
+    answered.resolve({ value: { eventId: "evt_1" } });
+    await sending;
+    expect(page.commands.map(({ runId }) => runId)).toStrictEqual(["run-1"]);
+  });
+});

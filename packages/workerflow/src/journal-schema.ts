@@ -14,8 +14,10 @@
  *   `steps.event_match`, what a `waitForMatch` takes (identity.ts).
  * - 11: `events.reserved`, an event the run's host owed it, which the
  *   inbox's limits on senders don't count (run.ts, `sendEvent`).
+ * - 12: `events.sender`, who sent an event, for each sender's share of
+ *   the inbox (run.ts, `sendEvent`).
  */
-export const journalSchemaVersion = 11;
+export const journalSchemaVersion = 12;
 
 /**
  * The oldest journal this engine reads, upgrading it as it first reads

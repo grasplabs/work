@@ -376,6 +376,31 @@ describe("the kickoff", { timeout: 60_000 }, () => {
     });
   });
 
+  it.each([
+    { given: "Anna", named: "Anna" },
+    { given: "anna", named: "Anna" },
+    // Not in the transcript: made up, never shown to the admin.
+    { given: "Pieter", named: null },
+    // Not a first name.
+    { given: "Anna (COO)", named: null },
+    { given: "", named: null },
+  ])(
+    "names the sponsor to the company's admin only as the transcript names them ($given)",
+    async ({ given, named }) => {
+      const staff = await asStaff();
+      const { api: admin } = await signedInApi(idp, "admin");
+      const { result: view } = await answering(
+        [answer({ ...reading, sponsor: given })],
+        async () => await staff.onboardingStaff.saveKickoff(pasted(dutch))
+      );
+      const { sponsor } = await admin.onboarding.view();
+      expect({ staff: view.reading?.sponsor ?? null, sponsor }).toStrictEqual({
+        staff: named,
+        sponsor: named,
+      });
+    }
+  );
+
   it("keeps nothing when the company ends Grasp's access while it is read", async () => {
     const before = await onboardingStore(env).kickoff();
     // A session that is staff's when the call comes in, and no longer once

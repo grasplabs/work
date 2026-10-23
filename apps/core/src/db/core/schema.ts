@@ -3,7 +3,10 @@ import type { AgentProposer, AppExports } from "@grasp-os/shared/apps";
 import { auditRejectReasons } from "@grasp-os/shared/audit";
 import type { DependencySummary } from "@grasp-os/shared/dependencies";
 import type { Json } from "@grasp-os/shared/json";
-import type { DeclaredPermission } from "@grasp-os/shared/permissions";
+import type {
+  BlueprintWorkflow,
+  DeclaredPermission,
+} from "@grasp-os/shared/permissions";
 import { artifactDecisions } from "@grasp-os/shared/screen-trust";
 import { signalKinds } from "@grasp-os/shared/signals";
 import type {
@@ -568,6 +571,15 @@ export const blueprints = sqliteTable(
      * each waiting for an admin there.
      */
     permissions: text({ mode: "json" }).$type<DeclaredPermission[]>().notNull(),
+    /**
+     * The independent workflows each App created from it gets (JSON,
+     * `BlueprintWorkflow[]`): a built-in's, from the release; a marked
+     * version ships none.
+     */
+    workflows: text({ mode: "json" })
+      .$type<BlueprintWorkflow[]>()
+      .notNull()
+      .default([]),
     /** Who marked it; null for a built-in. */
     markedBy: text("marked_by"),
     /** When it was marked, or last installed changed. */

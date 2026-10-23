@@ -1,4 +1,9 @@
-import { isAppLayout, workflowIdOf } from "@grasp-os/compiler";
+import {
+  isAppLayout,
+  isAppTestSuite,
+  workflowIdOf,
+  workflowPaths,
+} from "@grasp-os/compiler";
 import { appLimits } from "@grasp-os/shared/app-limits";
 import { versionErrors } from "@grasp-os/shared/app-releases";
 import {
@@ -66,7 +71,11 @@ import { buildOnSave } from "./save-builds.ts";
 import { recordVersionBuilds } from "./screen-builds.ts";
 import { requireStoreSchemaActive } from "./store-backfill.ts";
 import { liveStoreSql } from "./store-deletion.ts";
-import { requireWorkflowTestsPass, workflowCallsIn } from "./workflows/code.ts";
+import {
+  requireWorkflowTestsPass,
+  workflowCallsIn,
+  workflowIdsIn,
+} from "./workflows/code.ts";
 import {
   registerTriggers,
   registrationHolds,
@@ -1204,8 +1213,9 @@ export const verifyVersion = async (
   appId: AppId,
   number: number,
   files: Record<string, string>
-): Promise<void> => {
-  if (isAppLayout(files)) {
+): Promise<VerifiedObservations> => {
+  const layout = isAppLayout(files);
+  if (layout) {
     await requireRunnableRelease(env, appId, number);
     // Its migrations passed on their fixtures as it was sealed, even where
     // the store had nothing to transform; asked before its store, whose
@@ -1231,6 +1241,46 @@ export const verifyVersion = async (
   const { requireDeclaredModels } = await import("./app-activation.ts");
   await requireDeclaredModels(env, appId, number, files);
   await requireWorkflowTestsPass(env, appId, number, files);
+  // What the gates selected to run, each with no failure, or they had
+  // refused. The runners' own lists of what they ran aren't returned.
+  return {
+    appTests: layout
+      ? Object.keys(files).filter(isAppTestSuite).toSorted()
+      : [],
+    workflowTests: workflowIdsIn(files)
+      .filter((id) => Object.hasOwn(files, workflowPaths(id).tests))
+      .toSorted(),
+  };
+};
+
+/**
+ * What `verifyVersion` selected to run, all passing: the App test suites
+ * by path and the workflows with tests by ID, as the version's files list
+ * them. Not a record of what each runner executed.
+ */
+export interface VerifiedObservations {
+  readonly appTests: readonly string[];
+  readonly workflowTests: readonly string[];
+}
+
+/**
+ * Whether `version` of `app` could run if made current now: a version of
+ * spec 8's layout only with a release that is sealed, not revoked, and
+ * on a store that lives (`runnableReleaseSql`, as making it current asks);
+ * one of the earlier layout, which runs from its files, always.
+ */
+export const releaseRunnable = async (
+  env: Env,
+  app: AppId,
+  version: number
+): Promise<boolean> => {
+  if (!isAppLayout(await versionFiles(env, app, version))) {
+    return true;
+  }
+  const row = await drizzle(env.DB).get<{ runnable: number }>(
+    sql`SELECT (${runnableReleaseSql(app, version)}) AS runnable`
+  );
+  return row?.runnable === 1;
 };
 
 /**
@@ -1242,6 +1292,15 @@ export interface VerifiedCandidate {
   readonly id: string;
   readonly reportHash: string;
   readonly basedOn: number | null;
+  /**
+   * The release its report names, for a version of spec 8's layout: its
+   * manifest's hash and the digest of the artifacts read back
+   * (`artifactDigest`). Read back again as it is made current.
+   */
+  readonly release: {
+    readonly manifestHash: string;
+    readonly artifactDigest: string;
+  } | null;
 }
 
 /**
@@ -1286,6 +1345,47 @@ const requireCandidateVerified = async (
   }
   if (row?.state !== "verified" || row.reportHash !== candidate.reportHash) {
     throw appErrors.create("app.conflict");
+  }
+};
+
+/**
+ * Holds while the sealed manifest stored for `version` of `app` is the
+ * one the candidate's report names, as the statement runs.
+ */
+const releaseAsReportedSql = (
+  app: AppId,
+  version: number,
+  candidate: VerifiedCandidate
+) =>
+  candidate.release === null
+    ? sql`0`
+    : sql`EXISTS (SELECT 1 FROM sdk_release_manifests
+    WHERE app_id = ${app} AND version = ${version}
+      AND manifest_hash = ${candidate.release.manifestHash})`;
+
+/**
+ * Refuses `candidate` unless the release of `version` of `app`, read back
+ * from storage now, is the one its report names: the same manifest and
+ * the same artifacts (`app.candidate_release_changed`), or an artifact
+ * missing or changed (`version.artifact_corrupt`).
+ */
+const requireReleaseAsReported = async (
+  env: Env,
+  app: AppId,
+  version: number,
+  candidate: VerifiedCandidate
+): Promise<void> => {
+  if (candidate.release === null) {
+    throw appErrors.create("app.candidate_release_changed");
+  }
+  // Imported here, not at the top: releases reach back into this module.
+  const { artifactDigest, readBackRelease } = await import("./app-releases.ts");
+  const { manifest, hash } = await readBackRelease(env, app, version);
+  if (
+    hash !== candidate.release.manifestHash ||
+    (await artifactDigest(manifest)) !== candidate.release.artifactDigest
+  ) {
+    throw appErrors.create("app.candidate_release_changed");
   }
 };
 
@@ -1380,6 +1480,11 @@ export const makeCurrent = async (
     // asked here, before the store switches, so a candidate refused below
     // never leaves the version current locked out of its store.
     await requireCandidateVerified(env, candidate);
+    // Its release read back from storage once more, bypassing the cache of
+    // verified releases (`readBackRelease`): the report was written when
+    // the candidate was verified, and a verified candidate never expires,
+    // so an artifact changed in storage since must refuse it here.
+    await requireReleaseAsReported(env, appId, number, candidate);
     if (
       await requireStoreSchemaActive(env, appId, number, { activate: true })
     ) {
@@ -1405,6 +1510,9 @@ export const makeCurrent = async (
               sql`${apps.currentVersion} IS ${previous}`,
               registrationHolds(appId, triggers),
               sealedLayout ? runnableReleaseSql(appId, number) : undefined,
+              sealedLayout
+                ? releaseAsReportedSql(appId, number, candidate)
+                : undefined,
               sampleGate,
               verifiedCandidateSql(appId, number, candidate)
             )
