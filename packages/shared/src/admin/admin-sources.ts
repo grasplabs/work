@@ -31,6 +31,7 @@ export type SourceReads =
   | "signatures"
   | "companies"
   | "people"
+  | "deals"
   | "calls"
   | "customers"
   | "subscriptions"
@@ -102,13 +103,16 @@ export const ADMIN_SOURCES: readonly AdminSource[] = [
     tools: [],
   },
   {
-    // The CRM: every call with a company is there, with who was in it.
+    // The CRM: every call with a company is there, with who was in it, and
+    // the deals Grasp won, to start an organization from. Read through
+    // Attio's REST API with one read-only key, as Stripe is, not its MCP
+    // server, whose OAuth grant would be a person's to renew.
     id: "attio",
     ours: false,
     state: "planned",
     order: 3,
     direction: "in",
-    reads: ["companies", "people", "calls"],
+    reads: ["companies", "people", "deals", "calls"],
     feeds: ["details", "portfolio", "log"],
     tools: [],
   },

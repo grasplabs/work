@@ -136,11 +136,13 @@ import {
 import { readableSources, withheldSourceDetail } from "./history-access.ts";
 import { readAsDelegate } from "./knowledge/binding.ts";
 import { forContext } from "./knowledge/memory.ts";
+import { hasBrainGrant } from "./knowledge/recall-store.ts";
 import { catalog, noteListedSkills } from "./knowledge/tools.ts";
 import { gatewaySettings, models } from "./models.ts";
 import { functionProblem, PreviewReports } from "./preview-reports.ts";
 import type { Reports } from "./preview-reports.ts";
 import { PreviewUpdates } from "./preview-updates.ts";
+import { quietLoader } from "./quiet-loader.ts";
 import type { WorkContext } from "./restricted.ts";
 import { sessionHost } from "./sandboxed.ts";
 import { SealedPreviews } from "./sealed-previews.ts";
@@ -1119,9 +1121,12 @@ export class Workspace extends DurableObject<Env> {
             this.codeRunOutput(chat.id, runId, callId, line);
           },
         },
-        loader: this.env.LOADER,
+        loader: quietLoader(this.env.LOADER),
         sandbox: () => sessionHost(this.env),
         codeTimeoutMs: codeTimeoutMs(this.env),
+        // The Brain's recall before the first request, under the agent's
+        // own grant, as its code would recall (GRA-1029).
+        recallFirst: await hasBrainGrant(this.env, authority),
         signal: cancel.signal,
         events: () => live.events.splice(0),
         withheld: async () => await this.#withheldRuns(scope),

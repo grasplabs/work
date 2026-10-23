@@ -387,7 +387,7 @@ const boundSql = (id: StoreId): SQL =>
  * statement that requires it live, bound to no sealed release, and not
  * closing for another deletion (unless that mark lapsed,
  * `storeClosingMs`): the mark a seal's binding (app-releases.ts) and
- * `setCurrentVersion` honour, so of this deletion and a seal that binds
+ * `makeCurrent` honour, so of this deletion and a seal that binds
  * the store, exactly one wins. True when this call holds the mark: only
  * then may it close the store.
  */

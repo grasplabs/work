@@ -273,6 +273,13 @@ export interface EventCommand {
    * `eventAttributesOf`); none when missing or null.
    */
   attributes?: Readonly<Record<string, string>> | null;
+  /**
+   * Whether it is past the inbox's count and byte limits: only for what
+   * the run's own host owes it (a child's end), which the host bounds
+   * itself, so no other sender can crowd it out, however long the run has
+   * taken events. Its payload is held to its limit all the same.
+   */
+  reserved?: boolean;
 }
 
 /**
@@ -642,9 +649,9 @@ const forgetIn = (
   );
   sql.exec(`DELETE FROM steps WHERE ${forget.clause}`, ...forget.values);
   // Bytes as the inbox counts them: the payload's and the attributes'
-  // UTF-8 encodings.
+  // UTF-8 encodings, of the events senders sent (not the reserved ones).
   sql.exec(
-    "UPDATE run SET event_count = (SELECT COUNT(*) FROM events), event_bytes = (SELECT COALESCE(SUM(LENGTH(CAST(payload AS BLOB)) + COALESCE(LENGTH(CAST(attributes AS BLOB)), 0)), 0) FROM events), stream_bytes = (SELECT COALESCE(SUM(LENGTH(bytes)), 0) FROM stream_chunks)"
+    "UPDATE run SET event_count = (SELECT COUNT(*) FROM events WHERE reserved = 0), event_bytes = (SELECT COALESCE(SUM(LENGTH(CAST(payload AS BLOB)) + COALESCE(LENGTH(CAST(attributes AS BLOB)), 0)), 0) FROM events WHERE reserved = 0), stream_bytes = (SELECT COALESCE(SUM(LENGTH(bytes)), 0) FROM stream_chunks)"
   );
 };
 
@@ -1709,6 +1716,26 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
     };
   }
 
+  /**
+   * How many steps named `name` completed (a `do` that succeeded, or a
+   * sleep that ended), every occurrence counted once, whatever attempts
+   * each took; undefined when there is no run. A step replayed after a restart is the same record,
+   * not another. For the host's own inspection, as `stepOutput`.
+   */
+  succeededSteps(name: string): number | undefined {
+    const { sql } = this.ctx.storage;
+    if (!hasJournal(sql)) {
+      return undefined;
+    }
+    const [row] = sql
+      .exec<{ count: number }>(
+        "SELECT count(*) AS count FROM steps WHERE type IN ('do', 'sleep') AND name = ? AND state = 'succeeded'",
+        name
+      )
+      .toArray();
+    return row?.count ?? 0;
+  }
+
   /** The definition, or why there is none, as the run's end. */
   #resolve(run: RunRow): WorkflowDefinition | Settlement {
     const identity = {
@@ -2498,24 +2525,32 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
       if (bytes > maxEventPayloadBytes) {
         return { outcome: "too_large", wake: false };
       }
+      // What the run's host owes it isn't held to the limits: every other
+      // sender's events count against them, a full inbox's included.
       if (
-        run.event_count >= maxInboxEvents ||
-        run.event_bytes + held > maxInboxBytes
+        command.reserved !== true &&
+        (run.event_count >= maxInboxEvents ||
+          run.event_bytes + held > maxInboxBytes)
       ) {
         return { outcome: "full", wake: false };
       }
       storage.sql.exec(
-        "INSERT INTO events (type, payload, key, attributes, accepted_at) VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO events (type, payload, key, attributes, accepted_at, reserved) VALUES (?, ?, ?, ?, ?, ?)",
         command.type,
         command.payload,
         command.key,
         attributes,
-        now
+        now,
+        command.reserved === true ? 1 : 0
       );
-      storage.sql.exec(
-        "UPDATE run SET event_count = event_count + 1, event_bytes = event_bytes + ?",
-        held
-      );
+      // Nor does it count against them later: the counters are what other
+      // senders have filled, which a reserved event mustn't take from.
+      if (command.reserved !== true) {
+        storage.sql.exec(
+          "UPDATE run SET event_count = event_count + 1, event_bytes = event_bytes + ?",
+          held
+        );
+      }
       return {
         outcome: "accepted",
         wake: this.#wakeFor(

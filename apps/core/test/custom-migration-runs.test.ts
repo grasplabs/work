@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import { commitFiles, setCurrentVersion } from "../src/apps.ts";
 import { requireStoreSchemaActive } from "../src/store-backfill.ts";
+import { racingDb } from "./apps.ts";
 import {
   appFile,
   deriving,
@@ -44,6 +45,48 @@ import { newRecordId } from "./store-schemas.ts";
 //   test.
 
 describe("an explicit migration's run", { timeout: 180_000 }, () => {
+  it("makes the release current with its store when a person commits between the switch and the batch", async () => {
+    const { fixture, store, release } = await migrated(20, deriving);
+    const object = env.DATA_STORES.getByName(store.id);
+    const consumer = { resourceId: fixture.app, resourceVersion: 3 };
+    await vi.waitFor(
+      async () => {
+        await expect(
+          object.schemaStatus(store.id, release.manifest.schemaHash, consumer)
+        ).resolves.toMatchObject({ state: "ready" });
+      },
+      { timeout: 120_000, interval: 500 }
+    );
+    // A person commits after the store switched to the migration's
+    // contract, just before the batch that makes the release current.
+    const racing = racingDb(
+      async () =>
+        await commitFiles(
+          env,
+          fixture.owner,
+          fixture.app,
+          { "AGENTS.md": "# Notes\n" },
+          "Later"
+        ),
+      /update "apps" set "current_version"/iu
+    );
+    const current = await setCurrentVersion(
+      { ...env, DB: racing },
+      fixture.owner,
+      fixture.app,
+      3
+    );
+    const after = await object.schemaStatus(
+      store.id,
+      release.manifest.schemaHash,
+      consumer
+    );
+    expect({ current: current.currentVersion, after }).toStrictEqual({
+      current: 3,
+      after: { state: "active" },
+    });
+  });
+
   it("transforms every record once, then takes over as its release is made current", async () => {
     const { fixture, store, release } = await migrated(130, deriving);
     const object = env.DATA_STORES.getByName(store.id);
