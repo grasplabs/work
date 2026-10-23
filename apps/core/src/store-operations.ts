@@ -213,7 +213,7 @@ const ownerRelease = async (
  * Operation `path` of `release` as a consumer may call it: a public query
  * or mutation, with its contract fingerprint; undefined for anything else.
  */
-const servedIn = (
+export const servedIn = (
   release: Release,
   path: string
 ): Pick<ServedStoreOperation, "operation" | "fingerprint"> | undefined => {
@@ -509,7 +509,10 @@ export interface StoreOperationCaller {
 }
 
 /** `store`, its commits made only while `requireHolds` passes. */
-const fenced = (store: OpenStore, requireHolds?: () => void): OpenStore =>
+export const fenced = (
+  store: OpenStore,
+  requireHolds?: () => void
+): OpenStore =>
   requireHolds === undefined
     ? store
     : {

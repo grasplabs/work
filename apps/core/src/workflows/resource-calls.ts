@@ -5,6 +5,7 @@ import { connectionIdSchema, permissionIdSchema } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
+import { operationErrors } from "@grasp-os/shared/operations";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { runFileIdSchema } from "@grasp-os/shared/run-files";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
@@ -476,7 +477,7 @@ const connectionsOf = async (env: Env, run: CallingRun): Promise<string[]> => {
  * run's included: its instructions as text, and a whole number above 0 of
  * output tokens if any (`workflow.call_invalid` otherwise).
  */
-const requireModelRequest = (
+export const requireModelRequest = (
   call: Extract<BuiltCall, { name: "grasp.model" }>
 ): { instructions: string; tokens: number | undefined } => {
   if (typeof call.instructions !== "string") {
@@ -753,6 +754,13 @@ export const makeCall = async (
   // reach connect, a model, an App, a store or Knowledge.
   if (run.candidate !== undefined) {
     return await candidateAnswer(env, run.candidate, call);
+  }
+  // A run an App's test started never comes here: its host answers its
+  // model and store calls from its test (fixture-calls.ts) and refuses
+  // the rest. Refused again, before anything is looked at, so none of
+  // its calls can reach connect, a model, an App, a store or Knowledge.
+  if (run.fixture === true) {
+    throw operationErrors.create("resource.unavailable");
   }
   const binding = run.bindings.get(call.binding);
   if (binding?.kind !== kindOf[call.name]) {

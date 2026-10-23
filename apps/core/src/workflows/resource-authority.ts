@@ -152,6 +152,12 @@ export interface CallingRun {
    * (`workflow.candidate_unfixtured`).
    */
   readonly candidate?: ReadonlyMap<string, CandidateBinding>;
+  /**
+   * For a run an App's test started (fixture-runs.ts): it calls nothing
+   * real. Its host answers its model and store calls from its test
+   * (fixture-calls.ts), and `makeCall` refuses every call of it.
+   */
+  readonly fixture?: true;
 }
 
 /** A binding of a test run's checkpoint, and the answer its start gave it. */

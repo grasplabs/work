@@ -263,6 +263,7 @@ const coreDb: D1State = {
     app_default_stores: exported(`${core}app-activation.ts`),
     app_test_fixtures: transient(`${core}app-tests.ts`),
     app_test_runs: transient(`${core}workflows/fixture-runs.ts`),
+    app_test_decisions: transient(`${core}workflows/fixture-decisions.ts`),
     screen_submissions: exported(`${core}screen-submissions.ts`),
     action_invocations: exported(`${core}action-invocation.ts`),
     preview_fixture_stores: transient(`${core}sealed-previews.ts`),
