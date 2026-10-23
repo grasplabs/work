@@ -375,7 +375,7 @@ describe("sharing an App", () => {
     });
     await expect(outcome(anna.api.apps.get(app))).resolves.toBe("ok");
 
-    await env.KNOWLEDGE.prepare(
+    await env.DB.prepare(
       "UPDATE collection_teams SET team_id = ? WHERE collection_id = ?"
     )
       .bind(others, collection)
