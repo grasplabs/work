@@ -5,7 +5,7 @@
  * key prefix. Each says which module owns it, whether it is authoritative
  * or derived, and whether a client's export carries it.
  *
- * Pure data, so core (the export) and the console (the move) read the same
+ * Pure data, so core (the export) and the admin (the move) read the same
  * list. `vp run check:state-registry` (scripts/check-state-registry.ts)
  * fails when this list and the repo differ either way: a database, table,
  * Durable Object class or binding, or bucket without an entry, or an entry
@@ -167,6 +167,7 @@ export interface ClientStateRegistry {
 const core = "apps/core/src/";
 const connect = "apps/connect/src/";
 const workerflow = "packages/workerflow/src/";
+const chat = "packages/chat/src/";
 
 const exported = (owner: string, note?: string): StateEntry => ({
   owner,
@@ -581,6 +582,7 @@ const onboarding: DurableObjectState = {
     works: exported(`${core}onboarding/store.ts`),
     asked_about: exported(`${core}onboarding/store.ts`),
     drawn_works: exported(`${core}onboarding/store.ts`),
+    counted_works: exported(`${core}onboarding/store.ts`),
     brain_teams: exported(`${core}onboarding/store.ts`),
     brain_sent: exported(
       `${core}onboarding/store.ts`,
@@ -751,6 +753,29 @@ const connectClock: DurableObjectState = {
   runtimeTables: { clock_tasks: clockTasks },
 };
 
+const chatState: DurableObjectState = {
+  role: "chat-state",
+  worker: "core",
+  binding: "CHAT_STATE",
+  className: "ChatState",
+  owner: `${chat}state.ts`,
+  objects: {
+    kind: "named",
+    name: "`key:<key>` for a key the Chat SDK keeps, `thread:<thread ID>` for a conversation (`durableObjectState`).",
+    inventories: [],
+    note: "The Chat SDK's working state for chat apps: locks, messages queued while a handler runs, resent webhooks already taken, the threads the bot follows. Nothing lists the objects; each clears itself once what it holds expires, and a destination starts with none.",
+  },
+  runtimeTables: {
+    entry: transient(
+      `${chat}state.ts`,
+      "A key's value or list, with its expiry."
+    ),
+    lock: transient(`${chat}state.ts`),
+    queue: transient(`${chat}state.ts`),
+    subscribed: transient(`${chat}state.ts`),
+  },
+};
+
 const files: R2State = {
   role: "files",
   worker: "core",
@@ -829,10 +854,10 @@ export const clientStateRegistry: ClientStateRegistry = {
     connect: { config: "apps/connect/wrangler.jsonc" },
   },
   notClientState: {
-    "apps/console/wrangler.jsonc":
-      "The staff console runs once, in grasp-os-ops: its state is Grasp's, about clients.",
+    "apps/admin/wrangler.jsonc":
+      "Grasp's admin runs once, in grasp-os-ops: its state is Grasp's, about clients.",
     "apps/router/wrangler.jsonc":
-      "The router runs once, in grasp-os-ops, and holds only hostnames the console writes.",
+      "The router runs once, in grasp-os-ops, and holds only hostnames the admin writes.",
   },
   d1: [coreDb, knowledgeDb, connectDb],
   durableObjects: [
@@ -847,6 +872,7 @@ export const clientStateRegistry: ClientStateRegistry = {
     actionInvocations,
     coreClock,
     connectClock,
+    chatState,
   ],
   r2: [files, brainObjects, auditArchive],
   carriers: [

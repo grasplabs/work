@@ -21,7 +21,7 @@ const timestamp = (name: string) => integer(name, { mode: "timestamp_ms" });
 
 /**
  * The oldest migration whose code still runs on this database's schema,
- * which each release declares (scripts/release): the console won't put
+ * which each release declares (scripts/release): the admin won't put
  * the code of a release whose newest migration is older on it, by a
  * rollback or a deploy.
  *

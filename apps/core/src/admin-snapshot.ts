@@ -35,21 +35,21 @@ import { readOrganization } from "./organization.ts";
 //
 // - Anyone but Grasp's staff reading it: a member, an admin of the
 //   company, someone with an interview link, or anyone else. It isn't
-//   behind `/rpc` or any session: only the console's signed request reads
+//   behind `/rpc` or any session: only the admin's signed request reads
 //   it (console-signed.ts), with a key derived for this purpose alone from
 //   this client's auth secret, so a session cookie or a link opens
-//   nothing, and the console's key for another client signs nothing here.
+//   nothing, and the admin's key for another client signs nothing here.
 // - A read the company can't see: every read is in its audit log, by the
-//   staff member the console names, before anything is answered; when the
+//   staff member the admin names, before anything is answered; when the
 //   log can't take it, nothing is.
-// - What anyone said reaching the console: interviews leave the store as
+// - What anyone said reaching the admin: interviews leave the store as
 //   numbers (`Onboarding.adminFacts`), and the answer is only what the
 //   schema names. Transcripts stay behind the audited staff transcript
 //   read (onboarding/staff-rpc.ts).
 //
 // - Grasp reading on after the company said stop: once the company's
 //   admin ends Grasp's staff access (onboarding/gate.ts), this read is
-//   refused too, until the console opens a new staff window. It names
+//   refused too, until the admin opens a new staff window. It names
 //   people and their emails, and ending staff access is the company's
 //   one way to say no.
 // - A credential of the company's leaving through it: what it connected
@@ -174,7 +174,7 @@ const integrationsOf = async (
 
 /**
  * Everything the admin reads of this client, from what core holds, at
- * `now`: for the console's read below, and staff's in the onboarding area
+ * `now`: for the admin's read below, and staff's in the onboarding area
  * (onboarding/staff-rpc.ts). Only what the schema names may leave core.
  */
 export const snapshotOf = async (
@@ -260,7 +260,7 @@ export const snapshotOf = async (
 };
 
 /**
- * The console's request for the snapshot: 200 with it, once the request
+ * The admin's request for the snapshot: 200 with it, once the request
  * is signed, fresh and well formed and its read is in the audit log. An
  * unsigned request, or one signed otherwise, is 401; one too large, stale
  * or malformed, or made after the company ended staff access, 403;

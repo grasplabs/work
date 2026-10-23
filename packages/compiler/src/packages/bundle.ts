@@ -58,6 +58,7 @@ import {
   unbundledInCss,
 } from "./inert.ts";
 import { platformModules, platformPeers } from "./platform.ts";
+import { unscopedInCss } from "./scope.ts";
 import { svgRefusal } from "./svg.ts";
 
 /** Node.js's built-in modules: never available to an App's packages. */
@@ -581,6 +582,10 @@ const leavingOutput = (
       ...computedInCss(text, limit).map(
         (name) =>
           `the stylesheet ${path} takes a URL it loads from ${name}, which the build can't check`
+      ),
+      ...unscopedInCss(text, limit).map(
+        (selector) =>
+          `the stylesheet ${path} styles every "${selector}" on the screen, the kit's own included: scope its rules under the package's own classes`
       ),
     ].slice(0, limit);
   }

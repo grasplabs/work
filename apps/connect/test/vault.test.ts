@@ -577,7 +577,7 @@ describe("when something breaks", () => {
   });
 });
 
-/** A vault key as the console derives it for generation `generation`. */
+/** A vault key as the admin derives it for generation `generation`. */
 const derivedKey = async (generation: number) =>
   await deriveClientSecret(
     "test-client-key",
@@ -587,7 +587,7 @@ const derivedKey = async (generation: number) =>
     "base64"
   );
 
-describe("a vault key the console derives", () => {
+describe("a vault key the admin derives", () => {
   it("seals and opens, and still opens what the previous generation sealed", async () => {
     const [first, second] = await Promise.all([derivedKey(1), derivedKey(2)]);
     const before = await vaultFor({ ...env, TOKEN_ENCRYPTION_KEY: first });

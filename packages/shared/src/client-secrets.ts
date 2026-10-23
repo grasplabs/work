@@ -3,16 +3,16 @@ import { toHex } from "./encoding.ts";
 /**
  * A client's secrets, derived rather than stored: each is
  * `HMAC-SHA256(masterKey, "<purpose>:<clientId>:<generation>")`, so
- * nothing per client is kept anywhere. The console derives them to set on
+ * nothing per client is kept anywhere. The admin derives them to set on
  * a client's Workers, and the router derives the router secret on every
  * forward. Raising the client's generation rotates them.
  *
  * The master keys live in Secrets Store (grasp-os-ops): `ROUTER_KEY` for
  * the router secret, which the router holds too, and `CLIENT_KEY` for the
- * rest, which only the console holds.
+ * rest, which only the admin holds.
  */
 
-/** A client's id as the console gives it: no `:`, so the derivation stays unambiguous. */
+/** A client's id as the admin gives it: no `:`, so the derivation stays unambiguous. */
 export const clientIdPattern = /^[A-Za-z0-9_-]{1,64}$/u;
 
 /** A purpose, such as `router`: no `:` either. */
@@ -77,7 +77,7 @@ export const deriveClientSecret = async (
  * (SHA-256, no salt, the purpose as info): each purpose gets a key of its
  * own, so a MAC made for one never passes for another. Core derives its
  * own keys this way from its auth secret (core's src/derived-keys.ts);
- * the console, which derives that secret, signs what it tells core with
+ * the admin, which derives that secret, signs what it tells core with
  * one (@grasp-os/shared/platform-change).
  */
 export const hkdfHmacKey = async (

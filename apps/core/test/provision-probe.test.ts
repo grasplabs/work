@@ -21,10 +21,10 @@ import { clock, clockTasks } from "../src/clock.ts";
 import worker from "../src/index.ts";
 import { coreOrigin } from "./sign-in.ts";
 
-// The console's provisioning probe (src/provision-probe.ts). The ways it
+// The admin's provisioning probe (src/provision-probe.ts). The ways it
 // can fail, tried here:
 //
-// - Anyone but the console asking: through the router (its secret, and no
+// - Anyone but the admin asking: through the router (its secret, and no
 //   signature or a wrong one), with another client's key, with a key for
 //   another purpose, with a request signed long ago, without the router
 //   secret, or with another client's.
@@ -34,13 +34,13 @@ import { coreOrigin } from "./sign-in.ts";
 // - The answer leaking a secret, a resource's id or an error's words.
 // - A binding or clock that doesn't answer passing as one that does.
 
-/** The client the console deployed this core as. */
+/** The client the admin deployed this core as. */
 const clientId = "acme";
 
-/** Core's env as the console deploys it. */
+/** Core's env as the admin deploys it. */
 const deployed: Env = { ...env, CLIENT_ID: clientId };
 
-/** `body`'s signature as the console makes it, with the key `secret` gives for `purpose`. */
+/** `body`'s signature as the admin makes it, with the key `secret` gives for `purpose`. */
 const signatureOf = async (
   body: string,
   secret = env.BETTER_AUTH_SECRET,
@@ -67,7 +67,7 @@ interface Sent {
 }
 
 /**
- * Sends a request to core as the router would, by default the console's
+ * Sends a request to core as the router would, by default the admin's
  * probe, and waits for everything it left running.
  */
 const send = async ({
@@ -99,7 +99,7 @@ const send = async ({
   return response;
 };
 
-/** The console's probe, signed. */
+/** The admin's probe, signed. */
 const probe = async (coreEnv = deployed): Promise<Response> => {
   const body = bodyAt();
   return await send({ body, signature: await signatureOf(body), coreEnv });
@@ -199,7 +199,7 @@ describe("the console's provisioning probe", () => {
       { body: fresh, signature: "0".repeat(64) },
       // Another client's console signature.
       { body: fresh, signature: await signatureOf(fresh, otherClient) },
-      // The onboarding summary's, which the console signs with this
+      // The onboarding summary's, which the admin signs with this
       // client's key for another purpose.
       {
         body: fresh,
