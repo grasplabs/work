@@ -5418,13 +5418,13 @@ msgctxt "kind of app"
 msgid "HR"
 msgstr "RR. HH."
 
-#: src/interview/sound-check.tsx
-msgid "I cannot find a microphone. Plug one in and try again."
-msgstr "No encuentro ningún micrófono. Conecta uno y vuelve a intentarlo."
-
 #: src/onboarding/setup-steps.tsx
 msgid "I can’t read {name}: it’s in an old format. As a PDF or a newer file, I can."
 msgstr "No puedo leer {name}: está en un formato antiguo. Como PDF o en un archivo más reciente, sí puedo."
+
+#: src/interview/sound-check.tsx
+msgid "I cannot find a microphone. Plug one in and try again."
+msgstr "No encuentro ningún micrófono. Conecta uno y vuelve a intentarlo."
 
 #: src/onboarding/setup-steps.tsx
 msgid "I could not find the columns. The first row should name them: name, email, team and job."
