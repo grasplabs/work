@@ -25,7 +25,7 @@ import { drizzle } from "drizzle-orm/d1";
 
 import { revocationsOf, tellKept } from "./access-revocations.ts";
 import { hasSources, sourcesOf, unreadableBy } from "./app-provenance.ts";
-import { appFor } from "./apps.ts";
+import { appFor, editableApp } from "./apps.ts";
 import {
   auditedBatch,
   outboxed,
@@ -300,7 +300,7 @@ export const addMember = async (
   app: unknown,
   input: unknown
 ): Promise<AppMember> => {
-  const found = await appFor(env, by, app, "builder");
+  const found = await editableApp(env, by, app);
   requireNotStaff(by);
   const member = appErrors.parse("app.invalid", newAppMemberSchema, input);
   await requireSharable(env, member, sharingRules(found, member));
@@ -318,10 +318,23 @@ export const addMember = async (
     appMemberEntry(by, "app.member.added", found, member),
     "core"
   );
+  // Only while the App isn't archived when the batch runs: an archive
+  // that landed since `editableApp` let the change in stops it.
+  const ifNotArchived = db
+    .select({
+      appId: sql<string>`${row.appId}`.as("app_id"),
+      memberType: sql<Row["memberType"]>`${row.memberType}`.as("member_type"),
+      memberId: sql<string>`${row.memberId}`.as("member_id"),
+      role: sql<Row["role"]>`${row.role}`.as("role"),
+      addedBy: sql<string>`${row.addedBy}`.as("added_by"),
+      addedAt: sql<Date>`${row.addedAt.getTime()}`.as("added_at"),
+    })
+    .from(apps)
+    .where(and(eq(apps.id, found.id), ne(apps.status, "archived")));
   const results = await auditedBatch(env, db, [
     db
       .insert(appMembers)
-      .values(row)
+      .select(ifNotArchived)
       .onConflictDoUpdate({
         target: [appMembers.appId, appMembers.memberType, appMembers.memberId],
         set: { role: row.role, addedBy: row.addedBy, addedAt: row.addedAt },
@@ -339,6 +352,10 @@ export const addMember = async (
     ),
   ]);
   await tellKept(env, results[2]);
+  // Archived before the batch ran: it wrote nothing (`ifNotArchived`).
+  if (results[0].meta.changes === 0) {
+    await editableApp(env, by, found.id);
+  }
   const [added] = await namedMembers(env, rowOf(found, member));
   // Unshared since the batch above: nothing of it stands.
   if (!added) {
@@ -362,6 +379,7 @@ export const removeMember = async (
   app: unknown,
   input: unknown
 ): Promise<void> => {
+  // Taking access away is never blocked by an archive (app-status.ts).
   const found = await appFor(env, by, app, "builder");
   requireNotStaff(by);
   const member = appErrors.parse("app.invalid", appMemberRefSchema, input);

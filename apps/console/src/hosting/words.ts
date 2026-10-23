@@ -60,6 +60,8 @@ const inventoryWords: Readonly<Record<InventoryErrorCode, string>> = {
     "The release binds a bucket outside the policy's jurisdiction.",
   unsupported_durable_object_migration:
     "The release renames or transfers a Durable Object class, which needs a decision first.",
+  durable_object_jurisdiction:
+    "The release sets its Durable Objects' jurisdiction in a binding: core sets it as it creates each one.",
   resource_conflict:
     "A resource is recorded differently from what the release needs of it.",
   resource_missing:

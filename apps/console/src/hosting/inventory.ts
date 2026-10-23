@@ -71,6 +71,8 @@ export const inventoryErrorCodes = [
   "foreign_resource",
   /** A binding of a kind rendering doesn't map. */
   "unsupported_binding",
+  /** A binding that would take the Workers' Durable Objects out of the EU-restricted namespace. */
+  "durable_object_jurisdiction",
   /** A binding names a placeholder rendering doesn't fill. */
   "unknown_placeholder",
   /** The destination isn't one the console creates resources in (workerd is set up by its operator). */
@@ -817,6 +819,15 @@ const unmappedBindings = new Set([
   "worker_loader",
 ]);
 
+/**
+ * What core and connect read to take their Durable Objects out of the
+ * EU-restricted namespace (`none`, for workerd and on-prem: core's
+ * src/durable-objects.ts, connect's src/clock.ts). Unset is the EU, which
+ * a placed client's policy requires, so no binding of a placed client's
+ * Worker carries the name, whatever its kind or value.
+ */
+const durableObjectJurisdiction = "DURABLE_OBJECT_JURISDICTION";
+
 /** One of `worker`'s Workers as the destination takes it. */
 export interface RenderedWorker {
   scriptName: string;
@@ -830,8 +841,9 @@ export interface RenderedWorker {
  * client's own script and each Durable Object binding to a live class of
  * the Worker's own script. A resource that isn't the placement's own (another
  * client's, deployment's or destination's), isn't recorded, or is
- * tombstoned stops it, as does any binding kind it doesn't map and any
- * placeholder left: before anything is uploaded.
+ * tombstoned stops it, as does any binding kind it doesn't map, any
+ * placeholder left and any binding named for the Durable Object
+ * jurisdiction: before anything is uploaded.
  */
 export const renderClientWorker = (
   worker: WorkerEntry,
@@ -871,6 +883,12 @@ export const renderClientWorker = (
   };
 
   const bindings = worker.bindings.map((binding) => {
+    if (binding.name === durableObjectJurisdiction) {
+      throw new InventoryError(
+        "durable_object_jurisdiction",
+        `${worker.name}'s ${binding.name} would set its Durable Objects' jurisdiction`
+      );
+    }
     const rendered: Record<string, unknown> = { ...binding };
     switch (binding.type) {
       case "d1": {

@@ -27,6 +27,8 @@ const refusals: Readonly<Record<RolloutErrorCode, string>> = {
     "What that client ran before doesn't work with what it runs now, so going back could break it: roll out a release that does instead.",
   rotated_since:
     "That client's secrets rotated since, and its previous versions don't have the new ones: roll out instead.",
+  shared_secret_replaced:
+    "A shared secret that client's previous versions run was replaced since, or the console has no record of which they run, so going back could bring a retired key back: roll out instead.",
   client_busy:
     "Something else is deploying to that client right now: try again in a moment.",
   rollback_failed:

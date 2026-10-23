@@ -89,6 +89,9 @@ test("an admin takes a snapshot on the board page, writes its narrative and prin
     const copy = async (builtin: string, name: string): Promise<string> => {
       const created = await api.apps.blueprints.create(builtin, { name });
       await api.apps.versions.setCurrent(created.app.id, 1);
+      // Published, for the people it is shared with (a draft is its
+      // builders' alone).
+      await api.apps.publish(created.app.id);
       const { generation } = await api.screenTrust.review(created.app.id);
       await api.screenTrust.classify(created.app.id, "ordinary", generation);
       return created.app.id;

@@ -304,9 +304,35 @@ const contractInputSchema = z.object({ input: z.json() });
 const activeSql = (person: string): SQL => activeMember(person);
 
 /**
+ * That App `app`'s status lets `person` in now, as SQL, beside their role
+ * (`appRoleSql`), as `stillOpenTo` decides it (app-access.ts): never an
+ * archived App, and a draft only for its builders, in a role that builds.
+ */
+const appStatusAdmitsSql = (person: string, app: string): SQL => sql`(
+  EXISTS (SELECT 1 FROM apps AS lived
+    WHERE lived.id = ${app} AND lived.status != 'archived')
+  AND (EXISTS (SELECT 1 FROM apps AS out
+      WHERE out.id = ${app} AND out.status = 'published')
+    OR (${activeMember(person, ["admin", "builder"])}
+      AND (${activeMember(person, ["admin"])}
+        OR EXISTS (SELECT 1 FROM apps AS owned
+          WHERE owned.id = ${app} AND owned.owner_id = ${person})
+        OR EXISTS (SELECT 1 FROM app_members AS shared
+          WHERE shared.app_id = ${app} AND shared.role = 'builder'
+            AND shared.member_type = 'person' AND shared.member_id = ${person})
+        OR EXISTS (SELECT 1 FROM app_members AS shared
+          JOIN teams ON teams.id = shared.member_id
+            AND teams.organization_id = ${organizationId}
+          JOIN team_members ON team_members.team_id = shared.member_id
+            AND team_members.user_id = ${person}
+          WHERE shared.app_id = ${app} AND shared.role = 'builder'
+            AND shared.member_type = 'team')))))`;
+
+/**
  * That `person` has a role in App `app` now, as SQL: an admin of the
  * organization, its owner, or someone it is shared with, as a person or
- * through a team they are in now. Only while they are an active member.
+ * through a team they are in now, while its status lets them in
+ * (`appStatusAdmitsSql`). Only while they are an active member.
  */
 const appRoleSql = (
   person: string,
@@ -323,11 +349,37 @@ const appRoleSql = (
         AND teams.organization_id = ${organizationId}
       JOIN team_members ON team_members.team_id = shared.member_id
         AND team_members.user_id = ${person}
-      WHERE shared.app_id = ${app} AND shared.member_type = 'team')))`;
+      WHERE shared.app_id = ${app} AND shared.member_type = 'team'))
+  AND ${appStatusAdmitsSql(person, app)})`;
 
 /** That a permission allowing `start` on `id` for the invoker holds, as SQL. */
 const grantSql = (allowing: SQL): SQL =>
   sql`EXISTS (SELECT 1 FROM ${permissions} WHERE ${allowing})`;
+
+/**
+ * That App `app`, at `appVersion`, holds its grant of `action` on
+ * workflow `workflow` for `person` now, as SQL (`appStartHoldsSql`).
+ */
+const appGrantHoldsSql = (
+  app: AppId,
+  appVersion: number,
+  person: string,
+  workflow: WorkflowResourceId,
+  action: "start" | "send"
+): SQL => sql`(${appRoleSql(person, app)}
+  AND EXISTS (SELECT 1 FROM app_versions AS code
+    WHERE code.app_id = ${app} AND code.version = ${appVersion})
+  AND NOT EXISTS (SELECT 1 FROM sdk_release_manifests AS sealed
+    WHERE sealed.app_id = ${app} AND sealed.version = ${appVersion}
+      AND sealed.revoked_at IS NOT NULL)
+  AND ${grantSql(
+    allowingPermissionSql(
+      { type: "app", appId: app },
+      appVersion,
+      { type: "workflow", workflowId: workflow },
+      action
+    )
+  )})`;
 
 /**
  * That App `app`, at `appVersion`, may start workflow `workflow` for
@@ -342,20 +394,19 @@ export const appStartHoldsSql = (
   appVersion: number,
   person: string,
   workflow: WorkflowResourceId
-): SQL => sql`(${appRoleSql(person, app)}
-  AND EXISTS (SELECT 1 FROM app_versions AS code
-    WHERE code.app_id = ${app} AND code.version = ${appVersion})
-  AND NOT EXISTS (SELECT 1 FROM sdk_release_manifests AS sealed
-    WHERE sealed.app_id = ${app} AND sealed.version = ${appVersion}
-      AND sealed.revoked_at IS NOT NULL)
-  AND ${grantSql(
-    allowingPermissionSql(
-      { type: "app", appId: app },
-      appVersion,
-      { type: "workflow", workflowId: workflow },
-      "start"
-    )
-  )})`;
+): SQL => appGrantHoldsSql(app, appVersion, person, workflow, "start");
+
+/**
+ * That App `app`, at `appVersion`, may send events to `person`'s runs of
+ * workflow `workflow` now, as SQL: as `appStartHoldsSql`, by the App's own
+ * `send` grant, which its `start` grant doesn't imply (spec 10.4.6).
+ */
+export const appSendHoldsSql = (
+  app: AppId,
+  appVersion: number,
+  person: string,
+  workflow: WorkflowResourceId
+): SQL => appGrantHoldsSql(app, appVersion, person, workflow, "send");
 
 /** Where a version's manifest seals the approved packages its modules import. */
 const manifestPackagesSchema = z.object({

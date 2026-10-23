@@ -158,6 +158,29 @@ const useFrom = (
     }
     return declared;
   }
+  if (
+    hasExactly(use, [
+      "type",
+      "workflow",
+      "alias",
+      "eventType",
+      "fingerprint",
+    ]) &&
+    use.type === "workflowEvent"
+  ) {
+    if (typeof use.workflow !== "string" || !workflows.has(use.workflow)) {
+      return refuse(`\`${path}\` notifies a workflow the App doesn't declare.`);
+    }
+    // As the generated reference lists it: the declaration reads it back,
+    // and refuses anything that isn't one.
+    return {
+      kind: "workflowEvent",
+      workflow: `workflows.${use.workflow}`,
+      alias: use.alias,
+      type: use.eventType,
+      fingerprint: use.fingerprint,
+    };
+  }
   return refuse(`\`${path}\`'s \`uses\` holds an entry no declaration makes.`);
 };
 

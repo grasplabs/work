@@ -277,11 +277,11 @@ const request = (version: unknown = 1, who: unknown = "Ada") => ({
   key: `key-${unique()}`,
 });
 
-/** An App `owner` owns, with no version yet. */
+/** A published App `owner` owns, with no version yet: a draft lets only its builders in. */
 const appOwnedBy = async (owner: Person): Promise<string> => {
   const id = crypto.randomUUID();
   await env.DB.prepare(
-    "INSERT INTO apps (id, name, description, owner_id, created_at) VALUES (?, 'Engine', '', ?, ?)"
+    "INSERT INTO apps (id, name, description, owner_id, status, created_at) VALUES (?, 'Engine', '', ?, 'published', ?)"
   )
     .bind(id, owner.userId, Date.now())
     .run();

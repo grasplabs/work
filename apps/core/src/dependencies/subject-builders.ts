@@ -4,7 +4,7 @@ import type {
 } from "@grasp-os/shared/dependencies";
 import { roleErrors } from "@grasp-os/shared/roles";
 
-import { appFor } from "../apps.ts";
+import { appFor, editableApp } from "../apps.ts";
 import type { Acting } from "../auth/identity.ts";
 import { requireWorkflowRole } from "../workflow-resources.ts";
 
@@ -16,15 +16,20 @@ import { requireWorkflowRole } from "../workflow-resources.ts";
 /**
  * `subject`, for one of its builders, with its name: `app.not_found` or
  * `workflow.resource_unavailable` for anyone with no role in it, and
- * `role.forbidden` for one who only uses it.
+ * `role.forbidden` for one who only uses it. With `change`, for asking,
+ * resolving or building its packages, an archived App refuses
+ * (`app.archived`, app-status.ts).
  */
 export const builtSubject = async (
   env: Env,
   by: Acting,
-  subject: DependencySubject
+  subject: DependencySubject,
+  change = false
 ): Promise<NamedDependencySubject> => {
   if (subject.type === "app") {
-    const { id, name } = await appFor(env, by, subject.id, "builder");
+    const { id, name } = change
+      ? await editableApp(env, by, subject.id)
+      : await appFor(env, by, subject.id, "builder");
     return { type: "app", id, name };
   }
   // Grasp staff neither ask for, build nor read a workflow's packages,

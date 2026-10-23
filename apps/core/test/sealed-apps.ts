@@ -22,6 +22,7 @@ import {
   releaseRetentionMs,
   sweepReleases,
 } from "../src/release-retention.ts";
+import { published } from "./apps.ts";
 
 // Apps of spec 8's layout as the release tests build them: a builder's
 // App committed with given files, a store for it, and its seal.
@@ -66,6 +67,9 @@ export const appWith = async (
 ): Promise<Fixture> => {
   const owner = by ?? (await person("builder"));
   const { id } = await createApp(env, owner, { name });
+  // Published, for the people it is shared with: a draft is its builders'
+  // alone (app-status.ts), and these tests aren't about its status.
+  await published(id);
   await commitFiles(env, owner, id, files, "First version");
   return { owner, app: id, store: await createStore(env, owner) };
 };

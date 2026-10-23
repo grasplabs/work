@@ -199,11 +199,14 @@ export const Onward = ({
 /**
  * What Grasp says back to what was just done on a step, in place of its
  * sentence: said as soon as what he is saying reaches a natural break, or
- * at once with `cut`. `tone` and `quick` as for a step's line.
+ * at once with `cut`. `tone` and `quick` as for a step's line. With
+ * `announce`, it is said on its own even when an answer was already there
+ * as the step arrived: for something done again on this visit.
  */
 export interface Answer extends StepVoice {
   text: string;
   cut?: boolean;
+  announce?: boolean;
 }
 
 /**
@@ -215,12 +218,27 @@ export interface Answer extends StepVoice {
  * the sentence makes way once said, giving its room to what the step
  * shows; an answer then takes only the room it needs.
  */
+/** An answer said on its own, at the next natural break unless `cut`. */
+const useAnswerSaid = (
+  answer: Answer | undefined,
+  alone: boolean,
+  voice: StepVoice
+): void => {
+  useSay(answer?.text ?? "", {
+    when: answer !== undefined && alone,
+    soon: answer?.cut !== true,
+    tone: answer?.tone ?? voice.tone,
+    quick: answer?.quick ?? false,
+  });
+};
+
 /**
  * What Stephen says of a step's heading: the line he arrives with (the
  * answer instead of the sentence, if it is already there when you come
  * back), said as the step fades in, a breath rather than a wait; said
  * again in another language, unless an answer came since, when only the
- * answer is. An answer that comes is said as one.
+ * answer is. An answer that comes is said as one, and so is one
+ * announced.
  */
 const useHeadingSaid = ({
   title,
@@ -239,19 +257,19 @@ const useHeadingSaid = ({
   const { line, from } = stepLine(title, arrivingWith?.text ?? sentence);
   // oxlint-disable-next-line react/hook-use-state -- as it was on arrival, never set
   const [arrived] = useState(line);
+  // Done again on this visit: his answer is said on its own, not his line again.
+  const announced = answer?.announce === true;
+  const alone = !answeredOnArrival || announced;
   useSay(line, {
     delay: 120,
-    when: answer === undefined || answeredOnArrival || arrived === line,
+    when:
+      (answer === undefined || answeredOnArrival || arrived === line) &&
+      !(announced && arrived !== line),
     tone: arrivingWith?.tone ?? voice.tone,
     quick: arrivingWith === undefined ? voice.quick : arrivingWith.quick,
   });
-  useSay(answer?.text ?? "", {
-    when: answer !== undefined && !answeredOnArrival,
-    soon: answer?.cut !== true,
-    tone: answer?.tone ?? voice.tone,
-    quick: answer?.quick ?? false,
-  });
-  return { line, from, answeredOnArrival };
+  useAnswerSaid(answer, alone, voice);
+  return { line, from, alone };
 };
 
 export const Heading = ({
@@ -267,7 +285,7 @@ export const Heading = ({
 }) => {
   const heading = useRef<HTMLHeadingElement>(null);
   const paragraph = useRef<HTMLParagraphElement>(null);
-  const { line, from, answeredOnArrival } = useHeadingSaid({
+  const { line, from, alone } = useHeadingSaid({
     title,
     sentence,
     answer,
@@ -317,8 +335,8 @@ export const Heading = ({
             >
               {/* Said on its own, or as the end of the line he arrived with. */}
               <SpokenText
-                from={answeredOnArrival ? from : 0}
-                line={answeredOnArrival ? line : answer.text}
+                from={alone ? 0 : from}
+                line={alone ? answer.text : line}
                 text={answer.text}
               />
             </span>

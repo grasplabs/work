@@ -1,18 +1,23 @@
 import { interviewPhases } from "@grasp-os/shared/interview-links";
 import type { FactTag } from "@grasp-os/shared/interview-turn";
+import { interviewerNames } from "@grasp-os/shared/onboarding";
 import { cn } from "@grasp-os/ui/lib/utils";
 import { useLingui } from "@lingui/react/macro";
 import type { ReactNode } from "react";
 
 import { Head, headSizes, useHead } from "./head.tsx";
+import { useInterviewer } from "./kept.ts";
 import { useLoop } from "./loop.ts";
 import { markedPieces } from "./progress.ts";
-import { shownAs, SpokenText, useSaid } from "./spoken.tsx";
+import { useSaidOf, voiceLevel } from "./speech.ts";
+import { shownAs, SpokenText } from "./spoken.tsx";
 
-// The conversation (prototype `interview-talk.tsx`, `Talk`): Stephen in
-// the middle, as large as the window leaves him, asking one thing, his
-// words lighting up as he says them; beside him a small sign of what he is
-// doing. Then he waits for what they type in the box at the bottom.
+// The conversation (prototype `interview-talk.tsx`, `Talk`): Stephen, or
+// Claire when they chose her, in the middle, as large as the window leaves him, asking one thing, his
+// words lighting up as he says them, his mouth warm with his voice; beside
+// him a small sign of what he is doing. A line still being written grows
+// in place as it comes. Then he waits for what they type in the box at the
+// bottom.
 
 /** How full he is printed: fuller as the interview goes on. */
 export const fillOf = (phase: (typeof interviewPhases)[number]): number =>
@@ -27,23 +32,29 @@ export const Talk = ({
 }) => {
   const { t } = useLingui();
   const loop = useLoop();
+  const interviewer = useInterviewer();
+  const who = interviewerNames[interviewer];
   const { body, size } = useHead(room, headSizes.talking);
   const { title, rest } = shownAs(loop.line);
-  const said = useSaid({
-    line: loop.line,
-    saying: loop.saying,
-    from: loop.from,
-    speaking: loop.doing === "speaking",
-  });
-  let label = t`Stephen, asking.`;
+  const saidOf = useSaidOf(loop.line);
+  // While he is about to say it, its words wait; once said, they rest.
+  const said = loop.doing === "speaking" ? Math.max(0, saidOf) : -1;
+  let label = t`${who}, asking.`;
   if (loop.doing === "listening") {
-    label = t`Stephen, listening.`;
+    label = t`${who}, listening.`;
   } else if (loop.doing === "thinking") {
-    label = t`Stephen, thinking.`;
+    label = t`${who}, thinking.`;
   }
   return (
     <div className="flex w-full max-w-xl flex-col items-center gap-6 text-center">
-      <Head fill={fillOf(phase)} label={label} sign={loop.sign} size={size} />
+      <Head
+        fill={fillOf(phase)}
+        label={label}
+        sign={loop.sign}
+        size={size}
+        voice={voiceLevel}
+        who={interviewer}
+      />
       <div
         aria-live="polite"
         className="flex min-h-36 w-full flex-col items-center gap-5"

@@ -1,3 +1,4 @@
+import { interviewerNames } from "@grasp-os/shared/onboarding";
 import { Button } from "@grasp-os/ui/components/button";
 import {
   Dialog,
@@ -14,6 +15,7 @@ import { PlusIcon, Trash2Icon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { Head, headSizes, useHead } from "./head.tsx";
+import { useInterviewer } from "./kept.ts";
 import { sayingMs } from "./loop.ts";
 import { SpokenText, useSaid } from "./spoken.tsx";
 
@@ -37,7 +39,8 @@ const Rating = ({
   onRate: (rating: number) => void;
 }) => {
   const { t } = useLingui();
-  const question = t`How was talking to Stephen?`;
+  const who = interviewerNames[useInterviewer()];
+  const question = t`How was talking to ${who}?`;
   return (
     <fieldset className="text-muted-foreground flex flex-col items-center gap-1.5 text-sm">
       <legend className="sr-only">{question}</legend>
@@ -106,6 +109,8 @@ export const Closed = ({
   onAdd: () => void;
 }) => {
   const { t } = useLingui();
+  const interviewer = useInterviewer();
+  const who = interviewerNames[interviewer];
   const title = t`Thank you, ${name}.`;
   const message = t`What you agreed to is kept. Forgot something? This link works until ${closes}.`;
   const line = `${title} ${message}`;
@@ -125,9 +130,10 @@ export const Closed = ({
     <div className="flex w-full max-w-md flex-col items-center gap-6 text-center">
       <Head
         fill={1}
-        label={t`Stephen, drawn in dots.`}
+        label={t`${who}, drawn in dots.`}
         sign="heart"
         size={size}
+        who={interviewer}
       />
       <div className="flex w-full flex-col items-center gap-6" ref={body}>
         <div className="flex flex-col gap-2">

@@ -36,6 +36,11 @@ import { integrationsOf } from "../connections/integrations.ts";
 import type { Integration } from "../connections/integrations.ts";
 import type { Session } from "../core.ts";
 import { decidesRequests } from "../dashboard/to-do.tsx";
+import {
+  StatusActions,
+  StatusBadge,
+  StatusNote,
+} from "../engines/app-status.tsx";
 import { EngineIcon } from "../engines/engine-icon.tsx";
 import { engineReaders, loadEnginePage } from "../engines/engine-page.ts";
 import type { EnginePage } from "../engines/engine-page.ts";
@@ -67,8 +72,9 @@ import { WorkflowsTable } from "../workflows/workflows-table.tsx";
 // its icon, name and what it is for, then its workflows (with their runs),
 // its apps (core's screens), the integrations it uses and, which the
 // prototype doesn't have, its members. Each tab's read is its own: one
-// that hangs or is refused leaves the others. There is no menu yet:
-// removing an engine waits on core (GRA-161).
+// that hangs or is refused leaves the others. Its status, and for its
+// builders publishing and archiving it, stand beside its name
+// (app-status.tsx); removing an engine waits on core (GRA-161).
 
 /** A read only one tab waits for: the page shows before it comes. */
 type Deferred<T> = Promise<Loaded<T>>;
@@ -518,14 +524,20 @@ const EngineView = ({ page }: { page: EnginePage }) => {
           {app.description === "" ? null : (
             <p className="text-muted-foreground">{app.description}</p>
           )}
-          <p className="text-muted-foreground">
-            {version === null ? (
-              <Trans>Not released</Trans>
-            ) : (
-              <Trans>Version {version}</Trans>
-            )}
-          </p>
+          <div className="text-muted-foreground flex flex-wrap items-center gap-x-3 gap-y-1">
+            <StatusBadge status={app.status} />
+            <span>
+              {version === null ? (
+                <Trans>Not released</Trans>
+              ) : (
+                <Trans>Version {version}</Trans>
+              )}
+            </span>
+          </div>
+          <StatusNote status={app.status} />
         </div>
+        {/* On its bar, as the prototype's Publish: for who builds. */}
+        {canBuild(identity.role) ? <StatusActions app={app} /> : null}
       </div>
       <StoreChanges changes={storeChanges} engine={app} />
       <Tabs
