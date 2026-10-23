@@ -2,6 +2,7 @@
  * Workspace Durable Object SQLite: chats, agent state, and its person's
  * dashboard and email preferences. Migrates itself on first wake-up after a release.
  */
+import type { ChatChannel } from "@grasp-os/shared/chat";
 import type { StandardWidgetId } from "@grasp-os/shared/dashboard";
 import type { ChatId } from "@grasp-os/shared/ids";
 import { sql } from "drizzle-orm";
@@ -42,6 +43,13 @@ export const chats = sqliteTable(
      * agent reads the project's goal and documents.
      */
     projectId: text("project_id"),
+    /**
+     * Which channel the chat came through: Grasp's own app (`web`), or a
+     * chat platform by its Chat SDK adapter's name (`teams`), which its
+     * agent's audit events then name (`via`). Chats made before it was
+     * kept are `web`: there was no other.
+     */
+    via: text().$type<ChatChannel>().notNull().default("web"),
   },
   // A person's list, newest first.
   (table) => [

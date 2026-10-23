@@ -1,7 +1,7 @@
 /**
  * Collection helpers for release bundles: read a build's modules, D1
  * migrations and static assets, each addressed by its contents. The hash
- * schemes are the manifest's (@grasp-os/shared/release), and the console
+ * schemes are the manifest's (@grasp-os/shared/release), and the admin
  * verifies a release with the same code.
  */
 import { readdirSync, readFileSync } from "node:fs";

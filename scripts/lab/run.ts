@@ -10,7 +10,7 @@
  * the stack's Grasp staff member through the fake IdP, as the seed does.
  *
  * It spends on the models the local core's gateway is set up with: the
- * commands that play or judge (practice, simulate, score, keep) are run by
+ * commands that play or judge (practice, simulate, score, keep, bench, mine, write) are run by
  * hand, never by CI, whose tests use fakes.
  *
  * Commands:
@@ -25,6 +25,24 @@
  *   score                    the score card of every interview that counts
  *                            (--label <name>)
  *   keep                     keeps its interviews as fixed input for the benches
+ *   bench notes|ask|draw|all a bench on the Stephen you have, kept as a run:
+ *                            --label <name>, --only a,b (ids or kinds),
+ *                            --hidden, --interviewer claire; draw draws the
+ *                            practice company in core again (--practice)
+ *   compare <run> <run>      two runs side by side, with the noise and a
+ *                            verdict for each number
+ *   results                  every run kept
+ *   mine                     cuts moments from the conversations a model
+ *                            played, each with a second look (--check for
+ *                            only the second look, --hidden)
+ *   write                    a model writes moments of the kinds no played
+ *                            interview shows, each with a second look
+ *                            (--hidden, --count 2, --only kinds, --from 2)
+ *   check                    a page to check the judge against a person
+ *                            (--practice a,b); --answers <file> counts how
+ *                            often they agree: nine in ten at least
+ *   report                   the page to read: where each bench stands, by
+ *                            kind of moment, what went wrong, every run
  *
  * `--practice <id>` names a practice company; the newest by default. Keys
  * 03 and 06 are the hidden test set, read from `LAB_HIDDEN`, outside the
@@ -45,6 +63,16 @@ import {
   makePractice,
   practiceNamed,
 } from "./practice.ts";
+import {
+  checkJudge,
+  compareRuns,
+  listResults,
+  mine,
+  report,
+  runBenches,
+  write,
+} from "./round.ts";
+import type { RoundArgs } from "./round.ts";
 import { keepTranscripts, score } from "./score.ts";
 import { simulate } from "./simulate.ts";
 
@@ -59,6 +87,11 @@ const { positionals, values } = parseArgs({
     interviewer: { type: "string" },
     parallel: { type: "string" },
     label: { type: "string" },
+    hidden: { type: "boolean", default: false },
+    check: { type: "boolean", default: false },
+    answers: { type: "string" },
+    count: { type: "string" },
+    from: { type: "string" },
   },
 });
 
@@ -211,6 +244,23 @@ const keepAll = async (): Promise<void> => {
   }
 };
 
+const roundArgs = (): RoundArgs => ({
+  rest,
+  label: values.label,
+  only:
+    values.only === undefined
+      ? null
+      : values.only.split(",").map((each) => each.trim()),
+  hidden: values.hidden,
+  interviewer: values.interviewer === "claire" ? "claire" : "stephen",
+  practice: values.practice,
+  check: values.check,
+  answers: values.answers,
+  count: countOf(values.count, 2),
+  from: Math.max(Number(values.from ?? 0) || 0, 0),
+  log,
+});
+
 const commands: Readonly<Record<string, () => Promise<void> | void>> = {
   keys: checkKeys,
   practice: startPractice,
@@ -218,6 +268,27 @@ const commands: Readonly<Record<string, () => Promise<void> | void>> = {
   simulate: playRest,
   score: scoreAll,
   keep: keepAll,
+  bench: async () => {
+    await runBenches(roundArgs());
+  },
+  compare: () => {
+    compareRuns(roundArgs());
+  },
+  results: () => {
+    listResults(roundArgs());
+  },
+  mine: async () => {
+    await mine(roundArgs());
+  },
+  write: async () => {
+    await write(roundArgs());
+  },
+  check: () => {
+    checkJudge(roundArgs());
+  },
+  report: async () => {
+    await report(roundArgs());
+  },
 };
 
 const run = commands[command ?? ""];

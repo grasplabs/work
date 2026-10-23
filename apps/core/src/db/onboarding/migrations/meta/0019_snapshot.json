@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "f316da86-b6d3-4ab0-b741-efbd99b6c128",
-  "prevId": "ed702478-9d90-408a-804a-c2d7c27336ff",
+  "id": "af5462c1-5162-429c-8dde-d22a110da085",
+  "prevId": "997de2f9-afdf-4c32-b3d2-715f24e6cfae",
   "tables": {
     "answer_waits": {
       "name": "answer_waits",
@@ -203,6 +203,37 @@
         "talked": {
           "name": "talked",
           "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "counted_works": {
+      "name": "counted_works",
+      "columns": {
+        "work": {
+          "name": "work",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "at": {
+          "name": "at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "by": {
+          "name": "by",
+          "type": "text",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
@@ -914,6 +945,13 @@
         },
         "told_at": {
           "name": "told_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "rules": {
+          "name": "rules",
           "type": "text",
           "primaryKey": false,
           "notNull": false,

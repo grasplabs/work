@@ -132,7 +132,7 @@ export const staffAfterGoMs = 7 * 24 * 60 * 60 * 1000;
 
 /**
  * Whether Grasp's staff may be in now, by what the company decided: not
- * when its admin ended staff access after the console opened this window
+ * when its admin ended staff access after Grasp's admin opened this window
  * (`windowOpened`), and, for the onboarding scope, not past 7 days after
  * Grasp's go. The go counts once given, whether or not the gate was closed
  * again since: closing it never gives staff back access the go ended.
@@ -164,7 +164,7 @@ export const staffMayStay = async (
 
 /**
  * Whether the company's admin ended Grasp's staff access and no window
- * the console opened since has given it back, as `staffMayStay` counts a
+ * the admin opened since has given it back, as `staffMayStay` counts a
  * window opened after the end.
  */
 export const staffAccessEnded = async (
@@ -183,7 +183,7 @@ export const staffAccessEnded = async (
 };
 
 /**
- * When staff access ends: the console's window, or, for the onboarding
+ * When staff access ends: the admin's window, or, for the onboarding
  * scope, 7 days after Grasp's go when that comes first.
  */
 const staffUntil = (
@@ -296,8 +296,8 @@ export const closeGate = async (
 
 /**
  * Ends Grasp's staff access, as the company's admin: every staff session
- * goes now, and the window the console opened lets nobody in again; only
- * a window the console opens afterwards does. In one batch, audited as
+ * goes now, and the window the admin opened lets nobody in again; only
+ * a window the admin opens afterwards does. In one batch, audited as
  * the admin.
  */
 export const endStaffAccess = async (

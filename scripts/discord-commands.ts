@@ -1,5 +1,5 @@
 /**
- * Registers Grasp's Discord bot's `/grasp` command (apps/console's
+ * Registers Grasp's Discord bot's `/grasp` command (apps/admin's
  * src/admin/discord-commands.ts) with its Discord application, replacing
  * whatever commands it had: run once after creating the application, and
  * again whenever the command changes. `vp run discord:commands`, with:
@@ -14,12 +14,12 @@
  * Before it, in the Discord developer portal: create the application, add a
  * bot, and invite it to Grasp's server with the `applications.commands`
  * scope. After it: set the application's Interactions Endpoint URL to the
- * console's `https://<console host>/discord/interactions`, once the console
+ * admin's `https://<admin host>/discord/interactions`, once the admin
  * has `DISCORD_PUBLIC_KEY` (the application's public key) and
  * `DISCORD_STAFF_IDS` (staff's Discord user ids, comma-separated) and
  * Access lets that path through.
  */
-import { discordCommands } from "../apps/console/src/admin/discord-commands.ts";
+import { discordCommands } from "../apps/admin/src/admin/discord-commands.ts";
 
 const api = "https://discord.com/api/v10";
 

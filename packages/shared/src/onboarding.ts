@@ -1,9 +1,11 @@
 import { z } from "zod";
 
 import type { AdminSnapshot } from "./admin-snapshot.ts";
+import type { OrgRules } from "./admin/onboarding-admin.ts";
 import type { OnboardingDirectoryApi } from "./directory.ts";
 import type { OnboardingPlacesApi } from "./document-places.ts";
 import { defineErrorFamily } from "./errors.ts";
+import type { OnboardingHrApi } from "./hr.ts";
 import type { KickoffApi } from "./kickoff.ts";
 import type { OnboardingChoicesApi } from "./onboarding-choices.ts";
 import type { OnboardingDocumentsApi } from "./onboarding-documents.ts";
@@ -20,6 +22,7 @@ import type {
   StaffNote,
   StaffOverview,
   StaffTranscript,
+  StaffWorks,
   StephenSetup,
   StephenSetupView,
 } from "./onboarding-staff.ts";
@@ -360,7 +363,8 @@ export interface OnboardingApi
     OnboardingDocumentsApi,
     OnboardingDirectoryApi,
     OnboardingChoicesApi,
-    OnboardingPlacesApi {
+    OnboardingPlacesApi,
+    OnboardingHrApi {
   /** The programme, for the dashboard; null without a plan. Any role. */
   programme: () => Promise<Programme | null>;
   view: () => Promise<OnboardingView>;
@@ -442,6 +446,19 @@ export interface OnboardingStaffApi extends KickoffApi {
   organization: () => Promise<StaffOrganization>;
   /** Puts the list right, one change at a time; each is in the log. */
   changeOrganization: (change: OrganizationChangeInput) => Promise<void>;
+  /**
+   * Every piece of work as drawn from what its people agreed to, with
+   * this organization's rules for when one is known and the pieces Grasp
+   * counts as known by hand. It holds what people said, by name, so every
+   * read is in the audit log.
+   */
+  works: () => Promise<StaffWorks>;
+  /** Sets when a piece of work counts as known here; null takes the starting values back. */
+  setRules: (rules: OrgRules | null) => Promise<void>;
+  /** Counts a piece of work as known by hand, or leaves it to the rules again. */
+  countAsKnown: (work: string, counted: boolean) => Promise<void>;
+  /** Draws a piece of work again from everything its people agreed to. */
+  drawWorkAgain: (work: string) => Promise<void>;
 }
 
 /** Why the onboarding refused something. */
@@ -462,4 +479,6 @@ export const onboardingErrors = defineErrorFamily({
   "onboarding.no_failed_mail": "That person has no mail that failed.",
   "onboarding.no_difference":
     "Nothing about that piece of work needs settling.",
+  "onboarding.nothing_to_draw":
+    "Nobody who does that work has agreed to anything yet.",
 });

@@ -23,7 +23,7 @@ const entry = (owner: string): StateEntry => ({
 /** A registry of one Worker with a database, a namespace and a bucket. */
 const registry: ClientStateRegistry = {
   workers: { core: { config: "apps/core/wrangler.jsonc" } },
-  notClientState: { "apps/console/wrangler.jsonc": "Grasp's own." },
+  notClientState: { "apps/admin/wrangler.jsonc": "Grasp's own." },
   d1: [
     {
       role: "core-db",
@@ -81,7 +81,7 @@ const found: FoundState = {
       otherState: [],
     },
   },
-  configs: ["apps/console/wrangler.jsonc", "apps/core/wrangler.jsonc"],
+  configs: ["apps/admin/wrangler.jsonc", "apps/core/wrangler.jsonc"],
   schemas: {
     "apps/core/src/db/core": ["users"],
     "apps/core/src/db/runs": ["steps"],

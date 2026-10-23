@@ -14,6 +14,7 @@ import { plugin as shadcn } from "@shadcn/lint";
 import * as parser from "@typescript-eslint/parser";
 import { Linter } from "eslint/universal";
 
+import { designRuleLevels, designRules } from "./design-rules.ts";
 import type { Diagnostic } from "./diagnostic.ts";
 import type { Kit } from "./kit.ts";
 
@@ -76,9 +77,9 @@ export const lint = (
         parser,
         parserOptions: { ecmaFeatures: { jsx: true } },
       },
-      plugins: { shadcn: { ...shadcn, rules } },
+      plugins: { shadcn: { ...shadcn, rules }, grasp: designRules },
       settings: { shadcn: { note } },
-      rules: kit.lintRules,
+      rules: { ...kit.lintRules, ...designRuleLevels },
     },
   ];
   return Object.entries(appFiles)

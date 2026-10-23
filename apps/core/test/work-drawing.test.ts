@@ -567,11 +567,18 @@ describe("the work as drawn", () => {
   });
 
   it.each([
-    { why: "", told: ["lisa", "tim", "bram"], holds: null, state: "complete" },
+    {
+      why: "",
+      told: ["lisa", "tim", "bram"],
+      holds: null,
+      counted: false,
+      state: "complete",
+    },
     {
       why: "place",
       told: ["lisa", "tim", "bram"],
       holds: null,
+      counted: false,
       state: "variants",
     },
     // Told two ways and nobody can say why: it waits until somebody can.
@@ -579,6 +586,7 @@ describe("the work as drawn", () => {
       why: "conflict",
       told: ["lisa", "tim", "bram"],
       holds: null,
+      counted: false,
       state: "blocked",
     },
     // Or until the admin settles it: both ways kept, or one that holds.
@@ -586,23 +594,47 @@ describe("the work as drawn", () => {
       why: "conflict",
       told: ["lisa", "tim", "bram"],
       holds: "both",
+      counted: false,
       state: "variants",
     },
     {
       why: "conflict",
       told: ["lisa", "tim", "bram"],
       holds: "other",
+      counted: false,
       state: "complete",
     },
-    { why: "", told: ["lisa", "tim"], holds: null, state: "mapping" },
+    {
+      why: "",
+      told: ["lisa", "tim"],
+      holds: null,
+      counted: false,
+      state: "mapping",
+    },
+    // Counted as known by hand by Grasp: that holds, unless nobody can say why.
+    {
+      why: "",
+      told: ["lisa", "tim"],
+      holds: null,
+      counted: true,
+      state: "complete",
+    },
+    {
+      why: "conflict",
+      told: ["lisa", "tim", "bram"],
+      holds: null,
+      counted: true,
+      state: "blocked",
+    },
   ] satisfies {
     why: string;
     told: string[];
     holds: SettleChoice | null;
+    counted: boolean;
     state: string;
   }[])(
-    "is known as $state when $told.length of three told it, a step told two ways for '$why', settled as $holds",
-    ({ why, told, holds, state }) => {
+    "is known as $state when $told.length of three told it, a step told two ways for '$why', settled as $holds, counted by hand $counted",
+    ({ why, told, holds, counted, state }) => {
       const drawn = drawnOf(
         {
           steps: [
@@ -633,6 +665,7 @@ describe("the work as drawn", () => {
         doers: ["lisa", "tim", "bram"],
         lead: null,
         holds,
+        counted,
       });
       expect(known.state).toBe(state);
     }

@@ -2,6 +2,7 @@ import { oauthProviderSchema } from "@grasp-os/shared/connect";
 import { directorySuiteSchema } from "@grasp-os/shared/directory";
 import type { OnboardingDirectory } from "@grasp-os/shared/directory";
 import type { OnboardingPlaces } from "@grasp-os/shared/document-places";
+import type { OnboardingHr } from "@grasp-os/shared/hr";
 import type {
   LinkToSend,
   OnboardingReview,
@@ -463,6 +464,7 @@ interface Loaded {
   company: string | null;
   directory: OnboardingDirectory | null;
   places: OnboardingPlaces | null;
+  hr: OnboardingHr | null;
 }
 
 export const Route = createFileRoute("/setup")({
@@ -517,6 +519,7 @@ export const Route = createFileRoute("/setup")({
         directory,
         places,
         review,
+        hr,
       ] = await Promise.all([
         session.onboarding.view(),
         session.onboarding.links(),
@@ -527,6 +530,7 @@ export const Route = createFileRoute("/setup")({
         session.onboarding.directory(),
         session.onboarding.documentPlaces(),
         session.onboarding.review(),
+        session.onboarding.hrPlatform(),
       ]);
       return {
         view,
@@ -538,6 +542,7 @@ export const Route = createFileRoute("/setup")({
         directory,
         places,
         review,
+        hr,
       };
     }),
   component: Setup,
