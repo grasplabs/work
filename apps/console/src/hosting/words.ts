@@ -78,6 +78,8 @@ const inventoryWords: Readonly<Record<InventoryErrorCode, string>> = {
   resource_outside_jurisdiction:
     "Cloudflare reports a resource outside the jurisdiction the inventory records.",
   runner_replaced: "Another attempt took the client over.",
+  evidence_subject_unknown:
+    "Evidence names a release, commit, candidate or runtime profile the console can't check.",
 };
 
 /** Why an operation stopped, by its own code. */

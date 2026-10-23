@@ -18,7 +18,7 @@
 import { toHex } from "@grasp-os/shared/encoding";
 import { d1IdPlaceholder } from "@grasp-os/shared/release";
 import type { ReleaseManifest, WorkerEntry } from "@grasp-os/shared/release";
-import { and, asc, eq, isNull, or } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, or } from "drizzle-orm";
 import { z } from "zod";
 
 import { act, actIfChanged } from "../db/act.ts";
@@ -26,11 +26,14 @@ import type { Actor, ConsoleDatabase } from "../db/act.ts";
 import {
   clientPlacements,
   clientResources,
+  destinationCapabilityEvidence,
   hostingDestinations,
+  releases,
 } from "../db/schema.ts";
 import { holdsClient, stillHolds } from "../runners.ts";
 import type { HeldClient } from "../runners.ts";
 import {
+  capabilities,
   destinationCapabilitiesSchema,
   hostingPolicies,
   hostingPolicyIdSchema,
@@ -38,6 +41,7 @@ import {
 } from "./policy.ts";
 import type {
   DestinationCapabilities,
+  Evidence,
   HostingPolicyId,
   Jurisdiction,
   PlacementProblem,
@@ -79,6 +83,12 @@ export const inventoryErrorCodes = [
   "resource_outside_jurisdiction",
   /** Another runner took the client over: this one changes nothing more. */
   "runner_replaced",
+  /**
+   * Evidence observed against something the console can't check: a
+   * release it hasn't imported, a commit no imported release was built
+   * from, a candidate, or a runtime profile the destination doesn't run.
+   */
+  "evidence_subject_unknown",
 ] as const;
 
 export type InventoryErrorCode = (typeof inventoryErrorCodes)[number];
@@ -104,10 +114,12 @@ export type ResourceKind = (typeof clientResources.kind.enumValues)[number];
 export type ClientResource = typeof clientResources.$inferSelect;
 export type ClientPlacement = typeof clientPlacements.$inferSelect;
 
+type DestinationKind = (typeof hostingDestinations.kind.enumValues)[number];
+
 /** A destination as staff record it. */
 export interface DestinationInput {
   id: string;
-  kind: (typeof hostingDestinations.kind.enumValues)[number];
+  kind: DestinationKind;
   accountId: string | null;
   namespace: string | null;
   policies: readonly HostingPolicyId[];
@@ -119,10 +131,133 @@ const destinationIdSchema = z
   .regex(/^[a-z0-9](?:[a-z0-9-]{0,48}[a-z0-9])?$/u);
 
 /**
+ * The runtime profile core runs on in each kind of destination: the only
+ * profile evidence about that destination may name. Cloudflare's, as the
+ * deploy sets `RUNTIME_PROFILE` (src/deploy/core-config.ts), or plain
+ * workerd's, which its operator runs.
+ */
+const runtimeProfiles = {
+  workers_for_platforms: "cloudflare",
+  dedicated: "cloudflare",
+  workerd: "workerd",
+} as const satisfies Record<DestinationKind, string>;
+
+type Subject = Evidence["subject"];
+
+/** Each capability `verified` lists, with what its evidence was observed against. */
+const subjectsOf = (verified: DestinationCapabilities) =>
+  Object.entries(verified).flatMap(([capability, entry]) =>
+    entry === undefined ? [] : [{ capability, subject: entry.evidence.subject }]
+  );
+
+/** The ids of every subject of `kind` that `verified`'s evidence names. */
+const idsOf = (
+  verified: DestinationCapabilities,
+  kind: Subject["kind"]
+): string[] => [
+  ...new Set(
+    subjectsOf(verified)
+      .filter(({ subject }) => subject.kind === kind)
+      .map(({ subject }) => subject.id)
+  ),
+];
+
+/** Which of `ids` name a release the console imported. */
+const importedReleases = async (
+  db: ConsoleDatabase,
+  ids: readonly string[]
+): Promise<Set<string>> => {
+  if (ids.length === 0) {
+    return new Set();
+  }
+  const rows = await db
+    .select({ id: releases.id })
+    .from(releases)
+    .where(inArray(releases.id, [...ids]));
+  return new Set(rows.map(({ id }) => id));
+};
+
+/** Which of `commits` an imported release was built from. */
+const builtCommits = async (
+  db: ConsoleDatabase,
+  commits: readonly string[]
+): Promise<Set<string>> => {
+  if (commits.length === 0) {
+    return new Set();
+  }
+  const rows = await db
+    .selectDistinct({ commitSha: releases.commitSha })
+    .from(releases)
+    .where(inArray(releases.commitSha, [...commits]));
+  return new Set(rows.map(({ commitSha }) => commitSha));
+};
+
+/**
+ * Throws unless the evidence in `verified`, for a destination of `kind`,
+ * names only subjects the console knows: a release it imported, a commit
+ * one was built from, or the destination's own runtime profile. An
+ * untrusted report of success, naming anything else, proves nothing about
+ * what runs. A candidate is never known: the console imports releases,
+ * not candidates, so what was observed on one is recorded against the
+ * release it became.
+ */
+const assertSubjectsKnown = async (
+  db: ConsoleDatabase,
+  kind: DestinationKind,
+  verified: DestinationCapabilities
+): Promise<void> => {
+  const imported = await importedReleases(db, idsOf(verified, "release"));
+  const built = await builtCommits(db, idsOf(verified, "source"));
+  const known: Record<Subject["kind"], (id: string) => boolean> = {
+    release: (id) => imported.has(id),
+    source: (id) => built.has(id),
+    profile: (id) => id === runtimeProfiles[kind],
+    candidate: () => false,
+  };
+  const unknown = subjectsOf(verified).find(
+    ({ subject }) => !known[subject.kind](subject.id)
+  );
+  if (unknown !== undefined) {
+    throw new InventoryError(
+      "evidence_subject_unknown",
+      `${unknown.capability}'s evidence names ${unknown.subject.kind} ${unknown.subject.id}, which the console can't check`
+    );
+  }
+};
+
+/**
+ * Where `evidence`'s full record is, as the audit log keeps it: without
+ * credentials, query or fragment, which a link to a test run may carry.
+ */
+const recordOf = (evidence: Evidence): string => {
+  const url = new URL(evidence.record);
+  return `${url.origin}${url.pathname}`;
+};
+
+/** The audit detail of each capability `verified` lists: its status, subject and record. */
+const evidenceDetail = (
+  verified: DestinationCapabilities
+): Record<string, string> =>
+  Object.fromEntries(
+    Object.entries(verified).flatMap(([capability, entry]) =>
+      entry === undefined
+        ? []
+        : [
+            [
+              `evidence.${capability}`,
+              `${entry.status} ${entry.evidence.subject.kind}:${entry.evidence.subject.id} ${recordOf(entry.evidence)}`,
+            ],
+          ]
+    )
+  );
+
+/**
  * Records destination `input`, or replaces what it says about one: its
  * capabilities are re-verified as staff record new evidence. Placing a
  * client checks them again, so a capability withdrawn here stops the next
- * allocation for every client in it.
+ * allocation for every client in it. Evidence must name a subject the
+ * console knows, and every capability's declaration, the unlisted ones as
+ * unknown, is kept (`capabilityEvidence`).
  */
 export const saveDestination = async (
   db: ConsoleDatabase,
@@ -132,6 +267,7 @@ export const saveDestination = async (
   destinationIdSchema.parse(input.id);
   const policies = z.array(hostingPolicyIdSchema).parse(input.policies);
   const verified = destinationCapabilitiesSchema.parse(input.capabilities);
+  await assertSubjectsKnown(db, input.kind, verified);
   const now = new Date();
   const values = {
     kind: input.kind,
@@ -141,6 +277,24 @@ export const saveDestination = async (
     capabilities: JSON.stringify(verified),
     updatedAt: now,
   };
+  // An insert per capability: a D1 statement binds at most 100 values.
+  const declarations = capabilities.map((capability) => {
+    const entry = verified[capability];
+    return db.insert(destinationCapabilityEvidence).values({
+      destinationId: input.id,
+      capability,
+      status: entry?.status ?? "unknown",
+      subjectKind: entry?.evidence.subject.kind ?? null,
+      subjectId: entry?.evidence.subject.id ?? null,
+      procedure: entry?.evidence.procedure ?? null,
+      observedAt:
+        entry === undefined ? null : new Date(entry.evidence.observedAt),
+      recordedBy: entry?.evidence.recordedBy ?? null,
+      record: entry?.evidence.record ?? null,
+      declaredBy: actor === "system" ? actor : actor.email,
+      declaredAt: now,
+    });
+  });
   await act(
     db,
     actor,
@@ -149,6 +303,7 @@ export const saveDestination = async (
         .insert(hostingDestinations)
         .values({ id: input.id, ...values, createdAt: now })
         .onConflictDoUpdate({ target: hostingDestinations.id, set: values }),
+      ...declarations,
     ],
     {
       action: "destination.save",
@@ -156,10 +311,25 @@ export const saveDestination = async (
       detail: {
         policies: policies.join(","),
         capabilities: Object.keys(verified).join(","),
+        ...evidenceDetail(verified),
       },
     }
   );
 };
+
+export type CapabilityEvidence =
+  typeof destinationCapabilityEvidence.$inferSelect;
+
+/** Every capability destination `id` was declared with, in the order saved. */
+export const capabilityEvidence = async (
+  db: ConsoleDatabase,
+  id: string
+): Promise<CapabilityEvidence[]> =>
+  await db
+    .select()
+    .from(destinationCapabilityEvidence)
+    .where(eq(destinationCapabilityEvidence.destinationId, id))
+    .orderBy(asc(destinationCapabilityEvidence.id));
 
 export const destinationOf = async (db: ConsoleDatabase, id: string) => {
   const row = await db
