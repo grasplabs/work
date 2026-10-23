@@ -4,11 +4,12 @@ import { calendarTools } from "./calendar.ts";
 import { fileTools } from "./files.ts";
 import { graphHost } from "./graph.ts";
 import { mailTools } from "./mail.ts";
+import { todoTools } from "./todo.ts";
 
 /**
  * Native Microsoft 365 connector, on Microsoft Graph: mail and calendars
- * of one mailbox per call, and files in OneDrive and SharePoint, one drive
- * per call.
+ * of one mailbox per call, a person's own Microsoft To Do, and files in
+ * OneDrive and SharePoint, one drive per call.
  */
 export default defineConnector({
   name: "microsoft-365",
@@ -24,7 +25,8 @@ export default defineConnector({
     "Calendars.Read.Shared",
     "Files.Read.All",
     "Sites.Read.All",
+    "Tasks.ReadWrite",
   ],
   hosts: [graphHost],
-  tools: [...mailTools, ...calendarTools, ...fileTools],
+  tools: [...mailTools, ...calendarTools, ...fileTools, ...todoTools],
 });

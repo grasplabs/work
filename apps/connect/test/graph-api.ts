@@ -5,7 +5,9 @@
  * sent, as an attacker's would. `throttle` makes Graph answer the next
  * request with a 429, `throttleWrite` the next write; `failWrite` answers
  * the next write with an error, and `loseWriteAnswer` carries the next
- * write out and loses its answer.
+ * write out and loses its answer. Each person's To Do is theirs alone:
+ * Graph answers a token for its own user's lists only, as it answers a
+ * delegated `Tasks.ReadWrite` token.
  */
 import { egressHeader } from "@grasp-os/connector-kit/manifest";
 import {
@@ -16,6 +18,7 @@ import { beforeEach } from "vite-plus/test";
 import { z } from "zod";
 
 import {
+  accessDenied,
   attachment,
   attachmentPage,
   childrenPage,
@@ -37,14 +40,16 @@ import {
   sharePointHost,
   spoofedId,
   throttled,
+  todoLists,
 } from "./fixtures/graph.ts";
 import { fakeProvider, json, route as routeOn } from "./internet.ts";
 import type { ProviderRoute } from "./internet.ts";
+import type { fakeProviders } from "./oauth-provider.ts";
 
 const users = String.raw`^/v1\.0/users/(?<mailbox>[^/]+)`;
 const drives = String.raw`^/v1\.0/drives/(?<drive>[^/]+)`;
 
-const parts = ["mailbox", "drive", "id"] as const;
+const parts = ["mailbox", "drive", "id", "list", "task"] as const;
 
 type Part = (typeof parts)[number];
 
@@ -203,6 +208,175 @@ const graphRoutes: ProviderRoute<Part>[] = [
   ),
 ];
 
+/** A task in someone's To Do, as Graph keeps it. */
+interface TodoTask {
+  id: string;
+  title: string;
+  status: string;
+  body: { contentType: string; content: string };
+  dueDateTime?: { dateTime: string; timeZone: string };
+  completedDateTime?: { dateTime: string; timeZone: string };
+  createdDateTime: string;
+  lastModifiedDateTime: string;
+  /** The effect key it was tagged with, if any. */
+  tag?: string;
+}
+
+const todoTaskSchema = z.object({
+  title: z.string(),
+  body: z.object({ contentType: z.string(), content: z.string() }).optional(),
+  dueDateTime: z
+    .object({ dateTime: z.string(), timeZone: z.string() })
+    .optional(),
+});
+
+/**
+ * Each person's To Do tasks, by their account's subject and the list.
+ * Cleared before each test.
+ */
+const todoTasks = new Map<string, TodoTask[]>();
+
+const tasksOf = (owner: string, list: string): TodoTask[] => {
+  const key = `${owner} ${list}`;
+  const tasks = todoTasks.get(key) ?? [];
+  todoTasks.set(key, tasks);
+  return tasks;
+};
+
+/** A task as Graph answers for it, without the tag it keeps. */
+const taskAnswer = ({ tag: _tag, ...task }: TodoTask) => ({
+  "@odata.etag": `W/"${task.id}"`,
+  importance: "normal",
+  isReminderOn: false,
+  ...task,
+});
+
+/** The effect key a task Graph is asked to make is tagged with, if any. */
+const tagOf = (made: unknown): string | undefined =>
+  taggedSchema
+    .safeParse(made)
+    .data?.singleValueExtendedProperties?.find(
+      (property) => property.id === effectPropertyId
+    )?.value;
+
+/** The To Do list with this id, if Graph has one. */
+const listOf = (id: string) => todoLists.find((list) => list.id === id);
+
+/**
+ * Graph's To Do routes. `ownerOf` says whose a request's token is, if the
+ * mailbox it names is that user: anyone else's To Do is refused.
+ */
+const todoRoutes = (
+  ownerOf: (mailbox: string, request: Request) => string | undefined
+): ProviderRoute<Part>[] => {
+  const lists = `${users}/todo/lists`;
+  /** The list's owner, or Graph's refusal. */
+  const opened = (
+    mailbox: string,
+    list: string,
+    request: Request
+  ): string | Response => {
+    const owner = ownerOf(mailbox, request);
+    if (owner === undefined) {
+      return json(accessDenied, 403);
+    }
+    return listOf(list) === undefined ? json(notFound, 404) : owner;
+  };
+  return [
+    route("GET", lists, ({ mailbox, request }) =>
+      ownerOf(mailbox, request) === undefined
+        ? json(accessDenied, 403)
+        : json({ value: todoLists })
+    ),
+    route("GET", `${lists}/(?<list>[^/]+)`, ({ mailbox, list, request }) => {
+      const owner = opened(mailbox, list, request);
+      return owner instanceof Response ? owner : json(listOf(list));
+    }),
+    route(
+      "GET",
+      `${lists}/(?<list>[^/]+)/tasks`,
+      ({ mailbox, list, query, request }) => {
+        const owner = opened(mailbox, list, request);
+        if (owner instanceof Response) {
+          return owner;
+        }
+        const tasks = tasksOf(owner, list);
+        const filter = query.get("$filter") ?? "";
+        if (filter.startsWith("singleValueExtendedProperties/")) {
+          const asked = keyFilter.exec(filter)?.groups;
+          if (asked?.id !== effectPropertyId) {
+            return json({ error: { code: "BadRequest" } }, 400);
+          }
+          return json({
+            value: tasks.filter(({ tag }) => tag === asked.key).map(taskAnswer),
+          });
+        }
+        const openOnly = filter === "status ne 'completed'";
+        return json({
+          value: tasks
+            .filter(({ status }) => !openOnly || status !== "completed")
+            .map(taskAnswer),
+        });
+      }
+    ),
+    route(
+      "POST",
+      `${lists}/(?<list>[^/]+)/tasks`,
+      async ({ mailbox, list, request }) => {
+        const owner = opened(mailbox, list, request);
+        if (owner instanceof Response) {
+          return owner;
+        }
+        const body: unknown = await request.json();
+        const { title, body: note, dueDateTime } = todoTaskSchema.parse(body);
+        const now = new Date().toISOString();
+        const task: TodoTask = {
+          id: `AAkALgAAAAAAHYQDEapmEc2byACqAC-EWg0A${crypto.randomUUID().replaceAll("-", "")}=`,
+          title,
+          status: "notStarted",
+          body: note ?? { contentType: "text", content: "" },
+          ...(dueDateTime === undefined ? {} : { dueDateTime }),
+          createdDateTime: now,
+          lastModifiedDateTime: now,
+        };
+        const tag = tagOf(body);
+        tasksOf(owner, list).push({
+          ...task,
+          ...(tag === undefined ? {} : { tag }),
+        });
+        return json(taskAnswer(task), 201);
+      }
+    ),
+    route(
+      "PATCH",
+      `${lists}/(?<list>[^/]+)/tasks/(?<task>[^/]+)`,
+      async ({ mailbox, list, task: id, request }) => {
+        const owner = opened(mailbox, list, request);
+        if (owner instanceof Response) {
+          return owner;
+        }
+        const task = tasksOf(owner, list).find((each) => each.id === id);
+        if (task === undefined) {
+          return json(notFound, 404);
+        }
+        const { status } = z
+          .object({ status: z.string() })
+          .parse(await request.json());
+        const now = new Date().toISOString();
+        task.status = status;
+        task.lastModifiedDateTime = now;
+        if (status === "completed") {
+          task.completedDateTime = {
+            dateTime: now.replace("Z", ""),
+            timeZone: "UTC",
+          };
+        }
+        return json(taskAnswer(task));
+      }
+    ),
+  ];
+};
+
 /** SharePoint's answer to a download: the file, or a second redirect. */
 const sharePointAnswer = (url: URL): Response => {
   const id = url.searchParams.get("UniqueId");
@@ -218,16 +392,37 @@ const sharePointAnswer = (url: URL): Response => {
   });
 };
 
-/** Graph, SharePoint and the rest of the internet, for each test in the file. */
-export const fakeGraph = () => {
+/**
+ * Graph, SharePoint and the rest of the internet, for each test in the
+ * file. Given the OAuth providers, Graph knows whose each token is, and
+ * opens a person's To Do to their own token only; without them, it opens
+ * no one's.
+ */
+export const fakeGraph = (providers?: ReturnType<typeof fakeProviders>) => {
   beforeEach(() => {
     tagged.clear();
+    todoTasks.clear();
     duringLookup = undefined;
   });
+  /** The subject of the token's account, if `mailbox` is that account. */
+  const ownerOf = (mailbox: string, request: Request): string | undefined => {
+    const token = (request.headers.get("authorization") ?? "").replace(
+      "Bearer ",
+      ""
+    );
+    const account = providers?.state.holders.get(token);
+    if (account === undefined) {
+      return undefined;
+    }
+    const isThem =
+      mailbox.toLowerCase() === account.email.toLowerCase() ||
+      mailbox === account.subject;
+    return isThem ? account.subject : undefined;
+  };
   const { sent, writesDone, fail } = fakeProvider({
     hosts: [graphHost],
     parts,
-    routes: graphRoutes,
+    routes: [...graphRoutes, ...todoRoutes(ownerOf)],
     unmatched: () =>
       json(
         { error: { code: "BadRequest", message: "Unsupported request" } },
