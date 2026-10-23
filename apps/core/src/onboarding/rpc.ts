@@ -13,6 +13,12 @@ import type {
   PlacesSuite,
   SharePlaceFileInput,
 } from "@grasp-os/shared/document-places";
+import type {
+  HrCredentials,
+  HrPeople,
+  HrPlatform,
+  OnboardingHr,
+} from "@grasp-os/shared/hr";
 import {
   linksTakenSchema,
   onboardingErrors,
@@ -63,6 +69,7 @@ import {
 } from "./document-places.ts";
 import { shareDocument } from "./documents.ts";
 import { gateView } from "./gate.ts";
+import { connectHr, onboardingHr, readOnboardingHr } from "./hr.ts";
 import { mondayOf } from "./rules.ts";
 import { onboardingStore } from "./store.ts";
 import { summaryOf } from "./summary.ts";
@@ -79,8 +86,9 @@ import { summaryOf } from "./summary.ts";
 // dashboard: the plan's first week and the stage, and nothing of the plan
 // or the roster past them. Who works where can also come from the
 // organization's directory, connected here and read for the admin's
-// browser to make the roster of (directory.ts); and documents from where
-// they live, picked in the admin's browser (document-places.ts).
+// browser to make the roster of (directory.ts); documents from where
+// they live, picked in the admin's browser (document-places.ts); and who
+// leads which team from its HR platform, the same way (hr.ts).
 
 /** The admin's answer to a document's question. */
 const answerSchema = z.strictObject({
@@ -205,6 +213,31 @@ export class OnboardingRpc extends CoreRpcTarget implements OnboardingApi {
     return await withPerson(
       this.#check,
       async (person) => await sharePlaceFile(this.#env, person, input)
+    );
+  }
+
+  async hrPlatform(): Promise<OnboardingHr | null> {
+    return await withPerson(
+      this.#check,
+      async (person) => await onboardingHr(this.#env, person)
+    );
+  }
+
+  async connectHrPlatform(
+    platform: HrPlatform,
+    credentials: HrCredentials
+  ): Promise<OnboardingHr> {
+    return await withPerson(
+      this.#check,
+      async (person) =>
+        await connectHr(this.#env, person, platform, credentials)
+    );
+  }
+
+  async readHrPlatform(): Promise<HrPeople> {
+    return await withPerson(
+      this.#check,
+      async (person) => await readOnboardingHr(this.#env, person)
     );
   }
 

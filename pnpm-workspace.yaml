@@ -87,8 +87,16 @@ catalog:
   "@earendil-works/pi-ai": 1.4.0
   "@modelcontextprotocol/sdk": 1.30.0
   better-auth: 1.7.5
-  # The console's Cloudflare Access check.
+  # The admin's Cloudflare Access check.
   jose: 6.2.12
+  # Vercel's Chat SDK (MIT): one bot on Teams, Slack, Discord, WhatsApp and
+  # the rest, its state in Durable Objects (packages/chat). Its adapters
+  # move together; keep them on chat's version.
+  "@chat-adapter/discord": 4.43.0
+  chat: 4.43.0
+  # What the Teams and Slack adapters send through; packages/chat's tests
+  # check its fix against it (src/workerd.ts). On the version they resolve.
+  axios: 1.20.0
 
   # Frontend
   # Babel 7 until babel-plugin-react-compiler supports Babel 8.
@@ -119,7 +127,7 @@ catalog:
   "@tanstack/react-router": 1.170.38
   "@tanstack/react-start": 1.168.56
   "@tanstack/router-plugin": 1.168.40
-  # TanStack Start's wire format for server functions: the console's tests
+  # TanStack Start's wire format for server functions: the admin's tests
   # call them through the Worker's entry as its pages do. Keep it on the
   # version @tanstack/react-start uses.
   seroval: 1.6.7
@@ -191,5 +199,11 @@ peerDependencyRules:
 # jq-wasm's Workers entry imports its own, unmetered jq.wasm as a default;
 # the patch drops that import, so a bundle carries only the metered module
 # (packages/workflow-expressions/src/jq.wasm).
+#
+# vitest-pool-workers wraps each Durable Object class's prototype in one
+# more Proxy on every construction (0.23.0 too); with `isolate: false`, a
+# shard that constructs about 1,800 objects of one class overflows the
+# stack, and every file after fails (GRA-972). The patch wraps it once.
 patchedDependencies:
+  "@cloudflare/vitest-pool-workers@0.22.0": patches/@cloudflare__vitest-pool-workers@0.22.0.patch
   jq-wasm@3.0.0-jq-1.8.2: patches/jq-wasm@3.0.0-jq-1.8.2.patch

@@ -2,7 +2,7 @@
  * Deploys one Worker of a built release (build-release.ts) with Wrangler,
  * from the release's own bytes: what CI deploys to grasp-os-staging, so
  * staging runs exactly the release that is then published for the
- * console (upload-release.ts), not a second build of the same commit.
+ * admin (upload-release.ts), not a second build of the same commit.
  *
  * In order, each refusing the deploy when it fails:
  * 1. every file of the release is checked against its manifest

@@ -42,21 +42,43 @@ const mainJournal = (file: string): Journal | undefined => {
 
 const errors: string[] = [];
 
+// A migration moved unchanged with its app (a rename at 100% similarity)
+// is still the one main shipped: only its path changed.
 const changed = git(
   "diff",
   "--name-status",
+  "--find-renames",
   "--diff-filter=MDR",
   "origin/main",
   "--",
   "*/migrations/*.sql"
 )
   .split("\n")
-  .filter(Boolean);
+  .filter((line) => line !== "" && !line.startsWith("R100\t"));
 for (const line of changed) {
   errors.push(
     `${line.split("\t").at(-1)} is on main already: add a new migration instead of changing it.`
   );
 }
+
+/** Where main has each journal that moved with its app, by its path now. */
+const movedJournals = new Map(
+  git(
+    "diff",
+    "--name-status",
+    "--find-renames",
+    "--diff-filter=R",
+    "origin/main",
+    "--",
+    "*/migrations/meta/_journal.json"
+  )
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => {
+      const [, from = "", to = ""] = line.split("\t");
+      return [to, from] as const;
+    })
+);
 
 const journals = git("ls-files", "*/migrations/meta/_journal.json")
   .split("\n")
@@ -66,7 +88,7 @@ for (const file of journals) {
   // Objects record each applied migration by index and tag, so the entries
   // main has must stay exactly as they are, in front of any new ones.
   for (const [position, shipped] of (
-    mainJournal(file)?.entries ?? []
+    mainJournal(movedJournals.get(file) ?? file)?.entries ?? []
   ).entries()) {
     const entry = entries[position];
     if (

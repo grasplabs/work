@@ -37,10 +37,10 @@ const journeyTests = /journey\.e2e\.ts$/u;
  */
 const packageApprovalTests = /(?:dashboard|engine-packages|inbox)\.e2e\.ts$/u;
 /**
- * The staff console's journeys (e2e/console): they run on a stack of their
- * own (playwright.console.config.ts).
+ * The admin's journeys (e2e/admin): they run on a stack of their
+ * own (playwright.admin.config.ts).
  */
-const consoleTests = /\/e2e\/console\//u;
+const adminTests = /\/e2e\/admin\//u;
 const ci = process.env.CI === "true";
 
 /**
@@ -84,7 +84,7 @@ export default defineConfig({
         packageApprovalTests,
         interviewTests,
         journeyTests,
-        consoleTests,
+        adminTests,
       ],
     },
     {

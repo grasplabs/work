@@ -74,9 +74,12 @@ const lineTokens = 400;
 /** The most the notes' model writes: the facts of one answer. */
 const notesTokens = 4000;
 
+/** A turn as Stephen is asked for it: the page's request, without the link it came on. */
+export type TurnAsked = Omit<InterviewTurnRequest, "secret" | "key">;
+
 /** What happened, as Stephen is told it, for someone called `name`. */
 const happenedOf = (
-  turn: InterviewTurnRequest,
+  turn: TurnAsked,
   name: string
 ): Record<InterviewEvent, string> => {
   const last = turn.lines.at(-1);
@@ -104,7 +107,7 @@ const aiPartMinutes = 3;
  * page.
  */
 export const briefOf = (
-  turn: InterviewTurnRequest,
+  turn: TurnAsked,
   context: TurnContext,
   company: string
 ): string => {
@@ -224,7 +227,7 @@ const tookOf = (
 
 interface Turn {
   env: ModelsEnv & Env;
-  turn: InterviewTurnRequest;
+  turn: TurnAsked;
   context: TurnContext;
   system: string;
   brief: string;
@@ -400,6 +403,128 @@ const holdTurn = async (held: Turn): Promise<void> => {
 
 const encoder = new TextEncoder();
 
+/** The organization's name, as Stephen is told it. */
+const companyOf = async (env: Env): Promise<string> => {
+  const { name } = await readOrganization(env);
+  return name;
+};
+
+/** One turn to hold, from what is known of who it is with. */
+export interface TurnInput {
+  env: Env;
+  turn: TurnAsked;
+  context: TurnContext;
+  /** The company's name, while it is read. */
+  company: Promise<string>;
+  requestId: string;
+  ctx: Pick<ExecutionContext, "waitUntil">;
+  /** Counts what each call took. */
+  meter: (took: Took) => Promise<void>;
+  /**
+   * Keeps what the turn ran on, for the staff's numbers: the mark of the
+   * text that speaks. A link's turn has one; the Stephen Lab's has none.
+   */
+  ran?: (mark: string) => Promise<void>;
+}
+
+/**
+ * Holds one turn: the events, a line of JSON at a time, as the page reads
+ * them. Someone's own link comes here once the store said who they are;
+ * so does the Stephen Lab's fixed input (lab.ts), with who they are given.
+ */
+export const turnStream = async ({
+  env,
+  turn,
+  context,
+  company,
+  requestId,
+  ctx,
+  meter,
+  ran,
+}: TurnInput): Promise<Response> => {
+  const settings = gatewaySettings(env);
+  const quick = modelForRole(settings, "quick", { sensitive: true });
+  const careful = modelForRole(settings, "careful", { sensitive: true });
+  if (quick === undefined || careful === undefined) {
+    log.error("interview.no_model", { requestId });
+    return Response.json(
+      { error: "The interview is not set up yet.", status: 503 },
+      { status: 503, headers: linkHeaders }
+    );
+  }
+  const [{ text: system, mark }, name] = await Promise.all([
+    interviewerText(turn.interviewer, context.kind, turn.locale),
+    company,
+  ]);
+  const cut = new AbortController();
+  const counting: Promise<void>[] = ran === undefined ? [] : [ran(mark)];
+  const count = (took: Took | null) => {
+    if (took !== null) {
+      counting.push(meter(took));
+    }
+  };
+  const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
+  const writer = writable.getWriter();
+  const deliver = async (event: TurnEvent): Promise<void> => {
+    try {
+      await writer.write(encoder.encode(`${JSON.stringify(event)}\n`));
+    } catch {
+      // The page went away: the turn is given up (below).
+      cut.abort();
+    }
+  };
+  const send = (event: TurnEvent) => {
+    if (!cut.signal.aborted) {
+      void deliver(event);
+    }
+  };
+  // Given up because they talked on, the page closes its end: both models
+  // are cut off at once, and what they took is still counted, as the turn
+  // runs on until it is (`waitUntil`).
+  const given = async (): Promise<void> => {
+    try {
+      await writer.closed;
+    } catch {
+      cut.abort();
+    }
+  };
+  void given();
+  const held = (async () => {
+    try {
+      await holdTurn({
+        env,
+        turn,
+        context,
+        system,
+        brief: briefOf(turn, context, name),
+        quick,
+        careful,
+        signal: cut.signal,
+        send,
+        count,
+      });
+    } catch (error) {
+      const failed =
+        error instanceof TurnFailedError
+          ? error
+          : refusalOf(modelErrors.codeOf(error));
+      if (!(error instanceof TurnFailedError || cut.signal.aborted)) {
+        log.error("interview.turn_failed", { requestId });
+      }
+      send({ error: failed.message, status: failed.status });
+    }
+    await Promise.allSettled(counting);
+    await writer.close().catch(() => null);
+  })();
+  ctx.waitUntil(held);
+  return new Response(readable, {
+    headers: {
+      ...linkHeaders,
+      "content-type": "application/x-ndjson; charset=utf-8",
+    },
+  });
+};
+
 /** Someone's turn, as the page asks for it: the events, a line of JSON at a time. */
 export const interviewTurnResponse = async (
   request: Request,
@@ -445,95 +570,25 @@ export const interviewTurnResponse = async (
     }
     return linkRefusal(found.code, requestId);
   }
-  const context = found.value;
-  const settings = gatewaySettings(env);
-  const quick = modelForRole(settings, "quick", { sensitive: true });
-  const careful = modelForRole(settings, "careful", { sensitive: true });
-  if (quick === undefined || careful === undefined) {
-    log.error("interview.no_model", { requestId });
-    return Response.json(
-      { error: "The interview is not set up yet.", status: 503 },
-      { status: 503, headers: linkHeaders }
-    );
-  }
-  const { text: system, mark } = context.kind === "lead" ? lead : own;
-  const organization = await readOrganization(env);
-  const cut = new AbortController();
   const store = onboardingStore(env);
-  // What the turn ran on, for the staff's numbers: the text that speaks,
-  // and how long they waited for his voice the answer before.
-  const counting: Promise<void>[] = [
-    store.turnRan(
-      secretMark,
-      { mark, interviewer: turn.interviewer, locale: turn.locale },
-      turn.waited
-    ),
-  ];
-  // Counted through a stub of its own: the store may have restarted while
-  // the turn ran, and a stub from before the restart reaches nothing.
-  const count = (took: Took | null) => {
-    if (took !== null) {
-      counting.push(onboardingStore(env).meter(took));
-    }
-  };
-  const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
-  const writer = writable.getWriter();
-  const deliver = async (event: TurnEvent): Promise<void> => {
-    try {
-      await writer.write(encoder.encode(`${JSON.stringify(event)}\n`));
-    } catch {
-      // The page went away: the turn is given up (below).
-      cut.abort();
-    }
-  };
-  const send = (event: TurnEvent) => {
-    if (!cut.signal.aborted) {
-      void deliver(event);
-    }
-  };
-  // Given up because they talked on, the page closes its end: both models
-  // are cut off at once, and what they took is still counted, as the turn
-  // runs on until it is (`waitUntil`).
-  const given = async (): Promise<void> => {
-    try {
-      await writer.closed;
-    } catch {
-      cut.abort();
-    }
-  };
-  void given();
-  const held = (async () => {
-    try {
-      await holdTurn({
-        env,
-        turn,
-        context,
-        system,
-        brief: briefOf(turn, context, organization.name),
-        quick,
-        careful,
-        signal: cut.signal,
-        send,
-        count,
-      });
-    } catch (error) {
-      const failed =
-        error instanceof TurnFailedError
-          ? error
-          : refusalOf(modelErrors.codeOf(error));
-      if (!(error instanceof TurnFailedError || cut.signal.aborted)) {
-        log.error("interview.turn_failed", { requestId });
-      }
-      send({ error: failed.message, status: failed.status });
-    }
-    await Promise.allSettled(counting);
-    await writer.close().catch(() => null);
-  })();
-  ctx.waitUntil(held);
-  return new Response(readable, {
-    headers: {
-      ...linkHeaders,
-      "content-type": "application/x-ndjson; charset=utf-8",
+  return await turnStream({
+    env,
+    turn,
+    context: found.value,
+    company: companyOf(env),
+    requestId,
+    ctx,
+    // Counted through a stub of its own: the store may have restarted while
+    // the turn ran, and a stub from before the restart reaches nothing.
+    meter: async (took) => {
+      await onboardingStore(env).meter(took);
+    },
+    ran: async (mark) => {
+      await store.turnRan(
+        secretMark,
+        { mark, interviewer: turn.interviewer, locale: turn.locale },
+        turn.waited
+      );
     },
   });
 };
