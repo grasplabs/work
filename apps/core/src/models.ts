@@ -3435,6 +3435,53 @@ const recordSpeech = async (
   );
 };
 
+/** How the gateway reaches the voice provider, for a request of one's own. */
+export interface VoiceGatewayRoute {
+  /** `https://workers-binding.ai/ai-gateway/gateways/<gateway>/<provider>`. */
+  base: string;
+  transport: FetchFunction;
+  /** The gateway's own headers: its token where one is set. Never logged. */
+  headers: Record<string, string>;
+}
+
+/**
+ * Where live transcription (transcription.ts) reaches ElevenLabs at the
+ * deployment's gateway: the path speech takes (`voice.provider`), over
+ * the AI binding, with the gateway's token where one is set
+ * (`speechRequest`). `undefined`, so nothing is sent, where the config
+ * doesn't parse, allows no voice model (the client agreed to none), there
+ * is no AI binding (plain workerd), or the deployment keeps every call in
+ * the EU and ElevenLabs would be reached at its native host.
+ */
+export const voiceGatewayRoute = (
+  env: ModelsEnv
+): VoiceGatewayRoute | undefined => {
+  const config = modelGatewayConfig(env);
+  if (
+    config === undefined ||
+    typeof env.AI?.fetch !== "function" ||
+    !config.models.some((ref) => parseVoiceRef(ref) !== undefined)
+  ) {
+    return undefined;
+  }
+  const provider = config.voice?.provider ?? nativeVoiceProvider;
+  if (deploymentStaysInEu(env) && provider === nativeVoiceProvider) {
+    return undefined;
+  }
+  const token = env.AI_GATEWAY_TOKEN;
+  return {
+    base: `https://workers-binding.ai/ai-gateway/gateways/${config.gateway}/${provider}`,
+    transport: createAiBindingFetch(env.AI),
+    headers: {
+      "cf-aig-authorization": `Bearer ${
+        token === undefined || token === ""
+          ? CLOUDFLARE_GATEWAY_BINDING_AUTH_SENTINEL
+          : token
+      }`,
+    },
+  };
+};
+
 /**
  * Says a line through the gateway: refused, audited, before anything is
  * sent when the allowlist, the rules or a budget don't let it through;

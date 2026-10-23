@@ -27,6 +27,7 @@ import {
   firstInterviewer,
   planSchema,
   remindAfterWorkingDays,
+  rosterSchema,
 } from "@grasp-os/shared/onboarding";
 import type {
   Agreements,
@@ -46,6 +47,10 @@ import type {
   DocumentReading,
   OnboardingDocument,
 } from "@grasp-os/shared/onboarding-documents";
+import type {
+  OrganizationChange,
+  StaffOrganization,
+} from "@grasp-os/shared/onboarding-organization";
 import {
   logPageMax,
   stephenSetupSchema,
@@ -141,6 +146,8 @@ import {
 } from "./kickoff.ts";
 import { linkSecretOf } from "./link-secret.ts";
 import { linkMail, reminderMail, updateMail } from "./mail-text.ts";
+import { organizationOf, rosterAfter } from "./organization.ts";
+import type { ListChange, ListRefusal } from "./organization.ts";
 import {
   agreementsIn,
   closesOn,
@@ -305,6 +312,25 @@ const listenFor = (terms: readonly string[]): string[] => {
   }
   return kept.slice(0, listeningTermsMax);
 };
+
+/**
+ * A live transcription, as the onboarding notes it: its ID, who it is
+ * for, and the person whose link it is on, if it is on one.
+ */
+export interface TranscriptionSessionNote {
+  id: string;
+  by: AuditActor;
+  person?: string;
+}
+
+/** How a line said on someone's link is counted: `link:<person>`. */
+const linkWho = "link:";
+
+/**
+ * The key what is heard for `who` is counted under, beside what is said
+ * for them, in the same daily table.
+ */
+const heardKey = (who: string): string => `${who}:heard`;
 
 /** What one interview turn knows of who it is with, from the store (`turnContext`). */
 /** What the drawing gets from one interview: only what its person agreed to. */
@@ -535,6 +561,83 @@ const countsOf = (progress: InterviewProgress): InterviewCounts => ({
   interviewer: progress.interviewer ?? null,
 });
 
+/** Why staff's change to the organization wasn't made. */
+export type OrganizationRefusal =
+  | ListRefusal
+  | "onboarding.invalid"
+  | "onboarding.no_roster"
+  | "onboarding.no_work"
+  | "onboarding.not_now"
+  | "onboarding.no_map";
+
+/** A change to the list as the log and the audit log name it, and whom it was about. */
+const listChangeOf = (
+  change: ListChange,
+  before: Roster,
+  id: string
+): {
+  action: string;
+  detail: Record<string, AuditDetailValue>;
+  about: string | null;
+} => {
+  if (change.kind === "addTeam") {
+    return {
+      action: "onboarding.team.added",
+      detail: { team: id },
+      about: null,
+    };
+  }
+  if (change.kind === "editTeam") {
+    return {
+      action: "onboarding.team.changed",
+      detail: { team: change.team },
+      about: null,
+    };
+  }
+  if (change.kind === "takesPart") {
+    return {
+      action: change.takes
+        ? "onboarding.team.asked_in"
+        : "onboarding.team.left_out",
+      detail: { team: change.team },
+      about: null,
+    };
+  }
+  if (change.kind === "lead") {
+    return {
+      action: "onboarding.team.lead_set",
+      detail: { team: change.team },
+      about: change.person,
+    };
+  }
+  if (change.kind === "addPerson") {
+    return { action: "onboarding.person.added", detail: {}, about: id };
+  }
+  if (change.kind === "editPerson") {
+    const was = before.people.find(({ id: of }) => of === change.person);
+    return {
+      action:
+        was?.team === change.team
+          ? "onboarding.person.changed"
+          : "onboarding.person.moved",
+      detail: {},
+      about: change.person,
+    };
+  }
+  if (change.kind === "away") {
+    return {
+      action: change.away ? "onboarding.person.away" : "onboarding.person.back",
+      detail: {},
+      about: change.person,
+    };
+  }
+  return {
+    action: "onboarding.person.removed",
+    detail: {},
+    about: change.person,
+  };
+};
+
 export class Onboarding extends DurableObject<Env> {
   readonly #db = drizzle(this.ctx.storage);
   #auditRetryMs = auditRetryMs.first;
@@ -621,6 +724,24 @@ export class Onboarding extends DurableObject<Env> {
    * with them. Everyone new gets a link of their own.
    */
   async saveRoster(roster: Roster, by: AuditActor): Promise<OnboardingView> {
+    const fresh = await this.#freshCodes(roster);
+    this.ctx.storage.transactionSync(() => {
+      const { removed } = this.#writeRoster(roster, fresh, { late: false });
+      this.#changed(by, "onboarding.roster.saved", {
+        teams: roster.teams.length,
+        people: roster.people.length,
+        removed,
+      });
+    });
+    this.#deliverAudit();
+    this.ctx.waitUntil(this.#armLinks());
+    return this.view();
+  }
+
+  /** A link code for everyone on `roster` who has none yet. */
+  async #freshCodes(
+    roster: Roster
+  ): Promise<{ person: string; linkId: string; mark: string }[]> {
     const coded = new Set(
       this.#db
         .select({ person: linkCodes.person })
@@ -628,7 +749,7 @@ export class Onboarding extends DurableObject<Env> {
         .all()
         .map(({ person }) => person)
     );
-    const fresh = await Promise.all(
+    return await Promise.all(
       roster.people
         .filter(({ id }) => !coded.has(id))
         .map(async ({ id }) => {
@@ -637,97 +758,219 @@ export class Onboarding extends DurableObject<Env> {
           return { person: id, linkId, mark };
         })
     );
-    this.ctx.storage.transactionSync(() => {
-      const kept = new Set(roster.people.map((person) => person.id));
-      const gone = this.#db
-        .select({ id: people.id })
-        .from(people)
+  }
+
+  /**
+   * Writes who works where, in the caller's transaction. Whoever left the
+   * list keeps nothing; with `late`, as staff put the list right, a team
+   * that takes part only now, once the team is told and its moment has
+   * passed, starts now, its lead first (`#lateTeams`). The company's admin
+   * replaces the whole list, so for them no team is new that way;
+   * whoever moved, or is new, in a team with a map is asked about its work
+   * (`#askNewcomers`). Returns how many left.
+   */
+  #writeRoster(
+    roster: Roster,
+    fresh: readonly { person: string; linkId: string; mark: string }[],
+    { late }: { late: boolean },
+    now: string = new Date().toISOString()
+  ): { removed: number } {
+    const kept = new Set(roster.people.map((person) => person.id));
+    const before = this.#roster();
+    const gone = this.#db
+      .select({ id: people.id })
+      .from(people)
+      .all()
+      .filter(({ id }) => !kept.has(id))
+      .map(({ id }) => id);
+    const mapped = new Map(
+      this.#db
+        .select({ id: teams.id, mappedAt: teams.mappedAt })
+        .from(teams)
         .all()
-        .filter(({ id }) => !kept.has(id))
-        .map(({ id }) => id);
-      const mapped = new Map(
-        this.#db
-          .select({ id: teams.id, mappedAt: teams.mappedAt })
-          .from(teams)
-          .all()
-          .map(({ id, mappedAt }) => [id, mappedAt])
-      );
-      this.#db.delete(teams).run();
-      this.#db.delete(people).run();
-      for (const [position, team] of roster.teams.entries()) {
-        this.#db
-          .insert(teams)
-          .values({ ...team, position, mappedAt: mapped.get(team.id) ?? null })
-          .run();
-      }
-      for (const [position, person] of roster.people.entries()) {
-        this.#db
-          .insert(people)
-          .values({ ...person, position })
-          .run();
-      }
-      for (const code of fresh) {
-        this.#db.insert(linkCodes).values(code).onConflictDoNothing().run();
-      }
-      // Whoever left keeps nothing: no link, nothing said, no state.
-      const stale = this.#db
-        .select({ person: linkCodes.person })
-        .from(linkCodes)
+        .map(({ id, mappedAt }) => [id, mappedAt])
+    );
+    this.#db.delete(teams).run();
+    this.#db.delete(people).run();
+    for (const [position, team] of roster.teams.entries()) {
+      this.#db
+        .insert(teams)
+        .values({ ...team, position, mappedAt: mapped.get(team.id) ?? null })
+        .run();
+    }
+    for (const [position, person] of roster.people.entries()) {
+      this.#db
+        .insert(people)
+        .values({ ...person, position })
+        .run();
+    }
+    for (const code of fresh) {
+      this.#db.insert(linkCodes).values(code).onConflictDoNothing().run();
+    }
+    // Whoever left keeps nothing: no link, nothing said, no state.
+    const stale = this.#db
+      .select({ person: linkCodes.person })
+      .from(linkCodes)
+      .all()
+      .map(({ person }) => person)
+      .filter((person) => !kept.has(person));
+    // A piece of work goes with its team, and who is asked about it goes
+    // with them, or when they move to another team.
+    const teamOf = new Map(roster.people.map(({ id, team }) => [id, team]));
+    const teamIds = new Set(roster.teams.map(({ id }) => id));
+    const workTeam = new Map(
+      this.#db
+        .select({ id: works.id, team: works.team })
+        .from(works)
         .all()
+        .map(({ id, team }) => [id, team])
+    );
+    for (const [id, team] of workTeam) {
+      if (!teamIds.has(team)) {
+        this.#db.delete(works).where(eq(works.id, id)).run();
+      }
+    }
+    this.#dropOrphanDrawings();
+    for (const { person, work } of this.#db.select().from(askedAbout).all()) {
+      if (teamOf.get(person) !== workTeam.get(work)) {
+        this.#db.delete(askedAbout).where(eq(askedAbout.person, person)).run();
+      }
+    }
+    for (const person of new Set([...gone, ...stale])) {
+      this.#db.delete(linkCodes).where(eq(linkCodes.person, person)).run();
+      this.#db.delete(links).where(eq(links.person, person)).run();
+      this.#db.delete(interviews).where(eq(interviews.person, person)).run();
+      this.#db
+        .delete(interviewStates)
+        .where(eq(interviewStates.person, person))
+        .run();
+      this.#db
+        .delete(interviewTexts)
+        .where(eq(interviewTexts.person, person))
+        .run();
+      this.#db
+        .delete(interviewSettings)
+        .where(eq(interviewSettings.person, person))
+        .run();
+      dropMailAbout(this.ctx.storage.sql, person);
+    }
+    this.#lateTeams(late ? before : roster, roster, now);
+    this.#askNewcomers(before, roster);
+    return { removed: gone.length };
+  }
+
+  /**
+   * A team that takes part only now (added, or asked in again) once the
+   * team is told and its moment has passed starts now, as a team of its
+   * own in the plan: its lead's link goes out first, and everyone else's
+   * waits for the lead, `leadWaitWorkingDays` at most from today. A team
+   * no longer on the list leaves the plan's moments with it.
+   */
+  #lateTeams(before: Roster | null, roster: Roster, now: string): void {
+    const [row] = this.#db
+      .select({ toldAt: onboarding.toldAt })
+      .from(onboarding)
+      .where(eq(onboarding.id, 1))
+      .all();
+    const { plan } = this.#row();
+    if (plan === null) {
+      return;
+    }
+    // A team no longer on the list has no moment of its own any more.
+    const listed = new Set(roster.teams.map(({ id }) => id));
+    const later = Object.fromEntries(
+      Object.entries(plan.later ?? {}).filter(([team]) => listed.has(team))
+    );
+    const took = new Set(
+      (before?.teams ?? []).filter(({ off }) => !off).map(({ id }) => id)
+    );
+    const told = (row?.toldAt ?? null) !== null;
+    for (const { id, off } of roster.teams) {
+      const from = sendsFrom(plan, id);
+      if (told && !off && !took.has(id) && from !== null && from <= now) {
+        later[id] = now;
+      }
+    }
+    const kept = Object.keys(plan.later ?? {});
+    const same =
+      kept.length === Object.keys(later).length &&
+      kept.every((team) => later[team] === plan.later?.[team]);
+    if (!same) {
+      this.#db
+        .update(onboarding)
+        .set({ plan: JSON.stringify({ ...plan, later }) })
+        .where(eq(onboarding.id, 1))
+        .run();
+    }
+  }
+
+  /**
+   * Whoever moved to another team, or is new on the list, in a team whose
+   * map is drawn, is asked about a piece of its work, weighed by who is
+   * asked about each already. Whoever is asked about a piece also does it;
+   * whoever left a team no longer does its work, unless they talked: what
+   * they agreed to stays with the work it was about.
+   */
+  #askNewcomers(before: Roster | null, roster: Roster): void {
+    const wasIn = new Map(
+      (before?.people ?? []).map(({ id, team }) => [id, team])
+    );
+    const teamOf = new Map(roster.people.map(({ id, team }) => [id, team]));
+    const talked = new Set(
+      [...this.#interviews().values()]
+        .filter(({ completedAt }) => completedAt !== null)
         .map(({ person }) => person)
-        .filter((person) => !kept.has(person));
-      // A piece of work goes with its team, and who is asked about it goes
-      // with them, or when they move to another team.
-      const teamOf = new Map(roster.people.map(({ id, team }) => [id, team]));
-      const teamIds = new Set(roster.teams.map(({ id }) => id));
-      const workTeam = new Map(
-        this.#db
-          .select({ id: works.id, team: works.team })
-          .from(works)
-          .all()
-          .map(({ id, team }) => [id, team])
+    );
+    const asked = new Map(
+      this.#db
+        .select()
+        .from(askedAbout)
+        .all()
+        .map(({ person, work }) => [person, work])
+    );
+    for (const team of roster.teams) {
+      const mine = this.teamWorks(team.id);
+      if (mine.length === 0) {
+        continue;
+      }
+      const members = roster.people.filter((person) => person.team === team.id);
+      const newcomers = members.filter(
+        (person) =>
+          person.id !== team.lead &&
+          !person.away &&
+          wasIn.get(person.id) !== team.id &&
+          !asked.has(person.id)
       );
-      for (const [id, team] of workTeam) {
-        if (!teamIds.has(team)) {
-          this.#db.delete(works).where(eq(works.id, id)).run();
+      const heard = new Map(mine.map(({ id, asked: of }) => [id, of.length]));
+      for (const [person, work] of assignWork(
+        newcomers,
+        mine,
+        members,
+        heard
+      )) {
+        if (work !== null) {
+          asked.set(person, work);
+          this.#db.insert(askedAbout).values({ person, work }).run();
         }
       }
-      this.#dropOrphanDrawings();
-      for (const { person, work } of this.#db.select().from(askedAbout).all()) {
-        if (teamOf.get(person) !== workTeam.get(work)) {
+      for (const work of mine) {
+        const doers = work.doers.filter(
+          (person) => teamOf.get(person) === team.id || talked.has(person)
+        );
+        for (const { id } of members) {
+          if (asked.get(id) === work.id && !doers.includes(id)) {
+            doers.push(id);
+          }
+        }
+        if (doers.join(",") !== work.doers.join(",")) {
           this.#db
-            .delete(askedAbout)
-            .where(eq(askedAbout.person, person))
+            .update(works)
+            .set({ doers: JSON.stringify(doers) })
+            .where(eq(works.id, work.id))
             .run();
         }
       }
-      for (const person of new Set([...gone, ...stale])) {
-        this.#db.delete(linkCodes).where(eq(linkCodes.person, person)).run();
-        this.#db.delete(links).where(eq(links.person, person)).run();
-        this.#db.delete(interviews).where(eq(interviews.person, person)).run();
-        this.#db
-          .delete(interviewStates)
-          .where(eq(interviewStates.person, person))
-          .run();
-        this.#db
-          .delete(interviewTexts)
-          .where(eq(interviewTexts.person, person))
-          .run();
-        this.#db
-          .delete(interviewSettings)
-          .where(eq(interviewSettings.person, person))
-          .run();
-        dropMailAbout(this.ctx.storage.sql, person);
-      }
-      this.#changed(by, "onboarding.roster.saved", {
-        teams: roster.teams.length,
-        people: roster.people.length,
-        removed: gone.length,
-      });
-    });
-    this.#deliverAudit();
-    this.ctx.waitUntil(this.#armLinks());
-    return this.view();
+    }
   }
 
   /** Sets when the interviews run. Links go out by it, once the interviews are open. */
@@ -1406,6 +1649,205 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
+   * The organization as Grasp's staff see it (organization.ts): every team
+   * with its people, its map, when its links go out and what needs a look.
+   * Empty before there is a list.
+   */
+  staffOrganization(now: string = new Date().toISOString()): StaffOrganization {
+    const roster = this.#roster();
+    if (roster === null) {
+      return { teams: [], people: [], open: this.isOpen() };
+    }
+    const states = this.#db.select().from(interviewStates).all();
+    return organizationOf(
+      {
+        roster,
+        plan: this.#row().plan,
+        open: this.isOpen(),
+        links: new Map(
+          this.#db
+            .select({
+              person: links.person,
+              sentAt: links.sentAt,
+              openedAt: links.openedAt,
+            })
+            .from(links)
+            .all()
+            .map(({ person, ...link }) => [person, link])
+        ),
+        interviews: new Map(
+          states.map(({ person, startedAt, completedAt, agreedAt }) => [
+            person,
+            { startedAt, completedAt, agreedAt },
+          ])
+        ),
+        works: this.#db
+          .select()
+          .from(works)
+          .orderBy(asc(works.team), asc(works.position))
+          .all()
+          .map((row) => ({ ...row, doers: doersOf(row.doers) })),
+        asked: new Map(
+          this.#db
+            .select()
+            .from(askedAbout)
+            .all()
+            .map(({ person, work }) => [person, work])
+        ),
+        mapped: this.#linkFacts().mapped,
+      },
+      now
+    );
+  }
+
+  /**
+   * Puts the list right, one change at a time, as Grasp's staff make it
+   * (organization.ts `rosterAfter`): links already out stay out, and
+   * whoever takes part now and has none gets one when it is due. Every
+   * change is in the log, as the staff member who made it, with whom it
+   * was about; the audit log has what was done, never to whom. Returns
+   * why it wasn't made, or null.
+   */
+  async changeOrganization(
+    change: OrganizationChange,
+    by: AuditActor
+  ): Promise<OrganizationRefusal | null> {
+    if (change.kind === "send") {
+      return await this.#sendNow(change.person, by);
+    }
+    if (change.kind === "askAbout") {
+      return this.#askAbout(change.person, change.work, by);
+    }
+    if (change.kind === "draw") {
+      if (this.#roster()?.teams.some(({ id }) => id === change.team) !== true) {
+        return "onboarding.no_team";
+      }
+      return (await this.drawAgain(change.team, by))
+        ? null
+        : "onboarding.no_map";
+    }
+    const id = `${change.kind === "addTeam" ? "t" : "p"}-${crypto.randomUUID().slice(0, 8)}`;
+    const next = this.#listAfter(change, id);
+    if (typeof next === "string") {
+      return next;
+    }
+    const fresh = await this.#freshCodes(next);
+    const refusal = this.ctx.storage.transactionSync(() => {
+      // Made again on the list as it is now: what changed meanwhile stands.
+      const before = this.#roster();
+      const after = this.#listAfter(change, id);
+      if (typeof after === "string" || before === null) {
+        return typeof after === "string" ? after : "onboarding.no_roster";
+      }
+      this.#writeRoster(after, fresh, { late: true });
+      const { action, detail, about } = listChangeOf(change, before, id);
+      this.#changed(by, action, detail, about);
+      return null;
+    });
+    if (refusal === null) {
+      this.#deliverAudit();
+      this.ctx.waitUntil(this.#armLinks());
+    }
+    return refusal;
+  }
+
+  /** The list after `change`, held to the roster's rules; or why it can't be. */
+  #listAfter(change: ListChange, id: string): Roster | OrganizationRefusal {
+    const roster = this.#roster();
+    if (roster === null) {
+      return "onboarding.no_roster";
+    }
+    const next = rosterAfter(roster, change, id);
+    if (typeof next === "string") {
+      return next;
+    }
+    const parsed = rosterSchema.safeParse(next);
+    return parsed.success ? parsed.data : "onboarding.invalid";
+  }
+
+  /**
+   * Sends someone's link now, before its moment or their lead's interview,
+   * while the interviews run and they take part. Already out is fine.
+   */
+  async #sendNow(
+    person: string,
+    by: AuditActor,
+    now: string = new Date().toISOString()
+  ): Promise<OrganizationRefusal | null> {
+    // First: no other call comes in between what is read below and the
+    // transaction that sends.
+    const said = await this.#mailContext();
+    const roster = this.#roster();
+    const { plan } = this.#row();
+    const one = roster?.people.find(({ id }) => id === person);
+    if (roster === null || one === undefined) {
+      return "onboarding.not_found";
+    }
+    if (plan === null || !this.isOpen() || !takingPart(roster, one)) {
+      return "onboarding.not_now";
+    }
+    if (this.#linkFacts().sent.has(person)) {
+      return null;
+    }
+    this.ctx.storage.transactionSync(() => {
+      this.#send({ roster, plan, said }, person, now);
+      this.#changed(by, "onboarding.link.sent_now", {}, person);
+    });
+    this.#deliverAudit();
+    this.#deliverMailSoon();
+    return null;
+  }
+
+  /**
+   * The piece of work Stephen asks someone about, from their team's map;
+   * null and he asks which work they do. They do the piece they are asked
+   * about, as far as the record goes. From their next turn on: what they
+   * agreed to already stays with what it was about.
+   */
+  #askAbout(
+    person: string,
+    work: string | null,
+    by: AuditActor
+  ): OrganizationRefusal | null {
+    const one = this.#roster()?.people.find(({ id }) => id === person);
+    if (one === undefined) {
+      return "onboarding.not_found";
+    }
+    const [row] =
+      work === null
+        ? []
+        : this.#db.select().from(works).where(eq(works.id, work)).all();
+    if (work !== null && row?.team !== one.team) {
+      return "onboarding.no_work";
+    }
+    this.ctx.storage.transactionSync(() => {
+      if (row === undefined) {
+        this.#db.delete(askedAbout).where(eq(askedAbout.person, person)).run();
+      } else {
+        this.#db
+          .insert(askedAbout)
+          .values({ person, work: row.id })
+          .onConflictDoUpdate({
+            target: askedAbout.person,
+            set: { work: row.id },
+          })
+          .run();
+        const doers = doersOf(row.doers);
+        if (!doers.includes(person)) {
+          this.#db
+            .update(works)
+            .set({ doers: JSON.stringify([...doers, person]) })
+            .where(eq(works.id, row.id))
+            .run();
+        }
+      }
+      this.#changed(by, "onboarding.person.asked_about", {}, person);
+    });
+    this.#deliverAudit();
+    return null;
+  }
+
+  /**
    * Deletes someone's interview, from the device it is on, at any time
    * their link opens there: what they said is gone at once, and a copy
    * left open elsewhere can't save it back. What was drawn from it goes
@@ -1614,7 +2056,7 @@ export class Onboarding extends DurableObject<Env> {
     if (link.keyMark === null || link.keyMark !== keyMark) {
       return refused("interview.elsewhere");
     }
-    const who = `link:${person.id}`;
+    const who = `${linkWho}${person.id}`;
     return answered({ who, said: this.voiceSaid(who, now) });
   }
 
@@ -1639,20 +2081,142 @@ export class Onboarding extends DurableObject<Env> {
     seconds: number,
     now: string = new Date().toISOString()
   ): void {
-    const day = now.slice(0, 10);
-    const add = counted(seconds);
     this.ctx.storage.transactionSync(() => {
-      this.#db.delete(voiceUse).where(lt(voiceUse.day, day)).run();
-      this.#db
-        .insert(voiceUse)
-        .values({ who, day, seconds: add })
-        .onConflictDoUpdate({
-          target: [voiceUse.who, voiceUse.day],
-          set: { seconds: sql`${voiceUse.seconds} + ${add}` },
-        })
-        .run();
-      this.meter({ purpose, model: "voice", seconds: add }, now);
+      this.#countSeconds(who, { purpose, model: "voice", seconds }, now);
     });
+  }
+
+  /**
+   * Whom a live transcription on someone's link is for, from the device
+   * it is on, while their interview may be saved, as a line said is
+   * (`speechOnLink`): the key what is heard is counted under, the seconds
+   * heard under it today, and the person, for the onboarding's own log.
+   */
+  transcriptionOnLink(
+    secretMark: string,
+    keyMark: string,
+    now: string = new Date().toISOString()
+  ): LinkAnswer<{ who: string; heard: number; person: string }> {
+    const found = this.speechOnLink(secretMark, keyMark, now);
+    if (!found.ok) {
+      return found;
+    }
+    const who = heardKey(found.value.who);
+    const person = found.value.who.slice(linkWho.length);
+    return answered({ who, heard: this.voiceSaid(who, now), person });
+  }
+
+  /** Seconds heard by live transcription for an admin today. */
+  heardForAdmin(
+    userId: string,
+    now: string = new Date().toISOString()
+  ): { who: string; heard: number } {
+    const who = heardKey(`admin:${userId}`);
+    return { who, heard: this.voiceSaid(who, now) };
+  }
+
+  /**
+   * Notes a live transcription opened: on someone's link in the
+   * onboarding's own log, which only staff read, never in the audit log,
+   * which would tell the company who talked, and when; for an admin in
+   * the audit log, with the session's ID and nothing heard.
+   */
+  transcriptionOpened(
+    session: TranscriptionSessionNote,
+    now: string = new Date().toISOString()
+  ): void {
+    this.ctx.storage.transactionSync(() => {
+      if (session.person === undefined) {
+        this.#changed(session.by, "onboarding.transcription.opened", {
+          session: session.id,
+        });
+      } else {
+        this.#noted(session.person, "transcription.opened", now);
+      }
+    });
+    if (session.person === undefined) {
+      this.#deliverAudit();
+    }
+  }
+
+  /**
+   * Counts a live transcription once it closed: the seconds of audio it
+   * heard, against `who`'s budget and in the onboarding's use, and notes
+   * it as it was opened (`transcriptionOpened`), with how it ended. Never
+   * anything heard.
+   */
+  transcriptionClosed(
+    session: TranscriptionSessionNote & {
+      who: string;
+      purpose: Took["purpose"];
+      seconds: number;
+      ended: string;
+    },
+    now: string = new Date().toISOString()
+  ): void {
+    this.ctx.storage.transactionSync(() => {
+      this.#countSeconds(
+        session.who,
+        {
+          purpose: session.purpose,
+          model: "transcription",
+          seconds: session.seconds,
+        },
+        now
+      );
+      if (session.person === undefined) {
+        this.#changed(session.by, "onboarding.transcription.closed", {
+          session: session.id,
+          seconds: Math.round(session.seconds),
+          ended: session.ended,
+        });
+      } else {
+        this.#noted(session.person, "transcription.closed", now);
+      }
+    });
+    if (session.person === undefined) {
+      this.#deliverAudit();
+    }
+  }
+
+  /**
+   * Counts a recording written down for `who` (hear.ts): its seconds,
+   * against the same budget as live transcription's, and in the
+   * onboarding's use. Never anything heard.
+   */
+  countHeard(
+    who: string,
+    purpose: Took["purpose"],
+    seconds: number,
+    now: string = new Date().toISOString()
+  ): void {
+    this.ctx.storage.transactionSync(() => {
+      this.#countSeconds(
+        who,
+        { purpose, model: "transcription", seconds },
+        now
+      );
+    });
+  }
+
+  /** Adds `took`'s seconds to `who`'s today, and to the onboarding's use; the days before today go. */
+  #countSeconds(
+    who: string,
+    took: Took & { seconds: number },
+    now: string
+  ): void {
+    const day = now.slice(0, 10);
+    const add = counted(took.seconds);
+    this.#db.delete(voiceUse).where(lt(voiceUse.day, day)).run();
+    this.#db
+      .insert(voiceUse)
+      .values({ who, day, seconds: add })
+      .onConflictDoUpdate({
+        target: [voiceUse.who, voiceUse.day],
+        set: { seconds: sql`${voiceUse.seconds} + ${add}` },
+      })
+      .run();
+    this.meter({ ...took, seconds: add }, now);
   }
 
   /** The AI used, by day, purpose and model. */
@@ -2445,35 +3009,8 @@ export class Onboarding extends DurableObject<Env> {
       return [];
     }
     this.ctx.storage.transactionSync(() => {
-      // The first link out tells the team, for good.
-      this.#db
-        .update(onboarding)
-        .set({ toldAt: sql`coalesce(${onboarding.toldAt}, ${now})` })
-        .where(eq(onboarding.id, 1))
-        .run();
       for (const person of due) {
-        // Whether they lead a team is kept as it is now, when their link
-        // goes out: a lead named later never makes theirs a lead's interview.
-        const ledTeam =
-          roster.teams.find(({ lead: led }) => led === person)?.id ?? null;
-        this.#db.insert(links).values({ person, sentAt: now, ledTeam }).run();
-        this.#queuePersonMail(
-          { roster, plan, said, person, sentAt: now },
-          "link"
-        );
-        const team = roster.people.find(({ id }) => id === person)?.team;
-        if (team !== undefined && ledTeam === null) {
-          // Asked once ever: a person taken off and on again isn't asked twice.
-          const added = this.#db
-            .insert(countedPeople)
-            .values({ person, team, talked: false })
-            .onConflictDoNothing()
-            .returning()
-            .all();
-          if (added.length > 0) {
-            this.#count(team, now, { asked: 1 });
-          }
-        }
+        this.#send({ roster, plan, said }, person, now);
       }
       this.#changed({ type: "system" }, "onboarding.links.sent", {
         count: due.length,
@@ -2720,6 +3257,41 @@ export class Onboarding extends DurableObject<Env> {
         about: state.about,
       })
       .run();
+  }
+
+  /**
+   * Sends someone's link, in the caller's transaction: the first link out
+   * tells the team, for good; it is emailed to whoever has an address; and
+   * everyone but a lead is counted as asked, once ever, so a person taken
+   * off and on again isn't asked twice. Whether they lead a team is kept
+   * as it is now: a lead named later never makes theirs a lead's interview.
+   */
+  #send(
+    { roster, plan, said }: { roster: Roster; plan: Plan; said: MailContext },
+    person: string,
+    now: string
+  ): void {
+    this.#db
+      .update(onboarding)
+      .set({ toldAt: sql`coalesce(${onboarding.toldAt}, ${now})` })
+      .where(eq(onboarding.id, 1))
+      .run();
+    const ledTeam =
+      roster.teams.find(({ lead: led }) => led === person)?.id ?? null;
+    this.#db.insert(links).values({ person, sentAt: now, ledTeam }).run();
+    this.#queuePersonMail({ roster, plan, said, person, sentAt: now }, "link");
+    const team = roster.people.find(({ id }) => id === person)?.team;
+    if (team !== undefined && ledTeam === null) {
+      const added = this.#db
+        .insert(countedPeople)
+        .values({ person, team, talked: false })
+        .onConflictDoNothing()
+        .returning()
+        .all();
+      if (added.length > 0) {
+        this.#count(team, now, { asked: 1 });
+      }
+    }
   }
 
   #linkFacts() {
@@ -3779,12 +4351,14 @@ export class Onboarding extends DurableObject<Env> {
   #changed(
     by: AuditActor,
     action: string,
-    detail: Record<string, AuditDetailValue>
+    detail: Record<string, AuditDetailValue>,
+    about: string | null = null
   ): void {
     const at = new Date().toISOString();
+    // The onboarding's own log may name whom it was about; the audit log never does.
     this.#db
       .insert(events)
-      .values({ at, by: whoIs(by), what: action })
+      .values({ at, by: whoIs(by), what: action, about })
       .run();
     const event = createAuditEvent(
       { actor: by, action, target, detail },

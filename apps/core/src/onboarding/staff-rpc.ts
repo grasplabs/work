@@ -24,6 +24,11 @@ import type {
   OnboardingStaffApi,
   OnboardingView,
 } from "@grasp-os/shared/onboarding";
+import { organizationChangeSchema } from "@grasp-os/shared/onboarding-organization";
+import type {
+  OrganizationChangeInput,
+  StaffOrganization,
+} from "@grasp-os/shared/onboarding-organization";
 import {
   aiPurposes,
   logFilterSchema,
@@ -71,7 +76,8 @@ import { onboardingStore } from "./store.ts";
 // onboarding used, as numbers; and the interviews by name: where everyone
 // stands (the admin's snapshot, as the console reads it), someone's own
 // link to send by hand, the one reminder noted, a team asked in, and an
-// interview deleted because its person asked. Every read that names
+// interview deleted because its person asked; and the organization, team
+// by team, and the list put right (organization.ts). Every read that names
 // people, or holds a link, is in the audit log first, never with what was
 // said or the link itself.
 // Until the agreements are in and while the interviews are paused, no link
@@ -376,6 +382,39 @@ export class OnboardingStaffRpc
         const purpose = aiPurposes.find((each) => each === row.purpose);
         return purpose === undefined ? [] : [{ ...row, purpose }];
       });
+    });
+  }
+
+  async organization(): Promise<StaffOrganization> {
+    return await withPerson(this.#check, async (person) => {
+      requireStaff(person);
+      const organization = await onboardingStore(this.#env).staffOrganization();
+      // It names people: on record before it is read.
+      await appendAuditEvent(this.#env, {
+        actor: actorOf(person),
+        action: "onboarding.organization.read",
+        target: { type: "organization", id: organizationId },
+        detail: {},
+      });
+      return organization;
+    });
+  }
+
+  async changeOrganization(change: OrganizationChangeInput): Promise<void> {
+    await withPerson(this.#check, async (person) => {
+      requireStaff(person);
+      const parsed = onboardingErrors.parse(
+        "onboarding.invalid",
+        organizationChangeSchema,
+        change
+      );
+      const store = onboardingStore(this.#env);
+      const refusal = await store.changeOrganization(parsed, actorOf(person));
+      if (refusal !== null) {
+        throw onboardingErrors.create(refusal);
+      }
+      // A link sent now, or a team asked in, may make links due at once.
+      await store.releaseDue();
     });
   }
 
