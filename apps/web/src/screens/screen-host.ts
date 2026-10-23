@@ -24,7 +24,7 @@ import type {
 import { RpcStub } from "capnweb";
 
 import type { CoreConnection, SessionEnded } from "../core-connection.ts";
-import { wait as pauseFor } from "../core.ts";
+import { wait as pauseFor, reconnectDelay } from "../core.ts";
 import type { PendingConfirmation } from "../decision-confirmation.tsx";
 import {
   appDrafts,
@@ -151,6 +151,13 @@ export type FailureReason =
   /** The version running was revoked, and no longer runs. */
   | "version-revoked"
   | "unknown";
+
+/**
+ * How many times the page asks core about a frame's build when the App's
+ * version subscription says access may have dropped, while core can't
+ * answer: each after a pause that grows (`reconnectDelay`).
+ */
+const recheckTries = 6;
 
 const failures: Readonly<Record<string, FailureReason>> = {
   "role.forbidden": "forbidden",
@@ -1355,6 +1362,25 @@ export const appScreen = (
       running: (setState) => {
         const { version } = bundle;
         let updated = false;
+        const frame = { open: true };
+        // Asked again, after a pause that grows, while core can't answer
+        // and the frame runs: no timer asks later in its place.
+        const recheck = async (): Promise<void> => {
+          for (
+            let attempt = 0;
+            frame.open && attempt < recheckTries;
+            attempt += 1
+          ) {
+            try {
+              // oxlint-disable-next-line no-await-in-loop -- one ask at a time
+              await checkDelivery(hold, closing);
+              return;
+            } catch {
+              // oxlint-disable-next-line no-await-in-loop -- one ask at a time
+              await pauseFor(reconnectDelay(attempt));
+            }
+          }
+        };
         const stop = link.followVersion(app, (push) => {
           if (push.type === "refused") {
             const error = Object.assign(new Error(push.error.message), {
@@ -1377,7 +1403,7 @@ export const appScreen = (
           // screen that asks for nothing more still holds what it was
           // handed, so this is when the page asks about its build.
           if (push.recheck) {
-            void checkDeliveryNow(hold, closing);
+            void recheck();
           }
           // Once: the frame keeps the version it opened until it switches.
           if (!updated && push.version !== version) {
@@ -1385,7 +1411,10 @@ export const appScreen = (
             setState({ status: "updated" });
           }
         });
-        cleanups.push(stop);
+        cleanups.push(() => {
+          frame.open = false;
+          stop();
+        });
       },
     };
   },
