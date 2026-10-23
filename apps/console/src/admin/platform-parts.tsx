@@ -5,9 +5,10 @@
  * steps, and the console's own things as the admin says them.
  */
 import { cn } from "@grasp-os/ui/lib/utils";
-import { CheckIcon, PauseIcon, XIcon } from "lucide-react";
+import { CheckIcon, LoaderCircleIcon, PauseIcon, XIcon } from "lucide-react";
 
 import type { TargetView } from "../rollout/queries.ts";
+import type { StaffEvent } from "./platform-data.ts";
 import type { PlatformNeed, RingState, Standing } from "./platform.ts";
 import { formatPercent } from "./words.ts";
 
@@ -71,6 +72,41 @@ export const needWords = (need: PlatformNeed): string => {
   }
 };
 
+/**
+ * What someone at Grasp did, in a line: who, then what, naming the company
+ * by `nameOf` and the release or rollout by its id.
+ */
+export const eventWords = (
+  event: StaffEvent,
+  nameOf: (clientId: string) => string
+): string => {
+  const company = event.clientId === null ? "" : nameOf(event.clientId);
+  const target = event.target ?? "";
+  // A rollout's id says nothing to a reader; what it rolls out tells it apart.
+  let rollout = "a rollout";
+  if (event.rollout === "secrets") {
+    rollout = "a secrets rollout";
+  } else if (event.rollout !== null) {
+    rollout = `the rollout of ${event.rollout}`;
+  }
+  const what: Record<StaffEvent["action"], string> = {
+    "rollout.start": `started ${rollout}`,
+    "rollout.approve": `approved the next ring of ${rollout}`,
+    "rollout.pause": `paused ${rollout}`,
+    "rollout.resume": `resumed ${rollout}`,
+    "rollout.cancel": `cancelled ${rollout}`,
+    "rollout.rollback": `rolled ${company} back`,
+    "client.create": `added ${company}`,
+    "client.ring": `moved ${company} to another ring`,
+    "client.pin": `pinned ${company} to ${target}`,
+    "client.unpin": `unpinned ${company}`,
+    "client.rotate_secrets": `rotated ${company}'s secrets`,
+    "client.apply_settings": `applied ${company}'s settings`,
+    "client.sign_in": `changed how ${company}'s people sign in`,
+  };
+  return `${event.actor} ${what[event.action]}`;
+};
+
 const standingDot: Record<Standing, string> = {
   attention: "bg-status-attention",
   setup: "bg-foreground",
@@ -126,36 +162,36 @@ const RingMark = ({ state }: { state: RingState }) => {
       <span
         className={cn(
           markBase,
-          "border-status-attention text-status-attention"
+          "bg-status-attention text-background border-transparent"
         )}
       >
         <XIcon aria-hidden="true" className="size-3.5" />
       </span>
     );
   }
-  if (state === "waiting") {
+  if (state === "running") {
     return (
       <span className={cn(markBase, "border-foreground")}>
+        <LoaderCircleIcon
+          aria-hidden="true"
+          className="size-3.5 motion-safe:animate-spin"
+        />
+      </span>
+    );
+  }
+  if (state === "waiting") {
+    return (
+      <span
+        className={cn(
+          markBase,
+          "border-status-attention text-status-attention"
+        )}
+      >
         <PauseIcon aria-hidden="true" className="size-3" />
       </span>
     );
   }
-  return (
-    <span
-      className={cn(
-        markBase,
-        state === "running" ? "border-foreground" : "border-border"
-      )}
-    >
-      <span
-        aria-hidden="true"
-        className={cn(
-          "size-2 rounded-full",
-          state === "running" ? "bg-foreground" : "bg-transparent"
-        )}
-      />
-    </span>
-  );
+  return <span className={cn(markBase, "bg-card")} />;
 };
 
 /** One step of the rollout: a ring, what it says, and where it stands. */

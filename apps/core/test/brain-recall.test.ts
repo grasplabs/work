@@ -128,9 +128,41 @@ describe("the Brain's recall", setUpTime, () => {
       second: [
         { kind: "document", documentId, collectionId, version: 2, section: 1 },
       ],
-      policy: [1, "fulltext@1"],
+      policy: [1, "fulltext@2"],
       locator: ["Onboarding", "Onboarding", "Owner"],
     });
+  });
+
+  it("finds a question's section by its words, the one holding most of them first", async () => {
+    const admin = await personOf("admin");
+    const word = rareWord();
+    const { collectionId, documentId } = await collectionSaying(
+      admin,
+      "everyone",
+      [
+        "# Depot",
+        "",
+        "## Parking",
+        `Parking at the ${word} depot is behind the building.`,
+        "",
+        "## Opening hours",
+        `On weekdays the ${word} depot opens at seven in the morning.`,
+      ].join("\n")
+    );
+    const pack = await admin.knowledge.recall({
+      query: `When does the ${word} depot open on weekdays?`,
+      filters: { collectionIds: [collectionId] },
+    });
+    const sections = pack.items.flatMap(({ sourceRefs }) =>
+      sourceRefs.flatMap((ref) =>
+        ref.kind === "document" && ref.documentId === documentId
+          ? [ref.section]
+          : []
+      )
+    );
+    // Every section repeats the document's title, so each matches; the
+    // one with the question's own words ranks first, the parking next.
+    expect(sections.slice(0, 2)).toStrictEqual([2, 1]);
   });
 
   it("refuses forged authority and wider reach in its arguments, before reading anything", async () => {

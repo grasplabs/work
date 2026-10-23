@@ -45,7 +45,6 @@ import {
 } from "../db/knowledge/schema.ts";
 import { allowedCollections, noteProvenance } from "./access.ts";
 import type { Reader } from "./access.ts";
-import { admitToKnowledge } from "./admission.ts";
 import { allowedFor } from "./app-entries.ts";
 import type { Allowed } from "./app-entries.ts";
 import { readableCollection, requireWritable } from "./collections.ts";
@@ -106,29 +105,7 @@ interface Prepared {
   reviewDate: string | null;
   sections: Section[];
   links: Link[];
-  /**
-   * Every string its frontmatter decodes to, keys included: what YAML's
-   * escapes (`\u0063ancer`) make of the text, and what is kept and shown.
-   */
-  decoded: string[];
 }
-
-/** The strings in `value`, as YAML decoded it: keys and values, nested. */
-const stringsIn = (value: unknown): string[] => {
-  if (typeof value === "string") {
-    return [value];
-  }
-  if (Array.isArray(value)) {
-    return value.flatMap(stringsIn);
-  }
-  if (value instanceof Date || value === null || typeof value !== "object") {
-    return [];
-  }
-  return Object.entries(value).flatMap(([key, field]) => [
-    key,
-    ...stringsIn(field),
-  ]);
-};
 
 const invalid = (issues: string[]) =>
   knowledgeErrors.create("knowledge.invalid", { issues });
@@ -187,6 +164,23 @@ export const indexedValuesOf = (
 };
 
 /**
+ * How many sections a version's `text` at `path` has, numbered from 0 as
+ * its save numbered them, or undefined when its frontmatter doesn't read:
+ * for a version whose sections are no longer stored (only the current
+ * one's are), such as one a Brain memory cites.
+ */
+export const sectionCountOf = (
+  path: string,
+  text: string
+): number | undefined => {
+  try {
+    return splitSections(parseBaseFields(path, text).body).length;
+  } catch {
+    return undefined;
+  }
+};
+
+/**
  * Reads the text of the document at `path`, within the limits a save
  * keeps. Its title is the frontmatter's, else a skill's name, else its
  * first heading, else its file name.
@@ -208,7 +202,7 @@ const prepare = (path: string, text: string, purge: boolean): Prepared => {
     }
     throw error;
   }
-  const { type, frontmatter, fields, body } = parsed;
+  const { type, frontmatter, body } = parsed;
   const found = splitSections(body);
   if (found.length > documentMaxSections) {
     throw knowledgeErrors.create("knowledge.too_many_sections", {
@@ -232,7 +226,6 @@ const prepare = (path: string, text: string, purge: boolean): Prepared => {
     reviewDate: frontmatter.review ?? null,
     sections: found,
     links: linked,
-    decoded: stringsIn(fields),
   };
 };
 
@@ -422,37 +415,6 @@ export interface Write {
 }
 
 /**
- * Admits `write` into canonical Knowledge (admission.ts), or throws:
- * its text, path, message, the title it gets and every string its
- * frontmatter decodes to (`prepared`). A purge removes personal data and
- * the Grasp skills' sync writes the release's own text: neither is
- * screened.
- */
-const admitted = async (
-  env: Env,
-  by: Writer,
-  write: Write,
-  prepared: Prepared
-): Promise<void> => {
-  if (write.purge === true || write.graspSync === true) {
-    return;
-  }
-  // Everything the version keeps, each as a paragraph of its own: its
-  // path and the title made from it, its message, its text as written,
-  // and its frontmatter as YAML decodes it, which is what its row keeps
-  // (title, description, tags) and a reader shows: an escape in the raw
-  // text must not hide a word from the gate.
-  const kept = [
-    write.path,
-    prepared.title,
-    write.message ?? "",
-    write.text,
-    ...prepared.decoded,
-  ];
-  await admitToKnowledge(env, by.actor, write.collection.id, kept.join("\n\n"));
-};
-
-/**
  * `row`, just saved, once its sections are published (`publishInline`):
  * marked indexed when search holds them, queued otherwise.
  */
@@ -618,10 +580,6 @@ export const writeVersion = async (
       throw error;
     }
   };
-  // Admitted against the policy in effect now, after everything else
-  // that could refuse the write, and before anything is stored: R2 only
-  // ever holds text that was admitted.
-  await admitted(env, by, write, prepared);
   // Checked before the text is stored too: a write it refuses never
   // uploads it.
   await write.lastCheck?.();

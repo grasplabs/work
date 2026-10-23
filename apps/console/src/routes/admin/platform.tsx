@@ -17,7 +17,9 @@ import { useEffect, useState } from "react";
 import { AdminPage } from "../../admin/page.tsx";
 import { Panel } from "../../admin/panel.tsx";
 import { fetchPlatform } from "../../admin/platform-data.ts";
+import type { StaffEvent } from "../../admin/platform-data.ts";
 import {
+  eventWords,
   needWords,
   RingSteps,
   ringWords,
@@ -420,6 +422,37 @@ const EveryCompany = ({
   );
 };
 
+/** What someone at Grasp did, as the console's audit log keeps it. */
+const DoneHere = ({
+  events,
+  names,
+}: {
+  events: StaffEvent[];
+  names: ReadonlyMap<string, string>;
+}) =>
+  events.length === 0 ? null : (
+    <Panel
+      description="What someone at Grasp did, as the console keeps it."
+      title="Done here"
+    >
+      <ul className="flex flex-col">
+        {events.map((event) => (
+          <li
+            className="flex items-baseline justify-between gap-4 border-t px-5 py-3"
+            key={event.id}
+          >
+            <span className="min-w-0">
+              {eventWords(event, (id) => names.get(id) ?? id)}
+            </span>
+            <span className="text-muted-foreground flex-none text-xs tabular-nums">
+              {dayOf(event.at)}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </Panel>
+  );
+
 /** The live figures of every active company, read once the page shows. */
 const readLive = async (): Promise<Record<string, LiveStatus> | "failed"> => {
   try {
@@ -467,9 +500,13 @@ const PlatformPage = () => {
       description="Every company runs its own Grasp, in its own Cloudflare account in the EU. A release reaches them ring by ring, and waits after each ring for someone at Grasp."
       title="Platform"
     >
-      <GoingOut names={names} rollout={platform.rollout} />
-      <WhoRunsWhat names={names} releases={platform.releases} rows={rows} />
-      <EveryCompany live={live} releases={platform.releases} rows={rows} />
+      {/* The panels' type, as the prototype's sections set it. */}
+      <div className="flex flex-col gap-6 text-sm">
+        <GoingOut names={names} rollout={platform.rollout} />
+        <WhoRunsWhat names={names} releases={platform.releases} rows={rows} />
+        <EveryCompany live={live} releases={platform.releases} rows={rows} />
+        <DoneHere events={platform.events} names={names} />
+      </div>
     </AdminPage>
   );
 };

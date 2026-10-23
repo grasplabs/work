@@ -100,6 +100,20 @@ export const clients = sqliteTable(
      * (src/billing/stripe.ts). Null until it is linked.
      */
     stripeCustomerId: text("stripe_customer_id"),
+    /**
+     * The client's proposal in Grasp's Rooms: its room's id, as someone at
+     * Grasp linked it by hand (src/proposal/link.ts), never matched by
+     * name. Only the id is kept; the room and what was signed in it are
+     * read each time (src/proposal/rooms.ts). Null until it is linked.
+     */
+    roomsProjectId: text("rooms_project_id"),
+    /**
+     * The client's company in Grasp's Attio: its record's id, as someone at
+     * Grasp linked it by hand (src/crm/link.ts), never matched by name or
+     * domain. Only the id is kept; the company, its people and its deals
+     * are read each time (src/crm/attio.ts). Null until it is linked.
+     */
+    attioCompanyId: text("attio_company_id"),
     /** The release it stays on while pinned, whatever the rollouts. */
     pinnedReleaseId: text("pinned_release_id").references(() => releases.id),
     createdAt: timestamp("created_at").notNull(),
@@ -132,8 +146,14 @@ export const clientRuns = sqliteTable("client_runs", {
   runId: text("run_id").notNull(),
   /** When it was claimed: a run not created yet counts as starting for a while. */
   claimedAt: timestamp("claimed_at").notNull(),
-  /** Which Workflow the runner is an instance of. */
-  kind: text({ enum: ["provision", "rollout", "rollback", "apply"] })
+  /**
+   * Which Workflow the runner is an instance of: `provision_placed`
+   * provisions a client placed in a hosting destination
+   * (src/hosting/workflow.ts).
+   */
+  kind: text({
+    enum: ["provision", "rollout", "rollback", "apply", "provision_placed"],
+  })
     .notNull()
     .default("provision"),
 });
@@ -479,3 +499,97 @@ export const clientResources = sqliteTable(
     ),
   ]
 );
+
+/**
+ * Provisioning a placed client (spec 40.2, src/hosting/operation.ts): one
+ * operation per client, however often it's retried, and how far it got.
+ * Every step can run again, so a retry resumes it from the start of the
+ * step it stopped in, and nothing is created twice or replaced.
+ */
+export const clientProvisions = sqliteTable("client_provisions", {
+  id: text().primaryKey(),
+  /** One operation per client: a retry resumes it, never starts another. */
+  clientId: text("client_id")
+    .notNull()
+    .unique()
+    .references(() => clients.id),
+  /** The release it provisions: fixed for the operation. */
+  releaseId: text("release_id")
+    .notNull()
+    .references(() => releases.id),
+  status: text({ enum: ["running", "failed", "done"] }).notNull(),
+  /** The last step that finished, such as `resources`; null before the first. */
+  step: text(),
+  /** Why it stopped: an error code staff act on, never a message or a response body. */
+  error: text(),
+  /**
+   * What its steps observed, to resume without repeating them: JSON
+   * (`progressSchema`, src/hosting/operation.ts): each Worker's upload
+   * fingerprint, its delivered secrets' fingerprint, the core origin its
+   * probe passed at, and its sending domain's zone. Fingerprints are keyed hashes: they tell nothing
+   * of a secret.
+   */
+  progress: text(),
+  /** The runner that last recorded a step: a Workflow instance (src/runners.ts). */
+  runId: text("run_id"),
+  /** The staff member who started it. */
+  startedBy: text("started_by").notNull(),
+  createdAt: timestamp("created_at").notNull(),
+  updatedAt: timestamp("updated_at").notNull(),
+});
+
+/**
+ * An integration Grasp's agent builds into the platform: one row per app,
+ * shared by every company that asked for it (src/builds/builds.ts). It
+ * moves forward through its stages, each move a conditional write naming
+ * the stage it leaves, audited in the same batch, so a late or repeated
+ * event never moves it back. Never an app credential, a company's data or
+ * anything the agent read: those stay in Secrets Store, the company's
+ * deployment and the agent's session.
+ */
+export const integrationBuilds = sqliteTable("integration_builds", {
+  /** The app's connector name: its package's, `packages/connectors/<app>`. */
+  app: text().primaryKey(),
+  /** The app as people name it, such as `Personio`. */
+  name: text().notNull(),
+  stage: text({
+    enum: [
+      "asked",
+      "researching",
+      "plan_ready",
+      "credentials",
+      "writing",
+      "in_review",
+      "merged",
+      "needs_person",
+    ],
+  }).notNull(),
+  /** The stage it was in when it came to need a person; null otherwise. */
+  stoppedAt: text("stopped_at"),
+  /** Why it needs a person, as a code; null otherwise. */
+  reason: text(),
+  /** Its build's Workflow instance (src/builds/workflow.ts). */
+  runId: text("run_id").notNull(),
+  /**
+   * The agent's plan, while it waits for a person or once approved: JSON
+   * (`buildPlanSchema`, src/builds/plan.ts). Its hosts are the only ones
+   * the connector's manifest may name.
+   */
+  plan: text(),
+  /** How many plans the agent has written: a sent-back plan starts the next round. */
+  planRound: integer("plan_round").notNull().default(0),
+  /** What the person who sent the last plan back asked for; null otherwise. */
+  planNote: text("plan_note"),
+  /** The staff member who approved the plan. */
+  approvedBy: text("approved_by"),
+  /** The branch it is written on, `feat/connector-<app>`, once it has a pull request. */
+  branch: text(),
+  /** Its pull request's number in grasplabs/work. */
+  pullRequest: integer("pull_request"),
+  /** The commit its pull request was squash-merged as, on `main`. */
+  mergeCommitSha: text("merge_commit_sha"),
+  /** The staff member who confirmed Build it. */
+  requestedBy: text("requested_by").notNull(),
+  createdAt: timestamp("created_at").notNull(),
+  updatedAt: timestamp("updated_at").notNull(),
+});

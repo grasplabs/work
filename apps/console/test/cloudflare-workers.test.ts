@@ -24,7 +24,7 @@ import {
 } from "../src/cloudflare/workers.ts";
 import type { AssetFile, WorkerUpload } from "../src/cloudflare/workers.ts";
 import type { AccountState } from "./cloudflare-api-kit.ts";
-import { mockCloudflareApi } from "./cloudflare-api.ts";
+import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 
 const token = "test-deployer-token-0123456789";
 const cloudflare = mockCloudflareApi(token);

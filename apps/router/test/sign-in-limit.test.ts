@@ -333,16 +333,50 @@ describe("interview link rate limit", () => {
     ).toHaveLength(6);
   });
 
-  it("limits the lines a link has said from the same budget as its link's endpoint", async () => {
+  it("limits an interview's turns from the same budget as its link's endpoint", async () => {
     const limiter = limiterAllowing(1);
     const statuses = [
       await interviewFrom(
-        "192.0.2.25",
+        "192.0.2.24",
         "https://acme.interview.test/api/interview",
         limiter
       ),
       await interviewFrom(
+        "192.0.2.24",
+        "https://acme.interview.test/api/interview/turn",
+        limiter
+      ),
+    ].map(({ status }) => status);
+    expect(statuses).toStrictEqual([200, 429]);
+  });
+
+  it("limits an interview's read-back from the same budget as its link's endpoint", async () => {
+    const limiter = limiterAllowing(1);
+    const statuses = [
+      await interviewFrom(
         "192.0.2.25",
+        "https://acme.interview.test/api/interview/turn",
+        limiter
+      ),
+      await interviewFrom(
+        "192.0.2.25",
+        "https://acme.interview.test/api/interview/story",
+        limiter
+      ),
+    ].map(({ status }) => status);
+    expect(statuses).toStrictEqual([200, 429]);
+  });
+
+  it("limits the lines a link has said from the same budget as its link's endpoint", async () => {
+    const limiter = limiterAllowing(1);
+    const statuses = [
+      await interviewFrom(
+        "192.0.2.26",
+        "https://acme.interview.test/api/interview",
+        limiter
+      ),
+      await interviewFrom(
+        "192.0.2.26",
         "https://acme.interview.test/api/speech",
         limiter
       ),
