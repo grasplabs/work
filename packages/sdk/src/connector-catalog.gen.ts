@@ -76,12 +76,16 @@ export interface ConnectorCatalog {
       readonly output: { drive: string; items: Array<{ drive: string; id: string; kind: "file" | "folder" | "other"; lastModifiedAt: string | null; mimeType: string | null; name: string; parentId: string | null; size: number | null; webUrl: string | null }>; nextPage: string | null };
     };
     readonly read: {
-      readonly input: { as?: "text" | "base64"; drive: string; item: string };
-      readonly output: { content: string | null; drive: string; encoding: "text" | "base64"; id: string; mimeType: string | null; name: string; size: number };
+      readonly input: { as?: "text" | "base64"; drive: string; item: string; version?: string };
+      readonly output: { content: string | null; drive: string; encoding: "text" | "base64"; id: string; mimeType: string | null; name: string; size: number; version: string | null };
     };
     readonly search: {
       readonly input: { drive: string; page?: string; query: string; top?: number };
       readonly output: { drive: string; items: Array<{ drive: string; id: string; kind: "file" | "folder" | "other"; lastModifiedAt: string | null; mimeType: string | null; name: string; parentId: string | null; size: number | null; webUrl: string | null }>; nextPage: string | null };
+    };
+    readonly versions: {
+      readonly input: { drive: string; item: string; page?: string; top?: number };
+      readonly output: { drive: string; id: string; name: string; nextPage: string | null; versions: Array<{ current: boolean; id: string; savedAt: string | null; savedBy: { email: string | null; name: string | null } | null; size: number | null }> };
     };
   };
   readonly "microsoft-365.mail@1": {
