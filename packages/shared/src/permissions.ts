@@ -136,14 +136,22 @@ const collectionObjectSchema = z.strictObject({
  * - `guests`: inviting people who aren't members to a short chat with a
  *   model, through a link, and reading back what they wrote
  *   (`@grasp-os/shared/guests`).
+ * - `brain`: reading the company Brain, and only reading: recall, reads of
+ *   its evidence and of its open questions (gaps). Apps, runs and agents
+ *   share this one permission, and start without it. A grant never
+ *   reaches past the person it acts for: every read is that person's
+ *   access intersected with the grant's, and is audited. Writing
+ *   (remember, proposals) will be an action of its own, with its own
+ *   consent, so an approved read grant never gains writes.
  */
 const platformObjectSchema = z.strictObject({ type: z.literal("platform") });
 
 /**
  * What a permission gives access to: a connection (all of it, or one
  * resource in it, such as one mailbox), a Knowledge collection, an
- * independent workflow (to follow its runs, `read`, or start it,
- * `start`), another App's exports: the methods of its server
+ * independent workflow (to follow its runs, `read`, start it, `start`,
+ * or send events to its runs, `send`, which neither of the others
+ * implies), another App's exports: the methods of its server
  * code it lets other Apps call (`appExportsPath`), a business store's
  * public operations (the public queries and mutations of the App that owns
  * it, each action one of them by its path: core's store-operations.ts), or
@@ -184,8 +192,8 @@ const connectionActionPattern = /^[A-Za-z][\w.-]{0,63}$/u;
 /** The actions of collections and workflows, fixed by the platform. */
 const platformActions = {
   collection: ["read", "write"],
-  workflow: ["read", "start"],
-  platform: ["statistics", "guests"],
+  workflow: ["read", "start", "send"],
+  platform: ["statistics", "guests", "brain"],
 } as const;
 
 /**
@@ -240,11 +248,14 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   "AUDIT_LOG",
   "AUDIT_RETENTION_DAYS",
   "BETTER_AUTH_SECRET",
+  "BRAIN_OBJECTS",
   "BUILD_WAIT_MS",
   "BUILTINS",
   "CAPABILITY_SIGNING_KEY",
   "CAPABILITY_SIGNING_KEY_PREVIOUS",
   "CF_VERSION_METADATA",
+  // The client this deployment is (core's src/provision-probe.ts).
+  "CLIENT_ID",
   // The client's clock (core's src/clock.ts).
   "CLOCK",
   "COMPOSIO_API_KEY",
@@ -261,6 +272,9 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   // The directory's Google client (connect's providers.ts).
   "GOOGLE_DIRECTORY_CLIENT_ID",
   "GOOGLE_DIRECTORY_CLIENT_SECRET",
+  // The documents' Google client (connect's providers.ts).
+  "GOOGLE_DOCUMENTS_CLIENT_ID",
+  "GOOGLE_DOCUMENTS_CLIENT_SECRET",
   // Where the deployment receives mail (core's src/workflows/overview.ts).
   "INBOUND_MAIL_DOMAIN",
   "KNOWLEDGE",
@@ -273,6 +287,9 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   // The directory's Entra app (connect's providers.ts).
   "MICROSOFT_DIRECTORY_CLIENT_ID",
   "MICROSOFT_DIRECTORY_CLIENT_SECRET",
+  // The documents' Entra app (connect's providers.ts).
+  "MICROSOFT_DOCUMENTS_CLIENT_ID",
+  "MICROSOFT_DOCUMENTS_CLIENT_SECRET",
   // The landscape's Entra app (connect's providers.ts).
   "MICROSOFT_LANDSCAPE_CLIENT_ID",
   "MICROSOFT_LANDSCAPE_CLIENT_SECRET",
@@ -406,6 +423,25 @@ export const declaredPermissionSchema = z
     }
   });
 export type DeclaredPermission = z.infer<typeof declaredPermissionSchema>;
+
+/** Longest workflow definition a blueprint ships, as JSON text. */
+export const blueprintWorkflowMaxLength = 256 * 1024;
+
+/**
+ * An independent workflow a built-in blueprint ships (core's
+ * app-blueprints.ts): each App created from it gets a workflow of its
+ * creator's own, published from `definition` (grasp-open-workflow/1 JSON)
+ * and bound to the App under `alias`, and asks, under `binding`, for the
+ * permission to start it. Never a grant: the request waits for an admin,
+ * and each of the version's catalog bindings for an admin's approval.
+ * The alias is lowercase, as it also names the workflow.
+ */
+export const blueprintWorkflowSchema = z.strictObject({
+  alias: z.string().regex(/^[a-z][a-z0-9]{0,31}$/u),
+  binding: bindingNameSchema,
+  definition: z.string().min(1).max(blueprintWorkflowMaxLength),
+});
+export type BlueprintWorkflow = z.infer<typeof blueprintWorkflowSchema>;
 
 /**
  * Requested: asked for, allows nothing yet. Active: granted, allows its

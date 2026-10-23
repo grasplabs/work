@@ -212,6 +212,7 @@ const copyOf = async (
     await grantReviewed(admin.api, id);
   }
   await admin.api.apps.versions.setCurrent(made.app.id, 1);
+  await admin.api.apps.publish(made.app.id);
   // The resources it uses, bound by an admin, as on the engine's
   // Resources tab.
   if (model) {

@@ -142,6 +142,21 @@ export const workflowResourceErrors = defineErrorFamily({
   "workflow.run_limit":
     "The person this start acts for already has as many runs of this workflow under way as one person may. Wait for one to end, or stop one.",
   "workflow.run_ended": "This run has already ended.",
+  "workflow.event_invalid":
+    "That event isn't one this run takes: its binding doesn't admit its type, or its data doesn't match the type's contract.",
+  "workflow.event_denied":
+    "This run may no longer take events through that binding: its approval, or the run's own access, was revoked.",
+  "workflow.event_refused":
+    "This run can't take that event now: its inbox is full, the event is too large, the run is too old, or it hasn't started yet. Nothing was accepted.",
+  "workflow.event_conflict":
+    "That delivery key was used for another event to this run. Send a new event under a new key.",
+  "workflow.event_timeout":
+    "A listen task's events didn't all arrive before its timeout.",
+  "workflow.child_unavailable":
+    "This run can't start that child workflow: the version its binding pins has no executable build, or the run has no child workflows here.",
+  "workflow.child_failed": "A child workflow this run started didn't complete.",
+  "workflow.child_timeout":
+    "A child workflow this run started didn't end while its lineage could still run.",
   "workflow.start_unconfirmed":
     "The run never started: the workflow engine didn't confirm its start in time, so nothing of it ran. Start the workflow again.",
   "workflow.protocol_unsupported":
@@ -181,6 +196,8 @@ export const workflowResourceErrors = defineErrorFamily({
     "A task's call, or what it answered, doesn't match the binding's contract, so the run failed.",
   "workflow.call_release_not_current":
     "The App release this call's approval pins is no longer the App's current version, so the call can't run. Approve the binding for the App's current release, then start the workflow again.",
+  "workflow.decision_timed_out":
+    "Nobody answered the run's decision before its deadline, so the run failed.",
   "workflow.model_call_limit":
     "The run made as many model calls as its workflow allows, so it failed.",
   "workflow.modules_invalid":
@@ -318,6 +335,8 @@ export const catalogContractSchema = z
     { message: "A contract is at most 512 KiB, its operations included." }
   );
 export type CatalogContractInput = z.input<typeof catalogContractSchema>;
+/** A catalog contract, its key included, as published. */
+export type CatalogContractDefinition = z.infer<typeof catalogContractSchema>;
 
 /** A catalog contract as the catalog lists it. */
 export interface CatalogContractEntry {
@@ -515,7 +534,10 @@ export interface WorkflowStart {
   workflowId: string;
   version: number;
   manifestHash: string;
-  invoker: { type: "person" | "app" | "agent" | "trigger"; id: string };
+  invoker: {
+    type: "person" | "app" | "agent" | "trigger" | "workflow";
+    id: string;
+  };
   principal: string;
   authorityGeneration: number;
   inputHash: string;

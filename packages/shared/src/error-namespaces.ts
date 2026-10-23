@@ -14,6 +14,7 @@
  * sorted, as the test derives them.
  */
 export const familyNamespaces = [
+  "admin_ask",
   "agent",
   "app",
   "audit",
@@ -43,6 +44,7 @@ export const familyNamespaces = [
   "knowledge",
   "knowledge_signal",
   "landscape",
+  "link",
   "member",
   "migration",
   "model",
@@ -53,6 +55,7 @@ export const familyNamespaces = [
   "organization",
   "package",
   "permission",
+  "place",
   "query",
   "request",
   "resource",

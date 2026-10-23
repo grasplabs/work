@@ -6,24 +6,39 @@ import type {
   OnboardingDirectory,
 } from "@grasp-os/shared/directory";
 import type {
+  DocumentPlace,
+  OnboardingPlaces,
+  PlaceItem,
+  PlaceItemsInput,
+  PlacesSuite,
+  SharePlaceFileInput,
+} from "@grasp-os/shared/document-places";
+import type {
   HrCredentials,
   HrPeople,
   HrPlatform,
   OnboardingHr,
 } from "@grasp-os/shared/hr";
 import {
+  linksTakenSchema,
   onboardingErrors,
   planSchema,
   programmeWeeks,
   rosterSchema,
 } from "@grasp-os/shared/onboarding";
 import type {
+  LinkToSend,
   OnboardingApi,
   OnboardingView,
   PlanInput,
   Programme,
   RosterInput,
 } from "@grasp-os/shared/onboarding";
+import { setupChoicesSchema } from "@grasp-os/shared/onboarding-choices";
+import type {
+  SetupChoices,
+  SetupChoicesInput,
+} from "@grasp-os/shared/onboarding-choices";
 import {
   documentAnswerMaxLength,
   documentErrors,
@@ -45,6 +60,13 @@ import {
   onboardingDirectory,
   readOnboardingDirectory,
 } from "./directory.ts";
+import {
+  connectPlaces,
+  listPlaces,
+  onboardingPlaces,
+  placeItems,
+  sharePlaceFile,
+} from "./document-places.ts";
 import { shareDocument } from "./documents.ts";
 import { gateView } from "./gate.ts";
 import { connectHr, onboardingHr, readOnboardingHr } from "./hr.ts";
@@ -54,7 +76,9 @@ import { summaryOf } from "./summary.ts";
 
 // The onboarding over `/rpc`. The company's admin (and Grasp's staff,
 // whose access is the admin role) gives the store who works where and the
-// plan, and reads back numbers per team, never anyone's words. What only
+// plan, and reads back numbers per team, never anyone's words; and takes
+// everyone's own link, to send themselves as well (the threat model's L3:
+// a link opens on the first device only, whoever holds it). What only
 // Grasp's staff do is in staff-rpc.ts. The admin also shares documents,
 // each read at once (documents.ts). Everything that comes in is checked
 // against the shared schemas before the store sees it. Its programme
@@ -62,8 +86,9 @@ import { summaryOf } from "./summary.ts";
 // dashboard: the plan's first week and the stage, and nothing of the plan
 // or the roster past them. Who works where can also come from the
 // organization's directory, connected here and read for the admin's
-// browser to make the roster of (directory.ts), and who leads which team
-// from its HR platform, the same way (hr.ts).
+// browser to make the roster of (directory.ts); documents from where
+// they live, picked in the admin's browser (document-places.ts); and who
+// leads which team from its HR platform, the same way (hr.ts).
 
 /** The admin's answer to a document's question. */
 const answerSchema = z.strictObject({
@@ -149,6 +174,48 @@ export class OnboardingRpc extends CoreRpcTarget implements OnboardingApi {
     );
   }
 
+  async documentPlaces(): Promise<OnboardingPlaces | null> {
+    return await withPerson(
+      this.#check,
+      async (person) => await onboardingPlaces(this.#env, person)
+    );
+  }
+
+  async connectDocumentPlaces(
+    suite: PlacesSuite,
+    returnTo: string
+  ): Promise<{ url: string }> {
+    return await withPerson(
+      this.#check,
+      async (person) => await connectPlaces(this.#env, person, suite, returnTo)
+    );
+  }
+
+  async listDocumentPlaces(): Promise<DocumentPlace[]> {
+    return await withPerson(
+      this.#check,
+      async (person) => await listPlaces(this.#env, person)
+    );
+  }
+
+  async placeItems(
+    input: PlaceItemsInput
+  ): Promise<{ items: PlaceItem[]; next: string | null }> {
+    return await withPerson(
+      this.#check,
+      async (person) => await placeItems(this.#env, person, input)
+    );
+  }
+
+  async sharePlaceFile(
+    input: SharePlaceFileInput
+  ): Promise<OnboardingDocument> {
+    return await withPerson(
+      this.#check,
+      async (person) => await sharePlaceFile(this.#env, person, input)
+    );
+  }
+
   async hrPlatform(): Promise<OnboardingHr | null> {
     return await withPerson(
       this.#check,
@@ -191,6 +258,47 @@ export class OnboardingRpc extends CoreRpcTarget implements OnboardingApi {
         throw onboardingErrors.create("onboarding.no_roster");
       }
       return await store.savePlan(parsed, actorOf(person));
+    });
+  }
+
+  async links(): Promise<LinkToSend[]> {
+    return await withPerson(this.#check, async (person) => {
+      requireAdmin(person);
+      return await onboardingStore(this.#env).linksToSend();
+    });
+  }
+
+  async linksTaken(people: string[]): Promise<void> {
+    await withPerson(this.#check, async (person) => {
+      requireAdmin(person);
+      const parsed = onboardingErrors.parse(
+        "onboarding.invalid",
+        linksTakenSchema,
+        people
+      );
+      await onboardingStore(this.#env).linksTaken(parsed, actorOf(person));
+    });
+  }
+
+  async choices(): Promise<SetupChoices> {
+    return await withPerson(this.#check, async (person) => {
+      requireAdmin(person);
+      return await onboardingStore(this.#env).choices();
+    });
+  }
+
+  async saveChoices(choices: SetupChoicesInput): Promise<SetupChoices> {
+    return await withPerson(this.#check, async (person) => {
+      requireAdmin(person);
+      const parsed = onboardingErrors.parse(
+        "onboarding.invalid",
+        setupChoicesSchema,
+        choices
+      );
+      return await onboardingStore(this.#env).saveChoices(
+        parsed,
+        actorOf(person)
+      );
     });
   }
 

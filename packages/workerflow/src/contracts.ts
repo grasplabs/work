@@ -312,6 +312,33 @@ export interface WorkflowStep {
     name: string,
     options: { type: string; timeout?: WorkflowDuration }
   ) => Promise<WorkflowStepEvent<Payload>>;
+  /**
+   * As `waitForEvent`, for the oldest event matching any of `match`, until
+   * the absolute time `until` (in ms since the epoch, or a Date, at most
+   * 365 days ahead): Workerflow's own, beyond Cloudflare's. An event
+   * matches an entry when its type is the entry's and it was sent with
+   * every one of the entry's attributes, each with exactly that value
+   * (`deliverEvent`'s `attributes`); it may carry others. A deadline
+   * already past takes an event already there, or times out at once.
+   * Each replay returns the same event, or rejects the same way, and must
+   * give the same `match`; `until` may be computed afresh, as
+   * `sleepUntil`'s may: the deadline journaled when the wait was first
+   * reached decides.
+   */
+  waitForMatch: <Payload = unknown>(
+    name: string,
+    options: { match: readonly EventMatch[]; until: Date | number }
+  ) => Promise<WorkflowStepEvent<Payload>>;
+}
+
+/**
+ * One of the events a `waitForMatch` takes: its type, and the attributes
+ * (CloudEvents' rule for names: 1 to 20 lowercase letters and digits) it
+ * must have been sent with, each with exactly that value.
+ */
+export interface EventMatch {
+  readonly type: string;
+  readonly attributes?: Readonly<Record<string, string>>;
 }
 
 /** A workflow: what the host resolves a run's definition to. */

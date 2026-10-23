@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { OutboxedAuditEvent, OutboxRejected } from "./audit.ts";
 import type { HeldBinding } from "./capability.ts";
 import { directoryProviderSchema } from "./directory.ts";
+import { placesProviderSchema } from "./document-places.ts";
 import { defineErrorFamily, isExpectedError } from "./errors.ts";
 import type { CodedError } from "./errors.ts";
 import { hrProviderSchema } from "./hr.ts";
@@ -115,15 +116,16 @@ export type OAuthProvider = z.infer<typeof oauthProviderSchema>;
 
 /**
  * Names no app may take: the suites above, whose sign-in connect handles
- * itself; the landscape's, the directory's and the HR platform's admin
- * connections (`./landscape.ts`, `./directory.ts`, `./hr.ts`), which no
- * connector's calls may use; and Composio, whose connections are another
- * kind.
+ * itself; the landscape's, the directory's, the documents' and the HR
+ * platform's admin connections (`./landscape.ts`, `./directory.ts`,
+ * `./document-places.ts`, `./hr.ts`), which no connector's calls may use;
+ * and Composio, whose connections are another kind.
  */
 const reservedProviderIds: ReadonlySet<string> = new Set([
   ...oauthProviderSchema.options,
   ...landscapeProviderSchema.options,
   ...directoryProviderSchema.options,
+  ...placesProviderSchema.options,
   ...hrProviderSchema.options,
   "composio",
 ]);
@@ -189,12 +191,14 @@ export const startConnectionSchema = z.strictObject({
   person: connectionPersonSchema,
   /**
    * A connector's provider, or a read-only admin connection of a suite
-   * (the landscape's, the directory's), which no connector's calls use.
+   * (the landscape's, the directory's, the documents'), which no
+   * connector's calls use.
    */
   provider: z.union([
     connectorProviderSchema,
     landscapeProviderSchema,
     directoryProviderSchema,
+    placesProviderSchema,
   ]),
   scope: connectionScopeSchema,
   /** The deployment's origin, from its config: the provider returns there. */
@@ -354,6 +358,11 @@ export const connectionOwnersSchema = z
 export interface ConnectionOwner {
   id: string;
   ownerUserId: string | null;
+  /**
+   * Whether it takes calls (`active`), waits to be signed in again
+   * (`needs_reauth`), or was disconnected: its owner is kept either way.
+   */
+  status: "active" | "needs_reauth" | "disconnected";
   /** Who carries out its actions: a native connector, or Composio. */
   source: CatalogSource;
   /** A native provider (`microsoft`), or a Composio toolkit's slug. */

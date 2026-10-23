@@ -44,8 +44,9 @@ import {
   rollbackRingAndWait,
 } from "../src/rollout/rollback.ts";
 import { checkRevocation } from "../src/rollout/shared-secrets.ts";
+import { fleetConcurrency } from "../src/rollout/workflow.ts";
 import type { AccountState } from "./cloudflare-api-kit.ts";
-import { mockCloudflareApi } from "./cloudflare-api.ts";
+import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { racingDb } from "./racing-db.ts";
 import { declared, publishRelease } from "./releases.ts";
 import type { ReleaseSpec } from "./releases.ts";
@@ -111,16 +112,20 @@ const activeClient = async (
 };
 
 /**
- * The rollouts the test starts, as the test pool lets a test follow them:
- * pauses and retry delays going at once. Each wait is on the latest
- * rollout started.
+ * The rollouts the test starts, as the test pool lets a test follow them,
+ * with the children that deploy their fleet clients: pauses and retry
+ * delays going at once. Each wait is on the latest rollout started.
  */
 const followRollouts = async () => {
   const runs = await introspectWorkflow(env.ROLLOUT);
-  await runs.modifyAll(async (modifier) => {
-    await modifier.disableSleeps();
-    await modifier.disableRetryDelays();
-  });
+  const children = await introspectWorkflow(env.ROLLOUT_CLIENT);
+  for (const each of [runs, children]) {
+    // oxlint-disable-next-line no-await-in-loop -- set up before any run starts
+    await each.modifyAll(async (modifier) => {
+      await modifier.disableSleeps();
+      await modifier.disableRetryDelays();
+    });
+  }
   const latest = async () => {
     const all = await runs.get();
     const last = all.at(-1);
@@ -138,8 +143,20 @@ const followRollouts = async () => {
       const run = await latest();
       await run.waitForStatus(status);
     },
+    /** The runs started so far for fleet clients, one per client and round. */
+    childRuns: async () => await children.get(),
+    /** Waits for step `step` of the latest fleet client's child run. */
+    waitForChildStepResult: async (step: { name: string }) => {
+      const all = await children.get();
+      const child = all.at(-1);
+      if (child === undefined) {
+        throw new Error("No fleet client's run was started");
+      }
+      return await child.waitForStepResult(step);
+    },
     [Symbol.asyncDispose]: async () => {
       await runs.dispose();
+      await children.dispose();
     },
   };
 };
@@ -248,22 +265,29 @@ const landLateDuringRollback = (
 ): void => {
   const deployments = (): number =>
     client.account.scripts.get(script)?.deployments.length ?? 0;
-  cloudflare.beforeAnswering(isDeploymentAt(script, percent), async () => {
-    const rolloutId = await openRollout();
-    await rollbacks.startUntil(rolloutId, client.clientId, "restore");
-    // The rollout's deployment is the next one to land.
-    const restored = deployments();
-    // The rollback's read again, right before it records: only once the
-    // rollout's deployment has landed.
-    cloudflare.beforeAnswering(
-      (call) =>
-        call.method === "GET" &&
-        call.path.endsWith(`/workers/scripts/${script}/deployments`),
-      async () => {
-        await until(() => deployments() > restored);
-      }
-    );
-  });
+  // Its own account's: every client's Workers have the same names.
+  const ours = (call: { path: string }): boolean =>
+    call.path.startsWith(`/accounts/${client.account.id}/`);
+  cloudflare.beforeAnswering(
+    (call) => ours(call) && isDeploymentAt(script, percent)(call),
+    async () => {
+      const rolloutId = await openRollout();
+      await rollbacks.startUntil(rolloutId, client.clientId, "restore");
+      // The rollout's deployment is the next one to land.
+      const restored = deployments();
+      // The rollback's read again, right before it records: only once the
+      // rollout's deployment has landed.
+      cloudflare.beforeAnswering(
+        (call) =>
+          ours(call) &&
+          call.method === "GET" &&
+          call.path.endsWith(`/workers/scripts/${script}/deployments`),
+        async () => {
+          await until(() => deployments() > restored);
+        }
+      );
+    }
+  );
 };
 
 /** Starts a rollout of `releaseId` for `scope`, as staff. */
@@ -1584,6 +1608,329 @@ const liveSecretOf = (
     ?.secrets.get(name);
 };
 
+/**
+ * Samples, a few ms apart until stopped, how many clients the running
+ * rollout holds at once: `stop` returns the most it held.
+ */
+const watchClaims = () => {
+  let peak = 0;
+  const stopping = new AbortController();
+  const sampling = (async () => {
+    while (!stopping.signal.aborted) {
+      // oxlint-disable-next-line no-await-in-loop -- sampled until stopped
+      const rolloutId = await openRollout();
+      // oxlint-disable-next-line no-await-in-loop -- sampled until stopped
+      const held = await db.$count(clientRuns, eq(clientRuns.runId, rolloutId));
+      peak = Math.max(peak, held);
+      // oxlint-disable-next-line no-await-in-loop -- sampled until stopped
+      await scheduler.wait(5);
+    }
+  })();
+  return {
+    stop: async (): Promise<number> => {
+      stopping.abort();
+      await sampling;
+      return peak;
+    },
+  };
+};
+
+/** `count` active clients in `ring` running `releaseId`, each on its own account. */
+const activeClients = async (
+  count: number,
+  ring: number,
+  releaseId: string
+): Promise<{ clientId: string; account: AccountState }[]> => {
+  const made: { clientId: string; account: AccountState }[] = [];
+  // One at a time: the fake holds a few client databases at once.
+  for (let index = 0; index < count; index += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- one client at a time
+    made.push(await activeClient(ring, releaseId));
+  }
+  return made;
+};
+
+/** Each of `fleet`'s target statuses in rollout `rolloutId`, by client. */
+const fleetStatuses = async (
+  rolloutId: string,
+  fleet: readonly { clientId: string }[]
+): Promise<Record<string, string | undefined>> => {
+  const targets = await targetsOf(rolloutId);
+  return Object.fromEntries(
+    fleet.map(({ clientId }) => [clientId, targets[clientId]?.status])
+  );
+};
+
+/** Each of `fleet`'s runners, in its order. */
+const runnersOf = async (fleet: readonly { clientId: string }[]) =>
+  await Promise.all(
+    fleet.map(async ({ clientId }) => await runnerOf(clientId))
+  );
+
+describe("rolling out to the fleet a few clients at a time", () => {
+  useStoreSecrets({ deployer: token, tenant: tenantToken });
+  beforeEach(setAsideEarlierTests);
+
+  it("deploys a ring's clients side by side, never more at once than its limit, and one that fails stops none of the others and is retried", async () => {
+    const before = await importedRelease("feat(core): the release before");
+    await activeClient(0, before);
+    const fleet = await activeClients(fleetConcurrency + 2, 1, before);
+    const [failing] = fleet;
+    const release = await importedRelease("feat(core): side by side");
+    // A setting core doesn't read: this client's deploy is refused.
+    await db.insert(settings).values({
+      clientId: failing?.clientId ?? "",
+      key: "NOT_A_SETTING",
+      value: "true",
+      updatedBy: staff.email,
+      updatedAt: new Date(),
+    });
+    await using run = await followRollouts();
+
+    const rolloutId = await rollOut(release, { scope: "all" });
+    await run.waitForStepResult({ name: "ring 1 approved" });
+    const claims = watchClaims();
+    await approveRollout(env, staff, rolloutId);
+    await run.waitForStepResult({ name: "retry 1 asked" });
+    const peak = await claims.stop();
+    const failed = await fleetStatuses(rolloutId, fleet);
+
+    await db
+      .delete(settings)
+      .where(eq(settings.clientId, failing?.clientId ?? ""));
+    await retryRollout(env, staff, rolloutId);
+    await run.waitForStatus("complete");
+
+    const releases = await Promise.all(
+      fleet.map(async ({ clientId }) => await releasesOf(clientId))
+    );
+    expect({
+      peak: { together: peak > 1, withinLimit: peak <= fleetConcurrency },
+      failed,
+      retried: await fleetStatuses(rolloutId, fleet),
+      releases,
+      runners: await runnersOf(fleet),
+      rollout: await rolloutRow(rolloutId),
+    }).toStrictEqual({
+      peak: { together: true, withinLimit: true },
+      failed: Object.fromEntries(
+        fleet.map(({ clientId }) => [
+          clientId,
+          clientId === failing?.clientId ? "failed" : "done",
+        ])
+      ),
+      retried: Object.fromEntries(
+        fleet.map(({ clientId }) => [clientId, "done"])
+      ),
+      releases: fleet.map(() => [release, release]),
+      runners: fleet.map(() => null),
+      rollout: { status: "done", ring: 1 },
+    });
+  });
+
+  it("accepts a rollout to more fleet clients than its run could deploy by itself", async () => {
+    const before = await importedRelease("feat(core): the release before");
+    await activeClient(0, before);
+    const release = await importedRelease("feat(core): a large fleet");
+    // Recorded only: the rollout is cancelled before it reaches them.
+    const now = new Date();
+    const many = Array.from({ length: 60 }, (_, index) => ({
+      id: `fleet-${index}-${crypto.randomUUID().slice(0, 6)}`,
+      name: "Fleet",
+      accountId: crypto.randomUUID().replaceAll("-", ""),
+      ring: 1,
+      status: "active" as const,
+      createdAt: now,
+      updatedAt: now,
+    }));
+    const [firstRow, ...rest] = many.map((row) =>
+      db.insert(clients).values(row)
+    );
+    if (firstRow !== undefined) {
+      // A row per statement: D1 takes 100 bound values at most in one.
+      await db.batch([firstRow, ...rest]);
+    }
+    await using run = await followRollouts();
+
+    const rolloutId = await rollOut(release, { scope: "all" });
+    await run.waitForStepResult({ name: "ring 1 approved" });
+    await cancelRollout(env, staff, rolloutId);
+    await run.waitForStatus("terminated");
+
+    const targets = await targetsOf(rolloutId);
+    expect({
+      targets: Object.keys(targets).length,
+      rollout: await rolloutRow(rolloutId),
+    }).toStrictEqual({
+      targets: many.length + 1,
+      rollout: { status: "cancelled", ring: 0 },
+    });
+  });
+
+  it("starts no fleet client while paused, lets those deploying already finish, and goes on once resumed", async () => {
+    const before = await importedRelease("feat(core): the release before");
+    await activeClient(0, before);
+    const fleet = await activeClients(fleetConcurrency + 1, 1, before);
+    const accounts = new Set(fleet.map(({ account }) => account.id));
+    const release = await importedRelease("feat(core): paused in the fleet");
+    await using run = await followRollouts();
+    const rolloutId = await rollOut(release, { scope: "all" });
+    await run.waitForStepResult({ name: "ring 1 approved" });
+    // Staff pause the rollout as soon as a fleet client's deploy reaches
+    // its account.
+    cloudflare.beforeAnswering(
+      (call) => accounts.has(call.path.split("/")[2] ?? ""),
+      async () => {
+        await pauseRollout(env, staff, rolloutId);
+      }
+    );
+
+    await approveRollout(env, staff, rolloutId);
+    await run.waitForStatus("paused");
+    const started = await run.childRuns();
+    await Promise.all(started.map(settled));
+    const whilePaused = {
+      children: started.length,
+      statuses: Object.values(await fleetStatuses(rolloutId, fleet)).toSorted(
+        (a, b) => (a ?? "").localeCompare(b ?? "")
+      ),
+      runners: await runnersOf(fleet),
+    };
+    await resumeRollout(env, staff, rolloutId);
+    await run.waitForStatus("complete");
+    const all = await run.childRuns();
+
+    expect({
+      whilePaused,
+      children: all.length,
+      statuses: await fleetStatuses(rolloutId, fleet),
+      rollout: await rolloutRow(rolloutId),
+    }).toStrictEqual({
+      whilePaused: {
+        children: fleetConcurrency,
+        statuses: [...fleet.slice(1).map(() => "done"), "pending"],
+        runners: fleet.map(() => null),
+      },
+      children: fleet.length,
+      statuses: Object.fromEntries(
+        fleet.map(({ clientId }) => [clientId, "done"])
+      ),
+      rollout: { status: "done", ring: 1 },
+    });
+  });
+
+  it("stops the fleet clients deploying when the rollout's run ends outside the console, once the rollout is marked failed", async () => {
+    const before = await importedRelease("feat(core): the release before");
+    await activeClient(0, before);
+    const fleet = await activeClients(2, 1, before);
+    const accounts = new Set(fleet.map(({ account }) => account.id));
+    const release = await importedRelease("feat(core): run ended mid-fleet");
+    await using run = await followRollouts();
+    const rolloutId = await rollOut(release, { scope: "all" });
+    await run.waitForStepResult({ name: "ring 1 approved" });
+    // Terminated from the dashboard as a fleet client's deploy reaches its
+    // account; the next rollout's start finds the run ended and marks the
+    // rollout failed.
+    cloudflare.beforeAnswering(
+      (call) => accounts.has(call.path.split("/")[2] ?? ""),
+      async () => {
+        const instance = await env.ROLLOUT.get(rolloutId);
+        await instance.terminate();
+        await rollOut(before, { scope: "ring", ring: 0 });
+      }
+    );
+
+    await approveRollout(env, staff, rolloutId);
+    await vi.waitUntil(async () => {
+      const row = await rolloutRow(rolloutId);
+      return row?.status === "failed";
+    });
+    const started = await run.childRuns();
+    await Promise.all(started.map(settled));
+
+    // A child started for a client ends it as soon as it sees the
+    // rollout failed; a client never started stays pending.
+    const targets = await targetsOf(rolloutId);
+    const reached = fleet
+      .map(({ clientId }) => targets[clientId])
+      .filter((target) => target?.status !== "pending");
+    expect({
+      rollout: await rolloutRow(rolloutId),
+      reached: reached.length > 0 && reached.length <= started.length,
+      ended: reached.map((target) => ({
+        stopped: ["stopped", "skipped"].includes(target?.status ?? ""),
+        error: target?.error,
+      })),
+      runners: await runnersOf(fleet),
+    }).toStrictEqual({
+      rollout: { status: "failed", ring: 1 },
+      reached: true,
+      ended: reached.map(() => ({ stopped: true, error: "failed" })),
+      runners: fleet.map(() => null),
+    });
+  });
+
+  it("rolls back one fleet client while others deploy beside it, which stops the rollout and leaves every client ended and released", async () => {
+    const before = await importedRelease("feat(core): the release before");
+    await activeClient(0, before);
+    const fleet = await activeClients(fleetConcurrency - 1, 1, before);
+    const [rolledBack, ...others] = fleet;
+    if (rolledBack === undefined) {
+      throw new Error("The fleet was set up");
+    }
+    const previous = await recordedVersionsOf(rolledBack.clientId);
+    const [, core] = await workersOf(rolledBack.clientId);
+    const script = core?.scriptName ?? "";
+    const release = await importedRelease("feat(core): one rolled back");
+    await using run = await followRollouts();
+    await using rollbacks = await followRollbacks();
+    // Staff roll the client back as its core goes to 10% (connect is
+    // live, so there's something to roll back); that change lands after
+    // the rollback restored its versions, which puts it right.
+    landLateDuringRollback(rollbacks, rolledBack, script, 10);
+
+    const rolloutId = await rollOut(release, { scope: "all" });
+    await run.waitForStepResult({ name: "ring 1 approved" });
+    await approveRollout(env, staff, rolloutId);
+    await run.waitForStatus("complete");
+    await rollbacks.waitForAll();
+
+    const statuses = await fleetStatuses(rolloutId, others);
+    const actions = await rolloutActions(rolloutId);
+    const targets = await targetsOf(rolloutId);
+    expect({
+      live: await liveVersionsOf(rolledBack.clientId, rolledBack.account),
+      target: targets[rolledBack.clientId]?.status,
+      // Each of the others finished, or was stopped by the cancel.
+      others: Object.values(statuses).every((status) =>
+        ["done", "stopped", "skipped"].includes(status ?? "")
+      ),
+      runners: await runnersOf(fleet),
+      rollout: await rolloutRow(rolloutId),
+      failed: actions.includes("rollout.fail"),
+    }).toStrictEqual({
+      live: previous,
+      target: "rolled_back",
+      others: true,
+      runners: fleet.map(() => null),
+      rollout: { status: "cancelled", ring: 1 },
+      failed: false,
+    });
+  });
+});
+
+/** The steps of a client's deploy of a release with connect and core, Workers live at once. */
+const clientStepNames = (clientId: string): string[] => [
+  `${clientId} claim`,
+  `${clientId} prepare`,
+  `${clientId} connect upload`,
+  `${clientId} connect live`,
+  `${clientId} core upload`,
+  `${clientId} core live`,
+  `${clientId} finish`,
+  `${clientId} done`,
+];
+
 describe("rolling new secrets out", () => {
   useStoreSecrets({ deployer: token, tenant: tenantToken });
   beforeEach(setAsideEarlierTests);
@@ -1724,23 +2071,17 @@ describe("rolling new secrets out", () => {
     // Workflow step result.
     const events = await db.select().from(auditEvents);
     const deploys = await db.select().from(clientDeploys);
-    const stepNames = [
-      "targets",
-      "ring 2 approved",
-      ...[internal.clientId, acme.clientId].flatMap((clientId) => [
-        `${clientId} claim`,
-        `${clientId} prepare`,
-        `${clientId} connect upload`,
-        `${clientId} connect live`,
-        `${clientId} core upload`,
-        `${clientId} core live`,
-        `${clientId} finish`,
-        `${clientId} done`,
-      ]),
-    ];
-    const steps = await Promise.all(
-      stepNames.map(async (name) => await run.waitForStepResult({ name }))
-    );
+    // Ring 0's client is deployed by the rollout's run, acme by its child.
+    const steps = await Promise.all([
+      ...[
+        "targets",
+        "ring 2 approved",
+        ...clientStepNames(internal.clientId),
+      ].map(async (name) => await run.waitForStepResult({ name })),
+      ...clientStepNames(acme.clientId).map(
+        async (name) => await run.waitForChildStepResult({ name })
+      ),
+    ]);
     expect(
       JSON.stringify({ logged, events, deploys, steps, view })
     ).not.toContain(rotatedMicrosoft);
@@ -2280,7 +2621,9 @@ describe("controlling a rollout", () => {
     await using run = await followRollouts();
     const rolloutId = await rollOut(release, { scope: "ring", ring: 0 });
     await run.waitForStatus("complete");
-    await emptyStoreSecret(env.CLIENT_KEY, "CLIENT_KEY");
+    // The router's key: the client key also makes the shared secrets'
+    // fingerprints, which a rollback checks before anything goes back.
+    await emptyStoreSecret(env.ROUTER_KEY, "ROUTER_KEY");
     const warn = vi.spyOn(console, "warn").mockReturnValue();
     await using rollbacks = await followRollbacks();
 
@@ -2711,7 +3054,7 @@ describe("controlling a rollout", () => {
     });
   });
 
-  it("rolls a client back from a secrets rollout to the versions, and so the secrets, it ran before", async () => {
+  it("rolls a client back from a secrets rollout to the versions, and so the secrets, it ran before, only once Secrets Store holds those secrets again", async () => {
     const release = await importedRelease("feat(core): what it runs");
     const internal = await activeClient(0, release);
     await activeClient(1, release);
@@ -2722,9 +3065,35 @@ describe("controlling a rollout", () => {
     await using rollbacks = await followRollbacks();
     const rolloutId = await rollOutSecrets({ scope: "ring", ring: 1 });
     await run.waitForStepResult({ name: "ring 1 approved" });
+    const state = async () => ({
+      live: await liveVersionsOf(internal.clientId, internal.account),
+      recorded: await recordedVersionsOf(internal.clientId),
+      counts: deploymentCounts(internal.account),
+      targets: await targetsOf(rolloutId),
+      rollout: await rolloutRow(rolloutId),
+      runner: await runnerOf(internal.clientId),
+      actions: await rolloutActions(rolloutId),
+    });
+    const rolledOut = await state();
 
+    // The store holds the rotated secret: its previous versions run the
+    // one it replaced, which may be revoked.
+    const refused = await codeOf(
+      rollbackClient(env, staff, rolloutId, internal.clientId)
+    );
+    const untouched = await state();
+    // The rotation is undone: the store holds what they run again.
+    await setStoreSecret(
+      env.MICROSOFT_CLIENT_SECRET,
+      "MICROSOFT_CLIENT_SECRET",
+      "microsoft-secret"
+    );
     await rollbacks.rollBack(rolloutId, internal.clientId);
 
+    expect({ refused, untouched }).toStrictEqual({
+      refused: "shared_secret_replaced",
+      untouched: rolledOut,
+    });
     expect({
       live: await liveVersionsOf(internal.clientId, internal.account),
       microsoft: liveSecretOf(
@@ -2739,6 +3108,99 @@ describe("controlling a rollout", () => {
       microsoft: "microsoft-secret",
       targets: { [internal.clientId]: { status: "rolled_back" } },
       rollout: { status: "cancelled" },
+    });
+  });
+
+  it("refuses a rollback to versions that run a shared secret Secrets Store has replaced since, or that no record shows run the store's, and changes nothing", async () => {
+    const before = await importedRelease("feat(core): ran the old key");
+    const replaced = await activeClient(0, before);
+    const unrecorded = await activeClient(0, before);
+    // Someone made a copy of its connect live by hand: the same secrets,
+    // on a version the console has no fingerprints of.
+    const [connect] = await workersOf(unrecorded.clientId);
+    const script = unrecorded.account.scripts.get(connect?.scriptName ?? "");
+    const live = script?.versions.find(
+      ({ id }) => id === liveOf(unrecorded.account, connect?.scriptName ?? "")
+    );
+    if (script === undefined || live === undefined) {
+      throw new Error("connect isn't live");
+    }
+    const copy = {
+      ...live,
+      id: crypto.randomUUID(),
+      number: script.versions.length + 1,
+    };
+    script.versions.push(copy);
+    script.deployments.unshift({
+      id: crypto.randomUUID(),
+      created_on: new Date().toISOString(),
+      versions: [{ version_id: copy.id, percentage: 100 }],
+      annotations: {},
+    });
+    const release = await importedRelease("feat(core): runs the new key");
+    await using run = await followRollouts();
+    const rolloutId = await rollOut(release, { scope: "ring", ring: 0 });
+    await run.waitForStatus("complete");
+    const both = [replaced, unrecorded];
+    const state = async () => ({
+      live: await Promise.all(
+        both.map(
+          async ({ clientId, account }) =>
+            await liveVersionsOf(clientId, account)
+        )
+      ),
+      recorded: await Promise.all(
+        both.map(async ({ clientId }) => await recordedVersionsOf(clientId))
+      ),
+      counts: both.map(({ account }) => deploymentCounts(account)),
+      targets: await targetsOf(rolloutId),
+      rollout: await rolloutRow(rolloutId),
+      runners: await Promise.all(
+        both.map(async ({ clientId }) => await runnerOf(clientId))
+      ),
+      actions: await rolloutActions(rolloutId),
+    });
+    const rolledOut = await state();
+
+    const unproven = await codeOf(
+      rollbackClient(env, staff, rolloutId, unrecorded.clientId)
+    );
+    // The provider key is replaced in 1Password, and the old one revoked.
+    await rotateMicrosoftSecret();
+    const alone = await codeOf(
+      rollbackClient(env, staff, rolloutId, replaced.clientId)
+    );
+    const ring = await rollbackRing(env, staff, rolloutId, 0);
+    // With a shared secret missing from the store, there's nothing to
+    // compare the versions with.
+    await emptyStoreSecret(
+      env.MICROSOFT_CLIENT_SECRET,
+      "MICROSOFT_CLIENT_SECRET"
+    );
+    const unreadable = await codeOf(
+      rollbackClient(env, staff, rolloutId, replaced.clientId)
+    );
+
+    expect({
+      unproven,
+      alone,
+      ring: ring
+        .map(({ clientId, runId, refused }) => ({ clientId, runId, refused }))
+        .toSorted((a, b) => a.clientId.localeCompare(b.clientId)),
+      unreadable,
+      state: await state(),
+    }).toStrictEqual({
+      unproven: "shared_secret_replaced",
+      alone: "shared_secret_replaced",
+      ring: both
+        .map(({ clientId }) => ({
+          clientId,
+          runId: null,
+          refused: "shared_secret_replaced",
+        }))
+        .toSorted((a, b) => a.clientId.localeCompare(b.clientId)),
+      unreadable: "secrets_store_incomplete",
+      state: rolledOut,
     });
   });
 
@@ -2797,6 +3259,37 @@ describe("controlling a rollout", () => {
       counts,
       runner: null,
     });
+  });
+
+  it("refuses a rollback to a release whose code doesn't run on the database schema the rollout's migrations left", async () => {
+    const before = await importedRelease("feat(core): reads table a", {
+      compatibleFrom: {},
+    });
+    const internal = await activeClient(0, before);
+    const release = await importedRelease(
+      "feat(core): stop reading table a and drop it",
+      {
+        migrations: {
+          "0000_init.sql": "CREATE TABLE a (id TEXT);",
+          "0001_drop_a.sql": "DROP TABLE a;",
+        },
+        compatibleFrom: { "grasp-os-core": 1 },
+      }
+    );
+    await using run = await followRollouts();
+    const rolloutId = await rollOut(release, { scope: "ring", ring: 0 });
+    await run.waitForStatus("complete");
+    const counts = deploymentCounts(internal.account);
+
+    const refused = await codeOf(
+      rollbackClient(env, staff, rolloutId, internal.clientId)
+    );
+
+    expect({
+      refused,
+      counts: deploymentCounts(internal.account),
+      runner: await runnerOf(internal.clientId),
+    }).toStrictEqual({ refused: "schema_incompatible", counts, runner: null });
   });
 
   it("refuses a rollback while the rollout is still preparing the client, with nothing of it live", async () => {

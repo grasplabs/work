@@ -29,7 +29,7 @@ import {
 } from "../db/knowledge/schema.ts";
 import { noteProvenance } from "./access.ts";
 import type { Reader } from "./access.ts";
-import { allowedFor } from "./app-entries.ts";
+import { allowedFor } from "./authorize.ts";
 import {
   backlinkRows,
   documentMaxLinks,
@@ -37,6 +37,7 @@ import {
   readableDocument,
   toSummary,
 } from "./documents.ts";
+import { portsOf } from "./ports.ts";
 
 // The agent's Knowledge tools (Code Mode: a typed API it filters in code):
 // a small catalog always in its context, then search (search.ts), read and
@@ -111,7 +112,7 @@ export const catalog = async (
   reader: Reader
 ): Promise<KnowledgeCatalog> => {
   const db = drizzle(env.KNOWLEDGE);
-  const allowed = await allowedFor(env, db, reader);
+  const allowed = await allowedFor(portsOf(env), reader);
   const collectionRows = await db
     .select({
       id: collections.id,
@@ -200,7 +201,7 @@ export const read = async (
     return { ...summary, section: null, text: version.text, provenance };
   }
   const db = drizzle(env.KNOWLEDGE);
-  const allowed = await allowedFor(env, db, reader);
+  const allowed = await allowedFor(portsOf(env), reader);
   const id = documentIdSchema.safeParse(documentId);
   // The section is read in the same query as the access check, as a whole
   // document is (`getDocument`).
@@ -209,7 +210,11 @@ export const read = async (
         .select({
           document: documents,
           collection: collections,
-          section: { headings: sections.headings, text: sections.text },
+          section: {
+            version: sections.version,
+            headings: sections.headings,
+            text: sections.text,
+          },
         })
         .from(documents)
         .innerJoin(collections, eq(collections.id, documents.collectionId))
@@ -237,7 +242,7 @@ export const read = async (
       target: { type: "document", id: document.id },
       detail: {
         read: "section",
-        version: document.currentVersion,
+        version: row?.version ?? document.currentVersion,
         section,
       },
     },
@@ -250,6 +255,7 @@ export const read = async (
     ...toSummary(document),
     section: {
       position: section,
+      version: row.version,
       headings: headingsSchema.parse(JSON.parse(row.headings)),
     },
     text: row.text,
@@ -279,7 +285,7 @@ export const follow = async (
   documentId: unknown
 ): Promise<FollowResult> => {
   const db = drizzle(env.KNOWLEDGE);
-  const allowed = await allowedFor(env, db, reader);
+  const allowed = await allowedFor(portsOf(env), reader);
   const { document, collection } = await readableDocument(
     db,
     allowed,

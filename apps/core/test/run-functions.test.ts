@@ -1060,6 +1060,27 @@ describe("an App's functions a workflow run calls", { timeout: 90_000 }, () => {
     });
   });
 
+  it("go on with a user's run in flight once its App is taken back to a draft", async () => {
+    const { admin, builder, app } = await twoStepApp();
+    const member = await personApi("user");
+    await builder.api.apps.members.add(app, {
+      type: "person",
+      id: member.userId,
+      role: "user",
+    });
+    const ended = await changedBetween(admin, member, app, async () => {
+      await builder.api.apps.unpublish(app);
+    });
+    expect(ended).toMatchObject({
+      status: "completed",
+      output: [
+        { ok: true, value: "One." },
+        { ok: true, value: "Never sent." },
+      ],
+      asked: 2,
+    });
+  });
+
   it("refuse a run's next step once its release is revoked", async () => {
     const { admin, builder, app } = await twoStepApp();
     const ended = await changedBetween(admin, builder, app, async () => {

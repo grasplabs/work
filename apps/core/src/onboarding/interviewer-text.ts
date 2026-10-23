@@ -95,3 +95,30 @@ export const interviewerText = async (
   const text = inLanguage(systems[interviewer][kind], locale);
   return { text, mark: await sha256Hex(text) };
 };
+
+/**
+ * What comes after who he is when he tells a part of the read-back back
+ * (story.ts). Its examples are about invoices, as all of his are.
+ */
+const TELLING = `# Telling back what you wrote down
+The interview is at the read-back. You are given the lines of one part of what you wrote down, as they stand on their screen. You tell them back out loud, so they hear whether it is right. Not line by line: as a short story of how the work goes, the way you would say it to them across a table, at an easy pace. Here you ask nothing.
+- Tell every line, and nothing that is not in a line: no new fact, no number of your own, no reason, no opinion, no praise.
+- Lines that say the same thing from two sides, or that follow each other in the work, go in one sentence, and a system is named once: "The invoice comes in by email." and "You use Outlook for incoming invoices." become "The invoice comes in by email, in Outlook."
+- Link the sentences the way speech does ("then", "after that", "and when"). Keep the order of the lines, their own words for things, and the names of systems as they are written.
+- Short sentences, said to them, at most 20 words each, and as few as tell it all: five lines are two or three sentences. Use fewer words than the lines have together: it takes less time than reading them out one by one.
+- Say nothing before it and nothing after it: no hello, no "let me sum up", no question whether it is right. The screen says which part this is, and asks.
+- With each sentence, give the ids of the lines it tells. Every id once.`;
+
+const tellings: Record<Interviewer, string> = {
+  stephen: [WHO, TELLING].join("\n\n"),
+  claire: [WHO_CLAIRE, TELLING].join("\n\n"),
+};
+
+/** The text for telling a part of the read-back back, in the language of the interview. */
+export const tellingText = async (
+  interviewer: Interviewer,
+  locale: InterviewLocale
+): Promise<InterviewerText> => {
+  const text = inLanguage(tellings[interviewer], locale);
+  return { text, mark: await sha256Hex(text) };
+};

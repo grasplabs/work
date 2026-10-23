@@ -84,6 +84,10 @@ import { sandboxVerdictOf } from "./sandbox-session.ts";
 import { SandboxUnavailableError } from "./sandboxed.ts";
 import { readConsistently, StoreReader } from "./store-reader.ts";
 import { valueFiles } from "./store-references.ts";
+import type {
+  ListedEvent,
+  WorkflowNotifications,
+} from "./workflow-notifications.ts";
 
 // Core's operation host (spec 7.4, 7.5, 9.2, 9.5, 32.1): runs one of an
 // App's server functions for one caller, through the trusted host, and
@@ -190,6 +194,12 @@ import { valueFiles } from "./store-references.ts";
 // - A mutation spins on starts to make core read without end: a start
 //   takes its place among the commit's starts before it is admitted, so
 //   one past the bound is refused before anything is read.
+// - A mutation notifies a run with an event it didn't declare, or of
+//   another App's: a notification names an event the function's sealed
+//   `uses` lists (its workflow's alias, its own, its type and its
+//   fingerprint, which core takes from the manifest, never App code), and
+//   core stages it only as workflow-notifications.ts admits it, as an
+//   intent of the commit, in the commit's bound with its starts.
 
 /**
  * How core starts the workflows an App binds, for one invocation: the
@@ -278,6 +288,12 @@ export interface Invocation {
    * counted on that root (quotas.ts).
    */
   readonly workflows?: WorkflowStarts;
+  /**
+   * How core stages a mutation's notifications of the App's workflow runs
+   * (`ctx.notify`, workflow-notifications.ts), for this call; none staged
+   * without it, as for starts (`workflows`).
+   */
+  readonly notifications?: WorkflowNotifications;
   /**
    * Keeps the evidence of a use refused at the host's admission
    * (`UseRefusal`): the first of a caller's call, nested calls included,
@@ -2048,6 +2064,69 @@ const startsWorkflow = (
 ): boolean =>
   operation.uses.some((use) => use.type === "workflow" && use.alias === alias);
 
+/**
+ * The notification `operation` asks for under workflow `alias` with
+ * `args` (`[event, runId, data]`, the runner's `ctx.notify`), if it lists
+ * that event of the workflow in its `uses`: the event as the sealed
+ * manifest lists it, the run and the data, for core to check.
+ * `resource.not_allowed` for anything else.
+ */
+const workflowNotification = (
+  run: Run,
+  operation: OperationManifest,
+  request: { alias: unknown; args: unknown }
+): { workflow: string; event: ListedEvent; runId: Json; data: Json } => {
+  const args = jsonOf(request.args);
+  const [eventAlias, runId, data] =
+    args !== undefined && isJsonArray(args) ? args : [];
+  const listed = operation.uses.find(
+    (use) =>
+      use.type === "workflowEvent" &&
+      use.workflow === request.alias &&
+      use.alias === eventAlias
+  );
+  const workflowName = sealedName(run.app.manifest.workflows, request.alias);
+  if (listed?.type !== "workflowEvent") {
+    throw refusingUse(operationErrors.create("resource.not_allowed"), {
+      use: { kind: "workflow", name: workflowName },
+      reason: "use_undeclared",
+    });
+  }
+  if (args === undefined || !isJsonArray(args) || args.length !== 3) {
+    throw refusingUse(operationErrors.create("resource.not_allowed"), {
+      use: { kind: "workflow", name: workflowName },
+      reason: "request_not_allowed",
+    });
+  }
+  return {
+    workflow: listed.workflow,
+    event: {
+      alias: listed.alias,
+      type: listed.eventType,
+      fingerprint: listed.fingerprint,
+    },
+    runId: runId ?? null,
+    data: data ?? null,
+  };
+};
+
+/**
+ * What a notification's refusal becomes for App code: its own refusal
+ * when core raised one of the operation host's codes (an event its
+ * release doesn't resolve, data its contract refuses), anything else
+ * `internal.unexpected`, its cause logged.
+ */
+const notifyFailure = (error: unknown, requestId: string): Error => {
+  if (error instanceof Error && operationErrors.codeOf(error) !== undefined) {
+    return hostError(error);
+  }
+  log.error("operation.workflow_notify_failed", {
+    requestId,
+    ...errorFields(error),
+  });
+  return hostError(internalErrors.create("internal.unexpected", { requestId }));
+};
+
 /** What one run of a function may still read: its reads, and staged bytes sent. */
 interface ReadBudget {
   reads: number;
@@ -2961,6 +3040,43 @@ const runMutation = async (
           // lists, staged for its commit and made from its outbox after.
           // Any other resource is refused as a mutation's always is.
           resource: async (alias, method, callArgs) => {
+            if (method === "notify") {
+              const asked = workflowNotification(run, operation, {
+                alias,
+                args: callArgs,
+              });
+              const { notifications } = invocation;
+              if (notifications === undefined) {
+                throw operationErrors.create("resource.unavailable");
+              }
+              // Its place first, as a start's: the commit's bound counts
+              // both, refused before core reads anything.
+              if (placed >= commitMaxIntents) {
+                throw operationErrors.create("operation.call_limit", {
+                  maxStarts: commitMaxIntents,
+                });
+              }
+              placed += 1;
+              await admit(invocation);
+              let data: Json;
+              try {
+                data = await notifications.intent(
+                  asked.workflow,
+                  asked.event,
+                  asked.runId,
+                  asked.data
+                );
+              } catch (error) {
+                throw notifyFailure(error, invocation.requestId);
+              }
+              const intent: NonNullable<Commit["intents"]>[number] = {
+                kind: "workflow.notify",
+                data,
+              };
+              staging.reserve(intent);
+              intents.push(intent);
+              return null;
+            }
             if (!startsWorkflow(operation, alias)) {
               // Any resource but a workflow it lists: not one of its uses.
               throw refusingUse(

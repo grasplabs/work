@@ -223,12 +223,26 @@ export interface GesturePage {
   readonly focused: () => unknown;
   /** A monotonic clock, in milliseconds. */
   readonly now: () => number;
+  /**
+   * The gestures of every screen frame the page has mounted: the page's
+   * own (`mountedFrames`) unless a test gives another.
+   */
+  readonly mounted?: Set<object>;
 }
 
 /**
- * Takes the person's gesture for a download in `frame`, if they made one:
- * the page has activation, `frame` is focused, that activation isn't the
- * page's own, and no download spent it. A frame can focus itself, so focus
+ * Every screen frame's gesture the page has mounted now. With more than
+ * one, the page can't tell which frame a click reached for sure (a frame
+ * can take the focus while another is clicked), so no frame's activation
+ * counts: a download is refused, and a link asks in the page's dialog.
+ */
+const mountedFrames = new Set<object>();
+
+/**
+ * Takes the person's gesture for a download or a link in `frame`, if they
+ * made one: it is the only screen frame mounted, the page has activation,
+ * `frame` is focused, that activation isn't the page's own, and no
+ * download or link spent it. A frame can focus itself, so focus
  * alone would let it borrow a click elsewhere on the page; activation the
  * page gained from its own input counts for no frame for as long as it can
  * last (`activationLifetimeMs`), and so does one a download already took:
@@ -256,10 +270,14 @@ export const frameGesture = (
   if (page.active()) {
     own();
   }
+  const mounted = page.mounted ?? mountedFrames;
+  const self = {};
+  mounted.add(self);
   return {
     take: () => {
       const now = page.now();
       const asked =
+        mounted.size === 1 &&
         now - ownAt >= activationLifetimeMs &&
         now - spentAt >= activationLifetimeMs &&
         page.active() &&
@@ -270,6 +288,7 @@ export const frameGesture = (
       return asked;
     },
     close: () => {
+      mounted.delete(self);
       for (const type of pageActivationEvents) {
         page.events.removeEventListener(type, own, { capture: true });
       }

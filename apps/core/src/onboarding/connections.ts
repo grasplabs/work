@@ -15,8 +15,8 @@ import { onOrigin, personOf, tenantOf } from "../connections.ts";
 // to the step it left, with the new connection's ID in its address
 // (`?connection=`). Every such connection is the organization's (shared),
 // connected by its admin, never by Grasp's staff: what it reads is the
-// client's. The directory is the first (directory.ts); where the
-// documents live (GRA-370) goes the same way. The HR platform (hr.ts)
+// client's. The directory is the first (directory.ts), where the
+// documents live the second (document-places.ts). The HR platform (hr.ts)
 // signs in with API credentials the admin made there instead: no flow,
 // the same rules (`connectOnboardingWithKey`).
 

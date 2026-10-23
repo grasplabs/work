@@ -93,14 +93,14 @@ const inBatches = async <T, R>(
 };
 
 /**
- * Uploads the files `scriptName`'s next version serves that the account
- * doesn't hold yet, and returns the token that version's metadata names
- * them by (`assets.jwt`).
+ * `uploadAssets` for the script at `scriptAt`: an account's own, or one in a
+ * Workers for Platforms dispatch namespace, whose upload session is
+ * opened under its own path and whose files go to the account's upload.
  */
-export const uploadAssets = async (
+const uploadAssetsAt = async (
   api: CloudflareApi,
   accountId: string,
-  scriptName: string,
+  scriptAt: string,
   files: readonly AssetFile[]
 ): Promise<string> => {
   const encoded = await Promise.all(
@@ -114,7 +114,7 @@ export const uploadAssets = async (
   const session = await api.call(
     {
       method: "POST",
-      path: `${scriptPath(accountId, scriptName)}/assets-upload-session`,
+      path: `${scriptAt}/assets-upload-session`,
       json: {
         manifest: Object.fromEntries(
           encoded.map(({ path, hash, content }) => [
@@ -171,6 +171,24 @@ export const uploadAssets = async (
   }
   return completion.jwt;
 };
+
+/**
+ * Uploads the files `scriptName`'s next version serves that the account
+ * doesn't hold yet, and returns the token that version's metadata names
+ * them by (`assets.jwt`).
+ */
+export const uploadAssets = async (
+  api: CloudflareApi,
+  accountId: string,
+  scriptName: string,
+  files: readonly AssetFile[]
+): Promise<string> =>
+  await uploadAssetsAt(
+    api,
+    accountId,
+    scriptPath(accountId, scriptName),
+    files
+  );
 
 const deploymentSchema = z.object({
   id: z.string(),
@@ -278,14 +296,14 @@ export class RolledBackError extends Error {
 const uploadForm = async (
   api: CloudflareApi,
   accountId: string,
-  scriptName: string,
+  path: string,
   { releaseId, metadata, modules, assets }: WorkerUpload,
   secrets: readonly Secret[] | "keep"
 ): Promise<FormData> => {
   const assetsJwt =
     assets === undefined
       ? undefined
-      : await uploadAssets(api, accountId, scriptName, assets);
+      : await uploadAssetsAt(api, accountId, path, assets);
   const bindings: unknown[] = Array.isArray(metadata.bindings)
     ? metadata.bindings
     : [];
@@ -344,7 +362,13 @@ export const uploadVersionWithSecrets = async (
     {
       method: "POST",
       path: `${scriptPath(accountId, scriptName)}/versions`,
-      body: await uploadForm(api, accountId, scriptName, upload, secrets),
+      body: await uploadForm(
+        api,
+        accountId,
+        scriptPath(accountId, scriptName),
+        upload,
+        secrets
+      ),
     },
     versionSchema
   );
@@ -367,7 +391,13 @@ export const uploadVersion = async (
     {
       method: "POST",
       path: `${scriptPath(accountId, scriptName)}/versions`,
-      body: await uploadForm(api, accountId, scriptName, upload, "keep"),
+      body: await uploadForm(
+        api,
+        accountId,
+        scriptPath(accountId, scriptName),
+        upload,
+        "keep"
+      ),
     },
     versionSchema
   );
@@ -409,7 +439,7 @@ export const uploadScript = async (
       body: await uploadForm(
         api,
         accountId,
-        scriptName,
+        scriptPath(accountId, scriptName),
         upload,
         secrets ?? "keep"
       ),
@@ -727,4 +757,124 @@ export const applyD1Migrations = async (
   const pending = migrations.filter(({ name }) => !done.has(name));
   await applyInOrder(api, accountId, databaseId, pending);
   return pending.map(({ name }) => name);
+};
+
+/*
+ * A placed client's scripts (src/hosting/operation.ts): in a hosting
+ * destination's account, as its own Workers (`dedicated`), or in its
+ * Workers for Platforms dispatch namespace. The namespace calls are the
+ * ones Cloudflare documents for user Workers, under
+ * `/accounts/{account_id}/workers/dispatch/namespaces/{namespace}/scripts/{script_name}`:
+ * the upload (`PUT`, multipart, as an account's own script upload, with
+ * `keep_bindings`), the script's details (`GET`, whose
+ * `script.migration_tag` is the last Durable Object migration it ran),
+ * its static assets' upload session, and its secrets (`PUT` and `GET`
+ * `.../secrets`). Nothing more is assumed of a namespace: qualifying these
+ * on a real account is GRA-430's.
+ */
+
+/** Where a placed client's script is: an account's own Workers, or a dispatch namespace in it. */
+export interface ScriptTarget {
+  accountId: string;
+  scriptName: string;
+  /** The Workers for Platforms dispatch namespace; null for the account's own Workers. */
+  namespace: string | null;
+}
+
+/** The API path of the script `target` names. */
+const targetPath = ({ accountId, scriptName, namespace }: ScriptTarget) =>
+  namespace === null
+    ? scriptPath(accountId, scriptName)
+    : `/accounts/${accountId}/workers/dispatch/namespaces/${namespace}/scripts/${scriptName}`;
+
+/**
+ * Uploads `upload` as the script `target` names, live at once (a dispatch
+ * namespace has no gradual deployments), keeping the secrets its latest
+ * version has (`keep_bindings`): a placed client's secrets are delivered
+ * after it, by name (`putTargetSecret`). An upload that runs a Durable
+ * Object migration isn't retried after a server error or no answer, as
+ * `uploadScript`: the caller reads the script's migration tag to find out.
+ */
+export const uploadTargetScript = async (
+  api: CloudflareApi,
+  target: ScriptTarget,
+  upload: WorkerUpload
+): Promise<void> => {
+  const path = targetPath(target);
+  await api.call(
+    {
+      method: "PUT",
+      path,
+      body: await uploadForm(api, target.accountId, path, upload, "keep"),
+      idempotent: upload.metadata.migrations === undefined,
+    },
+    z.unknown()
+  );
+};
+
+const dispatchScriptSchema = z.object({
+  script: z.object({ migration_tag: z.string().nullish() }),
+});
+
+/**
+ * Whether the script `target` names exists, and the last Durable Object
+ * migration it ran: `scriptMigrationState` for an account's own, the
+ * script's details for one in a namespace.
+ */
+export const targetMigrationState = async (
+  api: CloudflareApi,
+  target: ScriptTarget
+): Promise<{ exists: boolean; migrationTag?: string }> => {
+  if (target.namespace === null) {
+    return await scriptMigrationState(api, target.accountId, target.scriptName);
+  }
+  try {
+    const { script } = await api.call(
+      { method: "GET", path: targetPath(target) },
+      dispatchScriptSchema
+    );
+    const tag = script.migration_tag;
+    return {
+      exists: true,
+      ...(tag === null || tag === undefined || tag === ""
+        ? {}
+        : { migrationTag: tag }),
+    };
+  } catch (error) {
+    if (isNotFound(error)) {
+      return { exists: false };
+    }
+    throw error;
+  }
+};
+
+/**
+ * Sets the secret `secret` on the script `target` names. Its value goes
+ * only into the request body, never into a path or an error.
+ */
+export const putTargetSecret = async (
+  api: CloudflareApi,
+  target: ScriptTarget,
+  secret: Secret
+): Promise<void> => {
+  await api.call(
+    {
+      method: "PUT",
+      path: `${targetPath(target)}/secrets`,
+      json: { name: secret.name, text: secret.value, type: "secret_text" },
+    },
+    z.unknown()
+  );
+};
+
+/** The names of the secrets the script `target` names has; their values are never read. */
+export const targetSecretNames = async (
+  api: CloudflareApi,
+  target: ScriptTarget
+): Promise<string[]> => {
+  const secrets = await api.call(
+    { method: "GET", path: `${targetPath(target)}/secrets` },
+    z.array(z.object({ name: z.string() }))
+  );
+  return secrets.map(({ name }) => name);
 };

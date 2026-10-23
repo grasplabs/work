@@ -3,7 +3,6 @@ import { onboardingDocumentsCollection } from "@grasp-os/shared/onboarding-docum
 import type { SessionApi } from "@grasp-os/shared/rpc";
 import type { Upload } from "@grasp-os/shared/uploads";
 import { env } from "cloudflare:workers";
-import { zipSync } from "fflate";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { onboardingStore } from "../src/onboarding/store.ts";
@@ -11,6 +10,7 @@ import { fakeGateway } from "./ai-gateway.ts";
 import type { GatewayReply } from "./ai-gateway.ts";
 import { mockIdp } from "./idp.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
+import { wordFile } from "./word-file.ts";
 
 // A document the company's admin shares in the onboarding (GRA-298): kept
 // in Knowledge, in a collection only admins read, and read at once through
@@ -25,22 +25,14 @@ import { outcome, signedInApi } from "./sign-in.ts";
 
 const idp = mockIdp();
 
-/** A Word file holding `paragraphs`. */
-const wordFile = (paragraphs: string[]): Uint8Array<ArrayBuffer> => {
-  const encoder = new TextEncoder();
-  const body = paragraphs
-    .map((text) => `<w:p><w:r><w:t>${text}</w:t></w:r></w:p>`)
-    .join("");
-  return Uint8Array.from(
-    zipSync({
-      "word/document.xml": encoder.encode(
-        `<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${body}</w:body></w:document>`
-      ),
-      "word/styles.xml": encoder.encode(
-        `<?xml version="1.0"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"/>`
-      ),
-    })
-  );
+const anthropic = "anthropic/claude-sonnet-4-5";
+
+/** The prompt tokens the onboarding counted as read from `anthropic`'s cache. */
+const cachedOf = async (): Promise<number> => {
+  const rows = await onboardingStore(env).usage();
+  return rows
+    .filter(({ model }) => model === anthropic)
+    .reduce((sum, { tokensCached }) => sum + tokensCached, 0);
 };
 
 /** A 2019 draft of how claims are handled. */
@@ -153,6 +145,28 @@ describe("documents shared in the onboarding", { timeout: 60_000 }, () => {
       brief: [true, true],
       reads: true,
     });
+  });
+
+  it("count what was read from the provider's prompt cache", async () => {
+    const { api: admin } = await signedInApi(idp, "admin");
+    const before = env.MODEL_GATEWAY;
+    env.MODEL_GATEWAY = { gateway: "grasp-os-test", models: [anthropic] };
+    try {
+      const cachedBefore = await cachedOf();
+      const { result } = await answering(
+        [{ ...answer(reading), cache: { read: 900, write: 300 } }],
+        async () =>
+          await admin.onboarding.shareDocument({
+            locale: "en",
+            name: `cached-${crypto.randomUUID()}.docx`,
+            bytes: draft,
+          })
+      );
+      await ended(admin, result.id);
+      expect((await cachedOf()) - cachedBefore).toBe(900);
+    } finally {
+      env.MODEL_GATEWAY = before;
+    }
   });
 
   it("ask nothing without answers to pick from", async () => {

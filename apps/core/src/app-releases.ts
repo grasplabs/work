@@ -34,8 +34,9 @@ import { actorOf } from "@grasp-os/shared/audit";
 import { sha256Hex, sha256HexOfBytes } from "@grasp-os/shared/encoding";
 import { storeIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, StoreId } from "@grasp-os/shared/ids";
-import { canonicalText } from "@grasp-os/shared/json";
+import { canonicalJson, canonicalText } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
+import { screenErrors, screenPath } from "@grasp-os/shared/screens";
 import { sharedRun } from "@grasp-os/shared/shared-runs";
 import type { SharedRun } from "@grasp-os/shared/shared-runs";
 import { dataErrors, migrationErrors } from "@grasp-os/shared/stores";
@@ -69,6 +70,7 @@ import {
   sdkStoreOwners,
 } from "./db/core/schema.ts";
 import { inList, isUniqueViolation, notNullFailed } from "./db/d1.ts";
+import { withReferencesText } from "./draft-references.ts";
 import { inJurisdiction } from "./durable-objects.ts";
 import {
   evidenceFits,
@@ -76,6 +78,8 @@ import {
   requireMigrationsTarget,
 } from "./migration-transform.ts";
 import { finishDeletion, markArtifact } from "./release-retention.ts";
+import { versionScreens } from "./screens.ts";
+import type { BuiltScreen } from "./screens.ts";
 import { defineSchemaOnStore, schemaStatus } from "./store-backfill.ts";
 import { liveStoreSql } from "./store-deletion.ts";
 
@@ -188,6 +192,12 @@ interface SealRequest {
   readonly store?: StoreId;
   /** Who seals it: they must manage `store`, if one is given. */
   readonly by: Acting;
+  /**
+   * Called once its code is inspected and checked, before it is built
+   * and stored: a candidate's move from checking to building
+   * (app-candidates.ts). Not called for a version sealed already.
+   */
+  readonly building?: () => Promise<void>;
 }
 
 /** A release as the host runs it: verified, every hash checked. */
@@ -310,16 +320,44 @@ const artifactText = async (
   );
 };
 
+/** Where a release's sealed screens are among its artifacts. */
+const screenDir = "screens/";
+
+/** Where the sealed build of screen `name` is among a release's artifacts. */
+const screenArtifactPath = (name: string): string => `${screenDir}${name}.json`;
+
+/** A sealed screen, as its artifact holds it: core's own build of it. */
+const sealedScreenSchema = z.strictObject({
+  screen: z.string(),
+  code: z.strictObject({
+    entry: z.string(),
+    runtime: z.string(),
+    modules: z.record(z.string(), z.string()),
+    kit: z.record(z.string(), z.string()),
+    css: z.string(),
+  }),
+  artifact: z.string(),
+});
+
 /** Where a release's sealed SDK modules are among its artifacts. */
 const sdkArtifactDir = "sdk/";
 
 /** A manifest's whole release, every artifact read back and checked. */
 const verifiedRelease = async (
   read: ArtifactReader,
-  manifest: ReleaseManifest
+  manifest: ReleaseManifest,
+  /**
+   * Whether the sealed screens are read too. A load to run the App's code
+   * leaves them: they are read, and checked against their hashes, when a
+   * screen opens (`sealedScreen`), and by a candidate's read-back.
+   */
+  { screens }: { screens: boolean }
 ): Promise<Omit<Release, "manifestHash">> => {
   const texts = new Map<string, string>();
   for (const entry of manifest.artifacts) {
+    if (!screens && entry.path.startsWith(screenDir)) {
+      continue;
+    }
     // One after the other: a release has a few dozen, and a failure stops
     // the rest.
     // oxlint-disable-next-line no-await-in-loop -- see above
@@ -577,7 +615,9 @@ export const loadRelease = async (
       hash,
       releaseReadMs(env, manifest),
       async () => {
-        const loaded = await verifiedRelease(storedArtifacts(env), manifest);
+        const loaded = await verifiedRelease(storedArtifacts(env), manifest, {
+          screens: false,
+        });
         // A load that ran on past being taken for abandoned keeps what is
         // there already: the same release, as the hash is the same.
         if (!verified.has(hash)) {
@@ -593,6 +633,104 @@ export const loadRelease = async (
       }
     ));
   return { ...kept, manifestHash: hash };
+};
+
+/**
+ * The sealed manifest of `version` of `app` and its hash, checked against
+ * the hash and the store binding core recorded, with every artifact it
+ * names read back from storage and verified as `loadRelease` verifies
+ * them (`verifiedRelease`), but never from or into the isolate's cache of
+ * verified releases, so a later load still reads storage: what a
+ * candidate's report names (app-candidates.ts). `version.artifact_corrupt`
+ * for an artifact missing or changed.
+ */
+export const readBackRelease = async (
+  env: Env,
+  app: AppId,
+  version: number
+): Promise<{ manifest: ReleaseManifest; hash: string }> => {
+  const checked = await checkedManifest(env, app, version);
+  await verifiedRelease(storedArtifacts(env), checked.manifest, {
+    screens: true,
+  });
+  return checked;
+};
+
+/**
+ * A digest of the artifacts a manifest names (path, hash and size of
+ * each): what a candidate's report records of a release read back, and
+ * what activation compares against read back again.
+ */
+export const artifactDigest = async (
+  manifest: ReleaseManifest
+): Promise<string> =>
+  await sha256Hex(
+    canonicalText(
+      manifest.artifacts.map(({ path, sha256, bytes }) => ({
+        path,
+        sha256,
+        bytes,
+      }))
+    )
+  );
+
+/**
+ * The sealed build of screen `name` of `app`'s `version`: the very bytes
+ * its release sealed, read back and checked against the manifest's hash
+ * of them and the build's own (`artifact`, what an admin approves),
+ * never built. `screen.not_sealed` when the release names no such
+ * screen, `version.artifact_corrupt` when its bytes are missing or
+ * changed, and the refusals of a release that can't load
+ * (`checkedManifest`).
+ */
+export const sealedScreen = async (
+  env: Env,
+  app: AppId,
+  version: number,
+  name: string
+): Promise<BuiltScreen> => {
+  const { manifest } = await checkedManifest(env, app, version);
+  const path = screenArtifactPath(name);
+  const entry = manifest.artifacts.find((named) => named.path === path);
+  if (entry === undefined) {
+    throw screenErrors.create("screen.not_sealed");
+  }
+  const text = await artifactText(storedArtifacts(env), entry);
+  try {
+    const sealed = sealedScreenSchema.parse(JSON.parse(text));
+    if (
+      sealed.screen !== name ||
+      sealed.artifact !== (await sha256Hex(canonicalJson(sealed.code)))
+    ) {
+      throw new Error("The screen doesn't match its hash");
+    }
+    return sealed;
+  } catch (error) {
+    log.error("release.screen_corrupt", {
+      app,
+      version,
+      ...errorFields(error),
+    });
+    throw versionErrors.create("version.artifact_corrupt", { path });
+  }
+};
+
+/**
+ * The names of the screens `app`'s sealed `version` carries, from its
+ * manifest alone: for a candidate's report, which then reads each
+ * (`sealedScreen`).
+ */
+export const sealedScreenNames = async (
+  env: Env,
+  app: AppId,
+  version: number
+): Promise<string[]> => {
+  const { manifest } = await checkedManifest(env, app, version);
+  return manifest.artifacts.flatMap(({ path }) =>
+    path.startsWith(screenDir) && path.endsWith(".json")
+      ? [path.slice(screenDir.length, -".json".length)]
+      : []
+  );
 };
 
 /** A draft release as its keeper stores it (sealed-previews.ts). */
@@ -631,7 +769,10 @@ export const loadDraftRelease = async (
   }
   // Every load reads every artifact back and checks it: no cache between
   // loads, so what a keeper loads again is always what it keeps now.
-  return { ...(await verifiedRelease(read, manifest)), manifestHash: hash };
+  return {
+    ...(await verifiedRelease(read, manifest, { screens: false })),
+    manifestHash: hash,
+  };
 };
 
 /** How often, and how long, a seal waits for a deletion in flight. */
@@ -872,7 +1013,7 @@ const operationManifestHash = async (app: AppManifest): Promise<string> =>
   await sha256Hex(canonicalText(app.operations));
 
 /** Whether `version` of `app` has a sealed release. */
-const isSealed = async (
+export const isSealed = async (
   env: Env,
   app: AppId,
   version: number
@@ -1235,6 +1376,44 @@ const inspectForSeal = async (
   };
 };
 
+/**
+ * Every screen of `files` (of `key.version` of an App), built with the
+ * references the release is sealing (`generated`), as a candidate's
+ * building stage builds them (app-candidates.ts), so opening a screen of
+ * the release never compiles. The build is the one a save made, from the
+ * build cache, when its files are the same. `screen.build_failed` for a
+ * screen that doesn't build, `screen.build_slow` for a build that doesn't
+ * answer within its wait: the version is not sealed with screens that
+ * can't open.
+ */
+const builtScreens = async (
+  env: Env,
+  key: { app: AppId; version: number },
+  files: Readonly<Record<string, string>>,
+  generated: Readonly<Record<string, string>>
+): Promise<BuiltScreen[]> => {
+  const names = Object.keys(files).flatMap((path) => {
+    const name = screenPath.exec(path)?.groups?.name;
+    return name === undefined ? [] : [name];
+  });
+  if (names.length === 0) {
+    return [];
+  }
+  const withReferences = await withReferencesText(
+    { ...files },
+    async () => await Promise.resolve(generated[generatedPaths.references])
+  );
+  const codeOf = await versionScreens(
+    env,
+    withReferences,
+    key.version,
+    key.app
+  );
+  return await Promise.all(
+    names.toSorted().map(async (name) => await codeOf(name))
+  );
+};
+
 /** A release as sealed: its artifacts, and its canonical manifest and hash. */
 interface PackagedRelease {
   readonly artifacts: readonly Artifact[];
@@ -1254,7 +1433,16 @@ const packaged = async (
   env: Env,
   key: { app: AppId; version: number },
   built: InspectedRelease,
-  { tree, store }: { tree: string; store: DataStoreBinding | null }
+  {
+    tree,
+    store,
+    screens = [],
+  }: {
+    tree: string;
+    store: DataStoreBinding | null;
+    /** The screens, built, sealed beside the code (`builtScreens`). */
+    screens?: readonly BuiltScreen[];
+  }
 ): Promise<PackagedRelease> => {
   const { manifest, generated, final, sdk, schema, evidence, inspections } =
     built;
@@ -1294,6 +1482,13 @@ const packaged = async (
     ),
     ...Object.entries(sdk.modules).map(
       async ([name, code]) => await artifactOf(`${sdkArtifactDir}${name}`, code)
+    ),
+    ...screens.map(
+      async (sealedScreenBuild) =>
+        await artifactOf(
+          screenArtifactPath(sealedScreenBuild.screen),
+          canonicalText(sealedScreenBuild)
+        )
     ),
     artifactOf(checkEvidencePath, report),
   ]);
@@ -1389,11 +1584,20 @@ export const sealRelease = async (
   const built = await inspectForSeal(env, { app, version }, files);
   const bound = await boundStore(env, request, built.manifest, built.schema);
   const store = bound?.binding ?? null;
+  await request.building?.();
+  // Every screen built and sealed with the release, so none is compiled
+  // when it opens.
+  const screens = await builtScreens(
+    env,
+    { app, version },
+    files,
+    built.generated
+  );
   const { artifacts, releaseManifest, text, hash } = await packaged(
     env,
     { app, version },
     built,
-    { tree: row.tree, store }
+    { tree: row.tree, store, screens }
   );
   const { manifest, final, sdk, schema } = built;
   await requireAsTombstoned(env, { app, version }, hash);

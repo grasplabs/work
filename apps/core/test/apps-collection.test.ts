@@ -5,7 +5,12 @@ import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { indexApps } from "../src/knowledge/apps-collection.ts";
-import { grantReviewed, release, requestGranted } from "./apps.ts";
+import {
+  grantReviewed,
+  release,
+  requestGranted,
+  verifiedCandidate,
+} from "./apps.ts";
 import { actingFor, envOf, knowledgeIn } from "./contexts.ts";
 import { runQuarterHourCron } from "./cron.ts";
 import { mockIdp } from "./idp.ts";
@@ -14,6 +19,7 @@ import {
   newTeam,
   readCollection,
   storedGrant,
+  storedVersionTexts,
 } from "./knowledge.ts";
 import {
   auditedDuring,
@@ -123,7 +129,7 @@ const entryState = async (owner: Person, app: string, words: string[]) => {
   const { id } = await entryOf(owner, app);
   const [{ currentVersion }, noted, { versions }, found] = await Promise.all([
     owner.api.apps.get(app),
-    env.KNOWLEDGE.prepare("SELECT version FROM app_entries WHERE app_id = ?")
+    env.DB.prepare("SELECT version FROM app_entries WHERE app_id = ?")
       .bind(app)
       .first<{ version: number }>(),
     owner.knowledge.history(id),
@@ -140,11 +146,11 @@ const entryState = async (owner: Person, app: string, words: string[]) => {
 const entriesQuery = /"app_entries"/u;
 
 /**
- * The Knowledge database, but every query of the Apps collection's
- * entries fails: an indexing that can't run, where the rest works.
+ * The core database, but every query of the Apps collection's entries
+ * (`app_entries`) fails: an indexing that can't run, where the rest works.
  */
-const knowledgeWithoutEntries = (): D1Database => {
-  const real = env.KNOWLEDGE;
+const coreWithoutEntries = (): D1Database => {
+  const real = env.DB;
   return {
     prepare: (query) => {
       if (entriesQuery.test(query)) {
@@ -171,7 +177,7 @@ const withIndexingFailing = async (
   run: (api: Person["api"]) => Promise<void>
 ): Promise<void> => {
   const { core } = await openRpc(owner.session, {
-    coreEnv: { ...env, KNOWLEDGE: knowledgeWithoutEntries() },
+    coreEnv: { ...env, DB: coreWithoutEntries() },
   });
   try {
     await run(core.authenticate());
@@ -630,12 +636,8 @@ const entryVersion = async (owner: Person, app: string): Promise<number> => {
 
 /** How many versions of the document `id` hold `word`. */
 const versionsHolding = async (id: string, word: string): Promise<number> => {
-  const { results } = await env.KNOWLEDGE.prepare(
-    "SELECT text FROM versions WHERE document_id = ?"
-  )
-    .bind(id)
-    .all<{ text: string }>();
-  return results.filter(({ text }) => text.includes(word)).length;
+  const texts = await storedVersionTexts(id);
+  return texts.filter((text) => text.includes(word)).length;
 };
 
 describe("read-only", setUpTime, () => {
@@ -744,6 +746,7 @@ describe("read-only", setUpTime, () => {
 
     // An App whose current version can't be read can't be checked: the
     // purge is refused rather than trusted.
+    await verifiedCandidate(appId, 999);
     await env.DB.prepare("UPDATE apps SET current_version = ? WHERE id = ?")
       .bind(999, appId)
       .run();

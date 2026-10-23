@@ -14,6 +14,7 @@ export { ChatApi } from "./agent-apis.ts";
 export { AppsApi } from "./agent-apps.ts";
 export { BuildApi } from "./agent-builds.ts";
 export { ConnectionsApi } from "./agent-connections.ts";
+export { BrainAgentApi } from "./agent-brain.ts";
 export { KnowledgeApi } from "./agent-knowledge.ts";
 export { MemoryApi } from "./agent-memory.ts";
 export { WorkflowsApi } from "./agent-workflows.ts";
@@ -55,7 +56,8 @@ export default {
   // starting the engine is still to confirm (`repairResourceTerminations`,
   // the same file), and pauses, resumes and
   // cancels the engine is still to confirm (see `repairControls`,
-  // src/workflows/controls.ts), wakes owed to runs waiting on a person,
+  // src/workflows/controls.ts), the runs of archived Apps not cancelled
+  // yet (`cancelArchivedRuns`, the same file), wakes owed to runs waiting on a person,
   // sent again (see `repairWakes`, src/workflows/wakes.ts), and connector
   // events:
   // where connect listens, and the events it read, delivered (see

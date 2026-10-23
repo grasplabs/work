@@ -917,3 +917,24 @@ describe("what the snapshot says the company connected and still needs", () => {
     expect(secrets.filter((secret) => text.includes(secret))).toStrictEqual([]);
   });
 });
+
+describe("what the snapshot says the company asked Grasp to add", () => {
+  it("names each app asked for and when, never why, its link or who asked", async () => {
+    const { api } = await signedInApi(idp, "user");
+    const name = `Exact Online ${unique()}`;
+    const why = `${sentinel}: book the invoices the mailbox gets`;
+    const link = `https://exact.example/${unique()}`;
+    const request = await api.connections.requestApp({ name, why, url: link });
+
+    const { text, snapshot } = await snapshotNow();
+
+    expect({
+      asked: snapshot.asked.filter((app) => app.id === request.id),
+      // Who asked is in the entry neither: the members are listed apart.
+      leaks: [why, sentinel, link].filter((secret) => text.includes(secret)),
+    }).toStrictEqual({
+      asked: [{ id: request.id, name, askedAt: request.requestedAt }],
+      leaks: [],
+    });
+  });
+});

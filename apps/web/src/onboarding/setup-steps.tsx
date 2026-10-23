@@ -1,44 +1,38 @@
+import type { OAuthProvider } from "@grasp-os/shared/connect";
 import { directoryErrors } from "@grasp-os/shared/directory";
 import type {
   DirectorySuite,
   OnboardingDirectory,
 } from "@grasp-os/shared/directory";
+import { placeErrors } from "@grasp-os/shared/document-places";
+import type {
+  OnboardingPlaces,
+  PlacesSuite,
+} from "@grasp-os/shared/document-places";
 import type { OnboardingHr } from "@grasp-os/shared/hr";
 import {
-  minTalkedShown,
   onboardingPeopleMax,
   onboardingTeamsMax,
   planDays,
 } from "@grasp-os/shared/onboarding";
 import type {
   InterviewLocale,
+  LinkToSend,
   OnboardingView,
   Roster,
   RosterInput,
-  TeamProgress,
 } from "@grasp-os/shared/onboarding";
+import type { SetupChoices } from "@grasp-os/shared/onboarding-choices";
 import { documentErrors } from "@grasp-os/shared/onboarding-documents";
 import type { OnboardingDocument } from "@grasp-os/shared/onboarding-documents";
 import type { GateView, KnownPart } from "@grasp-os/shared/onboarding-gate";
+import type { Identity } from "@grasp-os/shared/rpc";
 import {
   Alert,
   AlertDescription,
   AlertTitle,
 } from "@grasp-os/ui/components/alert";
 import { Button } from "@grasp-os/ui/components/button";
-import {
-  Item,
-  ItemContent,
-  ItemGroup,
-  ItemMedia,
-  ItemTitle,
-} from "@grasp-os/ui/components/item";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@grasp-os/ui/components/popover";
-import { Progress } from "@grasp-os/ui/components/progress";
 import {
   Select,
   SelectContent,
@@ -56,44 +50,47 @@ import { useLingui } from "@lingui/react/macro";
 import { useNavigate, useRouter, useSearch } from "@tanstack/react-router";
 import {
   CheckIcon,
-  ChevronDownIcon,
   CopyIcon,
   InfoIcon,
   PenLineIcon,
   UploadIcon,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useContext, useEffect, useRef, useState } from "react";
 import type { ComponentType } from "react";
 import { z } from "zod";
 
 import type { BrainScene } from "../brain/dot-brain.tsx";
-import { AppLogo } from "../connections/app-logo.tsx";
 import { CoreTimeoutError } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
-import { formatDate, formatList } from "../format.ts";
+import { formatList } from "../format.ts";
 import { isLocale, localeNames } from "../i18n.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
-import { usePrepare } from "../voice/voice.ts";
+import { SpokenText } from "../voice/spoken-text.tsx";
+import { speak, usePrepare, useSaid } from "../voice/voice.ts";
 import { About } from "./about-story.tsx";
+import {
+  HrPlatform,
+  Pulse as PulseStep,
+  Sources as SourcesStep,
+} from "./connect-steps.tsx";
 import { DocumentDrop } from "./document-drop.tsx";
 import type { DocumentRow } from "./document-drop.tsx";
 import { HrLeads } from "./hr-leads.tsx";
+import { InterviewsProgress } from "./interviews-progress.tsx";
 import { LanguageChoice } from "./language-choice.tsx";
+import { PlacePicker } from "./place-picker.tsx";
+import type { PickedFile } from "./place-picker.tsx";
+import { MailItem } from "./review-parts.tsx";
 import { SendPlanForm, useSendWords } from "./send-plan-form.tsx";
-import {
-  choiceHolds,
-  choiceOfPlan,
-  firstChoice,
-  replanOf,
-} from "./send-plan.ts";
+import { choiceHolds, choiceShown, replanOf } from "./send-plan.ts";
 import {
   Asides,
   Callout,
+  copyText,
   Cramped,
   evenVoice,
   Explained,
-  Figure,
   Heading,
   Later,
   LaterLink,
@@ -103,16 +100,11 @@ import {
   stepLine,
   SupportLink,
   tones,
+  useSayFollowing,
 } from "./setup-parts.tsx";
 import type { Answer, StepVoice } from "./setup-parts.tsx";
-import {
-  closesOn,
-  documentSources,
-  stepIndex,
-  steps,
-  teamNumbersOf,
-} from "./setup.ts";
-import type { Listening, SetupStep } from "./setup.ts";
+import { openItems, stepIndex, steps } from "./setup.ts";
+import type { Listening, ReviewItemId, SetupStep } from "./setup.ts";
 import {
   csvRows,
   directoryListOf,
@@ -129,23 +121,36 @@ import { XlsxError, xlsxMost, xlsxRows } from "./xlsx.ts";
 // `RealPulse`, `RealOpen`, and the others where nothing is different). What
 // a step keeps goes to core: who works where, who leads which team and
 // which teams take part, the documents and the answers to their questions,
-// and when the interviews run. What core keeps nothing of yet (where the
-// documents live, Pulse, what needs the admin settled) shows the step as
-// the prototype does with nothing in.
+// what the admin chose about what Grasp may connect (connect-steps.tsx),
+// and when the interviews run. What needs the admin settled, this browser
+// keeps.
 
 /** What the onboarding reads from core, and who is going through it. */
 export interface SetupData {
   /** The admin's first name. */
   admin: string;
+  /** The organization's name, as the message to the team is addressed; null when it has none. */
+  company: string | null;
   view: OnboardingView;
+  /** Everyone's own link to send, once it is out. */
+  links: LinkToSend[];
   documents: OnboardingDocument[];
   gate: GateView;
   /** The directory connected for the onboarding; null before one is. */
   directory: OnboardingDirectory | null;
-  /** The suites this deployment signs in with, whose directory can be connected. */
+  /** The suites this deployment signs in with, whose directory and documents can be connected. */
   suites: DirectorySuite[];
   /** The HR platform connected for the onboarding; null before one is. */
   hr: OnboardingHr | null;
+  /** Where the documents live, connected for the onboarding; null before it is. */
+  places: OnboardingPlaces | null;
+  /** Grasp's sending domain, which the admin lets through their mail filter. */
+  sendingDomain: string;
+  /** What the admin chose about what Grasp may connect. */
+  choices: SetupChoices;
+  /** The suites the company signs in with. */
+  signIn: OAuthProvider[];
+  identity: Identity;
 }
 
 export interface StepProps {
@@ -159,12 +164,13 @@ export interface StepProps {
   /** The message to the team, as the admin left it; null for the one drafted. */
   message: string | null;
   onMessage: (message: string) => void;
+  /** What the admin settled of what needs them. */
+  settled: ReviewItemId[];
+  onSettle: (item: ReviewItemId, settled: boolean) => void;
   go: (step: SetupStep) => void;
   /** "How this works" tells its story in the brain's figures: this sets the figure, or gives it back with null. */
   onStory: (scene: BrainScene | null) => void;
 }
-
-const firstName = (name: string): string => name.split(" ")[0] ?? name;
 
 /** How Stephen names each suite's sign-in. Product names: not translated. */
 const suiteNames: Record<DirectorySuite, string> = {
@@ -178,19 +184,6 @@ const suiteLogos: Record<DirectorySuite, string> = {
   google: "/logos/google.svg",
 };
 
-/** A date as the page's language writes it, from an ISO day. */
-const formatDay = (day: string): string => formatDate(`${day}T12:00:00Z`);
-
-/** Copies text, and says whether it worked: browsers refuse without focus or permission. */
-const copyText = async (text: string): Promise<boolean> => {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    return false;
-  }
-};
-
 /** Hands the reader a CSV file to save, made in the browser. */
 const downloadCsv = (content: string, filename: string): void => {
   const url = URL.createObjectURL(
@@ -202,6 +195,14 @@ const downloadCsv = (content: string, filename: string): void => {
   link.click();
   URL.revokeObjectURL(url);
 };
+
+/** What the steps that connect read, from a step's props (connect-steps.tsx). */
+const connectProps = ({ data, go }: StepProps) => ({
+  choices: data.choices,
+  signIn: data.signIn,
+  identity: data.identity,
+  go,
+});
 
 /** Reads core again after a change, so every step shows what core now has. */
 const useRefresh = (): (() => Promise<void>) => {
@@ -230,15 +231,19 @@ interface Headline {
  */
 const useHeadlines = ({
   data,
-}: Pick<StepProps, "data">): Record<Exclude<SetupStep, "about">, Headline> => {
+  settled,
+}: Pick<StepProps, "data" | "settled">): Record<
+  Exclude<SetupStep, "about">,
+  Headline
+> & { hr: Headline } => {
   const { t } = useLingui();
   const { admin } = data;
+  const { sponsor } = data.view;
   const named = toolsIn(data.documents).slice(0, 4);
   const tools = formatList(named);
   const { progress } = data.view;
   const talked = (progress?.talked ?? 0) + (progress?.leadsTalked ?? 0);
-  // Nothing core keeps needs the admin settled yet.
-  const openCount = 0;
+  const openCount = openItems(settled).length;
   // A sign-in to connect where the deployment signs in with one; else a staff list.
   const [onlySuite, ...otherSuites] = data.suites;
   const signIn = onlySuite === undefined ? "" : suiteNames[onlySuite];
@@ -248,10 +253,24 @@ const useHeadlines = ({
   } else if (onlySuite !== undefined) {
     companySentence = t`The quickest way is to connect your ${signIn} sign-in. I’ll only see names, teams and roles. Your email, chats and calendars stay closed.`;
   }
+  // Before the organization, the leads step asks for the HR platform, until the admin said which.
+  const hr: Headline = {
+    title: t`Which HR platform do you use?`,
+    sentence: t`It knows who leads which team, so I can talk to the leads first. We connect it with you.`,
+  };
+  const organization: Headline = {
+    title: t`Almost done: is this your organization?`,
+    sentence: t`I talk to each team lead first, so they hear about me before their team does. Check who leads which team, and which teams take part.`,
+  };
   return {
+    hr,
     welcome: {
       title: t`Hi ${admin}, I’m Stephen`,
-      sentence: t`Before we start, which language do you prefer?`,
+      // The sponsor by name, only when the kickoff gave one.
+      sentence:
+        sponsor === null
+          ? t`Before we start, which language do you prefer?`
+          : t`${sponsor} told me a lot about your company in our first conversation. Before we start, which language do you prefer?`,
       voice: { tone: tones.warm },
     },
     company: {
@@ -275,10 +294,7 @@ const useHeadlines = ({
         .join(" ")
         .trim(),
     },
-    leads: {
-      title: t`Almost done: is this your organization?`,
-      sentence: t`I talk to each team lead first, so they hear about me before their team does. Check who leads which team, and which teams take part.`,
-    },
+    leads: data.choices.hr === null ? hr : organization,
     team: {
       title: t`Before I reach out, let your team know`,
       sentence: t`People respond better when they know why I’m reaching out. I’ve drafted a message you can send yourself. Then pick the day the interviews start.`,
@@ -308,17 +324,45 @@ const useHeadlines = ({
   };
 };
 
+const sentenceEnd = /(?<=[.?!…])\s+/u;
+
+/**
+ * Whether Stephen has asked which language yet: as he starts the last
+ * sentence of his greeting, or once the step is explained, as with the
+ * sound off; or at once, when a language was `picked` already. Asked, the
+ * languages come in, and stay.
+ */
+const useAsked = ({ title, sentence }: Headline, picked: boolean): boolean => {
+  const { line } = stepLine(title, sentence);
+  const question = line.lastIndexOf(sentence.split(sentenceEnd).at(-1) ?? "");
+  const said = useSaid(line);
+  const { explained } = useContext(Explained);
+  const [asked, setAsked] = useState(picked);
+  if (!asked && (explained || said >= question)) {
+    setAsked(true);
+  }
+  return asked;
+};
+
+/** A language other than the page's was picked on the welcome a moment ago: the welcome drawn anew in it knows. */
+let languagePicked = false;
+
 /** About how long the steps take, for the welcome to say so. */
 const onboardingMinutes = 8;
 
 const Welcome = (props: StepProps) => {
   const { t } = useLingui();
   const lines = useHeadlines(props).welcome;
-  // A language is chosen before anything else, every time: none is marked until you pick one.
-  const [picked, setPicked] = useState(false);
   const { i18n } = useLingui();
+  // A language is chosen before anything else, every time: none is marked
+  // until you pick one, unless the page was just drawn anew for it.
+  const [picked, setPicked] = useState(() => languagePicked);
+  useEffect(() => {
+    languagePicked = false;
+  }, []);
   const chosen = localeNames[isLocale(i18n.locale) ? i18n.locale : "en"];
   const minutes = onboardingMinutes;
+  const asked = useAsked(lines, picked);
   return (
     <>
       {/* The question is the end of what Stephen says, not a line after it; answered, he says so in the new language. */}
@@ -335,14 +379,22 @@ const Welcome = (props: StepProps) => {
         title={lines.title}
         voice={lines.voice}
       />
-      <Onward>
+      <div
+        className={cn(
+          "transition-all duration-700 ease-out",
+          !asked && "-translate-y-2 opacity-0"
+        )}
+        inert={!asked}
+      >
         <LanguageChoice
-          onPick={() => {
+          onPick={(locale) => {
             setPicked(true);
+            // Another language draws the whole page anew (main.tsx), this welcome with it.
+            languagePicked = locale !== i18n.locale;
           }}
           picked={picked}
         />
-      </Onward>
+      </div>
       <Primary
         onClick={() => {
           props.go("about");
@@ -388,10 +440,12 @@ const shareDocument = async (
   core: ReturnType<typeof useCore>,
   file: File,
   locale: InterviewLocale
-): Promise<{ shared: true } | { shared: false; error: unknown }> => {
+): Promise<
+  { shared: true; kept: OnboardingDocument } | { shared: false; error: unknown }
+> => {
   try {
     const bytes = new Uint8Array(await file.arrayBuffer());
-    await core.withSession(
+    const kept = await core.withSession(
       async (session) =>
         await session.onboarding.shareDocument({
           locale,
@@ -399,7 +453,7 @@ const shareDocument = async (
           bytes,
         })
     );
-    return { shared: true };
+    return { shared: true, kept };
   } catch (error) {
     return { shared: false, error };
   }
@@ -804,53 +858,93 @@ const Company = (props: StepProps) => {
   );
 };
 
-/**
- * Where the documents live. Grasp connects none of them here yet, and core
- * keeps nothing of them: the places are listed, and the step can be
- * skipped, as the prototype's is with none connected.
- */
-const Sources = (props: StepProps) => {
-  const { t } = useLingui();
-  const lines = useHeadlines(props).sources;
-  return (
-    <>
-      <Heading sentence={lines.sentence} title={lines.title} />
-      <Onward>
-        <ItemGroup className="grid w-full text-left sm:grid-cols-2">
-          {documentSources.map((name) => (
-            <Item key={name} size="sm" variant="outline">
-              <ItemMedia>
-                <AppLogo name={name} size="sm" />
-              </ItemMedia>
-              <ItemContent>
-                <ItemTitle>{name}</ItemTitle>
-              </ItemContent>
-            </Item>
-          ))}
-        </ItemGroup>
-      </Onward>
-      <Asides>
-        <LaterLink
-          onClick={() => {
-            props.go("documents");
-          }}
-        >
-          {t`Skip for now`}
-        </LaterLink>
-        <SupportLink page="documents">{t`More about these connections`}</SupportLink>
-      </Asides>
-    </>
-  );
-};
+/** Where the documents live (connect-steps.tsx). */
+const Sources = (props: StepProps) => (
+  <SourcesStep {...connectProps(props)} lines={useHeadlines(props).sources} />
+);
 
 /** About how long reading a document takes, in milliseconds, for its bar to fill at; a bigger one longer. */
 const readMs = 4500;
 const readStaggerMs = 450;
 
-/** A document being read, or refused, on this visit. */
+/** A document being read, or refused, on this visit: a file dropped, or one picked where it lives. */
 interface Pending extends DocumentRow {
-  file: File;
+  from: File | PickedFile;
 }
+
+/** Where connecting the places documents live comes back to: this step. */
+const documentsStep = "/setup?step=documents";
+
+/**
+ * Starts connecting the places of `suite`: the browser goes to its
+ * sign-in, and comes back to this step. False if it could not start.
+ */
+const startPlaces = async (
+  core: ReturnType<typeof useCore>,
+  suite: PlacesSuite
+): Promise<boolean> => {
+  try {
+    const { url } = await core.withSession(
+      async (session) =>
+        await session.onboarding.connectDocumentPlaces(suite, documentsStep)
+    );
+    window.location.assign(url);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/** Shares a file picked where it lives: core fetches it and reads it at once, as a dropped one. */
+const sharePicked = async (
+  core: ReturnType<typeof useCore>,
+  { place, item }: PickedFile,
+  locale: InterviewLocale
+): Promise<
+  { shared: true; kept: OnboardingDocument } | { shared: false; error: unknown }
+> => {
+  try {
+    const kept = await core.withSession(
+      async (session) =>
+        await session.onboarding.sharePlaceFile({ locale, place, item })
+    );
+    return { shared: true, kept };
+  } catch (error) {
+    return { shared: false, error };
+  }
+};
+
+/** The button that picks documents where they live, by suite. */
+const PlaceButton = ({
+  suite,
+  waiting,
+  disabled,
+  onChoose,
+}: {
+  suite: PlacesSuite;
+  waiting: boolean;
+  disabled: boolean;
+  onChoose: () => void;
+}) => {
+  const { t } = useLingui();
+  return (
+    <Button disabled={disabled} onClick={onChoose} variant="outline">
+      {waiting ? (
+        <Spinner data-icon="inline-start" />
+      ) : (
+        <img
+          alt=""
+          className="size-4"
+          data-icon="inline-start"
+          src={suiteLogos[suite]}
+        />
+      )}
+      {suite === "microsoft"
+        ? t`Choose from SharePoint or OneDrive`
+        : t`Choose from Google Drive`}
+    </Button>
+  );
+};
 
 /** Why core could not read a document, as its row says it. */
 const useProblemOf = (): ((error: unknown) => string) => {
@@ -862,6 +956,13 @@ const useProblemOf = (): ((error: unknown) => string) => {
     const code = documentErrors.codeOf(error);
     if (code === "document.too_large") {
       return t`Too large to read`;
+    }
+    const placeCode = placeErrors.codeOf(error);
+    if (placeCode === "place.inactive" || placeCode === "place.not_connected") {
+      return t`Not read: connect it again`;
+    }
+    if (placeCode === "place.no_item" || placeCode === "place.not_a_file") {
+      return t`No longer where it was`;
     }
     if (code === "document.old_format" || code === "document.slides") {
       return t`An old format: save it as PDF or a newer file`;
@@ -877,11 +978,31 @@ const useProblemOf = (): ((error: unknown) => string) => {
   };
 };
 
+/** A document's question as Stephen asks it: with what the document is about. */
+const questionLine = ({ reading: { about, ask } }: OnboardingDocument) =>
+  `${about} ${ask?.question ?? ""}`.trim();
+
+/** What Stephen says when core could not read a document: an old format has a way out of its own. */
+const useSaidProblemOf = (): ((name: string, error: unknown) => string) => {
+  const { t } = useLingui();
+  return (name, error) =>
+    documentErrors.codeOf(error) === "document.old_format"
+      ? t`I can’t read ${name}: it’s in an old format. As a PDF or a newer file, I can.`
+      : t`I couldn’t read ${name}. Add it again, or as a PDF.`;
+};
+
 /**
  * Documents that explain how they work. Each is read the moment it is
- * dropped, for real, by core: every row says what it is about. Only what
- * nobody but the one who shared it can say, Stephen asks at once, with the
- * answers to pick from.
+ * dropped, for real, by core: Stephen thanks them at the drop, then says
+ * what he took from the first one, and every row says what it is about.
+ * Only what nobody but the one who shared it can say, he asks at once,
+ * with the answers to pick from. Such a question comes with what its
+ * document is about, so then he sums up nothing else first; and one
+ * answered on screen before he gets to it, he does not ask. Where the
+ * deployment signs in with Microsoft or Google, the admin can pick them
+ * where they live instead (GRA-370): SharePoint and OneDrive, or Google
+ * Drive, connected here through Grasp's own read-only connection, which
+ * fetches only the files picked; each is read as a dropped one is.
  */
 const Documents = (props: StepProps) => {
   const { t, i18n } = useLingui();
@@ -890,20 +1011,75 @@ const Documents = (props: StepProps) => {
   const refresh = useRefresh();
   const { run, busy, failure } = useCoreAction();
   const problemOf = useProblemOf();
+  const saidProblemOf = useSaidProblemOf();
   const [pending, setPending] = useState<Pending[]>([]);
   const [fresh, setFresh] = useState(false);
+  // Whether the step is still on screen: a reading that ends after it is left is kept, but not said.
+  const here = useRef(true);
+  useEffect(() => {
+    here.current = true;
+    return () => {
+      here.current = false;
+    };
+  }, []);
+  // How many documents he has told about on this visit: the first he sums up out loud, the rest say it in their rows.
+  const told = useRef(0);
+  // His questions about documents read on this visit, by document, until they are answered.
+  const asking = useRef(new Set<string>());
   const kept = props.data.documents;
+  const { suites, places } = props.data;
+  const navigate = useNavigate();
+  const search: unknown = useSearch({ strict: false });
+  const returned = returnedSchema.safeParse(search).success;
+  // Which suite's places are being connected, or picked from.
+  const [connecting, setConnecting] = useState<PlacesSuite | null>(null);
+  // Back from the sign-in, the picker opens at once; or he says why it can't.
+  const connectedNow = returned && places?.status === "active";
+  const [picking, setPicking] = useState<PlacesSuite | null>(
+    connectedNow ? places.suite : null
+  );
+  const [placeProblem, setPlaceProblem] = useState<string | null>(
+    returned && !connectedNow
+      ? t`I could not connect where your documents live. Try again with an administrator’s account, or add them here.`
+      : null
+  );
   const locale: InterviewLocale = isLocale(i18n.locale) ? i18n.locale : "en";
+  // His thanks and his "Got it." are fetched as the step opens, so each follows what was done without a pause.
+  const thanks = t`Thank you. I’m reading them now, and you can add more at any time.`;
+  const gotIt = t`Got it.`;
+  usePrepare(thanks, { tone: tones.warm });
+  usePrepare(gotIt, { tone: tones.plain });
+  const tell = (read: OnboardingDocument) => {
+    const { about, ask } = read.reading;
+    // A question only they can answer is always asked, with what its document is about, unless it was answered by then; otherwise only the first is summed up, and not while a question waits to be asked.
+    if (ask !== null && read.answer === null) {
+      asking.current.add(read.id);
+      speak(questionLine(read), {
+        after: true,
+        still: () => here.current && asking.current.has(read.id),
+        tone: tones.even,
+        quick: true,
+      });
+    } else if (told.current === 0) {
+      speak(about, {
+        after: true,
+        still: () => here.current && asking.current.size === 0,
+        tone: tones.even,
+        quick: true,
+      });
+    }
+    told.current += 1;
+  };
   // Core keeps two documents of the same name as two: each row is its own upload, by an id of its own.
-  const take = (files: File[]) => {
-    const added = files.map((file, at): Pending => ({
+  const take = (from: (File | PickedFile)[]) => {
+    const added = from.map((each, at): Pending => ({
       key: crypto.randomUUID(),
-      name: file.name,
-      size: file.size,
+      name: each.name,
+      size: each.size,
       state: "reading",
       startedAt: Date.now(),
-      ms: readMs + at * readStaggerMs + Math.min(6000, file.size / 400),
-      file,
+      ms: readMs + at * readStaggerMs + Math.min(6000, (each.size ?? 0) / 400),
+      from: each,
     }));
     if (added.length === 0) {
       return;
@@ -913,10 +1089,16 @@ const Documents = (props: StepProps) => {
     setFresh(true);
     for (const each of added) {
       void (async () => {
-        const result = await shareDocument(core, each.file, locale);
+        const result =
+          each.from instanceof File
+            ? await shareDocument(core, each.from, locale)
+            : await sharePicked(core, each.from, locale);
         if (result.shared) {
           await refresh();
           setPending((now) => now.filter((row) => row.key !== each.key));
+          if (here.current) {
+            tell(result.kept);
+          }
           return;
         }
         const problem = problemOf(result.error);
@@ -925,22 +1107,75 @@ const Documents = (props: StepProps) => {
             row.key === each.key ? { ...row, state: "failed", problem } : row
           )
         );
+        speak(saidProblemOf(each.name, result.error), {
+          after: true,
+          still: () => here.current,
+          tone: tones.plain,
+          quick: true,
+        });
       })();
     }
   };
-  // His one question about a document, while it waits for an answer: answered with a press.
-  const open = kept.find(
+  const connect = async (suite: PlacesSuite) => {
+    setPicking(null);
+    setConnecting(suite);
+    setPlaceProblem(null);
+    const signIn = suiteNames[suite];
+    if (!(await startPlaces(core, suite))) {
+      setPlaceProblem(
+        t`I could not reach ${signIn} just now. Try again in a moment, or add the documents here.`
+      );
+      setConnecting(null);
+    }
+  };
+  // Picked from a working connection; connected first, or again, otherwise.
+  const choose = (suite: PlacesSuite) => {
+    if (places?.suite === suite && places.status === "active") {
+      setPlaceProblem(null);
+      setPicking(suite);
+      return;
+    }
+    void connect(suite);
+  };
+  // Back from the sign-in, the address forgets the connection.
+  const forgot = useRef(false);
+  useEffect(() => {
+    if (returned && !forgot.current) {
+      forgot.current = true;
+      void navigate({
+        to: "/setup",
+        search: { step: "documents" },
+        replace: true,
+      });
+    }
+  });
+  // His one question about a document, while it waits for an answer: answered with a press. The first shared is asked first (core lists the newest first).
+  const open = kept.findLast(
     (each) => each.reading.ask !== null && each.answer === null
   );
   const answer = async (option: string) => {
     if (open === undefined) {
       return;
     }
+    asking.current.delete(open.id);
     const saved = await run(
       async (session) =>
         await session.onboarding.answerDocument(open.id, option)
     );
     if (saved !== undefined) {
+      // His answer cuts what waited to be said: a question still open comes with it.
+      const next = kept.findLast(
+        (each) => each.id !== open.id && asking.current.has(each.id)
+      );
+      if (next === undefined) {
+        speak(gotIt, { soon: true, tone: tones.plain });
+      } else {
+        speak(`${gotIt} ${questionLine(next)}`, {
+          soon: true,
+          tone: tones.even,
+          quick: true,
+        });
+      }
       await refresh();
     }
   };
@@ -962,13 +1197,12 @@ const Documents = (props: StepProps) => {
       <Heading
         answer={
           fresh && count + reading.length > 0
-            ? {
-                text: t`Thank you. I’m reading them now, and you can add more at any time.`,
-              }
+            ? { text: thanks, tone: tones.warm }
             : undefined
         }
         sentence={lines.sentence}
         title={lines.title}
+        voice={lines.voice}
       />
       <Onward>
         <DocumentDrop
@@ -978,6 +1212,42 @@ const Documents = (props: StepProps) => {
           }}
           rows={rows}
         />
+        {suites.length === 0 ? null : (
+          <div className="flex flex-col items-center gap-2">
+            <div className="flex flex-wrap justify-center gap-2">
+              {suites.map((suite) => (
+                <PlaceButton
+                  disabled={connecting !== null}
+                  key={suite}
+                  onChoose={() => {
+                    choose(suite);
+                  }}
+                  suite={suite}
+                  waiting={connecting === suite}
+                />
+              ))}
+            </div>
+            <ErrorText>{placeProblem ?? undefined}</ErrorText>
+          </div>
+        )}
+        {picking === null ? null : (
+          <PlacePicker
+            onAdd={(files) => {
+              setPicking(null);
+              take(files);
+            }}
+            onOpenChange={(opened) => {
+              if (!opened) {
+                setPicking(null);
+              }
+            }}
+            onReconnect={() => {
+              void connect(picking);
+            }}
+            open
+            suite={picking}
+          />
+        )}
         {open === undefined || ask === null ? null : (
           <div
             className="animate-in fade-in slide-in-from-bottom-1 flex flex-col items-center gap-2 duration-300"
@@ -1029,30 +1299,10 @@ const Documents = (props: StepProps) => {
   );
 };
 
-/**
- * Pulse: there is nothing to download here yet, and core keeps no wish for
- * it, so the step says what it is and can be skipped, as the prototype's is
- * before anything is chosen.
- */
-const Pulse = (props: StepProps) => {
-  const { t } = useLingui();
-  const lines = useHeadlines(props).pulse;
-  return (
-    <>
-      <Heading sentence={lines.sentence} title={lines.title} />
-      <Asides>
-        <LaterLink
-          onClick={() => {
-            props.go("leads");
-          }}
-        >
-          {t`Skip for now`}
-        </LaterLink>
-        <SupportLink page="pulse">{t`More about Pulse`}</SupportLink>
-      </Asides>
-    </>
-  );
-};
+/** Pulse on the work laptops (connect-steps.tsx). */
+const Pulse = (props: StepProps) => (
+  <PulseStep {...connectProps(props)} lines={useHeadlines(props).pulse} />
+);
 
 const ConfirmOrg = (props: StepProps & { roster: Roster }) => {
   const { t } = useLingui();
@@ -1084,21 +1334,25 @@ const ConfirmOrg = (props: StepProps & { roster: Roster }) => {
       ),
     });
   };
+  // A thank-you, said on its own every time it is saved, and quick: the count is only known as he says it.
+  const answer: Answer | undefined = saved
+    ? {
+        text: plural(leads, {
+          one: "Thank you. I’ll start with this lead.",
+          other: "Thank you. I’ll start with these # leads.",
+        }),
+        announce: true,
+        tone: tones.warm,
+        quick: true,
+      }
+    : fromHr;
   return (
     <>
       <Heading
-        answer={
-          saved
-            ? {
-                text: plural(leads, {
-                  one: "Thank you. I’ll start with this lead.",
-                  other: "Thank you. I’ll start with these # leads.",
-                }),
-              }
-            : fromHr
-        }
+        answer={answer}
         sentence={lines.sentence}
         title={lines.title}
+        voice={lines.voice}
       />
       <Onward>
         <div className="setup-org-list flex w-full flex-col overflow-auto rounded-xl border text-left">
@@ -1223,14 +1477,29 @@ const ConfirmOrg = (props: StepProps & { roster: Roster }) => {
  */
 const Leads = (props: StepProps) => {
   const { t } = useLingui();
-  const lines = useHeadlines(props).leads;
+  const headlines = useHeadlines(props);
+  const lines = headlines.leads;
   const { roster } = props.data.view;
+  // The HR platform comes first, until the admin said which; then, on this visit, the organization.
+  const [hrSaid, setHrSaid] = useState(props.data.choices.hr !== null);
+  if (!hrSaid) {
+    return (
+      <HrPlatform
+        choices={props.data.choices}
+        lines={headlines.hr}
+        onDone={() => {
+          setHrSaid(true);
+        }}
+      />
+    );
+  }
   if (roster === null) {
     return (
       <>
         <Heading
           sentence={t`First I need your staff list.`}
           title={lines.title}
+          voice={lines.voice}
         />
         <Primary
           onClick={() => {
@@ -1253,7 +1522,7 @@ const Leads = (props: StepProps) => {
 const Team = (props: StepProps) => {
   const { t } = useLingui();
   const lines = useHeadlines(props).team;
-  const { admin, view } = props.data;
+  const { admin, company, view } = props.data;
   const { run, busy, failure } = useCoreAction();
   const refresh = useRefresh();
   const written = [
@@ -1275,7 +1544,11 @@ const Team = (props: StepProps) => {
     }));
   // What they set before stands; else the next working day at nine, every team.
   const [choice, setChoice] = useState(() =>
-    view.plan === null ? firstChoice(props.today) : choiceOfPlan(view.plan)
+    choiceShown(
+      view.plan,
+      props.today,
+      teams.map((team) => team.id)
+    )
   );
   const [editing, setEditing] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -1284,16 +1557,29 @@ const Team = (props: StepProps) => {
   const next =
     choice.held.length === 0
       ? t`Leads get their link ${when}. Everyone else right after their lead has talked to me.`
-      : t`The leads of ${going} teams get their link ${when}. Everyone else right after their lead has talked to me.`;
+      : t`${plural(going, {
+          one: `The lead of # team gets their link ${when}. Everyone else right after their lead has talked to me.`,
+          other: `The leads of # teams get their link ${when}. Everyone else right after their lead has talked to me.`,
+        })}`;
+  // He says what happens next after his line, and again as the plan changes it: quick, as the day is only known then.
+  useSayFollowing(next, { quick: true });
   return (
     <>
-      <Heading sentence={lines.sentence} title={lines.title} />
+      <Heading
+        sentence={lines.sentence}
+        title={lines.title}
+        voice={lines.voice}
+      />
       <div className="flex w-full flex-col gap-3.5 text-left">
         <div className="bg-card overflow-hidden rounded-xl border shadow-sm">
           <div className="flex items-center gap-2.5 border-b px-4 py-3">
             <div className="flex min-w-0 flex-1 flex-col">
               <span>{admin}</span>
-              <span className="text-muted-foreground">{t`To everyone`}</span>
+              <span className="text-muted-foreground">
+                {company === null
+                  ? t`To everyone`
+                  : t`To everyone at ${company}`}
+              </span>
             </div>
             <Button
               onClick={() => {
@@ -1354,7 +1640,9 @@ const Team = (props: StepProps) => {
         <Alert>
           <InfoIcon />
           <AlertTitle>{t`What happens next`}</AlertTitle>
-          <AlertDescription>{next}</AlertDescription>
+          <AlertDescription>
+            <SpokenText from={0} line={next} text={next} />
+          </AlertDescription>
         </Alert>
         <ErrorText>{failure}</ErrorText>
       </div>
@@ -1387,123 +1675,29 @@ const Team = (props: StepProps) => {
   );
 };
 
-/** The one team far behind, named with the lead whose word usually helps. */
-const QuietTeam = ({ team, lead }: { team: string; lead: string }) => {
-  const { t } = useLingui();
-  return (
-    <p className="text-muted-foreground">
-      {t`${team} has been quiet so far. A short message from ${lead}, their lead, usually helps. I’ll remind everyone once myself.`}
-    </p>
-  );
-};
+/** Letting Grasp's mail through, as one of what needs the admin. */
+const Mail = ({ data, settled, onSettle }: StepProps) => (
+  <MailItem
+    domain={data.sendingDomain}
+    onSettle={(done) => {
+      onSettle("mail", done);
+    }}
+    settled={settled.includes("mail")}
+  />
+);
 
 /**
- * What keeps the links from going out, before anything else on the step:
- * Grasp's staff paused the interviews (in the words of their own switch),
- * or the agreements are not in place yet.
- */
-const Waiting = ({ paused, agreed }: { paused: boolean; agreed: boolean }) => {
-  const { t } = useLingui();
-  return (
-    <>
-      {paused ? (
-        <Callout
-          text={t`Paused: no link opens and none goes out. The links that are due go out once they run again.`}
-        />
-      ) : null}
-      {agreed ? null : (
-        <Callout
-          text={t`Grasp is still putting the agreements in place. Your people’s links go out once that is done.`}
-        />
-      )}
-    </>
-  );
-};
-
-/**
- * One team's row of how far it is: how many talked of how many were
- * asked; while too few talked, how many were asked and whether the lead
- * talked; while too few were asked, only whether the lead talked.
- */
-const TeamRow = ({ team }: { team: TeamProgress }) => {
-  const { t } = useLingui();
-  const numbers = teamNumbersOf(team);
-  const least = minTalkedShown;
-  let count = t`Under 5`;
-  if (numbers.shown === "both") {
-    const { talked, asked: of } = numbers;
-    count = t`${talked} of ${of}`;
-  } else if (numbers.shown === "asked") {
-    const { asked: of } = numbers;
-    count = t`Fewer than ${least} of ${of}`;
-  }
-  return (
-    <div className="setup-team-row grid items-center gap-3 py-1.5">
-      <span className="truncate">{team.name}</span>
-      {numbers.shown === "both" ? (
-        <Progress
-          aria-label={team.name}
-          value={
-            numbers.asked === 0
-              ? 0
-              : Math.round((numbers.talked / numbers.asked) * 100)
-          }
-        />
-      ) : (
-        <span className="text-muted-foreground text-xs">
-          {team.leadTalked ? t`Lead talked` : t`Lead not yet`}
-        </span>
-      )}
-      <span className="text-muted-foreground text-right tabular-nums">
-        {count}
-      </span>
-    </div>
-  );
-};
-
-/**
- * The weeks Stephen talks to the team: how far the days are, three
- * numbers, and the team that needs a word from its lead. Numbers per team
- * only for teams of five or more, and never who talked or what anyone said.
+ * The weeks Stephen talks to the team: where the interviews stand
+ * (interviews-progress.tsx), said as it turns up, and the way on once he
+ * has heard enough.
  */
 const ListeningStep = (props: StepProps) => {
   const { t } = useLingui();
   const { listening, percent, today, data } = props;
   const lines = useHeadlines(props).listening;
-  const { plan, progress, roster, agreed, paused } = data.view;
-  const closes = plan === null ? "" : formatDay(closesOn(plan));
-  const { days } = listening;
-  const day = Math.max(
-    listening.day,
-    plan !== null && plan.start <= today ? 1 : 0
-  );
-  const teams = progress?.teams.filter((team) => !team.off) ?? [];
-  // Once the others are well under way, a team of five or more far behind is named, with the lead who can help.
-  const quiet =
-    listening.progress > 0.35
-      ? teams.find((team) => {
-          const lead = roster?.teams.find((each) => each.id === team.id)?.lead;
-          return (
-            lead !== null &&
-            lead !== undefined &&
-            team.asked !== null &&
-            team.asked > 0 &&
-            (team.talked ?? 0) / team.asked < 0.35
-          );
-        })
-      : undefined;
-  const quietLead =
-    quiet === undefined
-      ? ""
-      : (roster?.people.find(
-          (person) =>
-            person.id ===
-            roster.teams.find((each) => each.id === quiet.id)?.lead
-        )?.name ?? "");
+  // oxlint-disable-next-line react/hook-use-state -- read once as the step arrives, never set
+  const [mailShown] = useState(() => !props.settled.includes("mail"));
   const gateOpen = percent >= data.gate.threshold;
-  const leads = progress?.leads ?? 0;
-  const { leadsHeard } = listening;
-  const starts = plan === null ? "" : formatDay(plan.start);
   return (
     <>
       <Heading
@@ -1511,69 +1705,16 @@ const ListeningStep = (props: StepProps) => {
         title={lines.title}
         voice={lines.voice}
       />
-      <div className="flex w-full flex-col gap-4 text-left">
-        <Waiting agreed={agreed} paused={paused} />
-        <div className="flex flex-col gap-2">
-          <div className="flex gap-1">
-            {Array.from({ length: days }, (_, index) => (
-              <span
-                className={
-                  index < day
-                    ? "bg-foreground h-1.5 flex-1 rounded-full transition-colors duration-500"
-                    : "bg-border h-1.5 flex-1 rounded-full transition-colors duration-500"
-                }
-                key={index}
-              />
-            ))}
-          </div>
-          <div className="text-muted-foreground flex justify-between">
-            <span>
-              {plan !== null && plan.start > today
-                ? t`Starts ${starts}`
-                : t`Day ${day} of ${days}`}
-            </span>
-            {closes === "" ? null : <span>{t`Closes ${closes}`}</span>}
-          </div>
-        </div>
-        <div className="grid grid-cols-3 gap-2.5">
-          <Figure
-            label={t`team leads talked`}
-            value={t`${leadsHeard} of ${leads}`}
-          />
-          <Figure
-            label={t`colleagues talked`}
-            value={String(listening.colleaguesHeard)}
-          />
-          {/* Core draws no work from the interviews yet: unknown stays unknown, never 0. */}
-          <Figure label={t`pieces of work found`} value="–" />
-        </div>
-        <div className="flex items-start gap-3">
-          <div className="min-w-0 flex-1">
-            {quiet === undefined ? null : (
-              <QuietTeam lead={firstName(quietLead)} team={quiet.name} />
-            )}
-          </div>
-          <Popover>
-            <PopoverTrigger
-              render={
-                <Button className="-my-1 flex-none" size="sm" variant="ghost" />
-              }
-            >
-              {t`By team`}
-              <ChevronDownIcon data-icon="inline-end" />
-            </PopoverTrigger>
-            <PopoverContent align="end" className="w-96">
-              {/* One list, close together: the content's own room is between its parts. */}
-              <div className="flex flex-col">
-                {teams.map((team) => (
-                  <TeamRow key={team.id} team={team} />
-                ))}
-                <p className="text-muted-foreground pt-2 text-xs">{t`Teams under five people show only whether their lead talked, so nobody can be singled out.`}</p>
-              </div>
-            </PopoverContent>
-          </Popover>
-        </div>
-      </div>
+      <InterviewsProgress
+        links={data.links}
+        listening={listening}
+        spoken
+        today={today}
+        view={data.view}
+      >
+        {/* Before the links go out, until it's done: the admin's mail filter lets Grasp's mail through. Settled here, it stays to say so until they leave. */}
+        {mailShown ? <Mail {...props} /> : null}
+      </InterviewsProgress>
       {gateOpen ? (
         <div className="animate-in fade-in slide-in-from-bottom-2 flex w-full flex-col gap-3 duration-400">
           <Callout
@@ -1593,12 +1734,14 @@ const ListeningStep = (props: StepProps) => {
 };
 
 /**
- * What only the admin can settle. Core keeps none of it yet, so nothing
- * needs them: the prototype's step with every item settled.
+ * What only the admin can settle, each with a way to settle it. Nothing
+ * moves on by itself: they read what they settled, and go on once nothing
+ * is open.
  */
 const Review = (props: StepProps) => {
   const { t } = useLingui();
   const lines = useHeadlines(props).review;
+  const open = openItems(props.settled).length;
   return (
     <>
       <Heading
@@ -1606,13 +1749,18 @@ const Review = (props: StepProps) => {
         title={lines.title}
         voice={lines.voice}
       />
-      <Primary
-        onClick={() => {
-          props.go("open");
-        }}
-      >
-        {t`Continue`}
-      </Primary>
+      <div className="w-full">
+        <Mail {...props} />
+      </div>
+      {open === 0 ? (
+        <Primary
+          onClick={() => {
+            props.go("open");
+          }}
+        >
+          {t`Continue`}
+        </Primary>
+      ) : null}
     </>
   );
 };

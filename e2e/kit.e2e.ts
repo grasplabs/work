@@ -140,7 +140,7 @@ test("the dot brain prints every figure, and on a phone too", async ({
     .locator('[data-slot="card"]')
     .filter({ has: page.getByText("Dot brain", { exact: true }) });
   const figures = card.locator("figure");
-  await expect(figures).toHaveCount(11);
+  await expect(figures).toHaveCount(14);
   // Each figure's dots are on its canvas: the fewest any of them printed.
   await expect
     .poll(

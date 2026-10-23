@@ -10,8 +10,14 @@
  *
  * - 9: `run.control_fence`, the newest fence a control came with (run.ts,
  *   `ControlFence`).
+ * - 10: `events.attributes`, what an event was sent with, and
+ *   `steps.event_match`, what a `waitForMatch` takes (identity.ts).
+ * - 11: `events.reserved`, an event the run's host owed it, which the
+ *   inbox's limits on senders don't count (run.ts, `sendEvent`).
+ * - 12: `events.sender`, who sent an event, for each sender's share of
+ *   the inbox (run.ts, `sendEvent`).
  */
-export const journalSchemaVersion = 9;
+export const journalSchemaVersion = 12;
 
 /**
  * The oldest journal this engine reads, upgrading it as it first reads

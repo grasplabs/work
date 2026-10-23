@@ -39,6 +39,7 @@ import type {
   IntegrationFilter,
   IntegrationSection,
 } from "../connections/integrations.ts";
+import { RequestedApps } from "../connections/requested-apps.tsx";
 import { ErrorText } from "../error-text.tsx";
 import { formatNumber } from "../format.ts";
 import {
@@ -53,7 +54,7 @@ import {
 import { PageLoading } from "../frame/page-states.tsx";
 import { PageHeading } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
-import { NotLoaded } from "../load-from-core.tsx";
+import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
 
 // Integrations, as in the prototype (`routes/integrations/index.tsx`):
 // every app Grasp can work in. The page sidebar filters: everything, what
@@ -502,7 +503,7 @@ const FilterSelect = ({
 };
 
 const Integrations = () => {
-  const { catalog, connections } = Route.useLoaderData();
+  const { catalog, connections, requests } = Route.useLoaderData();
   const { identity } = Route.useRouteContext();
   const search = Route.useSearch();
   const { q, connectionError, connection } = search;
@@ -524,6 +525,7 @@ const Integrations = () => {
     0
   );
   const loaded = catalog.state === "ready" && connections.state === "ready";
+  const wholeCatalog = filter.show === "all" && q === undefined;
   const about = formatNumber(roundedDown(integrations.length));
   return (
     <>
@@ -606,6 +608,8 @@ const Integrations = () => {
               key={`${JSON.stringify(filter)}·${q ?? ""}`}
               sections={sections}
             />
+            {/* Under the whole catalog only: not a kind, nor a search's match. */}
+            {wholeCatalog ? <RequestedApps requests={requests} /> : null}
           </div>
         </div>
       </div>
@@ -631,8 +635,14 @@ export const Route = createFileRoute("/_shell/integrations/")({
   // new one keeps the page as it is rather than reading it again. A change
   // reads it again (use-change.ts invalidates it).
   shouldReload: false,
-  loader: async ({ context: { core, identity } }) =>
-    await loadIntegrations(core, identity, { held: false }),
+  loader: async ({ context: { core, identity } }) => ({
+    ...(await loadIntegrations(core, identity, { held: false })),
+    // Not awaited: the catalog never waits for the apps people asked for.
+    requests: loadFromCore(
+      core,
+      async (session) => await session.connections.appRequests()
+    ),
+  }),
   pendingComponent: PageLoading,
   component: Integrations,
 });

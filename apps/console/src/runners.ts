@@ -2,7 +2,8 @@
  * A client's runner: the one thing that may change what its account runs,
  * as `client_runs` names it. A provisioning run (a Workflow instance per
  * attempt, `<clientId>-<random>`, src/provision/workflow.ts), a rollout
- * while it deploys the client (the rollout's instance,
+ * while it deploys the client (the rollout's instance, or for a fleet
+ * client a child of it that claims it in the rollout's name,
  * src/rollout/workflow.ts), a rollback of the client (its instance,
  * src/rollout/rollback.ts), or applying its settings (its instance,
  * src/clients/apply.ts). Instances are never deleted or reused.
@@ -92,6 +93,7 @@ const workflows: Readonly<Record<RunKind, (env: Env) => Workflow>> = {
   rollout: (env) => env.ROLLOUT,
   rollback: (env) => env.ROLLBACK_CLIENT,
   apply: (env) => env.APPLY_CLIENT,
+  provision_placed: (env) => env.PROVISION_PLACED_CLIENT,
 };
 
 /**

@@ -11,6 +11,13 @@ interface __BaseEnv_Env {
   GOOGLE_CLIENT_SECRET?: string;
   /** The model gateway (src/models.ts): JSON. */
   MODEL_GATEWAY?: unknown;
+  /**
+   * The deployment's AI Gateway token, a Worker secret: the
+   * `cf-aig-authorization` an authenticated gateway asks for, which voice
+   * requests carry (src/models.ts). Never logged, never sent to the
+   * browser. Without it they carry the AI binding's placeholder.
+   */
+  AI_GATEWAY_TOKEN?: string;
   /** Memory files' size limits, in tokens (src/knowledge/memory-files.ts): JSON. */
   MEMORY_LIMITS?: unknown;
   /**
@@ -48,6 +55,12 @@ interface __BaseEnv_Env {
    */
   RUNTIME_PROFILE?: string;
   /**
+   * The client this deployment is, as the console deploys it: what core
+   * answers the console's provisioning probe with (src/provision-probe.ts).
+   * Unset in local development and on-prem.
+   */
+  CLIENT_ID?: string;
+  /**
    * On-prem only: the sandbox supervisor (scripts/workerd-sandbox.ts), as an
    * external service, where untrusted isolates run in workerd processes of
    * their own with a deadline (src/sandboxed.ts). Plain workerd enforces no
@@ -65,6 +78,11 @@ interface __BaseEnv_Env {
    * `unbounded` where core may run untrusted isolates itself without
    * `SANDBOX_HOST` off Cloudflare, accepting that nothing bounds their CPU:
    * tests and local development only, never on-prem (src/sandboxed.ts).
+   * It accepts too that what App code with a tail writes (an App's server,
+   * a draft's preview) reaches the process's logs as well as its tail;
+   * every other isolate core loads prints nothing (src/quiet-loader.ts),
+   * as long as the process isn't served `--verbose`, which core can't
+   * detect: an operator who sets this doesn't serve core so (GRA-939).
    */
   SANDBOX_IN_PROCESS?: string;
   /** `none` where Durable Objects have no jurisdiction (src/durable-objects.ts). */

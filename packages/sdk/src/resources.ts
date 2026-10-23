@@ -1,3 +1,4 @@
+import { originRefusal } from "@grasp-os/shared/app-link-limits";
 import type {
   GuestChat,
   GuestInvitation,
@@ -764,38 +765,29 @@ const filesOperations: readonly FilesOperation[] = [
  * port. What a URL parser lets through beyond it (a `*`, say) is
  * no origin a browser navigates to exactly.
  */
-const originPattern =
-  /^https:\/\/(?:(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?|\[[0-9a-f:.]{2,45}\])(?::\d{1,5})?$/u;
-
-/** The most bytes of one link origin. */
-const originMaxLength = 253 + "https://".length + ":65535".length;
-
 /**
- * An exact HTTPS origin as the URL standard serializes it: scheme, host
- * and an optional port, nothing else (no path, query, credentials or
- * wildcard), lower case.
+ * An exact HTTPS origin a links declaration may list (`originRefusal`,
+ * in the shared app-link-limits module: the same rule core holds every
+ * open to): scheme, a host name and an optional port, in lower case, with
+ * nothing after it; never an IP address or a private network's host.
  */
 const checkedOrigin = (origin: unknown): string => {
-  if (typeof origin !== "string" || origin.length > originMaxLength) {
+  const refused = originRefusal(origin);
+  if (refused === "ip_literal") {
     return refuse(
-      "A link origin is an HTTPS origin, e.g. `https://example.com`."
+      `\`${String(origin)}\` is an IP address: a link origin is a public site's host name.`
     );
   }
-  let url: URL;
-  try {
-    url = new URL(origin);
-  } catch {
+  if (refused === "private_network") {
     return refuse(
-      "A link origin is an HTTPS origin, e.g. `https://example.com`."
+      `\`${String(origin)}\` is on a private network: a link origin is a public site's.`
     );
   }
-  if (
-    url.protocol !== "https:" ||
-    url.origin !== origin ||
-    !originPattern.test(origin)
-  ) {
+  if (refused !== undefined || typeof origin !== "string") {
     return refuse(
-      `\`${origin}\` isn't an exact HTTPS origin: \`https://\`, a host and an optional port, in lower case, with nothing after it.`
+      typeof origin === "string"
+        ? `\`${origin}\` isn't an exact HTTPS origin: \`https://\`, a host and an optional port, in lower case, with nothing after it.`
+        : "A link origin is an HTTPS origin, e.g. `https://example.com`."
     );
   }
   return origin;

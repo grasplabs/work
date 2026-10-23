@@ -24,6 +24,7 @@ import {
   classifyOutput,
   revokeScreen,
 } from "../src/screen-trust-rpc.ts";
+import { published } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { appModulesOf, kitModulesOf, loadFrame } from "./screen-frames.ts";
 import { calledAs, person as actingAs } from "./sealed-apps.ts";
@@ -256,6 +257,7 @@ const release = async (
 /** A new App running the sample, whose data is sensitive, as every App's is. */
 const sampleApp = async (builder: Person): Promise<string> => {
   const { id } = await builder.api.apps.create({ name: "Notes" });
+  await published(id);
   await release(builder, id, sampleFiles);
   return id;
 };
@@ -673,6 +675,7 @@ describe("screen trust", { timeout: 60_000 }, () => {
     const builder = await personApi("builder");
     const plainApp = async (): Promise<string> => {
       const { id } = await builder.api.apps.create({ name: "Notes" });
+      await published(id);
       await release(builder, id, {
         ...appCode,
         "screens/notes.tsx": plainScreenOf("Notes"),
@@ -1430,6 +1433,7 @@ describe("screen trust", { timeout: 60_000 }, () => {
     const builder = await personApi("builder");
     const plainApp = async (): Promise<string> => {
       const { id } = await builder.api.apps.create({ name: "Notes" });
+      await published(id);
       await release(builder, id, {
         ...appCode,
         "screens/notes.tsx": plainScreenOf("Notes"),
@@ -1832,19 +1836,24 @@ describe("screen trust", { timeout: 60_000 }, () => {
     });
   });
 
-  it("reviews a version whose screen doesn't build, and still lists earlier approvals to take back", async () => {
+  it("reviews a saved version whose screen doesn't build, and still lists earlier approvals to take back", async () => {
     const admin = await personApi("admin");
     const builder = await personApi("builder");
     const app = await sampleApp(builder);
     await approveCurrent(admin, app);
     const first = await openFrame(builder, app);
-    // Version 2 adds a screen that doesn't build.
-    await release(builder, app, {
-      "screens/broken.tsx":
-        'import leftPad from "left-pad";\nexport default () => leftPad;\n',
-    });
+    // Version 2 adds a screen that doesn't build. It is saved but can't be
+    // made current (a release seals every screen): it is reviewed as saved.
+    const { version } = await builder.api.apps.files.commit(
+      app,
+      {
+        "screens/broken.tsx":
+          'import leftPad from "left-pad";\nexport default () => leftPad;\n',
+      },
+      "Broken"
+    );
 
-    const review = await admin.api.screenTrust.review(app);
+    const review = await admin.api.screenTrust.review(app, version);
     await admin.api.screenTrust.revoke(app, first.artifact);
     const after = await admin.api.screenTrust.review(app);
 
