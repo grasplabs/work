@@ -310,7 +310,7 @@ const route = async (
     return await handler(request, env, requestId);
   }
   if (pathname === labPath) {
-    return await labResponse(request, env, requestId);
+    return await labResponse(request, env, requestId, ctx);
   }
   const linked = await linkResponse(pathname, request, env, requestId, ctx);
   if (linked !== undefined) {

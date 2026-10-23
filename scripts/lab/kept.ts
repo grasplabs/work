@@ -31,9 +31,16 @@ const openFolders = {
 
 export type Place = keyof typeof openFolders;
 
+/** The open set's cases, which may be read, or the hidden set's, of which only scores are shown. */
+export type CaseSet = "open" | "hidden";
+
+/** Where something of `set` is kept: the hidden set's own folder, outside the repository, for the hidden set. */
+export const setFolder = (place: Place, set: CaseSet): string =>
+  set === "hidden" ? path.join(hiddenFolder(), place) : openFolders[place];
+
 /** Where something made from `key` is kept: the hidden set's own folder for a hidden key. */
 export const folderOf = (place: Place, key: string): string =>
-  isHidden(key) ? path.join(hiddenFolder(), place) : openFolders[place];
+  setFolder(place, isHidden(key) ? "hidden" : "open");
 
 /** Keeps `value` as JSON at `file`, and says where. */
 export const keepJson = (file: string, value: unknown): string => {
