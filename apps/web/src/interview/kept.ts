@@ -1,4 +1,5 @@
 import type { InterviewProgress } from "@grasp-os/shared/interview-links";
+import type { Interviewer } from "@grasp-os/shared/onboarding";
 import { useSyncExternalStore } from "react";
 
 import { isRefused, saveProgress } from "./api.ts";
@@ -278,3 +279,7 @@ export const useProgress = (): InterviewProgress =>
 /** Where saving stands. */
 export const useSaveState = (): SaveState =>
   useSyncExternalStore(subscribe, () => saveState);
+
+/** Who holds the interview: whoever they chose, Stephen while nobody was chosen. */
+export const useInterviewer = (): Interviewer =>
+  useSyncExternalStore(subscribe, () => progressNow().interviewer ?? "stephen");

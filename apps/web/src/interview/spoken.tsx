@@ -32,7 +32,7 @@ export const wordsOf = (
  * the start, and how far the line is said then: one past the first letter
  * of the next word, which is the one being said.
  */
-const scheduleOf = (
+export const scheduleOf = (
   line: string,
   from: number
 ): { after: number; reached: number }[] => {

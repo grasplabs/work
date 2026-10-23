@@ -13,6 +13,7 @@ import type {
   InterviewWants,
   StephenTurn,
 } from "@grasp-os/shared/interview-turn";
+import type { Interviewer } from "@grasp-os/shared/onboarding";
 
 // Where someone's interview stands, as their page keeps it and sends it to
 // core to be kept (`InterviewProgress`), and how each thing that happens
@@ -43,15 +44,29 @@ export const isTalking = ({ person }: InterviewProgress): boolean =>
 export const isReading = ({ wants }: InterviewProgress): boolean =>
   wants === "readback" || wants === "end";
 
-/** They pressed start, by typing: Stephen has told them who he is. */
+/** They chose who they talk with: that one's text and voice every turn uses. */
+export const chose = (
+  progress: InterviewProgress,
+  interviewer: Interviewer
+): InterviewProgress =>
+  progress.interviewer === interviewer
+    ? progress
+    : { ...progress, interviewer };
+
+/** They read what this is: back on the link, they go straight to the sound check. */
+export const toldWhat = (progress: InterviewProgress): InterviewProgress =>
+  progress.told ? progress : { ...progress, told: true };
+
+/** They pressed start, to talk or by typing: they have read what this is. */
 export const begun = (
   progress: InterviewProgress,
-  now: number
+  now: number,
+  by: "talk" | "type"
 ): InterviewProgress => ({
   ...progress,
   person: "progress",
   told: true,
-  mode: "type",
+  mode: by,
   startedAt: progress.startedAt ?? now,
 });
 
