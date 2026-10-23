@@ -3,6 +3,7 @@ import { defineConnector } from "@grasp-os/connector-kit/connector";
 import { calendarTools } from "./calendar.ts";
 import { fileTools } from "./files.ts";
 import { graphHost } from "./graph.ts";
+import { mailReplyTools } from "./mail-replies.ts";
 import { mailTools } from "./mail.ts";
 
 /**
@@ -26,5 +27,5 @@ export default defineConnector({
     "Sites.Read.All",
   ],
   hosts: [graphHost],
-  tools: [...mailTools, ...calendarTools, ...fileTools],
+  tools: [...mailTools, ...mailReplyTools, ...calendarTools, ...fileTools],
 });

@@ -32,6 +32,7 @@ import {
   messagePage,
   moved,
   notFound,
+  replyDraft,
   reportText,
   searchResults,
   sharePointHost,
@@ -164,6 +165,18 @@ const graphRoutes: ProviderRoute<Part>[] = [
   ),
   route("POST", `${users}/messages/(?<id>[^/]+)/move`, ({ mailbox, id }) =>
     json(moved(mailbox, numberOf(id)), 201)
+  ),
+  route(
+    "POST",
+    `${users}/messages/(?<id>[^/]+)/createReply`,
+    async ({ mailbox, id, request }) => {
+      const body: unknown = await request.json();
+      const { message: reply } = z.object({ message: z.unknown() }).parse(body);
+      const { subject } = draftSchema.parse(reply);
+      const made = replyDraft(mailbox, numberOf(id), subject);
+      keepTag(mailbox, made.id, reply);
+      return json(made, 201);
+    }
   ),
   route("POST", `${users}/sendMail`, async ({ mailbox, request }) => {
     const sent = z.object({ message: z.unknown() }).parse(await request.json());

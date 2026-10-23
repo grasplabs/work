@@ -241,6 +241,17 @@ export const draft = (mailbox: string, subject: string) => ({
   webLink: `https://outlook.office365.com/owa/?ItemID=${encodeURIComponent(messageId(mailbox, 9))}&exvsurl=1&viewmodel=ReadMessageItem`,
 });
 
+/**
+ * What `POST /messages/{id}/createReply` returns: a draft in the
+ * conversation of message `n`.
+ */
+export const replyDraft = (mailbox: string, n: number, subject: string) => ({
+  ...draft(mailbox, subject),
+  id: messageId(mailbox, 8),
+  conversationId: messageSummary(mailbox, n).conversationId,
+  webLink: `https://outlook.office365.com/owa/?ItemID=${encodeURIComponent(messageId(mailbox, 8))}&exvsurl=1&viewmodel=ReadMessageItem`,
+});
+
 const utc = (dateTime: string) => ({ dateTime, timeZone: "UTC" });
 
 export const event = (mailbox: string, n: number) => ({

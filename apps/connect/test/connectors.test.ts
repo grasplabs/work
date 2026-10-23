@@ -516,6 +516,7 @@ describe("a native connector", () => {
       "mail.move": "change-company",
       "mail.send": "reach-others",
       "mail.createDraft": "change-company",
+      "mail.createReplyDraft": "change-company",
       ...calendar,
       ...files,
     });
