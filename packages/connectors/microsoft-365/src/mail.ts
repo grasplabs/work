@@ -310,6 +310,7 @@ const threadMessages = defineTool({
     earlierMessages: z.boolean(),
   }),
   readOnly: true,
+  reach: "company",
   resource: "mailbox",
   routes: [get("/messages")],
   run: async ({ mailbox, conversation }) => {
