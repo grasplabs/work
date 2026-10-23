@@ -1,6 +1,4 @@
-import type { AuditEntry } from "@grasp-os/shared/audit";
-
-import { appendAuditEvent, drainKnowledgeOutboxSoon } from "../audit-outbox.ts";
+import { drainKnowledgeOutboxSoon } from "../audit-outbox.ts";
 import { derivedHmacKey } from "../derived-keys.ts";
 import { runEngine } from "../workflows/engine.ts";
 import type { Reader } from "./access.ts";
@@ -34,8 +32,6 @@ export interface KnowledgePorts {
   audit: {
     /** Drains the outbox soon, in the background, never failing. */
     drain: () => void;
-    /** Appends an event straight to the log, for when the outbox can't. */
-    append: (entry: AuditEntry) => Promise<void>;
   };
   /** An HMAC key of the host's own for one `purpose`. */
   keys: {
@@ -72,9 +68,6 @@ export const portsOf = (env: Env): KnowledgePorts => ({
   audit: {
     drain: () => {
       drainKnowledgeOutboxSoon(env);
-    },
-    append: async (entry) => {
-      await appendAuditEvent(env, entry);
     },
   },
   keys: {
