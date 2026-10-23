@@ -85,9 +85,17 @@ export interface ConnectorCatalog {
     };
   };
   readonly "microsoft-365.mail@1": {
+    readonly categorise: {
+      readonly input: { categories: Array<string>; from: string; mailbox: string; message: string; subject: string };
+      readonly output: { categories: Array<string>; id: string; mailbox: string };
+    };
     readonly createDraft: {
       readonly input: { bcc?: Array<string>; body: string; bodyType?: "text" | "html"; cc?: Array<string>; mailbox: string; replyTo?: Array<string>; subject: string; to: Array<string> };
       readonly output: { conversationId: string | null; id: string; mailbox: string; webLink: string | null };
+    };
+    readonly flag: {
+      readonly input: { flag: "flagged" | "complete" | "notFlagged"; from: string; mailbox: string; message: string; subject: string };
+      readonly output: { flag: string; id: string; mailbox: string };
     };
     readonly get: {
       readonly input: { bodyType?: "text" | "html"; mailbox: string; message: string };
@@ -98,7 +106,7 @@ export interface ConnectorCatalog {
       readonly output: { mailbox: string; messages: Array<{ bodyPreview: string | null; cc: Array<{ address: string | null; name: string | null }>; conversationId: string | null; folderId: string | null; from: { address: string | null; name: string | null } | null; hasAttachments: boolean; id: string; importance: string | null; internetMessageId: string | null; isDraft: boolean; isRead: boolean; mailbox: string; receivedAt: string | null; sentAt: string | null; subject: string | null; to: Array<{ address: string | null; name: string | null }>; webLink: string | null }>; nextPage: string | null };
     };
     readonly move: {
-      readonly input: { destination: string; mailbox: string; message: string };
+      readonly input: { destination: string; folderName?: string; from?: string; mailbox: string; message: string; subject?: string };
       readonly output: { folderId: string | null; id: string; mailbox: string; previousId: string };
     };
     readonly readAttachment: {

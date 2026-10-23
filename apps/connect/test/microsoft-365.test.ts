@@ -38,6 +38,7 @@ import { fakeGraph } from "./graph-api.ts";
 import { fakeProviders } from "./oauth-provider.ts";
 import {
   callTool as call,
+  claimedAgo,
   outputOf,
   parsedRequests,
   refusalsFor,
@@ -63,8 +64,39 @@ const connected = async (): Promise<Connection> => {
   return { id, person };
 };
 
+/**
+ * Someone's connection, with their own mailbox: the address they sign in
+ * with, which Graph's `/me` names, and any aliases it lists besides.
+ */
+const connectedOwn = async (aliases: string[] = []) => {
+  const person = someone();
+  const id = await connectAccount(providers, person, {
+    ...ownAccount(person),
+    aliases,
+  });
+  return {
+    connection: { id, person },
+    own: person.email,
+    ownPath: `/v1.0/users/${encodeURIComponent(person.email)}`,
+  };
+};
+
+const invoiceSubject = "Invoice 2026-0041 from Northwind Supplies";
+
+/** An email in `mailbox`, as a card shows it: as Graph has it. */
+const shownEmail = (mailbox: string) => ({
+  mailbox,
+  message: messageId(mailbox, 1),
+  from: "billing@northwind.example.org",
+  subject: invoiceSubject,
+});
+
 /** What left connect, each request with its query and JSON body parsed. */
 const requests = () => parsedRequests(graph.sent);
+
+/** The requests with `method` that reached Graph. */
+const writesOf = (method: string) =>
+  requests().filter((request) => request.method === method);
 
 /** Graph's requests' paths. */
 const graphPaths = (): string[] =>
@@ -88,6 +120,18 @@ const mailboxInputs: Record<string, Input> = {
     attachment: pdfAttachmentId,
   },
   "mail.move": { message: messageId(ceo, 1), destination: "archive" },
+  "mail.flag": {
+    message: messageId(ceo, 1),
+    from: "billing@northwind.example.org",
+    subject: invoiceSubject,
+    flag: "flagged",
+  },
+  "mail.categorise": {
+    message: messageId(ceo, 1),
+    from: "billing@northwind.example.org",
+    subject: invoiceSubject,
+    categories: ["Finance"],
+  },
   "mail.send": { subject: "Hi", body: "Hi", to: ["a@example.com"] },
   "mail.createDraft": { subject: "Hi", body: "Hi", to: ["a@example.com"] },
   "calendar.list": {
@@ -105,22 +149,35 @@ const driveInputs: Record<string, Input> = {
 };
 
 describe("the Microsoft 365 connector's scoping", () => {
-  it("binds every route of every tool to its mailbox or drive, never /me", () => {
+  it("binds every route of every tool to its mailbox or drive, and reads /me only to know whose a mailbox is", () => {
     const unbound = Object.entries(manifest.actions).flatMap(
       ([name, { resource, routes }]) =>
         routes
           .filter(
-            ({ path }) =>
+            ({ method, path }) =>
               !(
                 (resource === "mailbox" &&
                   path.startsWith("/v1.0/users/{mailbox}/")) ||
                 (resource === "drive" &&
-                  path.startsWith("/v1.0/drives/{drive}/"))
+                  path.startsWith("/v1.0/drives/{drive}/")) ||
+                (method === "GET" && path === "/v1.0/me")
               )
           )
           .map(({ path }) => `${name} ${path}`)
     );
     expect(unbound).toStrictEqual([]);
+    // Only the tools that work in the person's own mailbox ask whose the
+    // token is, and nothing goes to /me but that one read.
+    const askWho = Object.entries(manifest.actions)
+      .filter(([, { routes }]) =>
+        routes.some(({ path }) => path.startsWith("/v1.0/me"))
+      )
+      .map(([name, { reach }]) => `${name} ${reach}`);
+    expect(askWho.toSorted()).toStrictEqual([
+      "mail.categorise own",
+      "mail.flag own",
+      "mail.move own",
+    ]);
     expect(
       Object.keys(manifest.actions).toSorted(),
       "every tool is tested for scoping below"
@@ -414,34 +471,35 @@ describe("the Microsoft 365 connector's mail tools", () => {
     ]);
   });
 
-  it("move a message once for its idempotency key, to a folder of its own mailbox", async () => {
-    const connection = await connected();
+  it("move an email once for its idempotency key, to a folder of the person's own mailbox", async () => {
+    const { connection, own, ownPath } = await connectedOwn();
     const move = async (destination: string, idempotencyKey: string) =>
       await outputOf(
         call(
           connection,
           "mail.move",
-          { mailbox: invoices, message: messageId(invoices, 1), destination },
-          { resource: invoices, idempotencyKey }
+          { mailbox: own, message: messageId(own, 1), destination },
+          { resource: own, idempotencyKey }
         )
       );
     const first = await move("archive", "run-7:move-invoice");
     expect(first).toStrictEqual({
-      mailbox: invoices,
-      previousId: messageId(invoices, 1),
-      id: movedId(invoices, 1),
+      mailbox: own,
+      previousId: messageId(own, 1),
+      id: movedId(own, 1),
       folderId: archiveFolderId,
     });
     await expect(move("archive", "run-7:move-invoice")).resolves.toStrictEqual(
       first
     );
-    // The destination is looked up in the bound mailbox, and the message
-    // moved to the folder it names there.
+    // The destination is looked up in the bound mailbox (once Graph's
+    // `/me` said it is the person's own), and the message moved to the
+    // folder it names there.
     expect(requests()).toMatchObject([
-      { method: "GET", path: `${mailboxPath}/mailFolders/archive` },
+      { method: "GET", path: `${ownPath}/mailFolders/archive` },
       {
         method: "POST",
-        path: `${mailboxPath}/messages/${encodeURIComponent(messageId(invoices, 1))}/move`,
+        path: `${ownPath}/messages/${encodeURIComponent(messageId(own, 1))}/move`,
         body: { destinationId: archiveFolderId },
       },
     ]);
@@ -449,9 +507,219 @@ describe("the Microsoft 365 connector's mail tools", () => {
     await expect(
       toolError(move(foreignFolderId, "run-7:move-away"))
     ).resolves.toMatchObject({ error: { code: "not_found" } });
-    expect(requests().filter(({ method }) => method === "POST")).toHaveLength(
-      1
+    expect(writesOf("POST")).toHaveLength(1);
+  });
+
+  it("move an email only when it and its folder are the ones the card shows", async () => {
+    const { connection, own } = await connectedOwn();
+    const move = async (shown: Input, idempotencyKey: string) =>
+      await outcome(
+        call(
+          connection,
+          "mail.move",
+          {
+            mailbox: own,
+            message: messageId(own, 1),
+            destination: "archive",
+            ...shown,
+          },
+          { resource: own, idempotencyKey }
+        )
+      );
+    const outcomes = [
+      await move({ from: "someone@example.org" }, "run-7:move-from"),
+      await move({ subject: "Invoice 2026-0042" }, "run-7:move-subject"),
+      await move({ folderName: "Deleted Items" }, "run-7:move-folder"),
+      // As Graph has them, the sender in any case: it moves.
+      await move(
+        {
+          from: "Billing@Northwind.example.org",
+          subject: invoiceSubject,
+          folderName: "Archive",
+        },
+        "run-7:move-shown"
+      ),
+    ];
+    expect(outcomes).toStrictEqual([
+      "connect.action_failed",
+      "connect.action_failed",
+      "connect.action_failed",
+      "ok",
+    ]);
+    expect(writesOf("POST")).toHaveLength(1);
+  });
+
+  it("flag an email in the person's own mailbox, checked against the card first", async () => {
+    const { connection, own, ownPath } = await connectedOwn();
+    await expect(
+      outputOf(
+        call(
+          connection,
+          "mail.flag",
+          { ...shownEmail(own), flag: "flagged" },
+          { resource: own, idempotencyKey: "run-3:flag" }
+        )
+      )
+    ).resolves.toStrictEqual({
+      mailbox: own,
+      id: messageId(own, 1),
+      flag: "flagged",
+    });
+    const path = `${ownPath}/messages/${encodeURIComponent(messageId(own, 1))}`;
+    expect(requests()).toMatchObject([
+      { method: "GET", path, query: { $select: "id,from,subject" } },
+      {
+        method: "PATCH",
+        path,
+        body: { flag: { flagStatus: "flagged" } },
+      },
+    ]);
+  });
+
+  it("set a flag of unknown outcome again once its call can no longer be out: it sets the same flag", async () => {
+    const { connection, own } = await connectedOwn();
+    const complete = async () =>
+      await outcome(
+        call(
+          connection,
+          "mail.flag",
+          { ...shownEmail(own), flag: "complete" },
+          { resource: own, idempotencyKey: "run-3:complete" }
+        )
+      );
+    graph.loseWriteAnswer();
+    const lost = await complete();
+    const early = await complete();
+    await claimedAgo(connection);
+    const recovered = await complete();
+    const patches = writesOf("PATCH").map(({ body }) => JSON.stringify(body));
+    expect({ lost, early, recovered, patches }).toStrictEqual({
+      lost: "connect.outcome_unknown",
+      early: "connect.outcome_unknown",
+      recovered: "ok",
+      patches: Array.from({ length: 2 }, () =>
+        JSON.stringify({ flag: { flagStatus: "complete" } })
+      ),
+    });
+  });
+
+  it("set an email's categories to exactly those asked, and the same again when its answer was lost", async () => {
+    const { connection, own } = await connectedOwn();
+    const categorise = async (idempotencyKey: string) =>
+      await outcome(
+        call(
+          connection,
+          "mail.categorise",
+          {
+            ...shownEmail(own),
+            categories: ["Finance", "Waiting on others", "Finance"],
+          },
+          { resource: own, idempotencyKey }
+        )
+      );
+    await expect(categorise("run-3:categorise")).resolves.toBe("ok");
+    graph.loseWriteAnswer();
+    const lost = await categorise("run-3:categorise-again");
+    await claimedAgo(connection);
+    const recovered = await categorise("run-3:categorise-again");
+    const patches = writesOf("PATCH").map(({ body }) => JSON.stringify(body));
+    expect({ lost, recovered, patches }).toStrictEqual({
+      lost: "connect.outcome_unknown",
+      recovered: "ok",
+      patches: Array.from({ length: 3 }, () =>
+        JSON.stringify({ categories: ["Finance", "Waiting on others"] })
+      ),
+    });
+  });
+
+  it("refuse a category the person doesn't have, before anything changes", async () => {
+    const { connection, own, ownPath } = await connectedOwn();
+    await expect(
+      toolError(
+        call(
+          connection,
+          "mail.categorise",
+          { ...shownEmail(own), categories: ["Finance", "Board only"] },
+          { resource: own, idempotencyKey: "run-3:new-category" }
+        )
+      )
+    ).resolves.toMatchObject({ error: { code: "invalid" } });
+    expect(requests()).toMatchObject([
+      { method: "GET", path: `${ownPath}/outlook/masterCategories` },
+    ]);
+    expect(graph.writesDone()).toBe(0);
+  });
+
+  it("flag or categorise only an email that is the one the card shows", async () => {
+    const { connection, own } = await connectedOwn();
+    const shown = [
+      { from: "someone@example.org" },
+      { subject: "Invoice 2026-0042 from Northwind Supplies" },
+      { subject: "invoice 2026-0041 from northwind supplies" },
+    ];
+    const outcomes = await Promise.all(
+      shown.flatMap((differs) => [
+        outcome(
+          call(
+            connection,
+            "mail.flag",
+            { ...shownEmail(own), ...differs, flag: "flagged" },
+            { resource: own, idempotencyKey: crypto.randomUUID() }
+          )
+        ),
+        outcome(
+          call(
+            connection,
+            "mail.categorise",
+            { ...shownEmail(own), ...differs, categories: ["Finance"] },
+            { resource: own, idempotencyKey: crypto.randomUUID() }
+          )
+        ),
+      ])
     );
+    expect(new Set(outcomes)).toStrictEqual(new Set(["connect.action_failed"]));
+    expect(graph.writesDone()).toBe(0);
+  });
+
+  it("work only in the person's own mailbox, by any of their addresses, asking only whose the token is", async () => {
+    const alias = "the.person@acme.test";
+    const { connection } = await connectedOwn([alias]);
+    // invoices@ is a mailbox the token opens, but not the person's own.
+    const inputs: Record<string, Input> = {
+      "mail.flag": { flag: "flagged" },
+      "mail.categorise": { categories: ["Finance"] },
+      "mail.move": { destination: "archive" },
+    };
+    const elsewhere = await Promise.all(
+      Object.entries(inputs).map(
+        async ([action, input]) =>
+          await toolError(
+            call(
+              connection,
+              action,
+              { ...shownEmail(invoices), ...input },
+              { resource: invoices, idempotencyKey: crypto.randomUUID() }
+            )
+          )
+      )
+    );
+    expect(elsewhere).toMatchObject(
+      Array.from({ length: 3 }, () => ({ error: { code: "invalid" } }))
+    );
+    // Only `/me` was asked: nothing reached the mailbox.
+    expect(graph.sent).toStrictEqual([]);
+    // An alias of theirs, in another case, is their own mailbox.
+    const shouted = alias.toUpperCase();
+    await expect(
+      outcome(
+        call(
+          connection,
+          "mail.flag",
+          { ...shownEmail(shouted), flag: "flagged" },
+          { resource: shouted, idempotencyKey: "run-3:alias" }
+        )
+      )
+    ).resolves.toBe("ok");
   });
 
   it("send mail from a shared mailbox", async () => {
@@ -818,16 +1086,16 @@ describe("the Microsoft 365 connector's file tools", () => {
 });
 
 describe("the Microsoft 365 connector's answers", () => {
-  it("free a move's key when its folder lookup is throttled, so a retry moves once", async () => {
-    const connection = await connected();
+  it("free a move's key when a lookup before it is throttled, so a retry moves once", async () => {
+    const { connection, own } = await connectedOwn();
     const move = async () =>
       await outcome(
         call(
           connection,
           "mail.move",
           {
-            mailbox: invoices,
-            message: messageId(invoices, 1),
+            mailbox: own,
+            message: messageId(own, 1),
             destination: "archive",
           },
           { idempotencyKey: "run-8:move-lookup" }
@@ -851,16 +1119,16 @@ describe("the Microsoft 365 connector's answers", () => {
     ).resolves.toMatchObject({ error: { code: "not_found" } });
   });
 
-  it("free a throttled move's key after its folder lookup, a read", async () => {
-    const connection = await connected();
+  it("free a throttled move's key after the lookups before it, reads", async () => {
+    const { connection, own } = await connectedOwn();
     const move = async () =>
       await outcome(
         call(
           connection,
           "mail.move",
           {
-            mailbox: invoices,
-            message: messageId(invoices, 1),
+            mailbox: own,
+            message: messageId(own, 1),
             destination: "archive",
           },
           { idempotencyKey: "run-8:move" }

@@ -18,6 +18,14 @@ export const invoices = "invoices@example.com";
 /** Another mailbox of the same tenant. */
 export const ceo = "ceo@example.com";
 
+/** `GET /outlook/masterCategories`: the categories the person has. */
+export const masterCategories = {
+  value: [
+    { id: "f1d3", displayName: "Finance", color: "preset0" },
+    { id: "a7c2", displayName: "Waiting on others", color: "preset3" },
+  ],
+};
+
 /** A SharePoint document library. */
 export const financeDrive =
   "b!kR3pQ9xLmUe2Vt7Wj4hYc1s0nAoBdFgHiJkLmNoPqRsTuVwXyZaBcDeFgHiJkLm";
@@ -218,8 +226,9 @@ export const mailFolder = (id: string) =>
   id === "archive" || id === archiveFolderId
     ? {
         "@odata.context":
-          "https://graph.microsoft.com/v1.0/$metadata#users('invoices%40example.com')/mailFolders(id)/$entity",
+          "https://graph.microsoft.com/v1.0/$metadata#users('invoices%40example.com')/mailFolders(id,displayName)/$entity",
         id: archiveFolderId,
+        displayName: "Archive",
       }
     : undefined;
 
@@ -228,6 +237,17 @@ export const moved = (mailbox: string, n: number) => ({
   ...messageSummary(mailbox, n),
   id: movedId(mailbox, n),
   parentFolderId: archiveFolderId,
+});
+
+/** What `PATCH /messages/{id}` returns: the message, with its changes. */
+export const patched = (
+  mailbox: string,
+  n: number,
+  changes: { flag?: unknown; categories?: unknown }
+) => ({
+  ...messageSummary(mailbox, n),
+  flag: changes.flag ?? { flagStatus: "notFlagged" },
+  categories: changes.categories ?? [],
 });
 
 /** What `POST /messages` returns for a new draft. */

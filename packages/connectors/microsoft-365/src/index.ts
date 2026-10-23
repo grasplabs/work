@@ -3,6 +3,7 @@ import { defineConnector } from "@grasp-os/connector-kit/connector";
 import { calendarTools } from "./calendar.ts";
 import { fileTools } from "./files.ts";
 import { graphHost } from "./graph.ts";
+import { mailSortingTools } from "./mail-sorting.ts";
 import { mailTools } from "./mail.ts";
 
 /**
@@ -12,7 +13,7 @@ import { mailTools } from "./mail.ts";
  */
 export default defineConnector({
   name: "microsoft-365",
-  version: "0.2.0",
+  version: "0.3.0",
   provider: "microsoft",
   scopes: [
     "User.Read",
@@ -20,11 +21,13 @@ export default defineConnector({
     "Mail.ReadWrite.Shared",
     "Mail.Send",
     "Mail.Send.Shared",
+    // The categories a person has, so mail.categorise sets only those.
+    "MailboxSettings.Read",
     "Calendars.Read",
     "Calendars.Read.Shared",
     "Files.Read.All",
     "Sites.Read.All",
   ],
   hosts: [graphHost],
-  tools: [...mailTools, ...calendarTools, ...fileTools],
+  tools: [...mailTools, ...mailSortingTools, ...calendarTools, ...fileTools],
 });
