@@ -267,6 +267,9 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   "FILES",
   "GOOGLE_CLIENT_ID",
   "GOOGLE_CLIENT_SECRET",
+  // The directory's Google client (connect's providers.ts).
+  "GOOGLE_DIRECTORY_CLIENT_ID",
+  "GOOGLE_DIRECTORY_CLIENT_SECRET",
   // Where the deployment receives mail (core's src/workflows/overview.ts).
   "INBOUND_MAIL_DOMAIN",
   "KNOWLEDGE",
@@ -276,6 +279,9 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   "MEMORY_LIMITS",
   "MICROSOFT_CLIENT_ID",
   "MICROSOFT_CLIENT_SECRET",
+  // The directory's Entra app (connect's providers.ts).
+  "MICROSOFT_DIRECTORY_CLIENT_ID",
+  "MICROSOFT_DIRECTORY_CLIENT_SECRET",
   // The landscape's Entra app (connect's providers.ts).
   "MICROSOFT_LANDSCAPE_CLIENT_ID",
   "MICROSOFT_LANDSCAPE_CLIENT_SECRET",

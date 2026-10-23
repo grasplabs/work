@@ -129,7 +129,7 @@ const entryState = async (owner: Person, app: string, words: string[]) => {
   const { id } = await entryOf(owner, app);
   const [{ currentVersion }, noted, { versions }, found] = await Promise.all([
     owner.api.apps.get(app),
-    env.KNOWLEDGE.prepare("SELECT version FROM app_entries WHERE app_id = ?")
+    env.DB.prepare("SELECT version FROM app_entries WHERE app_id = ?")
       .bind(app)
       .first<{ version: number }>(),
     owner.knowledge.history(id),
@@ -146,11 +146,11 @@ const entryState = async (owner: Person, app: string, words: string[]) => {
 const entriesQuery = /"app_entries"/u;
 
 /**
- * The Knowledge database, but every query of the Apps collection's
- * entries fails: an indexing that can't run, where the rest works.
+ * The core database, but every query of the Apps collection's entries
+ * (`app_entries`) fails: an indexing that can't run, where the rest works.
  */
-const knowledgeWithoutEntries = (): D1Database => {
-  const real = env.KNOWLEDGE;
+const coreWithoutEntries = (): D1Database => {
+  const real = env.DB;
   return {
     prepare: (query) => {
       if (entriesQuery.test(query)) {
@@ -177,7 +177,7 @@ const withIndexingFailing = async (
   run: (api: Person["api"]) => Promise<void>
 ): Promise<void> => {
   const { core } = await openRpc(owner.session, {
-    coreEnv: { ...env, KNOWLEDGE: knowledgeWithoutEntries() },
+    coreEnv: { ...env, DB: coreWithoutEntries() },
   });
   try {
     await run(core.authenticate());
