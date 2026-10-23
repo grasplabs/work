@@ -21,7 +21,7 @@ import { runCron } from "./cron.ts";
 import { mockIdp } from "./idp.ts";
 import { endLiveRuns, finished, sleeping, whileEngineRefuses } from "./runs.ts";
 import { person as acting } from "./sealed-apps.ts";
-import { outcome, signedInApi } from "./sign-in.ts";
+import { firstVersion, outcome, signedInApi } from "./sign-in.ts";
 import { sampleApp, workflowFiles } from "./workflow-apps.ts";
 
 // An App is a draft, published or archived (app-status.ts). These tests
@@ -112,7 +112,12 @@ const waysIn = async (person: Person, app: string) => {
     contents: await outcome(person.api.apps.contents(app)),
     exports: await outcome(person.api.apps.exports(app)),
     open: await outcome(person.api.screens.open(app, "desk")),
-    version: await outcome(person.api.screens.version(app)),
+    version: await outcome(
+      firstVersion(
+        async (onVersion) =>
+          await person.api.screens.watchVersion(app, onVersion)
+      )
+    ),
     start: await outcome(person.api.workflows.start(app, "nap")),
     runs: await outcome(person.api.workflows.list(app)),
     listed: listed.some(({ id }) => id === app),
