@@ -54,9 +54,13 @@ export const releaseDecider = "grasp";
  * exactly the code of the built-in blueprint it was created from, as the
  * release installed it, and this release's compiler and kit are the ones
  * the release vouches for it with (app-blueprints.ts): its origin is
- * core's record (`app_origins`), never the label `apps.blueprint`.
+ * core's record (`app_origins`), never the label `apps.blueprint`. And
+ * never for a screen of the App an admin took a build of back: every
+ * version builds that screen anew (its references name the version), so
+ * vouching again would undo their decision with a commit of anything.
+ * From then on its builds wait for an admin.
  */
-const vouchedSql = (app: AppId, version: number): SQL =>
+const vouchedSql = (app: AppId, version: number, screen: string): SQL =>
   sql`EXISTS (SELECT 1 FROM ${appOrigins}
     JOIN ${blueprints} ON ${blueprints.id} = ${appOrigins.blueprintId}
     JOIN ${appVersions} ON ${appVersions.appId} = ${appOrigins.appId}
@@ -64,7 +68,11 @@ const vouchedSql = (app: AppId, version: number): SQL =>
       AND ${appVersions.version} = ${version}
       AND ${blueprints.appId} IS NULL
       AND ${blueprints.attestedCode} = ${appVersions.code}
-      AND ${blueprints.attestedRelease} = ${compilerVersion})`;
+      AND ${blueprints.attestedRelease} = ${compilerVersion})
+    AND NOT EXISTS (SELECT 1 FROM ${screenArtifacts}
+      WHERE ${screenArtifacts.appId} = ${app}
+        AND ${screenArtifacts.screen} = ${screen}
+        AND ${screenArtifacts.status} = 'revoked')`;
 
 /**
  * Records what screens of `app`'s `version` build to with this release.
@@ -82,7 +90,6 @@ export const recordBuilds = async (
 ): Promise<void> => {
   const db = drizzle(env.DB);
   const now = Date.now();
-  const vouched = vouchedSql(app, version);
   const recorded = built.map(({ screen, artifact }) => {
     const event = createAuditEvent(
       {
@@ -110,7 +117,7 @@ export const recordBuilds = async (
           .insert(screenArtifacts)
           // The table's columns, in its order.
           .select(
-            sql`SELECT ${app}, ${artifact}, ${version}, ${screen}, 'approved', ${releaseDecider}, ${now} WHERE ${vouched}`
+            sql`SELECT ${app}, ${artifact}, ${version}, ${screen}, 'approved', ${releaseDecider}, ${now} WHERE ${vouchedSql(app, version, screen)}`
           )
           .onConflictDoNothing(),
         outboxedEventWhere(db, event, sql`changes() > 0`),

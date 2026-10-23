@@ -154,7 +154,10 @@ import { workflowCallsIn } from "./workflows/code.ts";
 //   approval of its App's screens comes along.
 // - Overriding an admin. The release's approval never replaces a
 //   decision: a build an admin took back stays taken back, and an admin
-//   takes back one the release approved as any other.
+//   takes back one the release approved as any other. Once they took
+//   back a build of a screen, the release vouches for no build of that
+//   screen in the App again: a new version (an AGENTS.md written) builds
+//   it anew, and would otherwise be approved over their word.
 // - A release's word unseen. Each approval is audited
 //   (`app.artifact.attested`), and shows in the review as Grasp's.
 //

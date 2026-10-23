@@ -729,7 +729,8 @@ describe("the built-in blueprints", () => {
     const files = helloWithScreen().blueprints.find(
       ({ id }) => id === "hello"
     )?.files;
-    if (!files) {
+    const greeting = files?.[greetings];
+    if (!files || greeting === undefined) {
       throw new Error("The release has no hello");
     }
     const { app } = await builder.api.apps.blueprints.create("hello", {
@@ -759,7 +760,7 @@ describe("the built-in blueprints", () => {
     // approve, as any.
     const { version: mine } = await builder.api.apps.files.commit(
       app.id,
-      { [greetings]: `${files[greetings]}\n// Mine.\n` },
+      { [greetings]: `${greeting}\n// Mine.\n` },
       "Mine"
     );
     await builder.api.apps.versions.setCurrent(app.id, mine);
@@ -771,6 +772,23 @@ describe("the built-in blueprints", () => {
     const back = await outcome(builder.api.screens.open(app.id, "hello"));
     await admin.api.screenTrust.revoke(app.id, first.artifact);
     const revoked = await outcome(builder.api.screens.open(app.id, "hello"));
+    // A builder's new version of the same code builds the screen anew (its
+    // references name the version): the release vouches for it no more,
+    // so it waits for an admin.
+    const { version: renoted } = await builder.api.apps.files.commit(
+      app.id,
+      // Over the builder's own code: the built-in's again.
+      {
+        "AGENTS.md": "Greets whoever asks, again.\n",
+        [greetings]: greeting,
+      },
+      "Notes again"
+    );
+    await builder.api.apps.versions.setCurrent(app.id, renoted);
+    const afterRevoke = await outcome(
+      builder.api.screens.open(app.id, "hello")
+    );
+    const reviewAfterRevoke = await admin.api.screenTrust.review(app.id);
 
     // The same code in an App labelled as hello's but not created from
     // it, and in a copy of a marked version of the copy: nobody vouches.
@@ -811,6 +829,14 @@ describe("the built-in blueprints", () => {
       changed,
       back,
       revoked,
+      afterRevoke,
+      reviewAfterRevoke: reviewAfterRevoke.screens.map(
+        ({ artifact, trust, decidedBy }) => ({
+          other: artifact !== first.artifact,
+          trust,
+          decidedBy,
+        })
+      ),
       labelled: await outcome(builder.api.screens.open(labelled.id, "hello")),
       copyOfCopy: await outcome(
         builder.api.screens.open(copyOfCopy.id, "hello")
@@ -837,6 +863,10 @@ describe("the built-in blueprints", () => {
       changed: "screen.unreviewed",
       back: "ok",
       revoked: "screen.revoked",
+      afterRevoke: "screen.unreviewed",
+      reviewAfterRevoke: [
+        { other: true, trust: "unreviewed", decidedBy: null },
+      ],
       labelled: "screen.unreviewed",
       copyOfCopy: "screen.unreviewed",
     });
