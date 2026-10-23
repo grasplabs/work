@@ -63,16 +63,19 @@ import type { OnErase } from "./purge.ts";
 import { recall } from "./recall.ts";
 import { search } from "./search.ts";
 import { catalog, follow, read } from "./tools.ts";
+import { uploadErasure } from "./uploads.ts";
 
 /**
  * What a purge reaches of core's own copies (purge.ts `OnErase`): the
- * brain's gap answers, and the onboarding's readings of the documents
- * shared in it, with what was drawn from them.
+ * brain's gap answers, the originals of uploaded files, and the
+ * onboarding's readings of the documents shared in it, with what was
+ * drawn from them.
  */
 const coreErasure = (env: Env): OnErase => {
   const answers = gapAnswerErasure(env);
   const readings = documentReadingErasure(env);
   return {
+    ...uploadErasure(env),
     count: async (holds) =>
       (await answers.count(holds)) + (await readings.count(holds)),
     rewrite: async (person, rewrite) => {
