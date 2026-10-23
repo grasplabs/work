@@ -110,4 +110,18 @@ export interface ConnectorCatalog {
       readonly output: { mailbox: string; sent: true };
     };
   };
+  readonly "microsoft-365.todo@1": {
+    readonly complete: {
+      readonly input: { list: string; mailbox: string; task: string };
+      readonly output: { listId: string; mailbox: string; task: { completedAt: { dateTime: string; timeZone: string } | null; createdAt: string | null; due: { dateTime: string; timeZone: string } | null; id: string; importance: string | null; lastModifiedAt: string | null; status: string | null; title: string | null } };
+    };
+    readonly lists: {
+      readonly input: { mailbox: string; page?: string; top?: number };
+      readonly output: { lists: Array<{ id: string; name: string | null; wellknownName: string | null }>; mailbox: string; nextPage: string | null };
+    };
+    readonly tasks: {
+      readonly input: { list: string; mailbox: string; openOnly?: boolean; page?: string; top?: number };
+      readonly output: { listId: string; mailbox: string; nextPage: string | null; tasks: Array<{ completedAt: { dateTime: string; timeZone: string } | null; createdAt: string | null; due: { dateTime: string; timeZone: string } | null; id: string; importance: string | null; lastModifiedAt: string | null; status: string | null; title: string | null }> };
+    };
+  };
 }
