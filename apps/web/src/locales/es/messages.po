@@ -12669,13 +12669,13 @@ msgstr "Esta aplicación perdió su conexión con la página y se detuvo."
 msgid "This app wants to open a page on another site in a new tab. Open it only if you expected to go there."
 msgstr "Esta app quiere abrir una página de otro sitio en una pestaña nueva. Ábrela solo si esperabas ir allí."
 
-#: src/interview/sound-check.tsx
-msgid "This browser cannot listen. You can type your answers."
-msgstr "Este navegador no puede escuchar. Puedes escribir tus respuestas."
-
 #: src/screens/screen-frame.tsx
 msgid "This app's stored code no longer matches the code that was approved, so it wasn't opened. Tell an admin."
 msgstr "El código guardado de esta aplicación ya no coincide con el código aprobado, así que no se abrió. Avisa a un administrador."
+
+#: src/interview/sound-check.tsx
+msgid "This browser cannot listen. You can type your answers."
+msgstr "Este navegador no puede escuchar. Puedes escribir tus respuestas."
 
 #: src/engines/store-change-errors.ts
 msgid "This change is being applied again, so it can't be abandoned now. The page shows where it stands now."
