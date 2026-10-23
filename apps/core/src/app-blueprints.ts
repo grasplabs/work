@@ -907,11 +907,14 @@ export const acceptBlueprintUpdate = async (
   }
   const db = drizzle(env.DB);
   // The origin moves on only from the code the builder's update was worked
-  // out from, to the blueprint's code as they saw it: otherwise NULL, which
-  // the column refuses, and the whole batch with it.
+  // out from, to the blueprint's code as they saw it, over the version they
+  // saw (it runs before this batch commits a version): otherwise NULL,
+  // which the column refuses, and the whole batch with it.
   const stillSeen = sql`${appOrigins.tree} = ${origin.tree} AND EXISTS (
     SELECT 1 FROM ${blueprints}
-    WHERE ${blueprints.id} = ${blueprint.id} AND ${blueprints.tree} = ${blueprint.tree})`;
+    WHERE ${blueprints.id} = ${blueprint.id} AND ${blueprints.tree} = ${blueprint.tree})
+    AND (SELECT max(${appVersions.version}) FROM ${appVersions}
+      WHERE ${appVersions.appId} = ${appId}) = ${latest.version}`;
   const moveOrigin = db
     .update(appOrigins)
     .set({
