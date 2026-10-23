@@ -30,6 +30,7 @@ import { base } from "./cloudflare-api-kit.ts";
 import { fakeCloudflareApi } from "./cloudflare-api.ts";
 import { seed } from "./e2e-seed.ts";
 
+export { IntegrationBuild } from "../src/builds/workflow.ts";
 export { ApplyClient } from "../src/clients/apply.ts";
 export { ProvisionPlacedClient } from "../src/hosting/workflow.ts";
 export { ProvisionClient } from "../src/provision/workflow.ts";
