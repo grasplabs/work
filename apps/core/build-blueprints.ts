@@ -16,7 +16,14 @@
  *   `"permissions"`: what each App created from it asks for, as
  *   `[{ "object": { "type": "collection", "collectionId": … }, "actions":
  *   […], "binding": … }]`, each a request an admin grants on the copy,
- *   and each for one of its collections;
+ *   and each for one of its collections; `"contracts"`: the catalog
+ *   contracts its workflows bind, as an admin publishes them
+ *   (`catalogContractSchema`), which the install publishes if their keys
+ *   aren't taken; and `"workflows"`: the independent workflows each App
+ *   created from it gets, as `[{ "alias": …, "binding": …, "definition":
+ *   "workflows/<alias>.json" }]`, each a grasp-open-workflow/1 definition
+ *   in the folder (not in `files/`: it is no file of the App), which the
+ *   copy binds under its alias and asks to start under its binding name;
  * - `files/`: the App's files, by path, written against `@grasp-os/sdk`
  *   like any App's.
  *
@@ -40,7 +47,11 @@ import path from "node:path";
 import { appLimits } from "@grasp-os/shared/app-limits";
 import { fileChangesSchema, fromBlueprintSchema } from "@grasp-os/shared/apps";
 import { declaredCollectionSchema } from "@grasp-os/shared/knowledge";
-import { declaredPermissionSchema } from "@grasp-os/shared/permissions";
+import {
+  blueprintWorkflowSchema,
+  declaredPermissionSchema,
+} from "@grasp-os/shared/permissions";
+import { catalogContractSchema } from "@grasp-os/shared/workflow-resources";
 import { z } from "zod";
 
 import type { BuiltinBlueprint } from "#blueprints";
@@ -65,6 +76,20 @@ export const declaredMaxPermissions = 16;
 
 /** Most collections one built-in declares. */
 export const declaredMaxCollections = 4;
+
+/**
+ * Most workflows one built-in ships: each is a workflow its creator
+ * creates and publishes as the copy is made, under their own quota.
+ */
+export const declaredMaxWorkflows = 4;
+
+/** Most catalog contracts one built-in ships. */
+export const declaredMaxContracts = 8;
+
+/** A workflow as `blueprint.json` names it: its definition by its path. */
+const declaredWorkflowSchema = blueprintWorkflowSchema.extend({
+  definition: z.string().regex(/^workflows\/[a-z][a-z0-9]*\.json$/u),
+});
 
 /**
  * A `blueprint.json`: the App's name and description, as for any App,
@@ -93,7 +118,37 @@ const manifestSchema = fromBlueprintSchema
         { message: "Each binding name once" }
       )
       .default([]),
+    contracts: z
+      .array(catalogContractSchema)
+      .max(declaredMaxContracts)
+      .refine(
+        (contracts) =>
+          new Set(contracts.map(({ key }) => key)).size === contracts.length,
+        { message: "Each key once" }
+      )
+      .default([]),
+    workflows: z
+      .array(declaredWorkflowSchema)
+      .max(declaredMaxWorkflows)
+      .refine(
+        (workflows) =>
+          new Set(workflows.map(({ alias }) => alias)).size ===
+          workflows.length,
+        { message: "Each alias once" }
+      )
+      .default([]),
   })
+  .refine(
+    // A copy's permissions, its workflows' included, each under a name of
+    // its own, as an App's permissions have them.
+    ({ permissions, workflows }) => {
+      const names = [...permissions, ...workflows].map(
+        ({ binding }) => binding
+      );
+      return new Set(names).size === names.length;
+    },
+    { path: ["workflows"], message: "Each binding name once" }
+  )
   .refine(
     ({ collections, permissions }) =>
       permissions.every(
@@ -155,7 +210,30 @@ const blueprintsIn = (dir: string): BuiltinBlueprint[] =>
           `${where}: files/ holds ${length} characters, over an App's ${appLimits.totalLength}`
         );
       }
-      return { id: name, ...manifest.data, files };
+      const workflows = manifest.data.workflows.map((workflow) => {
+        const file = path.join(folder, workflow.definition);
+        if (!existsSync(file)) {
+          throw new Error(`${where}: has no ${workflow.definition}`);
+        }
+        const definition = readFileSync(file, "utf-8");
+        // Checked as an install stores it, so the copy can publish it.
+        const shipped = blueprintWorkflowSchema.safeParse({
+          ...workflow,
+          definition,
+        });
+        if (!shipped.success) {
+          throw new Error(
+            `${where}: ${workflow.definition} ${shipped.error.message}`
+          );
+        }
+        try {
+          JSON.parse(definition);
+        } catch {
+          throw new Error(`${where}: ${workflow.definition} isn't JSON`);
+        }
+        return shipped.data;
+      });
+      return { id: name, ...manifest.data, workflows, files };
     });
 
 /**

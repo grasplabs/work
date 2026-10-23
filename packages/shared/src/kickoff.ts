@@ -62,6 +62,11 @@ export interface KickoffReading {
   /** The fields it didn't: the question to put to the sponsor. */
   ask: Partial<Record<VisionField, string>>;
   teams: KickoffTeam[];
+  /**
+   * The sponsor's first name, when the transcript names them: Stephen
+   * names them to the admin as he says hello.
+   */
+  sponsor?: string;
 }
 
 /** The kickoff as Grasp's staff see it. */
