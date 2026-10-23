@@ -128,7 +128,19 @@ export const message = (mailbox: string, n: number, bodyType: string) => ({
             "Dear customer,\r\n\r\nPlease find attached invoice 2026-0041 for EUR 1,250.00.\r\n",
         },
   bccRecipients: [],
-  replyTo: [address("Northwind Billing", "billing@northwind.example.org")],
+  // Message 2 asks replies to go to another address, and copied someone.
+  ...(n === 2
+    ? {
+        ccRecipients: [address("Controller", "controller@example.com")],
+        replyTo: [
+          address("Northwind Accounts", "accounts@northwind.example.org"),
+        ],
+      }
+    : {
+        replyTo: [
+          address("Northwind Billing", "billing@northwind.example.org"),
+        ],
+      }),
 });
 
 /** A message's attachments, without their content (`$select`ed). */

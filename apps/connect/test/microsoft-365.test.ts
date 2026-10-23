@@ -684,6 +684,60 @@ describe("the Microsoft 365 connector's reply drafts", () => {
     ]);
   });
 
+  it("reply to the address a message asks replies to go to, and to all with its Cc", async () => {
+    const connection = await connected();
+    const second = {
+      ...reply,
+      message: messageId(invoices, 2),
+      to: ["accounts@northwind.example.org"],
+    };
+    // Its Cc is someone the message was only copied to: not a reply's.
+    await expect(
+      toolError(
+        draftReply(
+          connection,
+          { ...second, to: ["controller@example.com"] },
+          "run-8:cc-only"
+        )
+      )
+    ).resolves.toMatchObject({ error: { code: "invalid" } });
+    await outputOf(draftReply(connection, second, "run-8:reply-to"));
+    await outputOf(
+      draftReply(
+        connection,
+        { ...second, replyAll: true, cc: ["controller@example.com"] },
+        "run-8:reply-all-cc"
+      )
+    );
+    const secondPath = `${mailboxPath}/messages/${encodeURIComponent(messageId(invoices, 2))}`;
+    expect(writes()).toMatchObject([
+      {
+        path: `${secondPath}/createReply`,
+        body: {
+          message: {
+            toRecipients: [
+              { emailAddress: { address: "accounts@northwind.example.org" } },
+            ],
+            ccRecipients: [],
+          },
+        },
+      },
+      {
+        path: `${secondPath}/createReply`,
+        body: {
+          message: {
+            toRecipients: [
+              { emailAddress: { address: "accounts@northwind.example.org" } },
+            ],
+            ccRecipients: [
+              { emailAddress: { address: "controller@example.com" } },
+            ],
+          },
+        },
+      },
+    ]);
+  });
+
   it("find a reply draft whose answer was lost, and never make it twice", async () => {
     const connection = await connected();
     graph.loseWriteAnswer();
