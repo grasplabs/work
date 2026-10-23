@@ -4,6 +4,7 @@ import { localAdmin } from "../apps/core/test/sign-in-config.ts";
 import { test } from "./csp.ts";
 import { queuedMail } from "./onboarding-outbox.ts";
 import { apiOf, signInStaff } from "./people.ts";
+import { origin } from "./stack.ts";
 
 // The admin's onboarding, end to end (GRA-339): they sign in, give their
 // staff list, confirm the organization as Stephen will interview it, plan
@@ -93,6 +94,12 @@ test("the admin signs in, gives the staff list, confirms and plans, and the link
   await page.getByRole("button", { name: "Sign in with Microsoft" }).click();
   await expect(page.getByLabel("Email")).toHaveValue(localAdmin);
   await page.getByRole("button", { name: "Sign in" }).click();
+  // Back from signing in, the onboarding opens where core says they are:
+  // a plan an earlier test saved puts that at the end. They start over.
+  await page.waitForURL(
+    (url) => url.origin === origin && url.pathname === "/setup"
+  );
+  await page.goto("/setup?step=welcome");
   await expect(
     page.getByRole("heading", { level: 1, name: /, I’m Stephen$/u })
   ).toBeVisible();
