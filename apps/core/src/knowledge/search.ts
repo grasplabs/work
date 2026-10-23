@@ -360,8 +360,14 @@ const nearestCollections = async (
       ? []
       : [{ table: "search_trigrams", pass: 1, match: long.join(" OR ") }]),
   ];
+  // MATERIALIZED: with one pass the CTE is a lone SELECT, which SQLite
+  // would flatten into the query below, putting bm25() inside min(), where
+  // FTS5 can't evaluate it ("unable to use function bm25 in the requested
+  // context"). A query of only short or digit words has one pass.
   const rows = await db.all(sql`
-    WITH matches AS (${sql.join(passes.map(matchesSql), sql` UNION ALL `)})
+    WITH matches AS MATERIALIZED (
+      ${sql.join(passes.map(matchesSql), sql` UNION ALL `)}
+    )
     SELECT collections.id AS collectionId, min(matches.score) AS score
     FROM matches
     JOIN search_rows ON search_rows.id = matches.row_id
