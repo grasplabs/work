@@ -15,6 +15,7 @@ import {
 import {
   archiveFolderId,
   attachmentsSkipToken,
+  categoriesSkipToken,
   endlessAttachments,
   foreignFolderId,
   bigAttachmentId,
@@ -603,6 +604,7 @@ describe("the Microsoft 365 connector's mail tools", () => {
     });
   });
 
+  // "Waiting on others" is on the second page of the person's categories.
   it("set an email's categories to exactly those asked, and the same again when its answer was lost", async () => {
     const { connection, own } = await connectedOwn();
     const categorise = async (idempotencyKey: string) =>
@@ -644,8 +646,16 @@ describe("the Microsoft 365 connector's mail tools", () => {
         )
       )
     ).resolves.toMatchObject({ error: { code: "invalid" } });
+    // Every page of their categories was read, the next on the tool's own
+    // route, before it was refused.
+    const categories = `${ownPath}/outlook/masterCategories`;
     expect(requests()).toMatchObject([
-      { method: "GET", path: `${ownPath}/outlook/masterCategories` },
+      { method: "GET", path: categories },
+      {
+        method: "GET",
+        path: categories,
+        query: { $skiptoken: categoriesSkipToken },
+      },
     ]);
     expect(graph.writesDone()).toBe(0);
   });

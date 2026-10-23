@@ -18,13 +18,24 @@ export const invoices = "invoices@example.com";
 /** Another mailbox of the same tenant. */
 export const ceo = "ceo@example.com";
 
-/** `GET /outlook/masterCategories`: the categories the person has. */
-export const masterCategories = {
-  value: [
-    { id: "f1d3", displayName: "Finance", color: "preset0" },
-    { id: "a7c2", displayName: "Waiting on others", color: "preset3" },
-  ],
-};
+/** Where the second page of a person's categories starts. */
+export const categoriesSkipToken = "c4e8a2f6-1b3d-4f7a-9c2e-5d8b1a6f3e07";
+
+/**
+ * `GET /outlook/masterCategories`: the categories the person has, over
+ * two pages.
+ */
+export const masterCategories = (skipToken: string | null) =>
+  skipToken === categoriesSkipToken
+    ? {
+        value: [
+          { id: "a7c2", displayName: "Waiting on others", color: "preset3" },
+        ],
+      }
+    : {
+        value: [{ id: "f1d3", displayName: "Finance", color: "preset0" }],
+        "@odata.nextLink": `https://graph.microsoft.com/v1.0/users('person%40acme.test')/outlook/masterCategories?%24select=displayName&%24skiptoken=${categoriesSkipToken}`,
+      };
 
 /** A SharePoint document library. */
 export const financeDrive =

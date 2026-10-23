@@ -122,8 +122,8 @@ const patchSchema = z.object({
 // `GET /me` is the OAuth fake's (oauth-provider.ts `profileOf`): it
 // answers for the account the bearer token was issued to.
 const graphRoutes: ProviderRoute<Part>[] = [
-  route("GET", `${users}/outlook/masterCategories`, () =>
-    json(masterCategories)
+  route("GET", `${users}/outlook/masterCategories`, ({ query }) =>
+    json(masterCategories(query.get("$skiptoken")))
   ),
   route(
     "PATCH",

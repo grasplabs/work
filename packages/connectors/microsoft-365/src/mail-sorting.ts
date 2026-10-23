@@ -7,11 +7,14 @@ import { jsonBody, segment } from "@grasp-os/connector-kit/provider";
 import { z } from "zod";
 
 import {
+  atPage,
   graphHost,
   graphJson,
   graphUrl,
   idSchema,
   mailboxSchema,
+  nextPageOf,
+  pageOf,
   v1,
 } from "./graph.ts";
 
@@ -196,9 +199,39 @@ const flagMessage = defineTool({
 /** A category's name, as Outlook keeps it. */
 const categorySchema = z.string().min(1).max(255);
 
-const graphMasterCategories = z.object({
-  value: z.array(z.object({ displayName: z.string() })),
-});
+const graphCategory = z.object({ displayName: z.string() });
+
+/** How many pages of a person's categories mail.categorise reads at most. */
+const categoryPageLimit = 10;
+
+/**
+ * The names of the categories the person has in `mailbox`, page by page
+ * up to `categoryPageLimit`, each next page asked for on the tool's own
+ * route with only its position taken from Graph's `@odata.nextLink`. A
+ * category past the last page read counts as one they don't have, so it
+ * is refused, never made.
+ */
+const categoriesOf = async (mailbox: string): Promise<Set<string>> => {
+  const names = new Set<string>();
+  let page: string | null | undefined;
+  for (let read = 0; read < categoryPageLimit && page !== null; read += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- each page's position is in the one before
+    const { value, "@odata.nextLink": nextLink } = await graphJson(
+      atPage(
+        graphUrl(`/users/${segment(mailbox)}/outlook/masterCategories`, {
+          $select: "displayName",
+        }),
+        page
+      ),
+      pageOf(graphCategory)
+    );
+    for (const { displayName } of value) {
+      names.add(displayName);
+    }
+    page = nextPageOf(nextLink);
+  }
+  return names;
+};
 
 const categoriseMessage = defineTool({
   name: "mail.categorise",
@@ -242,13 +275,7 @@ const categoriseMessage = defineTool({
     await requireOwnMailbox(mailbox);
     // Only the categories the person already has: a new one would show
     // up in their Outlook as a category nobody made.
-    const { value } = await graphJson(
-      graphUrl(`/users/${segment(mailbox)}/outlook/masterCategories`, {
-        $select: "displayName",
-      }),
-      graphMasterCategories
-    );
-    const known = new Set(value.map(({ displayName }) => displayName));
+    const known = await categoriesOf(mailbox);
     const unknown = categories.filter((category) => !known.has(category));
     if (unknown.length > 0) {
       throw new ToolError(
