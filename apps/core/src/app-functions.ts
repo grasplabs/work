@@ -34,7 +34,7 @@ import type { ResolvedPreferenceOperation } from "./app-preferences.ts";
 import { loadRelease } from "./app-releases.ts";
 import type { Release } from "./app-releases.ts";
 import { callTimeoutMs } from "./app.ts";
-import { appFor } from "./apps.ts";
+import { usableApp } from "./apps.ts";
 import { keepAuditEvent } from "./audit-outbox.ts";
 import { memberRole } from "./auth/identity.ts";
 import { openStore } from "./data-stores.ts";
@@ -65,6 +65,7 @@ import {
   readWorkflowWatch,
   watchesWorkflow,
 } from "./screen-workflows.ts";
+import { appWorkflowNotifications } from "./workflow-notifications.ts";
 import {
   callWorkflowQuery,
   isWorkflowQueryPath,
@@ -295,7 +296,18 @@ export const invocationFor = async (
     // starting another is a child run, within its lineage's limits.
     ...(fromRun
       ? {}
-      : { workflows: appWorkflowStarts(env, authority, agent ?? null) }),
+      : {
+          workflows: appWorkflowStarts(env, authority, agent ?? null),
+          // A mutation's notifications of the App's runs, likewise: one
+          // made in a run's chain is that run's own business, left out
+          // until decided on its own.
+          notifications: appWorkflowNotifications(
+            env,
+            authority,
+            release,
+            agent ?? null
+          ),
+        }),
   };
 };
 
@@ -445,10 +457,13 @@ export const runInvocationFor = async (
     if (role === undefined) {
       throw permissionErrors.create("permission.person_inactive");
     }
+    // A run in flight goes on when its App is taken back to a draft; an
+    // archive stops it (app-status.ts).
     const roles = await operationRoles(
       env,
       { userId: authority.onBehalfOf, role },
-      app
+      app,
+      true
     );
     await stillCurrent();
     return roles;
@@ -1009,7 +1024,7 @@ const callFunction = async (
   let preference: ResolvedPreferenceOperation | undefined;
   try {
     // Anyone without a role in the App learns nothing of it.
-    const found = await appFor(env, by, app, "user");
+    const found = await usableApp(env, by, app);
     if (found.currentVersion === null) {
       throw versionErrors.create("version.not_sealed");
     }
@@ -1377,7 +1392,7 @@ export const invokeAppAction = async (
   let reached = false;
   let effects = 0;
   try {
-    const found = await appFor(env, by, app, "user");
+    const found = await usableApp(env, by, app);
     if (found.currentVersion === null) {
       throw versionErrors.create("version.not_sealed");
     }

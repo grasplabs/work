@@ -79,6 +79,15 @@ export const commitMessageSchema = z
   .min(1)
   .max(appLimits.messageLength);
 
+/**
+ * Where an App is in its life: `draft` while its builders make it, open to
+ * them alone; `published` once the people it is shared with may use it;
+ * `archived` once put away, kept as it was and open to nobody until a
+ * builder restores it, as a draft. Only a published App's triggers fire.
+ */
+export const appStatusSchema = z.enum(["draft", "published", "archived"]);
+export type AppStatus = z.infer<typeof appStatusSchema>;
+
 /** An App in the registry. Times are ISO 8601. */
 export interface App {
   id: AppId;
@@ -95,6 +104,8 @@ export interface App {
   currentVersion: number | null;
   /** The version up for review, if any. */
   pendingVersion: number | null;
+  /** Where it is in its life (`appStatusSchema`). */
+  status: AppStatus;
   createdAt: string;
 }
 
@@ -568,6 +579,29 @@ export interface AppsApi {
    * its builders, never Grasp staff; audited.
    */
   definition: (app: string) => Promise<DefinitionPackage>;
+  /**
+   * Publishes a draft for the people it is shared with, for its builders:
+   * refused with `app.no_version` while no version of it is current, and
+   * with `app.archived` once archived (restore it first). Audited; a
+   * published App is answered as it is.
+   */
+  publish: (app: string) => Promise<App>;
+  /**
+   * Takes a published App back to a draft, for its builders: the people
+   * it is shared with as users lose it, their open screens cleared.
+   */
+  unpublish: (app: string) => Promise<App>;
+  /**
+   * Archives the App, for its builders: nobody opens its screens or calls
+   * it, its triggers stop, and its unfinished runs are cancelled, each
+   * audited. Its data, members and grants are kept for `restore`.
+   */
+  archive: (app: string) => Promise<App>;
+  /**
+   * Restores an archived App, for its builders, as a draft: refused with
+   * `app.stops_pending` while runs it started are still being stopped.
+   */
+  restore: (app: string) => Promise<App>;
   readonly files: AppFilesApi;
   readonly versions: AppVersionsApi;
   readonly members: AppMembersApi;
@@ -645,6 +679,12 @@ export const appErrors = defineErrorFamily({
   "app.candidate_superseded":
     "A newer change to this App replaced this version's check before it finished. Make the version current again if you still want it.",
   "app.not_running": "The App has no current version to run yet.",
+  "app.no_version": "Make a version of the App current before publishing it.",
+  "app.archived": "The App is archived. A builder can restore it.",
+  "app.stops_pending":
+    "Runs the App started are still being stopped from when it was archived. Try restoring it again in a few minutes.",
+  "app.not_published":
+    "The App isn't published, so other Apps and workflows can't call it.",
   "app.build_failed": "The App's server code doesn't build.",
   "app.method_invalid": "The App's server has no method by that name.",
   "app.failed": "The App's server code failed.",

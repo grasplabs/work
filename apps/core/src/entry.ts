@@ -12,6 +12,7 @@ import {
 } from "@grasp-os/shared/interview-links";
 import { interviewStoryPath } from "@grasp-os/shared/interview-story";
 import { interviewTurnPath } from "@grasp-os/shared/interview-turn";
+import { labPath } from "@grasp-os/shared/lab";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { LogFields } from "@grasp-os/shared/log";
 import { mailIngressPath } from "@grasp-os/shared/mail-ingress";
@@ -48,6 +49,7 @@ import { guestResponse } from "./guests.ts";
 import { originalResponse } from "./knowledge/uploads.ts";
 import { mailIngressResponse } from "./mail-ingress.ts";
 import { interviewTurnResponse } from "./onboarding/interview.ts";
+import { labResponse } from "./onboarding/lab.ts";
 import { interviewResponse } from "./onboarding/links.ts";
 import { speechResponse } from "./onboarding/speech.ts";
 import { interviewStoryResponse } from "./onboarding/story.ts";
@@ -321,6 +323,9 @@ const route = async (
   const handler = pathHandlers.get(pathname);
   if (handler !== undefined) {
     return await handler(request, env, requestId);
+  }
+  if (pathname === labPath) {
+    return await labResponse(request, env, requestId);
   }
   const linked = await linkResponse(pathname, request, env, requestId, ctx);
   if (linked !== undefined) {

@@ -46,7 +46,7 @@ import type {
 import { z } from "zod";
 
 import type { FunctionAnswer } from "./app-functions.ts";
-import { appFor, draftFiles, screensIn } from "./apps.ts";
+import { appFor, draftFiles, editableApp, screensIn } from "./apps.ts";
 import { organizationId } from "./auth/auth.ts";
 import { chatRequests, decideInChat } from "./chat-connections.ts";
 import { personOf } from "./connections.ts";
@@ -177,7 +177,7 @@ const buildsNow = async (
   app: AppId
 ): Promise<boolean> => {
   try {
-    await appFor(env, by, app, "builder");
+    await editableApp(env, by, app);
     return true;
   } catch (error) {
     if (isExpectedError(error)) {
@@ -552,7 +552,8 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     screen?: string
   ): Promise<PreviewBundle> {
     return await withPerson(this.#check, async (by) => {
-      const { id, name } = await appFor(this.#env, by, app, "builder");
+      // As its recheck (`buildsNow`): an archived App has no preview.
+      const { id, name } = await editableApp(this.#env, by, app);
       // One update of the preview loads at a time, and one waits, the
       // newest (preview-updates.ts).
       const chats = this.#chatsOf(by.userId);
@@ -707,7 +708,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     request: string
   ): Promise<FunctionAnswer> {
     return await withPerson(this.#check, async (by) => {
-      const { id } = await appFor(this.#env, by, app, "builder");
+      const { id } = await editableApp(this.#env, by, app);
       await admitPreviewCall(this.#env, by, id);
       if (
         typeof request !== "string" ||
@@ -745,7 +746,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     onSnapshot: (snapshot: QuerySnapshotPush) => void
   ): Promise<RunSubscription> {
     return await withPerson(this.#check, async (by) => {
-      const { id } = await appFor(this.#env, by, app, "builder");
+      const { id } = await editableApp(this.#env, by, app);
       await admitPreviewCall(this.#env, by, id);
       if (
         typeof request !== "string" ||
