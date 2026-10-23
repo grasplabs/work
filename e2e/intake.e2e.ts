@@ -46,6 +46,9 @@ const intakeFor = async (admin: Person): Promise<string> => {
       await api.permissions.grant(id, { version: null });
     }
     await api.apps.versions.setCurrent(created.app.id, 1);
+    // Published, for the people it is shared with (a draft is its
+    // builders' alone).
+    await api.apps.publish(created.app.id);
     // Its stakeholder chats, through the permission just granted, bound as
     // an admin binds them on the engine's Resources tab.
     const [guests] = created.permissions;

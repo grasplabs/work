@@ -350,12 +350,19 @@ const seedEngine = async (
   const adminSession = sessionFor(sessions, admin.key);
   const owner = sessionFor(sessions, seed.owner);
   const all = await adminSession.api.apps.list();
+  const existing = all.find(({ name }) => name === seed.name);
   const app =
-    all.find(({ name }) => name === seed.name) ??
+    existing ??
     (await owner.api.apps.create({
       name: seed.name,
       description: seed.description,
     }));
+  // Someone archived it: it is read-only, and restoring it is their
+  // decision. The seed leaves it as it is.
+  if (app.status === "archived") {
+    console.warn(`${app.name} is archived: the seed leaves it as it is.`);
+    return { id: app.id, runs: 0 };
+  }
   const screens = Object.fromEntries(
     Object.entries(engineScreens[seed.name] ?? {}).map(([name, code]) => [
       `screens/${name}.tsx`,
@@ -380,6 +387,12 @@ const seedEngine = async (
     await adminSession.api.apps.versions.setCurrent(app.id, version);
   } else if (Object.keys(screens).length > 0) {
     await upgradeScreens(owner, adminSession, app, screens);
+  }
+  // Published, so the people it is shared with use it, once it has a
+  // version current: only an App this run created. One it found is left
+  // as someone left it, a draft they took it back to included.
+  if (existing === undefined) {
+    await adminSession.api.apps.publish(app.id);
   }
   if (Object.keys(screens).length > 0) {
     await reviewScreens(adminSession, app.id, approvedScreens.has(seed.name));

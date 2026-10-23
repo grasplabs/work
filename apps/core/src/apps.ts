@@ -36,14 +36,18 @@ import { dataErrors } from "@grasp-os/shared/stores";
 import { workflowErrors } from "@grasp-os/shared/workflows";
 import type { WorkflowCalls } from "@grasp-os/shared/workflows";
 import { waitUntil } from "cloudflare:workers";
-import { and, asc, desc, eq, inArray, lt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, lt, ne, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { appsFoundBy, requireAppRole } from "./app-access.ts";
+import {
+  appsFoundBy,
+  requireAppRole,
+  requireNotArchived,
+} from "./app-access.ts";
 import type { Person } from "./app-access.ts";
 import { exportsIn } from "./app-exports.ts";
 import {
@@ -51,6 +55,7 @@ import {
   outboxed,
   outboxedEventWhere,
   outboxedIfChanged,
+  outboxedWhere,
   storedEvent,
 } from "./audit-outbox.ts";
 import type { Acting, Member } from "./auth/identity.ts";
@@ -160,6 +165,7 @@ export const toApp = (row: AppRow): App => ({
   blueprint: row.blueprint,
   currentVersion: row.currentVersion,
   pendingVersion: row.pendingVersion,
+  status: row.status,
   createdAt: row.createdAt.toISOString(),
 });
 
@@ -228,6 +234,45 @@ export const appFor = async (
   await requireAppRole(env, by, app, needed);
   return app;
 };
+
+/**
+ * The App `input` names, for `by` with at least `needed` in it, to use:
+ * open its screens, call it or start its runs. An archived App is
+ * refused (`app.archived`), its builders' too (app-access.ts).
+ */
+export const usableApp = async (
+  env: Env,
+  by: Person,
+  input: unknown,
+  needed: AppRole = "user"
+): Promise<App> => {
+  const app = await appFor(env, by, input, needed);
+  requireNotArchived(app);
+  return app;
+};
+
+/**
+ * The App `input` names, for one of its builders to change: its code, its
+ * versions, whom it is shared with, its bindings, its builds. An archived
+ * App is read-only (`app.archived`), until a builder restores it.
+ */
+export const editableApp = async (
+  env: Env,
+  by: Person,
+  input: unknown
+): Promise<App> => {
+  const app = await appFor(env, by, input, "builder");
+  requireNotArchived(app);
+  return app;
+};
+
+/**
+ * That App `app` is archived when the statement runs, as SQL: for a write
+ * an earlier `editableApp` let in, so an archive committed since stops it
+ * (app-status.ts).
+ */
+const archivedNow = (app: string): SQL =>
+  sql`EXISTS (SELECT 1 FROM ${apps} WHERE ${apps.id} = ${app} AND ${apps.status} = 'archived')`;
 
 /** The number of an App's latest version; null while it has none. */
 export const latestVersion = async (
@@ -512,6 +557,9 @@ export const createApp = async (
     blueprint: blueprint ?? null,
     currentVersion: null,
     pendingVersion: null,
+    status: "draft",
+    statusChangedAt: null,
+    statusChangedBy: null,
     createdAt: new Date(),
   };
   const app = toApp(row);
@@ -748,7 +796,7 @@ export const commitFiles = async (
   input: unknown,
   message: unknown
 ): Promise<CommittedVersion> => {
-  const { id: appId } = await appFor(env, by, app, "builder");
+  const { id: appId } = await editableApp(env, by, app);
   const text = appErrors.parse("app.invalid", commitMessageSchema, message);
   const { latest, files } = await latestFiles(env, appId);
   applyChanges(env, files, input);
@@ -778,17 +826,32 @@ export const commitFiles = async (
     workflowBindings,
   };
   const db = drizzle(env.DB);
+  let undone: unknown[];
   try {
-    await auditedBatch(env, db, [
+    // Taken back in the same batch should the App have been archived
+    // since `editableApp` let the commit in: nothing of it stays, and
+    // nothing is audited.
+    [, undone] = await auditedBatch(env, db, [
       db.insert(appVersions).values(row),
-      outboxed(
+      db
+        .delete(appVersions)
+        .where(
+          and(
+            eq(appVersions.appId, appId),
+            eq(appVersions.version, row.version),
+            archivedNow(appId)
+          )
+        )
+        .returning({ version: appVersions.version }),
+      outboxedWhere(
         db,
         changeEntry(by, "app.committed", appId, {
           version: row.version,
           parent: row.parent,
           tree,
           files: row.files,
-        })
+        }),
+        sql`NOT ${archivedNow(appId)}`
       ),
       // A person's newer edit supersedes the open candidates of the
       // versions before it (spec 22.1): whatever runs one finds it ended
@@ -800,6 +863,9 @@ export const commitFiles = async (
       throw appErrors.create("app.conflict");
     }
     throw error;
+  }
+  if (undone.length > 0) {
+    throw appErrors.create("app.archived");
   }
   // Committed: now built, so the version opens without building, and
   // whoever saved hears what doesn't build (save-builds.ts). Built from
@@ -926,7 +992,7 @@ export const proposeDraft = async (
    */
   fence?: { open: BatchItem<"sqlite">; close: BatchItem<"sqlite"> }
 ): Promise<AppVersion> => {
-  const { id: appId } = await appFor(env, by, app, "builder");
+  const { id: appId } = await editableApp(env, by, app);
   const text = appErrors.parse("app.invalid", commitMessageSchema, message);
   const { tree, json } = await versionTree(files);
   const latest =
@@ -955,39 +1021,60 @@ export const proposeDraft = async (
     workflowBindings,
   };
   const db = drizzle(env.DB);
+  let undone: unknown;
   try {
     // Admitted last, with nothing slow left before the write.
     await admit?.();
+    // Taken back in the same batch should the App have been archived since
+    // `editableApp` let the draft in, as in `commitFiles`: no version, no
+    // pending version, nothing audited.
     const write = [
       db.insert(appVersions).values(row),
-      outboxed(
+      db
+        .delete(appVersions)
+        .where(
+          and(
+            eq(appVersions.appId, appId),
+            eq(appVersions.version, row.version),
+            archivedNow(appId)
+          )
+        )
+        .returning({ version: appVersions.version }),
+      outboxedWhere(
         db,
         changeEntry(by, "app.committed", appId, {
           version: row.version,
           parent,
           tree,
           files: row.files,
-        })
+        }),
+        sql`NOT ${archivedNow(appId)}`
       ),
       db
         .update(apps)
         .set({ pendingVersion: row.version })
-        .where(eq(apps.id, appId)),
-      outboxed(
+        .where(and(eq(apps.id, appId), ne(apps.status, "archived"))),
+      outboxedWhere(
         db,
         changeEntry(by, "app.version.proposed", appId, {
           version: row.version,
-        })
+        }),
+        sql`NOT ${archivedNow(appId)}`
       ),
     ] as const;
-    await (fence === undefined
+    const results: readonly unknown[] = await (fence === undefined
       ? auditedBatch(env, db, write)
       : auditedBatch(env, db, [fence.open, ...write, fence.close]));
+    // The delete's rows: what an archive took back.
+    undone = results.at(fence === undefined ? 1 : 2);
   } catch (error) {
     if (isUniqueViolation(error)) {
       throw appErrors.create("app.conflict");
     }
     throw error;
+  }
+  if (Array.isArray(undone) && undone.length > 0) {
+    throw appErrors.create("app.archived");
   }
   return toVersion(row);
 };
@@ -1065,7 +1152,7 @@ export const proposeVersion = async (
   app: unknown,
   version: unknown
 ): Promise<App> => {
-  const found = await appFor(env, by, app, "builder");
+  const found = await editableApp(env, by, app);
   const appId = found.id;
   const { version: number } = await findVersion(env, appId, version);
   const db = drizzle(env.DB);
@@ -1076,6 +1163,8 @@ export const proposeVersion = async (
       .where(
         and(
           eq(apps.id, appId),
+          // Archived since `editableApp` let it in: read-only now.
+          ne(apps.status, "archived"),
           sql`${apps.pendingVersion} IS NOT ${number}`,
           sql`${apps.currentVersion} IS NOT ${number}`
         )
@@ -1087,8 +1176,13 @@ export const proposeVersion = async (
     ),
   ]);
   if (!proposed) {
-    // Pending or current already: nothing changed, nothing is recorded.
-    return await findApp(env, appId);
+    // Pending or current already, or archived meanwhile: nothing changed,
+    // nothing is recorded.
+    const now = await findApp(env, appId);
+    if (now.status === "archived") {
+      throw appErrors.create("app.archived");
+    }
+    return now;
   }
   return toApp(proposed);
 };
@@ -1508,6 +1602,8 @@ export const makeCurrent = async (
             and(
               eq(apps.id, appId),
               sql`${apps.currentVersion} IS ${previous}`,
+              // Archived since `editableApp` let it in: read-only now.
+              ne(apps.status, "archived"),
               registrationHolds(appId, triggers),
               sealedLayout ? runnableReleaseSql(appId, number) : undefined,
               sealedLayout
@@ -1605,8 +1701,9 @@ export const makeCurrent = async (
       .where(eq(auditOutbox.id, event.id))
       .get();
     if (ours !== undefined) {
-      return await appFor(env, by, appId, "builder");
+      return await editableApp(env, by, appId);
     }
+    requireNotArchived(await findApp(env, appId));
     if (sealedLayout) {
       // Revoked or deleted since it was checked, or a sample of its
       // migrations failed since, where the change still checked that (its
