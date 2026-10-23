@@ -1,11 +1,22 @@
 import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
+import {
+  createMemoryHistory,
+  createRootRoute,
+  createRouter,
+  RouterProvider,
+} from "@tanstack/react-router";
 import { env, exports } from "cloudflare:workers";
 import { ne } from "drizzle-orm";
+import { createElement } from "react";
+import { renderToString } from "react-dom/server";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
+import { BuildParts } from "../src/admin/integration-build.tsx";
+import type { IntegrationRow } from "../src/admin/integration-builds.ts";
 import { formatDate } from "../src/admin/words.ts";
+import { listBuilds } from "../src/builds/functions.ts";
 import { act, consoleDatabase } from "../src/db/act.ts";
-import { clients } from "../src/db/schema.ts";
+import { clients, integrationBuilds } from "../src/db/schema.ts";
 import { deployContext } from "../src/deploy/context.ts";
 import { runDeploy, startDeploy } from "../src/deploy/deploy.ts";
 import { importReleases } from "../src/releases/import.ts";
@@ -209,6 +220,51 @@ const integrationsOf = ({
   toCome: html.includes("This section isn’t in the console yet."),
 });
 
+/** A build of `app` the console records at `stage`, as its moves would have left it. */
+const recordBuild = async (
+  app: string,
+  name: string,
+  stage: (typeof integrationBuilds.$inferInsert)["stage"],
+  more: Partial<typeof integrationBuilds.$inferInsert> = {}
+) => {
+  const now = new Date();
+  await db.insert(integrationBuilds).values({
+    app,
+    name,
+    stage,
+    runId: `build-${app}-test`,
+    requestedBy: "ops@grasp.test",
+    createdAt: now,
+    updatedAt: now,
+    ...more,
+  });
+};
+
+/** A plan the agent wrote for `app`: one action reading, one changing. */
+const planOf = (app: string) =>
+  JSON.stringify({
+    app,
+    signIn: "oauth2",
+    hosts: ["api.example-hr.test"],
+    actions: [
+      {
+        action: "employees.read",
+        description: "Reads the company's employees.",
+        changes: false,
+        hosts: ["api.example-hr.test"],
+      },
+      {
+        action: "employees.update",
+        description: "Changes an employee's details.",
+        changes: true,
+        hosts: ["api.example-hr.test"],
+      },
+    ],
+    docs: ["https://developer.example-hr.test/docs"],
+  });
+
+const mergeSha = "0123456789abcdef0123456789abcdef01234567";
+
 describe("the admin's frame", () => {
   useStoreSecrets({ deployer: token, tenant: tenantToken });
   // Only each test's own clients are listed: an earlier test's accounts
@@ -218,6 +274,8 @@ describe("the admin's frame", () => {
       .update(clients)
       .set({ status: "offboarded" })
       .where(ne(clients.status, "offboarded"));
+    // Only each test's own builds are listed, and counted beside the place.
+    await db.delete(integrationBuilds);
   });
 
   it("gives staff the admin's own sidebar with every organization, one not read now marked as such, and no console bar", async () => {
@@ -389,6 +447,289 @@ describe("the admin's frame", () => {
       nothingToBuild: false,
       companyAsked: true,
       companyWords: true,
+    });
+  });
+
+  it("shows each app's build where the console records it, with the one action that fits, what waits on Grasp first", async () => {
+    const acme = await liveClient();
+    const names = [
+      "Asked App",
+      "Starting App",
+      "Researching App",
+      "Plan App",
+      "Keys App",
+      "Writing App",
+      "Review App",
+      "Merged App",
+      "Stopped App",
+    ];
+    acme.account.admin = {
+      ...readySnapshot("Acme"),
+      asked: names.map((name, index) => ({
+        id: crypto.randomUUID(),
+        name,
+        askedAt: daysAgo(20 - index),
+      })),
+    };
+    await recordBuild("starting-app", "Starting App", "asked");
+    await recordBuild("researching-app", "Researching App", "researching", {
+      planRound: 1,
+      planNote: "Only what reads employees.",
+    });
+    await recordBuild("plan-app", "Plan App", "plan_ready", {
+      plan: planOf("plan-app"),
+      planRound: 1,
+    });
+    await recordBuild("keys-app", "Keys App", "credentials", {
+      plan: planOf("keys-app"),
+      planRound: 1,
+      approvedBy: "jakob@grasp.test",
+    });
+    await recordBuild("writing-app", "Writing App", "writing", {
+      plan: planOf("writing-app"),
+      planRound: 1,
+      approvedBy: "jakob@grasp.test",
+    });
+    await recordBuild("review-app", "Review App", "in_review", {
+      plan: planOf("review-app"),
+      planRound: 1,
+      approvedBy: "jakob@grasp.test",
+      branch: "feat/connector-review-app",
+      pullRequest: 4242,
+    });
+    await recordBuild("merged-app", "Merged App", "merged", {
+      plan: planOf("merged-app"),
+      planRound: 2,
+      approvedBy: "jakob@grasp.test",
+      branch: "feat/connector-merged-app",
+      pullRequest: 4243,
+      mergeCommitSha: mergeSha,
+    });
+    await recordBuild("stopped-app", "Stopped App", "needs_person", {
+      stoppedAt: "credentials",
+      reason: "credentials_timed_out",
+      plan: planOf("stopped-app"),
+      planRound: 1,
+    });
+    // A build no company asks for any more still has its row.
+    await recordBuild("lone-app", "Lone App", "researching");
+
+    const { status, html } = await page("/admin/integrations");
+    const text = html.replaceAll(tags, " ").replaceAll(spaces, " ");
+    const rowHtml = (key: string) => {
+      const at = html.indexOf(`data-app="${key}"`);
+      return at === -1 ? "" : html.slice(at, html.indexOf("</tr>", at));
+    };
+    const rowText = (key: string) =>
+      rowHtml(key).replaceAll(tags, " ").replaceAll(spaces, " ");
+    const stands = (key: string, stage: string, line: string) =>
+      rowText(key).includes(`${stage}: ${line}`);
+    const keys = [...html.matchAll(/data-app="(?<key>[^"]+)"/gu)].map(
+      (match) => match.groups?.key ?? ""
+    );
+    const waiting = [
+      "asked-app",
+      "plan-app",
+      "keys-app",
+      "review-app",
+      "stopped-app",
+    ];
+
+    expect({
+      status,
+      rows: keys.length,
+      waitingFirst: keys
+        .slice(0, waiting.length)
+        .toSorted((a, b) => a.localeCompare(b)),
+      stands: {
+        asked: stands(
+          "asked-app",
+          "Asked for",
+          "Waiting for Grasp to start it"
+        ),
+        starting: stands(
+          "starting-app",
+          "Asked for",
+          "Grasp’s agent is starting"
+        ),
+        researching: stands(
+          "researching-app",
+          "Researching",
+          "Grasp’s agent is reading the docs"
+        ),
+        plan: stands(
+          "plan-app",
+          "Plan ready",
+          "The plan waits for Grasp’s approval"
+        ),
+        keys: stands(
+          "keys-app",
+          "Credentials",
+          "Waiting for Grasp to add the credentials"
+        ),
+        writing: stands(
+          "writing-app",
+          "Writing",
+          "Grasp’s agent is writing it"
+        ),
+        review: stands(
+          "review-app",
+          "In review",
+          "Waiting for Nick or Jakob to review the pull request"
+        ),
+        merged: stands(
+          "merged-app",
+          "Merged",
+          "Goes into the next release by itself"
+        ),
+        stopped: stands(
+          "stopped-app",
+          "Credentials",
+          "Needs a person at Grasp"
+        ),
+        lone: rowText("lone-app").includes("No company asks for it now"),
+      },
+      // The step bar: done up to the step it stands on.
+      bar: {
+        merged: (rowHtml("merged-app").match(/data-step="done"/gu) ?? [])
+          .length,
+        writing: (rowHtml("writing-app").match(/data-step="done"/gu) ?? [])
+          .length,
+      },
+      actions: {
+        buildIt: rowText("asked-app").includes("Build it"),
+        plan: rowText("plan-app").includes("Review the plan"),
+        keys: rowText("keys-app").includes("Add credentials"),
+        review: rowHtml("review-app").includes(
+          'href="https://github.com/grasplabs/work/pull/4242"'
+        ),
+        none: ["starting-app", "writing-app", "merged-app", "stopped-app"].map(
+          (key) => rowHtml(key).includes("<button")
+        ),
+      },
+      badge: text.includes("5 wait on Grasp"),
+      sidebar: sidebarOf(html).includes("5 apps wait on Grasp"),
+    }).toStrictEqual({
+      status: 200,
+      rows: 10,
+      waitingFirst: waiting.toSorted((a, b) => a.localeCompare(b)),
+      stands: {
+        asked: true,
+        starting: true,
+        researching: true,
+        plan: true,
+        keys: true,
+        writing: true,
+        review: true,
+        merged: true,
+        stopped: true,
+        lone: true,
+      },
+      bar: { merged: 8, writing: 4 },
+      actions: {
+        buildIt: true,
+        plan: true,
+        keys: true,
+        review: true,
+        none: [false, false, false, false],
+      },
+      badge: true,
+      sidebar: true,
+    });
+  });
+
+  it("opens each build with what fits where it stands: Build it, the plan to approve or send back, the credentials, and what is known of its work", async () => {
+    const acme = { clientId: "client-acme" };
+    await recordBuild("plan-app", "Plan App", "plan_ready", {
+      plan: planOf("plan-app"),
+      planRound: 2,
+    });
+    await recordBuild("keys-app", "Keys App", "credentials", {
+      plan: planOf("keys-app"),
+      planRound: 1,
+      approvedBy: "jakob@grasp.test",
+    });
+    await recordBuild("merged-app", "Merged App", "merged", {
+      plan: planOf("merged-app"),
+      planRound: 2,
+      approvedBy: "jakob@grasp.test",
+      branch: "feat/connector-merged-app",
+      pullRequest: 4243,
+      mergeCommitSha: mergeSha,
+    });
+    await recordBuild("stopped-app", "Stopped App", "needs_person", {
+      stoppedAt: "credentials",
+      reason: "credentials_timed_out",
+    });
+
+    // The sheet opens over the page in the browser only, so each build's
+    // parts are rendered as the sheet holds them, from what the console
+    // reads of its builds.
+    const builds = await listBuilds(db);
+    const sheet = async (key: string) => {
+      const row: IntegrationRow = {
+        key,
+        name: key,
+        asks: [{ org: acme.clientId, orgName: "Acme", on: daysAgo(3) }],
+        build: builds.find((build) => build.app === key) ?? null,
+      };
+      const router = createRouter({
+        routeTree: createRootRoute({
+          component: () => createElement(BuildParts, { row }),
+        }),
+        history: createMemoryHistory({ initialEntries: ["/"] }),
+      });
+      await router.load();
+      return renderToString(createElement(RouterProvider, { router }))
+        .replaceAll(tags, " ")
+        .replaceAll(spaces, " ");
+    };
+    const asked = await sheet("asked-app");
+    const plan = await sheet("plan-app");
+    const keys = await sheet("keys-app");
+    const merged = await sheet("merged-app");
+    const stopped = await sheet("stopped-app");
+
+    expect({
+      asked: {
+        buildIt: asked.includes("Build it"),
+        details: asked.includes("Details"),
+      },
+      plan: [
+        "The agent’s plan, round 2",
+        "Sign-in with OAuth2",
+        "api.example-hr.test",
+        "employees.read",
+        "Reads",
+        "employees.update",
+        "Changes",
+        "developer.example-hr.test/docs",
+        "Approve the plan",
+        "Send back",
+      ].filter((words) => !plan.includes(words)),
+      keys: {
+        registered: keys.includes("Credentials registered"),
+        // What the agent found out stays in the build once its plan is approved.
+        whatItIs: keys.includes("What it is"),
+        approve: keys.includes("Approve the plan"),
+      },
+      merged: [
+        "feat/connector-merged-app",
+        "#4243 on GitHub",
+        "0123456",
+        "jakob@grasp.test",
+        "2 rounds",
+        "Agent session Not yet",
+        "Cost so far Not yet",
+        "Tests Not yet",
+      ].filter((words) => !merged.includes(words)),
+      stopped: stopped.includes("Nobody added the credentials within 30 days."),
+    }).toStrictEqual({
+      asked: { buildIt: true, details: false },
+      plan: [],
+      keys: { registered: true, whatItIs: true, approve: false },
+      merged: [],
+      stopped: true,
     });
   });
 

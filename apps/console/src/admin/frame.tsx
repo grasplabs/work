@@ -12,7 +12,7 @@
  * (src/admin/views.ts). Beside Platform, how many companies' platforms
  * need a look and a rollout waiting for approval, as the console recorded
  * them (`platformCounts`). Beside Integrations to build, how many apps
- * the companies asked for wait on Grasp (`askedApps`).
+ * the companies asked for, and their builds, wait on Grasp (`needsGrasp`).
  */
 import {
   Sidebar,
@@ -52,8 +52,10 @@ import {
 import { useEffect } from "react";
 import type { ComponentType, SVGProps } from "react";
 
+import type { BuildRecord } from "../builds/functions.ts";
 import type { ClientAdmin } from "../clients/admin.ts";
 import { GraspMark } from "./grasp-mark.tsx";
+import { integrationRows, needsGrasp } from "./integration-builds.ts";
 import { askedApps } from "./integrations-asked.ts";
 import type { PlatformCounts } from "./platform.ts";
 import { organizationsOf, unreadWords } from "./views.ts";
@@ -142,7 +144,7 @@ const platformBadge = ({
   return { count, words: [...look, ...waits].join("; ") };
 };
 
-/** Integrations to build's badge: the apps asked for, each waiting on Grasp to start its build. */
+/** Integrations to build's badge: the apps whose build waits on a person at Grasp. */
 const integrationsBadge = (asked: number): PlaceBadge | null =>
   asked === 0
     ? null
@@ -252,14 +254,18 @@ const OrganizationItem = ({ organization }: { organization: Organization }) => {
 
 const AdminSidebar = ({
   admins,
+  builds,
   platform,
 }: {
   admins: readonly ClientAdmin[];
+  builds: readonly BuildRecord[];
   platform: PlatformCounts;
 }) => {
   const router = useRouter();
   const organizations = organizationsOf(admins);
-  const asked = askedApps(admins).length;
+  const asked = integrationRows(askedApps(admins), builds).filter(
+    needsGrasp
+  ).length;
   const { setOpenMobile } = useSidebar();
   // On a phone the sidebar is a sheet over the page: going anywhere from it
   // closes it, so the page it went to is in view.
@@ -348,14 +354,16 @@ const AdminSidebar = ({
  */
 export const AdminFrame = ({
   admins,
+  builds,
   platform,
 }: {
   admins: readonly ClientAdmin[];
+  builds: readonly BuildRecord[];
   platform: PlatformCounts;
 }) => (
   <TooltipProvider>
     <SidebarProvider className="h-svh">
-      <AdminSidebar admins={admins} platform={platform} />
+      <AdminSidebar admins={admins} builds={builds} platform={platform} />
       <SidebarInset className="min-h-0 min-w-0 overflow-y-auto">
         <Outlet />
       </SidebarInset>
