@@ -49,13 +49,12 @@ import {
 } from "./permissions.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { recordBuilds } from "./screen-builds.ts";
-import { withScreenReferences } from "./screen-references.ts";
+import { versionScreenCodes } from "./screen-references.ts";
 import {
   advanceGeneration,
   generationSql,
   standingOf,
 } from "./screen-trust.ts";
-import { versionScreens } from "./screens.ts";
 import type { VersionScreens } from "./screens.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
@@ -96,13 +95,10 @@ const builtScreens = async (
   app: AppId,
   version: number
 ): Promise<{ screen: string; artifact: string }[]> => {
-  const files = await withScreenReferences(
-    env,
-    app,
-    version,
-    await versionFiles(env, app, version)
-  );
-  const codeOf = await versionScreens(env, files, version, app);
+  const files = await versionFiles(env, app, version);
+  const codeOf = await versionScreenCodes(env, app, version, files, {
+    unsealed: "build",
+  });
   const built = await Promise.all(
     screensIn(new Map(Object.entries(files))).map(async (name) => {
       const { screen, artifact } = await codeOf(name);
@@ -136,12 +132,7 @@ const reviewedBuilds = async (
   app: AppId,
   version: number
 ): Promise<{ screen: string; artifact: string | null }[]> => {
-  const files = await withScreenReferences(
-    env,
-    app,
-    version,
-    await versionFiles(env, app, version)
-  );
+  const files = await versionFiles(env, app, version);
   const noted = (error: unknown): null => {
     if (!isExpectedError(error)) {
       log.warn("screen.review_build_failed", {
@@ -154,7 +145,9 @@ const reviewedBuilds = async (
   };
   let codeOf: VersionScreens | null;
   try {
-    codeOf = await versionScreens(env, files, version, app);
+    codeOf = await versionScreenCodes(env, app, version, files, {
+      unsealed: "build",
+    });
   } catch (error) {
     codeOf = noted(error);
   }

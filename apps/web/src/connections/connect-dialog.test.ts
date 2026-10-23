@@ -1,7 +1,8 @@
+import type { ListedConnection } from "@grasp-os/shared/connect";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { describe, expect, it } from "vite-plus/test";
 
-import { canConnect } from "./connect-dialog.tsx";
+import { canConnect, signInAgainTarget } from "./connect-dialog.tsx";
 import type { Integration } from "./integrations.ts";
 
 // Who is offered Connect: the page shows the button only where core and
@@ -76,5 +77,50 @@ describe("connecting from the Integrations page", () => {
         someone("admin", true)
       )
     ).toBeFalsy();
+  });
+});
+
+const connection = (
+  id: string,
+  scope: ListedConnection["scope"],
+  status: ListedConnection["status"]
+): ListedConnection => ({
+  id,
+  source: "native",
+  provider: "microsoft",
+  scope,
+  status,
+  ownerUserId: scope === "personal" ? "me" : null,
+  connectedBy: "me",
+  connectedByName: "Me",
+  accountName: `${id}@acme.test`,
+  createdAt: "2026-10-01T00:00:00.000Z",
+});
+
+const withConnections = (...connections: ListedConnection[]): Integration => ({
+  ...integration("native", "microsoft", "managed"),
+  connections,
+});
+
+describe("signing in again from an integration's page", () => {
+  it("skips an expired shared connection a member can't sign in to again, for their own expired one", () => {
+    const page = withConnections(
+      connection("shared", "shared", "needs_reauth"),
+      connection("mine", "personal", "needs_reauth")
+    );
+    expect(signInAgainTarget(page, someone("user"))?.id).toBe("mine");
+    expect(signInAgainTarget(page, someone("admin"))?.id).toBe("shared");
+  });
+
+  it("offers nothing while every connection is active", () => {
+    expect(
+      signInAgainTarget(
+        withConnections(
+          connection("shared", "shared", "active"),
+          connection("mine", "personal", "active")
+        ),
+        someone("admin")
+      )
+    ).toBeUndefined();
   });
 });

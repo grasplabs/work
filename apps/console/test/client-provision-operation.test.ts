@@ -429,6 +429,51 @@ const stops: Stop[] = [
   },
 ];
 
+interface ProbeFailure {
+  name: string;
+  probe: NonNullable<AccountState["coreProbe"]>;
+  code: string;
+}
+
+/** Ways core's signed probe doesn't check out, after its health check did. */
+const probeFailures: ProbeFailure[] = [
+  {
+    name: "core from before the probe",
+    probe: "absent",
+    code: "probe_unanswered",
+  },
+  {
+    name: "core deployed as another client",
+    probe: { asClient: "someone-else" },
+    code: "probe_identity_mismatch",
+  },
+  {
+    name: "a database that doesn't answer",
+    probe: { down: ["KNOWLEDGE"] },
+    code: "probe_binding_unanswered",
+  },
+  {
+    name: "a bucket that doesn't answer",
+    probe: { down: ["AUDIT_ARCHIVE"] },
+    code: "probe_binding_unanswered",
+  },
+  {
+    name: "connect not answering",
+    probe: { down: ["CONNECT"], clocksDown: ["connect"] },
+    code: "probe_binding_unanswered",
+  },
+  {
+    name: "core's clock not armed",
+    probe: { clocksDown: ["core"] },
+    code: "probe_clock_unarmed",
+  },
+  {
+    name: "connect's clock not armed",
+    probe: { clocksDown: ["connect"] },
+    code: "probe_clock_unarmed",
+  },
+];
+
 interface Refusal {
   name: string;
   kind: Kind;
@@ -508,7 +553,7 @@ describe("provisioning a placed client", () => {
       uploads: [connect, core],
     });
     // Core binds the client's own database, connect and bucket, and runs
-    // with the router secret the router will send.
+    // as the client, with the router secret the router will send.
     const [database, bucket] = await Promise.all([
       resourceOf(clientId, "d1:grasp-os-core"),
       resourceOf(clientId, "r2:grasp-os-files"),
@@ -522,6 +567,7 @@ describe("provisioning a placed client", () => {
         DB: { id: database.providerId },
         CONNECT: { service: connect },
         FILES: { bucket_name: bucket.physicalName },
+        CLIENT_ID: { type: "json", json: clientId },
       },
       routerSecret: await deriveRouterSecret(secrets.routerKey, clientId, 1),
     });
@@ -784,6 +830,30 @@ describe("provisioning a placed client", () => {
       scripts: 2,
     });
   });
+
+  it.each(probeFailures)(
+    "leaves the hostname unpublished while core's signed probe finds $name, and resumes once it checks out",
+    async ({ probe, code }) => {
+      const manifest = await importRelease("dedicated");
+      const { account, clientId, held } = await setUp("dedicated", manifest);
+      account.coreProbe = probe;
+
+      await expect(failing(held)).resolves.toMatchObject({ code });
+      expect({
+        operation: await operationOf(clientId),
+        routed: await routed(clientId),
+      }).toMatchObject({
+        operation: { status: "failed", step: "secrets", error: code },
+        routed: false,
+      });
+
+      delete account.coreProbe;
+      await runClientProvision(context, held);
+      await expect(provisioned(account, clientId)).resolves.toMatchObject(
+        once(clientId)
+      );
+    }
+  );
 
   it("delivers a secret again on retry when it was deleted after its delivery", async () => {
     const manifest = await importRelease("dedicated");

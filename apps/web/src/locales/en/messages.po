@@ -334,7 +334,12 @@ msgstr "{count, plural, one {# more domain with no workflows to show} other {# m
 msgid "{count, plural, one {# package} other {# packages}}"
 msgstr "{count, plural, one {# package} other {# packages}}"
 
+#: src/onboarding/organization-words.ts
+msgid "{count, plural, one {# person is asked about no piece of work} other {# people are asked about no piece of work}}"
+msgstr "{count, plural, one {# person is asked about no piece of work} other {# people are asked about no piece of work}}"
+
 #: src/onboarding/setup-steps.tsx
+#: src/routes/_shell.onboarding.organization.index.tsx
 msgid "{count, plural, one {# person} other {# people}}"
 msgstr "{count, plural, one {# person} other {# people}}"
 
@@ -365,6 +370,10 @@ msgstr "{count, plural, one {# team, with its roles} other {# teams, with their 
 #: src/brain/brain.ts
 msgid "{count, plural, one {# time waster} other {# time wasters}}"
 msgstr "{count, plural, one {# time waster} other {# time wasters}}"
+
+#: src/routes/_shell.integrations.$integration.tsx
+msgid "{count, plural, one {# tool allowed} other {# tools allowed}}"
+msgstr "{count, plural, one {# tool allowed} other {# tools allowed}}"
 
 #: src/knowledge/timeline.tsx
 msgid "{count, plural, one {# version} other {# versions}}"
@@ -652,6 +661,14 @@ msgstr "{lacks, plural, one {# thing missing} other {# things missing}}"
 msgid "{lead} for a team lead"
 msgstr "{lead} for a team lead"
 
+#: src/onboarding/organization-words.ts
+msgid "{lead} hasn't talked yet"
+msgstr "{lead} hasn't talked yet"
+
+#: src/onboarding/organization-words.ts
+msgid "{lead} talks first. Everyone else's link waits for that, until {by} at the latest."
+msgstr "{lead} talks first. Everyone else's link waits for that, until {by} at the latest."
+
 #: src/onboarding/interview-words.ts
 msgid "{leadName} was reminded and has not talked yet"
 msgstr "{leadName} was reminded and has not talked yet"
@@ -895,6 +912,10 @@ msgstr "{needed, plural, one {A step counts once # person told it.} other {A ste
 #: src/routes/_shell.onboarding.interviewers.tsx
 msgid "{next}–{upTo} minutes"
 msgstr "{next}–{upTo} minutes"
+
+#: src/routes/_shell.onboarding.organization.index.tsx
+msgid "{nobody, plural, one {# with nobody asked} other {# with nobody asked}}"
+msgstr "{nobody, plural, one {# with nobody asked} other {# with nobody asked}}"
 
 #: src/onboarding/work-record.tsx
 msgid "{normal} hours, {quickest} to {longest}"
@@ -1225,6 +1246,14 @@ msgstr "{subject}: {actions} on {object}"
 msgid "{sunk, plural, one {# of them is a time waster, as the team said it.} other {# of them are time wasters, as the teams said them.}}"
 msgstr "{sunk, plural, one {# of them is a time waster, as the team said it.} other {# of them are time wasters, as the teams said them.}}"
 
+#: src/routes/_shell.onboarding.organization.index.tsx
+msgid "{takingPart, plural, one {# takes part} other {# take part}}"
+msgstr "{takingPart, plural, one {# takes part} other {# take part}}"
+
+#: src/routes/_shell.onboarding.organization.index.tsx
+msgid "{talked, plural, one {# has talked} other {# have talked}}"
+msgstr "{talked, plural, one {# has talked} other {# have talked}}"
+
 #: src/onboarding/setup-steps.tsx
 msgid "{talked, plural, one {I talked with # person.} other {I talked with # people.}}"
 msgstr "{talked, plural, one {I talked with # person.} other {I talked with # people.}}"
@@ -1323,6 +1352,10 @@ msgstr "{told} of {steps}"
 msgid "{toReview} to review"
 msgstr "{toReview} to review"
 
+#: src/routes/_shell.integrations.$integration.tsx
+msgid "{total, plural, one {{count} of its # tool allowed} other {{count} of its # tools allowed}}"
+msgstr "{total, plural, one {{count} of its # tool allowed} other {{count} of its # tools allowed}}"
+
 #: src/settings/pulse-people.tsx
 msgid "{total, plural, one {{matching} of # person} other {{matching} of # people}}"
 msgstr "{total, plural, one {{matching} of # person} other {{matching} of # people}}"
@@ -1362,6 +1395,10 @@ msgstr "{total} is held for these model calls until you decide: what each could 
 #: src/brain/brain-atlas.ts
 msgid "{uninterviewed} of {total} not interviewed yet"
 msgstr "{uninterviewed} of {total} not interviewed yet"
+
+#: src/routes/_shell.onboarding.organization.index.tsx
+msgid "{unled, plural, one {# team without a lead} other {# teams without a lead}}"
+msgstr "{unled, plural, one {# team without a lead} other {# teams without a lead}}"
 
 #: src/brain/brain-atlas.ts
 msgid "{unnamed, plural, one {# more application is in use that nobody named.} other {# more applications are in use that nobody named.}}"
@@ -1494,6 +1531,10 @@ msgstr "{workflows, plural, one {# workflow} other {# workflows}}"
 #: src/dashboard/standard-widgets.tsx
 msgid "{workflows, plural, one {# workflow} other {# workflows}}: {steps}"
 msgstr "{workflows, plural, one {# workflow} other {# workflows}}: {steps}"
+
+#: src/routes/_shell.onboarding.organization.index.tsx
+msgid "{works, plural, one {# piece of work} other {# pieces of work}}"
+msgstr "{works, plural, one {# piece of work} other {# pieces of work}}"
 
 #: src/onboarding/work-record.tsx
 msgid "{wrongCount} in 10"
@@ -1870,6 +1911,17 @@ msgstr "Add a card"
 msgid "Add a domain for a second brand or an old one."
 msgstr "Add a domain for a second brand or an old one."
 
+#: src/onboarding/organization-dialogs.tsx
+#: src/routes/_shell.onboarding.organization.$team.tsx
+#: src/routes/_shell.onboarding.organization.index.tsx
+msgid "Add a person"
+msgstr "Add a person"
+
+#: src/onboarding/organization-dialogs.tsx
+#: src/routes/_shell.onboarding.organization.index.tsx
+msgid "Add a team"
+msgstr "Add a team"
+
 #: src/dashboard/widget-board.tsx
 msgid "Add a widget"
 msgstr "Add a widget"
@@ -1905,6 +1957,14 @@ msgstr "Add something"
 #: src/routes/_shell.onboarding.stephen.tsx
 msgid "Add something he leaves alone"
 msgstr "Add something he leaves alone"
+
+#: src/onboarding/organization-dialogs.tsx
+msgid "Add the person"
+msgstr "Add the person"
+
+#: src/onboarding/organization-dialogs.tsx
+msgid "Add the team"
+msgstr "Add the team"
 
 #: src/chat/builds.tsx
 msgid "Added"
@@ -2142,6 +2202,11 @@ msgctxt "filter: every interview"
 msgid "All"
 msgstr "All"
 
+#: src/onboarding/organization-words.ts
+msgctxt "filter: every team"
+msgid "All"
+msgstr "All"
+
 #: src/onboarding/work-list.tsx
 msgctxt "filter: every workflow"
 msgid "All"
@@ -2169,6 +2234,7 @@ msgid "All invoices"
 msgstr "All invoices"
 
 #: src/onboarding/work-list.tsx
+#: src/routes/_shell.onboarding.organization.$team.tsx
 msgid "All teams"
 msgstr "All teams"
 
@@ -2289,6 +2355,10 @@ msgstr "An old format: save it as PDF or a newer file"
 #: src/routes/_shell.brain.$noteId.tsx
 msgid "and {more} more"
 msgstr "and {more} more"
+
+#: src/routes/_shell.onboarding.organization.index.tsx
+msgid "And {moreFound} more: type more of the name."
+msgstr "And {moreFound} more: type more of the name."
 
 #: src/interview/before.tsx
 msgid "And I’m {secondName}."
@@ -2453,6 +2523,7 @@ msgstr "App approval"
 msgid "App name"
 msgstr "App name"
 
+#: src/routes/_shell.integrations.$integration.tsx
 #: src/routes/_shell.landscape.$appId.tsx
 msgid "App not found"
 msgstr "App not found"
@@ -2635,6 +2706,10 @@ msgstr "Article"
 msgid "as {binding}"
 msgstr "as {binding}"
 
+#: src/routes/_shell.onboarding.organization.index.tsx
+msgid "As each team's lead named them"
+msgstr "As each team's lead named them"
+
 #: src/onboarding/work-record.tsx
 msgid "As it runs today"
 msgstr "As it runs today"
@@ -2643,6 +2718,10 @@ msgstr "As it runs today"
 msgid "As its action, set the spam confidence level (SCL) to “Bypass spam filtering”, then save it."
 msgstr "As its action, set the spam confidence level (SCL) to “Bypass spam filtering”, then save it."
 
+#: src/routes/_shell.onboarding.organization.$team.tsx
+msgid "As its lead named it, with each piece's part of the team's time and who does it."
+msgstr "As its lead named it, with each piece's part of the team's time and who does it."
+
 #: src/dashboard/report.ts
 msgid "As of {date}."
 msgstr "As of {date}."
@@ -2650,6 +2729,10 @@ msgstr "As of {date}."
 #: src/routes/_shell.onboarding.kickoff.tsx
 msgid "As the company named them, until the staff list is in."
 msgstr "As the company named them, until the staff list is in."
+
+#: src/onboarding/organization-dialogs.tsx
+msgid "As the company's list should have them. Their link stays the same."
+msgstr "As the company's list should have them. Their link stays the same."
 
 #: src/routes/_shell.onboarding.stephen.tsx
 msgid "As the kickoff suggests"
@@ -2706,6 +2789,7 @@ msgid "Ask Grasp to build one. While it works, the domain stands beside the chat
 msgstr "Ask Grasp to build one. While it works, the domain stands beside the chat, to preview before it is proposed."
 
 #: src/onboarding/interview-teams.tsx
+#: src/routes/_shell.onboarding.organization.index.tsx
 msgid "Ask it in"
 msgstr "Ask it in"
 
@@ -2752,6 +2836,10 @@ msgctxt "what a decision asks"
 msgid "Asked"
 msgstr "Asked"
 
+#: src/routes/_shell.onboarding.organization.$team.tsx
+msgid "Asked about the team's work once its lead has named it"
+msgstr "Asked about the team's work once its lead has named it"
+
 #: src/activity/pending.tsx
 msgid "Asked again (previously granted by {person} on {date})"
 msgstr "Asked again (previously granted by {person} on {date})"
@@ -2764,9 +2852,17 @@ msgstr "Asked again after version {version} was made current (previously granted
 msgid "Asked by"
 msgstr "Asked by"
 
+#: src/connections/requested-apps.tsx
+msgid "Asked by {asker}"
+msgstr "Asked by {asker}"
+
 #: src/dashboard/pile-cards.tsx
 msgid "Asked by {requester} on {date}"
 msgstr "Asked by {requester} on {date}"
+
+#: src/connections/requested-apps.tsx
+msgid "Asked by a former member"
+msgstr "Asked by a former member"
 
 #: src/onboarding/connect-steps.tsx
 msgid "Asked for"
@@ -2788,6 +2884,10 @@ msgstr "asked for by the agent, in their chat"
 #: src/activity/audit-words.ts
 msgid "Asked the agent to fix a run"
 msgstr "Asked the agent to fix a run"
+
+#: src/routes/_shell.onboarding.organization.$team.tsx
+msgid "Asked which work they do"
+msgstr "Asked which work they do"
 
 #: src/onboarding/send-plan-form.tsx
 msgctxt "at an hour of the day: on Tuesday at 9:00"
@@ -2842,6 +2942,19 @@ msgstr "Available, via Composio"
 msgctxt "where a link stands"
 msgid "Away"
 msgstr "Away"
+
+#: src/onboarding/organization-words.ts
+msgctxt "where someone stands"
+msgid "Away"
+msgstr "Away"
+
+#: src/onboarding/organization-dialogs.tsx
+msgid "Away these weeks"
+msgstr "Away these weeks"
+
+#: src/onboarding/organization-dialogs.tsx
+msgid "Away these weeks. Nothing waits for {first}."
+msgstr "Away these weeks. Nothing waits for {first}."
 
 #: src/brain/atlas-overlays.tsx
 #: src/brain/back-button.tsx
@@ -3099,6 +3212,10 @@ msgstr "by hand, a month"
 msgid "By name, for Grasp only. A name opens that person: their link, what Stephen asks them about and their interview."
 msgstr "By name, for Grasp only. A name opens that person: their link, what Stephen asks them about and their interview."
 
+#: src/routes/_shell.onboarding.organization.$team.tsx
+msgid "By name, for Grasp only. A name opens that person."
+msgstr "By name, for Grasp only. A name opens that person."
+
 #. Column value: no team named this application
 #: src/brain/brain-source-contents.tsx
 msgid "By nobody"
@@ -3185,6 +3302,7 @@ msgstr "Can’t be read"
 #: src/inbox/item-detail.tsx
 #: src/knowledge/document.tsx
 #: src/link-confirmation.tsx
+#: src/onboarding/organization-dialogs.tsx
 #: src/onboarding/place-picker.tsx
 #: src/settings/invitations.tsx
 msgid "Cancel"
@@ -3260,6 +3378,11 @@ msgstr "change"
 msgid "Change"
 msgstr "Change"
 
+#: src/routes/_shell.onboarding.organization.$team.tsx
+msgctxt "button: change a team's name and what it does"
+msgid "Change"
+msgstr "Change"
+
 #: src/onboarding/review-parts.tsx
 msgctxt "change how it was settled"
 msgid "Change"
@@ -3279,9 +3402,22 @@ msgstr "Change"
 msgid "Change “{was}” to “{now}”."
 msgstr "Change “{was}” to “{now}”."
 
+#: src/onboarding/organization-dialogs.tsx
+msgid "Change {first}'s details"
+msgstr "Change {first}'s details"
+
+#: src/onboarding/organization-dialogs.tsx
+msgctxt "button: change someone's name, email, job or team"
+msgid "Change details"
+msgstr "Change details"
+
 #: src/routes/_shell.settings.billing.tsx
 msgid "Change plan"
 msgstr "Change plan"
+
+#: src/onboarding/organization-dialogs.tsx
+msgid "Change this team"
+msgstr "Change this team"
 
 #: src/interview/read-back.tsx
 msgid "Change: {text}"
@@ -3547,10 +3683,16 @@ msgstr "Click to open Usage"
 #: src/engines/store-changes.tsx
 #: src/knowledge/frame.tsx
 #: src/onboarding/interview-people.tsx
+#: src/onboarding/organization-dialogs.tsx
 #: src/onboarding/place-picker.tsx
 #: src/onboarding/work-rules.tsx
 #: src/routes/_shell.index.tsx
 #: src/screens/app-panel.tsx
+msgid "Close"
+msgstr "Close"
+
+#: src/onboarding/organization-dialogs.tsx
+msgctxt "button: close a dialog"
 msgid "Close"
 msgstr "Close"
 
@@ -4457,6 +4599,14 @@ msgstr "Does nothing until it is turned on again."
 msgid "Doesn't build now"
 msgstr "Doesn't build now"
 
+#: src/routes/_shell.onboarding.organization.index.tsx
+msgid "Doesn't take part"
+msgstr "Doesn't take part"
+
+#: src/onboarding/organization-words.ts
+msgid "Doesn't take part: nobody in it gets a link."
+msgstr "Doesn't take part: nobody in it gets a link."
+
 #: src/dashboard/runs-widget.tsx
 #: src/engines/resource-bindings.tsx
 #: src/inbox/items.ts
@@ -4536,6 +4686,10 @@ msgctxt "tour"
 msgid "Done"
 msgstr "Done"
 
+#: src/routes/_shell.onboarding.organization.$team.tsx
+msgid "Done by {doers}"
+msgstr "Done by {doers}"
+
 #: src/interview/words.ts
 msgid "Done right"
 msgstr "Done right"
@@ -4571,14 +4725,26 @@ msgctxt "a domain still being made"
 msgid "Draft"
 msgstr "Draft"
 
+#: src/routes/_shell.onboarding.organization.$team.tsx
+msgid "Draw again"
+msgstr "Draw again"
+
 #: src/onboarding/work-record.tsx
 msgid "Draw it again"
 msgstr "Draw it again"
+
+#: src/routes/_shell.onboarding.organization.$team.tsx
+msgid "Draw the map again"
+msgstr "Draw the map again"
 
 #: src/onboarding/staff-words.ts
 msgctxt "what AI was used for"
 msgid "Drawing"
 msgstr "Drawing"
+
+#: src/onboarding/organization-words.ts
+msgid "Drawing it failed, or the lead named no work. Draw it again from what the lead agreed to."
+msgstr "Drawing it failed, or the lead named no work. Draw it again from what the lead agreed to."
 
 #: src/brain/brain.ts
 msgctxt "workflow status"
@@ -4671,6 +4837,7 @@ msgstr "Edit project"
 
 #: src/onboarding/interview-people.tsx
 #: src/onboarding/interviews-progress.tsx
+#: src/onboarding/organization-dialogs.tsx
 #: src/routes/_shell.settings.notifications.tsx
 #: src/routes/_shell.settings.profile.tsx
 #: src/routes/_shell.settings.security.tsx
@@ -4838,6 +5005,10 @@ msgstr "Every team has its lead"
 msgid "Every team, whether it takes part or not. A team that was left out can be asked in: its lead gets a link first."
 msgstr "Every team, whether it takes part or not. A team that was left out can be asked in: its lead gets a link first."
 
+#: src/routes/_shell.integrations.$integration.tsx
+msgid "Every tool it has: domains and agents use only what they are granted."
+msgstr "Every tool it has: domains and agents use only what they are granted."
+
 #: src/knowledge/collection-markers.tsx
 msgid "Everyone"
 msgstr "Everyone"
@@ -4845,6 +5016,10 @@ msgstr "Everyone"
 #: src/routes/_shell.onboarding.interviewers.tsx
 msgid "Everyone chooses at the start of their interview. The questions are the same, whoever asks them."
 msgstr "Everyone chooses at the start of their interview. The questions are the same, whoever asks them."
+
+#: src/onboarding/organization-words.ts
+msgid "Everyone else in the team waits for this interview, a few working days at most. A word from the sponsor helps."
+msgstr "Everyone else in the team waits for this interview, a few working days at most. A word from the sponsor helps."
 
 #: src/dashboard/report.ts
 msgid "Everyone else, in the teams whose counts may be shown: {talked} of {asked}"
@@ -4858,6 +5033,10 @@ msgstr "Everyone has a link of their own: whoever has it is them, so send each o
 msgid "Everyone has talked"
 msgstr "Everyone has talked"
 
+#: src/onboarding/organization-words.ts
+msgid "Everyone taking part has their link."
+msgstr "Everyone taking part has their link."
+
 #: src/onboarding/work-record.tsx
 msgid "Everyone who does it has talked"
 msgstr "Everyone who does it has talked"
@@ -4869,6 +5048,10 @@ msgstr "Everyone who does it has talked, so a step one of them told counts."
 #: src/onboarding/work-record.tsx
 msgid "Everyone who does this work has talked."
 msgstr "Everyone who does this work has talked."
+
+#: src/onboarding/organization-words.ts
+msgid "Everyone's link is due: out once the interviews run."
+msgstr "Everyone's link is due: out once the interviews run."
 
 #: src/inbox/inbox-page.tsx
 msgctxt "inbox filter"
@@ -5129,6 +5312,10 @@ msgstr "Finance documents, invoices, billing exports, procurement records or for
 msgid "Financial data"
 msgstr "Financial data"
 
+#: src/routes/_shell.onboarding.organization.index.tsx
+msgid "Find a team or a person"
+msgstr "Find a team or a person"
+
 #: src/dashboard/dependency-requests.tsx
 msgid "Findings"
 msgstr "Findings"
@@ -5266,6 +5453,10 @@ msgstr "for every model call this month"
 #: src/connections/connect-dialog.tsx
 msgid "For everyone"
 msgstr "For everyone"
+
+#: src/onboarding/organization-dialogs.tsx
+msgid "For example: answers customers' questions"
+msgstr "For example: answers customers' questions"
 
 #: src/routes/_shell.onboarding.notes.tsx
 msgid "For Grasp's staff on this onboarding alone; the company doesn't see them."
@@ -5612,6 +5803,11 @@ msgstr "Handovers"
 msgid "Has no owner"
 msgstr "Has no owner"
 
+#: src/onboarding/organization-words.ts
+msgctxt "where someone stands"
+msgid "Has talked"
+msgstr "Has talked"
+
 #: src/activity/audit-log.tsx
 msgid "Hash"
 msgstr "Hash"
@@ -5940,6 +6136,10 @@ msgstr "If it fails"
 msgid "If the rest of the month goes like the days so far"
 msgstr "If the rest of the month goes like the days so far"
 
+#: src/onboarding/organization-dialogs.tsx
+msgid "In another team, {first} is asked about that team's work from now on. What they already said stays with the work it was about."
+msgstr "In another team, {first} is asked about that team's work from now on. What they already said stays with the work it was about."
+
 #: src/dashboard/pile-cards.tsx
 msgid "In one chat only, for {requester}"
 msgstr "In one chat only, for {requester}"
@@ -5998,10 +6198,6 @@ msgstr "Input"
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Integration"
 msgstr "Integration"
-
-#: src/routes/_shell.integrations.$integration.tsx
-msgid "Integration not found"
-msgstr "Integration not found"
 
 #: src/frame/app-sidebar.tsx
 #: src/routes/_shell.domains.$engine.index.tsx
@@ -6238,6 +6434,10 @@ msgstr "It starts when Stephen reads the kickoff, and grows with every interview
 msgid "It still does not work. You can stop for now and come back later. Your place is kept."
 msgstr "It still does not work. You can stop for now and come back later. Your place is kept."
 
+#: src/onboarding/organization-dialogs.tsx
+msgid "It takes part from the start. Add its people next and pick its lead: the lead talks first."
+msgstr "It takes part from the start. Add its people next and pick its lead: the lead talks first."
+
 #: src/routes/_shell.settings.spend.tsx
 msgid "It was charged {amount} on {when}."
 msgstr "It was charged {amount} on {when}."
@@ -6298,9 +6498,25 @@ msgstr "Its current version has no parameters."
 msgid "Its goal and documents are deleted. Its chats stay, back among the chats by date."
 msgstr "Its goal and documents are deleted. Its chats stay, back among the chats by date."
 
+#: src/onboarding/organization-words.ts
+msgid "Its lead named it, and nobody in the team is asked about it. Pick someone under People."
+msgstr "Its lead named it, and nobody in the team is asked about it. Pick someone under People."
+
+#: src/routes/_shell.onboarding.organization.$team.tsx
+msgid "Its lead names the team's work in their interview: what there is, how much of it, and who does which."
+msgstr "Its lead names the team's work in their interview: what there is, how much of it, and who does which."
+
+#: src/onboarding/organization-words.ts
+msgid "Its links go out from {at}, its lead first."
+msgstr "Its links go out from {at}, its lead first."
+
 #: src/onboarding/interview-words.ts
 msgid "Its links go out on the first day"
 msgstr "Its links go out on the first day"
+
+#: src/onboarding/organization-words.ts
+msgid "Its links wait for the day the interviews start."
+msgstr "Its links wait for the day the interviews start."
 
 #: src/chat/chat-list.tsx
 msgid "Its messages are deleted for good, and every change its agent holds for you is rejected. What the agent did stays in the audit log."
@@ -6317,6 +6533,10 @@ msgstr "Its migrations can't be read: it may rewrite the records of any table"
 #: src/routes/_shell.workflows.$workflow.tsx
 msgid "Its model tasks"
 msgstr "Its model tasks"
+
+#: src/onboarding/organization-dialogs.tsx
+msgid "Its name, and what it does. Its lead says what it does in more words, in their interview."
+msgstr "Its name, and what it does. Its lead says what it does in more words, in their interview."
 
 #: src/engines/store-changes.tsx
 msgid "Its new fields' defaults are being filled in. Releases that need it can be made current once it has finished."
@@ -6337,6 +6557,14 @@ msgstr "its output isn't what the fixture expects"
 #: src/chat/builds.tsx
 msgid "Its parameters can't be read from its code."
 msgstr "Its parameters can't be read from its code."
+
+#: src/routes/_shell.onboarding.organization.index.tsx
+msgid "Its people are each asked what they do"
+msgstr "Its people are each asked what they do"
+
+#: src/onboarding/organization-words.ts
+msgid "Its people get their links without waiting, and Stephen asks each what work they do. With a lead, he asks the lead first which work there is."
+msgstr "Its people get their links without waiting, and Stephen asks each what work they do. With a lead, he asks the lead first which work there is."
 
 #: src/workflows/chosen-at-run-time.tsx
 msgid "its retries"
@@ -6361,6 +6589,10 @@ msgstr "Its tokens are deleted, every domain and agent loses it, and actions wai
 #: src/dashboard/standard-widgets.tsx
 msgid "Its work is mapped; nothing is redesigned with AI yet."
 msgstr "Its work is mapped; nothing is redesigned with AI yet."
+
+#: src/onboarding/organization-dialogs.tsx
+msgid "Job"
+msgstr "Job"
 
 #: src/activity/audit-words.ts
 msgid "Joined through an invitation"
@@ -6595,6 +6827,11 @@ msgstr "Leaves this list"
 msgid "Left in"
 msgstr "Left in"
 
+#: src/onboarding/organization-words.ts
+msgctxt "filter: teams that don't take part in the interviews"
+msgid "Left out"
+msgstr "Left out"
+
 #: src/landscape/overview-tab.tsx
 msgid "Legal and policy documents the vendor publishes."
 msgstr "Legal and policy documents the vendor publishes."
@@ -6652,6 +6889,11 @@ msgstr "Link out"
 
 #: src/onboarding/interview-words.ts
 msgctxt "where a link stands"
+msgid "Link out"
+msgstr "Link out"
+
+#: src/onboarding/organization-words.ts
+msgctxt "where someone stands"
 msgid "Link out"
 msgstr "Link out"
 
@@ -7093,6 +7335,16 @@ msgstr "Moved old entries out of the audit trail"
 msgid "Name"
 msgstr "Name"
 
+#: src/onboarding/organization-dialogs.tsx
+msgctxt "field: someone's full name"
+msgid "Name"
+msgstr "Name"
+
+#: src/onboarding/organization-dialogs.tsx
+msgctxt "field: the name of a team"
+msgid "Name"
+msgstr "Name"
+
 #: src/workflows/independent-workflows.tsx
 msgid "Name of a new workflow"
 msgstr "Name of a new workflow"
@@ -7149,6 +7401,11 @@ msgstr "Nearly there"
 msgctxt "workflow stage"
 msgid "Needs a check"
 msgstr "Needs a check"
+
+#: src/onboarding/organization-words.ts
+msgctxt "filter: teams where something needs a person at Grasp"
+msgid "Needs a look"
+msgstr "Needs a look"
 
 #: src/dashboard/dependency-requests.tsx
 msgid "Needs alongside it"
@@ -7476,6 +7733,11 @@ msgctxt "where a link stands"
 msgid "No link yet"
 msgstr "No link yet"
 
+#: src/onboarding/organization-words.ts
+msgctxt "where someone stands"
+msgid "No link yet"
+msgstr "No link yet"
+
 #: src/engines/resource-bindings.tsx
 msgid "No longer declared"
 msgstr "No longer declared"
@@ -7495,6 +7757,10 @@ msgstr "No longer used: {removed}"
 #: src/onboarding/setup-steps.tsx
 msgid "No longer where it was"
 msgstr "No longer where it was"
+
+#: src/onboarding/organization-words.ts
+msgid "No map of its work came of the lead's interview"
+msgstr "No map of its work came of the lead's interview"
 
 #: src/brain/brain-transcript.tsx
 msgid "No matches"
@@ -7610,6 +7876,15 @@ msgstr "No stakeholder named yet"
 msgid "No steps yet. They are drawn once someone who does this work has agreed to their interview."
 msgstr "No steps yet. They are drawn once someone who does this work has agreed to their interview."
 
+#: src/onboarding/organization-words.ts
+#: src/routes/_shell.onboarding.organization.index.tsx
+msgid "No team lead named"
+msgstr "No team lead named"
+
+#: src/routes/_shell.onboarding.organization.index.tsx
+msgid "No team matches."
+msgstr "No team matches."
+
 #: src/routes/_shell.settings.profile.tsx
 msgid "No teams"
 msgstr "No teams"
@@ -7718,6 +7993,18 @@ msgstr "Nobody has edited it yet: it starts from a definition that passes."
 msgid "Nobody has said yet. At the end of their interview, people can say how it was: from 1 to 5."
 msgstr "Nobody has said yet. At the end of their interview, people can say how it was: from 1 to 5."
 
+#: src/onboarding/organization-words.ts
+msgid "Nobody is asked about “{work}”"
+msgstr "Nobody is asked about “{work}”"
+
+#: src/routes/_shell.onboarding.organization.$team.tsx
+msgid "Nobody is asked about it"
+msgstr "Nobody is asked about it"
+
+#: src/routes/_shell.onboarding.organization.$team.tsx
+msgid "Nobody is in this team yet."
+msgstr "Nobody is in this team yet."
+
 #: src/onboarding/interview-teams.tsx
 msgid "Nobody is known here yet. The people come with the company's own list."
 msgstr "Nobody is known here yet. The people come with the company's own list."
@@ -7725,6 +8012,14 @@ msgstr "Nobody is known here yet. The people come with the company's own list."
 #: src/brain/brain-atlas.ts
 msgid "Nobody is named yet to approve a new tool."
 msgstr "Nobody is named yet to approve a new tool."
+
+#: src/routes/_shell.onboarding.organization.index.tsx
+msgid "Nobody is on the list yet. The company's admin shares its staff list in their onboarding."
+msgstr "Nobody is on the list yet. The company's admin shares its staff list in their onboarding."
+
+#: src/routes/_shell.onboarding.organization.$team.tsx
+msgid "Nobody leads it"
+msgstr "Nobody leads it"
 
 #: src/onboarding/interview-people.tsx
 #: src/routes/_shell.settings.members.tsx
@@ -7910,10 +8205,6 @@ msgstr "Not confirmed"
 #: src/brain/brain-atlas.ts
 msgid "Not confirmed by the board yet"
 msgstr "Not confirmed by the board yet"
-
-#: src/routes/_shell.integrations.$integration.tsx
-msgid "Not connected"
-msgstr "Not connected"
 
 #: src/dashboard/standard-widgets.tsx
 msgid "not counted yet"
@@ -8533,6 +8824,8 @@ msgstr "Open"
 #: src/knowledge/uploads.tsx
 #: src/onboarding/interview-people.tsx
 #: src/onboarding/work-list.tsx
+#: src/routes/_shell.onboarding.organization.$team.tsx
+#: src/routes/_shell.onboarding.organization.index.tsx
 msgid "Open {name}"
 msgstr "Open {name}"
 
@@ -8645,6 +8938,11 @@ msgstr "Opened"
 msgid "Opened on {date}"
 msgstr "Opened on {date}"
 
+#: src/onboarding/organization-words.ts
+msgctxt "where someone stands"
+msgid "Opened the link"
+msgstr "Opened the link"
+
 #: src/routes/guest.tsx
 msgid "Opening the chat…"
 msgstr "Opening the chat…"
@@ -8669,6 +8967,11 @@ msgstr "Operations"
 #: src/onboarding/document-drop.tsx
 msgid "or choose them from your computer"
 msgstr "or choose them from your computer"
+
+#: src/routes/_shell.onboarding.tsx
+msgctxt "onboarding area section"
+msgid "Organization"
+msgstr "Organization"
 
 #. A time zone, by its city
 #: src/routes/_shell.settings.workspace.tsx
@@ -8930,6 +9233,16 @@ msgctxt "column: people who use an app"
 msgid "People"
 msgstr "People"
 
+#: src/routes/_shell.onboarding.organization.index.tsx
+msgctxt "figure: how many people there are"
+msgid "People"
+msgstr "People"
+
+#: src/routes/_shell.onboarding.organization.$team.tsx
+msgctxt "heading: the people in a team"
+msgid "People"
+msgstr "People"
+
 #: src/onboarding/staff-words.ts
 msgctxt "onboarding stage"
 msgid "People"
@@ -9066,6 +9379,10 @@ msgstr "Person or automated"
 msgctxt "kind of fact"
 msgid "Piece of work"
 msgstr "Piece of work"
+
+#: src/routes/_shell.onboarding.organization.index.tsx
+msgid "Pieces of work"
+msgstr "Pieces of work"
 
 #: src/onboarding/interviews-progress.tsx
 msgid "pieces of work found"
@@ -9352,6 +9669,10 @@ msgstr "Rating"
 #: src/workflows/workflow-diagram.tsx
 msgid "Reached"
 msgstr "Reached"
+
+#: src/routes/_shell.integrations.$integration.tsx
+msgid "Reaches"
+msgstr "Reaches"
 
 #: src/policies/policy.ts
 msgctxt "what a permission lets an app do with company data"
@@ -9694,6 +10015,15 @@ msgstr "Report"
 #: src/landscape/landscape.ts
 msgid "Repository content, snippets, editor context, build logs or engineering documentation."
 msgstr "Repository content, snippets, editor context, build logs or engineering documentation."
+
+#: src/connections/requested-apps.tsx
+msgctxt "apps someone asked for"
+msgid "Requested"
+msgstr "Requested"
+
+#: src/connections/requested-apps.tsx
+msgid "Requested {date}"
+msgstr "Requested {date}"
 
 #: src/settings/pulse-people.tsx
 msgid "Reset"
@@ -10118,6 +10448,11 @@ msgstr "Same version, different contents: {changed}"
 msgid "Save"
 msgstr "Save"
 
+#: src/onboarding/organization-dialogs.tsx
+msgctxt "button: save a team's or a person's details"
+msgid "Save"
+msgstr "Save"
+
 #: src/dashboard/report-dialog.tsx
 msgid "Save as PDF"
 msgstr "Save as PDF"
@@ -10274,6 +10609,10 @@ msgstr "Send"
 #: src/chat/brain-questions.tsx
 msgid "Send answer"
 msgstr "Send answer"
+
+#: src/onboarding/organization-dialogs.tsx
+msgid "Send the link now"
+msgstr "Send the link now"
 
 #: src/knowledge/collection-markers.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
@@ -10479,6 +10818,7 @@ msgstr "Sign in"
 #: src/connections/integrations-banner.tsx
 #: src/dashboard/to-do.tsx
 #: src/inbox/item-detail.tsx
+#: src/routes/_shell.integrations.$integration.tsx
 msgid "Sign in again"
 msgstr "Sign in again"
 
@@ -10887,6 +11227,10 @@ msgstr "Stephen"
 msgid "Stephen asks about"
 msgstr "Stephen asks about"
 
+#: src/onboarding/organization-words.ts
+msgid "Stephen asks them which work comes back most. To ask about a piece of work, open the person."
+msgstr "Stephen asks them which work comes back most. To ask about a piece of work, open the person."
+
 #: src/routes/_shell.onboarding.kickoff.tsx
 msgid "Stephen is reading it. This takes a minute."
 msgstr "Stephen is reading it. This takes a minute."
@@ -11064,6 +11408,10 @@ msgstr "Take back the approval of {screen}"
 msgid "Take off the dashboard"
 msgstr "Take off the dashboard"
 
+#: src/onboarding/organization-dialogs.tsx
+msgid "Take off the list"
+msgstr "Take off the list"
+
 #: src/chat/chat-list.tsx
 msgid "Take out of the project"
 msgstr "Take out of the project"
@@ -11088,9 +11436,18 @@ msgstr "Take the tour again"
 msgid "Take theirs"
 msgstr "Take theirs"
 
+#: src/routes/_shell.onboarding.organization.$team.tsx
+msgid "Takes part in the interviews"
+msgstr "Takes part in the interviews"
+
 #: src/routes/_shell.settings.models.tsx
 msgid "Takes sensitive data"
 msgstr "Takes sensitive data"
+
+#: src/onboarding/organization-words.ts
+msgctxt "filter: teams that take part in the interviews"
+msgid "Taking part"
+msgstr "Taking part"
 
 #: src/onboarding/work-list.tsx
 msgid "Talked"
@@ -11118,6 +11475,11 @@ msgstr "Talked, day by day"
 msgid "Talked: {count} of {of}"
 msgstr "Talked: {count} of {of}"
 
+#: src/onboarding/organization-words.ts
+msgctxt "where someone stands"
+msgid "Talking"
+msgstr "Talking"
+
 #: src/onboarding/interview-words.ts
 msgctxt "where a link stands"
 msgid "Talking now"
@@ -11143,6 +11505,11 @@ msgstr "Target ID"
 msgid "Team"
 msgstr "Team"
 
+#: src/onboarding/organization-dialogs.tsx
+msgctxt "field: the team someone is in"
+msgid "Team"
+msgstr "Team"
+
 #: src/routes/_shell.onboarding.log.tsx
 msgctxt "log filter"
 msgid "Team"
@@ -11162,9 +11529,20 @@ msgstr "Team"
 msgid "Team does not take part"
 msgstr "Team does not take part"
 
+#: src/onboarding/organization-words.ts
+msgctxt "where someone stands"
+msgid "Team doesn't take part"
+msgstr "Team doesn't take part"
+
 #: src/onboarding/interview-people.tsx
+#: src/onboarding/organization-dialogs.tsx
+#: src/routes/_shell.onboarding.organization.$team.tsx
 msgid "Team lead"
 msgstr "Team lead"
+
+#: src/routes/_shell.onboarding.organization.index.tsx
+msgid "Team leads"
+msgstr "Team leads"
 
 #: src/onboarding/interview-teams.tsx
 msgid "Team leads go first, then their team. One reminder after {after} working days, sent by hand with their own link, then nothing."
@@ -11194,6 +11572,11 @@ msgstr "Teams"
 
 #: src/onboarding/interview-teams.tsx
 msgctxt "every team of the company"
+msgid "Teams"
+msgstr "Teams"
+
+#: src/routes/_shell.onboarding.organization.index.tsx
+msgctxt "figure: how many teams there are"
 msgid "Teams"
 msgstr "Teams"
 
@@ -11760,6 +12143,10 @@ msgstr "The links go out once the company has told its team."
 msgid "The links work until {lastDay}."
 msgstr "The links work until {lastDay}."
 
+#: src/routes/_shell.onboarding.organization.index.tsx
+msgid "The list as the company's admin shared it, team by team. Put it right here: every change goes into the log."
+msgstr "The list as the company's admin shared it, team by team. Put it right here: every change goes into the log."
+
 #: src/routes/_shell.onboarding.stephen.tsx
 msgid "The list is full: remove a line to add another."
 msgstr "The list is full: remove a line to add another."
@@ -11844,6 +12231,10 @@ msgstr "The onboarding"
 #: src/dashboard/todo-pile.tsx
 msgid "The one before"
 msgstr "The one before"
+
+#: src/routes/_shell.onboarding.organization.index.tsx
+msgid "The organization"
+msgstr "The organization"
 
 #: src/landscape/app-cells.tsx
 msgid "The other kinds of data this app touches"
@@ -11991,6 +12382,7 @@ msgid "The team lead settles one nobody can explain"
 msgstr "The team lead settles one nobody can explain"
 
 #: src/onboarding/interview-words.ts
+#: src/routes/_shell.onboarding.organization.$team.tsx
 msgid "The team's work, and who to ask"
 msgstr "The team's work, and who to ask"
 
@@ -12036,7 +12428,12 @@ msgstr "the whole connection"
 msgid "The whole widget: every line, and what its colours mean."
 msgstr "The whole widget: every line, and what its colours mean."
 
+#: src/routes/_shell.onboarding.organization.$team.tsx
+msgid "The work it does"
+msgstr "The work it does"
+
 #: src/onboarding/interview-words.ts
+#: src/onboarding/organization-dialogs.tsx
 msgid "The work they do most, as they say"
 msgstr "The work they do most, as they say"
 
@@ -12051,6 +12448,10 @@ msgstr "The workflow run that asked this has ended, so this decision has closed.
 #: src/onboarding/staff-words.ts
 msgid "The works council hasn't been heard"
 msgstr "The works council hasn't been heard"
+
+#: src/onboarding/organization-dialogs.tsx
+msgid "Their link stops working, and what they said goes with them."
+msgstr "Their link stops working, and what they said goes with them."
 
 #: src/routes/_shell.onboarding.interviewers.tsx
 msgid "Their numbers show once the first person starts their interview."
@@ -12134,6 +12535,10 @@ msgstr "These requirements are about how people work, not which apps they use. T
 msgid "They are signed out everywhere, their personal connections are disconnected, and they cannot sign in again."
 msgstr "They are signed out everywhere, their personal connections are disconnected, and they cannot sign in again."
 
+#: src/onboarding/organization-dialogs.tsx
+msgid "They get a link of their own when their team's links are due."
+msgstr "They get a link of their own when their team's links are due."
+
 #: src/settings/invitations.tsx
 msgid "They get this role when they first sign in with your organization’s account. Grasp sends no email, so let them know."
 msgstr "They get this role when they first sign in with your organization’s account. Grasp sends no email, so let them know."
@@ -12150,6 +12555,10 @@ msgstr "They told us"
 #: src/brain/brain.ts
 msgid "They use"
 msgstr "They use"
+
+#: src/onboarding/organization-dialogs.tsx
+msgid "They're back"
+msgstr "They're back"
 
 #: src/chat/thread.tsx
 msgid "Thinking"
@@ -12357,6 +12766,14 @@ msgstr "This step failed."
 msgid "This store no longer exists, so there is nothing to abandon."
 msgstr "This store no longer exists, so there is nothing to abandon."
 
+#: src/onboarding/organization-dialogs.tsx
+msgid "This team doesn't take part: nobody in it gets a link until it is asked in."
+msgstr "This team doesn't take part: nobody in it gets a link until it is asked in."
+
+#: src/routes/_shell.onboarding.organization.$team.tsx
+msgid "This team is no longer on the list. <0>All teams</0>"
+msgstr "This team is no longer on the list. <0>All teams</0>"
+
 #: src/engines/store-change-errors.ts
 msgid "This version changes the domain's data with a migration, and it can't finish: its transform failed, or answered what the table doesn't accept."
 msgstr "This version changes the domain's data with a migration, and it can't finish: its transform failed, or answered what the table doesn't accept."
@@ -12448,6 +12865,10 @@ msgstr "To everyone at {company}"
 #: src/dashboard/report.ts
 msgid "To keep who spoke private, a team is left out until five of its people were asked, and its count until three were heard. Neither means nobody took part."
 msgstr "To keep who spoke private, a team is left out until five of its people were asked, and its count until three were heard. Neither means nobody took part."
+
+#: src/onboarding/organization-dialogs.tsx
+msgid "To send them their link. It can stay empty."
+msgstr "To send them their link. It can stay empty."
 
 #: src/onboarding/send-plan-form.tsx
 msgid "To the team leads. Everyone else follows once their lead has talked."
@@ -13357,6 +13778,10 @@ msgstr "What it brought"
 msgid "What it checks"
 msgstr "What it checks"
 
+#: src/onboarding/organization-dialogs.tsx
+msgid "What it does, in a few words"
+msgstr "What it does, in a few words"
+
 #: src/brain/brain.ts
 msgid "What it is"
 msgstr "What it is"
@@ -13420,6 +13845,10 @@ msgstr "What starts it"
 #: src/onboarding/work-record.tsx
 msgid "What starts it, where it waits, when it goes differently, and what right looks like."
 msgstr "What starts it, where it waits, when it goes differently, and what right looks like."
+
+#: src/onboarding/organization-dialogs.tsx
+msgid "What Stephen asks about"
+msgstr "What Stephen asks about"
 
 #: src/onboarding/staff-words.ts
 msgctxt "kickoff field"
@@ -13669,6 +14098,10 @@ msgstr "Which interviews to show"
 #: src/interview/before.tsx
 msgid "Which language do you want to do this interview in?"
 msgstr "Which language do you want to do this interview in?"
+
+#: src/routes/_shell.onboarding.organization.index.tsx
+msgid "Which teams to show"
+msgstr "Which teams to show"
 
 #: src/onboarding/setup-steps.tsx
 msgid "Which tools do people actually use?"
@@ -14092,6 +14525,10 @@ msgstr "Yes, I can hear you"
 #: src/onboarding/connect-steps.tsx
 msgid "Yes, set it up with us"
 msgstr "Yes, set it up with us"
+
+#: src/onboarding/organization-dialogs.tsx
+msgid "Yes, take them off the list"
+msgstr "Yes, take them off the list"
 
 #: src/interview/read-back.tsx
 msgid "Yes, that’s correct"

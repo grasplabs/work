@@ -378,8 +378,11 @@ export interface CoreConfigInputs {
 
 /**
  * The deployment config vars a deploy derives for a client's core:
- * `MODEL_GATEWAY`, `RUNTIME_PROFILE` and `MAIL_FROM` (`onboardingSender`)
- * always, `SIGN_IN` when its record has sign-in.
+ * `MODEL_GATEWAY`, `RUNTIME_PROFILE`, `CLIENT_ID` and `MAIL_FROM`
+ * (`onboardingSender`) always, `SIGN_IN` when its record has sign-in.
+ * `CLIENT_ID` is what core answers the provisioning probe with
+ * (src/hosting/probe.ts); like `RUNTIME_PROFILE`, it's no deployment
+ * config var, so no client setting can name it.
  */
 export const derivedCoreConfig = ({
   clientId,
@@ -391,6 +394,7 @@ export const derivedCoreConfig = ({
   return {
     MODEL_GATEWAY: { gateway: clientGatewayId, models: defaultGatewayModels },
     RUNTIME_PROFILE: clientRuntimeProfile,
+    CLIENT_ID: clientId,
     MAIL_FROM: onboardingSender(clientId, domain),
     ...(config === undefined ? {} : { SIGN_IN: config }),
   };

@@ -53,6 +53,42 @@ import { auditedDuring, signedInApi } from "./sign-in.ts";
 
 const idp = mockIdp();
 
+/**
+ * A live query's pushes as they arrive, and a wait on the push itself:
+ * `until` resolves once the latest push passes `check` (its `expect`s),
+ * looking again at each push, however long a cold preview takes to send
+ * its first; never on a clock, which a loaded runner outlasts (GRA-983).
+ * A push that never comes fails the test at its own timeout.
+ */
+const livePushes = () => {
+  const pushed: QuerySnapshotPush[] = [];
+  let arrived = Promise.withResolvers<null>();
+  const passes = (check: (latest?: QuerySnapshotPush) => void): boolean => {
+    try {
+      check(pushed.at(-1));
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  return {
+    pushed,
+    push: (snapshot: QuerySnapshotPush): void => {
+      pushed.push(snapshot);
+      arrived.resolve(null);
+      arrived = Promise.withResolvers<null>();
+    },
+    until: async (
+      check: (latest?: QuerySnapshotPush) => void
+    ): Promise<void> => {
+      while (!passes(check)) {
+        // oxlint-disable-next-line no-await-in-loop -- one push after the other
+        await arrived.promise;
+      }
+    },
+  };
+};
+
 type Person = Awaited<ReturnType<typeof signedInApi>>;
 
 /** The App's notes, its functions and a screen that reads them live. */
@@ -456,10 +492,11 @@ describe("previewing a draft of spec 8's layout", { timeout: 180_000 }, () => {
       fingerprint: "0".repeat(64),
       kind: "workflow",
     };
-    const pushed: QuerySnapshotPush[] = [];
+    const live = livePushes();
+    const { pushed } = live;
     const page = Object.assign(
       (push: QuerySnapshotPush): void => {
-        pushed.push(push);
+        live.push(push);
       },
       {
         [Symbol.dispose]: (): void => {
@@ -487,8 +524,8 @@ describe("previewing a draft of spec 8's layout", { timeout: 180_000 }, () => {
       JSON.stringify({ workflow, watch: "binding" }),
       page
     );
-    await vi.waitFor(() => {
-      expect(pushed.length).toBeGreaterThan(0);
+    await live.until((latest) => {
+      expect(latest).toBeDefined();
     });
     await watched.release();
     expect({
@@ -893,18 +930,16 @@ export class App extends DurableObject {
   it("keeps a live query of the preview fresh, and ends it once the draft changes", async () => {
     const { builder, app, chatId, revision, write } = await setUp();
     const { chats } = builder.api;
-    const pushed: QuerySnapshotPush[] = [];
+    const live = livePushes();
     await chats.previewWatchQuery(
       chatId,
       app,
       revision,
       await requestFor(builder, { chatId, app, revision }, "notes.titles"),
-      (snapshot) => {
-        pushed.push(snapshot);
-      }
+      live.push
     );
-    await vi.waitFor(() => {
-      expect(pushed.at(-1)?.result).toStrictEqual({ ok: true, value: [] });
+    await live.until((latest) => {
+      expect(latest?.result).toStrictEqual({ ok: true, value: [] });
     });
     await chats.previewFunction(
       chatId,
@@ -914,8 +949,8 @@ export class App extends DurableObject {
         title: "fresh",
       })
     );
-    await vi.waitFor(() => {
-      expect(pushed.at(-1)?.result).toStrictEqual({
+    await live.until((latest) => {
+      expect(latest?.result).toStrictEqual({
         ok: true,
         value: ["fresh"],
       });
@@ -941,7 +976,9 @@ export class App extends DurableObject {
     );
     await scheduler.wait(2000);
     expect(
-      pushed.filter(({ result }) => JSON.stringify(result).includes("newer"))
+      live.pushed.filter(({ result }) =>
+        JSON.stringify(result).includes("newer")
+      )
     ).toStrictEqual([]);
   });
 
@@ -1570,7 +1607,8 @@ export class App extends DurableObject {
   it("follows only a query live: a mutation's reference is refused, and runs nothing", async () => {
     const { builder, app, chatId, revision } = await setUp();
     const { chats } = builder.api;
-    const pushed: QuerySnapshotPush[] = [];
+    const live = livePushes();
+    const { pushed } = live;
     await chats.previewWatchQuery(
       chatId,
       app,
@@ -1578,12 +1616,10 @@ export class App extends DurableObject {
       await requestFor(builder, { chatId, app, revision }, "notes.create", {
         title: "written live",
       }),
-      (snapshot) => {
-        pushed.push(snapshot);
-      }
+      live.push
     );
-    await vi.waitFor(() => {
-      expect(pushed.length).toBeGreaterThan(0);
+    await live.until((latest) => {
+      expect(latest).toBeDefined();
     });
     const titles = outcome(
       await chats.previewFunction(
@@ -1855,7 +1891,7 @@ describe("a draft's preferences in its preview", { timeout: 180_000 }, () => {
   it("follows the draft's preferences live, pushed as they change", async () => {
     const builder = await signedInApi(idp, "builder");
     const draft = await deskDraft(builder);
-    const pushed: QuerySnapshotPush[] = [];
+    const live = livePushes();
     await builder.api.chats.previewWatchQuery(
       draft.chatId,
       draft.app,
@@ -1868,12 +1904,10 @@ describe("a draft's preferences in its preview", { timeout: 180_000 }, () => {
         ),
         input: {},
       }),
-      (snapshot) => {
-        pushed.push(snapshot);
-      }
+      live.push
     );
-    await vi.waitFor(() => {
-      expect(pushed.at(-1)?.result).toStrictEqual({
+    await live.until((latest) => {
+      expect(latest?.result).toStrictEqual({
         ok: true,
         value: { compact: false, theme: "light", _rev: 0 },
       });
@@ -1882,8 +1916,8 @@ describe("a draft's preferences in its preview", { timeout: 180_000 }, () => {
       expectedRevision: 0,
       patch: { compact: true },
     });
-    await vi.waitFor(() => {
-      expect(pushed.at(-1)?.result).toStrictEqual({
+    await live.until((latest) => {
+      expect(latest?.result).toStrictEqual({
         ok: true,
         value: { compact: true, theme: "light", _rev: 1 },
       });

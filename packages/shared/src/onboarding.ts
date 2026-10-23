@@ -9,6 +9,10 @@ import type { KickoffApi } from "./kickoff.ts";
 import type { OnboardingChoicesApi } from "./onboarding-choices.ts";
 import type { OnboardingDocumentsApi } from "./onboarding-documents.ts";
 import type {
+  OrganizationChangeInput,
+  StaffOrganization,
+} from "./onboarding-organization.ts";
+import type {
   LogFilter,
   StaffAgreements,
   StaffAiUseRow,
@@ -390,6 +394,13 @@ export interface OnboardingStaffApi extends KickoffApi {
   /** The AI the onboarding used, by day, purpose and model. */
   aiUse: () => Promise<StaffAiUseRow[]>;
   /**
+   * The organization as Grasp knows it, team by team: it names people, so
+   * every read is in the audit log.
+   */
+  organization: () => Promise<StaffOrganization>;
+  /** Puts the list right, one change at a time; each is in the log. */
+  changeOrganization: (change: OrganizationChangeInput) => Promise<void>;
+  /**
    * Every piece of work as drawn from what its people agreed to, with
    * this organization's rules for when one is known and the pieces Grasp
    * counts as known by hand. It holds what people said, by name, so every
@@ -413,8 +424,13 @@ export const onboardingErrors = defineErrorFamily({
   "onboarding.no_link": "That person has no link out yet.",
   "onboarding.not_found": "Nobody on the list by that id.",
   "onboarding.no_team": "No team on the list by that id.",
+  "onboarding.team_taken": "There is a team with this name already.",
+  "onboarding.no_work": "That piece of work isn't on their team's map.",
+  "onboarding.not_now":
+    "No link goes out while the interviews are paused, before the agreements are in, or to someone who doesn't take part.",
+  "onboarding.no_map":
+    "The team's lead hasn't agreed to anything to draw its map from yet.",
   "onboarding.no_failed_mail": "That person has no mail that failed.",
-  "onboarding.no_work": "No piece of work by that id.",
   "onboarding.nothing_to_draw":
     "Nobody who does that work has agreed to anything yet.",
 });

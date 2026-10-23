@@ -59,6 +59,7 @@ import type {
   NpmMalwareReports,
   NpmMetadata,
 } from "@grasp-os/shared/packages";
+import type { ClockRegistration } from "@grasp-os/workerflow/clock";
 import { WorkerEntrypoint } from "cloudflare:workers";
 
 import { ackAuditEvents, auditCall, takeAuditEvents } from "./audit.ts";
@@ -271,10 +272,12 @@ export default class Connect
   /**
    * Arms connect's clock if nothing has: core's clock asks every minute
    * (core's src/clock.ts), the repair path that starts it on a new
-   * deployment and after anything cleared its alarm.
+   * deployment and after anything cleared its alarm. Reports it as it
+   * left it, for the console's provisioning probe (core's
+   * src/provision-probe.ts).
    */
-  async ensureClock(): Promise<void> {
-    await clock(this.env).ensure();
+  async ensureClock(): Promise<ClockRegistration> {
+    return await clock(this.env).ensureRegistered();
   }
 
   // The audit outbox (src/audit.ts). Core's cron trigger takes the events
