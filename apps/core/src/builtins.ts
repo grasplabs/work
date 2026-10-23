@@ -104,12 +104,23 @@ export const fingerprintOf = async (of: Release): Promise<string> =>
       schema: coreSchema,
       knowledgeSchema,
       blueprints: of.blueprints.map(
-        ({ id, name, description, collections, permissions, files }) => ({
+        ({
+          id,
+          name,
+          description,
+          collections,
+          permissions,
+          contracts,
+          workflows,
+          files,
+        }) => ({
           id,
           name,
           description,
           collections: [...collections],
           permissions: [...permissions],
+          contracts: [...contracts],
+          workflows: [...workflows],
           files: { ...files },
         })
       ),

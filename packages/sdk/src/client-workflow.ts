@@ -48,6 +48,10 @@ import { v } from "./values.ts";
 //   idempotencyKey }`: controls the run; answers its receipt, `{ kind,
 //   state: "admitted" | "applied" | "superseded", revision }`, once
 //   admitted, `revision` the run snapshot's that recorded it.
+// - `{ workflow, command: "send", runId, event: { alias, type, fingerprint },
+//   data, idempotencyKey }`: sends the run the event of that reference;
+//   answers `{ eventId }` once its inbox committed it. Nothing of its
+//   envelope but the reference and the data is the client's to say.
 // - `{ workflow, watch: "run", runId }`: pushes `{ revision, result }`, the
 //   result the run's snapshot (`RunSnapshot`) or a refusal, one revision of
 //   the run each, status and what the person may do with it together.
@@ -68,9 +72,14 @@ import { v } from "./values.ts";
 // run's lifecycle on every request; nothing the client derives here is a
 // grant. Failure modes, and how each is closed:
 //
-// - A render, a remount or a reconnect starts or controls a run: commands
-//   are sent only from `run`, `pause`, `resume` and `cancel`, never from a
-//   subscription, a render or a lost connection, which only follows again.
+// - A render, a remount or a reconnect starts, controls or sends to a run:
+//   commands are sent only from `run`, `pause`, `resume`, `cancel` and
+//   `send`, never from a subscription, a render or a lost connection,
+//   which only follows again.
+// - An event of another workflow, contract or release sent, or one made
+//   up: `send` takes only a reference this workflow's own reference holds
+//   (its alias, type, fingerprint, workflow and release all equal), and
+//   data its descriptor takes; the host checks both again.
 // - One run followed once per hook: a run is followed once per client and
 //   reference, however many hooks show it, each keeping its own selection.
 // - A late answer shows on another run: each hook's selection has a
@@ -481,8 +490,12 @@ const receiptSchema = v.object({
   revision: v.number().integer().min(1),
 });
 
+/** A send's answer: the ID the host minted for its event. */
+const sentSchema = v.object({ eventId: idText });
+
 const descriptors = {
   handle: descriptorOf(runHandleSchema),
+  sent: descriptorOf(sentSchema),
   errorFields: descriptorOf(errorFieldsSchema),
   snapshot: descriptorOf(snapshotSchema),
   compensation: descriptorOf(compensationSchema),
@@ -861,6 +874,36 @@ const runKey = (read: ReadWorkflow, runId: string): string =>
 const bindingKey = (read: ReadWorkflow): string =>
   canonicalJson(["binding", read.key]);
 
+/**
+ * The event reference of `read` that `event` is: one `read` holds, under
+ * its alias, equal in everything that identifies it;
+ * `contract.invalid_request` for any other (another workflow's, a stale
+ * release's, one made up).
+ */
+const eventOf = (
+  read: ReadWorkflow,
+  event: unknown
+): WorkflowEventReference => {
+  const known =
+    isPlainObject(event) && typeof event.alias === "string"
+      ? read.events.get(event.alias)
+      : undefined;
+  if (
+    known === undefined ||
+    !isPlainObject(event) ||
+    event.kind !== known.kind ||
+    event.resourceId !== known.resourceId ||
+    event.resourceVersion !== known.resourceVersion ||
+    event.workflow !== known.workflow ||
+    event.workflowFingerprint !== known.workflowFingerprint ||
+    event.type !== known.type ||
+    event.fingerprint !== known.fingerprint
+  ) {
+    throw clientError("contract.invalid_request");
+  }
+  return known;
+};
+
 /** What a workflow's commands are scoped by, as a mutation's are. */
 const targetOf = (read: ReadWorkflow): SubmissionTarget => ({
   kind: "mutation",
@@ -988,6 +1031,50 @@ export class WorkflowChannel {
     // SAFETY: the command resolves only with a receipt `read` accepted.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
     return frozen(answer as ControlReceipt);
+  }
+
+  /**
+   * Sends run `runId` of `read` the event `event` refers to, with `data`:
+   * resolves once the host committed it to the run's inbox (never when the
+   * run takes it); a lost answer is recovered under the same key, so one
+   * call is one event however often it is sent.
+   */
+  async send(
+    read: ReadWorkflow,
+    runId: string,
+    event: unknown,
+    data: unknown
+  ): Promise<void> {
+    const known = eventOf(read, event);
+    const accepted = validateValue(known.data, data);
+    if (accepted.issues !== undefined) {
+      throw clientError("contract.invalid_args", {
+        issues: issueDetails(accepted.issues),
+      });
+    }
+    const key = freshKey();
+    await this.#link.command(
+      targetOf(read),
+      requestText({
+        workflow: read.wire,
+        command: "send",
+        runId,
+        event: {
+          alias: known.alias,
+          type: known.type,
+          fingerprint: known.fingerprint,
+        },
+        data: accepted.value,
+        idempotencyKey: key,
+      }),
+      key,
+      {
+        onRecovering: () => {
+          // A send shows nothing while under way: its promise is its state.
+        },
+        read: (value) => checked(descriptors.sent, value),
+      }
+    );
   }
 
   #follow(

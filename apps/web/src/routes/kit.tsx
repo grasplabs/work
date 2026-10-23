@@ -308,6 +308,9 @@ const figures: {
   },
   { name: "The team", shape: { kind: "crowd" }, fill: 0.65 },
   { name: "Two people", shape: { kind: "pair" }, fill: 0.75 },
+  { name: "Mark", shape: { kind: "person", who: "mark" }, fill: 0.3 },
+  { name: "Lisa", shape: { kind: "person", who: "lisa" }, fill: 0.3 },
+  { name: "Tim", shape: { kind: "person", who: "tim" }, fill: 0.3 },
   { name: "Brain", shape: { kind: "brain" }, fill: 0.9 },
 ];
 

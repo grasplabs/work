@@ -330,6 +330,31 @@ const grantSql = (allowing: SQL): SQL =>
   sql`EXISTS (SELECT 1 FROM ${permissions} WHERE ${allowing})`;
 
 /**
+ * That App `app`, at `appVersion`, holds its grant of `action` on
+ * workflow `workflow` for `person` now, as SQL (`appStartHoldsSql`).
+ */
+const appGrantHoldsSql = (
+  app: AppId,
+  appVersion: number,
+  person: string,
+  workflow: WorkflowResourceId,
+  action: "start" | "send"
+): SQL => sql`(${appRoleSql(person, app)}
+  AND EXISTS (SELECT 1 FROM app_versions AS code
+    WHERE code.app_id = ${app} AND code.version = ${appVersion})
+  AND NOT EXISTS (SELECT 1 FROM sdk_release_manifests AS sealed
+    WHERE sealed.app_id = ${app} AND sealed.version = ${appVersion}
+      AND sealed.revoked_at IS NOT NULL)
+  AND ${grantSql(
+    allowingPermissionSql(
+      { type: "app", appId: app },
+      appVersion,
+      { type: "workflow", workflowId: workflow },
+      action
+    )
+  )})`;
+
+/**
  * That App `app`, at `appVersion`, may start workflow `workflow` for
  * `person` now, as SQL: the App's own grant, from a version the App has
  * (one no admin approved changes nothing) whose release isn't revoked,
@@ -342,20 +367,19 @@ export const appStartHoldsSql = (
   appVersion: number,
   person: string,
   workflow: WorkflowResourceId
-): SQL => sql`(${appRoleSql(person, app)}
-  AND EXISTS (SELECT 1 FROM app_versions AS code
-    WHERE code.app_id = ${app} AND code.version = ${appVersion})
-  AND NOT EXISTS (SELECT 1 FROM sdk_release_manifests AS sealed
-    WHERE sealed.app_id = ${app} AND sealed.version = ${appVersion}
-      AND sealed.revoked_at IS NOT NULL)
-  AND ${grantSql(
-    allowingPermissionSql(
-      { type: "app", appId: app },
-      appVersion,
-      { type: "workflow", workflowId: workflow },
-      "start"
-    )
-  )})`;
+): SQL => appGrantHoldsSql(app, appVersion, person, workflow, "start");
+
+/**
+ * That App `app`, at `appVersion`, may send events to `person`'s runs of
+ * workflow `workflow` now, as SQL: as `appStartHoldsSql`, by the App's own
+ * `send` grant, which its `start` grant doesn't imply (spec 10.4.6).
+ */
+export const appSendHoldsSql = (
+  app: AppId,
+  appVersion: number,
+  person: string,
+  workflow: WorkflowResourceId
+): SQL => appGrantHoldsSql(app, appVersion, person, workflow, "send");
 
 /** Where a version's manifest seals the approved packages its modules import. */
 const manifestPackagesSchema = z.object({

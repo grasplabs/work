@@ -67,6 +67,12 @@ export interface AdmittedEngineEvent {
    * child's end, so no sender can crowd it out.
    */
   readonly reserved?: boolean;
+  /**
+   * Who sent it, as core names senders apart: held to that sender's share
+   * of the inbox (@grasp-os/workerflow's `maxSenderEvents`), so no one
+   * sender fills it for the others.
+   */
+  readonly sender?: string;
 }
 
 /** What an App's run is pinned to: the dispatcher loads it by these. */
@@ -344,6 +350,12 @@ export interface RunEngine {
    */
   admitEvent: (id: string, event: AdmittedEngineEvent) => Promise<EventOutcome>;
   /**
+   * Whether the run's inbox took an event under delivery key `key`, taken
+   * or not, the run ended or not; false for a run the engine has no record
+   * of. Accepts nothing.
+   */
+  hasEvent: (id: string, key: string) => Promise<boolean>;
+  /**
    * Removes the run, with all the engine kept of it, whether or not it has
    * ended; one it has no record of stays as it is. For a run core ended
    * that the engine's own retention may not reach (retention.ts).
@@ -506,7 +518,9 @@ export const runEngine = (env: Env): RunEngine => ({
       key: event.key,
       attributes: event.attributes,
       reserved: event.reserved === true,
+      sender: event.sender ?? null,
     }),
+  hasEvent: async (id, key) => await runStub(env, id).hasEvent(key),
   sendEvent: async (id, type, key) => {
     const outcome = await runStub(env, id).sendEvent({
       type,

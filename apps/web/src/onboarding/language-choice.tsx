@@ -5,6 +5,7 @@ import {
 import { useLingui } from "@lingui/react/macro";
 
 import { chooseLocale, isLocale, localeNames } from "../i18n.ts";
+import type { Locale } from "../i18n.ts";
 
 // The language is chosen on the first step and kept in the corner after it
 // (prototype `components/onboarding/onboarding-language.tsx`).
@@ -24,7 +25,8 @@ export const LanguageChoice = ({
   onPick,
 }: {
   picked: boolean;
-  onPick: () => void;
+  /** Told which, before the page turns to it. */
+  onPick: (locale: Locale) => void;
 }) => {
   const { t, i18n } = useLingui();
   return (
@@ -37,8 +39,8 @@ export const LanguageChoice = ({
           const [chosen] = value;
           // Pressing the chosen one again keeps it.
           if (isLocale(chosen)) {
+            onPick(chosen);
             void chooseLocale(chosen);
-            onPick();
           }
         }}
         size="sm"
