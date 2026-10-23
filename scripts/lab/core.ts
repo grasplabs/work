@@ -17,17 +17,27 @@ import {
 import type { InterviewProgress } from "@grasp-os/shared/interview-links";
 import { interviewTurnPath, turnEvents } from "@grasp-os/shared/interview-turn";
 import type {
+  EarlyLine,
+  EarlyNext,
+  InterviewPhase,
   InterviewTurnRequest,
   StephenTurn,
 } from "@grasp-os/shared/interview-turn";
 import {
   labAnswerSchema,
+  labContextSchema,
+  labDrawingsSchema,
   labJsonSchema,
   labLinksSchema,
   labPath,
   labViaSchema,
 } from "@grasp-os/shared/lab";
-import type { LabRequest, LabVia } from "@grasp-os/shared/lab";
+import type {
+  LabDrawings,
+  LabRequest,
+  LabVia,
+  LabWho,
+} from "@grasp-os/shared/lab";
 import type { ModelEffort } from "@grasp-os/shared/models";
 import { interviewKindSchema } from "@grasp-os/shared/onboarding";
 import { z } from "zod";
@@ -96,12 +106,20 @@ const refusalOf = async (
     : new CoreCallError(`${what} failed (${response.status})`, response.status);
 };
 
-/** What the lab has spent on models so far, as the gateway priced it. */
-const spent = { dollars: 0, calls: 0 };
+/** What the lab has spent on models so far, as the gateway priced it, and how many of Stephen's turns and drawings it asked for. */
+const spent = { dollars: 0, calls: 0, turns: 0, drawings: 0 };
 
 /** What the lab spent, for every command to print. */
-export const spentLine = (): string =>
-  `${spent.calls} calls of the lab's own, about $${spent.dollars.toFixed(2)} (Stephen's own turns are counted by the onboarding)`;
+export const spentLine = (): string => {
+  const parts = [
+    `${spent.calls} calls of the lab's own, about $${spent.dollars.toFixed(2)}`,
+    ...(spent.turns === 0
+      ? []
+      : [`${spent.turns} turns of Stephen's on fixed input`]),
+    ...(spent.drawings === 0 ? [] : [`${spent.drawings} drawings`]),
+  ];
+  return `${parts.join(", ")} (the turns of an interview on a link are counted by the onboarding; turns and drawings on fixed input aren't priced)`;
+};
 
 /** The local core, as Grasp's staff member of the stack. */
 export interface Core {
@@ -110,12 +128,12 @@ export interface Core {
   via: LabVia;
 }
 
-/** Asks `/api/lab`, as staff. */
-const labCall = async (
+/** Posts to `/api/lab`, as staff. */
+const labFetch = async (
   session: Pick<Session, "cookie">,
   body: LabRequest
-): Promise<unknown> => {
-  const response = await fetch(new URL(labPath, origin), {
+): Promise<Response> =>
+  await fetch(new URL(labPath, origin), {
     method: "POST",
     headers: {
       origin,
@@ -124,6 +142,13 @@ const labCall = async (
     },
     body: JSON.stringify(body),
   });
+
+/** Asks `/api/lab`, as staff. */
+const labCall = async (
+  session: Pick<Session, "cookie">,
+  body: LabRequest
+): Promise<unknown> => {
+  const response = await labFetch(session, body);
   if (!response.ok) {
     throw await refusalOf(response, "The lab's call to core");
   }
@@ -228,21 +253,70 @@ export interface Link {
   ) => Promise<StephenTurn>;
 }
 
-/** A turn, as the page reads its stream: the whole turn, or why it failed. */
-const turnOf = async (response: Response): Promise<StephenTurn> => {
+/**
+ * A turn, as the page reads its stream: the whole turn, or why it failed.
+ * With `early`, as soon as his line and where the interview goes are in,
+ * as a page does when someone talks on: what he would write down is then
+ * never waited for, and the turn is given up, which is half of what a
+ * turn takes. `early` is the part the interview was in.
+ */
+const turnOf = async (
+  response: Response,
+  early?: InterviewPhase
+): Promise<StephenTurn> => {
   if (!response.ok) {
     throw await refusalOf(response, "Stephen's turn");
   }
-  const { events } = turnEvents(`${await response.text()}\n`);
-  for (const event of events) {
-    if ("turn" in event) {
-      return event.turn;
+  const reader: ReadableStreamDefaultReader<Uint8Array> | undefined =
+    response.body?.getReader();
+  if (reader === undefined) {
+    throw new CoreCallError("Stephen's turn ended without a turn.", 502);
+  }
+  const decoder = new TextDecoder();
+  let rest = "";
+  let line: EarlyLine | undefined = undefined;
+  let next: EarlyNext | undefined = undefined;
+  for (;;) {
+    // oxlint-disable-next-line no-await-in-loop -- the stream comes a piece at a time
+    const { done, value } = await reader.read();
+    const arrived = turnEvents(
+      `${rest}${done ? "\n" : decoder.decode(value, { stream: true })}`
+    );
+    ({ rest } = arrived);
+    for (const event of arrived.events) {
+      if ("turn" in event) {
+        // oxlint-disable-next-line no-await-in-loop -- once, before it returns
+        await reader.cancel();
+        return event.turn;
+      }
+      if ("error" in event) {
+        throw new CoreCallError(`Stephen's turn: ${event.error}`, event.status);
+      }
+      if ("line" in event) {
+        ({ line } = event);
+      }
+      if ("next" in event) {
+        ({ next } = event);
+      }
     }
-    if ("error" in event) {
-      throw new CoreCallError(`Stephen's turn: ${event.error}`, event.status);
+    if (early !== undefined && line !== undefined && next !== undefined) {
+      // oxlint-disable-next-line no-await-in-loop -- once, before it returns
+      await reader.cancel();
+      return {
+        say: line.say,
+        tone: line.tone,
+        phase: next.phase ?? early,
+        facts: [],
+        changes: [],
+        wants: next.wants,
+        more: false,
+        approved: false,
+      };
+    }
+    if (done) {
+      throw new CoreCallError("Stephen's turn ended without a turn.", 502);
     }
   }
-  throw new CoreCallError("Stephen's turn ended without a turn.", 502);
 };
 
 /** Someone's link on the local core. */
@@ -281,6 +355,48 @@ export const linkOn = (link: string): Link => {
           )
       ),
   };
+};
+
+/**
+ * One of Stephen's turns on fixed input, with who it is with given: the
+ * same turn a link gets (`/api/lab`, core's onboarding/lab.ts). With
+ * `lineOnly`, only his line and where the interview goes are waited for.
+ */
+export const turnOn = async (
+  core: Core,
+  who: LabWho,
+  turn: Omit<InterviewTurnRequest, "secret" | "key">,
+  { lineOnly = false }: { lineOnly?: boolean } = {}
+): Promise<StephenTurn> => {
+  const taken = await whileBusy(
+    async () =>
+      await turnOf(
+        await labFetch(core.session, { action: "turn", who, turn }),
+        lineOnly ? turn.phase : undefined
+      )
+  );
+  spent.turns += 1;
+  return taken;
+};
+
+/** Who someone on the roster is, as a turn of theirs would know it; null when they aren't on it. */
+export const contextOf = async (
+  core: Core,
+  person: string
+): Promise<LabWho | null> =>
+  labContextSchema.parse(
+    await labCall(core.session, { action: "context", person })
+  ).who;
+
+/** Every piece of work of the local core, drawn again from what its people agreed to. */
+export const drawnAgain = async (
+  core: Core
+): Promise<LabDrawings["drawings"]> => {
+  const { drawings } = labDrawingsSchema.parse(
+    await whileBusy(async () => await labCall(core.session, { action: "draw" }))
+  );
+  spent.drawings += drawings.length;
+  return drawings;
 };
 
 /** Runs `work` for every item, at most `limit` at a time, keeping their order. */

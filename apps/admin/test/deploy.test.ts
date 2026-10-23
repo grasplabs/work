@@ -1405,19 +1405,22 @@ describe("making a client reachable", () => {
     const { release } = await setUp();
 
     const refused = await Promise.all(
-      ["Acme", "acme_corp", "console", "a".repeat(51)].map(async (id) => {
-        try {
-          await startDeploy(db, staff, id, release.id);
-          return "started";
-        } catch (error) {
-          return error instanceof Error && "code" in error
-            ? error.code
-            : "other";
+      ["Acme", "acme_corp", "admin", "console", "a".repeat(51)].map(
+        async (id) => {
+          try {
+            await startDeploy(db, staff, id, release.id);
+            return "started";
+          } catch (error) {
+            return error instanceof Error && "code" in error
+              ? error.code
+              : "other";
+          }
         }
-      })
+      )
     );
 
     expect(refused).toStrictEqual([
+      "invalid_client_id",
       "invalid_client_id",
       "invalid_client_id",
       "invalid_client_id",

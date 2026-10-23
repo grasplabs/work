@@ -3,6 +3,8 @@ import { authErrors, requestErrors } from "@grasp-os/shared/errors";
 import { labMaxBytes, labRequestSchema } from "@grasp-os/shared/lab";
 import type {
   LabAnswer,
+  LabContext,
+  LabDrawings,
   LabLinks,
   LabRequest,
   LabVia,
@@ -14,8 +16,10 @@ import { z } from "zod";
 import { identify } from "../auth/identity.ts";
 import { errorResponse } from "../errors.ts";
 import { gatewaySettings, modelForRole, models } from "../models.ts";
+import { readOrganization } from "../organization.ts";
 import { boundedText, jsonOf } from "../request-body.ts";
 import { isLocalDevRequest } from "../router-secret.ts";
+import { turnStream } from "./interview.ts";
 import { onboardingStore } from "./store.ts";
 
 // The Stephen Lab's way into a local core, `POST /api/lab` (GRA-337): the
@@ -25,6 +29,12 @@ import { onboardingStore } from "./store.ts";
 // rules, the budgets and the audit log. The lab holds no provider key, and
 // no bridge to anyone's subscription: what it measures is reached the way
 // the interviews themselves are.
+//
+// The benches (GRA-338) give Stephen fixed input: a turn here is the same
+// turn a link gets, with who it is with given instead of read from a link,
+// and a drawing is drawn again from what was agreed and kept nowhere.
+// Neither is counted by the onboarding: they are the lab's, not anyone's
+// interview.
 //
 // It answers on a local stack only (`vp run dev`, the same requests the
 // router-secret check lets through there), and only Grasp's staff: on a
@@ -131,11 +141,70 @@ const links = async (env: Env): Promise<Response> => {
   return Response.json(answered);
 };
 
+/** What a turn on fixed input took: the lab's, so the onboarding counts none of it. */
+const notCounted = async (): Promise<void> => {
+  await Promise.resolve();
+};
+
+/** One of Stephen's turns on fixed input: the events a link's turn has. */
+const turn = async (
+  env: Env,
+  asked: Extract<LabRequest, { action: "turn" }>,
+  requestId: string,
+  ctx: Pick<ExecutionContext, "waitUntil">
+): Promise<Response> => {
+  const { company, ...who } = asked.who;
+  return await turnStream({
+    env,
+    turn: asked.turn,
+    context: { ...who, kind: "own", terms: [] },
+    company: Promise.resolve(company),
+    requestId,
+    ctx,
+    meter: notCounted,
+  });
+};
+
+/** Who someone is, as a turn of theirs would know it. */
+const context = async (env: Env, person: string): Promise<Response> => {
+  const [found, organization] = await Promise.all([
+    onboardingStore(env).contextOf(person),
+    readOrganization(env),
+  ]);
+  const answered: LabContext = {
+    who:
+      found === null
+        ? null
+        : {
+            company: organization.name,
+            name: found.name,
+            team: found.team,
+            lead: found.lead,
+            work: found.work,
+            known: found.known,
+          },
+  };
+  return Response.json(answered);
+};
+
+/** Every piece of work, drawn again. */
+const drawings = async (env: Env, requestId: string): Promise<Response> => {
+  try {
+    const answered: LabDrawings = {
+      drawings: await onboardingStore(env).drawnAgain(),
+    };
+    return Response.json(answered);
+  } catch (error) {
+    return refusalResponse(error, requestId);
+  }
+};
+
 /** The lab's request, on a local stack, from Grasp's staff. */
 export const labResponse = async (
   request: Request,
   env: Env,
-  requestId: string
+  requestId: string,
+  ctx: Pick<ExecutionContext, "waitUntil">
 ): Promise<Response> => {
   const fetchSite = request.headers.get("sec-fetch-site");
   if (
@@ -181,6 +250,15 @@ export const labResponse = async (
   }
   if (asked.action === "via") {
     return Response.json(viaOf(env));
+  }
+  if (asked.action === "turn") {
+    return await turn(env, asked, requestId, ctx);
+  }
+  if (asked.action === "context") {
+    return await context(env, asked.person);
+  }
+  if (asked.action === "draw") {
+    return await drawings(env, requestId);
   }
   return await ask(env, person, asked, requestId);
 };

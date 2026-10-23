@@ -31,6 +31,7 @@ const toolWith = (input: z.ZodObject, resource?: string) =>
     input,
     output: z.strictObject({}),
     readOnly: true,
+    reach: "own",
     resource,
     routes: [route],
     run: async () => await Promise.resolve({ output: {} }),
@@ -139,6 +140,7 @@ describe("a tool", () => {
         input: z.strictObject({}),
         output: z.strictObject({}),
         readOnly: true,
+        reach: "own",
         routes: [route],
         run: () => {
           throw error;
@@ -182,6 +184,7 @@ describe("a tool", () => {
         input: z.strictObject({}),
         output: z.strictObject({}),
         readOnly: false,
+        reach: "own",
         routes: [{ ...route, method: "POST" }],
         run: () => {
           throw error;
@@ -245,6 +248,7 @@ describe("a tool's recovery", () => {
       input: z.strictObject({}),
       output: z.strictObject({ id: z.string() }),
       readOnly: false,
+      reach: "own",
       routes: [route, writeRoute],
       run: async (_input, effect) => {
         seen.push(effect.key);
@@ -284,6 +288,7 @@ describe("a tool's recovery", () => {
         input: z.strictObject({}),
         output: z.strictObject({}),
         readOnly: true,
+        reach: "own",
         repeatable: true,
         routes: [route],
         run: async () => await Promise.resolve({ output: {} }),
@@ -354,6 +359,7 @@ describe("a connector", () => {
             input: z.strictObject({}),
             output: z.strictObject({}),
             readOnly: true,
+            reach: "own",
             routes: [{ ...route, host: "evil.test" }],
             run: async () => await Promise.resolve({ output: {} }),
           }),
@@ -393,6 +399,7 @@ describe("a connector", () => {
               input: z.strictObject({}),
               output: z.strictObject({}),
               readOnly: true,
+              reach: "own",
               routes: [{ ...route, path }],
               run: async () => await Promise.resolve({ output: {} }),
             }),
@@ -414,6 +421,7 @@ describe("a connector", () => {
           "items.list": {
             routes: [{ ...route, ...extra }],
             readOnly: true,
+            reach: "own",
             recovery: "none",
             resource: null,
             input: [],
@@ -442,6 +450,7 @@ describe("a connector", () => {
             input: z.strictObject({}),
             output: z.strictObject({}),
             readOnly,
+            reach: "own",
             routes: methods.map((method, index) => ({
               ...route,
               method,
@@ -467,6 +476,7 @@ describe("a connector", () => {
             input: z.strictObject({}),
             output: z.strictObject({}),
             readOnly: true,
+            reach: "own",
             routes: [{ ...route, ...extra }],
             run: async () => await Promise.resolve({ output: {} }),
           }),
@@ -506,6 +516,7 @@ describe("a connector", () => {
             input,
             output: z.strictObject({}),
             readOnly: false,
+            reach: "own",
             routes: [{ ...route, method: "POST" }],
             describe: { title: "Send an item", fields },
             run: async () => await Promise.resolve({ output: {} }),
@@ -528,6 +539,26 @@ describe("a connector", () => {
       [],
     ]) {
       expect(() => described(broken)).toThrow(z.ZodError);
+    }
+  });
+
+  it("says whom each tool reaches, and doesn't build with a tool that doesn't say", () => {
+    const tool = toolWith(z.strictObject({}));
+    expect(
+      connectorWith({ tools: [tool] }).manifest.actions["items.list"]?.reach
+    ).toBe("own");
+    const { reach: _reach, ...unreached } = tool.action;
+    for (const action of [
+      unreached,
+      { ...unreached, reach: "everyone" },
+      { ...unreached, reach: null },
+    ]) {
+      expect(() =>
+        connectorManifestSchema.parse({
+          ...connectorWith({ tools: [] }).manifest,
+          actions: { "items.list": action },
+        })
+      ).toThrow(z.ZodError);
     }
   });
 
@@ -665,6 +696,7 @@ describe("generated contracts", () => {
       input: z.strictObject({}),
       output: z.strictObject({}),
       readOnly: true,
+      reach: "own",
       routes: [route],
       run: async () => await Promise.resolve({ output: {} }),
     });

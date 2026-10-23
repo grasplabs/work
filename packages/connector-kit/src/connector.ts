@@ -1,4 +1,4 @@
-import type { ConnectorProvider } from "@grasp-os/shared/connect";
+import type { ConnectorProvider, ToolReach } from "@grasp-os/shared/connect";
 import type { Json } from "@grasp-os/shared/json";
 import { z } from "zod";
 
@@ -79,6 +79,13 @@ export interface ToolDefinition<
   output: Output;
   /** Only a read-only tool runs without an idempotency key (R7). */
   readOnly: boolean;
+  /**
+   * Whom it reaches: `own`, only the person it acts for; `company`, what
+   * the company keeps together; `others`, other people (`toolReaches`).
+   * Say the furthest any call of it can reach: its class follows from this
+   * and `readOnly`, and a company turns classes on, not tools.
+   */
+  reach: ToolReach;
   /** Whether it may destroy something; any tool that isn't read-only by default. */
   destructive?: boolean;
   /**
@@ -470,7 +477,7 @@ export const defineTool = <
 >(
   definition: ToolDefinition<Input, Output>
 ): Tool => {
-  const { name, input, output, resource, readOnly, routes } = definition;
+  const { name, input, output, resource, readOnly, reach, routes } = definition;
   const recovery = recoveryOf(name, definition);
   const inputSchema = z.toJSONSchema(input, { io: "input" });
   const outputSchema = z.toJSONSchema(output, { io: "output" });
@@ -494,6 +501,7 @@ export const defineTool = <
     action: {
       routes: [...routes],
       readOnly,
+      reach,
       recovery,
       resource: resource ?? null,
       input: Object.keys(inputSchema.properties ?? {}),

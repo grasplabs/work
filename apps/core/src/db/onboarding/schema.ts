@@ -316,6 +316,18 @@ export const drawnWorks = sqliteTable("drawn_works", {
 });
 
 /**
+ * How the company's admin settled a piece of work told two ways that
+ * nobody could explain: both ways kept, or which way holds, the way most
+ * told it (`first`) or the other. Apart from the drawing, so drawing it
+ * again keeps it; it goes with the piece of work.
+ */
+export const settledWorks = sqliteTable("settled_works", {
+  work: text().primaryKey(),
+  holds: text({ enum: ["both", "first", "other"] }).notNull(),
+  at: text().notNull(),
+});
+
+/**
  * The pieces of work Grasp counts as known by hand, before the rules say
  * so: when, and by which staff member. Goes with the piece of work.
  */

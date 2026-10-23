@@ -39,6 +39,7 @@ import {
 } from "./message.tsx";
 import { signOf } from "./sign.ts";
 import type { WorkState } from "./sign.ts";
+import { AnswerSources } from "./sources.tsx";
 import { minutesAndSeconds, turnsOf, workedFor } from "./turns.ts";
 
 // A chat as the person reads it, in the prototype's look
@@ -248,6 +249,7 @@ const Reply = ({
   top,
   sign,
   onRetry,
+  sources,
 }: {
   reply: ChatPartial & {
     end?: Answer["end"];
@@ -266,6 +268,8 @@ const Reply = ({
   sign?: WorkState;
   /** Asks the last question again, offered under the last answer. */
   onRetry?: () => void;
+  /** The documents a stored answer cites, under it. */
+  sources?: ReactNode;
 }) => {
   const { t } = useLingui();
   const answer = reply.text.trim();
@@ -316,6 +320,7 @@ const Reply = ({
             </div>
           ) : null}
         </MessageContent>
+        {sources}
         {sign === undefined ? null : (
           <GraspSign said={reply.text.length} state={sign} />
         )}
@@ -378,6 +383,7 @@ const progressOf = (
 
 /** The chat's messages, and the response being written, oldest first. */
 export const ChatThread = ({
+  chatId,
   loaded,
   messages,
   output,
@@ -386,6 +392,8 @@ export const ChatThread = ({
   onRetry,
   children,
 }: {
+  /** The chat, whose answers' sources core is asked for. */
+  chatId: string;
   /** Whether core has sent the chat yet: until then, it is loading. */
   loaded: boolean;
   messages: readonly ChatMessage[];
@@ -465,6 +473,11 @@ export const ChatThread = ({
                       shown === null && message === replies.at(-1)
                         ? doing
                         : undefined
+                    }
+                    sources={
+                      message.citations.length === 0 ? undefined : (
+                        <AnswerSources chatId={chatId} messageId={message.id} />
+                      )
                     }
                     top={topOf(message.id)}
                     writing={false}

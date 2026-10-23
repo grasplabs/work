@@ -352,6 +352,7 @@ const listRows = defineTool({
     nextStart: z.number().nullable(),
   }),
   readOnly: true,
+  reach: "company",
   resource: "workbook",
   routes: [headerRoute, bodyRoute],
   run: async ({ drive, workbook, table: name, start = 0, top = 100 }) => {
@@ -392,6 +393,7 @@ const addRow = defineTool({
     values: rowSchema,
   }),
   readOnly: false,
+  reach: "company",
   destructive: false,
   resource: "workbook",
   // Recovery `none`: a row carries no tag to find it by, and the same
@@ -454,6 +456,7 @@ const updateRow = defineTool({
     after: rowSchema,
   }),
   readOnly: false,
+  reach: "company",
   destructive: true,
   resource: "workbook",
   // Recovery `repeat`: the write sets the row's cells, and a repeat finds
