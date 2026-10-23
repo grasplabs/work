@@ -1,4 +1,4 @@
-import { brainErrors } from "@grasp-os/shared/brain-api";
+import { brainErrors } from "@grasp-os/brain/contract";
 import type { Authority } from "@grasp-os/shared/permissions";
 
 import { grantedPermissions } from "../permissions.ts";

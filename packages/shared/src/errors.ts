@@ -1,3 +1,5 @@
+import { brainErrors } from "@grasp-os/brain/contract";
+import { knowledgeErrors } from "@grasp-os/brain/knowledge";
 import { z } from "zod";
 
 /**
@@ -58,6 +60,19 @@ const expectedMessages = new Map<string, string>();
 export const expectedMessageOf = (code: string): string | undefined =>
   expectedMessages.get(code);
 
+/** Adds a family's codes and messages to the expected errors. */
+const expect = (messages: Readonly<Record<string, string>>): void => {
+  for (const [code, message] of Object.entries(messages)) {
+    expectedCodes.add(code);
+    expectedMessages.set(code, message);
+  }
+};
+
+// The Brain's errors are expected errors too: the Brain defines them
+// (@grasp-os/brain) and keeps no registry of its own.
+expect(brainErrors.messages);
+expect(knowledgeErrors.messages);
+
 /**
  * Defines one family of expected errors: a fixed set of codes, each with the
  * message people see. Create errors from it, and read the code back from
@@ -67,10 +82,7 @@ export const defineErrorFamily = <Code extends string>(
   messages: Readonly<Record<Code, string>>
 ) => {
   const codes = new Set<unknown>(Object.keys(messages));
-  for (const [code, message] of Object.entries<string>(messages)) {
-    expectedCodes.add(code);
-    expectedMessages.set(code, message);
-  }
+  expect(messages);
   const isCode = (value: unknown): value is Code => codes.has(value);
   const create = (
     code: Code,

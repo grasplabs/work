@@ -1,4 +1,4 @@
-import { brainErrors } from "@grasp-os/shared/brain-api";
+import { brainErrors } from "@grasp-os/brain/contract";
 import { drizzle } from "drizzle-orm/d1";
 
 import { drainKnowledgeOutboxSoon } from "../audit-outbox.ts";

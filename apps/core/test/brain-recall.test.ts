@@ -1,4 +1,4 @@
-import type { MemoryPack, RecallInput } from "@grasp-os/shared/brain-api";
+import type { MemoryPack, RecallInput } from "@grasp-os/brain/contract";
 import type { KnowledgeApi, KnowledgeTools } from "@grasp-os/shared/knowledge";
 import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
