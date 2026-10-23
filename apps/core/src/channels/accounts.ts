@@ -151,21 +151,20 @@ export const offerChannelLink = async (
 /** Deletes links that stopped working a while ago, used or not. */
 export const sweepChannelLinks = async (env: Env, now: Date): Promise<void> => {
   const db = drizzle(env.DB);
-  const gone = await db
+  // Through a subquery: D1 binds at most 100 values to a statement.
+  const stale = db
     .select({ secretHash: channelLinks.secretHash })
     .from(channelLinks)
     .where(lt(channelLinks.expiresAt, new Date(now.getTime() - linkKeptMs)))
     .orderBy(asc(channelLinks.expiresAt))
     .limit(sweptPerRun);
+  const gone = await db
+    .delete(channelLinks)
+    .where(inArray(channelLinks.secretHash, stale))
+    .returning({ secretHash: channelLinks.secretHash });
   if (gone.length === 0) {
     return;
   }
-  await db.delete(channelLinks).where(
-    inArray(
-      channelLinks.secretHash,
-      gone.map(({ secretHash }) => secretHash)
-    )
-  );
   log.info("channel.links_deleted", { links: gone.length });
 };
 

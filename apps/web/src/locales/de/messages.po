@@ -5755,7 +5755,7 @@ msgstr "Grasp hat diese Pakete aus der npm-Registry aufgelöst und die Dateien j
 
 #: src/settings/chat-accounts.tsx
 msgid "Grasp sent this link to that account in {app}. Link it only if it is yours: Grasp then answers it as you, with what you can see."
-msgstr "Grasp hat diesen Link an dieses Konto in {app} gesendet. Verknüpfen Sie es nur, wenn es Ihres ist: Grasp antwortet ihm dann als Sie, mit dem, was Sie sehen können."
+msgstr "Grasp hat diesen Link an dieses Konto in {app} gesendet. Verknüpfen Sie es nur, wenn es Ihres ist: Grasp antwortet ihm dann in Ihrem Namen, mit dem, was Sie sehen können."
 
 #: src/dashboard/outcome-card.tsx
 msgid "Grasp sent this, but its answer was lost: nobody can tell whether it took effect. Check on {connection} before you say."

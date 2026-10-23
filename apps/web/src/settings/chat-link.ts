@@ -15,11 +15,8 @@ export const pendingChatLink = (): string | undefined => {
   }
 };
 
-/** Keeps `secret` for Settings › Security to offer; an empty one keeps nothing. */
+/** Keeps `secret` for Settings › Security to offer. */
 export const keepChatLink = (secret: string): void => {
-  if (secret === "") {
-    return;
-  }
   try {
     sessionStorage.setItem(key, secret);
   } catch {

@@ -122,9 +122,11 @@ const OpenLink = ({
     await run(async ({ channelAccounts }) => {
       await changeThenRefresh(
         async () => {
-          await channelAccounts.link(secret);
-          // Linked or not, the card shows what came of it from the list.
-          forgetChatLink();
+          const outcome = await channelAccounts.link(secret);
+          // A refusal keeps the link: the refreshed preview says why.
+          if (outcome.state === "linked") {
+            forgetChatLink();
+          }
         },
         async () => {
           await router.invalidate({ sync: true });

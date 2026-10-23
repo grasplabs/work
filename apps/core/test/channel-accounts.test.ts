@@ -276,10 +276,16 @@ describe("linking a chat account", { timeout: 60_000 }, () => {
     ]);
   });
 
-  it("delete links a day after they stopped working, used or not, and keep the rest", async () => {
-    const old = await sentLink({
-      now: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000),
-    });
+  it("delete links a day after they stopped working, used or not, more than D1 binds at once, and keep the rest", async () => {
+    const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
+    // More than the 100 values D1 binds to one statement.
+    await Promise.all(
+      Array.from(
+        { length: 120 },
+        async () => await sentLink({ now: twoDaysAgo })
+      )
+    );
+    const old = await sentLink({ now: twoDaysAgo });
     const fresh = await sentLink();
     const me = await signedInApi(idp, "user");
 
