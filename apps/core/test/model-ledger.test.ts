@@ -1204,6 +1204,38 @@ describe("the model ledger", () => {
     }).toStrictEqual({ refused: "refused", admitted: true, nia: undefined });
   });
 
+  it("refuses an admission naming a person's limit itself, which only the ledger sets from what admins set", async () => {
+    const ledger = newLedger();
+    await ledger.setPersonLimit(
+      { type: "person", userId: "ada" },
+      { monthlyMicros: 10, messagesAnHour: null },
+      null,
+      actor
+    );
+    const ownLimit = admission(50, [
+      budget(1000),
+      {
+        scope: "person",
+        key: "ada",
+        limitMicros: 1000,
+        alertMicros: null,
+        names: {},
+      },
+    ]);
+
+    const refused = await ledger.admit(ownLimit).then(
+      () => "admitted",
+      () => "refused"
+    );
+    const held = await ledger.admit(
+      admission(50, [budget(1000)], { person: { key: "ada", teams: [] } })
+    );
+    expect({ refused, held }).toStrictEqual({
+      refused: "refused",
+      held: { ok: false, scope: "person" },
+    });
+  });
+
   it("lists at most six damaged scopes in a decision's audit event, counting all, and still settles it", async () => {
     const ledger = newLedger();
     const held = admission(10, [budget(1000, `oz-${crypto.randomUUID()}`)]);

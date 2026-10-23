@@ -84,7 +84,9 @@ import {
   bindingRequestMicros,
   bindingScopes,
   budgetPeriods,
+  budgetPersonOf,
   hasBudget,
+  limitedPersonOf,
   lineageModelRequests,
   scopesFor,
 } from "./model-budgets.ts";
@@ -93,6 +95,7 @@ import type {
   Admitted as LedgerAdmitted,
   LedgerScope,
   LedgerScopeName,
+  LimitedPerson,
   Settled,
   Settlement,
 } from "./model-ledger.ts";
@@ -843,7 +846,8 @@ interface Route extends Admitted {
    * The scopes a provider request sent now counts against, in this month,
    * its run lineage's limited by the quota policy in force now, and that
    * policy's generation (none for a call with no lineage). Throws when the
-   * policy can't be read.
+   * policy, or the teams of the person it is made for, can't be read:
+   * nothing is admitted without the limits they give.
    */
   scopesNow: () => Promise<{
     period: string;
@@ -851,6 +855,11 @@ interface Route extends Admitted {
     policyGeneration: number | undefined;
     /** Whose shares of the requests in flight it takes, under the policy now. */
     fair: Fairness;
+    /**
+     * The person it is made for, and their teams, whose limit the ledger
+     * reserves it against; none for a call made for nobody.
+     */
+    person: LimitedPerson | undefined;
   }>;
   /**
    * What the call's provider requests may reserve together, under its
@@ -1110,7 +1119,10 @@ const retryAfterSeconds = (
   heldBy: readonly LedgerScopeName[],
   heldUntil: number
 ): number => {
-  if (!(isThePerson(trigger) && heldBy.every((scope) => scope === "user"))) {
+  // The limit admins set for the person counts their own calls, as their
+  // user scope does.
+  const own = heldBy.every((scope) => scope === "user" || scope === "person");
+  if (!(isThePerson(trigger) && own)) {
     return busyRetry.sharedSeconds;
   }
   const waitMs = heldUntil - Date.now();
@@ -1462,7 +1474,7 @@ const admitRequest = async (
   if ("held" in now) {
     return now;
   }
-  const { period, scopes, policyGeneration, fair } = now;
+  const { period, scopes, policyGeneration, fair, person } = now;
   const budgeted = hasBudget(scopes) || perRequest !== undefined;
   if (price === undefined && budgeted) {
     return { held: { code: "model.unpriced" } };
@@ -1499,6 +1511,7 @@ const admitRequest = async (
       reconcileAt: callDeadline + reconcileGraceMs,
       ...(policyGeneration === undefined ? {} : { policyGeneration }),
       fair,
+      ...(person === undefined ? {} : { person }),
     });
     if ("policyBehind" in admitted) {
       if (!retried) {
@@ -2489,6 +2502,10 @@ const scopesNowOf = (
     // One clock for both, so a request at a month's last instant never
     // counts its day in one month and its month in the next.
     const { month, day } = budgetPeriods(env);
+    // The person's teams as core's records have them now, so a person
+    // moved between teams is held to the right limit from their next
+    // request.
+    const person = await limitedPersonOf(env, budgetPersonOf(call));
     return {
       period: month,
       scopes: scopesOn(
@@ -2504,6 +2521,7 @@ const scopesNowOf = (
       // holds through an outage.
       policyGeneration: policy.generation,
       fair: { place, subject, resource, shares: modelSharesOf(policy) },
+      person,
     };
   };
 };
