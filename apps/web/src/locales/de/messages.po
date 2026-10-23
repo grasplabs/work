@@ -1755,7 +1755,7 @@ msgstr "Eine neue Version dieser App ist bereit"
 
 #: src/screens/screen-frame.tsx
 msgid "A new version of this domain is ready. It opens once your changes are saved."
-msgstr "Eine neue Version dieser Domäne ist bereit. Sie öffnet sich, sobald deine Änderungen gespeichert sind."
+msgstr "Eine neue Version dieser Domäne ist bereit. Sie öffnet sich, sobald Ihre Änderungen gespeichert sind."
 
 #: src/settings/chat-accounts.tsx
 msgid "A newer link was sent since. Open the latest one from the chat app."
@@ -6568,7 +6568,7 @@ msgstr "Es gibt nicht gespeicherte Änderungen oder eine Änderung ohne Rückmel
 
 #: src/screens/screen-frame.tsx
 msgid "It has changes that aren't saved, or a change it hasn't heard back about. Save them first and it switches once they are, or switch now and lose what isn't saved."
-msgstr "Es gibt nicht gespeicherte Änderungen oder eine Änderung ohne Rückmeldung. Speichere sie zuerst, dann wechselt die App, sobald sie gespeichert sind, oder wechsle jetzt und verliere, was nicht gespeichert ist."
+msgstr "Es gibt nicht gespeicherte Änderungen oder eine Änderung ohne Rückmeldung. Speichern Sie sie zuerst, dann wechselt die App, sobald sie gespeichert sind, oder wechseln Sie jetzt und verlieren Sie, was nicht gespeichert ist."
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "It has no parameters."

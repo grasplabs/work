@@ -840,6 +840,8 @@ describe("screens", { timeout: 60_000 }, () => {
   it("follows at most 20 Apps' versions on one connection", async () => {
     const builder = await personApi("builder");
     const app = await sampleApp(builder);
+    // Another App, as one App's twenty follows spend its burst of requests.
+    const other = await sampleApp(builder);
     const held = await Promise.all(
       Array.from(
         { length: 20 },
@@ -853,13 +855,13 @@ describe("screens", { timeout: 60_000 }, () => {
     const over = await outcome(
       firstVersion(
         async (onVersion) =>
-          await builder.api.screens.watchVersion(app, onVersion)
+          await builder.api.screens.watchVersion(other, onVersion)
       )
     );
     await held[0]?.release();
     const freed = await firstVersion(
       async (onVersion) =>
-        await builder.api.screens.watchVersion(app, onVersion)
+        await builder.api.screens.watchVersion(other, onVersion)
     );
     expect({ over, freed }).toStrictEqual({
       over: "screen.too_many_subscriptions",

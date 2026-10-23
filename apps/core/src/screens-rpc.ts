@@ -1731,7 +1731,9 @@ export class ScreensRpc extends CoreRpcTarget implements ScreensApi {
     onVersion: (push: AppVersionPush) => void
   ): Promise<RunSubscription> {
     return await withPerson(this.#check, async (by) => {
-      const { id } = await usableApp(this.#env, by, app);
+      // Following is a request like any other: a page that follows and
+      // lets go over and over is held to what a person may ask.
+      const id = await admitted(this.#env, by, app);
       if (!isStub(onVersion)) {
         throw screenErrors.create("screen.invalid");
       }
