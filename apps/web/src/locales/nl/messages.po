@@ -374,6 +374,10 @@ msgstr "{count, plural, one {# versie} other {# versies}}"
 msgid "{count, plural, one {# wish} other {# wishes}}"
 msgstr "{count, plural, one {# wens} other {# wensen}}"
 
+#: src/onboarding/place-picker.tsx
+msgid "{count, plural, one {Add # document} other {Add # documents}}"
+msgstr "{count, plural, one {# document toevoegen} other {# documenten toevoegen}}"
+
 #: src/chat/sources.tsx
 msgid "{count, plural, one {Answers draw on # source} other {Answers draw on # sources}}"
 msgstr "{count, plural, one {Antwoorden steunen op # bron} other {Antwoorden steunen op # bronnen}}"
@@ -545,6 +549,10 @@ msgstr "{gaps, plural, one {# leemte} other {# leemtes}}"
 #: src/brain/brain-atlas.ts
 msgid "{goals, plural, one {# goal} other {# goals}}"
 msgstr "{goals, plural, one {# doel} other {# doelen}}"
+
+#: src/onboarding/setup-steps.tsx
+msgid "{going, plural, one {The lead of # team gets their link {when}. Everyone else right after their lead has talked to me.} other {The leads of # teams get their link {when}. Everyone else right after their lead has talked to me.}}"
+msgstr "{going, plural, one {De teamleider van # team krijgt de link {when}. Alle anderen direct nadat hun teamleider met mij heeft gesproken.} other {De teamleiders van # teams krijgen hun link {when}. Alle anderen direct nadat hun teamleider met mij heeft gesproken.}}"
 
 #: src/onboarding/send-plan-form.tsx
 msgid "{going} of {count}"
@@ -3141,6 +3149,10 @@ msgstr "Kwam naar voren in {source}"
 msgid "Can {verbs} company data"
 msgstr "Kan bedrijfsdata {verbs}"
 
+#: src/onboarding/place-picker.tsx
+msgid "Can’t be read"
+msgstr "Niet leesbaar"
+
 #: src/chat/brain-questions.tsx
 #: src/chat/project-dialog.tsx
 #: src/decision-confirmation.tsx
@@ -3149,6 +3161,7 @@ msgstr "Kan bedrijfsdata {verbs}"
 #: src/inbox/item-detail.tsx
 #: src/knowledge/document.tsx
 #: src/link-confirmation.tsx
+#: src/onboarding/place-picker.tsx
 #: src/settings/invitations.tsx
 msgid "Cancel"
 msgstr "Annuleren"
@@ -3454,6 +3467,18 @@ msgstr "Kies een collectie"
 msgid "Choose a file"
 msgstr "Kies een bestand"
 
+#: src/onboarding/place-picker.tsx
+msgid "Choose documents"
+msgstr "Documenten kiezen"
+
+#: src/onboarding/setup-steps.tsx
+msgid "Choose from Google Drive"
+msgstr "Kiezen uit Google Drive"
+
+#: src/onboarding/setup-steps.tsx
+msgid "Choose from SharePoint or OneDrive"
+msgstr "Kiezen uit SharePoint of OneDrive"
+
 #: src/interview/before.tsx
 msgid "Choose who you want to be interviewed by."
 msgstr "Kies door wie je geïnterviewd wilt worden."
@@ -3498,6 +3523,7 @@ msgstr "Klik om Gebruik te openen"
 #: src/engines/store-changes.tsx
 #: src/knowledge/frame.tsx
 #: src/onboarding/interview-people.tsx
+#: src/onboarding/place-picker.tsx
 #: src/onboarding/work-rules.tsx
 #: src/routes/_shell.index.tsx
 #: src/screens/app-panel.tsx
@@ -3711,6 +3737,10 @@ msgstr "{name} koppelen"
 #: src/routes/_shell.settings.members.tsx
 msgid "Connect accounts of their own"
 msgstr "Eigen accounts koppelen"
+
+#: src/onboarding/place-picker.tsx
+msgid "Connect again"
+msgstr "Opnieuw koppelen"
 
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Connect another account"
@@ -5251,6 +5281,14 @@ msgstr "Uit al die gesprekken haal ik waar AI je team de meeste tijd bespaart."
 msgid "From before marks were kept"
 msgstr "Van voordat kenmerken werden bewaard"
 
+#: src/onboarding/place-picker.tsx
+msgid "From Google Drive. I read only the files you add."
+msgstr "Uit Google Drive. Ik lees alleen de bestanden die je toevoegt."
+
+#: src/onboarding/place-picker.tsx
+msgid "From SharePoint or OneDrive. I read only the files you add."
+msgstr "Uit SharePoint of OneDrive. Ik lees alleen de bestanden die je toevoegt."
+
 #: src/routes/_shell.onboarding.interviewers.tsx
 msgid "From the end of what someone said to the first sound of the answer, measured on their own page while they talk by voice: the middle answer of each day, and the one nine in ten were faster than."
 msgstr "Van het einde van wat iemand zei tot het eerste geluid van het antwoord, gemeten op diens eigen pagina tijdens het praten: het middelste antwoord van elke dag, en het antwoord waar negen op de tien sneller dan waren."
@@ -5770,12 +5808,24 @@ msgid "I cannot find a microphone. Plug one in and try again."
 msgstr "Ik vind geen microfoon. Sluit er een aan en probeer het opnieuw."
 
 #: src/onboarding/setup-steps.tsx
+msgid "I could not connect where your documents live. Try again with an administrator’s account, or add them here."
+msgstr "Ik kon niet koppelen waar je documenten staan. Probeer het opnieuw met een beheerdersaccount, of voeg ze hier toe."
+
+#: src/onboarding/setup-steps.tsx
 msgid "I could not find the columns. The first row should name them: name, email, team and job."
 msgstr "Ik kon de kolommen niet vinden. De eerste rij moet ze noemen: naam, e-mail, team en functie."
 
 #: src/onboarding/setup-steps.tsx
 msgid "I could not keep it. Try again in a moment."
 msgstr "Ik kon het niet bewaren. Probeer het zo nog eens."
+
+#: src/onboarding/place-picker.tsx
+msgid "I could not open this just now. Try again in a moment."
+msgstr "Ik kon dit nu niet openen. Probeer het zo nog eens."
+
+#: src/onboarding/setup-steps.tsx
+msgid "I could not reach {signIn} just now. Try again in a moment, or add the documents here."
+msgstr "Ik kon {signIn} nu niet bereiken. Probeer het zo nog eens, of voeg de documenten hier toe."
 
 #: src/onboarding/setup-steps.tsx
 msgid "I could not reach {signIn} just now. Try again in a moment, or use a staff list."
@@ -6645,6 +6695,10 @@ msgstr "Beoordeling opnieuw laden"
 msgid "Load the server code again"
 msgstr "Servercode opnieuw laden"
 
+#: src/onboarding/place-picker.tsx
+msgid "Loading"
+msgstr "Laden"
+
 #: src/activity/audit-log.tsx
 #: src/chat/thread.tsx
 #: src/frame/page-states.tsx
@@ -7396,6 +7450,10 @@ msgstr "Draait niet meer {how}"
 msgid "No longer used: {removed}"
 msgstr "Niet meer gebruikt: {removed}"
 
+#: src/onboarding/setup-steps.tsx
+msgid "No longer where it was"
+msgstr "Staat niet meer waar het stond"
+
 #: src/brain/brain-transcript.tsx
 msgid "No matches"
 msgstr "Geen treffers"
@@ -7911,6 +7969,10 @@ msgid "Not read: add it again"
 msgstr "Niet gelezen: voeg het opnieuw toe"
 
 #: src/onboarding/setup-steps.tsx
+msgid "Not read: connect it again"
+msgstr "Niet gelezen: koppel opnieuw"
+
+#: src/onboarding/setup-steps.tsx
 msgid "Not read: no connection"
 msgstr "Niet gelezen: geen verbinding"
 
@@ -8015,6 +8077,10 @@ msgstr "Nog niets gekoppeld."
 msgid "Nothing dealt with yet. What you decide here shows up in this list, and in the audit trail."
 msgstr "Nog niets afgehandeld. Wat je hier beslist, verschijnt in deze lijst en in de audittrail."
 
+#: src/onboarding/place-picker.tsx
+msgid "Nothing found"
+msgstr "Niets gevonden"
+
 #: src/landscape/faceted-filter.tsx
 #: src/landscape/filter-menu.tsx
 #: src/settings/filter-menu.tsx
@@ -8032,6 +8098,10 @@ msgstr "Er is nog niets gebeurd."
 #: src/workflows/runs.tsx
 msgid "Nothing has run yet."
 msgstr "Er is nog niets gedraaid."
+
+#: src/onboarding/place-picker.tsx
+msgid "Nothing here"
+msgstr "Hier staat niets"
 
 #: src/brain/brain-transcript.tsx
 msgid "Nothing here matches the filter."
@@ -8952,6 +9022,10 @@ msgstr "Werkonderdeel"
 #: src/onboarding/setup-steps.tsx
 msgid "pieces of work found"
 msgstr "stukken werk gevonden"
+
+#: src/onboarding/place-picker.tsx
+msgid "Places"
+msgstr "Plekken"
 
 #: src/routes/_shell.settings.billing.tsx
 msgid "Plan"
@@ -10045,6 +10119,10 @@ msgstr "Schema gestopt"
 msgid "Search"
 msgstr "Zoeken"
 
+#: src/onboarding/place-picker.tsx
+msgid "Search {name}"
+msgstr "{name} doorzoeken"
+
 #: src/landscape/filter-menu.tsx
 msgid "Search application"
 msgstr "Applicatie zoeken"
@@ -10288,6 +10366,7 @@ msgstr "Minder tonen"
 
 #: src/knowledge/nav.tsx
 #: src/onboarding/connect-steps.tsx
+#: src/onboarding/place-picker.tsx
 #: src/routes/_shell.settings.packages.index.tsx
 msgid "Show more"
 msgstr "Meer tonen"
@@ -11608,10 +11687,6 @@ msgstr "De laatste interviews voegden minder dan {stop} nieuwe feiten toe"
 msgid "The latest runs, newest first."
 msgstr "De laatste runs, nieuwste eerst."
 
-#: src/onboarding/setup-steps.tsx
-msgid "The leads of {going} teams get their link {when}. Everyone else right after their lead has talked to me."
-msgstr "De teamleiders van {going} teams krijgen hun link {when}. Alle anderen direct nadat hun teamleider met mij heeft gesproken."
-
 #: src/screens/screen-links.ts
 msgid "The link wasn't opened."
 msgstr "De link is niet geopend."
@@ -12083,6 +12158,10 @@ msgstr "Deze chat heeft beperkte gegevens gelezen: dit kan ze naar buiten sturen
 msgid "This collection has no files yet."
 msgstr "Deze collectie heeft nog geen bestanden."
 
+#: src/onboarding/place-picker.tsx
+msgid "This connection needs to be connected again."
+msgstr "Deze koppeling moet opnieuw worden gemaakt."
+
 #: src/dashboard/report.ts
 msgid "This couldn't be read when the report was made."
 msgstr "Dit kon niet worden gelezen toen het rapport werd gemaakt."
@@ -12308,6 +12387,10 @@ msgstr "Te doen"
 #: src/onboarding/setup-steps.tsx
 msgid "To everyone"
 msgstr "Aan iedereen"
+
+#: src/onboarding/setup-steps.tsx
+msgid "To everyone at {company}"
+msgstr "Aan iedereen bij {company}"
 
 #: src/dashboard/report.ts
 msgid "To keep who spoke private, a team is left out until five of its people were asked, and its count until three were heard. Neither means nobody took part."

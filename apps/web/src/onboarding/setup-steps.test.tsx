@@ -35,6 +35,7 @@ const said = (
 ): string => {
   const data: SetupData = {
     admin: "Ada",
+    company: null,
     view: view(paused, sponsor),
     documents: [],
     sendingDomain: "mail.example.test",
@@ -51,6 +52,7 @@ const said = (
     },
     directory: null,
     suites: [],
+    places: null,
     choices: noChoices,
     signIn: ["microsoft"],
     identity: {

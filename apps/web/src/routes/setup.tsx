@@ -1,11 +1,13 @@
 import { oauthProviderSchema } from "@grasp-os/shared/connect";
 import { directorySuiteSchema } from "@grasp-os/shared/directory";
 import type { OnboardingDirectory } from "@grasp-os/shared/directory";
+import type { OnboardingPlaces } from "@grasp-os/shared/document-places";
 import type { OnboardingView } from "@grasp-os/shared/onboarding";
 import { noChoices } from "@grasp-os/shared/onboarding-choices";
 import type { SetupChoices } from "@grasp-os/shared/onboarding-choices";
 import type { OnboardingDocument } from "@grasp-os/shared/onboarding-documents";
 import type { GateView } from "@grasp-os/shared/onboarding-gate";
+import type { Organization } from "@grasp-os/shared/organization";
 import { isAdmin } from "@grasp-os/shared/roles";
 import { cn } from "@grasp-os/ui/lib/utils";
 import { useLingui } from "@lingui/react/macro";
@@ -401,13 +403,31 @@ const Setup = () => {
   );
 };
 
+/**
+ * The organization's name, for the message to the team; none when it has
+ * none or core can't say, which leaves the rest of the onboarding as it is.
+ */
+const companyOf = async (
+  organization: () => Promise<Organization>
+): Promise<string | null> => {
+  try {
+    const { name } = await organization();
+    return name.trim() === "" ? null : name;
+  } catch {
+    return null;
+  }
+};
+
 /** What the onboarding reads from core. */
 interface Loaded {
   view: OnboardingView;
   documents: OnboardingDocument[];
   gate: GateView;
   choices: SetupChoices;
+  /** The organization's name, as the message to the team is addressed; null when it has none. */
+  company: string | null;
   directory: OnboardingDirectory | null;
+  places: OnboardingPlaces | null;
 }
 
 export const Route = createFileRoute("/setup")({
@@ -444,7 +464,7 @@ export const Route = createFileRoute("/setup")({
       const suite = oauthProviderSchema.safeParse(providerId);
       return suite.success ? [suite.data] : [];
     });
-    // The suites people sign in with here: their directories can be connected.
+    // The suites people sign in with here: their directories, and where their documents live, can be connected.
     const suites = directorySuites.filter((suite) =>
       signInOptions.some(({ providerId }) => providerId === suite)
     );
@@ -452,14 +472,17 @@ export const Route = createFileRoute("/setup")({
   },
   loader: async ({ context: { core } }) =>
     await loadFromCore(core, async (session): Promise<Loaded> => {
-      const [view, documents, gate, choices, directory] = await Promise.all([
-        session.onboarding.view(),
-        session.onboarding.documents(),
-        session.onboardingGate.view(),
-        session.onboarding.choices(),
-        session.onboarding.directory(),
-      ]);
-      return { view, documents, gate, choices, directory };
+      const [view, documents, gate, choices, company, directory, places] =
+        await Promise.all([
+          session.onboarding.view(),
+          session.onboarding.documents(),
+          session.onboardingGate.view(),
+          session.onboarding.choices(),
+          companyOf(async () => await session.organization.get()),
+          session.onboarding.directory(),
+          session.onboarding.documentPlaces(),
+        ]);
+      return { view, documents, gate, choices, company, directory, places };
     }),
   component: Setup,
 });

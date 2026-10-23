@@ -38,6 +38,23 @@ import {
 
 const timestamp = (name: string) => integer(name, { mode: "timestamp_ms" });
 
+/**
+ * The oldest migration whose code still runs on this database's schema,
+ * which each release declares (scripts/release): the console won't put
+ * the code of a release whose newest migration is older on it, by a
+ * rollback or a deploy.
+ *
+ * Migrations expand, then contract in a later release (AGENTS.md), so the
+ * code of the release before keeps working on a new schema, and a
+ * migration that only expands leaves this where it is. One that drops or
+ * renames what older code still uses raises it: to the migration of the
+ * first release whose code no longer used it, or, when the code stopped
+ * in the same release, to that migration's own number.
+ *
+ * 0120 dropped `admission_topics` in the release that stopped using it.
+ */
+export const compatibleFromMigration = 120;
+
 /** A person. Found by their IdP account, never by email alone. */
 export const users = sqliteTable("users", {
   id: text().primaryKey(),
@@ -594,6 +611,19 @@ export const blueprints = sqliteTable(
       .$type<BlueprintWorkflow[]>()
       .notNull()
       .default([]),
+    /**
+     * The code a built-in's release vouches for (`codeIdentity`, apps.ts):
+     * reviewed with the platform, so a copy whose version is exactly this
+     * code gets its screens' builds approved by the release (screen-
+     * builds.ts). Null for a marked version, which vouches for nothing.
+     */
+    attestedCode: text("attested_code"),
+    /**
+     * The compiler and kit (`compilerVersion`) the release vouches for
+     * `attested_code` with: a build with any other is approved by an
+     * admin, as any build. Null for a marked version.
+     */
+    attestedRelease: text("attested_release"),
     /** Who marked it; null for a built-in. */
     markedBy: text("marked_by"),
     /** When it was marked, or last installed changed. */
@@ -603,6 +633,27 @@ export const blueprints = sqliteTable(
     uniqueIndex("blueprints_app_version_idx").on(table.appId, table.version),
   ]
 );
+
+/**
+ * Where an App created from a blueprint came from (src/app-blueprints.ts):
+ * the blueprint, the version of its App a marked one was (null for a
+ * built-in), the tree it was copied from, and that tree's code
+ * (`codeIdentity`), stored under the App as a version's tree is, for an
+ * update to be merged over. Written only in the batch that creates the
+ * App from the blueprint: unlike `apps.blueprint`, a label a creator may
+ * give any App, this is core's record, which the release's vouching for a
+ * built-in's code reads.
+ */
+export const appOrigins = sqliteTable("app_origins", {
+  appId: text("app_id")
+    .primaryKey()
+    .references(() => apps.id),
+  blueprintId: text("blueprint_id").notNull(),
+  blueprintVersion: integer("blueprint_version"),
+  tree: text().notNull(),
+  code: text().notNull(),
+  createdAt: timestamp("created_at").notNull(),
+});
 
 /**
  * Every committed version of an App, never changed or deleted. `tree` is
@@ -619,6 +670,12 @@ export const appVersions = sqliteTable(
     version: integer().notNull(),
     parent: integer(),
     tree: text().notNull(),
+    /**
+     * The hash of the version's code (`codeIdentity`, apps.ts): its files
+     * but AGENTS.md, which agents write and nothing builds or runs. Null
+     * for a version committed before the column, which is no blueprint's.
+     */
+    code: text(),
     files: integer().notNull(),
     authorId: text("author_id").notNull(),
     message: text().notNull(),
