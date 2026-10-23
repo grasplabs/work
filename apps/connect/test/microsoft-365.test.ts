@@ -26,12 +26,12 @@ import {
   itemAttachmentId,
   itemIds,
   messageId,
-  messageSummary,
   movedId,
   eventId,
   pdfAttachmentId,
   pdfBase64,
   personalDrive,
+  replyDraft,
   reportText,
   spoofedId,
 } from "./fixtures/graph.ts";
@@ -574,6 +574,19 @@ describe("the Microsoft 365 connector's mail tools", () => {
   });
 });
 
+/** The write requests that reached Graph. */
+const writes = () => requests().filter(({ method }) => method !== "GET");
+
+const draftReply = async (
+  connection: Connection,
+  input: Input,
+  idempotencyKey: string
+) =>
+  await call(connection, "mail.createReplyDraft", input, {
+    resource: invoices,
+    idempotencyKey,
+  });
+
 describe("the Microsoft 365 connector's reply drafts", () => {
   const sender = "billing@northwind.example.org";
   const reply = {
@@ -584,31 +597,20 @@ describe("the Microsoft 365 connector's reply drafts", () => {
     to: [sender],
   };
   const replyPath = `${mailboxPath}/messages/${encodeURIComponent(messageId(invoices, 1))}`;
-
-  /** The write requests that reached Graph. */
-  const writes = () => requests().filter(({ method }) => method !== "GET");
-
-  const draftReply = async (
-    connection: Connection,
-    input: Input,
-    idempotencyKey: string
-  ) =>
-    await call(connection, "mail.createReplyDraft", input, {
-      resource: invoices,
-      idempotencyKey,
-    });
+  const made = replyDraft(invoices, 1, reply.subject);
+  const drafted = {
+    mailbox: invoices,
+    inReplyTo: messageId(invoices, 1),
+    id: made.id,
+    conversationId: made.conversationId,
+    webLink: made.webLink,
+  };
 
   it("draft a reply to a message's sender in its conversation, and never send it", async () => {
     const connection = await connected();
     await expect(
       outputOf(draftReply(connection, reply, "run-8:reply"))
-    ).resolves.toStrictEqual({
-      mailbox: invoices,
-      inReplyTo: messageId(invoices, 1),
-      id: messageId(invoices, 8),
-      conversationId: messageSummary(invoices, 1).conversationId,
-      webLink: expect.any(String),
-    });
+    ).resolves.toStrictEqual(drafted);
     // The message replied to is read in the bound mailbox, then the draft
     // made with the recipients and subject the call holds, the person's
     // text above the quoted message.
@@ -650,12 +652,8 @@ describe("the Microsoft 365 connector's reply drafts", () => {
           )
       )
     );
-    expect(refusals).toStrictEqual(
-      Array.from({ length: 4 }, () =>
-        expect.objectContaining({
-          error: expect.objectContaining({ code: "invalid" }),
-        })
-      )
+    expect(refusals).toMatchObject(
+      Array.from({ length: 4 }, () => ({ error: { code: "invalid" } }))
     );
     expect(writes()).toStrictEqual([]);
     // Replying to all, the message's To may be on it, in any case.
@@ -699,23 +697,17 @@ describe("the Microsoft 365 connector's reply drafts", () => {
     const repeat = await outputOf(
       draftReply(connection, reply, "run-8:reply-lost")
     );
+    // The draft found by its key is the one the lost answer made.
+    expect(found).toMatchObject({
+      mailbox: invoices,
+      inReplyTo: messageId(invoices, 1),
+      id: drafted.id,
+    });
     expect({
-      found,
       repeat,
       writesDone: graph.writesDone(),
       writes: writes().length,
-    }).toStrictEqual({
-      found: {
-        mailbox: invoices,
-        inReplyTo: messageId(invoices, 1),
-        id: messageId(invoices, 8),
-        conversationId: expect.any(String),
-        webLink: expect.any(String),
-      },
-      repeat: found,
-      writesDone: 1,
-      writes: 1,
-    });
+    }).toStrictEqual({ repeat: found, writesDone: 1, writes: 1 });
   });
 });
 

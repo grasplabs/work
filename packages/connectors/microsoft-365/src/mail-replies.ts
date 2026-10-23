@@ -74,8 +74,8 @@ const addressesOf = (
 ): Set<string> =>
   new Set(
     values.flatMap((value) => {
-      const address = value?.emailAddress?.address;
-      return address ? [address.toLowerCase()] : [];
+      const address = value?.emailAddress?.address ?? "";
+      return address === "" ? [] : [address.toLowerCase()];
     })
   );
 
