@@ -65,6 +65,7 @@ import {
   readWorkflowWatch,
   watchesWorkflow,
 } from "./screen-workflows.ts";
+import { appWorkflowNotifications } from "./workflow-notifications.ts";
 import {
   callWorkflowQuery,
   isWorkflowQueryPath,
@@ -295,7 +296,18 @@ export const invocationFor = async (
     // starting another is a child run, within its lineage's limits.
     ...(fromRun
       ? {}
-      : { workflows: appWorkflowStarts(env, authority, agent ?? null) }),
+      : {
+          workflows: appWorkflowStarts(env, authority, agent ?? null),
+          // A mutation's notifications of the App's runs, likewise: one
+          // made in a run's chain is that run's own business, left out
+          // until decided on its own.
+          notifications: appWorkflowNotifications(
+            env,
+            authority,
+            release,
+            agent ?? null
+          ),
+        }),
   };
 };
 

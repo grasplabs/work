@@ -25,11 +25,7 @@ import { auditedBatch, outboxed } from "./audit-outbox.ts";
 import { permissions } from "./db/core/schema.ts";
 import type { WorkflowStarts } from "./operations.ts";
 import { defaultMaxAttempts } from "./outbox-delivery.ts";
-import type {
-  OutboxConsumer,
-  OutboxConsumers,
-  OutboxEntry,
-} from "./outbox-delivery.ts";
+import type { OutboxEntry } from "./outbox-delivery.ts";
 import { allowingPermissionSql, grantedPermissions } from "./permissions.ts";
 import { isStaleRefusal, receiptOf } from "./workflow-starts.ts";
 
@@ -143,7 +139,7 @@ const agentAllowedSql = (
 };
 
 /** Throws once the hand-over's time is up: another has it now. */
-const requireLive = (signal: AbortSignal): void => {
+export const requireLive = (signal: AbortSignal): void => {
   if (signal.aborted) {
     throw new Error("The hand-over's time ran out");
   }
@@ -269,9 +265,10 @@ const undeliverable = (code: string) => ({ undeliverable: code });
 /**
  * Refuses (`workflow.start_denied`) a start an agent's call staged, once
  * the agent no longer holds `write` on App `app` for the person, as it
- * needed to make the call.
+ * needed to make the call: and a notification, likewise
+ * (workflow-notifications.ts).
  */
-const requireAgentAllowed = async (
+export const requireAgentAllowed = async (
   env: Env,
   app: AppId,
   principal: string,
@@ -423,18 +420,3 @@ export const dispatchStartIntent = async (
   );
   return undeliverable(code);
 };
-
-/** The consumer of a store outbox's workflow starts. */
-const startConsumer =
-  (env: Env): OutboxConsumer =>
-  async (entry) =>
-    await dispatchStartIntent(env, entry);
-
-/**
- * The consumers of each business store's outbox (data-store.ts): its
- * mutations' workflow starts. Notifications have none yet, so a commit
- * staging one is refused rather than left for nobody.
- */
-export const storeOutboxConsumers = (env: Env): OutboxConsumers => ({
-  "workflow.start": startConsumer(env),
-});

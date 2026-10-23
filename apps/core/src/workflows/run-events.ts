@@ -2,11 +2,16 @@ import { sha256Hex } from "@grasp-os/shared/encoding";
 import { runIdSchema, workflowResourceIdSchema } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
+import { decode } from "@grasp-os/workerflow/codec";
 import { z } from "zod";
 
 import { runEngine } from "./engine.ts";
 import { acceptedEventData, pinnedEventDataOf } from "./event-contracts.ts";
-import { contentType, eventTypeKey } from "./event-envelopes.ts";
+import {
+  contentType,
+  eventTypeKey,
+  storedEventSchema,
+} from "./event-envelopes.ts";
 import type { StoredEvent } from "./event-envelopes.ts";
 import { quotaPolicy } from "./quotas.ts";
 import { callingRunOf, requireCallAuthority } from "./resource-authority.ts";
@@ -60,7 +65,12 @@ import { runOf } from "./resource-runs.ts";
 //   another event is refused (`workflow.event_conflict`). One sent again
 //   once the run took it and ended, or once the authority it was sent on
 //   went, is still the event it was: answered with its ID
-//   (`acceptedEvent`), never refused as if it were lost.
+//   (`acceptedEvent`), never refused as if it were lost, and the same key
+//   with another event is a conflict there too. The inbox keeps a key as
+//   long as it keeps its event: a run restarted from an earlier step
+//   forgets the events nothing had taken (@grasp-os/workerflow,
+//   `forgetIn`), and a delivery of one sent again after that is admitted
+//   anew, as the event the restart forgot.
 
 /**
  * The attributes a listen's filter may match an event by, as the engine
@@ -141,20 +151,41 @@ const eventIdOf = async (
   return `evt_${digest.slice(0, 48)}`;
 };
 
+/** What of a delivery tells it apart from another under its key. */
+type DeliveredAs = Pick<
+  RunEventDelivery,
+  "runId" | "binding" | "source" | "key" | "type" | "data" | "subject"
+>;
+
 /**
  * The event `delivery` names, if its run's inbox took it already, ended
  * or not: a delivery sent again after its answer was lost, whatever came
- * since (the run ended, the authority it was sent on went). It admits
- * nothing.
+ * since (the run ended, the authority it was sent on went). The same key
+ * with another type, subject or data is `workflow.event_conflict`, as the
+ * inbox answers a live run. It admits nothing.
  */
 export const acceptedEvent = async (
   env: Env,
-  delivery: Pick<RunEventDelivery, "runId" | "binding" | "source" | "key">
+  delivery: DeliveredAs
 ): Promise<AdmittedEvent | undefined> => {
   const id = await eventIdOf(delivery);
-  return (await runEngine(env).hasEvent(delivery.runId, id))
-    ? { id, accepted: false }
-    : undefined;
+  const sent = await runEngine(env).eventOf(delivery.runId, id);
+  if (sent === null) {
+    return undefined;
+  }
+  const stored = storedEventSchema.safeParse(decode(sent.payload));
+  const data = z.json().safeParse(delivery.data);
+  const same =
+    stored.success &&
+    data.success &&
+    sent.type === (await eventTypeKey(delivery.binding, delivery.type)) &&
+    stored.data.type === delivery.type &&
+    stored.data.subject === delivery.subject &&
+    canonicalJson(stored.data.data) === canonicalJson(data.data);
+  if (!same) {
+    throw workflowResourceErrors.create("workflow.event_conflict");
+  }
+  return { id, accepted: false };
 };
 
 /**
@@ -164,7 +195,7 @@ export const acceptedEvent = async (
  */
 export const unlessAccepted = async (
   env: Env,
-  delivery: Pick<RunEventDelivery, "runId" | "binding" | "source" | "key">,
+  delivery: DeliveredAs,
   refusal: unknown
 ): Promise<AdmittedEvent> => {
   const accepted = await acceptedEvent(env, delivery);

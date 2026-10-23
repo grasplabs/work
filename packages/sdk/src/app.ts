@@ -10,7 +10,7 @@ import {
 import { assignable } from "./descriptor-assignable.ts";
 import { isMigration } from "./migration.ts";
 import type { Migration, MigrationManifest } from "./migration.ts";
-import { referenceData } from "./references.ts";
+import { eventReferenceData, referenceData } from "./references.ts";
 import {
   isBrowserResource,
   isResource,
@@ -195,6 +195,19 @@ export type UseManifest =
       /** A workflow it starts (an action) or stages a start of (a mutation). */
       readonly type: "workflow";
       readonly alias: string;
+    }
+  | {
+      /**
+       * An event of one of the App's workflows a mutation notifies runs
+       * of (spec 10.7.4): the workflow's alias, the event binding's, and
+       * the type and fingerprint its reference was generated with, which
+       * the host checks against the release it runs.
+       */
+      readonly type: "workflowEvent";
+      readonly workflow: string;
+      readonly alias: string;
+      readonly eventType: string;
+      readonly fingerprint: string;
     };
 
 /** One registered function, as data: what the host checks a call against. */
@@ -1019,6 +1032,28 @@ const usesOf = (
         );
       }
       return { type: "workflow", alias: use.alias };
+    }
+    const event = eventReferenceData(use);
+    if (event !== undefined) {
+      // A notification is a change staged with a commit: only a mutation
+      // stages one. An action calls a mutation that does.
+      if (fn.kind !== "mutation") {
+        refuse(
+          `\`${path}\` is a ${fn.kind}: only a mutation notifies a workflow's run, staged with its commit.`
+        );
+      }
+      if (!workflows.has(event.workflow)) {
+        refuse(
+          `\`${path}\` notifies workflow \`${event.workflow}\`, which the App's \`uses\` doesn't list.`
+        );
+      }
+      return {
+        type: "workflowEvent",
+        workflow: event.workflow,
+        alias: event.alias,
+        eventType: event.type,
+        fingerprint: event.fingerprint,
+      };
     }
     const { target, kind } = usedFunction(use, path, paths, functions);
     if (fn.kind === "mutation" && kind !== "query") {
