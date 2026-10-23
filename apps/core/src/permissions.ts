@@ -637,9 +637,28 @@ const workflowGenerationMoved = (
     .where(and(eq(workflowResources.id, id), landed));
 
 /**
+ * Refuses `send` on a workflow for anyone but an App: events reach a run
+ * only through an App's screen or mutation, so no other subject is
+ * granted what it can't use.
+ */
+const requireSenderFits = (
+  subject: PermissionSubject,
+  object: PermissionObject,
+  actions: readonly string[]
+): void => {
+  if (
+    object.type === "workflow" &&
+    subject.type !== "app" &&
+    actions.includes("send")
+  ) {
+    refuseRequest("actions: Only an App sends events to a workflow's runs.");
+  }
+};
+
+/**
  * Refuses an object `subject` has no use for: what the platform offers is
  * for an App's code; a trigger only starts, so it holds `start` on a
- * workflow and nothing else; a store's own code reaches connections and
+ * workflow and nothing else; only an App sends a workflow's runs events; a store's own code reaches connections and
  * collections alone. Only an agent writes a collection: an App, a workflow
  * and a store only read one (their collection stubs have no write), and
  * keep what they write in a business store, so `write` would give them
@@ -665,6 +684,7 @@ const requireObjectFits = (
   ) {
     refuseRequest("object: A trigger only starts a workflow.");
   }
+  requireSenderFits(subject, object, actions);
   if (
     object.type === "collection" &&
     subject.type !== "agent" &&

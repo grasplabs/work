@@ -466,6 +466,8 @@ describe("a journal of another schema", () => {
     await exec("ALTER TABLE run DROP COLUMN control_fence");
     await exec("ALTER TABLE events DROP COLUMN attributes");
     await exec("ALTER TABLE steps DROP COLUMN event_match");
+    await exec("DROP INDEX events_sender");
+    await exec("ALTER TABLE events DROP COLUMN sender");
     await exec("ALTER TABLE events DROP COLUMN reserved");
     const object = runObject("napper", id);
 

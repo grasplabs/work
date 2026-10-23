@@ -245,6 +245,7 @@ const delivery = (
     data: { jobId: "job-1", note },
     key: unique(),
     source,
+    sender: source,
     ...rest,
   };
 };

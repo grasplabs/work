@@ -14,7 +14,8 @@ import { z } from "zod";
 
 import { collections, documents } from "./db/knowledge/schema.ts";
 import { noteProvenance } from "./knowledge/access.ts";
-import { allowedFor } from "./knowledge/app-entries.ts";
+import { allowedFor } from "./knowledge/authorize.ts";
+import { portsOf } from "./knowledge/ports.ts";
 
 // What changed in the brain since a moment (`brain.changes`): one feed of
 // what core records today, newest first, a page at a time, as the person
@@ -148,7 +149,7 @@ export const brainChanges = async (
   const after = cursor === undefined ? undefined : positionOf(cursor);
   const reader = { type: "person", person } as const;
   const db = drizzle(env.KNOWLEDGE);
-  const allowed = await allowedFor(env, db, reader);
+  const allowed = await allowedFor(portsOf(env), reader);
   // One more than a page: whether another follows.
   const rows = await db
     .select({

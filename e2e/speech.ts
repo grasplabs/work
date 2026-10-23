@@ -33,6 +33,7 @@ export interface Asked {
   text: string;
   language: string;
   tone?: string;
+  speaker?: string;
 }
 
 const askedIn = (request: Request): Asked => {
@@ -47,11 +48,14 @@ const askedIn = (request: Request): Asked => {
   ) {
     throw new Error("Not a line to say");
   }
-  const tone =
-    "tone" in body && typeof body.tone === "string" ? body.tone : undefined;
-  return tone === undefined
-    ? { text: body.text, language: body.language }
-    : { text: body.text, language: body.language, tone };
+  const asked: Asked = { text: body.text, language: body.language };
+  if ("tone" in body && typeof body.tone === "string") {
+    asked.tone = body.tone;
+  }
+  if ("speaker" in body && typeof body.speaker === "string") {
+    asked.speaker = body.speaker;
+  }
+  return asked;
 };
 
 /** Answers the page's speech requests as core does, and keeps what was asked. */
