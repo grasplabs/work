@@ -10,6 +10,7 @@ import {
 } from "@grasp-os/sdk/host";
 import type { ClientTransport } from "@grasp-os/sdk/host";
 import { errorPayloadSchema } from "@grasp-os/shared/errors";
+import { appIdSchema } from "@grasp-os/shared/ids";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { builtArtifacts } from "@grasp-os/shared/screen-trust";
@@ -28,6 +29,7 @@ import type { Release } from "../src/app-releases.ts";
 import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
 import { appFor, setCurrentVersion } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
+import { appHost } from "../src/durable-objects.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import {
   grantPermission,
@@ -469,16 +471,20 @@ describe("a screen's typed send", { timeout: 180_000 }, () => {
     const runId = await startedRun(builder, app, lease, reference);
     const text = sendText(reference, runId);
 
+    let ended: unknown;
     const audited = await auditedDuring(async () => {
       const first = outcomeOf(await called(builder, app, lease, text));
-      // Its answer lost, the same send again: the same event.
+      // Its answer lost, the same send again: the same event, at once and
+      // once the run took it and ended.
       const again = outcomeOf(await called(builder, app, lease, text));
-      expect({ again, minted: isEvent(first) }).toStrictEqual({
+      ended = await runStatus(runId);
+      const afterEnd = outcomeOf(await called(builder, app, lease, text));
+      expect({ again, afterEnd, minted: isEvent(first) }).toStrictEqual({
         again: first,
+        afterEnd: first,
         minted: true,
       });
     });
-    const ended = await runStatus(runId);
     const { output } = await resourceRunFor(
       env,
       builder.acting,
@@ -519,7 +525,7 @@ describe("a screen's typed send", { timeout: 180_000 }, () => {
       late,
       runs: [before?.runs, runs?.runs],
     }).toStrictEqual({
-      sent: [false, true].map((redelivered) => ({
+      sent: [false, true, true].map((redelivered) => ({
         actor: { type: "person", userId: builder.userId },
         target: { type: "workflow_run", id: runId },
         via: "screen",
@@ -635,15 +641,46 @@ describe("a screen's typed send", { timeout: 180_000 }, () => {
 
     const withoutSend = await send(first);
     const grant = await granted(admin, builder, app, workflow, ["send"]);
-    const withSend = isEvent(await send(first));
+    const accepted = sendText(reference, first);
+    const withSend = outcomeOf(await called(builder, app, lease, accepted));
     const second = await startedRun(builder, app, lease, reference, "job-2");
     await revokePermission(env, admin.acting, grant);
     const revoked = await send(second);
+    // A send the run took before the revocation, its answer lost: still
+    // the event it was.
+    const resent = outcomeOf(await called(builder, app, lease, accepted));
 
-    expect({ withoutSend, withSend, revoked }).toStrictEqual({
+    expect({
+      withoutSend,
+      withSend: isEvent(withSend),
+      revoked,
+      resent,
+    }).toStrictEqual({
       withoutSend: "workflow.event_denied",
       withSend: true,
       revoked: "workflow.event_denied",
+      resent: withSend,
+    });
+  });
+
+  it("sends nothing from an App in restricted mode to a run that isn't restricted, and sends to one started restricted", async () => {
+    const { builder, app, reference } = await invoicesApp([
+      ["start"],
+      ["send"],
+    ]);
+    const lease = await screenOf(builder, app);
+    const before = await startedRun(builder, app, lease, reference);
+    await appHost(env, appIdSchema.parse(app)).restrict();
+    const after = await startedRun(builder, app, lease, reference, "job-2");
+    const send = async (runId: string) =>
+      outcomeOf(await called(builder, app, lease, sendText(reference, runId)));
+
+    expect({
+      unrestrictedRun: await send(before),
+      restrictedRun: isEvent(await send(after)),
+    }).toStrictEqual({
+      unrestrictedRun: "permission.restricted",
+      restrictedRun: true,
     });
   });
 });

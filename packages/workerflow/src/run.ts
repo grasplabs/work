@@ -2467,6 +2467,26 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
   }
 
   /**
+   * Whether the run's inbox took an event under delivery key `key`, taken
+   * by a wait or not, ended or not: how a sender whose answer was lost
+   * learns its event was accepted once the run can take no more. Read
+   * only: it accepts nothing.
+   */
+  hasEvent(key: string): boolean {
+    const storage = this.#store;
+    if (!hasJournal(storage.sql)) {
+      return false;
+    }
+    const [found] = storage.sql
+      .exec<{ found: number }>(
+        "SELECT 1 AS found FROM events WHERE key = ?",
+        key
+      )
+      .toArray();
+    return found !== undefined;
+  }
+
+  /**
    * Whether `sender`'s events leave room in its share of the inbox for
    * one more of `held` bytes: counted as the inbox's own counters are, its
    * payloads' and attributes' bytes, by the index of senders' events.

@@ -51,7 +51,8 @@ import {
 } from "./workflows/resource-runs.ts";
 import type { RunRow } from "./workflows/resource-runs.ts";
 import { tellQueryFollowers } from "./workflows/run-changes.ts";
-import { admitRunEvent } from "./workflows/run-events.ts";
+import { admitRunEvent, unlessAccepted } from "./workflows/run-events.ts";
+import type { AdmittedEvent } from "./workflows/run-events.ts";
 
 // What an App's screen asks of the workflows its App binds, through the
 // typed `useWorkflow` (spec 10.4; the SDK's client-workflow.ts speaks the
@@ -116,6 +117,8 @@ import { admitRunEvent } from "./workflows/run-events.ts";
 //   admits any event (workflows/run-events.ts): through an event binding
 //   its start froze, its contract pinned, its authority read again, and
 //   only while it hasn't ended (`workflow.run_ended`: a send starts no run).
+//   An App in restricted mode sends only to a run restricted itself
+//   (`permission.restricted`): its screen's data may carry what it read.
 //   The grant is read just before the inbox takes the event, in another
 //   store, so a revocation landing between the two lets that one send in;
 //   the next is refused.
@@ -133,8 +136,9 @@ import { admitRunEvent } from "./workflows/run-events.ts";
 // - A send admitted twice, or lost: each `send` call is its own key, so two
 //   calls are two events, however equal their data; a resend of one under
 //   its key, its answer lost, is the same event, answered with the same ID
-//   (the run's inbox keeps every key it took, consumed or not), and a key
-//   reused for other data is refused (`workflow.event_conflict`). A send
+//   (the run's inbox keeps every key it took, consumed or not, and answers
+//   for it even once the run ended or the grant it was sent on went), and
+//   a key reused for other data is refused (`workflow.event_conflict`). A send
 //   resumes no paused run (the event waits for the run's resume), and
 //   answers no decision, which only `decide` does.
 // - Controls this platform can't serialize yet: an independent run has no
@@ -908,25 +912,41 @@ const sent = async (
     pin,
     command.runId
   );
-  if (!(await holds(env, maySendSql(asking, resolved.alias, pin)))) {
-    throw workflowResourceErrors.create("workflow.event_denied");
-  }
-  const checked = schemaFromDescriptor(JSON.stringify(declared.data))[
-    "~standard"
-  ].validate(command.data);
-  if (checked instanceof Promise || checked.issues !== undefined) {
-    throw operationErrors.create("contract.invalid_args");
-  }
-  const admitted = await admitRunEvent(env, {
+  const delivery = {
     workflowId: pin.workflowId,
     runId: row.id,
     binding: alias,
     type,
-    data: checked.value,
     key: command.idempotencyKey,
     source: sourceOf(asking),
     sender: senderOf(asking),
-  });
+  };
+  // Refused only once it is known the run didn't take this send already:
+  // one sent again, its answer lost, is answered with its event whatever
+  // changed since (`unlessAccepted`).
+  const refuse = async (refusal: Error) =>
+    await unlessAccepted(env, delivery, refusal);
+  let admitted: AdmittedEvent;
+  if (!(await holds(env, maySendSql(asking, resolved.alias, pin)))) {
+    admitted = await refuse(
+      workflowResourceErrors.create("workflow.event_denied")
+    );
+  } else if (
+    !row.restricted &&
+    (await appHost(env, asking.app).isRestricted())
+  ) {
+    // What a restricted App's screen sends may carry what it read: never
+    // into a run that isn't restricted itself (restricted.ts).
+    admitted = await refuse(permissionErrors.create("permission.restricted"));
+  } else {
+    const checked = schemaFromDescriptor(JSON.stringify(declared.data))[
+      "~standard"
+    ].validate(command.data);
+    if (checked instanceof Promise || checked.issues !== undefined) {
+      throw operationErrors.create("contract.invalid_args");
+    }
+    admitted = await admitRunEvent(env, { ...delivery, data: checked.value });
+  }
   const db = drizzle(env.DB);
   // Every send the run took, a resend of one too: a resend may follow a
   // first answer lost before it was recorded here.

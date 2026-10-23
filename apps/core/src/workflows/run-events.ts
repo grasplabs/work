@@ -57,7 +57,10 @@ import { runOf } from "./resource-runs.ts";
 // - The same event delivered twice. Its key is the engine's delivery key:
 //   the same key, type, data and attributes again is the same event,
 //   accepted once, and answered with the same ID; the same key with
-//   another event is refused (`workflow.event_conflict`).
+//   another event is refused (`workflow.event_conflict`). One sent again
+//   once the run took it and ended, or once the authority it was sent on
+//   went, is still the event it was: answered with its ID
+//   (`acceptedEvent`), never refused as if it were lost.
 
 /**
  * The attributes a listen's filter may match an event by, as the engine
@@ -123,6 +126,54 @@ export interface AdmittedEvent {
   readonly accepted: boolean;
 }
 
+/** The ID the host mints for an event of `delivery`'s run, binding, source and key. */
+const eventIdOf = async (
+  delivery: Pick<RunEventDelivery, "runId" | "binding" | "source" | "key">
+): Promise<string> => {
+  const digest = await sha256Hex(
+    canonicalJson([
+      delivery.runId,
+      delivery.binding,
+      delivery.source,
+      delivery.key,
+    ])
+  );
+  return `evt_${digest.slice(0, 48)}`;
+};
+
+/**
+ * The event `delivery` names, if its run's inbox took it already, ended
+ * or not: a delivery sent again after its answer was lost, whatever came
+ * since (the run ended, the authority it was sent on went). It admits
+ * nothing.
+ */
+export const acceptedEvent = async (
+  env: Env,
+  delivery: Pick<RunEventDelivery, "runId" | "binding" | "source" | "key">
+): Promise<AdmittedEvent | undefined> => {
+  const id = await eventIdOf(delivery);
+  return (await runEngine(env).hasEvent(delivery.runId, id))
+    ? { id, accepted: false }
+    : undefined;
+};
+
+/**
+ * `refusal`, unless the run took `delivery` already (`acceptedEvent`):
+ * then that event, its answer lost. For a caller refusing a delivery on
+ * authority of its own, as the inbox does on the run's.
+ */
+export const unlessAccepted = async (
+  env: Env,
+  delivery: Pick<RunEventDelivery, "runId" | "binding" | "source" | "key">,
+  refusal: unknown
+): Promise<AdmittedEvent> => {
+  const accepted = await acceptedEvent(env, delivery);
+  if (accepted === undefined) {
+    throw refusal;
+  }
+  return accepted;
+};
+
 /**
  * Admits `delivery` to its run's inbox, as the header says: its ID, and
  * whether this delivery was the first of it. Refused before anything is
@@ -148,7 +199,11 @@ export const admitRunEvent = async (
   }
   const run = await callingRunOf(env, event.workflowId, event.runId);
   if (run === undefined) {
-    throw workflowResourceErrors.create("workflow.run_ended");
+    return await unlessAccepted(
+      env,
+      event,
+      workflowResourceErrors.create("workflow.run_ended")
+    );
   }
   const binding = run.bindings.get(event.binding);
   const descriptor =
@@ -162,7 +217,11 @@ export const admitRunEvent = async (
     await requireCallAuthority(env, run, binding);
   } catch (error) {
     if (workflowResourceErrors.codeOf(error) === "workflow.call_denied") {
-      throw workflowResourceErrors.create("workflow.event_denied");
+      return await unlessAccepted(
+        env,
+        event,
+        workflowResourceErrors.create("workflow.event_denied")
+      );
     }
     throw error;
   }
@@ -174,10 +233,7 @@ export const admitRunEvent = async (
   if (Date.now() - row.createdAt.getTime() >= policy.limits.workflowAgeMs) {
     throw workflowResourceErrors.create("workflow.event_refused");
   }
-  const digest = await sha256Hex(
-    canonicalJson([event.runId, event.binding, event.source, event.key])
-  );
-  const id = `evt_${digest.slice(0, 48)}`;
+  const id = await eventIdOf(event);
   const stored: StoredEvent = {
     id,
     source: event.source,
