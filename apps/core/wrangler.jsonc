@@ -8,6 +8,11 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-09-15",
   "compatibility_flags": ["nodejs_compat"],
+  // Microsoft's validator under the Chat SDK's Teams adapter fetches its
+  // keys through the channel door's fetch, not Node's https
+  // (src/channels/microsoft-keys.ts). vite.config.ts does the same for the
+  // tests.
+  "alias": { "jwks-rsa": "./src/channels/jwks-rsa.ts" },
   // The router reaches core on its workers.dev address, where every request
   // must carry the router secret. Preview URLs stay off: each would serve an
   // uploaded version of core, older ones included, at an address of its own.

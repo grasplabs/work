@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { builtinModules } from "node:module";
 
 import {
   cloudflareTest,
@@ -110,6 +111,9 @@ export const screenTests = [
   "test/workflow-type-check.test.ts",
 ];
 
+/** What core has in `jwks-rsa`'s place, in its build and its tests. */
+const jwksStandIn = `${import.meta.dirname}/src/channels/jwks-rsa.ts`;
+
 /** Core's Worker test setup, shared by each of core's test projects. */
 export const coreProject = (
   test: UserWorkspaceConfig["test"],
@@ -154,6 +158,32 @@ export const coreProject = (
       // Tests here build Apps and run workflows in workerd, which takes far
       // longer than Vitest's 5 s default, most of all on a loaded CI runner.
       testTimeout: 60_000,
+      // The Chat SDK's Teams adapter stands on Microsoft's Teams SDK:
+      // CommonJS that requires Node's built-ins, MSAL's ESM and
+      // OpenTelemetry's, whose files import each other without extensions.
+      // The module runner can't load that from workerd one file at a time,
+      // so the SDK is pre-bundled, as Wrangler bundles it for a deployment,
+      // `jwks-rsa` replaced as there (the alias below), and the built-ins
+      // left to workerd's nodejs_compat. The adapter and `chat` stay out of
+      // the bundle, so there is one Chat SDK.
+      deps: {
+        optimizer: {
+          ssr: {
+            enabled: true,
+            include: [
+              "@chat-adapter/teams > @microsoft/teams.api",
+              "@chat-adapter/teams > @microsoft/teams.apps",
+              "@chat-adapter/teams > @microsoft/teams.cards",
+              "@chat-adapter/teams > @microsoft/teams.graph",
+              "@chat-adapter/teams > @microsoft/teams.graph-endpoints",
+            ],
+            rolldownOptions: {
+              platform: "node",
+              external: [...builtinModules, /^node:/u],
+            },
+          },
+        },
+      },
       ...test,
       // Setup files one after another, as listed (Vitest's default runs
       // them at once): the check of the runtime reports before
@@ -167,6 +197,9 @@ export const coreProject = (
       alias: [
         { find: /^#blueprints$/u, replacement: testBlueprintsModule },
         { find: /^#version$/u, replacement: testVersionModule },
+        // As in core's build (wrangler.jsonc): Microsoft's keys through
+        // the channel door's fetch (src/channels/microsoft-keys.ts).
+        { find: /^jwks-rsa$/u, replacement: jwksStandIn },
       ],
     },
     plugins: [
