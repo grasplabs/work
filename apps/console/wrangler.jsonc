@@ -100,6 +100,14 @@
       "binding": "APPLY_CLIENT",
       "class_name": "ApplyClient",
     },
+    // Follows a build of an integration by Grasp's agent through its
+    // stages and waits (src/builds/workflow.ts): an instance per build,
+    // one build per app.
+    {
+      "name": "grasp-os-integration-build",
+      "binding": "INTEGRATION_BUILD",
+      "class_name": "IntegrationBuild",
+    },
     // Provisions a client placed in a hosting destination
     // (src/hosting/workflow.ts): an instance per attempt, each claimed in
     // D1 first, all resuming the client's one operation.
