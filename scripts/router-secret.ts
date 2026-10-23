@@ -1,6 +1,6 @@
 /**
  * Prints a client's router secret, derived from the router key as the router
- * derives it, so a core the console doesn't manage yet (grasp-os-staging,
+ * derives it, so a core the admin doesn't manage yet (grasp-os-staging,
  * grasp-os-internal) can be given it by hand:
  *
  *   op run --env-file router.env -- node scripts/router-secret.ts <clientId> <generation> \

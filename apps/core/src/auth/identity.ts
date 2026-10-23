@@ -84,7 +84,7 @@ export const memberOf = async (
 /**
  * A Grasp staff member's role and scope now, from the sign-in config:
  * `undefined` once the staff window has closed, they are no longer on the
- * staff list the console keeps, the company's admin ended staff access,
+ * staff list the admin keeps, the company's admin ended staff access,
  * or, with the onboarding scope, 7 days after Grasp's go (all checked now,
  * not only when they signed in).
  */

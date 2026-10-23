@@ -4,10 +4,10 @@ import type { z } from "zod";
 
 import { derivedHmacKey } from "./derived-keys.ts";
 
-// What the console sends core, signed: lowercase hex HMAC-SHA256 of the
+// What the admin sends core, signed: lowercase hex HMAC-SHA256 of the
 // body, in `platformUpdateSignatureHeader`, with a key both derive from
-// core's auth secret for one purpose (`hkdfHmacKey`), which the console
-// derives from its client key. So only the console can make one; the
+// core's auth secret for one purpose (`hkdfHmacKey`), which the admin
+// derives from its client key. So only the admin can make one; the
 // router secret it passes first only says it came through the router, as
 // everyone's request does. Each body carries when it was sent, and is
 // taken only within a few minutes of that, so one caught on its way can't
@@ -35,7 +35,7 @@ const hexBytes = (hex: string): Uint8Array<ArrayBuffer> =>
   );
 
 /**
- * What the console's signed `request` carries, checked against `schema`
+ * What the admin's signed `request` carries, checked against `schema`
  * and its `sentAt` against core's clock, or why it's refused.
  */
 export const consoleSigned = async <T extends { sentAt: string }>(

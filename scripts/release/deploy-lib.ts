@@ -4,7 +4,7 @@
  * from the bytes `verifyRelease` checked against the manifest, and a
  * wrangler.json that says what the manifest says and nothing else. The
  * modules go up unbundled (`no_bundle`), each with the type the manifest
- * gives it, so the Worker staging runs is the release the console rolls
+ * gives it, so the Worker staging runs is the release the admin rolls
  * out, byte for byte, not a second build of the same commit.
  *
  * The bindings are the manifest's, mapped back onto Wrangler's config
@@ -126,7 +126,7 @@ const addBinding = (
       return;
     }
     case "d1": {
-      // The placeholder the console fills in with the account's id;
+      // The placeholder the admin fills in with the account's id;
       // Wrangler finds the database by its name instead.
       const database = worker.d1Databases.find(
         (entry) => entry.binding === binding.name

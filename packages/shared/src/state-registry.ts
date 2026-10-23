@@ -5,7 +5,7 @@
  * key prefix. Each says which module owns it, whether it is authoritative
  * or derived, and whether a client's export carries it.
  *
- * Pure data, so core (the export) and the console (the move) read the same
+ * Pure data, so core (the export) and the admin (the move) read the same
  * list. `vp run check:state-registry` (scripts/check-state-registry.ts)
  * fails when this list and the repo differ either way: a database, table,
  * Durable Object class or binding, or bucket without an entry, or an entry
@@ -852,10 +852,10 @@ export const clientStateRegistry: ClientStateRegistry = {
     connect: { config: "apps/connect/wrangler.jsonc" },
   },
   notClientState: {
-    "apps/console/wrangler.jsonc":
-      "The staff console runs once, in grasp-os-ops: its state is Grasp's, about clients.",
+    "apps/admin/wrangler.jsonc":
+      "Grasp's admin runs once, in grasp-os-ops: its state is Grasp's, about clients.",
     "apps/router/wrangler.jsonc":
-      "The router runs once, in grasp-os-ops, and holds only hostnames the console writes.",
+      "The router runs once, in grasp-os-ops, and holds only hostnames the admin writes.",
   },
   d1: [coreDb, knowledgeDb, connectDb],
   durableObjects: [

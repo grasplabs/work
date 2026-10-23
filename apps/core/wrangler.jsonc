@@ -1,4 +1,4 @@
-// grasp-os-staging deployment. Client deployments are provisioned by the console,
+// grasp-os-staging deployment. Client deployments are provisioned by the admin,
 // which creates the D1 databases and R2 buckets below in the EU jurisdiction;
 // Durable Objects run in it through `jurisdiction("eu")` (src/durable-objects.ts),
 // workflow runs included: each is a Durable Object of its own.
@@ -41,7 +41,7 @@
     "not_found_handling": "single-page-application",
     "run_worker_first": true,
   },
-  // The console sets the deployment config vars below (SIGN_IN,
+  // The admin sets the deployment config vars below (SIGN_IN,
   // MODEL_GATEWAY, PLATFORM_CHANGE) through the API; without this, every deploy
   // would delete them, as Wrangler deletes the vars it doesn't find here.
   "keep_vars": true,
@@ -54,7 +54,7 @@
   // and encrypts sign-in state. CAPABILITY_SIGNING_KEY is shared with
   // connect: core signs the capability every call to connect carries.
   //
-  // Sign-in is deployment config the console sets, not listed here: the
+  // Sign-in is deployment config the admin sets, not listed here: the
   // `SIGN_IN` var (src/auth/config.ts) and the client secret of each IdP it
   // names, ENTRA_CLIENT_SECRET and GOOGLE_CLIENT_SECRET. Without them nobody
   // can sign in.
@@ -97,8 +97,8 @@
   // And the runtime profile, `RUNTIME_PROFILE` (src/code-mode.ts): only
   // `cloudflare` makes Code Mode's run record claim the CPU limit as
   // enforced. Not a var here, which local dev and tests read too: staging's
-  // deploy script passes it (package.json), and the console sets it on every
-  // client deploy (apps/console/src/deploy/core-config.ts). Plain workerd
+  // deploy script passes it (package.json), and the admin sets it on every
+  // client deploy (apps/admin/src/deploy/core-config.ts). Plain workerd
   // and on-prem say `workerd` (scripts/workerd-smoke-config.ts).
   //
   // Local dev reads none of these from .dev.vars (Wrangler loads only the

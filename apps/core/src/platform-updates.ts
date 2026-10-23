@@ -17,7 +17,7 @@ import { consoleSigned } from "./console-signed.ts";
 import { platformVersions } from "./db/core/schema.ts";
 import { errorResponse } from "./errors.ts";
 
-// Platform updates in the client's Activity: every version the console
+// Platform updates in the client's Activity: every version the admin
 // deploys carries a `PLATFORM_CHANGE` var (@grasp-os/shared/platform-change)
 // saying who changed what. The every-minute cron inserts the version
 // running now (the `CF_VERSION_METADATA` binding) into `platform_versions`,
@@ -26,11 +26,11 @@ import { errorResponse } from "./errors.ts";
 // recorded at most once, however many cron runs see it at the same time,
 // and however often isolates of two versions alternate on the cron during
 // a gradual rollout. A rollback to a version already recorded is not
-// recorded again here: the console tells core of it (`platformUpdatePath`,
+// recorded again here: the admin tells core of it (`platformUpdatePath`,
 // below). The event waits in core's outbox for the cron's drain, this
 // run's or the next.
 //
-// A version made outside the console (a `wrangler deploy`, which keeps the
+// A version made outside the admin (a `wrangler deploy`, which keeps the
 // vars) carries the previous version's `PLATFORM_CHANGE`; the event names
 // the version's own ID and creation time, so a reader can tell. Without
 // the var, or with one that doesn't parse, the change is `unknown`.
@@ -117,13 +117,13 @@ export const recordPlatformUpdate = async (
 };
 
 // A platform update that made no new version, a rollback to a version
-// core has run before, never reaches the cron above: the console tells
+// core has run before, never reaches the cron above: the admin tells
 // core of it instead, at `platformUpdatePath`, signed (console-signed.ts).
 // It's recorded as `platform.updated`, the way the cron records a new
 // version, with the version the rollback went back to.
 
 /**
- * Takes the console's notice of a platform update that made no new
+ * Takes the admin's notice of a platform update that made no new
  * version, and records it as `platform.updated`: 204. Anything but a
  * `POST` is a path core doesn't serve; a notice that's too large,
  * unsigned, signed otherwise, malformed or stale is refused (403) and

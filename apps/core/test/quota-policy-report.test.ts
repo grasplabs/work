@@ -16,13 +16,13 @@ import { allEvents } from "./audit-events.ts";
 import { lastGeneration, nextPolicy, withQuotas } from "./quota-policies.ts";
 import { routed } from "./sign-in.ts";
 
-// The quota policy core applies, for the console (GRA-600), and the audit
+// The quota policy core applies, for the admin (GRA-600), and the audit
 // trail of each generation core records. The ways it can fail, tried
-// first: anyone but the console reading it (unsigned, signed with another
+// first: anyone but the admin reading it (unsigned, signed with another
 // key or for another purpose, sent long ago, no request at all), and the
 // trail logging a generation twice, or one core never recorded.
 
-/** `body`'s signature as the console makes it, for `purpose`. */
+/** `body`'s signature as the admin makes it, for `purpose`. */
 const signatureOf = async (
   body: string,
   secret = env.BETTER_AUTH_SECRET,
