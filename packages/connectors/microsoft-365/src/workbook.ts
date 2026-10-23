@@ -30,6 +30,9 @@ import {
 // addressed by its index in the table's body, which moves when rows are
 // added, removed or sorted above it: a change names the row as it was
 // read (`before`), and goes ahead only while the row still holds it.
+// Graph's workbook API takes no condition (`If-Match`) on a range's
+// write, so the check is a read just before the write: a change someone
+// makes in Excel between the two, a round trip apart, isn't seen.
 //
 // Excel answers a day as a serial number (46316 is 2026-10-21), and runs
 // a cell typed as `=...`, `@...`, or `+` or `-` before a letter, as a
@@ -498,11 +501,10 @@ const updateRow = defineTool({
       )
     ) {
       // Already as asked: a repeat of this call, or a change to what is.
+      // Nothing is written, and what the row held before isn't seen, so
+      // no change is said: the caller's `before` is only what they read.
       const stood = writtenRow(columns, wanted, cells);
-      return {
-        output: { ...output, after: stood },
-        change: { before: output.before, after: stood },
-      };
+      return { output: { ...output, after: stood } };
     }
     if (
       !was.every((cell, index) =>

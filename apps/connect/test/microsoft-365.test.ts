@@ -1159,10 +1159,33 @@ describe("the Microsoft 365 connector's Excel tools", () => {
     await expect(
       toolError(update(northwind, 999, "run-4:stale"))
     ).resolves.toMatchObject({ error: { code: "conflict" } });
+    // One asking for what the row already holds writes nothing, and keeps
+    // no change: the `before` it names was never seen in the row.
+    const again = await outputOf(
+      update(withAmount(northwind, 5), 1350, "run-4:again")
+    );
+    const keptAfter = await drizzle(env.DB)
+      .select()
+      .from(callChanges)
+      .where(eq(callChanges.connectionId, connection.id));
     expect({
       amount: valuesHeld()[0]?.[3]?.value,
+      again,
+      kept: keptAfter.length,
       patches: sentAs("PATCH"),
-    }).toStrictEqual({ amount: 1350, patches: 1 });
+    }).toStrictEqual({
+      amount: 1350,
+      again: {
+        drive: financeDrive,
+        workbook: register,
+        table: supplierTable,
+        row: 0,
+        before: withAmount(northwind, 5),
+        after: withAmount(northwind, 1350),
+      },
+      kept: 1,
+      patches: 1,
+    });
   });
 
   it("never write a formula's value over it: a change keeps the formula a cell holds, unconfirmed, or is refused", async () => {

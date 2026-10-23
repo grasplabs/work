@@ -299,6 +299,9 @@ const landscapeScopes = [
 const microsoftLandscape: OAuthProviderConfig = {
   ...microsoft,
   id: "microsoft-landscape",
+  // Read-only: the write a Microsoft 365 renewal must still hold isn't
+  // asked for here, so its renewal requires nothing of it.
+  renewalRequires: [],
   // No connector: its connection takes no calls, only core's sync reads it.
   server: "microsoft-landscape",
   scopes: landscapeScopes,
@@ -400,6 +403,9 @@ const microsoftDirectoryScopes = [
 const microsoftDirectory: OAuthProviderConfig = {
   ...microsoft,
   id: "microsoft-directory",
+  // Read-only: the write a Microsoft 365 renewal must still hold isn't
+  // asked for here, so its renewal requires nothing of it.
+  renewalRequires: [],
   // No connector: its connection takes no calls, only core's read uses it.
   server: "microsoft-directory",
   scopes: microsoftDirectoryScopes,
@@ -489,6 +495,9 @@ const microsoftDocumentsScopes = [
 const microsoftDocuments: OAuthProviderConfig = {
   ...microsoft,
   id: "microsoft-documents",
+  // Read-only: the write a Microsoft 365 renewal must still hold isn't
+  // asked for here, so its renewal requires nothing of it.
+  renewalRequires: [],
   // No connector: its connection takes no calls, only core's reads use it.
   server: "microsoft-documents",
   scopes: microsoftDocumentsScopes,
