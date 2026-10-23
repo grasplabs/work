@@ -149,10 +149,10 @@ const interviewCall = async (body: object): Promise<unknown> => {
 
 /** Keeps `progress` on a person's link, from a device that opens it as their page does. */
 const interviewOn = async (
-  path: string,
+  link: string,
   progress: InterviewProgress
 ): Promise<void> => {
-  const secret = path.split("#")[1] ?? "";
+  const secret = link.split("#")[1] ?? "";
   const session = await interviewCall({ action: "session", secret });
   const key =
     typeof session === "object" &&
@@ -732,7 +732,7 @@ test("while Stephen talks to the team, the admin sees the numbers, no team under
     for (const [lead, team] of [
       [`lea-${run}`, sales],
       [`ona-${run}`, ops],
-    ]) {
+    ] as const) {
       talked.run(lead, team, at, at, at);
     }
   });
