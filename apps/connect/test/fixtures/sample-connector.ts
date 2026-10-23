@@ -77,6 +77,7 @@ export default defineConnector({
       }),
       output: z.strictObject({ items: z.array(itemSchema) }),
       readOnly: true,
+      reach: "own",
       resource: "mailbox",
       routes: [
         {
@@ -115,6 +116,7 @@ export default defineConnector({
         subject: z.string().nullable(),
       }),
       readOnly: false,
+      reach: "own",
       resource: "mailbox",
       routes: [
         {
@@ -156,6 +158,7 @@ export default defineConnector({
       }),
       output: z.strictObject({ id: z.string() }),
       readOnly: false,
+      reach: "own",
       resource: "mailbox",
       routes: [
         {
@@ -202,6 +205,7 @@ export default defineConnector({
       input: probeInput,
       output: attemptSchema,
       readOnly: true,
+      reach: "own",
       routes: [
         { method: "GET", host: sampleHost, path: "/v1/probe/{case}" },
         { method: "POST", host: sampleHost, path: "/v1/probe/{case}" },
@@ -215,6 +219,7 @@ export default defineConnector({
       input: probeInput.extend({ mailbox: z.string().min(1) }),
       output: attemptSchema,
       readOnly: true,
+      reach: "own",
       resource: "mailbox",
       routes: [
         {
@@ -231,6 +236,7 @@ export default defineConnector({
       input: probeInput,
       output: attemptSchema,
       readOnly: true,
+      reach: "own",
       routes: [
         {
           method: "GET",
@@ -251,6 +257,7 @@ export default defineConnector({
         found: z.string(),
       }),
       readOnly: true,
+      reach: "own",
       routes: [],
       run: async () => {
         let workers: { env?: object; exports?: object } = {};
@@ -278,6 +285,7 @@ export default defineConnector({
       input: z.strictObject({}),
       output: z.strictObject({ error: z.string().nullable() }),
       readOnly: true,
+      reach: "own",
       routes: [],
       run: async () => {
         try {
@@ -307,6 +315,7 @@ export default defineConnector({
         error: z.string().nullable(),
       }),
       readOnly: true,
+      reach: "own",
       routes: [],
       run: async () => {
         const url = `https://${sampleHost}/v1/probe/cached`;
@@ -325,6 +334,7 @@ export default defineConnector({
       input: z.strictObject({ value: z.string() }),
       output: z.strictObject({ previous: z.string().nullable() }),
       readOnly: true,
+      reach: "own",
       routes: [],
       run: async ({ value }) => {
         const previous = remembered;

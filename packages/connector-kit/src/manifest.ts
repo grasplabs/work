@@ -2,6 +2,7 @@ import { auditIdentifierMaxLength } from "@grasp-os/shared/audit";
 import {
   connectorProviderSchema,
   oauthProviderSchema,
+  toolReachSchema,
 } from "@grasp-os/shared/connect";
 import { permissionActionSchema } from "@grasp-os/shared/permissions";
 import { z } from "zod";
@@ -300,14 +301,20 @@ const jsonSchemaObject = z.record(z.string(), z.json());
 
 /**
  * What connect knows of one action (tool) before running it, and decides
- * by before it reads a token: whether it is read-only, the input property
- * that selects its resource, its input properties, and the only requests
- * it may send. And how a held call of it is shown (`describe`), if the
- * tool says.
+ * by before it reads a token: whether it is read-only, whom it reaches,
+ * the input property that selects its resource, its input properties, and
+ * the only requests it may send. And how a held call of it is shown
+ * (`describe`), if the tool says.
  */
 const actionManifestSchema = z.strictObject({
   routes: z.array(routeSchema).max(maxRoutes),
   readOnly: z.boolean(),
+  /**
+   * Whom it reaches (`toolReaches`), which with `readOnly` makes its class
+   * (`toolClassOf`). Required: a tool that doesn't say has no class, and a
+   * manifest holding one is refused, by the build and by connect.
+   */
+  reach: toolReachSchema,
   /** How a call of unknown outcome may be recovered (`recoveryModes`). */
   recovery: z.enum(recoveryModes),
   resource: z
