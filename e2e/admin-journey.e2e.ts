@@ -1,9 +1,10 @@
+import { noChoices } from "@grasp-os/shared/onboarding-choices";
 import { expect } from "@playwright/test";
 
 import { localAdmin } from "../apps/core/test/sign-in-config.ts";
 import { test } from "./csp.ts";
 import { queuedMail } from "./onboarding-outbox.ts";
-import { apiOf, signInStaff } from "./people.ts";
+import { apiOf, signInAs, signInStaff } from "./people.ts";
 import { origin } from "./stack.ts";
 
 // The admin's onboarding, end to end (GRA-339): they sign in, give their
@@ -33,7 +34,8 @@ const daysFromToday = (days: number): string =>
  * What only Grasp's staff do, before the admin starts: the agreements are
  * in place, so links go once they are due. A plan saved by an earlier test
  * is moved to a day still to come, so its alarm sends nothing to the staff
- * list the admin saves before their own plan is made.
+ * list the admin saves before their own plan is made. What earlier tests
+ * chose on the admin's steps is cleared, so each step asks again.
  */
 const readyForTheAdmin = async (): Promise<void> => {
   const staff = await signInStaff();
@@ -50,6 +52,12 @@ const readyForTheAdmin = async (): Promise<void> => {
     });
   } finally {
     core[Symbol.dispose]();
+  }
+  const admin = apiOf({ cookie: await signInAs(localAdmin) });
+  try {
+    await admin.api.onboarding.saveChoices(noChoices);
+  } finally {
+    admin.core[Symbol.dispose]();
   }
 };
 
