@@ -1,19 +1,25 @@
+import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
 import { workflowIdOf } from "@grasp-os/compiler";
 import {
   checkWorkflowBindings,
   describeWorkflow,
 } from "@grasp-os/sdk/describe";
-import { collectionIdSchema } from "@grasp-os/shared/ids";
+import { collectionIdSchema, appIdSchema } from "@grasp-os/shared/ids";
 import type { CollectionId } from "@grasp-os/shared/ids";
-import type { DeclaredPermission } from "@grasp-os/shared/permissions";
+import type {
+  DeclaredPermission,
+  Authority,
+} from "@grasp-os/shared/permissions";
+import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import type { BuiltinBlueprint } from "#blueprints";
 
 import { installBuiltinBlueprint } from "../src/app-blueprints.ts";
+import { startAppBinding } from "../src/app-workflow-bindings.ts";
 import {
   builtins,
   fingerprintOf,
@@ -23,6 +29,7 @@ import {
 import type { Release } from "../src/builtins.ts";
 import { withDraftReferences } from "../src/draft-references.ts";
 import { buildScreens } from "../src/screens.ts";
+import { fakeGateway } from "./ai-gateway.ts";
 import { grantReviewed, racingDb, serverBuilt } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { collectionWithNote, storedGrant } from "./knowledge.ts";
@@ -129,6 +136,77 @@ const guests: DeclaredPermission = {
   actions: ["guests"],
   binding: "GUESTS",
 };
+
+/** A model the deployment allows. */
+const allowedModel = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+
+/** A JSON Schema of an object of `properties`, all required. */
+const objectSchema = (properties: Record<string, unknown>) => ({
+  format: "json",
+  document: {
+    type: "object",
+    properties,
+    required: Object.keys(properties),
+    additionalProperties: false,
+  },
+});
+
+/**
+ * A workflow a release ships with `hello`, named `name`: a model, bound
+ * as `model` to the catalog's `contract`, greets its input's `who`.
+ */
+const greeter = (contract: string, name = "greeter"): string =>
+  JSON.stringify({
+    document: {
+      dsl: "1.0.3",
+      namespace: workflowNamespace,
+      name,
+      version: "1.0.0",
+      title: "Greeter",
+      metadata: {
+        grasp: {
+          profile: "grasp-open-workflow/1",
+          params: {},
+          bindings: { model: { kind: "model", contract } },
+        },
+      },
+    },
+    input: { schema: objectSchema({ who: { type: "string" } }) },
+    output: { schema: objectSchema({ line: { type: "string" } }) },
+    do: [
+      {
+        greet: {
+          call: "grasp.model",
+          with: {
+            binding: "model",
+            instructions: "Greet them.",
+            // oxlint-disable-next-line no-template-curly-in-string -- a workflow expression
+            input: { who: "${ $workflow.input.who }" },
+            outputSchema: objectSchema({ line: { type: "string" } }),
+          },
+          // oxlint-disable-next-line no-template-curly-in-string -- a workflow expression
+          export: { as: "${ {line: .line} }" },
+        },
+      },
+      // oxlint-disable-next-line no-template-curly-in-string -- a workflow expression
+      { finish: { set: { line: "${ $context.line }" } } },
+    ],
+  });
+
+/** A release whose `hello` ships `greeter` as `greet`, binding `contract`. */
+const shippingGreeter = (contract: string, definition = greeter(contract)) =>
+  releaseWith({
+    contracts: [{ key: contract, kind: "model" }],
+    workflows: [{ alias: "greet", binding: "GREET", definition }],
+  });
+
+/** An App's authority, for the person `by`, on its first version. */
+const authorityOf = (app: string, by: string): Authority => ({
+  subject: { type: "app", appId: appIdSchema.parse(app) },
+  onBehalfOf: by,
+  mode: "interactive",
+  appVersion: 1,
+});
 
 /** The trees stored for `hello`, by their hashes. */
 const helloTrees = async (): Promise<string[]> => {
@@ -616,6 +694,184 @@ describe("the built-in blueprints", () => {
       afterRelease: [granted],
       next: [{ status: "requested", requestedBy: builder.userId }],
       rolledBack: ["requested"],
+    });
+
+    await reinstall();
+  });
+
+  it("give each App created from them a workflow of its creator's own, bound to it, which starts only once an admin grants and approves it", async () => {
+    await reinstall();
+    const admin = await signedInApi(idp, "admin");
+    const builder = await signedInApi(idp, "builder");
+    const other = await signedInApi(idp, "builder");
+    const contract = `fixture/greeter-${unique()}`;
+    const shipping = shippingGreeter(contract);
+    const installed = await auditedDuring(async () => {
+      await expect(install(shipping)).resolves.toBeTruthy();
+      // Installed again: the contract is published once.
+      await expect(install(shipping)).resolves.toBeTruthy();
+    });
+    const created = await builder.api.apps.blueprints.create("hello", {
+      name: "Greets",
+    });
+    const theirs = await other.api.apps.blueprints.create("hello", {
+      name: "Greets too",
+    });
+    const [workflow] = await builder.api.workflowResources.list();
+    const [otherWorkflow] = await other.api.workflowResources.list();
+    if (workflow === undefined || otherWorkflow === undefined) {
+      throw new Error("Expected each copy to get a workflow");
+    }
+    const start = async (app: string, by: string, key: string) =>
+      await outcome(
+        startAppBinding(env, authorityOf(app, by), "greet", {
+          input: { who: "Ada" },
+          key,
+        })
+      );
+    const asked = created.permissions.find(
+      ({ binding }) => binding === "GREET"
+    );
+
+    // Nothing is allowed until an admin says so: not the start, then not
+    // the version's model.
+    const ungranted = await start(created.app.id, builder.userId, "k1");
+    await grantReviewed(admin.api, asked?.id ?? "");
+    const unapproved = await start(created.app.id, builder.userId, "k2");
+    // The other copy's workflow is its own: the grant isn't its.
+    const otherCopy = await start(theirs.app.id, other.userId, "k3");
+    await admin.api.workflowResources.approveBinding(workflow.id, {
+      alias: "model",
+      target: { kind: "model", model: allowedModel },
+      reviewed: { version: 1 },
+    });
+    const gateway = fakeGateway({
+      text: '{"line":"Hello, Ada"}',
+      inputTokens: 1,
+      outputTokens: 1,
+    });
+    const ai: AiBinding = env.AI;
+    vi.spyOn(ai, "fetch").mockImplementation(gateway.binding.fetch);
+    const started = await startAppBinding(
+      env,
+      authorityOf(created.app.id, builder.userId),
+      "greet",
+      { input: { who: "Ada" }, key: "k4" }
+    );
+    const { runId } = started;
+    if (runId === null) {
+      throw new Error("Expected the start to start a run");
+    }
+    await vi.waitFor(
+      async () => {
+        const run = await builder.api.workflowResources.run(workflow.id, runId);
+        expect(run.endedAt).not.toBeNull();
+      },
+      { timeout: 30_000, interval: 100 }
+    );
+    const ran = await builder.api.workflowResources.run(workflow.id, runId);
+    vi.restoreAllMocks();
+
+    expect({
+      contract: installed
+        .filter(({ target }) => target?.id === contract)
+        .map(({ action, actor }) => ({ action, actor })),
+      workflow: {
+        name: workflow.name.startsWith("hello-greet-"),
+        owner: workflow.owner,
+        currentVersion: workflow.currentVersion,
+      },
+      distinct: workflow.id !== otherWorkflow.id,
+      asked: created.permissions.map(({ object, actions, status }) => ({
+        object,
+        actions,
+        status,
+      })),
+      ungranted,
+      unapproved,
+      otherCopy,
+      ran: ran.status,
+    }).toStrictEqual({
+      contract: [
+        { action: "workflow.contract.published", actor: { type: "system" } },
+      ],
+      workflow: { name: true, owner: builder.userId, currentVersion: 1 },
+      distinct: true,
+      asked: [
+        {
+          object: { type: "workflow", workflowId: workflow.id },
+          actions: ["start"],
+          status: "requested",
+        },
+      ],
+      ungranted: "workflow.start_denied",
+      unapproved: "workflow.binding_unapproved",
+      otherCopy: "workflow.start_denied",
+      ran: "completed",
+    });
+
+    await reinstall();
+  });
+
+  it("publish a copy's workflow as its own, whatever workflow the release's definition names", async () => {
+    await reinstall();
+    const builder = await signedInApi(idp, "builder");
+    const owner = await signedInApi(idp, "builder");
+    const contract = `fixture/greeter-${unique()}`;
+    // Someone else's workflow, which the release's definition names.
+    const victim = await owner.api.workflowResources.create(
+      `victim-${unique()}`
+    );
+    await expect(
+      install(shippingGreeter(contract, greeter(contract, victim.name)))
+    ).resolves.toBeTruthy();
+    await builder.api.apps.blueprints.create("hello", { name: "Names" });
+    const [workflow] = await builder.api.workflowResources.list();
+    const definition = z
+      .object({
+        document: z.object({ namespace: z.string(), name: z.string() }),
+      })
+      .parse(
+        JSON.parse(
+          await builder.api.workflowResources.definition(workflow?.id ?? "", 1)
+        )
+      );
+    expect({
+      named: definition.document.name === workflow?.name,
+      namespace: definition.document.namespace,
+      victim: await owner.api.workflowResources.versions(victim.id),
+    }).toStrictEqual({
+      named: true,
+      namespace: workflowNamespace,
+      victim: [],
+    });
+
+    await reinstall();
+  });
+
+  it("make no workflow, and no App, for a definition that wouldn't publish", async () => {
+    await reinstall();
+    const builder = await signedInApi(idp, "builder");
+    const contract = `fixture/greeter-${unique()}`;
+    // The definition binds a contract the catalog doesn't hold.
+    const unpublishable = releaseWith({
+      workflows: [
+        { alias: "greet", binding: "GREET", definition: greeter(contract) },
+      ],
+    });
+    await expect(install(unpublishable)).resolves.toBeTruthy();
+    const refused = await outcome(
+      builder.api.apps.blueprints.create("hello", { name: "Refused" })
+    );
+    const listed = await builder.api.apps.list();
+    expect({
+      refused,
+      workflows: await builder.api.workflowResources.list(),
+      apps: listed.filter(({ name }) => name === "Refused"),
+    }).toStrictEqual({
+      refused: "workflow.definition_invalid",
+      workflows: [],
+      apps: [],
     });
 
     await reinstall();

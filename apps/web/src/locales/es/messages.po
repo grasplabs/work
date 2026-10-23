@@ -1287,9 +1287,37 @@ msgstr "{who} no se podrá conceder más tarde: tendrá que volver a pedirse."
 msgid "{who} consented to this before connecting it:"
 msgstr "{who} dio su consentimiento antes de conectarlo:"
 
+#: src/interview/before.tsx
+#: src/interview/sound-check.tsx
+msgid "{who} is talking"
+msgstr "{who} está hablando"
+
+#: src/interview/talk.tsx
+msgid "{who}, asking."
+msgstr "{who}, preguntando."
+
+#: src/interview/before.tsx
+#: src/interview/closed.tsx
+#: src/interview/page.tsx
+#: src/interview/sound-check.tsx
+msgid "{who}, drawn in dots."
+msgstr "{who}, en puntos."
+
 #: src/brain/brain-article/kern.tsx
 msgid "{who}, interviewed {day}"
 msgstr "{who}, entrevistado el {day}"
+
+#: src/interview/talk.tsx
+msgid "{who}, listening."
+msgstr "{who}, escuchando."
+
+#: src/interview/read-back.tsx
+msgid "{who}, reading back."
+msgstr "{who}, repasando lo anotado."
+
+#: src/interview/talk.tsx
+msgid "{who}, thinking."
+msgstr "{who}, pensando."
 
 #: src/routes/_shell.onboarding.interviews.$person.tsx
 msgid "{who}'s text:"
@@ -1992,6 +2020,10 @@ msgstr "Todas las transcripciones"
 msgid "All workflow tests pass."
 msgstr "Todas las pruebas de los flujos de trabajo pasan."
 
+#: src/interview/sound-check.tsx
+msgid "Allow the microphone when your browser asks."
+msgstr "Permite el micrófono cuando tu navegador lo pida."
+
 #: src/routes/_shell.settings.models.tsx
 msgid "Allowed models"
 msgstr "Modelos permitidos"
@@ -2084,6 +2116,10 @@ msgstr "y {more} más"
 #: src/routes/_shell.onboarding.organization.index.tsx
 msgid "And {moreFound} more: type more of the name."
 msgstr "Y {moreFound} más: escribe más del nombre."
+
+#: src/interview/before.tsx
+msgid "And I’m {secondName}."
+msgstr "Y yo soy {secondName}."
 
 #: src/interview/words.ts
 msgid "And the rest."
@@ -3229,6 +3265,10 @@ msgstr "Revisar un flujo"
 msgid "Check and save"
 msgstr "Comprobar y guardar"
 
+#: src/interview/before.tsx
+msgid "Check sound and microphone"
+msgstr "Probar sonido y micrófono"
+
 #: src/activity/audit-words.ts
 msgid "Checked the audit trail's chain"
 msgstr "Comprobó la cadena del registro de auditoría"
@@ -3253,6 +3293,10 @@ msgstr "Elige una colección"
 #: src/routes/_shell.onboarding.kickoff.tsx
 msgid "Choose a file"
 msgstr "Elegir un archivo"
+
+#: src/interview/before.tsx
+msgid "Choose who you want to be interviewed by."
+msgstr "Elige quién quieres que te entreviste."
 
 #: src/onboarding/language-choice.tsx
 msgid "Choose your language"
@@ -3640,6 +3684,7 @@ msgctxt "inbox item section"
 msgid "Context"
 msgstr "Contexto"
 
+#: src/interview/before.tsx
 #: src/onboarding/about-story.tsx
 #: src/onboarding/setup-steps.tsx
 msgid "Continue"
@@ -5087,6 +5132,10 @@ msgctxt "inbox item kind"
 msgid "Go live"
 msgstr "Puesta en marcha"
 
+#: src/interview/sound-check.tsx
+msgid "Go on without sound"
+msgstr "Seguir sin sonido"
+
 #: src/routes/decisions.$decision.tsx
 msgid "Go to Grasp"
 msgstr "Ir a Grasp"
@@ -5108,6 +5157,10 @@ msgstr "Objetivos"
 msgctxt "kickoff field"
 msgid "Goals, and why AI now"
 msgstr "Objetivos, y por qué IA ahora"
+
+#: src/interview/sound-check.tsx
+msgid "Good. Now say something, so I can hear you too."
+msgstr "Bien. Ahora di algo, para que yo también te oiga."
 
 #: src/brain/brain.ts
 msgid "Google sign-in"
@@ -5328,6 +5381,10 @@ msgstr "Datos de salud"
 msgid "Health-related employee or customer information that needs a closer review."
 msgstr "Información de salud de empleados o clientes que requiere una revisión más detallada."
 
+#: src/interview/before.tsx
+msgid "Hear both again"
+msgstr "Escuchar a los dos otra vez"
+
 #: src/onboarding/interview-people.tsx
 msgid "Held by"
 msgstr "Realizada por"
@@ -5367,9 +5424,13 @@ msgstr "Hola, {admin}, soy Stephen"
 msgid "Hi {name}"
 msgstr "Hola, {name}"
 
-#: src/interview/page.tsx
-msgid "Hi {name}, I’m Stephen. I’m an AI, and I work for Grasp."
-msgstr "Hola, {name}, soy Stephen. Soy una IA y trabajo para Grasp."
+#: src/interview/sound-check.tsx
+msgid "Hi {name}, I’m {who}, an AI. Can you hear me?"
+msgstr "Hola, {name}, soy {who}, una IA. ¿Me oyes?"
+
+#: src/interview/before.tsx
+msgid "Hi {name}, I’m {who}. I’m an AI, and I work for Grasp."
+msgstr "Hola, {name}, soy {who}. Soy una IA y trabajo para Grasp."
 
 #: src/onboarding/setup-steps.tsx
 msgid "Hi everyone,"
@@ -5476,8 +5537,8 @@ msgid "How they would notice: not said yet."
 msgstr "Cómo lo notarían: aún no se ha dicho."
 
 #: src/interview/closed.tsx
-msgid "How was talking to Stephen?"
-msgstr "¿Qué tal ha sido hablar con Stephen?"
+msgid "How was talking to {who}?"
+msgstr "¿Qué tal ha sido hablar con {who}?"
 
 #: src/routes/_shell.settings.profile.tsx
 msgid "How you appear in Grasp: on workflows you own, and in the audit trail."
@@ -5495,6 +5556,10 @@ msgstr "Cómo se llama tu organización en Grasp."
 msgctxt "kind of app"
 msgid "HR"
 msgstr "RR. HH."
+
+#: src/interview/sound-check.tsx
+msgid "I cannot find a microphone. Plug one in and try again."
+msgstr "No encuentro ningún micrófono. Conecta uno y vuelve a intentarlo."
 
 #: src/onboarding/setup-steps.tsx
 msgid "I could not find the columns. The first row should name them: name, email, team and job."
@@ -5516,6 +5581,10 @@ msgstr "No pude leer este"
 msgid "I do every interview myself. Here’s what that sounds like."
 msgstr "Hago cada entrevista yo mismo. Así suena."
 
+#: src/interview/sound-check.tsx
+msgid "I hear you. Shall we start?"
+msgstr "Te oigo. ¿Empezamos?"
+
 #: src/interview/words.ts
 msgid "I lost the connection. Please check your internet. I have kept what you said, and I keep trying."
 msgstr "He perdido la conexión. Comprueba tu internet. He guardado lo que has dicho y sigo intentándolo."
@@ -5528,9 +5597,13 @@ msgstr "Ya lo envié"
 msgid "I talk to each team lead first, so they hear about me before their team does. Check who leads which team, and which teams take part."
 msgstr "Hablo primero con cada responsable de equipo, para que sepa de mí antes que su equipo. Comprueba quién dirige cada equipo y qué equipos participan."
 
-#: src/interview/page.tsx
-msgid "I want to learn how your work really goes. I ask one question at a time, and you type your answers. At the end I read back what I wrote down, and you say what is wrong."
-msgstr "Quiero entender cómo va de verdad tu trabajo. Hago una pregunta cada vez y tú escribes tus respuestas. Al final te leo lo que he anotado y tú me dices qué está mal."
+#: src/interview/before.tsx
+msgid "I write down what you tell me. At the end I read it back, and you say what is wrong. Your voice is not kept. Your company never sees what one person said, only what five or more people said, put together."
+msgstr "Apunto lo que me cuentas. Al final te lo leo y tú dices qué está mal. Tu voz no se guarda. Tu empresa nunca ve lo que dijo una sola persona, solo lo que dijeron cinco personas o más, todo junto."
+
+#: src/interview/before.tsx
+msgid "I’m {firstName}."
+msgstr "Soy {firstName}."
 
 #: src/tour/tour-script.ts
 msgid "I’m ready"
@@ -6328,6 +6401,10 @@ msgstr "Enlaza con"
 msgid "Lisbon"
 msgstr "Lisboa"
 
+#: src/interview/sound-check.tsx
+msgid "Listening"
+msgstr "Escuchando"
+
 #: src/dashboard/standard-widgets.tsx
 msgctxt "how many of a goal's workflows are live, under the count"
 msgid "live"
@@ -6536,6 +6613,10 @@ msgstr "Mencionadas"
 #: src/routes/guest.tsx
 msgid "Messages"
 msgstr "Mensajes"
+
+#: src/interview/sound-check.tsx
+msgid "Microphone: {name}"
+msgstr "Micrófono: {name}"
 
 #: src/brain/brain.ts
 msgid "Microsoft sign-in"
@@ -7928,6 +8009,10 @@ msgstr "Pasos del onboarding"
 msgid "Once I have about {threshold}% of the picture, your team can start. I’ll fill in the rest as we go."
 msgstr "En cuanto tenga cerca del {threshold} % del panorama, tu equipo puede empezar. El resto lo completo sobre la marcha."
 
+#: src/interview/sound-check.tsx
+msgid "One moment"
+msgstr "Un momento"
+
 #: src/interview/words.ts
 msgid "One real case"
 msgstr "Un caso real"
@@ -8615,6 +8700,10 @@ msgstr "Actualización de la plataforma"
 msgid "Play"
 msgstr "Reproducir"
 
+#: src/interview/sound-check.tsx
+msgid "Play it again"
+msgstr "Reproducir otra vez"
+
 #: src/routes/_shell.policies.documents.$policyId.tsx
 #: src/routes/_shell.policies.index.tsx
 #: src/routes/_shell.policies.rules.$ruleId.tsx
@@ -8830,6 +8919,14 @@ msgstr "Ejecutadas sin una persona: {share}"
 #: src/routes/_shell.onboarding.interviews.$person.tsx
 msgid "Rated {rating} of 5."
 msgstr "Valorada con {rating} de 5."
+
+#: src/interview/before.tsx
+msgid "Rather talk with {otherName}?"
+msgstr "¿Prefieres hablar con {otherName}?"
+
+#: src/interview/sound-check.tsx
+msgid "Rather type?"
+msgstr "¿Prefieres escribir?"
 
 #: src/routes/_shell.onboarding.interviewers.tsx
 msgid "Rating"
@@ -10186,6 +10283,11 @@ msgstr "Parte interesada invitada a Grasp"
 msgid "Stakeholder named: the {role}"
 msgstr "Parte interesada designada: {role}"
 
+#: src/interview/sound-check.tsx
+msgctxt "begin the interview"
+msgid "Start"
+msgstr "Empezar"
+
 #: src/workflows/test-run.tsx
 msgid "Start a test run"
 msgstr "Iniciar una ejecución de prueba"
@@ -10194,7 +10296,7 @@ msgstr "Iniciar una ejecución de prueba"
 msgid "Start again from version {newerVersion}"
 msgstr "Empezar de nuevo desde la versión {newerVersion}"
 
-#: src/interview/page.tsx
+#: src/interview/sound-check.tsx
 msgid "Start by typing"
 msgstr "Empezar escribiendo"
 
@@ -10346,27 +10448,9 @@ msgstr "Stephen les pregunta qué trabajo se repite más. Para preguntar por una
 msgid "Stephen is reading it. This takes a minute."
 msgstr "Stephen lo está leyendo. Tarda un minuto."
 
-#: src/interview/talk.tsx
-msgid "Stephen, asking."
-msgstr "Stephen, preguntando."
-
-#: src/interview/closed.tsx
-#: src/interview/page.tsx
 #: src/routes/interview.tsx
 msgid "Stephen, drawn in dots."
 msgstr "Stephen, en puntos."
-
-#: src/interview/talk.tsx
-msgid "Stephen, listening."
-msgstr "Stephen, escuchando."
-
-#: src/interview/read-back.tsx
-msgid "Stephen, reading back."
-msgstr "Stephen, leyendo lo anotado."
-
-#: src/interview/talk.tsx
-msgid "Stephen, thinking."
-msgstr "Stephen, pensando."
 
 #: src/workflows/workflow-diagram.tsx
 msgid "Steps"
@@ -10384,6 +10468,10 @@ msgstr "Aún se está leyendo. Aparecerá en la lista de archivos cuando esté l
 #: src/routes/_shell.onboarding.agreements.tsx
 msgid "Still deciding"
 msgstr "Aún decidiendo"
+
+#: src/interview/sound-check.tsx
+msgid "Still nothing? Turn your volume up, or check where your sound goes."
+msgstr "¿Sigue sin oírse? Sube el volumen o comprueba por dónde sale el sonido."
 
 #: src/brain/atlas-map.ts
 #: src/brain/atlas-overlays.tsx
@@ -11634,6 +11722,10 @@ msgstr "Esta aplicación perdió su conexión con la página y se detuvo."
 msgid "This app wants to open a page on another site in a new tab. Open it only if you expected to go there."
 msgstr "Esta app quiere abrir una página de otro sitio en una pestaña nueva. Ábrela solo si esperabas ir allí."
 
+#: src/interview/sound-check.tsx
+msgid "This browser cannot listen. You can type your answers."
+msgstr "Este navegador no puede escuchar. Puedes escribir tus respuestas."
+
 #: src/engines/store-change-errors.ts
 msgid "This change is being applied again, so it can't be abandoned now. The page shows where it stands now."
 msgstr "Este cambio se está aplicando de nuevo, así que ahora no se puede abandonar. La página muestra ahora en qué punto está."
@@ -12050,6 +12142,7 @@ msgstr "Intentar"
 #: src/chat/chat-dock.tsx
 #: src/chat/thread.tsx
 #: src/frame/page-states.tsx
+#: src/interview/sound-check.tsx
 #: src/routes/_shell.index.tsx
 #: src/screens/screen-frame.tsx
 msgid "Try again"
@@ -12084,6 +12177,11 @@ msgstr "Dos respuestas"
 #: src/activity/audit-log.tsx
 msgid "Type"
 msgstr "Tipo"
+
+#: src/interview/before.tsx
+#: src/interview/sound-check.tsx
+msgid "Type instead, without sound"
+msgstr "Prefiero escribir, sin sonido"
 
 #: src/interview/page.tsx
 msgid "Type what is missing, or yes"
@@ -12911,6 +13009,10 @@ msgstr "Lo que se envió ya no se conserva."
 msgid "What was spent this month is under <0>AI spend</0>."
 msgstr "Lo gastado este mes está en <0>Gasto en IA</0>."
 
+#: src/interview/before.tsx
+msgid "What we do"
+msgstr "Qué hacemos"
+
 #: src/interview/closed.tsx
 msgid "What you agreed to is kept. Forgot something? This link works until {closes}."
 msgstr "Lo que has confirmado queda guardado. ¿Se te olvidó algo? Este enlace funciona hasta el {closes}."
@@ -13037,6 +13139,10 @@ msgstr "Qué correos te envía Grasp. Solo a ti; no cambia los de nadie más."
 msgid "Which interviews to show"
 msgstr "Qué entrevistas mostrar"
 
+#: src/interview/before.tsx
+msgid "Which language do you want to do this interview in?"
+msgstr "¿En qué idioma quieres hacer esta entrevista?"
+
 #: src/routes/_shell.onboarding.organization.index.tsx
 msgid "Which teams to show"
 msgstr "Qué equipos mostrar"
@@ -13126,6 +13232,10 @@ msgstr "Quién trabaja dónde"
 #: src/onboarding/staff-words.ts
 msgid "Who works where is in"
 msgstr "Ya se sabe quién trabaja dónde"
+
+#: src/interview/before.tsx
+msgid "Who would you like to talk with?"
+msgstr "¿Con quién quieres hablar?"
 
 #: src/onboarding/setup-steps.tsx
 msgid "Who’s who at your company?"
@@ -13421,6 +13531,10 @@ msgstr "Escribiendo"
 msgid "Yes"
 msgstr "Sí"
 
+#: src/interview/sound-check.tsx
+msgid "Yes, I can hear you"
+msgstr "Sí, te oigo"
+
 #: src/onboarding/organization-dialogs.tsx
 msgid "Yes, take them off the list"
 msgstr "Sí, quitar de la lista"
@@ -13475,9 +13589,9 @@ msgstr "No puedes abrir las aplicaciones de este dominio: tu rol no lo permite, 
 msgid "You come back to {app}’s page here."
 msgstr "Vuelves aquí a la página de {app}."
 
-#: src/interview/page.tsx
-msgid "You decide. Skip any question, stop whenever you want, and carry on later from this link."
-msgstr "Tú decides. Sáltate cualquier pregunta, para cuando quieras y sigue más tarde desde este enlace."
+#: src/interview/before.tsx
+msgid "You decide. You can stop when you want, skip any question, and delete everything for 7 days afterwards."
+msgstr "Tú decides. Puedes parar cuando quieras, saltarte cualquier pregunta y borrarlo todo durante 7 días después."
 
 #: src/sign-in-errors.ts
 msgid "You don't have access to this organization. Ask an admin."
@@ -13526,13 +13640,29 @@ msgctxt "the answer a person gives a decision"
 msgid "Your answer"
 msgstr "Tu respuesta"
 
+#: src/interview/sound-check.tsx
+msgid "Your browser is not letting me use the microphone. Allow it next to the address, and try again."
+msgstr "Tu navegador no me deja usar el micrófono. Permítelo junto a la dirección y vuelve a intentarlo."
+
 #: src/chat/chat-list.tsx
 msgid "Your chats show up here."
 msgstr "Tus chats aparecen aquí."
 
+#: src/interview/before.tsx
+msgid "Your choice"
+msgstr "Tu decisión"
+
 #: src/routes/_shell.settings.security.tsx
 msgid "Your company account. Leaving the company stops new sign-ins; an admin can end a session sooner in Members and roles."
 msgstr "Tu cuenta de la empresa. Al dejar la empresa ya no se puede iniciar sesión de nuevo; un administrador puede cerrar antes una sesión en Miembros y roles."
+
+#: src/interview/before.tsx
+msgid "Your company wants to know how the work really goes. First I ask how you work with AI today. Then I ask about one piece of your work. You tell me how you do it. That takes 12 to 15 minutes. Talking is the fastest. You can also type."
+msgstr "Tu empresa quiere saber cómo se hace el trabajo de verdad. Primero te pregunto cómo trabajas hoy con la IA. Después te pregunto por una parte de tu trabajo. Tú me cuentas cómo lo haces. Dura entre 12 y 15 minutos. Hablar es lo más rápido. También puedes escribir."
+
+#: src/interview/before.tsx
+msgid "Your company wants to know how the work really goes. You lead your team, so I first ask how your team works with AI today. Then I ask what work the team does, and who does which. That takes about 20 minutes. Talking is the fastest. You can also type."
+msgstr "Tu empresa quiere saber cómo se hace el trabajo de verdad. Diriges tu equipo, así que primero te pregunto cómo trabaja hoy tu equipo con la IA. Después te pregunto qué trabajo hace el equipo y quién hace cada cosa. Dura unos 20 minutos. Hablar es lo más rápido. También puedes escribir."
 
 #: src/routes/_shell.settings.workspace.tsx
 msgid "Your company’s name in Grasp."
@@ -13616,6 +13746,10 @@ msgstr "Tu relato"
 #: src/onboarding/knowledge-bar.tsx
 msgid "Your team can start at {threshold}%"
 msgstr "Tu equipo puede empezar al {threshold} %"
+
+#: src/interview/before.tsx
+msgid "Your words"
+msgstr "Tus palabras"
 
 #: src/routes/_shell.settings.tsx
 msgid "Your workspace, who may do what in it, and your own account."

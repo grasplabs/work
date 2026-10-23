@@ -335,6 +335,8 @@ export const catalogContractSchema = z
     { message: "A contract is at most 512 KiB, its operations included." }
   );
 export type CatalogContractInput = z.input<typeof catalogContractSchema>;
+/** A catalog contract, its key included, as published. */
+export type CatalogContractDefinition = z.infer<typeof catalogContractSchema>;
 
 /** A catalog contract as the catalog lists it. */
 export interface CatalogContractEntry {
