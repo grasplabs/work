@@ -562,6 +562,8 @@ export const screenErrors = defineErrorFamily({
   "screen.build_failed": "The App's screens don't build.",
   "screen.build_slow":
     "The app's screens are still building. Try again in a moment.",
+  "screen.not_sealed":
+    "This version's screens aren't sealed with its release, so they can't open.",
   "screen.invalid": "That isn't a valid request for a screen.",
   "screen.input_invalid": "That isn't valid input for the screen.",
   "screen.navigation_cancelled":
