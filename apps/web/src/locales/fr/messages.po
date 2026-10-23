@@ -2575,9 +2575,17 @@ msgstr "Redemandé après que la version {version} est devenue actuelle (accord�
 msgid "Asked by"
 msgstr "Demandé par"
 
+#: src/connections/requested-apps.tsx
+msgid "Asked by {asker}"
+msgstr "Demandée par {asker}"
+
 #: src/dashboard/pile-cards.tsx
 msgid "Asked by {requester} on {date}"
 msgstr "Demandé par {requester} le {date}"
+
+#: src/connections/requested-apps.tsx
+msgid "Asked by a former member"
+msgstr "Demandée par un ancien membre"
 
 #: src/onboarding/connect-steps.tsx
 msgid "Asked for"
@@ -9279,6 +9287,15 @@ msgstr "Rapport"
 #: src/landscape/landscape.ts
 msgid "Repository content, snippets, editor context, build logs or engineering documentation."
 msgstr "Contenu des dépôts, extraits de code, contexte de l’IDE, journaux de build ou documentation technique."
+
+#: src/connections/requested-apps.tsx
+msgctxt "apps someone asked for"
+msgid "Requested"
+msgstr "Demandées"
+
+#: src/connections/requested-apps.tsx
+msgid "Requested {date}"
+msgstr "Demandée le {date}"
 
 #: src/settings/pulse-people.tsx
 msgid "Reset"
