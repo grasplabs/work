@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "4d33e851-1a8d-406c-a82c-8c32e2e47436",
+  "id": "213073ff-ec31-40b2-a6f1-509fe107b080",
   "prevId": "fcb1c5d8-1fa0-46bb-9279-c1a6f4bdf4b4",
   "tables": {
     "audit_outbox": {
@@ -196,6 +196,20 @@
         },
         "completed_at": {
           "name": "completed_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "agreed_at": {
+          "name": "agreed_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "drawn_at": {
+          "name": "drawn_at",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
@@ -599,13 +613,6 @@
         },
         "told_at": {
           "name": "told_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "choices": {
-          "name": "choices",
           "type": "text",
           "primaryKey": false,
           "notNull": false,

@@ -29,6 +29,7 @@ import type { RpcTarget } from "cloudflare:workers";
 import { z } from "zod";
 
 import { appBindingKinds, workflowBindingKinds } from "../permissions.ts";
+import { quietLoader } from "../quiet-loader.ts";
 import {
   capability,
   noPlaceOf,
@@ -303,12 +304,14 @@ export const isolateCall = async (
       signal === undefined ? {} : { signal }
     );
   }
-  const stub: unknown = env.LOADER.get(key, async () => ({
-    ...workflowSandbox,
-    mainModule,
-    modules: await modules(),
-    env: {},
-  })).getEntrypoint(entrypoint);
+  const stub: unknown = quietLoader(env.LOADER)
+    .get(key, async () => ({
+      ...workflowSandbox,
+      mainModule,
+      modules: await modules(),
+      env: {},
+    }))
+    .getEntrypoint(entrypoint);
   const fn: unknown =
     typeof stub === "object" || typeof stub === "function"
       ? Reflect.get(stub ?? {}, method)
@@ -698,6 +701,16 @@ export interface RunHostCalls<Attempt = AttemptHost> {
    * workflow's (resource-host.ts); an App's run has none.
    */
   sleepUntil?: (name: unknown, until: unknown) => Promise<Settled<null>>;
+  /**
+   * A listen task's events, as the host takes them: an independent
+   * workflow's (resource-host.ts); an App's run has none.
+   */
+  listen?: (name: unknown) => Promise<Settled<unknown>>;
+  /**
+   * A run task's child's output, as the host waits for it: an independent
+   * workflow's (resource-host.ts); an App's run has none.
+   */
+  child?: (name: unknown) => Promise<Settled<unknown>>;
   waitForDecision: (
     name: unknown,
     options: unknown
@@ -876,7 +889,7 @@ const stepCodeFailure = async (
 };
 
 /**
- * `host` as the run's capability in a session: its three calls, and the
+ * `host` as the run's capability in a session: its calls, and the
  * attempt host each step's function gets, passed as a capability of its
  * calls alone, live while that function runs and the session's call is
  * open (`passedCapability`). A function that fails rather than answering
@@ -920,6 +933,20 @@ export const sessionRunHost = <Attempt extends object = AttemptHost>(
           error: { name: "Error", message: "This run has no sleep until." },
         }
       : await host.sleepUntil(name, until),
+  listen: async (name) =>
+    host.listen === undefined
+      ? {
+          ok: false,
+          error: { name: "Error", message: "This run has no listen tasks." },
+        }
+      : await host.listen(name),
+  child: async (name) =>
+    host.child === undefined
+      ? {
+          ok: false,
+          error: { name: "Error", message: "This run has no child workflows." },
+        }
+      : await host.child(name),
   waitForDecision: async (name, options) =>
     await host.waitForDecision(name, options),
 });
@@ -997,12 +1024,14 @@ export const loadRunIsolate = <Attempt extends object = AttemptHost>(
       run: async (host, start) => {
         // Read before the clock starts: none of the run's code runs yet.
         const loaded = await modules();
-        const entrypoint = env.LOADER.get(null, () => ({
-          ...workflowSandbox,
-          mainModule,
-          modules: loaded,
-          env: {},
-        })).getEntrypoint<RunEntrypoint>("Run");
+        const entrypoint = quietLoader(env.LOADER)
+          .get(null, () => ({
+            ...workflowSandbox,
+            mainModule,
+            modules: loaded,
+            env: {},
+          }))
+          .getEntrypoint<RunEntrypoint>("Run");
         const clock = betweenSteps(budgetMs);
         clock.started();
         try {
@@ -1036,7 +1065,14 @@ export const loadRunIsolate = <Attempt extends object = AttemptHost>(
           {
             capability: capability(
               sessionRunHost(new BoundedRunHost(host, clock), session, methods),
-              ["do", "sleep", "sleepUntil", "waitForDecision"]
+              [
+                "do",
+                "sleep",
+                "sleepUntil",
+                "listen",
+                "child",
+                "waitForDecision",
+              ]
             ),
           },
           { value: start },

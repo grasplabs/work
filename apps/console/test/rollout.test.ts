@@ -46,7 +46,7 @@ import {
 import { checkRevocation } from "../src/rollout/shared-secrets.ts";
 import { fleetConcurrency } from "../src/rollout/workflow.ts";
 import type { AccountState } from "./cloudflare-api-kit.ts";
-import { mockCloudflareApi } from "./cloudflare-api.ts";
+import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { racingDb } from "./racing-db.ts";
 import { declared, publishRelease } from "./releases.ts";
 import type { ReleaseSpec } from "./releases.ts";

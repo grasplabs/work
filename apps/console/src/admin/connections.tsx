@@ -7,12 +7,17 @@
  * so a Composio toolkit is named after its slug.
  */
 import type {
+  AdminAppAsked,
   AdminConnection,
   AdminIntegrations,
   AdminNeeded,
 } from "@grasp-os/shared/admin-snapshot";
 import { Badge } from "@grasp-os/ui/components/badge";
+import { Button } from "@grasp-os/ui/components/button";
+import { Link } from "@tanstack/react-router";
+import { ArrowRightIcon } from "lucide-react";
 
+import { appKey } from "./integrations-asked.ts";
 import { Done } from "./parts.tsx";
 import { sourceNames } from "./sections.ts";
 import { formatDate, formatList, plural } from "./words.ts";
@@ -320,3 +325,39 @@ export const WaitingOnConnectionsRows = ({
     </ul>
   );
 };
+
+/**
+ * The apps the company asked Grasp to add, as Composio's catalog doesn't
+ * have them: each with when it asked, and the way to its build on
+ * Integrations to build, which is one for every company that asked.
+ */
+export const AskedOfGraspRows = ({
+  asked,
+}: {
+  asked: readonly AdminAppAsked[];
+}) => (
+  <ul className="flex flex-col">
+    {asked.map((app) => (
+      <li className="flex items-center gap-3 border-t px-5 py-3" key={app.id}>
+        <span className="flex min-w-0 flex-1 flex-col">
+          <span>{app.name}</span>
+          <span className="text-muted-foreground text-xs">
+            {`Asked for on ${formatDate(app.askedAt)}, as Composio doesn’t have it`}
+          </span>
+        </span>
+        <Button
+          aria-label={`Asked of Grasp: open the build of ${app.name}`}
+          nativeButton={false}
+          render={
+            <Link search={{ app: appKey(app.name) }} to="/admin/integrations" />
+          }
+          size="sm"
+          variant="ghost"
+        >
+          Asked of Grasp
+          <ArrowRightIcon data-icon="inline-end" />
+        </Button>
+      </li>
+    ))}
+  </ul>
+);

@@ -561,6 +561,7 @@ const activationOf = async (
       await Promise.resolve();
     },
     waitForEvent: async () => await Promise.reject(new Error("No waits here")),
+    waitForMatch: async () => await Promise.reject(new Error("No waits here")),
   };
   return new ResourceRunHost(
     runEnv,
@@ -576,6 +577,7 @@ const activationOf = async (
       build,
       calling: {
         runId,
+        rootRunId: runId,
         workflowId: id,
         version: 1,
         principal: by.userId,

@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import type { AdminSnapshot } from "./admin-snapshot.ts";
 import { defineErrorFamily } from "./errors.ts";
 import type { KickoffApi } from "./kickoff.ts";
 import type { OnboardingChoicesApi } from "./onboarding-choices.ts";
@@ -7,6 +8,8 @@ import type { OnboardingDocumentsApi } from "./onboarding-documents.ts";
 import type {
   LogFilter,
   StaffAgreements,
+  StaffAiUseRow,
+  StaffInterviewers,
   StaffLog,
   StaffNote,
   StaffOverview,
@@ -320,6 +323,33 @@ export interface OnboardingStaffApi extends KickoffApi {
   addNote: (text: string) => Promise<StaffNote>;
   /** Someone's interview; every read is in the audit log, without its words. */
   transcript: (person: string) => Promise<StaffTranscript>;
+  /**
+   * Where everyone stands with their link and their interview, by name, as
+   * Grasp's admin reads it: numbers, never anyone's words. It names
+   * people, so every read is in the audit log.
+   */
+  interviews: () => Promise<AdminSnapshot>;
+  /**
+   * Someone's own link, for staff to send them by hand: its path, the
+   * secret after the `#`. Every read is in the audit log, without it.
+   */
+  link: (person: string) => Promise<string>;
+  /**
+   * Notes the one reminder as sent by hand to each of `people` whose link
+   * is out, who hasn't finished and wasn't reminded yet. Returns how many.
+   */
+  remind: (people: string[]) => Promise<number>;
+  /** A team that didn't take part takes part: its lead's link goes out first. */
+  askIn: (team: string) => Promise<OnboardingView>;
+  /**
+   * Deletes someone's interview because they asked: what they said is
+   * gone, and their link opens a new one.
+   */
+  deleteInterview: (person: string) => Promise<void>;
+  /** How Stephen and Claire are doing, as numbers: never who said what. */
+  interviewers: () => Promise<StaffInterviewers>;
+  /** The AI the onboarding used, by day, purpose and model. */
+  aiUse: () => Promise<StaffAiUseRow[]>;
 }
 
 /** Why the onboarding refused something. */
@@ -330,5 +360,6 @@ export const onboardingErrors = defineErrorFamily({
   "onboarding.past": "The interviews can't start in the past.",
   "onboarding.no_link": "That person has no link out yet.",
   "onboarding.not_found": "Nobody on the list by that id.",
+  "onboarding.no_team": "No team on the list by that id.",
   "onboarding.no_failed_mail": "That person has no mail that failed.",
 });

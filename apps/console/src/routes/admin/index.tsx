@@ -446,7 +446,7 @@ const NeedsToday = ({ organizations }: { organizations: Organization[] }) => {
 const Overview = () => {
   const navigate = useNavigate();
   const { phase } = Route.useSearch();
-  const organizations = organizationsOf(adminRoute.useLoaderData());
+  const organizations = organizationsOf(adminRoute.useLoaderData().admins);
   const views = organizations.flatMap(({ view }) =>
     view === null ? [] : [view]
   );

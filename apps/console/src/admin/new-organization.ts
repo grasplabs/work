@@ -1,10 +1,13 @@
 /**
  * Adding an organization, as the prototype's admin starts one
  * (grasplabs/prototype `components/admin/new-org-dialog.tsx`): from a deal
- * won in Attio, a proposal signed in Rooms, or by hand. The console reads
- * neither Attio nor Rooms yet (no connector for them), so only by hand can
- * be chosen; the other two are shown, with why not, where they will be.
+ * won in Attio, a proposal signed in Rooms, or by hand. A deal won in
+ * Attio can be chosen once Attio is read and has one no organization is
+ * linked to (src/crm/crm.ts); Rooms has no list of signed proposals to
+ * start from yet, so it is shown, with why not, where it will be.
  */
+import type { WonDeal } from "../crm/attio.ts";
+import type { WonDeals } from "../crm/crm.ts";
 
 /** Where a new organization's details can come from. */
 export interface StartingPoint {
@@ -15,7 +18,7 @@ export interface StartingPoint {
   unavailable: string | null;
 }
 
-export const startingPoints: readonly StartingPoint[] = [
+const startingPoints: readonly StartingPoint[] = [
   {
     id: "hand",
     label: "By hand",
@@ -25,8 +28,9 @@ export const startingPoints: readonly StartingPoint[] = [
   {
     id: "attio",
     label: "A deal won in Attio",
-    description: "Its company and contacts, filled in below to put right.",
-    unavailable: "Not yet: the console isn't connected to Attio.",
+    description:
+      "Its company, filled in below to put right, and linked to it in Attio.",
+    unavailable: null,
   },
   {
     id: "rooms",
@@ -35,6 +39,34 @@ export const startingPoints: readonly StartingPoint[] = [
     unavailable: "Not yet: the console isn't connected to Rooms.",
   },
 ];
+
+/** Why a deal won in Attio can't be started from, when it can't. */
+const attioUnavailable = (won: WonDeals): string | null => {
+  switch (won.state) {
+    case "not_connected": {
+      return "Not yet: the console isn't connected to Attio.";
+    }
+    case "unread": {
+      return "Attio can't be read now: try again in a moment.";
+    }
+    case "read": {
+      return won.deals.length === 0
+        ? "No deal won in Attio waits to be added."
+        : null;
+    }
+    default: {
+      return won satisfies never;
+    }
+  }
+};
+
+/** Where a new organization can start from, with the won deals Attio has now. */
+export const startingPointsOf = (won: WonDeals): readonly StartingPoint[] =>
+  startingPoints.map((start) =>
+    start.id === "attio"
+      ? { ...start, unavailable: attioUnavailable(won) }
+      : start
+  );
 
 const listSeparator = /[\s,]+/u;
 
@@ -54,3 +86,28 @@ export const domainsOrAdmins = (domains: string, admins: string): string => {
     .filter((domain) => domain !== "");
   return [...new Set(ofAdmins)].join(", ");
 };
+
+const accents = /\p{M}/gu;
+const notInAnAddress = /[^a-z0-9]+/gu;
+const dashesAtEnds = /^-+|-+$/gu;
+
+/**
+ * What a won deal fills in: the company's name, an address made from it
+ * (to put right: it can't change once added), and its domains for the
+ * sign-in. Its people aren't, as Attio doesn't say who goes through the
+ * onboarding.
+ */
+export const prefillOf = (
+  deal: WonDeal
+): { name: string; clientId: string; domains: string } => ({
+  name: deal.name,
+  clientId: deal.name
+    .normalize("NFKD")
+    .replaceAll(accents, "")
+    .toLowerCase()
+    .replaceAll(notInAnAddress, "-")
+    .replaceAll(dashesAtEnds, "")
+    .slice(0, 50)
+    .replaceAll(dashesAtEnds, ""),
+  domains: deal.domains.join(", "),
+});
