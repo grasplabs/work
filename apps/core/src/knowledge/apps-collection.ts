@@ -45,8 +45,9 @@ import { appMemoryPath } from "./memory-files.ts";
 // Two indexings of one App at once (a version change and the cron, say)
 // never write over each other: each reads what `app_entries` holds and the
 // entry before the App, and writes only over the entry's version it read
-// (the save's `ifVersion`), and `app_entries` only over the version it
-// read there, so the one that loses writes nothing. The one that wins may
+// (the save's `ifVersion`), so the one that loses writes nothing; one that
+// finds the text unchanged notes its version only over the note it read
+// (`noteVersion`). The one that wins may
 // have read the App before a version change that the loser saw, and so
 // leave the text of a version that is no longer current: `app_entries`
 // then names that version, which differs from the App's, and the next
@@ -147,14 +148,15 @@ export const entryNow = async (
 };
 
 /**
- * Sets the version the App's entry holds, once the entry does, unless
- * another indexing noted one since this one read `noted`.
+ * Sets the version the App's entry holds, once the entry does. With
+ * `onlyOver`, only while `app_entries` still holds what this indexing
+ * read there (`version` undefined: no row): see `indexApp`.
  */
 const noteVersion = async (
   env: Env,
   appId: string,
   version: number,
-  noted: number | undefined
+  onlyOver?: { version: number | undefined }
 ): Promise<void> => {
   await drizzle(env.DB)
     .insert(appEntries)
@@ -165,7 +167,14 @@ const noteVersion = async (
         version: sql`excluded.version`,
         indexedAt: sql`excluded.indexed_at`,
       },
-      setWhere: noted === undefined ? sql`0` : eq(appEntries.version, noted),
+      ...(onlyOver === undefined
+        ? {}
+        : {
+            setWhere:
+              onlyOver.version === undefined
+                ? sql`0`
+                : eq(appEntries.version, onlyOver.version),
+          }),
     });
 };
 
@@ -213,8 +222,11 @@ const indexApp = async (env: Env, appId: string): Promise<void> => {
   const ifVersion = stored?.version ?? 0;
   // Compared by hash: the entry's payload isn't read.
   if (stored?.sha256 === (await sha256Hex(text))) {
-    // The same text: only the version it holds.
-    await noteVersion(env, appId, version, noted?.version);
+    // The same text: only the version it holds, and only over what was
+    // read, so an indexing that wrote another version's text meanwhile,
+    // and noted it, isn't covered up: its note stays, which differs from
+    // the App's, and the next run indexes the App again.
+    await noteVersion(env, appId, version, { version: noted?.version });
     return;
   }
   const collection = await ensureCollection(
@@ -240,7 +252,12 @@ const indexApp = async (env: Env, appId: string): Promise<void> => {
     }
     await write(entryText(app, "This App's AGENTS.md is too large to search."));
   }
-  await noteVersion(env, appId, version, noted?.version);
+  // Whatever was noted meanwhile: the entry now holds this version's text
+  // (its save's `ifVersion` made sure of that), and `app_entries` must say
+  // so. Kept from a note made since (an unchanged-text indexing of another
+  // version, say), the two would agree with the App and never be indexed
+  // again, with this text in the entry.
+  await noteVersion(env, appId, version);
 };
 
 /**
