@@ -19,6 +19,7 @@ import {
   projectsMax,
 } from "@grasp-os/shared/chat";
 import type {
+  ChatCitedDocument,
   ChatDraft,
   ChatMessage,
   ChatProject,
@@ -137,7 +138,7 @@ import { readableSources, withheldSourceDetail } from "./history-access.ts";
 import { readAsDelegate } from "./knowledge/binding.ts";
 import { forContext } from "./knowledge/memory.ts";
 import { hasBrainGrant } from "./knowledge/recall-store.ts";
-import { catalog, noteListedSkills } from "./knowledge/tools.ts";
+import { catalog, cited, noteListedSkills } from "./knowledge/tools.ts";
 import { gatewaySettings, models } from "./models.ts";
 import { functionProblem, PreviewReports } from "./preview-reports.ts";
 import type { Reports } from "./preview-reports.ts";
@@ -310,8 +311,16 @@ export interface AnswerProvenance {
   restricted: boolean;
 }
 
-/** A turn's result, labelled with what it may hold. */
-export type Answer = TurnResult & { provenance: AnswerProvenance };
+/**
+ * A turn's result, labelled with what it may hold, with the documents its
+ * answer cites: those its chat's code was given before it that it links
+ * to, each while the chat's agent may still read it for its person
+ * (`ChatCitedDocument`). A channel shows them as the answer's sources.
+ */
+export type Answer = TurnResult & {
+  provenance: AnswerProvenance;
+  cited: ChatCitedDocument[];
+};
 
 /**
  * A stored message, as pi shapes it. Stored by this object only, so the
@@ -734,8 +743,11 @@ export class Workspace extends DurableObject<Env> {
     });
   }
 
-  /** Stores `message` as the chat's next, and shows it to its watchers. */
-  #keep(chatId: ChatId, message: Message): void {
+  /**
+   * Stores `message` as the chat's next, and shows it to its watchers;
+   * its ID.
+   */
+  #keep(chatId: ChatId, message: Message): number {
     const { id, createdAt } = this.#db
       .insert(chatMessages)
       .values({
@@ -758,6 +770,7 @@ export class Workspace extends DurableObject<Env> {
       this.#outputs.delete(chatId);
     }
     this.#changed(chatId, shown === undefined ? [] : [shown]);
+    return id;
   }
 
   /**
@@ -1102,6 +1115,8 @@ export class Workspace extends DurableObject<Env> {
       this.#builds.delete(chat.id);
       started?.();
       this.#changed(chat.id);
+      // The turn's answer is the last response it keeps.
+      let answer: number | undefined;
       const result = await runTurn({
         history: this.#transcript(chat.id),
         question: parsed.data.text,
@@ -1142,7 +1157,10 @@ export class Workspace extends DurableObject<Env> {
           if (message.role === "assistant") {
             this.#partials.delete(chat.id);
           }
-          this.#keep(chat.id, message);
+          const id = this.#keep(chat.id, message);
+          if (message.role === "assistant") {
+            answer = id;
+          }
         },
         write: (partial) => {
           this.#partials.set(chat.id, partial);
@@ -1155,6 +1173,7 @@ export class Workspace extends DurableObject<Env> {
           sources: this.#sources(chat.id),
           restricted: this.isChatRestricted(chat.id) === true,
         },
+        cited: answer === undefined ? [] : await this.#cited(scope, answer),
       };
     } finally {
       this.ctx.storage.kv.delete(`${turnKeyPrefix}${chat.id}`);
@@ -1951,6 +1970,72 @@ export class Workspace extends DurableObject<Env> {
       const givenAfter = given.get(documentId);
       return givenAfter !== undefined && messageId > givenAfter;
     };
+  }
+
+  /**
+   * The documents the chat's message `messageId` cites, as `personId`'s
+   * page shows them under it (`ChatsApi.cited`): only in their own chat.
+   */
+  async cited(
+    chatId: unknown,
+    personId: string,
+    messageId: unknown
+  ): Promise<ChatCitedDocument[]> {
+    const chat = this.#ownChat(chatId, personId);
+    const id = z.int().positive().safeParse(messageId);
+    if (!id.success) {
+      return [];
+    }
+    const workspaceId = workspaceIdSchema.parse(this.ctx.id.name);
+    const scope = {
+      workspaceId,
+      agentId: chat.agentId,
+      chatId: chat.id,
+      personId,
+    };
+    return await this.#cited(scope, id.data);
+  }
+
+  /**
+   * The documents the chat's answer `messageId` cites (`citedIn`), each
+   * looked up now as the chat's agent acting for its person, so one either
+   * may no longer read is left out; none for a message that isn't an
+   * answer, or one that cites nothing.
+   */
+  async #cited(
+    scope: Pick<AgentScope, "workspaceId" | "agentId" | "chatId" | "personId">,
+    messageId: number
+  ): Promise<ChatCitedDocument[]> {
+    const stored = this.#db
+      .select()
+      .from(chatMessages)
+      .where(
+        and(
+          eq(chatMessages.chatId, scope.chatId),
+          eq(chatMessages.id, messageId)
+        )
+      )
+      .get();
+    const shown =
+      stored === undefined
+        ? undefined
+        : chatMessageOf(
+            stored.id,
+            storedMessageSchema.parse(JSON.parse(stored.message)),
+            stored.createdAt,
+            this.#givenBy(scope.chatId)(stored.id)
+          );
+    if (shown?.role !== "assistant" || shown.citations.length === 0) {
+      return [];
+    }
+    const documentIds = shown.citations.map(({ documentId }) => documentId);
+    return await readAsDelegate(
+      this.env,
+      chatAuthority(scope),
+      chatContext(scope),
+      undefined,
+      async (reader) => await cited(this.env, reader, documentIds)
+    );
   }
 
   /**

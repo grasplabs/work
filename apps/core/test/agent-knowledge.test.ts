@@ -151,6 +151,8 @@ describe("a chat's Knowledge", setUpTime, () => {
       outcome: "answered",
       answer: "Sixteen weeks (Handbook, leave.md).",
       provenance: { sources: [collectionId], restricted: false },
+      // It links to no note: it cites none.
+      cited: [],
     });
     // The model read the API's declaration before it wrote the code.
     const declared = JSON.stringify(gateway.requests[0]?.body);
@@ -506,6 +508,7 @@ describe("a chat's Knowledge", setUpTime, () => {
         answer: "One document is past its review date.",
         // It read nothing it must name, and nothing restricted.
         provenance: { sources: [], restricted: false },
+        cited: [],
       },
       result: `Returned:\n${JSON.stringify([["overdue_review", granted]])}`,
       calls: [{ method: "knowledge.signals", signals: 1, outcome: "ok" }],
@@ -576,10 +579,15 @@ describe("a chat's Knowledge", setUpTime, () => {
         expect(sent.some(({ role }) => role === "assistant")).toBeTruthy();
       });
       await subscription.release();
-      return sent.flatMap((shown) =>
-        shown.role === "assistant" && shown.text !== ""
-          ? [{ text: shown.text, citations: shown.citations }]
-          : []
+      const shown = sent.flatMap((message) =>
+        message.role === "assistant" && message.text !== "" ? [message] : []
+      );
+      return await Promise.all(
+        shown.map(async ({ id, text, citations }) => ({
+          text,
+          citations,
+          cited: await person.api.chats.cited(chatId, id),
+        }))
       );
     };
 
@@ -588,18 +596,106 @@ describe("a chat's Knowledge", setUpTime, () => {
       other: await answers(other.chat.id),
     }).toStrictEqual({
       reading: [
-        { text: "Let me look Parental leave.", citations: [] },
+        { text: "Let me look Parental leave.", citations: [], cited: [] },
         {
           text: `Sixteen weeks [Parental leave](grasp:note/${read}), as [the policy](grasp:note/${read}) says; see Travel, Minutes and nothing.`,
           citations: [{ kind: "document", documentId: read }],
+          cited: [
+            {
+              documentId: read,
+              collectionId,
+              title: "Parental leave",
+              path: "leave.md",
+              snippet: "Parental leave lasts sixteen weeks.",
+            },
+          ],
         },
       ],
       other: [
         {
           text: "Sixteen weeks Parental leave, as the policy says; see Travel, Minutes and nothing.",
           citations: [],
+          cited: [],
         },
       ],
+    });
+  });
+
+  it("gives an answer the documents it cites, with their title, path and snippet: never one only read, nor one its person can no longer read", async () => {
+    const admin = await newAdmin();
+    const person = await newPerson();
+    const teamId = await newTeam(admin, [person]);
+    const { id: handbook } = await admin.knowledge.createCollection({
+      name: `Handbook ${unique()}`,
+      access: "everyone",
+    });
+    const { id: plans } = await admin.knowledge.createCollection({
+      name: `Plans ${unique()}`,
+      access: "teams",
+      teams: [teamId],
+    });
+    const [leaveDoc, travel, plan] = await Promise.all(
+      [
+        { collectionId: handbook, path: "leave.md", text: leave },
+        {
+          collectionId: handbook,
+          path: "travel.md",
+          text: "# Travel\n\nBook trains.",
+        },
+        {
+          collectionId: plans,
+          path: "routes/plan.md",
+          text: `---\ndescription: Where the route goes, and when.\n---\n# Route plan\n\nDeparts at nine.`,
+        },
+      ].map(
+        async (document) =>
+          await admin.knowledge.saveDocument({ ...document, ifVersion: 0 })
+      )
+    );
+    const ids = [leaveDoc?.id, travel?.id, plan?.id];
+    // Cites the plan first, then leave; travel was read, and isn't cited.
+    const answer = `It departs at nine [Route plan](grasp:note/${plan?.id}), and leave lasts sixteen weeks [Parental leave](grasp:note/${leaveDoc?.id}).`;
+    const { ask, agent } = await chatOf(
+      person.userId,
+      codeStep(
+        `export default async (self, env) => { for (const id of ${JSON.stringify(ids)}) { await env.knowledge.read(id); } return "read"; };`
+      ),
+      says(answer),
+      says(answer)
+    );
+    await grantRead(admin, agent, handbook);
+    await grantRead(admin, agent, plans);
+
+    const first = await ask(
+      "When does the route depart, and how long is leave?"
+    );
+    // The person leaves the team: the plan is no longer theirs to read.
+    await callAuth("/organization/remove-team-member", admin.session, {
+      teamId,
+      userId: person.userId,
+    });
+    const again = await ask("And now?");
+
+    const leaveCited = {
+      documentId: leaveDoc?.id,
+      collectionId: handbook,
+      title: "Parental leave",
+      path: "leave.md",
+      snippet: "Parental leave lasts sixteen weeks.",
+    };
+    expect({ first: first.cited, again: again.cited }).toStrictEqual({
+      first: [
+        {
+          documentId: plan?.id,
+          collectionId: plans,
+          title: "Route plan",
+          path: "routes/plan.md",
+          // Its description, as its author put it.
+          snippet: "Where the route goes, and when.",
+        },
+        leaveCited,
+      ],
+      again: [leaveCited],
     });
   });
 
