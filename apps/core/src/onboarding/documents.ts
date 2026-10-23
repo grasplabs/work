@@ -19,6 +19,7 @@ import { z } from "zod";
 
 import { ensureCollection } from "../knowledge/collections.ts";
 import { localExtractor } from "../knowledge/extract.ts";
+import { brainOf } from "../knowledge/ports.ts";
 import type { OnErase } from "../knowledge/purge.ts";
 import { uploadFile } from "../knowledge/uploads.ts";
 import { gatewaySettings, modelForRole, models } from "../models.ts";
@@ -136,7 +137,7 @@ const readingModel = (env: ModelsEnv): string | undefined =>
 /** The collection the onboarding keeps documents in, made by `person` the first time. */
 const documentsCollection = async (env: Env, person: Identity) =>
   await ensureCollection(
-    env,
+    brainOf(env),
     {
       id: collectionIdSchema.parse(onboardingDocumentsCollection),
       name: "Onboarding documents",

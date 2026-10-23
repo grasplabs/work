@@ -13,7 +13,7 @@ import { requireWritable } from "./collection-rules.ts";
 import { readableCollection } from "./collections.ts";
 import { readableDocument, versionText, writeVersion } from "./documents.ts";
 import type { Writer } from "./documents.ts";
-import { portsOf } from "./ports.ts";
+import { portsOf, brainOf } from "./ports.ts";
 
 // A person saving and restoring Knowledge's documents themselves: core
 // checks they may change the collection (collection-rules.ts), then
@@ -41,7 +41,7 @@ export const saveDocument = async (
     collectionId
   );
   requireWritable(env, person, collection);
-  return await writeVersion(env, personWriter(person), {
+  return await writeVersion(brainOf(env), personWriter(person), {
     collection,
     path,
     text,
@@ -69,11 +69,11 @@ export const restoreVersion = async (
     documentId
   );
   requireWritable(env, person, collection);
-  const restored = await versionText(env, db, document.id, version);
+  const restored = await versionText(brainOf(env), db, document.id, version);
   if (restored === undefined) {
     throw knowledgeErrors.create("knowledge.not_found");
   }
-  return await writeVersion(env, personWriter(person), {
+  return await writeVersion(brainOf(env), personWriter(person), {
     collection,
     path: document.path,
     text: restored,
