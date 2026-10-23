@@ -852,6 +852,53 @@ describe("the Microsoft 365 connector's file tools", () => {
     ]);
   });
 
+  it("page through a file's versions, the newest alone current", async () => {
+    const connection = await connected();
+    const pageSchema = z.object({
+      versions: z.array(z.object({ id: z.string(), current: z.boolean() })),
+      nextPage: z.string().nullable(),
+    });
+    const seen: { id: string; current: boolean }[] = [];
+    let page: string | undefined;
+    do {
+      const read = pageSchema.parse(
+        // oxlint-disable-next-line no-await-in-loop -- each page follows the last
+        await outputOf(
+          call(connection, "files.versions", {
+            drive: financeDrive,
+            item: itemIds.procedure,
+            top: 1,
+            ...(page === undefined ? {} : { page }),
+          })
+        )
+      );
+      seen.push(...read.versions);
+      page = read.nextPage ?? undefined;
+    } while (page !== undefined);
+    expect(seen).toStrictEqual([
+      { id: "3.0", current: true },
+      { id: "2.0", current: false },
+      { id: "1.0", current: false },
+    ]);
+  });
+
+  it("refuse an older version too big to read before asking for its content", async () => {
+    const connection = await connected();
+    graph.oversizeVersion("1.0");
+    await expect(
+      toolError(
+        call(connection, "files.read", {
+          drive: financeDrive,
+          item: itemIds.procedure,
+          version: "1.0",
+        })
+      )
+    ).resolves.toMatchObject({ error: { code: "too_large" } });
+    expect(graphPaths()).not.toContain(
+      `${drivePath}/items/${itemIds.procedure}/versions/1.0/content`
+    );
+  });
+
   it("read an older version of a file, to compare it with the current one", async () => {
     const connection = await connected();
     const procedure = { drive: financeDrive, item: itemIds.procedure };

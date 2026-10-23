@@ -380,11 +380,28 @@ export const procedureVersions = [
   ...version,
 }));
 
-/** A page of an item's versions: all of the procedure's. */
-export const versionPage = (drive: string, id: string) => ({
-  "@odata.context": `https://graph.microsoft.com/v1.0/$metadata#drives('${drive}')/items('${id}')/versions`,
-  value: procedureVersions,
-});
+/**
+ * A page of the procedure's versions, newest first: `$top` of them (all,
+ * if not asked) from the `$skiptoken`'s position on.
+ */
+export const versionPage = (
+  drive: string,
+  id: string,
+  query: URLSearchParams = new URLSearchParams()
+) => {
+  const top = Number(query.get("$top") ?? procedureVersions.length);
+  const from = Number(query.get("$skiptoken") ?? 0);
+  const next = from + top;
+  return {
+    "@odata.context": `https://graph.microsoft.com/v1.0/$metadata#drives('${drive}')/items('${id}')/versions`,
+    value: procedureVersions.slice(from, next),
+    ...(next < procedureVersions.length
+      ? {
+          "@odata.nextLink": `https://graph.microsoft.com/v1.0/drives/${drive}/items/${id}/versions?%24top=${top}&%24skiptoken=${next}`,
+        }
+      : {}),
+  };
+};
 
 /** One of the procedure's versions, as `GET /versions/{id}` returns it. */
 export const procedureVersion = (version: string) =>

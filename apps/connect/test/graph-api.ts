@@ -87,6 +87,9 @@ const keepTag = (mailbox: string, id: string, made: unknown): void => {
 /** Runs once while Graph answers the next lookup by effect key. */
 let duringLookup: (() => Promise<void>) | undefined;
 
+/** A version of the procedure Graph says is too big to read, if any. */
+let oversizedVersion: string | undefined;
+
 /** The effect key a lookup's `$filter` asks for, if it asks for one. */
 const keyFilter =
   /^singleValueExtendedProperties\/Any\(ep: ep\/id eq '(?<id>[^']+)' and ep\/value eq '(?<key>[^']+)'\)$/u;
@@ -198,21 +201,32 @@ const graphRoutes: ProviderRoute<Part>[] = [
   route("GET", `${drives}/items/(?<id>[^/]+)`, ({ drive, id }) =>
     id === itemIds.locked ? json(accessDenied, 403) : json(item(drive, id))
   ),
-  route("GET", `${drives}/items/(?<id>[^/]+)/versions`, ({ drive, id }) => {
-    if (id === itemIds.locked) {
-      return json(accessDenied, 403);
+  route(
+    "GET",
+    `${drives}/items/(?<id>[^/]+)/versions`,
+    ({ drive, id, query }) => {
+      if (id === itemIds.locked) {
+        return json(accessDenied, 403);
+      }
+      return id === itemIds.procedure
+        ? json(versionPage(drive, id, query))
+        : json(notFound, 404);
     }
-    return id === itemIds.procedure
-      ? json(versionPage(drive, id))
-      : json(notFound, 404);
-  }),
+  ),
   route(
     "GET",
     `${drives}/items/(?<id>[^/]+)/versions/(?<version>[^/]+)`,
     ({ id, version }) => {
       const found =
         id === itemIds.procedure ? procedureVersion(version) : undefined;
-      return found === undefined ? json(notFound, 404) : json(found);
+      if (found === undefined) {
+        return json(notFound, 404);
+      }
+      return json(
+        version === oversizedVersion
+          ? { ...found, size: 5 * 1024 * 1024 }
+          : found
+      );
     }
   ),
   route(
@@ -262,6 +276,7 @@ export const fakeGraph = () => {
   beforeEach(() => {
     tagged.clear();
     duringLookup = undefined;
+    oversizedVersion = undefined;
   });
   const { sent, writesDone, fail } = fakeProvider({
     hosts: [graphHost],
@@ -314,6 +329,10 @@ export const fakeGraph = () => {
         writesOnly: true,
         meanwhile,
       });
+    },
+    /** Graph says this version of the procedure is 5 MiB, past what a read takes. */
+    oversizeVersion: (version: string) => {
+      oversizedVersion = version;
     },
     /** Runs `meanwhile` while Graph answers the next lookup by effect key. */
     whileLookingUp: (meanwhile: () => Promise<void>) => {
