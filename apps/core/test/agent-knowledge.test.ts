@@ -1,5 +1,6 @@
 import { agentErrors } from "@grasp-os/shared/agent";
 import type { AuditEvent } from "@grasp-os/shared/audit";
+import { citedSnippetMax } from "@grasp-os/shared/chat";
 import type { ChatMessage } from "@grasp-os/shared/chat";
 import { workspaceIdSchema } from "@grasp-os/shared/ids";
 import { knowledgeErrors } from "@grasp-os/shared/knowledge";
@@ -635,7 +636,9 @@ describe("a chat's Knowledge", setUpTime, () => {
       access: "teams",
       teams: [teamId],
     });
-    const [leaveDoc, travel, plan] = await Promise.all(
+    // One long section: its snippet is read from the start of it.
+    const rule = "Arrive on time. ";
+    const [leaveDoc, travel, plan, rules] = await Promise.all(
       [
         { collectionId: handbook, path: "leave.md", text: leave },
         {
@@ -648,14 +651,19 @@ describe("a chat's Knowledge", setUpTime, () => {
           path: "routes/plan.md",
           text: `---\ndescription: Where the route goes, and when.\n---\n# Route plan\n\nDeparts at nine.`,
         },
+        {
+          collectionId: handbook,
+          path: "rules.md",
+          text: `# House rules\n\n${rule.repeat(20_000)}`,
+        },
       ].map(
         async (document) =>
           await admin.knowledge.saveDocument({ ...document, ifVersion: 0 })
       )
     );
-    const ids = [leaveDoc?.id, travel?.id, plan?.id];
+    const ids = [leaveDoc?.id, travel?.id, plan?.id, rules?.id];
     // Cites the plan first, then leave; travel was read, and isn't cited.
-    const answer = `It departs at nine [Route plan](grasp:note/${plan?.id}), and leave lasts sixteen weeks [Parental leave](grasp:note/${leaveDoc?.id}).`;
+    const answer = `It departs at nine [Route plan](grasp:note/${plan?.id}), and leave lasts sixteen weeks [Parental leave](grasp:note/${leaveDoc?.id}). Be on time [House rules](grasp:note/${rules?.id}).`;
     const { ask, agent } = await chatOf(
       person.userId,
       codeStep(
@@ -684,6 +692,14 @@ describe("a chat's Knowledge", setUpTime, () => {
       path: "leave.md",
       snippet: "Parental leave lasts sixteen weeks.",
     };
+    const rulesCited = {
+      documentId: rules?.id,
+      collectionId: handbook,
+      title: "House rules",
+      path: "rules.md",
+      // Cut to the most a snippet holds, and marked so.
+      snippet: `${rule.repeat(20).slice(0, citedSnippetMax - 1)}…`,
+    };
     expect({ first: first.cited, again: again.cited }).toStrictEqual({
       first: [
         {
@@ -695,8 +711,9 @@ describe("a chat's Knowledge", setUpTime, () => {
           snippet: "Where the route goes, and when.",
         },
         leaveCited,
+        rulesCited,
       ],
-      again: [leaveCited],
+      again: [leaveCited, rulesCited],
     });
   });
 

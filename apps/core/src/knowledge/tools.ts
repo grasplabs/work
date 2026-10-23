@@ -17,7 +17,7 @@ import type {
   Provenance,
   SkillFile,
 } from "@grasp-os/shared/knowledge";
-import { and, asc, eq, gte, lt, ne } from "drizzle-orm";
+import { and, asc, eq, gte, lt, ne, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { alias } from "drizzle-orm/sqlite-core";
 import { z } from "zod";
@@ -275,6 +275,14 @@ const whitespace = /\s+/gu;
 const snippetSections = 3;
 
 /**
+ * How much of each section a snippet is read from: its heading line and
+ * the start of what it says, enough for a snippet once whitespace is
+ * folded. A section can fill a whole document, and an answer can cite
+ * many, so its whole text is never read for a few words of it.
+ */
+const snippetExcerptChars = citedSnippetMax * 8;
+
+/**
  * What a section says under its heading: its text starts with its heading
  * line, but for text before a document's first heading, which has none.
  */
@@ -313,15 +321,20 @@ export const cited = async (
       path: documents.path,
       description: documents.description,
       headings: sections.headings,
-      text: sections.text,
+      text: sql<
+        string | null
+      >`substr(${sections.text}, 1, ${snippetExcerptChars})`,
     })
     .from(documents)
     .innerJoin(collections, eq(collections.id, documents.collectionId))
+    // A document's description is its snippet: its sections are read only
+    // for one without.
     .leftJoin(
       sections,
       and(
         eq(sections.documentId, documents.id),
-        lt(sections.position, snippetSections)
+        lt(sections.position, snippetSections),
+        eq(documents.description, "")
       )
     )
     .where(and(inList(documents.id, documentIds), allowed.documents()))
