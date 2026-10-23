@@ -3,6 +3,8 @@ import type { AuditActor } from "@grasp-os/shared/audit";
 import { staffWindowOpen } from "@grasp-os/shared/deployment-config";
 import type { SignInConfig } from "@grasp-os/shared/deployment-config";
 import type { OnboardingView } from "@grasp-os/shared/onboarding";
+import { noChoices } from "@grasp-os/shared/onboarding-choices";
+import type { SetupChoices } from "@grasp-os/shared/onboarding-choices";
 import {
   gateThresholdDefault,
   gateThresholds,
@@ -86,13 +88,17 @@ const share = (some: number, of: number): number => (of === 0 ? 0 : some / of);
  * What Grasp knows of the company, part by part, from what the onboarding
  * holds; the kickoff by how much of what Stephen needs from it is in
  * (`kickoff`, 0 to 1), and the documents once any is shared (`documents`).
- * Where they live, Pulse and the review come in with their own issues
- * (GRA-299, GRA-300, GRA-304) and count nothing until then.
+ * From what the admin chose (`choices`): where the documents live once a
+ * place is noted or connected (one only asked for by name is not), the
+ * tools once Pulse is to be set up, and the leads from an HR platform
+ * named, as from every team taking part having one. The review comes in
+ * with its own issue (GRA-304) and counts nothing until then.
  */
 export const knownParts = (
   view: OnboardingView,
   kickoff = 0,
-  documents = 0
+  documents = 0,
+  choices: SetupChoices = noChoices
 ): KnownPart[] => {
   const { roster, progress } = view;
   const taking = roster?.teams.filter((team) => !team.off) ?? [];
@@ -104,12 +110,15 @@ export const knownParts = (
   return [
     part("kickoff", kickoff),
     part("people", roster === null ? 0 : 1),
-    part("sources", 0),
+    part("sources", choices.sources.length > 0 ? 1 : 0),
     part("documents", documents),
-    part("tools", 0),
+    part("tools", choices.pulse === "wanted" ? 1 : 0),
     part(
       "leads",
-      taking.length > 0 && taking.every((team) => team.lead !== null) ? 1 : 0
+      choices.hr?.kind === "platform" ||
+        (taking.length > 0 && taking.every((team) => team.lead !== null))
+        ? 1
+        : 0
     ),
     part("conversations", conversations),
     part("review", 0),
@@ -200,7 +209,8 @@ export const gateView = async (
   const parts = knownParts(
     view,
     await store.kickoffKnown(),
-    shared.length > 0 ? 1 : 0
+    shared.length > 0 ? 1 : 0,
+    await store.choices()
   );
   let sum = 0;
   for (const { weight, known } of parts) {

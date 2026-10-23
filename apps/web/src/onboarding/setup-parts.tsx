@@ -423,6 +423,8 @@ const connectionPages = {
   documents: "connections/documents",
   /** Pulse, the app on the work laptops. */
   pulse: "connections/pulse",
+  /** The HR platform: Personio, AFAS and the like. */
+  hr: "connections/hr",
 } as const;
 
 export type ConnectionPage = keyof typeof connectionPages;

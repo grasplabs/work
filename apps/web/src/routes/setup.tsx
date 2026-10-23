@@ -1,3 +1,9 @@
+import { oauthProviderSchema } from "@grasp-os/shared/connect";
+import type { OnboardingView } from "@grasp-os/shared/onboarding";
+import { noChoices } from "@grasp-os/shared/onboarding-choices";
+import type { SetupChoices } from "@grasp-os/shared/onboarding-choices";
+import type { OnboardingDocument } from "@grasp-os/shared/onboarding-documents";
+import type { GateView } from "@grasp-os/shared/onboarding-gate";
 import { isAdmin } from "@grasp-os/shared/roles";
 import { cn } from "@grasp-os/ui/lib/utils";
 import { useLingui } from "@lingui/react/macro";
@@ -280,15 +286,24 @@ const useVoiceBetweenSteps = (step: SetupStep): void => {
   }, [step]);
 };
 
+/** What the steps read of what was loaded, or nothing while it could not be. */
+const readOf = (data: Loaded | null) => ({
+  roster: data?.view.roster ?? null,
+  plan: data?.view.plan ?? null,
+  progress: data?.view.progress ?? null,
+  percent: data?.gate.known ?? 0,
+  parts: data?.gate.parts ?? [],
+  choices: data?.choices ?? noChoices,
+});
+
 const Setup = () => {
   const { t, i18n } = useLingui();
   const navigate = useNavigate();
-  const { identity } = Route.useRouteContext();
+  const { identity, signIn } = Route.useRouteContext();
   const loaded = Route.useLoaderData();
   const { step: asked } = Route.useSearch();
   const data = loaded.state === "ready" ? loaded.data : null;
-  const roster = data?.view.roster ?? null;
-  const plan = data?.view.plan ?? null;
+  const { roster, plan, progress, percent, parts, choices } = readOf(data);
   const stored = readKept(identity.userId).reached;
   // Opened without a step, it goes on where they were.
   const step: SetupStep =
@@ -297,15 +312,15 @@ const Setup = () => {
   const kept = useKept(identity.userId, index);
   const reached = reachedOf(kept.reached, { plan });
   const now = today();
-  const listening = listeningOf(
-    { roster, plan, progress: data?.view.progress ?? null },
-    now
-  );
-  const percent = data?.gate.known ?? 0;
-  const parts = data?.gate.parts ?? [];
+  const listening = listeningOf({ roster, plan, progress }, now);
   // "How this works" tells its story in the brain's figures, so the figure follows the story there.
   const [story, setStory] = useState<BrainScene | null>(null);
-  const told = brainScene(step, { roster, listening, known: percent });
+  const told = brainScene(step, {
+    roster,
+    listening,
+    known: percent,
+    choices,
+  });
   const scene = step === "about" && story !== null ? story : told;
   const go = (next: SetupStep) => {
     void navigate({ to: "/setup", search: { step: next } });
@@ -356,7 +371,7 @@ const Setup = () => {
           >
             <SetupStepBody
               cramped={cramped}
-              data={{ ...data, admin, sendingDomain }}
+              data={{ ...data, admin, sendingDomain, signIn, identity }}
               go={go}
               listening={listening}
               message={kept.message}
@@ -381,11 +396,19 @@ const Setup = () => {
   );
 };
 
+/** What the onboarding reads from core. */
+interface Loaded {
+  view: OnboardingView;
+  documents: OnboardingDocument[];
+  gate: GateView;
+  choices: SetupChoices;
+}
+
 export const Route = createFileRoute("/setup")({
   validateSearch: (search: Record<string, unknown>): { step?: SetupStep } =>
     isStep(search.step) ? { step: search.step } : {},
   beforeLoad: async ({ context: { core }, location }) => {
-    const { connected, identity } = await loadCoreStatus(core);
+    const { connected, identity, signInOptions } = await loadCoreStatus(core);
     if (!connected) {
       throw new Error("Grasp can't be reached right now.");
     }
@@ -403,16 +426,22 @@ export const Route = createFileRoute("/setup")({
       // oxlint-disable-next-line typescript/only-throw-error -- the router redirects on a thrown redirect
       throw redirect({ to: "/", replace: true });
     }
-    return { identity };
+    // The suites the company signs in with: their places where documents live come first.
+    const signIn = signInOptions.flatMap(({ providerId }) => {
+      const suite = oauthProviderSchema.safeParse(providerId);
+      return suite.success ? [suite.data] : [];
+    });
+    return { identity, signIn };
   },
   loader: async ({ context: { core } }) =>
-    await loadFromCore(core, async (session) => {
-      const [view, documents, gate] = await Promise.all([
+    await loadFromCore(core, async (session): Promise<Loaded> => {
+      const [view, documents, gate, choices] = await Promise.all([
         session.onboarding.view(),
         session.onboarding.documents(),
         session.onboardingGate.view(),
+        session.onboarding.choices(),
       ]);
-      return { view, documents, gate };
+      return { view, documents, gate, choices };
     }),
   component: Setup,
 });
