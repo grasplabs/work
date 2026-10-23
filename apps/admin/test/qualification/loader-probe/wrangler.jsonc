@@ -1,0 +1,17 @@
+// A throwaway Worker for the real-account qualification (GRA-430): checks
+// the Worker Loader's shared cache and CPU limit with core's own sandbox
+// options. Deployed by hand as qual-<date>-loader-probe and deleted after.
+{
+  "name": "qual-loader-probe",
+  "main": "worker.ts",
+  "compatibility_date": "2026-09-15",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "preview_urls": false,
+  "observability": {
+    "enabled": true,
+    "logs": { "invocation_logs": false },
+    "redact_query_string": true,
+  },
+  "worker_loaders": [{ "binding": "LOADER" }],
+}
