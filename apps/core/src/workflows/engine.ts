@@ -67,6 +67,12 @@ export interface AdmittedEngineEvent {
    * child's end, so no sender can crowd it out.
    */
   readonly reserved?: boolean;
+  /**
+   * Who sent it, as core names senders apart: held to that sender's share
+   * of the inbox (@grasp-os/workerflow's `maxSenderEvents`), so no one
+   * sender fills it for the others.
+   */
+  readonly sender?: string;
 }
 
 /** What an App's run is pinned to: the dispatcher loads it by these. */
@@ -506,6 +512,7 @@ export const runEngine = (env: Env): RunEngine => ({
       key: event.key,
       attributes: event.attributes,
       reserved: event.reserved === true,
+      sender: event.sender ?? null,
     }),
   sendEvent: async (id, type, key) => {
     const outcome = await runStub(env, id).sendEvent({

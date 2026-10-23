@@ -48,10 +48,12 @@ import { runOf } from "./resource-runs.ts";
 //   (`workflow.run_ended`).
 // - Another workflow's run. The caller names the workflow and the run:
 //   a run of another workflow is no such run (`workflow.run_unavailable`).
-// - A run's inbox filled without bound. The engine refuses an event past
-//   its count or byte limit, or too large, before it answers; a run past
-//   its lineage's age takes none (`workflow.event_refused`). An event is
-//   never accepted and then dropped.
+// - A run's inbox filled without bound, or by one sender for all the
+//   others. The engine refuses an event past its count or byte limit, or
+//   past its sender's share of them (every delivery names its sender,
+//   from the caller's authority), or too large, before it answers; a run
+//   past its lineage's age takes none (`workflow.event_refused`). An event
+//   is never accepted and then dropped.
 // - The same event delivered twice. Its key is the engine's delivery key:
 //   the same key, type, data and attributes again is the same event,
 //   accepted once, and answered with the same ID; the same key with
@@ -86,6 +88,7 @@ const deliverySchema = z.strictObject({
     .min(1)
     .max(1024)
     .refine((text) => URL.canParse(text), "An absolute URI"),
+  sender: z.string().min(1).max(256),
 });
 
 /** An event a caller admits to a run: everything but what the host mints. */
@@ -106,6 +109,12 @@ export interface RunEventDelivery {
    * sender's input.
    */
   readonly source: string;
+  /**
+   * Who sends it, for its share of the run's inbox: the same for every
+   * delivery of one sender (say, the App and person a screen's send acts
+   * for, whatever release), derived as `source` is, never from the input.
+   */
+  readonly sender: string;
 }
 
 /** An admitted event: its ID, and whether this delivery was the first. */
@@ -183,6 +192,7 @@ export const admitRunEvent = async (
     // Its ID names the delivery: a sender's key is its own, never another's.
     key: id,
     attributes: attributesOf(stored),
+    sender: event.sender,
   });
   switch (outcome) {
     case "accepted":
@@ -198,6 +208,7 @@ export const admitRunEvent = async (
     case "too_large":
     case "full":
     case "missing": {
+      // Full: the inbox, or its sender's share of it.
       // Missing: the engine has no record of the run yet (its start isn't
       // confirmed); a delivery later may find it.
       throw workflowResourceErrors.create("workflow.event_refused");

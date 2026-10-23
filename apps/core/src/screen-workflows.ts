@@ -1,5 +1,6 @@
 import {
   declaredWorkflows,
+  eventFingerprint,
   schemaFromDescriptor,
   workflowFingerprint,
 } from "@grasp-os/sdk/host";
@@ -30,6 +31,7 @@ import { loadRelease } from "./app-releases.ts";
 import type { Release } from "./app-releases.ts";
 import { startAppBinding } from "./app-workflow-bindings.ts";
 import { appFor } from "./apps.ts";
+import { auditedBatch, outboxed } from "./audit-outbox.ts";
 import {
   workflowResourceRunControls,
   workflowResources,
@@ -40,7 +42,7 @@ import { isUniqueViolation } from "./db/d1.ts";
 import { appHost } from "./durable-objects.ts";
 import { requireNotRevoked } from "./release-runner.ts";
 import { coreStartKey } from "./workflow-start-intents.ts";
-import { appStartHoldsSql } from "./workflow-starts.ts";
+import { appSendHoldsSql, appStartHoldsSql } from "./workflow-starts.ts";
 import {
   applyCancel,
   cancelRepairAfterMs,
@@ -49,6 +51,7 @@ import {
 } from "./workflows/resource-runs.ts";
 import type { RunRow } from "./workflows/resource-runs.ts";
 import { tellQueryFollowers } from "./workflows/run-changes.ts";
+import { admitRunEvent } from "./workflows/run-events.ts";
 
 // What an App's screen asks of the workflows its App binds, through the
 // typed `useWorkflow` (spec 10.4; the SDK's client-workflow.ts speaks the
@@ -102,6 +105,38 @@ import { tellQueryFollowers } from "./workflows/run-changes.ts";
 // - A portable host: an App token from any origin, with no build core
 //   approved, starts, controls and follows no run yet (app-function-route.ts,
 //   portable-live.ts), until that is decided on its own.
+// - An event sent to a run by someone, or through something, that may not
+//   send it (spec 10.4.6). A send names a run the screen sees (above), an
+//   event the release declares for the workflow, of exactly the type and
+//   fingerprint the release resolved (`version.mismatch` otherwise), and
+//   data that the event's declared contract takes, extra fields refused.
+//   It needs the App's own `send` grant on the workflow, which no `start`,
+//   `read` or decision implies, held for the person now with their role in
+//   the App and the binding in force; the run takes it only as its inbox
+//   admits any event (workflows/run-events.ts): through an event binding
+//   its start froze, its contract pinned, its authority read again, and
+//   only while it hasn't ended (`workflow.run_ended`: a send starts no run).
+//   The grant is read just before the inbox takes the event, in another
+//   store, so a revocation landing between the two lets that one send in;
+//   the next is refused.
+// - A sender forging provenance, or another sender's event. A send carries
+//   only the event's reference, its data and the client's key: a request
+//   with any other field (an envelope's source, ID, time or subject) is
+//   refused whole (`contract.invalid_request`). The host mints the
+//   envelope: its source from the App, release and person the request is
+//   authenticated as (`sourceOf`), its ID from the run, binding, source
+//   and key, its time as the run accepts it.
+// - One person's screen filling a run's inbox for every other sender: each
+//   App and person is one sender, whose events hold no more than their
+//   share of the inbox (`senderOf`), refused before the send is answered
+//   (`workflow.event_refused`), never accepted and dropped.
+// - A send admitted twice, or lost: each `send` call is its own key, so two
+//   calls are two events, however equal their data; a resend of one under
+//   its key, its answer lost, is the same event, answered with the same ID
+//   (the run's inbox keeps every key it took, consumed or not), and a key
+//   reused for other data is refused (`workflow.event_conflict`). A send
+//   resumes no paused run (the event waits for the run's resume), and
+//   answers no decision, which only `decide` does.
 // - Controls this platform can't serialize yet: an independent run has no
 //   paused state of its own (the engine's pause shows as running), so
 //   pause and resume are refused (`workflow.control_refused`) and offered
@@ -124,6 +159,13 @@ const keySchema = z.string().regex(/^[0-9a-f]{32}$/u);
 
 const runIdSchema = z.string().min(1).max(128);
 
+/** An event a send names, by the reference the SDK was generated with. */
+const eventReferenceSchema = z.strictObject({
+  alias: z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,63}$/u),
+  type: z.string().min(1).max(256),
+  fingerprint: z.string().regex(/^[0-9a-f]{64}$/u),
+});
+
 /** What a screen asks of a workflow (see the header). */
 const workflowRequestSchema = z.union([
   z.strictObject({
@@ -140,6 +182,14 @@ const workflowRequestSchema = z.union([
   }),
   z.strictObject({
     workflow: referenceSchema,
+    command: z.literal("send"),
+    runId: runIdSchema,
+    event: eventReferenceSchema,
+    data: z.unknown(),
+    idempotencyKey: keySchema,
+  }),
+  z.strictObject({
+    workflow: referenceSchema,
     watch: z.literal("run"),
     runId: runIdSchema,
   }),
@@ -152,7 +202,7 @@ const workflowRequestSchema = z.union([
 /** A screen's request of a workflow, read. */
 export type WorkflowRequest = z.infer<typeof workflowRequestSchema>;
 
-/** A command: a start or a control. */
+/** A command: a start, a control or a send. */
 type WorkflowCommand = Extract<WorkflowRequest, { command: string }>;
 
 /** A watch: of a run, or of the binding. */
@@ -329,6 +379,24 @@ const mayStartSql = (asking: Asking, alias: string, pin: WorkflowPin): SQL => {
     return sql`0`;
   }
   return sql`(${appStartHoldsSql(
+    asking.app,
+    asking.version,
+    asking.by.userId,
+    workflow.data
+  )} AND ${bindingPinnedSql(asking.app, alias, pin)})`;
+};
+
+/**
+ * That the asking person may send events to their runs of `pin` through
+ * the App's binding of `alias` now, as SQL: the App's `send` grant, by
+ * `mayStartSql`'s rule otherwise.
+ */
+const maySendSql = (asking: Asking, alias: string, pin: WorkflowPin): SQL => {
+  const workflow = workflowResourceIdSchema.safeParse(pin.workflowId);
+  if (!workflow.success) {
+    return sql`0`;
+  }
+  return sql`(${appSendHoldsSql(
     asking.app,
     asking.version,
     asking.by.userId,
@@ -795,8 +863,99 @@ const controlled = async (
 };
 
 /**
+ * Who a screen's send comes from, as its event's source: the App, the
+ * release and the person the request is authenticated as, never anything
+ * the request says.
+ */
+const sourceOf = (asking: Asking): string =>
+  `urn:grasp:app:${asking.app}:version:${asking.version}:person:${encodeURIComponent(asking.by.userId)}`;
+
+/**
+ * Who a screen's send counts against in a run's inbox: the App and the
+ * person, whatever release, so a new release is no fresh share.
+ */
+const senderOf = (asking: Asking): string =>
+  `app:${asking.app}:person:${asking.by.userId}`;
+
+/**
+ * The event `command` sends to the asking person's run, admitted to its
+ * inbox (see the header): its ID, the same for the same key.
+ */
+const sent = async (
+  env: Env,
+  asking: Asking,
+  resolved: Resolved,
+  command: Extract<WorkflowCommand, { command: "send" }>
+): Promise<Json> => {
+  const pin = pinOf(resolved);
+  const { alias, type, fingerprint } = command.event;
+  const declared = Object.hasOwn(resolved.declared.events, alias)
+    ? resolved.declared.events[alias]
+    : undefined;
+  if (declared === undefined) {
+    throw operationErrors.create("operation.not_found");
+  }
+  if (
+    declared.type !== type ||
+    (await eventFingerprint(declared)) !== fingerprint
+  ) {
+    throw versionErrors.create("version.mismatch");
+  }
+  const { row } = await seenRun(
+    env,
+    asking,
+    resolved.alias,
+    pin,
+    command.runId
+  );
+  if (!(await holds(env, maySendSql(asking, resolved.alias, pin)))) {
+    throw workflowResourceErrors.create("workflow.event_denied");
+  }
+  const checked = schemaFromDescriptor(JSON.stringify(declared.data))[
+    "~standard"
+  ].validate(command.data);
+  if (checked instanceof Promise || checked.issues !== undefined) {
+    throw operationErrors.create("contract.invalid_args");
+  }
+  const admitted = await admitRunEvent(env, {
+    workflowId: pin.workflowId,
+    runId: row.id,
+    binding: alias,
+    type,
+    data: checked.value,
+    key: command.idempotencyKey,
+    source: sourceOf(asking),
+    sender: senderOf(asking),
+  });
+  const db = drizzle(env.DB);
+  // Every send the run took, a resend of one too: a resend may follow a
+  // first answer lost before it was recorded here.
+  await auditedBatch(env, db, [
+    outboxed(db, {
+      // The person, whose click on the App's screen sent it.
+      actor: { type: "person", userId: asking.by.userId },
+      action: "workflow.event.sent",
+      target: { type: "workflow_run", id: row.id },
+      detail: {
+        event: admitted.id,
+        workflow: pin.workflowId,
+        version: pin.version,
+        binding: alias,
+        type,
+        app: asking.app,
+        appVersion: asking.version,
+        via: "screen",
+        redelivered: !admitted.accepted,
+      },
+    }),
+  ]);
+  return { eventId: admitted.id };
+};
+
+/**
  * Answers a screen's workflow command `command` for `by` through App
- * `app`: a start's run handle, or a control's receipt; a refusal throws.
+ * `app`: a start's run handle, a control's receipt, or a send's event ID;
+ * a refusal throws.
  * The answer names the release it was decided under.
  */
 export const answerWorkflowCommand = async (
@@ -807,10 +966,14 @@ export const answerWorkflowCommand = async (
 ): Promise<{ value: Json; manifestHash: string }> => {
   const asking = await askingOf(env, by, app);
   const resolved = await resolve(asking, command.workflow);
-  const value =
-    command.command === "start"
-      ? await started(env, asking, resolved, command)
-      : await controlled(env, asking, resolved, command);
+  let value: Json;
+  if (command.command === "start") {
+    value = await started(env, asking, resolved, command);
+  } else if (command.command === "send") {
+    value = await sent(env, asking, resolved, command);
+  } else {
+    value = await controlled(env, asking, resolved, command);
+  }
   return { value, manifestHash: asking.release.manifestHash };
 };
 
