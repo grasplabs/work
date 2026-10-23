@@ -1254,6 +1254,14 @@ export interface SweepOptions {
  * clock; tests choose them, inside the object. Not a Durable Object
  * itself, so none of this is reachable over RPC.
  */
+/**
+ * Whether a schema recorded as `manifest` (its text) no longer fits the
+ * store's `contract`: what a migration taking over leaves behind
+ * (`StoreHost.#supersede`).
+ */
+const leftBehind = (contract: SchemaManifest, manifest: string): boolean =>
+  !covered(planSchemaChange(contract, readSchemaManifest(manifest).manifest));
+
 export class StoreHost {
   readonly ctx: DurableObjectState;
   readonly env: Env;
@@ -2176,12 +2184,7 @@ export class StoreHost {
       .from(schemas)
       .where(and(isNull(schemas.abandonedAt), isNull(schemas.supersededAt)))
       .all()
-      .filter(
-        ({ manifest }) =>
-          !covered(
-            planSchemaChange(contract, readSchemaManifest(manifest).manifest)
-          )
-      )
+      .filter(({ manifest }) => leftBehind(contract, manifest))
       .map(({ hash }) => hash);
     if (behind.length > 0) {
       this.#db
@@ -6175,6 +6178,48 @@ export class StoreHost {
         filled: pending.filled,
         failure: shownFailure(pending.failure, pending.migrations, named),
       };
+    });
+  }
+
+  /**
+   * Whether the schema `schemaHash` stays in force once the store's
+   * pending explicit migration takes over: false for a schema the store
+   * never took, one abandoned or already left behind, and one the pending
+   * target's contract doesn't cover, which taking over leaves behind
+   * (`#supersede`, the same check). With no explicit migration pending,
+   * whether it is still in force. Reads only, and tells core nothing of
+   * the store's records.
+   */
+  survivesMigration(storeId: StoreId, schemaHash: string): boolean {
+    const hash = dataErrors.parse(
+      "data.invalid",
+      backfillTargetSchema,
+      schemaHash
+    );
+    return this.ctx.storage.transactionSync((): boolean => {
+      this.#bind(storeId, false);
+      const recorded = this.#db
+        .select({
+          manifest: schemas.manifest,
+          abandonedAt: schemas.abandonedAt,
+          supersededAt: schemas.supersededAt,
+        })
+        .from(schemas)
+        .where(eq(schemas.schemaHash, hash))
+        .get();
+      if (
+        recorded === undefined ||
+        recorded.abandonedAt !== null ||
+        recorded.supersededAt !== null
+      ) {
+        return false;
+      }
+      const pending = this.#pendingTarget();
+      return (
+        pending === null ||
+        pending.migrations === null ||
+        !leftBehind(pending.manifest, recorded.manifest)
+      );
     });
   }
 

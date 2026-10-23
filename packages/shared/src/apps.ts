@@ -640,6 +640,8 @@ export const appErrors = defineErrorFamily({
     "Checking this version to make it current failed too many times for reasons outside its code. Try again later.",
   "app.candidate_environment":
     "This version was checked by an earlier release of the platform, so it must be checked again before it's made current.",
+  "app.candidate_release_changed":
+    "This version's sealed release no longer matches the one that was checked, so it can't be made current. Make the change again to check it anew.",
   "app.candidate_superseded":
     "A newer change to this App replaced this version's check before it finished. Make the version current again if you still want it.",
   "app.not_running": "The App has no current version to run yet.",
