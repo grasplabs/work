@@ -1,6 +1,8 @@
+import { releaseManifestSchema } from "@grasp-os/shared/release";
 import type { ReleaseManifest } from "@grasp-os/shared/release";
 import { describe, expect, it } from "vite-plus/test";
 
+import golden from "../../../scripts/release/testdata/golden-manifest.json" with { type: "json" };
 import {
   allocateClientResources,
   clientInventory,
@@ -24,6 +26,13 @@ import {
   staff,
   verified,
 } from "./hosting.ts";
+
+/**
+ * The manifest the release build makes of the real wrangler.jsonc of core
+ * and connect: every binding they declare. Its golden test
+ * (scripts/release/manifest-lib.test.ts) keeps it the configs' own.
+ */
+const realRelease = releaseManifestSchema.parse(golden);
 
 /** What the provider reports for each database once created: its own uuid. */
 const observeDatabases = async (
@@ -69,6 +78,45 @@ const bindingOf = (
   worker: ReturnType<typeof renderClientWorker> | undefined,
   name: string
 ) => worker?.bindings.find((binding) => binding.name === name);
+
+/**
+ * The resource rendered `binding` of `worker` names: a database's id, a
+ * bucket's or script's name, a class within the Worker's own script.
+ * Undefined for a binding that names none.
+ */
+const boundTo = (
+  worker: ReturnType<typeof renderClientWorker>,
+  binding: Record<string, unknown>
+): string | undefined => {
+  switch (binding.type) {
+    case "d1": {
+      return String(binding.id);
+    }
+    case "r2_bucket": {
+      return String(binding.bucket_name);
+    }
+    case "service": {
+      return String(binding.service);
+    }
+    case "durable_object_namespace": {
+      return `${worker.scriptName}:${String(binding.class_name)}`;
+    }
+    default: {
+      return undefined;
+    }
+  }
+};
+
+/** Every string anywhere in `value`. */
+const stringsIn = (value: unknown): string[] => {
+  if (typeof value === "string") {
+    return [value];
+  }
+  if (typeof value === "object" && value !== null) {
+    return Object.values(value).flatMap(stringsIn);
+  }
+  return [];
+};
 
 /** The code `render` throws, or null when it doesn't. */
 const codeOf = (render: () => unknown): string | null => {
@@ -237,6 +285,77 @@ describe("a client's resources", () => {
       },
     });
     expect(bindingOf(coreB, "DB")?.id).not.toBe(bindingOf(coreA, "DB")?.id);
+  });
+
+  it("are all a client's Workers bind, for every binding the real core and connect declare", async () => {
+    const destinationId = await destination();
+    const a = await placedClient(destinationId);
+    const b = await placedClient(destinationId);
+    const allocate = async (clientId: string) =>
+      await observeDatabases(
+        await allocateClientResources(db, staff, {
+          clientId,
+          manifest: realRelease,
+          operationId: "op",
+        })
+      );
+    const inventoryA = await allocate(a.clientId);
+    const inventoryB = await allocate(b.clientId);
+    expect(inventoryA.map(({ role }) => role)).toStrictEqual(
+      inventoryB.map(({ role }) => role)
+    );
+    expect(
+      physical(inventoryA).filter((name) => physical(inventoryB).includes(name))
+    ).toStrictEqual([]);
+
+    const renderedA = renderAll(realRelease, a.placement, inventoryA);
+    const renderedB = renderAll(realRelease, b.placement, inventoryB);
+    for (const [rendered, inventory] of [
+      [renderedA, inventoryA],
+      [renderedB, inventoryB],
+    ] as const) {
+      // What its Workers are and bind is exactly what it has...
+      expect(
+        new Set(
+          Object.values(rendered).flatMap((worker) => [
+            worker.scriptName,
+            ...worker.bindings.flatMap(
+              (binding) => boundTo(worker, binding) ?? []
+            ),
+          ])
+        )
+      ).toStrictEqual(
+        new Set(
+          inventory.map((row) =>
+            row.kind === "d1_database" ? row.providerId : row.physicalName
+          )
+        )
+      );
+      // ...a binding that names none of it is the release's own, as is...
+      for (const [app, worker] of Object.entries(rendered)) {
+        expect(
+          worker.bindings.filter(
+            (binding) => boundTo(worker, binding) === undefined
+          )
+        ).toStrictEqual(
+          realRelease.workers[app]?.bindings.filter(
+            (binding) => boundTo(worker, binding) === undefined
+          )
+        );
+      }
+      // ...and no placeholder is left.
+      expect(
+        stringsIn(rendered).filter((value) => value.startsWith("$"))
+      ).toStrictEqual([]);
+    }
+    // Core's and connect's databases are both bound as DB, each its own.
+    expect({
+      core: bindingOf(renderedA.core, "DB")?.id,
+      connect: bindingOf(renderedA.connect, "DB")?.id,
+    }).toStrictEqual({
+      core: nameOf(inventoryA, "d1:grasp-os-core")?.providerId,
+      connect: nameOf(inventoryA, "d1:grasp-os-connect")?.providerId,
+    });
   });
 
   it("are added to for a later release, and a class it deletes stays enumerable", async () => {
@@ -421,22 +540,22 @@ describe("a client's resources", () => {
 });
 
 describe("rendering a client's Worker", () => {
+  // Two clients in one destination, each with the real release's resources.
   const setUp = async () => {
     const destinationId = await destination();
-    const manifest = await release();
     const a = await placedClient(destinationId);
     const b = await placedClient(destinationId);
     const allocate = async (clientId: string) =>
       await observeDatabases(
         await allocateClientResources(db, staff, {
           clientId,
-          manifest,
+          manifest: realRelease,
           operationId: "op",
         })
       );
-    const { core } = manifest.workers;
+    const { core } = realRelease.workers;
     if (core === undefined) {
-      throw new Error("The test release has no core");
+      throw new Error("The real release has no core");
     }
     return {
       core,
@@ -520,6 +639,38 @@ describe("rendering a client's Worker", () => {
     expect(
       render({ type: "service", name: "OTHER", service: "grasp-os-router" })
     ).toThrow(expect.objectContaining({ code: "resource_missing" }));
+  });
+
+  it("refuses any binding that would take the Durable Objects out of the EU", async () => {
+    const { a } = await setUp();
+    const name = "DURABLE_OBJECT_JURISDICTION";
+    const bindings = [
+      { type: "plain_text", name, text: "none" },
+      { type: "json", name, json: "none" },
+      { type: "secret_text", name, text: "none" },
+      // Not even the EU, nor a kind that carries no value: unset is the EU.
+      { type: "plain_text", name, text: "eu" },
+      { type: "version_metadata", name },
+    ];
+    const workers = Object.values(realRelease.workers);
+    expect(
+      workers.flatMap((worker) =>
+        bindings.map((binding) =>
+          codeOf(() =>
+            renderClientWorker(
+              { ...worker, bindings: [...worker.bindings, binding] },
+              a.placement,
+              a.inventory
+            )
+          )
+        )
+      )
+    ).toStrictEqual(
+      Array.from(
+        { length: workers.length * bindings.length },
+        () => "durable_object_jurisdiction"
+      )
+    );
   });
 
   it("refuses a database the provider hasn't been observed to have", async () => {
