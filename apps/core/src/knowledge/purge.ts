@@ -387,16 +387,17 @@ const personalScope = async (
 
 /**
  * Deletes `userId`'s Personal collection and everything in it, and their
- * Brain memories and receipts, with the audit event, in one batch: all or
- * nothing.
+ * Brain memories and receipts, in one batch: all or nothing. Its audit
+ * event comes first, with the rebuild it owes, before anything changes;
+ * then the host forgets the files it keeps as its documents (`OnErase`
+ * `forgetFiles`: core deletes the uploads' originals); then the batch.
  * The sections go first, row by row, so the triggers take them out of the
- * search index; the rest in the order they refer to one another. The
- * host forgets the files it keeps as its documents first (`OnErase`
- * `forgetFiles`: core deletes the uploads' originals). Nothing of the
- * collection is left in the search index after (search-erasure.ts): every
- * version of its documents is read before the batch, and the tokens they
- * gave the index checked after, also when nothing was left to delete. The batch records
- * a rebuild as owed, so a run again after the check or rebuild fails,
+ * search index; the rest in the order they refer to one another. Nothing
+ * of the collection is left in the search index after (search-erasure.ts):
+ * every version of its documents is read before the batch, and the tokens
+ * they gave the index checked after, also when nothing was left to
+ * delete. The rebuild is owed from the start, so a run again after the
+ * check or rebuild fails,
  * with the collection gone, still rebuilds, and another when the
  * collection changed since it was read.
  */
@@ -418,27 +419,10 @@ const purgePersonal = async (
   // The versions' payloads, unreferenced once they go, are collected right
   // after: erased from R2 too.
   const released = releasing(db, inArray(versions.documentId, inCollection));
-  await onErase.forgetFiles(person, { collectionId });
+  // Recorded before anything changes, the host's files included, so no
+  // purge goes unrecorded however far it gets, with the rebuild it owes
+  // (as a content purge records them).
   await auditedBatch(portsOf(env), db, [
-    rebuildOwed(db, purgeId, { writesDone: true }),
-    ...(plan.kind === "keys"
-      ? [
-          rebuildOwedIfChanged(
-            db,
-            `${purgeId}:changed`,
-            collectionId,
-            plan.versions
-          ),
-        ]
-      : []),
-    ...released.before,
-    db.delete(sections).where(inArray(sections.documentId, inCollection)),
-    db.delete(links).where(inArray(links.fromDocumentId, inCollection)),
-    db.delete(versions).where(inArray(versions.documentId, inCollection)),
-    db.delete(documents).where(eq(documents.collectionId, collectionId)),
-    db.delete(collections).where(eq(collections.id, collectionId)),
-    ...released.after,
-    ...forgetPerson(db, input.userId),
     outboxed(
       db,
       purgeEntry(
@@ -450,7 +434,38 @@ const purgePersonal = async (
         purgeId
       )
     ),
+    rebuildOwed(db, purgeId),
   ]);
+  try {
+    await onErase.forgetFiles(person, { collectionId });
+    const [first, ...rest]: BatchItem<"sqlite">[] = [
+      ...(plan.kind === "keys"
+        ? [
+            rebuildOwedIfChanged(
+              db,
+              `${purgeId}:changed`,
+              collectionId,
+              plan.versions
+            ),
+          ]
+        : []),
+      ...released.before,
+      db.delete(sections).where(inArray(sections.documentId, inCollection)),
+      db.delete(links).where(inArray(links.fromDocumentId, inCollection)),
+      db.delete(versions).where(inArray(versions.documentId, inCollection)),
+      db.delete(documents).where(eq(documents.collectionId, collectionId)),
+      db.delete(collections).where(eq(collections.id, collectionId)),
+      ...released.after,
+      ...forgetPerson(db, input.userId),
+    ];
+    if (first !== undefined) {
+      await db.batch([first, ...rest]);
+    }
+  } finally {
+    // A rebuild from now on covers this purge's writes, also when they
+    // failed: it writes no more.
+    await owedWritesDone(db, purgeId);
+  }
   await collectPayloads(env, db);
   await cleanSearchIndex(async () => {
     await eraseCollectionFromSearchIndex(db, plan, { secure, id: purgeId });
