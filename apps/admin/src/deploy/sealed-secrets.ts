@@ -24,6 +24,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import type { AdminDatabase } from "../db/act.ts";
 import { clientSealedSecrets } from "../db/schema.ts";
 import { DeployError } from "./errors.ts";
+import { secretsFingerprint } from "./upload.ts";
 
 /** A sealed secret's name: the Worker secret it becomes. */
 export type SealedSecretName =
@@ -183,3 +184,23 @@ export const sealedWorkerSecrets = async (
   }
   return values;
 };
+
+/**
+ * The fingerprint of each of `sealed`, opened sealed secrets by name, as
+ * a deploy records them for each version it uploads: keyed with
+ * `clientKey`, so they tell nothing of the values, and one per secret, so
+ * a rollback can tell a version carrying a secret staff replaced since
+ * (src/rollout/rollback.ts).
+ */
+export const sealedSecretPrints = async (
+  clientKey: string,
+  sealed: ReadonlyMap<string, string>
+): Promise<Record<string, string>> =>
+  Object.fromEntries(
+    await Promise.all(
+      [...sealed].map(async ([name, value]): Promise<[string, string]> => [
+        name,
+        await secretsFingerprint(clientKey, [{ name, value }]),
+      ])
+    )
+  );

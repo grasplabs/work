@@ -7,7 +7,11 @@ import { z } from "zod";
 
 import { applySettings } from "../src/clients/apply.ts";
 import { clientSettings } from "../src/clients/queries.ts";
-import { SettingsError, setSignIn } from "../src/clients/settings.ts";
+import {
+  SettingsError,
+  setSealedSecret,
+  setSignIn,
+} from "../src/clients/settings.ts";
 import { cloudflareApi } from "../src/cloudflare/api.ts";
 import { deployVersion, deployVersions } from "../src/cloudflare/workers.ts";
 import { act, adminDatabase } from "../src/db/act.ts";
@@ -3201,6 +3205,51 @@ describe("controlling a rollout", () => {
         .toSorted((a, b) => a.clientId.localeCompare(b.clientId)),
       unreadable: "secrets_store_incomplete",
       state: rolledOut,
+    });
+  });
+
+  it("rolls a client back to versions carrying its Teams bot secret only while that is the one the admin holds", async () => {
+    const before = await importedRelease("feat(core): runs its own bot");
+    const internal = await activeClient(0, before);
+    const setBotSecret = async (value: string): Promise<void> => {
+      await setSealedSecret(env, staff, {
+        clientId: internal.clientId,
+        name: "TEAMS_BOT_SECRET",
+        value,
+      });
+    };
+    await setBotSecret("first~bot.Secret_0123456789");
+    // Its next deploy carries it: the versions a rollback goes back to.
+    await runDeploy(
+      await deployContext(env),
+      await startDeploy(db, staff, internal.clientId, before)
+    );
+    const previous = await recordedVersionsOf(internal.clientId);
+    const release = await importedRelease("feat(core): runs it too");
+    await using run = await followRollouts();
+    await using rollbacks = await followRollbacks();
+    const rolloutId = await rollOut(release, { scope: "ring", ring: 0 });
+    await run.waitForStatus("complete");
+    const counts = deploymentCounts(internal.account);
+
+    // Staff replace it, and may revoke the first in the client's Entra.
+    await setBotSecret("second~bot.Secret_0123456789");
+    const replaced = await codeOf(
+      rollbackClient(env, staff, rolloutId, internal.clientId)
+    );
+    const untouched = deploymentCounts(internal.account);
+    // The first is set again: what the previous versions carry is current.
+    await setBotSecret("first~bot.Secret_0123456789");
+    await rollbacks.rollBack(rolloutId, internal.clientId);
+
+    expect({
+      replaced,
+      untouched,
+      live: await liveVersionsOf(internal.clientId, internal.account),
+    }).toStrictEqual({
+      replaced: "sealed_secret_replaced",
+      untouched: counts,
+      live: previous,
     });
   });
 
