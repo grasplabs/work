@@ -10,6 +10,7 @@ import {
 } from "@grasp-os/shared/chat";
 import type {
   ChatConnectionRequest,
+  ChatCitedDocument,
   ChatDraft,
   ChatProject,
   ChatQuestion,
@@ -539,6 +540,14 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
       this.#check,
       async ({ userId }) =>
         await this.#chatsOf(userId).drafts(chatIdOf(chatId), userId)
+    );
+  }
+
+  async cited(chatId: string, messageId: number): Promise<ChatCitedDocument[]> {
+    return await withPerson(
+      this.#check,
+      async ({ userId }) =>
+        await this.#chatsOf(userId).cited(chatIdOf(chatId), userId, messageId)
     );
   }
 

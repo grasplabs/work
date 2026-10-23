@@ -294,6 +294,7 @@ describe("chat agent", () => {
       answer: "You are the person this chat belongs to.",
       // It read nothing: nothing to label it with.
       provenance: { sources: [], restricted: false },
+      cited: [],
     });
     // The code ran with the API core gave it, which knows whom it acts for.
     await expect(codeResults(stub, chat.id)).resolves.toStrictEqual([
