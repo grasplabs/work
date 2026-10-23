@@ -19,6 +19,7 @@ import {
   attachment,
   attachmentPage,
   childrenPage,
+  conversationPage,
   downloadUrl,
   draft,
   eventDetail,
@@ -85,6 +86,9 @@ let duringLookup: (() => Promise<void>) | undefined;
 const keyFilter =
   /^singleValueExtendedProperties\/Any\(ep: ep\/id eq '(?<id>[^']+)' and ep\/value eq '(?<key>[^']+)'\)$/u;
 
+/** The conversation a `$filter` asks for, if it asks for one. */
+const conversationFilter = / and conversationId eq '(?<id>[^']+)'$/u;
+
 /** Graph's answer to a lookup of a message by its effect key. */
 const foundByKey = (mailbox: string, filter: string): Response => {
   const asked = keyFilter.exec(filter)?.groups;
@@ -118,8 +122,20 @@ const graphRoutes: ProviderRoute<Part>[] = [
     `${users}(?:/mailFolders/[^/]+)?/messages`,
     async ({ mailbox, query }) => {
       const filter = query.get("$filter") ?? "";
+      const conversation = conversationFilter.exec(filter)?.groups?.id;
+      if (conversation !== undefined) {
+        return json(
+          conversationPage(mailbox, conversation, Number(query.get("$top")))
+        );
+      }
       if (!filter.startsWith("singleValueExtendedProperties/")) {
-        return json(messagePage(mailbox, Number(query.get("$skip") ?? 0)));
+        return json(
+          messagePage(
+            mailbox,
+            Number(query.get("$skip") ?? 0),
+            filter.includes("flag/flagStatus eq 'flagged'")
+          )
+        );
       }
       const meanwhile = duringLookup;
       duringLookup = undefined;
