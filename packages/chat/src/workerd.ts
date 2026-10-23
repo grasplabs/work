@@ -11,6 +11,12 @@
  * `"default"` asks for what a request does without a cache mode, so
  * dropping it changes nothing a request means; any other mode reaches
  * workerd as it was, to be honoured or refused there.
+ *
+ * axios takes `Request` and `fetch` when its fetch adapter loads
+ * (`getFetch()` at the module's top level), so the fix has to be in before
+ * that: importing this module puts it in. A Worker that sends through an
+ * axios-based adapter imports `@grasp-os/chat/workerd` first in its entry,
+ * before anything that loads an adapter.
  */
 
 /** Whether the fix is in, for this isolate. */
@@ -35,8 +41,8 @@ const withoutDefaultCache = (
 
 /**
  * Lets requests that ask for `cache: "default"` through `Request` and
- * `fetch` in this isolate. Call it once, where the Worker that sends
- * through an axios-based adapter starts; calling it again does nothing.
+ * `fetch` in this isolate. Importing the module calls it; calling it again
+ * does nothing.
  */
 export const allowDefaultCacheMode = (): void => {
   if (allowed) {
@@ -59,3 +65,5 @@ export const allowDefaultCacheMode = (): void => {
   globalThis.fetch = async (input, init) =>
     await workerdFetch(input, withoutDefaultCache(init));
 };
+
+allowDefaultCacheMode();

@@ -4,7 +4,9 @@
   "description": "Vercel's Chat SDK on workerd: its state in Durable Objects, and what its adapters need to send from a Worker",
   "license": "AGPL-3.0-only",
   "type": "module",
-  "sideEffects": false,
+  "sideEffects": [
+    "./src/workerd.ts"
+  ],
   "exports": {
     "./state": "./src/state.ts",
     "./workerd": "./src/workerd.ts"
@@ -15,6 +17,7 @@
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "catalog:",
     "@cloudflare/workers-types": "catalog:",
+    "axios": "catalog:",
     "vite-plus": "catalog:",
     "workerd": "catalog:",
     "wrangler": "catalog:"

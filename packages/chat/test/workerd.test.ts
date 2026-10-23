@@ -1,10 +1,8 @@
 // The fix for adapters that send through axios (src/workerd.ts): workerd
 // refuses `cache: "default"`, which axios' fetch adapter sets on every
-// request; with the fix such a request is made as one without a cache mode,
-// and any other mode still reaches workerd as it was.
+// request. Importing the fix before axios, as a Worker's entry does, lets
+// axios send; other cache modes still reach workerd as they were.
 import { describe, expect, it, vi } from "vite-plus/test";
-
-import { allowDefaultCacheMode } from "../src/workerd.ts";
 
 const url = "https://api.example.test/send";
 
@@ -27,32 +25,35 @@ const construct = (cache: string) => {
 };
 
 describe("sending from workerd through axios-based adapters", () => {
-  it("makes a request that asks for the default cache mode as one without a mode, and leaves other modes to workerd", async () => {
+  it("lets axios, loaded after the fix, send a request; other cache modes stay workerd's", async () => {
     const refusedBefore = construct("default");
-    const sent: (RequestInit | undefined)[] = [];
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (_input, init) => {
-      sent.push(init);
-      return await Promise.resolve(new Response("sent"));
+    const sent: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      sent.push(input instanceof Request ? input.url : String(input));
+      return await Promise.resolve(Response.json({ ok: true }));
     });
-    allowDefaultCacheMode();
-    allowDefaultCacheMode();
+    // As a Worker's entry orders them: the fix, then what loads axios.
+    await import("../src/workerd.ts");
+    const { default: axios } = await import("axios");
 
-    const init: RequestInit = { method: "POST" };
-    Reflect.set(init, "cache", "default");
-    const response = await fetch(url, init);
+    const response = await axios.post<unknown>(
+      url,
+      { text: "hi" },
+      { adapter: "fetch" }
+    );
 
     expect({
       refusedBefore,
       after: construct("default"),
       reload: construct("reload"),
       sent,
-      answer: await response.text(),
+      answer: response.data,
     }).toStrictEqual({
       refusedBefore: unsupported,
       after: undefined,
       reload: unsupported,
-      sent: [{ method: "POST" }],
-      answer: "sent",
+      sent: [url],
+      answer: { ok: true },
     });
   });
 });

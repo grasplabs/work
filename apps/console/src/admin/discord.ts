@@ -563,7 +563,14 @@ const discordBot = (
     },
   });
   bot.onSlashCommand(async (event) => {
-    await answerCommand(env, event, options);
+    try {
+      await answerCommand(env, event, options);
+    } catch (error) {
+      // What escapes (the audit's write, the rate limiter) would reach only
+      // the Chat SDK's logger, which is quiet: the console's log has it.
+      log.warn("admin.discord_failed", { error: errorCode(error) });
+      throw error;
+    }
   });
   return bot;
 };

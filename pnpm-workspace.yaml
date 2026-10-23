@@ -94,6 +94,9 @@ catalog:
   # move together; keep them on chat's version.
   "@chat-adapter/discord": 4.43.0
   chat: 4.43.0
+  # What the Teams and Slack adapters send through; packages/chat's tests
+  # check its fix against it (src/workerd.ts). On the version they resolve.
+  axios: 1.20.0
 
   # Frontend
   # Babel 7 until babel-plugin-react-compiler supports Babel 8.
