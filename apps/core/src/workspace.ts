@@ -15,6 +15,7 @@ import type {
 } from "@grasp-os/shared/audit";
 import {
   chatChannelSchema,
+  chatToolEventsKept,
   projectDocumentMaxBytes,
   projectDocumentsMax,
   projectsMax,
@@ -28,6 +29,7 @@ import type {
   ChatOutput,
   ChatProvenance,
   ChatSummary,
+  ChatToolEvent,
   ProjectDocument,
   ProjectDocumentInput,
 } from "@grasp-os/shared/chat";
@@ -105,6 +107,7 @@ import {
   coreMessageProvider,
   partialOf,
 } from "./chat-messages.ts";
+import { toolCallSchema, toolEventOf } from "./chat-tool-events.ts";
 import { ChatWatch } from "./chat-watch.ts";
 import type { ChatListener, ChatState } from "./chat-watch.ts";
 import {
@@ -131,6 +134,7 @@ import {
   chatProjects,
   chatRunSources,
   chatSources,
+  chatToolEvents,
   chats,
   dashboardWidgets,
   dashboards,
@@ -1664,6 +1668,72 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
+   * Keeps one call of the chat's code run `runId` as the chat shows it
+   * (`ChatToolEvent`), under the code step that made it, from the run's
+   * own record, and tells the chat's watchers. Only for a run this object
+   * still knows (open, or closed lately): a run from before a restart, or
+   * another chat's, keeps nothing. Never refuses the call it describes.
+   */
+  recordToolCall(chatId: ChatId, runId: string, call: unknown): void {
+    const parsed = toolCallSchema.safeParse(call);
+    if (!(parsed.success && this.#codeRuns.has(`${chatId}/${runId}`))) {
+      return;
+    }
+    const event = this.ctx.storage.transactionSync(() => {
+      const run = this.#db
+        .select({ callId: chatCodeRuns.toolCallId })
+        .from(chatCodeRuns)
+        .where(and(eq(chatCodeRuns.id, runId), eq(chatCodeRuns.chatId, chatId)))
+        .get();
+      if (run === undefined) {
+        return null;
+      }
+      const row = {
+        chatId,
+        callId: run.callId,
+        event: JSON.stringify(parsed.data),
+        createdAt: new Date(),
+      };
+      const { id } = this.#db
+        .insert(chatToolEvents)
+        .values(row)
+        .returning({ id: chatToolEvents.id })
+        .get();
+      // The chat keeps its latest calls only.
+      this.#db
+        .delete(chatToolEvents)
+        .where(
+          and(
+            eq(chatToolEvents.chatId, chatId),
+            sql`${chatToolEvents.id} NOT IN (SELECT ${chatToolEvents.id} FROM ${chatToolEvents} WHERE ${chatToolEvents.chatId} = ${chatId} ORDER BY ${chatToolEvents.id} DESC LIMIT ${chatToolEventsKept})`
+          )
+        )
+        .run();
+      return toolEventOf({ id, ...row }) ?? null;
+    });
+    if (event === null) {
+      return;
+    }
+    for (const watch of this.#watchers.get(chatId)?.values() ?? []) {
+      watch.push([], [event]);
+    }
+  }
+
+  /** The calls of the chat's code it keeps, oldest first. */
+  #toolEvents(chatId: ChatId): ChatToolEvent[] {
+    return this.#db
+      .select()
+      .from(chatToolEvents)
+      .where(eq(chatToolEvents.chatId, chatId))
+      .orderBy(asc(chatToolEvents.id))
+      .all()
+      .flatMap((row) => {
+        const event = toolEventOf(row);
+        return event === undefined ? [] : [event];
+      });
+  }
+
+  /**
    * Whether a code run of the chat may have a write admitted now, without
    * counting a call: `open` with when it opened, or why not. The check a
    * write makes as it commits, after its call was let in.
@@ -2757,6 +2827,10 @@ export class Workspace extends DurableObject<Env> {
           .run();
         this.#db.delete(chatCodeRuns).where(eq(chatCodeRuns.chatId, id)).run();
         this.#db
+          .delete(chatToolEvents)
+          .where(eq(chatToolEvents.chatId, id))
+          .run();
+        this.#db
           .delete(chatAttachments)
           .where(eq(chatAttachments.chatId, id))
           .run();
@@ -2822,7 +2896,7 @@ export class Workspace extends DurableObject<Env> {
     const watchers = this.#watchers.get(id) ?? new Map<string, ChatWatch>();
     watchers.set(watchId, watch);
     this.#watchers.set(id, watchers);
-    watch.push(this.#shownAfter(id, since.data ?? 0));
+    watch.push(this.#shownAfter(id, since.data ?? 0), this.#toolEvents(id));
     return watchId;
   }
 

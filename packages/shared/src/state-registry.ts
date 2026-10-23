@@ -473,6 +473,7 @@ const workspaces: DurableObjectState = {
     audit_outbox: exported(`${core}workspace.ts`),
     chat_attachments: exported(`${core}workspace.ts`),
     chat_code_runs: exported(`${core}workspace.ts`),
+    chat_tool_events: exported(`${core}workspace.ts`),
     chat_build_jobs: exported(`${core}build-jobs.ts`),
     dashboards: exported(`${core}workspace.ts`),
     dashboard_widgets: exported(`${core}workspace.ts`),

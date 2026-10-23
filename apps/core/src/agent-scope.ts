@@ -1,13 +1,15 @@
 import { agentErrors } from "@grasp-os/shared/agent";
 import {
+  auditDetailValueSchema,
   auditProvenanceMaxItems,
   delegateActorOf,
 } from "@grasp-os/shared/audit";
 import type { AuditDetailValue, AuditEntry } from "@grasp-os/shared/audit";
-import type { ChatChannel } from "@grasp-os/shared/chat";
+import type { ChatChannel, ChatToolOutcome } from "@grasp-os/shared/chat";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { connectionIdSchema, identifierSchema } from "@grasp-os/shared/ids";
 import type { ChatId, WorkspaceId } from "@grasp-os/shared/ids";
+import { errorFields, log } from "@grasp-os/shared/log";
 import {
   authoritySchema,
   permissionActionSchema,
@@ -19,6 +21,10 @@ import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { keepAuditEvent } from "./audit-outbox.ts";
+import {
+  toolReasonMaxChars,
+  toolSummaryEntriesMax,
+} from "./chat-tool-events.ts";
 import { permissions } from "./db/core/schema.ts";
 import { workspace } from "./durable-objects.ts";
 import type { WorkContext } from "./restricted.ts";
@@ -138,6 +144,14 @@ const refusalCodes = {
 /** The refusal of a call or write from a run that isn't open. */
 export const runRefusal = (call: keyof typeof refusalCodes) =>
   agentErrors.create(refusalCodes[call]);
+
+/** Whether `error` is the refusal of a run that isn't open (`runRefusal`). */
+export const isRunRefusal = (error: unknown): boolean => {
+  const code = agentErrors.codeOf(error);
+  return (
+    code !== undefined && Object.values<string>(refusalCodes).includes(code)
+  );
+};
 
 /**
  * Records with the chat what a call read from (collections, a
@@ -293,6 +307,62 @@ export const auditAgentCall = async (
 };
 
 /**
+ * Shows one call of the chat's code in the chat, as it ended: a line under
+ * the code step that made it (`ChatToolEvent`), in the words its audit
+ * event has. Never fails the call: a chat that can't keep it shows
+ * nothing, and the audit log still has the call.
+ */
+export const recordToolCall = async (
+  env: Env,
+  scope: AgentScope,
+  { method, target, detail = {} }: AgentCall,
+  ended?: { outcome: ChatToolOutcome; reason: string | null }
+): Promise<void> => {
+  // Only what fits an audit event's detail: a name the code made up too
+  // long for one is left out, not the call.
+  const summary = Object.fromEntries(
+    Object.entries(detail)
+      .filter(([, value]) => auditDetailValueSchema.safeParse(value).success)
+      .slice(0, toolSummaryEntriesMax)
+  );
+  try {
+    await workspace(env, scope.workspaceId).recordToolCall(
+      scope.chatId,
+      scope.runId,
+      {
+        method,
+        target: target ?? null,
+        summary,
+        outcome: ended?.outcome ?? "ok",
+        reason: ended?.reason?.slice(0, toolReasonMaxChars) ?? null,
+      }
+    );
+  } catch (error) {
+    log.warn("agent.tool_event_unkept", {
+      chatId: scope.chatId,
+      method,
+      ...errorFields(error),
+    });
+  }
+};
+
+/**
+ * Records a call of the chat's code in the audit log (`auditAgentCall`)
+ * and shows it in the chat (`recordToolCall`).
+ */
+export const auditToolCall = async (
+  env: Env,
+  scope: AgentScope,
+  call: AgentCall,
+  ended?: { outcome: CallOutcome; reason: string | null }
+): Promise<void> => {
+  await Promise.all([
+    auditAgentCall(env, scope, call, ended),
+    recordToolCall(env, scope, call, ended),
+  ]);
+};
+
+/**
  * Whether a permission the agent was granted, holding where this chat's
  * runs act, was revoked since `since`: one that held everywhere, or in
  * this chat alone. Not a request that was never granted (a person
@@ -384,7 +454,7 @@ export const requireOpenRun = async (
     counted.call === "open" ? "revoked" : counted.call
   );
   if ((counted.call !== "open" && counted.first) || revocation === "closed") {
-    await auditAgentCall(
+    await auditToolCall(
       env,
       scope,
       { method },
@@ -433,7 +503,7 @@ export const admitEffect = async (
   }
   const refusal = runRefusal(refused);
   if (method !== undefined && (record || refused === "ended")) {
-    await auditAgentCall(
+    await auditToolCall(
       env,
       scope,
       { method },
@@ -444,7 +514,7 @@ export const admitEffect = async (
 };
 
 /** How a call that threw ended, and why, as the audit log names it. */
-const endedBy = (
+export const endedBy = (
   error: unknown
 ): { outcome: CallOutcome; reason: string | null } =>
   isExpectedError(error)
@@ -460,6 +530,11 @@ export const auditedCall = async <T>(
   env: Env,
   scope: AgentScope,
   call: AgentCall & {
+    /**
+     * Whether the chat shows it (`recordToolCall`): a call its code made,
+     * not work done for it later (a build job).
+     */
+    shown?: boolean;
     detailOf?: (result: T) => Record<string, AuditDetailValue>;
     /**
      * How a call that answered ended, when its answer says it was refused
@@ -471,15 +546,16 @@ export const auditedCall = async <T>(
   },
   run: () => Promise<T>
 ): Promise<T> => {
-  const { detailOf, endedOf, ...recorded } = call;
+  const { detailOf, endedOf, shown = true, ...recorded } = call;
+  const audit = shown ? auditToolCall : auditAgentCall;
   let result: T;
   try {
     result = await run();
   } catch (error) {
-    await auditAgentCall(env, scope, recorded, endedBy(error));
+    await audit(env, scope, recorded, endedBy(error));
     throw error;
   }
-  await auditAgentCall(
+  await audit(
     env,
     scope,
     {
@@ -501,6 +577,6 @@ export const auditRefusal = async (
   call: AgentCall,
   error: unknown
 ): Promise<never> => {
-  await auditAgentCall(env, scope, call, endedBy(error));
+  await auditToolCall(env, scope, call, endedBy(error));
   throw error;
 };
