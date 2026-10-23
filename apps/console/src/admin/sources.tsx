@@ -58,6 +58,7 @@ const readWords: Record<SourceReads, string> = {
   signatures: "signatures",
   companies: "companies",
   people: "people",
+  deals: "deals",
   calls: "calls",
   customers: "customers",
   subscriptions: "subscriptions",

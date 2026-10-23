@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { AdminSnapshot } from "./admin-snapshot.ts";
 import { defineErrorFamily } from "./errors.ts";
 import type { KickoffApi } from "./kickoff.ts";
+import type { OnboardingChoicesApi } from "./onboarding-choices.ts";
 import type { OnboardingDocumentsApi } from "./onboarding-documents.ts";
 import type {
   LogFilter,
@@ -254,6 +255,11 @@ export interface OnboardingView {
   agreed: boolean;
   /** Grasp paused the interviews: no link opens and none goes out. */
   paused: boolean;
+  /**
+   * The sponsor's first name, when the kickoff named them; null before it
+   * is in, or when it did not. The one word of the kickoff the admin sees.
+   */
+  sponsor: string | null;
 }
 
 /**
@@ -321,7 +327,8 @@ export interface Programme {
  * The onboarding, for the client's admin (Grasp staff included); its
  * programme for everyone signed in.
  */
-export interface OnboardingApi extends OnboardingDocumentsApi {
+export interface OnboardingApi
+  extends OnboardingDocumentsApi, OnboardingChoicesApi {
   /** The programme, for the dashboard; null without a plan. Any role. */
   programme: () => Promise<Programme | null>;
   view: () => Promise<OnboardingView>;

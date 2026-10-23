@@ -13,6 +13,7 @@ import { auditLog } from "../src/audit-log.ts";
 import { chatAgentId } from "../src/chats-rpc.ts";
 import { refreshDailySignals } from "../src/daily-signals.ts";
 import worker from "../src/index.ts";
+import { published, verifiedCandidate } from "./apps.ts";
 import { allEvents, logHead } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { outcome, refusal, signedInApi, unique } from "./sign-in.ts";
@@ -47,6 +48,7 @@ const nextDay = (): Date => {
 const builderWithApp = async (): Promise<Person & { app: string }> => {
   const builder = await signedInApi(idp, "builder");
   const { id } = await builder.api.apps.create({ name: `Signals ${unique()}` });
+  await published(id);
   return { ...builder, app: id };
 };
 
@@ -75,6 +77,7 @@ const running = async (
     ),
     "Workflows"
   );
+  await verifiedCandidate(app, version);
   await env.DB.prepare("UPDATE apps SET current_version = ? WHERE id = ?")
     .bind(version, app)
     .run();

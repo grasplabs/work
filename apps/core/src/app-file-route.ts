@@ -33,7 +33,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { operationRoles } from "./app-access.ts";
 import { loadRelease } from "./app-releases.ts";
 import type { Release } from "./app-releases.ts";
-import { appFor } from "./apps.ts";
+import { usableApp } from "./apps.ts";
 import {
   auditedBatch,
   outboxedEventWhere,
@@ -402,7 +402,7 @@ const resolved = async (
   resource: string,
   operation: FilesOperation
 ) => {
-  const found = await appFor(env, person, app, "user");
+  const found = await usableApp(env, person, app);
   if (found.currentVersion === null) {
     throw versionErrors.create("version.not_sealed");
   }
@@ -847,7 +847,7 @@ export const appFileResponse = async (
       if (!(await appHost(env, named.data).admitChunk(person.userId))) {
         throw screenErrors.create("screen.rate_limited");
       }
-      const found = await appFor(env, person, named.data, "user");
+      const found = await usableApp(env, person, named.data);
       app = found.id;
     } else {
       app = await admitted(env, person, route.app);
@@ -880,7 +880,7 @@ export const appFileResponse = async (
       }
       // Pinned to the release it began on: another one current, or this
       // one revoked, delivers no more of it.
-      const found = await appFor(env, now, app, "user");
+      const found = await usableApp(env, now, app);
       if (found.currentVersion !== version) {
         throw versionErrors.create("version.mismatch");
       }

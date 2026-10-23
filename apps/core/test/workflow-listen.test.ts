@@ -245,6 +245,7 @@ const delivery = (
     data: { jobId: "job-1", note },
     key: unique(),
     source,
+    sender: source,
     ...rest,
   };
 };
@@ -727,6 +728,7 @@ const hostOf = async (
       build,
       calling: {
         runId,
+        rootRunId: runId,
         workflowId,
         version: 1,
         principal: by.userId,

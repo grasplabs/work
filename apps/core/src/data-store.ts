@@ -41,9 +41,9 @@ import type {
   SchemaStatus,
   TransformedBatch,
 } from "./store-host.ts";
+import { storeOutboxConsumers } from "./store-outbox-consumers.ts";
 import { StoreWatches } from "./store-watches.ts";
 import type { StoreWatcher } from "./store-watches.ts";
-import { storeOutboxConsumers } from "./workflow-start-intents.ts";
 
 // A business store: one Durable Object per store, named by the store's ID
 // (data-stores.ts), with a SQLite database of its own. What it does, and
@@ -205,6 +205,11 @@ export class DataStore extends DurableObject<Env> {
     consumer?: SchemaConsumer
   ): SchemaStatus {
     return this.#live().schemaStatus(storeId, schemaHash, consumer);
+  }
+
+  /** `StoreHost.survivesMigration`. */
+  survivesMigration(storeId: StoreId, schemaHash: string): boolean {
+    return this.#live().survivesMigration(storeId, schemaHash);
   }
 
   /** `StoreHost.compatibleVersions`. */

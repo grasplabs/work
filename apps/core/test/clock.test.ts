@@ -57,8 +57,10 @@ const nextQuarterHour = (from: number): number =>
   1000;
 
 // The tests share the one clock: each starts past every slot one before
-// it reached.
-let reached = Date.now();
+// it reached. It starts at the next UTC midnight, so the few hours the tests
+// move it on never cross into a new day (where `signals.daily` would claim
+// that day's run), whatever time of day the suite runs.
+let reached = (Math.floor(Date.now() / 86_400_000) + 1) * 86_400_000;
 /** A time in a quarter hour's slot no earlier test reached, a little into it. */
 const freshTime = (): number => {
   reached = nextQuarterHour(

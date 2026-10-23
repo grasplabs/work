@@ -26,9 +26,9 @@ import {
 } from "./agent-scope.ts";
 import type { AgentScope } from "./agent-scope.ts";
 import {
-  appFor,
   draftFiles,
   draftOverLatest,
+  editableApp,
   proposeDraft,
   versionTree,
 } from "./apps.ts";
@@ -281,7 +281,7 @@ const authorize = async (
     throw permissionErrors.create("permission.person_inactive");
   }
   const by = await buildingAs(env, scope, person);
-  const { id: app } = await appFor(env, by, job.appId, "builder");
+  const { id: app } = await editableApp(env, by, job.appId);
   return { by, app };
 };
 

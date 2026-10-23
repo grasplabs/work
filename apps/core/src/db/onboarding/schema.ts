@@ -39,6 +39,11 @@ export const onboarding = sqliteTable(
      * roster with their link; `null` before any link went out.
      */
     toldAt: text("told_at"),
+    /**
+     * What the admin chose about what Grasp may connect, as JSON
+     * (`setupChoicesSchema`), or `null` before anything.
+     */
+    choices: text(),
   },
   (table) => [check("onboarding_one_row", sql`${table.id} = 1`)]
 );
@@ -311,6 +316,37 @@ export const settledWorks = sqliteTable("settled_works", {
   holds: text({ enum: ["both", "first", "other"] }).notNull(),
   at: text().notNull(),
 });
+
+/**
+ * Each team on its way into the brain (onboarding/brain-intake.ts): when
+ * something new of it waits to be given to the brain (`dueAt`), and when
+ * the brain first had any of it (`sentAt`), both ISO 8601.
+ */
+export const brainTeams = sqliteTable("brain_teams", {
+  team: text().primaryKey(),
+  dueAt: text("due_at"),
+  sentAt: text("sent_at"),
+});
+
+/**
+ * Who each record the onboarding gave the brain rests on: a statement on
+ * whoever agreed to its fact, a drawing on whom it was drawn from. The
+ * brain's records never name a person; this is how deleting an interview
+ * finds what it is in (GRA-368). Goes with nothing else.
+ */
+export const brainSent = sqliteTable(
+  "brain_sent",
+  {
+    record: text().notNull(),
+    type: text().notNull(),
+    team: text().notNull(),
+    person: text().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.record, table.person] }),
+    index("brain_sent_person").on(table.person),
+  ]
+);
 
 /**
  * Drawings that failed and wait to be tried again: what (`team:<id>` or

@@ -22,13 +22,15 @@ import { writeBlueprints } from "./build-blueprints.ts";
 const made: string[] = [];
 
 /**
- * A folder of one built-in, `id`, with `files` by path and `manifest`
- * added to its `blueprint.json`; returns it.
+ * A folder of one built-in, `id`, with `files` by path, `manifest` added
+ * to its `blueprint.json`, and `beside` by path beside them in its
+ * folder; returns it.
  */
 const fixture = (
   id: string,
   files: Record<string, string>,
-  manifest: Record<string, unknown> = {}
+  manifest: Record<string, unknown> = {},
+  beside: Record<string, string> = {}
 ): string => {
   const dir = mkdtempSync(path.join(tmpdir(), "grasp-blueprints-"));
   made.push(dir);
@@ -44,6 +46,11 @@ const fixture = (
   );
   for (const [file, text] of Object.entries(files)) {
     const where = path.join(folder, "files", file);
+    mkdirSync(path.dirname(where), { recursive: true });
+    writeFileSync(where, text);
+  }
+  for (const [file, text] of Object.entries(beside)) {
+    const where = path.join(folder, file);
     mkdirSync(path.dirname(where), { recursive: true });
     writeFileSync(where, text);
   }
@@ -105,10 +112,81 @@ describe("the built-in blueprints' build", () => {
         description: "A test's built-in.",
         collections: [],
         permissions: [],
+        contracts: [],
+        workflows: [],
         files: schema,
       },
     ]);
   });
+
+  it("embeds the workflows a built-in ships, their definitions' text, and the contracts they bind", () => {
+    const definition = '{"document":{"name":"greeter"}}';
+    const contract = { key: "fixture/greeter", kind: "model" };
+    const out = build(
+      fixture(
+        "ships",
+        schema,
+        {
+          contracts: [contract],
+          workflows: [
+            {
+              alias: "greet",
+              binding: "GREET",
+              definition: "workflows/greet.json",
+            },
+          ],
+        },
+        { "workflows/greet.json": definition }
+      )
+    );
+    expect(embedded(out)).toMatchObject([
+      {
+        contracts: [contract],
+        workflows: [{ alias: "greet", binding: "GREET", definition }],
+        files: schema,
+      },
+    ]);
+  });
+
+  it.each([
+    ["no definition file", {}, {}, {}],
+    ["a definition that isn't JSON", {}, {}, { "workflows/greet.json": "{" }],
+    [
+      "a binding name a permission has",
+      { permissions: [onTasks("GREET")], collections: [tasks] },
+      {},
+      { "workflows/greet.json": "{}" },
+    ],
+    [
+      "a definition outside its workflows/",
+      {},
+      { definition: "files/schema.ts" },
+      {},
+    ],
+    ["an alias that isn't lowercase", {}, { alias: "Greet" }, {}],
+  ])(
+    "fails for a shipped workflow with %s",
+    (_case, manifest, change, beside) => {
+      const dir = fixture(
+        "ships",
+        schema,
+        {
+          ...manifest,
+          workflows: [
+            {
+              alias: "greet",
+              binding: "GREET",
+              definition: "workflows/greet.json",
+              ...change,
+            },
+          ],
+        },
+        beside
+      );
+      expect(() => build(dir)).toThrow("ships");
+      expect(existsSync(path.join(dir, "blueprints.js"))).toBeFalsy();
+    }
+  );
 
   it("embeds the collections and permissions a built-in declares", () => {
     const out = build(

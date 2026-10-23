@@ -1,4 +1,5 @@
 import type { OnboardingView } from "@grasp-os/shared/onboarding";
+import { noChoices } from "@grasp-os/shared/onboarding-choices";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -7,28 +8,34 @@ import { describe, expect, it } from "vite-plus/test";
 import { SetupStepBody } from "./setup-steps.tsx";
 import type { SetupData } from "./setup-steps.tsx";
 import { listeningOf } from "./setup.ts";
+import type { SetupStep } from "./setup.ts";
 
 // What the onboarding's step tells the company's admin while Stephen talks
 // to their people, from what it renders.
 
 const today = "2026-10-14";
 
-const view = (paused: boolean): OnboardingView => ({
+const view = (paused: boolean, sponsor: string | null): OnboardingView => ({
   roster: null,
   plan: { start: "2026-10-12", days: 14 },
   progress: null,
   agreed: true,
   paused,
+  sponsor,
 });
 
 /** What a step says, as text without its markup. */
 const said = (
-  step: "listening" | "review",
-  { paused = false, settled = [] }: { paused?: boolean; settled?: "mail"[] }
+  step: SetupStep,
+  {
+    paused = false,
+    settled = [],
+    sponsor = null,
+  }: { paused?: boolean; settled?: "mail"[]; sponsor?: string | null }
 ): string => {
   const data: SetupData = {
     admin: "Ada",
-    view: view(paused),
+    view: view(paused, sponsor),
     documents: [],
     sendingDomain: "mail.example.test",
     gate: {
@@ -43,6 +50,17 @@ const said = (
       staff: null,
     },
     review: { differences: [], mapped: 0 },
+    choices: noChoices,
+    signIn: ["microsoft"],
+    identity: {
+      userId: "ada",
+      email: "ada@acme.test",
+      name: "Ada",
+      role: "admin",
+      teams: [],
+      staff: false,
+      expiresAt: "2026-10-15T00:00:00Z",
+    },
   };
   return renderToStaticMarkup(
     <I18nProvider i18n={i18n}>
@@ -113,4 +131,20 @@ describe("what needs the admin", () => {
       ],
     }).toStrictEqual({ open: [true, false], done: [true, true, true] });
   });
+});
+
+describe("the welcome", () => {
+  it.each([
+    {
+      sponsor: "Anna",
+      says: "Anna told me a lot about your company in our first conversation. Before we start, which language do you prefer?",
+    },
+    // The kickoff named no one: no one is named.
+    { sponsor: null, says: "Ada, I’m Stephen Before we start, which language" },
+  ])(
+    "names the sponsor only when the kickoff gave a name ($sponsor)",
+    ({ sponsor, says }) => {
+      expect(said("welcome", { sponsor })).toContain(says);
+    }
+  );
 });

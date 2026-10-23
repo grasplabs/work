@@ -80,6 +80,21 @@ const frozenBindingsSchema = z.array(
 /** A catalog binding of a run's start, its approval and target frozen. */
 export type FrozenCatalogBinding = z.infer<typeof catalogBindingSchema>;
 
+/** Another workflow a run's start froze: the exact version its `run` tasks start. */
+export type FrozenWorkflowBinding = z.infer<typeof workflowBindingSchema>;
+
+/** The workflow bindings a start froze (its receipt's `bindings`), by alias. */
+export const frozenWorkflowsOf = (
+  text: string
+): ReadonlyMap<string, FrozenWorkflowBinding> =>
+  new Map(
+    frozenBindingsSchema
+      .parse(JSON.parse(text))
+      .flatMap((binding) =>
+        binding.kind === "workflow" ? [[binding.alias, binding] as const] : []
+      )
+  );
+
 /** The catalog bindings a start froze (its receipt's `bindings`), by alias. */
 export const frozenBindingsOf = (
   text: string
@@ -95,6 +110,12 @@ export const frozenBindingsOf = (
 /** What a call of a run needs to know of it, from its row and receipt. */
 export interface CallingRun {
   readonly runId: string;
+  /**
+   * Its lineage's root, as its row pins it: the run itself for a root.
+   * What its model requests count against at the gateway, with every
+   * other run of its lineage's (resource-calls.ts, `callModel`).
+   */
+  readonly rootRunId: string;
   readonly workflowId: string;
   readonly version: number;
   /** Whom it acts for: the person its start acted for. */
@@ -104,12 +125,19 @@ export interface CallingRun {
    * start by code needs the grant that let it start still to hold.
    */
   readonly invoker: {
-    readonly type: "person" | "app" | "agent" | "trigger";
+    readonly type: "person" | "app" | "agent" | "trigger" | "workflow";
     readonly id: string;
     readonly appVersion: number | null;
+    /** For a child run (`workflow`): its parent run's workflow. */
+    readonly parentWorkflowId?: string | null;
   };
   /** The catalog bindings its start froze, by alias. */
   readonly bindings: ReadonlyMap<string, FrozenCatalogBinding>;
+  /**
+   * The other workflows its start froze, by alias: what its `run` tasks
+   * start (run-children.ts). None unless given.
+   */
+  readonly workflows?: ReadonlyMap<string, FrozenWorkflowBinding>;
   /**
    * Whether it runs in restricted mode, as its start decided and its row
    * pins (restricted.ts): what it sends an App restricts that App first.
@@ -201,6 +229,26 @@ const invokerSql = (run: CallingRun): SQL => {
         "start"
       )})`;
     }
+    case "workflow": {
+      // A child run: its person still in its parent's workflow, its parent
+      // still going, and the parent workflow's own grant to start this one
+      // still active (run-children.ts).
+      const parentWorkflow = invoker.parentWorkflowId;
+      if (parentWorkflow === undefined || parentWorkflow === null) {
+        return sql`0`;
+      }
+      return sql`${workflowRoleSql(run.principal, parentWorkflow)} AND EXISTS (SELECT 1 FROM workflow_resource_runs AS parent_run
+        JOIN permissions AS held
+          ON held.subject_type = 'workflow'
+            AND held.subject_id = parent_run.workflow_resource_id
+        WHERE parent_run.id = ${invoker.id}
+          AND parent_run.status IN ('starting', 'running')
+          AND held.object_type = 'workflow' AND held.object_id = ${run.workflowId}
+          AND held.resource IS NULL
+          AND held.status = 'active'
+          AND parent_run.workflow_resource_id = ${parentWorkflow}
+          AND EXISTS (SELECT 1 FROM json_each(held.actions) WHERE value = 'start'))`;
+    }
     case "agent": {
       // A chat's grant holds only for the person who asked for it there
       // (permissions.ts, `holdsIn`): another person's never keeps this
@@ -273,10 +321,17 @@ export const callingRunOf = async (
       principal: workflowResourceRuns.principalId,
       status: workflowResourceRuns.status,
       restricted: workflowResourceRuns.restricted,
+      rootRunId: workflowResourceRuns.rootRunId,
       invokerType: workflowStartReceipts.invokerType,
       invokerId: workflowStartReceipts.invokerId,
       originAppVersion: workflowStartReceipts.originAppVersion,
       bindings: workflowStartReceipts.bindings,
+      // A child's parent's workflow, read from the parent's own row.
+      parentWorkflowId: sql<
+        string | null
+      >`(SELECT parent_run.workflow_resource_id FROM workflow_resource_runs AS parent_run
+        WHERE ${workflowStartReceipts.invokerType} = 'workflow'
+          AND parent_run.id = ${workflowStartReceipts.invokerId})`,
     })
     .from(workflowResourceRuns)
     .innerJoin(
@@ -294,6 +349,7 @@ export const callingRunOf = async (
   }
   return {
     runId,
+    rootRunId: row.rootRunId ?? runId,
     workflowId: row.workflowId,
     version: row.version,
     principal: row.principal,
@@ -301,8 +357,10 @@ export const callingRunOf = async (
       type: row.invokerType,
       id: row.invokerId,
       appVersion: row.originAppVersion,
+      parentWorkflowId: row.parentWorkflowId,
     },
     bindings: frozenBindingsOf(row.bindings),
+    workflows: frozenWorkflowsOf(row.bindings),
     restricted: row.restricted,
   };
 };

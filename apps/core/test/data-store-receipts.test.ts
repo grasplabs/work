@@ -487,11 +487,15 @@ describe("outbox", () => {
   it("refuses an intent nothing takes before anything is written", async () => {
     const store = await newStore();
     const held = heldBy(await store.claim(await claimOf("k1", {})));
+    // A deployment that takes starts only, as one rolled back past
+    // notifications would.
     await expect(
-      store.commit(
+      commitWith(
+        store,
         insertOf(held, "Launch", {
           intents: [{ kind: "workflow.notify", data: {} }],
-        })
+        }),
+        { "workflow.start": taker([]) }
       )
     ).rejects.toMatchObject({ code: "submission.intent_unsupported" });
     await expect(rowsOf(store, "sdk_records")).resolves.toHaveLength(0);
@@ -837,12 +841,24 @@ describe("alarm", () => {
       async (_instance, state) => await state.storage.getAlarm()
     );
 
+  /**
+   * The store's alarm firing in a deployment whose outbox takes nothing,
+   * as one rolled back past what it holds would: the alarm due is
+   * consumed, as firing does, before the host's alarm runs.
+   */
+  const alarmTakingNothing = async (store: OpenStore): Promise<void> => {
+    await runInDurableObject(objectOf(store), async (_instance, state) => {
+      await state.storage.deleteAlarm();
+      await new StoreHost(state, env).runAlarm({});
+    });
+  };
+
   it("retries an entry nothing takes now, settles it only once its attempts run out, then sleeps", async () => {
     const store = await newStore();
     const input = { title: "Launch" };
     const held = heldBy(await store.claim(await claimOf("k1", input)));
-    // Staged while something took notifications; this deployment takes
-    // none now.
+    // Staged while something took notifications; the deployment's alarm
+    // takes none now, as one rolled back past them would.
     await commitWith(
       store,
       insertOf(held, "Launch", {
@@ -851,7 +867,7 @@ describe("alarm", () => {
       { "workflow.notify": taker([]) }
     );
 
-    await runDurableObjectAlarm(objectOf(store));
+    await alarmTakingNothing(store);
     const [waiting] = await rowsOf(store, "sdk_change_outbox");
     expect(waiting).toMatchObject({ attempts: 1, settled_at: null });
     // Waits its backoff, neither spinning nor dropping it.
@@ -872,7 +888,7 @@ describe("alarm", () => {
       attempts: defaultMaxAttempts,
       undeliverable: "outbox.no_consumer",
     });
-    await runDurableObjectAlarm(objectOf(store));
+    await alarmTakingNothing(store);
     // The next thing due is the receipt's retention.
     await expect(alarmOf(store)).resolves.toBeGreaterThan(
       Date.now() + 29 * dayMs

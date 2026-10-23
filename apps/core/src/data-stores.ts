@@ -30,7 +30,7 @@ import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { requireAppRole } from "./app-access.ts";
+import { requireAppRole, requireNotArchived } from "./app-access.ts";
 import { auditedBatch, outboxed, outboxedIfChanged } from "./audit-outbox.ts";
 import { activeMember } from "./auth/auth.ts";
 import type { Acting } from "./auth/identity.ts";
@@ -241,7 +241,9 @@ export const createStore = async (env: Env, by: Acting): Promise<StoreId> => {
 };
 
 /** The App a default store serves: whose roles decide who manages it. */
-type DefaultStoreApp = Pick<App, "id" | "owner"> & { createdAt: Date };
+type DefaultStoreApp = Pick<App, "id" | "owner" | "status"> & {
+  createdAt: Date;
+};
 
 /**
  * The App whose default store `id` is (`app_default_stores`,
@@ -258,6 +260,7 @@ const defaultStoreApp = async (
     .select({
       id: apps.id,
       owner: apps.ownerId,
+      status: apps.status,
       createdAt: apps.createdAt,
     })
     .from(appDefaultStores)
@@ -267,12 +270,18 @@ const defaultStoreApp = async (
   if (row === undefined) {
     return undefined;
   }
-  if (row.id === null || row.owner === null || row.createdAt === null) {
+  if (
+    row.id === null ||
+    row.owner === null ||
+    row.status === null ||
+    row.createdAt === null
+  ) {
     throw dataErrors.create("data.store_unavailable");
   }
   return {
     id: appIdSchema.parse(row.id),
     owner: row.owner,
+    status: row.status,
     createdAt: row.createdAt,
   };
 };
@@ -292,7 +301,9 @@ const defaultStoreApp = async (
 const managedBy = async (
   env: Env,
   by: Acting,
-  id: string
+  id: string,
+  /** Whether to change it: an archived App's default store is read-only. */
+  change = true
 ): Promise<{ id: StoreId; owner: string; defaultOf?: DefaultStoreApp }> => {
   const parsed = storeIdSchema.safeParse(id);
   if (!parsed.success || !canBuild(by.role)) {
@@ -308,6 +319,9 @@ const managedBy = async (
         throw dataErrors.create("data.store_unavailable");
       }
       throw error;
+    }
+    if (change) {
+      requireNotArchived(app);
     }
   }
   const shared = db
@@ -387,7 +401,7 @@ const boundSql = (id: StoreId): SQL =>
  * statement that requires it live, bound to no sealed release, and not
  * closing for another deletion (unless that mark lapsed,
  * `storeClosingMs`): the mark a seal's binding (app-releases.ts) and
- * `setCurrentVersion` honour, so of this deletion and a seal that binds
+ * `makeCurrent` honour, so of this deletion and a seal that binds
  * the store, exactly one wins. True when this call holds the mark: only
  * then may it close the store.
  */
@@ -590,6 +604,22 @@ const sharingRules = (owner: string) => ({
 });
 
 /**
+ * Refuses a change to store `id` while it is the default store of an
+ * archived App (`app.archived`): read-only, as the App is, until a builder
+ * restores it (app-status.ts). For changes made by admins without a role
+ * check of their own on the App (backfills, migration samples).
+ */
+export const requireStoreChangeable = async (
+  env: Env,
+  id: StoreId
+): Promise<void> => {
+  const app = await defaultStoreApp(env, id);
+  if (app !== undefined) {
+    requireNotArchived(app);
+  }
+};
+
+/**
  * Shares store `id` with a person or team in role `manage`, for `by`, who
  * must manage it and isn't Grasp staff, as for Apps: a person in the
  * organization in a role that builds, never its creator; or a team that
@@ -693,7 +723,7 @@ export const storeManagers = async (
   by: Acting,
   id: string
 ): Promise<StoreManager[]> => {
-  const store = await managedBy(env, by, id);
+  const store = await managedBy(env, by, id, false);
   if (store.defaultOf !== undefined) {
     return await appBuilders(env, store.defaultOf);
   }

@@ -1,12 +1,29 @@
 import type { KnownPart } from "@grasp-os/shared/onboarding-gate";
 import { cn } from "@grasp-os/ui/lib/utils";
 import { useLingui } from "@lingui/react/macro";
-import { useContext, useEffect, useState, useSyncExternalStore } from "react";
+import {
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 
 import type { BrainScene } from "../brain/dot-brain.tsx";
-import type { ShapeKey } from "../brain/dot-shapes.ts";
+import type { ShapeKey, Teammate } from "../brain/dot-shapes.ts";
+import { SpokenText } from "../voice/spoken-text.tsx";
+import {
+  hold,
+  say,
+  stopSpeaking,
+  usePrepare,
+  useSaid,
+  useVoice,
+  voiceClock,
+} from "../voice/voice.ts";
+import type { Tone } from "../voice/voice.ts";
 import { KnowledgeBar } from "./knowledge-bar.tsx";
-import { Explained, Primary } from "./setup-parts.tsx";
+import { Explained, Primary, tones } from "./setup-parts.tsx";
 import type { StepProps } from "./setup-steps.tsx";
 import { readingSeconds } from "./setup.ts";
 
@@ -15,10 +32,11 @@ import { readingSeconds } from "./setup.ts";
 // for, told as a story rather than read. Stephen lays out the plan a line
 // at a time, each line alone in the middle, and the brain above takes a
 // figure for each. After the fifth line, a taste of the interviews: he asks
-// Mark, and three of the team answer; then he asks the last one how long it
-// takes. Grasp has no voice here yet, so each line gets its reading time,
-// as the prototype's do with the sound off. Last, the plan is summed up,
-// the bar settles back to what Grasp knows now, and the way on fades in.
+// Mark, and three of the team answer in their own voices; then he asks the
+// last one how long it takes. With the sound off, each line gets the time
+// it takes to say; paused, the story holds where it is. Last, the plan is
+// summed up, the bar settles back to what Grasp knows now, and the way on
+// fades in.
 
 /**
  * What line three names, in order, and what each fills in the bar: who's
@@ -41,8 +59,6 @@ const storyTeams = [42, 38, 30, 18, 14, 9, 8, 6, 5];
 
 /** A short breath between the story's lines, and between the voices of the team. */
 const breathMs = 350;
-
-const readingMs = (line: string): number => readingSeconds(line) * 1000;
 
 /**
  * The brain's figure for each line: Stephen laying out the plan; the two of
@@ -86,13 +102,30 @@ const storyScene = (
   return teams === undefined ? { shape, fill } : { shape, fill, teams };
 };
 
-/** One turn of the conversation: who, their role, what they say. */
+/** A line of the story, and how Stephen says it. */
+interface Line {
+  text: string;
+  tone: Tone;
+}
+
+/** Who is shown while someone speaks in the conversation: Stephen as himself, one of the team from their photo. */
+const figureOf = (speaker: Teammate | "stephen" | null): ShapeKey | null => {
+  if (speaker === null) {
+    return null;
+  }
+  return speaker === "stephen"
+    ? { kind: "head" }
+    : { kind: "person", who: speaker };
+};
+
+/** One turn of the conversation: who, their role, what they say, and how. */
 interface Turn {
   name: string;
   role: string;
   text: string;
-  /** One of the team, rather than Stephen himself. */
-  team: boolean;
+  tone: Tone;
+  /** One of the team, in their own voice and drawn from their photo; none for Stephen himself. */
+  who?: Teammate;
 }
 
 /** Where the story is. */
@@ -127,7 +160,7 @@ const spokenAt = ({ beat, turn }: Told, conversation: Turn[]): number => {
   const answered = beat > conversationBeat ? conversation.length : turn + 1;
   return conversation
     .slice(0, Math.max(answered, 0))
-    .filter((each) => each.team).length;
+    .filter((each) => each.who !== undefined).length;
 };
 
 /**
@@ -140,7 +173,7 @@ const storyBar = (
   conversation: Turn[],
   threshold: number
 ): KnownPart[] => {
-  const answers = conversation.filter((each) => each.team).length;
+  const answers = conversation.filter((each) => each.who !== undefined).length;
   const connected = connectedAt(told);
   const spoken = spokenAt(told, conversation);
   const before = parts
@@ -182,82 +215,182 @@ const onMotionChange = (listener: () => void): (() => void) => {
   };
 };
 
+/** A line comes in on its own first, and is said a moment after, in ms. */
+const lineDelayMs = 150;
+
+/** What the story says, as it is now: in the language the page is in now. */
+interface Script {
+  lines: Line[];
+  conversation: Turn[];
+}
+
+/** What the story tells the page as it goes. */
+interface Telling {
+  line: (beat: number) => void;
+  said: () => void;
+  turn: (turn: number) => void;
+  told: () => void;
+}
+
+/** The story as it is now, and whether the step was left: read afresh at every turn. */
+interface Teller {
+  now: () => { script: Script; on: Telling };
+  left: () => boolean;
+}
+
 /**
- * The story's clock: a line at a time, each given its reading time and a
- * breath, and after the fifth line every turn of the conversation. With
- * less motion, it is told at once.
+ * Plays the conversation from `turn` on, each a breath after the one
+ * before, in the voice of who says it; false once the step is left.
  */
-const useStory = (lines: string[], conversation: Turn[]): Told => {
+const playFrom = async (teller: Teller, turn: number): Promise<boolean> => {
+  const each = teller.now().script.conversation[turn];
+  await hold(each === undefined ? breathMs * 2 : breathMs);
+  if (teller.left()) {
+    return false;
+  }
+  teller.now().on.turn(turn);
+  if (each === undefined) {
+    return true;
+  }
+  await say(each.text, { speaker: each.who, tone: each.tone });
+  return !teller.left() && (await playFrom(teller, turn + 1));
+};
+
+/** Tells the story from line `beat` on, until it is told or the step is left. */
+const tellFrom = async (teller: Teller, beat: number): Promise<void> => {
+  if (beat >= teller.now().script.lines.length) {
+    teller.now().on.told();
+    return;
+  }
+  teller.now().on.line(beat);
+  await hold(lineDelayMs);
+  const line = teller.now().script.lines[beat];
+  if (teller.left() || line === undefined) {
+    return;
+  }
+  await say(line.text, { tone: line.tone });
+  if (teller.left()) {
+    return;
+  }
+  teller.now().on.said();
+  if (beat === conversationBeat && !(await playFrom(teller, 0))) {
+    return;
+  }
+  await hold(breathMs);
+  if (!teller.left()) {
+    await tellFrom(teller, beat + 1);
+  }
+};
+
+/**
+ * Plays the story: each line said, a breath after the one before, and
+ * after the fifth line each turn of the conversation, in the voice of who
+ * says it. With the sound off, `say` gives each its time to say instead;
+ * paused, `say` and `hold` stand still, and so does the story. A change of
+ * language goes on where it is, with the words of the new one. Leaving,
+ * the voices stop with it.
+ */
+const useTelling = (script: Script, reduce: boolean, on: Telling): void => {
+  const latest = useRef({ script, on });
+  useEffect(() => {
+    latest.current = { script, on };
+  });
+  useEffect(() => {
+    let left = false;
+    if (!reduce) {
+      void tellFrom({ now: () => latest.current, left: () => left }, 0);
+    }
+    return () => {
+      left = true;
+      stopSpeaking();
+    };
+  }, [reduce]);
+};
+
+/** A line the story says, fetched as the story opens, so nothing waits on the voice later; again in another language. */
+const Prepared = ({
+  text,
+  tone,
+  who,
+}: {
+  text: string;
+  tone: Tone;
+  who?: Teammate;
+}) => {
+  usePrepare(text, { tone, speaker: who });
+  return null;
+};
+
+/**
+ * The story's clock: a line at a time, said by Stephen, and after the
+ * fifth line every turn of the conversation, in the team's own voices.
+ * How far a line is comes from his voice as he says it; with the sound
+ * off, from the time it takes to say. With less motion, it is told at
+ * once.
+ */
+const useStory = (script: Script): Told => {
   const reduce = useSyncExternalStore(
     onMotionChange,
     () => window.matchMedia(lessMotion).matches,
     () => false
   );
-  const beats = lines.length;
+  const voice = useVoice();
+  const beats = script.lines.length;
   const [beat, setBeat] = useState(0);
   const [turn, setTurn] = useState(-1);
-  const [beganAt, setBeganAt] = useState(() => Date.now());
+  const [finished, setFinished] = useState(false);
+  const [beganAt, setBeganAt] = useState(voiceClock);
   const [now, setNow] = useState(beganAt);
   const told = reduce || beat >= beats;
-  const line = lines[beat] ?? "";
-  const reading = told ? 1 : readingMs(line);
-  const finished = told || now - beganAt >= reading + 150;
-  const turns = conversation.length;
-  const saying = conversation[turn]?.text ?? "";
+  const line = told ? "" : (script.lines[beat]?.text ?? "");
+  const said = useSaid(line);
+  const saying = voice.line?.text === line;
 
-  // The pictures follow the clock.
+  useTelling(script, reduce, {
+    line: (at) => {
+      const start = voiceClock();
+      setBeat(at);
+      setFinished(false);
+      setBeganAt(start);
+      setNow(start);
+    },
+    said: () => {
+      setFinished(true);
+    },
+    turn: setTurn,
+    told: () => {
+      setBeat(beats);
+    },
+  });
+
+  // With the sound off, the pictures follow the voice's clock, which a pause holds.
+  const ticking = !told && !finished && !voice.on;
   useEffect(() => {
-    const id = finished
-      ? undefined
-      : window.setInterval(() => {
-          setNow(Date.now());
-        }, 100);
+    const id = ticking
+      ? window.setInterval(() => {
+          setNow(voiceClock());
+        }, 100)
+      : undefined;
     return () => {
       window.clearInterval(id);
     };
-  }, [finished]);
+  }, [ticking]);
 
-  // After "Here's what that sounds like", the conversation plays, each turn given its reading time.
-  const playing =
-    !told && beat === conversationBeat && finished && turn < turns;
-  useEffect(() => {
-    const last = turn === turns - 1 ? 2 : 1;
-    const wait =
-      turn < 0 ? breathMs : readingMs(saying) + 150 + last * breathMs;
-    const id = playing
-      ? window.setTimeout(() => {
-          setTurn(turn + 1);
-        }, wait)
-      : undefined;
-    return () => {
-      window.clearTimeout(id);
-    };
-  }, [playing, turn, turns, saying]);
-
-  // A breath after a line is finished, and after the team has spoken, the next one.
-  const waiting = beat === conversationBeat && turn < turns;
-  const next = !told && finished && !waiting;
-  useEffect(() => {
-    const id = next
-      ? window.setTimeout(() => {
-          const at = Date.now();
-          setBeat(beat + 1);
-          setBeganAt(at);
-          setNow(at);
-        }, breathMs)
-      : undefined;
-    return () => {
-      window.clearTimeout(id);
-    };
-  }, [next, beat]);
-
-  const progress = finished
-    ? 1
-    : Math.min(Math.max((now - beganAt - 150) / reading, 0), 1);
+  let progress = 0;
+  if (told || finished) {
+    progress = 1;
+  } else if (saying) {
+    progress = Math.max(said, 0) / Math.max(line.length, 1);
+  } else if (!voice.on) {
+    progress = Math.min(
+      Math.max((now - beganAt - lineDelayMs / 1000) / readingSeconds(line), 0),
+      1
+    );
+  }
   return { beat: told ? beats : beat, turn, progress, told };
 };
 
-/** Whoever is speaking in the conversation, with their words. */
+/** Whoever is speaking in the conversation, their words lighting up as they say them. */
 const Speaking = ({ turn }: { turn: Turn }) => (
   <div className="animate-in fade-in slide-in-from-bottom-2 flex flex-col items-center gap-3 duration-500">
     <span className="text-muted-foreground flex items-center gap-2">
@@ -270,63 +403,114 @@ const Speaking = ({ turn }: { turn: Turn }) => (
       )}
     </span>
     <p className="text-2xl font-medium tracking-tight text-balance">
-      {turn.text}
+      <SpokenText from={0} line={turn.text} text={turn.text} />
     </p>
   </div>
 );
 
+/** What the story says: seven lines, and the conversation after the fifth. */
+const useScript = (data: StepProps["data"]): Script => {
+  const { t } = useLingui();
+  const { threshold } = data.gate;
+  const { sponsor } = data.view;
+  const { even } = tones;
+  return {
+    lines: [
+      { text: t`Alright, here’s the plan.`, tone: even },
+      {
+        // The sponsor by name, when the kickoff gave one.
+        text:
+          sponsor === null
+            ? t`Our first conversation gave me the big picture. Now I need the details.`
+            : t`${sponsor} gave me the big picture. Now I need the details.`,
+        tone: even,
+      },
+      {
+        text: t`You show me who’s who, where the documents are, and which tools people use.`,
+        tone: even,
+      },
+      {
+        text: t`Then I talk to your team myself: short conversations, over two weeks. That’s where I learn the most.`,
+        tone: even,
+      },
+      {
+        text: t`I do every interview myself. Here’s what that sounds like.`,
+        tone: even,
+      },
+      {
+        text: t`From all of that, I work out where AI saves your team the most time.`,
+        tone: even,
+      },
+      {
+        text: t`Once I have about ${threshold}% of the picture, your team can start. I’ll fill in the rest as we go.`,
+        tone: even,
+      },
+    ],
+    // Stephen asks Mark, in his own voice; three of the team answer, each
+    // in their own, short and quick, as said on a call rather than read
+    // out; and Stephen asks the last one how long it takes, as he does on
+    // every call, so the hours can be worked out.
+    conversation: [
+      {
+        name: "Stephen",
+        role: "",
+        tone: "interested, a little lighter",
+        text: t`Mark, where does the time go on a mortgage file?`,
+      },
+      {
+        name: "Mark",
+        role: t`Mortgage advice`,
+        who: "mark",
+        tone: "easy, light",
+        text: t`Chasing paperwork. Half of every file is waiting for payslips.`,
+      },
+      {
+        name: "Lisa",
+        role: t`Customer service`,
+        who: "lisa",
+        tone: "neutral, light",
+        text: t`Every morning I copy new tickets into a spreadsheet. There goes my first hour.`,
+      },
+      {
+        name: "Tim",
+        role: t`Finance`,
+        who: "tim",
+        tone: "easy, light",
+        text: t`Half my Monday goes on invoices. Most miss an order number, so I’m emailing around to ask.`,
+      },
+      {
+        name: "Stephen",
+        role: "",
+        tone: "curious, gently",
+        text: t`How long does one of those take you, Tim?`,
+      },
+      {
+        name: "Tim",
+        role: t`Finance`,
+        who: "tim",
+        tone: "easy, light",
+        text: t`Twenty minutes each, easily. About fifteen a week.`,
+      },
+    ],
+  };
+};
+
+/**
+ * "How this works", told rather than read: Stephen says the plan a line
+ * at a time, each alone in the middle with its words lighting up as he
+ * says them, and the brain above takes a figure for each. After the fifth
+ * line, a sample interview: Stephen asks, shown as himself, and Mark, Lisa
+ * and Tim answer in their own voices, each drawn in dots from their photo.
+ * Last, the plan is summed up, the bar settles back to what is known now,
+ * and the way on fades in.
+ */
 export const About = ({ data, parts, percent, go, onStory }: StepProps) => {
   const { t } = useLingui();
   const { onExplained } = useContext(Explained);
   const { threshold } = data.gate;
-  const lines = [
-    t`Alright, here’s the plan.`,
-    t`Our first conversation gave me the big picture. Now I need the details.`,
-    t`You show me who’s who, where the documents are, and which tools people use.`,
-    t`Then I talk to your team myself: short conversations, over two weeks. That’s where I learn the most.`,
-    t`I do every interview myself. Here’s what that sounds like.`,
-    t`From all of that, I work out where AI saves your team the most time.`,
-    t`Once I have about ${threshold}% of the picture, your team can start. I’ll fill in the rest as we go.`,
-  ];
-  const conversation: Turn[] = [
-    {
-      name: "Stephen",
-      role: "",
-      team: false,
-      text: t`Mark, where does the time go on a mortgage file?`,
-    },
-    {
-      name: "Mark",
-      role: t`Mortgage advice`,
-      team: true,
-      text: t`Chasing paperwork. Half of every file is waiting for payslips.`,
-    },
-    {
-      name: "Lisa",
-      role: t`Customer service`,
-      team: true,
-      text: t`Every morning I copy new tickets into a spreadsheet. There goes my first hour.`,
-    },
-    {
-      name: "Tim",
-      role: t`Finance`,
-      team: true,
-      text: t`Half my Monday goes on invoices. Most miss an order number, so I’m emailing around to ask.`,
-    },
-    {
-      name: "Stephen",
-      role: "",
-      team: false,
-      text: t`How long does one of those take you, Tim?`,
-    },
-    {
-      name: "Tim",
-      role: t`Finance`,
-      team: true,
-      text: t`Twenty minutes each, easily. About fifteen a week.`,
-    },
-  ];
-  const story = useStory(lines, conversation);
+  const script = useScript(data);
+  const { lines, conversation } = script;
+  const story = useStory(script);
   const { beat, turn, progress, told } = story;
 
   useEffect(() => {
@@ -336,15 +520,15 @@ export const About = ({ data, parts, percent, go, onStory }: StepProps) => {
   }, [told, onExplained]);
 
   const shown = storyBar(parts, story, conversation, threshold);
-  // Who is speaking in the conversation, if it is on.
+  // Who is speaking in the conversation, if it is on: the last to speak stays until the next line takes over.
   const current =
     beat === conversationBeat && turn >= 0
       ? conversation[Math.min(turn, conversation.length - 1)]
       : undefined;
-  // Stephen as himself as he asks; the team, as they answer.
-  let figure: "head" | "crowd" | null = null;
+  // Stephen as himself as he asks; the one of the team who answers, from their photo.
+  let speaker: Teammate | "stephen" | null = null;
   if (current !== undefined) {
-    figure = current.team ? "crowd" : "head";
+    speaker = current.who ?? "stephen";
   }
   const fill = told
     ? percent / 100
@@ -352,10 +536,8 @@ export const About = ({ data, parts, percent, go, onStory }: StepProps) => {
   // Twenty steps a line are smooth enough for ink to fill, and few enough for the page.
   const along = Math.round(progress * 20) / 20;
   useEffect(() => {
-    onStory(
-      storyScene(beat, fill, along, figure === null ? null : { kind: figure })
-    );
-  }, [onStory, beat, fill, along, figure]);
+    onStory(storyScene(beat, fill, along, figureOf(speaker)));
+  }, [onStory, beat, fill, along, speaker]);
   useEffect(
     () => () => {
       onStory(null);
@@ -363,13 +545,14 @@ export const About = ({ data, parts, percent, go, onStory }: StepProps) => {
     [onStory]
   );
 
+  const line = lines[beat]?.text ?? "";
   let shownLine = (
     <div
       className="animate-in fade-in slide-in-from-bottom-2 flex w-full flex-col items-center gap-5 duration-600"
       key={beat}
     >
       <p className="text-2xl font-medium tracking-tight text-balance">
-        {lines[beat]}
+        <SpokenText from={0} line={line} text={line} />
       </p>
     </div>
   );
@@ -391,6 +574,9 @@ export const About = ({ data, parts, percent, go, onStory }: StepProps) => {
   const gate = told || beat >= gateBeat;
   return (
     <>
+      {[...lines, ...conversation].map((each) => (
+        <Prepared key={each.text} {...each} />
+      ))}
       <h1 className="sr-only">{t`Here’s the plan`}</h1>
       <div
         aria-live="polite"

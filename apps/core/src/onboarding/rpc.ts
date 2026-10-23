@@ -16,6 +16,11 @@ import type {
   RosterInput,
   SettleChoice,
 } from "@grasp-os/shared/onboarding";
+import { setupChoicesSchema } from "@grasp-os/shared/onboarding-choices";
+import type {
+  SetupChoices,
+  SetupChoicesInput,
+} from "@grasp-os/shared/onboarding-choices";
 import {
   documentAnswerMaxLength,
   documentErrors,
@@ -153,6 +158,28 @@ export class OnboardingRpc extends CoreRpcTarget implements OnboardingApi {
         throw onboardingErrors.create("onboarding.no_difference");
       }
       return review;
+    });
+  }
+
+  async choices(): Promise<SetupChoices> {
+    return await withPerson(this.#check, async (person) => {
+      requireAdmin(person);
+      return await onboardingStore(this.#env).choices();
+    });
+  }
+
+  async saveChoices(choices: SetupChoicesInput): Promise<SetupChoices> {
+    return await withPerson(this.#check, async (person) => {
+      requireAdmin(person);
+      const parsed = onboardingErrors.parse(
+        "onboarding.invalid",
+        setupChoicesSchema,
+        choices
+      );
+      return await onboardingStore(this.#env).saveChoices(
+        parsed,
+        actorOf(person)
+      );
     });
   }
 

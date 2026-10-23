@@ -382,6 +382,11 @@ const drainSoon = (env: OutboxEnv, db: AuditedDatabase): void => {
   waitUntil(drainLogged(env, databaseOutbox(name, db.$client), 1));
 };
 
+/** Drains Knowledge's outbox soon, as `drainSoon` does: its `audit` port. */
+export const drainKnowledgeOutboxSoon = (env: OutboxEnv): void => {
+  waitUntil(drainLogged(env, databaseOutbox("knowledge", env.KNOWLEDGE), 1));
+};
+
 /** Stores the event for `entry`; run it in one batch with the change. */
 export const outboxed = (db: DrizzleD1Database, entry: AuditEntry) => {
   const event = createAuditEvent(entry, "core");

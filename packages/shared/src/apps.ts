@@ -79,6 +79,15 @@ export const commitMessageSchema = z
   .min(1)
   .max(appLimits.messageLength);
 
+/**
+ * Where an App is in its life: `draft` while its builders make it, open to
+ * them alone; `published` once the people it is shared with may use it;
+ * `archived` once put away, kept as it was and open to nobody until a
+ * builder restores it, as a draft. Only a published App's triggers fire.
+ */
+export const appStatusSchema = z.enum(["draft", "published", "archived"]);
+export type AppStatus = z.infer<typeof appStatusSchema>;
+
 /** An App in the registry. Times are ISO 8601. */
 export interface App {
   id: AppId;
@@ -95,6 +104,8 @@ export interface App {
   currentVersion: number | null;
   /** The version up for review, if any. */
   pendingVersion: number | null;
+  /** Where it is in its life (`appStatusSchema`). */
+  status: AppStatus;
   createdAt: string;
 }
 
@@ -401,7 +412,10 @@ export interface AppVersionsApi {
    */
   review: (app: string, version: number) => Promise<VersionReview>;
   /**
-   * Makes a version the one that runs, after review or to roll back. By
+   * Makes a version the one that runs, after review or to roll back,
+   * through a candidate verified for it (frozen, checked, built, sealed
+   * and verified, then made current only over the version it was based
+   * on). By
    * anyone but one of the organization's admins (Grasp staff too, and a
    * rollback too), it asks again for the App's permissions on a
    * connection, to start a workflow or to call
@@ -412,7 +426,16 @@ export interface AppVersionsApi {
    * of an App created from a blueprint, made current for the first time:
    * it existed and was immutable when an admin granted its requests.
    */
-  setCurrent: (app: string, version: number) => Promise<App>;
+  setCurrent: (
+    app: string,
+    version: number,
+    /**
+     * The version the caller expects is current (null for none): refused
+     * as `app.conflict` when another is. Without it, whichever is current
+     * as the call begins.
+     */
+    expected?: number | null
+  ) => Promise<App>;
 }
 
 /**
@@ -556,11 +579,67 @@ export interface AppsApi {
    * its builders, never Grasp staff; audited.
    */
   definition: (app: string) => Promise<DefinitionPackage>;
+  /**
+   * Publishes a draft for the people it is shared with, for its builders:
+   * refused with `app.no_version` while no version of it is current, and
+   * with `app.archived` once archived (restore it first). Audited; a
+   * published App is answered as it is.
+   */
+  publish: (app: string) => Promise<App>;
+  /**
+   * Takes a published App back to a draft, for its builders: the people
+   * it is shared with as users lose it, their open screens cleared.
+   */
+  unpublish: (app: string) => Promise<App>;
+  /**
+   * Archives the App, for its builders: nobody opens its screens or calls
+   * it, its triggers stop, and its unfinished runs are cancelled, each
+   * audited. Its data, members and grants are kept for `restore`.
+   */
+  archive: (app: string) => Promise<App>;
+  /**
+   * Restores an archived App, for its builders, as a draft: refused with
+   * `app.stops_pending` while runs it started are still being stopped.
+   */
+  restore: (app: string) => Promise<App>;
   readonly files: AppFilesApi;
   readonly versions: AppVersionsApi;
   readonly members: AppMembersApi;
   readonly blueprints: AppBlueprintsApi;
 }
+
+/**
+ * The states of a candidate: one frozen version of an App on its way to
+ * being made current (spec 22.1, core's app-candidates.ts). It moves
+ * forward through `frozen`, `checking`, `building`, `verifying` and
+ * `verified` to `active`, or ends in one of the outcomes: a defect a
+ * repair can fix (`repairable_failed`), something outside the App's code
+ * in the way (`operationally_blocked`), a refusal no repair of the code
+ * changes (`rejected`), or a newer change by a person (`superseded`).
+ * `active` and the outcomes are final; a repair is a new candidate.
+ */
+export const candidateStates = [
+  "frozen",
+  "checking",
+  "building",
+  "verifying",
+  "verified",
+  "active",
+  "repairable_failed",
+  "operationally_blocked",
+  "rejected",
+  "superseded",
+] as const;
+export type CandidateState = (typeof candidateStates)[number];
+
+/** The states of a candidate still on its way: neither active nor ended. */
+export const openCandidateStates = [
+  "frozen",
+  "checking",
+  "building",
+  "verifying",
+  "verified",
+] as const satisfies readonly CandidateState[];
 
 /** Why a call to the App registry was refused. */
 export const appErrors = defineErrorFamily({
@@ -589,7 +668,23 @@ export const appErrors = defineErrorFamily({
   "app.call_deadlock":
     "The App called is itself waiting, directly or through other Apps, for this call's App, so neither could go on. This call was stopped so the other can. Try again in a moment.",
   "app.conflict": "Someone else changed this App at the same time. Try again.",
+  "app.candidate_busy":
+    "This version is already being checked to be made current. Try again in a moment.",
+  "app.candidate_attempts":
+    "Checking this version to make it current failed too many times for reasons outside its code. Try again later.",
+  "app.candidate_environment":
+    "This version was checked by an earlier release of the platform, so it must be checked again before it's made current.",
+  "app.candidate_release_changed":
+    "This version's sealed release no longer matches the one that was checked, so it can't be made current. Make the change again to check it anew.",
+  "app.candidate_superseded":
+    "A newer change to this App replaced this version's check before it finished. Make the version current again if you still want it.",
   "app.not_running": "The App has no current version to run yet.",
+  "app.no_version": "Make a version of the App current before publishing it.",
+  "app.archived": "The App is archived. A builder can restore it.",
+  "app.stops_pending":
+    "Runs the App started are still being stopped from when it was archived. Try restoring it again in a few minutes.",
+  "app.not_published":
+    "The App isn't published, so other Apps and workflows can't call it.",
   "app.build_failed": "The App's server code doesn't build.",
   "app.method_invalid": "The App's server has no method by that name.",
   "app.failed": "The App's server code failed.",

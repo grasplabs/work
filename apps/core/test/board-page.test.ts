@@ -98,6 +98,7 @@ const fromBuiltin = async (admin: Person, blueprint: string) => {
     name: `Ours ${unique()}`,
   });
   await admin.api.apps.versions.setCurrent(made.app.id, 1);
+  await admin.api.apps.publish(made.app.id);
   return { app: appIdSchema.parse(made.app.id), permissions: made.permissions };
 };
 

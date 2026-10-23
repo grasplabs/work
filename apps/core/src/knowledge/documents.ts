@@ -34,7 +34,7 @@ import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { alias } from "drizzle-orm/sqlite-core";
 import { z } from "zod";
 
-import { auditedBatch, outboxed } from "../audit-outbox.ts";
+import { outboxed } from "../audit-outbox.ts";
 import { isUniqueViolation } from "../db/d1.ts";
 import {
   brainPayloads,
@@ -43,10 +43,11 @@ import {
   links,
   versions,
 } from "../db/knowledge/schema.ts";
-import { allowedCollections, noteProvenance } from "./access.ts";
+import { noteProvenance } from "./access.ts";
 import type { Reader } from "./access.ts";
-import { allowedFor } from "./app-entries.ts";
-import type { Allowed } from "./app-entries.ts";
+import { auditedBatch } from "./audit.ts";
+import { allowedFor } from "./authorize.ts";
+import type { Allowed } from "./authorize.ts";
 import { readableCollection, requireWritable } from "./collections.ts";
 import type { CollectionRow } from "./collections.ts";
 import {
@@ -67,6 +68,7 @@ import {
   stagePayload,
 } from "./payloads.ts";
 import type { StagedPayload } from "./payloads.ts";
+import { portsOf } from "./ports.ts";
 
 // Saving a document: its frontmatter is read and checked (and a memory
 // file's size, memory-files.ts), its Markdown split into sections and its
@@ -161,6 +163,23 @@ export const indexedValuesOf = (
       sectionText,
     ]),
   ];
+};
+
+/**
+ * How many sections a version's `text` at `path` has, numbered from 0 as
+ * its save numbered them, or undefined when its frontmatter doesn't read:
+ * for a version whose sections are no longer stored (only the current
+ * one's are), such as one a Brain memory cites.
+ */
+export const sectionCountOf = (
+  path: string,
+  text: string
+): number | undefined => {
+  try {
+    return splitSections(parseBaseFields(path, text).body).length;
+  } catch {
+    return undefined;
+  }
 };
 
 /**
@@ -474,7 +493,7 @@ export const writeVersion = async (
   if ((existing?.currentVersion ?? 0) !== ifVersion) {
     throw conflict(existing);
   }
-  const now = new Date();
+  const now = portsOf(env).clock();
   const number = ifVersion + 1;
   const documentId = existing?.id ?? crypto.randomUUID();
   const changes = {
@@ -555,7 +574,7 @@ export const writeVersion = async (
   const send = async (staged: StagedPayload): Promise<void> => {
     await write.lastCheck?.();
     try {
-      await auditedBatch(env, db, [document, ...statements(staged)]);
+      await auditedBatch(portsOf(env), db, [document, ...statements(staged)]);
     } catch (error) {
       if (isUniqueViolation(error)) {
         throw conflict(await findByPath(db, collection.id, path));
@@ -612,9 +631,10 @@ export const saveDocument = async (
   const { collectionId, path, text, ifVersion, message } =
     knowledgeErrors.parse("knowledge.invalid", saveInputSchema, input);
   const db = drizzle(env.KNOWLEDGE);
+  const allowed = await allowedFor(portsOf(env), { type: "person", person });
   const collection = await readableCollection(
     db,
-    await allowedCollections(env, db, { type: "person", person }),
+    allowed.collections,
     collectionId
   );
   requireWritable(env, person, collection);
@@ -642,7 +662,7 @@ export const restoreVersion = async (
   const db = drizzle(env.KNOWLEDGE);
   const { document, collection } = await readableDocument(
     db,
-    await allowedFor(env, db, { type: "person", person }),
+    await allowedFor(portsOf(env), { type: "person", person }),
     documentId
   );
   requireWritable(env, person, collection);
@@ -672,7 +692,7 @@ export const getDocument = async (
       ? undefined
       : knowledgeErrors.parse("knowledge.invalid", versionInputSchema, version);
   const db = drizzle(env.KNOWLEDGE);
-  const allowed = await allowedFor(env, db, reader);
+  const allowed = await allowedFor(portsOf(env), reader);
   const id = documentIdSchema.safeParse(documentId);
   // The version's payload is found in the same query as the access check,
   // so it is never read from a collection that stopped being readable in
@@ -739,7 +759,7 @@ export const listDocuments = async (
     options
   );
   const db = drizzle(env.KNOWLEDGE);
-  const allowed = await allowedFor(env, db, reader, collectionId);
+  const allowed = await allowedFor(portsOf(env), reader);
   const collection = await readableCollection(
     db,
     allowed.collections,
@@ -787,7 +807,7 @@ export const history = async (
     options
   );
   const db = drizzle(env.KNOWLEDGE);
-  const allowed = await allowedFor(env, db, reader);
+  const allowed = await allowedFor(portsOf(env), reader);
   const { document, collection } = await readableDocument(
     db,
     allowed,
@@ -880,7 +900,7 @@ export const backlinks = async (
     options
   );
   const db = drizzle(env.KNOWLEDGE);
-  const allowed = await allowedFor(env, db, reader);
+  const allowed = await allowedFor(portsOf(env), reader);
   const { document, collection } = await readableDocument(
     db,
     allowed,

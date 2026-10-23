@@ -14,6 +14,7 @@ import {
   PackageIcon,
   PencilLineIcon,
   RocketIcon,
+  ScaleIcon,
   ShieldCheckIcon,
   SparklesIcon,
   SplitIcon,
@@ -64,6 +65,7 @@ export const kindLabel: Record<InboxKind, MessageDescriptor> = {
   packages: msg({ message: "Packages", context: "inbox item kind" }),
   appApproval: msg({ message: "App approval", context: "inbox item kind" }),
   failedRun: msg({ message: "Failed run", context: "inbox item kind" }),
+  decision: msg({ message: "Decision", context: "inbox item kind" }),
 };
 
 export const kindIcon: Record<InboxKind, LucideIcon> = {
@@ -86,6 +88,7 @@ export const kindIcon: Record<InboxKind, LucideIcon> = {
   packages: PackageIcon,
   appApproval: ShieldCheckIcon,
   failedRun: TriangleAlertIcon,
+  decision: ScaleIcon,
 };
 
 /** What an item is about, as a square: the app's tile, or the icon of its kind (the dashboard's mark). */

@@ -56,15 +56,37 @@ const wranglerVars = (
   return vars;
 };
 
+const releaseVar = /--var (?<name>\w+):(?<value>\S+)/gu;
+
+/**
+ * The `--var NAME:value`s of each line of CI that deploys core from the
+ * release (scripts/release/deploy-release.ts), by name.
+ */
+const releaseDeployVars = (): Record<string, string>[] =>
+  read(".github/workflows/ci.yml")
+    .split("\n")
+    .filter(
+      (line) =>
+        line.includes("vp run release:deploy") && line.includes("--worker core")
+    )
+    .map((line) => {
+      const vars: Record<string, string> = {};
+      for (const match of line.matchAll(releaseVar)) {
+        vars[match.groups?.name ?? ""] = match.groups?.value ?? "";
+      }
+      return vars;
+    });
+
 describe("the runtime profile each deployment says", () => {
-  it("is cloudflare on staging, whose CI deploy runs core's deploy script", () => {
+  it("is cloudflare on staging, whose CI deploys core from the release", () => {
+    expect(
+      releaseDeployVars().map((vars) => vars.RUNTIME_PROFILE)
+    ).toStrictEqual(["cloudflare"]);
+  });
+
+  it("is cloudflare when core is deployed with its deploy script", () => {
     const deploy = coreScripts().deploy ?? "";
-    expect({
-      vars: wranglerVars(deploy, "deploy")?.RUNTIME_PROFILE,
-      ci: read(".github/workflows/ci.yml").includes(
-        "vp run --filter @grasp-os/core deploy"
-      ),
-    }).toStrictEqual({ vars: "cloudflare", ci: true });
+    expect(wranglerVars(deploy, "deploy")?.RUNTIME_PROFILE).toBe("cloudflare");
   });
 
   it("is workerd in local dev", () => {
