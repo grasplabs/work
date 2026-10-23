@@ -443,7 +443,9 @@ const entry = (
 export const createWorkflowResource = async (
   env: Env,
   by: Acting,
-  name: unknown
+  name: unknown,
+  /** Admits the write, right before it commits: throws to create nothing. */
+  admit?: () => Promise<void>
 ): Promise<WorkflowResource> => {
   requireBuilder(by);
   const parsed = workflowResourceErrors.parse(
@@ -468,6 +470,7 @@ export const createWorkflowResource = async (
     ]);
     throw workflowResourceErrors.create(reason);
   };
+  await admit?.();
   try {
     await auditedBatch(env, db, [
       db.insert(workflowResources).values({
@@ -1784,6 +1787,8 @@ interface Publication {
   actions: WorkflowVersionAction[];
   /** The approved packages its modules import, if any (GRA-665). */
   packages: SealedPackageManifest | undefined;
+  /** Admits the write, right before it commits: throws to write nothing. */
+  admit: (() => Promise<void>) | undefined;
 }
 
 /**
@@ -1807,6 +1812,7 @@ const writeVersion = async (
     modulesHash,
     actions,
     packages,
+    admit,
   } = publication;
   // Bounded when the definition was checked (`inspectDefinition`).
   const contractText = canonicalJson(contractOf(checked));
@@ -1866,6 +1872,9 @@ const writeVersion = async (
     // the row that names them; inside the cleanup, so a store that fails
     // halfway gives its reservations back too.
     await storeBuild(env, { id: owner, version }, compiled);
+    // After the slow work (compiling, storing the build), right before the
+    // row lands: refused, it gives its reservations back as below.
+    await admit?.();
     await auditedBatch(env, db, [
       db.insert(workflowResourceVersions).values({
         // Only while the workflow is live and still at the version this
@@ -2084,7 +2093,8 @@ const publish = async (
   by: Acting,
   id: unknown,
   input: unknown,
-  sealer: PackageSealer | undefined
+  sealer: PackageSealer | undefined,
+  admit: (() => Promise<void>) | undefined
 ): Promise<WorkflowResourceVersion> => {
   const workflow = await requireWorkflowRole(env, by, id, "builder");
   const {
@@ -2182,6 +2192,7 @@ const publish = async (
       modulesHash,
       actions: versionActionsOf(checked.bindings, modules),
       packages: sealed?.manifest,
+      admit,
     });
   } catch (error) {
     if (notNullFailed(error, "workflow_resource_versions.manifest_hash")) {
@@ -2309,9 +2320,15 @@ export const publishWorkflowVersion = async (
    * builder's own publication passes it; without it, a publication that
    * names packages is refused.
    */
-  sealer?: PackageSealer
+  sealer?: PackageSealer,
+  /**
+   * Admits the write, called right before the version is committed, after
+   * it was compiled and its build stored: throws to publish nothing (a
+   * chat's code run that ended meanwhile, agent-workflow-build.ts).
+   */
+  admit?: () => Promise<void>
 ): Promise<WorkflowResourceVersion> =>
-  await seenBy(env, by, await publish(env, by, id, input, sealer));
+  await seenBy(env, by, await publish(env, by, id, input, sealer, admit));
 
 /** Every version of workflow `id`, newest first, for anyone with a role. */
 export const workflowVersions = async (
