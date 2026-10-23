@@ -2327,6 +2327,60 @@ describe("chat agent code output", () => {
     );
   });
 
+  it("names the chat platform a chat came through in the record of a run's output it withheld", async () => {
+    const { userId } = await signedInWithRole(idp, "user");
+    const id = workspaceIdSchema.parse(crypto.randomUUID());
+    const stub = workspace(env, id);
+    const chat = await stub.createChat(
+      "Questions",
+      userId,
+      id,
+      undefined,
+      undefined,
+      undefined,
+      "teams"
+    );
+    await pointAtGateway(
+      stub,
+      fakeGateway(
+        codeStep(
+          "export default async () => { console.log('read'); await scheduler.wait(1_500); return 'secret'; };"
+        ),
+        says("Done.")
+      )
+    );
+
+    await withRevocationReads(
+      stub,
+      async () => {
+        await Promise.resolve();
+        throw new Error("D1 is down for a moment");
+      },
+      async () => {
+        await stub.ask(chat.id, { text: "Log it.", model });
+      }
+    );
+
+    await vi.waitFor(
+      async () => {
+        const events = await allEvents();
+        expect(
+          events
+            .filter(
+              ({ action, detail }) =>
+                action === "agent.call" &&
+                detail.chat === chat.id &&
+                detail.method === "output"
+            )
+            .map(({ actor }) => actor)
+        ).toStrictEqual([
+          { type: "agent", agentId: id, onBehalfOf: userId, via: "teams" },
+        ]);
+      },
+      { timeout: 10_000, interval: 100 }
+    );
+  });
+
   it("holds a line until a revocation read begun after it finds none, however slow", async () => {
     const { stub, chat, personId, ask } = await newChat(
       codeStep(

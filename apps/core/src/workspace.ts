@@ -1572,6 +1572,7 @@ export class Workspace extends DurableObject<Env> {
             agentId: chat.agentId,
             chatId,
             personId: chat.personId,
+            via: chat.via,
           },
           { method: "output" },
           {
