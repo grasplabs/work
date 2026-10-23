@@ -36,6 +36,16 @@ const knowledgeMigrationFiles = readdirSync(knowledgeMigrationsDir)
  * go through the real entry (src/server.ts), app included.
  */
 export default defineProject({
+  resolve: {
+    alias: {
+      // The Discord adapter imports discord.js only to hold Discord's
+      // Gateway open, which the console never does (it answers over HTTP,
+      // src/admin/discord.ts); discord.js's CommonJS `require`s of Node's
+      // built-ins don't load in the test pool. The build bundles the real
+      // one.
+      "discord.js": `${import.meta.dirname}/test/discord-js.ts`,
+    },
+  },
   test: {
     name: "console",
     include: ["test/**/*.test.ts"],
@@ -50,9 +60,19 @@ export default defineProject({
     // with an icon (the rollouts page's Selects) took several times as long
     // as the rest of the app: past 30 s under CI's load. Pre-bundled, it is
     // one module. React stays out of the bundle, so there is one React.
+    //
+    // The Chat SDK's Discord adapter reads discord-api-types, whose .mjs
+    // re-exports CommonJS the module runner can't load from workerd one
+    // file at a time: pre-bundled too.
     deps: {
       optimizer: {
-        ssr: { enabled: true, include: ["@grasp-os/ui > lucide-react"] },
+        ssr: {
+          enabled: true,
+          include: [
+            "@grasp-os/ui > lucide-react",
+            "@chat-adapter/discord > discord-api-types/v10",
+          ],
+        },
       },
     },
     // Checks the runtime is workerd, then brings the database up to the
@@ -84,6 +104,8 @@ export default defineProject({
           // in for (src/admin/discord.ts).
           DISCORD_PUBLIC_KEY: discordTest.publicKey,
           DISCORD_STAFF_IDS: discordTest.staffIds.join(","),
+          // workerd has no jurisdictions (src/env.d.ts).
+          DURABLE_OBJECT_JURISDICTION: "none",
           // Where provisioned clients are served (src/deploy/context.ts).
           CLIENT_DOMAIN: "grasp.test",
           // Grasp's Rooms, which test/admin-proposal.test.ts stands in for.
