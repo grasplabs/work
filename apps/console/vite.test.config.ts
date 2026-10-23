@@ -36,14 +36,10 @@ const knowledgeMigrationFiles = readdirSync(knowledgeMigrationsDir)
  * go through the real entry (src/server.ts), app included.
  */
 export default defineProject({
+  // As in every console build (vite.config.ts, src/admin/discord-gateway.ts).
   resolve: {
     alias: {
-      // The Discord adapter imports discord.js only to hold Discord's
-      // Gateway open, which the console never does (it answers over HTTP,
-      // src/admin/discord.ts); discord.js's CommonJS `require`s of Node's
-      // built-ins don't load in the test pool. The build bundles the real
-      // one.
-      "discord.js": `${import.meta.dirname}/test/discord-js.ts`,
+      "discord.js": `${import.meta.dirname}/src/admin/discord-gateway.ts`,
     },
   },
   test: {
