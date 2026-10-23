@@ -26,7 +26,8 @@ import {
 
 // Files, in one drive per call: a person's OneDrive or a SharePoint site's
 // document library, both as `/drives/{drive}`, so a call's capability
-// binds every request to its drive. Items are addressed by ID only.
+// binds every request to its drive. Items are addressed by ID only. A
+// tool reaches as far as any call of it can, so these reach `company`.
 // Graph answers with the person's own rights: a file they can't open is
 // refused, its versions too.
 
@@ -128,6 +129,7 @@ const listFolder = defineTool({
   }),
   output: pageOutput,
   readOnly: true,
+  reach: "company",
   resource: "drive",
   routes: [get("/root/children"), get("/items/{folder}/children")],
   run: async ({ drive, folder, top, page }) => {
@@ -161,6 +163,7 @@ const searchFiles = defineTool({
   }),
   output: pageOutput,
   readOnly: true,
+  reach: "company",
   resource: "drive",
   routes: [get("/root/search(q='{query}')")],
   run: async ({ drive, query, top, page }) => {
@@ -261,6 +264,7 @@ const listVersions = defineTool({
     nextPage: z.string().nullable(),
   }),
   readOnly: true,
+  reach: "company",
   resource: "drive",
   routes: [get("/items/{item}"), get("/items/{item}/versions")],
   run: async ({ drive, item: id, top, page }) => {
@@ -312,6 +316,7 @@ const readFile = defineTool({
     content: z.string().nullable(),
   }),
   readOnly: true,
+  reach: "company",
   resource: "drive",
   routes: [
     get("/items/{item}"),
