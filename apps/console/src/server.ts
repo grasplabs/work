@@ -46,6 +46,7 @@ import { consoleDatabase } from "./db/act.ts";
 import { movedPageRedirect } from "./moved-pages.ts";
 import { importReleases } from "./releases/import.ts";
 
+export { ChatState } from "@grasp-os/chat/state";
 export { IntegrationBuild } from "./builds/workflow.ts";
 export { ApplyClient } from "./clients/apply.ts";
 export { ProvisionPlacedClient } from "./hosting/workflow.ts";
