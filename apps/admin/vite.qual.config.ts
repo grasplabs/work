@@ -116,6 +116,9 @@ export default defineProject({
           CONSOLE_MIGRATIONS: migrations,
           QUAL_ACCOUNT_ID: accountId,
           QUAL_PREFIX: prefix,
+          QUAL_VARIANT: process.env.QUAL_VARIANT ?? "exact",
+          QUAL_ATTACK: process.env.QUAL_ATTACK ?? "",
+          QUAL_PROVISION: process.env.QUAL_PROVISION ?? "1",
           KNOWLEDGE_MIGRATION_FILES: knowledgeMigrationFiles,
         },
         outboundService: relay({
