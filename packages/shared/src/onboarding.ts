@@ -5,6 +5,7 @@ import type { OrgRules } from "./admin/onboarding-admin.ts";
 import type { OnboardingDirectoryApi } from "./directory.ts";
 import type { OnboardingPlacesApi } from "./document-places.ts";
 import { defineErrorFamily } from "./errors.ts";
+import type { OnboardingHrApi } from "./hr.ts";
 import type { KickoffApi } from "./kickoff.ts";
 import type { OnboardingChoicesApi } from "./onboarding-choices.ts";
 import type { OnboardingDocumentsApi } from "./onboarding-documents.ts";
@@ -322,7 +323,8 @@ export interface OnboardingApi
     OnboardingDocumentsApi,
     OnboardingDirectoryApi,
     OnboardingChoicesApi,
-    OnboardingPlacesApi {
+    OnboardingPlacesApi,
+    OnboardingHrApi {
   /** The programme, for the dashboard; null without a plan. Any role. */
   programme: () => Promise<Programme | null>;
   view: () => Promise<OnboardingView>;
