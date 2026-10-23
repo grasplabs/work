@@ -35,21 +35,26 @@ import type {
   SearchResults,
   SkillCollections,
 } from "@grasp-os/shared/knowledge";
+import { isAdmin, roleErrors } from "@grasp-os/shared/roles";
+import type { Identity } from "@grasp-os/shared/rpc";
 
 import { gapAnswerErasure } from "../brain-gaps.ts";
 import { CoreRpcTarget } from "../rpc-target.ts";
 import { withPerson } from "../session-check.ts";
 import type { SessionCheck } from "../session-check.ts";
 import type { Reader } from "./access.ts";
+import { appsErasure } from "./apps-collection.ts";
 import { createCollection, listCollections } from "./collections.ts";
 import {
   backlinks,
   getDocument,
   history,
   listDocuments,
+  personWriter,
   restoreVersion,
   saveDocument,
 } from "./documents.ts";
+import type { Writer } from "./documents.ts";
 import { copySkill, skillCollections } from "./grasp-skills.ts";
 import {
   memoriesGet,
@@ -57,6 +62,7 @@ import {
   receiptsGet,
   remember,
 } from "./memories.ts";
+import { personalCollectionId } from "./memory-files.ts";
 import { preparePurge, purge } from "./purge.ts";
 import type { OnErase } from "./purge.ts";
 import { recall } from "./recall.ts";
@@ -65,13 +71,28 @@ import { catalog, follow, read } from "./tools.ts";
 import { uploadErasure } from "./uploads.ts";
 
 /**
- * What a purge reaches of core's own copies (purge.ts `OnErase`): the
- * brain's gap answers and the originals of uploaded files.
+ * What a purge reaches of core's own (purge.ts `OnErase`): the brain's gap
+ * answers, the originals of uploaded files, the Apps collection's entries
+ * and each person's Personal collection.
  */
 const coreErasure = (env: Env): OnErase => ({
   ...gapAnswerErasure(env),
   ...uploadErasure(env),
+  ...appsErasure(env),
+  personalCollection: personalCollectionId,
 });
+
+/**
+ * Refuses a purge to anyone but an admin (not Grasp staff, who reach a
+ * purge only through the admin they help): Knowledge's purge takes no
+ * roles, so core checks before it, as the person who purges.
+ */
+const purgerOf = (person: Identity): Writer => {
+  if (person.staff || !isAdmin(person.role)) {
+    throw roleErrors.create("role.forbidden");
+  }
+  return personWriter(person);
+};
 
 /**
  * Knowledge for a signed-in person over `/rpc`. Like the session API, it
@@ -239,7 +260,12 @@ export class KnowledgeRpc extends CoreRpcTarget implements KnowledgeApi {
     return await withPerson(
       this.#check,
       async (person) =>
-        await preparePurge(this.#env, person, input, coreErasure(this.#env))
+        await preparePurge(
+          this.#env,
+          purgerOf(person),
+          input,
+          coreErasure(this.#env)
+        )
     );
   }
 
@@ -247,7 +273,13 @@ export class KnowledgeRpc extends CoreRpcTarget implements KnowledgeApi {
     return await withPerson(
       this.#check,
       async (person) =>
-        await purge(this.#env, person, input, token, coreErasure(this.#env))
+        await purge(
+          this.#env,
+          purgerOf(person),
+          input,
+          token,
+          coreErasure(this.#env)
+        )
     );
   }
 }
