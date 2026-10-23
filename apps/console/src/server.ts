@@ -24,9 +24,12 @@
  * client back from one, and `ApplyClient` applies a client's settings
  * now (src/clients/apply.ts). `ProvisionPlacedClient` provisions a client
  * placed in a hosting destination (src/hosting/workflow.ts).
+ *
+ * `/mcp` is the admin's MCP server for Grasp's staff (src/admin/mcp.ts),
+ * behind the same Access check.
  */
 import handler from "@tanstack/react-start/server-entry";
-import { waitUntil } from "cloudflare:workers";
+import { env as workerEnv, waitUntil } from "cloudflare:workers";
 
 import { withAccess } from "./access.ts";
 import type { Staff } from "./access.ts";
@@ -36,6 +39,7 @@ import {
   discordInteraction,
   discordInteractionsPath,
 } from "./admin/discord.ts";
+import { adminMcp, adminMcpPath } from "./admin/mcp.ts";
 import { consoleDatabase } from "./db/act.ts";
 import { importReleases } from "./releases/import.ts";
 
@@ -53,8 +57,10 @@ declare module "@tanstack/react-start" {
   }
 }
 
-const withStaff = withAccess(
-  async (request, staff) => await handler.fetch(request, { context: { staff } })
+const withStaff = withAccess(async (request, staff) =>
+  new URL(request.url).pathname === adminMcpPath
+    ? await adminMcp(request, staff, workerEnv)
+    : await handler.fetch(request, { context: { staff } })
 );
 
 export default {
