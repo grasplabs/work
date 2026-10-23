@@ -69,6 +69,8 @@ export const fakeBotConnector = () => {
   const tokenRequests: URLSearchParams[] = [];
   const removed = new Set<string>();
   let failures: Failure[] = [];
+  // Entra answers the next token requests with an OK that holds no token.
+  let tokenlessAnswers = 0;
   let expiresIn = 3600;
   let activities = 0;
   // The activities posted, as the conversation shows them.
@@ -88,6 +90,10 @@ export const fakeBotConnector = () => {
       form.get("scope") === botFrameworkScope;
     if (!valid) {
       return Response.json({ error: "invalid_client" }, { status: 401 });
+    }
+    if (tokenlessAnswers > 0) {
+      tokenlessAnswers -= 1;
+      return Response.json({ token_type: "Bearer" });
     }
     const value = `bot-token-${crypto.randomUUID()}`;
     issued.add(value);
@@ -151,6 +157,7 @@ export const fakeBotConnector = () => {
     tokenRequests.length = 0;
     removed.clear();
     failures = [];
+    tokenlessAnswers = 0;
     expiresIn = 3600;
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const request = new Request(input, init);
@@ -201,6 +208,10 @@ export const fakeBotConnector = () => {
     /** The Bot Connector answers the next requests with these instead. */
     fail: (...next: Failure[]) => {
       failures = next;
+    },
+    /** Entra answers the next token requests with an OK that holds no token. */
+    answerWithoutToken: (times = 1) => {
+      tokenlessAnswers = times;
     },
     /** The bot was removed from this conversation: sends to it get a 403. */
     remove: (conversation: string) => {

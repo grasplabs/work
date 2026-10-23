@@ -378,7 +378,12 @@ const botToken = async (bot: Bot): Promise<string | undefined> => {
     response.ok ? await response.json().catch(() => null) : null
   );
   if (!answer.success) {
-    await response.body?.cancel();
+    // An OK answer was read as JSON already, and its body can't be cancelled.
+    if (!response.bodyUsed) {
+      await response.body?.cancel().catch((error: unknown) => {
+        log.warn("channel.cancel_failed", errorFields(error));
+      });
+    }
     log.warn("channel.token_failed", {
       platform: "teams",
       status: response.status,

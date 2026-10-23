@@ -548,6 +548,18 @@ describe("sending as the bot", () => {
     expect(microsoft.posted).toHaveLength(1);
   });
 
+  it("answers failed when Entra's answer holds no token, and sends nothing", async () => {
+    const connect = connectForBot();
+    microsoft.answerWithoutToken();
+    const response = await connect.channelFetch(
+      "teams",
+      adapterRequest(activities())
+    );
+    expect(response.status).toBe(502);
+    expect(response.headers.get(channelHeader)).toBe(channelAnswer.failed);
+    expect(toBotConnector()).toStrictEqual([]);
+  });
+
   it("drops a platform's own answer-kind header, so it can't pass as connect's", async () => {
     const connect = connectForBot();
     microsoft.fail({
