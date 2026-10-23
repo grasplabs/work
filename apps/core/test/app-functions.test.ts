@@ -9,7 +9,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
-import { callAppFunction } from "../src/app-functions.ts";
+import { callAppFunction, callScreenFunction } from "../src/app-functions.ts";
 import type { FunctionAnswer } from "../src/app-functions.ts";
 import type { Release } from "../src/app-releases.ts";
 import { commitFiles, setCurrentVersion } from "../src/apps.ts";
@@ -18,6 +18,7 @@ import {
   sdkReleaseManifests,
   sdkResourceBindings,
 } from "../src/db/core/schema.ts";
+import { revokeRelease } from "../src/release-retention.ts";
 import { deepFiles, fieldDepth } from "./deep-records.ts";
 import { appWith, artifactKey, person, seal } from "./sealed-apps.ts";
 import type { Fixture } from "./sealed-apps.ts";
@@ -682,6 +683,80 @@ describe(
       expect(codeOf(await call(notes, notes.owner, "notes.count", {}))).toBe(
         "operation.not_found"
       );
+    });
+
+    it("is held to its contract, from a screen still open on the version before: the same contract runs on the version current now, another never", async () => {
+      const notes = await sealedNotes();
+      const pinned = {
+        same: referenceTo(notes.release, "notes.bump"),
+        changed: referenceTo(notes.release, "notes.get"),
+      };
+      // Version 2 keeps `bump`'s contract, and renames `get`'s argument.
+      const files = notesFiles("Notes, renamed");
+      const operations = files["operations/notes.ts"] ?? "";
+      const get = `export const get = query({
+  args: { id: v.id("notes") },
+  returns: doc("notes").nullable(),
+  handler: async (ctx, args) => await ctx.db.get("notes", args.id),
+});`;
+      expect(operations).toContain(get);
+      files["operations/notes.ts"] = operations.replace(
+        get,
+        get
+          .replace("{ id: v.id", "{ noteId: v.id")
+          .replace("args.id", "args.noteId")
+      );
+      await commitFiles(env, notes.owner, notes.app, files, "Rename");
+      const next = await seal(notes, 2);
+      await setCurrentVersion(env, notes.owner, notes.app, 2);
+      const fromScreen = async (
+        reference: ReturnType<typeof referenceTo>,
+        input: unknown
+      ): Promise<string> =>
+        codeOf(
+          await callScreenFunction(
+            env,
+            notes.owner,
+            notes.app,
+            JSON.stringify({ reference, input }),
+            Date.now() + 30_000,
+            async () => {
+              // A window's pages cost nothing here.
+            }
+          )
+        );
+      const before = {
+        same: await fromScreen(pinned.same, {}),
+        changed: await fromScreen(pinned.changed, { id: "0" }),
+        // Anyone else names the version that runs.
+        agent: codeOf(
+          await call(
+            { ...notes, release: next },
+            notes.owner,
+            "notes.bump",
+            {},
+            pinned.same
+          )
+        ),
+      };
+      const admin = await person("admin");
+      await revokeRelease(
+        env,
+        admin,
+        { app: notes.app, version: 1 },
+        "Leaks data"
+      );
+      expect({
+        before,
+        revoked: await fromScreen(pinned.same, {}),
+      }).toStrictEqual({
+        before: {
+          same: "ok",
+          changed: "version.mismatch",
+          agent: "version.mismatch",
+        },
+        revoked: "version.revoked",
+      });
     });
 
     it("is refused once another version runs, which runs its own code", async () => {

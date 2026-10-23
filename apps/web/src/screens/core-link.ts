@@ -9,6 +9,8 @@ import {
   retrying,
   wait,
 } from "../core.ts";
+import { VersionFeed } from "./app-versions.ts";
+import type { VersionListener } from "./app-versions.ts";
 
 /**
  * The pauses before trying again what a page needs to start: its first
@@ -123,6 +125,13 @@ export class CoreLink {
   #endedBy: Error | undefined;
   readonly #onEnded: (why: SessionEnded) => void;
   readonly #open: () => ReturnType<typeof connectCore>;
+  /** Its subscriptions to its Apps' versions (app-versions.ts). */
+  readonly #versions = new VersionFeed(async () => {
+    if (this.#closed) {
+      throw closedError();
+    }
+    return await this.session();
+  });
 
   /**
    * `open` makes one connection to core: a WebSocket to the page's own
@@ -190,6 +199,11 @@ export class CoreLink {
       run,
       () => !this.#closed
     );
+  }
+
+  /** Has `listener` told of `app`'s current version (app-versions.ts). */
+  followVersion(app: string, listener: VersionListener): () => void {
+    return this.#versions.follow(app, listener);
   }
 
   close(): void {

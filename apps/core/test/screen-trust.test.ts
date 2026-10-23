@@ -31,6 +31,7 @@ import { calledAs, person as actingAs } from "./sealed-apps.ts";
 import { clientOrigin } from "./sign-in-config.ts";
 import {
   auditedDuring,
+  firstVersion,
   openRpc,
   outcome,
   routed,
@@ -1142,7 +1143,9 @@ describe("screen trust", { timeout: 60_000 }, () => {
           ),
           outcome(screens.frame(app, "").watchRuns("invoices", noop)),
         ]),
-        version: await screens.version(app),
+        version: await firstVersion(
+          async (onVersion) => await screens.watchVersion(app, onVersion)
+        ),
         report: await outcome(
           screens.report(
             app,
@@ -1152,7 +1155,7 @@ describe("screen trust", { timeout: 60_000 }, () => {
         ),
       }).toStrictEqual({
         gated: Array.from({ length: 9 }, () => "screen.unreviewed"),
-        version: 1,
+        version: { type: "current", version: 1, recheck: false },
         report: "ok",
       });
     });

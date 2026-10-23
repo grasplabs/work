@@ -90,7 +90,9 @@ const ScreenStatus = ({ state, onReload }: StatusProps) => {
   }
   let message = i18n._(failureMessages.unknown);
   if (state.status === "updated") {
-    message = t`A new version of this domain is available.`;
+    // Only a screen holding unsaved edits shows this: one with nothing
+    // to lose switches at once.
+    message = t`A new version of this domain is ready. It opens once your changes are saved.`;
   } else if (state.status === "signed-out") {
     message = t`Your session has ended. Sign in again to go on.`;
   } else if (state.status === "failed") {
@@ -101,7 +103,7 @@ const ScreenStatus = ({ state, onReload }: StatusProps) => {
       <output className="text-sm">{message}</output>
       {state.status === "signed-out" ? null : (
         <Button onClick={onReload} size="sm" variant="outline">
-          {state.status === "updated" ? t`Reload` : t`Try again`}
+          {state.status === "updated" ? t`Switch now` : t`Try again`}
         </Button>
       )}
     </div>
@@ -431,6 +433,61 @@ export const LeaveConfirmDialog = ({
 );
 
 /**
+ * Asks once, when another version of the App was made current while its
+ * screen holds unsaved edits or a change it hasn't heard back about,
+ * whether to save first, the screen switching once nothing is left
+ * unsaved, or to switch now (spec 11.5, 10.7.7): in Grasp's own dialog,
+ * which the screen can't draw over or answer.
+ */
+const UpdateConfirmDialog = ({
+  open,
+  onSaveFirst,
+  onSwitch,
+}: {
+  open: boolean;
+  onSaveFirst: () => void;
+  onSwitch: () => void;
+}) => (
+  <AlertDialog
+    onOpenChange={(next) => {
+      if (!next) {
+        onSaveFirst();
+      }
+    }}
+    open={open}
+  >
+    <AlertDialogContent>
+      <AlertDialogHeader>
+        <AlertDialogTitle>
+          <Trans>A new version of this app is ready</Trans>
+        </AlertDialogTitle>
+        <AlertDialogDescription>
+          <Trans>
+            It has changes that aren&apos;t saved, or a change it hasn&apos;t
+            heard back about. Save them first and it switches once they are, or
+            switch now and lose what isn&apos;t saved.
+          </Trans>
+        </AlertDialogDescription>
+      </AlertDialogHeader>
+      <AlertDialogFooter>
+        <AlertDialogCancel>
+          <Trans>Save first</Trans>
+        </AlertDialogCancel>
+        <AlertDialogAction onClick={onSwitch}>
+          <Trans>Switch now</Trans>
+        </AlertDialogAction>
+      </AlertDialogFooter>
+    </AlertDialogContent>
+  </AlertDialog>
+);
+
+/**
+ * Where a screen stands on a new version of its App: none offered, the
+ * person asked (`UpdateConfirmDialog`), or saving first.
+ */
+type Update = "none" | "asking" | "saving";
+
+/**
  * What `source` names, running in a sandboxed frame, inside the page's
  * own chrome: `label` and the App's name, which say an App drew what's
  * below. A screen can draw anything in its frame, a fake sign-in prompt
@@ -478,6 +535,11 @@ const FramedScreen = ({
   // outcome: leaving the screen then, however the page leaves it, is
   // confirmed once, in Grasp's own dialog (spec 10.7.7).
   const [guarded, setGuarded] = useState(false);
+  // The same, and where the screen stands on a new version, as the
+  // frame's callbacks read them when they come, between renders.
+  const guardedNow = useRef(false);
+  const [update, setUpdate] = useState<Update>("none");
+  const updateNow = useRef<Update>("none");
   // A failed or signed-out screen is emptied: nothing of it is left to lose.
   const holdsEdits =
     guarded && (state.status === "running" || state.status === "updated");
@@ -506,10 +568,43 @@ const FramedScreen = ({
     navigateTo.current = onNavigate;
   }, [onNavigate]);
 
+  const reloadTo = useRef(onReload);
+  useEffect(() => {
+    reloadTo.current = onReload;
+  }, [onReload]);
+
+  const showUpdate = (next: Update) => {
+    updateNow.current = next;
+    setUpdate(next);
+  };
+  // A fresh start of the frame, on the version current now. What the
+  // start before reports as it stops (its guard let go) changes nothing:
+  // nothing is offered any more.
   const reload = () => {
+    showUpdate("none");
     setState({ status: "loading" });
-    setAttempt(attempt + 1);
-    onReload?.();
+    setAttempt((last) => last + 1);
+    reloadTo.current?.();
+  };
+  // Another version made current: a screen with nothing unsaved switches
+  // at once; one holding edits asks once first (spec 11.5).
+  const changeState = (next: ScreenState) => {
+    if (next.status === "updated" && !guardedNow.current) {
+      reload();
+      return;
+    }
+    if (next.status === "updated") {
+      showUpdate("asking");
+    }
+    setState(next);
+  };
+  // Nothing left unsaved while a new version waits: it switches now.
+  const changeGuard = (next: boolean) => {
+    guardedNow.current = next;
+    setGuarded(next);
+    if (!next && updateNow.current !== "none") {
+      reload();
+    }
   };
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -545,6 +640,13 @@ const FramedScreen = ({
         }}
         pending={question?.kind === "link" ? question.link : undefined}
       />
+      <UpdateConfirmDialog
+        onSaveFirst={() => {
+          showUpdate("saving");
+        }}
+        onSwitch={reload}
+        open={update === "asking" && state.status === "updated"}
+      />
       <LeaveConfirmDialog
         onLeave={() => {
           leaving.proceed?.();
@@ -560,10 +662,10 @@ const FramedScreen = ({
         navigateTo={navigateTo}
         policy={policy}
         onAsk={setAsked}
-        onGuard={setGuarded}
+        onGuard={changeGuard}
         key={attempt}
         onOpened={setAppName}
-        onState={setState}
+        onState={changeState}
         title={title}
         {...(source.screen === undefined ? {} : { screen: source.screen })}
         {...(source.chatId === undefined ? {} : { chatId: source.chatId })}

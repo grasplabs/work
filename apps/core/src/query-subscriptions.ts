@@ -93,7 +93,9 @@ import type { SessionCheck } from "./session-check.ts";
 //     followed when the event arrives.
 // - A subscription outlives its session or the App's version: a session
 //   that ended refuses the read (`check`) and ends it; a reference to a
-//   version that is no longer current is refused (`version.*`) and ends
+//   version that is no longer current is read on the current release only
+//   while its contract there is the same (app-functions.ts,
+//   `pinnedReference`), and refused otherwise (`version.*`), which ends
 //   it, never read against another contract.
 // - Results cross people or builds: a connection is one session's, and
 //   one read is shared only by subscriptions of the same App, build,
@@ -490,11 +492,14 @@ const allHaveLatest = (evaluation: Evaluation): boolean =>
 /**
  * A callback of an App's that isn't a live query, as the connection looks
  * at it again (`QuerySubscriptions.follow`): `look` checks its access now,
- * `lose` lets go of it, when the App's revocations can't be followed.
+ * `lose` lets go of it, when the App's revocations can't be followed;
+ * `versioned`, if given, is told another version of the App was made
+ * current.
  */
 interface Look {
   readonly look: () => Promise<void>;
   readonly lose: () => void;
+  readonly versioned?: () => Promise<void>;
 }
 
 export class QuerySubscriptions<By extends Reader = Identity> {
@@ -1456,19 +1461,28 @@ export class QuerySubscriptions<By extends Reader = Identity> {
    * pushed doesn't stay on screen until its next push. When the App's
    * revocations can't be followed, `lose` lets go of it, as the App's
    * queries are then (`#lose`); its own check before each push stays.
+   * `versioned`, if given, is called each time the App's host says another
+   * of its versions was made current (`versionChanged`): a page following
+   * the App's version (screens-rpc.ts, `watchVersion`). An event missed
+   * while the host restarted is made up for by the look that follows.
    */
   follow(
     by: By,
     app: AppId,
     look: () => Promise<void>,
-    lose: () => void
+    lose: () => void,
+    versioned?: () => Promise<void>
   ): Disposable {
     let looks = this.#looks.get(app);
     if (looks === undefined) {
       looks = new Set();
       this.#looks.set(app, looks);
     }
-    const entry: Look = { look, lose };
+    const entry: Look = {
+      look,
+      lose,
+      ...(versioned === undefined ? {} : { versioned }),
+    };
     looks.add(entry);
     if (this.#reads.revocable && !this.#following.has(app)) {
       this.#follow(by.userId, app);
@@ -1528,7 +1542,7 @@ export class QuerySubscriptions<By extends Reader = Identity> {
       }
     };
     const watcher = Object.assign(
-      (revoked: boolean, runsChanged = false): void => {
+      (revoked: boolean, runsChanged = false, versionChanged = false): void => {
         // Once it no longer follows, it says it is gone, so the host drops
         // it even if core's word that it let go never arrived.
         if (!current()) {
@@ -1539,6 +1553,9 @@ export class QuerySubscriptions<By extends Reader = Identity> {
         }
         if (runsChanged) {
           this.#runsChanged(app);
+        }
+        if (versionChanged) {
+          this.#versionChanged(app);
         }
       },
       {
@@ -1637,6 +1654,19 @@ export class QuerySubscriptions<By extends Reader = Identity> {
     }
     for (const { look } of this.#looks.get(app) ?? []) {
       void QuerySubscriptions.#lookAgain(look);
+    }
+  }
+
+  /**
+   * Another version of `app` was made current: each callback of it that
+   * follows its version is told. Its live queries are left as they are:
+   * each reads under its own reference, which decides (app-functions.ts).
+   */
+  #versionChanged(app: AppId): void {
+    for (const { versioned } of this.#looks.get(app) ?? []) {
+      if (versioned !== undefined) {
+        void QuerySubscriptions.#lookAgain(versioned);
+      }
     }
   }
 

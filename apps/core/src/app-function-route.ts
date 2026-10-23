@@ -37,6 +37,7 @@ import {
   callScreenFunction,
   readFunctionRequest,
   refusalOf,
+  pinnedReference,
   publicOperationOf,
 } from "./app-functions.ts";
 import type { FunctionAnswer, FunctionRequest } from "./app-functions.ts";
@@ -449,7 +450,10 @@ const noteKeyedAction = async (
       return;
     }
     release = await loadRelease(env, found.id, found.currentVersion);
-    path = publicOperationOf(release, call.reference);
+    path = publicOperationOf(
+      release,
+      await pinnedReference(env, release, call.reference)
+    );
   } catch {
     return;
   }

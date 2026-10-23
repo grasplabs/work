@@ -6,6 +6,7 @@ import type { AuditEvent } from "@grasp-os/shared/audit";
 import type { Role } from "@grasp-os/shared/roles";
 import { routerSecretHeader } from "@grasp-os/shared/router";
 import type { CoreApi } from "@grasp-os/shared/rpc";
+import type { AppVersionPush } from "@grasp-os/shared/screens";
 import type { EndedSession } from "@grasp-os/shared/sign-in";
 import { newWebSocketRpcSession } from "capnweb";
 import { createExecutionContext } from "cloudflare:test";
@@ -363,6 +364,57 @@ export const outcome = async (promise: Promise<unknown>): Promise<string> => {
       typeof error.code === "string"
       ? error.code
       : String(error);
+  }
+};
+
+/**
+ * Follows an App's current version as a page does (`screens.watchVersion`,
+ * through `follow`): each push in turn as core sends it (`next`), and the
+ * hold to let go of (`release`).
+ */
+export const followedVersion = async (
+  follow: (
+    onVersion: (push: AppVersionPush) => void
+  ) => Promise<{ release: () => Promise<void> }>
+) => {
+  const pushes: AppVersionPush[] = [];
+  let waiting: PromiseWithResolvers<AppVersionPush> | undefined;
+  const hold = await follow((push) => {
+    const waiter = waiting;
+    waiting = undefined;
+    if (waiter === undefined) {
+      pushes.push(push);
+    } else {
+      waiter.resolve(push);
+    }
+  });
+  return {
+    next: async (): Promise<AppVersionPush> => {
+      const queued = pushes.shift();
+      if (queued !== undefined) {
+        return queued;
+      }
+      waiting = Promise.withResolvers();
+      return await waiting.promise;
+    },
+    release: async () => {
+      await hold.release();
+    },
+  };
+};
+
+/**
+ * Follows an App's version through `follow` until core's first push, then
+ * lets go: refused as core refuses following it.
+ */
+export const firstVersion = async (
+  follow: Parameters<typeof followedVersion>[0]
+): Promise<AppVersionPush> => {
+  const followed = await followedVersion(follow);
+  try {
+    return await followed.next();
+  } finally {
+    await followed.release();
   }
 };
 

@@ -1,5 +1,7 @@
 import type { CoreConnection, SessionEnded } from "../core-connection.ts";
 import type { Session } from "../core.ts";
+import { VersionFeed } from "./app-versions.ts";
+import type { VersionListener } from "./app-versions.ts";
 import { CoreLink, retryingOn } from "./core-link.ts";
 
 // How an App frame reaches core: over the tab's one connection, the
@@ -19,6 +21,23 @@ import { CoreLink, retryingOn } from "./core-link.ts";
 
 type Ended = (why: SessionEnded) => void;
 
+/** Each tab connection's subscriptions to its Apps' versions. */
+const feeds = new WeakMap<CoreConnection, VersionFeed>();
+
+/** The version feed of `core`: one per connection, for all its frames. */
+const feedOf = (core: CoreConnection): VersionFeed => {
+  let feed = feeds.get(core);
+  if (feed === undefined) {
+    // Waits across reconnects for as long as the connection lasts.
+    const always = new AbortController().signal;
+    feed = new VersionFeed(
+      async () => await core.session(always, { patient: true })
+    );
+    feeds.set(core, feed);
+  }
+  return feed;
+};
+
 /** What a frame needs of its connection to core. */
 export interface FrameLink {
   /**
@@ -30,6 +49,12 @@ export interface FrameLink {
   person: () => Promise<string>;
   /** Runs `run` on the session, and again while it fails in a way that may pass. */
   retrying: <T>(run: (session: Session) => Promise<T>) => Promise<T>;
+  /**
+   * Has `listener` told of `app`'s current version, through the one
+   * subscription of it on the connection (app-versions.ts), until the
+   * returned function is called.
+   */
+  followVersion: (app: string, listener: VersionListener) => () => void;
 }
 
 /** A frame's place on its connection to core. */
@@ -67,6 +92,7 @@ export const tabLink = (core: CoreConnection, onEnded: Ended): Joined => {
       // Ending closes the connection, so a session is refused from then.
       retrying: async (run) =>
         await retryingOn(session, run, () => !left.signal.aborted),
+      followVersion: (app, listener) => feedOf(core).follow(app, listener),
     },
     end: (why) => {
       core.end(why);
