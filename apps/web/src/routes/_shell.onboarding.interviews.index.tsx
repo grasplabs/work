@@ -18,7 +18,7 @@ import { SettingsError } from "../settings/settings-parts.tsx";
 // three sides, the side in the address: where every team stands and what
 // can be done there, everyone by name, and the interviews one by one. All
 // from the snapshot Grasp's admin reads (core's admin-snapshot.ts), read
-// as the console reads it, as numbers: what anyone said is only in a
+// as the admin reads it, as numbers: what anyone said is only in a
 // transcript, read one at a time, on record (interviews.$person). The
 // company sees none of this: it gets numbers per team.
 

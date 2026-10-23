@@ -1,0 +1,138 @@
+/**
+ * A client's own Grasp as the admin reads and changes it (its Setup, and
+ * the overview's and Platform's live columns), behind the Access check
+ * every request passes (src/access.ts). The
+ * changes act as the verified staff member the request comes from, and
+ * answer a refusal as its code (`SettingsErrorCode`), which the page
+ * words; anything else fails.
+ */
+import { createServerFn } from "@tanstack/react-start";
+import { env } from "cloudflare:workers";
+import { z } from "zod";
+
+import { adminDatabase } from "../db/act.ts";
+import { rotateClientSecrets } from "../deploy/rotation.ts";
+import { adminReader } from "./admin.ts";
+import { applySettings } from "./apply.ts";
+import { clientGrid, defaultLiveOptions, gridLive } from "./grid.ts";
+import type { LiveStatus } from "./grid.ts";
+import {
+  ringInputSchema,
+  setRing,
+  setSignIn,
+  SettingsError,
+  signInInputSchema,
+} from "./settings.ts";
+import type { SettingsErrorCode } from "./settings.ts";
+import { getClientSetup } from "./setup.ts";
+
+const clientSchema = z.object({ clientId: z.string().min(1) });
+
+/** What a change answers: whether it changed anything, or why it was refused. */
+export type SettingsChange =
+  | { changed: boolean; refused: null }
+  | { changed: null; refused: SettingsErrorCode };
+
+/** Runs `task`, a refusal answered as its code. */
+const change = async (
+  task: () => Promise<boolean>
+): Promise<SettingsChange> => {
+  try {
+    return { changed: await task(), refused: null };
+  } catch (error) {
+    if (error instanceof SettingsError) {
+      return { changed: null, refused: error.code };
+    }
+    throw error;
+  }
+};
+
+/** Every client, as the grid shows it at once: what the admin recorded. */
+export const fetchClientGrid = createServerFn({ method: "GET" }).handler(
+  async () => await clientGrid(env)
+);
+
+/**
+ * Each active client's live columns, by id, read after the grid shows
+ * (`gridLive`): a few at a time, each within a deadline, kept a minute
+ * unless anything in them is unknown.
+ */
+export const fetchGridLive = createServerFn({ method: "GET" }).handler(
+  async () => await gridLive(env, new Date())
+);
+
+/**
+ * One active client's live columns, as the grid reads them (`gridLive`),
+ * for its Setup in the admin; null for a client that isn't active.
+ */
+export const fetchClientLive = createServerFn({ method: "GET" })
+  .validator(clientSchema)
+  .handler(async ({ data }): Promise<LiveStatus | null> => {
+    const live = await gridLive(
+      env,
+      new Date(),
+      defaultLiveOptions,
+      data.clientId
+    );
+    return live[data.clientId] ?? null;
+  });
+
+/**
+ * Every client's admin snapshot, as its core answers the verified staff
+ * member asking (whom its audit log records), or as not reachable since it
+ * last answered (`clientAdmins`). A POST, though it reads: it keeps when
+ * each core answered, and every core's audit log records the read, so it
+ * takes the same-origin check every change does (src/access.ts).
+ */
+export const fetchClientAdmins = createServerFn({ method: "POST" }).handler(
+  async ({ context }) => await adminReader(env, context.staff)()
+);
+
+/** A client's own Grasp as the admin runs it, for the admin's Setup; null for no such client. */
+export const fetchClientSetup = createServerFn({ method: "GET" })
+  .validator(clientSchema)
+  .handler(async ({ data }) => await getClientSetup(env, data.clientId));
+
+export const setRingFn = createServerFn({ method: "POST" })
+  .validator(ringInputSchema)
+  .handler(
+    async ({ data, context }) =>
+      await change(async () => await setRing(env, context.staff, data))
+  );
+
+/** Applies a client's settings now: a deploy of the release it runs, live at once. */
+export const applySettingsFn = createServerFn({ method: "POST" })
+  .validator(clientSchema)
+  .handler(
+    async ({ data, context }) =>
+      await change(async () => {
+        await applySettings(env, context.staff, data.clientId);
+        return true;
+      })
+  );
+
+export const setSignInFn = createServerFn({ method: "POST" })
+  .validator(signInInputSchema)
+  .handler(
+    async ({ data, context }) =>
+      await change(async () => await setSignIn(env, context.staff, data))
+  );
+
+/**
+ * Rotates a client's derived secrets (src/deploy/rotation.ts): changed
+ * false when its last rotation isn't live yet, or went live too recently.
+ */
+export const rotateSecretsFn = createServerFn({ method: "POST" })
+  .validator(clientSchema)
+  .handler(
+    async ({ data, context }) =>
+      await change(
+        async () =>
+          await rotateClientSecrets(
+            adminDatabase(env.DB),
+            context.staff,
+            data.clientId,
+            new Date()
+          )
+      )
+  );

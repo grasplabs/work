@@ -4,8 +4,8 @@ import { platformLimits } from "./platform-limits.ts";
 
 // A deployment's quota policy: the platform's limits (platform-limits.ts),
 // with whichever of them the deployment's operator lowered. Set by the
-// console as the `QUOTA_LIMITS` var and parsed by core with this schema,
-// which the console also checks before it deploys, so neither ever takes
+// admin as the `QUOTA_LIMITS` var and parsed by core with this schema,
+// which the admin also checks before it deploys, so neither ever takes
 // a value above the platform's: a limit is lowered here, and raised only
 // by a release that changes the platform's, with the evidence that takes.
 //

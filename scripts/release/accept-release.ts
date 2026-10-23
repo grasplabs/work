@@ -2,13 +2,13 @@
  * Staging's acceptance of a release deployed from its own bytes
  * (deploy-release.ts): core's `/health` on its workers.dev origin must
  * answer as the version that deploy just made live, to a request carrying
- * the router secret as the router sends it. The console's smoke check for
- * a client deploy (apps/console/src/deploy/router.ts) asks the same: so
+ * the router secret as the router sends it. The admin's smoke check for
+ * a client deploy (apps/admin/src/deploy/router.ts) asks the same: so
  * the version answering is the one deployed, and it has the secret the
  * router will send. Tries a few times, waiting longer between them: the
  * previous version can answer for a moment after a deploy.
  *
- * A release is published for the console only once this passes
+ * A release is published for the admin only once this passes
  * (publish-release in .github/workflows/ci.yml).
  *
  * Env: CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_API_TOKEN (for the account's

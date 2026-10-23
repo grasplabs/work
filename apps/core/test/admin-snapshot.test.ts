@@ -45,19 +45,19 @@ import {
 } from "./sign-in.ts";
 
 // Grasp's admin's read of a client (src/admin-snapshot.ts): only Grasp's
-// staff, through the console, read it, and what they read has no word
+// staff, through the admin, read it, and what they read has no word
 // anyone said in it. The ways it can fail, tried first:
 //
-// - Anyone but the console reading it: unsigned, signed with a made-up
-//   signature, with the console's key for another client or for another
+// - Anyone but the admin reading it: unsigned, signed with a made-up
+//   signature, with the admin's key for another client or for another
 //   purpose, sent long ago, too large, malformed, or not through the
 //   router.
-// - Someone who holds a credential of this client but not the console's
+// - Someone who holds a credential of this client but not the admin's
 //   key: a member's session, the company's admin's, a Grasp staff
 //   session, or an interview link.
 // - A read the company can't see in its audit log, or one served when the
 //   log can't take it.
-// - What someone said in their interview reaching the console.
+// - What someone said in their interview reaching the admin.
 // - Grasp reading on after the company's admin ended its staff access.
 
 const idp = mockIdp();
@@ -65,10 +65,10 @@ const idp = mockIdp();
 /** Words nobody else uses, to look for where they must not be. */
 const sentinel = "Periwinkle abacus under the harbour bridge";
 
-/** The Grasp staff member the console says is asking. */
+/** The Grasp staff member the admin says is asking. */
 const staffEmail = "ada.lovelace@grasp.test";
 
-/** `body`'s signature as the console makes it, with the key `secret` gives. */
+/** `body`'s signature as the admin makes it, with the key `secret` gives. */
 const signatureOf = async (
   body: string,
   secret = env.BETTER_AUTH_SECRET,
@@ -114,7 +114,7 @@ const ask = async (
   );
 };
 
-/** Asks as the console does: signed, now, for `staffEmail`. */
+/** Asks as the admin does: signed, now, for `staffEmail`. */
 const askAsConsole = async (coreEnv: Env = env): Promise<Response> => {
   const body = bodyAt();
   return await ask(body, { signature: await signatureOf(body), coreEnv });
@@ -250,11 +250,11 @@ describe("who reads the admin snapshot", () => {
         ask(fresh),
         ask(fresh, { signature: "0".repeat(64) }),
         ask(fresh, { signature: "not hex" }),
-        // The console's key for another client: another auth secret.
+        // The admin's key for another client: another auth secret.
         ask(fresh, {
           signature: await signatureOf(fresh, "another-client-auth-secret"),
         }),
-        // The console's key for the onboarding summary signs nothing here.
+        // The admin's key for the onboarding summary signs nothing here.
         ask(fresh, {
           signature: await signatureOf(
             fresh,
@@ -359,7 +359,7 @@ describe("the admin snapshot once the company ended Grasp's staff access", () =>
     });
     const [refused] = responses;
     const text = (await refused?.text()) ?? "";
-    // A window the console opens a moment after the company said stop:
+    // A window the admin opens a moment after the company said stop:
     // after the end, and not in the future.
     await scheduler.wait(5);
     const later = withSignIn({
@@ -664,7 +664,7 @@ const connectHubspot = async (by: Admin): Promise<string> => {
   return hubspot.id;
 };
 
-/** The snapshot as the console reads it, and its text as it came. */
+/** The snapshot as the admin reads it, and its text as it came. */
 const snapshotNow = async () => {
   const response = await askAsConsole();
   const text = await response.text();

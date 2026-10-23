@@ -23,7 +23,7 @@ import { eventTypeSchema } from "./workflows.ts";
  * The version of the interface connect serves core over the service
  * binding (its entrypoint's methods, and the calls and answers in this
  * file). A release's core and connect don't switch at once in a client
- * (the console deploys connect first, and a rollback restores core
+ * (the admin deploys connect first, and a rollback restores core
  * first), so a change a core of the release before couldn't call
  * correctly, or one that needs a connect of this release, is a new
  * version, with the range below moved to say which cores work with

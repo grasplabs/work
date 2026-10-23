@@ -74,7 +74,7 @@ import { onboardingStore } from "./store.ts";
 // this deployment (stephen-setup.ts), in every interview turn's context;
 // how Stephen and Claire are doing (interviewer-numbers.ts) and the AI the
 // onboarding used, as numbers; and the interviews by name: where everyone
-// stands (the admin's snapshot, as the console reads it), someone's own
+// stands (the admin's snapshot, as the admin reads it), someone's own
 // link to send by hand, the one reminder noted, a team asked in, and an
 // interview deleted because its person asked; and the organization, team
 // by team, and the list put right (organization.ts). Every read that names
@@ -274,7 +274,7 @@ export class OnboardingStaffRpc
   async interviews(): Promise<AdminSnapshot> {
     return await withPerson(this.#check, async (person) => {
       requireStaff(person);
-      // Only what the schema names leaves core, as for the console.
+      // Only what the schema names leaves core, as for the admin.
       const snapshot = adminSnapshotSchema.parse(
         await snapshotOf(this.#env, new Date().toISOString())
       );

@@ -17,7 +17,7 @@ import type { RestrictedEnv, WorkContext } from "./restricted.ts";
 // which models may take sensitive data, and what calls may cost.
 //
 // The rules are deployment config, part of the `MODEL_GATEWAY` var the
-// console sets, like the allowlist: they are what the client agreed to, so
+// admin sets, like the allowlist: they are what the client agreed to, so
 // no admin session can loosen them in the product. A config whose rules
 // don't parse refuses every call while they apply (models.ts), and is
 // never read while they don't.

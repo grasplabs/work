@@ -19,7 +19,7 @@ const client = {
 // A small company as core answers for it: two teams; Sales's lead finished
 // and its links went out, one of them talking now and one not invited yet;
 // Operations's lead has their link and opened it. The AI was used on two
-// days. Written as core sends it, and read as the console reads it.
+// days. Written as core sends it, and read as the admin reads it.
 const answer = {
   now: "2026-10-14T10:05:00Z",
   company: {
