@@ -191,5 +191,11 @@ peerDependencyRules:
 # jq-wasm's Workers entry imports its own, unmetered jq.wasm as a default;
 # the patch drops that import, so a bundle carries only the metered module
 # (packages/workflow-expressions/src/jq.wasm).
+#
+# vitest-pool-workers wraps each Durable Object class's prototype in one
+# more Proxy on every construction (0.23.0 too); with `isolate: false`, a
+# shard that constructs about 1,800 objects of one class overflows the
+# stack, and every file after fails (GRA-972). The patch wraps it once.
 patchedDependencies:
+  "@cloudflare/vitest-pool-workers@0.22.0": patches/@cloudflare__vitest-pool-workers@0.22.0.patch
   jq-wasm@3.0.0-jq-1.8.2: patches/jq-wasm@3.0.0-jq-1.8.2.patch
