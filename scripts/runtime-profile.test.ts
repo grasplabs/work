@@ -4,8 +4,8 @@
  * real configs: staging's deploy must say `cloudflare`, so its records carry
  * the right evidence; local dev and the on-prem smoke run on plain workerd
  * must say `workerd`; and core's wrangler.jsonc, which dev and tests read
- * too, must say nothing, so no unvouched run claims a limit. The console's
- * client deploys are covered by its deploy test (apps/console/test).
+ * too, must say nothing, so no unvouched run claims a limit. The admin's
+ * client deploys are covered by its deploy test (apps/admin/test).
  */
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -119,7 +119,7 @@ describe("the runtime profile each deployment says", () => {
       dev: wranglerVars(dev, "dev")?.SANDBOX_IN_PROCESS,
       deploy: wranglerVars(deploy, "deploy")?.SANDBOX_IN_PROCESS,
       wrangler: vars.SANDBOX_IN_PROCESS,
-      console: read("apps/console/src/deploy/core-config.ts").includes(
+      admin: read("apps/admin/src/deploy/core-config.ts").includes(
         "SANDBOX_IN_PROCESS"
       ),
       tests: read("apps/core/vite.config.ts").includes(
@@ -129,7 +129,7 @@ describe("the runtime profile each deployment says", () => {
       dev: "unbounded",
       deploy: undefined,
       wrangler: undefined,
-      console: false,
+      admin: false,
       tests: true,
     });
   });

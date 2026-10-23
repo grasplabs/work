@@ -1,3 +1,9 @@
+import {
+  transcriptionCloseCodes,
+  transcriptionFrameMaxBytes,
+  transcriptionPath,
+} from "@grasp-os/shared/voice";
+
 import type { Locale } from "../i18n.ts";
 import { pcmBytes, transcriptionRate } from "./pcm.ts";
 
@@ -14,10 +20,6 @@ import { pcmBytes, transcriptionRate } from "./pcm.ts";
 // line, or when a stretch's words don't come in time, `end` gives nothing,
 // and the ear has the stretch written down from its recording.
 
-/** Where the onboarding's pages open a live transcription (`transcriptionPath` in `@grasp-os/shared/voice`). */
-const transcriptionPath = "/api/transcription";
-/** The most bytes one audio frame may hold. */
-const frameMaxBytes = 32 * 1024;
 /** The upstream closes on a stretch shorter than 0.3 seconds: a shorter one is filled up with silence to this first, in seconds. */
 const leastSeconds = 0.4;
 /** How long the words of a closed stretch may take, in ms, before its recording is written down instead. */
@@ -29,8 +31,6 @@ const refusedAgainMs = 30_000;
 const droppedAgainMs = 2000;
 /** How long the line may take to say it listens, in ms. */
 const readyMs = 10_000;
-/** The close code core refuses with: a new line would only meet it again soon. */
-const refusedCode = 1008;
 
 /** What a live line is opened with. */
 export interface LiveLineOptions {
@@ -115,8 +115,8 @@ export const openLiveLine = (options: LiveLineOptions): LiveLine => {
     sent += sound.length;
     const bytes = pcmBytes(sound);
     try {
-      for (let at = 0; at < bytes.length; at += frameMaxBytes) {
-        socket.send(bytes.subarray(at, at + frameMaxBytes));
+      for (let at = 0; at < bytes.length; at += transcriptionFrameMaxBytes) {
+        socket.send(bytes.subarray(at, at + transcriptionFrameMaxBytes));
       }
     } catch {
       // Lost: the close says so.
@@ -209,7 +209,8 @@ export const openLiveLine = (options: LiveLineOptions): LiveLine => {
     });
     mine.addEventListener("close", (event) => {
       if (socket === mine) {
-        lost(event.code === refusedCode);
+        // Refused: a new line would only meet the same soon.
+        lost(event.code === transcriptionCloseCodes.refused);
       }
     });
     waiting = window.setTimeout(() => {

@@ -572,9 +572,17 @@ describe("the work as drawn", () => {
     // Told two ways and nobody can say why: it waits until somebody can.
     { why: "conflict", told: ["lisa", "tim", "bram"], state: "blocked" },
     { why: "", told: ["lisa", "tim"], state: "mapping" },
+    // Counted as known by hand by Grasp: that holds, unless nobody can say why.
+    { why: "", told: ["lisa", "tim"], counted: true, state: "complete" },
+    {
+      why: "conflict",
+      told: ["lisa", "tim", "bram"],
+      counted: true,
+      state: "blocked",
+    },
   ])(
     "is known as $state when $told.length of three told it, a step told two ways for '$why'",
-    ({ why, told, state }) => {
+    ({ why, told, counted = false, state }) => {
       const drawn = drawnOf(
         {
           steps: [
@@ -604,6 +612,7 @@ describe("the work as drawn", () => {
         told,
         doers: ["lisa", "tim", "bram"],
         lead: null,
+        counted,
       });
       expect(known.state).toBe(state);
     }

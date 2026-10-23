@@ -10,6 +10,7 @@ import {
 } from "@tanstack/react-router";
 import {
   ActivityIcon,
+  Building2Icon,
   FileSignatureIcon,
   HistoryIcon,
   LayoutDashboardIcon,
@@ -19,6 +20,7 @@ import {
   SparklesIcon,
   UserRoundIcon,
   UsersRoundIcon,
+  WorkflowIcon,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -44,10 +46,12 @@ type AreaPath =
   | "/onboarding/kickoff"
   | "/onboarding/agreements"
   | "/onboarding/stephen"
+  | "/onboarding/organization"
   | "/onboarding/interviewers"
   | "/onboarding/ai-use"
   | "/onboarding/open"
   | "/onboarding/interviews"
+  | "/onboarding/workflows"
   | "/onboarding/notes"
   | "/onboarding/log";
 
@@ -81,6 +85,14 @@ const sections: readonly AreaSection[] = [
     icon: UserRoundIcon,
   },
   {
+    to: "/onboarding/organization",
+    label: msg({
+      message: "Organization",
+      context: "onboarding area section",
+    }),
+    icon: Building2Icon,
+  },
+  {
     to: "/onboarding/interviewers",
     label: msg({ message: "Interviewers", context: "onboarding area section" }),
     icon: ActivityIcon,
@@ -99,6 +111,11 @@ const sections: readonly AreaSection[] = [
     to: "/onboarding/interviews",
     label: msg({ message: "Interviews", context: "onboarding area section" }),
     icon: UsersRoundIcon,
+  },
+  {
+    to: "/onboarding/workflows",
+    label: msg({ message: "Workflows", context: "onboarding area section" }),
+    icon: WorkflowIcon,
   },
   {
     to: "/onboarding/notes",

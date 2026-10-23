@@ -116,7 +116,7 @@ const invisible = /[\p{Cc}\p{Cf}]/gu;
 const spaces = /\s+/gu;
 
 /** Text as kept: without control or format characters, on one line, trimmed and cut. */
-const textOf = (text: string | null | undefined): string =>
+export const textOf = (text: string | null | undefined): string =>
   (text ?? "")
     .replaceAll(spaces, " ")
     .replaceAll(invisible, "")
@@ -127,7 +127,7 @@ const textOf = (text: string | null | undefined): string =>
 const emailSchema = z.email().max(directoryLimits.emailLength);
 
 /** An email address as kept, lower case; empty when it isn't one. */
-const emailOf = (email: string | null | undefined): string => {
+export const emailOf = (email: string | null | undefined): string => {
   const lower = (email ?? "").trim().toLowerCase();
   return emailSchema.safeParse(lower).success ? lower : "";
 };

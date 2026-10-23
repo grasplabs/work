@@ -295,7 +295,7 @@ const gatewayVar = (env: ModelsEnv): unknown =>
 
 /**
  * The deployment's model gateway config: deployment config, set by the
- * console as the `MODEL_GATEWAY` var, never an in-product setting, so an
+ * admin as the `MODEL_GATEWAY` var, never an in-product setting, so an
  * admin session can't allow a model the client didn't agree to; the
  * default config while none is set. One that doesn't parse counts as none
  * at all: `undefined`, and every call fails closed.
@@ -693,7 +693,7 @@ const gatewayHeaders = (call: Session): ProviderHeaders => ({
   // The gateway logs metadata, never prompts or answers.
   "cf-aig-collect-log-payload": "false",
   // Never an answer from the gateway's cache, whatever the gateway is set
-  // to (one the console adopted keeps its settings): a cached answer is
+  // to (one the admin adopted keeps its settings): a cached answer is
   // one person's, and would be served to another.
   "cf-aig-skip-cache": "true",
   // So the gateway's log can be searched by why and for what kind of
@@ -3433,6 +3433,53 @@ const recordSpeech = async (
       ledger,
     })
   );
+};
+
+/** How the gateway reaches the voice provider, for a request of one's own. */
+export interface VoiceGatewayRoute {
+  /** `https://workers-binding.ai/ai-gateway/gateways/<gateway>/<provider>`. */
+  base: string;
+  transport: FetchFunction;
+  /** The gateway's own headers: its token where one is set. Never logged. */
+  headers: Record<string, string>;
+}
+
+/**
+ * Where live transcription (transcription.ts) reaches ElevenLabs at the
+ * deployment's gateway: the path speech takes (`voice.provider`), over
+ * the AI binding, with the gateway's token where one is set
+ * (`speechRequest`). `undefined`, so nothing is sent, where the config
+ * doesn't parse, allows no voice model (the client agreed to none), there
+ * is no AI binding (plain workerd), or the deployment keeps every call in
+ * the EU and ElevenLabs would be reached at its native host.
+ */
+export const voiceGatewayRoute = (
+  env: ModelsEnv
+): VoiceGatewayRoute | undefined => {
+  const config = modelGatewayConfig(env);
+  if (
+    config === undefined ||
+    typeof env.AI?.fetch !== "function" ||
+    !config.models.some((ref) => parseVoiceRef(ref) !== undefined)
+  ) {
+    return undefined;
+  }
+  const provider = config.voice?.provider ?? nativeVoiceProvider;
+  if (deploymentStaysInEu(env) && provider === nativeVoiceProvider) {
+    return undefined;
+  }
+  const token = env.AI_GATEWAY_TOKEN;
+  return {
+    base: `https://workers-binding.ai/ai-gateway/gateways/${config.gateway}/${provider}`,
+    transport: createAiBindingFetch(env.AI),
+    headers: {
+      "cf-aig-authorization": `Bearer ${
+        token === undefined || token === ""
+          ? CLOUDFLARE_GATEWAY_BINDING_AUTH_SENTINEL
+          : token
+      }`,
+    },
+  };
 };
 
 /**

@@ -30,7 +30,7 @@ import { SettingsError, SettingsSection } from "../settings/settings-parts.tsx";
 // happened (the store's `meter`): in all, by what it was for (reading,
 // interviews, drawing) and the model that did it, and day by day. In
 // calls, tokens and minutes of voice; what Grasp pays for them is the
-// console's.
+// admin's.
 
 /** Minutes of voice, from seconds; a dash for none. */
 const voiceOf = (used: Used): string =>

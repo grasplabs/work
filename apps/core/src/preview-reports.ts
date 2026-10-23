@@ -90,10 +90,21 @@ export const draftSealFailures: ReadonlySet<string> = new Set([
  */
 export const functionProblem = (
   request: unknown,
-  result: OperationResult
+  result: OperationResult,
+  /** What the draft's code threw, when the call hid it (`draftFailure`). */
+  thrown?: string
 ): PreviewProblem | undefined => {
   if (result.ok) {
     return undefined;
+  }
+  // The draft's own code threw: what it said, as data, for its check.
+  if (result.error.code === "internal.unexpected" && thrown !== undefined) {
+    return {
+      source: "server",
+      at: functionOf(request),
+      kind: "failed",
+      message: thrown.slice(0, maxMessage),
+    };
   }
   const category = categoryOf(result.error.code);
   if (

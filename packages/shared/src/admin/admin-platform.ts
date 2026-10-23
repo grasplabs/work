@@ -1,9 +1,9 @@
 /**
- * Each company's own Grasp as the console runs it, and how a release reaches every company: the
- * same things the console (`apps/console`) keeps, in the words the admin says them in. A company
- * is a client of the console: its own Cloudflare account in the EU, made and set up by a
- * provisioning run, then kept on a release by deploys, ring by ring. Pure: the admin only says
- * what this works out, from what the console holds once the admin reads it.
+ * Each company's own Grasp as the admin runs it, and how a release reaches every company: the
+ * records the admin (`apps/admin`) keeps, in the words its pages say them in. A company is a
+ * client of the admin: its own Cloudflare account in the EU, made and set up by a provisioning
+ * run, then kept on a release by deploys, ring by ring. Pure: the pages only say what this works
+ * out, from the records the admin reads.
  */
 
 /** A provisioning run, in order: the account made or adopted, the client recorded, Workers Paid confirmed by staff, the first deploy, and the client active. */
@@ -30,14 +30,14 @@ export type DeployStep = (typeof DEPLOY_STEPS)[number];
 export const RINGS = [0, 1, 2] as const;
 export type Ring = (typeof RINGS)[number];
 
-/** The Workers the console deploys into a company's account. */
+/** The Workers the admin deploys into a company's account. */
 export type WorkerName = "core" | "connect";
 
 export interface Release {
   /** As CI names it: `r<run>-<commit>`. */
   id: string;
   commit: string;
-  /** The day it was imported into the console. */
+  /** The day it was imported into the admin. */
   on: string;
   /** What changed, a line each, as the release says it. */
   changes: string[];
@@ -67,7 +67,7 @@ export interface PlatformWorker {
   /** The script's name in the company's account. */
   script: string;
   release: string;
-  /** The version the console last made live. */
+  /** The version the admin last made live. */
   version: string;
   deployed: string;
   /** What the account runs now, as Cloudflare says: one version, or a split between two. None when unknown. */
@@ -91,7 +91,7 @@ export interface UsageDay {
 }
 
 export interface Platform {
-  /** The client's slug in the console, which is also its address. */
+  /** The client's slug in the admin, which is also its address. */
   client: string;
   status: "none" | "provisioning" | "active" | "offboarded";
   address: string;
@@ -129,7 +129,7 @@ export interface Platform {
     aiUsdMonth: number;
     days: UsageDay[];
   };
-  /** The client in the console, and the account in Cloudflare. */
+  /** The client in the admin, and the account in Cloudflare. */
   url: string | null;
 }
 
@@ -160,7 +160,7 @@ export interface Rollout {
   targets: RolloutTarget[];
 }
 
-/** Whether what runs is what the console made live: one version, another, two at once, or the release it is pinned off. */
+/** Whether what runs is what the admin made live: one version, another, two at once, or the release it is pinned off. */
 export type Drift = "in_sync" | "drifted" | "split" | "unknown" | "off_pin";
 
 /** Whether staff pinned it to a release. */

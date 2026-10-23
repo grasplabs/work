@@ -44,6 +44,13 @@ export const directoryClient = clients.microsoftDirectory;
  */
 export const directoryControlUrl = "https://graph-control.test/directory";
 
+/**
+ * Where tests set what HiBob holds, for the HR platform's reads: POST
+ * `{ employees }` as its people search answers them, and `{ key }`, the
+ * one service user it takes, as `<id>:<token>`.
+ */
+export const hibobControlUrl = "https://hibob-control.test/people";
+
 /** What the directory's Entra app is granted, as Entra's token answer says. */
 export const directoryGranted = "openid profile email User.Read User.Read.All";
 
@@ -148,6 +155,7 @@ const losesAnswer = (mailbox) => {
 const npm = (${npmRegistryFake.toString()})();
 const landscape = { grants: [], apps: [], people: [], throttle: null, failing: false };
 const directory = { users: [] };
+const hibob = { key: null, employees: [] };
 /** Graph's users, as the directory's reads ask for them, a page at a time. */
 const directoryGraph = (url) => {
   const top = Number(url.searchParams.get("$top") ?? "100");
@@ -244,6 +252,17 @@ export default {
     if (request.method === "POST" && url.href === ${JSON.stringify(directoryControlUrl)}) {
       Object.assign(directory, await request.json());
       return new Response(null, { status: 204 });
+    }
+    if (request.method === "POST" && url.href === ${JSON.stringify(hibobControlUrl)}) {
+      Object.assign(hibob, await request.json());
+      return new Response(null, { status: 204 });
+    }
+    if (url.hostname === "api.hibob.com" && request.method === "POST" && url.pathname === "/v1/people/search") {
+      const authorization = request.headers.get("authorization") ?? "";
+      if (hibob.key === null || authorization !== "Basic " + btoa(hibob.key)) {
+        return Response.json({ error: "Unauthorized" }, { status: 401 });
+      }
+      return Response.json({ employees: hibob.employees });
     }
     if (request.method === "POST" && url.href === ${JSON.stringify(documentsControlUrl)}) {
       Object.assign(documents, await request.json());
