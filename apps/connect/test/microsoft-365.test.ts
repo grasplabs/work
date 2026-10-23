@@ -967,6 +967,19 @@ describe("the Microsoft 365 connector's To Do tools", () => {
 
   it("find a task whose answer was lost by the tag it carries, and never make it twice", async () => {
     const connection = await connected();
+    // Older tasks fill Graph's first page, so the lost one is on a later
+    // page.
+    await Promise.all(
+      ["one", "two", "three"].map(
+        async (n) =>
+          await todo(
+            connection,
+            "todo.create",
+            { ...followUp, title: `Earlier follow-up ${n}` },
+            `run-5:earlier-${n}`
+          )
+      )
+    );
     graph.loseWriteAnswer();
     await expect(
       outcome(
@@ -992,10 +1005,16 @@ describe("the Microsoft 365 connector's To Do tools", () => {
       todo(connection, "todo.create", followUp, "run-5:follow-up")
     ).resolves.toStrictEqual(found);
     expect(found).toMatchObject({ task: { title: followUp.title } });
-    expect(graph.writesDone()).toBe(1);
-    await expect(
-      todo(connection, "todo.tasks", { list: todoListIds.tasks })
-    ).resolves.toMatchObject({ tasks: [{ id: taskIdOf(found) }] });
+    // The three earlier tasks and the lost one, each made once.
+    expect(graph.writesDone()).toBe(4);
+    const { tasks } = z
+      .object({
+        tasks: z.array(z.object({ id: z.string(), title: z.string() })),
+      })
+      .parse(await todo(connection, "todo.tasks", { list: todoListIds.tasks }));
+    expect(
+      tasks.filter(({ title }) => title === followUp.title).map(({ id }) => id)
+    ).toStrictEqual([taskIdOf(found)]);
   });
 });
 

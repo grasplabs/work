@@ -219,25 +219,67 @@ const createOutput = z.strictObject({
   task: taskSchema,
 });
 
+/** A task with the effect tag it carries, if Graph expanded it. */
+const graphTaggedTask = graphTask.extend({
+  singleValueExtendedProperties: z
+    .array(z.object({ id: z.string(), value: z.string().nullish() }))
+    .nullish(),
+});
+
+/** Tasks Graph is asked for per page while a lost task is looked for. */
+const effectPageSize = 50;
+
+/**
+ * Pages of a list looked through for a lost task before giving up: on a
+ * longer list the call's outcome stays unknown rather than risk making a
+ * second task.
+ */
+const effectPages = 40;
+
 /**
  * The task in the person's list that a call with effect key `key` made, if
- * there is one. The key is 64 hex characters (connect derives it, the kit
- * checks it), so it can't break out of the filter's string literal.
+ * there is one. Graph reads a To Do task's extended property only by
+ * expanding it (the `singleValueExtendedProperties/Any(...)` filter that
+ * mail and events take is reported as an unsupported query on To Do), so
+ * the list is read a page at a time with the tag expanded, and matched
+ * here.
  */
 const findByEffect = async (
   mailbox: string,
   list: string,
   key: string
 ): Promise<GraphTask | undefined> => {
-  const { value } = await graphJson(
-    graphUrl(tasksPath(mailbox, list), {
-      $filter: `singleValueExtendedProperties/Any(ep: ep/id eq '${effectPropertyId}' and ep/value eq '${key}')`,
-      $select: taskFields,
-      $top: "1",
-    }),
-    pageOf(graphTask)
+  let page: string | undefined;
+  for (let pages = 0; pages < effectPages; pages += 1) {
+    // One page after another: each names the next.
+    // oxlint-disable-next-line no-await-in-loop -- sequential pages
+    const { value, "@odata.nextLink": nextLink } = await graphJson(
+      atPage(
+        graphUrl(tasksPath(mailbox, list), {
+          $select: taskFields,
+          $top: String(effectPageSize),
+          $expand: `singleValueExtendedProperties($filter=id eq '${effectPropertyId}')`,
+        }),
+        page
+      ),
+      pageOf(graphTaggedTask)
+    );
+    const found = value.find(
+      (task) =>
+        task.singleValueExtendedProperties?.some(
+          (property) => property.value === key
+        ) === true
+    );
+    const next = nextPageOf(nextLink);
+    if (found !== undefined || next === null) {
+      return found;
+    }
+    page = next;
+  }
+  throw new ToolError(
+    "This To Do list is too long to look through for the task",
+    { code: "failed" }
   );
-  return value[0];
 };
 
 const createTask = defineTool({

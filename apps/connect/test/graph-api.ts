@@ -251,6 +251,38 @@ const taskAnswer = ({ tag: _tag, ...task }: TodoTask) => ({
   ...task,
 });
 
+/** The `$expand` that reads a task's effect tag, as Graph documents it. */
+const tagExpansion = `singleValueExtendedProperties($filter=id eq '${effectPropertyId}')`;
+
+/**
+ * Graph pages a list's tasks with their tag expanded by two, fewer than a
+ * lookup asks for, as Graph may: a lookup must follow the next page.
+ */
+const taggedTaskPageSize = 2;
+
+/** A page of tasks with their effect tag expanded, from `$skip`. */
+const taggedTaskPage = (tasks: TodoTask[], skip: string | null) => {
+  const from = Number(skip ?? "0");
+  const to = from + taggedTaskPageSize;
+  return {
+    value: tasks.slice(from, to).map((task) => ({
+      ...taskAnswer(task),
+      ...(task.tag === undefined
+        ? {}
+        : {
+            singleValueExtendedProperties: [
+              { id: effectPropertyId, value: task.tag },
+            ],
+          }),
+    })),
+    ...(to < tasks.length
+      ? {
+          "@odata.nextLink": `https://graph.microsoft.com/v1.0/me/todo/lists/tasks?%24skip=${to}`,
+        }
+      : {}),
+  };
+};
+
 /** The effect key a task Graph is asked to make is tagged with, if any. */
 const tagOf = (made: unknown): string | undefined =>
   taggedSchema
@@ -302,14 +334,16 @@ const todoRoutes = (
         }
         const tasks = tasksOf(owner, list);
         const filter = query.get("$filter") ?? "";
+        // To Do refuses the extended property filter mail and events take.
         if (filter.startsWith("singleValueExtendedProperties/")) {
-          const asked = keyFilter.exec(filter)?.groups;
-          if (asked?.id !== effectPropertyId) {
+          return json({ error: { code: "Request_UnsupportedQuery" } }, 400);
+        }
+        const expand = query.get("$expand");
+        if (expand !== null) {
+          if (expand !== tagExpansion) {
             return json({ error: { code: "BadRequest" } }, 400);
           }
-          return json({
-            value: tasks.filter(({ tag }) => tag === asked.key).map(taskAnswer),
-          });
+          return json(taggedTaskPage(tasks, query.get("$skip")));
         }
         const openOnly = filter === "status ne 'completed'";
         return json({
