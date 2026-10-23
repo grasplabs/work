@@ -168,6 +168,7 @@ const core = "apps/core/src/";
 const connect = "apps/connect/src/";
 const workerflow = "packages/workerflow/src/";
 const chat = "packages/chat/src/";
+const brain = "packages/brain/src/";
 
 const exported = (owner: string, note?: string): StateEntry => ({
   owner,
@@ -379,7 +380,7 @@ const coreDb: D1State = {
     brain_records: exported(`${core}brain-records.ts`, brainPending),
     brain_gap_states: exported(`${core}brain-gaps.ts`),
     // Knowledge's host tables (src/db/core/schema.ts).
-    collection_teams: exported(`${core}knowledge/collections.ts`),
+    collection_teams: exported(`${core}knowledge/collection-rules.ts`),
     app_entries: cache(`${core}knowledge/apps-collection.ts`),
     uploads: exported(`${core}knowledge/uploads.ts`, brainPending),
     upload_cleanups: exported(
@@ -397,47 +398,37 @@ const knowledgeDb: D1State = {
   worker: "core",
   binding: "KNOWLEDGE",
   database: "grasp-os-knowledge",
-  schema: `${core}db/knowledge`,
+  schema: `${brain}db`,
   tables: {
-    collections: exported(`${core}knowledge/collections.ts`, brainPending),
-    collection_teams: exported(`${core}knowledge/collections.ts`),
-    documents: exported(`${core}knowledge/documents.ts`, brainPending),
-    versions: exported(`${core}knowledge/documents.ts`, brainPending),
+    collections: exported(`${brain}collections.ts`, brainPending),
+    documents: exported(`${brain}documents.ts`, brainPending),
+    versions: exported(`${brain}documents.ts`, brainPending),
     sections: cache(
-      `${core}knowledge/documents.ts`,
+      `${brain}documents.ts`,
       "The current version's text, split by heading."
     ),
-    links: cache(`${core}knowledge/documents.ts`),
-    search_rows: cache(`${core}knowledge/search.ts`, "Search projection."),
-    search_words: cache(`${core}knowledge/search.ts`, "Search projection."),
-    search_trigrams: cache(`${core}knowledge/search.ts`, "Search projection."),
-    search_rebuilds: cache(`${core}knowledge/search-erasure.ts`),
-    app_entries: cache(`${core}knowledge/apps-collection.ts`),
-    uploads: exported(`${core}knowledge/uploads.ts`, brainPending),
-    upload_cleanups: exported(
-      `${core}knowledge/uploads.ts`,
-      "Deletions still owed, purges' included."
-    ),
-    knowledge_signal_computations: cache(`${core}knowledge/signals.ts`),
-    knowledge_signals: cache(`${core}knowledge/signals.ts`),
-    knowledge_signal_dismissals: exported(`${core}knowledge/signals.ts`),
-    brain_payloads: exported(`${core}knowledge/payloads.ts`, brainPending),
+    links: cache(`${brain}documents.ts`),
+    search_rows: cache(`${brain}search.ts`, "Search projection."),
+    search_words: cache(`${brain}search.ts`, "Search projection."),
+    search_trigrams: cache(`${brain}search.ts`, "Search projection."),
+    search_rebuilds: cache(`${brain}search-erasure.ts`),
+    brain_payloads: exported(`${brain}payloads.ts`, brainPending),
     brain_payload_releases: transient(
-      `${core}knowledge/payloads.ts`,
+      `${brain}payloads.ts`,
       "Empty between batches."
     ),
-    brain_memories: exported(`${core}knowledge/memories.ts`, brainPending),
+    brain_memories: exported(`${brain}memories.ts`, brainPending),
     brain_receipts: transient(
-      `${core}knowledge/memories.ts`,
+      `${brain}memories.ts`,
       "Command receipts for retries, swept a day after the command."
     ),
-    audit_outbox: exported(
-      `${core}audit-outbox.ts`,
-      "Made by the database's migrations, outside its Drizzle schema."
+    audit_outbox: transient(
+      `${brain}audit.ts`,
+      "Drained into core's audit log (src/audit-outbox.ts)."
     ),
     audit_outbox_rejected: exported(
       `${core}audit-outbox.ts`,
-      "Made by the database's migrations, outside its Drizzle schema."
+      "Rows core's drain couldn't append, kept for someone to look at."
     ),
   },
 };
@@ -853,7 +844,7 @@ const brainObjects: R2State = {
   bucket: "grasp-os-brain-objects",
   prefixes: {
     "payloads/": exported(
-      `${core}knowledge/payloads.ts`,
+      `${brain}payloads.ts`,
       `Knowledge version texts by SHA-256, each named by its row in brain_payloads. ${brainPending}`
     ),
   },

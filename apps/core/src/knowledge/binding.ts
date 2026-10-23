@@ -1,4 +1,13 @@
 import type { MemoryPack } from "@grasp-os/brain/contract";
+import {
+  backlinks,
+  getDocument,
+  history,
+  listDocuments,
+} from "@grasp-os/brain/documents";
+import { recall } from "@grasp-os/brain/recall";
+import { search } from "@grasp-os/brain/search";
+import { follow, read } from "@grasp-os/brain/tools";
 import type { CollectionId, PermissionId } from "@grasp-os/shared/ids";
 import type {
   BacklinkPage,
@@ -16,11 +25,7 @@ import { WorkerEntrypoint } from "cloudflare:workers";
 import { forSandbox } from "../bindings.ts";
 import type { WorkContext } from "../restricted.ts";
 import type { Reader } from "./access.ts";
-import { backlinks, getDocument, history, listDocuments } from "./documents.ts";
 import { brainOf } from "./ports.ts";
-import { recall } from "./recall.ts";
-import { search } from "./search.ts";
-import { follow, read } from "./tools.ts";
 
 /** A collection permission, as a stub holds it, and where it works. */
 export interface CollectionGrant {

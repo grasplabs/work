@@ -1,3 +1,4 @@
+import { ensureCollection } from "@grasp-os/brain/collections";
 import { actorOf } from "@grasp-os/shared/audit";
 import { collectionIdSchema } from "@grasp-os/shared/ids";
 import type { SessionApi } from "@grasp-os/shared/rpc";
@@ -5,7 +6,6 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { mayRead } from "../src/knowledge/access.ts";
-import { ensureCollection } from "../src/knowledge/collections.ts";
 import { brainOf } from "../src/knowledge/ports.ts";
 import { mockIdp } from "./idp.ts";
 import { signedInApi } from "./sign-in.ts";

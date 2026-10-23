@@ -1,3 +1,9 @@
+import { ensureCollection } from "@grasp-os/brain/collections";
+import type { CollectionRow } from "@grasp-os/brain/collections";
+import { writeVersion } from "@grasp-os/brain/documents";
+import type { Writer } from "@grasp-os/brain/documents";
+import type { ErasedDocument, OnErase } from "@grasp-os/brain/purge";
+import { brainPayloads, documents, versions } from "@grasp-os/brain/schema";
 import type { AuditActor } from "@grasp-os/shared/audit";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { appIdSchema } from "@grasp-os/shared/ids";
@@ -9,15 +15,9 @@ import { stringify } from "yaml";
 
 import { versionFiles } from "../apps.ts";
 import { appEntries, apps } from "../db/core/schema.ts";
-import { brainPayloads, documents, versions } from "../db/knowledge/schema.ts";
 import { appEntryPath, appOfEntry, appsCollectionId } from "./app-entries.ts";
-import { ensureCollection } from "./collections.ts";
-import type { CollectionRow } from "./collections.ts";
-import { writeVersion } from "./documents.ts";
-import type { Writer } from "./documents.ts";
 import { appMemoryPath } from "./memory-files.ts";
 import { brainOf } from "./ports.ts";
-import type { ErasedDocument, OnErase } from "./purge.ts";
 
 // The Apps collection: one entry per App, its AGENTS.md at its current
 // version, with its name and description, so people and agents find the

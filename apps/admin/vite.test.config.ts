@@ -16,11 +16,11 @@ const migrations = await readD1Migrations(
 );
 
 /**
- * Core's Knowledge migrations as their files hold them, for the test that
+ * The Brain's migrations (core's Knowledge database) as their files hold them, for the test that
  * applies real migrations through the admin's client (FTS5 tables,
  * triggers, comments).
  */
-const knowledgeMigrationsDir = `${import.meta.dirname}/../core/src/db/knowledge/migrations`;
+const knowledgeMigrationsDir = `${import.meta.dirname}/../../packages/brain/src/db/migrations`;
 const knowledgeMigrationFiles = readdirSync(knowledgeMigrationsDir)
   .filter((name) => name.endsWith(".sql"))
   .toSorted()

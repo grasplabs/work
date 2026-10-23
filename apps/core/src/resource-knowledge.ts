@@ -1,3 +1,6 @@
+import { documents } from "@grasp-os/brain/schema";
+import { search } from "@grasp-os/brain/search";
+import { read } from "@grasp-os/brain/tools";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { collectionIdSchema, permissionIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, CollectionId, PermissionId } from "@grasp-os/shared/ids";
@@ -11,11 +14,8 @@ import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { permissions } from "./db/core/schema.ts";
-import { documents } from "./db/knowledge/schema.ts";
 import { readAsDelegate } from "./knowledge/binding.ts";
 import { brainOf } from "./knowledge/ports.ts";
-import { search } from "./knowledge/search.ts";
-import { read } from "./knowledge/tools.ts";
 import type {
   BindingCaller,
   DeclarationOf,

@@ -1,12 +1,12 @@
 import type { MemoryPack, RecallInput } from "@grasp-os/brain/contract";
+import { recall } from "@grasp-os/brain/recall";
+import { d1BrainStore } from "@grasp-os/brain/recall-store";
 import type { KnowledgeApi, KnowledgeTools } from "@grasp-os/shared/knowledge";
 import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { brainOf } from "../src/knowledge/ports.ts";
-import { d1BrainStore } from "../src/knowledge/recall-store.ts";
-import { recall } from "../src/knowledge/recall.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { actingFor, collectionIn, envOf, knowledgeIn } from "./contexts.ts";
