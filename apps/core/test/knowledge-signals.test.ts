@@ -185,7 +185,7 @@ const computedOn = async (day: Date, action?: string): Promise<number> => {
 
 /** A claim of `day`'s computation, started `ago` before `at`, unfinished. */
 const seedClaim = async (day: Date, at: Date, ago: number): Promise<void> => {
-  await env.KNOWLEDGE.prepare(
+  await env.DB.prepare(
     "INSERT INTO knowledge_signal_computations (id, day, started_at) VALUES (?, ?, ?)"
   )
     .bind(
@@ -197,8 +197,8 @@ const seedClaim = async (day: Date, at: Date, ago: number): Promise<void> => {
 };
 
 /**
- * Knowledge's database, running `first` once, just before the first batch
- * with a statement that starts with `statement`.
+ * Core's database, where the signals are, running `first` once, just
+ * before the first batch with a statement that starts with `statement`.
  */
 const racingSignals = (
   statement: string,
@@ -206,7 +206,7 @@ const racingSignals = (
 ): D1Database => {
   let writing = false;
   let raced = false;
-  return new Proxy(env.KNOWLEDGE, {
+  return new Proxy(env.DB, {
     get: (target, property) => {
       if (property === "prepare") {
         return (query: string) => {
@@ -656,7 +656,7 @@ describe("Knowledge usage signals", () => {
       }
     );
 
-    await refreshDailySignals({ ...env, KNOWLEDGE: racing }, nextDay());
+    await refreshDailySignals({ ...env, DB: racing }, nextDay());
 
     expect({
       during,
@@ -692,7 +692,7 @@ describe("Knowledge usage signals", () => {
       }
     );
 
-    await outcome(refreshDailySignals({ ...env, KNOWLEDGE: racing }, day));
+    await outcome(refreshDailySignals({ ...env, DB: racing }, day));
 
     expect({
       signals: questions(await signalsOf(owner, collectionId)),
@@ -720,11 +720,11 @@ describe("Knowledge usage signals", () => {
     );
     await refreshDailySignals(env, nextDay());
     // What a reader that picked the latest computation reads of it.
-    const picked = await env.KNOWLEDGE.prepare(
+    const picked = await env.DB.prepare(
       "SELECT id FROM knowledge_signal_computations WHERE finished_at IS NOT NULL ORDER BY started_at DESC, id DESC LIMIT 1"
     ).first<{ id: string }>();
     const read = async () => {
-      const { results } = await env.KNOWLEDGE.prepare(
+      const { results } = await env.DB.prepare(
         "SELECT kind, subject, value FROM knowledge_signals WHERE computation = ? AND collection_id = ? ORDER BY kind, subject"
       )
         .bind(picked?.id ?? "", collectionId)
@@ -919,14 +919,20 @@ describe("Knowledge usage signals", () => {
       emptySearch("someone", "key-a", collectionId)
     );
 
-    const queries = await recordedQueries(async () => {
-      await refreshDailySignals(env, day);
-      const { signals } = await owner.api.knowledgeSignals.list();
-      await owner.api.knowledgeSignals.dismiss(signals[0]?.id ?? "");
-      // A search of every collection that finds nothing, and so looks
-      // where it came closest.
-      await owner.api.knowledge.search("old marzipan");
-    }, "KNOWLEDGE");
+    // The signals are in core's database, what they are about in
+    // Knowledge's: both are recorded.
+    let knowledgeQueries: Awaited<ReturnType<typeof recordedQueries>> = [];
+    const coreQueries = await recordedQueries(async () => {
+      knowledgeQueries = await recordedQueries(async () => {
+        await refreshDailySignals(env, day);
+        const { signals } = await owner.api.knowledgeSignals.list();
+        await owner.api.knowledgeSignals.dismiss(signals[0]?.id ?? "");
+        // A search of every collection that finds nothing, and so looks
+        // where it came closest.
+        await owner.api.knowledge.search("old marzipan");
+      }, "KNOWLEDGE");
+    }, "DB");
+    const queries = [...coreQueries, ...knowledgeQueries];
     // Those of the signals, their computations, documents, collections and
     // searches; an insert's list of values is no table, nor is a CTE of
     // search matches, and ranking the matches sorts them.
@@ -944,19 +950,13 @@ describe("Knowledge usage signals", () => {
         .map(async (recorded) => {
           const plan = await planOf(recorded);
           const search = recorded.query.includes("search_rows");
-          // The overdue listing sorts by the review date documents have
-          // now: a sort of that owner's own overdue signals, read by
-          // their index, so bounded by their data.
-          const overdue =
-            recorded.query.includes('from "knowledge_signals"') &&
-            recorded.query.includes('order by "documents"."review_date"');
           return {
             query: recorded.query,
             plan: plan.filter(
               (step) =>
                 !step.endsWith("VALUES CLAUSE") &&
                 step !== "SCAN CONSTANT ROW" &&
-                !((search || overdue) && step.includes("TEMP B-TREE")) &&
+                !(search && step.includes("TEMP B-TREE")) &&
                 !(
                   search &&
                   /^SCAN (?:matches|readable|found|ranked|top)\b/u.test(step)
@@ -977,13 +977,13 @@ describe("Knowledge usage signals", () => {
       many: plans.length > 8,
       searches: plans.filter(({ query }) => query.includes("search_rows"))
         .length,
-      // The overdue listing starts from the owner's signals.
-      overdueByOwner: plans.some(
+      // A listing starts from the owner's signals, by their index.
+      byOwner: plans.some(
         ({ query, plan }) =>
-          query.includes('order by "documents"."review_date"') &&
+          query.includes('"knowledge_signals"."owner" = ?') &&
           plan[0]?.includes("knowledge_signals_owner_idx") === true
       ),
-    }).toStrictEqual({ many: true, searches: 2, overdueByOwner: true });
+    }).toStrictEqual({ many: true, searches: 2, byOwner: true });
   });
 });
 

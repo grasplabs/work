@@ -344,7 +344,7 @@ const bookkeeping = new Set([
   "core.sqlite_sequence",
   "knowledge.sqlite_sequence",
   "core.improvement_signal_computations",
-  "knowledge.knowledge_signal_computations",
+  "core.knowledge_signal_computations",
 ]);
 
 /**
