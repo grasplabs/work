@@ -1,6 +1,10 @@
 import type { Id } from "@grasp-os/sdk";
-import { useClient, useQuery } from "@grasp-os/sdk/react";
-import { useWorkflow } from "@grasp-os/sdk/screen";
+import {
+  useClient,
+  useMutation,
+  useQuery,
+  useWorkflow,
+} from "@grasp-os/sdk/react";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
 import {
@@ -13,19 +17,19 @@ import {
 } from "@grasp-os/ui/components/table";
 import { useEffect, useRef, useState } from "react";
 
-import { api } from "#grasp";
+import { api, workflows } from "#grasp";
 
 import { DraftEditor } from "../components/draft-editor";
 import type { EditorResult } from "../components/draft-editor";
 import { Extractions } from "../components/extractions";
+import type { Found, Reading } from "../components/extractions";
 import {
-  isDraftId,
   mediumLabels,
   originLabels,
   refusal,
   settle,
 } from "../components/intake";
-import type { GuestChat, OpenedDraft } from "../components/intake";
+import type { DraftSource, GuestChat, OpenedDraft } from "../components/intake";
 import { NotesForm } from "../components/notes-form";
 import type { NotesInput } from "../components/notes-form";
 import { Stakeholders } from "../components/stakeholders";
@@ -40,15 +44,6 @@ type View =
   | { kind: "new"; count: number }
   | { kind: "notes" }
   | { kind: "open"; opened: OpenedDraft; problem: string };
-
-/** What a run of `extract` answers once it has kept its draft. */
-const draftOfRun = (output: unknown): Id<"drafts"> | undefined =>
-  typeof output === "object" &&
-  output !== null &&
-  "draft" in output &&
-  isDraftId(output.draft)
-    ? output.draft
-    : undefined;
 
 /** Why something failed, when there is a reason. */
 const Problem = ({ text }: { text: string }) =>
@@ -201,10 +196,11 @@ const Intake = () => {
   const listings = useRef(0);
   const openings = useRef(0);
   const counts = useRef(0);
-  const extract = useWorkflow("extract");
-  // The notes this screen sent to be read, newest first: each becomes a
-  // draft once its run is done.
-  const [reading, setReading] = useState<{ id: string; title: string }[]>([]);
+  const extract = useWorkflow(workflows.extract);
+  const propose = useMutation(api.drafts.propose);
+  // The notes this screen sent to be read, newest first, each with the
+  // source it keeps them under once its run found their statements.
+  const [reading, setReading] = useState<Reading[]>([]);
 
   const list = async (): Promise<void> => {
     listings.current += 1;
@@ -285,36 +281,61 @@ const Intake = () => {
 
   /**
    * Starts reading notes, or a stakeholder's chat, called `title` while
-   * it is read, and says why it didn't start, if it didn't.
+   * it is read, and says why it didn't start, if it didn't. A chat is read
+   * as notes by the App's own action first (`chats.notes`): the workflow
+   * only reads what it is given.
    */
   const startReading = async (
     input: NotesInput | { chat: string },
     title: string
   ): Promise<string | undefined> => {
-    const started = await settle(async () => await extract.start(input));
+    let source: DraftSource;
+    let lines: { role: "guest" | "question"; text: string }[] = [];
+    let guest = false;
+    if ("chat" in input) {
+      const read = await settle(
+        async () => await client.action(api.chats.notes, { chat: input.chat })
+      );
+      if ("error" in read) {
+        return refusal(read.error);
+      }
+      source = { ...read.ok.source, notes: read.ok.notes };
+      ({ lines } = read.ok);
+      guest = true;
+    } else {
+      source = { ...input.source, notes: input.notes };
+    }
+    const started = await settle(
+      async () => await extract.run({ notes: source.notes, lines })
+    );
     if ("error" in started) {
       return refusal(started.error);
     }
-    const { id } = started.ok;
-    setReading((runs) => [{ id, title }, ...runs]);
+    const { runId } = started.ok;
+    setReading((runs) => [{ id: runId, title, source, guest }, ...runs]);
     showList();
     return undefined;
   };
 
-  /** Opens the draft a finished reading kept. */
-  const review = async (run: string): Promise<void> => {
-    const found = await settle(async () => await extract.status(run));
-    if ("error" in found) {
-      setProblem(refusal(found.error));
+  /**
+   * Keeps what a finished reading found as a draft, as its source's (a
+   * chat's marked a guest's), and opens it for review.
+   */
+  const review = async (read: Reading, found: Found): Promise<void> => {
+    const kept = await settle(
+      async () =>
+        await propose({
+          source: read.source,
+          statements: found.statements,
+          guest: read.guest,
+        })
+    );
+    if ("error" in kept) {
+      setProblem(refusal(kept.error));
       return;
     }
-    const draft = draftOfRun(found.ok.output);
-    setReading((runs) => runs.filter(({ id }) => id !== run));
-    if (draft === undefined) {
-      setProblem("That reading kept no draft.");
-      return;
-    }
-    await open(draft);
+    setReading((runs) => runs.filter(({ id }) => id !== read.id));
+    await open(kept.ok);
   };
 
   const onResult = (result: EditorResult): void => {
@@ -374,8 +395,8 @@ const Intake = () => {
       {listing ? (
         <Extractions
           started={reading}
-          onReview={(run) => {
-            void review(run);
+          onReview={(read, found) => {
+            void review(read, found);
           }}
           onDismiss={(run) => {
             setReading((runs) => runs.filter(({ id }) => id !== run));
