@@ -164,6 +164,10 @@ jobs:
       # So is ADMIN_HOST, Grasp's admin's own hostname (admin.<domain>,
       # apps/console/src/admin-host.ts): a route of the console's Worker
       # and a hostname of its Access application, both set by hand.
+      # So are DISCORD_PUBLIC_KEY and DISCORD_STAFF_IDS, Grasp's Discord
+      # application's public key and the staff's Discord user ids
+      # (apps/console/src/admin/discord.ts): without them the bot answers
+      # no one.
       - name: Deploy the console with its Access settings
         if: ${{ !inputs.secrets-only }}
         env:
@@ -175,6 +179,8 @@ jobs:
           GRASP_CLIENT_ID: ${{ vars.GRASP_CLIENT_ID }}
           ROOMS_ORIGIN: ${{ vars.ROOMS_ORIGIN }}
           ADMIN_HOST: ${{ vars.ADMIN_HOST }}
+          DISCORD_PUBLIC_KEY: ${{ vars.DISCORD_PUBLIC_KEY }}
+          DISCORD_STAFF_IDS: ${{ vars.DISCORD_STAFF_IDS }}
         run: |
           set -euo pipefail
           if [ -z "$CF_ACCESS_AUD" ] || [ -z "$CF_ACCESS_ISS" ]; then
@@ -182,7 +188,7 @@ jobs:
             exit 1
           fi
           vars=(--var "CF_ACCESS_AUD:$CF_ACCESS_AUD" --var "CF_ACCESS_ISS:$CF_ACCESS_ISS")
-          for name in CLIENT_DOMAIN ENTRA_CLIENT_ID GOOGLE_CLIENT_ID GRASP_CLIENT_ID ROOMS_ORIGIN ADMIN_HOST; do
+          for name in CLIENT_DOMAIN ENTRA_CLIENT_ID GOOGLE_CLIENT_ID GRASP_CLIENT_ID ROOMS_ORIGIN ADMIN_HOST DISCORD_PUBLIC_KEY DISCORD_STAFF_IDS; do
             if [ -n "${!name}" ]; then
               vars+=(--var "$name:${!name}")
             fi

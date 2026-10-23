@@ -1,5 +1,8 @@
 import { compilerVersion, isAppLayout } from "@grasp-os/compiler";
-import { sdkProtocolVersion } from "@grasp-os/shared/app-releases";
+import {
+  sdkProtocolVersion,
+  versionErrors,
+} from "@grasp-os/shared/app-releases";
 import type { ReleaseManifest } from "@grasp-os/shared/app-releases";
 import { appErrors, openCandidateStates } from "@grasp-os/shared/apps";
 import type { App, CandidateState } from "@grasp-os/shared/apps";
@@ -10,12 +13,18 @@ import { appIdSchema, storeIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { canonicalText } from "@grasp-os/shared/json";
 import type { Identity } from "@grasp-os/shared/rpc";
+import { screenPath } from "@grasp-os/shared/screens";
 import { and, desc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { artifactDigest, readBackRelease } from "./app-releases.ts";
+import {
+  artifactDigest,
+  readBackRelease,
+  sealedScreen,
+  sealedScreenNames,
+} from "./app-releases.ts";
 import type { VerifiedObservations } from "./apps.ts";
 import {
   appFor,
@@ -594,6 +603,40 @@ const rollbackEligible = async (
 };
 
 /**
+ * The screens `app`'s sealed `version` carries, each as the hash its build
+ * is approved by, read back from the release (`sealedScreen`): the screens
+ * of its `files`, no more and no fewer, or the release is refused
+ * (`version.artifact_corrupt`), as a release that sealed other screens
+ * than its source holds can't have been sealed by this release.
+ */
+const sealedScreensOf = async (
+  env: Env,
+  app: AppId,
+  version: number,
+  files: Record<string, string>
+): Promise<{ screen: string; artifact: string }[]> => {
+  const sealedNames = await sealedScreenNames(env, app, version);
+  const named = sealedNames.toSorted();
+  const wanted = Object.keys(files)
+    .flatMap((path) => {
+      const name = screenPath.exec(path)?.groups?.name;
+      return name === undefined ? [] : [name];
+    })
+    .toSorted();
+  if (canonicalText(named) !== canonicalText(wanted)) {
+    throw versionErrors.create("version.artifact_corrupt", {
+      path: "screens/",
+    });
+  }
+  return await Promise.all(
+    named.map(async (name) => {
+      const { screen, artifact } = await sealedScreen(env, app, version, name);
+      return { screen, artifact };
+    })
+  );
+};
+
+/**
  * The report of the verified candidate `row`, whose gates observed
  * `observed`. Only what core computed, no verdict:
  * - its identities;
@@ -620,6 +663,10 @@ const reportOf = async (
     ? await readBackRelease(env, app, row.version)
     : undefined;
   const replaces = row.basedOn === 0 ? null : row.basedOn;
+  const screens =
+    sealed === undefined
+      ? []
+      : await sealedScreensOf(env, app, row.version, files);
   return canonicalText({
     formatVersion: reportFormatVersion,
     candidate: {
@@ -641,6 +688,9 @@ const reportOf = async (
             migrationEvidence: await sha256Hex(
               canonicalText(sealed.manifest.migrationEvidence)
             ),
+            // What each screen was built to and sealed as: the hash an
+            // admin approves, read back from the release.
+            screens,
             artifacts: {
               count: sealed.manifest.artifacts.length,
               // A digest of the manifest's entries (path, sha256, size),

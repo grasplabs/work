@@ -14,10 +14,15 @@ import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
 import { ChevronRightIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import { AdminPage } from "../../admin/page.tsx";
-import { Panel } from "../../admin/panel.tsx";
-import { fetchPlatform } from "../../admin/platform-data.ts";
-import type { StaffEvent } from "../../admin/platform-data.ts";
+import { AdminPage } from "../../../admin/page.tsx";
+import { Panel } from "../../../admin/panel.tsx";
+import { fetchPlatform } from "../../../admin/platform-data.ts";
+import type { StaffEvent } from "../../../admin/platform-data.ts";
+import {
+  PlatformNav,
+  rolloutStatusWords,
+  startRolloutId,
+} from "../../../admin/platform-nav.tsx";
 import {
   eventWords,
   needWords,
@@ -25,7 +30,7 @@ import {
   ringWords,
   StandingMark,
   targetWords,
-} from "../../admin/platform-parts.tsx";
+} from "../../../admin/platform-parts.tsx";
 import {
   companiesOf,
   errorRateLimit,
@@ -33,16 +38,16 @@ import {
   nextRing,
   ringsOf,
   spreadOf,
-} from "../../admin/platform.ts";
-import type { PlatformNeed, Standing } from "../../admin/platform.ts";
-import { formatDate, formatPercent, whole } from "../../admin/words.ts";
-import { fetchClientGrid, fetchGridLive } from "../../clients/functions.ts";
-import type { GridRow, LiveStatus } from "../../clients/grid.ts";
-import type { ReleaseSummary } from "../../releases/queries.ts";
-import { approveRolloutFn } from "../../rollout/functions.ts";
-import type { RolloutView } from "../../rollout/queries.ts";
-import { useRolloutAction } from "../../rollout/use-action.ts";
-import { thenRefresh } from "../../use-action.ts";
+} from "../../../admin/platform.ts";
+import type { PlatformNeed, Standing } from "../../../admin/platform.ts";
+import { formatDate, formatPercent, whole } from "../../../admin/words.ts";
+import { fetchClientGrid, fetchGridLive } from "../../../clients/functions.ts";
+import type { GridRow, LiveStatus } from "../../../clients/grid.ts";
+import type { ReleaseSummary } from "../../../releases/queries.ts";
+import { approveRolloutFn } from "../../../rollout/functions.ts";
+import type { RolloutView } from "../../../rollout/queries.ts";
+import { useRolloutAction } from "../../../rollout/use-action.ts";
+import { thenRefresh } from "../../../use-action.ts";
 
 const usd = new Intl.NumberFormat("en", {
   style: "currency",
@@ -58,14 +63,6 @@ const Nothing = () => <span className="text-muted-foreground">–</span>;
 
 /** A day, as the admin's pages say it. */
 const dayOf = (at: Date): string => formatDate(at.toISOString().slice(0, 10));
-
-const rolloutStatusWords: Record<RolloutView["status"], string> = {
-  running: "Rolling out",
-  waiting: "Waits",
-  done: "Done",
-  failed: "Failed",
-  cancelled: "Cancelled",
-};
 
 /**
  * What the rollout's badge says: paused, as its run tells when staff
@@ -154,15 +151,26 @@ const GoingOut = ({
   return (
     <Panel
       action={
-        approvable ? (
-          <ApproveRing next={next} rolloutId={rollout.id} />
-        ) : (
-          <Badge
-            variant={rollout.status === "failed" ? "destructive" : "secondary"}
+        <div className="flex flex-none items-start gap-2">
+          <Link
+            className={buttonVariants({ variant: "ghost", size: "sm" })}
+            params={{ rolloutId: rollout.id }}
+            to="/admin/platform/rollouts/$rolloutId"
           >
-            {status}
-          </Badge>
-        )
+            Open the rollout
+          </Link>
+          {approvable ? (
+            <ApproveRing next={next} rolloutId={rollout.id} />
+          ) : (
+            <Badge
+              variant={
+                rollout.status === "failed" ? "destructive" : "secondary"
+              }
+            >
+              {status}
+            </Badge>
+          )}
+        </div>
       }
       description={`Started by ${rollout.startedBy} on ${dayOf(rollout.createdAt)}.`}
       title={`Going out now: ${what}`}
@@ -235,7 +243,13 @@ const WhoRunsWhat = ({
             key={releaseId}
           >
             <span className="flex flex-wrap items-baseline gap-x-2">
-              <span className="font-mono text-xs">{releaseId}</span>
+              <Link
+                className="hover:text-foreground font-mono text-xs underline-offset-4 hover:underline"
+                params={{ releaseId }}
+                to="/admin/platform/releases/$releaseId"
+              >
+                {releaseId}
+              </Link>
               {release === null ? null : (
                 <span className="text-muted-foreground">
                   {dayOf(release.builtAt)}
@@ -490,17 +504,27 @@ const PlatformPage = () => {
   return (
     <AdminPage
       action={
-        <Link
-          className={buttonVariants({ variant: "ghost", size: "sm" })}
-          to="/"
-        >
-          Open the console
-        </Link>
+        <>
+          <Link
+            className={buttonVariants({ variant: "ghost", size: "sm" })}
+            to="/"
+          >
+            Open the console
+          </Link>
+          <Link
+            className={buttonVariants({ size: "sm" })}
+            hash={startRolloutId}
+            to="/admin/platform/rollouts"
+          >
+            Start a rollout
+          </Link>
+        </>
       }
       description="Every company runs its own Grasp, in its own Cloudflare account in the EU. A release reaches them ring by ring, and waits after each ring for someone at Grasp."
       title="Platform"
     >
       {/* The panels' type, as the prototype's sections set it. */}
+      <PlatformNav />
       <div className="flex flex-col gap-6 text-sm">
         <GoingOut names={names} rollout={platform.rollout} />
         <WhoRunsWhat names={names} releases={platform.releases} rows={rows} />
@@ -512,7 +536,7 @@ const PlatformPage = () => {
 };
 
 /** Every company's own deployment, and the rollout going out. */
-export const Route = createFileRoute("/admin/platform")({
+export const Route = createFileRoute("/admin/platform/")({
   loader: async () => {
     const [rows, platform] = await Promise.all([
       fetchClientGrid(),

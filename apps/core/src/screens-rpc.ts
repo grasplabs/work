@@ -70,7 +70,6 @@ import {
   versionFiles,
 } from "./apps.ts";
 import { screenBuilds } from "./db/core/schema.ts";
-import { withReferencesOf } from "./draft-references.ts";
 import type { ReferenceSource } from "./draft-references.ts";
 import { appHost } from "./durable-objects.ts";
 import { callbackFor, isStub } from "./page-callbacks.ts";
@@ -81,6 +80,7 @@ import { CoreRpcTarget } from "./rpc-target.ts";
 import { RunSubscription } from "./run-subscription.ts";
 import { recordBuilds } from "./screen-builds.ts";
 import { frameAccess, stageFrame } from "./screen-frame.ts";
+import { versionScreenCodes } from "./screen-references.ts";
 import { screenSubmissionReceived } from "./screen-submissions.ts";
 import {
   deliveryOf,
@@ -93,7 +93,6 @@ import {
   standingOf,
 } from "./screen-trust.ts";
 import type { Standing } from "./screen-trust.ts";
-import { screenCode } from "./screens.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 import { controlScreenRun } from "./workflows/controls.ts";
@@ -520,8 +519,9 @@ const openScreen = async (
   const raw = await versionFiles(env, id, version);
   const source = await routeSourceOf(env, id, version, raw);
   const opened = routedOpen(source?.manifest, file, asked);
-  const files = await withReferencesOf(id, version, raw, source);
-  const built = await screenCode(env, files, file, version, id);
+  const built = await (
+    await versionScreenCodes(env, id, version, raw, { unsealed: "refuse" })
+  )(file);
   const { artifact } = built;
   // What it builds to now, refused or not: a fact about the version, for
   // what waits on an admin (screen-builds.ts).
@@ -573,8 +573,9 @@ const navigateScreen = async (
     source?.manifest,
     asked
   );
-  const files = await withReferencesOf(id, version, raw, source);
-  const built = await screenCode(env, files, file, version, id);
+  const built = await (
+    await versionScreenCodes(env, id, version, raw, { unsealed: "refuse" })
+  )(file);
   await requireDelivery(env, by, id, built.artifact, {
     operation: "navigate",
     stage: "admission",

@@ -32,13 +32,17 @@ const ConsoleNav = () => {
       >
         Clients
       </Link>
-      <Link to="/releases" activeProps={{ className: "font-medium" }}>
+      {/*
+       * Releases and rollouts live under the admin's Platform now. Full page
+       * loads, so the admin's own hostname, when it has one, takes them
+       * (src/admin-host.ts).
+       */}
+      <Link reloadDocument to="/admin/platform/releases">
         Releases
       </Link>
-      <Link to="/rollouts" activeProps={{ className: "font-medium" }}>
+      <Link reloadDocument to="/admin/platform/rollouts">
         Rollouts
       </Link>
-      {/* A full page load, so the admin's own hostname, when it has one, takes it (src/admin-host.ts). */}
       <Link reloadDocument to="/admin">
         Admin
       </Link>

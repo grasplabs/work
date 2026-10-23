@@ -36,8 +36,19 @@ export const runFileLimits = {
   callBytes: 512 * kib,
   /** How long a file may stay unfinished before it is swept. */
   orphanMs: 24 * 60 * 60 * 1000,
+  /**
+   * How long a start's copy may stay unadmitted before it is swept: a
+   * copy is made and admitted within one start, so one left this long was
+   * never admitted (GRA-885).
+   */
+  startOrphanMs: 60 * 60 * 1000,
   /** Longest file name, in characters. */
   nameLength: 200,
+  /**
+   * An App's files one start hands its run (GRA-885): each copied while
+   * the screen's start waits, so few, within the run's own limits.
+   */
+  startFiles: 10,
 } as const;
 
 /**
@@ -171,4 +182,5 @@ export const runFileErrors = defineErrorFamily({
   "file.not_writable":
     "That file isn't being written by this task: only the task that started it writes it, until it is finished.",
   "file.not_finished": "That file isn't finished yet.",
+  "file.start_files": `A start hands its run at most ${runFileLimits.startFiles} files, each only from the App's screen that starts it.`,
 });

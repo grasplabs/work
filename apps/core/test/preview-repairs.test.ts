@@ -253,6 +253,55 @@ export default app({
 `,
 };
 
+/** The notes draft, with a query whose code throws the attack. */
+const spec8Broken: Record<string, string> = {
+  ...spec8Notes,
+  "operations/notes.ts": `${spec8Notes["operations/notes.ts"] ?? ""}
+export const broken = query({
+  args: {},
+  returns: v.number(),
+  handler: () => {
+    throw new Error(atob(${JSON.stringify(btoa(`Invoice 7 has no total. ${attack}`))}));
+  },
+});
+`,
+  "app.ts": (spec8Notes["app.ts"] ?? "")
+    .replace("{ create, titles }", "{ broken, create, titles }")
+    .replace(
+      "{ notes: { create, titles } }",
+      "{ notes: { broken, create, titles } }"
+    ),
+};
+
+/**
+ * For each request the agent sent the model, whether `attack` is in it
+ * anywhere but a tool's result: its system prompt, or what was said.
+ */
+const saidOutsideResults = (
+  gateway: ReturnType<typeof fakeGateway>
+): boolean[] =>
+  gateway.requests.map(({ body }) => {
+    const { system, messages } = z
+      .object({ system: z.unknown(), messages: z.array(z.unknown()) })
+      .parse(body);
+    const said = z
+      .array(
+        z.object({
+          content: z.union([
+            z.string(),
+            z.array(z.object({ type: z.string() }).loose()),
+          ]),
+        })
+      )
+      .parse(messages)
+      .flatMap(({ content }): unknown[] =>
+        typeof content === "string"
+          ? [content]
+          : content.filter(({ type }) => type !== "tool_result")
+      );
+    return JSON.stringify({ system, said }).includes(attack);
+  });
+
 const setUp = async (replies: GatewayReply[], agentBuilds = true) => {
   const admin = await signedInApi(idp, "admin");
   const builder = await signedInApi(idp, "builder");
@@ -308,27 +357,7 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
       returned(result?.text)
     );
     // The attack text reaches the model only inside a tool's result.
-    const outsideResults = gateway.requests.map(({ body }) => {
-      const { system, messages } = z
-        .object({ system: z.unknown(), messages: z.array(z.unknown()) })
-        .parse(body);
-      const said = z
-        .array(
-          z.object({
-            content: z.union([
-              z.string(),
-              z.array(z.object({ type: z.string() }).loose()),
-            ]),
-          })
-        )
-        .parse(messages)
-        .flatMap(({ content }): unknown[] =>
-          typeof content === "string"
-            ? [content]
-            : content.filter(({ type }) => type !== "tool_result")
-        );
-      return JSON.stringify({ system, said }).includes(attack);
-    });
+    const outsideResults = saidOutsideResults(gateway);
     expect({
       outcome,
       broken,
@@ -780,6 +809,38 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
     const results = await codeResults(stub, chatId);
     expect(returned(results[0]?.text)).toStrictEqual({
       refused: "app.preview_layout",
+    });
+  });
+
+  it("tells the agent what its spec 8 draft's code threw, only as data in its tool's result", async () => {
+    const { stub, chatId, gateway } = await setUp([
+      codeStep(`export default async (self, env) => {
+        const [app] = (await env.apps.list()).filter(({ name }) => name === "Invoice desk");
+        await env.build.write(app.id, ${JSON.stringify(spec8Broken)});
+        const broken = await env.build.call(app.id, "notes.broken");
+        return { ok: broken.ok, code: broken.code, message: broken.message };
+      };`),
+      says("It threw."),
+    ]);
+
+    await stub.ask(chatIdSchema.parse(chatId), {
+      text: "Try the invoice desk's total",
+      model,
+    });
+
+    const results = await codeResults(stub, chatId);
+    expect({
+      called: returned(results[0]?.text),
+      outsideResults: saidOutsideResults(gateway),
+      inResult: JSON.stringify(gateway.requests.at(-1)?.body).includes(attack),
+    }).toStrictEqual({
+      called: {
+        ok: false,
+        code: "internal.unexpected",
+        message: `Error: Invoice 7 has no total. ${attack}`,
+      },
+      outsideResults: gateway.requests.map(() => false),
+      inResult: true,
     });
   });
 

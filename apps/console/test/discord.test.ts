@@ -17,6 +17,7 @@ import { emptyAdminSnapshot } from "./cloudflare-api.ts";
 import { discordTest } from "./discord-config.ts";
 import { publishRelease } from "./releases.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
+import { longStream } from "./streamed-body.ts";
 
 // Grasp's Discord bot (GRA-663), from its threat model: only what Discord's
 // signature vouches for gets past the route outside Access; only Grasp's
@@ -346,6 +347,25 @@ describe("Grasp's Discord bot", () => {
       changedOnItsWay: 401,
       stale: 401,
     });
+  });
+
+  it("refuses a body past its limit without holding it, though it declares no length, auditing nothing", async () => {
+    // Far longer than an interaction may be, with no Content-Length: only
+    // as much of it is pulled as it takes to see it is too long.
+    const { body, heldWhole } = longStream();
+    const { status } = await routed(
+      new Request(`${origin}/discord/interactions`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body,
+      })
+    );
+
+    expect({
+      status,
+      heldWhole: heldWhole(),
+      audited: await discordCalls(),
+    }).toStrictEqual({ status: 413, heldWhole: false, audited: [] });
   });
 
   it("refuses everything without the application's public key", async () => {

@@ -6,7 +6,9 @@
  * are served before the Worker, behind Access at the edge only: they hold
  * nothing but the open-source app's code.
  *
- * Grasp's admin can have a hostname of its own (src/admin-host.ts).
+ * Grasp's admin can have a hostname of its own (src/admin-host.ts). The
+ * console's Releases and Rollouts pages moved under its Platform, and
+ * their old addresses redirect there (src/moved-pages.ts).
  *
  * `POST /discord/interactions` is the one route outside Access: Discord
  * posts Grasp's bot's interactions there (src/admin/discord.ts), so it
@@ -24,9 +26,12 @@
  * client back from one, and `ApplyClient` applies a client's settings
  * now (src/clients/apply.ts). `ProvisionPlacedClient` provisions a client
  * placed in a hosting destination (src/hosting/workflow.ts).
+ *
+ * `/mcp` is the admin's MCP server for Grasp's staff (src/admin/mcp.ts),
+ * behind the same Access check.
  */
 import handler from "@tanstack/react-start/server-entry";
-import { waitUntil } from "cloudflare:workers";
+import { env as workerEnv, waitUntil } from "cloudflare:workers";
 
 import { withAccess } from "./access.ts";
 import type { Staff } from "./access.ts";
@@ -36,7 +41,9 @@ import {
   discordInteraction,
   discordInteractionsPath,
 } from "./admin/discord.ts";
+import { adminMcp, adminMcpPath } from "./admin/mcp.ts";
 import { consoleDatabase } from "./db/act.ts";
+import { movedPageRedirect } from "./moved-pages.ts";
 import { importReleases } from "./releases/import.ts";
 
 export { IntegrationBuild } from "./builds/workflow.ts";
@@ -53,18 +60,25 @@ declare module "@tanstack/react-start" {
   }
 }
 
-const withStaff = withAccess(
-  async (request, staff) => await handler.fetch(request, { context: { staff } })
+const withStaff = withAccess(async (request, staff) =>
+  new URL(request.url).pathname === adminMcpPath
+    ? await adminMcp(request, staff, workerEnv)
+    : await handler.fetch(request, { context: { staff } })
 );
 
 export default {
   // Past the Access check, a page may move to or from the admin's own
-  // hostname (src/admin-host.ts), so nothing about it shows to anyone else.
+  // hostname (src/admin-host.ts), or from where it was to the admin
+  // (src/moved-pages.ts), so nothing about it shows to anyone else.
   fetch: async (request: Request, env: Env) => {
     if (new URL(request.url).pathname === discordInteractionsPath) {
       return await discordInteraction(request, env, waitUntil);
     }
-    return await withStaff(request, env, () => adminHostRedirect(request, env));
+    return await withStaff(
+      request,
+      env,
+      () => movedPageRedirect(request) ?? adminHostRedirect(request, env)
+    );
   },
   scheduled: async (controller, env) => {
     if (controller.cron === digestCron) {

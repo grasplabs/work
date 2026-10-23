@@ -44,12 +44,19 @@
       "jurisdiction": "eu",
     },
   ],
-  // Questions to Grasp's Discord bot (src/admin/discord.ts), per Discord
-  // user: 10 a minute. A question reads every client's core once, so this
-  // bounds the reads one person can start from Discord. The namespace id is
-  // unique in grasp-os-ops, beside the router's 1001 to 1003 and the admin
-  // MCP's 1004.
+  // Per-person limits on reads that reach every client's core once. The
+  // namespace ids are unique in grasp-os-ops, beside the router's 1001 to
+  // 1003.
   "ratelimits": [
+    // Tool calls of the admin's MCP (src/admin/mcp.ts), per staff member:
+    // 30 a minute.
+    {
+      "name": "ADMIN_MCP_RATE_LIMIT",
+      "namespace_id": "1004",
+      "simple": { "limit": 30, "period": 60 },
+    },
+    // Questions to Grasp's Discord bot (src/admin/discord.ts), per Discord
+    // user: 10 a minute.
     {
       "name": "DISCORD_RATE_LIMIT",
       "namespace_id": "1005",
