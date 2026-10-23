@@ -344,7 +344,7 @@ export const settledAs = (
 /**
  * Grasp's sending domain for the deployment at `hostname`: its client's
  * hostname (`<id>.<domain>`, where the router serves it) with `mail.` in
- * front, the domain the console sets up for Email Sending. Core doesn't
+ * front, the domain the admin sets up for Email Sending. Core doesn't
  * tell the web app who its mail is from yet; once it does, that replaces
  * this.
  */

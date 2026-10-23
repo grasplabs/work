@@ -1,14 +1,14 @@
-# Deploys the console and router to grasp-os-ops: the account that holds a token
+# Deploys the admin and router to grasp-os-ops: the account that holds a token
 # for every client, so it never changes on a merge. Run it by hand from main
 # once the change works in grasp-os-staging. Require a reviewer on the grasp-os-ops
 # environment in GitHub so a second person approves every run.
 #
 # Every run also copies the shared secrets (Grasp's OAuth app secrets and
 # Composio key) from 1Password into the ops account's Secrets Store, where
-# the console reads them to set on each client's Workers. The console never
+# the admin reads them to set on each client's Workers. The admin never
 # holds a 1Password credential. Run it with "secrets only" after rotating one
 # in 1Password to copy it without deploying; a secrets-only rollout from the
-# console then takes it to every client.
+# admin then takes it to every client.
 name: Deploy grasp-os-ops
 
 on:
@@ -118,40 +118,40 @@ jobs:
           done
       # A D1 database's jurisdiction is set only when it is created, and deploy
       # would auto-provision a missing one outside the EU: create the
-      # console's database before its first deploy, as CI does for
+      # admin's database before its first deploy, as CI does for
       # grasp-os-staging. One that exists outside the EU stops the deploy; it
       # has to be recreated.
-      - name: Create the console database in the EU
+      - name: Create the admin database in the EU
         if: ${{ !inputs.secrets-only }}
         run: |
           existing=$(vp exec wrangler d1 list --json)
-          jurisdiction=$(jq -r '.[] | select(.name == "grasp-os-console") | .jurisdiction // "none"' <<< "$existing")
+          jurisdiction=$(jq -r '.[] | select(.name == "grasp-os-admin") | .jurisdiction // "none"' <<< "$existing")
           if [ -z "$jurisdiction" ]; then
-            vp exec wrangler d1 create grasp-os-console --jurisdiction eu
+            vp exec wrangler d1 create grasp-os-admin --jurisdiction eu
           elif [ "$jurisdiction" != "eu" ]; then
-            echo "::error::D1 database grasp-os-console is not in the EU jurisdiction ($jurisdiction)"
+            echo "::error::D1 database grasp-os-admin is not in the EU jurisdiction ($jurisdiction)"
             exit 1
           fi
-      # D1 migrations are additive, so the running console keeps working on
+      # D1 migrations are additive, so the running admin keeps working on
       # the new schema until the deploy after them replaces it.
       - if: ${{ !inputs.secrets-only }}
-        run: vp run --filter @grasp-os/console db:migrate
-      # Router first: the console binds its hostname map, which the router's
+        run: vp run --filter @grasp-os/admin db:migrate
+      # Router first: the admin binds its hostname map, which the router's
       # first deploy creates, and both need the account's Secrets Store
       # (scripts/wrangler-deploy.ts fills in both ids). So a router deploy
-      # that fails stops the console's too. Besides Workers Scripts, D1 and
+      # that fails stops the admin's too. Besides Workers Scripts, D1 and
       # Secrets Store, the job's token needs Workers KV Storage (read, to
-      # find the map) and Workflows (edit: the console's deploy registers
+      # find the map) and Workflows (edit: the admin's deploy registers
       # its provisioning Workflow).
       - if: ${{ !inputs.secrets-only }}
         run: vp run --filter @grasp-os/router deploy
-      # The console verifies every request's Access JWT against its Access
-      # application (apps/console/src/access.ts) and refuses everyone
+      # The admin verifies every request's Access JWT against its Access
+      # application (apps/admin/src/access.ts) and refuses everyone
       # without these, so a deploy without them would lock staff out: stop
       # before deploying. They're the `grasp-os-ops` environment's variables,
       # not secrets: the AUD tag and the team URL identify the app, they
       # grant nothing. So is CLIENT_DOMAIN, the domain clients are served
-      # under: without it the console provisions and deploys no client, but
+      # under: without it the admin provisions and deploys no client, but
       # works otherwise, so it's passed only when set (keep_vars keeps the
       # last one). So are ENTRA_CLIENT_ID and GOOGLE_CLIENT_ID, Grasp's
       # OAuth apps' client ids, which each client's core signs people in
@@ -162,13 +162,13 @@ jobs:
       # each company's proposal from with ROOMS_READ_TOKEN (Secrets Store):
       # without it the proposal says Rooms isn't connected.
       # So is ADMIN_HOST, Grasp's admin's own hostname (admin.<domain>,
-      # apps/console/src/admin-host.ts): a route of the console's Worker
+      # apps/admin/src/admin-host.ts): a route of the admin's Worker
       # and a hostname of its Access application, both set by hand.
       # So are DISCORD_PUBLIC_KEY and DISCORD_STAFF_IDS, Grasp's Discord
       # application's public key and the staff's Discord user ids
-      # (apps/console/src/admin/discord.ts): without them the bot answers
+      # (apps/admin/src/admin/discord.ts): without them the bot answers
       # no one.
-      - name: Deploy the console with its Access settings
+      - name: Deploy the admin with its Access settings
         if: ${{ !inputs.secrets-only }}
         env:
           CF_ACCESS_AUD: ${{ vars.CF_ACCESS_AUD }}
@@ -193,6 +193,6 @@ jobs:
               vars+=(--var "$name:${!name}")
             fi
           done
-          vp run --filter @grasp-os/console build
-          cd apps/console
+          vp run --filter @grasp-os/admin build
+          cd apps/admin
           vp exec node ../../scripts/wrangler-deploy.ts "${vars[@]}"

@@ -9,7 +9,7 @@ One codebase, deployed once per client into the client's own Cloudflare account 
 | `apps/core` | Core Worker: sign-in, knowledge, Apps, workflows, model gateway, audit |
 | `apps/connect` | Connector Worker: the connector layer, the only place OAuth tokens live |
 | `apps/web` | Grasp OS frontend: React SPA, served as static files by core |
-| `apps/console` | Staff console (TanStack Start); production runs in grasp-os-ops |
+| `apps/admin` | Grasp's admin, where staff manage every client (TanStack Start); production runs in grasp-os-ops |
 | `apps/router` | Stateless router: `*.<domain>` to each client's core; production runs in grasp-os-ops |
 | `packages/sdk` | `@grasp-os/sdk`: workflow SDK and screen hooks, the only API App code sees |
 | `packages/ui` | `@grasp-os/ui`: shadcn on Base UI, Tailwind v4, shared with App screens |
@@ -32,7 +32,7 @@ Vite+ (`vp`) is the toolchain. Run from the repo root:
 - `vp run -r build`: build everything
 - `vp run e2e`: Playwright end-to-end tests (`*.e2e.ts` in `e2e/`)
 - `vp run smoke:workerd`: boot core on plain workerd (on-prem readiness)
-- `vp run dev`: run the frontend (localhost:5173) with core and connect behind it (localhost:8787); `vp -C apps/console dev` for the console
+- `vp run dev`: run the frontend (localhost:5173) with core and connect behind it (localhost:8787); `vp -C apps/admin dev` for the admin
 - `vp run seed`: while `vp run dev` runs, fill it with a demo company (`scripts/seed/`): people in teams, engines with 30 days of runs, Knowledge and chats; sign in as admin@acme.test. It adds only what's missing; to start over, stop dev and delete `apps/core/.wrangler/state`
 - `vp run -r typegen`: regenerate `worker-configuration.d.ts` after changing a `wrangler.jsonc`
 - `vp run -r db:generate`: generate migrations after changing a schema
@@ -52,7 +52,7 @@ Vite+ docs: `node_modules/vite-plus/docs`.
 
 ## Branches and pull requests
 
-Trunk-based: `main` is the only long-lived branch; every merge deploys all apps to grasp-os-staging. The console and router reach grasp-os-ops only through the manual Deploy grasp-os-ops workflow. Releases reach clients through the console, ring by ring.
+Trunk-based: `main` is the only long-lived branch; every merge deploys all apps to grasp-os-staging. The admin and router reach grasp-os-ops only through the manual Deploy grasp-os-ops workflow. Releases reach clients through the admin, ring by ring.
 
 1. Branch from `main` as `<type>/<kebab-description>`, e.g. `feat/audit-export`, using the commit types. A pre-push hook and CI check the name.
 2. Open a pull request into `main`. CI runs.
@@ -92,7 +92,7 @@ The frontend (`apps/web`) speaks English, German, Dutch, Spanish and French thro
 - Whole sentences only, never glued fragments. Counts go through `plural`. Name placeholders after what they hold: a local `const date = …` gives translators `{date}`, not `{0}`.
 - Lists through `formatList` (`apps/web/src/format.ts`), not `join(", ")` inside a message.
 - Not translated: product and company names, people's names, what someone typed, core's own error messages, and text whose exact words are recorded (the Composio consent).
-- `@grasp-os/ui` stays free of Lingui (App screens and the console share it): its few words are English props a page passes translated.
+- `@grasp-os/ui` stays free of Lingui (App screens and the admin share it): its few words are English props a page passes translated.
 - Every new message needs all four translations in the same pull request.
 
 ## Testing
