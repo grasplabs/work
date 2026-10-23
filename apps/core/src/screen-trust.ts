@@ -101,33 +101,46 @@ const leasePurpose = "grasp-os screen lease";
 
 const encoder = new TextEncoder();
 
+/**
+ * One build of an App's screen as core handed it out: its hash, and the
+ * App's version it was opened from, whose release the frame's calls are
+ * pinned to (app-functions.ts, `pinnedReference`) and whose revocation
+ * stops it (`standingOf`). The same hash can be a screen of several
+ * versions, so the version is signed with it, never read from the frame.
+ */
+export interface LeasedBuild {
+  readonly artifact: string;
+  readonly version: number;
+}
+
 /** What a lease signs: who was handed which build of which App. */
-const leased = (userId: string, app: AppId, artifact: string): Uint8Array =>
-  encoder.encode(canonicalJson([userId, app, artifact]));
+const leased = (
+  userId: string,
+  app: AppId,
+  { artifact, version }: LeasedBuild
+): Uint8Array =>
+  encoder.encode(canonicalJson([userId, app, artifact, version]));
 
 /**
- * Core's word that it handed `artifact` of `app` to `userId`: the build's
- * hash and a MAC only core can make (a key derived from its auth secret).
- * The page gives it back when it opens the frame (`ScreensApi.frame`);
- * it says which build, never that the build is approved.
+ * Core's word that it handed `build` of `app` to `userId`: the build's
+ * hash, the version it was opened from and a MAC only core can make (a
+ * key derived from its auth secret). The page gives it back when it opens
+ * the frame (`ScreensApi.frame`); it says which build, never that the
+ * build is approved.
  */
 export const leaseFor = async (
   env: Env,
   userId: string,
   app: AppId,
-  artifact: string
+  build: LeasedBuild
 ): Promise<string> => {
   const key = await derivedHmacKey(env, leasePurpose, ["sign", "verify"]);
-  const mac = await crypto.subtle.sign(
-    "HMAC",
-    key,
-    leased(userId, app, artifact)
-  );
-  return `${artifact}.${toBase64Url(new Uint8Array(mac))}`;
+  const mac = await crypto.subtle.sign("HMAC", key, leased(userId, app, build));
+  return `${build.artifact}.${build.version}.${toBase64Url(new Uint8Array(mac))}`;
 };
 
-/** The longest a lease is: a hash, a dot and a MAC. */
-const leaseMaxLength = 128;
+/** The longest a lease is: a hash, a version, two dots and a MAC. */
+const leaseMaxLength = 144;
 
 /**
  * Why a screen's request, through its page, is refused for whom it names
@@ -153,28 +166,34 @@ export const personRefusal = (
     : authErrors.create("auth.principal_changed");
 };
 
+/** A version as a lease writes it: a positive integer, in decimal. */
+const leasedVersion = /^[1-9]\d{0,9}$/u;
+
 /**
  * The build `lease` says core handed `userId` for `app`, or `undefined`
  * for anything core didn't sign for exactly them and that App.
  */
-export const leasedArtifact = async (
+export const leasedBuild = async (
   env: Env,
   userId: string,
   app: AppId,
   lease: unknown
-): Promise<string | undefined> => {
+): Promise<LeasedBuild | undefined> => {
   if (typeof lease !== "string" || lease.length > leaseMaxLength) {
     return undefined;
   }
-  const [artifact, mac, ...more] = lease.split(".");
+  const [artifact, version, mac, ...more] = lease.split(".");
   if (
     mac === undefined ||
     more.length > 0 ||
+    version === undefined ||
+    !leasedVersion.test(version) ||
     !artifactSchema.safeParse(artifact).success ||
     artifact === undefined
   ) {
     return undefined;
   }
+  const build: LeasedBuild = { artifact, version: Number(version) };
   let signature: Uint8Array<ArrayBuffer>;
   try {
     signature = fromBase64Url(mac);
@@ -186,9 +205,9 @@ export const leasedArtifact = async (
     "HMAC",
     key,
     signature,
-    leased(userId, app, artifact)
+    leased(userId, app, build)
   );
-  return signed ? artifact : undefined;
+  return signed ? build : undefined;
 };
 
 /** The App's policy generation now, as SQL: 0 until anything changed it. */
@@ -365,20 +384,21 @@ export interface Standing {
   generation: number;
   trust: ArtifactTrust;
   /**
-   * Whether the release of the App's current version was revoked: its
-   * screens then get nothing more, whatever their build's approval.
+   * Whether the release of the App's current version, or of the version
+   * the build was opened from, was revoked: its screens then get nothing
+   * more, whatever their build's approval.
    */
   releaseRevoked: boolean;
 }
 
 /**
- * What core holds now for `artifact` of `app`; a build it has no row for,
+ * What core holds now for `build` of `app`; a build it has no row for,
  * or none at all (a frame whose lease named none), is `unreviewed`.
  */
 export const standingOf = async (
   env: Env,
   app: AppId,
-  artifact?: string
+  build?: LeasedBuild
 ): Promise<Standing> => {
   const row = await drizzle(env.DB).get<{
     output: OutputClass | null;
@@ -391,11 +411,12 @@ export const standingOf = async (
       ${generationSql(app)} AS generation,
       (SELECT ${screenArtifacts.status} FROM ${screenArtifacts}
         WHERE ${screenArtifacts.appId} = ${app}
-          AND ${screenArtifacts.artifact} = ${artifact ?? null}) AS trust,
+          AND ${screenArtifacts.artifact} = ${build?.artifact ?? null}) AS trust,
       EXISTS (SELECT 1 FROM ${sdkReleaseManifests}
         WHERE ${sdkReleaseManifests.appId} = ${app}
-          AND ${sdkReleaseManifests.version} =
+          AND (${sdkReleaseManifests.version} =
             (SELECT ${apps.currentVersion} FROM ${apps} WHERE ${apps.id} = ${app})
+            OR ${sdkReleaseManifests.version} = ${build?.version ?? null})
           AND ${sdkReleaseManifests.revokedAt} IS NOT NULL) AS releaseRevoked`
   );
   return {
@@ -447,14 +468,15 @@ const recordRefusal = async (
   env: Env,
   by: Pick<Identity, "userId" | "staff">,
   app: AppId,
-  artifact: string | undefined,
+  build: LeasedBuild | undefined,
   { generation, ...standing }: Standing,
   { operation, stage }: Refused
 ): Promise<void> => {
   const reason = deliveryOf({ generation, ...standing });
   const refusal = canonicalJson([
     by.userId,
-    artifact ?? null,
+    build?.artifact ?? null,
+    build?.version ?? null,
     reason,
     operation,
     stage,
@@ -464,7 +486,8 @@ const recordRefusal = async (
     action: "app.artifact.refused",
     target: { type: "app", id: app },
     detail: {
-      artifact: artifact ?? null,
+      artifact: build?.artifact ?? null,
+      version: build?.version ?? null,
       reason,
       operation,
       stage,
@@ -474,7 +497,7 @@ const recordRefusal = async (
 };
 
 /**
- * Whether `artifact` of `app` gets the App's data now, for a push, and if
+ * Whether `build` of `app` gets the App's data now, for a push, and if
  * not, why (`revoked` or `unreviewed`): a refusal is recorded. `read` is
  * what core holds now (`standingOf`), when its caller shares one read
  * among several checks of the same build.
@@ -483,55 +506,54 @@ export const deliveryAt = async (
   env: Env,
   by: Pick<Identity, "userId" | "staff">,
   app: AppId,
-  artifact: string | undefined,
+  build: LeasedBuild | undefined,
   at: Refused,
   read?: Promise<Standing>
 ): Promise<ScreenDelivery> => {
-  const standing = await (read ?? standingOf(env, app, artifact));
+  const standing = await (read ?? standingOf(env, app, build));
   const delivery = deliveryOf(standing);
   if (delivery !== "open") {
-    await recordRefusal(env, by, app, artifact, standing, at);
+    await recordRefusal(env, by, app, build, standing, at);
   }
   return delivery;
 };
 
 /**
- * Whether `artifact` of `app` gets the App's data now, for a push: a
+ * Whether `build` of `app` gets the App's data now, for a push: a
  * refusal is recorded, and answers false.
  */
 export const deliveryOpen = async (
   env: Env,
   by: Pick<Identity, "userId" | "staff">,
   app: AppId,
-  artifact: string | undefined,
+  build: LeasedBuild | undefined,
   at: Refused
-): Promise<boolean> =>
-  (await deliveryAt(env, by, app, artifact, at)) === "open";
+): Promise<boolean> => (await deliveryAt(env, by, app, build, at)) === "open";
 
 /**
- * Refuses, with `screen.unreviewed` or `screen.revoked`, unless `artifact`
+ * Refuses, with `screen.unreviewed` or `screen.revoked`, unless `build`
  * of `app` gets the App's data now. The refusal is recorded first.
  */
 export const requireDelivery = async (
   env: Env,
   by: Pick<Identity, "userId" | "staff">,
   app: AppId,
-  artifact: string | undefined,
+  build: LeasedBuild | undefined,
   at: Refused
 ): Promise<void> => {
-  const standing = await standingOf(env, app, artifact);
+  const standing = await standingOf(env, app, build);
   const delivery = deliveryOf(standing);
   if (delivery === "open") {
     return;
   }
-  await recordRefusal(env, by, app, artifact, standing, at);
+  await recordRefusal(env, by, app, build, standing, at);
   throw screenErrors.create(
     delivery === "revoked" ? "screen.revoked" : "screen.unreviewed"
   );
 };
 
 /**
- * `run`'s answer for a screen running `artifact` of `app`: trust is read
+ * `run`'s answer for a screen running `build` of `app`: trust is read
  * before `run`, so code nobody approved starts nothing, and again before
  * whatever `run` ends with is handed over, its answer or its error, so an
  * approval taken back while it ran keeps both here. An error counts: the
@@ -542,21 +564,21 @@ export const delivering = async <Answer>(
   env: Env,
   by: Pick<Identity, "userId" | "staff">,
   app: AppId,
-  artifact: string | undefined,
+  build: LeasedBuild | undefined,
   operation: string,
   run: () => Promise<Answer>
 ): Promise<Answer> => {
   const before: Refused = { operation, stage: "admission" };
   const after: Refused = { operation, stage: "delivery" };
-  await requireDelivery(env, by, app, artifact, before);
+  await requireDelivery(env, by, app, build, before);
   let answer: Answer;
   try {
     answer = await run();
   } catch (error) {
     // Refused now: the refusal goes to the screen in place of the error.
-    await requireDelivery(env, by, app, artifact, after);
+    await requireDelivery(env, by, app, build, after);
     throw error;
   }
-  await requireDelivery(env, by, app, artifact, after);
+  await requireDelivery(env, by, app, build, after);
   return answer;
 };

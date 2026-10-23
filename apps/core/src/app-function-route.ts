@@ -57,10 +57,11 @@ import {
 } from "./screen-submissions.ts";
 import {
   delivering,
-  leasedArtifact,
+  leasedBuild,
   personRefusal,
   requireDelivery,
 } from "./screen-trust.ts";
+import type { LeasedBuild } from "./screen-trust.ts";
 import { isWorkflowRequest } from "./screen-workflows.ts";
 import { admitted, admitWindow, windowCharger } from "./screens-rpc.ts";
 
@@ -348,7 +349,7 @@ const keyedAction = (
 /** Which App a keyed action is for, and as which build. */
 interface KeyedTarget {
   readonly id: AppId;
-  readonly artifact: string | undefined;
+  readonly build: LeasedBuild | undefined;
 }
 
 /**
@@ -394,7 +395,7 @@ const requireReleasesLive = async (
 const stillTheirs = async (
   env: Env,
   { person, operation, current }: Caller,
-  { id, artifact }: KeyedTarget,
+  { id, build }: KeyedTarget,
   { access, versions }: { access: string; versions: readonly number[] }
 ): Promise<void> => {
   const now = await current();
@@ -405,7 +406,7 @@ const stillTheirs = async (
   if ((await accessOf(env, now, id)) !== access) {
     throw operationErrors.create("operation.access_changed");
   }
-  await requireDelivery(env, now, id, artifact, {
+  await requireDelivery(env, now, id, build, {
     operation,
     stage: "delivery",
   });
@@ -439,7 +440,7 @@ const withheld = (
 const noteKeyedAction = async (
   env: Env,
   person: Identity,
-  id: AppId,
+  { id, build }: KeyedTarget,
   call: FunctionRequest
 ): Promise<void> => {
   let release: Release;
@@ -452,7 +453,7 @@ const noteKeyedAction = async (
     release = await loadRelease(env, found.id, found.currentVersion);
     path = publicOperationOf(
       release,
-      await pinnedReference(env, release, call.reference)
+      await pinnedReference(env, release, call.reference, build?.version)
     );
   } catch {
     return;
@@ -489,14 +490,14 @@ const keyedAnswer = async (
   { call, key }: { call: FunctionRequest; key: string }
 ): Promise<KeyedAnswer> => {
   const { person, operation } = caller;
-  const { id, artifact } = target;
+  const { id, build } = target;
   // Nothing ran yet: a build nobody approved is refused as any call is.
-  await requireDelivery(env, person, id, artifact, {
+  await requireDelivery(env, person, id, build, {
     operation,
     stage: "admission",
   });
   if (caller.portableSession === undefined) {
-    await noteKeyedAction(env, person, id, call);
+    await noteKeyedAction(env, person, target, call);
   }
   const name = await invocationName(person.userId, id, call, key, false);
   const access = await accessOf(env, person, id);
@@ -509,6 +510,7 @@ const keyedAnswer = async (
     call,
     streaming: false,
     attach: false,
+    ...(build === undefined ? {} : { pinnedVersion: build.version }),
   });
   const text = await new Response(frames).text();
   const frame = text
@@ -619,22 +621,22 @@ const boundedCall = async (
     }
     // A window counts as the pages it reads (query-windows.ts).
     await admitWindow(env, person, id, text);
-    const artifact =
+    const build =
       lease === undefined
         ? undefined
-        : await leasedArtifact(env, person.userId, id, lease);
+        : await leasedBuild(env, person.userId, id, lease);
     const keyed = keyedAction(text);
     if (keyed !== undefined) {
       // Checks delivery itself, before the run and again before its answer.
       return Response.json(
-        await keyedAnswer(env, caller, { id, artifact }, keyed)
+        await keyedAnswer(env, caller, { id, build }, keyed)
       );
     }
     const answer = await delivering(
       env,
       person,
       id,
-      artifact,
+      build,
       operation,
       async () => {
         // Which attempt under its key this call is, once noted, and the
@@ -647,9 +649,13 @@ const boundedCall = async (
           text,
           Date.now() + screenCallMs,
           windowCharger(env, person, id),
-          // A portable host has no trusted shell to recover them in.
+          // A portable host has no trusted shell to recover them in, and
+          // no lease: nothing pins its calls.
           portableSession === undefined
             ? {
+                ...(build === undefined
+                  ? {}
+                  : { pinnedVersion: build.version }),
                 onAdmitted: async (release, call, path) => {
                   noted.attempt = await noteScreenSubmission(
                     env,
@@ -663,7 +669,7 @@ const boundedCall = async (
                   noted.fence = fence;
                 },
               }
-            : undefined
+            : {}
         );
         if (noted.attempt !== undefined) {
           await noteScreenAnswer(env, person, id, text, called.result, {
@@ -880,7 +886,7 @@ interface AdmittedCall {
   readonly person: Identity;
   readonly id: AppId;
   readonly body: string;
-  readonly artifact: string | undefined;
+  readonly build: LeasedBuild | undefined;
 }
 
 /**
@@ -937,13 +943,13 @@ const admitCall = async (
       requestId
     );
   }
-  const artifact = await leasedArtifact(
+  const build = await leasedBuild(
     env,
     person.userId,
     id,
     request.headers.get(screenLeaseHeader)
   );
-  return { person, id, body: new TextDecoder().decode(body), artifact };
+  return { person, id, body: new TextDecoder().decode(body), build };
 };
 
 /**
@@ -984,7 +990,7 @@ const stillDelivering = async (
   if ((await accessOf(env, now, call.id)) !== access) {
     throw operationErrors.create("operation.access_changed");
   }
-  await requireDelivery(env, now, call.id, call.artifact, {
+  await requireDelivery(env, now, call.id, call.build, {
     operation: "stream",
     stage,
   });
@@ -1198,8 +1204,8 @@ const appStreamResponse = async (
     if (admittedCall instanceof Response) {
       return admittedCall;
     }
-    const { person, id, body, artifact } = admittedCall;
-    await requireDelivery(env, person, id, artifact, {
+    const { person, id, body, build } = admittedCall;
+    await requireDelivery(env, person, id, build, {
       operation: "stream",
       stage: "admission",
     });
@@ -1222,6 +1228,7 @@ const appStreamResponse = async (
       call,
       streaming: true,
       attach: action === "attach",
+      ...(build === undefined ? {} : { pinnedVersion: build.version }),
     });
     // The release it runs under, besides the caller's: a join or an attach
     // may follow a run a release published since started.

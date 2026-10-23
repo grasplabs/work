@@ -216,11 +216,11 @@ export class PortableQueriesRpc
     const hasRole = stillHasRole(env, this.#check, app);
     this.#queries = new QuerySubscriptions(
       env,
-      screenReads(env, this.#check, async (by, id, artifact) => {
+      screenReads(env, this.#check, async (by, id, build) => {
         if (!(await hasRole())) {
           return "role";
         }
-        return await deliveryAt(env, by, id, artifact, {
+        return await deliveryAt(env, by, id, build, {
           operation: "portable.watchQuery",
           stage: "push",
         });
