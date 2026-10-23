@@ -98,6 +98,29 @@ const termsOf = (query: string): string[] =>
 const quoted = (term: string) => `"${term}"`;
 
 /**
+ * A term as the words pass asks for it: as a prefix ("vakan" finds
+ * "vakantiedagen"), but a single character exactly. The prefix indexes
+ * (`prefix = '2 3'`) don't cover one character, so `"7"*` would merge
+ * every term that starts with a 7: seconds at 100k sections, for `INC-7`.
+ */
+const asWord = (term: string): string =>
+  // Code points, as in `passesOf`.
+  // oxlint-disable-next-line typescript/no-misused-spread -- see passesOf
+  [...term].length === 1 ? quoted(term) : `${quoted(term)}*`;
+
+const digitsPattern = /^\p{N}+$/u;
+
+/**
+ * Whether the trigram passes ask for a term (its code points given): long
+ * enough for a trigram, and not only digits. Trigrams find words inside
+ * compounds and words with a typo; a group of digits ("2024" in
+ * "CR-2024-118") is neither, the words pass already matches it, and it is
+ * in so many codes that its trigrams cost seconds at 100k sections.
+ */
+const trigramReady = (term: string, chars: string[]): boolean =>
+  chars.length >= trigramLength && !digitsPattern.test(term);
+
+/**
  * A long word as the typo pass asks for it: two of its three pieces, close
  * together, as they are in the word spelled right. Pieces far apart in a
  * section ("zwang…" and "…zonder" in "bijzonder verlof of zwangerschap")
@@ -132,8 +155,9 @@ interface Pass {
   pass: number;
   match: string;
   /**
-   * Words too short for trigrams, which the section must then have as
-   * words, so that every word of the query still counts.
+   * Words the trigrams don't ask for (too short, or only digits), which the
+   * section must then have as words, so that every word of the query still
+   * counts.
    */
   short?: string;
 }
@@ -143,8 +167,7 @@ interface Pass {
 type Joiner = " AND " | " OR ";
 
 const passesOf = (terms: string[], joiner: Joiner): Pass[] => {
-  const words = (list: string[]) =>
-    list.map((term) => `${quoted(term)}*`).join(joiner);
+  const words = (list: string[]) => list.map(asWord).join(joiner);
   const letters = terms.map((term) => ({
     term,
     // Code points, as the trigram tokenizer counts them. Terms are letters
@@ -152,9 +175,9 @@ const passesOf = (terms: string[], joiner: Joiner): Pass[] => {
     // oxlint-disable-next-line typescript/no-misused-spread -- see above
     chars: [...term],
   }));
-  const long = letters.filter(({ chars }) => chars.length >= trigramLength);
+  const long = letters.filter(({ term, chars }) => trigramReady(term, chars));
   const short = letters
-    .filter(({ chars }) => chars.length < trigramLength)
+    .filter(({ term, chars }) => !trigramReady(term, chars))
     .map(({ term }) => term);
   const trigrams = (query: string): Pass | undefined =>
     long.length === 0
@@ -320,7 +343,7 @@ const nearestCollections = async (
     // Code points, as in `passesOf`.
     // oxlint-disable-next-line typescript/no-misused-spread -- see above
     const chars = [...term];
-    if (chars.length < trigramLength) {
+    if (!trigramReady(term, chars)) {
       return [];
     }
     return [
@@ -331,14 +354,20 @@ const nearestCollections = async (
     {
       table: "search_words",
       pass: 0,
-      match: terms.map((term) => `${quoted(term)}*`).join(" OR "),
+      match: terms.map(asWord).join(" OR "),
     },
     ...(long.length === 0
       ? []
       : [{ table: "search_trigrams", pass: 1, match: long.join(" OR ") }]),
   ];
+  // MATERIALIZED: with one pass the CTE is a lone SELECT, which SQLite
+  // would flatten into the query below, putting bm25() inside min(), where
+  // FTS5 can't evaluate it ("unable to use function bm25 in the requested
+  // context"). A query of only short or digit words has one pass.
   const rows = await db.all(sql`
-    WITH matches AS (${sql.join(passes.map(matchesSql), sql` UNION ALL `)})
+    WITH matches AS MATERIALIZED (
+      ${sql.join(passes.map(matchesSql), sql` UNION ALL `)}
+    )
     SELECT collections.id AS collectionId, min(matches.score) AS score
     FROM matches
     JOIN search_rows ON search_rows.id = matches.row_id
