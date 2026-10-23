@@ -5,8 +5,9 @@ import { readingSeconds } from "../onboarding/setup.ts";
 // Stephen's words lighting up as he says them (prototype
 // `onboarding/spoken-text.tsx`): said words in ink, the word being said
 // warm, the rest waiting in grey; when the line is over, every word eases
-// back to the text around it. Typing, he has no voice here, so a line is
-// said at the pace of speech.
+// back to the text around it. When the voice says a line (speech.ts), its
+// words light up as they are said; a line he says without it here, at the
+// pace of speech.
 
 const looks = {
   rest: "transition-colors duration-700",
@@ -109,7 +110,7 @@ export const SpokenText = ({
         look = "saying";
       }
       return (
-        <span className={looks[look]} key={start}>
+        <span className={looks[look]} data-said={look} key={start}>
           {word}
         </span>
       );
