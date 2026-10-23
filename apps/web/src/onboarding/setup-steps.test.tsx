@@ -35,6 +35,7 @@ const said = (
 ): string => {
   const data: SetupData = {
     admin: "Ada",
+    company: null,
     view: view(paused, sponsor),
     documents: [],
     sendingDomain: "mail.example.test",

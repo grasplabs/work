@@ -542,6 +542,10 @@ msgstr "{gaps, plural, one {# leemte} other {# leemtes}}"
 msgid "{goals, plural, one {# goal} other {# goals}}"
 msgstr "{goals, plural, one {# doel} other {# doelen}}"
 
+#: src/onboarding/setup-steps.tsx
+msgid "{going, plural, one {The lead of # team gets their link {when}. Everyone else right after their lead has talked to me.} other {The leads of # teams get their link {when}. Everyone else right after their lead has talked to me.}}"
+msgstr "{going, plural, one {De teamleider van # team krijgt de link {when}. Alle anderen direct nadat hun teamleider met mij heeft gesproken.} other {De teamleiders van # teams krijgen hun link {when}. Alle anderen direct nadat hun teamleider met mij heeft gesproken.}}"
+
 #: src/onboarding/send-plan-form.tsx
 msgid "{going} of {count}"
 msgstr "{going} van {count}"
@@ -11209,10 +11213,6 @@ msgstr "De kickoff, en de documenten die het bedrijf deelde."
 msgid "The latest runs, newest first."
 msgstr "De laatste runs, nieuwste eerst."
 
-#: src/onboarding/setup-steps.tsx
-msgid "The leads of {going} teams get their link {when}. Everyone else right after their lead has talked to me."
-msgstr "De teamleiders van {going} teams krijgen hun link {when}. Alle anderen direct nadat hun teamleider met mij heeft gesproken."
-
 #: src/screens/screen-links.ts
 msgid "The link wasn't opened."
 msgstr "De link is niet geopend."
@@ -11888,6 +11888,10 @@ msgstr "Te doen"
 #: src/onboarding/setup-steps.tsx
 msgid "To everyone"
 msgstr "Aan iedereen"
+
+#: src/onboarding/setup-steps.tsx
+msgid "To everyone at {company}"
+msgstr "Aan iedereen bij {company}"
 
 #: src/dashboard/report.ts
 msgid "To keep who spoke private, a team is left out until five of its people were asked, and its count until three were heard. Neither means nobody took part."

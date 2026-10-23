@@ -419,6 +419,50 @@ export const hostingDestinations = sqliteTable("hosting_destinations", {
 });
 
 /**
+ * Every capability of a destination as staff declared it, each time they
+ * saved it (src/hosting/inventory.ts): written in the same batch as the
+ * destination, never updated or deleted. A save records every capability,
+ * the ones it doesn't list as `unknown`, so a destination's latest row per
+ * capability is what its `capabilities` say. The evidence as it parsed
+ * (`evidenceSchema`, src/hosting/policy.ts), flattened.
+ */
+export const destinationCapabilityEvidence = sqliteTable(
+  "destination_capability_evidence",
+  {
+    /** Rising: the order the declarations were saved in. */
+    id: integer().primaryKey({ autoIncrement: true }),
+    destinationId: text("destination_id")
+      .notNull()
+      .references(() => hostingDestinations.id),
+    /** A capability (src/hosting/policy.ts). */
+    capability: text().notNull(),
+    /** `unknown`: the save didn't list it, and it has no evidence. */
+    status: text({ enum: ["verified", "unsupported", "unknown"] }).notNull(),
+    /** What the evidence was observed against; null when unknown. */
+    subjectKind: text("subject_kind", {
+      enum: ["source", "candidate", "release", "profile"],
+    }),
+    subjectId: text("subject_id"),
+    procedure: text(),
+    observedAt: timestamp("observed_at"),
+    /** Who the evidence says observed it. */
+    recordedBy: text("recorded_by"),
+    /** Where the full record is. */
+    record: text(),
+    /** Who saved it: a staff member's email, or `system`. */
+    declaredBy: text("declared_by").notNull(),
+    declaredAt: timestamp("declared_at").notNull(),
+  },
+  (table) => [
+    index("destination_capability_evidence_idx").on(
+      table.destinationId,
+      table.capability,
+      table.id
+    ),
+  ]
+);
+
+/**
  * The destination a client runs in and the policy it runs under, and the
  * opaque deployment id its resources' names are made from. Set once:
  * moving a client elsewhere, or to another jurisdiction, is a migration

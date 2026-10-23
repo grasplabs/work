@@ -73,6 +73,7 @@ import { formatDate, formatList } from "../format.ts";
 import { isLocale, localeNames } from "../i18n.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
+import { SpokenText } from "../voice/spoken-text.tsx";
 import { speak, usePrepare, useSaid } from "../voice/voice.ts";
 import { About } from "./about-story.tsx";
 import {
@@ -87,12 +88,7 @@ import { PlacePicker } from "./place-picker.tsx";
 import type { PickedFile } from "./place-picker.tsx";
 import { MailItem } from "./review-parts.tsx";
 import { SendPlanForm, useSendWords } from "./send-plan-form.tsx";
-import {
-  choiceHolds,
-  choiceOfPlan,
-  firstChoice,
-  replanOf,
-} from "./send-plan.ts";
+import { choiceHolds, choiceShown, replanOf } from "./send-plan.ts";
 import {
   Asides,
   Callout,
@@ -110,6 +106,7 @@ import {
   stepLine,
   SupportLink,
   tones,
+  useSayFollowing,
 } from "./setup-parts.tsx";
 import type { Answer, StepVoice } from "./setup-parts.tsx";
 import {
@@ -144,6 +141,8 @@ import { XlsxError, xlsxMost, xlsxRows } from "./xlsx.ts";
 export interface SetupData {
   /** The admin's first name. */
   admin: string;
+  /** The organization's name, as the message to the team is addressed; null when it has none. */
+  company: string | null;
   view: OnboardingView;
   documents: OnboardingDocument[];
   gate: GateView;
@@ -1346,21 +1345,25 @@ const ConfirmOrg = (props: StepProps & { roster: Roster }) => {
       ),
     });
   };
+  // A thank-you, said on its own every time it is saved, and quick: the count is only known as he says it.
+  const answer: Answer | undefined = saved
+    ? {
+        text: plural(leads, {
+          one: "Thank you. I’ll start with this lead.",
+          other: "Thank you. I’ll start with these # leads.",
+        }),
+        announce: true,
+        tone: tones.warm,
+        quick: true,
+      }
+    : undefined;
   return (
     <>
       <Heading
-        answer={
-          saved
-            ? {
-                text: plural(leads, {
-                  one: "Thank you. I’ll start with this lead.",
-                  other: "Thank you. I’ll start with these # leads.",
-                }),
-              }
-            : undefined
-        }
+        answer={answer}
         sentence={lines.sentence}
         title={lines.title}
+        voice={lines.voice}
       />
       <Onward>
         <div className="setup-org-list flex w-full flex-col overflow-auto rounded-xl border text-left">
@@ -1497,6 +1500,7 @@ const Leads = (props: StepProps) => {
         <Heading
           sentence={t`First I need your staff list.`}
           title={lines.title}
+          voice={lines.voice}
         />
         <Primary
           onClick={() => {
@@ -1519,7 +1523,7 @@ const Leads = (props: StepProps) => {
 const Team = (props: StepProps) => {
   const { t } = useLingui();
   const lines = useHeadlines(props).team;
-  const { admin, view } = props.data;
+  const { admin, company, view } = props.data;
   const { run, busy, failure } = useCoreAction();
   const refresh = useRefresh();
   const written = [
@@ -1541,7 +1545,11 @@ const Team = (props: StepProps) => {
     }));
   // What they set before stands; else the next working day at nine, every team.
   const [choice, setChoice] = useState(() =>
-    view.plan === null ? firstChoice(props.today) : choiceOfPlan(view.plan)
+    choiceShown(
+      view.plan,
+      props.today,
+      teams.map((team) => team.id)
+    )
   );
   const [editing, setEditing] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -1550,16 +1558,29 @@ const Team = (props: StepProps) => {
   const next =
     choice.held.length === 0
       ? t`Leads get their link ${when}. Everyone else right after their lead has talked to me.`
-      : t`The leads of ${going} teams get their link ${when}. Everyone else right after their lead has talked to me.`;
+      : t`${plural(going, {
+          one: `The lead of # team gets their link ${when}. Everyone else right after their lead has talked to me.`,
+          other: `The leads of # teams get their link ${when}. Everyone else right after their lead has talked to me.`,
+        })}`;
+  // He says what happens next after his line, and again as the plan changes it: quick, as the day is only known then.
+  useSayFollowing(next, { quick: true });
   return (
     <>
-      <Heading sentence={lines.sentence} title={lines.title} />
+      <Heading
+        sentence={lines.sentence}
+        title={lines.title}
+        voice={lines.voice}
+      />
       <div className="flex w-full flex-col gap-3.5 text-left">
         <div className="bg-card overflow-hidden rounded-xl border shadow-sm">
           <div className="flex items-center gap-2.5 border-b px-4 py-3">
             <div className="flex min-w-0 flex-1 flex-col">
               <span>{admin}</span>
-              <span className="text-muted-foreground">{t`To everyone`}</span>
+              <span className="text-muted-foreground">
+                {company === null
+                  ? t`To everyone`
+                  : t`To everyone at ${company}`}
+              </span>
             </div>
             <Button
               onClick={() => {
@@ -1620,7 +1641,9 @@ const Team = (props: StepProps) => {
         <Alert>
           <InfoIcon />
           <AlertTitle>{t`What happens next`}</AlertTitle>
-          <AlertDescription>{next}</AlertDescription>
+          <AlertDescription>
+            <SpokenText from={0} line={next} text={next} />
+          </AlertDescription>
         </Alert>
         <ErrorText>{failure}</ErrorText>
       </div>
