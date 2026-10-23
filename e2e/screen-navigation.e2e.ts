@@ -76,52 +76,128 @@ test("a screen opens another with its input, and leaving unsaved edits is confir
   await expect(leave).toBeHidden();
 });
 
-test("a screen loaded again holds none of the edits it lost, so leaving it asks nothing", async ({
+test("a new version made current switches a clean screen at once, and asks an editor with unsaved edits once, which saves on the version it opened before it switches", async ({
   pageOf,
 }) => {
   const { builder } = peopleIn("screenNavigation");
   const name = `Notes ${crypto.randomUUID().slice(0, 8)}`;
+  const files = navigationFiles();
+  // The note's form saves, and holds nothing unsaved once it has.
+  files["screens/note.tsx"] = (files["screens/note.tsx"] ?? "")
+    .replace(
+      'import { Form, TextField } from "@grasp-os/ui/form";',
+      'import { Form, SubmitButton, TextField } from "@grasp-os/ui/form";'
+    )
+    .replace(
+      '{ defaultValues: { title: "", body: "" } }',
+      '{ defaultValues: { title: "", body: "" }, resetOnSuccess: true }'
+    )
+    .replace(
+      '<TextField form={form} label="Title" name="title" />',
+      '<TextField form={form} label="Title" name="title" />\n        <SubmitButton form={form}>Save note</SubmitButton>'
+    );
   const { core, api } = apiOf(builder);
   let app: string;
   try {
     ({ id: app } = await api.apps.create({ name }));
-    await release(api, app, navigationFiles(), name);
+    await release(api, app, files, name);
   } finally {
     core[Symbol.dispose]();
   }
-  const page = await pageOf(builder);
-  await page.clock.install();
-  await page.goto(`/domains/${app}/apps/home/full`);
-  const start = page.frameLocator('iframe[title="home app"]');
-  await start
-    .getByRole("button", { name: "Open note n42", exact: true })
-    .click();
-  const note = page.frameLocator('iframe[title="note app"]');
-  await note.getByLabel("Title").fill("Groceries");
+  /** Makes a new version current, its start screen changed by `mark`. */
+  const releaseAgain = async (mark: string): Promise<void> => {
+    const again = apiOf(builder);
+    try {
+      await release(
+        again.api,
+        app,
+        {
+          ...files,
+          "screens/home.tsx": `${files["screens/home.tsx"]}// ${mark}\n`,
+        },
+        mark
+      );
+    } finally {
+      again.core[Symbol.dispose]();
+    }
+  };
 
-  const again = apiOf(builder);
-  try {
-    const files = navigationFiles();
-    await release(
-      again.api,
-      app,
-      { ...files, "screens/home.tsx": `${files["screens/home.tsx"]}\n` },
-      "Again"
-    );
-  } finally {
-    again.core[Symbol.dispose]();
-  }
-  // The frame asks for a new version every 30 seconds.
-  await page.clock.fastForward(30_000);
-  await page.getByRole("button", { name: "Reload" }).click();
-  await expect(note.getByLabel("Title")).toHaveValue("");
-
-  await note.getByRole("button", { name: "Back to start" }).click();
+  // A clean screen in one tab: the start screen, which holds no form.
+  const clean = await pageOf(builder);
+  await clean.goto(`/domains/${app}/apps/home/full`);
+  const start = clean.frameLocator('iframe[title="home app"]');
   await expect(start.getByRole("heading", { name: "Start" })).toBeVisible({
     timeout: 20_000,
   });
+  const frameAddress = async (): Promise<string | null> =>
+    await clean.locator('iframe[title="home app"]').getAttribute("src");
+  const before = await frameAddress();
+
+  // An editor with unsaved edits in another.
+  const dirty = await pageOf(builder);
+  await dirty.goto(`/domains/${app}/apps/home/full`);
+  await dirty
+    .frameLocator('iframe[title="home app"]')
+    .getByRole("button", { name: "Open note n42", exact: true })
+    .click();
+  const note = dirty.frameLocator('iframe[title="note app"]');
+  await note.getByLabel("Title").fill("Groceries");
+  const ask = dirty.getByRole("alertdialog", {
+    name: "A new version of this app is ready",
+  });
+
+  await releaseAgain("v2");
+
+  // The clean screen switches by itself, to the new version's build, and
+  // offers nothing.
+  await expect.poll(frameAddress, { timeout: 20_000 }).not.toBe(before);
+  await expect(start.getByRole("heading", { name: "Start" })).toBeVisible({
+    timeout: 20_000,
+  });
+  await expect(clean.getByRole("alertdialog")).toHaveCount(0);
+
+  // The editor asks once, and saving first keeps its edits and the
+  // version it opened, whose save runs, as its contract is the same.
+  await expect(ask).toBeVisible({ timeout: 20_000 });
+  await expect(ask).toHaveCount(1);
+  await ask.getByRole("button", { name: "Save first" }).click();
+  await expect(ask).toBeHidden();
+  await expect(note.getByLabel("Title")).toHaveValue("Groceries");
   await expect(
-    page.getByRole("alertdialog", { name: "Leave this app?" })
+    dirty.getByText("It opens once your changes are saved.", { exact: false })
+  ).toBeVisible();
+  await note.getByRole("button", { name: "Save note" }).click();
+  // Saved, nothing is left unsaved, and it switches by itself.
+  await expect(
+    dirty.getByText("It opens once your changes are saved.", { exact: false })
+  ).toBeHidden({ timeout: 20_000 });
+  await expect(note.getByLabel("Title")).toHaveValue("", { timeout: 20_000 });
+  await expect(ask).toHaveCount(0);
+  // What it saved is there, in the App's list.
+  await clean.goto(`/domains/${app}/apps/notes/full`);
+  await expect(
+    clean
+      .frameLocator('iframe[title="notes app"]')
+      .getByText("Groceries", { exact: true })
+      .first()
+  ).toBeVisible({ timeout: 20_000 });
+
+  // Unsaved again, switching now drops the edits, and leaving the screen
+  // afterwards asks nothing: nothing is left to lose.
+  await note.getByLabel("Title").fill("Errands");
+  await releaseAgain("v3");
+  await expect(ask).toBeVisible({ timeout: 20_000 });
+  await ask.getByRole("button", { name: "Switch now" }).click();
+  await expect(ask).toBeHidden();
+  await expect(note.getByLabel("Title")).toHaveValue("", { timeout: 20_000 });
+  await note.getByRole("button", { name: "Back to start" }).click();
+  await expect(
+    dirty
+      .frameLocator('iframe[title="home app"]')
+      .getByRole("heading", { name: "Start" })
+  ).toBeVisible({ timeout: 20_000 });
+  await expect(
+    dirty.getByRole("alertdialog", { name: "Leave this app?" })
   ).toHaveCount(0);
 });
 
