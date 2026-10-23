@@ -56,7 +56,7 @@ import {
   PenLineIcon,
   UploadIcon,
 } from "lucide-react";
-import { useRef, useState } from "react";
+import { useContext, useEffect, useRef, useState } from "react";
 import type { ComponentType } from "react";
 
 import type { BrainScene } from "../brain/dot-brain.tsx";
@@ -67,7 +67,7 @@ import { formatDate, formatList } from "../format.ts";
 import { isLocale, localeNames } from "../i18n.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
-import { usePrepare } from "../voice/voice.ts";
+import { usePrepare, useSaid } from "../voice/voice.ts";
 import { About } from "./about-story.tsx";
 import { DocumentDrop } from "./document-drop.tsx";
 import type { DocumentRow } from "./document-drop.tsx";
@@ -208,6 +208,7 @@ const useHeadlines = ({
 > => {
   const { t } = useLingui();
   const { admin } = data;
+  const { sponsor } = data.view;
   const named = toolsIn(data.documents).slice(0, 4);
   const tools = formatList(named);
   const { progress } = data.view;
@@ -216,7 +217,11 @@ const useHeadlines = ({
   return {
     welcome: {
       title: t`Hi ${admin}, I’m Stephen`,
-      sentence: t`Before we start, which language do you prefer?`,
+      // The sponsor by name, only when the kickoff gave one.
+      sentence:
+        sponsor === null
+          ? t`Before we start, which language do you prefer?`
+          : t`${sponsor} told me a lot about your company in our first conversation. Before we start, which language do you prefer?`,
       voice: { tone: tones.warm },
     },
     company: {
@@ -273,17 +278,45 @@ const useHeadlines = ({
   };
 };
 
+const sentenceEnd = /(?<=[.?!…])\s+/u;
+
+/**
+ * Whether Stephen has asked which language yet: as he starts the last
+ * sentence of his greeting, or once the step is explained, as with the
+ * sound off; or at once, when a language was `picked` already. Asked, the
+ * languages come in, and stay.
+ */
+const useAsked = ({ title, sentence }: Headline, picked: boolean): boolean => {
+  const { line } = stepLine(title, sentence);
+  const question = line.lastIndexOf(sentence.split(sentenceEnd).at(-1) ?? "");
+  const said = useSaid(line);
+  const { explained } = useContext(Explained);
+  const [asked, setAsked] = useState(picked);
+  if (!asked && (explained || said >= question)) {
+    setAsked(true);
+  }
+  return asked;
+};
+
+/** A language other than the page's was picked on the welcome a moment ago: the welcome drawn anew in it knows. */
+let languagePicked = false;
+
 /** About how long the steps take, for the welcome to say so. */
 const onboardingMinutes = 8;
 
 const Welcome = (props: StepProps) => {
   const { t } = useLingui();
   const lines = useHeadlines(props).welcome;
-  // A language is chosen before anything else, every time: none is marked until you pick one.
-  const [picked, setPicked] = useState(false);
   const { i18n } = useLingui();
+  // A language is chosen before anything else, every time: none is marked
+  // until you pick one, unless the page was just drawn anew for it.
+  const [picked, setPicked] = useState(() => languagePicked);
+  useEffect(() => {
+    languagePicked = false;
+  }, []);
   const chosen = localeNames[isLocale(i18n.locale) ? i18n.locale : "en"];
   const minutes = onboardingMinutes;
+  const asked = useAsked(lines, picked);
   return (
     <>
       {/* The question is the end of what Stephen says, not a line after it; answered, he says so in the new language. */}
@@ -300,14 +333,22 @@ const Welcome = (props: StepProps) => {
         title={lines.title}
         voice={lines.voice}
       />
-      <Onward>
+      <div
+        className={cn(
+          "transition-all duration-700 ease-out",
+          !asked && "-translate-y-2 opacity-0"
+        )}
+        inert={!asked}
+      >
         <LanguageChoice
-          onPick={() => {
+          onPick={(locale) => {
             setPicked(true);
+            // Another language draws the whole page anew (main.tsx), this welcome with it.
+            languagePicked = locale !== i18n.locale;
           }}
           picked={picked}
         />
-      </Onward>
+      </div>
       <Primary
         onClick={() => {
           props.go("about");

@@ -1,34 +1,31 @@
 import { collectionIdSchema } from "@grasp-os/shared/ids";
 import type { CollectionId } from "@grasp-os/shared/ids";
 import { isAdmin } from "@grasp-os/shared/roles";
-import { and, ne, or } from "drizzle-orm";
-import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
-import type { DrizzleD1Database } from "drizzle-orm/d1";
-import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 
 import { appsFoundBy, appsReadableBy } from "../app-access.ts";
 import type { Person } from "../app-access.ts";
 import { memberOf } from "../auth/identity.ts";
 import { apps } from "../db/core/schema.ts";
-import { inList } from "../db/d1.ts";
-import { collections, documents } from "../db/knowledge/schema.ts";
+import { collections } from "../db/knowledge/schema.ts";
 import { collectionsAllowed } from "./access.ts";
 import type { Reader } from "./access.ts";
+import type { Readable } from "./authorize.ts";
 
 // Who finds what in the Apps collection (apps-collection.ts): one entry
 // per App, found exactly by those who may open the App, as
 // `requireAppRole` (app-access.ts) decides it: its owner and admins, and
 // those it is shared with, while they may read everything it read. The
 // collection is for everyone, so the rule is per document: an entry's
-// path names its App, and every query that reads documents asks, in its
-// own SQL, for the paths of the Apps the reader may open, read from the
-// core database on the same read. Nothing of who may open an App is
+// path names its App, and `authorize` answers, for the collection, the
+// paths of the Apps the reader may open (`Readable.only`), read from the
+// core database on the same read; every query that reads documents puts
+// them in its own SQL (authorize.ts). Nothing of who may open an App is
 // copied into Knowledge, so unsharing, a team change, a new role or a
 // source the App is granted counts from the next read.
 //
 // The lookup is made only when a read can reach the collection: not for
-// a read scoped to another collection, not for an App or agent without a
+// a reader who may read no Apps collection, not for an App or agent without a
 // permission to read the Apps collection (only agents are given one:
 // permissions.ts `requireCollection`; an App granted it before counts it
 // as a source that doesn't resolve, app-provenance.ts, so the App reaches
@@ -49,19 +46,6 @@ export const appOfEntry = (path: string): string | undefined => {
     file === "AGENTS.md" && rest.length === 0 && appId !== undefined;
   return isEntry && appId !== "" ? appId : undefined;
 };
-
-/** What a reader may read. */
-export interface Allowed {
-  /** The collections they may read, as a condition on `collections`. */
-  collections: SQL;
-  /**
-   * The documents they may read, as a condition on `collections` and on
-   * the column that has their path (`documents.path` unless an alias's):
-   * those of `collections`, and in the Apps collection only the entries
-   * of Apps they may open.
-   */
-  documents: (path?: SQLiteColumn) => SQL;
-}
 
 /** The person whose Apps `reader` finds; undefined once they have left. */
 const personOf = async (
@@ -93,38 +77,26 @@ const foundBy = async (env: Env, person: Person): Promise<Found> => {
 };
 
 /**
- * What `reader` may read: the collections of `allowedCollections`, and of
- * their documents, those `Allowed.documents` says. Every query that reads
- * documents, their versions, sections or links uses `documents`. A read
- * of one collection passes it as `scope`: of any other, it finds no entry,
- * and asks nothing of the core database.
+ * What `reader` may read now: the collections `collectionsAllowed` lets
+ * them (access.ts), and of the Apps collection only the entries of Apps
+ * they may open. Knowledge's `authorize` port (ports.ts).
  */
-export const allowedFor = async (
+export const authorize = async (
   env: Env,
-  db: DrizzleD1Database,
-  reader: Reader,
-  scope?: unknown
-): Promise<Allowed> => {
-  const { condition: allowed, granted } = await collectionsAllowed(
-    env,
-    db,
-    reader
-  );
-  const reaches =
-    (scope === undefined || scope === appsCollectionId) &&
-    (granted === undefined || granted.includes(appsCollectionId));
-  const person = reaches ? await personOf(env, reader) : undefined;
+  reader: Reader
+): Promise<Readable> => {
+  const db = drizzle(env.KNOWLEDGE);
+  const { condition } = await collectionsAllowed(env, db, reader);
+  const rows = await db
+    .select({ id: collections.id })
+    .from(collections)
+    .where(condition);
+  const ids = rows.map(({ id }) => id);
+  const person = ids.includes(appsCollectionId)
+    ? await personOf(env, reader)
+    : undefined;
   const found: Found = person ? await foundBy(env, person) : [];
-  return {
-    collections: allowed,
-    documents: (path = documents.path) => {
-      if (found === "every") {
-        return allowed;
-      }
-      const notAnEntry = ne(collections.source, "apps");
-      const entries =
-        found.length === 0 ? notAnEntry : or(notAnEntry, inList(path, found));
-      return and(allowed, entries) ?? allowed;
-    },
-  };
+  return found === "every"
+    ? { collections: ids }
+    : { collections: ids, only: { [appsCollectionId]: found } };
 };

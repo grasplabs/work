@@ -159,6 +159,8 @@ import {
   maxEventPayloadBytes,
   maxInboxBytes,
   maxInboxEvents,
+  maxSenderBytes,
+  maxSenderEvents,
   readRun,
   readStep,
   removeJournal,
@@ -280,6 +282,14 @@ export interface EventCommand {
    * taken events. Its payload is held to its limit all the same.
    */
   reserved?: boolean;
+  /**
+   * Who sent it, as its host names senders apart (an App's screen for a
+   * person, a mutation): its events hold no more than their share of the
+   * inbox (`maxSenderEvents`, `maxSenderBytes`), besides the inbox's own
+   * limits, so no one sender crowds out the others. None for an event
+   * held only to the whole inbox's.
+   */
+  sender?: string | null;
 }
 
 /**
@@ -2457,6 +2467,45 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
   }
 
   /**
+   * Whether the run's inbox took an event under delivery key `key`, taken
+   * by a wait or not, ended or not: how a sender whose answer was lost
+   * learns its event was accepted once the run can take no more. Read
+   * only: it accepts nothing.
+   */
+  hasEvent(key: string): boolean {
+    const storage = this.#store;
+    if (!hasJournal(storage.sql)) {
+      return false;
+    }
+    const [found] = storage.sql
+      .exec<{ found: number }>(
+        "SELECT 1 AS found FROM events WHERE key = ?",
+        key
+      )
+      .toArray();
+    return found !== undefined;
+  }
+
+  /**
+   * Whether `sender`'s events leave room in its share of the inbox for
+   * one more of `held` bytes: counted as the inbox's own counters are, its
+   * payloads' and attributes' bytes, by the index of senders' events.
+   */
+  #sharesRoom(sender: string, held: number): boolean {
+    const [share] = this.#store.sql
+      .exec<{ events: number; bytes: number }>(
+        "SELECT COUNT(*) AS events, COALESCE(SUM(LENGTH(CAST(payload AS BLOB)) + COALESCE(LENGTH(CAST(attributes AS BLOB)), 0)), 0) AS bytes FROM events WHERE sender = ? AND reserved = 0",
+        sender
+      )
+      .toArray();
+    return (
+      share !== undefined &&
+      share.events < maxSenderEvents &&
+      share.bytes + held <= maxSenderBytes
+    );
+  }
+
+  /**
    * Accepts an event into the run's inbox: journaled, in order, with the
    * time it was accepted, before the answer. A run that waits for an event
    * of this type, and is still before that wait's deadline, is woken in
@@ -2534,14 +2583,21 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
       ) {
         return { outcome: "full", wake: false };
       }
+      // A reserved event is the host's own, never a sender's.
+      const sender =
+        command.reserved === true ? null : (command.sender ?? null);
+      if (sender !== null && !this.#sharesRoom(sender, held)) {
+        return { outcome: "full", wake: false };
+      }
       storage.sql.exec(
-        "INSERT INTO events (type, payload, key, attributes, accepted_at, reserved) VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO events (type, payload, key, attributes, accepted_at, reserved, sender) VALUES (?, ?, ?, ?, ?, ?, ?)",
         command.type,
         command.payload,
         command.key,
         attributes,
         now,
-        command.reserved === true ? 1 : 0
+        command.reserved === true ? 1 : 0,
+        sender
       );
       // Nor does it count against them later: the counters are what other
       // senders have filled, which a reserved event mustn't take from.
