@@ -304,9 +304,35 @@ const contractInputSchema = z.object({ input: z.json() });
 const activeSql = (person: string): SQL => activeMember(person);
 
 /**
+ * That App `app`'s status lets `person` in now, as SQL, beside their role
+ * (`appRoleSql`), as `stillOpenTo` decides it (app-access.ts): never an
+ * archived App, and a draft only for its builders, in a role that builds.
+ */
+const appStatusAdmitsSql = (person: string, app: string): SQL => sql`(
+  EXISTS (SELECT 1 FROM apps AS lived
+    WHERE lived.id = ${app} AND lived.status != 'archived')
+  AND (EXISTS (SELECT 1 FROM apps AS out
+      WHERE out.id = ${app} AND out.status = 'published')
+    OR (${activeMember(person, ["admin", "builder"])}
+      AND (${activeMember(person, ["admin"])}
+        OR EXISTS (SELECT 1 FROM apps AS owned
+          WHERE owned.id = ${app} AND owned.owner_id = ${person})
+        OR EXISTS (SELECT 1 FROM app_members AS shared
+          WHERE shared.app_id = ${app} AND shared.role = 'builder'
+            AND shared.member_type = 'person' AND shared.member_id = ${person})
+        OR EXISTS (SELECT 1 FROM app_members AS shared
+          JOIN teams ON teams.id = shared.member_id
+            AND teams.organization_id = ${organizationId}
+          JOIN team_members ON team_members.team_id = shared.member_id
+            AND team_members.user_id = ${person}
+          WHERE shared.app_id = ${app} AND shared.role = 'builder'
+            AND shared.member_type = 'team')))))`;
+
+/**
  * That `person` has a role in App `app` now, as SQL: an admin of the
  * organization, its owner, or someone it is shared with, as a person or
- * through a team they are in now. Only while they are an active member.
+ * through a team they are in now, while its status lets them in
+ * (`appStatusAdmitsSql`). Only while they are an active member.
  */
 const appRoleSql = (
   person: string,
@@ -323,7 +349,8 @@ const appRoleSql = (
         AND teams.organization_id = ${organizationId}
       JOIN team_members ON team_members.team_id = shared.member_id
         AND team_members.user_id = ${person}
-      WHERE shared.app_id = ${app} AND shared.member_type = 'team')))`;
+      WHERE shared.app_id = ${app} AND shared.member_type = 'team'))
+  AND ${appStatusAdmitsSql(person, app)})`;
 
 /** That a permission allowing `start` on `id` for the invoker holds, as SQL. */
 const grantSql = (allowing: SQL): SQL =>

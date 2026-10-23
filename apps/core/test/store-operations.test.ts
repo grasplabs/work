@@ -525,6 +525,28 @@ describe("an App calling another App's store", () => {
     });
   });
 
+  it("is served only while the store's App is published", async () => {
+    const admin = await person("admin");
+    const crm = await sealedApp(crmFiles(), "CRM");
+    const desk = await sealedApp(deskFiles, "Desk");
+    await bind(admin, desk, await deskGrant(admin, desk, crm, crmActions));
+    const published = await call(desk.owner, desk, "desk.list");
+    // Its builders take the CRM back to a draft: its code runs for them
+    // alone, never for another App.
+    await env.DB.prepare("UPDATE apps SET status = 'draft' WHERE id = ?")
+      .bind(crm.app)
+      .run();
+    expect({
+      published,
+      draft: await call(desk.owner, desk, "desk.list"),
+      crmSees: await call(crm.owner, crm, "contacts.list"),
+    }).toStrictEqual({
+      published: [],
+      draft: "error:resource.unavailable",
+      crmSees: [],
+    });
+  });
+
   it("stops once the store's App changes an operation's contract, and goes on while it keeps it", async () => {
     const admin = await person("admin");
     const crm = await sealedApp(crmFiles(), "CRM");

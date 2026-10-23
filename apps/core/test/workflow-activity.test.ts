@@ -4,7 +4,7 @@ import type { RunActivity } from "@grasp-os/shared/workflows";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { verifiedCandidate } from "./apps.ts";
+import { published, verifiedCandidate } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { fullScan, planOf, recordedQueries } from "./query-plans.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
@@ -107,6 +107,7 @@ describe("runs over time", () => {
     ]);
     const appName = `Invoices ${unique()}`;
     const { id: app } = await owner.api.apps.create({ name: appName });
+    await published(app);
     const { id: hidden } = await other.api.apps.create({
       name: `Payroll ${unique()}`,
     });
@@ -257,6 +258,7 @@ describe("runs over time", () => {
     const { id: app } = await owner.api.apps.create({
       name: `Invoices ${unique()}`,
     });
+    await published(app);
     await Promise.all([
       seedRun(app, { workflow: "approve", status: "completed", ago: 9 }),
       seedRun(app, { workflow: "approve", status: "completed", ago: 7 }),
@@ -340,6 +342,7 @@ describe("runs over time", () => {
     const { id: app } = await owner.api.apps.create({
       name: `Invoices ${unique()}`,
     });
+    await published(app);
     await seedRun(app, {
       workflow: "approve",
       status: "running",

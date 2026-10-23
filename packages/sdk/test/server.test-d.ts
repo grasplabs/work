@@ -22,6 +22,7 @@ import {
   v,
 } from "../src/values.ts";
 import type { Id } from "../src/values.ts";
+import { workflows } from "./notes/.grasp/references.ts";
 import type { invoiceWorkflow } from "./workflows/invoice-approval.ts";
 
 const noteFields = {
@@ -43,6 +44,7 @@ const { query, mutation, action, internalQuery, doc } = serverModule(schema);
 type Tables = (typeof schema)["tables"];
 
 declare const noteId: Id<"notes">;
+declare const anything: unknown;
 
 // The complete Notes operations of spec 9.4 type-check as written.
 const list = query({
@@ -215,13 +217,17 @@ mutation({
     expectTypeOf(ctx.runQuery(get, { id: args.id })).resolves.toExtend<{
       title: string;
     } | null>();
-    // No resources (so no network), queries only, no `ctx.data`, and
-    // notifications are the runtime of 10.7.4's.
+    // No resources (so no network), queries only, no `ctx.data`, and no
+    // event to notify a run with that it doesn't list.
     expectTypeOf(ctx).not.toHaveProperty("resources");
     expectTypeOf(ctx).not.toHaveProperty("runMutation");
     expectTypeOf(ctx).not.toHaveProperty("runAction");
     expectTypeOf(ctx).not.toHaveProperty("data");
-    expectTypeOf(ctx).not.toHaveProperty("notify");
+    // @ts-expect-error -- an event the mutation doesn't list in `uses`
+    ctx.notify(workflows.summarizeNote.events.styleChosen, {
+      runId: "run-1",
+      data: { style: "short" },
+    });
     return null;
   },
 });
@@ -444,3 +450,72 @@ expectTypeOf<QueryCtx<Tables>>().not.toHaveProperty("startWorkflow");
 expectTypeOf(doc("notes").shape._rev).toExtend<unknown>();
 // @ts-expect-error -- the schema has no such table
 doc("missing");
+
+// `ctx.notify` (spec 10.7.4): a mutation's only, for an event it lists,
+// its data inferred from the reference and never from the call, and
+// answering nothing (it stages; the commit delivers).
+mutation({
+  args: { runId: v.string() },
+  returns: v.null(),
+  uses: [
+    workflows.summarizeNote.events.styleChosen,
+    workflows.summarizeNote.events.noteEdited,
+  ],
+  handler: (ctx, args) => {
+    expectTypeOf(ctx.notify).returns.toBeVoid();
+    ctx.notify(workflows.summarizeNote.events.styleChosen, {
+      runId: args.runId,
+      data: { style: "short" },
+    });
+    ctx.notify(workflows.summarizeNote.events.noteEdited, {
+      runId: args.runId,
+      data: { noteId },
+    });
+    ctx.notify(workflows.summarizeNote.events.styleChosen, {
+      runId: args.runId,
+      // @ts-expect-error -- a value outside the event's enum
+      data: { style: "medium" },
+    });
+    ctx.notify(workflows.summarizeNote.events.styleChosen, {
+      runId: args.runId,
+      // @ts-expect-error -- the other event's data: never inferred from the call
+      data: { noteId },
+    });
+    ctx.notify(workflows.summarizeNote.events.styleChosen, {
+      runId: args.runId,
+      // @ts-expect-error -- data typed as nothing in particular
+      data: anything,
+    });
+    // @ts-expect-error -- an event of another workflow, not listed
+    ctx.notify(workflows.archiveNotes.events.confirmed, {
+      runId: args.runId,
+      data: { confirmed: true },
+    });
+    // @ts-expect-error -- an event's name, not its reference
+    ctx.notify("styleChosen", { runId: args.runId, data: { style: "short" } });
+    // @ts-expect-error -- a run's ID is required
+    ctx.notify(workflows.summarizeNote.events.styleChosen, {
+      data: { style: "short" },
+    });
+    return null;
+  },
+});
+
+// A query reads only, and an action has no transaction to stage one in:
+// neither has `notify`.
+query({
+  args: {},
+  returns: v.null(),
+  handler: (ctx) => {
+    expectTypeOf(ctx).not.toHaveProperty("notify");
+    return null;
+  },
+});
+action({
+  args: {},
+  returns: v.null(),
+  handler: (ctx) => {
+    expectTypeOf(ctx).not.toHaveProperty("notify");
+    return null;
+  },
+});

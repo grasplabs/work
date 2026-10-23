@@ -111,6 +111,7 @@ const openedApp = async () => {
   const { id } = await builder.api.apps.create({ name: "Notes" });
   const { version } = await builder.api.apps.files.commit(id, files, "First");
   await builder.api.apps.versions.setCurrent(id, version);
+  await builder.api.apps.publish(id);
   const review = await admin.api.screenTrust.review(id);
   await admin.api.screenTrust.approve(id, {
     version: review.version,
