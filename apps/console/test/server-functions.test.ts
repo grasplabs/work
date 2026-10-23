@@ -24,7 +24,7 @@ import {
   rollbackRingFn,
 } from "../src/rollout/functions.ts";
 import { mockAccess } from "./access.ts";
-import { mockCloudflareApi } from "./cloudflare-api.ts";
+import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { callServerFn } from "./pages.ts";
 import { publishRelease } from "./releases.ts";
 import { useStoreSecrets } from "./secrets-store.ts";

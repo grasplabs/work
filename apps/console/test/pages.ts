@@ -76,11 +76,13 @@ export interface Caller {
  * member), at TanStack Start's route for server functions, in its wire
  * format. A `caller` can also be what the console's pages never are:
  * another site's page, or no one Access vouches for. An answer that isn't
- * one (a refusal) throws, saying its status.
+ * one (a refusal) throws, saying its status. A GET function takes its data
+ * in the query, as the pages' client sends it.
  */
 export const callServerFn = async <Data, Result>(
   fn: ((options: { data: Data }) => Promise<Result>) & {
     serverFnMeta?: { id: string };
+    method?: string;
   },
   data: Data,
   { email = "staff@grasp.test", from = origin }: Caller = {}
@@ -89,20 +91,26 @@ export const callServerFn = async <Data, Result>(
   if (id === undefined) {
     throw new Error("Not a server function");
   }
-  const response = await exports.default.fetch(`${origin}/_serverFn/${id}`, {
-    method: "POST",
-    headers: {
-      ...(email === null
-        ? {}
-        : { "cf-access-jwt-assertion": await accessJwt(email) }),
-      origin: from,
-      "x-tsr-serverFn": "true",
-      "content-type": "application/json",
-      accept: "application/json",
-    },
-    // Plain data needs none of the plugins the pages' client adds.
-    body: JSON.stringify(await toJSONAsync({ data })),
-  });
+  // Plain data needs none of the plugins the pages' client adds.
+  const payload = JSON.stringify(await toJSONAsync({ data }));
+  const get = fn.method === "GET";
+  const url = `${origin}/_serverFn/${id}`;
+  const response = await exports.default.fetch(
+    get ? `${url}?${new URLSearchParams({ payload })}` : url,
+    {
+      method: get ? "GET" : "POST",
+      headers: {
+        ...(email === null
+          ? {}
+          : { "cf-access-jwt-assertion": await accessJwt(email) }),
+        origin: from,
+        "x-tsr-serverFn": "true",
+        ...(get ? {} : { "content-type": "application/json" }),
+        accept: "application/json",
+      },
+      body: get ? undefined : payload,
+    }
+  );
   if (!response.ok) {
     throw new Error(`The server function answered ${response.status}`);
   }

@@ -1047,6 +1047,25 @@ export const screenSubmissions = sqliteTable(
 );
 
 /**
+ * The inventory of action invocations' objects (action-invocation.ts),
+ * one row per object that may hold an invocation: written before the
+ * object records its run and deleted after the object empties itself, so
+ * every object holding a run, a receipt or a tombstone has a row (a row
+ * left behind names an empty object). Where the invocation stands is the
+ * object's own; the row only names it and whose it is.
+ */
+export const actionInvocations = sqliteTable("action_invocations", {
+  /** The object's name (`invocationName`). */
+  name: text().primaryKey(),
+  personId: text("person_id").notNull(),
+  appId: text("app_id").notNull(),
+  /** Whether it is a streaming action's (spec 10.7.6) or a plain one's. */
+  streaming: integer({ mode: "boolean" }).notNull(),
+  /** When it was listed, as its first run started. */
+  createdAt: timestamp("created_at").notNull(),
+});
+
+/**
  * The workflow runs an App's tests started (workflows/fixture-runs.ts),
  * each recorded before the engine is asked for it and deleted once the
  * engine removed it: a row left behind is a test run that died between
@@ -3888,6 +3907,8 @@ export const brainRecords = sqliteTable(
         "teamCount",
         "stakeholder",
         "gap",
+        "workflow",
+        "workflowVersion",
       ],
     }).notNull(),
     id: text().notNull(),
