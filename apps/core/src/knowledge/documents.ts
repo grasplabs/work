@@ -164,6 +164,23 @@ export const indexedValuesOf = (
 };
 
 /**
+ * How many sections a version's `text` at `path` has, numbered from 0 as
+ * its save numbered them, or undefined when its frontmatter doesn't read:
+ * for a version whose sections are no longer stored (only the current
+ * one's are), such as one a Brain memory cites.
+ */
+export const sectionCountOf = (
+  path: string,
+  text: string
+): number | undefined => {
+  try {
+    return splitSections(parseBaseFields(path, text).body).length;
+  } catch {
+    return undefined;
+  }
+};
+
+/**
  * Reads the text of the document at `path`, within the limits a save
  * keeps. Its title is the frontmatter's, else a skill's name, else its
  * first heading, else its file name.

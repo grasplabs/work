@@ -20,6 +20,13 @@ export const consoleDatabase = (d1: D1Database): ConsoleDatabase => drizzle(d1);
 /** Who acted: a staff member, or the console itself (its cron and workflows). */
 export type Actor = Staff | "system";
 
+/**
+ * Who an audit event names: an actor, or a Discord user asking Grasp's bot
+ * (src/admin/discord.ts), by their Discord id. The bot only reads, so it is
+ * only ever recorded on its own (`audit`).
+ */
+export type AuditActor = Actor | `discord:${string}`;
+
 /** What happened, as the audit log records it: identifiers, never content. */
 export interface ConsoleEvent {
   /** A dotted verb, such as `client.create`. */
@@ -36,14 +43,14 @@ export interface ConsoleEvent {
 const actionPattern = /^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$/u;
 
 /** Checks `event` and builds its row. */
-const rowOf = (actor: Actor, event: ConsoleEvent) => {
+const rowOf = (actor: AuditActor, event: ConsoleEvent) => {
   if (!actionPattern.test(event.action)) {
     throw new Error(`Not an audit action: ${event.action}`);
   }
   return {
     id: crypto.randomUUID(),
     at: new Date(),
-    actor: actor === "system" ? actor : actor.email,
+    actor: typeof actor === "string" ? actor : actor.email,
     action: event.action,
     clientId: event.clientId ?? null,
     target: event.target ?? null,
@@ -77,7 +84,7 @@ export const act = async (
  */
 export const audit = async (
   db: ConsoleDatabase,
-  actor: Actor,
+  actor: AuditActor,
   event: ConsoleEvent
 ): Promise<void> => {
   await db.insert(auditEvents).values(rowOf(actor, event));

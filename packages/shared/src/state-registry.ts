@@ -249,6 +249,8 @@ const coreDb: D1State = {
     screen_policies: exported(`${core}screen-trust.ts`),
     blueprints: exported(`${core}app-blueprints.ts`),
     app_versions: exported(`${core}apps.ts`),
+    app_candidates: exported(`${core}app-candidates.ts`),
+    app_candidate_reports: exported(`${core}app-candidates.ts`),
     sdk_release_manifests: exported(`${core}app-releases.ts`),
     sdk_release_artifacts: exported(`${core}app-releases.ts`),
     sdk_artifact_deletions: transient(`${core}release-retention.ts`),
@@ -323,6 +325,10 @@ const coreDb: D1State = {
     trigger_resource_versions: exported(`${core}trigger-resources.ts`),
     workflow_start_receipts: exported(`${core}workflow-starts.ts`),
     workflow_resource_runs: exported(`${core}workflows/resource-runs.ts`),
+    workflow_emitted_events: exported(
+      `${core}workflows/emitted-events.ts`,
+      "The events JSON workflows' emit tasks wrote: an outbox, its undelivered rows still owed."
+    ),
     workflow_run_files: exported(`${core}workflows/run-files.ts`),
     workflow_run_file_chunks: exported(`${core}workflows/run-files.ts`),
     workflow_resource_run_terminations: exported(
@@ -383,6 +389,11 @@ const knowledgeDb: D1State = {
     brain_payload_releases: transient(
       `${core}knowledge/payloads.ts`,
       "Empty between batches."
+    ),
+    brain_memories: exported(`${core}knowledge/memories.ts`, brainPending),
+    brain_receipts: transient(
+      `${core}knowledge/memories.ts`,
+      "Command receipts for retries, swept a day after the command."
     ),
     audit_outbox: exported(
       `${core}audit-outbox.ts`,

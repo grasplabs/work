@@ -239,6 +239,18 @@ export const adminIntegrationsSchema = z.object({
 export type AdminIntegrations = z.output<typeof adminIntegrationsSchema>;
 
 /**
+ * An app the company asked Grasp to add, as Composio's catalog doesn't
+ * have it (core's app-requests): the name it was asked by, and when. Never
+ * why, its link, or who asked: what someone typed, and a person.
+ */
+export const adminAppAskedSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  askedAt: isoTime,
+});
+export type AdminAppAsked = z.output<typeof adminAppAskedSchema>;
+
+/**
  * What core doesn't hold yet: null from this core, and whatever a newer
  * one sends is read as null too, for this schema can't say what it is.
  */
@@ -319,6 +331,12 @@ export const adminSnapshotSchema = z.object({
    * from a core that doesn't send it yet, and when connect didn't answer.
    */
   integrations: adminIntegrationsSchema.nullable(),
+  /**
+   * The apps the company asked Grasp to add, oldest first: what Grasp's
+   * admin lists as integrations to build. None from a core that doesn't
+   * send them yet.
+   */
+  asked: z.array(adminAppAskedSchema).default([]),
   /** The AI the onboarding used, day by day, oldest first. */
   usage: z.array(adminUsageDaySchema),
 });

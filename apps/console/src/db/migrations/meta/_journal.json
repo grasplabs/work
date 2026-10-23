@@ -134,6 +134,13 @@
       "when": 1792687050203,
       "tag": "0018_client_provisions",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "6",
+      "when": 1792702304497,
+      "tag": "0019_client_attio_company",
+      "breakpoints": true
     }
   ]
 }
