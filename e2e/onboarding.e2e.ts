@@ -48,7 +48,7 @@ test("staff put the agreements in place, and the links that waited go out", asyn
   const lead = `lea-${run}`;
   const { core, api } = apiOf(staff);
   try {
-    await api.onboarding.saveRoster({
+    await api.onboarding.confirmRoster({
       teams: [
         { id: `sales-${run}`, name: "Sales", lead },
         { id: `ops-${run}`, name: "Ops", lead: null },
@@ -372,7 +372,7 @@ test("staff move someone to another team, and ask a team in late, its lead first
   const { core, api } = apiOf(staff);
   try {
     // The agreements are in since the first test: links go out by the plan.
-    await api.onboarding.saveRoster({
+    await api.onboarding.confirmRoster({
       teams: [
         { id: `sales-${run}`, name: "Sales", lead: `lea-${run}` },
         { id: `ops-${run}`, name: "Ops", lead: `ona-${run}` },
@@ -537,6 +537,12 @@ test("the company's admin goes through their onboarding: the staff list, the org
   await expect(
     page.getByText(
       "Thank you. From your staff list I can see 4 people in 3 teams."
+    )
+  ).toBeVisible();
+  // A plan is set: nobody new gets a link before the organization is confirmed.
+  await expect(
+    page.getByText(
+      "4 people new on your list get their links once you confirm your organization."
     )
   ).toBeVisible();
   await page.getByRole("button", { name: "Continue" }).click();
@@ -936,7 +942,7 @@ test("while Stephen talks to the team, the admin sees the numbers, no team under
   });
   const { core, api } = apiOf(admin);
   try {
-    await api.onboarding.saveRoster({
+    await api.onboarding.confirmRoster({
       teams: [
         { id: sales, name: "Sales", lead: `lea-${run}` },
         { id: service, name: "Service", lead: `lisa-${run}` },
