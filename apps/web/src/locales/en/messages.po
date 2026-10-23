@@ -366,6 +366,10 @@ msgstr "{count, plural, one {# team, with its roles} other {# teams, with their 
 msgid "{count, plural, one {# time waster} other {# time wasters}}"
 msgstr "{count, plural, one {# time waster} other {# time wasters}}"
 
+#: src/routes/_shell.integrations.$integration.tsx
+msgid "{count, plural, one {# tool allowed} other {# tools allowed}}"
+msgstr "{count, plural, one {# tool allowed} other {# tools allowed}}"
+
 #: src/knowledge/timeline.tsx
 msgid "{count, plural, one {# version} other {# versions}}"
 msgstr "{count, plural, one {# version} other {# versions}}"
@@ -1202,6 +1206,10 @@ msgstr "{title} removed from the dashboard."
 #: src/routes/_shell.policies.index.tsx
 msgid "{toReview} to review"
 msgstr "{toReview} to review"
+
+#: src/routes/_shell.integrations.$integration.tsx
+msgid "{total, plural, one {{count} of its # tool allowed} other {{count} of its # tools allowed}}"
+msgstr "{total, plural, one {{count} of its # tool allowed} other {{count} of its # tools allowed}}"
 
 #: src/settings/pulse-people.tsx
 msgid "{total, plural, one {{matching} of # person} other {{matching} of # people}}"
@@ -2263,6 +2271,7 @@ msgstr "App approval"
 msgid "App name"
 msgstr "App name"
 
+#: src/routes/_shell.integrations.$integration.tsx
 #: src/routes/_shell.landscape.$appId.tsx
 msgid "App not found"
 msgstr "App not found"
@@ -4593,6 +4602,10 @@ msgstr "Every team has its lead"
 msgid "Every team, whether it takes part or not. A team that was left out can be asked in: its lead gets a link first."
 msgstr "Every team, whether it takes part or not. A team that was left out can be asked in: its lead gets a link first."
 
+#: src/routes/_shell.integrations.$integration.tsx
+msgid "Every tool it has: domains and agents use only what they are granted."
+msgstr "Every tool it has: domains and agents use only what they are granted."
+
 #: src/knowledge/collection-markers.tsx
 msgid "Everyone"
 msgstr "Everyone"
@@ -5701,10 +5714,6 @@ msgstr "Input"
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Integration"
 msgstr "Integration"
-
-#: src/routes/_shell.integrations.$integration.tsx
-msgid "Integration not found"
-msgstr "Integration not found"
 
 #: src/frame/app-sidebar.tsx
 #: src/routes/_shell.domains.$engine.index.tsx
@@ -7530,10 +7539,6 @@ msgstr "Not confirmed"
 msgid "Not confirmed by the board yet"
 msgstr "Not confirmed by the board yet"
 
-#: src/routes/_shell.integrations.$integration.tsx
-msgid "Not connected"
-msgstr "Not connected"
-
 #: src/dashboard/standard-widgets.tsx
 msgid "not counted yet"
 msgstr "not counted yet"
@@ -8931,6 +8936,10 @@ msgstr "Rating"
 msgid "Reached"
 msgstr "Reached"
 
+#: src/routes/_shell.integrations.$integration.tsx
+msgid "Reaches"
+msgstr "Reaches"
+
 #: src/policies/policy.ts
 msgctxt "what a permission lets an app do with company data"
 msgid "read"
@@ -10050,6 +10059,7 @@ msgstr "Sign in"
 #: src/connections/integrations-banner.tsx
 #: src/dashboard/to-do.tsx
 #: src/inbox/item-detail.tsx
+#: src/routes/_shell.integrations.$integration.tsx
 msgid "Sign in again"
 msgstr "Sign in again"
 

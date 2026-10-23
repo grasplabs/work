@@ -78,6 +78,22 @@ test("a person comes back from connecting Microsoft 365, sees it on its page, an
   await expect(
     page.getByRole("status").filter({ hasText: "Connected." })
   ).toBeVisible();
+  // Its Overview's account card: where it stands, what it reaches, and
+  // signing in again to the connection whose access ran out.
+  const account = page.getByRole("region", { name: "Account" });
+  await expect(account.getByRole("definition").first()).toHaveText(
+    "Needs someone to sign in again"
+  );
+  await expect(
+    account.getByText(
+      "Every tool it has: domains and agents use only what they are granted."
+    )
+  ).toBeVisible();
+  await account.getByRole("button", { name: "Sign in again" }).click();
+  await expect(
+    page.getByRole("dialog", { name: "Sign in to Microsoft 365 again" })
+  ).toBeVisible();
+  await page.keyboard.press("Escape");
 
   await page.getByRole("tab", { name: /^Account/u }).click();
   const mineCard = cardOf(page, "Microsoft 365", mine);
@@ -187,7 +203,10 @@ test("a person comes back from connecting Microsoft 365, sees it on its page, an
   // An integration there isn't is not found, in the frame.
   await page.goto("/integrations/native:no-such-app");
   await expect(
-    page.getByRole("heading", { name: "Integration not found" })
+    page.getByRole("heading", { name: "App not found" })
+  ).toBeVisible();
+  await expect(
+    page.getByText("It may have been renamed or removed.")
   ).toBeVisible();
 });
 
