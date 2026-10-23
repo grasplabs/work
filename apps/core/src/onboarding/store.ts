@@ -36,6 +36,11 @@ import type {
   Plan,
   Roster,
 } from "@grasp-os/shared/onboarding";
+import {
+  noChoices,
+  setupChoicesSchema,
+} from "@grasp-os/shared/onboarding-choices";
+import type { SetupChoices } from "@grasp-os/shared/onboarding-choices";
 import type {
   DocumentReading,
   OnboardingDocument,
@@ -1665,6 +1670,41 @@ export class Onboarding extends DurableObject<Env> {
    */
   interviewBrief(): string {
     return interviewBrief(this.#stephen(), this.kickoff());
+  }
+
+  /** What the admin chose about what Grasp may connect. */
+  choices(): SetupChoices {
+    const [row] = this.#db
+      .select({ choices: onboarding.choices })
+      .from(onboarding)
+      .where(eq(onboarding.id, 1))
+      .all();
+    const stored = row?.choices ?? null;
+    return stored === null
+      ? noChoices
+      : setupChoicesSchema.parse(JSON.parse(stored));
+  }
+
+  /**
+   * Keeps what the admin chose. In the log and the audit log by which
+   * places and what of Pulse and the HR platform, never what they typed.
+   */
+  saveChoices(choices: SetupChoices, by: AuditActor): SetupChoices {
+    this.ctx.storage.transactionSync(() => {
+      this.#db
+        .update(onboarding)
+        .set({ choices: JSON.stringify(choices) })
+        .where(eq(onboarding.id, 1))
+        .run();
+      this.#changed(by, "onboarding.choices.saved", {
+        sources: choices.sources.join(" "),
+        asked: choices.sourcesWanted.length,
+        pulse: choices.pulse ?? "",
+        hr: choices.hr?.kind ?? "",
+      });
+    });
+    this.#deliverAudit();
+    return this.choices();
   }
 
   /** The documents the admin shared, the newest first. */

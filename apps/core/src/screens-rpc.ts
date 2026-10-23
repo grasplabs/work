@@ -61,7 +61,14 @@ import { z } from "zod";
 import { asksPreferenceWindow, windowExtentOf } from "./app-functions.ts";
 import { heldManifest, versionReferenceSource } from "./app-releases.ts";
 import type { AppAnswer } from "./app.ts";
-import { appFor, findVersion, getApp, listApps, versionFiles } from "./apps.ts";
+import {
+  appFor,
+  findVersion,
+  getApp,
+  listApps,
+  usableApp,
+  versionFiles,
+} from "./apps.ts";
 import { screenBuilds } from "./db/core/schema.ts";
 import { withReferencesOf } from "./draft-references.ts";
 import type { ReferenceSource } from "./draft-references.ts";
@@ -161,7 +168,7 @@ const admittedApp = async (
   by: Identity,
   app: unknown
 ): Promise<App> => {
-  const found = await getApp(env, by, app);
+  const found = await usableApp(env, by, app);
   if (!(await appHost(env, found.id).admitRequest(by.userId))) {
     throw rateLimited();
   }
@@ -980,7 +987,7 @@ const hasRoleNow = async (
   app: AppId
 ): Promise<boolean> => {
   try {
-    await appFor(env, by, app, "user");
+    await usableApp(env, by, app);
     return true;
   } catch (error) {
     if (isExpectedError(error)) {
@@ -1020,7 +1027,7 @@ export const stillHasRole = (
   };
   const hasRole = async (person: Identity): Promise<boolean> => {
     try {
-      await appFor(env, person, app, role);
+      await usableApp(env, person, app, role);
       return true;
     } catch (error) {
       return refused(error);
@@ -1287,8 +1294,9 @@ export class ScreenFrameRpc extends CoreRpcTarget implements ScreenFrameApi {
     const by = await this.#person();
     const { env, app, artifact } = this.#connection;
     // The person's role in the App first, as every call's: someone who
-    // lost it hears that, never how the App's build stands.
-    const { id } = await getApp(env, by, app);
+    // lost it hears that, never how the App's build stands. Nobody's frame
+    // of an archived App is delivered anything.
+    const { id } = await usableApp(env, by, app);
     return deliveryOf(await standingOf(env, id, artifact));
   }
 
@@ -1565,7 +1573,7 @@ export class ScreensRpc extends CoreRpcTarget implements ScreensApi {
 
   async frame(app: string, lease: string): Promise<ScreenFrameRpc> {
     return await withPerson(this.#check, async (by) => {
-      const { id } = await getApp(this.#env, by, app);
+      const { id } = await usableApp(this.#env, by, app);
       // Core's own lease names the build, never the page or the frame; a
       // lease core didn't sign for them and this App names none, and is
       // decided as a build nobody approved.
@@ -1587,7 +1595,7 @@ export class ScreensRpc extends CoreRpcTarget implements ScreensApi {
 
   async version(app: string): Promise<number | null> {
     return await withPerson(this.#check, async (by) => {
-      const { currentVersion } = await getApp(this.#env, by, app);
+      const { currentVersion } = await usableApp(this.#env, by, app);
       return currentVersion;
     });
   }

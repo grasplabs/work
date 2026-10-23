@@ -1174,7 +1174,7 @@ export const buildDependencies = async (
     throw dependencyErrors.create("dependency.forbidden");
   }
   // Its own builders only; the schema keeps a workflow to `computation`.
-  await builtSubject(env, by, asked.subject);
+  await builtSubject(env, by, asked.subject, true);
   const admit = async (use: "new" | "retained"): Promise<Admitted> =>
     await admitDependencies(
       env,

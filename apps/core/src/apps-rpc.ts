@@ -10,6 +10,8 @@ import type { DefinitionPackage } from "@grasp-os/shared/definition-packages";
 import { AppBlueprintsRpc } from "./app-blueprints.ts";
 import { AppFilesRpc } from "./app-files-rpc.ts";
 import { AppMembersRpc } from "./app-members.ts";
+import { changeStatus } from "./app-status.ts";
+import type { AppTransition } from "./app-status.ts";
 import { AppVersionsRpc } from "./app-versions-rpc.ts";
 import {
   appContents,
@@ -95,6 +97,29 @@ export class AppsRpc extends CoreRpcTarget implements AppsApi {
     return await withPerson(
       this.#check,
       async (by) => await appExports(this.#env, by, app)
+    );
+  }
+
+  async publish(app: string): Promise<App> {
+    return await this.#changeStatus(app, "publish");
+  }
+
+  async unpublish(app: string): Promise<App> {
+    return await this.#changeStatus(app, "unpublish");
+  }
+
+  async archive(app: string): Promise<App> {
+    return await this.#changeStatus(app, "archive");
+  }
+
+  async restore(app: string): Promise<App> {
+    return await this.#changeStatus(app, "restore");
+  }
+
+  async #changeStatus(app: string, transition: AppTransition): Promise<App> {
+    return await withPerson(
+      this.#check,
+      async (by) => await changeStatus(this.#env, by, app, transition)
     );
   }
 

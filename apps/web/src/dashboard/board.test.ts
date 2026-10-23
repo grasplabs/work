@@ -45,6 +45,7 @@ const engine = (id: string): App => ({
   blueprint: null,
   currentVersion: 1,
   pendingVersion: null,
+  status: "published",
   createdAt: "2026-10-01T09:00:00.000Z",
 });
 

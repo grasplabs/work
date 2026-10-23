@@ -535,17 +535,23 @@ const ReviewDetails = ({
 type MadeCurrent = { made: true } | ReturnType<typeof makeCurrentFailure>;
 
 /**
- * Makes `version` of `app` current, or says why core refused: a store's
- * failed change it waits on points to the engine's page (`link`).
- * Outside the component, as the React Compiler can't compile `try`.
+ * Makes `version` of `app` current, and with `publish` then publishes the
+ * App (a draft until then: its users can't open it, its triggers don't
+ * fire), or says why core refused: a store's failed change it waits on
+ * points to the engine's page (`link`). Outside the component, as the
+ * React Compiler can't compile `try`.
  */
 const setCurrentOf = async (
   session: Session,
   app: string,
-  version: number
+  version: number,
+  publish: boolean
 ): Promise<MadeCurrent> => {
   try {
     await session.apps.versions.setCurrent(app, version);
+    if (publish) {
+      await session.apps.publish(app);
+    }
     return { made: true };
   } catch (error) {
     return makeCurrentFailure(error);
@@ -619,10 +625,10 @@ const PendingVersion = ({
   }, [core, app.id, version, loaded, codeReads]);
   const [refused, setRefused] =
     useState<Exclude<MadeCurrent, { made: true }>>();
-  const makeCurrent = async (): Promise<void> => {
+  const makeCurrent = async (publish: boolean): Promise<void> => {
     setRefused(undefined);
     const made = await run(
-      async (session) => await setCurrentOf(session, app.id, version)
+      async (session) => await setCurrentOf(session, app.id, version, publish)
     );
     if (made === undefined) {
       return;
@@ -700,14 +706,39 @@ const PendingVersion = ({
       </CardContent>
       {loaded === undefined ? null : (
         <CardFooter>
-          <Button
-            disabled={busy || !ready}
-            onClick={() => {
-              void makeCurrent();
-            }}
-          >
-            <Trans>Make version {version} current</Trans>
-          </Button>
+          <div className="flex flex-col items-start gap-2">
+            {/* A draft is released for its builders alone until published:
+              the two together, for who means it for its users now. */}
+            {app.status === "draft" ? (
+              <p className="text-muted-foreground">
+                <Trans>
+                  {name} is a draft: only its builders open it, and its triggers
+                  don&apos;t fire, until it is published.
+                </Trans>
+              </p>
+            ) : null}
+            <div className="flex flex-wrap gap-2">
+              <Button
+                disabled={busy || !ready}
+                onClick={() => {
+                  void makeCurrent(false);
+                }}
+                variant={app.status === "draft" ? "outline" : "default"}
+              >
+                <Trans>Make version {version} current</Trans>
+              </Button>
+              {app.status === "draft" ? (
+                <Button
+                  disabled={busy || !ready}
+                  onClick={() => {
+                    void makeCurrent(true);
+                  }}
+                >
+                  <Trans>Make version {version} current and publish</Trans>
+                </Button>
+              ) : null}
+            </div>
+          </div>
         </CardFooter>
       )}
     </Card>

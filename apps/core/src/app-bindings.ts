@@ -7,7 +7,7 @@ import { runOfStepKey } from "@grasp-os/shared/workflows";
 import { WorkerEntrypoint, exports } from "cloudflare:workers";
 import { z } from "zod";
 
-import { requireStillOpen } from "./app-access.ts";
+import { requireServes, requireStillOpen } from "./app-access.ts";
 import type { AppExportBinding } from "./app-calls.ts";
 import type { Admission, Admitted, InvocationKind } from "./app.ts";
 import {
@@ -52,6 +52,9 @@ const requireStillAdmitted = async (
   app: AppId,
   admission: Admission | undefined
 ): Promise<void> => {
+  // Whoever let the call in: an App archived since serves it no more, and
+  // one taken back to a draft no longer serves other callers.
+  await requireServes(env, app, admission);
   if (admission?.type === "role") {
     await requireStillOpen(env, admission.person, app);
   } else if (admission?.type === "export") {

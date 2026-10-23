@@ -33,6 +33,7 @@ import {
 } from "../src/file-host.ts";
 import { revokeRelease } from "../src/release-retention.ts";
 import { StoreHost } from "../src/store-host.ts";
+import { published as publishedApp } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { person as actingPerson } from "./sealed-apps.ts";
@@ -335,6 +336,7 @@ type Person = Awaited<ReturnType<typeof personApi>>;
 const releasedApp = async (builder: Person) => {
   const admin = await personApi("admin");
   const { id } = await builder.api.apps.create({ name: "Notes" });
+  await publishedApp(id);
   const { version } = await builder.api.apps.files.commit(id, files, "First");
   await builder.api.apps.versions.setCurrent(id, version);
   const review = await admin.api.screenTrust.review(id);
@@ -1074,6 +1076,7 @@ describe("an App's files", { timeout: 120_000 }, () => {
     const builder = await personApi("builder");
     const admin = await personApi("admin");
     const { id: app } = await builder.api.apps.create({ name: "Notes" });
+    await publishedApp(app);
     const { version } = await builder.api.apps.files.commit(
       app,
       files,

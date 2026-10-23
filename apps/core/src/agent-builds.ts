@@ -39,6 +39,7 @@ import {
   createApp,
   draftFiles,
   draftOverLatest,
+  editableApp,
   latestVersion,
   proposeDraft,
 } from "./apps.ts";
@@ -693,8 +694,20 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
     });
   }
 
-  /** The App `app` names, which the person builds. */
+  /**
+   * The App `app` names, which the person builds: never an archived one,
+   * which is read-only until a builder restores it (app-status.ts).
+   */
   async #buildable(by: Acting, app: unknown): Promise<AppId> {
+    const { id } = await editableApp(this.env, by, app);
+    return id;
+  }
+
+  /**
+   * The App `app` names, which the person builds, to read: its draft's
+   * files, its checks and dry runs, an archived App's included.
+   */
+  async #readable(by: Acting, app: unknown): Promise<AppId> {
     const { id } = await appFor(this.env, by, app, "builder");
     return id;
   }
@@ -820,7 +833,7 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
     return await this.#build(
       "build.files",
       async (by) => {
-        const id = await this.#buildable(by, app);
+        const id = await this.#readable(by, app);
         const draft = await draftOf(this.env, this.ctx.props, id);
         return {
           base: draft.base,
@@ -926,7 +939,7 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
     return await this.#build(
       "build.check",
       async (by) => {
-        const id = await this.#buildable(by, app);
+        const id = await this.#readable(by, app);
         const draft = await draftOf(this.env, this.ctx.props, id);
         const files = Object.fromEntries(await draftFiles(this.env, id, draft));
         const { result, failedInARow } = await this.#counted(
@@ -1109,7 +1122,7 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
     return await this.#build(
       "build.dryRun",
       async (by) => {
-        const id = await this.#buildable(by, app);
+        const id = await this.#readable(by, app);
         const values = appErrors.parse(
           "app.invalid",
           dryRunParamsSchema,

@@ -5,6 +5,7 @@ import type { OnboardingDirectoryApi } from "./directory.ts";
 import type { OnboardingPlacesApi } from "./document-places.ts";
 import { defineErrorFamily } from "./errors.ts";
 import type { KickoffApi } from "./kickoff.ts";
+import type { OnboardingChoicesApi } from "./onboarding-choices.ts";
 import type { OnboardingDocumentsApi } from "./onboarding-documents.ts";
 import type {
   LogFilter,
@@ -289,7 +290,11 @@ export interface Programme {
  * programme for everyone signed in.
  */
 export interface OnboardingApi
-  extends OnboardingDocumentsApi, OnboardingDirectoryApi, OnboardingPlacesApi {
+  extends
+    OnboardingDocumentsApi,
+    OnboardingDirectoryApi,
+    OnboardingChoicesApi,
+    OnboardingPlacesApi {
   /** The programme, for the dashboard; null without a plan. Any role. */
   programme: () => Promise<Programme | null>;
   view: () => Promise<OnboardingView>;

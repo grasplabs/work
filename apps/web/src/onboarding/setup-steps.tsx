@@ -1,3 +1,4 @@
+import type { OAuthProvider } from "@grasp-os/shared/connect";
 import { directoryErrors } from "@grasp-os/shared/directory";
 import type {
   DirectorySuite,
@@ -21,22 +22,17 @@ import type {
   RosterInput,
   TeamProgress,
 } from "@grasp-os/shared/onboarding";
+import type { SetupChoices } from "@grasp-os/shared/onboarding-choices";
 import { documentErrors } from "@grasp-os/shared/onboarding-documents";
 import type { OnboardingDocument } from "@grasp-os/shared/onboarding-documents";
 import type { GateView, KnownPart } from "@grasp-os/shared/onboarding-gate";
+import type { Identity } from "@grasp-os/shared/rpc";
 import {
   Alert,
   AlertDescription,
   AlertTitle,
 } from "@grasp-os/ui/components/alert";
 import { Button } from "@grasp-os/ui/components/button";
-import {
-  Item,
-  ItemContent,
-  ItemGroup,
-  ItemMedia,
-  ItemTitle,
-} from "@grasp-os/ui/components/item";
 import {
   Popover,
   PopoverContent,
@@ -71,15 +67,19 @@ import type { ComponentType } from "react";
 import { z } from "zod";
 
 import type { BrainScene } from "../brain/dot-brain.tsx";
-import { AppLogo } from "../connections/app-logo.tsx";
 import { CoreTimeoutError } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatDate, formatList } from "../format.ts";
 import { isLocale, localeNames } from "../i18n.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
-import { usePrepare, useSaid } from "../voice/voice.ts";
+import { speak, usePrepare, useSaid } from "../voice/voice.ts";
 import { About } from "./about-story.tsx";
+import {
+  HrPlatform,
+  Pulse as PulseStep,
+  Sources as SourcesStep,
+} from "./connect-steps.tsx";
 import { DocumentDrop } from "./document-drop.tsx";
 import type { DocumentRow } from "./document-drop.tsx";
 import { LanguageChoice } from "./language-choice.tsx";
@@ -114,7 +114,6 @@ import {
 import type { Answer, StepVoice } from "./setup-parts.tsx";
 import {
   closesOn,
-  documentSources,
   openItems,
   stepIndex,
   steps,
@@ -137,9 +136,9 @@ import { XlsxError, xlsxMost, xlsxRows } from "./xlsx.ts";
 // `RealPulse`, `RealOpen`, and the others where nothing is different). What
 // a step keeps goes to core: who works where, who leads which team and
 // which teams take part, the documents and the answers to their questions,
-// and when the interviews run. What core keeps nothing of yet (where the
-// documents live, Pulse) shows the step as the prototype does with nothing
-// in; what needs the admin settled, this browser keeps.
+// what the admin chose about what Grasp may connect (connect-steps.tsx),
+// and when the interviews run. What needs the admin settled, this browser
+// keeps.
 
 /** What the onboarding reads from core, and who is going through it. */
 export interface SetupData {
@@ -156,6 +155,11 @@ export interface SetupData {
   places: OnboardingPlaces | null;
   /** Grasp's sending domain, which the admin lets through their mail filter. */
   sendingDomain: string;
+  /** What the admin chose about what Grasp may connect. */
+  choices: SetupChoices;
+  /** The suites the company signs in with. */
+  signIn: OAuthProvider[];
+  identity: Identity;
 }
 
 export interface StepProps {
@@ -206,6 +210,14 @@ const downloadCsv = (content: string, filename: string): void => {
   URL.revokeObjectURL(url);
 };
 
+/** What the steps that connect read, from a step's props (connect-steps.tsx). */
+const connectProps = ({ data, go }: StepProps) => ({
+  choices: data.choices,
+  signIn: data.signIn,
+  identity: data.identity,
+  go,
+});
+
 /** Reads core again after a change, so every step shows what core now has. */
 const useRefresh = (): (() => Promise<void>) => {
   const router = useRouter();
@@ -237,7 +249,7 @@ const useHeadlines = ({
 }: Pick<StepProps, "data" | "settled">): Record<
   Exclude<SetupStep, "about">,
   Headline
-> => {
+> & { hr: Headline } => {
   const { t } = useLingui();
   const { admin } = data;
   const { sponsor } = data.view;
@@ -255,7 +267,17 @@ const useHeadlines = ({
   } else if (onlySuite !== undefined) {
     companySentence = t`The quickest way is to connect your ${signIn} sign-in. I’ll only see names, teams and roles. Your email, chats and calendars stay closed.`;
   }
+  // Before the organization, the leads step asks for the HR platform, until the admin said which.
+  const hr: Headline = {
+    title: t`Which HR platform do you use?`,
+    sentence: t`It knows who leads which team, so I can talk to the leads first. We connect it with you.`,
+  };
+  const organization: Headline = {
+    title: t`Almost done: is this your organization?`,
+    sentence: t`I talk to each team lead first, so they hear about me before their team does. Check who leads which team, and which teams take part.`,
+  };
   return {
+    hr,
     welcome: {
       title: t`Hi ${admin}, I’m Stephen`,
       // The sponsor by name, only when the kickoff gave one.
@@ -286,10 +308,7 @@ const useHeadlines = ({
         .join(" ")
         .trim(),
     },
-    leads: {
-      title: t`Almost done: is this your organization?`,
-      sentence: t`I talk to each team lead first, so they hear about me before their team does. Check who leads which team, and which teams take part.`,
-    },
+    leads: data.choices.hr === null ? hr : organization,
     team: {
       title: t`Before I reach out, let your team know`,
       sentence: t`People respond better when they know why I’m reaching out. I’ve drafted a message you can send yourself. Then pick the day the interviews start.`,
@@ -435,10 +454,12 @@ const shareDocument = async (
   core: ReturnType<typeof useCore>,
   file: File,
   locale: InterviewLocale
-): Promise<{ shared: true } | { shared: false; error: unknown }> => {
+): Promise<
+  { shared: true; kept: OnboardingDocument } | { shared: false; error: unknown }
+> => {
   try {
     const bytes = new Uint8Array(await file.arrayBuffer());
-    await core.withSession(
+    const kept = await core.withSession(
       async (session) =>
         await session.onboarding.shareDocument({
           locale,
@@ -446,7 +467,7 @@ const shareDocument = async (
           bytes,
         })
     );
-    return { shared: true };
+    return { shared: true, kept };
   } catch (error) {
     return { shared: false, error };
   }
@@ -851,44 +872,10 @@ const Company = (props: StepProps) => {
   );
 };
 
-/**
- * Where the documents live. Grasp connects none of them here yet, and core
- * keeps nothing of them: the places are listed, and the step can be
- * skipped, as the prototype's is with none connected.
- */
-const Sources = (props: StepProps) => {
-  const { t } = useLingui();
-  const lines = useHeadlines(props).sources;
-  return (
-    <>
-      <Heading sentence={lines.sentence} title={lines.title} />
-      <Onward>
-        <ItemGroup className="grid w-full text-left sm:grid-cols-2">
-          {documentSources.map((name) => (
-            <Item key={name} size="sm" variant="outline">
-              <ItemMedia>
-                <AppLogo name={name} size="sm" />
-              </ItemMedia>
-              <ItemContent>
-                <ItemTitle>{name}</ItemTitle>
-              </ItemContent>
-            </Item>
-          ))}
-        </ItemGroup>
-      </Onward>
-      <Asides>
-        <LaterLink
-          onClick={() => {
-            props.go("documents");
-          }}
-        >
-          {t`Skip for now`}
-        </LaterLink>
-        <SupportLink page="documents">{t`More about these connections`}</SupportLink>
-      </Asides>
-    </>
-  );
-};
+/** Where the documents live (connect-steps.tsx). */
+const Sources = (props: StepProps) => (
+  <SourcesStep {...connectProps(props)} lines={useHeadlines(props).sources} />
+);
 
 /** About how long reading a document takes, in milliseconds, for its bar to fill at; a bigger one longer. */
 const readMs = 4500;
@@ -927,13 +914,15 @@ const sharePicked = async (
   core: ReturnType<typeof useCore>,
   { place, item }: PickedFile,
   locale: InterviewLocale
-): Promise<{ shared: true } | { shared: false; error: unknown }> => {
+): Promise<
+  { shared: true; kept: OnboardingDocument } | { shared: false; error: unknown }
+> => {
   try {
-    await core.withSession(
+    const kept = await core.withSession(
       async (session) =>
         await session.onboarding.sharePlaceFile({ locale, place, item })
     );
-    return { shared: true };
+    return { shared: true, kept };
   } catch (error) {
     return { shared: false, error };
   }
@@ -1003,15 +992,31 @@ const useProblemOf = (): ((error: unknown) => string) => {
   };
 };
 
+/** A document's question as Stephen asks it: with what the document is about. */
+const questionLine = ({ reading: { about, ask } }: OnboardingDocument) =>
+  `${about} ${ask?.question ?? ""}`.trim();
+
+/** What Stephen says when core could not read a document: an old format has a way out of its own. */
+const useSaidProblemOf = (): ((name: string, error: unknown) => string) => {
+  const { t } = useLingui();
+  return (name, error) =>
+    documentErrors.codeOf(error) === "document.old_format"
+      ? t`I can’t read ${name}: it’s in an old format. As a PDF or a newer file, I can.`
+      : t`I couldn’t read ${name}. Add it again, or as a PDF.`;
+};
+
 /**
  * Documents that explain how they work. Each is read the moment it is
- * dropped, for real, by core: every row says what it is about. Only what
- * nobody but the one who shared it can say, Stephen asks at once, with the
- * answers to pick from. Where the deployment signs in with Microsoft or
- * Google, the admin can pick them where they live instead (GRA-370):
- * SharePoint and OneDrive, or Google Drive, connected here through Grasp's
- * own read-only connection, which fetches only the files picked; each is
- * read as a dropped one is.
+ * dropped, for real, by core: Stephen thanks them at the drop, then says
+ * what he took from the first one, and every row says what it is about.
+ * Only what nobody but the one who shared it can say, he asks at once,
+ * with the answers to pick from. Such a question comes with what its
+ * document is about, so then he sums up nothing else first; and one
+ * answered on screen before he gets to it, he does not ask. Where the
+ * deployment signs in with Microsoft or Google, the admin can pick them
+ * where they live instead (GRA-370): SharePoint and OneDrive, or Google
+ * Drive, connected here through Grasp's own read-only connection, which
+ * fetches only the files picked; each is read as a dropped one is.
  */
 const Documents = (props: StepProps) => {
   const { t, i18n } = useLingui();
@@ -1020,8 +1025,21 @@ const Documents = (props: StepProps) => {
   const refresh = useRefresh();
   const { run, busy, failure } = useCoreAction();
   const problemOf = useProblemOf();
+  const saidProblemOf = useSaidProblemOf();
   const [pending, setPending] = useState<Pending[]>([]);
   const [fresh, setFresh] = useState(false);
+  // Whether the step is still on screen: a reading that ends after it is left is kept, but not said.
+  const here = useRef(true);
+  useEffect(() => {
+    here.current = true;
+    return () => {
+      here.current = false;
+    };
+  }, []);
+  // How many documents he has told about on this visit: the first he sums up out loud, the rest say it in their rows.
+  const told = useRef(0);
+  // His questions about documents read on this visit, by document, until they are answered.
+  const asking = useRef(new Set<string>());
   const kept = props.data.documents;
   const { suites, places } = props.data;
   const navigate = useNavigate();
@@ -1040,6 +1058,32 @@ const Documents = (props: StepProps) => {
       : null
   );
   const locale: InterviewLocale = isLocale(i18n.locale) ? i18n.locale : "en";
+  // His thanks and his "Got it." are fetched as the step opens, so each follows what was done without a pause.
+  const thanks = t`Thank you. I’m reading them now, and you can add more at any time.`;
+  const gotIt = t`Got it.`;
+  usePrepare(thanks, { tone: tones.warm });
+  usePrepare(gotIt, { tone: tones.plain });
+  const tell = (read: OnboardingDocument) => {
+    const { about, ask } = read.reading;
+    // A question only they can answer is always asked, with what its document is about, unless it was answered by then; otherwise only the first is summed up, and not while a question waits to be asked.
+    if (ask !== null && read.answer === null) {
+      asking.current.add(read.id);
+      speak(questionLine(read), {
+        after: true,
+        still: () => here.current && asking.current.has(read.id),
+        tone: tones.even,
+        quick: true,
+      });
+    } else if (told.current === 0) {
+      speak(about, {
+        after: true,
+        still: () => here.current && asking.current.size === 0,
+        tone: tones.even,
+        quick: true,
+      });
+    }
+    told.current += 1;
+  };
   // Core keeps two documents of the same name as two: each row is its own upload, by an id of its own.
   const take = (from: (File | PickedFile)[]) => {
     const added = from.map((each, at): Pending => ({
@@ -1066,6 +1110,9 @@ const Documents = (props: StepProps) => {
         if (result.shared) {
           await refresh();
           setPending((now) => now.filter((row) => row.key !== each.key));
+          if (here.current) {
+            tell(result.kept);
+          }
           return;
         }
         const problem = problemOf(result.error);
@@ -1074,6 +1121,12 @@ const Documents = (props: StepProps) => {
             row.key === each.key ? { ...row, state: "failed", problem } : row
           )
         );
+        speak(saidProblemOf(each.name, result.error), {
+          after: true,
+          still: () => here.current,
+          tone: tones.plain,
+          quick: true,
+        });
       })();
     }
   };
@@ -1110,19 +1163,33 @@ const Documents = (props: StepProps) => {
       });
     }
   });
-  // His one question about a document, while it waits for an answer: answered with a press.
-  const open = kept.find(
+  // His one question about a document, while it waits for an answer: answered with a press. The first shared is asked first (core lists the newest first).
+  const open = kept.findLast(
     (each) => each.reading.ask !== null && each.answer === null
   );
   const answer = async (option: string) => {
     if (open === undefined) {
       return;
     }
+    asking.current.delete(open.id);
     const saved = await run(
       async (session) =>
         await session.onboarding.answerDocument(open.id, option)
     );
     if (saved !== undefined) {
+      // His answer cuts what waited to be said: a question still open comes with it.
+      const next = kept.findLast(
+        (each) => each.id !== open.id && asking.current.has(each.id)
+      );
+      if (next === undefined) {
+        speak(gotIt, { soon: true, tone: tones.plain });
+      } else {
+        speak(`${gotIt} ${questionLine(next)}`, {
+          soon: true,
+          tone: tones.even,
+          quick: true,
+        });
+      }
       await refresh();
     }
   };
@@ -1144,13 +1211,12 @@ const Documents = (props: StepProps) => {
       <Heading
         answer={
           fresh && count + reading.length > 0
-            ? {
-                text: t`Thank you. I’m reading them now, and you can add more at any time.`,
-              }
+            ? { text: thanks, tone: tones.warm }
             : undefined
         }
         sentence={lines.sentence}
         title={lines.title}
+        voice={lines.voice}
       />
       <Onward>
         <DocumentDrop
@@ -1247,30 +1313,10 @@ const Documents = (props: StepProps) => {
   );
 };
 
-/**
- * Pulse: there is nothing to download here yet, and core keeps no wish for
- * it, so the step says what it is and can be skipped, as the prototype's is
- * before anything is chosen.
- */
-const Pulse = (props: StepProps) => {
-  const { t } = useLingui();
-  const lines = useHeadlines(props).pulse;
-  return (
-    <>
-      <Heading sentence={lines.sentence} title={lines.title} />
-      <Asides>
-        <LaterLink
-          onClick={() => {
-            props.go("leads");
-          }}
-        >
-          {t`Skip for now`}
-        </LaterLink>
-        <SupportLink page="pulse">{t`More about Pulse`}</SupportLink>
-      </Asides>
-    </>
-  );
-};
+/** Pulse on the work laptops (connect-steps.tsx). */
+const Pulse = (props: StepProps) => (
+  <PulseStep {...connectProps(props)} lines={useHeadlines(props).pulse} />
+);
 
 const ConfirmOrg = (props: StepProps & { roster: Roster }) => {
   const { t } = useLingui();
@@ -1429,8 +1475,22 @@ const ConfirmOrg = (props: StepProps & { roster: Roster }) => {
  */
 const Leads = (props: StepProps) => {
   const { t } = useLingui();
-  const lines = useHeadlines(props).leads;
+  const headlines = useHeadlines(props);
+  const lines = headlines.leads;
   const { roster } = props.data.view;
+  // The HR platform comes first, until the admin said which; then, on this visit, the organization.
+  const [hrSaid, setHrSaid] = useState(props.data.choices.hr !== null);
+  if (!hrSaid) {
+    return (
+      <HrPlatform
+        choices={props.data.choices}
+        lines={headlines.hr}
+        onDone={() => {
+          setHrSaid(true);
+        }}
+      />
+    );
+  }
   if (roster === null) {
     return (
       <>

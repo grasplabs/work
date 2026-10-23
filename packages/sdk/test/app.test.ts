@@ -4,7 +4,7 @@ import { describe, expect, test } from "vite-plus/test";
 import { databaseWriter } from "../src/database.ts";
 import { inspectApp, readAppManifest } from "../src/host.ts";
 import { AppError, app, resource } from "../src/index.ts";
-import type { AppDefinition } from "../src/index.ts";
+import type { AppDefinition, WorkflowEventReference } from "../src/index.ts";
 import { readResourceDeclaration } from "../src/resources.ts";
 import { runFunction } from "../src/runner.ts";
 import { serverModule } from "../src/server.ts";
@@ -114,6 +114,19 @@ const refusal = (register: () => unknown): string => {
   }
   throw new Error("The registration was accepted");
 };
+
+/** The reference `#grasp` generates for `workflow`'s `edited` event. */
+const eventOf = (workflow: string): WorkflowEventReference => ({
+  kind: "workflowEvent",
+  resourceId: "app",
+  resourceVersion: 1,
+  workflow,
+  workflowFingerprint: "0".repeat(64),
+  alias: "edited",
+  type: "notes.note.edited",
+  fingerprint: "f".repeat(64),
+  data: v.object({ title: v.string() }).descriptor,
+});
 
 describe("access", () => {
   test("a table or mode the App doesn't declare is none", () => {
@@ -679,6 +692,79 @@ describe("uses", () => {
       unlisted: true,
       lookalike: true,
       sameAlias: true,
+    });
+  });
+
+  test("a workflow's event is notified by a mutation only, of a workflow the App lists, and reads back as declared", () => {
+    const followUp = resource.workflow("followUp", {
+      input: v.object({ title: v.string().trim() }),
+      output: v.object({ done: v.boolean() }),
+    });
+    const edited = eventOf("workflows.followUp");
+    const notify = server.mutation({
+      args: {},
+      returns: v.null(),
+      uses: [edited],
+      handler: () => null,
+    });
+    const registered = notes({
+      operations: { notes: { list, notify } },
+      uses: [followUp],
+    });
+    const { manifest } = inspectApp(registered);
+    const byAction = server.action({
+      args: {},
+      returns: v.null(),
+      uses: [edited],
+      handler: () => null,
+    });
+    const otherWorkflow = server.mutation({
+      args: {},
+      returns: v.null(),
+      uses: [eventOf("workflows.archive")],
+      handler: () => null,
+    });
+    expect({
+      notify: manifest.operations["notes.notify"]?.uses,
+      readBack:
+        canonicalText(readAppManifest(JSON.stringify(manifest))) ===
+        canonicalText(manifest),
+      byAction: refusal(() =>
+        notes({
+          operations: { notes: { list, byAction } },
+          uses: [followUp],
+        })
+      ).includes("only a mutation notifies"),
+      otherWorkflow: refusal(() =>
+        notes({
+          operations: { notes: { list, otherWorkflow } },
+          uses: [followUp],
+        })
+      ).includes("doesn't list"),
+      madeUp: refusal(() =>
+        Reflect.apply(server.mutation, server, [
+          {
+            args: {},
+            returns: v.null(),
+            uses: [{ ...edited, fingerprint: "not a fingerprint" }],
+            handler: () => null,
+          },
+        ])
+      ).includes("never IDs or names"),
+    }).toStrictEqual({
+      notify: [
+        {
+          type: "workflowEvent",
+          workflow: "followUp",
+          alias: "edited",
+          eventType: "notes.note.edited",
+          fingerprint: "f".repeat(64),
+        },
+      ],
+      readBack: true,
+      byAction: true,
+      otherWorkflow: true,
+      madeUp: true,
     });
   });
 
