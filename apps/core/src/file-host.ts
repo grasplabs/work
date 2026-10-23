@@ -1067,6 +1067,29 @@ export class FileHost {
   }
 
   /**
+   * File `fileId`, if `reader` may read it now through one of `resources`
+   * (the files resources the App's release declares with `read`): what
+   * `content` answers, for a start that hands it to a workflow run
+   * (core's workflow-starts.ts). `file.not_found` otherwise, the same
+   * however it isn't readable: a file still uploading, deleted, uploaded
+   * through another resource, or not the reader's to read.
+   */
+  async readableThrough(
+    storeId: StoreId,
+    reader: FileReader,
+    fileId: unknown,
+    resources: readonly string[]
+  ): Promise<FileContent> {
+    const id = fileIdSchema.safeParse(fileId);
+    this.#store.bind(storeIdSchema.parse(storeId));
+    const row = id.success ? this.#row(id.data) : undefined;
+    if (row === undefined || !resources.includes(row.resource)) {
+      throw notFound();
+    }
+    return await this.content(storeId, reader, row.resource, row.fileId);
+  }
+
+  /**
    * Checks `reader` may use each of `fileIds` in a call's arguments: each
    * published, uploaded through one of `resources` (those declaring the
    * use) and readable to them (`file.not_found` otherwise). What a commit

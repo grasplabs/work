@@ -248,6 +248,8 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   "AUDIT_LOG",
   "AUDIT_RETENTION_DAYS",
   "BETTER_AUTH_SECRET",
+  // The Chat SDK's state for Stephen's door (core's @grasp-os/chat/state).
+  "CHAT_STATE",
   "BRAIN_OBJECTS",
   "BUILD_WAIT_MS",
   "BUILTINS",

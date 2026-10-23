@@ -22,18 +22,18 @@ import type { ModelsEnv } from "./models.ts";
 // let happen, and what stops it here:
 //
 // - Anyone but Grasp's staff asking, or spending this core's model budget:
-//   only the console's signed request reaches it (console-signed.ts), with
+//   only the admin's signed request reaches it (console-signed.ts), with
 //   a key derived for this purpose alone, behind the router secret; a
 //   session cookie or an interview link opens nothing.
 // - A question the company can't see: every one is in the audit log, by
-//   the staff member the console names, before the model is asked; when
+//   the staff member the admin names, before the model is asked; when
 //   the log can't take it, nothing is asked.
 // - The admin's document going to a model the deployment doesn't let
 //   take sensitive data: it holds every company's numbers and people's
 //   names, so the call is judged as onboarding's are, as always carrying
 //   sensitive data (model-rules.ts), and only such a model is chosen.
 // - The document or a question steering the model to do something: it has
-//   no tools; all it can do is answer in words, which the console shows.
+//   no tools; all it can do is answer in words, which the admin shows.
 
 /** The instructions, as the prototype's admin gives them (`worker/admin.ts`). */
 const instructions = `You are Grasp's own assistant for Grasp's staff: the people who onboard companies onto Grasp and keep them going. You answer questions about those companies from the admin's document, which holds every organization in numbers, worked out by the admin.
@@ -71,7 +71,7 @@ const forbidden = (requestId: string): Response =>
   errorResponse(403, requestErrors.create("request.forbidden"), requestId);
 
 /**
- * The console's question: 200 with the answer, once the request is
+ * The admin's question: 200 with the answer, once the request is
  * signed, fresh and well formed and the question is in the audit log. An
  * unsigned request, or one signed otherwise, is 401; one too large, stale
  * or malformed, 403; 503 when no model may answer or the model failed;

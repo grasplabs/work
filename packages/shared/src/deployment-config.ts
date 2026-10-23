@@ -4,9 +4,9 @@ import { appIdSchema, connectionIdSchema, workflowIdSchema } from "./ids.ts";
 import { roleSchema } from "./roles.ts";
 import { loopbackHosts } from "./router.ts";
 
-// The deployment config vars the console sets on core, as core parses them
-// (with `deploymentConfig`, @grasp-os/shared/config) and the console
-// validates them before it deploys: one schema for both, so the console
+// The deployment config vars the admin sets on core, as core parses them
+// (with `deploymentConfig`, @grasp-os/shared/config) and the admin
+// validates them before it deploys: one schema for both, so the admin
 // never sets a value core would refuse. Each var is deployment config,
 // never an in-product setting, so no admin session can change it. The
 // `MEMORY_LIMITS` var's schema is `memoryLimitsSchema` in
@@ -40,7 +40,7 @@ const isOrigin = (value: string): boolean => {
  * It names at least one IdP for the client's people: its Entra tenant, its
  * Google Workspace, or both. One that names neither isn't a sign-in config
  * (its people could never sign in), so it's refused here, where core and
- * the console both read it.
+ * the admin both read it.
  */
 export const signInConfigSchema = z
   .object({
@@ -67,7 +67,7 @@ export const signInConfigSchema = z
       .object({ hostedDomain: domainSchema, clientId: z.string().min(1) })
       .optional(),
     /**
-     * Grasp staff access, off unless the console opens a window. Only the
+     * Grasp staff access, off unless the admin opens a window. Only the
      * listed people (Entra object ids in Grasp's own tenant) sign in, get
      * `role` without joining the organization, and lose access when `until`
      * passes. A window longer than {@link staffWindowMaxMs} is closed
@@ -86,7 +86,7 @@ export const signInConfigSchema = z
          * until 7 days after Grasp's go).
          */
         scope: z.enum(["full", "onboarding"]).default("full"),
-        /** When the console opened the window. */
+        /** When the admin opened the window. */
         opened: z.iso.datetime({ offset: true }),
         until: z.iso.datetime({ offset: true }),
       })
@@ -129,7 +129,7 @@ export const staffWindowMaxMs = 7 * 24 * 60 * 60 * 1000;
 /**
  * Whether the staff window is open at `now`: between `opened` and `until`,
  * and seven days long at most. A longer window counts as closed for its
- * whole length, never only once its end draws near: the console opens short
+ * whole length, never only once its end draws near: the admin opens short
  * windows, and a longer one is a mistake rather than a reason to let staff
  * in.
  */
@@ -396,7 +396,7 @@ export const inboundMailDomainSchema = domainSchema
 /**
  * `MAIL_FROM`: who the mail core sends is from, `"<name>" <<address>>`:
  * an address on the deployment's sending domain, set up for Email Sending
- * outside core (the console's src/deploy/resources.ts, which also locks
+ * outside core (the admin's src/deploy/resources.ts, which also locks
  * the `EMAIL` binding to that address), and the name shown with it. The name is one line with no
  * quotes or angle brackets, so it can't change the header it goes in.
  * Unset, core sends no mail: each one fails, and says why.
@@ -414,7 +414,7 @@ export type MailFrom = z.infer<typeof mailFromSchema>;
 
 /**
  * The names of the deployment config vars above, the only settings the
- * console sets on core as vars. `PLATFORM_CHANGE` is the console's own, set
+ * admin sets on core as vars. `PLATFORM_CHANGE` is the admin's own, set
  * on every version it deploys, never a setting.
  */
 export const deploymentConfigVars = [
