@@ -1,3 +1,4 @@
+import type { AuditDetailValue } from "@grasp-os/shared/audit";
 import { and, eq, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
@@ -76,3 +77,17 @@ export const allowedFor = async <Caller>(
   { authorize }: { authorize: (caller: Caller) => Promise<Readable> },
   reader: Caller
 ): Promise<Allowed> => allowedOf(await authorize(reader));
+
+/**
+ * A read, as Knowledge reports it to the host's `onRead` port (ports.ts),
+ * which records it: which read (`knowledge.read`, with `detail.read`
+ * naming it, or a search), what it was of, and the documents it returned
+ * beyond that (a search's hits). Identifiers and counts only, never what
+ * was read or searched for.
+ */
+export interface ReadRecord {
+  action: "knowledge.read" | "knowledge.search" | "knowledge.search.empty";
+  target?: { type: "document" | "collection"; id: string };
+  documentIds?: string[];
+  detail: Record<string, AuditDetailValue>;
+}
