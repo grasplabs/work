@@ -162,7 +162,7 @@ describe("an organization's Setup", () => {
         latestRollout: releases.html.includes("Not in one yet"),
         // Only the newest are listed, and the whole list is a link away.
         allReleases: sectionOf(releases.html, "Recent releases").includes(
-          'href="/releases"'
+          'href="/admin/platform/releases"'
         ),
       },
       settings: textOf(sectionOf(settings.html, "Its secrets")).includes(

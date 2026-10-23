@@ -35,9 +35,12 @@ const visit = async (page: Page, path: string): Promise<void> => {
   await page.goto(path, { waitUntil: "networkidle" });
 };
 
-/** Starts a rollout of the newest release, `releaseId`, from the form. */
+/**
+ * Starts a rollout of the newest release, `releaseId`, from the form on
+ * the admin's Platform.
+ */
 const startRollout = async (page: Page, releaseId: string): Promise<void> => {
-  await visit(page, "/rollouts");
+  await visit(page, "/admin/platform/rollouts");
   await expect(page.getByLabel("Release")).toHaveValue(releaseId);
   await expect(
     page.getByText(
@@ -45,10 +48,10 @@ const startRollout = async (page: Page, releaseId: string): Promise<void> => {
     )
   ).toBeVisible();
   await page.getByRole("button", { name: "Start rollout" }).click();
-  await expect(page).toHaveURL(/\/rollouts\/[\da-f-]{36}$/u);
+  await expect(page).toHaveURL(/\/admin\/platform\/rollouts\/[\da-f-]{36}$/u);
 };
 
-/** The client's row on a rollout's page. */
+/** The client's row on a rollout's page: its name, then its id under it. */
 const targetRow = (page: Page, clientId: string) =>
   page.getByRole("row").filter({ hasText: clientId });
 
@@ -91,16 +94,18 @@ test("staff roll a release out to ring 0 and watch it go and finish", async ({
 
   await startRollout(page, releaseId);
 
-  await expect(page.getByText("rolling out to ring 0")).toBeVisible();
-  await expect(page.getByText(releaseId)).toBeVisible();
+  await expect(page.getByText("Rolling out to ring 0")).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: `Rollout of ${releaseId}` })
+  ).toBeVisible();
   await expect(targetRow(page, clientId)).toBeVisible();
   // The page follows the run on its own, without a reload: the rollout's
   // status, then the client's.
-  await expect(page.getByText("done", { exact: true })).toHaveCount(2, {
+  await expect(page.getByText("Done", { exact: true })).toBeVisible({
     timeout: rolloutMs,
   });
   await expect(targetRow(page, clientId).getByRole("cell").nth(1)).toHaveText(
-    "done"
+    "On it"
   );
 
   await page.goto(setupOf(clientId, "releases"));
@@ -119,7 +124,7 @@ test("staff roll a client back from a rollout and see it on its previous version
   await startRollout(page, releaseId);
   const rollout = page.url();
   await expect(targetRow(page, clientId).getByRole("cell").nth(1)).toHaveText(
-    "done",
+    "On it",
     { timeout: rolloutMs }
   );
   const rolledOut = await checkDrift(page, clientId);
@@ -130,7 +135,7 @@ test("staff roll a client back from a rollout and see it on its previous version
     .click();
 
   await expect(targetRow(page, clientId).getByRole("cell").nth(1)).toHaveText(
-    "rolled_back",
+    "Rolled back",
     { timeout: rolloutMs }
   );
   const after = await checkDrift(page, clientId);

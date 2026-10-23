@@ -392,18 +392,22 @@ const OrganizationRow = ({
   );
 };
 
+/** Every active company's own platform, or `failed` when it couldn't be read. Never throws. */
+const readLive = async (): Promise<Live> => {
+  try {
+    return await fetchGridLive();
+  } catch {
+    return "failed";
+  }
+};
+
 /** Every active company's own platform, read once the overview shows. */
 const useLive = (): Live => {
   const [live, setLive] = useState<Live>(null);
   useEffect(() => {
     let current = true;
     void (async () => {
-      let read: Live = "failed";
-      try {
-        read = await fetchGridLive();
-      } catch {
-        read = "failed";
-      }
+      const read = await readLive();
       // A page left before its answer came doesn't take it.
       if (current) {
         setLive(read);

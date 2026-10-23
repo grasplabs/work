@@ -761,6 +761,15 @@ const liveRows = (
   { label: "Cost this month", value: costWords(live.costUsd) },
 ];
 
+/** Client `clientId`'s live numbers, or `failed` when they couldn't be read. Never throws. */
+const readLive = async (clientId: string): Promise<LiveRead> => {
+  try {
+    return (await fetchClientLive({ data: { clientId } })) ?? "failed";
+  } catch {
+    return "failed";
+  }
+};
+
 /**
  * What its account shows now, read once the Setup shows and kept a
  * minute, as the console's grid read it: whether the router reaches its
@@ -781,12 +790,7 @@ export const LiveNumbers = ({
     let current = true;
     if (active) {
       void (async () => {
-        let read: LiveRead = "failed";
-        try {
-          read = (await fetchClientLive({ data: { clientId } })) ?? "failed";
-        } catch {
-          read = "failed";
-        }
+        const read = await readLive(clientId);
         // A page left before its answer came doesn't take it.
         if (current) {
           setLive(read);
@@ -875,7 +879,7 @@ export const History = ({ history }: { history: HistoryEntry[] }) =>
                     <Link
                       className="hover:text-foreground font-mono text-xs underline underline-offset-4"
                       params={{ rolloutId }}
-                      to="/rollouts/$rolloutId"
+                      to="/admin/platform/rollouts/$rolloutId"
                     >
                       {rolloutId.slice(0, 8)}
                     </Link>

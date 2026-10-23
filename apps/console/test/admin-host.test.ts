@@ -44,13 +44,11 @@ describe("the admin's own hostname", () => {
     ]);
   });
 
-  it("moves every page load on the console's hostname to the admin's, an old page straight to where it went", async () => {
+  it("moves every page load on the console's hostname to the same page on the admin's", async () => {
     const locations = await Promise.all(
       [
         "https://console.grasp.test/admin/sources?day=1",
-        "https://console.grasp.test/",
-        "https://console.grasp.test/clients/acme?tab=deploys",
-        "https://console.grasp.test/releases",
+        "https://console.grasp.test/admin/organizations/acme/setup",
         "https://console.grasp.test/no-such-page",
       ].map(async (url) => {
         const response = await answer(await asStaff(url));
@@ -59,10 +57,26 @@ describe("the admin's own hostname", () => {
     );
     expect(locations).toStrictEqual([
       [302, `https://${adminHost}/admin/sources?day=1`],
-      [302, `https://${adminHost}/admin`],
-      [302, `https://${adminHost}/admin/organizations/acme/setup?tab=deploys`],
-      [302, `https://${adminHost}/releases`],
+      [302, `https://${adminHost}/admin/organizations/acme/setup`],
       [302, `https://${adminHost}/no-such-page`],
+    ]);
+  });
+
+  it("moves an old console page to where it went first, then on to the admin's hostname", async () => {
+    const first = await answer(
+      await asStaff("https://console.grasp.test/clients/acme?tab=deploys")
+    );
+    const second = await answer(
+      await asStaff(
+        `https://console.grasp.test${first.headers.get("location") ?? ""}`
+      )
+    );
+    expect([
+      [first.status, first.headers.get("location")],
+      [second.status, second.headers.get("location")],
+    ]).toStrictEqual([
+      [301, "/admin/organizations/acme/setup?tab=deploys"],
+      [302, `https://${adminHost}/admin/organizations/acme/setup?tab=deploys`],
     ]);
   });
 

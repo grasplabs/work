@@ -488,7 +488,9 @@ describe("the company pages, in the admin", () => {
     expect({
       reached: reachedPage.html.includes("Roll it back"),
       waiting: waitingPage.html.includes("Roll it back"),
-      rollout: reachedPage.html.includes(`href="/rollouts/${rolloutId}"`),
+      rollout: reachedPage.html.includes(
+        `href="/admin/platform/rollouts/${rolloutId}"`
+      ),
     }).toStrictEqual({ reached: true, waiting: false, rollout: true });
   });
 
