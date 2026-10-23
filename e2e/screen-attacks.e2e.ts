@@ -95,6 +95,9 @@ const approvedApp = async (
     const { id } = await building.api.apps.create({ name });
     const { version } = await building.api.apps.files.commit(id, files, name);
     await building.api.apps.versions.setCurrent(id, version);
+    // Published, for the people it is shared with (a draft is its
+    // builders' alone).
+    await building.api.apps.publish(id);
     const review = await deciding.api.screenTrust.review(id);
     await deciding.api.screenTrust.approve(id, {
       version: review.version,

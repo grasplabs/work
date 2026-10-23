@@ -15,6 +15,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import { loadRelease } from "../src/app-releases.ts";
 import { revokeRelease } from "../src/release-retention.ts";
+import { published } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { person } from "./sealed-apps.ts";
 import { clientOrigin } from "./sign-in-config.ts";
@@ -82,6 +83,7 @@ const approvedApp = async () => {
   const builder = await personApi("builder");
   const admin = await personApi("admin");
   const { id } = await builder.api.apps.create({ name: "Notes" });
+  await published(id);
   const { version } = await builder.api.apps.files.commit(id, files, "First");
   await builder.api.apps.versions.setCurrent(id, version);
   const review = await admin.api.screenTrust.review(id);

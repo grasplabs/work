@@ -764,6 +764,10 @@ msgstr "{name} in {domain}"
 msgid "{name} in {domain}: {started} started, {completed} completed, {failed} failed"
 msgstr "{name} in {domain}: {started} started, {completed} completed, {failed} failed"
 
+#: src/chat/builds.tsx
+msgid "{name} is a draft: only its builders open it, and its triggers don't fire, until it is published."
+msgstr "{name} is a draft: only its builders open it, and its triggers don't fire, until it is published."
+
 #: src/brain/brain-atlas.ts
 msgid "{name} is invited but not interviewed yet."
 msgstr "{name} is invited but not interviewed yet."
@@ -1288,7 +1292,7 @@ msgid "{who} consented to this before connecting it:"
 msgstr "{who} consented to this before connecting it:"
 
 #: src/interview/before.tsx
-#: src/interview/sound-check.tsx
+#: src/interview/voice-bar.tsx
 msgid "{who} is talking"
 msgstr "{who} is talking"
 
@@ -1450,6 +1454,10 @@ msgstr "A data migration moved this domain's records on after this version, so i
 #: src/activity/audit-words.ts
 msgid "A decision was put to people, or answered"
 msgstr "A decision was put to people, or answered"
+
+#: src/engines/app-status.tsx
+msgid "A draft: only its builders open it, and its triggers don't fire, until it is published."
+msgstr "A draft: only its builders open it, and its triggers don't fire, until it is published."
 
 #: src/screens/screen-files.ts
 msgid "A file is downloaded only when you ask for it, with a click."
@@ -2105,6 +2113,10 @@ msgstr "An app nobody approved was refused the domain's data"
 msgid "An app runs only once an admin approved its code. That happens on the domain's page."
 msgstr "An app runs only once an admin approved its code. That happens on the domain's page."
 
+#: src/engines/app-status.tsx
+msgid "An archived domain is kept as it is and goes offline: nobody opens its apps, its triggers stop and its unfinished runs are cancelled. A builder can restore it later, as a draft."
+msgstr "An archived domain is kept as it is and goes offline: nobody opens its apps, its triggers stop and its unfinished runs are cancelled. A builder can restore it later, as a draft."
+
 #: src/onboarding/setup-steps.tsx
 msgid "An old format: save it as PDF or a newer file"
 msgstr "An old format: save it as PDF or a newer file"
@@ -2412,6 +2424,23 @@ msgstr "Apps that break them"
 #: src/dashboard/to-do.tsx
 msgid "Apps to approve"
 msgstr "Apps to approve"
+
+#: src/engines/app-status.tsx
+msgid "Archive"
+msgstr "Archive"
+
+#: src/engines/app-status.tsx
+msgid "Archive {name}?"
+msgstr "Archive {name}?"
+
+#: src/engines/app-status.tsx
+msgctxt "a domain put away"
+msgid "Archived"
+msgstr "Archived"
+
+#: src/engines/app-status.tsx
+msgid "Archived: nobody opens its apps and nothing runs, until a builder restores it."
+msgstr "Archived: nobody opens its apps and nothing runs, until a builder restores it."
 
 #: src/brain/brain-markdown.ts
 msgid "Article"
@@ -2966,6 +2995,7 @@ msgstr "Can {verbs} company data"
 #: src/chat/brain-questions.tsx
 #: src/chat/project-dialog.tsx
 #: src/decision-confirmation.tsx
+#: src/engines/app-status.tsx
 #: src/engines/package-approvals.tsx
 #: src/inbox/item-detail.tsx
 #: src/knowledge/document.tsx
@@ -4332,6 +4362,11 @@ msgid "DPA status"
 msgstr "DPA status"
 
 #: src/brain/brain.ts
+msgid "Draft"
+msgstr "Draft"
+
+#: src/engines/app-status.tsx
+msgctxt "a domain still being made"
 msgid "Draft"
 msgstr "Draft"
 
@@ -6413,7 +6448,7 @@ msgstr "Links to"
 msgid "Lisbon"
 msgstr "Lisbon"
 
-#: src/interview/sound-check.tsx
+#: src/interview/voice-bar.tsx
 msgid "Listening"
 msgstr "Listening"
 
@@ -6535,6 +6570,10 @@ msgstr "Make admin"
 #: src/chat/builds.tsx
 msgid "Make version {version} current"
 msgstr "Make version {version} current"
+
+#: src/chat/builds.tsx
+msgid "Make version {version} current and publish"
+msgstr "Make version {version} current and publish"
 
 #: src/connections/integration-row.tsx
 msgid "Manage"
@@ -7089,6 +7128,10 @@ msgstr "No data"
 msgid "No domain has a model bound to it."
 msgstr "No domain has a model bound to it."
 
+#: src/routes/_shell.domains.index.tsx
+msgid "No domain is published yet: publish one from its page, and the people it is shared with can open it."
+msgstr "No domain is published yet: publish one from its page, and the people it is shared with can open it."
+
 #: src/chat/side-panel.tsx
 #: src/routes/_shell.domains.index.tsx
 msgid "No domains yet"
@@ -7097,6 +7140,10 @@ msgstr "No domains yet"
 #: src/dashboard/widget-board.tsx
 msgid "No domains yet. Domains are made in chat."
 msgstr "No domains yet. Domains are made in chat."
+
+#: src/routes/_shell.domains.index.tsx
+msgid "No drafts."
+msgstr "No drafts."
 
 #: src/landscape/audit-trail.tsx
 msgid "No events in the latest stretch of the log"
@@ -7745,6 +7792,10 @@ msgctxt "onboarding area section"
 msgid "Notes"
 msgstr "Notes"
 
+#: src/routes/_shell.domains.index.tsx
+msgid "Nothing archived."
+msgstr "Nothing archived."
+
 #: src/routes/_shell.integrations.index.tsx
 msgid "Nothing connected yet."
 msgstr "Nothing connected yet."
@@ -8021,7 +8072,7 @@ msgstr "Onboarding steps"
 msgid "Once I have about {threshold}% of the picture, your team can start. I’ll fill in the rest as we go."
 msgstr "Once I have about {threshold}% of the picture, your team can start. I’ll fill in the rest as we go."
 
-#: src/interview/sound-check.tsx
+#: src/interview/voice-bar.tsx
 msgid "One moment"
 msgstr "One moment"
 
@@ -8846,6 +8897,10 @@ msgstr "Proposed rules"
 msgid "Provided by Grasp, not installed again: {provided}"
 msgstr "Provided by Grasp, not installed again: {provided}"
 
+#: src/engines/app-status.tsx
+msgid "Publish"
+msgstr "Publish"
+
 #: src/engines/resource-bindings.tsx
 msgid "Publish a version of {contract}"
 msgstr "Publish a version of {contract}"
@@ -8860,6 +8915,11 @@ msgid "Publish revision {0}"
 msgstr "Publish revision {0}"
 
 #: src/routes/_shell.workflows.$workflow.tsx
+msgid "Published"
+msgstr "Published"
+
+#: src/engines/app-status.tsx
+msgctxt "a domain open to the people it is shared with"
 msgid "Published"
 msgstr "Published"
 
@@ -9306,6 +9366,7 @@ msgstr "Resource"
 msgid "Resources"
 msgstr "Resources"
 
+#: src/engines/app-status.tsx
 #: src/knowledge/timeline.tsx
 msgid "Restore"
 msgstr "Restore"
@@ -12190,6 +12251,10 @@ msgstr "Two answers"
 msgid "Type"
 msgstr "Type"
 
+#: src/interview/composer.tsx
+msgid "Type instead"
+msgstr "Type instead"
+
 #: src/interview/before.tsx
 #: src/interview/sound-check.tsx
 msgid "Type instead, without sound"
@@ -12301,6 +12366,10 @@ msgstr "Unknown outcomes"
 #: src/brain/brain.ts
 msgid "Unknown source"
 msgstr "Unknown source"
+
+#: src/engines/app-status.tsx
+msgid "Unpublish"
+msgstr "Unpublish"
 
 #: src/activity/audit-log.tsx
 #: src/dashboard/activity.tsx

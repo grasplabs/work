@@ -30,7 +30,7 @@ import { z } from "zod";
 import { loadRelease } from "./app-releases.ts";
 import type { Release } from "./app-releases.ts";
 import { bindingPinnedSql, startAppBinding } from "./app-workflow-bindings.ts";
-import { appFor } from "./apps.ts";
+import { usableApp } from "./apps.ts";
 import { auditedBatch, outboxed } from "./audit-outbox.ts";
 import {
   workflowResourceRunControls,
@@ -292,14 +292,15 @@ export interface Resolved {
 
 /**
  * The App `app` as `by` may use it now, and its current release: none
- * for someone without a role in it, a version not sealed or revoked.
+ * for someone without a role in it, an archived App, a version not sealed
+ * or revoked.
  */
 const askingOf = async (
   env: Env,
   by: Asking["by"],
   app: unknown
 ): Promise<Asking> => {
-  const found = await appFor(env, by, app, "user");
+  const found = await usableApp(env, by, app);
   if (found.currentVersion === null) {
     throw versionErrors.create("version.not_sealed");
   }

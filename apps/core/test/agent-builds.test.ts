@@ -23,7 +23,7 @@ import {
 import type { WorkspaceStub } from "./agent-chat.ts";
 import { fakeGateway } from "./ai-gateway.ts";
 import type { GatewayReply } from "./ai-gateway.ts";
-import { outlook, release, requestGranted } from "./apps.ts";
+import { outlook, published, release, requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { signedInApi } from "./sign-in.ts";
@@ -147,6 +147,7 @@ const setUp = async (
   const admin = await signedInApi(idp, "admin");
   const builder = await signedInApi(idp, "builder");
   const { id: existing } = await builder.api.apps.create({ name: "Ledger" });
+  await published(existing);
   await release(builder, existing, { "AGENTS.md": "# Ledger\n" });
   const person = role === "builder" ? builder : await signedInApi(idp, role);
   const chat = await chatOf(person.userId, ...replies);
@@ -767,7 +768,9 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
   it("changes only the Apps its person builds", async () => {
     const other = await signedInApi(idp, "builder");
     const { id: shared } = await other.api.apps.create({ name: "Shared" });
+    await published(shared);
     const { id: unshared } = await other.api.apps.create({ name: "Other" });
+    await published(unshared);
     const { person, chat, grant } = await setUp([
       codeStep(
         tryEach({
@@ -1493,6 +1496,7 @@ export default workflow("reading", { params: {}, input: z.unknown() }, async (st
     const builder = await signedInApi(idp, "builder");
     const user = await signedInApi(idp, "user");
     const { id: app } = await builder.api.apps.create({ name: "Invoices" });
+    await published(app);
     await release(builder, app, {
       ...invoices(500, false),
       "notes.md": "old",
@@ -1595,6 +1599,7 @@ export default workflowTests(definition, [{ name: "runs", mocks: { save: 1 }, ex
 `,
     };
     const { id: app } = await builder.api.apps.create({ name: "Notes" });
+    await published(app);
     await release(builder, app, {
       "app/server.ts": v1Server,
       "app/lib/books.ts": "export const twice = false;\n",
@@ -1678,6 +1683,7 @@ export default workflowTests(definition, [{ name: "runs", mocks: { save: 1 }, ex
   it("lists every step of a workflow whose shared code changed, and a step changed only in its code", async () => {
     const builder = await signedInApi(idp, "builder");
     const { id: app } = await builder.api.apps.create({ name: "Digest" });
+    await published(app);
     await release(builder, app, digest("hwczrv0to6"));
     // Only the mail's address: two calls a 32-bit hash couldn't tell apart.
     const { version: address } = await builder.api.apps.files.commit(
@@ -1848,6 +1854,7 @@ export default workflowTests(definition, [{ name: "runs", mocks: { save: 1 }, ex
   it("calls out new triggers, changed exports, and steps it can't read as possibly acting", async () => {
     const builder = await signedInApi(idp, "builder");
     const { id: app } = await builder.api.apps.create({ name: "Weekly" });
+    await published(app);
     await release(builder, app, {
       ...weekly(`[{ type: "manual" }]`),
       "app/exports.json": JSON.stringify({
@@ -1923,6 +1930,7 @@ export default workflowTests(definition, [{ name: "runs", mocks: { save: 1 }, ex
   it("counts a second identical trigger as added, and a workflow with an unchanged acting step as acting", async () => {
     const builder = await signedInApi(idp, "builder");
     const { id: app } = await builder.api.apps.create({ name: "Weekly" });
+    await published(app);
     const once = `[{ type: "schedule", param: "every" }]`;
     await release(builder, app, weekly(once, false, true));
     // Only a second schedule, the same as the first: both run it.
@@ -1965,7 +1973,9 @@ export default workflowTests(definition, [{ name: "runs", mocks: { save: 1 }, ex
     const owner = await signedInApi(idp, "builder");
     const reviewer = await signedInApi(idp, "builder");
     const { id: app } = await owner.api.apps.create({ name: "Invoicing" });
+    await published(app);
     const { id: unreadable } = await owner.api.apps.create({ name: "Inbox" });
+    await published(unreadable);
     await owner.api.apps.members.add(app, {
       type: "person",
       id: reviewer.userId,
@@ -2023,7 +2033,9 @@ export default workflowTests(definition, [{ name: "runs", mocks: { save: 1 }, ex
     const owner = await signedInApi(idp, "builder");
     const reviewer = await signedInApi(idp, "builder");
     const { id: app } = await owner.api.apps.create({ name: "Invoicing" });
+    await published(app);
     const { id: hidden } = await owner.api.apps.create({ name: "Ledger" });
+    await published(hidden);
     await requestGranted(idp, owner, {
       subject: { type: "app", appId: app },
       object: { type: "app", appId: hidden },
@@ -2056,6 +2068,7 @@ export default workflowTests(definition, [{ name: "runs", mocks: { save: 1 }, ex
   it("runs a version's tests once", async () => {
     const builder = await signedInApi(idp, "builder");
     const { id: app } = await builder.api.apps.create({ name: "Invoices" });
+    await published(app);
     await release(builder, app, invoices(500, false));
     const [latest] = await builder.api.apps.versions.list(app);
     const kept = `apps/${app}/tests/${latest?.tree ?? ""}-${compilerVersion}.json`;

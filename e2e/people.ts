@@ -490,5 +490,8 @@ export const release = async (
 ): Promise<void> => {
   const { version } = await api.apps.files.commit(app, files, message);
   await api.apps.versions.setCurrent(app, version);
+  // Published, for the people it is shared with (a draft is its
+  // builders' alone).
+  await api.apps.publish(app);
   await ordinaryData(app);
 };

@@ -124,7 +124,11 @@ const currentExports = async (
   app: AppId
 ): Promise<{ version: number; exports: Record<string, AppExport> }> => {
   const found = await drizzle(env.DB)
-    .select({ version: apps.currentVersion, exports: appVersions.exports })
+    .select({
+      version: apps.currentVersion,
+      exports: appVersions.exports,
+      status: apps.status,
+    })
     .from(apps)
     .leftJoin(
       appVersions,
@@ -137,6 +141,14 @@ const currentExports = async (
     .get();
   if (!found) {
     throw appErrors.create("app.not_found");
+  }
+  // Nobody calls an archived App, and only a published one serves other
+  // Apps (app-status.ts).
+  if (found.status === "archived") {
+    throw appErrors.create("app.archived");
+  }
+  if (found.status !== "published") {
+    throw appErrors.create("app.not_published");
   }
   if (found.version === null || found.exports === null) {
     throw appErrors.create("app.not_running");

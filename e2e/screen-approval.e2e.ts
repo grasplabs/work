@@ -86,6 +86,9 @@ test("a screen gets its engine's data only while an admin's approval of its code
       name
     );
     await api.apps.versions.setCurrent(app, version);
+    // Published, for the people it is shared with (a draft is its
+    // builders' alone).
+    await api.apps.publish(app);
   } finally {
     core[Symbol.dispose]();
   }

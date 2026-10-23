@@ -354,7 +354,8 @@ const fixture = async () => {
   const app = appIdSchema.parse(crypto.randomUUID());
   await env.DB.batch([
     env.DB.prepare(
-      "INSERT INTO apps (id, name, description, owner_id, created_at) VALUES (?, 'Jobs', '', ?, ?)"
+      // Published: Bob, who only uses it, sees no draft (app-status.ts).
+      "INSERT INTO apps (id, name, description, owner_id, status, created_at) VALUES (?, 'Jobs', '', ?, 'published', ?)"
     ).bind(app, ada.userId, Date.now()),
     env.DB.prepare(
       "INSERT INTO app_versions (app_id, version, tree, files, author_id, message, created_at, approved) VALUES (?, 1, 'tree', 0, ?, 'Version', ?, 1)"

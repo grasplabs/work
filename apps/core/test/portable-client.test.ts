@@ -18,6 +18,7 @@ import { authFor } from "../src/auth/auth.ts";
 import { signInConfig } from "../src/auth/config.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import { revokeRelease } from "../src/release-retention.ts";
+import { published } from "./apps.ts";
 import { eventsAfter, logHead } from "./audit-events.ts";
 import { hostSockets } from "./host-sockets.ts";
 import { mockIdp } from "./idp.ts";
@@ -101,6 +102,7 @@ const notesApp = async ({ sensitive = false, files = notesFiles } = {}) => {
   const builder = await personApi("builder");
   const admin = await personApi("admin");
   const { id } = await builder.api.apps.create({ name: "Notes" });
+  await published(id);
   const { version } = await builder.api.apps.files.commit(id, files, "First");
   await builder.api.apps.versions.setCurrent(id, version);
   if (!sensitive) {

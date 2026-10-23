@@ -764,6 +764,10 @@ msgstr "{name} in {domain}"
 msgid "{name} in {domain}: {started} started, {completed} completed, {failed} failed"
 msgstr "{name} in {domain}: {started} gestart, {completed} voltooid, {failed} mislukt"
 
+#: src/chat/builds.tsx
+msgid "{name} is a draft: only its builders open it, and its triggers don't fire, until it is published."
+msgstr "{name} is een concept: alleen de bouwers openen het, en de triggers gaan niet af, tot het gepubliceerd is."
+
 #: src/brain/brain-atlas.ts
 msgid "{name} is invited but not interviewed yet."
 msgstr "{name} is uitgenodigd, maar nog niet geïnterviewd."
@@ -1288,7 +1292,7 @@ msgid "{who} consented to this before connecting it:"
 msgstr "{who} gaf hier toestemming voor voordat het werd gekoppeld:"
 
 #: src/interview/before.tsx
-#: src/interview/sound-check.tsx
+#: src/interview/voice-bar.tsx
 msgid "{who} is talking"
 msgstr "{who} praat"
 
@@ -1450,6 +1454,10 @@ msgstr "Een gegevensmigratie heeft de records van dit domein na deze versie omge
 #: src/activity/audit-words.ts
 msgid "A decision was put to people, or answered"
 msgstr "Een beslissing is aan mensen voorgelegd of beantwoord"
+
+#: src/engines/app-status.tsx
+msgid "A draft: only its builders open it, and its triggers don't fire, until it is published."
+msgstr "Een concept: alleen de bouwers openen het, en de triggers gaan niet af, tot het gepubliceerd is."
 
 #: src/screens/screen-files.ts
 msgid "A file is downloaded only when you ask for it, with a click."
@@ -2105,6 +2113,10 @@ msgstr "Een app die niemand heeft goedgekeurd kreeg de gegevens van het domein n
 msgid "An app runs only once an admin approved its code. That happens on the domain's page."
 msgstr "Een app draait pas als een beheerder de code heeft goedgekeurd. Dat gebeurt op de pagina van het domein."
 
+#: src/engines/app-status.tsx
+msgid "An archived domain is kept as it is and goes offline: nobody opens its apps, its triggers stop and its unfinished runs are cancelled. A builder can restore it later, as a draft."
+msgstr "Een gearchiveerd domein blijft zoals het is en gaat offline: niemand opent de apps, de triggers stoppen en onafgemaakte runs worden geannuleerd. Een bouwer kan het later herstellen, als concept."
+
 #: src/onboarding/setup-steps.tsx
 msgid "An old format: save it as PDF or a newer file"
 msgstr "Een oud formaat: sla het op als pdf of nieuwer bestand"
@@ -2412,6 +2424,23 @@ msgstr "Apps die ze overtreden"
 #: src/dashboard/to-do.tsx
 msgid "Apps to approve"
 msgstr "Apps om goed te keuren"
+
+#: src/engines/app-status.tsx
+msgid "Archive"
+msgstr "Archiveren"
+
+#: src/engines/app-status.tsx
+msgid "Archive {name}?"
+msgstr "{name} archiveren?"
+
+#: src/engines/app-status.tsx
+msgctxt "a domain put away"
+msgid "Archived"
+msgstr "Gearchiveerd"
+
+#: src/engines/app-status.tsx
+msgid "Archived: nobody opens its apps and nothing runs, until a builder restores it."
+msgstr "Gearchiveerd: niemand opent de apps en er draait niets, tot een bouwer het herstelt."
 
 #: src/brain/brain-markdown.ts
 msgid "Article"
@@ -2966,6 +2995,7 @@ msgstr "Kan bedrijfsdata {verbs}"
 #: src/chat/brain-questions.tsx
 #: src/chat/project-dialog.tsx
 #: src/decision-confirmation.tsx
+#: src/engines/app-status.tsx
 #: src/engines/package-approvals.tsx
 #: src/inbox/item-detail.tsx
 #: src/knowledge/document.tsx
@@ -4332,6 +4362,11 @@ msgid "DPA status"
 msgstr "Status verwerkersovereenkomst"
 
 #: src/brain/brain.ts
+msgid "Draft"
+msgstr "Concept"
+
+#: src/engines/app-status.tsx
+msgctxt "a domain still being made"
 msgid "Draft"
 msgstr "Concept"
 
@@ -6413,7 +6448,7 @@ msgstr "Linkt naar"
 msgid "Lisbon"
 msgstr "Lissabon"
 
-#: src/interview/sound-check.tsx
+#: src/interview/voice-bar.tsx
 msgid "Listening"
 msgstr "Luistert"
 
@@ -6535,6 +6570,10 @@ msgstr "Beheerder maken"
 #: src/chat/builds.tsx
 msgid "Make version {version} current"
 msgstr "Versie {version} actueel maken"
+
+#: src/chat/builds.tsx
+msgid "Make version {version} current and publish"
+msgstr "Versie {version} actueel maken en publiceren"
 
 #: src/connections/integration-row.tsx
 msgid "Manage"
@@ -7089,6 +7128,10 @@ msgstr "Geen data"
 msgid "No domain has a model bound to it."
 msgstr "Aan geen enkel domein is een model gekoppeld."
 
+#: src/routes/_shell.domains.index.tsx
+msgid "No domain is published yet: publish one from its page, and the people it is shared with can open it."
+msgstr "Nog geen domein is gepubliceerd: publiceer er een vanaf de pagina, dan kunnen de mensen met wie het gedeeld is het openen."
+
 #: src/chat/side-panel.tsx
 #: src/routes/_shell.domains.index.tsx
 msgid "No domains yet"
@@ -7097,6 +7140,10 @@ msgstr "Nog geen domeinen"
 #: src/dashboard/widget-board.tsx
 msgid "No domains yet. Domains are made in chat."
 msgstr "Nog geen domeinen. Domeinen maak je in de chat."
+
+#: src/routes/_shell.domains.index.tsx
+msgid "No drafts."
+msgstr "Geen concepten."
 
 #: src/landscape/audit-trail.tsx
 msgid "No events in the latest stretch of the log"
@@ -7745,6 +7792,10 @@ msgctxt "onboarding area section"
 msgid "Notes"
 msgstr "Notities"
 
+#: src/routes/_shell.domains.index.tsx
+msgid "Nothing archived."
+msgstr "Niets gearchiveerd."
+
 #: src/routes/_shell.integrations.index.tsx
 msgid "Nothing connected yet."
 msgstr "Nog niets gekoppeld."
@@ -8021,7 +8072,7 @@ msgstr "Onboardingstappen"
 msgid "Once I have about {threshold}% of the picture, your team can start. I’ll fill in the rest as we go."
 msgstr "Zodra ik ongeveer {threshold}% van het plaatje heb, kan je team beginnen. De rest vul ik onderweg aan."
 
-#: src/interview/sound-check.tsx
+#: src/interview/voice-bar.tsx
 msgid "One moment"
 msgstr "Een moment"
 
@@ -8846,6 +8897,10 @@ msgstr "Voorgestelde regels"
 msgid "Provided by Grasp, not installed again: {provided}"
 msgstr "Geleverd door Grasp, niet opnieuw geïnstalleerd: {provided}"
 
+#: src/engines/app-status.tsx
+msgid "Publish"
+msgstr "Publiceren"
+
 #: src/engines/resource-bindings.tsx
 msgid "Publish a version of {contract}"
 msgstr "Een versie van {contract} publiceren"
@@ -8860,6 +8915,11 @@ msgid "Publish revision {0}"
 msgstr "Revisie {0} publiceren"
 
 #: src/routes/_shell.workflows.$workflow.tsx
+msgid "Published"
+msgstr "Gepubliceerd"
+
+#: src/engines/app-status.tsx
+msgctxt "a domain open to the people it is shared with"
 msgid "Published"
 msgstr "Gepubliceerd"
 
@@ -9306,6 +9366,7 @@ msgstr "Resource"
 msgid "Resources"
 msgstr "Resources"
 
+#: src/engines/app-status.tsx
 #: src/knowledge/timeline.tsx
 msgid "Restore"
 msgstr "Herstellen"
@@ -12190,6 +12251,10 @@ msgstr "Twee antwoorden"
 msgid "Type"
 msgstr "Type"
 
+#: src/interview/composer.tsx
+msgid "Type instead"
+msgstr "Liever typen"
+
 #: src/interview/before.tsx
 #: src/interview/sound-check.tsx
 msgid "Type instead, without sound"
@@ -12301,6 +12366,10 @@ msgstr "Onbekende uitkomsten"
 #: src/brain/brain.ts
 msgid "Unknown source"
 msgstr "Onbekende bron"
+
+#: src/engines/app-status.tsx
+msgid "Unpublish"
+msgstr "Publicatie intrekken"
 
 #: src/activity/audit-log.tsx
 #: src/dashboard/activity.tsx

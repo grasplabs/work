@@ -24,6 +24,7 @@ import {
   classifyOutput,
   revokeScreen,
 } from "../src/screen-trust-rpc.ts";
+import { published } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { appModulesOf, kitModulesOf, loadFrame } from "./screen-frames.ts";
 import { calledAs, person as actingAs } from "./sealed-apps.ts";
@@ -256,6 +257,7 @@ const release = async (
 /** A new App running the sample, whose data is sensitive, as every App's is. */
 const sampleApp = async (builder: Person): Promise<string> => {
   const { id } = await builder.api.apps.create({ name: "Notes" });
+  await published(id);
   await release(builder, id, sampleFiles);
   return id;
 };
@@ -673,6 +675,7 @@ describe("screen trust", { timeout: 60_000 }, () => {
     const builder = await personApi("builder");
     const plainApp = async (): Promise<string> => {
       const { id } = await builder.api.apps.create({ name: "Notes" });
+      await published(id);
       await release(builder, id, {
         ...appCode,
         "screens/notes.tsx": plainScreenOf("Notes"),
@@ -1430,6 +1433,7 @@ describe("screen trust", { timeout: 60_000 }, () => {
     const builder = await personApi("builder");
     const plainApp = async (): Promise<string> => {
       const { id } = await builder.api.apps.create({ name: "Notes" });
+      await published(id);
       await release(builder, id, {
         ...appCode,
         "screens/notes.tsx": plainScreenOf("Notes"),
