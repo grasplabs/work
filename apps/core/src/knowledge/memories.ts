@@ -32,9 +32,11 @@ import {
   versions,
 } from "../db/knowledge/schema.ts";
 import { derivedHmacKey } from "../derived-keys.ts";
-import { collectionsAllowed, readerActor } from "./access.ts";
+import { readerActor } from "./access.ts";
 import type { Reader } from "./access.ts";
+import { allowedFor } from "./authorize.ts";
 import { sectionCountOf, versionText } from "./documents.ts";
+import { portsOf } from "./ports.ts";
 
 // The Brain's memory commands (GRA-297; the Brain design's "Brain SDK and
 // API" and "Memory model"): `remember`, `receipts.get`, `memories.get`
@@ -223,7 +225,7 @@ const requireCitable = async (
   const db = drizzle(env.KNOWLEDGE);
   const documentRefs = refs.filter((ref) => ref.kind === "document");
   const memoryRefs = refs.filter((ref) => ref.kind === "memory");
-  const { condition } = await collectionsAllowed(env, db, reader);
+  const allowed = await allowedFor(portsOf(env), reader);
   const citable = await Promise.all([
     ...documentRefs.map(async (ref) => {
       const row = await db
@@ -236,7 +238,7 @@ const requireCitable = async (
             eq(versions.documentId, ref.documentId),
             eq(versions.number, ref.version),
             eq(documents.collectionId, ref.collectionId),
-            condition
+            allowed.documents()
           )
         )
         .get();
