@@ -1750,8 +1750,12 @@ msgid "A new template"
 msgstr "Eine neue Vorlage"
 
 #: src/screens/screen-frame.tsx
-msgid "A new version of this domain is available."
-msgstr "Eine neue Version dieser Domäne ist verfügbar."
+msgid "A new version of this app is ready"
+msgstr "Eine neue Version dieser App ist bereit"
+
+#: src/screens/screen-frame.tsx
+msgid "A new version of this domain is ready. It opens once your changes are saved."
+msgstr "Eine neue Version dieser Domäne ist bereit. Sie öffnet sich, sobald deine Änderungen gespeichert sind."
 
 #: src/settings/chat-accounts.tsx
 msgid "A newer link was sent since. Open the latest one from the chat app."
@@ -6562,6 +6566,10 @@ msgstr "Es ist geschehen: {who}"
 msgid "It has changes that aren't saved, or a change it hasn't heard back about. Leaving loses unsaved changes; anything already saved or running stays."
 msgstr "Es gibt nicht gespeicherte Änderungen oder eine Änderung ohne Rückmeldung. Beim Verlassen gehen nicht gespeicherte Änderungen verloren; bereits Gespeichertes oder Laufendes bleibt."
 
+#: src/screens/screen-frame.tsx
+msgid "It has changes that aren't saved, or a change it hasn't heard back about. Save them first and it switches once they are, or switch now and lose what isn't saved."
+msgstr "Es gibt nicht gespeicherte Änderungen oder eine Änderung ohne Rückmeldung. Speichere sie zuerst, dann wechselt die App, sobald sie gespeichert sind, oder wechsle jetzt und verliere, was nicht gespeichert ist."
+
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "It has no parameters."
 msgstr "Er hat keine Parameter."
@@ -10273,10 +10281,6 @@ msgstr "Freigeben"
 msgid "Release the {amount} held for this model call?"
 msgstr "Die {amount} freigeben, die für diesen Modellaufruf zurückgehalten werden?"
 
-#: src/screens/screen-frame.tsx
-msgid "Reload"
-msgstr "Neu laden"
-
 #: src/onboarding/interview-words.ts
 msgid "Reminded on {date}"
 msgstr "Erinnert am {date}"
@@ -10805,6 +10809,10 @@ msgstr "Speichern"
 #: src/dashboard/report-dialog.tsx
 msgid "Save as PDF"
 msgstr "Als PDF speichern"
+
+#: src/screens/screen-frame.tsx
+msgid "Save first"
+msgstr "Zuerst speichern"
 
 #: src/routes/_shell.onboarding.agreements.tsx
 msgid "Save the agreements"
@@ -11765,6 +11773,10 @@ msgstr "Kundenservice"
 #: src/onboarding/setup-steps.tsx
 msgid "Switch a team off and nobody in it gets a link."
 msgstr "Schalten Sie ein Team aus, bekommt niemand darin einen Link."
+
+#: src/screens/screen-frame.tsx
+msgid "Switch now"
+msgstr "Jetzt wechseln"
 
 #: src/frame/person-menu.tsx
 msgid "System"
