@@ -172,7 +172,7 @@ const noteVersion = async (
   appId: string,
   version: number,
   described: string,
-  onlyOver?: { version: number; described: string | null } | undefined | null
+  onlyOver?: { version: number; described: string | null } | null
 ): Promise<void> => {
   await drizzle(env.DB)
     .insert(appEntries)
