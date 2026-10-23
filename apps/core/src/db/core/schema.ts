@@ -2171,6 +2171,32 @@ export const workflowDecisions = sqliteTable(
 );
 
 /**
+ * The recipients of a decision asked of more than one (a JSON workflow's
+ * `grasp.decision` naming several, src/decisions/decisions.ts): each
+ * `person:<id>`, `team:<id>` or `role:<role>`, any of whom may answer it,
+ * the first answer the only one. Written once, with the decision; a
+ * decision of one recipient has none here, its `deciders` alone saying
+ * who answers.
+ */
+export const workflowDecisionRecipients = sqliteTable(
+  "workflow_decision_recipients",
+  {
+    decisionId: text("decision_id")
+      .notNull()
+      .references(() => workflowDecisions.id),
+    deciders: text().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.decisionId, table.deciders] }),
+    // The decisions asked of someone (`waitingDecisions`).
+    index("workflow_decision_recipients_deciders_idx").on(
+      table.deciders,
+      table.decisionId
+    ),
+  ]
+);
+
+/**
  * One-use confirmations of a person's answer to a decision
  * (src/decisions/confirmations.ts), minted by the trusted host decision UI
  * once the person confirmed exactly what they answer, and taken by the
