@@ -67,6 +67,7 @@ import type { Staff } from "../access.ts";
 import { clientAdmins } from "../clients/admin.ts";
 import type { AdminReadOptions } from "../clients/admin.ts";
 import { audit, consoleDatabase } from "../db/act.ts";
+import { boundedText } from "../request-body.ts";
 import { organizationsOf } from "./views.ts";
 
 /** Where the admin's MCP is served. */
@@ -242,45 +243,11 @@ const plain = (
     },
   });
 
-/**
- * The request's body as text, read no further than `maxBodyBytes`:
- * `undefined` when it is longer, and the stream cancelled there. A body
- * without a `Content-Length` is never held whole before it is measured.
- */
-const boundedText = async (request: Request): Promise<string | undefined> => {
-  if (request.body === null) {
-    return "";
-  }
-  const reader: ReadableStreamDefaultReader<unknown> = request.body.getReader();
-  const decoder = new TextDecoder();
-  let bytes = 0;
-  let text = "";
-  for (;;) {
-    // oxlint-disable-next-line no-await-in-loop -- a stream reads in order
-    const { done, value } = await reader.read();
-    if (done) {
-      return text + decoder.decode();
-    }
-    // A request's body is bytes; anything else has no length to count.
-    bytes += value instanceof Uint8Array ? value.byteLength : 0;
-    if (!(value instanceof Uint8Array) || bytes > maxBodyBytes) {
-      // oxlint-disable-next-line no-await-in-loop -- the last step
-      await reader.cancel();
-      return undefined;
-    }
-    text += decoder.decode(value, { stream: true });
-  }
-};
-
 /** The request's body as JSON, or why it can't be one. */
 const bodyOf = async (
   request: Request
 ): Promise<{ body: unknown } | { refused: Response }> => {
-  const declared = Number(request.headers.get("content-length") ?? "0");
-  if (declared > maxBodyBytes) {
-    return { refused: plain(413, "Too large.") };
-  }
-  const text = await boundedText(request);
+  const text = await boundedText(request, maxBodyBytes);
   if (text === undefined) {
     return { refused: plain(413, "Too large.") };
   }

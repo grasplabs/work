@@ -56,6 +56,7 @@ import { clientAdmins } from "../clients/admin.ts";
 import type { AdminReadOptions } from "../clients/admin.ts";
 import { audit, consoleDatabase } from "../db/act.ts";
 import { errorCode } from "../deploy/deploy.ts";
+import { boundedText } from "../request-body.ts";
 import { discordCommandName, discordSubcommands } from "./discord-commands.ts";
 import { organizationsOf } from "./views.ts";
 
@@ -492,18 +493,16 @@ export const discordInteraction = async (
   if (request.method !== "POST") {
     return refused(405, "Method not allowed.");
   }
-  if (Number(request.headers.get("content-length") ?? "0") > maxBodyBytes) {
+  const body = await boundedText(request, maxBodyBytes);
+  if (body === undefined) {
     return refused(413, "Too large.");
   }
-  const body = await request.text();
-  const signed =
-    encoder.encode(body).byteLength <= maxBodyBytes &&
-    (await signedByDiscord(
-      env.DISCORD_PUBLIC_KEY ?? "",
-      request.headers.get("x-signature-ed25519") ?? "",
-      request.headers.get("x-signature-timestamp") ?? "",
-      body
-    ));
+  const signed = await signedByDiscord(
+    env.DISCORD_PUBLIC_KEY ?? "",
+    request.headers.get("x-signature-ed25519") ?? "",
+    request.headers.get("x-signature-timestamp") ?? "",
+    body
+  );
   if (!signed) {
     return refused(401, "Invalid request signature.");
   }

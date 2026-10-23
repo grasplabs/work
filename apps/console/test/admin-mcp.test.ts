@@ -16,6 +16,7 @@ import { emptyAdminSnapshot } from "./cloudflare-api.ts";
 import { page } from "./pages.ts";
 import { publishRelease } from "./releases.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
+import { longStream } from "./streamed-body.ts";
 
 // The admin's MCP (GRA-656), from its threat model: only a staff member
 // Access vouches for reaches it, and only from an MCP client, never a page
@@ -155,10 +156,6 @@ const mcpCalls = async () => {
     detail: detail === null ? null : z.unknown().parse(JSON.parse(detail)),
   }));
 };
-
-/** A streamed body's pieces, and how long it would be in all: 4 MiB. */
-const chunkBytes = 16 * 1024;
-const streamedBytes = 4 * 1024 * 1024;
 
 /** A stand-in for Cloudflare's rate limiter that lets `allowed` calls through. */
 const limiterAllowing = (allowed: number): RateLimit => {
@@ -462,20 +459,9 @@ describe("the admin's MCP", () => {
   it("refuses a body past its limit without holding it, though it declares no length, reading nothing", async () => {
     const acme = await liveClient();
     acme.account.admin = readySnapshot("Acme");
-    // A stream far longer than the limit, with no Content-Length: only as
-    // much of it is pulled as it takes to see it is too long.
-    const chunk = new TextEncoder().encode(" ".repeat(chunkBytes));
-    let pulled = 0;
-    const body = new ReadableStream<Uint8Array>({
-      pull: (controller) => {
-        if (pulled >= streamedBytes) {
-          controller.close();
-          return;
-        }
-        pulled += chunk.byteLength;
-        controller.enqueue(chunk);
-      },
-    });
+    // Far longer than the limit, with no Content-Length: only as much of
+    // it is pulled as it takes to see it is too long.
+    const { body, heldWhole } = longStream();
     const response = await exports.default.fetch(`${origin}/mcp`, {
       method: "POST",
       headers: {
@@ -487,7 +473,7 @@ describe("the admin's MCP", () => {
     });
     expect({
       status: response.status,
-      heldWhole: pulled >= streamedBytes,
+      heldWhole: heldWhole(),
       readers: acme.account.adminReaders,
       audited: await mcpCalls(),
     }).toStrictEqual({
