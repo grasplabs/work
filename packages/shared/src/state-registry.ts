@@ -568,6 +568,11 @@ const onboarding: DurableObjectState = {
     works: exported(`${core}onboarding/store.ts`),
     asked_about: exported(`${core}onboarding/store.ts`),
     drawn_works: exported(`${core}onboarding/store.ts`),
+    brain_teams: exported(`${core}onboarding/store.ts`),
+    brain_sent: exported(
+      `${core}onboarding/store.ts`,
+      "Who each record the onboarding gave the brain rests on: what deleting an interview takes out of it."
+    ),
     draw_failures: transient(
       `${core}onboarding/store.ts`,
       "Drawings that failed, waiting to be tried again: a destination draws anew."

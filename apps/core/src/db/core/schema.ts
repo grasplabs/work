@@ -3907,6 +3907,8 @@ export const brainRecords = sqliteTable(
         "teamCount",
         "stakeholder",
         "gap",
+        "workflow",
+        "workflowVersion",
       ],
     }).notNull(),
     id: text().notNull(),
