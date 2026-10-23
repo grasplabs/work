@@ -638,7 +638,7 @@ describe("chat agent sandbox", () => {
 
     expect(result?.isError).toBeTruthy();
     expect(result?.text).toContain(
-      "This chat has no API named env.mailbox. It has: env.chat, env.knowledge, env.connections, env.apps, env.build, env.workflows, env.memory, env.brain, env.dashboard."
+      "This chat has no API named env.mailbox. It has: env.chat, env.knowledge, env.connections, env.apps, env.build, env.workflows, env.workflowBuild, env.memory, env.brain, env.dashboard."
     );
   });
 
