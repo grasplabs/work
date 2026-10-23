@@ -4,7 +4,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { updateApp } from "../src/app-settings.ts";
-import { outlook, requestGranted } from "./apps.ts";
+import { outlook, published, requestGranted } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { newTeam } from "./knowledge.ts";
 import { racingDb } from "./racing-db.ts";
@@ -38,8 +38,10 @@ const slow = { timeout: 60_000 };
 const personApi = async (role: Role) => await signedInApi(idp, role);
 type Person = Awaited<ReturnType<typeof personApi>>;
 
+/** A new App of `owner`'s, published for the people it is shared with. */
 const newApp = async (owner: Person): Promise<string> => {
   const { id } = await owner.api.apps.create({ name: `Desk ${unique()}` });
+  await published(id);
   return id;
 };
 
