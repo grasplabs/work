@@ -96,6 +96,21 @@ export interface AccountState {
   /** The version its Workers' health checks name, as an old version still answering would. */
   answeringVersion?: string;
   /**
+   * How its core answers the console's provisioning probe
+   * (@grasp-os/shared/provision-probe) unlike a healthy one: `absent` for
+   * a core from before the probe, which answers it as any path it has no
+   * route for; otherwise the client it answers as, as a core deployed
+   * with another client's config would, and the bindings and clocks that
+   * don't answer.
+   */
+  coreProbe?:
+    | "absent"
+    | {
+        asClient?: string;
+        down?: readonly string[];
+        clocksDown?: readonly ("core" | "connect")[];
+      };
+  /**
    * The platform update notices its core took, signed with the key its
    * live version's auth secret gives (@grasp-os/shared/platform-change).
    */
