@@ -248,6 +248,7 @@ const cast = {
   staffInterviews: { admin: "admin" },
   tour: { member: "user" },
   setupVoice: { admin: "admin" },
+  setupConnect: { admin: "admin" },
   setupDocuments: { admin: "admin" },
   setupStory: { admin: "admin" },
 } as const satisfies Record<string, Record<string, Role>>;
