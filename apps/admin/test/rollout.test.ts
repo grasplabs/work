@@ -20,6 +20,7 @@ import {
   clientDeploys,
   clientRuns,
   clients,
+  clientSealedSecrets,
   clientWorkers,
   rollouts,
   rolloutTargets,
@@ -3240,16 +3241,36 @@ describe("controlling a rollout", () => {
     const untouched = deploymentCounts(internal.account);
     // The first is set again: what the previous versions carry is current.
     await setBotSecret("first~bot.Secret_0123456789");
-    await rollbacks.rollBack(rolloutId, internal.clientId);
+    const sealedNow = async () =>
+      await db
+        .select({ sealed: clientSealedSecrets.sealed })
+        .from(clientSealedSecrets)
+        .where(eq(clientSealedSecrets.clientId, internal.clientId));
+    const checked = await sealedNow();
+    // Checked, and about to put the versions back: a replacement now would
+    // be passed over by them.
+    await rollbacks.startUntil(rolloutId, internal.clientId, "plan");
+    const midway = await codeOf(setBotSecret("third~bot.Secret_0123456789"));
+    await rollbacks.waitForAll();
+    const kept = await sealedNow();
 
     expect({
       replaced,
       untouched,
+      midway,
+      kept,
       live: await liveVersionsOf(internal.clientId, internal.account),
+      runner: await runnerOf(internal.clientId),
+      // Once it's done, it can be set again.
+      after: await codeOf(setBotSecret("third~bot.Secret_0123456789")),
     }).toStrictEqual({
       replaced: "sealed_secret_replaced",
       untouched: counts,
+      midway: "client_busy",
+      kept: checked,
       live: previous,
+      runner: null,
+      after: "resolved",
     });
   });
 

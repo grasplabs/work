@@ -12,13 +12,13 @@
  * the release already (src/rollout/targets.ts).
  */
 import { hkdfHmacKey } from "@grasp-os/shared/client-secrets";
-import { and, eq, isNull, ne, or } from "drizzle-orm";
+import { and, eq, isNull, ne, or, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import type { Staff } from "../access.ts";
-import { act, actIfChanged, adminDatabase } from "../db/act.ts";
+import { actIfChanged, adminDatabase } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
-import { clients, clientSealedSecrets } from "../db/schema.ts";
+import { clientRuns, clients, clientSealedSecrets } from "../db/schema.ts";
 import {
   MissingStoreSecretError,
   signInApps,
@@ -31,6 +31,7 @@ import {
 } from "../deploy/core-config.ts";
 import { sealSecret } from "../deploy/sealed-secrets.ts";
 import { keyedHash } from "../deploy/upload.ts";
+import { currentRun, hasEnded } from "../runners.ts";
 
 /** Why staff's change to a client's settings was refused, as the page words it. */
 export const settingsErrorCodes = [
@@ -269,9 +270,9 @@ const secretValuePattern = /^[\u0021-\u007E]{8,256}$/u;
  * audited (`client.sealed_secret`, its name as the target, and whether it
  * replaced one), never with anything of the value, and marking the client
  * (`configChangedAt`) so its next deploy gives it to its connect. Refused
- * as `secret_invalid` for a value that isn't one, and as
+ * as `secret_invalid` for a value that isn't one, as
  * `store_secret_missing` while Secrets Store has no `CLIENT_KEY` to seal
- * it with. Every set is a change: a sealed value can't be compared
+ * it with, and as `client_busy` while a rollback holds the client. Every set is a change: a sealed value can't be compared
  * without opening it, and nothing here opens one.
  *
  * Nothing reads it back: what staff see of it is who set it and when
@@ -310,29 +311,55 @@ export const setSealedSecret = async (
         eq(clientSealedSecrets.name, name)
       )
     );
+  const busy = new SettingsError(
+    "client_busy",
+    `${clientId} is being rolled back: set its ${name} once that's done`
+  );
+  // A rollback checks, once it holds the client, that the versions it
+  // puts back carry the sealed secrets the admin holds
+  // (src/rollout/rollback.ts), then puts them back: one replaced in
+  // between would come back with them. So none is set while a rollback
+  // holds the client, in the same batch as the set, as a rollback that
+  // claims the client after it reads the new one.
+  const run = await currentRun(env, clientId);
+  const rollback = run?.kind === "rollback" ? run : null;
+  if (rollback !== null && !hasEnded(rollback.status)) {
+    throw busy;
+  }
+  const noRollback = sql`NOT EXISTS (SELECT 1 FROM ${clientRuns} WHERE ${clientRuns.clientId} = ${clientId} AND ${clientRuns.kind} = ${"rollback"}${
+    rollback === null
+      ? sql``
+      : sql` AND ${clientRuns.runId} <> ${rollback.runId}`
+  })`;
   const now = new Date();
-  await act(
+  const set = await actIfChanged(
     db,
     staff,
-    [
-      db
-        .insert(clientSealedSecrets)
-        .values({ clientId, name, sealed, setBy: staff.email, setAt: now })
-        .onConflictDoUpdate({
-          target: [clientSealedSecrets.clientId, clientSealedSecrets.name],
-          set: { sealed, setBy: staff.email, setAt: now },
-        }),
-      db
-        .update(clients)
-        .set({ configChangedAt: now, updatedAt: now })
-        .where(eq(clients.id, clientId)),
-    ],
+    db
+      .update(clients)
+      .set({ configChangedAt: now, updatedAt: now })
+      .where(and(eq(clients.id, clientId), noRollback)),
     {
       action: "client.sealed_secret",
       clientId,
       target: name,
       detail: { replaced: had !== undefined },
-    }
+    },
+    [
+      // Only once the event is recorded: `changes()` reads its insert.
+      db
+        .insert(clientSealedSecrets)
+        .select(
+          sql`SELECT ${clientId}, ${name}, ${sealed}, ${staff.email}, ${now.getTime()} WHERE changes() > 0`
+        )
+        .onConflictDoUpdate({
+          target: [clientSealedSecrets.clientId, clientSealedSecrets.name],
+          set: { sealed, setBy: staff.email, setAt: now },
+        }),
+    ]
   );
+  if (!set) {
+    throw busy;
+  }
   return true;
 };
