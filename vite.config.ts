@@ -228,6 +228,12 @@ export default defineConfig({
         },
       },
       {
+        // Core's JSX is Chat SDK's cards (apps/core/tsconfig.json), not
+        // React's DOM: a card's `style` is a word ("primary", "muted").
+        files: ["apps/core/src/**/*.tsx"],
+        rules: { "react/style-prop-object": "off" },
+      },
+      {
         // Schema files start as comment-only placeholders until their first table.
         files: ["apps/*/src/db/**/schema.ts"],
         rules: { "unicorn/no-empty-file": "off" },
