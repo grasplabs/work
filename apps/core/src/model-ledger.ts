@@ -735,6 +735,9 @@ export class ModelLedger extends DurableObject<Env> {
           alerted: 0,
         };
       }
+      if (admission.person !== undefined) {
+        this.#carryPersonSpend(admission.person.key, admission.period);
+      }
       const scopes =
         admission.person === undefined
           ? admission.scopes
@@ -896,6 +899,40 @@ export class ModelLedger extends DurableObject<Env> {
       alertMicros: null,
       names: { user: key },
     });
+  }
+
+  /**
+   * Starts `person`'s spend in `period` from their user scope's, the first
+   * time a request of theirs counts against the person scope there: what
+   * they spent before this release counted it still counts against the
+   * limit admins set. Only requests admitted before then can hold a
+   * reservation on the user scope at that moment, and they settle against
+   * the user scope alone, so what they hold is carried as spent: the most
+   * they can still be charged. Inside the transaction that admits.
+   */
+  #carryPersonSpend(person: string, period: string): void {
+    const earlier = this.#spendOf(
+      {
+        scope: "user",
+        key: person,
+        limitMicros: null,
+        alertMicros: null,
+        names: {},
+      },
+      period
+    );
+    this.#db
+      .insert(spend)
+      .values({
+        scope: "person",
+        key: person,
+        period: periodOf("person", period),
+        spentMicros: earlier.spentMicros + earlier.reservedMicros,
+        reservedMicros: 0,
+        requests: earlier.requests,
+      })
+      .onConflictDoNothing()
+      .run();
   }
 
   /**

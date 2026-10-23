@@ -1236,6 +1236,43 @@ describe("the model ledger", () => {
     });
   });
 
+  it("counts what a person spent and holds from before their limit's scope counted, against the limit admins set", async () => {
+    const ledger = newLedger();
+    // Before this release, requests counted against the user scope alone:
+    // one settled at 20, one still under way holding 40.
+    const settled = admission(80, [budget(1000)], {
+      price: { ...price, output: 2_000_000, version: "pinned" },
+    });
+    const open = admission(40, [budget(1000)]);
+    await ledger.admit(settled);
+    await ledger.admit(open);
+    await ledger.settle(settled.id, {
+      by: "usage",
+      tokens: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0 },
+    });
+    await ledger.setPersonLimit(
+      { type: "person", userId: "ada" },
+      { monthlyMicros: 100, messagesAnHour: null },
+      null,
+      actor
+    );
+    const ada = { person: { key: "ada", teams: [] } };
+
+    // 20 spent and 40 held leave 40 of Ada's 100; once those are held
+    // too, a request waits on her limit.
+    const fits = await ledger.admit(admission(40, [budget(1000)], ada));
+    const over = await ledger.admit(admission(1, [budget(1000)], ada));
+    expect({
+      fits,
+      over,
+      person: await ledger.spendOfKeys("2400-01", "person", ["ada"]),
+    }).toMatchObject({
+      fits: { ok: true },
+      over: { ok: false, scope: "person" },
+      person: [{ key: "ada", spentMicros: 60, reservedMicros: 40 }],
+    });
+  });
+
   it("lists at most six damaged scopes in a decision's audit event, counting all, and still settles it", async () => {
     const ledger = newLedger();
     const held = admission(10, [budget(1000, `oz-${crypto.randomUUID()}`)]);

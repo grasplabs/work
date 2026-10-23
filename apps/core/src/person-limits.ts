@@ -222,18 +222,20 @@ export const personLimitsIn = async (
       .orderBy(asc(teamMembers.teamId)),
   ]);
   const listed = everyone.slice(0, personLimitsListed);
-  const [exceptions, spent] = await Promise.all([
+  const keys = listed.map(({ userId }) => userId);
+  const [exceptions, spent, earlier] = await Promise.all([
     exceptionsOf(env, stored),
-    ledger.spendOfKeys(
-      month,
-      "person",
-      listed.map(({ userId }) => userId)
-    ),
+    ledger.spendOfKeys(month, "person", keys),
+    ledger.spendOfKeys(month, "user", keys),
   ]);
   const teamsByPerson = Map.groupBy(memberships, ({ userId }) => userId);
-  const spentBy = new Map(
-    spent.map(({ key, spentMicros }) => [key, spentMicros])
-  );
+  // Someone who made no call since the person scope began counting has
+  // spent what their user scope says: the ledger carries it over at their
+  // next call (`#carryPersonSpend`).
+  const spentBy = new Map([
+    ...earlier.map(({ key, spentMicros }) => [key, spentMicros] as const),
+    ...spent.map(({ key, spentMicros }) => [key, spentMicros] as const),
+  ]);
   const fallback = stored.find(({ subject }) => subject.type === "default");
   return {
     month,
