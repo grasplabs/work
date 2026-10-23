@@ -22,9 +22,22 @@ interface __BaseEnv_Env {
    */
   MICROSOFT_LANDSCAPE_CLIENT_ID?: string;
   MICROSOFT_LANDSCAPE_CLIENT_SECRET?: string;
+  /**
+   * Grasp's multi-tenant Entra app for the directory's read-only admin
+   * connection (src/providers.ts), apart for the same reason.
+   */
+  MICROSOFT_DIRECTORY_CLIENT_ID?: string;
+  MICROSOFT_DIRECTORY_CLIENT_SECRET?: string;
   /** Grasp's Google OAuth client for connections (src/providers.ts). */
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
+  /**
+   * Grasp's Google OAuth client for the directory's read-only admin
+   * connection (src/providers.ts), apart from the one above so that
+   * disconnecting either leaves the other's grant alone.
+   */
+  GOOGLE_DIRECTORY_CLIENT_ID?: string;
+  GOOGLE_DIRECTORY_CLIENT_SECRET?: string;
   /**
    * Grasp's OAuth apps at the apps that aren't suites (src/providers.ts),
    * as JSON: `{"<provider>": {"id": "...", "secret": "..."}}`, by the

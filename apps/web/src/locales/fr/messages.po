@@ -1028,6 +1028,10 @@ msgstr "{shared, plural, one {# document a été partagé ou trouvé, et lu.} ot
 msgid "{shown, plural, one {# integration shown} other {# integrations shown}}"
 msgstr "{shown, plural, one {# intégration affichée} other {# intégrations affichées}}"
 
+#: src/onboarding/setup-steps.tsx
+msgid "{signIn} is connected. I can see {people} people in {teams} teams."
+msgstr "{signIn} est connecté. Je vois {people} personnes dans {teams} équipes."
+
 #: src/brain/brain.ts
 msgid "{sources, plural, one {Time-consuming work that could be automated, raised in # source by {teams}.} other {Time-consuming work that could be automated, raised in # sources by {teams}.}}"
 msgstr "{sources, plural, one {Un travail chronophage qui pourrait être automatisé, soulevé dans # source par {teams}.} other {Un travail chronophage qui pourrait être automatisé, soulevé dans # sources par {teams}.}}"
@@ -3630,6 +3634,10 @@ msgstr "Contexte"
 msgid "Continue"
 msgstr "Continuer"
 
+#: src/onboarding/setup-steps.tsx
+msgid "Continue with {signIn}"
+msgstr "Continuer avec {signIn}"
+
 #: src/engines/resource-bindings.tsx
 msgid "Contract"
 msgstr "Contrat"
@@ -5473,8 +5481,20 @@ msgid "I could not keep it. Try again in a moment."
 msgstr "Je n’ai pas pu l’enregistrer. Réessayez dans un instant."
 
 #: src/onboarding/setup-steps.tsx
+msgid "I could not reach {signIn} just now. Try again in a moment, or use a staff list."
+msgstr "Je n’ai pas pu joindre {signIn} pour l’instant. Réessayez dans un instant, ou utilisez une liste du personnel."
+
+#: src/onboarding/setup-steps.tsx
+msgid "I could not read {signIn} just now. Try again in a moment, or use a staff list."
+msgstr "Je n’ai pas pu lire {signIn} pour l’instant. Réessayez dans un instant, ou utilisez une liste du personnel."
+
+#: src/onboarding/setup-steps.tsx
 msgid "I could not read this file. A CSV or an Excel file works."
 msgstr "Je n’ai pas pu lire ce fichier. Un fichier CSV ou Excel fonctionne."
+
+#: src/onboarding/setup-steps.tsx
+msgid "I could not read who works where from {signIn}. Connect it again with an administrator’s account."
+msgstr "Je n’ai pas pu lire dans {signIn} qui travaille où. Reconnectez-le avec un compte administrateur."
 
 #: src/onboarding/setup-steps.tsx
 msgid "I couldn’t read {name}. Add it again, or as a PDF."
@@ -5487,6 +5507,10 @@ msgstr "Je n’ai pas pu lire celui-ci"
 #: src/onboarding/about-story.tsx
 msgid "I do every interview myself. Here’s what that sounds like."
 msgstr "Je mène chaque entretien moi-même. Voici ce que cela donne."
+
+#: src/onboarding/setup-steps.tsx
+msgid "I found nobody in {signIn}."
+msgstr "Je n’ai trouvé personne dans {signIn}."
 
 #: src/interview/sound-check.tsx
 msgid "I hear you. Shall we start?"
@@ -6577,6 +6601,7 @@ msgid "More about these connections"
 msgstr "En savoir plus sur ces connexions"
 
 #: src/onboarding/connect-steps.tsx
+#: src/onboarding/setup-steps.tsx
 msgid "More about this connection"
 msgstr "En savoir plus sur cette connexion"
 
@@ -6844,6 +6869,10 @@ msgstr "Neuf sur dix"
 msgid "No"
 msgstr "Non"
 
+#: src/onboarding/setup-steps.tsx
+msgid "No {onlySignIn}? A staff list works too."
+msgstr "Pas de {onlySignIn} ? Une liste du personnel fonctionne aussi."
+
 #: src/landscape/landscape.ts
 #: src/policies/policy.ts
 msgid "No AI"
@@ -7045,6 +7074,10 @@ msgstr "Aucun résultat"
 #: src/routes/_shell.knowledge.index.tsx
 msgid "No memory files are written yet."
 msgstr "Aucun fichier de mémoire n’a encore été écrit."
+
+#: src/onboarding/setup-steps.tsx
+msgid "No Microsoft or Google? A staff list works too."
+msgstr "Pas de Microsoft ni de Google ? Une liste du personnel fonctionne aussi."
 
 #: src/chat/chat-dock.tsx
 #: src/chat/composer.tsx
@@ -11237,6 +11270,14 @@ msgstr "La personne pour qui l'exécution agit dit ce qui s'est passé sur son t
 msgid "The platform is open to everyone at the company: it was never closed for the onboarding."
 msgstr "La plateforme est ouverte à toute l’entreprise : elle n’a jamais été fermée pour l’onboarding."
 
+#: src/onboarding/setup-steps.tsx
+msgid "The quickest way is to connect your {signIn} sign-in. I’ll only see names, teams and roles. Your email, chats and calendars stay closed."
+msgstr "Le plus rapide est de connecter votre compte {signIn}. Je ne verrai que les noms, les équipes et les rôles. Vos e-mails, discussions et agendas restent fermés."
+
+#: src/onboarding/setup-steps.tsx
+msgid "The quickest way is to connect your Microsoft or Google sign-in. I’ll only see names, teams and roles. Your email, chats and calendars stay closed."
+msgstr "Le plus rapide est de connecter votre compte Microsoft ou Google. Je ne verrai que les noms, les équipes et les rôles. Vos e-mails, discussions et agendas restent fermés."
+
 #: src/onboarding/interview-words.ts
 msgctxt "part of an interview"
 msgid "The read-back"
@@ -11425,6 +11466,10 @@ msgstr "Ensuite, je parle moi-même avec votre équipe : de courts échanges, su
 #: src/interview/words.ts
 msgid "Then, when it goes differently."
 msgstr "Ensuite, si ça se passe autrement."
+
+#: src/onboarding/setup-steps.tsx
+msgid "There are more people in {signIn} than I can take: up to {peopleMost} people in up to {teamsMost} teams. A staff list of those taking part works."
+msgstr "Il y a plus de personnes dans {signIn} que je ne peux en prendre : jusqu’à {peopleMost} personnes dans jusqu’à {teamsMost} équipes. Une liste du personnel de ceux qui participent fonctionne."
 
 #: src/routes/_shell.knowledge.index.tsx
 msgid "There are no collections you can read yet."
@@ -12143,6 +12188,10 @@ msgid "Usage unknown"
 msgstr "Utilisation inconnue"
 
 #: src/onboarding/setup-steps.tsx
+msgid "Use a staff list instead"
+msgstr "Utiliser plutôt une liste du personnel"
+
+#: src/onboarding/setup-steps.tsx
 msgid "Use another list"
 msgstr "Utiliser une autre liste"
 
@@ -12359,6 +12408,10 @@ msgstr "Attente"
 msgctxt "dashboard: what waits on you, settled on its own page"
 msgid "Waiting elsewhere"
 msgstr "En attente ailleurs"
+
+#: src/onboarding/setup-steps.tsx
+msgid "Waiting for {signIn}"
+msgstr "En attente de {signIn}"
 
 #: src/routes/_shell.workflows.index.tsx
 #: src/workflows/history-view.tsx
