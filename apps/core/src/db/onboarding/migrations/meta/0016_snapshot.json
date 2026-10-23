@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "62ea2bd8-7059-4f2a-ae46-8867c6dbbe97",
+  "id": "ac866191-a00c-4c0c-b58a-ab4358abcce8",
   "prevId": "4f81abd5-ae08-4eac-b3af-11a5239f5f0e",
   "tables": {
     "answer_waits": {
@@ -710,13 +710,6 @@
           "notNull": false,
           "autoincrement": false
         },
-        "taken_at": {
-          "name": "taken_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "version": {
           "name": "version",
           "type": "integer",
@@ -914,6 +907,13 @@
         },
         "told_at": {
           "name": "told_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "choices": {
+          "name": "choices",
           "type": "text",
           "primaryKey": false,
           "notNull": false,

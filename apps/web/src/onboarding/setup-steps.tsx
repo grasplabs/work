@@ -1,3 +1,4 @@
+import type { OAuthProvider } from "@grasp-os/shared/connect";
 import {
   onboardingPeopleMax,
   onboardingTeamsMax,
@@ -10,22 +11,17 @@ import type {
   Roster,
   RosterInput,
 } from "@grasp-os/shared/onboarding";
+import type { SetupChoices } from "@grasp-os/shared/onboarding-choices";
 import { documentErrors } from "@grasp-os/shared/onboarding-documents";
 import type { OnboardingDocument } from "@grasp-os/shared/onboarding-documents";
 import type { GateView, KnownPart } from "@grasp-os/shared/onboarding-gate";
+import type { Identity } from "@grasp-os/shared/rpc";
 import {
   Alert,
   AlertDescription,
   AlertTitle,
 } from "@grasp-os/ui/components/alert";
 import { Button } from "@grasp-os/ui/components/button";
-import {
-  Item,
-  ItemContent,
-  ItemGroup,
-  ItemMedia,
-  ItemTitle,
-} from "@grasp-os/ui/components/item";
 import {
   Select,
   SelectContent,
@@ -52,7 +48,6 @@ import { useContext, useEffect, useRef, useState } from "react";
 import type { ComponentType } from "react";
 
 import type { BrainScene } from "../brain/dot-brain.tsx";
-import { AppLogo } from "../connections/app-logo.tsx";
 import { CoreTimeoutError } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatList } from "../format.ts";
@@ -62,6 +57,11 @@ import { useCore } from "../use-core.ts";
 import { SpokenText } from "../voice/spoken-text.tsx";
 import { speak, usePrepare, useSaid } from "../voice/voice.ts";
 import { About } from "./about-story.tsx";
+import {
+  HrPlatform,
+  Pulse as PulseStep,
+  Sources as SourcesStep,
+} from "./connect-steps.tsx";
 import { DocumentDrop } from "./document-drop.tsx";
 import type { DocumentRow } from "./document-drop.tsx";
 import { InterviewsProgress } from "./interviews-progress.tsx";
@@ -88,7 +88,7 @@ import {
   useSayFollowing,
 } from "./setup-parts.tsx";
 import type { Answer, StepVoice } from "./setup-parts.tsx";
-import { documentSources, openItems, stepIndex, steps } from "./setup.ts";
+import { openItems, stepIndex, steps } from "./setup.ts";
 import type { Listening, ReviewItemId, SetupStep } from "./setup.ts";
 import {
   csvRows,
@@ -105,9 +105,9 @@ import { XlsxError, xlsxMost, xlsxRows } from "./xlsx.ts";
 // `RealPulse`, `RealOpen`, and the others where nothing is different). What
 // a step keeps goes to core: who works where, who leads which team and
 // which teams take part, the documents and the answers to their questions,
-// and when the interviews run. What core keeps nothing of yet (where the
-// documents live, Pulse) shows the step as the prototype does with nothing
-// in; what needs the admin settled, this browser keeps.
+// what the admin chose about what Grasp may connect (connect-steps.tsx),
+// and when the interviews run. What needs the admin settled, this browser
+// keeps.
 
 /** What the onboarding reads from core, and who is going through it. */
 export interface SetupData {
@@ -122,6 +122,11 @@ export interface SetupData {
   gate: GateView;
   /** Grasp's sending domain, which the admin lets through their mail filter. */
   sendingDomain: string;
+  /** What the admin chose about what Grasp may connect. */
+  choices: SetupChoices;
+  /** The suites the company signs in with. */
+  signIn: OAuthProvider[];
+  identity: Identity;
 }
 
 export interface StepProps {
@@ -155,6 +160,14 @@ const downloadCsv = (content: string, filename: string): void => {
   URL.revokeObjectURL(url);
 };
 
+/** What the steps that connect read, from a step's props (connect-steps.tsx). */
+const connectProps = ({ data, go }: StepProps) => ({
+  choices: data.choices,
+  signIn: data.signIn,
+  identity: data.identity,
+  go,
+});
+
 /** Reads core again after a change, so every step shows what core now has. */
 const useRefresh = (): (() => Promise<void>) => {
   const router = useRouter();
@@ -186,7 +199,7 @@ const useHeadlines = ({
 }: Pick<StepProps, "data" | "settled">): Record<
   Exclude<SetupStep, "about">,
   Headline
-> => {
+> & { hr: Headline } => {
   const { t } = useLingui();
   const { admin } = data;
   const { sponsor } = data.view;
@@ -195,7 +208,17 @@ const useHeadlines = ({
   const { progress } = data.view;
   const talked = (progress?.talked ?? 0) + (progress?.leadsTalked ?? 0);
   const openCount = openItems(settled).length;
+  // Before the organization, the leads step asks for the HR platform, until the admin said which.
+  const hr: Headline = {
+    title: t`Which HR platform do you use?`,
+    sentence: t`It knows who leads which team, so I can talk to the leads first. We connect it with you.`,
+  };
+  const organization: Headline = {
+    title: t`Almost done: is this your organization?`,
+    sentence: t`I talk to each team lead first, so they hear about me before their team does. Check who leads which team, and which teams take part.`,
+  };
   return {
+    hr,
     welcome: {
       title: t`Hi ${admin}, I’m Stephen`,
       // The sponsor by name, only when the kickoff gave one.
@@ -226,10 +249,7 @@ const useHeadlines = ({
         .join(" ")
         .trim(),
     },
-    leads: {
-      title: t`Almost done: is this your organization?`,
-      sentence: t`I talk to each team lead first, so they hear about me before their team does. Check who leads which team, and which teams take part.`,
-    },
+    leads: data.choices.hr === null ? hr : organization,
     team: {
       title: t`Before I reach out, let your team know`,
       sentence: t`People respond better when they know why I’m reaching out. I’ve drafted a message you can send yourself. Then pick the day the interviews start.`,
@@ -546,44 +566,10 @@ const Company = (props: StepProps) => {
   );
 };
 
-/**
- * Where the documents live. Grasp connects none of them here yet, and core
- * keeps nothing of them: the places are listed, and the step can be
- * skipped, as the prototype's is with none connected.
- */
-const Sources = (props: StepProps) => {
-  const { t } = useLingui();
-  const lines = useHeadlines(props).sources;
-  return (
-    <>
-      <Heading sentence={lines.sentence} title={lines.title} />
-      <Onward>
-        <ItemGroup className="grid w-full text-left sm:grid-cols-2">
-          {documentSources.map((name) => (
-            <Item key={name} size="sm" variant="outline">
-              <ItemMedia>
-                <AppLogo name={name} size="sm" />
-              </ItemMedia>
-              <ItemContent>
-                <ItemTitle>{name}</ItemTitle>
-              </ItemContent>
-            </Item>
-          ))}
-        </ItemGroup>
-      </Onward>
-      <Asides>
-        <LaterLink
-          onClick={() => {
-            props.go("documents");
-          }}
-        >
-          {t`Skip for now`}
-        </LaterLink>
-        <SupportLink page="documents">{t`More about these connections`}</SupportLink>
-      </Asides>
-    </>
-  );
-};
+/** Where the documents live (connect-steps.tsx). */
+const Sources = (props: StepProps) => (
+  <SourcesStep {...connectProps(props)} lines={useHeadlines(props).sources} />
+);
 
 /** About how long reading a document takes, in milliseconds, for its bar to fill at; a bigger one longer. */
 const readMs = 4500;
@@ -848,30 +834,10 @@ const Documents = (props: StepProps) => {
   );
 };
 
-/**
- * Pulse: there is nothing to download here yet, and core keeps no wish for
- * it, so the step says what it is and can be skipped, as the prototype's is
- * before anything is chosen.
- */
-const Pulse = (props: StepProps) => {
-  const { t } = useLingui();
-  const lines = useHeadlines(props).pulse;
-  return (
-    <>
-      <Heading sentence={lines.sentence} title={lines.title} />
-      <Asides>
-        <LaterLink
-          onClick={() => {
-            props.go("leads");
-          }}
-        >
-          {t`Skip for now`}
-        </LaterLink>
-        <SupportLink page="pulse">{t`More about Pulse`}</SupportLink>
-      </Asides>
-    </>
-  );
-};
+/** Pulse on the work laptops (connect-steps.tsx). */
+const Pulse = (props: StepProps) => (
+  <PulseStep {...connectProps(props)} lines={useHeadlines(props).pulse} />
+);
 
 const ConfirmOrg = (props: StepProps & { roster: Roster }) => {
   const { t } = useLingui();
@@ -1034,8 +1000,22 @@ const ConfirmOrg = (props: StepProps & { roster: Roster }) => {
  */
 const Leads = (props: StepProps) => {
   const { t } = useLingui();
-  const lines = useHeadlines(props).leads;
+  const headlines = useHeadlines(props);
+  const lines = headlines.leads;
   const { roster } = props.data.view;
+  // The HR platform comes first, until the admin said which; then, on this visit, the organization.
+  const [hrSaid, setHrSaid] = useState(props.data.choices.hr !== null);
+  if (!hrSaid) {
+    return (
+      <HrPlatform
+        choices={props.data.choices}
+        lines={headlines.hr}
+        onDone={() => {
+          setHrSaid(true);
+        }}
+      />
+    );
+  }
   if (roster === null) {
     return (
       <>

@@ -426,7 +426,7 @@ test("the company's admin goes through their onboarding: the staff list, the org
   ).toBeVisible();
   await page.getByRole("button", { name: "Continue" }).click();
 
-  // Where the documents live and Pulse: core keeps nothing of them yet, so both are skipped.
+  // Where the documents live and Pulse are skipped (e2e/setup-voice.e2e.ts notes them).
   await page.getByRole("button", { name: "Skip for now" }).click();
   await expect(
     page.getByRole("heading", {
@@ -438,6 +438,9 @@ test("the company's admin goes through their onboarding: the staff list, the org
     page.getByRole("heading", { name: "Which tools do people actually use?" })
   ).toBeVisible();
   await page.getByRole("button", { name: "Skip for now" }).click();
+  await page
+    .getByRole("button", { name: "We don’t use an HR platform" })
+    .click();
 
   // The leads as the list said them; Ops gets Ona as its lead, and Legal does not take part.
   await expect(
