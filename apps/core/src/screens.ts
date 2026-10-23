@@ -55,7 +55,7 @@ import {
   sweepReceipts,
   throughCache,
 } from "./build-cache.ts";
-import type { CacheEnv } from "./build-cache.ts";
+import type { Built, CacheEnv } from "./build-cache.ts";
 import { PlatformBoundError, platformRunner } from "./platform-sandbox.ts";
 import type { PlatformEnv, PlatformRunner } from "./platform-sandbox.ts";
 import type { FrameCode } from "./screen-frame.ts";
@@ -149,7 +149,24 @@ export type BuildEnv = PlatformEnv &
   };
 
 /** How much longer than a build may take a build's lease is held. */
-const leaseSlackMs = 30_000;
+export const leaseSlackMs = 30_000;
+
+/**
+ * Which build profile a build is for (spec 19.2.1): `production`, what a
+ * version's saves, reviews, seals and opens build; `preview`, what a
+ * chat's draft builds, checks and seals. Each profile has cache keys and
+ * screen artifact hashes of its own, so a preview build never stands in
+ * for a production one, even of the same files.
+ */
+export type BuildProfile = "preview" | "production";
+
+/** How a build is asked for. */
+export interface BuildOptions {
+  /** Its profile: `production` unless a chat's draft asks. */
+  readonly profile?: BuildProfile;
+  /** Given up on: no compile starts, and it throws its reason. */
+  readonly signal?: AbortSignal;
+}
 
 /**
  * What the compiler (`AppCompiler`) runs for each kind of build: its
@@ -264,12 +281,17 @@ const buildSweepKey = "builds-sweep.json";
 /** The most objects one run of the builds' sweep reads. */
 const buildSweepBatch = 500;
 
+/** The prefix inspected manifests are cached under (app-inspection.ts). */
+export const inspectionsPrefix = "inspections/";
+
 /**
- * The prefix each kind of build is cached under, and the bad bytes kept
- * for operators (build-cache.ts), which go after the same time.
+ * The prefix each kind of build is cached under, inspected manifests, and
+ * the bad bytes kept for operators (build-cache.ts), which all go after
+ * the same time.
  */
 const buildPrefixes = [
   ...Object.keys(compilerCalls).map((kind) => `${kind}-builds/`),
+  inspectionsPrefix,
   "build-quarantine/",
 ];
 
@@ -341,6 +363,45 @@ export const sweepBuilds = async (env: Env, now: Date): Promise<void> => {
     : { prefix: (state.prefix + 1) % buildPrefixes.length };
   await env.FILES.put(buildSweepKey, JSON.stringify(next));
   await sweepReceipts(env, now);
+};
+
+/**
+ * `cacheKey`'s answer through the verified cache (build-cache.ts): kept
+ * with when it was last used, and a hit older than `buildRefreshMs`
+ * written again, so one in use never reaches the sweep's limit
+ * (`sweepBuilds`). Builds and inspected manifests are kept alike.
+ */
+export const throughKeptCache = async (
+  env: CacheEnv,
+  cacheKey: string,
+  leaseMs: number,
+  build: () => Promise<Built>,
+  signal?: AbortSignal
+): Promise<CachedAnswer> => {
+  const answer = await throughCache(
+    env,
+    cacheKey,
+    leaseMs,
+    build,
+    usedNow,
+    signal
+  );
+  const { text, object, objectKey } = answer;
+  if (
+    object !== undefined &&
+    objectKey !== undefined &&
+    Date.now() - lastUsedOf(object) > buildRefreshMs
+  ) {
+    try {
+      // The same bytes, while its receipt still names them.
+      await refreshKept(env, cacheKey, objectKey, text, usedNow());
+    } catch (error) {
+      // Served all the same: a refresh that failed is tried again at its
+      // next use, well before the sweep's limit.
+      log.warn("build.refresh_failed", errorFields(error));
+    }
+  }
+  return answer;
 };
 
 /**
@@ -437,7 +498,7 @@ const cachedBuild = async <Build>(
   select: (files: AppFiles) => AppFiles,
   /** Whose build it is: the App's, or an independent workflow's, ID. */
   whose: string,
-  signal?: AbortSignal
+  { profile = "production", signal }: BuildOptions = {}
 ): Promise<Build | FailedBuild> => {
   const files = select(appFiles);
   const tooMuch = limitsOf(kind)(files);
@@ -453,14 +514,15 @@ const cachedBuild = async <Build>(
   const runner = platformRunner(env, whose);
   // Under the call the build is, as well as its kind: a change to which
   // compiler call a kind makes (`compilerCalls`) builds again, rather than
-  // serving what the old call built for as long as it is kept.
+  // serving what the old call built for as long as it is kept. Under its
+  // profile too: a preview's build is never served as production's.
   const [callMethod, callTarget] = compilerCalls[kind];
-  const cacheKey = `${kind}-builds/${callMethod}.${callTarget}/${keySchema}/${await buildKey(files)}.json`;
+  const cacheKey = `${kind}-builds/${callMethod}.${callTarget}/${keySchema}/${profile}/${await buildKey(files)}.json`;
   const isBuild = (value: unknown): value is Build | FailedBuild =>
     isBuildShaped(value);
   const started = Date.now();
   const leaseMs = runner.callMs("compiler") + leaseSlackMs;
-  const { text, outcome, object, objectKey } = await sharedThroughCache(
+  const { text, outcome } = await sharedThroughCache(
     // One sub-owner's: another App building the same files builds them in
     // its own part of the builder's share, never on this one's (or with
     // its refusal). The cache itself is by content alone.
@@ -468,7 +530,7 @@ const cachedBuild = async <Build>(
     // Waited on as long as a lease, and the wait for one, may take.
     leaseMs * 2,
     async (given) =>
-      await throughCache(
+      await throughKeptCache(
         env,
         cacheKey,
         // Held as long as a build may take, and a little more.
@@ -482,28 +544,18 @@ const cachedBuild = async <Build>(
           }
           return { text: JSON.stringify(answer.built), cache: answer.cache };
         },
-        usedNow,
         given
       ),
     signal
   );
   // Assembly, transforms and execution are the compiler's own; this is
   // the cache's part: how a build came about, and how long it took.
-  log.info("build.cache", { kind, outcome, ms: Date.now() - started });
-  if (
-    object !== undefined &&
-    objectKey !== undefined &&
-    Date.now() - lastUsedOf(object) > buildRefreshMs
-  ) {
-    try {
-      // The same bytes, while its receipt still names them.
-      await refreshKept(env, cacheKey, objectKey, text, usedNow());
-    } catch (error) {
-      // The build is served all the same: a refresh that failed is tried
-      // again at its next use, well before the sweep's limit.
-      log.warn("build.refresh_failed", errorFields(error));
-    }
-  }
+  log.info("build.cache", {
+    kind,
+    profile,
+    outcome,
+    ms: Date.now() - started,
+  });
   const built: unknown = JSON.parse(text);
   if (!isBuild(built)) {
     throw new TypeError("The compiler answered something else than a build.");
@@ -522,7 +574,7 @@ export const buildScreens = async (
   appFiles: AppFiles,
   /** Whose build it is: the App's ID. */
   whose: string,
-  signal?: AbortSignal
+  options?: BuildOptions
 ): Promise<ScreenBuild> =>
   await cachedBuild<ScreenBuild>(
     env,
@@ -530,7 +582,7 @@ export const buildScreens = async (
     appFiles,
     buildFiles,
     whose,
-    signal
+    options
   );
 
 /**
@@ -542,7 +594,7 @@ export const buildServer = async (
   appFiles: AppFiles,
   /** Whose build it is: the App's ID. */
   whose: string,
-  signal?: AbortSignal
+  options?: BuildOptions
 ): Promise<ServerBuild> =>
   await cachedBuild<ServerBuild>(
     env,
@@ -550,7 +602,7 @@ export const buildServer = async (
     appFiles,
     serverFiles,
     whose,
-    signal
+    options
   );
 
 /**
@@ -565,7 +617,7 @@ export const buildAppCode = async (
   appFiles: AppFiles,
   /** Whose build it is: the App's ID. */
   whose: string,
-  signal?: AbortSignal
+  options?: BuildOptions
 ): Promise<AppCodeBuild> =>
   await cachedBuild<AppCodeBuild>(
     env,
@@ -573,7 +625,7 @@ export const buildAppCode = async (
     appFiles,
     appCodeFiles,
     whose,
-    signal
+    options
   );
 
 /** An App's server code with its tests: what `checkAppCode` reads. */
@@ -594,7 +646,7 @@ export const checkAppCode = async (
   appFiles: AppFiles,
   /** Whose build it is: the App's ID. */
   whose: string,
-  signal?: AbortSignal
+  options?: BuildOptions
 ): Promise<AppCodeBuild> =>
   await cachedBuild<AppCodeBuild>(
     env,
@@ -602,7 +654,7 @@ export const checkAppCode = async (
     appFiles,
     appCodeAndTestFiles,
     whose,
-    signal
+    options
   );
 
 /**
@@ -665,7 +717,7 @@ export const buildWorkflows = async (
   /** Whose build it is: the App's ID. */
   whose: string,
   bindings: Readonly<Record<string, string>>,
-  signal?: AbortSignal
+  options?: BuildOptions
 ): Promise<WorkflowBuild> =>
   await cachedBuild<WorkflowBuild>(
     env,
@@ -682,7 +734,7 @@ export const buildWorkflows = async (
       ),
     }),
     whose,
-    signal
+    options
   );
 
 /**
@@ -744,7 +796,7 @@ export const buildFailed = (
 export interface BuiltScreen {
   screen: string;
   code: FrameCode;
-  /** The SHA-256, in hex, of `code`: what an admin approves. */
+  /** `code`'s hash under its profile (`screenArtifact`): what an admin approves. */
   artifact: string;
 }
 
@@ -767,6 +819,19 @@ const pick = (
     })
   );
 
+/**
+ * The hash of a screen's code built for `profile`: what an admin
+ * approves, and what its frame is staged under. The profile is part of
+ * it, so a preview's artifact never passes for production's.
+ */
+export const screenArtifact = async (
+  profile: BuildProfile,
+  { entry, runtime, modules, kit, css }: FrameCode
+): Promise<string> =>
+  await sha256Hex(
+    canonicalJson({ profile, code: { entry, runtime, modules, kit, css } })
+  );
+
 /** The screens of a version, built once, for each screen's code. */
 export type VersionScreens = (screen: unknown) => Promise<BuiltScreen>;
 
@@ -785,7 +850,9 @@ export const versionScreens = async (
   files: Record<string, string>,
   version: number | null,
   /** Whose screens they are: the App's ID. */
-  app: string
+  app: string,
+  /** `preview` for a chat's draft. */
+  profile: BuildProfile
 ): Promise<VersionScreens> => {
   if (!Object.keys(files).some((path) => screenPath.test(path))) {
     return async () => {
@@ -796,7 +863,10 @@ export const versionScreens = async (
   const loaded = await withinBuildWait(
     env,
     async () =>
-      await Promise.all([buildScreens(env, files, app), kitModules(env.ASSETS)])
+      await Promise.all([
+        buildScreens(env, files, app, { profile }),
+        kitModules(env.ASSETS),
+      ])
   );
   if (loaded === "late") {
     throw screenErrors.create("screen.build_slow");
@@ -834,7 +904,7 @@ export const versionScreens = async (
     return {
       screen: name,
       code,
-      artifact: await sha256Hex(canonicalJson(code)),
+      artifact: await screenArtifact(profile, code),
     };
   };
 };
@@ -852,12 +922,14 @@ export const screenCode = async (
   screen: unknown,
   version: number | null,
   /** Whose screen it is: the App's ID. */
-  app: string
+  app: string,
+  /** `preview` for a chat's draft. */
+  profile: BuildProfile
 ): Promise<BuiltScreen> => {
   const name = screenErrors.parse("screen.invalid", screenNameSchema, screen);
   if (!Object.hasOwn(files, `screens/${name}.tsx`)) {
     throw screenErrors.create("screen.not_found");
   }
-  const built = await versionScreens(env, files, version, app);
+  const built = await versionScreens(env, files, version, app, profile);
   return await built(name);
 };

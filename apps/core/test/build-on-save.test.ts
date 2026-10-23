@@ -222,7 +222,8 @@ export class App {}
         version: 1,
         files,
         bindings: {},
-      }
+      },
+      { profile: "production" }
     );
     // Still held: the build that didn't finish has cached nothing, so its
     // first use builds it anew.
@@ -322,7 +323,8 @@ export class App {}
         files,
         "desk",
         1,
-        "app-test"
+        "app-test",
+        "production"
       )
     );
     held.resolve(true);
@@ -506,12 +508,16 @@ describe("a save's diagnostics", { timeout: 60_000 }, () => {
     "names a problem's category, %s, in a closed set that holds nothing of the App's",
     async (category, files) => {
       // Built as a save builds them: past what a commit takes, for limits.
-      const builds = await buildOnSave(env, {
-        app: appIdSchema.parse(crypto.randomUUID()),
-        version: 1,
-        files,
-        bindings: {},
-      });
+      const builds = await buildOnSave(
+        env,
+        {
+          app: appIdSchema.parse(crypto.randomUUID()),
+          version: 1,
+          files,
+          bindings: {},
+        },
+        { profile: "production" }
+      );
       expect(
         builds.screens.diagnostics
           .filter(({ severity }) => severity === "error")

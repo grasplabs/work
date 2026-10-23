@@ -888,12 +888,16 @@ export const commitFiles = async (
   // the files as the version reads back, paths in order, so a build says
   // the same here as at its first use.
   const saved = storedTreeSchema.parse(JSON.parse(json));
-  const builds = await buildOnSave(env, {
-    app: appId,
-    version: row.version,
-    files: saved,
-    bindings: workflowBindings,
-  });
+  const builds = await buildOnSave(
+    env,
+    {
+      app: appId,
+      version: row.version,
+      files: saved,
+      bindings: workflowBindings,
+    },
+    { profile: "production" }
+  );
   // What its screens build to, for what waits on an admin
   // (screen-builds.ts), in the background: only once they built just now,
   // so from the cache.

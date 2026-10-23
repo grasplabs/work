@@ -34,7 +34,7 @@ import { actorOf } from "@grasp-os/shared/audit";
 import { sha256Hex, sha256HexOfBytes } from "@grasp-os/shared/encoding";
 import { storeIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, StoreId } from "@grasp-os/shared/ids";
-import { canonicalJson, canonicalText } from "@grasp-os/shared/json";
+import { canonicalText } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { screenErrors, screenPath } from "@grasp-os/shared/screens";
 import { sharedRun } from "@grasp-os/shared/shared-runs";
@@ -78,8 +78,8 @@ import {
   requireMigrationsTarget,
 } from "./migration-transform.ts";
 import { finishDeletion, markArtifact } from "./release-retention.ts";
-import { versionScreens } from "./screens.ts";
-import type { BuiltScreen } from "./screens.ts";
+import { screenArtifact, versionScreens } from "./screens.ts";
+import type { BuildProfile, BuiltScreen } from "./screens.ts";
 import { defineSchemaOnStore, schemaStatus } from "./store-backfill.ts";
 import { liveStoreSql } from "./store-deletion.ts";
 
@@ -712,7 +712,9 @@ export const sealedScreen = async (
     const sealed = sealedScreenSchema.parse(JSON.parse(text));
     if (
       sealed.screen !== name ||
-      sealed.artifact !== (await sha256Hex(canonicalJson(sealed.code)))
+      // Sealed releases hold production's builds alone: a preview's
+      // artifact never passes for one.
+      sealed.artifact !== (await screenArtifact("production", sealed.code))
     ) {
       throw new Error("The screen doesn't match its hash");
     }
@@ -1327,7 +1329,9 @@ interface InspectedRelease {
 const inspectForSeal = async (
   env: Env,
   key: { app: AppId; version: number },
-  files: Readonly<Record<string, string>>
+  files: Readonly<Record<string, string>>,
+  /** `preview` for a chat's draft. */
+  profile: BuildProfile
 ): Promise<InspectedRelease> => {
   if (!isAppLayout(files)) {
     throw versionErrors.create("version.unsealable");
@@ -1345,7 +1349,8 @@ const inspectForSeal = async (
       ...symbolicModules(),
       [generatedPaths.server]: serverModuleSource,
     },
-    key.app
+    key.app,
+    { profile }
   );
   const firstText = await inspected(env, symbolic, sdk.modules);
   const manifest = readManifest(firstText);
@@ -1359,7 +1364,12 @@ const inspectForSeal = async (
   );
   // Type-checked with them, against the SDK's server side: nothing is
   // sealed that doesn't check.
-  const final = await checkedCode(env, { ...files, ...generated }, key.app);
+  const final = await checkedCode(
+    env,
+    { ...files, ...generated },
+    key.app,
+    profile
+  );
   const secondText = await inspected(env, final, sdk.modules);
   const reread = readManifest(secondText);
   if (canonicalText(reread) !== canonicalText(manifest)) {
@@ -1419,7 +1429,8 @@ const builtScreens = async (
     env,
     withReferences,
     key.version,
-    key.app
+    key.app,
+    "production"
   );
   return await Promise.all(
     names.toSorted().map(async (name) => await codeOf(name))
@@ -1538,7 +1549,12 @@ export const sealDraftRelease = async (
   files: ReadonlyMap<string, string>
 ): Promise<SealedDraft> => {
   const { tree } = await versionTree(files);
-  const built = await inspectForSeal(env, key, Object.fromEntries(files));
+  const built = await inspectForSeal(
+    env,
+    key,
+    Object.fromEntries(files),
+    "preview"
+  );
   const { artifacts, text, hash } = await packaged(env, key, built, {
     tree,
     store: null,
@@ -1593,7 +1609,12 @@ export const sealRelease = async (
   }
   const row = await findVersion(env, app, version);
   const files = await versionFiles(env, app, version);
-  const built = await inspectForSeal(env, { app, version }, files);
+  const built = await inspectForSeal(
+    env,
+    { app, version },
+    files,
+    "production"
+  );
   const bound = await boundStore(env, request, built.manifest, built.schema);
   const store = bound?.binding ?? null;
   await request.building?.();

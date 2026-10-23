@@ -558,18 +558,21 @@ describe("screen trust", { timeout: 60_000 }, () => {
       })),
       // What is approved is the hash of everything the frame runs, as
       // core serves it to the frame: its modules, the kit's it loads, its
-      // CSS.
+      // CSS, built for production.
       approvedIsWhatRuns:
         bundle.artifact ===
         (await sha256Hex(
           canonicalJson({
-            entry: frame.screen.entry,
-            runtime: frame.screen.runtime,
-            modules: Object.fromEntries(
-              appModulesOf(frame).map((name) => [name, frame.modules[name]])
-            ),
-            kit: kitModulesOf(frame),
-            css: frame.screen.css,
+            profile: "production",
+            code: {
+              entry: frame.screen.entry,
+              runtime: frame.screen.runtime,
+              modules: Object.fromEntries(
+                appModulesOf(frame).map((name) => [name, frame.modules[name]])
+              ),
+              kit: kitModulesOf(frame),
+              css: frame.screen.css,
+            },
           })
         )),
       after: await called(builder, app, { lease: bundle.lease }),
