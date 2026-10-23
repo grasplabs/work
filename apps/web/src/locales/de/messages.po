@@ -526,6 +526,18 @@ msgstr "{fixtures, plural, one {Sie läuft auf ihrem # Testdatensatz, wenn die V
 msgid "{folded, plural, one {# earlier} other {# earlier}}"
 msgstr "{folded, plural, one {# frühere} other {# frühere}}"
 
+#: src/onboarding/interviews-progress.tsx
+msgid "{fresh, plural, one {One new link is ready to send, under “Links to send”.} other {# new links are ready to send, under “Links to send”.}}"
+msgstr "{fresh, plural, one {Ein neuer Link ist bereit zum Versenden, unter „Links zum Versenden“.} other {# neue Links sind bereit zum Versenden, unter „Links zum Versenden“.}}"
+
+#: src/onboarding/interviews-progress.tsx
+msgid "{freshCount, plural, one {# new link to send} other {# new links to send}}"
+msgstr "{freshCount, plural, one {# neuer Link zum Versenden} other {# neue Links zum Versenden}}"
+
+#: src/onboarding/interviews-progress.tsx
+msgid "{freshCount, plural, one {The new link, as a list} other {The # new links, as a list}}"
+msgstr "{freshCount, plural, one {Der neue Link als Liste} other {Die # neuen Links als Liste}}"
+
 #: src/settings/pulse.ts
 msgid "{from} to {until}"
 msgstr "{from} bis {until}"
@@ -624,7 +636,7 @@ msgstr "{leadName} wurde erinnert und hat noch nicht gesprochen"
 msgid "{leads, plural, one {Thank you. I’ll start with this lead.} other {Thank you. I’ll start with these # leads.}}"
 msgstr "{leads, plural, one {Danke. Ich beginne mit dieser Teamleitung.} other {Danke. Ich beginne mit diesen # Teamleitungen.}}"
 
-#: src/onboarding/setup-steps.tsx
+#: src/onboarding/interviews-progress.tsx
 msgid "{leadsHeard} of {leads}"
 msgstr "{leadsHeard} von {leads}"
 
@@ -872,6 +884,10 @@ msgstr "{openCount, plural, =0 {Nichts wartet auf Sie} =1 {Nur eine Sache für S
 msgid "{out, plural, one {All in place: # link is out, the rest go by the plan.} other {All in place: # links are out, the rest go by the plan.}}"
 msgstr "{out, plural, one {Alles steht: # Link ist raus, die übrigen gehen nach Plan.} other {Alles steht: # Links sind raus, die übrigen gehen nach Plan.}}"
 
+#: src/onboarding/interviews-progress.tsx
+msgid "{outCount, plural, one {The link that is out, as a list} other {The # links that are out, as a list}}"
+msgstr "{outCount, plural, one {Der verfügbare Link als Liste} other {Die # verfügbaren Links als Liste}}"
+
 #: src/chat/builds-state.ts
 msgid "{path}, as it would run"
 msgstr "{path}, wie es laufen würde"
@@ -1113,15 +1129,23 @@ msgstr "{talked} von {asked} bis Tag {day} von {of}"
 msgid "{talked} of {asked} talked"
 msgstr "{talked} von {asked} haben gesprochen"
 
-#: src/onboarding/setup-steps.tsx
+#: src/onboarding/interviews-progress.tsx
 msgid "{talked} of {of}"
 msgstr "{talked} von {of}"
+
+#: src/onboarding/interviews-progress.tsx
+msgid "{team} · new"
+msgstr "{team} · neu"
+
+#: src/onboarding/interviews-progress.tsx
+msgid "{team} · not out yet"
+msgstr "{team} · noch nicht verfügbar"
 
 #: src/routes/_shell.domains.$engine.index.tsx
 msgid "{team} (team)"
 msgstr "{team} (Team)"
 
-#: src/onboarding/setup-steps.tsx
+#: src/onboarding/interviews-progress.tsx
 msgid "{team} has been quiet so far. A short message from {lead}, their lead, usually helps. I’ll remind everyone once myself."
 msgstr "{team} ist bisher still. Eine kurze Nachricht von {lead}, der Teamleitung, hilft meist. Ich erinnere alle selbst einmal."
 
@@ -2868,7 +2892,7 @@ msgstr "Nach Person"
 msgid "By purpose"
 msgstr "Nach Zweck"
 
-#: src/onboarding/setup-steps.tsx
+#: src/onboarding/interviews-progress.tsx
 msgid "By team"
 msgstr "Nach Team"
 
@@ -3327,7 +3351,7 @@ msgctxt "where a link stands"
 msgid "Closed without talking"
 msgstr "Geschlossen, ohne Gespräch"
 
-#: src/onboarding/setup-steps.tsx
+#: src/onboarding/interviews-progress.tsx
 msgid "Closes {closes}"
 msgstr "Endet am {closes}"
 
@@ -3348,7 +3372,7 @@ msgstr "Code, den er nutzen kann, wurde geändert: {code}"
 msgid "Code step"
 msgstr "Code-Schritt"
 
-#: src/onboarding/setup-steps.tsx
+#: src/onboarding/interviews-progress.tsx
 msgid "colleagues talked"
 msgstr "Kolleginnen und Kollegen gesprochen"
 
@@ -3718,6 +3742,10 @@ msgstr "Antwort kopieren"
 msgid "Copy the link"
 msgstr "Link kopieren"
 
+#: src/onboarding/interviews-progress.tsx
+msgid "Copy the link for {name}"
+msgstr "Link für {name} kopieren"
+
 #: src/landscape/landscape.ts
 msgid "Core AI"
 msgstr "Kern-KI"
@@ -3885,7 +3913,7 @@ msgctxt "log filter"
 msgid "Day"
 msgstr "Tag"
 
-#: src/onboarding/setup-steps.tsx
+#: src/onboarding/interviews-progress.tsx
 msgid "Day {day} of {days}"
 msgstr "Tag {day} von {days}"
 
@@ -4397,6 +4425,7 @@ msgid "Edit project"
 msgstr "Projekt bearbeiten"
 
 #: src/onboarding/interview-people.tsx
+#: src/onboarding/interviews-progress.tsx
 #: src/routes/_shell.settings.notifications.tsx
 #: src/routes/_shell.settings.profile.tsx
 #: src/routes/_shell.settings.security.tsx
@@ -4575,6 +4604,10 @@ msgstr "Alle wählen am Anfang ihres Interviews. Die Fragen sind dieselben, wer 
 #: src/dashboard/report.ts
 msgid "Everyone else, in the teams whose counts may be shown: {talked} of {asked}"
 msgstr "Alle anderen, in den Teams, deren Zahlen gezeigt werden dürfen: {talked} von {asked}"
+
+#: src/onboarding/interviews-progress.tsx
+msgid "Everyone has a link of their own: whoever has it is them, so send each only to its owner. Links that are not out yet open on their day, or once their lead has talked."
+msgstr "Jede Person hat einen eigenen Link: Wer ihn hat, gilt als diese Person, senden Sie ihn also nur an sie. Links, die noch nicht verfügbar sind, öffnen sich an ihrem Tag oder sobald die Teamleitung gesprochen hat."
 
 #: src/onboarding/interview-words.ts
 msgid "Everyone has talked"
@@ -4758,7 +4791,7 @@ msgstr "Fehlgeschlagen, erneut versucht"
 msgid "Failed: {failed}"
 msgstr "Fehlgeschlagen: {failed}"
 
-#: src/onboarding/setup-steps.tsx
+#: src/onboarding/interviews-progress.tsx
 msgid "Fewer than {least} of {of}"
 msgstr "Weniger als {least} von {of}"
 
@@ -5184,7 +5217,7 @@ msgstr "Grasp ist gerade ausgelastet. Entfernen Sie diese Richtlinie und laden S
 msgid "Grasp is reading the policy"
 msgstr "Grasp liest die Richtlinie"
 
-#: src/onboarding/setup-steps.tsx
+#: src/onboarding/interviews-progress.tsx
 msgid "Grasp is still putting the agreements in place. Your people’s links go out once that is done."
 msgstr "Grasp regelt noch die Vereinbarungen. Die Links Ihrer Leute werden verfügbar, sobald das erledigt ist."
 
@@ -6202,7 +6235,7 @@ msgstr "Neueste Aktivität"
 msgid "Layout"
 msgstr "Ansicht"
 
-#: src/onboarding/setup-steps.tsx
+#: src/onboarding/interviews-progress.tsx
 msgid "Lead not yet"
 msgstr "Teamleitung noch nicht"
 
@@ -6210,7 +6243,7 @@ msgstr "Teamleitung noch nicht"
 msgid "Lead of {name}"
 msgstr "Teamleitung von {name}"
 
-#: src/onboarding/setup-steps.tsx
+#: src/onboarding/interviews-progress.tsx
 msgid "Lead talked"
 msgstr "Teamleitung hat gesprochen"
 
@@ -6289,6 +6322,10 @@ msgstr "Lizenz"
 msgid "Light"
 msgstr "Hell"
 
+#: src/onboarding/interviews-progress.tsx
+msgid "Link"
+msgstr "Link"
+
 #: src/routes/_shell.settings.security.tsx
 msgid "Link for AI apps"
 msgstr "Verbindung für KI-Apps"
@@ -6330,6 +6367,10 @@ msgstr "Links verschickt: {count} von {of}"
 #: src/knowledge/document.tsx
 msgid "Links to"
 msgstr "Verweist auf"
+
+#: src/onboarding/interviews-progress.tsx
+msgid "Links to send"
+msgstr "Links zum Versenden"
 
 #. A time zone, by its city
 #: src/routes/_shell.settings.workspace.tsx
@@ -6724,6 +6765,7 @@ msgid "Moved old entries out of the audit trail"
 msgstr "Alte Einträge aus dem Audit-Trail ausgelagert"
 
 #: src/chat/project-dialog.tsx
+#: src/onboarding/interviews-progress.tsx
 #: src/routes/_shell.settings.packages.index.tsx
 #: src/routes/_shell.settings.profile.tsx
 #: src/routes/_shell.settings.workspace.tsx
@@ -7949,6 +7991,8 @@ msgstr "Auf dieser Seite verbinden Sie die Anwendungen, mit denen Ihre Organisat
 
 #: src/frame/app-sidebar.tsx
 #: src/routes/_shell.onboarding.tsx
+#: src/routes/_shell.settings.onboarding.tsx
+#: src/routes/_shell.settings.tsx
 msgid "Onboarding"
 msgstr "Onboarding"
 
@@ -8172,6 +8216,10 @@ msgstr "Offen bis"
 #: src/inbox/item-detail.tsx
 msgid "Open where it lives"
 msgstr "Dort öffnen, wo es liegt"
+
+#: src/routes/_shell.settings.onboarding.tsx
+msgid "Open your onboarding"
+msgstr "Ihr Onboarding öffnen"
 
 #: src/dashboard/report.ts
 msgid "Open: {open}"
@@ -8432,7 +8480,7 @@ msgctxt "status of a policy rule"
 msgid "Paused"
 msgstr "Pausiert"
 
-#: src/onboarding/setup-steps.tsx
+#: src/onboarding/interviews-progress.tsx
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Paused: no link opens and none goes out. The links that are due go out once they run again."
 msgstr "Pausiert: Kein Link öffnet sich, und keiner geht raus. Die fälligen Links gehen raus, sobald sie wieder laufen."
@@ -8601,7 +8649,7 @@ msgctxt "kind of fact"
 msgid "Piece of work"
 msgstr "Arbeitsbereich"
 
-#: src/onboarding/setup-steps.tsx
+#: src/onboarding/interviews-progress.tsx
 msgid "pieces of work found"
 msgstr "Aufgaben gefunden"
 
@@ -10291,7 +10339,7 @@ msgstr "Startet"
 msgid "Starting…"
 msgstr "Wird gestartet…"
 
-#: src/onboarding/setup-steps.tsx
+#: src/onboarding/interviews-progress.tsx
 msgid "Starts {starts}"
 msgstr "Beginnt am {starts}"
 
@@ -10625,6 +10673,7 @@ msgstr "Ziel-ID"
 #: src/brain/brain-source-contents.tsx
 #: src/brain/brain.ts
 #: src/dashboard/standard-widgets.tsx
+#: src/onboarding/interviews-progress.tsx
 #: src/settings/pulse-people.tsx
 msgid "Team"
 msgstr "Team"
@@ -10651,7 +10700,7 @@ msgstr "Teamleitung"
 msgid "Team leads go first, then their team. One reminder after {after} working days, sent by hand with their own link, then nothing."
 msgstr "Zuerst die Teamleitungen, dann ihr Team. Eine Erinnerung nach {after} Arbeitstagen, von Hand mit dem eigenen Link verschickt, dann nichts mehr."
 
-#: src/onboarding/setup-steps.tsx
+#: src/onboarding/interviews-progress.tsx
 msgid "team leads talked"
 msgstr "Teamleitungen gesprochen"
 
@@ -10691,7 +10740,7 @@ msgstr "Teams und Rollen"
 msgid "Teams named"
 msgstr "Genannte Teams"
 
-#: src/onboarding/setup-steps.tsx
+#: src/onboarding/interviews-progress.tsx
 msgid "Teams under five people show only whether their lead talked, so nobody can be singled out."
 msgstr "Teams unter fünf Personen zeigen nur, ob ihre Teamleitung gesprochen hat, damit niemand herausgegriffen werden kann."
 
@@ -11183,6 +11232,10 @@ msgstr "Die Gespräche sind vorbei."
 #: src/onboarding/staff-words.ts
 msgid "The interviews are paused"
 msgstr "Die Interviews sind pausiert"
+
+#: src/routes/_shell.settings.onboarding.tsx
+msgid "The interviews aren’t planned yet. You plan them at the end of your onboarding."
+msgstr "Die Interviews sind noch nicht geplant. Sie planen sie am Ende Ihres Onboardings."
 
 #: src/routes/_shell.onboarding.interviewers.tsx
 msgid "The interviews people agreed to, by how many minutes they took."
@@ -12112,7 +12165,7 @@ msgstr "Unbeantwortete Frage"
 msgid "Uncategorized"
 msgstr "Ohne Kategorie"
 
-#: src/onboarding/setup-steps.tsx
+#: src/onboarding/interviews-progress.tsx
 msgid "Under 5"
 msgstr "Unter 5"
 
@@ -13071,6 +13124,10 @@ msgstr "Welche Tools nutzen die Leute tatsächlich?"
 #: src/routes/_shell.onboarding.open.tsx
 msgid "While paused, no link opens and none goes out, whatever was agreed."
 msgstr "Solange pausiert ist, öffnet sich kein Link und keiner geht raus, egal was vereinbart wurde."
+
+#: src/routes/_shell.settings.onboarding.tsx
+msgid "While Stephen talks to your team: how far the interviews are, team by team, and everyone’s own link to send."
+msgstr "Während Stephen mit Ihrem Team spricht: wie weit die Interviews sind, Team für Team, und der eigene Link jeder Person zum Versenden."
 
 #: src/inbox/item-detail.tsx
 msgid "Who"

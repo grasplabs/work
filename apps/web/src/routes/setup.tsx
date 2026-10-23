@@ -2,7 +2,7 @@ import { oauthProviderSchema } from "@grasp-os/shared/connect";
 import { directorySuiteSchema } from "@grasp-os/shared/directory";
 import type { OnboardingDirectory } from "@grasp-os/shared/directory";
 import type { OnboardingPlaces } from "@grasp-os/shared/document-places";
-import type { OnboardingView } from "@grasp-os/shared/onboarding";
+import type { LinkToSend, OnboardingView } from "@grasp-os/shared/onboarding";
 import { noChoices } from "@grasp-os/shared/onboarding-choices";
 import type { SetupChoices } from "@grasp-os/shared/onboarding-choices";
 import type { OnboardingDocument } from "@grasp-os/shared/onboarding-documents";
@@ -421,6 +421,8 @@ const companyOf = async (
 /** What the onboarding reads from core. */
 interface Loaded {
   view: OnboardingView;
+  /** Everyone's own link to send, once it is out. */
+  links: LinkToSend[];
   documents: OnboardingDocument[];
   gate: GateView;
   choices: SetupChoices;
@@ -472,17 +474,35 @@ export const Route = createFileRoute("/setup")({
   },
   loader: async ({ context: { core } }) =>
     await loadFromCore(core, async (session): Promise<Loaded> => {
-      const [view, documents, gate, choices, company, directory, places] =
-        await Promise.all([
-          session.onboarding.view(),
-          session.onboarding.documents(),
-          session.onboardingGate.view(),
-          session.onboarding.choices(),
-          companyOf(async () => await session.organization.get()),
-          session.onboarding.directory(),
-          session.onboarding.documentPlaces(),
-        ]);
-      return { view, documents, gate, choices, company, directory, places };
+      const [
+        view,
+        links,
+        documents,
+        gate,
+        choices,
+        company,
+        directory,
+        places,
+      ] = await Promise.all([
+        session.onboarding.view(),
+        session.onboarding.links(),
+        session.onboarding.documents(),
+        session.onboardingGate.view(),
+        session.onboarding.choices(),
+        companyOf(async () => await session.organization.get()),
+        session.onboarding.directory(),
+        session.onboarding.documentPlaces(),
+      ]);
+      return {
+        view,
+        links,
+        documents,
+        gate,
+        choices,
+        company,
+        directory,
+        places,
+      };
     }),
   component: Setup,
 });

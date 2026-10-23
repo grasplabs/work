@@ -37,6 +37,7 @@ const said = (
     admin: "Ada",
     company: null,
     view: view(paused, sponsor),
+    links: [],
     documents: [],
     sendingDomain: "mail.example.test",
     gate: {
