@@ -360,6 +360,31 @@ const doersSchema = z.array(z.string());
 const doersOf = (stored: string): string[] =>
   doersSchema.safeParse(JSON.parse(stored)).data ?? [];
 
+/**
+ * Who a piece of work is drawn from, and when each last agreed: who does
+ * it and who was asked about it, as far as they agreed to something.
+ * `agreedAt` says when someone did; undefined when they didn't, or aren't
+ * on the roster.
+ */
+const agreedAbout = (
+  work: string,
+  doers: readonly string[],
+  asked: readonly { person: string; work: string }[],
+  agreedAt: (person: string) => string | undefined
+): [person: string, at: string][] =>
+  [
+    ...new Set([
+      ...doers,
+      ...asked.filter((each) => each.work === work).map(({ person }) => person),
+    ]),
+  ].flatMap((person): [string, string][] => {
+    const at = agreedAt(person);
+    return at === undefined ? [] : [[person, at]];
+  });
+
+/** What the lab's drawings took: not the onboarding's to count. */
+const noMeter = (): void => undefined;
+
 export interface TurnContext {
   kind: InterviewKind;
   /** Their first name, their team, and their lead's first name. */
@@ -1226,20 +1251,38 @@ export class Onboarding extends DurableObject<Env> {
     if (link.keyMark === null || link.keyMark !== keyMark) {
       return refused("interview.elsewhere");
     }
-    const team = roster.teams.find(({ id }) => id === person.team);
-    const lead = roster.people.find(
-      ({ id }) => id === team?.lead && id !== person.id
-    );
-    const kind = leads(roster, person.id) ? "lead" : "own";
+    const context = this.#contextOf(person, roster);
     if (texts !== undefined) {
       // The text this turn is held with, kept by its mark: the first time
       // it spoke in this interview is when it came in.
       this.#db
         .insert(interviewTexts)
-        .values({ person: person.id, mark: texts[kind], at: now })
+        .values({ person: person.id, mark: texts[context.kind], at: now })
         .onConflictDoNothing()
         .run();
     }
+    return answered(context);
+  }
+
+  /**
+   * What a turn of someone's interview would know, by their roster ID,
+   * whether their link is out or not: the Stephen Lab (lab.ts) keeps it
+   * with an interview it plays back. Null for someone not on the roster.
+   */
+  contextOf(id: string): TurnContext | null {
+    const roster = this.#roster();
+    const person = roster?.people.find((each) => each.id === id);
+    return roster === null || person === undefined
+      ? null
+      : this.#contextOf(person, roster);
+  }
+
+  #contextOf(person: Roster["people"][number], roster: Roster): TurnContext {
+    const team = roster.teams.find(({ id }) => id === person.team);
+    const lead = roster.people.find(
+      ({ id }) => id === team?.lead && id !== person.id
+    );
+    const kind = leads(roster, person.id) ? "lead" : "own";
     const members =
       kind === "lead"
         ? roster.people.filter(
@@ -1260,7 +1303,7 @@ export class Onboarding extends DurableObject<Env> {
       ...(this.#stephen()?.terms ?? []),
       ...this.documents().flatMap(({ reading }) => reading.tools),
     ];
-    return answered({
+    return {
       kind,
       name: firstName(person.name),
       team: teamName,
@@ -1268,7 +1311,7 @@ export class Onboarding extends DurableObject<Env> {
       work: kind === "lead" ? "" : this.#workOf(person.id),
       known: known.join("\n\n"),
       terms: [...new Set(terms)],
-    });
+    };
   }
 
   /**
@@ -3438,17 +3481,11 @@ export class Onboarding extends DurableObject<Env> {
           return [];
         }
         const doers = doersOf(row.doers);
-        const tellers = [
-          ...new Set([
-            ...doers,
-            ...asked
-              .filter(({ work }) => work === row.id)
-              .map(({ person }) => person),
-          ]),
-        ].filter((id) => onRoster.has(id) && agreedAt.has(id));
-        const agreed = Object.fromEntries(
-          tellers.map((id) => [id, agreedAt.get(id) ?? ""])
+        const told = agreedAbout(row.id, doers, asked, (id) =>
+          onRoster.has(id) ? agreedAt.get(id) : undefined
         );
+        const tellers = told.map(([id]) => id);
+        const agreed = Object.fromEntries(told);
         const leadsOwn =
           doers.length > 0 && doers.every((id) => id === team.lead);
         const before = drawnFrom.get(row.id) ?? {};
@@ -3493,11 +3530,44 @@ export class Onboarding extends DurableObject<Env> {
    * while it was drawn takes the drawing with them.
    */
   async #drawWork(due: WorkToDraw, at: string): Promise<void> {
+    const briefed = await this.#briefOf(due);
+    if (briefed === "gone") {
+      return;
+    }
+    if (briefed === "nothing") {
+      // Nothing agreed to draw from: noted as drawn as it is, so it isn't due again and again.
+      this.#keepDrawing(due, null, at);
+      return;
+    }
+    const { brief, lead } = briefed;
+    const drawn = await drawWork(this.env, brief, (took) => {
+      this.meter(took, at);
+    });
+    this.ctx.storage.transactionSync(() => {
+      const gone = [...drawn.from, ...(lead === null ? [] : [lead])].some(
+        (person) => this.#agreedAt(person) === null
+      );
+      if (gone) {
+        return;
+      }
+      this.#keepDrawing(due, drawn, at);
+    });
+  }
+
+  /**
+   * What a piece of work is drawn from (`#drawWork`): "gone" when it or
+   * its team isn't there any more, "nothing" when nobody it would be drawn
+   * from agreed to anything. `lead` is the team's lead when what they
+   * agreed to is there for context.
+   */
+  async #briefOf(
+    due: Pick<WorkToDraw, "id" | "team" | "agreed">
+  ): Promise<{ brief: WorkBrief; lead: string | null } | "gone" | "nothing"> {
     const roster = this.#roster();
     const team = roster?.teams.find(({ id }) => id === due.team);
     const work = this.teamWorks(due.team).find(({ id }) => id === due.id);
     if (roster === null || team === undefined || work === undefined) {
-      return;
+      return "gone";
     }
     const inputs = Object.keys(due.agreed).flatMap((person) => {
       const input = this.drawInput(person);
@@ -3510,9 +3580,7 @@ export class Onboarding extends DurableObject<Env> {
         ? this.drawInput(team.lead)
         : null;
     if (telling.length === 0) {
-      // Nothing agreed to draw from: noted as drawn as it is, so it isn't due again and again.
-      this.#keepDrawing(due, null, at);
-      return;
+      return "nothing";
     }
     const asked = new Map(
       this.#db
@@ -3558,19 +3626,53 @@ export class Onboarding extends DurableObject<Env> {
       tellers,
       documents: this.documentsBrief(team.name),
     };
-    const drawn = await drawWork(this.env, brief, (took) => {
-      this.meter(took, at);
-    });
-    this.ctx.storage.transactionSync(() => {
-      const gone = [
-        ...drawn.from,
-        ...(leadInput === null ? [] : [leadInput.person]),
-      ].some((person) => this.#agreedAt(person) === null);
-      if (gone) {
-        return;
+    return { brief, lead: leadInput?.person ?? null };
+  }
+
+  /**
+   * Every piece of work drawn again from what its people agreed to, as it
+   * would be drawn now, and kept nowhere: the Stephen Lab's drawing bench
+   * (lab.ts) draws the same agreements again and again, so two runs differ
+   * only by how the work is drawn. Its calls are the lab's, so the
+   * onboarding counts none of them.
+   */
+  async drawnAgain(): Promise<
+    { work: string; name: string; drawn: DrawnWork }[]
+  > {
+    const roster = this.#roster();
+    if (roster === null) {
+      return [];
+    }
+    const onRoster = new Set(roster.people.map(({ id }) => id));
+    const asked = this.#db.select().from(askedAbout).all();
+    const found: { work: string; name: string; drawn: DrawnWork }[] = [];
+    for (const row of this.#db.select().from(works).all()) {
+      const doers = doersOf(row.doers);
+      const agreed = Object.fromEntries(
+        agreedAbout(row.id, doers, asked, (id) =>
+          onRoster.has(id) ? (this.#agreedAt(id) ?? undefined) : undefined
+        )
+      );
+      // As the alarm does: a lead's overview alone draws only their own work.
+      const lead = roster.teams.find(({ id }) => id === row.team)?.lead;
+      const leadOnly = Object.keys(agreed).every((id) => id === lead);
+      const leadsOwn = doers.length > 0 && doers.every((id) => id === lead);
+      if (leadOnly && !leadsOwn) {
+        continue;
       }
-      this.#keepDrawing(due, drawn, at);
-    });
+      // oxlint-disable-next-line no-await-in-loop -- one drawing at a time, as the alarm draws them
+      const briefed = await this.#briefOf({
+        id: row.id,
+        team: row.team,
+        agreed,
+      });
+      if (typeof briefed !== "string") {
+        // oxlint-disable-next-line no-await-in-loop -- one drawing at a time
+        const drawn = await drawWork(this.env, briefed.brief, noMeter);
+        found.push({ work: row.id, name: row.name, drawn });
+      }
+    }
+    return found;
   }
 
   /**
