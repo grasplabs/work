@@ -31,6 +31,7 @@ import type { OpenStore } from "../src/data-stores.ts";
 import { appMembers } from "../src/db/core/schema.ts";
 import { callOperation } from "../src/operations.ts";
 import type { HostedApp, Invocation, Runner } from "../src/operations.ts";
+import { published } from "./apps.ts";
 
 // An App's server functions run through core's operation host
 // (operations.ts) against a real business store and the App's real roles:
@@ -411,6 +412,7 @@ interface Fixture {
 const notes = async (): Promise<Fixture> => {
   const owner = await person("builder");
   const { id: appId } = await createApp(env, owner, { name: "Notes" });
+  await published(appId);
   const store = await openStore(env, await createStore(env, owner));
   await store.defineTables(manifestText(manifest.schema));
   return { owner, appId, store };

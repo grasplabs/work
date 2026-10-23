@@ -30,6 +30,7 @@ import {
   blueprintFiles,
   changeEntry,
   deleteOtherBlueprintTrees,
+  editableApp,
   findVersion,
   storeBlueprintTree,
   storeTree,
@@ -336,7 +337,7 @@ export const markBlueprint = async (
   app: unknown,
   version: unknown
 ): Promise<Blueprint> => {
-  const found = await appFor(env, by, app, "builder");
+  const found = await editableApp(env, by, app);
   requireNotStaff(by);
   const row = await findVersion(env, found.id, version);
   const db = drizzle(env.DB);
@@ -406,7 +407,7 @@ export const unmarkBlueprint = async (
   if (row.appId === null) {
     throw roleErrors.create("role.forbidden");
   }
-  const found = await appFor(env, by, row.appId, "builder");
+  const found = await editableApp(env, by, row.appId);
   requireNotStaff(by);
   const db = drizzle(env.DB);
   await auditedBatch(env, db, [
@@ -506,6 +507,10 @@ export const createFromBlueprint = async (
     blueprint: blueprint.id,
     currentVersion: null,
     pendingVersion: null,
+    // A draft, as any new App: its builders publish it (app-status.ts).
+    status: "draft",
+    statusChangedAt: null,
+    statusChangedBy: null,
     createdAt: now,
   };
   const versionRow: VersionRow = {
@@ -563,6 +568,9 @@ export const createFromBlueprint = async (
       pendingVersion: sql<number | null>`${appRow.pendingVersion}`.as(
         "pending_version"
       ),
+      status: sql<"draft">`${appRow.status}`.as("status"),
+      statusChangedAt: sql<Date | null>`NULL`.as("status_changed_at"),
+      statusChangedBy: sql<null>`NULL`.as("status_changed_by"),
       createdAt: sql<Date>`${appRow.createdAt.getTime()}`.as("created_at"),
     })
     .from(blueprints)

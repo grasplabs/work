@@ -751,6 +751,10 @@ msgstr "{name} en {domain}"
 msgid "{name} in {domain}: {started} started, {completed} completed, {failed} failed"
 msgstr "{name} en {domain}: {started} iniciadas, {completed} completadas, {failed} fallidas"
 
+#: src/chat/builds.tsx
+msgid "{name} is a draft: only its builders open it, and its triggers don't fire, until it is published."
+msgstr "{name} es un borrador: solo sus creadores lo abren, y sus disparadores no se activan, hasta que se publique."
+
 #: src/brain/brain-atlas.ts
 msgid "{name} is invited but not interviewed yet."
 msgstr "{name} está invitado, pero aún no entrevistado."
@@ -1418,6 +1422,10 @@ msgstr "Una migración de datos transformó los registros de este dominio despu�
 msgid "A decision was put to people, or answered"
 msgstr "Se planteó una decisión a personas, o se respondió"
 
+#: src/engines/app-status.tsx
+msgid "A draft: only its builders open it, and its triggers don't fire, until it is published."
+msgstr "Un borrador: solo sus creadores lo abren, y sus disparadores no se activan, hasta que se publique."
+
 #: src/screens/screen-files.ts
 msgid "A file is downloaded only when you ask for it, with a click."
 msgstr "Un archivo solo se descarga cuando lo pides, con un clic."
@@ -2044,6 +2052,10 @@ msgstr "A una aplicación que nadie aprobó se le negaron los datos del dominio"
 msgid "An app runs only once an admin approved its code. That happens on the domain's page."
 msgstr "Una aplicación solo se ejecuta cuando un administrador ha aprobado su código. Eso se hace en la página del dominio."
 
+#: src/engines/app-status.tsx
+msgid "An archived domain is kept as it is and goes offline: nobody opens its apps, its triggers stop and its unfinished runs are cancelled. A builder can restore it later, as a draft."
+msgstr "Un dominio archivado se conserva tal como está y queda fuera de línea: nadie abre sus apps, sus disparadores se detienen y sus ejecuciones sin terminar se cancelan. Un creador puede restaurarlo más tarde, como borrador."
+
 #: src/onboarding/setup-steps.tsx
 msgid "An old format: save it as PDF or a newer file"
 msgstr "Un formato antiguo: guárdalo como PDF o en un archivo más reciente"
@@ -2347,6 +2359,23 @@ msgstr "Aplicaciones que las incumplen"
 #: src/dashboard/to-do.tsx
 msgid "Apps to approve"
 msgstr "Aplicaciones por aprobar"
+
+#: src/engines/app-status.tsx
+msgid "Archive"
+msgstr "Archivar"
+
+#: src/engines/app-status.tsx
+msgid "Archive {name}?"
+msgstr "¿Archivar {name}?"
+
+#: src/engines/app-status.tsx
+msgctxt "a domain put away"
+msgid "Archived"
+msgstr "Archivado"
+
+#: src/engines/app-status.tsx
+msgid "Archived: nobody opens its apps and nothing runs, until a builder restores it."
+msgstr "Archivado: nadie abre sus apps y nada se ejecuta, hasta que un creador lo restaure."
 
 #: src/brain/brain-markdown.ts
 msgid "Article"
@@ -2863,6 +2892,7 @@ msgstr "Puede {verbs} datos de la empresa"
 #: src/chat/brain-questions.tsx
 #: src/chat/project-dialog.tsx
 #: src/decision-confirmation.tsx
+#: src/engines/app-status.tsx
 #: src/engines/package-approvals.tsx
 #: src/inbox/item-detail.tsx
 #: src/knowledge/document.tsx
@@ -4195,6 +4225,11 @@ msgstr "Estado del DPA"
 msgid "Draft"
 msgstr "Borrador"
 
+#: src/engines/app-status.tsx
+msgctxt "a domain still being made"
+msgid "Draft"
+msgstr "Borrador"
+
 #: src/onboarding/staff-words.ts
 msgctxt "what AI was used for"
 msgid "Drawing"
@@ -5383,13 +5418,13 @@ msgctxt "kind of app"
 msgid "HR"
 msgstr "RR. HH."
 
-#: src/interview/sound-check.tsx
-msgid "I cannot find a microphone. Plug one in and try again."
-msgstr "No encuentro ningún micrófono. Conecta uno y vuelve a intentarlo."
-
 #: src/onboarding/setup-steps.tsx
 msgid "I can’t read {name}: it’s in an old format. As a PDF or a newer file, I can."
 msgstr "No puedo leer {name}: está en un formato antiguo. Como PDF o en un archivo más reciente, sí puedo."
+
+#: src/interview/sound-check.tsx
+msgid "I cannot find a microphone. Plug one in and try again."
+msgstr "No encuentro ningún micrófono. Conecta uno y vuelve a intentarlo."
 
 #: src/onboarding/setup-steps.tsx
 msgid "I could not find the columns. The first row should name them: name, email, team and job."
@@ -6308,6 +6343,10 @@ msgstr "Hacer administrador"
 msgid "Make version {version} current"
 msgstr "Hacer actual la versión {version}"
 
+#: src/chat/builds.tsx
+msgid "Make version {version} current and publish"
+msgstr "Hacer actual la versión {version} y publicar"
+
 #: src/connections/integration-row.tsx
 msgid "Manage"
 msgstr "Gestionar"
@@ -6846,6 +6885,10 @@ msgstr "Sin datos"
 msgid "No domain has a model bound to it."
 msgstr "Ningún dominio tiene un modelo vinculado."
 
+#: src/routes/_shell.domains.index.tsx
+msgid "No domain is published yet: publish one from its page, and the people it is shared with can open it."
+msgstr "Aún no hay ningún dominio publicado: publica uno desde su página y las personas con quienes se comparte podrán abrirlo."
+
 #: src/chat/side-panel.tsx
 #: src/routes/_shell.domains.index.tsx
 msgid "No domains yet"
@@ -6854,6 +6897,10 @@ msgstr "Aún no hay dominios"
 #: src/dashboard/widget-board.tsx
 msgid "No domains yet. Domains are made in chat."
 msgstr "Aún no hay dominios. Los dominios se crean en el chat."
+
+#: src/routes/_shell.domains.index.tsx
+msgid "No drafts."
+msgstr "No hay borradores."
 
 #: src/landscape/audit-trail.tsx
 msgid "No events in the latest stretch of the log"
@@ -7463,6 +7510,10 @@ msgstr "Notas"
 msgctxt "onboarding area section"
 msgid "Notes"
 msgstr "Notas"
+
+#: src/routes/_shell.domains.index.tsx
+msgid "Nothing archived."
+msgstr "Nada archivado."
 
 #: src/routes/_shell.integrations.index.tsx
 msgid "Nothing connected yet."
@@ -8539,6 +8590,10 @@ msgstr "Reglas propuestas"
 msgid "Provided by Grasp, not installed again: {provided}"
 msgstr "Lo proporciona Grasp, no se instala de nuevo: {provided}"
 
+#: src/engines/app-status.tsx
+msgid "Publish"
+msgstr "Publicar"
+
 #: src/engines/resource-bindings.tsx
 msgid "Publish a version of {contract}"
 msgstr "Publicar una versión de {contract}"
@@ -8555,6 +8610,11 @@ msgstr "Publicar la revisión {0}"
 #: src/routes/_shell.workflows.$workflow.tsx
 msgid "Published"
 msgstr "Publicada"
+
+#: src/engines/app-status.tsx
+msgctxt "a domain open to the people it is shared with"
+msgid "Published"
+msgstr "Publicado"
 
 #. placeholder {0}: outcome.version
 #: src/workflows/definition-editor.tsx
@@ -8999,6 +9059,7 @@ msgstr "Recurso"
 msgid "Resources"
 msgstr "Recursos"
 
+#: src/engines/app-status.tsx
 #: src/knowledge/timeline.tsx
 msgid "Restore"
 msgstr "Restaurar"
@@ -11904,6 +11965,10 @@ msgstr "Resultados desconocidos"
 #: src/brain/brain.ts
 msgid "Unknown source"
 msgstr "Fuente desconocida"
+
+#: src/engines/app-status.tsx
+msgid "Unpublish"
+msgstr "Despublicar"
 
 #: src/activity/audit-log.tsx
 #: src/dashboard/activity.tsx

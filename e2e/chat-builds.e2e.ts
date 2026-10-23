@@ -132,6 +132,7 @@ test("the side panel shows an App being built, and a builder makes its version c
     );
     const makeCurrent = built.getByRole("button", {
       name: `Make version ${version} current`,
+      exact: true,
     });
     await expect(makeCurrent).toBeEnabled();
 
