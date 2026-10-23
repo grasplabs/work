@@ -20,17 +20,19 @@ import {
 // `org-steps.tsx`): what needs Grasp, the most pressing first, then the
 // stages, each a list of what it asks for, ticked off as it is done.
 // Each stage and need that a section of the area deals with links to it;
-// the people, the leads and the interviews are the company admin's.
+// the people and the leads are the company admin's.
 
 type Section =
   | "/onboarding/kickoff"
   | "/onboarding/agreements"
+  | "/onboarding/interviews"
   | "/onboarding/open";
 
 /** Where the area deals with each stage, when it does. */
 const stageSections: Partial<Record<StaffStage, Section>> = {
   kickoff: "/onboarding/kickoff",
   agreements: "/onboarding/agreements",
+  interviews: "/onboarding/interviews",
   open: "/onboarding/open",
 };
 
@@ -39,7 +41,7 @@ const needSection = (need: StaffNeed): Section | undefined => {
   if (need.kind === "agreement") {
     return "/onboarding/agreements";
   }
-  return need.kind === "lead" ? undefined : "/onboarding/open";
+  return need.kind === "lead" ? "/onboarding/interviews" : "/onboarding/open";
 };
 
 const linkClass = "underline-offset-4 hover:underline";

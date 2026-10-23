@@ -1011,6 +1011,11 @@ const eventWords = ({
         ? "Unlinked it from Stripe."
         : `Linked it to ${target} in Stripe.`;
     }
+    case "client.attio_company": {
+      return target === null
+        ? "Unlinked it from Attio."
+        : `Linked it to ${target} in Attio.`;
+    }
     default: {
       return action;
     }

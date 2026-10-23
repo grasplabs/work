@@ -45,6 +45,10 @@ const outcome = async (call: Promise<unknown>): Promise<unknown> => {
 const confirmNothing = async (): Promise<boolean> =>
   await Promise.resolve(false);
 
+/** A link confirmation the person never gives. */
+const confirmNoLink = async (): Promise<boolean> =>
+  await Promise.resolve(false);
+
 /** A screen opened by its file, which navigates nowhere. */
 const noNavigation: ScreenOpening = {
   navigation: {
@@ -303,6 +307,7 @@ const runningWithDraft = async (
     bundle.app,
     bundle.screen,
     confirmNothing,
+    confirmNoLink,
     noNavigation
   );
   const link = linkAsAda(present);
@@ -345,6 +350,7 @@ describe("a running screen's submissions core keeps for recovery", () => {
       bundle.app,
       bundle.screen,
       confirmNothing,
+      confirmNoLink,
       noNavigation
     ).connect(
       link,
@@ -533,6 +539,7 @@ describe("a running screen's drafts while it follows a query", () => {
       bundle.app,
       bundle.screen,
       confirmNothing,
+      confirmNoLink,
       noNavigation
     );
     const cleanups: (() => void)[] = [];
@@ -588,6 +595,7 @@ describe("a running screen whose query core refuses for its build", () => {
       bundle.app,
       bundle.screen,
       confirmNothing,
+      confirmNoLink,
       noNavigation
     );
     const cleanups: (() => void)[] = [];
@@ -641,7 +649,13 @@ describe("an App's drafts when its screen can't be opened", () => {
     const asSession = session as unknown as Parameters<
       ReturnType<typeof appScreen>["open"]
     >[0];
-    await appScreen(bundle.app, bundle.screen, confirmNothing, noNavigation)
+    await appScreen(
+      bundle.app,
+      bundle.screen,
+      confirmNothing,
+      confirmNoLink,
+      noNavigation
+    )
       .open(asSession)
       .catch(() => {
         // Refused, as the test says.
@@ -694,6 +708,7 @@ describe("a screen's drafts handed over", () => {
       bundle.app,
       bundle.screen,
       confirmNothing,
+      confirmNoLink,
       noNavigation
     ).connect(
       link,
@@ -721,6 +736,7 @@ describe("a screen's drafts handed over", () => {
       bundle.app,
       bundle.screen,
       confirmNothing,
+      confirmNoLink,
       noNavigation
     ).connect(
       link,
@@ -782,6 +798,7 @@ describe("a running screen's drafts once core stops its build", () => {
       bundle.app,
       bundle.screen,
       confirmNothing,
+      confirmNoLink,
       noNavigation
     );
     const stopped: string[] = [];
@@ -1013,6 +1030,7 @@ describe("a screen's navigation, as the page takes it", () => {
       bundle.app,
       bundle.screen,
       confirmNothing,
+      confirmNoLink,
       opening
     ).connect(
       link,
@@ -1095,6 +1113,7 @@ describe("a screen's navigation, as the page takes it", () => {
       bundle.app,
       bundle.screen,
       confirmNothing,
+      confirmNoLink,
       opening
     ).connect(
       link,

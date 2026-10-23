@@ -38,7 +38,10 @@ const ConsoleNav = () => {
       <Link to="/rollouts" activeProps={{ className: "font-medium" }}>
         Rollouts
       </Link>
-      <Link to="/admin">Admin</Link>
+      {/* A full page load, so the admin's own hostname, when it has one, takes it (src/admin-host.ts). */}
+      <Link reloadDocument to="/admin">
+        Admin
+      </Link>
     </nav>
   );
 };

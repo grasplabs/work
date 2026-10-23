@@ -32,12 +32,16 @@ import type { FoundSection } from "./search.ts";
 // memory pack of the sections that match, each cited at its exact
 // version, with how far the read got.
 //
-// This first policy reads full text only. Semantic routes are reported as
+// This policy reads full text only, any of the question's words ranked by
+// BM25 (search.ts). Semantic routes are reported as
 // not enabled, and no model is used, so no source text reaches one here;
 // the recheck before model use comes with reranking (GRA-304).
 
-/** The retrieval policy this service follows: full text, version 1. */
-export const recallPolicyVersion = "fulltext@1";
+/**
+ * The retrieval policy this service follows: full text, version 2, which
+ * matches any of a question's words rather than all of them.
+ */
+export const recallPolicyVersion = "fulltext@2";
 
 /** The search index a recall reads: Knowledge's FTS5 tables. */
 const indexGeneration = "knowledge-fts@1";
