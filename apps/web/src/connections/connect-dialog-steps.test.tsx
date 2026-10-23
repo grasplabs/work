@@ -22,6 +22,21 @@ import { integrationsOf } from "./integrations.ts";
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
+// Someone who asked for less motion: the dialog stands still, and the test
+// reads it without waiting on animations the test DOM can't run.
+Reflect.set(window, "matchMedia", (query: string) => ({
+  matches: query.includes("reduce"),
+  media: query,
+  onchange: null,
+  addEventListener: () => {
+    // Nothing changes during a test.
+  },
+  removeEventListener: () => {
+    // Nothing to stop.
+  },
+  dispatchEvent: () => false,
+}));
+
 const someone = (role: Identity["role"]): Identity => ({
   userId: "u1",
   email: "ada@example.com",
