@@ -84,6 +84,12 @@ export interface ConnectorCatalog {
       readonly output: { drive: string; items: Array<{ drive: string; id: string; kind: "file" | "folder" | "other"; lastModifiedAt: string | null; mimeType: string | null; name: string; parentId: string | null; size: number | null; webUrl: string | null }>; nextPage: string | null };
     };
   };
+  readonly "microsoft-365.lists@1": {
+    readonly items: {
+      readonly input: { columns?: Array<string>; list: string; page?: string; site: string; top?: number; where?: Array<{ column: string; is: "eq" | "ne" | "gt" | "ge" | "lt" | "le"; value: (string) | (number) }> };
+      readonly output: { items: Array<{ createdAt: string | null; fields: Record<string, (string) | (number) | (boolean) | (Array<string>) | null>; id: string; lastModifiedAt: string | null; webUrl: string | null }>; list: string; nextPage: string | null; site: string };
+    };
+  };
   readonly "microsoft-365.mail@1": {
     readonly createDraft: {
       readonly input: { bcc?: Array<string>; body: string; bodyType?: "text" | "html"; cc?: Array<string>; mailbox: string; replyTo?: Array<string>; subject: string; to: Array<string> };

@@ -497,6 +497,12 @@ export const contract = (n: number) => {
       Renewal_x0020_date: `2027-0${(n % 9) + 1}-01T00:00:00Z`,
       // "2nd signatory": a leading digit SharePoint writes as `_x0032_`.
       _x0032_nd_x0020_signatory: n % 2 === 0 ? "Finance" : "Legal",
+      // A choice of several, and a link, which Graph gives as an object.
+      Regions: ["EU", "UK"],
+      Website: {
+        Description: "Supplier portal",
+        Url: `https://suppliers.example.com/${n}`,
+      },
       ContentType: "Item",
       Modified: modified,
       Created: "2026-01-05T08:00:00Z",

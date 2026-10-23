@@ -136,9 +136,40 @@ const isOwnColumn = (name: string): boolean =>
     bookkeeping.has(name)
   );
 
+/**
+ * A column's value as an item gives it: text, a number, a yes/no, nothing,
+ * or a choice of several (a list of text). A value Graph gives as an object
+ * (a link, a place) is its JSON text: a contract's schema says what each
+ * value can be, and arbitrary JSON says nothing.
+ */
+const fieldValue = z.union([
+  z.string(),
+  z.number(),
+  z.boolean(),
+  z.null(),
+  z.array(z.string()),
+]);
+type FieldValue = z.infer<typeof fieldValue>;
+
+const scalar = z.union([z.string(), z.number(), z.boolean(), z.null()]);
+
+const valueOf = (value: unknown): FieldValue => {
+  const plain = scalar.safeParse(value);
+  if (plain.success) {
+    return plain.data;
+  }
+  const choices = z.array(z.union([z.string(), z.number()])).safeParse(value);
+  if (choices.success) {
+    return choices.data.map(String);
+  }
+  return JSON.stringify(value);
+};
+
 const itemSchema = z.strictObject({
   id: z.string(),
-  fields: z.record(z.string(), z.json()),
+  // A map of columns to values. As a record, its schema would name its keys
+  // with `propertyNames`, which a contract may not use.
+  fields: z.object({}).catchall(fieldValue),
   createdAt: z.string().nullable(),
   lastModifiedAt: z.string().nullable(),
   webUrl: z.string().nullable(),
@@ -151,9 +182,9 @@ const itemOf = (
 ): z.infer<typeof itemSchema> => ({
   id: item.id,
   fields: Object.fromEntries(
-    Object.entries(item.fields ?? {}).filter(
-      ([name]) => isOwnColumn(name) || columns.includes(name)
-    )
+    Object.entries(item.fields ?? {})
+      .filter(([name]) => isOwnColumn(name) || columns.includes(name))
+      .map(([name, value]) => [name, valueOf(value)])
   ),
   createdAt: item.createdDateTime ?? null,
   lastModifiedAt: item.lastModifiedDateTime ?? null,

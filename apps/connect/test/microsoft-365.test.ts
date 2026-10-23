@@ -881,6 +881,11 @@ describe("the Microsoft 365 connector's list tools", () => {
         Amount: 5750,
         Renewal_x0020_date: "2027-06-01T00:00:00Z",
         _x0032_nd_x0020_signatory: "Legal",
+        Regions: ["EU", "UK"],
+        Website: JSON.stringify({
+          Description: "Supplier portal",
+          Url: "https://suppliers.example.com/23",
+        }),
         Modified: "2026-06-13T09:30:00Z",
         Created: "2026-01-05T08:00:00Z",
         AuthorLookupId: "11",
