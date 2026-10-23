@@ -38,7 +38,16 @@
  * can take longer: the request is answered at once with a deferred,
  * ephemeral reply, and the answer follows through the interaction's
  * webhook, which needs no bot token.
+ *
+ * The bot runs on Vercel's Chat SDK (`chat`, its Discord adapter), the same
+ * channel layer as Stephen's door into core, so it can grow threads,
+ * buttons or another chat app without a second bot framework. The adapter
+ * answers Discord's PING, defers each command with the flags given here and
+ * sends the reply through the interaction's webhook; this file still checks
+ * every request itself before the adapter sees it, and decides every reply.
  */
+import { DiscordAdapter } from "@chat-adapter/discord";
+import { durableObjectState } from "@grasp-os/chat/state";
 import { phaseOf } from "@grasp-os/shared/admin/admin-health";
 import type { AdminPhase } from "@grasp-os/shared/admin/admin-health";
 import {
@@ -49,6 +58,8 @@ import type { AdminView } from "@grasp-os/shared/admin/admin-view";
 import type { Need } from "@grasp-os/shared/admin/onboarding-admin";
 import { fromHex } from "@grasp-os/shared/encoding";
 import { log } from "@grasp-os/shared/log";
+import { Chat } from "chat";
+import type { AdapterPostableMessage, Logger, SlashCommandEvent } from "chat";
 import { z } from "zod";
 
 import type { Staff } from "../access.ts";
@@ -63,7 +74,7 @@ import { organizationsOf } from "./views.ts";
 /** Where Discord posts interactions. */
 export const discordInteractionsPath = "/discord/interactions";
 
-/** Where the answer to an interaction is sent: its webhook, as Discord's API has it. */
+/** Discord's API, where the adapter sends the answer to an interaction: its webhook. */
 export const discordApi = "https://discord.com/api/v10";
 
 /** How far a signed request's timestamp may be from the console's clock. */
@@ -75,18 +86,12 @@ const maxBodyBytes = 64 * 1024;
 /** The longest text a call's audit keeps of what was asked. */
 const maxAuditedText = 100;
 
-/** How long Discord may take to take an answer, as for the morning digest (src/admin/discord-digest.ts). */
-const discordTimeoutMs = 10_000;
-
 /** The most a Discord message may hold. */
 const maxMessageChars = 2000;
 
-/** Discord's interaction types, response types and message flags. */
+/** Discord's interaction types, and the flag that shows a reply to its asker alone. */
 const PING = 1;
 const APPLICATION_COMMAND = 2;
-const PONG = 1;
-const CHANNEL_MESSAGE = 4;
-const DEFERRED_CHANNEL_MESSAGE = 5;
 const EPHEMERAL = 64;
 
 /** A Discord id (a snowflake). */
@@ -115,12 +120,6 @@ const interactionSchema = z.object({
 });
 type Interaction = z.infer<typeof interactionSchema>;
 
-const json = (body: unknown, status = 200): Response =>
-  Response.json(body, {
-    status,
-    headers: { "cache-control": "no-store" },
-  });
-
 const refused = (status: number, text: string): Response =>
   new Response(text, {
     status,
@@ -128,13 +127,6 @@ const refused = (status: number, text: string): Response =>
       "content-type": "text/plain; charset=utf-8",
       "cache-control": "no-store",
     },
-  });
-
-/** A reply only the asker sees, which pings nobody. */
-const ephemeral = (content: string): Response =>
-  json({
-    type: CHANNEL_MESSAGE,
-    data: { content, flags: EPHEMERAL, allowed_mentions: { parse: [] } },
   });
 
 const encoder = new TextEncoder();
@@ -191,10 +183,6 @@ const staffIds = (env: Env): ReadonlySet<string> =>
       .map((id) => id.trim())
       .filter((id) => snowflake.safeParse(id).success)
   );
-
-/** Who sent an interaction: in a server, its member; in a DM, its user. */
-const userOf = (interaction: Interaction): string | null =>
-  interaction.member?.user.id ?? interaction.user?.id ?? null;
 
 /** A question, as a subcommand asks it. */
 type Question =
@@ -434,44 +422,100 @@ export interface DiscordOptions {
   today?: () => string;
 }
 
-/** Sends `content` as the interaction's deferred reply. */
-const sendAnswer = async (
-  interaction: Interaction,
-  content: string
-): Promise<void> => {
-  const response = await fetch(
-    `${discordApi}/webhooks/${interaction.application_id}/${interaction.token}/messages/@original`,
-    {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ content, allowed_mentions: { parse: [] } }),
-      signal: AbortSignal.timeout(discordTimeoutMs),
-    }
-  );
-  await response.body?.cancel();
-  if (!response.ok) {
-    throw new Error(`Discord refused the answer: ${response.status}`);
+/**
+ * Chat SDK's Discord adapter, sending the bot's words as written and
+ * pinging nobody. The bot writes Discord's markdown itself, in fixed words
+ * with every name escaped (`plainText`), so a reply is sent as it is: the
+ * adapter would turn any `@name` in it into a mention. And the adapter sets
+ * no `allowed_mentions`, so this sets them to none, whatever a company's
+ * name holds.
+ */
+class QuietDiscordAdapter extends DiscordAdapter {
+  protected override buildMessagePayload(
+    message: AdapterPostableMessage,
+    options?: { clearContentForCard?: boolean }
+  ): ReturnType<DiscordAdapter["buildMessagePayload"]> {
+    const built = super.buildMessagePayload(message, options);
+    const payload =
+      typeof message === "string"
+        ? { ...built.payload, content: message }
+        : built.payload;
+    return {
+      ...built,
+      payload: { ...payload, allowed_mentions: { parse: [] } },
+    };
   }
+}
+
+/**
+ * Chat SDK's logs stay out of the console's: the adapter logs the
+ * signatures it checks at info, and what fails is logged here instead.
+ */
+const silent = (): void => undefined;
+const quiet: Logger = {
+  child: () => quiet,
+  debug: silent,
+  info: silent,
+  warn: silent,
+  error: silent,
 };
 
-/** Reads every client as `reader`, answers `question` and sends the answer; never throws. */
-const answerLater = async (
+/**
+ * Answers one staff member's `/grasp` question as the adapter hands it on:
+ * each reply goes to the interaction's deferred, ephemeral message.
+ */
+const answerCommand = async (
   env: Env,
-  interaction: Interaction,
-  question: Question,
-  reader: Staff,
+  event: SlashCommandEvent,
   options: DiscordOptions
 ): Promise<void> => {
+  const reply = async (content: string) => {
+    await event.channel.post(content);
+  };
+  const user = event.user.userId;
+  if (!staffIds(env).has(user)) {
+    await reply("Only Grasp's staff can ask Grasp here.");
+    return;
+  }
+  const interaction = interactionSchema.safeParse(event.raw);
+  const question = interaction.success ? questionOf(interaction.data) : null;
+  if (question === null) {
+    await reply(
+      "Ask `/grasp orgs`, `/grasp org name:<company>` or `/grasp needs`."
+    );
+    return;
+  }
+  const { success } = await env.DISCORD_RATE_LIMIT.limit({ key: user });
+  if (!success) {
+    log.warn("admin.discord_limited", { user });
+    await reply("Too many questions: wait a minute and ask again.");
+    return;
+  }
+  const domain = env.CLIENT_DOMAIN ?? "";
+  if (domain === "") {
+    await reply(
+      "The console can't read the companies: it has no client domain."
+    );
+    return;
+  }
+  // Recorded before anything is read, so a question that fails is still an
+  // audited attempt.
+  await audit(consoleDatabase(env.DB), `discord:${user}`, {
+    action: "admin.discord.call",
+    target: question.ask,
+    detail: auditedQuestion(question),
+  });
+  const reader: Staff = { email: `discord-${user}@${domain}`, sub: "" };
   try {
     const views = organizationsOf(
       await clientAdmins(env, reader, options.reads)
     ).flatMap(({ view }) => (view === null ? [] : [view]));
     const today = options.today?.() ?? todayNow();
-    await sendAnswer(interaction, answerOf(question, views, today));
+    await reply(answerOf(question, views, today));
   } catch (error) {
     log.warn("admin.discord_unanswered", { error: errorCode(error) });
     try {
-      await sendAnswer(interaction, "The admin couldn't answer that now.");
+      await reply("The admin couldn't answer that now.");
     } catch {
       // Discord's own failure: nothing more to tell anyone.
     }
@@ -479,10 +523,55 @@ const answerLater = async (
 };
 
 /**
+ * The bot for one interaction Discord signed: Chat SDK's, its state in the
+ * console's Durable Objects. Its replies use only the interaction's
+ * webhook, so it has no bot token; were it ever to call Discord's API as
+ * the bot, that call fails here instead of going out unauthenticated.
+ */
+const discordBot = (
+  env: Env,
+  applicationId: string,
+  options: DiscordOptions
+) => {
+  const states =
+    env.DURABLE_OBJECT_JURISDICTION === "none"
+      ? env.CHAT_STATE
+      : env.CHAT_STATE.jurisdiction("eu");
+  const bot = new Chat({
+    userName: "grasp",
+    logger: quiet,
+    state: durableObjectState(states),
+    adapters: {
+      discord: new QuietDiscordAdapter({
+        applicationId,
+        botToken: () => {
+          throw new Error("The console's Discord bot has no bot token.");
+        },
+        // The route checked the request already; the adapter checks it
+        // again, the same way, before anything reaches a handler.
+        webhookVerifier: async (request, body) =>
+          await signedByDiscord(
+            env.DISCORD_PUBLIC_KEY ?? "",
+            request.headers.get("x-signature-ed25519") ?? "",
+            request.headers.get("x-signature-timestamp") ?? "",
+            body
+          ),
+        // Every reply, refusals included, is the asker's alone.
+        interactionFlags: () => EPHEMERAL,
+        logger: quiet,
+      }),
+    },
+  });
+  bot.onSlashCommand(async (event) => {
+    await answerCommand(env, event, options);
+  });
+  return bot;
+};
+
+/**
  * Answers one request Discord posts to the console: a PING with a PONG, a
- * staff member's `/grasp` question with a deferred reply whose answer
- * `waitUntil` sends, anyone else's with a refusal. Anything not signed by
- * the application is 401.
+ * `/grasp` question with a deferred, ephemeral reply whose answer, or
+ * refusal, `waitUntil` sends. Anything not signed by the application is 401.
  */
 export const discordInteraction = async (
   request: Request,
@@ -516,42 +605,16 @@ export const discordInteraction = async (
   if (!read.success) {
     return refused(400, "Not an interaction.");
   }
-  const interaction = read.data;
-  if (interaction.type === PING) {
-    return json({ type: PONG });
-  }
-  if (interaction.type !== APPLICATION_COMMAND) {
+  if (read.data.type !== PING && read.data.type !== APPLICATION_COMMAND) {
     return refused(400, "Not an interaction the bot answers.");
   }
-  const user = userOf(interaction);
-  if (user === null || !staffIds(env).has(user)) {
-    return ephemeral("Only Grasp's staff can ask Grasp here.");
-  }
-  const question = questionOf(interaction);
-  if (question === null) {
-    return ephemeral(
-      "Ask `/grasp orgs`, `/grasp org name:<company>` or `/grasp needs`."
-    );
-  }
-  const { success } = await env.DISCORD_RATE_LIMIT.limit({ key: user });
-  if (!success) {
-    log.warn("admin.discord_limited", { user });
-    return ephemeral("Too many questions: wait a minute and ask again.");
-  }
-  const domain = env.CLIENT_DOMAIN ?? "";
-  if (domain === "") {
-    return ephemeral(
-      "The console can't read the companies: it has no client domain."
-    );
-  }
-  // Recorded before anything is read, so a question that fails is still an
-  // audited attempt.
-  await audit(consoleDatabase(env.DB), `discord:${user}`, {
-    action: "admin.discord.call",
-    target: question.ask,
-    detail: auditedQuestion(question),
-  });
-  const reader: Staff = { email: `discord-${user}@${domain}`, sub: "" };
-  waitUntil(answerLater(env, interaction, question, reader, options));
-  return json({ type: DEFERRED_CHANNEL_MESSAGE, data: { flags: EPHEMERAL } });
+  const bot = discordBot(env, read.data.application_id, options);
+  return await bot.webhooks.discord(
+    new Request(request.url, {
+      method: "POST",
+      headers: request.headers,
+      body,
+    }),
+    { waitUntil }
+  );
 };
