@@ -910,7 +910,7 @@ const Status = ({
                   render={
                     <Link
                       params={{ rolloutId: need.rollout.id }}
-                      to="/rollouts/$rolloutId"
+                      to="/admin/platform/rollouts/$rolloutId"
                     />
                   }
                   size="sm"
@@ -1399,7 +1399,7 @@ const rolloutFact = (
   <Link
     className="hover:text-foreground underline underline-offset-4"
     params={{ rolloutId: rollout.id }}
-    to="/rollouts/$rolloutId"
+    to="/admin/platform/rollouts/$rolloutId"
   >
     {`${rollout.releaseId ?? "New secrets"}: ${targetWords[rollout.target].toLowerCase()}`}
   </Link>
@@ -1463,7 +1463,7 @@ const Releases = ({
         action={
           <Button
             nativeButton={false}
-            render={<Link to="/releases" />}
+            render={<Link to="/admin/platform/releases" />}
             size="sm"
             variant="ghost"
           >
@@ -1490,7 +1490,7 @@ const Releases = ({
                   <Link
                     className="hover:text-foreground font-mono text-xs underline underline-offset-4"
                     params={{ releaseId: release.id }}
-                    to="/releases/$releaseId"
+                    to="/admin/platform/releases/$releaseId"
                   >
                     {release.id}
                   </Link>
