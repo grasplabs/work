@@ -8,6 +8,8 @@ import { directoryProviderSchema } from "@grasp-os/shared/directory";
 import type { DirectoryProvider } from "@grasp-os/shared/directory";
 import { placesProviderSchema } from "@grasp-os/shared/document-places";
 import type { PlacesProvider } from "@grasp-os/shared/document-places";
+import { hrProviderSchema } from "@grasp-os/shared/hr";
+import type { HrProvider } from "@grasp-os/shared/hr";
 import { landscapeProviderSchema } from "@grasp-os/shared/landscape";
 import type { LandscapeProvider } from "@grasp-os/shared/landscape";
 import { log } from "@grasp-os/shared/log";
@@ -15,6 +17,7 @@ import { z } from "zod";
 
 import { appRecord } from "./bundled-connectors.ts";
 import type { AppRecord } from "./bundled-connectors.ts";
+import { hibobAccount, hibobCredential } from "./hibob.ts";
 import { idTokenClaims, lookupAccount } from "./oauth-client.ts";
 import type { TokenSet } from "./oauth-client.ts";
 
@@ -138,6 +141,8 @@ export interface ApiKeyProviderConfig {
   credential: (key: string) => Credential;
   /** The account the key is for, as the app says; `null` if it refused it. */
   account: (key: string) => Promise<ProviderAccount | null>;
+  /** Only shared connections, never a person's own (the HR platform's). */
+  sharedOnly?: boolean;
 }
 
 export type ProviderConfig = OAuthProviderConfig | ApiKeyProviderConfig;
@@ -449,6 +454,31 @@ const directoryProviders: Readonly<
   "google-directory": googleDirectory,
 };
 
+/**
+ * HiBob, the HR platform's read-only connection (GRA-371), for the
+ * onboarding to know who leads which team. HiBob signs in a service user
+ * the company's admin makes in Bob, with its ID and token: no OAuth, so no
+ * app of Grasp's at HiBob, and nothing Grasp can ask it to hold no more
+ * than. What keeps it to the read is connect's: it is the organization's
+ * only, connected by its admin; it takes no connector calls (no connector
+ * can name its provider); and the key is sent only with the one search
+ * hr.ts makes, for only the fields a roster needs (hibob.ts).
+ */
+const hibobHr: ApiKeyProviderConfig = {
+  kind: "api_key",
+  id: "hibob-hr",
+  // No connector: its connection takes no calls, only core's read uses it.
+  server: "hibob-hr",
+  credential: hibobCredential,
+  account: hibobAccount,
+  sharedOnly: true,
+};
+
+/** The HR platforms' connections, by provider. */
+const hrProviders: Readonly<Record<HrProvider, ApiKeyProviderConfig>> = {
+  "hibob-hr": hibobHr,
+};
+
 /** What the documents' Microsoft connection reads with, and only that. */
 const microsoftDocumentsScopes = [
   "openid",
@@ -637,7 +667,7 @@ const appProvider = ({
 
 /**
  * The provider `id` names: a suite, the landscape's, the directory's, the
- * documents', or an app of this release.
+ * documents', an HR platform's, or an app of this release.
  */
 export const providerFor = (id: string): ProviderConfig | undefined => {
   const suite = oauthProviderSchema.safeParse(id);
@@ -655,6 +685,10 @@ export const providerFor = (id: string): ProviderConfig | undefined => {
   const places = placesProviderSchema.safeParse(id);
   if (places.success) {
     return placesProviders[places.data];
+  }
+  const hr = hrProviderSchema.safeParse(id);
+  if (hr.success) {
+    return hrProviders[hr.data];
   }
   const record = appProviderSchema.safeParse(id).success
     ? appRecord(id)

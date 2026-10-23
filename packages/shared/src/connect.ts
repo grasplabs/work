@@ -6,6 +6,7 @@ import { directoryProviderSchema } from "./directory.ts";
 import { placesProviderSchema } from "./document-places.ts";
 import { defineErrorFamily, isExpectedError } from "./errors.ts";
 import type { CodedError } from "./errors.ts";
+import { hrProviderSchema } from "./hr.ts";
 import {
   chatIdSchema,
   connectionIdSchema,
@@ -115,16 +116,17 @@ export type OAuthProvider = z.infer<typeof oauthProviderSchema>;
 
 /**
  * Names no app may take: the suites above, whose sign-in connect handles
- * itself; the landscape's, the directory's and the documents' admin
- * connections (`./landscape.ts`, `./directory.ts`, `./document-places.ts`),
- * which no connector's calls may use; and Composio, whose connections are
- * another kind.
+ * itself; the landscape's, the directory's, the documents' and the HR
+ * platform's admin connections (`./landscape.ts`, `./directory.ts`,
+ * `./document-places.ts`, `./hr.ts`), which no connector's calls may use;
+ * and Composio, whose connections are another kind.
  */
 const reservedProviderIds: ReadonlySet<string> = new Set([
   ...oauthProviderSchema.options,
   ...landscapeProviderSchema.options,
   ...directoryProviderSchema.options,
   ...placesProviderSchema.options,
+  ...hrProviderSchema.options,
   "composio",
 ]);
 
@@ -233,7 +235,11 @@ export const apiKeyMaxLength = 4096;
  */
 export const connectWithKeySchema = z.strictObject({
   person: connectionPersonSchema,
-  provider: appProviderSchema,
+  /**
+   * An app's provider, or an HR platform's read-only admin connection,
+   * which no connector's calls use.
+   */
+  provider: z.union([appProviderSchema, hrProviderSchema]),
   scope: connectionScopeSchema,
   /** Printable ASCII only: it goes into a request header as it is. */
   key: z

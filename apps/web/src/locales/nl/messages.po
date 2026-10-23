@@ -803,6 +803,10 @@ msgstr "{name} gewijzigd"
 msgid "{name} changed: it {does}"
 msgstr "{name} gewijzigd: {does}"
 
+#: src/onboarding/hr-leads.tsx
+msgid "{name} didn’t take this service user. Check its ID and token, and that it may read people’s work details."
+msgstr "{name} accepteerde deze service user niet. Controleer de ID en het token, en of hij de werkgegevens van mensen mag lezen."
+
 #. The first hour Pulse may report on a day
 #: src/settings/week-hours.tsx
 msgid "{name} from"
@@ -1305,6 +1309,10 @@ msgstr "Aandeel gebruikers in {teamName}"
 #: src/onboarding/staff-words.ts
 msgid "{teamName}'s lead hasn't talked yet: the team goes ahead without their map of its work"
 msgstr "De lead van {teamName} heeft nog niet gesproken: het team gaat verder zonder diens overzicht van het werk"
+
+#: src/onboarding/hr-leads.tsx
+msgid "{teams, plural, one {{name} is connected. I can see # team, its lead and who reports to whom.} other {{name} is connected. I can see # teams, their leads and who reports to whom.}}"
+msgstr "{teams, plural, one {{name} is gekoppeld. Ik zie # team, de teamleider en wie aan wie rapporteert.} other {{name} is gekoppeld. Ik zie # teams, hun teamleiders en wie aan wie rapporteert.}}"
 
 #: src/brain/brain-atlas.ts
 msgid "{teams, plural, one {# team} other {# teams}}"
@@ -3897,6 +3905,7 @@ msgid "Connect {app}"
 msgstr "{app} koppelen"
 
 #: src/onboarding/connect-steps.tsx
+#: src/onboarding/hr-leads.tsx
 msgid "Connect {name}"
 msgstr "{name} koppelen"
 
@@ -6052,6 +6061,10 @@ msgstr "Ik kon het niet bewaren. Probeer het zo nog eens."
 msgid "I could not open this just now. Try again in a moment."
 msgstr "Ik kon dit nu niet openen. Probeer het zo nog eens."
 
+#: src/onboarding/hr-leads.tsx
+msgid "I could not reach {name} just now. Try again in a moment."
+msgstr "Ik kon {name} nu niet bereiken. Probeer het zo nog eens."
+
 #: src/onboarding/setup-steps.tsx
 msgid "I could not reach {signIn} just now. Try again in a moment, or add the documents here."
 msgstr "Ik kon {signIn} nu niet bereiken. Probeer het zo nog eens, of voeg de documenten hier toe."
@@ -6059,6 +6072,10 @@ msgstr "Ik kon {signIn} nu niet bereiken. Probeer het zo nog eens, of voeg de do
 #: src/onboarding/setup-steps.tsx
 msgid "I could not reach {signIn} just now. Try again in a moment, or use a staff list."
 msgstr "Ik kon {signIn} nu niet bereiken. Probeer het zo nog eens, of gebruik een personeelslijst."
+
+#: src/onboarding/hr-leads.tsx
+msgid "I could not read {name}. Connect it again with a service user that may read people’s work details."
+msgstr "Ik kon {name} niet lezen. Koppel het opnieuw met een service user die de werkgegevens van mensen mag lezen."
 
 #: src/onboarding/setup-steps.tsx
 msgid "I could not read {signIn} just now. Try again in a moment, or use a staff list."
@@ -6083,6 +6100,10 @@ msgstr "Deze kon ik niet lezen"
 #: src/onboarding/about-story.tsx
 msgid "I do every interview myself. Here’s what that sounds like."
 msgstr "Elk interview doe ik zelf. Zo klinkt dat."
+
+#: src/onboarding/hr-leads.tsx
+msgid "I found nobody in {name}."
+msgstr "Ik vond niemand in {name}."
 
 #: src/onboarding/setup-steps.tsx
 msgid "I found nobody in {signIn}."
@@ -6135,6 +6156,10 @@ msgstr "Als het mislukt"
 #: src/routes/_shell.settings.spend.tsx
 msgid "If the rest of the month goes like the days so far"
 msgstr "Als de rest van de maand gaat zoals de dagen tot nu toe"
+
+#: src/onboarding/hr-leads.tsx
+msgid "In {name}, make a service user that may read people’s basic and work details, and paste its ID and token here."
+msgstr "Maak in {name} een service user aan die de basis- en werkgegevens van mensen mag lezen, en plak hier de ID en het token."
 
 #: src/onboarding/organization-dialogs.tsx
 msgid "In another team, {first} is asked about that team's work from now on. What they already said stays with the work it was about."
@@ -7254,6 +7279,7 @@ msgid "More about these connections"
 msgstr "Meer over deze koppelingen"
 
 #: src/onboarding/connect-steps.tsx
+#: src/onboarding/hr-leads.tsx
 #: src/onboarding/setup-steps.tsx
 msgid "More about this connection"
 msgstr "Meer over deze koppeling"
@@ -8275,6 +8301,7 @@ msgstr "Niet gemaakt door {vendors}"
 msgid "Not named by the provider"
 msgstr "Niet benoemd door de provider"
 
+#: src/onboarding/hr-leads.tsx
 #: src/tour/tour-script.ts
 msgid "Not now"
 msgstr "Nu niet"
@@ -8983,6 +9010,7 @@ msgctxt "kind of app"
 msgid "Other"
 msgstr "Overig"
 
+#: src/onboarding/hr-leads.tsx
 #: src/onboarding/setup-steps.tsx
 msgctxt "the team for people a staff list gives no team"
 msgid "Other"
@@ -9733,6 +9761,10 @@ msgstr "Beperkte bronnen gelezen en is daar nu aan gebonden"
 #: src/engines/screen-approval.tsx
 msgid "Read the code of version {version}"
 msgstr "Lees de code van versie {version}"
+
+#: src/onboarding/hr-leads.tsx
+msgid "Read the leads from {name} again"
+msgstr "Teamleiders opnieuw uit {name} lezen"
 
 #: src/onboarding/interview-people.tsx
 msgid "Read the transcript"
@@ -10651,6 +10683,10 @@ msgstr "Server"
 msgid "Server code"
 msgstr "Servercode"
 
+#: src/onboarding/hr-leads.tsx
+msgid "Service user ID"
+msgstr "ID van de service user"
+
 #: src/activity/audit-words.ts
 msgid "Set aside entries the audit trail couldn't take"
 msgstr "Vermeldingen apart gezet die het auditlogboek niet kon opnemen"
@@ -11423,6 +11459,10 @@ msgstr "Weghalen: {text}"
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Take the go back"
 msgstr "Het startsein intrekken"
+
+#: src/onboarding/hr-leads.tsx
+msgid "Take the leads from {name}"
+msgstr "Teamleiders uit {name} halen"
 
 #: src/frame/person-menu.tsx
 msgid "Take the tour"
@@ -12491,6 +12531,10 @@ msgstr "Dan zouden meer interviews alleen herhalen wat bekend is."
 msgid "Then, when it goes differently."
 msgstr "Dan: als het anders gaat."
 
+#: src/onboarding/hr-leads.tsx
+msgid "There are more people in {name} than I can take: up to {peopleMost} people in up to {teamsMost} teams."
+msgstr "Er staan meer mensen in {name} dan ik aankan: tot {peopleMost} mensen in tot {teamsMost} teams."
+
 #: src/onboarding/setup-steps.tsx
 msgid "There are more people in {signIn} than I can take: up to {peopleMost} people in up to {teamsMost} teams. A staff list of those taking part works."
 msgstr "Er staan meer mensen in {signIn} dan ik aankan: tot {peopleMost} mensen in tot {teamsMost} teams. Een personeelslijst van wie meedoet werkt wel."
@@ -12890,6 +12934,10 @@ msgstr "Vandaag"
 #: src/routes/_shell.settings.models.tsx
 msgid "Today ({day}, UTC)"
 msgstr "Vandaag ({day}, UTC)"
+
+#: src/onboarding/hr-leads.tsx
+msgid "Token"
+msgstr "Token"
 
 #: src/routes/_shell.onboarding.ai-use.tsx
 msgid "Tokens read"
