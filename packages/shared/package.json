@@ -51,6 +51,7 @@
     "./brain-api": "./src/brain-api.ts",
     "./brain-records": "./src/brain-records.ts",
     "./capability": "./src/capability.ts",
+    "./channel-keys": "./src/channel-keys.ts",
     "./chat": "./src/chat.ts",
     "./chunks": "./src/chunks.ts",
     "./client-secrets": "./src/client-secrets.ts",
