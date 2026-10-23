@@ -233,6 +233,7 @@ const DockThread = ({
   }
   return (
     <ChatThread
+      chatId={chatId}
       loaded={view.loaded || failure !== undefined}
       messages={view.messages}
       onRetry={onRetry}
