@@ -34,7 +34,7 @@ import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { alias } from "drizzle-orm/sqlite-core";
 import { z } from "zod";
 
-import { auditedBatch, outboxed } from "../audit-outbox.ts";
+import { outboxed } from "../audit-outbox.ts";
 import { isUniqueViolation } from "../db/d1.ts";
 import {
   brainPayloads,
@@ -45,6 +45,7 @@ import {
 } from "../db/knowledge/schema.ts";
 import { noteProvenance } from "./access.ts";
 import type { Reader } from "./access.ts";
+import { auditedBatch } from "./audit.ts";
 import { allowedFor } from "./authorize.ts";
 import type { Allowed } from "./authorize.ts";
 import { readableCollection, requireWritable } from "./collections.ts";
@@ -492,7 +493,7 @@ export const writeVersion = async (
   if ((existing?.currentVersion ?? 0) !== ifVersion) {
     throw conflict(existing);
   }
-  const now = new Date();
+  const now = portsOf(env).clock();
   const number = ifVersion + 1;
   const documentId = existing?.id ?? crypto.randomUUID();
   const changes = {
@@ -573,7 +574,7 @@ export const writeVersion = async (
   const send = async (staged: StagedPayload): Promise<void> => {
     await write.lastCheck?.();
     try {
-      await auditedBatch(env, db, [document, ...statements(staged)]);
+      await auditedBatch(portsOf(env), db, [document, ...statements(staged)]);
     } catch (error) {
       if (isUniqueViolation(error)) {
         throw conflict(await findByPath(db, collection.id, path));

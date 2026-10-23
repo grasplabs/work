@@ -249,6 +249,7 @@ const cast = {
   tour: { member: "user" },
   setupVoice: { admin: "admin" },
   setupConnect: { admin: "admin" },
+  setupStory: { admin: "admin" },
 } as const satisfies Record<string, Record<string, Role>>;
 
 type Scene = keyof typeof cast;

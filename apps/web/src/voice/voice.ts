@@ -124,6 +124,9 @@ let pausedFor = 0;
 const clock = (): number =>
   ((pausedAt ?? performance.now()) - pausedFor) / 1000;
 
+/** The voice's clock, in seconds: it stands still while paused, so what is timed on it holds too. */
+export const voiceClock = (): number => clock();
+
 /** Waits `ms` on the voice's clock, so a pause holds the wait too. */
 export const hold = async (ms: number): Promise<void> => {
   const until = clock() + ms / 1000;

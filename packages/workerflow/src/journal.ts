@@ -51,6 +51,10 @@ export class JournalSchemaError extends Error {
 
 export { journalSchemaVersion } from "./journal-schema.ts";
 
+/** The index each sender's share of the inbox is counted by. */
+const senderIndex =
+  "CREATE INDEX IF NOT EXISTS events_sender ON events (sender) WHERE sender IS NOT NULL AND reserved = 0";
+
 /**
  * The journal's version, once upgraded to this engine's where it was the
  * one before (`journalSchemaVersion`): each upgrade in one write, as the
@@ -84,6 +88,12 @@ const upgradedSchema = (
     sql.exec("UPDATE run SET schema = 11");
     schema = 11;
   }
+  if (schema === 11) {
+    sql.exec("ALTER TABLE events ADD COLUMN sender TEXT");
+    sql.exec(senderIndex);
+    sql.exec("UPDATE run SET schema = 12");
+    schema = 12;
+  }
   return schema;
 };
 
@@ -103,6 +113,15 @@ export { maxStoredTextBytes as maxEventPayloadBytes } from "./codec.ts";
  */
 export const maxInboxEvents = 10_000;
 export const maxInboxBytes = 32 * 1024 * 1024;
+
+/**
+ * What one sender's events may take of a run's inbox (`EventCommand.sender`,
+ * run.ts): an eighth of its count and bytes, so no one sender (a screen, a
+ * mutation) fills it and leaves every other sender none. Events a sender
+ * names no one for count only against the whole inbox.
+ */
+export const maxSenderEvents = maxInboxEvents / 8;
+export const maxSenderBytes = maxInboxBytes / 8;
 
 /**
  * `waitingForPause`: a pause was asked for while an activation ran; it
@@ -474,10 +493,12 @@ export const createJournal = (sql: SqlStorage): void => {
       accepted_at INTEGER NOT NULL,
       consumed_by INTEGER UNIQUE REFERENCES steps (ordinal),
       attributes TEXT,
-      reserved INTEGER NOT NULL DEFAULT 0
+      reserved INTEGER NOT NULL DEFAULT 0,
+      sender TEXT
     );
     CREATE INDEX IF NOT EXISTS events_unconsumed
       ON events (type, seq) WHERE consumed_by IS NULL;
+    ${senderIndex};
     -- At most one wait waits at a time: the lookups by state stay one row
     -- deep however long the run's history grows.
     CREATE INDEX IF NOT EXISTS steps_waiting

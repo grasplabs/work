@@ -193,6 +193,7 @@ describe("a JSON workflow's run on-prem", () => {
       data: { note: "done" },
       key: unique(),
       source: "https://grasp.test/on-prem",
+      sender: "on-prem",
     });
     const run = await vi.waitFor(
       async () => {

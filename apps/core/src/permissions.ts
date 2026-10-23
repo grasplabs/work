@@ -637,9 +637,28 @@ const workflowGenerationMoved = (
     .where(and(eq(workflowResources.id, id), landed));
 
 /**
+ * Refuses `send` on a workflow for anyone but an App: events reach a run
+ * only through an App's screen or mutation, so no other subject is
+ * granted what it can't use.
+ */
+const requireSenderFits = (
+  subject: PermissionSubject,
+  object: PermissionObject,
+  actions: readonly string[]
+): void => {
+  if (
+    object.type === "workflow" &&
+    subject.type !== "app" &&
+    actions.includes("send")
+  ) {
+    refuseRequest("actions: Only an App sends events to a workflow's runs.");
+  }
+};
+
+/**
  * Refuses an object `subject` has no use for: what the platform offers is
  * for an App's code; a trigger only starts, so it holds `start` on a
- * workflow and nothing else; a store's own code reaches connections and
+ * workflow and nothing else; only an App sends a workflow's runs events; a store's own code reaches connections and
  * collections alone. Only an agent writes a collection: an App, a workflow
  * and a store only read one (their collection stubs have no write), and
  * keep what they write in a business store, so `write` would give them
@@ -665,6 +684,7 @@ const requireObjectFits = (
   ) {
     refuseRequest("object: A trigger only starts a workflow.");
   }
+  requireSenderFits(subject, object, actions);
   if (
     object.type === "collection" &&
     subject.type !== "agent" &&
@@ -941,31 +961,19 @@ export const declarableOf = async (
   );
 };
 
-/**
- * Requests for `app`, made by `by` as `app` is created from the blueprint
- * `blueprint` (app-blueprints.ts), of what the blueprint declares: the
- * rows and their audit entries, for the batch that creates `app`. Like
- * any request, each allows nothing until an admin grants it.
- */
-export const declaredRequests = (
+/** Requested rows of `app` for `requested`, and their audit entries. */
+const requestsOf = (
   by: Acting,
   app: AppId,
-  declared: readonly DeclaredPermission[],
+  requested: readonly {
+    object: PermissionObject;
+    actions: readonly string[];
+    binding: string;
+  }[],
   blueprint: string
 ): { rows: Row[]; entries: AuditEntry[] } => {
   const requestedAt = new Date();
-  // Checked again as each is asked for: a blueprint keeps what it declared
-  // when it was marked, and what may be declared has narrowed since (a
-  // collection only to read), so none is asked for that a request would be
-  // refused.
-  const checked = declared.map((permission) =>
-    permissionErrors.parse(
-      "permission.invalid",
-      declaredPermissionSchema,
-      permission
-    )
-  );
-  const rows = checked.map(({ object, actions, binding }): Row => ({
+  const rows = requested.map(({ object, actions, binding }): Row => ({
     id: crypto.randomUUID(),
     ...subjectColumns({ type: "app", appId: app }),
     ...objectColumns(object),
@@ -992,6 +1000,60 @@ export const declaredRequests = (
     ),
   };
 };
+
+/**
+ * Requests for `app`, made by `by` as `app` is created from the blueprint
+ * `blueprint` (app-blueprints.ts), of what the blueprint declares: the
+ * rows and their audit entries, for the batch that creates `app`. Like
+ * any request, each allows nothing until an admin grants it.
+ */
+export const declaredRequests = (
+  by: Acting,
+  app: AppId,
+  declared: readonly DeclaredPermission[],
+  blueprint: string
+): { rows: Row[]; entries: AuditEntry[] } => {
+  // Checked again as each is asked for: a blueprint keeps what it declared
+  // when it was marked, and what may be declared has narrowed since (a
+  // collection only to read), so none is asked for that a request would be
+  // refused.
+  const checked = declared.map((permission) =>
+    permissionErrors.parse(
+      "permission.invalid",
+      declaredPermissionSchema,
+      permission
+    )
+  );
+  return requestsOf(by, app, checked, blueprint);
+};
+
+/**
+ * Requests for `app`, made by `by` as `app` is created from the blueprint
+ * `blueprint`, to start each workflow `started` names, the one the
+ * creation made of each workflow the blueprint ships (app-blueprints.ts),
+ * under its binding name: the rows and their audit entries, for the batch
+ * that creates `app`. Like any request, each allows nothing until an
+ * admin grants it.
+ */
+export const workflowStartRequests = (
+  by: Acting,
+  app: AppId,
+  started: readonly { workflowId: string; binding: string }[],
+  blueprint: string
+): { rows: Row[]; entries: AuditEntry[] } =>
+  requestsOf(
+    by,
+    app,
+    started.map(({ workflowId, binding }) =>
+      permissionErrors.parse("permission.invalid", permissionRequestSchema, {
+        subject: { type: "app", appId: app },
+        object: { type: "workflow", workflowId },
+        actions: ["start"],
+        binding,
+      })
+    ),
+    blueprint
+  );
 
 /**
  * Tells the chat's agent how its request for `permission` was decided,

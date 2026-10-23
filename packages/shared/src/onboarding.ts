@@ -255,6 +255,11 @@ export interface OnboardingView {
   agreed: boolean;
   /** Grasp paused the interviews: no link opens and none goes out. */
   paused: boolean;
+  /**
+   * The sponsor's first name, when the kickoff named them; null before it
+   * is in, or when it did not. The one word of the kickoff the admin sees.
+   */
+  sponsor: string | null;
 }
 
 /** How many weeks the programme with Grasp runs. */
