@@ -1,24 +1,24 @@
-import type { AuditActor, AuditEntry } from "@grasp-os/shared/audit";
 import {
   fromBase64Url,
   sha256Hex,
   toBase64Url,
-} from "@grasp-os/shared/encoding";
-import { canonicalJson } from "@grasp-os/shared/json";
+} from "@grasp-os/brain/encoding";
+import type { BrainEvent } from "@grasp-os/brain/events";
+import type { Json } from "@grasp-os/brain/json";
+import { canonicalJson } from "@grasp-os/brain/json";
 import {
   knowledgeErrors,
   purgeInputSchema,
   purgeMaxDocuments,
   purgedMarker,
-} from "@grasp-os/shared/knowledge";
-import type { PurgePlan, PurgeResult } from "@grasp-os/shared/knowledge";
-import { log } from "@grasp-os/shared/log";
+} from "@grasp-os/brain/knowledge";
+import type { PurgePlan, PurgeResult } from "@grasp-os/brain/knowledge";
+import { log } from "@grasp-os/brain/log";
 import { and, asc, count, eq, gt, inArray, lte, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import type { z } from "zod";
 
-import { outboxed } from "../audit-outbox.ts";
 import { inList } from "../db/d1.ts";
 import {
   brainPayloads,
@@ -28,7 +28,7 @@ import {
   sections,
   versions,
 } from "../db/knowledge/schema.ts";
-import { auditedBatch } from "./audit.ts";
+import { auditedBatch, outboxed } from "./audit.ts";
 import type { Brain } from "./brain.ts";
 import type { CollectionRow } from "./collections.ts";
 import { checkedText, indexedValuesOf, writeVersion } from "./documents.ts";
@@ -365,7 +365,7 @@ const purgeEntry = (
     receipts?: number;
   },
   purgeId?: string
-): AuditEntry => ({
+): BrainEvent => ({
   actor: by.actor,
   action,
   ...(scope.collectionId === undefined
@@ -457,7 +457,7 @@ const purgePersonal = async <C>(
   // (as a content purge records them).
   await auditedBatch(brain.ports, db, [
     outboxed(
-      db,
+      brain,
       purgeEntry(
         by,
         "knowledge.purged",
@@ -1127,10 +1127,10 @@ const requireStorable = (
  * its payload couldn't be read: missing, or not the text its hash names.
  */
 const replacedEntry = (
-  actor: AuditActor,
+  actor: Json,
   document: DocumentRow,
   version: number
-): AuditEntry => ({
+): BrainEvent => ({
   actor,
   action: "knowledge.payload.replaced",
   target: { type: "document", id: document.id },
@@ -1150,7 +1150,7 @@ const repointVersions = async <C>(
     number: number;
     changed: { text: string; message: string | null; unreadable: boolean };
   }[],
-  actor: AuditActor
+  actor: Json
 ): Promise<void> => {
   const stage = async () =>
     await Promise.all(
@@ -1171,7 +1171,9 @@ const repointVersions = async <C>(
   );
   const replaced = changes
     .filter(({ changed }) => changed.unreadable)
-    .map(({ number }) => outboxed(db, replacedEntry(actor, document, number)));
+    .map(({ number }) =>
+      outboxed(brain, replacedEntry(actor, document, number))
+    );
   const send = async (staged: StagedPayload[]): Promise<void> => {
     const updates = changes.flatMap(({ number, changed }, index) => {
       const payload = staged[index];
@@ -1238,7 +1240,7 @@ const rewriteVersions = async <C>(
   upTo: number,
   matcher: Matcher,
   /** Who the purge is by, to write; only counted without. */
-  write?: AuditActor
+  write?: Json
 ): Promise<{
   changed: number;
   removed: number;
@@ -1445,7 +1447,7 @@ const purgeDocument = async <C>(
             ),
           ...releasedCurrent.after,
           ...(changed.unreadable
-            ? [outboxed(db, replacedEntry(actor, document, at))]
+            ? [outboxed(brain, replacedEntry(actor, document, at))]
             : []),
         ];
   await writeVersion(brain, by, {
@@ -1575,7 +1577,7 @@ const purgeContent = async <C>(
   // so, too.
   await auditedBatch(brain.ports, db, [
     outboxed(
-      db,
+      brain,
       purgeEntry(
         by,
         "knowledge.purged",
@@ -1705,7 +1707,7 @@ export const preparePurge = async <C>(
   }
   await auditedBatch(brain.ports, db, [
     outboxed(
-      db,
+      brain,
       purgeEntry(by, "knowledge.purge.prepared", parsed, scope, {
         ...counts,
         ...(parsed.type === "content"

@@ -1,4 +1,4 @@
-import type { AuditDetailValue } from "@grasp-os/shared/audit";
+import type { DetailValue } from "@grasp-os/brain/events";
 import { and, eq, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
@@ -89,5 +89,5 @@ export interface ReadRecord {
   action: "knowledge.read" | "knowledge.search" | "knowledge.search.empty";
   target?: { type: "document" | "collection"; id: string };
   documentIds?: string[];
-  detail: Record<string, AuditDetailValue>;
+  detail: Record<string, DetailValue>;
 }

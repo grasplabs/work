@@ -1,4 +1,4 @@
-import { linkPath, wikiLinkPattern } from "@grasp-os/shared/knowledge";
+import { linkPath, wikiLinkPattern } from "@grasp-os/brain/knowledge";
 
 // How a document's Markdown becomes sections and links. Line based, and
 // deliberately small: ATX headings (`# Title`) start sections, `[[links]]`

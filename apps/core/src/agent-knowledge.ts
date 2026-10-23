@@ -28,11 +28,12 @@ import {
 import type { AgentApi, AgentScope } from "./agent-scope.ts";
 import type { Reader } from "./knowledge/access.ts";
 import { readAsDelegate } from "./knowledge/binding.ts";
+import { catalog } from "./knowledge/catalog.ts";
 import { brainOf } from "./knowledge/ports.ts";
 import { recallWithSources } from "./knowledge/recall.ts";
 import { search } from "./knowledge/search.ts";
 import { agentKnowledgeSignals } from "./knowledge/signals.ts";
-import { catalog, follow, read } from "./knowledge/tools.ts";
+import { follow, read } from "./knowledge/tools.ts";
 
 // Knowledge for a chat's code: `await env.knowledge.search("leave policy")`.
 // The agent's Knowledge tools (knowledge/tools.ts), read as the chat's

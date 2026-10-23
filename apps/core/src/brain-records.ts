@@ -1,4 +1,8 @@
-import { actorOf, auditProvenanceMaxItems } from "@grasp-os/shared/audit";
+import {
+  actorOf,
+  auditActorSchema,
+  auditProvenanceMaxItems,
+} from "@grasp-os/shared/audit";
 import type { AuditActor } from "@grasp-os/shared/audit";
 import type {
   Candidate,
@@ -946,7 +950,7 @@ export const brainRecordErasure = (
 ): Pick<OnErase, "count" | "rewrite" | "forgetActor"> => ({
   count: async (holds) => await countRecords(env, holds),
   rewrite: async (by, rewrite) => {
-    await rewriteRecords(env, by.actor, rewrite);
+    await rewriteRecords(env, auditActorSchema.parse(by.actor), rewrite);
   },
   forgetActor: async () => {
     // Records keep no author: the audit log names who added them.

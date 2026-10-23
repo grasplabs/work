@@ -1,4 +1,4 @@
-import { errorFields, log } from "@grasp-os/shared/log";
+import { errorFields, log } from "@grasp-os/brain/log";
 import { eq, lte, ne, or, sql } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 

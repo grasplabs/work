@@ -1,6 +1,6 @@
-import { sha256HexOfBytes, toHex } from "@grasp-os/shared/encoding";
-import { knowledgeErrors } from "@grasp-os/shared/knowledge";
-import { errorFields, log } from "@grasp-os/shared/log";
+import { sha256HexOfBytes, toHex } from "@grasp-os/brain/encoding";
+import { knowledgeErrors } from "@grasp-os/brain/knowledge";
+import { errorFields, log } from "@grasp-os/brain/log";
 import { and, eq, inArray, lt, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";

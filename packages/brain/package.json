@@ -7,10 +7,15 @@
   "sideEffects": false,
   "exports": {
     "./contract": "./src/contract.ts",
+    "./encoding": "./src/encoding.ts",
     "./errors": "./src/errors.ts",
+    "./events": "./src/events.ts",
     "./ids": "./src/ids.ts",
+    "./json": "./src/json.ts",
     "./knowledge": "./src/knowledge.ts",
-    "./limits": "./src/limits.ts"
+    "./limits": "./src/limits.ts",
+    "./log": "./src/log.ts",
+    "./tokens": "./src/tokens.ts"
   },
   "dependencies": {
     "zod": "catalog:"

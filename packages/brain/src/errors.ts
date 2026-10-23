@@ -15,10 +15,11 @@ export type BrainCodedError<Code extends string = string> = Error & {
 /**
  * What's wrong with some input, for an error's `details.issues`: each
  * issue as `path: message`, naming the field, never repeating its value.
+ * `prefix` goes before every path, e.g. `frontmatter`.
  */
-export const issuesOf = (error: z.ZodError): string[] =>
+export const issuesOf = (error: z.ZodError, prefix = ""): string[] =>
   error.issues.map(({ path, message }) => {
-    const where = path.map(String).join(".");
+    const where = [prefix, ...path.map(String)].filter(Boolean).join(".");
     return where === "" ? message : `${where}: ${message}`;
   });
 
