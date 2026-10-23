@@ -104,6 +104,11 @@ export const links = sqliteTable("links", {
    */
   ledTeam: text("led_team"),
   /**
+   * When the company's admin took the link to send it themselves (ISO
+   * 8601): it is new to them no more. None while they haven't.
+   */
+  takenAt: text("taken_at"),
+  /**
    * The version of what their interview holds: a save goes up by one, and
    * so does a delete or a new start, so no copy from before either ever
    * matches again. A save from a copy of another version is refused.

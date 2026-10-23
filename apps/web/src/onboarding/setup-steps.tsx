@@ -10,17 +10,16 @@ import type {
   PlacesSuite,
 } from "@grasp-os/shared/document-places";
 import {
-  minTalkedShown,
   onboardingPeopleMax,
   onboardingTeamsMax,
   planDays,
 } from "@grasp-os/shared/onboarding";
 import type {
   InterviewLocale,
+  LinkToSend,
   OnboardingView,
   Roster,
   RosterInput,
-  TeamProgress,
 } from "@grasp-os/shared/onboarding";
 import type { SetupChoices } from "@grasp-os/shared/onboarding-choices";
 import { documentErrors } from "@grasp-os/shared/onboarding-documents";
@@ -33,12 +32,6 @@ import {
   AlertTitle,
 } from "@grasp-os/ui/components/alert";
 import { Button } from "@grasp-os/ui/components/button";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@grasp-os/ui/components/popover";
-import { Progress } from "@grasp-os/ui/components/progress";
 import {
   Select,
   SelectContent,
@@ -56,7 +49,6 @@ import { useLingui } from "@lingui/react/macro";
 import { useNavigate, useRouter, useSearch } from "@tanstack/react-router";
 import {
   CheckIcon,
-  ChevronDownIcon,
   CopyIcon,
   InfoIcon,
   PenLineIcon,
@@ -69,7 +61,7 @@ import { z } from "zod";
 import type { BrainScene } from "../brain/dot-brain.tsx";
 import { CoreTimeoutError } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
-import { formatDate, formatList } from "../format.ts";
+import { formatList } from "../format.ts";
 import { isLocale, localeNames } from "../i18n.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
@@ -83,6 +75,7 @@ import {
 } from "./connect-steps.tsx";
 import { DocumentDrop } from "./document-drop.tsx";
 import type { DocumentRow } from "./document-drop.tsx";
+import { InterviewsProgress } from "./interviews-progress.tsx";
 import { LanguageChoice } from "./language-choice.tsx";
 import { PlacePicker } from "./place-picker.tsx";
 import type { PickedFile } from "./place-picker.tsx";
@@ -96,7 +89,6 @@ import {
   Cramped,
   evenVoice,
   Explained,
-  Figure,
   Heading,
   Later,
   LaterLink,
@@ -109,13 +101,7 @@ import {
   useSayFollowing,
 } from "./setup-parts.tsx";
 import type { Answer, StepVoice } from "./setup-parts.tsx";
-import {
-  closesOn,
-  openItems,
-  stepIndex,
-  steps,
-  teamNumbersOf,
-} from "./setup.ts";
+import { openItems, stepIndex, steps } from "./setup.ts";
 import type { Listening, ReviewItemId, SetupStep } from "./setup.ts";
 import {
   csvRows,
@@ -144,6 +130,8 @@ export interface SetupData {
   /** The organization's name, as the message to the team is addressed; null when it has none. */
   company: string | null;
   view: OnboardingView;
+  /** Everyone's own link to send, once it is out. */
+  links: LinkToSend[];
   documents: OnboardingDocument[];
   gate: GateView;
   /** The directory connected for the onboarding; null before one is. */
@@ -180,8 +168,6 @@ export interface StepProps {
   onStory: (scene: BrainScene | null) => void;
 }
 
-const firstName = (name: string): string => name.split(" ")[0] ?? name;
-
 /** How Stephen names each suite's sign-in. Product names: not translated. */
 const suiteNames: Record<DirectorySuite, string> = {
   microsoft: "Microsoft",
@@ -193,9 +179,6 @@ const suiteLogos: Record<DirectorySuite, string> = {
   microsoft: "/logos/microsoft.svg",
   google: "/logos/google.svg",
 };
-
-/** A date as the page's language writes it, from an ISO day. */
-const formatDay = (day: string): string => formatDate(`${day}T12:00:00Z`);
 
 /** Hands the reader a CSV file to save, made in the browser. */
 const downloadCsv = (content: string, filename: string): void => {
@@ -1687,84 +1670,10 @@ const Mail = ({ data, settled, onSettle }: StepProps) => (
   />
 );
 
-/** The one team far behind, named with the lead whose word usually helps. */
-const QuietTeam = ({ team, lead }: { team: string; lead: string }) => {
-  const { t } = useLingui();
-  return (
-    <p className="text-muted-foreground">
-      {t`${team} has been quiet so far. A short message from ${lead}, their lead, usually helps. I’ll remind everyone once myself.`}
-    </p>
-  );
-};
-
 /**
- * What keeps the links from going out, before anything else on the step:
- * Grasp's staff paused the interviews (in the words of their own switch),
- * or the agreements are not in place yet.
- */
-const Waiting = ({ paused, agreed }: { paused: boolean; agreed: boolean }) => {
-  const { t } = useLingui();
-  return (
-    <>
-      {paused ? (
-        <Callout
-          text={t`Paused: no link opens and none goes out. The links that are due go out once they run again.`}
-        />
-      ) : null}
-      {agreed ? null : (
-        <Callout
-          text={t`Grasp is still putting the agreements in place. Your people’s links go out once that is done.`}
-        />
-      )}
-    </>
-  );
-};
-
-/**
- * One team's row of how far it is: how many talked of how many were
- * asked; while too few talked, how many were asked and whether the lead
- * talked; while too few were asked, only whether the lead talked.
- */
-const TeamRow = ({ team }: { team: TeamProgress }) => {
-  const { t } = useLingui();
-  const numbers = teamNumbersOf(team);
-  const least = minTalkedShown;
-  let count = t`Under 5`;
-  if (numbers.shown === "both") {
-    const { talked, asked: of } = numbers;
-    count = t`${talked} of ${of}`;
-  } else if (numbers.shown === "asked") {
-    const { asked: of } = numbers;
-    count = t`Fewer than ${least} of ${of}`;
-  }
-  return (
-    <div className="setup-team-row grid items-center gap-3 py-1.5">
-      <span className="truncate">{team.name}</span>
-      {numbers.shown === "both" ? (
-        <Progress
-          aria-label={team.name}
-          value={
-            numbers.asked === 0
-              ? 0
-              : Math.round((numbers.talked / numbers.asked) * 100)
-          }
-        />
-      ) : (
-        <span className="text-muted-foreground text-xs">
-          {team.leadTalked ? t`Lead talked` : t`Lead not yet`}
-        </span>
-      )}
-      <span className="text-muted-foreground text-right tabular-nums">
-        {count}
-      </span>
-    </div>
-  );
-};
-
-/**
- * The weeks Stephen talks to the team: how far the days are, three
- * numbers, and the team that needs a word from its lead. Numbers per team
- * only for teams of five or more, and never who talked or what anyone said.
+ * The weeks Stephen talks to the team: where the interviews stand
+ * (interviews-progress.tsx), said as it turns up, and the way on once he
+ * has heard enough.
  */
 const ListeningStep = (props: StepProps) => {
   const { t } = useLingui();
@@ -1772,40 +1681,7 @@ const ListeningStep = (props: StepProps) => {
   const lines = useHeadlines(props).listening;
   // oxlint-disable-next-line react/hook-use-state -- read once as the step arrives, never set
   const [mailShown] = useState(() => !props.settled.includes("mail"));
-  const { plan, progress, roster, agreed, paused } = data.view;
-  const closes = plan === null ? "" : formatDay(closesOn(plan));
-  const { days } = listening;
-  const day = Math.max(
-    listening.day,
-    plan !== null && plan.start <= today ? 1 : 0
-  );
-  const teams = progress?.teams.filter((team) => !team.off) ?? [];
-  // Once the others are well under way, a team of five or more far behind is named, with the lead who can help.
-  const quiet =
-    listening.progress > 0.35
-      ? teams.find((team) => {
-          const lead = roster?.teams.find((each) => each.id === team.id)?.lead;
-          return (
-            lead !== null &&
-            lead !== undefined &&
-            team.asked !== null &&
-            team.asked > 0 &&
-            (team.talked ?? 0) / team.asked < 0.35
-          );
-        })
-      : undefined;
-  const quietLead =
-    quiet === undefined
-      ? ""
-      : (roster?.people.find(
-          (person) =>
-            person.id ===
-            roster.teams.find((each) => each.id === quiet.id)?.lead
-        )?.name ?? "");
   const gateOpen = percent >= data.gate.threshold;
-  const leads = progress?.leads ?? 0;
-  const { leadsHeard } = listening;
-  const starts = plan === null ? "" : formatDay(plan.start);
   return (
     <>
       <Heading
@@ -1813,71 +1689,16 @@ const ListeningStep = (props: StepProps) => {
         title={lines.title}
         voice={lines.voice}
       />
-      <div className="flex w-full flex-col gap-4 text-left">
-        <Waiting agreed={agreed} paused={paused} />
+      <InterviewsProgress
+        links={data.links}
+        listening={listening}
+        spoken
+        today={today}
+        view={data.view}
+      >
         {/* Before the links go out, until it's done: the admin's mail filter lets Grasp's mail through. Settled here, it stays to say so until they leave. */}
         {mailShown ? <Mail {...props} /> : null}
-        <div className="flex flex-col gap-2">
-          <div className="flex gap-1">
-            {Array.from({ length: days }, (_, index) => (
-              <span
-                className={
-                  index < day
-                    ? "bg-foreground h-1.5 flex-1 rounded-full transition-colors duration-500"
-                    : "bg-border h-1.5 flex-1 rounded-full transition-colors duration-500"
-                }
-                key={index}
-              />
-            ))}
-          </div>
-          <div className="text-muted-foreground flex justify-between">
-            <span>
-              {plan !== null && plan.start > today
-                ? t`Starts ${starts}`
-                : t`Day ${day} of ${days}`}
-            </span>
-            {closes === "" ? null : <span>{t`Closes ${closes}`}</span>}
-          </div>
-        </div>
-        <div className="grid grid-cols-3 gap-2.5">
-          <Figure
-            label={t`team leads talked`}
-            value={t`${leadsHeard} of ${leads}`}
-          />
-          <Figure
-            label={t`colleagues talked`}
-            value={String(listening.colleaguesHeard)}
-          />
-          {/* Core draws no work from the interviews yet: unknown stays unknown, never 0. */}
-          <Figure label={t`pieces of work found`} value="–" />
-        </div>
-        <div className="flex items-start gap-3">
-          <div className="min-w-0 flex-1">
-            {quiet === undefined ? null : (
-              <QuietTeam lead={firstName(quietLead)} team={quiet.name} />
-            )}
-          </div>
-          <Popover>
-            <PopoverTrigger
-              render={
-                <Button className="-my-1 flex-none" size="sm" variant="ghost" />
-              }
-            >
-              {t`By team`}
-              <ChevronDownIcon data-icon="inline-end" />
-            </PopoverTrigger>
-            <PopoverContent align="end" className="w-96">
-              {/* One list, close together: the content's own room is between its parts. */}
-              <div className="flex flex-col">
-                {teams.map((team) => (
-                  <TeamRow key={team.id} team={team} />
-                ))}
-                <p className="text-muted-foreground pt-2 text-xs">{t`Teams under five people show only whether their lead talked, so nobody can be singled out.`}</p>
-              </div>
-            </PopoverContent>
-          </Popover>
-        </div>
-      </div>
+      </InterviewsProgress>
       {gateOpen ? (
         <div className="animate-in fade-in slide-in-from-bottom-2 flex w-full flex-col gap-3 duration-400">
           <Callout
