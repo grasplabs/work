@@ -767,6 +767,8 @@ describe("the Microsoft 365 connector's calendar writes", () => {
       { requiredAttendees: ["guest@example.org"] },
       { start: "2026-10-26T14:00:00Z" },
       { start: "2026-10-26T14:00+01:00" },
+      // A day that doesn't exist, which Date.parse would move on.
+      { start: "2026-02-30T10:00" },
       { timeZone: "Mars/Olympus_Mons" },
       { timeZone: 'UTC", outlook.body-content-type="html' },
       { end: "2026-10-26T13:00" },
@@ -784,7 +786,7 @@ describe("the Microsoft 365 connector's calendar writes", () => {
     expect(refusals).toStrictEqual([
       "connect.resource_out_of_scope",
       "connect.resource_out_of_scope",
-      ...Array.from({ length: 5 }, () => "connect.action_failed"),
+      ...Array.from({ length: 6 }, () => "connect.action_failed"),
     ]);
     expect(graph.sent).toStrictEqual([]);
   });

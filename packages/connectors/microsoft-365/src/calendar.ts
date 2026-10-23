@@ -238,6 +238,25 @@ const getEvent = defineTool({
   },
 });
 
+const minutesOnly = "2026-10-26T14:30".length;
+
+/** The same time with its seconds, so that two compare as strings. */
+const withSeconds = (time: string): string =>
+  time.length === minutesOnly ? `${time}:00` : time;
+
+/**
+ * Whether `time` names a day and time that exist: `Date.parse` moves
+ * 30 February on to 2 March, and 24:00 on to the next day, so the time it
+ * read must read back the same.
+ */
+const isRealTime = (time: string): boolean => {
+  const parsed = Date.parse(`${time}Z`);
+  return (
+    !Number.isNaN(parsed) &&
+    new Date(parsed).toISOString().startsWith(withSeconds(time))
+  );
+};
+
 /**
  * A wall-clock time without an offset, `2026-10-26T14:30`, or with
  * seconds: read in the call's time zone, as the person confirming it reads
@@ -246,15 +265,7 @@ const getEvent = defineTool({
 const localTimeSchema = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?$/u)
-  .refine((time) => !Number.isNaN(Date.parse(`${time}Z`)), {
-    message: "Not a time",
-  });
-
-const minutesOnly = "2026-10-26T14:30".length;
-
-/** The same time with its seconds, so that two compare as strings. */
-const withSeconds = (time: string): string =>
-  time.length === minutesOnly ? `${time}:00` : time;
+  .refine(isRealTime, { message: "Not a time" });
 
 /** Whether the runtime knows `timeZone`. */
 const isTimeZone = (timeZone: string): boolean => {
