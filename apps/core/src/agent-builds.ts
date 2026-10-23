@@ -534,7 +534,7 @@ export const checkFiles = async (
       files,
       bindings: await appBindingKinds(env, app),
     },
-    signal
+    { profile: "preview", signal }
   );
   signal?.throwIfAborted();
   const builds = {

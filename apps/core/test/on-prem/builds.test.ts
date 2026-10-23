@@ -328,19 +328,23 @@ describe("the App compiler on-prem", () => {
     // Fresh, so nothing is read from the cache: three compiles at once,
     // where the App's part of the share is one place.
     const fresh = crypto.randomUUID();
-    const saved = await buildOnSave(onPrem, {
-      app: appIdSchema.parse("app-on-prem-save"),
-      version: 1,
-      files: {
-        ...screen(`// ${fresh}`),
-        "app/server.ts": `${v1Server}\n// ${fresh}\n`,
-        ...workflowFiles(
-          "single",
-          `  return await step.do("only", { description: "${fresh}" }, async () => "done");`
-        ),
+    const saved = await buildOnSave(
+      onPrem,
+      {
+        app: appIdSchema.parse("app-on-prem-save"),
+        version: 1,
+        files: {
+          ...screen(`// ${fresh}`),
+          "app/server.ts": `${v1Server}\n// ${fresh}\n`,
+          ...workflowFiles(
+            "single",
+            `  return await step.do("only", { description: "${fresh}" }, async () => "done");`
+          ),
+        },
+        bindings: {},
       },
-      bindings: {},
-    });
+      { profile: "production" }
+    );
 
     expect({
       screens: saved.screens.status,
