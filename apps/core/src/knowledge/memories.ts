@@ -23,7 +23,7 @@ import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { auditedBatch, outboxedWhere } from "../audit-outbox.ts";
+import { outboxedWhere } from "../audit-outbox.ts";
 import {
   brainMemories,
   brainReceipts,
@@ -31,10 +31,12 @@ import {
   documents,
   versions,
 } from "../db/knowledge/schema.ts";
-import { derivedHmacKey } from "../derived-keys.ts";
-import { collectionsAllowed, readerActor } from "./access.ts";
+import { readerActor } from "./access.ts";
 import type { Reader } from "./access.ts";
+import { auditedBatch } from "./audit.ts";
+import { allowedFor } from "./authorize.ts";
 import { sectionCountOf, versionText } from "./documents.ts";
+import { portsOf } from "./ports.ts";
 
 // The Brain's memory commands (GRA-297; the Brain design's "Brain SDK and
 // API" and "Memory model"): `remember`, `receipts.get`, `memories.get`
@@ -106,7 +108,7 @@ const keyed = async (
   purpose: string,
   parts: Json
 ): Promise<string> => {
-  const key = await derivedHmacKey(env, purpose, ["sign"]);
+  const key = await portsOf(env).keys.hmac(purpose, ["sign"]);
   const mac = await crypto.subtle.sign(
     "HMAC",
     key,
@@ -223,7 +225,7 @@ const requireCitable = async (
   const db = drizzle(env.KNOWLEDGE);
   const documentRefs = refs.filter((ref) => ref.kind === "document");
   const memoryRefs = refs.filter((ref) => ref.kind === "memory");
-  const { condition } = await collectionsAllowed(env, db, reader);
+  const allowed = await allowedFor(portsOf(env), reader);
   const citable = await Promise.all([
     ...documentRefs.map(async (ref) => {
       const row = await db
@@ -236,7 +238,7 @@ const requireCitable = async (
             eq(versions.documentId, ref.documentId),
             eq(versions.number, ref.version),
             eq(documents.collectionId, ref.collectionId),
-            condition
+            allowed.documents()
           )
         )
         .get();
@@ -389,7 +391,7 @@ export const remember = async (
     request.text,
     sourceRefs,
   ]);
-  const now = new Date();
+  const now = portsOf(env).clock();
   const kept = await keptReceipt(env, keyHash, now);
   if (kept !== undefined) {
     return replayed(kept, requestHash);
@@ -417,7 +419,7 @@ export const remember = async (
   // without the others, and calls in flight together can't pass the bound.
   let stored: { id: string }[];
   try {
-    [stored] = await auditedBatch(env, db, [
+    [stored] = await auditedBatch(portsOf(env), db, [
       db
         .insert(brainReceipts)
         .select(
@@ -490,7 +492,7 @@ export const receiptsGet = async (
   if (row === undefined) {
     throw brainErrors.create("brain.not_found");
   }
-  if (expired(row.retentionUntil, new Date())) {
+  if (expired(row.retentionUntil, portsOf(env).clock())) {
     throw brainErrors.create("brain.receipt_expired");
   }
   return receiptOf(row);

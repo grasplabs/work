@@ -17,8 +17,8 @@ import { knowledgeErrors, searchMaxLimit } from "@grasp-os/shared/knowledge";
 import { memoryTokens } from "@grasp-os/shared/memory";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 
-import { derivedHmacKey } from "../derived-keys.ts";
 import type { Reader } from "./access.ts";
+import { portsOf } from "./ports.ts";
 import { d1BrainStore } from "./recall-store.ts";
 import type { BrainStore } from "./recall-store.ts";
 import type { FoundSection } from "./search.ts";
@@ -178,7 +178,7 @@ const coverageOf = (timedOut: boolean, truncated: boolean): Coverage => {
  * back, from what a caller knows of its own access.
  */
 const digest = async (env: Env, text: string): Promise<string> => {
-  const key = await derivedHmacKey(env, "grasp-os brain access revision", [
+  const key = await portsOf(env).keys.hmac("grasp-os brain access revision", [
     "sign",
   ]);
   const mac = await crypto.subtle.sign(
@@ -278,7 +278,7 @@ export const recallWithSources = async (
       tokenCount,
       accessRevision,
       indexGeneration,
-      createdAt: new Date().toISOString(),
+      createdAt: portsOf(env).clock().toISOString(),
     };
     return { pack, sources };
   } catch (error) {
