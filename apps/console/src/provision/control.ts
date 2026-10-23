@@ -71,6 +71,11 @@ export const provisionInputSchema = z.object({
   ring: z.int().nonnegative(),
   /** How its people sign in: every deploy makes core's `SIGN_IN` from it. */
   signIn: clientSignInSchema,
+  /**
+   * Its company in Grasp's Attio, when it starts from a deal won there: the
+   * record's id, linked as Details links one (src/crm/link.ts).
+   */
+  attioCompanyId: z.string().trim().toLowerCase().pipe(z.uuid()).optional(),
 });
 export type ProvisionInput = z.infer<typeof provisionInputSchema>;
 
@@ -196,6 +201,9 @@ export const startProvisioning = async (
     detail: {
       account: accountId ?? "new",
       ring: parsed.ring,
+      ...(parsed.attioCompanyId === undefined
+        ? {}
+        : { attioCompany: parsed.attioCompanyId }),
       ...(run === null ? {} : { replaces: run.runId }),
     },
   });
