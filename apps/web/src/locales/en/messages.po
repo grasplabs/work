@@ -5572,6 +5572,10 @@ msgstr "I could not connect where your documents live. Try again with an adminis
 msgid "I could not find the columns. The first row should name them: name, email, team and job."
 msgstr "I could not find the columns. The first row should name them: name, email, team and job."
 
+#: src/interview/words.ts
+msgid "I could not hear that. Say it once more, or type it."
+msgstr "I could not hear that. Say it once more, or type it."
+
 #: src/onboarding/setup-steps.tsx
 msgid "I could not keep it. Try again in a moment."
 msgstr "I could not keep it. Try again in a moment."
@@ -11324,6 +11328,10 @@ msgstr "The memory files, skills and uploads your agents read are in <0>Knowledg
 #: src/onboarding/setup-steps.tsx
 msgid "The message"
 msgstr "The message"
+
+#: src/interview/words.ts
+msgid "The microphone is not available here. Type your answer."
+msgstr "The microphone is not available here. Type your answer."
 
 #: src/engines/store-change-errors.ts
 msgid "The migration {migration} failed on its fixture {fixture} when this version was sealed: {reason}. It runs on no records, so the version can't be made current: fix the migration or its fixture and build the domain again."

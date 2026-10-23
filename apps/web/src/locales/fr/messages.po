@@ -5572,6 +5572,10 @@ msgstr "Je n’ai pas pu connecter l’endroit où se trouvent vos documents. R�
 msgid "I could not find the columns. The first row should name them: name, email, team and job."
 msgstr "Je n’ai pas trouvé les colonnes. La première ligne doit les nommer : nom, e-mail, équipe et poste."
 
+#: src/interview/words.ts
+msgid "I could not hear that. Say it once more, or type it."
+msgstr "Je n’ai pas entendu. Redites-le, ou écrivez-le."
+
 #: src/onboarding/setup-steps.tsx
 msgid "I could not keep it. Try again in a moment."
 msgstr "Je n’ai pas pu l’enregistrer. Réessayez dans un instant."
@@ -11324,6 +11328,10 @@ msgstr "Les fichiers mémoire, les skills et les fichiers importés que lisent v
 #: src/onboarding/setup-steps.tsx
 msgid "The message"
 msgstr "Le message"
+
+#: src/interview/words.ts
+msgid "The microphone is not available here. Type your answer."
+msgstr "Le micro n’est pas disponible ici. Écrivez votre réponse."
 
 #: src/engines/store-change-errors.ts
 msgid "The migration {migration} failed on its fixture {fixture} when this version was sealed: {reason}. It runs on no records, so the version can't be made current: fix the migration or its fixture and build the domain again."

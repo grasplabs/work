@@ -60,8 +60,14 @@ export type Happening =
   | { type: "speak"; at: number; answers?: boolean; readsBack?: boolean }
   /** His line leads to the read-back, known while he says it. */
   | { type: "reads-back"; at: number }
-  /** He is done saying his line and waits for theirs. `asked`: in the read-back, he asked whether it is right. */
-  | { type: "listen"; at: number; asked?: boolean }
+  /**
+   * He is done saying his line and waits for theirs. `asked`: in the
+   * read-back, he asked whether it is right. `nudge`: what they said before
+   * is answered after a silence, if no more comes.
+   */
+  | { type: "listen"; at: number; asked?: boolean; nudge?: boolean }
+  /** What they said is answered without a line of his: they agreed, or he goes on to the read-back. */
+  | { type: "answered"; at: number }
   /** He thinks, not listening: what he wrote down is on its way before the read-back. */
   | { type: "wait"; at: number }
   /** They chose to talk, or to type. */
@@ -462,6 +468,33 @@ const speaks = (
   };
 };
 
+/** He is done saying his line, and listens. */
+const listensAgain = (
+  floor: Floor,
+  { asked, nudge }: Extract<Happening, { type: "listen" }>
+): Step => {
+  const reading = floor.reading && asked !== true;
+  const listens = listening({ ...floor, reading });
+  if (nudge !== true || listens.floor.parts.length === 0) {
+    return listens;
+  }
+  return {
+    floor: listens.floor,
+    acts: [...listens.acts, { type: "after", wait: "nudge", ms: nudgeMs }],
+  };
+};
+
+/** They chose to talk, or to type. */
+const voiced = (floor: Floor, on: boolean): Step => {
+  const next = { ...floor, voice: on };
+  if (!on) {
+    return deafened(next);
+  }
+  return next.doing === "listening"
+    ? listening(next)
+    : { floor: next, acts: [] };
+};
+
 /** What the ear says. */
 type Heard = Extract<
   Happening,
@@ -541,21 +574,17 @@ export const step = (floor: Floor, happening: Happening): Step => {
       return { floor: { ...deaf.floor, reading: true }, acts: deaf.acts };
     }
     case "listen": {
-      const reading = floor.reading && happening.asked !== true;
-      return listening({ ...floor, reading });
+      return listensAgain(floor, happening);
+    }
+    case "answered": {
+      return { floor: { ...floor, parts: [], asking: null }, acts: [] };
     }
     case "wait": {
       const deaf = deafened(floor);
       return { floor: { ...deaf.floor, doing: "thinking" }, acts: deaf.acts };
     }
     case "voice": {
-      const next = { ...floor, voice: happening.on };
-      if (!happening.on) {
-        return deafened(next);
-      }
-      return next.doing === "listening"
-        ? listening(next)
-        : { floor: next, acts: [] };
+      return voiced(floor, happening.on);
     }
     case "typed": {
       return typedIn(floor, happening.text);
