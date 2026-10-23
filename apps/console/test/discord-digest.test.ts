@@ -19,7 +19,8 @@ import { importReleases } from "../src/releases/import.ts";
 import worker from "../src/server.ts";
 import { mockAccess } from "./access.ts";
 import type { AccountState } from "./cloudflare-api-kit.ts";
-import { emptyAdminSnapshot, mockCloudflareApi } from "./cloudflare-api.ts";
+import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
+import { emptyAdminSnapshot } from "./cloudflare-api.ts";
 import { publishRelease } from "./releases.ts";
 import { setStoreSecret, useStoreSecrets } from "./secrets-store.ts";
 

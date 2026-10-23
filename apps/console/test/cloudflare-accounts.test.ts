@@ -10,11 +10,8 @@ import {
   getAccount,
 } from "../src/cloudflare/accounts.ts";
 import { CloudflareApiError, cloudflareApi } from "../src/cloudflare/api.ts";
-import {
-  deployerEmail,
-  mockCloudflareApi,
-  tenantEmail,
-} from "./cloudflare-api.ts";
+import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
+import { deployerEmail, tenantEmail } from "./cloudflare-api.ts";
 
 const token = "test-deployer-token-0123456789";
 const cloudflare = mockCloudflareApi(token);
