@@ -28,6 +28,7 @@ const app = (id: string, pendingVersion: number | null): App => ({
   blueprint: null,
   currentVersion: null,
   pendingVersion,
+  status: "published",
   createdAt: "2026-09-29T00:00:00.000Z",
 });
 

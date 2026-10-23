@@ -61,7 +61,11 @@ import {
 import type { ReleaseStore } from "../releases/import.ts";
 import { holdsClient, stillHolds } from "../runners.ts";
 import type { HeldClient } from "../runners.ts";
-import { currentReleases, incompatibility } from "./compatibility.ts";
+import {
+  appliedSchema,
+  currentReleases,
+  incompatibility,
+} from "./compatibility.ts";
 import {
   checkDeployedConfig,
   clientMailDomain,
@@ -651,9 +655,10 @@ const runPhase = async <T>(
 };
 
 /**
- * Refuses (`release_undeclared`, `release_incompatible`) a release the
- * client can't go to from what its Workers run, switched in the order a
- * deploy makes them live (src/deploy/compatibility.ts).
+ * Refuses (`release_undeclared`, `release_incompatible`,
+ * `schema_incompatible`) a release the client can't go to from what its
+ * Workers run, switched in the order a deploy makes them live, and the
+ * schemas its databases are at (src/deploy/compatibility.ts).
  */
 const assertCompatible = async (
   db: ConsoleDatabase,
@@ -662,7 +667,8 @@ const assertCompatible = async (
   const refused = incompatibility(
     await currentReleases(db, deploy.clientId),
     manifest,
-    appsOf(manifest)
+    appsOf(manifest),
+    await appliedSchema(db, deploy.clientId)
   );
   if (refused !== null) {
     throw new DeployError(refused.code, refused.message);

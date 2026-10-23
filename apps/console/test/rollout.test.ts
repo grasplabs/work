@@ -2621,7 +2621,9 @@ describe("controlling a rollout", () => {
     await using run = await followRollouts();
     const rolloutId = await rollOut(release, { scope: "ring", ring: 0 });
     await run.waitForStatus("complete");
-    await emptyStoreSecret(env.CLIENT_KEY, "CLIENT_KEY");
+    // The router's key: the client key also makes the shared secrets'
+    // fingerprints, which a rollback checks before anything goes back.
+    await emptyStoreSecret(env.ROUTER_KEY, "ROUTER_KEY");
     const warn = vi.spyOn(console, "warn").mockReturnValue();
     await using rollbacks = await followRollbacks();
 
@@ -3052,7 +3054,7 @@ describe("controlling a rollout", () => {
     });
   });
 
-  it("rolls a client back from a secrets rollout to the versions, and so the secrets, it ran before", async () => {
+  it("rolls a client back from a secrets rollout to the versions, and so the secrets, it ran before, only once Secrets Store holds those secrets again", async () => {
     const release = await importedRelease("feat(core): what it runs");
     const internal = await activeClient(0, release);
     await activeClient(1, release);
@@ -3063,9 +3065,35 @@ describe("controlling a rollout", () => {
     await using rollbacks = await followRollbacks();
     const rolloutId = await rollOutSecrets({ scope: "ring", ring: 1 });
     await run.waitForStepResult({ name: "ring 1 approved" });
+    const state = async () => ({
+      live: await liveVersionsOf(internal.clientId, internal.account),
+      recorded: await recordedVersionsOf(internal.clientId),
+      counts: deploymentCounts(internal.account),
+      targets: await targetsOf(rolloutId),
+      rollout: await rolloutRow(rolloutId),
+      runner: await runnerOf(internal.clientId),
+      actions: await rolloutActions(rolloutId),
+    });
+    const rolledOut = await state();
 
+    // The store holds the rotated secret: its previous versions run the
+    // one it replaced, which may be revoked.
+    const refused = await codeOf(
+      rollbackClient(env, staff, rolloutId, internal.clientId)
+    );
+    const untouched = await state();
+    // The rotation is undone: the store holds what they run again.
+    await setStoreSecret(
+      env.MICROSOFT_CLIENT_SECRET,
+      "MICROSOFT_CLIENT_SECRET",
+      "microsoft-secret"
+    );
     await rollbacks.rollBack(rolloutId, internal.clientId);
 
+    expect({ refused, untouched }).toStrictEqual({
+      refused: "shared_secret_replaced",
+      untouched: rolledOut,
+    });
     expect({
       live: await liveVersionsOf(internal.clientId, internal.account),
       microsoft: liveSecretOf(
@@ -3080,6 +3108,99 @@ describe("controlling a rollout", () => {
       microsoft: "microsoft-secret",
       targets: { [internal.clientId]: { status: "rolled_back" } },
       rollout: { status: "cancelled" },
+    });
+  });
+
+  it("refuses a rollback to versions that run a shared secret Secrets Store has replaced since, or that no record shows run the store's, and changes nothing", async () => {
+    const before = await importedRelease("feat(core): ran the old key");
+    const replaced = await activeClient(0, before);
+    const unrecorded = await activeClient(0, before);
+    // Someone made a copy of its connect live by hand: the same secrets,
+    // on a version the console has no fingerprints of.
+    const [connect] = await workersOf(unrecorded.clientId);
+    const script = unrecorded.account.scripts.get(connect?.scriptName ?? "");
+    const live = script?.versions.find(
+      ({ id }) => id === liveOf(unrecorded.account, connect?.scriptName ?? "")
+    );
+    if (script === undefined || live === undefined) {
+      throw new Error("connect isn't live");
+    }
+    const copy = {
+      ...live,
+      id: crypto.randomUUID(),
+      number: script.versions.length + 1,
+    };
+    script.versions.push(copy);
+    script.deployments.unshift({
+      id: crypto.randomUUID(),
+      created_on: new Date().toISOString(),
+      versions: [{ version_id: copy.id, percentage: 100 }],
+      annotations: {},
+    });
+    const release = await importedRelease("feat(core): runs the new key");
+    await using run = await followRollouts();
+    const rolloutId = await rollOut(release, { scope: "ring", ring: 0 });
+    await run.waitForStatus("complete");
+    const both = [replaced, unrecorded];
+    const state = async () => ({
+      live: await Promise.all(
+        both.map(
+          async ({ clientId, account }) =>
+            await liveVersionsOf(clientId, account)
+        )
+      ),
+      recorded: await Promise.all(
+        both.map(async ({ clientId }) => await recordedVersionsOf(clientId))
+      ),
+      counts: both.map(({ account }) => deploymentCounts(account)),
+      targets: await targetsOf(rolloutId),
+      rollout: await rolloutRow(rolloutId),
+      runners: await Promise.all(
+        both.map(async ({ clientId }) => await runnerOf(clientId))
+      ),
+      actions: await rolloutActions(rolloutId),
+    });
+    const rolledOut = await state();
+
+    const unproven = await codeOf(
+      rollbackClient(env, staff, rolloutId, unrecorded.clientId)
+    );
+    // The provider key is replaced in 1Password, and the old one revoked.
+    await rotateMicrosoftSecret();
+    const alone = await codeOf(
+      rollbackClient(env, staff, rolloutId, replaced.clientId)
+    );
+    const ring = await rollbackRing(env, staff, rolloutId, 0);
+    // With a shared secret missing from the store, there's nothing to
+    // compare the versions with.
+    await emptyStoreSecret(
+      env.MICROSOFT_CLIENT_SECRET,
+      "MICROSOFT_CLIENT_SECRET"
+    );
+    const unreadable = await codeOf(
+      rollbackClient(env, staff, rolloutId, replaced.clientId)
+    );
+
+    expect({
+      unproven,
+      alone,
+      ring: ring
+        .map(({ clientId, runId, refused }) => ({ clientId, runId, refused }))
+        .toSorted((a, b) => a.clientId.localeCompare(b.clientId)),
+      unreadable,
+      state: await state(),
+    }).toStrictEqual({
+      unproven: "shared_secret_replaced",
+      alone: "shared_secret_replaced",
+      ring: both
+        .map(({ clientId }) => ({
+          clientId,
+          runId: null,
+          refused: "shared_secret_replaced",
+        }))
+        .toSorted((a, b) => a.clientId.localeCompare(b.clientId)),
+      unreadable: "secrets_store_incomplete",
+      state: rolledOut,
     });
   });
 
@@ -3138,6 +3259,37 @@ describe("controlling a rollout", () => {
       counts,
       runner: null,
     });
+  });
+
+  it("refuses a rollback to a release whose code doesn't run on the database schema the rollout's migrations left", async () => {
+    const before = await importedRelease("feat(core): reads table a", {
+      compatibleFrom: {},
+    });
+    const internal = await activeClient(0, before);
+    const release = await importedRelease(
+      "feat(core): stop reading table a and drop it",
+      {
+        migrations: {
+          "0000_init.sql": "CREATE TABLE a (id TEXT);",
+          "0001_drop_a.sql": "DROP TABLE a;",
+        },
+        compatibleFrom: { "grasp-os-core": 1 },
+      }
+    );
+    await using run = await followRollouts();
+    const rolloutId = await rollOut(release, { scope: "ring", ring: 0 });
+    await run.waitForStatus("complete");
+    const counts = deploymentCounts(internal.account);
+
+    const refused = await codeOf(
+      rollbackClient(env, staff, rolloutId, internal.clientId)
+    );
+
+    expect({
+      refused,
+      counts: deploymentCounts(internal.account),
+      runner: await runnerOf(internal.clientId),
+    }).toStrictEqual({ refused: "schema_incompatible", counts, runner: null });
   });
 
   it("refuses a rollback while the rollout is still preparing the client, with nothing of it live", async () => {

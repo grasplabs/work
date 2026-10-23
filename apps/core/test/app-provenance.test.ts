@@ -5,7 +5,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { mayRead } from "../src/knowledge/access.ts";
-import { outlook, requestGranted } from "./apps.ts";
+import { outlook, published, requestGranted } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { newTeam, readCollection, storedGrant } from "./knowledge.ts";
 import { mailConnection } from "./mail-connection.ts";
@@ -29,6 +29,7 @@ const personApi = async (role: Role): Promise<Person> =>
 
 const newApp = async (owner: Person): Promise<string> => {
   const { id } = await owner.api.apps.create({ name: `Desk ${unique()}` });
+  await published(id);
   return id;
 };
 
@@ -374,7 +375,7 @@ describe("sharing an App", () => {
     });
     await expect(outcome(anna.api.apps.get(app))).resolves.toBe("ok");
 
-    await env.KNOWLEDGE.prepare(
+    await env.DB.prepare(
       "UPDATE collection_teams SET team_id = ? WHERE collection_id = ?"
     )
       .bind(others, collection)

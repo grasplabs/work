@@ -32,10 +32,16 @@ import type {
   Agreements,
   InterviewKind,
   InterviewLocale,
+  LinkToSend,
   OnboardingView,
   Plan,
   Roster,
 } from "@grasp-os/shared/onboarding";
+import {
+  noChoices,
+  setupChoicesSchema,
+} from "@grasp-os/shared/onboarding-choices";
+import type { SetupChoices } from "@grasp-os/shared/onboarding-choices";
 import type {
   DocumentReading,
   OnboardingDocument,
@@ -467,6 +473,9 @@ const waitStepMs = 100;
 const counted = (value: number | undefined): number =>
   typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
 
+/** How many people's links one query marks as taken. */
+const takenPage = 90;
+
 /** How many interviews a snapshot read parses at once. */
 const adminFactsPage = 100;
 
@@ -532,7 +541,19 @@ export class Onboarding extends DurableObject<Env> {
           : progressOf(roster, this.#interviews(), this.#counts(), now),
       agreed: agreementsIn(row.agreements),
       paused: row.pausedAt !== null,
+      sponsor: this.#sponsor(),
     };
+  }
+
+  /** The sponsor's first name, when the kickoff named them: read without its transcript. */
+  #sponsor(): string | null {
+    const [row] = this.#db
+      .select({ reading: kickoff.reading })
+      .from(kickoff)
+      .all();
+    return row === undefined
+      ? null
+      : (storedReadingSchema.parse(JSON.parse(row.reading)).sponsor ?? null);
   }
 
   /**
@@ -1424,6 +1445,79 @@ export class Onboarding extends DurableObject<Env> {
       .all();
   }
 
+  /**
+   * Everyone who takes part, or whose link is out, in the roster's order,
+   * with their link once it is out: for the company's admin to send
+   * themselves. A link is new to them until they take it.
+   */
+  async linksToSend(): Promise<LinkToSend[]> {
+    const roster = this.#roster();
+    if (roster === null) {
+      return [];
+    }
+    const out = new Map(
+      this.#db
+        .select({ person: links.person, takenAt: links.takenAt })
+        .from(links)
+        .all()
+        .map(({ person, takenAt }) => [person, takenAt])
+    );
+    const teamName = new Map(roster.teams.map(({ id, name }) => [id, name]));
+    const listed = roster.people.filter(
+      (person) => takingPart(roster, person) || out.has(person.id)
+    );
+    return await Promise.all(
+      listed.map(async (person) => {
+        const taken = out.get(person.id);
+        return {
+          person: person.id,
+          name: person.name,
+          team: teamName.get(person.team) ?? "",
+          email: person.email,
+          path: taken === undefined ? null : await this.linkOf(person.id),
+          fresh: taken === null,
+        };
+      })
+    );
+  }
+
+  /**
+   * The admin took these people's links to send: those out and new are
+   * new no more. The audit log has how many, never whose. Returns how
+   * many were new.
+   */
+  linksTaken(persons: readonly string[], by: AuditActor): number {
+    if (persons.length === 0) {
+      return 0;
+    }
+    const now = new Date().toISOString();
+    const taken = this.ctx.storage.transactionSync(() => {
+      let count = 0;
+      // A few at a time: a query binds a hundred values at most.
+      for (let at = 0; at < persons.length; at += takenPage) {
+        count += this.#db
+          .update(links)
+          .set({ takenAt: now })
+          .where(
+            and(
+              inArray(links.person, persons.slice(at, at + takenPage)),
+              isNull(links.takenAt)
+            )
+          )
+          .returning({ person: links.person })
+          .all().length;
+      }
+      if (count > 0) {
+        this.#changed(by, "onboarding.links.taken", { count });
+      }
+      return count;
+    });
+    if (taken > 0) {
+      this.#deliverAudit();
+    }
+    return taken;
+  }
+
   /** Counts one model call for the day it ends on. */
   meter(took: Took, at: string = new Date().toISOString()): void {
     const day = at.slice(0, 10);
@@ -1653,6 +1747,41 @@ export class Onboarding extends DurableObject<Env> {
    */
   interviewBrief(): string {
     return interviewBrief(this.#stephen(), this.kickoff());
+  }
+
+  /** What the admin chose about what Grasp may connect. */
+  choices(): SetupChoices {
+    const [row] = this.#db
+      .select({ choices: onboarding.choices })
+      .from(onboarding)
+      .where(eq(onboarding.id, 1))
+      .all();
+    const stored = row?.choices ?? null;
+    return stored === null
+      ? noChoices
+      : setupChoicesSchema.parse(JSON.parse(stored));
+  }
+
+  /**
+   * Keeps what the admin chose. In the log and the audit log by which
+   * places and what of Pulse and the HR platform, never what they typed.
+   */
+  saveChoices(choices: SetupChoices, by: AuditActor): SetupChoices {
+    this.ctx.storage.transactionSync(() => {
+      this.#db
+        .update(onboarding)
+        .set({ choices: JSON.stringify(choices) })
+        .where(eq(onboarding.id, 1))
+        .run();
+      this.#changed(by, "onboarding.choices.saved", {
+        sources: choices.sources.join(" "),
+        asked: choices.sourcesWanted.length,
+        pulse: choices.pulse ?? "",
+        hr: choices.hr?.kind ?? "",
+      });
+    });
+    this.#deliverAudit();
+    return this.choices();
   }
 
   /** The documents the admin shared, the newest first. */
@@ -2111,7 +2240,10 @@ export class Onboarding extends DurableObject<Env> {
   adminFacts(): {
     told: boolean;
     mapped: string[];
-    links: Omit<typeof links.$inferSelect, "keyMark" | "version" | "ledTeam">[];
+    links: Omit<
+      typeof links.$inferSelect,
+      "keyMark" | "version" | "ledTeam" | "takenAt"
+    >[];
     interviews: AdminInterviewFacts[];
   } {
     // Only the counts are kept, read a page of interviews at a time, so a

@@ -857,7 +857,7 @@ export const resolveDependencies = async (
   if (by.staff) {
     throw dependencyErrors.create("dependency.forbidden");
   }
-  await builtSubject(env, by, asked);
+  await builtSubject(env, by, asked, true);
   const limits = packageLimitsOf(env.PACKAGE_LIMITS);
   for (const [name, range] of Object.entries(intent.dependencies)) {
     registryRange(name, range);

@@ -84,8 +84,16 @@ export default defineProject({
           MICROSOFT_CLIENT_SECRET: clients.microsoft.secret,
           MICROSOFT_LANDSCAPE_CLIENT_ID: clients.microsoftLandscape.id,
           MICROSOFT_LANDSCAPE_CLIENT_SECRET: clients.microsoftLandscape.secret,
+          MICROSOFT_DIRECTORY_CLIENT_ID: clients.microsoftDirectory.id,
+          MICROSOFT_DIRECTORY_CLIENT_SECRET: clients.microsoftDirectory.secret,
+          MICROSOFT_DOCUMENTS_CLIENT_ID: clients.microsoftDocuments.id,
+          MICROSOFT_DOCUMENTS_CLIENT_SECRET: clients.microsoftDocuments.secret,
           GOOGLE_CLIENT_ID: clients.google.id,
           GOOGLE_CLIENT_SECRET: clients.google.secret,
+          GOOGLE_DIRECTORY_CLIENT_ID: clients.googleDirectory.id,
+          GOOGLE_DIRECTORY_CLIENT_SECRET: clients.googleDirectory.secret,
+          GOOGLE_DOCUMENTS_CLIENT_ID: clients.googleDocuments.id,
+          GOOGLE_DOCUMENTS_CLIENT_SECRET: clients.googleDocuments.secret,
           // Grasp's apps at the apps, as test/app-provider.ts knows them.
           APP_OAUTH_CLIENTS: JSON.stringify(appClients),
           // Grasp's key for Composio, as test/composio-api.ts checks it.

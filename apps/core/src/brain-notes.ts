@@ -13,7 +13,8 @@ import { alias } from "drizzle-orm/sqlite-core";
 
 import { collections, documents, links } from "./db/knowledge/schema.ts";
 import { noteProvenance } from "./knowledge/access.ts";
-import { allowedFor } from "./knowledge/app-entries.ts";
+import { allowedFor } from "./knowledge/authorize.ts";
+import { portsOf } from "./knowledge/ports.ts";
 
 // Every note in the brain with its links (`brain.notes`), a page at a
 // time, as the person may read them: what core records today, Knowledge
@@ -58,7 +59,7 @@ export const brainNotes = async (
   );
   const reader = { type: "person", person } as const;
   const db = drizzle(env.KNOWLEDGE);
-  const allowed = await allowedFor(env, db, reader);
+  const allowed = await allowedFor(portsOf(env), reader);
   // One more than a page: whether another follows.
   const rows = await db
     .select({

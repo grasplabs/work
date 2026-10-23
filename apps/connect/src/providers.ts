@@ -4,6 +4,10 @@ import {
   oauthProviderSchema,
 } from "@grasp-os/shared/connect";
 import type { OAuthProvider } from "@grasp-os/shared/connect";
+import { directoryProviderSchema } from "@grasp-os/shared/directory";
+import type { DirectoryProvider } from "@grasp-os/shared/directory";
+import { placesProviderSchema } from "@grasp-os/shared/document-places";
+import type { PlacesProvider } from "@grasp-os/shared/document-places";
 import { landscapeProviderSchema } from "@grasp-os/shared/landscape";
 import type { LandscapeProvider } from "@grasp-os/shared/landscape";
 import { log } from "@grasp-os/shared/log";
@@ -91,13 +95,17 @@ export interface OAuthProviderConfig {
    * The access a token must be granted, exactly: tokens granted more than
    * `allowed`, or less than `required`, are refused
    * (`connection.scopes_refused`). For a connection that must hold no
-   * more than it asks for, as the landscape's; none for the rest.
+   * more than it asks for, as the landscape's, the directory's and the
+   * documents'; none for the rest.
    */
   granted?: {
     allowed: ReadonlySet<string>;
     required: readonly string[];
   };
-  /** Only shared connections, never a person's own (the landscape's). */
+  /**
+   * Only shared connections, never a person's own (the landscape's, the
+   * directory's, the documents').
+   */
   sharedOnly?: boolean;
   /** Parameters the authorization request adds to the standard ones. */
   authorizationParams: (tenant: string) => Record<string, string>;
@@ -356,6 +364,177 @@ const google: OAuthProviderConfig = {
   },
 };
 
+/** What the directory's Microsoft connection reads Graph with, and only that. */
+const microsoftDirectoryScopes = [
+  "openid",
+  "profile",
+  "email",
+  "offline_access",
+  "User.Read",
+  // Everyone's department, job title and manager: `User.ReadBasic.All`
+  // holds names and addresses only.
+  "User.Read.All",
+] as const;
+
+/**
+ * The directory's read-only admin connection to Entra (GRA-369), for the
+ * onboarding to know who works where. As the landscape's, it signs in
+ * with an Entra app registration of its own
+ * (`MICROSOFT_DIRECTORY_CLIENT_*`), since Entra puts every scope a person
+ * ever granted an app into each token for it, and a token granted
+ * anything beyond these scopes, or short of the read, is refused.
+ */
+const microsoftDirectory: OAuthProviderConfig = {
+  ...microsoft,
+  id: "microsoft-directory",
+  // No connector: its connection takes no calls, only core's read uses it.
+  server: "microsoft-directory",
+  scopes: microsoftDirectoryScopes,
+  granted: {
+    allowed: new Set(
+      microsoftDirectoryScopes.map((scope) => scope.toLowerCase())
+    ),
+    required: ["User.Read.All"],
+  },
+  sharedOnly: true,
+  client: (env) =>
+    credentials(
+      env.MICROSOFT_DIRECTORY_CLIENT_ID,
+      env.MICROSOFT_DIRECTORY_CLIENT_SECRET
+    ),
+};
+
+/** Google's directory, read-only: its users, and nothing of Gmail or Drive. */
+const googleDirectoryScope =
+  "https://www.googleapis.com/auth/admin.directory.user.readonly";
+
+/**
+ * The directory's read-only admin connection to Google's directory
+ * (GRA-369), through the Admin SDK, which only a Workspace admin's account
+ * reads. It has an OAuth client of its own (`GOOGLE_DIRECTORY_CLIENT_*`):
+ * Google revokes the whole grant of an account and client whichever of
+ * its tokens is revoked, so disconnecting it can never disconnect the
+ * same admin's Gmail. Google names the sign-in scopes by their full URIs
+ * in its answer.
+ */
+const googleDirectory: OAuthProviderConfig = {
+  ...google,
+  id: "google-directory",
+  server: "google-directory",
+  scopes: ["openid", "email", "profile", googleDirectoryScope],
+  granted: {
+    allowed: new Set([
+      "openid",
+      "email",
+      "profile",
+      "https://www.googleapis.com/auth/userinfo.email",
+      "https://www.googleapis.com/auth/userinfo.profile",
+      googleDirectoryScope,
+    ]),
+    required: [googleDirectoryScope],
+  },
+  sharedOnly: true,
+  client: (env) =>
+    credentials(
+      env.GOOGLE_DIRECTORY_CLIENT_ID,
+      env.GOOGLE_DIRECTORY_CLIENT_SECRET
+    ),
+};
+
+/** The directory's connections, by provider. */
+const directoryProviders: Readonly<
+  Record<DirectoryProvider, OAuthProviderConfig>
+> = {
+  "microsoft-directory": microsoftDirectory,
+  "google-directory": googleDirectory,
+};
+
+/** What the documents' Microsoft connection reads with, and only that. */
+const microsoftDocumentsScopes = [
+  "openid",
+  "profile",
+  "email",
+  "offline_access",
+  "User.Read",
+  // The files the admin can open, in OneDrive and SharePoint, read only.
+  "Files.Read.All",
+  // The SharePoint sites they can open, to list them as places.
+  "Sites.Read.All",
+] as const;
+
+/**
+ * The documents' read-only admin connection to SharePoint and OneDrive
+ * (GRA-370), for the onboarding's documents step: the admin picks files
+ * there instead of downloading and dropping them. As the directory's, it
+ * signs in with an Entra app registration of its own
+ * (`MICROSOFT_DOCUMENTS_CLIENT_*`), since Entra puts every scope a person
+ * ever granted an app into each token for it; a token granted anything
+ * beyond these scopes, a write among them, or short of the reads, is
+ * refused. Delegated: it opens what the admin who connected it can open,
+ * and nothing more.
+ */
+const microsoftDocuments: OAuthProviderConfig = {
+  ...microsoft,
+  id: "microsoft-documents",
+  // No connector: its connection takes no calls, only core's reads use it.
+  server: "microsoft-documents",
+  scopes: microsoftDocumentsScopes,
+  granted: {
+    allowed: new Set(
+      microsoftDocumentsScopes.map((scope) => scope.toLowerCase())
+    ),
+    required: ["Files.Read.All", "Sites.Read.All"],
+  },
+  sharedOnly: true,
+  client: (env) =>
+    credentials(
+      env.MICROSOFT_DOCUMENTS_CLIENT_ID,
+      env.MICROSOFT_DOCUMENTS_CLIENT_SECRET
+    ),
+};
+
+/** Google Drive, read-only: its files, and nothing of Gmail or the calendar. */
+const googleDocumentsScope = "https://www.googleapis.com/auth/drive.readonly";
+
+/**
+ * The documents' read-only admin connection to Google Drive (GRA-370). It
+ * has an OAuth client of its own (`GOOGLE_DOCUMENTS_CLIENT_*`), for the
+ * directory's reason: Google revokes the whole grant of an account and
+ * client whichever of its tokens is revoked, so disconnecting it never
+ * disconnects the same admin's Gmail. Google's Picker, which grants only
+ * the files picked (`drive.file`), would need the token in the browser,
+ * and tokens stay in connect; so the folders are listed here, read-only.
+ */
+const googleDocuments: OAuthProviderConfig = {
+  ...google,
+  id: "google-documents",
+  server: "google-documents",
+  scopes: ["openid", "email", "profile", googleDocumentsScope],
+  granted: {
+    allowed: new Set([
+      "openid",
+      "email",
+      "profile",
+      "https://www.googleapis.com/auth/userinfo.email",
+      "https://www.googleapis.com/auth/userinfo.profile",
+      googleDocumentsScope,
+    ]),
+    required: [googleDocumentsScope],
+  },
+  sharedOnly: true,
+  client: (env) =>
+    credentials(
+      env.GOOGLE_DOCUMENTS_CLIENT_ID,
+      env.GOOGLE_DOCUMENTS_CLIENT_SECRET
+    ),
+};
+
+/** The documents' connections, by provider. */
+const placesProviders: Readonly<Record<PlacesProvider, OAuthProviderConfig>> = {
+  "microsoft-documents": microsoftDocuments,
+  "google-documents": googleDocuments,
+};
+
 /** The suites, by provider. */
 export const providers: Readonly<Record<OAuthProvider, OAuthProviderConfig>> = {
   microsoft,
@@ -456,7 +635,10 @@ const appProvider = ({
   };
 };
 
-/** The provider `id` names: a suite, the landscape's, or an app of this release. */
+/**
+ * The provider `id` names: a suite, the landscape's, the directory's, the
+ * documents', or an app of this release.
+ */
 export const providerFor = (id: string): ProviderConfig | undefined => {
   const suite = oauthProviderSchema.safeParse(id);
   if (suite.success) {
@@ -465,6 +647,14 @@ export const providerFor = (id: string): ProviderConfig | undefined => {
   const landscape = landscapeProviderSchema.safeParse(id);
   if (landscape.success) {
     return landscapeProviders[landscape.data];
+  }
+  const directory = directoryProviderSchema.safeParse(id);
+  if (directory.success) {
+    return directoryProviders[directory.data];
+  }
+  const places = placesProviderSchema.safeParse(id);
+  if (places.success) {
+    return placesProviders[places.data];
   }
   const record = appProviderSchema.safeParse(id).success
     ? appRecord(id)

@@ -137,12 +137,16 @@ const screenOf = async (person: Person, app: string) => {
   return { lease, channel, raw };
 };
 
-/** A builder's App declaring links, current and approved, open in their screen. */
+/**
+ * A builder's App declaring links, current, approved and published (a
+ * draft is its builders' alone), open in their screen.
+ */
 const openedApp = async (files = linkedFiles()) => {
   const builder = await personApi("builder");
   const admin = await personApi("admin");
   const { id } = await builder.api.apps.create({ name: "Notes" });
   const version = await released(builder, admin, id, files);
+  await builder.api.apps.publish(id);
   return {
     app: id,
     version,

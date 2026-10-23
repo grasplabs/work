@@ -88,7 +88,7 @@ const holdersOf = (
  * The shared-secret fingerprints client `clientId`'s deploys recorded for
  * `app`'s version `version`, by name; null when none are on record.
  */
-const recordedShared = async (
+export const recordedShared = async (
   db: ConsoleDatabase,
   clientId: string,
   app: string,

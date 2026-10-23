@@ -14,7 +14,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { loadRelease } from "../src/app-releases.ts";
-import { pastAccessRecheck } from "./apps.ts";
+import { pastAccessRecheck, published } from "./apps.ts";
 import { approvalApp } from "./decisions.ts";
 import { mockIdp } from "./idp.ts";
 import { apiOf, notesFiles } from "./notes-client-app.ts";
@@ -66,6 +66,7 @@ const approvedApp = async (
   files: Record<string, string>
 ) => {
   const { id } = await builder.api.apps.create({ name: "Notes" });
+  await published(id);
   const { version } = await builder.api.apps.files.commit(id, files, "First");
   await builder.api.apps.versions.setCurrent(id, version);
   await approveCurrent(admin, id);

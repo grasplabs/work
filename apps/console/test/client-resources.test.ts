@@ -1,8 +1,14 @@
+import { releaseManifestSchema } from "@grasp-os/shared/release";
 import type { ReleaseManifest } from "@grasp-os/shared/release";
+import { env } from "cloudflare:workers";
+import { and, desc, eq } from "drizzle-orm";
 import { describe, expect, it } from "vite-plus/test";
 
+import golden from "../../../scripts/release/testdata/golden-manifest.json" with { type: "json" };
+import { auditEvents } from "../src/db/schema.ts";
 import {
   allocateClientResources,
+  capabilityEvidence,
   clientInventory,
   InventoryError,
   placeClient,
@@ -13,7 +19,10 @@ import {
 import type {
   ClientPlacement,
   ClientResource,
+  DestinationInput,
 } from "../src/hosting/inventory.ts";
+import type { Evidence } from "../src/hosting/policy.ts";
+import { importReleases } from "../src/releases/import.ts";
 import {
   client,
   db,
@@ -24,6 +33,45 @@ import {
   staff,
   verified,
 } from "./hosting.ts";
+import { publishRelease } from "./releases.ts";
+
+/** A release CI published and the console imported: one evidence can name. */
+const importedRelease = async () => {
+  const { manifest } = await publishRelease({ notes: "feat(core): verify" });
+  await importReleases(env.RELEASES, db);
+  return manifest;
+};
+
+/**
+ * Saves a new destination of `kind` whose evidence names `subject`: the
+ * code it's refused with, if it is, and whether its evidence was kept.
+ */
+const save = async (
+  subject: Evidence["subject"],
+  kind: DestinationInput["kind"] = "workers_for_platforms"
+) => {
+  const id = `eu-subject-${crypto.randomUUID().slice(0, 8)}`;
+  const refused = await saveDestination(db, staff, {
+    id,
+    kind,
+    accountId: null,
+    namespace: null,
+    policies: ["eu-storage"],
+    capabilities: verified({}, { ...evidence, subject }),
+  }).then(
+    () => null,
+    (error: unknown) => (error instanceof InventoryError ? error.code : error)
+  );
+  const kept = await capabilityEvidence(db, id);
+  return { error: refused, kept: kept.length > 0 };
+};
+
+/**
+ * The manifest the release build makes of the real wrangler.jsonc of core
+ * and connect: every binding they declare. Its golden test
+ * (scripts/release/manifest-lib.test.ts) keeps it the configs' own.
+ */
+const realRelease = releaseManifestSchema.parse(golden);
 
 /** What the provider reports for each database once created: its own uuid. */
 const observeDatabases = async (
@@ -69,6 +117,45 @@ const bindingOf = (
   worker: ReturnType<typeof renderClientWorker> | undefined,
   name: string
 ) => worker?.bindings.find((binding) => binding.name === name);
+
+/**
+ * The resource rendered `binding` of `worker` names: a database's id, a
+ * bucket's or script's name, a class within the Worker's own script.
+ * Undefined for a binding that names none.
+ */
+const boundTo = (
+  worker: ReturnType<typeof renderClientWorker>,
+  binding: Record<string, unknown>
+): string | undefined => {
+  switch (binding.type) {
+    case "d1": {
+      return String(binding.id);
+    }
+    case "r2_bucket": {
+      return String(binding.bucket_name);
+    }
+    case "service": {
+      return String(binding.service);
+    }
+    case "durable_object_namespace": {
+      return `${worker.scriptName}:${String(binding.class_name)}`;
+    }
+    default: {
+      return undefined;
+    }
+  }
+};
+
+/** Every string anywhere in `value`. */
+const stringsIn = (value: unknown): string[] => {
+  if (typeof value === "string") {
+    return [value];
+  }
+  if (typeof value === "object" && value !== null) {
+    return Object.values(value).flatMap(stringsIn);
+  }
+  return [];
+};
 
 /** The code `render` throws, or null when it doesn't. */
 const codeOf = (render: () => unknown): string | null => {
@@ -132,6 +219,113 @@ describe("placing a client", () => {
         },
       })
     ).rejects.toThrow("evidence");
+  });
+
+  it("doesn't take evidence about anything the console can't check", async () => {
+    const imported = await importedRelease();
+    await expect(
+      Promise.all([
+        save({ kind: "release", id: imported.releaseId }),
+        save({ kind: "source", id: imported.commit }),
+        save({ kind: "profile", id: "cloudflare" }),
+        save({ kind: "profile", id: "workerd" }, "workerd"),
+      ])
+    ).resolves.toStrictEqual(
+      Array.from({ length: 4 }, () => ({ error: null, kept: true }))
+    );
+    await expect(
+      Promise.all([
+        save({ kind: "release", id: "r000000001-abcdef0" }),
+        save({ kind: "source", id: "0".repeat(40) }),
+        save({ kind: "candidate", id: imported.releaseId }),
+        save({ kind: "profile", id: "workerd" }),
+        save({ kind: "profile", id: "cloudflare" }, "workerd"),
+      ])
+    ).resolves.toStrictEqual(
+      Array.from({ length: 5 }, () => ({
+        error: "evidence_subject_unknown",
+        kept: false,
+      }))
+    );
+  });
+
+  it("keeps the evidence of every save, and audits what each names", async () => {
+    const { releaseId } = await importedRelease();
+    const destinationId = await destination();
+    const observed: Evidence = {
+      ...evidence,
+      subject: { kind: "release", id: releaseId },
+      observedAt: "2026-10-21T09:00:00.000Z",
+      record: "https://ci.grasp.test/runs/42?token=not-for-the-log#step-3",
+    };
+    await saveDestination(db, staff, {
+      id: destinationId,
+      kind: "workers_for_platforms",
+      accountId: null,
+      namespace: "production",
+      policies: ["eu-storage"],
+      capabilities: verified({ "logs.payload_free": "unknown" }, observed),
+    });
+
+    const history = await capabilityEvidence(db, destinationId);
+    const declared = history.filter(
+      ({ capability }) => capability === "logs.payload_free"
+    );
+    expect(
+      declared.map(
+        ({ status, subjectKind, subjectId, record, declaredBy }) => ({
+          status,
+          subject: subjectKind === null ? null : `${subjectKind}:${subjectId}`,
+          record,
+          declaredBy,
+        })
+      )
+    ).toStrictEqual([
+      {
+        status: "verified",
+        subject: "profile:cloudflare",
+        record: evidence.record,
+        declaredBy: staff.email,
+      },
+      {
+        status: "unknown",
+        subject: null,
+        record: null,
+        declaredBy: staff.email,
+      },
+    ]);
+    expect(
+      history.findLast(({ capability }) => capability === "d1.eu_jurisdiction")
+    ).toMatchObject({
+      status: "verified",
+      subjectKind: "release",
+      subjectId: releaseId,
+      record: observed.record,
+      observedAt: new Date(observed.observedAt),
+      recordedBy: observed.recordedBy,
+    });
+
+    const [saved] = await db
+      .select({ actor: auditEvents.actor, detail: auditEvents.detail })
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.action, "destination.save"),
+          eq(auditEvents.target, destinationId)
+        )
+      )
+      .orderBy(desc(auditEvents.at))
+      .limit(1);
+    const detail: unknown = JSON.parse(saved?.detail ?? "{}");
+    expect({ actor: saved?.actor, detail }).toMatchObject({
+      actor: staff.email,
+      detail: {
+        "evidence.d1.eu_jurisdiction": `verified release:${releaseId} https://ci.grasp.test/runs/42`,
+      },
+    });
+    // The unknown capability has no evidence, and the record's token stays out.
+    expect(detail).not.toHaveProperty(["evidence.logs.payload_free"]);
+    expect(saved?.detail).not.toContain("not-for-the-log");
   });
 
   it("happens once, however often it's asked at the same time, and moving is a migration", async () => {
@@ -237,6 +431,77 @@ describe("a client's resources", () => {
       },
     });
     expect(bindingOf(coreB, "DB")?.id).not.toBe(bindingOf(coreA, "DB")?.id);
+  });
+
+  it("are all a client's Workers bind, for every binding the real core and connect declare", async () => {
+    const destinationId = await destination();
+    const a = await placedClient(destinationId);
+    const b = await placedClient(destinationId);
+    const allocate = async (clientId: string) =>
+      await observeDatabases(
+        await allocateClientResources(db, staff, {
+          clientId,
+          manifest: realRelease,
+          operationId: "op",
+        })
+      );
+    const inventoryA = await allocate(a.clientId);
+    const inventoryB = await allocate(b.clientId);
+    expect(inventoryA.map(({ role }) => role)).toStrictEqual(
+      inventoryB.map(({ role }) => role)
+    );
+    expect(
+      physical(inventoryA).filter((name) => physical(inventoryB).includes(name))
+    ).toStrictEqual([]);
+
+    const renderedA = renderAll(realRelease, a.placement, inventoryA);
+    const renderedB = renderAll(realRelease, b.placement, inventoryB);
+    for (const [rendered, inventory] of [
+      [renderedA, inventoryA],
+      [renderedB, inventoryB],
+    ] as const) {
+      // What its Workers are and bind is exactly what it has...
+      expect(
+        new Set(
+          Object.values(rendered).flatMap((worker) => [
+            worker.scriptName,
+            ...worker.bindings.flatMap(
+              (binding) => boundTo(worker, binding) ?? []
+            ),
+          ])
+        )
+      ).toStrictEqual(
+        new Set(
+          inventory.map((row) =>
+            row.kind === "d1_database" ? row.providerId : row.physicalName
+          )
+        )
+      );
+      // ...a binding that names none of it is the release's own, as is...
+      for (const [app, worker] of Object.entries(rendered)) {
+        expect(
+          worker.bindings.filter(
+            (binding) => boundTo(worker, binding) === undefined
+          )
+        ).toStrictEqual(
+          realRelease.workers[app]?.bindings.filter(
+            (binding) => boundTo(worker, binding) === undefined
+          )
+        );
+      }
+      // ...and no placeholder is left.
+      expect(
+        stringsIn(rendered).filter((value) => value.startsWith("$"))
+      ).toStrictEqual([]);
+    }
+    // Core's and connect's databases are both bound as DB, each its own.
+    expect({
+      core: bindingOf(renderedA.core, "DB")?.id,
+      connect: bindingOf(renderedA.connect, "DB")?.id,
+    }).toStrictEqual({
+      core: nameOf(inventoryA, "d1:grasp-os-core")?.providerId,
+      connect: nameOf(inventoryA, "d1:grasp-os-connect")?.providerId,
+    });
   });
 
   it("are added to for a later release, and a class it deletes stays enumerable", async () => {
@@ -370,6 +635,43 @@ describe("a client's resources", () => {
       })
     ).rejects.toMatchObject({ code: "placement_refused" });
     await expect(clientInventory(db, clientId)).resolves.toStrictEqual([]);
+
+    // Verified again, on the release it was observed against: the latest
+    // evidence is what allocation reads, and what the history ends with.
+    const { releaseId } = await importedRelease();
+    await saveDestination(db, staff, {
+      id: destinationId,
+      kind: "workers_for_platforms",
+      accountId: null,
+      namespace: "production",
+      policies: ["eu-storage"],
+      capabilities: verified(
+        {},
+        { ...evidence, subject: { kind: "release", id: releaseId } }
+      ),
+    });
+    await expect(
+      allocateClientResources(db, staff, {
+        clientId,
+        manifest: await release(),
+        operationId: "op",
+      })
+    ).resolves.not.toStrictEqual([]);
+    const history = await capabilityEvidence(db, destinationId);
+    const latest = new Map(
+      history.map((row) => [
+        row.capability,
+        { status: row.status, subjectId: row.subjectId },
+      ])
+    );
+    expect(latest.get("r2.eu_jurisdiction")).toStrictEqual({
+      status: "verified",
+      subjectId: releaseId,
+    });
+    expect(latest.get("execution.eu_ingress")).toStrictEqual({
+      status: "unknown",
+      subjectId: null,
+    });
   });
 
   it("are refused for a bucket outside the policy's jurisdiction or a class moved by a rename", async () => {
@@ -421,22 +723,22 @@ describe("a client's resources", () => {
 });
 
 describe("rendering a client's Worker", () => {
+  // Two clients in one destination, each with the real release's resources.
   const setUp = async () => {
     const destinationId = await destination();
-    const manifest = await release();
     const a = await placedClient(destinationId);
     const b = await placedClient(destinationId);
     const allocate = async (clientId: string) =>
       await observeDatabases(
         await allocateClientResources(db, staff, {
           clientId,
-          manifest,
+          manifest: realRelease,
           operationId: "op",
         })
       );
-    const { core } = manifest.workers;
+    const { core } = realRelease.workers;
     if (core === undefined) {
-      throw new Error("The test release has no core");
+      throw new Error("The real release has no core");
     }
     return {
       core,
@@ -520,6 +822,38 @@ describe("rendering a client's Worker", () => {
     expect(
       render({ type: "service", name: "OTHER", service: "grasp-os-router" })
     ).toThrow(expect.objectContaining({ code: "resource_missing" }));
+  });
+
+  it("refuses any binding that would take the Durable Objects out of the EU", async () => {
+    const { a } = await setUp();
+    const name = "DURABLE_OBJECT_JURISDICTION";
+    const bindings = [
+      { type: "plain_text", name, text: "none" },
+      { type: "json", name, json: "none" },
+      { type: "secret_text", name, text: "none" },
+      // Not even the EU, nor a kind that carries no value: unset is the EU.
+      { type: "plain_text", name, text: "eu" },
+      { type: "version_metadata", name },
+    ];
+    const workers = Object.values(realRelease.workers);
+    expect(
+      workers.flatMap((worker) =>
+        bindings.map((binding) =>
+          codeOf(() =>
+            renderClientWorker(
+              { ...worker, bindings: [...worker.bindings, binding] },
+              a.placement,
+              a.inventory
+            )
+          )
+        )
+      )
+    ).toStrictEqual(
+      Array.from(
+        { length: workers.length * bindings.length },
+        () => "durable_object_jurisdiction"
+      )
+    );
   });
 
   it("refuses a database the provider hasn't been observed to have", async () => {

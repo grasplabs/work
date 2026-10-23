@@ -3,7 +3,11 @@ import type { AgentProposer, AppExports } from "@grasp-os/shared/apps";
 import { auditRejectReasons } from "@grasp-os/shared/audit";
 import type { DependencySummary } from "@grasp-os/shared/dependencies";
 import type { Json } from "@grasp-os/shared/json";
-import type { DeclaredPermission } from "@grasp-os/shared/permissions";
+import { knowledgeSignalKinds } from "@grasp-os/shared/knowledge-signals";
+import type {
+  BlueprintWorkflow,
+  DeclaredPermission,
+} from "@grasp-os/shared/permissions";
 import { artifactDecisions } from "@grasp-os/shared/screen-trust";
 import { signalKinds } from "@grasp-os/shared/signals";
 import type {
@@ -33,6 +37,23 @@ import {
 } from "drizzle-orm/sqlite-core";
 
 const timestamp = (name: string) => integer(name, { mode: "timestamp_ms" });
+
+/**
+ * The oldest migration whose code still runs on this database's schema,
+ * which each release declares (scripts/release): the console won't put
+ * the code of a release whose newest migration is older on it, by a
+ * rollback or a deploy.
+ *
+ * Migrations expand, then contract in a later release (AGENTS.md), so the
+ * code of the release before keeps working on a new schema, and a
+ * migration that only expands leaves this where it is. One that drops or
+ * renames what older code still uses raises it: to the migration of the
+ * first release whose code no longer used it, or, when the code stopped
+ * in the same release, to that migration's own number.
+ *
+ * 0120 dropped `admission_topics` in the release that stopped using it.
+ */
+export const compatibleFromMigration = 120;
 
 /** A person. Found by their IdP account, never by email alone. */
 export const users = sqliteTable("users", {
@@ -416,6 +437,19 @@ export const apps = sqliteTable("apps", {
   blueprint: text(),
   currentVersion: integer("current_version"),
   pendingVersion: integer("pending_version"),
+  /**
+   * Where it is in its life (app-status.ts): a new App is a draft, open to
+   * its builders alone, until one publishes it.
+   */
+  status: text({ enum: ["draft", "published", "archived"] })
+    .notNull()
+    .default("draft"),
+  /** When its status last changed, and who changed it; null until then. */
+  statusChangedAt: timestamp("status_changed_at"),
+  statusChangedBy: text("status_changed_by", { mode: "json" }).$type<{
+    userId: string;
+    staff: boolean;
+  }>(),
   createdAt: timestamp("created_at").notNull(),
 });
 
@@ -568,6 +602,28 @@ export const blueprints = sqliteTable(
      * each waiting for an admin there.
      */
     permissions: text({ mode: "json" }).$type<DeclaredPermission[]>().notNull(),
+    /**
+     * The independent workflows each App created from it gets (JSON,
+     * `BlueprintWorkflow[]`): a built-in's, from the release; a marked
+     * version ships none.
+     */
+    workflows: text({ mode: "json" })
+      .$type<BlueprintWorkflow[]>()
+      .notNull()
+      .default([]),
+    /**
+     * The code a built-in's release vouches for (`codeIdentity`, apps.ts):
+     * reviewed with the platform, so a copy whose version is exactly this
+     * code gets its screens' builds approved by the release (screen-
+     * builds.ts). Null for a marked version, which vouches for nothing.
+     */
+    attestedCode: text("attested_code"),
+    /**
+     * The compiler and kit (`compilerVersion`) the release vouches for
+     * `attested_code` with: a build with any other is approved by an
+     * admin, as any build. Null for a marked version.
+     */
+    attestedRelease: text("attested_release"),
     /** Who marked it; null for a built-in. */
     markedBy: text("marked_by"),
     /** When it was marked, or last installed changed. */
@@ -577,6 +633,27 @@ export const blueprints = sqliteTable(
     uniqueIndex("blueprints_app_version_idx").on(table.appId, table.version),
   ]
 );
+
+/**
+ * Where an App created from a blueprint came from (src/app-blueprints.ts):
+ * the blueprint, the version of its App a marked one was (null for a
+ * built-in), the tree it was copied from, and that tree's code
+ * (`codeIdentity`), stored under the App as a version's tree is, for an
+ * update to be merged over. Written only in the batch that creates the
+ * App from the blueprint: unlike `apps.blueprint`, a label a creator may
+ * give any App, this is core's record, which the release's vouching for a
+ * built-in's code reads.
+ */
+export const appOrigins = sqliteTable("app_origins", {
+  appId: text("app_id")
+    .primaryKey()
+    .references(() => apps.id),
+  blueprintId: text("blueprint_id").notNull(),
+  blueprintVersion: integer("blueprint_version"),
+  tree: text().notNull(),
+  code: text().notNull(),
+  createdAt: timestamp("created_at").notNull(),
+});
 
 /**
  * Every committed version of an App, never changed or deleted. `tree` is
@@ -593,6 +670,12 @@ export const appVersions = sqliteTable(
     version: integer().notNull(),
     parent: integer(),
     tree: text().notNull(),
+    /**
+     * The hash of the version's code (`codeIdentity`, apps.ts): its files
+     * but AGENTS.md, which agents write and nothing builds or runs. Null
+     * for a version committed before the column, which is no blueprint's.
+     */
+    code: text(),
     files: integer().notNull(),
     authorId: text("author_id").notNull(),
     message: text().notNull(),
@@ -3258,6 +3341,12 @@ export const workflowResourceRuns = sqliteTable(
     parentRunId: text("parent_run_id"),
     rootRunId: text("root_run_id"),
     depth: integer().notNull().default(0),
+    /**
+     * When the archive of the App that started it asked it to stop
+     * (app-status.ts, `stopRunsStartedBy`): asked once, never again by a
+     * later pass while the engine ends it.
+     */
+    stopRequestedAt: timestamp("stop_requested_at"),
   },
   (table) => [
     // A run's children that haven't ended, for its end to stop them.
@@ -3934,3 +4023,196 @@ export const brainGapStates = sqliteTable("brain_gap_states", {
   /** Their name when they answered, as they chose to give it. */
   answeredBy: text("answered_by"),
 });
+
+// Knowledge's host tables: Grasp's own records about Knowledge, kept here
+// and not in Knowledge's database, which holds only the Brain's own
+// (collections, documents, versions, sections, links, payloads, search).
+// They name Knowledge's collections and documents by ID, with no foreign
+// key: no batch holds both databases.
+
+/** The teams that may read a `teams` collection (knowledge/access.ts). */
+export const collectionTeams = sqliteTable(
+  "collection_teams",
+  {
+    /** A collection in Knowledge. */
+    collectionId: text("collection_id").notNull(),
+    teamId: text("team_id").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.collectionId, table.teamId] }),
+    index("collection_teams_team_id_idx").on(table.teamId),
+  ]
+);
+
+/**
+ * Which version of each App its entry in the Apps collection holds
+ * (knowledge/apps-collection.ts): written once the entry is, so it never
+ * names a version the entry doesn't have. An App whose current version
+ * differs, or that has no row, is indexed again.
+ */
+export const appEntries = sqliteTable("app_entries", {
+  appId: text("app_id").primaryKey(),
+  version: integer().notNull(),
+  /**
+   * The SHA-256 of the name and description the entry holds; null for
+   * none read yet, which is indexed again.
+   */
+  described: text(),
+  indexedAt: timestamp("indexed_at").notNull(),
+});
+
+/**
+ * A file uploaded into a collection (knowledge/uploads.ts): its original,
+ * kept in R2 under its hash, and where extracting its text into the
+ * document at `path` stands. Only the person who uploaded it sees it.
+ */
+export const uploads = sqliteTable(
+  "uploads",
+  {
+    id: text().primaryKey(),
+    /** A collection in Knowledge. */
+    collectionId: text("collection_id").notNull(),
+    /** The file's name, and the path of its document. */
+    path: text().notNull(),
+    mediaType: text("media_type").notNull(),
+    /** The file's size. */
+    bytes: integer().notNull(),
+    /** The file's SHA-256, in hex, which R2 checks the original against. */
+    sha256: text().notNull(),
+    uploadedBy: text("uploaded_by").notNull(),
+    /** JSON: the audit log's actor for the person who uploaded it. */
+    actor: text().notNull(),
+    status: text({
+      enum: ["pending", "extracting", "ready", "failed"],
+    }).notNull(),
+    /** The code of the error it failed with. */
+    failure: text(),
+    /** The document and version it was saved as, once ready. */
+    documentId: text("document_id"),
+    version: integer(),
+    createdAt: timestamp("created_at").notNull(),
+    updatedAt: timestamp("updated_at").notNull(),
+  },
+  (table) => [
+    index("uploads_path_idx").on(
+      table.collectionId,
+      table.path,
+      table.createdAt
+    ),
+    index("uploads_original_idx").on(table.collectionId, table.sha256),
+    index("uploads_status_idx").on(table.status, table.updatedAt),
+  ]
+);
+
+/**
+ * Originals to delete from R2 (knowledge/uploads.ts), by key: recorded
+ * with the upload, before its original is stored, and cleared once it is
+ * saved; recorded again by a purge. Deleted by the failure that makes one
+ * unneeded, or by the cron trigger once its upload is gone or failed.
+ */
+export const uploadCleanups = sqliteTable("upload_cleanups", {
+  /** The original's key in R2. */
+  key: text().primaryKey(),
+  /** The upload whose original it is. */
+  uploadId: text("upload_id").notNull(),
+  /**
+   * When its original may have been written, at the latest: the upload's
+   * creation, or 0 for one known to be written already.
+   */
+  createdAt: timestamp("created_at").notNull(),
+});
+
+/**
+ * The daily computations of Knowledge's usage signals
+ * (knowledge/signals.ts), one row per attempt, as
+ * `improvement_signal_computations` has them (src/daily-claims.ts).
+ */
+export const knowledgeSignalComputations = sqliteTable(
+  "knowledge_signal_computations",
+  {
+    id: text().primaryKey(),
+    /** The UTC day it is the computation of, such as `2026-09-29`. */
+    day: text().notNull(),
+    startedAt: timestamp("started_at").notNull(),
+    finishedAt: timestamp("finished_at"),
+  },
+  (table) => [
+    index("knowledge_signal_computations_day_idx").on(table.day),
+    index("knowledge_signal_computations_started_idx").on(
+      table.startedAt,
+      table.id
+    ),
+  ]
+);
+
+/**
+ * The usage signals of a computation: one per kind, collection and subject
+ * (a search's key, or a document's ID), for the collection's owner, with
+ * an ID derived from those three, the same in every computation. Readers
+ * take only the finished computation started last, so a computation's
+ * signals show all at once when it finishes, and never those of one that
+ * doesn't. Written under the computation's ID: one that outlived its lease
+ * and lost its row fails on the foreign key. `evidence` is JSON, IDs and
+ * counts only; `evidence_at` is when its latest evidence was seen (a
+ * question's latest search), null for a document's. Reads check the
+ * collection (and the document) in Knowledge, and so never show a signal
+ * about one that's gone.
+ */
+export const knowledgeSignals = sqliteTable(
+  "knowledge_signals",
+  {
+    computation: text()
+      .notNull()
+      .references(() => knowledgeSignalComputations.id),
+    id: text().notNull(),
+    kind: text({ enum: knowledgeSignalKinds }).notNull(),
+    collectionId: text("collection_id").notNull(),
+    subject: text().notNull(),
+    /** User ID: the collection's owner when it was computed. */
+    owner: text().notNull(),
+    /**
+     * Ranks it within its kind: a question's searches, the days since an
+     * unread document changed. Null for an overdue document, ranked by its
+     * review date as it is when listed.
+     */
+    value: integer(),
+    evidence: text({ mode: "json" }).$type<Json>().notNull(),
+    evidenceAt: timestamp("evidence_at"),
+  },
+  (table) => [
+    primaryKey({ columns: [table.computation, table.id] }),
+    uniqueIndex("knowledge_signals_subject_idx").on(
+      table.computation,
+      table.collectionId,
+      table.kind,
+      table.subject
+    ),
+    index("knowledge_signals_owner_idx").on(
+      table.computation,
+      table.owner,
+      table.kind,
+      table.value,
+      table.id
+    ),
+  ]
+);
+
+/**
+ * Signals an owner dismissed, by kind, collection and subject, so they
+ * outlast the computations: a signal is hidden while it has no evidence
+ * newer than its dismissal. A computation's finish removes those whose
+ * signal it no longer has, or has with newer evidence, so a signal that
+ * went away and came back shows again.
+ */
+export const knowledgeSignalDismissals = sqliteTable(
+  "knowledge_signal_dismissals",
+  {
+    kind: text({ enum: knowledgeSignalKinds }).notNull(),
+    collectionId: text("collection_id").notNull(),
+    subject: text().notNull(),
+    dismissedAt: timestamp("dismissed_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.kind, table.collectionId, table.subject] }),
+  ]
+);

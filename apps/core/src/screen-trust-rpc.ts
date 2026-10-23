@@ -30,7 +30,7 @@ import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { revocationsOf, tellKept } from "./access-revocations.ts";
-import { appFor, screensIn, versionFiles } from "./apps.ts";
+import { appFor, editableApp, screensIn, versionFiles } from "./apps.ts";
 import {
   auditedBatch,
   outboxedEventWhere,
@@ -279,7 +279,7 @@ export const approveScreens = async (
   input: unknown
 ): Promise<ScreenTrustReview> => {
   requireMemberAdmin(by);
-  const found = await appFor(env, by, app, "builder");
+  const found = await editableApp(env, by, app);
   const reviewed = screenErrors.parse(
     "screen.invalid",
     screenApprovalSchema,
@@ -428,7 +428,7 @@ export const classifyOutput = async (
   reviewed: unknown
 ): Promise<OutputClass> => {
   requireMemberAdmin(by);
-  const found = await appFor(env, by, app, "builder");
+  const found = await editableApp(env, by, app);
   const output = screenErrors.parse("screen.invalid", outputClassSchema, input);
   const generation = screenErrors.parse(
     "screen.invalid",

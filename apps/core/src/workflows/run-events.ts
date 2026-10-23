@@ -2,11 +2,16 @@ import { sha256Hex } from "@grasp-os/shared/encoding";
 import { runIdSchema, workflowResourceIdSchema } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
+import { decode } from "@grasp-os/workerflow/codec";
 import { z } from "zod";
 
 import { runEngine } from "./engine.ts";
 import { acceptedEventData, pinnedEventDataOf } from "./event-contracts.ts";
-import { contentType, eventTypeKey } from "./event-envelopes.ts";
+import {
+  contentType,
+  eventTypeKey,
+  storedEventSchema,
+} from "./event-envelopes.ts";
 import type { StoredEvent } from "./event-envelopes.ts";
 import { quotaPolicy } from "./quotas.ts";
 import { callingRunOf, requireCallAuthority } from "./resource-authority.ts";
@@ -48,14 +53,24 @@ import { runOf } from "./resource-runs.ts";
 //   (`workflow.run_ended`).
 // - Another workflow's run. The caller names the workflow and the run:
 //   a run of another workflow is no such run (`workflow.run_unavailable`).
-// - A run's inbox filled without bound. The engine refuses an event past
-//   its count or byte limit, or too large, before it answers; a run past
-//   its lineage's age takes none (`workflow.event_refused`). An event is
-//   never accepted and then dropped.
+// - A run's inbox filled without bound, or by one sender for all the
+//   others. The engine refuses an event past its count or byte limit, or
+//   past its sender's share of them (every delivery names its sender,
+//   from the caller's authority), or too large, before it answers; a run
+//   past its lineage's age takes none (`workflow.event_refused`). An event
+//   is never accepted and then dropped.
 // - The same event delivered twice. Its key is the engine's delivery key:
 //   the same key, type, data and attributes again is the same event,
 //   accepted once, and answered with the same ID; the same key with
-//   another event is refused (`workflow.event_conflict`).
+//   another event is refused (`workflow.event_conflict`). One sent again
+//   once the run took it and ended, or once the authority it was sent on
+//   went, is still the event it was: answered with its ID
+//   (`acceptedEvent`), never refused as if it were lost, and the same key
+//   with another event is a conflict there too. The inbox keeps a key as
+//   long as it keeps its event: a run restarted from an earlier step
+//   forgets the events nothing had taken (@grasp-os/workerflow,
+//   `forgetIn`), and a delivery of one sent again after that is admitted
+//   anew, as the event the restart forgot.
 
 /**
  * The attributes a listen's filter may match an event by, as the engine
@@ -86,6 +101,7 @@ const deliverySchema = z.strictObject({
     .min(1)
     .max(1024)
     .refine((text) => URL.canParse(text), "An absolute URI"),
+  sender: z.string().min(1).max(256),
 });
 
 /** An event a caller admits to a run: everything but what the host mints. */
@@ -106,6 +122,12 @@ export interface RunEventDelivery {
    * sender's input.
    */
   readonly source: string;
+  /**
+   * Who sends it, for its share of the run's inbox: the same for every
+   * delivery of one sender (say, the App and person a screen's send acts
+   * for, whatever release), derived as `source` is, never from the input.
+   */
+  readonly sender: string;
 }
 
 /** An admitted event: its ID, and whether this delivery was the first. */
@@ -113,6 +135,75 @@ export interface AdmittedEvent {
   readonly id: string;
   readonly accepted: boolean;
 }
+
+/** The ID the host mints for an event of `delivery`'s run, binding, source and key. */
+const eventIdOf = async (
+  delivery: Pick<RunEventDelivery, "runId" | "binding" | "source" | "key">
+): Promise<string> => {
+  const digest = await sha256Hex(
+    canonicalJson([
+      delivery.runId,
+      delivery.binding,
+      delivery.source,
+      delivery.key,
+    ])
+  );
+  return `evt_${digest.slice(0, 48)}`;
+};
+
+/** What of a delivery tells it apart from another under its key. */
+type DeliveredAs = Pick<
+  RunEventDelivery,
+  "runId" | "binding" | "source" | "key" | "type" | "data" | "subject"
+>;
+
+/**
+ * The event `delivery` names, if its run's inbox took it already, ended
+ * or not: a delivery sent again after its answer was lost, whatever came
+ * since (the run ended, the authority it was sent on went). The same key
+ * with another type, subject or data is `workflow.event_conflict`, as the
+ * inbox answers a live run. It admits nothing.
+ */
+export const acceptedEvent = async (
+  env: Env,
+  delivery: DeliveredAs
+): Promise<AdmittedEvent | undefined> => {
+  const id = await eventIdOf(delivery);
+  const sent = await runEngine(env).eventOf(delivery.runId, id);
+  if (sent === null) {
+    return undefined;
+  }
+  const stored = storedEventSchema.safeParse(decode(sent.payload));
+  const data = z.json().safeParse(delivery.data);
+  const same =
+    stored.success &&
+    data.success &&
+    sent.type === (await eventTypeKey(delivery.binding, delivery.type)) &&
+    stored.data.type === delivery.type &&
+    stored.data.subject === delivery.subject &&
+    canonicalJson(stored.data.data) === canonicalJson(data.data);
+  if (!same) {
+    throw workflowResourceErrors.create("workflow.event_conflict");
+  }
+  return { id, accepted: false };
+};
+
+/**
+ * `refusal`, unless the run took `delivery` already (`acceptedEvent`):
+ * then that event, its answer lost. For a caller refusing a delivery on
+ * authority of its own, as the inbox does on the run's.
+ */
+export const unlessAccepted = async (
+  env: Env,
+  delivery: DeliveredAs,
+  refusal: unknown
+): Promise<AdmittedEvent> => {
+  const accepted = await acceptedEvent(env, delivery);
+  if (accepted === undefined) {
+    throw refusal;
+  }
+  return accepted;
+};
 
 /**
  * Admits `delivery` to its run's inbox, as the header says: its ID, and
@@ -139,7 +230,11 @@ export const admitRunEvent = async (
   }
   const run = await callingRunOf(env, event.workflowId, event.runId);
   if (run === undefined) {
-    throw workflowResourceErrors.create("workflow.run_ended");
+    return await unlessAccepted(
+      env,
+      event,
+      workflowResourceErrors.create("workflow.run_ended")
+    );
   }
   const binding = run.bindings.get(event.binding);
   const descriptor =
@@ -153,7 +248,11 @@ export const admitRunEvent = async (
     await requireCallAuthority(env, run, binding);
   } catch (error) {
     if (workflowResourceErrors.codeOf(error) === "workflow.call_denied") {
-      throw workflowResourceErrors.create("workflow.event_denied");
+      return await unlessAccepted(
+        env,
+        event,
+        workflowResourceErrors.create("workflow.event_denied")
+      );
     }
     throw error;
   }
@@ -165,10 +264,7 @@ export const admitRunEvent = async (
   if (Date.now() - row.createdAt.getTime() >= policy.limits.workflowAgeMs) {
     throw workflowResourceErrors.create("workflow.event_refused");
   }
-  const digest = await sha256Hex(
-    canonicalJson([event.runId, event.binding, event.source, event.key])
-  );
-  const id = `evt_${digest.slice(0, 48)}`;
+  const id = await eventIdOf(event);
   const stored: StoredEvent = {
     id,
     source: event.source,
@@ -183,6 +279,7 @@ export const admitRunEvent = async (
     // Its ID names the delivery: a sender's key is its own, never another's.
     key: id,
     attributes: attributesOf(stored),
+    sender: event.sender,
   });
   switch (outcome) {
     case "accepted":
@@ -198,6 +295,7 @@ export const admitRunEvent = async (
     case "too_large":
     case "full":
     case "missing": {
+      // Full: the inbox, or its sender's share of it.
       // Missing: the engine has no record of the run yet (its start isn't
       // confirmed); a delivery later may find it.
       throw workflowResourceErrors.create("workflow.event_refused");

@@ -6,22 +6,31 @@
  * another must call the version that one serves: a deploy that stops
  * halfway leaves the client in one of those states. And the release
  * must read every workflow journal, and run every App release, the code
- * it replaces may have left.
+ * it replaces may have left, and its code must run on each database's
+ * schema as the client's migrations left it.
  *
  * A release that declares nothing isn't made live. A Worker still on one
  * is checked only as far as the release that replaces it declares: an
- * undeclared release says nothing to check against.
+ * undeclared release says nothing to check against. Schemas are checked
+ * only between releases that declare them: for a release built before
+ * they did, the old rule holds, migrations only expanding for the release
+ * before, and a rollback going back no further (src/rollout/rollback.ts).
  */
 import type { ReleaseManifest } from "@grasp-os/shared/release";
-import { eq } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, ne, or } from "drizzle-orm";
 
 import type { ConsoleDatabase } from "../db/act.ts";
-import { clientWorkers } from "../db/schema.ts";
+import {
+  clientDeploys,
+  clientProvisions,
+  clientWorkers,
+  releases,
+} from "../db/schema.ts";
 import { importedManifest } from "./release.ts";
 
 /** Why a client can't go to a release: a code, and our own words for it. */
 export interface Incompatibility {
-  code: "release_undeclared" | "release_incompatible";
+  code: "release_undeclared" | "release_incompatible" | "schema_incompatible";
   message: string;
 }
 
@@ -76,16 +85,47 @@ const unreadState = (
   return null;
 };
 
+/** A migration's number as its file name has it: `0016`. */
+const migration = (number: number): string => String(number).padStart(4, "0");
+
+/**
+ * The first database whose schema, as `applied` left it, doesn't run
+ * `target`'s code: one of its migrations raised the oldest schema whose
+ * code runs on it past the one `target` needs.
+ */
+const contractedSchema = (
+  applied: Iterable<ReleaseManifest | null>,
+  target: ReleaseManifest
+): string | null => {
+  const needs = target.compatibility?.databases;
+  if (needs === undefined) {
+    return null;
+  }
+  for (const release of applied) {
+    const left = release?.compatibility?.databases ?? {};
+    for (const [name, { schema, compatibleFrom }] of Object.entries(left)) {
+      const own = needs[name]?.schema;
+      if (own !== undefined && own < compatibleFrom) {
+        return `${target.releaseId} needs ${name} at migration ${migration(own)}, but ${release?.releaseId ?? ""} took it to ${migration(schema)}, which runs code from migration ${migration(compatibleFrom)} on`;
+      }
+    }
+  }
+  return null;
+};
+
 /**
  * Why a client whose Workers run `current` (by app; null where none runs
- * yet) can't switch them to `target` one at a time in `order`, or null
- * when it can. A client that runs `target` everywhere already changes no
- * code, so it always can (a deploy of new secrets or settings).
+ * yet), and whose databases' schemas are as `applied` left them
+ * (`appliedSchema`; null when none is known), can't switch its Workers to
+ * `target` one at a time in `order`, or null when it can. A client that
+ * runs `target` everywhere already changes no code, so it always can (a
+ * deploy of new secrets or settings).
  */
 export const incompatibility = (
   current: ReadonlyMap<string, ReleaseManifest | null>,
   target: ReleaseManifest,
-  order: readonly string[]
+  order: readonly string[],
+  applied: ReleaseManifest | null
 ): Incompatibility | null => {
   if (order.every((app) => current.get(app)?.releaseId === target.releaseId)) {
     return null;
@@ -95,6 +135,15 @@ export const incompatibility = (
       code: "release_undeclared",
       message: `${target.releaseId} declares nothing of what its code works with`,
     };
+  }
+  // The releases the client runs applied their migrations too, so their
+  // schemas count, whatever the client's deploy records say.
+  const contracted = contractedSchema(
+    new Set([applied, ...current.values()]),
+    target
+  );
+  if (contracted !== null) {
+    return { code: "schema_incompatible", message: contracted };
   }
   for (const release of new Set(current.values())) {
     const unread = release === null ? null : unreadState(release, target);
@@ -138,4 +187,44 @@ export const currentReleases = async (
       )
     )
   );
+};
+
+/**
+ * The release whose schemas client `clientId`'s databases are at, as its
+ * records tell: the newest-built release a deploy or its provisioning
+ * may have run the migrations of (one that finished a step before
+ * them); null when none did. Its databases may be at a newer schema than
+ * the release its Workers run, after a rollback. Releases are built from
+ * `main` in order, so a newer one ships every migration an older one
+ * does, and its schemas run code from no older migration.
+ */
+export const appliedSchema = async (
+  db: ConsoleDatabase,
+  clientId: string
+): Promise<ReleaseManifest | null> => {
+  const deployed = db
+    .select({ releaseId: clientDeploys.releaseId })
+    .from(clientDeploys)
+    .where(
+      and(eq(clientDeploys.clientId, clientId), isNotNull(clientDeploys.step))
+    );
+  const provisioned = db
+    .select({ releaseId: clientProvisions.releaseId })
+    .from(clientProvisions)
+    .where(
+      and(
+        eq(clientProvisions.clientId, clientId),
+        isNotNull(clientProvisions.step),
+        ne(clientProvisions.step, "validated")
+      )
+    );
+  const [newest] = await db
+    .select({ id: releases.id })
+    .from(releases)
+    .where(
+      or(inArray(releases.id, deployed), inArray(releases.id, provisioned))
+    )
+    .orderBy(desc(releases.builtAt))
+    .limit(1);
+  return newest === undefined ? null : await importedManifest(db, newest.id);
 };

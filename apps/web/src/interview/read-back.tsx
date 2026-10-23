@@ -1,3 +1,4 @@
+import { interviewerNames } from "@grasp-os/shared/onboarding";
 import { Button } from "@grasp-os/ui/components/button";
 import { Input } from "@grasp-os/ui/components/input";
 import { cn } from "@grasp-os/ui/lib/utils";
@@ -7,11 +8,12 @@ import { XIcon } from "lucide-react";
 import { useRef, useState } from "react";
 
 import { Head, headSizes, useHead } from "./head.tsx";
-import { update, useProgress } from "./kept.ts";
+import { update, useInterviewer, useProgress } from "./kept.ts";
 import { agreeToPart, changeLine, useLoop } from "./loop.ts";
 import type { LoopState } from "./loop.ts";
 import { partAt, withFactsBack, withFactToggled } from "./progress.ts";
-import { SpokenText, useSaid } from "./spoken.tsx";
+import { useSaidIn, voiceLevel } from "./speech.ts";
+import { SpokenText } from "./spoken.tsx";
 
 // The read-back (prototype `interview-talk.tsx`, `ReadBack`): one part at
 // a time, a few lines each, so it is read, checked and agreed to without
@@ -128,14 +130,16 @@ export const ReadBack = ({ room }: { room: number }) => {
   const { t } = useLingui();
   const loop = useLoop();
   const progress = useProgress();
+  const interviewer = useInterviewer();
+  const who = interviewerNames[interviewer];
   const { parts, at, part } = partAt(progress);
   const { body, size } = useHead(room, headSizes.reading);
-  const said = useSaid({
-    line: loop.line,
-    saying: loop.saying,
-    from: loop.from,
-    speaking: loop.doing === "speaking" && loop.telling === null,
-  });
+  const saidIn = useSaidIn(loop.line, loop.from);
+  // What he says lights up as he says it; while he tells the lines, they light up instead.
+  const said =
+    loop.doing === "speaking" && loop.telling === null
+      ? Math.max(loop.from, saidIn)
+      : -1;
   if (part === undefined) {
     return null;
   }
@@ -157,9 +161,11 @@ export const ReadBack = ({ room }: { room: number }) => {
     <div className="flex w-full max-w-xl flex-col items-center gap-6 text-center">
       <Head
         fill={1}
-        label={t`Stephen, reading back.`}
+        label={t`${who}, reading back.`}
         sign={loop.sign}
         size={size}
+        voice={voiceLevel}
+        who={interviewer}
       />
       <div className="flex w-full flex-col items-center gap-5" ref={body}>
         <h1

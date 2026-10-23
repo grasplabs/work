@@ -36,20 +36,49 @@ export { auditOutbox, auditOutboxRejected } from "../core/schema.ts";
 
 const timestamp = (name: string) => integer(name, { mode: "timestamp_ms" });
 
-/** A set of documents with one owner, access rule and source. */
-export const collections = sqliteTable("collections", {
-  id: text().primaryKey(),
-  name: text().notNull(),
-  description: text().notNull(),
-  /** User ID. */
-  owner: text().notNull(),
-  access: text({ enum: ["everyone", "teams", "me", "admins"] }).notNull(),
-  sensitive: integer({ mode: "boolean" }).notNull().default(false),
-  source: text({
-    enum: ["here", "upload", "grasp", "apps"],
-  }).notNull(),
-  createdAt: timestamp("created_at").notNull(),
-});
+/**
+ * The oldest migration whose code still runs on this database's schema,
+ * which each release declares (scripts/release): the console won't put
+ * the code of a release whose newest migration is older on it, by a
+ * rollback or a deploy.
+ *
+ * Migrations expand, then contract in a later release (AGENTS.md), so the
+ * code of the release before keeps working on a new schema, and a
+ * migration that only expands leaves this where it is. One that drops or
+ * renames what older code still uses raises it: to the migration of the
+ * first release whose code no longer used it, or, when the code stopped
+ * in the same release, to that migration's own number.
+ *
+ * 0015 replaced `versions` (each one's text moved to R2) in the release
+ * that stopped writing the old one.
+ */
+export const compatibleFromMigration = 15;
+
+/**
+ * A set of documents with one owner, access rule and source. Indexed by
+ * access and by owner, so listing the collections a reader may read
+ * (knowledge/access.ts) reaches them by index, never the whole table.
+ */
+export const collections = sqliteTable(
+  "collections",
+  {
+    id: text().primaryKey(),
+    name: text().notNull(),
+    description: text().notNull(),
+    /** User ID. */
+    owner: text().notNull(),
+    access: text({ enum: ["everyone", "teams", "me", "admins"] }).notNull(),
+    sensitive: integer({ mode: "boolean" }).notNull().default(false),
+    source: text({
+      enum: ["here", "upload", "grasp", "apps"],
+    }).notNull(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [
+    index("collections_access_idx").on(table.access),
+    index("collections_owner_idx").on(table.owner),
+  ]
+);
 
 /** The teams that may read a `teams` collection. */
 export const collectionTeams = sqliteTable(

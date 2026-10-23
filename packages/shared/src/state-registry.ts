@@ -248,6 +248,7 @@ const coreDb: D1State = {
     ),
     screen_policies: exported(`${core}screen-trust.ts`),
     blueprints: exported(`${core}app-blueprints.ts`),
+    app_origins: exported(`${core}app-blueprints.ts`),
     app_versions: exported(`${core}apps.ts`),
     app_candidates: exported(`${core}app-candidates.ts`),
     app_candidate_reports: exported(`${core}app-candidates.ts`),
@@ -354,6 +355,17 @@ const coreDb: D1State = {
     landscape_staged_people: transient(`${core}landscape.ts`),
     brain_records: exported(`${core}brain-records.ts`, brainPending),
     brain_gap_states: exported(`${core}brain-gaps.ts`),
+    // Knowledge's host tables (src/db/core/schema.ts).
+    collection_teams: exported(`${core}knowledge/collections.ts`),
+    app_entries: cache(`${core}knowledge/apps-collection.ts`),
+    uploads: exported(`${core}knowledge/uploads.ts`, brainPending),
+    upload_cleanups: exported(
+      `${core}knowledge/uploads.ts`,
+      "Deletions still owed, purges' included."
+    ),
+    knowledge_signal_computations: cache(`${core}knowledge/signals.ts`),
+    knowledge_signals: cache(`${core}knowledge/signals.ts`),
+    knowledge_signal_dismissals: exported(`${core}knowledge/signals.ts`),
   },
 };
 

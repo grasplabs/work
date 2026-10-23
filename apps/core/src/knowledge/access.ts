@@ -11,26 +11,25 @@ import { permissionErrors } from "@grasp-os/shared/permissions";
 import type { Authority } from "@grasp-os/shared/permissions";
 import { isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { and, eq, exists, ne, or, sql } from "drizzle-orm";
+import { and, eq, ne, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
 import { keepAuditEvent } from "../audit-outbox.ts";
 import { teamsOf } from "../auth/identity.ts";
+import { collectionTeams } from "../db/core/schema.ts";
 import { inList } from "../db/d1.ts";
-import { collectionTeams, collections } from "../db/knowledge/schema.ts";
+import { collections } from "../db/knowledge/schema.ts";
 import { grantedPermissions } from "../permissions.ts";
 import { restrict } from "../restricted.ts";
 import type { WorkContext } from "../restricted.ts";
 
-// The one place Knowledge decides what may be read. Every query that reads
-// collections puts `allowedCollections` inside its SQL, and every query
-// that reads documents, versions or links puts `allowedFor`'s `documents`
-// (app-entries.ts: these collections, and of the Apps collection only the
-// entries of Apps the reader may open), never as a filter afterwards, so
-// no path (listing, history, backlinks, search) shows more than a read
-// would.
+// The one place core decides what Knowledge may be read by whom: the
+// host side of Knowledge's `authorize` port (app-entries.ts `authorize`
+// adds the Apps collection's entries; authorize.ts puts the answer inside
+// every read's SQL). Core's own reads of Knowledge (uploads, signals,
+// memory, history) use these conditions directly.
 //
 // A person reads a collection for everyone, one of their teams', or one
 // they own. An App or agent reads the collections it has a permission to
@@ -70,34 +69,47 @@ export interface PersonAccess {
   admin: boolean;
 }
 
-/** Collections a person may read, as a condition on `collections`. */
-const readableBy = (
-  db: DrizzleD1Database,
+/**
+ * The collections shared with any of `teamIds`, read now from core's
+ * `collection_teams`.
+ */
+const sharedWith = async (
+  env: Env,
+  teamIds: readonly string[]
+): Promise<string[]> => {
+  if (teamIds.length === 0) {
+    return [];
+  }
+  const rows = await drizzle(env.DB)
+    .selectDistinct({ id: collectionTeams.collectionId })
+    .from(collectionTeams)
+    .where(inList(collectionTeams.teamId, teamIds));
+  return rows.map(({ id }) => id);
+};
+
+/**
+ * Collections a person may read, as a condition on `collections`, with
+ * the collections shared with their teams (`sharedWith`).
+ */
+const readableBy = async (
+  env: Env,
   { userId, teamIds, admin }: PersonAccess
-): SQL =>
-  or(
-    eq(collections.access, "everyone"),
-    admin ? eq(collections.access, "admins") : undefined,
-    // Its owner always, also of a team collection for teams they aren't in;
-    // but one for admins only while they are one: owning it gives nothing.
-    and(eq(collections.owner, userId), ne(collections.access, "admins")),
-    teamIds.length === 0
-      ? undefined
-      : and(
-          eq(collections.access, "teams"),
-          exists(
-            db
-              .select({ one: sql`1` })
-              .from(collectionTeams)
-              .where(
-                and(
-                  eq(collectionTeams.collectionId, collections.id),
-                  inList(collectionTeams.teamId, teamIds)
-                )
-              )
-          )
-        )
-  ) ?? sql`0`;
+): Promise<SQL> => {
+  const shared = await sharedWith(env, teamIds);
+  return (
+    or(
+      eq(collections.access, "everyone"),
+      admin ? eq(collections.access, "admins") : undefined,
+      // Its owner always, also of a team collection for teams they aren't
+      // in; but one for admins only while they are one: owning it gives
+      // nothing.
+      and(eq(collections.owner, userId), ne(collections.access, "admins")),
+      shared.length === 0
+        ? undefined
+        : and(eq(collections.access, "teams"), inList(collections.id, shared))
+    ) ?? sql`0`
+  );
+};
 
 /** A collection as `mayRead` needs it: its access, owner and teams. */
 export interface CollectionAccess {
@@ -188,7 +200,7 @@ export const collectionsAllowed = async (
   if (reader.type === "person") {
     const { userId, teams, role } = reader.person;
     return {
-      condition: readableBy(db, {
+      condition: await readableBy(env, {
         userId,
         teamIds: teams.map(({ id }) => id),
         admin: isAdmin(role),
@@ -213,7 +225,7 @@ export const collectionsAllowed = async (
         ne(collections.access, "me"),
         // Nor one for admins: what the onboarding holds stays with people.
         ne(collections.access, "admins"),
-        readableBy(db, {
+        await readableBy(env, {
           userId: authority.onBehalfOf,
           teamIds: teams.map(({ id }) => id),
           admin: false,
@@ -247,7 +259,7 @@ export const readableForPerson = async (
 ): Promise<SQL> => {
   const teams = await teamsOf(env.DB, userId);
   // Memory is the person's own files and the company's: never admins'.
-  return readableBy(db, {
+  return await readableBy(env, {
     userId,
     teamIds: teams.map(({ id }) => id),
     admin: false,

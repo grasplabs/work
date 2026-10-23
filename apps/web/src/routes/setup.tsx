@@ -1,3 +1,13 @@
+import { oauthProviderSchema } from "@grasp-os/shared/connect";
+import { directorySuiteSchema } from "@grasp-os/shared/directory";
+import type { OnboardingDirectory } from "@grasp-os/shared/directory";
+import type { OnboardingPlaces } from "@grasp-os/shared/document-places";
+import type { LinkToSend, OnboardingView } from "@grasp-os/shared/onboarding";
+import { noChoices } from "@grasp-os/shared/onboarding-choices";
+import type { SetupChoices } from "@grasp-os/shared/onboarding-choices";
+import type { OnboardingDocument } from "@grasp-os/shared/onboarding-documents";
+import type { GateView } from "@grasp-os/shared/onboarding-gate";
+import type { Organization } from "@grasp-os/shared/organization";
 import { isAdmin } from "@grasp-os/shared/roles";
 import { cn } from "@grasp-os/ui/lib/utils";
 import { useLingui } from "@lingui/react/macro";
@@ -35,6 +45,9 @@ import { resumeVoice, stopSpeaking, voiceLevel } from "../voice/voice.ts";
 // arrives (setup-parts.tsx). Admins only: core refuses
 // everyone else, and anyone else is taken home. Grasp's staff have their
 // own side of it at /onboarding.
+
+/** The suites whose directory the company step offers, in order. */
+const directorySuites = directorySuiteSchema.options;
 
 /** How wide the column is by step, and how large the brain: roomier where there is more to read. */
 const layout: Record<SetupStep, { width: string; brain: number }> = {
@@ -280,15 +293,24 @@ const useVoiceBetweenSteps = (step: SetupStep): void => {
   }, [step]);
 };
 
+/** What the steps read of what was loaded, or nothing while it could not be. */
+const readOf = (data: Loaded | null) => ({
+  roster: data?.view.roster ?? null,
+  plan: data?.view.plan ?? null,
+  progress: data?.view.progress ?? null,
+  percent: data?.gate.known ?? 0,
+  parts: data?.gate.parts ?? [],
+  choices: data?.choices ?? noChoices,
+});
+
 const Setup = () => {
   const { t, i18n } = useLingui();
   const navigate = useNavigate();
-  const { identity } = Route.useRouteContext();
+  const { identity, signIn, suites } = Route.useRouteContext();
   const loaded = Route.useLoaderData();
   const { step: asked } = Route.useSearch();
   const data = loaded.state === "ready" ? loaded.data : null;
-  const roster = data?.view.roster ?? null;
-  const plan = data?.view.plan ?? null;
+  const { roster, plan, progress, percent, parts, choices } = readOf(data);
   const stored = readKept(identity.userId).reached;
   // Opened without a step, it goes on where they were.
   const step: SetupStep =
@@ -297,15 +319,15 @@ const Setup = () => {
   const kept = useKept(identity.userId, index);
   const reached = reachedOf(kept.reached, { plan });
   const now = today();
-  const listening = listeningOf(
-    { roster, plan, progress: data?.view.progress ?? null },
-    now
-  );
-  const percent = data?.gate.known ?? 0;
-  const parts = data?.gate.parts ?? [];
+  const listening = listeningOf({ roster, plan, progress }, now);
   // "How this works" tells its story in the brain's figures, so the figure follows the story there.
   const [story, setStory] = useState<BrainScene | null>(null);
-  const told = brainScene(step, { roster, listening, known: percent });
+  const told = brainScene(step, {
+    roster,
+    listening,
+    known: percent,
+    choices,
+  });
   const scene = step === "about" && story !== null ? story : told;
   const go = (next: SetupStep) => {
     void navigate({ to: "/setup", search: { step: next } });
@@ -356,7 +378,7 @@ const Setup = () => {
           >
             <SetupStepBody
               cramped={cramped}
-              data={{ ...data, admin, sendingDomain }}
+              data={{ ...data, admin, sendingDomain, signIn, suites, identity }}
               go={go}
               listening={listening}
               message={kept.message}
@@ -381,11 +403,47 @@ const Setup = () => {
   );
 };
 
+/**
+ * The organization's name, for the message to the team; none when it has
+ * none or core can't say, which leaves the rest of the onboarding as it is.
+ */
+const companyOf = async (
+  organization: () => Promise<Organization>
+): Promise<string | null> => {
+  try {
+    const { name } = await organization();
+    return name.trim() === "" ? null : name;
+  } catch {
+    return null;
+  }
+};
+
+/** What the onboarding reads from core. */
+interface Loaded {
+  view: OnboardingView;
+  /** Everyone's own link to send, once it is out. */
+  links: LinkToSend[];
+  documents: OnboardingDocument[];
+  gate: GateView;
+  choices: SetupChoices;
+  /** The organization's name, as the message to the team is addressed; null when it has none. */
+  company: string | null;
+  directory: OnboardingDirectory | null;
+  places: OnboardingPlaces | null;
+}
+
 export const Route = createFileRoute("/setup")({
-  validateSearch: (search: Record<string, unknown>): { step?: SetupStep } =>
-    isStep(search.step) ? { step: search.step } : {},
+  // `connection`: a connection's flow, started on a step, came back to it.
+  validateSearch: (
+    search: Record<string, unknown>
+  ): { step?: SetupStep; connection?: string } => ({
+    ...(isStep(search.step) && { step: search.step }),
+    ...(typeof search.connection === "string" && {
+      connection: search.connection,
+    }),
+  }),
   beforeLoad: async ({ context: { core }, location }) => {
-    const { connected, identity } = await loadCoreStatus(core);
+    const { connected, identity, signInOptions } = await loadCoreStatus(core);
     if (!connected) {
       throw new Error("Grasp can't be reached right now.");
     }
@@ -403,16 +461,48 @@ export const Route = createFileRoute("/setup")({
       // oxlint-disable-next-line typescript/only-throw-error -- the router redirects on a thrown redirect
       throw redirect({ to: "/", replace: true });
     }
-    return { identity };
+    // The suites the company signs in with: their places where documents live come first.
+    const signIn = signInOptions.flatMap(({ providerId }) => {
+      const suite = oauthProviderSchema.safeParse(providerId);
+      return suite.success ? [suite.data] : [];
+    });
+    // The suites people sign in with here: their directories, and where their documents live, can be connected.
+    const suites = directorySuites.filter((suite) =>
+      signInOptions.some(({ providerId }) => providerId === suite)
+    );
+    return { identity, signIn, suites };
   },
   loader: async ({ context: { core } }) =>
-    await loadFromCore(core, async (session) => {
-      const [view, documents, gate] = await Promise.all([
+    await loadFromCore(core, async (session): Promise<Loaded> => {
+      const [
+        view,
+        links,
+        documents,
+        gate,
+        choices,
+        company,
+        directory,
+        places,
+      ] = await Promise.all([
         session.onboarding.view(),
+        session.onboarding.links(),
         session.onboarding.documents(),
         session.onboardingGate.view(),
+        session.onboarding.choices(),
+        companyOf(async () => await session.organization.get()),
+        session.onboarding.directory(),
+        session.onboarding.documentPlaces(),
       ]);
-      return { view, documents, gate };
+      return {
+        view,
+        links,
+        documents,
+        gate,
+        choices,
+        company,
+        directory,
+        places,
+      };
     }),
   component: Setup,
 });

@@ -1,4 +1,4 @@
-import type { App, AppContents } from "@grasp-os/shared/apps";
+import type { App, AppContents, AppStatus } from "@grasp-os/shared/apps";
 import { buttonVariants } from "@grasp-os/ui/components/button";
 import {
   Empty,
@@ -8,12 +8,15 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@grasp-os/ui/components/empty";
+import { Tabs, TabsList, TabsTrigger } from "@grasp-os/ui/components/tabs";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { CogIcon, LayoutGridIcon, TagIcon, WorkflowIcon } from "lucide-react";
+import { useState } from "react";
 
 import { timeoutMs, withTimeout } from "../core.ts";
 import type { Session } from "../core.ts";
+import { statusLabel } from "../engines/app-status.tsx";
 import { EngineIcon } from "../engines/engine-icon.tsx";
 import { PageNotLoaded, PageLoading } from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
@@ -23,7 +26,10 @@ import { openableApps } from "../workflows/reads.ts";
 // Engines, as in the prototype (`routes/engines/index.tsx`): the engines
 // (core's Apps) the person can open, as core lists them, each a card with
 // what its current version holds, counted by core. No process bars, hours
-// or "New engine": engines are made in chat.
+// or "New engine": engines are made in chat. Its builders also see the
+// drafts and the archived ones: then, as the prototype's Apps page
+// (`components/apps/apps-overview.tsx`), a tab for each status, with how
+// many each holds.
 
 interface ListedApp {
   app: App;
@@ -153,6 +159,78 @@ const NoEngines = () => (
   </div>
 );
 
+/** The tabs, in the prototype's order. */
+const statuses = [
+  "published",
+  "draft",
+  "archived",
+] as const satisfies readonly AppStatus[];
+
+/** The engines as cards, in a grid. */
+const EngineGrid = ({ listed }: { listed: ListedApp[] }) => {
+  const { t } = useLingui();
+  return (
+    <ul
+      aria-label={t`Domains`}
+      className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3"
+    >
+      {listed.map((each) => (
+        <EngineCard key={each.app.id} {...each} />
+      ))}
+    </ul>
+  );
+};
+
+/**
+ * The engines by status, a tab each, once any isn't published: only its
+ * builders see those. It opens where there is something to see: the
+ * published ones, or else the drafts.
+ */
+const ByStatus = ({ listed }: { listed: ListedApp[] }) => {
+  const [status, setStatus] = useState<AppStatus>(() =>
+    listed.some(({ app }) => app.status === "published") ? "published" : "draft"
+  );
+  if (listed.every(({ app }) => app.status === "published")) {
+    return <EngineGrid listed={listed} />;
+  }
+  const shown = listed.filter(({ app }) => app.status === status);
+  return (
+    <div className="flex flex-col gap-4">
+      <Tabs
+        onValueChange={(value: AppStatus) => {
+          setStatus(value);
+        }}
+        value={status}
+      >
+        <TabsList>
+          {statuses.map((each) => (
+            <TabsTrigger key={each} value={each}>
+              {statusLabel(each)}
+              <span className="text-muted-foreground tabular-nums">
+                {listed.filter(({ app }) => app.status === each).length}
+              </span>
+            </TabsTrigger>
+          ))}
+        </TabsList>
+      </Tabs>
+      {shown.length === 0 ? (
+        <p className="text-muted-foreground">
+          {status === "published" ? (
+            <Trans>
+              No domain is published yet: publish one from its page, and the
+              people it is shared with can open it.
+            </Trans>
+          ) : null}
+          {status === "draft" ? <Trans>No drafts.</Trans> : null}
+          {status === "archived" ? <Trans>Nothing archived.</Trans> : null}
+        </p>
+      ) : (
+        <EngineGrid listed={shown} />
+      )}
+    </div>
+  );
+};
+
 const Engines = () => {
   const { t } = useLingui();
   const page = Route.useLoaderData();
@@ -177,14 +255,7 @@ const Engines = () => {
         {page.data.length === 0 ? (
           <NoEngines />
         ) : (
-          <ul
-            aria-label={t`Domains`}
-            className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3"
-          >
-            {page.data.map((listed) => (
-              <EngineCard key={listed.app.id} {...listed} />
-            ))}
-          </ul>
+          <ByStatus listed={page.data} />
         )}
       </div>
     </>

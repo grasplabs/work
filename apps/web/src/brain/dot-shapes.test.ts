@@ -9,6 +9,7 @@ import {
   NONE,
   OPEN,
   POINTS,
+  teammates,
 } from "./dot-shapes.ts";
 import type { DotShape, ShapeKey } from "./dot-shapes.ts";
 
@@ -25,6 +26,9 @@ const figures: ShapeKey[] = [
   { kind: "head" },
   { kind: "listen" },
   { kind: "listen", who: "claire" },
+  { kind: "person", who: "mark" },
+  { kind: "person", who: "lisa" },
+  { kind: "person", who: "tim" },
   { kind: "pair" },
   { kind: "crowd" },
   { kind: "sheets" },
@@ -105,6 +109,18 @@ describe("the brain shapes", () => {
     const hers = dotShape({ kind: "listen", who: "claire" });
     expect(hers.position).not.toStrictEqual(his.position);
     expect(hers.hot.some((heat) => heat > 0.5)).toBeTruthy();
+  });
+
+  it("draws each of the team in the sample interview from a photo of their own, talking", () => {
+    const shapes = teammates.map((who) => dotShape({ kind: "person", who }));
+    const heads = [dotShape({ kind: "head" }), ...shapes];
+    expect({
+      own: new Set(heads.map(({ position }) => position.join(","))).size,
+      talking: shapes.every(
+        ({ activity, hot }) =>
+          activity === "speak" && hot.some((heat) => heat > 0.5)
+      ),
+    }).toStrictEqual({ own: heads.length, talking: true });
   });
 
   it("inks the places where documents live once they are connected, and leaves the rest open", () => {

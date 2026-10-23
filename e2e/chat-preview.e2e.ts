@@ -186,6 +186,9 @@ test("a chat builds an App in a studio, the chat on the left and a preview that 
       "A tally"
     );
     await api.apps.versions.setCurrent(app.id, version);
+    // Published, for the people it is shared with (a draft is its
+    // builders' alone).
+    await api.apps.publish(app.id);
     await ordinaryData(app.id);
     const chat = await api.chats.create(`Build ${tag}`);
     const page = await pageOf(builder);
