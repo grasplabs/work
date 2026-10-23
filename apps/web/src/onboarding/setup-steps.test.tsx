@@ -50,6 +50,8 @@ const said = (
       openedAt: null,
       staff: null,
     },
+    directory: null,
+    suites: [],
     choices: noChoices,
     signIn: ["microsoft"],
     identity: {

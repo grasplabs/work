@@ -1,4 +1,6 @@
 import { oauthProviderSchema } from "@grasp-os/shared/connect";
+import { directorySuiteSchema } from "@grasp-os/shared/directory";
+import type { OnboardingDirectory } from "@grasp-os/shared/directory";
 import type { OnboardingView } from "@grasp-os/shared/onboarding";
 import { noChoices } from "@grasp-os/shared/onboarding-choices";
 import type { SetupChoices } from "@grasp-os/shared/onboarding-choices";
@@ -42,6 +44,9 @@ import { resumeVoice, stopSpeaking, voiceLevel } from "../voice/voice.ts";
 // arrives (setup-parts.tsx). Admins only: core refuses
 // everyone else, and anyone else is taken home. Grasp's staff have their
 // own side of it at /onboarding.
+
+/** The suites whose directory the company step offers, in order. */
+const directorySuites = directorySuiteSchema.options;
 
 /** How wide the column is by step, and how large the brain: roomier where there is more to read. */
 const layout: Record<SetupStep, { width: string; brain: number }> = {
@@ -300,7 +305,7 @@ const readOf = (data: Loaded | null) => ({
 const Setup = () => {
   const { t, i18n } = useLingui();
   const navigate = useNavigate();
-  const { identity, signIn } = Route.useRouteContext();
+  const { identity, signIn, suites } = Route.useRouteContext();
   const loaded = Route.useLoaderData();
   const { step: asked } = Route.useSearch();
   const data = loaded.state === "ready" ? loaded.data : null;
@@ -372,7 +377,7 @@ const Setup = () => {
           >
             <SetupStepBody
               cramped={cramped}
-              data={{ ...data, admin, sendingDomain, signIn, identity }}
+              data={{ ...data, admin, sendingDomain, signIn, suites, identity }}
               go={go}
               listening={listening}
               message={kept.message}
@@ -420,11 +425,19 @@ interface Loaded {
   choices: SetupChoices;
   /** The organization's name, as the message to the team is addressed; null when it has none. */
   company: string | null;
+  directory: OnboardingDirectory | null;
 }
 
 export const Route = createFileRoute("/setup")({
-  validateSearch: (search: Record<string, unknown>): { step?: SetupStep } =>
-    isStep(search.step) ? { step: search.step } : {},
+  // `connection`: a connection's flow, started on a step, came back to it.
+  validateSearch: (
+    search: Record<string, unknown>
+  ): { step?: SetupStep; connection?: string } => ({
+    ...(isStep(search.step) && { step: search.step }),
+    ...(typeof search.connection === "string" && {
+      connection: search.connection,
+    }),
+  }),
   beforeLoad: async ({ context: { core }, location }) => {
     const { connected, identity, signInOptions } = await loadCoreStatus(core);
     if (!connected) {
@@ -449,18 +462,24 @@ export const Route = createFileRoute("/setup")({
       const suite = oauthProviderSchema.safeParse(providerId);
       return suite.success ? [suite.data] : [];
     });
-    return { identity, signIn };
+    // The suites people sign in with here: their directories can be connected.
+    const suites = directorySuites.filter((suite) =>
+      signInOptions.some(({ providerId }) => providerId === suite)
+    );
+    return { identity, signIn, suites };
   },
   loader: async ({ context: { core } }) =>
     await loadFromCore(core, async (session): Promise<Loaded> => {
-      const [view, documents, gate, choices, company] = await Promise.all([
-        session.onboarding.view(),
-        session.onboarding.documents(),
-        session.onboardingGate.view(),
-        session.onboarding.choices(),
-        companyOf(async () => await session.organization.get()),
-      ]);
-      return { view, documents, gate, choices, company };
+      const [view, documents, gate, choices, company, directory] =
+        await Promise.all([
+          session.onboarding.view(),
+          session.onboarding.documents(),
+          session.onboardingGate.view(),
+          session.onboarding.choices(),
+          companyOf(async () => await session.organization.get()),
+          session.onboarding.directory(),
+        ]);
+      return { view, documents, gate, choices, company, directory };
     }),
   component: Setup,
 });
