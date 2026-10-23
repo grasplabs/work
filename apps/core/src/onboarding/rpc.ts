@@ -140,6 +140,17 @@ export class OnboardingRpc extends CoreRpcTarget implements OnboardingApi {
   }
 
   async saveRoster(roster: RosterInput): Promise<OnboardingView> {
+    return await this.#keepRoster(roster, false);
+  }
+
+  async confirmRoster(roster: RosterInput): Promise<OnboardingView> {
+    return await this.#keepRoster(roster, true);
+  }
+
+  async #keepRoster(
+    roster: RosterInput,
+    confirmed: boolean
+  ): Promise<OnboardingView> {
     return await withPerson(this.#check, async (person) => {
       requireAdmin(person);
       const parsed = onboardingErrors.parse(
@@ -149,7 +160,8 @@ export class OnboardingRpc extends CoreRpcTarget implements OnboardingApi {
       );
       return await onboardingStore(this.#env).saveRoster(
         parsed,
-        actorOf(person)
+        actorOf(person),
+        { confirmed }
       );
     });
   }

@@ -202,7 +202,7 @@ const invited = async (
 ): Promise<string> => {
   const { core, api } = apiOf(staff);
   try {
-    await api.onboarding.saveRoster({
+    await api.onboarding.confirmRoster({
       teams: [{ id: `team-${person}`, name: "Finance", lead: null }],
       people: [{ id: person, name, team: `team-${person}` }],
     });
