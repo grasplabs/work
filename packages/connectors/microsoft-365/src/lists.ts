@@ -179,6 +179,7 @@ const listItems = defineTool({
     nextPage: z.string().nullable(),
   }),
   readOnly: true,
+  reach: "company",
   resource: "site",
   routes: [
     { method: "GET", host: graphHost, path: `${sites}/lists/{list}/items` },

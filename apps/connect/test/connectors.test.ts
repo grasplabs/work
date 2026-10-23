@@ -518,6 +518,7 @@ describe("a native connector", () => {
       "mail.createDraft": "change-company",
       ...calendar,
       ...files,
+      "lists.items": "read-company",
     });
     expect(classesOf("google-workspace")).toStrictEqual({
       "mail.list": "read-own",
