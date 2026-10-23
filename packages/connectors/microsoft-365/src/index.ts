@@ -12,7 +12,7 @@ import { mailTools } from "./mail.ts";
  */
 export default defineConnector({
   name: "microsoft-365",
-  version: "0.2.0",
+  version: "0.3.0",
   provider: "microsoft",
   scopes: [
     "User.Read",
@@ -21,6 +21,7 @@ export default defineConnector({
     "Mail.Send",
     "Mail.Send.Shared",
     "Calendars.Read",
+    "Calendars.ReadWrite",
     "Calendars.Read.Shared",
     "Files.Read.All",
     "Sites.Read.All",

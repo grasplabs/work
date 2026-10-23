@@ -246,6 +246,7 @@ const microsoft: OAuthProviderConfig = {
     "Mail.Send",
     "Mail.Send.Shared",
     "Calendars.Read",
+    "Calendars.ReadWrite",
     "Calendars.Read.Shared",
     "Files.Read.All",
     "Sites.Read.All",
@@ -665,6 +666,16 @@ export const providerFor = (id: string): ProviderConfig | undefined => {
 /** How Entra may prefix a Microsoft Graph scope in a token's answer. */
 const graphScopePrefix = "https://graph.microsoft.com/";
 
+/** The scopes a token answer's `scope` lists, lowercased. */
+const scopesIn = (scope: string): Set<string> =>
+  new Set(
+    scope
+      .split(" ")
+      .filter((each) => each !== "")
+      // Entra may name Graph's scopes by their full URI.
+      .map((each) => each.toLowerCase().replace(graphScopePrefix, ""))
+  );
+
 /**
  * Whether `tokens` were granted exactly the access `provider` asks for,
  * where it must hold no more (`granted`): every scope the provider's
@@ -681,15 +692,33 @@ export const grantedAsAsked = (
   if (scope === undefined) {
     return false;
   }
-  const scopes = new Set(
-    scope
-      .split(" ")
-      .filter((each) => each !== "")
-      // Entra may name Graph's scopes by their full URI.
-      .map((each) => each.toLowerCase().replace(graphScopePrefix, ""))
-  );
+  const scopes = scopesIn(scope);
   return (
     [...scopes].every((each) => granted.allowed.has(each)) &&
     granted.required.every((each) => scopes.has(each.toLowerCase()))
   );
+};
+
+/** The OpenID scopes, which a provider's answer may name or leave out. */
+const signInScopes: ReadonlySet<string> = new Set([
+  "openid",
+  "profile",
+  "email",
+  "offline_access",
+]);
+
+/**
+ * The scopes `provider` asks for now that a grant of `scope` (a token
+ * answer's) lacks, besides the OpenID ones: those its connector came to
+ * ask for after the connection was made.
+ */
+export const scopesLacking = (
+  { scopes }: OAuthProviderConfig,
+  scope: string
+): string[] => {
+  const granted = scopesIn(scope);
+  return scopes.filter((each) => {
+    const asked = each.toLowerCase();
+    return !(signInScopes.has(asked) || granted.has(asked));
+  });
 };

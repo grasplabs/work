@@ -1,12 +1,16 @@
 import { connectorManifestSchema } from "@grasp-os/connector-kit/manifest";
-import { env } from "cloudflare:workers";
+import { signCapability } from "@grasp-os/shared/capability";
+import { env, exports } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { nativeConnector } from "../src/bundled-connectors.ts";
 import { accessTokenFor } from "../src/tokens.ts";
 import {
+  agentFor,
   auditEvents,
+  callAs,
+  chatOrigin,
   connectAccount,
   outcome,
   ownAccount,
@@ -38,6 +42,7 @@ import { fakeGraph } from "./graph-api.ts";
 import { fakeProviders } from "./oauth-provider.ts";
 import {
   callTool as call,
+  claimedAgo,
   outputOf,
   parsedRequests,
   refusalsFor,
@@ -95,6 +100,17 @@ const mailboxInputs: Record<string, Input> = {
     end: "2026-10-05T00:00:00Z",
   },
   "calendar.get": { event: eventId(ceo, 1) },
+  "calendar.create": {
+    subject: "Focus time",
+    start: "2026-10-26T14:00",
+    end: "2026-10-26T15:00",
+    timeZone: "Europe/Amsterdam",
+  },
+  "calendar.update": {
+    event: eventId(ceo, 1),
+    timeZone: "Europe/Amsterdam",
+    subject: "Focus time",
+  },
 };
 
 /** Input for each file tool, but its drive. */
@@ -652,6 +668,252 @@ describe("the Microsoft 365 connector's calendar tools", () => {
   });
 });
 
+/** The organization's time zone, in the calendar writes below. */
+const amsterdam = "Europe/Amsterdam";
+
+/** An hour of focus time in `mailbox`'s calendar, in Amsterdam time. */
+const focusTime = (mailbox: string) => ({
+  mailbox,
+  subject: "Focus time: Q4 forecast",
+  start: "2026-10-26T14:00",
+  end: "2026-10-26T15:00",
+  timeZone: amsterdam,
+});
+
+/** Puts an event in the person's own calendar, under `key`. */
+const createEvent = async (
+  connection: Connection,
+  input: Input,
+  key: string = crypto.randomUUID()
+) =>
+  await call(connection, "calendar.create", input, {
+    resource: connection.person.email,
+    idempotencyKey: key,
+  });
+
+/** Changes an event in the person's own calendar. */
+const updateEvent = async (connection: Connection, input: Input) =>
+  await call(connection, "calendar.update", input, {
+    resource: connection.person.email,
+    idempotencyKey: crypto.randomUUID(),
+  });
+
+/** The event, as calendar.get reads it from the person's own calendar. */
+const readEvent = async (connection: Connection, event: string) =>
+  await outputOf(
+    call(connection, "calendar.get", {
+      mailbox: connection.person.email,
+      event,
+    })
+  );
+
+/** The ID of the event a calendar write answered with. */
+const madeId = z
+  .object({ event: z.object({ id: z.string() }) })
+  .transform(({ event }) => event.id);
+
+describe("the Microsoft 365 connector's calendar writes", () => {
+  it("put an event in a person's own calendar with nobody invited, its times in the organization's time zone", async () => {
+    const connection = await connected();
+    const own = connection.person.email;
+    const made = await outputOf(createEvent(connection, focusTime(own)));
+    expect(made).toMatchObject({
+      event: {
+        mailbox: own,
+        subject: "Focus time: Q4 forecast",
+        start: { dateTime: "2026-10-26T14:00:00.0000000", timeZone: amsterdam },
+        end: { dateTime: "2026-10-26T15:00:00.0000000", timeZone: amsterdam },
+        showAs: "busy",
+      },
+    });
+    // What Graph was asked to make: these fields, nobody invited, and the
+    // call's tag; nothing else.
+    const [sent] = requests();
+    expect(sent).toMatchObject({
+      method: "POST",
+      path: `/v1.0/users/${encodeURIComponent(own)}/events`,
+      headers: { prefer: `outlook.timezone="${amsterdam}"` },
+    });
+    expect(
+      Object.keys(
+        z.record(z.string(), z.unknown()).parse(sent?.body)
+      ).toSorted()
+    ).toStrictEqual(
+      [
+        "subject",
+        "start",
+        "end",
+        "showAs",
+        "attendees",
+        "singleValueExtendedProperties",
+      ].toSorted()
+    );
+    expect(sent?.body).toMatchObject({
+      start: { dateTime: "2026-10-26T14:00", timeZone: amsterdam },
+      attendees: [],
+    });
+    await expect(
+      readEvent(connection, madeId.parse(made))
+    ).resolves.toMatchObject({
+      event: { subject: "Focus time: Q4 forecast", attendees: [] },
+    });
+  });
+
+  it("refuse guests, and times that aren't wall-clock times in a time zone, before anything goes out", async () => {
+    const connection = await connected();
+    const own = connection.person.email;
+    const changes: Input[] = [
+      { attendees: [{ emailAddress: { address: "guest@example.org" } }] },
+      { requiredAttendees: ["guest@example.org"] },
+      { start: "2026-10-26T14:00:00Z" },
+      { start: "2026-10-26T14:00+01:00" },
+      { timeZone: "Mars/Olympus_Mons" },
+      { timeZone: 'UTC", outlook.body-content-type="html' },
+      { end: "2026-10-26T13:00" },
+    ];
+    const refusals = await Promise.all(
+      changes.map(
+        async (change) =>
+          await outcome(
+            createEvent(connection, { ...focusTime(own), ...change })
+          )
+      )
+    );
+    // Guests are input the tool doesn't have: connect refuses them before
+    // the tool does. The tool refuses the rest.
+    expect(refusals).toStrictEqual([
+      "connect.resource_out_of_scope",
+      "connect.resource_out_of_scope",
+      ...Array.from({ length: 5 }, () => "connect.action_failed"),
+    ]);
+    expect(graph.sent).toStrictEqual([]);
+  });
+
+  it("are shown for the person to confirm as the card will show them, and made once confirmed", async () => {
+    const connection = await connected();
+    const { person } = connection;
+    const input = { ...focusTime(person.email), location: "Desk 3" };
+    const inChat = agentFor(person.userId, "agent-chat", "interactive");
+    const asked = {
+      connectionId: connection.id,
+      action: "calendar.create",
+      input,
+      resource: person.email,
+      idempotencyKey: `chat-1:${crypto.randomUUID()}`,
+    };
+    await callAs(inChat, asked);
+    const [held] = await exports.default.listPendingActions(person);
+    expect({ held: held?.description, sent: graph.sent }).toStrictEqual({
+      held: {
+        title: "Put an event in your calendar",
+        fields: [
+          { input: "mailbox", label: "Calendar", value: person.email },
+          { input: "subject", label: "Title", value: input.subject },
+          { input: "start", label: "Starts", value: "2026-10-26T14:00" },
+          { input: "end", label: "Ends", value: "2026-10-26T15:00" },
+          { input: "timeZone", label: "Time zone", value: amsterdam },
+          { input: "location", label: "Where", value: "Desk 3" },
+        ],
+        complete: true,
+      },
+      sent: [],
+    });
+    const confirmed = await exports.default.confirmAction({
+      person,
+      id: held?.id ?? "",
+      inputHash: held?.inputHash ?? "",
+      capability: await signCapability(env.CAPABILITY_SIGNING_KEY, inChat, {
+        ...asked,
+        origin: chatOrigin,
+        decision: { kind: "confirm", pendingActionId: held?.id ?? "" },
+      }),
+    });
+    const made = madeId.parse(JSON.parse(confirmed.output));
+    await expect(readEvent(connection, made)).resolves.toMatchObject({
+      event: { location: "Desk 3", attendees: [] },
+    });
+  });
+
+  it("move an event the person organised alone, in the organization's time zone", async () => {
+    const connection = await connected();
+    const own = connection.person.email;
+    const made = madeId.parse(
+      await outputOf(createEvent(connection, focusTime(own)))
+    );
+    const moved = await outputOf(
+      updateEvent(connection, {
+        mailbox: own,
+        event: made,
+        timeZone: amsterdam,
+        start: "2026-10-27T09:30",
+        end: "2026-10-27T10:30",
+      })
+    );
+    expect(moved).toMatchObject({
+      event: {
+        id: made,
+        start: { dateTime: "2026-10-27T09:30:00.0000000", timeZone: amsterdam },
+        subject: "Focus time: Q4 forecast",
+      },
+    });
+    const patch = requests().find(({ method }) => method === "PATCH");
+    expect(patch?.body).toStrictEqual({
+      start: { dateTime: "2026-10-27T09:30", timeZone: amsterdam },
+      end: { dateTime: "2026-10-27T10:30", timeZone: amsterdam },
+    });
+  });
+
+  it("refuse to change an event with guests, or one someone else organised, and change nothing", async () => {
+    const connection = await connected();
+    const own = connection.person.email;
+    const errors = await Promise.all(
+      // The first has a guest; the CEO organised the second, and hides
+      // its guests.
+      [eventId(own, 1), eventId(own, 2)].map(
+        async (event) =>
+          await toolError(
+            updateEvent(connection, {
+              mailbox: own,
+              event,
+              timeZone: amsterdam,
+              subject: "Moved",
+            })
+          )
+      )
+    );
+    expect(errors).toMatchObject([
+      { error: { code: "invalid" } },
+      { error: { code: "invalid" } },
+    ]);
+    expect(graph.writesDone()).toBe(0);
+  });
+
+  it("refuse a change once a guest was invited after the event was checked", async () => {
+    const connection = await connected();
+    const own = connection.person.email;
+    const made = madeId.parse(
+      await outputOf(createEvent(connection, focusTime(own)))
+    );
+    graph.inviteDuringRead();
+    await expect(
+      outcome(
+        updateEvent(connection, {
+          mailbox: own,
+          event: made,
+          timeZone: amsterdam,
+          subject: "Moved",
+        })
+      )
+    ).resolves.toBe("connect.action_failed");
+    await expect(readEvent(connection, made)).resolves.toMatchObject({
+      event: {
+        subject: "Focus time: Q4 forecast",
+        attendees: [{ address: "guest@example.org" }],
+      },
+    });
+  });
+});
+
 describe("the Microsoft 365 connector's file tools", () => {
   it("list a drive's top folder or a folder in it, page by page", async () => {
     const connection = await connected();
@@ -993,5 +1255,152 @@ describe("the Microsoft 365 connector's writes whose outcome can't be confirmed"
       "connect.outcome_unknown"
     );
     expect(writesSent()).toBe(1);
+  });
+});
+
+/** An hour of focus time in the person's own calendar, under `key`. */
+const createFocusTime = async (connection: Connection, key: string) =>
+  await createEvent(connection, focusTime(connection.person.email), key);
+
+/** What a connection made before the connector wrote calendars holds. */
+const readOnlyCalendars = [
+  "openid",
+  "profile",
+  "email",
+  "offline_access",
+  "User.Read",
+  "Mail.ReadWrite",
+  "Mail.ReadWrite.Shared",
+  "Mail.Send",
+  "Mail.Send.Shared",
+  "Calendars.Read",
+  "Calendars.Read.Shared",
+  "Files.Read.All",
+  "Sites.Read.All",
+];
+
+const graphScope = /^[A-Z]/u;
+
+/** Entra's `scope` for a grant of `scopes`, Graph's by their full URI. */
+const grantOf = (scopes: readonly string[]): string =>
+  scopes
+    .map((scope) =>
+      graphScope.test(scope) ? `https://graph.microsoft.com/${scope}` : scope
+    )
+    .join(" ");
+
+/** Someone's connection whose grant Entra says holds `scopes`. */
+const connectedWith = async (
+  scopes: readonly string[]
+): Promise<Connection> => {
+  const person = someone();
+  const id = await connectAccount(providers, person, {
+    ...ownAccount(person),
+    granted: grantOf(scopes),
+  });
+  return { id, person };
+};
+
+const statusOf = async ({ id }: Connection): Promise<string | undefined> => {
+  const row = await env.DB.prepare(
+    "SELECT status FROM connections WHERE id = ?"
+  )
+    .bind(id)
+    .first<{ status: string }>();
+  return row?.status;
+};
+
+const accessDenied = { error: { code: "ErrorAccessDenied" } };
+
+describe("the Microsoft 365 connector's calendar writes, when something goes wrong", () => {
+  it("find an event whose answer was lost by its tag, and never make it twice", async () => {
+    const connection = await connected();
+    graph.loseWriteAnswer();
+    await expect(
+      outcome(createFocusTime(connection, "run-4:hold"))
+    ).resolves.toBe("connect.outcome_unknown");
+    await claimedAgo(connection);
+    const found = await outputOf(createFocusTime(connection, "run-4:hold"));
+    expect({
+      found,
+      writesDone: graph.writesDone(),
+      lookups: requests()
+        .filter(({ method }) => method === "GET")
+        .map(({ path, headers }) => ({ path, prefer: headers.prefer })),
+    }).toMatchObject({
+      found: {
+        event: {
+          subject: "Focus time: Q4 forecast",
+          start: {
+            dateTime: "2026-10-26T14:00:00.0000000",
+            timeZone: amsterdam,
+          },
+        },
+      },
+      writesDone: 1,
+      lookups: [
+        {
+          path: `/v1.0/users/${encodeURIComponent(connection.person.email)}/events`,
+          prefer: `outlook.timezone="${amsterdam}"`,
+        },
+      ],
+    });
+  });
+
+  it("report a connection made before it could write calendars for reconnecting, in place, and go through once it is", async () => {
+    const connection = await connectedWith(readOnlyCalendars);
+    graph.failWrite(403, accessDenied);
+    const refused = await outcome(createFocusTime(connection, "run-5:hold"));
+    const status = await statusOf(connection);
+    const audited = await audit.events();
+    // The person reconnects, granting the new right: the same connection,
+    // and the same call goes out under its key.
+    const reconnected = await connectAccount(providers, connection.person, {
+      ...ownAccount(connection.person),
+      granted: grantOf([...readOnlyCalendars, "Calendars.ReadWrite"]),
+    });
+    const again = await outcome(createFocusTime(connection, "run-5:hold"));
+    expect({
+      refused,
+      status,
+      marked: audited
+        .filter(({ action }) => action === "connection.needs_reauth")
+        .map(({ detail }) => detail),
+      sameConnection: reconnected === connection.id,
+      again,
+      writesDone: graph.writesDone(),
+    }).toStrictEqual({
+      refused: "connect.connection_inactive",
+      status: "needs_reauth",
+      marked: [{ provider: "microsoft", reason: "scopes_missing" }],
+      sameConnection: true,
+      again: "ok",
+      writesDone: 1,
+    });
+  });
+
+  it("keep a connection granted every right, or whose grant isn't known, when Graph refuses it a calendar", async () => {
+    const granted = await connectedWith([
+      ...readOnlyCalendars,
+      "Calendars.ReadWrite",
+    ]);
+    // Tokens stored before connect kept their grant.
+    const unknown = await connected();
+    const outcomes: string[] = [];
+    for (const connection of [granted, unknown]) {
+      graph.failWrite(403, accessDenied);
+      outcomes.push(
+        // oxlint-disable-next-line no-await-in-loop -- one write failed at a time
+        await outcome(createFocusTime(connection, "run-6:hold")),
+        // oxlint-disable-next-line no-await-in-loop -- one write failed at a time
+        (await statusOf(connection)) ?? "none"
+      );
+    }
+    expect(outcomes).toStrictEqual([
+      "connect.action_failed",
+      "active",
+      "connect.action_failed",
+      "active",
+    ]);
   });
 });

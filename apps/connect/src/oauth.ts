@@ -427,6 +427,9 @@ const reconnect = async (
             ),
             generation: sql<number>`${row.generation}`.as("generation"),
             refreshUntil: sql<null>`NULL`.as("refresh_until"),
+            grantedScopes: sql<string | null>`${row.grantedScopes}`.as(
+              "granted_scopes"
+            ),
             updatedAt: sql<Date>`${now.getTime()}`.as("updated_at"),
           })
           .from(connections)
@@ -613,6 +616,7 @@ const keepTokens = async (
       accessToken: tokens.accessToken,
       refreshToken,
       expiresAt: tokens.expiresAt,
+      scope: tokens.scope,
     },
     drop,
     refuse

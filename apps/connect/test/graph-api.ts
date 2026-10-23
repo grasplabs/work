@@ -5,7 +5,8 @@
  * sent, as an attacker's would. `throttle` makes Graph answer the next
  * request with a 429, `throttleWrite` the next write; `failWrite` answers
  * the next write with an error, and `loseWriteAnswer` carries the next
- * write out and loses its answer.
+ * write out and loses its answer. Events it makes or changes it keeps for
+ * the test, and holds a change to the `If-Match` etag it is sent.
  */
 import { egressHeader } from "@grasp-os/connector-kit/manifest";
 import {
@@ -80,6 +81,79 @@ const keepTag = (mailbox: string, id: string, made: unknown): void => {
 
 /** Runs once while Graph answers the next lookup by effect key. */
 let duringLookup: (() => Promise<void>) | undefined;
+
+type GraphEvent = Record<string, unknown> & {
+  id: string;
+  "@odata.etag": string;
+  attendees: unknown[];
+};
+
+/**
+ * The events Graph made or changed, by mailbox and ID; any other is the
+ * fixtures' as it was. Cleared before each test.
+ */
+const events = new Map<string, GraphEvent>();
+
+/** The events Graph made that carry an effect key, by key. */
+const taggedEvents = new Map<string, { mailbox: string; id: string }>();
+
+const eventKey = (mailbox: string, id: string): string => `${mailbox}/${id}`;
+
+/** An event of `mailbox` as Graph holds it now. */
+const eventOf = (mailbox: string, id: string): GraphEvent =>
+  events.get(eventKey(mailbox, id)) ?? eventDetail(mailbox, numberOf(id));
+
+/** Whether a guest joins the event the next update reads, once it has read it. */
+let inviteDuringRead = false;
+
+const newEtag = (): string => `W/"${crypto.randomUUID()}"`;
+
+/** The time zone a request's `Prefer` header asks for, UTC if none. */
+const zoneOf = (request: Request): string =>
+  /outlook\.timezone="(?<zone>[^"]+)"/u.exec(
+    request.headers.get("prefer") ?? ""
+  )?.groups?.zone ?? "UTC";
+
+const graphTimeSchema = z.object({
+  dateTime: z.string(),
+  timeZone: z.string(),
+});
+
+/** How long a time without its seconds is: `2026-10-26T14:30`. */
+const minutesOnly = 16;
+
+/**
+ * A time as Graph answers it, in the zone it was asked in. Never
+ * converted: these tests read in the zone they write in.
+ */
+const answeredTime = (
+  { dateTime }: z.infer<typeof graphTimeSchema>,
+  zone: string
+): z.infer<typeof graphTimeSchema> => ({
+  dateTime: `${dateTime.length === minutesOnly ? `${dateTime}:00` : dateTime.slice(0, 19)}.0000000`,
+  timeZone: zone,
+});
+
+const eventChangesSchema = z.object({
+  start: graphTimeSchema.optional(),
+  end: graphTimeSchema.optional(),
+});
+
+/** `event` with `changes` made to it, its times as asked in `zone`. */
+const changed = (
+  event: GraphEvent,
+  changes: Record<string, unknown>,
+  zone: string
+): GraphEvent => {
+  const { start, end } = eventChangesSchema.parse(changes);
+  return {
+    ...event,
+    ...changes,
+    ...(start === undefined ? {} : { start: answeredTime(start, zone) }),
+    ...(end === undefined ? {} : { end: answeredTime(end, zone) }),
+    "@odata.etag": newEtag(),
+  };
+};
 
 /** The effect key a lookup's `$filter` asks for, if it asks for one. */
 const keyFilter =
@@ -180,9 +254,91 @@ const graphRoutes: ProviderRoute<Part>[] = [
   route("GET", `${users}/calendarView`, ({ mailbox, query }) =>
     json(eventPage(mailbox, query.get("$skiptoken")))
   ),
-  route("GET", `${users}/events/(?<id>[^/]+)`, ({ mailbox, id }) =>
-    json(eventDetail(mailbox, numberOf(id)))
-  ),
+  route("GET", `${users}/events/(?<id>[^/]+)`, ({ mailbox, id }) => {
+    const event = eventOf(mailbox, id);
+    if (inviteDuringRead) {
+      // Someone invites a guest right after this read.
+      inviteDuringRead = false;
+      events.set(eventKey(mailbox, id), {
+        ...event,
+        attendees: [
+          {
+            type: "required",
+            status: { response: "none" },
+            emailAddress: { name: "Guest", address: "guest@example.org" },
+          },
+        ],
+        "@odata.etag": newEtag(),
+      });
+    }
+    return json(event);
+  }),
+  route("PATCH", `${users}/events/(?<id>[^/]+)`, async (part) => {
+    const { mailbox, id, request } = part;
+    const event = eventOf(mailbox, id);
+    if (request.headers.get("if-match") !== event["@odata.etag"]) {
+      return json({ error: { code: "ErrorIrresolvableConflict" } }, 412);
+    }
+    const changes = z
+      .record(z.string(), z.unknown())
+      .parse(await request.json());
+    const updated = changed(event, changes, zoneOf(request));
+    events.set(eventKey(mailbox, id), updated);
+    return json(updated);
+  }),
+  route("POST", `${users}/events`, async ({ mailbox, request }) => {
+    const body = z.record(z.string(), z.unknown()).parse(await request.json());
+    const id = `AAMkAGE1M2IyNGNmLTI5MTktMade${crypto.randomUUID().replaceAll("-", "")}=`;
+    const { singleValueExtendedProperties, ...asked } = body;
+    const made = changed(
+      {
+        id,
+        "@odata.etag": newEtag(),
+        isOrganizer: true,
+        isCancelled: false,
+        isAllDay: false,
+        organizer: { emailAddress: { name: "Anna", address: mailbox } },
+        webLink: `https://outlook.office365.com/owa/?itemid=${id}`,
+        attendees: [],
+      },
+      asked,
+      zoneOf(request)
+    );
+    events.set(eventKey(mailbox, id), made);
+    const tag = taggedSchema
+      .safeParse({ singleValueExtendedProperties })
+      .data?.singleValueExtendedProperties?.find(
+        (property) => property.id === effectPropertyId
+      )?.value;
+    if (tag !== undefined) {
+      taggedEvents.set(tag, { mailbox, id });
+    }
+    return json(made, 201);
+  }),
+  route("GET", `${users}/events`, ({ mailbox, query, request }) => {
+    const asked = keyFilter.exec(query.get("$filter") ?? "")?.groups;
+    if (asked?.id !== effectPropertyId) {
+      return json({ error: { code: "BadRequest" } }, 400);
+    }
+    const found = taggedEvents.get(asked.key ?? "");
+    const event =
+      found?.mailbox === mailbox
+        ? events.get(eventKey(mailbox, found.id))
+        : undefined;
+    const zone = zoneOf(request);
+    return json({
+      value:
+        event === undefined
+          ? []
+          : [
+              {
+                ...event,
+                start: answeredTime(graphTimeSchema.parse(event.start), zone),
+                end: answeredTime(graphTimeSchema.parse(event.end), zone),
+              },
+            ],
+    });
+  }),
   route("GET", `${drives}/(?:root|items/[^/]+)/children`, ({ drive, query }) =>
     json(childrenPage(drive, query.get("$skiptoken")))
   ),
@@ -223,6 +379,9 @@ export const fakeGraph = () => {
   beforeEach(() => {
     tagged.clear();
     duringLookup = undefined;
+    events.clear();
+    taggedEvents.clear();
+    inviteDuringRead = false;
   });
   const { sent, writesDone, fail } = fakeProvider({
     hosts: [graphHost],
@@ -275,6 +434,10 @@ export const fakeGraph = () => {
         writesOnly: true,
         meanwhile,
       });
+    },
+    /** Has someone invite a guest to the next event read, right after it. */
+    inviteDuringRead: () => {
+      inviteDuringRead = true;
     },
     /** Runs `meanwhile` while Graph answers the next lookup by effect key. */
     whileLookingUp: (meanwhile: () => Promise<void>) => {
