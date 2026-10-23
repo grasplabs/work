@@ -248,13 +248,10 @@ describe("the interviews in Grasp's onboarding area", () => {
     expect({
       off: view.roster?.teams.find(({ id }) => id === "labs")?.off,
       lia: links.find(({ person }) => person === ids.lia)?.state,
-      // Asked in after the company was told: Labs starts now, its own moment.
-      later: Object.keys(view.plan?.later ?? {}),
       unknown: await outcome(staff.onboardingStaff.askIn("nowhere")),
     }).toStrictEqual({
       off: false,
       lia: "invited",
-      later: ["labs"],
       unknown: "onboarding.no_team",
     });
   });

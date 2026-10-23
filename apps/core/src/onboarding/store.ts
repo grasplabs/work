@@ -2480,18 +2480,11 @@ export class Onboarding extends DurableObject<Env> {
     }
     if (row.off) {
       this.ctx.storage.transactionSync(() => {
-        const before = this.#roster();
         this.#db
           .update(teams)
           .set({ off: false })
           .where(eq(teams.id, team))
           .run();
-        // As when staff ask it in from the organization: once the team is
-        // told and its moment has passed, it starts now, its lead first.
-        const after = this.#roster();
-        if (after !== null) {
-          this.#lateTeams(before, after, new Date().toISOString());
-        }
         this.#changed(by, "onboarding.team.asked_in", {});
       });
       this.#deliverAudit();
