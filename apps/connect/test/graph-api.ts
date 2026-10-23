@@ -434,6 +434,24 @@ export const fakeGraph = () => {
     loseWriteAnswer: () => {
       fail({ lost: true, writesOnly: true });
     },
+    /**
+     * Has a person type `formula` into cell `column` of row `row` of
+     * workbook `id`'s supplier table, Excel showing `value` for it.
+     */
+    typeFormula: (
+      id: string,
+      {
+        row,
+        column,
+        formula,
+        value,
+      }: Omit<SheetCell, "format"> & { row: number; column: number }
+    ) => {
+      const cells = workbooks.get(id)?.get(supplierTable)?.rows[row];
+      if (cells !== undefined) {
+        cells[column] = { value, format: "General", formula };
+      }
+    },
     /** The rows of workbook `id`'s supplier table, as Excel holds them. */
     supplierRowsOf: (id: string): readonly SheetCell[][] =>
       workbooks.get(id)?.get(supplierTable)?.rows ?? [],

@@ -734,8 +734,9 @@ export default class Connect
     // doesn't have: a side effect's answer is stored with its events. If
     // that fails, the call happened but went unrecorded: its key is spent,
     // and it is recorded, as far as possible, with an unknown outcome.
-    // What it changed is kept with its answer and events, its hash in them.
-    const kept = await keptChange(this.env, claims, call, done.change);
+    // What it changed is kept with its answer and events, its hash in them;
+    // preparing it comes after the call went out, so its failure is one of
+    // recording too.
     const record: CallRecord = {
       call: stated,
       claims,
@@ -746,10 +747,10 @@ export default class Connect
       recovery: done.recovery,
       provenance: done.result.provenance,
       pendingActionId: done.pending?.id ?? held?.id,
-      changeHash: kept.hash,
     };
     try {
-      await auditCall(this.env, record, [
+      const kept = await keptChange(this.env, claims, call, done.change);
+      await auditCall(this.env, { ...record, changeHash: kept.hash }, [
         ...(done.commit === undefined ? [] : [done.commit]),
         ...kept.writes,
       ]);
@@ -760,8 +761,6 @@ export default class Connect
       });
       await auditFailure(this.env, {
         ...record,
-        // Its values went with the batch that failed.
-        changeHash: undefined,
         outcome: "unknown",
         reason: "connect.outcome_unknown",
       });

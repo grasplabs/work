@@ -36,7 +36,10 @@ import {
 // formula. A day is read and written here as `{ date }`, never a number;
 // text that would run as a formula is refused, and a formula is written
 // only as `{ formula }`, in a call its person confirmed on a card that
-// showed it.
+// showed it. A row reads a formula's cell as its value, so a change that
+// gave that value back would write it over the formula: a cell holding a
+// formula is changed only as `{ formula }`, and keeping the one it holds
+// needs no confirming again.
 
 const table = `${v1}/drives/{drive}/items/{workbook}/workbook/tables/{table}`;
 
@@ -243,17 +246,23 @@ const inColumnOrder = <Value>(
   return columns.map((column) => byColumn.get(column) ?? null);
 };
 
+/** Whether a cell's formula, as Graph answers it, is one, not a constant. */
+const isFormula = (
+  formula: z.infer<typeof graphValue> | undefined
+): formula is string => typeof formula === "string" && formula.startsWith("=");
+
 /**
  * Cells as Graph takes them, typed as a person would type them: a day as
  * `2026-10-21`, which Excel stores as a date, never its serial number;
  * text that would run as a formula refused; a formula only once its
- * person confirmed it.
+ * person confirmed it, or as the cell already holds it (`held`).
  */
 const valuesOf = (
   cells: readonly Cell[],
-  { confirmed }: Effect
+  { confirmed }: Effect,
+  held: readonly z.infer<typeof graphValue>[] = []
 ): (string | number | boolean)[] =>
-  cells.map((cell) => {
+  cells.map((cell, index) => {
     if (cell === null) {
       return "";
     }
@@ -261,7 +270,7 @@ const valuesOf = (
       if ("date" in cell) {
         return cell.date;
       }
-      if (!confirmed) {
+      if (!confirmed && cell.formula !== held[index]) {
         throw new ToolError(
           "A formula is written only once its person confirmed it",
           { code: invalidCode }
@@ -469,7 +478,6 @@ const updateRow = defineTool({
     const columns = await columnsOf(path);
     const was = inColumnOrder(columns, before);
     const wanted = inColumnOrder(columns, after);
-    const values = valuesOf(wanted, effect);
     const rowPath = `${path}/rows/itemAt(index=${row})/range`;
     const now = await graphJson(
       graphUrl(rowPath, { $select: "values,numberFormat,formulas" }),
@@ -506,6 +514,22 @@ const updateRow = defineTool({
         { code: "conflict" }
       );
     }
+    // A formula's cell reads as its value: written back as that value, it
+    // would lose its formula.
+    const overwritten = columns.flatMap((column, index) => {
+      const cell = wanted[index] ?? null;
+      const held = formulas[index];
+      const asFormula =
+        cell !== null && typeof cell === "object" && "formula" in cell;
+      return isFormula(held) && !asFormula ? [`${column} holds ${held}`] : [];
+    });
+    if (overwritten.length > 0) {
+      throw new ToolError(
+        `A cell holding a formula is changed only as { formula }: ${overwritten.join(", ")}`,
+        { code: invalidCode }
+      );
+    }
+    const values = valuesOf(wanted, effect, formulas);
     const written = await graphJson(graphUrl(rowPath), graphRange, {
       ...jsonBody({ values: [values] }),
       method: "PATCH",

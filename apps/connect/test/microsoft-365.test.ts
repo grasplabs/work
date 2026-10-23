@@ -155,6 +155,10 @@ const withAmount = (row: SupplierRow, amount: Input[string]): SupplierRow =>
     cell.column === "Amount" ? { ...cell, value: amount } : cell
   );
 
+/** `row` with its IBAN as `iban`. */
+const withIban = (row: SupplierRow, iban: string): SupplierRow =>
+  row.map((cell) => (cell.column === "IBAN" ? { ...cell, value: iban } : cell));
+
 /** Where each Excel tool's call goes: the register's supplier table. */
 const supplierTableOf = { drive: financeDrive, table: supplierTable };
 
@@ -908,7 +912,8 @@ describe("the Microsoft 365 connector's file tools", () => {
 // Excel registers, as company records: the ways it can fail come first. A
 // call for one register reaches another (scoping, above), or a named
 // range that points at any sheet; a change lands on a row that moved or
-// changed since it was read; a cell from an email runs as a formula; a day
+// changed since it was read; a cell from an email runs as a formula; a
+// formula's value, as a row reads it, is written back over it; a day
 // is written as a number nobody can read; a change leaves no record of
 // what the row held; a lost answer makes it run twice.
 describe("the Microsoft 365 connector's Excel tools", () => {
@@ -1158,6 +1163,48 @@ describe("the Microsoft 365 connector's Excel tools", () => {
       amount: valuesHeld()[0]?.[3]?.value,
       patches: sentAs("PATCH"),
     }).toStrictEqual({ amount: 1350, patches: 1 });
+  });
+
+  it("never write a formula's value over it: a change keeps the formula a cell holds, unconfirmed, or is refused", async () => {
+    const connection = await connected();
+    graph.typeFormula(register, {
+      row: 0,
+      column: 3,
+      formula: "=1200*1.1",
+      value: 1320,
+    });
+    // The row reads the formula's cell as its value.
+    const read = withAmount(northwind, 1320);
+    await expect(
+      outputOf(onRegister(connection, "excel.listRows", { top: 1 }))
+    ).resolves.toMatchObject({ rows: [{ row: 0, values: read }] });
+    const change = async (after: SupplierRow, key: string) =>
+      await onRegister(
+        connection,
+        "excel.updateRow",
+        { row: 0, before: read, after },
+        key
+      );
+    const iban = "NL20INGB0001234567";
+    // Given back as that value, it would be written over the formula.
+    await expect(
+      toolError(change(withIban(read, iban), "run-6:iban"))
+    ).resolves.toMatchObject({ error: { code: "invalid" } });
+    // Given as the formula the cell holds, a run writes the row without
+    // its person confirming it again.
+    const kept = withIban(
+      withAmount(northwind, { formula: "=1200*1.1" }),
+      iban
+    );
+    await expect(
+      outputOf(change(kept, "run-6:iban-kept"))
+    ).resolves.toMatchObject({ after: kept });
+    const [first] = graph.supplierRowsOf(register);
+    expect({
+      iban: first?.[1]?.value,
+      amount: first?.[3]?.formula,
+      patches: sentAs("PATCH"),
+    }).toStrictEqual({ iban, amount: "=1200*1.1", patches: 1 });
   });
 
   it("recover a row change whose answer was lost by finding it written, never writing twice; an added row's stays unknown", async () => {
