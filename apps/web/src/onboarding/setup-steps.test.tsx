@@ -1,4 +1,5 @@
 import type { OnboardingView } from "@grasp-os/shared/onboarding";
+import { noChoices } from "@grasp-os/shared/onboarding-choices";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -47,6 +48,17 @@ const said = (
       over: false,
       openedAt: null,
       staff: null,
+    },
+    choices: noChoices,
+    signIn: ["microsoft"],
+    identity: {
+      userId: "ada",
+      email: "ada@acme.test",
+      name: "Ada",
+      role: "admin",
+      teams: [],
+      staff: false,
+      expiresAt: "2026-10-15T00:00:00Z",
     },
   };
   return renderToStaticMarkup(
