@@ -1,4 +1,5 @@
 import type { ChatMessage } from "@grasp-os/shared/chat";
+import type { ModelErrorCode } from "@grasp-os/shared/models";
 import { i18n } from "@lingui/core";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -20,7 +21,7 @@ const answered = (
   id: number,
   text: string,
   end: "done" | "cut_off" | "cancelled" | "failed" = "done",
-  error?: string
+  failure?: ModelErrorCode
 ): ChatMessage => ({
   id,
   role: "assistant",
@@ -29,7 +30,7 @@ const answered = (
   code: [],
   end,
   at,
-  ...(error === undefined ? {} : { error }),
+  ...(failure === undefined ? {} : { failure }),
 });
 
 const none = { sources: [], restricted: false };
@@ -84,13 +85,13 @@ describe(chatMarkdown, () => {
         title: "Pay",
         messages: [
           asked(1, "a"),
-          answered(2, "", "failed"),
+          answered(2, "", "failed", "model.failed"),
           asked(3, "b"),
           answered(4, "Half", "cut_off"),
           asked(5, "c"),
           answered(6, "", "cancelled"),
           asked(7, "d"),
-          answered(8, "", "failed", "The budget is spent."),
+          answered(8, "", "failed", "model.over_budget"),
         ],
         provenance: { sources: [], restricted: true },
         names: new Map(),
@@ -100,13 +101,13 @@ describe(chatMarkdown, () => {
       [
         "# Pay",
         "**You:**\n\na",
-        "**Grasp:**\n\nThe model call failed.",
+        "**Grasp:**\n\nThe model couldn't answer. Try again.",
         "**You:**\n\nb",
         "**Grasp:**\n\nHalf\n\nThe answer was cut off at the model's limit.",
         "**You:**\n\nc",
         "**Grasp:**\n\nStopped.",
         "**You:**\n\nd",
-        "**Grasp:**\n\nThe budget is spent.",
+        "**Grasp:**\n\nThe model budget is used up. Ask your admin to have Grasp raise it.",
         "## Sources",
         "**Restricted**",
       ].join("\n\n")

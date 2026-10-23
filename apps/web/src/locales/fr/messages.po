@@ -5650,13 +5650,33 @@ msgstr "Accès de Grasp"
 msgid "Grasp can't be reached right now. Try again in a moment."
 msgstr "Grasp est injoignable pour le moment. Réessayez dans un instant."
 
+#: src/chat/failure.ts
+msgid "Grasp can't count model spend right now. Try again later."
+msgstr "Grasp ne peut pas comptabiliser les dépenses de modèles pour le moment. Réessayez plus tard."
+
+#: src/chat/failure.ts
+msgid "Grasp can't read your organization's model limits right now. Try again later."
+msgstr "Grasp ne peut pas lire les limites de modèles de votre organisation pour le moment. Réessayez plus tard."
+
+#: src/chat/failure.ts
+msgid "Grasp can't tell what this model would cost. Pick another one."
+msgstr "Grasp ne peut pas dire ce que coûterait ce modèle. Choisissez-en un autre."
+
 #: src/routes/_shell.policies.documents.$policyId.tsx
 msgid "Grasp could not be reached. Check the connection and upload the policy again."
 msgstr "Impossible de joindre Grasp. Vérifiez la connexion et importez de nouveau la politique."
 
+#: src/chat/failure.ts
+msgid "Grasp could not be reached. Try again."
+msgstr "Grasp n’a pas pu être joint. Réessayez."
+
 #: src/routes/_shell.policies.documents.$policyId.tsx
 msgid "Grasp could not read this policy"
 msgstr "Grasp n’a pas pu lire cette politique"
+
+#: src/chat/failure.ts
+msgid "Grasp couldn't put this question to the model. Try again."
+msgstr "Grasp n’a pas pu poser cette question au modèle. Réessayez."
 
 #: src/dashboard/outcome-card.tsx
 msgid "Grasp doesn't know where this came from, so it can't be resolved here."
@@ -5689,6 +5709,10 @@ msgstr "Grasp dans votre langue. Les nombres, les dates et les montants la suive
 #: src/routes/_shell.policies.documents.$policyId.tsx
 msgid "Grasp is busy right now. Remove this policy and upload it again in a minute."
 msgstr "Grasp est occupé pour le moment. Retirez cette politique et importez-la de nouveau dans une minute."
+
+#: src/chat/failure.ts
+msgid "Grasp is busy with other questions. Try again in a minute."
+msgstr "Grasp est occupé par d’autres questions. Réessayez dans une minute."
 
 #: src/routes/_shell.policies.documents.$policyId.tsx
 msgid "Grasp is reading the policy"
@@ -7264,6 +7288,10 @@ msgstr "Modèles"
 #: src/routes/_shell.settings.models.tsx
 msgid "Models aren't set up for this deployment yet, so no model call can be made. Grasp sets them up."
 msgstr "Aucun modèle n’est encore configuré pour ce déploiement : aucun appel de modèle n’est possible. Grasp s’en charge."
+
+#: src/chat/failure.ts
+msgid "Models aren't set up yet. Ask your admin to have Grasp set them up."
+msgstr "Les modèles ne sont pas encore configurés. Demandez à votre admin de les faire configurer par Grasp."
 
 #: src/chat/composer.tsx
 msgid "Models for your organization"
@@ -9055,6 +9083,10 @@ msgstr "Les autres domaines peuvent désormais appeler {name}"
 #: src/chat/builds-state.ts
 msgid "Other domains may now call {name}, which {does}"
 msgstr "Les autres domaines peuvent désormais appeler {name}, qui {does}"
+
+#: src/chat/failure.ts
+msgid "Other questions are using what's left of the model budget. Try again in a minute."
+msgstr "D’autres questions utilisent ce qui reste du budget de modèles. Réessayez dans une minute."
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Otherwise:"
@@ -12251,14 +12283,25 @@ msgstr "La migration {migration} de la table {table} a échoué sur l'enregistre
 msgid "the migration threw an error"
 msgstr "la migration a levé une erreur"
 
-#: src/chat/chat-markdown.ts
-#: src/chat/thread.tsx
-msgid "The model call failed."
-msgstr "L’appel au modèle a échoué."
+#: src/chat/failure.ts
+msgid "The model budget is used up. Ask your admin to have Grasp raise it."
+msgstr "Le budget de modèles est épuisé. Demandez à votre admin de le faire augmenter par Grasp."
+
+#: src/chat/failure.ts
+msgid "The model couldn't answer. Try again."
+msgstr "Le modèle n’a pas pu répondre. Réessayez."
+
+#: src/chat/failure.ts
+msgid "The model is busy. Try again in a minute."
+msgstr "Le modèle est occupé. Réessayez dans une minute."
 
 #: src/routes/_shell.policies.documents.$policyId.tsx
 msgid "The model key does not work. Check it in Settings, under Models."
 msgstr "La clé du modèle ne fonctionne pas. Vérifiez-la dans Paramètres, sous Modèles."
+
+#: src/chat/failure.ts
+msgid "The model's answer came back in the wrong shape. Try again."
+msgstr "La réponse du modèle est revenue sous une mauvaise forme. Réessayez."
 
 #: src/brain/brain-atlas.ts
 msgid "The monthly budget for AI is not set yet."
@@ -12696,9 +12739,17 @@ msgstr "Ce chat a été fermé par la personne qui vous a envoyé le lien."
 msgid "This chat has reached its length. Press Finish to end it."
 msgstr "Ce chat a atteint sa longueur maximale. Cliquez sur Terminer pour le clore."
 
+#: src/chat/failure.ts
+msgid "This chat holds sensitive data this model may not see. Pick another one."
+msgstr "Ce chat contient des données sensibles que ce modèle ne peut pas voir. Choisissez-en un autre."
+
 #: src/chat/held-writes.tsx
 msgid "This chat read restricted data: this may send it out"
 msgstr "Ce chat a lu des données restreintes : ceci peut les envoyer à l’extérieur"
+
+#: src/chat/failure.ts
+msgid "This chat stays in the EU, and this model isn't hosted there. Pick another one."
+msgstr "Ce chat reste dans l’UE, et ce modèle n’y est pas hébergé. Choisissez-en un autre."
 
 #: src/routes/_shell.knowledge.$collection.tsx
 msgid "This collection has no files yet."
@@ -12810,6 +12861,10 @@ msgstr "Ce lien ouvre l’app avec quelque chose qu’elle n’accepte pas. Ouvr
 msgid "This list is too large. I can take up to {peopleMost} people in up to {teamsMost} teams."
 msgstr "Cette liste est trop longue. Je peux prendre jusqu’à {peopleMost} personnes dans {teamsMost} équipes au plus."
 
+#: src/chat/failure.ts
+msgid "This model can't give an answer that long. Pick another model, or ask for less."
+msgstr "Ce modèle ne peut pas donner une réponse aussi longue. Choisissez un autre modèle, ou demandez moins."
+
 #: src/routes/_shell.settings.models.tsx
 msgid "This month"
 msgstr "Ce mois-ci"
@@ -12837,6 +12892,10 @@ msgstr "Cette politique n’existe plus"
 #: src/routes/_shell.policies.rules.$ruleId.tsx
 msgid "This rule is not here any more"
 msgstr "Cette règle n’existe plus"
+
+#: src/chat/failure.ts
+msgid "This run has made all the model calls it may make."
+msgstr "Cette exécution a fait tous les appels au modèle qu’elle peut faire."
 
 #: src/routes/_shell.workflows.$app.$workflow_.runs.$run.tsx
 msgid "This run's details were removed once its retention was over, and its history with them."
@@ -14775,6 +14834,10 @@ msgstr "Votre onboarding"
 msgid "your organization"
 msgstr "votre organisation"
 
+#: src/chat/failure.ts
+msgid "Your organization doesn't allow this model. Pick another one."
+msgstr "Votre organisation n’autorise pas ce modèle. Choisissez-en un autre."
+
 #: src/connections/connect-dialog.tsx
 msgid "Your organization uses it through the permissions you grant."
 msgstr "Votre organisation l’utilise via les autorisations que vous accordez."
@@ -14782,6 +14845,10 @@ msgstr "Votre organisation l’utilise via les autorisations que vous accordez."
 #: src/routes/_shell.settings.security.tsx
 msgid "Your organization’s account"
 msgstr "Le compte de votre organisation"
+
+#: src/chat/failure.ts
+msgid "Your organization's model limits need a check. Ask your admin to have Grasp look at them."
+msgstr "Les limites de modèles de votre organisation doivent être vérifiées. Demandez à votre admin de les faire vérifier par Grasp."
 
 #: src/onboarding/about-story.tsx
 msgid "Your people, documents and tools first. Then two weeks of short conversations with your team. At {threshold}%, your team can start."

@@ -6,6 +6,7 @@ import type {
 import type { I18n } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 
+import { failureMessage } from "./failure.ts";
 import type { SourceName } from "./sources.tsx";
 
 // A chat as Markdown, for its export (export/export-menu.tsx): its title,
@@ -43,7 +44,7 @@ const endNote = (
       return i18n._(msg`The answer was cut off at the model's limit.`);
     }
     case "failed": {
-      return reply.error ?? i18n._(msg`The model call failed.`);
+      return failureMessage(reply.failure, i18n);
     }
     case "done": {
       return undefined;

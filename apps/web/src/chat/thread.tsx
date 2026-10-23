@@ -29,6 +29,7 @@ import {
   ConversationContent,
   ConversationScrollButton,
 } from "./conversation.tsx";
+import { failureMessage } from "./failure.ts";
 import { GraspSign } from "./grasp-sign.tsx";
 import {
   Message,
@@ -251,7 +252,7 @@ const Reply = ({
 }: {
   reply: ChatPartial & {
     end?: Answer["end"];
-    error?: string;
+    failure?: Answer["failure"];
     /** A stored answer's citations; one being written has none. */
     citations?: ChatCitation[];
   };
@@ -267,7 +268,7 @@ const Reply = ({
   /** Asks the last question again, offered under the last answer. */
   onRetry?: () => void;
 }) => {
-  const { t } = useLingui();
+  const { t, i18n } = useLingui();
   const answer = reply.text.trim();
   const quiet = writing || sign !== undefined;
   return (
@@ -305,7 +306,7 @@ const Reply = ({
             <div className="flex items-start gap-3 rounded-lg border px-3.5 py-3">
               <TriangleAlertIcon className="text-destructive mt-0.5 size-4 flex-none" />
               <p className="flex-1" role="alert">
-                {reply.error ?? t`The model call failed.`}
+                {failureMessage(reply.failure, i18n)}
               </p>
               {onRetry === undefined ? null : (
                 <Button onClick={onRetry} size="sm" variant="outline">

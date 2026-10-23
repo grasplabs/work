@@ -35,6 +35,9 @@ export const modelErrors = defineErrorFamily({
     "The model's answer didn't match the expected shape, also when asked again.",
 });
 
+/** One of {@link modelErrors}' codes: why the model gateway refused or failed a call. */
+export type ModelErrorCode = Parameters<typeof modelErrors.create>[0];
+
 /**
  * How hard a model thinks before it answers, least first: the levels
  * Claude and OpenAI both take. A model takes some, all or none of them
