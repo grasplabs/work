@@ -1,11 +1,11 @@
 /**
  * Generates the release manifest (@grasp-os/shared/release, the contract
- * with the console) from each Worker's wrangler.jsonc and build, and writes
+ * with the admin) from each Worker's wrangler.jsonc and build, and writes
  * and verifies a release directory.
  *
  * Names (Workers, D1 databases, R2 buckets, the workflow) are the same in
  * every client account; what differs per account is a placeholder the
- * console fills in for the Worker it deploys (see the manifest's header
+ * admin fills in for the Worker it deploys (see the manifest's header
  * comment).
  */
 import {
@@ -318,7 +318,7 @@ const MIGRATION_NAME = /^(?<number>\d{4,})_[^/]*\.sql$/u;
  * Each database's schema (`compatibility.databases`): its newest
  * migration's number, and the oldest whose code runs on it. Fails the
  * build on a migration that isn't numbered in order from 0000, since the
- * console compares schemas by those numbers.
+ * admin compares schemas by those numbers.
  */
 const databaseSchemas = (
   workers: readonly WorkerBuild[]
@@ -498,7 +498,7 @@ export interface VerifiedRelease {
 }
 
 /**
- * Checks a release directory against its manifest, as the console checks
+ * Checks a release directory against its manifest, as the admin checks
  * a release in R2 (`verifyReleaseBlobs`). Each file is read once, and
  * those bytes are returned, so what's published is what was checked.
  */

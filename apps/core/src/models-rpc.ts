@@ -34,8 +34,8 @@ import type { SessionCheck } from "./session-check.ts";
 // each budget, and this month's spend budget or not (model-budgets.ts),
 // and each App's model binding with its own caps and what it spent
 // (resource-bindings.ts). The settings are deployment config that the
-// console sets, so nothing here changes them. Reads aren't
-// audited: the rules are the console's to record, and each call's cost is
+// admin sets, so nothing here changes them. Reads aren't
+// audited: the rules are the admin's to record, and each call's cost is
 // in the audit log already, with its model call.
 //
 // And the reservations the model ledger set aside because it couldn't read

@@ -5,7 +5,7 @@ import { identifierMaxLength } from "./identifier.ts";
 
 // Ask Grasp (GRA-657): the admin's own chat over every organization. Its
 // model calls go through Grasp's own core and its model gateway, never
-// from the console or the browser (GRA-637, answer 3): the console asks
+// from the admin or the browser (GRA-637, answer 3): the admin asks
 // that core, signed with the key both derive from its auth secret for this
 // purpose alone, as it asks for the admin snapshot (`admin-snapshot.ts`),
 // and names the staff member Cloudflare Access let in, whom core's audit
@@ -14,7 +14,7 @@ import { identifierMaxLength } from "./identifier.ts";
 // and nothing else: no tools, and never what anyone said in an interview,
 // which the document doesn't hold.
 
-/** Where the console asks Grasp's own core. Behind the router-secret check. */
+/** Where the admin asks Grasp's own core. Behind the router-secret check. */
 export const adminAskPath = "/platform/admin/ask";
 
 /** The purpose the request's signing key is derived for (`hkdfHmacKey`). */
@@ -44,7 +44,7 @@ const turnSchema = z.strictObject({
 export type AdminAskTurn = z.output<typeof turnSchema>;
 
 /**
- * What the console sends: when, so a request caught on its way can't be
+ * What the admin sends: when, so a request caught on its way can't be
  * sent later; the staff member asking, for the audit log; the admin's
  * document; and the conversation, taking turns, starting and ending with
  * a question.
@@ -76,7 +76,7 @@ export const adminAskAnswerSchema = z.object({
 });
 export type AdminAskAnswer = z.output<typeof adminAskAnswerSchema>;
 
-/** Why Grasp's core didn't answer, as the console says it. */
+/** Why Grasp's core didn't answer, as the admin says it. */
 export const adminAskErrors = defineErrorFamily({
   "admin_ask.no_model":
     "Grasp's own platform has no model it may send every company's numbers to.",

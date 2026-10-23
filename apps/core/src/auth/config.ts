@@ -7,7 +7,7 @@ import type { SignInConfig } from "@grasp-os/shared/deployment-config";
 import { loopbackHosts } from "@grasp-os/shared/router";
 
 /**
- * The deployment's sign-in config (the `SIGN_IN` var the console sets), or
+ * The deployment's sign-in config (the `SIGN_IN` var the admin sets), or
  * `undefined` when none is set. A config that doesn't parse counts as none:
  * sign-in fails closed.
  */
@@ -57,7 +57,7 @@ const microsoftOrigin = "https://login.microsoftonline.com";
  * wrangler.jsonc; apps/core/test/idp-worker.ts). It applies only while
  * both it and the deployment's own origin (`SIGN_IN.origin`) are on this
  * machine. A deployment's origin is its public hostname, set by the
- * console, so setting the var alone does nothing there; and whoever can set
+ * admin, so setting the var alone does nothing there; and whoever can set
  * both already controls sign-in.
  */
 export const devIdpOrigin = (
