@@ -76,6 +76,40 @@ const cachedBuilds = async (): Promise<number> => {
   return page.objects.length;
 };
 
+/**
+ * Rewrites every build cached in R2 that holds `word`, as someone who can
+ * write to the bucket but doesn't hold core's secret could, keeping what
+ * it was written with: how many it rewrote.
+ */
+const poisonBuildCache = async (word: string): Promise<number> => {
+  let poisoned = 0;
+  let cursor: string | undefined;
+  do {
+    // oxlint-disable-next-line no-await-in-loop -- one page after another
+    const page = await env.FILES.list({ cursor, include: ["customMetadata"] });
+    for (const { key, customMetadata } of page.objects) {
+      if (!/^[a-z-]+-builds\//u.test(key) || key.startsWith("package-")) {
+        continue;
+      }
+      // oxlint-disable-next-line no-await-in-loop -- one after another
+      const object = await env.FILES.get(key);
+      // oxlint-disable-next-line no-await-in-loop -- see above
+      const text = (await object?.text()) ?? "";
+      if (text.includes(word)) {
+        // oxlint-disable-next-line no-await-in-loop -- see above
+        await env.FILES.put(
+          key,
+          text.replaceAll(word, "PWNED"),
+          customMetadata === undefined ? {} : { customMetadata }
+        );
+        poisoned += 1;
+      }
+    }
+    cursor = page.truncated ? page.cursor : undefined;
+  } while (cursor !== undefined);
+  return poisoned;
+};
+
 /** An App running `files`, and who builds it. */
 const published = async () => {
   const builder = await signedInApi(idp, "builder");
@@ -444,6 +478,38 @@ describe("screens sealed with their release", { timeout: 120_000 }, () => {
       moved: { status: 404, cache: "no-store" },
       edited: { status: 404, cache: "no-store" },
       reopened: deskFrame?.screen.entry,
+    });
+  });
+
+  it("seals and serves what its files build to, not a build rewritten in R2's cache", async () => {
+    const { builder, app, id } = await published();
+    // The next version builds to what the first did, so sealing it asks
+    // the cache for the builds the first left there.
+    const { version } = await builder.api.apps.files.commit(
+      app,
+      { "screens/desk.tsx": `${files["screens/desk.tsx"]}\n` },
+      "Again"
+    );
+    const poisoned = {
+      screens: await poisonBuildCache("Desk"),
+      server: await poisonBuildCache("Sealed screens"),
+    };
+    await builder.api.apps.versions.setCurrent(app, version);
+
+    const sealed = await sealedScreen(env, id, version, "desk");
+    const frame = await loadFrame(await builder.api.screens.open(app, "desk"));
+    const running = await loadRelease(env, id, version);
+
+    expect({
+      rewrote: poisoned.screens > 0 && poisoned.server > 0,
+      sealed: JSON.stringify(sealed.code).includes("PWNED"),
+      served: JSON.stringify(frame?.modules ?? {}).includes("PWNED"),
+      server: JSON.stringify([running.modules, running.app]).includes("PWNED"),
+    }).toStrictEqual({
+      rewrote: true,
+      sealed: false,
+      served: false,
+      server: false,
     });
   });
 
