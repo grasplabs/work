@@ -284,6 +284,28 @@ export interface Took {
   seconds?: number;
 }
 
+/** The most words transcription is asked to listen out for. */
+export const listeningTermsMax = 30;
+
+/**
+ * Words to listen out for, as transcription takes them: each once,
+ * whatever its case, longer than two characters and shorter than forty,
+ * the first `listeningTermsMax` of them, in the order given.
+ */
+const listenFor = (terms: readonly string[]): string[] => {
+  const seen = new Set<string>();
+  const kept: string[] = [];
+  for (const term of terms) {
+    const word = term.replaceAll(/\s+/gu, " ").trim();
+    const key = word.toLowerCase();
+    if (word.length > 2 && word.length < 40 && !seen.has(key)) {
+      seen.add(key);
+      kept.push(word);
+    }
+  }
+  return kept.slice(0, listeningTermsMax);
+};
+
 /** What one interview turn knows of who it is with, from the store (`turnContext`). */
 /** What the drawing gets from one interview: only what its person agreed to. */
 export interface DrawInput {
@@ -1040,6 +1062,35 @@ export class Onboarding extends DurableObject<Env> {
       known: known.join("\n\n"),
       terms: [...new Set(terms)],
     });
+  }
+
+  /**
+   * The words to listen out for when someone talks (`listenFor`): the
+   * company's name, the names of `person`'s team and its lead, the
+   * company's own words from Stephen's setup, and the tools the shared
+   * documents name. Without `person`, as for an admin, the team's names
+   * are left out.
+   */
+  async listeningTerms(person?: string): Promise<string[]> {
+    const roster = this.#roster();
+    const own = roster?.people.find(({ id }) => id === person);
+    const team = roster?.teams.find(({ id }) => id === own?.team);
+    const names = (roster?.people ?? [])
+      .filter(
+        (each) =>
+          own !== undefined &&
+          (each.team === own.team || each.id === team?.lead) &&
+          !each.away
+      )
+      .map(({ name }) => firstName(name));
+    return listenFor([
+      await companyName(this.env),
+      ...(own === undefined ? [] : [firstName(own.name)]),
+      ...(team === undefined ? [] : [team.name]),
+      ...names,
+      ...this.stephen().setup.terms,
+      ...this.documents().flatMap(({ reading }) => reading.tools),
+    ]);
   }
 
   /**

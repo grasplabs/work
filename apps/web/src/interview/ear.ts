@@ -132,6 +132,8 @@ interface Stretch {
   live: boolean;
   /** When the microphone was last looked at. */
   before: number;
+  /** When it ended; 0 while it lasts. */
+  ended: number;
 }
 
 const fresh = (number: number): Stretch => ({
@@ -144,6 +146,7 @@ const fresh = (number: number): Stretch => ({
   talking: false,
   live: false,
   before: performance.now(),
+  ended: 0,
 });
 
 /**
@@ -238,7 +241,7 @@ export const openEar = async (options: EarOptions): Promise<Ear | null> => {
       ...options.link,
       locale: options.locale,
       audio: blob,
-      seconds: closing.voiced / 1000,
+      seconds: (closing.ended - closing.began) / 1000,
     });
     if (closed) {
       return;
@@ -258,6 +261,7 @@ export const openEar = async (options: EarOptions): Promise<Ear | null> => {
   /** The stretch is done: off it goes to be written down, and the next begins. */
   const finish = (now: number): void => {
     const closing = stretch;
+    closing.ended = now;
     const wanted = recording;
     count += 1;
     stretch = fresh(count);
@@ -359,11 +363,13 @@ export const openEar = async (options: EarOptions): Promise<Ear | null> => {
         return;
       }
       deaf = on;
+      // Nothing is recorded while nobody listens; listening again starts afresh.
+      forget();
       if (on) {
-        // Nothing is recorded while nobody listens; listening again, the next look starts a recording.
-        forget();
         stopRecording(recording);
         recording = null;
+      } else {
+        restart();
       }
     },
     close: () => {
