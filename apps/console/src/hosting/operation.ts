@@ -18,7 +18,11 @@
  *    Workers need, delivered by name to each script, then observed.
  * 7. `probe`: core answers its health check as the version live, with the
  *    router secret the router will send (`smokeCheck`).
- * 8. `route`: only then the client's hostname in the router's map.
+ * 8. `mail`, then `route`: for a release that sends mail, the client's
+ *    sending domain (`clientMailDomain`) with Email Sending on in the
+ *    destination's account (`ensureSendingDomain`), as a deploy sets it
+ *    up, so core's `EMAIL` sends from the onboarding sender it's locked
+ *    to; only then the client's hostname in the router's map.
  * 9. `done`: the operation recorded complete, the client active and the
  *    runner's claim released, in one batch.
  *
@@ -31,7 +35,9 @@
  * Every step can run again: a retry, by the same runner or one that took
  * the client over, runs the operation from its first step, and each step
  * finds what an earlier run did. Resources are found by their recorded
- * names and ids; migrations skip what a database applied; an upload whose
+ * names and ids; migrations skip what a database applied; the sending
+ * domain's zone is found by its name, and sending turned on only where
+ * it's off; an upload whose
  * fingerprint (everything that went into it) is recorded, and whose
  * script is observed at the release's migration tag, isn't made again;
  * secrets whose fingerprint is recorded aren't delivered again. Nothing
@@ -58,7 +64,9 @@
  * - A Workers for Platforms destination: its documented upload, secrets
  *   and script details calls are used, and any binding its documentation
  *   doesn't list for user Workers is refused before an upload
- *   (`wfp_binding_unqualified`). How the console probes, and the router
+ *   (`wfp_binding_unqualified`): a release that sends mail among them, as
+ *   whether a user Worker can send through a `send_email` binding at all
+ *   is a spike of its own. How the console probes, and the router
  *   reaches, a user Worker in a namespace isn't qualified, so the probe
  *   stops there (`probe_unqualified`) and the hostname stays unpublished.
  *   Real-account qualification is GRA-430's.
@@ -76,6 +84,7 @@ import { z } from "zod";
 
 import { findD1Database } from "../cloudflare/accounts.ts";
 import type { CloudflareApi } from "../cloudflare/api.ts";
+import { ensureSendingDomain } from "../cloudflare/email-sending.ts";
 import {
   liveVersion,
   putSchedules,
@@ -90,7 +99,7 @@ import { actIfChanged } from "../db/act.ts";
 import type { Actor, ConsoleDatabase } from "../db/act.ts";
 import { clientProvisions, clients, clientWorkers } from "../db/schema.ts";
 import { currentReleases, incompatibility } from "../deploy/compatibility.ts";
-import { derivedCoreConfig } from "../deploy/core-config.ts";
+import { clientMailDomain, derivedCoreConfig } from "../deploy/core-config.ts";
 import type { SignInApps } from "../deploy/core-config.ts";
 import {
   configuredCoreVars,
@@ -99,6 +108,7 @@ import {
 } from "../deploy/deploy.ts";
 import { migrateDatabases } from "../deploy/migrations.ts";
 import { importedManifest } from "../deploy/release.ts";
+import { sendsMail } from "../deploy/resources.ts";
 import {
   coreOrigin,
   registerHostname,
@@ -196,6 +206,7 @@ export const provisionSteps = [
   "core",
   "secrets",
   "probe",
+  "mail",
   "route",
 ] as const;
 export type ProvisionStep = (typeof provisionSteps)[number];
@@ -223,6 +234,11 @@ const progressSchema = z.object({
   secrets: z.record(z.string(), z.string()).default({}),
   /** The core origin the probe passed at. */
   origin: z.string().optional(),
+  /**
+   * The sending domain's zone, for a release that sends mail, and whether
+   * it was active (its name servers delegated) when last ensured.
+   */
+  mail: z.object({ zoneId: z.string(), active: z.boolean() }).optional(),
 });
 type Progress = z.infer<typeof progressSchema>;
 
@@ -923,6 +939,43 @@ const probe = async (
   return origin;
 };
 
+/**
+ * Step 8, first part: for a release that sends mail, the client's sending
+ * domain in the destination's account with Email Sending on, found before
+ * anything is created (`ensureSendingDomain`); a release that sends none
+ * sets up nothing. Before the hostname is published, so no client is
+ * reachable whose mail has nowhere to send from.
+ */
+const setUpMail = async (
+  context: ProvisionContext,
+  loaded: Loaded
+): Promise<void> => {
+  const { db } = context;
+  if (!sendsMail(loaded.manifest)) {
+    await recordStep(db, loaded, "mail");
+    return;
+  }
+  await assertHolds(db, loaded.held);
+  const sending = await ensureSendingDomain(
+    context.api,
+    loaded.accountId,
+    clientMailDomain(loaded.held.clientId, context.router.domain)
+  );
+  const progress = await progressNow(db, loaded.operation.id);
+  await recordStep(
+    db,
+    loaded,
+    "mail",
+    // Mail sends only once the zone is delegated, which happens outside
+    // the operation: on record for staff to see, as a deploy records it.
+    { mailDomainActive: sending.active ? 1 : 0 },
+    {
+      ...progress,
+      mail: { zoneId: sending.zoneId, active: sending.active },
+    }
+  );
+};
+
 /** Step 8: the client's hostname in the router's map, only after the probe passed. */
 const route = async (
   context: ProvisionContext,
@@ -1082,6 +1135,9 @@ export const runClientProvision = async (
 
     step = "probe";
     const origin = await probe(context, loaded, inventory);
+
+    step = "mail";
+    await setUpMail(context, loaded);
 
     step = "route";
     await route(context, loaded, origin);
