@@ -23,9 +23,10 @@ import { z } from "zod";
 import { derivedHmacKey } from "../derived-keys.ts";
 import { noteProvenance } from "./access.ts";
 import type { Reader, ReadRecord } from "./access.ts";
-import { allowedFor } from "./app-entries.ts";
-import type { Allowed } from "./app-entries.ts";
+import { allowedFor } from "./authorize.ts";
+import type { Allowed } from "./authorize.ts";
 import { readableCollection } from "./collections.ts";
+import { portsOf } from "./ports.ts";
 import { nearestCollectionsMax, nearestDetail } from "./usage-tally.ts";
 
 // Full-text search over sections, in two FTS5 indexes kept by triggers on
@@ -479,7 +480,7 @@ export const searchSections = async (
         collectionId: only,
       };
   const db = drizzle(env.KNOWLEDGE);
-  const allowed = await allowedFor(env, db, reader, scope);
+  const allowed = await allowedFor(portsOf(env), reader);
   // Refused like any read of a collection the reader can't read. A search
   // in one collection reads from it whatever it finds: that nothing
   // matches says something of what it holds too. So the collection is
