@@ -16,9 +16,9 @@ import { fakeGateway } from "./ai-gateway.ts";
 import type { GatewayReply } from "./ai-gateway.ts";
 import { auditedDuring, routed } from "./sign-in.ts";
 
-// Ask Grasp on Grasp's own core (src/admin-ask.ts): only the console's
+// Ask Grasp on Grasp's own core (src/admin-ask.ts): only the admin's
 // signed question reaches the model gateway, every question is in the
-// audit log by the staff member the console names before the model is
+// audit log by the staff member the admin names before the model is
 // asked, and the admin's document only goes to a model the deployment's
 // rules let take sensitive data. AI Gateway is the outside system: a fake
 // behind the AI binding.
@@ -34,7 +34,7 @@ const document = `# Grasp's admin
 - Interviews done: 12 of 20
 - Health: needs a look`;
 
-/** `body`'s signature as the console makes it, with the key `secret` gives for `purpose`. */
+/** `body`'s signature as the admin makes it, with the key `secret` gives for `purpose`. */
 const signatureOf = async (
   body: string,
   secret = env.BETTER_AUTH_SECRET,
@@ -119,7 +119,7 @@ describe("Ask Grasp on Grasp's own core", () => {
         const responses = await Promise.all([
           ask(fresh),
           ask(fresh, { signature: "0".repeat(64) }),
-          // The console's key for the admin snapshot asks nothing here.
+          // The admin's key for the admin snapshot asks nothing here.
           ask(fresh, {
             signature: await signatureOf(
               fresh,

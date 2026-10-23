@@ -8,6 +8,7 @@ import type { ReactNode } from "react";
 import type { CoreConnection } from "../core-connection.ts";
 import { keepFolded, readFolded } from "../fold.ts";
 import { TourLayer } from "../tour/tour-layer.tsx";
+import { useTour } from "../tour/tour-state.ts";
 import { AppSidebar } from "./app-sidebar.tsx";
 import { InFrame } from "./in-frame.ts";
 
@@ -16,6 +17,12 @@ import { InFrame } from "./in-frame.ts";
  * scrolls inside it so its site header stays in view. The shell's pages
  * are in it, and a page outside the shell for someone signed in, such as
  * a decision opened from a link.
+ *
+ * While Stephen gives the tour, from his question whether the person is
+ * ready to its end, the frame is inert: no press or key reaches a page
+ * under him, as in the prototype. His card stands outside it, so it is
+ * what is left to use. His offer alone doesn't hold it: the person may
+ * pass it by and ask their own question.
  */
 export const AppFrame = ({
   core,
@@ -31,6 +38,8 @@ export const AppFrame = ({
 }) => {
   // Folded as the person left it in this browser.
   const [open, setOpen] = useState(() => readFolded("sidebar") !== true);
+  const { phase } = useTour();
+  const touring = phase === "opening" || phase === "running";
   return (
     // What the frame says of an action outside any page, such as a
     // sign-out from the person menu that core didn't carry out.
@@ -38,6 +47,7 @@ export const AppFrame = ({
       <TooltipProvider>
         <SidebarProvider
           className="h-svh"
+          inert={touring}
           onOpenChange={(next) => {
             setOpen(next);
             void keepFolded("sidebar", !next);
@@ -49,8 +59,8 @@ export const AppFrame = ({
             <InFrame value>{children}</InFrame>
           </SidebarInset>
           {aside}
-          <TourLayer identity={identity} />
         </SidebarProvider>
+        <TourLayer identity={identity} />
       </TooltipProvider>
     </Toaster>
   );

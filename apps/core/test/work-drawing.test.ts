@@ -6,7 +6,7 @@ import type {
   InterviewSaved,
 } from "@grasp-os/shared/interview-links";
 import type { FactTag } from "@grasp-os/shared/interview-turn";
-import type { Roster } from "@grasp-os/shared/onboarding";
+import type { Roster, SettleChoice } from "@grasp-os/shared/onboarding";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
@@ -567,14 +567,74 @@ describe("the work as drawn", () => {
   });
 
   it.each([
-    { why: "", told: ["lisa", "tim", "bram"], state: "complete" },
-    { why: "place", told: ["lisa", "tim", "bram"], state: "variants" },
+    {
+      why: "",
+      told: ["lisa", "tim", "bram"],
+      holds: null,
+      counted: false,
+      state: "complete",
+    },
+    {
+      why: "place",
+      told: ["lisa", "tim", "bram"],
+      holds: null,
+      counted: false,
+      state: "variants",
+    },
     // Told two ways and nobody can say why: it waits until somebody can.
-    { why: "conflict", told: ["lisa", "tim", "bram"], state: "blocked" },
-    { why: "", told: ["lisa", "tim"], state: "mapping" },
-  ])(
-    "is known as $state when $told.length of three told it, a step told two ways for '$why'",
-    ({ why, told, state }) => {
+    {
+      why: "conflict",
+      told: ["lisa", "tim", "bram"],
+      holds: null,
+      counted: false,
+      state: "blocked",
+    },
+    // Or until the admin settles it: both ways kept, or one that holds.
+    {
+      why: "conflict",
+      told: ["lisa", "tim", "bram"],
+      holds: "both",
+      counted: false,
+      state: "variants",
+    },
+    {
+      why: "conflict",
+      told: ["lisa", "tim", "bram"],
+      holds: "other",
+      counted: false,
+      state: "complete",
+    },
+    {
+      why: "",
+      told: ["lisa", "tim"],
+      holds: null,
+      counted: false,
+      state: "mapping",
+    },
+    // Counted as known by hand by Grasp: that holds, unless nobody can say why.
+    {
+      why: "",
+      told: ["lisa", "tim"],
+      holds: null,
+      counted: true,
+      state: "complete",
+    },
+    {
+      why: "conflict",
+      told: ["lisa", "tim", "bram"],
+      holds: null,
+      counted: true,
+      state: "blocked",
+    },
+  ] satisfies {
+    why: string;
+    told: string[];
+    holds: SettleChoice | null;
+    counted: boolean;
+    state: string;
+  }[])(
+    "is known as $state when $told.length of three told it, a step told two ways for '$why', settled as $holds, counted by hand $counted",
+    ({ why, told, holds, counted, state }) => {
       const drawn = drawnOf(
         {
           steps: [
@@ -604,6 +664,8 @@ describe("the work as drawn", () => {
         told,
         doers: ["lisa", "tim", "bram"],
         lead: null,
+        holds,
+        counted,
       });
       expect(known.state).toBe(state);
     }

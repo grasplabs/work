@@ -773,7 +773,7 @@ const inboundMailDomain = (
   env: Pick<Env, "INBOUND_MAIL_DOMAIN">
 ): string | undefined => {
   const raw = env.INBOUND_MAIL_DOMAIN;
-  // A string var: the console sets it as JSON, which arrives parsed (a
+  // A string var: the admin sets it as JSON, which arrives parsed (a
   // bare string), and `wrangler dev --var` as text, which may or may not be
   // JSON. Either way a bare domain is read as the JSON string it is.
   return deploymentConfig(

@@ -3,12 +3,16 @@ import { describe, expect, it } from "vite-plus/test";
 import { adminSnapshotSchema } from "../../src/admin-snapshot.ts";
 import type { AdminSnapshot } from "../../src/admin-snapshot.ts";
 import { logItemsOf } from "../../src/admin/admin-log.ts";
+import { missingOf } from "../../src/admin/admin-missing.ts";
 import {
   adminOrgOf,
   staffSnapshotOf,
 } from "../../src/admin/admin-snapshot-adapter.ts";
 import { adminViewOf, portfolioOf } from "../../src/admin/admin-view.ts";
+import { recordOf } from "../../src/admin/onboarding-admin-record.ts";
+import { STARTING_ORG_RULES } from "../../src/admin/onboarding-admin.ts";
 import { orgOfSnapshot } from "../../src/admin/org-adapter.ts";
+import type { Told, WorkRecord } from "../../src/admin/org-record.ts";
 
 const client = {
   id: "bakkerij",
@@ -19,7 +23,7 @@ const client = {
 // A small company as core answers for it: two teams; Sales's lead finished
 // and its links went out, one of them talking now and one not invited yet;
 // Operations's lead has their link and opened it. The AI was used on two
-// days. Written as core sends it, and read as the console reads it.
+// days. Written as core sends it, and read as the admin reads it.
 const answer = {
   now: "2026-10-14T10:05:00Z",
   company: {
@@ -263,6 +267,29 @@ const text = (value: unknown): string =>
     }
     return each;
   });
+
+/** What someone told of a piece of work: both steps, and the numbers given. */
+const told = (numbers: Partial<Told>): Told => ({
+  start: true,
+  steps: [0, 1],
+  end: true,
+  way: null,
+  waits: [],
+  differently: [],
+  decides: false,
+  own: false,
+  ai: false,
+  volume: null,
+  takes: null,
+  wrong: null,
+  right: false,
+  ask: false,
+  next: false,
+  example: null,
+  term: false,
+  out: [],
+  ...numbers,
+});
 
 describe("an organization from core's admin snapshot", () => {
   it("is told, nine days in, with the agreements in and its leads named", () => {
@@ -872,5 +899,110 @@ describe("an organization from core's admin snapshot", () => {
     expect(text(orgOfSnapshot(adapted))).not.toMatch(
       /secret|lost|Taking orders|"fee":4000|"plan":"Grasp"|logo/u
     );
+  });
+
+  it("shows staff a drawn piece of work with each person's numbers apart, its open questions, under the organization's rules", () => {
+    // Tom finished too, and both told about taking orders.
+    const both = adminSnapshotSchema.parse({
+      ...answer,
+      links: answer.links.map((link) =>
+        link.person === "tom" ? { ...link, state: "completed" } : link
+      ),
+      interviews: answer.interviews.map((interview) =>
+        interview.person === "tom"
+          ? {
+              ...interview,
+              completedAt: "2026-10-14T10:00:00.000Z",
+              agreed: true,
+              phase: "readback",
+              stoppedAt: null,
+            }
+          : interview
+      ),
+    });
+    const orders: WorkRecord = {
+      id: "orders",
+      team: "sales",
+      name: "Taking orders",
+      item: ["order", "orders"],
+      doers: ["lisa", "tom", "ann"],
+      share: 0.6,
+      from: "lead",
+      stale: false,
+      drawn: {
+        at: "2026-10-14T10:01:00.000Z",
+        from: ["lisa", "tom"],
+        starts: "A shop calls.",
+        steps: [
+          {
+            text: "Write the order down.",
+            who: "Sales",
+            tool: "Excel",
+            minutes: null,
+            documented: false,
+          },
+          {
+            text: "Send it to the bakery.",
+            who: "Sales",
+            tool: "",
+            minutes: null,
+            documented: false,
+          },
+        ],
+        waits: [],
+        differently: [],
+        decides: "",
+        own: "",
+        ai: "",
+        right: "",
+        ask: "",
+        next: "",
+        term: null,
+        differs: null,
+        per: "week",
+        unit: "minutes",
+        told: {
+          lisa: told({ volume: [20, 40], takes: [2, 5, 10] }),
+          tom: told({ volume: [60, 80], wrong: 2 }),
+        },
+        open: ["Who takes an order when Sales is out?"],
+      },
+    };
+    const rules = { ...STARTING_ORG_RULES, people: 2 };
+    const { org, state } = adminOrgOf(both, client, {
+      works: [orders],
+      rules,
+      counted: ["orders"],
+    });
+    const view = adminViewOf(org, state, "2026-10-14");
+    const record = recordOf(view, "orders");
+    const missing = record
+      ? missingOf(record, orders.drawn?.open).map(({ kind }) => kind)
+      : [];
+
+    expect({
+      unknown: view.unknown.works,
+      rules: state.rules,
+      evidence: view.works.map(({ id, approved, state: stands, byHand }) => [
+        id,
+        approved,
+        stands,
+        byHand,
+      ]),
+      volume: record?.volume,
+      wrong: record?.wrong,
+      heardFrom: record?.interviews.map(({ person }) => person.id),
+      missing,
+    }).toStrictEqual({
+      unknown: false,
+      rules,
+      // Two of three talked: not known by the rules, but counted by hand.
+      evidence: [["orders", 2, "complete", true]],
+      // The lowest and the highest anyone said, never an average.
+      volume: { quiet: [20, 60], busy: [40, 80], people: 2 },
+      wrong: { outOfTen: [2, 2], people: 1 },
+      heardFrom: ["lisa", "tom"],
+      missing: ["people", "around", "around", "question"],
+    });
   });
 });

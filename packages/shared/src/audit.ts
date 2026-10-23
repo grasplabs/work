@@ -95,8 +95,8 @@ export const auditActorSchema = z.discriminatedUnion("type", [
     type: z.literal("staff"),
     userId: identifierSchema,
     /**
-     * Read through the staff console rather than signed in here: `userId`
-     * is then the email Cloudflare Access verified, as the console signs
+     * Read through Grasp's admin rather than signed in here: `userId`
+     * is then the email Cloudflare Access verified, as the admin signs
      * it (core's admin-snapshot.ts), for they have no user here.
      */
     via: z.literal("console").optional(),
