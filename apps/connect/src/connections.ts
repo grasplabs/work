@@ -171,6 +171,7 @@ export const connectionOwners = async (
     .select({
       id: connections.id,
       ownerUserId: connections.ownerUserId,
+      status: connections.status,
       source: connections.serverKind,
       provider: connections.provider,
       accountId: connections.accountId,

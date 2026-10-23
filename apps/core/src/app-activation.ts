@@ -8,13 +8,8 @@ import { workflowErrors } from "@grasp-os/shared/workflows";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
+import { activateThroughCandidate } from "./app-candidates.ts";
 import { loadRelease, sealRelease } from "./app-releases.ts";
-import {
-  appFor,
-  findVersion,
-  setCurrentVersion,
-  versionFiles,
-} from "./apps.ts";
 import { createStore } from "./data-stores.ts";
 import { appDefaultStores, businessStores } from "./db/core/schema.ts";
 import { aiStepProblem, workflowAiSteps } from "./resource-bindings.ts";
@@ -34,7 +29,7 @@ import { aiStepProblem, workflowAiSteps } from "./resource-bindings.ts";
 //   activation creates is theirs, as `createStore` records it. Who else
 //   manages an App's store is GRA-416's.
 // - A version runs without its release, or on a store that is gone:
-//   `setCurrentVersion` refuses a version of spec 8's layout whose release
+//   `makeCurrent` refuses a version of spec 8's layout whose release
 //   isn't sealed, is revoked, or is bound to a deleted store, whoever calls
 //   it, in the statement that makes it current. A deleted default store is
 //   replaced by a new one for the versions sealed after it.
@@ -75,7 +70,7 @@ const defaultStoreOf = async (
  * conditional statement, so of two activations replacing it at once one
  * record wins and both use its store; the other store stays empty and
  * claimed by no App. The versions sealed on the deleted store stay bound
- * to it and are refused as they are made current (`setCurrentVersion`):
+ * to it and are refused as they are made current (`makeCurrent`):
  * their data is gone, and a fresh store isn't it.
  */
 const ensureDefaultStore = async (
@@ -124,7 +119,8 @@ const sealForActivation = async (
   by: Identity,
   app: AppId,
   version: number,
-  files: Readonly<Record<string, string>>
+  files: Readonly<Record<string, string>>,
+  building: () => Promise<void>
 ): Promise<void> => {
   if (!isAppLayout(files)) {
     return;
@@ -132,7 +128,7 @@ const sealForActivation = async (
   const found = await defaultStoreOf(env, app);
   const store = found?.live === true ? found.store : undefined;
   try {
-    await sealRelease(env, { app, version, store, by });
+    await sealRelease(env, { app, version, store, by, building });
   } catch (error) {
     if (store !== undefined || !needsStore(error)) {
       throw error;
@@ -142,6 +138,7 @@ const sealForActivation = async (
       version,
       store: await ensureDefaultStore(env, by, app),
       by,
+      building,
     });
   }
 };
@@ -152,7 +149,7 @@ const sealForActivation = async (
  * sealed for it declares (`aiStepProblem`): an App without a release
  * declares none. Each such step is named, at its line.
  */
-const requireDeclaredModels = async (
+export const requireDeclaredModels = async (
   env: Env,
   app: AppId,
   version: number,
@@ -181,21 +178,22 @@ const requireDeclaredModels = async (
 };
 
 /**
- * Makes `version` of `app` the one that runs, for one of its builders:
- * sealed first when it is of spec 8's layout, and refused when its
- * workflows' AI steps go through models it doesn't declare (see the
- * header).
+ * Makes `version` of `app` the one that runs, for one of its builders,
+ * through a candidate (app-candidates.ts): sealed when it is of spec 8's
+ * layout, and refused when its workflows' AI steps go through models it
+ * doesn't declare (see the header), then verified and made current over
+ * the version current now, or over `expected` when the caller gives it.
  */
 export const activateVersion = async (
   env: Env,
   by: Identity,
   app: unknown,
-  version: unknown
-): Promise<App> => {
-  const found = await appFor(env, by, app, "builder");
-  const { version: number } = await findVersion(env, found.id, version);
-  const files = await versionFiles(env, found.id, number);
-  await sealForActivation(env, by, found.id, number, files);
-  await requireDeclaredModels(env, found.id, number, files);
-  return await setCurrentVersion(env, by, found.id, number);
-};
+  version: unknown,
+  expected?: unknown
+): Promise<App> =>
+  await activateThroughCandidate(env, by, app, version, {
+    expected,
+    seal: async (id, number, files, building) => {
+      await sealForActivation(env, by, id, number, files, building);
+    },
+  });

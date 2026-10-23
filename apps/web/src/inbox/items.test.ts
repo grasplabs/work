@@ -5,6 +5,9 @@ import {
   collectionIdSchema,
   connectionIdSchema,
   permissionIdSchema,
+  runIdSchema,
+  workflowIdSchema,
+  workflowResourceIdSchema,
 } from "@grasp-os/shared/ids";
 import type { Permission } from "@grasp-os/shared/permissions";
 import { describe, expect, it } from "vite-plus/test";
@@ -159,8 +162,17 @@ const waiting = (status: "active" | "needs_reauth" = "needs_reauth") =>
               at: "2026-10-13T10:00:00.000Z",
               read: false,
             },
+            {
+              id: "asked-1",
+              type: "gap_asked",
+              gap: "gap-invoices",
+              question: "How many invoices come in a month?",
+              owner: "Head of finance",
+              at: "2026-10-13T09:00:00.000Z",
+              read: false,
+            },
           ],
-          unread: 1,
+          unread: 2,
           more: false,
         },
       },
@@ -185,6 +197,25 @@ const waiting = (status: "active" | "needs_reauth" = "needs_reauth") =>
       state: "ready",
       data: [{ app, name: "Invoices", version: 3, screens: ["Overview"] }],
     },
+    decisions: {
+      state: "ready",
+      data: [
+        {
+          id: "decision-1",
+          workflowResource: {
+            id: workflowResourceIdSchema.parse("approve"),
+            name: "approve",
+          },
+          workflow: workflowIdSchema.parse("approve"),
+          run: runIdSchema.parse("run-2"),
+          description: "Approve this invoice?",
+          input: { amount: 5000 },
+          status: "open",
+          expiresAt: "2026-10-20T08:00:00.000Z",
+          revision: "revision-1",
+        },
+      ],
+    },
   }) satisfies Waiting;
 
 const admin = { role: "admin", staff: false, name: "Ada Admin" } as const;
@@ -195,6 +226,8 @@ describe(inboxItems, () => {
     const ids = inboxItems(waiting(), admin, readAt).map(({ id }) => id);
     expect(ids.toSorted()).toStrictEqual(
       [
+        "asked:asked-1",
+        "decision:decision-1",
         "failed:failure-1",
         "held:held-new",
         "held:held-old",
@@ -259,8 +292,20 @@ describe(listed, () => {
   it("shows one group of kinds when asked", () => {
     expect(
       listed(items, "workflows", "urgent").map(({ kind }) => kind)
-    ).toStrictEqual(["failedRun"]);
-    expect(listed(items, "brain", "urgent")).toStrictEqual([]);
-    expect(listed(items, "apps", "urgent")).toHaveLength(items.length - 1);
+    ).toStrictEqual(["decision", "failedRun"]);
+    expect(
+      listed(items, "brain", "urgent").map(({ kind, title, about }) => ({
+        kind,
+        title,
+        about,
+      }))
+    ).toStrictEqual([
+      {
+        kind: "openQuestion",
+        title: "How many invoices come in a month?",
+        about: { kind: "brain" },
+      },
+    ]);
+    expect(listed(items, "apps", "urgent")).toHaveLength(items.length - 3);
   });
 });

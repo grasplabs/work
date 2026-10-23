@@ -9,12 +9,15 @@
     "dev": "node scripts/dev.ts",
     "seed": "node scripts/seed.ts",
     "e2e": "playwright test",
+    "e2e:console": "playwright test -c playwright.console.config.ts",
     "smoke:workerd": "node scripts/workerd-smoke.ts",
     "smoke:code-mode": "node scripts/workerd-code-mode.ts",
     "check:docs": "node scripts/check-docs.ts",
     "check:product-name": "node scripts/check-product-name.ts",
     "check:migrations": "node scripts/check-migrations.ts",
     "check:wrangler-configs": "node scripts/check-wrangler-configs.ts",
+    "check:state-registry": "node scripts/check-state-registry.ts",
+    "check:playwright-image": "node scripts/check-playwright-image.ts",
     "github:setup": "node scripts/github-setup.ts",
     "check:branch": "node scripts/check-branch-name.ts",
     "build:jq-wasm": "node scripts/jq-wasm/build.ts",
@@ -22,8 +25,11 @@
     "test:durations": "node scripts/test-durations.ts",
     "release:build": "node scripts/release/build-release.ts",
     "release:upload": "node scripts/release/upload-release.ts",
+    "release:deploy": "node scripts/release/deploy-release.ts",
+    "release:accept": "node scripts/release/accept-release.ts",
     "package:definition": "node scripts/package-definition.ts",
-    "parity": "node scripts/parity/run.ts"
+    "parity": "node scripts/parity/run.ts",
+    "discord:commands": "node scripts/discord-commands.ts"
   },
   "devDependencies": {
     "@commitlint/cli": "catalog:",

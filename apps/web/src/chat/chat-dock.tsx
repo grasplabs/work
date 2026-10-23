@@ -1,7 +1,13 @@
 import type { ModelEfforts } from "@grasp-os/shared/models";
 import { Button, buttonVariants } from "@grasp-os/ui/components/button";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { Link, useLocation } from "@tanstack/react-router";
+import {
+  Link,
+  useLocation,
+  useMatch,
+  useRouteContext,
+  useRouter,
+} from "@tanstack/react-router";
 import {
   ChevronDownIcon,
   ChevronUpIcon,
@@ -20,6 +26,7 @@ import type { Loaded } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
 import { setActiveChat, useActiveChat } from "./active-chat.ts";
 import type { ChatSlot } from "./active-chat.ts";
+import { BrainQuestions } from "./brain-questions.tsx";
 import { useFollowedChat } from "./chat-watch.ts";
 import { Composer } from "./composer.tsx";
 import { setDockMode, useDockMode } from "./dock-mode.ts";
@@ -252,6 +259,30 @@ interface DockWords {
 }
 
 /**
+ * The brain's open questions, as the brain page read them (the brain's
+ * layout loads them: routes/_shell.brain.tsx), to answer or have asked
+ * about; the brain is read again when one was.
+ */
+const DockQuestions = ({ slot }: { slot: ChatSlot }) => {
+  const router = useRouter();
+  const { identity } = useRouteContext({ from: "/_shell" });
+  const brain = useMatch({ from: "/_shell/brain", shouldThrow: false });
+  const loaded = brain?.loaderData;
+  if (slot !== "brain" || loaded?.state !== "ready") {
+    return null;
+  }
+  return (
+    <BrainQuestions
+      gaps={loaded.data.workspace.gaps}
+      identity={identity}
+      onChanged={() => {
+        void router.invalidate();
+      }}
+    />
+  );
+};
+
+/**
  * The dock itself: on every page in the frame but Chat's, carrying on the
  * tab's open chat of `slot` (active-chat.ts).
  */
@@ -371,6 +402,7 @@ const Dock = ({ slot, words }: { slot: ChatSlot; words: DockWords }) => {
             view={view}
           />
         ) : null}
+        {open ? <DockQuestions slot={slot} /> : null}
         <div className={open ? "flex flex-none flex-col gap-1 p-3" : undefined}>
           {box}
           {noModels === undefined ? null : (
@@ -405,10 +437,9 @@ const Dock = ({ slot, words }: { slot: ChatSlot; words: DockWords }) => {
  * whose answers cite the notes they used (`ChatCitation`, opening them as
  * `CitedNote` does).
  *
- * The brain's open questions are to wait in the brain's chat, each to
- * answer there or to have Grasp ask the role that can (`brain.answerGap`,
- * `brain.askAboutGap`): they come with GRA-527's records (#882), and go
- * here, between the thread and the box.
+ * The brain's open questions wait in the brain's chat, between the thread
+ * and the box (`DockQuestions`), each to answer there or to have Grasp ask
+ * the role that can.
  */
 export const ChatDock = () => {
   const { t } = useLingui();

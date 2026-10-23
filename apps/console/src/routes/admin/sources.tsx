@@ -15,7 +15,7 @@ const localToday = (): string => {
 
 /** Where the admin's numbers come from, and where they go. */
 const SourcesPage = () => {
-  const views = organizationsOf(adminRoute.useLoaderData()).flatMap(
+  const views = organizationsOf(adminRoute.useLoaderData().admins).flatMap(
     ({ view }) => (view === null ? [] : [view])
   );
   return (

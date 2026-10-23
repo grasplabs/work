@@ -41,6 +41,25 @@ const coreDurableObjects = (): { name: string; className: string }[] =>
       className,
     }));
 
+/**
+ * The deployment's own hostname, as the console sets it (`SIGN_IN.origin`):
+ * the domain the router sorts its mail to it by.
+ */
+export const smokeHostname = "acme.grasp.test";
+
+/**
+ * Its sign-in config: an Entra tenant that isn't one, and no client secret
+ * for it, so nobody signs in.
+ */
+const signIn = {
+  origin: `https://${smokeHostname}`,
+  domains: [smokeHostname],
+  entra: {
+    tenantId: "00000000-0000-4000-8000-000000000000",
+    clientId: "smoke",
+  },
+};
+
 /** What the config is made from. */
 export interface SmokeConfigInputs {
   /** The local port core is served on. */
@@ -104,6 +123,7 @@ const core :Workerd.Worker = (
     (name = "ROUTER_SECRET", text = "${routerSecret}"),
     (name = "DURABLE_OBJECT_JURISDICTION", text = "none"),
     (name = "RUNTIME_PROFILE", text = "workerd"),
+    (name = "SIGN_IN", text = ${JSON.stringify(JSON.stringify(signIn))}),
     (name = "SANDBOX_HOST", service = "sandbox"),
     ${durableObjectBindings.join(",\n    ")},
     ${d1Bindings(d1DatabasesOf(coreWranglerConfig)).join(",\n    ")},

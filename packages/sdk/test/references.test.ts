@@ -1511,14 +1511,11 @@ describe("browser resources", () => {
     expect(() => looseResource.links("help", { origins })).toThrow(/origin/u);
   });
 
-  test.each([
-    ["an IPv6 address", "https://[2001:db8::1]"],
-    ["an IPv6 address and a port", "https://[2001:db8::1]:8443"],
-    ["an IPv4 address", "https://192.0.2.1"],
-  ])("links accept %s as an exact origin", (_case, origin) => {
-    expect(resource.links("help", { origins: [origin] }).origins).toStrictEqual(
-      [origin]
-    );
+  test("links accept a host name and a port as an exact origin", () => {
+    expect(
+      resource.links("help", { origins: ["https://help.example.com:8443"] })
+        .origins
+    ).toStrictEqual(["https://help.example.com:8443"]);
   });
 
   test.each([
@@ -1527,6 +1524,17 @@ describe("browser resources", () => {
       "https://[2001:DB8:0::1]",
     ],
     ["an IPv6 address with a path", "https://[2001:db8::1]/docs"],
+    ["an IPv6 address", "https://[2001:db8::1]"],
+    ["an IPv4 address", "https://192.0.2.1"],
+    ["a trailing dot", "https://help.example.com."],
+    ["an empty label", "https://help..example.com"],
+    ["the home network's name", "https://home.arpa"],
+    ["a loopback address", "https://127.0.0.1"],
+    ["a private address", "https://10.0.0.8"],
+    ["a link-local IPv6 address", "https://[fe80::1]"],
+    ["localhost", "https://localhost"],
+    ["a private-use name", "https://wiki.internal"],
+    ["a name of one label", "https://intranet"],
   ])("links with %s are refused too", (_case, origin) => {
     expect(() => looseResource.links("help", { origins: [origin] })).toThrow(
       /origin/u
