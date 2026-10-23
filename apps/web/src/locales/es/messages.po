@@ -6785,6 +6785,16 @@ msgstr "Mover a un proyecto"
 msgid "Moved old entries out of the audit trail"
 msgstr "Sacó entradas antiguas del registro de auditoría"
 
+#: src/interview/voice-bar.tsx
+msgctxt "turn your microphone off for a moment"
+msgid "Mute"
+msgstr "Silenciar"
+
+#: src/interview/voice-bar.tsx
+msgctxt "your microphone is off for a moment"
+msgid "Muted"
+msgstr "En silencio"
+
 #: src/chat/project-dialog.tsx
 #: src/onboarding/interviews-progress.tsx
 #: src/routes/_shell.settings.packages.index.tsx
@@ -12278,6 +12288,11 @@ msgstr "Resultados desconocidos"
 #: src/brain/brain.ts
 msgid "Unknown source"
 msgstr "Fuente desconocida"
+
+#: src/interview/voice-bar.tsx
+msgctxt "turn your microphone back on"
+msgid "Unmute"
+msgstr "Activar el micrófono"
 
 #: src/engines/app-status.tsx
 msgid "Unpublish"

@@ -24,7 +24,10 @@ import type { Measured } from "./answer-meter.ts";
 import { askStory, askTurn, turnFailed } from "./api.ts";
 import type { EarlyEvent, TurnFailed } from "./api.ts";
 import type { DotSign } from "./dot-signs.ts";
+import { openEar, pauseMs } from "./ear.ts";
+import type { Ear, EarEvent } from "./ear.ts";
 import { keepNow, linkNow, progressNow, update } from "./kept.ts";
+import { hangUp, lastHeard, muteMic } from "./mic.ts";
 import {
   afterTurn,
   approved,
@@ -47,6 +50,7 @@ import {
 import type { Saying, Voicing } from "./speech.ts";
 import {
   hiccup,
+  pauseFor,
   quietFloor,
   retryWaits,
   step,
@@ -71,8 +75,11 @@ import type { LoopWords } from "./words.ts";
 // src/data/interview-loop.ts), with his voice; his ears come later.
 //
 // Whose turn it is is decided by turn-taking.ts, which is told everything
-// that happens here and says what to do: he answers when they are done,
-// waits when they aren't, and drops his answer when they talk on.
+// that happens here, also what his ears hear (ear.ts), and says what to
+// do: he answers when they are done, waits when they aren't, and drops his
+// answer when they talk on. One ear is opened for the conversation, for
+// whoever chose to talk, and it is deaf whenever the floor says so: while
+// he speaks, and through the read-back until he asks whether it is right.
 //
 // When core can't be reached, a turn is asked for again by itself, twice.
 // Only when that doesn't help does anyone notice: Stephen says so himself,
@@ -1189,15 +1196,12 @@ const askedFor = ({
   void ask("readback", said, turn);
 };
 
-/** When they were last heard, on the page's clock. */
-const heardLast = (): number => floor.lastHeard;
-
 /** Does `go` once they make no sound: at once, unless they made one so lately they may be starting to talk; then a moment later, at most. */
 const whenStill = (go: () => void, since = performance.now()): void => {
   const wait = stillIn({
     now: performance.now(),
     since,
-    lastHeard: heardLast(),
+    lastHeard: lastHeard(),
     hearing: floor.hearing,
   });
   if (wait === 0) {
@@ -1209,14 +1213,119 @@ const whenStill = (go: () => void, since = performance.now()): void => {
   }, wait);
 };
 
-/** Opens his ears for whoever chose to talk. */
-const hearken = (): void => {
-  // The ear (GRA-381) is opened here.
+/** Stephen's ears, while the conversation is on and they chose to talk. */
+let ear: Ear | null = null;
+let earOpening = false;
+/** The ear numbers its stretches from 1; the floor's are counted on across ears. */
+let stretchesBefore = 0;
+/** Whether the stretch being said comes in live: then a breath ends it. */
+let swift = false;
+
+/** What the ear hears, as it happens to the floor. */
+const heardBy =
+  (opened: Ear, from: number) =>
+  (event: EarEvent): void => {
+    if (!on || ear !== opened) {
+      return;
+    }
+    const at = performance.now();
+    const stretch = from + ("stretch" in event ? event.stretch : 0);
+    stretchesBefore = Math.max(stretchesBefore, stretch);
+    switch (event.type) {
+      case "stretch-start": {
+        ({ live: swift } = event);
+        // oxlint-disable-next-line no-use-before-define -- what is heard happens to the floor
+        happen({ type: "stretch-start", at: event.at, stretch });
+        break;
+      }
+      case "partial": {
+        // oxlint-disable-next-line no-use-before-define -- as above
+        happen({ type: "partial", at, stretch, text: event.text });
+        break;
+      }
+      case "stretch-end": {
+        // oxlint-disable-next-line no-use-before-define -- as above
+        happen({ type: "stretch-end", at: lastHeard(), stretch });
+        break;
+      }
+      case "final": {
+        // oxlint-disable-next-line no-use-before-define -- as above
+        happen({ type: "final", at, stretch, text: event.text });
+        break;
+      }
+      case "unheard": {
+        // oxlint-disable-next-line no-use-before-define -- as above
+        happen({ type: "unheard", at, stretch });
+        break;
+      }
+      case "line": {
+        // The ear falls back to recordings by itself: nothing changes here.
+        break;
+      }
+      default: {
+        event satisfies never;
+      }
+    }
+  };
+
+/** Without a microphone, he says so, and from then on they type. */
+const noMicrophone = (): void => {
+  update((progress) => ({ ...progress, mode: "type" }));
+  // oxlint-disable-next-line no-use-before-define -- the floor stops listening by ear
+  happen({ type: "voice", at: performance.now(), on: false });
+  if (words !== null) {
+    notice(words.noMicrophone, () => {
+      listen();
+    });
+  }
 };
 
-/** Closes his ears: what is being said is dropped. */
+/** Opens his ears, once, for whoever chose to talk; it hears from now on. */
+const hearken = async (): Promise<void> => {
+  if (ear !== null) {
+    ear.setDeaf(false);
+    return;
+  }
+  const link = linkNow();
+  if (earOpening || words === null || link === null) {
+    return;
+  }
+  earOpening = true;
+  const opened = await openEar({
+    locale: words.locale,
+    link,
+    pause: () => pauseFor(swift, pauseMs),
+  });
+  earOpening = false;
+  if (opened === null) {
+    if (on) {
+      noMicrophone();
+    }
+    return;
+  }
+  if (!on) {
+    opened.close();
+    return;
+  }
+  ear = opened;
+  opened.on(heardBy(opened, stretchesBefore));
+  // The floor may have stopped listening while the microphone was asked for.
+  opened.setDeaf(!floor.hearing);
+};
+
+/** His ears hear nothing for now: what is being said counts for nothing. */
 const unhear = (): void => {
-  // The ear (GRA-381) is closed here.
+  ear?.setDeaf(true);
+};
+
+/** Lets go of his ears and of the microphone. */
+const hangUpEar = (): void => {
+  ear?.close();
+  ear = null;
+  swift = false;
+  hangUp();
+  // A new conversation never starts muted.
+  muteMic(false);
 };
 
 /** One of the floor's waits is set, in place of one of the same name. */
@@ -1236,7 +1345,7 @@ const waitFor = (wait: Wait, ms: number): void => {
 const perform = (act: Act): void => {
   switch (act.type) {
     case "hear": {
-      hearken();
+      void hearken();
       return;
     }
     case "deaf": {
@@ -1404,6 +1513,7 @@ export const stopLoop = ({ keep = true }: { keep?: boolean } = {}): void => {
   drop();
   happen({ type: "stop", at: performance.now() });
   floor = quietFloor;
+  hangUpEar();
   meter.stop();
   unmeasure?.();
   unmeasure = null;

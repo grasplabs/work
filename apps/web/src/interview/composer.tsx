@@ -16,12 +16,13 @@ import { useSaveState } from "./kept.ts";
 import type { LoopState, Said } from "./loop.ts";
 import { Marked, Own } from "./talk.tsx";
 import { VoiceBar } from "./voice-bar.tsx";
+import type { BarDoing } from "./voice-bar.tsx";
 
 // The box at the bottom (prototype `interview-view.tsx`, `Composer` and
 // `ChatBox`): as in any chat, only larger and rounder. Enter sends,
-// Shift+Enter starts a new line. For whoever chose to talk, it becomes a
-// voice bar while Stephen talks or thinks, and the box again when it is
-// their turn, until his ears come; "Type instead" brings the box back at
+// Shift+Enter starts a new line. For whoever chose to talk, it is a voice
+// bar: while Stephen talks or thinks, and while he listens, with the way
+// to mute themselves for a moment; "Type instead" brings the box back at
 // once, for the rest of his line. What they just said shows over it, as
 // their side of the chat, with what Stephen marked in it; when it is long,
 // its newest words stay and its top fades out under the stage.
@@ -133,11 +134,11 @@ export const Composer = ({
   const [text, setText] = useState("");
   // The line during which they asked to type instead: the box stays until his next.
   const [typing, setTyping] = useState<number | null>(null);
-  const bar =
-    talking &&
-    text === "" &&
-    typing !== line &&
-    (doing === "speaking" || doing === "thinking");
+  const bar = talking && text === "" && typing !== line && doing !== "idle";
+  let barDoing: BarDoing = "thinking";
+  if (doing === "speaking" || doing === "listening") {
+    barDoing = doing;
+  }
   return (
     <div className="relative flex flex-col">
       <div className="pointer-events-none absolute inset-x-0 bottom-full mb-4 flex justify-end">
@@ -161,7 +162,7 @@ export const Composer = ({
           className="animate-in fade-in slide-in-from-bottom-1 duration-300"
           key="bar"
         >
-          <VoiceBar doing={doing === "speaking" ? "speaking" : "thinking"}>
+          <VoiceBar doing={barDoing} mute>
             <Button
               onClick={() => {
                 setTyping(line);
