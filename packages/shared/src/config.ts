@@ -3,7 +3,7 @@ import type { z } from "zod";
 import { log } from "./log.ts";
 
 /**
- * The value of a JSON var the console sets. It arrives parsed; one set as
+ * The value of a JSON var the admin sets. It arrives parsed; one set as
  * text (`wrangler dev --var NAME:<json>`) is parsed here, and is `undefined`
  * if it isn't JSON.
  */
@@ -23,7 +23,7 @@ export const jsonVar = (value: unknown): unknown => {
 const parsedConfigs = new WeakMap<z.ZodType, Map<unknown, unknown>>();
 
 /**
- * A deployment config var as `schema` has it: the value the console set,
+ * A deployment config var as `schema` has it: the value the admin set,
  * `undefined` when none is set. One that doesn't parse counts as none, so
  * whatever needs it fails closed, and is logged as `config.invalid` with the
  * var's name and the paths that are wrong, never their values.

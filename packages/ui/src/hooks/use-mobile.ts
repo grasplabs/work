@@ -13,7 +13,7 @@ const subscribe = (onChange: () => void): (() => void) => {
 
 const isMobileNow = (): boolean => matchMedia(mobileQuery).matches;
 
-/** Rendered on the server (the console), there is no screen yet: not mobile. */
+/** Rendered on the server (the admin), there is no screen yet: not mobile. */
 const isMobileOnServer = (): boolean => false;
 
 /** Whether the screen is narrower than the sidebar's mobile breakpoint. */

@@ -47,17 +47,17 @@ describe("reading test files' durations from progress logs", () => {
   it("takes each file's median over the runs, and keeps the files no run named", () => {
     const run = (ms: number) =>
       log(
-        `2026-10-16T10:00:42.023Z passed ${ms}ms console test/x.test.ts > x > runs`
+        `2026-10-16T10:00:42.023Z passed ${ms}ms admin test/x.test.ts > x > runs`
       );
 
     expect(
       updatedDurations(
-        { "console test/x.test.ts": 99, "console test/y.test.ts": 3 },
+        { "admin test/x.test.ts": 99, "admin test/y.test.ts": 3 },
         [run(1000), run(4000), run(1234)]
       )
     ).toStrictEqual({
-      "console test/x.test.ts": 1.2,
-      "console test/y.test.ts": 3,
+      "admin test/x.test.ts": 1.2,
+      "admin test/y.test.ts": 3,
     });
   });
 });
