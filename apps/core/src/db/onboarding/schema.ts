@@ -324,6 +324,11 @@ export const brainSent = sqliteTable(
     type: text().notNull(),
     team: text().notNull(),
     person: text().notNull(),
+    /**
+     * The record it belongs to: a drawing's workflow, which goes once none
+     * of its drawings is left. None for anything else.
+     */
+    parent: text(),
   },
   (table) => [
     primaryKey({ columns: [table.record, table.person] }),

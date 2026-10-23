@@ -20,6 +20,7 @@ import {
   brainRecordsMaxPerCall,
   brainRecordsMaxPerType,
   brainRecordsSchema,
+  onboardingIdPrefix,
   onboardingSourceIds,
 } from "@grasp-os/shared/brain-records";
 import type {
@@ -37,6 +38,7 @@ import { drizzle } from "drizzle-orm/d1";
 
 import { auditedBatch, outboxed } from "./audit-outbox.ts";
 import { brainRecords } from "./db/core/schema.ts";
+import { inList } from "./db/d1.ts";
 
 // The Playbook's records, as core keeps them (`brain_records`), and adding
 // them (`brain.addRecords`). Threat model, and how each is closed (the
@@ -64,6 +66,8 @@ import { brainRecords } from "./db/core/schema.ts";
 //   workflow, a roster team's record or an `onb-` id
 //   (`keepOnboardingRecords`, as the system); `brain.addRecords` refuses
 //   them (`brainRecordInputSchema`).
+// - A deleted interview left in the brain: the onboarding alone takes its
+//   own records out (`purgeOnboardingRecords`, as the system), whole.
 
 /** A record's key across types, as its audit event names it. */
 const keyOf = ({ type, id }: { type: string; id: string }): string =>
@@ -468,6 +472,41 @@ export const keepOnboardingRecords = async (
     kept.unchanged += unchanged;
   }
   return kept;
+};
+
+/**
+ * Takes the onboarding's records `ids` out of the brain, for good, as the
+ * system (GRA-368): what rested on an interview that was deleted. Nothing
+ * else is ever taken out, and nothing is written over: a record goes
+ * whole, with every drawing that is a version of its own. One batch with
+ * its audit event, which names the records by id and counts them, never
+ * what they said. Ids the brain doesn't hold are left; returns how many
+ * it took out.
+ */
+export const purgeOnboardingRecords = async (
+  env: Env,
+  ids: readonly string[]
+): Promise<number> => {
+  const held = await heldOf(
+    env,
+    ids.filter((id) => id.startsWith(onboardingIdPrefix))
+  );
+  if (held.size === 0) {
+    return 0;
+  }
+  const db = drizzle(env.DB);
+  const gone = [...held.keys()];
+  await auditedBatch(env, db, [
+    db.delete(brainRecords).where(inList(brainRecords.id, gone)),
+    outboxed(db, {
+      actor: { type: "system" },
+      action: "brain.records.purged",
+      target: { type: "brain", id: "playbook" },
+      provenance: [...held].map(([id, { type }]) => keyOf({ type, id })),
+      detail: { purged: held.size },
+    }),
+  ]);
+  return held.size;
 };
 
 /** A dated value of a team, by the team it is for. */
