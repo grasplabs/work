@@ -596,6 +596,11 @@ const FramedScreen = ({
     if (next.status === "updated") {
       showUpdate("asking");
     }
+    // Stopped (its person lost the App, its build its approval, or the
+    // session ended): nothing is offered any more, and nothing reloads.
+    if (next.status === "failed" || next.status === "signed-out") {
+      showUpdate("none");
+    }
     setState(next);
   };
   // Nothing left unsaved while a new version waits: it switches now.
