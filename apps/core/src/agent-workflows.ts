@@ -3,6 +3,10 @@ import { isExpectedCode } from "@grasp-os/shared/errors";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { Permission } from "@grasp-os/shared/permissions";
 import { roleErrors } from "@grasp-os/shared/roles";
+import type {
+  WorkflowRole,
+  WorkflowRunStatus,
+} from "@grasp-os/shared/workflow-resources";
 import { workflowErrors } from "@grasp-os/shared/workflows";
 import type { WorkflowRun, WorkflowSummary } from "@grasp-os/shared/workflows";
 import { WorkerEntrypoint, exports } from "cloudflare:workers";
@@ -10,7 +14,9 @@ import { WorkerEntrypoint, exports } from "cloudflare:workers";
 import { asPerson } from "./agent-person.ts";
 import type { AgentApi, AgentScope } from "./agent-scope.ts";
 import { appHost } from "./durable-objects.ts";
+import { listWorkflowResources } from "./workflow-resources.ts";
 import { listAllRuns, workflowOverview } from "./workflows/overview.ts";
+import { listResourceRuns } from "./workflows/resource-runs.ts";
 import { runStatus } from "./workflows/runs.ts";
 
 // Workflows for a chat's code: `await env.workflows.runs("app-1",
@@ -42,6 +48,46 @@ const readsWorkflow =
         object.appId === app &&
         actions.includes("read")
     );
+
+/**
+ * Whether the agent may follow the runs of independent workflow
+ * `workflow`: `read` on it, a permission of its own an admin grants
+ * (workflow-resources.ts), as a person follows it with a role in it.
+ */
+const followsWorkflow =
+  (workflow: unknown) =>
+  (permissions: Permission[]): boolean =>
+    permissions.some(
+      ({ object, actions }) =>
+        object.type === "workflow" &&
+        object.workflowId === workflow &&
+        actions.includes("read")
+    );
+
+/** An independent workflow, as the chat's agent lists it. */
+export interface AgentIndependentWorkflow {
+  id: string;
+  name: string;
+  /** The version published last; null before the first. */
+  currentVersion: number | null;
+  /** The person's role in it. */
+  role: WorkflowRole;
+}
+
+/**
+ * A run of an independent workflow, as the chat's agent sees it: its
+ * state, never what it returned or why it failed, as for an App's run.
+ */
+export interface AgentResourceRun {
+  id: string;
+  workflowId: string;
+  version: number;
+  status: WorkflowRunStatus;
+  /** The person it acts for. */
+  principal: string;
+  createdAt: string;
+  endedAt: string | null;
+}
 
 /** A run, as the chat's agent sees it: its state, not what it read. */
 export interface AgentRun {
@@ -151,6 +197,54 @@ export class WorkflowsApi extends WorkerEntrypoint<Env, AgentScope> {
     });
   }
 
+  /**
+   * The independent workflows the agent may follow, of those the person
+   * has a role in. Only their names and versions: following one's runs
+   * is `independentRuns`.
+   */
+  async independent(): Promise<AgentIndependentWorkflow[]> {
+    return await asPerson(this.env, this.ctx.props, {
+      allowed: () => true,
+      method: "workflows.independent",
+      read: async (person, permissions) => {
+        const listed = await listWorkflowResources(this.env, person);
+        return listed.flatMap(({ id, name, currentVersion, role }) =>
+          followsWorkflow(id)(permissions)
+            ? [{ id, name, currentVersion, role }]
+            : []
+        );
+      },
+      detail: (listed) => ({ workflows: listed.length }),
+    });
+  }
+
+  /**
+   * An independent workflow's runs, newest first: every run for its
+   * builders, a user's own for a user, as the person reads them.
+   */
+  async independentRuns(workflow: unknown): Promise<AgentResourceRun[]> {
+    return await asPerson(this.env, this.ctx.props, {
+      allowed: followsWorkflow(workflow),
+      method: "workflows.independentRuns",
+      read: async (person) => {
+        const runs = await listResourceRuns(this.env, person, workflow);
+        return runs.map((run) => ({
+          id: run.id,
+          workflowId: run.workflowId,
+          version: run.version,
+          status: run.status,
+          principal: run.principal,
+          createdAt: run.createdAt,
+          endedAt: run.endedAt,
+        }));
+      },
+      detail: (listed) => ({
+        workflow: typeof workflow === "string" ? workflow : null,
+        runs: listed.length,
+      }),
+    });
+  }
+
   /** One run, as it is now. */
   async status(run: unknown): Promise<AgentRun> {
     return await asPerson(this.env, this.ctx.props, {
@@ -212,6 +306,26 @@ workflows: {
   runs(app: string, workflow: string): Promise<WorkflowRun[]>;
   /** One run, as it is now. */
   status(run: string): Promise<WorkflowRun>;
+  /**
+   * The independent workflows (env.workflowBuild) you may follow, of those
+   * the person has a role in.
+   */
+  independent(): Promise<{ id: string; name: string; currentVersion: number | null; role: "user" | "builder" }[]>;
+  /**
+   * An independent workflow's runs, newest first, at most 50: every run
+   * for its builders, the person's own for a user. Their state, never what
+   * a run returned or why it failed.
+   */
+  independentRuns(workflow: string): Promise<{
+    id: string;
+    workflowId: string;
+    version: number;
+    status: "starting" | "running" | "completed" | "failed" | "cancelled";
+    /** The person it acts for. */
+    principal: string;
+    createdAt: string;
+    endedAt: string | null;
+  }[]>;
 };`;
 
 /** `env.workflows`. */
