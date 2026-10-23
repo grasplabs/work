@@ -13,6 +13,7 @@ import {
   markTaken,
 } from "@grasp-os/shared/connect";
 import type {
+  ActionShape,
   Catalog,
   CatalogLogo,
   CatalogTool,
@@ -74,7 +75,7 @@ import {
   startToolkitConnection,
 } from "./composio-connections.ts";
 import { connectionOwners } from "./connections.ts";
-import { connectorContract } from "./contracts.ts";
+import { actionShape, connectorContract } from "./contracts.ts";
 import { requireDecision } from "./decisions.ts";
 import { directoryConnections, readDirectory } from "./directory.ts";
 import {
@@ -464,6 +465,14 @@ export default class Connect
 
   async connectorContract(request: unknown): Promise<ConnectorContract> {
     return await connectorContract(this.env, request);
+  }
+
+  /**
+   * Whether an action only reads, and the input it takes, as connect goes
+   * by them: what core checks a chat's write against before the call.
+   */
+  async actionShape(request: unknown): Promise<ActionShape> {
+    return await actionShape(this.env, request);
   }
 
   // Held actions (src/pending.ts). Core names the person from their
