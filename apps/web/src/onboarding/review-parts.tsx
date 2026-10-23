@@ -1,3 +1,4 @@
+import type { Difference, SettleChoice } from "@grasp-os/shared/onboarding";
 import { Button } from "@grasp-os/ui/components/button";
 import {
   Tabs,
@@ -13,8 +14,9 @@ import type { ReactNode } from "react";
 import { copyText } from "./setup-parts.tsx";
 
 // What only the admin can settle in their onboarding, one item each
-// (prototype `components/onboarding/review-parts.tsx`), and the one there
-// is: letting Grasp's mail through their mail filter (GRA-968). Microsoft
+// (prototype `components/onboarding/review-parts.tsx`): a step people told
+// two ways when nobody could say why, and letting Grasp's mail through
+// their mail filter (GRA-968). Microsoft
 // 365 filters mail with Exchange Online Protection and Defender, Google
 // Workspace with its own rules: either can put mail from a domain it
 // doesn't know in spam, and the interview links with it.
@@ -92,6 +94,66 @@ export const ReviewItem = ({
         </div>
       )}
     </div>
+  );
+};
+
+/** The ways to settle a difference, the one Stephen would take first. */
+const settleChoices: readonly SettleChoice[] = ["both", "first", "other"];
+
+/** One way a step is told, in a card: what is done, and how it was told, never by whom. */
+const Way = ({ text, told }: { text: string; told: string }) => (
+  <li className="bg-card flex flex-col gap-0.5 rounded-xl border px-3.5 py-3">
+    <span className="font-medium">{text}</span>
+    <span className="text-muted-foreground text-xs">{told}</span>
+  </li>
+);
+
+/**
+ * A step of a piece of work its people told two ways, and nobody could
+ * say why: the two ways side by side, never by whom, and whether both
+ * hold or which one does. Settled, it says which; `open` while it is
+ * being decided again.
+ */
+export const DifferenceItem = ({
+  difference,
+  open,
+  onSettle,
+  onReopen,
+}: {
+  difference: Difference;
+  open: boolean;
+  onSettle: (holds: SettleChoice) => void;
+  onReopen: () => void;
+}) => {
+  const { t } = useLingui();
+  const { name, team, way, other, holds } = difference;
+  const labels: Record<SettleChoice, string> = {
+    both: t`Keep both`,
+    first: t`Only the first way`,
+    other: t`Only the second way`,
+  };
+  const choices = settleChoices.map((id) => ({ id, label: labels[id] }));
+  return (
+    <ReviewItem
+      choices={choices}
+      chosen={
+        open || holds === null ? null : { id: holds, label: labels[holds] }
+      }
+      context={t`${team}: some do a step another way, and nobody could say why. I keep both ways until you decide.`}
+      onChoose={({ id }) => {
+        const choice = settleChoices.find((each) => each === id);
+        if (choice !== undefined) {
+          onSettle(choice);
+        }
+      }}
+      onReopen={onReopen}
+      title={t`People do “${name}” in two ways`}
+    >
+      <ul className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+        <Way text={way} told={t`The way most told it`} />
+        <Way text={other} told={t`The way some told it`} />
+      </ul>
+    </ReviewItem>
   );
 };
 
