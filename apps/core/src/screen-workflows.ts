@@ -136,9 +136,13 @@ import type { AdmittedEvent } from "./workflows/run-events.ts";
 // - A send admitted twice, or lost: each `send` call is its own key, so two
 //   calls are two events, however equal their data; a resend of one under
 //   its key, its answer lost, is the same event, answered with the same ID
-//   (the run's inbox keeps every key it took, consumed or not, and answers
-//   for it even once the run ended or the grant it was sent on went), and
-//   a key reused for other data is refused (`workflow.event_conflict`). A send
+//   (the run's inbox keeps every key it took, consumed or not, for as long
+//   as it keeps the event, and answers for it even once the run ended or
+//   the grant it was sent on went), and a key reused for other data is
+//   refused (`workflow.event_conflict`). A run restarted from an earlier
+//   step forgets the events nothing had taken (@grasp-os/workerflow,
+//   `forgetIn`), keys and all: a resend of one of those after the restart
+//   is admitted again, as the event the restart forgot. A send
 //   resumes no paused run (the event waits for the run's resume), and
 //   answers no decision, which only `decide` does.
 // - Controls this platform can't serialize yet: an independent run has no
@@ -905,18 +909,26 @@ const sent = async (
     pin,
     command.runId
   );
+  const checked = schemaFromDescriptor(JSON.stringify(declared.data))[
+    "~standard"
+  ].validate(command.data);
+  if (checked instanceof Promise || checked.issues !== undefined) {
+    throw operationErrors.create("contract.invalid_args");
+  }
   const delivery = {
     workflowId: pin.workflowId,
     runId: row.id,
     binding: alias,
     type,
+    data: checked.value,
     key: command.idempotencyKey,
     source: sourceOf(asking),
     sender: senderOf(asking),
   };
   // Refused only once it is known the run didn't take this send already:
   // one sent again, its answer lost, is answered with its event whatever
-  // changed since (`unlessAccepted`).
+  // changed since (`unlessAccepted`); the same key with other data is a
+  // conflict.
   const refuse = async (refusal: Error) =>
     await unlessAccepted(env, delivery, refusal);
   let admitted: AdmittedEvent;
@@ -932,13 +944,7 @@ const sent = async (
     // into a run that isn't restricted itself (restricted.ts).
     admitted = await refuse(permissionErrors.create("permission.restricted"));
   } else {
-    const checked = schemaFromDescriptor(JSON.stringify(declared.data))[
-      "~standard"
-    ].validate(command.data);
-    if (checked instanceof Promise || checked.issues !== undefined) {
-      throw operationErrors.create("contract.invalid_args");
-    }
-    admitted = await admitRunEvent(env, { ...delivery, data: checked.value });
+    admitted = await admitRunEvent(env, delivery);
   }
   const db = drizzle(env.DB);
   // Every send the run took, a resend of one too: a resend may follow a
