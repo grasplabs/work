@@ -224,7 +224,11 @@ export class OnboardingRpc extends CoreRpcTarget implements OnboardingApi {
       if (roster === null) {
         throw onboardingErrors.create("onboarding.no_roster");
       }
-      return await store.savePlan(parsed, actorOf(person));
+      const saved = await store.savePlan(parsed, actorOf(person));
+      // What is due under it goes now, as a plan whose first moment has
+      // passed already says: the alarm only looks again within the hour.
+      const sent = await store.releaseDue();
+      return sent.length === 0 ? saved : await store.view();
     });
   }
 

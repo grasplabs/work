@@ -469,9 +469,11 @@ export const interviewTurnResponse = async (
       turn.waited
     ),
   ];
+  // Counted through a stub of its own: the store may have restarted while
+  // the turn ran, and a stub from before the restart reaches nothing.
   const count = (took: Took | null) => {
     if (took !== null) {
-      counting.push(store.meter(took));
+      counting.push(onboardingStore(env).meter(took));
     }
   };
   const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
