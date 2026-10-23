@@ -8,6 +8,7 @@ import { testConnectorsFile } from "./test/global-setup.ts";
 import {
   appClients,
   clients,
+  teamsBot,
   testComposioKey,
 } from "./test/provider-config.ts";
 
@@ -98,6 +99,10 @@ export default defineProject({
           APP_OAUTH_CLIENTS: JSON.stringify(appClients),
           // Grasp's key for Composio, as test/composio-api.ts checks it.
           COMPOSIO_API_KEY: testComposioKey,
+          // The client's own Teams bot, as test/bot-connector.ts knows it.
+          TEAMS_BOT_ID: teamsBot.id,
+          TEAMS_BOT_TENANT_ID: teamsBot.tenant,
+          TEAMS_BOT_SECRET: teamsBot.secret,
           CONNECT_MIGRATIONS: migrations,
           ...smokeBindings,
         },

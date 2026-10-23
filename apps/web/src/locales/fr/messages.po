@@ -10212,6 +10212,10 @@ msgstr "Envoyé"
 msgid "Sent <0>{sent}</0>"
 msgstr "Envoyé <0>{sent}</0>"
 
+#: src/activity/audit-words.ts
+msgid "Sent a chat app message as the company's bot"
+msgstr "A envoyé un message d'app de chat en tant que bot de l'entreprise"
+
 #: src/decision-confirmation.tsx
 msgctxt "what an App's screen sends with an answer to a decision"
 msgid "Sent by the app"

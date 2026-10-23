@@ -39,6 +39,17 @@ export const clients = {
 /** Grasp's key for Composio, as set on connect in the tests. */
 export const testComposioKey = "test-composio-key";
 
+/**
+ * The client's own Teams bot, as set on connect in the tests: its Entra
+ * app, in the client's tenant, and its secret, which test/bot-connector.ts
+ * knows.
+ */
+export const teamsBot = {
+  id: "acme-teams-bot",
+  tenant: acmeTenant,
+  secret: "acme-teams-bot-secret",
+} as const;
+
 /** Grasp's apps at the apps that aren't suites, as test/app-provider.ts knows them. */
 export const appClients = {
   "sample-oauth": { id: "grasp-sample-oauth", secret: "sample-oauth-secret" },

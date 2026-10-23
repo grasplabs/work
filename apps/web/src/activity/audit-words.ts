@@ -16,6 +16,10 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
   },
   { action: "connection.connect", text: msg`Connected an account` },
   {
+    action: "channel.call",
+    text: msg`Sent a chat app message as the company's bot`,
+  },
+  {
     action: "connection.reconnected",
     text: msg`Signed in to a connection again`,
   },
