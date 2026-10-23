@@ -685,6 +685,10 @@ msgstr "{name} changed"
 msgid "{name} changed: it {does}"
 msgstr "{name} changed: it {does}"
 
+#: src/onboarding/hr-leads.tsx
+msgid "{name} didn’t take this service user. Check its ID and token, and that it may read people’s work details."
+msgstr "{name} didn’t take this service user. Check its ID and token, and that it may read people’s work details."
+
 #. The first hour Pulse may report on a day
 #: src/settings/week-hours.tsx
 msgid "{name} from"
@@ -1041,6 +1045,10 @@ msgstr "{teamName} share of users"
 #: src/onboarding/staff-words.ts
 msgid "{teamName}'s lead hasn't talked yet: the team goes ahead without their map of its work"
 msgstr "{teamName}'s lead hasn't talked yet: the team goes ahead without their map of its work"
+
+#: src/onboarding/hr-leads.tsx
+msgid "{teams, plural, one {{name} is connected. I can see # team, its lead and who reports to whom.} other {{name} is connected. I can see # teams, their leads and who reports to whom.}}"
+msgstr "{teams, plural, one {{name} is connected. I can see # team, its lead and who reports to whom.} other {{name} is connected. I can see # teams, their leads and who reports to whom.}}"
 
 #: src/brain/brain-atlas.ts
 msgid "{teams, plural, one {# team} other {# teams}}"
@@ -3103,6 +3111,10 @@ msgstr "Connect"
 msgid "Connect {app}"
 msgstr "Connect {app}"
 
+#: src/onboarding/hr-leads.tsx
+msgid "Connect {name}"
+msgstr "Connect {name}"
+
 #: src/routes/_shell.settings.members.tsx
 msgid "Connect accounts of their own"
 msgstr "Connect accounts of their own"
@@ -4841,9 +4853,17 @@ msgstr "I could not find the columns. The first row should name them: name, emai
 msgid "I could not keep it. Try again in a moment."
 msgstr "I could not keep it. Try again in a moment."
 
+#: src/onboarding/hr-leads.tsx
+msgid "I could not reach {name} just now. Try again in a moment."
+msgstr "I could not reach {name} just now. Try again in a moment."
+
 #: src/onboarding/setup-steps.tsx
 msgid "I could not reach {signIn} just now. Try again in a moment, or use a staff list."
 msgstr "I could not reach {signIn} just now. Try again in a moment, or use a staff list."
+
+#: src/onboarding/hr-leads.tsx
+msgid "I could not read {name}. Connect it again with a service user that may read people’s work details."
+msgstr "I could not read {name}. Connect it again with a service user that may read people’s work details."
 
 #: src/onboarding/setup-steps.tsx
 msgid "I could not read {signIn} just now. Try again in a moment, or use a staff list."
@@ -4864,6 +4884,10 @@ msgstr "I couldn’t read this one"
 #: src/onboarding/about-story.tsx
 msgid "I do every interview myself. Here’s what that sounds like."
 msgstr "I do every interview myself. Here’s what that sounds like."
+
+#: src/onboarding/hr-leads.tsx
+msgid "I found nobody in {name}."
+msgstr "I found nobody in {name}."
 
 #: src/onboarding/setup-steps.tsx
 msgid "I found nobody in {signIn}."
@@ -4900,6 +4924,10 @@ msgstr "If it fails"
 #: src/routes/_shell.settings.spend.tsx
 msgid "If the rest of the month goes like the days so far"
 msgstr "If the rest of the month goes like the days so far"
+
+#: src/onboarding/hr-leads.tsx
+msgid "In {name}, make a service user that may read people’s basic and work details, and paste its ID and token here."
+msgstr "In {name}, make a service user that may read people’s basic and work details, and paste its ID and token here."
 
 #: src/dashboard/pile-cards.tsx
 msgid "In one chat only, for {requester}"
@@ -5788,6 +5816,7 @@ msgstr "More about the staff list"
 msgid "More about these connections"
 msgstr "More about these connections"
 
+#: src/onboarding/hr-leads.tsx
 #: src/onboarding/setup-steps.tsx
 msgid "More about this connection"
 msgstr "More about this connection"
@@ -6579,6 +6608,7 @@ msgstr "Not made by {vendors}"
 msgid "Not named by the provider"
 msgstr "Not named by the provider"
 
+#: src/onboarding/hr-leads.tsx
 #: src/tour/tour-script.ts
 msgid "Not now"
 msgstr "Not now"
@@ -7124,6 +7154,7 @@ msgctxt "kind of app"
 msgid "Other"
 msgstr "Other"
 
+#: src/onboarding/hr-leads.tsx
 #: src/onboarding/setup-steps.tsx
 msgctxt "the team for people a staff list gives no team"
 msgid "Other"
@@ -7737,6 +7768,10 @@ msgstr "Read restricted sources, and is held to them"
 #: src/engines/screen-approval.tsx
 msgid "Read the code of version {version}"
 msgstr "Read the code of version {version}"
+
+#: src/onboarding/hr-leads.tsx
+msgid "Read the leads from {name} again"
+msgstr "Read the leads from {name} again"
 
 #: src/activity/audit-words.ts
 msgid "Read what a guest wrote"
@@ -8565,6 +8600,10 @@ msgstr "Server"
 msgid "Server code"
 msgstr "Server code"
 
+#: src/onboarding/hr-leads.tsx
+msgid "Service user ID"
+msgstr "Service user ID"
+
 #: src/activity/audit-words.ts
 msgid "Set aside entries the audit trail couldn't take"
 msgstr "Set aside entries the audit trail couldn't take"
@@ -9170,6 +9209,10 @@ msgstr "Take out of the project"
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Take the go back"
 msgstr "Take the go back"
+
+#: src/onboarding/hr-leads.tsx
+msgid "Take the leads from {name}"
+msgstr "Take the leads from {name}"
 
 #: src/frame/person-menu.tsx
 msgid "Take the tour"
@@ -9968,6 +10011,10 @@ msgstr "Then {task}"
 msgid "Then I talk to your team myself: short conversations, over two weeks. That’s where I learn the most."
 msgstr "Then I talk to your team myself: short conversations, over two weeks. That’s where I learn the most."
 
+#: src/onboarding/hr-leads.tsx
+msgid "There are more people in {name} than I can take: up to {peopleMost} people in up to {teamsMost} teams."
+msgstr "There are more people in {name} than I can take: up to {peopleMost} people in up to {teamsMost} teams."
+
 #: src/onboarding/setup-steps.tsx
 msgid "There are more people in {signIn} than I can take: up to {peopleMost} people in up to {teamsMost} teams. A staff list of those taking part works."
 msgstr "There are more people in {signIn} than I can take: up to {peopleMost} people in up to {teamsMost} teams. A staff list of those taking part works."
@@ -10302,6 +10349,10 @@ msgstr "Today"
 #: src/routes/_shell.settings.models.tsx
 msgid "Today ({day}, UTC)"
 msgstr "Today ({day}, UTC)"
+
+#: src/onboarding/hr-leads.tsx
+msgid "Token"
+msgstr "Token"
 
 #: src/onboarding/send-plan-form.tsx
 msgid "Tomorrow"

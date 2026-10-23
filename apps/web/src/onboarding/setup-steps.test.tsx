@@ -39,6 +39,7 @@ const listening = (paused: boolean): string => {
       staff: null,
     },
     directory: null,
+    hr: null,
     suites: [],
   };
   return renderToStaticMarkup(

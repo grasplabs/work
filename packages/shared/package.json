@@ -67,6 +67,7 @@
     "./guests": "./src/guests.ts",
     "./interview-links": "./src/interview-links.ts",
     "./kickoff": "./src/kickoff.ts",
+    "./hr": "./src/hr.ts",
     "./http": "./src/http.ts",
     "./identifier": "./src/identifier.ts",
     "./ids": "./src/ids.ts",

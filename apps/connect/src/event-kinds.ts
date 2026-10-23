@@ -28,13 +28,13 @@ export interface RequestBudget {
 }
 
 /**
- * What a read reaches a provider with: the connection's access token,
- * for the provider's own hosts only, and the sync's request budget.
+ * What a read reaches a provider with: the connection's access token, or
+ * its API key in the header its provider takes it in, for the provider's
+ * own hosts only, and the sync's request budget.
  */
-export interface ProviderAccess {
-  token: string;
-  budget: RequestBudget;
-}
+export type ProviderAccess =
+  | { token: string; budget: RequestBudget }
+  | { credential: { header: string; value: string }; budget: RequestBudget };
 
 /** What one read of a source has to go on. */
 export interface SourceRead {
@@ -262,7 +262,7 @@ interface ProviderSpec {
  */
 const requestProvider = async (
   { name, hosts, headers = {}, resyncStatuses = [] }: ProviderSpec,
-  { token, budget }: ProviderAccess,
+  access: ProviderAccess,
   url: string,
   post?: { body: string; contentType: string }
 ): Promise<{ text: string; contentType: string }> => {
@@ -271,13 +271,17 @@ const requestProvider = async (
       resync: true,
     });
   }
-  budget.spend();
+  access.budget.spend();
+  const credential =
+    "credential" in access
+      ? access.credential
+      : { header: "authorization", value: `Bearer ${access.token}` };
   const response = await fetch(url, {
     method: post === undefined ? "GET" : "POST",
     headers: {
       ...headers,
       ...(post === undefined ? {} : { "content-type": post.contentType }),
-      authorization: `Bearer ${token}`,
+      [credential.header]: credential.value,
     },
     ...(post === undefined ? {} : { body: post.body }),
     redirect: "manual",
