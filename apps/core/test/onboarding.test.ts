@@ -223,6 +223,32 @@ describe("the admin's numbers", () => {
     expect(after.progress?.talked).toBe(before.progress?.talked);
   });
 
+  it("stay as they were when the same list comes in again, and so do everyone's links", async () => {
+    const store = await storeWithLinksOut();
+    const before = await store.view();
+    if (before.roster === null) {
+      throw new Error("No roster");
+    }
+    const ids = before.roster.people.map(({ id }) => id);
+    const linksBefore = await Promise.all(
+      ids.map(async (id) => await store.linkOf(id))
+    );
+    const sentBefore = await store.sentLinks();
+    await store.saveRoster(before.roster, { type: "system" });
+    const after = await store.view();
+    expect({
+      roster: after.roster,
+      progress: after.progress,
+      links: await Promise.all(ids.map(async (id) => await store.linkOf(id))),
+      sent: await store.sentLinks(),
+    }).toStrictEqual({
+      roster: before.roster,
+      progress: before.progress,
+      links: linksBefore,
+      sent: sentBefore,
+    });
+  });
+
   it("count each person once, however often they are taken off the list and put back", async () => {
     const store = await storeWithLinksOut();
     const yesterday = new Date(Date.now() - 86_400_000).toISOString();

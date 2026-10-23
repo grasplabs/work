@@ -1,18 +1,22 @@
 import { interviewApiPath } from "@grasp-os/shared/interview-links";
 import type { InterviewProgress } from "@grasp-os/shared/interview-links";
 import { expect } from "@playwright/test";
+import type { Request } from "@playwright/test";
 
 import { test } from "./csp.ts";
 import { apiOf, peopleIn, signInAs, signInStaff, signInTo } from "./people.ts";
 import type { Person } from "./people.ts";
 import { origin } from "./stack.ts";
+import { workbookOf } from "./staff-workbook.ts";
 
 // What only Grasp's staff do in a client's onboarding (GRA-320), end to
 // end: they put the agreements in place, and the links that waited for
 // them go out; they give the go, and the company's people sign in, and
 // see the programme's week on the dashboard, from the plan. Its
 // own Playwright project, after all the others: taking the go back signs
-// out everyone the other tests signed in (playwright.config.ts).
+// out everyone the other tests signed in (playwright.config.ts). The
+// admin's own steps come last, as each replaces the deployment's roster:
+// their journey through the wizard, and a large staff list from Excel.
 
 test.describe.configure({ mode: "serial" });
 
@@ -349,7 +353,7 @@ test("the company's admin goes through their onboarding: the staff list, the lea
   page,
   cspViolations,
 }) => {
-  // Last of the serial run: what it keeps replaces the roster and the plan
+  // Late in the serial run: what it keeps replaces the roster and the plan
   // the tests before it read.
   const admin = await signInStaff();
   await signInTo(page.context(), admin);
@@ -472,6 +476,106 @@ test("the company's admin goes through their onboarding: the staff list, the lea
       "Ona Smit",
     ]);
     expect(plan?.start).toBe(start);
+  } finally {
+    core[Symbol.dispose]();
+  }
+  expect(cspViolations).toStrictEqual([]);
+});
+
+/** The teams of a staff list of a company that size. */
+const nineTeams = [
+  "Sales",
+  "Customer service",
+  "Planning",
+  "Field service",
+  "Warehouse",
+  "Finance",
+  "HR",
+  "IT",
+  "Marketing",
+];
+
+/** What a line asked of the voice says, and in what tone. */
+const lineOf = (request: Request): { text: string; tone: unknown } => {
+  const body: unknown = request.postDataJSON();
+  return typeof body === "object" &&
+    body !== null &&
+    "text" in body &&
+    typeof body.text === "string"
+    ? { text: body.text, tone: "tone" in body ? body.tone : undefined }
+    : { text: "", tone: undefined };
+};
+
+test("a staff list of 170 people in 9 teams, from Excel, is kept; the same list again changes nothing", async ({
+  page,
+  cspViolations,
+}) => {
+  // After the journey above: its list of three is there as the step arrives.
+  const admin = await signInStaff();
+  await signInTo(page.context(), admin);
+  // The voice isn't reached from the local stack: what the page asks of it is kept, and it says nothing.
+  const asked: { text: string; tone: unknown }[] = [];
+  await page.route("**/api/speech", async (route) => {
+    asked.push(lineOf(route.request()));
+    await route.fulfill({
+      status: 503,
+      json: { code: "speech.failed", message: "Not here" },
+    });
+  });
+  const run = crypto.randomUUID().slice(0, 8);
+  const rows = Array.from({ length: 170 }, (_, at) => {
+    const team = nineTeams[at % nineTeams.length] ?? "Sales";
+    return [
+      `Person ${at + 1}`,
+      `person${at + 1}.${run}@acme.test`,
+      team,
+      at < nineTeams.length ? `Head of ${team}` : "Employee",
+      at < nineTeams.length ? "yes" : "",
+    ];
+  });
+  const list = {
+    name: "staff.xlsx",
+    mimeType:
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    buffer: workbookOf([
+      ["Name", "Email", "Team", "Job title", "Team lead"],
+      ...rows,
+    ]),
+  };
+  const counted =
+    "Thank you. From your staff list I can see 170 people in 9 teams.";
+  const saidAlone = () =>
+    asked.filter((line) => line.text === counted).map(({ tone }) => tone);
+
+  await page.goto("/setup?step=company");
+  await expect(
+    page.getByRole("heading", { name: "Who’s who at your company?" })
+  ).toBeVisible();
+  await page.locator('input[type="file"]').setInputFiles(list);
+  await expect(page.getByText(counted)).toBeVisible();
+  // Read on this visit, Stephen says so on its own, plainly.
+  await expect.poll(saidAlone).toStrictEqual(["clear, measured pace"]);
+
+  const { core, api } = apiOf(admin);
+  try {
+    const { roster: kept } = await api.onboarding.view();
+    expect({
+      people: kept?.people.length,
+      teams: kept?.teams.map(({ name }) => name).toSorted(),
+      led: kept?.teams.every(({ lead }) => lead !== null),
+    }).toStrictEqual({
+      people: 170,
+      teams: nineTeams.toSorted(),
+      led: true,
+    });
+
+    // The same list again, on another visit: said again once read, and nothing changes.
+    await page.reload();
+    await expect(page.getByText(counted)).toBeVisible();
+    await page.locator('input[type="file"]').setInputFiles(list);
+    await expect.poll(() => saidAlone().length).toBe(2);
+    const again = await api.onboarding.view();
+    expect(again.roster).toStrictEqual(kept);
   } finally {
     core[Symbol.dispose]();
   }

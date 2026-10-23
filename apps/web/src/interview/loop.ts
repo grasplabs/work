@@ -33,18 +33,22 @@ import {
   withFactText,
   withLine,
 } from "./progress.ts";
+import { prepare, say, sayInPieces, setSound, stopSpeaking } from "./speech.ts";
+import type { Saying, Voicing } from "./speech.ts";
 import type { LoopWords } from "./words.ts";
 
-// The interview as it runs, by typing: Stephen says his line, which lights
-// up at the pace he would say it; they type; he thinks; turn after turn.
-// His lines come from core (`/api/interview/turn`), his line first, the
-// moment it is written, so it shows while what he wrote down is still on
-// its way. Last he reads back what he wrote down, a part at a time, told
-// as a short story (`/api/interview/story`), and they agree to it, put a
-// line right or take one out. What was said is kept with the interview
-// (kept.ts); this is only the moment. Ported from the prototype
-// (grasplabs/prototype, packages/grasp: src/data/interview-loop.ts),
-// without the voice: typing only.
+// The interview as it runs: Stephen says his line, out loud (speech.ts),
+// its words lighting up as he says them, or at the pace he would say it
+// without sound; they type; he thinks; turn after turn. His lines come
+// from core (`/api/interview/turn`): the first sentence of his line while
+// the rest is still being written, so he begins to speak with it; then the
+// whole line, which he goes on saying without a gap, while what he wrote
+// down is still on its way. Last he reads back what he wrote down, a part
+// at a time, told as a short story (`/api/interview/story`), and they
+// agree to it, put a line right or take one out. What was said is kept
+// with the interview (kept.ts); this is only the moment. Ported from the
+// prototype (grasplabs/prototype, packages/grasp:
+// src/data/interview-loop.ts), with his voice; his ears come later.
 //
 // When core can't be reached, a turn is asked for again by itself, twice.
 // Only when that doesn't help does anyone notice: Stephen says so himself,
@@ -155,7 +159,8 @@ let turns = 0;
 /** Which of his lines is being said: a later one makes an earlier one's end count for nothing. */
 let speaking = 0;
 let sayingCount = 0;
-let speakTimer = 0;
+/** His line being said while the rest of it is still being written. */
+let underway: Saying | null = null;
 let nudging = 0;
 let noting = 0;
 /** How he says the line on screen, and whether it asked something. */
@@ -200,10 +205,18 @@ const show = (
   set({ sign: more.sign === undefined ? signFor(doing) : more.sign });
 };
 
+/** He stops: what he says, and what he would do next by himself. */
 const rest = (): void => {
-  window.clearTimeout(speakTimer);
+  stopSpeaking();
+  underway = null;
   window.clearTimeout(nudging);
 };
+
+/** How he says a line: in the voice of whoever holds the interview. */
+const voiceOf = (how: VoiceTag | null): Voicing => ({
+  speaker: progressNow().interviewer ?? "stephen",
+  tone: how,
+});
 
 /** The turn on its way counts for nothing any more, nor one still owed. */
 const drop = (): void => {
@@ -251,13 +264,19 @@ const listen = (): void => {
 };
 
 /**
- * Stephen says a line: it lights up on screen at the pace he would say
- * it; then `after`, unless something else happened meanwhile.
+ * Stephen says a line, a sentence at a time, its words lighting up as he
+ * says them; then `after`, unless something else happened meanwhile. With
+ * `open`, the line is only its first sentence so far: the rest follows
+ * (`grow`) as it is written.
  */
 const speak = (
   line: string,
   how: VoiceTag | null,
-  { noted = false, after }: { noted?: boolean; after: () => void }
+  {
+    noted = false,
+    open = false,
+    after,
+  }: { noted?: boolean; open?: boolean; after: () => void }
 ): void => {
   speaking += 1;
   const mine = speaking;
@@ -278,11 +297,27 @@ const speak = (
       }
     }, penMs);
   }
-  speakTimer = window.setTimeout(() => {
+  const saying = sayInPieces(line, voiceOf(how), { done: !open });
+  underway = open ? saying : null;
+  void (async () => {
+    await saying.over;
     if (speaking === mine && on) {
       after();
     }
-  }, sayingMs(line));
+  })();
+};
+
+/** The rest of the line he began with its first sentence: he says it on without a gap, and it grows on screen in place. */
+const grow = (all: string): void => {
+  const saying = underway;
+  if (saying === null) {
+    return;
+  }
+  underway = null;
+  saying.add(all);
+  saying.end();
+  asked = saying.text.trim().endsWith("?");
+  set({ line: saying.text });
 };
 
 /** Says a line and waits until it is said; false when something else happened meanwhile. */
@@ -293,7 +328,7 @@ const sayThrough = async (
 ): Promise<boolean> => {
   sayingCount += 1;
   set({ line, saying: sayingCount, from });
-  await pause(sayingMs(line.slice(from)));
+  await say(line.slice(from), voiceOf(tone));
   return speaking === mine && on;
 };
 
@@ -542,7 +577,7 @@ const tell = async (
   for (const sentence of sentences) {
     set({ telling: { now: sentence.ids, told: [...told] } });
     // oxlint-disable-next-line no-await-in-loop -- one sentence after another, as he says them
-    await pause(sayingMs(sentence.say));
+    await say(sentence.say, voiceOf(tone));
     if (speaking !== mine || !on) {
       return false;
     }
@@ -594,6 +629,11 @@ const readPart = async (): Promise<void> => {
     part.facts
       .filter(({ out }) => out !== true)
       .map(({ id, text }) => ({ say: text, ids: [id] }));
+  // Each sentence, and the question after them, is fetched ahead, so it follows the one before without a gap.
+  for (const sentence of sentences) {
+    prepare(sentence.say, voiceOf(tone));
+  }
+  prepare(told.question, voiceOf(tone));
   if (!(await tell(sentences, mine))) {
     return;
   }
@@ -655,14 +695,29 @@ const conversed = (said: InterviewLine | undefined): number => {
 };
 
 /** His line in the conversation. */
-const hisLine = ({ say, tone: how }: EarlyLine): void => {
+const hisLine = ({ say: text, tone: how }: EarlyLine): void => {
   update((progress) =>
     withLine(progress, {
       from: "stephen",
-      text: say,
+      text,
       ...(how === null ? {} : { tone: how }),
     })
   );
+};
+
+/**
+ * His line came whole after he began it with its first sentence: it goes
+ * in the conversation, unless they went on meanwhile, and he says the rest.
+ */
+const rounded = (known: Turn, line: EarlyLine): void => {
+  if (known.opening === null) {
+    return;
+  }
+  known.opening = null;
+  if (on && known.order === turns) {
+    hisLine(line);
+  }
+  grow(line.say);
 };
 
 /** What one turn knows while it runs. */
@@ -675,6 +730,8 @@ interface Turn {
   said: InterviewLine | undefined;
   /** Where the line his marks go on stands in the conversation. */
   answered: number;
+  /** The first sentence of his line, said while the rest of it is owed. */
+  opening: EarlyLine | null;
 }
 
 /** Where the interview goes after a turn whose line is out: a later turn, the read-back, or an answer still coming decides it. */
@@ -795,7 +852,8 @@ const earlyOf = (
       );
     }
   };
-  const begin = (line: EarlyLine): void => {
+  /** He begins his line: with its first sentence while the rest is written, or all of it. */
+  const begin = (line: EarlyLine, whole: boolean): void => {
     // They typed on while he thought, or left: this line is not said.
     if (pending !== mine || !on || line.say === "") {
       return;
@@ -805,15 +863,25 @@ const earlyOf = (
     mine.spoke = true;
     carry = [];
     known.answered = conversed(said);
-    hisLine(line);
+    if (whole) {
+      hisLine(line);
+    } else {
+      known.opening = line;
+    }
     window.clearTimeout(noting);
     set({ said: theirs(said) });
-    speak(line.say, line.tone, { after });
+    speak(line.say, line.tone, { after, open: !whole });
     steer();
   };
   const onEvent = (early: EarlyEvent): void => {
-    if ("line" in early) {
-      begin(early.line);
+    if ("opening" in early) {
+      begin(early.opening, false);
+    } else if ("line" in early) {
+      if (known.opening === null) {
+        begin(early.line, true);
+      } else {
+        rounded(known, early.line);
+      }
     } else if ("next" in early) {
       ({ next } = early);
       if (early.next.wants === "readback" || early.next.wants === "end") {
@@ -906,11 +974,22 @@ const ask = async (
     part: now.confirmed,
     said,
     answered: -1,
+    opening: null,
   };
   show("thinking");
   const { after, onEvent } = earlyOf(known);
   const turn = await reach(request, mine.giving, onEvent);
   if (mine.spoke) {
+    // Begun with its first sentence, his line came only with the whole turn, or never: he says what there is.
+    const { opening } = known;
+    if (opening !== null) {
+      rounded(
+        known,
+        turnFailed(turn) || turn.say === ""
+          ? opening
+          : { say: turn.say, tone: turn.tone }
+      );
+    }
     taken(turn, known);
     return;
   }
@@ -1001,6 +1080,10 @@ export const startLoop = (): void => {
   troubled = 0;
   window.addEventListener("online", tryAgain);
   const now = progressNow();
+  // Whoever chose to type isn't surprised by a voice, back on the link too.
+  if (now.mode === "type") {
+    setSound(false);
+  }
   if (isReading(now)) {
     void readPart();
     return;

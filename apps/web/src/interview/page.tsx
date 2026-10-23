@@ -59,12 +59,13 @@ import { useInterviewWords, useLoopWords } from "./words.ts";
 // `interview-view.tsx`): full screen, outside the app, as calm as the
 // onboarding. Before it, the language, Stephen or Claire, what this is and
 // a sound check (before.tsx). Then whoever they chose in the middle, the
-// line lighting up as it is said; the box to type in at the bottom, their own words as a bubble over it;
-// the parts of the interview as a row of marks at the top; top left the
-// way out for now, which keeps their place; top right the transcript,
-// which floats at the right side. Last he reads back what he wrote down, a
-// few lines at a time; what they leave in is what counts. Nothing on the
-// page scrolls.
+// line lighting up as it is said; the box to type in at the bottom, a
+// voice bar while he talks for whoever chose to talk, their own words as a
+// bubble over it; the parts of the interview as a row of marks at the top;
+// top left the way out for now, which keeps their place; top right the
+// transcript, which floats at the right side. Last he reads back what he
+// wrote down, a few lines at a time; what they leave in is what counts.
+// Nothing on the page scrolls.
 
 /** Room kept free over the box, for their words that show there. */
 const overBox = 112;
@@ -436,17 +437,20 @@ const AnswerBox = ({ reading }: { reading: boolean }) => {
   const { t } = useLingui();
   const loop = useLoop();
   const words = useInterviewWords();
+  const { mode } = useProgress();
   return (
     <>
       <SaveTrouble />
       <Composer
+        doing={loop.doing}
+        line={loop.saying}
         names={words.tag}
         onSend={sendTyped}
         placeholder={
           reading ? t`Type what is missing, or yes` : t`Type your answer`
         }
         said={loop.said}
-        thinking={loop.doing === "thinking"}
+        talking={mode === "talk"}
       />
     </>
   );

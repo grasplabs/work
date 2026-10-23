@@ -16,3 +16,4 @@ test-results/
 .vite-hooks/_/
 release-out/
 wrangler.deploy.jsonc
+scripts/lab/out/
