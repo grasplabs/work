@@ -289,7 +289,7 @@ const cutText = (text: string, limit: number): string => {
 const threadMessages = defineTool({
   name: "mail.thread",
   description:
-    "Gets the messages of one conversation (a conversationId from mail.list or mail.get) in every folder of a mailbox, Sent Items included, oldest first, each with its own text without the earlier messages quoted below it. The last 25 at most: earlierMessages is true when the conversation has older ones. A body over 8,000 characters is cut, and bodyCut says so. A thread whose last message is someone else's waits on the mailbox's owner.",
+    "Gets the messages of one conversation (a conversationId from mail.list or mail.get) in every folder of a mailbox, Sent Items included, oldest first, each with its own text without the earlier messages quoted below it. The last 25 at most: earlierMessages is true when the conversation has older ones. A body over 8,000 characters is cut, and bodyCut says so. A thread whose last message, leaving out drafts (isDraft), is someone else's waits on the mailbox's owner.",
   input: z.strictObject({
     mailbox: mailboxSchema,
     conversation: conversationSchema,
