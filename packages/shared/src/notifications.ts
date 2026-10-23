@@ -6,8 +6,9 @@ export const notificationErrors = defineErrorFamily({
 });
 
 // What core tells a signed-in person in the product (core's
-// notifications.ts): for now, that a workflow failed while acting for
-// them. Only they see their own; nobody else is told.
+// notifications.ts): that a workflow failed while acting for them, or
+// that an admin asked them one of the brain's open questions. Only they
+// see their own; nobody else is told.
 
 /**
  * A workflow of an App failed while acting for the person: one per App
@@ -28,7 +29,25 @@ export interface RunFailedNotification {
   read: boolean;
 }
 
-export type Notification = RunFailedNotification;
+/**
+ * An admin asked the person one of the brain's open questions, as the
+ * role that can answer it (core's brain-gaps.ts): listed while the
+ * question is open, and gone once anyone answers or closes it.
+ */
+export interface GapAskedNotification {
+  id: string;
+  type: "gap_asked";
+  /** The question's id: `brain.answerGap` takes it. */
+  gap: string;
+  question: string;
+  /** The role it was asked of, as the question names it. */
+  owner: string;
+  /** When they were asked (ISO 8601). */
+  at: string;
+  read: boolean;
+}
+
+export type Notification = RunFailedNotification | GapAskedNotification;
 
 /** Most notifications `list` returns: the latest. */
 export const listedNotifications = 50;
@@ -55,8 +74,9 @@ export interface NotificationPage {
 /** The signed-in person's notifications. */
 export interface NotificationsApi {
   /**
-   * Their notifications of Apps they can still open, latest first: the
-   * latest page, or the page older than `before`.
+   * Their notifications of Apps they can still open, and of questions
+   * still open, latest first: the latest page, or the page older than
+   * `before`.
    */
   list: (before?: NotificationCursor) => Promise<NotificationPage>;
   /**

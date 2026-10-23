@@ -34,6 +34,9 @@
 // Values and errors are kept as codec text (codec.ts), never as live
 // objects; a step's stream result as chunks beside them (streams.ts).
 import { createHistory } from "./history.ts";
+import { eventMatches } from "./identity.ts";
+import type { JournaledMatch } from "./identity.ts";
+import { journalSchemaVersion } from "./journal-schema.ts";
 import { createNotifications } from "./notifications.ts";
 import { createStreamChunks } from "./streams.ts";
 
@@ -46,16 +49,7 @@ export class JournalSchemaError extends Error {
   override readonly name = "JournalSchemaError";
 }
 
-/**
- * The journal's own layout; a change to it is a new version, with the
- * upgrade from the one before it (`upgradedSchema`). No journal predates
- * version 8 (nothing earlier was released), so a run of an older version,
- * or a newer one, is refused when it is read.
- *
- * - 9: `run.control_fence`, the newest fence a control came with (run.ts,
- *   `ControlFence`).
- */
-export const journalSchemaVersion = 9;
+export { journalSchemaVersion } from "./journal-schema.ts";
 
 /**
  * The journal's version, once upgraded to this engine's where it was the
@@ -69,14 +63,28 @@ const upgradedSchema = (
   const [stored] = sql
     .exec<{ schema: number | string | null }>("SELECT schema FROM run")
     .toArray();
-  if (stored?.schema === 8) {
-    // In one turn, so in one of the object's atomic writes: the column and
-    // the version move together.
+  let schema = stored?.schema;
+  // Each in one turn, so in one of the object's atomic writes: the columns
+  // and the version move together.
+  if (schema === 8) {
     sql.exec("ALTER TABLE run ADD COLUMN control_fence INTEGER");
     sql.exec("UPDATE run SET schema = 9");
-    return 9;
+    schema = 9;
   }
-  return stored?.schema;
+  if (schema === 9) {
+    sql.exec("ALTER TABLE events ADD COLUMN attributes TEXT");
+    sql.exec("ALTER TABLE steps ADD COLUMN event_match TEXT");
+    sql.exec("UPDATE run SET schema = 10");
+    schema = 10;
+  }
+  if (schema === 10) {
+    sql.exec(
+      "ALTER TABLE events ADD COLUMN reserved INTEGER NOT NULL DEFAULT 0"
+    );
+    sql.exec("UPDATE run SET schema = 11");
+    schema = 11;
+  }
+  return schema;
 };
 
 /**
@@ -277,8 +285,10 @@ export interface StepRow extends Record<string, SqlStorageValue> {
    * only `resume` does, by the time the run was paused (run.ts).
    */
   deadline: number | null;
-  /** The event type a wait takes. */
+  /** The event type a `waitForEvent` takes. */
   event_type: string | null;
+  /** What a `waitForMatch` takes, as `eventMatchOf` journals it. */
+  event_match: string | null;
   /**
    * A sleep's duration or a wait's timeout as first given, which every
    * replay must give again; null for `sleepUntil`.
@@ -362,6 +372,8 @@ export interface EventRow extends Record<string, SqlStorageValue> {
   payload: string;
   /** The sender's delivery key: the same key again is the same event. */
   key: string | null;
+  /** What it was sent with, as `eventAttributesOf` keeps them. */
+  attributes: string | null;
   accepted_at: number;
   /** The wait (its step's ordinal) that took the event. */
   consumed_by: number | null;
@@ -436,6 +448,7 @@ export const createJournal = (sql: SqlStorage): void => {
       deadline INTEGER,
       event_type TEXT,
       duration_ms INTEGER,
+      event_match TEXT,
       config TEXT,
       has_rollback INTEGER NOT NULL DEFAULT 0,
       nested INTEGER NOT NULL DEFAULT 0,
@@ -459,7 +472,9 @@ export const createJournal = (sql: SqlStorage): void => {
       payload TEXT NOT NULL,
       key TEXT UNIQUE,
       accepted_at INTEGER NOT NULL,
-      consumed_by INTEGER UNIQUE REFERENCES steps (ordinal)
+      consumed_by INTEGER UNIQUE REFERENCES steps (ordinal),
+      attributes TEXT,
+      reserved INTEGER NOT NULL DEFAULT 0
     );
     CREATE INDEX IF NOT EXISTS events_unconsumed
       ON events (type, seq) WHERE consumed_by IS NULL;
@@ -658,7 +673,7 @@ export const readRun = (sql: SqlStorage): RunRow | undefined => {
     return undefined;
   }
   if (schema !== journalSchemaVersion) {
-    // No journal predates version 8; see journalSchemaVersion.
+    // Outside what this engine reads (journal-schema.ts).
     throw new JournalSchemaError(
       `This run's journal has schema ${String(schema)}, where this engine reads only schema ${journalSchemaVersion}`
     );
@@ -671,7 +686,7 @@ export const readRun = (sql: SqlStorage): RunRow | undefined => {
 };
 
 const stepColumns =
-  "ordinal, type, name, occurrence, idempotency_key, state, attempt, value, error, deadline, event_type, duration_ms, config, has_rollback, nested";
+  "ordinal, type, name, occurrence, idempotency_key, state, attempt, value, error, deadline, event_type, event_match, duration_ms, config, has_rollback, nested";
 
 export const readStep = (
   sql: SqlStorage,
@@ -765,7 +780,8 @@ export const readGenerationOver = (sql: SqlStorage): number | undefined => {
   return row === undefined ? undefined : row.generation - row.open;
 };
 
-const eventColumns = "seq, type, payload, key, accepted_at, consumed_by";
+const eventColumns =
+  "seq, type, payload, key, attributes, accepted_at, consumed_by";
 
 /** The event a wait took, if it took one. */
 export const readConsumedEvent = (
@@ -800,6 +816,34 @@ export const readNextEvent = (
   return oldest !== undefined && oldest.accepted_at < deadline
     ? oldest
     : undefined;
+};
+
+/**
+ * The oldest event no wait has taken that matches any entry of `match`
+ * (identity.ts, `eventMatches`), if the run accepted it before
+ * `deadline`: the one a `waitForMatch` with that deadline takes. The query
+ * narrows by type alone, one bound value per distinct type (16 at most,
+ * well within SQLite's bound-parameter limit however many attributes the
+ * entries name); the attributes are compared as the rows are read, in the
+ * order the run accepted them, stopping at the first that matches.
+ */
+export const readMatchingEvent = (
+  sql: SqlStorage,
+  match: readonly JournaledMatch[],
+  deadline: number
+): EventRow | undefined => {
+  const types = [...new Set(match.map((entry) => entry.type))];
+  const rows = sql.exec<EventRow>(
+    `SELECT ${eventColumns} FROM events WHERE consumed_by IS NULL AND accepted_at < ? AND type IN (${types.map(() => "?").join(", ")}) ORDER BY seq`,
+    deadline,
+    ...types
+  );
+  for (const row of rows) {
+    if (eventMatches(match, row.type, row.attributes)) {
+      return row;
+    }
+  }
+  return undefined;
 };
 
 /** A step whose rollback is still to run, or ended the rolling back. */

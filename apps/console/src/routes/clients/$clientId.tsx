@@ -17,6 +17,9 @@ import { useEffect } from "react";
 
 import { ClientSettings } from "../../clients/client-settings.tsx";
 import { fetchClientSettings } from "../../clients/functions.ts";
+import { ClientHosting } from "../../hosting/client-hosting.tsx";
+import { fetchClientHosting } from "../../hosting/functions.ts";
+import { hostingPolicyIds } from "../../hosting/policy.ts";
 import {
   confirmClientWorkersPaid,
   fetchNewClientOptions,
@@ -220,9 +223,18 @@ const working: ReadonlySet<ProvisioningView["phase"]> = new Set([
 ]);
 
 const Client = () => {
-  const { view, releases, settings, history } = Route.useLoaderData();
+  const { view, releases, settings, history, hosting } = Route.useLoaderData();
   const router = useRouter();
-  const following = working.has(view.phase);
+  // A client placed in a hosting destination, or being provisioned in
+  // one, is followed by its operation: the account-per-client run's
+  // phases say nothing of it.
+  const placed =
+    hosting !== null &&
+    (hosting.placement !== null || hosting.operation !== null);
+  const following = placed ? hosting.going : working.has(view.phase);
+  const stopped = placed
+    ? hosting.operation?.status === "failed"
+    : view.phase === "failed";
   useEffect(() => {
     const timer = following
       ? setInterval(() => {
@@ -239,19 +251,25 @@ const Client = () => {
         <h1 className="text-2xl font-medium">
           {view.client?.name ?? view.clientId}
         </h1>
-        <Badge variant={view.phase === "failed" ? "destructive" : "secondary"}>
+        <Badge variant={stopped ? "destructive" : "secondary"}>
           {view.client?.status ?? "provisioning"}
         </Badge>
       </div>
       <Facts view={view} />
-      <Card>
-        <CardHeader>
-          <CardTitle>Provisioning</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <Progress view={view} />
-        </CardContent>
-      </Card>
+      {placed ? null : (
+        <Card>
+          <CardHeader>
+            <CardTitle>Provisioning</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Progress view={view} />
+          </CardContent>
+        </Card>
+      )}
+      {hosting !== null &&
+      (placed || view.client?.status === "provisioning") ? (
+        <ClientHosting releases={releases} view={hosting} />
+      ) : null}
       {view.client?.status === "active" ? (
         <ClientRelease
           clientId={view.clientId}
@@ -289,15 +307,19 @@ export const Route = createFileRoute("/clients/$clientId")({
     if (!newClientIdSchema.safeParse(params.clientId).success) {
       throw notFound();
     }
-    const [view, { releases }, { settings, history }] = await Promise.all([
-      fetchProvisioning({ data: { clientId: params.clientId } }),
-      fetchNewClientOptions(),
-      fetchClientSettings({ data: { clientId: params.clientId } }),
-    ]);
+    const [view, { releases }, { settings, history }, hosting] =
+      await Promise.all([
+        fetchProvisioning({ data: { clientId: params.clientId } }),
+        fetchNewClientOptions(),
+        fetchClientSettings({ data: { clientId: params.clientId } }),
+        fetchClientHosting({
+          data: { clientId: params.clientId, policyId: hostingPolicyIds[0] },
+        }),
+      ]);
     if (view === null) {
       throw notFound();
     }
-    return { view, releases, settings, history };
+    return { view, releases, settings, history, hosting };
   },
   component: Client,
   notFoundComponent: NoSuchClient,

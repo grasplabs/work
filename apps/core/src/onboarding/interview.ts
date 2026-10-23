@@ -426,9 +426,18 @@ export const interviewTurnResponse = async (
     return linkRefusal("interview.invalid", requestId);
   }
   const turn = parsed.data;
+  // The text for either kind of interview: the store keeps the mark of the
+  // one this turn is held with, once it knows which kind it is.
+  const [own, lead] = await Promise.all([
+    interviewerText(turn.interviewer, "own", turn.locale),
+    interviewerText(turn.interviewer, "lead", turn.locale),
+  ]);
+  const secretMark = await sha256Hex(turn.secret);
   const found = await onboardingStore(env).turnContext(
-    await sha256Hex(turn.secret),
-    await sha256Hex(turn.key)
+    secretMark,
+    await sha256Hex(turn.key),
+    new Date().toISOString(),
+    { own: own.mark, lead: lead.mark }
   );
   if (!found.ok) {
     if (found.code === "interview.link_invalid") {
@@ -447,13 +456,19 @@ export const interviewTurnResponse = async (
       { status: 503, headers: linkHeaders }
     );
   }
-  const [{ text: system }, organization] = await Promise.all([
-    interviewerText(turn.interviewer, context.kind, turn.locale),
-    readOrganization(env),
-  ]);
+  const { text: system, mark } = context.kind === "lead" ? lead : own;
+  const organization = await readOrganization(env);
   const cut = new AbortController();
   const store = onboardingStore(env);
-  const counting: Promise<void>[] = [];
+  // What the turn ran on, for the staff's numbers: the text that speaks,
+  // and how long they waited for his voice the answer before.
+  const counting: Promise<void>[] = [
+    store.turnRan(
+      secretMark,
+      { mark, interviewer: turn.interviewer, locale: turn.locale },
+      turn.waited
+    ),
+  ];
   const count = (took: Took | null) => {
     if (took !== null) {
       counting.push(store.meter(took));

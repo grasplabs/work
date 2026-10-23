@@ -1277,8 +1277,10 @@ describe("a JSON workflow's own actions", () => {
       )
     );
     const build = await loadWorkflowBuild(env, workflow.id, 1);
+    const runId = `run-${unique()}`;
     const run: CallingRun = {
-      runId: `run-${unique()}`,
+      runId,
+      rootRunId: runId,
       workflowId: workflow.id,
       version: 1,
       principal: ada.userId,
@@ -1627,6 +1629,7 @@ export const notify = action({
         env,
         {
           runId,
+          rootRunId: runId,
           workflowId: crypto.randomUUID(),
           version: 1,
           principal: crypto.randomUUID(),

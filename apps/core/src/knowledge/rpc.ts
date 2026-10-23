@@ -1,4 +1,16 @@
 import type {
+  CommandOptions,
+  CommandReceipt,
+  MemoriesGetInput,
+  MemoriesListInput,
+  MemoryPack,
+  MemoryPage,
+  MemoryRecord,
+  ReceiptsGetInput,
+  RecallInput,
+  RememberInput,
+} from "@grasp-os/shared/brain-api";
+import type {
   BacklinkPage,
   Collection,
   CollectionInput,
@@ -24,6 +36,7 @@ import type {
   SkillCollections,
 } from "@grasp-os/shared/knowledge";
 
+import { gapAnswerErasure } from "../brain-gaps.ts";
 import { CoreRpcTarget } from "../rpc-target.ts";
 import { withPerson } from "../session-check.ts";
 import type { SessionCheck } from "../session-check.ts";
@@ -38,7 +51,14 @@ import {
   saveDocument,
 } from "./documents.ts";
 import { copySkill, skillCollections } from "./grasp-skills.ts";
+import {
+  memoriesGet,
+  memoriesList,
+  receiptsGet,
+  remember,
+} from "./memories.ts";
 import { preparePurge, purge } from "./purge.ts";
+import { recall } from "./recall.ts";
 import { search } from "./search.ts";
 import { catalog, follow, read } from "./tools.ts";
 
@@ -62,6 +82,33 @@ export class KnowledgeRpc extends CoreRpcTarget implements KnowledgeApi {
     return await withPerson(
       this.#check,
       async (person) => await run({ type: "person", person })
+    );
+  }
+
+  async remember(
+    input: RememberInput,
+    options: CommandOptions
+  ): Promise<CommandReceipt> {
+    return await this.#asReader(
+      async (reader) => await remember(this.#env, reader, input, options)
+    );
+  }
+
+  async receiptsGet(input: ReceiptsGetInput): Promise<CommandReceipt> {
+    return await this.#asReader(
+      async (reader) => await receiptsGet(this.#env, reader, input)
+    );
+  }
+
+  async memoriesGet(input: MemoriesGetInput): Promise<MemoryRecord> {
+    return await this.#asReader(
+      async (reader) => await memoriesGet(this.#env, reader, input)
+    );
+  }
+
+  async memoriesList(input?: MemoriesListInput): Promise<MemoryPage> {
+    return await this.#asReader(
+      async (reader) => await memoriesList(this.#env, reader, input)
     );
   }
 
@@ -136,6 +183,12 @@ export class KnowledgeRpc extends CoreRpcTarget implements KnowledgeApi {
     );
   }
 
+  async recall(input: RecallInput): Promise<MemoryPack> {
+    return await this.#asReader(
+      async (reader) => await recall(this.#env, reader, input)
+    );
+  }
+
   async catalog(): Promise<KnowledgeCatalog> {
     return await this.#asReader(
       async (reader) => await catalog(this.#env, reader)
@@ -174,14 +227,27 @@ export class KnowledgeRpc extends CoreRpcTarget implements KnowledgeApi {
   async preparePurge(input: PurgeInput): Promise<PurgePlan> {
     return await withPerson(
       this.#check,
-      async (person) => await preparePurge(this.#env, person, input)
+      async (person) =>
+        await preparePurge(
+          this.#env,
+          person,
+          input,
+          gapAnswerErasure(this.#env)
+        )
     );
   }
 
   async purge(input: PurgeInput, token: string): Promise<PurgeResult> {
     return await withPerson(
       this.#check,
-      async (person) => await purge(this.#env, person, input, token)
+      async (person) =>
+        await purge(
+          this.#env,
+          person,
+          input,
+          token,
+          gapAnswerErasure(this.#env)
+        )
     );
   }
 }

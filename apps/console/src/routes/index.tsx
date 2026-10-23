@@ -12,6 +12,7 @@ import {
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
+import { Cost } from "../clients/cost.tsx";
 import { fetchClientGrid, fetchGridLive } from "../clients/functions.ts";
 import type { GridRow, LiveStatus, Reach } from "../clients/grid.ts";
 import { formatTime } from "../releases/format.ts";
@@ -51,11 +52,6 @@ const secretsBadge = (
     : { label: "behind", variant: "destructive" };
 };
 
-const usd = new Intl.NumberFormat("en", {
-  style: "currency",
-  currency: "USD",
-});
-
 const percent = new Intl.NumberFormat("en", {
   style: "percent",
   maximumFractionDigits: 1,
@@ -86,18 +82,6 @@ const Health = ({ live }: { live: LiveStatus }) => {
     </div>
   );
 };
-
-const Cost = ({ cost }: { cost: LiveStatus["costUsd"] }) =>
-  cost === null ? (
-    <span className="text-muted-foreground">unknown</span>
-  ) : (
-    <div className="flex flex-col">
-      <span>{usd.format(cost.workers + cost.ai)}</span>
-      <span className="text-muted-foreground text-xs">
-        {`AI ${usd.format(cost.ai)}`}
-      </span>
-    </div>
-  );
 
 /** A stage of a client's onboarding, as its badge says it. */
 const stageBadges: Readonly<

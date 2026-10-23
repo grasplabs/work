@@ -1,7 +1,8 @@
 /**
  * What staff do with rollouts (src/rollout/workflow.ts): start one,
- * approve its next ring, pause and resume its run, cancel it between
- * rings, and pin a client to a release. Rolling a client back is
+ * approve its fleet once its first ring passed, pause and resume its
+ * run, cancel it while it waits for that approval, and pin a client to a
+ * release (which its rollouts then skip). Rolling a client back is
  * src/rollout/rollback.ts.
  *
  * One rollout runs at a time: a rollout waiting for approval still owns
@@ -29,6 +30,7 @@ import type { Staff } from "../access.ts";
 import { actIfChanged, audit, consoleDatabase } from "../db/act.ts";
 import type { ConsoleDatabase } from "../db/act.ts";
 import {
+  auditEvents,
   clients,
   clientWorkers,
   releases,
@@ -48,7 +50,14 @@ import { goOnToStop } from "./rollback.ts";
 import { storePrints } from "./shared-secrets.ts";
 import type { SharedPrints } from "./shared-secrets.ts";
 import { firstRing, rolloutScopeSchema, targetsOf } from "./targets.ts";
-import { approvalEvent, rolloutSteps, stepBudget } from "./workflow.ts";
+import {
+  approvalEvent,
+  fleetTargets,
+  retryEvent,
+  retrySteps,
+  rolloutSteps,
+  stepBudget,
+} from "./workflow.ts";
 import type { RolloutParams } from "./workflow.ts";
 
 /**
@@ -200,11 +209,14 @@ export const startRollout = async (
   // Refused rather than left to stop part way at Workflows' step limit.
   const manifest =
     releaseId === null ? null : await importedManifest(db, releaseId);
-  const steps = rolloutSteps(
-    new Set(targets.map(({ ring }) => ring)).size,
-    targets.length,
-    manifest === null ? mostWorkers : Object.keys(manifest.workers).length
-  );
+  const internal = targets.filter(({ ring }) => ring === first.ring).length;
+  const steps = rolloutSteps({
+    rings: new Set(targets.map(({ ring }) => ring)).size,
+    internal,
+    fleet: targets.length - internal,
+    apps:
+      manifest === null ? mostWorkers : Object.keys(manifest.workers).length,
+  });
   if (steps > stepBudget) {
     throw new RolloutError(
       "too_large",
@@ -313,8 +325,9 @@ const resendApproval = async (
 };
 
 /**
- * Approves rollout `rolloutId`'s next ring, as `staff`: moves it on to
- * that ring, audited, then tells its run. Of two staff approving at
+ * Approves rollout `rolloutId`'s fleet, as `staff`: moves it on to the
+ * first ring after the one it passed, audited, then tells its run, which
+ * then reaches every ring after without asking again. Of two staff approving at
  * once, one does. Approving again once the rollout moved on sends the
  * approval again if its run still waits for it (`resendApproval`), so an
  * approval whose event was lost can be given again. Refused otherwise.
@@ -381,6 +394,114 @@ export const approveRollout = async (
   await instance.sendEvent({ type: approvalEvent(next), payload: {} });
 };
 
+const retryDetailSchema = z.object({ clients: z.int().nonnegative() });
+
+/**
+ * Retries rollout `rolloutId`'s failed fleet clients, as `staff`, once it
+ * reached every client and waits for it: each target set going again,
+ * the rollout running, audited, then its run told. The rollout keeps what
+ * a rollback of each puts back, resumes each one's deploy, and deploys
+ * none of the others again. Refused unless it waits with failed fleet
+ * clients (`not_waiting`), and when its run would pass the step budget
+ * (`too_large`: roll those clients out in a new rollout instead). Of two
+ * staff retrying at once, one does.
+ */
+export const retryRollout = async (
+  env: Env,
+  staff: Staff,
+  rolloutId: string
+): Promise<void> => {
+  const db = consoleDatabase(env.DB);
+  const notWaiting = new RolloutError(
+    "not_waiting",
+    `Rollout ${rolloutId} isn't waiting for a retry`
+  );
+  const [row] = await db
+    .select({ status: rollouts.status, releaseId: rollouts.releaseId })
+    .from(rollouts)
+    .where(eq(rollouts.id, rolloutId));
+  const failed =
+    row?.status === "waiting"
+      ? await fleetTargets(db, rolloutId, "failed")
+      : [];
+  if (row === undefined || failed.length === 0) {
+    throw notWaiting;
+  }
+  const targets = await db
+    .select({ ring: rolloutTargets.ring })
+    .from(rolloutTargets)
+    .where(eq(rolloutTargets.rolloutId, rolloutId));
+  const manifest =
+    row.releaseId === null ? null : await importedManifest(db, row.releaseId);
+  const apps =
+    manifest === null ? mostWorkers : Object.keys(manifest.workers).length;
+  const firstRingOf = Math.min(...targets.map(({ ring }) => ring));
+  const internal = targets.filter(({ ring }) => ring === firstRingOf).length;
+  const earlier = await db
+    .select({ detail: auditEvents.detail })
+    .from(auditEvents)
+    .where(
+      and(
+        eq(auditEvents.target, rolloutId),
+        eq(auditEvents.action, "rollout.retry")
+      )
+    );
+  const steps =
+    rolloutSteps({
+      rings: new Set(targets.map(({ ring }) => ring)).size,
+      internal,
+      fleet: targets.length - internal,
+      apps,
+    }) +
+    earlier.reduce(
+      (sum, { detail }) =>
+        sum +
+        retrySteps(
+          retryDetailSchema.parse(JSON.parse(detail ?? "null")).clients
+        ),
+      0
+    ) +
+    retrySteps(failed.length);
+  if (steps > stepBudget) {
+    throw new RolloutError(
+      "too_large",
+      `Retrying ${failed.length} clients would take the run to about ${steps} steps, over ${stepBudget}: roll them out in a new rollout instead`
+    );
+  }
+  const round = earlier.length + 1;
+  const retried = await actIfChanged(
+    db,
+    staff,
+    db
+      .update(rollouts)
+      .set({ status: "running", updatedAt: new Date() })
+      .where(and(eq(rollouts.id, rolloutId), eq(rollouts.status, "waiting"))),
+    {
+      action: "rollout.retry",
+      target: rolloutId,
+      detail: { clients: failed.length, round },
+    },
+    [
+      db
+        .update(rolloutTargets)
+        .set({ status: "pending", error: null, updatedAt: new Date() })
+        .where(
+          and(
+            eq(rolloutTargets.rolloutId, rolloutId),
+            inArray(rolloutTargets.clientId, failed),
+            eq(rolloutTargets.status, "failed"),
+            sql`EXISTS (SELECT 1 FROM ${rollouts} WHERE ${rollouts.id} = ${rolloutId} AND ${rollouts.status} = 'running')`
+          )
+        ),
+    ]
+  );
+  if (!retried) {
+    throw notWaiting;
+  }
+  const instance = await env.ROLLOUT.get(rolloutId);
+  await instance.sendEvent({ type: retryEvent(round), payload: {} });
+};
+
 /** Rollout `rolloutId`'s row and where its run is; null when there's no such rollout. */
 const runOf = async (env: Env, db: ConsoleDatabase, rolloutId: string) => {
   const [row] = await db
@@ -405,9 +526,11 @@ const isActive = (status: string): boolean =>
 
 /**
  * Pauses rollout `rolloutId`'s run, as `staff`, audited first: it stops
- * after the step it's in, holding a client's traffic where it is if it's
- * part way through one. Refused unless the rollout is running or waiting
- * and its run is going (`not_running`).
+ * after the step it's in, holding a client of its first ring's traffic
+ * where it is if it's part way through one. In the fleet it starts no
+ * further client, while each client a child is deploying already is
+ * finished (src/rollout/workflow.ts, `deployFleet`). Refused unless the
+ * rollout is running or waiting and its run is going (`not_running`).
  */
 export const pauseRollout = async (
   env: Env,
@@ -471,7 +594,7 @@ export const resumeRollout = async (
 /**
  * Cancels rollout `rolloutId`, as `staff`, while it waits for approval:
  * it deploys no further ring, and no longer holds the console's one
- * rollout. Only then: between rings it holds no client, whereas part way
+ * rollout. Only then: waiting it holds no client, whereas part way
  * through one a client is rolled back instead (src/rollout/rollback.ts).
  * Refused otherwise (`not_waiting`).
  */

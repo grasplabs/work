@@ -13,7 +13,7 @@ const refusals: Readonly<Record<RolloutErrorCode, string>> = {
     "That's more clients than one rollout takes: roll out one ring or client at a time.",
   rollout_running:
     "Another rollout is running or waiting for approval: finish or cancel it first.",
-  not_waiting: "It isn't waiting for approval.",
+  not_waiting: "It isn't waiting for approval or a retry.",
   not_running: "Its run isn't going, so there's nothing to pause.",
   not_paused: "It isn't paused.",
   unknown_client: "There's no such client.",
@@ -23,6 +23,8 @@ const refusals: Readonly<Record<RolloutErrorCode, string>> = {
     "Something newer was deployed to that client since: roll out the release you want instead.",
   too_far_back:
     "That client ran an older release than the one right before this rollout's: roll out the release you want instead.",
+  incompatible:
+    "What that client ran before doesn't work with what it runs now, so going back could break it: roll out a release that does instead.",
   rotated_since:
     "That client's secrets rotated since, and its previous versions don't have the new ones: roll out instead.",
   client_busy:

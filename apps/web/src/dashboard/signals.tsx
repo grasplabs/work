@@ -111,7 +111,7 @@ const SignalRow = ({
   );
 };
 
-/** The workflow a signal is about, linking to it; its engine without one. */
+/** The workflow a signal is about, linking to it; its engine without one; an independent workflow by name. */
 const About = ({
   signal,
   engines,
@@ -122,7 +122,8 @@ const About = ({
   const { t } = useLingui();
   const { app, workflow } = signal;
   if (app === null) {
-    return <span>{t`your organization`}</span>;
+    // An independent workflow's, by its name: it has no App to go to.
+    return <span>{workflow ?? t`your organization`}</span>;
   }
   const engine = engines.get(app) ?? app;
   return workflow === null ? (

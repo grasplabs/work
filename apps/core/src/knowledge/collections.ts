@@ -173,8 +173,9 @@ export const createCollection = async (
       issues: unknown.map((id) => `teams: there's no team ${id}`),
     });
   }
+  const id = crypto.randomUUID();
   const row: CollectionRow = {
-    id: crypto.randomUUID(),
+    id,
     name,
     description,
     owner: person.userId,

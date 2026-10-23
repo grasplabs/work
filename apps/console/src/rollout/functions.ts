@@ -22,9 +22,11 @@ import {
   pinClient,
   pinSchema,
   resumeRollout,
+  retryRollout,
   startRollout,
   startRolloutSchema,
 } from "./control.ts";
+import { rolloutCost } from "./cost.ts";
 import { driftOf } from "./drift.ts";
 import type { ClientDrift } from "./drift.ts";
 import { RolloutError } from "./errors.ts";
@@ -72,6 +74,16 @@ export const fetchRollout = createServerFn({ method: "GET" })
   .validator(rolloutSchema)
   .handler(async ({ data }) => await getRollout(env, data.rolloutId));
 
+/**
+ * Rollout `rolloutId`'s clients' cost this month and its total, read from
+ * their accounts after its page shows (`rolloutCost`).
+ */
+export const fetchRolloutCost = createServerFn({ method: "GET" })
+  .validator(rolloutSchema)
+  .handler(
+    async ({ data }) => await rolloutCost(env, data.rolloutId, new Date())
+  );
+
 export const startRolloutFn = createServerFn({ method: "POST" })
   .validator(startRolloutSchema)
   .handler(
@@ -85,6 +97,16 @@ export const approveRolloutFn = createServerFn({ method: "POST" })
     async ({ data, context }) =>
       await change(async () => {
         await approveRollout(env, context.staff, data.rolloutId);
+        return data.rolloutId;
+      })
+  );
+
+export const retryRolloutFn = createServerFn({ method: "POST" })
+  .validator(rolloutSchema)
+  .handler(
+    async ({ data, context }) =>
+      await change(async () => {
+        await retryRollout(env, context.staff, data.rolloutId);
         return data.rolloutId;
       })
   );
