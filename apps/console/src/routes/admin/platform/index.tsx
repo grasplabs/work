@@ -504,21 +504,13 @@ const PlatformPage = () => {
   return (
     <AdminPage
       action={
-        <>
-          <Link
-            className={buttonVariants({ variant: "ghost", size: "sm" })}
-            to="/"
-          >
-            Open the console
-          </Link>
-          <Link
-            className={buttonVariants({ size: "sm" })}
-            hash={startRolloutId}
-            to="/admin/platform/rollouts"
-          >
-            Start a rollout
-          </Link>
-        </>
+        <Link
+          className={buttonVariants({ size: "sm" })}
+          hash={startRolloutId}
+          to="/admin/platform/rollouts"
+        >
+          Start a rollout
+        </Link>
       }
       description="Every company runs its own Grasp, in its own Cloudflare account in the EU. A release reaches them ring by ring, and waits after each ring for someone at Grasp."
       title="Platform"

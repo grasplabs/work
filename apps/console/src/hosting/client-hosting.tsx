@@ -1,5 +1,6 @@
 /**
- * A client's hosting, on its page: where it's placed, or where it would
+ * A client's hosting, in its Setup in the admin (src/admin/setup.tsx),
+ * which titles it: where it's placed, or where it would
  * go (the destination the console picks by itself, and what keeps every
  * other from taking it), dedicated hosting as an advanced choice, and
  * starting or resuming its provisioning there, with where its operation
@@ -7,12 +8,6 @@
  */
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@grasp-os/ui/components/card";
 import {
   Collapsible,
   CollapsibleContent,
@@ -285,68 +280,59 @@ export const ClientHosting = ({
   };
   const done = view.operation?.status === "done";
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Hosting</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="flex flex-col gap-6">
-          <div className="flex flex-col gap-1 text-sm">
-            <p>{`Policy: ${view.policy.id}`}</p>
-            <p className="text-muted-foreground">{view.policy.description}</p>
+    <div className="flex flex-col gap-6">
+      <div className="flex flex-col gap-1 text-sm">
+        <p>{`Policy: ${view.policy.id}`}</p>
+        <p className="text-muted-foreground">{view.policy.description}</p>
+      </div>
+      {view.placement === null ? (
+        <Destinations onChoose={setChosen} view={view} chosen={chosen} />
+      ) : (
+        <p className="text-sm">
+          {`Placed in ${view.placement.destinationId} by ${view.placement.placedBy} on ${formatTime(view.placement.placedAt)} UTC. It stays there: moving it is a migration.`}
+        </p>
+      )}
+      {view.operation === null ? null : (
+        <Operation operation={view.operation} run={view.run} />
+      )}
+      {done ? null : (
+        <div className="flex flex-col gap-4">
+          {view.operation === null ? (
+            <Field>
+              <FieldLabel htmlFor="hosting-release">Release</FieldLabel>
+              <NativeSelect
+                id="hosting-release"
+                onChange={(event) => {
+                  setReleaseId(event.target.value);
+                }}
+                value={releaseId}
+              >
+                {releases.map((release) => (
+                  <NativeSelectOption key={release.id} value={release.id}>
+                    {release.id}
+                  </NativeSelectOption>
+                ))}
+              </NativeSelect>
+            </Field>
+          ) : null}
+          <div className="flex flex-wrap items-center gap-4">
+            <Button
+              disabled={busy || releaseId === "" || (placing && chosen === "")}
+              onClick={start}
+            >
+              {startWords(view)}
+            </Button>
+            {failure === null ? null : (
+              <p className="text-destructive text-sm" role="alert">
+                {failure}
+              </p>
+            )}
           </div>
-          {view.placement === null ? (
-            <Destinations onChoose={setChosen} view={view} chosen={chosen} />
-          ) : (
-            <p className="text-sm">
-              {`Placed in ${view.placement.destinationId} by ${view.placement.placedBy} on ${formatTime(view.placement.placedAt)} UTC. It stays there: moving it is a migration.`}
-            </p>
-          )}
-          {view.operation === null ? null : (
-            <Operation operation={view.operation} run={view.run} />
-          )}
-          {done ? null : (
-            <div className="flex flex-col gap-4">
-              {view.operation === null ? (
-                <Field>
-                  <FieldLabel htmlFor="hosting-release">Release</FieldLabel>
-                  <NativeSelect
-                    id="hosting-release"
-                    onChange={(event) => {
-                      setReleaseId(event.target.value);
-                    }}
-                    value={releaseId}
-                  >
-                    {releases.map((release) => (
-                      <NativeSelectOption key={release.id} value={release.id}>
-                        {release.id}
-                      </NativeSelectOption>
-                    ))}
-                  </NativeSelect>
-                </Field>
-              ) : null}
-              <div className="flex flex-wrap items-center gap-4">
-                <Button
-                  disabled={
-                    busy || releaseId === "" || (placing && chosen === "")
-                  }
-                  onClick={start}
-                >
-                  {startWords(view)}
-                </Button>
-                {failure === null ? null : (
-                  <p className="text-destructive text-sm" role="alert">
-                    {failure}
-                  </p>
-                )}
-              </div>
-              {failure === null || blocking.length === 0 ? null : (
-                <Problems problems={blocking} />
-              )}
-            </div>
+          {failure === null || blocking.length === 0 ? null : (
+            <Problems problems={blocking} />
           )}
         </div>
-      </CardContent>
-    </Card>
+      )}
+    </div>
   );
 };

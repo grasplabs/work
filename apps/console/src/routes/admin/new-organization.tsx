@@ -1,3 +1,4 @@
+import { newClientIdSchema } from "@grasp-os/shared/router";
 import { Button } from "@grasp-os/ui/components/button";
 import {
   Field,
@@ -18,8 +19,13 @@ import {
   RadioGroup,
   RadioGroupItem,
 } from "@grasp-os/ui/components/radio-group";
-import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
-import { useState } from "react";
+import {
+  createFileRoute,
+  Link,
+  useNavigate,
+  useRouter,
+} from "@tanstack/react-router";
+import { useEffect, useState } from "react";
 
 import {
   domainsOrAdmins,
@@ -28,6 +34,8 @@ import {
 } from "../../admin/new-organization.ts";
 import type { StartingPoint } from "../../admin/new-organization.ts";
 import { AdminPage } from "../../admin/page.tsx";
+import { SettingUpNow } from "../../admin/setup-actions.tsx";
+import type { Refresh } from "../../admin/setup-actions.tsx";
 import { formatDate } from "../../admin/words.ts";
 import { signInOf, textOf } from "../../clients/sign-in-fields.tsx";
 import type { WonDeal } from "../../crm/attio.ts";
@@ -35,10 +43,22 @@ import { fetchWonDeals } from "../../crm/functions.ts";
 import { clientIdProblem } from "../../provision/client-id.ts";
 import {
   fetchNewClientOptions,
+  fetchProvisioning,
   startClient,
 } from "../../provision/functions.ts";
+import type { ProvisioningView } from "../../provision/queries.ts";
 import { useProvisionAction } from "../../provision/use-action.ts";
 import { InvalidFieldError } from "../../use-action.ts";
+
+/** Client `clientId`'s provisioning; null for none, or an id that can't be one. */
+const provisioningOf = async (
+  clientId: string
+): Promise<ProvisioningView | null> => {
+  if (!newClientIdSchema.safeParse(clientId).success) {
+    return null;
+  }
+  return await fetchProvisioning({ data: { clientId } });
+};
 
 /** Where the organization starts from: by hand, or a deal won in Attio; Rooms is still to come. */
 const StartFrom = ({
@@ -131,21 +151,91 @@ const DealChoice = ({
   </Field>
 );
 
-/** Started: where its provisioning is followed, as the prototype's dialog ends on the way in. */
-const Started = ({ clientId, name }: { clientId: string; name: string }) => {
+/** Reads the page again: its own route alone, as it follows the run. */
+const useRefreshPage = (): Refresh => {
   const router = useRouter();
+  return async () => {
+    await router.invalidate({
+      filter: (match) => match.routeId === "/admin/new-organization",
+      sync: true,
+    });
+  };
+};
+
+/** How often the page reads the run again while it works on its own. */
+const followMs = 5000;
+
+/**
+ * Added: setting it up followed here until the console records it, as
+ * the prototype's dialog ends on the way in. Until then it has no page
+ * among the organizations (they are the clients the console recorded);
+ * once it has, its Setup follows the rest. A run that stopped before it
+ * recorded the company says why, to add it again.
+ */
+const Following = ({
+  clientId,
+  view,
+}: {
+  clientId: string;
+  view: ProvisioningView | null;
+}) => {
+  const router = useRouter();
+  const navigate = useNavigate();
+  const refresh = useRefreshPage();
+  const working =
+    view !== null && view.client === null && view.phase !== "failed";
+  useEffect(() => {
+    const timer = working
+      ? setInterval(() => {
+          void refresh();
+        }, followMs)
+      : undefined;
+    return () => {
+      clearInterval(timer);
+    };
+  }, [working, refresh]);
+  if (view === null) {
+    return (
+      <p className="text-muted-foreground text-sm">
+        {`There's no organization ${clientId} being set up.`}
+      </p>
+    );
+  }
+  const openSetup = async () => {
+    // The organizations stand a minute (src/routes/admin.tsx): read them
+    // again, so the one recorded since is among them.
+    await router.invalidate({
+      filter: (match) => match.routeId === "/admin",
+      sync: true,
+    });
+    await navigate({
+      to: "/admin/organizations/$clientId/setup",
+      params: { clientId },
+    });
+  };
   return (
     <div className="flex flex-col gap-4">
       <p className="text-sm">
-        {`${name} is being set up: its own Cloudflare account, its Grasp, and its address. It shows among the organizations once the console has recorded it.`}
+        {view.client === null
+          ? `${clientId} is being set up: its own Cloudflare account, its Grasp, and its address. It shows among the organizations once the console has recorded it.`
+          : `${view.client.name} is recorded: its Setup follows the rest of setting it up.`}
       </p>
+      <section
+        aria-label="Setting it up"
+        className="bg-card overflow-hidden rounded-xl border text-sm"
+      >
+        <SettingUpNow refresh={refresh} view={view} />
+      </section>
       <div className="flex items-center gap-2">
-        <Button
-          nativeButton={false}
-          render={<Link params={{ clientId }} to="/clients/$clientId" />}
-        >
-          Follow its provisioning
-        </Button>
+        {view.client === null ? null : (
+          <Button
+            onClick={() => {
+              void openSetup();
+            }}
+          >
+            Open its Setup
+          </Button>
+        )}
         <Button
           nativeButton={false}
           render={
@@ -181,7 +271,9 @@ const Started = ({ clientId, name }: { clientId: string; name: string }) => {
  * what it is, its language, who decided on Grasp, and marking it a test.
  */
 const NewOrganization = () => {
-  const { releases, won } = Route.useLoaderData();
+  const { releases, won, following } = Route.useLoaderData();
+  const search = Route.useSearch();
+  const navigate = useNavigate();
   const starts = startingPointsOf(won);
   const deals = won.state === "read" ? won.deals : [];
   // A deal won and not added yet is what an organization most likely
@@ -199,10 +291,6 @@ const NewOrganization = () => {
       ? { name: "", clientId: "", domains: "" }
       : prefillOf(deal);
   const { busy, failure, run } = useProvisionAction();
-  const [started, setStarted] = useState<{
-    clientId: string;
-    name: string;
-  } | null>(null);
   const add = (form: FormData) => {
     const accountId = textOf(form, "accountId");
     const clientId = textOf(form, "clientId");
@@ -229,16 +317,21 @@ const NewOrganization = () => {
         },
       });
       if (result.clientId !== null) {
-        setStarted({ clientId: result.clientId, name });
+        await navigate({
+          to: "/admin/new-organization",
+          search: { following: result.clientId },
+        });
       }
       return result;
     });
   };
   const [newest] = releases;
-  if (started !== null) {
+  if (search.following !== undefined) {
     return (
-      <AdminPage title={`${started.name} is added`}>
-        <Started clientId={started.clientId} name={started.name} />
+      <AdminPage
+        title={`${following?.client?.name ?? search.following} is added`}
+      >
+        <Following clientId={search.following} view={following} />
       </AdminPage>
     );
   }
@@ -355,7 +448,9 @@ const NewOrganization = () => {
                 >
                   {releases.map((release) => (
                     <NativeSelectOption key={release.id} value={release.id}>
-                      {release.id}
+                      {release.notes === ""
+                        ? release.id
+                        : `${release.id} · ${release.notes}`}
                     </NativeSelectOption>
                   ))}
                 </NativeSelect>
@@ -419,12 +514,17 @@ const NewOrganization = () => {
  * organizations/, where `new` could be a client's id.
  */
 export const Route = createFileRoute("/admin/new-organization")({
-  loader: async () => {
-    const [options, won] = await Promise.all([
+  // The organization just added, followed until the console records it.
+  validateSearch: (search: Record<string, unknown>): { following?: string } =>
+    typeof search.following === "string" ? { following: search.following } : {},
+  loaderDeps: ({ search }) => ({ following: search.following }),
+  loader: async ({ deps }) => {
+    const [options, won, following] = await Promise.all([
       fetchNewClientOptions(),
       fetchWonDeals(),
+      deps.following === undefined ? null : provisioningOf(deps.following),
     ]);
-    return { ...options, won };
+    return { ...options, won, following };
   },
   head: () => ({ meta: [{ title: "New organization" }] }),
   component: NewOrganization,

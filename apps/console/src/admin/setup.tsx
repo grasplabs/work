@@ -8,11 +8,13 @@
  * its data, every deploy step by step, what runs in its Cloudflare
  * account, the releases it gets, and how its people sign in.
  *
- * Read only: what someone at Grasp does to a platform (resume a run,
- * confirm Workers Paid, a ring, a pin, applying settings) is done on the
- * client's own console page, which every place that needs it links to.
- * What the console doesn't read yet (the requests and errors of every
- * day, what each resource holds) says so rather than show a number.
+ * And what someone at Grasp does to it, where it shows
+ * (src/admin/setup-actions.tsx): resume setting it up or confirm Workers
+ * Paid, place it in a hosting destination, pin it, move it to another
+ * ring, roll it back, change how its people sign in, apply its settings,
+ * rotate its secrets. Its account's numbers now (reach, errors, drift,
+ * shared secrets, cost) are read live once the section shows; what the
+ * console doesn't keep day by day says so rather than show a number.
  */
 import type { AdminView } from "@grasp-os/shared/admin/admin-view";
 import { Badge } from "@grasp-os/ui/components/badge";
@@ -44,20 +46,42 @@ import {
   PauseIcon,
   XIcon,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { z } from "zod";
 
 import type { ClientSetup, SetupDeploy } from "../clients/setup.ts";
 import type { DeployStep } from "../deploy/deploy.ts";
+import { ClientHosting } from "../hosting/client-hosting.tsx";
+import type { ClientHostingView } from "../hosting/placement.ts";
 import type { ProvisioningView } from "../provision/queries.ts";
 import { formatTime } from "../releases/format.ts";
 import type { ClientDriftState } from "../rollout/drift.ts";
 import { fetchDrift } from "../rollout/functions.ts";
 import type { DriftCheck } from "../rollout/functions.ts";
-import { useOrganization } from "./organization.tsx";
 import { sectionTo } from "./sections.ts";
 import type { OrgSection } from "./sections.ts";
+import {
+  ApplySettings,
+  History,
+  LiveNumbers,
+  PinRelease,
+  RingChange,
+  RollBack,
+  RotateSecrets,
+  SettingUpNow,
+  SignInChange,
+  useRefreshSetup,
+} from "./setup-actions.tsx";
+import type { Refresh } from "./setup-actions.tsx";
+import {
+  Body,
+  ErrorCode,
+  Facts,
+  Quiet,
+  ringWords,
+  SetupSection,
+} from "./setup-parts.tsx";
 import { formatDate } from "./words.ts";
 
 /** The section's tabs, in order: how it stands first. */
@@ -179,89 +203,27 @@ const driftWords: Record<ClientDriftState, string> = {
   unknown: "Not known: nothing is live yet, or its account didn’t answer",
 };
 
-/** A ring as the admin says it: the first one by name. */
-const ringWords = (ring: number): string =>
-  ring === 0 ? "Ring 0, first" : `Ring ${ring}`;
-
-/** An error code as the section says it: the code alone, as the console keeps it. */
-const ErrorCode = ({ code }: { code: string }) => (
-  <span className="font-mono text-xs">{code}</span>
-);
-
 // The section's parts.
 
-/** A titled part of the section, with what can be done beside its title. */
-const SetupSection = ({
-  title,
-  description,
-  action,
+/** The way to another of the Setup's tabs, where what it says is seen to. */
+const TabLink = ({
+  clientId,
+  tab,
   children,
 }: {
-  title: string;
-  description?: string;
-  action?: ReactNode;
-  children: ReactNode;
-}) => (
-  <section
-    aria-label={title}
-    className="bg-card overflow-hidden rounded-xl border text-sm"
-  >
-    {/* Where there is no room beside it, what can be done goes under the title. */}
-    <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3 px-5 py-4">
-      <div className="flex min-w-0 flex-1 basis-56 flex-col gap-0.5">
-        <h2 className="font-medium">{title}</h2>
-        {description === undefined ? null : (
-          <p className="text-muted-foreground">{description}</p>
-        )}
-      </div>
-      {action}
-    </div>
-    {children}
-  </section>
-);
-
-/** A line in a section, for what it has none of yet. */
-const Quiet = ({ children }: { children: ReactNode }) => (
-  <p className="text-muted-foreground border-t px-5 py-3">{children}</p>
-);
-
-/** A few facts as rows: what it is on the left, the fact on the right. */
-const Facts = ({
-  rows,
-}: {
-  rows: { label: string; value: ReactNode; attention?: boolean }[];
-}) => (
-  <dl className="flex flex-col">
-    {rows.map((row) => (
-      <div
-        className="flex items-baseline justify-between gap-4 border-t px-5 py-3"
-        key={row.label}
-      >
-        <dt className="text-muted-foreground flex-none">{row.label}</dt>
-        <dd
-          className={cn(
-            "min-w-0 text-right wrap-break-word",
-            row.attention === true && "text-status-attention"
-          )}
-        >
-          {row.value}
-        </dd>
-      </div>
-    ))}
-  </dl>
-);
-
-/** The way over to the client's own page in the console, where what is done to it is done. */
-const ConsoleLink = ({
-  clientId,
-  children = "Open in the console",
-}: {
   clientId: string;
-  children?: ReactNode;
+  tab: SetupTab;
+  children: ReactNode;
 }) => (
   <Button
     nativeButton={false}
-    render={<Link params={{ clientId }} to="/clients/$clientId" />}
+    render={
+      <Link
+        params={{ clientId }}
+        search={tab === "status" ? {} : { tab }}
+        to="/admin/organizations/$clientId/setup"
+      />
+    }
     size="sm"
     variant="ghost"
   >
@@ -624,7 +586,19 @@ const Header = ({
         </span>
       </div>
       <div className="-mx-2.5 flex flex-wrap items-center gap-1 sm:mx-0">
-        <ConsoleLink clientId={clientId} />
+        {provisioning.hostname === null ||
+        client?.status !== "active" ? null : (
+          <>
+            <OutLink
+              href={`https://${provisioning.hostname}`}
+              label="Open its Grasp"
+            />
+            <OutLink
+              href={`https://${provisioning.hostname}/activity`}
+              label="Its activity"
+            />
+          </>
+        )}
         {client === null ? null : (
           <OutLink
             href={dashboard(client.accountId)}
@@ -871,18 +845,151 @@ const Checklist = ({
   );
 };
 
+/** Where what a need says is seen to: the rollout's page, or the tab it is done on. */
+const NeedAction = ({
+  clientId,
+  need,
+}: {
+  clientId: string;
+  need: PlatformNeed;
+}) => {
+  switch (need.kind) {
+    case "rollout": {
+      return (
+        <Button
+          nativeButton={false}
+          render={
+            <Link
+              params={{ rolloutId: need.rollout.id }}
+              to="/admin/platform/rollouts/$rolloutId"
+            />
+          }
+          size="sm"
+          variant="ghost"
+        >
+          The rollout
+        </Button>
+      );
+    }
+    case "failed": {
+      return (
+        <TabLink clientId={clientId} tab="deploys">
+          Its deploys
+        </TabLink>
+      );
+    }
+    case "secrets":
+    case "settings": {
+      return (
+        <TabLink clientId={clientId} tab="settings">
+          Its settings
+        </TabLink>
+      );
+    }
+    case "behind": {
+      return (
+        <TabLink clientId={clientId} tab="releases">
+          Its releases
+        </TabLink>
+      );
+    }
+    case "provisioning": {
+      // Setting it up is seen to below, on this tab.
+      return null;
+    }
+    default: {
+      return need satisfies never;
+    }
+  }
+};
+
+/** Whether a company is in a hosting destination, or being provisioned in one. */
+const placedOf = (hosting: ClientHostingView | null): boolean =>
+  hosting !== null &&
+  (hosting.placement !== null || hosting.operation !== null);
+
+/**
+ * Setting it up, while it is: its steps, where it is now and what someone
+ * at Grasp does there. A company placed in a hosting destination is
+ * followed by its operation instead (`HostingSection`).
+ */
+const SettingUp = ({
+  setup,
+  hosting,
+  refresh,
+}: {
+  setup: ClientSetup;
+  hosting: ClientHostingView | null;
+  refresh: Refresh;
+}) => {
+  const { provisioning } = setup;
+  if (provisioning.client?.status === "active" || placedOf(hosting)) {
+    return null;
+  }
+  return (
+    <SetupSection
+      description="One run in the console makes its account, records it, waits for Workers Paid, deploys the release of its ring and marks it active. Every step can run again without making anything twice."
+      title="Setting it up"
+    >
+      <div className="border-t px-5 py-4">
+        <Steps
+          label="Setting it up"
+          steps={provisionStepsOf(provisioning).map(({ step, state }) => ({
+            id: step,
+            label: provisionWords[step],
+            state,
+          }))}
+        />
+      </div>
+      <SettingUpNow refresh={refresh} view={provisioning} />
+    </SetupSection>
+  );
+};
+
+/**
+ * Where its Grasp is hosted: the destination it is placed in, or where it
+ * would go, and provisioning it there. For a company being set up, or
+ * one placed already.
+ */
+const HostingSection = ({
+  setup,
+  hosting,
+  releases,
+}: {
+  setup: ClientSetup;
+  hosting: ClientHostingView | null;
+  releases: readonly { id: string; notes: string }[];
+}) =>
+  hosting !== null &&
+  (placedOf(hosting) ||
+    setup.provisioning.client?.status === "provisioning") ? (
+    <SetupSection
+      description="The hosting policy it is held to, and the destination that meets it."
+      title="Hosting"
+    >
+      <div className="border-t px-5 py-4">
+        <ClientHosting releases={releases} view={hosting} />
+      </div>
+    </SetupSection>
+  ) : null;
+
 const Status = ({
   clientId,
   setup,
   needs,
   view,
-  contractRead,
+  hosting,
+  releases,
+  refresh,
 }: {
   clientId: string;
   setup: ClientSetup;
   needs: PlatformNeed[];
-  view: AdminView;
-  contractRead: boolean;
+  /** What its core answered, worked out; null when it didn't answer. */
+  view: AdminView | null;
+  hosting: ClientHostingView | null;
+  releases: readonly { id: string; notes: string }[];
+  refresh: Refresh;
 }) => (
   <>
     <Header clientId={clientId} needs={needs} setup={setup} />
@@ -904,43 +1011,22 @@ const Status = ({
                 />
                 <span>{needWords(need)}</span>
               </span>
-              {need.kind === "rollout" ? (
-                <Button
-                  nativeButton={false}
-                  render={
-                    <Link
-                      params={{ rolloutId: need.rollout.id }}
-                      to="/admin/platform/rollouts/$rolloutId"
-                    />
-                  }
-                  size="sm"
-                  variant="ghost"
-                >
-                  The rollout
-                </Button>
-              ) : (
-                <ConsoleLink clientId={clientId} />
-              )}
+              <NeedAction clientId={clientId} need={need} />
             </li>
           ))}
         </ul>
       </SetupSection>
     ) : null}
+    <SettingUp hosting={hosting} refresh={refresh} setup={setup} />
+    <HostingSection hosting={hosting} releases={releases} setup={setup} />
     <SetupSection
-      description="Its requests, what ended in an error, and what it costs, day by day."
+      description="Read from its account now, and kept a minute. The console doesn’t keep these day by day yet. Cost is an estimate for the calendar month: its Workers Paid plan past what it includes, and AI Gateway spend; not storage or Durable Objects."
       title="Its platform in numbers"
     >
-      <Quiet>
-        The console doesn’t keep these day by day yet. Its errors of the last
-        day and its cost this month are read live on{" "}
-        <Link
-          className="hover:text-foreground underline underline-offset-4"
-          to="/"
-        >
-          the console’s list of clients
-        </Link>
-        .
-      </Quiet>
+      <LiveNumbers
+        active={setup.provisioning.client?.status === "active"}
+        clientId={clientId}
+      />
     </SetupSection>
     <SetupSection
       description="From its address to where its data is. Everything after the router is in the company’s own Cloudflare account, in the EU."
@@ -956,12 +1042,14 @@ const Status = ({
         )}
       </div>
     </SetupSection>
-    <Checklist
-      clientId={clientId}
-      contractRead={contractRead}
-      setup={setup}
-      view={view}
-    />
+    {view === null ? null : (
+      <Checklist
+        clientId={clientId}
+        contractRead={!view.unknown.contract}
+        setup={setup}
+        view={view}
+      />
+    )}
   </>
 );
 
@@ -1029,14 +1117,18 @@ const Deploys = ({
   clientId: string;
   setup: ClientSetup;
 }) => {
-  const { provisioning, deploys, done } = setup;
+  const { provisioning, deploys, done, history } = setup;
   const [latest] = deploys;
   const settingUp = provisioning.client?.status !== "active";
   return (
     <>
       {settingUp ? (
         <SetupSection
-          action={<ConsoleLink clientId={clientId} />}
+          action={
+            <TabLink clientId={clientId} tab="status">
+              Where it is now
+            </TabLink>
+          }
           description="One run in the console makes its account, records it, waits for Workers Paid, deploys the release of its ring and marks it active. Every step can run again without making anything twice."
           title="Setting it up"
         >
@@ -1058,11 +1150,6 @@ const Deploys = ({
         </SetupSection>
       ) : (
         <SetupSection
-          action={
-            latest.status === "failed" ? (
-              <ConsoleLink clientId={clientId} />
-            ) : undefined
-          }
           description={`${kindWords[latest.kind]} · ${latest.releaseId} · ${formatTime(latest.createdAt)} UTC · ${latest.startedBy}`}
           title="The last deploy"
         >
@@ -1173,8 +1260,24 @@ const Deploys = ({
           </ul>
         </SetupSection>
       ) : null}
+      <SetupSection
+        description="Everything the console’s audit log keeps of it, the newest first: what someone at Grasp did, and its provisioning, deploys and rollouts."
+        title="Its history"
+      >
+        <History history={history} />
+      </SetupSection>
     </>
   );
+};
+
+/** Whether it runs the shared secrets in Secrets Store now, in words. */
+const sharedSecretsWords = (current: boolean | null): string => {
+  if (current === null) {
+    return "Whether it runs the shared secrets in Secrets Store now can’t be told: the store or its account couldn’t be read, or nothing is live on it yet.";
+  }
+  return current
+    ? "It runs the shared secrets in Secrets Store now."
+    : "It doesn’t run the shared secrets in Secrets Store now: a secrets rollout brings it up to date.";
 };
 
 /** What its account runs, read from Cloudflare when staff ask. */
@@ -1222,22 +1325,61 @@ const WhatRuns = ({ clientId }: { clientId: string }) => {
         </Button>
       </div>
       {drift !== null && drift !== "failed" ? (
-        <ul className="text-muted-foreground flex flex-col gap-1 text-xs">
-          {drift.workers.map((worker) => (
-            <li key={worker.worker}>
-              <span className="font-mono">{worker.scriptName}</span>
-              {": "}
-              {worker.live === null
-                ? "not known"
-                : worker.live
-                    .map(
-                      ({ version_id: version, percentage }) =>
-                        `${shortVersion(version)} at ${percentage}%`
-                    )
-                    .join(", ")}
-            </li>
-          ))}
-        </ul>
+        <>
+          <p className="text-muted-foreground">
+            {sharedSecretsWords(drift.sharedSecretsCurrent)}
+          </p>
+          <div className="@container -mx-5">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead variant="card">Worker</TableHead>
+                  <TableHead variant="card">Made live</TableHead>
+                  <TableHead variant="card">Running</TableHead>
+                  <TableHead className="hidden @xl:table-cell" variant="card">
+                    State
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {drift.workers.map((worker) => (
+                  <TableRow key={worker.worker}>
+                    <TableCell variant="card">
+                      <span className="font-mono text-xs">
+                        {worker.scriptName}
+                      </span>
+                    </TableCell>
+                    <TableCell variant="card">
+                      <span className="font-mono text-xs">
+                        {worker.recorded === null
+                          ? "–"
+                          : shortVersion(worker.recorded)}
+                      </span>
+                    </TableCell>
+                    <TableCell className="whitespace-normal" variant="card">
+                      <span className="font-mono text-xs">
+                        {worker.live === null
+                          ? "not known"
+                          : worker.live
+                              .map(
+                                ({ version_id: version, percentage }) =>
+                                  `${shortVersion(version)} at ${percentage}%`
+                              )
+                              .join(", ")}
+                      </span>
+                    </TableCell>
+                    <TableCell
+                      className="hidden whitespace-normal @xl:table-cell"
+                      variant="card"
+                    >
+                      {driftWords[worker.state]}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        </>
       ) : null}
     </div>
   );
@@ -1292,6 +1434,8 @@ const Resources = ({
                   <span className="font-mono text-xs">{`${core.scriptName}.${subdomain}.workers.dev`}</span>
                 ),
             },
+            { label: "Added by", value: client.createdBy ?? "–" },
+            { label: "Added (UTC)", value: formatTime(client.createdAt) },
           ]}
         />
       </SetupSection>
@@ -1408,9 +1552,14 @@ const rolloutFact = (
 const Releases = ({
   clientId,
   setup,
+  imported,
+  refresh,
 }: {
   clientId: string;
   setup: ClientSetup;
+  /** Every imported release, newest first, to pin it to. */
+  imported: readonly { id: string; notes: string }[];
+  refresh: Refresh;
 }) => {
   const { provisioning, releases, rollout } = setup;
   const { client } = provisioning;
@@ -1419,11 +1568,6 @@ const Releases = ({
   return (
     <>
       <SetupSection
-        action={
-          <ConsoleLink clientId={clientId}>
-            Change it in the console
-          </ConsoleLink>
-        }
         description="A release goes out ring by ring, and waits after each for someone at Grasp. A pinned company stays on its release, whatever the rollouts."
         title="Where it gets releases"
       >
@@ -1458,6 +1602,25 @@ const Releases = ({
             },
           ]}
         />
+        {client === null ? null : (
+          <Body>
+            <RingChange
+              clientId={clientId}
+              refresh={refresh}
+              ring={client.ring}
+            />
+            {/* Only a live company is pinned: one being set up gets the release it was added with. */}
+            {client.status === "active" ? (
+              <PinRelease
+                clientId={clientId}
+                pinned={pinned}
+                refresh={refresh}
+                releases={imported}
+              />
+            ) : null}
+          </Body>
+        )}
+        <RollBack clientId={clientId} refresh={refresh} rollout={rollout} />
       </SetupSection>
       <SetupSection
         action={
@@ -1519,11 +1682,14 @@ const Releases = ({
 const Settings = ({
   clientId,
   setup,
+  refresh,
 }: {
   clientId: string;
   setup: ClientSetup;
+  refresh: Refresh;
 }) => {
   const { signIn, account } = setup;
+  const { client } = setup.provisioning;
   const providers = [
     ...(signIn?.entraTenantId === undefined ? [] : ["Microsoft Entra ID"]),
     ...(signIn?.googleHostedDomain === undefined ? [] : ["Google Workspace"]),
@@ -1532,12 +1698,7 @@ const Settings = ({
   return (
     <>
       <SetupSection
-        action={
-          <ConsoleLink clientId={clientId}>
-            Change it in the console
-          </ConsoleLink>
-        }
-        description="As someone at Grasp gave it when it was set up. Every deploy sets it on core."
+        description="As someone at Grasp gave it. Every deploy sets it on core."
         title="How its people sign in"
       >
         {signIn === null ? (
@@ -1576,7 +1737,29 @@ const Settings = ({
             ]}
           />
         )}
+        {client === null ? null : (
+          <SignInChange
+            clientId={clientId}
+            overridden={setup.signInOverridden}
+            refresh={refresh}
+            signIn={signIn}
+          />
+        )}
       </SetupSection>
+      {client === null ? null : (
+        <SetupSection
+          description="A change to its settings reaches it with a deploy."
+          title="Applying its settings"
+        >
+          <ApplySettings
+            active={client.status === "active"}
+            clientId={clientId}
+            configPending={setup.configPending}
+            pinned={client.pinnedReleaseId}
+            refresh={refresh}
+          />
+        </SetupSection>
+      )}
       <SetupSection
         description="Derived for this company alone, never stored. New ones reach it with its next deploy; the old ones keep working a while after."
         title="Its secrets"
@@ -1602,25 +1785,77 @@ const Settings = ({
             ]}
           />
         )}
+        {account === null ? null : (
+          <RotateSecrets clientId={clientId} refresh={refresh} />
+        )}
       </SetupSection>
     </>
   );
 };
 
+/** How often the Setup is read again while setting it up moves on by itself. */
+const followMs = 5000;
+
+/**
+ * Phases that move on without the page: the run works on its own, or
+ * (Workers Paid) goes on once someone at Grasp confirms.
+ */
+const working: ReadonlySet<ProvisioningView["phase"]> = new Set([
+  "account",
+  "workers_paid",
+  "deploying",
+]);
+
+/**
+ * Reads the Setup again every few seconds while setting the company up
+ * moves on by itself: its run, or its operation in a hosting destination.
+ */
+const useFollow = (
+  setup: ClientSetup,
+  hosting: ClientHostingView | null,
+  refresh: Refresh
+) => {
+  const following =
+    hosting !== null && placedOf(hosting)
+      ? hosting.going
+      : working.has(setup.provisioning.phase);
+  useEffect(() => {
+    const timer = following
+      ? setInterval(() => {
+          void refresh();
+        }, followMs)
+      : undefined;
+    return () => {
+      clearInterval(timer);
+    };
+  }, [following, refresh]);
+};
+
 /**
  * The company's own Grasp, tab by tab: how it stands, its deploys, its
- * account, its releases and its settings.
+ * account, its releases and its settings. `view` is what its core
+ * answered, worked out, for the checklist; null when it didn't answer
+ * (being set up, or not reachable), when the rest still shows.
  */
 export const OrgSetup = ({
+  clientId,
   setup,
   tab,
+  view,
+  releases,
+  hosting,
 }: {
+  clientId: string;
   setup: ClientSetup;
   tab: SetupTab;
+  view: AdminView | null;
+  /** Every imported release, newest first. */
+  releases: readonly { id: string; notes: string }[];
+  hosting: ClientHostingView | null;
 }) => {
-  const { admin, view } = useOrganization();
   const navigate = useNavigate();
-  const clientId = admin.client.id;
+  const refresh = useRefreshSetup();
+  useFollow(setup, hosting, refresh);
   const needs = needsOf(setup);
   return (
     <Tabs
@@ -1644,8 +1879,10 @@ export const OrgSetup = ({
         <div className="flex flex-col gap-6 pt-4">
           <Status
             clientId={clientId}
-            contractRead={!view.unknown.contract}
+            hosting={hosting}
             needs={needs}
+            refresh={refresh}
+            releases={releases}
             setup={setup}
             view={view}
           />
@@ -1663,12 +1900,17 @@ export const OrgSetup = ({
       </TabsContent>
       <TabsContent value="releases">
         <div className="flex flex-col gap-6 pt-4">
-          <Releases clientId={clientId} setup={setup} />
+          <Releases
+            clientId={clientId}
+            imported={releases}
+            refresh={refresh}
+            setup={setup}
+          />
         </div>
       </TabsContent>
       <TabsContent value="settings">
         <div className="flex flex-col gap-6 pt-4">
-          <Settings clientId={clientId} setup={setup} />
+          <Settings clientId={clientId} refresh={refresh} setup={setup} />
         </div>
       </TabsContent>
     </Tabs>

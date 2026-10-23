@@ -390,31 +390,4 @@ describe("the rollout pages", () => {
       { status: 404, says: true },
     ]);
   });
-
-  it("show a live client's pin, with a drift check, and none of it for one being provisioned", async () => {
-    const release = await importedRelease();
-    const pinned = await recordClient(1, release);
-    const unpinned = await recordClient(1);
-
-    const [pinnedPage, unpinnedPage] = await Promise.all([
-      page(`/clients/${pinned}`),
-      page(`/clients/${unpinned}`),
-    ]);
-
-    expect({
-      pinned: {
-        status: pinnedPage.status,
-        says: pinnedPage.html.includes(`Pinned to ${release}`),
-        unpin: pinnedPage.html.includes("Unpin"),
-        drift: pinnedPage.html.includes("Check drift"),
-      },
-      unpinned: {
-        says: unpinnedPage.html.includes("Not pinned"),
-        unpin: unpinnedPage.html.includes("Unpin"),
-      },
-    }).toStrictEqual({
-      pinned: { status: 200, says: true, unpin: true, drift: true },
-      unpinned: { says: true, unpin: false },
-    });
-  });
 });

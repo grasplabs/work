@@ -513,15 +513,20 @@ export const clientGrid = async (env: Env): Promise<GridRow[]> => {
  * from the last minute, and the rest read `options.concurrency` clients
  * at a time, each within `options.rowDeadlineMs`. An answer with anything
  * unknown in it isn't kept, so the next call reads that client again.
+ * With `only`, that one client alone, for its own page in the admin.
  */
 export const gridLive = async (
   env: Env,
   now: Date,
-  options: LiveOptions = defaultLiveOptions
+  options: LiveOptions = defaultLiveOptions,
+  only?: string
 ): Promise<Record<string, LiveStatus>> => {
   const db = consoleDatabase(env.DB);
   const grid = await clientGrid(env);
-  const active = grid.filter(({ status }) => status === "active");
+  const active = grid.filter(
+    ({ id, status }) =>
+      status === "active" && (only === undefined || id === only)
+  );
   const answers = new Map<string, LiveStatus>();
   if (options.cache) {
     const kept = await Promise.all(

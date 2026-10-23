@@ -9,7 +9,6 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as IndexRouteImport } from './routes/index'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as AdminIndexRouteImport } from './routes/admin/index'
 import { Route as AdminAskRouteImport } from './routes/admin/ask'
@@ -17,8 +16,6 @@ import { Route as AdminIntegrationsRouteImport } from './routes/admin/integratio
 import { Route as AdminLabRouteImport } from './routes/admin/lab'
 import { Route as AdminNewOrganizationRouteImport } from './routes/admin/new-organization'
 import { Route as AdminSourcesRouteImport } from './routes/admin/sources'
-import { Route as ClientsClientIdRouteImport } from './routes/clients/$clientId'
-import { Route as ClientsNewRouteImport } from './routes/clients/new'
 import { Route as AdminOrganizationsClientIdRouteImport } from './routes/admin/organizations/$clientId'
 import { Route as AdminPlatformIndexRouteImport } from './routes/admin/platform/index'
 import { Route as AdminOrganizationsClientIdIndexRouteImport } from './routes/admin/organizations/$clientId/index'
@@ -42,11 +39,6 @@ import { Route as AdminPlatformReleasesDiffRouteImport } from './routes/admin/pl
 import { Route as AdminPlatformRolloutsIndexRouteImport } from './routes/admin/platform/rollouts/index'
 import { Route as AdminPlatformRolloutsRolloutIdRouteImport } from './routes/admin/platform/rollouts/$rolloutId'
 
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const AdminRoute = AdminRouteImport.update({
   id: '/admin',
   path: '/admin',
@@ -81,16 +73,6 @@ const AdminSourcesRoute = AdminSourcesRouteImport.update({
   id: '/sources',
   path: '/sources',
   getParentRoute: () => AdminRoute,
-} as any)
-const ClientsClientIdRoute = ClientsClientIdRouteImport.update({
-  id: '/clients/$clientId',
-  path: '/clients/$clientId',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ClientsNewRoute = ClientsNewRouteImport.update({
-  id: '/clients/new',
-  path: '/clients/new',
-  getParentRoute: () => rootRouteImport,
 } as any)
 const AdminOrganizationsClientIdRoute =
   AdminOrganizationsClientIdRouteImport.update({
@@ -225,15 +207,12 @@ const AdminPlatformRolloutsRolloutIdRoute =
   } as any)
 
 export interface FileRoutesByFullPath {
-  '/': typeof IndexRoute
   '/admin': typeof AdminRouteWithChildren
   '/admin/ask': typeof AdminAskRoute
   '/admin/integrations': typeof AdminIntegrationsRoute
   '/admin/lab': typeof AdminLabRoute
   '/admin/new-organization': typeof AdminNewOrganizationRoute
   '/admin/sources': typeof AdminSourcesRoute
-  '/clients/$clientId': typeof ClientsClientIdRoute
-  '/clients/new': typeof ClientsNewRoute
   '/admin/': typeof AdminIndexRoute
   '/admin/organizations/$clientId': typeof AdminOrganizationsClientIdRouteWithChildren
   '/admin/platform/': typeof AdminPlatformIndexRoute
@@ -259,14 +238,11 @@ export interface FileRoutesByFullPath {
   '/admin/platform/rollouts/': typeof AdminPlatformRolloutsIndexRoute
 }
 export interface FileRoutesByTo {
-  '/': typeof IndexRoute
   '/admin/ask': typeof AdminAskRoute
   '/admin/integrations': typeof AdminIntegrationsRoute
   '/admin/lab': typeof AdminLabRoute
   '/admin/new-organization': typeof AdminNewOrganizationRoute
   '/admin/sources': typeof AdminSourcesRoute
-  '/clients/$clientId': typeof ClientsClientIdRoute
-  '/clients/new': typeof ClientsNewRoute
   '/admin': typeof AdminIndexRoute
   '/admin/platform': typeof AdminPlatformIndexRoute
   '/admin/organizations/$clientId/ai-use': typeof AdminOrganizationsClientIdAiUseRoute
@@ -292,15 +268,12 @@ export interface FileRoutesByTo {
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
-  '/': typeof IndexRoute
   '/admin': typeof AdminRouteWithChildren
   '/admin/ask': typeof AdminAskRoute
   '/admin/integrations': typeof AdminIntegrationsRoute
   '/admin/lab': typeof AdminLabRoute
   '/admin/new-organization': typeof AdminNewOrganizationRoute
   '/admin/sources': typeof AdminSourcesRoute
-  '/clients/$clientId': typeof ClientsClientIdRoute
-  '/clients/new': typeof ClientsNewRoute
   '/admin/': typeof AdminIndexRoute
   '/admin/organizations/$clientId': typeof AdminOrganizationsClientIdRouteWithChildren
   '/admin/platform/': typeof AdminPlatformIndexRoute
@@ -328,15 +301,12 @@ export interface FileRoutesById {
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
-    | '/'
     | '/admin'
     | '/admin/ask'
     | '/admin/integrations'
     | '/admin/lab'
     | '/admin/new-organization'
     | '/admin/sources'
-    | '/clients/$clientId'
-    | '/clients/new'
     | '/admin/'
     | '/admin/organizations/$clientId'
     | '/admin/platform/'
@@ -362,14 +332,11 @@ export interface FileRouteTypes {
     | '/admin/platform/rollouts/'
   fileRoutesByTo: FileRoutesByTo
   to:
-    | '/'
     | '/admin/ask'
     | '/admin/integrations'
     | '/admin/lab'
     | '/admin/new-organization'
     | '/admin/sources'
-    | '/clients/$clientId'
-    | '/clients/new'
     | '/admin'
     | '/admin/platform'
     | '/admin/organizations/$clientId/ai-use'
@@ -394,15 +361,12 @@ export interface FileRouteTypes {
     | '/admin/platform/rollouts'
   id:
     | '__root__'
-    | '/'
     | '/admin'
     | '/admin/ask'
     | '/admin/integrations'
     | '/admin/lab'
     | '/admin/new-organization'
     | '/admin/sources'
-    | '/clients/$clientId'
-    | '/clients/new'
     | '/admin/'
     | '/admin/organizations/$clientId'
     | '/admin/platform/'
@@ -429,21 +393,11 @@ export interface FileRouteTypes {
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
-  IndexRoute: typeof IndexRoute
   AdminRoute: typeof AdminRouteWithChildren
-  ClientsClientIdRoute: typeof ClientsClientIdRoute
-  ClientsNewRoute: typeof ClientsNewRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/': {
-      id: '/'
-      path: '/'
-      fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/admin': {
       id: '/admin'
       path: '/admin'
@@ -492,20 +446,6 @@ declare module '@tanstack/react-router' {
       fullPath: '/admin/sources'
       preLoaderRoute: typeof AdminSourcesRouteImport
       parentRoute: typeof AdminRoute
-    }
-    '/clients/$clientId': {
-      id: '/clients/$clientId'
-      path: '/clients/$clientId'
-      fullPath: '/clients/$clientId'
-      preLoaderRoute: typeof ClientsClientIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/clients/new': {
-      id: '/clients/new'
-      path: '/clients/new'
-      fullPath: '/clients/new'
-      preLoaderRoute: typeof ClientsNewRouteImport
-      parentRoute: typeof rootRouteImport
     }
     '/admin/organizations/$clientId': {
       id: '/admin/organizations/$clientId'
@@ -748,10 +688,7 @@ const AdminRouteChildren: AdminRouteChildren = {
 const AdminRouteWithChildren = AdminRoute._addFileChildren(AdminRouteChildren)
 
 const rootRouteChildren: RootRouteChildren = {
-  IndexRoute: IndexRoute,
   AdminRoute: AdminRouteWithChildren,
-  ClientsClientIdRoute: ClientsClientIdRoute,
-  ClientsNewRoute: ClientsNewRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
