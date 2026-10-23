@@ -33,12 +33,15 @@ import {
 } from "@grasp-os/shared/onboarding";
 import type {
   Agreements,
+  Difference,
   InterviewKind,
   InterviewLocale,
   LinkToSend,
+  OnboardingReview,
   OnboardingView,
   Plan,
   Roster,
+  SettleChoice,
 } from "@grasp-os/shared/onboarding";
 import {
   noChoices,
@@ -121,6 +124,7 @@ import {
   people,
   teamCounts,
   teams,
+  settledWorks,
   usage,
   voiceUse,
   works,
@@ -1590,6 +1594,7 @@ export class Onboarding extends DurableObject<Env> {
         .all()
         .map((row) => [row.work, row])
     );
+    const settled = this.#settled();
     return this.#db
       .select()
       .from(works)
@@ -1625,12 +1630,129 @@ export class Onboarding extends DurableObject<Env> {
               told,
               doers: doers.filter((id) => !away.has(id)),
               lead,
+              holds: settled.get(row.id) ?? null,
               counted: byHand.has(row.id),
             },
             rules
           ),
         };
       });
+  }
+
+  /** How the admin settled each piece of work told two ways, by its id. */
+  #settled(): Map<string, SettleChoice> {
+    return new Map(
+      this.#db
+        .select()
+        .from(settledWorks)
+        .all()
+        .map(({ work, holds }) => [work, holds])
+    );
+  }
+
+  /**
+   * The pieces of work of the teams that take part, as drawn, with the
+   * differences nobody could explain among them: what the review, and how
+   * much of it is known, are read from.
+   */
+  #reviewed(): {
+    differences: Difference[];
+    mapped: number;
+    works: number;
+    known: number;
+  } {
+    const settled = this.#settled();
+    const differences: Difference[] = [];
+    let mapped = 0;
+    let all = 0;
+    let known = 0;
+    for (const team of this.#roster()?.teams ?? []) {
+      if (team.off) {
+        continue;
+      }
+      for (const work of this.teamWorks(team.id)) {
+        all += 1;
+        if (
+          work.known.state === "complete" ||
+          work.known.state === "variants"
+        ) {
+          known += 1;
+        }
+        const { drawn } = work;
+        if (drawn === null || drawn.steps.length === 0) {
+          continue;
+        }
+        mapped += 1;
+        const { differs } = drawn;
+        if (differs?.why === "conflict") {
+          differences.push({
+            work: work.id,
+            name: work.local === "" ? work.name : work.local,
+            team: team.name,
+            way: drawn.steps[differs.step]?.text ?? "",
+            other: differs.other,
+            holds: settled.get(work.id) ?? null,
+          });
+        }
+      }
+    }
+    return { differences, mapped, works: all, known };
+  }
+
+  /**
+   * What needs the company's admin at the end: the steps people told two
+   * ways and nobody could say why, settled or not, and how many pieces of
+   * work are mapped. Never who told which way.
+   */
+  review(): OnboardingReview {
+    const { differences, mapped } = this.#reviewed();
+    return { differences, mapped };
+  }
+
+  /**
+   * How much of the review is in, 0 to 1, for what Grasp knows: half how
+   * much of what needs the admin is settled, half how much of the work is
+   * known. Nothing counts before any piece of work is drawn.
+   */
+  reviewKnown(): number {
+    const { differences, mapped, works: all, known } = this.#reviewed();
+    if (mapped === 0) {
+      return 0;
+    }
+    const settled = differences.filter(({ holds }) => holds !== null).length;
+    return (
+      0.5 * (differences.length === 0 ? 1 : settled / differences.length) +
+      0.5 * (known / all)
+    );
+  }
+
+  /**
+   * Settles a piece of work told two ways that nobody could explain: both
+   * ways kept, or which way holds. It can be settled again another way.
+   * Null when nothing about it needs settling.
+   */
+  settle(
+    work: string,
+    holds: SettleChoice,
+    by: AuditActor
+  ): OnboardingReview | null {
+    const open = this.#reviewed().differences.some(
+      (difference) => difference.work === work
+    );
+    if (!open) {
+      return null;
+    }
+    const at = new Date().toISOString();
+    this.ctx.storage.transactionSync(() => {
+      this.#db
+        .insert(settledWorks)
+        .values({ work, holds, at })
+        .onConflictDoUpdate({ target: settledWorks.work, set: { holds, at } })
+        .run();
+      this.#changed(by, "onboarding.work.settled", { holds });
+    });
+    this.#deliverAudit();
+    return this.review();
   }
 
   /**
@@ -3894,11 +4016,17 @@ export class Onboarding extends DurableObject<Env> {
     return drawingOf(row?.drawn ?? null);
   }
 
-  /** Forgets the drawings of pieces of work that are gone. */
+  /** Forgets the drawings of pieces of work that are gone, how they were settled and whether they were counted. */
   #dropOrphanDrawings(): void {
     this.#db
       .delete(drawnWorks)
       .where(sql`${drawnWorks.work} not in (select ${works.id} from ${works})`)
+      .run();
+    this.#db
+      .delete(settledWorks)
+      .where(
+        sql`${settledWorks.work} not in (select ${works.id} from ${works})`
+      )
       .run();
     this.#db
       .delete(countedWorks)
