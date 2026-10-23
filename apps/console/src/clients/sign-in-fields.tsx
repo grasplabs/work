@@ -1,30 +1,17 @@
 /**
- * A client's sign-in as a form asks for it, for the new-client form and
- * the client's settings: the fields, and reading them back.
+ * A client's sign-in as a form asks for it, for adding an organization
+ * and its Setup in the admin: the fields, and reading them back.
  */
+import {
+  Field,
+  FieldDescription,
+  FieldLabel,
+} from "@grasp-os/ui/components/field";
 import { Input } from "@grasp-os/ui/components/input";
-import type { ReactNode } from "react";
 
 import { signInProblem } from "../deploy/core-config.ts";
 import type { ClientSignInRecord } from "../deploy/core-config.ts";
 import { InvalidFieldError } from "../use-action.ts";
-
-/** A form field with its label and what it's for. */
-export const Field = ({
-  label,
-  hint,
-  children,
-}: {
-  label: string;
-  hint: string;
-  children: ReactNode;
-}) => (
-  <label className="flex flex-col gap-1 text-sm">
-    <span className="font-medium">{label}</span>
-    {children}
-    <span className="text-muted-foreground">{hint}</span>
-  </label>
-);
 
 /** The form's text field `name`, trimmed. */
 export const textOf = (form: FormData, name: string): string => {
@@ -64,43 +51,65 @@ export const signInOf = (form: FormData): ClientSignInRecord => {
   return signIn;
 };
 
-/** The sign-in fields, filled with `current` when there is one. */
+/**
+ * The sign-in fields, filled with `current` when there is one, as the
+ * admin's forms lay fields out; `idPrefix` keeps their ids apart from
+ * another form's on the same page.
+ */
 export const SignInFields = ({
   current,
+  idPrefix,
 }: {
   current: ClientSignInRecord | null;
+  idPrefix: string;
 }) => (
   <>
-    <Field
-      label="Entra tenant id"
-      hint="The client's Microsoft Entra tenant, if its people sign in with Microsoft."
-    >
-      <Input name="entraTenantId" defaultValue={current?.entraTenantId} />
-    </Field>
-    <Field
-      label="Google Workspace domain"
-      hint="The client's Workspace primary domain, if its people sign in with Google."
-    >
+    <Field>
+      <FieldLabel htmlFor={`${idPrefix}-entra`}>Entra tenant id</FieldLabel>
       <Input
-        name="googleHostedDomain"
-        defaultValue={current?.googleHostedDomain}
+        defaultValue={current?.entraTenantId}
+        id={`${idPrefix}-entra`}
+        name="entraTenantId"
       />
+      <FieldDescription>If its people sign in with Microsoft.</FieldDescription>
     </Field>
-    <Field
-      label="Email domains"
-      hint="The domains its people sign in with, exactly, separated by commas."
-    >
+    <Field>
+      <FieldLabel htmlFor={`${idPrefix}-google`}>
+        Google Workspace domain
+      </FieldLabel>
       <Input
+        defaultValue={current?.googleHostedDomain}
+        id={`${idPrefix}-google`}
+        name="googleHostedDomain"
+      />
+      <FieldDescription>
+        Its primary domain, if its people sign in with Google.
+      </FieldDescription>
+    </Field>
+    <Field>
+      <FieldLabel htmlFor={`${idPrefix}-domains`}>Email domains</FieldLabel>
+      <Input
+        defaultValue={current?.domains.join(", ")}
+        id={`${idPrefix}-domains`}
         name="domains"
         required
-        defaultValue={current?.domains.join(", ")}
       />
+      <FieldDescription>
+        The domains its people sign in with, exactly, separated by commas.
+      </FieldDescription>
     </Field>
-    <Field
-      label="Admins"
-      hint="Emails that get the admin role when they first sign in, separated by commas: at least one, each in the email domains."
-    >
-      <Input name="admins" required defaultValue={current?.admins.join(", ")} />
+    <Field>
+      <FieldLabel htmlFor={`${idPrefix}-admins`}>First admins</FieldLabel>
+      <Input
+        defaultValue={current?.admins.join(", ")}
+        id={`${idPrefix}-admins`}
+        name="admins"
+        required
+      />
+      <FieldDescription>
+        Emails that get the admin role when they first sign in, separated by
+        commas: at least one, each in the email domains.
+      </FieldDescription>
     </Field>
   </>
 );

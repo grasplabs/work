@@ -20,34 +20,89 @@ const answer = async (request: Request, host = adminHost) =>
   await worker.fetch(request, { ...env, ADMIN_HOST: host });
 
 describe("the admin's own hostname", () => {
-  it("lands on the admin from its front page", async () => {
+  it("lands on the admin from its front page, for good", async () => {
     const response = await answer(await asStaff(`https://${adminHost}/?x=1`));
-    expect(response.status).toBe(302);
+    expect(response.status).toBe(301);
     expect(response.headers.get("location")).toBe("/admin?x=1");
   });
 
-  it("moves the admin's pages from the console's hostname to its own", async () => {
-    const response = await answer(
-      await asStaff("https://console.grasp.test/admin/sources?day=1")
-    );
-    expect(response.status).toBe(302);
-    expect(response.headers.get("location")).toBe(
-      `https://${adminHost}/admin/sources?day=1`
-    );
-  });
-
-  it("serves the admin on its own hostname and the console's pages where asked", async () => {
-    const statuses = await Promise.all(
+  it("moves the console's old pages to where they went in the admin, keeping what the address asked", async () => {
+    const locations = await Promise.all(
       [
-        `https://${adminHost}/admin/sources`,
-        "https://console.grasp.test/",
-        "https://console.grasp.test/administrators",
+        `https://${adminHost}/clients/new?from=grid`,
+        `https://${adminHost}/clients/acme?tab=settings`,
+        `https://${adminHost}/clients/acme/`,
       ].map(async (url) => {
         const response = await answer(await asStaff(url));
-        return response.status;
+        return [response.status, response.headers.get("location")];
       })
     );
-    expect(statuses).not.toContain(302);
+    expect(locations).toStrictEqual([
+      [301, "/admin/new-organization?from=grid"],
+      [301, "/admin/organizations/acme/setup?tab=settings"],
+      [301, "/admin/organizations/acme/setup"],
+    ]);
+  });
+
+  it("moves every page load on the console's hostname to the same page on the admin's", async () => {
+    const locations = await Promise.all(
+      [
+        "https://console.grasp.test/admin/sources?day=1",
+        "https://console.grasp.test/admin/organizations/acme/setup",
+        "https://console.grasp.test/no-such-page",
+      ].map(async (url) => {
+        const response = await answer(await asStaff(url));
+        return [response.status, response.headers.get("location")];
+      })
+    );
+    expect(locations).toStrictEqual([
+      [302, `https://${adminHost}/admin/sources?day=1`],
+      [302, `https://${adminHost}/admin/organizations/acme/setup`],
+      [302, `https://${adminHost}/no-such-page`],
+    ]);
+  });
+
+  it("moves an old console page to where it went first, then on to the admin's hostname", async () => {
+    const first = await answer(
+      await asStaff("https://console.grasp.test/clients/acme?tab=deploys")
+    );
+    const second = await answer(
+      await asStaff(
+        `https://console.grasp.test${first.headers.get("location") ?? ""}`
+      )
+    );
+    expect([
+      [first.status, first.headers.get("location")],
+      [second.status, second.headers.get("location")],
+    ]).toStrictEqual([
+      [301, "/admin/organizations/acme/setup?tab=deploys"],
+      [302, `https://${adminHost}/admin/organizations/acme/setup?tab=deploys`],
+    ]);
+  });
+
+  it("serves the admin's pages on its own hostname", async () => {
+    const response = await answer(
+      await asStaff(`https://${adminHost}/admin/sources`)
+    );
+    expect(response.status).toBe(200);
+  });
+
+  it("answers what isn't a page, and anything that changes something, where it's asked", async () => {
+    const requests = [
+      await asStaff("https://console.grasp.test/_serverFn/anything"),
+      await asStaff("https://console.grasp.test/mcp"),
+      await asStaff("https://console.grasp.test/mcp", { method: "POST" }),
+      new Request("https://console.grasp.test/discord/interactions"),
+      await asStaff("https://console.grasp.test/admin", { method: "POST" }),
+      await asStaff(`https://${adminHost}/`, { method: "POST" }),
+    ];
+    const answers = await Promise.all(
+      requests.map(async (request) => {
+        const response = await answer(request);
+        return response.headers.get("location");
+      })
+    );
+    expect(answers).toStrictEqual(requests.map(() => null));
   });
 
   it("moves nothing without ADMIN_HOST", async () => {

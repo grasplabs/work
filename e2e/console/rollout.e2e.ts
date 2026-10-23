@@ -55,16 +55,21 @@ const startRollout = async (page: Page, releaseId: string): Promise<void> => {
 const targetRow = (page: Page, clientId: string) =>
   page.getByRole("row").filter({ hasText: clientId });
 
+/** The client's Setup in the admin, on `tab`. */
+const setupOf = (clientId: string, tab: string): string =>
+  `/admin/organizations/${clientId}/setup?tab=${tab}`;
+
 /**
  * Each of the client's Workers as its drift check reads them, from its
- * page: the version the console made live, what runs, and its state.
+ * Setup in the admin: the version the console made live, what runs, and
+ * its state.
  */
 const checkDrift = async (page: Page, clientId: string) => {
-  await visit(page, `/clients/${clientId}`);
-  await page.getByRole("button", { name: "Check drift" }).click();
+  await visit(page, setupOf(clientId, "resources"));
+  await page.getByRole("button", { name: "Read what runs" }).click();
   const rows = page
     .getByRole("table")
-    .filter({ has: page.getByRole("columnheader", { name: "Made live" }) })
+    .filter({ has: page.getByRole("columnheader", { name: "Running" }) })
     .getByRole("row")
     .filter({ has: page.getByRole("cell") });
   await expect(rows.first()).toBeVisible();
@@ -103,9 +108,10 @@ test("staff roll a release out to ring 0 and watch it go and finish", async ({
     "On it"
   );
 
-  await page.goto(`/clients/${clientId}`);
+  await page.goto(setupOf(clientId, "releases"));
+  // What it runs now; the latest rollout, beside it, names the release too.
   await expect(
-    page.getByRole("definition").filter({ hasText: releaseId })
+    page.getByRole("definition").filter({ hasText: releaseId }).first()
   ).toBeVisible();
 });
 
@@ -133,7 +139,7 @@ test("staff roll a client back from a rollout and see it on its previous version
     { timeout: rolloutMs }
   );
   const after = await checkDrift(page, clientId);
-  const inSync = "runs what the console made live";
+  const inSync = "In sync: it runs what the console made live";
   expect({
     before: before.map(({ state }) => state),
     rolledOut: rolledOut.every(

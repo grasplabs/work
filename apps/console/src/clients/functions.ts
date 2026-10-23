@@ -1,6 +1,7 @@
 /**
- * A client's settings and history, as its page reads and changes them,
- * behind the Access check every request passes (src/access.ts). The
+ * A client's own Grasp as the admin reads and changes it (its Setup, and
+ * the overview's and Platform's live columns), behind the Access check
+ * every request passes (src/access.ts). The
  * changes act as the verified staff member the request comes from, and
  * answer a refusal as its code (`SettingsErrorCode`), which the page
  * words; anything else fails.
@@ -10,10 +11,11 @@ import { env } from "cloudflare:workers";
 import { z } from "zod";
 
 import { consoleDatabase } from "../db/act.ts";
+import { rotateClientSecrets } from "../deploy/rotation.ts";
 import { adminReader } from "./admin.ts";
 import { applySettings } from "./apply.ts";
-import { clientGrid, gridLive } from "./grid.ts";
-import { clientHistory, clientSettings } from "./queries.ts";
+import { clientGrid, defaultLiveOptions, gridLive } from "./grid.ts";
+import type { LiveStatus } from "./grid.ts";
 import {
   ringInputSchema,
   setRing,
@@ -60,6 +62,22 @@ export const fetchGridLive = createServerFn({ method: "GET" }).handler(
 );
 
 /**
+ * One active client's live columns, as the grid reads them (`gridLive`),
+ * for its Setup in the admin; null for a client that isn't active.
+ */
+export const fetchClientLive = createServerFn({ method: "GET" })
+  .validator(clientSchema)
+  .handler(async ({ data }): Promise<LiveStatus | null> => {
+    const live = await gridLive(
+      env,
+      new Date(),
+      defaultLiveOptions,
+      data.clientId
+    );
+    return live[data.clientId] ?? null;
+  });
+
+/**
  * Every client's admin snapshot, as its core answers the verified staff
  * member asking (whom its audit log records), or as not reachable since it
  * last answered (`clientAdmins`). A POST, though it reads: it keeps when
@@ -74,17 +92,6 @@ export const fetchClientAdmins = createServerFn({ method: "POST" }).handler(
 export const fetchClientSetup = createServerFn({ method: "GET" })
   .validator(clientSchema)
   .handler(async ({ data }) => await getClientSetup(env, data.clientId));
-
-/** A client's settings and its latest console actions; null settings for no such client. */
-export const fetchClientSettings = createServerFn({ method: "GET" })
-  .validator(clientSchema)
-  .handler(async ({ data }) => {
-    const db = consoleDatabase(env.DB);
-    return {
-      settings: await clientSettings(db, data.clientId),
-      history: await clientHistory(db, data.clientId),
-    };
-  });
 
 export const setRingFn = createServerFn({ method: "POST" })
   .validator(ringInputSchema)
@@ -109,4 +116,23 @@ export const setSignInFn = createServerFn({ method: "POST" })
   .handler(
     async ({ data, context }) =>
       await change(async () => await setSignIn(env, context.staff, data))
+  );
+
+/**
+ * Rotates a client's derived secrets (src/deploy/rotation.ts): changed
+ * false when its last rotation isn't live yet, or went live too recently.
+ */
+export const rotateSecretsFn = createServerFn({ method: "POST" })
+  .validator(clientSchema)
+  .handler(
+    async ({ data, context }) =>
+      await change(
+        async () =>
+          await rotateClientSecrets(
+            consoleDatabase(env.DB),
+            context.staff,
+            data.clientId,
+            new Date()
+          )
+      )
   );

@@ -18,9 +18,9 @@ const Frame = () => {
 };
 
 /**
- * Grasp's admin, in a frame of its own (src/admin/frame.tsx), apart from
- * the console's pages: the root leaves its bar out here. For Grasp's staff
- * only, as the whole console is: a request Access doesn't vouch for gets
+ * Grasp's admin, in its own frame (src/admin/frame.tsx): the one place
+ * staff manage everything, every page the console still serves outside it
+ * moving here. For Grasp's staff only, as the whole console is: a request Access doesn't vouch for gets
  * nothing (src/access.ts), so nothing here, not even that it exists, is
  * seen by anyone else. Every organization is every client the console
  * knows, as its core answers now (`fetchClientAdmins`).

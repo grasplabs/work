@@ -205,14 +205,17 @@ describe("placing a client and provisioning it, through the console's entry", ()
     expect(result.runId).toBeTypeOf("string");
   });
 
-  it("shows staff on the client's page the destination it would go in, and the requirement that blocks another", async () => {
+  it("shows staff in the company's Setup the destination it would go in, and the requirement that blocks another", async () => {
     const shared = await destination();
     const blocked = await destination({
       capabilities: verified({ "logs.payload_free": "unsupported" }),
     });
     const clientId = await client();
 
-    const { status, html } = await page(`/clients/${clientId}`, caller);
+    const { status, html } = await page(
+      `/admin/organizations/${clientId}/setup`,
+      caller
+    );
 
     expect(status).toBe(200);
     expect(html).toContain(
