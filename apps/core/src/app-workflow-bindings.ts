@@ -1,6 +1,8 @@
+import { appErrors } from "@grasp-os/shared/apps";
 import { actorOf } from "@grasp-os/shared/audit";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { appIdSchema } from "@grasp-os/shared/ids";
+import type { AppId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { Authority } from "@grasp-os/shared/permissions";
 import {
@@ -16,7 +18,7 @@ import { and, eq, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
-import { appFor } from "./apps.ts";
+import { editableApp } from "./apps.ts";
 import { auditedBatch, outboxed, outboxedIfChanged } from "./audit-outbox.ts";
 import type { Acting } from "./auth/identity.ts";
 import {
@@ -29,6 +31,7 @@ import { requireNotStaff } from "./sharing.ts";
 import { requireWorkflowRole } from "./workflow-resources.ts";
 import { startWorkflow } from "./workflow-starts.ts";
 import type { StartingAgent } from "./workflow-starts.ts";
+import type { StartFiles } from "./workflows/start-files.ts";
 
 // Apps binding independent workflows (platform specification 3, 13.1,
 // 15.1): an App names an exact version of a workflow by an alias of its
@@ -112,7 +115,7 @@ export const bindWorkflowToApp = async (
     appWorkflowBindingSchema,
     input
   );
-  const found = await appFor(env, by, app, "builder");
+  const found = await editableApp(env, by, app);
   const workflow = await requireWorkflowRole(env, by, id, "user");
   const published = await drizzle(env.DB)
     .select({ version: workflowResourceVersions.version })
@@ -158,6 +161,10 @@ export const bindWorkflowToApp = async (
         ),
       db.insert(appWorkflowBindings).values({
         ...row,
+        // Only while the App isn't archived, as the batch runs: otherwise
+        // NULL, which fails the batch (app-status.ts).
+        appId: sql`(SELECT id FROM apps
+          WHERE id = ${found.id} AND status != 'archived')`,
         // Only while the workflow is live: otherwise NULL, which fails the
         // batch, so a deletion and this binding never both land.
         workflowResourceId: sql`(SELECT id FROM workflow_resources
@@ -171,6 +178,9 @@ export const bindWorkflowToApp = async (
       }),
     ]);
   } catch (error) {
+    if (notNullFailed(error, "app_workflow_bindings.app_id")) {
+      throw appErrors.create("app.archived");
+    }
     if (notNullFailed(error, "app_workflow_bindings.workflow_resource_id")) {
       throw workflowResourceErrors.create("workflow.resource_unavailable");
     }
@@ -193,7 +203,7 @@ const mayRemove = async (
   row: typeof appWorkflowBindings.$inferSelect
 ): Promise<boolean> => {
   for (const check of [
-    async () => await appFor(env, by, row.appId, "builder"),
+    async () => await editableApp(env, by, row.appId),
     async () =>
       await requireWorkflowRole(env, by, row.workflowResourceId, "builder"),
   ]) {
@@ -289,7 +299,9 @@ export const startAppBinding = async (
   /** Asked just before the start is admitted: throws to start nothing. */
   beforeAdmit?: () => void,
   /** The agent whose call made it, whose chat's restricted mode it takes. */
-  agent: StartingAgent | null = null
+  agent: StartingAgent | null = null,
+  /** The App files it may hand its run: a screen's start's only (GRA-885). */
+  files?: StartFiles
 ): Promise<WorkflowStart> => {
   if (authority.subject.type !== "app" || typeof alias !== "string") {
     throw workflowResourceErrors.create("workflow.app_binding_unavailable");
@@ -321,6 +333,23 @@ export const startAppBinding = async (
     sql`EXISTS (SELECT 1 FROM app_workflow_bindings
       WHERE id = ${row.id} AND status = 'active') AND ${requires}`,
     noted,
-    beforeAdmit
+    beforeAdmit,
+    files
   );
 };
+
+/**
+ * That App `app`'s active binding of `alias` names exactly workflow
+ * version `pin`, as SQL: what a screen's run, and a run a mutation
+ * notifies, are read through (screen-workflows.ts,
+ * workflow-notifications.ts).
+ */
+export const bindingPinnedSql = (
+  app: AppId,
+  alias: string,
+  pin: { readonly workflowId: string; readonly version: number }
+): SQL =>
+  sql`EXISTS (SELECT 1 FROM app_workflow_bindings
+    WHERE app_id = ${app} AND alias = ${alias} AND status = 'active'
+      AND workflow_resource_id = ${pin.workflowId}
+      AND workflow_resource_version = ${pin.version})`;

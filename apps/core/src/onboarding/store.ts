@@ -24,21 +24,33 @@ import type {
 import { errorFields, log } from "@grasp-os/shared/log";
 import {
   agreementsSchema,
+  firstInterviewer,
   planSchema,
   remindAfterWorkingDays,
+  rosterSchema,
 } from "@grasp-os/shared/onboarding";
 import type {
   Agreements,
   InterviewKind,
   InterviewLocale,
+  LinkToSend,
   OnboardingView,
   Plan,
   Roster,
 } from "@grasp-os/shared/onboarding";
+import {
+  noChoices,
+  setupChoicesSchema,
+} from "@grasp-os/shared/onboarding-choices";
+import type { SetupChoices } from "@grasp-os/shared/onboarding-choices";
 import type {
   DocumentReading,
   OnboardingDocument,
 } from "@grasp-os/shared/onboarding-documents";
+import type {
+  OrganizationChange,
+  StaffOrganization,
+} from "@grasp-os/shared/onboarding-organization";
 import {
   logPageMax,
   stephenSetupSchema,
@@ -77,17 +89,23 @@ import { z } from "zod";
 
 import { drainObjectOutbox } from "../audit-outbox.ts";
 import { signInConfig } from "../auth/config.ts";
+import { keepOnboardingRecords } from "../brain-records.ts";
 import { organizations } from "../db/core/schema.ts";
 import { migrateOnWake } from "../db/migrate.ts";
 import migrations from "../db/onboarding/migrations/migrations.js";
 import {
   askedAbout,
+  answerWaits,
   auditOutbox,
+  brainSent,
+  brainTeams,
   countedPeople,
   drawFailures,
   drawnWorks,
   events,
   interviewStates,
+  interviewTexts,
+  interviewSettings,
   interviews,
   linkCodes,
   documents,
@@ -113,6 +131,13 @@ import {
 } from "../mail-outbox.ts";
 import type { MailState, MailToQueue } from "../mail-outbox.ts";
 import { sendMail } from "../mail.ts";
+import {
+  brainFloor,
+  intakeIds,
+  intakeOf,
+  rosterSource,
+} from "./brain-intake.ts";
+import type { TeamIntake } from "./brain-intake.ts";
 import { storedDocumentReadingSchema } from "./document-reading.ts";
 import {
   kickoffBrief,
@@ -121,6 +146,8 @@ import {
 } from "./kickoff.ts";
 import { linkSecretOf } from "./link-secret.ts";
 import { linkMail, reminderMail, updateMail } from "./mail-text.ts";
+import { organizationOf, rosterAfter } from "./organization.ts";
+import type { ListChange, ListRefusal } from "./organization.ts";
 import {
   agreementsIn,
   closesOn,
@@ -471,9 +498,15 @@ const logWhere = (filter: LogFilter, about: string[] | undefined) =>
       : eq(sql`substr(${events.at}, 1, 10)`, filter.day)
   );
 
+/** The waits for his voice are kept to the tenth of a second, rounded up. */
+const waitStepMs = 100;
+
 /** A count as given, when it is one: a number from nothing up. */
 const counted = (value: number | undefined): number =>
   typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
+
+/** How many people's links one query marks as taken. */
+const takenPage = 90;
 
 /** How many interviews a snapshot read parses at once. */
 const adminFactsPage = 100;
@@ -512,6 +545,83 @@ const countsOf = (progress: InterviewProgress): InterviewCounts => ({
   interviewer: progress.interviewer ?? null,
 });
 
+/** Why staff's change to the organization wasn't made. */
+export type OrganizationRefusal =
+  | ListRefusal
+  | "onboarding.invalid"
+  | "onboarding.no_roster"
+  | "onboarding.no_work"
+  | "onboarding.not_now"
+  | "onboarding.no_map";
+
+/** A change to the list as the log and the audit log name it, and whom it was about. */
+const listChangeOf = (
+  change: ListChange,
+  before: Roster,
+  id: string
+): {
+  action: string;
+  detail: Record<string, AuditDetailValue>;
+  about: string | null;
+} => {
+  if (change.kind === "addTeam") {
+    return {
+      action: "onboarding.team.added",
+      detail: { team: id },
+      about: null,
+    };
+  }
+  if (change.kind === "editTeam") {
+    return {
+      action: "onboarding.team.changed",
+      detail: { team: change.team },
+      about: null,
+    };
+  }
+  if (change.kind === "takesPart") {
+    return {
+      action: change.takes
+        ? "onboarding.team.asked_in"
+        : "onboarding.team.left_out",
+      detail: { team: change.team },
+      about: null,
+    };
+  }
+  if (change.kind === "lead") {
+    return {
+      action: "onboarding.team.lead_set",
+      detail: { team: change.team },
+      about: change.person,
+    };
+  }
+  if (change.kind === "addPerson") {
+    return { action: "onboarding.person.added", detail: {}, about: id };
+  }
+  if (change.kind === "editPerson") {
+    const was = before.people.find(({ id: of }) => of === change.person);
+    return {
+      action:
+        was?.team === change.team
+          ? "onboarding.person.changed"
+          : "onboarding.person.moved",
+      detail: {},
+      about: change.person,
+    };
+  }
+  if (change.kind === "away") {
+    return {
+      action: change.away ? "onboarding.person.away" : "onboarding.person.back",
+      detail: {},
+      about: change.person,
+    };
+  }
+  return {
+    action: "onboarding.person.removed",
+    detail: {},
+    about: change.person,
+  };
+};
+
 export class Onboarding extends DurableObject<Env> {
   readonly #db = drizzle(this.ctx.storage);
   #auditRetryMs = auditRetryMs.first;
@@ -540,7 +650,19 @@ export class Onboarding extends DurableObject<Env> {
           : progressOf(roster, this.#interviews(), this.#counts(), now),
       agreed: agreementsIn(row.agreements),
       paused: row.pausedAt !== null,
+      sponsor: this.#sponsor(),
     };
+  }
+
+  /** The sponsor's first name, when the kickoff named them: read without its transcript. */
+  #sponsor(): string | null {
+    const [row] = this.#db
+      .select({ reading: kickoff.reading })
+      .from(kickoff)
+      .all();
+    return row === undefined
+      ? null
+      : (storedReadingSchema.parse(JSON.parse(row.reading)).sponsor ?? null);
   }
 
   /**
@@ -586,6 +708,24 @@ export class Onboarding extends DurableObject<Env> {
    * with them. Everyone new gets a link of their own.
    */
   async saveRoster(roster: Roster, by: AuditActor): Promise<OnboardingView> {
+    const fresh = await this.#freshCodes(roster);
+    this.ctx.storage.transactionSync(() => {
+      const { removed } = this.#writeRoster(roster, fresh, { late: false });
+      this.#changed(by, "onboarding.roster.saved", {
+        teams: roster.teams.length,
+        people: roster.people.length,
+        removed,
+      });
+    });
+    this.#deliverAudit();
+    this.ctx.waitUntil(this.#armLinks());
+    return this.view();
+  }
+
+  /** A link code for everyone on `roster` who has none yet. */
+  async #freshCodes(
+    roster: Roster
+  ): Promise<{ person: string; linkId: string; mark: string }[]> {
     const coded = new Set(
       this.#db
         .select({ person: linkCodes.person })
@@ -593,7 +733,7 @@ export class Onboarding extends DurableObject<Env> {
         .all()
         .map(({ person }) => person)
     );
-    const fresh = await Promise.all(
+    return await Promise.all(
       roster.people
         .filter(({ id }) => !coded.has(id))
         .map(async ({ id }) => {
@@ -602,89 +742,219 @@ export class Onboarding extends DurableObject<Env> {
           return { person: id, linkId, mark };
         })
     );
-    this.ctx.storage.transactionSync(() => {
-      const kept = new Set(roster.people.map((person) => person.id));
-      const gone = this.#db
-        .select({ id: people.id })
-        .from(people)
+  }
+
+  /**
+   * Writes who works where, in the caller's transaction. Whoever left the
+   * list keeps nothing; with `late`, as staff put the list right, a team
+   * that takes part only now, once the team is told and its moment has
+   * passed, starts now, its lead first (`#lateTeams`). The company's admin
+   * replaces the whole list, so for them no team is new that way;
+   * whoever moved, or is new, in a team with a map is asked about its work
+   * (`#askNewcomers`). Returns how many left.
+   */
+  #writeRoster(
+    roster: Roster,
+    fresh: readonly { person: string; linkId: string; mark: string }[],
+    { late }: { late: boolean },
+    now: string = new Date().toISOString()
+  ): { removed: number } {
+    const kept = new Set(roster.people.map((person) => person.id));
+    const before = this.#roster();
+    const gone = this.#db
+      .select({ id: people.id })
+      .from(people)
+      .all()
+      .filter(({ id }) => !kept.has(id))
+      .map(({ id }) => id);
+    const mapped = new Map(
+      this.#db
+        .select({ id: teams.id, mappedAt: teams.mappedAt })
+        .from(teams)
         .all()
-        .filter(({ id }) => !kept.has(id))
-        .map(({ id }) => id);
-      const mapped = new Map(
-        this.#db
-          .select({ id: teams.id, mappedAt: teams.mappedAt })
-          .from(teams)
-          .all()
-          .map(({ id, mappedAt }) => [id, mappedAt])
-      );
-      this.#db.delete(teams).run();
-      this.#db.delete(people).run();
-      for (const [position, team] of roster.teams.entries()) {
-        this.#db
-          .insert(teams)
-          .values({ ...team, position, mappedAt: mapped.get(team.id) ?? null })
-          .run();
-      }
-      for (const [position, person] of roster.people.entries()) {
-        this.#db
-          .insert(people)
-          .values({ ...person, position })
-          .run();
-      }
-      for (const code of fresh) {
-        this.#db.insert(linkCodes).values(code).onConflictDoNothing().run();
-      }
-      // Whoever left keeps nothing: no link, nothing said, no state.
-      const stale = this.#db
-        .select({ person: linkCodes.person })
-        .from(linkCodes)
+        .map(({ id, mappedAt }) => [id, mappedAt])
+    );
+    this.#db.delete(teams).run();
+    this.#db.delete(people).run();
+    for (const [position, team] of roster.teams.entries()) {
+      this.#db
+        .insert(teams)
+        .values({ ...team, position, mappedAt: mapped.get(team.id) ?? null })
+        .run();
+    }
+    for (const [position, person] of roster.people.entries()) {
+      this.#db
+        .insert(people)
+        .values({ ...person, position })
+        .run();
+    }
+    for (const code of fresh) {
+      this.#db.insert(linkCodes).values(code).onConflictDoNothing().run();
+    }
+    // Whoever left keeps nothing: no link, nothing said, no state.
+    const stale = this.#db
+      .select({ person: linkCodes.person })
+      .from(linkCodes)
+      .all()
+      .map(({ person }) => person)
+      .filter((person) => !kept.has(person));
+    // A piece of work goes with its team, and who is asked about it goes
+    // with them, or when they move to another team.
+    const teamOf = new Map(roster.people.map(({ id, team }) => [id, team]));
+    const teamIds = new Set(roster.teams.map(({ id }) => id));
+    const workTeam = new Map(
+      this.#db
+        .select({ id: works.id, team: works.team })
+        .from(works)
         .all()
+        .map(({ id, team }) => [id, team])
+    );
+    for (const [id, team] of workTeam) {
+      if (!teamIds.has(team)) {
+        this.#db.delete(works).where(eq(works.id, id)).run();
+      }
+    }
+    this.#dropOrphanDrawings();
+    for (const { person, work } of this.#db.select().from(askedAbout).all()) {
+      if (teamOf.get(person) !== workTeam.get(work)) {
+        this.#db.delete(askedAbout).where(eq(askedAbout.person, person)).run();
+      }
+    }
+    for (const person of new Set([...gone, ...stale])) {
+      this.#db.delete(linkCodes).where(eq(linkCodes.person, person)).run();
+      this.#db.delete(links).where(eq(links.person, person)).run();
+      this.#db.delete(interviews).where(eq(interviews.person, person)).run();
+      this.#db
+        .delete(interviewStates)
+        .where(eq(interviewStates.person, person))
+        .run();
+      this.#db
+        .delete(interviewTexts)
+        .where(eq(interviewTexts.person, person))
+        .run();
+      this.#db
+        .delete(interviewSettings)
+        .where(eq(interviewSettings.person, person))
+        .run();
+      dropMailAbout(this.ctx.storage.sql, person);
+    }
+    this.#lateTeams(late ? before : roster, roster, now);
+    this.#askNewcomers(before, roster);
+    return { removed: gone.length };
+  }
+
+  /**
+   * A team that takes part only now (added, or asked in again) once the
+   * team is told and its moment has passed starts now, as a team of its
+   * own in the plan: its lead's link goes out first, and everyone else's
+   * waits for the lead, `leadWaitWorkingDays` at most from today. A team
+   * no longer on the list leaves the plan's moments with it.
+   */
+  #lateTeams(before: Roster | null, roster: Roster, now: string): void {
+    const [row] = this.#db
+      .select({ toldAt: onboarding.toldAt })
+      .from(onboarding)
+      .where(eq(onboarding.id, 1))
+      .all();
+    const { plan } = this.#row();
+    if (plan === null) {
+      return;
+    }
+    // A team no longer on the list has no moment of its own any more.
+    const listed = new Set(roster.teams.map(({ id }) => id));
+    const later = Object.fromEntries(
+      Object.entries(plan.later ?? {}).filter(([team]) => listed.has(team))
+    );
+    const took = new Set(
+      (before?.teams ?? []).filter(({ off }) => !off).map(({ id }) => id)
+    );
+    const told = (row?.toldAt ?? null) !== null;
+    for (const { id, off } of roster.teams) {
+      const from = sendsFrom(plan, id);
+      if (told && !off && !took.has(id) && from !== null && from <= now) {
+        later[id] = now;
+      }
+    }
+    const kept = Object.keys(plan.later ?? {});
+    const same =
+      kept.length === Object.keys(later).length &&
+      kept.every((team) => later[team] === plan.later?.[team]);
+    if (!same) {
+      this.#db
+        .update(onboarding)
+        .set({ plan: JSON.stringify({ ...plan, later }) })
+        .where(eq(onboarding.id, 1))
+        .run();
+    }
+  }
+
+  /**
+   * Whoever moved to another team, or is new on the list, in a team whose
+   * map is drawn, is asked about a piece of its work, weighed by who is
+   * asked about each already. Whoever is asked about a piece also does it;
+   * whoever left a team no longer does its work, unless they talked: what
+   * they agreed to stays with the work it was about.
+   */
+  #askNewcomers(before: Roster | null, roster: Roster): void {
+    const wasIn = new Map(
+      (before?.people ?? []).map(({ id, team }) => [id, team])
+    );
+    const teamOf = new Map(roster.people.map(({ id, team }) => [id, team]));
+    const talked = new Set(
+      [...this.#interviews().values()]
+        .filter(({ completedAt }) => completedAt !== null)
         .map(({ person }) => person)
-        .filter((person) => !kept.has(person));
-      // A piece of work goes with its team, and who is asked about it goes
-      // with them, or when they move to another team.
-      const teamOf = new Map(roster.people.map(({ id, team }) => [id, team]));
-      const teamIds = new Set(roster.teams.map(({ id }) => id));
-      const workTeam = new Map(
-        this.#db
-          .select({ id: works.id, team: works.team })
-          .from(works)
-          .all()
-          .map(({ id, team }) => [id, team])
+    );
+    const asked = new Map(
+      this.#db
+        .select()
+        .from(askedAbout)
+        .all()
+        .map(({ person, work }) => [person, work])
+    );
+    for (const team of roster.teams) {
+      const mine = this.teamWorks(team.id);
+      if (mine.length === 0) {
+        continue;
+      }
+      const members = roster.people.filter((person) => person.team === team.id);
+      const newcomers = members.filter(
+        (person) =>
+          person.id !== team.lead &&
+          !person.away &&
+          wasIn.get(person.id) !== team.id &&
+          !asked.has(person.id)
       );
-      for (const [id, team] of workTeam) {
-        if (!teamIds.has(team)) {
-          this.#db.delete(works).where(eq(works.id, id)).run();
+      const heard = new Map(mine.map(({ id, asked: of }) => [id, of.length]));
+      for (const [person, work] of assignWork(
+        newcomers,
+        mine,
+        members,
+        heard
+      )) {
+        if (work !== null) {
+          asked.set(person, work);
+          this.#db.insert(askedAbout).values({ person, work }).run();
         }
       }
-      this.#dropOrphanDrawings();
-      for (const { person, work } of this.#db.select().from(askedAbout).all()) {
-        if (teamOf.get(person) !== workTeam.get(work)) {
+      for (const work of mine) {
+        const doers = work.doers.filter(
+          (person) => teamOf.get(person) === team.id || talked.has(person)
+        );
+        for (const { id } of members) {
+          if (asked.get(id) === work.id && !doers.includes(id)) {
+            doers.push(id);
+          }
+        }
+        if (doers.join(",") !== work.doers.join(",")) {
           this.#db
-            .delete(askedAbout)
-            .where(eq(askedAbout.person, person))
+            .update(works)
+            .set({ doers: JSON.stringify(doers) })
+            .where(eq(works.id, work.id))
             .run();
         }
       }
-      for (const person of new Set([...gone, ...stale])) {
-        this.#db.delete(linkCodes).where(eq(linkCodes.person, person)).run();
-        this.#db.delete(links).where(eq(links.person, person)).run();
-        this.#db.delete(interviews).where(eq(interviews.person, person)).run();
-        this.#db
-          .delete(interviewStates)
-          .where(eq(interviewStates.person, person))
-          .run();
-        dropMailAbout(this.ctx.storage.sql, person);
-      }
-      this.#changed(by, "onboarding.roster.saved", {
-        teams: roster.teams.length,
-        people: roster.people.length,
-        removed: gone.length,
-      });
-    });
-    this.#deliverAudit();
-    this.ctx.waitUntil(this.#armLinks());
-    return this.view();
+    }
   }
 
   /** Sets when the interviews run. Links go out by it, once the interviews are open. */
@@ -943,6 +1213,7 @@ export class Onboarding extends DurableObject<Env> {
           .set({ agreedAt: now })
           .where(eq(interviewStates.person, person.id))
           .run();
+        this.#brainDue(person.team, now);
       }
     });
     if (newlyAgreed) {
@@ -957,12 +1228,15 @@ export class Onboarding extends DurableObject<Env> {
    * what Stephen knows of the company beforehand, and what earlier
    * interviews about their work left open. Never from the page,
    * which could say anything. `work` stays empty until the team's map
-   * names their piece of work: Stephen then asks which one it is.
+   * names their piece of work: Stephen then asks which one it is. With
+   * `texts`, the marks of the interviewer's text for each kind, the one
+   * this turn is held with is kept with the interview.
    */
   turnContext(
     secretMark: string,
     keyMark: string,
-    now: string = new Date().toISOString()
+    now: string = new Date().toISOString(),
+    texts?: Record<InterviewKind, string>
   ): LinkAnswer<TurnContext> {
     const found = this.#onLink(secretMark, now, "save");
     if (!found.ok) {
@@ -972,7 +1246,17 @@ export class Onboarding extends DurableObject<Env> {
     if (link.keyMark === null || link.keyMark !== keyMark) {
       return refused("interview.elsewhere");
     }
-    return answered(this.#contextOf(person, roster));
+    const context = this.#contextOf(person, roster);
+    if (texts !== undefined) {
+      // The text this turn is held with, kept by its mark: the first time
+      // it spoke in this interview is when it came in.
+      this.#db
+        .insert(interviewTexts)
+        .values({ person: person.id, mark: texts[context.kind], at: now })
+        .onConflictDoNothing()
+        .run();
+    }
+    return answered(context);
   }
 
   /**
@@ -1165,6 +1449,122 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
+   * Gives the brain what the next team waiting for it learned (GRA-367):
+   * one whose drawings are all done, so what its people agreed to goes in
+   * together. What fails is tried again after a minute, five and thirty;
+   * then it's given up and logged until something new is agreed. Returns
+   * what it gave (`brain:<team>`), or null.
+   */
+  async intakeNext(now: number = Date.now()): Promise<string | null> {
+    const drawing = new Set(
+      this.#dueToDraw(now).map(({ id, work }) => work?.team ?? id)
+    );
+    const due = this.#brainDueAt(now).find(
+      ({ team, after }) => after <= now && !drawing.has(team)
+    );
+    if (due === undefined) {
+      return null;
+    }
+    const item = `brain:${due.team}`;
+    try {
+      await this.#intakeTeam(due.team, due.dueAt, new Date(now).toISOString());
+      this.#db.delete(drawFailures).where(eq(drawFailures.item, item)).run();
+    } catch (error) {
+      const tries = due.tries + 1;
+      log.error("onboarding.brain_failed", {
+        item,
+        tries,
+        error: error instanceof Error ? error.name : "unknown",
+      });
+      const wait = drawRetryMs[tries - 1];
+      this.ctx.storage.transactionSync(() => {
+        if (wait === undefined) {
+          this.#db
+            .delete(drawFailures)
+            .where(eq(drawFailures.item, item))
+            .run();
+          this.#brainSettled(due.team, due.dueAt);
+          return;
+        }
+        const after = new Date(now + wait).toISOString();
+        this.#db
+          .insert(drawFailures)
+          .values({ item, tries, after })
+          .onConflictDoUpdate({
+            target: drawFailures.item,
+            set: { tries, after },
+          })
+          .run();
+      });
+    }
+    return item;
+  }
+
+  /**
+   * The records the onboarding gave the brain that rest on someone's
+   * interview (brain-intake.ts): what deleting it has to take out of the
+   * brain (GRA-368). For staff and the store alone; the brain never names
+   * anyone.
+   */
+  sentFor(person: string): { record: string; type: string; team: string }[] {
+    return this.#db
+      .select({
+        record: brainSent.record,
+        type: brainSent.type,
+        team: brainSent.team,
+      })
+      .from(brainSent)
+      .where(eq(brainSent.person, person))
+      .orderBy(asc(brainSent.type), asc(brainSent.record))
+      .all();
+  }
+
+  /**
+   * Each team the brain has interviews of: one source for all of them
+   * (brain-intake.ts), with how many of its people agreed and the day the
+   * first of them did, never who. A team that left the roster has none.
+   */
+  interviewSources(): {
+    team: string;
+    name: string;
+    people: number;
+    since: string;
+  }[] {
+    const roster = this.#roster();
+    const states = this.#db
+      .select({
+        person: interviewStates.person,
+        completedAt: interviewStates.completedAt,
+      })
+      .from(interviewStates)
+      .where(isNotNull(interviewStates.agreedAt))
+      .all();
+    return this.#db
+      .select({ team: brainTeams.team })
+      .from(brainTeams)
+      .where(isNotNull(brainTeams.sentAt))
+      .orderBy(asc(brainTeams.sentAt), asc(brainTeams.team))
+      .all()
+      .flatMap(({ team: id }) => {
+        const team = roster?.teams.find((each) => each.id === id);
+        const members = new Set(
+          roster?.people
+            .filter((person) => person.team === id)
+            .map((person) => person.id)
+        );
+        const agreed = states.filter(({ person }) => members.has(person));
+        const [since] = agreed
+          .flatMap(({ completedAt }) =>
+            completedAt === null ? [] : [dayOf(completedAt)]
+          )
+          .toSorted();
+        return team === undefined || since === undefined
+          ? []
+          : [{ team: id, name: team.name, people: agreed.length, since }];
+      });
+  }
+
+  /**
    * A team's pieces of work, as its map holds them, who is asked about
    * each, each as drawn from what its people agreed to, and how far it is
    * known: for staff, and for the drawing of each piece.
@@ -1219,6 +1619,205 @@ export class Onboarding extends DurableObject<Env> {
           }),
         };
       });
+  }
+
+  /**
+   * The organization as Grasp's staff see it (organization.ts): every team
+   * with its people, its map, when its links go out and what needs a look.
+   * Empty before there is a list.
+   */
+  staffOrganization(now: string = new Date().toISOString()): StaffOrganization {
+    const roster = this.#roster();
+    if (roster === null) {
+      return { teams: [], people: [], open: this.isOpen() };
+    }
+    const states = this.#db.select().from(interviewStates).all();
+    return organizationOf(
+      {
+        roster,
+        plan: this.#row().plan,
+        open: this.isOpen(),
+        links: new Map(
+          this.#db
+            .select({
+              person: links.person,
+              sentAt: links.sentAt,
+              openedAt: links.openedAt,
+            })
+            .from(links)
+            .all()
+            .map(({ person, ...link }) => [person, link])
+        ),
+        interviews: new Map(
+          states.map(({ person, startedAt, completedAt, agreedAt }) => [
+            person,
+            { startedAt, completedAt, agreedAt },
+          ])
+        ),
+        works: this.#db
+          .select()
+          .from(works)
+          .orderBy(asc(works.team), asc(works.position))
+          .all()
+          .map((row) => ({ ...row, doers: doersOf(row.doers) })),
+        asked: new Map(
+          this.#db
+            .select()
+            .from(askedAbout)
+            .all()
+            .map(({ person, work }) => [person, work])
+        ),
+        mapped: this.#linkFacts().mapped,
+      },
+      now
+    );
+  }
+
+  /**
+   * Puts the list right, one change at a time, as Grasp's staff make it
+   * (organization.ts `rosterAfter`): links already out stay out, and
+   * whoever takes part now and has none gets one when it is due. Every
+   * change is in the log, as the staff member who made it, with whom it
+   * was about; the audit log has what was done, never to whom. Returns
+   * why it wasn't made, or null.
+   */
+  async changeOrganization(
+    change: OrganizationChange,
+    by: AuditActor
+  ): Promise<OrganizationRefusal | null> {
+    if (change.kind === "send") {
+      return await this.#sendNow(change.person, by);
+    }
+    if (change.kind === "askAbout") {
+      return this.#askAbout(change.person, change.work, by);
+    }
+    if (change.kind === "draw") {
+      if (this.#roster()?.teams.some(({ id }) => id === change.team) !== true) {
+        return "onboarding.no_team";
+      }
+      return (await this.drawAgain(change.team, by))
+        ? null
+        : "onboarding.no_map";
+    }
+    const id = `${change.kind === "addTeam" ? "t" : "p"}-${crypto.randomUUID().slice(0, 8)}`;
+    const next = this.#listAfter(change, id);
+    if (typeof next === "string") {
+      return next;
+    }
+    const fresh = await this.#freshCodes(next);
+    const refusal = this.ctx.storage.transactionSync(() => {
+      // Made again on the list as it is now: what changed meanwhile stands.
+      const before = this.#roster();
+      const after = this.#listAfter(change, id);
+      if (typeof after === "string" || before === null) {
+        return typeof after === "string" ? after : "onboarding.no_roster";
+      }
+      this.#writeRoster(after, fresh, { late: true });
+      const { action, detail, about } = listChangeOf(change, before, id);
+      this.#changed(by, action, detail, about);
+      return null;
+    });
+    if (refusal === null) {
+      this.#deliverAudit();
+      this.ctx.waitUntil(this.#armLinks());
+    }
+    return refusal;
+  }
+
+  /** The list after `change`, held to the roster's rules; or why it can't be. */
+  #listAfter(change: ListChange, id: string): Roster | OrganizationRefusal {
+    const roster = this.#roster();
+    if (roster === null) {
+      return "onboarding.no_roster";
+    }
+    const next = rosterAfter(roster, change, id);
+    if (typeof next === "string") {
+      return next;
+    }
+    const parsed = rosterSchema.safeParse(next);
+    return parsed.success ? parsed.data : "onboarding.invalid";
+  }
+
+  /**
+   * Sends someone's link now, before its moment or their lead's interview,
+   * while the interviews run and they take part. Already out is fine.
+   */
+  async #sendNow(
+    person: string,
+    by: AuditActor,
+    now: string = new Date().toISOString()
+  ): Promise<OrganizationRefusal | null> {
+    // First: no other call comes in between what is read below and the
+    // transaction that sends.
+    const said = await this.#mailContext();
+    const roster = this.#roster();
+    const { plan } = this.#row();
+    const one = roster?.people.find(({ id }) => id === person);
+    if (roster === null || one === undefined) {
+      return "onboarding.not_found";
+    }
+    if (plan === null || !this.isOpen() || !takingPart(roster, one)) {
+      return "onboarding.not_now";
+    }
+    if (this.#linkFacts().sent.has(person)) {
+      return null;
+    }
+    this.ctx.storage.transactionSync(() => {
+      this.#send({ roster, plan, said }, person, now);
+      this.#changed(by, "onboarding.link.sent_now", {}, person);
+    });
+    this.#deliverAudit();
+    this.#deliverMailSoon();
+    return null;
+  }
+
+  /**
+   * The piece of work Stephen asks someone about, from their team's map;
+   * null and he asks which work they do. They do the piece they are asked
+   * about, as far as the record goes. From their next turn on: what they
+   * agreed to already stays with what it was about.
+   */
+  #askAbout(
+    person: string,
+    work: string | null,
+    by: AuditActor
+  ): OrganizationRefusal | null {
+    const one = this.#roster()?.people.find(({ id }) => id === person);
+    if (one === undefined) {
+      return "onboarding.not_found";
+    }
+    const [row] =
+      work === null
+        ? []
+        : this.#db.select().from(works).where(eq(works.id, work)).all();
+    if (work !== null && row?.team !== one.team) {
+      return "onboarding.no_work";
+    }
+    this.ctx.storage.transactionSync(() => {
+      if (row === undefined) {
+        this.#db.delete(askedAbout).where(eq(askedAbout.person, person)).run();
+      } else {
+        this.#db
+          .insert(askedAbout)
+          .values({ person, work: row.id })
+          .onConflictDoUpdate({
+            target: askedAbout.person,
+            set: { work: row.id },
+          })
+          .run();
+        const doers = doersOf(row.doers);
+        if (!doers.includes(person)) {
+          this.#db
+            .update(works)
+            .set({ doers: JSON.stringify([...doers, person]) })
+            .where(eq(works.id, row.id))
+            .run();
+        }
+      }
+      this.#changed(by, "onboarding.person.asked_about", {}, person);
+    });
+    this.#deliverAudit();
+    return null;
   }
 
   /**
@@ -1310,6 +1909,79 @@ export class Onboarding extends DurableObject<Env> {
       .from(links)
       .orderBy(asc(links.sentAt), asc(links.person))
       .all();
+  }
+
+  /**
+   * Everyone who takes part, or whose link is out, in the roster's order,
+   * with their link once it is out: for the company's admin to send
+   * themselves. A link is new to them until they take it.
+   */
+  async linksToSend(): Promise<LinkToSend[]> {
+    const roster = this.#roster();
+    if (roster === null) {
+      return [];
+    }
+    const out = new Map(
+      this.#db
+        .select({ person: links.person, takenAt: links.takenAt })
+        .from(links)
+        .all()
+        .map(({ person, takenAt }) => [person, takenAt])
+    );
+    const teamName = new Map(roster.teams.map(({ id, name }) => [id, name]));
+    const listed = roster.people.filter(
+      (person) => takingPart(roster, person) || out.has(person.id)
+    );
+    return await Promise.all(
+      listed.map(async (person) => {
+        const taken = out.get(person.id);
+        return {
+          person: person.id,
+          name: person.name,
+          team: teamName.get(person.team) ?? "",
+          email: person.email,
+          path: taken === undefined ? null : await this.linkOf(person.id),
+          fresh: taken === null,
+        };
+      })
+    );
+  }
+
+  /**
+   * The admin took these people's links to send: those out and new are
+   * new no more. The audit log has how many, never whose. Returns how
+   * many were new.
+   */
+  linksTaken(persons: readonly string[], by: AuditActor): number {
+    if (persons.length === 0) {
+      return 0;
+    }
+    const now = new Date().toISOString();
+    const taken = this.ctx.storage.transactionSync(() => {
+      let count = 0;
+      // A few at a time: a query binds a hundred values at most.
+      for (let at = 0; at < persons.length; at += takenPage) {
+        count += this.#db
+          .update(links)
+          .set({ takenAt: now })
+          .where(
+            and(
+              inArray(links.person, persons.slice(at, at + takenPage)),
+              isNull(links.takenAt)
+            )
+          )
+          .returning({ person: links.person })
+          .all().length;
+      }
+      if (count > 0) {
+        this.#changed(by, "onboarding.links.taken", { count });
+      }
+      return count;
+    });
+    if (taken > 0) {
+      this.#deliverAudit();
+    }
+    return taken;
   }
 
   /** Counts one model call for the day it ends on. */
@@ -1407,6 +2079,70 @@ export class Onboarding extends DurableObject<Env> {
       .all();
   }
 
+  /**
+   * Notes what one turn of an interview ran on, for the staff's numbers:
+   * the text that spoke, kept with the interview of the link's person,
+   * and how long they waited for his voice the answer before, when their
+   * page measured it, kept by day alone. The turn checked the link and
+   * the device first (`turnContext`).
+   */
+  turnRan(
+    secretMark: string,
+    ran: Omit<typeof interviewSettings.$inferInsert, "person">,
+    waited?: number,
+    at: string = new Date().toISOString()
+  ): void {
+    const [code] = this.#db
+      .select({ person: linkCodes.person })
+      .from(linkCodes)
+      .where(eq(linkCodes.mark, secretMark))
+      .all();
+    this.ctx.storage.transactionSync(() => {
+      if (code !== undefined) {
+        this.#db
+          .insert(interviewSettings)
+          .values({ person: code.person, ...ran })
+          .onConflictDoUpdate({ target: interviewSettings.person, set: ran })
+          .run();
+      }
+      if (waited !== undefined) {
+        this.#db
+          .insert(answerWaits)
+          .values({
+            day: dayOf(at),
+            upTo: Math.ceil(waited / waitStepMs) * waitStepMs,
+            answers: 1,
+          })
+          .onConflictDoUpdate({
+            target: [answerWaits.day, answerWaits.upTo],
+            set: { answers: sql`${answerWaits.answers} + 1` },
+          })
+          .run();
+      }
+    });
+  }
+
+  /**
+   * What the staff's numbers on Stephen and Claire are made from: each
+   * interview as numbers (`adminFacts`), the text each ran on, and the
+   * waits for his voice by day. Never anything that was said.
+   */
+  interviewerFacts(): {
+    interviews: AdminInterviewFacts[];
+    texts: (typeof interviewSettings.$inferSelect)[];
+    waits: (typeof answerWaits.$inferSelect)[];
+  } {
+    return {
+      interviews: this.adminFacts().interviews,
+      texts: this.#db.select().from(interviewSettings).all(),
+      waits: this.#db
+        .select()
+        .from(answerWaits)
+        .orderBy(asc(answerWaits.day), asc(answerWaits.upTo))
+        .all(),
+    };
+  }
+
   /** Where the agreements stand, as staff last said; none before they did. */
   agreements(): Agreements | null {
     return this.#row().agreements;
@@ -1477,6 +2213,41 @@ export class Onboarding extends DurableObject<Env> {
    */
   interviewBrief(): string {
     return interviewBrief(this.#stephen(), this.kickoff());
+  }
+
+  /** What the admin chose about what Grasp may connect. */
+  choices(): SetupChoices {
+    const [row] = this.#db
+      .select({ choices: onboarding.choices })
+      .from(onboarding)
+      .where(eq(onboarding.id, 1))
+      .all();
+    const stored = row?.choices ?? null;
+    return stored === null
+      ? noChoices
+      : setupChoicesSchema.parse(JSON.parse(stored));
+  }
+
+  /**
+   * Keeps what the admin chose. In the log and the audit log by which
+   * places and what of Pulse and the HR platform, never what they typed.
+   */
+  saveChoices(choices: SetupChoices, by: AuditActor): SetupChoices {
+    this.ctx.storage.transactionSync(() => {
+      this.#db
+        .update(onboarding)
+        .set({ choices: JSON.stringify(choices) })
+        .where(eq(onboarding.id, 1))
+        .run();
+      this.#changed(by, "onboarding.choices.saved", {
+        sources: choices.sources.join(" "),
+        asked: choices.sourcesWanted.length,
+        pulse: choices.pulse ?? "",
+        hr: choices.hr?.kind ?? "",
+      });
+    });
+    this.#deliverAudit();
+    return this.choices();
   }
 
   /** The documents the admin shared, the newest first. */
@@ -1756,7 +2527,10 @@ export class Onboarding extends DurableObject<Env> {
     return { entries, teams: named };
   }
 
-  /** Someone's interview for Grasp's staff, with the link's random id to audit its read by. */
+  /**
+   * Someone's interview for Grasp's staff, with who held it and the texts
+   * it was held with, and the link's random id to audit its read by.
+   */
   transcriptOf(
     person: string
   ): (StaffTranscript & { interviewId: string }) | null {
@@ -1771,15 +2545,143 @@ export class Onboarding extends DurableObject<Env> {
       return null;
     }
     const state = this.#interviews().get(person);
+    const progress = this.#held(person);
+    const texts = this.#db
+      .select({ mark: interviewTexts.mark })
+      .from(interviewTexts)
+      .where(eq(interviewTexts.person, person))
+      .orderBy(asc(interviewTexts.at), asc(interviewTexts.mark))
+      .all();
     return {
       person,
       name: one.name,
       team: roster?.teams.find(({ id }) => id === one.team)?.name ?? "",
       startedAt: state?.startedAt ?? null,
       completedAt: state?.completedAt ?? null,
-      progress: this.#held(person),
+      progress,
+      interviewer:
+        progress === null ? null : (progress.interviewer ?? firstInterviewer),
+      texts: texts.map(({ mark }) => mark),
       interviewId: code.linkId,
     };
+  }
+
+  /**
+   * Someone's link's random id, to audit a read of their link by: none
+   * for anyone not on the roster.
+   */
+  linkIdOf(person: string): string | null {
+    if (!this.#onRoster(person)) {
+      return null;
+    }
+    const [code] = this.#db
+      .select({ linkId: linkCodes.linkId })
+      .from(linkCodes)
+      .where(eq(linkCodes.person, person))
+      .all();
+    return code?.linkId ?? null;
+  }
+
+  /**
+   * Notes the one reminder as sent by hand, by Grasp's staff, to each of
+   * `whom` whose link is out, who hasn't agreed to their interview and
+   * wasn't reminded before: once, ever. Returns who it was noted for. The
+   * audit log has how many, never who.
+   */
+  remind(
+    whom: readonly string[],
+    by: AuditActor,
+    now: string = new Date().toISOString()
+  ): string[] {
+    const wanted = new Set(whom);
+    const talked = this.#interviews();
+    const due = this.#db
+      .select({ person: links.person })
+      .from(links)
+      .where(isNull(links.remindedAt))
+      .all()
+      .map(({ person }) => person)
+      .filter(
+        (person) =>
+          wanted.has(person) &&
+          (talked.get(person)?.completedAt ?? null) === null
+      );
+    if (due.length === 0) {
+      return [];
+    }
+    this.ctx.storage.transactionSync(() => {
+      for (const person of due) {
+        this.#db
+          .update(links)
+          .set({ remindedAt: now })
+          .where(eq(links.person, person))
+          .run();
+        this.#noted(person, "interview.reminded", now, whoIs(by));
+      }
+      this.#changed(by, "onboarding.reminded", { count: due.length });
+    });
+    this.#deliverAudit();
+    return due;
+  }
+
+  /**
+   * A team that didn't take part takes part from now on, as the company's
+   * list then says: its lead's link goes out first, by the plan. False for
+   * a team not on the list.
+   */
+  askIn(team: string, by: AuditActor): boolean {
+    const [row] = this.#db
+      .select({ off: teams.off })
+      .from(teams)
+      .where(eq(teams.id, team))
+      .all();
+    if (row === undefined) {
+      return false;
+    }
+    if (row.off) {
+      this.ctx.storage.transactionSync(() => {
+        this.#db
+          .update(teams)
+          .set({ off: false })
+          .where(eq(teams.id, team))
+          .run();
+        this.#changed(by, "onboarding.team.asked_in", {});
+      });
+      this.#deliverAudit();
+    }
+    return true;
+  }
+
+  /**
+   * Deletes someone's interview because they asked Grasp to: what they
+   * said is gone at once, a copy left open can't save it back, and their
+   * link opens a new one on the device it is on. False when no link of
+   * theirs went out. The audit log has that staff did, not for whom.
+   */
+  deleteOnRequest(
+    person: string,
+    by: AuditActor,
+    now: string = new Date().toISOString()
+  ): boolean {
+    const [link] = this.#db
+      .select()
+      .from(links)
+      .where(eq(links.person, person))
+      .all();
+    if (link === undefined) {
+      return false;
+    }
+    this.ctx.storage.transactionSync(() => {
+      this.#forget(person, now, "interview.deleted", whoIs(by));
+      this.#db
+        .update(links)
+        .set({ deletedAt: now, version: link.version + 1 })
+        .where(eq(links.person, person))
+        .run();
+      this.#changed(by, "onboarding.interview.deleted", {});
+    });
+    this.#deliverAudit();
+    return true;
   }
 
   /** What Grasp's staff see of where the interviews stand: exact, by person. */
@@ -1804,7 +2706,10 @@ export class Onboarding extends DurableObject<Env> {
   adminFacts(): {
     told: boolean;
     mapped: string[];
-    links: Omit<typeof links.$inferSelect, "keyMark" | "version" | "ledTeam">[];
+    links: Omit<
+      typeof links.$inferSelect,
+      "keyMark" | "version" | "ledTeam" | "takenAt"
+    >[];
     interviews: AdminInterviewFacts[];
   } {
     // Only the counts are kept, read a page of interviews at a time, so a
@@ -1885,6 +2790,7 @@ export class Onboarding extends DurableObject<Env> {
     if ((await this.drawNext()) !== null) {
       await this.releaseDue();
     }
+    await this.intakeNext();
     await this.remindDue();
     await this.sendUpdate();
     await this.deliverMail();
@@ -1954,35 +2860,8 @@ export class Onboarding extends DurableObject<Env> {
       return [];
     }
     this.ctx.storage.transactionSync(() => {
-      // The first link out tells the team, for good.
-      this.#db
-        .update(onboarding)
-        .set({ toldAt: sql`coalesce(${onboarding.toldAt}, ${now})` })
-        .where(eq(onboarding.id, 1))
-        .run();
       for (const person of due) {
-        // Whether they lead a team is kept as it is now, when their link
-        // goes out: a lead named later never makes theirs a lead's interview.
-        const ledTeam =
-          roster.teams.find(({ lead: led }) => led === person)?.id ?? null;
-        this.#db.insert(links).values({ person, sentAt: now, ledTeam }).run();
-        this.#queuePersonMail(
-          { roster, plan, said, person, sentAt: now },
-          "link"
-        );
-        const team = roster.people.find(({ id }) => id === person)?.team;
-        if (team !== undefined && ledTeam === null) {
-          // Asked once ever: a person taken off and on again isn't asked twice.
-          const added = this.#db
-            .insert(countedPeople)
-            .values({ person, team, talked: false })
-            .onConflictDoNothing()
-            .returning()
-            .all();
-          if (added.length > 0) {
-            this.#count(team, now, { asked: 1 });
-          }
-        }
+        this.#send({ roster, plan, said }, person, now);
       }
       this.#changed({ type: "system" }, "onboarding.links.sent", {
         count: due.length,
@@ -2229,6 +3108,41 @@ export class Onboarding extends DurableObject<Env> {
         about: state.about,
       })
       .run();
+  }
+
+  /**
+   * Sends someone's link, in the caller's transaction: the first link out
+   * tells the team, for good; it is emailed to whoever has an address; and
+   * everyone but a lead is counted as asked, once ever, so a person taken
+   * off and on again isn't asked twice. Whether they lead a team is kept
+   * as it is now: a lead named later never makes theirs a lead's interview.
+   */
+  #send(
+    { roster, plan, said }: { roster: Roster; plan: Plan; said: MailContext },
+    person: string,
+    now: string
+  ): void {
+    this.#db
+      .update(onboarding)
+      .set({ toldAt: sql`coalesce(${onboarding.toldAt}, ${now})` })
+      .where(eq(onboarding.id, 1))
+      .run();
+    const ledTeam =
+      roster.teams.find(({ lead: led }) => led === person)?.id ?? null;
+    this.#db.insert(links).values({ person, sentAt: now, ledTeam }).run();
+    this.#queuePersonMail({ roster, plan, said, person, sentAt: now }, "link");
+    const team = roster.people.find(({ id }) => id === person)?.team;
+    if (team !== undefined && ledTeam === null) {
+      const added = this.#db
+        .insert(countedPeople)
+        .values({ person, team, talked: false })
+        .onConflictDoNothing()
+        .returning()
+        .all();
+      if (added.length > 0) {
+        this.#count(team, now, { asked: 1 });
+      }
+    }
   }
 
   #linkFacts() {
@@ -2638,7 +3552,151 @@ export class Onboarding extends DurableObject<Env> {
     }
     if (drawn !== null) {
       this.#noted(due.about, "work.drawn", at, "grasp");
+      this.#brainDue(due.team, at);
     }
+  }
+
+  /** Notes that something new of a team waits to be given to the brain. */
+  #brainDue(team: string, at: string): void {
+    this.#db
+      .insert(brainTeams)
+      .values({ team, dueAt: at })
+      .onConflictDoUpdate({ target: brainTeams.team, set: { dueAt: at } })
+      .run();
+  }
+
+  /** Notes a team given to the brain as it was at `dueAt`: unless something new came since. */
+  #brainSettled(team: string, dueAt: string): void {
+    this.#db
+      .update(brainTeams)
+      .set({ dueAt: null })
+      .where(and(eq(brainTeams.team, team), eq(brainTeams.dueAt, dueAt)))
+      .run();
+  }
+
+  /** The teams waiting to be given to the brain, the longest first, with when each may be and how often it failed. */
+  #brainDueAt(
+    now: number
+  ): { team: string; dueAt: string; after: number; tries: number }[] {
+    const failures = new Map(
+      this.#db
+        .select()
+        .from(drawFailures)
+        .where(like(drawFailures.item, "brain:%"))
+        .all()
+        .map((row) => [row.item, row])
+    );
+    return this.#db
+      .select({ team: brainTeams.team, dueAt: brainTeams.dueAt })
+      .from(brainTeams)
+      .where(isNotNull(brainTeams.dueAt))
+      .orderBy(asc(brainTeams.dueAt), asc(brainTeams.team))
+      .all()
+      .flatMap(({ team, dueAt }) => {
+        if (dueAt === null) {
+          return [];
+        }
+        const failed = failures.get(`brain:${team}`);
+        return [
+          {
+            team,
+            dueAt,
+            after: failed === undefined ? now : Date.parse(failed.after),
+            tries: failed?.tries ?? 0,
+          },
+        ];
+      });
+  }
+
+  /**
+   * What a team gives the brain, from the store: its name, everyone's
+   * names (for none to reach it), the facts each person who told their
+   * own work agreed to, and its pieces of work as drawn. Never the lead's
+   * facts, whose role alone says who they are, nor a piece of work drawn
+   * from the lead alone. None while fewer than `brainFloor` of its people
+   * agreed: it waits.
+   */
+  #teamIntake(teamId: string): TeamIntake | null {
+    const roster = this.#roster();
+    const team = roster?.teams.find(({ id }) => id === teamId);
+    if (roster === null || team === undefined || team.off) {
+      return null;
+    }
+    const members = roster.people.filter((person) => person.team === teamId);
+    const agreed = members.filter(({ id }) => this.#agreedAt(id) !== null);
+    if (agreed.length < brainFloor) {
+      return null;
+    }
+    const { lead } = team;
+    const leadAgreed =
+      lead !== null && this.#agreedAt(lead) !== null ? [lead] : [];
+    return {
+      team: { id: team.id, name: team.name },
+      names: roster.people.map(({ name }) => name),
+      tellers: agreed.flatMap(({ id }) => {
+        const input = this.drawInput(id);
+        return input === null || input.kind !== "own" || id === lead
+          ? []
+          : [{ person: id, facts: input.facts }];
+      }),
+      works: this.teamWorks(teamId).flatMap((work) => {
+        const { drawn } = work;
+        if (
+          drawn === null ||
+          drawn.from.length === 0 ||
+          drawn.from.every((person) => person === lead)
+        ) {
+          return [];
+        }
+        return [
+          {
+            id: work.id,
+            name: work.name,
+            local: work.local,
+            one: work.one,
+            drawn,
+            state: work.known.state,
+            namedBy: leadAgreed,
+            context: leadAgreed.filter((id) => !drawn.from.includes(id)),
+          },
+        ];
+      }),
+    };
+  }
+
+  /**
+   * Gives the brain what a team learned, as it was due at `dueAt`
+   * (brain-intake.ts), as the onboarding, which owns those records: kept
+   * once each, so giving it again adds only what is new. Then notes who
+   * each rests on, here alone.
+   */
+  async #intakeTeam(teamId: string, dueAt: string, at: string): Promise<void> {
+    const intake = this.#teamIntake(teamId);
+    if (intake === null || this.rosterSavedAt() === null) {
+      this.#brainSettled(teamId, dueAt);
+      return;
+    }
+    const { records, rests } = await intakeOf(intake);
+    await keepOnboardingRecords(this.env, records, {
+      sources: new Set([rosterSource, await intakeIds.interviews(teamId)]),
+      teams: new Set([intakeIds.team(teamId)]),
+    });
+    this.ctx.storage.transactionSync(() => {
+      // One row a statement: within SQLite's bound parameters.
+      for (const rest of rests) {
+        this.#db
+          .insert(brainSent)
+          .values({ ...rest, team: teamId })
+          .onConflictDoNothing()
+          .run();
+      }
+      this.#db
+        .update(brainTeams)
+        .set({ sentAt: sql`coalesce(${brainTeams.sentAt}, ${at})` })
+        .where(eq(brainTeams.team, teamId))
+        .run();
+      this.#brainSettled(teamId, dueAt);
+    });
   }
 
   /**
@@ -2678,7 +3736,15 @@ export class Onboarding extends DurableObject<Env> {
   /** Sets the alarm for the next thing to draw, when there is one. */
   async #armDrawing(): Promise<void> {
     const now = Date.now();
-    const afters = this.#dueToDraw(now).map(({ after }) => after);
+    const drawing = this.#dueToDraw(now);
+    const drawn = new Set(drawing.map(({ id, work }) => work?.team ?? id));
+    // A team still being drawn goes to the brain once it is drawn.
+    const afters = [
+      ...drawing.map(({ after }) => after),
+      ...this.#brainDueAt(now).flatMap(({ team, after }) =>
+        drawn.has(team) ? [] : [after]
+      ),
+    ];
     if (afters.length > 0) {
       await this.#alarmBy(Math.max(Math.min(...afters), now + drawNextMs));
     }
@@ -2975,8 +4041,16 @@ export class Onboarding extends DurableObject<Env> {
   #forget(person: string, now: string, what: string, by: string): void {
     this.#db.delete(interviews).where(eq(interviews.person, person)).run();
     this.#db
+      .delete(interviewTexts)
+      .where(eq(interviewTexts.person, person))
+      .run();
+    this.#db
       .delete(interviewStates)
       .where(eq(interviewStates.person, person))
+      .run();
+    this.#db
+      .delete(interviewSettings)
+      .where(eq(interviewSettings.person, person))
       .run();
     this.#noted(person, what, now, by);
   }
@@ -3187,12 +4261,14 @@ export class Onboarding extends DurableObject<Env> {
   #changed(
     by: AuditActor,
     action: string,
-    detail: Record<string, AuditDetailValue>
+    detail: Record<string, AuditDetailValue>,
+    about: string | null = null
   ): void {
     const at = new Date().toISOString();
+    // The onboarding's own log may name whom it was about; the audit log never does.
     this.#db
       .insert(events)
-      .values({ at, by: whoIs(by), what: action })
+      .values({ at, by: whoIs(by), what: action, about })
       .run();
     const event = createAuditEvent(
       { actor: by, action, target, detail },

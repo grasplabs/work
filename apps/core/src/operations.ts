@@ -84,6 +84,10 @@ import { sandboxVerdictOf } from "./sandbox-session.ts";
 import { SandboxUnavailableError } from "./sandboxed.ts";
 import { readConsistently, StoreReader } from "./store-reader.ts";
 import { valueFiles } from "./store-references.ts";
+import type {
+  ListedEvent,
+  WorkflowNotifications,
+} from "./workflow-notifications.ts";
 
 // Core's operation host (spec 7.4, 7.5, 9.2, 9.5, 32.1): runs one of an
 // App's server functions for one caller, through the trusted host, and
@@ -190,6 +194,12 @@ import { valueFiles } from "./store-references.ts";
 // - A mutation spins on starts to make core read without end: a start
 //   takes its place among the commit's starts before it is admitted, so
 //   one past the bound is refused before anything is read.
+// - A mutation notifies a run with an event it didn't declare, or of
+//   another App's: a notification names an event the function's sealed
+//   `uses` lists (its workflow's alias, its own, its type and its
+//   fingerprint, which core takes from the manifest, never App code), and
+//   core stages it only as workflow-notifications.ts admits it, as an
+//   intent of the commit, in the commit's bound with its starts.
 
 /**
  * How core starts the workflows an App binds, for one invocation: the
@@ -279,6 +289,12 @@ export interface Invocation {
    */
   readonly workflows?: WorkflowStarts;
   /**
+   * How core stages a mutation's notifications of the App's workflow runs
+   * (`ctx.notify`, workflow-notifications.ts), for this call; none staged
+   * without it, as for starts (`workflows`).
+   */
+  readonly notifications?: WorkflowNotifications;
+  /**
    * Keeps the evidence of a use refused at the host's admission
    * (`UseRefusal`): the first of a caller's call, nested calls included,
    * before App code hears of it. Never throws: the refusal stands, whatever
@@ -286,7 +302,20 @@ export interface Invocation {
    * App's tests).
    */
   readonly refusedUse?: (refusal: UseRefusal) => Promise<void>;
+  /**
+   * Told what the function the caller named threw that its caller hears
+   * only as `internal.unexpected`, at most once a call: its name and
+   * message, when they are strings, cut to `draftFailureMaxLength`, as
+   * data (`tellerOf`). Only a chat's preview of its
+   * own draft (sealed-previews.ts) is told, for the agent's check to read
+   * as a tool's result; every other caller's App code keeps its failures
+   * to the log, and no caller's answer ever carries them.
+   */
+  readonly draftFailure?: (message: string) => void;
 }
+
+/** The most of a draft's failure a preview is told (`draftFailure`). */
+export const draftFailureMaxLength = 2000;
 
 /**
  * A use App code asked the operation host for that the running function's
@@ -819,6 +848,89 @@ const field = (value: unknown, key: string): unknown =>
     : undefined;
 
 /**
+ * The message App code sees for a function it called that failed
+ * unexpectedly (`forCaller`): what a draft's code that caught it and
+ * threw it on says, never why it failed.
+ */
+const callerSeesUnexpected = internalErrors.create(
+  "internal.unexpected"
+).message;
+
+/**
+ * What a draft's code threw, as the preview is told it: the name and
+ * message that crossed from the sandbox, an error rebuilt there whose
+ * message a non-error thrown, or one past the sandbox's size, may have
+ * lost. Undefined for a message that isn't text.
+ */
+/** Told what App code threw, and the error the host fails with for it. */
+type Teller = (
+  thrown: { name: unknown; message: unknown; details: unknown },
+  failed: object
+) => void;
+
+const saidOf = (name: unknown, message: unknown): string | undefined => {
+  if (typeof message !== "string") {
+    return undefined;
+  }
+  const named = typeof name === "string" ? name : "";
+  return named === "" || message === ""
+    ? named || message
+    : `${named}: ${message}`;
+};
+
+/**
+ * What each nested function's unexpected failure said, by the error it
+ * failed with, as the host holds it: `forCaller` gives App code a token
+ * for it (`Told.nested`), so the one App code throws on is told, never
+ * another it handled.
+ */
+const nestedSaid = new WeakMap<object, string>();
+
+/** The token a nested failure App code threw on carries (`forCaller`). */
+const tokenOf = (details: unknown): string | undefined => {
+  const token: unknown =
+    typeof details === "object" && details !== null
+      ? Reflect.get(details, "failure")
+      : undefined;
+  return typeof token === "string" ? token : undefined;
+};
+
+/**
+ * Keeps what a draft's code threw for its chat's preview (`draftFailure`),
+ * told once the call has failed with it (`callOperation`): an attempt a
+ * stale read discards, or a call that answers after all, tells nothing.
+ * A nested function's failure is kept by the error it failed with, and
+ * told only when the function the caller named throws on that very error
+ * (its token, `Told.nested`): the platform's generic text alone, or a
+ * failure it handled, says nothing of why the call failed.
+ */
+const tellerOf = (run: Run): Teller | undefined => {
+  if (run.invocation.draftFailure === undefined) {
+    return undefined;
+  }
+  return ({ name, message, details }, failed) => {
+    const said = saidOf(name, message);
+    if (said === undefined) {
+      return;
+    }
+    const token = tokenOf(details);
+    // The platform's generic text alone: what the nested failure App
+    // code threw on said, if its token names one.
+    const generic = message === callerSeesUnexpected;
+    const nested = token === undefined ? undefined : run.told.nested.get(token);
+    const told = generic ? nested : said;
+    if (told === undefined) {
+      return;
+    }
+    if (run.depth > 0) {
+      nestedSaid.set(failed, told);
+      return;
+    }
+    run.told.failure = told.slice(0, draftFailureMaxLength);
+  };
+};
+
+/**
  * What App code's failure `thrown` becomes, decided by the host (see the
  * header): a domain failure the host rebuilt from a valid `AppError`, an
  * expected error `open`'s channel raised, `contract.invalid_query` for
@@ -828,7 +940,8 @@ const failureOf = (
   thrown: unknown,
   open: OpenChannel,
   requestId: string,
-  path: string
+  path: string,
+  tell?: Teller
 ): Error => {
   // Every read of what App code threw may run its getters: what they
   // throw is an unexpected failure, never taken for the host's.
@@ -880,7 +993,13 @@ const failureOf = (
   if (typeof code === "string" && isPlatformCode(code)) {
     const raised = open.raised(code);
     if (raised !== undefined) {
-      return hostError(raised);
+      const failed = hostError(raised);
+      if (code === "internal.unexpected") {
+        // A nested call's unexpected failure, thrown on: why it failed is
+        // the nested call's (`tellerOf`).
+        tell?.(failure, failed);
+      }
+      return failed;
     }
   }
   if (sdkDefinitionCodes.has(code)) {
@@ -891,7 +1010,11 @@ const failureOf = (
     path,
     code: typeof code === "string" ? code : undefined,
   });
-  return Object.assign(new Error("Unexpected failure"), { unexpected: true });
+  const failed = Object.assign(new Error("Unexpected failure"), {
+    unexpected: true,
+  });
+  tell?.(failure, failed);
+  return failed;
 };
 
 /** The error each verdict of the sandbox's becomes for a function's caller. */
@@ -2048,6 +2171,69 @@ const startsWorkflow = (
 ): boolean =>
   operation.uses.some((use) => use.type === "workflow" && use.alias === alias);
 
+/**
+ * The notification `operation` asks for under workflow `alias` with
+ * `args` (`[event, runId, data]`, the runner's `ctx.notify`), if it lists
+ * that event of the workflow in its `uses`: the event as the sealed
+ * manifest lists it, the run and the data, for core to check.
+ * `resource.not_allowed` for anything else.
+ */
+const workflowNotification = (
+  run: Run,
+  operation: OperationManifest,
+  request: { alias: unknown; args: unknown }
+): { workflow: string; event: ListedEvent; runId: Json; data: Json } => {
+  const args = jsonOf(request.args);
+  const [eventAlias, runId, data] =
+    args !== undefined && isJsonArray(args) ? args : [];
+  const listed = operation.uses.find(
+    (use) =>
+      use.type === "workflowEvent" &&
+      use.workflow === request.alias &&
+      use.alias === eventAlias
+  );
+  const workflowName = sealedName(run.app.manifest.workflows, request.alias);
+  if (listed?.type !== "workflowEvent") {
+    throw refusingUse(operationErrors.create("resource.not_allowed"), {
+      use: { kind: "workflow", name: workflowName },
+      reason: "use_undeclared",
+    });
+  }
+  if (args === undefined || !isJsonArray(args) || args.length !== 3) {
+    throw refusingUse(operationErrors.create("resource.not_allowed"), {
+      use: { kind: "workflow", name: workflowName },
+      reason: "request_not_allowed",
+    });
+  }
+  return {
+    workflow: listed.workflow,
+    event: {
+      alias: listed.alias,
+      type: listed.eventType,
+      fingerprint: listed.fingerprint,
+    },
+    runId: runId ?? null,
+    data: data ?? null,
+  };
+};
+
+/**
+ * What a notification's refusal becomes for App code: its own refusal
+ * when core raised one of the operation host's codes (an event its
+ * release doesn't resolve, data its contract refuses), anything else
+ * `internal.unexpected`, its cause logged.
+ */
+const notifyFailure = (error: unknown, requestId: string): Error => {
+  if (error instanceof Error && operationErrors.codeOf(error) !== undefined) {
+    return hostError(error);
+  }
+  log.error("operation.workflow_notify_failed", {
+    requestId,
+    ...errorFields(error),
+  });
+  return hostError(internalErrors.create("internal.unexpected", { requestId }));
+};
+
 /** What one run of a function may still read: its reads, and staged bytes sent. */
 interface ReadBudget {
   reads: number;
@@ -2103,6 +2289,16 @@ const scopeOf = async (
  */
 export const callMaxDepth = appCallLimits.depth;
 
+/**
+ * What a draft's code threw in the current attempt of the function the
+ * caller named (`tellerOf`): its own failure, and its nested functions'
+ * by the token App code was handed for each (`forCaller`).
+ */
+interface Told {
+  failure?: string;
+  readonly nested: Map<string, string>;
+}
+
 /** One function's run, and where it sits in the call it belongs to. */
 interface Run {
   readonly app: HostedApp;
@@ -2118,6 +2314,13 @@ interface Run {
    * its first refusal is kept.
    */
   readonly evidence: { kept: boolean };
+  /**
+   * The first failure a nested function of the current attempt threw that
+   * said more than the platform's generic text (`tellerOf`): shared by
+   * every function in the call, and cleared as each attempt of the one
+   * the caller named starts.
+   */
+  readonly told: Told;
   /** The caller's call, as its runner knows it: the same at any depth. */
   readonly call: CallTree;
   /**
@@ -2564,6 +2767,12 @@ const runHandler = async (
   capabilities: Capabilities,
   stale?: () => Promise<boolean>
 ): Promise<Json> => {
+  if (run.depth === 0) {
+    // A new attempt: what an earlier one's nested calls threw isn't why
+    // this one fails.
+    run.told.failure = undefined;
+    run.told.nested.clear();
+  }
   const calls = trackedCalls(
     keepingEvidence(run, operation, capabilities),
     run.invocation.deadline
@@ -2625,7 +2834,8 @@ const runHandler = async (
         outcome.thrown,
         open,
         run.invocation.requestId,
-        operation.path
+        operation.path,
+        tellerOf(run)
       );
     }
     if (unfinished !== undefined) {
@@ -2638,7 +2848,8 @@ const runHandler = async (
         unfinished,
         open,
         run.invocation.requestId,
-        operation.path
+        operation.path,
+        tellerOf(run)
       );
     }
     return checkedReturn(run.compiled, operation, outcome.value);
@@ -2710,7 +2921,8 @@ const stagedQuery = async (
  * it on), an expected platform error as it is, anything else
  * `internal.unexpected`, its cause logged already.
  */
-const forCaller = (error: unknown, requestId: string): Error => {
+const forCaller = (error: unknown, run: Run): Error => {
+  const { requestId } = run.invocation;
   const domain = error instanceof Error ? domainFailures.get(error) : undefined;
   if (error instanceof Error && domain !== undefined) {
     // A fresh `AppError` each time, of the SDK's own class (what App code
@@ -2723,10 +2935,26 @@ const forCaller = (error: unknown, requestId: string): Error => {
     const details = structuredClone(domain.details) as JsonValue | undefined;
     return new AppError(domain.code, error.message, details);
   }
-  if (isExpectedError(error) && hostErrors.has(error)) {
+  // What a draft's nested function threw, kept by a token App code is
+  // handed with it: told only if it throws on this very failure. Read
+  // before a host error passes on as it is: a nested function that threw
+  // on one failure it caught fails with its channel's copy of the last
+  // one it was raised, whose token names that other failure.
+  const said =
+    typeof error === "object" && error !== null
+      ? nestedSaid.get(error)
+      : undefined;
+  if (said === undefined && isExpectedError(error) && hostErrors.has(error)) {
     return error;
   }
-  const opaque = internalErrors.create("internal.unexpected", { requestId });
+  const token = said === undefined ? undefined : crypto.randomUUID();
+  if (said !== undefined && token !== undefined) {
+    run.told.nested.set(token, said);
+  }
+  const opaque = internalErrors.create(
+    "internal.unexpected",
+    token === undefined ? { requestId } : { requestId, failure: token }
+  );
   opaque.stack = undefined;
   return opaque;
 };
@@ -2813,7 +3041,7 @@ const startNested = async (
       callee.kind === "query" ? [] : await within.derived()
     );
   } catch (error) {
-    throw forCaller(error, run.invocation.requestId);
+    throw forCaller(error, run);
   }
 };
 
@@ -2961,6 +3189,43 @@ const runMutation = async (
           // lists, staged for its commit and made from its outbox after.
           // Any other resource is refused as a mutation's always is.
           resource: async (alias, method, callArgs) => {
+            if (method === "notify") {
+              const asked = workflowNotification(run, operation, {
+                alias,
+                args: callArgs,
+              });
+              const { notifications } = invocation;
+              if (notifications === undefined) {
+                throw operationErrors.create("resource.unavailable");
+              }
+              // Its place first, as a start's: the commit's bound counts
+              // both, refused before core reads anything.
+              if (placed >= commitMaxIntents) {
+                throw operationErrors.create("operation.call_limit", {
+                  maxStarts: commitMaxIntents,
+                });
+              }
+              placed += 1;
+              await admit(invocation);
+              let data: Json;
+              try {
+                data = await notifications.intent(
+                  asked.workflow,
+                  asked.event,
+                  asked.runId,
+                  asked.data
+                );
+              } catch (error) {
+                throw notifyFailure(error, invocation.requestId);
+              }
+              const intent: NonNullable<Commit["intents"]>[number] = {
+                kind: "workflow.notify",
+                data,
+              };
+              staging.reserve(intent);
+              intents.push(intent);
+              return null;
+            }
             if (!startsWorkflow(operation, alias)) {
               // Any resource but a workflow it lists: not one of its uses.
               throw refusingUse(
@@ -3304,6 +3569,21 @@ const admitFiles = async (
 };
 
 /**
+ * Tells a chat's preview what its draft's code threw (`draftFailure`),
+ * once the call failed with it: the last attempt's (`tellerOf`).
+ */
+const tellDraft = (invocation: Invocation, told: Told): void => {
+  if (invocation.draftFailure === undefined || told.failure === undefined) {
+    return;
+  }
+  try {
+    invocation.draftFailure(told.failure);
+  } catch (error) {
+    log.error("operation.draft_failure_unkept", errorFields(error));
+  }
+};
+
+/**
  * Calls the public function `reference` names of `app` for `invocation`,
  * with `args`: what it returned, or why it failed, as its caller may see
  * it (see the header). Never throws.
@@ -3320,6 +3600,7 @@ export const callOperation = async (
     ...asked,
     deadline: invocationDeadline(asked.deadline),
   };
+  const told: Told = { nested: new Map() };
   try {
     const { compiled, operation, admitted, key } = await trusted(() => {
       const known = compiledOf(app.manifest);
@@ -3365,6 +3646,7 @@ export const callOperation = async (
         depth: 0,
         budget: options.budget ?? callBudget(),
         evidence: { kept: false },
+        told,
         call: new CallTree(options.parentSession),
         ...(progress === undefined ? {} : { progress }),
         ...(cancelled === undefined ? {} : { cancelled }),
@@ -3379,6 +3661,10 @@ export const callOperation = async (
     );
     return { ok: true, value };
   } catch (error) {
-    return { ok: false, error: payloadOf(error, invocation.requestId, path) };
+    const payload = payloadOf(error, invocation.requestId, path);
+    if (payload.code === "internal.unexpected") {
+      tellDraft(invocation, told);
+    }
+    return { ok: false, error: payload };
   }
 };

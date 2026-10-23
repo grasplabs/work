@@ -52,6 +52,9 @@ const namedCalls: Readonly<
   "grasp.sleepUntil": { required: ["timestamp"], optional: [] },
 };
 
+/** The longest prompt a decision takes, as its description. */
+export const maxDecisionPrompt = 500;
+
 /** Upstream's protocol calls, none of which the profile has. */
 const protocolCalls = new Set([
   "http",
@@ -190,7 +193,9 @@ const checkDecisionCall = (args: CallArgs): void => {
     );
   }
   const [prompt, promptPointer] = args.field("prompt");
-  textOrExpression(checker, prompt, promptPointer, site, 10_000);
+  // What the decision service shows as the decision's description, which
+  // it never cuts short: a longer prompt is refused, here and at run time.
+  textOrExpression(checker, prompt, promptPointer, site, maxDecisionPrompt);
   callData(args, "input", binding?.contract?.input);
 };
 

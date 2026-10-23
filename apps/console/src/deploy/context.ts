@@ -145,8 +145,8 @@ const sharedSecret = async (env: Env, name: SharedSecret): Promise<string> => {
   return value === "" ? standIn : value;
 };
 
-/** Every secret a deploy gives the Workers, read from Secrets Store. */
-export const deploySecrets = async (env: Env): Promise<DeploySecrets> => {
+/** Each app's shared secrets, by name, read from Secrets Store. */
+const sharedValues = async (env: Env): Promise<DeploySecrets["shared"]> => {
   const names = [...new Set(Object.values(sharedSecrets).flat())];
   const values = new Map(
     await Promise.all(
@@ -156,18 +156,34 @@ export const deploySecrets = async (env: Env): Promise<DeploySecrets> => {
       ])
     )
   );
+  return Object.fromEntries(
+    Object.entries(sharedSecrets).map(([app, secrets]) => [
+      app,
+      Object.fromEntries(secrets.map((name) => [name, values.get(name) ?? ""])),
+    ])
+  );
+};
+
+/** Every secret a deploy gives the Workers, read from Secrets Store. */
+export const deploySecrets = async (env: Env): Promise<DeploySecrets> => {
+  const shared = await sharedValues(env);
   return {
     routerKey: await storeSecret(env, "ROUTER_KEY"),
     clientKey: await storeSecret(env, "CLIENT_KEY"),
-    shared: Object.fromEntries(
-      Object.entries(sharedSecrets).map(([app, secrets]) => [
-        app,
-        Object.fromEntries(
-          secrets.map((name) => [name, values.get(name) ?? ""])
-        ),
-      ])
-    ),
+    shared,
   };
+};
+
+/**
+ * The shared secrets, and the key their fingerprints are made with
+ * (`sharedSecretPrints`), read from Secrets Store: only these, so a
+ * rollback's check of them (src/rollout/rollback.ts) needs nothing else.
+ */
+export const sharedStoreSecrets = async (
+  env: Env
+): Promise<Pick<DeploySecrets, "clientKey" | "shared">> => {
+  const shared = await sharedValues(env);
+  return { clientKey: await storeSecret(env, "CLIENT_KEY"), shared };
 };
 
 /**

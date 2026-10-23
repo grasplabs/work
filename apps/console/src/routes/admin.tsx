@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 
 import { AdminFrame } from "../admin/frame.tsx";
+import { fetchPlatformSidebar } from "../admin/platform-data.ts";
 import { fetchClientAdmins } from "../clients/functions.ts";
 
 /**
@@ -11,18 +12,28 @@ import { fetchClientAdmins } from "../clients/functions.ts";
  */
 const organizationsFreshMs = 60_000;
 
-const Frame = () => <AdminFrame admins={Route.useLoaderData()} />;
+const Frame = () => {
+  const { admins, platform } = Route.useLoaderData();
+  return <AdminFrame admins={admins} platform={platform} />;
+};
 
 /**
- * Grasp's admin, in a frame of its own (src/admin/frame.tsx), apart from
- * the console's pages: the root leaves its bar out here. For Grasp's staff
- * only, as the whole console is: a request Access doesn't vouch for gets
+ * Grasp's admin, in its own frame (src/admin/frame.tsx): the one place
+ * staff manage everything, every page the console still serves outside it
+ * moving here. For Grasp's staff only, as the whole console is: a request Access doesn't vouch for gets
  * nothing (src/access.ts), so nothing here, not even that it exists, is
  * seen by anyone else. Every organization is every client the console
  * knows, as its core answers now (`fetchClientAdmins`).
  */
 export const Route = createFileRoute("/admin")({
-  loader: async () => await fetchClientAdmins(),
+  // Beside Platform, what the console recorded alone: no account is read.
+  loader: async () => {
+    const [admins, platform] = await Promise.all([
+      fetchClientAdmins(),
+      fetchPlatformSidebar(),
+    ]);
+    return { admins, platform };
+  },
   staleTime: organizationsFreshMs,
   head: () => ({ meta: [{ title: "Grasp admin" }] }),
   component: Frame,

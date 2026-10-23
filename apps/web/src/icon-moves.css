@@ -911,6 +911,13 @@
   --icon-time: 0.7s;
 }
 
+/* The cloud drifts a little and comes back. */
+.lucide-cloud > * {
+  --icon-move: icon-there;
+  --icon-x: 1.5px;
+  --icon-time: 0.6s;
+}
+
 /* The brackets step apart and back. */
 .lucide-code > :nth-child(1) {
   --icon-move: icon-there;
@@ -1317,6 +1324,17 @@
   --icon-turn: 12deg;
   --icon-origin: 50% 85%;
   --icon-time: 0.6s;
+}
+
+/* The two lights blink, one after the other. */
+.lucide-hard-drive > :nth-child(4) {
+  --icon-move: icon-flash;
+  --icon-time: 0.6s;
+}
+.lucide-hard-drive > :nth-child(1) {
+  --icon-move: icon-flash;
+  --icon-time: 0.6s;
+  --icon-wait: 0.15s;
 }
 
 /* The four lines are drawn one by one. */
@@ -2243,6 +2261,14 @@
   --icon-ease: cubic-bezier(0.4, 0, 0.2, 1);
 }
 
+/* Turns on half a turn, where it looks the same again. */
+.lucide-refresh-cw {
+  --icon-move: icon-to;
+  --icon-turn: 180deg;
+  --icon-time: 0.6s;
+  --icon-ease: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
 /* Each arrow takes a step its way. */
 .lucide-repeat > :nth-child(1) {
   --icon-move: icon-hop;
@@ -2825,6 +2851,13 @@
 
 /* The second person steps out from behind the first. */
 .lucide-users > :is(:nth-child(2), :nth-child(3)) {
+  --icon-move: icon-from;
+  --icon-x: -3px;
+  --icon-fade: 0;
+}
+
+/* The second person steps out from behind the first. */
+.lucide-users-round > :nth-child(3) {
   --icon-move: icon-from;
   --icon-x: -3px;
   --icon-fade: 0;

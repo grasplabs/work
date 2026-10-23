@@ -27,6 +27,7 @@ import {
   useNavigate,
 } from "@tanstack/react-router";
 import { ArrowRightIcon, PlusIcon } from "lucide-react";
+import { useEffect, useState } from "react";
 
 import { AdminPage } from "../../admin/page.tsx";
 import { KnowledgeDots, StageBar, Tile } from "../../admin/parts.tsx";
@@ -44,6 +45,10 @@ import {
   whole,
 } from "../../admin/words.ts";
 import type { ClientAdmin } from "../../clients/admin.ts";
+import { usd } from "../../clients/cost.tsx";
+import { fetchGridLive } from "../../clients/functions.ts";
+import type { LiveStatus, Reach } from "../../clients/grid.ts";
+import type { ClientDriftState } from "../../rollout/drift.ts";
 
 /** Every organization, as the admin's layout read them. */
 const adminRoute = getRouteApi("/admin");
@@ -89,15 +94,94 @@ const NameLink = ({
   </Link>
 );
 
+/**
+ * Every active company's own platform, read from its account once the
+ * overview shows (`gridLive`, kept a minute): null while it is read,
+ * `failed` when it couldn't be.
+ */
+type Live = Readonly<Record<string, LiveStatus>> | "failed" | null;
+
+const reachWords: Record<Reach, string> = {
+  reachable: "Reachable",
+  unreachable: "Not reachable",
+  no_route: "No route",
+  unknown: "Reach not known",
+};
+
+const driftWords: Record<ClientDriftState, string> = {
+  in_sync: "in sync",
+  drifted: "drifted",
+  split: "split",
+  off_pin: "off its pin",
+  unknown: "drift not known",
+};
+
+const percent = new Intl.NumberFormat("en", {
+  style: "percent",
+  maximumFractionDigits: 1,
+});
+
+/** Its last day's errors, in a few words; null when not known. */
+const errorsOf = (day: LiveStatus["day"]): string | null => {
+  if (day === null) {
+    return null;
+  }
+  return day.requests === 0
+    ? "no requests"
+    : `${percent.format(day.errors / day.requests)} errors`;
+};
+
+/**
+ * A company's own platform as its account shows it now, as the console's
+ * list of clients had it: whether the router reaches it and whether it
+ * drifted, then its cost this month, its last day's errors and whether
+ * it runs the shared secrets. A dash for one that isn't live.
+ */
+const PlatformCell = ({ live, id }: { live: Live; id: string }) => {
+  if (live === null) {
+    return <span className="text-muted-foreground">Reading…</span>;
+  }
+  const own = live === "failed" ? undefined : live[id];
+  if (own === undefined) {
+    return <Nothing />;
+  }
+  const attention =
+    own.reach === "unreachable" ||
+    own.reach === "no_route" ||
+    own.drift === "drifted" ||
+    own.drift === "split" ||
+    own.drift === "off_pin" ||
+    own.sharedSecretsCurrent === false;
+  const cost =
+    own.costUsd === null
+      ? null
+      : `${usd.format(own.costUsd.workers + own.costUsd.ai)} this month`;
+  const secrets = own.sharedSecretsCurrent === false ? "secrets behind" : null;
+  return (
+    <span className="flex flex-col">
+      <span className={cn(attention && "text-status-attention")}>
+        {`${reachWords[own.reach]}, ${driftWords[own.drift]}`}
+      </span>
+      <span className="text-muted-foreground text-xs">
+        {[cost, errorsOf(own.day), secrets]
+          .filter((part) => part !== null)
+          .join(" · ")}
+      </span>
+    </span>
+  );
+};
+
 /** One organization whose core answered: everything the model worked out of it. */
 const AnsweredRow = ({
   view,
   id,
   name,
+  live,
 }: {
   view: AdminView;
   id: string;
   name: string;
+  live: Live;
 }) => {
   const { contract } = view;
   const health = healthOf(view);
@@ -197,6 +281,12 @@ const AnsweredRow = ({
           </span>
         </span>
       </TableCell>
+      <TableCell
+        className="hidden whitespace-normal @4xl:table-cell"
+        variant="card"
+      >
+        <PlatformCell id={id} live={live} />
+      </TableCell>
       <TableCell className="hidden text-right @6xl:table-cell" variant="card">
         {view.usage.thisMonth.spend > 0 ? (
           <span className="tabular-nums">
@@ -225,8 +315,10 @@ const AnsweredRow = ({
  */
 const UnreadRow = ({
   admin,
+  live,
 }: {
   admin: Extract<ClientAdmin, { state: "unreachable" }>;
+  live: Live;
 }) => {
   const words = unreadWords(admin);
   const why = `${words.charAt(0).toUpperCase()}${words.slice(1)}`;
@@ -263,6 +355,12 @@ const UnreadRow = ({
       <TableCell className="hidden @4xl:table-cell" variant="card">
         <Nothing />
       </TableCell>
+      <TableCell
+        className="hidden whitespace-normal @4xl:table-cell"
+        variant="card"
+      >
+        <PlatformCell id={admin.client.id} live={live} />
+      </TableCell>
       <TableCell className="hidden text-right @6xl:table-cell" variant="card">
         <Nothing />
       </TableCell>
@@ -273,14 +371,53 @@ const UnreadRow = ({
   );
 };
 
-const OrganizationRow = ({ organization }: { organization: Organization }) => {
+const OrganizationRow = ({
+  organization,
+  live,
+}: {
+  organization: Organization;
+  live: Live;
+}) => {
   const { admin, view } = organization;
   if (admin.state === "unreachable") {
-    return <UnreadRow admin={admin} />;
+    return <UnreadRow admin={admin} live={live} />;
   }
   return view === null ? null : (
-    <AnsweredRow id={admin.client.id} name={admin.client.name} view={view} />
+    <AnsweredRow
+      id={admin.client.id}
+      live={live}
+      name={admin.client.name}
+      view={view}
+    />
   );
+};
+
+/** Every active company's own platform, or `failed` when it couldn't be read. Never throws. */
+const readLive = async (): Promise<Live> => {
+  try {
+    return await fetchGridLive();
+  } catch {
+    return "failed";
+  }
+};
+
+/** Every active company's own platform, read once the overview shows. */
+const useLive = (): Live => {
+  const [live, setLive] = useState<Live>(null);
+  useEffect(() => {
+    let current = true;
+    void (async () => {
+      const read = await readLive();
+      // A page left before its answer came doesn't take it.
+      if (current) {
+        setLive(read);
+      }
+    })();
+    return () => {
+      current = false;
+    };
+  }, []);
+  return live;
 };
 
 /** What the contract column says: unknown until the company's core holds one. */
@@ -437,7 +574,9 @@ const NeedsToday = ({ organizations }: { organizations: Organization[] }) => {
  * adds up to, what needs Grasp today, then each organization with where it
  * stands and how many things need Grasp there, all as the admin's model
  * works it out of what its core answered (src/admin/views.ts). One whose
- * core didn't answer is listed with why, and nothing else.
+ * core didn't answer is listed with why. Beside each, its own platform as
+ * its account shows it now, read once the page shows, as the console's
+ * list of clients read it (src/clients/grid.ts).
  *
  * Left out, as the console has no source for them yet: exporting them,
  * and the prototype's line on which are past the milestone and still
@@ -446,7 +585,8 @@ const NeedsToday = ({ organizations }: { organizations: Organization[] }) => {
 const Overview = () => {
   const navigate = useNavigate();
   const { phase } = Route.useSearch();
-  const organizations = organizationsOf(adminRoute.useLoaderData());
+  const organizations = organizationsOf(adminRoute.useLoaderData().admins);
+  const live = useLive();
   const views = organizations.flatMap(({ view }) =>
     view === null ? [] : [view]
   );
@@ -519,6 +659,9 @@ const Overview = () => {
               <TableHead className="hidden @4xl:table-cell" variant="card">
                 Health
               </TableHead>
+              <TableHead className="hidden @4xl:table-cell" variant="card">
+                Its platform
+              </TableHead>
               <TableHead
                 className="hidden text-right @6xl:table-cell"
                 variant="card"
@@ -537,6 +680,7 @@ const Overview = () => {
             {shown.map((organization) => (
               <OrganizationRow
                 key={organization.admin.client.id}
+                live={live}
                 organization={organization}
               />
             ))}

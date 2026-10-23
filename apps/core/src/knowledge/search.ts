@@ -20,16 +20,17 @@ import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { derivedHmacKey } from "../derived-keys.ts";
 import { noteProvenance } from "./access.ts";
 import type { Reader, ReadRecord } from "./access.ts";
-import { allowedFor } from "./app-entries.ts";
-import type { Allowed } from "./app-entries.ts";
+import { allowedFor } from "./authorize.ts";
+import type { Allowed } from "./authorize.ts";
 import { readableCollection } from "./collections.ts";
+import { portsOf } from "./ports.ts";
 import { nearestCollectionsMax, nearestDetail } from "./usage-tally.ts";
 
 // Full-text search over sections, in two FTS5 indexes kept by triggers on
-// the sections table (see the migration `0001_search.sql`): whole words,
+// the sections table (see the migrations `0001_search.sql` and
+// `0017_search_one_content.sql`, one copy of the text for both): whole words,
 // with diacritics removed and prefixes indexed ("vakan" finds
 // "vakantiedagen", "financiele" finds "financiële"), and trigrams, which
 // find a word inside a compound ("verlof" in "zwangerschapsverlof").
@@ -38,8 +39,11 @@ import { nearestCollectionsMax, nearestDetail } from "./usage-tally.ts";
 // that finds it: whole words first, then trigrams; and only when neither
 // finds anything, trigrams with room for one typo. Within a pass sections
 // rank by BM25 with field weights (title, then description, headings and
-// text) and by freshness. Every word of the query must match (AND): a
-// search narrows as it gets longer.
+// text) and by freshness. Every word of a search must match (AND): a
+// search narrows as it gets longer. A recall asks a question in its
+// person's words, which no section holds all of, so any of its words
+// matches (OR), and BM25 ranks the sections that hold more of them, and
+// the rarer ones, first: how search engines read a question.
 //
 // Access is part of the same statement (R11): a section of a collection
 // the reader can't read, or of an App's entry they may not find
@@ -94,6 +98,29 @@ const termsOf = (query: string): string[] =>
 const quoted = (term: string) => `"${term}"`;
 
 /**
+ * A term as the words pass asks for it: as a prefix ("vakan" finds
+ * "vakantiedagen"), but a single character exactly. The prefix indexes
+ * (`prefix = '2 3'`) don't cover one character, so `"7"*` would merge
+ * every term that starts with a 7: seconds at 100k sections, for `INC-7`.
+ */
+const asWord = (term: string): string =>
+  // Code points, as in `passesOf`.
+  // oxlint-disable-next-line typescript/no-misused-spread -- see passesOf
+  [...term].length === 1 ? quoted(term) : `${quoted(term)}*`;
+
+const digitsPattern = /^\p{N}+$/u;
+
+/**
+ * Whether the trigram passes ask for a term (its code points given): long
+ * enough for a trigram, and not only digits. Trigrams find words inside
+ * compounds and words with a typo; a group of digits ("2024" in
+ * "CR-2024-118") is neither, the words pass already matches it, and it is
+ * in so many codes that its trigrams cost seconds at 100k sections.
+ */
+const trigramReady = (term: string, chars: string[]): boolean =>
+  chars.length >= trigramLength && !digitsPattern.test(term);
+
+/**
  * A long word as the typo pass asks for it: two of its three pieces, close
  * together, as they are in the word spelled right. Pieces far apart in a
  * section ("zwang…" and "…zonder" in "bijzonder verlof of zwangerschap")
@@ -128,16 +155,19 @@ interface Pass {
   pass: number;
   match: string;
   /**
-   * Words too short for trigrams, which the section must then have as
-   * words, so that every word of the query still counts.
+   * Words the trigrams don't ask for (too short, or only digits), which the
+   * section must then have as words, so that every word of the query still
+   * counts.
    */
   short?: string;
 }
 
 /** The FTS5 queries of each pass that has one, in order. */
-const passesOf = (terms: string[]): Pass[] => {
-  const words = (list: string[]) =>
-    list.map((term) => `${quoted(term)}*`).join(" AND ");
+/** How a pass joins a query's words: all of them, or any (a recall). */
+type Joiner = " AND " | " OR ";
+
+const passesOf = (terms: string[], joiner: Joiner): Pass[] => {
+  const words = (list: string[]) => list.map(asWord).join(joiner);
   const letters = terms.map((term) => ({
     term,
     // Code points, as the trigram tokenizer counts them. Terms are letters
@@ -145,9 +175,9 @@ const passesOf = (terms: string[]): Pass[] => {
     // oxlint-disable-next-line typescript/no-misused-spread -- see above
     chars: [...term],
   }));
-  const long = letters.filter(({ chars }) => chars.length >= trigramLength);
+  const long = letters.filter(({ term, chars }) => trigramReady(term, chars));
   const short = letters
-    .filter(({ chars }) => chars.length < trigramLength)
+    .filter(({ term, chars }) => !trigramReady(term, chars))
     .map(({ term }) => term);
   const trigrams = (query: string): Pass | undefined =>
     long.length === 0
@@ -156,16 +186,19 @@ const passesOf = (terms: string[]): Pass[] => {
           table: "search_trigrams",
           pass: 0,
           match: query,
-          ...(short.length === 0 ? {} : { short: words(short) }),
+          // Each word counts only when every one must match.
+          ...(short.length === 0 || joiner === " OR "
+            ? {}
+            : { short: words(short) }),
         };
   const typo = long.map(({ term, chars }) =>
     chars.length < typoLength ? quoted(term) : `(${allowingTypo(chars)})`
   );
   return [
     { table: "search_words", pass: 0, match: words(terms) },
-    trigrams(long.map(({ term }) => quoted(term)).join(" AND ")),
+    trigrams(long.map(({ term }) => quoted(term)).join(joiner)),
     long.some(({ chars }) => chars.length >= typoLength)
-      ? trigrams(typo.join(" AND "))
+      ? trigrams(typo.join(joiner))
       : undefined,
   ].flatMap((pass, index) =>
     pass === undefined ? [] : [{ ...pass, pass: index }]
@@ -276,9 +309,10 @@ const toHit = (row: z.infer<typeof hitRowSchema>): SearchHit => ({
  * ("ziekmelding jan de vries"), and the audit log can't be purged.
  */
 const queryKey = async (env: Env, terms: string[]): Promise<string> => {
-  const key = await derivedHmacKey(env, "grasp-os knowledge search query key", [
-    "sign",
-  ]);
+  const key = await portsOf(env).keys.hmac(
+    "grasp-os knowledge search query key",
+    ["sign"]
+  );
   const normalized = terms
     .map((term) => term.normalize("NFKD").replaceAll(/\p{M}/gu, ""))
     .toSorted()
@@ -309,7 +343,7 @@ const nearestCollections = async (
     // Code points, as in `passesOf`.
     // oxlint-disable-next-line typescript/no-misused-spread -- see above
     const chars = [...term];
-    if (chars.length < trigramLength) {
+    if (!trigramReady(term, chars)) {
       return [];
     }
     return [
@@ -320,14 +354,20 @@ const nearestCollections = async (
     {
       table: "search_words",
       pass: 0,
-      match: terms.map((term) => `${quoted(term)}*`).join(" OR "),
+      match: terms.map(asWord).join(" OR "),
     },
     ...(long.length === 0
       ? []
       : [{ table: "search_trigrams", pass: 1, match: long.join(" OR ") }]),
   ];
+  // MATERIALIZED: with one pass the CTE is a lone SELECT, which SQLite
+  // would flatten into the query below, putting bm25() inside min(), where
+  // FTS5 can't evaluate it ("unable to use function bm25 in the requested
+  // context"). A query of only short or digit words has one pass.
   const rows = await db.all(sql`
-    WITH matches AS (${sql.join(passes.map(matchesSql), sql` UNION ALL `)})
+    WITH matches AS MATERIALIZED (
+      ${sql.join(passes.map(matchesSql), sql` UNION ALL `)}
+    )
     SELECT collections.id AS collectionId, min(matches.score) AS score
     FROM matches
     JOIN search_rows ON search_rows.id = matches.row_id
@@ -441,7 +481,8 @@ export const searchSections = async (
   only?: string,
   /**
    * For a recall: only these collections, each refused as not found
-   * unless the reader may read it, read in one search; and recorded as a
+   * unless the reader may read it, read in one search; matching any of
+   * the query's words, ranked by BM25 (`passesOf`); and recorded as a
    * recall (`searchRecord`).
    */
   recall?: { among?: readonly string[] }
@@ -468,7 +509,7 @@ export const searchSections = async (
         collectionId: only,
       };
   const db = drizzle(env.KNOWLEDGE);
-  const allowed = await allowedFor(env, db, reader, scope);
+  const allowed = await allowedFor(portsOf(env), reader);
   // Refused like any read of a collection the reader can't read. A search
   // in one collection reads from it whatever it finds: that nothing
   // matches says something of what it holds too. So the collection is
@@ -499,7 +540,7 @@ export const searchSections = async (
       ),
     };
   }
-  const now = Date.now();
+  const now = portsOf(env).clock().getTime();
   const today = new Date(now).toISOString().slice(0, 10);
   // Freshness scales a score by 0.5 to 1: a quarter off for a year without
   // changes, and a quarter off past the review date. It orders sections that
@@ -510,7 +551,7 @@ export const searchSections = async (
   // Every section of a document repeats its title and description, so a
   // document ranks by its best section, and its sections follow one another
   // in the order their own headings and text match.
-  const passes = passesOf(terms);
+  const passes = passesOf(terms, recall === undefined ? " AND " : " OR ");
   const rows = await db.all(sql`
     WITH matches AS (${sql.join(passes.map(matchesSql), sql` UNION ALL `)}),
     readable AS (

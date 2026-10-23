@@ -403,6 +403,12 @@ export interface PreviewCallOptions {
    * the caller paid, as for a version's screen (`WindowRequest.charge`).
    */
   readonly chargeWindow?: (pages: number, whole: number) => Promise<void>;
+  /**
+   * Told what the draft's code threw that its caller hears only as
+   * `internal.unexpected` (`Invocation.draftFailure`): for the agent's
+   * check, never for the screen's answer.
+   */
+  readonly draftFailure?: (message: string) => void;
 }
 
 /** The key of one chat's preview of one App. */
@@ -555,6 +561,7 @@ export class SealedPreviews {
         store,
         requestId,
         deadline,
+        draftFailure: options.draftFailure,
       });
       const observe = hasTables(release)
         ? (readSet: Record<string, number>) => {
@@ -748,9 +755,16 @@ export class SealedPreviews {
       store,
       requestId,
       deadline,
-    }: { store: OpenStore; requestId: string; deadline: number }
+      draftFailure,
+    }: {
+      store: OpenStore;
+      requestId: string;
+      deadline: number;
+      draftFailure?: Invocation["draftFailure"];
+    }
   ): Invocation {
     return {
+      ...(draftFailure === undefined ? {} : { draftFailure }),
       principal: personId,
       consumer: { resourceId: app, resourceVersion: running.version },
       store,

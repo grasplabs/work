@@ -5,10 +5,12 @@ import { inspectApp } from "./app.ts";
 import { databaseReader, databaseWriter } from "./database.ts";
 import { migrationHandler } from "./migration.ts";
 import type { MigrationContext } from "./migration.ts";
-import { referenceData } from "./references.ts";
+import { eventReferenceData, referenceData } from "./references.ts";
+import type { EventReferenceData } from "./references.ts";
 import { isResource, isWorkflowResource } from "./resources.ts";
 import type { AnyResource } from "./resources.ts";
 import type { AnyFunction, FunctionKind } from "./server.ts";
+import { isPlainObject } from "./value-descriptor.ts";
 import type { JsonValue } from "./value-descriptor.ts";
 
 // How an App's server functions run where its code runs: the runner looks
@@ -42,7 +44,11 @@ export interface OperationChannel {
     path: string,
     args: unknown
   ) => Promise<unknown>;
-  /** One call of a resource the function uses: an action's only. */
+  /**
+   * One call of a resource the function uses: an action's only, but a
+   * mutation's staged start (`start`) or notification (`notify`) of one
+   * of the App's workflows.
+   */
   readonly resource: (
     alias: string,
     method: string,
@@ -124,6 +130,63 @@ const usedWorkflow = (fn: AnyFunction, workflow: unknown): string => {
     );
   }
   return used.alias;
+};
+
+/**
+ * The event reference `event` is among `fn`'s `uses`, read as data, or a
+ * refusal: only one it lists, by identity.
+ */
+const usedEvent = (fn: AnyFunction, event: unknown): EventReferenceData => {
+  const used = fn.uses.find((use) => use === event);
+  const read = used === undefined ? undefined : eventReferenceData(used);
+  if (read === undefined) {
+    throw Object.assign(
+      new Error("A mutation notifies only with the events it lists in `uses`."),
+      { code: "operation.not_found" }
+    );
+  }
+  return read;
+};
+
+/** A notification a mutation's handler staged, sent once it returns. */
+interface StagedNotification {
+  readonly workflow: string;
+  readonly alias: string;
+  readonly runId: unknown;
+  readonly data: unknown;
+}
+
+/**
+ * A mutation's `ctx.notify` (spec 10.7.4), over `channel`: each call kept
+ * in order while the handler runs, synchronously, and sent to the host by
+ * `flush` once it has returned, in that order, which is each one's place
+ * among the commit's intents; nothing for a handler that throws, whose
+ * mutation commits nothing. The host checks each again as it stages it.
+ */
+const notificationsOf = (fn: AnyFunction, channel: OperationChannel) => {
+  const staged: StagedNotification[] = [];
+  let open = true;
+  return {
+    notify: (event: unknown, notification: unknown): void => {
+      if (!open) {
+        throw Object.assign(
+          new Error("A mutation notifies only while its handler runs."),
+          { code: "operation.ended" }
+        );
+      }
+      const { workflow, alias } = usedEvent(fn, event);
+      const given = isPlainObject(notification) ? notification : {};
+      staged.push({ workflow, alias, runId: given.runId, data: given.data });
+    },
+    flush: async (): Promise<void> => {
+      open = false;
+      for (const { workflow, alias, runId, data } of staged) {
+        // In order: each one's place among the commit's intents.
+        // oxlint-disable-next-line no-await-in-loop -- see above
+        await channel.resource(workflow, "notify", [alias, runId, data]);
+      }
+    },
+  };
 };
 
 /**
@@ -220,9 +283,11 @@ export const runFunction = async (
       }
     };
   let ctx: object;
+  let notifications: ReturnType<typeof notificationsOf> | undefined;
   if (fn.kind === "query") {
     ctx = { db: databaseReader(schema, read) };
   } else if (fn.kind === "mutation") {
+    notifications = notificationsOf(fn, channel);
     ctx = {
       db: databaseWriter(
         schema,
@@ -235,6 +300,7 @@ export const runFunction = async (
           await startOf(fn, channel)(workflow, input);
         },
       }),
+      notify: notifications.notify,
     };
   } else {
     ctx = {
@@ -258,7 +324,9 @@ export const runFunction = async (
   // arguments are what the host validated against its `args`.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
   const handler = fn.handler as (ctx: object, args: unknown) => unknown;
-  return await handler(Object.freeze(ctx), args);
+  const answer = await handler(Object.freeze(ctx), args);
+  await notifications?.flush();
+  return answer;
 };
 
 /**

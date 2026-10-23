@@ -14,6 +14,8 @@ import {
 } from "@grasp-os/shared/screens";
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
+import { eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
@@ -21,6 +23,7 @@ import { actionInvocation, invocationName } from "../src/action-invocation.ts";
 import { readFunctionRequest } from "../src/app-functions.ts";
 import { loadRelease } from "../src/app-releases.ts";
 import { versionFiles } from "../src/apps.ts";
+import { actionInvocations } from "../src/db/core/schema.ts";
 import { appHost, inJurisdiction } from "../src/durable-objects.ts";
 import { revokeRelease } from "../src/release-retention.ts";
 import { withScreenReferences } from "../src/screen-references.ts";
@@ -28,7 +31,7 @@ import { buildScreens } from "../src/screens.ts";
 import { sessionRecheckMs } from "../src/session-check.ts";
 import { StoreHost } from "../src/store-host.ts";
 import { storeMaxWatches } from "../src/store-watches.ts";
-import { pastAccessRecheck, requestGranted } from "./apps.ts";
+import { pastAccessRecheck, published, requestGranted } from "./apps.ts";
 import { runCron } from "./cron.ts";
 import { mockIdp } from "./idp.ts";
 import { newTeam, readCollection } from "./knowledge.ts";
@@ -52,7 +55,8 @@ import {
 // keys reused for other input or past their receipt refused; an action's
 // lost response recovered from its receipt and a resend joining it while
 // it runs, never run twice, its receipt kept from another person and from
-// its own person once their role narrowed; and arguments the operation
+// its own person once their role narrowed; each invocation's object
+// listed for as long as it holds anything; and arguments the operation
 // can't take refused before anything is sent.
 
 const idp = mockIdp();
@@ -67,6 +71,7 @@ const openedApp = async (appFiles: Record<string, string> = files) => {
   const builder = await personApi("builder");
   const admin = await personApi("admin");
   const { id } = await builder.api.apps.create({ name: "Notes" });
+  await published(id);
   const { version } = await builder.api.apps.files.commit(
     id,
     appFiles,
@@ -638,6 +643,59 @@ describe("the session client", { timeout: 120_000 }, () => {
     await expect(titles(client, api)).resolves.toStrictEqual(["Ran"]);
   });
 
+  it("lists an action's invocation once, for as long as its object holds anything", async () => {
+    const opened = await openedApp();
+    const api = apiOf(opened.release);
+    const { client } = clientFor(opened);
+    const keyed = { idempotencyKey: "listed-once" };
+    const input = { title: "Listed" };
+    const first = await client.action(api.stamp, input, keyed);
+    await expect(client.action(api.stamp, input, keyed)).resolves.toStrictEqual(
+      first
+    );
+    const listed = async () =>
+      await drizzle(env.DB)
+        .select({
+          name: actionInvocations.name,
+          personId: actionInvocations.personId,
+          streaming: actionInvocations.streaming,
+        })
+        .from(actionInvocations)
+        .where(eq(actionInvocations.appId, opened.app));
+    const rows = await listed();
+    expect(
+      rows.map(({ personId, streaming }) => ({ personId, streaming }))
+    ).toStrictEqual([{ personId: opened.builderId, streaming: false }]);
+    // The row names the object that holds the receipt: kept past its
+    // time, it leaves a tombstone, still listed.
+    const stub = actionInvocation(env, rows[0]?.name ?? "");
+    const held = async () =>
+      await runInDurableObject(stub, (_instance, state) =>
+        state.storage.kv.get("invocation")
+      );
+    await runInDurableObject(stub, (_instance, state) => {
+      const record = z
+        .object({ settledAt: z.number() })
+        .loose()
+        .parse(state.storage.kv.get("invocation"));
+      state.storage.kv.put("invocation", {
+        ...record,
+        settledAt: Date.now() - 16 * 60_000,
+      });
+    });
+    await runDurableObjectAlarm(stub);
+    await expect(Promise.all([held(), listed()])).resolves.toMatchObject([
+      { state: "expired" },
+      rows,
+    ]);
+    // Once the tombstone goes, the object holds nothing and isn't listed.
+    await runDurableObjectAlarm(stub);
+    await expect(Promise.all([held(), listed()])).resolves.toStrictEqual([
+      undefined,
+      [],
+    ]);
+  });
+
   it("withholds an action's answer made under a release revoked while it ran, its outcome unknown with its key", async () => {
     const opened = await openedApp();
     const api = apiOf(opened.release);
@@ -773,6 +831,7 @@ describe("a screen's build", { timeout: 120_000 }, () => {
     // either is sealed yet, so the references come from the files.
     const builder = await personApi("builder");
     const { id } = await builder.api.apps.create({ name: "Notes" });
+    await published(id);
     const { builds } = await builder.api.apps.files.commit(id, files, "First");
     expect(builds.screens).toMatchObject({ status: "ok", diagnostics: [] });
     const broken = await builder.api.apps.files.commit(
@@ -795,6 +854,7 @@ describe("a screen's build", { timeout: 120_000 }, () => {
     const own = { ...files, "operations/notes.ts": operations };
     const before = await inspections();
     const { id } = await builder.api.apps.create({ name: "Notes" });
+    await published(id);
     await builder.api.apps.files.commit(id, own, "First");
     // A screen changed, the server code not: what was inspected is kept.
     await builder.api.apps.files.commit(
@@ -824,6 +884,7 @@ describe("a screen's build", { timeout: 120_000 }, () => {
   ): Promise<string[]> => {
     const builder = await personApi("builder");
     const { id } = await builder.api.apps.create({ name: "Notes" });
+    await published(id);
     const { version } = await builder.api.apps.files.commit(
       id,
       appFiles,

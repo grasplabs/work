@@ -44,8 +44,36 @@
       "jurisdiction": "eu",
     },
   ],
-  // Imports newly published releases (src/releases/import.ts).
-  "triggers": { "crons": ["*/5 * * * *"] },
+  // Per-person limits on reads that reach every client's core once. The
+  // namespace ids are unique in grasp-os-ops, beside the router's 1001 to
+  // 1003.
+  "ratelimits": [
+    // Tool calls of the admin's MCP (src/admin/mcp.ts), per staff member:
+    // 30 a minute.
+    {
+      "name": "ADMIN_MCP_RATE_LIMIT",
+      "namespace_id": "1004",
+      "simple": { "limit": 30, "period": 60 },
+    },
+    // Questions to Grasp's Discord bot (src/admin/discord.ts), per Discord
+    // user: 10 a minute.
+    {
+      "name": "DISCORD_RATE_LIMIT",
+      "namespace_id": "1005",
+      "simple": { "limit": 10, "period": 60 },
+    },
+  ],
+  // The Chat SDK's state for Grasp's Discord bot (src/admin/discord.ts,
+  // @grasp-os/chat/state): one SQLite object per key and per conversation,
+  // in the EU.
+  "durable_objects": {
+    "bindings": [{ "name": "CHAT_STATE", "class_name": "ChatState" }],
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ChatState"] }],
+  // Imports newly published releases (src/releases/import.ts) every 5
+  // minutes; on weekday mornings, posts the admin's digest to Discord
+  // (src/admin/discord-digest.ts, `digestCron`).
+  "triggers": { "crons": ["*/5 * * * *", "0 6,7 * * 1-5"] },
   // Onboards a client (src/provision/workflow.ts): an instance per attempt,
   // each claimed in D1 first (src/runners.ts), so two runs for one
   // client can't overlap.
@@ -64,6 +92,14 @@
       "binding": "ROLLOUT",
       "class_name": "Rollout",
     },
+    // Deploys one fleet client of a rollout (src/rollout/fleet-client.ts): an
+    // instance per client and retry round, a few at once, started by the
+    // rollout's run, which claims the client in the rollout's name.
+    {
+      "name": "grasp-os-rollout-client",
+      "binding": "ROLLOUT_CLIENT",
+      "class_name": "RolloutClient",
+    },
     // Rolls a client back from a rollout (src/rollout/rollback.ts): an
     // instance per rollback, a runner under the same claim as the others.
     {
@@ -77,6 +113,22 @@
       "name": "grasp-os-apply-client",
       "binding": "APPLY_CLIENT",
       "class_name": "ApplyClient",
+    },
+    // Follows a build of an integration by Grasp's agent through its
+    // stages and waits (src/builds/workflow.ts): an instance per build,
+    // one build per app.
+    {
+      "name": "grasp-os-integration-build",
+      "binding": "INTEGRATION_BUILD",
+      "class_name": "IntegrationBuild",
+    },
+    // Provisions a client placed in a hosting destination
+    // (src/hosting/workflow.ts): an instance per attempt, each claimed in
+    // D1 first, all resuming the client's one operation.
+    {
+      "name": "grasp-os-provision-placed-client",
+      "binding": "PROVISION_PLACED_CLIENT",
+      "class_name": "ProvisionPlacedClient",
     },
   ],
   // The router's hostname map, which a deploy writes (src/deploy/router.ts).
@@ -152,6 +204,36 @@
       "binding": "STRIPE_RESTRICTED_KEY",
       "store_id": "account-secrets-store",
       "secret_name": "STRIPE_RESTRICTED_KEY",
+    },
+    // Grasp's Rooms' read-only service token (grasplabs/rooms,
+    // worker/service-read.ts), for the proposal under Contract
+    // (src/proposal/rooms.ts): it reads rooms and their signature requests
+    // and nothing else. The console's alone, never sent to the browser. Put
+    // in the store by hand; until it is, the proposal says Rooms isn't
+    // connected.
+    {
+      "binding": "ROOMS_READ_TOKEN",
+      "store_id": "account-secrets-store",
+      "secret_name": "ROOMS_READ_TOKEN",
+    },
+    // The Discord webhook the admin's morning digest is posted to, which
+    // names the channel (src/admin/discord-digest.ts). The console's alone.
+    // Put in the store by hand; until it is, no digest is sent.
+    {
+      "binding": "DISCORD_DIGEST_WEBHOOK",
+      "store_id": "account-secrets-store",
+      "secret_name": "DISCORD_DIGEST_WEBHOOK",
+    },
+    // A read-only Attio API key (records, object configuration, notes and
+    // meetings read; user management read to name deal owners), for the
+    // company, its people, deals and calls under Details and the won deals
+    // a new organization starts from (src/crm/attio.ts). The console's
+    // alone: never copied to a client, never sent to the browser. Put in
+    // the store by hand; until it is, Details says Attio isn't connected.
+    {
+      "binding": "ATTIO_READ_KEY",
+      "store_id": "account-secrets-store",
+      "secret_name": "ATTIO_READ_KEY",
     },
   ],
 }

@@ -1,5 +1,5 @@
-import { fileChannel } from "@grasp-os/sdk/host";
-import type { FileChannel } from "@grasp-os/sdk/host";
+import { fileChannel, linkChannel } from "@grasp-os/sdk/host";
+import type { FileChannel, LinkChannel } from "@grasp-os/sdk/host";
 import { appErrors } from "@grasp-os/shared/apps";
 import type { PreviewBundle } from "@grasp-os/shared/chat";
 import { decisionErrors } from "@grasp-os/shared/decisions";
@@ -44,6 +44,7 @@ import type { ExpectedStart } from "./frame-stages.ts";
 import { openBridge } from "./screen-bridge.ts";
 import type { FrameTarget } from "./screen-bridge.ts";
 import { frameGesture, openFilePort } from "./screen-files.ts";
+import { openLinkPort, openOutside } from "./screen-links.ts";
 import { cancelStream, followStream } from "./screen-stream.ts";
 import { ownLink, tabLink } from "./tab-link.ts";
 import type { FrameLink, Joined } from "./tab-link.ts";
@@ -152,6 +153,7 @@ const failures: Readonly<Record<string, FailureReason>> = {
   "screen.input_too_large": "bad-input",
   "app.not_running": "not-running",
   "screen.build_failed": "broken",
+  "screen.not_sealed": "broken",
   "screen.build_slow": "timed-out",
   // Asked again until the page's wait for a build was spent (`openPreview`).
   "app.preview_superseded": "timed-out",
@@ -541,6 +543,16 @@ export interface ScreenOpening {
  * answer a screen asked to give (decision-confirmation.tsx): whether they
  * did.
  */
+/**
+ * Asks the person whether to open a link to `link.origin` (ASCII; the
+ * whole URL too, for an App that read restricted data), in the page's own
+ * dialog; rejects while another question waits.
+ */
+export type ConfirmLink = (link: {
+  readonly origin: string;
+  readonly url?: string;
+}) => Promise<boolean>;
+
 export type ConfirmDecision = (
   pending: PendingConfirmation
 ) => Promise<boolean>;
@@ -965,6 +977,12 @@ interface Connected {
    * is for; a draft's preview doesn't.
    */
   files?: FileChannel;
+  /**
+   * The screen's link channel (spec 10.7.7), if it has one, and how the
+   * person is asked to confirm a link to an origin: a running App's
+   * screen has both; a draft's preview opens no links.
+   */
+  links?: { channel: LinkChannel; confirm: ConfirmLink };
 }
 
 /** What a frame runs, and what its bridge reaches. */
@@ -1125,6 +1143,7 @@ const runFrame = <Bundle extends FrameCode>(
       target,
       running,
       files: channel,
+      links,
     } = source.connect(link, bundle, refused, cleanups);
     const { port1, port2 } = new MessageChannel();
     cleanups.push(
@@ -1143,9 +1162,19 @@ const runFrame = <Bundle extends FrameCode>(
       focused: () => document.activeElement,
       now: () => performance.now(),
     });
+    // Its links over a third port: the page alone decides whether the
+    // person asked, and opens (screen-links.ts).
+    const linkPorts = new MessageChannel();
     cleanups.push(
       gesture.close,
-      openFilePort(files.port1, channel, gesture.take)
+      openFilePort(files.port1, channel, gesture.take),
+      openLinkPort(linkPorts.port1, links?.channel, {
+        take: gesture.take,
+        active: () => navigator.userActivation.isActive,
+        confirm: async (asked) =>
+          links === undefined ? false : await links.confirm(asked),
+        open: openOutside,
+      })
     );
     const mounted = stage(
       "mounted",
@@ -1156,7 +1185,7 @@ const runFrame = <Bundle extends FrameCode>(
     frame.contentWindow?.postMessage(
       { type: screenFrameMessage, ...expected },
       "*",
-      [port2, files.port2]
+      [port2, files.port2, linkPorts.port2]
     );
     onOpened(bundle.name);
     // Running only once the screen has rendered, never because its frame
@@ -1209,6 +1238,7 @@ export const appScreen = (
   app: string,
   screen: string,
   confirm: ConfirmDecision,
+  confirmLink: ConfirmLink,
   opening: ScreenOpening
 ): Omit<FrameSource<ScreenBundle>, "join"> => ({
   open: async (session) => {
@@ -1253,6 +1283,26 @@ export const appScreen = (
       drafts.stop();
       hold.close();
     });
+    // A request of core's own channels (files, links), as the page sends
+    // it: one refused as someone else's, or for the build, is handled as
+    // a function call's is.
+    const coreFetch = async (
+      path: string,
+      init: RequestInit
+    ): Promise<Response> => {
+      const response = await fetch(path, {
+        ...init,
+        credentials: "same-origin",
+      });
+      const refusal = await fileRefusal(response);
+      if (refusal === "principal-changed") {
+        closing("principal-changed");
+      }
+      if (refusal === "build") {
+        void checkDeliveryNow(hold, closing);
+      }
+      return response;
+    };
     return {
       target: appTarget(
         bundle,
@@ -1270,21 +1320,19 @@ export const appScreen = (
         app,
         lease: bundle.lease,
         person: async () => await link.person(),
-        fetch: async (path, init) => {
-          const response = await fetch(path, {
-            ...init,
-            credentials: "same-origin",
-          });
-          const refusal = await fileRefusal(response);
-          if (refusal === "principal-changed") {
-            closing("principal-changed");
-          }
-          if (refusal === "build") {
-            void checkDeliveryNow(hold, closing);
-          }
-          return response;
-        },
+        fetch: coreFetch,
       }),
+      // Core's link channel likewise; the person confirms in the page's
+      // own dialog (screen-links.ts).
+      links: {
+        channel: linkChannel({
+          app,
+          lease: bundle.lease,
+          person: async () => await link.person(),
+          fetch: coreFetch,
+        }),
+        confirm: confirmLink,
+      },
       running: (setState) => {
         const { version } = bundle;
         const check = async (): Promise<void> => {
@@ -1344,6 +1392,7 @@ export const runScreen = (
   onState: (state: ScreenState) => void,
   onOpened: (appName: string) => void,
   confirm: ConfirmDecision,
+  confirmLink: ConfirmLink,
   opening: ScreenOpening
 ): (() => void) => {
   // A screen refused or stopped for access (the person's, or its build's)
@@ -1368,7 +1417,7 @@ export const runScreen = (
   return runFrame(
     frame,
     {
-      ...appScreen(app, screen, confirm, opening),
+      ...appScreen(app, screen, confirm, confirmLink, opening),
       join: (onEnded) => tabLink(core, onEnded),
     },
     stateOf,

@@ -189,7 +189,16 @@ const ownerRelease = async (
     .from(businessStores)
     .innerJoin(sdkStoreOwners, eq(sdkStoreOwners.storeId, businessStores.id))
     .innerJoin(apps, eq(apps.id, sdkStoreOwners.appId))
-    .where(and(eq(businessStores.id, id), isNull(businessStores.deletedAt)))
+    .where(
+      and(
+        eq(businessStores.id, id),
+        isNull(businessStores.deletedAt),
+        // Only a published App runs its store's operations for others: an
+        // archived one runs none, and a draft's code runs for its builders
+        // alone (app-status.ts).
+        eq(apps.status, "published")
+      )
+    )
     .get();
   const owner = appIdSchema.safeParse(row?.owner);
   if (row?.version === null || row === undefined || !owner.success) {

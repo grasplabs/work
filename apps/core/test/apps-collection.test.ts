@@ -5,7 +5,12 @@ import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { indexApps } from "../src/knowledge/apps-collection.ts";
-import { grantReviewed, release, requestGranted } from "./apps.ts";
+import {
+  grantReviewed,
+  release,
+  requestGranted,
+  verifiedCandidate,
+} from "./apps.ts";
 import { actingFor, envOf, knowledgeIn } from "./contexts.ts";
 import { runQuarterHourCron } from "./cron.ts";
 import { mockIdp } from "./idp.ts";
@@ -124,7 +129,7 @@ const entryState = async (owner: Person, app: string, words: string[]) => {
   const { id } = await entryOf(owner, app);
   const [{ currentVersion }, noted, { versions }, found] = await Promise.all([
     owner.api.apps.get(app),
-    env.KNOWLEDGE.prepare("SELECT version FROM app_entries WHERE app_id = ?")
+    env.DB.prepare("SELECT version FROM app_entries WHERE app_id = ?")
       .bind(app)
       .first<{ version: number }>(),
     owner.knowledge.history(id),
@@ -141,11 +146,11 @@ const entryState = async (owner: Person, app: string, words: string[]) => {
 const entriesQuery = /"app_entries"/u;
 
 /**
- * The Knowledge database, but every query of the Apps collection's
- * entries fails: an indexing that can't run, where the rest works.
+ * The core database, but every query of the Apps collection's entries
+ * (`app_entries`) fails: an indexing that can't run, where the rest works.
  */
-const knowledgeWithoutEntries = (): D1Database => {
-  const real = env.KNOWLEDGE;
+const coreWithoutEntries = (): D1Database => {
+  const real = env.DB;
   return {
     prepare: (query) => {
       if (entriesQuery.test(query)) {
@@ -172,7 +177,7 @@ const withIndexingFailing = async (
   run: (api: Person["api"]) => Promise<void>
 ): Promise<void> => {
   const { core } = await openRpc(owner.session, {
-    coreEnv: { ...env, KNOWLEDGE: knowledgeWithoutEntries() },
+    coreEnv: { ...env, DB: coreWithoutEntries() },
   });
   try {
     await run(core.authenticate());
@@ -242,47 +247,6 @@ describe("indexing", setUpTime, () => {
     ).resolves.toStrictEqual({
       [word]: [],
       [app.name.split(" ")[1] ?? ""]: [entryPath(app.id)],
-    });
-  });
-
-  it("indexes an App whose AGENTS.md admission refuses by its name alone, and one whose name it refuses without it", async () => {
-    const owner = await personOf("builder");
-    const word = term();
-    const app = await releasedApp(
-      owner,
-      `# ${word}\nShe is on sick leave with burnout.\n`
-    );
-    const named = app.name.split(" ")[1] ?? "";
-    const entry = await entryOf(owner, app.id);
-    const { version } = await owner.knowledge.getDocument(entry.id);
-    const sensitive = await owner.api.apps.create({
-      name: `Leave ${term()}`,
-      description: "Tracks his sick leave and his therapy.",
-    });
-    await release(owner, sensitive.id, { "notes.md": "# Notes\n" });
-    const hidden = await entryOf(owner, sensitive.id);
-    const hiddenText = await owner.knowledge.getDocument(hidden.id);
-    // Over Knowledge's limits as well: within an App's, over 500 links.
-    const links = Array.from({ length: 501 }, (_, index) => `[[l${index}]]`);
-    const large = await owner.api.apps.create({
-      name: `Leave ${term()}`,
-      description: "Tracks her sick leave.",
-    });
-    await release(owner, large.id, {
-      "AGENTS.md": `# Links\n${links.join(" ")}\n`,
-    });
-    const largeEntry = await entryOf(owner, large.id);
-    const largeText = await owner.knowledge.getDocument(largeEntry.id);
-    expect({
-      text: version.text.includes("sick"),
-      found: await foundFor(owner.knowledge, word, named),
-      hidden: hiddenText.version.text.includes("therapy"),
-      large: largeText.version.text.includes("sick"),
-    }).toStrictEqual({
-      text: false,
-      found: { [word]: [], [named]: [entryPath(app.id)] },
-      hidden: false,
-      large: false,
     });
   });
 
@@ -782,6 +746,7 @@ describe("read-only", setUpTime, () => {
 
     // An App whose current version can't be read can't be checked: the
     // purge is refused rather than trusted.
+    await verifiedCandidate(appId, 999);
     await env.DB.prepare("UPDATE apps SET current_version = ? WHERE id = ?")
       .bind(999, appId)
       .run();

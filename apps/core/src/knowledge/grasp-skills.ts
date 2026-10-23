@@ -29,7 +29,7 @@ import {
   documents,
   versions,
 } from "../db/knowledge/schema.ts";
-import { allowedFor } from "./app-entries.ts";
+import { allowedFor } from "./authorize.ts";
 import { ensureCollection, requireWritable } from "./collections.ts";
 import type { CollectionRow } from "./collections.ts";
 import {
@@ -39,6 +39,7 @@ import {
   writeVersion,
 } from "./documents.ts";
 import type { Writer } from "./documents.ts";
+import { portsOf } from "./ports.ts";
 
 // Skills in two collections, both in every person's catalog, and in an
 // agent's once it is granted read of each, as for any collection (agents
@@ -263,7 +264,7 @@ export const copySkill = async (
   const db = drizzle(env.KNOWLEDGE);
   const { document, collection } = await readableDocument(
     db,
-    await allowedFor(env, db, { type: "person", person }),
+    await allowedFor(portsOf(env), { type: "person", person }),
     documentId
   );
   if (

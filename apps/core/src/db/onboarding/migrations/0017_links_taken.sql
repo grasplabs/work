@@ -1,0 +1,1 @@
+ALTER TABLE `links` ADD `taken_at` text;

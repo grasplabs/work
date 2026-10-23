@@ -725,6 +725,7 @@ const ElsewhereItem = ({ frame }: { frame: Frame }) => {
   const labels: Partial<Record<InboxSource["type"], string>> = {
     reconnect: t`Sign in again`,
     asked: t`Answer in the brain`,
+    decision: t`Review and answer`,
   };
   const label = labels[item.source.type] ?? t`Review`;
   return (

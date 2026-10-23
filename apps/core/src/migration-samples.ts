@@ -17,6 +17,7 @@ import { z } from "zod";
 import { loadRelease } from "./app-releases.ts";
 import { auditedBatch, outboxed } from "./audit-outbox.ts";
 import type { Member } from "./auth/identity.ts";
+import { requireStoreChangeable } from "./data-stores.ts";
 import { migrationSampleLeases, migrationSamples } from "./db/core/schema.ts";
 import { inJurisdiction } from "./durable-objects.ts";
 import { transformBatch } from "./migration-transform.ts";
@@ -283,6 +284,7 @@ export const sampleMigration = async (
   }
   const owned = access.read === "owner" || access.write === "owner";
   const store = storeIdSchema.parse(release.store.storeId);
+  await requireStoreChangeable(env, store);
   const token = await takeLease(env, { app, version, migration: name });
   try {
     const rows = sampledSchema.parse(

@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it } from "vite-plus/test";
 
 import {
   applySettingsFn,
+  rotateSecretsFn,
   setRingFn,
   setSignInFn,
 } from "../src/clients/functions.ts";
@@ -24,7 +25,7 @@ import {
   rollbackRingFn,
 } from "../src/rollout/functions.ts";
 import { mockAccess } from "./access.ts";
-import { mockCloudflareApi } from "./cloudflare-api.ts";
+import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { callServerFn } from "./pages.ts";
 import { publishRelease } from "./releases.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
@@ -350,6 +351,17 @@ const changes: {
     },
   },
   {
+    name: "rotating a client's secrets",
+    arrange: async () => {
+      const clientId = await recordClient(1);
+      return {
+        make: async () =>
+          await callServerFn(rotateSecretsFn, { clientId }, { email: caller }),
+        audited: { action: "client.rotate_secrets", clientId, target: null },
+      };
+    },
+  },
+  {
     name: "applying a client's settings now",
     arrange: async ({ applyRuns }) => {
       const release = await importedRelease("feat(core): applied to");
@@ -387,6 +399,8 @@ describe("the console's changes, through its entry", () => {
     "%s is audited as the staff member Access vouches for, about its client and target",
     async (_name, arrange) => {
       await using rolloutRuns = await follow(env.ROLLOUT);
+      // An approved rollout deploys its fleet clients in runs of their own.
+      await using _fleetRuns = await follow(env.ROLLOUT_CLIENT);
       await using applyRuns = await follow(env.APPLY_CLIENT);
       const { make, audited, settled } = await arrange({
         rolloutRuns,

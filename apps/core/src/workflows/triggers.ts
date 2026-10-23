@@ -188,7 +188,9 @@ export const startDueSchedules = async (
       apps,
       and(
         eq(apps.id, workflowTriggers.appId),
-        eq(apps.currentVersion, workflowTriggers.version)
+        eq(apps.currentVersion, workflowTriggers.version),
+        // Only a published App's triggers fire (app-status.ts).
+        eq(apps.status, "published")
       )
     )
     .where(

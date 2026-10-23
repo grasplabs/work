@@ -19,11 +19,12 @@ import { adminIntegrationsOf } from "./admin-integrations.ts";
 import { appendAuditEvent } from "./audit-outbox.ts";
 import { organizationId } from "./auth/auth.ts";
 import { signInConfig } from "./auth/config.ts";
+import { appsAsked } from "./catalog-requests.ts";
 import { consoleSigned } from "./console-signed.ts";
 import { errorResponse } from "./errors.ts";
 import { membersOf } from "./members.ts";
 import { gateView, staffAccessEnded } from "./onboarding/gate.ts";
-import { closesOn } from "./onboarding/rules.ts";
+import { closesOn, talkingMs } from "./onboarding/rules.ts";
 import { onboardingStore } from "./onboarding/store.ts";
 import type { AdminInterviewFacts } from "./onboarding/store.ts";
 import { readOrganization } from "./organization.ts";
@@ -55,9 +56,6 @@ import { readOrganization } from "./organization.ts";
 //   comes from connect without tokens, server URLs or anything Composio
 //   knows an account by (admin-integrations.ts), and of personal
 //   connections and chats' requests only counts by app.
-
-/** How long after its last save an interview still counts as going on. */
-const talkingMs = 15 * 60 * 1000;
 
 /**
  * Where someone stands, as the prototype's admin says it
@@ -174,8 +172,15 @@ const integrationsOf = async (
   }
 };
 
-/** Everything the admin reads of this client, from what core holds, at `now`. */
-const snapshotOf = async (env: Env, now: string): Promise<AdminSnapshot> => {
+/**
+ * Everything the admin reads of this client, from what core holds, at
+ * `now`: for the console's read below, and staff's in the onboarding area
+ * (onboarding/staff-rpc.ts). Only what the schema names may leave core.
+ */
+export const snapshotOf = async (
+  env: Env,
+  now: string
+): Promise<AdminSnapshot> => {
   const store = onboardingStore(env);
   const view = await store.view(now);
   const [
@@ -187,6 +192,7 @@ const snapshotOf = async (env: Env, now: string): Promise<AdminSnapshot> => {
     organization,
     members,
     integrations,
+    asked,
   ] = await Promise.all([
     store.adminFacts(),
     store.agreements(),
@@ -196,6 +202,7 @@ const snapshotOf = async (env: Env, now: string): Promise<AdminSnapshot> => {
     readOrganization(env),
     membersOf(env),
     integrationsOf(env),
+    appsAsked(env),
   ]);
   const config = signInConfig(env);
   const sent = new Map(facts.links.map((link) => [link.person, link]));
@@ -247,6 +254,7 @@ const snapshotOf = async (env: Env, now: string): Promise<AdminSnapshot> => {
     contract: null,
     members,
     integrations,
+    asked,
     usage: usageOf(usage),
   };
 };

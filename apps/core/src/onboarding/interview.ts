@@ -420,6 +420,11 @@ export interface TurnInput {
   ctx: Pick<ExecutionContext, "waitUntil">;
   /** Counts what each call took. */
   meter: (took: Took) => Promise<void>;
+  /**
+   * Keeps what the turn ran on, for the staff's numbers: the mark of the
+   * text that speaks. A link's turn has one; the Stephen Lab's has none.
+   */
+  ran?: (mark: string) => Promise<void>;
 }
 
 /**
@@ -435,6 +440,7 @@ export const turnStream = async ({
   requestId,
   ctx,
   meter,
+  ran,
 }: TurnInput): Promise<Response> => {
   const settings = gatewaySettings(env);
   const quick = modelForRole(settings, "quick", { sensitive: true });
@@ -446,12 +452,12 @@ export const turnStream = async ({
       { status: 503, headers: linkHeaders }
     );
   }
-  const [{ text: system }, name] = await Promise.all([
+  const [{ text: system, mark }, name] = await Promise.all([
     interviewerText(turn.interviewer, context.kind, turn.locale),
     company,
   ]);
   const cut = new AbortController();
-  const counting: Promise<void>[] = [];
+  const counting: Promise<void>[] = ran === undefined ? [] : [ran(mark)];
   const count = (took: Took | null) => {
     if (took !== null) {
       counting.push(meter(took));
@@ -545,9 +551,18 @@ export const interviewTurnResponse = async (
     return linkRefusal("interview.invalid", requestId);
   }
   const turn = parsed.data;
+  // The text for either kind of interview: the store keeps the mark of the
+  // one this turn is held with, once it knows which kind it is.
+  const [own, lead] = await Promise.all([
+    interviewerText(turn.interviewer, "own", turn.locale),
+    interviewerText(turn.interviewer, "lead", turn.locale),
+  ]);
+  const secretMark = await sha256Hex(turn.secret);
   const found = await onboardingStore(env).turnContext(
-    await sha256Hex(turn.secret),
-    await sha256Hex(turn.key)
+    secretMark,
+    await sha256Hex(turn.key),
+    new Date().toISOString(),
+    { own: own.mark, lead: lead.mark }
   );
   if (!found.ok) {
     if (found.code === "interview.link_invalid") {
@@ -565,6 +580,13 @@ export const interviewTurnResponse = async (
     ctx,
     meter: async (took) => {
       await store.meter(took);
+    },
+    ran: async (mark) => {
+      await store.turnRan(
+        secretMark,
+        { mark, interviewer: turn.interviewer, locale: turn.locale },
+        turn.waited
+      );
     },
   });
 };

@@ -4,7 +4,7 @@ import type { AuditEvent } from "@grasp-os/shared/audit";
 import { applyOutput } from "@grasp-os/shared/chat";
 import type { ChatOutput, ChatUpdate } from "@grasp-os/shared/chat";
 import type { WorkspaceId } from "@grasp-os/shared/ids";
-import { chatIdSchema } from "@grasp-os/shared/ids";
+import { chatIdSchema, workspaceIdSchema } from "@grasp-os/shared/ids";
 import { memoryMaxLimit } from "@grasp-os/shared/memory";
 import { modelErrors } from "@grasp-os/shared/models";
 import { permissionErrors } from "@grasp-os/shared/permissions";
@@ -60,11 +60,12 @@ import { signedInApi, signedInWithRole } from "./sign-in.ts";
 const idp = mockIdp();
 
 /**
- * Models of different context windows, as pi's catalog gives them: the
- * tests' own, of 1,000,000 tokens, one of 200,000 and one of 24,000. Each
- * request keeps 16,384 of them for the answer, or a quarter of a window
- * too small for that (6,000 of the 24,000).
+ * Models of different context windows, as pi's catalog gives them: one of
+ * 1,000,000 tokens, one of 200,000 and one of 24,000. Each request keeps
+ * 16,384 of them for the answer, or a quarter of a window too small for that
+ * (6,000 of the 24,000).
  */
+const largeModel = "anthropic/claude-sonnet-5-5";
 const smallModel = "anthropic/claude-haiku-4-5";
 const tinyModel = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 const answerTokens = 16_384;
@@ -76,7 +77,7 @@ const inputTokens = {
 /** A deployment that allows them all. */
 const bothModels = {
   ...gatewayConfig,
-  models: [model, smallModel, tinyModel],
+  models: [model, largeModel, smallModel, tinyModel],
 };
 
 /**
@@ -343,6 +344,33 @@ describe("chat agent", () => {
     ]);
     // Metadata only: never the question or the code.
     expect(JSON.stringify(events)).not.toContain("1 + 1");
+  });
+
+  it("names the chat platform a chat came through in the audit of its turns", async () => {
+    const { userId } = await signedInWithRole(idp, "user");
+    const id = workspaceIdSchema.parse(crypto.randomUUID());
+    const stub = workspace(env, id);
+    const chat = await stub.createChat(
+      "Questions",
+      userId,
+      id,
+      undefined,
+      undefined,
+      undefined,
+      "teams"
+    );
+    await pointAtGateway(stub, fakeGateway(says("Hello.")));
+
+    await stub.ask(chat.id, { text: "Hi.", model });
+
+    const [event] = await modelCallsBy(userId, 1);
+    expect(chat.via).toBe("teams");
+    expect(event?.actor).toStrictEqual({
+      type: "agent",
+      agentId: id,
+      onBehalfOf: userId,
+      via: "teams",
+    });
   });
 
   it("hands what the code throws back to the model, which goes on", async () => {
@@ -1163,7 +1191,7 @@ describe("chat agent turns", () => {
     };
 
     const small = await sentTo(smallModel, "And now?", "Still here.");
-    const large = await sentTo(model, "And again?", "All here.");
+    const large = await sentTo(largeModel, "And again?", "All here.");
 
     expect({
       small: { ...small, chars: undefined },
@@ -2293,6 +2321,60 @@ describe("chat agent code output", () => {
             outcome: "refused",
             reason: "agent.revocation_read_failed",
           },
+        ]);
+      },
+      { timeout: 10_000, interval: 100 }
+    );
+  });
+
+  it("names the chat platform a chat came through in the record of a run's output it withheld", async () => {
+    const { userId } = await signedInWithRole(idp, "user");
+    const id = workspaceIdSchema.parse(crypto.randomUUID());
+    const stub = workspace(env, id);
+    const chat = await stub.createChat(
+      "Questions",
+      userId,
+      id,
+      undefined,
+      undefined,
+      undefined,
+      "teams"
+    );
+    await pointAtGateway(
+      stub,
+      fakeGateway(
+        codeStep(
+          "export default async () => { console.log('read'); await scheduler.wait(1_500); return 'secret'; };"
+        ),
+        says("Done.")
+      )
+    );
+
+    await withRevocationReads(
+      stub,
+      async () => {
+        await Promise.resolve();
+        throw new Error("D1 is down for a moment");
+      },
+      async () => {
+        await stub.ask(chat.id, { text: "Log it.", model });
+      }
+    );
+
+    await vi.waitFor(
+      async () => {
+        const events = await allEvents();
+        expect(
+          events
+            .filter(
+              ({ action, detail }) =>
+                action === "agent.call" &&
+                detail.chat === chat.id &&
+                detail.method === "output"
+            )
+            .map(({ actor }) => actor)
+        ).toStrictEqual([
+          { type: "agent", agentId: id, onBehalfOf: userId, via: "teams" },
         ]);
       },
       { timeout: 10_000, interval: 100 }

@@ -1,7 +1,18 @@
 import { z } from "zod";
 
 import { auditProvenanceMaxItems } from "./audit.ts";
-import type { MemoryPack, RecallInput } from "./brain-api.ts";
+import type {
+  CommandOptions,
+  CommandReceipt,
+  MemoriesGetInput,
+  MemoriesListInput,
+  MemoryPack,
+  MemoryPage,
+  MemoryRecord,
+  ReceiptsGetInput,
+  RecallInput,
+  RememberInput,
+} from "./brain-api.ts";
 import { defineErrorFamily } from "./errors.ts";
 import {
   collectionIdSchema,
@@ -795,11 +806,12 @@ export interface PurgePlan {
    */
   inLongerWords: number;
   /**
-   * Answers to the brain's gaps a term is removed from (`content`), every
-   * one holding a term, whatever documents are named. Always 0 for
-   * `personal`, which forgets the person as an answerer instead.
+   * Copies the host keeps outside Knowledge a term is removed from
+   * (`content`; core's: the brain's gap answers), every one holding a
+   * term, whatever documents are named. Always 0 for `personal`, which
+   * forgets the person as their author instead.
    */
-  gapAnswers: number;
+  hostCopies: number;
   /**
    * Originals of uploaded files it deletes (and the uploads it forgets):
    * those of the collection (`personal`), or every one uploaded as a
@@ -874,6 +886,21 @@ export interface KnowledgeApi {
    * collections the person may read, as a bounded memory pack.
    */
   recall: (input: RecallInput) => Promise<MemoryPack>;
+  /**
+   * Asks the Brain to remember something of the person's own (brain-api.ts):
+   * retry with the same key after a lost reply. Admitted, it is kept as a
+   * proposed record; refused by admission, only its receipt is kept.
+   */
+  remember: (
+    input: RememberInput,
+    options: CommandOptions
+  ) => Promise<CommandReceipt>;
+  /** A remember's receipt, recovered after a lost reply. */
+  receiptsGet: (input: ReceiptsGetInput) => Promise<CommandReceipt>;
+  /** One of the person's own Brain memory records. */
+  memoriesGet: (input: MemoriesGetInput) => Promise<MemoryRecord>;
+  /** The person's own Brain memory records, newest first, a page at a time. */
+  memoriesList: (input?: MemoriesListInput) => Promise<MemoryPage>;
   /** The collections the person may read and their skills, as an agent's. */
   catalog: KnowledgeTools["catalog"];
   /** A document, or one section of it. */
@@ -964,10 +991,6 @@ export const knowledgeErrors = defineErrorFamily({
     "This document has too many headings to save. Split it into several documents.",
   "knowledge.too_many_links":
     "This document has too many links to save. Split it into several documents.",
-  "knowledge.excluded":
-    "This wasn't saved: it contains sensitive personal data, such as someone's health, pay or beliefs, which Grasp doesn't keep. Remove it and save again.",
-  "knowledge.held":
-    "This wasn't saved: it may contain sensitive personal data, such as someone's health, pay or beliefs, which Grasp doesn't keep. Remove it and save again.",
   "knowledge.conflict":
     "This document changed since you opened it. Load the latest version and apply your change to it.",
   "knowledge.purge_expired":

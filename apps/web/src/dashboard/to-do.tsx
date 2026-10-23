@@ -1,4 +1,5 @@
 import type { PendingAction, UnknownOutcome } from "@grasp-os/shared/connect";
+import type { DecisionView } from "@grasp-os/shared/decisions";
 import type { DependenciesWaiting } from "@grasp-os/shared/dependencies";
 import { isMemberAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
@@ -52,6 +53,8 @@ export interface Waiting {
   dependencies: Loaded<DependenciesWaiting>;
   /** Engines with apps whose code waits for approval. Admins only. */
   screens: Loaded<ScreensWaiting[]> | undefined;
+  /** Decisions of workflows' runs that wait for the person's answer. */
+  decisions: Loaded<DecisionView[]>;
 }
 
 /** Who counts what waits: what they may act on follows from their role. */

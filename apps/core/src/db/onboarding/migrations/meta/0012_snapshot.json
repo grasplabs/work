@@ -1,9 +1,48 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "d66f3da3-ea1c-454f-8c35-c5c0eb09e768",
-  "prevId": "524b9380-8232-4e27-8031-d8cb90d04910",
+  "id": "4e34a57b-ab4d-43a5-9dc4-84a75f840f12",
+  "prevId": "88a1ced4-de7b-4e31-95fd-cc1b0a575790",
   "tables": {
+    "answer_waits": {
+      "name": "answer_waits",
+      "columns": {
+        "day": {
+          "name": "day",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "up_to": {
+          "name": "up_to",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "answers": {
+          "name": "answers",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "answer_waits_day_up_to_pk": {
+          "columns": [
+            "day",
+            "up_to"
+          ],
+          "name": "answer_waits_day_up_to_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
     "asked_about": {
       "name": "asked_about",
       "columns": {
@@ -173,44 +212,6 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "drawn_works": {
-      "name": "drawn_works",
-      "columns": {
-        "work": {
-          "name": "work",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "drawn": {
-          "name": "drawn",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "agreed": {
-          "name": "agreed",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "at": {
-          "name": "at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
     "events": {
       "name": "events",
       "columns": {
@@ -247,6 +248,44 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "interview_settings": {
+      "name": "interview_settings",
+      "columns": {
+        "person": {
+          "name": "person",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "mark": {
+          "name": "mark",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "interviewer": {
+          "name": "interviewer",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "locale": {
+          "name": "locale",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
           "autoincrement": false
         }
       },

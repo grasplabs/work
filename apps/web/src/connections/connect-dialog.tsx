@@ -85,6 +85,22 @@ export const canReconnect = (
   (connection.scope === "personal" || isAdmin(identity.role)) &&
   !identity.staff;
 
+/**
+ * The connection an integration's page offers to sign in to again: the
+ * first whose access ran out that this person may sign in to again. An
+ * active one has nothing to sign in to again: connect refuses it as
+ * already connected.
+ */
+export const signInAgainTarget = (
+  integration: Integration,
+  identity: Pick<Identity, "role" | "staff">
+): ListedConnection | undefined =>
+  integration.connections.find(
+    (connection) =>
+      connection.status === "needs_reauth" &&
+      canReconnect(connection, integration.offered, identity)
+  );
+
 /** A step: its number in a ring, its title, and what it asks. */
 const Step = ({
   n,
@@ -246,11 +262,13 @@ const NativeFlow = ({
   integration,
   identity,
   again,
+  returnTo,
 }: {
   integration: Integration;
   identity: Identity;
   /** The connection to sign in to again, keeping its scope. */
   again: ListedConnection | undefined;
+  returnTo: string;
 }) => {
   const { busy, failure, run } = useCoreAction();
   const { t } = useLingui();
@@ -269,7 +287,7 @@ const NativeFlow = ({
           await session.connections.start({
             provider: provider.data,
             scope,
-            returnTo: returnToOf(integration.key),
+            returnTo,
           })
       )
     );
@@ -317,7 +335,13 @@ const NativeFlow = ({
  * waits for its person to confirm it wherever a person is there (chat, an
  * App they use), and which a workflow's run makes as a step.
  */
-const ComposioFlow = ({ integration }: { integration: Integration }) => {
+const ComposioFlow = ({
+  integration,
+  returnTo,
+}: {
+  integration: Integration;
+  returnTo: string;
+}) => {
   const { busy, failure, run } = useCoreAction();
   const core = useCore();
   const [listed, setListed] = useState<Loaded<CatalogTool[]>>();
@@ -351,7 +375,7 @@ const ComposioFlow = ({ integration }: { integration: Integration }) => {
             toolkit: integration.id,
             tools: toolRules(allowed),
             consent: composioConsentText,
-            returnTo: returnToOf(integration.key),
+            returnTo,
           })
       )
     );
@@ -420,18 +444,21 @@ const ComposioFlow = ({ integration }: { integration: Integration }) => {
 
 /**
  * The dialog: connecting `integration`, or signing in again to `again`.
- * Open only for someone `canConnect` or `canReconnect` allows.
+ * Open only for someone `canConnect` or `canReconnect` allows. The flow
+ * sends the browser back to `returnTo`: by default the integration's page.
  */
 export const ConnectDialog = ({
   integration,
   identity,
   again,
+  returnTo,
   open,
   onOpenChange,
 }: {
   integration: Integration;
   identity: Identity;
   again?: ListedConnection;
+  returnTo?: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) => {
@@ -464,10 +491,14 @@ export const ConnectDialog = ({
             again={again}
             identity={identity}
             integration={integration}
+            returnTo={returnTo ?? returnToOf(integration.key)}
           />
         ) : null}
         {open && integration.source === "composio" ? (
-          <ComposioFlow integration={integration} />
+          <ComposioFlow
+            integration={integration}
+            returnTo={returnTo ?? returnToOf(integration.key)}
+          />
         ) : null}
       </DialogContent>
     </Dialog>

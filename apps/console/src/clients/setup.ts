@@ -27,6 +27,7 @@ import { getProvisioning } from "../provision/queries.ts";
 import type { ProvisioningView } from "../provision/queries.ts";
 import { listReleases } from "../releases/queries.ts";
 import { clientHistory, clientSettings } from "./queries.ts";
+import type { HistoryEntry } from "./queries.ts";
 
 /** How many of a client's deploys the section lists: the latest. */
 export const setupDeployLimit = 20;
@@ -116,6 +117,12 @@ export interface ClientSetup {
   } | null;
   /** What staff did to it by hand, the newest first. */
   done: SetupEvent[];
+  /**
+   * Everything the audit log keeps of it, the newest first: staff's
+   * changes and its provisioning, deploys and rollouts, the latest
+   * `historyLimit` (src/clients/queries.ts).
+   */
+  history: HistoryEntry[];
 }
 
 /** What staff do to a client by hand, as its audit log names it. */
@@ -130,6 +137,8 @@ const byHand: ReadonlySet<string> = new Set([
   "client.sign_in",
   "client.apply_settings",
   "client.stripe_customer",
+  "client.rooms_project",
+  "client.attio_company",
 ]);
 
 const deploysOf = async (
@@ -283,5 +292,6 @@ export const getClientSetup = async (
     done: history.filter(
       ({ actor, action }) => actor !== "system" && byHand.has(action)
     ),
+    history,
   };
 };

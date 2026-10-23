@@ -5,14 +5,16 @@ import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowErrors } from "@grasp-os/shared/workflows";
 import type { RunControl, WorkflowRun } from "@grasp-os/shared/workflows";
 import type { InstanceStatus } from "@grasp-os/workerflow/contracts";
-import { and, asc, eq, inArray, isNull, lt, lte, sql } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, isNull, lt, lte, sql } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { appFor } from "../apps.ts";
 import { auditedBatch, outboxedEventWhere } from "../audit-outbox.ts";
-import { workflowRunControls, workflowRuns } from "../db/core/schema.ts";
+import { apps, workflowRunControls, workflowRuns } from "../db/core/schema.ts";
 import { markRunCancelled, runEngine, settleRunCancel } from "./engine.ts";
+import { stopRetryMs, stopRunsStartedBy } from "./resource-runs.ts";
 import {
   endedLive,
   findRun,
@@ -64,6 +66,9 @@ type ControlRow = typeof workflowRunControls.$inferSelect;
 export type ControlKind = RunControl["kind"];
 
 const controlKindSchema = z.enum(["pause", "resume", "cancel"]);
+
+/** Who asks for a control, as its receipt and audit event name them. */
+type Requester = Pick<Identity, "userId" | "staff">;
 
 /** A receipt as its callers see it. */
 const toControl = ({ id, kind, state }: ControlRow): RunControl => ({
@@ -172,7 +177,7 @@ const admissionOf = (
  */
 const writeReceipt = async (
   env: Env,
-  by: Identity,
+  by: Requester,
   row: RunRow,
   kind: ControlKind,
   done: boolean,
@@ -429,7 +434,7 @@ export const settleControls = async (
  */
 const control = async (
   env: Env,
-  by: Identity,
+  by: Requester,
   run: RunRow,
   kind: ControlKind,
   via?: "screen"
@@ -627,4 +632,136 @@ export const repairControls = async (env: Env): Promise<void> => {
       }
     })
   );
+};
+
+/** Most runs of archived Apps one pass cancels (`cancelArchivedRuns`). */
+const archivedRunsPerPass = 50;
+
+/**
+ * Cancels the unfinished runs of the archived App `app`, for `by`, who
+ * archived it (app-status.ts), at most `limit` of them, oldest first: each
+ * as a builder's cancel is, audited. A run whose cancel fails is logged
+ * and left to `cancelArchivedRuns`. Answers how many it asked to cancel,
+ * and the runs whose cancel failed.
+ */
+export const cancelRunsOf = async (
+  env: Env,
+  by: Requester,
+  app: string,
+  /** When it was archived: runs started later belong to no archive. */
+  archivedAt: Date,
+  limit = archivedRunsPerPass
+): Promise<{ asked: number; failed: string[] }> => {
+  const rows = await drizzle(env.DB)
+    .select()
+    .from(workflowRuns)
+    .where(
+      and(
+        eq(workflowRuns.appId, app),
+        inArray(workflowRuns.status, unended),
+        // A run asked to cancel already is the engine's to end.
+        isNull(workflowRuns.cancelRequestedAt),
+        lte(workflowRuns.createdAt, archivedAt),
+        // Only while the App is archived: a restored App's runs are its
+        // own again, whoever asks.
+        sql`EXISTS (SELECT 1 FROM ${apps} WHERE ${apps.id} = ${app} AND ${apps.status} = 'archived')`
+      )
+    )
+    .orderBy(asc(workflowRuns.createdAt), asc(workflowRuns.id))
+    .limit(limit);
+  const failed = await Promise.all(
+    rows.map(async (row): Promise<boolean> => {
+      try {
+        await control(env, by, row, "cancel");
+        return false;
+      } catch (error) {
+        log.error("workflow.archive_cancel_failed", {
+          runId: row.id,
+          appId: app,
+          ...errorFields(error),
+        });
+        return true;
+      }
+    })
+  );
+  // And the independent runs the App started, from its screens or its
+  // code, within what is left of the limit: archived, the App acts on
+  // nobody's behalf any more.
+  const started = await stopRunsStartedBy(
+    env,
+    actorOf(by),
+    app,
+    archivedAt,
+    limit - rows.length
+  );
+  return {
+    asked: rows.length + started.asked,
+    failed: [
+      ...rows.flatMap((row, at) => (failed[at] === true ? [row.id] : [])),
+      ...started.failed,
+    ],
+  };
+};
+
+/**
+ * Cancels, a few at a time, the unfinished runs of Apps that are archived:
+ * those archiving left (more than one call cancels, or a cancel that
+ * failed), and a run whose start raced the archive. Each is cancelled for
+ * whoever archived its App, or its owner. The cron trigger runs it every
+ * minute.
+ */
+export const cancelArchivedRuns = async (
+  env: Env,
+  from: string = crypto.randomUUID()
+): Promise<void> => {
+  // Archived Apps with a run of their own left to cancel, or an
+  // independent run they started left to stop: in ID order from a random
+  // ID (`from`), wrapping round, so Apps whose cancels keep failing can't
+  // hold every pass's budget, and every one is reached in time.
+  const slice = async (side: SQL, limit: number) =>
+    await drizzle(env.DB)
+      .select({
+        app: apps.id,
+        owner: apps.ownerId,
+        by: apps.statusChangedBy,
+        at: apps.statusChangedAt,
+      })
+      .from(apps)
+      .where(
+        and(
+          eq(apps.status, "archived"),
+          sql`(EXISTS (SELECT 1 FROM ${workflowRuns} WHERE ${workflowRuns.appId} = ${apps.id} AND ${workflowRuns.status} IN ('starting', 'running', 'paused') AND ${workflowRuns.cancelRequestedAt} IS NULL) OR EXISTS (SELECT 1 FROM workflow_resource_runs r JOIN workflow_start_receipts s ON s.id = r.id WHERE s.invoker_type = 'app' AND s.invoker_id = ${apps.id} AND r.status IN ('starting', 'running') AND (r.stop_requested_at IS NULL OR r.stop_requested_at <= ${Date.now() - stopRetryMs})))`,
+          side
+        )
+      )
+      .orderBy(asc(apps.id))
+      .limit(limit);
+  const onward = await slice(gte(apps.id, from), archivedRunsPerPass);
+  const rows =
+    onward.length < archivedRunsPerPass
+      ? [
+          ...onward,
+          ...(await slice(
+            lt(apps.id, from),
+            archivedRunsPerPass - onward.length
+          )),
+        ]
+      : onward;
+  // One budget for the whole pass, whatever the number of Apps.
+  let left = archivedRunsPerPass;
+  for (const { app, owner, by, at } of rows) {
+    if (left <= 0) {
+      break;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- one App at a time
+    const { asked } = await cancelRunsOf(
+      env,
+      by ?? { userId: owner, staff: false },
+      app,
+      // Archived now: every run of it, a run that raced the archive too.
+      new Date(Math.max(Date.now(), at?.getTime() ?? 0)),
+      left
+    );
+    left -= asked;
+  }
 };

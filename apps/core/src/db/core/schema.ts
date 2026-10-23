@@ -1,8 +1,13 @@
+import { candidateStates } from "@grasp-os/shared/apps";
 import type { AgentProposer, AppExports } from "@grasp-os/shared/apps";
 import { auditRejectReasons } from "@grasp-os/shared/audit";
 import type { DependencySummary } from "@grasp-os/shared/dependencies";
 import type { Json } from "@grasp-os/shared/json";
-import type { DeclaredPermission } from "@grasp-os/shared/permissions";
+import { knowledgeSignalKinds } from "@grasp-os/shared/knowledge-signals";
+import type {
+  BlueprintWorkflow,
+  DeclaredPermission,
+} from "@grasp-os/shared/permissions";
 import { artifactDecisions } from "@grasp-os/shared/screen-trust";
 import { signalKinds } from "@grasp-os/shared/signals";
 import type {
@@ -32,6 +37,23 @@ import {
 } from "drizzle-orm/sqlite-core";
 
 const timestamp = (name: string) => integer(name, { mode: "timestamp_ms" });
+
+/**
+ * The oldest migration whose code still runs on this database's schema,
+ * which each release declares (scripts/release): the console won't put
+ * the code of a release whose newest migration is older on it, by a
+ * rollback or a deploy.
+ *
+ * Migrations expand, then contract in a later release (AGENTS.md), so the
+ * code of the release before keeps working on a new schema, and a
+ * migration that only expands leaves this where it is. One that drops or
+ * renames what older code still uses raises it: to the migration of the
+ * first release whose code no longer used it, or, when the code stopped
+ * in the same release, to that migration's own number.
+ *
+ * 0120 dropped `admission_topics` in the release that stopped using it.
+ */
+export const compatibleFromMigration = 120;
 
 /** A person. Found by their IdP account, never by email alone. */
 export const users = sqliteTable("users", {
@@ -415,6 +437,19 @@ export const apps = sqliteTable("apps", {
   blueprint: text(),
   currentVersion: integer("current_version"),
   pendingVersion: integer("pending_version"),
+  /**
+   * Where it is in its life (app-status.ts): a new App is a draft, open to
+   * its builders alone, until one publishes it.
+   */
+  status: text({ enum: ["draft", "published", "archived"] })
+    .notNull()
+    .default("draft"),
+  /** When its status last changed, and who changed it; null until then. */
+  statusChangedAt: timestamp("status_changed_at"),
+  statusChangedBy: text("status_changed_by", { mode: "json" }).$type<{
+    userId: string;
+    staff: boolean;
+  }>(),
   createdAt: timestamp("created_at").notNull(),
 });
 
@@ -567,6 +602,28 @@ export const blueprints = sqliteTable(
      * each waiting for an admin there.
      */
     permissions: text({ mode: "json" }).$type<DeclaredPermission[]>().notNull(),
+    /**
+     * The independent workflows each App created from it gets (JSON,
+     * `BlueprintWorkflow[]`): a built-in's, from the release; a marked
+     * version ships none.
+     */
+    workflows: text({ mode: "json" })
+      .$type<BlueprintWorkflow[]>()
+      .notNull()
+      .default([]),
+    /**
+     * The code a built-in's release vouches for (`codeIdentity`, apps.ts):
+     * reviewed with the platform, so a copy whose version is exactly this
+     * code gets its screens' builds approved by the release (screen-
+     * builds.ts). Null for a marked version, which vouches for nothing.
+     */
+    attestedCode: text("attested_code"),
+    /**
+     * The compiler and kit (`compilerVersion`) the release vouches for
+     * `attested_code` with: a build with any other is approved by an
+     * admin, as any build. Null for a marked version.
+     */
+    attestedRelease: text("attested_release"),
     /** Who marked it; null for a built-in. */
     markedBy: text("marked_by"),
     /** When it was marked, or last installed changed. */
@@ -576,6 +633,27 @@ export const blueprints = sqliteTable(
     uniqueIndex("blueprints_app_version_idx").on(table.appId, table.version),
   ]
 );
+
+/**
+ * Where an App created from a blueprint came from (src/app-blueprints.ts):
+ * the blueprint, the version of its App a marked one was (null for a
+ * built-in), the tree it was copied from, and that tree's code
+ * (`codeIdentity`), stored under the App as a version's tree is, for an
+ * update to be merged over. Written only in the batch that creates the
+ * App from the blueprint: unlike `apps.blueprint`, a label a creator may
+ * give any App, this is core's record, which the release's vouching for a
+ * built-in's code reads.
+ */
+export const appOrigins = sqliteTable("app_origins", {
+  appId: text("app_id")
+    .primaryKey()
+    .references(() => apps.id),
+  blueprintId: text("blueprint_id").notNull(),
+  blueprintVersion: integer("blueprint_version"),
+  tree: text().notNull(),
+  code: text().notNull(),
+  createdAt: timestamp("created_at").notNull(),
+});
 
 /**
  * Every committed version of an App, never changed or deleted. `tree` is
@@ -592,6 +670,12 @@ export const appVersions = sqliteTable(
     version: integer().notNull(),
     parent: integer(),
     tree: text().notNull(),
+    /**
+     * The hash of the version's code (`codeIdentity`, apps.ts): its files
+     * but AGENTS.md, which agents write and nothing builds or runs. Null
+     * for a version committed before the column, which is no blueprint's.
+     */
+    code: text(),
     files: integer().notNull(),
     authorId: text("author_id").notNull(),
     message: text().notNull(),
@@ -657,6 +741,68 @@ export const appVersions = sqliteTable(
   },
   (table) => [primaryKey({ columns: [table.appId, table.version] })]
 );
+
+/**
+ * Candidates: one frozen version of an App on its way to being made
+ * current (spec 22.1, src/app-candidates.ts). A candidate pins the
+ * version, its source tree and the version it expects to replace
+ * (`based_on`, 0 for an App with none current), and moves forward
+ * through its states only (`candidateStates`), each move a compare and
+ * set on its state and, while it runs, on the lease of whoever runs it.
+ * Triggers keep what it pins and the moves it may make (migration 0126).
+ */
+export const appCandidates = sqliteTable(
+  "app_candidates",
+  {
+    id: text().primaryKey(),
+    appId: text("app_id")
+      .notNull()
+      .references(() => apps.id),
+    version: integer().notNull(),
+    sourceTree: text("source_tree").notNull(),
+    basedOn: integer("based_on").notNull(),
+    /** The candidate this one repairs, if it does. */
+    previousCandidate: text("previous_candidate"),
+    state: text({ enum: candidateStates }).notNull(),
+    /** How many runs claimed it, the one running included. */
+    attempt: integer().notNull().default(0),
+    /** Whose run holds it, and until when; null while none does. */
+    lease: text(),
+    leaseUntil: timestamp("lease_until"),
+    /** The code of what ended it, for an outcome. */
+    outcome: text(),
+    /** Its report's SHA-256, once verified (`app_candidate_reports`). */
+    reportHash: text("report_hash"),
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at").notNull(),
+    updatedAt: timestamp("updated_at").notNull(),
+  },
+  (table) => [
+    // One open candidate per version and the version it would replace:
+    // freezing it again finds this one.
+    uniqueIndex("app_candidates_open_idx")
+      .on(table.appId, table.version, table.basedOn)
+      .where(
+        sql`${table.state} IN ('frozen', 'checking', 'building', 'verifying', 'verified')`
+      ),
+    // An App's candidates, newest first, and those a commit supersedes.
+    index("app_candidates_app_idx").on(table.appId, table.createdAt),
+  ]
+);
+
+/**
+ * A verified candidate's report (spec 22.2, step 11): canonical text
+ * holding only identities and hashes core itself computed, stored once
+ * with its SHA-256. Never updated or deleted (migration 0126).
+ */
+export const appCandidateReports = sqliteTable("app_candidate_reports", {
+  candidateId: text("candidate_id")
+    .primaryKey()
+    .references(() => appCandidates.id),
+  report: text().notNull(),
+  hash: text().notNull(),
+  createdAt: timestamp("created_at").notNull(),
+});
 
 /**
  * The sealed release of an App version of spec 8's layout (spec 16;
@@ -981,6 +1127,60 @@ export const screenSubmissions = sqliteTable(
       sql`${table.kind} IN ('mutation', 'action')`
     ),
   ]
+);
+
+/**
+ * The inventory of action invocations' objects (action-invocation.ts),
+ * one row per object that may hold an invocation: written before the
+ * object records its run and deleted after the object empties itself, so
+ * every object holding a run, a receipt or a tombstone has a row (a row
+ * left behind names an empty object). Where the invocation stands is the
+ * object's own; the row only names it and whose it is.
+ */
+export const actionInvocations = sqliteTable("action_invocations", {
+  /** The object's name (`invocationName`). */
+  name: text().primaryKey(),
+  personId: text("person_id").notNull(),
+  appId: text("app_id").notNull(),
+  /** Whether it is a streaming action's (spec 10.7.6) or a plain one's. */
+  streaming: integer({ mode: "boolean" }).notNull(),
+  /** When it was listed, as its first run started. */
+  createdAt: timestamp("created_at").notNull(),
+});
+
+/**
+ * The workflow runs an App's tests started (workflows/fixture-runs.ts),
+ * each recorded before the engine is asked for it and deleted once the
+ * engine removed it: a row left behind is a test run that died between
+ * the two, whose run the sweep removes past its deadline. What a run is
+ * and runs with is here, never in the organization's runs and receipts:
+ * its pinned version and build, the fixture principal it acts for, its
+ * input and the parameter values its fixture gave it (or their defaults:
+ * never the organization's).
+ */
+export const appTestRuns = sqliteTable(
+  "app_test_runs",
+  {
+    runId: text("run_id").primaryKey(),
+    /** The App whose tests started it, and the version under test. */
+    appId: text("app_id").notNull(),
+    appVersion: integer("app_version").notNull(),
+    workflowResourceId: text("workflow_resource_id").notNull(),
+    version: integer().notNull(),
+    manifestHash: text("manifest_hash").notNull(),
+    buildHash: text("build_hash").notNull(),
+    /** The fixture's principal it acts for (`fixture-<name>`). */
+    principal: text().notNull(),
+    input: text().notNull(),
+    params: text().notNull(),
+    createdAt: timestamp("created_at").notNull(),
+    /**
+     * When its test's time is up: no activation runs it after, and the
+     * sweep removes it once it is past.
+     */
+    deadline: timestamp("deadline").notNull(),
+  },
+  (table) => [index("app_test_runs_deadline").on(table.deadline)]
 );
 
 /**
@@ -1903,15 +2103,20 @@ export const workflowTriggers = sqliteTable(
  * ended. `status` moves from `open` once, in one conditional update, to an
  * answer (`approved`, `rejected`) or `timed_out`, so the first answer is
  * the only one. An answer keeps who gave it, when, and the payload they
- * sent (JSON), which the run gets.
+ * sent (JSON), which the run gets. The run is an App's (`run_id`) or an
+ * independent workflow's (`resource_run_id`, a JSON workflow's
+ * `grasp.decision` call), exactly one of them; an independent run's
+ * decision keeps what it is about (`input`), which its reviewer sees.
  */
 export const workflowDecisions = sqliteTable(
   "workflow_decisions",
   {
     id: text().primaryKey(),
-    runId: text("run_id")
-      .notNull()
-      .references(() => workflowRuns.id),
+    runId: text("run_id").references(() => workflowRuns.id),
+    resourceRunId: text("resource_run_id").references(
+      // oxlint-disable-next-line no-use-before-define -- declared with the independent runs, below
+      () => workflowResourceRuns.id
+    ),
     step: text().notNull(),
     deciders: text().notNull(),
     /**
@@ -1932,9 +2137,26 @@ export const workflowDecisions = sqliteTable(
     decidedBy: text("decided_by"),
     decidedAt: timestamp("decided_at"),
     payload: text({ mode: "json" }).$type<Json>(),
+    input: text({ mode: "json" }).$type<Json>(),
+    /**
+     * What an answer's payload must be, as the descriptor text of an
+     * independent run's decision contract's response schema: an answer
+     * it doesn't take is refused, never recorded. None takes any payload.
+     */
+    response: text(),
   },
   (table) => [
+    check(
+      "workflow_decisions_one_run",
+      // Unqualified: a check naming its table by name would keep the name
+      // of the table its migration made it in.
+      sql`(run_id IS NULL) <> (resource_run_id IS NULL)`
+    ),
     uniqueIndex("workflow_decisions_run_step_idx").on(table.runId, table.step),
+    uniqueIndex("workflow_decisions_resource_run_step_idx").on(
+      table.resourceRunId,
+      table.step
+    ),
     // A run's open decisions (src/workflows/overview.ts): whether it waits.
     index("workflow_decisions_run_status_idx").on(table.runId, table.status),
     // The improvement signals (src/signals.ts): open decisions, oldest
@@ -2190,6 +2412,39 @@ export const packageCleanups = sqliteTable(
     index("package_cleanups_created_at_idx").on(table.createdAt),
   ]
 );
+
+/**
+ * The trusted record of each compiler build core keeps in R2
+ * (src/build-cache.ts), by its cache key: the SHA-256 and size of the
+ * bytes the build that passed its gates wrote, which a cached object must
+ * hash to before it is served. Only core writes it, and only the build
+ * that holds the key's lease. Also the key's lease (`holder`,
+ * `lease_expires_at`), so builds of the same files in any isolate run
+ * once, and its integrity failures: past a few, the key is quarantined
+ * (`quarantined_at`) and nothing is served from or written to the cache
+ * for it.
+ */
+export const buildReceipts = sqliteTable("build_receipts", {
+  key: text().primaryKey(),
+  /**
+   * The R2 object holding the bytes: the key and the holder that kept
+   * them, so a holder that lost its lease writes only an object of its
+   * own, which no receipt names.
+   */
+  objectKey: text("object_key"),
+  sha256: text(),
+  bytes: integer(),
+  builtAt: timestamp("built_at"),
+  holder: text(),
+  leaseExpiresAt: timestamp("lease_expires_at"),
+  integrityFailures: integer("integrity_failures").notNull().default(0),
+  /**
+   * The `built_at` of the build whose bytes last failed their check: each
+   * kept build counts one failure at most, however many read it.
+   */
+  failedBuiltAt: timestamp("failed_built_at"),
+  quarantinedAt: timestamp("quarantined_at"),
+});
 
 /**
  * The one build under way of each target of an App's graph
@@ -2952,7 +3207,7 @@ export const workflowStartReceipts = sqliteTable(
   {
     id: text().primaryKey(),
     invokerType: text("invoker_type", {
-      enum: ["person", "app", "agent", "trigger"],
+      enum: ["person", "app", "agent", "trigger", "workflow"],
     }).notNull(),
     invokerId: text("invoker_id").notNull(),
     idempotencyKey: text("idempotency_key").notNull(),
@@ -3077,8 +3332,27 @@ export const workflowResourceRuns = sqliteTable(
      * it here (restricted.ts), so no step, retry or replay runs without it.
      */
     restricted: integer({ mode: "boolean" }).notNull().default(false),
+    /**
+     * For a child run (a `run` task's, workflows/run-children.ts): the run
+     * that started it, its lineage's root and its depth under it (quotas.ts,
+     * `admitChild`), pinned with it. Null, null and 0 for a run its own
+     * start admitted, the root of its own lineage.
+     */
+    parentRunId: text("parent_run_id"),
+    rootRunId: text("root_run_id"),
+    depth: integer().notNull().default(0),
+    /**
+     * When the archive of the App that started it asked it to stop
+     * (app-status.ts, `stopRunsStartedBy`): asked once, never again by a
+     * later pass while the engine ends it.
+     */
+    stopRequestedAt: timestamp("stop_requested_at"),
   },
   (table) => [
+    // A run's children that haven't ended, for its end to stop them.
+    index("workflow_resource_runs_parent_idx")
+      .on(table.parentRunId, table.status)
+      .where(sql`${table.parentRunId} IS NOT NULL`),
     // A workflow's runs that haven't ended, for its deletion check.
     index("workflow_resource_runs_workflow_idx").on(
       table.workflowResourceId,
@@ -3179,6 +3453,52 @@ export const workflowRunFileChunks = sqliteTable(
  * sends each again, backing off, so an instance the engine made before
  * that end never keeps its lease or alarm.
  */
+/**
+ * The events runs of independent workflows emitted (`emit` tasks,
+ * workflows/emitted-events.ts): the transactional outbox of each, written
+ * once, under an ID derived from its run and its task's step, so an
+ * attempt run again writes nothing new. Each names its run, its pinned
+ * binding and catalog contract, and the envelope the host minted: its
+ * source is the emitting run, never what the workflow says. Delivery to
+ * what consumes platform events (system triggers) marks it delivered; until
+ * something consumes them, each waits here. Retention removes an event's
+ * subject and data with its run's details (workflows/retention.ts), and
+ * closes one still undelivered then (its `delivered_at` the removal's
+ * time), so nothing delivers it without its data.
+ */
+export const workflowEmittedEvents = sqliteTable(
+  "workflow_emitted_events",
+  {
+    id: text().primaryKey(),
+    runId: text("run_id")
+      .notNull()
+      .references(() => workflowResourceRuns.id),
+    workflowResourceId: text("workflow_resource_id").notNull(),
+    version: integer().notNull(),
+    taskId: text("task_id").notNull(),
+    binding: text().notNull(),
+    contractId: text("contract_id").notNull(),
+    source: text().notNull(),
+    type: text().notNull(),
+    subject: text(),
+    dataschema: text(),
+    /** The data, canonical JSON; null once retention removed it. */
+    data: text(),
+    /** Whether its run was restricted (restricted.ts), pinned with it. */
+    restricted: integer({ mode: "boolean" }).notNull().default(false),
+    createdAt: timestamp("created_at").notNull(),
+    deliveredAt: timestamp("delivered_at"),
+    detailsRemovedAt: timestamp("details_removed_at"),
+  },
+  (table) => [
+    index("workflow_emitted_events_run").on(table.runId),
+    // The events still to deliver, oldest first.
+    index("workflow_emitted_events_undelivered")
+      .on(table.createdAt)
+      .where(sql`${table.deliveredAt} IS NULL`),
+  ]
+);
+
 export const workflowResourceRunTerminations = sqliteTable(
   "workflow_resource_run_terminations",
   {
@@ -3676,6 +3996,8 @@ export const brainRecords = sqliteTable(
         "teamCount",
         "stakeholder",
         "gap",
+        "workflow",
+        "workflowVersion",
       ],
     }).notNull(),
     id: text().notNull(),
@@ -3684,30 +4006,6 @@ export const brainRecords = sqliteTable(
   },
   // One id is one record, whatever its type.
   (table) => [uniqueIndex("brain_records_id_idx").on(table.id)]
-);
-
-/**
- * Exclusion topics, one row per revision: what Knowledge admission
- * (knowledge/admission.ts) keeps out of canonical storage. The platform's
- * own topics are written from code (knowledge/admission-topics.ts), which
- * also holds their detectors, so no row can loosen them; a company's
- * topics would be added here. A revision never changes once written: a
- * change is the next revision, from its `effective_at`.
- */
-export const admissionTopics = sqliteTable(
-  "admission_topics",
-  {
-    id: text().notNull(),
-    revision: integer().notNull(),
-    name: text().notNull(),
-    coverage: text().notNull(),
-    /** `TopicExample[]`, as JSON: at least one per product language. */
-    examples: text().notNull(),
-    owner: text({ enum: ["platform", "company"] }).notNull(),
-    effectiveAt: timestamp("effective_at").notNull(),
-    createdAt: timestamp("created_at").notNull(),
-  },
-  (table) => [primaryKey({ columns: [table.id, table.revision] })]
 );
 
 /**
@@ -3725,3 +4023,196 @@ export const brainGapStates = sqliteTable("brain_gap_states", {
   /** Their name when they answered, as they chose to give it. */
   answeredBy: text("answered_by"),
 });
+
+// Knowledge's host tables: Grasp's own records about Knowledge, kept here
+// and not in Knowledge's database, which holds only the Brain's own
+// (collections, documents, versions, sections, links, payloads, search).
+// They name Knowledge's collections and documents by ID, with no foreign
+// key: no batch holds both databases.
+
+/** The teams that may read a `teams` collection (knowledge/access.ts). */
+export const collectionTeams = sqliteTable(
+  "collection_teams",
+  {
+    /** A collection in Knowledge. */
+    collectionId: text("collection_id").notNull(),
+    teamId: text("team_id").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.collectionId, table.teamId] }),
+    index("collection_teams_team_id_idx").on(table.teamId),
+  ]
+);
+
+/**
+ * Which version of each App its entry in the Apps collection holds
+ * (knowledge/apps-collection.ts): written once the entry is, so it never
+ * names a version the entry doesn't have. An App whose current version
+ * differs, or that has no row, is indexed again.
+ */
+export const appEntries = sqliteTable("app_entries", {
+  appId: text("app_id").primaryKey(),
+  version: integer().notNull(),
+  /**
+   * The SHA-256 of the name and description the entry holds; null for
+   * none read yet, which is indexed again.
+   */
+  described: text(),
+  indexedAt: timestamp("indexed_at").notNull(),
+});
+
+/**
+ * A file uploaded into a collection (knowledge/uploads.ts): its original,
+ * kept in R2 under its hash, and where extracting its text into the
+ * document at `path` stands. Only the person who uploaded it sees it.
+ */
+export const uploads = sqliteTable(
+  "uploads",
+  {
+    id: text().primaryKey(),
+    /** A collection in Knowledge. */
+    collectionId: text("collection_id").notNull(),
+    /** The file's name, and the path of its document. */
+    path: text().notNull(),
+    mediaType: text("media_type").notNull(),
+    /** The file's size. */
+    bytes: integer().notNull(),
+    /** The file's SHA-256, in hex, which R2 checks the original against. */
+    sha256: text().notNull(),
+    uploadedBy: text("uploaded_by").notNull(),
+    /** JSON: the audit log's actor for the person who uploaded it. */
+    actor: text().notNull(),
+    status: text({
+      enum: ["pending", "extracting", "ready", "failed"],
+    }).notNull(),
+    /** The code of the error it failed with. */
+    failure: text(),
+    /** The document and version it was saved as, once ready. */
+    documentId: text("document_id"),
+    version: integer(),
+    createdAt: timestamp("created_at").notNull(),
+    updatedAt: timestamp("updated_at").notNull(),
+  },
+  (table) => [
+    index("uploads_path_idx").on(
+      table.collectionId,
+      table.path,
+      table.createdAt
+    ),
+    index("uploads_original_idx").on(table.collectionId, table.sha256),
+    index("uploads_status_idx").on(table.status, table.updatedAt),
+  ]
+);
+
+/**
+ * Originals to delete from R2 (knowledge/uploads.ts), by key: recorded
+ * with the upload, before its original is stored, and cleared once it is
+ * saved; recorded again by a purge. Deleted by the failure that makes one
+ * unneeded, or by the cron trigger once its upload is gone or failed.
+ */
+export const uploadCleanups = sqliteTable("upload_cleanups", {
+  /** The original's key in R2. */
+  key: text().primaryKey(),
+  /** The upload whose original it is. */
+  uploadId: text("upload_id").notNull(),
+  /**
+   * When its original may have been written, at the latest: the upload's
+   * creation, or 0 for one known to be written already.
+   */
+  createdAt: timestamp("created_at").notNull(),
+});
+
+/**
+ * The daily computations of Knowledge's usage signals
+ * (knowledge/signals.ts), one row per attempt, as
+ * `improvement_signal_computations` has them (src/daily-claims.ts).
+ */
+export const knowledgeSignalComputations = sqliteTable(
+  "knowledge_signal_computations",
+  {
+    id: text().primaryKey(),
+    /** The UTC day it is the computation of, such as `2026-09-29`. */
+    day: text().notNull(),
+    startedAt: timestamp("started_at").notNull(),
+    finishedAt: timestamp("finished_at"),
+  },
+  (table) => [
+    index("knowledge_signal_computations_day_idx").on(table.day),
+    index("knowledge_signal_computations_started_idx").on(
+      table.startedAt,
+      table.id
+    ),
+  ]
+);
+
+/**
+ * The usage signals of a computation: one per kind, collection and subject
+ * (a search's key, or a document's ID), for the collection's owner, with
+ * an ID derived from those three, the same in every computation. Readers
+ * take only the finished computation started last, so a computation's
+ * signals show all at once when it finishes, and never those of one that
+ * doesn't. Written under the computation's ID: one that outlived its lease
+ * and lost its row fails on the foreign key. `evidence` is JSON, IDs and
+ * counts only; `evidence_at` is when its latest evidence was seen (a
+ * question's latest search), null for a document's. Reads check the
+ * collection (and the document) in Knowledge, and so never show a signal
+ * about one that's gone.
+ */
+export const knowledgeSignals = sqliteTable(
+  "knowledge_signals",
+  {
+    computation: text()
+      .notNull()
+      .references(() => knowledgeSignalComputations.id),
+    id: text().notNull(),
+    kind: text({ enum: knowledgeSignalKinds }).notNull(),
+    collectionId: text("collection_id").notNull(),
+    subject: text().notNull(),
+    /** User ID: the collection's owner when it was computed. */
+    owner: text().notNull(),
+    /**
+     * Ranks it within its kind: a question's searches, the days since an
+     * unread document changed. Null for an overdue document, ranked by its
+     * review date as it is when listed.
+     */
+    value: integer(),
+    evidence: text({ mode: "json" }).$type<Json>().notNull(),
+    evidenceAt: timestamp("evidence_at"),
+  },
+  (table) => [
+    primaryKey({ columns: [table.computation, table.id] }),
+    uniqueIndex("knowledge_signals_subject_idx").on(
+      table.computation,
+      table.collectionId,
+      table.kind,
+      table.subject
+    ),
+    index("knowledge_signals_owner_idx").on(
+      table.computation,
+      table.owner,
+      table.kind,
+      table.value,
+      table.id
+    ),
+  ]
+);
+
+/**
+ * Signals an owner dismissed, by kind, collection and subject, so they
+ * outlast the computations: a signal is hidden while it has no evidence
+ * newer than its dismissal. A computation's finish removes those whose
+ * signal it no longer has, or has with newer evidence, so a signal that
+ * went away and came back shows again.
+ */
+export const knowledgeSignalDismissals = sqliteTable(
+  "knowledge_signal_dismissals",
+  {
+    kind: text({ enum: knowledgeSignalKinds }).notNull(),
+    collectionId: text("collection_id").notNull(),
+    subject: text().notNull(),
+    dismissedAt: timestamp("dismissed_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.kind, table.collectionId, table.subject] }),
+  ]
+);

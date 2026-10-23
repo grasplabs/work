@@ -9,23 +9,15 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as IndexRouteImport } from './routes/index'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as AdminIndexRouteImport } from './routes/admin/index'
 import { Route as AdminAskRouteImport } from './routes/admin/ask'
 import { Route as AdminIntegrationsRouteImport } from './routes/admin/integrations'
 import { Route as AdminLabRouteImport } from './routes/admin/lab'
 import { Route as AdminNewOrganizationRouteImport } from './routes/admin/new-organization'
-import { Route as AdminPlatformRouteImport } from './routes/admin/platform'
 import { Route as AdminSourcesRouteImport } from './routes/admin/sources'
-import { Route as ClientsClientIdRouteImport } from './routes/clients/$clientId'
-import { Route as ClientsNewRouteImport } from './routes/clients/new'
-import { Route as ReleasesIndexRouteImport } from './routes/releases/index'
-import { Route as ReleasesReleaseIdRouteImport } from './routes/releases/$releaseId'
-import { Route as ReleasesDiffRouteImport } from './routes/releases/diff'
-import { Route as RolloutsIndexRouteImport } from './routes/rollouts/index'
-import { Route as RolloutsRolloutIdRouteImport } from './routes/rollouts/$rolloutId'
 import { Route as AdminOrganizationsClientIdRouteImport } from './routes/admin/organizations/$clientId'
+import { Route as AdminPlatformIndexRouteImport } from './routes/admin/platform/index'
 import { Route as AdminOrganizationsClientIdIndexRouteImport } from './routes/admin/organizations/$clientId/index'
 import { Route as AdminOrganizationsClientIdAiUseRouteImport } from './routes/admin/organizations/$clientId/ai-use'
 import { Route as AdminOrganizationsClientIdBrainRouteImport } from './routes/admin/organizations/$clientId/brain'
@@ -41,12 +33,12 @@ import { Route as AdminOrganizationsClientIdOrganizationRouteImport } from './ro
 import { Route as AdminOrganizationsClientIdSetupRouteImport } from './routes/admin/organizations/$clientId/setup'
 import { Route as AdminOrganizationsClientIdStepsRouteImport } from './routes/admin/organizations/$clientId/steps'
 import { Route as AdminOrganizationsClientIdWorkflowsRouteImport } from './routes/admin/organizations/$clientId/workflows'
+import { Route as AdminPlatformReleasesIndexRouteImport } from './routes/admin/platform/releases/index'
+import { Route as AdminPlatformReleasesReleaseIdRouteImport } from './routes/admin/platform/releases/$releaseId'
+import { Route as AdminPlatformReleasesDiffRouteImport } from './routes/admin/platform/releases/diff'
+import { Route as AdminPlatformRolloutsIndexRouteImport } from './routes/admin/platform/rollouts/index'
+import { Route as AdminPlatformRolloutsRolloutIdRouteImport } from './routes/admin/platform/rollouts/$rolloutId'
 
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const AdminRoute = AdminRouteImport.update({
   id: '/admin',
   path: '/admin',
@@ -77,50 +69,10 @@ const AdminNewOrganizationRoute = AdminNewOrganizationRouteImport.update({
   path: '/new-organization',
   getParentRoute: () => AdminRoute,
 } as any)
-const AdminPlatformRoute = AdminPlatformRouteImport.update({
-  id: '/platform',
-  path: '/platform',
-  getParentRoute: () => AdminRoute,
-} as any)
 const AdminSourcesRoute = AdminSourcesRouteImport.update({
   id: '/sources',
   path: '/sources',
   getParentRoute: () => AdminRoute,
-} as any)
-const ClientsClientIdRoute = ClientsClientIdRouteImport.update({
-  id: '/clients/$clientId',
-  path: '/clients/$clientId',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ClientsNewRoute = ClientsNewRouteImport.update({
-  id: '/clients/new',
-  path: '/clients/new',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ReleasesIndexRoute = ReleasesIndexRouteImport.update({
-  id: '/releases/',
-  path: '/releases/',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ReleasesReleaseIdRoute = ReleasesReleaseIdRouteImport.update({
-  id: '/releases/$releaseId',
-  path: '/releases/$releaseId',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ReleasesDiffRoute = ReleasesDiffRouteImport.update({
-  id: '/releases/diff',
-  path: '/releases/diff',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const RolloutsIndexRoute = RolloutsIndexRouteImport.update({
-  id: '/rollouts/',
-  path: '/rollouts/',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const RolloutsRolloutIdRoute = RolloutsRolloutIdRouteImport.update({
-  id: '/rollouts/$rolloutId',
-  path: '/rollouts/$rolloutId',
-  getParentRoute: () => rootRouteImport,
 } as any)
 const AdminOrganizationsClientIdRoute =
   AdminOrganizationsClientIdRouteImport.update({
@@ -128,6 +80,11 @@ const AdminOrganizationsClientIdRoute =
     path: '/organizations/$clientId',
     getParentRoute: () => AdminRoute,
   } as any)
+const AdminPlatformIndexRoute = AdminPlatformIndexRouteImport.update({
+  id: '/platform/',
+  path: '/platform/',
+  getParentRoute: () => AdminRoute,
+} as any)
 const AdminOrganizationsClientIdIndexRoute =
   AdminOrganizationsClientIdIndexRouteImport.update({
     id: '/',
@@ -218,25 +175,47 @@ const AdminOrganizationsClientIdWorkflowsRoute =
     path: '/workflows',
     getParentRoute: () => AdminOrganizationsClientIdRoute,
   } as any)
+const AdminPlatformReleasesIndexRoute =
+  AdminPlatformReleasesIndexRouteImport.update({
+    id: '/platform/releases/',
+    path: '/platform/releases/',
+    getParentRoute: () => AdminRoute,
+  } as any)
+const AdminPlatformReleasesReleaseIdRoute =
+  AdminPlatformReleasesReleaseIdRouteImport.update({
+    id: '/platform/releases/$releaseId',
+    path: '/platform/releases/$releaseId',
+    getParentRoute: () => AdminRoute,
+  } as any)
+const AdminPlatformReleasesDiffRoute =
+  AdminPlatformReleasesDiffRouteImport.update({
+    id: '/platform/releases/diff',
+    path: '/platform/releases/diff',
+    getParentRoute: () => AdminRoute,
+  } as any)
+const AdminPlatformRolloutsIndexRoute =
+  AdminPlatformRolloutsIndexRouteImport.update({
+    id: '/platform/rollouts/',
+    path: '/platform/rollouts/',
+    getParentRoute: () => AdminRoute,
+  } as any)
+const AdminPlatformRolloutsRolloutIdRoute =
+  AdminPlatformRolloutsRolloutIdRouteImport.update({
+    id: '/platform/rollouts/$rolloutId',
+    path: '/platform/rollouts/$rolloutId',
+    getParentRoute: () => AdminRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
-  '/': typeof IndexRoute
   '/admin': typeof AdminRouteWithChildren
   '/admin/ask': typeof AdminAskRoute
   '/admin/integrations': typeof AdminIntegrationsRoute
   '/admin/lab': typeof AdminLabRoute
   '/admin/new-organization': typeof AdminNewOrganizationRoute
-  '/admin/platform': typeof AdminPlatformRoute
   '/admin/sources': typeof AdminSourcesRoute
-  '/clients/$clientId': typeof ClientsClientIdRoute
-  '/clients/new': typeof ClientsNewRoute
-  '/releases/$releaseId': typeof ReleasesReleaseIdRoute
-  '/releases/diff': typeof ReleasesDiffRoute
-  '/rollouts/$rolloutId': typeof RolloutsRolloutIdRoute
   '/admin/': typeof AdminIndexRoute
-  '/releases/': typeof ReleasesIndexRoute
-  '/rollouts/': typeof RolloutsIndexRoute
   '/admin/organizations/$clientId': typeof AdminOrganizationsClientIdRouteWithChildren
+  '/admin/platform/': typeof AdminPlatformIndexRoute
   '/admin/organizations/$clientId/ai-use': typeof AdminOrganizationsClientIdAiUseRoute
   '/admin/organizations/$clientId/brain': typeof AdminOrganizationsClientIdBrainRoute
   '/admin/organizations/$clientId/contract': typeof AdminOrganizationsClientIdContractRoute
@@ -251,24 +230,21 @@ export interface FileRoutesByFullPath {
   '/admin/organizations/$clientId/setup': typeof AdminOrganizationsClientIdSetupRoute
   '/admin/organizations/$clientId/steps': typeof AdminOrganizationsClientIdStepsRoute
   '/admin/organizations/$clientId/workflows': typeof AdminOrganizationsClientIdWorkflowsRoute
+  '/admin/platform/releases/$releaseId': typeof AdminPlatformReleasesReleaseIdRoute
+  '/admin/platform/releases/diff': typeof AdminPlatformReleasesDiffRoute
+  '/admin/platform/rollouts/$rolloutId': typeof AdminPlatformRolloutsRolloutIdRoute
   '/admin/organizations/$clientId/': typeof AdminOrganizationsClientIdIndexRoute
+  '/admin/platform/releases/': typeof AdminPlatformReleasesIndexRoute
+  '/admin/platform/rollouts/': typeof AdminPlatformRolloutsIndexRoute
 }
 export interface FileRoutesByTo {
-  '/': typeof IndexRoute
   '/admin/ask': typeof AdminAskRoute
   '/admin/integrations': typeof AdminIntegrationsRoute
   '/admin/lab': typeof AdminLabRoute
   '/admin/new-organization': typeof AdminNewOrganizationRoute
-  '/admin/platform': typeof AdminPlatformRoute
   '/admin/sources': typeof AdminSourcesRoute
-  '/clients/$clientId': typeof ClientsClientIdRoute
-  '/clients/new': typeof ClientsNewRoute
-  '/releases/$releaseId': typeof ReleasesReleaseIdRoute
-  '/releases/diff': typeof ReleasesDiffRoute
-  '/rollouts/$rolloutId': typeof RolloutsRolloutIdRoute
   '/admin': typeof AdminIndexRoute
-  '/releases': typeof ReleasesIndexRoute
-  '/rollouts': typeof RolloutsIndexRoute
+  '/admin/platform': typeof AdminPlatformIndexRoute
   '/admin/organizations/$clientId/ai-use': typeof AdminOrganizationsClientIdAiUseRoute
   '/admin/organizations/$clientId/brain': typeof AdminOrganizationsClientIdBrainRoute
   '/admin/organizations/$clientId/contract': typeof AdminOrganizationsClientIdContractRoute
@@ -283,27 +259,24 @@ export interface FileRoutesByTo {
   '/admin/organizations/$clientId/setup': typeof AdminOrganizationsClientIdSetupRoute
   '/admin/organizations/$clientId/steps': typeof AdminOrganizationsClientIdStepsRoute
   '/admin/organizations/$clientId/workflows': typeof AdminOrganizationsClientIdWorkflowsRoute
+  '/admin/platform/releases/$releaseId': typeof AdminPlatformReleasesReleaseIdRoute
+  '/admin/platform/releases/diff': typeof AdminPlatformReleasesDiffRoute
+  '/admin/platform/rollouts/$rolloutId': typeof AdminPlatformRolloutsRolloutIdRoute
   '/admin/organizations/$clientId': typeof AdminOrganizationsClientIdIndexRoute
+  '/admin/platform/releases': typeof AdminPlatformReleasesIndexRoute
+  '/admin/platform/rollouts': typeof AdminPlatformRolloutsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
-  '/': typeof IndexRoute
   '/admin': typeof AdminRouteWithChildren
   '/admin/ask': typeof AdminAskRoute
   '/admin/integrations': typeof AdminIntegrationsRoute
   '/admin/lab': typeof AdminLabRoute
   '/admin/new-organization': typeof AdminNewOrganizationRoute
-  '/admin/platform': typeof AdminPlatformRoute
   '/admin/sources': typeof AdminSourcesRoute
-  '/clients/$clientId': typeof ClientsClientIdRoute
-  '/clients/new': typeof ClientsNewRoute
-  '/releases/$releaseId': typeof ReleasesReleaseIdRoute
-  '/releases/diff': typeof ReleasesDiffRoute
-  '/rollouts/$rolloutId': typeof RolloutsRolloutIdRoute
   '/admin/': typeof AdminIndexRoute
-  '/releases/': typeof ReleasesIndexRoute
-  '/rollouts/': typeof RolloutsIndexRoute
   '/admin/organizations/$clientId': typeof AdminOrganizationsClientIdRouteWithChildren
+  '/admin/platform/': typeof AdminPlatformIndexRoute
   '/admin/organizations/$clientId/ai-use': typeof AdminOrganizationsClientIdAiUseRoute
   '/admin/organizations/$clientId/brain': typeof AdminOrganizationsClientIdBrainRoute
   '/admin/organizations/$clientId/contract': typeof AdminOrganizationsClientIdContractRoute
@@ -318,28 +291,25 @@ export interface FileRoutesById {
   '/admin/organizations/$clientId/setup': typeof AdminOrganizationsClientIdSetupRoute
   '/admin/organizations/$clientId/steps': typeof AdminOrganizationsClientIdStepsRoute
   '/admin/organizations/$clientId/workflows': typeof AdminOrganizationsClientIdWorkflowsRoute
+  '/admin/platform/releases/$releaseId': typeof AdminPlatformReleasesReleaseIdRoute
+  '/admin/platform/releases/diff': typeof AdminPlatformReleasesDiffRoute
+  '/admin/platform/rollouts/$rolloutId': typeof AdminPlatformRolloutsRolloutIdRoute
   '/admin/organizations/$clientId/': typeof AdminOrganizationsClientIdIndexRoute
+  '/admin/platform/releases/': typeof AdminPlatformReleasesIndexRoute
+  '/admin/platform/rollouts/': typeof AdminPlatformRolloutsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
-    | '/'
     | '/admin'
     | '/admin/ask'
     | '/admin/integrations'
     | '/admin/lab'
     | '/admin/new-organization'
-    | '/admin/platform'
     | '/admin/sources'
-    | '/clients/$clientId'
-    | '/clients/new'
-    | '/releases/$releaseId'
-    | '/releases/diff'
-    | '/rollouts/$rolloutId'
     | '/admin/'
-    | '/releases/'
-    | '/rollouts/'
     | '/admin/organizations/$clientId'
+    | '/admin/platform/'
     | '/admin/organizations/$clientId/ai-use'
     | '/admin/organizations/$clientId/brain'
     | '/admin/organizations/$clientId/contract'
@@ -354,24 +324,21 @@ export interface FileRouteTypes {
     | '/admin/organizations/$clientId/setup'
     | '/admin/organizations/$clientId/steps'
     | '/admin/organizations/$clientId/workflows'
+    | '/admin/platform/releases/$releaseId'
+    | '/admin/platform/releases/diff'
+    | '/admin/platform/rollouts/$rolloutId'
     | '/admin/organizations/$clientId/'
+    | '/admin/platform/releases/'
+    | '/admin/platform/rollouts/'
   fileRoutesByTo: FileRoutesByTo
   to:
-    | '/'
     | '/admin/ask'
     | '/admin/integrations'
     | '/admin/lab'
     | '/admin/new-organization'
-    | '/admin/platform'
     | '/admin/sources'
-    | '/clients/$clientId'
-    | '/clients/new'
-    | '/releases/$releaseId'
-    | '/releases/diff'
-    | '/rollouts/$rolloutId'
     | '/admin'
-    | '/releases'
-    | '/rollouts'
+    | '/admin/platform'
     | '/admin/organizations/$clientId/ai-use'
     | '/admin/organizations/$clientId/brain'
     | '/admin/organizations/$clientId/contract'
@@ -386,26 +353,23 @@ export interface FileRouteTypes {
     | '/admin/organizations/$clientId/setup'
     | '/admin/organizations/$clientId/steps'
     | '/admin/organizations/$clientId/workflows'
+    | '/admin/platform/releases/$releaseId'
+    | '/admin/platform/releases/diff'
+    | '/admin/platform/rollouts/$rolloutId'
     | '/admin/organizations/$clientId'
+    | '/admin/platform/releases'
+    | '/admin/platform/rollouts'
   id:
     | '__root__'
-    | '/'
     | '/admin'
     | '/admin/ask'
     | '/admin/integrations'
     | '/admin/lab'
     | '/admin/new-organization'
-    | '/admin/platform'
     | '/admin/sources'
-    | '/clients/$clientId'
-    | '/clients/new'
-    | '/releases/$releaseId'
-    | '/releases/diff'
-    | '/rollouts/$rolloutId'
     | '/admin/'
-    | '/releases/'
-    | '/rollouts/'
     | '/admin/organizations/$clientId'
+    | '/admin/platform/'
     | '/admin/organizations/$clientId/ai-use'
     | '/admin/organizations/$clientId/brain'
     | '/admin/organizations/$clientId/contract'
@@ -420,30 +384,20 @@ export interface FileRouteTypes {
     | '/admin/organizations/$clientId/setup'
     | '/admin/organizations/$clientId/steps'
     | '/admin/organizations/$clientId/workflows'
+    | '/admin/platform/releases/$releaseId'
+    | '/admin/platform/releases/diff'
+    | '/admin/platform/rollouts/$rolloutId'
     | '/admin/organizations/$clientId/'
+    | '/admin/platform/releases/'
+    | '/admin/platform/rollouts/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
-  IndexRoute: typeof IndexRoute
   AdminRoute: typeof AdminRouteWithChildren
-  ClientsClientIdRoute: typeof ClientsClientIdRoute
-  ClientsNewRoute: typeof ClientsNewRoute
-  ReleasesReleaseIdRoute: typeof ReleasesReleaseIdRoute
-  ReleasesDiffRoute: typeof ReleasesDiffRoute
-  RolloutsRolloutIdRoute: typeof RolloutsRolloutIdRoute
-  ReleasesIndexRoute: typeof ReleasesIndexRoute
-  RolloutsIndexRoute: typeof RolloutsIndexRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/': {
-      id: '/'
-      path: '/'
-      fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/admin': {
       id: '/admin'
       path: '/admin'
@@ -486,13 +440,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminNewOrganizationRouteImport
       parentRoute: typeof AdminRoute
     }
-    '/admin/platform': {
-      id: '/admin/platform'
-      path: '/platform'
-      fullPath: '/admin/platform'
-      preLoaderRoute: typeof AdminPlatformRouteImport
-      parentRoute: typeof AdminRoute
-    }
     '/admin/sources': {
       id: '/admin/sources'
       path: '/sources'
@@ -500,60 +447,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminSourcesRouteImport
       parentRoute: typeof AdminRoute
     }
-    '/clients/$clientId': {
-      id: '/clients/$clientId'
-      path: '/clients/$clientId'
-      fullPath: '/clients/$clientId'
-      preLoaderRoute: typeof ClientsClientIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/clients/new': {
-      id: '/clients/new'
-      path: '/clients/new'
-      fullPath: '/clients/new'
-      preLoaderRoute: typeof ClientsNewRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/releases/': {
-      id: '/releases/'
-      path: '/releases'
-      fullPath: '/releases/'
-      preLoaderRoute: typeof ReleasesIndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/releases/$releaseId': {
-      id: '/releases/$releaseId'
-      path: '/releases/$releaseId'
-      fullPath: '/releases/$releaseId'
-      preLoaderRoute: typeof ReleasesReleaseIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/releases/diff': {
-      id: '/releases/diff'
-      path: '/releases/diff'
-      fullPath: '/releases/diff'
-      preLoaderRoute: typeof ReleasesDiffRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/rollouts/': {
-      id: '/rollouts/'
-      path: '/rollouts'
-      fullPath: '/rollouts/'
-      preLoaderRoute: typeof RolloutsIndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/rollouts/$rolloutId': {
-      id: '/rollouts/$rolloutId'
-      path: '/rollouts/$rolloutId'
-      fullPath: '/rollouts/$rolloutId'
-      preLoaderRoute: typeof RolloutsRolloutIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/admin/organizations/$clientId': {
       id: '/admin/organizations/$clientId'
       path: '/organizations/$clientId'
       fullPath: '/admin/organizations/$clientId'
       preLoaderRoute: typeof AdminOrganizationsClientIdRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/platform/': {
+      id: '/admin/platform/'
+      path: '/platform'
+      fullPath: '/admin/platform/'
+      preLoaderRoute: typeof AdminPlatformIndexRouteImport
       parentRoute: typeof AdminRoute
     }
     '/admin/organizations/$clientId/': {
@@ -661,6 +566,41 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminOrganizationsClientIdWorkflowsRouteImport
       parentRoute: typeof AdminOrganizationsClientIdRoute
     }
+    '/admin/platform/releases/': {
+      id: '/admin/platform/releases/'
+      path: '/platform/releases'
+      fullPath: '/admin/platform/releases/'
+      preLoaderRoute: typeof AdminPlatformReleasesIndexRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/platform/releases/$releaseId': {
+      id: '/admin/platform/releases/$releaseId'
+      path: '/platform/releases/$releaseId'
+      fullPath: '/admin/platform/releases/$releaseId'
+      preLoaderRoute: typeof AdminPlatformReleasesReleaseIdRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/platform/releases/diff': {
+      id: '/admin/platform/releases/diff'
+      path: '/platform/releases/diff'
+      fullPath: '/admin/platform/releases/diff'
+      preLoaderRoute: typeof AdminPlatformReleasesDiffRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/platform/rollouts/': {
+      id: '/admin/platform/rollouts/'
+      path: '/platform/rollouts'
+      fullPath: '/admin/platform/rollouts/'
+      preLoaderRoute: typeof AdminPlatformRolloutsIndexRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/platform/rollouts/$rolloutId': {
+      id: '/admin/platform/rollouts/$rolloutId'
+      path: '/platform/rollouts/$rolloutId'
+      fullPath: '/admin/platform/rollouts/$rolloutId'
+      preLoaderRoute: typeof AdminPlatformRolloutsRolloutIdRouteImport
+      parentRoute: typeof AdminRoute
+    }
   }
 }
 
@@ -718,10 +658,15 @@ interface AdminRouteChildren {
   AdminIntegrationsRoute: typeof AdminIntegrationsRoute
   AdminLabRoute: typeof AdminLabRoute
   AdminNewOrganizationRoute: typeof AdminNewOrganizationRoute
-  AdminPlatformRoute: typeof AdminPlatformRoute
   AdminSourcesRoute: typeof AdminSourcesRoute
   AdminIndexRoute: typeof AdminIndexRoute
   AdminOrganizationsClientIdRoute: typeof AdminOrganizationsClientIdRouteWithChildren
+  AdminPlatformIndexRoute: typeof AdminPlatformIndexRoute
+  AdminPlatformReleasesReleaseIdRoute: typeof AdminPlatformReleasesReleaseIdRoute
+  AdminPlatformReleasesDiffRoute: typeof AdminPlatformReleasesDiffRoute
+  AdminPlatformRolloutsRolloutIdRoute: typeof AdminPlatformRolloutsRolloutIdRoute
+  AdminPlatformReleasesIndexRoute: typeof AdminPlatformReleasesIndexRoute
+  AdminPlatformRolloutsIndexRoute: typeof AdminPlatformRolloutsIndexRoute
 }
 
 const AdminRouteChildren: AdminRouteChildren = {
@@ -729,24 +674,21 @@ const AdminRouteChildren: AdminRouteChildren = {
   AdminIntegrationsRoute: AdminIntegrationsRoute,
   AdminLabRoute: AdminLabRoute,
   AdminNewOrganizationRoute: AdminNewOrganizationRoute,
-  AdminPlatformRoute: AdminPlatformRoute,
   AdminSourcesRoute: AdminSourcesRoute,
   AdminIndexRoute: AdminIndexRoute,
   AdminOrganizationsClientIdRoute: AdminOrganizationsClientIdRouteWithChildren,
+  AdminPlatformIndexRoute: AdminPlatformIndexRoute,
+  AdminPlatformReleasesReleaseIdRoute: AdminPlatformReleasesReleaseIdRoute,
+  AdminPlatformReleasesDiffRoute: AdminPlatformReleasesDiffRoute,
+  AdminPlatformRolloutsRolloutIdRoute: AdminPlatformRolloutsRolloutIdRoute,
+  AdminPlatformReleasesIndexRoute: AdminPlatformReleasesIndexRoute,
+  AdminPlatformRolloutsIndexRoute: AdminPlatformRolloutsIndexRoute,
 }
 
 const AdminRouteWithChildren = AdminRoute._addFileChildren(AdminRouteChildren)
 
 const rootRouteChildren: RootRouteChildren = {
-  IndexRoute: IndexRoute,
   AdminRoute: AdminRouteWithChildren,
-  ClientsClientIdRoute: ClientsClientIdRoute,
-  ClientsNewRoute: ClientsNewRoute,
-  ReleasesReleaseIdRoute: ReleasesReleaseIdRoute,
-  ReleasesDiffRoute: ReleasesDiffRoute,
-  RolloutsRolloutIdRoute: RolloutsRolloutIdRoute,
-  ReleasesIndexRoute: ReleasesIndexRoute,
-  RolloutsIndexRoute: RolloutsIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

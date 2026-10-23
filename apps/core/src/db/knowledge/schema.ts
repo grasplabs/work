@@ -12,7 +12,9 @@
  *
  * The full-text index (`search_rows`, `search_words`, `search_trigrams` and
  * the triggers that keep them) is FTS5, which Drizzle can't describe: it
- * lives in its own migration, `0001_search.sql`.
+ * lives in its own migrations: `0001_search.sql`, and
+ * `0017_search_one_content.sql`, where the trigram index reads the words
+ * index's content rather than keeping a copy of it.
  */
 import type { Json } from "@grasp-os/shared/json";
 import { knowledgeSignalKinds } from "@grasp-os/shared/knowledge-signals";
@@ -34,20 +36,49 @@ export { auditOutbox, auditOutboxRejected } from "../core/schema.ts";
 
 const timestamp = (name: string) => integer(name, { mode: "timestamp_ms" });
 
-/** A set of documents with one owner, access rule and source. */
-export const collections = sqliteTable("collections", {
-  id: text().primaryKey(),
-  name: text().notNull(),
-  description: text().notNull(),
-  /** User ID. */
-  owner: text().notNull(),
-  access: text({ enum: ["everyone", "teams", "me", "admins"] }).notNull(),
-  sensitive: integer({ mode: "boolean" }).notNull().default(false),
-  source: text({
-    enum: ["here", "upload", "grasp", "apps"],
-  }).notNull(),
-  createdAt: timestamp("created_at").notNull(),
-});
+/**
+ * The oldest migration whose code still runs on this database's schema,
+ * which each release declares (scripts/release): the console won't put
+ * the code of a release whose newest migration is older on it, by a
+ * rollback or a deploy.
+ *
+ * Migrations expand, then contract in a later release (AGENTS.md), so the
+ * code of the release before keeps working on a new schema, and a
+ * migration that only expands leaves this where it is. One that drops or
+ * renames what older code still uses raises it: to the migration of the
+ * first release whose code no longer used it, or, when the code stopped
+ * in the same release, to that migration's own number.
+ *
+ * 0015 replaced `versions` (each one's text moved to R2) in the release
+ * that stopped writing the old one.
+ */
+export const compatibleFromMigration = 15;
+
+/**
+ * A set of documents with one owner, access rule and source. Indexed by
+ * access and by owner, so listing the collections a reader may read
+ * (knowledge/access.ts) reaches them by index, never the whole table.
+ */
+export const collections = sqliteTable(
+  "collections",
+  {
+    id: text().primaryKey(),
+    name: text().notNull(),
+    description: text().notNull(),
+    /** User ID. */
+    owner: text().notNull(),
+    access: text({ enum: ["everyone", "teams", "me", "admins"] }).notNull(),
+    sensitive: integer({ mode: "boolean" }).notNull().default(false),
+    source: text({
+      enum: ["here", "upload", "grasp", "apps"],
+    }).notNull(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [
+    index("collections_access_idx").on(table.access),
+    index("collections_owner_idx").on(table.owner),
+  ]
+);
 
 /** The teams that may read a `teams` collection. */
 export const collectionTeams = sqliteTable(
@@ -454,5 +485,88 @@ export const knowledgeSignalDismissals = sqliteTable(
   },
   (table) => [
     primaryKey({ columns: [table.kind, table.collectionId, table.subject] }),
+  ]
+);
+
+/**
+ * The Brain's memory records (knowledge/memories.ts): what a person, or
+ * later an App or agent acting for one, asked the Brain to remember, as
+ * they said it. A record starts `proposed`, never an accepted fact.
+ * Its scope decides who reads it; `owner_id` is the person whose it is.
+ */
+export const brainMemories = sqliteTable(
+  "brain_memories",
+  {
+    id: text().primaryKey(),
+    revision: integer().notNull(),
+    scope: text({ enum: ["person", "session", "team", "company"] }).notNull(),
+    /** User ID of the person whose record it is. */
+    ownerId: text("owner_id").notNull(),
+    kind: text({
+      enum: ["fact", "experience", "lesson", "preference"],
+    }).notNull(),
+    statement: text().notNull(),
+    /** JSON array of the Brain's source references (brain-api.ts). */
+    sourceRefs: text("source_refs").notNull(),
+    state: text({ enum: ["proposed", "accepted", "retired"] }).notNull(),
+    /** Whether search has it yet: written `pending` with the record. */
+    indexingState: text("indexing_state", {
+      enum: ["pending", "indexed", "failed"],
+    }).notNull(),
+    recordedAt: timestamp("recorded_at").notNull(),
+    updatedAt: timestamp("updated_at").notNull(),
+  },
+  (table) => [
+    // A person's records, newest first, of one kind or all, paged by
+    // `(recorded_at, id)` (memories.ts): each index ends in the cursor's
+    // order, so a page is a range scan. The first also serves a personal
+    // purge's delete by owner.
+    index("brain_memories_owner_idx").on(
+      table.ownerId,
+      table.recordedAt,
+      table.id
+    ),
+    index("brain_memories_owner_kind_idx").on(
+      table.ownerId,
+      table.kind,
+      table.recordedAt,
+      table.id
+    ),
+  ]
+);
+
+/**
+ * The Brain's command receipts: one per command key, so a retry after a
+ * lost reply answers the recorded result. `key_hash` is the key keyed to
+ * the deployment and scoped to the caller and operation, never the key
+ * itself; `request_hash` is the validated request's, never its text.
+ */
+export const brainReceipts = sqliteTable(
+  "brain_receipts",
+  {
+    id: text().primaryKey(),
+    keyHash: text("key_hash").notNull(),
+    /** Who may read it back: the same caller, as `callerKey` names it. */
+    caller: text().notNull(),
+    operation: text({ enum: ["remember", "memories.proposeChange"] }).notNull(),
+    requestHash: text("request_hash").notNull(),
+    status: text({
+      enum: ["committed", "proposed", "queued", "completed", "failed"],
+    }).notNull(),
+    indexingState: text("indexing_state", {
+      enum: ["pending", "indexed", "failed"],
+    }).notNull(),
+    /** JSON array of the Brain's source references it committed. */
+    resourceRefs: text("resource_refs").notNull(),
+    createdAt: timestamp("created_at").notNull(),
+    retentionUntil: timestamp("retention_until").notNull(),
+  },
+  (table) => [
+    uniqueIndex("brain_receipts_key_idx").on(table.keyHash),
+    // The clock's sweep of expired receipts (`sweepBrainReceipts`).
+    index("brain_receipts_retention_idx").on(table.retentionUntil),
+    // A caller's recent commands, for the per-person bound on remember,
+    // and a personal purge's delete by caller.
+    index("brain_receipts_caller_idx").on(table.caller, table.createdAt),
   ]
 );

@@ -1,11 +1,21 @@
 import { z } from "zod";
 
+import type { AdminSnapshot } from "./admin-snapshot.ts";
+import type { OnboardingDirectoryApi } from "./directory.ts";
+import type { OnboardingPlacesApi } from "./document-places.ts";
 import { defineErrorFamily } from "./errors.ts";
 import type { KickoffApi } from "./kickoff.ts";
+import type { OnboardingChoicesApi } from "./onboarding-choices.ts";
 import type { OnboardingDocumentsApi } from "./onboarding-documents.ts";
+import type {
+  OrganizationChangeInput,
+  StaffOrganization,
+} from "./onboarding-organization.ts";
 import type {
   LogFilter,
   StaffAgreements,
+  StaffAiUseRow,
+  StaffInterviewers,
   StaffLog,
   StaffNote,
   StaffOverview,
@@ -172,6 +182,9 @@ export const rosterSchema = z
 export type Roster = z.output<typeof rosterSchema>;
 export type RosterInput = z.input<typeof rosterSchema>;
 
+/** Whose links the admin took to send, by person. */
+export const linksTakenSchema = z.array(idSchema).max(onboardingPeopleMax);
+
 /**
  * When the interviews run: from the start day, for so many days. The leads'
  * links go out at `at` (by default the start of the start day); a team in
@@ -251,6 +264,30 @@ export interface OnboardingView {
   agreed: boolean;
   /** Grasp paused the interviews: no link opens and none goes out. */
   paused: boolean;
+  /**
+   * The sponsor's first name, when the kickoff named them; null before it
+   * is in, or when it did not. The one word of the kickoff the admin sees.
+   */
+  sponsor: string | null;
+}
+
+/**
+ * Someone's own link, as the company's admin takes it to send themselves:
+ * from their own email or chat, or on paper to whoever has no address.
+ * Grasp emails each link on its day as well; the admin's list is for
+ * whoever they would rather reach themselves.
+ */
+export interface LinkToSend {
+  person: string;
+  name: string;
+  /** Their team's name. */
+  team: string;
+  /** Empty when they have none. */
+  email: string;
+  /** The link's path, its secret after the `#`; null while it isn't out. */
+  path: string | null;
+  /** Out, and not taken by the admin since: new since they last took links. */
+  fresh: boolean;
 }
 
 /** How many weeks the programme with Grasp runs. */
@@ -278,7 +315,12 @@ export interface Programme {
  * The onboarding, for the client's admin (Grasp staff included); its
  * programme for everyone signed in.
  */
-export interface OnboardingApi extends OnboardingDocumentsApi {
+export interface OnboardingApi
+  extends
+    OnboardingDocumentsApi,
+    OnboardingDirectoryApi,
+    OnboardingChoicesApi,
+    OnboardingPlacesApi {
   /** The programme, for the dashboard; null without a plan. Any role. */
   programme: () => Promise<Programme | null>;
   view: () => Promise<OnboardingView>;
@@ -286,6 +328,10 @@ export interface OnboardingApi extends OnboardingDocumentsApi {
   saveRoster: (roster: RosterInput) => Promise<OnboardingView>;
   /** Sets when the interviews run; links go out by it. */
   savePlan: (plan: PlanInput) => Promise<OnboardingView>;
+  /** Everyone who takes part, with their link once it is out. */
+  links: () => Promise<LinkToSend[]>;
+  /** The admin took these people's links to send: they are new no more. */
+  linksTaken: (people: string[]) => Promise<void>;
 }
 
 /** What only Grasp's staff do in an onboarding, the kickoff included. */
@@ -318,6 +364,40 @@ export interface OnboardingStaffApi extends KickoffApi {
   addNote: (text: string) => Promise<StaffNote>;
   /** Someone's interview; every read is in the audit log, without its words. */
   transcript: (person: string) => Promise<StaffTranscript>;
+  /**
+   * Where everyone stands with their link and their interview, by name, as
+   * Grasp's admin reads it: numbers, never anyone's words. It names
+   * people, so every read is in the audit log.
+   */
+  interviews: () => Promise<AdminSnapshot>;
+  /**
+   * Someone's own link, for staff to send them by hand: its path, the
+   * secret after the `#`. Every read is in the audit log, without it.
+   */
+  link: (person: string) => Promise<string>;
+  /**
+   * Notes the one reminder as sent by hand to each of `people` whose link
+   * is out, who hasn't finished and wasn't reminded yet. Returns how many.
+   */
+  remind: (people: string[]) => Promise<number>;
+  /** A team that didn't take part takes part: its lead's link goes out first. */
+  askIn: (team: string) => Promise<OnboardingView>;
+  /**
+   * Deletes someone's interview because they asked: what they said is
+   * gone, and their link opens a new one.
+   */
+  deleteInterview: (person: string) => Promise<void>;
+  /** How Stephen and Claire are doing, as numbers: never who said what. */
+  interviewers: () => Promise<StaffInterviewers>;
+  /** The AI the onboarding used, by day, purpose and model. */
+  aiUse: () => Promise<StaffAiUseRow[]>;
+  /**
+   * The organization as Grasp knows it, team by team: it names people, so
+   * every read is in the audit log.
+   */
+  organization: () => Promise<StaffOrganization>;
+  /** Puts the list right, one change at a time; each is in the log. */
+  changeOrganization: (change: OrganizationChangeInput) => Promise<void>;
 }
 
 /** Why the onboarding refused something. */
@@ -328,5 +408,12 @@ export const onboardingErrors = defineErrorFamily({
   "onboarding.past": "The interviews can't start in the past.",
   "onboarding.no_link": "That person has no link out yet.",
   "onboarding.not_found": "Nobody on the list by that id.",
+  "onboarding.no_team": "No team on the list by that id.",
+  "onboarding.team_taken": "There is a team with this name already.",
+  "onboarding.no_work": "That piece of work isn't on their team's map.",
+  "onboarding.not_now":
+    "No link goes out while the interviews are paused, before the agreements are in, or to someone who doesn't take part.",
+  "onboarding.no_map":
+    "The team's lead hasn't agreed to anything to draw its map from yet.",
   "onboarding.no_failed_mail": "That person has no mail that failed.",
 });

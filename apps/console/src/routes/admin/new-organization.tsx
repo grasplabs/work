@@ -1,3 +1,4 @@
+import { newClientIdSchema } from "@grasp-os/shared/router";
 import { Button } from "@grasp-os/ui/components/button";
 import {
   Field,
@@ -18,33 +19,74 @@ import {
   RadioGroup,
   RadioGroupItem,
 } from "@grasp-os/ui/components/radio-group";
-import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
-import { useState } from "react";
+import {
+  createFileRoute,
+  Link,
+  useNavigate,
+  useRouter,
+} from "@tanstack/react-router";
+import { useEffect, useState } from "react";
 
 import {
   domainsOrAdmins,
-  startingPoints,
+  prefillOf,
+  startingPointsOf,
 } from "../../admin/new-organization.ts";
+import type { StartingPoint } from "../../admin/new-organization.ts";
 import { AdminPage } from "../../admin/page.tsx";
+import { SettingUpNow } from "../../admin/setup-actions.tsx";
+import type { Refresh } from "../../admin/setup-actions.tsx";
+import { formatDate } from "../../admin/words.ts";
 import { signInOf, textOf } from "../../clients/sign-in-fields.tsx";
+import type { WonDeal } from "../../crm/attio.ts";
+import { fetchWonDeals } from "../../crm/functions.ts";
 import { clientIdProblem } from "../../provision/client-id.ts";
 import {
   fetchNewClientOptions,
+  fetchProvisioning,
   startClient,
 } from "../../provision/functions.ts";
+import type { ProvisioningView } from "../../provision/queries.ts";
 import { useProvisionAction } from "../../provision/use-action.ts";
 import { InvalidFieldError } from "../../use-action.ts";
 
-/** Where the organization starts from: by hand, until the console reads Attio and Rooms. */
-const StartFrom = () => (
+/** Client `clientId`'s provisioning; null for none, or an id that can't be one. */
+const provisioningOf = async (
+  clientId: string
+): Promise<ProvisioningView | null> => {
+  if (!newClientIdSchema.safeParse(clientId).success) {
+    return null;
+  }
+  return await fetchProvisioning({ data: { clientId } });
+};
+
+/** Where the organization starts from: by hand, or a deal won in Attio; Rooms is still to come. */
+const StartFrom = ({
+  starts,
+  value,
+  onChange,
+}: {
+  starts: readonly StartingPoint[];
+  value: StartingPoint["id"];
+  onChange: (value: StartingPoint["id"]) => void;
+}) => (
   <FieldSet>
     <FieldLegend variant="label">Start from</FieldLegend>
     <FieldDescription>
       What a deal or a proposal knows is filled in below, to put right before it
       is added.
     </FieldDescription>
-    <RadioGroup defaultValue="hand" name="startFrom">
-      {startingPoints.map((start) => (
+    <RadioGroup
+      name="startFrom"
+      onValueChange={(next) => {
+        const start = starts.find((each) => each.id === next);
+        if (start !== undefined) {
+          onChange(start.id);
+        }
+      }}
+      value={value}
+    >
+      {starts.map((start) => (
         <FieldLabel htmlFor={`start-${start.id}`} key={start.id}>
           <Field
             data-disabled={start.unavailable !== null}
@@ -68,21 +110,132 @@ const StartFrom = () => (
   </FieldSet>
 );
 
-/** Started: where its provisioning is followed, as the prototype's dialog ends on the way in. */
-const Started = ({ clientId, name }: { clientId: string; name: string }) => {
+/** A won deal in a line: what it is called, its company and the day it was won. */
+const dealLabel = (deal: WonDeal): string =>
+  [
+    deal.title === "" ? deal.name : `${deal.title}, ${deal.name}`,
+    deal.on === null ? "" : `won ${formatDate(deal.on)}`,
+  ]
+    .filter((part) => part !== "")
+    .join(" · ");
+
+/** Which won deal it starts from: its company fills in the fields below. */
+const DealChoice = ({
+  deals,
+  dealId,
+  onChange,
+}: {
+  deals: readonly WonDeal[];
+  dealId: string;
+  onChange: (dealId: string) => void;
+}) => (
+  <Field>
+    <FieldLabel htmlFor="org-deal">The deal</FieldLabel>
+    <NativeSelect
+      className="w-full"
+      id="org-deal"
+      onChange={(event) => {
+        onChange(event.currentTarget.value);
+      }}
+      value={dealId}
+    >
+      {deals.map((deal) => (
+        <NativeSelectOption key={deal.dealId} value={deal.dealId}>
+          {dealLabel(deal)}
+        </NativeSelectOption>
+      ))}
+    </NativeSelect>
+    <FieldDescription>
+      Its company is linked to the organization, so Details reads it from Attio.
+    </FieldDescription>
+  </Field>
+);
+
+/** Reads the page again: its own route alone, as it follows the run. */
+const useRefreshPage = (): Refresh => {
   const router = useRouter();
+  return async () => {
+    await router.invalidate({
+      filter: (match) => match.routeId === "/admin/new-organization",
+      sync: true,
+    });
+  };
+};
+
+/** How often the page reads the run again while it works on its own. */
+const followMs = 5000;
+
+/**
+ * Added: setting it up followed here until the console records it, as
+ * the prototype's dialog ends on the way in. Until then it has no page
+ * among the organizations (they are the clients the console recorded);
+ * once it has, its Setup follows the rest. A run that stopped before it
+ * recorded the company says why, to add it again.
+ */
+const Following = ({
+  clientId,
+  view,
+}: {
+  clientId: string;
+  view: ProvisioningView | null;
+}) => {
+  const router = useRouter();
+  const navigate = useNavigate();
+  const refresh = useRefreshPage();
+  const working =
+    view !== null && view.client === null && view.phase !== "failed";
+  useEffect(() => {
+    const timer = working
+      ? setInterval(() => {
+          void refresh();
+        }, followMs)
+      : undefined;
+    return () => {
+      clearInterval(timer);
+    };
+  }, [working, refresh]);
+  if (view === null) {
+    return (
+      <p className="text-muted-foreground text-sm">
+        {`There's no organization ${clientId} being set up.`}
+      </p>
+    );
+  }
+  const openSetup = async () => {
+    // The organizations stand a minute (src/routes/admin.tsx): read them
+    // again, so the one recorded since is among them.
+    await router.invalidate({
+      filter: (match) => match.routeId === "/admin",
+      sync: true,
+    });
+    await navigate({
+      to: "/admin/organizations/$clientId/setup",
+      params: { clientId },
+    });
+  };
   return (
     <div className="flex flex-col gap-4">
       <p className="text-sm">
-        {`${name} is being set up: its own Cloudflare account, its Grasp, and its address. It shows among the organizations once the console has recorded it.`}
+        {view.client === null
+          ? `${clientId} is being set up: its own Cloudflare account, its Grasp, and its address. It shows among the organizations once the console has recorded it.`
+          : `${view.client.name} is recorded: its Setup follows the rest of setting it up.`}
       </p>
+      <section
+        aria-label="Setting it up"
+        className="bg-card overflow-hidden rounded-xl border text-sm"
+      >
+        <SettingUpNow refresh={refresh} view={view} />
+      </section>
       <div className="flex items-center gap-2">
-        <Button
-          nativeButton={false}
-          render={<Link params={{ clientId }} to="/clients/$clientId" />}
-        >
-          Follow its provisioning
-        </Button>
+        {view.client === null ? null : (
+          <Button
+            onClick={() => {
+              void openSetup();
+            }}
+          >
+            Open its Setup
+          </Button>
+        )}
         <Button
           nativeButton={false}
           render={
@@ -118,12 +271,26 @@ const Started = ({ clientId, name }: { clientId: string; name: string }) => {
  * what it is, its language, who decided on Grasp, and marking it a test.
  */
 const NewOrganization = () => {
-  const { releases } = Route.useLoaderData();
+  const { releases, won, following } = Route.useLoaderData();
+  const search = Route.useSearch();
+  const navigate = useNavigate();
+  const starts = startingPointsOf(won);
+  const deals = won.state === "read" ? won.deals : [];
+  // A deal won and not added yet is what an organization most likely
+  // starts from: the latest is chosen, to change or put right.
+  const [startFrom, setStartFrom] = useState<StartingPoint["id"]>(
+    deals.length > 0 ? "attio" : "hand"
+  );
+  const [dealId, setDealId] = useState(deals[0]?.dealId ?? "");
+  const deal =
+    startFrom === "attio"
+      ? deals.find((each) => each.dealId === dealId)
+      : undefined;
+  const prefill =
+    deal === undefined
+      ? { name: "", clientId: "", domains: "" }
+      : prefillOf(deal);
   const { busy, failure, run } = useProvisionAction();
-  const [started, setStarted] = useState<{
-    clientId: string;
-    name: string;
-  } | null>(null);
   const add = (form: FormData) => {
     const accountId = textOf(form, "accountId");
     const clientId = textOf(form, "clientId");
@@ -146,19 +313,25 @@ const NewOrganization = () => {
           ring: Number(textOf(form, "ring")),
           signIn: signInOf(form),
           ...(accountId === "" ? {} : { accountId }),
+          ...(deal === undefined ? {} : { attioCompanyId: deal.companyId }),
         },
       });
       if (result.clientId !== null) {
-        setStarted({ clientId: result.clientId, name });
+        await navigate({
+          to: "/admin/new-organization",
+          search: { following: result.clientId },
+        });
       }
       return result;
     });
   };
   const [newest] = releases;
-  if (started !== null) {
+  if (search.following !== undefined) {
     return (
-      <AdminPage title={`${started.name} is added`}>
-        <Started clientId={started.clientId} name={started.name} />
+      <AdminPage
+        title={`${following?.client?.name ?? search.following} is added`}
+      >
+        <Following clientId={search.following} view={following} />
       </AdminPage>
     );
   }
@@ -180,17 +353,39 @@ const NewOrganization = () => {
           }}
         >
           <FieldGroup>
-            <StartFrom />
+            <StartFrom
+              onChange={setStartFrom}
+              starts={starts}
+              value={startFrom}
+            />
+            {startFrom === "attio" ? (
+              <DealChoice dealId={dealId} deals={deals} onChange={setDealId} />
+            ) : null}
             <Field>
               <FieldLabel htmlFor="org-name">Name</FieldLabel>
-              <Input id="org-name" maxLength={100} name="name" required />
+              <Input
+                defaultValue={prefill.name}
+                id="org-name"
+                // Keyed by the deal: the field starts again from the one chosen.
+                key={`name-${deal?.dealId ?? ""}`}
+                maxLength={100}
+                name="name"
+                required
+              />
               <FieldDescription>
                 The company, as Grasp&apos;s staff know it.
               </FieldDescription>
             </Field>
             <Field>
               <FieldLabel htmlFor="org-id">Its address</FieldLabel>
-              <Input id="org-id" maxLength={50} name="clientId" required />
+              <Input
+                defaultValue={prefill.clientId}
+                id="org-id"
+                key={`id-${deal?.dealId ?? ""}`}
+                maxLength={50}
+                name="clientId"
+                required
+              />
               <FieldDescription>
                 Its hostname: lowercase letters, digits and dashes. It
                 can&apos;t change.
@@ -210,7 +405,12 @@ const NewOrganization = () => {
               </Field>
               <Field>
                 <FieldLabel htmlFor="org-domains">Email domains</FieldLabel>
-                <Input id="org-domains" name="domains" />
+                <Input
+                  defaultValue={prefill.domains}
+                  id="org-domains"
+                  key={`domains-${deal?.dealId ?? ""}`}
+                  name="domains"
+                />
                 <FieldDescription>
                   The domains its people sign in with, separated by commas. Left
                   empty, the admins&apos; own.
@@ -248,7 +448,9 @@ const NewOrganization = () => {
                 >
                   {releases.map((release) => (
                     <NativeSelectOption key={release.id} value={release.id}>
-                      {release.id}
+                      {release.notes === ""
+                        ? release.id
+                        : `${release.id} · ${release.notes}`}
                     </NativeSelectOption>
                   ))}
                 </NativeSelect>
@@ -312,7 +514,18 @@ const NewOrganization = () => {
  * organizations/, where `new` could be a client's id.
  */
 export const Route = createFileRoute("/admin/new-organization")({
-  loader: async () => await fetchNewClientOptions(),
+  // The organization just added, followed until the console records it.
+  validateSearch: (search: Record<string, unknown>): { following?: string } =>
+    typeof search.following === "string" ? { following: search.following } : {},
+  loaderDeps: ({ search }) => ({ following: search.following }),
+  loader: async ({ deps }) => {
+    const [options, won, following] = await Promise.all([
+      fetchNewClientOptions(),
+      fetchWonDeals(),
+      deps.following === undefined ? null : provisioningOf(deps.following),
+    ]);
+    return { ...options, won, following };
+  },
   head: () => ({ meta: [{ title: "New organization" }] }),
   component: NewOrganization,
 });

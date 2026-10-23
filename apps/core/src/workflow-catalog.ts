@@ -6,6 +6,7 @@ import type { CatalogContract } from "@grasp-os/open-workflow/catalog";
 import { actorOf } from "@grasp-os/shared/audit";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { canonicalJson } from "@grasp-os/shared/json";
+import { log } from "@grasp-os/shared/log";
 import { requireBuilder, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import {
@@ -25,6 +26,7 @@ import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import { workflowCatalogContracts } from "./db/core/schema.ts";
 import { inList, isUniqueViolation } from "./db/d1.ts";
 import { requireMemberAdmin, stillAdminSql } from "./permissions.ts";
+import { takesPageAnswers } from "./workflows/exact-values.ts";
 
 // The host catalog of contracts independent workflows bind besides each
 // other (platform specification 13.2): operation, connector, model,
@@ -43,7 +45,9 @@ import { requireMemberAdmin, stillAdminSql } from "./permissions.ts";
 //   the profile's own catalog reader (`resolveContract`), with its limits,
 //   before they are stored; one it refuses is never stored.
 // - Who publishes: only the organization's own admins, never Grasp staff,
-//   re-checked in the statement that stores it, and audited.
+//   re-checked in the statement that stores it, and audited; and the
+//   release's install, the contracts a built-in blueprint's workflows bind
+//   (`ensureReleaseContract`), only under a key nobody has taken.
 
 /** A stored contract, as a validation resolves it. */
 const storedSchema = z.strictObject({
@@ -86,17 +90,11 @@ const entryOf = (row: typeof workflowCatalogContracts.$inferSelect) => ({
 });
 
 /**
- * Publishes a contract to the catalog for `by`, one of the organization's
- * own admins: refused unless the profile's catalog reader accepts it
- * (`workflow.contract_invalid`), and once its key is taken
- * (`workflow.contract_exists`).
+ * `input` as the catalog stores it: refused unless the profile's catalog
+ * reader accepts it, and a decision contract's response schema takes what
+ * a person can answer (`workflow.contract_invalid`).
  */
-export const publishCatalogContract = async (
-  env: Env,
-  by: Identity,
-  input: unknown
-): Promise<CatalogContractEntry> => {
-  requireMemberAdmin(by);
+const checkedContract = async (input: unknown) => {
   const { key, ...contract } = workflowResourceErrors.parse(
     "workflow.contract_invalid",
     catalogContractSchema,
@@ -108,21 +106,49 @@ export const publishCatalogContract = async (
       issues: [read.reason],
     });
   }
+  // A decision is answered on its page, with no payload or a comment: a
+  // response schema taking neither could never be answered.
+  if (
+    contract.kind === "decision" &&
+    contract.response !== undefined &&
+    !takesPageAnswers(contract.response)
+  ) {
+    throw workflowResourceErrors.create("workflow.contract_invalid", {
+      issues: [
+        "response: A person answers a decision with no payload or with { comment }: take one of them.",
+      ],
+    });
+  }
   const text = canonicalJson(contract);
-  const fingerprint = await sha256Hex(text);
+  return { key, kind: contract.kind, text, fingerprint: await sha256Hex(text) };
+};
+
+/**
+ * Publishes a contract to the catalog for `by`, one of the organization's
+ * own admins: refused unless it is a contract the catalog takes
+ * (`checkedContract`), and once its key is taken
+ * (`workflow.contract_exists`).
+ */
+export const publishCatalogContract = async (
+  env: Env,
+  by: Identity,
+  input: unknown
+): Promise<CatalogContractEntry> => {
+  requireMemberAdmin(by);
+  const { key, kind, text, fingerprint } = await checkedContract(input);
   const publishedAt = new Date();
   const db = drizzle(env.DB);
   try {
     await auditedBatch(env, db, [
       db.insert(workflowCatalogContracts).select(
-        sql`SELECT ${key}, ${contract.kind}, ${text}, ${fingerprint}, ${by.userId}, ${publishedAt.getTime()}
+        sql`SELECT ${key}, ${kind}, ${text}, ${fingerprint}, ${by.userId}, ${publishedAt.getTime()}
           WHERE ${stillAdminSql(by)}`
       ),
       outboxedIfChanged(db, {
         actor: actorOf(by),
         action: "workflow.contract.published",
         target: { type: "workflow_contract", id: key },
-        detail: { kind: contract.kind, fingerprint },
+        detail: { kind, fingerprint },
       }),
     ]);
   } catch (error) {
@@ -142,11 +168,57 @@ export const publishCatalogContract = async (
   }
   return {
     key,
-    kind: contract.kind,
+    kind,
     fingerprint,
     publishedBy: by.userId,
     publishedAt: publishedAt.toISOString(),
   };
+};
+
+/** Who the catalog names as publishing what the release ships. */
+const releasePublisher = "grasp";
+
+/**
+ * Publishes `input`, a contract a built-in blueprint ships, as the
+ * release's install (app-blueprints.ts): checked as an admin's is, and
+ * stored only while its key isn't taken, audited only then. A key is
+ * never changed once published, so one taken already, by an earlier
+ * install or by an admin, stays as it is: a different contract under it
+ * is logged, and a definition binding the key is checked against the
+ * contract stored, as any is. A contract grants nothing: what serves its
+ * binding is still an admin's approval.
+ */
+export const ensureReleaseContract = async (
+  env: Env,
+  input: unknown,
+  /** What the audit event names it shipped with: the built-in. */
+  detail: Readonly<Record<string, string>>
+): Promise<void> => {
+  const { key, kind, text, fingerprint } = await checkedContract(input);
+  const db = drizzle(env.DB);
+  // Not an insert over the key's row, which the database refuses whatever
+  // the conflict clause (migrations 0080 and 0101): one only while there is
+  // none.
+  await auditedBatch(env, db, [
+    db.insert(workflowCatalogContracts).select(
+      sql`SELECT ${key}, ${kind}, ${text}, ${fingerprint}, ${releasePublisher}, ${Date.now()}
+          WHERE NOT EXISTS (SELECT 1 FROM workflow_catalog_contracts WHERE key = ${key})`
+    ),
+    outboxedIfChanged(db, {
+      actor: { type: "system" },
+      action: "workflow.contract.published",
+      target: { type: "workflow_contract", id: key },
+      detail: { kind, fingerprint, ...detail },
+    }),
+  ]);
+  const stored = await db
+    .select({ fingerprint: workflowCatalogContracts.fingerprint })
+    .from(workflowCatalogContracts)
+    .where(eq(workflowCatalogContracts.key, key))
+    .get();
+  if (stored?.fingerprint !== fingerprint) {
+    log.warn("builtins.contract_differs", { key, ...detail });
+  }
 };
 
 /** The catalog's contracts, by key, for builders. */

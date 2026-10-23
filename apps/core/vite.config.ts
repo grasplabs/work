@@ -14,6 +14,8 @@ import { testVersionModule } from "./test/compiler-version.ts";
 import {
   connectClient,
   connectProvidersScript,
+  directoryClient,
+  documentsClient,
   landscapeClient,
 } from "./test/connect-providers.ts";
 import { testSignIn } from "./test/sign-in-config.ts";
@@ -60,6 +62,7 @@ export const screenTests = [
   "test/app-invocation-isolation.test.ts",
   "test/release-retention.test.ts",
   "test/app-activation.test.ts",
+  "test/app-candidates.test.ts",
   "test/app-tests.test.ts",
   "test/app-test-live.test.ts",
   "test/app-function-route.test.ts",
@@ -277,6 +280,10 @@ export const coreProject = (
                 MICROSOFT_CLIENT_SECRET: connectClient.secret,
                 MICROSOFT_LANDSCAPE_CLIENT_ID: landscapeClient.id,
                 MICROSOFT_LANDSCAPE_CLIENT_SECRET: landscapeClient.secret,
+                MICROSOFT_DIRECTORY_CLIENT_ID: directoryClient.id,
+                MICROSOFT_DIRECTORY_CLIENT_SECRET: directoryClient.secret,
+                MICROSOFT_DOCUMENTS_CLIENT_ID: documentsClient.id,
+                MICROSOFT_DOCUMENTS_CLIENT_SECRET: documentsClient.secret,
                 COMPOSIO_API_KEY: testComposioKey,
               },
               d1Databases: { DB: "grasp-os-connect" },

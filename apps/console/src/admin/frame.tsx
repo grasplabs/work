@@ -1,23 +1,22 @@
 /**
- * Grasp's admin as a place of its own, apart from the console's pages and
- * from the platform a company works in, ported from the prototype
+ * Grasp's admin, the one place staff manage everything, apart from the
+ * platform a company works in, ported from the prototype
  * (grasplabs/prototype `packages/grasp/src/components/admin/admin-frame.tsx`):
- * its own sidebar (its places, every organization, and the way back to the
- * console at its foot) and none of the console's bar above. It folds to
+ * its own sidebar, with its places and every organization. It folds to
  * icons, so inside one organization that organization's own column of
  * sections has the room.
  *
  * Beside each organization, as the prototype has it, how many things need
  * Grasp there, as the admin's model works it out of what its core answered
- * (src/admin/views.ts). Not yet here: how many integrations wait on Grasp
- * and how many companies' platforms need a look, for the console has no
- * source for them yet; those places show no number rather than a made-up
- * one.
+ * (src/admin/views.ts). Beside Platform, how many companies' platforms
+ * need a look and a rollout waiting for approval, as the console recorded
+ * them (`platformCounts`), and under it its releases and rollouts.
+ * Beside Integrations to build, how many apps
+ * the companies asked for wait on Grasp (`askedApps`).
  */
 import {
   Sidebar,
   SidebarContent,
-  SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
   SidebarGroupLabel,
@@ -27,6 +26,9 @@ import {
   SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarMenuSub,
+  SidebarMenuSubButton,
+  SidebarMenuSubItem,
   SidebarProvider,
   useSidebar,
 } from "@grasp-os/ui/components/sidebar";
@@ -38,7 +40,6 @@ import {
 } from "@grasp-os/ui/components/tooltip";
 import { Link, Outlet, useMatchRoute, useRouter } from "@tanstack/react-router";
 import {
-  ArrowLeftIcon,
   BuildingIcon,
   CableIcon,
   FlaskConicalIcon,
@@ -54,6 +55,8 @@ import type { ComponentType, SVGProps } from "react";
 
 import type { ClientAdmin } from "../clients/admin.ts";
 import { GraspMark } from "./grasp-mark.tsx";
+import { askedApps } from "./integrations-asked.ts";
+import type { PlatformCounts } from "./platform.ts";
 import { organizationsOf, unreadWords } from "./views.ts";
 import type { Organization } from "./views.ts";
 
@@ -68,6 +71,14 @@ interface Place {
     | "/admin/lab";
   label: string;
   icon: ComponentType<SVGProps<SVGSVGElement>>;
+  /** The pages under it, nested beneath its entry. */
+  under?: readonly SubPlace[];
+}
+
+/** A page under one of the admin's places, nested beneath its entry. */
+interface SubPlace {
+  to: "/admin/platform/releases" | "/admin/platform/rollouts";
+  label: string;
 }
 
 const places: readonly Place[] = [
@@ -77,7 +88,15 @@ const places: readonly Place[] = [
     label: "Integrations to build",
     icon: WrenchIcon,
   },
-  { to: "/admin/platform", label: "Platform", icon: ServerIcon },
+  {
+    to: "/admin/platform",
+    label: "Platform",
+    icon: ServerIcon,
+    under: [
+      { to: "/admin/platform/releases", label: "Releases" },
+      { to: "/admin/platform/rollouts", label: "Rollouts" },
+    ],
+  },
   { to: "/admin/ask", label: "Ask Grasp", icon: SparklesIcon },
   { to: "/admin/sources", label: "Sources", icon: CableIcon },
   { to: "/admin/lab", label: "Stephen Lab", icon: FlaskConicalIcon },
@@ -115,9 +134,61 @@ const tooltipOf = (
   return `${name}: ${needs} ${needs === 1 ? "thing needs" : "things need"} Grasp`;
 };
 
-const PlaceItem = ({ place }: { place: Place }) => {
+/** What a place says beside its name: a count, and what it counts in words. */
+interface PlaceBadge {
+  count: number;
+  words: string;
+}
+
+/** Platform's badge: companies that need a look, and a rollout that waits, as one count. */
+const platformBadge = ({
+  needLook,
+  waiting,
+}: PlatformCounts): PlaceBadge | null => {
+  const count = needLook + (waiting ? 1 : 0);
+  if (count === 0) {
+    return null;
+  }
+  const look =
+    needLook === 0
+      ? []
+      : [
+          `${needLook} ${needLook === 1 ? "company needs" : "companies need"} a look`,
+        ];
+  const waits = waiting ? ["a rollout waits for approval"] : [];
+  return { count, words: [...look, ...waits].join("; ") };
+};
+
+/** Integrations to build's badge: the apps asked for, each waiting on Grasp to start its build. */
+const integrationsBadge = (asked: number): PlaceBadge | null =>
+  asked === 0
+    ? null
+    : {
+        count: asked,
+        words: `${asked} ${asked === 1 ? "app waits" : "apps wait"} on Grasp`,
+      };
+
+/** What a place says beside its name, if anything. */
+const badgeOf = (
+  to: Place["to"],
+  platform: PlatformCounts,
+  asked: number
+): PlaceBadge | null => {
+  if (to === "/admin/platform") {
+    return platformBadge(platform);
+  }
+  return to === "/admin/integrations" ? integrationsBadge(asked) : null;
+};
+
+const PlaceItem = ({
+  place,
+  badge = null,
+}: {
+  place: Place;
+  badge?: PlaceBadge | null;
+}) => {
   const matchRoute = useMatchRoute();
-  const { to, label, icon: Icon } = place;
+  const { to, label, icon: Icon, under = [] } = place;
   // The overview is only itself; any other place holds the pages under it.
   const active = matchRoute({ to, fuzzy: to !== "/admin" }) !== false;
   return (
@@ -125,11 +196,33 @@ const PlaceItem = ({ place }: { place: Place }) => {
       <SidebarMenuButton
         isActive={active}
         render={<Link to={to} />}
-        tooltip={label}
+        // The folded sidebar hides the badge, so its tooltip says the count.
+        tooltip={badge === null ? label : `${label}: ${badge.words}`}
       >
         <Icon />
         <span>{label}</span>
       </SidebarMenuButton>
+      {badge === null ? null : (
+        <SidebarMenuBadge>
+          {badge.count}
+          <span className="sr-only">{`: ${badge.words}`}</span>
+        </SidebarMenuBadge>
+      )}
+      {under.length === 0 ? null : (
+        // Hidden while the sidebar is folded to icons: its entry leads there.
+        <SidebarMenuSub>
+          {under.map((sub) => (
+            <SidebarMenuSubItem key={sub.to}>
+              <SidebarMenuSubButton
+                isActive={matchRoute({ to: sub.to, fuzzy: true }) !== false}
+                render={<Link to={sub.to} />}
+              >
+                <span>{sub.label}</span>
+              </SidebarMenuSubButton>
+            </SidebarMenuSubItem>
+          ))}
+        </SidebarMenuSub>
+      )}
     </SidebarMenuItem>
   );
 };
@@ -189,9 +282,16 @@ const OrganizationItem = ({ organization }: { organization: Organization }) => {
   );
 };
 
-const AdminSidebar = ({ admins }: { admins: readonly ClientAdmin[] }) => {
+const AdminSidebar = ({
+  admins,
+  platform,
+}: {
+  admins: readonly ClientAdmin[];
+  platform: PlatformCounts;
+}) => {
   const router = useRouter();
   const organizations = organizationsOf(admins);
+  const asked = askedApps(admins).length;
   const { setOpenMobile } = useSidebar();
   // On a phone the sidebar is a sheet over the page: going anywhere from it
   // closes it, so the page it went to is in view.
@@ -231,7 +331,11 @@ const AdminSidebar = ({ admins }: { admins: readonly ClientAdmin[] }) => {
             <nav aria-label="Admin">
               <SidebarMenu>
                 {places.map((place) => (
-                  <PlaceItem key={place.to} place={place} />
+                  <PlaceItem
+                    badge={badgeOf(place.to, platform, asked)}
+                    key={place.to}
+                    place={place}
+                  />
                 ))}
               </SidebarMenu>
             </nav>
@@ -253,19 +357,6 @@ const AdminSidebar = ({ admins }: { admins: readonly ClientAdmin[] }) => {
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
-      <SidebarFooter>
-        <SidebarMenu>
-          <SidebarMenuItem>
-            <SidebarMenuButton
-              render={<Link to="/" />}
-              tooltip="Back to the console"
-            >
-              <ArrowLeftIcon />
-              <span>Back to the console</span>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        </SidebarMenu>
-      </SidebarFooter>
     </Sidebar>
   );
 };
@@ -274,10 +365,16 @@ const AdminSidebar = ({ admins }: { admins: readonly ClientAdmin[] }) => {
  * The admin's frame around its pages: its sidebar beside the page, which
  * scrolls inside it so its bar stays in view, as the platform's frame does.
  */
-export const AdminFrame = ({ admins }: { admins: readonly ClientAdmin[] }) => (
+export const AdminFrame = ({
+  admins,
+  platform,
+}: {
+  admins: readonly ClientAdmin[];
+  platform: PlatformCounts;
+}) => (
   <TooltipProvider>
     <SidebarProvider className="h-svh">
-      <AdminSidebar admins={admins} />
+      <AdminSidebar admins={admins} platform={platform} />
       <SidebarInset className="min-h-0 min-w-0 overflow-y-auto">
         <Outlet />
       </SidebarInset>

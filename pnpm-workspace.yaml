@@ -6,6 +6,14 @@ packages:
 # Supply-chain defaults: new versions wait 3 days, exotic sub-dependencies are
 # blocked, and only the packages listed here may run install scripts.
 minimumReleaseAge: 4320
+# One-off exception Nick approved on 2026-10-22: pi 1.4.0 before its 3-day wait,
+# to test DeepSeek V4.1 Flash, which only 1.4.0's catalogue has. pi-agent-core
+# and pi-telemetry pin pi-ai's exact version, so they come along. Remove after
+# 2026-10-24, when 1.4.0 is past the wait.
+minimumReleaseAgeExclude:
+  - "@earendil-works/pi-agent-core@1.4.0"
+  - "@earendil-works/pi-ai@1.4.0"
+  - "@earendil-works/pi-telemetry@1.4.0"
 blockExoticSubdeps: true
 strictDepBuilds: true
 allowBuilds:
@@ -75,12 +83,20 @@ catalog:
   # as better-auth.
   "@better-auth/core": 1.7.5
   "@better-auth/sso": 1.7.5
-  "@earendil-works/pi-agent-core": 1.1.0
-  "@earendil-works/pi-ai": 1.1.0
+  "@earendil-works/pi-agent-core": 1.4.0
+  "@earendil-works/pi-ai": 1.4.0
   "@modelcontextprotocol/sdk": 1.30.0
   better-auth: 1.7.5
   # The console's Cloudflare Access check.
   jose: 6.2.12
+  # Vercel's Chat SDK (MIT): one bot on Teams, Slack, Discord, WhatsApp and
+  # the rest, its state in Durable Objects (packages/chat). Its adapters
+  # move together; keep them on chat's version.
+  "@chat-adapter/discord": 4.43.0
+  chat: 4.43.0
+  # What the Teams and Slack adapters send through; packages/chat's tests
+  # check its fix against it (src/workerd.ts). On the version they resolve.
+  axios: 1.20.0
 
   # Frontend
   # Babel 7 until babel-plugin-react-compiler supports Babel 8.
@@ -183,5 +199,11 @@ peerDependencyRules:
 # jq-wasm's Workers entry imports its own, unmetered jq.wasm as a default;
 # the patch drops that import, so a bundle carries only the metered module
 # (packages/workflow-expressions/src/jq.wasm).
+#
+# vitest-pool-workers wraps each Durable Object class's prototype in one
+# more Proxy on every construction (0.23.0 too); with `isolate: false`, a
+# shard that constructs about 1,800 objects of one class overflows the
+# stack, and every file after fails (GRA-972). The patch wraps it once.
 patchedDependencies:
+  "@cloudflare/vitest-pool-workers@0.22.0": patches/@cloudflare__vitest-pool-workers@0.22.0.patch
   jq-wasm@3.0.0-jq-1.8.2: patches/jq-wasm@3.0.0-jq-1.8.2.patch

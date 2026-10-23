@@ -39,6 +39,11 @@ export const onboarding = sqliteTable(
      * roster with their link; `null` before any link went out.
      */
     toldAt: text("told_at"),
+    /**
+     * What the admin chose about what Grasp may connect, as JSON
+     * (`setupChoicesSchema`), or `null` before anything.
+     */
+    choices: text(),
   },
   (table) => [check("onboarding_one_row", sql`${table.id} = 1`)]
 );
@@ -93,6 +98,11 @@ export const links = sqliteTable("links", {
    * making someone a lead afterwards tells nobody about their interview.
    */
   ledTeam: text("led_team"),
+  /**
+   * When the company's admin took the link to send it themselves (ISO
+   * 8601): it is new to them no more. None while they haven't.
+   */
+  takenAt: text("taken_at"),
   /**
    * The version of what their interview holds: a save goes up by one, and
    * so does a delete or a new start, so no copy from before either ever
@@ -152,6 +162,21 @@ export const interviewStates = sqliteTable("interview_states", {
   drawnAt: text("drawn_at"),
   updatedAt: text("updated_at").notNull(),
 });
+
+/**
+ * The interviewer's texts each interview was held with, by their mark
+ * (onboarding/interviewer-text.ts), and when each first spoke in it: so
+ * staff, and the lab, know which Stephen they read. Gone with what was said.
+ */
+export const interviewTexts = sqliteTable(
+  "interview_texts",
+  {
+    person: text().notNull(),
+    mark: text().notNull(),
+    at: text().notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.person, table.mark] })]
+);
 
 /**
  * Everyone ever counted in the admin's numbers (`teamCounts`), once: the
@@ -286,6 +311,37 @@ export const drawnWorks = sqliteTable("drawn_works", {
 });
 
 /**
+ * Each team on its way into the brain (onboarding/brain-intake.ts): when
+ * something new of it waits to be given to the brain (`dueAt`), and when
+ * the brain first had any of it (`sentAt`), both ISO 8601.
+ */
+export const brainTeams = sqliteTable("brain_teams", {
+  team: text().primaryKey(),
+  dueAt: text("due_at"),
+  sentAt: text("sent_at"),
+});
+
+/**
+ * Who each record the onboarding gave the brain rests on: a statement on
+ * whoever agreed to its fact, a drawing on whom it was drawn from. The
+ * brain's records never name a person; this is how deleting an interview
+ * finds what it is in (GRA-368). Goes with nothing else.
+ */
+export const brainSent = sqliteTable(
+  "brain_sent",
+  {
+    record: text().notNull(),
+    type: text().notNull(),
+    team: text().notNull(),
+    person: text().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.record, table.person] }),
+    index("brain_sent_person").on(table.person),
+  ]
+);
+
+/**
  * Drawings that failed and wait to be tried again: what (`team:<id>` or
  * `work:<id>`), how often it failed, and when it may be tried again (ISO 8601).
  */
@@ -328,6 +384,34 @@ export const voiceUse = sqliteTable(
     seconds: real().notNull(),
   },
   (table) => [primaryKey({ columns: [table.who, table.day] })]
+);
+
+/**
+ * The text each interview ran on (onboarding/interviewer-text.ts), as its
+ * last turn had it: the text's mark, who held it, and in which language.
+ * Nothing that was said. Goes with the interview.
+ */
+export const interviewSettings = sqliteTable("interview_settings", {
+  person: text().primaryKey(),
+  mark: text().notNull(),
+  interviewer: text({ enum: ["stephen", "claire"] }).notNull(),
+  locale: text().notNull(),
+});
+
+/**
+ * How long people waited for Stephen's voice, from the end of what they
+ * said to his first sound, as their page measured it: by day, how many
+ * answers took up to each tenth of a second (`upTo`, in ms). Whose
+ * answers they were isn't kept.
+ */
+export const answerWaits = sqliteTable(
+  "answer_waits",
+  {
+    day: text().notNull(),
+    upTo: integer("up_to").notNull(),
+    answers: integer().notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.day, table.upTo] })]
 );
 
 /**

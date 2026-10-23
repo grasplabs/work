@@ -117,6 +117,59 @@ describe("the release manifest", () => {
     expect(declaring({ ...interfaces, connect: { calls: {} } })).toThrow(
       /declares no version it serves/u
     );
+
+    const [connect, core] = fixture;
+    if (connect === undefined || core === undefined) {
+      throw new Error("expected two builds");
+    }
+    const [migration] = connect.d1Migrations.DB ?? [];
+    if (migration === undefined) {
+      throw new Error("expected a migration");
+    }
+    const withDatabase = (database: Partial<typeof connect>) => () =>
+      generateManifest(info, [{ ...connect, ...database }, core]);
+    // A schema compatible from a migration the release doesn't ship.
+    expect(withDatabase({ d1CompatibleFrom: { DB: 1 } })).toThrow(
+      /compatible from migration 1/u
+    );
+    // A migration out of order, which no schema number describes.
+    expect(
+      withDatabase({
+        d1Migrations: {
+          DB: [migration, { ...migration, name: "0002_skipped.sql" }],
+        },
+      })
+    ).toThrow(/0002_skipped.sql isn't numbered 0001/u);
+  });
+
+  it("declares each database's schema as its newest migration, compatible from the oldest one its schema says", () => {
+    const [connect, core] = fixture;
+    const [migration] = connect?.d1Migrations.DB ?? [];
+    if (
+      connect === undefined ||
+      core === undefined ||
+      migration === undefined
+    ) {
+      throw new Error("expected two builds with a migration");
+    }
+    const migrations = ["0000_a.sql", "0001_b.sql", "0002_c.sql"].map(
+      (name) => ({ ...migration, name })
+    );
+
+    const { compatibility } = generateManifest(info, [
+      {
+        ...connect,
+        d1Migrations: { DB: migrations },
+        d1CompatibleFrom: { DB: 1 },
+      },
+      core,
+    ]);
+
+    expect(compatibility?.databases).toStrictEqual({
+      "grasp-os-connect": { schema: 2, compatibleFrom: 1 },
+      "grasp-os-core": { schema: 0, compatibleFrom: 0 },
+      "grasp-os-knowledge": { schema: 0, compatibleFrom: 0 },
+    });
   });
 
   it("refuses Workers on different compatibility dates", () => {

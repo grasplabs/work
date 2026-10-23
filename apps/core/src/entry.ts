@@ -1,3 +1,4 @@
+import { adminAskPath } from "@grasp-os/shared/admin-ask";
 import { adminSnapshotPath } from "@grasp-os/shared/admin-snapshot";
 import { auditExportPath } from "@grasp-os/shared/audit-log";
 import { connectionCallbackPath } from "@grasp-os/shared/connect";
@@ -17,10 +18,12 @@ import type { LogFields } from "@grasp-os/shared/log";
 import { mailIngressPath } from "@grasp-os/shared/mail-ingress";
 import { onboardingSummaryPath } from "@grasp-os/shared/onboarding-summary";
 import { platformUpdatePath } from "@grasp-os/shared/platform-change";
+import { provisionProbePath } from "@grasp-os/shared/provision-probe";
 import { quotaPolicyReportPath } from "@grasp-os/shared/quota-policy-report";
 import { screenFramePath } from "@grasp-os/shared/screens";
 import { speechPath } from "@grasp-os/shared/voice";
 
+import { adminAskResponse } from "./admin-ask.ts";
 import { adminSnapshotResponse } from "./admin-snapshot.ts";
 import { appFileResponse, fileRouteOf } from "./app-file-route.ts";
 import {
@@ -28,6 +31,7 @@ import {
   portableCallApp,
   portableFunctionResponse,
 } from "./app-function-route.ts";
+import { appLinkResponse, linkRouteOf } from "./app-link-route.ts";
 import { appTokenResponse, tokenRequestApp } from "./app-token-route.ts";
 import { auditExportResponse } from "./audit-rpc.ts";
 import { authBasePath } from "./auth/auth.ts";
@@ -57,6 +61,7 @@ import {
 } from "./packages/serve.ts";
 import { platformUpdateResponse } from "./platform-updates.ts";
 import { liveConnectionApp, portableLiveResponse } from "./portable-live.ts";
+import { provisionProbeResponse } from "./provision-probe.ts";
 import { checkRouterSecret } from "./router-secret.ts";
 import { rpcResponse } from "./rpc.ts";
 import { screenFrameResponse, screenModuleResponse } from "./screen-frame.ts";
@@ -238,6 +243,17 @@ const appCallResponse = async (
   if (tokenApp !== undefined) {
     return await appTokenResponse(request, env, tokenApp, requestId);
   }
+  const linkRoute = linkRouteOf(pathname, request.method);
+  if (linkRoute === "not_found") {
+    return errorResponse(
+      404,
+      requestErrors.create("request.not_found"),
+      requestId
+    );
+  }
+  if (linkRoute !== undefined) {
+    return await appLinkResponse(request, env, linkRoute, requestId);
+  }
   const fileRoute = fileRouteOf(pathname, request.method);
   if (fileRoute === "not_found") {
     return errorResponse(
@@ -261,6 +277,7 @@ const pathHandlers: ReadonlyMap<
   [onboardingSummaryPath, onboardingSummaryResponse],
   [quotaPolicyReportPath, quotaPolicyReportResponse],
   [adminSnapshotPath, adminSnapshotResponse],
+  [adminAskPath, adminAskResponse],
   [platformUpdatePath, platformUpdateResponse],
   [mailIngressPath, mailIngressResponse],
 ]);
@@ -285,6 +302,14 @@ const route = async (
   }
   if (pathname === "/rpc") {
     return await rpcResponse(request, env, requestId);
+  }
+  // The console's alone: anyone else's request goes on as one to a path
+  // core has no route for (src/provision-probe.ts).
+  if (pathname === provisionProbePath) {
+    const probe = await provisionProbeResponse(request, env);
+    if (probe !== undefined) {
+      return probe;
+    }
   }
   if (pathname === screenFramePath) {
     return await screenFrameResponse(env, url);

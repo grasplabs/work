@@ -26,7 +26,7 @@ import type { DeploySecrets } from "../src/deploy/secrets.ts";
 import { importReleases } from "../src/releases/import.ts";
 import type { ReleaseStore } from "../src/releases/import.ts";
 import type { AccountState } from "./cloudflare-api-kit.ts";
-import { mockCloudflareApi } from "./cloudflare-api.ts";
+import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { declared, publishRelease } from "./releases.ts";
 import type { ReleaseSpec } from "./releases.ts";
 
@@ -728,25 +728,45 @@ describe("deploying safely", () => {
       name: "INBOUND_MAIL_DOMAIN",
       json: "mail.acme.test",
     });
-    await db.insert(settings).values({
-      clientId,
-      key: "DB",
-      value: JSON.stringify("elsewhere"),
-      updatedBy: staff.email,
-      updatedAt: now,
-    });
-    const refused = await nextDeploy(clientId, { notes: "fix(core): db" });
+    // One that would replace a binding, and one that would take core's
+    // Durable Objects out of the EU (core's src/durable-objects.ts).
+    for (const [key, value] of [
+      ["DB", "elsewhere"],
+      ["DURABLE_OBJECT_JURISDICTION", "none"],
+    ] as const) {
+      // oxlint-disable-next-line no-await-in-loop -- one setting at a time
+      await db
+        .delete(settings)
+        .where(and(eq(settings.clientId, clientId), eq(settings.key, "DB")));
+      // oxlint-disable-next-line no-await-in-loop -- one setting at a time
+      await db.insert(settings).values({
+        clientId,
+        key,
+        value: JSON.stringify(value),
+        updatedBy: staff.email,
+        updatedAt: now,
+      });
+      // oxlint-disable-next-line no-await-in-loop -- one deploy at a time
+      const refused = await nextDeploy(clientId, {
+        notes: `fix(core): ${key}`,
+      });
 
-    await failingDeploy(refused);
+      // oxlint-disable-next-line no-await-in-loop -- one deploy at a time
+      await failingDeploy(refused);
 
-    expect(
-      bindingsOf(liveVersionOf(account, "grasp-os-core")).get(
-        "AUDIT_RETENTION_DAYS"
-      )
-    ).toStrictEqual({ type: "json", name: "AUDIT_RETENTION_DAYS", json: 90 });
-    await expect(deployRow(refused)).resolves.toMatchObject({
-      error: "unknown_setting",
-    });
+      const live = bindingsOf(liveVersionOf(account, "grasp-os-core"));
+      expect({
+        retention: live.get("AUDIT_RETENTION_DAYS"),
+        jurisdiction: live.get("DURABLE_OBJECT_JURISDICTION"),
+      }).toStrictEqual({
+        retention: { type: "json", name: "AUDIT_RETENTION_DAYS", json: 90 },
+        jurisdiction: undefined,
+      });
+      // oxlint-disable-next-line no-await-in-loop -- one deploy at a time
+      await expect(deployRow(refused)).resolves.toMatchObject({
+        error: "unknown_setting",
+      });
+    }
   });
 
   it("deploys a client whose feature flags were stored before they were removed, once its migration ran, keeping its other settings", async () => {
@@ -813,6 +833,24 @@ describe("deploying safely", () => {
           gateway: "grasp-os",
           models: ["anthropic/claude-sonnet-4-5"],
           eu: { models: ["mistral/mistral-large"] },
+        }),
+      ],
+      // A way to ElevenLabs the gateway has no path for.
+      [
+        "MODEL_GATEWAY",
+        JSON.stringify({
+          gateway: "grasp-os",
+          models: ["elevenlabs/eleven_v4"],
+          voice: { provider: "elevenlabs-us" },
+        }),
+      ],
+      // An EU voice model, reached at ElevenLabs's native host.
+      [
+        "MODEL_GATEWAY",
+        JSON.stringify({
+          gateway: "grasp-os",
+          models: ["elevenlabs/eleven_v4"],
+          eu: { models: ["elevenlabs/eleven_v4"] },
         }),
       ],
       ["MEMORY_LIMITS", JSON.stringify({ "USER.md": 0 })],
@@ -1711,8 +1749,18 @@ describe("deploying only a release that works with what the client runs", () => 
     });
   });
 
-  it("refuses a release that doesn't read every workflow journal and run every App the client's code may have left", async () => {
-    const { account, clientId, deployId } = await setUp();
+  it("refuses a release that doesn't read every workflow journal, run every App, or run on every database schema the client's code may have left", async () => {
+    // Its second migration contracts core's database: no code from before
+    // it runs on it.
+    const contracted = {
+      "0000_init.sql": "CREATE TABLE a (id TEXT, old TEXT);",
+      "0001_drop_old.sql": "ALTER TABLE a DROP COLUMN old;",
+    };
+    const { account, clientId, deployId } = await setUp({
+      notes: "feat(core): stop using a.old and drop it",
+      migrations: contracted,
+      compatibleFrom: { "grasp-os-core": 1 },
+    });
     await runDeploy(context, deployId);
 
     const journals = await refusal(
@@ -1729,8 +1777,17 @@ describe("deploying only a release that works with what the client runs", () => 
       }),
       account
     );
+    const schemas = await refusal(
+      await startNext(clientId, {
+        notes: "revert: use a.old again",
+        compatibleFrom: {},
+      }),
+      account
+    );
     const wider = await startNext(clientId, {
       notes: "feat(core): read journal 10 and run protocol 3 too",
+      migrations: contracted,
+      compatibleFrom: { "grasp-os-core": 1 },
       compatibility: {
         ...declared,
         workflowJournal: { min: 8, max: 10 },
@@ -1740,9 +1797,10 @@ describe("deploying only a release that works with what the client runs", () => 
     await runDeploy(context, wider);
 
     const widerRow = await deployRow(wider);
-    expect({ journals, apps, wider: widerRow?.status }).toStrictEqual({
+    expect({ journals, apps, schemas, wider: widerRow?.status }).toStrictEqual({
       journals: refused("release_incompatible"),
       apps: refused("release_incompatible"),
+      schemas: refused("schema_incompatible"),
       wider: "done",
     });
   });

@@ -2,12 +2,19 @@
  * Rolling a client back from a rollout: each of its Workers sent all its
  * traffic back to the version it ran before the rollout reached it
  * (`previous` on its target, src/rollout/targets.ts). Instant: the
- * versions are there, with their own secrets, so nothing is uploaded.
+ * versions are there, with their own secrets, so nothing is uploaded, and
+ * so only while those secrets are still the current ones: the client's
+ * secrets generation, and every shared secret Secrets Store holds. A
+ * rollback never brings back a key that was rotated or replaced, and may
+ * be revoked; rolling forward with the current secrets is the way then.
  * Migrations only expand for the release after, so the previous code runs
  * on the database the release left, as long as the previous release is
  * the one right before it (or the same one, after a secrets rollout,
- * which puts the previous shared secrets back); a client further back
- * isn't rolled back. Crons and Workflows stay as the release set them.
+ * once the store holds what the client ran before again); a client
+ * further back isn't rolled back, and neither is one whose databases a
+ * migration since contracted for the previous code, as its release
+ * declares (src/deploy/compatibility.ts). Crons and Workflows stay as the
+ * release set them.
  *
  * A rollback is a runner like the others (src/runners.ts): a Workflow
  * instance, `RollbackClient`, that claims the client, taking it from the
@@ -47,11 +54,23 @@ import {
   rollouts,
   rolloutTargets,
 } from "../db/schema.ts";
-import { currentReleases, incompatibility } from "../deploy/compatibility.ts";
-import { activityKeys, clientDomain, deployerApi } from "../deploy/context.ts";
+import {
+  appliedSchema,
+  currentReleases,
+  incompatibility,
+} from "../deploy/compatibility.ts";
+import {
+  activityKeys,
+  clientDomain,
+  deployerApi,
+  MissingStoreSecretError,
+  sharedStoreSecrets,
+} from "../deploy/context.ts";
 import { errorCode, latestDeployOf } from "../deploy/deploy.ts";
 import { importedManifest } from "../deploy/release.ts";
 import { mappedGeneration } from "../deploy/router.ts";
+import { sharedSecretPrints } from "../deploy/secrets.ts";
+import type { DeploySecrets } from "../deploy/secrets.ts";
 import { deployOrder } from "../deploy/versions.ts";
 import {
   claimRun,
@@ -72,6 +91,7 @@ import {
 } from "../workflow-steps.ts";
 import { tellCore } from "./activity.ts";
 import { RolloutError } from "./errors.ts";
+import { recordedShared } from "./shared-secrets.ts";
 import { parsePrevious } from "./targets.ts";
 import type { PreviousRun } from "./targets.ts";
 
@@ -306,10 +326,11 @@ const movedOffPrevious = async (
 };
 
 /**
- * Refuses (`incompatible`) going back to `previous` from release
- * `releaseId`, the rollout's, when its code doesn't work with what client
- * `clientId` runs now, with `workers` restored one at a time, in order
- * (src/deploy/compatibility.ts). Each Worker it restores is taken to run
+ * Refuses (`incompatible`, `schema_incompatible`) going back to
+ * `previous` from release `releaseId`, the rollout's, when its code
+ * doesn't work with what client `clientId` runs now, with `workers`
+ * restored one at a time, in order, or on the schemas its databases are
+ * at (src/deploy/compatibility.ts). Each Worker it restores is taken to run
  * the rollout's release, whatever its record says: a version can go live
  * and the write after it fail, and the record lags what runs.
  */
@@ -334,12 +355,64 @@ const assertCompatible = async (
   const refused = incompatibility(
     current,
     before,
-    workers.map(({ app }) => app)
+    workers.map(({ app }) => app),
+    await appliedSchema(db, clientId)
   );
   if (refused !== null) {
     throw new RolloutError(
-      "incompatible",
+      refused.code === "schema_incompatible"
+        ? "schema_incompatible"
+        : "incompatible",
       `${clientId} can't go back to ${previous.release ?? ""}: ${refused.message}`
+    );
+  }
+};
+
+/**
+ * Refuses (`shared_secret_replaced`) putting `workers`' versions of client
+ * `clientId` back unless each runs, of every shared secret it holds, the
+ * value Secrets Store holds now: the fingerprints its deploy recorded for
+ * it against the store's (`sharedSecretPrints`), secret by secret. A
+ * provider key staff replaced, and may have revoked at the provider, never
+ * comes back with a version that ran it. A version with no fingerprints on
+ * record (one the console didn't make, or made before it recorded them)
+ * proves nothing of what it runs, so it's refused too. A secret the store
+ * holds and a version doesn't brings no old key back: its code never read
+ * it. Refused as a secrets rollout's start is (`secrets_store_incomplete`)
+ * while the store is missing one, or the key the fingerprints are made
+ * with: there's nothing to compare against.
+ */
+const assertSharedCurrent = async (
+  env: Env,
+  db: ConsoleDatabase,
+  clientId: string,
+  workers: readonly RestoredWorker[]
+): Promise<void> => {
+  let secrets: Pick<DeploySecrets, "clientKey" | "shared">;
+  try {
+    secrets = await sharedStoreSecrets(env);
+  } catch (error) {
+    if (error instanceof MissingStoreSecretError) {
+      throw new RolloutError("secrets_store_incomplete", error.message);
+    }
+    throw error;
+  }
+  const stale = await Promise.all(
+    workers.map(async ({ app, version }) => {
+      const [recorded, store] = await Promise.all([
+        recordedShared(db, clientId, app, version),
+        sharedSecretPrints(secrets, app),
+      ]);
+      return (
+        recorded === null ||
+        Object.entries(recorded).some(([name, print]) => store[name] !== print)
+      );
+    })
+  );
+  if (stale.some(Boolean)) {
+    throw new RolloutError(
+      "shared_secret_replaced",
+      `${clientId}'s previous versions don't run the shared secrets in Secrets Store now`
     );
   }
 };
@@ -354,9 +427,12 @@ const assertCompatible = async (
  * (`client_busy`: nothing of it is live before), what it ran before is the release right
  * before the rollout's, or the same one (`too_far_back`), whose code works
  * with what the client runs now, restored in the rollback's order
- * (`incompatible`, src/deploy/compatibility.ts), and its secrets generation is
+ * (`incompatible`, src/deploy/compatibility.ts), and runs on its
+ * databases' schemas (`schema_incompatible`), and its secrets generation is
  * the one the previous versions carry, in the console and the router's
- * map (`rotated_since`: the router would send a secret they don't have).
+ * map (`rotated_since`: the router would send a secret they don't have),
+ * and they run the shared secrets Secrets Store holds now
+ * (`shared_secret_replaced`, `assertSharedCurrent`).
  */
 const check = async (
   env: Env,
@@ -440,6 +516,7 @@ const check = async (
       `${clientId}'s secrets rotated after rollout ${rolloutId} reached it`
     );
   }
+  await assertSharedCurrent(env, db, clientId, workers);
   return { accountId: target.accountId, previous, workers };
 };
 

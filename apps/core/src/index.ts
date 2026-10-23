@@ -32,6 +32,7 @@ export { AppCollectionBinding } from "./knowledge/app-binding.ts";
 export { CollectionBinding } from "./knowledge/binding.ts";
 export { KnowledgeBinding } from "./knowledge/tools-binding.ts";
 export { ActionInvocation } from "./action-invocation.ts";
+export { ChatState } from "@grasp-os/chat/state";
 export { WorkflowRuns } from "./workflows/run-object.ts";
 export { Workspace } from "./workspace.ts";
 
@@ -56,7 +57,8 @@ export default {
   // starting the engine is still to confirm (`repairResourceTerminations`,
   // the same file), and pauses, resumes and
   // cancels the engine is still to confirm (see `repairControls`,
-  // src/workflows/controls.ts), wakes owed to runs waiting on a person,
+  // src/workflows/controls.ts), the runs of archived Apps not cancelled
+  // yet (`cancelArchivedRuns`, the same file), wakes owed to runs waiting on a person,
   // sent again (see `repairWakes`, src/workflows/wakes.ts), and connector
   // events:
   // where connect listens, and the events it read, delivered (see

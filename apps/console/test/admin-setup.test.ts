@@ -11,7 +11,8 @@ import { runDeploy, startDeploy } from "../src/deploy/deploy.ts";
 import { rotateClientSecrets } from "../src/deploy/rotation.ts";
 import { importReleases } from "../src/releases/import.ts";
 import { mockAccess } from "./access.ts";
-import { emptyAdminSnapshot, mockCloudflareApi } from "./cloudflare-api.ts";
+import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
+import { emptyAdminSnapshot } from "./cloudflare-api.ts";
 import { page } from "./pages.ts";
 import { publishRelease } from "./releases.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
@@ -102,15 +103,21 @@ describe("an organization's Setup", () => {
         "Healthy",
         acme.release.id,
         "Ring 1",
-        "Open in the console",
+        "Open its Grasp",
+        "Its activity",
         "Open in Cloudflare",
       ].map((text) => header.includes(text)),
-      toConsole: status.html.includes(`href="/clients/${acme.clientId}"`),
+      // Nothing of it is left to the console's own pages.
+      toConsole: status.html.includes('href="/clients/'),
       // Nothing needs a look on a company that runs the newest release.
       needs: status.html.includes("What needs a look"),
-      // Its numbers aren't kept day by day: said, not made up.
-      numbers: status.html.includes(
-        "The console doesn’t keep these day by day yet."
+      // Its numbers aren't kept day by day: said, not made up, and its
+      // account's now read once the page shows.
+      numbers: [
+        "The console doesn’t keep these day by day yet.",
+        "Reading its account…",
+      ].map((text) =>
+        sectionOf(status.html, "Its platform in numbers").includes(text)
       ),
       howItRuns: [
         "Router",
@@ -155,7 +162,7 @@ describe("an organization's Setup", () => {
         latestRollout: releases.html.includes("Not in one yet"),
         // Only the newest are listed, and the whole list is a link away.
         allReleases: sectionOf(releases.html, "Recent releases").includes(
-          'href="/releases"'
+          'href="/admin/platform/releases"'
         ),
       },
       settings: textOf(sectionOf(settings.html, "Its secrets")).includes(
@@ -163,10 +170,10 @@ describe("an organization's Setup", () => {
       ),
     }).toStrictEqual({
       statuses: [200, 200, 200, 200, 200],
-      header: [true, true, true, true, true, true],
-      toConsole: true,
+      header: [true, true, true, true, true, true, true],
+      toConsole: false,
       needs: false,
-      numbers: true,
+      numbers: [true, true],
       howItRuns: [true, true, true, true, true, true],
       checklist: [true, true, true],
       deployed: true,

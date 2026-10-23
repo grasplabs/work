@@ -40,6 +40,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import { invocationFor } from "../src/app-functions.ts";
 import type { Release } from "../src/app-releases.ts";
+import { changeStatus } from "../src/app-status.ts";
 import {
   bindWorkflowToApp,
   unbindWorkflowFromApp,
@@ -70,7 +71,11 @@ import {
 } from "../src/workflow-start-intents.ts";
 import type { CallingAgent } from "../src/workflow-start-intents.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
-import { resourceRunFor } from "../src/workflows/resource-runs.ts";
+import {
+  repairResourceStarts,
+  resourceRunFor,
+  stopRetryMs,
+} from "../src/workflows/resource-runs.ts";
 import { racingDb } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { outcome, unique } from "./sign-in.ts";
@@ -461,7 +466,7 @@ const fixture = async (waits = false): Promise<Fixture> => {
   const app = appIdSchema.parse(crypto.randomUUID());
   await env.DB.batch([
     env.DB.prepare(
-      "INSERT INTO apps (id, name, description, owner_id, created_at) VALUES (?, 'Requests', '', ?, ?)"
+      "INSERT INTO apps (id, name, description, owner_id, status, created_at) VALUES (?, 'Requests', '', ?, 'published', ?)"
     ).bind(app, ada.userId, Date.now()),
     env.DB.prepare(
       "INSERT INTO app_versions (app_id, version, tree, files, author_id, message, created_at, approved) VALUES (?, 1, 'tree', 0, ?, 'Version', ?, 1)"
@@ -768,6 +773,120 @@ describe("an action starting a workflow", () => {
     });
   });
 
+  it("stops the runs the App started once a builder archives it", async () => {
+    const fx = await fixture(true);
+    const started = await call(fx, fx.bob, "requests.kickOff", { who: "Bob" });
+    expect(started.ok).toBeTruthy();
+    if (!started.ok) {
+      return;
+    }
+    const handle = handleSchema["~standard"].validate(started.value);
+    const runId = "value" in handle ? handle.value.runId : null;
+    const before = await runOf(fx, runId);
+
+    await changeStatus(env, fx.ada, fx.app, "archive");
+    const after = await ended(fx, runId);
+    const asked = await env.DB.prepare(
+      "SELECT stop_requested_at IS NOT NULL AS asked FROM workflow_resource_runs WHERE id = ?"
+    )
+      .bind(runId)
+      .first("asked");
+
+    expect({
+      before: before.endedAt,
+      after: after.status,
+      asked,
+    }).toStrictEqual({ before: null, after: "cancelled", asked: 1 });
+  });
+
+  it("keeps an App archived while a stop claimed but never sent is owed, and asks again once it is due", async () => {
+    const fx = await fixture(true);
+    const started = await call(fx, fx.bob, "requests.kickOff", { who: "Bob" });
+    expect(started.ok).toBeTruthy();
+    if (!started.ok) {
+      return;
+    }
+    const handle = handleSchema["~standard"].validate(started.value);
+    const runId = "value" in handle ? handle.value.runId : null;
+    // Archived, its stop claimed by a pass whose request died after the
+    // claim was saved and before the stop was sent.
+    const claimedAgo = async (ms: number): Promise<void> => {
+      await env.DB.batch([
+        env.DB.prepare("UPDATE apps SET status = 'archived' WHERE id = ?").bind(
+          fx.app
+        ),
+        env.DB.prepare(
+          "UPDATE workflow_resource_runs SET stop_requested_at = ? WHERE id = ?"
+        ).bind(Date.now() - ms, runId),
+      ]);
+    };
+    const statusOfApp = async () =>
+      await env.DB.prepare("SELECT status FROM apps WHERE id = ?")
+        .bind(fx.app)
+        .first("status");
+
+    await claimedAgo(1000);
+    const early = await outcome(changeStatus(env, fx.ada, fx.app, "restore"));
+    const owed = await runOf(fx, runId);
+    const whileOwed = { app: await statusOfApp(), ended: owed.endedAt };
+    await claimedAgo(stopRetryMs + 1000);
+    const restored = await changeStatus(env, fx.ada, fx.app, "restore");
+    const after = await ended(fx, runId);
+
+    expect({
+      early,
+      whileOwed,
+      restored: restored.status,
+      after: after.status,
+    }).toStrictEqual({
+      early: "app.stops_pending",
+      whileOwed: { app: "archived", ended: null },
+      restored: "draft",
+      after: "cancelled",
+    });
+  });
+
+  it("abandons a start the App made that core never sent, once the App is archived", async () => {
+    const fx = await fixture(true);
+    const started = await call(fx, fx.bob, "requests.kickOff", { who: "Bob" });
+    expect(started.ok).toBeTruthy();
+    const [receipt] = await receiptsOf(fx.app);
+    // A start of the App's whose row was written but never sent, as core
+    // stopping between the two leaves it: its receipt and its run.
+    const orphan = crypto.randomUUID();
+    const copied = await env.DB.prepare(
+      "SELECT * FROM workflow_start_receipts WHERE id = ?"
+    )
+      .bind(receipt?.id ?? "")
+      .first();
+    const columns = Object.keys(copied ?? {});
+    const values = columns.map((column) =>
+      column === "id" || column === "idempotency_key"
+        ? orphan
+        : (copied?.[column] ?? null)
+    );
+    await env.DB.batch([
+      env.DB.prepare(
+        `INSERT INTO workflow_start_receipts (${columns.join(", ")}) VALUES (${columns.map(() => "?").join(", ")})`
+      ).bind(...values),
+      env.DB.prepare(
+        "INSERT INTO workflow_resource_runs (id, workflow_resource_id, version, manifest_hash, build_hash, principal_id, status, created_at) SELECT ?, workflow_resource_id, version, manifest_hash, build_hash, principal_id, 'starting', ? FROM workflow_resource_runs WHERE id = ?"
+      ).bind(orphan, Date.now() - hour, receipt?.id ?? ""),
+      env.DB.prepare("UPDATE apps SET status = 'archived' WHERE id = ?").bind(
+        fx.app
+      ),
+    ]);
+
+    await repairResourceStarts(env);
+    const status = await env.DB.prepare(
+      "SELECT status FROM workflow_resource_runs WHERE id = ?"
+    )
+      .bind(orphan)
+      .first("status");
+
+    expect(status).toBe("failed");
+  });
+
   it("starts nothing without the App's own grant, its binding, or the caller's use of the App, and says only that it can't", async () => {
     const fx = await fixture();
     const eve = await person("user");
@@ -1015,6 +1134,25 @@ describe("a mutation starting a workflow after it commits", () => {
       receipts: afterKill.map(({ id }) => id),
       settled: [{ settled: true, undeliverable: null }],
       run: "completed",
+    });
+  });
+
+  it("starts nothing a commit staged once the App is archived before its dispatch", async () => {
+    const fx = await fixture();
+    const staged = await call(fx, fx.bob, "requests.submit", { who: "Bob" });
+    // Archived after the commit, before its outbox hands the start on.
+    await env.DB.prepare("UPDATE apps SET status = 'archived' WHERE id = ?")
+      .bind(fx.app)
+      .run();
+    await runDurableObjectAlarm(objectOf(fx.store));
+    expect({
+      committed: staged.ok,
+      receipts: await receiptsOf(fx.app),
+      outbox: await settledOf(fx.store),
+    }).toStrictEqual({
+      committed: true,
+      receipts: [],
+      outbox: [{ settled: true, undeliverable: "workflow.start_denied" }],
     });
   });
 

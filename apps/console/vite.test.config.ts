@@ -9,6 +9,7 @@ import react from "@vitejs/plugin-react";
 import { defineProject } from "vite-plus";
 
 import { accessTeam } from "./test/access-config.ts";
+import { discordTest } from "./test/discord-config.ts";
 
 const migrations = await readD1Migrations(
   `${import.meta.dirname}/src/db/migrations`
@@ -35,6 +36,12 @@ const knowledgeMigrationFiles = readdirSync(knowledgeMigrationsDir)
  * go through the real entry (src/server.ts), app included.
  */
 export default defineProject({
+  // As in every console build (vite.config.ts, src/admin/discord-gateway.ts).
+  resolve: {
+    alias: {
+      "discord.js": `${import.meta.dirname}/src/admin/discord-gateway.ts`,
+    },
+  },
   test: {
     name: "console",
     include: ["test/**/*.test.ts"],
@@ -49,9 +56,19 @@ export default defineProject({
     // with an icon (the rollouts page's Selects) took several times as long
     // as the rest of the app: past 30 s under CI's load. Pre-bundled, it is
     // one module. React stays out of the bundle, so there is one React.
+    //
+    // The Chat SDK's Discord adapter reads discord-api-types, whose .mjs
+    // re-exports CommonJS the module runner can't load from workerd one
+    // file at a time: pre-bundled too.
     deps: {
       optimizer: {
-        ssr: { enabled: true, include: ["@grasp-os/ui > lucide-react"] },
+        ssr: {
+          enabled: true,
+          include: [
+            "@grasp-os/ui > lucide-react",
+            "@chat-adapter/discord > discord-api-types/v10",
+          ],
+        },
       },
     },
     // Checks the runtime is workerd, then brings the database up to the
@@ -79,8 +96,16 @@ export default defineProject({
           // Off whatever a developer's .dev.vars sets: the tests of the
           // bypass set it themselves.
           DEV_ACCESS_EMAIL: "",
+          // Grasp's Discord application, which test/discord.test.ts stands
+          // in for (src/admin/discord.ts).
+          DISCORD_PUBLIC_KEY: discordTest.publicKey,
+          DISCORD_STAFF_IDS: discordTest.staffIds.join(","),
+          // workerd has no jurisdictions (src/env.d.ts).
+          DURABLE_OBJECT_JURISDICTION: "none",
           // Where provisioned clients are served (src/deploy/context.ts).
           CLIENT_DOMAIN: "grasp.test",
+          // Grasp's Rooms, which test/admin-proposal.test.ts stands in for.
+          ROOMS_ORIGIN: "https://rooms.grasp.test",
           // Where TanStack Start answers server functions: the build sets
           // it; here the Worker reads it from process.env, which workerd
           // fills from its vars, so tests can call them through the entry.
@@ -94,7 +119,7 @@ export default defineProject({
         // Where the fake Cloudflare API runs client D1 queries, one for
         // each database it holds at once (test/cloudflare-api-workers.ts).
         d1Databases: Object.fromEntries(
-          Array.from({ length: 12 }, (_, slot) => [
+          Array.from({ length: 24 }, (_, slot) => [
             `CLIENT_D1_${slot}`,
             `client-d1-${slot}`,
           ])

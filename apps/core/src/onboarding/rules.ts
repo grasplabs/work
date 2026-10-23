@@ -36,6 +36,9 @@ export interface InterviewState {
   ledTeam?: string;
 }
 
+/** How long after its last save an interview still counts as going on. */
+export const talkingMs = 15 * 60 * 1000;
+
 /** The Monday (UTC) of the week `day` falls in, as an ISO day. */
 export const mondayOf = (day: string): string => {
   const weekday = new Date(`${dayOf(day)}T12:00:00Z`).getUTCDay();
