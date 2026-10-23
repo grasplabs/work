@@ -1,6 +1,7 @@
 import { interviewPhases } from "@grasp-os/shared/interview-links";
 import type { InterviewLine } from "@grasp-os/shared/interview-links";
 import type { InterviewPhase } from "@grasp-os/shared/interview-turn";
+import { interviewerNames } from "@grasp-os/shared/onboarding";
 import { Button } from "@grasp-os/ui/components/button";
 import { cn } from "@grasp-os/ui/lib/utils";
 import { useLingui } from "@lingui/react/macro";
@@ -20,6 +21,7 @@ import { isLocale } from "../i18n.ts";
 import { LanguageButton } from "../language-picker.tsx";
 import { deleteInterview, isRefused } from "./api.ts";
 import type { OpenSession } from "./api.ts";
+import { Before } from "./before.tsx";
 import { Closed, DeleteInterview } from "./closed.tsx";
 import { Composer, SaveNote, SaveTrouble } from "./composer.tsx";
 import { Head, headSizes, useHead } from "./head.tsx";
@@ -29,6 +31,7 @@ import {
   linkNow,
   onTaken,
   update,
+  useInterviewer,
   useProgress,
 } from "./kept.ts";
 import {
@@ -54,8 +57,9 @@ import { useInterviewWords, useLoopWords } from "./words.ts";
 
 // Someone's interview, as their own link opens it (prototype
 // `interview-view.tsx`): full screen, outside the app, as calm as the
-// onboarding. Stephen in the middle, his line lighting up as he says it;
-// the box to type in at the bottom, their own words as a bubble over it;
+// onboarding. Before it, the language, Stephen or Claire, what this is and
+// a sound check (before.tsx). Then whoever they chose in the middle, the
+// line lighting up as it is said; the box to type in at the bottom, their own words as a bubble over it;
 // the parts of the interview as a row of marks at the top; top left the
 // way out for now, which keeps their place; top right the transcript,
 // which floats at the right side. Last he reads back what he wrote down, a
@@ -140,7 +144,7 @@ const PhaseBar = ({ phase }: { phase: InterviewPhase }) => {
   );
 };
 
-/** A screen of the interview with Stephen over what it says: before it, after it, or instead of it. */
+/** A screen of the interview with whoever holds it over what it says: after it, or instead of it. */
 export const Said = ({
   room,
   sign = null,
@@ -155,9 +159,10 @@ export const Said = ({
   children: ReactNode;
 }) => {
   const { body, size } = useHead(room, headSizes.talking);
+  const who = useInterviewer();
   return (
     <div className="flex w-full max-w-md flex-col items-center gap-6 text-center">
-      <Head fill={fill} label={label} sign={sign} size={size} />
+      <Head fill={fill} label={label} sign={sign} size={size} who={who} />
       <div className="flex w-full flex-col items-center gap-6" ref={body}>
         {children}
       </div>
@@ -224,37 +229,6 @@ export const InterviewFrame = ({
 /** Room over the stage for a screen without the box. */
 export const useQuietRoom = () => useStageRoom(16);
 
-/** Before the first question: who Stephen is, what this is, and the way in. */
-const Start = ({
-  room,
-  name,
-  onStart,
-}: {
-  room: number;
-  name: string;
-  onStart: () => void;
-}) => {
-  const { t } = useLingui();
-  return (
-    <Said label={t`Stephen, drawn in dots.`} room={room} sign="question">
-      <div className="flex flex-col gap-2">
-        <h1 className="text-2xl font-medium tracking-tight text-balance">
-          {t`Hi ${name}, I’m Stephen. I’m an AI, and I work for Grasp.`}
-        </h1>
-        <p className="text-muted-foreground text-balance">
-          {t`I want to learn how your work really goes. I ask one question at a time, and you type your answers. At the end I read back what I wrote down, and you say what is wrong.`}
-        </p>
-        <p className="text-muted-foreground text-balance">
-          {t`You decide. Skip any question, stop whenever you want, and carry on later from this link.`}
-        </p>
-      </div>
-      <Button className="w-full max-w-sm" onClick={onStart} size="xl">
-        {t`Start by typing`}
-      </Button>
-    </Said>
-  );
-};
-
 /** They stopped for now: their place is kept. */
 const Stopped = ({
   room,
@@ -264,8 +238,9 @@ const Stopped = ({
   onCarryOn: () => void;
 }) => {
   const { t } = useLingui();
+  const who = interviewerNames[useInterviewer()];
   return (
-    <Said label={t`Stephen, drawn in dots.`} room={room}>
+    <Said label={t`${who}, drawn in dots.`} room={room}>
       <div className="flex flex-col gap-2">
         <h1 className="text-2xl font-medium tracking-tight text-balance">
           {t`Your place is kept.`}
@@ -284,8 +259,9 @@ const Stopped = ({
 /** The interviews are over: what was said can be deleted, no more. */
 const Over = ({ room }: { room: number }) => {
   const { t } = useLingui();
+  const who = interviewerNames[useInterviewer()];
   return (
-    <Said fill={1} label={t`Stephen, drawn in dots.`} room={room} sign="heart">
+    <Said fill={1} label={t`${who}, drawn in dots.`} room={room} sign="heart">
       <div className="flex flex-col gap-2">
         <h1 className="text-2xl font-medium tracking-tight text-balance">
           {t`The interviews are over.`}
@@ -301,8 +277,9 @@ const Over = ({ room }: { room: number }) => {
 /** They deleted it. */
 const Deleted = ({ room }: { room: number }) => {
   const { t } = useLingui();
+  const who = interviewerNames[useInterviewer()];
   return (
-    <Said label={t`Stephen, drawn in dots.`} room={room}>
+    <Said label={t`${who}, drawn in dots.`} room={room}>
       <h1
         aria-live="polite"
         className="text-2xl font-medium tracking-tight text-balance"
@@ -427,15 +404,16 @@ const Stage = ({
     key = "closed";
   } else if (!started) {
     stage = (
-      <Start
+      <Before
+        kind={session.kind}
         name={session.name}
-        onStart={() => {
-          update((now) => begun(now, Date.now()));
+        onStart={(by) => {
+          update((now) => begun(now, Date.now(), by));
         }}
         room={room}
       />
     );
-    key = "start";
+    key = "before";
   } else if (reading) {
     stage = <ReadBack room={room} />;
     key = `part-${progress.confirmed}`;
