@@ -1,5 +1,6 @@
 import { fileChannel, linkChannel } from "@grasp-os/sdk/host";
 import type { FileChannel, LinkChannel } from "@grasp-os/sdk/host";
+import { versionErrors } from "@grasp-os/shared/app-releases";
 import { appErrors } from "@grasp-os/shared/apps";
 import type { PreviewBundle } from "@grasp-os/shared/chat";
 import { decisionErrors } from "@grasp-os/shared/decisions";
@@ -133,6 +134,12 @@ export type FailureReason =
   | "principal-changed"
   /** The screen was opened with input its route doesn't take. */
   | "bad-input"
+  /** The version's sealed code no longer matches what was sealed. */
+  | "corrupt"
+  /** The version running has no sealed release to open the screen from. */
+  | "not-sealed"
+  /** The version running was revoked, and no longer runs. */
+  | "version-revoked"
   | "unknown";
 
 /**
@@ -160,14 +167,20 @@ const failures: Readonly<Record<string, FailureReason>> = {
   "screen.unreviewed": "unreviewed",
   "screen.revoked": "revoked",
   "auth.principal_changed": "principal-changed",
+  // A sealed version's screen, refused as it is opened (`sealedScreen`).
+  "version.artifact_corrupt": "corrupt",
+  "version.manifest_corrupt": "corrupt",
+  "version.not_sealed": "not-sealed",
+  "version.revoked": "version-revoked",
 };
 
 /** Why opening a screen failed, as the page says it. */
-const failureOf = (error: unknown): FailureReason => {
+export const failureOf = (error: unknown): FailureReason => {
   const code =
     roleErrors.codeOf(error) ??
     appErrors.codeOf(error) ??
     screenErrors.codeOf(error) ??
+    versionErrors.codeOf(error) ??
     authErrors.codeOf(error) ??
     permissionErrors.codeOf(error);
   return (code === undefined ? undefined : failures[code]) ?? "unknown";
