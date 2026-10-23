@@ -458,14 +458,16 @@ workflowBuild: {
   }>;
   /**
    * Asks for a permission for the workflow itself: a connection or a store
-   * an admin can then approve its bindings with. It allows nothing until
-   * an admin grants it.
+   * an admin can then approve its bindings with, a collection it reads, or
+   * \`start\` on a child workflow it binds. It allows nothing until an admin
+   * grants it.
    */
   requestPermission(workflow: string, request: {
     object:
       | { type: "connection"; connectionId: string; resource?: string }
       | { type: "store"; storeId: string }
-      | { type: "collection"; collectionId: string };
+      | { type: "collection"; collectionId: string }
+      | { type: "workflow"; workflowId: string };
     actions: string[];
     binding: string;
   }): Promise<{ id: string; status: string }>;
