@@ -10,7 +10,9 @@
  */
 import { briefOf } from "@grasp-os/shared/admin/admin-brief";
 import type { AdminView } from "@grasp-os/shared/admin/admin-view";
+import { buttonVariants } from "@grasp-os/ui/components/button";
 import { Link } from "@tanstack/react-router";
+import { SparklesIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { needSection, sectionTo } from "./sections.ts";
@@ -59,13 +61,24 @@ export const OrgBrief = ({
       aria-labelledby="before-the-next-call"
       className="bg-card overflow-hidden rounded-xl border"
     >
-      <div className="flex flex-col gap-0.5 px-5 py-4">
-        <h2 className="font-medium" id="before-the-next-call">
-          Before the next call
-        </h2>
-        <p className="text-muted-foreground">
-          {where}. {percent}% of what Grasp needs is known.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3 px-5 py-4">
+        <div className="flex flex-col gap-0.5">
+          <h2 className="font-medium" id="before-the-next-call">
+            Before the next call
+          </h2>
+          <p className="text-muted-foreground">
+            {where}. {percent}% of what Grasp needs is known.
+          </p>
+        </div>
+        {/* Opens Ask Grasp, which prepares the call at once. */}
+        <Link
+          className={buttonVariants({ size: "sm", variant: "outline" })}
+          search={{ about: clientId }}
+          to="/admin/ask"
+        >
+          <SparklesIcon data-icon="inline-start" />
+          Prepare the call with Grasp
+        </Link>
       </div>
       <div className="flex flex-col gap-4 border-t px-5 py-4">
         {brief.bringUp.length > 0 ? (

@@ -7,11 +7,13 @@
   "sideEffects": false,
   "exports": {
     "./binding": "./src/binding.ts",
+    "./clock": "./src/clock.ts",
     "./codec": "./src/codec.ts",
     "./contracts": "./src/contracts.ts",
     "./errors": "./src/errors.ts",
     "./identity": "./src/identity.ts",
     "./instance": "./src/instance.ts",
+    "./journal-schema": "./src/journal-schema.ts",
     "./run": "./src/run.ts"
   },
   "devDependencies": {

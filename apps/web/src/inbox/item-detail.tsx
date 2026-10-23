@@ -722,7 +722,12 @@ const FailedItem = ({
 const ElsewhereItem = ({ frame }: { frame: Frame }) => {
   const { t } = useLingui();
   const { item } = frame;
-  const label = item.source.type === "reconnect" ? t`Sign in again` : t`Review`;
+  const labels: Partial<Record<InboxSource["type"], string>> = {
+    reconnect: t`Sign in again`,
+    asked: t`Answer in the brain`,
+    decision: t`Review and answer`,
+  };
+  const label = labels[item.source.type] ?? t`Review`;
   return (
     <ItemFrame
       acts={item.about === undefined ? [] : [{ label, to: item.about }]}

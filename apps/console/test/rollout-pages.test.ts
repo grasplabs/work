@@ -12,13 +12,20 @@ import {
   rolloutTargets,
 } from "../src/db/schema.ts";
 import { importReleases } from "../src/releases/import.ts";
-import { startRolloutFn } from "../src/rollout/functions.ts";
+import { fetchRolloutCost, startRolloutFn } from "../src/rollout/functions.ts";
 import { startRequestOf } from "../src/rollout/start-request.ts";
 import type { StartChoices } from "../src/rollout/start-request.ts";
 import { mockAccess } from "./access.ts";
+import type { AccountState } from "./cloudflare-api-kit.ts";
+import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { callServerFn, page } from "./pages.ts";
 import { publishRelease } from "./releases.ts";
+import { useStoreSecrets } from "./secrets-store.ts";
 
+const token = "test-deployer-token-rollout-pages-3c9e17";
+const tenantToken = "test-tenant-admin-token-rollout-pages-7f2a64";
+const cloudflare = mockCloudflareApi(token, tenantToken);
+// After the fake API: Access's keys are served, the rest goes to the fake.
 mockAccess();
 
 const db = consoleDatabase(env.DB);
@@ -31,9 +38,26 @@ const importedRelease = async (): Promise<string> => {
   return release.id;
 };
 
-/** An active client in `ring`, pinned to `pinnedReleaseId` if given. */
+/** Each client's account in the fake, by client id. */
+const accounts = new Map<string, AccountState>();
+
+/** Client `clientId`'s account in the fake. */
+const accountOf = (clientId: string): AccountState => {
+  const account = accounts.get(clientId);
+  if (account === undefined) {
+    throw new Error(`${clientId} has no account in the fake`);
+  }
+  return account;
+};
+
+/**
+ * An active client in `ring`, on a new account in the fake, pinned to
+ * `pinnedReleaseId` if given.
+ */
 const recordClient = async (ring: number, pinnedReleaseId?: string) => {
   const id = `client-${crypto.randomUUID().slice(0, 8)}`;
+  const account = cloudflare.addAccount();
+  accounts.set(id, account);
   const now = new Date();
   await act(
     db,
@@ -42,7 +66,7 @@ const recordClient = async (ring: number, pinnedReleaseId?: string) => {
       db.insert(clients).values({
         id,
         name: `Acme ${id}`,
-        accountId: crypto.randomUUID().replaceAll("-", ""),
+        accountId: account.id,
         ring,
         status: "active",
         pinnedReleaseId: pinnedReleaseId ?? null,
@@ -57,13 +81,14 @@ const recordClient = async (ring: number, pinnedReleaseId?: string) => {
 
 /**
  * A rollout of `releaseId` (a secrets rollout for null) waiting for
- * approval after ring 0, which it reached `reached` in, with `pending` in
- * ring 1: as its run leaves it.
+ * approval after ring 0, which it reached `reached` in, with `pending`
+ * (and `morePending`) in ring 1: as its run leaves it.
  */
 const waitingRollout = async (
   releaseId: string | null,
   reached: string,
-  pending: string
+  pending: string,
+  morePending: readonly string[] = []
 ): Promise<string> => {
   const id = crypto.randomUUID();
   const now = new Date();
@@ -86,13 +111,13 @@ const waitingRollout = async (
         status: "done",
         updatedAt: now,
       },
-      {
+      ...[pending, ...morePending].map((clientId) => ({
         rolloutId: id,
-        clientId: pending,
+        clientId,
         ring: 1,
-        status: "pending",
+        status: "pending" as const,
         updatedAt: now,
-      },
+      })),
     ]),
   ]);
   return id;
@@ -103,6 +128,8 @@ const count = (html: string, text: string): number =>
   html.split(text).length - 1;
 
 describe("the rollout pages", () => {
+  useStoreSecrets({ deployer: token, tenant: tenantToken });
+
   it("list rollouts, with the form to start one on the newest release", async () => {
     const release = await importedRelease();
     const reached = await recordClient(0);
@@ -243,8 +270,8 @@ describe("the rollout pages", () => {
 
     expect({
       status,
-      waiting: html.includes("waiting for approval after ring 0"),
-      approve: html.includes("Approve the next ring"),
+      waiting: html.includes("ring 0 passed: waiting for approval"),
+      approve: html.includes("Approve every other client"),
       cancel: html.includes("Cancel"),
       rings: html.includes("Ring 0") && html.includes("Ring 1"),
       clients:
@@ -256,6 +283,11 @@ describe("the rollout pages", () => {
         html.includes("Roll back ring 0"),
         html.includes("Roll back ring 1"),
       ],
+      // Each client's cost, and their total, read once the page shows.
+      cost: [
+        html.includes("Cost this month"),
+        html.includes("Its clients&#x27; cost this month"),
+      ],
     }).toStrictEqual({
       status: 200,
       waiting: true,
@@ -265,6 +297,45 @@ describe("the rollout pages", () => {
       clients: true,
       rollBackClient: 1,
       rollBackRing: [true, false],
+      cost: [true, true],
+    });
+  });
+
+  it("read each of a rollout's clients' cost this month and their total, a client whose account doesn't answer unknown on its own", async () => {
+    const release = await importedRelease();
+    const reached = await recordClient(0);
+    const pending = await recordClient(1);
+    const unreported = await recordClient(1);
+    const rolloutId = await waitingRollout(release, reached, pending, [
+      unreported,
+    ]);
+    // The client grid's usage (test/client-grid.test.ts): $5.80 of
+    // Workers and $1.25 of AI; then the Workers Paid base alone.
+    accountOf(reached).usage = {
+      monthRequests: 12_000_000,
+      monthCpuTimeUs: 40_000_000_000,
+      monthAiCost: 1.25,
+      dayRequests: 1000,
+      dayErrors: 20,
+    };
+    accountOf(pending).usage = {
+      monthRequests: 100,
+      monthCpuTimeUs: 1000,
+      monthAiCost: 0,
+      dayRequests: 0,
+      dayErrors: 0,
+    };
+
+    const cost = await callServerFn(fetchRolloutCost, { rolloutId });
+
+    expect(cost).toStrictEqual({
+      clients: {
+        [reached]: { workers: 5.8, ai: 1.25 },
+        [pending]: { workers: 5, ai: 0 },
+        [unreported]: null,
+      },
+      total: { workers: 10.8, ai: 1.25 },
+      unknown: 1,
     });
   });
 
@@ -288,7 +359,7 @@ describe("the rollout pages", () => {
         says: own.html.includes(
           "Secrets only, on each client&#x27;s own release"
         ),
-        approve: own.html.includes("Approve the next ring"),
+        approve: own.html.includes("Approve every other client"),
       },
     }).toStrictEqual({
       shown: 2,

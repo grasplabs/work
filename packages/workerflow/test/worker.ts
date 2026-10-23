@@ -3,6 +3,7 @@
 // test definitions, and nothing of Grasp.
 import type {
   DefinitionIdentity,
+  EventMatch,
   WorkflowDefinition,
   WorkflowDuration,
   WorkflowStep,
@@ -903,6 +904,40 @@ export const definitions: Record<string, WorkflowDefinition> = {
       const first = await step.waitForEvent("first", { type: "vote" });
       const second = await step.waitForEvent("second", { type: "vote" });
       return [first.payload, second.payload];
+    },
+  },
+  // A step, then a wait for events matching its params' `match` until its
+  // params' `until`; with `twice`, a second wait for the same after it. A
+  // timeout is caught, and answered.
+  matches: {
+    run: async (event, step) => {
+      // SAFETY: whatever the test passed, unchecked here: the engine is
+      // what checks it.
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+      const match = paramOf(event.payload, "match") as EventMatch[];
+      // SAFETY: as above.
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+      const deadline = paramOf(event.payload, "until") as number;
+      await step.do(
+        "before",
+        async (context) => await effect(event.instanceId, "before", context)
+      );
+      try {
+        const first = await step.waitForMatch("first", {
+          match,
+          until: deadline,
+        });
+        if (paramOf(event.payload, "twice") !== true) {
+          return [first.payload];
+        }
+        const second = await step.waitForMatch("second", {
+          match,
+          until: deadline,
+        });
+        return [first.payload, second.payload];
+      } catch (error) {
+        return { timedOut: errorOf(error) };
+      }
     },
   },
   // A wait with the timeout in the params; when it runs out, the author

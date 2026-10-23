@@ -4,10 +4,16 @@ import {
   collectionSearchOptionsSchema,
   documentTypeOf,
   knowledgeErrors,
+  searchCoverageCap,
   searchOptionsSchema,
   searchQuerySchema,
 } from "@grasp-os/shared/knowledge";
-import type { SearchHit, SearchResults } from "@grasp-os/shared/knowledge";
+import type {
+  Provenance,
+  SearchCoverage,
+  SearchHit,
+  SearchResults,
+} from "@grasp-os/shared/knowledge";
 import { sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -17,13 +23,15 @@ import { z } from "zod";
 import { derivedHmacKey } from "../derived-keys.ts";
 import { noteProvenance } from "./access.ts";
 import type { Reader, ReadRecord } from "./access.ts";
-import { allowedFor } from "./app-entries.ts";
-import type { Allowed } from "./app-entries.ts";
+import { allowedFor } from "./authorize.ts";
+import type { Allowed } from "./authorize.ts";
 import { readableCollection } from "./collections.ts";
+import { portsOf } from "./ports.ts";
 import { nearestCollectionsMax, nearestDetail } from "./usage-tally.ts";
 
 // Full-text search over sections, in two FTS5 indexes kept by triggers on
-// the sections table (see the migration `0001_search.sql`): whole words,
+// the sections table (see the migrations `0001_search.sql` and
+// `0017_search_one_content.sql`, one copy of the text for both): whole words,
 // with diacritics removed and prefixes indexed ("vakan" finds
 // "vakantiedagen", "financiele" finds "financiële"), and trigrams, which
 // find a word inside a compound ("verlof" in "zwangerschapsverlof").
@@ -32,8 +40,11 @@ import { nearestCollectionsMax, nearestDetail } from "./usage-tally.ts";
 // that finds it: whole words first, then trigrams; and only when neither
 // finds anything, trigrams with room for one typo. Within a pass sections
 // rank by BM25 with field weights (title, then description, headings and
-// text) and by freshness. Every word of the query must match (AND): a
-// search narrows as it gets longer.
+// text) and by freshness. Every word of a search must match (AND): a
+// search narrows as it gets longer. A recall asks a question in its
+// person's words, which no section holds all of, so any of its words
+// matches (OR), and BM25 ranks the sections that hold more of them, and
+// the rarer ones, first: how search engines read a question.
 //
 // Access is part of the same statement (R11): a section of a collection
 // the reader can't read, or of an App's entry they may not find
@@ -129,9 +140,12 @@ interface Pass {
 }
 
 /** The FTS5 queries of each pass that has one, in order. */
-const passesOf = (terms: string[]): Pass[] => {
+/** How a pass joins a query's words: all of them, or any (a recall). */
+type Joiner = " AND " | " OR ";
+
+const passesOf = (terms: string[], joiner: Joiner): Pass[] => {
   const words = (list: string[]) =>
-    list.map((term) => `${quoted(term)}*`).join(" AND ");
+    list.map((term) => `${quoted(term)}*`).join(joiner);
   const letters = terms.map((term) => ({
     term,
     // Code points, as the trigram tokenizer counts them. Terms are letters
@@ -150,16 +164,19 @@ const passesOf = (terms: string[]): Pass[] => {
           table: "search_trigrams",
           pass: 0,
           match: query,
-          ...(short.length === 0 ? {} : { short: words(short) }),
+          // Each word counts only when every one must match.
+          ...(short.length === 0 || joiner === " OR "
+            ? {}
+            : { short: words(short) }),
         };
   const typo = long.map(({ term, chars }) =>
     chars.length < typoLength ? quoted(term) : `(${allowingTypo(chars)})`
   );
   return [
     { table: "search_words", pass: 0, match: words(terms) },
-    trigrams(long.map(({ term }) => quoted(term)).join(" AND ")),
+    trigrams(long.map(({ term }) => quoted(term)).join(joiner)),
     long.some(({ chars }) => chars.length >= typoLength)
-      ? trigrams(typo.join(" AND "))
+      ? trigrams(typo.join(joiner))
       : undefined,
   ].flatMap((pass, index) =>
     pass === undefined ? [] : [{ ...pass, pass: index }]
@@ -212,7 +229,41 @@ const hitRowSchema = z.object({
   section: z.number(),
   headings: z.string(),
   snippet: z.string(),
+  version: z.number(),
+  updatedAt: z.number(),
+  text: z.string(),
 });
+
+/**
+ * The most of a section's text a search reads: a recall quotes no more
+ * (recall.ts), and a section can be as large as a document.
+ */
+export const sectionTextMax = 4000;
+
+/**
+ * Up to `sectionTextMax` characters of a section, around where it first
+ * holds one of `terms` (the first that it holds, in the query's order), so
+ * a match deep in a long section still comes with its words; from the
+ * start when none is found as typed (a typo or prefix match).
+ */
+const excerptSql = (terms: readonly string[]): SQL => {
+  const found = terms.map(
+    (term) => sql`nullif(instr(lower(sections.text), ${term}), 0)`
+  );
+  const at = sql`coalesce(${sql.join([...found, sql`1`], sql`, `)})`;
+  return sql`substr(sections.text, max(1, ${at} - ${sectionTextMax / 2}), ${sectionTextMax})`;
+};
+
+/** A section a search found, as Knowledge holds it: its hit, and more. */
+export interface FoundSection {
+  hit: SearchHit;
+  /** The document's version the section is of. */
+  version: number;
+  /** When the document last changed, in milliseconds. */
+  updatedAt: number;
+  /** The section's Markdown around its match, at most `sectionTextMax` characters. */
+  text: string;
+}
 
 const headingsSchema = z.array(z.string());
 
@@ -224,6 +275,7 @@ const toHit = (row: z.infer<typeof hitRowSchema>): SearchHit => ({
   type: documentTypeOf(row.type),
   description: row.description,
   section: row.section,
+  version: row.version,
   headings: headingsSchema.parse(JSON.parse(row.headings)),
   snippet: row.snippet,
 });
@@ -318,12 +370,24 @@ const searchRecord = async (
   terms: string[],
   collectionId: string | undefined,
   hits: { documentId: string }[],
-  nearest: readonly string[] = []
+  nearest: readonly string[] = [],
+  recall = false
 ): Promise<ReadRecord> => {
   const target =
     collectionId === undefined
       ? undefined
       : { type: "collection" as const, id: collectionId };
+  // A recall is recorded as a read of what it returned, marked as one:
+  // never as an empty search, which feeds owners' signals of what people
+  // couldn't find, and automated recalls would skew those.
+  if (recall) {
+    return {
+      action: "knowledge.search",
+      target,
+      documentIds: hits.map(({ documentId }) => documentId),
+      detail: { terms: terms.length, hits: hits.length, via: "recall" },
+    };
+  }
   if (hits.length === 0) {
     return {
       action: "knowledge.search.empty",
@@ -344,18 +408,60 @@ const searchRecord = async (
 };
 
 /**
- * The sections that match `query`, best first, in the collections `reader`
- * may read, or in the one `options` names, and of the document type it
- * names, if any. A collection's stub passes its
- * own as `only`, and its options can't name another.
+ * How many readable documents in the search's scope (`scope`, `type`)
+ * search can't see at their current version: queued or retrying, and
+ * failed, each counted up to `searchCoverageCap`. Unscoped, only
+ * collections that aren't sensitive are counted: a count says something of
+ * what it counts, and a sensitive collection isn't among an unscoped
+ * read's sources unless a hit is from it. A scoped search's collection is
+ * among them, whatever it is.
  */
-export const search = async (
+const coverageOf = async (
+  db: DrizzleD1Database,
+  allowed: Allowed,
+  scope: string | undefined,
+  type: string | undefined
+): Promise<SearchCoverage> => {
+  const counted = (states: SQL) => sql`(
+    SELECT count(*) FROM (
+      SELECT 1 FROM documents
+      JOIN collections ON collections.id = documents.collection_id
+      WHERE documents.index_state IN ${states}
+        AND ${allowed.documents()}
+        ${scope === undefined ? sql`AND collections.sensitive = 0` : sql`AND collections.id = ${scope}`}
+        ${type === undefined ? sql`` : sql`AND documents.type = ${type}`}
+      LIMIT ${searchCoverageCap}
+    )
+  )`;
+  const [row] = await db.all<{ pending: number; failed: number }>(sql`
+    SELECT ${counted(sql`('queued', 'retrying')`)} AS pending,
+      ${counted(sql`('failed')`)} AS failed
+  `);
+  return { pending: row?.pending ?? 0, failed: row?.failed ?? 0 };
+};
+
+/**
+ * `search`, with each section's version, last change and whole text: what
+ * a recall (recall.ts) cites and quotes. The same reads, checks and audit.
+ */
+export const searchSections = async (
   env: Env,
   reader: Reader,
   query: unknown,
   options?: unknown,
-  only?: string
-): Promise<SearchResults> => {
+  only?: string,
+  /**
+   * For a recall: only these collections, each refused as not found
+   * unless the reader may read it, read in one search; matching any of
+   * the query's words, ranked by BM25 (`passesOf`); and recorded as a
+   * recall (`searchRecord`).
+   */
+  recall?: { among?: readonly string[] }
+): Promise<{
+  sections: FoundSection[];
+  coverage: SearchCoverage;
+  provenance: Provenance;
+}> => {
   const terms = termsOf(
     knowledgeErrors.parse("knowledge.invalid", searchQuerySchema, query)
   );
@@ -374,24 +480,33 @@ export const search = async (
         collectionId: only,
       };
   const db = drizzle(env.KNOWLEDGE);
-  const allowed = await allowedFor(env, db, reader, scope);
+  const allowed = await allowedFor(portsOf(env), reader);
   // Refused like any read of a collection the reader can't read. A search
   // in one collection reads from it whatever it finds: that nothing
   // matches says something of what it holds too. So the collection is
   // among the read's sources, and a sensitive one restricts the reader
   // even when nothing is found, or a delegate could probe it word by word
   // and send out what it learned.
-  const scoped =
-    scope === undefined
-      ? []
-      : [await readableCollection(db, allowed.collections, scope)];
+  const among = recall?.among ?? [];
+  const scoped = await Promise.all(
+    [...(scope === undefined ? [] : [scope]), ...among].map(
+      async (id) => await readableCollection(db, allowed.collections, id)
+    )
+  );
+  // What search can't see yet, declared to a search; a recall cites only
+  // what it found, each section with its version.
+  const coverage =
+    recall === undefined
+      ? await coverageOf(db, allowed, scope, type)
+      : { pending: 0, failed: 0 };
   if (terms.length === 0) {
     return {
-      hits: [],
+      sections: [],
+      coverage,
       provenance: await noteProvenance(
         env,
         reader,
-        await searchRecord(env, terms, scope, []),
+        await searchRecord(env, terms, scope, [], [], recall !== undefined),
         ...scoped
       ),
     };
@@ -407,7 +522,7 @@ export const search = async (
   // Every section of a document repeats its title and description, so a
   // document ranks by its best section, and its sections follow one another
   // in the order their own headings and text match.
-  const passes = passesOf(terms);
+  const passes = passesOf(terms, recall === undefined ? " AND " : " OR ");
   const rows = await db.all(sql`
     WITH matches AS (${sql.join(passes.map(matchesSql), sql` UNION ALL `)}),
     readable AS (
@@ -422,6 +537,14 @@ export const search = async (
       JOIN collections ON collections.id = documents.collection_id
       WHERE ${allowed.documents()}
         ${scope === undefined ? sql`` : sql`AND collections.id = ${scope}`}
+        ${
+          among.length === 0
+            ? sql``
+            : sql`AND collections.id IN (${sql.join(
+                among.map((id) => sql`${id}`),
+                sql`, `
+              )})`
+        }
         ${type === undefined ? sql`` : sql`AND documents.type = ${type}`}
     ),
     found AS (
@@ -445,11 +568,18 @@ export const search = async (
       ORDER BY document_pass, document_rank, document_id, in_document
       LIMIT ${limit}
     )
+    -- The title, description and path are the document's as it is now;
+    -- the headings and snippet are of the version search holds, which can
+    -- be older while indexing catches up (the hit's version says which).
     SELECT ranked.document_id AS documentId,
       ranked.collection_id AS collectionId, ranked.sensitive,
       documents.path, documents.title, documents.type, documents.description,
       ranked.position AS section, sections.headings,
-      ${snippetSql(passes)} AS snippet
+      ${snippetSql(passes)} AS snippet,
+      -- The version search holds, which a citation pins: older than the
+      -- document's current one while indexing catches up.
+      sections.version AS version, documents.updated_at AS updatedAt,
+      ${recall === undefined ? sql`''` : excerptSql(terms)} AS text
     FROM top AS ranked
     JOIN documents ON documents.id = ranked.document_id
     JOIN sections ON sections.document_id = ranked.document_id
@@ -461,18 +591,53 @@ export const search = async (
   // A search of every collection that found nothing notes where it came
   // closest, for the usage signals. Nothing of it reaches the reader.
   const nearest =
-    scope === undefined && found.length === 0
+    scope === undefined &&
+    among.length === 0 &&
+    recall === undefined &&
+    found.length === 0
       ? await nearestCollections(db, allowed, terms)
       : [];
   const provenance = await noteProvenance(
     env,
     reader,
-    await searchRecord(env, terms, scope, found, nearest),
+    await searchRecord(env, terms, scope, found, nearest, recall !== undefined),
     ...scoped,
     ...found.map((row) => ({
       id: row.collectionId,
       sensitive: row.sensitive !== 0,
     }))
   );
-  return { hits: found.map(toHit), provenance };
+  return {
+    sections: found.map((row) => ({
+      hit: toHit(row),
+      version: row.version,
+      updatedAt: row.updatedAt,
+      text: row.text,
+    })),
+    coverage,
+    provenance,
+  };
+};
+
+/**
+ * The sections that match `query`, best first, in the collections `reader`
+ * may read, or in the one `options` names, and of the document type it
+ * names, if any. A collection's stub passes its
+ * own as `only`, and its options can't name another.
+ */
+export const search = async (
+  env: Env,
+  reader: Reader,
+  query: unknown,
+  options?: unknown,
+  only?: string
+): Promise<SearchResults> => {
+  const { sections, coverage, provenance } = await searchSections(
+    env,
+    reader,
+    query,
+    options,
+    only
+  );
+  return { hits: sections.map(({ hit }) => hit), coverage, provenance };
 };

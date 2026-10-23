@@ -18,8 +18,10 @@ import { organizationId } from "../auth/auth.ts";
 import { teams } from "../db/core/schema.ts";
 import { inList } from "../db/d1.ts";
 import { collectionTeams, collections } from "../db/knowledge/schema.ts";
-import { allowedCollections, canCreate, canWrite } from "./access.ts";
+import { canCreate, canWrite } from "./access.ts";
 import type { Reader } from "./access.ts";
+import { allowedFor } from "./authorize.ts";
+import { portsOf } from "./ports.ts";
 
 export type CollectionRow = typeof collections.$inferSelect;
 
@@ -85,7 +87,7 @@ export const listCollections = async (
   reader: Reader
 ): Promise<Collection[]> => {
   const db = drizzle(env.KNOWLEDGE);
-  const allowed = await allowedCollections(env, db, reader);
+  const { collections: allowed } = await allowedFor(portsOf(env), reader);
   const rows = await db
     .select()
     .from(collections)
@@ -173,8 +175,9 @@ export const createCollection = async (
       issues: unknown.map((id) => `teams: there's no team ${id}`),
     });
   }
+  const id = crypto.randomUUID();
   const row: CollectionRow = {
-    id: crypto.randomUUID(),
+    id,
     name,
     description,
     owner: person.userId,

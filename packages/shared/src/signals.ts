@@ -152,7 +152,10 @@ export const improvementSignalSchema = z
     z.object({
       /** The App it was seen in; null for the deployment's own. */
       app: appIdSchema.nullable(),
-      /** The App's workflow it was seen in; null for none. */
+      /**
+       * The App's workflow it was seen in; with no App, an independent
+       * workflow's name (a JSON workflow's decisions); null for none.
+       */
       workflow: workflowIdSchema.nullable(),
       /**
        * What it is about: the deciders (`role:admin`; `person` for one

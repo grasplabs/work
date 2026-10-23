@@ -5,7 +5,7 @@
  * Ring 0 is Grasp's own deployments (`grasp-os-internal`): every rollout
  * reaches them first, then, once a staff member approves, what it was
  * started for: one ring, one client, or every client, ring by ring, with
- * an approval between each.
+ * no approval between them (src/rollout/workflow.ts).
  */
 import { and, desc, eq, inArray, or } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";

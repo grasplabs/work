@@ -269,9 +269,12 @@ describe("a workflow's owner", slow, () => {
       .map(({ target, detail }) => [target?.id, detail.person]);
     const told = async (person: Person) => {
       const { notifications } = await person.api.notifications.list();
-      return notifications
-        .filter((notice) => notice.run === failed || notice.run === unseen)
-        .map(({ run }) => run);
+      return notifications.flatMap((notice) =>
+        notice.type === "run_failed" &&
+        (notice.run === failed || notice.run === unseen)
+          ? [notice.run]
+          : []
+      );
     };
 
     expect({

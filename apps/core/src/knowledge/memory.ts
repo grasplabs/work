@@ -30,7 +30,12 @@ import { drizzle } from "drizzle-orm/d1";
 
 import { appFor, versionFiles } from "../apps.ts";
 import { memberRole, teamsOf } from "../auth/identity.ts";
-import { collections, documents, versions } from "../db/knowledge/schema.ts";
+import {
+  brainPayloads,
+  collections,
+  documents,
+  versions,
+} from "../db/knowledge/schema.ts";
 import { isRestricted } from "../restricted.ts";
 import type { WorkContext } from "../restricted.ts";
 import { noteProvenance, readableForPerson } from "./access.ts";
@@ -44,6 +49,7 @@ import {
   memoryLimit,
   personalCollectionId,
 } from "./memory-files.ts";
+import { readPayload } from "./payloads.ts";
 
 // An agent's memory: the files it always has in its context, by where it
 // works. The agent loop calls `forContext` for the memory of each turn,
@@ -305,9 +311,11 @@ const textsOf = async (
           .select({
             documentId: versions.documentId,
             number: versions.number,
-            text: versions.text,
+            key: brainPayloads.key,
+            sha256: brainPayloads.sha256,
           })
           .from(versions)
+          .innerJoin(brainPayloads, eq(brainPayloads.key, versions.payloadKey))
           .where(
             or(
               ...documentVersions.map(({ documentId, version }) =>
@@ -321,11 +329,10 @@ const textsOf = async (
   return await Promise.all(
     found.map(async ({ wanted: { at }, documentId, version }) => {
       if (!("appId" in at)) {
-        return (
-          rows.find(
-            (row) => row.documentId === documentId && row.number === version
-          )?.text ?? ""
+        const row = rows.find(
+          (one) => one.documentId === documentId && one.number === version
         );
+        return row === undefined ? "" : await readPayload(env, row);
       }
       const files = await versionFiles(env, at.appId, version);
       return files[appMemoryPath];

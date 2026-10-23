@@ -190,37 +190,49 @@ const DecisionCard = ({ decision }: { decision: DecisionView }) => {
                     <Trans>A run of a workflow asked for this answer.</Trans>
                   )}
                 </p>
-              </div>
-              <dl className="flex flex-col gap-1">
-                <div className="flex gap-4">
-                  <dt className="text-muted-foreground w-24 flex-none">
+                <dl className="mt-1 grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-0.5">
+                  <dt className="text-muted-foreground">
                     <Trans context="where a decision comes from">From</Trans>
                   </dt>
-                  <dd className="min-w-0 truncate">
-                    {current.app.name} · {current.workflow}
+                  <dd className="truncate">
+                    {current.app === undefined
+                      ? current.workflow
+                      : `${current.app.name} · ${current.workflow}`}
                   </dd>
-                </div>
-                <div className="flex gap-4">
-                  <dt className="text-muted-foreground w-24 flex-none">
+                  <dt className="text-muted-foreground">
                     <Trans context="the run of a workflow a decision is for">
                       Run
                     </Trans>
                   </dt>
-                  <dd className="min-w-0 truncate font-mono text-xs leading-5">
+                  <dd className="truncate font-mono text-xs leading-5">
                     {current.run}
                   </dd>
-                </div>
-                {open ? (
-                  <div className="flex gap-4">
-                    <dt className="text-muted-foreground w-24 flex-none">
-                      <Trans context="until when a decision can be answered">
-                        Open until
-                      </Trans>
-                    </dt>
-                    <dd>{formatDateTime(current.expiresAt)}</dd>
-                  </div>
-                ) : null}
-              </dl>
+                  {current.input === undefined ? null : (
+                    <>
+                      <dt className="text-muted-foreground">
+                        <Trans context="what a decision is about, as its workflow run passed it">
+                          About
+                        </Trans>
+                      </dt>
+                      <dd className="min-w-0">
+                        <pre className="max-h-48 overflow-auto font-mono text-xs break-all whitespace-pre-wrap">
+                          {JSON.stringify(current.input, undefined, 2)}
+                        </pre>
+                      </dd>
+                    </>
+                  )}
+                  {open ? (
+                    <>
+                      <dt className="text-muted-foreground">
+                        <Trans context="until when a decision can be answered">
+                          Open until
+                        </Trans>
+                      </dt>
+                      <dd>{formatDateTime(current.expiresAt)}</dd>
+                    </>
+                  ) : null}
+                </dl>
+              </div>
               {open ? (
                 <div className="flex flex-col gap-3">
                   <div className="flex flex-col gap-2">
@@ -298,7 +310,7 @@ const DecisionInFrame = ({
   return (
     <AppFrame core={core} identity={identity}>
       <SiteHeader crumbs={crumbs} />
-      <div className="flex flex-col items-center gap-4 p-6 text-sm">
+      <div className="pb-chat flex flex-col items-center gap-4 px-6 pt-7 text-sm">
         {children}
       </div>
     </AppFrame>
@@ -386,17 +398,18 @@ const Decision = () => {
     );
   }
   const { decision } = page;
-  return (
-    <DecisionInFrame
-      crumbs={[
-        workflows,
-        {
+  // An independent workflow's decision has no App page to lead to.
+  const source: Crumb =
+    decision.app === undefined
+      ? { label: decision.workflow }
+      : {
           label: decision.workflow,
           to: "/workflows/$app/$workflow",
           params: { app: decision.app.id, workflow: decision.workflow },
-        },
-        { label: t`Decision` },
-      ]}
+        };
+  return (
+    <DecisionInFrame
+      crumbs={[workflows, source, { label: t`Decision` }]}
       identity={page.identity}
     >
       <DecisionCard decision={decision} />

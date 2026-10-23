@@ -8,7 +8,9 @@ import {
   dotsOf,
   keptAt,
   listeningOf,
+  openItems,
   reachedOf,
+  settledAs,
   stepIndex,
   steps,
   teamNumbersOf,
@@ -177,7 +179,7 @@ describe("how far the admin went", () => {
 
 describe("what this browser keeps of how far the admin went", () => {
   it("moves on with them, and stays at the furthest step when they go back", () => {
-    let kept: Kept = { reached: 0, message: null };
+    let kept: Kept = { reached: 0, message: null, settled: [] };
     for (const step of [
       "company",
       "documents",
@@ -187,9 +189,32 @@ describe("what this browser keeps of how far the admin went", () => {
     ] as const) {
       kept = keptAt(kept, stepIndex(step));
     }
-    expect(kept).toStrictEqual({ reached: stepIndex("leads"), message: null });
-    const same = { reached: 4, message: "Hi" };
+    expect(kept).toStrictEqual({
+      reached: stepIndex("leads"),
+      message: null,
+      settled: [],
+    });
+    const same: Kept = { reached: 4, message: "Hi", settled: [] };
     expect(keptAt(same, 2)).toBe(same);
+  });
+});
+
+describe("what needs the admin", () => {
+  it("is letting Grasp's mail through until they say it's done, and again once they take that back", () => {
+    const fresh: Kept = { reached: 9, message: null, settled: [] };
+    const done = settledAs(fresh, "mail", true);
+    const again = settledAs(done, "mail", false);
+    expect({
+      fresh: openItems(fresh.settled),
+      done: openItems(done.settled),
+      again: openItems(again.settled),
+      unchanged: settledAs(done, "mail", true) === done,
+    }).toStrictEqual({
+      fresh: ["mail"],
+      done: [],
+      again: ["mail"],
+      unchanged: true,
+    });
   });
 });
 

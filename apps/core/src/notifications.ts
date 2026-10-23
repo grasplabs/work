@@ -1,15 +1,28 @@
 import type { AuditEntry } from "@grasp-os/shared/audit";
+import { brainRecordSchema } from "@grasp-os/shared/brain-records";
 import {
   listedNotifications,
   notificationErrors,
 } from "@grasp-os/shared/notifications";
 import type {
+  Notification,
   NotificationCursor,
   NotificationPage,
   NotificationsApi,
 } from "@grasp-os/shared/notifications";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { and, count, desc, eq, isNull, lt, lte, sql } from "drizzle-orm";
+import {
+  and,
+  count,
+  desc,
+  eq,
+  isNotNull,
+  isNull,
+  lt,
+  lte,
+  or,
+  sql,
+} from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
@@ -18,16 +31,26 @@ import { z } from "zod";
 import { appsFoundBy } from "./app-access.ts";
 import { outboxedWhere } from "./audit-outbox.ts";
 import { activeMember } from "./auth/auth.ts";
-import { apps, notifications } from "./db/core/schema.ts";
+import {
+  apps,
+  brainGapStates,
+  brainRecords,
+  notifications,
+} from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 
-// What core tells a person in the product: for now, that a workflow
-// failed while acting for them (who started the run, or, for a run a
-// trigger started, the App's owner when it failed), while they are a
-// member of the organization still. Nobody else is told:
+// What core tells a person in the product: that a workflow failed while
+// acting for them, or that an admin asked them one of the brain's open
+// questions (`gap_asked`, written by brain-gaps.ts in the batch that
+// records the ask). A question is listed while it is open: once anyone
+// answers or closes it, it goes from the list by itself.
+//
+// A workflow's failure tells who it acted for (who started the run, or,
+// for a run a trigger started, the App's owner when it failed), while
+// they are a member of the organization still. Nobody else is told:
 // admins see every run's failure on the Workflows page, and the report
 // itself stays there, for those who see it (`seesDetails` in
 // workflows/runs.ts). A notification holds IDs and a count, never what
@@ -78,7 +101,7 @@ export const failureNoticed = (
     db
       .insert(notifications)
       .select(
-        sql`SELECT ${crypto.randomUUID()}, ${personId}, 'run_failed', ${run.appId}, ${run.workflowId}, ${run.id}, 1, ${now}, ${now}, NULL WHERE ${told}`
+        sql`SELECT ${crypto.randomUUID()}, ${personId}, 'run_failed', ${run.appId}, ${run.workflowId}, ${run.id}, 1, NULL, ${now}, ${now}, NULL WHERE ${told}`
       )
       .onConflictDoUpdate({
         target: [
@@ -98,9 +121,105 @@ export const failureNoticed = (
   ] as const;
 };
 
-/** `person`'s notifications, of Apps they can still open. */
+/**
+ * `person`'s notifications: of Apps they can still open, and of gaps
+ * still open. Read with `apps`, `brain_records` and `brain_gap_states`
+ * joined on the row (`appOn`, `gapOn`, `gapStateOn`).
+ */
 const visibleTo = (env: Env, person: Identity): SQL | undefined =>
-  and(eq(notifications.personId, person.userId), appsFoundBy(env, person));
+  and(
+    eq(notifications.personId, person.userId),
+    or(
+      and(
+        eq(notifications.type, "run_failed"),
+        isNotNull(apps.id),
+        appsFoundBy(env, person)
+      ),
+      and(
+        eq(notifications.type, "gap_asked"),
+        isNotNull(brainRecords.id),
+        isNull(brainGapStates.closedAt)
+      )
+    )
+  );
+
+/** Joins `apps` to a notification: a `run_failed` row's App. */
+const appOn = eq(apps.id, notifications.appId);
+/** Joins `brain_records` to a notification: a `gap_asked` row's gap. */
+const gapOn = and(
+  eq(brainRecords.type, "gap"),
+  eq(brainRecords.id, notifications.gapId)
+);
+/** Joins `brain_gap_states` to a notification: what became of its gap. */
+const gapStateOn = eq(brainGapStates.gapId, notifications.gapId);
+
+/** A notification as `listNotifications` reads its row. */
+interface ListedRow {
+  id: string;
+  type: "run_failed" | "gap_asked";
+  app: string | null;
+  appName: string | null;
+  workflow: string | null;
+  run: string | null;
+  failures: number | null;
+  gap: string | null;
+  gapBody: string | null;
+  updatedAt: Date;
+  readAt: Date | null;
+}
+
+/** The gap a `gap_asked` row is about, as added: its question and owner. */
+const askedGapOf = (
+  body: string | null
+): { question: string; owner: string } | null => {
+  if (body === null) {
+    return null;
+  }
+  const record = brainRecordSchema.safeParse(JSON.parse(body));
+  return record.success && record.data.type === "gap" ? record.data : null;
+};
+
+/** The notification a listed row holds; none for a row it can't read. */
+const notificationOf = (row: ListedRow): Notification[] => {
+  const at = row.updatedAt.toISOString();
+  const read = row.readAt !== null;
+  if (row.type === "gap_asked") {
+    const gap = askedGapOf(row.gapBody);
+    return row.gap === null || gap === null
+      ? []
+      : [
+          {
+            id: row.id,
+            type: "gap_asked",
+            gap: row.gap,
+            question: gap.question,
+            owner: gap.owner,
+            at,
+            read,
+          },
+        ];
+  }
+  const { app, appName, workflow, run, failures } = row;
+  return app === null ||
+    appName === null ||
+    workflow === null ||
+    run === null ||
+    failures === null
+    ? []
+    : [
+        {
+          id: row.id,
+          type: "run_failed",
+          app,
+          appName,
+          workflow,
+          run,
+          failures,
+          at,
+          read,
+        },
+      ];
+};
 
 /** Where a page goes on from, as the page passes it. */
 const cursorSchema = z
@@ -131,16 +250,21 @@ export const listNotifications = async (
     db
       .select({
         id: notifications.id,
+        type: notifications.type,
         app: notifications.appId,
         appName: apps.name,
         workflow: notifications.workflowId,
         run: notifications.runId,
         failures: notifications.failures,
+        gap: notifications.gapId,
+        gapBody: brainRecords.body,
         updatedAt: notifications.updatedAt,
         readAt: notifications.readAt,
       })
       .from(notifications)
-      .innerJoin(apps, eq(apps.id, notifications.appId))
+      .leftJoin(apps, appOn)
+      .leftJoin(brainRecords, gapOn)
+      .leftJoin(brainGapStates, gapStateOn)
       .where(and(visibleTo(env, person), after))
       .orderBy(desc(notifications.updatedAt), desc(notifications.id))
       // One past the page: whether more follow.
@@ -148,18 +272,13 @@ export const listNotifications = async (
     db
       .select({ count: count() })
       .from(notifications)
-      .innerJoin(apps, eq(apps.id, notifications.appId))
+      .leftJoin(apps, appOn)
+      .leftJoin(brainRecords, gapOn)
+      .leftJoin(brainGapStates, gapStateOn)
       .where(and(visibleTo(env, person), isNull(notifications.readAt))),
   ]);
   return {
-    notifications: rows
-      .slice(0, listedNotifications)
-      .map(({ updatedAt, readAt, ...row }) => ({
-        ...row,
-        type: "run_failed",
-        at: updatedAt.toISOString(),
-        read: readAt !== null,
-      })),
+    notifications: rows.slice(0, listedNotifications).flatMap(notificationOf),
     unread: unread?.count ?? 0,
     more: rows.length > listedNotifications,
   };

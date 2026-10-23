@@ -29,6 +29,11 @@ const interviewTests = /interview\.e2e\.ts$/u;
  * stale. They run in a project of their own, one test at a time.
  */
 const packageApprovalTests = /(?:dashboard|engine-packages|inbox)\.e2e\.ts$/u;
+/**
+ * The staff console's journeys (e2e/console): they run on a stack of their
+ * own (playwright.console.config.ts).
+ */
+const consoleTests = /\/e2e\/console\//u;
 const ci = process.env.CI === "true";
 
 /**
@@ -67,7 +72,12 @@ export default defineConfig({
     {
       name: "chromium",
       use: { ...devices["Desktop Chrome"] },
-      testIgnore: [onboardingTests, packageApprovalTests, interviewTests],
+      testIgnore: [
+        onboardingTests,
+        packageApprovalTests,
+        interviewTests,
+        consoleTests,
+      ],
     },
     {
       name: "package-approvals",

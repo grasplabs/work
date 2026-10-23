@@ -106,6 +106,41 @@
       "when": 1792338856044,
       "tag": "0014_sections_insert_triggers",
       "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "6",
+      "when": 1792571127085,
+      "tag": "0015_payloads",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "6",
+      "when": 1792605229217,
+      "tag": "0016_search_generations",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1792680144530,
+      "tag": "0017_search_one_content",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1792711486036,
+      "tag": "0018_brain_memories",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "6",
+      "when": 1792743100699,
+      "tag": "0019_collection_access_indexes",
+      "breakpoints": true
     }
   ]
 }

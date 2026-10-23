@@ -42,6 +42,8 @@ import { Route as ShellLandscapeIndexRouteImport } from './routes/_shell.landsca
 import { Route as ShellLandscapeAppIdRouteImport } from './routes/_shell.landscape.$appId'
 import { Route as ShellOnboardingIndexRouteImport } from './routes/_shell.onboarding.index'
 import { Route as ShellOnboardingAgreementsRouteImport } from './routes/_shell.onboarding.agreements'
+import { Route as ShellOnboardingAiUseRouteImport } from './routes/_shell.onboarding.ai-use'
+import { Route as ShellOnboardingInterviewersRouteImport } from './routes/_shell.onboarding.interviewers'
 import { Route as ShellOnboardingKickoffRouteImport } from './routes/_shell.onboarding.kickoff'
 import { Route as ShellOnboardingLogRouteImport } from './routes/_shell.onboarding.log'
 import { Route as ShellOnboardingNotesRouteImport } from './routes/_shell.onboarding.notes'
@@ -74,6 +76,8 @@ import { Route as ShellLandscapeAppIdConnectionsRouteImport } from './routes/_sh
 import { Route as ShellLandscapeAppIdDataRouteImport } from './routes/_shell.landscape.$appId.data'
 import { Route as ShellLandscapeAppIdOverviewRouteImport } from './routes/_shell.landscape.$appId.overview'
 import { Route as ShellLinksAppSurfaceRouteImport } from './routes/_shell.links.$app.$surface'
+import { Route as ShellOnboardingInterviewsIndexRouteImport } from './routes/_shell.onboarding.interviews.index'
+import { Route as ShellOnboardingInterviewsPersonRouteImport } from './routes/_shell.onboarding.interviews.$person'
 import { Route as ShellPoliciesDocumentsPolicyIdRouteImport } from './routes/_shell.policies.documents.$policyId'
 import { Route as ShellPoliciesRulesRuleIdRouteImport } from './routes/_shell.policies.rules.$ruleId'
 import { Route as ShellSettingsPackagesIndexRouteImport } from './routes/_shell.settings.packages.index'
@@ -255,6 +259,17 @@ const ShellOnboardingAgreementsRoute =
     path: '/agreements',
     getParentRoute: () => ShellOnboardingRoute,
   } as any)
+const ShellOnboardingAiUseRoute = ShellOnboardingAiUseRouteImport.update({
+  id: '/ai-use',
+  path: '/ai-use',
+  getParentRoute: () => ShellOnboardingRoute,
+} as any)
+const ShellOnboardingInterviewersRoute =
+  ShellOnboardingInterviewersRouteImport.update({
+    id: '/interviewers',
+    path: '/interviewers',
+    getParentRoute: () => ShellOnboardingRoute,
+  } as any)
 const ShellOnboardingKickoffRoute = ShellOnboardingKickoffRouteImport.update({
   id: '/kickoff',
   path: '/kickoff',
@@ -421,6 +436,18 @@ const ShellLinksAppSurfaceRoute = ShellLinksAppSurfaceRouteImport.update({
   path: '/links/$app/$surface',
   getParentRoute: () => ShellRoute,
 } as any)
+const ShellOnboardingInterviewsIndexRoute =
+  ShellOnboardingInterviewsIndexRouteImport.update({
+    id: '/interviews/',
+    path: '/interviews/',
+    getParentRoute: () => ShellOnboardingRoute,
+  } as any)
+const ShellOnboardingInterviewsPersonRoute =
+  ShellOnboardingInterviewsPersonRouteImport.update({
+    id: '/interviews/$person',
+    path: '/interviews/$person',
+    getParentRoute: () => ShellOnboardingRoute,
+  } as any)
 const ShellPoliciesDocumentsPolicyIdRoute =
   ShellPoliciesDocumentsPolicyIdRouteImport.update({
     id: '/policies/documents/$policyId',
@@ -524,6 +551,8 @@ export interface FileRoutesByFullPath {
   '/knowledge/$collection': typeof ShellKnowledgeCollectionRoute
   '/landscape/$appId': typeof ShellLandscapeAppIdRouteWithChildren
   '/onboarding/agreements': typeof ShellOnboardingAgreementsRoute
+  '/onboarding/ai-use': typeof ShellOnboardingAiUseRoute
+  '/onboarding/interviewers': typeof ShellOnboardingInterviewersRoute
   '/onboarding/kickoff': typeof ShellOnboardingKickoffRoute
   '/onboarding/log': typeof ShellOnboardingLogRoute
   '/onboarding/notes': typeof ShellOnboardingNotesRoute
@@ -561,6 +590,7 @@ export interface FileRoutesByFullPath {
   '/landscape/$appId/data': typeof ShellLandscapeAppIdDataRoute
   '/landscape/$appId/overview': typeof ShellLandscapeAppIdOverviewRoute
   '/links/$app/$surface': typeof ShellLinksAppSurfaceRoute
+  '/onboarding/interviews/$person': typeof ShellOnboardingInterviewsPersonRoute
   '/policies/documents/$policyId': typeof ShellPoliciesDocumentsPolicyIdRoute
   '/policies/rules/$ruleId': typeof ShellPoliciesRulesRuleIdRoute
   '/workflows/$app/$workflow': typeof ShellWorkflowsAppWorkflowRoute
@@ -568,6 +598,7 @@ export interface FileRoutesByFullPath {
   '/domains/$engine/': typeof ShellDomainsEngineIndexRoute
   '/engines/$engine/': typeof ShellEnginesEngineIndexRoute
   '/landscape/$appId/': typeof ShellLandscapeAppIdIndexRoute
+  '/onboarding/interviews/': typeof ShellOnboardingInterviewsIndexRoute
   '/settings/packages/': typeof ShellSettingsPackagesIndexRoute
   '/domains/$engine/apps/$screen': typeof ShellDomainsEngineAppsScreenRoute
   '/engines/$engine/apps/$screen': typeof ShellEnginesEngineAppsScreenRoute
@@ -599,6 +630,8 @@ export interface FileRoutesByTo {
   '/integrations/$integration': typeof ShellIntegrationsIntegrationRoute
   '/knowledge/$collection': typeof ShellKnowledgeCollectionRoute
   '/onboarding/agreements': typeof ShellOnboardingAgreementsRoute
+  '/onboarding/ai-use': typeof ShellOnboardingAiUseRoute
+  '/onboarding/interviewers': typeof ShellOnboardingInterviewersRoute
   '/onboarding/kickoff': typeof ShellOnboardingKickoffRoute
   '/onboarding/log': typeof ShellOnboardingLogRoute
   '/onboarding/notes': typeof ShellOnboardingNotesRoute
@@ -636,6 +669,7 @@ export interface FileRoutesByTo {
   '/landscape/$appId/data': typeof ShellLandscapeAppIdDataRoute
   '/landscape/$appId/overview': typeof ShellLandscapeAppIdOverviewRoute
   '/links/$app/$surface': typeof ShellLinksAppSurfaceRoute
+  '/onboarding/interviews/$person': typeof ShellOnboardingInterviewsPersonRoute
   '/policies/documents/$policyId': typeof ShellPoliciesDocumentsPolicyIdRoute
   '/policies/rules/$ruleId': typeof ShellPoliciesRulesRuleIdRoute
   '/workflows/$app/$workflow': typeof ShellWorkflowsAppWorkflowRoute
@@ -643,6 +677,7 @@ export interface FileRoutesByTo {
   '/domains/$engine': typeof ShellDomainsEngineIndexRoute
   '/engines/$engine': typeof ShellEnginesEngineIndexRoute
   '/landscape/$appId': typeof ShellLandscapeAppIdIndexRoute
+  '/onboarding/interviews': typeof ShellOnboardingInterviewsIndexRoute
   '/settings/packages': typeof ShellSettingsPackagesIndexRoute
   '/domains/$engine/apps/$screen': typeof ShellDomainsEngineAppsScreenRoute
   '/engines/$engine/apps/$screen': typeof ShellEnginesEngineAppsScreenRoute
@@ -680,6 +715,8 @@ export interface FileRoutesById {
   '/_shell/knowledge/$collection': typeof ShellKnowledgeCollectionRoute
   '/_shell/landscape/$appId': typeof ShellLandscapeAppIdRouteWithChildren
   '/_shell/onboarding/agreements': typeof ShellOnboardingAgreementsRoute
+  '/_shell/onboarding/ai-use': typeof ShellOnboardingAiUseRoute
+  '/_shell/onboarding/interviewers': typeof ShellOnboardingInterviewersRoute
   '/_shell/onboarding/kickoff': typeof ShellOnboardingKickoffRoute
   '/_shell/onboarding/log': typeof ShellOnboardingLogRoute
   '/_shell/onboarding/notes': typeof ShellOnboardingNotesRoute
@@ -717,6 +754,7 @@ export interface FileRoutesById {
   '/_shell/landscape/$appId/data': typeof ShellLandscapeAppIdDataRoute
   '/_shell/landscape/$appId/overview': typeof ShellLandscapeAppIdOverviewRoute
   '/_shell/links/$app/$surface': typeof ShellLinksAppSurfaceRoute
+  '/_shell/onboarding/interviews/$person': typeof ShellOnboardingInterviewsPersonRoute
   '/_shell/policies/documents/$policyId': typeof ShellPoliciesDocumentsPolicyIdRoute
   '/_shell/policies/rules/$ruleId': typeof ShellPoliciesRulesRuleIdRoute
   '/_shell/workflows/$app/$workflow': typeof ShellWorkflowsAppWorkflowRoute
@@ -724,6 +762,7 @@ export interface FileRoutesById {
   '/_shell/domains/$engine/': typeof ShellDomainsEngineIndexRoute
   '/_shell/engines/$engine/': typeof ShellEnginesEngineIndexRoute
   '/_shell/landscape/$appId/': typeof ShellLandscapeAppIdIndexRoute
+  '/_shell/onboarding/interviews/': typeof ShellOnboardingInterviewsIndexRoute
   '/_shell/settings/packages/': typeof ShellSettingsPackagesIndexRoute
   '/_shell/domains/$engine/apps/$screen': typeof ShellDomainsEngineAppsScreenRoute
   '/_shell/engines/$engine/apps/$screen': typeof ShellEnginesEngineAppsScreenRoute
@@ -761,6 +800,8 @@ export interface FileRouteTypes {
     | '/knowledge/$collection'
     | '/landscape/$appId'
     | '/onboarding/agreements'
+    | '/onboarding/ai-use'
+    | '/onboarding/interviewers'
     | '/onboarding/kickoff'
     | '/onboarding/log'
     | '/onboarding/notes'
@@ -798,6 +839,7 @@ export interface FileRouteTypes {
     | '/landscape/$appId/data'
     | '/landscape/$appId/overview'
     | '/links/$app/$surface'
+    | '/onboarding/interviews/$person'
     | '/policies/documents/$policyId'
     | '/policies/rules/$ruleId'
     | '/workflows/$app/$workflow'
@@ -805,6 +847,7 @@ export interface FileRouteTypes {
     | '/domains/$engine/'
     | '/engines/$engine/'
     | '/landscape/$appId/'
+    | '/onboarding/interviews/'
     | '/settings/packages/'
     | '/domains/$engine/apps/$screen'
     | '/engines/$engine/apps/$screen'
@@ -836,6 +879,8 @@ export interface FileRouteTypes {
     | '/integrations/$integration'
     | '/knowledge/$collection'
     | '/onboarding/agreements'
+    | '/onboarding/ai-use'
+    | '/onboarding/interviewers'
     | '/onboarding/kickoff'
     | '/onboarding/log'
     | '/onboarding/notes'
@@ -873,6 +918,7 @@ export interface FileRouteTypes {
     | '/landscape/$appId/data'
     | '/landscape/$appId/overview'
     | '/links/$app/$surface'
+    | '/onboarding/interviews/$person'
     | '/policies/documents/$policyId'
     | '/policies/rules/$ruleId'
     | '/workflows/$app/$workflow'
@@ -880,6 +926,7 @@ export interface FileRouteTypes {
     | '/domains/$engine'
     | '/engines/$engine'
     | '/landscape/$appId'
+    | '/onboarding/interviews'
     | '/settings/packages'
     | '/domains/$engine/apps/$screen'
     | '/engines/$engine/apps/$screen'
@@ -916,6 +963,8 @@ export interface FileRouteTypes {
     | '/_shell/knowledge/$collection'
     | '/_shell/landscape/$appId'
     | '/_shell/onboarding/agreements'
+    | '/_shell/onboarding/ai-use'
+    | '/_shell/onboarding/interviewers'
     | '/_shell/onboarding/kickoff'
     | '/_shell/onboarding/log'
     | '/_shell/onboarding/notes'
@@ -953,6 +1002,7 @@ export interface FileRouteTypes {
     | '/_shell/landscape/$appId/data'
     | '/_shell/landscape/$appId/overview'
     | '/_shell/links/$app/$surface'
+    | '/_shell/onboarding/interviews/$person'
     | '/_shell/policies/documents/$policyId'
     | '/_shell/policies/rules/$ruleId'
     | '/_shell/workflows/$app/$workflow'
@@ -960,6 +1010,7 @@ export interface FileRouteTypes {
     | '/_shell/domains/$engine/'
     | '/_shell/engines/$engine/'
     | '/_shell/landscape/$appId/'
+    | '/_shell/onboarding/interviews/'
     | '/_shell/settings/packages/'
     | '/_shell/domains/$engine/apps/$screen'
     | '/_shell/engines/$engine/apps/$screen'
@@ -1219,6 +1270,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShellOnboardingAgreementsRouteImport
       parentRoute: typeof ShellOnboardingRoute
     }
+    '/_shell/onboarding/ai-use': {
+      id: '/_shell/onboarding/ai-use'
+      path: '/ai-use'
+      fullPath: '/onboarding/ai-use'
+      preLoaderRoute: typeof ShellOnboardingAiUseRouteImport
+      parentRoute: typeof ShellOnboardingRoute
+    }
+    '/_shell/onboarding/interviewers': {
+      id: '/_shell/onboarding/interviewers'
+      path: '/interviewers'
+      fullPath: '/onboarding/interviewers'
+      preLoaderRoute: typeof ShellOnboardingInterviewersRouteImport
+      parentRoute: typeof ShellOnboardingRoute
+    }
     '/_shell/onboarding/kickoff': {
       id: '/_shell/onboarding/kickoff'
       path: '/kickoff'
@@ -1443,6 +1508,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShellLinksAppSurfaceRouteImport
       parentRoute: typeof ShellRoute
     }
+    '/_shell/onboarding/interviews/': {
+      id: '/_shell/onboarding/interviews/'
+      path: '/interviews'
+      fullPath: '/onboarding/interviews/'
+      preLoaderRoute: typeof ShellOnboardingInterviewsIndexRouteImport
+      parentRoute: typeof ShellOnboardingRoute
+    }
+    '/_shell/onboarding/interviews/$person': {
+      id: '/_shell/onboarding/interviews/$person'
+      path: '/interviews/$person'
+      fullPath: '/onboarding/interviews/$person'
+      preLoaderRoute: typeof ShellOnboardingInterviewsPersonRouteImport
+      parentRoute: typeof ShellOnboardingRoute
+    }
     '/_shell/policies/documents/$policyId': {
       id: '/_shell/policies/documents/$policyId'
       path: '/policies/documents/$policyId'
@@ -1555,22 +1634,30 @@ const ShellBrainRouteWithChildren = ShellBrainRoute._addFileChildren(
 
 interface ShellOnboardingRouteChildren {
   ShellOnboardingAgreementsRoute: typeof ShellOnboardingAgreementsRoute
+  ShellOnboardingAiUseRoute: typeof ShellOnboardingAiUseRoute
+  ShellOnboardingInterviewersRoute: typeof ShellOnboardingInterviewersRoute
   ShellOnboardingKickoffRoute: typeof ShellOnboardingKickoffRoute
   ShellOnboardingLogRoute: typeof ShellOnboardingLogRoute
   ShellOnboardingNotesRoute: typeof ShellOnboardingNotesRoute
   ShellOnboardingOpenRoute: typeof ShellOnboardingOpenRoute
   ShellOnboardingStephenRoute: typeof ShellOnboardingStephenRoute
   ShellOnboardingIndexRoute: typeof ShellOnboardingIndexRoute
+  ShellOnboardingInterviewsPersonRoute: typeof ShellOnboardingInterviewsPersonRoute
+  ShellOnboardingInterviewsIndexRoute: typeof ShellOnboardingInterviewsIndexRoute
 }
 
 const ShellOnboardingRouteChildren: ShellOnboardingRouteChildren = {
   ShellOnboardingAgreementsRoute: ShellOnboardingAgreementsRoute,
+  ShellOnboardingAiUseRoute: ShellOnboardingAiUseRoute,
+  ShellOnboardingInterviewersRoute: ShellOnboardingInterviewersRoute,
   ShellOnboardingKickoffRoute: ShellOnboardingKickoffRoute,
   ShellOnboardingLogRoute: ShellOnboardingLogRoute,
   ShellOnboardingNotesRoute: ShellOnboardingNotesRoute,
   ShellOnboardingOpenRoute: ShellOnboardingOpenRoute,
   ShellOnboardingStephenRoute: ShellOnboardingStephenRoute,
   ShellOnboardingIndexRoute: ShellOnboardingIndexRoute,
+  ShellOnboardingInterviewsPersonRoute: ShellOnboardingInterviewsPersonRoute,
+  ShellOnboardingInterviewsIndexRoute: ShellOnboardingInterviewsIndexRoute,
 }
 
 const ShellOnboardingRouteWithChildren = ShellOnboardingRoute._addFileChildren(

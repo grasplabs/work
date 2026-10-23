@@ -1,4 +1,8 @@
-import { defaultGatewayModels } from "@grasp-os/shared/deployment-config";
+import { deploymentConfig } from "@grasp-os/shared/config";
+import {
+  defaultGatewayModels,
+  mailFromSchema,
+} from "@grasp-os/shared/deployment-config";
 import { introspectWorkflow } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { and, asc, eq, sql } from "drizzle-orm";
@@ -22,11 +26,8 @@ import { accountName } from "../src/provision/workflow.ts";
 import { importReleases } from "../src/releases/import.ts";
 import { startingMs } from "../src/runners.ts";
 import type { AccountState } from "./cloudflare-api-kit.ts";
-import {
-  deployerEmail,
-  mockCloudflareApi,
-  tenantEmail,
-} from "./cloudflare-api.ts";
+import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
+import { deployerEmail, tenantEmail } from "./cloudflare-api.ts";
 import { publishRelease } from "./releases.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
 
@@ -373,6 +374,79 @@ describe("provisioning a new client", () => {
         entra: { tenantId: signIn.entraTenantId, clientId: entraClientId },
         google: { hostedDomain: "acme.test", clientId: googleClientId },
       },
+    });
+  });
+
+  it("provisions a client whose core sends mail only as Grasp's onboarding sender, from a sending domain in its own account", async () => {
+    const release = await publishRelease({
+      notes: "feat(core): send onboarding mail",
+      sendsMail: true,
+    });
+    await importReleases(env.RELEASES, db);
+    const { clientId, input } = await setUp({ releaseId: release.id });
+    await using run = await followRuns();
+
+    await startProvisioning(env, staff, input);
+    await run.waitForStepResult({ name: "client" });
+    await confirmWorkersPaid(env, staff, clientId);
+    await run.waitForStatus("complete");
+
+    const [account] = cloudflare.accountsNamed(accountName(clientId));
+    const core = account?.scripts.get("grasp-os-core");
+    const live = core?.deployments[0]?.versions[0]?.version_id;
+    const email = z
+      .array(z.looseObject({ name: z.string() }))
+      .parse(core?.versions.find(({ id }) => id === live)?.metadata.bindings)
+      .find(({ name }) => name === "EMAIL");
+    const mailDomain = `mail.${clientId}.${domain}`;
+    const address = `onboarding@${mailDomain}`;
+    expect({
+      zones: account?.zones.map(({ name, sending }) => ({
+        name,
+        sending: sending.map((entry) => entry.name),
+      })),
+      email,
+      // As core reads it (core's src/mail.ts).
+      from: deploymentConfig(
+        mailFromSchema,
+        "MAIL_FROM",
+        coreVarsOf(account).MAIL_FROM
+      ),
+    }).toStrictEqual({
+      zones: [{ name: mailDomain, sending: [mailDomain] }],
+      email: {
+        type: "send_email",
+        name: "EMAIL",
+        allowed_sender_addresses: [address],
+      },
+      from: { name: "Grasp Work", address },
+    });
+  });
+
+  it("links a client started from a deal won in Attio to the deal's company, refusing an id that isn't one", async () => {
+    const companyId = crypto.randomUUID();
+    const { clientId, input } = await setUp({
+      attioCompanyId: companyId.toUpperCase(),
+    });
+    const bad = await setUp({ attioCompanyId: "Noordkade Finance" });
+    await using run = await followRuns();
+
+    await startProvisioning(env, staff, input);
+    await run.waitForStepResult({ name: "client" });
+    const refused = await startProvisioning(env, staff, bad.input).then(
+      () => "started",
+      () => "refused"
+    );
+
+    const row = await clientRow(clientId);
+    expect({
+      linked: row?.attioCompanyId,
+      refused,
+      other: await clientRow(bad.clientId),
+    }).toStrictEqual({
+      linked: companyId,
+      refused: "refused",
+      other: undefined,
     });
   });
 

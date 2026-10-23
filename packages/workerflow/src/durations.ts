@@ -54,8 +54,10 @@ export const parseDuration = (duration: unknown, what: string): number => {
 };
 
 /** What an event wait that ran out throws, on first run and on replay. */
-export const waitTimedOut = (timeoutMs: number): Error =>
+export const waitTimedOut = (timeoutMs: number | null): Error =>
   namedError(
     "WorkflowTimeoutError",
-    `Execution timed out after ${timeoutMs}ms`
+    timeoutMs === null
+      ? "Execution timed out at its deadline"
+      : `Execution timed out after ${timeoutMs}ms`
   );
