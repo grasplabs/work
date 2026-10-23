@@ -1251,7 +1251,7 @@ msgid "{who} consented to this before connecting it:"
 msgstr "{who} a donné son consentement avant de le connecter :"
 
 #: src/interview/before.tsx
-#: src/interview/sound-check.tsx
+#: src/interview/voice-bar.tsx
 msgid "{who} is talking"
 msgstr "{who} parle"
 
@@ -6165,7 +6165,7 @@ msgstr "Renvoie à"
 msgid "Lisbon"
 msgstr "Lisbonne"
 
-#: src/interview/sound-check.tsx
+#: src/interview/voice-bar.tsx
 msgid "Listening"
 msgstr "À l’écoute"
 
@@ -7720,7 +7720,7 @@ msgstr "Étapes de l’onboarding"
 msgid "Once I have about {threshold}% of the picture, your team can start. I’ll fill in the rest as we go."
 msgstr "Dès que j’ai environ {threshold} % du tableau, votre équipe peut commencer. Je compléterai le reste en chemin."
 
-#: src/interview/sound-check.tsx
+#: src/interview/voice-bar.tsx
 msgid "One moment"
 msgstr "Un instant"
 
@@ -11773,6 +11773,10 @@ msgstr "Deux réponses"
 msgid "Type"
 msgstr "Type"
 
+#: src/interview/composer.tsx
+msgid "Type instead"
+msgstr "Plutôt écrire"
+
 #: src/interview/before.tsx
 #: src/interview/sound-check.tsx
 msgid "Type instead, without sound"
@@ -13346,55 +13350,3 @@ msgstr "Zoom arrière"
 #: src/routes/_shell.settings.workspace.tsx
 msgid "Zurich"
 msgstr "Zurich"
-
-#: src/routes/_shell.settings.members.tsx
-msgid "{people, plural, one {# person has access. Members join by signing in with your organization’s account; there are no invitations to send.} other {# people have access. Members join by signing in with your organization’s account; there are no invitations to send.}}"
-msgstr "{people, plural, one {# personne a accès. Les membres arrivent en se connectant avec le compte de votre organisation ; il n’y a pas d’invitation à envoyer.} other {# personnes ont accès. Les membres arrivent en se connectant avec le compte de votre organisation ; il n’y a pas d’invitation à envoyer.}}"
-
-#. A time zone, by its city
-#: src/routes/_shell.settings.workspace.tsx
-msgid "Amsterdam (CET)"
-msgstr "Amsterdam (CET)"
-
-#. A time zone, by its city
-#: src/routes/_shell.settings.workspace.tsx
-msgid "Berlin (CET)"
-msgstr "Berlin (CET)"
-
-#. A time zone, by its city
-#: src/routes/_shell.settings.workspace.tsx
-msgid "Brussels (CET)"
-msgstr "Bruxelles (CET)"
-
-#: src/routes/_shell.settings.members.tsx
-msgid "Change roles, sign people out and remove them"
-msgstr "Changer les rôles, déconnecter des personnes et les retirer"
-
-#: src/routes/_shell.settings.workspace.tsx
-msgid "Company domain"
-msgstr "Domaine de l’entreprise"
-
-#: src/routes/_shell.settings.workspace.tsx
-msgid "Everything Grasp stores stays here."
-msgstr "Tout ce que Grasp stocke reste ici."
-
-#: src/routes/_shell.settings.workspace.tsx
-msgid "How the workspace is named across Grasp and in emails."
-msgstr "Le nom de l’espace de travail dans Grasp et dans les e-mails."
-
-#. A time zone, by its city
-#: src/routes/_shell.settings.workspace.tsx
-msgid "London (GMT)"
-msgstr "Londres (GMT)"
-
-#: src/routes/_shell.settings.workspace.tsx
-msgid "The time zone a schedule uses when it names none of its own."
-msgstr "Le fuseau horaire qu’utilise une planification qui n’en indique aucun."
-
-#: src/interview/composer.tsx
-msgid "Type instead"
-msgstr "Plutôt écrire"
-
-#: src/routes/_shell.settings.workspace.tsx
-msgid "Who can be invited, and where the logo comes from."
-msgstr "Qui peut être invité, et d’où vient le logo."
