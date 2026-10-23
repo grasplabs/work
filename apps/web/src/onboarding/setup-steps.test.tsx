@@ -52,6 +52,7 @@ const said = (
     },
     directory: null,
     suites: [],
+    places: null,
     choices: noChoices,
     signIn: ["microsoft"],
     identity: {
