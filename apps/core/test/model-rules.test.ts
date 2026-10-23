@@ -15,7 +15,11 @@ import {
 } from "../src/resource-bindings.ts";
 import { fakeGateway } from "./ai-gateway.ts";
 import type { GatewayReply } from "./ai-gateway.ts";
-import { release as nextVersion, requestGranted } from "./apps.ts";
+import {
+  release as nextVersion,
+  requestGranted,
+  verifiedCandidate,
+} from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { collectionWithNote, newTeam, readCollection } from "./knowledge.ts";
@@ -74,6 +78,7 @@ const currentPastActivation = async (
   const activation = await outcome(
     builder.api.apps.versions.setCurrent(app, version)
   );
+  await verifiedCandidate(app, version);
   await env.DB.prepare("UPDATE apps SET current_version = ? WHERE id = ?")
     .bind(version, app)
     .run();

@@ -77,7 +77,8 @@ import type { FixtureRunStarted } from "./workflows/fixture-runs.ts";
 // The trusted test runner for an App's tests (spec 28.2): every suite in
 // `tests/**.test.ts` runs whenever a version of the App is made current,
 // rollbacks included, and a failing test refuses it (`requireAppTestsPass`,
-// called by `setCurrentVersion` in apps.ts). The suites are
+// called by `verifyVersion` in apps.ts, as a candidate is verified,
+// app-candidates.ts). The suites are
 // App code, written with `appTest` (`@grasp-os/sdk/testing`); the host
 // they call is core's, and real. Threat model, and how each is closed:
 //
