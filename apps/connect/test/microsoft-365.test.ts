@@ -425,7 +425,11 @@ describe("the Microsoft 365 connector's mail tools", () => {
     );
     const last = output.messages.at(-1);
     expect(last).toMatchObject({ bodyCut: true });
-    expect(last?.body).toBe(longBody.slice(0, 8000));
+    // Cut before the emoji whose halves straddle the bound, never between them.
+    expect({
+      straddling: String.fromCodePoint(longBody.codePointAt(7999) ?? 0),
+      body: last?.body,
+    }).toStrictEqual({ straddling: "🧾", body: longBody.slice(0, 7999) });
     expect(
       output.messages.slice(0, -1).filter(({ bodyCut }) => bodyCut)
     ).toStrictEqual([]);

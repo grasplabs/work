@@ -143,7 +143,8 @@ export const longConversationId =
 export const longThreadLength = 30;
 
 /** The text of the newest message of the long conversation. */
-export const longBody = `${"Line of the contract under review.\r\n".repeat(300)}End.`;
+// An emoji's two halves sit across the 8,000th character, where its body is cut.
+export const longBody = `${"Line of the contract under review.\r\n".repeat(222)}Total: 🧾\r\n${"Line of the contract under review.\r\n".repeat(78)}End.`;
 
 /** Sent Items' ID. */
 const sentItemsId =
