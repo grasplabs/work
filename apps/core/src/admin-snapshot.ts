@@ -19,6 +19,7 @@ import { adminIntegrationsOf } from "./admin-integrations.ts";
 import { appendAuditEvent } from "./audit-outbox.ts";
 import { organizationId } from "./auth/auth.ts";
 import { signInConfig } from "./auth/config.ts";
+import { appsAsked } from "./catalog-requests.ts";
 import { consoleSigned } from "./console-signed.ts";
 import { errorResponse } from "./errors.ts";
 import { membersOf } from "./members.ts";
@@ -191,6 +192,7 @@ export const snapshotOf = async (
     organization,
     members,
     integrations,
+    asked,
   ] = await Promise.all([
     store.adminFacts(),
     store.agreements(),
@@ -200,6 +202,7 @@ export const snapshotOf = async (
     readOrganization(env),
     membersOf(env),
     integrationsOf(env),
+    appsAsked(env),
   ]);
   const config = signInConfig(env);
   const sent = new Map(facts.links.map((link) => [link.person, link]));
@@ -251,6 +254,7 @@ export const snapshotOf = async (
     contract: null,
     members,
     integrations,
+    asked,
     usage: usageOf(usage),
   };
 };

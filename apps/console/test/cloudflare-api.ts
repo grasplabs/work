@@ -188,6 +188,7 @@ export const emptyAdminSnapshot = (name: string): AdminSnapshot => ({
   contract: null,
   members: [],
   integrations: null,
+  asked: [],
   usage: [],
 });
 
