@@ -8,7 +8,12 @@ import type {
   WatchState,
   WorkflowChannel,
 } from "./client-workflow.ts";
-import type { AppErrorPayload, RunHandle, WorkflowWait } from "./references.ts";
+import type {
+  AppErrorPayload,
+  EventDataOf,
+  RunHandle,
+  WorkflowWait,
+} from "./references.ts";
 
 // One `useWorkflow`'s state (spec 10.4.1–10.4.7, 10.7.3): the run it
 // selects, its own starts and controls, and the view it derives from them
@@ -29,6 +34,9 @@ import type { AppErrorPayload, RunHandle, WorkflowWait } from "./references.ts";
 // - A control the host admitted stays `applying` until a snapshot newer
 //   than the one shown at admission arrives; a cancel, this hook's or the
 //   host's, outranks a pause or resume.
+// - A send addresses the run shown when it was called, as a control does:
+//   a selection changed while it is under way doesn't redirect it. Each
+//   call is its own event; none is joined with another.
 
 /** A selection: `null` follows the hook's latest admitted start. */
 export type Selection = string | null;
@@ -45,7 +53,7 @@ export interface PendingControl {
 }
 
 /** What a hook does, and may do now, whatever its run's status. */
-export interface WorkflowCommands<Input, Wait> {
+export interface WorkflowCommands<Input, Wait, Event = never> {
   /**
    * Starts a new run with `input`: resolves with its handle once the host
    * admitted it durably (never when it finishes); rejects with a
@@ -65,6 +73,17 @@ export interface WorkflowCommands<Input, Wait> {
    * pause or resume still applying, and undoes nothing already done.
    */
   readonly cancel: () => Promise<void>;
+  /**
+   * Sends the selected run `event`, one of its workflow's own event
+   * references (`workflows.<workflow>.events.<alias>`), with `data` as
+   * that event declares it: resolves once the host committed it to the
+   * run's inbox, never when the run takes it. Each call is its own event;
+   * it resumes no paused run and answers no decision.
+   */
+  readonly send: <Sent extends Event>(
+    event: Sent,
+    data: NoInfer<EventDataOf<Sent>>
+  ) => Promise<void>;
   /** Whether a new run may be started now (not a promise it will be). */
   readonly canRun: boolean;
   readonly canPause: boolean;
@@ -120,11 +139,12 @@ export type WorkflowRunView<Output> =
     });
 
 /** What `useWorkflow` answers: the commands and the selected run's view. */
-export type WorkflowView<Input, Output, Wait = WorkflowWait> = WorkflowCommands<
+export type WorkflowView<
   Input,
-  Wait
-> &
-  WorkflowRunView<Output>;
+  Output,
+  Wait = WorkflowWait,
+  Event = never,
+> = WorkflowCommands<Input, Wait, Event> & WorkflowRunView<Output>;
 
 /** A snapshot as its status's variant of the view. */
 const runView = (snapshot: RunSnapshot): WorkflowRunView<unknown> => {
@@ -400,6 +420,11 @@ export class WorkflowStore {
     await this.#control("cancel");
   };
 
+  readonly send = async (event: unknown, data: unknown): Promise<void> => {
+    const runId = this.#attachedRunId();
+    await this.#channel.send(this.#read, runId, event, data);
+  };
+
   #runIdOf(selection: Selection): string | undefined {
     return selection ?? this.#autoRunId;
   }
@@ -452,7 +477,8 @@ export class WorkflowStore {
     return revision > intent.settleAfter;
   }
 
-  async #control(kind: PendingControl["kind"]): Promise<void> {
+  /** The run shown now, once its snapshot loaded: `workflow.not_attached` otherwise. */
+  #attachedRunId(): string {
     const runId =
       this.#committed === undefined
         ? undefined
@@ -463,6 +489,11 @@ export class WorkflowStore {
     ) {
       throw clientError("workflow.not_attached");
     }
+    return runId;
+  }
+
+  async #control(kind: PendingControl["kind"]): Promise<void> {
+    const runId = this.#attachedRunId();
     const generation = this.#generation;
     const joined = this.#intents.find(
       (intent) =>
@@ -562,11 +593,12 @@ export class WorkflowStore {
   ): WorkflowView<unknown, unknown> {
     const pending = runId === undefined ? null : this.#pending(runId, run);
     const snapshot = run?.error === undefined ? run?.value : undefined;
-    const commands: WorkflowCommands<unknown, WorkflowWait> = {
+    const commands: WorkflowCommands<unknown, WorkflowWait, unknown> = {
       run: this.run,
       pause: this.pause,
       resume: this.resume,
       cancel: this.cancel,
+      send: this.send,
       canRun:
         binding.fresh &&
         binding.error === undefined &&

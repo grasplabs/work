@@ -90,6 +90,7 @@ import type {
   FilesReference,
   ProgressOf,
   ReturnOf,
+  WorkflowEventsOf,
   WorkflowInputOf,
   WorkflowOutputOf,
   WorkflowWaitOf,
@@ -857,7 +858,8 @@ export const useStream = <Reference extends StreamReference>(
 export type WorkflowViewOf<Reference> = WorkflowView<
   WorkflowInputOf<Reference>,
   WorkflowOutputOf<Reference>,
-  WorkflowWaitOf<Reference>
+  WorkflowWaitOf<Reference>,
+  WorkflowEventsOf<Reference>[keyof WorkflowEventsOf<Reference>]
 >;
 
 /** The longest run ID a selection takes, as the host's IDs are. */
@@ -865,10 +867,10 @@ const maxRunIdLength = 256;
 
 /**
  * One workflow the App binds and one run of it (spec 10.4): the run's
- * view, narrowed by `status`, and stable `run`, `pause`, `resume` and
- * `cancel`, with what may be done now (`canRun`, `canPause`, `canResume`,
- * `canCancel`), whether a start is under way (`isStarting`) and a control
- * still settling (`pendingControl`).
+ * view, narrowed by `status`, and stable `run`, `pause`, `resume`,
+ * `cancel` and `send`, with what may be done now (`canRun`, `canPause`,
+ * `canResume`, `canCancel`), whether a start is under way (`isStarting`)
+ * and a control still settling (`pendingControl`).
  *
  * ```tsx
  * const summary = useWorkflow(workflows.summarizeNote);
@@ -878,6 +880,8 @@ const maxRunIdLength = 256;
  *
  * const existing = useWorkflow(workflows.summarizeNote, { runId });
  * // In a handler: await existing.cancel();
+ * // Or send it an event its workflow declares, typed by that event:
+ * // await existing.send(workflows.summarizeNote.events.styleChosen, { style: "short" });
  * ```
  *
  * Without `runId` it shows the run of its latest admitted start, idle

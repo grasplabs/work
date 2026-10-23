@@ -7,6 +7,7 @@ import {
   receiptsSweptPerStatement,
   rememberPerWindow,
 } from "../src/knowledge/memories.ts";
+import { release } from "./apps.ts";
 import { runQuarterHourCron } from "./cron.ts";
 import { mockIdp } from "./idp.ts";
 import { auditedDuring, outcome, signedInApi, unique } from "./sign-in.ts";
@@ -22,9 +23,10 @@ import { auditedDuring, outcome, signedInApi, unique } from "./sign-in.ts";
 //    request's hash says nothing across people.
 // 4. A remember is stored without its audit event, or its receipt
 //    without its record: all three commit together or not at all.
-// 5. A memory cites what its author can't read, or a section its version
-//    doesn't have, so a later reader learns it exists: such a reference
-//    refuses the whole command.
+// 5. A memory cites what its author can't read (an App's entry in the
+//    Apps collection included, for one who may not open the App), or a
+//    section its version doesn't have, so a later reader learns it
+//    exists: such a reference refuses the whole command.
 // 6. Forged fields (an actor, a scope) or a revision on a new record pass.
 // 7. An expired receipt keeps its key forever, or is still served; or
 //    receipts pile up past their retention.
@@ -367,6 +369,36 @@ describe("the Brain's memory commands", setUpTime, () => {
       forgedScope: "brain.invalid",
       withRevision: "brain.invalid",
       shortKey: "brain.invalid",
+    });
+  });
+
+  it("cite an App's entry only for those who may open the App", async () => {
+    const owner = await signedInApi(idp, "builder");
+    const person = await signedInApi(idp, "user");
+    const { id: app } = await owner.api.apps.create({
+      name: `Leave ${unique()}`,
+      description: "Leave requests, from request to approval.",
+    });
+    await release(owner, app, { "AGENTS.md": "# Leave\nAsk your lead.\n" });
+    const { documents } = await owner.api.knowledge.listDocuments("apps");
+    const entry = documents.find(({ path }) => path === `${app}/AGENTS.md`);
+    if (entry === undefined) {
+      throw new Error(`App ${app} has no entry`);
+    }
+    const cite = async (by: typeof owner) =>
+      await outcome(
+        by.api.knowledge.remember(citing(entry.id, "apps", 1), {
+          idempotencyKey: key(),
+        })
+      );
+    // The collection is for everyone, but its entries are for those who
+    // may open their App: the receipt mustn't say one exists.
+    expect({
+      owner: await cite(owner),
+      person: await cite(person),
+    }).toStrictEqual({
+      owner: "ok",
+      person: "brain.not_found",
     });
   });
 

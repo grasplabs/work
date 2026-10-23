@@ -95,6 +95,17 @@ export const schemaStatus = async (
   await storeObject(env, storeId).schemaStatus(storeId, schemaHash, consumer);
 
 /**
+ * Whether the store keeps `schemaHash` in force once its pending explicit
+ * migration takes over (`StoreHost.survivesMigration`).
+ */
+export const survivesMigration = async (
+  env: Pick<Env, "DATA_STORES" | "DURABLE_OBJECT_JURISDICTION">,
+  storeId: StoreId,
+  schemaHash: string
+): Promise<boolean> =>
+  await storeObject(env, storeId).survivesMigration(storeId, schemaHash);
+
+/**
  * The versions of `app` other than `version` that could be made current
  * on store `storeId` in its place: of its newest retained releases bound
  * to the store (sealed, not revoked: release-retention.ts deletes the
