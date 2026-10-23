@@ -13,13 +13,16 @@ import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
-import { auditedBatch, outboxed, outboxedIfChanged } from "../audit-outbox.ts";
+import { outboxed, outboxedIfChanged } from "../audit-outbox.ts";
 import { organizationId } from "../auth/auth.ts";
 import { teams } from "../db/core/schema.ts";
 import { inList } from "../db/d1.ts";
 import { collectionTeams, collections } from "../db/knowledge/schema.ts";
-import { allowedCollections, canCreate, canWrite } from "./access.ts";
+import { canCreate, canWrite } from "./access.ts";
 import type { Reader } from "./access.ts";
+import { auditedBatch } from "./audit.ts";
+import { allowedFor } from "./authorize.ts";
+import { portsOf } from "./ports.ts";
 
 export type CollectionRow = typeof collections.$inferSelect;
 
@@ -85,7 +88,7 @@ export const listCollections = async (
   reader: Reader
 ): Promise<Collection[]> => {
   const db = drizzle(env.KNOWLEDGE);
-  const allowed = await allowedCollections(env, db, reader);
+  const { collections: allowed } = await allowedFor(portsOf(env), reader);
   const rows = await db
     .select()
     .from(collections)
@@ -182,13 +185,13 @@ export const createCollection = async (
     access,
     sensitive,
     source,
-    createdAt: new Date(),
+    createdAt: portsOf(env).clock(),
   };
   const db = drizzle(env.KNOWLEDGE);
   const insertTeams = teamIds.map((teamId) =>
     db.insert(collectionTeams).values({ collectionId: row.id, teamId })
   );
-  await auditedBatch(env, db, [
+  await auditedBatch(portsOf(env), db, [
     db.insert(collections).values(row),
     ...insertTeams,
     outboxed(db, {
@@ -215,7 +218,7 @@ export const ensureCollection = async (
 ): Promise<CollectionRow> => {
   const db = drizzle(env.KNOWLEDGE);
   const { access, sensitive, source } = row;
-  await auditedBatch(env, db, [
+  await auditedBatch(portsOf(env), db, [
     db.insert(collections).values(row).onConflictDoNothing(),
     outboxedIfChanged(db, {
       actor,
