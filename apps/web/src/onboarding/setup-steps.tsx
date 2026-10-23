@@ -98,7 +98,7 @@ import {
   SupportLink,
   tones,
 } from "./setup-parts.tsx";
-import type { StepVoice } from "./setup-parts.tsx";
+import type { Answer, StepVoice } from "./setup-parts.tsx";
 import {
   closesOn,
   documentSources,
@@ -425,6 +425,8 @@ const Company = (props: StepProps) => {
   const refresh = useRefresh();
   const [reading, setReading] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
+  // Read on this visit: then Stephen says so, even when a list was there as the step arrived.
+  const [fresh, setFresh] = useState(false);
   const list = useRef<HTMLInputElement>(null);
   const { roster } = props.data.view;
   const people = roster?.people.length ?? 0;
@@ -466,21 +468,31 @@ const Company = (props: StepProps) => {
       );
       if (saved !== undefined) {
         await refresh();
+        setFresh(true);
       }
     }
     setReading(false);
   };
-  let answer: { text: string } | undefined;
+  // Said plainly, and quick: the counts are only known as he says them.
+  let answer: Answer | undefined;
   if (problem !== null) {
-    answer = { text: problem };
+    answer = { text: problem, announce: true, tone: tones.plain, quick: true };
   } else if (roster !== null) {
     answer = {
       text: t`Thank you. From your staff list I can see ${people} people in ${teams} teams.`,
+      announce: fresh,
+      tone: tones.plain,
+      quick: true,
     };
   }
   return (
     <>
-      <Heading answer={answer} sentence={lines.sentence} title={lines.title} />
+      <Heading
+        answer={answer}
+        sentence={lines.sentence}
+        title={lines.title}
+        voice={lines.voice}
+      />
       {roster === null ? (
         <Onward>
           <Button
