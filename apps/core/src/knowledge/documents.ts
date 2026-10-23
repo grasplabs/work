@@ -43,10 +43,10 @@ import {
   links,
   versions,
 } from "../db/knowledge/schema.ts";
-import { allowedCollections, noteProvenance } from "./access.ts";
+import { noteProvenance } from "./access.ts";
 import type { Reader } from "./access.ts";
-import { allowedFor } from "./app-entries.ts";
-import type { Allowed } from "./app-entries.ts";
+import { allowedFor } from "./authorize.ts";
+import type { Allowed } from "./authorize.ts";
 import { readableCollection, requireWritable } from "./collections.ts";
 import type { CollectionRow } from "./collections.ts";
 import {
@@ -67,6 +67,7 @@ import {
   stagePayload,
 } from "./payloads.ts";
 import type { StagedPayload } from "./payloads.ts";
+import { portsOf } from "./ports.ts";
 
 // Saving a document: its frontmatter is read and checked (and a memory
 // file's size, memory-files.ts), its Markdown split into sections and its
@@ -629,9 +630,10 @@ export const saveDocument = async (
   const { collectionId, path, text, ifVersion, message } =
     knowledgeErrors.parse("knowledge.invalid", saveInputSchema, input);
   const db = drizzle(env.KNOWLEDGE);
+  const allowed = await allowedFor(portsOf(env), { type: "person", person });
   const collection = await readableCollection(
     db,
-    await allowedCollections(env, db, { type: "person", person }),
+    allowed.collections,
     collectionId
   );
   requireWritable(env, person, collection);
@@ -659,7 +661,7 @@ export const restoreVersion = async (
   const db = drizzle(env.KNOWLEDGE);
   const { document, collection } = await readableDocument(
     db,
-    await allowedFor(env, db, { type: "person", person }),
+    await allowedFor(portsOf(env), { type: "person", person }),
     documentId
   );
   requireWritable(env, person, collection);
@@ -689,7 +691,7 @@ export const getDocument = async (
       ? undefined
       : knowledgeErrors.parse("knowledge.invalid", versionInputSchema, version);
   const db = drizzle(env.KNOWLEDGE);
-  const allowed = await allowedFor(env, db, reader);
+  const allowed = await allowedFor(portsOf(env), reader);
   const id = documentIdSchema.safeParse(documentId);
   // The version's payload is found in the same query as the access check,
   // so it is never read from a collection that stopped being readable in
@@ -756,7 +758,7 @@ export const listDocuments = async (
     options
   );
   const db = drizzle(env.KNOWLEDGE);
-  const allowed = await allowedFor(env, db, reader, collectionId);
+  const allowed = await allowedFor(portsOf(env), reader);
   const collection = await readableCollection(
     db,
     allowed.collections,
@@ -804,7 +806,7 @@ export const history = async (
     options
   );
   const db = drizzle(env.KNOWLEDGE);
-  const allowed = await allowedFor(env, db, reader);
+  const allowed = await allowedFor(portsOf(env), reader);
   const { document, collection } = await readableDocument(
     db,
     allowed,
@@ -897,7 +899,7 @@ export const backlinks = async (
     options
   );
   const db = drizzle(env.KNOWLEDGE);
-  const allowed = await allowedFor(env, db, reader);
+  const allowed = await allowedFor(portsOf(env), reader);
   const { document, collection } = await readableDocument(
     db,
     allowed,
