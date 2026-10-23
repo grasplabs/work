@@ -29,6 +29,12 @@ test.describe.configure({ mode: "serial" });
 /** Today, as core's plan reads it (UTC). */
 const today = (): string => new Date().toISOString().slice(0, 10);
 
+const dayMs = 24 * 60 * 60 * 1000;
+
+/** The day `days` from today, as core's plan reads it (UTC). */
+const daysFromToday = (days: number): string =>
+  new Date(Date.now() + days * dayMs).toISOString().slice(0, 10);
+
 test("staff put the agreements in place, and the links that waited go out", async ({
   page,
   cspViolations,
@@ -373,6 +379,17 @@ test("the company's admin goes through their onboarding: the staff list, the org
   // Late in the serial run: what it keeps replaces the roster and the plan
   // the tests before it read.
   const admin = await signInStaff();
+  // The first test's plan runs from today with the agreements in, so the
+  // store's alarm would send the links due under it to the staff list saved
+  // below before its organization is confirmed and its own plan made. A
+  // start still to come holds every link back, as before an onboarding's
+  // first plan.
+  const held = apiOf(admin);
+  try {
+    await held.api.onboarding.savePlan({ start: daysFromToday(2) });
+  } finally {
+    held.core[Symbol.dispose]();
+  }
   await signInTo(page.context(), admin);
   // The story on "How this works" is told at once.
   await page.emulateMedia({ reducedMotion: "reduce" });
@@ -515,7 +532,8 @@ test("the company's admin goes through their onboarding: the staff list, the org
   ).toBeVisible();
 
   // Core keeps what was set: the leads, Legal off, the plan from that day
-  // with Ops on its own later day, and links for the three who take part.
+  // with Ops on its own later day, and links for the three who take part,
+  // none out before the start.
   const { core, api } = apiOf(admin);
   try {
     const { roster, plan } = await api.onboarding.view();
@@ -641,10 +659,6 @@ test("a staff list of 170 people in 9 teams, from Excel, is kept; the same list 
   expect(cspViolations).toStrictEqual([]);
 });
 
-/** The day `days` from today (UTC), as `YYYY-MM-DD`. */
-const dayFrom = (days: number): string =>
-  new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-
 /**
  * Writes the onboarding's state straight into its object's local SQLite,
  * as the seed does (scripts/seed/local.ts): what no API can backdate, the
@@ -716,10 +730,10 @@ test("while Stephen talks to the team, the admin sees the numbers, no team under
   // Seeded interviews: the plan began six days ago, and by yesterday Sales
   // had heard from five of its six, Service from none of its five, and
   // Ops from its three; Lea and Ona talked, Lisa didn't.
-  const yesterday = dayFrom(-1);
+  const yesterday = daysFromToday(-1);
   onboardingSql((db) => {
     db.prepare("UPDATE onboarding SET plan = ? WHERE id = 1").run(
-      JSON.stringify({ start: dayFrom(-6), days: 14 })
+      JSON.stringify({ start: daysFromToday(-6), days: 14 })
     );
     const count = db.prepare(
       "INSERT OR REPLACE INTO team_counts (team, day, asked, talked) VALUES (?, ?, ?, ?)"

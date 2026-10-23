@@ -15,9 +15,9 @@ import type { DrizzleD1Database } from "drizzle-orm/d1";
 
 import { outboxed, outboxedIfChanged } from "../audit-outbox.ts";
 import { organizationId } from "../auth/auth.ts";
-import { teams } from "../db/core/schema.ts";
+import { collectionTeams, teams } from "../db/core/schema.ts";
 import { inList } from "../db/d1.ts";
-import { collectionTeams, collections } from "../db/knowledge/schema.ts";
+import { collections } from "../db/knowledge/schema.ts";
 import { canCreate, canWrite } from "./access.ts";
 import type { Reader } from "./access.ts";
 import { auditedBatch } from "./audit.ts";
@@ -94,15 +94,22 @@ export const listCollections = async (
     .from(collections)
     .where(allowed)
     .orderBy(asc(collections.name), asc(collections.id));
-  const shared = await db
-    .select({
-      collectionId: collectionTeams.collectionId,
-      teamId: collectionTeams.teamId,
-    })
-    .from(collectionTeams)
-    .innerJoin(collections, eq(collections.id, collectionTeams.collectionId))
-    .where(allowed)
-    .orderBy(asc(collectionTeams.teamId));
+  const shared =
+    rows.length === 0
+      ? []
+      : await drizzle(env.DB)
+          .select({
+            collectionId: collectionTeams.collectionId,
+            teamId: collectionTeams.teamId,
+          })
+          .from(collectionTeams)
+          .where(
+            inList(
+              collectionTeams.collectionId,
+              rows.map(({ id }) => id)
+            )
+          )
+          .orderBy(asc(collectionTeams.teamId));
   return rows.map((row) =>
     toCollection(
       row,
@@ -187,13 +194,16 @@ export const createCollection = async (
     source,
     createdAt: portsOf(env).clock(),
   };
+  // The teams first, in core's database: should the collection then fail,
+  // they name a collection nobody has, which nothing reads.
+  if (teamIds.length > 0) {
+    await drizzle(env.DB)
+      .insert(collectionTeams)
+      .values(teamIds.map((teamId) => ({ collectionId: row.id, teamId })));
+  }
   const db = drizzle(env.KNOWLEDGE);
-  const insertTeams = teamIds.map((teamId) =>
-    db.insert(collectionTeams).values({ collectionId: row.id, teamId })
-  );
   await auditedBatch(portsOf(env), db, [
     db.insert(collections).values(row),
-    ...insertTeams,
     outboxed(db, {
       actor: actorOf(person),
       action: "knowledge.collection.created",

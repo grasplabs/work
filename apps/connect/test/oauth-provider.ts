@@ -11,7 +11,10 @@ import { afterEach, beforeEach, vi } from "vite-plus/test";
 
 import { acmeTenant, clients } from "./provider-config.ts";
 
-export type ProviderName = Exclude<keyof typeof clients, "microsoftLandscape">;
+export type ProviderName = Exclude<
+  keyof typeof clients,
+  "microsoftLandscape" | "microsoftDirectory" | "googleDirectory"
+>;
 
 /** The account a code is for, as its ID token will say. */
 export interface Account {
@@ -178,9 +181,12 @@ export const fakeProviders = () => {
   const tokenEndpoint = async (form: URLSearchParams): Promise<Response> => {
     const clientId = form.get("client_id");
     const client =
-      [clients.google, clients.microsoftLandscape].find(
-        ({ id }) => id === clientId
-      ) ?? clients.microsoft;
+      [
+        clients.google,
+        clients.microsoftLandscape,
+        clients.microsoftDirectory,
+        clients.googleDirectory,
+      ].find(({ id }) => id === clientId) ?? clients.microsoft;
     if (form.get("client_secret") !== client.secret) {
       return oauthError("invalid_client", 401);
     }

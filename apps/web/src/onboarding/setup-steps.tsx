@@ -1,4 +1,9 @@
 import type { OAuthProvider } from "@grasp-os/shared/connect";
+import { directoryErrors } from "@grasp-os/shared/directory";
+import type {
+  DirectorySuite,
+  OnboardingDirectory,
+} from "@grasp-os/shared/directory";
 import {
   onboardingPeopleMax,
   onboardingTeamsMax,
@@ -36,7 +41,7 @@ import { Textarea } from "@grasp-os/ui/components/textarea";
 import { cn } from "@grasp-os/ui/lib/utils";
 import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
-import { useRouter } from "@tanstack/react-router";
+import { useNavigate, useRouter, useSearch } from "@tanstack/react-router";
 import {
   CheckIcon,
   CopyIcon,
@@ -46,6 +51,7 @@ import {
 } from "lucide-react";
 import { useContext, useEffect, useRef, useState } from "react";
 import type { ComponentType } from "react";
+import { z } from "zod";
 
 import type { BrainScene } from "../brain/dot-brain.tsx";
 import { CoreTimeoutError } from "../core.ts";
@@ -92,6 +98,7 @@ import { openItems, stepIndex, steps } from "./setup.ts";
 import type { Listening, ReviewItemId, SetupStep } from "./setup.ts";
 import {
   csvRows,
+  directoryListOf,
   exampleList,
   StaffListError,
   staffListOf,
@@ -120,6 +127,10 @@ export interface SetupData {
   links: LinkToSend[];
   documents: OnboardingDocument[];
   gate: GateView;
+  /** The directory connected for the onboarding; null before one is. */
+  directory: OnboardingDirectory | null;
+  /** The suites this deployment signs in with, whose directory can be connected. */
+  suites: DirectorySuite[];
   /** Grasp's sending domain, which the admin lets through their mail filter. */
   sendingDomain: string;
   /** What the admin chose about what Grasp may connect. */
@@ -147,6 +158,18 @@ export interface StepProps {
   /** "How this works" tells its story in the brain's figures: this sets the figure, or gives it back with null. */
   onStory: (scene: BrainScene | null) => void;
 }
+
+/** How Stephen names each suite's sign-in. Product names: not translated. */
+const suiteNames: Record<DirectorySuite, string> = {
+  microsoft: "Microsoft",
+  google: "Google",
+};
+
+/** Each suite's mark, as its own sign-in button guidelines draw it. */
+const suiteLogos: Record<DirectorySuite, string> = {
+  microsoft: "/logos/microsoft.svg",
+  google: "/logos/google.svg",
+};
 
 /** Hands the reader a CSV file to save, made in the browser. */
 const downloadCsv = (content: string, filename: string): void => {
@@ -208,6 +231,15 @@ const useHeadlines = ({
   const { progress } = data.view;
   const talked = (progress?.talked ?? 0) + (progress?.leadsTalked ?? 0);
   const openCount = openItems(settled).length;
+  // A sign-in to connect where the deployment signs in with one; else a staff list.
+  const [onlySuite, ...otherSuites] = data.suites;
+  const signIn = onlySuite === undefined ? "" : suiteNames[onlySuite];
+  let companySentence = t`A staff list is the quickest way in: names, email addresses, teams and jobs, as a CSV or Excel file. I only use it to know who to talk to.`;
+  if (otherSuites.length > 0) {
+    companySentence = t`The quickest way is to connect your Microsoft or Google sign-in. I’ll only see names, teams and roles. Your email, chats and calendars stay closed.`;
+  } else if (onlySuite !== undefined) {
+    companySentence = t`The quickest way is to connect your ${signIn} sign-in. I’ll only see names, teams and roles. Your email, chats and calendars stay closed.`;
+  }
   // Before the organization, the leads step asks for the HR platform, until the admin said which.
   const hr: Headline = {
     title: t`Which HR platform do you use?`,
@@ -230,7 +262,7 @@ const useHeadlines = ({
     },
     company: {
       title: t`Who’s who at your company?`,
-      sentence: t`A staff list is the quickest way in: names, email addresses, teams and jobs, as a CSV or Excel file. I only use it to know who to talk to.`,
+      sentence: companySentence,
     },
     sources: {
       title: t`Where does the work get written down?`,
@@ -414,36 +446,217 @@ const shareDocument = async (
   }
 };
 
+/** Where connecting a directory comes back to: this step. */
+const companyStep = "/setup?step=company";
+
+/** Why the directory could not become a roster. */
+type DirectoryProblem = "large" | "empty" | "inactive" | "failed";
+
 /**
- * Who works there, from a staff list the admin shares: a CSV or Excel file
- * with a row per person. It is read in this browser; only names, email
- * addresses, teams and jobs are kept, in core.
+ * Who works where, from the connected directory, as a roster with what the
+ * admin set on the one saved before kept: the same path a staff list
+ * takes, so everyone keeps their id and their link. Or why it could not be.
+ */
+const readDirectoryRoster = async (
+  core: ReturnType<typeof useCore>,
+  noTeam: string,
+  saved: Roster | null
+): Promise<
+  { roster: RosterInput; suite: DirectorySuite } | DirectoryProblem
+> => {
+  try {
+    const { people, suite } = await core.withSession(
+      async (session) => await session.onboarding.readDirectory()
+    );
+    return {
+      roster: withSaved(directoryListOf(people, noTeam).roster, saved),
+      suite,
+    };
+  } catch (error) {
+    if (error instanceof StaffListError) {
+      return error.reason === "empty" ? "empty" : "large";
+    }
+    const code = directoryErrors.codeOf(error);
+    if (code === "directory.too_large") {
+      return "large";
+    }
+    return code === "directory.inactive" || code === "directory.not_connected"
+      ? "inactive"
+      : "failed";
+  }
+};
+
+/**
+ * Starts connecting the directory of `suite`: the browser goes to its
+ * sign-in, and comes back to this step. False if it could not start.
+ */
+const startDirectory = async (
+  core: ReturnType<typeof useCore>,
+  suite: DirectorySuite
+): Promise<boolean> => {
+  try {
+    const { url } = await core.withSession(
+      async (session) =>
+        await session.onboarding.connectDirectory(suite, companyStep)
+    );
+    window.location.assign(url);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Which directory the roster came from, as Stephen names it: the one read
+ * on this visit, or, arriving, the one connected; none for a staff list.
+ */
+const directoryShown = (
+  fresh: DirectorySuite | "list" | null,
+  directory: OnboardingDirectory | null
+): DirectorySuite | null => {
+  if (fresh === "list") {
+    return null;
+  }
+  if (fresh !== null) {
+    return fresh;
+  }
+  return directory?.status === "active" ? directory.suite : null;
+};
+
+/** What a step's search says once a connection's flow came back to it. */
+const returnedSchema = z.object({ connection: z.string().min(1) });
+
+/**
+ * A button for each suite's sign-in, side by side, arriving together once
+ * Stephen has asked; and, without either, a staff list instead.
+ */
+const SignIns = ({
+  suites,
+  reading,
+  onConnect,
+  onList,
+}: {
+  suites: DirectorySuite[];
+  /** What is being connected or read, if anything. */
+  reading: DirectorySuite | "list" | null;
+  onConnect: (suite: DirectorySuite) => void;
+  onList: () => void;
+}) => {
+  const { t } = useLingui();
+  const [onlySuite] = suites;
+  const onlySignIn = onlySuite === undefined ? "" : suiteNames[onlySuite];
+  let listInstead = t`No ${onlySignIn}? A staff list works too.`;
+  if (reading === "list") {
+    listInstead = t`Reading your staff list`;
+  } else if (suites.length > 1) {
+    listInstead = t`No Microsoft or Google? A staff list works too.`;
+  }
+  return (
+    <>
+      <Onward>
+        <div
+          className={cn(
+            "grid w-full gap-2.5",
+            suites.length > 1 && "sm:grid-cols-2"
+          )}
+        >
+          {suites.map((suite) => {
+            const signIn = suiteNames[suite];
+            const waiting = reading === suite;
+            return (
+              <Button
+                className="w-full"
+                disabled={reading !== null}
+                key={suite}
+                onClick={() => {
+                  onConnect(suite);
+                }}
+                size="lg"
+                variant="outline"
+              >
+                {waiting ? (
+                  <Spinner data-icon="inline-start" />
+                ) : (
+                  <img
+                    alt=""
+                    className="size-4"
+                    data-icon="inline-start"
+                    src={suiteLogos[suite]}
+                  />
+                )}
+                {waiting
+                  ? t`Waiting for ${signIn}`
+                  : t`Continue with ${signIn}`}
+              </Button>
+            );
+          })}
+        </div>
+      </Onward>
+      <Asides>
+        {/* Without either sign-in, a list of who works where does the same. */}
+        <LaterLink onClick={onList}>{listInstead}</LaterLink>
+        {/* What the sign-in lets Grasp see, on the support site. */}
+        <SupportLink page="directory">{t`More about this connection`}</SupportLink>
+      </Asides>
+    </>
+  );
+};
+
+/**
+ * Who works there: from the organization's Microsoft or Google sign-in,
+ * connected here and read through Grasp's own read-only connection
+ * (names, teams, jobs and who reports to whom, nothing else), or from a
+ * staff list the admin shares, a CSV or Excel file with a row per person,
+ * read in this browser. Either way only names, email addresses, teams and
+ * jobs are kept, in core. A sign-in is offered for each suite this
+ * deployment signs in with.
  */
 const Company = (props: StepProps) => {
   const { t } = useLingui();
   const lines = useHeadlines(props).company;
+  const core = useCore();
   const { run } = useCoreAction();
   const refresh = useRefresh();
-  const [reading, setReading] = useState(false);
+  const navigate = useNavigate();
+  const search: unknown = useSearch({ strict: false });
+  const returned = returnedSchema.safeParse(search).success;
+  const [reading, setReading] = useState<DirectorySuite | "list" | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
-  // Read on this visit: then Stephen says so, even when a list was there as the step arrived.
-  const [fresh, setFresh] = useState(false);
+  // Read on this visit, and from where: then Stephen says so, even when a roster was there as the step arrived.
+  const [fresh, setFresh] = useState<DirectorySuite | "list" | null>(null);
   const list = useRef<HTMLInputElement>(null);
   const { roster } = props.data.view;
+  const { directory, suites } = props.data;
   const people = roster?.people.length ?? 0;
   const teams = roster?.teams.length ?? 0;
   const noTeam = t({
     message: "Other",
     context: "the team for people a staff list gives no team",
   });
+  const peopleMost = onboardingPeopleMax;
+  const teamsMost = onboardingTeamsMax;
+  const tooLarge = t`This list is too large. I can take up to ${peopleMost} people in up to ${teamsMost} teams.`;
+  const keep = async (
+    found: RosterInput,
+    from: DirectorySuite | "list"
+  ): Promise<void> => {
+    const saved = await run(
+      async (session) => await session.onboarding.saveRoster(found),
+      () => {
+        setProblem(t`I could not keep it. Try again in a moment.`);
+      }
+    );
+    if (saved !== undefined) {
+      await refresh();
+      setFresh(from);
+    }
+  };
   const read = async (file: File) => {
-    setReading(true);
+    setReading("list");
     setProblem(null);
     const found = await readStaffList(file, noTeam, roster);
     if (typeof found === "string") {
       const why = found;
-      const peopleMost = onboardingPeopleMax;
-      const teamsMost = onboardingTeamsMax;
       if (why === "headings") {
         setProblem(
           t`I could not find the columns. The first row should name them: name, email, team and job.`
@@ -451,41 +664,102 @@ const Company = (props: StepProps) => {
       } else if (why === "empty") {
         setProblem(t`There is nobody in this list.`);
       } else if (why === "large") {
-        setProblem(
-          t`This list is too large. I can take up to ${peopleMost} people in up to ${teamsMost} teams.`
-        );
+        setProblem(tooLarge);
       } else {
         setProblem(
           t`I could not read this file. A CSV or an Excel file works.`
         );
       }
+    } else {
+      await keep(found, "list");
     }
-    if (typeof found !== "string") {
-      const saved = await run(
-        async (session) => await session.onboarding.saveRoster(found),
-        () => {
-          setProblem(t`I could not keep it. Try again in a moment.`);
-        }
-      );
-      if (saved !== undefined) {
-        await refresh();
-        setFresh(true);
-      }
-    }
-    setReading(false);
+    setReading(null);
   };
+  const connect = async (suite: DirectorySuite) => {
+    setReading(suite);
+    setProblem(null);
+    const signIn = suiteNames[suite];
+    if (!(await startDirectory(core, suite))) {
+      setProblem(
+        t`I could not reach ${signIn} just now. Try again in a moment, or use a staff list.`
+      );
+      setReading(null);
+    }
+  };
+  // Back from the sign-in: the directory is read once, made a roster and kept, and the address forgets the connection.
+  const readOnReturn = async () => {
+    const suite = directory?.suite ?? null;
+    setReading(suite ?? "list");
+    setProblem(null);
+    const found = await readDirectoryRoster(core, noTeam, roster);
+    const signIn = suite === null ? "" : suiteNames[suite];
+    if (found === "large") {
+      setProblem(
+        t`There are more people in ${signIn} than I can take: up to ${peopleMost} people in up to ${teamsMost} teams. A staff list of those taking part works.`
+      );
+    } else if (found === "empty") {
+      setProblem(t`I found nobody in ${signIn}.`);
+    } else if (found === "inactive") {
+      setProblem(
+        t`I could not read who works where from ${signIn}. Connect it again with an administrator’s account.`
+      );
+    } else if (found === "failed") {
+      setProblem(
+        t`I could not read ${signIn} just now. Try again in a moment, or use a staff list.`
+      );
+    } else {
+      await keep(found.roster, found.suite);
+    }
+    setReading(null);
+    void navigate({ to: "/setup", search: { step: "company" }, replace: true });
+  };
+  const readOnce = useRef(false);
+  useEffect(() => {
+    if (returned && !readOnce.current) {
+      readOnce.current = true;
+      void readOnReturn();
+    }
+  });
+  const fromDirectory = directoryShown(fresh, directory);
   // Said plainly, and quick: the counts are only known as he says them.
   let answer: Answer | undefined;
   if (problem !== null) {
     answer = { text: problem, announce: true, tone: tones.plain, quick: true };
+  } else if (roster !== null && fromDirectory !== null) {
+    const signIn = suiteNames[fromDirectory];
+    answer = {
+      text: t`${signIn} is connected. I can see ${people} people in ${teams} teams.`,
+      announce: fresh !== null,
+      tone: tones.plain,
+      quick: true,
+    };
   } else if (roster !== null) {
     answer = {
       text: t`Thank you. From your staff list I can see ${people} people in ${teams} teams.`,
-      announce: fresh,
+      announce: fresh !== null,
       tone: tones.plain,
       quick: true,
     };
   }
+  const listButton = (
+    <Button
+      className="w-full max-w-sm"
+      disabled={reading !== null}
+      onClick={() => {
+        list.current?.click();
+      }}
+      size="xl"
+    >
+      {reading === "list" ? (
+        <Spinner data-icon="inline-start" />
+      ) : (
+        <UploadIcon data-icon="inline-start" />
+      )}
+      {reading === "list"
+        ? t`Reading your staff list`
+        : t`Choose your staff list`}
+    </Button>
+  );
   return (
     <>
       <Heading
@@ -494,23 +768,21 @@ const Company = (props: StepProps) => {
         title={lines.title}
         voice={lines.voice}
       />
-      {roster === null ? (
+      {roster === null && suites.length > 0 ? (
+        <SignIns
+          onConnect={(suite) => {
+            void connect(suite);
+          }}
+          onList={() => {
+            list.current?.click();
+          }}
+          reading={reading}
+          suites={suites}
+        />
+      ) : null}
+      {roster === null && suites.length === 0 ? (
         <Onward>
-          <Button
-            className="w-full max-w-sm"
-            disabled={reading}
-            onClick={() => {
-              list.current?.click();
-            }}
-            size="xl"
-          >
-            {reading ? (
-              <Spinner data-icon="inline-start" />
-            ) : (
-              <UploadIcon data-icon="inline-start" />
-            )}
-            {reading ? t`Reading your staff list` : t`Choose your staff list`}
-          </Button>
+          {listButton}
           <p className="text-muted-foreground text-balance">
             {t`From your HR or payroll system. Microsoft 365 or Google can be connected later, with us.`}{" "}
             <button
@@ -525,7 +797,8 @@ const Company = (props: StepProps) => {
           </p>
           <MoreAbout page="staffList">{t`More about the staff list`}</MoreAbout>
         </Onward>
-      ) : (
+      ) : null}
+      {roster === null ? null : (
         <>
           <Primary
             onClick={() => {
@@ -540,9 +813,15 @@ const Company = (props: StepProps) => {
                 list.current?.click();
               }}
             >
-              {t`Use another list`}
+              {fromDirectory === null
+                ? t`Use another list`
+                : t`Use a staff list instead`}
             </LaterLink>
-            <SupportLink page="staffList">{t`More about the staff list`}</SupportLink>
+            {fromDirectory === null ? (
+              <SupportLink page="staffList">{t`More about the staff list`}</SupportLink>
+            ) : (
+              <SupportLink page="directory">{t`More about this connection`}</SupportLink>
+            )}
           </Asides>
         </>
       )}

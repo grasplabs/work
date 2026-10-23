@@ -35,6 +35,9 @@ export const fixtureBuild = async (app: string): Promise<WorkerBuild> => {
     d1Migrations: Object.fromEntries(
       config.d1_databases.map((database) => [database.binding, migrations])
     ),
+    d1CompatibleFrom: Object.fromEntries(
+      config.d1_databases.map((database) => [database.binding, 0])
+    ),
     ...(config.assets
       ? { assets: await collectAssets(path.join(TESTDATA, "assets")) }
       : {}),

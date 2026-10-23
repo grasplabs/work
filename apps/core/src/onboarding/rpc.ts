@@ -1,5 +1,10 @@
 import { dayOf } from "@grasp-os/shared/admin/org-record";
 import { actorOf } from "@grasp-os/shared/audit";
+import type {
+  DirectoryPeople,
+  DirectorySuite,
+  OnboardingDirectory,
+} from "@grasp-os/shared/directory";
 import {
   linksTakenSchema,
   onboardingErrors,
@@ -36,6 +41,11 @@ import { z } from "zod";
 import { CoreRpcTarget } from "../rpc-target.ts";
 import { withPerson } from "../session-check.ts";
 import type { SessionCheck } from "../session-check.ts";
+import {
+  connectDirectory,
+  onboardingDirectory,
+  readOnboardingDirectory,
+} from "./directory.ts";
 import { shareDocument } from "./documents.ts";
 import { gateView } from "./gate.ts";
 import { mondayOf } from "./rules.ts";
@@ -52,7 +62,9 @@ import { summaryOf } from "./summary.ts";
 // against the shared schemas before the store sees it. Its programme
 // (when it began, and where it stands) is for everyone signed in, for the
 // dashboard: the plan's first week and the stage, and nothing of the plan
-// or the roster past them.
+// or the roster past them. Who works where can also come from the
+// organization's directory, connected here and read for the admin's
+// browser to make the roster of (directory.ts).
 
 /** The admin's answer to a document's question. */
 const answerSchema = z.strictObject({
@@ -111,6 +123,31 @@ export class OnboardingRpc extends CoreRpcTarget implements OnboardingApi {
         actorOf(person)
       );
     });
+  }
+
+  async directory(): Promise<OnboardingDirectory | null> {
+    return await withPerson(
+      this.#check,
+      async (person) => await onboardingDirectory(this.#env, person)
+    );
+  }
+
+  async connectDirectory(
+    suite: DirectorySuite,
+    returnTo: string
+  ): Promise<{ url: string }> {
+    return await withPerson(
+      this.#check,
+      async (person) =>
+        await connectDirectory(this.#env, person, suite, returnTo)
+    );
+  }
+
+  async readDirectory(): Promise<DirectoryPeople> {
+    return await withPerson(
+      this.#check,
+      async (person) => await readOnboardingDirectory(this.#env, person)
+    );
   }
 
   async savePlan(plan: PlanInput): Promise<OnboardingView> {
