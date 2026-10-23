@@ -495,6 +495,8 @@ export const contract = (n: number) => {
       Status: n % 3 === 0 ? "Closed" : "Open",
       Amount: n * 250,
       Renewal_x0020_date: `2027-0${(n % 9) + 1}-01T00:00:00Z`,
+      // "2nd signatory": a leading digit SharePoint writes as `_x0032_`.
+      _x0032_nd_x0020_signatory: n % 2 === 0 ? "Finance" : "Legal",
       ContentType: "Item",
       Modified: modified,
       Created: "2026-01-05T08:00:00Z",

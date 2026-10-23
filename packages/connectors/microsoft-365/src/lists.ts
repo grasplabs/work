@@ -121,8 +121,20 @@ const bookkeeping = new Set([
   "AppEditorLookupId",
 ]);
 
+/**
+ * How SharePoint writes a character a name can't start with or hold in its
+ * internal name: `_x0032_` for a leading "2", `_x0020_` for a space. A
+ * column named "2nd signatory" is `_x0032_nd_x0020_signatory`, the list's
+ * own, not one of SharePoint's `_`-named columns.
+ */
+const encodedCharacter = /^_x[\da-fA-F]{4}_/u;
+
 const isOwnColumn = (name: string): boolean =>
-  !(name.startsWith("@") || name.startsWith("_") || bookkeeping.has(name));
+  !(
+    name.startsWith("@") ||
+    (name.startsWith("_") && !encodedCharacter.test(name)) ||
+    bookkeeping.has(name)
+  );
 
 const itemSchema = z.strictObject({
   id: z.string(),
@@ -132,10 +144,16 @@ const itemSchema = z.strictObject({
   webUrl: z.string().nullable(),
 });
 
-const itemOf = (item: GraphListItem): z.infer<typeof itemSchema> => ({
+/** An item, with its own columns and any column `columns` asked for. */
+const itemOf = (
+  item: GraphListItem,
+  columns: readonly string[] = []
+): z.infer<typeof itemSchema> => ({
   id: item.id,
   fields: Object.fromEntries(
-    Object.entries(item.fields ?? {}).filter(([name]) => isOwnColumn(name))
+    Object.entries(item.fields ?? {}).filter(
+      ([name]) => isOwnColumn(name) || columns.includes(name)
+    )
   ),
   createdAt: item.createdDateTime ?? null,
   lastModifiedAt: item.lastModifiedDateTime ?? null,
@@ -187,7 +205,7 @@ const listItems = defineTool({
       output: {
         site,
         list,
-        items: value.map(itemOf),
+        items: value.map((item) => itemOf(item, columns)),
         nextPage: nextPageOf(nextLink),
       },
       provenance: value.map(({ id }) => id),

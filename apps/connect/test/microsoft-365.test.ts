@@ -880,6 +880,7 @@ describe("the Microsoft 365 connector's list tools", () => {
         Status: "Open",
         Amount: 5750,
         Renewal_x0020_date: "2027-06-01T00:00:00Z",
+        _x0032_nd_x0020_signatory: "Legal",
         Modified: "2026-06-13T09:30:00Z",
         Created: "2026-01-05T08:00:00Z",
         AuthorLookupId: "11",
@@ -905,22 +906,30 @@ describe("the Microsoft 365 connector's list tools", () => {
     });
   });
 
-  it("read only the columns asked for", async () => {
+  it("read only the columns asked for, one of SharePoint's own too", async () => {
     const connection = await connected();
     const output = await outputOf(
       call(connection, "lists.items", {
         ...contracts,
-        columns: ["Title", "Status"],
+        columns: ["Title", "Status", "ContentType"],
         top: 1,
       })
     );
     expect(output).toMatchObject({
       items: [
-        { id: "1", fields: { id: "1", Title: "Contract 1", Status: "Open" } },
+        {
+          id: "1",
+          fields: {
+            id: "1",
+            Title: "Contract 1",
+            Status: "Open",
+            ContentType: "Item",
+          },
+        },
       ],
     });
     expect(requests()[0]?.query).toMatchObject({
-      $expand: "fields($select=Title,Status)",
+      $expand: "fields($select=Title,Status,ContentType)",
     });
   });
 
