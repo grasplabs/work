@@ -2657,9 +2657,17 @@ msgstr "Erneut angefragt, nachdem Version {version} aktuell wurde (zuvor erteilt
 msgid "Asked by"
 msgstr "Angefragt von"
 
+#: src/connections/requested-apps.tsx
+msgid "Asked by {asker}"
+msgstr "Angefragt von {asker}"
+
 #: src/dashboard/pile-cards.tsx
 msgid "Asked by {requester} on {date}"
 msgstr "Angefragt von {requester} am {date}"
+
+#: src/connections/requested-apps.tsx
+msgid "Asked by a former member"
+msgstr "Angefragt von einem ehemaligen Mitglied"
 
 #: src/onboarding/connect-steps.tsx
 msgid "Asked for"
@@ -9586,6 +9594,15 @@ msgstr "Bericht"
 #: src/landscape/landscape.ts
 msgid "Repository content, snippets, editor context, build logs or engineering documentation."
 msgstr "Repository-Inhalte, Snippets, Editor-Kontext, Build-Logs oder technische Dokumentation."
+
+#: src/connections/requested-apps.tsx
+msgctxt "apps someone asked for"
+msgid "Requested"
+msgstr "Angefragt"
+
+#: src/connections/requested-apps.tsx
+msgid "Requested {date}"
+msgstr "Angefragt am {date}"
 
 #: src/settings/pulse-people.tsx
 msgid "Reset"

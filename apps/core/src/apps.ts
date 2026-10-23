@@ -1735,19 +1735,20 @@ export const makeCurrent = async (
     // is left is a conflict: the base moved, or the candidate ended.
     throw appErrors.create("app.conflict");
   }
-  // What its screens build to with this release's kit, which may not be
-  // the one it was committed under, and with the references they import,
-  // read back from its release, checked above (screen-builds.ts): in the
-  // background, never something making it current waits on. Bounded by
-  // the build wait; what doesn't get recorded now is when it is opened or
+  // What its screens build to, for what waits on an admin
+  // (screen-builds.ts), in the background: read from the release, which
+  // sealed them (screen-references.ts), checked above, so nothing is
+  // compiled. What doesn't get recorded now is when it is opened or
   // reviewed.
   waitUntil(
     recordVersionBuilds(env, appId, number, files, {
-      // Imported here, not at the top: the references reach releases,
-      // which reach back into this module for App lookups.
-      withReferences: async (built) => {
-        const { withScreenReferences } = await import("./screen-references.ts");
-        return await withScreenReferences(env, appId, number, built);
+      // Imported here, not at the top: the screens reach releases, which
+      // reach back into this module for App lookups.
+      codesOf: async () => {
+        const { versionScreenCodes } = await import("./screen-references.ts");
+        return await versionScreenCodes(env, appId, number, files, {
+          unsealed: "refuse",
+        });
       },
     })
   );
