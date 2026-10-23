@@ -24,13 +24,11 @@ import { grantedPermissions } from "../permissions.ts";
 import { restrict } from "../restricted.ts";
 import type { WorkContext } from "../restricted.ts";
 
-// The one place Knowledge decides what may be read. Every query that reads
-// collections puts `allowedCollections` inside its SQL, and every query
-// that reads documents, versions or links puts `allowedFor`'s `documents`
-// (app-entries.ts: these collections, and of the Apps collection only the
-// entries of Apps the reader may open), never as a filter afterwards, so
-// no path (listing, history, backlinks, search) shows more than a read
-// would.
+// The one place core decides what Knowledge may be read by whom: the
+// host side of Knowledge's `authorize` port (app-entries.ts `authorize`
+// adds the Apps collection's entries; authorize.ts puts the answer inside
+// every read's SQL). Core's own reads of Knowledge (uploads, signals,
+// memory, history) use these conditions directly.
 //
 // A person reads a collection for everyone, one of their teams', or one
 // they own. An App or agent reads the collections it has a permission to
