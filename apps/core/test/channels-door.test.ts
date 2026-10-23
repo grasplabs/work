@@ -18,6 +18,7 @@ import { z } from "zod";
 import { channelAdapters } from "../src/channels/door.ts";
 import {
   botFrameworkAskedUrl,
+  botFrameworkFailUrl,
   botFrameworkKeysUrl,
 } from "./connect-providers.ts";
 import { acmeTenant, otherTenant, signInConfig } from "./sign-in-config.ts";
@@ -552,5 +553,35 @@ describe("keys Microsoft rotates", () => {
       status: 200,
       handled: 1,
     });
+  });
+
+  it("are fetched again at most once a minute while fetching them fails", async () => {
+    await providers().fetch(botFrameworkFailUrl, {
+      method: "POST",
+      body: JSON.stringify({ status: 503 }),
+    });
+    try {
+      // Past the hour the keys are kept for: every request wants them anew.
+      vi.useFakeTimers({
+        toFake: ["Date"],
+        now: Date.now() + 2 * 60 * 60 * 1000,
+      });
+      const before = await keysAsked();
+      const token = await sign();
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        // oxlint-disable-next-line no-await-in-loop
+        await expect(
+          deliver(directMessage(), `Bearer ${token}`)
+        ).resolves.toStrictEqual(refused);
+      }
+      const after = await keysAsked();
+      expect(after - before).toBe(1);
+    } finally {
+      await providers().fetch(botFrameworkFailUrl, {
+        method: "POST",
+        body: JSON.stringify({ status: null }),
+      });
+      vi.useRealTimers();
+    }
   });
 });

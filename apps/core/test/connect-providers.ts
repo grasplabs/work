@@ -129,6 +129,13 @@ export const osvAnswerUrl = "https://osv-control.test/answer";
  */
 export const botFrameworkKeysUrl = "https://botframework-control.test/keys";
 
+/**
+ * Where tests have login.botframework.com fail its key set: POST
+ * `{ status }` to have it answer with that status, `{ status: null }` to
+ * have it answer as before.
+ */
+export const botFrameworkFailUrl = "https://botframework-control.test/fail";
+
 /** Where tests read the paths login.botframework.com was asked for, in order. */
 export const botFrameworkAskedUrl = "https://botframework-control.test/asked";
 
@@ -381,6 +388,14 @@ export default {
     if (request.method === "POST" && url.href === ${JSON.stringify(botFrameworkKeysUrl)}) {
       const { keys } = await request.json();
       botFramework.setKeys(keys);
+      return new Response(null, { status: 204 });
+    }
+    if (request.method === "POST" && url.href === ${JSON.stringify(botFrameworkFailUrl)}) {
+      const { status } = await request.json();
+      botFramework.override(
+        botFramework.keysPath,
+        status === null ? undefined : () => new Response("Unavailable", { status })
+      );
       return new Response(null, { status: 204 });
     }
     if (url.href === ${JSON.stringify(botFrameworkAskedUrl)}) {

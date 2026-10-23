@@ -106,9 +106,11 @@ const fetchKeys = async (env: Env): Promise<KeySet> => {
 };
 
 /**
- * The published key `kid` names, fetching the keys when they are older
- * than an hour, or when `kid` isn't among them and they weren't fetched in
- * the last minute.
+ * The published key `kid` names. The keys are fetched when they are older
+ * than an hour, or when `kid` isn't among them; fetches start at least a
+ * minute apart whatever the keys' state, a failed one included, so an
+ * outage or made-up key ids can't have every request ask connect again. A
+ * request arriving while a fetch is under way waits for that fetch.
  */
 const keyFor = async (
   env: Env,
@@ -120,7 +122,7 @@ const keyFor = async (
   if (known !== undefined) {
     return known;
   }
-  if (fresh && now - lastFetch < refreshIntervalMs) {
+  if (fetching === undefined && now - lastFetch < refreshIntervalMs) {
     return undefined;
   }
   const fetched = await fetchKeys(env);
