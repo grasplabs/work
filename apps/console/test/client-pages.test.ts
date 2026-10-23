@@ -11,7 +11,7 @@ import { importReleases } from "../src/releases/import.ts";
 import { mockAccess } from "./access.ts";
 import { page } from "./pages.ts";
 import { publishRelease } from "./releases.ts";
-import { adminOf } from "./secrets-store.ts";
+import { adminOf } from "./secrets-store-admin.ts";
 
 mockAccess();
 

@@ -484,6 +484,52 @@ describe("a screen's file port", () => {
     }
   });
 
+  it("counts no frame's click while another screen frame is mounted, until it is gone", () => {
+    const mounted = new Set<object>();
+    const frame = {};
+    const page = {
+      events: new EventTarget(),
+      focused: () => frame,
+      now: () => 10_000,
+      mounted,
+    };
+    let active = false;
+    // Mounted before the page had activation: no opening click to wait out.
+    const gesture = frameGesture(frame, { ...page, active: () => active });
+    const other = frameGesture({}, { ...page, active: () => active });
+    try {
+      active = true;
+      const withTwo = gesture.take();
+      other.close();
+      expect([withTwo, gesture.take()]).toStrictEqual([false, true]);
+    } finally {
+      gesture.close();
+      other.close();
+    }
+  });
+
+  it("spends one click on one download or one link, never both", () => {
+    const frame = {};
+    let now = 0;
+    const gesture = frameGesture(frame, {
+      events: new EventTarget(),
+      active: () => true,
+      focused: () => frame,
+      now: () => now,
+      mounted: new Set(),
+    });
+    try {
+      // Past the click that opened the frame.
+      now += 5000;
+      // The download's port and the link's take from the same gesture.
+      const download = gesture.take();
+      const link = gesture.take();
+      expect([download, link]).toStrictEqual([true, false]);
+    } finally {
+      gesture.close();
+    }
+  });
+
   it("refuses a call past the transfers and the queue", async () => {
     const { channel, release } = heldChannel();
     const frame = frameOf(channel);

@@ -2,8 +2,9 @@
  * On-prem smoke run: bundles core and serves it on plain workerd (no
  * Wrangler, no Miniflare), checks it answers, and waits for its built-in
  * content to install: it fails on any failure core or workerd logs before
- * that. Keeps the code on-prem ready: only platform APIs that also run on
- * workerd.
+ * that. Then delivers signed raw mail to core's ingress, as the router
+ * does in the cloud and a mail bridge on-prem. Keeps the code on-prem
+ * ready: only platform APIs that also run on workerd.
  */
 import { execFileSync, spawn } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
@@ -21,12 +22,23 @@ import path from "node:path";
 import { createInterface } from "node:readline";
 import { PassThrough } from "node:stream";
 
+import {
+  mailIngressRequest,
+  mailRejectedStatus,
+  mailSignatureHeader,
+  signMail,
+} from "../packages/shared/src/mail-ingress.ts";
+import type { RawMail } from "../packages/shared/src/mail-ingress.ts";
 import { routerSecretHeader } from "../packages/shared/src/router.ts";
 import { d1DatabasesOf, writeD1Service } from "./workerd-d1.ts";
 import { writeR2Service } from "./workerd-r2.ts";
 import { nativeWorkerd, startSandboxSupervisor } from "./workerd-sandbox.ts";
 import type { SandboxSupervisor } from "./workerd-sandbox.ts";
-import { coreWranglerConfig, smokeConfig } from "./workerd-smoke-config.ts";
+import {
+  coreWranglerConfig,
+  smokeConfig,
+  smokeHostname,
+} from "./workerd-smoke-config.ts";
 import { coreStarted, installedOnWorkerd } from "./workerd-smoke-start.ts";
 import type { KnownGap } from "./workerd-smoke-start.ts";
 
@@ -92,6 +104,77 @@ writeR2Service(out);
 const storage = path.join(out, "storage");
 mkdirSync(storage);
 
+/** A message to `to`, as Email Routing hands it over, sent now. */
+const rawMail = (to: string): RawMail => ({
+  to,
+  from: "ben@example.com",
+  raw: new TextEncoder().encode(
+    [
+      "From: Ben <ben@example.com>",
+      `To: ${to}`,
+      "Subject: Invoice INV-7",
+      "Message-ID: <inv-7@example.com>",
+      "Content-Type: text/plain; charset=utf-8",
+      "",
+      "Please pay by Friday.",
+      "",
+    ].join("\r\n")
+  ),
+  sentAt: new Date().toISOString(),
+});
+
+/** Throws, saying what core answered instead, unless it's `expected`. */
+const expectAnswer = async (
+  what: string,
+  response: Response,
+  expected: { status: number; body: string }
+): Promise<void> => {
+  const answer = { status: response.status, body: await response.text() };
+  if (answer.status !== expected.status || answer.body !== expected.body) {
+    throw new Error(
+      `${what}: core answered ${JSON.stringify(answer)}, not ${JSON.stringify(expected)}`
+    );
+  }
+};
+
+/**
+ * Delivers raw mail to core's ingress as the router's mail sorter sends it
+ * (@grasp-os/shared/mail-ingress), and as an on-prem mail bridge would:
+ * signed for the client's own address, core takes it to its email
+ * triggers; signed with any other key, it refuses it. A fresh deployment
+ * has no workflow receiving mail, so what core takes bounces with
+ * `receiveEmail`'s reason, as Email Routing would bounce it.
+ */
+const mailDelivered = async (origin: string): Promise<void> => {
+  const own = await mailIngressRequest(
+    origin,
+    ROUTER_SECRET,
+    rawMail(`invoices@${smokeHostname}`)
+  );
+  await expectAnswer("signed mail to the client", await fetch(own.request), {
+    status: mailRejectedStatus,
+    body: JSON.stringify({ reason: "No such address." }),
+  });
+
+  // The same message, signed with a key derived from another secret.
+  const forged = await mailIngressRequest(
+    origin,
+    ROUTER_SECRET,
+    rawMail(`invoices@${smokeHostname}`)
+  );
+  forged.request.headers.set(
+    mailSignatureHeader,
+    await signMail("not-the-router-secret", forged.mail)
+  );
+  const refused = await fetch(forged.request);
+  if (refused.status !== 403) {
+    throw new Error(
+      `mail signed with another key: core answered ${String(refused.status)}, not 403`
+    );
+  }
+  await refused.body?.cancel();
+};
+
 // Everything from here runs inside the scope that stops the sandbox
 // supervisor and core and removes `out`, however the run ends.
 let sandbox: SandboxSupervisor | undefined;
@@ -147,10 +230,11 @@ try {
   for (const { why } of excused) {
     console.warn(`known on-prem gap: ${why}`);
   }
+  await mailDelivered(`http://127.0.0.1:${PORT}`);
   console.info(
     excused.length === 0
-      ? "core runs on workerd, and its built-in content installed"
-      : "core runs on workerd, and its built-in content installed but for the known gaps above"
+      ? "core runs on workerd, its built-in content installed, and it takes signed mail"
+      : "core runs on workerd, its built-in content installed but for the known gaps above, and it takes signed mail"
   );
 } finally {
   server?.kill();

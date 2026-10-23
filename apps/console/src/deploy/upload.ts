@@ -33,6 +33,19 @@ const unknownPlaceholder = (worker: WorkerEntry, binding: string) =>
   );
 
 /**
+ * `binding`, if it's a `send_email` binding, locked to send from
+ * `mailSender` alone (`allowed_sender_addresses`), whatever it said.
+ */
+export const lockMailSender = (
+  binding: Record<string, unknown>,
+  mailSender: string
+): void => {
+  if (binding.type === "send_email") {
+    binding.allowed_sender_addresses = [mailSender];
+  }
+};
+
+/**
  * `worker`'s bindings with each D1 binding's id filled in: a D1 binding's
  * `id` must be exactly its own placeholder (`d1IdPlaceholder`), for a
  * database the Worker lists, and is replaced by that database's id in the
@@ -52,9 +65,7 @@ export const renderBindings = (
 ): Record<string, unknown>[] =>
   worker.bindings.map((binding) => {
     const rendered: Record<string, unknown> = { ...binding };
-    if (binding.type === "send_email") {
-      rendered.allowed_sender_addresses = [mailSender];
-    }
+    lockMailSender(rendered, mailSender);
     if (binding.type === "d1") {
       const database = worker.d1Databases.find(
         (entry) => entry.binding === binding.name
@@ -127,19 +138,16 @@ const readAssets = async (
   );
 
 /**
- * What `worker` of `manifest` is uploaded as: its metadata on the
- * release's compatibility date and flags, its bindings filled in (its
- * mail locked to `mailSender`, `renderBindings`) and
- * `vars` added as JSON bindings, and its modules and static files, all
- * read from `store` and checked against the manifest.
+ * `workerUpload` with `bindings` rendered already: a placed client's,
+ * mapped onto its inventory (src/hosting/inventory.ts), its mail locked
+ * (`lockMailSender`).
  */
-export const workerUpload = async (
+export const renderedWorkerUpload = async (
   store: ReleaseStore,
   manifest: ReleaseManifest,
   worker: WorkerEntry,
-  databases: ReadonlyMap<string, string>,
-  vars: Readonly<Record<string, unknown>>,
-  mailSender: string
+  bindings: readonly Record<string, unknown>[],
+  vars: Readonly<Record<string, unknown>>
 ): Promise<WorkerUpload> => {
   const modules = await Promise.all(
     worker.modules.map(async (file): Promise<WorkerModule> => ({
@@ -153,7 +161,7 @@ export const workerUpload = async (
     compatibility_date: manifest.compatibilityDate,
     compatibility_flags: worker.compatibilityFlags,
     bindings: [
-      ...renderBindings(worker, databases, mailSender),
+      ...bindings,
       ...Object.entries(vars).map(([name, json]) => ({
         type: "json",
         name,
@@ -174,6 +182,29 @@ export const workerUpload = async (
       : { assets: await readAssets(store, worker) }),
   };
 };
+
+/**
+ * What `worker` of `manifest` is uploaded as: its metadata on the
+ * release's compatibility date and flags, its bindings filled in (its
+ * mail locked to `mailSender`, `renderBindings`) and
+ * `vars` added as JSON bindings, and its modules and static files, all
+ * read from `store` and checked against the manifest.
+ */
+export const workerUpload = async (
+  store: ReleaseStore,
+  manifest: ReleaseManifest,
+  worker: WorkerEntry,
+  databases: ReadonlyMap<string, string>,
+  vars: Readonly<Record<string, unknown>>,
+  mailSender: string
+): Promise<WorkerUpload> =>
+  await renderedWorkerUpload(
+    store,
+    manifest,
+    worker,
+    renderBindings(worker, databases, mailSender),
+    vars
+  );
 
 /**
  * Throws `binding_name_taken` unless every binding, var and secret of

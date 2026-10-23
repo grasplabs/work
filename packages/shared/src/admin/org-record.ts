@@ -534,6 +534,8 @@ export interface Told {
   own: boolean;
   ai: boolean;
   volume: [number, number] | null;
+  /** Whose count `volume` is: theirs alone, the whole team's, or not said. Missing on a drawing from before it was asked. */
+  volumeOf?: "me" | "team" | "unknown";
   takes: [number, number, number] | null;
   wrong: number | null;
   right: boolean;

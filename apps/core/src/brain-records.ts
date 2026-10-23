@@ -1,4 +1,5 @@
 import { actorOf } from "@grasp-os/shared/audit";
+import type { AuditActor } from "@grasp-os/shared/audit";
 import type {
   Candidate,
   Gap,
@@ -7,12 +8,16 @@ import type {
   Statement,
   Team,
   TeamCount,
+  Step,
   Tool,
+  Workflow,
+  WorkflowDrawing,
 } from "@grasp-os/shared/brain";
 import {
   brainGapSubjects,
   brainRecordErrors,
   brainRecordSchema,
+  brainRecordsMaxPerCall,
   brainRecordsMaxPerType,
   brainRecordsSchema,
   onboardingSourceIds,
@@ -32,7 +37,6 @@ import { drizzle } from "drizzle-orm/d1";
 
 import { auditedBatch, outboxed } from "./audit-outbox.ts";
 import { brainRecords } from "./db/core/schema.ts";
-import { onboardingStore } from "./onboarding/store.ts";
 
 // The Playbook's records, as core keeps them (`brain_records`), and adding
 // them (`brain.addRecords`). Threat model, and how each is closed (the
@@ -56,6 +60,10 @@ import { onboardingStore } from "./onboarding/store.ts";
 //   bounded.
 // - A change without its record: the records and their audit event are one
 //   batch, kept together or not at all.
+// - The onboarding's records taken or forged: only the onboarding adds a
+//   workflow, a roster team's record or an `onb-` id
+//   (`keepOnboardingRecords`, as the system); `brain.addRecords` refuses
+//   them (`brainRecordInputSchema`).
 
 /** A record's key across types, as its audit event names it. */
 const keyOf = ({ type, id }: { type: string; id: string }): string =>
@@ -154,6 +162,18 @@ const referencesOf = (record: BrainRecord): Reference[] => {
         ...record.about.map((id) => ({ type: "note" as const, id })),
       ];
     }
+    case "workflow": {
+      return [
+        { type: "source", id: record.sourceId },
+        { type: "team", id: record.teamId },
+      ];
+    }
+    case "workflowVersion": {
+      return [
+        { type: "source", id: record.sourceId },
+        { type: "workflow", id: record.workflowId },
+      ];
+    }
     default: {
       return [];
     }
@@ -161,7 +181,7 @@ const referencesOf = (record: BrainRecord): Reference[] => {
 };
 
 /** What the onboarding gives the brain now, that a record may name. */
-interface OnboardingHeld {
+export interface OnboardingHeld {
   /** Its sources: the kickoff once brought in, the staff list once saved. */
   sources: ReadonlySet<string>;
   /**
@@ -178,12 +198,12 @@ const nothingOnboarded: OnboardingHeld = {
 };
 
 /**
- * What the onboarding gives the brain, read only when a record may name
- * it: a team, or one of its source ids.
+ * What the onboarding gives the brain, read (by `read`, brain-rpc.ts) only
+ * when a record may name it: a team, or one of its source ids.
  */
 const onboardingHeld = async (
-  env: Env,
-  records: readonly BrainRecord[]
+  records: readonly BrainRecord[],
+  read: () => Promise<OnboardingHeld>
 ): Promise<OnboardingHeld> => {
   const named = records.some((record) =>
     referencesOf(record).some(
@@ -191,23 +211,7 @@ const onboardingHeld = async (
         type === "team" || (type === "source" && onboardingSourceIds.has(id))
     )
   );
-  if (!named) {
-    return nothingOnboarded;
-  }
-  const store = onboardingStore(env);
-  const [kickoff, view, rosterSavedAt] = await Promise.all([
-    store.kickoff(),
-    store.view(),
-    store.rosterSavedAt(),
-  ]);
-  const rosterTeams = view.roster?.teams ?? [];
-  return {
-    sources: new Set([
-      ...(kickoff.transcript === null ? [] : ["src-kickoff"]),
-      ...(view.roster === null || rosterSavedAt === null ? [] : ["src-roster"]),
-    ]),
-    teams: new Set(rosterTeams.map(({ id }) => `team-${id}`)),
-  };
+  return named ? await read() : nothingOnboarded;
 };
 
 const types = [
@@ -219,6 +223,8 @@ const types = [
   "teamCount",
   "stakeholder",
   "gap",
+  "workflow",
+  "workflowVersion",
 ] as const;
 
 /** Rows one insert writes: four columns each, within D1's 100 bound parameters. */
@@ -339,12 +345,12 @@ const isTakenId = (error: unknown): boolean =>
 const maxWriteAttempts = 3;
 
 /**
- * Writes `fresh` as `person`, with its audit event, in one batch: none of
+ * Writes `fresh` as `actor`, with its audit event, in one batch: none of
  * it when the unique index finds an id taken since it was read.
  */
 const writeRecords = async (
   env: Env,
-  person: Identity,
+  actor: AuditActor,
   fresh: readonly BrainRecord[]
 ): Promise<void> => {
   await requireRoom(env, fresh);
@@ -372,7 +378,7 @@ const writeRecords = async (
     insert(first),
     ...more.map(insert),
     outboxed(db, {
-      actor: actorOf(person),
+      actor,
       action: "brain.records.added",
       target: { type: "brain", id: "playbook" },
       provenance: fresh.map(keyOf),
@@ -382,20 +388,15 @@ const writeRecords = async (
 };
 
 /**
- * Adds `input` to the Playbook as `person`, all or none: for admins. A
- * record held already, exactly so, is left as it is.
+ * Keeps `records` as `actor`, all or none, beside what `onboarding` gives
+ * the brain. A record held already, exactly so, is left as it is.
  */
-export const addBrainRecords = async (
+const keepRecords = async (
   env: Env,
-  person: Identity,
-  input: unknown
+  actor: AuditActor,
+  records: readonly BrainRecord[],
+  onboarding: OnboardingHeld
 ): Promise<BrainRecordsAdded> => {
-  requireAdmin(person);
-  const records = recordsOf(input);
-  // GRA-328: a record's free text (a statement's, a gap's question)
-  // is canonical Brain storage, so it should pass the knowledge admission gate
-  // here, before anything is kept; that gate is not built yet.
-  const onboarding = await onboardingHeld(env, records);
   // Another call can add some of these ids between the read and the
   // write: the unique index then refuses the whole batch, and what is
   // still fresh is read again and written once more.
@@ -408,7 +409,7 @@ export const addBrainRecords = async (
     }
     try {
       // oxlint-disable-next-line no-await-in-loop -- write again after a race
-      await writeRecords(env, person, fresh);
+      await writeRecords(env, actor, fresh);
       return { added: fresh.length, unchanged };
     } catch (error) {
       if (!isTakenId(error) || attempt === maxWriteAttempts) {
@@ -418,6 +419,55 @@ export const addBrainRecords = async (
       }
     }
   }
+};
+
+/**
+ * Adds `input` to the Playbook as `person`, all or none: for admins. A
+ * record held already, exactly so, is left as it is. `onboarding` reads
+ * what the onboarding gives the brain, when a record names it.
+ */
+export const addBrainRecords = async (
+  env: Env,
+  person: Identity,
+  input: unknown,
+  onboarding: () => Promise<OnboardingHeld>
+): Promise<BrainRecordsAdded> => {
+  requireAdmin(person);
+  const records = recordsOf(input);
+  return await keepRecords(
+    env,
+    actorOf(person),
+    records,
+    await onboardingHeld(records, onboarding)
+  );
+};
+
+/**
+ * Keeps the onboarding's own records (GRA-367), as the system: its team
+ * records, statements and drawn workflows, each type only it adds. They
+ * may name `held`, the onboarding's sources and teams. In calls of at
+ * most `brainRecordsMaxPerCall`, in order, so a record finds what an
+ * earlier call kept; each call all or none, and a retry keeps what is
+ * left.
+ */
+export const keepOnboardingRecords = async (
+  env: Env,
+  records: readonly BrainRecord[],
+  held: OnboardingHeld
+): Promise<BrainRecordsAdded> => {
+  const kept: BrainRecordsAdded = { added: 0, unchanged: 0 };
+  for (let at = 0; at < records.length; at += brainRecordsMaxPerCall) {
+    // oxlint-disable-next-line no-await-in-loop -- each call names what the one before kept
+    const { added, unchanged } = await keepRecords(
+      env,
+      { type: "system" },
+      records.slice(at, at + brainRecordsMaxPerCall),
+      held
+    );
+    kept.added += added;
+    kept.unchanged += unchanged;
+  }
+  return kept;
 };
 
 /** A dated value of a team, by the team it is for. */
@@ -439,6 +489,16 @@ export interface HeldRecords {
   /** Stakeholders added for teams that aren't records: the onboarding's. */
   stakeholders: ForTeam<Stakeholder>[];
   gaps: GapRecord[];
+  /** Its workflows, each with its drawings, the newest its baseline. */
+  workflows: Workflow[];
+  /** Drawings of workflows, before they join theirs. */
+  drawings: ForWorkflow[];
+}
+
+/** A drawing, by the workflow it is of. */
+interface ForWorkflow {
+  workflowId: string;
+  value: WorkflowDrawing;
 }
 
 /** A gap as added, before what became of it. */
@@ -498,6 +558,24 @@ const collect = (held: HeldRecords, record: BrainRecord): void => {
       held.gaps.push(gap);
       break;
     }
+    case "workflow": {
+      const { id, name, local, teamId, status } = record;
+      held.workflows.push({
+        id,
+        name,
+        ...(local === undefined ? {} : { local }),
+        teamId,
+        status,
+        baseline: { steps: [] },
+        drawings: [],
+      });
+      break;
+    }
+    case "workflowVersion": {
+      const { type: _version, workflowId, ...value } = record;
+      held.drawings.push({ workflowId, value });
+      break;
+    }
     default: {
       break;
     }
@@ -519,6 +597,33 @@ export const datedInOrder = (team: Team): void => {
   team.stakeholders = byDate(team.stakeholders);
 };
 
+/** The steps of a drawing, as a workflow's baseline. */
+const stepsOf = ({ steps }: WorkflowDrawing): Step[] =>
+  steps.map(({ text, who, tool, minutes }) => ({
+    text,
+    ...(who === "" ? {} : { who }),
+    ...(tool === "" ? {} : { tool }),
+    ...(minutes === null ? {} : { minutes }),
+  }));
+
+/**
+ * Gives each workflow its drawings, oldest first, and the newest as its
+ * baseline: a drawing for a workflow that isn't held is left out.
+ */
+const withDrawings = (held: HeldRecords): void => {
+  const workflows = new Map(held.workflows.map((each) => [each.id, each]));
+  for (const { workflowId, value } of held.drawings) {
+    workflows.get(workflowId)?.drawings?.push(value);
+  }
+  for (const workflow of held.workflows) {
+    const drawings = byDate(workflow.drawings ?? []);
+    const newest = drawings.at(-1);
+    workflow.drawings = drawings;
+    workflow.baseline = { steps: newest === undefined ? [] : stepsOf(newest) };
+  }
+  held.drawings = [];
+};
+
 /** Every record core keeps, in the order they were added. */
 export const readBrainRecords = async (env: Env): Promise<HeldRecords> => {
   const held: HeldRecords = {
@@ -530,6 +635,8 @@ export const readBrainRecords = async (env: Env): Promise<HeldRecords> => {
     teamCounts: [],
     stakeholders: [],
     gaps: [],
+    workflows: [],
+    drawings: [],
   };
   const rows = await drizzle(env.DB)
     .select({ body: brainRecords.body })
@@ -561,5 +668,6 @@ export const readBrainRecords = async (env: Env): Promise<HeldRecords> => {
   for (const team of held.teams) {
     datedInOrder(team);
   }
+  withDrawings(held);
   return held;
 };
