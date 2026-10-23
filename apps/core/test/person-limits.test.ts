@@ -13,7 +13,7 @@ import { fakeGateway } from "./ai-gateway.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { newTeam } from "./knowledge.ts";
-import { openRpc, outcome, signedInApi } from "./sign-in.ts";
+import { openRpc, outcome, signedInApi, signedInWithRole } from "./sign-in.ts";
 
 // The limits a company's admins set per person (D8): reserved against by
 // the model ledger as one more scope beside Grasp's budgets, never above
@@ -186,6 +186,33 @@ describe("person limits", { timeout: 60_000 }, () => {
         spent: (29_526 * 2) / 1_000_000,
       },
     });
+  });
+
+  it("list each exception by its person's name, past the hundred a query can bind", async () => {
+    const { coreEnv } = deploymentWith({ user: { limit: 1 } });
+    const { models: admin } = await adminOn(coreEnv);
+    const people = await Promise.all(
+      Array.from(
+        { length: 101 },
+        async () => await signedInWithRole(idp, "user")
+      )
+    );
+    for (const { userId } of people) {
+      // oxlint-disable-next-line no-await-in-loop -- one after another, as an admin would
+      await admin.setLimit(person(userId), {
+        monthly: 0.5,
+        messagesAnHour: null,
+      });
+    }
+    const listed = await admin.limits();
+    const named = new Map(
+      listed.exceptions.flatMap(({ subject, name }) =>
+        subject.type === "person" ? [[subject.userId, name]] : []
+      )
+    );
+    expect(
+      people.filter(({ userId }) => typeof named.get(userId) !== "string")
+    ).toStrictEqual([]);
   });
 
   it("never lift a person above Grasp's budgets: a limit above one is refused, and none leaves Grasp's in charge", async () => {

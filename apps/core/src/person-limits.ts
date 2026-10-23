@@ -8,12 +8,13 @@ import type {
   PersonLimitSet,
   PersonLimitSubject,
 } from "@grasp-os/shared/models";
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { z } from "zod";
 
 import { activeMember, organizationId } from "./auth/auth.ts";
 import { teamMembers, teams, users } from "./db/core/schema.ts";
+import { inList } from "./db/d1.ts";
 import { membersOf } from "./members.ts";
 import { limitedPersonOf } from "./model-budgets.ts";
 import { appliedLimit, modelLedger, personTeamsMost } from "./model-ledger.ts";
@@ -160,19 +161,21 @@ const exceptionsOf = async (
     subject.type === "team" ? [subject.teamId] : []
   );
   const db = drizzle(env.DB);
+  // Each set as one bound parameter: D1 binds at most 100 to a query, and
+  // a company can have more exceptions than that.
   const [userRows, teamRows] = await Promise.all([
     userIds.length === 0
       ? []
       : db
           .select({ id: users.id, name: users.name })
           .from(users)
-          .where(inArray(users.id, userIds)),
+          .where(inList(users.id, userIds)),
     teamIds.length === 0
       ? []
       : db
           .select({ id: teams.id, name: teams.name })
           .from(teams)
-          .where(inArray(teams.id, teamIds)),
+          .where(inList(teams.id, teamIds)),
   ]);
   const people = new Map(userRows.map(({ id, name }) => [id, name]));
   const named = new Map(teamRows.map(({ id, name }) => [id, name]));
