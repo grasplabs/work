@@ -201,6 +201,9 @@ const Intake = () => {
   // The notes this screen sent to be read, newest first, each with the
   // source it keeps them under once its run found their statements.
   const [reading, setReading] = useState<Reading[]>([]);
+  // The readings being kept as drafts now: a second Review of one before
+  // its first lands keeps no second draft.
+  const reviewing = useRef(new Set<string>());
 
   const list = async (): Promise<void> => {
     listings.current += 1;
@@ -322,6 +325,10 @@ const Intake = () => {
    * chat's marked a guest's), and opens it for review.
    */
   const review = async (read: Reading, found: Found): Promise<void> => {
+    if (reviewing.current.has(read.id)) {
+      return;
+    }
+    reviewing.current.add(read.id);
     const kept = await settle(
       async () =>
         await propose({
@@ -331,9 +338,11 @@ const Intake = () => {
         })
     );
     if ("error" in kept) {
+      reviewing.current.delete(read.id);
       setProblem(refusal(kept.error));
       return;
     }
+    // Kept: the reading goes, and stays marked, so it is never kept again.
     setReading((runs) => runs.filter(({ id }) => id !== read.id));
     await open(kept.ok);
   };
