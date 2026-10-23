@@ -17,12 +17,12 @@ import {
   sections,
   versions,
 } from "../db/knowledge/schema.ts";
-import { runEngine } from "../workflows/engine.ts";
 import type { RunStep } from "../workflows/host.ts";
 import { parseBaseFields } from "./frontmatter.ts";
 import { splitSections } from "./markdown.ts";
 import type { Section } from "./markdown.ts";
 import { readPayload } from "./payloads.ts";
+import { portsOf } from "./ports.ts";
 
 // Indexing: what search holds of a document is one generation, the
 // sections of one version (`documents.indexed_version`), replaced whole.
@@ -64,13 +64,6 @@ const sweepBatch = 20;
 /** How long a document may stay queued before the cron trigger looks. */
 const staleAfterMs = 2 * 60_000;
 
-/** Where the engine has a run that has ended. */
-const endedStatuses: ReadonlySet<string> = new Set([
-  "complete",
-  "errored",
-  "terminated",
-]);
-
 /**
  * Retries of the publishing step: three, 30 seconds apart and doubling
  * (none in tests), so a moment's outage passes and a failing document
@@ -86,7 +79,7 @@ const inputSchema = z.object({
   version: z.int().min(1),
 });
 
-/** A document version's indexing run: its instance on the engine. */
+/** A document version's indexing run: its job, as the host runs it. */
 export const indexRunId = (
   documentId: string,
   version: number,
@@ -195,10 +188,9 @@ const startRun = async (
   version: number,
   run: number
 ): Promise<void> => {
-  await runEngine(env).createInternal({
-    id: indexRunId(documentId, version, run),
-    workflow: "indexing",
-    input: { documentId, version },
+  await portsOf(env).jobs.start(indexRunId(documentId, version, run), {
+    documentId,
+    version,
   });
 };
 
@@ -238,14 +230,14 @@ const startCurrentRun = async (
       return;
     }
     const { currentVersion: version, indexRun: run } = state;
-    const status = await runEngine(env).status(
+    const status = await portsOf(env).jobs.status(
       indexRunId(documentId, version, run)
     );
     if (status === undefined) {
       await startRun(env, documentId, version, run);
       return;
     }
-    if (!endedStatuses.has(status.status)) {
+    if (status !== "ended") {
       return;
     }
     const [taken] = await db
@@ -474,7 +466,7 @@ export const runIndexing = async (
         .set({
           indexState: "failed",
           indexFailure: code,
-          indexFailedAt: new Date(),
+          indexFailedAt: portsOf(env).clock(),
         })
         .where(whileCurrent(documentId, version));
       return null;
@@ -625,15 +617,15 @@ export const sweepIndexing = async (env: Env, now: Date): Promise<void> => {
     // while, and mustn't keep the rest from being seen.
     .orderBy(sql`random()`)
     .limit(sweepBatch);
-  const engine = runEngine(env);
+  const { jobs } = portsOf(env);
   for (const { id, version, run } of stale) {
     try {
       // oxlint-disable-next-line no-await-in-loop -- a few at a time
-      const status = await engine.status(indexRunId(id, version, run));
+      const status = await jobs.status(indexRunId(id, version, run));
       if (status === undefined) {
         // oxlint-disable-next-line no-await-in-loop -- a few at a time
         await startRun(env, id, version, run);
-      } else if (endedStatuses.has(status.status)) {
+      } else if (status === "ended") {
         // oxlint-disable-next-line no-await-in-loop -- a few at a time
         await db
           .update(documents)
