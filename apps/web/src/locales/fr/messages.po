@@ -751,6 +751,10 @@ msgstr "{name} dans {domain}"
 msgid "{name} in {domain}: {started} started, {completed} completed, {failed} failed"
 msgstr "{name} dans {domain} : {started} lancées, {completed} terminées, {failed} en échec"
 
+#: src/chat/builds.tsx
+msgid "{name} is a draft: only its builders open it, and its triggers don't fire, until it is published."
+msgstr "{name} est un brouillon : seuls ses concepteurs l’ouvrent, et ses déclencheurs ne se lancent pas, jusqu’à sa publication."
+
 #: src/onboarding/connect-steps.tsx
 msgid "{name} is connected. I’ll only read what you share with me."
 msgstr "{name} est connecté. Je ne lirai que ce que vous partagez avec moi."
@@ -1263,7 +1267,7 @@ msgid "{who} consented to this before connecting it:"
 msgstr "{who} a donné son consentement avant de le connecter :"
 
 #: src/interview/before.tsx
-#: src/interview/sound-check.tsx
+#: src/interview/voice-bar.tsx
 msgid "{who} is talking"
 msgstr "{who} parle"
 
@@ -1421,6 +1425,10 @@ msgstr "Une migration des données a transformé les enregistrements de ce domai
 #: src/activity/audit-words.ts
 msgid "A decision was put to people, or answered"
 msgstr "Une décision a été soumise à des personnes, ou tranchée"
+
+#: src/engines/app-status.tsx
+msgid "A draft: only its builders open it, and its triggers don't fire, until it is published."
+msgstr "Un brouillon : seuls ses concepteurs l’ouvrent, et ses déclencheurs ne se lancent pas, jusqu’à sa publication."
 
 #: src/screens/screen-files.ts
 msgid "A file is downloaded only when you ask for it, with a click."
@@ -2052,6 +2060,10 @@ msgstr "Une application que personne n’a approuvée s’est vu refuser les don
 msgid "An app runs only once an admin approved its code. That happens on the domain's page."
 msgstr "Une application ne s’exécute qu’une fois son code approuvé par un administrateur. Cela se fait sur la page du domaine."
 
+#: src/engines/app-status.tsx
+msgid "An archived domain is kept as it is and goes offline: nobody opens its apps, its triggers stop and its unfinished runs are cancelled. A builder can restore it later, as a draft."
+msgstr "Un domaine archivé est conservé tel quel et passe hors ligne : personne n’ouvre ses apps, ses déclencheurs s’arrêtent et ses exécutions inachevées sont annulées. Un concepteur peut le restaurer plus tard, en brouillon."
+
 #: src/onboarding/setup-steps.tsx
 msgid "An old format: save it as PDF or a newer file"
 msgstr "Un ancien format : enregistrez-le en PDF ou en fichier plus récent"
@@ -2367,6 +2379,23 @@ msgstr "Applications en infraction"
 #: src/dashboard/to-do.tsx
 msgid "Apps to approve"
 msgstr "Applications à approuver"
+
+#: src/engines/app-status.tsx
+msgid "Archive"
+msgstr "Archiver"
+
+#: src/engines/app-status.tsx
+msgid "Archive {name}?"
+msgstr "Archiver {name} ?"
+
+#: src/engines/app-status.tsx
+msgctxt "a domain put away"
+msgid "Archived"
+msgstr "Archivé"
+
+#: src/engines/app-status.tsx
+msgid "Archived: nobody opens its apps and nothing runs, until a builder restores it."
+msgstr "Archivé : personne n’ouvre ses apps et rien ne s’exécute, jusqu’à ce qu’un concepteur le restaure."
 
 #: src/brain/brain-markdown.ts
 msgid "Article"
@@ -2891,6 +2920,7 @@ msgstr "Peut {verbs} les données de l’entreprise"
 #: src/chat/brain-questions.tsx
 #: src/chat/project-dialog.tsx
 #: src/decision-confirmation.tsx
+#: src/engines/app-status.tsx
 #: src/engines/package-approvals.tsx
 #: src/inbox/item-detail.tsx
 #: src/knowledge/document.tsx
@@ -4230,6 +4260,11 @@ msgid "DPA status"
 msgstr "Statut du DPA"
 
 #: src/brain/brain.ts
+msgid "Draft"
+msgstr "Brouillon"
+
+#: src/engines/app-status.tsx
+msgctxt "a domain still being made"
 msgid "Draft"
 msgstr "Brouillon"
 
@@ -6227,7 +6262,7 @@ msgstr "Renvoie à"
 msgid "Lisbon"
 msgstr "Lisbonne"
 
-#: src/interview/sound-check.tsx
+#: src/interview/voice-bar.tsx
 msgid "Listening"
 msgstr "À l’écoute"
 
@@ -6349,6 +6384,10 @@ msgstr "Faire admin"
 #: src/chat/builds.tsx
 msgid "Make version {version} current"
 msgstr "Rendre la version {version} actuelle"
+
+#: src/chat/builds.tsx
+msgid "Make version {version} current and publish"
+msgstr "Rendre la version {version} actuelle et publier"
 
 #: src/connections/integration-row.tsx
 msgid "Manage"
@@ -6896,6 +6935,10 @@ msgstr "Aucune donnée"
 msgid "No domain has a model bound to it."
 msgstr "Aucun domaine n'a de modèle lié."
 
+#: src/routes/_shell.domains.index.tsx
+msgid "No domain is published yet: publish one from its page, and the people it is shared with can open it."
+msgstr "Aucun domaine n’est encore publié : publiez-en un depuis sa page, et les personnes avec qui il est partagé pourront l’ouvrir."
+
 #: src/chat/side-panel.tsx
 #: src/routes/_shell.domains.index.tsx
 msgid "No domains yet"
@@ -6904,6 +6947,10 @@ msgstr "Aucun domaine pour l’instant"
 #: src/dashboard/widget-board.tsx
 msgid "No domains yet. Domains are made in chat."
 msgstr "Aucun domaine pour l’instant. Les domaines se créent dans le chat."
+
+#: src/routes/_shell.domains.index.tsx
+msgid "No drafts."
+msgstr "Aucun brouillon."
 
 #: src/landscape/audit-trail.tsx
 msgid "No events in the latest stretch of the log"
@@ -7534,6 +7581,10 @@ msgctxt "onboarding area section"
 msgid "Notes"
 msgstr "Notes"
 
+#: src/routes/_shell.domains.index.tsx
+msgid "Nothing archived."
+msgstr "Rien d’archivé."
+
 #: src/routes/_shell.integrations.index.tsx
 msgid "Nothing connected yet."
 msgstr "Rien n’est encore connecté."
@@ -7810,7 +7861,7 @@ msgstr "Étapes de l’onboarding"
 msgid "Once I have about {threshold}% of the picture, your team can start. I’ll fill in the rest as we go."
 msgstr "Dès que j’ai environ {threshold} % du tableau, votre équipe peut commencer. Je compléterai le reste en chemin."
 
-#: src/interview/sound-check.tsx
+#: src/interview/voice-bar.tsx
 msgid "One moment"
 msgstr "Un instant"
 
@@ -8609,6 +8660,10 @@ msgstr "Règles proposées"
 msgid "Provided by Grasp, not installed again: {provided}"
 msgstr "Fourni par Grasp, non réinstallé : {provided}"
 
+#: src/engines/app-status.tsx
+msgid "Publish"
+msgstr "Publier"
+
 #: src/engines/resource-bindings.tsx
 msgid "Publish a version of {contract}"
 msgstr "Publier une version de {contract}"
@@ -8625,6 +8680,11 @@ msgstr "Publier la révision {0}"
 #: src/routes/_shell.workflows.$workflow.tsx
 msgid "Published"
 msgstr "Publiée"
+
+#: src/engines/app-status.tsx
+msgctxt "a domain open to the people it is shared with"
+msgid "Published"
+msgstr "Publié"
 
 #. placeholder {0}: outcome.version
 #: src/workflows/definition-editor.tsx
@@ -9069,6 +9129,7 @@ msgstr "Ressource"
 msgid "Resources"
 msgstr "Ressources"
 
+#: src/engines/app-status.tsx
 #: src/knowledge/timeline.tsx
 msgid "Restore"
 msgstr "Restaurer"
@@ -11886,6 +11947,10 @@ msgstr "Deux réponses"
 msgid "Type"
 msgstr "Type"
 
+#: src/interview/composer.tsx
+msgid "Type instead"
+msgstr "Plutôt écrire"
+
 #: src/interview/before.tsx
 #: src/interview/sound-check.tsx
 msgid "Type instead, without sound"
@@ -11997,6 +12062,10 @@ msgstr "Résultats inconnus"
 #: src/brain/brain.ts
 msgid "Unknown source"
 msgstr "Source inconnue"
+
+#: src/engines/app-status.tsx
+msgid "Unpublish"
+msgstr "Dépublier"
 
 #: src/activity/audit-log.tsx
 #: src/dashboard/activity.tsx

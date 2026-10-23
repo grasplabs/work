@@ -42,6 +42,9 @@ const mapFor = async (admin: Person): Promise<string> => {
     // It asks for nothing: its workflows are in its own store.
     expect(created.permissions).toStrictEqual([]);
     await api.apps.versions.setCurrent(created.app.id, 1);
+    // Published, for the people it is shared with (a draft is its
+    // builders' alone).
+    await api.apps.publish(created.app.id);
     const { generation } = await api.screenTrust.review(created.app.id);
     await api.screenTrust.classify(created.app.id, "ordinary", generation);
     return created.app.id;

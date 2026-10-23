@@ -95,7 +95,9 @@ const receiversOf = async (env: Env, event: ConnectorEvent) =>
       apps,
       and(
         eq(apps.id, workflowTriggers.appId),
-        eq(apps.currentVersion, workflowTriggers.version)
+        eq(apps.currentVersion, workflowTriggers.version),
+        // Only a published App's triggers fire (app-status.ts).
+        eq(apps.status, "published")
       )
     )
     .where(
@@ -330,6 +332,7 @@ const listenersFor = async (env: Env, type: string, action: string) =>
     .where(
       and(
         listeningPermissionSql(apps.id, apps.currentVersion),
+        eq(apps.status, "published"),
         sql`EXISTS (SELECT 1 FROM json_each(${permissions.actions}) WHERE value = ${action})`,
         sql`EXISTS (SELECT 1 FROM ${workflowTriggers} WHERE ${workflowTriggers.appId} = ${apps.id} AND ${workflowTriggers.version} = ${apps.currentVersion} AND ${workflowTriggers.type} = 'event' AND ${workflowTriggers.event} = ${type})`
       )

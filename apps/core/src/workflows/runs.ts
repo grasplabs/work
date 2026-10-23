@@ -1,6 +1,8 @@
 import { appErrors } from "@grasp-os/shared/apps";
+import type { AppStatus } from "@grasp-os/shared/apps";
 import type { AuditActor, AuditEntry } from "@grasp-os/shared/audit";
 import { actorOf, createAuditEvent, runActorOf } from "@grasp-os/shared/audit";
+import { isExpectedError } from "@grasp-os/shared/errors";
 import {
   appIdSchema,
   runIdSchema,
@@ -10,6 +12,7 @@ import type { AppId, RunId, WorkflowId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
+import { roleSchema } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowErrors } from "@grasp-os/shared/workflows";
 import type {
@@ -38,7 +41,9 @@ import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { appFor, versionFiles } from "../apps.ts";
+import { requireStillOpen } from "../app-access.ts";
+import type { Person } from "../app-access.ts";
+import { appFor, usableApp, versionFiles } from "../apps.ts";
 import {
   auditedBatch,
   outboxed,
@@ -47,8 +52,14 @@ import {
   outboxedWhere,
   storedEvent,
 } from "../audit-outbox.ts";
+import { currentMembership } from "../auth/auth.ts";
 import type { Member } from "../auth/identity.ts";
-import { apps, workflowRunControls, workflowRuns } from "../db/core/schema.ts";
+import {
+  apps,
+  members,
+  workflowRunControls,
+  workflowRuns,
+} from "../db/core/schema.ts";
 import { failureNoticed } from "../notifications.ts";
 import { stepStatisticsForgotten } from "../statistic-steps.ts";
 import { queuedRuns, runDequeued } from "./admission.ts";
@@ -188,9 +199,17 @@ export const toRun = (env: Env, row: RunFields): WorkflowRun => ({
 export const appRecord = async (
   env: Env,
   app: AppId
-): Promise<{ currentVersion: number | null; ownerId: string }> => {
+): Promise<{
+  currentVersion: number | null;
+  ownerId: string;
+  status: AppStatus;
+}> => {
   const found = await drizzle(env.DB)
-    .select({ currentVersion: apps.currentVersion, ownerId: apps.ownerId })
+    .select({
+      currentVersion: apps.currentVersion,
+      ownerId: apps.ownerId,
+      status: apps.status,
+    })
     .from(apps)
     .where(eq(apps.id, app))
     .get();
@@ -296,6 +315,13 @@ export interface RunRequest {
    */
   via?: "screen";
   /**
+   * The person who starts it, as their session has them, for a run a
+   * person starts: checked again once its row is written
+   * (`requireStillStartable`), so someone who may no longer use the App
+   * (its status changed, their role went) starts nothing.
+   */
+  starter?: Person;
+  /**
    * The trigger that started it, with the key of what it started it for
    * (triggers.ts): while a run has that key, it is the run, and no other
    * starts. `version` is the App version that registered it: it starts a
@@ -353,6 +379,11 @@ const resendStart = async (env: Env, row: RunRow): Promise<void> => {
  */
 const unstarted = {
   start_failed: "The workflow run couldn't be started.",
+  app_archived: "The App was archived before the run started.",
+  app_unpublished:
+    "The App was taken back to a draft before its trigger's run started.",
+  starter_refused:
+    "Whoever started it could no longer use the App when it would have started.",
   no_instance: "The engine has no record of this run.",
 } as const;
 
@@ -657,6 +688,64 @@ const startFailed = async (
 };
 
 /**
+ * The version of `app` a run would start on: its current one. Refused for
+ * an archived App (`app.archived`); for a trigger, unless the App is
+ * published (`workflow.trigger_gone`: its builders start a draft's runs
+ * by hand, app-status.ts); and while no version is current.
+ */
+const versionToStart = async (
+  env: Env,
+  app: AppId,
+  trigger: RunRequest["trigger"]
+): Promise<number> => {
+  const { currentVersion, status } = await appRecord(env, app);
+  if (status === "archived") {
+    throw appErrors.create("app.archived");
+  }
+  if (trigger !== undefined && status !== "published") {
+    throw workflowErrors.create("workflow.trigger_gone");
+  }
+  if (currentVersion === null) {
+    throw appErrors.create("app.not_running");
+  }
+  return currentVersion;
+};
+
+/**
+ * Refuses `row`'s start, its row written, if its App's status refuses it
+ * now, as `versionToStart` would: an archive (or, for a trigger, an
+ * unpublish) that committed since that read is caught here, and ends the
+ * run as one that never started; an archive committing after this read
+ * finds the row and cancels it (app-status.ts).
+ */
+const requireStillStartable = async (
+  env: Env,
+  row: Pick<RunRow, "id" | "appId" | "workflowId" | "version" | "startedBy">,
+  { trigger, starter }: Pick<RunRequest, "trigger" | "starter">
+): Promise<void> => {
+  const app = appIdSchema.parse(row.appId);
+  if (starter !== undefined) {
+    // Their role in the App as it stands now, with its status: someone
+    // with only the user role has none once it is no longer published.
+    try {
+      await requireStillOpen(env, starter, app);
+    } catch (error) {
+      await failStart(env, row, "starter_refused");
+      throw error;
+    }
+  }
+  const { status } = await appRecord(env, app);
+  if (status === "archived") {
+    await failStart(env, row, "app_archived");
+    throw appErrors.create("app.archived");
+  }
+  if (trigger !== undefined && status !== "published") {
+    await failStart(env, row, "app_unpublished");
+    throw workflowErrors.create("workflow.trigger_gone");
+  }
+};
+
+/**
  * Starts a run on the App's current version, which it keeps until it ends.
  * The row, the start it is to send and its audit event are written before
  * the start is sent, so the dispatcher always finds the row, and a start
@@ -681,16 +770,23 @@ const startFailed = async (
  */
 export const startRun = async (
   env: Env,
-  { app, workflow, input, startedBy, actor, via, trigger, parent }: RunRequest
+  {
+    app,
+    workflow,
+    input,
+    startedBy,
+    actor,
+    via,
+    trigger,
+    parent,
+    starter,
+  }: RunRequest
 ): Promise<WorkflowRun> => {
   if (input !== undefined && jsonBytes(input) > maxInputBytes) {
     throw invalid();
   }
   const db = drizzle(env.DB);
-  const { currentVersion: version } = await appRecord(env, app);
-  if (version === null) {
-    throw appErrors.create("app.not_running");
-  }
+  const version = await versionToStart(env, app, trigger);
   if (trigger && trigger.version !== version) {
     throw workflowErrors.create("workflow.trigger_gone");
   }
@@ -746,6 +842,7 @@ export const startRun = async (
   if (inserted.length === 0) {
     return await deliveredBefore(env, row.triggerKey ?? "", row.id);
   }
+  await requireStillStartable(env, row, { trigger, starter });
   try {
     await sendStart(env, row, input);
   } catch (error) {
@@ -769,8 +866,9 @@ export const startWorkflow = async (
   input?: unknown,
   via?: "screen"
 ): Promise<WorkflowRun> => {
-  await appFor(env, by, app, "user");
+  await usableApp(env, by, app);
   return await startRun(env, {
+    starter: by,
     app: parse(appIdSchema, app),
     workflow: parse(workflowInputSchema, workflow),
     input: parse(z.json().optional(), input),
@@ -1234,15 +1332,84 @@ const endCancelledStart = async (env: Env, row: RunRow): Promise<void> => {
 };
 
 /**
+ * Why a start the engine has no record of must not be sent again now, as
+ * `startRun` would decide it (core may have stopped before its check, or
+ * that read failed): an archived App; a trigger's start on an App that
+ * isn't published; a person's start once they may no longer use the App,
+ * their role and teams read now. Null when it may go; undefined when it
+ * can't be told now, and the next pass looks again.
+ */
+const repairRefusal = async (
+  env: Env,
+  row: RunRow
+): Promise<keyof typeof unstarted | null | undefined> => {
+  const app = appIdSchema.parse(row.appId);
+  try {
+    const { status } = await appRecord(env, app);
+    if (status === "archived") {
+      return "app_archived";
+    }
+    if (row.startedBy === null) {
+      return status === "published" ? null : "app_unpublished";
+    }
+    const [membership] = await drizzle(env.DB)
+      .select({ role: members.role })
+      .from(members)
+      .where(currentMembership(row.startedBy));
+    const role = roleSchema.safeParse(membership?.role);
+    if (!role.success) {
+      return "starter_refused";
+    }
+    // Their teams are read again by the check itself.
+    await requireStillOpen(
+      env,
+      { userId: row.startedBy, role: role.data, teams: [] },
+      app
+    );
+    return null;
+  } catch (error) {
+    if (isExpectedError(error)) {
+      return "starter_refused";
+    }
+    log.error("workflow.start_repair_failed", {
+      runId: row.id,
+      ...errorFields(error),
+    });
+    return undefined;
+  }
+};
+
+/**
  * Sends `row`'s start again (`repairStarts`). A start the engine still
  * won't take `repairGivesUpAfterMs` after it was written is marked failed,
  * but only once the engine says it has no record of the run: one it has
  * is confirmed, and one it can't say of is tried again by the next repair,
- * so a start whose answer was lost is never given up while it runs.
+ * so a start whose answer was lost is never given up while it runs. A
+ * start it has no record of is sent again only while the App would admit
+ * it (`repairRefusal`).
  */
 const repairStart = async (env: Env, row: RunRow): Promise<void> => {
   if (row.cancelRequestedAt !== null) {
     await endCancelledStart(env, row);
+    return;
+  }
+  // The engine first: a start it took already is a run in flight, which
+  // goes on whatever became of the App since (archiving cancels it apart,
+  // app-status.ts); one it can't say of waits for the next pass.
+  const taken = await engineHas(env, row.id);
+  if (taken === null) {
+    return;
+  }
+  if (taken) {
+    await confirmStart(env, row.id);
+    return;
+  }
+  const refused = await repairRefusal(env, row);
+  if (refused === undefined) {
+    return;
+  }
+  if (refused !== null) {
+    await failStart(env, row, refused);
     return;
   }
   try {

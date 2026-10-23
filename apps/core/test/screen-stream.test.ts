@@ -27,6 +27,7 @@ import type { FunctionRequest } from "../src/app-functions.ts";
 import { loadRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
 import { revokeRelease } from "../src/release-retention.ts";
+import { published as publishedApp } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { person } from "./sealed-apps.ts";
 import { clientOrigin } from "./sign-in-config.ts";
@@ -302,6 +303,7 @@ const openedApp = async (people: { builder?: Person; admin?: Person } = {}) => {
   const builder = people.builder ?? (await personApi("builder"));
   const admin = people.admin ?? (await personApi("admin"));
   const { id } = await builder.api.apps.create({ name: "Writer" });
+  await publishedApp(id);
   const { version } = await builder.api.apps.files.commit(id, files, "First");
   await builder.api.apps.versions.setCurrent(id, version);
   const review = await admin.api.screenTrust.review(id);

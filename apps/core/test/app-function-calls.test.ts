@@ -37,7 +37,7 @@ import {
   createWorkflowResource,
   publishWorkflowVersion,
 } from "../src/workflow-resources.ts";
-import { release } from "./apps.ts";
+import { published, release } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { endLiveRuns, finished, leave } from "./runs.ts";
@@ -1133,6 +1133,7 @@ describe("a run calling another App's functions", { timeout: 90_000 }, () => {
       kind: "action",
     });
     const { id } = await builder.api.apps.create({ name: "Kicking desk" });
+    await published(id);
     await release(builder, id, {
       ...deskFiles(),
       "workflows/kicker.ts": `import { type Json, workflow, z } from "@grasp-os/sdk/workflow";
@@ -1235,6 +1236,7 @@ export default workflowTests(definition, [{ name: "runs", mocks: { kick: null },
     });
     // The Asker calls the Inviter's invite, from a screen and from a run.
     const { id } = await builder.api.apps.create({ name: "Asker" });
+    await published(id);
     await release(builder, id, {
       ...askerFiles("inviter.invite"),
       ...askingWorkflow("asking"),
@@ -1291,6 +1293,7 @@ export default workflowTests(definition, [{ name: "runs", mocks: { kick: null },
     await bindFollowUp(admin, crm);
     // A run of the Asker calls Desk's `desk.kick`, which calls the CRM's.
     const { id } = await builder.api.apps.create({ name: "Asker" });
+    await published(id);
     await release(builder, id, {
       ...askerFiles("desk.kick"),
       ...askingWorkflow("asking"),
@@ -1411,6 +1414,7 @@ export default workflowTests(definition, [{ name: "runs", mocks: { kick: null },
       kind: "action",
     });
     const { id } = await builder.api.apps.create({ name: "Retrying desk" });
+    await published(id);
     await release(builder, id, {
       ...deskFiles(),
       "workflows/retry.ts": `import { workflow, z } from "@grasp-os/sdk/workflow";
@@ -1468,6 +1472,7 @@ export default workflowTests(definition, [{ name: "runs", mocks: { note: null },
       kind: "action",
     });
     const { id } = await builder.api.apps.create({ name: "Run desk" });
+    await published(id);
     await release(builder, id, {
       ...deskFiles(),
       "workflows/noter.ts": `import { type Json, workflow, z } from "@grasp-os/sdk/workflow";
