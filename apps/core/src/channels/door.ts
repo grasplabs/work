@@ -11,8 +11,15 @@
  */
 import "@grasp-os/chat/workerd";
 import { teamsAdapter } from "./teams.ts";
+import type { TeamsKeys } from "./teams.ts";
 
-/** Every platform's adapter, keyed by the platform's name. */
-export const channelAdapters = (env: Env) => ({
-  teams: teamsAdapter(env),
+/**
+ * Every platform's adapter, keyed by the platform's name, checking
+ * against the keys this isolate fetched, or `teamsKeys` when given.
+ */
+export const channelAdapters = (
+  env: Env,
+  { teamsKeys }: { teamsKeys?: TeamsKeys } = {}
+) => ({
+  teams: teamsAdapter(env, teamsKeys),
 });

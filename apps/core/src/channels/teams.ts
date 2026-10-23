@@ -83,26 +83,39 @@ interface KeySet {
   at: number;
 }
 
-/** The keys this isolate last fetched, and when it last fetched them. */
-let keySet: KeySet | undefined;
-let lastFetch = Number.NEGATIVE_INFINITY;
-let fetching: Promise<KeySet> | undefined;
+/**
+ * The keys an isolate last fetched, when it last started fetching them,
+ * and the fetch under way, if one is.
+ */
+export interface TeamsKeys {
+  set?: KeySet;
+  lastFetch: number;
+  fetching?: Promise<KeySet>;
+}
 
-const fetchKeys = async (env: Env): Promise<KeySet> => {
-  fetching ??= (async () => {
-    lastFetch = Date.now();
+/** Keys not yet fetched. */
+export const teamsKeys = (): TeamsKeys => ({
+  lastFetch: Number.NEGATIVE_INFINITY,
+});
+
+/** This isolate's keys, which every request it serves checks against. */
+const isolateKeys = teamsKeys();
+
+const fetchKeys = async (env: Env, keys: TeamsKeys): Promise<KeySet> => {
+  keys.fetching ??= (async () => {
+    keys.lastFetch = Date.now();
     try {
-      const { keys } = await env.CONNECT.channelSigningKeys("teams");
-      keySet = {
-        keys: new Map(keys.map((key) => [key.kid, key])),
+      const fetched = await env.CONNECT.channelSigningKeys("teams");
+      keys.set = {
+        keys: new Map(fetched.keys.map((key) => [key.kid, key])),
         at: Date.now(),
       };
-      return keySet;
+      return keys.set;
     } finally {
-      fetching = undefined;
+      keys.fetching = undefined;
     }
   })();
-  return await fetching;
+  return await keys.fetching;
 };
 
 /**
@@ -114,18 +127,20 @@ const fetchKeys = async (env: Env): Promise<KeySet> => {
  */
 const keyFor = async (
   env: Env,
+  keys: TeamsKeys,
   kid: string
 ): Promise<ChannelSigningKey | undefined> => {
   const now = Date.now();
-  const fresh = keySet !== undefined && now - keySet.at < keysMaxAgeMs;
-  const known = fresh ? keySet?.keys.get(kid) : undefined;
+  const { set } = keys;
+  const fresh = set !== undefined && now - set.at < keysMaxAgeMs;
+  const known = fresh ? set.keys.get(kid) : undefined;
   if (known !== undefined) {
     return known;
   }
-  if (fetching === undefined && now - lastFetch < refreshIntervalMs) {
+  if (keys.fetching === undefined && now - keys.lastFetch < refreshIntervalMs) {
     return undefined;
   }
-  const fetched = await fetchKeys(env);
+  const fetched = await fetchKeys(env, keys);
   return fetched.keys.get(kid);
 };
 
@@ -136,7 +151,7 @@ class RefusalError extends Error {
 
 /** The key a token's header names, if Microsoft endorses it for Teams. */
 const verificationKey =
-  (env: Env) =>
+  (env: Env, keys: TeamsKeys) =>
   async (header: JWTHeaderParameters): Promise<CryptoKey> => {
     if (header.alg !== "RS256") {
       throw new RefusalError("algorithm");
@@ -144,7 +159,7 @@ const verificationKey =
     if (typeof header.kid !== "string" || header.kid === "") {
       throw new RefusalError("no_kid");
     }
-    const key = await keyFor(env, header.kid);
+    const key = await keyFor(env, keys, header.kid);
     if (key === undefined) {
       throw new RefusalError("unknown_kid");
     }
@@ -177,6 +192,7 @@ const tenantsOf = (activity: z.infer<typeof activitySchema>): string[] =>
  */
 const checkTeamsRequest = async (
   env: Env,
+  keys: TeamsKeys,
   request: Request,
   body: string
 ): Promise<void> => {
@@ -209,7 +225,7 @@ const checkTeamsRequest = async (
   }
   let payload: Record<string, unknown>;
   try {
-    ({ payload } = await jwtVerify(token, verificationKey(env), {
+    ({ payload } = await jwtVerify(token, verificationKey(env, keys), {
       algorithms: ["RS256"],
       issuer: botFrameworkIssuer,
       audience: [botId, `api://botid-${botId}`, `api://${botId}`],
@@ -233,10 +249,11 @@ const checkTeamsRequest = async (
 export const verifiedTeamsRequest = async (
   env: Env,
   request: Request,
-  body: string
+  body: string,
+  keys: TeamsKeys = isolateKeys
 ): Promise<boolean> => {
   try {
-    await checkTeamsRequest(env, request, body);
+    await checkTeamsRequest(env, keys, request, body);
     return true;
   } catch (error) {
     const reason = error instanceof RefusalError ? error.message : "keys";
@@ -265,17 +282,21 @@ const teamsLogger: Logger = {
 
 /**
  * Teams' adapter for this client's bot, every request it is handed checked
- * by {@link verifiedTeamsRequest}. Its replies go out through connect,
+ * by {@link verifiedTeamsRequest} against `keys`, this isolate's unless a
+ * test gives keys of its own. Its replies go out through connect,
  * which holds the bot's credential (GRA-709, GRA-757): until then, any
  * call to Microsoft as the bot fails here instead of going out.
  */
-export const teamsAdapter = (env: Env): TeamsAdapter =>
+export const teamsAdapter = (
+  env: Env,
+  keys: TeamsKeys = isolateKeys
+): TeamsAdapter =>
   new TeamsAdapter({
     appId: env.TEAMS_BOT_ID ?? "",
     appType: "SingleTenant",
     appTenantId: clientTenant(env),
     webhookVerifier: async (request, body) =>
-      await verifiedTeamsRequest(env, request, body),
+      await verifiedTeamsRequest(env, request, body, keys),
     token: () => {
       throw new Error("Core holds no Teams bot credential.");
     },

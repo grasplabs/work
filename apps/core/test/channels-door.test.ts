@@ -16,6 +16,7 @@ import {
 import { z } from "zod";
 
 import { channelAdapters } from "../src/channels/door.ts";
+import { teamsKeys } from "../src/channels/teams.ts";
 import {
   botFrameworkAskedUrl,
   botFrameworkFailUrl,
@@ -181,11 +182,14 @@ const teamsEnv = (changes: Partial<Env> = {}): Env => ({
 const deliver = async (
   activity: unknown,
   authorization: string | undefined,
-  doorEnv: Env = teamsEnv()
+  doorEnv: Env = teamsEnv(),
+  adapters: (
+    adaptersEnv: Env
+  ) => ReturnType<typeof channelAdapters> = channelAdapters
 ): Promise<{ status: number; handled: number }> => {
   const chat = new Chat({
     userName: "Stephen",
-    adapters: channelAdapters(doorEnv),
+    adapters: adapters(doorEnv),
     state: durableObjectState(env.CHAT_STATE),
     logger: "silent",
   });
@@ -524,54 +528,80 @@ describe("a request Microsoft sent", () => {
   });
 });
 
+const minute = 60 * 1000;
+
+/** Moves the clock `ms` on, for `Date` alone. */
+const later = (ms: number) => {
+  vi.useFakeTimers({ toFake: ["Date"], now: Date.now() + ms });
+};
+
 describe("keys Microsoft rotates", () => {
-  it("are fetched again for an unknown key id at most once a minute", async () => {
-    // The door has the keys already: earlier tests in the file used them.
-    await deliver(directMessage(), `Bearer ${await sign()}`);
+  // Each test here has keys of its own, which it alone fetched: these
+  // tests move the clock, and the isolate's keys would keep the times.
+  let keys = teamsKeys();
+  beforeEach(() => {
+    keys = teamsKeys();
+  });
+  const deliverFresh = async (activity: unknown, authorization: string) =>
+    await deliver(activity, authorization, teamsEnv(), (freshEnv) =>
+      channelAdapters(freshEnv, { teamsKeys: keys })
+    );
+
+  it("are fetched again once for a burst of unknown key ids, a minute on", async () => {
+    await expect(
+      deliverFresh(directMessage(), `Bearer ${await sign()}`)
+    ).resolves.toStrictEqual({ status: 200, handled: 1 });
+    later(2 * minute);
     const before = await keysAsked();
     const token = await sign({}, { key: unpublishedKey });
     for (let attempt = 0; attempt < 5; attempt += 1) {
       // oxlint-disable-next-line no-await-in-loop
       await expect(
-        deliver(directMessage(), `Bearer ${token}`)
+        deliverFresh(directMessage(), `Bearer ${token}`)
       ).resolves.toStrictEqual(refused);
     }
-    expect((await keysAsked()) - before).toBeLessThanOrEqual(1);
+    const after = await keysAsked();
+    expect(after - before).toBe(1);
+  });
+
+  it("aren't fetched again for an unknown key id within the minute", async () => {
+    await deliverFresh(directMessage(), `Bearer ${await sign()}`);
+    const before = await keysAsked();
+    const token = await sign({}, { key: unpublishedKey });
+    await expect(
+      deliverFresh(directMessage(), `Bearer ${token}`)
+    ).resolves.toStrictEqual(refused);
+    const after = await keysAsked();
+    expect(after - before).toBe(0);
   });
 
   it("let in a newly published key once the minute has passed", async () => {
+    await deliverFresh(directMessage(), `Bearer ${await sign()}`);
     const rotated = await signingKey(`rotated-${unique()}`);
     await publish([
-      { key: teamsKey, endorsements: ["msteams"] },
+      { key: teamsKey, endorsements: ["msteams", "webchat"] },
+      { key: skypeKey, endorsements: ["skype"] },
       { key: rotated, endorsements: ["msteams"] },
     ]);
-    vi.useFakeTimers({ toFake: ["Date"], now: Date.now() + 2 * 60 * 1000 });
+    later(2 * minute);
     const token = await sign({}, { key: rotated });
     await expect(
-      deliver(directMessage(), `Bearer ${token}`)
-    ).resolves.toStrictEqual({
-      status: 200,
-      handled: 1,
-    });
+      deliverFresh(directMessage(), `Bearer ${token}`)
+    ).resolves.toStrictEqual({ status: 200, handled: 1 });
   });
 
-  it("are fetched again at most once a minute while fetching them fails", async () => {
+  it("are fetched at most once a minute while fetching them fails", async () => {
     await providers().fetch(botFrameworkFailUrl, {
       method: "POST",
       body: JSON.stringify({ status: 503 }),
     });
     try {
-      // Past the hour the keys are kept for: every request wants them anew.
-      vi.useFakeTimers({
-        toFake: ["Date"],
-        now: Date.now() + 2 * 60 * 60 * 1000,
-      });
       const before = await keysAsked();
       const token = await sign();
       for (let attempt = 0; attempt < 5; attempt += 1) {
         // oxlint-disable-next-line no-await-in-loop
         await expect(
-          deliver(directMessage(), `Bearer ${token}`)
+          deliverFresh(directMessage(), `Bearer ${token}`)
         ).resolves.toStrictEqual(refused);
       }
       const after = await keysAsked();
@@ -581,7 +611,6 @@ describe("keys Microsoft rotates", () => {
         method: "POST",
         body: JSON.stringify({ status: null }),
       });
-      vi.useRealTimers();
     }
   });
 });
