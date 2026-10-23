@@ -72,7 +72,9 @@ import type { LoopWords } from "./words.ts";
 // agree to it, put a line right or take one out. What was said is kept
 // with the interview (kept.ts); this is only the moment. Ported from the
 // prototype (grasplabs/prototype, packages/grasp:
-// src/data/interview-loop.ts), with his voice; his ears come later.
+// src/data/interview-loop.ts), with his voice and his ears: whoever chose
+// to talk is listened to while it is their turn, and their words show as
+// they say them.
 //
 // Whose turn it is is decided by turn-taking.ts, which is told everything
 // that happens here, also what his ears hear (ear.ts), and says what to
