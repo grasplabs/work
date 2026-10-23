@@ -1,4 +1,5 @@
 import type { OnboardingView } from "@grasp-os/shared/onboarding";
+import { noChoices } from "@grasp-os/shared/onboarding-choices";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -50,6 +51,17 @@ const said = (
     },
     directory: null,
     suites: [],
+    choices: noChoices,
+    signIn: ["microsoft"],
+    identity: {
+      userId: "ada",
+      email: "ada@acme.test",
+      name: "Ada",
+      role: "admin",
+      teams: [],
+      staff: false,
+      expiresAt: "2026-10-15T00:00:00Z",
+    },
   };
   return renderToStaticMarkup(
     <I18nProvider i18n={i18n}>
