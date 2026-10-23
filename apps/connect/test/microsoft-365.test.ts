@@ -1021,6 +1021,60 @@ describe("the Microsoft 365 connector's list tools", () => {
   });
 });
 
+describe("the Microsoft 365 connector's list pages", () => {
+  const contracts = { site: financeSite, list: contractsList };
+
+  it("keep a page's conditions and columns on the next page", async () => {
+    const connection = await connected();
+    const asked = {
+      ...contracts,
+      where: [{ column: "Status", is: "eq", value: "Open" }],
+      columns: ["Title", "Status"],
+      top: 10,
+    };
+    const pageSchema = z.object({
+      items: z.array(
+        z.object({ id: z.string(), fields: z.record(z.string(), z.unknown()) })
+      ),
+      nextPage: z.string().nullable(),
+    });
+    const first = pageSchema.parse(
+      await outputOf(call(connection, "lists.items", asked))
+    );
+    const second = pageSchema.parse(
+      await outputOf(
+        call(connection, "lists.items", {
+          ...asked,
+          page: first.nextPage ?? "",
+        })
+      )
+    );
+    const items = [...first.items, ...second.items];
+    // Open contracts are those whose number isn't a multiple of 3.
+    const open = Array.from({ length: contractCount }, (_, index) => index + 1)
+      .filter((n) => n % 3 !== 0)
+      .slice(0, 20)
+      .map(String);
+    expect({
+      ids: items.map(({ id }) => id),
+      columns: [
+        ...new Set(items.flatMap(({ fields }) => Object.keys(fields))),
+      ].toSorted(),
+      statuses: [...new Set(items.map(({ fields }) => fields.Status))],
+    }).toStrictEqual({
+      ids: open,
+      columns: ["Status", "Title", "id"],
+      statuses: ["Open"],
+    });
+    const [, again] = requests();
+    expect(again?.query).toMatchObject({
+      $filter: "fields/Status eq 'Open'",
+      $expand: "fields($select=Title,Status)",
+      $top: "10",
+    });
+  });
+});
+
 describe("the Microsoft 365 connector's answers", () => {
   it("free a move's key when its folder lookup is throttled, so a retry moves once", async () => {
     const connection = await connected();
