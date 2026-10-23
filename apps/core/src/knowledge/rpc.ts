@@ -58,9 +58,20 @@ import {
   remember,
 } from "./memories.ts";
 import { preparePurge, purge } from "./purge.ts";
+import type { OnErase } from "./purge.ts";
 import { recall } from "./recall.ts";
 import { search } from "./search.ts";
 import { catalog, follow, read } from "./tools.ts";
+import { uploadErasure } from "./uploads.ts";
+
+/**
+ * What a purge reaches of core's own copies (purge.ts `OnErase`): the
+ * brain's gap answers and the originals of uploaded files.
+ */
+const coreErasure = (env: Env): OnErase => ({
+  ...gapAnswerErasure(env),
+  ...uploadErasure(env),
+});
 
 /**
  * Knowledge for a signed-in person over `/rpc`. Like the session API, it
@@ -228,12 +239,7 @@ export class KnowledgeRpc extends CoreRpcTarget implements KnowledgeApi {
     return await withPerson(
       this.#check,
       async (person) =>
-        await preparePurge(
-          this.#env,
-          person,
-          input,
-          gapAnswerErasure(this.#env)
-        )
+        await preparePurge(this.#env, person, input, coreErasure(this.#env))
     );
   }
 
@@ -241,13 +247,7 @@ export class KnowledgeRpc extends CoreRpcTarget implements KnowledgeApi {
     return await withPerson(
       this.#check,
       async (person) =>
-        await purge(
-          this.#env,
-          person,
-          input,
-          token,
-          gapAnswerErasure(this.#env)
-        )
+        await purge(this.#env, person, input, token, coreErasure(this.#env))
     );
   }
 }

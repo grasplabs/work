@@ -4111,8 +4111,12 @@ export const uploads = sqliteTable(
     uploadedBy: text("uploaded_by").notNull(),
     /** JSON: the audit log's actor for the person who uploaded it. */
     actor: text().notNull(),
+    /**
+     * `saving`: claimed for the save of its text, which a purge's
+     * forgetting refuses (knowledge/uploads.ts).
+     */
     status: text({
-      enum: ["pending", "extracting", "ready", "failed"],
+      enum: ["pending", "extracting", "saving", "ready", "failed"],
     }).notNull(),
     /** The code of the error it failed with. */
     failure: text(),
