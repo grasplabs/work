@@ -224,6 +224,7 @@ describe(
           migrationEvidence: await sha256Hex(
             canonicalText(release.manifest.migrationEvidence)
           ),
+          screens: [],
           artifacts: {
             count: release.manifest.artifacts.length,
             readBack: await sha256Hex(
