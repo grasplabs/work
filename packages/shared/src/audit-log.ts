@@ -66,6 +66,8 @@ const typeRules: readonly {
   { action: "connection.consent", type: "config" },
   // An admin changing which connectors are offered.
   { action: "connection.offer_changed", type: "config" },
+  // An admin turning a class of tools on or off, and for whom.
+  { action: "connection.class.changed", type: "config" },
   // A connection's tokens stopped working: it needs signing in again.
   { action: "connection.needs_reauth", type: "config" },
   // Connect reading what changed at a connection for workflows' event

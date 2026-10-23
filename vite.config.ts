@@ -36,6 +36,8 @@ const generated = [
   // The SDK's connector catalog, from the release's connectors
   // (apps/core/build-connector-catalog.ts).
   "packages/sdk/src/connector-catalog.gen.ts",
+  // Each native tool's class, from the same connectors.
+  "apps/core/src/native-tool-classes.gen.ts",
 ];
 
 /** Why a target may not extend Cap'n Web's or workerd's RpcTarget itself. */
