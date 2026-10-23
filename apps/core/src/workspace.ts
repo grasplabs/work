@@ -14,11 +14,13 @@ import type {
   AuditEntry,
 } from "@grasp-os/shared/audit";
 import {
+  chatChannelSchema,
   projectDocumentMaxBytes,
   projectDocumentsMax,
   projectsMax,
 } from "@grasp-os/shared/chat";
 import type {
+  ChatChannel,
   ChatDraft,
   ChatMessage,
   ChatProject,
@@ -774,6 +776,10 @@ export class Workspace extends DurableObject<Env> {
    *
    * Made in project `projectId`, it is in it from the start: only one of
    * `personId`'s own, refused as if there were none otherwise.
+   *
+   * Made through a chat platform (`via`, its adapter's name), it is that
+   * platform's chat for good, and its agent's audit events name it; Grasp's
+   * own app (`web`) otherwise.
    */
   createChat(
     title: string,
@@ -781,13 +787,15 @@ export class Workspace extends DurableObject<Env> {
     agentId: string,
     by?: AuditActor,
     fix?: RunToFix,
-    projectId?: string
+    projectId?: string,
+    via: ChatChannel = "web"
   ): Chat {
     const agent = workspaceAgentIdSchema.safeParse(agentId);
     if (!agent.success) {
       // No agent core names: nowhere an agent can work.
       throw permissionErrors.create("permission.context_invalid");
     }
+    const channel = chatChannelSchema.parse(via);
     const [kept] = this.#db
       .select({ count: count() })
       .from(chats)
@@ -818,6 +826,7 @@ export class Workspace extends DurableObject<Env> {
           agentId: agent.data,
           restricted: fix?.restricted === true,
           projectId: project,
+          via: channel,
         })
         .returning()
         .get();
@@ -855,7 +864,7 @@ export class Workspace extends DurableObject<Env> {
    */
   #attachRun(chat: Chat, fix: RunToFix, by: AuditActor | undefined): void {
     const { report, sources, restricted } = fix;
-    const { id, createdAt, personId, agentId } = chat;
+    const { id, createdAt, personId, agentId, via } = chat;
     this.#db
       .insert(chatAttachments)
       .values({
@@ -885,7 +894,7 @@ export class Workspace extends DurableObject<Env> {
     if (restricted) {
       // As restricted.ts records a chat entering restricted mode.
       this.#outboxEntry({
-        actor: delegateActorOf(chatAuthority({ agentId, personId })),
+        actor: delegateActorOf(chatAuthority({ agentId, personId }), via),
         action: "context.restricted",
         target: { type: "chat", id },
         provenance: carried.slice(0, auditProvenanceMaxItems),
@@ -1040,7 +1049,7 @@ export class Workspace extends DurableObject<Env> {
     }
     // The agent acts for the chat's own person, as this object stored it,
     // never for whoever asks, and only while they are still a member.
-    const { personId, agentId } = chat;
+    const { personId, agentId, via } = chat;
     // Being deleted: its writes are being rejected, and it takes no more.
     if (this.#deleting.has(chat.id)) {
       throw agentErrors.create("agent.chat_not_found");
@@ -1074,7 +1083,7 @@ export class Workspace extends DurableObject<Env> {
       // `workspace` in durable-objects.ts), and whose agent acts in it, as
       // the chat stored it.
       const workspaceId = workspaceIdSchema.parse(this.ctx.id.name);
-      const scope = { workspaceId, agentId, chatId: chat.id, personId };
+      const scope = { workspaceId, agentId, chatId: chat.id, personId, via };
       // The organization's agent, acting for the chat's person, in this chat:
       // the audit log's actor, and the rules' context (its restricted mode).
       const authority = chatAuthority(scope);
@@ -1091,7 +1100,7 @@ export class Workspace extends DurableObject<Env> {
           model: parsed.data.model,
           effort: parsed.data.effort,
           purpose: "chat.turn",
-          trigger: delegateActorOf(authority),
+          trigger: delegateActorOf(authority, via),
           provenance: this.#sources(chat.id),
           work: { authority, context: work },
         },
@@ -2028,7 +2037,7 @@ export class Workspace extends DurableObject<Env> {
         withheldAt !== null && readable.has(sourceId)
     );
     if (fresh.length > 0 || back.length > 0) {
-      const actor = delegateActorOf(chatAuthority(scope));
+      const actor = delegateActorOf(chatAuthority(scope), scope.via);
       this.ctx.storage.transactionSync(() => {
         for (const { runId, sourceId, withheldAt } of [...fresh, ...back]) {
           this.#db
