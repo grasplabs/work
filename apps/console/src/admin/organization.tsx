@@ -463,9 +463,12 @@ const AnsweredPage = ({
             >
               <SourceNote
                 origins={
-                  originsOf(admin.snapshot, admin.billing.state === "read")[
-                    section
-                  ]
+                  originsOf(
+                    admin.snapshot,
+                    admin.billing.state === "read",
+                    admin.proposal.state === "read",
+                    admin.crm.state === "read"
+                  )[section]
                 }
               />
             </PageHeading>

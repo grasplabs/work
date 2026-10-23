@@ -213,7 +213,8 @@ const isPathTemplate = (path: string): boolean => {
   );
 };
 
-const hostSchema = z.string().regex(hostPattern);
+/** A host a connector may reach (`hostPattern`). */
+export const hostSchema = z.string().regex(hostPattern);
 
 /**
  * Hosts a redirect may lead to, as `*.<host>`: the `*` stands for exactly
@@ -331,7 +332,8 @@ export type ActionManifest = z.infer<typeof actionManifestSchema>;
 /** Most hosts one connector may reach. */
 const maxHosts = 16;
 
-const connectorNameSchema = z.string().regex(/^[a-z][a-z0-9-]{0,62}$/u);
+/** A connector's name: its package's, and its app's slug. */
+export const connectorNameSchema = z.string().regex(/^[a-z][a-z0-9-]{0,62}$/u);
 
 export const connectorManifestSchema = z
   .strictObject({

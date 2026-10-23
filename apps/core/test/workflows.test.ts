@@ -7,6 +7,7 @@ import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
+import { setCurrentVersion } from "../src/apps.ts";
 import { appHost } from "../src/durable-objects.ts";
 import { startRun } from "../src/workflows/runs.ts";
 import { fakeGateway, loggedRunStep } from "./ai-gateway.ts";
@@ -576,6 +577,21 @@ ${mailStep("after")}`,
     // An App of the earlier layout declares no resources at all.
     const { id: earlier } = await builder.api.apps.create({ name: "Earlier" });
     const unsealed = await activating(reading("extractor"), earlier);
+    // Sealed by a refused activation, then made current without sealing:
+    // its candidate is verified the same way, models included.
+    const { version: again } = await builder.api.apps.files.commit(
+      app,
+      { ...own, ...reading("missing"), "AGENTS.md": "# Again\n" },
+      "Again"
+    );
+    await refusal(builder.api.apps.versions.setCurrent(app, again));
+    const unsealedPath = z
+      .object({ code: z.string() })
+      .parse(
+        await refusal(
+          setCurrentVersion(env, await builder.api.whoami(), app, again)
+        )
+      ).code;
     const step =
       'workflows/reader.ts:4 AI step "extract" of workflow "reader" goes through';
     expect({
@@ -590,6 +606,7 @@ ${mailStep("after")}`,
       shadowed,
       fits,
       unsealed,
+      unsealedPath,
     }).toStrictEqual({
       undeclared: {
         code: "workflow.model_undeclared",
@@ -632,6 +649,7 @@ ${mailStep("after")}`,
         code: "workflow.model_undeclared",
         steps: [`${step} "extractor"`],
       },
+      unsealedPath: "workflow.model_undeclared",
     });
   });
 

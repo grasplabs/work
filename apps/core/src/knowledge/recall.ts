@@ -17,8 +17,8 @@ import { knowledgeErrors, searchMaxLimit } from "@grasp-os/shared/knowledge";
 import { memoryTokens } from "@grasp-os/shared/memory";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 
-import { derivedHmacKey } from "../derived-keys.ts";
 import type { Reader } from "./access.ts";
+import { portsOf } from "./ports.ts";
 import { d1BrainStore } from "./recall-store.ts";
 import type { BrainStore } from "./recall-store.ts";
 import type { FoundSection } from "./search.ts";
@@ -32,12 +32,16 @@ import type { FoundSection } from "./search.ts";
 // memory pack of the sections that match, each cited at its exact
 // version, with how far the read got.
 //
-// This first policy reads full text only. Semantic routes are reported as
+// This policy reads full text only, any of the question's words ranked by
+// BM25 (search.ts). Semantic routes are reported as
 // not enabled, and no model is used, so no source text reaches one here;
 // the recheck before model use comes with reranking (GRA-304).
 
-/** The retrieval policy this service follows: full text, version 1. */
-export const recallPolicyVersion = "fulltext@1";
+/**
+ * The retrieval policy this service follows: full text, version 2, which
+ * matches any of a question's words rather than all of them.
+ */
+export const recallPolicyVersion = "fulltext@2";
 
 /** The search index a recall reads: Knowledge's FTS5 tables. */
 const indexGeneration = "knowledge-fts@1";
@@ -174,7 +178,7 @@ const coverageOf = (timedOut: boolean, truncated: boolean): Coverage => {
  * back, from what a caller knows of its own access.
  */
 const digest = async (env: Env, text: string): Promise<string> => {
-  const key = await derivedHmacKey(env, "grasp-os brain access revision", [
+  const key = await portsOf(env).keys.hmac("grasp-os brain access revision", [
     "sign",
   ]);
   const mac = await crypto.subtle.sign(
@@ -274,7 +278,7 @@ export const recallWithSources = async (
       tokenCount,
       accessRevision,
       indexGeneration,
-      createdAt: new Date().toISOString(),
+      createdAt: portsOf(env).clock().toISOString(),
     };
     return { pack, sources };
   } catch (error) {

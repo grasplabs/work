@@ -69,10 +69,13 @@ describe("a chat's brain", setUpTime, () => {
     await after.ask("What's still unknown?");
 
     const calls = await gapCalls(agent.agentId, 2);
-    const [refused] = await codeResults(stub, before.chat.id);
-    const [read] = await codeResults(stub, after.chat.id);
+    const beforeSteps = await codeResults(stub, before.chat.id);
+    // Once granted, the turn recalls for the question before the model's
+    // first request (agent.ts): its own code step, then the model's.
+    const [recalled, read] = await codeResults(stub, after.chat.id);
     expect({
-      before: refused?.text,
+      before: beforeSteps.map(({ text }) => text),
+      recalled: recalled?.text.startsWith('Returned:\n{"note":'),
       after: read?.text,
       calls: calls.map(({ actor, detail }) => ({
         onBehalfOf: actor.type === "agent" ? actor.onBehalfOf : null,
@@ -80,7 +83,11 @@ describe("a chat's brain", setUpTime, () => {
         reason: detail.reason,
       })),
     }).toStrictEqual({
-      before: `Returned:\n${permissionErrors.create("permission.denied", { action: "read" }).message}`,
+      // Without the permission, no recall step: only the model's.
+      before: [
+        `Returned:\n${permissionErrors.create("permission.denied", { action: "read" }).message}`,
+      ],
+      recalled: true,
       after: "Returned:\n[]",
       calls: [
         {
@@ -138,8 +145,10 @@ describe("a chat's brain", setUpTime, () => {
     const { chat, ask } = await newChat();
     await ask("What's still unknown?");
 
-    const [read] = await codeResults(stub, chat.id);
+    // The recall before the first request, then the model's own read.
+    const [recalled, read] = await codeResults(stub, chat.id);
     const text = read?.text ?? "";
+    expect(recalled?.text).not.toContain(secret);
     expect(text).not.toContain(secret);
     expect(JSON.parse(text.replace(/^Returned:\n/u, ""))).toStrictEqual([
       {

@@ -25,6 +25,7 @@ import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import { workflowCatalogContracts } from "./db/core/schema.ts";
 import { inList, isUniqueViolation } from "./db/d1.ts";
 import { requireMemberAdmin, stillAdminSql } from "./permissions.ts";
+import { takesPageAnswers } from "./workflows/exact-values.ts";
 
 // The host catalog of contracts independent workflows bind besides each
 // other (platform specification 13.2): operation, connector, model,
@@ -87,7 +88,8 @@ const entryOf = (row: typeof workflowCatalogContracts.$inferSelect) => ({
 
 /**
  * Publishes a contract to the catalog for `by`, one of the organization's
- * own admins: refused unless the profile's catalog reader accepts it
+ * own admins: refused unless the profile's catalog reader accepts it, and
+ * a decision contract's response schema takes what a person can answer
  * (`workflow.contract_invalid`), and once its key is taken
  * (`workflow.contract_exists`).
  */
@@ -106,6 +108,19 @@ export const publishCatalogContract = async (
   if (!read.found) {
     throw workflowResourceErrors.create("workflow.contract_invalid", {
       issues: [read.reason],
+    });
+  }
+  // A decision is answered on its page, with no payload or a comment: a
+  // response schema taking neither could never be answered.
+  if (
+    contract.kind === "decision" &&
+    contract.response !== undefined &&
+    !takesPageAnswers(contract.response)
+  ) {
+    throw workflowResourceErrors.create("workflow.contract_invalid", {
+      issues: [
+        "response: A person answers a decision with no payload or with { comment }: take one of them.",
+      ],
     });
   }
   const text = canonicalJson(contract);

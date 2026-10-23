@@ -23,12 +23,7 @@ import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import type { z } from "zod";
 
-import { auditedBatch, outboxed } from "../audit-outbox.ts";
-import {
-  countGapAnswers,
-  eraseGapAnswerer,
-  rewriteGapAnswers,
-} from "../brain-gaps.ts";
+import { outboxed } from "../audit-outbox.ts";
 import { inList } from "../db/d1.ts";
 import {
   brainPayloads,
@@ -39,9 +34,9 @@ import {
   uploads,
   versions,
 } from "../db/knowledge/schema.ts";
-import { derivedHmacKey } from "../derived-keys.ts";
 import { appOfEntry } from "./app-entries.ts";
 import { entryNow } from "./apps-collection.ts";
+import { auditedBatch } from "./audit.ts";
 import type { CollectionRow } from "./collections.ts";
 import {
   checkedText,
@@ -52,6 +47,7 @@ import {
 import type { DocumentRow } from "./documents.ts";
 import { parseBaseFields } from "./frontmatter.ts";
 import { requireCurrentIndexed } from "./indexing.ts";
+import { forgetPerson, personCounts } from "./memories.ts";
 import { personalCollectionId } from "./memory-files.ts";
 import {
   collectPayloads,
@@ -63,6 +59,7 @@ import {
   stagePayload,
 } from "./payloads.ts";
 import type { PayloadRef, StagedPayload } from "./payloads.ts";
+import { portsOf } from "./ports.ts";
 import {
   collectionPlan,
   eraseCollectionFromSearchIndex,
@@ -82,7 +79,8 @@ import { cleanUpOriginals, forgetUploads } from "./uploads.ts";
 //
 // - `personal`: the person's Personal collection (their USER.md and
 //   whatever else is in it) is deleted with every version, section, link
-//   and search row. One batch, with its audit event.
+//   and search row, and so are their Brain memories and command receipts
+//   (memories.ts). One batch, with its audit event, which counts them.
 // - `content`: every occurrence of some terms (a name, an email address, a
 //   passage), in any case and as a whole word as the search index's
 //   tokenizer draws words (never inside a longer word, except in scripts
@@ -98,12 +96,14 @@ import { cleanUpOriginals, forgetUploads } from "./uploads.ts";
 //   rows and the document's title and description again, and fails for
 //   anyone who saved meanwhile from text not yet purged.
 //
-// Both reach the brain's gap answers too (brain-gaps.ts): a personal
-// purge forgets the person as anyone's answerer, a content purge rewrites
-// every answer holding a term, whatever documents it names, before its
-// documents. Its plan counts them (`gapAnswers`), and its check counts
-// one still holding a term (answered after the rewrite read it) with the
-// documents a term still finds (`stillFound`).
+// Both reach the copies of people's words the host keeps outside
+// Knowledge too, through its `OnErase` hook (core's: the brain's gap
+// answers), so Knowledge names none of them: a personal purge forgets the
+// person as the author of any, a content purge rewrites every one holding
+// a term, whatever documents it names, before its documents. Its plan
+// counts them (`hostCopies`), and its check counts one still holding a
+// term (written after the rewrite read it) with the documents a term
+// still finds (`stillFound`).
 //
 // Both delete the originals of the files uploaded as the documents they
 // purge (uploads.ts), and forget those uploads: an original holds the data
@@ -199,6 +199,26 @@ const sum = (all: Counts[]): Counts => {
  * Refuses anyone but the client's own admins: Grasp staff never purge the
  * client's data, whatever their role.
  */
+/**
+ * How a purge reaches the copies of people's words a host keeps outside
+ * Knowledge, so Knowledge itself names none of them. Core's is the
+ * brain's gap answers (brain-gaps.ts).
+ */
+export interface OnErase {
+  /** How many copies `holds` is true of: those holding a purged term. */
+  count: (holds: (text: string) => boolean) => Promise<number>;
+  /**
+   * Rewrites every copy with `rewrite` (a content purge's: its terms
+   * replaced), as `person`; a copy it leaves as it is isn't written.
+   */
+  rewrite: (
+    person: Identity,
+    rewrite: (text: string) => string
+  ) => Promise<void>;
+  /** Forgets `userId` as the author of any copy (a personal purge). */
+  forgetActor: (person: Identity, userId: string) => Promise<void>;
+}
+
 const requirePurger = (person: Identity): void => {
   if (person.staff || !isAdmin(person.role)) {
     throw roleErrors.create("role.forbidden");
@@ -209,7 +229,7 @@ const parseInput = (input: unknown): PurgeInput =>
   knowledgeErrors.parse("knowledge.invalid", purgeInputSchema, input);
 
 const tokenKey = async (env: Env): Promise<CryptoKey> =>
-  await derivedHmacKey(env, "grasp-os knowledge purge token", [
+  await portsOf(env).keys.hmac("grasp-os knowledge purge token", [
     "sign",
     "verify",
   ]);
@@ -235,7 +255,7 @@ const requireToken = async (
     typeof token === "string" ? tokenPattern.exec(token)?.groups : undefined;
   const expiresAt = Number(groups?.expiresAt);
   let valid = false;
-  if (groups?.mac !== undefined && expiresAt > Date.now()) {
+  if (groups?.mac !== undefined && expiresAt > portsOf(env).clock().getTime()) {
     try {
       valid = await crypto.subtle.verify(
         "HMAC",
@@ -258,7 +278,7 @@ const tokenFor = async (
   person: Identity,
   input: PurgeInput
 ): Promise<{ token: string; expiresAt: string }> => {
-  const expiresAt = Date.now() + tokenLifetimeMs;
+  const expiresAt = portsOf(env).clock().getTime() + tokenLifetimeMs;
   const mac = await crypto.subtle.sign(
     "HMAC",
     await tokenKey(env),
@@ -297,7 +317,11 @@ const purgeEntry = (
   action: "knowledge.purge.prepared" | "knowledge.purged",
   input: PurgeInput,
   scope: { collectionId?: string; documentIds: string[] },
-  counts: Partial<Counts> & { inLongerWords?: number },
+  counts: Partial<Counts> & {
+    inLongerWords?: number;
+    memories?: number;
+    receipts?: number;
+  },
   purgeId?: string
 ): AuditEntry => ({
   actor: actorOf(person),
@@ -348,8 +372,9 @@ const personalScope = async (
 };
 
 /**
- * Deletes `userId`'s Personal collection and everything in it, with the
- * audit event, in one batch: all or nothing.
+ * Deletes `userId`'s Personal collection and everything in it, and their
+ * Brain memories and receipts, with the audit event, in one batch: all or
+ * nothing.
  * The sections go first, row by row, so the triggers take them out of the
  * search index; the rest in the order they refer to one another. The
  * originals of files uploaded to it are recorded for deleting in the same
@@ -364,10 +389,12 @@ const personalScope = async (
 const purgePersonal = async (
   env: Env,
   person: Identity,
-  input: PersonalPurge
+  input: PersonalPurge,
+  onErase: OnErase
 ): Promise<PurgeResult> => {
   const db = drizzle(env.KNOWLEDGE);
   const { collectionId, documentIds, counts } = await personalScope(db, input);
+  const brain = await personCounts(db, input.userId);
   const purgeId = crypto.randomUUID();
   const inCollection = documentsIn(db, collectionId);
   const secure = await secureDeleteReady(db);
@@ -377,7 +404,7 @@ const purgePersonal = async (
   // The versions' payloads, unreferenced once they go, are collected right
   // after: erased from R2 too.
   const released = releasing(db, inArray(versions.documentId, inCollection));
-  await auditedBatch(env, db, [
+  await auditedBatch(portsOf(env), db, [
     rebuildOwed(db, purgeId, { writesDone: true }),
     ...(plan.kind === "keys"
       ? [
@@ -397,6 +424,7 @@ const purgePersonal = async (
     db.delete(documents).where(eq(documents.collectionId, collectionId)),
     db.delete(collections).where(eq(collections.id, collectionId)),
     ...released.after,
+    ...forgetPerson(db, input.userId),
     outboxed(
       db,
       purgeEntry(
@@ -404,7 +432,7 @@ const purgePersonal = async (
         "knowledge.purged",
         input,
         { collectionId, documentIds },
-        counts,
+        { ...counts, ...brain },
         purgeId
       )
     ),
@@ -414,8 +442,8 @@ const purgePersonal = async (
   await cleanSearchIndex(async () => {
     await eraseCollectionFromSearchIndex(db, plan, { secure, id: purgeId });
   });
-  // The brain's gaps keep who answered them: never the person erased.
-  await eraseGapAnswerer(env, person, input.userId);
+  // The host's copies keep who wrote them: never the person erased.
+  await onErase.forgetActor(person, input.userId);
   return { purgeId, ...counts };
 };
 
@@ -1407,7 +1435,8 @@ const stillFoundIn = async (
 const purgeContent = async (
   env: Env,
   person: Identity,
-  input: ContentPurge
+  input: ContentPurge,
+  onErase: OnErase
 ): Promise<PurgeResult> => {
   const db = drizzle(env.KNOWLEDGE);
   const named = await documentsNamed(db, input);
@@ -1426,7 +1455,7 @@ const purgeContent = async (
   // next purge to rebuild. A separator another document's text explained
   // at a purge's check that this one then takes the term from is covered
   // so, too.
-  await auditedBatch(env, db, [
+  await auditedBatch(portsOf(env), db, [
     outboxed(
       db,
       purgeEntry(
@@ -1442,10 +1471,10 @@ const purgeContent = async (
   ]);
   const done: Counts[] = [];
   try {
-    // The brain's gap answers hold people's words too: every one is
-    // rewritten, whatever documents the purge names. First, so a document
-    // whose purge fails doesn't leave them holding a term.
-    await rewriteGapAnswers(env, person, (text) => without(text, matcher));
+    // The host's copies hold people's words too: every one is rewritten,
+    // whatever documents the purge names. First, so a document whose
+    // purge fails doesn't leave them holding a term.
+    await onErase.rewrite(person, (text) => without(text, matcher));
     for (const one of named) {
       // oxlint-disable-next-line no-await-in-loop -- one document at a time, to bound memory
       done.push(await purgeDocument(env, db, person, one, matcher));
@@ -1471,16 +1500,14 @@ const purgeContent = async (
     input.terms,
     named.map(({ document }) => document.id)
   );
-  // An answer given after the rewrite read it is left to a purge again.
-  const gapAnswers = await countGapAnswers(env, (text) =>
-    holdsTerm(text, matcher)
-  );
-  const stillFound = inDocuments + gapAnswers;
+  // A copy written after the rewrite read it is left to a purge again.
+  const hostCopies = await onErase.count((text) => holdsTerm(text, matcher));
+  const stillFound = inDocuments + hostCopies;
   if (stillFound > 0) {
     log.warn("knowledge.purge_still_found", {
       purgeId,
       documents: inDocuments,
-      gapAnswers,
+      hostCopies,
     });
   }
   return { purgeId, ...sum(done), stillFound };
@@ -1494,7 +1521,8 @@ const purgeContent = async (
 export const preparePurge = async (
   env: Env,
   person: Identity,
-  input: unknown
+  input: unknown,
+  onErase: OnErase
 ): Promise<PurgePlan> => {
   requirePurger(person);
   const parsed = parseInput(input);
@@ -1505,7 +1533,7 @@ export const preparePurge = async (
   // A personal purge deletes whole documents: nothing is left in a word.
   let removed = 0;
   let left = 0;
-  let gapAnswers = 0;
+  let hostCopies = 0;
   if (parsed.type === "personal") {
     ({ counts, ...scope } = await personalScope(db, parsed));
     originals = await originalsOf(
@@ -1521,16 +1549,16 @@ export const preparePurge = async (
     scope = { documentIds: named.map(({ document }) => document.id) };
     const matcher = matcherOf(parsed.terms, { countLeft: true });
     ({ counts, removed, left } = await contentCounts(env, db, named, matcher));
-    gapAnswers = await countGapAnswers(env, (text) => holdsTerm(text, matcher));
+    hostCopies = await onErase.count((text) => holdsTerm(text, matcher));
   }
-  await auditedBatch(env, db, [
+  await auditedBatch(portsOf(env), db, [
     outboxed(
       db,
       purgeEntry(person, "knowledge.purge.prepared", parsed, scope, {
         ...counts,
         ...(parsed.type === "content"
-          ? { occurrences: removed, inLongerWords: left, gapAnswers }
-          : {}),
+          ? { occurrences: removed, inLongerWords: left, hostCopies }
+          : await personCounts(db, parsed.userId)),
       })
     ),
   ]);
@@ -1538,7 +1566,7 @@ export const preparePurge = async (
     ...counts,
     occurrences: removed,
     inLongerWords: left,
-    gapAnswers,
+    hostCopies,
     originals,
     ...(await tokenFor(env, person, parsed)),
   };
@@ -1553,12 +1581,13 @@ export const purge = async (
   env: Env,
   person: Identity,
   input: unknown,
-  token: unknown
+  token: unknown,
+  onErase: OnErase
 ): Promise<PurgeResult> => {
   requirePurger(person);
   const parsed = parseInput(input);
   await requireToken(env, person, parsed, token);
   return parsed.type === "personal"
-    ? await purgePersonal(env, person, parsed)
-    : await purgeContent(env, person, parsed);
+    ? await purgePersonal(env, person, parsed, onErase)
+    : await purgeContent(env, person, parsed, onErase);
 };

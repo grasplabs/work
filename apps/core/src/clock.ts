@@ -20,6 +20,7 @@ import { inJurisdiction } from "./durable-objects.ts";
 import { sweepGuestChats } from "./guests.ts";
 import { indexApps } from "./knowledge/apps-collection.ts";
 import { sweepIndexing } from "./knowledge/indexing.ts";
+import { sweepBrainReceipts } from "./knowledge/memories.ts";
 import { sweepPayloads } from "./knowledge/payloads.ts";
 import { sweepUploads } from "./knowledge/uploads.ts";
 import { syncLandscapes } from "./landscape.ts";
@@ -130,6 +131,12 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     },
   },
   { name: "statistics.sweep", period: "quarterHour", run: sweepStatistics },
+  // Brain command receipts past their retention (src/knowledge/memories.ts).
+  {
+    name: "knowledge.brain_receipts",
+    period: "quarterHour",
+    run: sweepBrainReceipts,
+  },
   {
     name: "email.kept",
     period: "quarterHour",
