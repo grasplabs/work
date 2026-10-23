@@ -1,22 +1,24 @@
 /**
- * A client's settings, as staff change them on its page: its ring and
- * its sign-in (its record's `signIn`, which every deploy makes core's
- * `SIGN_IN` from). Each change is audited in the same batch as the change, and
- * only when it changes something.
+ * A client's settings, as staff change them on its page: its ring, its
+ * sign-in (its record's `signIn`, which every deploy makes core's
+ * `SIGN_IN` from) and its sealed secrets, such as its Teams bot's
+ * (src/deploy/sealed-secrets.ts). Each change is audited in the same batch
+ * as the change, and only when it changes something.
  *
  * None of it reaches the client's account at once. The ring decides which
- * rollouts reach it; sign-in is set on core by its next deploy. It also
- * marks the client (`configChangedAt`), so the next rollout
- * deploys it even when it's on the release already (src/rollout/targets.ts).
+ * rollouts reach it; sign-in is set on core, and a sealed secret on
+ * connect, by its next deploy. Both also mark the client
+ * (`configChangedAt`), so the next rollout deploys it even when it's on
+ * the release already (src/rollout/targets.ts).
  */
 import { hkdfHmacKey } from "@grasp-os/shared/client-secrets";
 import { and, eq, isNull, ne, or } from "drizzle-orm";
 import { z } from "zod";
 
 import type { Staff } from "../access.ts";
-import { actIfChanged, adminDatabase } from "../db/act.ts";
+import { act, actIfChanged, adminDatabase } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
-import { clients } from "../db/schema.ts";
+import { clients, clientSealedSecrets } from "../db/schema.ts";
 import {
   MissingStoreSecretError,
   signInApps,
@@ -27,6 +29,7 @@ import {
   clientSignInSchema,
   missingSignInApp,
 } from "../deploy/core-config.ts";
+import { sealSecret } from "../deploy/sealed-secrets.ts";
 import { keyedHash } from "../deploy/upload.ts";
 
 /** Why staff's change to a client's settings was refused, as the page words it. */
@@ -45,8 +48,10 @@ export const settingsErrorCodes = [
   "nothing_deployed",
   /** Another runner (provisioning, a rollout, a rollback) has the client. */
   "client_busy",
-  /** Secrets Store has no `CLIENT_KEY` to fingerprint a sign-in's admins with. */
+  /** Secrets Store has no `CLIENT_KEY` to fingerprint a sign-in's admins, or seal a secret, with. */
   "store_secret_missing",
+  /** A secret to seal isn't one: empty, with spaces in it, or too long. */
+  "secret_invalid",
 ] as const;
 export type SettingsErrorCode = (typeof settingsErrorCodes)[number];
 
@@ -238,4 +243,96 @@ export const setSignIn = async (
       },
     }
   );
+};
+
+/**
+ * A secret to seal as the page sends it: its value checked here rather
+ * than by the server function's validator, so a refusal comes back as its
+ * code and never carries the value back with it.
+ */
+export const sealedSecretInputSchema = z.object({
+  clientId: clientIdSchema,
+  name: z.enum(clientSealedSecrets.name.enumValues),
+  value: z.unknown(),
+});
+
+/**
+ * A secret's value: printable ASCII without spaces, as Entra's client
+ * secrets are, so a value pasted with a space in it is refused rather
+ * than sealed as a secret that never works.
+ */
+const secretValuePattern = /^[\u0021-\u007E]{8,256}$/u;
+
+/**
+ * Seals `value` as client `clientId`'s secret `name`, such as its Teams
+ * bot's (`TEAMS_BOT_SECRET`), as `staff`, replacing the one it had:
+ * audited (`client.sealed_secret`, its name as the target, and whether it
+ * replaced one), never with anything of the value, and marking the client
+ * (`configChangedAt`) so its next deploy gives it to its connect. Refused
+ * as `secret_invalid` for a value that isn't one, and as
+ * `store_secret_missing` while Secrets Store has no `CLIENT_KEY` to seal
+ * it with. Every set is a change: a sealed value can't be compared
+ * without opening it, and nothing here opens one.
+ *
+ * Nothing reads it back: what staff see of it is who set it and when
+ * (src/clients/setup.ts), and only a deploy opens it
+ * (src/deploy/sealed-secrets.ts).
+ */
+export const setSealedSecret = async (
+  env: Env,
+  staff: Staff,
+  input: z.input<typeof sealedSecretInputSchema>
+): Promise<boolean> => {
+  const db = adminDatabase(env.DB);
+  const { clientId, name, value } = sealedSecretInputSchema.parse(input);
+  const trimmed = typeof value === "string" ? value.trim() : "";
+  if (!secretValuePattern.test(trimmed)) {
+    throw new SettingsError(
+      "secret_invalid",
+      `That isn't a value ${clientId}'s ${name} can be`
+    );
+  }
+  await assertClient(db, clientId);
+  const key = await clientKey(env);
+  if (key === null) {
+    throw new SettingsError(
+      "store_secret_missing",
+      `CLIENT_KEY is missing from Secrets Store: ${clientId}'s ${name} can't be sealed`
+    );
+  }
+  const sealed = await sealSecret(key, clientId, name, trimmed);
+  const [had] = await db
+    .select({ setAt: clientSealedSecrets.setAt })
+    .from(clientSealedSecrets)
+    .where(
+      and(
+        eq(clientSealedSecrets.clientId, clientId),
+        eq(clientSealedSecrets.name, name)
+      )
+    );
+  const now = new Date();
+  await act(
+    db,
+    staff,
+    [
+      db
+        .insert(clientSealedSecrets)
+        .values({ clientId, name, sealed, setBy: staff.email, setAt: now })
+        .onConflictDoUpdate({
+          target: [clientSealedSecrets.clientId, clientSealedSecrets.name],
+          set: { sealed, setBy: staff.email, setAt: now },
+        }),
+      db
+        .update(clients)
+        .set({ configChangedAt: now, updatedAt: now })
+        .where(eq(clients.id, clientId)),
+    ],
+    {
+      action: "client.sealed_secret",
+      clientId,
+      target: name,
+      detail: { replaced: had !== undefined },
+    }
+  );
+  return true;
 };

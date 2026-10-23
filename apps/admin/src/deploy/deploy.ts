@@ -84,6 +84,7 @@ import {
   workersSubdomain,
 } from "./router.ts";
 import type { RouterHosts, SmokeOptions } from "./router.ts";
+import { sealedWorkerSecrets } from "./sealed-secrets.ts";
 import { sharedSecretPrints, workerSecrets } from "./secrets.ts";
 import type { DeploySecrets } from "./secrets.ts";
 import {
@@ -775,7 +776,10 @@ const uploadApp = async (
       generation: deploy.generation,
       rotationLiveAt: deploy.rotationLiveAt,
     },
-    context.now?.() ?? new Date()
+    context.now?.() ?? new Date(),
+    // Read for every upload, so one staff set or replaced since the deploy
+    // started is the one it carries, and the fingerprint below changes.
+    await sealedWorkerSecrets(db, secrets.clientKey, clientId, app)
   );
   const workerVars = app === coreApp ? vars : {};
   checkBindingNames(worker, workerVars, workerSecretValues);
