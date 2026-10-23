@@ -22,6 +22,7 @@ import {
   LinkIcon,
 } from "lucide-react";
 import { useState } from "react";
+import type { ReactNode } from "react";
 
 import { ErrorText } from "../error-text.tsx";
 import { formatDate } from "../format.ts";
@@ -335,7 +336,8 @@ const LinksToSend = ({ links }: { links: LinkToSend[] }) => {
  * three numbers, the team that needs a word from its lead, every team in a
  * panel, and the links to send. Numbers per team only for teams of five or
  * more, and never who talked or what anyone said. `spoken`: Stephen says
- * its lines as they turn up, as on the onboarding's step.
+ * its lines as they turn up, as on the onboarding's step. `children`
+ * come right after what keeps the links from going out.
  */
 export const InterviewsProgress = ({
   view,
@@ -343,12 +345,14 @@ export const InterviewsProgress = ({
   listening,
   today,
   spoken,
+  children,
 }: {
   view: OnboardingView;
   links: LinkToSend[];
   listening: Listening;
   today: string;
   spoken: boolean;
+  children?: ReactNode;
 }) => {
   const { t } = useLingui();
   const { plan, progress, roster, agreed, paused } = view;
@@ -386,6 +390,7 @@ export const InterviewsProgress = ({
         paused={paused}
         spoken={spoken}
       />
+      {children}
       <div className="flex flex-col gap-2">
         <div className="flex gap-1">
           {Array.from({ length: days }, (_, index) => (

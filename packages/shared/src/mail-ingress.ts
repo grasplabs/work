@@ -1,5 +1,6 @@
 import { hkdfHmacKey } from "./client-secrets.ts";
-import { fromHex, toHex } from "./encoding.ts";
+import { fromHex, sha256HexOfBytes, toHex } from "./encoding.ts";
+import { routerSecretHeader } from "./router.ts";
 
 // Raw mail into a client's core over HTTP: what the router's mail sorter
 // sends for each message Email Routing hands it (one catch-all for every
@@ -103,4 +104,49 @@ export const verifyMail = async (
   }
   const key = await hkdfHmacKey(routerSecret, mailIngressPurpose, ["verify"]);
   return await crypto.subtle.verify("HMAC", key, bytes, signed(mail));
+};
+
+/** A raw message on its way to core, and when it was sent. */
+export interface RawMail {
+  to: string;
+  from: string;
+  raw: Uint8Array<ArrayBuffer>;
+  sentAt: string;
+}
+
+/**
+ * The request that delivers `message` to the core at `origin`: behind
+ * its router secret, and signed with the key derived from it. What the
+ * router's mail sorter sends, and an on-prem mail bridge would; `mail` is
+ * what it signs.
+ */
+export const mailIngressRequest = async (
+  origin: string,
+  routerSecret: string,
+  message: RawMail
+): Promise<{ mail: SignedMail; request: Request }> => {
+  const { to, from, raw, sentAt } = message;
+  const mail = {
+    to,
+    from,
+    sha256: await sha256HexOfBytes(raw),
+    size: raw.byteLength,
+    sentAt,
+  };
+  const request = new Request(`${origin}${mailIngressPath}`, {
+    method: "POST",
+    headers: {
+      "content-type": "message/rfc822",
+      [routerSecretHeader]: routerSecret,
+      [mailToHeader]: mail.to,
+      [mailFromHeader]: mail.from,
+      [mailSha256Header]: mail.sha256,
+      [mailSizeHeader]: String(mail.size),
+      [mailSentAtHeader]: mail.sentAt,
+      [mailSignatureHeader]: await signMail(routerSecret, mail),
+    },
+    body: raw,
+    redirect: "manual",
+  });
+  return { mail, request };
 };

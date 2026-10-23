@@ -46,12 +46,18 @@ const listed = async (person: Person) => {
   const { notifications, unread } = await person.api.notifications.list();
   return {
     unread,
-    notifications: notifications.map(({ workflow, run, failures, read }) => ({
-      workflow,
-      run,
-      failures,
-      read,
-    })),
+    notifications: notifications.flatMap((notice) =>
+      notice.type === "run_failed"
+        ? [
+            {
+              workflow: notice.workflow,
+              run: notice.run,
+              failures: notice.failures,
+              read: notice.read,
+            },
+          ]
+        : []
+    ),
   };
 };
 

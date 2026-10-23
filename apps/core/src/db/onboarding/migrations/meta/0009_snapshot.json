@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "621e65fa-e69f-4d24-9770-f5f8577fc874",
+  "id": "fcb1c5d8-1fa0-46bb-9279-c1a6f4bdf4b4",
   "prevId": "4372ac7b-7d7d-48a9-bc42-3525e04e776c",
   "tables": {
     "audit_outbox": {
@@ -178,6 +178,13 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true,
+          "autoincrement": false
+        },
+        "lead_of": {
+          "name": "lead_of",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
           "autoincrement": false
         },
         "started_at": {
@@ -388,8 +395,8 @@
           "notNull": false,
           "autoincrement": false
         },
-        "taken_at": {
-          "name": "taken_at",
+        "led_team": {
+          "name": "led_team",
           "type": "text",
           "primaryKey": false,
           "notNull": false,

@@ -1,6 +1,10 @@
 import type { PendingAction, UnknownOutcome } from "@grasp-os/shared/connect";
+import type { DecisionView } from "@grasp-os/shared/decisions";
 import type { DependencyRequest } from "@grasp-os/shared/dependencies";
-import type { Notification } from "@grasp-os/shared/notifications";
+import type {
+  GapAskedNotification,
+  RunFailedNotification,
+} from "@grasp-os/shared/notifications";
 import type { Permission } from "@grasp-os/shared/permissions";
 import type { ScreensWaiting } from "@grasp-os/shared/screen-trust";
 import { i18n } from "@lingui/core";
@@ -46,14 +50,17 @@ export type InboxKind =
   | "permissionRequest"
   | "packages"
   | "appApproval"
-  | "failedRun";
+  | "failedRun"
+  | "decision";
 
 /** Where an item can be opened: the page of what it is about. */
 export type Target =
   | { kind: "workflow"; app: string; workflow: string }
   | { kind: "engine"; engine: string }
   | { kind: "integration"; integration: string }
-  | { kind: "chat"; chat: string };
+  | { kind: "chat"; chat: string }
+  | { kind: "brain" }
+  | { kind: "decision"; decision: string };
 
 /** What an item was made from: what its page shows of it and acts on. */
 export type InboxSource =
@@ -62,8 +69,14 @@ export type InboxSource =
   | { type: "request"; request: Permission; pending: PendingRequests }
   | { type: "packages"; request: DependencyRequest; policyGeneration: number }
   | { type: "screens"; waiting: ScreensWaiting }
-  | { type: "failed"; notification: Notification; model: string | undefined }
-  | { type: "reconnect"; integration: string };
+  | {
+      type: "failed";
+      notification: RunFailedNotification;
+      model: string | undefined;
+    }
+  | { type: "reconnect"; integration: string }
+  | { type: "asked"; notification: GapAskedNotification }
+  | { type: "decision"; decision: DecisionView };
 
 export interface InboxItem {
   /** Stable from one read to the next: its kind and what it is about, e.g. "held:<id>". */
@@ -112,6 +125,7 @@ export const groupOf: Record<InboxKind, Exclude<Group, "all">> = {
   packages: "apps",
   appApproval: "apps",
   failedRun: "workflows",
+  decision: "workflows",
 };
 
 export type Sort = "urgent" | "newest" | "oldest";
@@ -329,9 +343,12 @@ const screenItems = (
 
 /** A workflow that failed while acting for the person, with a way to ask the agent to fix it. */
 const failedItems = (failed: NotificationsPage, me: string): InboxItem[] =>
-  failed.page.notifications.map((notification) => {
+  failed.page.notifications.flatMap((notification): InboxItem[] => {
+    if (notification.type !== "run_failed") {
+      return [];
+    }
     const { app, appName, workflow, failures, at } = notification;
-    return {
+    const item: InboxItem = {
       id: `failed:${notification.id}`,
       kind: "failedRun",
       title: t`${workflow} in ${appName} failed`,
@@ -352,6 +369,69 @@ const failedItems = (failed: NotificationsPage, me: string): InboxItem[] =>
       date: at,
       urgent: false,
       source: { type: "failed", notification, model: failed.model },
+    };
+    return [item];
+  });
+
+/** A question of the brain an admin asked the person, as the role that can answer it, while it is open. */
+const askedItems = (failed: NotificationsPage, me: string): InboxItem[] =>
+  failed.page.notifications.flatMap((notification): InboxItem[] => {
+    if (notification.type !== "gap_asked") {
+      return [];
+    }
+    const { question, owner, at } = notification;
+    return [
+      {
+        id: `asked:${notification.id}`,
+        kind: "openQuestion",
+        title: question,
+        context: owner,
+        body: [
+          t`You were asked this as the ${owner}. Answer it in the brain: everyone in the company reads the answer, with your name.`,
+        ],
+        facts: [{ label: t`Asked`, value: formatDateTime(at) }],
+        about: { kind: "brain" },
+        forWhom: { person: me },
+        date: at,
+        urgent: false,
+        source: { type: "asked", notification },
+      },
+    ];
+  });
+
+/**
+ * A decision a workflow's run waits for the person to answer: answered on
+ * its own page, where they review what it is about and confirm.
+ */
+const decisionItems = (
+  decisions: readonly DecisionView[],
+  me: string,
+  readAt: string
+): InboxItem[] =>
+  decisions.map((decision) => {
+    const name =
+      decision.app?.name ??
+      decision.workflowResource?.name ??
+      decision.workflow;
+    return {
+      id: `decision:${decision.id}`,
+      kind: "decision",
+      title: decision.description,
+      context: name,
+      body: [
+        t`A run of ${name} waits for your answer. Nothing more happens in it until someone answers, or until it stops waiting.`,
+      ],
+      facts: [
+        { label: t`Workflow`, value: name },
+        { label: t`Answer by`, value: formatDateTime(decision.expiresAt) },
+      ],
+      about: { kind: "decision", decision: decision.id },
+      forWhom: { person: me },
+      // Core says what waits now, not since when: as of the read.
+      date: readAt,
+      // Its run waits on the answer.
+      urgent: true,
+      source: { type: "decision", decision },
     };
   });
 
@@ -378,6 +458,7 @@ export const inboxItems = (
   const dependencies = readyOf(waiting.dependencies);
   const screens = readyOf(waiting.screens) ?? [];
   const failed = readyOf(waiting.failed);
+  const decisions = readyOf(waiting.decisions) ?? [];
   const integrations = readyOf(waiting.integrations);
   const reconnect = (
     integrations === undefined ? [] : toReconnect(integrations, viewer)
@@ -405,6 +486,7 @@ export const inboxItems = (
     };
   });
   return [
+    ...decisionItems(decisions, me, readAt),
     ...heldItems(held, me),
     ...outcomeItems(outcomes, me),
     ...(requests === undefined ? [] : requestItems(requests)),
@@ -413,6 +495,7 @@ export const inboxItems = (
       : packageItems(dependencies.requests, dependencies.policyGeneration)),
     ...screenItems(screens, readAt),
     ...(failed === undefined ? [] : failedItems(failed, me)),
+    ...(failed === undefined ? [] : askedItems(failed, me)),
     ...reconnect,
   ].toSorted(order);
 };
@@ -427,6 +510,7 @@ export const unread = (waiting: Waiting): Loaded<unknown>[] => {
     waiting.screens,
     waiting.failed,
     waiting.integrations,
+    waiting.decisions,
   ];
   return parts.filter(
     (part): part is Loaded<unknown> =>

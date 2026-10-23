@@ -14,10 +14,12 @@ import {
   confirmDecision,
   decisionFor,
   reviewDecision,
+  waitingDecisions,
 } from "./decisions.ts";
 
 /**
- * A signed-in person's `decisions`: for screens and the decision's page.
+ * A signed-in person's `decisions`: for screens, the decision's page and
+ * the inbox.
  * Every call checks the session first and hands the
  * identity that check returned, with its role and teams read now, to the
  * decision functions, which check that person may answer.
@@ -34,6 +36,13 @@ export class DecisionsRpc extends CoreRpcTarget implements DecisionsApi {
     super();
     this.#env = env;
     this.#check = check;
+  }
+
+  async waiting(): Promise<DecisionView[]> {
+    return await withPerson(
+      this.#check,
+      async (by) => await waitingDecisions(this.#env, by)
+    );
   }
 
   async get(decision: string): Promise<DecisionView> {

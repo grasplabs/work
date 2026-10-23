@@ -2,31 +2,10 @@
  * The console's Secrets Store in the test pool, filled for each test as
  * deploy-ops fills it (wrangler.jsonc), and emptied after.
  */
-import { env } from "cloudflare:workers";
 import { afterEach, beforeEach } from "vite-plus/test";
 
-/** What the local Secrets Store (Miniflare) offers tests to manage a secret. */
-export interface SecretsStoreAdmin {
-  create: (value: string) => Promise<string>;
-  update: (value: string, id: string) => Promise<string>;
-  delete: (id: string) => Promise<void>;
-  /** The store's secrets: each one's name, and its id as `metadata.uuid`. */
-  list: () => Promise<{ name: string; metadata?: { uuid?: string } }[]>;
-}
-
-/** The local Secrets Store's admin API for the secret `binding` names. */
-export const adminOf = async (
-  binding: SecretsStoreSecret
-): Promise<SecretsStoreAdmin> => {
-  // SAFETY: Miniflare's local Secrets Store binding answers this method with
-  // its admin API, whose methods have these signatures.
-  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-  const admin = Reflect.get(
-    binding,
-    "SecretsStoreSecret::admin_api"
-  ) as () => Promise<SecretsStoreAdmin>;
-  return await admin();
-};
+import { adminOf, consoleSecrets } from "./secrets-store-admin.ts";
+import type { SecretsStoreAdmin } from "./secrets-store-admin.ts";
 
 /**
  * Sets the secret `binding` names, `name` in the store, to `value`, as
@@ -64,23 +43,9 @@ export const useStoreSecrets = (tokens: {
   deployer: string;
   tenant: string;
 }): void => {
-  const secrets: [SecretsStoreSecret, string][] = [
-    [env.TENANT_ADMIN_TOKEN, tokens.tenant],
-    [env.DEPLOYER_API_TOKEN, tokens.deployer],
-    [env.ROUTER_KEY, "test-router-key"],
-    [env.CLIENT_KEY, "test-client-key"],
-    [env.ENTRA_CLIENT_SECRET, "entra-secret"],
-    [env.MICROSOFT_CLIENT_SECRET, "microsoft-secret"],
-    [env.GOOGLE_CLIENT_SECRET, "google-secret"],
-    [env.COMPOSIO_API_KEY, "composio-key"],
-    [env.APP_OAUTH_CLIENTS, "{}"],
-    // Empty, as a store nobody put Stripe's key in reads: a test that
-    // reads Stripe sets it (test/admin-billing.test.ts).
-    [env.STRIPE_RESTRICTED_KEY, ""],
-  ];
   const stored: { admin: SecretsStoreAdmin; id: string }[] = [];
   beforeEach(async () => {
-    for (const [binding, value] of secrets) {
+    for (const [binding, value] of consoleSecrets(tokens)) {
       // oxlint-disable-next-line no-await-in-loop -- a few, in order
       const admin = await adminOf(binding);
       // oxlint-disable-next-line no-await-in-loop -- a few, in order

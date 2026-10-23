@@ -188,6 +188,10 @@ const clientErrors = {
     message: "The upload was cancelled.",
     category: "operational",
   },
+  "link.unavailable": {
+    message: "Links can't be opened here.",
+    category: "operational",
+  },
 } as const satisfies Record<
   string,
   { message: string; category: ErrorCategory }
@@ -393,6 +397,9 @@ const fileCategories: Readonly<Record<string, ErrorCategory>> = {
   "file.content_mismatch": "contract",
   "file.referenced": "domain",
   "submission.key_conflict": "contract",
+  // A link the App's declaration doesn't allow, or one that isn't one.
+  "link.not_allowed": "authorization",
+  "link.invalid": "contract",
 };
 
 /** The category of a refusal the page or core sent before any call ran. */

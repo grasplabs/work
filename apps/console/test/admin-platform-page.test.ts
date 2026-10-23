@@ -8,7 +8,8 @@ import { deployContext } from "../src/deploy/context.ts";
 import { runDeploy, startDeploy } from "../src/deploy/deploy.ts";
 import { importReleases } from "../src/releases/import.ts";
 import { mockAccess } from "./access.ts";
-import { emptyAdminSnapshot, mockCloudflareApi } from "./cloudflare-api.ts";
+import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
+import { emptyAdminSnapshot } from "./cloudflare-api.ts";
 import { page } from "./pages.ts";
 import { publishRelease } from "./releases.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
@@ -124,6 +125,14 @@ describe("the admin's Platform page", () => {
         companies.indexOf("Laggard") < companies.indexOf("Earlyco") &&
         companies.indexOf("Laggard") < companies.indexOf("Firstco"),
       opensSetup: html.includes(`href="/admin/organizations/${first}/setup"`),
+      // What staff did, as the audit log keeps it: adding a company, never a deploy's steps.
+      doneHere: text
+        .slice(text.indexOf("Done here"))
+        .includes("ops@grasp.test added Laggard"),
+      // Beside Platform in the sidebar: the laggard, and the waiting rollout.
+      sidebarCount: text.includes(
+        "1 company needs a look; a rollout waits for approval"
+      ),
     }).toMatchObject({
       status: 200,
       release: true,
@@ -134,6 +143,8 @@ describe("the admin's Platform page", () => {
       laggardBehind: true,
       laggardFirst: true,
       opensSetup: true,
+      doneHere: true,
+      sidebarCount: true,
     });
     const [a, b, c] = [
       spread.indexOf(newest.id),

@@ -1,4 +1,5 @@
 import type { AuditActor } from "@grasp-os/shared/audit";
+import { sha256Hex } from "@grasp-os/shared/encoding";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import { knowledgeErrors } from "@grasp-os/shared/knowledge";
 import { errorFields, log } from "@grasp-os/shared/log";
@@ -9,7 +10,12 @@ import { stringify } from "yaml";
 
 import { versionFiles } from "../apps.ts";
 import { apps } from "../db/core/schema.ts";
-import { appEntries, documents, versions } from "../db/knowledge/schema.ts";
+import {
+  appEntries,
+  brainPayloads,
+  documents,
+  versions,
+} from "../db/knowledge/schema.ts";
 import { appEntryPath, appsCollectionId } from "./app-entries.ts";
 import { ensureCollection } from "./collections.ts";
 import type { CollectionRow } from "./collections.ts";
@@ -179,7 +185,10 @@ const indexApp = async (env: Env, appId: string): Promise<void> => {
       .from(appEntries)
       .where(eq(appEntries.appId, appId)),
     knowledge
-      .select({ version: documents.currentVersion, text: versions.text })
+      .select({
+        version: documents.currentVersion,
+        sha256: brainPayloads.sha256,
+      })
       .from(documents)
       .innerJoin(
         versions,
@@ -188,6 +197,7 @@ const indexApp = async (env: Env, appId: string): Promise<void> => {
           eq(versions.number, documents.currentVersion)
         )
       )
+      .innerJoin(brainPayloads, eq(brainPayloads.key, versions.payloadKey))
       .where(
         and(
           eq(documents.collectionId, appsCollectionId),
@@ -202,7 +212,8 @@ const indexApp = async (env: Env, appId: string): Promise<void> => {
   }
   const text = entryText(app, await agentsOf(env, appId, version));
   const ifVersion = stored?.version ?? 0;
-  if (stored?.text === text) {
+  // Compared by hash: the entry's payload isn't read.
+  if (stored?.sha256 === (await sha256Hex(text))) {
     // The same text: only the version it holds, while it is as read.
     await noteVersion(
       knowledge,

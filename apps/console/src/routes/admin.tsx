@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 
 import { AdminFrame } from "../admin/frame.tsx";
+import { fetchPlatformSidebar } from "../admin/platform-data.ts";
 import { fetchClientAdmins } from "../clients/functions.ts";
 
 /**
@@ -11,7 +12,10 @@ import { fetchClientAdmins } from "../clients/functions.ts";
  */
 const organizationsFreshMs = 60_000;
 
-const Frame = () => <AdminFrame admins={Route.useLoaderData()} />;
+const Frame = () => {
+  const { admins, platform } = Route.useLoaderData();
+  return <AdminFrame admins={admins} platform={platform} />;
+};
 
 /**
  * Grasp's admin, in a frame of its own (src/admin/frame.tsx), apart from
@@ -22,7 +26,14 @@ const Frame = () => <AdminFrame admins={Route.useLoaderData()} />;
  * knows, as its core answers now (`fetchClientAdmins`).
  */
 export const Route = createFileRoute("/admin")({
-  loader: async () => await fetchClientAdmins(),
+  // Beside Platform, what the console recorded alone: no account is read.
+  loader: async () => {
+    const [admins, platform] = await Promise.all([
+      fetchClientAdmins(),
+      fetchPlatformSidebar(),
+    ]);
+    return { admins, platform };
+  },
   staleTime: organizationsFreshMs,
   head: () => ({ meta: [{ title: "Grasp admin" }] }),
   component: Frame,
