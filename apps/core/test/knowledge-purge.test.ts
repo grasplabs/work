@@ -829,6 +829,39 @@ describe("a purge of content", setUpTime, () => {
     });
   });
 
+  it("removes a term typed with a combining accent from text typed the same way", async () => {
+    const admin = await personOf("admin");
+    const decomposed = `Rene\u0301${unique()}`;
+    const handbook = await admin.api.knowledge.createCollection({
+      name: "Handbook",
+      access: "everyone",
+    });
+    const document = await saveOver(
+      admin,
+      handbook.id,
+      "team.md",
+      `# Team\n${decomposed} runs payroll.`
+    );
+    const { plan, result } = await purged(admin, {
+      type: "content",
+      documentIds: [document.id],
+      terms: [decomposed],
+      reason: "erasure_request",
+    });
+    expect({
+      occurrences: plan.occurrences,
+      stillFound: result.stillFound,
+      texts: await versionTexts(document.id),
+    }).toStrictEqual({
+      occurrences: 1,
+      stillFound: 0,
+      texts: [
+        "# Team\n(removed) runs payroll.",
+        "# Team\n(removed) runs payroll.",
+      ],
+    });
+  });
+
   it("drops a term from the index's page directory, where it was the first term of a page", async () => {
     const admin = await personOf("admin");
     const handbook = await admin.api.knowledge.createCollection({
@@ -1880,8 +1913,8 @@ describe("a purge of content", setUpTime, () => {
     });
     // "José" twice: once with its accent as one character, which only a
     // Unicode-aware boundary keeps from ending "Jos", and once as an e and
-    // a combining acute, which the search index drops from the token, so
-    // it is "Jose" to the index and goes with it. A soft hyphen and a
+    // a combining acute, the same text composed (NFC), so it stays with
+    // the other: neither is the word "Jose". A soft hyphen and a
     // zero-width non-joiner end a word, as they end the index's token.
     const decomposed = `Jose${String.fromCodePoint(0x3_01)}`;
     const softHyphen = String.fromCodePoint(0xad);
@@ -1900,7 +1933,7 @@ describe("a purge of content", setUpTime, () => {
     });
     const read = await admin.api.knowledge.getDocument(document.id);
     expect(read.version.text).toBe(
-      `# Team\n(removed), (removed) and (removed) left; Renée stays.\n(removed), (removed) and (removed) left; José stays.\n(removed) left; (removed)${softHyphen}my and (removed)${nonJoiner}s go.`
+      `# Team\n(removed), (removed) and (removed) left; Renée stays.\n(removed), (removed) and José left; José stays.\n(removed) left; (removed)${softHyphen}my and (removed)${nonJoiner}s go.`
     );
   });
 
@@ -2553,6 +2586,103 @@ describe("a purge of content's memory records", setUpTime, () => {
       teammate: [`${name} approves leave. Again.`],
       other: ["Ask (removed)."],
       events: 1,
+    });
+  });
+
+  it("counts what it removes, where the index's tokens differ: a script without spaces, an emoji, a final sigma", async () => {
+    const admin = await personOf("admin");
+    const teammate = await personOf("user");
+    const tag = unique();
+    const cjk = `\u7530\u4E2D${tag}`;
+    const handbook = await admin.api.knowledge.createCollection({
+      name: "Handbook",
+      access: "everyone",
+    });
+    const document = await saveOver(
+      admin,
+      handbook.id,
+      "team.md",
+      "# Team\nNothing."
+    );
+    await rememberAs(teammate, `${cjk}\u3055\u3093\u306B\u805E\u304F`);
+    await rememberAs(teammate, `Ask Tom${tag}\u{1F642} now`);
+    await rememberAs(
+      teammate,
+      `Ask X${tag}\u039F\u0394\u03A5\u03A3\u03A3\u0395\u03A5\u03A3 now`
+    );
+    const { plan, result } = await purged(admin, {
+      type: "content",
+      documentIds: [document.id],
+      terms: [
+        cjk,
+        `Tom${tag}`,
+        `x${tag}\u03BF\u03B4\u03C5\u03C3\u03C3\u03B5\u03C5\u03C2`,
+      ],
+      reason: "erasure_request",
+    });
+    expect({
+      planned: plan.memories,
+      stillFound: result.stillFound,
+      memories: await statementsOf(teammate),
+    }).toStrictEqual({
+      planned: 3,
+      stillFound: 0,
+      memories: [
+        "(removed)\u3055\u3093\u306B\u805E\u304F",
+        "Ask (removed)\u{1F642} now",
+        "Ask (removed) now",
+      ].toSorted(),
+    });
+  });
+
+  it("reports a record in a script without spaces remembered after it read them", async () => {
+    const admin = await personOf("admin");
+    const teammate = await personOf("user");
+    const cjk = `\u7530\u4E2D${unique()}`;
+    const handbook = await admin.api.knowledge.createCollection({
+      name: "Handbook",
+      access: "everyone",
+    });
+    const document = await saveOver(
+      admin,
+      handbook.id,
+      "team.md",
+      "# Team\nNothing."
+    );
+    await rememberAs(teammate, `${cjk}\u3055\u3093\u306B\u805E\u304F`);
+    let raceNext = false;
+    let raced = false;
+    const racing = await apiWith(admin, {
+      prepare: (query) => {
+        raceNext ||= !raced && writesRecords(query);
+      },
+      beforeBatch: async () => {
+        if (raceNext) {
+          raceNext = false;
+          raced = true;
+          await rememberAs(teammate, `${cjk}\u3055\u3093\u306B\u611F\u8B1D`);
+        }
+      },
+    });
+    const input: PurgeInput = {
+      type: "content",
+      documentIds: [document.id],
+      terms: [cjk],
+      reason: "erasure_request",
+    };
+    const plan = await racing.knowledge.preparePurge(input);
+    const first = await racing.knowledge.purge(input, plan.token);
+    expect({
+      raced,
+      stillFound: first.stillFound,
+      memories: await statementsOf(teammate),
+    }).toStrictEqual({
+      raced: true,
+      stillFound: 1,
+      memories: [
+        "(removed)\u3055\u3093\u306B\u805E\u304F",
+        `${cjk}\u3055\u3093\u306B\u611F\u8B1D`,
+      ].toSorted(),
     });
   });
 });

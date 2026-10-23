@@ -161,8 +161,9 @@ import { cleanUpOriginals, forgetUploads } from "./uploads.ts";
 // it again), collection names and
 // descriptions, other documents that quote the text, a term split by
 // Markdown or a line break, a term spelled otherwise (a variant, an
-// accent left out or encoded otherwise: "Rene" for "René", which the
-// index folds to the same token), a term joined to more of a word
+// accent left out: "Rene" for "René", which the index folds to the same
+// token; one typed with a combining accent is the same word, as text and
+// terms are compared composed, NFC), a term joined to more of a word
 // ("Toms", "tomVisser", "automated": not removed, only counted; the words
 // index keeps those as other tokens, the trigram index finds the term
 // inside them), an address or a domain inside a longer one
@@ -631,16 +632,22 @@ const matcherOf = (
  * "Tom.Ann"), which one pass would leave to a purge run again. It ends:
  * a term can't overlap the marker (`purgeTermSchema`), so each pass
  * replaces text outside the markers, or markers with fewer of them.
+ *
+ * Compared composed (NFC), as the terms are (`purgeTermSchema`), so a
+ * term typed with a combining accent ("René" as "e" and U+0301) is the
+ * same word, however the text or the term was typed. Text holding a term
+ * comes back composed; text holding none, as it was, byte for byte.
  */
 const without = (
   text: string,
   matcher: Matcher,
   visit?: (current: string, index: number, length: number) => void
 ): string => {
-  if (!matcher.anywhere.test(text)) {
+  const composed = text.normalize("NFC");
+  if (!matcher.anywhere.test(composed)) {
     return text;
   }
-  let current = text;
+  let current = composed;
   for (;;) {
     let next = "";
     let end = 0;
@@ -651,7 +658,7 @@ const without = (
     }
     next += current.slice(end);
     if (next === current) {
-      return current;
+      return current === composed ? text : current;
     }
     current = next;
   }
@@ -685,20 +692,16 @@ const wordCharacter = /[\p{L}\p{N}]/u;
  * that says nothing is deleted rather than kept as a husk. Whether what
  * is left still means what the person meant can't be told without
  * reading it, so any word left keeps it, redacted, as a document is.
- * Compared composed (NFC), as the terms are (`purgeInputSchema`), so a
- * term typed with a combining accent ("René" as "e" and U+0301) is found
- * as the same word; a statement holding no term is left as it was.
  */
 const erasedStatement = (
   statement: string,
   matcher: Matcher
 ): string | null => {
-  const composed = statement.normalize("NFC");
-  const now = without(composed, matcher);
-  if (now === composed) {
-    return statement;
-  }
-  return wordCharacter.test(now.replaceAll(purgedMarker, "")) ? now : null;
+  const now = without(statement, matcher);
+  return now === statement ||
+    wordCharacter.test(now.replaceAll(purgedMarker, ""))
+    ? now
+    : null;
 };
 
 const keptCharacter = new RegExp(`^[${classOf(unicode61Kept)}]$`, "u");
@@ -738,8 +741,8 @@ const foldedTokens = (text: string): string[] => {
  * query matches. So a form a content purge leaves on purpose is counted
  * too: spelled without its accents ("Rene" for "René"), joined otherwise
  * ("tom-visser" for "tom visser"), or with a ligature. A term with no
- * token (punctuation only) is never found. For a plan's and a check's
- * counts of memory records, which no index holds yet.
+ * token (punctuation only) is never found. Alongside what the purge
+ * removes (`statementHolds`), never instead of it.
  */
 const foldedHolds = (terms: readonly string[]): ((text: string) => boolean) => {
   const phrases = terms.map(foldedTokens).filter((phrase) => phrase.length > 0);
@@ -756,6 +759,21 @@ const foldedHolds = (terms: readonly string[]): ((text: string) => boolean) => {
 /** Whether a content purge would remove a term from `text`. */
 const holdsTerm = (text: string, matcher: Matcher): boolean =>
   without(text, matcher) !== text;
+
+/**
+ * Whether a memory statement holds a term, for a plan's and a check's
+ * counts of memory records, which no index holds yet: one the purge
+ * removes (`holdsTerm`: inside running text of a script written without
+ * spaces, beside an emoji, a Greek final sigma in either case), or one
+ * the index would find, which it leaves on purpose (`foldedHolds`).
+ */
+const statementHolds = (
+  terms: readonly string[],
+  matcher: Matcher
+): ((statement: string) => boolean) => {
+  const folded = foldedHolds(terms);
+  return (statement) => holdsTerm(statement, matcher) || folded(statement);
+};
 
 /** How often a term is removed from `text`, in every pass (`without`). */
 const removalsIn = (text: string, matcher: Matcher): number => {
@@ -1600,7 +1618,10 @@ const purgeContent = async (
   );
   // A record or copy written after the purge read it is left to a purge
   // again.
-  const memories = await countStatements(env, foldedHolds(input.terms));
+  const memories = await countStatements(
+    env,
+    statementHolds(input.terms, matcher)
+  );
   const hostCopies = await onErase.count((text) => holdsTerm(text, matcher));
   const stillFound = inDocuments + memories + hostCopies;
   if (stillFound > 0) {
@@ -1653,7 +1674,10 @@ export const preparePurge = async (
     const matcher = matcherOf(parsed.terms, { countLeft: true });
     ({ counts, removed, left } = await contentCounts(env, db, named, matcher));
     brain = {
-      memories: await countStatements(env, foldedHolds(parsed.terms)),
+      memories: await countStatements(
+        env,
+        statementHolds(parsed.terms, matcher)
+      ),
     };
     hostCopies = await onErase.count((text) => holdsTerm(text, matcher));
   }
