@@ -1263,7 +1263,7 @@ msgid "{who} consented to this before connecting it:"
 msgstr "{who} gaf hier toestemming voor voordat het werd gekoppeld:"
 
 #: src/interview/before.tsx
-#: src/interview/sound-check.tsx
+#: src/interview/voice-bar.tsx
 msgid "{who} is talking"
 msgstr "{who} praat"
 
@@ -6220,7 +6220,7 @@ msgstr "Linkt naar"
 msgid "Lisbon"
 msgstr "Lissabon"
 
-#: src/interview/sound-check.tsx
+#: src/interview/voice-bar.tsx
 msgid "Listening"
 msgstr "Luistert"
 
@@ -7791,7 +7791,7 @@ msgstr "Onboardingstappen"
 msgid "Once I have about {threshold}% of the picture, your team can start. I’ll fill in the rest as we go."
 msgstr "Zodra ik ongeveer {threshold}% van het plaatje heb, kan je team beginnen. De rest vul ik onderweg aan."
 
-#: src/interview/sound-check.tsx
+#: src/interview/voice-bar.tsx
 msgid "One moment"
 msgstr "Een moment"
 
@@ -11853,6 +11853,10 @@ msgstr "Twee antwoorden"
 #: src/activity/audit-log.tsx
 msgid "Type"
 msgstr "Type"
+
+#: src/interview/composer.tsx
+msgid "Type instead"
+msgstr "Liever typen"
 
 #: src/interview/before.tsx
 #: src/interview/sound-check.tsx

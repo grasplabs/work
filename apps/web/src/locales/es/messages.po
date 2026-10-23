@@ -1263,7 +1263,7 @@ msgid "{who} consented to this before connecting it:"
 msgstr "{who} dio su consentimiento antes de conectarlo:"
 
 #: src/interview/before.tsx
-#: src/interview/sound-check.tsx
+#: src/interview/voice-bar.tsx
 msgid "{who} is talking"
 msgstr "{who} está hablando"
 
@@ -6220,7 +6220,7 @@ msgstr "Enlaza con"
 msgid "Lisbon"
 msgstr "Lisboa"
 
-#: src/interview/sound-check.tsx
+#: src/interview/voice-bar.tsx
 msgid "Listening"
 msgstr "Escuchando"
 
@@ -7791,7 +7791,7 @@ msgstr "Pasos del onboarding"
 msgid "Once I have about {threshold}% of the picture, your team can start. I’ll fill in the rest as we go."
 msgstr "En cuanto tenga cerca del {threshold} % del panorama, tu equipo puede empezar. El resto lo completo sobre la marcha."
 
-#: src/interview/sound-check.tsx
+#: src/interview/voice-bar.tsx
 msgid "One moment"
 msgstr "Un momento"
 
@@ -11853,6 +11853,10 @@ msgstr "Dos respuestas"
 #: src/activity/audit-log.tsx
 msgid "Type"
 msgstr "Tipo"
+
+#: src/interview/composer.tsx
+msgid "Type instead"
+msgstr "Prefiero escribir"
 
 #: src/interview/before.tsx
 #: src/interview/sound-check.tsx
