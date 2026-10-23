@@ -611,6 +611,19 @@ export const blueprints = sqliteTable(
       .$type<BlueprintWorkflow[]>()
       .notNull()
       .default([]),
+    /**
+     * The code a built-in's release vouches for (`codeIdentity`, apps.ts):
+     * reviewed with the platform, so a copy whose version is exactly this
+     * code gets its screens' builds approved by the release (screen-
+     * builds.ts). Null for a marked version, which vouches for nothing.
+     */
+    attestedCode: text("attested_code"),
+    /**
+     * The compiler and kit (`compilerVersion`) the release vouches for
+     * `attested_code` with: a build with any other is approved by an
+     * admin, as any build. Null for a marked version.
+     */
+    attestedRelease: text("attested_release"),
     /** Who marked it; null for a built-in. */
     markedBy: text("marked_by"),
     /** When it was marked, or last installed changed. */
@@ -620,6 +633,24 @@ export const blueprints = sqliteTable(
     uniqueIndex("blueprints_app_version_idx").on(table.appId, table.version),
   ]
 );
+
+/**
+ * Where an App created from a blueprint came from (src/app-blueprints.ts):
+ * the blueprint, the version of its App a marked one was (null for a
+ * built-in), and the tree it was copied from. Written only in the batch
+ * that creates the App from the blueprint, never changed: unlike
+ * `apps.blueprint`, a label a creator may give any App, this is core's
+ * record, which the release's vouching for a built-in's code reads.
+ */
+export const appOrigins = sqliteTable("app_origins", {
+  appId: text("app_id")
+    .primaryKey()
+    .references(() => apps.id),
+  blueprintId: text("blueprint_id").notNull(),
+  blueprintVersion: integer("blueprint_version"),
+  tree: text().notNull(),
+  createdAt: timestamp("created_at").notNull(),
+});
 
 /**
  * Every committed version of an App, never changed or deleted. `tree` is
@@ -636,6 +667,12 @@ export const appVersions = sqliteTable(
     version: integer().notNull(),
     parent: integer(),
     tree: text().notNull(),
+    /**
+     * The hash of the version's code (`codeIdentity`, apps.ts): its files
+     * but AGENTS.md, which agents write and nothing builds or runs. Null
+     * for a version committed before the column, which is no blueprint's.
+     */
+    code: text(),
     files: integer().notNull(),
     authorId: text("author_id").notNull(),
     message: text().notNull(),

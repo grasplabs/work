@@ -1,3 +1,4 @@
+import { compilerVersion } from "@grasp-os/compiler";
 import { appErrors, fromBlueprintSchema } from "@grasp-os/shared/apps";
 import type {
   AppBlueprintsApi,
@@ -29,6 +30,7 @@ import {
   appFor,
   blueprintFiles,
   changeEntry,
+  codeIdentity,
   deleteOtherBlueprintTrees,
   editableApp,
   findVersion,
@@ -43,6 +45,7 @@ import type { AppRow, VersionRow } from "./apps.ts";
 import { auditedBatch, outboxed, outboxedIfChanged } from "./audit-outbox.ts";
 import type { Acting } from "./auth/identity.ts";
 import {
+  appOrigins,
   apps,
   appVersions,
   appWorkflowBindings,
@@ -76,8 +79,10 @@ import { workflowCallsIn } from "./workflows/code.ts";
 // organization) creates an App of their own from. The release ships
 // others, the built-ins (apps/core/blueprints/, builtins.ts), which
 // everyone who builds creates from, and which only the install changes.
-// Either way the new App is theirs, and nothing downstream knows where
-// its blueprint came from. Its first version is the blueprint's code, but
+// Either way the new App is theirs, with a fresh ID, and core records
+// where it came from (`app_origins`: the blueprint, a marked one's
+// version, the tree it was copied from), which grants nothing but what
+// the release vouches for (below). Its first version is the blueprint's code, but
 // for its AGENTS.md, and it asks for what the blueprint declares, each
 // request waiting for an admin: a built-in's `blueprint.json`, or what the
 // App asked for or was given as the version was marked, of the kinds
@@ -128,6 +133,30 @@ import { workflowCallsIn } from "./workflows/code.ts";
 //   makes none. The workflows are created and published before the App's
 //   batch; if the batch is refused, they stay, the creator's own, bound
 //   to nothing and allowed nothing, for them to delete.
+//
+// A built-in's code was reviewed with the platform that ships it, so the
+// release vouches for it (`attested_code`, with the compiler and kit it
+// was reviewed with, `attested_release`): a copy's screens built from
+// exactly that code are approved by the release, not each by an admin
+// (screen-builds.ts, GRA-402). How that could go wrong, and what stops it:
+//
+// - Vouching for code someone changed. It holds only while the version's
+//   code (`codeIdentity`: every file but AGENTS.md, which agents write and
+//   nothing builds or runs) is the code the release vouches for, and the
+//   build's compiler and kit are the ones it was reviewed with: a change
+//   to any file, or a new release's kit, is a build an admin approves as
+//   any. What the release vouched for is approved as the exact build
+//   (its hash), so it stays approved only as long as that build runs.
+// - A claimed origin. `apps.blueprint` is a label any creator may give an
+//   App; only `app_origins`, written in the batch that creates the App
+//   from the blueprint, counts. A marked version vouches for nothing: its
+//   code is a builder's, so copies of it are approved by an admin, and no
+//   approval of its App's screens comes along.
+// - Overriding an admin. The release's approval never replaces a
+//   decision: a build an admin took back stays taken back, and an admin
+//   takes back one the release approved as any other.
+// - A release's word unseen. Each approval is audited
+//   (`app.artifact.attested`), and shows in the review as Grasp's.
 //
 // Marking, unmarking, installing and creating are audited, each in the
 // same batch as its change. Grasp staff neither mark, unmark nor create
@@ -518,6 +547,7 @@ export const createFromBlueprint = async (
     version: 1,
     parent: null,
     tree: tree.tree,
+    code: await codeIdentity(files),
     files: files.size,
     authorId: by.userId,
     message: `Created from the blueprint ${blueprint.name}.`,
@@ -582,12 +612,22 @@ export const createFromBlueprint = async (
     );
   const statements = [
     db.insert(apps).select(appFromBlueprint),
+    // Where it came from, core's record (`app_origins`): only here, with
+    // the App, so no App has one it wasn't created with.
+    db.insert(appOrigins).values({
+      appId: app,
+      blueprintId: blueprint.id,
+      blueprintVersion: blueprint.version,
+      tree: blueprint.tree,
+      createdAt: now,
+    }),
     outboxed(
       db,
       changeEntry(by, "app.created", app, {
         blueprint: blueprint.id,
         fromApp: blueprint.appId,
         fromVersion: blueprint.version,
+        fromTree: blueprint.tree,
       })
     ),
     db.insert(appVersions).values(versionRow),
@@ -717,7 +757,11 @@ export const installBuiltinBlueprint = async (
     fromBlueprintSchema,
     { name: builtin.name, description: builtin.description }
   );
-  const tree = await versionTree(new Map(Object.entries(builtin.files)));
+  const files = new Map(Object.entries(builtin.files));
+  const tree = await versionTree(files);
+  // What the release vouches for (see above): this code, built with this
+  // release's compiler and kit.
+  const attestedCode = await codeIdentity(files);
   const declared = [...builtin.permissions];
   const shipped = blueprintWorkflowSchema.array().parse(builtin.workflows);
   const stored = await blueprintRow(env, id);
@@ -727,7 +771,9 @@ export const installBuiltinBlueprint = async (
       stored.description !== description ||
       stored.tree !== tree.tree ||
       JSON.stringify(stored.permissions) !== JSON.stringify(declared) ||
-      JSON.stringify(stored.workflows) !== JSON.stringify(shipped));
+      JSON.stringify(stored.workflows) !== JSON.stringify(shipped) ||
+      stored.attestedCode !== attestedCode ||
+      stored.attestedRelease !== compilerVersion);
   if (stored === undefined || stored.tree !== tree.tree) {
     await storeBlueprintTree(env, id, tree);
   }
@@ -748,13 +794,18 @@ export const installBuiltinBlueprint = async (
               approved: true,
               permissions: declared,
               workflows: shipped,
+              attestedCode,
+              attestedRelease: compilerVersion,
               markedBy: null,
               markedAt: now,
             })
             .onConflictDoNothing(),
           outboxedIfChanged(
             db,
-            installEntry("blueprint.installed", id, { tree: tree.tree })
+            installEntry("blueprint.installed", id, {
+              tree: tree.tree,
+              release: compilerVersion,
+            })
           ),
         ]
       : [];
@@ -768,12 +819,14 @@ export const installBuiltinBlueprint = async (
             tree: tree.tree,
             permissions: declared,
             workflows: shipped,
+            attestedCode,
+            attestedRelease: compilerVersion,
             markedAt: now,
           })
           .where(
             and(
               eq(blueprints.id, id),
-              sql`(${blueprints.name} IS NOT ${name} OR ${blueprints.description} IS NOT ${description} OR ${blueprints.tree} IS NOT ${tree.tree} OR ${blueprints.permissions} IS NOT ${JSON.stringify(declared)} OR ${blueprints.workflows} IS NOT ${JSON.stringify(shipped)})`
+              sql`(${blueprints.name} IS NOT ${name} OR ${blueprints.description} IS NOT ${description} OR ${blueprints.tree} IS NOT ${tree.tree} OR ${blueprints.permissions} IS NOT ${JSON.stringify(declared)} OR ${blueprints.workflows} IS NOT ${JSON.stringify(shipped)} OR ${blueprints.attestedCode} IS NOT ${attestedCode} OR ${blueprints.attestedRelease} IS NOT ${compilerVersion})`
             )
           ),
         outboxedIfChanged(
@@ -782,6 +835,7 @@ export const installBuiltinBlueprint = async (
             name,
             description,
             tree: tree.tree,
+            release: compilerVersion,
           })
         ),
       ]
