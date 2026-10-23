@@ -23,7 +23,7 @@ import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import type { z } from "zod";
 
-import { auditedBatch, outboxed } from "../audit-outbox.ts";
+import { outboxed } from "../audit-outbox.ts";
 import { inList } from "../db/d1.ts";
 import {
   brainPayloads,
@@ -34,9 +34,9 @@ import {
   uploads,
   versions,
 } from "../db/knowledge/schema.ts";
-import { derivedHmacKey } from "../derived-keys.ts";
 import { appOfEntry } from "./app-entries.ts";
 import { entryNow } from "./apps-collection.ts";
+import { auditedBatch } from "./audit.ts";
 import type { CollectionRow } from "./collections.ts";
 import {
   checkedText,
@@ -59,6 +59,7 @@ import {
   stagePayload,
 } from "./payloads.ts";
 import type { PayloadRef, StagedPayload } from "./payloads.ts";
+import { portsOf } from "./ports.ts";
 import {
   collectionPlan,
   eraseCollectionFromSearchIndex,
@@ -228,7 +229,7 @@ const parseInput = (input: unknown): PurgeInput =>
   knowledgeErrors.parse("knowledge.invalid", purgeInputSchema, input);
 
 const tokenKey = async (env: Env): Promise<CryptoKey> =>
-  await derivedHmacKey(env, "grasp-os knowledge purge token", [
+  await portsOf(env).keys.hmac("grasp-os knowledge purge token", [
     "sign",
     "verify",
   ]);
@@ -254,7 +255,7 @@ const requireToken = async (
     typeof token === "string" ? tokenPattern.exec(token)?.groups : undefined;
   const expiresAt = Number(groups?.expiresAt);
   let valid = false;
-  if (groups?.mac !== undefined && expiresAt > Date.now()) {
+  if (groups?.mac !== undefined && expiresAt > portsOf(env).clock().getTime()) {
     try {
       valid = await crypto.subtle.verify(
         "HMAC",
@@ -277,7 +278,7 @@ const tokenFor = async (
   person: Identity,
   input: PurgeInput
 ): Promise<{ token: string; expiresAt: string }> => {
-  const expiresAt = Date.now() + tokenLifetimeMs;
+  const expiresAt = portsOf(env).clock().getTime() + tokenLifetimeMs;
   const mac = await crypto.subtle.sign(
     "HMAC",
     await tokenKey(env),
@@ -403,7 +404,7 @@ const purgePersonal = async (
   // The versions' payloads, unreferenced once they go, are collected right
   // after: erased from R2 too.
   const released = releasing(db, inArray(versions.documentId, inCollection));
-  await auditedBatch(env, db, [
+  await auditedBatch(portsOf(env), db, [
     rebuildOwed(db, purgeId, { writesDone: true }),
     ...(plan.kind === "keys"
       ? [
@@ -1454,7 +1455,7 @@ const purgeContent = async (
   // next purge to rebuild. A separator another document's text explained
   // at a purge's check that this one then takes the term from is covered
   // so, too.
-  await auditedBatch(env, db, [
+  await auditedBatch(portsOf(env), db, [
     outboxed(
       db,
       purgeEntry(
@@ -1550,7 +1551,7 @@ export const preparePurge = async (
     ({ counts, removed, left } = await contentCounts(env, db, named, matcher));
     hostCopies = await onErase.count((text) => holdsTerm(text, matcher));
   }
-  await auditedBatch(env, db, [
+  await auditedBatch(portsOf(env), db, [
     outboxed(
       db,
       purgeEntry(person, "knowledge.purge.prepared", parsed, scope, {
