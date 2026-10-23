@@ -757,6 +757,148 @@ test("a staff list of 170 people in 9 teams, from Excel, is kept; the same list 
   expect(cspViolations).toStrictEqual([]);
 });
 
+/** A call the page makes to core, as Cap'n Web writes it: its pushes are numbered from 1. */
+const makesCall = /^\["(?:push|stream)",/u;
+
+/** The way the admin settled the difference, in a call to settle it. */
+const settleChoice = /"tickets","(?<holds>both|first|other)"/u;
+
+/** A message on the page's connection, as its fields. */
+const fieldsOf = (message: string | Buffer): unknown[] => {
+  const parsed: unknown = JSON.parse(String(message));
+  if (!Array.isArray(parsed)) {
+    return [];
+  }
+  const fields: unknown[] = parsed;
+  return fields;
+};
+
+/** A piece of work told two ways that nobody could explain, as core would draw it. */
+const ticketsDifference = {
+  work: "tickets",
+  name: "nieuwe tickets afhandelen",
+  team: "Ops",
+  way: "Look up the customer in the client sheet.",
+  other: "Look up the customer in Salesforce.",
+};
+
+test("the admin settles what needs them, and once Grasp gives its go, goes in through the way in", async ({
+  page,
+  cspViolations,
+}) => {
+  const staff = await signInStaff();
+  const { core, api } = apiOf(staff);
+  try {
+    // Waiting for Grasp's go.
+    await api.onboardingGate.close();
+  } finally {
+    core[Symbol.dispose]();
+  }
+
+  // The local stack reaches no model, so it draws no work: core's answer
+  // to what needs the admin is given a difference as the drawing leaves
+  // one, and the admin's settling of it answered as core keeps it
+  // (apps/core/test/onboarding-review.test.ts settles a drawn one).
+  let holds: string | null = null;
+  const settled: string[] = [];
+  const review = () => ({
+    differences: [[{ ...ticketsDifference, holds }]],
+    mapped: 3,
+  });
+  await page.routeWebSocket("**/rpc", (socket) => {
+    const server = socket.connectToServer();
+    let calls = 0;
+    const reviews = new Set<number>();
+    const settles = new Set<number>();
+    socket.onMessage((message) => {
+      const text = String(message);
+      if (makesCall.test(text)) {
+        calls += 1;
+        if (text.includes('"onboarding","review"')) {
+          reviews.add(calls);
+        }
+        const choice = text.includes('"onboarding","settle"')
+          ? settleChoice.exec(text)?.groups?.holds
+          : undefined;
+        if (choice !== undefined) {
+          settles.add(calls);
+          settled.push(choice);
+          holds = choice;
+        }
+      }
+      server.send(message);
+    });
+    server.onMessage((message) => {
+      const [kind, id] = fieldsOf(message);
+      const answers = kind === "resolve" || kind === "reject";
+      if (
+        answers &&
+        typeof id === "number" &&
+        (reviews.has(id) || settles.has(id))
+      ) {
+        socket.send(JSON.stringify(["resolve", id, review()]));
+        return;
+      }
+      socket.send(message);
+    });
+  });
+  await signInTo(page.context(), staff);
+  await page.goto("/setup?step=review");
+
+  // The difference, and letting Grasp's mail through, which this new
+  // browser hasn't settled.
+  await expect(
+    page.getByRole("heading", { name: "2 things for you" })
+  ).toBeVisible();
+  const needs = page.getByRole("region", { name: "What needs you" });
+  await expect(
+    needs.getByText("People do “nieuwe tickets afhandelen” in two ways")
+  ).toBeVisible();
+  // The two ways side by side, never who told which.
+  await expect(
+    needs.getByText("Look up the customer in Salesforce.")
+  ).toBeVisible();
+  await needs.getByRole("button", { name: "Keep both" }).click();
+  await expect(needs.getByText("Settled: Keep both")).toBeVisible();
+  expect(settled).toStrictEqual(["both"]);
+  await needs.getByRole("button", { name: "It’s done" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Nothing needs you" })
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Continue" }).click();
+
+  // Stephen's thanks, and until Grasp's go, that it opens once checked.
+  await expect(
+    page.getByRole("heading", { name: /^Thank you, /u })
+  ).toBeVisible();
+  await expect(
+    page.getByText(/3 pieces of work are mapped and ready for you\.$/u)
+  ).toBeVisible();
+  await expect(
+    page.getByText(
+      "We open your platform once we’ve checked everything with you. You’ll hear from us."
+    )
+  ).toBeVisible();
+
+  const giving = apiOf(staff);
+  try {
+    await giving.api.onboardingGate.open();
+  } finally {
+    giving.core[Symbol.dispose]();
+  }
+  // The page asks again on its own, and the way in begins: the brain's
+  // dots build the dashboard, then let it be.
+  await expect(page.getByText("Your platform is open.")).toBeVisible({
+    timeout: 30_000,
+  });
+  await expect(page).toHaveURL(/\/dashboard$/u, { timeout: 15_000 });
+  await expect(page.getByRole("region", { name: "Workflows" })).toBeVisible();
+  await expect(page.getByText("Opening Grasp")).toHaveCount(0, {
+    timeout: 15_000,
+  });
+  expect(cspViolations).toStrictEqual([]);
+});
+
 /**
  * Writes the onboarding's state straight into its object's local SQLite,
  * as the seed does (scripts/seed/local.ts): what no API can backdate, the

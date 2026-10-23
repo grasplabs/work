@@ -24,16 +24,18 @@ import {
 
 // Calendars, of one mailbox per call, as `/users/{mailbox}` like mail: the
 // same resource, so a permission for invoices@ covers its calendar too.
-// Reads give times in UTC. Writes take and give them in the time zone the
-// call names, the organization's, so the person asked to confirm one reads
-// the times they know.
+// Like mail, the mailbox a read names may be a shared one or a
+// colleague's (`Calendars.Read.Shared`), so reads reach `company`. Reads
+// give times in UTC. Writes take and give them in the time zone the call
+// names, the organization's, so the person asked to confirm one reads the
+// times they know.
 //
 // Writes put events in a person's own calendar and never invite anyone:
 // their input has no attendees at all, and an update refuses an event that
 // has guests or that the mailbox didn't organise, since Outlook would tell
 // every guest of the change. The connector asks for Calendars.ReadWrite,
 // never its `.Shared` form, so Graph lets a write reach only the signed-in
-// person's own calendar.
+// person's own calendar: writes reach `own`.
 
 const users = `${v1}/users/{mailbox}`;
 
@@ -149,6 +151,7 @@ const listEvents = defineTool({
     nextPage: z.string().nullable(),
   }),
   readOnly: true,
+  reach: "company",
   resource: "mailbox",
   routes: [{ method: "GET", host: graphHost, path: `${users}/calendarView` }],
   run: async ({ mailbox, start, end, top, page }) => {
@@ -206,6 +209,7 @@ const getEvent = defineTool({
     }),
   }),
   readOnly: true,
+  reach: "company",
   resource: "mailbox",
   routes: [{ method: "GET", host: graphHost, path: `${users}/events/{event}` }],
   run: async ({ mailbox, event: id }) => {
@@ -381,6 +385,7 @@ const createEvent = defineTool({
   input: createInput,
   output: writtenSchema,
   readOnly: false,
+  reach: "own",
   destructive: false,
   resource: "mailbox",
   routes: [
@@ -453,6 +458,7 @@ const updateEvent = defineTool({
   }),
   output: writtenSchema,
   readOnly: false,
+  reach: "own",
   destructive: true,
   resource: "mailbox",
   routes: [

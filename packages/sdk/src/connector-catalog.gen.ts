@@ -61,6 +61,10 @@ export interface ConnectorCatalog {
     };
   };
   readonly "microsoft-365.calendar@1": {
+    readonly create: {
+      readonly input: { body?: string; end: string; location?: string; mailbox: string; showAs?: "free" | "tentative" | "busy" | "oof" | "workingElsewhere"; start: string; subject: string; timeZone: string };
+      readonly output: { event: { bodyPreview: string | null; end: { dateTime: string; timeZone: string }; id: string; isAllDay: boolean; isCancelled: boolean; location: string | null; mailbox: string; organizer: { address: string | null; name: string | null } | null; showAs: string | null; start: { dateTime: string; timeZone: string }; subject: string | null; webLink: string | null } };
+    };
     readonly get: {
       readonly input: { event: string; mailbox: string };
       readonly output: { event: { attendees: Array<{ address: string | null; name: string | null; response: string | null; type: string | null }>; body: { content: string; contentType: string } | null; bodyPreview: string | null; end: { dateTime: string; timeZone: string }; id: string; isAllDay: boolean; isCancelled: boolean; joinUrl: string | null; location: string | null; mailbox: string; organizer: { address: string | null; name: string | null } | null; showAs: string | null; start: { dateTime: string; timeZone: string }; subject: string | null; webLink: string | null } };
@@ -68,6 +72,10 @@ export interface ConnectorCatalog {
     readonly list: {
       readonly input: { end: string; mailbox: string; page?: string; start: string; top?: number };
       readonly output: { events: Array<{ bodyPreview: string | null; end: { dateTime: string; timeZone: string }; id: string; isAllDay: boolean; isCancelled: boolean; location: string | null; mailbox: string; organizer: { address: string | null; name: string | null } | null; showAs: string | null; start: { dateTime: string; timeZone: string }; subject: string | null; webLink: string | null }>; mailbox: string; nextPage: string | null };
+    };
+    readonly update: {
+      readonly input: { body?: string; end?: string; event: string; location?: string; mailbox: string; showAs?: "free" | "tentative" | "busy" | "oof" | "workingElsewhere"; start?: string; subject?: string; timeZone: string };
+      readonly output: { event: { bodyPreview: string | null; end: { dateTime: string; timeZone: string }; id: string; isAllDay: boolean; isCancelled: boolean; location: string | null; mailbox: string; organizer: { address: string | null; name: string | null } | null; showAs: string | null; start: { dateTime: string; timeZone: string }; subject: string | null; webLink: string | null } };
     };
   };
   readonly "microsoft-365.files@1": {

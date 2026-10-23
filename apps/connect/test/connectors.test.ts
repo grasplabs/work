@@ -1,5 +1,6 @@
 import { connectorManifestSchema } from "@grasp-os/connector-kit/manifest";
 import { signCapability } from "@grasp-os/shared/capability";
+import { toolClassOf } from "@grasp-os/shared/connect";
 import type { ConnectionPerson } from "@grasp-os/shared/connect";
 import { env, exports } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
@@ -130,6 +131,14 @@ const probe = async (
 
 /** A probe's report of a request the egress handler refused. */
 const refused = { status: 403, error: null };
+
+/** Each tool of a bundled suite, by its class. */
+const classesOf = (suite: string) =>
+  Object.fromEntries(
+    Object.entries(nativeConnector(suite)?.manifest.actions ?? {}).map(
+      ([action, declared]) => [action, toolClassOf(declared)]
+    )
+  );
 
 describe("a native connector", () => {
   it("can't write from a lookup of a call's effect: only the action's GETs leave", async () => {
@@ -446,6 +455,28 @@ describe("a native connector", () => {
     expect(api.sent).toStrictEqual([]);
   });
 
+  it("isn't loaded when a tool of its manifest doesn't say whom it reaches", async () => {
+    // A copy of the sample connector, but its items.list has no reach
+    // (test/global-setup.ts): none of its tools runs, that one or another.
+    const connection = await connectionTo("sample-unreached");
+    const outcomes = await Promise.all([
+      outcome(call(connection, "items.list", { mailbox: "a@acme.test" })),
+      outcome(
+        call(
+          connection,
+          "items.send",
+          { mailbox: "a@acme.test", subject: "Paid" },
+          { idempotencyKey: "run-1:send" }
+        )
+      ),
+    ]);
+    expect(outcomes).toStrictEqual([
+      "connect.server_unavailable",
+      "connect.server_unavailable",
+    ]);
+    expect(api.sent).toStrictEqual([]);
+  });
+
   it("isn't loaded for an action it doesn't declare", async () => {
     const connection = await connectionTo("sample");
     await expect(
@@ -462,6 +493,45 @@ describe("a native connector", () => {
         expect.arrayContaining([...(connector?.manifest.scopes ?? [])])
       );
     }
+  });
+
+  it("of each suite gives every tool the class of the furthest it reaches", () => {
+    // Microsoft opens shared and colleagues' mailboxes and calendars, and
+    // Google colleagues' and groups' calendars, so those reach the company;
+    // a Google token reaches only its own mailbox. A suite with a tool
+    // that doesn't say whom it reaches isn't loaded.
+    const calendar = {
+      "calendar.list": "read-company",
+      "calendar.get": "read-company",
+    };
+    const files = {
+      "files.list": "read-company",
+      "files.search": "read-company",
+      "files.read": "read-company",
+    };
+    expect(classesOf("microsoft-365")).toStrictEqual({
+      "mail.list": "read-company",
+      "mail.get": "read-company",
+      "mail.readAttachment": "read-company",
+      "mail.move": "change-company",
+      "mail.send": "reach-others",
+      "mail.createDraft": "change-company",
+      ...calendar,
+      ...files,
+      "calendar.create": "change-own",
+      "calendar.update": "change-own",
+    });
+    expect(classesOf("google-workspace")).toStrictEqual({
+      "mail.list": "read-own",
+      "mail.get": "read-own",
+      "mail.readAttachment": "read-own",
+      "mail.labels": "read-own",
+      "mail.label": "change-own",
+      "mail.send": "reach-others",
+      "mail.createDraft": "change-own",
+      ...calendar,
+      ...files,
+    });
   });
 });
 
@@ -863,7 +933,12 @@ describe("the egress handler", () => {
 // the top or nested, gets past it. Connect sees only top-level keys; the
 // connector refuses the rest itself, before anything goes out.
 const tools = bundled.flatMap(({ manifest }) => {
-  const { name, provider, actions } = connectorManifestSchema.parse(manifest);
+  const parsed = connectorManifestSchema.safeParse(manifest);
+  if (!parsed.success) {
+    // `sample-unreached`, which connect refuses whole (above).
+    return [];
+  }
+  const { name, provider, actions } = parsed.data;
   return Object.keys(actions).map((action) => ({
     connector: name,
     provider,

@@ -817,6 +817,11 @@ export const connectWithKey = async (
   if (provider?.kind !== "api_key" || vault === undefined) {
     throw connectionErrors.create("connection.provider_unavailable");
   }
+  // The HR platform's connection reads the whole company: the
+  // organization's, never a person's own.
+  if (provider.sharedOnly === true && scope !== "shared") {
+    throw connectionErrors.create("connection.invalid");
+  }
   const refuse: Refuse = async (
     reason,
     { outcome = "refused", connectionId } = {}
