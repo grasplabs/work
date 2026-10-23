@@ -23,6 +23,12 @@ test.describe.configure({ mode: "serial" });
 /** Today, as core's plan reads it (UTC). */
 const today = (): string => new Date().toISOString().slice(0, 10);
 
+const dayMs = 24 * 60 * 60 * 1000;
+
+/** The day `days` from today, as core's plan reads it (UTC). */
+const daysFromToday = (days: number): string =>
+  new Date(Date.now() + days * dayMs).toISOString().slice(0, 10);
+
 test("staff put the agreements in place, and the links that waited go out", async ({
   page,
   cspViolations,
@@ -367,6 +373,17 @@ test("the company's admin goes through their onboarding: the staff list, the org
   // Late in the serial run: what it keeps replaces the roster and the plan
   // the tests before it read.
   const admin = await signInStaff();
+  // The first test's plan runs from today with the agreements in, so the
+  // store's alarm would send the links due under it to the staff list saved
+  // below before its organization is confirmed and its own plan made. A
+  // start still to come holds every link back, as before an onboarding's
+  // first plan.
+  const held = apiOf(admin);
+  try {
+    await held.api.onboarding.savePlan({ start: daysFromToday(2) });
+  } finally {
+    held.core[Symbol.dispose]();
+  }
   await signInTo(page.context(), admin);
   // The story on "How this works" is told at once.
   await page.emulateMedia({ reducedMotion: "reduce" });
@@ -509,7 +526,8 @@ test("the company's admin goes through their onboarding: the staff list, the org
   ).toBeVisible();
 
   // Core keeps what was set: the leads, Legal off, the plan from that day
-  // with Ops on its own later day, and links for the three who take part.
+  // with Ops on its own later day, and links for the three who take part,
+  // none out before the start.
   const { core, api } = apiOf(admin);
   try {
     const { roster, plan } = await api.onboarding.view();
