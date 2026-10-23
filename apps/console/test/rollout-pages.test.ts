@@ -17,7 +17,7 @@ import { startRequestOf } from "../src/rollout/start-request.ts";
 import type { StartChoices } from "../src/rollout/start-request.ts";
 import { mockAccess } from "./access.ts";
 import type { AccountState } from "./cloudflare-api-kit.ts";
-import { mockCloudflareApi } from "./cloudflare-api.ts";
+import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { callServerFn, page } from "./pages.ts";
 import { publishRelease } from "./releases.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
