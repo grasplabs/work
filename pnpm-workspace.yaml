@@ -89,6 +89,14 @@ catalog:
   better-auth: 1.7.5
   # The console's Cloudflare Access check.
   jose: 6.2.12
+  # Vercel's Chat SDK (MIT): one bot on Teams, Slack, Discord, WhatsApp and
+  # the rest, its state in Durable Objects (packages/chat). Its adapters
+  # move together; keep them on chat's version.
+  "@chat-adapter/discord": 4.43.0
+  chat: 4.43.0
+  # What the Teams and Slack adapters send through; packages/chat's tests
+  # check its fix against it (src/workerd.ts). On the version they resolve.
+  axios: 1.20.0
 
   # Frontend
   # Babel 7 until babel-plugin-react-compiler supports Babel 8.
