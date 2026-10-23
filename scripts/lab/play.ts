@@ -77,13 +77,13 @@ const changed = (
     : { ...open, text: change.text, record: change.record ?? change.text };
 };
 
-/** What a turn brought, as the page keeps it; `pin` for what was said in a part of the read-back. */
-export const taken = (
-  progress: InterviewProgress,
+/** His notes after a turn, as the page keeps them: what it put right, and what it added; `pin` for what was said in a part of the read-back. */
+export const notesAfter = (
+  notes: readonly InterviewFact[],
   turn: StephenTurn,
   pin?: number
-): InterviewProgress => {
-  const facts = progress.facts.map((fact) => {
+): InterviewFact[] => {
+  const facts = notes.map((fact) => {
     const change = turn.changes.find((each) => each.id === fact.id);
     return change === undefined ? fact : changed(fact, change);
   });
@@ -94,6 +94,15 @@ export const taken = (
     record: fact.record,
     ...(pin === undefined ? {} : { pin }),
   }));
+  return [...facts, ...added];
+};
+
+/** What a turn brought, as the page keeps it; `pin` for what was said in a part of the read-back. */
+export const taken = (
+  progress: InterviewProgress,
+  turn: StephenTurn,
+  pin?: number
+): InterviewProgress => {
   const readBackWants = turn.wants === "file" ? "file" : "readback";
   return {
     ...progress,
@@ -101,7 +110,7 @@ export const taken = (
       turn.say === ""
         ? progress.lines
         : [...progress.lines, { from: "stephen", text: turn.say }],
-    facts: [...facts, ...added],
+    facts: notesAfter(progress.facts, turn, pin),
     phase: pin === undefined ? turn.phase : "readback",
     wants: pin === undefined ? turn.wants : readBackWants,
   };

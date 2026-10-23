@@ -9,6 +9,7 @@ import type {
   OnboardingPlaces,
   PlacesSuite,
 } from "@grasp-os/shared/document-places";
+import type { OnboardingHr } from "@grasp-os/shared/hr";
 import {
   onboardingPeopleMax,
   onboardingTeamsMax,
@@ -75,6 +76,7 @@ import {
 } from "./connect-steps.tsx";
 import { DocumentDrop } from "./document-drop.tsx";
 import type { DocumentRow } from "./document-drop.tsx";
+import { HrLeads } from "./hr-leads.tsx";
 import { InterviewsProgress } from "./interviews-progress.tsx";
 import { LanguageChoice } from "./language-choice.tsx";
 import { PlacePicker } from "./place-picker.tsx";
@@ -138,6 +140,8 @@ export interface SetupData {
   directory: OnboardingDirectory | null;
   /** The suites this deployment signs in with, whose directory and documents can be connected. */
   suites: DirectorySuite[];
+  /** The HR platform connected for the onboarding; null before one is. */
+  hr: OnboardingHr | null;
   /** Where the documents live, connected for the onboarding; null before it is. */
   places: OnboardingPlaces | null;
   /** Grasp's sending domain, which the admin lets through their mail filter. */
@@ -1307,6 +1311,8 @@ const ConfirmOrg = (props: StepProps & { roster: Roster }) => {
   const refresh = useRefresh();
   const [draft, setDraft] = useState<Roster>(props.roster);
   const [saved, setSaved] = useState(false);
+  // What Stephen says of the HR platform, once it was read or could not be.
+  const [fromHr, setFromHr] = useState<Answer>();
   const teams = draft.teams
     .map((team) => ({
       team,
@@ -1339,7 +1345,7 @@ const ConfirmOrg = (props: StepProps & { roster: Roster }) => {
         tone: tones.warm,
         quick: true,
       }
-    : undefined;
+    : fromHr;
   return (
     <>
       <Heading
@@ -1449,6 +1455,15 @@ const ConfirmOrg = (props: StepProps & { roster: Roster }) => {
           {t`This is right`}
         </Primary>
       )}
+      <HrLeads
+        hr={props.data.hr}
+        onAnswer={setFromHr}
+        onRoster={(roster) => {
+          setSaved(false);
+          setDraft(roster);
+        }}
+        roster={draft}
+      />
     </>
   );
 };
@@ -1457,7 +1472,8 @@ const ConfirmOrg = (props: StepProps & { roster: Roster }) => {
  * The organization as Stephen will interview it, on one screen: every
  * team with its head count, who leads it, and whether it takes part. A lead
  * is picked from the team's own people; a team that is off gets no links.
- * What the staff list guessed, the admin puts right here.
+ * What the staff list guessed, the admin puts right here, or takes from
+ * the HR platform (hr-leads.tsx) and checks.
  */
 const Leads = (props: StepProps) => {
   const { t } = useLingui();

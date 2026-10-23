@@ -52,6 +52,7 @@ const said = (
       staff: null,
     },
     directory: null,
+    hr: null,
     suites: [],
     places: null,
     choices: noChoices,
