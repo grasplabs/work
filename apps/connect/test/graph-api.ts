@@ -291,8 +291,16 @@ const tagOf = (made: unknown): string | undefined =>
       (property) => property.id === effectPropertyId
     )?.value;
 
+/** The person's own lists they shared during a test. Cleared before each. */
+const sharedSince = new Set<string>();
+
 /** The To Do list with this id, if Graph has one. */
-const listOf = (id: string) => todoLists.find((list) => list.id === id);
+const listOf = (id: string) => {
+  const list = todoLists.find((each) => each.id === id);
+  return list !== undefined && sharedSince.has(id)
+    ? { ...list, isShared: true }
+    : list;
+};
 
 /**
  * Graph's To Do routes. `ownerOf` says whose a request's token is, if the
@@ -318,7 +326,7 @@ const todoRoutes = (
     route("GET", lists, ({ mailbox, request }) =>
       ownerOf(mailbox, request) === undefined
         ? json(accessDenied, 403)
-        : json({ value: todoLists })
+        : json({ value: todoLists.map(({ id }) => listOf(id)) })
     ),
     route("GET", `${lists}/(?<list>[^/]+)`, ({ mailbox, list, request }) => {
       const owner = opened(mailbox, list, request);
@@ -436,6 +444,7 @@ export const fakeGraph = (providers?: ReturnType<typeof fakeProviders>) => {
   beforeEach(() => {
     tagged.clear();
     todoTasks.clear();
+    sharedSince.clear();
     duringLookup = undefined;
   });
   /** The subject of the token's account, if `mailbox` is that account. */
@@ -516,6 +525,10 @@ export const fakeGraph = (providers?: ReturnType<typeof fakeProviders>) => {
     /** Makes Graph carry out the next write, then lose its answer. */
     loseWriteAnswer: () => {
       fail({ lost: true, writesOnly: true });
+    },
+    /** The person shares their own To Do list `id` with someone. */
+    shareList: (id: string) => {
+      sharedSince.add(id);
     },
     sharePointHost,
   };

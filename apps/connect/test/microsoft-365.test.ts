@@ -1016,6 +1016,46 @@ describe("the Microsoft 365 connector's To Do tools", () => {
       tasks.filter(({ title }) => title === followUp.title).map(({ id }) => id)
     ).toStrictEqual([taskIdOf(found)]);
   });
+
+  it("read no task of a list the person shared after its answer was lost", async () => {
+    const connection = await connected();
+    graph.loseWriteAnswer();
+    await expect(
+      outcome(
+        call(
+          connection,
+          "todo.create",
+          { mailbox: ownMailbox(connection), ...followUp },
+          {
+            resource: ownMailbox(connection),
+            idempotencyKey: "run-6:follow-up",
+          }
+        )
+      )
+    ).resolves.toBe("connect.outcome_unknown");
+    await claimedAgo(connection);
+    graph.shareList(todoListIds.tasks);
+    const tasksRead = () =>
+      graphPaths().filter((path) => path.endsWith("/tasks")).length;
+    const before = tasksRead();
+    await expect(
+      outcome(
+        call(
+          connection,
+          "todo.create",
+          { mailbox: ownMailbox(connection), ...followUp },
+          {
+            resource: ownMailbox(connection),
+            idempotencyKey: "run-6:follow-up",
+          }
+        )
+      )
+    ).resolves.toBe("connect.outcome_unknown");
+    // The list is no longer the person's alone: the task isn't looked for
+    // in it, so the outcome stays unknown. Only the POST that made the task
+    // went to its tasks, before the list was shared.
+    expect(tasksRead()).toBe(before);
+  });
 });
 
 describe("the Microsoft 365 connector's answers", () => {

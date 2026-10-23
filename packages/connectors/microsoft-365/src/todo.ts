@@ -346,8 +346,10 @@ const createTask = defineTool({
     );
     return { output: { mailbox, listId: list, task: taskOf(task) } };
   },
-  // Made, if a task with its key is in the list.
+  // Made, if a task with its key is in the list. The list may have been
+  // shared since the task was made: then it is read no more than run would.
   find: async ({ mailbox, list }, effect) => {
+    await ownList(mailbox, list);
     const task = await findByEffect(mailbox, list, effect.key);
     return task === undefined
       ? null
