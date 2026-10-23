@@ -1,3 +1,4 @@
+import { candidateStates } from "@grasp-os/shared/apps";
 import type { AgentProposer, AppExports } from "@grasp-os/shared/apps";
 import { auditRejectReasons } from "@grasp-os/shared/audit";
 import type { DependencySummary } from "@grasp-os/shared/dependencies";
@@ -657,6 +658,68 @@ export const appVersions = sqliteTable(
   },
   (table) => [primaryKey({ columns: [table.appId, table.version] })]
 );
+
+/**
+ * Candidates: one frozen version of an App on its way to being made
+ * current (spec 22.1, src/app-candidates.ts). A candidate pins the
+ * version, its source tree and the version it expects to replace
+ * (`based_on`, 0 for an App with none current), and moves forward
+ * through its states only (`candidateStates`), each move a compare and
+ * set on its state and, while it runs, on the lease of whoever runs it.
+ * Triggers keep what it pins and the moves it may make (migration 0126).
+ */
+export const appCandidates = sqliteTable(
+  "app_candidates",
+  {
+    id: text().primaryKey(),
+    appId: text("app_id")
+      .notNull()
+      .references(() => apps.id),
+    version: integer().notNull(),
+    sourceTree: text("source_tree").notNull(),
+    basedOn: integer("based_on").notNull(),
+    /** The candidate this one repairs, if it does. */
+    previousCandidate: text("previous_candidate"),
+    state: text({ enum: candidateStates }).notNull(),
+    /** How many runs claimed it, the one running included. */
+    attempt: integer().notNull().default(0),
+    /** Whose run holds it, and until when; null while none does. */
+    lease: text(),
+    leaseUntil: timestamp("lease_until"),
+    /** The code of what ended it, for an outcome. */
+    outcome: text(),
+    /** Its report's SHA-256, once verified (`app_candidate_reports`). */
+    reportHash: text("report_hash"),
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at").notNull(),
+    updatedAt: timestamp("updated_at").notNull(),
+  },
+  (table) => [
+    // One open candidate per version and the version it would replace:
+    // freezing it again finds this one.
+    uniqueIndex("app_candidates_open_idx")
+      .on(table.appId, table.version, table.basedOn)
+      .where(
+        sql`${table.state} IN ('frozen', 'checking', 'building', 'verifying', 'verified')`
+      ),
+    // An App's candidates, newest first, and those a commit supersedes.
+    index("app_candidates_app_idx").on(table.appId, table.createdAt),
+  ]
+);
+
+/**
+ * A verified candidate's report (spec 22.2, step 11): canonical text
+ * holding only identities and hashes core itself computed, stored once
+ * with its SHA-256. Never updated or deleted (migration 0126).
+ */
+export const appCandidateReports = sqliteTable("app_candidate_reports", {
+  candidateId: text("candidate_id")
+    .primaryKey()
+    .references(() => appCandidates.id),
+  report: text().notNull(),
+  hash: text().notNull(),
+  createdAt: timestamp("created_at").notNull(),
+});
 
 /**
  * The sealed release of an App version of spec 8's layout (spec 16;
@@ -3301,6 +3364,52 @@ export const workflowRunFileChunks = sqliteTable(
  * sends each again, backing off, so an instance the engine made before
  * that end never keeps its lease or alarm.
  */
+/**
+ * The events runs of independent workflows emitted (`emit` tasks,
+ * workflows/emitted-events.ts): the transactional outbox of each, written
+ * once, under an ID derived from its run and its task's step, so an
+ * attempt run again writes nothing new. Each names its run, its pinned
+ * binding and catalog contract, and the envelope the host minted: its
+ * source is the emitting run, never what the workflow says. Delivery to
+ * what consumes platform events (system triggers) marks it delivered; until
+ * something consumes them, each waits here. Retention removes an event's
+ * subject and data with its run's details (workflows/retention.ts), and
+ * closes one still undelivered then (its `delivered_at` the removal's
+ * time), so nothing delivers it without its data.
+ */
+export const workflowEmittedEvents = sqliteTable(
+  "workflow_emitted_events",
+  {
+    id: text().primaryKey(),
+    runId: text("run_id")
+      .notNull()
+      .references(() => workflowResourceRuns.id),
+    workflowResourceId: text("workflow_resource_id").notNull(),
+    version: integer().notNull(),
+    taskId: text("task_id").notNull(),
+    binding: text().notNull(),
+    contractId: text("contract_id").notNull(),
+    source: text().notNull(),
+    type: text().notNull(),
+    subject: text(),
+    dataschema: text(),
+    /** The data, canonical JSON; null once retention removed it. */
+    data: text(),
+    /** Whether its run was restricted (restricted.ts), pinned with it. */
+    restricted: integer({ mode: "boolean" }).notNull().default(false),
+    createdAt: timestamp("created_at").notNull(),
+    deliveredAt: timestamp("delivered_at"),
+    detailsRemovedAt: timestamp("details_removed_at"),
+  },
+  (table) => [
+    index("workflow_emitted_events_run").on(table.runId),
+    // The events still to deliver, oldest first.
+    index("workflow_emitted_events_undelivered")
+      .on(table.createdAt)
+      .where(sql`${table.deliveredAt} IS NULL`),
+  ]
+);
+
 export const workflowResourceRunTerminations = sqliteTable(
   "workflow_resource_run_terminations",
   {

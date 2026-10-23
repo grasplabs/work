@@ -6,6 +6,7 @@ import type { DrizzleD1Database } from "drizzle-orm/d1";
 
 import {
   workflowResourceParams,
+  workflowEmittedEvents,
   workflowStartReceipts,
   runLineageChildren,
   runMailCalls,
@@ -422,6 +423,25 @@ export const sweepWorkflowStartDetails = async (
       .update(workflowDecisions)
       .set({ description: "", payload: null, input: null })
       .where(inArray(workflowDecisions.resourceRunId, due)),
+    // What its `emit` tasks sent goes with its details too: the event's
+    // envelope stays, its subject and data don't (emitted-events.ts). One
+    // still undelivered then is closed undelivered, as expired with its
+    // details, never delivered later without its data: its
+    // `delivered_at` set with `details_removed_at` says which it was.
+    db
+      .update(workflowEmittedEvents)
+      .set({
+        subject: null,
+        data: null,
+        detailsRemovedAt: now,
+        deliveredAt: sql`COALESCE(${workflowEmittedEvents.deliveredAt}, ${now.getTime()})`,
+      })
+      .where(
+        and(
+          inArray(workflowEmittedEvents.runId, due),
+          isNull(workflowEmittedEvents.detailsRemovedAt)
+        )
+      ),
     db
       .update(receipts)
       .set({ input: null, params: null, detailsRemovedAt: now })

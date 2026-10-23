@@ -1,4 +1,15 @@
-import type { MemoryPack, RecallInput } from "@grasp-os/shared/brain-api";
+import type {
+  CommandOptions,
+  CommandReceipt,
+  MemoriesGetInput,
+  MemoriesListInput,
+  MemoryPack,
+  MemoryPage,
+  MemoryRecord,
+  ReceiptsGetInput,
+  RecallInput,
+  RememberInput,
+} from "@grasp-os/shared/brain-api";
 import type {
   BacklinkPage,
   Collection,
@@ -40,6 +51,12 @@ import {
   saveDocument,
 } from "./documents.ts";
 import { copySkill, skillCollections } from "./grasp-skills.ts";
+import {
+  memoriesGet,
+  memoriesList,
+  receiptsGet,
+  remember,
+} from "./memories.ts";
 import { preparePurge, purge } from "./purge.ts";
 import { recall } from "./recall.ts";
 import { search } from "./search.ts";
@@ -65,6 +82,33 @@ export class KnowledgeRpc extends CoreRpcTarget implements KnowledgeApi {
     return await withPerson(
       this.#check,
       async (person) => await run({ type: "person", person })
+    );
+  }
+
+  async remember(
+    input: RememberInput,
+    options: CommandOptions
+  ): Promise<CommandReceipt> {
+    return await this.#asReader(
+      async (reader) => await remember(this.#env, reader, input, options)
+    );
+  }
+
+  async receiptsGet(input: ReceiptsGetInput): Promise<CommandReceipt> {
+    return await this.#asReader(
+      async (reader) => await receiptsGet(this.#env, reader, input)
+    );
+  }
+
+  async memoriesGet(input: MemoriesGetInput): Promise<MemoryRecord> {
+    return await this.#asReader(
+      async (reader) => await memoriesGet(this.#env, reader, input)
+    );
+  }
+
+  async memoriesList(input?: MemoriesListInput): Promise<MemoryPage> {
+    return await this.#asReader(
+      async (reader) => await memoriesList(this.#env, reader, input)
     );
   }
 

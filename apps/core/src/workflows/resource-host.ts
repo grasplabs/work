@@ -43,6 +43,7 @@ import type {
 } from "../workflow-builds.ts";
 import { settling } from "./code.ts";
 import type { RunHostCalls, Settled, StepError } from "./code.ts";
+import { emitEvent } from "./emitted-events.ts";
 import {
   childEndSchema,
   childEndType,
@@ -1149,6 +1150,9 @@ const templatesOf = (call: SealedCall): SealedTemplate[] => {
     }
     case "grasp.decision": {
       return [call.recipients, call.prompt, call.input];
+    }
+    case "grasp.emit": {
+      return [call.data, ...(call.subject === undefined ? [] : [call.subject])];
     }
     default: {
       return call satisfies never;
@@ -3159,6 +3163,9 @@ export class ResourceRunHost
     if (call.name === "grasp.decision") {
       return await this.#decided(attempt, task, call);
     }
+    if (call.name === "grasp.emit") {
+      return await this.#emitted(attempt, task, call, passed);
+    }
     const built = await this.#builtCall(attempt, call, passed);
     return await makeCall(this.#env, this.#run.calling, task.id, built, {
       key: stepIdempotencyKey(this.#run.runId, attempt.step.name),
@@ -3167,6 +3174,52 @@ export class ResourceRunHost
         this.#requireCurrent(attempt);
       },
     });
+  }
+
+  /**
+   * `#made`'s work for an emit task: its event, built from what the build
+   * sealed on the task's transformed input, emitted once (emitted-events.ts)
+   * under its step's key. A test run emits nothing. Its answer is its
+   * transformed input: an emit passes its input on.
+   */
+  async #emitted(
+    attempt: StepAttempt,
+    task: Extract<SealedTask, { kind: "call" }>,
+    call: Extract<SealedCall, { name: "grasp.emit" }>,
+    frame: { input: Json; output: Json; size: number }
+  ): Promise<Json> {
+    const build = async (template: SealedTemplate | undefined) =>
+      template === undefined
+        ? undefined
+        : await this.#built(attempt, template, frame, frame.size);
+    const data = await build(call.data);
+    const subject = await build(call.subject);
+    const { dataschema } = call;
+    if (this.#run.calling.candidate !== undefined) {
+      return frame.input;
+    }
+    this.#requireCurrent(attempt);
+    await emitEvent(
+      this.#env,
+      this.#run.calling,
+      {
+        taskId: task.id,
+        // Its step's name, not its task's: a step the same task runs again
+        // under another name (a loop's iteration) emits an event of its own.
+        stepKey: stepIdempotencyKey(this.#run.runId, attempt.name),
+        binding: call.binding,
+        type: call.type,
+        data: data ?? null,
+        ...(subject === undefined ? {} : { subject }),
+        ...(dataschema === undefined ? {} : { dataschema }),
+      },
+      // Asked again just before the event is written: an attempt the
+      // engine let go of, or a run cancelled meanwhile, writes nothing.
+      () => {
+        this.#requireCurrent(attempt);
+      }
+    );
+    return frame.input;
   }
 
   /**
@@ -3345,7 +3398,8 @@ export class ResourceRunHost
           | "grasp.sleepUntil"
           | "grasp.compute"
           | "grasp.action"
-          | "grasp.decision";
+          | "grasp.decision"
+          | "grasp.emit";
       }
     >,
     frame: { input: Json; output: Json; size: number }
