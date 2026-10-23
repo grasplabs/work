@@ -6,6 +6,7 @@ import { noChoices } from "@grasp-os/shared/onboarding-choices";
 import type { SetupChoices } from "@grasp-os/shared/onboarding-choices";
 import type { OnboardingDocument } from "@grasp-os/shared/onboarding-documents";
 import type { GateView } from "@grasp-os/shared/onboarding-gate";
+import type { Organization } from "@grasp-os/shared/organization";
 import { isAdmin } from "@grasp-os/shared/roles";
 import { cn } from "@grasp-os/ui/lib/utils";
 import { useLingui } from "@lingui/react/macro";
@@ -401,12 +402,29 @@ const Setup = () => {
   );
 };
 
+/**
+ * The organization's name, for the message to the team; none when it has
+ * none or core can't say, which leaves the rest of the onboarding as it is.
+ */
+const companyOf = async (
+  organization: () => Promise<Organization>
+): Promise<string | null> => {
+  try {
+    const { name } = await organization();
+    return name.trim() === "" ? null : name;
+  } catch {
+    return null;
+  }
+};
+
 /** What the onboarding reads from core. */
 interface Loaded {
   view: OnboardingView;
   documents: OnboardingDocument[];
   gate: GateView;
   choices: SetupChoices;
+  /** The organization's name, as the message to the team is addressed; null when it has none. */
+  company: string | null;
   directory: OnboardingDirectory | null;
 }
 
@@ -452,14 +470,16 @@ export const Route = createFileRoute("/setup")({
   },
   loader: async ({ context: { core } }) =>
     await loadFromCore(core, async (session): Promise<Loaded> => {
-      const [view, documents, gate, choices, directory] = await Promise.all([
-        session.onboarding.view(),
-        session.onboarding.documents(),
-        session.onboardingGate.view(),
-        session.onboarding.choices(),
-        session.onboarding.directory(),
-      ]);
-      return { view, documents, gate, choices, directory };
+      const [view, documents, gate, choices, company, directory] =
+        await Promise.all([
+          session.onboarding.view(),
+          session.onboarding.documents(),
+          session.onboardingGate.view(),
+          session.onboarding.choices(),
+          companyOf(async () => await session.organization.get()),
+          session.onboarding.directory(),
+        ]);
+      return { view, documents, gate, choices, company, directory };
     }),
   component: Setup,
 });
