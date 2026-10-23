@@ -11086,6 +11086,7 @@ msgstr "Source"
 
 #: src/brain/brain.ts
 #: src/chat/chat-markdown.ts
+#: src/chat/sources.tsx
 #: src/routes/_shell.brain.$noteId.tsx
 msgid "Sources"
 msgstr "Sources"
