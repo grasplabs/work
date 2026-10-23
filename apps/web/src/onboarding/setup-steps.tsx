@@ -56,7 +56,7 @@ import {
   PenLineIcon,
   UploadIcon,
 } from "lucide-react";
-import { useRef, useState } from "react";
+import { useContext, useEffect, useRef, useState } from "react";
 import type { ComponentType } from "react";
 
 import type { BrainScene } from "../brain/dot-brain.tsx";
@@ -67,7 +67,7 @@ import { formatDate, formatList } from "../format.ts";
 import { isLocale, localeNames } from "../i18n.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
-import { usePrepare } from "../voice/voice.ts";
+import { speak, usePrepare, useSaid } from "../voice/voice.ts";
 import { About } from "./about-story.tsx";
 import { DocumentDrop } from "./document-drop.tsx";
 import type { DocumentRow } from "./document-drop.tsx";
@@ -98,7 +98,7 @@ import {
   SupportLink,
   tones,
 } from "./setup-parts.tsx";
-import type { StepVoice } from "./setup-parts.tsx";
+import type { Answer, StepVoice } from "./setup-parts.tsx";
 import {
   closesOn,
   documentSources,
@@ -208,6 +208,7 @@ const useHeadlines = ({
 > => {
   const { t } = useLingui();
   const { admin } = data;
+  const { sponsor } = data.view;
   const named = toolsIn(data.documents).slice(0, 4);
   const tools = formatList(named);
   const { progress } = data.view;
@@ -216,7 +217,11 @@ const useHeadlines = ({
   return {
     welcome: {
       title: t`Hi ${admin}, I’m Stephen`,
-      sentence: t`Before we start, which language do you prefer?`,
+      // The sponsor by name, only when the kickoff gave one.
+      sentence:
+        sponsor === null
+          ? t`Before we start, which language do you prefer?`
+          : t`${sponsor} told me a lot about your company in our first conversation. Before we start, which language do you prefer?`,
       voice: { tone: tones.warm },
     },
     company: {
@@ -273,17 +278,45 @@ const useHeadlines = ({
   };
 };
 
+const sentenceEnd = /(?<=[.?!…])\s+/u;
+
+/**
+ * Whether Stephen has asked which language yet: as he starts the last
+ * sentence of his greeting, or once the step is explained, as with the
+ * sound off; or at once, when a language was `picked` already. Asked, the
+ * languages come in, and stay.
+ */
+const useAsked = ({ title, sentence }: Headline, picked: boolean): boolean => {
+  const { line } = stepLine(title, sentence);
+  const question = line.lastIndexOf(sentence.split(sentenceEnd).at(-1) ?? "");
+  const said = useSaid(line);
+  const { explained } = useContext(Explained);
+  const [asked, setAsked] = useState(picked);
+  if (!asked && (explained || said >= question)) {
+    setAsked(true);
+  }
+  return asked;
+};
+
+/** A language other than the page's was picked on the welcome a moment ago: the welcome drawn anew in it knows. */
+let languagePicked = false;
+
 /** About how long the steps take, for the welcome to say so. */
 const onboardingMinutes = 8;
 
 const Welcome = (props: StepProps) => {
   const { t } = useLingui();
   const lines = useHeadlines(props).welcome;
-  // A language is chosen before anything else, every time: none is marked until you pick one.
-  const [picked, setPicked] = useState(false);
   const { i18n } = useLingui();
+  // A language is chosen before anything else, every time: none is marked
+  // until you pick one, unless the page was just drawn anew for it.
+  const [picked, setPicked] = useState(() => languagePicked);
+  useEffect(() => {
+    languagePicked = false;
+  }, []);
   const chosen = localeNames[isLocale(i18n.locale) ? i18n.locale : "en"];
   const minutes = onboardingMinutes;
+  const asked = useAsked(lines, picked);
   return (
     <>
       {/* The question is the end of what Stephen says, not a line after it; answered, he says so in the new language. */}
@@ -300,14 +333,22 @@ const Welcome = (props: StepProps) => {
         title={lines.title}
         voice={lines.voice}
       />
-      <Onward>
+      <div
+        className={cn(
+          "transition-all duration-700 ease-out",
+          !asked && "-translate-y-2 opacity-0"
+        )}
+        inert={!asked}
+      >
         <LanguageChoice
-          onPick={() => {
+          onPick={(locale) => {
             setPicked(true);
+            // Another language draws the whole page anew (main.tsx), this welcome with it.
+            languagePicked = locale !== i18n.locale;
           }}
           picked={picked}
         />
-      </Onward>
+      </div>
       <Primary
         onClick={() => {
           props.go("about");
@@ -353,10 +394,12 @@ const shareDocument = async (
   core: ReturnType<typeof useCore>,
   file: File,
   locale: InterviewLocale
-): Promise<{ shared: true } | { shared: false; error: unknown }> => {
+): Promise<
+  { shared: true; kept: OnboardingDocument } | { shared: false; error: unknown }
+> => {
   try {
     const bytes = new Uint8Array(await file.arrayBuffer());
-    await core.withSession(
+    const kept = await core.withSession(
       async (session) =>
         await session.onboarding.shareDocument({
           locale,
@@ -364,7 +407,7 @@ const shareDocument = async (
           bytes,
         })
     );
-    return { shared: true };
+    return { shared: true, kept };
   } catch (error) {
     return { shared: false, error };
   }
@@ -382,6 +425,8 @@ const Company = (props: StepProps) => {
   const refresh = useRefresh();
   const [reading, setReading] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
+  // Read on this visit: then Stephen says so, even when a list was there as the step arrived.
+  const [fresh, setFresh] = useState(false);
   const list = useRef<HTMLInputElement>(null);
   const { roster } = props.data.view;
   const people = roster?.people.length ?? 0;
@@ -423,21 +468,31 @@ const Company = (props: StepProps) => {
       );
       if (saved !== undefined) {
         await refresh();
+        setFresh(true);
       }
     }
     setReading(false);
   };
-  let answer: { text: string } | undefined;
+  // Said plainly, and quick: the counts are only known as he says them.
+  let answer: Answer | undefined;
   if (problem !== null) {
-    answer = { text: problem };
+    answer = { text: problem, announce: true, tone: tones.plain, quick: true };
   } else if (roster !== null) {
     answer = {
       text: t`Thank you. From your staff list I can see ${people} people in ${teams} teams.`,
+      announce: fresh,
+      tone: tones.plain,
+      quick: true,
     };
   }
   return (
     <>
-      <Heading answer={answer} sentence={lines.sentence} title={lines.title} />
+      <Heading
+        answer={answer}
+        sentence={lines.sentence}
+        title={lines.title}
+        voice={lines.voice}
+      />
       {roster === null ? (
         <Onward>
           <Button
@@ -583,11 +638,27 @@ const useProblemOf = (): ((error: unknown) => string) => {
   };
 };
 
+/** A document's question as Stephen asks it: with what the document is about. */
+const questionLine = ({ reading: { about, ask } }: OnboardingDocument) =>
+  `${about} ${ask?.question ?? ""}`.trim();
+
+/** What Stephen says when core could not read a document: an old format has a way out of its own. */
+const useSaidProblemOf = (): ((name: string, error: unknown) => string) => {
+  const { t } = useLingui();
+  return (name, error) =>
+    documentErrors.codeOf(error) === "document.old_format"
+      ? t`I can’t read ${name}: it’s in an old format. As a PDF or a newer file, I can.`
+      : t`I couldn’t read ${name}. Add it again, or as a PDF.`;
+};
+
 /**
  * Documents that explain how they work. Each is read the moment it is
- * dropped, for real, by core: every row says what it is about. Only what
- * nobody but the one who shared it can say, Stephen asks at once, with the
- * answers to pick from.
+ * dropped, for real, by core: Stephen thanks them at the drop, then says
+ * what he took from the first one, and every row says what it is about.
+ * Only what nobody but the one who shared it can say, he asks at once,
+ * with the answers to pick from. Such a question comes with what its
+ * document is about, so then he sums up nothing else first; and one
+ * answered on screen before he gets to it, he does not ask.
  */
 const Documents = (props: StepProps) => {
   const { t, i18n } = useLingui();
@@ -596,10 +667,49 @@ const Documents = (props: StepProps) => {
   const refresh = useRefresh();
   const { run, busy, failure } = useCoreAction();
   const problemOf = useProblemOf();
+  const saidProblemOf = useSaidProblemOf();
   const [pending, setPending] = useState<Pending[]>([]);
   const [fresh, setFresh] = useState(false);
+  // Whether the step is still on screen: a reading that ends after it is left is kept, but not said.
+  const here = useRef(true);
+  useEffect(() => {
+    here.current = true;
+    return () => {
+      here.current = false;
+    };
+  }, []);
+  // How many documents he has told about on this visit: the first he sums up out loud, the rest say it in their rows.
+  const told = useRef(0);
+  // His questions about documents read on this visit, by document, until they are answered.
+  const asking = useRef(new Set<string>());
   const kept = props.data.documents;
   const locale: InterviewLocale = isLocale(i18n.locale) ? i18n.locale : "en";
+  // His thanks and his "Got it." are fetched as the step opens, so each follows what was done without a pause.
+  const thanks = t`Thank you. I’m reading them now, and you can add more at any time.`;
+  const gotIt = t`Got it.`;
+  usePrepare(thanks, { tone: tones.warm });
+  usePrepare(gotIt, { tone: tones.plain });
+  const tell = (read: OnboardingDocument) => {
+    const { about, ask } = read.reading;
+    // A question only they can answer is always asked, with what its document is about, unless it was answered by then; otherwise only the first is summed up, and not while a question waits to be asked.
+    if (ask !== null && read.answer === null) {
+      asking.current.add(read.id);
+      speak(questionLine(read), {
+        after: true,
+        still: () => here.current && asking.current.has(read.id),
+        tone: tones.even,
+        quick: true,
+      });
+    } else if (told.current === 0) {
+      speak(about, {
+        after: true,
+        still: () => here.current && asking.current.size === 0,
+        tone: tones.even,
+        quick: true,
+      });
+    }
+    told.current += 1;
+  };
   // Core keeps two documents of the same name as two: each row is its own upload, by an id of its own.
   const take = (files: File[]) => {
     const added = files.map((file, at): Pending => ({
@@ -623,6 +733,9 @@ const Documents = (props: StepProps) => {
         if (result.shared) {
           await refresh();
           setPending((now) => now.filter((row) => row.key !== each.key));
+          if (here.current) {
+            tell(result.kept);
+          }
           return;
         }
         const problem = problemOf(result.error);
@@ -631,22 +744,42 @@ const Documents = (props: StepProps) => {
             row.key === each.key ? { ...row, state: "failed", problem } : row
           )
         );
+        speak(saidProblemOf(each.name, result.error), {
+          after: true,
+          still: () => here.current,
+          tone: tones.plain,
+          quick: true,
+        });
       })();
     }
   };
-  // His one question about a document, while it waits for an answer: answered with a press.
-  const open = kept.find(
+  // His one question about a document, while it waits for an answer: answered with a press. The first shared is asked first (core lists the newest first).
+  const open = kept.findLast(
     (each) => each.reading.ask !== null && each.answer === null
   );
   const answer = async (option: string) => {
     if (open === undefined) {
       return;
     }
+    asking.current.delete(open.id);
     const saved = await run(
       async (session) =>
         await session.onboarding.answerDocument(open.id, option)
     );
     if (saved !== undefined) {
+      // His answer cuts what waited to be said: a question still open comes with it.
+      const next = kept.findLast(
+        (each) => each.id !== open.id && asking.current.has(each.id)
+      );
+      if (next === undefined) {
+        speak(gotIt, { soon: true, tone: tones.plain });
+      } else {
+        speak(`${gotIt} ${questionLine(next)}`, {
+          soon: true,
+          tone: tones.even,
+          quick: true,
+        });
+      }
       await refresh();
     }
   };
@@ -668,13 +801,12 @@ const Documents = (props: StepProps) => {
       <Heading
         answer={
           fresh && count + reading.length > 0
-            ? {
-                text: t`Thank you. I’m reading them now, and you can add more at any time.`,
-              }
+            ? { text: thanks, tone: tones.warm }
             : undefined
         }
         sentence={lines.sentence}
         title={lines.title}
+        voice={lines.voice}
       />
       <Onward>
         <DocumentDrop

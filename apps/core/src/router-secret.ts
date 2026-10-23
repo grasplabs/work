@@ -12,7 +12,7 @@ type RouterSecretCheck =
  * flag with `wrangler dev --var`; it is never set in wrangler.jsonc. Even when
  * set, it only applies to requests addressed to this machine.
  */
-const isLocalDevRequest = (request: Request, env: Env): boolean =>
+export const isLocalDevRequest = (request: Request, env: Env): boolean =>
   env.DEV_SKIP_ROUTER_SECRET === "true" &&
   loopbackHosts.has(new URL(request.url).hostname);
 

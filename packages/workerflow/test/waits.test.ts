@@ -8,9 +8,12 @@ import { describe, expect, it } from "vite-plus/test";
 import { SerializationError, encode } from "../src/codec.ts";
 import type { InstanceEvent } from "../src/instance.ts";
 import {
+  journalSchemaVersion,
   maxEventPayloadBytes,
   maxInboxBytes,
   maxInboxEvents,
+  maxSenderBytes,
+  maxSenderEvents,
 } from "../src/journal.ts";
 import { WorkflowRun } from "../src/run.ts";
 import {
@@ -540,7 +543,8 @@ const sendAll = async (
   id: string,
   payloads: string[],
   reserved = false,
-  type = "spam"
+  type = "spam",
+  sender: string | null = null
 ): Promise<string[]> =>
   await runInDurableObject(runObject("approval", id), async (run) => {
     if (!(run instanceof WorkflowRun)) {
@@ -554,6 +558,7 @@ const sendAll = async (
         payload,
         key: null,
         reserved,
+        sender,
       });
       outcomes.push(outcome);
     }
@@ -663,6 +668,102 @@ describe("an inbox", () => {
       kept: events.length,
       counts: [row.event_count, row.event_bytes],
     }).toStrictEqual({ kept: 1, counts: [0, 0] });
+  });
+});
+
+describe("a sender's share of an inbox", () => {
+  it("refuses one sender past its share of the count, and still takes another sender's events and the host's own", async () => {
+    const id = newId();
+    await workflow("approval").create({ id });
+
+    const filled = await sendAll(
+      id,
+      Array.from({ length: maxSenderEvents + 1 }, () => encode(null)),
+      false,
+      "spam",
+      "screen-a"
+    );
+    const other = await sendAll(id, [encode(null)], false, "spam", "screen-b");
+    const reserved = await sendAll(
+      id,
+      [encode(null)],
+      true,
+      "spam",
+      "screen-a"
+    );
+    const unnamed = await sendAll(id, [encode(null)]);
+
+    expect({
+      accepted: filled.filter((outcome) => outcome === "accepted").length,
+      last: filled.at(-1),
+      other,
+      reserved,
+      unnamed,
+    }).toStrictEqual({
+      accepted: maxSenderEvents,
+      last: "full",
+      other: ["accepted"],
+      reserved: ["accepted"],
+      unnamed: ["accepted"],
+    });
+  });
+
+  it("refuses one sender past its share of the bytes, before the inbox is full", async () => {
+    const id = newId();
+    await workflow("approval").create({ id });
+    const bytes = 1_000_000;
+    const fit = Math.floor(maxSenderBytes / bytes);
+
+    const outcomes = await sendAll(
+      id,
+      Array.from({ length: fit + 1 }, () => payloadOf(bytes)),
+      false,
+      "spam",
+      "screen-a"
+    );
+    const other = await sendAll(
+      id,
+      [payloadOf(bytes)],
+      false,
+      "spam",
+      "screen-b"
+    );
+
+    expect({
+      accepted: outcomes.filter((outcome) => outcome === "accepted").length,
+      last: outcomes.at(-1),
+      other,
+    }).toStrictEqual({ accepted: fit, last: "full", other: ["accepted"] });
+    expect(fit * bytes).toBeLessThan(maxInboxBytes);
+  });
+
+  it("upgrades a version-11 journal as it first reads it, and holds senders to their shares from then", async () => {
+    const id = newId();
+    await workflow("approval").create({ id });
+    await runInDurableObject(runObject("approval", id), (_, state) => {
+      state.storage.sql.exec("UPDATE run SET schema = 11");
+      state.storage.sql.exec("DROP INDEX events_sender");
+      state.storage.sql.exec("ALTER TABLE events DROP COLUMN sender");
+    });
+
+    const outcomes = await sendAll(
+      id,
+      Array.from({ length: maxSenderEvents + 1 }, () => encode(null)),
+      false,
+      "spam",
+      "screen-a"
+    );
+    const { run } = await journalOf("approval", id);
+
+    expect({
+      schema: run.schema,
+      accepted: outcomes.filter((outcome) => outcome === "accepted").length,
+      last: outcomes.at(-1),
+    }).toStrictEqual({
+      schema: journalSchemaVersion,
+      accepted: maxSenderEvents,
+      last: "full",
+    });
   });
 });
 

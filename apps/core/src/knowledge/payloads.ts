@@ -13,6 +13,7 @@ import {
   brainPayloads,
   versions,
 } from "../db/knowledge/schema.ts";
+import { portsOf } from "./ports.ts";
 
 // The texts of Knowledge's versions: each an immutable object in the
 // deployment's private `BRAIN_OBJECTS` bucket (EU jurisdiction, set when
@@ -92,7 +93,7 @@ const intact = async (
   sha256: string,
   bytes: number
 ): Promise<boolean> => {
-  const head = await env.BRAIN_OBJECTS.head(key);
+  const head = await portsOf(env).blobs.head(key);
   const stored = head?.checksums.sha256;
   return (
     head !== null &&
@@ -160,9 +161,9 @@ export const stagePayload = async (
     sha256,
     bytes: body.byteLength,
     state: "pending",
-    createdAt: new Date(),
+    createdAt: portsOf(env).clock(),
   });
-  await env.BRAIN_OBJECTS.put(key, body, { sha256 });
+  await portsOf(env).blobs.put(key, body, { sha256 });
   return { key, collectionId, sha256, bytes: body.byteLength, fresh: true };
 };
 
@@ -267,7 +268,7 @@ export const readPayload = async (
   env: Env,
   ref: PayloadRef
 ): Promise<string> => {
-  const object = await env.BRAIN_OBJECTS.get(ref.key);
+  const object = await portsOf(env).blobs.get(ref.key);
   if (object === null) {
     throw unavailable(ref, "missing");
   }
@@ -291,7 +292,7 @@ export const readPayload = async (
 export const collectPayloads = async (
   env: Env,
   db: DrizzleD1Database,
-  now = Date.now()
+  now = portsOf(env).clock().getTime()
 ): Promise<number> => {
   await db
     .update(brainPayloads)
@@ -318,7 +319,7 @@ export const collectPayloads = async (
     const keys = page.map(({ key }) => key);
     try {
       // oxlint-disable-next-line no-await-in-loop -- a page at a time
-      await env.BRAIN_OBJECTS.delete(keys);
+      await portsOf(env).blobs.delete(keys);
     } catch (error) {
       // Thrown, so a purge that called it fails rather than say the text
       // is gone; its rows stay `collecting`, for the next run or sweep.

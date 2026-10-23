@@ -1,14 +1,16 @@
 import { usesMaxEntries } from "@grasp-os/shared/operation-limits";
 
 import type { DatabaseReader, DatabaseWriter } from "./database.ts";
-import { referenceData } from "./references.ts";
+import { eventReferenceData, referenceData } from "./references.ts";
 import type {
   ArgsOf,
   Callable,
+  EventDataOf,
   ReferenceKind,
   ReferenceVisibility,
   ReturnOf,
   StreamingFunction,
+  WorkflowEventReference,
 } from "./references.ts";
 import { isResource, isWorkflowResource } from "./resources.ts";
 import type {
@@ -47,7 +49,9 @@ import type {
 //   after it returns, and may run the App's queries in the same staged
 //   state (`ctx.runQuery`); it has no resources, so no network, and the
 //   only thing it starts is a workflow it lists, after it commits
-//   (`ctx.afterCommit.start`), as part of that commit;
+//   (`ctx.afterCommit.start`), as part of that commit, and the only event
+//   it sends is one it lists, to a run of the App's own, likewise
+//   (`ctx.notify`, spec 10.7.4);
 // - an action has no `db` at all: it composes the App's functions
 //   (`runQuery`, `runMutation`, `runAction`), each its own invocation,
 //   and reaches outside capabilities only through `ctx.resources`, for
@@ -94,10 +98,39 @@ export type AnyReference = FunctionReference;
 export type { ArgsOf, ReturnOf } from "./references.ts";
 
 /**
- * What a function's `uses` may list: functions of the App, resources, and
- * the workflows it starts.
+ * What a function's `uses` may list: functions of the App, resources, the
+ * workflows it starts, and the events of the App's workflows it notifies
+ * runs of (`workflows.<workflow>.events.<alias>`, a mutation's only).
  */
-export type Use = AnyReference | AnyResource | AnyWorkflow;
+export type Use = AnyReference | AnyResource | AnyWorkflow | AnyWorkflowEvent;
+
+/** Any generated event reference, whatever its data. */
+export type AnyWorkflowEvent = WorkflowEventReference<
+  string,
+  string,
+  string,
+  // oxlint-disable-next-line typescript/no-explicit-any -- the data is only read, by `EventDataOf`
+  any
+>;
+
+/** The event references among `Uses`. */
+type UsedEvent<Uses extends readonly Use[]> = Extract<
+  Uses[number],
+  AnyWorkflowEvent
+>;
+
+/**
+ * `ctx.notify`: stages the event `event` (one `Uses` lists) for run
+ * `runId` of its workflow, with `data` as that event declares it, never
+ * inferred from the call.
+ */
+type Notify<Uses extends readonly Use[]> = <Event extends UsedEvent<Uses>>(
+  event: Event,
+  notification: {
+    readonly runId: string;
+    readonly data: NoInfer<EventDataOf<Event>>;
+  }
+) => void;
 
 /** Any workflow declaration, whatever its input. */
 // oxlint-disable-next-line typescript/no-explicit-any -- the input is only read, by `WorkflowInput`
@@ -224,6 +257,17 @@ export interface MutationCtx<
   readonly db: DatabaseWriter<Tables>;
   readonly runQuery: RunQuery<Uses>;
   readonly afterCommit: AfterCommit<Uses>;
+  /**
+   * Notifies run `runId` of one of the App's workflows with an event its
+   * `uses` lists (spec 10.7.4): staged with the mutation's writes, in the
+   * same transaction, and delivered to the run's inbox from the store's
+   * outbox after the commit, once. The host checks the run, the data and
+   * the App's grant to send as the mutation runs, and fails the mutation
+   * if any doesn't hold; a mutation that fails, is rolled back or is
+   * superseded notifies nothing. Its success is the local commit, never
+   * the run taking the event, which the host checks again as it delivers.
+   */
+  readonly notify: Notify<Uses>;
 }
 
 /**
@@ -342,7 +386,10 @@ export interface MutationDefinition<
 > {
   readonly args: Shape;
   readonly returns: Returns;
-  /** The queries it runs and the workflows it starts; none unless listed. */
+  /**
+   * The queries it runs, the workflows it starts and the events it
+   * notifies runs of; none unless listed.
+   */
   readonly uses?: Uses;
   readonly handler: (
     ctx: MutationCtx<Tables, Uses>,
@@ -457,10 +504,11 @@ const usesOf = (uses: unknown): readonly Use[] => {
       !isServerFunction(use) &&
       !isResource(use) &&
       !isWorkflowResource(use) &&
-      referenceData(use) === undefined
+      referenceData(use) === undefined &&
+      eventReferenceData(use) === undefined
     ) {
       return refuse(
-        "`uses` lists the App's server functions, their generated references and `resource` declarations, never IDs or names."
+        "`uses` lists the App's server functions, their generated references, `resource` declarations and its workflows' generated event references, never IDs or names."
       );
     }
     // SAFETY: one of those just checked: a definition, a resource or

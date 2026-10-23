@@ -3,7 +3,10 @@ import type { AgentProposer, AppExports } from "@grasp-os/shared/apps";
 import { auditRejectReasons } from "@grasp-os/shared/audit";
 import type { DependencySummary } from "@grasp-os/shared/dependencies";
 import type { Json } from "@grasp-os/shared/json";
-import type { DeclaredPermission } from "@grasp-os/shared/permissions";
+import type {
+  BlueprintWorkflow,
+  DeclaredPermission,
+} from "@grasp-os/shared/permissions";
 import { artifactDecisions } from "@grasp-os/shared/screen-trust";
 import { signalKinds } from "@grasp-os/shared/signals";
 import type {
@@ -433,6 +436,19 @@ export const apps = sqliteTable("apps", {
   blueprint: text(),
   currentVersion: integer("current_version"),
   pendingVersion: integer("pending_version"),
+  /**
+   * Where it is in its life (app-status.ts): a new App is a draft, open to
+   * its builders alone, until one publishes it.
+   */
+  status: text({ enum: ["draft", "published", "archived"] })
+    .notNull()
+    .default("draft"),
+  /** When its status last changed, and who changed it; null until then. */
+  statusChangedAt: timestamp("status_changed_at"),
+  statusChangedBy: text("status_changed_by", { mode: "json" }).$type<{
+    userId: string;
+    staff: boolean;
+  }>(),
   createdAt: timestamp("created_at").notNull(),
 });
 
@@ -585,6 +601,15 @@ export const blueprints = sqliteTable(
      * each waiting for an admin there.
      */
     permissions: text({ mode: "json" }).$type<DeclaredPermission[]>().notNull(),
+    /**
+     * The independent workflows each App created from it gets (JSON,
+     * `BlueprintWorkflow[]`): a built-in's, from the release; a marked
+     * version ships none.
+     */
+    workflows: text({ mode: "json" })
+      .$type<BlueprintWorkflow[]>()
+      .notNull()
+      .default([]),
     /** Who marked it; null for a built-in. */
     markedBy: text("marked_by"),
     /** When it was marked, or last installed changed. */
@@ -3275,6 +3300,12 @@ export const workflowResourceRuns = sqliteTable(
     parentRunId: text("parent_run_id"),
     rootRunId: text("root_run_id"),
     depth: integer().notNull().default(0),
+    /**
+     * When the archive of the App that started it asked it to stop
+     * (app-status.ts, `stopRunsStartedBy`): asked once, never again by a
+     * later pass while the engine ends it.
+     */
+    stopRequestedAt: timestamp("stop_requested_at"),
   },
   (table) => [
     // A run's children that haven't ended, for its end to stop them.

@@ -5,12 +5,19 @@ import type {
   CreatedFromBlueprint,
   FromBlueprint,
 } from "@grasp-os/shared/apps";
+import { actorOf } from "@grasp-os/shared/audit";
 import type { AuditEntry } from "@grasp-os/shared/audit";
 import { appIdSchema, blueprintIdSchema } from "@grasp-os/shared/ids";
 import type { BlueprintId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
+import { blueprintWorkflowSchema } from "@grasp-os/shared/permissions";
+import type { BlueprintWorkflow } from "@grasp-os/shared/permissions";
 import { canBuild, requireBuilder, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
+import {
+  workflowNamespace,
+  workflowResourceErrors,
+} from "@grasp-os/shared/workflow-resources";
 import { and, asc, desc, eq, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
@@ -23,6 +30,7 @@ import {
   blueprintFiles,
   changeEntry,
   deleteOtherBlueprintTrees,
+  editableApp,
   findVersion,
   storeBlueprintTree,
   storeTree,
@@ -37,6 +45,7 @@ import type { Acting } from "./auth/identity.ts";
 import {
   apps,
   appVersions,
+  appWorkflowBindings,
   blueprints,
   permissions,
 } from "./db/core/schema.ts";
@@ -48,10 +57,17 @@ import {
   workflowBindingKinds,
   declaredRequests,
   toPermission,
+  workflowStartRequests,
 } from "./permissions.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
+import { ensureReleaseContract } from "./workflow-catalog.ts";
+import {
+  createWorkflowResource,
+  definitionProblems,
+  publishWorkflowVersion,
+} from "./workflow-resources.ts";
 import { workflowCallsIn } from "./workflows/code.ts";
 
 // Blueprints: code to create Apps from, each its own record. A builder of
@@ -80,6 +96,39 @@ import { workflowCallsIn } from "./workflows/code.ts";
 // code is copied as it is, taken to hold no data: builders must not put
 // data into code.
 //
+// A built-in may also ship independent workflows (`workflows`, from the
+// release's `blueprint.json`): each App created from it gets one of each,
+// bound to it under the workflow's alias. Neither installing a built-in
+// nor creating from it grants authority (GRA-402). Threat model, and how
+// each is closed:
+//
+// - Authority copied with the code: each workflow is created fresh, the
+//   creator's own, its ID minted here, and its first version published
+//   from the release's definition as the creator's own publication. It
+//   holds no approval: each catalog binding it declares (a model, a store
+//   operation) serves nothing until an admin approves it for that very
+//   version (workflow-bindings.ts). The App's permission to start it is
+//   a request that waits for an admin, as any other. Nothing is copied
+//   from another App or workflow, and no approval, grant or run written.
+// - The definition naming another workflow: its namespace and name are
+//   the new workflow's own, set before it is published, and publication
+//   refuses text naming anything else (`workflow.identity_mismatch`);
+//   what it binds resolves as any publication of the creator's would.
+// - The App's binding as a grant: it pins the version and nothing more
+//   (app-workflow-bindings.ts), and lands in the batch that creates the
+//   App, so the App is never seen without it.
+// - A marked blueprint carrying its App's workflows: it ships none; a
+//   copy's builders bind the workflows they want themselves.
+// - Workflows made in bulk or without trace: each counts toward the
+//   creator's quota (`workflowResourcesPerPerson`), and is audited as
+//   any creation and publication; its name is the blueprint's and the
+//   alias's with a random suffix, so copies never collide.
+// - A failure halfway: every definition is checked as publication checks
+//   it before any workflow is made, so a definition that wouldn't publish
+//   makes none. The workflows are created and published before the App's
+//   batch; if the batch is refused, they stay, the creator's own, bound
+//   to nothing and allowed nothing, for them to delete.
+//
 // Marking, unmarking, installing and creating are audited, each in the
 // same batch as its change. Grasp staff neither mark, unmark nor create
 // from blueprints: which Apps get copied is the client's decision, and
@@ -105,6 +154,118 @@ const requireNotStaff = (by: Pick<Acting, "staff">): void => {
   if (by.staff) {
     throw roleErrors.create("role.forbidden");
   }
+};
+
+/** Random hex characters a shipped workflow's name ends with. */
+const workflowSuffixLength = 8;
+
+/** Longest workflow name (`workflowNameSchema`). */
+const workflowNameMax = 63;
+
+/**
+ * The name of the workflow a copy of blueprint `blueprint` gets for its
+ * workflow `alias`: both, and a random suffix, as no name is ever given
+ * to two workflows.
+ */
+const shippedWorkflowName = (blueprint: string, alias: string): string => {
+  const suffix = crypto
+    .randomUUID()
+    .replaceAll("-", "")
+    .slice(0, workflowSuffixLength);
+  const prefix = `${blueprint}-${alias}`.slice(
+    0,
+    workflowNameMax - workflowSuffixLength - 1
+  );
+  return `${prefix}-${suffix}`;
+};
+
+/**
+ * `definition` as the workflow named `name` publishes it: its document's
+ * namespace and name are that workflow's, whatever the release wrote.
+ * Text that isn't a definition is left as it is, for publication to
+ * refuse.
+ */
+const definitionNamed = (definition: string, name: string): string => {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(definition);
+  } catch {
+    return definition;
+  }
+  if (
+    typeof parsed !== "object" ||
+    parsed === null ||
+    !("document" in parsed) ||
+    typeof parsed.document !== "object" ||
+    parsed.document === null
+  ) {
+    return definition;
+  }
+  return JSON.stringify({
+    ...parsed,
+    document: { ...parsed.document, namespace: workflowNamespace, name },
+  });
+};
+
+/** A workflow a copy got, created and published for it. */
+interface ShippedWorkflow {
+  alias: string;
+  binding: string;
+  workflowId: string;
+  version: number;
+}
+
+/**
+ * Creates and publishes, for `by`, a workflow of their own of each one
+ * `shipped` lists (see above): created and published one at a time, as
+ * `by` would themselves.
+ */
+const createShippedWorkflows = async (
+  env: Env,
+  by: Acting,
+  blueprint: string,
+  shipped: readonly BlueprintWorkflow[]
+): Promise<ShippedWorkflow[]> => {
+  const named = shipped.map(({ alias, binding, definition }) => {
+    const name = shippedWorkflowName(blueprint, alias);
+    return {
+      alias,
+      binding,
+      name,
+      definition: definitionNamed(definition, name),
+    };
+  });
+  // Every definition checked as its publication will check it, before any
+  // workflow is made: a creation counts toward the creator's quota for
+  // good, deleted or not, so none is made for a definition that wouldn't
+  // publish.
+  for (const { name, definition } of named) {
+    // oxlint-disable-next-line no-await-in-loop -- a few, one at a time
+    const problems = await definitionProblems(env, by, { name }, definition);
+    if (problems.length > 0) {
+      throw workflowResourceErrors.create("workflow.definition_invalid", {
+        // Each a code, a pointer and fixed text, as publication refuses it.
+        problems: problems.map((problem) => ({ ...problem })),
+      });
+    }
+  }
+  const created: ShippedWorkflow[] = [];
+  for (const { alias, binding, name, definition } of named) {
+    // oxlint-disable-next-line no-await-in-loop -- a few, one at a time
+    const workflow = await createWorkflowResource(env, by, name);
+    // oxlint-disable-next-line no-await-in-loop -- after its creation
+    const published = await publishWorkflowVersion(env, by, workflow.id, {
+      definition,
+      basedOn: null,
+    });
+    created.push({
+      alias,
+      binding,
+      workflowId: workflow.id,
+      version: published.version,
+    });
+  }
+  return created;
 };
 
 const toBlueprint = (row: Row): Blueprint => ({
@@ -176,7 +337,7 @@ export const markBlueprint = async (
   app: unknown,
   version: unknown
 ): Promise<Blueprint> => {
-  const found = await appFor(env, by, app, "builder");
+  const found = await editableApp(env, by, app);
   requireNotStaff(by);
   const row = await findVersion(env, found.id, version);
   const db = drizzle(env.DB);
@@ -246,7 +407,7 @@ export const unmarkBlueprint = async (
   if (row.appId === null) {
     throw roleErrors.create("role.forbidden");
   }
-  const found = await appFor(env, by, row.appId, "builder");
+  const found = await editableApp(env, by, row.appId);
   requireNotStaff(by);
   const db = drizzle(env.DB);
   await auditedBatch(env, db, [
@@ -320,6 +481,20 @@ export const createFromBlueprint = async (
     blueprint.permissions,
     blueprint.id
   );
+  // What the blueprint ships, as the release stored it: refused whole if
+  // any of it isn't, with nothing made.
+  const shipped = blueprintWorkflowSchema.array().parse(blueprint.workflows);
+  if (shipped.length > 0) {
+    // Admitted before anything is made for the copy, as again below.
+    await admit?.();
+  }
+  const workflows = await createShippedWorkflows(
+    env,
+    by,
+    blueprint.id,
+    shipped
+  );
+  const starts = workflowStartRequests(by, app, workflows, blueprint.id);
   const tree = await versionTree(files);
   await storeTree(env, app, tree);
 
@@ -332,6 +507,10 @@ export const createFromBlueprint = async (
     blueprint: blueprint.id,
     currentVersion: null,
     pendingVersion: null,
+    // A draft, as any new App: its builders publish it (app-status.ts).
+    status: "draft",
+    statusChangedAt: null,
+    statusChangedBy: null,
     createdAt: now,
   };
   const versionRow: VersionRow = {
@@ -389,6 +568,9 @@ export const createFromBlueprint = async (
       pendingVersion: sql<number | null>`${appRow.pendingVersion}`.as(
         "pending_version"
       ),
+      status: sql<"draft">`${appRow.status}`.as("status"),
+      statusChangedAt: sql<Date | null>`NULL`.as("status_changed_at"),
+      statusChangedBy: sql<null>`NULL`.as("status_changed_by"),
       createdAt: sql<Date>`${appRow.createdAt.getTime()}`.as("created_at"),
     })
     .from(blueprints)
@@ -421,6 +603,36 @@ export const createFromBlueprint = async (
     // One statement each: D1 binds at most 100 values to one.
     ...requests.rows.map((row) => db.insert(permissions).values(row)),
     ...requests.entries.map((entry) => outboxed(db, entry)),
+    // Each workflow the copy got, bound under its alias, and the request
+    // to start it, which waits for an admin.
+    ...workflows.flatMap(({ alias, workflowId, version }) => {
+      const binding = crypto.randomUUID();
+      return [
+        db.insert(appWorkflowBindings).values({
+          id: binding,
+          appId: app,
+          alias,
+          // Only while the workflow is live, as any binding: otherwise
+          // NULL, which fails the batch.
+          workflowResourceId: sql`(SELECT id FROM workflow_resources
+            WHERE id = ${workflowId} AND deleted_at IS NULL)`,
+          workflowResourceVersion: version,
+          status: "active",
+          boundBy: by.userId,
+          boundAt: now,
+          removedBy: null,
+          removedAt: null,
+        }),
+        outboxed(db, {
+          actor: by.actor ?? actorOf(by),
+          action: "workflow.app_binding.bound",
+          target: { type: "app", id: app },
+          detail: { binding, alias, workflowId, version },
+        }),
+      ];
+    }),
+    ...starts.rows.map((row) => db.insert(permissions).values(row)),
+    ...starts.entries.map((entry) => outboxed(db, entry)),
   ] as const;
   try {
     // Admitted last, with nothing slow left before the write.
@@ -439,7 +651,7 @@ export const createFromBlueprint = async (
   return {
     app: toApp(appRow),
     version: toVersion(versionRow),
-    permissions: requests.rows.map(toPermission),
+    permissions: [...requests.rows, ...starts.rows].map(toPermission),
   };
 };
 
@@ -487,7 +699,8 @@ const deleteReplacedTrees = async (
  * declares each App created from it asks for differ from what's stored,
  * in one audited batch, so installing it again writes nothing. The
  * collections it declares are created first, in Knowledge's database,
- * each only if it isn't there yet, and audited only then. Apps created
+ * each only if it isn't there yet, and audited only then, and so are the
+ * catalog contracts its workflows bind, in core's. Apps created
  * from it earlier keep their code and their permissions. The trees of its
  * earlier releases are deleted once its row names the new one.
  *
@@ -506,13 +719,15 @@ export const installBuiltinBlueprint = async (
   );
   const tree = await versionTree(new Map(Object.entries(builtin.files)));
   const declared = [...builtin.permissions];
+  const shipped = blueprintWorkflowSchema.array().parse(builtin.workflows);
   const stored = await blueprintRow(env, id);
   const differs =
     stored !== undefined &&
     (stored.name !== name ||
       stored.description !== description ||
       stored.tree !== tree.tree ||
-      JSON.stringify(stored.permissions) !== JSON.stringify(declared));
+      JSON.stringify(stored.permissions) !== JSON.stringify(declared) ||
+      JSON.stringify(stored.workflows) !== JSON.stringify(shipped));
   if (stored === undefined || stored.tree !== tree.tree) {
     await storeBlueprintTree(env, id, tree);
   }
@@ -532,6 +747,7 @@ export const installBuiltinBlueprint = async (
               version: null,
               approved: true,
               permissions: declared,
+              workflows: shipped,
               markedBy: null,
               markedAt: now,
             })
@@ -551,12 +767,13 @@ export const installBuiltinBlueprint = async (
             description,
             tree: tree.tree,
             permissions: declared,
+            workflows: shipped,
             markedAt: now,
           })
           .where(
             and(
               eq(blueprints.id, id),
-              sql`(${blueprints.name} IS NOT ${name} OR ${blueprints.description} IS NOT ${description} OR ${blueprints.tree} IS NOT ${tree.tree} OR ${blueprints.permissions} IS NOT ${JSON.stringify(declared)})`
+              sql`(${blueprints.name} IS NOT ${name} OR ${blueprints.description} IS NOT ${description} OR ${blueprints.tree} IS NOT ${tree.tree} OR ${blueprints.permissions} IS NOT ${JSON.stringify(declared)} OR ${blueprints.workflows} IS NOT ${JSON.stringify(shipped)})`
             )
           ),
         outboxedIfChanged(
@@ -588,6 +805,12 @@ export const installBuiltinBlueprint = async (
       { type: "system" },
       { builtin: builtin.id }
     );
+  }
+  // The contracts its workflows bind, before any copy publishes one: each
+  // published once, by the first install that ships it, and never changed.
+  for (const contract of builtin.contracts) {
+    // oxlint-disable-next-line no-await-in-loop -- a few, one at a time
+    await ensureReleaseContract(env, contract, { builtin: builtin.id });
   }
   const [first, ...rest] = [...created, ...changed];
   if (first !== undefined) {

@@ -32,7 +32,7 @@ import {
 import type { WorkspaceStub } from "./agent-chat.ts";
 import { fakeGateway } from "./ai-gateway.ts";
 import type { GatewayReply } from "./ai-gateway.ts";
-import { release, requestGranted } from "./apps.ts";
+import { published, release, requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { collectionWithNote, readCollection } from "./knowledge.ts";
@@ -115,6 +115,7 @@ const setUp = async (replies: GatewayReply[]) => {
   const admin = await signedInApi(idp, "admin");
   const builder = await signedInApi(idp, "builder");
   const { id: existing } = await builder.api.apps.create({ name: "Ledger" });
+  await published(existing);
   await release(builder, existing, { "AGENTS.md": "# Ledger\n" });
   const chat = await chatOf(builder.userId, ...replies);
   await requestGranted(idp, admin, {
@@ -757,6 +758,7 @@ describe("build jobs", { timeout: 180_000 }, () => {
   it("hands on nothing of a job whose person stopped building its App while it ran", async () => {
     const other = await signedInApi(idp, "builder");
     const { id: shared } = await other.api.apps.create({ name: "Shared" });
+    await published(shared);
     const { builder, chat } = await setUp([
       codeStep(`export default async (self, env) => {
         await env.build.write(${JSON.stringify(shared)}, ${JSON.stringify({ "screens/desk.tsx": desk })});
@@ -839,6 +841,7 @@ describe("build jobs", { timeout: 180_000 }, () => {
   it("refuses to read a job to a person who no longer builds its App, and keeps its record", async () => {
     const other = await signedInApi(idp, "builder");
     const { id: shared } = await other.api.apps.create({ name: "Shared" });
+    await published(shared);
     const { builder, chat } = await setUp([
       codeStep(`export default async (self, env) => {
         await env.build.write(${JSON.stringify(shared)}, ${JSON.stringify({ "screens/desk.tsx": desk })});
@@ -913,6 +916,7 @@ describe("build jobs", { timeout: 180_000 }, () => {
   it("commits nothing when its person stops building the App while its files are stored", async () => {
     const other = await signedInApi(idp, "builder");
     const { id: shared } = await other.api.apps.create({ name: "Shared" });
+    await published(shared);
     const { builder, chat } = await setUp([
       codeStep(`export default async (self, env) => {
         await env.build.write(${JSON.stringify(shared)}, ${JSON.stringify({ "screens/desk.tsx": desk })});

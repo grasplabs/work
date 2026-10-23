@@ -15,7 +15,9 @@ import {
   verifyMail,
 } from "@grasp-os/shared/mail-ingress";
 import type { SignedMail } from "@grasp-os/shared/mail-ingress";
+import { routerHostKey } from "@grasp-os/shared/router";
 
+import { signInConfig } from "./auth/config.ts";
 import { errorResponse } from "./errors.ts";
 import { acceptedSecrets } from "./router-secret.ts";
 import { receiveEmail } from "./workflows/inbound-email.ts";
@@ -57,6 +59,58 @@ const forbidden = (requestId: string, reason: Refusal): Response => {
   );
 };
 
+/**
+ * The client's own mail domain, as the router's map keys it: its hostname
+ * (`SIGN_IN.origin`), the one domain the router sorts mail to it by.
+ * Undefined while the deployment has none.
+ */
+const ownMailDomain = (env: Env): string | undefined => {
+  const origin = signInConfig(env)?.origin;
+  return origin === undefined
+    ? undefined
+    : routerHostKey(new URL(origin).hostname);
+};
+
+/**
+ * Whether `to` is at `domain`, read as the router reads it: the domain
+ * after its last `@` (and a local part), lowercase, without a trailing
+ * dot. Exactly: no subdomain, parent or look-alike passes.
+ */
+const isAt = (to: string, domain: string): boolean => {
+  const at = to.lastIndexOf("@");
+  return at > 0 && routerHostKey(to.slice(at + 1)) === domain;
+};
+
+/**
+ * Core's answer to signed `mail` that isn't for the client's own domain;
+ * undefined when it is. Signed by the router isn't sorted right by it: a
+ * wrong entry in its map would bring another client's mail here. Such
+ * mail bounces, as sent again it would only come back here; without a
+ * hostname of its own, core takes none for now.
+ */
+const misrouted = (
+  env: Env,
+  mail: SignedMail,
+  requestId: string
+): Response | undefined => {
+  const domain = ownMailDomain(env);
+  if (domain === undefined) {
+    return forbidden(requestId, "not_configured");
+  }
+  if (isAt(mail.to, domain)) {
+    return undefined;
+  }
+  log.warn("mail.ingress_refused", {
+    reason: "foreign_recipient",
+    requestId,
+    message: mail.sha256,
+  });
+  return Response.json(
+    { reason: "No such address." },
+    { status: mailRejectedStatus }
+  );
+};
+
 /** Whether any of core's router secrets signed `mail` as `signature`. */
 const signedByRouter = async (
   env: Env,
@@ -76,8 +130,9 @@ const signedByRouter = async (
 /**
  * Takes one message from the raw-mail ingress, after the router-secret
  * check: only a delivery signed for exactly this recipient, sender, body
- * and time, within `mailIngressMaxSkewMs`, reaches `receiveEmail`. Logs
- * no address and nothing the message says: its hash and size alone.
+ * and time, within `mailIngressMaxSkewMs`, and for an address at the
+ * client's own hostname, reaches `receiveEmail`. Logs no address and
+ * nothing the message says: its hash and size alone.
  */
 export const mailIngressResponse = async (
   request: Request,
@@ -122,6 +177,10 @@ export const mailIngressResponse = async (
   const mail = { to, from, sha256, size, sentAt };
   if (!(await signedByRouter(env, mail, signature))) {
     return forbidden(requestId, "bad_signature");
+  }
+  const refused = misrouted(env, mail, requestId);
+  if (refused !== undefined) {
+    return refused;
   }
   // The signed size bounds the read; the bytes must be the signed ones.
   const raw = await readAtMost(body, Math.min(size, mailIngressMaxBytes));

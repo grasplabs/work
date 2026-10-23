@@ -23,12 +23,14 @@ import {
   desc,
   eq,
   inArray,
+  isNotNull,
   isNull,
   lt,
   lte,
   or,
   sql,
 } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -228,6 +230,7 @@ export const runAdmitted = (db: DrizzleD1Database, run: RunAdmission) =>
           "root"
         ),
         depth: sql<number>`${run.lineage?.depth ?? 0}`.as("depth"),
+        stopRequestedAt: sql<null>`NULL`.as("stop_requested"),
       })
       .from(sql`(SELECT 1)`)
       .where(
@@ -472,6 +475,22 @@ const startAbandoned = async (
  * past {@link maxStartAttempts} tries or {@link maxStartingMs}, it is
  * marked failed.
  */
+/** Whether run `runId`'s start receipt names an App that is archived now. */
+const startedByArchived = async (env: Env, runId: string): Promise<boolean> => {
+  const row = await drizzle(env.DB)
+    .select({ one: sql`1` })
+    .from(workflowStartReceipts)
+    .where(
+      and(
+        eq(workflowStartReceipts.id, runId),
+        eq(workflowStartReceipts.invokerType, "app"),
+        sql`EXISTS (SELECT 1 FROM apps WHERE apps.id = ${workflowStartReceipts.invokerId} AND apps.status = 'archived')`
+      )
+    )
+    .get();
+  return row !== undefined;
+};
+
 const repairStart = async (env: Env, row: RunRow, now: Date): Promise<void> => {
   const backoff = Math.min(
     repairAfterMs * 2 ** row.startAttempts,
@@ -519,7 +538,13 @@ const repairStart = async (env: Env, row: RunRow, now: Date): Promise<void> => {
     await tellQueryFollowers(env, row.id);
     return;
   }
-  if (row.startAttempts >= maxStartAttempts || pastStarting) {
+  // Started by an App archived since: nothing of it starts any more
+  // (app-status.ts), so the start is abandoned rather than sent again.
+  if (
+    row.startAttempts >= maxStartAttempts ||
+    pastStarting ||
+    (await startedByArchived(env, row.id))
+  ) {
     await startAbandoned(env, row, now);
     return;
   }
@@ -1440,6 +1465,133 @@ const stopResourceRun = async (
   await auditedBatch(env, db, [
     outboxed(db, terminatedEntry(actor, row, now?.status ?? row.status)),
   ]);
+};
+
+/**
+ * How long a stop an archive asked for is left to the engine before a
+ * later pass asks again: a crash between asking and sending never leaves
+ * the run unstopped.
+ */
+export const stopRetryMs = 5 * 60 * 1000;
+
+/**
+ * That run's stop is due, as SQL: never asked, or asked longer than
+ * `stopRetryMs` ago and still not ended.
+ */
+const stopDue = (): SQL =>
+  sql`(${workflowResourceRuns.stopRequestedAt} IS NULL OR ${workflowResourceRuns.stopRequestedAt} <= ${Date.now() - stopRetryMs})`;
+
+/**
+ * Stops the unfinished runs of independent workflows that App `app`'s
+ * screens or code started (their start receipt names the App as invoker),
+ * created by `before`, while the App is archived (app-status.ts): at most
+ * `limit`, oldest first, each as a builder's stop is, audited under
+ * `actor`. A stop that fails is logged and left to the next pass. Answers
+ * how many it asked to stop, and how many of those failed.
+ */
+export const stopRunsStartedBy = async (
+  env: Env,
+  actor: AuditActor,
+  app: string,
+  before: Date,
+  limit: number
+): Promise<{ asked: number; failed: string[] }> => {
+  if (limit <= 0) {
+    return { asked: 0, failed: [] };
+  }
+  const rows = await drizzle(env.DB)
+    .select({ run: workflowResourceRuns })
+    .from(workflowResourceRuns)
+    .innerJoin(
+      workflowStartReceipts,
+      eq(workflowStartReceipts.id, workflowResourceRuns.id)
+    )
+    .where(
+      and(
+        eq(workflowStartReceipts.invokerType, "app"),
+        eq(workflowStartReceipts.invokerId, app),
+        inArray(workflowResourceRuns.status, unended),
+        stopDue(),
+        lte(workflowResourceRuns.createdAt, before),
+        sql`EXISTS (SELECT 1 FROM apps WHERE apps.id = ${app} AND apps.status = 'archived')`
+      )
+    )
+    .orderBy(asc(workflowResourceRuns.createdAt), asc(workflowResourceRuns.id))
+    .limit(limit);
+  const failed = await Promise.all(
+    rows.map(async ({ run }): Promise<boolean> => {
+      const db = drizzle(env.DB);
+      // Claimed first: a later pass, or another archive's, never asks it
+      // again, nor audits a second stop, while the engine ends it.
+      const claimedAt = new Date();
+      const [claimed] = await db
+        .update(workflowResourceRuns)
+        .set({ stopRequestedAt: claimedAt })
+        .where(and(eq(workflowResourceRuns.id, run.id), stopDue()))
+        .returning({ id: workflowResourceRuns.id });
+      if (claimed === undefined) {
+        return false;
+      }
+      try {
+        await stopResourceRun(env, actor, run);
+        return false;
+      } catch (error) {
+        log.error("workflow.archive_stop_failed", {
+          runId: run.id,
+          appId: app,
+          ...errorFields(error),
+        });
+        // Asked again by the next pass: only this claim is let go of, never
+        // a later pass's that took the run since.
+        await db
+          .update(workflowResourceRuns)
+          .set({ stopRequestedAt: null })
+          .where(
+            and(
+              eq(workflowResourceRuns.id, run.id),
+              eq(workflowResourceRuns.stopRequestedAt, claimedAt)
+            )
+          );
+        return true;
+      }
+    })
+  );
+  return {
+    asked: rows.length,
+    failed: rows.flatMap(({ run }, at) =>
+      failed[at] === true ? [run.id] : []
+    ),
+  };
+};
+
+/**
+ * Whether an independent run App `app` started still has a stop claimed
+ * for it that hasn't ended it (`stopRunsStartedBy`): one in flight, or one
+ * whose sender died between the claim and the send. A restore waits for
+ * these (app-status.ts).
+ */
+export const stopsUnsettled = async (
+  env: Env,
+  app: string
+): Promise<boolean> => {
+  const row = await drizzle(env.DB)
+    .select({ one: sql`1` })
+    .from(workflowResourceRuns)
+    .innerJoin(
+      workflowStartReceipts,
+      eq(workflowStartReceipts.id, workflowResourceRuns.id)
+    )
+    .where(
+      and(
+        eq(workflowStartReceipts.invokerType, "app"),
+        eq(workflowStartReceipts.invokerId, app),
+        inArray(workflowResourceRuns.status, unended),
+        isNotNull(workflowResourceRuns.stopRequestedAt)
+      )
+    )
+    .limit(1)
+    .get();
+  return row !== undefined;
 };
 
 /**
