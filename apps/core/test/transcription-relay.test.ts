@@ -30,6 +30,9 @@ import { routed, signedInWithRole, unique } from "./sign-in.ts";
 // - One side closing and the other left open, holding the upstream (and
 //   its bill) or the page's microphone.
 // - Audio kept anywhere: the store, the database, the audit log.
+// - Listening on after the link or the admin no longer may: the person
+//   taken off the list, the onboarding paused, the admin made a member.
+// - Sockets opened side by side on one link, each hearing a day's budget.
 
 const idp = mockIdp();
 
@@ -193,7 +196,7 @@ const openedTwo = async () => {
   if (ada === undefined || bo === undefined) {
     throw new Error("Expected two links");
   }
-  return { ada, bo };
+  return { ada, bo, roster };
 };
 
 /** What core sends the page, as these tests read it. */
@@ -512,6 +515,112 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
 
     expect(result).toStrictEqual(closes);
   });
+
+  it("shares one budget between sockets opened side by side on a link, and gives back what a socket didn't hear", async () => {
+    const { ada } = await openedTwo();
+    const start = {
+      type: "start",
+      language: "en",
+      sampleRate: 16_000,
+      link: ada,
+    } as const;
+
+    const { result } = await relaying(async () => {
+      // A day's hour on the link: four sockets of fifteen minutes.
+      const pages = await Promise.all(
+        Array.from({ length: 4 }, async () => await listen())
+      );
+      for (const page of pages) {
+        page.start(start);
+      }
+      const ready = await Promise.all(
+        pages.map(async (page) => await page.next())
+      );
+      const fifth = await listen();
+      fifth.start(start);
+      const spent = await refusalOf(fifth);
+      // One socket hears a tenth of a second and leaves: the rest is back.
+      const [first] = pages;
+      first?.socket.send(tenthOfASecond());
+      await first?.next();
+      first?.socket.close(1000, "Done");
+      await first?.ended();
+      const again = await vi.waitFor(async () => {
+        const page = await listen();
+        page.start(start);
+        const message = await page.next();
+        if (message?.type !== "ready") {
+          throw new Error(`Expected ready, got ${message?.type}`);
+        }
+        return message.maxSeconds;
+      });
+      return {
+        ready: ready.map((message) =>
+          message?.type === "ready" ? message.maxSeconds : message?.type
+        ),
+        spent,
+        again,
+      };
+    });
+
+    expect(result).toStrictEqual({
+      ready: [900, 900, 900, 900],
+      spent: { errors: ["transcription.limited"], code: 1008 },
+      again: 899,
+    });
+  });
+
+  it.each([
+    ["the person is taken off the list", "removed", "interview.link_invalid"],
+    ["the onboarding is paused", "paused", "interview.paused"],
+    ["the admin is made a member", "demoted", "role.forbidden"],
+  ] as const)(
+    "stops listening, upstream too, once %s while the socket is open",
+    async (_, change, refusal) => {
+      const { ada, roster } = await openedTwo();
+      const admin =
+        change === "demoted" ? await signedInWithRole(idp, "admin") : undefined;
+      const store = onboardingStore(env);
+      const by = { type: "system" } as const;
+
+      const { result } = await relaying(async (upstream) => {
+        const page = await listen(
+          admin === undefined ? {} : { cookie: admin.session }
+        );
+        page.start({
+          type: "start",
+          language: "en",
+          sampleRate: 16_000,
+          ...(admin === undefined ? { link: ada } : {}),
+        });
+        await page.next();
+        if (change === "removed") {
+          // Ada leaves; Bo stays.
+          await store.saveRoster(
+            { ...roster, people: roster.people.slice(1) },
+            by
+          );
+        } else if (change === "paused") {
+          await store.setPaused(true, by);
+        } else {
+          await env.DB.prepare("UPDATE members SET role = ? WHERE user_id = ?")
+            .bind("user", admin?.userId ?? "")
+            .run();
+        }
+        const [ended, upstreamCode] = await Promise.all([
+          refusalOf(page),
+          upstream.closed,
+        ]);
+        return { ...ended, upstream: upstreamCode };
+      });
+
+      expect(result).toStrictEqual({
+        errors: [refusal],
+        code: 1008,
+        upstream: 1000,
+      });
+    }
+  );
 
   it("relays for an admin signed in, audited when it opens and closes, with nothing heard", async () => {
     const { session, userId } = await signedInWithRole(idp, "admin");

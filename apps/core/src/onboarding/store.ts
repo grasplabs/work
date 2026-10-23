@@ -2440,6 +2440,27 @@ export class Onboarding extends DurableObject<Env> {
     return answered({ who, heard: this.voiceSaid(who, now), person });
   }
 
+  /**
+   * Whether a live transcription open on someone's link may go on, as it
+   * might open (`transcriptionOnLink`): checked again while it is open,
+   * so it doesn't count as a call on the link.
+   */
+  transcriptionStill(
+    secretMark: string,
+    keyMark: string,
+    now: string = new Date().toISOString()
+  ): LinkAnswer<null> {
+    const found = this.#onLink(secretMark, now, "save", false);
+    if (!found.ok) {
+      return found;
+    }
+    const { link } = found.value;
+    if (link.keyMark === null || link.keyMark !== keyMark) {
+      return refused("interview.elsewhere");
+    }
+    return answered(null);
+  }
+
   /** Seconds heard by live transcription for an admin today. */
   heardForAdmin(
     userId: string,
@@ -2450,16 +2471,40 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
-   * Notes a live transcription opened: on someone's link in the
-   * onboarding's own log, which only staff read, never in the audit log,
-   * which would tell the company who talked, and when; for an admin in
-   * the audit log, with the session's ID and nothing heard.
+   * Opens a live transcription for `who`: holds the seconds it may hear
+   * against `who`'s budget for today, at once, so sockets opened side by
+   * side share one budget rather than each finding it untouched, and a
+   * socket whose close is never counted keeps what it held. Notes it on
+   * someone's link in the onboarding's own log, which only staff read,
+   * never in the audit log, which would tell the company who talked, and
+   * when; for an admin in the audit log, with the session's ID and
+   * nothing heard. The seconds held, and the day they are held on; none,
+   * and nothing noted, when the budget is spent.
    */
   transcriptionOpened(
-    session: TranscriptionSessionNote,
+    session: TranscriptionSessionNote & {
+      who: string;
+      budget: number;
+      most: number;
+    },
     now: string = new Date().toISOString()
-  ): void {
-    this.ctx.storage.transactionSync(() => {
+  ): { held: number; day: string } {
+    const day = now.slice(0, 10);
+    const held = this.ctx.storage.transactionSync(() => {
+      const left = session.budget - this.voiceSaid(session.who, now);
+      const most = Math.floor(Math.min(left, session.most));
+      if (most <= 0) {
+        return 0;
+      }
+      this.#db.delete(voiceUse).where(lt(voiceUse.day, day)).run();
+      this.#db
+        .insert(voiceUse)
+        .values({ who: session.who, day, seconds: most })
+        .onConflictDoUpdate({
+          target: [voiceUse.who, voiceUse.day],
+          set: { seconds: sql`${voiceUse.seconds} + ${most}` },
+        })
+        .run();
       if (session.person === undefined) {
         this.#changed(session.by, "onboarding.transcription.opened", {
           session: session.id,
@@ -2467,41 +2512,52 @@ export class Onboarding extends DurableObject<Env> {
       } else {
         this.#noted(session.person, "transcription.opened", now);
       }
+      return most;
     });
-    if (session.person === undefined) {
+    if (held > 0 && session.person === undefined) {
       this.#deliverAudit();
     }
+    return { held, day };
   }
 
   /**
    * Counts a live transcription once it closed: the seconds of audio it
-   * heard, against `who`'s budget and in the onboarding's use, and notes
-   * it as it was opened (`transcriptionOpened`), with how it ended. Never
-   * anything heard.
+   * heard in the onboarding's use, what it held and didn't hear given
+   * back to `who`'s budget on the day it was held (`transcriptionOpened`),
+   * and notes it as it was opened, with how it ended. Never anything
+   * heard.
    */
   transcriptionClosed(
     session: TranscriptionSessionNote & {
       who: string;
       purpose: Took["purpose"];
       seconds: number;
+      held: number;
+      day: string;
       ended: string;
     },
     now: string = new Date().toISOString()
   ): void {
+    const seconds = Math.min(counted(session.seconds), session.held);
+    const back = session.held - seconds;
     this.ctx.storage.transactionSync(() => {
-      this.#countSeconds(
-        session.who,
-        {
-          purpose: session.purpose,
-          model: "transcription",
-          seconds: session.seconds,
-        },
+      if (back > 0) {
+        this.#db
+          .update(voiceUse)
+          .set({ seconds: sql`max(${voiceUse.seconds} - ${back}, 0)` })
+          .where(
+            and(eq(voiceUse.who, session.who), eq(voiceUse.day, session.day))
+          )
+          .run();
+      }
+      this.meter(
+        { purpose: session.purpose, model: "transcription", seconds },
         now
       );
       if (session.person === undefined) {
         this.#changed(session.by, "onboarding.transcription.closed", {
           session: session.id,
-          seconds: Math.round(session.seconds),
+          seconds: Math.round(seconds),
           ended: session.ended,
         });
       } else {
@@ -4459,7 +4515,9 @@ export class Onboarding extends DurableObject<Env> {
   #onLink(
     secretMark: string,
     now: string,
-    use: "open" | "save" | "delete"
+    use: "open" | "save" | "delete",
+    /** Whether it counts as a call on the link: a check again does not. */
+    call = true
   ): LinkAnswer<{
     person: Roster["people"][number];
     link: typeof links.$inferSelect;
@@ -4476,7 +4534,7 @@ export class Onboarding extends DurableObject<Env> {
     if (roster === null || person === undefined) {
       return refused("interview.link_invalid");
     }
-    if (!this.#withinLimit(person.id, now)) {
+    if (call && !this.#withinLimit(person.id, now)) {
       return refused("interview.limited");
     }
     const [link] = this.#db
