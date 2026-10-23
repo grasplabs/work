@@ -349,7 +349,7 @@ describe("Grasp's staff in the onboarding", () => {
     const store = onboardingStore(env);
     const run = crypto.randomUUID().slice(0, 8);
     const [lead, member, alone] = [`lea-${run}`, `sam-${run}`, `oli-${run}`];
-    await api.onboarding.saveRoster({
+    await api.onboarding.confirmRoster({
       teams: [
         { id: `sales-${run}`, name: "Sales", lead },
         { id: `ops-${run}`, name: "Ops", lead: null },
