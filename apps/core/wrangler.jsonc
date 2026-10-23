@@ -139,6 +139,9 @@
       // One object per foreground action invocation, streaming or not, named
       // by its person, App, contract and key (src/action-invocation.ts).
       { "name": "ACTION_INVOCATIONS", "class_name": "ActionInvocation" },
+      // The Chat SDK's state for Stephen's door into core from chat apps
+      // (@grasp-os/chat/state): one object per key and per conversation.
+      { "name": "CHAT_STATE", "class_name": "ChatState" },
     ],
   },
   "migrations": [
@@ -150,6 +153,7 @@
     { "tag": "v6", "new_sqlite_classes": ["WorkflowRuns"] },
     { "tag": "v7", "new_sqlite_classes": ["ActionInvocation"] },
     { "tag": "v8", "new_sqlite_classes": ["Clock"] },
+    { "tag": "v9", "new_sqlite_classes": ["ChatState"] },
   ],
   // Runs App sandboxes and the App compiler.
   "worker_loaders": [{ "binding": "LOADER" }],
