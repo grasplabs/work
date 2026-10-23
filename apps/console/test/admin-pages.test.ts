@@ -238,15 +238,14 @@ describe("the admin's frame", () => {
       "Sources",
       "Stephen Lab",
       "Organizations",
-      "Back to the console",
     ].map((text) => sidebar.indexOf(text));
-    const [organizations = -1, back = -1] = places.slice(-2);
+    const [organizations = -1] = places.slice(-1);
     /** Where `name` is in the sidebar, and what its entry says besides. */
     const entryOf = (name: string) => {
       const at = sidebar.indexOf(name);
       return {
-        // Under the organizations' label and above the way back.
-        listed: at > organizations && at < back,
+        // Under the organizations' label.
+        listed: at > organizations,
         entry: sidebar.slice(at, sidebar.indexOf("</li>", at)),
       };
     };
@@ -256,7 +255,7 @@ describe("the admin's frame", () => {
 
     expect({
       status,
-      // Every place, in the prototype's order, the way back last.
+      // Every place, in the prototype's order, the organizations last.
       placesInOrder:
         places.every((position) => position >= 0) &&
         places.toSorted((a, b) => a - b).every((at, i) => at === places[i]),
@@ -267,8 +266,10 @@ describe("the admin's frame", () => {
       opensAcme: html.includes(`href="/admin/organizations/${acme.clientId}"`),
       // Its mark explains itself while the sidebar is open, too.
       downExplained: downEntry?.entry.includes('data-slot="tooltip-trigger"'),
-      // The console's own bar is not part of the admin.
-      consoleBar: html.includes('aria-label="Console"'),
+      // The admin is the one frame: no console bar, and no way back to one.
+      consoleBar:
+        html.includes('aria-label="Console"') ||
+        html.includes("Back to the console"),
       readers: acme.account.adminReaders,
     }).toStrictEqual({
       status: 200,

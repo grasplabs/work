@@ -26,10 +26,10 @@ const statusOf = async (request: Request, changes: Partial<Env> = {}) => {
 describe("the Access JWT", () => {
   it("lets a staff member with a valid JWT in", async () => {
     const response = await exports.default.fetch(
-      asStaff("/", await accessJwt(staffEmail))
+      asStaff("/admin", await accessJwt(staffEmail))
     );
     expect(response.status).toBe(200);
-    await expect(response.text()).resolves.toContain("Clients");
+    await expect(response.text()).resolves.toContain("Organizations");
   });
 
   it("refuses every path without one, server functions and unknown pages included", async () => {
@@ -100,9 +100,9 @@ describe("the local dev bypass", () => {
   it("lets requests to this machine in without a JWT", async () => {
     const statuses = await Promise.all(
       [
-        "http://localhost:3000/",
-        "http://127.0.0.1:3000/",
-        "http://[::1]:3000/",
+        "http://localhost:3000/admin",
+        "http://127.0.0.1:3000/admin",
+        "http://[::1]:3000/admin",
       ].map(async (url) => await statusOf(new Request(url), dev))
     );
     expect(statuses).toStrictEqual([200, 200, 200]);

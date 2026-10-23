@@ -1,9 +1,8 @@
 /**
- * Grasp's admin as a place of its own, apart from the console's pages and
- * from the platform a company works in, ported from the prototype
+ * Grasp's admin, the one place staff manage everything, apart from the
+ * platform a company works in, ported from the prototype
  * (grasplabs/prototype `packages/grasp/src/components/admin/admin-frame.tsx`):
- * its own sidebar (its places, every organization, and the way back to the
- * console at its foot) and none of the console's bar above. It folds to
+ * its own sidebar, with its places and every organization. It folds to
  * icons, so inside one organization that organization's own column of
  * sections has the room.
  *
@@ -17,7 +16,6 @@
 import {
   Sidebar,
   SidebarContent,
-  SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
   SidebarGroupLabel,
@@ -38,7 +36,6 @@ import {
 } from "@grasp-os/ui/components/tooltip";
 import { Link, Outlet, useMatchRoute, useRouter } from "@tanstack/react-router";
 import {
-  ArrowLeftIcon,
   BuildingIcon,
   CableIcon,
   FlaskConicalIcon,
@@ -325,19 +322,6 @@ const AdminSidebar = ({
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
-      <SidebarFooter>
-        <SidebarMenu>
-          <SidebarMenuItem>
-            <SidebarMenuButton
-              render={<Link to="/" />}
-              tooltip="Back to the console"
-            >
-              <ArrowLeftIcon />
-              <span>Back to the console</span>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        </SidebarMenu>
-      </SidebarFooter>
     </Sidebar>
   );
 };

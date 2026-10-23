@@ -103,15 +103,21 @@ describe("an organization's Setup", () => {
         "Healthy",
         acme.release.id,
         "Ring 1",
-        "Open in the console",
+        "Open its Grasp",
+        "Its activity",
         "Open in Cloudflare",
       ].map((text) => header.includes(text)),
-      toConsole: status.html.includes(`href="/clients/${acme.clientId}"`),
+      // Nothing of it is left to the console's own pages.
+      toConsole: status.html.includes('href="/clients/'),
       // Nothing needs a look on a company that runs the newest release.
       needs: status.html.includes("What needs a look"),
-      // Its numbers aren't kept day by day: said, not made up.
-      numbers: status.html.includes(
-        "The console doesn’t keep these day by day yet."
+      // Its numbers aren't kept day by day: said, not made up, and its
+      // account's now read once the page shows.
+      numbers: [
+        "The console doesn’t keep these day by day yet.",
+        "Reading its account…",
+      ].map((text) =>
+        sectionOf(status.html, "Its platform in numbers").includes(text)
       ),
       howItRuns: [
         "Router",
@@ -164,10 +170,10 @@ describe("an organization's Setup", () => {
       ),
     }).toStrictEqual({
       statuses: [200, 200, 200, 200, 200],
-      header: [true, true, true, true, true, true],
-      toConsole: true,
+      header: [true, true, true, true, true, true, true],
+      toConsole: false,
       needs: false,
-      numbers: true,
+      numbers: [true, true],
       howItRuns: [true, true, true, true, true, true],
       checklist: [true, true, true],
       deployed: true,

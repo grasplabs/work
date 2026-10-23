@@ -3,69 +3,35 @@ import {
   HeadContent,
   Link,
   Scripts,
-  useRouterState,
 } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 
 import styles from "../styles.css?url";
 
 /**
- * The console's bar above its pages. Grasp's admin has a frame of its own
- * (src/admin/frame.tsx), so not there. It follows the page on screen, not
- * the address: the address changes before the next page has loaded, while
- * the last one is still showing.
+ * The document every page renders in. Grasp's admin (src/routes/admin.tsx)
+ * is the one frame staff work in, with its own sidebar: the console has no
+ * bar of its own any more.
  */
-const ConsoleNav = () => {
-  const inAdmin = useRouterState({
-    select: (state) =>
-      state.matches.some(({ routeId }) => routeId === "/admin"),
-  });
-  if (inAdmin) {
-    return null;
-  }
-  return (
-    <nav aria-label="Console" className="flex gap-4 border-b px-6 py-3">
-      <Link
-        to="/"
-        activeOptions={{ exact: true }}
-        activeProps={{ className: "font-medium" }}
-      >
-        Clients
-      </Link>
-      <Link to="/releases" activeProps={{ className: "font-medium" }}>
-        Releases
-      </Link>
-      <Link to="/rollouts" activeProps={{ className: "font-medium" }}>
-        Rollouts
-      </Link>
-      {/* A full page load, so the admin's own hostname, when it has one, takes it (src/admin-host.ts). */}
-      <Link reloadDocument to="/admin">
-        Admin
-      </Link>
-    </nav>
-  );
-};
-
 const RootDocument = ({ children }: { children: ReactNode }) => (
   <html lang="en">
     <head>
       <HeadContent />
     </head>
     <body>
-      <ConsoleNav />
       {children}
       <Scripts />
     </body>
   </html>
 );
 
-/** A page the console doesn't have. */
+/** A page there isn't. */
 const NotFound = () => (
   <main className="flex flex-col gap-4 p-6">
     <h1 className="text-2xl font-medium">Not found</h1>
-    <p className="text-sm">The console has no such page.</p>
-    <Link to="/" className="text-sm underline underline-offset-4">
-      Back to clients
+    <p className="text-sm">There&apos;s no such page.</p>
+    <Link className="text-sm underline underline-offset-4" to="/admin">
+      Back to the admin
     </Link>
   </main>
 );
@@ -75,7 +41,7 @@ export const Route = createRootRoute({
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Grasp console" },
+      { title: "Grasp admin" },
     ],
     links: [{ rel: "stylesheet", href: styles }],
   }),

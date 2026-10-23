@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it } from "vite-plus/test";
 
 import {
   applySettingsFn,
+  rotateSecretsFn,
   setRingFn,
   setSignInFn,
 } from "../src/clients/functions.ts";
@@ -346,6 +347,17 @@ const changes: {
             { email: caller }
           ),
         audited: { action: "client.sign_in", clientId, target: null },
+      };
+    },
+  },
+  {
+    name: "rotating a client's secrets",
+    arrange: async () => {
+      const clientId = await recordClient(1);
+      return {
+        make: async () =>
+          await callServerFn(rotateSecretsFn, { clientId }, { email: caller }),
+        audited: { action: "client.rotate_secrets", clientId, target: null },
       };
     },
   },

@@ -68,6 +68,13 @@ export interface AnsweredOrganization {
 
 const OrganizationContext = createContext<AnsweredOrganization | null>(null);
 
+/**
+ * The organization a section is of when its core answered; null on the
+ * page of one that didn't, where only its Setup shows.
+ */
+export const useAnsweredOrganization = (): AnsweredOrganization | null =>
+  use(OrganizationContext);
+
 /** The organization a section is of: only ever rendered under its page. */
 export const useOrganization = (): AnsweredOrganization => {
   const organization = use(OrganizationContext);
@@ -483,6 +490,36 @@ const AnsweredPage = ({
 };
 
 /**
+ * The page of an organization whose core didn't answer: its name and why.
+ * Its Setup still shows, from what the console itself recorded: setting it
+ * up, or seeing why its core doesn't answer, is done there. Every other
+ * section needs what its core answers.
+ */
+const UnreadPage = ({ admin }: { admin: ClientAdmin }) => {
+  const { id: clientId, name } = admin.client;
+  const onSetup = useSection(clientId) === "setup";
+  return (
+    <AdminPage
+      action={
+        onSetup ? undefined : (
+          <Button
+            nativeButton={false}
+            render={<Link params={{ clientId }} to={sectionTo.setup} />}
+            variant="outline"
+          >
+            Its platform
+          </Button>
+        )
+      }
+      description={admin.state === "answered" ? undefined : unreadWhy(admin)}
+      title={name}
+    >
+      {onSetup ? <Outlet /> : null}
+    </AdminPage>
+  );
+};
+
+/**
  * One organization's page: its column of sections and the section it is
  * on; or, when its core didn't answer, its name and why nothing of it is
  * read now.
@@ -490,12 +527,7 @@ const AnsweredPage = ({
 export const OrganizationPage = ({ admin }: { admin: ClientAdmin }) => {
   const { view } = organizationOf(admin);
   if (admin.state !== "answered" || view === null) {
-    return (
-      <AdminPage
-        description={admin.state === "answered" ? undefined : unreadWhy(admin)}
-        title={admin.client.name}
-      />
-    );
+    return <UnreadPage admin={admin} />;
   }
   return <AnsweredPage organization={{ admin, view }} />;
 };
