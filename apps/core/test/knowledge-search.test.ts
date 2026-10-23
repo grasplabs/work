@@ -590,13 +590,9 @@ const recordingReads = async (person: Person) => {
   return { knowledge: api, made };
 };
 
-/**
- * The tables that grow with what the knowledge base holds. Not
- * `collections`: the host's `authorize` reads which collections a reader
- * may read (one row each, however much they hold) before a search, and
- * the search then reaches them by ID.
- */
+/** The tables that grow with what the knowledge base holds. */
 const corpusTables = new Set([
+  "collections",
   "documents",
   "sections",
   "search_rows",
