@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "e82138f6-24de-4024-9925-023ace95e64b",
+  "id": "f0c932fd-6a80-45fd-894f-a51dcdbf94ee",
   "prevId": "654b6463-dc57-4cb2-8f7d-bb9aa54612c5",
   "tables": {
     "access_revocations": {
@@ -651,6 +651,13 @@
         },
         "tree": {
           "name": "tree",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "code": {
+          "name": "code",
           "type": "text",
           "primaryKey": false,
           "notNull": true,

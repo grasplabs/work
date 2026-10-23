@@ -497,6 +497,12 @@ export const createFromBlueprint = async (
     appId: source?.id ?? null,
     tree: blueprint.tree,
   });
+  // The blueprint's code, kept under the copy (`app_origins.code`): what an
+  // update of the blueprint is merged over. Its AGENTS.md isn't, as it
+  // isn't copied (above).
+  const taken = new Map(files);
+  taken.delete(appMemoryPath);
+  const takenCode = await versionTree(taken);
   // Replaced, not added: the copy has as many files as the blueprint.
   if (files.has(appMemoryPath)) {
     files.set(appMemoryPath, copiedMemory(blueprint.name));
@@ -526,6 +532,7 @@ export const createFromBlueprint = async (
   const starts = workflowStartRequests(by, app, workflows, blueprint.id);
   const tree = await versionTree(files);
   await storeTree(env, app, tree);
+  await storeTree(env, app, takenCode);
 
   const now = new Date();
   const appRow: AppRow = {
@@ -547,7 +554,8 @@ export const createFromBlueprint = async (
     version: 1,
     parent: null,
     tree: tree.tree,
-    code: await codeIdentity(files),
+    // The blueprint's code: the copy's AGENTS.md is its own.
+    code: takenCode.tree,
     files: files.size,
     authorId: by.userId,
     message: `Created from the blueprint ${blueprint.name}.`,
@@ -619,6 +627,7 @@ export const createFromBlueprint = async (
       blueprintId: blueprint.id,
       blueprintVersion: blueprint.version,
       tree: blueprint.tree,
+      code: takenCode.tree,
       createdAt: now,
     }),
     outboxed(

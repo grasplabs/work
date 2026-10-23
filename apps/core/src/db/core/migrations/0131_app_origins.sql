@@ -3,6 +3,7 @@ CREATE TABLE `app_origins` (
 	`blueprint_id` text NOT NULL,
 	`blueprint_version` integer,
 	`tree` text NOT NULL,
+	`code` text NOT NULL,
 	`created_at` integer NOT NULL,
 	FOREIGN KEY (`app_id`) REFERENCES `apps`(`id`) ON UPDATE no action ON DELETE no action
 );
