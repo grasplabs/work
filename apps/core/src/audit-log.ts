@@ -99,7 +99,7 @@ export const auditRetentionDays = (
 
 /**
  * Days an event is kept in all, archive included, counted from when the
- * log received it: the `AUDIT_ARCHIVE_RETENTION_DAYS` var the console sets
+ * log received it: the `AUDIT_ARCHIVE_RETENTION_DAYS` var the admin sets
  * per deployment, as the DPA states it (AU7). At least a year and at least
  * the retention, at most ten years. `undefined` while it's unset, or
  * invalid (logged as `config.invalid`), or while retention is invalid: then
@@ -140,7 +140,7 @@ export const archiveRetentionDays = (
 // objects any other way (outside the product) makes verification report
 // them missing.
 //
-// The console sets it per deployment with the `AUDIT_RETENTION_DAYS` var:
+// The admin sets it per deployment with the `AUDIT_RETENTION_DAYS` var:
 // 180 days unless set, at least 30 (so an admin always has the last month
 // to search), at most ten years. A value outside that, or one that isn't a
 // whole number of days, is logged as `config.invalid` and archives nothing:

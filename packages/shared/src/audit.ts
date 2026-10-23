@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { chatPlatformSchema } from "./chat.ts";
+import type { ChatChannel } from "./chat.ts";
 import {
   appIdSchema,
   identifierMaxLength,
@@ -44,11 +46,24 @@ const actionPattern = /^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$/u;
  * staff (whose access is always logged).
  */
 export const auditActorSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("person"), userId: identifierSchema }),
+  z.object({
+    type: z.literal("person"),
+    userId: identifierSchema,
+    /**
+     * The chat platform they acted through (a press on a card in Teams,
+     * say), by its adapter's name; none in Grasp's own app.
+     */
+    via: chatPlatformSchema.optional(),
+  }),
   z.object({
     type: z.literal("agent"),
     agentId: identifierSchema,
     onBehalfOf: identifierSchema,
+    /**
+     * The chat platform of the chat it answered in (a Teams chat's turn),
+     * by its adapter's name; none in Grasp's own app.
+     */
+    via: chatPlatformSchema.optional(),
   }),
   z.object({
     type: z.literal("app"),
@@ -80,8 +95,8 @@ export const auditActorSchema = z.discriminatedUnion("type", [
     type: z.literal("staff"),
     userId: identifierSchema,
     /**
-     * Read through the staff console rather than signed in here: `userId`
-     * is then the email Cloudflare Access verified, as the console signs
+     * Read through Grasp's admin rather than signed in here: `userId`
+     * is then the email Cloudflare Access verified, as the admin signs
      * it (core's admin-snapshot.ts), for they have no user here.
      */
     via: z.literal("console").optional(),
@@ -100,26 +115,41 @@ export const auditActorSchema = z.discriminatedUnion("type", [
 ]);
 export type AuditActor = z.infer<typeof auditActorSchema>;
 
-/** A signed-in person as the audit log names them: staff apart. */
-export const actorOf = ({
-  userId,
-  staff,
-}: Pick<Identity, "userId" | "staff">): AuditActor =>
-  staff ? { type: "staff", userId } : { type: "person", userId };
+/** The `via` an actor carries for `channel`: none for Grasp's own app. */
+const viaOf = (channel: ChatChannel | undefined) =>
+  channel === undefined || channel === "web" ? {} : { via: channel };
+
+/**
+ * A signed-in person as the audit log names them: staff apart. A person
+ * acting through a chat platform (`channel`) names it.
+ */
+export const actorOf = (
+  { userId, staff }: Pick<Identity, "userId" | "staff">,
+  channel?: ChatChannel
+): AuditActor =>
+  staff
+    ? { type: "staff", userId }
+    : { type: "person", userId, ...viaOf(channel) };
 
 /**
  * An App, agent or independent workflow, acting for a person, as the audit
  * log names it. A run of an independent workflow is the system, as every
  * event of such runs names it, its run being the event's target
- * (core's workflows/resource-runs.ts).
+ * (core's workflows/resource-runs.ts). An agent answering in a chat names
+ * the chat's `channel` when it is a chat platform's.
  */
-export const delegateActorOf = ({
-  subject,
-  onBehalfOf,
-}: Authority): AuditActor => {
+export const delegateActorOf = (
+  { subject, onBehalfOf }: Authority,
+  channel?: ChatChannel
+): AuditActor => {
   switch (subject.type) {
     case "agent": {
-      return { type: "agent", agentId: subject.agentId, onBehalfOf };
+      return {
+        type: "agent",
+        agentId: subject.agentId,
+        onBehalfOf,
+        ...viaOf(channel),
+      };
     }
     case "app": {
       return { type: "app", appId: subject.appId, part: "server" };

@@ -3,7 +3,7 @@ import type { z } from "zod";
 
 // Composio's REST API, as connect calls it: the only place in Grasp that
 // does (threat model CN17). Core reaches Composio only through connect, and
-// nothing but connect holds the key, a Worker secret the console sets
+// nothing but connect holds the key, a Worker secret the admin sets
 // (`COMPOSIO_API_KEY`). While it is unset, nothing of Composio is offered
 // or reached.
 //

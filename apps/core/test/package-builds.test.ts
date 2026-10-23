@@ -1382,6 +1382,39 @@ describe("what a build names and keeps", () => {
     ]);
   });
 
+  it("refuses a stylesheet that styles the whole screen, and takes one scoped to its own classes", async () => {
+    const reset = named("reset");
+    const scoped = named("scoped");
+    await publish(
+      esm(reset, {
+        "index.js": 'import "./reset.css"; export {};',
+        "reset.css":
+          "*, ::before { box-sizing: border-box; } body { margin: 0; } .lib { color: red; } [data-slot=button] { border-radius: 0; }",
+      })
+    );
+    await publish(
+      esm(scoped, {
+        "index.js": 'import "./scoped.css"; export {};',
+        "scoped.css":
+          "@media (min-width: 40rem) { .lib-root * { gap: 4px; } } #chart text { font-size: 12px; } @keyframes spin { from { opacity: 0; } }",
+      })
+    );
+    const refused = await approvedApp({ [reset]: "1" });
+    const taken = await approvedApp({ [scoped]: "1" });
+    const built = await buildOf(taken, "browser");
+    expect({
+      refused: await refusalsOf(buildOf(refused, "browser")),
+      taken: built.artifact.entries[scoped]?.css,
+    }).toStrictEqual({
+      // As the bundler writes it back: `::before` as `:before`.
+      refused: ["*", ":before", "body", "[data-slot=button]"].map(
+        (selector) =>
+          `the stylesheet ${reset}.css styles every "${selector}" on the screen, the kit's own included: scope its rules under the package's own classes`
+      ),
+      taken: `${scoped}.css`,
+    });
+  });
+
   it("takes a stylesheet's text that only looks like a URL", async () => {
     const quoted = named("quoted");
     await publish(

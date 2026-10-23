@@ -63,6 +63,54 @@ const usePointing = (stop: TourStop | undefined): void => {
   }, [stop]);
 };
 
+/** His card, as the page's hold finds it (its `data-tour-card`). */
+const cardSelector = "[data-tour-card]";
+
+/**
+ * While he tells the tour, the page under him is held: the frame is inert
+ * (frame/app-frame.tsx), but that stops neither a shortcut the page listens
+ * for on the window (the sidebar's Cmd/Ctrl+B, the Brain's arrow keys) nor
+ * one pressed in his card, which bubbles up to it. So every key stops here
+ * before it reaches the page: one pressed elsewhere as the window first
+ * gets it, one pressed in his card as it leaves the card, after his buttons
+ * had it. Escape ends the tour, wherever the focus is.
+ */
+/** Nothing held, so nothing to let go of. */
+const letGo = (): void => {
+  // The page wasn't held.
+};
+
+const useHeldPage = (holding: boolean): void => {
+  useEffect(() => {
+    if (!holding) {
+      return letGo;
+    }
+    const onWindow = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") {
+        event.stopImmediatePropagation();
+        endTour();
+        return;
+      }
+      const { target } = event;
+      const inCard =
+        target instanceof Element && target.closest(cardSelector) !== null;
+      if (!inCard) {
+        event.stopImmediatePropagation();
+      }
+    };
+    const onCard = (event: KeyboardEvent): void => {
+      event.stopPropagation();
+    };
+    const card = document.querySelector<HTMLElement>(cardSelector);
+    window.addEventListener("keydown", onWindow, { capture: true });
+    card?.addEventListener("keydown", onCard);
+    return () => {
+      window.removeEventListener("keydown", onWindow, { capture: true });
+      card?.removeEventListener("keydown", onCard);
+    };
+  }, [holding]);
+};
+
 /** His card: who speaks, his line, and what the person can do. */
 const TourCard = ({
   line,
@@ -80,6 +128,7 @@ const TourCard = ({
   return (
     <section
       aria-label={t`Tour of Grasp`}
+      data-tour-card=""
       className="bg-popover text-popover-foreground ring-foreground/10 fixed right-4 bottom-4 left-4 z-50 flex flex-col gap-3 rounded-xl p-4 text-sm shadow-md ring-1 sm:left-auto sm:w-96"
     >
       <div className="flex items-center gap-2">
@@ -158,22 +207,8 @@ export const TourLayer = ({ identity }: { identity: Identity }) => {
     }
   }, [tour.phase, pathname, navigate]);
 
-  // Escape ends the tour, wherever the focus is.
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent): void => {
-      const { phase } = tourState();
-      if (
-        event.key === "Escape" &&
-        (phase === "opening" || phase === "running")
-      ) {
-        endTour();
-      }
-    };
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("keydown", onKey);
-    };
-  }, []);
+  // The page under him is held from his question on.
+  useHeldPage(tour.phase === "opening" || tour.phase === "running");
 
   /** To the stop `at`, on its page; one entry in the history for the whole tour. */
   const goTo = (at: number): void => {

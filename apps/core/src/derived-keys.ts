@@ -10,7 +10,7 @@ const derived = new Map<string, CryptoKey>();
 /**
  * An HMAC-SHA256 key of core's own for one `purpose`, derived (HKDF,
  * `hkdfHmacKey`) from the deployment's auth secret, which only core holds,
- * and the console that derives it from its client key. Each purpose gets
+ * and the admin that derives it from its client key. Each purpose gets
  * a key of its own, so a MAC made for one never passes for another, and
  * none needs a secret of its own. Rotating the auth secret changes every
  * one.
