@@ -11,14 +11,14 @@ import { consoleSigned } from "../console-signed.ts";
 import { errorResponse } from "../errors.ts";
 import { quotaPolicyReport } from "./quotas.ts";
 
-// The quota policy core applies, for the console alone (GRA-600): signed
+// The quota policy core applies, for the admin alone (GRA-600): signed
 // with a key derived for this purpose only (console-signed.ts), so no
 // other signed request reads it, and nothing an App, a screen or a run
 // reaches serves it. Numbers only: the generation, what it lowers, when
 // core recorded it. Threat model on GRA-600.
 
 /**
- * The console's request for the policy: 200 with it, once the request is
+ * The admin's request for the policy: 200 with it, once the request is
  * signed, fresh and well formed; 403 for anything else, logged with why.
  */
 export const quotaPolicyReportResponse = async (

@@ -26,7 +26,7 @@ export const routerKeyAdmin = async (): Promise<SecretsStoreAdmin> => {
   return await admin();
 };
 
-/** Puts `entry` in the hostname map, as the console does. */
+/** Puts `entry` in the hostname map, as the admin does. */
 export const mapHost = async (
   host: string,
   entry: RouterHost | Record<string, unknown>

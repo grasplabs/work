@@ -16,7 +16,7 @@
     "logs": { "invocation_logs": false },
     "traces": { "enabled": true },
   },
-  // The hostname map the console writes: hostname -> { clientId, coreUrl,
+  // The hostname map the admin writes: hostname -> { clientId, coreUrl,
   // generation } (@grasp-os/shared/router). No id: the first deploy to an
   // account creates it as grasp-os-router-hosts, later deploys keep it. It
   // holds routing only, no client content, so KV's lack of an EU

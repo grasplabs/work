@@ -544,7 +544,7 @@ export const providers: Readonly<Record<OAuthProvider, OAuthProviderConfig>> = {
 
 /**
  * Grasp's OAuth apps at the apps, by provider: one Worker secret, JSON,
- * which the console delivers as it does the suites' secrets. Each entry
+ * which the admin delivers as it does the suites' secrets. Each entry
  * is read on its own, so one that's broken leaves only its own app unset.
  */
 const appClientsSchema = z.record(z.string(), z.unknown());

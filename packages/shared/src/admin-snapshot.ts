@@ -16,7 +16,7 @@ import { roleSchema } from "./roles.ts";
 // What Grasp's admin works its pages out from for one client (core's
 // admin-snapshot.ts): the prototype's staff snapshot (`StaffSnapshot` in
 // ./admin/org-record.ts), from what core holds. For Grasp's staff only:
-// the console asks, signed with the key both derive from the client's
+// the admin asks, signed with the key both derive from the client's
 // auth secret for this purpose alone, as it asks for the onboarding
 // summary (`onboarding-summary.ts`), and names the staff member Cloudflare
 // Access let in, whom core's audit log records as the reader. Unlike the
@@ -30,12 +30,12 @@ import { roleSchema } from "./roles.ts";
 // and people's own connections, and chats' requests, only as counts by app.
 //
 // Objects in the answer are read with `z.object`, which drops what it
-// doesn't know: the console asks cores on several releases, and a newer
-// core's added field mustn't make an older console's read fail. Core
+// doesn't know: the admin asks cores on several releases, and a newer
+// core's added field mustn't make an older admin's read fail. Core
 // answers with what this schema keeps of what it built, so nothing it
 // doesn't name ever leaves core either.
 
-/** Where the console asks core for the snapshot. Behind the router-secret check. */
+/** Where the admin asks core for the snapshot. Behind the router-secret check. */
 export const adminSnapshotPath = "/platform/admin";
 
 /** The purpose the request's signing key is derived for (`hkdfHmacKey`). */
@@ -48,7 +48,7 @@ export const adminSnapshotMaxSkewMs = 5 * 60 * 1000;
 export const adminSnapshotMaxBytes = 1024;
 
 /**
- * What the console sends: when, so a request caught on its way can't be
+ * What the admin sends: when, so a request caught on its way can't be
  * sent later, and the staff member asking, as Cloudflare Access verified
  * them, for the audit log.
  */
@@ -118,7 +118,7 @@ const meteredSchema = z.object({
 /** One day's AI use, by purpose then model: the prototype's `MeterDay`. */
 export const adminUsageDaySchema = z.object({
   day: z.iso.date(),
-  // A purpose this console doesn't know, from a newer core, is dropped
+  // A purpose this admin doesn't know, from a newer core, is dropped
   // unread, whatever its numbers look like, rather than refusing the whole
   // answer.
   use: z.preprocess(

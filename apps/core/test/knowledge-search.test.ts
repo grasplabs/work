@@ -304,7 +304,9 @@ describe("search access", () => {
     const member = await personOf("user");
     const outsider = await personOf("user");
     const teamId = await newTeam(admin, [member]);
-    const word = unique();
+    // Letters first: the trigram passes skip a word of digits alone (an
+    // identifier's number), and `unique()` is sometimes only digits.
+    const word = `zq${unique()}`;
     const onlyInTeam = `alleen${unique()}`;
     // `voor…regeling`: a whole word to the word index, and `word` only
     // inside it, to the trigram index.
