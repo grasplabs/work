@@ -32,7 +32,8 @@ import {
 //
 // A person's My Drive isn't a shared drive and has no drive ID to hold a
 // call to, or to check a file against: it is left out. An organization's
-// files live in shared drives. Scoping is per drive, not per folder.
+// files live in shared drives, so these tools reach `company`. Scoping is
+// per drive, not per folder.
 //
 // Content: Google serves a stored file's bytes from www.googleapis.com
 // itself (`alt=media`, no redirect, so the egress follows none). Google's
@@ -183,6 +184,7 @@ const listFolder = defineTool({
   }),
   output: pageOutput,
   readOnly: true,
+  reach: "company",
   resource: "drive",
   routes: [driveListRoute],
   run: async ({ drive, folder, top, page }) =>
@@ -216,6 +218,7 @@ const searchFiles = defineTool({
   }),
   output: pageOutput,
   readOnly: true,
+  reach: "company",
   resource: "drive",
   routes: [driveListRoute],
   run: async ({ drive, query, top, page }) =>
@@ -248,6 +251,7 @@ const readFile = defineTool({
     content: z.string().nullable(),
   }),
   readOnly: true,
+  reach: "company",
   resource: "drive",
   // A file has no drive in its path: `run` checks it before its content.
   routes: [
