@@ -18,6 +18,7 @@ import m0015 from './0015_brain_intake.sql';
 import m0016 from './0016_setup_choices.sql';
 import m0017 from './0017_links_taken.sql';
 import m0018 from './0018_counted_works.sql';
+import m0019 from './0019_settled_works.sql';
 
   export default {
     journal,
@@ -40,7 +41,8 @@ m0014,
 m0015,
 m0016,
 m0017,
-m0018
+m0018,
+m0019
     }
   }
   

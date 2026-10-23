@@ -729,6 +729,10 @@ msgstr "{live} sur {count} en service"
 msgid "{low} to {high}"
 msgstr "{low} à {high}"
 
+#: src/onboarding/setup-steps.tsx
+msgid "{mapped, plural, one {One piece of work is mapped and ready for you.} other {# pieces of work are mapped and ready for you.}}"
+msgstr "{mapped, plural, one {Une tâche est cartographiée et prête pour vous.} other {# tâches sont cartographiées et prêtes pour vous.}}"
+
 #: src/dashboard/standard-widgets.tsx
 msgid "{mapped} mapped"
 msgstr "{mapped} cartographiés"
@@ -1301,6 +1305,10 @@ msgstr "Entretien avec {team}"
 #: src/brain/brain.ts
 msgid "{team}, {total} interviewed: {who}."
 msgstr "{team}, {total} interviewés : {who}."
+
+#: src/onboarding/review-parts.tsx
+msgid "{team}: some do a step another way, and nobody could say why. I keep both ways until you decide."
+msgstr "{team} : certains font une étape autrement, et personne n’a su dire pourquoi. Je garde les deux façons jusqu’à ce que vous décidiez."
 
 #: src/landscape/app-cells.tsx
 msgid "{teamName} share of users"
@@ -6668,6 +6676,10 @@ msgstr "Rien que pour vous"
 msgid "Keep “Require sender authentication” on, then save."
 msgstr "Laissez « Exiger l’authentification de l’expéditeur » activé, puis enregistrez."
 
+#: src/onboarding/review-parts.tsx
+msgid "Keep both"
+msgstr "Garder les deux"
+
 #: src/interview/closed.tsx
 msgid "Keep holding"
 msgstr "Maintenez appuyé"
@@ -6901,6 +6913,10 @@ msgstr "Relâchez pour les ajouter"
 #: src/onboarding/review-parts.tsx
 msgid "Let Grasp’s mail through"
 msgstr "Laissez passer les e-mails de Grasp"
+
+#: src/onboarding/setup-steps.tsx
+msgid "Let me put it all together for you."
+msgstr "Je rassemble tout pour vous."
 
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Let the interviews run again"
@@ -8797,6 +8813,10 @@ msgstr "Seulement cartographié"
 msgid "Only people who may approve packages see what is approved across the workspace."
 msgstr "Seules les personnes autorisées à approuver des paquets voient ce qui est approuvé dans tout l’espace de travail."
 
+#: src/onboarding/review-parts.tsx
+msgid "Only the first way"
+msgstr "Seulement la première façon"
+
 #: src/routes/_shell.settings.models.tsx
 msgid "Only the models marked as taking sensitive data may be sent data from a sensitive collection (marked in Knowledge) or a sensitive connection, or from a chat, domain or run that read one."
 msgstr "Seuls les modèles marqués comme acceptant des données sensibles peuvent recevoir des données d’une collection sensible (marquée dans Connaissances) ou d’une connexion sensible, ou d’un chat, d’un domaine ou d’une exécution qui en a lu une."
@@ -8808,6 +8828,10 @@ msgstr "Seulement le propriétaire"
 #: src/routes/decisions.$decision.tsx
 msgid "Only the people this decision is from can answer it."
 msgstr "Seules les personnes concernées par cette décision peuvent y répondre."
+
+#: src/onboarding/review-parts.tsx
+msgid "Only the second way"
+msgstr "Seulement la seconde façon"
 
 #: src/workflows/resource-params.tsx
 msgid "Only the workflow's builders can change these."
@@ -8997,6 +9021,10 @@ msgstr "Ouvert le {date}"
 msgctxt "where someone stands"
 msgid "Opened the link"
 msgstr "A ouvert le lien"
+
+#: src/onboarding/platform-reveal.tsx
+msgid "Opening Grasp"
+msgstr "Grasp s’ouvre"
 
 #: src/routes/guest.tsx
 msgid "Opening the chat…"
@@ -9316,6 +9344,10 @@ msgstr "Personnes"
 #: src/routes/_shell.settings.pulse.tsx
 msgid "People and devices"
 msgstr "Personnes et appareils"
+
+#: src/onboarding/review-parts.tsx
+msgid "People do “{name}” in two ways"
+msgstr "« {name} » se fait de deux façons"
 
 #: src/dashboard/report.ts
 msgid "People heard"
@@ -12503,6 +12535,14 @@ msgstr "Le téléversement a été annulé."
 msgid "The vision conversation, the interviews with stakeholders and employees by voice or chat, and chats with a Grasp agent. Adds how each team works, in their own words."
 msgstr "L’entretien de vision, les entretiens avec les parties prenantes et les employés par la voix ou par chat, et les échanges avec un agent Grasp. Ajoute comment chaque équipe travaille, avec ses propres mots."
 
+#: src/onboarding/review-parts.tsx
+msgid "The way most told it"
+msgstr "Comme la plupart l’ont raconté"
+
+#: src/onboarding/review-parts.tsx
+msgid "The way some told it"
+msgstr "Comme certains l’ont raconté"
+
 #: src/connections/connection-list.tsx
 msgid "the whole connection"
 msgstr "toute la connexion"
@@ -13921,6 +13961,10 @@ msgstr "Ce qui le fait s’exécuter tout seul ne peut pas être lu dans son cod
 msgid "What needs Grasp"
 msgstr "Ce qui attend Grasp"
 
+#: src/onboarding/setup-steps.tsx
+msgid "What needs you"
+msgstr "Ce qui vous attend"
+
 #: src/chat/builds.tsx
 msgid "What other domains may call"
 msgstr "Ce que les autres domaines peuvent appeler"
@@ -14819,8 +14863,8 @@ msgid "Your place is kept."
 msgstr "Votre progression est conservée."
 
 #: src/onboarding/setup-steps.tsx
-msgid "Your platform is open. We’ll walk you through it."
-msgstr "Votre plateforme est ouverte. Nous allons vous la faire découvrir."
+msgid "Your platform is open."
+msgstr "Votre plateforme est ouverte."
 
 #: src/routes/_shell.policies.index.tsx
 msgctxt "tab: the company's own policy documents"
