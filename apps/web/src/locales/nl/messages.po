@@ -1040,6 +1040,14 @@ msgstr "{sources, plural, one {Tijdrovend werk dat geautomatiseerd kan worden, g
 msgid "{spent} of {limit}"
 msgstr "{spent} van {limit}"
 
+#: src/onboarding/about-story.tsx
+msgid "{sponsor} gave me the big picture. Now I need the details."
+msgstr "{sponsor} gaf me het grote plaatje. Nu heb ik de details nodig."
+
+#: src/onboarding/setup-steps.tsx
+msgid "{sponsor} told me a lot about your company in our first conversation. Before we start, which language do you prefer?"
+msgstr "{sponsor} heeft me in ons eerste gesprek veel over jullie bedrijf verteld. Voordat we beginnen: welke taal heeft je voorkeur?"
+
 #: src/brain/brain.ts
 msgid "{statements, plural, one {# statement: {breakdown}} other {# statements: {breakdown}}}"
 msgstr "{statements, plural, one {# uitspraak: {breakdown}} other {# uitspraken: {breakdown}}}"

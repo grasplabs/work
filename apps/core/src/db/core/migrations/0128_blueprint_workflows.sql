@@ -1,0 +1,1 @@
+ALTER TABLE `blueprints` ADD `workflows` text DEFAULT '[]' NOT NULL;

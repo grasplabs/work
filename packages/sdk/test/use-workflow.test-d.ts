@@ -197,3 +197,72 @@ export const useRefusedReferences = (): void => {
     workflows.summarizeNote
   );
 };
+
+declare const anything: unknown;
+declare const json: Record<string, unknown>;
+
+/**
+ * `send` (spec 10.4.6): the data is inferred from the event reference,
+ * never widened by what the caller passes; another workflow's event, a
+ * string, an object made up and data as unknown or loose JSON are
+ * refused; a workflow that declares no event a screen sends has nothing
+ * `send` takes.
+ */
+export const useSendChecks = (): void => {
+  const summary = useWorkflow(workflows.summarizeNote, { runId });
+  expectTypeOf(
+    summary.send(workflows.summarizeNote.events.styleChosen, {
+      style: "short",
+    })
+  ).toEqualTypeOf<Promise<void>>();
+  void summary.send(workflows.summarizeNote.events.noteEdited, { noteId });
+  void summary.send(workflows.summarizeNote.events.noteEdited, {
+    noteId,
+    title: "Renamed",
+  });
+  void summary.send(workflows.summarizeNote.events.styleChosen, {
+    // @ts-expect-error -- a value outside the event's enum
+    style: "medium",
+  });
+  void summary.send(workflows.summarizeNote.events.styleChosen, {
+    style: "short",
+    // @ts-expect-error -- a field the event doesn't declare
+    source: "urn:forged",
+  });
+  // @ts-expect-error -- its required field left out
+  void summary.send(workflows.summarizeNote.events.noteEdited, {});
+  void summary.send(workflows.summarizeNote.events.noteEdited, {
+    // @ts-expect-error -- a task's ID, not a note's
+    noteId: taskId,
+  });
+  // @ts-expect-error -- data typed as nothing in particular
+  void summary.send(workflows.summarizeNote.events.styleChosen, anything);
+  // @ts-expect-error -- loose JSON in place of the declared schema
+  void summary.send(workflows.summarizeNote.events.styleChosen, json);
+  // @ts-expect-error -- another workflow's event
+  void summary.send(workflows.archiveNotes.events.confirmed, {
+    confirmed: true,
+  });
+  // @ts-expect-error -- an event's name, not its reference
+  void summary.send("styleChosen", { style: "short" });
+  void summary.send(
+    // @ts-expect-error -- an object made up, not the generated reference
+    { kind: "workflowEvent", alias: "styleChosen" },
+    { style: "short" }
+  );
+  // The data isn't inferred from the call: one event's data for another's.
+  void summary.send(
+    workflows.summarizeNote.events.styleChosen,
+    // @ts-expect-error -- the other event's data
+    { noteId }
+  );
+
+  const archive = useWorkflow(workflows.archiveNotes);
+  void archive.send(workflows.archiveNotes.events.confirmed, {
+    confirmed: true,
+  });
+  // @ts-expect-error -- the summary workflow's event, on the archive's hook
+  void archive.send(workflows.summarizeNote.events.styleChosen, {
+    style: "short",
+  });
+};

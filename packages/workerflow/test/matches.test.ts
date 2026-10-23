@@ -363,6 +363,8 @@ describe("a wait for a match", () => {
       sql.exec("UPDATE run SET schema = 9");
       sql.exec("ALTER TABLE events DROP COLUMN attributes");
       sql.exec("ALTER TABLE steps DROP COLUMN event_match");
+      sql.exec("DROP INDEX events_sender");
+      sql.exec("ALTER TABLE events DROP COLUMN sender");
       sql.exec("ALTER TABLE events DROP COLUMN reserved");
     });
 
