@@ -264,6 +264,7 @@ const coreDb: D1State = {
     app_test_fixtures: transient(`${core}app-tests.ts`),
     app_test_runs: transient(`${core}workflows/fixture-runs.ts`),
     screen_submissions: exported(`${core}screen-submissions.ts`),
+    action_invocations: exported(`${core}action-invocation.ts`),
     preview_fixture_stores: transient(`${core}sealed-previews.ts`),
     resource_templates: exported(`${core}resource-bindings.ts`),
     app_resource_bindings: exported(`${core}resource-bindings.ts`),
@@ -698,8 +699,8 @@ const actionInvocations: DurableObjectState = {
   objects: {
     kind: "named",
     name: "The SHA-256 of its person, App, contract and key (`invocationName`).",
-    inventories: [],
-    note: "An App's object holds the names of its open invocations; nothing lists finished ones.",
+    inventories: ["core-db/action_invocations"],
+    note: "Listed before it records a run and unlisted once it empties itself; one from before the inventory has no row and goes within about a day.",
   },
   kv: {
     invocation: exported(`${core}action-invocation.ts`),

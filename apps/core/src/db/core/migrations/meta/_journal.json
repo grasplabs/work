@@ -890,6 +890,13 @@
       "when": 1792710308468,
       "tag": "0126_app_candidates",
       "breakpoints": true
+    },
+    {
+      "idx": 127,
+      "version": "6",
+      "when": 1792716637811,
+      "tag": "0127_action_invocations",
+      "breakpoints": true
     }
   ]
 }
