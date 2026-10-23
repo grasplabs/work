@@ -250,23 +250,26 @@ const markDead = async (
  * permissions (oauth.ts `reconnect`). One granted all of them was refused
  * for another reason, and stays as it is; so does one whose grant connect
  * doesn't know (tokens stored before it kept them), until a refresh tells
- * it. Whether it marked it.
+ * it. Whether it is marked now: by this call, or by another refused while
+ * this one was on its way, which took its tokens with it.
  */
 export const markIfGrantLacks = async (
   env: Env,
   connectionId: string
 ): Promise<boolean> => {
   const connection = await drizzle(env.DB)
-    .select({ provider: connections.provider })
+    .select({ provider: connections.provider, status: connections.status })
     .from(connections)
     .where(eq(connections.id, connectionId))
     .get();
   const provider =
     connection === undefined ? undefined : providerFor(connection.provider);
   const row = await readRow(env.DB, connectionId);
+  if (row === undefined) {
+    return connection?.status === "needs_reauth";
+  }
   if (
     provider?.kind !== "oauth" ||
-    row === undefined ||
     row.grantedScopes === null ||
     scopesLacking(provider, row.grantedScopes).length === 0
   ) {

@@ -890,6 +890,34 @@ describe("the Microsoft 365 connector's calendar writes", () => {
     expect(graph.writesDone()).toBe(0);
   });
 
+  it("refuse a change when Graph's answer doesn't say who is invited", async () => {
+    const connection = await connected();
+    const own = connection.person.email;
+    const made = madeId.parse(
+      await outputOf(createEvent(connection, focusTime(own)))
+    );
+    const outcomes: string[] = [];
+    for (const how of ["missing", "null"] as const) {
+      graph.leaveOutAttendees(how);
+      outcomes.push(
+        // oxlint-disable-next-line no-await-in-loop -- one read left out at a time
+        await outcome(
+          updateEvent(connection, {
+            mailbox: own,
+            event: made,
+            timeZone: amsterdam,
+            subject: "Moved",
+          })
+        )
+      );
+    }
+    expect(outcomes).toStrictEqual([
+      "connect.action_failed",
+      "connect.action_failed",
+    ]);
+    expect(graph.writesDone()).toBe(1);
+  });
+
   it("refuse a change once a guest was invited after the event was checked", async () => {
     const connection = await connected();
     const own = connection.person.email;
@@ -1378,6 +1406,37 @@ describe("the Microsoft 365 connector's calendar writes, when something goes wro
       sameConnection: true,
       again: "ok",
       writesDone: 1,
+    });
+  });
+
+  it("let every call Graph refused before the connection was marked go through once it is reconnected", async () => {
+    const connection = await connectedWith(readOnlyCalendars);
+    // A second call is refused while the first's refusal is still on its
+    // way: the second marks the connection, so the first finds it marked.
+    let second = "";
+    graph.failWrite(403, accessDenied, async () => {
+      graph.failWrite(403, accessDenied);
+      second = await outcome(createFocusTime(connection, "run-7:second"));
+    });
+    const first = await outcome(createFocusTime(connection, "run-7:first"));
+    await connectAccount(providers, connection.person, {
+      ...ownAccount(connection.person),
+      granted: grantOf([...readOnlyCalendars, "Calendars.ReadWrite"]),
+    });
+    const again = [
+      await outcome(createFocusTime(connection, "run-7:first")),
+      await outcome(createFocusTime(connection, "run-7:second")),
+    ];
+    expect({
+      first,
+      second,
+      again,
+      writesDone: graph.writesDone(),
+    }).toStrictEqual({
+      first: "connect.connection_inactive",
+      second: "connect.connection_inactive",
+      again: ["ok", "ok"],
+      writesDone: 2,
     });
   });
 

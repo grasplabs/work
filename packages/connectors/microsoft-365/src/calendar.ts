@@ -513,7 +513,15 @@ const updateEvent = defineTool({
       graphUrl(path, { $select: "isOrganizer,attendees" }),
       guardedEvent
     );
-    if ((found.attendees ?? []).length > 0) {
+    // An answer without a guest list proves nobody is invited no more than
+    // it proves someone is: only an empty list lets the change go out.
+    if (found.attendees === null || found.attendees === undefined) {
+      throw new ToolError(
+        "Outlook didn't say who is invited to this event: change it in Outlook",
+        { code: invalidCode }
+      );
+    }
+    if (found.attendees.length > 0) {
       throw new ToolError(
         "This event has guests, and Outlook would tell each of them of the change: change it in Outlook",
         { code: invalidCode }

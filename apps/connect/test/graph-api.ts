@@ -106,6 +106,9 @@ const eventOf = (mailbox: string, id: string): GraphEvent =>
 /** Whether a guest joins the event the next update reads, once it has read it. */
 let inviteDuringRead = false;
 
+/** How the next event read leaves out its guest list, if it does. */
+let attendeesLeftOut: "missing" | "null" | undefined;
+
 const newEtag = (): string => `W/"${crypto.randomUUID()}"`;
 
 /** The time zone a request's `Prefer` header asks for, UTC if none. */
@@ -271,6 +274,12 @@ const graphRoutes: ProviderRoute<Part>[] = [
         "@odata.etag": newEtag(),
       });
     }
+    if (attendeesLeftOut !== undefined) {
+      const { attendees: _attendees, ...rest } = event;
+      const leftOut = attendeesLeftOut;
+      attendeesLeftOut = undefined;
+      return json(leftOut === "null" ? { ...rest, attendees: null } : rest);
+    }
     return json(event);
   }),
   route("PATCH", `${users}/events/(?<id>[^/]+)`, async (part) => {
@@ -382,6 +391,7 @@ export const fakeGraph = () => {
     events.clear();
     taggedEvents.clear();
     inviteDuringRead = false;
+    attendeesLeftOut = undefined;
   });
   const { sent, writesDone, fail } = fakeProvider({
     hosts: [graphHost],
@@ -414,12 +424,20 @@ export const fakeGraph = () => {
         writesOnly: true,
       });
     },
-    /** Makes Graph answer the next write with `status`, without acting. */
-    failWrite: (status: number, body?: unknown) => {
+    /**
+     * Makes Graph answer the next write with `status`, without acting,
+     * running `meanwhile` (if given) while the write is with it.
+     */
+    failWrite: (
+      status: number,
+      body?: unknown,
+      meanwhile?: () => Promise<void>
+    ) => {
       fail({
         status,
         body: body ?? { error: { code: "Failed" } },
         writesOnly: true,
+        ...(meanwhile === undefined ? {} : { meanwhile }),
       });
     },
     /**
@@ -438,6 +456,10 @@ export const fakeGraph = () => {
     /** Has someone invite a guest to the next event read, right after it. */
     inviteDuringRead: () => {
       inviteDuringRead = true;
+    },
+    /** Graph's next event read leaves the guest list out, or sends it as null. */
+    leaveOutAttendees: (how: "missing" | "null") => {
+      attendeesLeftOut = how;
     },
     /** Runs `meanwhile` while Graph answers the next lookup by effect key. */
     whileLookingUp: (meanwhile: () => Promise<void>) => {
