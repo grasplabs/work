@@ -7,8 +7,9 @@ import { drizzle } from "drizzle-orm/d1";
 import { collections } from "../db/knowledge/schema.ts";
 import { grantedPermissions } from "../permissions.ts";
 import type { Reader } from "./access.ts";
-import { collectionsAllowed } from "./access.ts";
+import { allowedFor } from "./authorize.ts";
 import { readableCollection } from "./collections.ts";
+import { portsOf } from "./ports.ts";
 import { searchSections } from "./search.ts";
 import type { FoundSection } from "./search.ts";
 
@@ -88,11 +89,11 @@ export const d1BrainStore = (env: Env): BrainStore => ({
   },
   requireReadable: async (reader, collectionIds) => {
     const db = drizzle(env.KNOWLEDGE);
-    const { condition } = await collectionsAllowed(env, db, reader);
+    const allowed = await allowedFor(portsOf(env), reader);
     await Promise.all(
       collectionIds.map(
         async (collectionId) =>
-          await readableCollection(db, condition, collectionId)
+          await readableCollection(db, allowed.collections, collectionId)
       )
     );
   },
@@ -111,7 +112,7 @@ export const d1BrainStore = (env: Env): BrainStore => ({
     // and for an App or agent its grants, the brain grant among them. A
     // change to any of those changes the key.
     const db = drizzle(env.KNOWLEDGE);
-    const { condition } = await collectionsAllowed(env, db, reader);
+    const allowed = await allowedFor(portsOf(env), reader);
     const readable = await db
       .select({
         id: collections.id,
@@ -119,7 +120,7 @@ export const d1BrainStore = (env: Env): BrainStore => ({
         sensitive: collections.sensitive,
       })
       .from(collections)
-      .where(condition)
+      .where(allowed.collections)
       .orderBy(collections.id);
     const permissions =
       reader.type === "person"
