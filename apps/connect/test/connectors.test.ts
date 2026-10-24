@@ -518,8 +518,21 @@ describe("a native connector", () => {
       "mail.categorise": "change-own",
       "mail.send": "reach-others",
       "mail.createDraft": "change-company",
+      "mail.createReplyDraft": "change-company",
       ...calendar,
       ...files,
+      "lists.items": "read-company",
+      "calendar.create": "change-own",
+      "calendar.update": "change-own",
+      "excel.listRows": "read-company",
+      "excel.addRow": "change-company",
+      "excel.updateRow": "change-company",
+      "mail.thread": "read-company",
+      // A delegated token opens no one's To Do but its own user's.
+      "todo.lists": "read-own",
+      "todo.tasks": "read-own",
+      "todo.create": "change-own",
+      "todo.complete": "change-own",
     });
     expect(classesOf("google-workspace")).toStrictEqual({
       "mail.list": "read-own",

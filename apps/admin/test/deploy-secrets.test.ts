@@ -54,7 +54,8 @@ const byName = async (
     app === "core" ? core : connect,
     given,
     { id: "acme", generation, rotationLiveAt },
-    now
+    now,
+    new Map()
   );
   return Object.fromEntries(values.map(({ name, value }) => [name, value]));
 };
@@ -102,7 +103,7 @@ describe("a Worker's secrets", () => {
     ]);
   });
 
-  it("refuse every derived name and every previous name given as a shared one", async () => {
+  it("refuse every derived name, every previous name and every sealed name given as a shared one", async () => {
     const names = [
       "ROUTER_SECRET",
       "ROUTER_SECRET_PREVIOUS",
@@ -111,6 +112,8 @@ describe("a Worker's secrets", () => {
       "CAPABILITY_SIGNING_KEY_PREVIOUS",
       "TOKEN_ENCRYPTION_KEY",
       "TOKEN_ENCRYPTION_KEY_PREVIOUS",
+      // A client's own bot secret, sealed: never what every client shares.
+      "TEAMS_BOT_SECRET",
     ];
     const codes = await Promise.all(
       names.map(async (name) => {
@@ -137,7 +140,8 @@ describe("a Worker's secrets", () => {
         { ...connect, requiredSecrets: ["MICROSOFT_CLIENT_SECRET"] },
         secrets,
         { id: "acme", generation: 1, rotationLiveAt: null },
-        now
+        now,
+        new Map()
       )
     ).rejects.toMatchObject({ code: "missing_secret" });
   });

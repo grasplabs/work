@@ -325,6 +325,17 @@ interface Line {
 
 let lineId = 0;
 let source: AudioBufferSourceNode | null = null;
+
+/** Who wants to know when a line is first heard: how fast he answers is measured to it. */
+const soundListeners = new Set<(at: number) => void>();
+
+/** Tells `listener` the moment each line said out loud is first heard, on the page's clock; until stopped. */
+export const onFirstSound = (listener: (at: number) => void): (() => void) => {
+  soundListeners.add(listener);
+  return () => {
+    soundListeners.delete(listener);
+  };
+};
 /** Who waits for the line being said to be over. */
 let ending: (() => void) | null = null;
 
@@ -483,6 +494,12 @@ const playHeard = (
     );
     source = node;
     node.start();
+    if (at === 0) {
+      const heardAt = performance.now();
+      for (const listener of soundListeners) {
+        listener(heardAt);
+      }
+    }
   };
   const onward = async (at: number): Promise<void> => {
     const next = coming[at];

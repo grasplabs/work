@@ -743,10 +743,13 @@ describe("a migration's dry run on a sample", { timeout: 180_000 }, () => {
       ],
       fixture.owner.userId
     );
+    const queued = await sampleMigration(env, admin, asked);
+    // Sampled before the switch is refused: the refusal takes the
+    // backfill's run up again (`keepStoreBackfillGoing`), which may
+    // transform the note before a later sample reads it.
     const switching = await refusalOf(async () => {
       await requireStoreSchemaActive(env, fixture.app, 3, { activate: true });
     });
-    const queued = await sampleMigration(env, admin, asked);
     expect({
       ready: [ready.outcome, ready.rows],
       switching: switching.code,

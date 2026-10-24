@@ -1167,7 +1167,7 @@ describe("grasp.model calls of JSON workflows", () => {
       kind: "system",
       workflowId: byTrigger.workflow.id,
       version: 1,
-      config: {},
+      config: { event: { contract: "notes", type: "note.created" } },
     });
     const triggerGrant = await startOf(
       { type: "trigger", triggerId: triggerIdSchema.parse(trigger.id) },
@@ -1287,7 +1287,7 @@ describe("grasp.model calls of JSON workflows", () => {
         kind: "system",
         workflowId: workflow.id,
         version: 1,
-        config: {},
+        config: { event: { contract: "notes", type: "note.created" } },
       });
       await granted(ada, admin, {
         subject: {

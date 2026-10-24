@@ -64,6 +64,15 @@ interface __BaseEnv_Env {
    */
   COMPOSIO_API_KEY?: string;
   /**
+   * The client's own Teams bot (src/channels.ts): its Entra app ID, the
+   * client's tenant the app is registered in, and its client secret. Set
+   * by hand on staging until the console seals them per client. While any
+   * is unset, every channel request is refused as `unconfigured`.
+   */
+  TEAMS_BOT_ID?: string;
+  TEAMS_BOT_TENANT_ID?: string;
+  TEAMS_BOT_SECRET?: string;
+  /**
    * `none` on workerd and on-prem, which have no Cloudflare jurisdiction:
    * the clock's object is then taken from the plain namespace
    * (src/clock.ts). Unset or any other value means the EU. Never set in

@@ -5,6 +5,12 @@ import {
 } from "@grasp-os/shared/errors";
 import { requestIdHeader } from "@grasp-os/shared/http";
 import {
+  hearAnswerSchema,
+  hearSecondsMax,
+  interviewHearPath,
+} from "@grasp-os/shared/interview-hear";
+import type { HearFields } from "@grasp-os/shared/interview-hear";
+import {
   interviewApiPath,
   interviewProgressSchema,
 } from "@grasp-os/shared/interview-links";
@@ -305,3 +311,46 @@ export const keepKey = async (secret: string, key: string): Promise<void> => {
 /** Where what they typed and did not send is kept, per link. */
 export const draftName = async (secret: string): Promise<string> =>
   `${await keyName(secret)}.draft`;
+
+/** How long a recording may take to be written down. */
+const hearTimeoutMs = 20_000;
+
+/**
+ * A stretch they said, written down from its recording, when it couldn't
+ * be as they said it: what was heard, or why not. The recording is sent
+ * once and kept nowhere.
+ */
+export const hearRecording = async ({
+  audio,
+  ...fields
+}: Omit<HearFields, "seconds"> & {
+  seconds: number;
+  audio: Blob;
+}): Promise<{ heard: string } | { reason: "failed" | "limited" }> => {
+  const form = new FormData();
+  form.set("secret", fields.secret);
+  form.set("key", fields.key);
+  form.set("locale", fields.locale);
+  form.set(
+    "seconds",
+    String(Math.min(hearSecondsMax, Math.max(0, fields.seconds)))
+  );
+  form.set("audio", audio, "stretch");
+  try {
+    const response = await fetch(interviewHearPath, {
+      method: "POST",
+      body: form,
+      credentials: "omit",
+      signal: AbortSignal.timeout(hearTimeoutMs),
+    });
+    if (!response.ok) {
+      return { reason: response.status === 429 ? "limited" : "failed" };
+    }
+    const parsed = hearAnswerSchema.safeParse(await response.json());
+    return parsed.success
+      ? { heard: parsed.data.heard.trim() }
+      : { reason: "failed" };
+  } catch {
+    return { reason: "failed" };
+  }
+};

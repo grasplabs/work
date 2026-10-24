@@ -359,6 +359,45 @@ describe("fair model admission", { timeout: 60_000 }, () => {
     });
   });
 
+  it("holds no share while a transcription is open, so calls go on beside it", async () => {
+    const { fake } = gatewayWith([answered]);
+    const coreEnv: ModelsEnv = {
+      ...env,
+      AI: fake.binding,
+      MODEL_GATEWAY: {
+        gateway,
+        models: [workersAi, "elevenlabs/scribe_v2_realtime"],
+      },
+      QUOTA_LIMITS: policy,
+    };
+    // As many sockets open as the client has shares in all.
+    const open = await Promise.all(
+      Array.from(
+        { length: policy.limits.modelClientRequests },
+        async () =>
+          await models(coreEnv).listen({
+            model: "elevenlabs/scribe_v2_realtime",
+            seconds: 900,
+            openMs: 30 * 60_000,
+            purpose: "onboarding.transcription",
+            trigger: { type: "system" },
+            work: { onboarding: true },
+          })
+      )
+    );
+
+    const beside = await outcome(
+      models(coreEnv).call(callBy(newPerson().userId, 0))
+    );
+    await Promise.all(
+      open.map(async (listening) => {
+        await listening.heard(0, "cancelled");
+      })
+    );
+
+    expect([open.length, beside]).toStrictEqual([3, "ok"]);
+  });
+
   it("holds one person to their share across Apps, and leaves room for someone else", async () => {
     const release = Promise.withResolvers<boolean>();
     const { fake, call } = gatewayWith([

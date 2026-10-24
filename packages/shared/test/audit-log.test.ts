@@ -172,8 +172,10 @@ describe("audit event types", () => {
         "workflow.param.updated",
         "model.budget.alert",
         "model.budget.exhausted",
+        "model.limit.set",
       ].map((action) => typeOf(action))
     ).toStrictEqual([
+      "config",
       "config",
       "config",
       "config",

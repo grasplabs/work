@@ -16,9 +16,10 @@ import { env } from "cloudflare:workers";
 import { chainHash } from "../src/audit-chain.ts";
 import type { AuditLog } from "../src/audit-log.ts";
 import { auditLog } from "../src/audit-log.ts";
-import { drainAuditOutboxes } from "../src/audit-outbox.ts";
+import { drainAuditOutboxes, drainObjectOutbox } from "../src/audit-outbox.ts";
 import { AuditRpc } from "../src/audit-rpc.ts";
 import { identify } from "../src/auth/identity.ts";
+import { onboardingStore } from "../src/onboarding/store.ts";
 
 /** The log's events after position `after`, oldest first, with positions. */
 const entriesAfter = async (
@@ -49,11 +50,23 @@ export const loggedEvents = async (): Promise<AuditEvent[]> => {
 
 /**
  * Drains every outbox into the log, connect's included, as the cron trigger
- * does. A change drains its own outbox in the background, so a test that
- * reads the log drains first rather than wait for that.
+ * does, and the onboarding store's, which only the store itself drains (in
+ * the background after each change, then by its alarm). A change drains its
+ * own outbox in the background, so a test that reads the log drains first
+ * rather than wait for that: under load that background drain can still be
+ * on its way when the test reads, and the event isn't in the log yet. A
+ * drain here that meets the store's own takes the same rows, and the log
+ * keeps each event ID once.
  */
 const drained = async (): Promise<void> => {
-  await drainAuditOutboxes(env);
+  await Promise.all([
+    drainAuditOutboxes(env),
+    runInDurableObject(
+      onboardingStore(env),
+      async (_instance, state) =>
+        await drainObjectOutbox(env, state.storage.sql)
+    ),
+  ]);
 };
 
 /**
