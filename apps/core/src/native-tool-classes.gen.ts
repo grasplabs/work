@@ -10,6 +10,7 @@ export const nativeToolClasses: Readonly<
   Record<string, Readonly<Record<string, string>>>
 > = {
   "google": {
+    "calendar.create": "change-own",
     "calendar.get": "read-company",
     "calendar.list": "read-company",
     "files.list": "read-company",
