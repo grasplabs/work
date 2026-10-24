@@ -51,7 +51,9 @@ const intakeFor = async (admin: Person): Promise<string> => {
     await api.apps.publish(created.app.id);
     // Its stakeholder chats, through the permission just granted, bound as
     // an admin binds them on the engine's Resources tab.
-    const [guests] = created.permissions;
+    const guests = created.permissions.find(
+      ({ binding }) => binding === "GUESTS"
+    );
     if (guests !== undefined) {
       await api.resourceBindings.approve({
         app: created.app.id,
@@ -60,19 +62,22 @@ const intakeFor = async (admin: Person): Promise<string> => {
         reviewed: { version: 1 },
       });
     }
-    // The model its reading goes through (app.ts), bound as an admin binds
-    // it on the engine's Resources tab: to the deployment's first model,
-    // capped at a cent a request. The local stack reaches no model, and a
-    // call it can't reach is tried again for minutes; a reading's request
-    // reserves more than a cent, so the binding's cap refuses it at once,
-    // before anything is sent. Core's tests read notes with a scripted
-    // model (apps/core/test/intake.test.ts).
-    await api.resourceBindings.approve({
-      app: created.app.id,
+    // The model its reading goes through: the `extractor` of the `extract`
+    // workflow the copy got (the one it asked to start), approved as an
+    // admin approves it on the workflow's page, for the deployment's first
+    // model. The local stack reaches no model, so the reading's model call
+    // fails. Core's tests read notes with a scripted model
+    // (apps/core/test/intake.test.ts).
+    const extract = created.permissions.find(
+      ({ binding }) => binding === "EXTRACT"
+    );
+    if (extract?.object.type !== "workflow") {
+      throw new Error("Expected the copy to ask to start its workflow");
+    }
+    await api.workflowResources.approveBinding(extract.object.workflowId, {
       alias: "extractor",
       target: { kind: "model", model: defaultGatewayModels[0] },
       reviewed: { version: 1 },
-      budget: { perRequest: 0.01 },
     });
     const { generation } = await api.screenTrust.review(created.app.id);
     await api.screenTrust.classify(created.app.id, "ordinary", generation);
@@ -165,7 +170,8 @@ test("an admin sends notes to be read, and follows the reading to its end", asyn
   const { admin } = peopleIn("intake");
   const title = `Notes ${crypto.randomUUID().slice(0, 8)}`;
   const app = await intakeFor(admin);
-  // Its binding's cap refuses the reading's request at once (`intakeFor`).
+  // The local stack reaches no model, so the reading's model call fails
+  // (`intakeFor`).
   const page = await pageOf(admin);
   const screen = await openIntake(page, app);
 
@@ -178,12 +184,12 @@ test("an admin sends notes to be read, and follows the reading to its end", asyn
     .fill("Closing the month takes three days.");
   await start.click();
 
-  // Followed live: the reading fails, saying why (its binding's cap per
-  // request, the model gateway's `model.over_budget`), and keeps no draft.
+  // Followed live: the reading fails, saying why (the model the workflow's
+  // `extractor` is approved for can't be reached), and keeps no draft.
   const reading = screen.getByRole("region", { name: "Notes being read" });
   const item = reading.getByRole("listitem").filter({ hasText: title });
   await expect(item).toContainText(
-    "Failed: This model call could cost more than this model binding's cap per request has room for",
+    "Failed: The model call failed. Try again later.",
     { timeout: 30_000 }
   );
   await item.getByRole("button", { name: "Dismiss" }).click();
