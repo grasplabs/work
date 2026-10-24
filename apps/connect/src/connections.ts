@@ -20,6 +20,7 @@ import { composioKey } from "./composio.ts";
 import { connections } from "./db/schema.ts";
 import { mcpServer } from "./mcp.ts";
 import type { McpServer } from "./mcp.ts";
+import { isNeverTool } from "./never.ts";
 
 // The connection registry: which connections exist, whose they are, and
 // which MCP server carries out their actions.
@@ -160,6 +161,8 @@ const reviewedClass = (
  * recorded, or can't be read, allows none. A tool allowed by name alone
  * is a side effect with no resource.
  *
+ * A tool Grasp never runs (never.ts) has no rule either.
+ *
  * A call is a read only when both say so: the class Grasp gave the tool
  * and the admin's rule. Neither alone makes a change a read: a classed
  * read the admin didn't mark is held as a change of the same reach, and a
@@ -173,8 +176,11 @@ export const allowedTool = (
   const tool = storedTools(connection).find(
     (each) => composioToolName(each) === action
   );
+  // Never offered, served or run, whatever its review or the admin say.
   const reviewed =
-    tool === undefined ? undefined : reviewedClass(connection.provider, action);
+    tool === undefined || isNeverTool(action)
+      ? undefined
+      : reviewedClass(connection.provider, action);
   if (tool === undefined || reviewed === undefined) {
     return undefined;
   }
