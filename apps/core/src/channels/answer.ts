@@ -9,7 +9,7 @@ import { signInConfig } from "../auth/config.ts";
 import { chatAgentId, personalWorkspaceId } from "../chats-rpc.ts";
 import { workspace } from "../durable-objects.ts";
 import { answerCard } from "./cards.tsx";
-import type { ChannelHandoff } from "./door.ts";
+import type { ChannelHandoff, ChannelMessage } from "./door.ts";
 import { channelLocales, languageOf, say } from "./words.ts";
 import type { ChannelLocale } from "./words.ts";
 
@@ -80,60 +80,84 @@ const typingIn = (thread: Thread): (() => void) => {
   };
 };
 
+/** One question asked in the person's chat for `platform`, and its answer posted. */
+const answerOne = async (
+  env: Env,
+  {
+    platform,
+    userId,
+    thread,
+  }: Pick<ChannelMessage, "platform" | "userId" | "thread">,
+  text: string,
+  locale: ChannelLocale
+): Promise<void> => {
+  const stopTyping = typingIn(thread);
+  let asked: Awaited<ReturnType<ReturnType<typeof workspace>["askThrough"]>>;
+  try {
+    asked = await workspace(env, personalWorkspaceId(userId)).askThrough(
+      userId,
+      chatAgentId,
+      platform,
+      text
+    );
+  } catch (error) {
+    const line = lineFor(error);
+    log.warn("channel.turn_refused", {
+      platform,
+      line,
+      ...errorFields(error),
+    });
+    await thread.post(say(line, locale));
+    return;
+  } finally {
+    stopTyping();
+  }
+  const { chatId, answer } = asked;
+  if (answer.outcome !== "answered" || answer.answer.trim() === "") {
+    log.warn("channel.turn_failed", { platform, outcome: answer.outcome });
+    await thread.post(say("failed", locale));
+    return;
+  }
+  const origin = signInConfig(env)?.origin;
+  if (origin === undefined) {
+    await thread.post(answer.answer);
+    return;
+  }
+  await thread.post(
+    answerCard({
+      locale,
+      text: answer.answer,
+      sources: answer.cited.map(({ title, collectionId, documentId }) => ({
+        title,
+        url: `${origin}/knowledge/${encodeURIComponent(collectionId)}?doc=${encodeURIComponent(documentId)}`,
+      })),
+      chatUrl: `${origin}/?chat=${encodeURIComponent(chatId)}`,
+    })
+  );
+};
+
 /**
  * Hands each member's message to their own chat for its platform, and
- * posts the answer, or a line, back to where they wrote.
+ * posts the answer, or a line, back to where they wrote. What they asked
+ * before Grasp knew them, if it was kept for them, is answered first, so
+ * they needn't ask it again.
  */
 export const answerInChat =
   (env: Env): ChannelHandoff =>
-  async ({ platform, userId, thread, message }) => {
+  async (accepted) => {
+    const { message, thread, kept } = accepted;
+    const fallback = appLocale(message.raw);
+    if (kept !== undefined) {
+      await answerOne(env, accepted, kept, languageOf(kept, fallback));
+    }
     const text = message.text.trim();
-    const locale = languageOf(text, appLocale(message.raw));
+    const locale = languageOf(text, fallback);
     if (text === "") {
-      await thread.post(say("textOnly", locale));
+      // A sign-in's "👍" or a sticker after a kept question needs no line.
+      if (kept === undefined) {
+        await thread.post(say("textOnly", locale));
+      }
       return;
     }
-    const stopTyping = typingIn(thread);
-    let asked: Awaited<ReturnType<ReturnType<typeof workspace>["askThrough"]>>;
-    try {
-      asked = await workspace(env, personalWorkspaceId(userId)).askThrough(
-        userId,
-        chatAgentId,
-        platform,
-        text
-      );
-    } catch (error) {
-      const line = lineFor(error);
-      log.warn("channel.turn_refused", {
-        platform,
-        line,
-        ...errorFields(error),
-      });
-      await thread.post(say(line, locale));
-      return;
-    } finally {
-      stopTyping();
-    }
-    const { chatId, answer } = asked;
-    if (answer.outcome !== "answered" || answer.answer.trim() === "") {
-      log.warn("channel.turn_failed", { platform, outcome: answer.outcome });
-      await thread.post(say("failed", locale));
-      return;
-    }
-    const origin = signInConfig(env)?.origin;
-    if (origin === undefined) {
-      await thread.post(answer.answer);
-      return;
-    }
-    await thread.post(
-      answerCard({
-        locale,
-        text: answer.answer,
-        sources: answer.cited.map(({ title, collectionId, documentId }) => ({
-          title,
-          url: `${origin}/knowledge/${encodeURIComponent(collectionId)}?doc=${encodeURIComponent(documentId)}`,
-        })),
-        chatUrl: `${origin}/?chat=${encodeURIComponent(chatId)}`,
-      })
-    );
+    await answerOne(env, accepted, text, locale);
   };
