@@ -24,7 +24,7 @@ import { connectDb } from "./test-env.ts";
 // onboarding, which only admins see, reaching anyone else; an interview
 // shown before the admin's progress counts it, an employee's shown at
 // all, or anything said in one reaching the brain; a tool counted twice
-// when two documents, or a document and a Playbook record, name it; a
+// when two documents, or a document and a brain record, name it; a
 // hidden entry's connection lost; an empty
 // deployment failing to give the brain anything to build from.
 
@@ -555,7 +555,7 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
     });
   });
 
-  it("shows a tool a document and a Playbook record both name once, as the record, used by the teams of both", async () => {
+  it("shows a tool a document and a brain record both name once, as the record, used by the teams of both", async () => {
     const admin = await signedInApi(idp, "admin");
     const member = await signedInApi(idp, "user");
     await admin.api.onboarding.saveRoster(roster);

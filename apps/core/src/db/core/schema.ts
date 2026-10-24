@@ -4032,7 +4032,7 @@ export const landscapeStagedPeople = sqliteTable(
 );
 
 /**
- * The Playbook's records (brain-records.ts): one row each, never written
+ * The brain's records (brain-records.ts): one row each, never written
  * over, in the order they were added. `body` is the record as
  * `brainRecordSchema` parsed it, as canonical JSON, so a record sent again
  * compares as the same text. No row names who added it: the audit log does.
@@ -4065,7 +4065,7 @@ export const brainRecords = sqliteTable(
 );
 
 /**
- * What became of the Playbook's gaps (brain-records.ts): one row once a
+ * What became of the brain's gaps (brain-gaps.ts): one row once a
  * gap was asked about, answered or closed, each set once, never cleared.
  * A gap with no row is open and nobody was asked.
  */

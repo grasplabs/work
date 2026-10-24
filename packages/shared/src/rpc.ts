@@ -102,7 +102,7 @@ export interface SessionApi {
   readonly knowledge: KnowledgeApi;
   /**
    * What the company brain is built from, assembled from the onboarding,
-   * the Playbook's records and the connections, each as the person may
+   * the brain's records and the connections, each as the person may
    * read it.
    */
   readonly brain: BrainApi;

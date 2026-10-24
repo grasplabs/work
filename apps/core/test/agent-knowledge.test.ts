@@ -976,7 +976,7 @@ describe("a chat's Knowledge", setUpTime, () => {
     const person = await newPerson();
     const marker = `SKILL-${unique()}`;
     const { id: collectionId } = await admin.knowledge.createCollection({
-      name: `Playbooks ${unique()}`,
+      name: `Handbooks ${unique()}`,
       access: "everyone",
     });
     await admin.knowledge.saveDocument({

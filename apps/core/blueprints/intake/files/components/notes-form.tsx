@@ -106,8 +106,8 @@ export const NotesForm = ({
         <div className="flex flex-col gap-4">
           <p className="text-muted-foreground text-sm">
             A model reads the notes and lists the claims in them, tagged. They
-            come back as a draft to review: nothing is saved to the Playbook
-            until you save it.
+            come back as a draft to review: nothing is saved to the brain until
+            you save it.
           </p>
           <SourceFields source={source} disabled={busy} onChange={setSource} />
           <Input
