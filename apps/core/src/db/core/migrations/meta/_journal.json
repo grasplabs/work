@@ -925,6 +925,13 @@
       "when": 1792754171483,
       "tag": "0131_app_origins",
       "breakpoints": true
+    },
+    {
+      "idx": 132,
+      "version": "6",
+      "when": 1792833439867,
+      "tag": "0132_dependency_malware_check",
+      "breakpoints": true
     }
   ]
 }
