@@ -469,18 +469,29 @@ const slackResponse = async (
   );
 };
 
+/** What the door reads of a Gmail mail's own headers: whom replies go to. */
+const gmailReplyToSchema = z.object({
+  email: z.object({
+    replyTo: z
+      .array(z.object({ address: z.string().max(320).optional() }))
+      .optional(),
+  }),
+});
+
 /** How often someone unknown on the client's own domains is sent the link. */
 const gmailLinkEveryMs = 24 * 60 * 60 * 1000;
 
 /**
- * Sends `address` the link to sign in by, in reply to their mail: once a
- * day, and only on one of the client's own sign-in domains, so a forged
- * sender elsewhere draws nothing. Their mail isn't read or quoted.
+ * Sends `address` the link to sign in by, in a mail of its own to that
+ * address, never as a reply (a reply goes to whatever Reply-To the mail
+ * named): once a day, and only on one of the client's own sign-in domains,
+ * so a forged sender elsewhere draws nothing. Their mail isn't read or
+ * quoted.
  */
 const offerGmailLink = async (
   env: Env,
   state: StateAdapter,
-  thread: Thread,
+  adapter: ReturnType<typeof gmailAdapter>,
   address: string,
   origin: string
 ): Promise<void> => {
@@ -503,7 +514,8 @@ const offerGmailLink = async (
       platform: "gmail",
       platformUserId: address,
     });
-    await thread.post(
+    await adapter.postMessage(
+      await adapter.openDM(address),
       signInCard({ locale: "en", url: new URL(path, origin).href })
     );
   } catch (error) {
@@ -514,6 +526,12 @@ const offerGmailLink = async (
     });
   }
 };
+
+/** The addresses a mail asks replies to go to, lowercase: none if it names none. */
+const replyToOf = (raw: unknown): string[] =>
+  (gmailReplyToSchema.safeParse(raw).data?.email.replyTo ?? []).flatMap(
+    ({ address }) => (address === undefined ? [] : [address.toLowerCase()])
+  );
 
 /**
  * Answers a Gmail push whose body the door read: 401 unless Google signed
@@ -559,9 +577,15 @@ const gmailResponse = async (
       log.info("channel.limited", { platform: "gmail" });
       return;
     }
+    // A reply goes to the mail's Reply-To: one naming anyone but its
+    // sender would carry the answer, or the link, to someone else.
+    if (replyToOf(message.raw).some((replyTo) => replyTo !== address)) {
+      log.info("channel.refused", { platform: "gmail", reason: "reply_to" });
+      return;
+    }
     const writer = await writerOf(env, "gmail", address);
     if (writer.kind !== "member") {
-      await offerGmailLink(env, state, thread, address, origin);
+      await offerGmailLink(env, state, adapter, address, origin);
       return;
     }
     await keepConversation(env, "gmail", thread.id, writer.userId);

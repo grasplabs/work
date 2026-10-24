@@ -28,6 +28,10 @@
  * - Backscatter. Someone unknown is sent the link once a day, and only to
  *   an address on one of the client's own sign-in domains: a forged From
  *   elsewhere gets nothing back. Nothing they wrote is read or echoed.
+ * - A reply carried elsewhere. The adapter replies to a mail's Reply-To,
+ *   which its sender chooses: mail whose Reply-To names anyone but its
+ *   sender is dropped, and the link goes in a mail of its own to the
+ *   sender's address, never as a reply (door.ts).
  * - Misconfiguration. Until the mailbox and its push are set, the door
  *   answers 404 and every push would be refused: nothing falls back to
  *   accepting.
