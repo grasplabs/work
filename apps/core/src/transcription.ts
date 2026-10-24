@@ -9,23 +9,21 @@ import type {
 } from "@grasp-os/shared/voice";
 import { z } from "zod";
 
-import { voiceGatewayRoute } from "./models.ts";
-import type { ModelsEnv } from "./models.ts";
+import type { Listening } from "./models.ts";
 
 // Live transcription as core implements it (`elevenlabs-gateway`):
 // ElevenLabs's Scribe v2 realtime, over a WebSocket core opens to the
 // deployment's AI Gateway with `fetch` and `Upgrade: websocket`, on the
-// path speech takes (models.ts, `voiceGatewayRoute`), with the key the
-// gateway stores: core sends none, and the browser never sees the
-// upstream. On plain workerd, with no AI binding, it fails closed
-// (`transcription.unavailable`).
+// path speech takes, with the key the gateway stores: core sends none, and
+// the browser never sees the upstream. Only for a listening the model
+// gateway admitted (models.ts, `models(env).listen`): the allowlist, the
+// rules and the budgets let it through first, and the way to the upstream
+// is the one its admission hands over. The caller holds it to the seconds
+// admitted, and says what it heard (`Listening.heard`).
 //
 // Audio goes through as it comes, and nothing of it is kept: not here,
 // not in a log. ElevenLabs is asked to keep nothing either
 // (`enable_logging=false`).
-
-/** The realtime model, as ElevenLabs names it. */
-const scribeModel = "scribe_v2_realtime";
 
 /** The longest an upstream may take to accept the socket. */
 const openTimeoutMs = 10_000;
@@ -143,9 +141,12 @@ class EventQueue implements AsyncIterable<TranscriptionEvent> {
 }
 
 /** The realtime endpoint's query: the session's settings, and nothing kept. */
-const queryOf = ({ language, keyterms, sampleRate }: TranscriptionOptions) => {
+const queryOf = (
+  modelId: string,
+  { language, keyterms, sampleRate }: TranscriptionOptions
+) => {
   const query = new URLSearchParams({
-    model_id: scribeModel,
+    model_id: modelId,
     language_code: language,
     audio_format: `pcm_${sampleRate}`,
     // Settles at each pause as well as when the page commits.
@@ -161,17 +162,13 @@ const queryOf = ({ language, keyterms, sampleRate }: TranscriptionOptions) => {
 
 /** Opens the upstream socket; throws `transcription.*` when it won't open. */
 const openUpstream = async (
-  env: ModelsEnv,
+  { route, modelId }: Listening,
   options: TranscriptionOptions
 ): Promise<WebSocket> => {
-  const route = voiceGatewayRoute(env);
-  if (route === undefined) {
-    throw transcriptionErrors.create("transcription.unavailable");
-  }
   let response: Response;
   try {
     response = await route.transport(
-      `${route.base}/v1/speech-to-text/realtime?${queryOf(options).toString()}`,
+      `${route.base}/v1/speech-to-text/realtime?${queryOf(modelId, options).toString()}`,
       {
         headers: { ...route.headers, Upgrade: "websocket" },
         signal: AbortSignal.timeout(openTimeoutMs),
@@ -190,12 +187,14 @@ const openUpstream = async (
 };
 
 /**
- * Live transcription through the deployment's AI Gateway: each session a
- * socket of its own to ElevenLabs's realtime endpoint.
+ * Live transcription through the deployment's AI Gateway, for a listening
+ * it admitted: a socket of its own to ElevenLabs's realtime endpoint.
  */
-export const gatewayTranscription = (env: ModelsEnv): LiveTranscription => ({
+export const gatewayTranscription = (
+  listening: Listening
+): LiveTranscription => ({
   open: async (options): Promise<TranscriptionSession> => {
-    const socket = await openUpstream(env, options);
+    const socket = await openUpstream(listening, options);
     const events = new EventQueue();
     let { previousText } = options;
     let closed = false;
