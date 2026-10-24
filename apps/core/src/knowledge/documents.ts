@@ -43,7 +43,6 @@ import {
   links,
   versions,
 } from "../db/knowledge/schema.ts";
-import { noteProvenance } from "./access.ts";
 import type { Reader } from "./access.ts";
 import { auditedBatch } from "./audit.ts";
 import { allowedFor } from "./authorize.ts";
@@ -725,8 +724,7 @@ export const getDocument = async (
   // Recorded before a missing version is refused: that a version isn't
   // there says something of the document too, so a sensitive one
   // restricts the reader either way.
-  const provenance = await noteProvenance(
-    env,
+  const provenance = await portsOf(env).onRead(
     reader,
     {
       action: "knowledge.read",
@@ -778,8 +776,7 @@ export const listDocuments = async (
     )
     .orderBy(asc(documents.path))
     .limit(limit);
-  const provenance = await noteProvenance(
-    env,
+  const provenance = await portsOf(env).onRead(
     reader,
     {
       action: "knowledge.read",
@@ -828,8 +825,7 @@ export const history = async (
     )
     .orderBy(desc(versions.number))
     .limit(limit);
-  const provenance = await noteProvenance(
-    env,
+  const provenance = await portsOf(env).onRead(
     reader,
     {
       action: "knowledge.read",
@@ -907,8 +903,7 @@ export const backlinks = async (
     documentId
   );
   const found = await backlinkRows(db, allowed, document, page);
-  const provenance = await noteProvenance(
-    env,
+  const provenance = await portsOf(env).onRead(
     reader,
     {
       action: "knowledge.read",
