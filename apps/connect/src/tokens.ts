@@ -13,6 +13,7 @@ import {
   bearer,
   grantedAsAsked,
   providerFor,
+  scopesLacking,
   renewalHolds,
 } from "./providers.ts";
 import type {
@@ -107,7 +108,7 @@ const accessTokenOf = async (
 export const firstTokens = async (
   vault: Vault,
   connectionId: string,
-  tokens: StoredTokens & { expiresAt: number },
+  tokens: StoredTokens & { expiresAt: number; scope?: string },
   now: Date
 ): Promise<TokenRow> => ({
   connectionId,
@@ -121,6 +122,7 @@ export const firstTokens = async (
   accessExpiresAt: new Date(tokens.expiresAt),
   generation: now.getTime(),
   refreshUntil: null,
+  grantedScopes: tokens.scope ?? null,
   updatedAt: now,
 });
 
@@ -240,6 +242,43 @@ const markDead = async (
   );
 };
 
+/**
+ * Marks the connection for reconnecting when its provider refused one of
+ * its writes and its tokens weren't granted every scope its provider asks
+ * for now: a connection made before its connector asked for a right (a
+ * Microsoft 365 one from before Calendars.ReadWrite) can't get it without
+ * the person consenting again, and reconnecting keeps its ID and its
+ * permissions (oauth.ts `reconnect`). One granted all of them was refused
+ * for another reason, and stays as it is; so does one whose grant connect
+ * doesn't know (tokens stored before it kept them), until a refresh tells
+ * it. Whether it is marked now: by this call, or by another refused while
+ * this one was on its way, which took its tokens with it.
+ */
+export const markIfGrantLacks = async (
+  env: Env,
+  connectionId: string
+): Promise<boolean> => {
+  const connection = await drizzle(env.DB)
+    .select({ provider: connections.provider, status: connections.status })
+    .from(connections)
+    .where(eq(connections.id, connectionId))
+    .get();
+  const provider =
+    connection === undefined ? undefined : providerFor(connection.provider);
+  const row = await readRow(env.DB, connectionId);
+  if (row === undefined) {
+    return connection?.status === "needs_reauth";
+  }
+  if (
+    provider?.kind !== "oauth" ||
+    row.grantedScopes === null ||
+    scopesLacking(provider, row.grantedScopes).length === 0
+  ) {
+    return false;
+  }
+  return await markDead(env, provider.id, row, "scopes_missing");
+};
+
 interface RefreshContext {
   env: Env;
   vault: Vault;
@@ -271,6 +310,7 @@ const storeRefreshed = async (
       accessExpiresAt: new Date(minted.expiresAt),
       generation: row.generation + 1,
       refreshUntil: null,
+      grantedScopes: minted.scope ?? row.grantedScopes,
       updatedAt: new Date(),
     })
     .where(unchanged(row))
