@@ -52,14 +52,13 @@ import {
   newComputation,
 } from "../daily-claims.ts";
 import type { Computation } from "../daily-claims.ts";
-import { chunks, inList } from "../db/d1.ts";
 import {
-  collections,
-  documents,
   knowledgeSignalComputations as computations,
   knowledgeSignalDismissals as dismissals,
   knowledgeSignals,
-} from "../db/knowledge/schema.ts";
+} from "../db/core/schema.ts";
+import { chunks, inList } from "../db/d1.ts";
+import { collections, documents } from "../db/knowledge/schema.ts";
 import { allowedCollections } from "./access.ts";
 import type { Reader } from "./access.ts";
 import type { KnowledgeTally } from "./usage-tally.ts";
@@ -93,6 +92,12 @@ import type { KnowledgeTally } from "./usage-tally.ts";
 // them all (retention archived some meanwhile), that kind isn't computed:
 // the computation carries the last one's over as they were. Questions
 // count what the log holds.
+//
+// The signals are core's, in core's database; the collections and
+// documents they are about are Knowledge's. So a computation reads
+// Knowledge and writes core, and a read takes the owner's signals from
+// core and keeps those whose collection (and document) Knowledge still
+// has as they say (`signalsFor`).
 //
 // A question's searches by the collection's owner themselves don't count:
 // they know what they asked. Collections only Grasp writes (the Grasp
@@ -425,7 +430,7 @@ export const claimKnowledgeSignals = async (
   env: Env,
   now: Date
 ): Promise<Computation | undefined> => {
-  const db = drizzle(env.KNOWLEDGE);
+  const db = drizzle(env.DB);
   const computation = newComputation(now);
   const claimed = await claimComputation(db, computations, computation);
   return claimed.length === 0 ? undefined : computation;
@@ -537,13 +542,14 @@ export const storeKnowledgeSignals = async (
   totals: KnowledgeTotals
 ): Promise<void> => {
   const now = computation.startedAt;
-  const db = drizzle(env.KNOWLEDGE);
+  const knowledge = drizzle(env.KNOWLEDGE);
+  const db = drizzle(env.DB);
   const [questions, overdue, unread] = await Promise.all([
-    questionSignals(db, totals),
-    overdueSignals(db, now),
+    questionSignals(knowledge, totals),
+    overdueSignals(knowledge, now),
     totals.read === null
       ? []
-      : unreadSignals(db, now, totals.unreadDays, totals.read),
+      : unreadSignals(knowledge, now, totals.unreadDays, totals.read),
   ]);
   const found = [...questions, ...overdue, ...unread];
   const rows = await Promise.all(
@@ -634,208 +640,224 @@ const ofDismissal = and(
 );
 
 /**
- * Reads of the signals of the finished computation started last, and when
- * it finished, for `owner`, `where` holds for their collection: joined
- * with the collection, which `owner` must still own, and for a document,
- * with the document, which must still be one the signal is about. Each
- * selects no column name twice, as a batch returns rows by name.
+ * Most of an owner's signals of each kind a read looks at, in their order
+ * (highest value first; by ID for overdue documents, which are ranked by
+ * their review date as it is now): far more than one shows, so those
+ * whose collection or document is gone, or changed, rarely leave a list
+ * short.
  */
-const signalReads = (
-  db: DrizzleD1Database,
-  owner: string,
-  where: SQL | undefined,
-  today: string
-) => {
-  const latest = latestFinished(computations);
-  const ofKind = (kind: KnowledgeSignalKind) =>
-    and(
-      eq(knowledgeSignals.computation, latest),
-      eq(knowledgeSignals.owner, owner),
-      eq(knowledgeSignals.kind, kind),
-      shown,
-      where
-    );
-  const ofCollection = and(
-    eq(collections.id, knowledgeSignals.collectionId),
-    eq(collections.owner, knowledgeSignals.owner)
-  );
-  const ofDocument = and(
-    eq(documents.id, knowledgeSignals.subject),
-    eq(documents.collectionId, knowledgeSignals.collectionId)
-  );
-  const order = [desc(knowledgeSignals.value), desc(knowledgeSignals.id)];
-  const aboutDocument = {
-    id: knowledgeSignals.id,
-    collectionId: knowledgeSignals.collectionId,
-    name: collections.name,
-    documentId: knowledgeSignals.subject,
-    path: documents.path,
-    title: documents.title,
-  };
-  return {
-    computed: db
-      .select({ finishedAt: computations.finishedAt })
-      .from(computations)
-      .where(eq(computations.id, latest)),
-    questions: db
-      .select({
-        id: knowledgeSignals.id,
-        collectionId: knowledgeSignals.collectionId,
-        name: collections.name,
-        queryKey: knowledgeSignals.subject,
-        value: knowledgeSignals.value,
-        evidence: knowledgeSignals.evidence,
-      })
-      .from(knowledgeSignals)
-      .innerJoin(collections, ofCollection)
-      .leftJoin(dismissals, ofDismissal)
-      .where(ofKind("unanswered_question"))
-      .orderBy(...order)
-      .limit(knowledgeSignalsPerKind),
-    // Still unread, as far as the document says: one changed since the
-    // computation isn't.
-    unread: db
-      .select({
-        ...aboutDocument,
-        value: knowledgeSignals.value,
-        evidence: knowledgeSignals.evidence,
-        updatedAt: documents.updatedAt,
-      })
-      .from(knowledgeSignals)
-      .innerJoin(collections, ofCollection)
-      .innerJoin(documents, ofDocument)
-      .leftJoin(dismissals, ofDismissal)
-      .where(
-        and(
-          ofKind("unread_document"),
-          lt(
-            documents.updatedAt,
-            sql`(SELECT ${computations.startedAt} FROM ${computations} WHERE ${computations.id} = ${latest})`
-          )
-        )
-      )
-      .orderBy(...order)
-      .limit(knowledgeSignalsPerKind),
-    // Most overdue first by the review date each document has now, which
-    // may have moved since the computation: from the owner's overdue
-    // signals (their index) to their documents, sorted by that date. The
-    // sort holds only this owner's overdue signals.
-    overdue: db
-      .select({ ...aboutDocument, reviewDate: documents.reviewDate })
-      .from(knowledgeSignals)
-      .innerJoin(collections, ofCollection)
-      .innerJoin(documents, ofDocument)
-      .leftJoin(dismissals, ofDismissal)
-      .where(
-        and(
-          ofKind("overdue_review"),
-          isNotNull(documents.reviewDate),
-          lt(documents.reviewDate, today)
-        )
-      )
-      .orderBy(asc(documents.reviewDate), asc(documents.id))
-      .limit(knowledgeSignalsPerKind),
-  };
-};
+const candidatesPerKind = 1000;
 
-/** A document signal's row, as `signalReads` returns it. */
-interface DocumentSignalRow {
+/** A signal as a read takes it from core, before Knowledge is asked. */
+interface Candidate {
   id: string;
   collectionId: string;
-  name: string;
-  documentId: string;
-  path: string;
-  title: string;
+  subject: string;
+  value: number | null;
+  evidence: Json;
 }
 
-/** The collection and document of a document signal's row. */
-const aboutOf = (row: DocumentSignalRow) => ({
-  id: row.id,
-  collection: {
-    id: collectionIdSchema.parse(row.collectionId),
-    name: row.name,
-  },
-  document: {
-    id: documentIdSchema.parse(row.documentId),
-    path: row.path,
-    title: row.title,
-  },
+/** The signals about a document, by kind, as a read keeps them. */
+interface DocumentFacts {
+  id: string;
+  collectionId: string;
+  path: string;
+  title: string;
+  updatedAt: Date;
+  reviewDate: string | null;
+}
+
+/** A signal's document, as a signal names it. */
+const documentAbout = (document: DocumentFacts) => ({
+  id: documentIdSchema.parse(document.id),
+  path: document.path,
+  title: document.title,
 });
 
 /**
- * The signals for `owner` of the collections `where` holds for, as of the
- * finished computation started last: read in one batch with it, so a
- * computation finishing or being cleaned up meanwhile can't change them.
+ * The signals for `owner` of the collections `where` holds for (a
+ * condition on Knowledge's `collections`), as of the finished computation
+ * started last: read from core in one batch with it, so a computation
+ * finishing or being cleaned up meanwhile can't change them; then kept
+ * while Knowledge has their collection, which `owner` must still own, and
+ * for a document, the document, which must still be one the signal is
+ * about.
  */
 const signalsFor = async (
   env: Env,
   owner: string,
   where?: SQL
 ): Promise<KnowledgeSignals> => {
-  const db = drizzle(env.KNOWLEDGE);
+  const core = drizzle(env.DB);
+  const knowledge = drizzle(env.KNOWLEDGE);
   const today = isoDay(new Date());
-  const reads = signalReads(db, owner, where, today);
-  const [computed, questions, unread, overdue] = await db.batch([
-    reads.computed,
-    reads.questions,
-    reads.unread,
-    reads.overdue,
+  const latest = latestFinished(computations);
+  const candidates = (kind: KnowledgeSignalKind, order: SQL[]) =>
+    core
+      .select({
+        id: knowledgeSignals.id,
+        collectionId: knowledgeSignals.collectionId,
+        subject: knowledgeSignals.subject,
+        value: knowledgeSignals.value,
+        evidence: knowledgeSignals.evidence,
+      })
+      .from(knowledgeSignals)
+      .leftJoin(dismissals, ofDismissal)
+      .where(
+        and(
+          eq(knowledgeSignals.computation, latest),
+          eq(knowledgeSignals.owner, owner),
+          eq(knowledgeSignals.kind, kind),
+          shown
+        )
+      )
+      .orderBy(...order)
+      .limit(candidatesPerKind);
+  const byValue = [desc(knowledgeSignals.value), desc(knowledgeSignals.id)];
+  const [computed, questions, unread, overdue] = await core.batch([
+    core
+      .select({
+        startedAt: computations.startedAt,
+        finishedAt: computations.finishedAt,
+      })
+      .from(computations)
+      .where(eq(computations.id, latest)),
+    candidates("unanswered_question", byValue),
+    candidates("unread_document", byValue),
+    // An overdue signal has no value: by ID, the owner index's order.
+    candidates("overdue_review", [
+      asc(knowledgeSignals.value),
+      asc(knowledgeSignals.id),
+    ]),
   ]);
+  const collectionIds = [
+    ...new Set(
+      [...questions, ...unread, ...overdue].map(
+        ({ collectionId }) => collectionId
+      )
+    ),
+  ];
+  const documentIds = [
+    ...new Set([...unread, ...overdue].map(({ subject }) => subject)),
+  ];
+  const [ownedNow, about] = await Promise.all([
+    collectionIds.length === 0
+      ? []
+      : knowledge
+          .select({ id: collections.id, name: collections.name })
+          .from(collections)
+          .where(
+            and(
+              inList(collections.id, collectionIds),
+              eq(collections.owner, owner),
+              where
+            )
+          ),
+    documentIds.length === 0
+      ? []
+      : knowledge
+          .select({
+            id: documents.id,
+            collectionId: documents.collectionId,
+            path: documents.path,
+            title: documents.title,
+            updatedAt: documents.updatedAt,
+            reviewDate: documents.reviewDate,
+          })
+          .from(documents)
+          .where(inList(documents.id, documentIds)),
+  ]);
+  const names = new Map(ownedNow.map(({ id, name }) => [id, name]));
+  const facts = new Map(about.map((row) => [row.id, row]));
+  const collectionOf = (row: Candidate) => {
+    const name = names.get(row.collectionId);
+    return name === undefined
+      ? undefined
+      : { id: collectionIdSchema.parse(row.collectionId), name };
+  };
+  /** The document a signal is about, while it still is in its collection. */
+  const documentOf = (row: Candidate): DocumentFacts | undefined => {
+    const found = facts.get(row.subject);
+    return found?.collectionId === row.collectionId ? found : undefined;
+  };
+  const startedAt = computed[0]?.startedAt;
   const signals: KnowledgeSignal[] = [
-    ...questions.flatMap((row): KnowledgeSignal[] => {
-      const evidence = questionEvidenceSchema.safeParse(row.evidence);
-      // One that no longer reads as a question is left out.
-      if (!evidence.success || row.value === null) {
-        return [];
-      }
-      const { value } = row;
-      return [
-        {
-          kind: "unanswered_question",
-          id: row.id,
-          collection: {
-            id: collectionIdSchema.parse(row.collectionId),
-            name: row.name,
+    ...questions
+      .flatMap((row): KnowledgeSignal[] => {
+        const collection = collectionOf(row);
+        const evidence = questionEvidenceSchema.safeParse(row.evidence);
+        // One that no longer reads as a question is left out.
+        if (!(collection && evidence.success) || row.value === null) {
+          return [];
+        }
+        return [
+          {
+            kind: "unanswered_question",
+            id: row.id,
+            collection,
+            value: row.value,
+            evidence: { queryKey: row.subject, ...evidence.data },
           },
-          value,
-          evidence: { queryKey: row.queryKey, ...evidence.data },
-        },
-      ];
-    }),
-    ...unread.flatMap((row): KnowledgeSignal[] => {
-      const evidence = unreadEvidenceSchema.safeParse(row.evidence);
-      if (!evidence.success || row.value === null) {
-        return [];
-      }
-      const { value } = row;
-      const { document, ...about } = aboutOf(row);
-      return [
-        {
-          kind: "unread_document",
-          ...about,
-          value,
-          evidence: {
-            document,
-            updatedAt: row.updatedAt.toISOString(),
-            days: evidence.data.days,
+        ];
+      })
+      .slice(0, knowledgeSignalsPerKind),
+    // Still unread, as far as the document says: one changed since the
+    // computation isn't.
+    ...unread
+      .flatMap((row): KnowledgeSignal[] => {
+        const collection = collectionOf(row);
+        const document = documentOf(row);
+        const evidence = unreadEvidenceSchema.safeParse(row.evidence);
+        if (
+          !(collection && document && evidence.success) ||
+          row.value === null ||
+          startedAt === undefined ||
+          document.updatedAt >= startedAt
+        ) {
+          return [];
+        }
+        return [
+          {
+            kind: "unread_document",
+            id: row.id,
+            collection,
+            value: row.value,
+            evidence: {
+              document: documentAbout(document),
+              updatedAt: document.updatedAt.toISOString(),
+              days: evidence.data.days,
+            },
           },
-        },
-      ];
-    }),
-    ...overdue.flatMap((row): KnowledgeSignal[] => {
-      if (row.reviewDate === null) {
-        return [];
-      }
-      const { document, ...about } = aboutOf(row);
-      return [
-        {
-          kind: "overdue_review",
-          ...about,
-          value: daysBetween(Date.parse(row.reviewDate), Date.parse(today)),
-          evidence: { document, reviewDate: row.reviewDate },
-        },
-      ];
-    }),
+        ];
+      })
+      .slice(0, knowledgeSignalsPerKind),
+    // Most overdue first by the review date each document has now, which
+    // may have moved since the computation.
+    ...overdue
+      .flatMap((row) => {
+        const collection = collectionOf(row);
+        const document = documentOf(row);
+        const reviewDate = document?.reviewDate;
+        return collection &&
+          document &&
+          typeof reviewDate === "string" &&
+          reviewDate < today
+          ? [{ row, collection, document, reviewDate }]
+          : [];
+      })
+      .toSorted(
+        (a, b) =>
+          a.reviewDate.localeCompare(b.reviewDate) ||
+          a.document.id.localeCompare(b.document.id)
+      )
+      .slice(0, knowledgeSignalsPerKind)
+      .map(({ row, collection, document, reviewDate }): KnowledgeSignal => ({
+        kind: "overdue_review",
+        id: row.id,
+        collection,
+        value: daysBetween(Date.parse(reviewDate), Date.parse(today)),
+        evidence: { document: documentAbout(document), reviewDate },
+      })),
   ];
   return {
     computedAt: computed[0]?.finishedAt?.toISOString() ?? null,
@@ -851,7 +873,7 @@ export const listKnowledgeSignals = async (
   env: Env,
   person: Identity
 ): Promise<KnowledgeSignals> => {
-  await keepAuditEvent(env, drizzle(env.KNOWLEDGE), {
+  await keepAuditEvent(env, drizzle(env.DB), {
     actor: actorOf(person),
     action: "knowledge.signals.read",
   });
@@ -895,17 +917,34 @@ export const dismissKnowledgeSignal = async (
     knowledgeSignalIdSchema,
     signalId
   );
-  const db = drizzle(env.KNOWLEDGE);
+  const db = drizzle(env.DB);
   const theirs = and(
     eq(knowledgeSignals.computation, latestFinished(computations)),
     eq(knowledgeSignals.id, id),
-    eq(knowledgeSignals.owner, person.userId),
-    sql`EXISTS (
-      SELECT 1 FROM ${collections}
-      WHERE ${collections.id} = ${knowledgeSignals.collectionId}
-        AND ${collections.owner} = ${person.userId}
-    )`
+    eq(knowledgeSignals.owner, person.userId)
   );
+  // Theirs while they still own its collection, which Knowledge has.
+  const signal = await db
+    .select({ collectionId: knowledgeSignals.collectionId })
+    .from(knowledgeSignals)
+    .where(theirs)
+    .get();
+  const stillOwned =
+    signal === undefined
+      ? undefined
+      : await drizzle(env.KNOWLEDGE)
+          .select({ id: collections.id })
+          .from(collections)
+          .where(
+            and(
+              eq(collections.id, signal.collectionId),
+              eq(collections.owner, person.userId)
+            )
+          )
+          .get();
+  if (stillOwned === undefined) {
+    throw knowledgeSignalErrors.create("knowledge_signal.not_found");
+  }
   const [dismissed] = await auditedBatch(env, db, [
     db
       .insert(dismissals)

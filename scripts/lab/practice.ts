@@ -275,7 +275,7 @@ export const makePractice = async (
       : `Making ${key.company.name} (practice ${id}), in ${locale}`
   );
   await api.organization.update({ name: key.company.name.slice(0, 80) });
-  await api.onboarding.saveRoster(roster);
+  await api.onboarding.confirmRoster(roster);
   await api.onboarding.savePlan({
     start: new Date().toISOString().slice(0, 10),
     days: 14,

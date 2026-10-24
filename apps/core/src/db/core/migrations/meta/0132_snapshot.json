@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "0cf6bf9d-dfbb-47fb-93e4-35a018a90049",
+  "id": "6cd08406-9b41-4dba-b082-bb9254efb67e",
   "prevId": "f0c932fd-6a80-45fd-894f-a51dcdbf94ee",
   "tables": {
     "access_revocations": {
@@ -2452,184 +2452,6 @@
         }
       },
       "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "channel_accounts": {
-      "name": "channel_accounts",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "platform": {
-          "name": "platform",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "platform_user_id": {
-          "name": "platform_user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "linked_at": {
-          "name": "linked_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "linked_how": {
-          "name": "linked_how",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "channel_accounts_platform_user_idx": {
-          "name": "channel_accounts_platform_user_idx",
-          "columns": [
-            "platform",
-            "platform_user_id"
-          ],
-          "isUnique": true
-        },
-        "channel_accounts_user_id_idx": {
-          "name": "channel_accounts_user_id_idx",
-          "columns": [
-            "user_id"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "channel_accounts_user_id_users_id_fk": {
-          "name": "channel_accounts_user_id_users_id_fk",
-          "tableFrom": "channel_accounts",
-          "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "channel_links": {
-      "name": "channel_links",
-      "columns": {
-        "secret_hash": {
-          "name": "secret_hash",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "platform": {
-          "name": "platform",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "platform_user_id": {
-          "name": "platform_user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "expires_at": {
-          "name": "expires_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "used_at": {
-          "name": "used_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "used_by": {
-          "name": "used_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "replaced_at": {
-          "name": "replaced_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "channel_links_platform_user_idx": {
-          "name": "channel_links_platform_user_idx",
-          "columns": [
-            "platform",
-            "platform_user_id"
-          ],
-          "isUnique": false
-        },
-        "channel_links_expires_at_idx": {
-          "name": "channel_links_expires_at_idx",
-          "columns": [
-            "expires_at"
-          ],
-          "isUnique": false
-        }
-      },
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
@@ -7245,9 +7067,33 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
+        },
+        "event_contract": {
+          "name": "event_contract",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "event_type": {
+          "name": "event_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
-      "indexes": {},
+      "indexes": {
+        "trigger_resource_versions_event": {
+          "name": "trigger_resource_versions_event",
+          "columns": [
+            "event_contract",
+            "event_type"
+          ],
+          "isUnique": false,
+          "where": "\"trigger_resource_versions\".\"event_contract\" IS NOT NULL"
+        }
+      },
       "foreignKeys": {
         "trigger_resource_versions_trigger_id_trigger_resources_id_fk": {
           "name": "trigger_resource_versions_trigger_id_trigger_resources_id_fk",
@@ -8492,6 +8338,28 @@
         "details_removed_at": {
           "name": "details_removed_at",
           "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "delivery_attempts": {
+          "name": "delivery_attempts",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "delivery_at": {
+          "name": "delivery_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "undeliverable": {
+          "name": "undeliverable",
+          "type": "text",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
