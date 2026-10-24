@@ -529,7 +529,22 @@ const slackResponse = async (
   const takeOn = handoff ?? answerInChat(env);
   chat.onDirectMessage(async (thread, message) => {
     await keepConversation(env, "slack", thread.id, userId);
-    await takeOn({ platform: "slack", userId, thread, message });
+    // Slack takes a reply whole, no stream: it has it once the handler
+    // posted it, so what comes after goes right after, in order.
+    const later: (() => Promise<unknown>)[] = [];
+    await takeOn({
+      platform: "slack",
+      userId,
+      thread,
+      message,
+      afterward: (send) => {
+        later.push(send);
+      },
+    });
+    for (const send of later) {
+      // oxlint-disable-next-line no-await-in-loop -- in the order they were asked for
+      await send();
+    }
   });
   return await chat.webhooks.slack(
     new Request(request.url, {
