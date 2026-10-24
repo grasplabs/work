@@ -229,8 +229,10 @@ jobs:
       # memory isn't held to Docker's 64 MB /dev/shm.
       options: --user 1001 --ipc=host
     runs-on: ubuntu-latest
-    # About 1 minute of setup and 2 for the stack to build and start, then
-    # each part's tests.
+    # About 1 minute of setup and 2 for the stack to build and start (up
+    # to the 4 Playwright waits for it, playwright.config.ts), then each
+    # part's tests: 6 to 10 minutes in all when they passed (October
+    # 2026), so a slow start and a slow runner still fit.
     timeout-minutes: 20
     strategy:
       # A failing part doesn't cancel the others: each says what failed in
