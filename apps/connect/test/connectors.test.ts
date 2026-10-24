@@ -522,6 +522,7 @@ describe("a native connector", () => {
       ...calendar,
       ...files,
       "lists.items": "read-company",
+      "calendar.freeTime": "read-own",
       "calendar.create": "change-own",
       "calendar.update": "change-own",
       "excel.listRows": "read-company",
