@@ -202,6 +202,14 @@ export const slackApp = {
 export const slackPostedUrl = "https://slack-control.test/posted";
 
 /**
+ * Where tests remove the bot from a conversation, as uninstalling its app
+ * does: POST `{ conversation }`; the Bot Connector refuses its posts there
+ * with 403 from then on.
+ */
+export const botConnectorUninstallUrl =
+  "https://bot-connector-control.test/uninstall";
+
+/**
  * The client's WhatsApp Business number, as core (`WHATSAPP_APP_SECRET`,
  * `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_VERIFY_TOKEN`) and connect
  * (`WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_ACCESS_TOKEN`) are set up with it.
@@ -527,6 +535,11 @@ export default {
     if (request.method === "POST" && url.href === ${JSON.stringify(botConnectorStreamsUrl)}) {
       const { refuse } = await request.json();
       botConnector.refuseStreams(refuse);
+      return new Response(null, { status: 204 });
+    }
+    if (request.method === "POST" && url.href === ${JSON.stringify(botConnectorUninstallUrl)}) {
+      const { conversation } = await request.json();
+      botConnector.uninstall(conversation);
       return new Response(null, { status: 204 });
     }
     if (url.href === ${JSON.stringify(botConnectorPostedUrl)}) {

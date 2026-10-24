@@ -25,6 +25,8 @@
  *   removed people and people Grasp doesn't know each get one line, in
  *   the language their app is set to, and nothing they wrote is read.
  *   The lines go out through connect like every send.
+ * - Someone Settings › Stephen doesn't let reach him, here or at all
+ *   (`stephenFor`), is told so in one line, and nothing they wrote is read.
  * - One of the client's own people Grasp hasn't seen yet (Teams' roster
  *   says they are of the client's tenant, and no guest) is sent a link to
  *   the deployment's own sign-in, once a day: it carries no token and
@@ -65,9 +67,11 @@ import { channelConversations } from "../db/core/schema.ts";
 import { inJurisdiction } from "../durable-objects.ts";
 import { errorResponse } from "../errors.ts";
 import { boundedText, jsonOf } from "../request-body.ts";
+import { stephenFor } from "../stephen-reach.ts";
 import { offerChannelLink } from "./accounts.ts";
 import { answerInChat } from "./answer.ts";
 import { signInCard } from "./cards.tsx";
+import { countSignal } from "./signals.ts";
 import { slackAdapter, verifiedSlackRequest } from "./slack.ts";
 import type { ConnectedTeamsAdapter } from "./teams-adapter.ts";
 import { teamsAdapter, verifiedTeamsRequest } from "./teams.ts";
@@ -164,7 +168,8 @@ type DoorLine =
   | "otherCompany"
   | "guest"
   | "removed"
-  | "signIn";
+  | "signIn"
+  | "notTurnedOn";
 
 /**
  * A Teams activity, as far as the door reads it. Its text is read only to
@@ -199,6 +204,11 @@ export interface ChannelMessage {
   platform: Platform;
   /** The member who wrote it. */
   userId: string;
+  /**
+   * Whether Settings › Stephen lets him do things for them here, or only
+   * answer (`stephenFor`): what holds writes for a press must ask it.
+   */
+  acts: boolean;
   thread: Thread;
   message: Message;
   /**
@@ -343,7 +353,12 @@ const gate = async (
   state: StateAdapter,
   adapter: ConnectedTeamsAdapter,
   activity: Activity
-): Promise<{ line?: DoorLine; userId?: string; kept?: string }> => {
+): Promise<{
+  line?: DoorLine;
+  userId?: string;
+  acts?: boolean;
+  kept?: string;
+}> => {
   // A message without an id can't be told from its resends: dropped.
   if (activity.id === undefined) {
     return {};
@@ -373,7 +388,17 @@ const gate = async (
   const writer = await writerOf(env, "teams", oid);
   switch (writer.kind) {
     case "member": {
-      return { userId: writer.userId, kept: await keptQuestion(state, oid) };
+      // Settings › Stephen: whether he answers them here at all, asked
+      // before anything they wrote is read.
+      const reach = await stephenFor(env, writer.userId, "teams");
+      if (!reach.reaches) {
+        return { line: "notTurnedOn" };
+      }
+      return {
+        userId: writer.userId,
+        acts: reach.acts,
+        kept: await keptQuestion(state, oid),
+      };
     }
     case "removed": {
       return { line: "removed" };
@@ -388,63 +413,6 @@ const gate = async (
       return writer satisfies never;
     }
   }
-};
-
-/**
- * Hands a member's message on to `chat`, through the platform's webhook
- * (`webhook`), as the request's background work, and answers the platform
- * at once: it gives up on a webhook long before an answer is ready, and
- * sends it again. Its conversation is kept, and what the hand-off asks to
- * send afterward goes once the platform has the reply as it stands.
- */
-const handOn = (
-  env: Env,
-  ctx: Pick<ExecutionContext, "waitUntil">,
-  chat: Chat,
-  {
-    platform,
-    userId,
-    kept,
-    handoff,
-    webhook,
-  }: {
-    platform: Platform;
-    userId: string;
-    kept?: string;
-    handoff: ChannelHandoff | undefined;
-    webhook: (
-      waitUntil: (promise: Promise<unknown>) => void
-    ) => Promise<unknown>;
-  }
-): Response => {
-  const takeOn = handoff ?? answerInChat(env);
-  const later: (() => Promise<unknown>)[] = [];
-  const afterward = (send: () => Promise<unknown>): void => {
-    later.push(send);
-  };
-  chat.onDirectMessage(async (thread, message) => {
-    await keepConversation(env, platform, thread.id, userId);
-    await takeOn({ platform, userId, thread, message, kept, afterward });
-  });
-  const settled = async (promise: Promise<unknown>): Promise<void> => {
-    try {
-      await promise;
-    } catch (error) {
-      log.error("channel.handle_failed", { platform, ...errorFields(error) });
-    }
-  };
-  const background = (promise: Promise<unknown>): void => {
-    ctx.waitUntil(settled(promise));
-  };
-  const handled = async (): Promise<void> => {
-    await webhook(background);
-    for (const send of later) {
-      // oxlint-disable-next-line no-await-in-loop -- in the order they were asked for
-      await send();
-    }
-  };
-  background(handled());
-  return new Response(null, { status: 200 });
 };
 
 /**
@@ -588,6 +556,15 @@ const slackResponse = async (
   if (userId === undefined) {
     return new Response(null, { status: 200 });
   }
+  // Settings › Stephen, as for Teams: whether he answers them in Slack at
+  // all, asked before anything they wrote is read.
+  const reach = await stephenFor(env, userId, "slack");
+  if (!reach.reaches) {
+    ctx.waitUntil(sendSlackLine(env, origin, from, "notTurnedOn"));
+    return new Response(null, { status: 200 });
+  }
+  // As for Teams: one turn at a time per conversation, answered by the
+  // same agent in the person's own chat for Slack (answer.ts).
   const chat = new Chat({
     userName: "Stephen",
     adapters: { slack: slackAdapter(env) },
@@ -595,20 +572,39 @@ const slackResponse = async (
     logger: "silent",
     concurrency: "queue",
   });
-  return handOn(env, ctx, chat, {
-    platform: "slack",
-    userId,
-    handoff,
-    webhook: async (waitUntil) =>
-      await chat.webhooks.slack(
-        new Request(request.url, {
-          method: "POST",
-          headers: request.headers,
-          body,
-        }),
-        { waitUntil }
-      ),
+  const takeOn = handoff ?? answerInChat(env);
+  chat.onDirectMessage(async (thread, message) => {
+    await keepConversation(env, "slack", thread.id, userId);
+    // Slack takes a reply whole, no stream: it has it once the handler
+    // posted it, so what comes after goes right after, in order.
+    const later: (() => Promise<unknown>)[] = [];
+    await takeOn({
+      platform: "slack",
+      userId,
+      thread,
+      message,
+      acts: reach.acts,
+      afterward: (send) => {
+        later.push(send);
+      },
+    });
+    for (const send of later) {
+      // oxlint-disable-next-line no-await-in-loop -- in the order they were asked for
+      await send();
+    }
   });
+  return await chat.webhooks.slack(
+    new Request(request.url, {
+      method: "POST",
+      headers: request.headers,
+      body,
+    }),
+    {
+      waitUntil: (promise) => {
+        ctx.waitUntil(promise);
+      },
+    }
+  );
 };
 
 /**
@@ -716,6 +712,65 @@ const sendWhatsAppLine = async (
 };
 
 /**
+ * Hands a member's message on to `chat`, through the platform's webhook
+ * (`webhook`), as the request's background work, and answers the platform
+ * at once: it gives up on a webhook long before an answer is ready, and
+ * sends it again. Its conversation is kept, and what the hand-off asks to
+ * send afterward goes once the platform has the reply as it stands.
+ */
+const handOn = (
+  env: Env,
+  ctx: Pick<ExecutionContext, "waitUntil">,
+  chat: Chat,
+  {
+    platform,
+    userId,
+    acts,
+    kept,
+    handoff,
+    webhook,
+  }: {
+    platform: Platform;
+    userId: string;
+    acts: boolean;
+    kept?: string;
+    handoff: ChannelHandoff | undefined;
+    webhook: (
+      waitUntil: (promise: Promise<unknown>) => void
+    ) => Promise<unknown>;
+  }
+): Response => {
+  const takeOn = handoff ?? answerInChat(env);
+  const later: (() => Promise<unknown>)[] = [];
+  const afterward = (send: () => Promise<unknown>): void => {
+    later.push(send);
+  };
+  chat.onDirectMessage(async (thread, message) => {
+    await keepConversation(env, platform, thread.id, userId);
+    await takeOn({ platform, userId, thread, message, acts, kept, afterward });
+  });
+  const settled = async (promise: Promise<unknown>): Promise<void> => {
+    try {
+      await promise;
+    } catch (error) {
+      log.error("channel.handle_failed", { platform, ...errorFields(error) });
+    }
+  };
+  const background = (promise: Promise<unknown>): void => {
+    ctx.waitUntil(settled(promise));
+  };
+  const handled = async (): Promise<void> => {
+    await webhook(background);
+    for (const send of later) {
+      // oxlint-disable-next-line no-await-in-loop -- in the order they were asked for
+      await send();
+    }
+  };
+  background(handled());
+  return new Response(null, { status: 200 });
+};
+
+/**
  * Answers a WhatsApp request whose body the door read: 401 unless Meta
  * signed it for this client's number, and otherwise 200 at once. Each
  * message is gated on its own; a member's is handed on alone, in a body
@@ -751,7 +806,17 @@ const whatsAppResponse = async (
         if (line !== undefined || link !== undefined) {
           ctx.waitUntil(sendWhatsAppLine(env, origin, message, line ?? "link"));
         }
-        if (userId !== undefined) {
+        // Settings › Stephen, as for Teams and Slack: whether he answers
+        // them in WhatsApp at all, asked before anything they wrote is read.
+        const reach =
+          userId === undefined
+            ? undefined
+            : // oxlint-disable-next-line no-await-in-loop -- one message after another, in order
+              await stephenFor(env, userId, "whatsapp");
+        if (reach !== undefined && !reach.reaches) {
+          ctx.waitUntil(sendWhatsAppLine(env, origin, message, "notTurnedOn"));
+        }
+        if (userId !== undefined && reach?.reaches === true) {
           const alone = JSON.stringify({
             object: parsed.data.object,
             entry: [
@@ -778,6 +843,7 @@ const whatsAppResponse = async (
           handOn(env, ctx, chat, {
             platform: "whatsapp",
             userId,
+            acts: reach.acts,
             handoff,
             webhook: async (waitUntil) =>
               await chat.webhooks.whatsapp(
@@ -848,6 +914,7 @@ export const channelResponse = async (
     return await whatsAppResponse(request, env, body, ctx, handoff);
   }
   if (!(await verifiedTeamsRequest(env, request, body, teamsKeys))) {
+    ctx.waitUntil(countSignal(env, platform, "refused"));
     return new Response("Unauthorized", { status: 401 });
   }
   const parsed = activitySchema.safeParse(jsonOf(body));
@@ -859,7 +926,12 @@ export const channelResponse = async (
   const activity = parsed.data;
   const state = durableObjectState(inJurisdiction(env, env.CHAT_STATE));
   const adapter = teamsAdapter(env, teamsKeys);
-  const { line, userId, kept } = await gate(env, state, adapter, activity);
+  const { line, userId, acts, kept } = await gate(
+    env,
+    state,
+    adapter,
+    activity
+  );
   if (line !== undefined) {
     ctx.waitUntil(sendLine(env, adapter, activity, line));
   }
@@ -876,19 +948,50 @@ export const channelResponse = async (
     logger: "silent",
     concurrency: "queue",
   });
-  return handOn(env, ctx, chat, {
-    platform,
-    userId,
-    kept,
-    handoff,
-    webhook: async (waitUntil) =>
-      await chat.webhooks.teams(
-        new Request(request.url, {
-          method: "POST",
-          headers: request.headers,
-          body,
-        }),
-        { waitUntil }
-      ),
+  const takeOn = handoff ?? answerInChat(env);
+  const later: (() => Promise<unknown>)[] = [];
+  const afterward = (send: () => Promise<unknown>): void => {
+    later.push(send);
+  };
+  chat.onDirectMessage(async (thread, message) => {
+    await keepConversation(env, platform, thread.id, userId);
+    await takeOn({
+      platform,
+      userId,
+      thread,
+      message,
+      acts: acts ?? false,
+      kept,
+      afterward,
+    });
   });
+  // Answered at once: the platform gives up on a webhook long before an
+  // answer is ready, and sends it again. The message is handled after,
+  // as the request's background work.
+  const settled = async (promise: Promise<unknown>): Promise<void> => {
+    try {
+      await promise;
+    } catch (error) {
+      log.error("channel.handle_failed", { platform, ...errorFields(error) });
+    }
+  };
+  const background = (promise: Promise<unknown>): void => {
+    ctx.waitUntil(settled(promise));
+  };
+  const handled = async (): Promise<void> => {
+    await chat.webhooks.teams(
+      new Request(request.url, {
+        method: "POST",
+        headers: request.headers,
+        body,
+      }),
+      { waitUntil: background }
+    );
+    for (const send of later) {
+      // oxlint-disable-next-line no-await-in-loop -- in the order they were asked for
+      await send();
+    }
+  };
+  background(handled());
+  return new Response(null, { status: 200 });
 };
