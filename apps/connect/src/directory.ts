@@ -2,11 +2,13 @@ import { connectErrors, connectionErrors } from "@grasp-os/shared/connect";
 import {
   directoryErrors,
   directoryLimits,
+  directoryLookupRequestSchema,
   directoryProviderSchema,
   directoryReadRequestSchema,
 } from "@grasp-os/shared/directory";
 import type {
   DirectoryConnection,
+  DirectoryLookup,
   DirectoryPerson,
   DirectoryProvider,
   DirectoryRead,
@@ -46,6 +48,11 @@ import { accessTokenFor } from "./tokens.ts";
 // - A flood: one read asks for `peoplePerRead` people and sends one
 //   request; a page holding more than it asked for is refused; core
 //   bounds the reads of a directory.
+// - A lookup that reads someone else: core looks one person up by the ID
+//   their chat platform verified (Teams' `aadObjectId`), never by name or
+//   email. The ID must be the provider's own shape before it is put in
+//   the path, so it can't name another endpoint, and the person answered
+//   must carry that same ID.
 
 const graphHost = "graph.microsoft.com";
 const graphUsersPath = "/v1.0/users";
@@ -256,6 +263,47 @@ const googlePerson = (
   };
 };
 
+/** The user endpoint of the one person with `id`, as a lookup asks it; none for an ID that isn't the provider's. */
+const personUrlOf = (provider: DirectoryProvider, id: string): URL | null => {
+  if (provider === "microsoft-directory") {
+    if (!guidPattern.test(id)) {
+      return null;
+    }
+    const url = new URL(
+      `https://${graphHost}${graphUsersPath}/${id.toLowerCase()}`
+    );
+    url.searchParams.set(
+      "$select",
+      "id,displayName,mail,department,jobTitle,accountEnabled,userType"
+    );
+    url.searchParams.set("$expand", "manager($select=id)");
+    return url;
+  }
+  if (!googleIdPattern.test(id)) {
+    return null;
+  }
+  const url = new URL(`https://${googleHost}${googleUsersPath}/${id}`);
+  url.searchParams.set("projection", "basic");
+  url.searchParams.set("viewType", "admin_view");
+  url.searchParams.set(
+    "fields",
+    "id,primaryEmail,name/fullName,suspended,archived,organizations(department,title,primary),relations(type,value)"
+  );
+  return url;
+};
+
+/** The one person a lookup's answer holds, as a read would answer them. */
+const personOf = async (
+  provider: DirectoryProvider,
+  access: ProviderAccess,
+  url: URL
+): Promise<DirectoryPerson | null> =>
+  provider === "microsoft-directory"
+    ? graphPerson(graphUserSchema.parse(await graph(access, url.href)))
+    : googlePerson(
+        googleUserSchema.parse(await googleDirectory(access, url.href))
+      );
+
 /** One page of the provider's users: its people, and the link to the next. */
 const pageOf = async (
   provider: DirectoryProvider,
@@ -427,4 +475,59 @@ export const readDirectory = async (
     throw directoryErrors.create("directory.provider_failed");
   }
   return { tenant: connection.tenant, people, next };
+};
+
+/**
+ * Looks up one person in a directory connection by their ID at the
+ * provider: null when it holds nobody by that ID (the provider answers
+ * 404), or only a guest or an account that is turned off.
+ */
+export const lookUpInDirectory = async (
+  env: Env,
+  request: unknown
+): Promise<DirectoryLookup> => {
+  const { connectionId, id } = directoryErrors.parse(
+    "directory.not_found",
+    directoryLookupRequestSchema,
+    request
+  );
+  const connection = await drizzle(env.DB)
+    .select()
+    .from(connections)
+    .where(eq(connections.id, connectionId))
+    .get();
+  const provider = directoryProviderSchema.safeParse(connection?.provider);
+  if (
+    connection === undefined ||
+    !provider.success ||
+    connection.tenant === null
+  ) {
+    throw directoryErrors.create("directory.not_found");
+  }
+  if (connection.status !== "active") {
+    throw directoryErrors.create("directory.inactive");
+  }
+  const url = personUrlOf(provider.data, id);
+  if (url === null) {
+    return { tenant: connection.tenant, person: null };
+  }
+  const access: ProviderAccess = {
+    token: await directoryToken(env, connection.id),
+    budget: requestBudget(1),
+  };
+  let person: DirectoryPerson | null;
+  try {
+    person = await personOf(provider.data, access, url);
+  } catch (error) {
+    if (error instanceof SourceError && error.status === 404) {
+      return { tenant: connection.tenant, person: null };
+    }
+    throw readFailure(error);
+  }
+  // Someone else answered for the ID asked: nobody is taken for them.
+  const asked = provider.data === "microsoft-directory" ? id.toLowerCase() : id;
+  return {
+    tenant: connection.tenant,
+    person: person?.id === asked ? person : null,
+  };
 };

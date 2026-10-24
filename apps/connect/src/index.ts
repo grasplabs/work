@@ -40,6 +40,7 @@ import type {
 } from "@grasp-os/shared/connect";
 import type {
   DirectoryConnection,
+  DirectoryLookup,
   DirectoryRead,
 } from "@grasp-os/shared/directory";
 import type {
@@ -80,7 +81,11 @@ import {
 import { connectionOwners } from "./connections.ts";
 import { connectorContract } from "./contracts.ts";
 import { requireDecision } from "./decisions.ts";
-import { directoryConnections, readDirectory } from "./directory.ts";
+import {
+  directoryConnections,
+  lookUpInDirectory,
+  readDirectory,
+} from "./directory.ts";
 import {
   placesConnections,
   readPlaceFile,
@@ -440,7 +445,8 @@ export default class Connect
     return await readLandscape(this.env, request);
   }
 
-  // The directory (src/directory.ts): for the onboarding, in core, only.
+  // The directory (src/directory.ts): for the onboarding, and to know the
+  // people writing to Stephen on a chat platform, in core, only.
 
   async directoryConnections(): Promise<DirectoryConnection[]> {
     return await directoryConnections(this.env);
@@ -448,6 +454,10 @@ export default class Connect
 
   async readDirectory(request: unknown): Promise<DirectoryRead> {
     return await readDirectory(this.env, request);
+  }
+
+  async lookUpInDirectory(request: unknown): Promise<DirectoryLookup> {
+    return await lookUpInDirectory(this.env, request);
   }
 
   // The HR platform (src/hr.ts): for the onboarding, in core, only.

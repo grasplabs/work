@@ -6680,6 +6680,10 @@ msgid "Job"
 msgstr "Puesto"
 
 #: src/activity/audit-words.ts
+msgid "Joined from the directory, writing to Stephen"
+msgstr "Se unió desde el directorio, al escribir a Stephen"
+
+#: src/activity/audit-words.ts
 msgid "Joined through an invitation"
 msgstr "Se unió mediante una invitación"
 
@@ -11067,6 +11071,10 @@ msgstr "Firmado"
 #: src/routes/_shell.settings.security.tsx
 msgid "Signed in {time}"
 msgstr "Sesión iniciada el {time}"
+
+#: src/activity/audit-words.ts
+msgid "Signed in for the first time, after joining from the directory"
+msgstr "Inició sesión por primera vez, tras unirse desde el directorio"
 
 #: src/activity/audit-words.ts
 msgid "Signed in to a connection again"
