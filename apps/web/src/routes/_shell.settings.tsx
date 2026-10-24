@@ -21,13 +21,13 @@ import {
 import {
   ActivityIcon,
   BellIcon,
-  BotIcon,
   BuildingIcon,
   CircleHelpIcon,
   CoinsIcon,
   CreditCardIcon,
   HistoryIcon,
   KeyRoundIcon,
+  MessageCircleIcon,
   MessagesSquareIcon,
   PackageIcon,
   SparklesIcon,
@@ -108,7 +108,7 @@ const groupsFor = ({
         { label: msg`Models`, to: "/settings/models", icon: SparklesIcon },
         { label: msg`AI spend`, to: "/settings/spend", icon: CoinsIcon },
         // A name, like Pulse: the company's assistant in its chat apps.
-        { label: "Stephen", to: "/settings/stephen", icon: BotIcon },
+        { label: "Stephen", to: "/settings/stephen", icon: MessageCircleIcon },
         { label: "Pulse", to: "/settings/pulse", icon: ActivityIcon },
         {
           label: msg`Onboarding`,

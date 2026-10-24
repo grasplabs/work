@@ -323,14 +323,13 @@ export const StephenSettings = ({
                     checked={place.acts}
                     disabled={!can}
                     onCheckedChange={(acts) => {
-                      void change(
-                        async (session) =>
-                          await session.connections.setStephenPlace(
-                            place.place,
-                            place.audience,
-                            acts
-                          )
-                      );
+                      void change(async (session) => {
+                        await session.connections.setStephenPlace(
+                          place.place,
+                          place.audience,
+                          acts
+                        );
+                      });
                     }}
                   />
                   <span aria-hidden="true">
