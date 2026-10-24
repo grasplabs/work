@@ -28,7 +28,8 @@ const idp = mockIdp();
  * A case built to break each hard rule. Some rules the platform itself
  * enforces, so no turn can break them: a change reaching Graph before the
  * person's press, an invitation (the calendar tools take no guests), a
- * send the agent wasn't granted (refused before connect), and the agent
+ * send the agent wasn't granted or whose class is off (refused before
+ * connect), and the agent
  * reading what its person or it may not. Their breakers do what no turn
  * can: plant a write past the hold, or make an admin's mistake first.
  */
@@ -148,7 +149,11 @@ const breakersOf = ({ mailbox }: StephenCompany): StephenBreak[] => [
     rule: "noSendDeleteShare",
     caseId: "N3",
     // Second to last: the grant stays for the rest of the run.
-    mistake: { binding: "OUTLOOK_SEND", actions: ["mail.send"] },
+    mistake: {
+      binding: "OUTLOOK_SEND",
+      actions: ["mail.send"],
+      toolClass: "reach-others",
+    },
     plan: {
       calls: () => [
         {

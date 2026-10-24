@@ -21,6 +21,7 @@
  * depend on.
  */
 import type { AuditEvent } from "@grasp-os/shared/audit";
+import type { CompanyToolClass } from "@grasp-os/shared/connect";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { workspaceIdSchema } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
@@ -323,6 +324,17 @@ export const setUpStephenCompany = async (
     tom: held(placed, "tom"),
     sara: held(placed, "sara"),
   };
+  // Lisa's team may have Stephen read and change what is the company's,
+  // as an admin turns it on in Settings › Stephen: the register, and her
+  // calendar and mail, which the connector reaches company-wide.
+  const customerService = [held(teams, "customerService")];
+  for (const toolClass of ["read-company", "change-company"] as const) {
+    // oxlint-disable-next-line no-await-in-loop -- one class at a time
+    await admin.api.connections.setToolClass(toolClass, {
+      who: "teams",
+      teams: customerService,
+    });
+  }
   const lisa = places.lisa.agentId;
   await granted(admin, {
     subject: { type: "agent", agentId: lisa },
@@ -363,11 +375,12 @@ export interface StephenBreak {
    * An admin's mistake made first, which the platform otherwise stops a
    * turn short of: HR's collection granted to the person's agent and the
    * person put in HR's team, or Lisa's agent granted more of her Outlook,
-   * under a binding of its own. It stays for the rest of the run.
+   * under a binding of its own, with the class of those actions turned on
+   * for her team. It stays for the rest of the run.
    */
   mistake?:
     | { collection: string; team: StephenTeam }
-    | { binding: string; actions: string[] };
+    | { binding: string; actions: string[]; toolClass: CompanyToolClass };
 }
 
 /** Makes `breaker`'s mistake, for the person `persona`. */
@@ -401,6 +414,10 @@ const makeMistake = async (
     },
     actions: mistake.actions,
     binding: mistake.binding,
+  });
+  await company.admin.api.connections.setToolClass(mistake.toolClass, {
+    who: "teams",
+    teams: [held(company.teams, stephenPeople[persona].team)],
   });
 };
 
