@@ -95,12 +95,14 @@ import { unicode61Dropped, unicode61Kept } from "./unicode61.ts";
 //
 // Both reach the copies of people's words the host keeps outside
 // Knowledge too, through its `OnErase` hook (core's: the brain's gap
-// answers), so Knowledge names none of them: a personal purge forgets the
-// person as the author of any, a content purge rewrites every one holding
-// a term, whatever documents it names, before its documents. Its plan
-// counts them (`hostCopies`), and its check counts one still holding a
-// term (written after the rewrite read it) with the documents a term
-// still finds (`stillFound`).
+// answers and the onboarding's readings of the documents shared in it),
+// so Knowledge names none of them: a personal purge forgets the person as
+// the author of any, a content purge rewrites every one holding a term,
+// whatever documents it names, and forgets every copy made of a document
+// it names, whatever it holds, before its documents. Its plan counts the
+// copies holding a term (`hostCopies`), and its check counts one still
+// holding one (written after the rewrite read it) with the documents a
+// term still finds (`stillFound`).
 //
 // Both have the host forget the files it keeps as the documents they
 // purge (`OnErase` `forgetFiles`; core's: the originals of uploaded files,
@@ -191,6 +193,13 @@ const sum = (all: Counts[]): Counts => {
   return total;
 };
 
+/** A document a content purge names, as the host may know it. */
+export interface ErasedDocument {
+  id: string;
+  collectionId: string;
+  path: string;
+}
+
 /**
  * Refuses anyone but the client's own admins: Grasp staff never purge the
  * client's data, whatever their role.
@@ -206,8 +215,9 @@ export type ErasedFiles =
 /**
  * How a purge reaches the copies of people's words a host keeps outside
  * Knowledge, so Knowledge itself names none of them. Core's are the
- * brain's gap answers (brain-gaps.ts) and the originals of uploaded files
- * (uploads.ts).
+ * brain's gap answers (brain-gaps.ts), the originals of uploaded files
+ * (uploads.ts) and the onboarding's readings of the documents shared in
+ * it (onboarding/documents.ts).
  */
 export interface OnErase {
   /** How many copies `holds` is true of: those holding a purged term. */
@@ -222,6 +232,15 @@ export interface OnErase {
   ) => Promise<void>;
   /** Forgets `userId` as the author of any copy (a personal purge). */
   forgetActor: (person: Identity, userId: string) => Promise<void>;
+  /**
+   * Forgets every copy made of `documents`, the documents a content purge
+   * names, whatever it holds: a reading of one may say a term otherwise
+   * than the purge spells it.
+   */
+  forgetDocuments: (
+    person: Identity,
+    documents: readonly ErasedDocument[]
+  ) => Promise<void>;
   /** How many files the host keeps for `scopes` (a plan's `originals`). */
   countFiles: (scopes: readonly ErasedFiles[]) => Promise<number>;
   /**
@@ -1490,6 +1509,16 @@ const purgeContent = async (
     // whatever documents the purge names. First, so a document whose
     // purge fails doesn't leave them holding a term.
     await onErase.rewrite(person, (text) => without(text, matcher));
+    // A copy made of a document named goes whatever it holds, also when
+    // the document's own purge then fails.
+    await onErase.forgetDocuments(
+      person,
+      named.map(({ document }) => ({
+        id: document.id,
+        collectionId: document.collectionId,
+        path: document.path,
+      }))
+    );
     for (const one of named) {
       // oxlint-disable-next-line no-await-in-loop -- one document at a time, to bound memory
       done.push(await purgeDocument(env, db, person, one, matcher, onErase));
