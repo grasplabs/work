@@ -8,7 +8,9 @@
  * write out and loses its answer. Events it makes or changes it keeps for
  * the test, and holds a change to the `If-Match` etag it is sent. Excel's
  * workbooks in the finance drive hold their named tables in memory, typed
- * as Excel types what it is sent, afresh for each test.
+ * as Excel types what it is sent, afresh for each test. Each person's To
+ * Do is theirs alone: Graph answers a token for its own user's lists only,
+ * as it answers a delegated `Tasks.ReadWrite` token.
  */
 import { egressHeader } from "@grasp-os/connector-kit/manifest";
 import {
@@ -20,6 +22,7 @@ import { z } from "zod";
 
 import {
   accessDenied,
+  graphAccessDenied,
   attachment,
   attachmentPage,
   childrenPage,
@@ -39,10 +42,14 @@ import {
   item,
   itemIds,
   mailFolder,
+  masterCategories,
   message,
   messagePage,
   moved,
   notFound,
+  patched,
+  procedureTexts,
+  procedureVersion,
   replyDraft,
   notIndexed,
   reportText,
@@ -53,11 +60,16 @@ import {
   supplierRows,
   supplierTable,
   throttled,
+  todoLists,
+  versionAt,
+  versionDownloadUrl,
+  versionPage,
   workbookIds,
 } from "./fixtures/graph.ts";
 import type { SheetCell } from "./fixtures/graph.ts";
 import { fakeProvider, json, route as routeOn } from "./internet.ts";
 import type { ProviderRoute } from "./internet.ts";
+import type { fakeProviders } from "./oauth-provider.ts";
 
 const users = String.raw`^/v1\.0/users/(?<mailbox>[^/]+)`;
 const drives = String.raw`^/v1\.0/drives/(?<drive>[^/]+)`;
@@ -74,6 +86,8 @@ const parts = [
   "id",
   "table",
   "row",
+  "task",
+  "version",
 ] as const;
 
 type Part = (typeof parts)[number];
@@ -212,6 +226,9 @@ const keepTag = (mailbox: string, id: string, made: unknown): void => {
 
 /** Runs once while Graph answers the next lookup by effect key. */
 let duringLookup: (() => Promise<void>) | undefined;
+
+/** A version of the procedure Graph says is too big to read, if any. */
+let oversizedVersion: string | undefined;
 
 type GraphEvent = Record<string, unknown> & {
   id: string;
@@ -457,7 +474,90 @@ const workbookRoutes: ProviderRoute<Part>[] = [
   }),
 ];
 
+/**
+ * The files in the person's own OneDrive, by their decoded path from the
+ * drive's root (`Drafts from Stephen/Letter.docx`), as files.createDraft
+ * writes and finds them. Cleared before each test.
+ */
+const ownFiles = new Map<string, { id: string; bytes: Uint8Array }>();
+
+const ownFile = String.raw`^/v1\.0/me/drive/root:/[^/]+/[^/:]+`;
+
+const ownRoot = "/v1.0/me/drive/root:/";
+const contentSuffix = /:\/content$/u;
+
+/** The decoded path from the root a request names, without `:/content`. */
+const ownPathOf = (request: Request): string =>
+  decodeURIComponent(
+    new URL(request.url).pathname
+      .replace(ownRoot, "")
+      .replace(contentSuffix, "")
+  );
+
+const newOwnId = (): string =>
+  `01OWN${crypto.randomUUID().replaceAll("-", "").toUpperCase()}`;
+
+/** A file of the person's own OneDrive, as Graph describes it. */
+const driveItemOf = (path: string, id: string, bytes: Uint8Array) => ({
+  id,
+  name: path.split("/").at(-1),
+  size: bytes.byteLength,
+  webUrl: `https://example-my.sharepoint.com/personal/someone/Documents/${encodeURI(path)}`,
+});
+
+const ownFileRoutes: ProviderRoute<Part>[] = [
+  route("PUT", `${ownFile}:/content`, async ({ query, request }) => {
+    const path = ownPathOf(request);
+    const existing = ownFiles.get(path);
+    if (
+      existing !== undefined &&
+      query.get("@microsoft.graph.conflictBehavior") === "fail"
+    ) {
+      return json({ error: { code: "nameAlreadyExists" } }, 409);
+    }
+    const bytes = new Uint8Array(await request.arrayBuffer());
+    const id = existing?.id ?? newOwnId();
+    ownFiles.set(path, { id, bytes });
+    return json(driveItemOf(path, id, bytes), 201);
+  }),
+  route("GET", `${ownFile}:/content`, ({ request }) => {
+    const file = ownFiles.get(ownPathOf(request));
+    return file === undefined
+      ? json(notFound, 404)
+      : new Response(null, {
+          status: 302,
+          headers: { location: downloadUrl(file.id) },
+        });
+  }),
+  route("GET", ownFile, ({ request }) => {
+    const path = ownPathOf(request);
+    const file = ownFiles.get(path);
+    return file === undefined
+      ? json(notFound, 404)
+      : json(driveItemOf(path, file.id, file.bytes));
+  }),
+];
+
+const patchSchema = z.object({
+  flag: z.unknown().optional(),
+  categories: z.unknown().optional(),
+});
+
+// `GET /me` is the OAuth fake's (oauth-provider.ts `profileOf`): it
+// answers for the account the bearer token was issued to.
 const graphRoutes: ProviderRoute<Part>[] = [
+  ...ownFileRoutes,
+  route("GET", `${users}/outlook/masterCategories`, ({ query }) =>
+    json(masterCategories(query.get("$skiptoken")))
+  ),
+  route(
+    "PATCH",
+    `${users}/messages/(?<id>[^/]+)`,
+    async ({ mailbox, id, request }) =>
+      json(
+        patched(mailbox, numberOf(id), patchSchema.parse(await request.json()))
+      )
+  ),
   ...workbookRoutes,
   route(
     "GET",
@@ -675,7 +775,44 @@ const graphRoutes: ProviderRoute<Part>[] = [
     json(searchResults(drive))
   ),
   route("GET", `${drives}/items/(?<id>[^/]+)`, ({ drive, id }) =>
-    json(item(drive, id))
+    id === itemIds.locked ? json(accessDenied, 403) : json(item(drive, id))
+  ),
+  route(
+    "GET",
+    `${drives}/items/(?<id>[^/]+)/versions`,
+    ({ drive, id, query }) => {
+      if (id === itemIds.locked) {
+        return json(accessDenied, 403);
+      }
+      return id === itemIds.procedure
+        ? json(versionPage(drive, id, query))
+        : json(notFound, 404);
+    }
+  ),
+  route(
+    "GET",
+    `${drives}/items/(?<id>[^/]+)/versions/(?<version>[^/]+)`,
+    ({ id, version }) => {
+      const found =
+        id === itemIds.procedure ? procedureVersion(version) : undefined;
+      if (found === undefined) {
+        return json(notFound, 404);
+      }
+      return json(
+        version === oversizedVersion
+          ? { ...found, size: 5 * 1024 * 1024 }
+          : found
+      );
+    }
+  ),
+  route(
+    "GET",
+    `${drives}/items/(?<id>[^/]+)/versions/(?<version>[^/]+)/content`,
+    ({ version }) =>
+      new Response(null, {
+        status: 302,
+        headers: { location: versionDownloadUrl(version) },
+      })
   ),
   route(
     "GET",
@@ -688,36 +825,280 @@ const graphRoutes: ProviderRoute<Part>[] = [
   ),
 ];
 
+/** A task in someone's To Do, as Graph keeps it. */
+interface TodoTask {
+  id: string;
+  title: string;
+  status: string;
+  body: { contentType: string; content: string };
+  dueDateTime?: { dateTime: string; timeZone: string };
+  completedDateTime?: { dateTime: string; timeZone: string };
+  createdDateTime: string;
+  lastModifiedDateTime: string;
+  /** The effect key it was tagged with, if any. */
+  tag?: string;
+}
+
+const todoTaskSchema = z.object({
+  title: z.string(),
+  body: z.object({ contentType: z.string(), content: z.string() }).optional(),
+  dueDateTime: z
+    .object({ dateTime: z.string(), timeZone: z.string() })
+    .optional(),
+});
+
+/**
+ * Each person's To Do tasks, by their account's subject and the list.
+ * Cleared before each test.
+ */
+const todoTasks = new Map<string, TodoTask[]>();
+
+const tasksOf = (owner: string, list: string): TodoTask[] => {
+  const key = `${owner} ${list}`;
+  const tasks = todoTasks.get(key) ?? [];
+  todoTasks.set(key, tasks);
+  return tasks;
+};
+
+/** A task as Graph answers for it, without the tag it keeps. */
+const taskAnswer = ({ tag: _tag, ...task }: TodoTask) => ({
+  "@odata.etag": `W/"${task.id}"`,
+  importance: "normal",
+  isReminderOn: false,
+  ...task,
+});
+
+/** The `$expand` that reads a task's effect tag, as Graph documents it. */
+const tagExpansion = `singleValueExtendedProperties($filter=id eq '${effectPropertyId}')`;
+
+/**
+ * Graph pages a list's tasks with their tag expanded by two, fewer than a
+ * lookup asks for, as Graph may: a lookup must follow the next page.
+ */
+const taggedTaskPageSize = 2;
+
+/** A page of tasks with their effect tag expanded, from `$skip`. */
+const taggedTaskPage = (tasks: TodoTask[], skip: string | null) => {
+  const from = Number(skip ?? "0");
+  const to = from + taggedTaskPageSize;
+  return {
+    value: tasks.slice(from, to).map((task) => ({
+      ...taskAnswer(task),
+      ...(task.tag === undefined
+        ? {}
+        : {
+            singleValueExtendedProperties: [
+              { id: effectPropertyId, value: task.tag },
+            ],
+          }),
+    })),
+    ...(to < tasks.length
+      ? {
+          "@odata.nextLink": `https://graph.microsoft.com/v1.0/me/todo/lists/tasks?%24skip=${to}`,
+        }
+      : {}),
+  };
+};
+
+/** The effect key a task Graph is asked to make is tagged with, if any. */
+const tagOf = (made: unknown): string | undefined =>
+  taggedSchema
+    .safeParse(made)
+    .data?.singleValueExtendedProperties?.find(
+      (property) => property.id === effectPropertyId
+    )?.value;
+
+/** The person's own lists they shared during a test. Cleared before each. */
+const sharedSince = new Set<string>();
+
+/** The To Do list with this id, if Graph has one. */
+const listOf = (id: string) => {
+  const list = todoLists.find((each) => each.id === id);
+  return list !== undefined && sharedSince.has(id)
+    ? { ...list, isShared: true }
+    : list;
+};
+
+/**
+ * Graph's To Do routes. `ownerOf` says whose a request's token is, if the
+ * mailbox it names is that user: anyone else's To Do is refused.
+ */
+const todoRoutes = (
+  ownerOf: (mailbox: string, request: Request) => string | undefined
+): ProviderRoute<Part>[] => {
+  const lists = `${users}/todo/lists`;
+  /** The list's owner, or Graph's refusal. */
+  const opened = (
+    mailbox: string,
+    list: string,
+    request: Request
+  ): string | Response => {
+    const owner = ownerOf(mailbox, request);
+    if (owner === undefined) {
+      return json(graphAccessDenied, 403);
+    }
+    return listOf(list) === undefined ? json(notFound, 404) : owner;
+  };
+  return [
+    route("GET", lists, ({ mailbox, request }) =>
+      ownerOf(mailbox, request) === undefined
+        ? json(graphAccessDenied, 403)
+        : json({ value: todoLists.map(({ id }) => listOf(id)) })
+    ),
+    route("GET", `${lists}/(?<list>[^/]+)`, ({ mailbox, list, request }) => {
+      const owner = opened(mailbox, list, request);
+      return owner instanceof Response ? owner : json(listOf(list));
+    }),
+    route(
+      "GET",
+      `${lists}/(?<list>[^/]+)/tasks`,
+      ({ mailbox, list, query, request }) => {
+        const owner = opened(mailbox, list, request);
+        if (owner instanceof Response) {
+          return owner;
+        }
+        const tasks = tasksOf(owner, list);
+        const filter = query.get("$filter") ?? "";
+        // To Do refuses the extended property filter mail and events take.
+        if (filter.startsWith("singleValueExtendedProperties/")) {
+          return json({ error: { code: "Request_UnsupportedQuery" } }, 400);
+        }
+        const expand = query.get("$expand");
+        if (expand !== null) {
+          if (expand !== tagExpansion) {
+            return json({ error: { code: "BadRequest" } }, 400);
+          }
+          return json(taggedTaskPage(tasks, query.get("$skip")));
+        }
+        const openOnly = filter === "status ne 'completed'";
+        return json({
+          value: tasks
+            .filter(({ status }) => !openOnly || status !== "completed")
+            .map(taskAnswer),
+        });
+      }
+    ),
+    route(
+      "POST",
+      `${lists}/(?<list>[^/]+)/tasks`,
+      async ({ mailbox, list, request }) => {
+        const owner = opened(mailbox, list, request);
+        if (owner instanceof Response) {
+          return owner;
+        }
+        const body: unknown = await request.json();
+        const { title, body: note, dueDateTime } = todoTaskSchema.parse(body);
+        const now = new Date().toISOString();
+        const task: TodoTask = {
+          id: `AAkALgAAAAAAHYQDEapmEc2byACqAC-EWg0A${crypto.randomUUID().replaceAll("-", "")}=`,
+          title,
+          status: "notStarted",
+          body: note ?? { contentType: "text", content: "" },
+          ...(dueDateTime === undefined ? {} : { dueDateTime }),
+          createdDateTime: now,
+          lastModifiedDateTime: now,
+        };
+        const tag = tagOf(body);
+        tasksOf(owner, list).push({
+          ...task,
+          ...(tag === undefined ? {} : { tag }),
+        });
+        return json(taskAnswer(task), 201);
+      }
+    ),
+    route(
+      "PATCH",
+      `${lists}/(?<list>[^/]+)/tasks/(?<task>[^/]+)`,
+      async ({ mailbox, list, task: id, request }) => {
+        const owner = opened(mailbox, list, request);
+        if (owner instanceof Response) {
+          return owner;
+        }
+        const task = tasksOf(owner, list).find((each) => each.id === id);
+        if (task === undefined) {
+          return json(notFound, 404);
+        }
+        const { status } = z
+          .object({ status: z.string() })
+          .parse(await request.json());
+        const now = new Date().toISOString();
+        task.status = status;
+        task.lastModifiedDateTime = now;
+        if (status === "completed") {
+          task.completedDateTime = {
+            dateTime: now.replace("Z", ""),
+            timeZone: "UTC",
+          };
+        }
+        return json(taskAnswer(task));
+      }
+    ),
+  ];
+};
+
 /** SharePoint's answer to a download: the file, or a second redirect. */
 const sharePointAnswer = (url: URL): Response => {
+  const version = versionAt(url.pathname);
+  if (version !== undefined) {
+    return new Response(new TextEncoder().encode(procedureTexts[version]), {
+      headers: { "content-type": "application/octet-stream" },
+    });
+  }
   const id = url.searchParams.get("UniqueId");
   if (id === itemIds.twice) {
     return Response.redirect(downloadUrl(itemIds.report), 302);
   }
-  const content = {
-    [itemIds.pdf]: invoicePdf,
-    [itemIds.controls]: new TextEncoder().encode(controlText),
-  }[id ?? ""];
+  const own = [...ownFiles.values()].find((file) => file.id === id);
+  const content =
+    {
+      [itemIds.pdf]: invoicePdf,
+      [itemIds.controls]: new TextEncoder().encode(controlText),
+      [itemIds.procedure]: new TextEncoder().encode(procedureTexts["3.0"]),
+    }[id ?? ""] ?? own?.bytes;
   return new Response(content ?? new TextEncoder().encode(reportText), {
     headers: { "content-type": "application/octet-stream" },
   });
 };
 
-/** Graph, SharePoint and the rest of the internet, for each test in the file. */
-export const fakeGraph = () => {
+/**
+ * Graph, SharePoint and the rest of the internet, for each test in the
+ * file. Given the OAuth providers, Graph knows whose each token is, and
+ * opens a person's To Do to their own token only; without them, it opens
+ * no one's.
+ */
+export const fakeGraph = (providers?: ReturnType<typeof fakeProviders>) => {
   beforeEach(() => {
     tagged.clear();
+    todoTasks.clear();
+    sharedSince.clear();
+    ownFiles.clear();
     duringLookup = undefined;
+    oversizedVersion = undefined;
     events.clear();
     taggedEvents.clear();
     inviteDuringRead = false;
     attendeesLeftOut = undefined;
     resetWorkbooks();
   });
+  /** The subject of the token's account, if `mailbox` is that account. */
+  const ownerOf = (mailbox: string, request: Request): string | undefined => {
+    const token = (request.headers.get("authorization") ?? "").replace(
+      "Bearer ",
+      ""
+    );
+    const account = providers?.state.holders.get(token);
+    if (account === undefined) {
+      return undefined;
+    }
+    const isThem =
+      mailbox.toLowerCase() === account.email.toLowerCase() ||
+      mailbox === account.subject;
+    return isThem ? account.subject : undefined;
+  };
   const { sent, writesDone, fail } = fakeProvider({
     hosts: [graphHost],
     parts,
-    routes: graphRoutes,
+    routes: [...graphRoutes, ...todoRoutes(ownerOf)],
     unmatched: () =>
       json(
         { error: { code: "BadRequest", message: "Unsupported request" } },
@@ -782,6 +1163,10 @@ export const fakeGraph = () => {
     leaveOutAttendees: (how: "missing" | "null") => {
       attendeesLeftOut = how;
     },
+    /** Graph says this version of the procedure is 5 MiB, past what a read takes. */
+    oversizeVersion: (version: string) => {
+      oversizedVersion = version;
+    },
     /** Runs `meanwhile` while Graph answers the next lookup by effect key. */
     whileLookingUp: (meanwhile: () => Promise<void>) => {
       duringLookup = meanwhile;
@@ -815,6 +1200,17 @@ export const fakeGraph = () => {
     /** The rows of workbook `id`'s supplier table, as Excel holds them. */
     supplierRowsOf: (id: string): readonly SheetCell[][] =>
       workbooks.get(id)?.get(supplierTable)?.rows ?? [],
+    /** The person shares their own To Do list `id` with someone. */
+    shareList: (id: string) => {
+      sharedSince.add(id);
+    },
     sharePointHost,
+    /** The file at `path` of the person's own OneDrive, if there is one. */
+    ownFile: (path: string): Uint8Array | undefined =>
+      ownFiles.get(path)?.bytes,
+    /** Puts a file at `path` of the person's own OneDrive, as they could. */
+    putOwnFile: (path: string, bytes: Uint8Array): void => {
+      ownFiles.set(path, { id: newOwnId(), bytes });
+    },
   };
 };

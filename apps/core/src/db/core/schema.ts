@@ -218,6 +218,67 @@ export const memberRemovals = sqliteTable(
 );
 
 /**
+ * A person's account on a chat platform that carries no Entra object id
+ * (Slack, WhatsApp, Telegram...), linked to them (`channels/accounts.ts`):
+ * one person per platform account, by the platform's own verified sender
+ * id. Its id names it to the person and in the audit log, which never
+ * holds the platform id itself (a WhatsApp id is a phone number).
+ */
+export const channelAccounts = sqliteTable(
+  "channel_accounts",
+  {
+    id: text().primaryKey(),
+    platform: text().notNull(),
+    platformUserId: text("platform_user_id").notNull(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** What the platform called them when they linked it; never who they are. */
+    name: text(),
+    linkedAt: timestamp("linked_at").notNull(),
+    /** How it was linked: a sign-in link the chat sent, so far the only way. */
+    linkedHow: text("linked_how", { enum: ["sign_in_link"] }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("channel_accounts_platform_user_idx").on(
+      table.platform,
+      table.platformUserId
+    ),
+    index("channel_accounts_user_id_idx").on(table.userId),
+  ]
+);
+
+/**
+ * One-use links a chat sent someone it doesn't know, each bound to the
+ * platform account it was sent to (`channels/accounts.ts`). Only the
+ * secret's hash is kept. Used or not, a link is gone soon after it
+ * expires.
+ */
+export const channelLinks = sqliteTable(
+  "channel_links",
+  {
+    secretHash: text("secret_hash").primaryKey(),
+    platform: text().notNull(),
+    platformUserId: text("platform_user_id").notNull(),
+    name: text(),
+    createdAt: timestamp("created_at").notNull(),
+    expiresAt: timestamp("expires_at").notNull(),
+    /** Set once, by the sign-in it linked, with whose. */
+    usedAt: timestamp("used_at"),
+    usedBy: text("used_by"),
+    /** Set when the chat sent the same account a newer link. */
+    replacedAt: timestamp("replaced_at"),
+  },
+  (table) => [
+    index("channel_links_platform_user_idx").on(
+      table.platform,
+      table.platformUserId
+    ),
+    index("channel_links_expires_at_idx").on(table.expiresAt),
+  ]
+);
+
+/**
  * Part of the organization plugin's model. Invitations aren't offered: people
  * join by signing in with the deployment's IdP.
  */
@@ -2294,6 +2355,12 @@ export const dependencyRequests = sqliteTable(
      */
     endedGeneration: integer("ended_generation"),
     endedReason: text("ended_reason"),
+    /**
+     * When an approval in force was last found clean of malware reported
+     * since (OSV.dev and the registry's advisories), by the periodic
+     * re-check (`recheckMalware`, requests.ts): null until it was.
+     */
+    malwareCheckedAt: timestamp("malware_checked_at"),
   },
   (table) => [
     // One request waits per subject: a second pending row is refused.
@@ -2313,6 +2380,14 @@ export const dependencyRequests = sqliteTable(
       table.subjectType,
       table.subjectId,
       table.graphHash,
+      table.status
+    ),
+    // The approvals the malware re-check is due to read: by when each was
+    // last found clean, never checked first. Led by that time, not the
+    // status, so the approvers' list of what is in force keeps reading the
+    // subject index in its order.
+    index("dependency_requests_malware_idx").on(
+      table.malwareCheckedAt,
       table.status
     ),
   ]
@@ -2608,6 +2683,20 @@ export const hiddenConnectors = sqliteTable(
   },
   (table) => [primaryKey({ columns: [table.source, table.connectorId] })]
 );
+
+/**
+ * The classes of tools an admin changed (tool-classes.ts): one row each,
+ * for whom it is on now (`who`: `nobody`, `everyone` or `teams`, then the
+ * team IDs in `teams` as a JSON array). A class without a row is as
+ * `defaultToolClassAudiences` has it.
+ */
+export const toolClassSettings = sqliteTable("tool_class_settings", {
+  toolClass: text("tool_class").primaryKey(),
+  who: text({ enum: ["nobody", "everyone", "teams"] }).notNull(),
+  teams: text().notNull().default("[]"),
+  changedBy: text("changed_by").notNull(),
+  changedAt: timestamp("changed_at").notNull(),
+});
 
 /**
  * Apps people asked Grasp to add, as the catalog doesn't have them
