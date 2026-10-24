@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import type { OutboxedAuditEvent, OutboxRejected } from "./audit.ts";
 import type { HeldBinding } from "./capability.ts";
+import { chatPlatformSchema } from "./chat.ts";
 import { directoryProviderSchema } from "./directory.ts";
 import { placesProviderSchema } from "./document-places.ts";
 import { defineErrorFamily, isExpectedError } from "./errors.ts";
@@ -1100,6 +1101,11 @@ export const confirmActionSchema = z.strictObject({
   person: connectionPersonSchema,
   id: z.uuid(),
   inputHash: inputHashSchema,
+  /**
+   * The chat platform the person decided on (a press on a Teams card), as
+   * core verified it: its events name it. None in Grasp's own app.
+   */
+  via: chatPlatformSchema.optional(),
 });
 export type ConfirmAction = z.input<typeof confirmActionSchema>;
 
@@ -1107,6 +1113,8 @@ export type ConfirmAction = z.input<typeof confirmActionSchema>;
 export const declineActionSchema = z.strictObject({
   person: connectionPersonSchema,
   id: z.uuid(),
+  /** As `ConfirmAction.via`. */
+  via: chatPlatformSchema.optional(),
 });
 export type DeclineAction = z.input<typeof declineActionSchema>;
 

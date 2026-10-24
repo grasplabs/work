@@ -119,6 +119,9 @@ export const accounts = sqliteTable(
   },
   (table) => [
     index("accounts_user_id_idx").on(table.userId),
+    // Who writes in Teams, by the object id its messages carry
+    // (channels/who.ts).
+    index("accounts_oid_idx").on(table.oid),
     uniqueIndex("accounts_provider_account_idx").on(
       table.providerId,
       table.accountId
@@ -275,6 +278,30 @@ export const channelLinks = sqliteTable(
       table.platformUserId
     ),
     index("channel_links_expires_at_idx").on(table.expiresAt),
+  ]
+);
+
+/**
+ * The chat conversations people write to the agent in, each the person's
+ * own private chat with the client's bot on its platform (`channels/door.ts`),
+ * so a later message, or the agent's answer, finds it again. `threadId` is
+ * the Chat SDK's thread id, which names the conversation and where the
+ * platform takes its replies.
+ */
+export const channelConversations = sqliteTable(
+  "channel_conversations",
+  {
+    platform: text().notNull(),
+    threadId: text("thread_id").notNull(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at").notNull(),
+    lastMessageAt: timestamp("last_message_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.platform, table.threadId] }),
+    index("channel_conversations_user_id_idx").on(table.userId),
   ]
 );
 
