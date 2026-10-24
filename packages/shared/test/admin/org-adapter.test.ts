@@ -246,6 +246,15 @@ const snapshot: StaffSnapshot = {
   now: "2026-10-06T12:00:00Z",
 };
 
+/** One call's count that heard `seconds`, as core counts transcription. */
+const heard = (seconds: number) => ({
+  calls: 1,
+  tokensIn: 0,
+  kept: 0,
+  tokensOut: 0,
+  seconds,
+});
+
 describe("a real organization as the admin reads it", () => {
   const org = orgOfSnapshot(snapshot);
   const view = adminViewOf(org, org.seed, "2026-10-06");
@@ -666,5 +675,44 @@ describe("a real organization as the admin reads it", () => {
       counted.reduce((sum, each) => sum + each.use.spend, 0),
       6
     );
+  });
+
+  it("counts what Stephen heard as his ears, by purpose, at the admin’s price a minute", () => {
+    const counted = meteredOf([
+      {
+        day: "2026-10-24",
+        use: {
+          interviews: { transcription: heard(180) },
+          reading: { transcription: heard(30) },
+        },
+      },
+    ]);
+
+    expect(
+      counted.map(({ purpose, model, use }) => ({ purpose, model, use }))
+    ).toStrictEqual([
+      {
+        purpose: "reading",
+        model: "ears",
+        use: {
+          tokensIn: 0,
+          tokensOut: 0,
+          spoken: 0,
+          heard: 0.5,
+          spend: 0.5 * PRICES.ears.minute,
+        },
+      },
+      {
+        purpose: "interviews",
+        model: "ears",
+        use: {
+          tokensIn: 0,
+          tokensOut: 0,
+          spoken: 0,
+          heard: 3,
+          spend: 3 * PRICES.ears.minute,
+        },
+      },
+    ]);
   });
 });

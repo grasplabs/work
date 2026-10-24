@@ -225,21 +225,29 @@ describe("every client's admin snapshot", () => {
     });
   });
 
-  it("tells a core that refuses the read, as one does once its company ended Grasp's staff access, from one whose answer isn't a snapshot", async () => {
+  it("tells a core that refuses the read, as one does once its company ended Grasp's staff access, from one whose answer isn't a snapshot, and never follows one that redirects", async () => {
     const release = await importedRelease("feat(core): refusing cores");
     const ended = await liveClient(release);
     ended.account.admin = "ended";
     const garbled = await liveClient(release);
     garbled.account.admin = "garbled";
+    const moved = await liveClient(release);
+    moved.account.admin = emptyAdminSnapshot("Moved");
+    moved.account.redirectsTo = "https://elsewhere.example";
 
     const read = await clientAdmins(env, staff);
 
     expect({
       ended: entryOf(read, ended.clientId),
       garbled: entryOf(read, garbled.clientId),
+      moved: entryOf(read, moved.clientId),
+      // The signed request and its router secret went nowhere else.
+      redirected: cloudflare.redirected(),
     }).toMatchObject({
       ended: { state: "unreachable", error: "refused" },
       garbled: { state: "unreachable", error: "invalid_answer" },
+      moved: { state: "unreachable", error: "core_error" },
+      redirected: [],
     });
   });
 

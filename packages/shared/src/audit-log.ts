@@ -57,6 +57,9 @@ const typeRules: readonly {
   { action: "connection.call", sideEffect: true, type: "action" },
   { action: "connection.call", type: "read" },
   { action: "connection.connect", type: "config" },
+  // Connect sending, editing or deleting a message as the client's own bot
+  // on a chat platform, or refusing a request core's chat adapters sent.
+  { action: "channel.call", type: "action" },
   // A connection whose grant ran out given a new one, by signing in again.
   { action: "connection.reconnected", type: "config" },
   { action: "connection.disconnect", type: "config" },
@@ -112,6 +115,9 @@ const typeRules: readonly {
   // A spending budget crossing its alert threshold or running out: filed
   // with the budgets it belongs to, not as a model call.
   { action: "model.budget", type: "config" },
+  // A company admin setting or removing a limit per person (core's
+  // src/model-ledger.ts): configuration, not a model call.
+  { action: "model.limit", type: "config" },
   // Core recording a new quota policy generation, the limits that apply
   // from then on (core's src/workflows/quotas.ts).
   { action: "quota_policy.recorded", type: "config" },
@@ -144,6 +150,9 @@ const typeRules: readonly {
   { action: "app.token.issued", type: "permission" },
   { action: "app.portable.called", type: "action" },
   { action: "app", type: "config" },
+  // A person linking a chat platform account to themselves, so the agent
+  // knows them there, or unlinking it: who they are on that door.
+  { action: "channel_account", type: "permission" },
   { action: "member", type: "config" },
   { action: "team", type: "config" },
   // A decision a run put to people: opened, asked, answered, timed out.
