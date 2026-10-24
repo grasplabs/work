@@ -76,7 +76,7 @@ import type { SessionCheck } from "./session-check.ts";
 // | candidates,        | signed in, after the onboarding's; a record's counts and |
 // | statements, teams, | stakeholders for an onboarding team join that team, for  |
 // | gaps               | whoever reads it; gaps with what became of them          |
-// | workflows          | the Playbook's, as the onboarding drew them, for         |
+// | workflows          | the brain's records, as the onboarding drew them, for    |
 // |                    | everyone signed in                                       |
 // | goals, landscape,  | nothing core can read holds them yet: empty              |
 // | policies           |                                                          |
@@ -358,7 +358,7 @@ const documentTools = (
 
 /**
  * The brain's tools, one per name as people mean it (`nameKey`), as
- * `onboardingTeams` merges teams: a document's tool the Playbook has a
+ * `onboardingTeams` merges teams: a document's tool the brain has a
  * record of too is that record, which keeps its id and source (statements
  * name it by that id), used by the teams of both. Records are never
  * merged with each other: each is a fact of its own, which statements may
