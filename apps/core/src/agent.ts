@@ -17,6 +17,8 @@ import type { Memory } from "@grasp-os/shared/memory";
 import { z } from "zod";
 
 import type { AgentApi, AgentScope } from "./agent-scope.ts";
+import { withoutLinks } from "./channels/stephen-rules.ts";
+import type { ChannelText } from "./channels/stephen-rules.ts";
 import { describeRun, runCode, sourceHash } from "./code-mode.ts";
 import type { CodeRun } from "./code-mode.ts";
 import type { CodeRunStatus } from "./code-run-statuses.ts";
@@ -140,10 +142,21 @@ export interface TurnContext {
   skills: readonly CatalogSkill[];
   /** Whether the chat is in a project. */
   inProject?: boolean;
+  /**
+   * How to answer in a chat that came through a chat platform, and its
+   * mark (channels/stephen-rules.ts); none in Grasp's own app.
+   */
+  channel?: ChannelText;
 }
 
 /** The sections of the system prompt, in the order they first come. */
-const sectionNames = ["apis", "memory", "skills", "project"] as const;
+const sectionNames = [
+  "apis",
+  "memory",
+  "skills",
+  "project",
+  "channel",
+] as const;
 
 /** The sections of the system prompt, `null` for one that is empty. */
 type Sections = Record<(typeof sectionNames)[number], string | null>;
@@ -183,6 +196,14 @@ const systemUpdates = (
     memory: memorySection(context.memory),
     skills: skillsSection(context.skills),
     project: projectSection(context.inProject === true),
+    channel:
+      context.channel === undefined
+        ? null
+        : [
+            `<channel mark="${context.channel.mark}">`,
+            context.channel.text,
+            "</channel>",
+          ].join("\n"),
   };
   const timestamp = Date.now();
   const changed: Partial<Sections> = {};
@@ -978,6 +999,22 @@ const refusal = (
   return undefined;
 };
 
+/**
+ * `message` with no links in its text, as a chat platform's chat keeps
+ * and shows the agent's own words (`withoutLinks`); others as they are.
+ */
+const inOwnWords = (message: Message): Message =>
+  message.role === "assistant"
+    ? {
+        ...message,
+        content: message.content.map((block) =>
+          block.type === "text"
+            ? { ...block, text: withoutLinks(block.text) }
+            : block
+        ),
+      }
+    : message;
+
 const textOf = (message: AssistantMessage | undefined): string =>
   (message?.content ?? [])
     .flatMap((block) => (block.type === "text" ? [block.text] : []))
@@ -1022,6 +1059,8 @@ export const runTurn = async ({
   events,
   withheld,
 }: Turn): Promise<TurnResult> => {
+  // In a chat app, no links in the agent's own words: links come from code.
+  const ownWords = context.channel !== undefined;
   // Cancelled by the caller, or stopped here (see `whyStop`).
   const stop = new AbortController();
   const signal = AbortSignal.any([cancelled, stop.signal]);
@@ -1108,7 +1147,7 @@ export const runTurn = async ({
     },
     (event) => {
       if (event.type === "message_end" && isMessage(event.message)) {
-        keep(event.message);
+        keep(ownWords ? inOwnWords(event.message) : event.message);
       }
       if (event.type === "tool_execution_update") {
         const update: unknown = event.partialResult;
@@ -1133,9 +1172,10 @@ export const runTurn = async ({
   }
   const { steps, last } = progress;
   const outcome = outcomeOf(last, steps, signal);
+  const text = textOf(last);
   return {
     outcome,
-    answer: textOf(last),
+    answer: ownWords ? withoutLinks(text) : text,
     ...(outcome === "failed" ? { error: last?.errorMessage } : {}),
   };
 };
