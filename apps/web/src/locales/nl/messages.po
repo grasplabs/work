@@ -1466,6 +1466,10 @@ msgstr "{vendor} · gebruik onbekend"
 msgid "{visible, plural, one {# shown. Drag to reorder.} other {# shown. Drag to reorder.}}"
 msgstr "{visible, plural, one {# getoond. Sleep om de volgorde te wijzigen.} other {# getoond. Sleep om de volgorde te wijzigen.}}"
 
+#: src/onboarding/setup-steps.tsx
+msgid "{waiting, plural, one {# person new on your list gets a link once you confirm your organization.} other {# people new on your list get their links once you confirm your organization.}}"
+msgstr "{waiting, plural, one {# nieuwe persoon op je lijst krijgt een link zodra je je organisatie bevestigt.} other {# nieuwe mensen op je lijst krijgen hun link zodra je je organisatie bevestigt.}}"
+
 #: src/dashboard/nav-item.tsx
 msgid "{waiting, plural, one {# thing waiting} other {# things waiting}}"
 msgstr "{waiting, plural, one {# ding wacht} other {# dingen wachten}}"
@@ -2506,6 +2510,7 @@ msgstr "Overal"
 #: src/dashboard/dependency-requests.tsx
 #: src/engines/screen-approval.tsx
 #: src/inbox/items.ts
+#: src/routes/_shell.apps.$app.tsx
 #: src/routes/_shell.settings.packages.index.tsx
 msgid "App"
 msgstr "App"
@@ -2539,6 +2544,7 @@ msgstr "Goedkeuring van apps"
 msgid "App name"
 msgstr "Naam van de app"
 
+#: src/routes/_shell.apps.$app.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 #: src/routes/_shell.landscape.$appId.tsx
 msgid "App not found"
@@ -2981,6 +2987,10 @@ msgstr "Terug"
 #: src/brain/atlas-overlays.tsx
 msgid "Back to {destination}"
 msgstr "Terug naar {destination}"
+
+#: src/engines/app-page.tsx
+msgid "Back to a draft, for its builders alone"
+msgstr "Terug naar een concept, alleen voor de bouwers"
 
 #: src/dashboard/widget-board.tsx
 msgid "Back to how it began"
@@ -4450,6 +4460,10 @@ msgctxt "kind of app"
 msgid "Design and media"
 msgstr "Ontwerp en media"
 
+#: src/engines/app-page.tsx
+msgid "Design it in the chat"
+msgstr "Ontwerp hem in de chat"
+
 #: src/brain/brain.ts
 msgctxt "workflow status"
 msgid "Designed"
@@ -4672,6 +4686,7 @@ msgstr "Snelkoppelingen van domeinen"
 #: src/dashboard/widget-board.tsx
 #: src/frame/app-sidebar.tsx
 #: src/landscape/app-cells.tsx
+#: src/routes/_shell.apps.$app.tsx
 #: src/routes/_shell.domains.$engine.apps.$screen.tsx
 #: src/routes/_shell.domains.$engine.index.tsx
 #: src/routes/_shell.domains.index.tsx
@@ -4839,6 +4854,7 @@ msgstr "Eerder"
 msgid "Earlier versions"
 msgstr "Eerdere versies"
 
+#: src/engines/app-page.tsx
 #: src/knowledge/document.tsx
 #: src/onboarding/setup-steps.tsx
 msgid "Edit"
@@ -5490,6 +5506,10 @@ msgstr "Voor de {role}"
 #: src/onboarding/work-record.tsx
 msgid "For the next interview about it."
 msgstr "Voor het volgende interview erover."
+
+#: src/engines/app-page.tsx
+msgid "For the people it is shared with"
+msgstr "Voor de mensen met wie hij gedeeld is"
 
 #: src/onboarding/work-rules.tsx
 msgid "For this organization only. Every organization starts with the same values, and Grasp tunes them as its interviews come in."
@@ -8783,6 +8803,10 @@ msgstr "Online"
 msgid "Only admins can read the audit trail"
 msgstr "Alleen beheerders kunnen de audittrail lezen"
 
+#: src/engines/app-page.tsx
+msgid "Only described"
+msgstr "Alleen beschreven"
+
 #: src/brain/brain-transcript.tsx
 msgid "Only highlighted turns"
 msgstr "Alleen gemarkeerde beurten"
@@ -9628,6 +9652,7 @@ msgstr "Voorgestelde regels"
 msgid "Provided by Grasp, not installed again: {provided}"
 msgstr "Geleverd door Grasp, niet opnieuw geïnstalleerd: {provided}"
 
+#: src/engines/app-page.tsx
 #: src/engines/app-status.tsx
 msgid "Publish"
 msgstr "Publiceren"
@@ -9645,6 +9670,7 @@ msgstr "Publiceren als"
 msgid "Publish revision {0}"
 msgstr "Revisie {0} publiceren"
 
+#: src/engines/app-page.tsx
 #: src/routes/_shell.workflows.$workflow.tsx
 msgid "Published"
 msgstr "Gepubliceerd"
@@ -10116,6 +10142,7 @@ msgstr "Resource"
 msgid "Resources"
 msgstr "Resources"
 
+#: src/engines/app-page.tsx
 #: src/engines/app-status.tsx
 #: src/knowledge/timeline.tsx
 msgid "Restore"
@@ -10576,6 +10603,10 @@ msgstr "Opschalen"
 msgid "Schedule stopped"
 msgstr "Schema gestopt"
 
+#: src/engines/app-page.tsx
+msgid "Screens"
+msgstr "Schermen"
+
 #: src/routes/_shell.settings.members.tsx
 msgid "Search"
 msgstr "Zoeken"
@@ -10758,11 +10789,16 @@ msgstr "Ingesteld in de directory van je organisatie."
 msgid "Set. Type a new value to replace it."
 msgstr "Ingesteld. Typ een nieuwe waarde om deze te vervangen."
 
+#: src/engines/app-page.tsx
 #: src/frame/person-menu.tsx
 #: src/routes/_shell.domains.$engine.index.tsx
 #: src/routes/_shell.settings.tsx
 msgid "Settings"
 msgstr "Instellingen"
+
+#: src/engines/app-page.tsx
+msgid "Settings of {name}"
+msgstr "Instellingen van {name}"
 
 #: src/onboarding/review-parts.tsx
 msgid "Settled: {choice}"
@@ -11100,6 +11136,7 @@ msgstr "Bron"
 
 #: src/brain/brain.ts
 #: src/chat/chat-markdown.ts
+#: src/chat/sources.tsx
 #: src/routes/_shell.brain.$noteId.tsx
 msgid "Sources"
 msgstr "Bronnen"
@@ -12674,6 +12711,14 @@ msgstr "Deze app is niet op tijd gestart."
 msgid "This app doesn't build. Ask a builder to fix it."
 msgstr "Deze app bouwt niet. Vraag een bouwer om hem te herstellen."
 
+#: src/engines/app-page.tsx
+msgid "This app has no screen yet. Grasp designs it with you in the chat."
+msgstr "Deze app heeft nog geen scherm. Grasp ontwerpt het met je in de chat."
+
+#: src/engines/app-page.tsx
+msgid "This app is archived. It is kept as it was, and nobody works on it."
+msgstr "Deze app is gearchiveerd. Hij blijft zoals hij was, en niemand werkt eraan."
+
 #: src/screens/screen-frame.tsx
 msgid "This app left its frame and was stopped."
 msgstr "Deze app heeft zijn frame verlaten en is gestopt."
@@ -12685,6 +12730,10 @@ msgstr "Deze app is de verbinding met de pagina kwijtgeraakt en is gestopt."
 #: src/link-confirmation.tsx
 msgid "This app wants to open a page on another site in a new tab. Open it only if you expected to go there."
 msgstr "Deze app wil een pagina van een andere site openen in een nieuw tabblad. Open die alleen als je verwachtte daarheen te gaan."
+
+#: src/screens/screen-frame.tsx
+msgid "This app's stored code no longer matches the code that was approved, so it wasn't opened. Tell an admin."
+msgstr "De opgeslagen code van deze app komt niet meer overeen met de goedgekeurde code, dus hij is niet geopend. Laat het een beheerder weten."
 
 #: src/interview/sound-check.tsx
 msgid "This browser cannot listen. You can type your answers."
@@ -12891,6 +12940,14 @@ msgstr "Deze versie wijzigt de gegevens van het domein, en de wijziging kan niet
 #: src/engines/store-change-errors.ts
 msgid "This version changes the domain's data, and the change can't be applied: filling in one of its new fields would make a record larger than a record may be."
 msgstr "Deze versie wijzigt de gegevens van het domein, en de wijziging kan niet worden toegepast: het invullen van een van de nieuwe velden zou een record groter maken dan een record mag zijn."
+
+#: src/screens/screen-frame.tsx
+msgid "This version of the app hasn't been sealed, so it can't be opened. A builder can publish it again."
+msgstr "Deze versie van de app is niet verzegeld, dus hij kan niet worden geopend. Een bouwer kan hem opnieuw publiceren."
+
+#: src/screens/screen-frame.tsx
+msgid "This version of the app was revoked and no longer runs. An admin can make another version current."
+msgstr "Deze versie van de app is ingetrokken en draait niet meer. Een beheerder kan een andere versie actueel maken."
 
 #: src/engines/store-change-errors.ts
 msgid "This version's data change is still being applied. Try again in a moment."
@@ -13283,6 +13340,7 @@ msgctxt "turn your microphone back on"
 msgid "Unmute"
 msgstr "Dempen opheffen"
 
+#: src/engines/app-page.tsx
 #: src/engines/app-status.tsx
 msgid "Unpublish"
 msgstr "Publicatie intrekken"

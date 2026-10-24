@@ -1466,6 +1466,10 @@ msgstr "{vendor} · utilisation inconnue"
 msgid "{visible, plural, one {# shown. Drag to reorder.} other {# shown. Drag to reorder.}}"
 msgstr "{visible, plural, one {# affichée. Faites glisser pour réorganiser.} other {# affichées. Faites glisser pour réorganiser.}}"
 
+#: src/onboarding/setup-steps.tsx
+msgid "{waiting, plural, one {# person new on your list gets a link once you confirm your organization.} other {# people new on your list get their links once you confirm your organization.}}"
+msgstr "{waiting, plural, one {# nouvelle personne de votre liste reçoit un lien dès que vous confirmez votre organisation.} other {# nouvelles personnes de votre liste reçoivent leur lien dès que vous confirmez votre organisation.}}"
+
 #: src/dashboard/nav-item.tsx
 msgid "{waiting, plural, one {# thing waiting} other {# things waiting}}"
 msgstr "{waiting, plural, one {# élément en attente} other {# éléments en attente}}"
@@ -2506,6 +2510,7 @@ msgstr "Partout"
 #: src/dashboard/dependency-requests.tsx
 #: src/engines/screen-approval.tsx
 #: src/inbox/items.ts
+#: src/routes/_shell.apps.$app.tsx
 #: src/routes/_shell.settings.packages.index.tsx
 msgid "App"
 msgstr "Application"
@@ -2539,6 +2544,7 @@ msgstr "Approbation d’applications"
 msgid "App name"
 msgstr "Nom de l’application"
 
+#: src/routes/_shell.apps.$app.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 #: src/routes/_shell.landscape.$appId.tsx
 msgid "App not found"
@@ -2981,6 +2987,10 @@ msgstr "Retour"
 #: src/brain/atlas-overlays.tsx
 msgid "Back to {destination}"
 msgstr "Retour à {destination}"
+
+#: src/engines/app-page.tsx
+msgid "Back to a draft, for its builders alone"
+msgstr "Retour au brouillon, pour ses seuls créateurs"
 
 #: src/dashboard/widget-board.tsx
 msgid "Back to how it began"
@@ -4450,6 +4460,10 @@ msgctxt "kind of app"
 msgid "Design and media"
 msgstr "Design et médias"
 
+#: src/engines/app-page.tsx
+msgid "Design it in the chat"
+msgstr "La concevoir dans le chat"
+
 #: src/brain/brain.ts
 msgctxt "workflow status"
 msgid "Designed"
@@ -4672,6 +4686,7 @@ msgstr "Raccourcis des domaines"
 #: src/dashboard/widget-board.tsx
 #: src/frame/app-sidebar.tsx
 #: src/landscape/app-cells.tsx
+#: src/routes/_shell.apps.$app.tsx
 #: src/routes/_shell.domains.$engine.apps.$screen.tsx
 #: src/routes/_shell.domains.$engine.index.tsx
 #: src/routes/_shell.domains.index.tsx
@@ -4839,6 +4854,7 @@ msgstr "Plus anciennes"
 msgid "Earlier versions"
 msgstr "Versions précédentes"
 
+#: src/engines/app-page.tsx
 #: src/knowledge/document.tsx
 #: src/onboarding/setup-steps.tsx
 msgid "Edit"
@@ -5490,6 +5506,10 @@ msgstr "Pour : {role}"
 #: src/onboarding/work-record.tsx
 msgid "For the next interview about it."
 msgstr "Pour le prochain entretien à ce sujet."
+
+#: src/engines/app-page.tsx
+msgid "For the people it is shared with"
+msgstr "Pour les personnes avec qui elle est partagée"
 
 #: src/onboarding/work-rules.tsx
 msgid "For this organization only. Every organization starts with the same values, and Grasp tunes them as its interviews come in."
@@ -8783,6 +8803,10 @@ msgstr "En ligne"
 msgid "Only admins can read the audit trail"
 msgstr "Seuls les administrateurs peuvent lire le journal d’audit"
 
+#: src/engines/app-page.tsx
+msgid "Only described"
+msgstr "Seulement décrite"
+
 #: src/brain/brain-transcript.tsx
 msgid "Only highlighted turns"
 msgstr "Seulement les prises de parole surlignées"
@@ -9628,6 +9652,7 @@ msgstr "Règles proposées"
 msgid "Provided by Grasp, not installed again: {provided}"
 msgstr "Fourni par Grasp, non réinstallé : {provided}"
 
+#: src/engines/app-page.tsx
 #: src/engines/app-status.tsx
 msgid "Publish"
 msgstr "Publier"
@@ -9645,6 +9670,7 @@ msgstr "Publier comme"
 msgid "Publish revision {0}"
 msgstr "Publier la révision {0}"
 
+#: src/engines/app-page.tsx
 #: src/routes/_shell.workflows.$workflow.tsx
 msgid "Published"
 msgstr "Publiée"
@@ -10116,6 +10142,7 @@ msgstr "Ressource"
 msgid "Resources"
 msgstr "Ressources"
 
+#: src/engines/app-page.tsx
 #: src/engines/app-status.tsx
 #: src/knowledge/timeline.tsx
 msgid "Restore"
@@ -10576,6 +10603,10 @@ msgstr "Passage à l’échelle"
 msgid "Schedule stopped"
 msgstr "Planification arrêtée"
 
+#: src/engines/app-page.tsx
+msgid "Screens"
+msgstr "Écrans"
+
 #: src/routes/_shell.settings.members.tsx
 msgid "Search"
 msgstr "Rechercher"
@@ -10758,11 +10789,16 @@ msgstr "Défini dans l’annuaire de votre organisation."
 msgid "Set. Type a new value to replace it."
 msgstr "Défini. Saisissez une nouvelle valeur pour la remplacer."
 
+#: src/engines/app-page.tsx
 #: src/frame/person-menu.tsx
 #: src/routes/_shell.domains.$engine.index.tsx
 #: src/routes/_shell.settings.tsx
 msgid "Settings"
 msgstr "Paramètres"
+
+#: src/engines/app-page.tsx
+msgid "Settings of {name}"
+msgstr "Paramètres de {name}"
 
 #: src/onboarding/review-parts.tsx
 msgid "Settled: {choice}"
@@ -11100,6 +11136,7 @@ msgstr "Source"
 
 #: src/brain/brain.ts
 #: src/chat/chat-markdown.ts
+#: src/chat/sources.tsx
 #: src/routes/_shell.brain.$noteId.tsx
 msgid "Sources"
 msgstr "Sources"
@@ -12674,6 +12711,14 @@ msgstr "Cette application n'a pas démarré à temps."
 msgid "This app doesn't build. Ask a builder to fix it."
 msgstr "Cette application ne se construit pas. Demandez à un concepteur de la corriger."
 
+#: src/engines/app-page.tsx
+msgid "This app has no screen yet. Grasp designs it with you in the chat."
+msgstr "Cette application n’a pas encore d’écran. Grasp le conçoit avec vous dans le chat."
+
+#: src/engines/app-page.tsx
+msgid "This app is archived. It is kept as it was, and nobody works on it."
+msgstr "Cette application est archivée. Elle reste telle quelle, et personne n’y travaille."
+
 #: src/screens/screen-frame.tsx
 msgid "This app left its frame and was stopped."
 msgstr "Cette application a quitté son cadre et a été arrêtée."
@@ -12685,6 +12730,10 @@ msgstr "Cette application a perdu sa connexion avec la page et a été arrêtée
 #: src/link-confirmation.tsx
 msgid "This app wants to open a page on another site in a new tab. Open it only if you expected to go there."
 msgstr "Cette app veut ouvrir une page d’un autre site dans un nouvel onglet. Ne l’ouvrez que si vous vous attendiez à y aller."
+
+#: src/screens/screen-frame.tsx
+msgid "This app's stored code no longer matches the code that was approved, so it wasn't opened. Tell an admin."
+msgstr "Le code enregistré de cette application ne correspond plus au code approuvé, elle n’a donc pas été ouverte. Prévenez un admin."
 
 #: src/interview/sound-check.tsx
 msgid "This browser cannot listen. You can type your answers."
@@ -12891,6 +12940,14 @@ msgstr "Cette version modifie les données du domaine, et la modification ne peu
 #: src/engines/store-change-errors.ts
 msgid "This version changes the domain's data, and the change can't be applied: filling in one of its new fields would make a record larger than a record may be."
 msgstr "Cette version modifie les données du domaine, et la modification ne peut pas être appliquée : remplir l’un de ses nouveaux champs rendrait un enregistrement plus grand qu’un enregistrement ne peut l’être."
+
+#: src/screens/screen-frame.tsx
+msgid "This version of the app hasn't been sealed, so it can't be opened. A builder can publish it again."
+msgstr "Cette version de l’application n’a pas été scellée, elle ne peut donc pas être ouverte. Un concepteur peut la publier de nouveau."
+
+#: src/screens/screen-frame.tsx
+msgid "This version of the app was revoked and no longer runs. An admin can make another version current."
+msgstr "Cette version de l’application a été révoquée et ne s’exécute plus. Un admin peut rendre une autre version actuelle."
 
 #: src/engines/store-change-errors.ts
 msgid "This version's data change is still being applied. Try again in a moment."
@@ -13283,6 +13340,7 @@ msgctxt "turn your microphone back on"
 msgid "Unmute"
 msgstr "Rétablir le micro"
 
+#: src/engines/app-page.tsx
 #: src/engines/app-status.tsx
 msgid "Unpublish"
 msgstr "Dépublier"

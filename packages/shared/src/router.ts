@@ -63,8 +63,13 @@ export const routerHostSchema = z.object({
 });
 export type RouterHost = z.infer<typeof routerHostSchema>;
 
-/** Hostnames no client gets: the platform's own, under `<domain>`. */
+/**
+ * Hostnames no client gets: the platform's own, under `<domain>`. `admin`
+ * is the admin's own host (`ADMIN_HOST`); `console` stays reserved from
+ * when the admin was called that.
+ */
 export const reservedClientIds: ReadonlySet<string> = new Set([
+  "admin",
   "console",
   "internal",
   "staging",

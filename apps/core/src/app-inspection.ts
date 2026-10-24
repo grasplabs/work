@@ -16,6 +16,7 @@ import { appManifestMaxBytes } from "@grasp-os/shared/app-limits";
 import { versionErrors } from "@grasp-os/shared/app-releases";
 import { diagnosticCategory } from "@grasp-os/shared/diagnostics";
 
+import { putCached, readCached } from "./cache-macs.ts";
 import { callSandboxed, SandboxUnavailableError } from "./sandboxed.ts";
 import type { SandboxedEnv } from "./sandboxed.ts";
 import { buildAppCode, buildKey, checkAppCode } from "./screens.ts";
@@ -32,6 +33,14 @@ import { buildAppCode, buildKey, checkAppCode } from "./screens.ts";
  * in bytes, never fewer characters (the host checks the bytes on reading).
  */
 const inspectionMaxLength = appManifestMaxBytes;
+
+/**
+ * The purpose an inspection's cached manifest is signed for (`putCached`).
+ * Sealing, the sidebar and a draft's check take the manifest as what the
+ * App registers (its permissions, server methods, screens), so only one
+ * core inspected is read back.
+ */
+const inspectionCachePurpose = "grasp-os inspection cache";
 
 /** The module that inspects the App in its isolate. */
 const inspectModule = "grasp-inspect.js";
@@ -179,12 +188,6 @@ export const readManifest = (text: string): AppManifest => {
 };
 
 /**
- * The manifest of the App whose code `files` holds, inspected with the
- * symbolic references the host lends a first inspection: what it
- * registers, for files no release sealed (a draft, a version not yet
- * made current). Refused as sealing would refuse it.
- */
-/**
  * The manifest `filesManifest` keeps in R2 for `files`, if it kept one:
  * undefined on a miss, never inspecting the code itself. For reads that
  * may only show what core has already worked out (the sidebar).
@@ -199,12 +202,21 @@ export const cachedFilesManifest = async (
     ...symbolicModules(),
     [generatedPaths.server]: serverModuleSource,
   };
-  const cached = await env.FILES.get(
+  const cached = await readCached(
+    env,
+    env.FILES,
+    inspectionCachePurpose,
     `inspections/${await buildKey(code)}/${sdk.version}.json`
   );
-  return cached ? readManifest(await cached.text()) : undefined;
+  return cached === undefined ? undefined : readManifest(cached);
 };
 
+/**
+ * The manifest of the App whose code `files` holds, inspected with the
+ * symbolic references the host lends a first inspection: what it
+ * registers, for files no release sealed (a draft, a version not yet
+ * made current). Refused as sealing would refuse it.
+ */
 export const filesManifest = async (
   env: Env,
   files: Readonly<Record<string, string>>,
@@ -226,16 +238,22 @@ export const filesManifest = async (
   // manifest kept in R2 (in the EU) as the builds are, so saving or
   // checking the same server code again runs nothing in the sandbox. Only
   // a manifest that read is kept; a failure inspects again next time.
+  // One whose MAC doesn't check isn't core's, and is inspected again.
   const cacheKey = `inspections/${await buildKey(code)}/${sdk.version}.json`;
-  const cached = await env.FILES.get(cacheKey);
-  if (cached) {
-    return readManifest(await cached.text());
+  const cached = await readCached(
+    env,
+    env.FILES,
+    inspectionCachePurpose,
+    cacheKey
+  );
+  if (cached !== undefined) {
+    return readManifest(cached);
   }
   signal?.throwIfAborted();
   const symbolic = await builtCode(env, code, app, signal);
   signal?.throwIfAborted();
   const text = await inspected(env, symbolic, sdk.modules);
   const manifest = readManifest(text);
-  await env.FILES.put(cacheKey, text);
+  await putCached(env, env.FILES, inspectionCachePurpose, cacheKey, text);
   return manifest;
 };
