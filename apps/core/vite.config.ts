@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { builtinModules } from "node:module";
 
 import {
   cloudflareTest,
@@ -154,6 +155,26 @@ export const coreProject = (
       // Tests here build Apps and run workflows in workerd, which takes far
       // longer than Vitest's 5 s default, most of all on a loaded CI runner.
       testTimeout: 60_000,
+      // Microsoft's Teams SDK, under the Teams adapter, is CommonJS that
+      // requires dual packages (msal-node, lru-cache) the tests' module
+      // fallback can't load: bundled first, as Wrangler bundles it for the
+      // Worker, so each require resolves. Node's built-ins stay imports,
+      // which workerd's nodejs_compat serves.
+      deps: {
+        optimizer: {
+          ssr: {
+            enabled: true,
+            include: ["@chat-adapter/teams"],
+            exclude: ["@opentelemetry/api"],
+            rolldownOptions: {
+              external: [
+                ...builtinModules,
+                ...builtinModules.map((name) => `node:${name}`),
+              ],
+            },
+          },
+        },
+      },
       ...test,
       // Setup files one after another, as listed (Vitest's default runs
       // them at once): the check of the runtime reports before
