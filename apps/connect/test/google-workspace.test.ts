@@ -1,11 +1,20 @@
 import { connectorManifestSchema } from "@grasp-os/connector-kit/manifest";
 import { env } from "cloudflare:workers";
+import { eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { nativeConnector } from "../src/bundled-connectors.ts";
+import { connections } from "../src/db/schema.ts";
 import { accessTokenFor } from "../src/tokens.ts";
-import { connectAccount, outcome, ownAccount, someone } from "./connect.ts";
+import {
+  auditEvents,
+  connectAccount,
+  outcome,
+  ownAccount,
+  someone,
+} from "./connect.ts";
 import {
   cancelledOccurrenceId,
   ceo,
@@ -59,7 +68,10 @@ import type { Connection, Input } from "./tool-calls.ts";
 // shared drive reaches only that one.
 
 const providers = fakeProviders();
-const google = fakeGoogle();
+// A person's own calendar is the one of the address their token was
+// issued to.
+const google = fakeGoogle((token) => providers.state.holders.get(token)?.email);
+const audit = auditEvents();
 
 /** Someone's Google Workspace connection, made through OAuth. */
 const connected = async (): Promise<Connection> => {
@@ -111,6 +123,12 @@ const calendarInputs: Record<string, Input> = {
     end: "2026-10-05T00:00:00Z",
   },
   "calendar.get": { event: eventId(teamCalendar, 1) },
+  "calendar.create": {
+    subject: "Focus time",
+    start: "2026-10-26T14:00",
+    end: "2026-10-26T15:00",
+    timeZone: "Europe/Amsterdam",
+  },
 };
 
 /** Input for each Drive tool, but its drive. */
@@ -135,7 +153,9 @@ describe("the Google Workspace connector's scoping", () => {
             (resource === "mailbox" &&
               path.startsWith("/gmail/v1/users/{mailbox}/")) ||
             (resource === "calendar" &&
-              path.startsWith("/calendar/v3/calendars/{calendar}/")) ||
+              (path.startsWith("/calendar/v3/calendars/{calendar}/") ||
+                // The person's own entry for that same calendar.
+                path === "/calendar/v3/users/me/calendarList/{calendar}")) ||
             (resource === "drive" && path.startsWith("/drive/v3/files"))
           )
       )
@@ -937,6 +957,214 @@ describe("the Google Workspace connector's Calendar tools", () => {
         })
       )
     ).resolves.toBe("connect.action_failed");
+  });
+});
+
+const amsterdam = "Europe/Amsterdam";
+
+/** An hour of focus time in `calendar`, in Amsterdam's wall-clock time. */
+const focusTime = (calendar: string) => ({
+  calendar,
+  subject: "Focus time: Q4 forecast",
+  start: "2026-10-26T14:00",
+  end: "2026-10-26T15:00",
+  timeZone: amsterdam,
+  location: "Home",
+  body: "No meetings.",
+});
+
+/** Makes an event in the person's own calendar, under the key `key`. */
+const createFocusTime = async (
+  connection: Connection,
+  key: string,
+  input: Input & { calendar: string } = focusTime(connection.person.email)
+) =>
+  await call(connection, "calendar.create", input, {
+    resource: input.calendar,
+    idempotencyKey: key,
+  });
+
+/** The connection's status. */
+const statusOf = async (connection: Connection) => {
+  const row = await drizzle(env.DB)
+    .select({ status: connections.status })
+    .from(connections)
+    .where(eq(connections.id, connection.id))
+    .get();
+  return row?.status;
+};
+
+/** What a connection made before the connector wrote events was granted. */
+const readOnlyCalendar = [
+  "openid",
+  "https://www.googleapis.com/auth/userinfo.email",
+  "https://www.googleapis.com/auth/userinfo.profile",
+  "https://www.googleapis.com/auth/gmail.modify",
+  "https://www.googleapis.com/auth/calendar.events.readonly",
+  "https://www.googleapis.com/auth/drive.readonly",
+].join(" ");
+
+describe("the Google Workspace connector's calendar writes", () => {
+  it("put an event in the person's own calendar, with nobody invited or told", async () => {
+    const connection = await connected();
+    const own = connection.person.email;
+    const output = await outputOf(createFocusTime(connection, "run-1:focus"));
+    const [checked, written] = requests();
+    expect(output).toMatchObject({
+      event: {
+        calendar: own,
+        subject: "Focus time: Q4 forecast",
+        start: "2026-10-26T14:00:00",
+        location: "Home",
+        isCancelled: false,
+      },
+    });
+    const { id, ...body } = z
+      .object({ id: z.string() })
+      .loose()
+      .parse(written?.body);
+    expect({
+      // The call's effect key: the same call can't make a second event.
+      id: /^[0-9a-f]{64}$/u.test(id),
+      checked: checked?.path,
+      written: {
+        path: written?.path,
+        sendUpdates: written?.query.sendUpdates,
+        body,
+      },
+      made: google.made().map(({ attendees }) => attendees),
+    }).toStrictEqual({
+      id: true,
+      // Google says it is their primary calendar first.
+      checked: `/calendar/v3/users/me/calendarList/${encodeURIComponent(own)}`,
+      written: {
+        path: `/calendar/v3/calendars/${encodeURIComponent(own)}/events`,
+        sendUpdates: "none",
+        body: {
+          summary: "Focus time: Q4 forecast",
+          start: { dateTime: "2026-10-26T14:00:00", timeZone: amsterdam },
+          end: { dateTime: "2026-10-26T15:00:00", timeZone: amsterdam },
+          location: "Home",
+          description: "No meetings.",
+          transparency: "opaque",
+          attendees: [],
+          guestsCanInviteOthers: false,
+        },
+      },
+      made: [[]],
+    });
+  });
+
+  it("write nothing in a calendar that isn't the person's own, though it is shared with them", async () => {
+    const connection = await connected();
+    await expect(
+      toolError(
+        createFocusTime(connection, "run-2:team", focusTime(teamCalendar))
+      )
+    ).resolves.toMatchObject({ error: { code: "access_denied" } });
+    expect({
+      writes: requests().filter(({ method }) => method !== "GET").length,
+      status: await statusOf(connection),
+    }).toStrictEqual({ writes: 0, status: "active" });
+  });
+
+  it("refuse guests, times with an offset, unknown time zones and an event that ends before it starts, before anything goes out", async () => {
+    const connection = await connected();
+    const own = focusTime(connection.person.email);
+    // A guest: no such input, which connect refuses before the tool runs.
+    const guests = await outcome(
+      createFocusTime(connection, "run-3:guests", {
+        ...own,
+        attendees: [{ email: "ben@example.com" }],
+      })
+    );
+    const refusals = await Promise.all(
+      [
+        { ...own, start: "2026-10-26T14:00:00Z" },
+        { ...own, start: "2026-10-26T14:00+01:00" },
+        { ...own, timeZone: "Mars/Olympus" },
+        { ...own, end: "2026-10-26T13:00" },
+        { ...own, start: "2026-02-30T14:00" },
+      ].map(
+        async (input, index) =>
+          await toolError(createFocusTime(connection, `run-3:${index}`, input))
+      )
+    );
+    // Each refused as invalid: by its input's schema, or by the tool.
+    expect(
+      refusals.map((refusal) =>
+        typeof refusal === "string"
+          ? refusal.startsWith("Invalid input")
+          : JSON.stringify(refusal).includes('"code":"invalid"')
+      )
+    ).toStrictEqual(Array.from({ length: 5 }, () => true));
+    expect({ guests, sent: google.sent }).toStrictEqual({
+      guests: "connect.resource_out_of_scope",
+      sent: [],
+    });
+  });
+
+  it("find an event whose answer was lost by its ID, and never make it twice", async () => {
+    const connection = await connected();
+    google.loseWriteAnswer();
+    await expect(
+      outcome(createFocusTime(connection, "run-4:hold"))
+    ).resolves.toBe("connect.outcome_unknown");
+    await claimedAgo(connection);
+    const found = await outputOf(createFocusTime(connection, "run-4:hold"));
+    const [made] = google.made();
+    expect({
+      found,
+      writesDone: google.writesDone(),
+      lookup: requests().at(-1)?.path,
+    }).toMatchObject({
+      found: { event: { id: made?.id, subject: "Focus time: Q4 forecast" } },
+      writesDone: 1,
+      lookup: `/calendar/v3/calendars/${encodeURIComponent(connection.person.email)}/events/${String(made?.id)}`,
+    });
+  });
+
+  it("report a connection made before it could write events for reconnecting, in place, and go through once it is", async () => {
+    const person = someone();
+    const id = await connectAccount(providers, person, {
+      ...ownAccount(person, "google"),
+      granted: readOnlyCalendar,
+    });
+    const connection = { id, person };
+    // Google refuses the calendar list a grant without its right.
+    google.failNext(403, {
+      error: {
+        code: 403,
+        status: "PERMISSION_DENIED",
+        errors: [{ reason: "insufficientPermissions" }],
+      },
+    });
+    const refused = await outcome(createFocusTime(connection, "run-5:hold"));
+    const status = await statusOf(connection);
+    const events = await audit.events();
+    const marked = events
+      .filter(({ action }) => action === "connection.needs_reauth")
+      .map(({ detail }) => detail);
+    const reconnected = await connectAccount(providers, person, {
+      ...ownAccount(person, "google"),
+      granted: `${readOnlyCalendar} https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.calendarlist.readonly`,
+    });
+    const again = await outcome(createFocusTime(connection, "run-5:hold"));
+    expect({
+      refused,
+      status,
+      marked,
+      sameConnection: reconnected === id,
+      again,
+      made: google.made().length,
+    }).toStrictEqual({
+      refused: "connect.connection_inactive",
+      status: "needs_reauth",
+      marked: [{ provider: "google", reason: "scopes_missing" }],
+      sameConnection: true,
+      again: "ok",
+      made: 1,
+    });
   });
 });
 

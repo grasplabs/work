@@ -67,9 +67,30 @@ export const deletedMessageId = "19a0f00df00df00d";
 /** A message whose read Google answers posing as connect's egress. */
 export const spoofedMessageId = "19a0ffffffffffff";
 
-export const fakeGoogle = () => {
+/** An event as Calendar's insert takes it, as far as the fake reads it. */
+const newEventSchema = z
+  .object({
+    id: z.string().optional(),
+    summary: z.string(),
+    start: z.object({ dateTime: z.string(), timeZone: z.string() }),
+    end: z.object({ dateTime: z.string(), timeZone: z.string() }),
+  })
+  .loose();
+
+/** The access token a request carries. */
+const tokenOf = (request: Request): string =>
+  (request.headers.get("authorization") ?? "").replace(/^Bearer /u, "");
+
+/**
+ * `holderOf` names the address of the person an access token was issued
+ * to: their own calendar is their primary one, as Google lists it for
+ * them.
+ */
+export const fakeGoogle = (holderOf: (token: string) => string | undefined) => {
   /** The attachment IDs each message's reads gave out, and their content. */
   const attachments = new Map<string, { size: number; data: string }>();
+  /** The events Calendar's insert made, by calendar and ID. */
+  const made = new Map<string, Record<string, unknown>>();
 
   const routes: ProviderRoute<Part>[] = [
     // A search for `deleted` finds more than asked for, one deleted since.
@@ -153,6 +174,41 @@ export const fakeGoogle = () => {
         message: labelled(mailbox, sentId(mailbox), ["DRAFT"]),
       })
     ),
+    // The person's own entry for a calendar: their primary one, else one
+    // shared with them.
+    route(
+      apisHost,
+      "GET",
+      String.raw`^/calendar/v3/users/me/calendarList/(?<calendar>[^/]+)`,
+      ({ calendar, request }) =>
+        json({
+          id: calendar,
+          accessRole: "owner",
+          ...(holderOf(tokenOf(request)) === calendar ? { primary: true } : {}),
+        })
+    ),
+    route(
+      apisHost,
+      "POST",
+      `${calendars}/events`,
+      async ({ calendar, query, request }) => {
+        const event = newEventSchema.parse(await request.json());
+        const id = event.id ?? crypto.randomUUID().replaceAll("-", "");
+        if (made.has(`${calendar}/${id}`)) {
+          return json(googleError(409, "ALREADY_EXISTS", "duplicate"), 409);
+        }
+        const stored = {
+          ...event,
+          id,
+          status: "confirmed",
+          htmlLink: `https://www.google.com/calendar/event?eid=${id}`,
+          organizer: { email: calendar, self: true },
+          sendUpdates: query.get("sendUpdates"),
+        };
+        made.set(`${calendar}/${id}`, stored);
+        return json(stored);
+      }
+    ),
     route(apisHost, "GET", `${calendars}/events`, ({ calendar, query }) =>
       json(eventPage(calendar, query.get("pageToken")))
     ),
@@ -161,6 +217,13 @@ export const fakeGoogle = () => {
       "GET",
       `${calendars}/events/(?<id>[^/]+)`,
       ({ calendar, id }) => {
+        const madeEvent = made.get(`${calendar}/${id}`);
+        if (madeEvent !== undefined) {
+          return json(madeEvent);
+        }
+        if (/^[0-9a-f]{64}$/u.test(id)) {
+          return json(notFound, 404);
+        }
         if (id === cancelledOccurrenceId(calendar)) {
           return json(cancelledOccurrence(calendar));
         }
@@ -209,6 +272,7 @@ export const fakeGoogle = () => {
 
   beforeEach(() => {
     attachments.clear();
+    made.clear();
   });
   const { sent, writesDone, fail } = fakeProvider({
     hosts: [gmailHost, apisHost],
@@ -219,6 +283,8 @@ export const fakeGoogle = () => {
   });
   return {
     sent,
+    /** The events Calendar made, as it keeps them, with `sendUpdates`. */
+    made: () => [...made.values()],
     /** The writes Google carried out. */
     writesDone,
     /** Makes Google refuse the next request as Drive and Calendar rate limit. */
@@ -227,6 +293,10 @@ export const fakeGoogle = () => {
         status: 403,
         body: googleError(403, "PERMISSION_DENIED", "userRateLimitExceeded"),
       });
+    },
+    /** Makes Google answer the next request with `status` and `body`. */
+    failNext: (status: number, body: unknown) => {
+      fail({ status, body });
     },
     /** Makes Google carry out the next write, then lose its answer. */
     loseWriteAnswer: () => {
