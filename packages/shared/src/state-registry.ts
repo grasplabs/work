@@ -231,6 +231,11 @@ const coreDb: D1State = {
     organizations: exported(auth),
     members: exported(auth),
     member_removals: exported(`${core}organization.ts`),
+    channel_accounts: exported(`${core}channels/accounts.ts`),
+    channel_links: transient(
+      `${core}channels/accounts.ts`,
+      "Links a chat sent, good for 15 minutes: the chat sends a new one."
+    ),
     invitations: exported(auth),
     teams: exported(auth),
     team_members: exported(auth),
