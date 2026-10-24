@@ -33,7 +33,7 @@ import type { Loaded } from "../load-from-core.tsx";
 // switching language reads it again (main.tsx), and so does anything that
 // invalidates the router.
 
-/** The Playbook steps the brain's folders are grouped under, by their ids in `Note.path`. */
+/** The onboarding steps the brain's folders are grouped under, by their ids in `Note.path`. */
 const steps = new Set(["1 Vision", "2 Inventory"]);
 
 /** Every note in a folder, its own and those of the folders in it. */
@@ -247,7 +247,7 @@ export const Route = createFileRoute("/_shell/brain")({
     };
   },
   // Going from note to note keeps what was read: each read is a page of
-  // the Playbook per record type, every one in the audit log.
+  // the brain's records per type, every one in the audit log.
   shouldReload: false,
   pendingComponent: PageLoading,
   component: BrainLayout,

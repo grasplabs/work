@@ -10,7 +10,7 @@ import type { Authority } from "@grasp-os/shared/permissions";
 import { env, exports } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
-import { describe, expect, it } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import {
   connections,
@@ -1411,6 +1411,178 @@ describe("a side effect from chat", () => {
       newestFirst: true,
       oldestListed: false,
       ran: [{ tool: "mail.send", input: first.input }],
+    });
+  });
+});
+
+/** Moves the clock on by `ms`, as a night passing. */
+const later = (ms: number) => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(Date.now() + ms);
+};
+
+describe("a write held from a chat platform", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const hourMs = 60 * 60 * 1000;
+
+  /**
+   * Holds a mail from a Teams chat, as core signs it there: ending at
+   * `heldUntil`, the company's midnight. Without a key of its own, as the
+   * chat's agent calls, so connect makes one that carries the chat.
+   */
+  const holdFromTeams = async (
+    person: ConnectionPerson,
+    connectionId: string,
+    heldUntil: number
+  ): Promise<PendingAction> => {
+    const { idempotencyKey: _key, ...call } = mail(connectionId);
+    await hold(inChat(person), call, { heldUntil });
+    return await heldFor(person);
+  };
+
+  it("runs when pressed the same day, and says when it ends", async () => {
+    const anna = someone();
+    const connectionId = await addConnection();
+    const midnight = Date.now() + hourMs;
+    const held = await holdFromTeams(anna, connectionId, midnight);
+    later(hourMs / 2);
+    const { output } = await confirm(anna, held);
+    expect({
+      endsAt: held.endsAt,
+      output,
+      ran: server.ran.length,
+    }).toStrictEqual({
+      endsAt: new Date(midnight).toISOString(),
+      output: '{"sent":"ben@acme.test"}',
+      ran: 1,
+    });
+  });
+
+  it("runs nothing pressed after its day ended, is declined as expired, and is audited", async () => {
+    const anna = someone();
+    const connectionId = await addConnection();
+    const held = await holdFromTeams(anna, connectionId, Date.now() + hourMs);
+    later(hourMs + 1);
+    const pressed = await outcome(confirm(anna, held));
+    // Pressed again, or the same call asked again the next day.
+    const again = await outcome(confirm(anna, held));
+    const left = await leftFor(connectionId);
+    expect({
+      pressed,
+      again,
+      ran: server.ran,
+      waiting: await waitingFor(anna),
+      held: left.held,
+      // Its chat is told it was declined; nothing of its input is kept.
+      spent: left.answers.map(({ idempotencyKey, state, output, input }) => ({
+        idempotencyKey,
+        state,
+        output,
+        input,
+      })),
+    }).toStrictEqual({
+      pressed: "connect.pending_expired",
+      again: "connect.pending_not_found",
+      ran: [],
+      waiting: [],
+      held: [],
+      spent: [
+        {
+          idempotencyKey: held.idempotencyKey,
+          state: "declined",
+          output: "expired",
+          input: null,
+        },
+      ],
+    });
+    await expect(eventsFor(connectionId)).resolves.toStrictEqual([
+      { action: "connection.call", actor: "agent", outcome: "held" },
+      {
+        action: "connection.action.expired",
+        actor: "person",
+        outcome: "expired",
+      },
+      {
+        action: "connection.action.confirm_refused",
+        actor: "person",
+        outcome: "connect.pending_expired",
+      },
+      // The second press finds nothing: refused as for any action gone.
+    ]);
+  });
+
+  it("is declined as expired by connect's clock once its day ended, pressed or not", async () => {
+    const anna = someone();
+    const connectionId = await addConnection();
+    await holdFromTeams(anna, connectionId, Date.now() + hourMs);
+    // Before midnight the clock leaves it waiting.
+    await exports.default.scheduled();
+    const before = await leftFor(connectionId);
+    later(hourMs + 1);
+    // Listed no more the moment its day is over.
+    const listed = await waitingFor(anna);
+    await exports.default.scheduled();
+    const after = await leftFor(connectionId);
+    expect({
+      before: before.held.length,
+      listed,
+      after: after.held,
+      spent: after.answers.map(({ state, output }) => ({ state, output })),
+    }).toStrictEqual({
+      before: 1,
+      listed: [],
+      after: [],
+      spent: [{ state: "declined", output: "expired" }],
+    });
+    await expect(eventsFor(connectionId)).resolves.toStrictEqual([
+      { action: "connection.call", actor: "agent", outcome: "held" },
+      {
+        action: "connection.action.expired",
+        actor: "system",
+        outcome: "expired",
+      },
+    ]);
+  });
+
+  it("asked again the next day is a new action with that day's end", async () => {
+    const anna = someone();
+    const connectionId = await addConnection();
+    const { idempotencyKey: _key, ...call } = mail(connectionId);
+    const first = await hold(inChat(anna), call, {
+      heldUntil: Date.now() + hourMs,
+    });
+    later(hourMs + 1);
+    const tomorrow = Date.now() + 24 * hourMs;
+    const second = await hold(inChat(anna), call, { heldUntil: tomorrow });
+    const [waiting, ...others] = await waitingFor(anna);
+    expect({
+      fresh: second.pending?.id !== first.pending?.id,
+      waiting: waiting?.id,
+      endsAt: waiting?.endsAt,
+      others,
+    }).toStrictEqual({
+      fresh: true,
+      waiting: second.pending?.id,
+      endsAt: new Date(tomorrow).toISOString(),
+      others: [],
+    });
+  });
+
+  it("from Grasp's own app still waits, however many days pass", async () => {
+    const anna = someone();
+    const connectionId = await addConnection();
+    const { idempotencyKey: _key, ...call } = mail(connectionId);
+    await hold(inChat(anna), call);
+    later(30 * 24 * hourMs);
+    await exports.default.scheduled();
+    const held = await heldFor(anna);
+    const { output } = await confirm(anna, held);
+    expect({ endsAt: held.endsAt, output }).toStrictEqual({
+      endsAt: undefined,
+      output: '{"sent":"ben@acme.test"}',
     });
   });
 });
