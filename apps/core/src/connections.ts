@@ -682,7 +682,8 @@ const redirect = (to: URL): Response =>
  */
 export const handleConnectionCallback = async (
   request: Request,
-  env: Env
+  env: Env,
+  onConnected?: (userId: string) => void
 ): Promise<Response | undefined> => {
   const config = signInConfig(env);
   if (request.method !== "GET" || config === undefined) {
@@ -719,6 +720,8 @@ export const handleConnectionCallback = async (
   } catch (error) {
     return failed(errorCodeOf(error));
   }
+  // A chat app may be waiting on it (channels/connect-own.ts).
+  onConnected?.(identity.userId);
   const back = onOrigin(config.origin, finished.returnTo) ?? connectionsPage;
   back.searchParams.set("connection", finished.connectionId);
   return redirect(back);
