@@ -66,6 +66,8 @@ import { inList } from "./db/d1.ts";
 //   workflow, a roster team's record or an `onb-` id
 //   (`keepOnboardingRecords`, as the system); `brain.addRecords` refuses
 //   them (`brainRecordInputSchema`).
+// - A deleted interview left in the brain: the onboarding alone takes its
+//   own records out (`purgeOnboardingRecords`, as the system), whole.
 // - A purged document left in the brain: the onboarding alone takes its
 //   own drawings out (`purgeOnboardingDrawings`, as the system), whole.
 
@@ -472,6 +474,43 @@ export const keepOnboardingRecords = async (
     kept.unchanged += unchanged;
   }
   return kept;
+};
+
+/**
+ * Takes the onboarding's records `ids` out of the brain, for good, as the
+ * system (GRA-368): what rested on an interview that was deleted. Nothing
+ * else is ever taken out, and nothing is written over: a record goes
+ * whole, with every drawing that is a version of its own. One batch with
+ * its audit event, which names the records by id and counts them, never
+ * what they said. Ids the brain doesn't hold are left; returns how many
+ * it took out.
+ */
+export const purgeOnboardingRecords = async (
+  env: Env,
+  ids: readonly string[]
+): Promise<number> => {
+  const held = await heldOf(
+    env,
+    ids.filter((id) => id.startsWith(onboardingIdPrefix))
+  );
+  if (held.size === 0) {
+    return 0;
+  }
+  const db = drizzle(env.DB);
+  const gone = [...held.keys()];
+  await auditedBatch(env, db, [
+    db.delete(brainRecords).where(inList(brainRecords.id, gone)),
+    outboxed(db, {
+      actor: { type: "system" },
+      action: "brain.records.purged",
+      target: { type: "brain", id: "playbook" },
+      provenance: [...held]
+        .slice(0, auditProvenanceMaxItems)
+        .map(([id, { type }]) => keyOf({ type, id })),
+      detail: { purged: held.size },
+    }),
+  ]);
+  return held.size;
 };
 
 /**
