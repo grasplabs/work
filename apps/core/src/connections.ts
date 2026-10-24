@@ -33,6 +33,7 @@ import { errorFields, log } from "@grasp-os/shared/log";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import { isAdmin, requireAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
+import type { StephenReach } from "@grasp-os/shared/stephen-reach";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -52,6 +53,12 @@ import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 import { pointSharedMailbox, readSharedMailboxes } from "./shared-mailboxes.ts";
+import {
+  readStephenReach,
+  setAppToolClass,
+  setStephenPlace,
+  setStephenReach,
+} from "./stephen-reach.ts";
 import {
   anyMailboxPointed,
   classesOn,
@@ -566,6 +573,39 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
   async pointSharedMailbox(mailbox: unknown, audience: unknown): Promise<void> {
     await withPerson(this.#check, async (identity) => {
       await pointSharedMailbox(this.#env, identity, mailbox, audience);
+    });
+  }
+
+  async stephenReach(): Promise<StephenReach> {
+    return await withPerson(this.#check, async (identity) => {
+      requireAdmin(identity);
+      return await readStephenReach(this.#env);
+    });
+  }
+
+  async setStephenReach(on: unknown, audience: unknown): Promise<void> {
+    await withPerson(this.#check, async (identity) => {
+      await setStephenReach(this.#env, identity, on, audience);
+    });
+  }
+
+  async setStephenPlace(
+    place: unknown,
+    audience: unknown,
+    acts: unknown
+  ): Promise<void> {
+    await withPerson(this.#check, async (identity) => {
+      await setStephenPlace(this.#env, identity, place, audience, acts);
+    });
+  }
+
+  async setAppToolClass(
+    app: unknown,
+    toolClass: unknown,
+    audience: unknown
+  ): Promise<void> {
+    await withPerson(this.#check, async (identity) => {
+      await setAppToolClass(this.#env, identity, app, toolClass, audience);
     });
   }
 
