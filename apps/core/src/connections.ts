@@ -50,7 +50,7 @@ import { errorResponse } from "./errors.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
-import { readToolClasses, setToolClass } from "./tool-classes.ts";
+import { classesOn, readToolClasses, setToolClass } from "./tool-classes.ts";
 
 // Connecting accounts, as core's part in it: the signed-in person's API
 // over `/rpc`, and the callback the provider sends the browser back to.
@@ -381,6 +381,7 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
       origin: config.origin,
       tenant,
       returnTo: `${back.pathname}${back.search}`,
+      classes: await classesOn(this.#env),
     });
   }
 

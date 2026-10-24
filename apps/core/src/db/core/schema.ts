@@ -119,6 +119,9 @@ export const accounts = sqliteTable(
   },
   (table) => [
     index("accounts_user_id_idx").on(table.userId),
+    // Who writes in Teams, by the object id its messages carry
+    // (channels/who.ts).
+    index("accounts_oid_idx").on(table.oid),
     uniqueIndex("accounts_provider_account_idx").on(
       table.providerId,
       table.accountId
@@ -275,6 +278,30 @@ export const channelLinks = sqliteTable(
       table.platformUserId
     ),
     index("channel_links_expires_at_idx").on(table.expiresAt),
+  ]
+);
+
+/**
+ * The chat conversations people write to the agent in, each the person's
+ * own private chat with the client's bot on its platform (`channels/door.ts`),
+ * so a later message, or the agent's answer, finds it again. `threadId` is
+ * the Chat SDK's thread id, which names the conversation and where the
+ * platform takes its replies.
+ */
+export const channelConversations = sqliteTable(
+  "channel_conversations",
+  {
+    platform: text().notNull(),
+    threadId: text("thread_id").notNull(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at").notNull(),
+    lastMessageAt: timestamp("last_message_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.platform, table.threadId] }),
+    index("channel_conversations_user_id_idx").on(table.userId),
   ]
 );
 
@@ -4121,7 +4148,7 @@ export const landscapeStagedPeople = sqliteTable(
 );
 
 /**
- * The Playbook's records (brain-records.ts): one row each, never written
+ * The brain's records (brain-records.ts): one row each, never written
  * over, in the order they were added. `body` is the record as
  * `brainRecordSchema` parsed it, as canonical JSON, so a record sent again
  * compares as the same text. No row names who added it: the audit log does.
@@ -4154,7 +4181,7 @@ export const brainRecords = sqliteTable(
 );
 
 /**
- * What became of the Playbook's gaps (brain-records.ts): one row once a
+ * What became of the brain's gaps (brain-gaps.ts): one row once a
  * gap was asked about, answered or closed, each set once, never cleared.
  * A gap with no row is open and nobody was asked.
  */
