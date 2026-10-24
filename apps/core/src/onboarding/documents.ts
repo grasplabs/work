@@ -307,7 +307,7 @@ export const documentReadingErasure = (
       const shared = await store.documents();
       return shared.filter((document) => textsOf(document).some(holds)).length;
     },
-    rewrite: async (person, rewrite) => {
+    rewrite: async (by, rewrite) => {
       const shared = await store.documents();
       const holding = shared.filter((document) =>
         textsOf(document).some((text) => rewrite(text) !== text)
@@ -315,11 +315,11 @@ export const documentReadingErasure = (
       if (holding.length > 0) {
         await store.forgetDocuments(
           holding.map(({ id }) => id),
-          actorOf(person)
+          by.actor
         );
       }
     },
-    forgetDocuments: async (person, named) => {
+    forgetDocuments: async (by, named) => {
       const paths = new Set(
         named.flatMap(({ collectionId, path }) =>
           collectionId === onboardingDocumentsCollection ? [path] : []
@@ -333,7 +333,7 @@ export const documentReadingErasure = (
       if (of.length > 0) {
         await store.forgetDocuments(
           of.map(({ id }) => id),
-          actorOf(person)
+          by.actor
         );
       }
     },
