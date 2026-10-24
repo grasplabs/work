@@ -493,8 +493,8 @@ describe("a session on the on-prem sandbox", () => {
     "judges a session whose process reset its connection as it died, as a dying process with unread bytes does on Linux",
     { timeout: 60_000 },
     async () => {
-      // A stand-in host: it answers the session, then ends itself (status
-      // 1, as workerd does at V8's heap limit) on the first read of core's
+      // A stand-in host: it answers the session, then ends itself (V8's
+      // heap limit line and status 1, as workerd does) on the first read of core's
       // next frame, far larger than one read takes: the rest still unread,
       // which Linux answers with a reset, whatever the timing.
       const host = path.join(tempDir(), "resetting-host.mjs");
@@ -511,6 +511,7 @@ const server = createServer((connection) => {
   connection.on("data", (chunk) => {
     if (upgraded) {
       connection.pause();
+      process.stderr.write("workerd/jsg/setup.c++:38: fatal: V8 fatal error; location = Reached heap limit; message = : allocation failed: JavaScript heap out of memory\\n");
       process.exit(1);
     }
     head += chunk.toString("latin1");
