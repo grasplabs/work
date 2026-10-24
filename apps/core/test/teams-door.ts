@@ -19,6 +19,7 @@ import type { GatewayReply } from "./ai-gateway.ts";
 import {
   botConnectorMembersUrl,
   botConnectorPostedUrl,
+  botConnectorUninstallUrl,
   botFrameworkSharedKeyUrl,
   teamsBot,
 } from "./connect-providers.ts";
@@ -211,6 +212,14 @@ export const reached = async (conversation: string) => {
       .map(({ text }) => text),
     asked: asked.filter((key) => key.startsWith(`${conversation} `)),
   };
+};
+
+/** Removes the bot from `person`'s chat, as uninstalling its app does. */
+export const uninstalledFor = async (person: TeamsPerson): Promise<void> => {
+  await providers().fetch(botConnectorUninstallUrl, {
+    method: "POST",
+    body: JSON.stringify({ conversation: person.conversation }),
+  });
 };
 
 /** Sets what Teams' roster says of `person` in their chat. */

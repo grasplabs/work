@@ -21,9 +21,9 @@ import { claimedAgo } from "./tool-calls.ts";
 // connection and input.
 
 let sent = 0;
-/** What `mail.forward` answers its next calls with: an error, or its result. */
+/** What `mail.relay` answers its next calls with: an error, or its result. */
 let forwardError: Record<string, unknown> | undefined;
-/** An error `mail.forward` answers with as a text block, in its place. */
+/** An error `mail.relay` answers with as a text block, in its place. */
 let forwardText: string | undefined;
 /** Whether that error carries an image after its text block. */
 let forwardImage = false;
@@ -39,7 +39,7 @@ const server = fakeMcpServer(serverUrl, [
     },
   },
   {
-    name: "mail.forward",
+    name: "mail.relay",
     run: () => {
       if (forwardText !== undefined) {
         return {
@@ -450,7 +450,7 @@ describe("a side effect", () => {
       const connectionId = await addConnection();
       const call = {
         connectionId,
-        action: "mail.forward",
+        action: "mail.relay",
         input: {},
         idempotencyKey: "run-1:forward",
       };
@@ -475,11 +475,11 @@ describe("a side effect", () => {
 
   it("on a Composio tool the admin marked read-only keeps its error as the failure, on the read path", async () => {
     const connectionId = await addConnection({
-      tools: JSON.stringify([{ name: "mail.forward", read: true }]),
+      tools: JSON.stringify([{ name: "mail.relay", read: true }]),
     });
     const call = {
       connectionId,
-      action: "mail.forward",
+      action: "mail.relay",
       input: {},
       idempotencyKey: "run-1:forward",
     };
@@ -508,7 +508,7 @@ describe("a side effect", () => {
     const connectionId = await addConnection();
     const call = {
       connectionId,
-      action: "mail.forward",
+      action: "mail.relay",
       input: {},
       idempotencyKey: "run-1:forward",
     };
@@ -543,7 +543,7 @@ describe("a side effect", () => {
       bounded: text.length <= 501,
     }).toStrictEqual({
       callId: "string",
-      action: "mail.forward",
+      action: "mail.relay",
       said: true,
       redacted: true,
       bounded: true,
@@ -575,7 +575,7 @@ describe("a side effect", () => {
           outcome(
             callAs(anna, {
               connectionId,
-              action: "mail.forward",
+              action: "mail.relay",
               input: {},
               idempotencyKey: "run-1:forward",
             })
@@ -611,7 +611,7 @@ describe("a side effect", () => {
         outcome(
           callAs(anna, {
             connectionId,
-            action: "mail.forward",
+            action: "mail.relay",
             input: {},
             idempotencyKey: "run-1:forward",
           })

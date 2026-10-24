@@ -34,7 +34,19 @@ import {
   workContextSchema,
 } from "@grasp-os/shared/permissions";
 import type { WorkContext } from "@grasp-os/shared/permissions";
-import { and, asc, desc, eq, isNotNull, notExists, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gt,
+  isNotNull,
+  isNull,
+  lte,
+  notExists,
+  or,
+  sql,
+} from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
@@ -57,7 +69,11 @@ import type { DecidedCall } from "./decisions.ts";
 // Nothing of it is left but the audit events and, for a workflow run's
 // or a chat's under a key connect made, its key, spent as declined (see
 // `deletion`): never its input. As in the reference design,
-// a held action waits until it is decided: it doesn't expire.
+// a held action waits until it is decided: it doesn't expire. Except one
+// held in a chat on a chat platform (a Teams card scrolls away, and its
+// days and values may have moved on): it ends when core said it does
+// (`CapabilityClaims.heldUntil`, midnight of the company's day), and is
+// then declined as expired (`expired`), pressed or not.
 //
 // A restricted context's held actions are marked `restricted`, so the
 // person sees a warning and every event records it. A workflow run's held
@@ -270,6 +286,7 @@ const summaryOf = ({
     input: row.input,
     inputHash: row.inputHash,
     requestedAt: row.createdAt.toISOString(),
+    ...(row.endsAt === null ? {} : { endsAt: row.endsAt.toISOString() }),
     binding: bindingOf(row),
   };
 };
@@ -414,13 +431,17 @@ const dropBatchSize = 50;
  * `connection.action.dropped` event saying why: when its connection is
  * disconnected, or the person it waits for was removed. The rows hold
  * exact inputs, which nothing may keep once nobody can confirm them.
- * By `person`, or by core itself (`null`).
+ * By `person`, or by core itself (`null`). Those whose day ended go as
+ * `connection.action.expired` (`event`).
  */
 export const dropPendingActions = async (
   env: Env,
   where: SQL,
   reason: string,
-  person: ConnectionPerson | null
+  person: ConnectionPerson | null,
+  event:
+    | "connection.action.dropped"
+    | "connection.action.expired" = "connection.action.dropped"
 ): Promise<void> => {
   const actor = person === null ? { type: "system" as const } : actorOf(person);
   // A batch at a time until none are left: each batch deletes its rows with
@@ -440,7 +461,7 @@ export const dropPendingActions = async (
         row,
         {
           actor,
-          action: "connection.action.dropped",
+          action: event,
           target: { type: "connection", id: row.connectionId },
           detail: { ...detailOf(row), reason },
         },
@@ -508,6 +529,7 @@ export const hold = async (
   const subjectId = codeSubjectId(subject);
   const id = crypto.randomUUID();
   const context = JSON.stringify(origin.context);
+  const heldAt = Date.now();
   const sameCaller = and(
     eq(pendingActions.subjectType, subjectType),
     eq(pendingActions.subjectId, subjectId),
@@ -516,13 +538,18 @@ export const hold = async (
     eq(pendingActions.action, claims.action)
   );
   // The call this one repeats: by its key, or, without one, by what it
-  // would do and where it was asked.
+  // would do and where it was asked, while it hasn't ended: asked again
+  // the next day, it is a new action, with that day's end.
   const sameCall =
     idempotencyKey === null
       ? and(
           sameCaller,
           eq(pendingActions.inputHash, inputHash),
-          eq(pendingActions.context, context)
+          eq(pendingActions.context, context),
+          or(
+            isNull(pendingActions.endsAt),
+            gt(pendingActions.endsAt, new Date(heldAt))
+          )
         )
       : and(sameCaller, eq(pendingActions.idempotencyKey, idempotencyKey));
   // Only while the connection is still active: a disconnect that dropped
@@ -551,7 +578,7 @@ export const hold = async (
           permissionId: value(origin.permissionId, "permission_id"),
           context: value(context, "context"),
           restricted: value(claims.restricted ? 1 : 0, "restricted"),
-          createdAt: value(Date.now(), "created_at"),
+          createdAt: value(heldAt, "created_at"),
           binding: value(
             origin.binding === undefined
               ? null
@@ -559,6 +586,7 @@ export const hold = async (
             "binding"
           ),
           stamp: value(stamp, "stamp"),
+          endsAt: value(claims.heldUntil ?? null, "ends_at"),
         })
         .from(connections)
         .where(
@@ -738,6 +766,60 @@ export const take = async (
   }
 };
 
+/** Whether the held action `row` has ended unconfirmed by `now`. */
+export const hasEnded = (row: HeldAction, now = Date.now()): boolean =>
+  row.endsAt !== null && row.endsAt.getTime() <= now;
+
+/**
+ * Refuses (`connect.pending_expired`) confirming the held action `row`,
+ * whose day ended: it is declined as expired there and then, by its
+ * person's press, with its event, and its refused confirmation recorded.
+ * It runs nothing, whatever else the press carries.
+ */
+export const refuseEnded = async (
+  env: Env,
+  person: ConnectionPerson,
+  row: HeldAction
+): Promise<void> => {
+  if (!hasEnded(row)) {
+    return;
+  }
+  // Gone already if the clock or another press ended it meanwhile.
+  await deleteWith(
+    env,
+    row,
+    decisionEvent(person, "connection.action.expired", row.connectionId, {
+      ...detailOf(row),
+      reason: "expired",
+    }),
+    "expired"
+  );
+  await auditRefusedDecision(
+    env,
+    person,
+    "confirm",
+    row.id,
+    "connect.pending_expired",
+    row
+  );
+  throw connectErrors.create("connect.pending_expired");
+};
+
+/**
+ * Declines every held action whose day ended by `at`, each as
+ * `connection.action.expired` by core itself: nobody can confirm them,
+ * so nothing keeps their inputs. Run by connect's clock every minute.
+ */
+export const expireHeldActions = async (env: Env, at: Date): Promise<void> => {
+  await dropPendingActions(
+    env,
+    lte(pendingActions.endsAt, at),
+    "expired",
+    null,
+    "connection.action.expired"
+  );
+};
+
 /** Most held actions one list answers: the newest. */
 const listLimit = 200;
 
@@ -762,7 +844,13 @@ export const listPendingActions = async (
     .select(withConnection)
     .from(pendingActions)
     .leftJoin(connections, eq(connections.id, pendingActions.connectionId))
-    .where(eq(pendingActions.onBehalfOf, parsed.data.userId))
+    .where(
+      and(
+        eq(pendingActions.onBehalfOf, parsed.data.userId),
+        // One whose day ended can only be declined as expired: never shown.
+        or(isNull(pendingActions.endsAt), gt(pendingActions.endsAt, new Date()))
+      )
+    )
     .orderBy(desc(pendingActions.createdAt), desc(pendingActions.id))
     .limit(listLimit);
   return rows.map(summaryOf);

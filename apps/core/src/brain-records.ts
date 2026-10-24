@@ -36,11 +36,12 @@ import type { Identity } from "@grasp-os/shared/rpc";
 import { and, asc, count, eq, gte, like, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
-import { auditedBatch, outboxed } from "./audit-outbox.ts";
+import { auditedBatch, outboxed, outboxedIfChanged } from "./audit-outbox.ts";
 import { brainRecords } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
+import type { OnErase } from "./knowledge/purge.ts";
 
-// The Playbook's records, as core keeps them (`brain_records`), and adding
+// The brain's records, as core keeps them (`brain_records`), and adding
 // them (`brain.addRecords`). Threat model, and how each is closed (the
 // design and its threat note are on GRA-527):
 //
@@ -70,6 +71,13 @@ import { inList } from "./db/d1.ts";
 //   own records out (`purgeOnboardingRecords`, as the system), whole.
 // - A purged document left in the brain: the onboarding alone takes its
 //   own drawings out (`purgeOnboardingDrawings`, as the system), whole.
+// - A purged name or passage left in a record, reaching agents through
+//   `brain.read`: a Knowledge content purge reaches every record through
+//   core's `OnErase` (`brainRecordErasure`), rewriting the words in it as
+//   it rewrites a document's. Ids and the values the schema names are
+//   kept, so what a record names still holds. Once purged, a record sent
+//   again under its id (the onboarding giving a team's intake again) is
+//   left as purged, never its words put back.
 
 /** A record's key across types, as its audit event names it. */
 const keyOf = ({ type, id }: { type: string; id: string }): string =>
@@ -82,6 +90,8 @@ const bodyOf = (record: BrainRecord): string => canonicalJson(record);
 interface Held {
   type: string;
   body: string;
+  /** A purge rewrote it: the same id sent again leaves it as it is. */
+  purged: boolean;
 }
 
 /** The records core holds among the ids `wanted`, of whatever type. */
@@ -97,6 +107,7 @@ const heldOf = async (
       id: brainRecords.id,
       type: brainRecords.type,
       body: brainRecords.body,
+      purgedAt: brainRecords.purgedAt,
     })
     .from(brainRecords)
     // Every id as one bound parameter: D1 binds at most 100 to a
@@ -104,7 +115,12 @@ const heldOf = async (
     .where(
       sql`${brainRecords.id} IN (SELECT value FROM json_each(${JSON.stringify(wanted)}))`
     );
-  return new Map(rows.map(({ id, type, body }) => [id, { type, body }]));
+  return new Map(
+    rows.map(({ id, type, body, purgedAt }) => [
+      id,
+      { type, body, purged: purgedAt !== null },
+    ])
+  );
 };
 
 /**
@@ -297,7 +313,10 @@ const freshOf = (
     const stored = held.get(record.id);
     if (stored === undefined) {
       fresh.push(record);
-    } else if (stored.type !== record.type || stored.body !== bodyOf(record)) {
+    } else if (
+      stored.type !== record.type ||
+      (!stored.purged && stored.body !== bodyOf(record))
+    ) {
       throw brainRecordErrors.create("brain.record_conflict", {
         issues: [`${keyOf(record)}: held already, differently`],
       });
@@ -386,7 +405,7 @@ const writeRecords = async (
     outboxed(db, {
       actor,
       action: "brain.records.added",
-      target: { type: "brain", id: "playbook" },
+      target: { type: "brain", id: "records" },
       provenance: fresh.map(keyOf),
       detail: { added: fresh.length },
     }),
@@ -428,7 +447,7 @@ const keepRecords = async (
 };
 
 /**
- * Adds `input` to the Playbook as `person`, all or none: for admins. A
+ * Adds `input` to the brain's records as `person`, all or none: for admins. A
  * record held already, exactly so, is left as it is. `onboarding` reads
  * what the onboarding gives the brain, when a record names it.
  */
@@ -503,7 +522,7 @@ export const purgeOnboardingRecords = async (
     outboxed(db, {
       actor: { type: "system" },
       action: "brain.records.purged",
-      target: { type: "brain", id: "playbook" },
+      target: { type: "brain", id: "records" },
       provenance: [...held]
         .slice(0, auditProvenanceMaxItems)
         .map(([id, { type }]) => keyOf({ type, id })),
@@ -546,7 +565,7 @@ export const purgeOnboardingDrawings = async (
     outboxed(db, {
       actor: { type: "system" },
       action: "brain.records.purged",
-      target: { type: "brain", id: "playbook" },
+      target: { type: "brain", id: "records" },
       provenance: held.slice(0, auditProvenanceMaxItems).map(keyOf),
       detail: { purged: held.length },
     }),
@@ -560,7 +579,7 @@ interface ForTeam<T> {
   value: T;
 }
 
-/** The Playbook's records, as the brain reads them, oldest first. */
+/** The brain's records, as the brain reads them, oldest first. */
 export interface HeldRecords {
   sources: Source[];
   tools: Tool[];
@@ -755,3 +774,181 @@ export const readBrainRecords = async (env: Env): Promise<HeldRecords> => {
   withDrawings(held);
   return held;
 };
+
+/**
+ * Keys whose strings are ids, dates or values the schema names, never
+ * anyone's words: a purge leaves them, so a record still names what it
+ * named and still reads (a purged term can't be an id: `(removed)` isn't
+ * one). A tool's `ai` is one of its values; a drawing's is text.
+ */
+const notWords: ReadonlySet<string> = new Set([
+  "type",
+  "id",
+  "kind",
+  "date",
+  "interviewee",
+  "teamIds",
+  "sourceId",
+  "toolIds",
+  "candidateId",
+  "followsUp",
+  "pain",
+  "teamId",
+  "about",
+  "workflowId",
+  "status",
+  "state",
+  "of",
+  "per",
+  "unit",
+  "basis",
+  "why",
+]);
+
+/** Whether the strings under `key` of a record of `type` are words. */
+const holdsWords = (type: unknown, key: string): boolean =>
+  !notWords.has(key) && !(type === "tool" && key === "ai");
+
+/**
+ * `value` (a stored record, or part of it) with `change` applied to every
+ * string of words in it, under `key`, of a record of `type`.
+ */
+const mapWords = (
+  value: unknown,
+  key: string,
+  type: unknown,
+  change: (text: string) => string
+): unknown => {
+  if (typeof value === "string") {
+    return holdsWords(type, key) ? change(value) : value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item: unknown) => mapWords(item, key, type, change));
+  }
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([name, item]: [string, unknown]) => [
+        name,
+        mapWords(item, name, type, change),
+      ])
+    );
+  }
+  return value;
+};
+
+/** A stored record's type, as its body says it. */
+const typeIn = (value: unknown): unknown =>
+  value !== null && typeof value === "object" && "type" in value
+    ? value.type
+    : undefined;
+
+/** `body` as stored, with `change` applied to its words; `null` if unreadable. */
+const changedBody = (
+  body: string,
+  change: (text: string) => string
+): unknown => {
+  let value: unknown;
+  try {
+    value = JSON.parse(body);
+  } catch {
+    return null;
+  }
+  return mapWords(value, "", typeIn(value), change);
+};
+
+/** Whether a stored record's words hold what `holds` looks for. */
+const bodyHolds = (body: string, holds: (text: string) => boolean): boolean => {
+  let found = false;
+  changedBody(body, (text) => {
+    found ||= holds(text);
+    return text;
+  });
+  return found;
+};
+
+/** Records one batch of a purge rewrites: two statements each. */
+const recordsPerPurgeBatch = 40;
+
+/**
+ * Rewrites the words of every record with `rewrite` (a content purge's:
+ * its terms replaced), as `actor`; a record it leaves as it is isn't
+ * written. Each only as it was read: one changed since is left to a
+ * purge again. Each change is audited in its batch, by the record's key
+ * alone, never its words.
+ */
+const rewriteRecords = async (
+  env: Env,
+  actor: AuditActor,
+  rewrite: (text: string) => string
+): Promise<void> => {
+  const db = drizzle(env.DB);
+  const rows = await db
+    .select({
+      id: brainRecords.id,
+      type: brainRecords.type,
+      body: brainRecords.body,
+    })
+    .from(brainRecords);
+  const changes = rows.flatMap(({ id, type, body }) => {
+    const changed = changedBody(body, rewrite);
+    if (changed === null) {
+      return [];
+    }
+    // Written as the schema reads it when it still does; otherwise (a
+    // label the markers took past its length) as rewritten, which
+    // `readBrainRecords` leaves out: the words go, whatever the record.
+    const parsed = brainRecordSchema.safeParse(changed);
+    const now = parsed.success ? bodyOf(parsed.data) : JSON.stringify(changed);
+    return now === body ? [] : [{ id, type, body, now }];
+  });
+  const purgedAt = new Date();
+  const write = ({ id, type, body, now }: (typeof changes)[number]) =>
+    [
+      db
+        .update(brainRecords)
+        .set({ body: now, purgedAt })
+        .where(and(eq(brainRecords.id, id), eq(brainRecords.body, body))),
+      outboxedIfChanged(db, {
+        actor,
+        action: "brain.records.purged",
+        target: { type: "brain_record", id: keyOf({ type, id }) },
+      }),
+    ] as const;
+  for (let at = 0; at < changes.length; at += recordsPerPurgeBatch) {
+    const [first, ...rest] = changes
+      .slice(at, at + recordsPerPurgeBatch)
+      .flatMap(write);
+    if (first !== undefined) {
+      // oxlint-disable-next-line no-await-in-loop -- one bounded batch after another
+      await auditedBatch(env, db, [first, ...rest]);
+    }
+  }
+};
+
+/** How many records' words `holds` is true of. */
+const countRecords = async (
+  env: Env,
+  holds: (text: string) => boolean
+): Promise<number> => {
+  const rows = await drizzle(env.DB)
+    .select({ body: brainRecords.body })
+    .from(brainRecords);
+  return rows.filter(({ body }) => bodyHolds(body, holds)).length;
+};
+
+/**
+ * The Playbook's records as a Knowledge purge reaches them: their words
+ * are people's too, so a content purge rewrites them. No record names
+ * who added it, so a personal purge has no one to forget here.
+ */
+export const brainRecordErasure = (
+  env: Env
+): Pick<OnErase, "count" | "rewrite" | "forgetActor"> => ({
+  count: async (holds) => await countRecords(env, holds),
+  rewrite: async (by, rewrite) => {
+    await rewriteRecords(env, by.actor, rewrite);
+  },
+  forgetActor: async () => {
+    // Records keep no author: the audit log names who added them.
+  },
+});

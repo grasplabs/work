@@ -26,6 +26,7 @@
     "@tanstack/react-start": "catalog:",
     "chat": "catalog:",
     "drizzle-orm": "catalog:",
+    "fflate": "catalog:",
     "jose": "catalog:",
     "lucide-react": "catalog:",
     "react": "catalog:",

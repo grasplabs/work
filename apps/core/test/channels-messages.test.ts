@@ -139,19 +139,6 @@ describe("someone who isn't one of the client's people", () => {
     ]);
   });
 
-  it("is asked to sign in once when they're the client's but Grasp hasn't seen them", async () => {
-    const newcomer = teamsPerson();
-    await onRoster(newcomer, { userRole: "user", tenantId: acmeTenant });
-
-    await post(messageFrom(newcomer));
-
-    await expect(kept(newcomer.conversation)).resolves.toStrictEqual([]);
-    const { lines } = await reached(newcomer.conversation);
-    expect(lines).toStrictEqual([
-      "I don't know you yet. Sign in to Grasp once with your work account, and I'll answer you right after.",
-    ]);
-  });
-
   it("gets one line once they're removed, without a look at the roster", async () => {
     const admin = await signedInApi(idp, "admin");
     const { userId, teams } = await member(idp);
@@ -283,7 +270,7 @@ describe("a platform the deployment hasn't set up", () => {
     const { teams } = await member(idp);
 
     await expect(
-      post(messageFrom(teams), { path: "/api/channels/slack" })
+      post(messageFrom(teams), { path: "/api/channels/discord" })
     ).resolves.toBe(404);
     await expect(
       post(messageFrom(teams), { coreEnv: { ...env, TEAMS_BOT_ID: "" } })

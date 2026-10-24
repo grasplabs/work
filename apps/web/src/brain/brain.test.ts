@@ -733,7 +733,7 @@ describe("processIds", () => {
 });
 
 describe("a brain of a deployment that holds nothing yet", () => {
-  // As core's `brain.read` gives it before any onboarding or Playbook:
+  // As core's `brain.read` gives it before any onboarding or records:
   // no kickoff (a vision page without a source), no teams, no records.
   const empty: Workspace = {
     company: { name: "Organization", sector: "", people: 0 },
@@ -789,7 +789,7 @@ describe("a brain of a deployment that holds nothing yet", () => {
 });
 
 describe("a brain of the onboarding alone, as core reads it for an admin", () => {
-  // As core's `brain.read` gives an admin before the Playbook's records:
+  // As core's `brain.read` gives an admin before the brain's records:
   // the kickoff and the staff list, a team lead's finished interview as
   // its team's stakeholder interview, a document shared and the tools it
   // names, nothing said in any of them.

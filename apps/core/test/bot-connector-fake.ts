@@ -29,10 +29,14 @@ export const botConnectorFake = (bot: {
     id?: string;
     editOf?: string;
   }[] = [];
+  /** Conversations where Teams refuses a streamed message. */
+  const unstreamed = new Set<string>();
   /** Every roster read, as `<conversation> <user id>`. */
   const asked: string[] = [];
   /** The roster: `<conversation> <user id>` to what Teams says of them. */
   const members: Record<string, unknown> = {};
+  /** Conversations the bot was removed from: Teams refuses its posts there. */
+  const uninstalled = new Set<string>();
 
   const membersPath =
     /\/v3\/conversations\/(?<conversation>[^/]+)\/members\/(?<member>[^/]+)$/u;
@@ -62,6 +66,35 @@ export const botConnectorFake = (bot: {
     });
   };
 
+  /**
+   * Takes a post in `conversation`, unless the bot was taken out of it
+   * (`uninstall`) or it is a streamed message where Teams refuses them
+   * (`refuseStreams`).
+   */
+  const post = (conversation: string, body: unknown): Response => {
+    if (uninstalled.has(conversation)) {
+      return Response.json(
+        {
+          error: {
+            code: "BotNotInConversationRoster",
+            message: "The bot is not part of the conversation roster.",
+          },
+        },
+        { status: 403 }
+      );
+    }
+    const streamed = JSON.stringify(body).includes('"streamType":"streaming"');
+    if (streamed && unstreamed.has(conversation)) {
+      return Response.json(
+        { error: { code: "ContentStreamNotAllowed" } },
+        { status: 403 }
+      );
+    }
+    const id = `activity-${posted.length + 1}`;
+    posted.push({ conversation, activity: body, id });
+    return Response.json({ id }, { status: 201 });
+  };
+
   const botConnector = async (request: Request, url: URL) => {
     const bearer = (request.headers.get("authorization") ?? "").replace(
       /^Bearer /u,
@@ -80,13 +113,10 @@ export const botConnectorFake = (bot: {
     }
     const activity = activitiesPath.exec(url.pathname)?.groups;
     if (request.method === "POST" && activity !== undefined) {
-      const id = `activity-${posted.length + 1}`;
-      posted.push({
-        conversation: decodeURIComponent(activity.conversation ?? ""),
-        activity: await request.json(),
-        id,
-      });
-      return Response.json({ id }, { status: 201 });
+      return post(
+        decodeURIComponent(activity.conversation ?? ""),
+        await request.json()
+      );
     }
     const edited = editPath.exec(url.pathname)?.groups;
     if (request.method === "PUT" && edited !== undefined) {
@@ -104,6 +134,14 @@ export const botConnectorFake = (bot: {
   return {
     posted,
     asked,
+    /** Teams refuses streamed messages in `conversation` from now on. */
+    refuseStreams: (conversation: string) => {
+      unstreamed.add(conversation);
+    },
+    /** Removes the bot from `conversation`, as uninstalling its app does. */
+    uninstall: (conversation: string) => {
+      uninstalled.add(conversation);
+    },
     /** Adds to the roster, `<conversation> <user id>` to each member. */
     setMembers: (next: Record<string, unknown>) => {
       Object.assign(members, next);

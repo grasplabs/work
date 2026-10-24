@@ -31,7 +31,7 @@ import {
 import type { OnErase } from "./knowledge/purge.ts";
 import { onboardingStore } from "./onboarding/store.ts";
 
-// What became of the Playbook's gaps (`brain.askAboutGap`, `answerGap`,
+// What became of the brain's gaps (`brain.askAboutGap`, `answerGap`,
 // `closeGap`): the gap record itself is never written over (brain-records
 // .ts); its ask, answer and close are kept beside it, in
 // `brain_gap_states`, each set once. Threat model, and how each is closed
@@ -462,7 +462,7 @@ const rewriteGapAnswers = async (
     outboxed(db, {
       actor,
       action: "brain.gap.answers_purged",
-      target: { type: "brain", id: "playbook" },
+      target: { type: "brain", id: "gaps" },
       detail: { gaps: changed.length },
     }),
   ]);

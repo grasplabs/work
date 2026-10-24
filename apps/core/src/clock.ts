@@ -16,6 +16,7 @@ import { auditLog } from "./audit-log.ts";
 import { drainAuditOutboxes } from "./audit-outbox.ts";
 import { sweepTokenKeys } from "./auth/app-tokens.ts";
 import { sweepChannelLinks } from "./channels/accounts.ts";
+import { sweepChannelSignals } from "./channels/signals.ts";
 import { refreshDailySignals } from "./daily-signals.ts";
 import { recheckMalware } from "./dependencies/requests.ts";
 import { inJurisdiction } from "./durable-objects.ts";
@@ -164,6 +165,12 @@ export const clockTasks: readonly ClockTask<Env>[] = [
   },
   { name: "guests.sweep", period: "quarterHour", run: sweepGuestChats },
   { name: "channels.links", period: "quarterHour", run: sweepChannelLinks },
+  // Stephen's counts past their week (src/channels/signals.ts).
+  {
+    name: "channels.signals",
+    period: "quarterHour",
+    run: sweepChannelSignals,
+  },
   {
     name: "workflows.run_details",
     period: "quarterHour",

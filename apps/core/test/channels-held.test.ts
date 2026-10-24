@@ -150,6 +150,10 @@ describe("a Teams turn that holds writes", setUpTime, () => {
     const { activities } = await reached(person.teams.conversation);
     const messages = activities
       .filter(({ type }) => type === "message")
+      // Not the card offering their own Microsoft 365 (connect-own.ts).
+      .filter(
+        (activity) => !JSON.stringify(activity).includes("/connect-microsoft")
+      )
       .map((activity) => JSON.stringify(activity));
     const [answer, card, ...more] = messages;
     expect({

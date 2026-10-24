@@ -20,6 +20,7 @@ import { appendAuditEvent } from "./audit-outbox.ts";
 import { organizationId } from "./auth/auth.ts";
 import { signInConfig } from "./auth/config.ts";
 import { appsAsked } from "./catalog-requests.ts";
+import { stephenSignalsOf } from "./channels/signals.ts";
 import { consoleSigned } from "./console-signed.ts";
 import { errorResponse } from "./errors.ts";
 import { membersOf } from "./members.ts";
@@ -55,7 +56,9 @@ import { readOrganization } from "./organization.ts";
 // - A credential of the company's leaving through it: what it connected
 //   comes from connect without tokens, server URLs or anything Composio
 //   knows an account by (admin-integrations.ts), and of personal
-//   connections and chats' requests only counts by app.
+//   connections and chats' requests only counts by app. How Stephen
+//   fared in the chat apps is counts too (channels/signals.ts): never who
+//   wrote or what.
 
 /**
  * Where someone stands, as the prototype's admin says it
@@ -173,6 +176,22 @@ const integrationsOf = async (
 };
 
 /**
+ * How Stephen fared in the chat apps up to `now`, or null when its counts
+ * can't be read: the rest of the snapshot is still worth reading.
+ */
+const stephenOf = async (
+  env: Env,
+  now: string
+): Promise<AdminSnapshot["stephen"]> => {
+  try {
+    return await stephenSignalsOf(env, new Date(now));
+  } catch (error) {
+    log.warn("admin.snapshot.stephen_unread", errorFields(error));
+    return null;
+  }
+};
+
+/**
  * Everything the admin reads of this client, from what core holds, at
  * `now`: for the admin's read below, and staff's in the onboarding area
  * (onboarding/staff-rpc.ts). Only what the schema names may leave core.
@@ -193,6 +212,7 @@ export const snapshotOf = async (
     members,
     integrations,
     asked,
+    stephen,
   ] = await Promise.all([
     store.adminFacts(),
     store.agreements(),
@@ -203,6 +223,7 @@ export const snapshotOf = async (
     membersOf(env),
     integrationsOf(env),
     appsAsked(env),
+    stephenOf(env, now),
   ]);
   const config = signInConfig(env);
   const sent = new Map(facts.links.map((link) => [link.person, link]));
@@ -256,6 +277,7 @@ export const snapshotOf = async (
     integrations,
     asked,
     usage: usageOf(usage),
+    stephen,
   };
 };
 

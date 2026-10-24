@@ -123,7 +123,7 @@ export type CollectionInput = z.input<typeof collectionInputSchema>;
  * ID of its own, the same in every deployment, which no collection a
  * person creates has (theirs are UUIDs): the install creates it, open to
  * everyone and changed by admins, if it isn't there yet, and every App
- * created from a blueprint that names it shares it, such as the Playbook.
+ * created from a blueprint that names it shares it.
  */
 export const declaredCollectionSchema = z.strictObject({
   id: collectionIdSchema.refine(
@@ -806,6 +806,13 @@ export interface PurgePlan {
    */
   inLongerWords: number;
   /**
+   * The Brain's memory records it reaches: the person's own, deleted
+   * (`personal`), or everyone's whose statement holds a term, whatever
+   * documents are named (`content`), each redacted, or deleted when no
+   * word of it is left but the markers.
+   */
+  memories: number;
+  /**
    * Copies the host keeps outside Knowledge a term is removed from
    * (`content`; core's: the brain's gap answers), every one holding a
    * term, whatever documents are named. Always 0 for `personal`, which
@@ -838,8 +845,9 @@ export interface PurgeResult {
    * longer one (which the plan counted, `inLongerWords`), a form spelled
    * otherwise that folds to the same ("Rene" for "René"), or a term of
    * several words joined otherwise ("tom-visser" for "tom visser").
-   * Gap answers still holding a term count too: one given after the
-   * purge read them, left to a purge again. Absent for `personal`.
+   * Memory records and gap answers still holding a term count too: one
+   * remembered or given after the purge read them, left to a purge
+   * again. Absent for `personal`.
    */
   stillFound?: number;
 }

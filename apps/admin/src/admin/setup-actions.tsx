@@ -12,6 +12,7 @@
  * errors, drift, shared secrets, cost), as the admin's grid read it,
  * and everything its audit log keeps of it.
  */
+import { fromBase64Url } from "@grasp-os/shared/encoding";
 import { Button } from "@grasp-os/ui/components/button";
 import {
   Field,
@@ -37,19 +38,24 @@ import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { z } from "zod";
 
+import type { AlertOutcome } from "../alerts.ts";
 import { usd } from "../clients/cost.tsx";
 import {
   applySettingsFn,
   fetchClientLive,
+  fetchTeamsPackageFn,
   rotateSecretsFn,
+  sendTestAlertFn,
   setRingFn,
   setSealedSecretFn,
   setSignInFn,
+  setTeamsBotFn,
 } from "../clients/functions.ts";
 import type { LiveStatus, Reach } from "../clients/grid.ts";
 import type { HistoryEntry } from "../clients/queries.ts";
 import type { ClientSetup } from "../clients/setup.ts";
 import { SignInFields, signInOf, textOf } from "../clients/sign-in-fields.tsx";
+import type { TeamsBot } from "../clients/teams-bot.ts";
 import { useSettingsAction } from "../clients/use-action.ts";
 import type { ClientSignInRecord } from "../deploy/core-config.ts";
 import {
@@ -602,6 +608,246 @@ export const ApplySettings = ({
         </div>
       ) : null}
     </Body>
+  );
+};
+
+/** What became of a test alert, in words. */
+const alertOutcomeWords: Readonly<Record<AlertOutcome, string>> = {
+  sent: "Sent: it should be in the alerts' channel now.",
+  held: "Held back: one went out less than a minute ago.",
+  no_channel:
+    "Not sent: Secrets Store has no STAFF_ALERTS_WEBHOOK, or it isn't a Discord webhook.",
+  failed: "Not sent: the channel refused it. Try again in a moment.",
+};
+
+/** Sends a test alert about client `clientId`; what became of it. */
+const testAlertOutcome = async (
+  clientId: string
+): Promise<AlertOutcome | "error"> => {
+  try {
+    return await sendTestAlertFn({ data: { clientId } });
+  } catch {
+    return "error";
+  }
+};
+
+/** Sending a test alert about it, to see staff alerts reach their channel. */
+export const TestAlert = ({ clientId }: { clientId: string }) => {
+  const [busy, setBusy] = useState(false);
+  const [outcome, setOutcome] = useState<AlertOutcome | "error" | null>(null);
+  return (
+    <Body>
+      <div className="flex flex-wrap items-center gap-3">
+        <Button
+          disabled={busy}
+          onClick={() => {
+            setBusy(true);
+            void (async () => {
+              setOutcome(await testAlertOutcome(clientId));
+              setBusy(false);
+            })();
+          }}
+          size="sm"
+          variant="outline"
+        >
+          Send a test alert
+        </Button>
+        {outcome === null ? null : (
+          <output
+            className={
+              outcome === "sent" ? "text-muted-foreground" : "text-destructive"
+            }
+          >
+            {outcome === "error"
+              ? "The admin couldn't send it: read the page again and retry."
+              : alertOutcomeWords[outcome]}
+          </output>
+        )}
+      </div>
+    </Body>
+  );
+};
+
+/**
+ * Setting its Teams bot: the app id and tenant of the bot's registration
+ * in the company's own Entra, and the day its secret expires. Its connect
+ * and core get it with the next deploy.
+ */
+export const TeamsBotChange = ({
+  clientId,
+  bot,
+  refresh,
+}: {
+  clientId: string;
+  bot: TeamsBot | null;
+  refresh: Refresh;
+}) => {
+  const { busy, failure, run } = useSettingsAction();
+  return (
+    <form
+      className="flex flex-col gap-4 border-t px-5 py-4"
+      onSubmit={(event) => {
+        event.preventDefault();
+        const form = new FormData(event.currentTarget);
+        void run(
+          async () =>
+            await thenRefresh(
+              async () =>
+                await setTeamsBotFn({
+                  data: {
+                    clientId,
+                    bot: {
+                      appId: textOf(form, "appId"),
+                      tenantId: textOf(form, "tenantId"),
+                      secretExpiresOn: textOf(form, "secretExpiresOn"),
+                    },
+                  },
+                }),
+              refresh
+            )
+        );
+      }}
+    >
+      {/* Keyed by what was read: the fields start again from it after a save. */}
+      <FieldGroup key={JSON.stringify(bot)}>
+        <Field>
+          <FieldLabel htmlFor="setup-teams-bot-app">App id</FieldLabel>
+          <Input
+            autoComplete="off"
+            className="max-w-md"
+            defaultValue={bot?.appId ?? ""}
+            id="setup-teams-bot-app"
+            name="appId"
+            required
+            spellCheck={false}
+          />
+          <FieldDescription>
+            The bot app&apos;s Application (client) ID, from its registration in
+            the company&apos;s own Entra.
+          </FieldDescription>
+        </Field>
+        <Field>
+          <FieldLabel htmlFor="setup-teams-bot-tenant">Tenant</FieldLabel>
+          <Input
+            autoComplete="off"
+            className="max-w-md"
+            defaultValue={bot?.tenantId ?? ""}
+            id="setup-teams-bot-tenant"
+            name="tenantId"
+            required
+            spellCheck={false}
+          />
+          <FieldDescription>
+            The Directory (tenant) ID the bot app is registered in.
+          </FieldDescription>
+        </Field>
+        <Field>
+          <FieldLabel htmlFor="setup-teams-bot-expiry">
+            Secret expires on
+          </FieldLabel>
+          <Input
+            className="max-w-xs"
+            defaultValue={bot?.secretExpiresOn ?? ""}
+            id="setup-teams-bot-expiry"
+            name="secretExpiresOn"
+            required
+            type="date"
+          />
+          <FieldDescription>
+            As Entra shows it beside the client secret.
+          </FieldDescription>
+        </Field>
+      </FieldGroup>
+      <div className="flex flex-wrap items-center gap-3">
+        <Button disabled={busy} size="sm" type="submit" variant="outline">
+          Save bot
+        </Button>
+        {bot === null ? null : (
+          <Button
+            disabled={busy}
+            onClick={() => {
+              void run(
+                async () =>
+                  await thenRefresh(
+                    async () =>
+                      await setTeamsBotFn({ data: { clientId, bot: null } }),
+                    refresh
+                  )
+              );
+            }}
+            size="sm"
+            type="button"
+            variant="ghost"
+          >
+            Remove bot
+          </Button>
+        )}
+        <Failure failure={failure} />
+      </div>
+    </form>
+  );
+};
+
+/** Saves `bytes` as the file `fileName` in the browser. */
+const saveFile = (fileName: string, bytes: Uint8Array<ArrayBuffer>): void => {
+  const url = URL.createObjectURL(
+    new Blob([bytes], { type: "application/zip" })
+  );
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  link.click();
+  URL.revokeObjectURL(url);
+};
+
+/** Downloads client `clientId`'s Teams app package; whether it could. */
+const downloadTeamsPackage = async (clientId: string): Promise<boolean> => {
+  try {
+    const download = await fetchTeamsPackageFn({ data: { clientId } });
+    if (download === null) {
+      return false;
+    }
+    saveFile(download.fileName, fromBase64Url(download.zip));
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Downloading its Teams app package, the one file its IT uploads to Teams
+ * (src/clients/teams-package.ts).
+ */
+export const TeamsPackageDownload = ({ clientId }: { clientId: string }) => {
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState(false);
+  return (
+    <div className="flex flex-wrap items-center gap-3">
+      <Button
+        disabled={busy}
+        onClick={() => {
+          setBusy(true);
+          setFailed(false);
+          void (async () => {
+            const saved = await downloadTeamsPackage(clientId);
+            setFailed(!saved);
+            setBusy(false);
+          })();
+        }}
+        size="sm"
+        variant="outline"
+      >
+        Download app package
+      </Button>
+      <span className="text-muted-foreground">
+        For its IT to upload in the Teams admin center, under Manage apps.
+      </span>
+      {failed ? (
+        <span className="text-destructive">
+          The package couldn&apos;t be made: read the page again and retry.
+        </span>
+      ) : null}
+    </div>
   );
 };
 

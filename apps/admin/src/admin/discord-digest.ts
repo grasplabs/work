@@ -22,6 +22,7 @@ import { log } from "@grasp-os/shared/log";
 import { clientAdmins } from "../clients/admin.ts";
 import { ifStored } from "../clients/grid.ts";
 import { storeSecret } from "../deploy/context.ts";
+import { discordWebhookOf, postToDiscord } from "../discord-webhook.ts";
 import { organizationsOf } from "./views.ts";
 
 /** The digest's cron (wrangler.jsonc): weekdays, at 06:00 and 07:00 UTC. */
@@ -38,21 +39,6 @@ const berlinClock = new Intl.DateTimeFormat("en-CA", {
   hour: "2-digit",
   hourCycle: "h23",
 });
-
-/** The hosts a Discord webhook URL is served from. */
-const discordHosts = new Set([
-  "discord.com",
-  "discordapp.com",
-  "ptb.discord.com",
-  "canary.discord.com",
-]);
-const webhookPath = "/api/webhooks/";
-
-/** The most characters Discord takes in a message. */
-const discordMessageMax = 2000;
-
-/** How long Discord may take to take the digest. */
-const discordTimeoutMs = 10_000;
 
 /** The day (YYYY-MM-DD) and the hour it is in Berlin at `at`. */
 const berlinAt = (at: Date): { day: string; hour: number } => {
@@ -73,23 +59,12 @@ const digestWebhook = async (env: Env): Promise<URL | null> => {
   if (stored === null) {
     return null;
   }
-  const url = URL.parse(stored.trim());
-  const isDiscord =
-    url?.protocol === "https:" &&
-    discordHosts.has(url.hostname) &&
-    url.pathname.startsWith(webhookPath);
-  if (!isDiscord) {
+  const url = discordWebhookOf(stored);
+  if (url === null) {
     log.warn("digest.not_discord", {});
-    return null;
   }
   return url;
 };
-
-/** `text` as one Discord message, cut short when it's longer than one takes. */
-const asMessage = (text: string): string =>
-  text.length <= discordMessageMax
-    ? text
-    : `${text.slice(0, discordMessageMax - 1)}…`;
 
 /**
  * Posts the morning digest to Discord when the digest's cron fires at
@@ -120,19 +95,9 @@ export const sendMorningDigest = async (
   const views = organizationsOf(admins).flatMap(({ view }) =>
     view === null ? [] : [view]
   );
-  const response = await fetch(webhook, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    // Nobody is pinged: an organization's name is never a mention.
-    body: JSON.stringify({
-      content: asMessage(digestOf(views, day)),
-      allowed_mentions: { parse: [] },
-    }),
-    signal: AbortSignal.timeout(discordTimeoutMs),
-  });
-  await response.body?.cancel();
-  if (!response.ok) {
-    throw new Error(`Discord refused the morning digest: ${response.status}`);
+  const posted = await postToDiscord(webhook, digestOf(views, day));
+  if (!posted.ok) {
+    throw new Error(`Discord refused the morning digest: ${posted.status}`);
   }
   log.info("digest.posted", { organizations: views.length });
 };
