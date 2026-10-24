@@ -49,7 +49,10 @@ import {
   packageCleanups,
 } from "../db/core/schema.ts";
 import { policyGenerationSql } from "../dependencies/policy.ts";
-import { admitDependencies } from "../dependencies/requests.ts";
+import {
+  admitDependencies,
+  refuseMalwareBefore,
+} from "../dependencies/requests.ts";
 import type { Admitted } from "../dependencies/requests.ts";
 import { builtSubject } from "../dependencies/subject-builders.ts";
 import { auditTargetOf, ofSubject } from "../dependencies/subjects.ts";
@@ -103,6 +106,11 @@ import { verifiedTarball } from "./tarballs.ts";
 //   bytes, so its answer is checked like any input: its shape, every
 //   file's SHA-256 against the bytes, and the artifact's size.
 //
+// - Building a version reported as malware after its graph was approved
+//   (GRA-924): a build that makes a new artifact asks both sources again
+//   first, and is refused (`dependency.malware`), or fails closed when
+//   either can't be read. What was built before is the periodic
+//   re-check's to revoke (`recheckMalware`, dependencies/requests.ts).
 // - Building with a graph that was retired or revoked (spec 19.3.1):
 //   ending an approval moves the policy generation on, so a build that
 //   read it before is refused, and its pin (whose write checks the
@@ -1029,6 +1037,22 @@ const buildUnderLease = async (
   const use = pinned ? "retained" : "new";
   if (admitted.scope !== "approved" && use === "new") {
     await admit("new");
+  }
+  // A new artifact: of no version reported as malware since the graph was
+  // approved (GRA-924), asked again now, failing closed. One made again
+  // under its pin reproduces bytes built before; the periodic re-check
+  // revokes the graph if a report covers them (dependencies/requests.ts).
+  if (use === "new") {
+    await refuseMalwareBefore(
+      env,
+      by,
+      asked.subject,
+      asked.graphHash,
+      graphOfLock(lock).packages.map(({ name, version }) => ({
+        name,
+        version,
+      }))
+    );
   }
   const limits = packageLimitsOf(env.PACKAGE_LIMITS);
   const packages = await lockedTarballs(env, lock, limits);
