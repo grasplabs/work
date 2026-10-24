@@ -79,6 +79,7 @@ export const versionScreenCodes = async (
     env,
     await withScreenReferences(env, app, version, files),
     version,
-    app
+    app,
+    "production"
   );
 };

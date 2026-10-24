@@ -651,7 +651,8 @@ const modulesOf = async (
     draft
       ? await appBindingKinds(env, app)
       : await workflowBindingKinds(env, app, version),
-    signal
+    // A draft's workflows build as a preview: never served as a version's.
+    { profile: draft ? "preview" : "production", signal }
   );
   signal?.throwIfAborted();
   if (!build.ok) {
