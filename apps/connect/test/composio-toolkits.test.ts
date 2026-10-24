@@ -79,7 +79,6 @@ describe("each Composio toolkit this release reviewed", () => {
         name,
         read: isRead,
         resource: placeField,
-        places: [place],
       });
       const rules: ComposioToolRule[] = [
         pointed(read, true),
@@ -102,7 +101,8 @@ describe("each Composio toolkit this release reviewed", () => {
             input: { [placeField]: at, text: "status" },
             idempotencyKey: crypto.randomUUID(),
           },
-          { origin: chatOrigin }
+          // Core signs in where the company pointed him (app-pointers.ts).
+          { origin: chatOrigin, resources: [place] }
         );
       const there = await outcome(call(read, place));
       const elsewhere = await outcome(call(read, "place-2"));
@@ -112,6 +112,8 @@ describe("each Composio toolkit this release reviewed", () => {
       const listed = await exports.default.listConnections(anna);
       const connection = listed.find(({ id }) => id === connectionId);
       const pending = await exports.default.listPendingActions(anna);
+      const [owned] = await exports.default.connectionOwners([connectionId]);
+      const reviewed = shipped[toolkit] ?? {};
       expect({
         there,
         elsewhere,
@@ -122,14 +124,21 @@ describe("each Composio toolkit this release reviewed", () => {
             : "ran",
         pending: pending.map(({ action }) => action),
         offered: connection?.offeredTools,
+        classes: owned?.toolClasses,
         ran: composio.state.mcp.ran.map(({ tool }) => tool),
       }).toStrictEqual({
         there: "ok",
-        elsewhere: "connect.place_out_of_scope",
+        elsewhere: "connect.resource_not_pointed",
         neverClassed: "connect.action_not_found",
         changed: "held",
         pending: change === undefined ? [] : [change],
         offered: change === undefined ? [read] : [read, change],
+        // Core holds each to the company's classes by the one it reviewed.
+        classes: Object.fromEntries(
+          [read, change].flatMap((name) =>
+            name === undefined ? [] : [[name, reviewed[name]]]
+          )
+        ),
         ran: [read],
       });
     }
