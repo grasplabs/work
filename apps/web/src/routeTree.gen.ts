@@ -20,6 +20,7 @@ import { Route as ShellIndexRouteImport } from './routes/_shell.index'
 import { Route as ShellSplatRouteImport } from './routes/_shell.$'
 import { Route as ShellActivityRouteImport } from './routes/_shell.activity'
 import { Route as ShellBrainRouteImport } from './routes/_shell.brain'
+import { Route as ShellConnectMicrosoftRouteImport } from './routes/_shell.connect-microsoft'
 import { Route as ShellConnectionsRouteImport } from './routes/_shell.connections'
 import { Route as ShellDashboardRouteImport } from './routes/_shell.dashboard'
 import { Route as ShellInboxRouteImport } from './routes/_shell.inbox'
@@ -151,6 +152,11 @@ const ShellActivityRoute = ShellActivityRouteImport.update({
 const ShellBrainRoute = ShellBrainRouteImport.update({
   id: '/brain',
   path: '/brain',
+  getParentRoute: () => ShellRoute,
+} as any)
+const ShellConnectMicrosoftRoute = ShellConnectMicrosoftRouteImport.update({
+  id: '/connect-microsoft',
+  path: '/connect-microsoft',
   getParentRoute: () => ShellRoute,
 } as any)
 const ShellConnectionsRoute = ShellConnectionsRouteImport.update({
@@ -583,6 +589,7 @@ export interface FileRoutesByFullPath {
   '/$': typeof ShellSplatRoute
   '/activity': typeof ShellActivityRoute
   '/brain': typeof ShellBrainRouteWithChildren
+  '/connect-microsoft': typeof ShellConnectMicrosoftRoute
   '/connections': typeof ShellConnectionsRoute
   '/dashboard': typeof ShellDashboardRoute
   '/inbox': typeof ShellInboxRoute
@@ -671,6 +678,7 @@ export interface FileRoutesByTo {
   '/sign-in': typeof SignInRoute
   '/$': typeof ShellSplatRoute
   '/activity': typeof ShellActivityRoute
+  '/connect-microsoft': typeof ShellConnectMicrosoftRoute
   '/connections': typeof ShellConnectionsRoute
   '/dashboard': typeof ShellDashboardRoute
   '/inbox': typeof ShellInboxRoute
@@ -760,6 +768,7 @@ export interface FileRoutesById {
   '/_shell/$': typeof ShellSplatRoute
   '/_shell/activity': typeof ShellActivityRoute
   '/_shell/brain': typeof ShellBrainRouteWithChildren
+  '/_shell/connect-microsoft': typeof ShellConnectMicrosoftRoute
   '/_shell/connections': typeof ShellConnectionsRoute
   '/_shell/dashboard': typeof ShellDashboardRoute
   '/_shell/inbox': typeof ShellInboxRoute
@@ -853,6 +862,7 @@ export interface FileRouteTypes {
     | '/$'
     | '/activity'
     | '/brain'
+    | '/connect-microsoft'
     | '/connections'
     | '/dashboard'
     | '/inbox'
@@ -941,6 +951,7 @@ export interface FileRouteTypes {
     | '/sign-in'
     | '/$'
     | '/activity'
+    | '/connect-microsoft'
     | '/connections'
     | '/dashboard'
     | '/inbox'
@@ -1029,6 +1040,7 @@ export interface FileRouteTypes {
     | '/_shell/$'
     | '/_shell/activity'
     | '/_shell/brain'
+    | '/_shell/connect-microsoft'
     | '/_shell/connections'
     | '/_shell/dashboard'
     | '/_shell/inbox'
@@ -1203,6 +1215,13 @@ declare module '@tanstack/react-router' {
       path: '/brain'
       fullPath: '/brain'
       preLoaderRoute: typeof ShellBrainRouteImport
+      parentRoute: typeof ShellRoute
+    }
+    '/_shell/connect-microsoft': {
+      id: '/_shell/connect-microsoft'
+      path: '/connect-microsoft'
+      fullPath: '/connect-microsoft'
+      preLoaderRoute: typeof ShellConnectMicrosoftRouteImport
       parentRoute: typeof ShellRoute
     }
     '/_shell/connections': {
@@ -1882,6 +1901,7 @@ interface ShellRouteChildren {
   ShellSplatRoute: typeof ShellSplatRoute
   ShellActivityRoute: typeof ShellActivityRoute
   ShellBrainRoute: typeof ShellBrainRouteWithChildren
+  ShellConnectMicrosoftRoute: typeof ShellConnectMicrosoftRoute
   ShellConnectionsRoute: typeof ShellConnectionsRoute
   ShellDashboardRoute: typeof ShellDashboardRoute
   ShellInboxRoute: typeof ShellInboxRoute
@@ -1919,6 +1939,7 @@ const ShellRouteChildren: ShellRouteChildren = {
   ShellSplatRoute: ShellSplatRoute,
   ShellActivityRoute: ShellActivityRoute,
   ShellBrainRoute: ShellBrainRouteWithChildren,
+  ShellConnectMicrosoftRoute: ShellConnectMicrosoftRoute,
   ShellConnectionsRoute: ShellConnectionsRoute,
   ShellDashboardRoute: ShellDashboardRoute,
   ShellInboxRoute: ShellInboxRoute,
