@@ -95,6 +95,8 @@ catalog:
   "@chat-adapter/discord": 4.43.0
   "@chat-adapter/slack": 4.43.0
   "@chat-adapter/teams": 4.43.0
+  "@chat-adapter/telegram": 4.43.0
+  "@chat-adapter/whatsapp": 4.43.0
   chat: 4.43.0
   # What the Teams and Slack adapters send through; packages/chat's tests
   # check its fix against it (src/workerd.ts). On the version they resolve.

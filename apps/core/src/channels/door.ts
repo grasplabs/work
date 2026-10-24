@@ -42,6 +42,10 @@
  * its people are known only by the Slack account they linked to Grasp, and
  * someone who hasn't linked one gets the link, once, and nothing more.
  *
+ * WhatsApp (whatsapp.ts) comes in the same way as Slack: by Meta's
+ * signature, for the client's own number, its people known only by the
+ * WhatsApp account they linked to Grasp.
+ *
  * Teams' and Slack's adapters send through axios, which workerd refuses
  * as it builds its requests: `@grasp-os/chat/workerd` puts the fix in, so
  * it is imported before any adapter loads.
@@ -68,6 +72,12 @@ import { slackAdapter, verifiedSlackRequest } from "./slack.ts";
 import type { ConnectedTeamsAdapter } from "./teams-adapter.ts";
 import { teamsAdapter, verifiedTeamsRequest } from "./teams.ts";
 import type { TeamsKeys } from "./teams.ts";
+import {
+  verifiedWhatsAppRequest,
+  whatsAppAdapter,
+  whatsAppSetUp,
+  whatsAppSubscription,
+} from "./whatsapp.ts";
 import { writerOf } from "./who.ts";
 import { channelLocales, say } from "./words.ts";
 import type { ChannelLocale } from "./words.ts";
@@ -82,6 +92,7 @@ export const channelAdapters = (
 ) => ({
   teams: teamsAdapter(env, teamsKeys),
   slack: slackAdapter(env),
+  whatsapp: whatsAppAdapter(env),
 });
 
 /** A platform the door has an adapter for. */
@@ -93,6 +104,9 @@ type Platform = keyof ReturnType<typeof channelAdapters>;
  * secret, without which every request would be refused anyway.
  */
 const isSetUp = (env: Env, platform: string): platform is Platform => {
+  if (platform === "whatsapp") {
+    return whatsAppSetUp(env);
+  }
   if (platform === "slack") {
     return (
       env.SLACK_SIGNING_SECRET !== undefined && env.SLACK_SIGNING_SECRET !== ""
@@ -597,6 +611,191 @@ const slackResponse = async (
   });
 };
 
+/**
+ * A WhatsApp request, as far as the door reads one: each change's number,
+ * and each message's id, sender and kind, never its text. The contacts are
+ * kept only to hand a member's message on as Meta sent it.
+ */
+const whatsAppPayloadSchema = z.object({
+  object: z.string().optional(),
+  entry: z.array(
+    z.object({
+      id: z.string().optional(),
+      changes: z.array(
+        z.object({
+          field: z.string(),
+          value: z
+            .object({
+              metadata: z.object({ phone_number_id: z.string() }).loose(),
+              contacts: z.array(z.object({}).loose()).optional(),
+              messages: z
+                .array(
+                  z
+                    .object({
+                      id: z.string().min(1).max(256),
+                      from: z.string().min(1).max(64),
+                      type: z.string(),
+                    })
+                    .loose()
+                )
+                .optional(),
+            })
+            .loose(),
+        })
+      ),
+    })
+  ),
+});
+type WhatsAppPayload = z.infer<typeof whatsAppPayloadSchema>;
+type WhatsAppChange = WhatsAppPayload["entry"][number]["changes"][number];
+type WhatsAppMessage = NonNullable<WhatsAppChange["value"]["messages"]>[number];
+
+/**
+ * What the door does with a WhatsApp message before the Chat SDK sees it,
+ * as `slackGate` does with Slack's: the line it sends and nothing more, a
+ * link for someone who hasn't linked their WhatsApp account, or the member
+ * it is from. WhatsApp is always a private chat with the business number.
+ */
+const whatsAppGate = async (
+  env: Env,
+  state: StateAdapter,
+  message: WhatsAppMessage
+): Promise<{ line?: DoorLine; link?: true; userId?: string }> => {
+  const first = await state.setIfNotExists(
+    `door:whatsapp:${message.id}`,
+    true,
+    seenTtlMs
+  );
+  if (!first) {
+    return {};
+  }
+  if (!messages.take(`whatsapp:${message.from}`)) {
+    log.info("channel.limited", { platform: "whatsapp" });
+    return told.take(`whatsapp:${message.from}`) ? { line: "tooFast" } : {};
+  }
+  const writer = await writerOf(env, "whatsapp", message.from);
+  return writer.kind === "member" ? { userId: writer.userId } : { link: true };
+};
+
+/**
+ * Sends one of Stephen's lines, or a link to sign in by, to whoever sent
+ * `message`. WhatsApp names no language a person reads: lines are in
+ * English, as Slack's are.
+ */
+const sendWhatsAppLine = async (
+  env: Env,
+  origin: string,
+  message: WhatsAppMessage,
+  line: DoorLine | "link"
+): Promise<void> => {
+  const adapter = whatsAppAdapter(env);
+  const threadId = adapter.encodeThreadId({
+    phoneNumberId: env.WHATSAPP_PHONE_NUMBER_ID ?? "",
+    userWaId: message.from,
+  });
+  try {
+    if (line === "link") {
+      const { path } = await offerChannelLink(env, {
+        platform: "whatsapp",
+        platformUserId: message.from,
+      });
+      await adapter.postMessage(
+        threadId,
+        signInCard({ locale: "en", url: new URL(path, origin).href })
+      );
+      return;
+    }
+    await adapter.postMessage(threadId, say(line, "en"));
+  } catch (error) {
+    log.warn("channel.line_failed", {
+      platform: "whatsapp",
+      line,
+      ...errorFields(error),
+    });
+  }
+};
+
+/**
+ * Answers a WhatsApp request whose body the door read: 401 unless Meta
+ * signed it for this client's number, and otherwise 200 at once. Each
+ * message is gated on its own; a member's is handed on alone, in a body
+ * the door made of it and vouches for to the adapter, so no one else's
+ * message in the same delivery reaches the Chat SDK.
+ */
+const whatsAppResponse = async (
+  request: Request,
+  env: Env,
+  body: string,
+  ctx: Pick<ExecutionContext, "waitUntil">,
+  handoff: ChannelHandoff | undefined
+): Promise<Response> => {
+  if (!(await verifiedWhatsAppRequest(env, request, body))) {
+    return new Response("Unauthorized", { status: 401 });
+  }
+  const parsed = whatsAppPayloadSchema.safeParse(jsonOf(body));
+  if (!parsed.success) {
+    return new Response(null, { status: 200 });
+  }
+  const state = durableObjectState(inJurisdiction(env, env.CHAT_STATE));
+  const { origin } = new URL(request.url);
+  for (const entry of parsed.data.entry) {
+    for (const change of entry.changes) {
+      // Delivery receipts, profile and id updates: acknowledged, and
+      // dropped.
+      if (change.field !== "messages") {
+        continue;
+      }
+      for (const message of change.value.messages ?? []) {
+        // oxlint-disable-next-line no-await-in-loop -- one message after another, in order
+        const { line, link, userId } = await whatsAppGate(env, state, message);
+        if (line !== undefined || link !== undefined) {
+          ctx.waitUntil(sendWhatsAppLine(env, origin, message, line ?? "link"));
+        }
+        if (userId !== undefined) {
+          const alone = JSON.stringify({
+            object: parsed.data.object,
+            entry: [
+              {
+                id: entry.id,
+                changes: [
+                  {
+                    field: change.field,
+                    value: { ...change.value, messages: [message] },
+                  },
+                ],
+              },
+            ],
+          });
+          const chat = new Chat({
+            userName: "Stephen",
+            adapters: {
+              whatsapp: whatsAppAdapter(env, (handed) => handed === alone),
+            },
+            state,
+            logger: "silent",
+            concurrency: "queue",
+          });
+          handOn(env, ctx, chat, {
+            platform: "whatsapp",
+            userId,
+            handoff,
+            webhook: async (waitUntil) =>
+              await chat.webhooks.whatsapp(
+                new Request(request.url, {
+                  method: "POST",
+                  headers: { "content-type": "application/json" },
+                  body: alone,
+                }),
+                { waitUntil }
+              ),
+          });
+        }
+      }
+    }
+  }
+  return new Response(null, { status: 200 });
+};
+
 /** Options the tests set: the keys to check against, and the handoff. */
 export interface DoorOptions {
   teamsKeys?: TeamsKeys;
@@ -623,6 +822,10 @@ export const channelResponse = async (
       requestId
     );
   }
+  // Meta checks the webhook it is subscribed to with a GET.
+  if (platform === "whatsapp" && request.method === "GET") {
+    return whatsAppSubscription(env, request);
+  }
   if (request.method !== "POST") {
     return errorResponse(
       405,
@@ -640,6 +843,9 @@ export const channelResponse = async (
   }
   if (platform === "slack") {
     return await slackResponse(request, env, body, ctx, handoff);
+  }
+  if (platform === "whatsapp") {
+    return await whatsAppResponse(request, env, body, ctx, handoff);
   }
   if (!(await verifiedTeamsRequest(env, request, body, teamsKeys))) {
     return new Response("Unauthorized", { status: 401 });

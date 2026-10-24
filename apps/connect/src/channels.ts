@@ -50,6 +50,13 @@ import { recordEvents } from "./audit.ts";
 // its bearer token, which connect swaps for the app's bot token
 // (`SLACK_BOT_TOKEN`); Slack's token never goes back to core.
 //
+// WhatsApp: only the Cloud API's messages endpoint of the client's own
+// business number (`https://graph.facebook.com/v<n>/<phone number id>/
+// messages`), posted, with the placeholder as its bearer token, which
+// connect swaps for the client's system user token
+// (`WHATSAPP_ACCESS_TOKEN`). Media, templates, the number's settings and
+// every other Graph path are refused, and so is another number's id.
+//
 // The token is cached in this isolate until shortly before it expires,
 // keyed by the bot's app, tenant and a hash of its secret, so rotating the
 // secret takes a new token at once. Only the token is cached, never a
@@ -152,6 +159,13 @@ const slackMethods: ReadonlyMap<string, { write: boolean }> = new Map([
   ["conversations.info", { write: false }],
 ]);
 
+/** Meta's Graph API, where WhatsApp's Cloud API is. */
+const whatsAppHost = "graph.facebook.com";
+
+/** A message sent from a business number: the one path WhatsApp needs. */
+const whatsAppMessagesPath =
+  /^\/v\d{1,3}\.\d{1,3}\/(?<number>\d{1,32})\/messages$/u;
+
 /** Methods that change something at the platform, recorded. */
 const writeMethods: ReadonlySet<string> = new Set(["POST", "PUT", "DELETE"]);
 
@@ -248,6 +262,7 @@ const statedOf = (
     url !== undefined &&
     (url.hostname === loginHost ||
       url.hostname === slackHost ||
+      url.hostname === whatsAppHost ||
       botConnectorHosts.has(url.hostname))
       ? url.hostname
       : "other",
@@ -891,6 +906,102 @@ const slackFetch = async (
 };
 
 /**
+ * Why a WhatsApp request is refused, or the client's token and its body:
+ * only the Cloud API's messages endpoint of the client's own number, over
+ * HTTPS, posted, with the placeholder as its token, within the size limit,
+ * and only while the client's number is set up.
+ */
+const checkedWhatsAppRequest = async (
+  env: Env,
+  request: Request,
+  url: URL
+): Promise<
+  { refused: RefusedReason } | { token: string; body: Uint8Array }
+> => {
+  if (
+    url.protocol !== "https:" ||
+    url.username !== "" ||
+    url.password !== "" ||
+    url.port !== "" ||
+    url.hostname !== whatsAppHost
+  ) {
+    return { refused: "host" };
+  }
+  const token = env.WHATSAPP_ACCESS_TOKEN;
+  const number = env.WHATSAPP_PHONE_NUMBER_ID;
+  if (
+    token === undefined ||
+    token === "" ||
+    number === undefined ||
+    number === ""
+  ) {
+    return { refused: "unconfigured" };
+  }
+  const named = whatsAppMessagesPath.exec(url.pathname)?.groups?.number;
+  if (named !== number || url.search !== "") {
+    return { refused: "path" };
+  }
+  if (request.method !== "POST") {
+    return { refused: "method" };
+  }
+  if (
+    request.headers.get("authorization") !==
+    `Bearer ${channelCredentialPlaceholder}`
+  ) {
+    return { refused: "credential" };
+  }
+  const body = await readCapped(request.body, maxChannelRequestBytes);
+  return body === undefined ? { refused: "too_large" } : { token, body };
+};
+
+/**
+ * A WhatsApp request: a message from the client's own number, sent on with
+ * the client's token, or refused (`checkedWhatsAppRequest`). Every one is
+ * a write, recorded as Teams' and Slack's are.
+ */
+const whatsAppFetch = async (
+  env: Env,
+  request: Request,
+  url: URL
+): Promise<Response> => {
+  const platform = "whatsapp";
+  const stated = statedOf(request.method, url);
+  const checked = await checkedWhatsAppRequest(env, request, url);
+  if ("refused" in checked) {
+    return await refuse(env, platform, checked.refused, stated);
+  }
+  const headers = new Headers();
+  for (const name of forwardedHeaders) {
+    const value = request.headers.get(name);
+    if (value !== null) {
+      headers.set(name, value);
+    }
+  }
+  // Sent as Slack's are: posted with the token, a short 429 waited out.
+  const sent = await sendToSlack(checked.token, url, headers, checked.body);
+  if (sent.response === undefined) {
+    log.warn("channel.failed", { platform, ...stated });
+    await record(env, { platform, outcome: "failed", ...stated });
+    return failed();
+  }
+  const { response, attempts } = sent;
+  const { status } = response;
+  log.info("channel.request", { platform, ...stated, status, attempts });
+  await record(env, {
+    platform,
+    outcome: response.ok ? "ok" : "failed",
+    ...stated,
+    status,
+    attempts: attempts > 1 ? attempts : undefined,
+  });
+  if (status >= 300 && status < 400 && status !== 304) {
+    await response.body?.cancel();
+    return failed();
+  }
+  return await passedBack(response);
+};
+
+/**
  * Sends a chat adapter's request on to its platform as the client's own
  * bot (`ChannelApi.channelFetch`), or refuses it.
  */
@@ -912,7 +1023,19 @@ export const channelFetch = async (
   if (!parsed.success) {
     return await refuse(env, named, "platform", statedOf(request.method, url));
   }
-  return parsed.data === "slack"
-    ? await slackFetch(env, request, url)
-    : await teamsFetch(env, request, url);
+  const sendingTo = parsed.data;
+  switch (sendingTo) {
+    case "slack": {
+      return await slackFetch(env, request, url);
+    }
+    case "whatsapp": {
+      return await whatsAppFetch(env, request, url);
+    }
+    case "teams": {
+      return await teamsFetch(env, request, url);
+    }
+    default: {
+      return sendingTo satisfies never;
+    }
+  }
 };
