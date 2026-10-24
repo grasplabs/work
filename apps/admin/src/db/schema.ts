@@ -680,7 +680,10 @@ export const staffAlerts = sqliteTable(
   "staff_alerts",
   {
     clientId: text("client_id").notNull(),
-    /** The alert's kind, such as `teams_bot_secret_expiring`. */
+    /**
+     * The alert's kind, such as `test`, and its subject when it has one:
+     * `teams_bot_secret_expiring/2027-04-30/30` (src/alerts.ts).
+     */
     kind: text().notNull(),
     sentAt: timestamp("sent_at").notNull(),
   },
