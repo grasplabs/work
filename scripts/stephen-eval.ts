@@ -11,7 +11,7 @@
  * JSON line, `STEPHEN_MODEL_REPORT {...}`.
  */
 import { execFileSync } from "node:child_process";
-import { appendFileSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync } from "node:fs";
 
 import { z } from "zod";
 
@@ -152,10 +152,13 @@ const changed = (base: string): void => {
 
 /** Prints the report in `log`; fails when a hard rule broke or there is none. */
 const report = (log: string): void => {
-  const found = reportIn(readFileSync(log, "utf-8"));
+  // No log at all: the run never started (its secrets didn't load, say).
+  const found = existsSync(log)
+    ? reportIn(readFileSync(log, "utf-8"))
+    : undefined;
   if (found === undefined) {
     console.error(
-      "The run printed no report: it stopped before its cases ran."
+      "The run printed no report: it stopped before its cases ran, or never started."
     );
     process.exitCode = 1;
     return;
