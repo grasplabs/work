@@ -19,6 +19,8 @@ import {
 import type { Conversation } from "./connect-own.ts";
 import type { ChannelHandoff, ChannelMessage } from "./door.ts";
 import { checkOf, turnHeldWrites } from "./held.ts";
+import { countAnswered, countSignal } from "./signals.ts";
+import type { ChannelSignal } from "./signals.ts";
 import { teamsAdapter } from "./teams.ts";
 import { channelLocales, languageOf, say } from "./words.ts";
 import type { ChannelLocale } from "./words.ts";
@@ -77,6 +79,38 @@ const appLocale = (raw: unknown): ChannelLocale => {
     .data?.locale?.split("-")[0]
     ?.toLowerCase();
   return channelLocales.find((each) => each === language) ?? "en";
+};
+
+/** The count a refused or failed turn's line stands for (signals.ts). */
+const signalOfLine: Readonly<Record<RefusedLine, ChannelSignal | null>> = {
+  budget: "over_budget",
+  busy: "busy",
+  failed: "failed",
+  // Someone removed since the door let them in: nothing about Stephen.
+  removed: null,
+};
+
+/**
+ * Posts `content` in `thread`, counting a post the platform didn't take
+ * (`send_failed`), and one it refused as forbidden as the app uninstalled
+ * (`uninstalled`: Teams answers 403 to a bot no longer in the chat, which
+ * its adapter throws as a `PermissionError`). Throws what posting threw.
+ */
+const postIn = async (
+  env: Env,
+  platform: string,
+  thread: Conversation,
+  content: Parameters<Conversation["post"]>[0]
+): Promise<void> => {
+  try {
+    await thread.post(content);
+  } catch (error) {
+    await countSignal(env, platform, "send_failed");
+    if (error instanceof Error && error.name === "PermissionError") {
+      await countSignal(env, platform, "uninstalled");
+    }
+    throw error;
+  }
 };
 
 /** Shows typing in `thread` until the returned function is called. */
@@ -204,6 +238,7 @@ const answerOne = async (
   text: string,
   locale: ChannelLocale
 ): Promise<void> => {
+  const startedAt = Date.now();
   const stopTyping = typingIn(thread);
   // Streamed only in a direct message the platform's SDK handed over.
   const streaming =
@@ -231,7 +266,11 @@ const answerOne = async (
       line,
       ...errorFields(error),
     });
-    await thread.post(say(line, locale));
+    const signal = signalOfLine[line];
+    if (signal !== null) {
+      await countSignal(env, platform, signal);
+    }
+    await postIn(env, platform, thread, say(line, locale));
     return;
   }
   stopTyping();
@@ -246,13 +285,23 @@ const answerOne = async (
   }
   if (!answered || final === "") {
     log.warn("channel.turn_failed", { platform, outcome: answer.outcome });
-    await thread.post(say("failed", locale));
+    await countSignal(env, platform, "failed");
+    await postIn(env, platform, thread, say("failed", locale));
     return;
+  }
+  // Timed to the answer the person has, as they wait for it: its stream's
+  // last words, or the post of it whole.
+  const timed = async () => {
+    await countAnswered(env, platform, Date.now() - startedAt);
+  };
+  if (streamed) {
+    await timed();
   }
   const origin = signInConfig(env)?.origin;
   if (origin === undefined) {
     if (!streamed) {
-      await thread.post(final);
+      await postIn(env, platform, thread, final);
+      await timed();
     }
     return;
   }
@@ -289,7 +338,13 @@ const answerOne = async (
     );
   };
   if (!streamed) {
-    await thread.post(answerCard({ locale, text: final, sources, chatUrl }));
+    await postIn(
+      env,
+      platform,
+      thread,
+      answerCard({ locale, text: final, sources, chatUrl })
+    );
+    await timed();
     await held();
     await offer();
     return;

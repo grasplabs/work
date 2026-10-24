@@ -30,6 +30,8 @@ import { listReleases } from "../releases/queries.ts";
 import { clientHistory, clientSettings } from "./queries.ts";
 import type { HistoryEntry } from "./queries.ts";
 import type { TeamsBot } from "./teams-bot.ts";
+import type { WatchedSignals } from "./watch-signals.ts";
+import { lastWatched } from "./watch.ts";
 
 /** How many of a client's deploys the section lists: the latest. */
 export const setupDeployLimit = 20;
@@ -103,6 +105,11 @@ export interface ClientSetup {
    * value, sealed or not, so nothing of it reaches the page.
    */
   sealedSecrets: SetupSealedSecret[];
+  /**
+   * What the admin's watch last read of how its Stephen fares
+   * (src/clients/watch.ts), and when; null before it read any.
+   */
+  watched: { readAt: Date; signals: WatchedSignals } | null;
   /** The newest first: its latest `setupDeployLimit`. */
   deploys: SetupDeploy[];
   /** Whether it has older deploys than those. */
@@ -293,16 +300,25 @@ export const getClientSetup = async (
     })
     .from(clients)
     .where(eq(clients.id, clientId));
-  const [settings, sealedSecrets, deploys, workers, listed, rollout, history] =
-    await Promise.all([
-      clientSettings(db, clientId),
-      sealedSecretsOf(db, clientId),
-      deploysOf(db, clientId),
-      workersOf(db, clientId),
-      listReleases(db),
-      rolloutOf(db, clientId),
-      clientHistory(db, clientId),
-    ]);
+  const [
+    settings,
+    sealedSecrets,
+    deploys,
+    workers,
+    listed,
+    rollout,
+    history,
+    watched,
+  ] = await Promise.all([
+    clientSettings(db, clientId),
+    sealedSecretsOf(db, clientId),
+    deploysOf(db, clientId),
+    workersOf(db, clientId),
+    listReleases(db),
+    rolloutOf(db, clientId),
+    clientHistory(db, clientId),
+    lastWatched(env, clientId),
+  ]);
   // Core's release is the one its people meet.
   const runs =
     workers.find(({ worker }) => worker === "core")?.releaseId ?? null;
@@ -314,6 +330,7 @@ export const getClientSetup = async (
     teamsBot: settings?.teamsBot ?? null,
     configPending: settings?.configPending ?? false,
     sealedSecrets,
+    watched,
     deploys: deploys.slice(0, setupDeployLimit),
     moreDeploys: deploys.length > setupDeployLimit,
     workers,

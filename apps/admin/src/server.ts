@@ -19,8 +19,10 @@
  *
  * The cron imports newly published releases (src/releases/import.ts);
  * the digest's own cron posts the admin's morning digest to Discord
- * (src/admin/discord-digest.ts), and the expiry cron warns staff of Teams
- * bot secrets about to expire (src/clients/teams-bot-expiry.ts).
+ * (src/admin/discord-digest.ts), the expiry cron warns staff of Teams
+ * bot secrets about to expire (src/clients/teams-bot-expiry.ts), and the
+ * watch's reads how Stephen fares at every client every hour
+ * (src/clients/watch.ts).
  * `ProvisionClient` is the Workflow that onboards a client
  * (src/provision/workflow.ts), `Rollout` the one that rolls a release
  * out to clients (src/rollout/workflow.ts), `RolloutClient` deploys one
@@ -48,6 +50,7 @@ import {
   expiryCron,
   warnOfExpiringSecrets,
 } from "./clients/teams-bot-expiry.ts";
+import { watchCron, watchStephen } from "./clients/watch.ts";
 import { adminDatabase } from "./db/act.ts";
 import { movedPageRedirect } from "./moved-pages.ts";
 import { importReleases } from "./releases/import.ts";
@@ -94,6 +97,10 @@ export default {
     }
     if (controller.cron === expiryCron) {
       await warnOfExpiringSecrets(env, new Date(controller.scheduledTime));
+      return;
+    }
+    if (controller.cron === watchCron) {
+      await watchStephen(env, new Date(controller.scheduledTime));
       return;
     }
     await importReleases(env.RELEASES, adminDatabase(env.DB));

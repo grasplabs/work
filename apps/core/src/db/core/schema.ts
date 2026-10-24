@@ -306,6 +306,27 @@ export const channelConversations = sqliteTable(
 );
 
 /**
+ * How Stephen fared in the chat apps, counted by the hour
+ * (src/channels/signals.ts): requests refused at the door, turns by how
+ * they ended, answer times by bucket, sends that failed. Counts only,
+ * never who or what; kept a week, for Grasp's admin to watch.
+ */
+export const channelSignals = sqliteTable(
+  "channel_signals",
+  {
+    /** The hour it counts, as its first millisecond. */
+    hour: timestamp("hour").notNull(),
+    platform: text().notNull(),
+    /** Such as `refused`, `answered` or `answered_within_8000`. */
+    signal: text().notNull(),
+    count: integer().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.hour, table.platform, table.signal] }),
+  ]
+);
+
+/**
  * Part of the organization plugin's model. Invitations aren't offered: people
  * join by signing in with the deployment's IdP.
  */

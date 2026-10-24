@@ -74,8 +74,11 @@
   // minutes; on weekday mornings, posts the admin's digest to Discord
   // (src/admin/discord-digest.ts, `digestCron`); every morning, warns
   // staff of Teams bot secrets about to expire
-  // (src/clients/teams-bot-expiry.ts, `expiryCron`).
-  "triggers": { "crons": ["*/5 * * * *", "0 6,7 * * 1-5", "15 7 * * *"] },
+  // (src/clients/teams-bot-expiry.ts, `expiryCron`); every hour, watches
+  // Stephen at every client (src/clients/watch.ts, `watchCron`).
+  "triggers": {
+    "crons": ["*/5 * * * *", "0 6,7 * * 1-5", "15 7 * * *", "45 * * * *"],
+  },
   // Onboards a client (src/provision/workflow.ts): an instance per attempt,
   // each claimed in D1 first (src/runners.ts), so two runs for one
   // client can't overlap.

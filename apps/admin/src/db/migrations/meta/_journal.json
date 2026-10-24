@@ -176,6 +176,13 @@
       "when": 1792876385365,
       "tag": "0024_staff_alerts",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1792884156264,
+      "tag": "0025_client_watch",
+      "breakpoints": true
     }
   ]
 }

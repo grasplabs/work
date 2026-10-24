@@ -51,6 +51,7 @@ import type { ReactNode } from "react";
 import { z } from "zod";
 
 import type { ClientSetup, SetupDeploy } from "../clients/setup.ts";
+import { overBars } from "../clients/watch-signals.ts";
 import type { DeployStep } from "../deploy/deploy.ts";
 import { ClientHosting } from "../hosting/client-hosting.tsx";
 import type { ClientHostingView } from "../hosting/placement.ts";
@@ -977,6 +978,76 @@ const HostingSection = ({
     </SetupSection>
   ) : null;
 
+/** Milliseconds as seconds, to one decimal. */
+const secondsOf = (ms: number | null): string =>
+  ms === null ? "No answers to time" : `up to ${(ms / 1000).toFixed(1)} s`;
+
+/**
+ * How its Stephen fares in the chat apps, as the admin's watch last read
+ * it (src/clients/watch.ts): a line a signal, the ones over their bar
+ * marked, as staff were told of them.
+ */
+const StephenWatched = ({ setup }: { setup: ClientSetup }) => {
+  const { watched } = setup;
+  if (watched === null) {
+    return null;
+  }
+  const { signals, readAt } = watched;
+  const over = overBars(signals);
+  return (
+    <SetupSection
+      description={`Over the last ${signals.hours} hours, as the admin's hourly watch read it at ${formatTime(readAt)}. Counts only. Each signal over its bar was posted to the staff alerts' channel.`}
+      title="Stephen"
+    >
+      <Facts
+        rows={[
+          { label: "Answered", value: String(signals.answered) },
+          {
+            label: "Answer time",
+            value: `Median ${secondsOf(signals.p50Ms)}, 9 in 10 ${secondsOf(signals.p90Ms)}`,
+            attention: over.has("stephen_slow"),
+          },
+          {
+            label: "Turns failed",
+            value: String(signals.failed),
+            attention: over.has("stephen_failing"),
+          },
+          {
+            label: "Over budget",
+            value: String(signals.overBudget),
+            attention: over.has("stephen_over_budget"),
+          },
+          {
+            label: "Busy",
+            value: String(signals.busy),
+            attention: over.has("stephen_busy"),
+          },
+          {
+            label: "Requests refused",
+            value: String(signals.refused),
+            attention: over.has("stephen_refused"),
+          },
+          {
+            label: "Sends failed",
+            value: String(signals.sendFailed),
+            attention: over.has("stephen_sends_failing"),
+          },
+          {
+            label: "Uninstalled",
+            value: String(signals.uninstalled),
+            attention: over.has("stephen_uninstalled"),
+          },
+          {
+            label: "Need a new sign-in",
+            value: `${signals.companyAgain} of the company's connections, ${signals.personalAgain} of people's own`,
+            attention: over.has("stephen_connections_again"),
+          },
+        ]}
+      />
+    </SetupSection>
+  );
+};
+
 const Status = ({
   clientId,
   setup,
@@ -1032,6 +1103,7 @@ const Status = ({
         clientId={clientId}
       />
     </SetupSection>
+    <StephenWatched setup={setup} />
     <SetupSection
       description="From its address to where its data is. Everything after the router is in the company’s own Cloudflare account, in the EU."
       title="How it runs"
