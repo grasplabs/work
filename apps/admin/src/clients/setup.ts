@@ -29,6 +29,7 @@ import type { ProvisioningView } from "../provision/queries.ts";
 import { listReleases } from "../releases/queries.ts";
 import { clientHistory, clientSettings } from "./queries.ts";
 import type { HistoryEntry } from "./queries.ts";
+import type { TeamsBot } from "./teams-bot.ts";
 import type { WatchedSignals } from "./watch-signals.ts";
 import { lastWatched } from "./watch.ts";
 
@@ -94,6 +95,8 @@ export interface ClientSetup {
   signIn: ClientSignInRecord | null;
   /** Whether a `SIGN_IN` setting replaces that on deploy. */
   signInOverridden: boolean;
+  /** Its own Teams bot (src/clients/teams-bot.ts); null when it has none. */
+  teamsBot: TeamsBot | null;
   /** Whether a change to what a deploy sets on its core waits for its next deploy. */
   configPending: boolean;
   /**
@@ -157,6 +160,7 @@ const byHand: ReadonlySet<string> = new Set([
   "client.rotate_secrets",
   "client.sign_in",
   "client.sealed_secret",
+  "client.teams_bot",
   "client.apply_settings",
   "client.stripe_customer",
   "client.rooms_project",
@@ -323,6 +327,7 @@ export const getClientSetup = async (
     account: account ?? null,
     signIn: settings?.signIn ?? null,
     signInOverridden: settings?.signInOverridden ?? false,
+    teamsBot: settings?.teamsBot ?? null,
     configPending: settings?.configPending ?? false,
     sealedSecrets,
     watched,

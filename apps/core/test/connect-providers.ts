@@ -171,12 +171,35 @@ export const botConnectorMembersUrl =
   "https://bot-connector-control.test/members";
 
 /**
+ * Where tests have Teams refuse streamed messages in a conversation: POST
+ * `{ refuse }`, the conversation's id.
+ */
+export const botConnectorStreamsUrl =
+  "https://bot-connector-control.test/streams";
+
+/**
  * Where tests read what reached the Bot Connector, in order: `{ posted,
  * asked }`, the activities it took (`{ conversation, activity }` each) and
  * the roster reads (`<conversation id> <user id>` each).
  */
 export const botConnectorPostedUrl =
   "https://bot-connector-control.test/posted";
+
+/**
+ * The client's Slack app, as core (`SLACK_SIGNING_SECRET`) and connect
+ * (`SLACK_BOT_TOKEN`) are set up with it in the tests.
+ */
+export const slackApp = {
+  signingSecret: "acme-slack-signing-secret-for-tests",
+  botToken: "acme-slack-bot-token-for-tests",
+  botUserId: "UBOTSTEPHEN",
+} as const;
+
+/**
+ * Where tests read what reached Slack's Web API, in order: each call's
+ * method, its form or JSON fields, and whether it carried the bot's token.
+ */
+export const slackPostedUrl = "https://slack-control.test/posted";
 
 /**
  * Where tests remove the bot from a conversation, as uninstalling its app
@@ -222,6 +245,28 @@ const botFramework = (${botFrameworkKeysFake.toString()})();
 let botFrameworkKeys = [];
 let botFrameworkSharedKey = null;
 const botConnector = (${botConnectorFake.toString()})(${JSON.stringify(teamsBot)});
+const slackCalls = [];
+/** Slack's Web API, as far as the door's adapter calls it. */
+const slackAnswer = async (request, url) => {
+  const method = url.pathname.slice("/api/".length);
+  const text = await request.text();
+  const type = request.headers.get("content-type") ?? "";
+  const fields = type.includes("json")
+    ? JSON.parse(text)
+    : Object.fromEntries(new URLSearchParams(text));
+  slackCalls.push({
+    method,
+    fields,
+    authorized: request.headers.get("authorization") === ${JSON.stringify(`Bearer ${slackApp.botToken}`)},
+  });
+  if (method === "auth.test") {
+    return Response.json({ ok: true, user_id: ${JSON.stringify(slackApp.botUserId)}, bot_id: "BSTEPHEN", team_id: "TACME" });
+  }
+  if (method === "chat.postMessage") {
+    return Response.json({ ok: true, channel: fields.channel, ts: String(Date.now() / 1000) });
+  }
+  return Response.json({ ok: true });
+};
 const landscape = { grants: [], apps: [], people: [], throttle: null, failing: false };
 const directory = { users: [] };
 const hibob = { key: null, employees: [] };
@@ -432,6 +477,12 @@ export default {
     if (url.hostname === "registry.npmjs.org") {
       return await npm.answer(request);
     }
+    if (url.hostname === "slack.com") {
+      return await slackAnswer(request, url);
+    }
+    if (url.href === ${JSON.stringify(slackPostedUrl)}) {
+      return Response.json(slackCalls);
+    }
     const fromMicrosoft = await botConnector.answer(request);
     if (fromMicrosoft !== undefined) {
       return fromMicrosoft;
@@ -439,6 +490,11 @@ export default {
     if (request.method === "POST" && url.href === ${JSON.stringify(botConnectorMembersUrl)}) {
       const { members } = await request.json();
       botConnector.setMembers(members);
+      return new Response(null, { status: 204 });
+    }
+    if (request.method === "POST" && url.href === ${JSON.stringify(botConnectorStreamsUrl)}) {
+      const { refuse } = await request.json();
+      botConnector.refuseStreams(refuse);
       return new Response(null, { status: 204 });
     }
     if (request.method === "POST" && url.href === ${JSON.stringify(botConnectorUninstallUrl)}) {

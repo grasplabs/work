@@ -25,7 +25,7 @@ import type { ReadRecord, Allowed } from "./authorize.ts";
 import { allowedFor } from "./authorize.ts";
 import { readableCollection } from "./collections.ts";
 import { portsOf } from "./ports.ts";
-import { nearestCollectionsMax, nearestDetail } from "./usage-tally.ts";
+import { nearestCollectionsMax, nearestDetail } from "./search-detail.ts";
 
 // Full-text search over sections, in two FTS5 indexes kept by triggers on
 // the sections table (see the migrations `0001_search.sql` and

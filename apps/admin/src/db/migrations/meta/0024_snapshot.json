@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "342d44fb-a504-40fb-ab4d-1bfe4583eb9c",
-  "prevId": "275b664d-00d3-449d-97e0-18fb85391deb",
+  "id": "089fda8b-c6a7-490c-8712-6902872cef7a",
+  "prevId": "8e147996-0a27-43c7-9f1f-0841cd85d30b",
   "tables": {
     "audit_events": {
       "name": "audit_events",
@@ -717,51 +717,6 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "client_watch": {
-      "name": "client_watch",
-      "columns": {
-        "client_id": {
-          "name": "client_id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "read_at": {
-          "name": "read_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "signals": {
-          "name": "signals",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "client_watch_client_id_clients_id_fk": {
-          "name": "client_watch_client_id_clients_id_fk",
-          "tableFrom": "client_watch",
-          "tableTo": "clients",
-          "columnsFrom": [
-            "client_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
     "client_workers": {
       "name": "client_workers",
       "columns": {
@@ -927,6 +882,13 @@
         },
         "sign_in": {
           "name": "sign_in",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "teams_bot": {
+          "name": "teams_bot",
           "type": "text",
           "primaryKey": false,
           "notNull": false,

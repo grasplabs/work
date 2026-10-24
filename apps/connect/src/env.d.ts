@@ -73,6 +73,12 @@ interface __BaseEnv_Env {
   TEAMS_BOT_TENANT_ID?: string;
   TEAMS_BOT_SECRET?: string;
   /**
+   * The client's own Slack app's bot token (`xoxb-…`, src/channels.ts),
+   * set by hand on staging until the console seals it per client. While it
+   * is unset, every Slack request is refused as `unconfigured`.
+   */
+  SLACK_BOT_TOKEN?: string;
+  /**
    * `none` on workerd and on-prem, which have no Cloudflare jurisdiction:
    * the clock's object is then taken from the plain namespace
    * (src/clock.ts). Unset or any other value means the EU. Never set in
