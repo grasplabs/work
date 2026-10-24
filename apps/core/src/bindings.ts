@@ -26,6 +26,7 @@ import type { KnowledgeBinding } from "./knowledge/tools-binding.ts";
 import { authorize, grantedPermissions } from "./permissions.ts";
 import { isRestricted } from "./restricted.ts";
 import type { WorkContext } from "./restricted.ts";
+import { mailboxesFor } from "./shared-mailboxes.ts";
 import { requireToolClassOn } from "./tool-classes.ts";
 import { stampedMail } from "./workflows/mail-stamps.ts";
 import type { StampingRun } from "./workflows/mail-stamps.ts";
@@ -95,10 +96,12 @@ export const signedCall = async (
   decision?: CapabilityDecision
 ) => {
   await authorize(env, authority, connection, action, permissionId, context);
+  // Its context first: one that doesn't exist, or isn't its caller's,
+  // refuses the call whatever it is.
+  const restricted = await isRestricted(env, authority, context);
   // The chat's agent may call only the classes the company turned on for
   // its person: one that is off never reaches connect (tool-classes.ts).
-  await requireToolClassOn(env, authority, connection, action);
-  const restricted = await isRestricted(env, authority, context);
+  const classed = await requireToolClassOn(env, authority, connection, action);
   const scope = {
     connectionId: connection.connectionId,
     resource: connection.resource,
@@ -121,6 +124,14 @@ export const signedCall = async (
       },
       context,
       decision,
+      // The chat's agent reaches its person's own mailbox and those its
+      // company pointed it at for them, no other (shared-mailboxes.ts).
+      ...(authority.subject.type === "agent"
+        ? { mailboxes: await mailboxesFor(env, authority.onBehalfOf) }
+        : {}),
+      ...(classed.resources === undefined
+        ? {}
+        : { resources: classed.resources }),
     }
   );
   return { capability, scope };

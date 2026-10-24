@@ -10,6 +10,7 @@ import {
 } from "@grasp-os/shared/connect";
 import type {
   CompanyToolClass,
+  ConnectionOwner,
   ToolClass,
   ToolClassAudience,
   ToolClassSetting,
@@ -17,12 +18,18 @@ import type {
 import type { PermissionObject, Authority } from "@grasp-os/shared/permissions";
 import { requireAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { and, eq, or, sql } from "drizzle-orm";
+import { and, eq, ne, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
-import { teamMembers, teams, toolClassSettings } from "./db/core/schema.ts";
+import {
+  appPointers,
+  sharedMailboxPointers,
+  teamMembers,
+  teams,
+  toolClassSettings,
+} from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
 import { nativeToolClasses } from "./native-tool-classes.gen.ts";
 
@@ -65,10 +72,10 @@ const nativeClasses: ReadonlyMap<
 );
 
 /** A stored row's teams: a JSON array of team IDs, or nothing it can read. */
-const storedTeamsSchema = z.array(z.string());
+export const storedTeamsSchema = z.array(z.string());
 
 /** A stored row as the audience it records, or `undefined` if unreadable. */
-const audienceOf = (row: {
+export const audienceOf = (row: {
   who: string;
   teams: string;
 }): ToolClassAudience | undefined => {
@@ -126,7 +133,7 @@ export const classesOn = async (env: Env): Promise<CompanyToolClass[]> => {
 };
 
 /** `audience` as stored: its `who`, and its teams sorted, each once. */
-const storedOf = (
+export const storedOf = (
   audience: ToolClassAudience
 ): { who: ToolClassAudience["who"]; teams: string } => ({
   who: audience.who,
@@ -134,6 +141,21 @@ const storedOf = (
     audience.who === "teams" ? [...new Set(audience.teams)].toSorted() : []
   ),
 });
+
+/**
+ * Whether the company points Stephen at a shared mailbox for anyone
+ * (shared-mailboxes.ts): Microsoft 365 is then asked for shared
+ * mailboxes' rights too.
+ */
+export const anyMailboxPointed = async (env: Env): Promise<boolean> => {
+  const row = await drizzle(env.DB)
+    .select({ mailbox: sharedMailboxPointers.mailbox })
+    .from(sharedMailboxPointers)
+    .where(ne(sharedMailboxPointers.who, "nobody"))
+    .limit(1)
+    .get();
+  return row !== undefined;
+};
 
 /**
  * Turns `toolClass` on for everyone or some teams, or off. Admins only, and
@@ -224,7 +246,10 @@ export const setToolClass = async (
     // made before them isn't asked again for a class that was on already.
     // Asked even when nothing changed here, so an admin who sets it again
     // after a failure here gets it done.
-    await env.CONNECT.requireClassRights({ classes: [parsedClass.data] });
+    await env.CONNECT.requireClassRights({
+      classes: [parsedClass.data],
+      sharedMailbox: await anyMailboxPointed(env),
+    });
   }
 };
 
@@ -245,7 +270,7 @@ const audienceNow = async (
 };
 
 /** Whether `audience` takes in the person `userId`. */
-const takesIn = async (
+export const takesIn = async (
   env: Env,
   audience: ToolClassAudience,
   userId: string
@@ -267,6 +292,94 @@ const takesIn = async (
 };
 
 /**
+ * What core signs into the capability of a call it let through: for a read
+ * in a company app pointed at within some resources, those resources.
+ */
+export interface ClassedCall {
+  resources?: string[];
+}
+
+/**
+ * The pointer at the company app `connectionId` that takes in the person
+ * `userId` (app-pointers.ts), if there is one: the resources it names.
+ */
+export const appPointerFor = async (
+  env: Env,
+  connectionId: string,
+  userId: string
+): Promise<{ resources: string[] } | undefined> => {
+  const row = await drizzle(env.DB)
+    .select()
+    .from(appPointers)
+    .where(eq(appPointers.connectionId, connectionId))
+    .get();
+  const audience = row === undefined ? undefined : audienceOf(row);
+  if (
+    row === undefined ||
+    audience === undefined ||
+    !(await takesIn(env, audience, userId))
+  ) {
+    return undefined;
+  }
+  let resources: unknown;
+  try {
+    resources = JSON.parse(row.resources);
+  } catch {
+    // Unreadable: no pointer, never more than the admin chose.
+    return undefined;
+  }
+  const parsed = storedTeamsSchema.safeParse(resources);
+  return parsed.success ? { resources: parsed.data } : undefined;
+};
+
+/**
+ * Refuses the chat's agent's call of a company app's tool (a Composio
+ * one) whose class is off for its person: by the class connect takes the
+ * tool to be (`ConnectionOwner.toolClasses`), `connect.class_unknown` for
+ * one it doesn't offer. Reading there is Read company, which an admin
+ * turns on app by app, by pointing the agent at it (`appPointerFor`):
+ * `connect.app_not_pointed` without a pointer for its person. The rest
+ * follow the company's classes.
+ */
+const requireAppClassOn = async (
+  env: Env,
+  authority: Authority,
+  owner: ConnectionOwner,
+  action: string
+): Promise<ClassedCall> => {
+  const toolClass =
+    owner.toolClasses !== undefined && Object.hasOwn(owner.toolClasses, action)
+      ? owner.toolClasses[action]
+      : undefined;
+  if (toolClass === undefined) {
+    throw connectErrors.create("connect.class_unknown");
+  }
+  if (toolClass === "read-company") {
+    const pointer = await appPointerFor(env, owner.id, authority.onBehalfOf);
+    if (pointer === undefined) {
+      throw connectErrors.create("connect.app_not_pointed");
+    }
+    return pointer.resources.length === 0
+      ? {}
+      : { resources: pointer.resources };
+  }
+  const audience = await audienceNow(env, toolClass);
+  if (!(await takesIn(env, audience, authority.onBehalfOf))) {
+    throw connectErrors.create("connect.class_off");
+  }
+  return {};
+};
+
+/** A mail tool's class in its person's own mailbox. */
+const inOwnMailbox: Readonly<Record<CompanyToolClass, CompanyToolClass>> = {
+  "read-own": "read-own",
+  "read-company": "read-own",
+  "change-own": "change-own",
+  "change-company": "change-own",
+  "reach-others": "reach-others",
+};
+
+/**
  * Refuses a call of the chat's agent whose class is off for the person it
  * acts for, before core signs anything for connect: `connect.class_off`.
  * A native tool missing from the generated table, or classed `never`, is
@@ -279,18 +392,16 @@ export const requireToolClassOn = async (
   authority: Authority,
   connection: ConnectionObject,
   action: string
-): Promise<void> => {
+): Promise<ClassedCall> => {
   if (authority.subject.type !== "agent") {
-    return;
+    return {};
   }
   const [owner] = await env.CONNECT.connectionOwners([connection.connectionId]);
   if (owner === undefined) {
     throw connectErrors.create("connect.connection_not_found");
   }
-  // Composio's tools get their class when their contract is generated
-  // (GRA-762); until then they run as their admin allowed them.
   if (owner.source === "composio") {
-    return;
+    return await requireAppClassOn(env, authority, owner, action);
   }
   const toolClass = nativeClasses.get(owner.provider)?.get(action);
   if (toolClass === undefined) {
@@ -299,8 +410,17 @@ export const requireToolClassOn = async (
   if (toolClass === "never") {
     throw connectErrors.create("connect.class_off");
   }
-  const audience = await audienceNow(env, toolClass);
+  // A Microsoft 365 mail tool takes any mailbox the account may open: the
+  // mailbox it reaches is checked in connect, which knows it (its own, or
+  // one the company pointed the agent at: shared-mailboxes.ts), so here
+  // it has the class it has in the person's own mailbox.
+  const mailTool = owner.provider === "microsoft" && action.startsWith("mail.");
+  const audience = await audienceNow(
+    env,
+    mailTool ? inOwnMailbox[toolClass] : toolClass
+  );
   if (!(await takesIn(env, audience, authority.onBehalfOf))) {
     throw connectErrors.create("connect.class_off");
   }
+  return {};
 };

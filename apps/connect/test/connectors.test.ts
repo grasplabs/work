@@ -486,12 +486,12 @@ describe("a native connector", () => {
     expect(api.sent).toStrictEqual([]);
   });
 
-  it("is what each provider's connections run, with the scopes connect asks for when every class is on", () => {
+  it("is what each provider's connections run, with the scopes connect asks for when every class is on and a shared mailbox pointed at", () => {
     for (const config of Object.values(providerConfigs)) {
       const connector = nativeConnector(config.server);
       expect(connector?.manifest.provider).toBe(config.id);
       expect(
-        rightsFor(config.id, companyToolClasses) ?? config.scopes
+        rightsFor(config.id, companyToolClasses, true) ?? config.scopes
       ).toStrictEqual(
         expect.arrayContaining([...(connector?.manifest.scopes ?? [])])
       );

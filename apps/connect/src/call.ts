@@ -21,6 +21,7 @@ import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
+import { requirePointedResource } from "./app-pointers.ts";
 import { changeOf } from "./changes.ts";
 import type { CallChange } from "./changes.ts";
 import {
@@ -42,6 +43,7 @@ import {
   scopeOf,
 } from "./idempotency.ts";
 import type { Repeat, Row, StoredAnswer } from "./idempotency.ts";
+import { requirePointedMailbox } from "./mailboxes.ts";
 import { McpError } from "./mcp.ts";
 import type {
   McpServer,
@@ -881,6 +883,8 @@ export const carryOut = async (
   progress.sideEffect = sideEffect;
   requireAllowedEffect(claims, sideEffect);
   checkResourceScope(resource, tool, input);
+  requirePointedMailbox(claims, connection, call.action, tool, input);
+  requirePointedResource(claims, connection, call.action, input);
   if (recovering !== undefined) {
     // Recovered only as the call itself would run now: every check above
     // has passed again (the capability core signed for this caller now,
