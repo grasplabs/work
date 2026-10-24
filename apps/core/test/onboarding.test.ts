@@ -108,6 +108,9 @@ describe("the admin's onboarding", () => {
     await expect(outcome(api.onboarding.saveRoster(roster))).resolves.toBe(
       "role.forbidden"
     );
+    await expect(outcome(api.onboarding.confirmRoster(roster))).resolves.toBe(
+      "role.forbidden"
+    );
   });
 
   it("refuses what isn't a roster: someone in no team, a lead from another team, too many people", async () => {
@@ -340,6 +343,49 @@ describe("Grasp's staff in the onboarding", () => {
     ]);
   });
 
+  it("send the links already due as the admin plans them, from a moment that has passed", async () => {
+    const { api } = await signedInApi(idp, "admin");
+    const staff = await asStaff();
+    const store = onboardingStore(env);
+    const run = crypto.randomUUID().slice(0, 8);
+    const [lead, member, alone] = [`lea-${run}`, `sam-${run}`, `oli-${run}`];
+    await api.onboarding.confirmRoster({
+      teams: [
+        { id: `sales-${run}`, name: "Sales", lead },
+        { id: `ops-${run}`, name: "Ops", lead: null },
+      ],
+      people: [
+        person(lead, `sales-${run}`),
+        person(member, `sales-${run}`),
+        person(alone, `ops-${run}`),
+      ],
+    });
+    // Agreed first, with the interviews a week off: nothing is due yet.
+    const weekOn = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    await api.onboarding.savePlan({
+      start: weekOn.toISOString().slice(0, 10),
+      days: 14,
+    });
+    await staff.onboardingStaff.resume();
+    await staff.onboardingStaff.setAgreements({
+      processing: true,
+      assessment: true,
+      council: "none",
+    });
+    // Then today, from its first moment: the lead's and Ops' are due, and go.
+    await api.onboarding.savePlan({
+      start: today(),
+      days: 14,
+      at: `${today()}T00:00:00.000Z`,
+    });
+    const sent = await store.sentLinks();
+    expect(
+      [lead, member, alone].filter((id) =>
+        sent.some(({ person: one }) => one === id)
+      )
+    ).toStrictEqual([lead, alone]);
+  });
+
   it("put every change in the audit log, as who made it, with no name in it", async () => {
     const { api, userId } = await signedInApi(idp, "admin");
     const staff = await asStaff();
@@ -366,6 +412,85 @@ describe("Grasp's staff in the onboarding", () => {
     });
     expect(ours[2]?.actor.type).toBe("staff");
     expect(textOf(ours)).not.toContain(sentinel);
+  });
+});
+
+/** Three weeks before `now`: past the days a team's people wait for their lead. */
+const weeksAgo = (now: string) =>
+  new Date(Date.parse(now) - 21 * 86_400_000).toISOString().slice(0, 10);
+
+/** Sales, led by Lea, with Sam: the list as the admin first confirmed it. */
+const confirmedFirst: RosterInput = {
+  teams: [{ id: "sales", name: "Sales", lead: "lea" }],
+  people: [person("lea", "sales"), person("sam", "sales")],
+};
+
+/** The list shared again: Sam's job is new, Sue is new in Sales, and Ops is new, without a lead. */
+const sharedAgain: RosterInput = {
+  teams: [...confirmedFirst.teams, { id: "ops", name: "Ops", lead: null }],
+  people: [
+    person("lea", "sales"),
+    { ...person("sam", "sales"), title: "Account manager" },
+    person("sue", "sales"),
+    person("oli", "ops"),
+    person("ona", "ops"),
+  ],
+};
+
+describe("a list shared again while the plan runs", () => {
+  it("sends nobody new on it a link until the admin confirms the organization, and then each team as it goes", async () => {
+    const { api } = await signedInApi(idp, "admin");
+    const staff = await asStaff();
+    const store = onboardingStore(env);
+    const now = new Date().toISOString();
+    await api.onboarding.confirmRoster(confirmedFirst);
+    // Moved back in the store: core plans from today on.
+    await store.savePlan(
+      { start: weeksAgo(now), days: 42 },
+      { type: "system" }
+    );
+    await staff.onboardingStaff.setAgreements({
+      processing: true,
+      assessment: true,
+      council: "none",
+    });
+    await store.releaseDue(now);
+    const sentFirst = await store.sentLinks();
+    const first = sentFirst.map(({ person: id }) => id);
+    const links = async () => [
+      await store.linkOf("lea"),
+      await store.linkOf("sam"),
+    ];
+    const linksBefore = await links();
+    const saved = await api.onboarding.saveRoster(sharedAgain);
+    const beforeConfirmed = await store.releaseDue(now);
+    // On the confirm screen the admin picks Oli to lead Ops.
+    const confirmed = await api.onboarding.confirmRoster({
+      ...sharedAgain,
+      teams: sharedAgain.teams.map((team) =>
+        team.id === "ops" ? { ...team, lead: "oli" } : team
+      ),
+    });
+    const afterConfirmed = await store.releaseDue();
+    // Ona waits for her lead, as anyone does in a team that starts late.
+    const later = new Date(Date.now() + 7 * 86_400_000).toISOString();
+    expect({
+      first,
+      sam: saved.roster?.people.find(({ id }) => id === "sam")?.title,
+      links: await links(),
+      waiting: [saved.waiting, confirmed.waiting],
+      beforeConfirmed,
+      afterConfirmed,
+      lastly: await store.releaseDue(later),
+    }).toStrictEqual({
+      first: ["lea", "sam"],
+      sam: "Account manager",
+      links: linksBefore,
+      waiting: [3, 0],
+      beforeConfirmed: [],
+      afterConfirmed: ["sue", "oli"],
+      lastly: ["ona"],
+    });
   });
 });
 
