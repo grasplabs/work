@@ -8,7 +8,8 @@
     "#connectors": {
       "types": "./src/connectors-bundle.d.ts",
       "default": "./dist/connectors.js"
-    }
+    },
+    "#composio-classes": "./src/composio-classes.ts"
   },
   "scripts": {
     "build": "node build.ts",

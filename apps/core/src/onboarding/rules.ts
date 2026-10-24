@@ -86,6 +86,12 @@ export interface LinkFacts {
   interviews: ReadonlyMap<string, InterviewState>;
   /** Teams whose lead's map of the work is drawn. */
   mapped: ReadonlySet<string>;
+  /**
+   * The teams and people new on a list the admin saved while the plan was
+   * set, until they confirm the organization again: no link of theirs goes
+   * out before that.
+   */
+  unconfirmed: { teams: ReadonlySet<string>; people: ReadonlySet<string> };
 }
 
 /** Whether a team's lead is someone who will talk: there, and not away. */
@@ -109,6 +115,10 @@ const isDue = (
   now: string
 ): boolean => {
   if (!takingPart(roster, person) || facts.sent.has(person.id)) {
+    return false;
+  }
+  const { unconfirmed } = facts;
+  if (unconfirmed.people.has(person.id) || unconfirmed.teams.has(person.team)) {
     return false;
   }
   // Nothing of a team goes out before its own moment, and nothing at all while that isn't planned.

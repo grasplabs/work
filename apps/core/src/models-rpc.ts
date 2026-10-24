@@ -1,5 +1,9 @@
 import { actorOf } from "@grasp-os/shared/audit";
-import { heldListed } from "@grasp-os/shared/models";
+import {
+  heldListed,
+  personLimitSchema,
+  personLimitSubjectSchema,
+} from "@grasp-os/shared/models";
 import type {
   HeldDecision,
   HeldHow,
@@ -7,6 +11,10 @@ import type {
   ModelMonthSpend,
   ModelSettings,
   ModelsApi,
+  PersonLimit,
+  PersonLimits,
+  PersonLimitSet,
+  PersonLimitSubject,
 } from "@grasp-os/shared/models";
 import { requireAdmin } from "@grasp-os/shared/roles";
 import { z } from "zod";
@@ -15,6 +23,7 @@ import { budgetPeriods, budgetSpend, monthSpend } from "./model-budgets.ts";
 import { modelLedger } from "./model-ledger.ts";
 import { microsPerDollar } from "./model-prices.ts";
 import { gatewaySettings } from "./models.ts";
+import { personLimitsIn, setPersonLimit } from "./person-limits.ts";
 import { modelBindingSpend } from "./resource-bindings.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
@@ -34,6 +43,12 @@ import type { SessionCheck } from "./session-check.ts";
 // each or charge it in full, which the ledger audits in their name. Each
 // decision answers what it came to: done, or decided before, with what
 // stands.
+//
+// And the limits the company's admins set per person (person-limits.ts):
+// a default, exceptions per person or team, each a monthly limit and
+// messages an hour, never above Grasp's budgets. Admins read them with
+// each person's spend against theirs, and set or remove them; the ledger
+// audits each change in their name.
 
 const heldIdSchema = z.uuid();
 const howSchema = z.enum(["release", "charge"]);
@@ -130,6 +145,49 @@ export class ModelsRpc extends CoreRpcTarget implements ModelsApi {
       }
       return { state: "not_held" };
     });
+  }
+
+  async limits(): Promise<PersonLimits> {
+    return await withPerson(this.#check, async (person) => {
+      requireAdmin(person);
+      return await personLimitsIn(
+        this.#env,
+        this.#budgets(),
+        budgetPeriods(this.#env).month
+      );
+    });
+  }
+
+  async setLimit(
+    subject: PersonLimitSubject,
+    limit: PersonLimit
+  ): Promise<PersonLimitSet> {
+    return await withPerson(this.#check, async (person) => {
+      requireAdmin(person);
+      return await setPersonLimit(
+        this.#env,
+        this.#budgets(),
+        personLimitSubjectSchema.parse(subject),
+        personLimitSchema.parse(limit),
+        actorOf(person)
+      );
+    });
+  }
+
+  async removeLimit(subject: PersonLimitSubject): Promise<void> {
+    await withPerson(this.#check, async (person) => {
+      requireAdmin(person);
+      await modelLedger(this.#env).removePersonLimit(
+        personLimitSubjectSchema.parse(subject),
+        actorOf(person)
+      );
+    });
+  }
+
+  /** Grasp's budgets, as the console set them; `invalid` when they don't parse. */
+  #budgets() {
+    const { rules } = gatewaySettings(this.#env);
+    return rules === undefined ? ("invalid" as const) : rules.budgets;
   }
 
   async #held(): Promise<HeldRequest[]> {

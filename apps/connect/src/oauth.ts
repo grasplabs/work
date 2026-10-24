@@ -41,7 +41,7 @@ import {
   connectionEvent,
   refuseStaff,
 } from "./connection-audit.ts";
-import { allowedToolNames } from "./connections.ts";
+import { allowedToolNames, offeredToolNames } from "./connections.ts";
 import {
   connections,
   connectionTokens,
@@ -427,6 +427,9 @@ const reconnect = async (
             ),
             generation: sql<number>`${row.generation}`.as("generation"),
             refreshUntil: sql<null>`NULL`.as("refresh_until"),
+            grantedScopes: sql<string | null>`${row.grantedScopes}`.as(
+              "granted_scopes"
+            ),
             updatedAt: sql<Date>`${now.getTime()}`.as("updated_at"),
           })
           .from(connections)
@@ -613,6 +616,7 @@ const keepTokens = async (
       accessToken: tokens.accessToken,
       refreshToken,
       expiresAt: tokens.expiresAt,
+      scope: tokens.scope,
     },
     drop,
     refuse
@@ -895,7 +899,10 @@ export const listConnections = async (
     connectedBy: row.connectedBy,
     accountName: row.accountName,
     createdAt: row.createdAt.toISOString(),
-    ...(row.serverKind === "composio" && { tools: allowedToolNames(row) }),
+    ...(row.serverKind === "composio" && {
+      tools: allowedToolNames(row),
+      offeredTools: offeredToolNames(row),
+    }),
   }));
 };
 

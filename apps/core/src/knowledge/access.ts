@@ -3,7 +3,7 @@ import {
   auditProvenanceMaxItems,
   delegateActorOf,
 } from "@grasp-os/shared/audit";
-import type { AuditActor, AuditDetailValue } from "@grasp-os/shared/audit";
+import type { AuditActor } from "@grasp-os/shared/audit";
 import { collectionIdSchema } from "@grasp-os/shared/ids";
 import type { PermissionId } from "@grasp-os/shared/ids";
 import type { Provenance } from "@grasp-os/shared/knowledge";
@@ -24,6 +24,7 @@ import { collections } from "../db/knowledge/schema.ts";
 import { grantedPermissions } from "../permissions.ts";
 import { restrict } from "../restricted.ts";
 import type { WorkContext } from "../restricted.ts";
+import type { ReadRecord } from "./authorize.ts";
 
 // The one place core decides what Knowledge may be read by whom: the
 // host side of Knowledge's `authorize` port (app-entries.ts `authorize`
@@ -273,20 +274,7 @@ export const readerActor = (reader: Reader): AuditActor =>
     : delegateActorOf(reader.authority);
 
 /**
- * A read, as the audit log records it: which read (`knowledge.read`, with
- * `detail.read` naming it, or a search), what it was of, and the documents
- * it returned beyond that (a search's hits). Identifiers and counts only,
- * never what was read or searched for.
- */
-export interface ReadRecord {
-  action: "knowledge.read" | "knowledge.search" | "knowledge.search.empty";
-  target?: { type: "document" | "collection"; id: string };
-  documentIds?: string[];
-  detail: Record<string, AuditDetailValue>;
-}
-
-/**
- * Notes where what `reader` read came from, `sources` (a collection, or
+ * Knowledge's `onRead` port (ports.ts): notes where what `reader` read came from, `sources` (a collection, or
  * those a search found something in; none when it found nothing), and
  * returns the read's provenance. Call it after the read and before handing
  * over what it returned: an App or agent that read restricted data puts
