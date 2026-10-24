@@ -73,8 +73,8 @@ import {
   SignInChange,
   TeamsBotChange,
   TeamsBotSecretChange,
-  TestAlert,
   TeamsPackageDownload,
+  TestAlert,
   useRefreshSetup,
 } from "./setup-actions.tsx";
 import type { Refresh } from "./setup-actions.tsx";
