@@ -2698,6 +2698,20 @@ export const hiddenConnectors = sqliteTable(
 );
 
 /**
+ * The classes of tools an admin changed (tool-classes.ts): one row each,
+ * for whom it is on now (`who`: `nobody`, `everyone` or `teams`, then the
+ * team IDs in `teams` as a JSON array). A class without a row is as
+ * `defaultToolClassAudiences` has it.
+ */
+export const toolClassSettings = sqliteTable("tool_class_settings", {
+  toolClass: text("tool_class").primaryKey(),
+  who: text({ enum: ["nobody", "everyone", "teams"] }).notNull(),
+  teams: text().notNull().default("[]"),
+  changedBy: text("changed_by").notNull(),
+  changedAt: timestamp("changed_at").notNull(),
+});
+
+/**
  * Apps people asked Grasp to add, as the catalog doesn't have them
  * (app-requests.ts): one row each, by its name in lower case, so the
  * same app asked for twice is one request.
