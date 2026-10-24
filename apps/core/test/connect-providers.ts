@@ -14,7 +14,8 @@ import { botFrameworkKeysFake } from "../../connect/test/bot-framework-keys-fake
 import { graphEventsFake } from "../../connect/test/graph-events-fake.ts";
 import { npmRegistryFake } from "../../connect/test/npm-registry-fake.ts";
 import { osvFake } from "../../connect/test/osv-fake.ts";
-import { clients } from "../../connect/test/provider-config.ts";
+import { acmeTenant, clients } from "../../connect/test/provider-config.ts";
+import { botConnectorFake } from "./bot-connector-fake.ts";
 import { composioApiScript, composioLogoScript } from "./composio-api.ts";
 import { mailServerScript } from "./mail-server.ts";
 
@@ -139,6 +140,31 @@ export const botFrameworkFailUrl = "https://botframework-control.test/fail";
 /** Where tests read the paths login.botframework.com was asked for, in order. */
 export const botFrameworkAskedUrl = "https://botframework-control.test/asked";
 
+/**
+ * The client's Teams bot, as core (`TEAMS_BOT_ID`) and connect
+ * (`TEAMS_BOT_*`) are set up with it in the tests, and Entra knows it.
+ */
+export const teamsBot = {
+  id: "5b1e7c2a-3f4d-4e6b-9a8c-1d2e3f4a5b6c",
+  tenant: acmeTenant,
+  secret: "acme-teams-bot-secret",
+} as const;
+
+/**
+ * Where tests set the Bot Connector's rosters: POST `{ members }`, each
+ * `<conversation id> <user id>` to the member Teams answers with.
+ */
+export const botConnectorMembersUrl =
+  "https://bot-connector-control.test/members";
+
+/**
+ * Where tests read what reached the Bot Connector, in order: `{ posted,
+ * asked }`, the activities it took (`{ conversation, activity }` each) and
+ * the roster reads (`<conversation id> <user id>` each).
+ */
+export const botConnectorPostedUrl =
+  "https://bot-connector-control.test/posted";
+
 /** Where tests read the paths the fake npm registry was asked for, in order. */
 export const npmAskedUrl = "https://npm-control.test/asked";
 
@@ -172,6 +198,7 @@ const losesAnswer = (mailbox) => {
 };
 const npm = (${npmRegistryFake.toString()})();
 const botFramework = (${botFrameworkKeysFake.toString()})();
+const botConnector = (${botConnectorFake.toString()})(${JSON.stringify(teamsBot)});
 const landscape = { grants: [], apps: [], people: [], throttle: null, failing: false };
 const directory = { users: [] };
 const hibob = { key: null, employees: [] };
@@ -381,6 +408,18 @@ export default {
     }
     if (url.hostname === "registry.npmjs.org") {
       return await npm.answer(request);
+    }
+    const fromMicrosoft = await botConnector.answer(request);
+    if (fromMicrosoft !== undefined) {
+      return fromMicrosoft;
+    }
+    if (request.method === "POST" && url.href === ${JSON.stringify(botConnectorMembersUrl)}) {
+      const { members } = await request.json();
+      botConnector.setMembers(members);
+      return new Response(null, { status: 204 });
+    }
+    if (url.href === ${JSON.stringify(botConnectorPostedUrl)}) {
+      return Response.json({ posted: botConnector.posted, asked: botConnector.asked });
     }
     if (url.hostname === "login.botframework.com") {
       return botFramework.answer(request);

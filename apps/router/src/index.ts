@@ -1,3 +1,4 @@
+import { channelsApiPath } from "@grasp-os/shared/channels";
 import { requestErrors } from "@grasp-os/shared/errors";
 import type { ErrorPayload } from "@grasp-os/shared/errors";
 import { guestApiPath } from "@grasp-os/shared/guests";
@@ -106,8 +107,9 @@ const bounceReason = (answer: unknown): string => {
 const authBasePath = "/api/auth";
 
 /**
- * The limits' window, as `AUTH_RATE_LIMIT`, `GUEST_RATE_LIMIT` and
- * `INTERVIEW_RATE_LIMIT` all have it in wrangler.jsonc.
+ * The limits' window, as `AUTH_RATE_LIMIT`, `GUEST_RATE_LIMIT`,
+ * `INTERVIEW_RATE_LIMIT` and `CHANNELS_RATE_LIMIT` all have it in
+ * wrangler.jsonc.
  */
 const limitPeriodS = 60;
 
@@ -141,6 +143,44 @@ const withinLimit = async (
 
 /** Core's sign-out route, which the limit leaves alone. */
 const signOutPath = `${authBasePath}/sign-out`;
+
+/**
+ * The limit a request to `pathname` counts against, if any: the public
+ * endpoints core reaches without a session.
+ */
+const limiterFor = (pathname: string, env: Env): RateLimit | undefined => {
+  // Signing out needs no protection from guessing, and refusing it would
+  // leave the person signed in.
+  const isAuth =
+    pathname === authBasePath || pathname.startsWith(`${authBasePath}/`);
+  if (isAuth && pathname !== signOutPath) {
+    return env.AUTH_RATE_LIMIT;
+  }
+  // A guest chat's endpoint (core's src/guests.ts), which anyone with a
+  // link, or without one, can reach.
+  if (pathname === guestApiPath) {
+    return env.GUEST_RATE_LIMIT;
+  }
+  // A chat platform's webhook (core's src/channels/door.ts), which anyone
+  // can post to; core checks each request is the platform's own.
+  if (pathname.startsWith(`${channelsApiPath}/`)) {
+    return env.CHANNELS_RATE_LIMIT;
+  }
+  // An interview link's endpoints (core's src/onboarding/links.ts, its
+  // turns, src/onboarding/interview.ts, its read-back,
+  // src/onboarding/story.ts, and where its lines are said,
+  // src/onboarding/speech.ts), the same, from one budget; core counts per
+  // link too.
+  if (
+    pathname === interviewApiPath ||
+    pathname === interviewTurnPath ||
+    pathname === interviewStoryPath ||
+    pathname === speechPath
+  ) {
+    return env.INTERVIEW_RATE_LIMIT;
+  }
+  return undefined;
+};
 
 /**
  * The router's own 429, with the headers core puts on every response it
@@ -195,34 +235,8 @@ export default {
     if (pathname === mailIngressPath) {
       return new Response("Not found", { status: 404 });
     }
-    const isAuth =
-      pathname === authBasePath || pathname.startsWith(`${authBasePath}/`);
-    // Signing out needs no protection from guessing, and refusing it would
-    // leave the person signed in.
-    const isLimited = isAuth && pathname !== signOutPath;
-    if (isLimited && !(await withinLimit(env.AUTH_RATE_LIMIT, request, host))) {
-      return rateLimited(url, host);
-    }
-    // A guest chat's endpoint (core's src/guests.ts), which anyone with a
-    // link, or without one, can reach.
-    if (
-      pathname === guestApiPath &&
-      !(await withinLimit(env.GUEST_RATE_LIMIT, request, host))
-    ) {
-      return rateLimited(url, host);
-    }
-    // An interview link's endpoints (core's src/onboarding/links.ts, its
-    // turns, src/onboarding/interview.ts, its read-back,
-    // src/onboarding/story.ts, and where its lines are said,
-    // src/onboarding/speech.ts), the same, from one budget; core counts per
-    // link too.
-    if (
-      (pathname === interviewApiPath ||
-        pathname === interviewTurnPath ||
-        pathname === interviewStoryPath ||
-        pathname === speechPath) &&
-      !(await withinLimit(env.INTERVIEW_RATE_LIMIT, request, host))
-    ) {
+    const limiter = limiterFor(pathname, env);
+    if (limiter !== undefined && !(await withinLimit(limiter, request, host))) {
       return rateLimited(url, host);
     }
 
