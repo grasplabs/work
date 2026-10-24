@@ -563,3 +563,57 @@ export const notFound = {
     message: "The specified object was not found in the store.",
   },
 };
+
+/** Excel workbooks of `financeDrive`, by drive item ID. */
+export const workbookIds = {
+  /** The supplier register, with its table and a named range. */
+  register: "01BYE5RZ5SUPPLIERREGISTERXLSXAAAA",
+  /** Another workbook, with a table of the same name. */
+  other: "01BYE5RZ2OTHERWORKBOOKXLSXAAAAAAA",
+};
+
+/** The register's named table. */
+export const supplierTable = "Suppliers";
+
+/** A named range of the register: a name Excel knows, but no table. */
+export const totalsRange = "Totals";
+
+/** The supplier table's columns, as its header row names them. */
+export const supplierColumns = ["Supplier", "IBAN", "Since", "Amount"];
+
+/**
+ * Excel's days 2024-01-01 and 2025-06-15, as its serial numbers count
+ * them: what a date-formatted cell holds.
+ */
+export const daySerials = { first: 45_292, second: 45_823 };
+
+/**
+ * A cell as Excel holds it: its value, the number format it is shown in,
+ * and its formula (the value itself, for a constant).
+ */
+export interface SheetCell {
+  value: string | number | boolean;
+  format: string;
+  formula: string | number | boolean;
+}
+
+const constant = (
+  value: string | number | boolean,
+  format = "General"
+): SheetCell => ({ value, format, formula: value });
+
+/** The supplier table's rows as Excel holds them, fresh for each test. */
+export const supplierRows = (): SheetCell[][] => [
+  [
+    constant("Northwind Supplies"),
+    constant("NL91ABNA0417164300"),
+    constant(daySerials.first, "yyyy-mm-dd"),
+    constant(1200),
+  ],
+  [
+    constant("Contoso Paper"),
+    constant("NL02RABO0123456789"),
+    constant(daySerials.second, String.raw`[$-409]d\-mmm\-yyyy;@`),
+    constant(""),
+  ],
+];

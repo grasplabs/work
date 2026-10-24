@@ -70,6 +70,20 @@ export interface ConnectorCatalog {
       readonly output: { events: Array<{ bodyPreview: string | null; end: { dateTime: string; timeZone: string }; id: string; isAllDay: boolean; isCancelled: boolean; location: string | null; mailbox: string; organizer: { address: string | null; name: string | null } | null; showAs: string | null; start: { dateTime: string; timeZone: string }; subject: string | null; webLink: string | null }>; mailbox: string; nextPage: string | null };
     };
   };
+  readonly "microsoft-365.excel@1": {
+    readonly addRow: {
+      readonly input: { drive: string; table: string; values: Array<{ column: string; value: (string) | (number) | (boolean) | ({ date: string }) | ({ formula: string }) | null }>; workbook: string };
+      readonly output: { drive: string; row: number; table: string; values: Array<{ column: string; value: (string) | (number) | (boolean) | ({ date: string }) | ({ formula: string }) | null }>; workbook: string };
+    };
+    readonly listRows: {
+      readonly input: { drive: string; start?: number; table: string; top?: number; workbook: string };
+      readonly output: { columns: Array<string>; drive: string; nextStart: number | null; rows: Array<{ row: number; values: Array<{ column: string; value: (string) | (number) | (boolean) | ({ date: string }) | null }> }>; table: string; workbook: string };
+    };
+    readonly updateRow: {
+      readonly input: { after: Array<{ column: string; value: (string) | (number) | (boolean) | ({ date: string }) | ({ formula: string }) | null }>; before: Array<{ column: string; value: (string) | (number) | (boolean) | ({ date: string }) | null }>; drive: string; row: number; table: string; workbook: string };
+      readonly output: { after: Array<{ column: string; value: (string) | (number) | (boolean) | ({ date: string }) | ({ formula: string }) | null }>; before: Array<{ column: string; value: (string) | (number) | (boolean) | ({ date: string }) | null }>; drive: string; row: number; table: string; workbook: string };
+    };
+  };
   readonly "microsoft-365.files@1": {
     readonly list: {
       readonly input: { drive: string; folder?: string; page?: string; top?: number };

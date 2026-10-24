@@ -1,7 +1,10 @@
 import type { ConnectorProvider, ToolReach } from "@grasp-os/shared/connect";
+import type { Json } from "@grasp-os/shared/json";
 import { z } from "zod";
 
 import {
+  changeMetaKey,
+  confirmedMetaKey,
   connectorManifestSchema,
   effectAbsentMetaKey,
   effectKeyMetaKey,
@@ -41,6 +44,17 @@ export interface ToolResult<Output> {
   output: Output;
   /** The provider's IDs of the resources the output came from. */
   provenance?: readonly string[];
+  /**
+   * What a write changed, before and after, for the audit record of old
+   * and new values (`changeMetaKey`).
+   */
+  change?: ToolChange;
+}
+
+/** What a write changed: the values before it, and after it. */
+export interface ToolChange {
+  before: Json;
+  after: Json;
 }
 
 export interface ToolDefinition<
@@ -143,6 +157,11 @@ export interface Effect {
    * otherwise.
    */
   stamp: string | null;
+  /**
+   * Whether the call is a held side effect its person confirmed, on a card
+   * that showed its exact input (`confirmedMetaKey`).
+   */
+  confirmed: boolean;
 }
 
 /** What went wrong in a tool's error, for code to act on. */
@@ -157,7 +176,8 @@ export type ToolErrorCode =
   | "failed"
   | "too_large"
   | "not_text"
-  | "not_a_file";
+  | "not_a_file"
+  | "conflict";
 
 /** What a caller may act on in a tool's error, besides its message. */
 export interface ToolErrorDetails {
@@ -251,20 +271,19 @@ export interface Tool {
 }
 
 /**
- * What a call's `_meta` asks: its effect key, its stamp, and whether to
- * find it.
+ * What a call's `_meta` asks: its effect key, its stamp, whether its
+ * person confirmed it, and whether to find it.
  */
-const callMetaOf = (
-  meta: unknown
-): { key: string | null; stamp: string | null; find: boolean } => {
+const callMetaOf = (meta: unknown): Effect & { find: boolean } => {
   if (typeof meta !== "object" || meta === null) {
-    return { key: null, stamp: null, find: false };
+    return { key: null, stamp: null, confirmed: false, find: false };
   }
   const key: unknown = Reflect.get(meta, effectKeyMetaKey);
   const stamp: unknown = Reflect.get(meta, stampMetaKey);
   return {
     key: typeof key === "string" && effectKeyPattern.test(key) ? key : null,
     stamp: typeof stamp === "string" && stampPattern.test(stamp) ? stamp : null,
+    confirmed: Reflect.get(meta, confirmedMetaKey) === true,
     find: Reflect.get(meta, findMetaKey) === true,
   };
 };
@@ -529,6 +548,7 @@ export const defineTool = <
           result = await definition.run(parsed.data, {
             key: effect.key,
             stamp: effect.stamp,
+            confirmed: effect.confirmed,
           });
         } catch (error) {
           return runFailure(error, readOnly);
@@ -551,7 +571,12 @@ export const defineTool = <
       return {
         content: [],
         structuredContent: structured,
-        _meta: { [provenanceMetaKey]: provenance.data },
+        _meta: {
+          [provenanceMetaKey]: provenance.data,
+          ...(result.change === undefined
+            ? {}
+            : { [changeMetaKey]: result.change }),
+        },
       };
     },
   };
