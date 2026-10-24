@@ -122,7 +122,23 @@ describe("scoring a trial", () => {
       unknown: supportWith(
         "ANSWER: Marta Ruiz\nFrom [Lease](grasp:note/doc-unknown)"
       ),
-    }).toStrictEqual({ lease: 1, other: 0, unknown: 0 });
+      onAnswerLine: verdict(contract, {
+        answer: "ANSWER: Marta Ruiz [Lease](grasp:note/doc-lease)",
+        notes,
+      }),
+    }).toStrictEqual({
+      lease: 1,
+      other: 0,
+      unknown: 0,
+      // A link on the answer line cites; it isn't part of the answer.
+      onAnswerLine: {
+        completed: true,
+        authorized: true,
+        abstained: false,
+        evidenceRecall: 1,
+        citationSupport: 1,
+      },
+    });
   });
 
   it("takes the answer line's keyword in the question's language, and in bold", () => {

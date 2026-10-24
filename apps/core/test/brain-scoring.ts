@@ -351,6 +351,7 @@ export const scoreTrial = (
   // only in an explanation or a citation's label aren't the answer.
   const said = normalized(
     (answerLine.exec(observed.answer)?.groups?.answer ?? "")
+      .replaceAll(noteLink, " ")
       .replaceAll(citation, " ")
       .replaceAll(emphasis, "")
   );
