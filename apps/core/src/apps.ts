@@ -43,6 +43,7 @@ import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { z } from "zod";
 
+import { versionMadeCurrent } from "./access-revocations.ts";
 import {
   appsFoundBy,
   requireAppRole,
@@ -894,6 +895,9 @@ export const commitFiles = async (
     files: saved,
     bindings: workflowBindings,
   });
+  // The pages open on the App hear of it (spec 11.5): their screens show
+  // a new version ready, and switch to it (screens-rpc.ts, `watchVersion`).
+  waitUntil(versionMadeCurrent(env, appId));
   // What its screens build to, for what waits on an admin
   // (screen-builds.ts), in the background: only once they built just now,
   // so from the cache.
@@ -1726,6 +1730,8 @@ export const makeCurrent = async (
       .where(eq(auditOutbox.id, event.id))
       .get();
     if (ours !== undefined) {
+      // The try whose answer was lost may have told no page either.
+      waitUntil(versionMadeCurrent(env, appId));
       return await editableApp(env, by, appId);
     }
     requireNotArchived(await findApp(env, appId));
@@ -1744,6 +1750,9 @@ export const makeCurrent = async (
     // is left is a conflict: the base moved, or the candidate ended.
     throw appErrors.create("app.conflict");
   }
+  // The pages open on the App hear of it (spec 11.5): their screens show
+  // a new version ready, and switch to it (screens-rpc.ts, `watchVersion`).
+  waitUntil(versionMadeCurrent(env, appId));
   // What its screens build to, for what waits on an admin
   // (screen-builds.ts), in the background: read from the release, which
   // sealed them (screen-references.ts), checked above, so nothing is

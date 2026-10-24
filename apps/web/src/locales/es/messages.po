@@ -1725,8 +1725,12 @@ msgid "A new template"
 msgstr "Una plantilla nueva"
 
 #: src/screens/screen-frame.tsx
-msgid "A new version of this domain is available."
-msgstr "Hay una nueva versión de este dominio."
+msgid "A new version of this app is ready"
+msgstr "Hay una nueva versión de esta app lista"
+
+#: src/screens/screen-frame.tsx
+msgid "A new version of this domain is ready. It opens once your changes are saved."
+msgstr "Hay una nueva versión de este dominio lista. Se abrirá cuando tus cambios estén guardados."
 
 #: src/onboarding/work-record.tsx
 msgid "A normal one takes {normal} hours. The quickest took {least}, the longest {most}."
@@ -6419,6 +6423,10 @@ msgstr "Ocurrió: {who}"
 msgid "It has changes that aren't saved, or a change it hasn't heard back about. Leaving loses unsaved changes; anything already saved or running stays."
 msgstr "Tiene cambios sin guardar o un cambio sin respuesta todavía. Al salir se pierden los cambios sin guardar; lo que ya está guardado o en marcha se mantiene."
 
+#: src/screens/screen-frame.tsx
+msgid "It has changes that aren't saved, or a change it hasn't heard back about. Save them first and it switches once they are, or switch now and lose what isn't saved."
+msgstr "Tiene cambios sin guardar o un cambio sin respuesta todavía. Guárdalos primero y cambiará cuando estén guardados, o cambia ahora y pierde lo que no está guardado."
+
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "It has no parameters."
 msgstr "No tiene parámetros."
@@ -10025,10 +10033,6 @@ msgstr "Liberar"
 msgid "Release the {amount} held for this model call?"
 msgstr "¿Liberar los {amount} retenidos para esta llamada al modelo?"
 
-#: src/screens/screen-frame.tsx
-msgid "Reload"
-msgstr "Volver a cargar"
-
 #: src/onboarding/interview-words.ts
 msgid "Reminded on {date}"
 msgstr "Recordado el {date}"
@@ -10551,6 +10555,10 @@ msgstr "Guardar"
 #: src/dashboard/report-dialog.tsx
 msgid "Save as PDF"
 msgstr "Guardar como PDF"
+
+#: src/screens/screen-frame.tsx
+msgid "Save first"
+msgstr "Guardar primero"
 
 #: src/routes/_shell.onboarding.agreements.tsx
 msgid "Save the agreements"
@@ -11491,6 +11499,10 @@ msgstr "Atención al cliente"
 #: src/onboarding/setup-steps.tsx
 msgid "Switch a team off and nobody in it gets a link."
 msgstr "Desactiva un equipo y nadie en él recibe un enlace."
+
+#: src/screens/screen-frame.tsx
+msgid "Switch now"
+msgstr "Cambiar ahora"
 
 #: src/frame/person-menu.tsx
 msgid "System"

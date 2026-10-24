@@ -24,7 +24,7 @@ import type {
 import { RpcStub } from "capnweb";
 
 import type { CoreConnection, SessionEnded } from "../core-connection.ts";
-import { wait as pauseFor } from "../core.ts";
+import { wait as pauseFor, reconnectDelay } from "../core.ts";
 import type { PendingConfirmation } from "../decision-confirmation.tsx";
 import {
   appDrafts,
@@ -85,8 +85,9 @@ import type { FrameLink, Joined } from "./tab-link.ts";
 // connection when it opens the frame (`frame`), core decides every call
 // on that build, and
 // when it says the build no longer gets the data (as a refused call, or
-// at the page's next check) the frame is emptied, and with it what the
-// screen had been handed. That is all the page can take back; what a
+// when the App's version subscription says access may have dropped and
+// the page asks) the frame is emptied, and with it what the screen had
+// been handed. That is all the page can take back; what a
 // screen sent elsewhere before, it can't.
 //
 // A frame is for the person its page's connection was first made for
@@ -106,6 +107,15 @@ import type { FrameLink, Joined } from "./tab-link.ts";
 // the page loads again; what stops one frame (its build's approval taken
 // back, a broken channel, a timeout, the page leaving) stops that frame
 // alone.
+//
+// A frame keeps the version it opened (spec 11.5). When another is made
+// current, the tab's one subscription to the App's version says so
+// (app-versions.ts), and the frame shows it as `updated`: the page
+// switches a screen with nothing unsaved at once, and asks once first
+// when it holds unsaved edits (screen-frame.tsx). Until it switches, its
+// calls name the version it opened, and core runs each only where its
+// contract is the same in the version current now, never on another
+// (core's app-functions.ts, `pinnedReference`).
 
 /** What the page shows about a screen besides the screen itself. */
 export type ScreenState =
@@ -143,10 +153,11 @@ export type FailureReason =
   | "unknown";
 
 /**
- * How often the page asks whether the App has a new current version, and
- * whether the screen's build still gets the App's data.
+ * How many times the page asks core about a frame's build when the App's
+ * version subscription says access may have dropped, while core can't
+ * answer: each after a pause that grows (`reconnectDelay`).
  */
-const versionCheckMs = 30_000;
+const recheckTries = 6;
 
 const failures: Readonly<Record<string, FailureReason>> = {
   "role.forbidden": "forbidden",
@@ -187,10 +198,10 @@ export const failureOf = (error: unknown): FailureReason => {
 };
 
 /**
- * The refusals of the page's own check that end a running screen: the
- * person lost the App (their role, its share, the App itself, their being
- * active), or is no longer who opened it, or signed out. Anything else,
- * a token not to hand now among it, may pass, and is asked again.
+ * The refusals of the App's version subscription that end a running
+ * screen: the person lost the App (their role, its share, the App itself,
+ * their being active), or is no longer who opened it, or signed out.
+ * Anything else, a token not to hand now among it, may pass.
  */
 const endingCodes: ReadonlySet<string> = new Set([
   "role.forbidden",
@@ -1346,36 +1357,63 @@ export const appScreen = (
         }),
         confirm: confirmLink,
       },
+      // The App's version, as the tab's one subscription of it pushes it
+      // (app-versions.ts, spec 11.5): no frame asks on a timer.
       running: (setState) => {
         const { version } = bundle;
-        const check = async (): Promise<void> => {
-          try {
-            // A screen that asks for nothing more still holds what it was
-            // handed: this is when the page hears its approval is gone.
-            await checkDelivery(hold, closing);
-            const session = await hold.session();
-            if ((await session.screens.version(app)) !== version) {
-              setState({ status: "updated" });
+        let updated = false;
+        const frame = { open: true };
+        // Asked again, after a pause that grows, while core can't answer
+        // and the frame runs: no timer asks later in its place.
+        const recheck = async (): Promise<void> => {
+          for (
+            let attempt = 0;
+            frame.open && attempt < recheckTries;
+            attempt += 1
+          ) {
+            try {
+              // oxlint-disable-next-line no-await-in-loop -- one ask at a time
+              await checkDelivery(hold, closing);
+              return;
+            } catch {
+              // oxlint-disable-next-line no-await-in-loop -- one ask at a time
+              await pauseFor(reconnectDelay(attempt));
             }
-          } catch (error) {
+          }
+        };
+        const stop = link.followVersion(app, (push) => {
+          if (push.type === "refused") {
+            const error = Object.assign(new Error(push.error.message), {
+              code: push.error.code,
+            });
             drafts.refused(error);
             // The person lost the App (it was unshared, or is gone): the
-            // screen stops, as its calls would be refused from now on, and
-            // whatever holds it (the shell's panel) can let it go.
+            // screen stops, its frame emptied, as its calls would be
+            // refused from now on, and whatever holds it (the shell's
+            // panel) can let it go. No new version is offered then.
             const code = refusalCode(error);
             if (code === "auth.unauthenticated") {
               setState({ status: "signed-out" });
             } else if (code !== undefined && endingCodes.has(code)) {
               setState({ status: "failed", reason: failureOf(error) });
             }
-            // Anything else is asked again at the next check.
+            return;
           }
-        };
-        const timer = setInterval(() => {
-          void check();
-        }, versionCheckMs);
+          // Someone's access, or a build's approval, may have dropped: a
+          // screen that asks for nothing more still holds what it was
+          // handed, so this is when the page asks about its build.
+          if (push.recheck) {
+            void recheck();
+          }
+          // Once: the frame keeps the version it opened until it switches.
+          if (!updated && push.version !== version) {
+            updated = true;
+            setState({ status: "updated" });
+          }
+        });
         cleanups.push(() => {
-          clearInterval(timer);
+          frame.open = false;
+          stop();
         });
       },
     };
@@ -1393,9 +1431,8 @@ const dropsDrafts: ReadonlySet<FailureReason> = new Set([
 ]);
 
 /**
- * Runs `screen` of `app` in `frame`, and watches for a new current
- * version, and for its build no longer getting the App's data
- * (`runFrame`).
+ * Runs `screen` of `app` in `frame`, and follows its App's current
+ * version, and whether its build still gets the App's data (`runFrame`).
  */
 export const runScreen = (
   frame: HTMLIFrameElement,

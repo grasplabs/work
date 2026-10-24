@@ -52,7 +52,7 @@ import type {
 } from "./file-host.ts";
 import { requireNotRevoked } from "./release-runner.ts";
 import { isOwnOrigin } from "./rpc.ts";
-import { delivering, leasedArtifact, personRefusal } from "./screen-trust.ts";
+import { delivering, leasedBuild, personRefusal } from "./screen-trust.ts";
 import { admitted } from "./screens-rpc.ts";
 
 // Core's file channel (spec 10.7.5): how a running App's screen, through
@@ -852,7 +852,7 @@ export const appFileResponse = async (
     } else {
       app = await admitted(env, person, route.app);
     }
-    const artifact = await leasedArtifact(
+    const build = await leasedBuild(
       env,
       person.userId,
       app,
@@ -861,13 +861,13 @@ export const appFileResponse = async (
     // A lease that doesn't verify, for this person and App, is no screen
     // of theirs, whatever the App's data: a screen of ordinary data runs
     // without one elsewhere, but never moves files.
-    if (artifact === undefined) {
+    if (build === undefined) {
       throw requestErrors.create("request.forbidden");
     }
     const within = async <Answer>(
       work: () => Promise<Answer>
     ): Promise<Answer> =>
-      await delivering(env, person, app, artifact, "file", work);
+      await delivering(env, person, app, build, "file", work);
     const { release, version, storeId, stub } = await within(
       async () => await resolved(env, person, app, resource, operationOf(asked))
     );

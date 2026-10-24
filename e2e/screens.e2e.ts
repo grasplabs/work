@@ -346,12 +346,14 @@ test("a tab holds one connection to core for its shell and every App frame it op
   expect(sockets).toHaveLength(1);
 });
 
-test("a new current version is offered while the screen is open", async ({
+test("a screen with nothing unsaved switches to a new current version by itself", async ({
   pageOf,
 }) => {
   const page = await pageOf(one);
-  await page.clock.install();
-  await openScreen(page, app);
+  const screen = await openScreen(page, app);
+  const frameAddress = async (): Promise<string | null> =>
+    await page.locator('iframe[title="notes app"]').getAttribute("src");
+  const before = await frameAddress();
   const { core, api } = apiOf(one);
   try {
     await release(
@@ -366,8 +368,10 @@ test("a new current version is offered while the screen is open", async ({
     core[Symbol.dispose]();
   }
 
-  await page.clock.fastForward(30_000);
-  await expect(
-    page.getByText("A new version of this domain is available.")
-  ).toBeVisible();
+  // Told over the tab's connection, not on a timer: no clock runs here.
+  await expect.poll(frameAddress, { timeout: 20_000 }).not.toBe(before);
+  await expect(screen.getByRole("heading", { name: "Notes" })).toBeVisible({
+    timeout: 20_000,
+  });
+  await expect(page.getByRole("alertdialog")).toHaveCount(0);
 });
