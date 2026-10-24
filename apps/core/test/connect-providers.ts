@@ -178,6 +178,22 @@ export const botConnectorMembersUrl =
 export const botConnectorPostedUrl =
   "https://bot-connector-control.test/posted";
 
+/**
+ * The client's Slack app, as core (`SLACK_SIGNING_SECRET`) and connect
+ * (`SLACK_BOT_TOKEN`) are set up with it in the tests.
+ */
+export const slackApp = {
+  signingSecret: "acme-slack-signing-secret-for-tests",
+  botToken: "acme-slack-bot-token-for-tests",
+  botUserId: "UBOTSTEPHEN",
+} as const;
+
+/**
+ * Where tests read what reached Slack's Web API, in order: each call's
+ * method, its form or JSON fields, and whether it carried the bot's token.
+ */
+export const slackPostedUrl = "https://slack-control.test/posted";
+
 /** Where tests read the paths the fake npm registry was asked for, in order. */
 export const npmAskedUrl = "https://npm-control.test/asked";
 
@@ -214,6 +230,28 @@ const botFramework = (${botFrameworkKeysFake.toString()})();
 let botFrameworkKeys = [];
 let botFrameworkSharedKey = null;
 const botConnector = (${botConnectorFake.toString()})(${JSON.stringify(teamsBot)});
+const slackCalls = [];
+/** Slack's Web API, as far as the door's adapter calls it. */
+const slackAnswer = async (request, url) => {
+  const method = url.pathname.slice("/api/".length);
+  const text = await request.text();
+  const type = request.headers.get("content-type") ?? "";
+  const fields = type.includes("json")
+    ? JSON.parse(text)
+    : Object.fromEntries(new URLSearchParams(text));
+  slackCalls.push({
+    method,
+    fields,
+    authorized: request.headers.get("authorization") === ${JSON.stringify(`Bearer ${slackApp.botToken}`)},
+  });
+  if (method === "auth.test") {
+    return Response.json({ ok: true, user_id: ${JSON.stringify(slackApp.botUserId)}, bot_id: "BSTEPHEN", team_id: "TACME" });
+  }
+  if (method === "chat.postMessage") {
+    return Response.json({ ok: true, channel: fields.channel, ts: String(Date.now() / 1000) });
+  }
+  return Response.json({ ok: true });
+};
 const landscape = { grants: [], apps: [], people: [], throttle: null, failing: false };
 const directory = { users: [] };
 const hibob = { key: null, employees: [] };
@@ -423,6 +461,12 @@ export default {
     }
     if (url.hostname === "registry.npmjs.org") {
       return await npm.answer(request);
+    }
+    if (url.hostname === "slack.com") {
+      return await slackAnswer(request, url);
+    }
+    if (url.href === ${JSON.stringify(slackPostedUrl)}) {
+      return Response.json(slackCalls);
     }
     const fromMicrosoft = await botConnector.answer(request);
     if (fromMicrosoft !== undefined) {

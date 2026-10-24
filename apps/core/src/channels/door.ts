@@ -30,9 +30,13 @@
  * the Chat SDK, with who they are, and its conversation is kept
  * (`channel_conversations`) so a later message, and the answer, find it.
  *
- * Teams' adapter sends through axios, which workerd refuses as it builds
- * its requests: `@grasp-os/chat/workerd` puts the fix in, so it is
- * imported before any adapter loads.
+ * Slack (slack.ts) comes in the same way, by its own signature and ids:
+ * its people are known only by the Slack account they linked to Grasp, and
+ * someone who hasn't linked one gets the link, once, and nothing more.
+ *
+ * Teams' and Slack's adapters send through axios, which workerd refuses
+ * as it builds its requests: `@grasp-os/chat/workerd` puts the fix in, so
+ * it is imported before any adapter loads.
  */
 import "@grasp-os/chat/workerd";
 import { durableObjectState } from "@grasp-os/chat/state";
@@ -49,6 +53,9 @@ import { channelConversations } from "../db/core/schema.ts";
 import { inJurisdiction } from "../durable-objects.ts";
 import { errorResponse } from "../errors.ts";
 import { boundedText, jsonOf } from "../request-body.ts";
+import { offerChannelLink } from "./accounts.ts";
+import { signInCard } from "./cards.tsx";
+import { slackAdapter, verifiedSlackRequest } from "./slack.ts";
 import type { ConnectedTeamsAdapter } from "./teams-adapter.ts";
 import { teamsAdapter, verifiedTeamsRequest } from "./teams.ts";
 import type { TeamsKeys } from "./teams.ts";
@@ -65,6 +72,7 @@ export const channelAdapters = (
   { teamsKeys }: { teamsKeys?: TeamsKeys } = {}
 ) => ({
   teams: teamsAdapter(env, teamsKeys),
+  slack: slackAdapter(env),
 });
 
 /** A platform the door has an adapter for. */
@@ -72,14 +80,22 @@ type Platform = keyof ReturnType<typeof channelAdapters>;
 
 /**
  * Whether the deployment set `platform` up: Teams once it has the bot's id
- * and the client's Entra tenant, without which every request would be
- * refused anyway.
+ * and the client's Entra tenant, Slack once it has the app's signing
+ * secret, without which every request would be refused anyway.
  */
-const isSetUp = (env: Env, platform: string): platform is Platform =>
-  platform === "teams" &&
-  env.TEAMS_BOT_ID !== undefined &&
-  env.TEAMS_BOT_ID !== "" &&
-  signInConfig(env)?.entra?.tenantId !== undefined;
+const isSetUp = (env: Env, platform: string): platform is Platform => {
+  if (platform === "slack") {
+    return (
+      env.SLACK_SIGNING_SECRET !== undefined && env.SLACK_SIGNING_SECRET !== ""
+    );
+  }
+  return (
+    platform === "teams" &&
+    env.TEAMS_BOT_ID !== undefined &&
+    env.TEAMS_BOT_ID !== "" &&
+    signInConfig(env)?.entra?.tenantId !== undefined
+  );
+};
 
 /** Largest request a platform may post: a Teams activity is far smaller. */
 const maxBodyBytes = 256 * 1024;
@@ -269,6 +285,171 @@ const gate = async (
   }
 };
 
+/**
+ * A Slack request, as far as the door reads one: Slack's URL check, or an
+ * event's envelope and who sent it where, never its text.
+ */
+const slackPayloadSchema = z.object({
+  type: z.string(),
+  challenge: z.string().min(1).max(256).optional(),
+  event_id: z.string().min(1).max(256).optional(),
+  event: z
+    .object({
+      type: z.string(),
+      subtype: z.string().optional(),
+      bot_id: z.string().optional(),
+      user: z.string().min(1).max(64).optional(),
+      channel: z.string().min(1).max(64),
+      channel_type: z.string().optional(),
+      ts: z.string().max(64),
+      thread_ts: z.string().max(64).optional(),
+    })
+    .optional(),
+});
+type SlackEvent = NonNullable<z.infer<typeof slackPayloadSchema>["event"]>;
+
+/**
+ * The thread a Slack message is in, as the adapter names it: a direct
+ * message's conversation itself, a channel's message's own thread.
+ */
+const slackThreadOf = (event: SlackEvent): string => {
+  const threadTs =
+    event.channel_type === "im"
+      ? (event.thread_ts ?? "")
+      : (event.thread_ts ?? event.ts);
+  return `slack:${event.channel}:${threadTs}`;
+};
+
+/**
+ * What the door does with a Slack message before the Chat SDK sees it, as
+ * `gate` does with Teams': the line it sends and nothing more, a link for
+ * someone who hasn't linked their Slack account, or the member it is from.
+ * Slack names no language a person reads, so lines are in English.
+ */
+const slackGate = async (
+  env: Env,
+  state: StateAdapter,
+  eventId: string,
+  event: SlackEvent & { user: string }
+): Promise<{ line?: DoorLine; link?: true; userId?: string }> => {
+  const first = await state.setIfNotExists(
+    `door:slack:${eventId}`,
+    true,
+    seenTtlMs
+  );
+  if (!first) {
+    return {};
+  }
+  if (!messages.take(`slack:${event.user}`)) {
+    log.info("channel.limited", { platform: "slack" });
+    return told.take(`slack:${event.user}`) ? { line: "tooFast" } : {};
+  }
+  if (event.channel_type !== "im") {
+    return { line: "privateOnly" };
+  }
+  const writer = await writerOf(env, "slack", event.user);
+  return writer.kind === "member" ? { userId: writer.userId } : { link: true };
+};
+
+/** Sends one of Stephen's lines, or a link to sign in by, to `event`'s thread. */
+const sendSlackLine = async (
+  env: Env,
+  origin: string,
+  event: SlackEvent & { user: string },
+  line: DoorLine | "link"
+): Promise<void> => {
+  const adapter = slackAdapter(env);
+  try {
+    if (line === "link") {
+      const { path } = await offerChannelLink(env, {
+        platform: "slack",
+        platformUserId: event.user,
+      });
+      await adapter.postMessage(
+        slackThreadOf(event),
+        signInCard({ locale: "en", url: new URL(path, origin).href })
+      );
+      return;
+    }
+    await adapter.postMessage(slackThreadOf(event), say(line, "en"));
+  } catch (error) {
+    log.warn("channel.line_failed", {
+      platform: "slack",
+      line,
+      ...errorFields(error),
+    });
+  }
+};
+
+/**
+ * Answers a Slack request whose body the door read: 401 unless Slack
+ * signed it for this client's app, the URL check's challenge, and
+ * otherwise 200 at once, Slack's event handled in the background.
+ */
+const slackResponse = async (
+  request: Request,
+  env: Env,
+  body: string,
+  ctx: Pick<ExecutionContext, "waitUntil">,
+  handoff: ChannelHandoff | undefined
+): Promise<Response> => {
+  if (!(await verifiedSlackRequest(env, request, body))) {
+    return new Response("Unauthorized", { status: 401 });
+  }
+  const parsed = slackPayloadSchema.safeParse(jsonOf(body));
+  if (!parsed.success) {
+    return new Response(null, { status: 200 });
+  }
+  const { type, challenge, event_id: eventId, event } = parsed.data;
+  if (type === "url_verification" && challenge !== undefined) {
+    return Response.json({ challenge });
+  }
+  // Only a person's new message: the bot's own, edits and the rest are
+  // acknowledged and dropped.
+  if (
+    type !== "event_callback" ||
+    eventId === undefined ||
+    event?.type !== "message" ||
+    event.subtype !== undefined ||
+    event.bot_id !== undefined ||
+    event.user === undefined
+  ) {
+    return new Response(null, { status: 200 });
+  }
+  const from = { ...event, user: event.user };
+  const state = durableObjectState(inJurisdiction(env, env.CHAT_STATE));
+  const { line, link, userId } = await slackGate(env, state, eventId, from);
+  const { origin } = new URL(request.url);
+  if (line !== undefined || link !== undefined) {
+    ctx.waitUntil(sendSlackLine(env, origin, from, line ?? "link"));
+  }
+  if (userId === undefined) {
+    return new Response(null, { status: 200 });
+  }
+  const chat = new Chat({
+    userName: "Stephen",
+    adapters: { slack: slackAdapter(env) },
+    state,
+    logger: "silent",
+  });
+  chat.onDirectMessage(async (thread, message) => {
+    await keepConversation(env, "slack", thread.id, userId);
+    await handoff?.({ platform: "slack", userId, thread, message });
+  });
+  return await chat.webhooks.slack(
+    new Request(request.url, {
+      method: "POST",
+      headers: request.headers,
+      body,
+    }),
+    {
+      waitUntil: (promise) => {
+        ctx.waitUntil(promise);
+      },
+    }
+  );
+};
+
 /** Options the tests set: the keys to check against, and the handoff. */
 export interface DoorOptions {
   teamsKeys?: TeamsKeys;
@@ -309,6 +490,9 @@ export const channelResponse = async (
       requestErrors.create("request.too_large"),
       requestId
     );
+  }
+  if (platform === "slack") {
+    return await slackResponse(request, env, body, ctx, handoff);
   }
   if (!(await verifiedTeamsRequest(env, request, body, teamsKeys))) {
     return new Response("Unauthorized", { status: 401 });
