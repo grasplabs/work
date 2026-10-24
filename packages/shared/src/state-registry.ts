@@ -623,6 +623,7 @@ const modelLedger: DurableObjectState = {
     request_scopes: exported(`${core}model-ledger.ts`),
     spend: exported(`${core}model-ledger.ts`),
     alerts: exported(`${core}model-ledger.ts`),
+    person_limits: exported(`${core}model-ledger.ts`),
     audit_outbox: exported(`${core}model-ledger.ts`),
   },
 };
