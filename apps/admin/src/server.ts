@@ -19,7 +19,8 @@
  *
  * The cron imports newly published releases (src/releases/import.ts);
  * the digest's own cron posts the admin's morning digest to Discord
- * (src/admin/discord-digest.ts).
+ * (src/admin/discord-digest.ts), and the watch's reads how Stephen fares
+ * at every client every hour (src/clients/watch.ts).
  * `ProvisionClient` is the Workflow that onboards a client
  * (src/provision/workflow.ts), `Rollout` the one that rolls a release
  * out to clients (src/rollout/workflow.ts), `RolloutClient` deploys one
@@ -43,6 +44,7 @@ import {
   discordInteractionsPath,
 } from "./admin/discord.ts";
 import { adminMcp, adminMcpPath } from "./admin/mcp.ts";
+import { watchCron, watchStephen } from "./clients/watch.ts";
 import { adminDatabase } from "./db/act.ts";
 import { movedPageRedirect } from "./moved-pages.ts";
 import { importReleases } from "./releases/import.ts";
@@ -85,6 +87,10 @@ export default {
   scheduled: async (controller, env) => {
     if (controller.cron === digestCron) {
       await sendMorningDigest(env, new Date(controller.scheduledTime));
+      return;
+    }
+    if (controller.cron === watchCron) {
+      await watchStephen(env, new Date(controller.scheduledTime));
       return;
     }
     await importReleases(env.RELEASES, adminDatabase(env.DB));

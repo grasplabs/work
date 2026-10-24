@@ -236,6 +236,11 @@ const coreDb: D1State = {
       `${core}channels/accounts.ts`,
       "Links a chat sent, good for 15 minutes: the chat sends a new one."
     ),
+    channel_conversations: exported(`${core}channels/door.ts`),
+    channel_signals: transient(
+      `${core}channels/signals.ts`,
+      "Hourly counts of how Stephen fared in the chat apps, kept a week for the admin's watch."
+    ),
     invitations: exported(auth),
     teams: exported(auth),
     team_members: exported(auth),

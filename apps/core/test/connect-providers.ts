@@ -14,7 +14,8 @@ import { botFrameworkKeysFake } from "../../connect/test/bot-framework-keys-fake
 import { graphEventsFake } from "../../connect/test/graph-events-fake.ts";
 import { npmRegistryFake } from "../../connect/test/npm-registry-fake.ts";
 import { osvFake } from "../../connect/test/osv-fake.ts";
-import { clients } from "../../connect/test/provider-config.ts";
+import { acmeTenant, clients } from "../../connect/test/provider-config.ts";
+import { botConnectorFake } from "./bot-connector-fake.ts";
 import { composioApiScript, composioLogoScript } from "./composio-api.ts";
 import { mailServerScript } from "./mail-server.ts";
 
@@ -125,7 +126,8 @@ export const osvAnswerUrl = "https://osv-control.test/answer";
 /**
  * Where tests publish Microsoft's Bot Framework signing keys, as
  * login.botframework.com serves them to connect: POST `{ keys }`, public
- * JWKs each with its `endorsements`.
+ * JWKs each with its `endorsements`, added to those published before (a
+ * key with the same `kid` replaced).
  */
 export const botFrameworkKeysUrl = "https://botframework-control.test/keys";
 
@@ -136,8 +138,53 @@ export const botFrameworkKeysUrl = "https://botframework-control.test/keys";
  */
 export const botFrameworkFailUrl = "https://botframework-control.test/fail";
 
+/**
+ * Where tests that post through core's own route, and so are checked
+ * against the isolate's keys, take the one signing key they share: POST
+ * `{ key }`, a private JWK with its `kid`, to have it published, and get
+ * back the key the first test file published, this one or an earlier
+ * one. Test files may share an isolate, which fetches the keys at most
+ * once a minute: one key, published before any of them posts, is always
+ * among them.
+ */
+export const botFrameworkSharedKeyUrl =
+  "https://botframework-control.test/shared-key";
+
 /** Where tests read the paths login.botframework.com was asked for, in order. */
 export const botFrameworkAskedUrl = "https://botframework-control.test/asked";
+
+/**
+ * The client's Teams bot, as core (`TEAMS_BOT_ID`) and connect
+ * (`TEAMS_BOT_*`) are set up with it in the tests, and Entra knows it.
+ */
+export const teamsBot = {
+  id: "5b1e7c2a-3f4d-4e6b-9a8c-1d2e3f4a5b6c",
+  tenant: acmeTenant,
+  secret: "acme-teams-bot-secret",
+} as const;
+
+/**
+ * Where tests set the Bot Connector's rosters: POST `{ members }`, each
+ * `<conversation id> <user id>` to the member Teams answers with.
+ */
+export const botConnectorMembersUrl =
+  "https://bot-connector-control.test/members";
+
+/**
+ * Where tests read what reached the Bot Connector, in order: `{ posted,
+ * asked }`, the activities it took (`{ conversation, activity }` each) and
+ * the roster reads (`<conversation id> <user id>` each).
+ */
+export const botConnectorPostedUrl =
+  "https://bot-connector-control.test/posted";
+
+/**
+ * Where tests remove the bot from a conversation, as uninstalling its app
+ * does: POST `{ conversation }`; the Bot Connector refuses its posts there
+ * with 403 from then on.
+ */
+export const botConnectorUninstallUrl =
+  "https://bot-connector-control.test/uninstall";
 
 /** Where tests read the paths the fake npm registry was asked for, in order. */
 export const npmAskedUrl = "https://npm-control.test/asked";
@@ -172,6 +219,9 @@ const losesAnswer = (mailbox) => {
 };
 const npm = (${npmRegistryFake.toString()})();
 const botFramework = (${botFrameworkKeysFake.toString()})();
+let botFrameworkKeys = [];
+let botFrameworkSharedKey = null;
+const botConnector = (${botConnectorFake.toString()})(${JSON.stringify(teamsBot)});
 const landscape = { grants: [], apps: [], people: [], throttle: null, failing: false };
 const directory = { users: [] };
 const hibob = { key: null, employees: [] };
@@ -382,13 +432,44 @@ export default {
     if (url.hostname === "registry.npmjs.org") {
       return await npm.answer(request);
     }
+    const fromMicrosoft = await botConnector.answer(request);
+    if (fromMicrosoft !== undefined) {
+      return fromMicrosoft;
+    }
+    if (request.method === "POST" && url.href === ${JSON.stringify(botConnectorMembersUrl)}) {
+      const { members } = await request.json();
+      botConnector.setMembers(members);
+      return new Response(null, { status: 204 });
+    }
+    if (request.method === "POST" && url.href === ${JSON.stringify(botConnectorUninstallUrl)}) {
+      const { conversation } = await request.json();
+      botConnector.uninstall(conversation);
+      return new Response(null, { status: 204 });
+    }
+    if (url.href === ${JSON.stringify(botConnectorPostedUrl)}) {
+      return Response.json({ posted: botConnector.posted, asked: botConnector.asked });
+    }
     if (url.hostname === "login.botframework.com") {
       return botFramework.answer(request);
     }
     if (request.method === "POST" && url.href === ${JSON.stringify(botFrameworkKeysUrl)}) {
+      // Added to the keys other test files published: files run at once,
+      // and each signs with keys of its own.
       const { keys } = await request.json();
-      botFramework.setKeys(keys);
+      const kids = new Set(keys.map(({ kid }) => kid));
+      botFrameworkKeys = [...botFrameworkKeys.filter(({ kid }) => !kids.has(kid)), ...keys];
+      botFramework.setKeys(botFrameworkKeys);
       return new Response(null, { status: 204 });
+    }
+    if (request.method === "POST" && url.href === ${JSON.stringify(botFrameworkSharedKeyUrl)}) {
+      if (botFrameworkSharedKey === null) {
+        const { key } = await request.json();
+        botFrameworkSharedKey = key;
+        const { kid, kty, n, e } = key;
+        botFrameworkKeys = [...botFrameworkKeys, { kid, kty, n, e, use: "sig", endorsements: ["msteams"] }];
+        botFramework.setKeys(botFrameworkKeys);
+      }
+      return Response.json({ key: botFrameworkSharedKey });
     }
     if (request.method === "POST" && url.href === ${JSON.stringify(botFrameworkFailUrl)}) {
       const { status } = await request.json();
