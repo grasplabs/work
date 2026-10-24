@@ -36,13 +36,17 @@
  * placeholder token for the mailbox's own (connect's channels.ts).
  */
 import { GmailAdapter } from "@chat-adapter/gmail";
+import { durableObjectState } from "@grasp-os/chat/state";
 import type { ChannelSigningKey } from "@grasp-os/shared/channel-keys";
 import { channelCredentialPlaceholder } from "@grasp-os/shared/connect";
-import { log } from "@grasp-os/shared/log";
+import { errorFields, log } from "@grasp-os/shared/log";
+import { Chat } from "chat";
 import type { Logger } from "chat";
 import { importJWK, jwtVerify } from "jose";
 import type { JWTHeaderParameters } from "jose";
 import { z } from "zod";
+
+import { inJurisdiction } from "../durable-objects.ts";
 
 /** Who issues the tokens Pub/Sub pushes with. */
 const googleIssuers = ["https://accounts.google.com", "accounts.google.com"];
@@ -348,4 +352,39 @@ export const ownDomainOf = (
 ): string | undefined => {
   const domain = address.slice(address.lastIndexOf("@") + 1).toLowerCase();
   return domains.includes(domain) ? domain : undefined;
+};
+
+/** How often the mailbox's watch is renewed: Gmail ends one after a week. */
+const watchEveryMs = 24 * 60 * 60 * 1000;
+
+/**
+ * Keeps Gmail telling the door of Stephen's new mail: once a day, renews
+ * the mailbox's watch on its Pub/Sub topic, which also gives the adapter
+ * where its history starts. Nothing while the mailbox or its topic isn't
+ * set up. For core's clock.
+ */
+export const renewGmailWatch = async (env: Env): Promise<void> => {
+  const setUp = gmailSetUp(env);
+  if (setUp?.topic === undefined) {
+    return;
+  }
+  const state = durableObjectState(inJurisdiction(env, env.CHAT_STATE));
+  if (!(await state.setIfNotExists("gmail:watch", true, watchEveryMs))) {
+    return;
+  }
+  const adapter = gmailAdapter(env, setUp);
+  const chat = new Chat({
+    userName: "Stephen",
+    adapters: { gmail: adapter },
+    state,
+    logger: "silent",
+  });
+  try {
+    await chat.initialize();
+    await adapter.watch(setUp.topic);
+  } catch (error) {
+    // Tried again at the next tick, not a day later.
+    await state.delete("gmail:watch");
+    log.warn("channel.gmail_watch_failed", errorFields(error));
+  }
 };
