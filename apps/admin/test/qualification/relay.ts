@@ -165,7 +165,7 @@ export const relay = (options: RelayOptions) => {
         );
       }
     }
-    // As the console sent it: the deployer token it holds is a placeholder
+    // As the admin sent it: the deployer token it holds is a placeholder
     // the proxy replaces; an asset upload's JWT is its own.
     const headers = new Headers(request.headers);
     let response: Response;

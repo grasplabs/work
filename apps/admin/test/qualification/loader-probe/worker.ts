@@ -15,7 +15,7 @@ interface Env {
 
 // Core's `sandbox` (apps/core/src/sandbox.ts), restated so the probe needs
 // none of core's modules.
-// Workers' CacheStorage, which the console's DOM lib types without `default`.
+// Workers' CacheStorage, which the admin's DOM lib types without `default`.
 const workerCaches = caches as unknown as {
   default: Cache;
   open: (name: string) => Promise<Cache>;

@@ -28,7 +28,7 @@ const migrations = await readD1Migrations(
 
 /**
  * Core's Knowledge migrations as their files hold them, for the test that
- * applies real migrations through the console's client (FTS5 tables,
+ * applies real migrations through the admin's client (FTS5 tables,
  * triggers, comments).
  */
 const knowledgeMigrationsDir = `${import.meta.dirname}/../core/src/db/knowledge/migrations`;
@@ -42,19 +42,25 @@ const knowledgeMigrationFiles = readdirSync(knowledgeMigrationsDir)
 
 /**
  * The real-account qualification (GRA-430), run by hand, never in CI:
- * `vp test --config apps/console/vite.qual.config.ts`, with
+ * `vp test --config apps/admin/vite.qual.config.ts`, with
  * CLOUDFLARE_ACCOUNT_ID, QUAL_PREFIX, QUAL_RELEASE_DIR and QUAL_LOG set,
- * Node's proxy on (NODE_USE_ENV_PROXY=1). As the console's tests, in
+ * Node's proxy on (NODE_USE_ENV_PROXY=1). As the admin's tests, in
  * workerd, with every outside call through test/qualification/relay.ts.
  *
- * The console's tests, in workerd. The Cloudflare Vite plugin (vite.config.ts)
+ * The admin's tests, in workerd. The Cloudflare Vite plugin (vite.config.ts)
  * can't run as a Vitest project, so the test pool runs the Worker instead,
  * with TanStack Start's plugin for the modules its handler loads: the tests
  * go through the real entry (src/server.ts), app included.
  */
 export default defineProject({
+  // As in every admin build (vite.config.ts, src/admin/discord-gateway.ts).
+  resolve: {
+    alias: {
+      "discord.js": `${import.meta.dirname}/src/admin/discord-gateway.ts`,
+    },
+  },
   test: {
-    name: "console-qualification",
+    name: "admin-qualification",
     include: ["test/qualification/**/*.qual.ts"],
     // The first page a test file renders loads the whole app through Vite's
     // module runner, about 2 s on an idle machine and several times that on
@@ -68,9 +74,19 @@ export default defineProject({
     // with an icon (the rollouts page's Selects) took several times as long
     // as the rest of the app: past 30 s under CI's load. Pre-bundled, it is
     // one module. React stays out of the bundle, so there is one React.
+    //
+    // The Chat SDK's Discord adapter reads discord-api-types, whose .mjs
+    // re-exports CommonJS the module runner can't load from workerd one
+    // file at a time: pre-bundled too.
     deps: {
       optimizer: {
-        ssr: { enabled: true, include: ["@grasp-os/ui > lucide-react"] },
+        ssr: {
+          enabled: true,
+          include: [
+            "@grasp-os/ui > lucide-react",
+            "@chat-adapter/discord > discord-api-types/v10",
+          ],
+        },
       },
     },
     // Checks the runtime is workerd, then brings the database up to the
@@ -102,6 +118,8 @@ export default defineProject({
           // in for (src/admin/discord.ts).
           DISCORD_PUBLIC_KEY: discordTest.publicKey,
           DISCORD_STAFF_IDS: discordTest.staffIds.join(","),
+          // workerd has no jurisdictions (src/env.d.ts).
+          DURABLE_OBJECT_JURISDICTION: "none",
           // Where provisioned clients are served (src/deploy/context.ts).
           CLIENT_DOMAIN: "qual.invalid",
           // Grasp's Rooms, which test/admin-proposal.test.ts stands in for.
@@ -113,7 +131,7 @@ export default defineProject({
           // Grasp's OAuth apps, which clients' sign-in names (src/deploy/core-config.ts).
           ENTRA_CLIENT_ID: "test-entra-app",
           GOOGLE_CLIENT_ID: "test-google-app.apps.googleusercontent.com",
-          CONSOLE_MIGRATIONS: migrations,
+          ADMIN_MIGRATIONS: migrations,
           QUAL_ACCOUNT_ID: accountId,
           QUAL_PREFIX: prefix,
           QUAL_VARIANT: process.env.QUAL_VARIANT ?? "exact",
