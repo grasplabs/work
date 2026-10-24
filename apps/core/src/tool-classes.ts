@@ -114,6 +114,17 @@ export const readToolClasses = async (
   });
 };
 
+/**
+ * The classes on for anyone in the company now: what a suite's consent
+ * asks the rights of (connect's provider-rights.ts).
+ */
+export const classesOn = async (env: Env): Promise<CompanyToolClass[]> => {
+  const settings = await readToolClasses(env);
+  return settings
+    .filter(({ audience }) => audience.who !== "nobody")
+    .map(({ toolClass }) => toolClass);
+};
+
 /** `audience` as stored: its `who`, and its teams sorted, each once. */
 const storedOf = (
   audience: ToolClassAudience
@@ -207,6 +218,14 @@ export const setToolClass = async (
       detail,
     }),
   ]);
+  if (stored.who !== "nobody") {
+    // A class on for anyone asks the grants that lack its rights to be
+    // given again (GRA-717): its own rights, not every class's, so a grant
+    // made before them isn't asked again for a class that was on already.
+    // Asked even when nothing changed here, so an admin who sets it again
+    // after a failure here gets it done.
+    await env.CONNECT.requireClassRights({ classes: [parsedClass.data] });
+  }
 };
 
 /** The audience `toolClass` has now: its row's, or the default. */

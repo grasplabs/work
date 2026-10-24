@@ -186,6 +186,17 @@ export const connectionPersonSchema = z.strictObject({
 });
 export type ConnectionPerson = z.infer<typeof connectionPersonSchema>;
 
+/** The classes a company turns on or off: all but `never`, which nothing does. */
+export const companyToolClasses = [
+  "read-own",
+  "read-company",
+  "change-own",
+  "change-company",
+  "reach-others",
+] as const satisfies readonly Exclude<ToolClass, "never">[];
+export const companyToolClassSchema = z.enum(companyToolClasses);
+export type CompanyToolClass = z.infer<typeof companyToolClassSchema>;
+
 /** Starts connecting an account through OAuth. */
 export const startConnectionSchema = z.strictObject({
   person: connectionPersonSchema,
@@ -211,6 +222,16 @@ export const startConnectionSchema = z.strictObject({
   tenant: identifierSchema.optional(),
   /** A path on the deployment's origin; core checks it. */
   returnTo: z.string().startsWith("/").max(returnPathMaxLength),
+  /**
+   * The classes the company turned on for anyone (core's tool-classes.ts):
+   * a suite asks its provider only for their rights (connect's
+   * provider-rights.ts). Absent from a core that predates them, which
+   * gets the rights of the classes on by default.
+   */
+  classes: z
+    .array(companyToolClassSchema)
+    .max(companyToolClasses.length)
+    .optional(),
 });
 export type StartConnection = z.input<typeof startConnectionSchema>;
 
@@ -807,17 +828,6 @@ export const toolClassOf = ({
   return reach === "own" ? "change-own" : "change-company";
 };
 
-/** The classes a company turns on or off: all but `never`, which nothing does. */
-export const companyToolClasses = [
-  "read-own",
-  "read-company",
-  "change-own",
-  "change-company",
-  "reach-others",
-] as const satisfies readonly Exclude<ToolClass, "never">[];
-export const companyToolClassSchema = z.enum(companyToolClasses);
-export type CompanyToolClass = z.infer<typeof companyToolClassSchema>;
-
 /** Most teams one class may be on for. */
 export const toolClassTeamsMax = 20;
 
@@ -850,6 +860,12 @@ export const defaultToolClassAudiences: Readonly<
   "change-company": { who: "nobody" },
   "reach-others": { who: "nobody" },
 };
+
+/** The classes an admin just turned on, for `ConnectApi.requireClassRights`. */
+export const requireClassRightsSchema = z.strictObject({
+  classes: z.array(companyToolClassSchema).max(companyToolClasses.length),
+});
+export type RequireClassRights = z.input<typeof requireClassRightsSchema>;
 
 /** One class, as the company has it now. */
 export interface ToolClassSetting {
@@ -1538,6 +1554,14 @@ export interface ConnectApi extends PackageRegistryApi, ChannelApi {
     connectionIds: readonly string[]
   ) => Promise<ConnectionOwner[]>;
   /**
+   * Asks the connections whose grant lacks the rights of `classes`, those
+   * an admin just turned on, to be connected again (`needs_reauth`), in
+   * place. How many it asked.
+   */
+  requireClassRights: (
+    request: RequireClassRights
+  ) => Promise<{ reconnect: number }>;
+  /**
    * Deletes the connection's tokens, revoking them at the provider where it
    * can (`revoked`); the connection takes no more calls.
    */
@@ -1927,6 +1951,8 @@ export const connectErrors = defineErrorFamily({
     "Your company hasn't turned this kind of action on for you, so it wasn't done. An admin can turn it on.",
   "connect.class_unknown":
     "It isn't known what kind of action this is, so it wasn't done.",
+  "connect.never":
+    "Grasp never deletes, shares, forwards, sets rules or settings, or pays, whatever is allowed, so it wasn't done.",
 });
 
 /**
