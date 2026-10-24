@@ -126,7 +126,8 @@ export const osvAnswerUrl = "https://osv-control.test/answer";
 /**
  * Where tests publish Microsoft's Bot Framework signing keys, as
  * login.botframework.com serves them to connect: POST `{ keys }`, public
- * JWKs each with its `endorsements`.
+ * JWKs each with its `endorsements`, added to those published before (a
+ * key with the same `kid` replaced).
  */
 export const botFrameworkKeysUrl = "https://botframework-control.test/keys";
 
@@ -198,6 +199,7 @@ const losesAnswer = (mailbox) => {
 };
 const npm = (${npmRegistryFake.toString()})();
 const botFramework = (${botFrameworkKeysFake.toString()})();
+let botFrameworkKeys = [];
 const botConnector = (${botConnectorFake.toString()})(${JSON.stringify(teamsBot)});
 const landscape = { grants: [], apps: [], people: [], throttle: null, failing: false };
 const directory = { users: [] };
@@ -425,8 +427,12 @@ export default {
       return botFramework.answer(request);
     }
     if (request.method === "POST" && url.href === ${JSON.stringify(botFrameworkKeysUrl)}) {
+      // Added to the keys other test files published: files run at once,
+      // and each signs with keys of its own.
       const { keys } = await request.json();
-      botFramework.setKeys(keys);
+      const kids = new Set(keys.map(({ kid }) => kid));
+      botFrameworkKeys = [...botFrameworkKeys.filter(({ kid }) => !kids.has(kid)), ...keys];
+      botFramework.setKeys(botFrameworkKeys);
       return new Response(null, { status: 204 });
     }
     if (request.method === "POST" && url.href === ${JSON.stringify(botFrameworkFailUrl)}) {
