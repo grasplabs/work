@@ -3981,6 +3981,7 @@ export const landscapeStagedPeople = sqliteTable(
  * over, in the order they were added. `body` is the record as
  * `brainRecordSchema` parsed it, as canonical JSON, so a record sent again
  * compares as the same text. No row names who added it: the audit log does.
+ * Never written over, but for a content purge rewriting its words.
  */
 export const brainRecords = sqliteTable(
   "brain_records",
@@ -4004,6 +4005,13 @@ export const brainRecords = sqliteTable(
     id: text().notNull(),
     body: text().notNull(),
     addedAt: timestamp("added_at").notNull(),
+    /**
+     * When a Knowledge content purge last rewrote `body` (brain-records.ts
+     * `brainRecordErasure`): the record is the company's as purged from
+     * then on, and the same id sent again is left as it is, never its
+     * words put back.
+     */
+    purgedAt: timestamp("purged_at"),
   },
   // One id is one record, whatever its type.
   (table) => [uniqueIndex("brain_records_id_idx").on(table.id)]
