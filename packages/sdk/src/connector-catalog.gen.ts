@@ -91,11 +91,11 @@ export interface ConnectorCatalog {
     };
     readonly get: {
       readonly input: { bodyType?: "text" | "html"; mailbox: string; message: string };
-      readonly output: { message: { attachments: Array<{ contentType: string | null; id: string; isInline: boolean; kind: "file" | "item" | "reference" | "other"; name: string | null; size: number }>; bcc: Array<{ address: string | null; name: string | null }>; body: { content: string; contentType: string } | null; bodyPreview: string | null; cc: Array<{ address: string | null; name: string | null }>; conversationId: string | null; folderId: string | null; from: { address: string | null; name: string | null } | null; hasAttachments: boolean; id: string; importance: string | null; internetMessageId: string | null; isDraft: boolean; isRead: boolean; mailbox: string; moreAttachments: boolean; receivedAt: string | null; replyTo: Array<{ address: string | null; name: string | null }>; sentAt: string | null; subject: string | null; to: Array<{ address: string | null; name: string | null }>; webLink: string | null } };
+      readonly output: { message: { attachments: Array<{ contentType: string | null; id: string; isInline: boolean; kind: "file" | "item" | "reference" | "other"; name: string | null; size: number }>; bcc: Array<{ address: string | null; name: string | null }>; body: { content: string; contentType: string } | null; bodyPreview: string | null; cc: Array<{ address: string | null; name: string | null }>; conversationId: string | null; flagStatus: string | null; folderId: string | null; from: { address: string | null; name: string | null } | null; hasAttachments: boolean; id: string; importance: string | null; internetMessageId: string | null; isDraft: boolean; isRead: boolean; mailbox: string; moreAttachments: boolean; receivedAt: string | null; replyTo: Array<{ address: string | null; name: string | null }>; sentAt: string | null; subject: string | null; to: Array<{ address: string | null; name: string | null }>; webLink: string | null } };
     };
     readonly list: {
-      readonly input: { folder?: string; mailbox: string; page?: string; receivedAfter?: string; search?: string; top?: number; unreadOnly?: boolean };
-      readonly output: { mailbox: string; messages: Array<{ bodyPreview: string | null; cc: Array<{ address: string | null; name: string | null }>; conversationId: string | null; folderId: string | null; from: { address: string | null; name: string | null } | null; hasAttachments: boolean; id: string; importance: string | null; internetMessageId: string | null; isDraft: boolean; isRead: boolean; mailbox: string; receivedAt: string | null; sentAt: string | null; subject: string | null; to: Array<{ address: string | null; name: string | null }>; webLink: string | null }>; nextPage: string | null };
+      readonly input: { flaggedOnly?: boolean; folder?: string; mailbox: string; page?: string; receivedAfter?: string; search?: string; top?: number; unreadOnly?: boolean };
+      readonly output: { mailbox: string; messages: Array<{ bodyPreview: string | null; cc: Array<{ address: string | null; name: string | null }>; conversationId: string | null; flagStatus: string | null; folderId: string | null; from: { address: string | null; name: string | null } | null; hasAttachments: boolean; id: string; importance: string | null; internetMessageId: string | null; isDraft: boolean; isRead: boolean; mailbox: string; receivedAt: string | null; sentAt: string | null; subject: string | null; to: Array<{ address: string | null; name: string | null }>; webLink: string | null }>; nextPage: string | null };
     };
     readonly move: {
       readonly input: { destination: string; mailbox: string; message: string };
@@ -108,6 +108,10 @@ export interface ConnectorCatalog {
     readonly send: {
       readonly input: { bcc?: Array<string>; body: string; bodyType?: "text" | "html"; cc?: Array<string>; mailbox: string; replyTo?: Array<string>; subject: string; to: Array<string> };
       readonly output: { mailbox: string; sent: true };
+    };
+    readonly thread: {
+      readonly input: { conversation: string; mailbox: string };
+      readonly output: { conversationId: string; earlierMessages: boolean; mailbox: string; messages: Array<{ body: string | null; bodyCut: boolean; bodyPreview: string | null; cc: Array<{ address: string | null; name: string | null }>; conversationId: string | null; flagStatus: string | null; folderId: string | null; from: { address: string | null; name: string | null } | null; hasAttachments: boolean; id: string; importance: string | null; internetMessageId: string | null; isDraft: boolean; isRead: boolean; mailbox: string; receivedAt: string | null; sentAt: string | null; subject: string | null; to: Array<{ address: string | null; name: string | null }>; webLink: string | null }> };
     };
   };
 }
