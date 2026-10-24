@@ -518,6 +518,7 @@ describe("a native connector", () => {
       "mail.createDraft": "change-company",
       ...calendar,
       ...files,
+      "lists.items": "read-company",
       "calendar.create": "change-own",
       "calendar.update": "change-own",
       "excel.listRows": "read-company",

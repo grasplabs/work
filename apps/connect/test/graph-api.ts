@@ -19,14 +19,20 @@ import { beforeEach } from "vite-plus/test";
 import { z } from "zod";
 
 import {
+  accessDenied,
   attachment,
   attachmentPage,
   childrenPage,
+  contract,
+  contractCount,
+  contractsList,
   conversationPage,
   downloadUrl,
   draft,
   eventDetail,
   eventPage,
+  financeSite,
+  hrSite,
   financeDrive,
   invoicePdf,
   controlText,
@@ -37,6 +43,7 @@ import {
   messagePage,
   moved,
   notFound,
+  notIndexed,
   reportText,
   searchResults,
   sharePointHost,
@@ -56,9 +63,121 @@ const drives = String.raw`^/v1\.0/drives/(?<drive>[^/]+)`;
 const tables = `${drives}/items/(?<id>[^/]+)/workbook/tables/(?<table>[^/]+)`;
 const tableRow = String.raw`${tables}/rows/itemAt\(index=(?<row>\d+)\)/range`;
 
-const parts = ["mailbox", "drive", "id", "table", "row"] as const;
+const sites = String.raw`^/v1\.0/sites/(?<site>[^/]+)`;
+
+const parts = [
+  "mailbox",
+  "drive",
+  "site",
+  "list",
+  "id",
+  "table",
+  "row",
+] as const;
 
 type Part = (typeof parts)[number];
+
+/** One condition of a list's `$filter`. */
+interface Condition {
+  column: string;
+  is: string;
+  value: string | number;
+}
+
+/** One condition of a list's `$filter`, read where the last one ended. */
+const conditionPattern =
+  /fields\/(?<column>\w+) (?<is>eq|ne|gt|ge|lt|le) (?<literal>'(?:[^']|'')*'|-?\d+(?:\.\d+)?)(?: and |$)/uy;
+
+/** A list `$filter`'s conditions, or undefined where Graph can't read it. */
+const conditionsOf = (filter: string): Condition[] | undefined => {
+  conditionPattern.lastIndex = 0;
+  const conditions: Condition[] = [];
+  while (conditionPattern.lastIndex < filter.length) {
+    const { column, is, literal } = conditionPattern.exec(filter)?.groups ?? {};
+    if (column === undefined || is === undefined || literal === undefined) {
+      return undefined;
+    }
+    const value = literal.startsWith("'")
+      ? literal.slice(1, -1).replaceAll("''", "'")
+      : Number(literal);
+    conditions.push({ column, is, value });
+  }
+  return conditions;
+};
+
+/** Whether a column's value meets a condition. */
+const meets = (actual: unknown, { is, value }: Condition): boolean => {
+  if (typeof actual !== typeof value) {
+    return is === "ne";
+  }
+  const order =
+    typeof value === "number"
+      ? Number(actual) - value
+      : String(actual).localeCompare(value);
+  const outcomes: Record<string, boolean> = {
+    eq: order === 0,
+    ne: order !== 0,
+    gt: order > 0,
+    ge: order >= 0,
+    lt: order < 0,
+    le: order <= 0,
+  };
+  return outcomes[is] ?? false;
+};
+
+/** The columns `$expand=fields($select=...)` asks for. */
+const selectedColumns = /^fields\(\$select=(?<columns>[\w,]+)\)$/u;
+
+/**
+ * Graph's page of the contracts register, as the query asks for it: the
+ * items that meet every condition, with only the columns asked for (and
+ * the two Graph always gives), `$top` of them after the `$skiptoken`'s.
+ */
+const contractPage = (
+  site: string,
+  list: string,
+  query: URLSearchParams,
+  conditions: readonly Condition[]
+) => {
+  const top = Number(query.get("$top") ?? 200);
+  const after = Number(
+    new URLSearchParams(query.get("$skiptoken") ?? "").get("p_ID") ?? 0
+  );
+  const columns = selectedColumns.exec(query.get("$expand") ?? "")?.groups
+    ?.columns;
+  const kept = new Set(["@odata.etag", "id", ...(columns?.split(",") ?? [])]);
+  const rest = Array.from({ length: contractCount }, (_, index) =>
+    contract(index + 1)
+  ).filter(({ id, fields }) => {
+    const values = new Map(Object.entries(fields));
+    return (
+      Number(id) > after &&
+      conditions.every((condition) =>
+        meets(values.get(condition.column), condition)
+      )
+    );
+  });
+  const page = rest.slice(0, top).map((listItem) => ({
+    ...listItem,
+    fields:
+      columns === undefined
+        ? listItem.fields
+        : Object.fromEntries(
+            Object.entries(listItem.fields).filter(([name]) => kept.has(name))
+          ),
+  }));
+  const last = page.at(-1)?.id;
+  const skipToken = encodeURIComponent(`Paged=TRUE&p_ID=${last}`);
+  return {
+    "@odata.context": `https://graph.microsoft.com/v1.0/$metadata#sites('${site}')/lists('${list}')/items`,
+    value: page,
+    ...(rest.length > top
+      ? {
+          "@odata.nextLink": `https://graph.microsoft.com/v1.0/sites/${site}/lists/${list}/items?%24expand=fields&%24top=${top}&%24skiptoken=${skipToken}`,
+        }
+      : {}),
+  };
+};
 
 /** The number in a message or event ID of the fixtures. */
 const numberOf = (id: string): number => Number(id.at(-2)) || 1;
@@ -339,6 +458,33 @@ const workbookRoutes: ProviderRoute<Part>[] = [
 
 const graphRoutes: ProviderRoute<Part>[] = [
   ...workbookRoutes,
+  route(
+    "GET",
+    `${sites}/lists/(?<list>[^/]+)/items`,
+    ({ site, list, query, request }) => {
+      // Graph holds a delegated token to its person's own SharePoint
+      // rights: HR's site isn't theirs to open.
+      if (site === hrSite) {
+        return json(accessDenied, 403);
+      }
+      if (site !== financeSite || list !== contractsList) {
+        return json(notFound, 404);
+      }
+      const filter = query.get("$filter");
+      const conditions = filter === null ? [] : conditionsOf(filter);
+      if (conditions === undefined) {
+        return json({ error: { code: "invalidRequest" } }, 400);
+      }
+      const prefer = request.headers.get("prefer") ?? "";
+      if (
+        filter !== null &&
+        !prefer.includes("HonorNonIndexedQueriesWarningMayFailRandomly")
+      ) {
+        return json(notIndexed, 400);
+      }
+      return json(contractPage(site, list, query, conditions));
+    }
+  ),
   route(
     "GET",
     `${users}(?:/mailFolders/[^/]+)?/messages`,
