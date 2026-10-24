@@ -148,11 +148,13 @@ describe("the Google Workspace connector's scoping", () => {
         declared.map((route) => ({ name, resource, ...route }))
     );
     // Drive and Sheets have no path per drive: their tools hold a call to
-    // the drive themselves (tested below).
+    // the drive themselves (tested below). Drafts name no resource: they go
+    // in the person's own Drive, under `drive.file` (tested below).
     const unbound = routes
       .filter(
-        ({ resource, path }) =>
+        ({ name, resource, path }) =>
           !(
+            (name === "files.createDraft" && resource === null) ||
             (resource === "mailbox" &&
               path.startsWith("/gmail/v1/users/{mailbox}/")) ||
             (resource === "calendar" &&
@@ -174,6 +176,7 @@ describe("the Google Workspace connector's scoping", () => {
         ...Object.keys(mailboxInputs),
         ...Object.keys(calendarInputs),
         ...Object.keys(driveInputs),
+        "files.createDraft",
       ].toSorted()
     );
     expect(manifest.hosts).toStrictEqual([
@@ -1168,6 +1171,160 @@ describe("the Google Workspace connector's calendar writes", () => {
       status: "needs_reauth",
       marked: [{ provider: "google", reason: "scopes_missing" }],
       sameConnection: true,
+      again: "ok",
+      made: 1,
+    });
+  });
+});
+
+/** A reply Stephen drafts. */
+const reply: Input = {
+  name: "Reply to Northwind",
+  format: "doc",
+  text: "Dear Ben,\n\nThank you for the invoice.",
+};
+
+/** A draft in the person's own Drive, under the key `key`. */
+const writeDraft = async (
+  connection: Connection,
+  key: string,
+  input: Input = reply
+) =>
+  await call(connection, "files.createDraft", input, { idempotencyKey: key });
+
+describe("the Google Workspace connector's drafts", () => {
+  it("write a Google Doc or a text file at the top of the person's own Drive, tagged with the call's key", async () => {
+    const connection = await connected();
+    const first = await outputOf(writeDraft(connection, "run-1:draft"));
+    await writeDraft(connection, "run-1:notes", {
+      name: "Notes",
+      format: "text",
+      text: "Chase 0041 on Friday.",
+    });
+    expect({
+      first,
+      drafts: google
+        .madeFiles()
+        .map(({ name, mimeType, parents, text, appProperties }) => ({
+          name,
+          mimeType,
+          parents,
+          text,
+          tagged: /^[0-9a-f]{64}$/u.test(appProperties.graspEffect ?? ""),
+        })),
+      // One upload each, nothing else written.
+      writes: requests()
+        .filter(({ method }) => method !== "GET")
+        .map(
+          ({ path, query }) => `${path}?uploadType=${query.uploadType ?? ""}`
+        ),
+    }).toStrictEqual({
+      first: {
+        id: "file-1",
+        name: "Draft from Stephen: Reply to Northwind",
+        mimeType: "application/vnd.google-apps.document",
+        webUrl: "https://docs.google.com/document/d/file-1/edit",
+      },
+      drafts: [
+        {
+          name: "Draft from Stephen: Reply to Northwind",
+          mimeType: "application/vnd.google-apps.document",
+          parents: ["root"],
+          text: "Dear Ben,\n\nThank you for the invoice.",
+          tagged: true,
+        },
+        {
+          name: "Draft from Stephen: Notes",
+          mimeType: "text/plain",
+          parents: ["root"],
+          text: "Chase 0041 on Friday.",
+          tagged: true,
+        },
+      ],
+      writes: [
+        "/upload/drive/v3/files?uploadType=multipart",
+        "/upload/drive/v3/files?uploadType=multipart",
+      ],
+    });
+  });
+
+  it("refuse a drive, a folder, a name with controls and an unknown format before anything goes out", async () => {
+    const connection = await connected();
+    const draft = { name: "Reply", format: "doc", text: "Hi" };
+    const outcomes = await Promise.all(
+      [
+        { ...draft, drive: financeDrive },
+        { ...draft, folder: fileIds.folder },
+        { ...draft, name: "Reply\u0000" },
+        { ...draft, name: " Reply" },
+        { ...draft, format: "pdf" },
+      ].map(
+        async (input, index) =>
+          await outcome(writeDraft(connection, `run-2:${index}`, input))
+      )
+    );
+    expect({
+      ran: outcomes.filter((each) => each === "ok"),
+      sent: google.sent,
+    }).toStrictEqual({ ran: [], sent: [] });
+  });
+
+  it("find a draft whose answer was lost by its key, and never make it twice", async () => {
+    const connection = await connected();
+    google.loseWriteAnswer();
+    await expect(outcome(writeDraft(connection, "run-3:draft"))).resolves.toBe(
+      "connect.outcome_unknown"
+    );
+    await claimedAgo(connection);
+    const found = await outputOf(writeDraft(connection, "run-3:draft"));
+    const lookup = requests().at(-1)?.query.q ?? "";
+    expect({
+      found,
+      made: google.madeFiles().length,
+      byKey:
+        /^appProperties has \{ key='graspEffect' and value='[0-9a-f]{64}' \} and trashed = false$/u.test(
+          lookup
+        ),
+    }).toMatchObject({
+      found: { id: "file-1", name: "Draft from Stephen: Reply to Northwind" },
+      made: 1,
+      byKey: true,
+    });
+  });
+
+  it("report a connection made before it could write drafts for reconnecting, in place, and go through once it is", async () => {
+    const person = someone();
+    const before = readOnlyCalendar.replace(
+      "calendar.events.readonly",
+      "calendar.events https://www.googleapis.com/auth/calendar.calendarlist.readonly"
+    );
+    const id = await connectAccount(providers, person, {
+      ...ownAccount(person, "google"),
+      granted: before,
+    });
+    const connection = { id, person };
+    google.failNextWrite(403, {
+      error: {
+        code: 403,
+        status: "PERMISSION_DENIED",
+        errors: [{ reason: "insufficientPermissions" }],
+      },
+    });
+    const refused = await outcome(writeDraft(connection, "run-4:draft"));
+    const status = await statusOf(connection);
+    await connectAccount(providers, person, {
+      ...ownAccount(person, "google"),
+      granted: `${before} https://www.googleapis.com/auth/drive.file`,
+    });
+    const again = await outcome(writeDraft(connection, "run-4:draft"));
+    expect({
+      refused,
+      status,
+      again,
+      made: google.madeFiles().length,
+    }).toStrictEqual({
+      refused: "connect.connection_inactive",
+      status: "needs_reauth",
       again: "ok",
       made: 1,
     });

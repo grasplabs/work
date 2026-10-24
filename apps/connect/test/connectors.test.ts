@@ -554,6 +554,8 @@ describe("a native connector", () => {
       "sheets.read": "read-company",
       // Only in the person's own calendar.
       "calendar.create": "change-own",
+      // Only in the person's own Drive.
+      "files.createDraft": "change-own",
     });
   });
 });
