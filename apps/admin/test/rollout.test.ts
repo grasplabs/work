@@ -2613,6 +2613,59 @@ describe("controlling a rollout", () => {
     });
   });
 
+  it("rolls a client back without following its core's redirect, and audits that the notice wasn't taken", async () => {
+    const before = await importedRelease("feat(core): the release before");
+    const internal = await activeClient(0, before);
+    const previous = await recordedVersionsOf(internal.clientId);
+    const release = await importedRelease("feat(core): an older core");
+    await using run = await followRollouts();
+    const rolloutId = await rollOut(release, { scope: "ring", ring: 0 });
+    await run.waitForStatus("complete");
+    // A core, or a hop in front of it, that sends the signed notice on.
+    internal.account.redirectsTo = "https://elsewhere.example";
+    const warn = vi.spyOn(console, "warn").mockReturnValue();
+    await using rollbacks = await followRollbacks();
+
+    try {
+      await rollbacks.rollBack(rolloutId, internal.clientId);
+    } finally {
+      warn.mockRestore();
+    }
+
+    const unrecorded = await db
+      .select({ target: auditEvents.target, detail: auditEvents.detail })
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.clientId, internal.clientId),
+          eq(auditEvents.action, "rollout.activity_unrecorded")
+        )
+      );
+    expect({
+      live: await liveVersionsOf(internal.clientId, internal.account),
+      targets: await targetsOf(rolloutId),
+      notices: internal.account.notices,
+      redirected: cloudflare.redirected(),
+      unrecorded: unrecorded.map(({ target, detail }) => ({
+        target,
+        detail: parsedDetail(detail),
+      })),
+    }).toStrictEqual({
+      live: previous,
+      targets: {
+        [internal.clientId]: { ring: 0, status: "rolled_back", error: null },
+      },
+      notices: [],
+      redirected: [],
+      unrecorded: [
+        {
+          target: previous.core,
+          detail: { what: "rollback", error: "core_307" },
+        },
+      ],
+    });
+  });
+
   it("rolls a client back even when the keys to tell its core are missing, auditing that it didn't", async () => {
     const before = await importedRelease("feat(core): the release before");
     const internal = await activeClient(0, before);
