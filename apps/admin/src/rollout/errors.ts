@@ -51,6 +51,12 @@ export const rolloutErrorCodes = [
    * could bring a retired provider key back.
    */
   "shared_secret_replaced",
+  /**
+   * A secret of the client's own, sealed in the admin (its Teams bot's),
+   * that its previous versions run was replaced since: going back could
+   * bring a revoked bot secret back.
+   */
+  "sealed_secret_replaced",
   /** Another runner (provisioning, another rollout, a rollback) has the client. */
   "client_busy",
   /** The rollback's run failed or was ended before it finished. */

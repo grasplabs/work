@@ -1,4 +1,5 @@
 import { actorOf, createAuditEvent } from "@grasp-os/shared/audit";
+import type { AuditActor } from "@grasp-os/shared/audit";
 import type { Gap } from "@grasp-os/shared/brain";
 import {
   brainGapAnswerSchema,
@@ -428,7 +429,7 @@ const countGapAnswers = async (
  */
 const rewriteGapAnswers = async (
   env: Env,
-  person: Identity,
+  actor: AuditActor,
   rewrite: (text: string) => string
 ): Promise<number> => {
   const db = drizzle(env.DB);
@@ -459,7 +460,7 @@ const rewriteGapAnswers = async (
     update(first),
     ...rest.map(update),
     outboxed(db, {
-      actor: actorOf(person),
+      actor,
       action: "brain.gap.answers_purged",
       target: { type: "brain", id: "playbook" },
       detail: { gaps: changed.length },
@@ -474,7 +475,7 @@ const rewriteGapAnswers = async (
  */
 const eraseGapAnswerer = async (
   env: Env,
-  person: Identity,
+  actor: AuditActor,
   userId: string
 ): Promise<void> => {
   const db = drizzle(env.DB);
@@ -484,7 +485,7 @@ const eraseGapAnswerer = async (
       .set({ answeredBy: null })
       .where(inArray(brainGapStates.answeredBy, [userId])),
     outboxedIfChanged(db, {
-      actor: actorOf(person),
+      actor,
       action: "brain.gap.answerer_erased",
       target: { type: "user", id: userId },
     }),
@@ -495,12 +496,14 @@ const eraseGapAnswerer = async (
  * The gap answers as a Knowledge purge reaches them: they hold people's
  * words too, so a purge rewrites them and forgets who gave them.
  */
-export const gapAnswerErasure = (env: Env): OnErase => ({
+export const gapAnswerErasure = (
+  env: Env
+): Pick<OnErase, "count" | "rewrite" | "forgetActor"> => ({
   count: async (holds) => await countGapAnswers(env, holds),
-  rewrite: async (person, rewrite) => {
-    await rewriteGapAnswers(env, person, rewrite);
+  rewrite: async (by, rewrite) => {
+    await rewriteGapAnswers(env, by.actor, rewrite);
   },
-  forgetActor: async (person, userId) => {
-    await eraseGapAnswerer(env, person, userId);
+  forgetActor: async (by, userId) => {
+    await eraseGapAnswerer(env, by.actor, userId);
   },
 });

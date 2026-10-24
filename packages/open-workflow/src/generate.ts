@@ -1494,10 +1494,11 @@ const modelCallOf = (
 };
 
 /**
- * The most recipients a decision has: a decision asks one person, team
- * or role (core's decision service keeps one set of deciders a decision).
+ * The most recipients a decision has: as many as a decision binding names
+ * deciders. Any of them answers it, the first answer the only one (core's
+ * workflows/resource-decisions.ts holds an expression's list to the same).
  */
-export const maxDecisionRecipients = 1;
+export const maxDecisionRecipients = 16;
 
 /**
  * A `grasp.decision` task's call: its parts' templates (`part`), and its

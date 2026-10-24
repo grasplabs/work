@@ -55,6 +55,10 @@ export const onboardingSummaryOf = async ({
       [platformUpdateSignatureHeader]: signature,
     },
     body,
+    // Never followed: a redirect would send the signed body and the router
+    // secret wherever it points, and take what answers there for the
+    // core's answer. A 3xx isn't ok, so it reads as unknown (`null`).
+    redirect: "manual",
     signal,
   });
   if (response.status === 404) {

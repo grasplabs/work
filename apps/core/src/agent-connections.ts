@@ -1,5 +1,8 @@
+import { agentErrors } from "@grasp-os/shared/agent";
+import type { ChatToolOutcome } from "@grasp-os/shared/chat";
 import { connectErrors } from "@grasp-os/shared/connect";
 import type {
+  ActionShape,
   ConnectResult,
   HeldOutcome,
   PendingReference,
@@ -19,8 +22,11 @@ import {
   chatAuthority,
   chatContext,
   connectionRead,
+  endedBy,
   recordSources,
+  recordToolCall,
   requireOpenRun,
+  runRefusal,
 } from "./agent-scope.ts";
 import type { AgentApi, AgentScope } from "./agent-scope.ts";
 import {
@@ -30,6 +36,7 @@ import {
   signedStubCall,
 } from "./bindings.ts";
 import type { ConnectionGrant } from "./bindings.ts";
+import { readsMail, textsOf } from "./channels/stephen-rules.ts";
 import { askInChat, askableConnections } from "./chat-connections.ts";
 import type { AskableConnection, AskedConnection } from "./chat-connections.ts";
 import { connectionOwnersOf } from "./connections.ts";
@@ -87,6 +94,18 @@ export interface AgentCallOutcome {
 }
 
 /** `outcome` as a chat's code reads it; read outputs are JSON text. */
+/** How the chat shows a read of a held call's outcome: as the call stands. */
+const heldShown = (
+  outcome: HeldOutcome
+): { outcome: ChatToolOutcome; reason: string | null } | undefined => {
+  if (outcome.state === "failed") {
+    return { outcome: "failed", reason: outcome.reason };
+  }
+  return outcome.state === "waiting"
+    ? { outcome: "pending", reason: null }
+    : undefined;
+};
+
 const callOutcome = (outcome: HeldOutcome): AgentCallOutcome => {
   if (outcome.state === "done") {
     return {
@@ -147,6 +166,69 @@ const heldInChat = async (env: Env, scope: AgentScope): Promise<void> => {
       chatId: scope.chatId,
       ...errorFields(error),
     });
+  }
+};
+
+/** Whether the chat came through a chat platform, not Grasp's own app. */
+const fromChatApp = (scope: AgentScope): boolean =>
+  scope.via !== undefined && scope.via !== "web";
+
+/**
+ * In a chat that came through a chat platform: what connect goes by for
+ * `action` (`ActionShape`), after refusing a write the chat's person
+ * didn't give the values of (channels/stephen-rules.ts) before connect
+ * holds it. `undefined` in Grasp's own app, where the person sees the
+ * whole call in Grasp before confirming it.
+ */
+const checkedForChatApp = async (
+  env: Env,
+  scope: AgentScope,
+  grant: ConnectionGrant,
+  action: unknown,
+  input: unknown
+): Promise<ActionShape | undefined> => {
+  if (!fromChatApp(scope)) {
+    return undefined;
+  }
+  const shape = await env.CONNECT.actionShape({
+    connectionId: grant.connection.connectionId,
+    action: permissionActionSchema.parse(action),
+  });
+  if (shape.readOnly) {
+    return shape;
+  }
+  const refusal = await workspace(env, scope.workspaceId).heldWriteRefusal(
+    scope.chatId,
+    input,
+    shape.inputs
+  );
+  if (refusal !== undefined) {
+    throw agentErrors.create(refusal);
+  }
+  return shape;
+};
+
+/**
+ * Keeps what a read of a chat platform's chat returned with the chat, that
+ * its later writes are traced to, and what it read for the turn's check
+ * line. A run that ended since the call began keeps nothing, and the call
+ * is refused.
+ */
+const keptForChatApp = async (
+  env: Env,
+  scope: AgentScope,
+  action: string,
+  shape: ActionShape,
+  output: unknown
+): Promise<void> => {
+  const kept = await workspace(env, scope.workspaceId).keepRead(
+    scope.chatId,
+    scope.runId,
+    textsOf(output),
+    { read: readsMail(action) ? "mail" : "record", where: shape.provider }
+  );
+  if (kept !== "open") {
+    throw runRefusal(kept);
   }
 };
 
@@ -278,7 +360,7 @@ export class ConnectionsApi extends WorkerEntrypoint<Env, AgentScope> {
     await requireOpenRun(this.env, scope, "connections.call");
     // Everything before connect sees the call: refused here, it is
     // recorded here, once; what connect takes, connect records.
-    const { grant, request } = await (async () => {
+    const { grant, request, shape } = await (async () => {
       const named = await this.#grantNamed(connection);
       const signed = await signedStubCall(
         this.env,
@@ -286,7 +368,14 @@ export class ConnectionsApi extends WorkerEntrypoint<Env, AgentScope> {
         named,
         [action, input]
       );
-      return { grant: named, request: signed };
+      const checked = await checkedForChatApp(
+        this.env,
+        scope,
+        named,
+        action,
+        input
+      );
+      return { grant: named, request: signed, shape: checked };
     })().catch(
       async (error: unknown) =>
         await auditRefusal(
@@ -301,18 +390,39 @@ export class ConnectionsApi extends WorkerEntrypoint<Env, AgentScope> {
           forSandbox(error)
         )
     );
-    let result: ConnectResult;
+    // Connect records the call in the audit log; the chat shows it here.
+    const shown = {
+      method: "connections.call",
+      detail: {
+        connection: typeof connection === "string" ? connection : null,
+        action: typeof action === "string" ? action : null,
+      },
+    };
     try {
       // Admitted as it goes to connect, not only as the call began; a
       // refusal here is recorded here, as nothing else records this call.
       await admitEffect(this.env, scope, "connections.call");
+    } catch (error) {
+      throw forSandbox(error);
+    }
+    let result: ConnectResult;
+    try {
       result = await this.env.CONNECT.call(request);
     } catch (error) {
+      await recordToolCall(this.env, scope, shown, endedBy(error));
       throw forSandbox(error);
     }
     if (result.pending !== undefined) {
       await heldInChat(this.env, scope);
+      await recordToolCall(this.env, scope, shown, {
+        outcome: "pending",
+        reason: null,
+      });
       return { output: null, pending: result.pending };
+    }
+    const output: unknown = JSON.parse(result.output);
+    if (shape !== undefined) {
+      await keptForChatApp(this.env, scope, request.action, shape, output);
     }
     // The run's result rests on this grant's action and resource, not on
     // the connection: another grant left on it doesn't let it through.
@@ -330,7 +440,8 @@ export class ConnectionsApi extends WorkerEntrypoint<Env, AgentScope> {
         ),
       ]
     );
-    return { output: JSON.parse(result.output), pending: null };
+    await recordToolCall(this.env, scope, shown);
+    return { output, pending: null };
   }
 
   /**
@@ -394,15 +505,26 @@ export class ConnectionsApi extends WorkerEntrypoint<Env, AgentScope> {
           forSandbox(error)
         )
     );
+    const shown = {
+      method: "connections.outcome",
+      detail: { pendingActionId: id.success ? id.data : null },
+    };
     let outcome: HeldOutcome;
     try {
       outcome = await this.env.CONNECT.heldOutcome(request);
     } catch (error) {
+      await recordToolCall(this.env, scope, shown, endedBy(error));
       throw forSandbox(error);
     }
     if (outcome.state === "done" || outcome.state === "failed") {
       await recordSources(this.env, scope, [request.connectionId], [], [read]);
     }
+    await recordToolCall(
+      this.env,
+      scope,
+      { ...shown, detail: { ...shown.detail, status: outcome.state } },
+      heldShown(outcome)
+    );
     return callOutcome(outcome);
   }
 }

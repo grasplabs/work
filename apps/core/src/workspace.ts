@@ -15,18 +15,21 @@ import type {
 } from "@grasp-os/shared/audit";
 import {
   chatChannelSchema,
+  chatToolEventsKept,
   projectDocumentMaxBytes,
   projectDocumentsMax,
   projectsMax,
 } from "@grasp-os/shared/chat";
 import type {
   ChatChannel,
+  ChatCitedDocument,
   ChatDraft,
   ChatMessage,
   ChatProject,
   ChatOutput,
   ChatProvenance,
   ChatSummary,
+  ChatToolEvent,
   ProjectDocument,
   ProjectDocumentInput,
 } from "@grasp-os/shared/chat";
@@ -98,12 +101,19 @@ import type {
   BuildJobOpening,
   BuildJobRow,
 } from "./build-job-records.ts";
+import {
+  channelText,
+  heldWriteRefusal,
+  turnCheckOf,
+} from "./channels/stephen-rules.ts";
+import type { HeldWriteRefusal, TurnCheck } from "./channels/stephen-rules.ts";
 import { revokeChatPermissions } from "./chat-connections.ts";
 import {
   chatMessageOf,
   coreMessageProvider,
   partialOf,
 } from "./chat-messages.ts";
+import { toolCallSchema, toolEventOf } from "./chat-tool-events.ts";
 import { ChatWatch } from "./chat-watch.ts";
 import type { ChatListener, ChatState } from "./chat-watch.ts";
 import {
@@ -130,6 +140,7 @@ import {
   chatProjects,
   chatRunSources,
   chatSources,
+  chatToolEvents,
   chats,
   dashboardWidgets,
   dashboards,
@@ -139,7 +150,7 @@ import { readableSources, withheldSourceDetail } from "./history-access.ts";
 import { readAsDelegate } from "./knowledge/binding.ts";
 import { forContext } from "./knowledge/memory.ts";
 import { hasBrainGrant } from "./knowledge/recall-store.ts";
-import { catalog, noteListedSkills } from "./knowledge/tools.ts";
+import { catalog, cited, noteListedSkills } from "./knowledge/tools.ts";
 import { gatewaySettings, models } from "./models.ts";
 import { functionProblem, PreviewReports } from "./preview-reports.ts";
 import type { Reports } from "./preview-reports.ts";
@@ -195,6 +206,8 @@ interface LiveTurn {
   id: string;
   events: Message[];
   notices: Set<string>;
+  /** What the turn read through connections, for its check line. */
+  reads: TurnCheck[];
 }
 
 /** A build job, with the chat's agent and person it acts for. */
@@ -312,8 +325,24 @@ export interface AnswerProvenance {
   restricted: boolean;
 }
 
-/** A turn's result, labelled with what it may hold. */
-export type Answer = TurnResult & { provenance: AnswerProvenance };
+/**
+ * A turn's result, labelled with what it may hold, with the documents its
+ * answer cites: those its chat's code was given before it that it links
+ * to, each while the chat's agent may still read it for its person
+ * (`ChatCitedDocument`). A channel shows them as the answer's sources.
+ */
+export type Answer = TurnResult & {
+  provenance: AnswerProvenance;
+  cited: ChatCitedDocument[];
+  /**
+   * In a chat that came through a chat platform: what the turn read, as a
+   * held write's card says it on its check line (`turnCheckOf`), and the
+   * mark of the text that told the model how to answer there
+   * (`channelText`). Both `null` in Grasp's own app.
+   */
+  check: TurnCheck | null;
+  channelText: string | null;
+};
 
 /**
  * A stored message, as pi shapes it. Stored by this object only, so the
@@ -376,6 +405,9 @@ export interface CodeRunOpening {
  * a few collections or a connection, each an identifier.
  */
 const sourcesSchema = z.array(identifierSchema).max(auditProvenanceMaxItems);
+
+/** What a chat read, as `keepRead` keeps it (`trace:<chat>`). */
+const traceSchema = z.array(z.string());
 
 /**
  * Longest source a run's result rests on: a connection call's names its
@@ -457,6 +489,17 @@ const stopReason = (chatId: ChatId, error: unknown): string => {
  * the wake knows what the turn itself stored.
  */
 const turnKeyPrefix = "turn:";
+
+/**
+ * What a chat that came through a chat platform read, as `trace:<chat>`:
+ * each text value its connection reads returned, newest first, that its
+ * writes are traced to before they are held (channels/stephen-rules.ts).
+ * Kept across turns, up to {@link traceCharsMax}, oldest dropped first.
+ */
+const traceKeyPrefix = "trace:";
+
+/** Most characters of what a chat read that its writes are traced to. */
+const traceCharsMax = 200_000;
 
 /**
  * What a chat says in place of the answer a restart cut short: the person
@@ -736,8 +779,11 @@ export class Workspace extends DurableObject<Env> {
     });
   }
 
-  /** Stores `message` as the chat's next, and shows it to its watchers. */
-  #keep(chatId: ChatId, message: Message): void {
+  /**
+   * Stores `message` as the chat's next, and shows it to its watchers;
+   * its ID.
+   */
+  #keep(chatId: ChatId, message: Message): number {
     const { id, createdAt } = this.#db
       .insert(chatMessages)
       .values({
@@ -760,6 +806,7 @@ export class Workspace extends DurableObject<Env> {
       this.#outputs.delete(chatId);
     }
     this.#changed(chatId, shown === undefined ? [] : [shown]);
+    return id;
   }
 
   /**
@@ -1065,6 +1112,7 @@ export class Workspace extends DurableObject<Env> {
       id: crypto.randomUUID(),
       events: [],
       notices: new Set(),
+      reads: [],
     };
     this.#turns.set(chat.id, live);
     // Marked in storage as long as it is in `#turns`, however it ends.
@@ -1111,6 +1159,8 @@ export class Workspace extends DurableObject<Env> {
       this.#builds.delete(chat.id);
       started?.();
       this.#changed(chat.id);
+      // The turn's answer is the last response it keeps.
+      let answer: number | undefined;
       const result = await runTurn({
         history: this.#transcript(chat.id),
         question: parsed.data.text,
@@ -1151,7 +1201,10 @@ export class Workspace extends DurableObject<Env> {
           if (message.role === "assistant") {
             this.#partials.delete(chat.id);
           }
-          this.#keep(chat.id, message);
+          const id = this.#keep(chat.id, message);
+          if (message.role === "assistant") {
+            answer = id;
+          }
         },
         write: (partial) => {
           this.#partials.set(chat.id, partial);
@@ -1164,6 +1217,10 @@ export class Workspace extends DurableObject<Env> {
           sources: this.#sources(chat.id),
           restricted: this.isChatRestricted(chat.id) === true,
         },
+        cited:
+          answer === undefined ? [] : await this.#citedOrNone(scope, answer),
+        check: via === "web" ? null : turnCheckOf(live.reads),
+        channelText: context.channel?.mark ?? null,
       };
     } finally {
       this.ctx.storage.kv.delete(`${turnKeyPrefix}${chat.id}`);
@@ -1293,8 +1350,11 @@ export class Workspace extends DurableObject<Env> {
         turn: true,
       },
     });
-    const inProject = this.#chat(work.chatId).projectId !== null;
-    return { memory, skills, inProject };
+    const { projectId, via } = this.#chat(work.chatId);
+    const inProject = projectId !== null;
+    // A chat that came through a chat platform: how to answer there.
+    const channel = via === "web" ? undefined : await channelText();
+    return { memory, skills, inProject, channel };
   }
 
   /**
@@ -1644,6 +1704,72 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
+   * Keeps one call of the chat's code run `runId` as the chat shows it
+   * (`ChatToolEvent`), under the code step that made it, from the run's
+   * own record, and tells the chat's watchers. Only for a run this object
+   * still knows (open, or closed lately): a run from before a restart, or
+   * another chat's, keeps nothing. Never refuses the call it describes.
+   */
+  recordToolCall(chatId: ChatId, runId: string, call: unknown): void {
+    const parsed = toolCallSchema.safeParse(call);
+    if (!(parsed.success && this.#codeRuns.has(`${chatId}/${runId}`))) {
+      return;
+    }
+    const event = this.ctx.storage.transactionSync(() => {
+      const run = this.#db
+        .select({ callId: chatCodeRuns.toolCallId })
+        .from(chatCodeRuns)
+        .where(and(eq(chatCodeRuns.id, runId), eq(chatCodeRuns.chatId, chatId)))
+        .get();
+      if (run === undefined) {
+        return null;
+      }
+      const row = {
+        chatId,
+        callId: run.callId,
+        event: JSON.stringify(parsed.data),
+        createdAt: new Date(),
+      };
+      const { id } = this.#db
+        .insert(chatToolEvents)
+        .values(row)
+        .returning({ id: chatToolEvents.id })
+        .get();
+      // The chat keeps its latest calls only.
+      this.#db
+        .delete(chatToolEvents)
+        .where(
+          and(
+            eq(chatToolEvents.chatId, chatId),
+            sql`${chatToolEvents.id} NOT IN (SELECT ${chatToolEvents.id} FROM ${chatToolEvents} WHERE ${chatToolEvents.chatId} = ${chatId} ORDER BY ${chatToolEvents.id} DESC LIMIT ${chatToolEventsKept})`
+          )
+        )
+        .run();
+      return toolEventOf({ id, ...row }) ?? null;
+    });
+    if (event === null) {
+      return;
+    }
+    for (const watch of this.#watchers.get(chatId)?.values() ?? []) {
+      watch.push([], [event]);
+    }
+  }
+
+  /** The calls of the chat's code it keeps, oldest first. */
+  #toolEvents(chatId: ChatId): ChatToolEvent[] {
+    return this.#db
+      .select()
+      .from(chatToolEvents)
+      .where(eq(chatToolEvents.chatId, chatId))
+      .orderBy(asc(chatToolEvents.id))
+      .all()
+      .flatMap((row) => {
+        const event = toolEventOf(row);
+        return event === undefined ? [] : [event];
+      });
+  }
+
+  /**
    * Whether a code run of the chat may have a write admitted now, without
    * counting a call: `open` with when it opened, or why not. The check a
    * write makes as it commits, after its call was let in.
@@ -1911,6 +2037,74 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
+   * Keeps what a connection read of a code run of a chat platform's chat
+   * returned (`values`, its text values), that the chat's later writes are
+   * traced to, and, while its turn is under way, what it read for the
+   * turn's check line (`check`). Why not, and nothing kept, once the run
+   * has ended or a revocation closed it (`open` when kept).
+   */
+  keepRead(
+    chatId: ChatId,
+    runId: string,
+    values: readonly string[],
+    check: TurnCheck
+  ): CodeRunAdmission["call"] {
+    const { call } = this.admitFromCodeRun(chatId, runId);
+    if (call !== "open") {
+      return call;
+    }
+    this.#turns.get(chatId)?.reads.push(check);
+    const key = `${traceKeyPrefix}${chatId}`;
+    const kept = traceSchema.safeParse(this.ctx.storage.kv.get(key));
+    const trace: string[] = [];
+    let chars = 0;
+    for (const value of new Set([
+      ...values,
+      ...(kept.success ? kept.data : []),
+    ])) {
+      if (chars + value.length > traceCharsMax) {
+        continue;
+      }
+      chars += value.length;
+      trace.push(value);
+    }
+    this.ctx.storage.kv.put(key, trace);
+    return call;
+  }
+
+  /**
+   * Why a write of a chat platform's chat can't be held, or `undefined`
+   * when it can (channels/stephen-rules.ts): `input`, against the fields
+   * its action takes (`inputs`), traced to what the chat's person said in
+   * it and what it read (`keepRead`).
+   */
+  heldWriteRefusal(
+    chatId: ChatId,
+    input: unknown,
+    inputs: readonly string[] | null
+  ): HeldWriteRefusal | undefined {
+    const kept = traceSchema.safeParse(
+      this.ctx.storage.kv.get(`${traceKeyPrefix}${chatId}`)
+    );
+    const said = this.#transcript(chatId)
+      .flatMap((message) => {
+        if (message.role !== "user") {
+          return [];
+        }
+        return typeof message.content === "string"
+          ? [message.content]
+          : message.content.flatMap((part) =>
+              part.type === "text" ? [part.text] : []
+            );
+      })
+      .join("\n");
+    return heldWriteRefusal(input, inputs, {
+      said,
+      read: kept.success ? kept.data : [],
+    });
+  }
+
+  /**
    * Keeps `documentIds` as given to the chat's code: each once, after the
    * chat's last message when it first was, then drops the oldest past
    * {@link chatDocumentsMax}: given after an earlier message, or in an
@@ -1961,6 +2155,94 @@ export class Workspace extends DurableObject<Env> {
       const givenAfter = given.get(documentId);
       return givenAfter !== undefined && messageId > givenAfter;
     };
+  }
+
+  /**
+   * The documents the chat's message `messageId` cites, as `personId`'s
+   * page shows them under it (`ChatsApi.cited`): only in their own chat.
+   */
+  async cited(
+    chatId: unknown,
+    personId: string,
+    messageId: unknown
+  ): Promise<ChatCitedDocument[]> {
+    const chat = this.#ownChat(chatId, personId);
+    const id = z.int().positive().safeParse(messageId);
+    if (!id.success) {
+      return [];
+    }
+    const workspaceId = workspaceIdSchema.parse(this.ctx.id.name);
+    const scope = {
+      workspaceId,
+      agentId: chat.agentId,
+      chatId: chat.id,
+      personId,
+    };
+    return await this.#cited(scope, id.data);
+  }
+
+  /**
+   * The documents the chat's answer `messageId` cites (`citedIn`), each
+   * looked up now as the chat's agent acting for its person, so one either
+   * may no longer read is left out; none for a message that isn't an
+   * answer, or one that cites nothing.
+   */
+  async #cited(
+    scope: Pick<AgentScope, "workspaceId" | "agentId" | "chatId" | "personId">,
+    messageId: number
+  ): Promise<ChatCitedDocument[]> {
+    const stored = this.#db
+      .select()
+      .from(chatMessages)
+      .where(
+        and(
+          eq(chatMessages.chatId, scope.chatId),
+          eq(chatMessages.id, messageId)
+        )
+      )
+      .get();
+    const shown =
+      stored === undefined
+        ? undefined
+        : chatMessageOf(
+            stored.id,
+            storedMessageSchema.parse(JSON.parse(stored.message)),
+            stored.createdAt,
+            this.#givenBy(scope.chatId)(stored.id)
+          );
+    if (shown?.role !== "assistant" || shown.citations.length === 0) {
+      return [];
+    }
+    const documentIds = shown.citations.map(({ documentId }) => documentId);
+    return await readAsDelegate(
+      this.env,
+      chatAuthority(scope),
+      chatContext(scope),
+      undefined,
+      async (reader) => await cited(this.env, reader, documentIds)
+    );
+  }
+
+  /**
+   * `#cited` for a turn that has answered: the answer is stored and shown
+   * by then, so documents that can't be looked up now (Knowledge's
+   * database, or what the agent may read, failing) leave the turn's result
+   * without any, and never fail an answered turn. The page asks again
+   * (`cited`).
+   */
+  async #citedOrNone(
+    scope: Pick<AgentScope, "workspaceId" | "agentId" | "chatId" | "personId">,
+    messageId: number
+  ): Promise<ChatCitedDocument[]> {
+    try {
+      return await this.#cited(scope, messageId);
+    } catch (error) {
+      log.warn("agent.cited_failed", {
+        chatId: scope.chatId,
+        ...errorFields(error),
+      });
+      return [];
+    }
   }
 
   /**
@@ -2649,6 +2931,10 @@ export class Workspace extends DurableObject<Env> {
           .run();
         this.#db.delete(chatCodeRuns).where(eq(chatCodeRuns.chatId, id)).run();
         this.#db
+          .delete(chatToolEvents)
+          .where(eq(chatToolEvents.chatId, id))
+          .run();
+        this.#db
           .delete(chatAttachments)
           .where(eq(chatAttachments.chatId, id))
           .run();
@@ -2657,6 +2943,7 @@ export class Workspace extends DurableObject<Env> {
           eq(chatDrafts.chatId, id)
         );
         this.#db.delete(chats).where(eq(chats.id, id)).run();
+        this.ctx.storage.kv.delete(`${traceKeyPrefix}${id}`);
         this.#outboxed(by, "chat.deleted", id, { declined });
       });
       this.#deliverAudit();
@@ -2714,7 +3001,7 @@ export class Workspace extends DurableObject<Env> {
     const watchers = this.#watchers.get(id) ?? new Map<string, ChatWatch>();
     watchers.set(watchId, watch);
     this.#watchers.set(id, watchers);
-    watch.push(this.#shownAfter(id, since.data ?? 0));
+    watch.push(this.#shownAfter(id, since.data ?? 0), this.#toolEvents(id));
     return watchId;
   }
 

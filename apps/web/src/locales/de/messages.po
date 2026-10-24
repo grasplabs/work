@@ -1466,6 +1466,10 @@ msgstr "{vendor} · Nutzung unbekannt"
 msgid "{visible, plural, one {# shown. Drag to reorder.} other {# shown. Drag to reorder.}}"
 msgstr "{visible, plural, one {# angezeigt. Zum Sortieren ziehen.} other {# angezeigt. Zum Sortieren ziehen.}}"
 
+#: src/onboarding/setup-steps.tsx
+msgid "{waiting, plural, one {# person new on your list gets a link once you confirm your organization.} other {# people new on your list get their links once you confirm your organization.}}"
+msgstr "{waiting, plural, one {# neue Person auf Ihrer Liste bekommt einen Link, sobald Sie Ihre Organisation bestätigen.} other {# neue Personen auf Ihrer Liste bekommen ihre Links, sobald Sie Ihre Organisation bestätigen.}}"
+
 #: src/dashboard/nav-item.tsx
 msgid "{waiting, plural, one {# thing waiting} other {# things waiting}}"
 msgstr "{waiting, plural, one {# Sache wartet} other {# Sachen warten}}"
@@ -1477,6 +1481,10 @@ msgstr "{waiting, plural, one {# wartender Lauf} other {# wartende Läufe}} von 
 #: src/workflows/workflows-table.tsx
 msgid "{waiting, plural, one {# waiting} other {# waiting}}"
 msgstr "{waiting, plural, one {# wartet} other {# warten}}"
+
+#: src/workflows/nav-item.tsx
+msgid "{waiting, plural, one {# workflow needs you} other {# workflows need you}}"
+msgstr "{waiting, plural, one {# Workflow braucht Sie} other {# Workflows brauchen Sie}}"
 
 #: src/routes/_shell.onboarding.agreements.tsx
 msgid "{waiting, plural, one {All three in place, or no link goes out: # link waits.} other {All three in place, or no link goes out: # links wait.}}"
@@ -1719,6 +1727,10 @@ msgstr "Eine neue Vorlage"
 #: src/screens/screen-frame.tsx
 msgid "A new version of this domain is available."
 msgstr "Eine neue Version dieser Domäne ist verfügbar."
+
+#: src/settings/chat-accounts.tsx
+msgid "A newer link was sent since. Open the latest one from the chat app."
+msgstr "Seitdem wurde ein neuerer Link gesendet. Öffnen Sie den neuesten aus der Chat-App."
 
 #: src/onboarding/work-record.tsx
 msgid "A normal one takes {normal} hours. The quickest took {least}, the longest {most}."
@@ -2506,6 +2518,7 @@ msgstr "Überall"
 #: src/dashboard/dependency-requests.tsx
 #: src/engines/screen-approval.tsx
 #: src/inbox/items.ts
+#: src/routes/_shell.apps.$app.tsx
 #: src/routes/_shell.settings.packages.index.tsx
 msgid "App"
 msgstr "App"
@@ -2539,6 +2552,7 @@ msgstr "App-Genehmigung"
 msgid "App name"
 msgstr "App-Name"
 
+#: src/routes/_shell.apps.$app.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 #: src/routes/_shell.landscape.$appId.tsx
 msgid "App not found"
@@ -2901,6 +2915,10 @@ msgstr "vom Agenten angefragt, in dessen Chat"
 msgid "Asked the agent to fix a run"
 msgstr "Den Agenten gebeten, einen Lauf zu beheben"
 
+#: src/activity/audit-words.ts
+msgid "Asked to send, edit or delete a chat app message as the company's bot"
+msgstr "Das Senden, Bearbeiten oder Löschen einer Chat-App-Nachricht als Bot des Unternehmens angefragt"
+
 #: src/routes/_shell.onboarding.organization.$team.tsx
 msgid "Asked which work they do"
 msgstr "Wird gefragt, welche Arbeit sie macht"
@@ -2981,6 +2999,10 @@ msgstr "Zurück"
 #: src/brain/atlas-overlays.tsx
 msgid "Back to {destination}"
 msgstr "Zurück zu {destination}"
+
+#: src/engines/app-page.tsx
+msgid "Back to a draft, for its builders alone"
+msgstr "Zurück zum Entwurf, nur für seine Ersteller"
 
 #: src/dashboard/widget-board.tsx
 msgid "Back to how it began"
@@ -3581,6 +3603,14 @@ msgstr "Chat"
 msgctxt "the chat beside an App being built"
 msgid "Chat"
 msgstr "Chat"
+
+#: src/settings/chat-accounts.tsx
+msgid "Chat apps"
+msgstr "Chat-Apps"
+
+#: src/settings/chat-accounts.tsx
+msgid "Chat apps where Grasp knows it’s you. Write to Grasp in one, and it sends you a link to connect your account here. Unlink one you no longer use."
+msgstr "Chat-Apps, in denen Grasp weiß, dass Sie es sind. Schreiben Sie Grasp in einer davon, und es sendet Ihnen einen Link, um Ihr Konto hier zu verknüpfen. Heben Sie die Verknüpfung auf, wenn Sie eine nicht mehr nutzen."
 
 #: src/chat/chat-list.tsx
 msgid "Chat name"
@@ -4450,6 +4480,10 @@ msgctxt "kind of app"
 msgid "Design and media"
 msgstr "Design und Medien"
 
+#: src/engines/app-page.tsx
+msgid "Design it in the chat"
+msgstr "Im Chat entwerfen"
+
 #: src/brain/brain.ts
 msgctxt "workflow status"
 msgid "Designed"
@@ -4546,6 +4580,10 @@ msgstr "Erkennung"
 #: src/landscape/landscape-overview.ts
 msgid "Discovery sources"
 msgstr "Erkennungsquellen"
+
+#: src/settings/chat-accounts.tsx
+msgid "Dismiss"
+msgstr "Schließen"
 
 #: src/dashboard/signals.tsx
 msgctxt "put a signal away until something new"
@@ -4672,6 +4710,7 @@ msgstr "Domänen-Verknüpfungen"
 #: src/dashboard/widget-board.tsx
 #: src/frame/app-sidebar.tsx
 #: src/landscape/app-cells.tsx
+#: src/routes/_shell.apps.$app.tsx
 #: src/routes/_shell.domains.$engine.apps.$screen.tsx
 #: src/routes/_shell.domains.$engine.index.tsx
 #: src/routes/_shell.domains.index.tsx
@@ -4839,6 +4878,7 @@ msgstr "Früher"
 msgid "Earlier versions"
 msgstr "Frühere Versionen"
 
+#: src/engines/app-page.tsx
 #: src/knowledge/document.tsx
 #: src/onboarding/setup-steps.tsx
 msgid "Edit"
@@ -5491,6 +5531,10 @@ msgstr "Für: {role}"
 msgid "For the next interview about it."
 msgstr "Für das nächste Interview dazu."
 
+#: src/engines/app-page.tsx
+msgid "For the people it is shared with"
+msgstr "Für die Personen, mit denen sie geteilt ist"
+
 #: src/onboarding/work-rules.tsx
 msgid "For this organization only. Every organization starts with the same values, and Grasp tunes them as its interviews come in."
 msgstr "Nur für diese Organisation. Jede Organisation beginnt mit denselben Werten, und Grasp passt sie an, wenn die Interviews hereinkommen."
@@ -5736,6 +5780,10 @@ msgstr "Grasp hält Ihre Aussage fest, dass es wirksam wurde, und sendet es nie 
 #: src/dashboard/dependency-requests.tsx
 msgid "Grasp resolved these packages from the npm registry and checked each one's files against the registry's hash. A licence is as the package states it."
 msgstr "Grasp hat diese Pakete aus der npm-Registry aufgelöst und die Dateien jedes Pakets mit dem Hash der Registry abgeglichen. Eine Lizenz ist so angegeben, wie das Paket sie selbst nennt."
+
+#: src/settings/chat-accounts.tsx
+msgid "Grasp sent this link to that account in {app}. Link it only if it is yours: Grasp then answers it as you, with what you can see."
+msgstr "Grasp hat diesen Link an dieses Konto in {app} gesendet. Verknüpfen Sie es nur, wenn es Ihres ist: Grasp antwortet ihm dann in Ihrem Namen, mit dem, was Sie sehen können."
 
 #: src/dashboard/outcome-card.tsx
 msgid "Grasp sent this, but its answer was lost: nobody can tell whether it took effect. Check on {connection} before you say."
@@ -6060,6 +6108,10 @@ msgstr "Ich konnte nicht verbinden, wo Ihre Dokumente liegen. Versuchen Sie es m
 #: src/onboarding/setup-steps.tsx
 msgid "I could not find the columns. The first row should name them: name, email, team and job."
 msgstr "Ich konnte die Spalten nicht finden. Die erste Zeile sollte sie benennen: Name, E-Mail, Team und Funktion."
+
+#: src/interview/words.ts
+msgid "I could not hear that. Say it once more, or type it."
+msgstr "Das habe ich nicht gehört. Sagen Sie es bitte noch einmal, oder tippen Sie es."
 
 #: src/onboarding/setup-steps.tsx
 msgid "I could not keep it. Try again in a moment."
@@ -6916,6 +6968,7 @@ msgid "Light"
 msgstr "Hell"
 
 #: src/onboarding/interviews-progress.tsx
+#: src/settings/chat-accounts.tsx
 msgid "Link"
 msgstr "Link"
 
@@ -6942,9 +6995,17 @@ msgstr "Link verschickt"
 msgid "Link out on {date}"
 msgstr "Link verschickt am {date}"
 
+#: src/settings/chat-accounts.tsx
+msgid "Link your {app} account {account}?"
+msgstr "Ihr {app}-Konto {account} verknüpfen?"
+
 #: src/brain/brain-markdown.ts
 msgid "Linked"
 msgstr "Verknüpft"
+
+#: src/settings/chat-accounts.tsx
+msgid "Linked {time}"
+msgstr "Verknüpft {time}"
 
 #: src/screens/screen-links.ts
 msgid "Links can't be opened here."
@@ -7368,6 +7429,16 @@ msgstr "In Projekt verschieben"
 msgid "Moved old entries out of the audit trail"
 msgstr "Alte Einträge aus dem Audit-Trail ausgelagert"
 
+#: src/interview/voice-bar.tsx
+msgctxt "turn your microphone off for a moment"
+msgid "Mute"
+msgstr "Stummschalten"
+
+#: src/interview/voice-bar.tsx
+msgctxt "your microphone is off for a moment"
+msgid "Muted"
+msgstr "Stumm"
+
 #: src/chat/project-dialog.tsx
 #: src/onboarding/interviews-progress.tsx
 #: src/routes/_shell.settings.packages.index.tsx
@@ -7663,6 +7734,10 @@ msgstr "Keine Karte hinterlegt"
 #: src/landscape/overview-tab.tsx
 msgid "No certifications on file"
 msgstr "Keine Zertifizierungen hinterlegt"
+
+#: src/settings/chat-accounts.tsx
+msgid "No chat app accounts are linked."
+msgstr "Keine Chat-App-Konten verknüpft."
 
 #: src/chat/chat-list.tsx
 msgid "No chats yet. Drag one here, or move it from its menu."
@@ -8313,6 +8388,10 @@ msgstr "Nicht aufgeführt"
 msgid "Not made by {vendors}"
 msgstr "Nicht entwickelt von {vendors}"
 
+#: src/settings/chat-accounts.tsx
+msgid "Not mine"
+msgstr "Nicht meins"
+
 #: src/connections/connection-list.tsx
 msgid "Not named by the provider"
 msgstr "Vom Anbieter nicht benannt"
@@ -8768,6 +8847,10 @@ msgstr "Online"
 #: src/routes/_shell.landscape.$appId.audit.tsx
 msgid "Only admins can read the audit trail"
 msgstr "Nur Admins können den Audit-Trail lesen"
+
+#: src/engines/app-page.tsx
+msgid "Only described"
+msgstr "Nur beschrieben"
 
 #: src/brain/brain-transcript.tsx
 msgid "Only highlighted turns"
@@ -9614,6 +9697,7 @@ msgstr "Vorgeschlagene Regeln"
 msgid "Provided by Grasp, not installed again: {provided}"
 msgstr "Von Grasp bereitgestellt, nicht erneut installiert: {provided}"
 
+#: src/engines/app-page.tsx
 #: src/engines/app-status.tsx
 msgid "Publish"
 msgstr "Veröffentlichen"
@@ -9631,6 +9715,7 @@ msgstr "Veröffentlichen als"
 msgid "Publish revision {0}"
 msgstr "Revision {0} veröffentlichen"
 
+#: src/engines/app-page.tsx
 #: src/routes/_shell.workflows.$workflow.tsx
 msgid "Published"
 msgstr "Veröffentlicht"
@@ -10102,6 +10187,7 @@ msgstr "Ressource"
 msgid "Resources"
 msgstr "Ressourcen"
 
+#: src/engines/app-page.tsx
 #: src/engines/app-status.tsx
 #: src/knowledge/timeline.tsx
 msgid "Restore"
@@ -10562,6 +10648,10 @@ msgstr "Skalieren"
 msgid "Schedule stopped"
 msgstr "Zeitplan gestoppt"
 
+#: src/engines/app-page.tsx
+msgid "Screens"
+msgstr "Bildschirme"
+
 #: src/routes/_shell.settings.members.tsx
 msgid "Search"
 msgstr "Suchen"
@@ -10744,11 +10834,16 @@ msgstr "Im Verzeichnis Ihrer Organisation festgelegt."
 msgid "Set. Type a new value to replace it."
 msgstr "Festgelegt. Geben Sie einen neuen Wert ein, um ihn zu ersetzen."
 
+#: src/engines/app-page.tsx
 #: src/frame/person-menu.tsx
 #: src/routes/_shell.domains.$engine.index.tsx
 #: src/routes/_shell.settings.tsx
 msgid "Settings"
 msgstr "Einstellungen"
+
+#: src/engines/app-page.tsx
+msgid "Settings of {name}"
+msgstr "Einstellungen von {name}"
 
 #: src/onboarding/review-parts.tsx
 msgid "Settled: {choice}"
@@ -11086,6 +11181,7 @@ msgstr "Quelle"
 
 #: src/brain/brain.ts
 #: src/chat/chat-markdown.ts
+#: src/chat/sources.tsx
 #: src/routes/_shell.brain.$noteId.tsx
 msgid "Sources"
 msgstr "Quellen"
@@ -12231,6 +12327,10 @@ msgstr "Die Gedächtnisdateien, Skills und hochgeladenen Dateien, die Ihre Agent
 msgid "The message"
 msgstr "Die Nachricht"
 
+#: src/interview/words.ts
+msgid "The microphone is not available here. Type your answer."
+msgstr "Das Mikrofon ist hier nicht verfügbar. Tippen Sie Ihre Antwort."
+
 #: src/engines/store-change-errors.ts
 msgid "The migration {migration} failed on its fixture {fixture} when this version was sealed: {reason}. It runs on no records, so the version can't be made current: fix the migration or its fixture and build the domain again."
 msgstr "Die Migration {migration} ist an ihrem Testdatensatz {fixture} gescheitert, als diese Version versiegelt wurde: {reason}. Sie läuft auf keinem Datensatz, daher kann die Version nicht aktuell gemacht werden: Korrigieren Sie die Migration oder ihren Testdatensatz und lassen Sie die Domäne neu bauen."
@@ -12656,6 +12756,14 @@ msgstr "Diese App ist nicht rechtzeitig gestartet."
 msgid "This app doesn't build. Ask a builder to fix it."
 msgstr "Diese App lässt sich nicht erstellen. Bitten Sie einen Builder, sie zu beheben."
 
+#: src/engines/app-page.tsx
+msgid "This app has no screen yet. Grasp designs it with you in the chat."
+msgstr "Diese App hat noch keinen Bildschirm. Grasp entwirft ihn mit Ihnen im Chat."
+
+#: src/engines/app-page.tsx
+msgid "This app is archived. It is kept as it was, and nobody works on it."
+msgstr "Diese App ist archiviert. Sie bleibt, wie sie war, und niemand arbeitet daran."
+
 #: src/screens/screen-frame.tsx
 msgid "This app left its frame and was stopped."
 msgstr "Diese App hat ihren Rahmen verlassen und wurde gestoppt."
@@ -12668,6 +12776,10 @@ msgstr "Diese App hat ihre Verbindung zur Seite verloren und wurde gestoppt."
 msgid "This app wants to open a page on another site in a new tab. Open it only if you expected to go there."
 msgstr "Diese App möchte eine Seite einer anderen Website in einem neuen Tab öffnen. Öffnen Sie sie nur, wenn Sie erwartet haben, dorthin zu gehen."
 
+#: src/screens/screen-frame.tsx
+msgid "This app's stored code no longer matches the code that was approved, so it wasn't opened. Tell an admin."
+msgstr "Der gespeicherte Code dieser App stimmt nicht mehr mit dem genehmigten Code überein, deshalb wurde sie nicht geöffnet. Informieren Sie einen Admin."
+
 #: src/interview/sound-check.tsx
 msgid "This browser cannot listen. You can type your answers."
 msgstr "Dieser Browser kann nicht zuhören. Sie können Ihre Antworten tippen."
@@ -12679,6 +12791,10 @@ msgstr "Diese Änderung wird erneut angewendet und lässt sich daher jetzt nicht
 #: src/engines/store-change-errors.ts
 msgid "This change was already abandoned."
 msgstr "Diese Änderung wurde bereits verworfen."
+
+#: src/settings/chat-accounts.tsx
+msgid "This chat account is linked to someone else. They need to unlink it first."
+msgstr "Dieses Chat-Konto ist mit jemand anderem verknüpft. Diese Person muss die Verknüpfung zuerst aufheben."
 
 #: src/routes/guest.tsx
 msgid "This chat asks how your work is done. Everything you write is kept and read by the people who invited you, who may copy it into their own records and keep it there. Please don't share passwords, bank details or anything you wouldn't put in an email."
@@ -12789,6 +12905,10 @@ msgstr "Das habe ich aufgeschrieben."
 msgid "This is what is new."
 msgstr "Das ist neu."
 
+#: src/settings/chat-accounts.tsx
+msgid "This link can’t be used"
+msgstr "Dieser Link kann nicht verwendet werden"
+
 #: src/routes/_shell.links.$app.$surface.tsx
 msgid "This link doesn't open anything you can open"
 msgstr "Dieser Link öffnet nichts, was Sie öffnen können"
@@ -12798,9 +12918,21 @@ msgstr "Dieser Link öffnet nichts, was Sie öffnen können"
 msgid "This link doesn't work. Ask whoever sent it for a new one."
 msgstr "Dieser Link funktioniert nicht. Bitten Sie die Person, die ihn geschickt hat, um einen neuen."
 
+#: src/settings/chat-accounts.tsx
+msgid "This link has been used already. Each link works once."
+msgstr "Dieser Link wurde bereits verwendet. Jeder Link funktioniert nur einmal."
+
 #: src/routes/guest.tsx
 msgid "This link has expired. Ask whoever sent it for a new one."
 msgstr "Dieser Link ist abgelaufen. Bitten Sie die Person, die ihn geschickt hat, um einen neuen."
+
+#: src/settings/chat-accounts.tsx
+msgid "This link has expired. Write to Grasp in the chat app for a new one."
+msgstr "Dieser Link ist abgelaufen. Schreiben Sie Grasp in der Chat-App, um einen neuen zu erhalten."
+
+#: src/settings/chat-accounts.tsx
+msgid "This link isn’t one Grasp sent. Write to Grasp in the chat app for a new one."
+msgstr "Diesen Link hat Grasp nicht gesendet. Schreiben Sie Grasp in der Chat-App, um einen neuen zu erhalten."
 
 #: src/screens/screen-frame.tsx
 msgid "This link opens the app with something it doesn't take. Open the app from its domain instead."
@@ -12873,6 +13005,14 @@ msgstr "Diese Version ändert die Daten der Domäne, und die Änderung lässt si
 #: src/engines/store-change-errors.ts
 msgid "This version changes the domain's data, and the change can't be applied: filling in one of its new fields would make a record larger than a record may be."
 msgstr "Diese Version ändert die Daten der Domäne, und die Änderung lässt sich nicht anwenden: Das Ausfüllen eines ihrer neuen Felder würde einen Datensatz größer machen, als ein Datensatz sein darf."
+
+#: src/screens/screen-frame.tsx
+msgid "This version of the app hasn't been sealed, so it can't be opened. A builder can publish it again."
+msgstr "Diese Version der App wurde nicht versiegelt und kann deshalb nicht geöffnet werden. Ein Builder kann sie erneut veröffentlichen."
+
+#: src/screens/screen-frame.tsx
+msgid "This version of the app was revoked and no longer runs. An admin can make another version current."
+msgstr "Diese Version der App wurde widerrufen und läuft nicht mehr. Ein Admin kann eine andere Version aktuell machen."
 
 #: src/engines/store-change-errors.ts
 msgid "This version's data change is still being applied. Try again in a moment."
@@ -13260,6 +13400,20 @@ msgstr "Unbekannte Ergebnisse"
 msgid "Unknown source"
 msgstr "Unbekannte Quelle"
 
+#: src/settings/chat-accounts.tsx
+msgid "Unlink"
+msgstr "Verknüpfung aufheben"
+
+#: src/settings/chat-accounts.tsx
+msgid "Unlink {app} account {shown}"
+msgstr "Verknüpfung des {app}-Kontos {shown} aufheben"
+
+#: src/interview/voice-bar.tsx
+msgctxt "turn your microphone back on"
+msgid "Unmute"
+msgstr "Stummschaltung aufheben"
+
+#: src/engines/app-page.tsx
 #: src/engines/app-status.tsx
 msgid "Unpublish"
 msgstr "Veröffentlichung aufheben"
@@ -14482,6 +14636,7 @@ msgstr "workflow.json"
 #: src/routes/_shell.workflows.$workflow.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/routes/decisions.$decision.tsx
+#: src/workflows/nav-item.tsx
 msgid "Workflows"
 msgstr "Workflows"
 

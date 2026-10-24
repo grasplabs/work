@@ -4,6 +4,7 @@ import {
   verifyCapability,
 } from "@grasp-os/shared/capability";
 import type { CapabilityClaims } from "@grasp-os/shared/capability";
+import type { ChannelSigningKeys } from "@grasp-os/shared/channel-keys";
 import {
   confirmActionSchema,
   connectCallSchema,
@@ -13,6 +14,7 @@ import {
   markTaken,
 } from "@grasp-os/shared/connect";
 import type {
+  ActionShape,
   Catalog,
   CatalogLogo,
   CatalogTool,
@@ -68,13 +70,16 @@ import type { CallOutcome, CallRecord } from "./audit.ts";
 import { carryOut, connectionFor, heldOutcome } from "./call.ts";
 import type { CallDone, CallProgress } from "./call.ts";
 import { catalog, catalogTools } from "./catalog.ts";
+import { keptChange } from "./changes.ts";
+import { channelSigningKeys } from "./channel-keys.ts";
+import { channelFetch } from "./channels.ts";
 import { clock, tickClock } from "./clock.ts";
 import {
   finishToolkitFlow,
   startToolkitConnection,
 } from "./composio-connections.ts";
 import { connectionOwners } from "./connections.ts";
-import { connectorContract } from "./contracts.ts";
+import { actionShape, connectorContract } from "./contracts.ts";
 import { requireDecision } from "./decisions.ts";
 import { directoryConnections, readDirectory } from "./directory.ts";
 import {
@@ -396,6 +401,22 @@ export default class Connect
     return await npmMalwareReports(request);
   }
 
+  // A chat platform's signing keys (src/channel-keys.ts), for core to
+  // check that a request from the platform really comes from it. Public
+  // data; nothing here is a client's.
+
+  // oxlint-disable-next-line class-methods-use-this
+  async channelSigningKeys(platform: unknown): Promise<ChannelSigningKeys> {
+    return await channelSigningKeys(platform);
+  }
+
+  // The chat platforms (src/channels.ts): core's chat adapters send every
+  // request through here, and connect sends it on as the client's own bot.
+
+  async channelFetch(platform: unknown, request: unknown): Promise<Response> {
+    return await channelFetch(this.env, platform, request);
+  }
+
   // The catalog (src/catalog.ts): what can be connected.
 
   async catalog(): Promise<Catalog> {
@@ -464,6 +485,14 @@ export default class Connect
 
   async connectorContract(request: unknown): Promise<ConnectorContract> {
     return await connectorContract(this.env, request);
+  }
+
+  /**
+   * Whether an action only reads, and the input it takes, as connect goes
+   * by them: what core checks a chat's write against before the call.
+   */
+  async actionShape(request: unknown): Promise<ActionShape> {
+    return await actionShape(this.env, request);
   }
 
   // Held actions (src/pending.ts). Core names the person from their
@@ -745,6 +774,9 @@ export default class Connect
     // doesn't have: a side effect's answer is stored with its events. If
     // that fails, the call happened but went unrecorded: its key is spent,
     // and it is recorded, as far as possible, with an unknown outcome.
+    // What it changed is kept with its answer and events, its hash in them;
+    // preparing it comes after the call went out, so its failure is one of
+    // recording too.
     const record: CallRecord = {
       call: stated,
       claims,
@@ -757,11 +789,11 @@ export default class Connect
       pendingActionId: done.pending?.id ?? held?.id,
     };
     try {
-      await auditCall(
-        this.env,
-        record,
-        done.commit === undefined ? [] : [done.commit]
-      );
+      const kept = await keptChange(this.env, claims, call, done.change);
+      await auditCall(this.env, { ...record, changeHash: kept.hash }, [
+        ...(done.commit === undefined ? [] : [done.commit]),
+        ...kept.writes,
+      ]);
     } catch (error) {
       log.error("audit.record_failed", errorFields(error));
       await done.spend?.().catch((spendError: unknown) => {

@@ -407,8 +407,13 @@ const asJob = async <T>(
         await auditedCall(
           env,
           { ...scope, runId: job.runId },
-          // The run that submitted it, recorded with each of its calls.
-          { method, detail: { job: job.id, app: job.appId, run: job.runId } },
+          // The run that submitted it, recorded with each of its calls. Work
+          // done for the run after it, not a call of its code: not shown.
+          {
+            method,
+            detail: { job: job.id, app: job.appId, run: job.runId },
+            shown: false,
+          },
           async () => {
             const { by, app } = await authorize(env, scope, job);
             return await run({ job, scope, app, by, lease, lost });

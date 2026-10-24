@@ -1,5 +1,6 @@
 import { agentErrors } from "@grasp-os/shared/agent";
 import type { AuditEvent } from "@grasp-os/shared/audit";
+import { citedSnippetMax } from "@grasp-os/shared/chat";
 import type { ChatMessage } from "@grasp-os/shared/chat";
 import { workspaceIdSchema } from "@grasp-os/shared/ids";
 import { knowledgeErrors } from "@grasp-os/shared/knowledge";
@@ -24,6 +25,7 @@ import {
   codeStep,
   gatewayConfig,
   model,
+  pausedReply,
   pointAtGateway,
   says,
   setObjectEnv,
@@ -151,6 +153,10 @@ describe("a chat's Knowledge", setUpTime, () => {
       outcome: "answered",
       answer: "Sixteen weeks (Handbook, leave.md).",
       provenance: { sources: [collectionId], restricted: false },
+      // It links to no note: it cites none.
+      cited: [],
+      check: null,
+      channelText: null,
     });
     // The model read the API's declaration before it wrote the code.
     const declared = JSON.stringify(gateway.requests[0]?.body);
@@ -506,6 +512,9 @@ describe("a chat's Knowledge", setUpTime, () => {
         answer: "One document is past its review date.",
         // It read nothing it must name, and nothing restricted.
         provenance: { sources: [], restricted: false },
+        cited: [],
+        check: null,
+        channelText: null,
       },
       result: `Returned:\n${JSON.stringify([["overdue_review", granted]])}`,
       calls: [{ method: "knowledge.signals", signals: 1, outcome: "ok" }],
@@ -576,10 +585,15 @@ describe("a chat's Knowledge", setUpTime, () => {
         expect(sent.some(({ role }) => role === "assistant")).toBeTruthy();
       });
       await subscription.release();
-      return sent.flatMap((shown) =>
-        shown.role === "assistant" && shown.text !== ""
-          ? [{ text: shown.text, citations: shown.citations }]
-          : []
+      const shown = sent.flatMap((message) =>
+        message.role === "assistant" && message.text !== "" ? [message] : []
+      );
+      return await Promise.all(
+        shown.map(async ({ id, text, citations }) => ({
+          text,
+          citations,
+          cited: await person.api.chats.cited(chatId, id),
+        }))
       );
     };
 
@@ -588,16 +602,206 @@ describe("a chat's Knowledge", setUpTime, () => {
       other: await answers(other.chat.id),
     }).toStrictEqual({
       reading: [
-        { text: "Let me look Parental leave.", citations: [] },
+        { text: "Let me look Parental leave.", citations: [], cited: [] },
         {
           text: `Sixteen weeks [Parental leave](grasp:note/${read}), as [the policy](grasp:note/${read}) says; see Travel, Minutes and nothing.`,
           citations: [{ kind: "document", documentId: read }],
+          cited: [
+            {
+              documentId: read,
+              collectionId,
+              title: "Parental leave",
+              path: "leave.md",
+              snippet: "Parental leave lasts sixteen weeks.",
+            },
+          ],
         },
       ],
       other: [
         {
           text: "Sixteen weeks Parental leave, as the policy says; see Travel, Minutes and nothing.",
           citations: [],
+          cited: [],
+        },
+      ],
+    });
+  });
+
+  it("gives an answer the documents it cites, with their title, path and snippet: never one only read, nor one its person can no longer read", async () => {
+    const admin = await newAdmin();
+    const person = await newPerson();
+    const teamId = await newTeam(admin, [person]);
+    const { id: handbook } = await admin.knowledge.createCollection({
+      name: `Handbook ${unique()}`,
+      access: "everyone",
+    });
+    const { id: plans } = await admin.knowledge.createCollection({
+      name: `Plans ${unique()}`,
+      access: "teams",
+      teams: [teamId],
+    });
+    // One long section: its snippet is read from the start of it.
+    const rule = "Arrive on time. ";
+    const [leaveDoc, travel, plan, rules] = await Promise.all(
+      [
+        { collectionId: handbook, path: "leave.md", text: leave },
+        {
+          collectionId: handbook,
+          path: "travel.md",
+          text: "# Travel\n\nBook trains.",
+        },
+        {
+          collectionId: plans,
+          path: "routes/plan.md",
+          text: `---\ndescription: Where the route goes, and when.\n---\n# Route plan\n\nDeparts at nine.`,
+        },
+        {
+          collectionId: handbook,
+          path: "rules.md",
+          text: `# House rules\n\n${rule.repeat(20_000)}`,
+        },
+      ].map(
+        async (document) =>
+          await admin.knowledge.saveDocument({ ...document, ifVersion: 0 })
+      )
+    );
+    const ids = [leaveDoc?.id, travel?.id, plan?.id, rules?.id];
+    // Cites the plan first, then leave; travel was read, and isn't cited.
+    const answer = `It departs at nine [Route plan](grasp:note/${plan?.id}), and leave lasts sixteen weeks [Parental leave](grasp:note/${leaveDoc?.id}). Be on time [House rules](grasp:note/${rules?.id}).`;
+    const { ask, agent } = await chatOf(
+      person.userId,
+      codeStep(
+        `export default async (self, env) => { for (const id of ${JSON.stringify(ids)}) { await env.knowledge.read(id); } return "read"; };`
+      ),
+      says(answer),
+      says(answer)
+    );
+    await grantRead(admin, agent, handbook);
+    await grantRead(admin, agent, plans);
+
+    const first = await ask(
+      "When does the route depart, and how long is leave?"
+    );
+    // The person leaves the team: the plan is no longer theirs to read.
+    await callAuth("/organization/remove-team-member", admin.session, {
+      teamId,
+      userId: person.userId,
+    });
+    const again = await ask("And now?");
+
+    const leaveCited = {
+      documentId: leaveDoc?.id,
+      collectionId: handbook,
+      title: "Parental leave",
+      path: "leave.md",
+      snippet: "Parental leave lasts sixteen weeks.",
+    };
+    const rulesCited = {
+      documentId: rules?.id,
+      collectionId: handbook,
+      title: "House rules",
+      path: "rules.md",
+      // Cut to the most a snippet holds, and marked so.
+      snippet: `${rule.repeat(20).slice(0, citedSnippetMax - 1)}…`,
+    };
+    expect({ first: first.cited, again: again.cited }).toStrictEqual({
+      first: [
+        {
+          documentId: plan?.id,
+          collectionId: plans,
+          title: "Route plan",
+          path: "routes/plan.md",
+          // Its description, as its author put it.
+          snippet: "Where the route goes, and when.",
+        },
+        leaveCited,
+        rulesCited,
+      ],
+      again: [leaveCited, rulesCited],
+    });
+  });
+
+  it("answers when the documents its answer cites can't be looked up, and the page finds them once they can", async () => {
+    const admin = await newAdmin();
+    const person = await signedInApi(idp, "user");
+    const { id: collectionId } = await admin.knowledge.createCollection({
+      name: `Handbook ${unique()}`,
+      access: "everyone",
+    });
+    const { id: documentId } = await admin.knowledge.saveDocument({
+      collectionId,
+      path: "leave.md",
+      text: leave,
+      ifVersion: 0,
+    });
+    const answer = `Sixteen weeks [Parental leave](grasp:note/${documentId}).`;
+    const { reply, release } = pausedReply(says(answer), 1);
+    const { agent, gateway, newChat } = await personalChatsOf(
+      person.userId,
+      codeStep(readCode(documentId)),
+      reply
+    );
+    await grantRead(admin, agent, collectionId);
+    const { chat, ask } = await newChat();
+
+    const turn = ask("How long is parental leave?");
+    await vi.waitFor(
+      () => {
+        expect(gateway.requests).toHaveLength(2);
+      },
+      { timeout: 10_000 }
+    );
+    // Knowledge's database fails while the model is still answering.
+    await env.KNOWLEDGE.prepare(
+      "ALTER TABLE sections RENAME TO sections_away"
+    ).run();
+    try {
+      release();
+      await expect(turn).resolves.toStrictEqual({
+        outcome: "answered",
+        answer,
+        provenance: { sources: [collectionId], restricted: false },
+        cited: [],
+        check: null,
+        channelText: null,
+      });
+    } finally {
+      await env.KNOWLEDGE.prepare(
+        "ALTER TABLE sections_away RENAME TO sections"
+      ).run();
+    }
+
+    // The answer was kept, and its page finds what it cites now.
+    const sent: ChatMessage[] = [];
+    const subscription = await person.api.chats.watch(
+      chat.id,
+      null,
+      (update) => {
+        sent.push(...update.messages);
+      }
+    );
+    await vi.waitFor(() => {
+      expect(sent.some(({ role }) => role === "assistant")).toBeTruthy();
+    });
+    await subscription.release();
+    const shown = sent.find(
+      (message) => message.role === "assistant" && message.text !== ""
+    );
+    expect({
+      text: shown?.role === "assistant" ? shown.text : undefined,
+      cited:
+        shown === undefined
+          ? []
+          : await person.api.chats.cited(chat.id, shown.id),
+    }).toStrictEqual({
+      text: answer,
+      cited: [
+        {
+          documentId,
+          collectionId,
+          title: "Parental leave",
+          path: "leave.md",
+          snippet: "Parental leave lasts sixteen weeks.",
         },
       ],
     });

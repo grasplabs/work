@@ -135,7 +135,7 @@ const readTreeAt = async (
 };
 
 /** A version's files, checked against the hash that names them. */
-const readTree = async (
+export const readTree = async (
   env: Env,
   app: AppId,
   tree: string
@@ -194,7 +194,8 @@ export const changeEntry = (
     | "app.candidate.moved"
     | "app.candidate.claimed"
     | "app.blueprint.marked"
-    | "app.blueprint.unmarked",
+    | "app.blueprint.unmarked"
+    | "app.blueprint.updated",
   app: AppId,
   detail: Record<string, AuditDetailValue>
 ): AuditEntry => ({
@@ -374,7 +375,7 @@ const latestFiles = async (env: Env, app: AppId) => {
  * `added` count, as with the limits: an App whose files already collide
  * can still be changed, and fixed.
  */
-const checkPaths = (
+export const checkPaths = (
   paths: Iterable<string>,
   added: ReadonlySet<string>
 ): void => {
@@ -759,9 +760,9 @@ export const applyChanges = (
  * still being checked as superseded, for `by`'s commit of `version`: the
  * statements, with their audit event, for the commit's batch.
  */
-const supersededBy = (
+export const supersededBy = (
   db: DrizzleD1Database,
-  by: Identity,
+  by: Pick<Acting, "userId" | "staff" | "actor">,
   app: AppId,
   version: number
 ) =>
@@ -1131,20 +1132,11 @@ export const getVersion = async (
   return toVersion(await findVersion(env, appId, version));
 };
 
-/** How the files of version `to` differ from those of `from`, by path. */
-export const diffVersions = async (
-  env: Env,
-  by: Identity,
-  app: unknown,
-  from: unknown,
-  to: unknown
-): Promise<FileDiff[]> => {
-  const { id: appId } = await appFor(env, by, app, "builder");
-  const treeOf = async (version: unknown) => {
-    const { tree } = await findVersion(env, appId, version);
-    return await readTree(env, appId, tree);
-  };
-  const [before, after] = await Promise.all([treeOf(from), treeOf(to)]);
+/** How the files `after` differ from `before`, by path. */
+export const diffFiles = (
+  before: ReadonlyMap<string, string>,
+  after: ReadonlyMap<string, string>
+): FileDiff[] => {
   const paths = [...new Set([...before.keys(), ...after.keys()])].toSorted();
   return paths.flatMap((path): FileDiff[] => {
     const old = before.get(path);
@@ -1159,6 +1151,23 @@ export const diffVersions = async (
       ? []
       : [{ path, change: "modified", before: old, after: now }];
   });
+};
+
+/** How the files of version `to` differ from those of `from`, by path. */
+export const diffVersions = async (
+  env: Env,
+  by: Identity,
+  app: unknown,
+  from: unknown,
+  to: unknown
+): Promise<FileDiff[]> => {
+  const { id: appId } = await appFor(env, by, app, "builder");
+  const treeOf = async (version: unknown) => {
+    const { tree } = await findVersion(env, appId, version);
+    return await readTree(env, appId, tree);
+  };
+  const [before, after] = await Promise.all([treeOf(from), treeOf(to)]);
+  return diffFiles(before, after);
 };
 
 /** Puts a version up for review. The current version can't be. */

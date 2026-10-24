@@ -1,4 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
+import type { Project } from "@playwright/test";
 
 import { localSignIn } from "./apps/core/test/sign-in-config.ts";
 import { testAuthSecret, testCapabilityKey } from "./e2e/people.ts";
@@ -22,6 +23,13 @@ const onboardingTests = /onboarding\.e2e\.ts$/u;
  * expect links that wait. So it runs after them, one test at a time.
  */
 const interviewTests = /interview\.e2e\.ts$/u;
+/**
+ * The journeys that matter most, end to end (e2e/*-journey.e2e.ts): the
+ * admin's onboarding, an employee's interview on a phone, a lead's by
+ * voice. Each sends links, which tells the team, and replaces the roster
+ * the tests before read, so they run last, one at a time.
+ */
+const journeyTests = /journey\.e2e\.ts$/u;
 /**
  * What grants, retires or revokes package approvals: each bumps the
  * deployment's shared policy generation in the one database every worker
@@ -49,6 +57,109 @@ const e2eThinkingModel = "workers-ai/@cf/zai-org/glm-5.3-flash";
 const devVar = (name: string, value: string): string =>
   `--var '${name}:${value}'`;
 
+/**
+ * The projects that run side by side, from the start: the product's tests
+ * in Chromium, the package approvals one at a time, and the browser policy
+ * tests in each engine.
+ */
+const parallelProjects: Project[] = [
+  {
+    name: "chromium",
+    use: { ...devices["Desktop Chrome"] },
+    testIgnore: [
+      onboardingTests,
+      packageApprovalTests,
+      interviewTests,
+      journeyTests,
+      adminTests,
+    ],
+  },
+  {
+    name: "package-approvals",
+    use: { ...devices["Desktop Chrome"] },
+    testMatch: packageApprovalTests,
+    workers: 1,
+  },
+  // A screen's frame and the product page are held by the browser's own
+  // sandbox and policy, so what they can't do is shown in each engine:
+  // only those files, as the rest tests the product, not the browser.
+  {
+    name: "firefox",
+    use: { ...devices["Desktop Firefox"] },
+    testMatch: browserPolicyTests,
+  },
+  {
+    name: "webkit",
+    use: { ...devices["Desktop Safari"] },
+    testMatch: browserPolicyTests,
+  },
+];
+
+/**
+ * The projects that run one after another, after `before` on the same
+ * stack: Grasp's go, then the interviews, then the journeys, each changing
+ * what every test after it sees.
+ */
+const serialProjects = (before: string[]): Project[] => [
+  {
+    name: "onboarding",
+    // Never tried again (below), so a trace is kept of the run that failed.
+    use: { ...devices["Desktop Chrome"], trace: "retain-on-failure" },
+    testMatch: onboardingTests,
+    dependencies: before,
+    workers: 1,
+    // Not tried again: once a link is out the team is told, and nothing
+    // undoes that (the agreements stay as they were), so a second try
+    // would only fail on what the first one did. A failure shows as itself.
+    retries: 0,
+  },
+  {
+    name: "interview",
+    use: { ...devices["Desktop Chrome"], trace: "retain-on-failure" },
+    testMatch: interviewTests,
+    dependencies: ["onboarding"],
+    workers: 1,
+  },
+  {
+    name: "journeys",
+    // Never tried again: a flaky journey shows as itself, with the trace
+    // of the run that failed.
+    use: { ...devices["Desktop Chrome"], trace: "retain-on-failure" },
+    testMatch: journeyTests,
+    dependencies: ["interview"],
+    workers: 1,
+    retries: 0,
+  },
+];
+
+/**
+ * Which part of the suite runs (`GRASP_E2E_PART`): all of it, on one
+ * stack, unless CI splits it. Playwright runs a project's dependencies in
+ * full on every shard, so `--shard` alone can't split a suite whose
+ * serial tail depends on everything before it. CI runs the parallel part
+ * in shards (`parallel` with `--shard`) and the serial part (`serial`) on
+ * a stack of its own, where nothing runs before it to wait for. Locally
+ * both run on one stack, the serial part last.
+ */
+const e2eProjects = (): Project[] => {
+  const part = process.env.GRASP_E2E_PART;
+  if (part === undefined || part === "") {
+    return [
+      ...parallelProjects,
+      ...serialProjects(parallelProjects.map(({ name }) => name ?? "")),
+    ];
+  }
+  if (part === "parallel") {
+    return parallelProjects;
+  }
+  if (part === "serial") {
+    return serialProjects([]);
+  }
+  throw new Error(
+    `GRASP_E2E_PART is "${part}": leave it unset, or set "parallel" or "serial".`
+  );
+};
+
 export default defineConfig({
   testDir: "e2e",
   testMatch: "**/*.e2e.ts",
@@ -68,56 +179,7 @@ export default defineConfig({
     baseURL: origin,
     trace: "on-first-retry",
   },
-  projects: [
-    {
-      name: "chromium",
-      use: { ...devices["Desktop Chrome"] },
-      testIgnore: [
-        onboardingTests,
-        packageApprovalTests,
-        interviewTests,
-        adminTests,
-      ],
-    },
-    {
-      name: "package-approvals",
-      use: { ...devices["Desktop Chrome"] },
-      testMatch: packageApprovalTests,
-      workers: 1,
-    },
-    // A screen's frame and the product page are held by the browser's own
-    // sandbox and policy, so what they can't do is shown in each engine:
-    // only those files, as the rest tests the product, not the browser.
-    {
-      name: "firefox",
-      use: { ...devices["Desktop Firefox"] },
-      testMatch: browserPolicyTests,
-    },
-    {
-      name: "webkit",
-      use: { ...devices["Desktop Safari"] },
-      testMatch: browserPolicyTests,
-    },
-    {
-      name: "onboarding",
-      // Never tried again (below), so a trace is kept of the run that failed.
-      use: { ...devices["Desktop Chrome"], trace: "retain-on-failure" },
-      testMatch: onboardingTests,
-      dependencies: ["chromium", "package-approvals", "firefox", "webkit"],
-      workers: 1,
-      // Not tried again: once a link is out the team is told, and nothing
-      // undoes that (the agreements stay as they were), so a second try
-      // would only fail on what the first one did. A failure shows as itself.
-      retries: 0,
-    },
-    {
-      name: "interview",
-      use: { ...devices["Desktop Chrome"], trace: "retain-on-failure" },
-      testMatch: interviewTests,
-      dependencies: ["onboarding"],
-      workers: 1,
-    },
-  ],
+  projects: e2eProjects(),
   // Never a server already running: on this checkout's ports (e2e/stack.ts)
   // that is a stale run or another checkout's stack, with state the tests
   // don't expect. Playwright then fails, naming the port.

@@ -12,6 +12,7 @@ import {
   connectWith,
   outcome,
 } from "./connect.ts";
+import { composioClasses } from "./fixtures/composio-classes.ts";
 import type { FakeTool } from "./mcp-server.ts";
 import { testComposioKey } from "./provider-config.ts";
 
@@ -231,6 +232,14 @@ const contractOf = async (
 const parsed = (text: string | undefined): unknown =>
   text === undefined ? undefined : JSON.parse(text);
 
+/** The class and read flag a contract serves the list tool with. */
+const listOf = ({
+  actions: { HUBSPOT_LIST_CONTACTS: list },
+}: Awaited<ReturnType<typeof contractOf>>) => ({
+  class: list?.class,
+  readOnly: list?.readOnly,
+});
+
 describe("a Composio connection's generated contract", () => {
   beforeEach(() => {
     // The list tool as its server first lists it: tests change it.
@@ -293,6 +302,42 @@ describe("a Composio connection's generated contract", () => {
     expect(after.actions.HUBSPOT_LIST_CONTACTS?.input).not.toBe(
       before.actions.HUBSPOT_LIST_CONTACTS?.input
     );
+  });
+
+  it("carries each tool's class: a release that reclasses one is a changed contract, a read no more", async () => {
+    // Marked as a read, and allowed by name alone: for this one, the
+    // admin's rule already made it a change before the reclass.
+    const connections = await Promise.all(
+      [
+        [{ name: "HUBSPOT_LIST_CONTACTS", read: true }],
+        ["HUBSPOT_LIST_CONTACTS"],
+      ].map(async (allowed) => await hubspot(allowed))
+    );
+    const before = await Promise.all(
+      connections.map(async (id) => await contractOf(id))
+    );
+    const { hubspot: classed } = composioClasses;
+    if (classed === undefined) {
+      throw new Error("Expected HubSpot's classes");
+    }
+    classed.HUBSPOT_LIST_CONTACTS = "change-company";
+    try {
+      const after = await Promise.all(
+        connections.map(async (id) => await contractOf(id))
+      );
+      expect({ was: before.map(listOf), is: after.map(listOf) }).toStrictEqual({
+        was: [
+          { class: "read-company", readOnly: true },
+          { class: "read-company", readOnly: false },
+        ],
+        is: [
+          { class: "change-company", readOnly: false },
+          { class: "change-company", readOnly: false },
+        ],
+      });
+    } finally {
+      classed.HUBSPOT_LIST_CONTACTS = "read-company";
+    }
   });
 
   it("follows the admin's allowlist as it stands: a tool taken off it is gone", async () => {
@@ -458,6 +503,53 @@ describe("a Composio connection's generated contract", () => {
     }).toStrictEqual({
       gone: "connect.contract_not_found",
       withoutKey: "connect.server_unavailable",
+    });
+  });
+});
+
+const shapeOf = async (connectionId: string, action: string) =>
+  await exports.default.actionShape({ connectionId, action });
+
+describe("an action's shape, as core checks a chat app's write against it", () => {
+  it("is a read only as the admin said, with the fields its server lists, or none it can tell", async () => {
+    const connectionId = await hubspot();
+    expect({
+      list: await shapeOf(connectionId, "HUBSPOT_LIST_CONTACTS"),
+      create: await shapeOf(connectionId, "HUBSPOT_CREATE_CONTACT"),
+      unservable: await shapeOf(connectionId, "HUBSPOT.DOTTED"),
+      notAllowed: await outcome(
+        shapeOf(connectionId, "HUBSPOT_DELETE_CONTACTS")
+      ),
+    }).toStrictEqual({
+      list: { readOnly: true, inputs: ["limit"], provider: "hubspot" },
+      // Its server says it only reads: the admin didn't.
+      create: { readOnly: false, inputs: ["email"], provider: "hubspot" },
+      unservable: { readOnly: false, inputs: null, provider: "hubspot" },
+      notAllowed: "connect.action_not_found",
+    });
+  });
+
+  it("is a native tool's as its manifest says, and no connection's that's gone", async () => {
+    const native = await addConnection({
+      provider: "microsoft",
+      serverKind: "native",
+      server: "microsoft-365",
+    });
+    const gone = await hubspot(rules, { status: "disconnected" });
+    const send = await shapeOf(native, "mail.send");
+    const list = await shapeOf(native, "mail.list");
+    expect({
+      send: { readOnly: send.readOnly, provider: send.provider },
+      takesFields: (send.inputs ?? []).length > 0,
+      list: list.readOnly,
+      unknown: await outcome(shapeOf(native, "mail.nope")),
+      gone: await outcome(shapeOf(gone, "HUBSPOT_LIST_CONTACTS")),
+    }).toStrictEqual({
+      send: { readOnly: false, provider: "microsoft" },
+      takesFields: true,
+      list: true,
+      unknown: "connect.action_not_found",
+      gone: "connect.connection_not_found",
     });
   });
 });

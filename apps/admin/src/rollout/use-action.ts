@@ -33,6 +33,8 @@ const refusals: Readonly<Record<RolloutErrorCode, string>> = {
     "That client's secrets rotated since, and its previous versions don't have the new ones: roll out instead.",
   shared_secret_replaced:
     "A shared secret that client's previous versions run was replaced since, or the admin has no record of which they run, so going back could bring a retired key back: roll out instead.",
+  sealed_secret_replaced:
+    "That client's Teams bot secret was replaced since its previous versions ran, so going back could bring a revoked secret back: roll out instead.",
   client_busy:
     "Something else is deploying to that client right now: try again in a moment.",
   rollback_failed:
