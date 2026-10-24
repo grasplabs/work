@@ -1720,6 +1720,10 @@ msgstr "A new template"
 msgid "A new version of this domain is available."
 msgstr "A new version of this domain is available."
 
+#: src/settings/chat-accounts.tsx
+msgid "A newer link was sent since. Open the latest one from the chat app."
+msgstr "A newer link was sent since. Open the latest one from the chat app."
+
 #: src/onboarding/work-record.tsx
 msgid "A normal one takes {normal} hours. The quickest took {least}, the longest {most}."
 msgstr "A normal one takes {normal} hours. The quickest took {least}, the longest {most}."
@@ -3586,6 +3590,14 @@ msgctxt "the chat beside an App being built"
 msgid "Chat"
 msgstr "Chat"
 
+#: src/settings/chat-accounts.tsx
+msgid "Chat apps"
+msgstr "Chat apps"
+
+#: src/settings/chat-accounts.tsx
+msgid "Chat apps where Grasp knows it’s you. Write to Grasp in one, and it sends you a link to connect your account here. Unlink one you no longer use."
+msgstr "Chat apps where Grasp knows it’s you. Write to Grasp in one, and it sends you a link to connect your account here. Unlink one you no longer use."
+
 #: src/chat/chat-list.tsx
 msgid "Chat name"
 msgstr "Chat name"
@@ -4550,6 +4562,10 @@ msgstr "Discovery"
 #: src/landscape/landscape-overview.ts
 msgid "Discovery sources"
 msgstr "Discovery sources"
+
+#: src/settings/chat-accounts.tsx
+msgid "Dismiss"
+msgstr "Dismiss"
 
 #: src/dashboard/signals.tsx
 msgctxt "put a signal away until something new"
@@ -5741,6 +5757,10 @@ msgstr "Grasp records your word that it took effect and never sends it again; a 
 msgid "Grasp resolved these packages from the npm registry and checked each one's files against the registry's hash. A licence is as the package states it."
 msgstr "Grasp resolved these packages from the npm registry and checked each one's files against the registry's hash. A licence is as the package states it."
 
+#: src/settings/chat-accounts.tsx
+msgid "Grasp sent this link to that account in {app}. Link it only if it is yours: Grasp then answers it as you, with what you can see."
+msgstr "Grasp sent this link to that account in {app}. Link it only if it is yours: Grasp then answers it as you, with what you can see."
+
 #: src/dashboard/outcome-card.tsx
 msgid "Grasp sent this, but its answer was lost: nobody can tell whether it took effect. Check on {connection} before you say."
 msgstr "Grasp sent this, but its answer was lost: nobody can tell whether it took effect. Check on {connection} before you say."
@@ -6920,6 +6940,7 @@ msgid "Light"
 msgstr "Light"
 
 #: src/onboarding/interviews-progress.tsx
+#: src/settings/chat-accounts.tsx
 msgid "Link"
 msgstr "Link"
 
@@ -6946,9 +6967,17 @@ msgstr "Link out"
 msgid "Link out on {date}"
 msgstr "Link out on {date}"
 
+#: src/settings/chat-accounts.tsx
+msgid "Link your {app} account {account}?"
+msgstr "Link your {app} account {account}?"
+
 #: src/brain/brain-markdown.ts
 msgid "Linked"
 msgstr "Linked"
+
+#: src/settings/chat-accounts.tsx
+msgid "Linked {time}"
+msgstr "Linked {time}"
 
 #: src/screens/screen-links.ts
 msgid "Links can't be opened here."
@@ -7668,6 +7697,10 @@ msgstr "No card on file"
 msgid "No certifications on file"
 msgstr "No certifications on file"
 
+#: src/settings/chat-accounts.tsx
+msgid "No chat app accounts are linked."
+msgstr "No chat app accounts are linked."
+
 #: src/chat/chat-list.tsx
 msgid "No chats yet. Drag one here, or move it from its menu."
 msgstr "No chats yet. Drag one here, or move it from its menu."
@@ -8316,6 +8349,10 @@ msgstr "Not listed"
 #: src/policies/policy.ts
 msgid "Not made by {vendors}"
 msgstr "Not made by {vendors}"
+
+#: src/settings/chat-accounts.tsx
+msgid "Not mine"
+msgstr "Not mine"
 
 #: src/connections/connection-list.tsx
 msgid "Not named by the provider"
@@ -12685,6 +12722,10 @@ msgstr "This change is being applied again, so it can't be abandoned now. The pa
 msgid "This change was already abandoned."
 msgstr "This change was already abandoned."
 
+#: src/settings/chat-accounts.tsx
+msgid "This chat account is linked to someone else. They need to unlink it first."
+msgstr "This chat account is linked to someone else. They need to unlink it first."
+
 #: src/routes/guest.tsx
 msgid "This chat asks how your work is done. Everything you write is kept and read by the people who invited you, who may copy it into their own records and keep it there. Please don't share passwords, bank details or anything you wouldn't put in an email."
 msgstr "This chat asks how your work is done. Everything you write is kept and read by the people who invited you, who may copy it into their own records and keep it there. Please don't share passwords, bank details or anything you wouldn't put in an email."
@@ -12794,6 +12835,10 @@ msgstr "This is what I wrote down."
 msgid "This is what is new."
 msgstr "This is what is new."
 
+#: src/settings/chat-accounts.tsx
+msgid "This link can’t be used"
+msgstr "This link can’t be used"
+
 #: src/routes/_shell.links.$app.$surface.tsx
 msgid "This link doesn't open anything you can open"
 msgstr "This link doesn't open anything you can open"
@@ -12803,9 +12848,21 @@ msgstr "This link doesn't open anything you can open"
 msgid "This link doesn't work. Ask whoever sent it for a new one."
 msgstr "This link doesn't work. Ask whoever sent it for a new one."
 
+#: src/settings/chat-accounts.tsx
+msgid "This link has been used already. Each link works once."
+msgstr "This link has been used already. Each link works once."
+
 #: src/routes/guest.tsx
 msgid "This link has expired. Ask whoever sent it for a new one."
 msgstr "This link has expired. Ask whoever sent it for a new one."
+
+#: src/settings/chat-accounts.tsx
+msgid "This link has expired. Write to Grasp in the chat app for a new one."
+msgstr "This link has expired. Write to Grasp in the chat app for a new one."
+
+#: src/settings/chat-accounts.tsx
+msgid "This link isn’t one Grasp sent. Write to Grasp in the chat app for a new one."
+msgstr "This link isn’t one Grasp sent. Write to Grasp in the chat app for a new one."
 
 #: src/screens/screen-frame.tsx
 msgid "This link opens the app with something it doesn't take. Open the app from its domain instead."
@@ -13264,6 +13321,14 @@ msgstr "Unknown outcomes"
 #: src/brain/brain.ts
 msgid "Unknown source"
 msgstr "Unknown source"
+
+#: src/settings/chat-accounts.tsx
+msgid "Unlink"
+msgstr "Unlink"
+
+#: src/settings/chat-accounts.tsx
+msgid "Unlink {app} account {shown}"
+msgstr "Unlink {app} account {shown}"
 
 #: src/engines/app-status.tsx
 msgid "Unpublish"

@@ -13,6 +13,10 @@ import { ErrorText } from "../error-text.tsx";
 import { formatDateTime } from "../format.ts";
 import { NotLoadedState } from "../frame/page-states.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
+import type { Loaded } from "../load-from-core.tsx";
+import { ChatAccountsSection } from "../settings/chat-accounts.tsx";
+import type { ChatAccounts } from "../settings/chat-accounts.tsx";
+import { pendingChatLink } from "../settings/chat-link.ts";
 import {
   SettingsError,
   SettingsLoading,
@@ -25,8 +29,10 @@ import { useCoreAction } from "../use-core-action.ts";
 // how the person gets into Grasp, the devices they are signed in on, and
 // the link for AI apps outside it. Each device but this one can be signed
 // out here; this one signs out from the person menu. Core names no place
-// a session signed in from, so the prototype's places aren't here. Grasp
-// has no link for AI apps yet: it stays off.
+// a session signed in from, so the prototype's places aren't here. Then
+// the chat apps where Grasp knows them (settings/chat-accounts.tsx); never
+// for Grasp staff, who aren't the company's people. Grasp has no link for
+// AI apps yet: it stays off.
 
 /** The way people sign in here, when there is just the one; core's own name for it. */
 const SignedInWith = ({ labels }: { labels: string[] }) => {
@@ -142,7 +148,7 @@ const Devices = ({ sessions }: { sessions: OwnSession[] }) => {
 const Security = () => {
   const { t } = useLingui();
   const { identity } = Route.useRouteContext();
-  const { labels, sessions } = Route.useLoaderData();
+  const { labels, sessions, chat } = Route.useLoaderData();
   const current =
     sessions.state === "ready"
       ? sessions.data.find((session) => session.current)
@@ -176,6 +182,8 @@ const Security = () => {
         </SettingsSection>
       )}
 
+      {chat === undefined ? null : <ChatAccountsSection chat={chat} />}
+
       <SettingsSection
         description={t`Let an AI app such as Claude or ChatGPT use Grasp. It reads what Grasp knows, and it can show you a page. For anything else it asks you here first: nothing changes unless you allow it.`}
         title={t`AI apps`}
@@ -208,15 +216,37 @@ const signInLabels = async (
   }
 };
 
+/** The person's linked chat accounts, and the link they opened in this tab, if any. */
+const chatAccounts = async (
+  core: Pick<CoreConnection, "withSession">
+): Promise<Loaded<ChatAccounts>> => {
+  const secret = pendingChatLink();
+  return await loadFromCore(core, async (session) => {
+    const [accounts, preview] = await Promise.all([
+      session.channelAccounts.list(),
+      secret === undefined
+        ? undefined
+        : session.channelAccounts.preview(secret),
+    ]);
+    return {
+      accounts,
+      ...(secret === undefined || preview === undefined
+        ? {}
+        : { pending: { secret, preview } }),
+    };
+  });
+};
+
 export const Route = createFileRoute("/_shell/settings/security")({
   pendingComponent: SettingsLoading,
   errorComponent: SettingsError,
   component: Security,
-  loader: async ({ context: { core } }) => {
-    const [labels, sessions] = await Promise.all([
+  loader: async ({ context: { core, identity } }) => {
+    const [labels, sessions, chat] = await Promise.all([
       signInLabels(core),
       loadFromCore(core, async (session) => await session.sessions.list()),
+      identity.staff ? undefined : chatAccounts(core),
     ]);
-    return { labels, sessions };
+    return { labels, sessions, chat };
   },
 });
