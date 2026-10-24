@@ -87,6 +87,16 @@ const lines = {
     es: "Iniciar sesión",
   },
 
+  // A workflow step that waits for the person, told in their chat
+  // (reach.ts): where to go, and nothing of what it is about.
+  decisionWaiting: {
+    en: "A workflow is waiting for your decision. Decide in Grasp: {link}",
+    nl: "Een workflow wacht op jouw beslissing. Beslis in Grasp: {link}",
+    de: "Ein Workflow wartet auf Ihre Entscheidung. Entscheiden Sie in Grasp: {link}",
+    fr: "Un workflow attend votre décision. Décidez dans Grasp : {link}",
+    es: "Un flujo de trabajo espera tu decisión. Decide en Grasp: {link}",
+  },
+
   // A turn that can't be answered.
 
   /** Over the per-person limit on incoming messages. */

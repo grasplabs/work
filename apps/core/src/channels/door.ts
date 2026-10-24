@@ -157,14 +157,22 @@ const keepConversation = async (
   platform: Platform,
   threadId: string,
   userId: string,
+  locale: ChannelLocale,
   now = new Date()
 ): Promise<void> => {
   await drizzle(env.DB)
     .insert(channelConversations)
-    .values({ platform, threadId, userId, createdAt: now, lastMessageAt: now })
+    .values({
+      platform,
+      threadId,
+      userId,
+      locale,
+      createdAt: now,
+      lastMessageAt: now,
+    })
     .onConflictDoUpdate({
       target: [channelConversations.platform, channelConversations.threadId],
-      set: { userId, lastMessageAt: now },
+      set: { userId, locale, lastMessageAt: now },
     });
 };
 
@@ -345,7 +353,13 @@ export const channelResponse = async (
   });
   const takeOn = handoff ?? answerInChat(env);
   chat.onDirectMessage(async (thread, message) => {
-    await keepConversation(env, platform, thread.id, userId);
+    await keepConversation(
+      env,
+      platform,
+      thread.id,
+      userId,
+      localeOf(activity.locale)
+    );
     await takeOn({ platform, userId, thread, message });
   });
   // A press on a card of held writes, by the member the gate let in, in

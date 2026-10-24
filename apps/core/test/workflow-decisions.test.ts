@@ -9,6 +9,7 @@ import type { WorkflowResourceRun } from "@grasp-os/shared/workflow-resources";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
+import { teamsAdapter } from "../src/channels/teams.ts";
 import { refreshDailySignals } from "../src/daily-signals.ts";
 import {
   answerDecision,
@@ -41,6 +42,7 @@ import { repairWakes } from "../src/workflows/wakes.ts";
 import { allEvents } from "./audit-events.ts";
 import { resumed, stopped, whileEngineRefuses } from "./runs.ts";
 import { outcome, unique } from "./sign-in.ts";
+import { reached } from "./teams-door.ts";
 
 // `grasp.decision` in JSON workflows (GRA-941: @grasp-os/open-workflow's
 // generate.ts, core's resource-host.ts, resource-decisions.ts and the
@@ -434,6 +436,26 @@ const seededDecisions = async (
     ),
   ]);
   return ids;
+};
+
+/**
+ * A private Teams chat `who` wrote to Stephen in, with their app set to
+ * `locale`, kept as the door keeps it (channels/door.ts): its Teams
+ * conversation id.
+ */
+const teamsChatOf = async (who: Identity, locale: string): Promise<string> => {
+  const conversation = `a:${unique()}`;
+  const threadId = teamsAdapter(env).encodeThreadId({
+    conversationId: conversation,
+    serviceUrl: "https://smba.trafficmanager.net/emea/",
+    conversationType: "personal",
+  });
+  await env.DB.prepare(
+    "INSERT INTO channel_conversations (platform, thread_id, user_id, locale, created_at, last_message_at) VALUES ('teams', ?, ?, ?, ?, ?)"
+  )
+    .bind(threadId, who.userId, locale, Date.now(), Date.now())
+    .run();
+  return conversation;
 };
 
 /** The IDs of the decisions waiting for `by` to answer (their inbox). */
@@ -851,6 +873,39 @@ describe("asking the people a JSON workflow's decision is for", () => {
       afterAnswer: false,
       asksAfterReplay: 1,
       end: { status: "completed", output: { status: "approved" } },
+    });
+  });
+
+  it("tells its recipient once in their own Teams chat with Stephen, in their language, with the link: one without a chat finds it in their inbox alone", async () => {
+    const { owner, reviewer, workflow } = await approvalWorkflow();
+    const conversation = await teamsChatOf(reviewer, "nl");
+    const runId = await started(owner, workflow.id, 5000);
+    const decision = await openedBy(runId);
+    await vi.waitFor(
+      async () => {
+        await expect(asksOf(decision)).resolves.not.toStrictEqual([]);
+      },
+      { timeout: 20_000, interval: 100 }
+    );
+    const told = await reached(conversation);
+    await confirmedAnswer(reviewer, decision, { approved: true });
+    await ended(owner, workflow.id, runId);
+    const link = `/decisions/${encodeURIComponent(decision)}`;
+    const toldAfter = await reached(conversation);
+    expect({
+      lines: told.lines,
+      // Answered and ended, it said nothing more.
+      after: toldAfter.lines.length,
+    }).toStrictEqual({
+      lines: [
+        expect.stringMatching(
+          new RegExp(
+            `^Een workflow wacht op jouw beslissing\\. Beslis in Grasp: https://[^ ]+${link.replaceAll("/", "\\/")}$`,
+            "u"
+          )
+        ),
+      ],
+      after: 1,
     });
   });
 

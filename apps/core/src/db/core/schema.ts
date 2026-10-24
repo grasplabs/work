@@ -298,6 +298,12 @@ export const channelConversations = sqliteTable(
       .references(() => users.id, { onDelete: "cascade" }),
     createdAt: timestamp("created_at").notNull(),
     lastMessageAt: timestamp("last_message_at").notNull(),
+    /**
+     * The language the person's app was set to when they last wrote
+     * (`en`, `nl`, `de`, `fr`, `es`), which Stephen tells them in when
+     * he writes first (channels/reach.ts); null before it was kept.
+     */
+    locale: text(),
   },
   (table) => [
     primaryKey({ columns: [table.platform, table.threadId] }),
