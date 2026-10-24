@@ -193,6 +193,31 @@ export type { RunNotification } from "./notifications.ts";
 /** What `WorkflowRun.journal()` returns. */
 export type { Journal } from "./journal.ts";
 
+/** A journaled step's type, as a pending wait names it. */
+const pendingTypes: Readonly<Record<string, PendingWait["type"]>> = {
+  do: "retry",
+  sleep: "sleep",
+  waitForEvent: "waitForEvent",
+};
+
+/**
+ * A sleep or wait a run is suspended in, or a step waiting for its retry
+ * (`WorkflowRun.pendingWaits`): metadata only.
+ */
+export interface PendingWait {
+  /** The step's ordinal, never given to another step. */
+  readonly ordinal: number;
+  readonly type: "sleep" | "waitForEvent" | "retry";
+  /** The step's name, as the definition gave it. */
+  readonly name: string;
+  /** The event type a wait takes; null for a sleep or a retry. */
+  readonly eventType: string | null;
+  /** When the sleep or wait was first reached, or the retried attempt failed. */
+  readonly openedAt: number | null;
+  /** When it is due; null for a wait with no timeout. */
+  readonly deadline: number | null;
+}
+
 /** What `WorkflowRun.history` returns each event as. */
 export type {
   HistoryRecord,
@@ -1503,6 +1528,61 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
   }
 
   /**
+   * What the run waits on now, read in one turn: each sleep and wait it is
+   * suspended in, and each step that waits for its retry, as metadata (its
+   * ordinal, kind, name, the event type a wait takes, when it was first
+   * reached or failed, and when it is due), never a value of the run's.
+   * Empty for a run that waits on nothing, or has ended; undefined when
+   * there is no run.
+   */
+  pendingWaits(): PendingWait[] | undefined {
+    const run = this.#run();
+    if (run === undefined) {
+      return undefined;
+    }
+    // An ended run waits on nothing, whatever steps it left waiting.
+    if (
+      run.status === "complete" ||
+      run.status === "errored" ||
+      run.status === "terminated"
+    ) {
+      return [];
+    }
+    return this.ctx.storage.sql
+      .exec<{
+        ordinal: number;
+        type: string;
+        name: string;
+        event_type: string | null;
+        opened_at: number | null;
+        deadline: number | null;
+      }>(
+        `SELECT s.ordinal, s.type, s.name, s.event_type,
+          CASE WHEN s.type = 'do'
+            THEN (SELECT a.ended_at FROM attempts a WHERE a.ordinal = s.ordinal ORDER BY a.attempt DESC LIMIT 1)
+            ELSE (SELECT MIN(h.at) FROM history h WHERE h.ordinal = s.ordinal AND h.type IN ('sleep_started', 'wait_started'))
+          END AS opened_at,
+          CASE WHEN s.type = 'do'
+            THEN (SELECT a.retry_at FROM attempts a WHERE a.ordinal = s.ordinal ORDER BY a.attempt DESC LIMIT 1)
+            ELSE s.deadline
+          END AS deadline
+        FROM steps s
+        WHERE (s.state = 'waiting' AND s.type IN ('sleep', 'waitForEvent'))
+          OR (s.state = 'retrying' AND s.type = 'do')
+        ORDER BY s.ordinal`
+      )
+      .toArray()
+      .map((row) => ({
+        ordinal: row.ordinal,
+        type: pendingTypes[row.type] ?? "waitForEvent",
+        name: row.name,
+        eventType: row.event_type,
+        openedAt: row.opened_at,
+        deadline: row.deadline,
+      }));
+  }
+
+  /**
    * The run's whole journal, as plain data: raw, a sensitive step's result
    * too, for the host's own inspection. Observers subscribe.
    */
@@ -2215,6 +2295,12 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
   async pause(command?: ControlFence): Promise<PauseOutcome> {
     const { sql } = this.ctx.storage;
     return await this.#command((run, now): CommandDecision<PauseOutcome> => {
+      // A run rolling back can't be paused: a pause then is ignored, and
+      // takes no fence, so it says nothing of which controls reached the
+      // run.
+      if (run.status === "rollingBack") {
+        return { outcome: "ignored" };
+      }
       if (!takesFence(sql, run, command)) {
         return { outcome: "fenced" };
       }
