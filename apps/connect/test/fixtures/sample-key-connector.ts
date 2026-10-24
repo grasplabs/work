@@ -70,6 +70,7 @@ export default defineConnector({
       input: boardInput,
       output: itemsOutput,
       readOnly: true,
+      reach: "own",
       resource: "board",
       routes: [listRoute],
       run: async ({ board }) => await list(board),
@@ -80,6 +81,7 @@ export default defineConnector({
       input: boardInput,
       output: itemsOutput,
       readOnly: true,
+      reach: "own",
       resource: "board",
       routes: [listRoute],
       run: async ({ board }) =>

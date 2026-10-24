@@ -51,6 +51,7 @@ export default defineConnector({
       input: z.strictObject({ board: z.string().min(1) }),
       output: z.strictObject({ items: z.array(itemSchema) }),
       readOnly: true,
+      reach: "own",
       resource: "board",
       routes: [
         {
