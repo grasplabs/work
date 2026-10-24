@@ -232,6 +232,7 @@ describe("the classes a company turned on", setUpTime, () => {
     const inTeam = await signedInApi(idp, "user");
     const outside = await signedInApi(idp, "user");
     const { id, mailbox } = await connectShared(admin);
+    await pointedAt(admin, mailbox);
     const team = await teamOf(inTeam.userId);
     await admin.api.connections.setToolClass("read-company", {
       who: "everyone",
