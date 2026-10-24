@@ -138,6 +138,18 @@ export const botFrameworkKeysUrl = "https://botframework-control.test/keys";
  */
 export const botFrameworkFailUrl = "https://botframework-control.test/fail";
 
+/**
+ * Where tests that post through core's own route, and so are checked
+ * against the isolate's keys, take the one signing key they share: POST
+ * `{ key }`, a private JWK with its `kid`, to have it published, and get
+ * back the key the first test file published, this one or an earlier
+ * one. Test files may share an isolate, which fetches the keys at most
+ * once a minute: one key, published before any of them posts, is always
+ * among them.
+ */
+export const botFrameworkSharedKeyUrl =
+  "https://botframework-control.test/shared-key";
+
 /** Where tests read the paths login.botframework.com was asked for, in order. */
 export const botFrameworkAskedUrl = "https://botframework-control.test/asked";
 
@@ -200,6 +212,7 @@ const losesAnswer = (mailbox) => {
 const npm = (${npmRegistryFake.toString()})();
 const botFramework = (${botFrameworkKeysFake.toString()})();
 let botFrameworkKeys = [];
+let botFrameworkSharedKey = null;
 const botConnector = (${botConnectorFake.toString()})(${JSON.stringify(teamsBot)});
 const landscape = { grants: [], apps: [], people: [], throttle: null, failing: false };
 const directory = { users: [] };
@@ -434,6 +447,16 @@ export default {
       botFrameworkKeys = [...botFrameworkKeys.filter(({ kid }) => !kids.has(kid)), ...keys];
       botFramework.setKeys(botFrameworkKeys);
       return new Response(null, { status: 204 });
+    }
+    if (request.method === "POST" && url.href === ${JSON.stringify(botFrameworkSharedKeyUrl)}) {
+      if (botFrameworkSharedKey === null) {
+        const { key } = await request.json();
+        botFrameworkSharedKey = key;
+        const { kid, kty, n, e } = key;
+        botFrameworkKeys = [...botFrameworkKeys, { kid, kty, n, e, use: "sig", endorsements: ["msteams"] }];
+        botFramework.setKeys(botFrameworkKeys);
+      }
+      return Response.json({ key: botFrameworkSharedKey });
     }
     if (request.method === "POST" && url.href === ${JSON.stringify(botFrameworkFailUrl)}) {
       const { status } = await request.json();

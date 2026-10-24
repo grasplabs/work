@@ -5,7 +5,7 @@ import {
   waitOnExecutionContext,
 } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { SignJWT, exportJWK, generateKeyPair } from "jose";
+import { SignJWT, exportJWK, generateKeyPair, importJWK } from "jose";
 import type { CryptoKey as JoseKey } from "jose";
 import {
   afterEach,
@@ -22,7 +22,7 @@ import worker from "../src/index.ts";
 import {
   botConnectorMembersUrl,
   botConnectorPostedUrl,
-  botFrameworkKeysUrl,
+  botFrameworkSharedKeyUrl,
   teamsBot,
 } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
@@ -57,30 +57,34 @@ const providers = (): Fetcher => {
 
 let signingKey: { kid: string; privateKey: JoseKey };
 
+const sharedKeySchema = z.object({
+  key: z.looseObject({ kid: z.string() }),
+});
+
 /**
- * The file's signing key, published once, and a watch on core's own fetch
- * for each test, over the mock IdP's.
+ * The signing key the test files share (`botFrameworkSharedKeyUrl`),
+ * published once, and a watch on core's own fetch for each test, over the
+ * mock IdP's.
  */
 const watched = () => {
   beforeAll(async () => {
-    const { privateKey, publicKey } = await generateKeyPair("RS256", {
+    const { privateKey } = await generateKeyPair("RS256", {
       extractable: true,
     });
-    const kid = `door-key-${unique()}`;
-    signingKey = { kid, privateKey };
-    await providers().fetch(botFrameworkKeysUrl, {
+    const offered = {
+      ...(await exportJWK(privateKey)),
+      kid: `door-key-${unique()}`,
+    };
+    const response = await providers().fetch(botFrameworkSharedKeyUrl, {
       method: "POST",
-      body: JSON.stringify({
-        keys: [
-          {
-            ...(await exportJWK(publicKey)),
-            kid,
-            use: "sig",
-            endorsements: ["msteams"],
-          },
-        ],
-      }),
+      body: JSON.stringify({ key: offered }),
     });
+    const { key } = sharedKeySchema.parse(await response.json());
+    const imported = await importJWK(key, "RS256");
+    if (!(imported instanceof CryptoKey)) {
+      throw new TypeError("Expected the shared signing key as a CryptoKey");
+    }
+    signingKey = { kid: key.kid, privateKey: imported };
   });
   beforeEach(() => {
     toMicrosoft.length = 0;
