@@ -5,7 +5,9 @@
  * sent, as an attacker's would. `throttle` makes Graph answer the next
  * request with a 429, `throttleWrite` the next write; `failWrite` answers
  * the next write with an error, and `loseWriteAnswer` carries the next
- * write out and loses its answer.
+ * write out and loses its answer. Excel's workbooks in the finance drive
+ * hold their named tables in memory, typed as Excel types what it is
+ * sent, afresh for each test.
  */
 import { egressHeader } from "@grasp-os/connector-kit/manifest";
 import {
@@ -24,6 +26,7 @@ import {
   draft,
   eventDetail,
   eventPage,
+  financeDrive,
   invoicePdf,
   controlText,
   item,
@@ -37,15 +40,22 @@ import {
   searchResults,
   sharePointHost,
   spoofedId,
+  supplierColumns,
+  supplierRows,
+  supplierTable,
   throttled,
+  workbookIds,
 } from "./fixtures/graph.ts";
+import type { SheetCell } from "./fixtures/graph.ts";
 import { fakeProvider, json, route as routeOn } from "./internet.ts";
 import type { ProviderRoute } from "./internet.ts";
 
 const users = String.raw`^/v1\.0/users/(?<mailbox>[^/]+)`;
 const drives = String.raw`^/v1\.0/drives/(?<drive>[^/]+)`;
+const tables = `${drives}/items/(?<id>[^/]+)/workbook/tables/(?<table>[^/]+)`;
+const tableRow = String.raw`${tables}/rows/itemAt\(index=(?<row>\d+)\)/range`;
 
-const parts = ["mailbox", "drive", "id"] as const;
+const parts = ["mailbox", "drive", "id", "table", "row"] as const;
 
 type Part = (typeof parts)[number];
 
@@ -116,7 +126,142 @@ const route = (
   answer: ProviderRoute<Part>["answer"]
 ): ProviderRoute<Part> => routeOn(graphHost, method, path, answer);
 
+/** A named table, as the fake Excel holds it. */
+interface SheetTable {
+  columns: string[];
+  rows: SheetCell[][];
+}
+
+/**
+ * Each workbook of the finance drive, by ID: its named tables, by name.
+ * Made afresh before each test.
+ */
+const workbooks = new Map<string, Map<string, SheetTable>>();
+
+const resetWorkbooks = (): void => {
+  workbooks.clear();
+  for (const id of Object.values(workbookIds)) {
+    workbooks.set(
+      id,
+      new Map([
+        [
+          supplierTable,
+          { columns: [...supplierColumns], rows: supplierRows() },
+        ],
+      ])
+    );
+  }
+};
+
+/** The named table `table` of workbook `id` in `drive`, if there is one. */
+const tableAt = ({
+  drive,
+  id,
+  table,
+}: Record<Part, string>): SheetTable | undefined =>
+  drive === financeDrive ? workbooks.get(id)?.get(table) : undefined;
+
+const isoDay = /^\d{4}-\d{2}-\d{2}$/u;
+const numeric = /^-?\d+(?:\.\d+)?$/u;
+const excelEpoch = Date.UTC(1899, 11, 30);
+const dayMs = 86_400_000;
+
+/**
+ * A value as Excel takes it when it is typed: a day as its serial number,
+ * shown in a date format; a number as a number; `=...` as a formula.
+ */
+const typed = (value: string | number | boolean): SheetCell => {
+  if (typeof value !== "string") {
+    return { value, format: "General", formula: value };
+  }
+  if (isoDay.test(value)) {
+    const serial = (Date.parse(`${value}T00:00:00Z`) - excelEpoch) / dayMs;
+    return { value: serial, format: "yyyy-mm-dd", formula: serial };
+  }
+  if (value.startsWith("=")) {
+    return { value: 0, format: "General", formula: value };
+  }
+  if (numeric.test(value)) {
+    const number = Number(value);
+    return { value: number, format: "General", formula: number };
+  }
+  return { value, format: "General", formula: value };
+};
+
+/** Rows as Graph answers a range of them. */
+const rangeOf = (rows: readonly SheetCell[][]) => ({
+  values: rows.map((row) => row.map(({ value }) => value)),
+  numberFormat: rows.map((row) => row.map(({ format }) => format)),
+  formulas: rows.map((row) => row.map(({ formula }) => formula)),
+});
+
+/** One row's values, as Graph takes them to add or change a row. */
+const rowValuesSchema = z.object({
+  values: z
+    .array(z.array(z.union([z.string(), z.number(), z.boolean()])))
+    .length(1),
+});
+
+/** The one row a request's body gives, typed, if it fits `table`. */
+const typedRow = async (
+  request: Request,
+  table: SheetTable
+): Promise<SheetCell[] | undefined> => {
+  const [values = []] = rowValuesSchema.parse(await request.json()).values;
+  return values.length === table.columns.length ? values.map(typed) : undefined;
+};
+
+const invalidArgument = { error: { code: "InvalidArgument" } };
+
+const workbookRoutes: ProviderRoute<Part>[] = [
+  route("GET", `${tables}/headerRowRange`, (asked) => {
+    const table = tableAt(asked);
+    return table === undefined
+      ? json(notFound, 404)
+      : json({ values: [table.columns] });
+  }),
+  route("GET", `${tables}/dataBodyRange`, (asked) => {
+    const table = tableAt(asked);
+    return table === undefined
+      ? json(notFound, 404)
+      : json(rangeOf(table.rows));
+  }),
+  route("POST", `${tables}/rows`, async (asked) => {
+    const table = tableAt(asked);
+    if (table === undefined) {
+      return json(notFound, 404);
+    }
+    const row = await typedRow(asked.request, table);
+    if (row === undefined) {
+      return json(invalidArgument, 400);
+    }
+    table.rows.push(row);
+    return json(
+      { index: table.rows.length - 1, values: [row.map(({ value }) => value)] },
+      201
+    );
+  }),
+  route("GET", tableRow, (asked) => {
+    const row = tableAt(asked)?.rows[Number(asked.row)];
+    return row === undefined ? json(notFound, 404) : json(rangeOf([row]));
+  }),
+  route("PATCH", tableRow, async (asked) => {
+    const table = tableAt(asked);
+    const index = Number(asked.row);
+    if (table?.rows[index] === undefined) {
+      return json(notFound, 404);
+    }
+    const row = await typedRow(asked.request, table);
+    if (row === undefined) {
+      return json(invalidArgument, 400);
+    }
+    table.rows[index] = row;
+    return json(rangeOf([row]));
+  }),
+];
+
 const graphRoutes: ProviderRoute<Part>[] = [
+  ...workbookRoutes,
   route(
     "GET",
     `${users}(?:/mailFolders/[^/]+)?/messages`,
@@ -239,6 +384,7 @@ export const fakeGraph = () => {
   beforeEach(() => {
     tagged.clear();
     duringLookup = undefined;
+    resetWorkbooks();
   });
   const { sent, writesDone, fail } = fakeProvider({
     hosts: [graphHost],
@@ -304,6 +450,27 @@ export const fakeGraph = () => {
     loseWriteAnswer: () => {
       fail({ lost: true, writesOnly: true });
     },
+    /**
+     * Has a person type `formula` into cell `column` of row `row` of
+     * workbook `id`'s supplier table, Excel showing `value` for it.
+     */
+    typeFormula: (
+      id: string,
+      {
+        row,
+        column,
+        formula,
+        value,
+      }: Omit<SheetCell, "format"> & { row: number; column: number }
+    ) => {
+      const cells = workbooks.get(id)?.get(supplierTable)?.rows[row];
+      if (cells !== undefined) {
+        cells[column] = { value, format: "General", formula };
+      }
+    },
+    /** The rows of workbook `id`'s supplier table, as Excel holds them. */
+    supplierRowsOf: (id: string): readonly SheetCell[][] =>
+      workbooks.get(id)?.get(supplierTable)?.rows ?? [],
     sharePointHost,
   };
 };
