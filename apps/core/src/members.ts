@@ -44,6 +44,7 @@ import { signInConfig } from "./auth/config.ts";
 import { revokeChatPermissions } from "./chat-connections.ts";
 import { personOf } from "./connections.ts";
 import {
+  channelAccounts,
   invitations,
   memberRemovals,
   members,
@@ -255,6 +256,10 @@ const recordRemoval = async (
         )
       ),
     db.delete(sessions).where(and(eq(sessions.userId, userId), removed)),
+    // Their chat accounts too: the agent no longer knows them on any platform.
+    db
+      .delete(channelAccounts)
+      .where(and(eq(channelAccounts.userId, userId), removed)),
     db
       .delete(notifications)
       .where(and(eq(notifications.personId, userId), removed)),

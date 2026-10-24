@@ -13,7 +13,6 @@ import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { collections, documents } from "./db/knowledge/schema.ts";
-import { noteProvenance } from "./knowledge/access.ts";
 import { allowedFor } from "./knowledge/authorize.ts";
 import { portsOf } from "./knowledge/ports.ts";
 
@@ -217,8 +216,7 @@ export const brainChanges = async (
       ({ change }) => change.kind === "document" && change.document.id === id
     )
   );
-  await noteProvenance(
-    env,
+  await portsOf(env).onRead(
     reader,
     {
       action: "knowledge.read",

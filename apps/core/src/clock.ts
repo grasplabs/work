@@ -15,6 +15,7 @@ import { sweepTestFixtures } from "./app-tests.ts";
 import { auditLog } from "./audit-log.ts";
 import { drainAuditOutboxes } from "./audit-outbox.ts";
 import { sweepTokenKeys } from "./auth/app-tokens.ts";
+import { sweepChannelLinks } from "./channels/accounts.ts";
 import { refreshDailySignals } from "./daily-signals.ts";
 import { recheckMalware } from "./dependencies/requests.ts";
 import { inJurisdiction } from "./durable-objects.ts";
@@ -162,6 +163,7 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     run: deleteExpiredEmail,
   },
   { name: "guests.sweep", period: "quarterHour", run: sweepGuestChats },
+  { name: "channels.links", period: "quarterHour", run: sweepChannelLinks },
   {
     name: "workflows.run_details",
     period: "quarterHour",

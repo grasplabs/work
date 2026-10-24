@@ -32,7 +32,16 @@ expectTypeOf<"microsoft-365.mail@1">().toExtend<ConnectorContract>();
 expectTypeOf<"google-workspace.files@1">().toExtend<ConnectorContract>();
 expectTypeOf<"grasp.mail@1">().not.toExtend<ConnectorContract>();
 expectTypeOf<ConnectorAction<"microsoft-365.mail@1">>().toEqualTypeOf<
-  "createDraft" | "get" | "list" | "move" | "readAttachment" | "send"
+  | "categorise"
+  | "createDraft"
+  | "createReplyDraft"
+  | "flag"
+  | "get"
+  | "list"
+  | "move"
+  | "readAttachment"
+  | "send"
+  | "thread"
 >();
 
 declare const ctx: ActionCtx<readonly [typeof mail, typeof gmail]>;

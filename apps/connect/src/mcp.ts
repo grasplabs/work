@@ -1,4 +1,5 @@
 import {
+  changeMetaKey,
   effectAbsentMetaKey,
   mcpProtocolVersion,
   notPerformedMetaKey,
@@ -99,6 +100,11 @@ export interface McpToolResult {
    * on this (call.ts).
    */
   effectAbsent: boolean;
+  /**
+   * What a successful write says it changed (`changeMetaKey`), as the
+   * server sent it, unread: only a native connector's is taken (changes.ts).
+   */
+  change: unknown;
 }
 
 /**
@@ -324,6 +330,7 @@ const resultOf = (result: unknown): McpToolResult => {
       isError &&
       meta?.[effectAbsentMetaKey] === true &&
       meta[outcomeUnknownMetaKey] !== true,
+    change: isError ? undefined : meta?.[changeMetaKey],
   };
 };
 

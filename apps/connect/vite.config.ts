@@ -4,10 +4,14 @@ import {
 } from "@cloudflare/vitest-pool-workers";
 import { defineProject } from "vite-plus";
 
-import { testConnectorsFile } from "./test/global-setup.ts";
+import {
+  testComposioClassesFile,
+  testConnectorsFile,
+} from "./test/global-setup.ts";
 import {
   appClients,
   clients,
+  teamsBot,
   testComposioKey,
 } from "./test/provider-config.ts";
 
@@ -41,8 +45,15 @@ const smokeBindings = Object.fromEntries(
 const testTokenKey = btoa("test-token-key-of-exactly-32-b!!");
 
 export default defineProject({
-  // The tests' connectors: the release's and the sample one (see the setup).
-  resolve: { alias: { "#connectors": testConnectorsFile } },
+  resolve: {
+    alias: {
+      // The tests' connectors: the release's and the sample one (see the
+      // setup).
+      "#connectors": testConnectorsFile,
+      // The classes of the fake Composio's tools, for the release's.
+      "#composio-classes": testComposioClassesFile,
+    },
+  },
   test: {
     // Builds the connectors the tests load, once per run.
     globalSetup: ["./test/global-setup.ts"],
@@ -98,6 +109,10 @@ export default defineProject({
           APP_OAUTH_CLIENTS: JSON.stringify(appClients),
           // Grasp's key for Composio, as test/composio-api.ts checks it.
           COMPOSIO_API_KEY: testComposioKey,
+          // The client's own Teams bot, as test/bot-connector.ts knows it.
+          TEAMS_BOT_ID: teamsBot.id,
+          TEAMS_BOT_TENANT_ID: teamsBot.tenant,
+          TEAMS_BOT_SECRET: teamsBot.secret,
           CONNECT_MIGRATIONS: migrations,
           ...smokeBindings,
         },

@@ -1,9 +1,13 @@
+import type { AuditActor } from "@grasp-os/shared/audit";
+import type { Provenance } from "@grasp-os/shared/knowledge";
+
 import { drainKnowledgeOutboxSoon } from "../audit-outbox.ts";
 import { derivedHmacKey } from "../derived-keys.ts";
 import { runEngine } from "../workflows/engine.ts";
+import { noteProvenance, readerActor } from "./access.ts";
 import type { Reader } from "./access.ts";
 import { authorize } from "./app-entries.ts";
-import type { Readable } from "./authorize.ts";
+import type { Readable, ReadRecord } from "./authorize.ts";
 
 // What Knowledge asks of its host, in one place: the rest of Knowledge
 // reaches Grasp's people, roles, teams and Apps, its buckets, audit log,
@@ -23,6 +27,20 @@ export interface IndexJob {
 export interface KnowledgePorts {
   /** What `reader` may read now (authorize.ts). */
   authorize: (reader: Reader) => Promise<Readable>;
+  /**
+   * Called after every read, before what was read is handed over, with
+   * the collections it came from (and whether each is sensitive): the host
+   * records the read and may act on it (core puts an App or agent that
+   * read restricted data in restricted mode first), and answers its
+   * provenance. A refusal fails the read.
+   */
+  onRead: (
+    reader: Reader,
+    record: ReadRecord,
+    ...sources: { id: string; sensitive: boolean }[]
+  ) => Promise<Provenance>;
+  /** Who `reader` is, as the host's audit log names them. */
+  actorOf: (reader: Reader) => AuditActor;
   /** Payloads (payloads.ts), in a bucket whose jurisdiction the host set. */
   blobs: BlobStore;
   /**
@@ -64,6 +82,9 @@ const endedStatuses: ReadonlySet<string> = new Set([
 /** Core's ports for Knowledge, over `env`. */
 export const portsOf = (env: Env): KnowledgePorts => ({
   authorize: async (reader) => await authorize(env, reader),
+  onRead: async (reader, record, ...sources) =>
+    await noteProvenance(env, reader, record, ...sources),
+  actorOf: readerActor,
   blobs: env.BRAIN_OBJECTS,
   audit: {
     drain: () => {

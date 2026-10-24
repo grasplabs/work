@@ -2,9 +2,12 @@ import { connectionCallbackPath } from "@grasp-os/shared/connect";
 import type { ConnectionPerson } from "@grasp-os/shared/connect";
 import { directoryErrors, directoryLimits } from "@grasp-os/shared/directory";
 import type { DirectoryProvider } from "@grasp-os/shared/directory";
-import { exports } from "cloudflare:workers";
+import { env, exports } from "cloudflare:workers";
+import { eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
 
+import { connectionTokens } from "../src/db/schema.ts";
 import {
   addConnection,
   agentFor,
@@ -377,6 +380,18 @@ describe("the directory's connection", () => {
 });
 
 describe("a directory read", () => {
+  it("of a connection renewed with the read it asked for, and nothing to write, goes on", async () => {
+    const connectionId = await connectDirectory(someone("admin"));
+    await drizzle(env.DB)
+      .update(connectionTokens)
+      .set({ accessExpiresAt: new Date(0) })
+      .where(eq(connectionTokens.connectionId, connectionId));
+    providers.state.refreshGranted = asAsked["microsoft-directory"];
+    const renewed = await codeOf(read(connectionId));
+    providers.state.refreshGranted = undefined;
+    expect(renewed).toBe("ok");
+  });
+
   it("of Graph answers people as a roster needs them, and nothing more: planted names cut, guests, disabled accounts and IDs that aren't Entra's left out", async () => {
     const connectionId = await connectDirectory(someone("admin"));
     const lead = guid();

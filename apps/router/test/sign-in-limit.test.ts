@@ -401,6 +401,23 @@ describe("interview link rate limit", () => {
     expect(statuses).toStrictEqual([200, 429]);
   });
 
+  it("limits the recordings a link has written down from the same budget as its link's endpoint", async () => {
+    const limiter = limiterAllowing(1);
+    const statuses = [
+      await interviewFrom(
+        "192.0.2.28",
+        "https://acme.interview.test/api/interview",
+        limiter
+      ),
+      await interviewFrom(
+        "192.0.2.28",
+        "https://acme.interview.test/api/interview/hear",
+        limiter
+      ),
+    ].map(({ status }) => status);
+    expect(statuses).toStrictEqual([200, 429]);
+  });
+
   it("limits nothing else by it", async () => {
     const none = limiterAllowing(0);
     const others = await Promise.all(

@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "fb1027de-01be-47b1-960b-b698eafb2461",
+  "id": "1482de49-9049-4587-a303-de79d8c4f0ca",
   "prevId": "6cd08406-9b41-4dba-b082-bb9254efb67e",
   "tables": {
     "access_revocations": {
@@ -2990,13 +2990,6 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
-        },
-        "malware_checked_at": {
-          "name": "malware_checked_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
         }
       },
       "indexes": {
@@ -3025,14 +3018,6 @@
             "subject_type",
             "subject_id",
             "graph_hash",
-            "status"
-          ],
-          "isUnique": false
-        },
-        "dependency_requests_malware_idx": {
-          "name": "dependency_requests_malware_idx",
-          "columns": [
-            "malware_checked_at",
             "status"
           ],
           "isUnique": false
@@ -8048,6 +8033,61 @@
         }
       },
       "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "workflow_decision_recipients": {
+      "name": "workflow_decision_recipients",
+      "columns": {
+        "decision_id": {
+          "name": "decision_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "deciders": {
+          "name": "deciders",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "workflow_decision_recipients_deciders_idx": {
+          "name": "workflow_decision_recipients_deciders_idx",
+          "columns": [
+            "deciders",
+            "decision_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "workflow_decision_recipients_decision_id_workflow_decisions_id_fk": {
+          "name": "workflow_decision_recipients_decision_id_workflow_decisions_id_fk",
+          "tableFrom": "workflow_decision_recipients",
+          "tableTo": "workflow_decisions",
+          "columnsFrom": [
+            "decision_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "workflow_decision_recipients_decision_id_deciders_pk": {
+          "columns": [
+            "decision_id",
+            "deciders"
+          ],
+          "name": "workflow_decision_recipients_decision_id_deciders_pk"
+        }
+      },
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
