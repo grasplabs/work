@@ -42,10 +42,12 @@ import {
   item,
   itemIds,
   mailFolder,
+  masterCategories,
   message,
   messagePage,
   moved,
   notFound,
+  patched,
   replyDraft,
   notIndexed,
   reportText,
@@ -463,7 +465,25 @@ const workbookRoutes: ProviderRoute<Part>[] = [
   }),
 ];
 
+const patchSchema = z.object({
+  flag: z.unknown().optional(),
+  categories: z.unknown().optional(),
+});
+
+// `GET /me` is the OAuth fake's (oauth-provider.ts `profileOf`): it
+// answers for the account the bearer token was issued to.
 const graphRoutes: ProviderRoute<Part>[] = [
+  route("GET", `${users}/outlook/masterCategories`, ({ query }) =>
+    json(masterCategories(query.get("$skiptoken")))
+  ),
+  route(
+    "PATCH",
+    `${users}/messages/(?<id>[^/]+)`,
+    async ({ mailbox, id, request }) =>
+      json(
+        patched(mailbox, numberOf(id), patchSchema.parse(await request.json()))
+      )
+  ),
   ...workbookRoutes,
   route(
     "GET",
