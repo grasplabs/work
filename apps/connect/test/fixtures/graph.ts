@@ -363,7 +363,12 @@ export const event = (mailbox: string, n: number) => ({
   isCancelled: false,
   showAs: "busy",
   location: { displayName: "Room 4.12", locationType: "default" },
-  organizer: { emailAddress: { name: "Finance Team", address: mailbox } },
+  // The second is the CEO's, who hides its guest list from those invited.
+  organizer:
+    n === 1
+      ? { emailAddress: { name: "Finance Team", address: mailbox } }
+      : { emailAddress: { name: "CEO", address: ceo } },
+  isOrganizer: n === 1,
   webLink: `https://outlook.office365.com/owa/?itemid=${encodeURIComponent(eventId(mailbox, n))}&exvsurl=1&path=/calendar/item`,
 });
 
@@ -384,13 +389,20 @@ export const eventDetail = (mailbox: string, n: number) => ({
     contentType: "text",
     content: "Agenda: open invoices, accruals, sign-off.\r\n",
   },
-  attendees: [
-    {
-      type: "required",
-      status: { response: "accepted", time: "2026-09-20T10:00:00Z" },
-      emailAddress: { name: "Controller", address: "controller@example.com" },
-    },
-  ],
+  ...(n === 1
+    ? {
+        attendees: [
+          {
+            type: "required",
+            status: { response: "accepted", time: "2026-09-20T10:00:00Z" },
+            emailAddress: {
+              name: "Controller",
+              address: "controller@example.com",
+            },
+          },
+        ],
+      }
+    : { hideAttendees: true, attendees: [] }),
   onlineMeeting: {
     joinUrl: "https://teams.microsoft.com/l/meetup-join/19%3ameeting_example",
   },
