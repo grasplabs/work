@@ -66,6 +66,8 @@ const AppPageView = () => {
         {open === undefined ? null : (
           <ScreenFrame
             app={id}
+            // The App's bar holds the page's heading, its name.
+            embedded
             // A navigation to another input of the same screen starts it
             // afresh, as one to another screen does.
             key={`${id}/${open}/${opening === undefined ? "" : JSON.stringify(opening)}`}
