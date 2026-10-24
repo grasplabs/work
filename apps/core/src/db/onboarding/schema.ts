@@ -49,6 +49,12 @@ export const onboarding = sqliteTable(
      * (`setupChoicesSchema`), or `null` before anything.
      */
     choices: text(),
+    /**
+     * The teams and people new on a list the admin saved while a plan was
+     * set, as JSON (`unconfirmedSchema`): their links wait until the admin
+     * confirms the organization. `null` while nothing waits.
+     */
+    unconfirmed: text(),
   },
   (table) => [check("onboarding_one_row", sql`${table.id} = 1`)]
 );

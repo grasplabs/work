@@ -34,6 +34,7 @@ import {
 } from "./apps.ts";
 import type { VersionRow } from "./apps.ts";
 import type { Member } from "./auth/identity.ts";
+import { putCached, readCached } from "./cache-macs.ts";
 import { workspace } from "./durable-objects.ts";
 import { permissionsOpenTo } from "./permissions-open.ts";
 import { askedAgainBy } from "./permissions.ts";
@@ -368,6 +369,13 @@ const exportChanges = (
     accessBefore: was?.access ?? null,
   }));
 
+/**
+ * The purpose kept test results are signed for (`putCached`). A review
+ * shows them to whoever decides on the version, so only results core
+ * kept are read back: one whose MAC doesn't check runs the tests again.
+ */
+const testsCachePurpose = "grasp-os workflow tests cache";
+
 /** Where a version's tests are kept, by its files' hash and the compiler. */
 const testsKey = (app: AppId, tree: string): string =>
   `apps/${app}/tests/${tree}-${compilerVersion}.json`;
@@ -393,7 +401,13 @@ export const keepTests = async (
     failures: tests.failures.slice(0, maxFailures),
   });
   if (kept.success) {
-    await env.FILES.put(testsKey(app, tree), JSON.stringify(kept.data));
+    await putCached(
+      env,
+      env.FILES,
+      testsCachePurpose,
+      testsKey(app, tree),
+      JSON.stringify(kept.data)
+    );
   }
 };
 
@@ -412,9 +426,14 @@ const testsOf = async (
   if (workflowIdsIn(files).length === 0) {
     return { status: "none", failures: [] };
   }
-  const stored = await env.FILES.get(testsKey(app, tree));
-  if (stored !== null) {
-    const kept = keptTestsSchema.safeParse(JSON.parse(await stored.text()));
+  const stored = await readCached(
+    env,
+    env.FILES,
+    testsCachePurpose,
+    testsKey(app, tree)
+  );
+  if (stored !== undefined) {
+    const kept = keptTestsSchema.safeParse(JSON.parse(stored));
     if (kept.success) {
       return kept.data;
     }

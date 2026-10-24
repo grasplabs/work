@@ -228,6 +228,16 @@ export const onboardingStore = (
 /** What the audit log names as acted on. */
 const target = { type: "onboarding", id: storeName } as const;
 
+/** The teams and people new on a list saved while a plan was set, by id, until the admin confirms it. */
+const unconfirmedSchema = z.object({
+  teams: z.array(z.string()),
+  people: z.array(z.string()),
+});
+
+/** Whether a team or person waits for the admin to confirm: new on the list, or waiting already. */
+const waits = (id: string, known: Set<string>, waited: Set<string>) =>
+  !known.has(id) || waited.has(id);
+
 /** Most calls one link makes in a minute: a person talks far slower. */
 const linkCallsPerMinute = 60;
 
@@ -702,7 +712,20 @@ export class Onboarding extends DurableObject<Env> {
       agreed: agreementsIn(row.agreements),
       paused: row.pausedAt !== null,
       sponsor: this.#sponsor(),
+      waiting: roster === null ? 0 : this.#waiting(roster),
     };
+  }
+
+  /** How many who take part have no link out and wait for the admin to confirm the organization. */
+  #waiting(roster: Roster): number {
+    const { sent, unconfirmed } = this.#linkFacts();
+    return roster.people.filter(
+      (person) =>
+        takingPart(roster, person) &&
+        !sent.has(person.id) &&
+        (unconfirmed.people.has(person.id) ||
+          unconfirmed.teams.has(person.team))
+    ).length;
   }
 
   /** The sponsor's first name, when the kickoff named them: read without its transcript. */
@@ -756,18 +779,32 @@ export class Onboarding extends DurableObject<Env> {
   /**
    * Replaces who works where. People who are no longer in it keep nothing
    * here: their link, what they said and where their interview stood go
-   * with them. Everyone new gets a link of their own.
+   * with them. Everyone new gets a link of their own. A list the admin
+   * saves on its own (`confirmed: false`, rpc.ts) sends no link to the
+   * teams and people new on it while a plan is set: they wait until the
+   * admin confirms the organization.
    */
-  async saveRoster(roster: Roster, by: AuditActor): Promise<OnboardingView> {
+  async saveRoster(
+    roster: Roster,
+    by: AuditActor,
+    { confirmed = true }: { confirmed?: boolean } = {}
+  ): Promise<OnboardingView> {
     const fresh = await this.#freshCodes(roster);
     const said = this.ctx.storage.transactionSync(() => {
+      const before = this.#roster();
       const { removed, erased } = this.#writeRoster(roster, fresh, {
         late: false,
       });
+      if (confirmed) {
+        this.#confirmed(before, roster);
+      } else {
+        this.#holdNew(before, roster);
+      }
       this.#changed(by, "onboarding.roster.saved", {
         teams: roster.teams.length,
         people: roster.people.length,
         removed,
+        confirmed,
       });
       return erased;
     });
@@ -777,6 +814,74 @@ export class Onboarding extends DurableObject<Env> {
       await this.#afterForget(said);
     }
     return this.view();
+  }
+
+  /**
+   * Keeps the teams and people new on `roster`, while a plan is set, as
+   * waiting for the admin to confirm the organization, with those that
+   * waited already and are still on it. Details of everyone else change
+   * at once; their ids and links stay.
+   */
+  #holdNew(before: Roster | null, roster: Roster): void {
+    if (this.#row().plan === null) {
+      return;
+    }
+    const was = this.#unconfirmed();
+    const teamsBefore = new Set(before?.teams.map(({ id }) => id));
+    const peopleBefore = new Set(before?.people.map(({ id }) => id));
+    this.#keepUnconfirmed({
+      teams: roster.teams
+        .map(({ id }) => id)
+        .filter((id) => waits(id, teamsBefore, was.teams)),
+      people: roster.people
+        .map(({ id }) => id)
+        .filter((id) => waits(id, peopleBefore, was.people)),
+    });
+  }
+
+  /**
+   * The admin confirmed the organization: nothing waits for it any more,
+   * and a team that takes part only now, the ones that waited or were
+   * switched on, starts as a late one, its lead first (`#lateTeams`).
+   */
+  #confirmed(before: Roster | null, roster: Roster): void {
+    const { teams: waited } = this.#unconfirmed();
+    this.#lateTeams(
+      before === null
+        ? roster
+        : {
+            ...before,
+            teams: before.teams.filter(({ id }) => !waited.has(id)),
+          },
+      roster,
+      new Date().toISOString()
+    );
+    this.#keepUnconfirmed({ teams: [], people: [] });
+  }
+
+  /** The teams and people waiting for the admin to confirm the organization. */
+  #unconfirmed(): { teams: Set<string>; people: Set<string> } {
+    const [row] = this.#db
+      .select({ unconfirmed: onboarding.unconfirmed })
+      .from(onboarding)
+      .where(eq(onboarding.id, 1))
+      .all();
+    const stored = row?.unconfirmed ?? null;
+    const { teams: waitingTeams, people: waitingPeople } =
+      stored === null
+        ? { teams: [], people: [] }
+        : unconfirmedSchema.parse(JSON.parse(stored));
+    return { teams: new Set(waitingTeams), people: new Set(waitingPeople) };
+  }
+
+  #keepUnconfirmed(unconfirmed: z.infer<typeof unconfirmedSchema>): void {
+    const none =
+      unconfirmed.teams.length === 0 && unconfirmed.people.length === 0;
+    this.#db
+      .update(onboarding)
+      .set({ unconfirmed: none ? null : JSON.stringify(unconfirmed) })
+      .where(eq(onboarding.id, 1))
+      .run();
   }
 
   /** A link code for everyone on `roster` who has none yet. */
@@ -3538,6 +3643,7 @@ export class Onboarding extends DurableObject<Env> {
           .all()
           .map(({ id }) => id)
       ),
+      unconfirmed: this.#unconfirmed(),
     };
   }
 
