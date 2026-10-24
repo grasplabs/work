@@ -73,6 +73,7 @@ import {
   SignInChange,
   TeamsBotChange,
   TeamsBotSecretChange,
+  TestAlert,
   TeamsPackageDownload,
   useRefreshSetup,
 } from "./setup-actions.tsx";
@@ -1873,6 +1874,12 @@ const Settings = ({
       {client === null ? null : (
         <TeamsBotSection clientId={clientId} refresh={refresh} setup={setup} />
       )}
+      <SetupSection
+        description="What needs someone at Grasp about it, such as its Teams bot's secret running out, is posted to the staff alerts' channel with a link here."
+        title="Staff alerts"
+      >
+        <TestAlert clientId={clientId} />
+      </SetupSection>
     </>
   );
 };

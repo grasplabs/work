@@ -224,6 +224,14 @@
       "store_id": "account-secrets-store",
       "secret_name": "DISCORD_DIGEST_WEBHOOK",
     },
+    // The webhook staff alerts are posted to, which names the channel
+    // (src/alerts.ts). The admin's alone. Put in the store by hand; until
+    // it is, alerts are only logged.
+    {
+      "binding": "STAFF_ALERTS_WEBHOOK",
+      "store_id": "account-secrets-store",
+      "secret_name": "STAFF_ALERTS_WEBHOOK",
+    },
     // A read-only Attio API key (records, object configuration, notes and
     // meetings read; user management read to name deal owners), for the
     // company, its people, deals and calls under Details and the won deals
