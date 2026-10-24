@@ -492,7 +492,11 @@ describe("Stephen's cards in Teams", () => {
 });
 
 /** Values for every line's room, the same in each language. */
-const values = { count: 3, where: "Sales register.xlsx" };
+const values = {
+  count: 3,
+  where: "Sales register.xlsx",
+  link: "https://acme.grasp.test/decisions/d-1",
+};
 
 describe("Stephen's lines", () => {
   it("are in all five languages, naming the same values as the English", () => {
