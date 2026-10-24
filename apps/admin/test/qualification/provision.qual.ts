@@ -2,7 +2,7 @@ import { releaseManifestSchema } from "@grasp-os/shared/release";
 /* oxlint-disable eslint/no-nested-ternary, typescript/no-unsafe-type-assertion, anti-slop/require-safety-comment-for-type-assertion, anti-slop/no-chained-type-assertions, unicorn/no-await-expression-member, eslint/no-plusplus, eslint/no-await-in-loop, react-hooks/rules-of-hooks -- a hand-run qualification harness (GRA-430), never in CI or production: kept as it ran, for the record. */
 /**
  * Real-account qualification (GRA-430), part 3: two test clients provisioned
- * on ordinary Workers by the console's own code (`placeAndProvision`), from
+ * on ordinary Workers by the admin's own code (`placeAndProvision`), from
  * a release built from main (scripts/release), into the account the relay
  * reaches. Each client's deployment id carries the run's prefix, so every
  * resource it gets is `g<prefix>-<a|b>-…`. Prints what each operation
@@ -38,7 +38,7 @@ const releaseOrigin = "https://qual-release.invalid";
 // The proxy replaces the token with the real one.
 useStoreSecrets({ deployer: "placeholder", tenant: "placeholder" });
 
-/** The built release, put in the console's releases bucket as CI publishes it. */
+/** The built release, put in the admin's releases bucket as CI publishes it. */
 const publishRelease = async (): Promise<string> => {
   const manifestText = await (
     await fetch(`${releaseOrigin}/manifest.json`)
@@ -93,8 +93,8 @@ const sha256Hex = async (text: string): Promise<string> =>
 
 /**
  * The release the clients are provisioned with: the one built, as the
- * console's import takes it; when the import refuses it, its manifest
- * recorded directly, as the console's own tests record theirs. With
+ * admin's import takes it; when the import refuses it, its manifest
+ * recorded directly, as the admin's own tests record theirs. With
  * QUAL_VARIANT=no-ai, the same release without core's Workers AI binding,
  * under an id of its own, which provisioning refuses for placed clients
  * (`model_spend_undecided`).
@@ -205,7 +205,7 @@ it.runIf(Reflect.get(env, "QUAL_PROVISION") === "1")(
         .set({ deploymentId: `${prefix}-${letter}` })
         .where(eq(clientPlacements.clientId, clientId));
       // Staff's retry resumes a failed operation: tried again, as they would,
-      // only for a failure the console's words call a retry's to fix.
+      // only for a failure the admin's words call a retry's to fix.
       const attempts: unknown[] = [];
       for (let attempt = 1; attempt <= 3; attempt += 1) {
         let started: unknown;

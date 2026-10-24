@@ -2,7 +2,7 @@
 /**
  * Real-account qualification (GRA-430), part 3, the attacks: client A, with
  * everything A holds (its router secret and core auth secret, derived as
- * the console derives them, and its place on the account), tries to reach
+ * the admin derives them, and its place on the account), tries to reach
  * client B's core, connect, databases, buckets, Durable Objects and
  * secrets. Runs against what provision.qual.ts left, read back from the
  * account; prints every observation (relay log). QUAL_ATTACK=1 to run.
@@ -24,7 +24,7 @@ const qual = z
   .parse(env);
 const accountPath = `/accounts/${qual.QUAL_ACCOUNT_ID}`;
 const api = cloudflareApi({ token: "placeholder", retryDelayMs: 1000 });
-// As the harness gave them to the console (test/secrets-store-admin.ts).
+// As the harness gave them to the admin (test/secrets-store-admin.ts).
 const keys = { routerKey: "test-router-key", clientKey: "test-client-key" };
 const generation = 1;
 
@@ -109,7 +109,7 @@ it.runIf(Reflect.get(env, "QUAL_ATTACK") === "1")(
       ),
     });
 
-    // The console's signed probe, which answers with the client's identity
+    // The admin's signed probe, which answers with the client's identity
     // and bindings: signed with A's auth secret, sent to B.
     const probe = async (
       letter: "a" | "b",
