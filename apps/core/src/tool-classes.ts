@@ -17,12 +17,17 @@ import type {
 import type { PermissionObject, Authority } from "@grasp-os/shared/permissions";
 import { requireAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { and, eq, or, sql } from "drizzle-orm";
+import { and, eq, ne, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
-import { teamMembers, teams, toolClassSettings } from "./db/core/schema.ts";
+import {
+  sharedMailboxPointers,
+  teamMembers,
+  teams,
+  toolClassSettings,
+} from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
 import { nativeToolClasses } from "./native-tool-classes.gen.ts";
 
@@ -65,10 +70,10 @@ const nativeClasses: ReadonlyMap<
 );
 
 /** A stored row's teams: a JSON array of team IDs, or nothing it can read. */
-const storedTeamsSchema = z.array(z.string());
+export const storedTeamsSchema = z.array(z.string());
 
 /** A stored row as the audience it records, or `undefined` if unreadable. */
-const audienceOf = (row: {
+export const audienceOf = (row: {
   who: string;
   teams: string;
 }): ToolClassAudience | undefined => {
@@ -126,7 +131,7 @@ export const classesOn = async (env: Env): Promise<CompanyToolClass[]> => {
 };
 
 /** `audience` as stored: its `who`, and its teams sorted, each once. */
-const storedOf = (
+export const storedOf = (
   audience: ToolClassAudience
 ): { who: ToolClassAudience["who"]; teams: string } => ({
   who: audience.who,
@@ -134,6 +139,21 @@ const storedOf = (
     audience.who === "teams" ? [...new Set(audience.teams)].toSorted() : []
   ),
 });
+
+/**
+ * Whether the company points Stephen at a shared mailbox for anyone
+ * (shared-mailboxes.ts): Microsoft 365 is then asked for shared
+ * mailboxes' rights too.
+ */
+export const anyMailboxPointed = async (env: Env): Promise<boolean> => {
+  const row = await drizzle(env.DB)
+    .select({ mailbox: sharedMailboxPointers.mailbox })
+    .from(sharedMailboxPointers)
+    .where(ne(sharedMailboxPointers.who, "nobody"))
+    .limit(1)
+    .get();
+  return row !== undefined;
+};
 
 /**
  * Turns `toolClass` on for everyone or some teams, or off. Admins only, and
@@ -224,7 +244,10 @@ export const setToolClass = async (
     // made before them isn't asked again for a class that was on already.
     // Asked even when nothing changed here, so an admin who sets it again
     // after a failure here gets it done.
-    await env.CONNECT.requireClassRights({ classes: [parsedClass.data] });
+    await env.CONNECT.requireClassRights({
+      classes: [parsedClass.data],
+      sharedMailbox: await anyMailboxPointed(env),
+    });
   }
 };
 
@@ -245,7 +268,7 @@ const audienceNow = async (
 };
 
 /** Whether `audience` takes in the person `userId`. */
-const takesIn = async (
+export const takesIn = async (
   env: Env,
   audience: ToolClassAudience,
   userId: string
@@ -264,6 +287,15 @@ const takesIn = async (
     )
     .get();
   return membership !== undefined;
+};
+
+/** A mail tool's class in its person's own mailbox. */
+const inOwnMailbox: Readonly<Record<CompanyToolClass, CompanyToolClass>> = {
+  "read-own": "read-own",
+  "read-company": "read-own",
+  "change-own": "change-own",
+  "change-company": "change-own",
+  "reach-others": "reach-others",
 };
 
 /**
@@ -299,7 +331,15 @@ export const requireToolClassOn = async (
   if (toolClass === "never") {
     throw connectErrors.create("connect.class_off");
   }
-  const audience = await audienceNow(env, toolClass);
+  // A Microsoft 365 mail tool takes any mailbox the account may open: the
+  // mailbox it reaches is checked in connect, which knows it (its own, or
+  // one the company pointed the agent at: shared-mailboxes.ts), so here
+  // it has the class it has in the person's own mailbox.
+  const mailTool = owner.provider === "microsoft" && action.startsWith("mail.");
+  const audience = await audienceNow(
+    env,
+    mailTool ? inOwnMailbox[toolClass] : toolClass
+  );
   if (!(await takesIn(env, audience, authority.onBehalfOf))) {
     throw connectErrors.create("connect.class_off");
   }
