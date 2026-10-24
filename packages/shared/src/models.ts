@@ -1,4 +1,7 @@
+import { z } from "zod";
+
 import { defineErrorFamily } from "./errors.ts";
+import { identifierSchema } from "./ids.ts";
 import type { ModelBindingBudget } from "./resource-bindings.ts";
 
 /** Why the model gateway refused or failed a model call. */
@@ -68,11 +71,13 @@ export type ModelBudgetScope = "deployment" | "workflow" | "user" | "run";
 /**
  * What can refuse a call as over its budget (`model.over_budget`'s
  * `because`): one of the deployment's budgets ({@link ModelBudgetScope}),
- * or one of a model binding's caps, for its month, its UTC day or one
- * request.
+ * the monthly limit the company's admins set for the person
+ * ({@link PersonLimits}), or one of a model binding's caps, for its
+ * month, its UTC day or one request.
  */
 export type ModelBudgetCap =
   | ModelBudgetScope
+  | "person"
   | "binding"
   | "binding_day"
   | "binding_request";
@@ -88,6 +93,8 @@ const overBudgetMessages: Readonly<Record<ModelBudgetCap, string>> = {
     "This workflow's model budget for the month is used up, so it can make no more model calls until the budget resets at the start of next month (UTC). Ask your admin to have Grasp raise the budget.",
   user: "The model budget for the month of the person this call is made for is used up, so no more model calls can be made for them until it resets at the start of next month (UTC). Ask your admin to have Grasp raise the budget.",
   run: "This workflow run, with the runs it started, has used up the model budget one run may spend, so no more model calls can be made in it.",
+  person:
+    "The monthly model limit your company's admins set for the person this call is made for is used up, so no more model calls can be made for them until it resets at the start of next month (UTC). Ask one of your company's admins to raise it in Settings.",
   binding:
     "This model binding's budget for the month is used up, so the App can make no more calls through it until the budget resets at the start of next month (UTC). Ask your admin to raise the binding's monthly budget.",
   binding_day:
@@ -123,6 +130,8 @@ const busyBudgetMessages: Readonly<
     "Model calls still under way hold what's left of this workflow's model budget for the month. Try again once they finish.",
   user: "Model calls still under way hold what's left of the model budget for the month of the person this call is made for. Try again once they finish.",
   run: "Model calls still under way hold what's left of the model budget this workflow run, with the runs it started, may spend. Try again once they finish.",
+  person:
+    "Model calls still under way hold what's left of the monthly model limit your company's admins set for the person this call is made for. Try again once they finish.",
   binding:
     "Model calls still under way hold what's left of this model binding's budget for the month. Try again once they finish.",
   binding_day:
@@ -363,6 +372,100 @@ export interface ModelMonthSpend {
   more: boolean;
 }
 
+/**
+ * Whom a limit the company's admins set applies to: everyone without an
+ * exception (`default`), or an exception for one person or one team.
+ */
+export const personLimitSubjectSchema = z.discriminatedUnion("type", [
+  z.strictObject({ type: z.literal("default") }),
+  z.strictObject({ type: z.literal("person"), userId: identifierSchema }),
+  z.strictObject({ type: z.literal("team"), teamId: identifierSchema }),
+]);
+
+/** One of {@link personLimitSubjectSchema}. */
+export type PersonLimitSubject = z.infer<typeof personLimitSubjectSchema>;
+
+/** The most chat messages an hour a limit may allow a person. */
+export const maxMessagesAnHour = 3600;
+
+/** The most US dollars a month a limit may allow a person. */
+export const maxMonthlyLimit = 1_000_000;
+
+/**
+ * A limit the company's admins set for a person: the most their model
+ * calls may cost in a UTC month, in US dollars, and the most chat
+ * messages they may send an hour. Null for none: then only Grasp's
+ * budgets, and the chat door's own rate, hold them.
+ */
+export const personLimitSchema = z.strictObject({
+  monthly: z.number().min(0).max(maxMonthlyLimit).nullable(),
+  messagesAnHour: z.int().min(1).max(maxMessagesAnHour).nullable(),
+});
+
+/** One of {@link personLimitSchema}. */
+export type PersonLimit = z.infer<typeof personLimitSchema>;
+
+/**
+ * Where a person's limit comes from: their own exception, a team's, the
+ * default, or none.
+ */
+export type PersonLimitFrom = "person" | "team" | "default" | "none";
+
+/** A person's limit as it applies to them, and what they spent against it this month. */
+export interface PersonLimitSpend {
+  userId: string;
+  name: string;
+  from: PersonLimitFrom;
+  limit: PersonLimit;
+  /** US dollars charged against their monthly limit this month. */
+  spent: number;
+}
+
+/** An exception an admin set for a person or a team, with its name where core has one. */
+export interface PersonLimitException {
+  subject: Exclude<PersonLimitSubject, { type: "default" }>;
+  /** Null once the person or team is gone. */
+  name: string | null;
+  limit: PersonLimit;
+}
+
+/** Most people the limits list. */
+export const personLimitsListed = 1000;
+
+/**
+ * The limits the company's admins set per person, within Grasp's budgets,
+ * and each person's spend against theirs this month.
+ */
+export interface PersonLimits {
+  /** The UTC month spend counts in, such as `2026-10`. */
+  month: string;
+  /** The limit for everyone without an exception. */
+  default: PersonLimit;
+  exceptions: PersonLimitException[];
+  /**
+   * The most a monthly limit may be, in US dollars: the lower of Grasp's
+   * budgets for one person and for the whole deployment; null when
+   * neither is set.
+   */
+  ceiling: number | null;
+  /** The organization's people, by name: at most {@link personLimitsListed}. */
+  people: PersonLimitSpend[];
+  /** More people are in the organization than `people` lists. */
+  more: boolean;
+}
+
+/**
+ * What setting a limit came to. `set`: done. `above_budget`: refused, as
+ * its monthly limit is above Grasp's budget (`ceiling`, US dollars).
+ * `rules_invalid`: refused, as Grasp's budgets can't be read to check it.
+ * `not_found`: the person or team isn't in the organization.
+ */
+export type PersonLimitSet =
+  | { state: "set" }
+  | { state: "above_budget"; ceiling: number }
+  | { state: "rules_invalid" }
+  | { state: "not_found" };
+
 /** The model gateway's settings, over `/rpc`, for admins only. */
 export interface ModelsApi {
   /** The settings, and this month's spend against each budget. */
@@ -380,4 +483,16 @@ export interface ModelsApi {
    * with that decision.
    */
   resolveHeld: (id: string, how: HeldHow) => Promise<HeldDecision>;
+  /** The limits per person, and what each person spent against theirs. */
+  limits: () => Promise<PersonLimits>;
+  /** Sets the limit for `subject`, never above Grasp's budgets. Audited. */
+  setLimit: (
+    subject: PersonLimitSubject,
+    limit: PersonLimit
+  ) => Promise<PersonLimitSet>;
+  /**
+   * Removes `subject`'s exception, or the default, leaving no default
+   * limit. Audited when there was one.
+   */
+  removeLimit: (subject: PersonLimitSubject) => Promise<void>;
 }

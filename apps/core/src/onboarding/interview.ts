@@ -578,8 +578,10 @@ export const interviewTurnResponse = async (
     company: companyOf(env),
     requestId,
     ctx,
+    // Counted through a stub of its own: the store may have restarted while
+    // the turn ran, and a stub from before the restart reaches nothing.
     meter: async (took) => {
-      await store.meter(took);
+      await onboardingStore(env).meter(took);
     },
     ran: async (mark) => {
       await store.turnRan(

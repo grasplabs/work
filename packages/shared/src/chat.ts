@@ -398,6 +398,40 @@ export const applyOutput = (
 };
 
 /**
+ * How one call of the chat's code ended: done, held for the person to
+ * confirm (a connection's side effect), refused (an expected error: no
+ * permission, an unknown ID, a run that had ended), or failed.
+ */
+export type ChatToolOutcome = "ok" | "pending" | "refused" | "failed";
+
+/**
+ * One call the chat's code made to one of its agent's APIs (Code Mode),
+ * as a line a page can show under the code step that made it: the call
+ * the audit log records, by the same words. Its summary holds identifiers
+ * and counts of what it was given and what it found, never what it read:
+ * the run's ID, how many hits a search had, which connection it called.
+ */
+export interface ChatToolEvent {
+  /** Its order in the chat: a later call has a higher ID. */
+  id: number;
+  /** The code step that made it (`ChatCode.callId`). */
+  callId: string;
+  /** The API and method, as the code called it, such as `workflows.runs`. */
+  method: string;
+  /** What it acted on, when the audit log names one. */
+  target: { type: string; id: string } | null;
+  /** Identifiers and counts of its input and result, never their content. */
+  summary: Record<string, string | number | boolean | null>;
+  outcome: ChatToolOutcome;
+  /** Why it was refused or failed: an error code. */
+  reason: string | null;
+  at: string;
+}
+
+/** Most calls a chat keeps the events of: its latest. */
+export const chatToolEventsKept = 200;
+
+/**
  * What changed in a chat since the last update: the messages stored since,
  * and the chat as it is now. The first update of a `watch` catches up: the
  * messages after the one it named, what the agent is writing then, and
@@ -416,6 +450,13 @@ export interface ChatUpdate {
    * replaces it once stored.
    */
   output?: ChatOutputUpdate | null;
+  /**
+   * The calls the chat's code made since the last update, oldest first;
+   * in a watch's first update, every one the chat keeps (the latest
+   * {@link chatToolEventsKept}), which a page merges by ID. Left out when
+   * there are none.
+   */
+  tools?: ChatToolEvent[];
   /** Whether the agent is working on a question. */
   running: boolean;
   /** The chat's provenance: in the first update, and whenever it changes. */

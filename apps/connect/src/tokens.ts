@@ -14,6 +14,7 @@ import {
   grantedAsAsked,
   providerFor,
   scopesLacking,
+  renewalHolds,
 } from "./providers.ts";
 import type {
   Credential,
@@ -364,6 +365,17 @@ const refreshUnderLease = async (
       // (Entra can't, and its refresh token lapses unused).
       await discardMint(provider, context.client, minted);
       if (!(await markDead(env, provider.id, row, "scopes_changed"))) {
+        return undefined;
+      }
+      throw connectErrors.create("connect.connection_inactive");
+    }
+    // A connection made before its provider asked for a scope it now
+    // needs (writing workbooks) can't do what it is now asked to: it is
+    // marked for its person to reconnect it, in place, with its
+    // permissions, and consent to the new scope.
+    if (!renewalHolds(provider, minted)) {
+      await discardMint(provider, context.client, minted);
+      if (!(await markDead(env, provider.id, row, "scopes_missing"))) {
         return undefined;
       }
       throw connectErrors.create("connect.connection_inactive");

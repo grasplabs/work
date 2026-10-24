@@ -25,11 +25,14 @@ export interface LoopWords {
   /**
    * What he says when something fails, each a line of his own: nothing
    * came back, so most likely their connection; core or the model said
-   * no, so it is on our side; it still doesn't work after all his tries.
+   * no, so it is on our side; it still doesn't work after all his tries;
+   * he couldn't hear what they said; he can't listen here.
    */
   offline: string;
   trouble: string;
   stillTrouble: string;
+  unheard: string;
+  noMicrophone: string;
 }
 
 /** A plain yes, in each language: said to a part of the read-back, it needs no thinking about. */
@@ -68,6 +71,8 @@ export const useLoopWords = (locale: Locale): LoopWords => {
     offline: t`I lost the connection. Please check your internet. I have kept what you said, and I keep trying.`,
     trouble: t`We have a technical problem on our side. It is not you. I have kept what you said, and I keep trying.`,
     stillTrouble: t`It still does not work. You can stop for now and come back later. Your place is kept.`,
+    unheard: t`I could not hear that. Say it once more, or type it.`,
+    noMicrophone: t`The microphone is not available here. Type your answer.`,
   };
 };
 
