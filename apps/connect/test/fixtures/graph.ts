@@ -18,6 +18,25 @@ export const invoices = "invoices@example.com";
 /** Another mailbox of the same tenant. */
 export const ceo = "ceo@example.com";
 
+/** Where the second page of a person's categories starts. */
+export const categoriesSkipToken = "c4e8a2f6-1b3d-4f7a-9c2e-5d8b1a6f3e07";
+
+/**
+ * `GET /outlook/masterCategories`: the categories the person has, over
+ * two pages.
+ */
+export const masterCategories = (skipToken: string | null) =>
+  skipToken === categoriesSkipToken
+    ? {
+        value: [
+          { id: "a7c2", displayName: "Waiting on others", color: "preset3" },
+        ],
+      }
+    : {
+        value: [{ id: "f1d3", displayName: "Finance", color: "preset0" }],
+        "@odata.nextLink": `https://graph.microsoft.com/v1.0/users('person%40acme.test')/outlook/masterCategories?%24select=displayName&%24skiptoken=${categoriesSkipToken}`,
+      };
+
 /** A SharePoint document library. */
 export const financeDrive =
   "b!kR3pQ9xLmUe2Vt7Wj4hYc1s0nAoBdFgHiJkLmNoPqRsTuVwXyZaBcDeFgHiJkLm";
@@ -236,7 +255,19 @@ export const message = (mailbox: string, n: number, bodyType: string) => ({
             "Dear customer,\r\n\r\nPlease find attached invoice 2026-0041 for EUR 1,250.00.\r\n",
         },
   bccRecipients: [],
-  replyTo: [address("Northwind Billing", "billing@northwind.example.org")],
+  // Message 2 asks replies to go to another address, and copied someone.
+  ...(n === 2
+    ? {
+        ccRecipients: [address("Controller", "controller@example.com")],
+        replyTo: [
+          address("Northwind Accounts", "accounts@northwind.example.org"),
+        ],
+      }
+    : {
+        replyTo: [
+          address("Northwind Billing", "billing@northwind.example.org"),
+        ],
+      }),
 });
 
 /** A message's attachments, without their content (`$select`ed). */
@@ -326,8 +357,9 @@ export const mailFolder = (id: string) =>
   id === "archive" || id === archiveFolderId
     ? {
         "@odata.context":
-          "https://graph.microsoft.com/v1.0/$metadata#users('invoices%40example.com')/mailFolders(id)/$entity",
+          "https://graph.microsoft.com/v1.0/$metadata#users('invoices%40example.com')/mailFolders(id,displayName)/$entity",
         id: archiveFolderId,
+        displayName: "Archive",
       }
     : undefined;
 
@@ -336,6 +368,17 @@ export const moved = (mailbox: string, n: number) => ({
   ...messageSummary(mailbox, n),
   id: movedId(mailbox, n),
   parentFolderId: archiveFolderId,
+});
+
+/** What `PATCH /messages/{id}` returns: the message, with its changes. */
+export const patched = (
+  mailbox: string,
+  n: number,
+  changes: { flag?: unknown; categories?: unknown }
+) => ({
+  ...messageSummary(mailbox, n),
+  flag: changes.flag ?? { flagStatus: "notFlagged" },
+  categories: changes.categories ?? [],
 });
 
 /** What `POST /messages` returns for a new draft. */
@@ -347,6 +390,17 @@ export const draft = (mailbox: string, subject: string) => ({
   conversationId:
     "AAQkAGE1M2IyNGNmLTI5MTktNDUyZi1iOTVjLTc2ZjI5ZmNmZmQ2MwAQADraft9A=",
   webLink: `https://outlook.office365.com/owa/?ItemID=${encodeURIComponent(messageId(mailbox, 9))}&exvsurl=1&viewmodel=ReadMessageItem`,
+});
+
+/**
+ * What `POST /messages/{id}/createReply` returns: a draft in the
+ * conversation of message `n`.
+ */
+export const replyDraft = (mailbox: string, n: number, subject: string) => ({
+  ...draft(mailbox, subject),
+  id: messageId(mailbox, 8),
+  conversationId: messageSummary(mailbox, n).conversationId,
+  webLink: `https://outlook.office365.com/owa/?ItemID=${encodeURIComponent(messageId(mailbox, 8))}&exvsurl=1&viewmodel=ReadMessageItem`,
 });
 
 const utc = (dateTime: string) => ({ dateTime, timeZone: "UTC" });
@@ -363,7 +417,12 @@ export const event = (mailbox: string, n: number) => ({
   isCancelled: false,
   showAs: "busy",
   location: { displayName: "Room 4.12", locationType: "default" },
-  organizer: { emailAddress: { name: "Finance Team", address: mailbox } },
+  // The second is the CEO's, who hides its guest list from those invited.
+  organizer:
+    n === 1
+      ? { emailAddress: { name: "Finance Team", address: mailbox } }
+      : { emailAddress: { name: "CEO", address: ceo } },
+  isOrganizer: n === 1,
   webLink: `https://outlook.office365.com/owa/?itemid=${encodeURIComponent(eventId(mailbox, n))}&exvsurl=1&path=/calendar/item`,
 });
 
@@ -384,13 +443,20 @@ export const eventDetail = (mailbox: string, n: number) => ({
     contentType: "text",
     content: "Agenda: open invoices, accruals, sign-off.\r\n",
   },
-  attendees: [
-    {
-      type: "required",
-      status: { response: "accepted", time: "2026-09-20T10:00:00Z" },
-      emailAddress: { name: "Controller", address: "controller@example.com" },
-    },
-  ],
+  ...(n === 1
+    ? {
+        attendees: [
+          {
+            type: "required",
+            status: { response: "accepted", time: "2026-09-20T10:00:00Z" },
+            emailAddress: {
+              name: "Controller",
+              address: "controller@example.com",
+            },
+          },
+        ],
+      }
+    : { hideAttendees: true, attendees: [] }),
   onlineMeeting: {
     joinUrl: "https://teams.microsoft.com/l/meetup-join/19%3ameeting_example",
   },
@@ -414,7 +480,106 @@ export const itemIds = {
   controls: "01BYE5RZ5CONTROLSAAAAAAAAAAAAAAAAA",
   /** Shared into search results from another drive. */
   foreign: "01BYE5RZ4FOREIGNAAAAAAAAAAAAAAAAAA",
+  /** A procedure saved three times: its versions are `procedureVersions`. */
+  procedure: "01BYE5RZ6PROCEDUREAAAAAAAAAAAAAAAA",
+  /** A file the person may not open: Graph refuses it. */
+  locked: "01BYE5RZ3LOCKEDAAAAAAAAAAAAAAAAAA",
 } as const;
+
+/** The procedure's text at each of its versions, by version ID. */
+export const procedureTexts: Readonly<Record<string, string>> = {
+  "1.0": "Advice procedure\nCheck the client's income against two payslips.\n",
+  "2.0":
+    "Advice procedure\nCheck the client's income against three payslips.\n",
+  "3.0":
+    "Advice procedure\nCheck the client's income against three payslips and the employer's statement.\n",
+};
+
+const savedBy = (displayName: string, email: string, id: string) => ({
+  user: { displayName, email, id },
+});
+
+const byteLength = (text: string | undefined): number =>
+  new TextEncoder().encode(text ?? "").byteLength;
+
+/** Where SharePoint keeps a version of the procedure: 512 per major version. */
+const versionPath = (version: string): string =>
+  `/sites/Finance/_vti_history/${Math.trunc(Number(version)) * 512}/Shared%20Documents/Advice%20procedure.txt`;
+
+/** Where Graph sends a version's download, on the tenant's SharePoint. */
+export const versionDownloadUrl = (version: string): string =>
+  `https://${sharePointHost}${versionPath(version)}?tempauth=v1.eyJ0eXAi`;
+
+/** The version of the procedure a SharePoint path holds, if it holds one. */
+export const versionAt = (path: string): string | undefined =>
+  Object.keys(procedureTexts).find((version) => versionPath(version) === path);
+
+/**
+ * The procedure's versions, as Graph lists them: newest first, each with
+ * a pre-authenticated download link.
+ */
+export const procedureVersions = [
+  {
+    id: "3.0",
+    lastModifiedDateTime: "2026-10-12T09:41:07Z",
+    lastModifiedBy: savedBy(
+      "Sanne Visser",
+      "sanne.visser@example.com",
+      "5f1c2e9a-7b3d-4e8f-9a0b-1c2d3e4f5a6b"
+    ),
+    size: byteLength(procedureTexts["3.0"]),
+  },
+  {
+    id: "2.0",
+    lastModifiedDateTime: "2026-06-03T14:20:55Z",
+    lastModifiedBy: savedBy(
+      "Daan Bakker",
+      "daan.bakker@example.com",
+      "8a7b6c5d-4e3f-4a1b-9c8d-7e6f5a4b3c2d"
+    ),
+    size: byteLength(procedureTexts["2.0"]),
+  },
+  {
+    id: "1.0",
+    lastModifiedDateTime: "2025-11-18T08:05:30Z",
+    lastModifiedBy: savedBy(
+      "Sanne Visser",
+      "sanne.visser@example.com",
+      "5f1c2e9a-7b3d-4e8f-9a0b-1c2d3e4f5a6b"
+    ),
+    size: byteLength(procedureTexts["1.0"]),
+  },
+].map((version) => ({
+  "@microsoft.graph.downloadUrl": versionDownloadUrl(version.id),
+  ...version,
+}));
+
+/**
+ * A page of the procedure's versions, newest first: `$top` of them (all,
+ * if not asked) from the `$skiptoken`'s position on.
+ */
+export const versionPage = (
+  drive: string,
+  id: string,
+  query: URLSearchParams = new URLSearchParams()
+) => {
+  const top = Number(query.get("$top") ?? procedureVersions.length);
+  const from = Number(query.get("$skiptoken") ?? 0);
+  const next = from + top;
+  return {
+    "@odata.context": `https://graph.microsoft.com/v1.0/$metadata#drives('${drive}')/items('${id}')/versions`,
+    value: procedureVersions.slice(from, next),
+    ...(next < procedureVersions.length
+      ? {
+          "@odata.nextLink": `https://graph.microsoft.com/v1.0/drives/${drive}/items/${id}/versions?%24top=${top}&%24skiptoken=${next}`,
+        }
+      : {}),
+  };
+};
+
+/** One of the procedure's versions, as `GET /versions/{id}` returns it. */
+export const procedureVersion = (version: string) =>
+  procedureVersions.find(({ id }) => id === version);
 
 /** The controls file's content: 2 MiB of one control character. */
 export const controlText = "\u0001".repeat(2 * 1024 * 1024);
@@ -466,6 +631,18 @@ const driveItem = (drive: string, id: string) => {
         size: controlText.length,
         webUrl:
           "https://example.sharepoint.com/sites/Finance/Shared%20Documents/Export.txt",
+        file: { mimeType: "text/plain" },
+      };
+    }
+    case itemIds.procedure: {
+      return {
+        ...base,
+        id,
+        name: "Advice procedure.txt",
+        size: byteLength(procedureTexts["3.0"]),
+        lastModifiedDateTime: procedureVersions[0]?.lastModifiedDateTime,
+        webUrl:
+          "https://example.sharepoint.com/sites/Finance/Shared%20Documents/Advice%20procedure.txt",
         file: { mimeType: "text/plain" },
       };
     }
@@ -564,6 +741,88 @@ export const notFound = {
   },
 };
 
+/** A SharePoint site the person can open: Finance. */
+export const financeSite =
+  "example.sharepoint.com,7a1e3c2b-4d5f-4e6a-9b8c-0d1e2f3a4b5c,5c4b3a2f-1e0d-4c8b-9a6e-4f5d2b3c1e7a";
+
+/** A SharePoint site the person can't open: HR. */
+export const hrSite =
+  "example.sharepoint.com,1f2e3d4c-5b6a-4978-8e9d-a0b1c2d3e4f5,9e8d7c6b-5a49-4382-b1c0-d9e8f7a6b5c4";
+
+/** Finance's contracts register, a list, by its ID. */
+export const contractsList = "8d3f5a1c-2b7e-4c9d-a6f0-3e1b5d7c9a2f";
+
+/** How many items the contracts register holds: more than a page. */
+export const contractCount = 60;
+
+const suppliers = [
+  "Northwind Traders",
+  "Contoso",
+  "Fabrikam",
+  "O'Brien & Sons",
+] as const;
+
+/** Item `n` of the contracts register, as Graph gives it, `fields` and all. */
+export const contract = (n: number) => {
+  const etag = `"5f0c2d4e-7a1b-4c3d-9e8f-${String(n).padStart(12, "0")},2"`;
+  const modified = `2026-0${(n % 9) + 1}-1${n % 10}T09:30:00Z`;
+  return {
+    "@odata.etag": etag,
+    id: String(n),
+    createdDateTime: "2026-01-05T08:00:00Z",
+    lastModifiedDateTime: modified,
+    webUrl: `https://${sharePointHost}/sites/Finance/Lists/Contracts/${n}_.000`,
+    fields: {
+      "@odata.etag": etag,
+      id: String(n),
+      Title: `Contract ${n}`,
+      Supplier: suppliers[n % suppliers.length],
+      Status: n % 3 === 0 ? "Closed" : "Open",
+      Amount: n * 250,
+      Renewal_x0020_date: `2027-0${(n % 9) + 1}-01T00:00:00Z`,
+      // "2nd signatory": a leading digit SharePoint writes as `_x0032_`.
+      _x0032_nd_x0020_signatory: n % 2 === 0 ? "Finance" : "Legal",
+      // A choice of several, and a link, which Graph gives as an object.
+      Regions: ["EU", "UK"],
+      Website: {
+        Description: "Supplier portal",
+        Url: `https://suppliers.example.com/${n}`,
+      },
+      ContentType: "Item",
+      Modified: modified,
+      Created: "2026-01-05T08:00:00Z",
+      AuthorLookupId: "11",
+      EditorLookupId: "11",
+      _UIVersionString: "2.0",
+      Attachments: false,
+      Edit: "",
+      LinkTitleNoMenu: `Contract ${n}`,
+      LinkTitle: `Contract ${n}`,
+      ItemChildCount: "0",
+      FolderChildCount: "0",
+      _ComplianceFlags: "",
+      _ComplianceTag: "",
+    },
+  };
+};
+
+/** Graph's answer for a site the signed-in person can't open. */
+export const accessDenied = {
+  error: {
+    code: "accessDenied",
+    message:
+      "Access denied. You do not have permission to perform this action or access this resource.",
+  },
+};
+
+/** Graph's answer for a filter on a column that isn't indexed, unasked. */
+export const notIndexed = {
+  error: {
+    code: "invalidRequest",
+    message:
+      "Field 'Status' cannot be referenced in filter or orderby as it is not indexed. Provide the 'Prefer: HonorNonIndexedQueriesWarningMayFailRandomly' header to allow this, but be warned that such queries may fail on large lists.",
+  },
+};
 /** Excel workbooks of `financeDrive`, by drive item ID. */
 export const workbookIds = {
   /** The supplier register, with its table and a named range. */
@@ -616,4 +875,50 @@ export const supplierRows = (): SheetCell[][] => [
     constant(daySerials.second, String.raw`[$-409]d\-mmm\-yyyy;@`),
     constant(""),
   ],
+];
+
+/** Graph's answer when a token may not open what it asked for. */
+export const graphAccessDenied = {
+  error: {
+    code: "ErrorAccessDenied",
+    message: "Access is denied. Check credentials and try again.",
+  },
+};
+
+/** A person's Microsoft To Do lists, by what they are to them. */
+export const todoListIds = {
+  /** Their default list, Tasks: theirs, shared with no one. */
+  tasks: "AAMkADIyAAAAABrJAAA=",
+  /** A list they made and shared with colleagues. */
+  sharedByThem: "AAMkADIyAAAAABrKAAA=",
+  /** A colleague's list shared with them. */
+  sharedWithThem: "AAMkADIyAAAAABrLAAA=",
+};
+
+/** A person's To Do lists, as Graph answers for them. */
+export const todoLists = [
+  {
+    "@odata.etag": 'W/"m1fdwWoFiE2YS9yegTKoYwAA/ZGlTQ=="',
+    id: todoListIds.tasks,
+    displayName: "Tasks",
+    isOwner: true,
+    isShared: false,
+    wellknownListName: "defaultList",
+  },
+  {
+    "@odata.etag": 'W/"m1fdwWoFiE2YS9yegTKoYwAA/ZGlTR=="',
+    id: todoListIds.sharedByThem,
+    displayName: "Office move",
+    isOwner: true,
+    isShared: true,
+    wellknownListName: "none",
+  },
+  {
+    "@odata.etag": 'W/"m1fdwWoFiE2YS9yegTKoYwAA/ZGlTS=="',
+    id: todoListIds.sharedWithThem,
+    displayName: "Board pack",
+    isOwner: false,
+    isShared: true,
+    wellknownListName: "none",
+  },
 ];
