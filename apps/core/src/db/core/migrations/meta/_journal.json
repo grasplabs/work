@@ -950,15 +950,29 @@
     {
       "idx": 135,
       "version": "6",
-      "when": 1792851886658,
-      "tag": "0135_channel_conversations",
+      "when": 1792853240377,
+      "tag": "0135_tool_class_settings",
       "breakpoints": true
     },
     {
       "idx": 136,
       "version": "6",
-      "when": 1792854767627,
-      "tag": "0136_chat_workflow_offers",
+      "when": 1792854777497,
+      "tag": "0136_dependency_malware_check",
+      "breakpoints": true
+    },
+    {
+      "idx": 137,
+      "version": "6",
+      "when": 1792856761494,
+      "tag": "0137_channel_conversations",
+      "breakpoints": true
+    },
+    {
+      "idx": 138,
+      "version": "6",
+      "when": 1792858442771,
+      "tag": "0138_chat_workflow_offers",
       "breakpoints": true
     }
   ]

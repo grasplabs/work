@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "687b8873-caf4-4541-aca0-07e6b125534e",
-  "prevId": "23fffc97-3fc6-4b28-a94d-9d34be05a643",
+  "id": "645de232-11e9-4161-86a2-2222a2e121b3",
+  "prevId": "0c55a9a0-8480-4f40-951e-94ebfae76a6d",
   "tables": {
     "access_revocations": {
       "name": "access_revocations",
@@ -187,13 +187,6 @@
           "name": "accounts_user_id_idx",
           "columns": [
             "user_id"
-          ],
-          "isUnique": false
-        },
-        "accounts_oid_idx": {
-          "name": "accounts_oid_idx",
-          "columns": [
-            "oid"
           ],
           "isUnique": false
         },
@@ -2553,81 +2546,6 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "channel_conversations": {
-      "name": "channel_conversations",
-      "columns": {
-        "platform": {
-          "name": "platform",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "thread_id": {
-          "name": "thread_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "last_message_at": {
-          "name": "last_message_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "channel_conversations_user_id_idx": {
-          "name": "channel_conversations_user_id_idx",
-          "columns": [
-            "user_id"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "channel_conversations_user_id_users_id_fk": {
-          "name": "channel_conversations_user_id_users_id_fk",
-          "tableFrom": "channel_conversations",
-          "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "channel_conversations_platform_thread_id_pk": {
-          "columns": [
-            "platform",
-            "thread_id"
-          ],
-          "name": "channel_conversations_platform_thread_id_pk"
-        }
-      },
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
     "channel_links": {
       "name": "channel_links",
       "columns": {
@@ -2713,178 +2631,6 @@
         }
       },
       "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "chat_workflow_offers": {
-      "name": "chat_workflow_offers",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "workspace_id": {
-          "name": "workspace_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "chat_id": {
-          "name": "chat_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "workflow_id": {
-          "name": "workflow_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "workflow_name": {
-          "name": "workflow_name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "version": {
-          "name": "version",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "input": {
-          "name": "input",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "expires_at": {
-          "name": "expires_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "posted_at": {
-          "name": "posted_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "platform": {
-          "name": "platform",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "thread_id": {
-          "name": "thread_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "locale": {
-          "name": "locale",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "pressed_at": {
-          "name": "pressed_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "start_id": {
-          "name": "start_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "run_id": {
-          "name": "run_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "told_at": {
-          "name": "told_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "chat_workflow_offers_chat_idx": {
-          "name": "chat_workflow_offers_chat_idx",
-          "columns": [
-            "chat_id"
-          ],
-          "isUnique": false
-        },
-        "chat_workflow_offers_run_idx": {
-          "name": "chat_workflow_offers_run_idx",
-          "columns": [
-            "run_id"
-          ],
-          "isUnique": false
-        },
-        "chat_workflow_offers_user_idx": {
-          "name": "chat_workflow_offers_user_idx",
-          "columns": [
-            "user_id"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "chat_workflow_offers_user_id_users_id_fk": {
-          "name": "chat_workflow_offers_user_id_users_id_fk",
-          "tableFrom": "chat_workflow_offers",
-          "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {}
@@ -3422,6 +3168,13 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "malware_checked_at": {
+          "name": "malware_checked_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {
@@ -3450,6 +3203,14 @@
             "subject_type",
             "subject_id",
             "graph_hash",
+            "status"
+          ],
+          "isUnique": false
+        },
+        "dependency_requests_malware_idx": {
+          "name": "dependency_requests_malware_idx",
+          "columns": [
+            "malware_checked_at",
             "status"
           ],
           "isUnique": false
@@ -7448,6 +7209,52 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
+    "tool_class_settings": {
+      "name": "tool_class_settings",
+      "columns": {
+        "tool_class": {
+          "name": "tool_class",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "who": {
+          "name": "who",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "teams": {
+          "name": "teams",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'[]'"
+        },
+        "changed_by": {
+          "name": "changed_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "changed_at": {
+          "name": "changed_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
     "trigger_resource_versions": {
       "name": "trigger_resource_versions",
       "columns": {
@@ -10085,14 +9892,6 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
-        },
-        "askable": {
-          "name": "askable",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": false
         }
       },
       "indexes": {
