@@ -9273,14 +9273,12 @@ msgctxt "status of a policy rule"
 msgid "Paused"
 msgstr "Gepauzeerd"
 
-#: src/onboarding/interviews-progress.tsx
-
 #: src/workflows/resource-runs.tsx
 msgctxt "status of a workflow run"
 msgid "Paused"
 msgstr "Gepauzeerd"
 
-#: src/onboarding/setup-steps.tsx
+#: src/onboarding/interviews-progress.tsx
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Paused: no link opens and none goes out. The links that are due go out once they run again."
 msgstr "Gepauzeerd: geen link gaat open en er gaat er geen uit. De links die aan de beurt zijn, gaan uit zodra de interviews weer lopen."
