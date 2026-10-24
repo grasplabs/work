@@ -90,6 +90,9 @@ test("a builder opens an App's page, moves between its screens, unpublishes and 
   await expect(page.getByRole("button", { name: "Published" })).toBeVisible();
   // Its first screen opens first; the other is a tab away.
   await screenShowing(page, "board", "The board");
+  // The App's name heads the page once: the screen's frame, open now,
+  // names it a level below.
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText(name);
   const screens = page.getByRole("navigation", { name: "Screens" });
   await expect(screens.getByRole("link", { name: "board" })).toHaveAttribute(
     "aria-current",

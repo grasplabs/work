@@ -69,6 +69,8 @@ const typeRules: readonly {
   { action: "connection.consent", type: "config" },
   // An admin changing which connectors are offered.
   { action: "connection.offer_changed", type: "config" },
+  // An admin turning a class of tools on or off, and for whom.
+  { action: "connection.class.changed", type: "config" },
   // A connection's tokens stopped working: it needs signing in again.
   { action: "connection.needs_reauth", type: "config" },
   // Connect reading what changed at a connection for workflows' event
@@ -148,6 +150,9 @@ const typeRules: readonly {
   { action: "app.token.issued", type: "permission" },
   { action: "app.portable.called", type: "action" },
   { action: "app", type: "config" },
+  // A person linking a chat platform account to themselves, so the agent
+  // knows them there, or unlinking it: who they are on that door.
+  { action: "channel_account", type: "permission" },
   { action: "member", type: "config" },
   { action: "team", type: "config" },
   // A decision a run put to people: opened, asked, answered, timed out.
