@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "85e9252c-1425-484a-8ce7-ffe0ea331787",
+  "id": "9871f753-2787-48a7-90d0-be6ef4d453f6",
   "prevId": "1482de49-9049-4587-a303-de79d8c4f0ca",
   "tables": {
     "access_revocations": {
