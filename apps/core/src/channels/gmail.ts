@@ -319,6 +319,22 @@ const gmailLogger: Logger = {
 };
 
 /**
+ * The adapter's request as connect takes it over RPC: its method, URL,
+ * headers and body. Not its `redirect: "error"`, which workerd doesn't
+ * take (connect follows no redirect whatever a request says), nor its
+ * abort signal, which RPC can't carry (connect times every request out).
+ */
+const forConnect = (input: RequestInfo | URL, init?: RequestInit): Request => {
+  const request = new Request(input, { ...init, redirect: "manual" });
+  return new Request(request.url, {
+    method: request.method,
+    headers: request.headers,
+    body: request.body,
+    redirect: "manual",
+  });
+};
+
+/**
  * Gmail's adapter for Stephen's mailbox, reading its inbox: every request
  * it sends goes through connect with the placeholder token, and every push
  * it is handed is checked again by {@link verifiedGmailPush}. Each setting
@@ -342,7 +358,7 @@ export const gmailAdapter = (
       (await verifiedGmailPush(env, request, await request.text(), keys)) !==
       undefined,
     fetch: async (input: RequestInfo | URL, init?: RequestInit) =>
-      await env.CONNECT.channelFetch("gmail", new Request(input, init)),
+      await env.CONNECT.channelFetch("gmail", forConnect(input, init)),
     logger: gmailLogger,
   });
 

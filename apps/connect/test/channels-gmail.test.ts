@@ -15,7 +15,14 @@ import {
   channelCredentialPlaceholder,
   channelHeader,
 } from "@grasp-os/shared/connect";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vite-plus/test";
 
 import { auditEvents, connectWith } from "./connect.ts";
 import { googleGmailFake } from "./google-gmail-fake.ts";
@@ -28,26 +35,30 @@ const account = {
   accessToken: "gmail-access-token-for-tests",
 };
 
-const google = googleGmailFake(account);
-/** What left connect for anywhere Google doesn't answer. */
-const elsewhere: string[] = [];
-
-beforeEach(() => {
-  google.reset();
-  elsewhere.length = 0;
-  vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
-    const request = new Request(input, init);
-    const answered = await google.answer(request);
-    if (answered !== undefined) {
-      return answered;
-    }
-    elsewhere.push(request.url);
-    return new Response("Taken");
+/** Google, and what left connect for anywhere Google doesn't answer. */
+const fakeGoogle = () => {
+  const fake = googleGmailFake(account);
+  const missed: string[] = [];
+  beforeEach(() => {
+    fake.reset();
+    missed.length = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const request = new Request(input, init);
+      const answered = await fake.answer(request);
+      if (answered !== undefined) {
+        return answered;
+      }
+      missed.push(request.url);
+      return new Response("Taken");
+    });
   });
-});
-afterEach(() => {
-  vi.restoreAllMocks();
-});
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+  return { google: fake, elsewhere: missed };
+};
+
+const { google, elsewhere } = fakeGoogle();
 
 const audit = auditEvents();
 

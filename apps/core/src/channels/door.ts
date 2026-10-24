@@ -514,9 +514,10 @@ const offerGmailLink = async (
       platform: "gmail",
       platformUserId: address,
     });
+    // As plain text: a mail shows a card's text, not its buttons.
     await adapter.postMessage(
       await adapter.openDM(address),
-      signInCard({ locale: "en", url: new URL(path, origin).href })
+      `${say("signIn", "en")}\n\n${new URL(path, origin).href}`
     );
   } catch (error) {
     log.warn("channel.line_failed", {

@@ -11,6 +11,7 @@
  * (core's test/connect-providers.ts embeds its source), connect's call it
  * straight from a fetch spy.
  */
+/* oxlint-disable unicorn/consistent-function-scoping -- core embeds the fake's source alone, so nothing it uses may live outside it */
 export const googleGmailFake = (account: {
   mailbox: string;
   clientId: string;
@@ -32,15 +33,12 @@ export const googleGmailFake = (account: {
     labelIds: string[];
     raw: string;
   }[] = [];
-  const sent: { to: string; subject: string; text: string; raw: string }[] =
-    [];
+  const sent: { to: string; subject: string; text: string; raw: string }[] = [];
   const asked: { method: string; host: string; path: string; token: string }[] =
     [];
 
   const base64Url = (text: string): string =>
-    btoa(
-      String.fromCodePoint(...new TextEncoder().encode(text))
-    )
+    btoa(String.fromCodePoint(...new TextEncoder().encode(text)))
       .replaceAll("+", "-")
       .replaceAll("/", "_")
       .replaceAll("=", "");
@@ -54,23 +52,17 @@ export const googleGmailFake = (account: {
   const headerOf = (raw: string, name: string): string =>
     new RegExp(`^${name}: (.*)$`, "imu").exec(raw)?.[1]?.trim() ?? "";
   const notFound = () =>
-    Response.json({ error: { errors: [{ reason: "notFound" }] } }, { status: 404 });
+    Response.json(
+      { error: { errors: [{ reason: "notFound" }] } },
+      { status: 404 }
+    );
 
-  const gmailAnswer = async (request: Request, url: URL): Promise<Response> => {
-    const authorization = request.headers.get("authorization") ?? "";
-    asked.push({
-      method: request.method,
-      host: url.hostname,
-      path: url.pathname,
-      token: authorization.replace(/^Bearer /u, ""),
-    });
-    if (authorization !== `Bearer ${account.accessToken}`) {
-      return Response.json({ error: "authError" }, { status: 401 });
-    }
-    if (!url.pathname.startsWith(prefix)) {
-      return Response.json({ error: "forbidden" }, { status: 403 });
-    }
-    const path = url.pathname.slice(prefix.length);
+  /** The mailbox's own routes: its profile, watch, history, listing and sending. */
+  const mailboxRoute = async (
+    request: Request,
+    url: URL,
+    path: string
+  ): Promise<Response | undefined> => {
     if (path === "profile") {
       return Response.json({
         emailAddress: account.mailbox,
@@ -110,17 +102,22 @@ export const googleGmailFake = (account: {
     }
     if (path === "messages/send") {
       const body: unknown = await request.json();
-      const fields =
+      const fields: [string, unknown][] =
         typeof body === "object" && body !== null ? Object.entries(body) : [];
-      const encoded = String(
-        fields.find(([key]) => key === "raw")?.[1] ?? ""
-      );
+      const sentRaw = fields.find(([key]) => key === "raw")?.[1];
+      const encoded = typeof sentRaw === "string" ? sentRaw : "";
       const thread = fields.find(([key]) => key === "threadId")?.[1];
       const raw = fromBase64Url(encoded);
+      // The body as a person reads it: base64 bodies decoded.
+      const [head = "", ...rest] = raw.split(/\r?\n\r?\n/u);
+      const content = rest.join("\n\n");
+      const text = /^Content-Transfer-Encoding: base64$/imu.test(head)
+        ? fromBase64Url(content.replaceAll(/\s/gu, ""))
+        : content;
       sent.push({
         to: headerOf(raw, "To"),
         subject: headerOf(raw, "Subject"),
-        text: raw,
+        text,
         raw: encoded,
       });
       return Response.json({
@@ -129,6 +126,28 @@ export const googleGmailFake = (account: {
           typeof thread === "string" ? thread : `sentthread${sent.length}`,
         labelIds: ["SENT"],
       });
+    }
+    return undefined;
+  };
+
+  const gmailAnswer = async (request: Request, url: URL): Promise<Response> => {
+    const authorization = request.headers.get("authorization") ?? "";
+    asked.push({
+      method: request.method,
+      host: url.hostname,
+      path: url.pathname,
+      token: authorization.replace(/^Bearer /u, ""),
+    });
+    if (authorization !== `Bearer ${account.accessToken}`) {
+      return Response.json({ error: "authError" }, { status: 401 });
+    }
+    if (!url.pathname.startsWith(prefix)) {
+      return Response.json({ error: "forbidden" }, { status: 403 });
+    }
+    const path = url.pathname.slice(prefix.length);
+    const mailboxAnswer = await mailboxRoute(request, url, path);
+    if (mailboxAnswer !== undefined) {
+      return mailboxAnswer;
     }
     const messageId = /^messages\/(?<id>[\w-]+)$/u.exec(path)?.groups?.id;
     if (messageId !== undefined) {
