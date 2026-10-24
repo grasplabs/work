@@ -2,7 +2,6 @@ import type { AuditActor } from "@grasp-os/shared/audit";
 import { isExpectedCode, isExpectedError } from "@grasp-os/shared/errors";
 import { knowledgeErrors } from "@grasp-os/shared/knowledge";
 import { log } from "@grasp-os/shared/log";
-import type { WorkflowStepConfig } from "@grasp-os/workerflow/contracts";
 import { and, eq, inArray, lt, lte, ne, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
@@ -17,7 +16,6 @@ import {
   sections,
   versions,
 } from "../db/knowledge/schema.ts";
-import type { RunStep } from "../workflows/host.ts";
 import { parseBaseFields } from "./frontmatter.ts";
 import { splitSections } from "./markdown.ts";
 import type { Section } from "./markdown.ts";
@@ -58,6 +56,31 @@ import { portsOf } from "./ports.ts";
 /** D1 binds at most 100 parameters to one statement: a section binds 8. */
 const sectionsPerInsert = 10;
 
+/** How the host retries and times a step of an indexing job. */
+export interface StepConfig {
+  retries?: {
+    /** Retries after the first attempt. */
+    limit: number;
+    delay: `${number} seconds`;
+    backoff: "constant" | "linear" | "exponential";
+  };
+  /** Each attempt's, in ms. */
+  timeout?: number;
+}
+
+/**
+ * A durable step, as the host's job runner gives `runIndexing` one: `do`
+ * runs `fn` once, retrying it as `config` says, and returns its result
+ * again when the job is replayed.
+ */
+export interface IndexStep {
+  do: (
+    name: string,
+    config: StepConfig,
+    fn: () => Promise<unknown>
+  ) => Promise<unknown>;
+}
+
 /** Documents the cron trigger looks at, each minute. */
 const sweepBatch = 20;
 
@@ -69,7 +92,7 @@ const staleAfterMs = 2 * 60_000;
  * (none in tests), so a moment's outage passes and a failing document
  * fails within minutes.
  */
-const indexConfig: WorkflowStepConfig = {
+const indexConfig: StepConfig = {
   retries: { limit: 3, delay: "30 seconds", backoff: "exponential" },
   timeout: 5 * 60_000,
 };
@@ -433,7 +456,7 @@ const codeOf = (error: unknown): string => {
 export const runIndexing = async (
   env: Env,
   payload: unknown,
-  step: RunStep
+  step: IndexStep
 ): Promise<void> => {
   const { documentId, version } = inputSchema.parse(payload);
   const db = drizzle(env.KNOWLEDGE);

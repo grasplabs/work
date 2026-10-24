@@ -151,7 +151,7 @@ import {
 import { readableSources, withheldSourceDetail } from "./history-access.ts";
 import { readAsDelegate } from "./knowledge/binding.ts";
 import { forContext } from "./knowledge/memory.ts";
-import { hasBrainGrant } from "./knowledge/recall-store.ts";
+import { hasBrainGrant } from "./knowledge/recall-grants.ts";
 import { catalog, cited, noteListedSkills } from "./knowledge/tools.ts";
 import { gatewaySettings, models } from "./models.ts";
 import { functionProblem, PreviewReports } from "./preview-reports.ts";
