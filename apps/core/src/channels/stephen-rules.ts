@@ -82,6 +82,34 @@ const isIdLike = (value: string): boolean =>
   !dateOrTime.test(value) &&
   !duration.test(value);
 
+/** A character that can stand inside an address or an ID. */
+const tokenChar = /[\w.%+@-]/u;
+
+/**
+ * Whether `text` holds `value` as a whole token, not inside a longer one:
+ * `smith@acme.test` isn't in `john.smith@acme.test`, nor `AAMkAD-0042` in
+ * `AAMkAD-00421`. A full stop may follow it, as one ends a sentence.
+ */
+const holdsToken = (text: string, value: string): boolean => {
+  for (
+    let at = text.indexOf(value);
+    at !== -1;
+    at = text.indexOf(value, at + 1)
+  ) {
+    const before = text[at - 1];
+    const after = text[at + value.length];
+    const next = text[at + value.length + 1];
+    const endsHere =
+      after === undefined ||
+      !tokenChar.test(after) ||
+      (after === "." && (next === undefined || !tokenChar.test(next)));
+    if ((before === undefined || !tokenChar.test(before)) && endsHere) {
+      return true;
+    }
+  }
+  return false;
+};
+
 /** Every text value in `value`, however deep. */
 export const textsOf = (value: unknown): string[] => {
   if (typeof value === "string") {
@@ -122,20 +150,30 @@ export const heldWriteRefusal = (
     return "agent.write_placeholder";
   }
   const saidLower = said.toLowerCase();
-  const recipients = values.flatMap((value) =>
-    [...value.matchAll(emailAddress)].map(([address]) => address.toLowerCase())
-  );
-  if (recipients.some((address) => !saidLower.includes(address))) {
+  const readLower = read.join("\n").toLowerCase();
+  // A value that is an address is someone the write reaches: the person
+  // must have said it. One inside longer text (a reply quoting the mail
+  // it answers) may also come from what the chat read.
+  const unsaid = values.some((value) => {
+    const whole = onlyEmailAddress.test(value.trim());
+    return [...value.matchAll(emailAddress)].some(([found]) => {
+      const address = found.toLowerCase();
+      return (
+        !holdsToken(saidLower, address) &&
+        (whole || !holdsToken(readLower, address))
+      );
+    });
+  });
+  if (unsaid) {
     return "agent.write_recipient_unsaid";
   }
-  const readLower = read.join("\n").toLowerCase();
   const untraced = values.some((value) => {
     const trimmed = value.trim();
     if (!isIdLike(trimmed) || onlyEmailAddress.test(trimmed)) {
       return false;
     }
     const lower = trimmed.toLowerCase();
-    return !saidLower.includes(lower) && !readLower.includes(lower);
+    return !holdsToken(saidLower, lower) && !holdsToken(readLower, lower);
   });
   return untraced ? "agent.write_untraced" : undefined;
 };
@@ -155,9 +193,12 @@ const linkLeft = (whole: string): string => {
   return citation ? whole : (parts?.label ?? "");
 };
 
-/** An address written out, or between angle brackets. */
+/**
+ * An address written out, or between angle brackets, with the spaces
+ * before it, so dropping it leaves no gap.
+ */
 const bareLink =
-  /<?\b(?:https?:\/\/|www\.|mailto:)(?:[^\s<>)]*[^\s<>).,;:!?'"])?>?/giu;
+  /[ \t]*<?\b(?:https?:\/\/|www\.|mailto:)(?:[^\s<>)]*[^\s<>).,;:!?'"])?>?/giu;
 
 /**
  * Stephen's own words without links: a Markdown link keeps its label, and
@@ -165,11 +206,7 @@ const bareLink =
  * read (`grasp:`) stays, as code turns it into the answer's sources.
  */
 export const withoutLinks = (text: string): string =>
-  text
-    .replaceAll(markdownLink, linkLeft)
-    .replaceAll(bareLink, "")
-    .replaceAll(/[ \t]{2,}/gu, " ")
-    .replaceAll(/ +(?<mark>[.,;:!?])/gu, "$<mark>");
+  text.replaceAll(markdownLink, linkLeft).replaceAll(bareLink, "");
 
 /**
  * How Stephen answers in a chat app, after the agent's own instructions.

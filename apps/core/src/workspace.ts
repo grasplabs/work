@@ -2111,7 +2111,7 @@ export class Workspace extends DurableObject<Env> {
       ...(kept.success ? kept.data : []),
     ])) {
       if (chars + value.length > traceCharsMax) {
-        break;
+        continue;
       }
       chars += value.length;
       trace.push(value);
