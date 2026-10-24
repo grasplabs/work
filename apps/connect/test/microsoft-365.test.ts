@@ -33,7 +33,11 @@ import {
   bigAttachmentId,
   childrenSkipToken,
   ceo,
+  contractCount,
+  contractsList,
   financeDrive,
+  financeSite,
+  hrSite,
   flaggedMessage,
   invoicePdf,
   longBody,
@@ -191,8 +195,13 @@ const workbookInputs: Record<string, Input> = {
   },
 };
 
+/** Input for each list tool, but its site. */
+const siteInputs: Record<string, Input> = {
+  "lists.items": { list: contractsList },
+};
+
 describe("the Microsoft 365 connector's scoping", () => {
-  it("binds every route of every tool to its mailbox, drive or workbook's named table, never /me", () => {
+  it("binds every route of every tool to its mailbox, drive, site or workbook's named table, never /me", () => {
     const unbound = Object.entries(manifest.actions).flatMap(
       ([name, { resource, routes }]) =>
         routes
@@ -203,6 +212,8 @@ describe("the Microsoft 365 connector's scoping", () => {
                   path.startsWith("/v1.0/users/{mailbox}/")) ||
                 (resource === "drive" &&
                   path.startsWith("/v1.0/drives/{drive}/")) ||
+                (resource === "site" &&
+                  path.startsWith("/v1.0/sites/{site}/")) ||
                 (resource === "workbook" &&
                   path.startsWith(
                     "/v1.0/drives/{drive}/items/{workbook}/workbook/tables/{table}/"
@@ -219,6 +230,7 @@ describe("the Microsoft 365 connector's scoping", () => {
       [
         ...Object.keys(mailboxInputs),
         ...Object.keys(driveInputs),
+        ...Object.keys(siteInputs),
         ...Object.keys(workbookInputs),
       ].toSorted()
     );
@@ -252,6 +264,17 @@ describe("the Microsoft 365 connector's scoping", () => {
     await expect(
       refusalsFor(connection, driveInputs, "drive", financeDrive, [
         personalDrive,
+      ])
+    ).resolves.toStrictEqual(new Set(["connect.resource_out_of_scope"]));
+    expect(graph.sent).toStrictEqual([]);
+  });
+
+  it("keeps a call for one site out of every other", async () => {
+    const connection = await connected();
+    await expect(
+      refusalsFor(connection, siteInputs, "site", financeSite, [
+        hrSite,
+        financeSite.toUpperCase(),
       ])
     ).resolves.toStrictEqual(new Set(["connect.resource_out_of_scope"]));
     expect(graph.sent).toStrictEqual([]);
@@ -1341,6 +1364,239 @@ describe("the Microsoft 365 connector's file tools", () => {
         .map(({ host }) => host)
         .filter((host) => host !== "graph.microsoft.com")
     ).toStrictEqual([graph.sharePointHost]);
+  });
+});
+
+describe("the Microsoft 365 connector's list tools", () => {
+  const contracts = { site: financeSite, list: contractsList };
+
+  it("read the items of a list that meet every condition, with only their own columns", async () => {
+    const connection = await connected();
+    const result = await resultOf(
+      call(connection, "lists.items", {
+        ...contracts,
+        where: [
+          { column: "Supplier", is: "eq", value: "O'Brien & Sons" },
+          { column: "Amount", is: "ge", value: 5000 },
+        ],
+      })
+    );
+    // Items 3, 7, 11... are O'Brien's; from 20 on they're worth 5,000.
+    const ids = Array.from({ length: contractCount }, (_, index) => index + 1)
+      .filter((n) => n % 4 === 3 && n >= 20)
+      .map(String);
+    expect(result.provenance).toStrictEqual(ids);
+    expect(result.output).toMatchObject({
+      site: financeSite,
+      list: contractsList,
+      nextPage: null,
+    });
+    expect(
+      z
+        .object({ items: z.array(z.unknown()) })
+        .parse(result.output)
+        .items.at(0)
+    ).toStrictEqual({
+      id: "23",
+      fields: {
+        id: "23",
+        Title: "Contract 23",
+        Supplier: "O'Brien & Sons",
+        Status: "Open",
+        Amount: 5750,
+        Renewal_x0020_date: "2027-06-01T00:00:00Z",
+        _x0032_nd_x0020_signatory: "Legal",
+        Regions: ["EU", "UK"],
+        Website: JSON.stringify({
+          Description: "Supplier portal",
+          Url: "https://suppliers.example.com/23",
+        }),
+        Modified: "2026-06-13T09:30:00Z",
+        Created: "2026-01-05T08:00:00Z",
+        AuthorLookupId: "11",
+        EditorLookupId: "11",
+        Attachments: false,
+      },
+      createdAt: "2026-01-05T08:00:00Z",
+      lastModifiedAt: "2026-06-13T09:30:00Z",
+      webUrl: `https://${graph.sharePointHost}/sites/Finance/Lists/Contracts/23_.000`,
+    });
+    // The filter is built from the conditions, its quote doubled as OData
+    // does, and Graph is told it may filter on columns that aren't indexed.
+    const [sent] = requests();
+    expect(sent).toMatchObject({
+      path: `/v1.0/sites/${encodeURIComponent(financeSite)}/lists/${contractsList}/items`,
+      query: {
+        $filter:
+          "fields/Supplier eq 'O''Brien & Sons' and fields/Amount ge 5000",
+      },
+    });
+    expect(graph.sent[0]?.headers).toMatchObject({
+      prefer: "HonorNonIndexedQueriesWarningMayFailRandomly",
+    });
+  });
+
+  it("read only the columns asked for, one of SharePoint's own too", async () => {
+    const connection = await connected();
+    const output = await outputOf(
+      call(connection, "lists.items", {
+        ...contracts,
+        columns: ["Title", "Status", "ContentType"],
+        top: 1,
+      })
+    );
+    expect(output).toMatchObject({
+      items: [
+        {
+          id: "1",
+          fields: {
+            id: "1",
+            Title: "Contract 1",
+            Status: "Open",
+            ContentType: "Item",
+          },
+        },
+      ],
+    });
+    expect(requests()[0]?.query).toMatchObject({
+      $expand: "fields($select=Title,Status,ContentType)",
+    });
+  });
+
+  it("take no condition that could be anything but a literal on a column", async () => {
+    const connection = await connected();
+    const refusals = await Promise.all(
+      [
+        { column: "Status eq 'Open' or Amount", is: "gt", value: 0 },
+        { column: "Status", is: "eq or", value: "Open" },
+      ].map(
+        async (condition) =>
+          await toolError(
+            call(connection, "lists.items", {
+              ...contracts,
+              where: [condition],
+            })
+          )
+      )
+    );
+    expect(refusals).toStrictEqual([
+      "Invalid input: invalid_format at where.0.column",
+      "Invalid input: invalid_value at where.0.is",
+    ]);
+    expect(graph.sent).toStrictEqual([]);
+  });
+
+  it("refuse a list in a site the person can't open, as Graph does", async () => {
+    const connection = await connected();
+    await expect(
+      toolError(
+        call(
+          connection,
+          "lists.items",
+          { site: hrSite, list: contractsList },
+          { resource: hrSite }
+        )
+      )
+    ).resolves.toMatchObject({ error: { code: "access_denied" } });
+  });
+
+  it("cut a long list at its bound, and go on from there page by page", async () => {
+    const connection = await connected();
+    const pageSchema = z.object({
+      items: z.array(z.object({ id: z.string() })),
+      nextPage: z.string().nullable(),
+    });
+    const first = pageSchema.parse(
+      await outputOf(call(connection, "lists.items", contracts))
+    );
+    expect({
+      read: first.items.length,
+      nextPage: first.nextPage,
+    }).toStrictEqual({
+      read: 50,
+      nextPage: `%24skiptoken=${encodeURIComponent("Paged=TRUE&p_ID=50")}`,
+    });
+    const second = pageSchema.parse(
+      await outputOf(
+        call(connection, "lists.items", {
+          ...contracts,
+          page: first.nextPage ?? "",
+        })
+      )
+    );
+    // The rest, from where the first page ended.
+    expect({
+      read: second.items.map(({ id }) => Number(id)),
+      nextPage: second.nextPage,
+    }).toStrictEqual({
+      read: Array.from(
+        { length: contractCount - 50 },
+        (_, index) => index + 51
+      ),
+      nextPage: null,
+    });
+    // Never more than a page's bound, whatever is asked.
+    await expect(
+      toolError(call(connection, "lists.items", { ...contracts, top: 500 }))
+    ).resolves.toBe("Invalid input: too_big at top");
+    expect(requests().map(({ query }) => query.$top)).toStrictEqual([
+      "50",
+      "50",
+    ]);
+  });
+});
+
+describe("the Microsoft 365 connector's list pages", () => {
+  const contracts = { site: financeSite, list: contractsList };
+
+  it("keep a page's conditions and columns on the next page", async () => {
+    const connection = await connected();
+    const asked = {
+      ...contracts,
+      where: [{ column: "Status", is: "eq", value: "Open" }],
+      columns: ["Title", "Status"],
+      top: 10,
+    };
+    const pageSchema = z.object({
+      items: z.array(
+        z.object({ id: z.string(), fields: z.record(z.string(), z.unknown()) })
+      ),
+      nextPage: z.string().nullable(),
+    });
+    const first = pageSchema.parse(
+      await outputOf(call(connection, "lists.items", asked))
+    );
+    const second = pageSchema.parse(
+      await outputOf(
+        call(connection, "lists.items", {
+          ...asked,
+          page: first.nextPage ?? "",
+        })
+      )
+    );
+    const items = [...first.items, ...second.items];
+    // Open contracts are those whose number isn't a multiple of 3.
+    const open = Array.from({ length: contractCount }, (_, index) => index + 1)
+      .filter((n) => n % 3 !== 0)
+      .slice(0, 20)
+      .map(String);
+    expect({
+      ids: items.map(({ id }) => id),
+      columns: [
+        ...new Set(items.flatMap(({ fields }) => Object.keys(fields))),
+      ].toSorted(),
+      statuses: [...new Set(items.map(({ fields }) => fields.Status))],
+    }).toStrictEqual({
+      ids: open,
+      columns: ["Status", "Title", "id"],
+      statuses: ["Open"],
+    });
+    const [, again] = requests();
+    expect(again?.query).toMatchObject({
+      $filter: "fields/Status eq 'Open'",
+      $expand: "fields($select=Title,Status)",
+      $top: "10",
+    });
   });
 });
 

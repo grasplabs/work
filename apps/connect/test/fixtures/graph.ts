@@ -576,6 +576,88 @@ export const notFound = {
   },
 };
 
+/** A SharePoint site the person can open: Finance. */
+export const financeSite =
+  "example.sharepoint.com,7a1e3c2b-4d5f-4e6a-9b8c-0d1e2f3a4b5c,5c4b3a2f-1e0d-4c8b-9a6e-4f5d2b3c1e7a";
+
+/** A SharePoint site the person can't open: HR. */
+export const hrSite =
+  "example.sharepoint.com,1f2e3d4c-5b6a-4978-8e9d-a0b1c2d3e4f5,9e8d7c6b-5a49-4382-b1c0-d9e8f7a6b5c4";
+
+/** Finance's contracts register, a list, by its ID. */
+export const contractsList = "8d3f5a1c-2b7e-4c9d-a6f0-3e1b5d7c9a2f";
+
+/** How many items the contracts register holds: more than a page. */
+export const contractCount = 60;
+
+const suppliers = [
+  "Northwind Traders",
+  "Contoso",
+  "Fabrikam",
+  "O'Brien & Sons",
+] as const;
+
+/** Item `n` of the contracts register, as Graph gives it, `fields` and all. */
+export const contract = (n: number) => {
+  const etag = `"5f0c2d4e-7a1b-4c3d-9e8f-${String(n).padStart(12, "0")},2"`;
+  const modified = `2026-0${(n % 9) + 1}-1${n % 10}T09:30:00Z`;
+  return {
+    "@odata.etag": etag,
+    id: String(n),
+    createdDateTime: "2026-01-05T08:00:00Z",
+    lastModifiedDateTime: modified,
+    webUrl: `https://${sharePointHost}/sites/Finance/Lists/Contracts/${n}_.000`,
+    fields: {
+      "@odata.etag": etag,
+      id: String(n),
+      Title: `Contract ${n}`,
+      Supplier: suppliers[n % suppliers.length],
+      Status: n % 3 === 0 ? "Closed" : "Open",
+      Amount: n * 250,
+      Renewal_x0020_date: `2027-0${(n % 9) + 1}-01T00:00:00Z`,
+      // "2nd signatory": a leading digit SharePoint writes as `_x0032_`.
+      _x0032_nd_x0020_signatory: n % 2 === 0 ? "Finance" : "Legal",
+      // A choice of several, and a link, which Graph gives as an object.
+      Regions: ["EU", "UK"],
+      Website: {
+        Description: "Supplier portal",
+        Url: `https://suppliers.example.com/${n}`,
+      },
+      ContentType: "Item",
+      Modified: modified,
+      Created: "2026-01-05T08:00:00Z",
+      AuthorLookupId: "11",
+      EditorLookupId: "11",
+      _UIVersionString: "2.0",
+      Attachments: false,
+      Edit: "",
+      LinkTitleNoMenu: `Contract ${n}`,
+      LinkTitle: `Contract ${n}`,
+      ItemChildCount: "0",
+      FolderChildCount: "0",
+      _ComplianceFlags: "",
+      _ComplianceTag: "",
+    },
+  };
+};
+
+/** Graph's answer for a site the signed-in person can't open. */
+export const accessDenied = {
+  error: {
+    code: "accessDenied",
+    message:
+      "Access denied. You do not have permission to perform this action or access this resource.",
+  },
+};
+
+/** Graph's answer for a filter on a column that isn't indexed, unasked. */
+export const notIndexed = {
+  error: {
+    code: "invalidRequest",
+    message:
+      "Field 'Status' cannot be referenced in filter or orderby as it is not indexed. Provide the 'Prefer: HonorNonIndexedQueriesWarningMayFailRandomly' header to allow this, but be warned that such queries may fail on large lists.",
+  },
+};
 /** Excel workbooks of `financeDrive`, by drive item ID. */
 export const workbookIds = {
   /** The supplier register, with its table and a named range. */
