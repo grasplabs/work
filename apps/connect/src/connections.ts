@@ -119,12 +119,6 @@ export interface ToolRule {
   /** What a call of it is: Grasp's class, a change unless both say read. */
   class: Exclude<ToolClass, "never">;
   /**
-   * The values its resource property must hold, where the admin pointed
-   * it (`ComposioToolRule.places`); `undefined` where they pointed it at
-   * no place in particular.
-   */
-  places?: readonly string[] | undefined;
-  /**
    * The class Grasp gave it (composio-classes.ts), as reviewed. It goes in
    * the contract, not `class`: a reclass the admin's rule hides (a read
    * turned change, for a tool the admin never marked as a read) is still
@@ -192,18 +186,13 @@ export const allowedTool = (
   }
   const rule =
     typeof tool === "string"
-      ? { read: false, resource: undefined, places: undefined }
-      : {
-          read: tool.read === true,
-          resource: tool.resource,
-          places: tool.places,
-        };
+      ? { read: false, resource: undefined }
+      : { read: tool.read === true, resource: tool.resource };
   const read =
     rule.read && (reviewed === "read-own" || reviewed === "read-company");
   return {
     read,
     resource: rule.resource,
-    places: rule.places,
     class: toolClassOf({ readOnly: read, reach: reachOf[reviewed] }),
     reviewed,
   };
