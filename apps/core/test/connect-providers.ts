@@ -17,6 +17,7 @@ import { osvFake } from "../../connect/test/osv-fake.ts";
 import { clients } from "../../connect/test/provider-config.ts";
 import { composioApiScript, composioLogoScript } from "./composio-api.ts";
 import { mailServerScript } from "./mail-server.ts";
+import { stephenGraphFake } from "./stephen-graph-fake.ts";
 
 /** Grasp's Entra app for connections, as set on connect in the tests. */
 export const connectClient = clients.microsoft;
@@ -102,6 +103,12 @@ export const graphSentUrl = "https://graph-control.test/sent";
  */
 export const graphLoseUrl = "https://graph-control.test/lose";
 
+/**
+ * Where Stephen's eval sets a mailbox's calendar and mail, or a workbook's
+ * table, and reads the writes that reached them (test/stephen-graph-fake.ts).
+ */
+export const stephenGraphUrl = "https://graph-control.test/stephen";
+
 /** Where tests read how many drafts Graph made for `?mailbox=`: `{ drafts }`. */
 export const graphDraftsUrl = "https://graph-control.test/drafts";
 
@@ -158,6 +165,7 @@ const base64Url = (bytes) =>
 const encoded = (value) =>
   base64Url(new TextEncoder().encode(JSON.stringify(value)));
 const graphEvents = (${graphEventsFake.toString()})();
+const stephenGraph = (${stephenGraphFake.toString()})();
 const graphSent = [];
 const graphLosing = new Map();
 const graphDrafts = new Map();
@@ -286,6 +294,15 @@ export default {
     if (request.method === "POST" && url.href === ${JSON.stringify(documentsControlUrl)}) {
       Object.assign(documents, await request.json());
       return new Response(null, { status: 204 });
+    }
+    if (url.href === ${JSON.stringify(stephenGraphUrl)}) {
+      return await stephenGraph.control(request);
+    }
+    if (url.hostname === "graph.microsoft.com") {
+      const answered = await stephenGraph.answer(request, url);
+      if (answered !== undefined) {
+        return answered;
+      }
     }
     if ((url.hostname === "graph.microsoft.com" || url.hostname === "acme-my.sharepoint.com") && request.method === "GET") {
       const answered = documentsGraph(url);
