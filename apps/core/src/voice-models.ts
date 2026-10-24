@@ -6,7 +6,8 @@ import type { ListPrices } from "./model-prices.ts";
 // The voice models the model gateway offers (models.ts), beside the text
 // models of pi's catalog: our own small catalog, as pi's has no voice
 // models. Each is priced per character it is asked to say, which is how
-// ElevenLabs bills speech.
+// ElevenLabs bills speech; and the transcription models, priced per
+// second they hear, which is how ElevenLabs bills speech to text.
 
 /**
  * The provider of the gateway's voice models, as the allowlist names
@@ -63,6 +64,57 @@ export const parseVoiceRef = (ref: string): VoiceRef | undefined => {
  */
 export const voicePricesOf = ({ id }: VoiceRef): ListPrices => {
   const perMillion = dollarsPer1000Chars[id] * 1000;
+  return { input: perMillion, output: perMillion, cacheRead: 0, cacheWrite: 0 };
+};
+
+/**
+ * ElevenLabs's API prices for speech to text, in US dollars per hour of
+ * audio, with keyterm prompting added, which is billed on top whenever
+ * the request names words to listen out for: so what a transcription is
+ * charged is never below what it is billed, keyterms or not.
+ *
+ * Source: ElevenLabs's API pricing page (https://elevenlabs.io/pricing/api),
+ * read on 2026-10-24: Scribe at $0.22 an hour and Scribe realtime at $0.39,
+ * keyterm prompting $0.05 and $0.08 an hour more.
+ */
+const dollarsPerHour = {
+  /** Scribe v2 realtime: live transcription (transcription.ts). */
+  scribe_v2_realtime: 0.39 + 0.08,
+  /** Scribe v2: a recording written down whole. */
+  scribe_v2: 0.22 + 0.05,
+} as const;
+
+/** A transcription model the gateway offers. */
+export interface HearingRef {
+  provider: typeof voiceProvider;
+  id: keyof typeof dollarsPerHour;
+}
+
+const isHearingModel = (id: string): id is HearingRef["id"] =>
+  Object.hasOwn(dollarsPerHour, id);
+
+/**
+ * A transcription model as the gateway names it, `elevenlabs/<model>`,
+ * such as `elevenlabs/scribe_v2_realtime`; `undefined` for any other, a
+ * voice model too: each takes calls of its own kind only.
+ */
+export const parseHearingRef = (ref: string): HearingRef | undefined => {
+  const [provider, id, ...rest] = ref.split("/");
+  return provider === voiceProvider &&
+    id !== undefined &&
+    rest.length === 0 &&
+    isHearingModel(id)
+    ? { provider, id }
+    : undefined;
+};
+
+/**
+ * A transcription model's prices in the shape the ledger pins: per
+ * million seconds of audio, as the input a request sends. What is heard
+ * is all it is billed for, so it counts no output.
+ */
+export const hearingPricesOf = ({ id }: HearingRef): ListPrices => {
+  const perMillion = (dollarsPerHour[id] / 3600) * 1_000_000;
   return { input: perMillion, output: perMillion, cacheRead: 0, cacheWrite: 0 };
 };
 

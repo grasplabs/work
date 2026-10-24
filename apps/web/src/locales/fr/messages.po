@@ -7392,6 +7392,16 @@ msgstr "Déplacer vers un projet"
 msgid "Moved old entries out of the audit trail"
 msgstr "A déplacé d’anciennes entrées hors du journal d’audit"
 
+#: src/interview/voice-bar.tsx
+msgctxt "turn your microphone off for a moment"
+msgid "Mute"
+msgstr "Couper le micro"
+
+#: src/interview/voice-bar.tsx
+msgctxt "your microphone is off for a moment"
+msgid "Muted"
+msgstr "Micro coupé"
+
 #: src/chat/project-dialog.tsx
 #: src/onboarding/interviews-progress.tsx
 #: src/routes/_shell.settings.packages.index.tsx
@@ -13320,6 +13330,11 @@ msgstr "Résultats inconnus"
 #: src/brain/brain.ts
 msgid "Unknown source"
 msgstr "Source inconnue"
+
+#: src/interview/voice-bar.tsx
+msgctxt "turn your microphone back on"
+msgid "Unmute"
+msgstr "Rétablir le micro"
 
 #: src/engines/app-page.tsx
 #: src/engines/app-status.tsx
