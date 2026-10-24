@@ -1,4 +1,4 @@
-import { actorOf } from "@grasp-os/shared/audit";
+import { actorOf, auditProvenanceMaxItems } from "@grasp-os/shared/audit";
 import type { AuditActor } from "@grasp-os/shared/audit";
 import type {
   Candidate,
@@ -33,7 +33,7 @@ import { canonicalJson } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { requireAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { asc, count, sql } from "drizzle-orm";
+import { and, asc, count, eq, gte, like, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { auditedBatch, outboxed } from "./audit-outbox.ts";
@@ -68,6 +68,8 @@ import { inList } from "./db/d1.ts";
 //   them (`brainRecordInputSchema`).
 // - A deleted interview left in the brain: the onboarding alone takes its
 //   own records out (`purgeOnboardingRecords`, as the system), whole.
+// - A purged document left in the brain: the onboarding alone takes its
+//   own drawings out (`purgeOnboardingDrawings`, as the system), whole.
 
 /** A record's key across types, as its audit event names it. */
 const keyOf = ({ type, id }: { type: string; id: string }): string =>
@@ -502,11 +504,54 @@ export const purgeOnboardingRecords = async (
       actor: { type: "system" },
       action: "brain.records.purged",
       target: { type: "brain", id: "playbook" },
-      provenance: [...held].map(([id, { type }]) => keyOf({ type, id })),
+      provenance: [...held]
+        .slice(0, auditProvenanceMaxItems)
+        .map(([id, { type }]) => keyOf({ type, id })),
       detail: { purged: held.size },
     }),
   ]);
   return held.size;
+};
+
+/**
+ * Takes out of the brain, for good, every drawing the onboarding gave it
+ * from `since` on: what may have been drawn with a document's reading
+ * that a Knowledge purge reached (onboarding/documents.ts). A drawing is
+ * a version of its workflow; the workflow stays, and is drawn again.
+ * Nothing else is taken out, and nothing written over. One batch with its
+ * audit event, which names the records by id and counts them, never what
+ * they said. Returns the ids taken out.
+ */
+export const purgeOnboardingDrawings = async (
+  env: Env,
+  since: Date
+): Promise<string[]> => {
+  const db = drizzle(env.DB);
+  const held = await db
+    .select({ id: brainRecords.id, type: brainRecords.type })
+    .from(brainRecords)
+    .where(
+      and(
+        eq(brainRecords.type, "workflowVersion"),
+        like(brainRecords.id, `${onboardingIdPrefix}%`),
+        gte(brainRecords.addedAt, since)
+      )
+    );
+  if (held.length === 0) {
+    return [];
+  }
+  const gone = held.map(({ id }) => id);
+  await auditedBatch(env, db, [
+    db.delete(brainRecords).where(inList(brainRecords.id, gone)),
+    outboxed(db, {
+      actor: { type: "system" },
+      action: "brain.records.purged",
+      target: { type: "brain", id: "playbook" },
+      provenance: held.slice(0, auditProvenanceMaxItems).map(keyOf),
+      detail: { purged: held.length },
+    }),
+  ]);
+  return gone;
 };
 
 /** A dated value of a team, by the team it is for. */
