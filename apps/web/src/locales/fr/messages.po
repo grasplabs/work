@@ -844,10 +844,6 @@ msgstr "{name} est invitée, mais pas encore interviewée."
 msgid "{name} is named, but not seen in use yet."
 msgstr "{name} est cité, mais pas encore vu en usage."
 
-#: src/connections/connect-dialog.tsx
-msgid "{name} is read-only"
-msgstr "{name} est en lecture seule"
-
 #: src/routes/_shell.settings.members.tsx
 msgid "{name} is removed. {count, plural, one {# personal connection was disconnected.} other {# personal connections were disconnected.}}"
 msgstr "Le compte de {name} est retiré. {count, plural, one {# connexion personnelle a été déconnectée.} other {# connexions personnelles ont été déconnectées.}}"
@@ -860,6 +856,10 @@ msgstr "{name} : déconnexion partout effectuée."
 msgid "{name} logo"
 msgstr "Logo {name}"
 
+#: src/connections/connect-dialog.tsx
+msgid "{name} may write. Change to Read"
+msgstr "{name} peut écrire. Passer en Lecture"
+
 #: src/chat/builds-state.ts
 msgid "{name} no longer changes the domain's data (write → read)"
 msgstr "{name} ne modifie plus les données du domaine (écriture → lecture)"
@@ -867,6 +867,10 @@ msgstr "{name} ne modifie plus les données du domaine (écriture → lecture)"
 #: src/chat/builds-state.ts
 msgid "{name} now changes the domain's data (read → write)"
 msgstr "{name} modifie désormais les données du domaine (lecture → écriture)"
+
+#: src/connections/connect-dialog.tsx
+msgid "{name} reads only. Change to Write"
+msgstr "{name} ne fait que lire. Passer en Écriture"
 
 #: src/onboarding/setup-steps.tsx
 msgid "{name} takes part"
@@ -1788,6 +1792,10 @@ msgstr "Une étape"
 #: src/onboarding/setup-steps.tsx
 msgid "A team without a lead gets its links on the first day, and I ask each person what they do."
 msgstr "Une équipe sans responsable reçoit ses liens le premier jour, et je demande à chacun ce qu’il fait."
+
+#: src/connections/connect-dialog.tsx
+msgid "A tool switched on starts as Read where Composio says it only reads; Grasp doesn't check that. A Read tool runs without asking. A call of a Write tool from chat, or from a person using a domain, waits for that person to confirm it; a workflow's run makes it as one of its steps. Press a tool's badge to change it. Mark a tool Read only if it changes nothing: marked wrongly, it changes things without asking."
+msgstr "Un outil activé commence en Lecture là où Composio indique qu’il ne fait que lire ; Grasp ne le vérifie pas. Un outil en Lecture s’exécute sans demander. L’appel d’un outil en Écriture depuis un chat, ou par une personne qui utilise un domaine, attend que cette personne le confirme ; l’exécution d’un workflow le fait comme l’une de ses étapes. Appuyez sur le badge d’un outil pour le changer. Ne mettez un outil en Lecture que s’il ne change rien : mal marqué, il change des choses sans demander."
 
 #: src/dashboard/standard-widgets.tsx
 msgid "A workflow is redesigned with AI and waits for its test."
@@ -3326,6 +3334,7 @@ msgstr "Illisible"
 
 #: src/chat/brain-questions.tsx
 #: src/chat/project-dialog.tsx
+#: src/connections/connect-dialog.tsx
 #: src/decision-confirmation.tsx
 #: src/engines/app-status.tsx
 #: src/engines/package-approvals.tsx
@@ -4709,6 +4718,11 @@ msgstr "fait"
 #: src/chat/thread.tsx
 #: src/onboarding/setup-steps.tsx
 #: src/routes/_shell.workflows.index.tsx
+msgid "Done"
+msgstr "Terminé"
+
+#: src/connections/connect-dialog.tsx
+msgctxt "a step that is finished"
 msgid "Done"
 msgstr "Terminé"
 
@@ -7521,6 +7535,11 @@ msgstr "Nécessite votre propre application de connexion"
 msgid "Never"
 msgstr "Jamais"
 
+#: src/connections/connect-dialog.tsx
+msgctxt "what a tool may do"
+msgid "Never"
+msgstr "Jamais"
+
 #: src/settings/pulse.ts
 msgctxt "when Pulse may report"
 msgid "Never"
@@ -9784,6 +9803,11 @@ msgctxt "button: read a transcript"
 msgid "Read"
 msgstr "Lire"
 
+#: src/connections/connect-dialog.tsx
+msgctxt "what a tool may do"
+msgid "Read"
+msgstr "Lecture"
+
 #: src/activity/audit-words.ts
 msgid "Read a domain's statistics"
 msgstr "A lu les statistiques d’un domaine"
@@ -9850,14 +9874,9 @@ msgstr "A lu ce qui a changé sur une connexion"
 msgid "Read what could be improved"
 msgstr "A lu ce qui pourrait être amélioré"
 
-#: src/connections/connect-dialog.tsx
 #: src/knowledge/collection-markers.tsx
 msgid "Read-only"
 msgstr "Lecture seule"
-
-#: src/connections/connect-dialog.tsx
-msgid "Read-only is ticked where Composio says a tool only reads; Grasp doesn't check that. A read-only tool runs without asking. A call of any other tool from chat, or from a person using a domain, waits for that person to confirm it; a workflow's run makes it as one of its steps. Mark a tool read-only only if it changes nothing: marked wrongly, it changes things without asking."
-msgstr "« Lecture seule » est coché là où Composio indique qu’un outil ne fait que lire ; Grasp ne le vérifie pas. Un outil en lecture seule s’exécute sans demander. L’appel de tout autre outil depuis un chat, ou par une personne qui utilise un domaine, attend que cette personne le confirme ; l’exécution d’un workflow le fait comme l’une de ses étapes. Ne marquez un outil en lecture seule que s’il ne modifie rien : mal marqué, il modifie des choses sans demander."
 
 #: src/onboarding/document-drop.tsx
 msgid "Reading"
@@ -11556,6 +11575,10 @@ msgstr "Participe aux entretiens"
 #: src/routes/_shell.settings.models.tsx
 msgid "Takes sensitive data"
 msgstr "Accepte des données sensibles"
+
+#: src/connections/connect-dialog.tsx
+msgid "Taking long? <0>Try again</0>"
+msgstr "C’est long ? <0>Réessayer</0>"
 
 #: src/onboarding/organization-words.ts
 msgctxt "filter: teams that take part in the interviews"
@@ -13623,6 +13646,10 @@ msgctxt "dashboard: what waits on you, settled on its own page"
 msgid "Waiting elsewhere"
 msgstr "En attente ailleurs"
 
+#: src/connections/connect-dialog.tsx
+msgid "Waiting for {app}"
+msgstr "En attente de {app}"
+
 #: src/onboarding/setup-steps.tsx
 msgid "Waiting for {signIn}"
 msgstr "En attente de {signIn}"
@@ -14648,6 +14675,11 @@ msgstr "S’appliquerait"
 msgid "Would run after approval"
 msgstr "S’exécuterait après approbation"
 
+#: src/connections/connect-dialog.tsx
+msgctxt "what a tool may do"
+msgid "Write"
+msgstr "Écriture"
+
 #: src/routes/guest.tsx
 msgid "Write your answer"
 msgstr "Écrivez votre réponse"
@@ -14750,6 +14782,11 @@ msgstr "Vous avez terminé ce chat. Merci pour votre temps."
 #: src/onboarding/about-story.tsx
 msgid "You show me who’s who, where the documents are, and which tools people use."
 msgstr "Vous me montrez qui est qui, où sont les documents et quels outils les gens utilisent."
+
+#. {host} is the web address of the sign-in page, e.g. login.microsoftonline.com.
+#: src/connections/connect-dialog.tsx
+msgid "You sign in at <0>{host}</0>"
+msgstr "Vous vous connectez sur <0>{host}</0>"
 
 #: src/connections/connect-dialog.tsx
 msgid "You sign in on {app}’s own page."
