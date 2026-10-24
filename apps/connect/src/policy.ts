@@ -6,9 +6,11 @@ import type { McpServerTool, McpTool, McpToolResult } from "./mcp.ts";
 
 // What connect takes a tool to be. A native connector's tool is what its
 // manifest says: the manifest is ours, reviewed. A Composio server's tool
-// is what the admin's allowlist says (`composioTool`, threat model CN16),
-// whatever the server declares about it: a read only if the admin said so,
-// and held to one resource only by the input property the admin named.
+// is what the class Grasp gave it and the admin's allowlist say
+// (`composioTool`, threat model CN16), whatever the server declares about
+// it: one nobody classed isn't run at all (`allowedTool`), a read only if
+// both its class and the admin say so, and held to one resource only by
+// the input property the admin named.
 
 type ServerKind = Connection["serverKind"];
 

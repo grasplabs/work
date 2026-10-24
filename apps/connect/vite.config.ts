@@ -4,7 +4,10 @@ import {
 } from "@cloudflare/vitest-pool-workers";
 import { defineProject } from "vite-plus";
 
-import { testConnectorsFile } from "./test/global-setup.ts";
+import {
+  testComposioClassesFile,
+  testConnectorsFile,
+} from "./test/global-setup.ts";
 import {
   appClients,
   clients,
@@ -42,8 +45,15 @@ const smokeBindings = Object.fromEntries(
 const testTokenKey = btoa("test-token-key-of-exactly-32-b!!");
 
 export default defineProject({
-  // The tests' connectors: the release's and the sample one (see the setup).
-  resolve: { alias: { "#connectors": testConnectorsFile } },
+  resolve: {
+    alias: {
+      // The tests' connectors: the release's and the sample one (see the
+      // setup).
+      "#connectors": testConnectorsFile,
+      // The classes of the fake Composio's tools, for the release's.
+      "#composio-classes": testComposioClassesFile,
+    },
+  },
   test: {
     // Builds the connectors the tests load, once per run.
     globalSetup: ["./test/global-setup.ts"],
