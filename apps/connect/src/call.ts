@@ -53,7 +53,6 @@ import { isNeverTool } from "./never.ts";
 import { hold, waitingUnder } from "./pending.ts";
 import type { HeldAction } from "./pending.ts";
 import {
-  checkPlaces,
   checkResourceScope,
   composioTool,
   didNothing,
@@ -882,7 +881,6 @@ export const carryOut = async (
   progress.sideEffect = sideEffect;
   requireAllowedEffect(claims, sideEffect);
   checkResourceScope(resource, tool, input);
-  checkPlaces(tool, input);
   if (recovering !== undefined) {
     // Recovered only as the call itself would run now: every check above
     // has passed again (the capability core signed for this caller now,

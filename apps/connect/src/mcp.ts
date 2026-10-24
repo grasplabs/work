@@ -48,11 +48,6 @@ export interface McpTool {
   resourceField: string | undefined;
   /** The properties its input schema declares, if it declares any. */
   inputProperties: readonly string[] | undefined;
-  /**
-   * The only values its resource property may hold, where an admin
-   * pointed it at some places (a Composio tool's rule); absent otherwise.
-   */
-  places?: readonly string[];
 }
 
 /**

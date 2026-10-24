@@ -487,96 +487,6 @@ describe("a Composio tool the admin didn't mark as a read", () => {
   });
 });
 
-describe("a Composio tool the admin pointed at some places", () => {
-  /** A HubSpot connection whose tools the admin pointed at `owner` alone. */
-  const pointed = async (): Promise<string> =>
-    await addConnection({
-      provider: "hubspot",
-      server: `https://backend.composio.dev/v3/mcp/${crypto.randomUUID()}?connected_account_id=ca_1`,
-      tools: JSON.stringify([
-        {
-          name: "HUBSPOT_LIST_CONTACTS",
-          read: true,
-          resource: "owner_id",
-          places: [owner],
-        },
-        {
-          name: "HUBSPOT_CREATE_CONTACT",
-          resource: "owner_id",
-          places: [owner],
-        },
-      ]),
-    });
-
-  it("reads where the admin pointed it, from chat, and refuses a read anywhere else without running it", async () => {
-    const connectionId = await pointed();
-    const inChat = agentFor("user-anna", "agent-chat", "interactive");
-    const inputs: Call["input"][] = [
-      { owner_id: owner, limit: "5" },
-      { owner_id: "owner-8" },
-      // A search across the whole app names no place.
-      { limit: "5" },
-      // Another spelling of the property, which the tool doesn't take.
-      { owner_id: owner, ownerId: "owner-8" },
-      { owner_id: [owner] },
-    ];
-    const ends = await Promise.all(
-      inputs.map(
-        async (input) =>
-          await outcome(
-            callAs(inChat, read(connectionId, "HUBSPOT_LIST_CONTACTS", input), {
-              origin: chatOrigin,
-            })
-          )
-      )
-    );
-    expect({ ends, ran: composio.state.mcp.ran }).toStrictEqual({
-      ends: [
-        "ok",
-        "connect.place_out_of_scope",
-        "connect.place_out_of_scope",
-        "connect.place_out_of_scope",
-        "connect.place_out_of_scope",
-      ],
-      ran: [
-        {
-          tool: "HUBSPOT_LIST_CONTACTS",
-          input: { owner_id: owner, limit: "5" },
-        },
-      ],
-    });
-  });
-
-  it("holds a change where the admin pointed it for its person's card, and refuses one elsewhere before it is held", async () => {
-    const anna = someone();
-    const connectionId = await pointed();
-    const inChat = agentFor(anna.userId, "agent-chat", "interactive");
-    const create = (ownerId: string) => ({
-      ...read(connectionId, "HUBSPOT_CREATE_CONTACT", {
-        owner_id: ownerId,
-        email: "new@acme.test",
-      }),
-      idempotencyKey: crypto.randomUUID(),
-    });
-    const there = await callAs(inChat, create(owner), { origin: chatOrigin });
-    const elsewhere = await outcome(
-      callAs(inChat, create("owner-8"), { origin: chatOrigin })
-    );
-    const pending = await exports.default.listPendingActions(anna);
-    expect({
-      there: there.pending === undefined ? "ran" : "held",
-      elsewhere,
-      pending: pending.map(({ action }) => action),
-      ran: composio.state.mcp.ran,
-    }).toStrictEqual({
-      there: "held",
-      elsewhere: "connect.place_out_of_scope",
-      pending: ["HUBSPOT_CREATE_CONTACT"],
-      ran: [],
-    });
-  });
-});
-
 describe("a call core signs for work that may only read", () => {
   it("reads, and refuses every side effect before it is held, run or replayed", async () => {
     const anna = someone();
@@ -720,21 +630,12 @@ describe("the admin's allowlist, when they connect", () => {
     expect(consent?.detail).not.toHaveProperty("unnamedReadCount");
   });
 
-  it("names only the tools' own input properties as resources, places only in one, and each tool and place once", async () => {
+  it("names only the tools' own input properties as resources, and each tool once", async () => {
     const refused = [
       [{ name: "HUBSPOT_GET_CONTACT", read: true, resource: "owner_id" }],
       [{ name: "HUBSPOT_GET_CONTACT", resource: "contact.id" }],
       [{ name: "HUBSPOT_EXPORT", read: true }],
       ["HUBSPOT_GET_CONTACT", { name: "HUBSPOT_GET_CONTACT", read: true }],
-      // Places are named in a resource property, so they need one.
-      [{ name: "HUBSPOT_GET_CONTACT", read: true, places: ["c-1"] }],
-      [
-        {
-          name: "HUBSPOT_GET_CONTACT",
-          resource: "contact_id",
-          places: ["c-1", "c-1"],
-        },
-      ],
     ];
     const ends = await Promise.all(
       refused.map(async (tools) => await outcome(start(tools)))
