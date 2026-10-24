@@ -22,6 +22,7 @@ export const nativeToolClasses: Readonly<
     "mail.list": "read-own",
     "mail.readAttachment": "read-own",
     "mail.send": "reach-others",
+    "sheets.read": "read-company",
   },
   "microsoft": {
     "calendar.create": "change-own",
