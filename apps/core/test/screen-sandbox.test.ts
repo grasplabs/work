@@ -236,6 +236,46 @@ describe(
       });
     });
 
+    it("read their code from the assets once per isolate, however many builds load them", async () => {
+      // Core's static assets, noting each file read: a fresh binding, so
+      // nothing read before this test is kept for it.
+      const read: string[] = [];
+      const assets: Fetcher = {
+        fetch: async (...args: Parameters<Fetcher["fetch"]>) => {
+          read.push(new URL(new Request(...args).url).pathname);
+          return await env.ASSETS.fetch(...args);
+        },
+        connect: env.ASSETS.connect.bind(env.ASSETS),
+      };
+      const loads = await Promise.all(
+        Array.from({ length: 3 }, async () => ({
+          compiler: await loadAppCompiler(env.LOADER, assets),
+          builder: await startPackageBuilder(env.LOADER, assets),
+        }))
+      );
+      // Each builder loaded from the code kept: it still runs.
+      const inspected = await Promise.all(
+        loads.map(
+          async ({ builder }) =>
+            await callStub(builder, "inspect", [{ limits: {}, packages: [] }])
+        )
+      );
+      expect({
+        files: read
+          .map((file) => file.slice(file.lastIndexOf("/") + 1))
+          .toSorted(),
+        inspected,
+      }).toStrictEqual({
+        files: [
+          "compiler.js",
+          "esbuild.wasm",
+          "kit.json",
+          "package-builder.js",
+        ],
+        inspected: [[], [], []],
+      });
+    });
+
     it("hold both isolates to no outbound at all, the one barrier to the network shown to hold", () => {
       // `subRequests: 0` doesn't stop a fetch on workerd (the control below
       // reaches its outbound with it), and the tests' default outbound
