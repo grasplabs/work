@@ -6,6 +6,7 @@ import type {
   InterviewSaved,
 } from "@grasp-os/shared/interview-links";
 import type { Roster } from "@grasp-os/shared/onboarding";
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
@@ -31,6 +32,18 @@ const dayMs = 24 * 60 * 60 * 1000;
 const isoDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 const sessionKey = z.object({ key: z.string().optional() });
 const staff = { type: "staff", userId: "staff-test" } as const;
+
+/**
+ * Cancels the store's alarm: these tests release links and draw by hand.
+ * The alarm releases and draws whatever is due too, so on a slow run it
+ * can draw a map between a test's own steps, and the links it opens then
+ * aren't the test's to see.
+ */
+const withoutAlarm = async (): Promise<void> => {
+  await runInDurableObject(onboardingStore(env), async (_instance, state) => {
+    await state.storage.deleteAlarm();
+  });
+};
 
 /** A team led by Lea, with Max and Mia, in a fresh onboarding running from `start`. */
 const team = async (start: string) => {
@@ -66,6 +79,7 @@ const team = async (start: string) => {
     { processing: true, assessment: true, council: "none" },
     by
   );
+  await withoutAlarm();
   return ids;
 };
 

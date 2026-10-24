@@ -71,6 +71,8 @@ const typeRules: readonly {
   { action: "connection.offer_changed", type: "config" },
   // An admin turning a class of tools on or off, and for whom.
   { action: "connection.class.changed", type: "config" },
+  // An admin pointing Stephen at a shared mailbox, and for whom.
+  { action: "connection.mailbox.pointed", type: "config" },
   // A connection's tokens stopped working: it needs signing in again.
   { action: "connection.needs_reauth", type: "config" },
   // Connect reading what changed at a connection for workflows' event
@@ -88,7 +90,8 @@ const typeRules: readonly {
   // The onboarding: who works where, the plan, pausing it, the
   // agreements, and the gate that keeps the company out until Grasp's go.
   { action: "onboarding", type: "config" },
-  // An admin adding records to the Playbook the brain is built from.
+  // An admin adding records the brain is built from, and a purge
+  // rewriting a record's words.
   { action: "brain.records", type: "action" },
   // A gap's owner asked (Grasp's), and a person answering or closing it.
   { action: "brain.gap.asked", type: "action" },

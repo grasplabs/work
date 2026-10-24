@@ -6,7 +6,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
-import { createCollection } from "../src/knowledge/collections.ts";
+import { createCollection } from "../src/knowledge/collection-rules.ts";
 import { allEvents } from "./audit-events.ts";
 import { runCron, waitingInOutbox, whileLogDown } from "./cron.ts";
 import { mockIdp } from "./idp.ts";
