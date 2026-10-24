@@ -185,7 +185,7 @@ const gmailCalls: readonly {
   },
   {
     method: "GET",
-    path: /^(?:messages|threads)\/[\w-]{1,128}$/u,
+    path: /^(?:messages|threads)\/(?!send$)[\w-]{1,128}$/u,
     write: false,
   },
   { method: "POST", path: /^messages\/send$/u, write: true },
