@@ -10,15 +10,19 @@ import type {
 import type { Authority } from "@grasp-os/shared/permissions";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import type { ModelBindingBudget } from "@grasp-os/shared/resource-bindings";
-import { and, count, gte, inArray, lt } from "drizzle-orm";
+import { and, asc, count, eq, gte, inArray, lt } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { apps, users, workflowRuns } from "./db/core/schema.ts";
+import { apps, teamMembers, users, workflowRuns } from "./db/core/schema.ts";
 import { personOf } from "./model-admission.ts";
-import { modelLedger } from "./model-ledger.ts";
-import type { LedgerScope, LedgerScopeName } from "./model-ledger.ts";
+import { modelLedger, personTeamsMost } from "./model-ledger.ts";
+import type {
+  LedgerScope,
+  LedgerScopeName,
+  LimitedPerson,
+} from "./model-ledger.ts";
 import { microsPerDollar } from "./model-prices.ts";
 
 // Model budgets, one of the client's rules for model calls (model-rules.ts):
@@ -123,10 +127,32 @@ export interface BudgetInput {
 }
 
 /** The person a call is made by or for, if any. */
-const budgetPersonOf = (input: BudgetInput): string | undefined =>
+export const budgetPersonOf = (input: BudgetInput): string | undefined =>
   // A guest's chat spends the budget of the member it was made for (its
   // share of the requests in flight is its own: model-admission.ts).
   input.trigger.type === "guest" ? input.trigger.invitedBy : personOf(input);
+
+/**
+ * Whose limit, as the company's admins set it (person-limits.ts), a call
+ * made for `person` counts against: them, with the teams core's records
+ * have them in, at most {@link personTeamsMost} (a person in more has
+ * their limit found by those first); none for a call made for nobody.
+ */
+export const limitedPersonOf = async (
+  env: Pick<Env, "DB">,
+  person: string | undefined
+): Promise<LimitedPerson | undefined> => {
+  if (person === undefined) {
+    return undefined;
+  }
+  const rows = await drizzle(env.DB)
+    .select({ teamId: teamMembers.teamId })
+    .from(teamMembers)
+    .where(eq(teamMembers.userId, person))
+    .orderBy(asc(teamMembers.teamId))
+    .limit(personTeamsMost);
+  return { key: person, teams: rows.map(({ teamId }) => teamId) };
+};
 
 const monthPattern = /^\d{4}-(?:0[1-9]|1[0-2])$/u;
 

@@ -1,0 +1,1 @@
+ALTER TABLE `brain_sent` ADD `parent` text;

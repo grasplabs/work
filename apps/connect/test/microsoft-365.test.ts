@@ -34,7 +34,12 @@ import {
   childrenSkipToken,
   ceo,
   financeDrive,
+  flaggedMessage,
   invoicePdf,
+  longBody,
+  longConversationId,
+  longThreadLength,
+  threadConversationId,
   invoices,
   itemAttachmentId,
   itemIds,
@@ -100,6 +105,7 @@ const manifest = connectorManifestSchema.parse(
 /** Input for each mail and calendar tool, but its mailbox. */
 const mailboxInputs: Record<string, Input> = {
   "mail.list": {},
+  "mail.thread": { conversation: threadConversationId },
   "mail.get": { message: messageId(ceo, 1) },
   "mail.readAttachment": {
     message: messageId(ceo, 1),
@@ -377,6 +383,148 @@ describe("the Microsoft 365 connector's mail tools", () => {
       )
     ).resolves.toMatchObject({ error: { code: "invalid" } });
     expect(graph.sent).toHaveLength(2);
+  });
+
+  it("list the flagged messages only, each with its flag and conversation", async () => {
+    const connection = await connected();
+    await expect(
+      outputOf(
+        call(connection, "mail.list", { mailbox: invoices, flaggedOnly: true })
+      )
+    ).resolves.toMatchObject({
+      messages: [
+        {
+          id: messageId(invoices, flaggedMessage),
+          flagStatus: "flagged",
+          conversationId:
+            "AAQkAGE1M2IyNGNmLTI5MTktNDUyZi1iOTVjLTc2ZjI5ZmNmZmQ2MwAQAC3Ym9A=",
+        },
+      ],
+      nextPage: null,
+    });
+    expect(requests()).toMatchObject([
+      {
+        path: `${mailboxPath}/messages`,
+        query: {
+          $filter:
+            "receivedDateTime ge 1900-01-01T00:00:00Z and flag/flagStatus eq 'flagged'",
+          $orderby: "receivedDateTime desc",
+        },
+      },
+    ]);
+    await expect(
+      toolError(
+        call(connection, "mail.list", {
+          mailbox: invoices,
+          search: "invoice",
+          flaggedOnly: true,
+        })
+      )
+    ).resolves.toMatchObject({ error: { code: "invalid" } });
+    expect(graph.sent).toHaveLength(1);
+  });
+
+  it("read a conversation oldest first, Sent Items included, so the last word shows who waits", async () => {
+    const connection = await connected();
+    const result = await resultOf(
+      call(connection, "mail.thread", {
+        mailbox: invoices,
+        conversation: threadConversationId,
+      })
+    );
+    const billing = {
+      name: "Northwind Billing",
+      address: "billing@northwind.example.org",
+    };
+    expect(result).toMatchObject({
+      output: {
+        mailbox: invoices,
+        conversationId: threadConversationId,
+        messages: [
+          { id: messageId(invoices, 101), from: billing },
+          {
+            id: messageId(invoices, 102),
+            from: { address: invoices },
+            to: [billing],
+          },
+          {
+            mailbox: invoices,
+            id: messageId(invoices, 103),
+            conversationId: threadConversationId,
+            from: billing,
+            isRead: false,
+            body: "Message 3 of the conversation about invoice 2026-0041.",
+            bodyCut: false,
+          },
+        ],
+        earlierMessages: false,
+      },
+      provenance: [101, 102, 103].map((n) => messageId(invoices, n)),
+    });
+    // The whole mailbox, not a folder, so the person's own replies count;
+    // each message's own text only, as text.
+    expect(requests()).toMatchObject([
+      {
+        path: `${mailboxPath}/messages`,
+        query: {
+          $filter: `receivedDateTime ge 1900-01-01T00:00:00Z and conversationId eq '${threadConversationId}'`,
+          $orderby: "receivedDateTime desc",
+        },
+        headers: { prefer: 'outlook.body-content-type="text"' },
+      },
+    ]);
+    expect(requests()[0]?.query.$select?.split(",")).toContain("uniqueBody");
+    // A conversation ID can't end the filter's string literal: refused as
+    // input, before anything goes out.
+    await expect(
+      toolError(
+        call(connection, "mail.thread", {
+          mailbox: invoices,
+          conversation: "x' or isRead eq false or id eq 'y",
+        })
+      )
+    ).resolves.toBe("Invalid input: invalid_format at conversation");
+    expect(graph.sent).toHaveLength(1);
+  });
+
+  it("cut a long conversation to its newest messages, and a long body to its bound", async () => {
+    const connection = await connected();
+    const output = z
+      .object({
+        messages: z.array(
+          z.object({
+            id: z.string(),
+            body: z.string().nullable(),
+            bodyCut: z.boolean(),
+          })
+        ),
+        earlierMessages: z.boolean(),
+      })
+      .parse(
+        await outputOf(
+          call(connection, "mail.thread", {
+            mailbox: invoices,
+            conversation: longConversationId,
+          })
+        )
+      );
+    const bound = 25;
+    expect(output.earlierMessages).toBeTruthy();
+    expect(output.messages.map(({ id }) => id)).toStrictEqual(
+      Array.from({ length: bound }, (_, at) =>
+        messageId(invoices, 100 + longThreadLength - bound + 1 + at)
+      )
+    );
+    const last = output.messages.at(-1);
+    expect(last).toMatchObject({ bodyCut: true });
+    // Cut before the emoji whose halves straddle the bound, never between them.
+    expect({
+      straddling: String.fromCodePoint(longBody.codePointAt(7999) ?? 0),
+      body: last?.body,
+    }).toStrictEqual({ straddling: "🧾", body: longBody.slice(0, 7999) });
+    expect(
+      output.messages.slice(0, -1).filter(({ bodyCut }) => bodyCut)
+    ).toStrictEqual([]);
   });
 
   it("get a message with its body as text, and its attachments' metadata", async () => {

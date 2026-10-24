@@ -4,6 +4,7 @@ import type { SQL, SQLWrapper } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
+import { auditedBatch, outboxedWhere } from "../audit-outbox.ts";
 import {
   workflowResourceParams,
   workflowEmittedEvents,
@@ -410,7 +411,26 @@ export const sweepWorkflowStartDetails = async (
     // oxlint-disable-next-line no-await-in-loop -- one bounded batch after another
     await env.CONNECT.dropForEndedRuns({ runs });
   }
-  await db.batch([
+  // The events of those runs still undelivered, which this closes
+  // undelivered: each audited as it is closed (`expiredEvents`).
+  const expiring =
+    dueRows.length === 0
+      ? []
+      : await db
+          .select({
+            id: workflowEmittedEvents.id,
+            runId: workflowEmittedEvents.runId,
+            type: workflowEmittedEvents.type,
+          })
+          .from(workflowEmittedEvents)
+          .where(
+            and(
+              inArray(workflowEmittedEvents.runId, due),
+              isNull(workflowEmittedEvents.deliveredAt),
+              isNull(workflowEmittedEvents.detailsRemovedAt)
+            )
+          );
+  await auditedBatch(env, db, [
     // A start's run has its receipt's ID (resource-runs.ts).
     ...attemptsPruned(db, due, now),
     // Its own files go with its details (GRA-724): marked here, their
@@ -428,6 +448,24 @@ export const sweepWorkflowStartDetails = async (
     // still undelivered then is closed undelivered, as expired with its
     // details, never delivered later without its data: its
     // `delivered_at` set with `details_removed_at` says which it was.
+    // Each such is audited as it is, never lost without a record: before
+    // the change, while it still is undelivered, so once however many
+    // sweeps race.
+    ...expiring.map((event) =>
+      outboxedWhere(
+        db,
+        {
+          actor: { type: "system" },
+          action: "workflow.event.expired",
+          target: { type: "workflow_run", id: event.runId },
+          detail: { event: event.id, type: event.type, delivered: false },
+        },
+        sql`EXISTS (SELECT 1 FROM ${workflowEmittedEvents}
+          WHERE ${workflowEmittedEvents.id} = ${event.id}
+            AND ${workflowEmittedEvents.deliveredAt} IS NULL
+            AND ${workflowEmittedEvents.detailsRemovedAt} IS NULL)`
+      )
+    ),
     db
       .update(workflowEmittedEvents)
       .set({

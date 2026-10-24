@@ -225,7 +225,8 @@ const toolFor = async (
  * tool comes from its manifest, and its server (an isolate, with the
  * connection's token for its egress) is only opened once the call passed
  * every check. A Composio server is asked for its tools, and only for one
- * its admin allowed, which is what the admin's rule says it is.
+ * its admin allowed and Grasp classed, which is what its class and the
+ * admin's rule say it is.
  */
 const actionFor = async (
   env: Env,
@@ -257,8 +258,8 @@ const actionFor = async (
         ),
     };
   }
-  // Only a tool the admin allowed, asked for before anything goes out,
-  // and taken to be what the admin said it is.
+  // Only a tool the admin allowed and Grasp classed, asked for before
+  // anything goes out, and taken to be what its class and the admin say.
   const rule = allowedTool(connection, action);
   if (rule === undefined) {
     throw connectErrors.create("connect.action_not_found");

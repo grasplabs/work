@@ -521,6 +521,7 @@ describe("a native connector", () => {
       "excel.listRows": "read-company",
       "excel.addRow": "change-company",
       "excel.updateRow": "change-company",
+      "mail.thread": "read-company",
     });
     expect(classesOf("google-workspace")).toStrictEqual({
       "mail.list": "read-own",

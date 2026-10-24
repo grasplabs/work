@@ -5,6 +5,7 @@ import type {
   ChatPartial,
   ChatPartialUpdate,
   ChatProvenance,
+  ChatToolEvent,
   ChatUpdate,
 } from "@grasp-os/shared/chat";
 
@@ -111,6 +112,8 @@ export class ChatWatch {
   readonly #drop: () => void;
   /** Stored messages this watcher hasn't had yet, oldest first. */
   readonly #unsent: ChatMessage[] = [];
+  /** Calls of the chat's code this watcher hasn't had yet, oldest first. */
+  readonly #unsentTools: ChatToolEvent[] = [];
   /** The response being written, as this watcher has it. */
   #shown: ChatPartial | null = null;
   /** The running step's output, as this watcher has it; `undefined` before its first update. */
@@ -133,9 +136,16 @@ export class ChatWatch {
     this.#drop = drop;
   }
 
-  /** Sends the watcher `messages`, and the chat as it is when it goes out. */
-  push(messages: readonly ChatMessage[] = []): void {
+  /**
+   * Sends the watcher `messages` and the calls of its code `tools`, and the
+   * chat as it is when it goes out.
+   */
+  push(
+    messages: readonly ChatMessage[] = [],
+    tools: readonly ChatToolEvent[] = []
+  ): void {
     this.#unsent.push(...messages);
+    this.#unsentTools.push(...tools);
     this.#changed = true;
     void this.#flush();
   }
@@ -150,10 +160,12 @@ export class ChatWatch {
       drafts,
       provenanceVersion,
     } = this.#state();
+    const tools = this.#unsentTools.splice(0);
     const update: ChatUpdate = {
       messages: this.#unsent.splice(0),
       partial: partialUpdate(this.#shown, partial),
       ...outputChange(this.#shownOutput, output),
+      ...(tools.length === 0 ? {} : { tools }),
       running,
       stopped,
       held,
@@ -189,6 +201,7 @@ export class ChatWatch {
   [Symbol.dispose](): void {
     this.#changed = false;
     this.#unsent.length = 0;
+    this.#unsentTools.length = 0;
     this.#listener[Symbol.dispose]();
   }
 }

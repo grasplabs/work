@@ -1492,6 +1492,46 @@ export default workflow("reading", { params: {}, input: z.unknown() }, async (st
     });
   });
 
+  it("reviews a version's tests as they ran, not as results rewritten in R2's cache say", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const { id: app } = await builder.api.apps.create({ name: "Invoices" });
+    const failing = invoices(500, false);
+    const { version } = await builder.api.apps.files.commit(
+      app,
+      {
+        ...failing,
+        "workflows/invoices.workflow-tests.ts": failing[
+          "workflows/invoices.workflow-tests.ts"
+        ].replace("expect: { output: 1 }", "expect: { output: 2 }"),
+      },
+      "Fails its tests"
+    );
+    const ran = await builder.api.apps.versions.review(app, version);
+    // Rewritten to pass, as someone who can write to the bucket but doesn't
+    // hold core's secret could, keeping what each was written with.
+    const page = await env.FILES.list({
+      prefix: `apps/${app}/tests/`,
+      include: ["customMetadata"],
+    });
+    await Promise.all(
+      page.objects.map(async ({ key, customMetadata }) => {
+        await env.FILES.put(
+          key,
+          JSON.stringify({ status: "passed", failures: [] }),
+          customMetadata === undefined ? {} : { customMetadata }
+        );
+      })
+    );
+
+    const reviewed = await builder.api.apps.versions.review(app, version);
+
+    expect({
+      ran: ran.tests.status,
+      rewrote: page.objects.length,
+      reviewed: reviewed.tests.status,
+    }).toStrictEqual({ ran: "failed", rewrote: 1, reviewed: "failed" });
+  });
+
   it("reviews what a version changes against the current one, for its builders only", async () => {
     const builder = await signedInApi(idp, "builder");
     const user = await signedInApi(idp, "user");
@@ -2073,17 +2113,24 @@ export default workflowTests(definition, [{ name: "runs", mocks: { save: 1 }, ex
     const [latest] = await builder.api.apps.versions.list(app);
     const kept = `apps/${app}/tests/${latest?.tree ?? ""}-${compilerVersion}.json`;
 
-    await builder.api.apps.versions.review(app, 1);
-    // What the first review kept is what the next one reads.
-    await expect(env.FILES.get(kept)).resolves.not.toBeNull();
-    await env.FILES.put(
-      kept,
-      JSON.stringify({ status: "failed", failures: ["kept"] })
-    );
-    await expect(
-      builder.api.apps.versions.review(app, 1)
-    ).resolves.toMatchObject({
-      tests: { status: "failed", failures: ["kept"] },
+    const first = await builder.api.apps.versions.review(app, 1);
+    const keptFirst = await env.FILES.head(kept);
+    const second = await builder.api.apps.versions.review(app, 1);
+    // What the first review kept is what the next one reads: running the
+    // tests again would have kept their results again.
+    const keptSecond = await env.FILES.head(kept);
+
+    expect({
+      reviewed: [first.tests, second.tests],
+      kept: keptFirst !== null,
+      keptAgain: keptSecond?.version !== keptFirst?.version,
+    }).toStrictEqual({
+      reviewed: [
+        { status: "passed", failures: [] },
+        { status: "passed", failures: [] },
+      ],
+      kept: true,
+      keptAgain: false,
     });
   });
 });

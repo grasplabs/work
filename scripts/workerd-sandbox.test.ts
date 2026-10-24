@@ -750,6 +750,45 @@ describe("the sandbox supervisor", () => {
     });
   }, 30_000);
 
+  it.each([
+    [
+      "aborts without V8's heap limit line, as one refused memory under strict overcommit does",
+      "kill -ABRT $child\nwait $child\nexit $?",
+    ],
+    [
+      "exits with a status of its own without V8's heap limit line, as one out of file descriptors does",
+      "kill -9 $child\nwait $child\nexit 1",
+    ],
+  ])(
+    "says a call crashed, never its memory, when its process %s",
+    async (_how, end) => {
+      // workerd behind a shell that ends it three seconds in, mid-call, as
+      // the host's own trouble would: never through the call's heap.
+      const ended = path.join(tempDir(), "ended-by-the-host.sh");
+      writeFileSync(
+        ended,
+        `#!/bin/sh\n"${nativeWorkerd}" "$@" &\nchild=$!\nsleep 3\n${end}\n`
+      );
+      chmodSync(ended, 0o755);
+      await withSupervisor({ workerd: ended }, async (supervisor) => {
+        const result = await callSupervisor(supervisor.socket, {
+          body: "for (;;) {}",
+          deadlineMs: 20_000,
+        });
+        expect({
+          result: { status: result.status, verdict: result.verdict },
+          crashed: supervisor.stats().crashed,
+          memory: supervisor.stats().memory,
+        }).toStrictEqual({
+          result: { status: 200, verdict: "crashed" },
+          crashed: 1,
+          memory: 0,
+        });
+      });
+    },
+    30_000
+  );
+
   it("ends at once, as its bound, a call whose host dropped it and still runs", async () => {
     // Its memory past its limit half a second after the drop: the
     // supervisor doesn't wait out a process that won't go.

@@ -49,6 +49,12 @@ export const onboarding = sqliteTable(
      * (`setupChoicesSchema`), or `null` before anything.
      */
     choices: text(),
+    /**
+     * The teams and people new on a list the admin saved while a plan was
+     * set, as JSON (`unconfirmedSchema`): their links wait until the admin
+     * confirms the organization. `null` while nothing waits.
+     */
+    unconfirmed: text(),
   },
   (table) => [check("onboarding_one_row", sql`${table.id} = 1`)]
 );
@@ -361,6 +367,11 @@ export const brainSent = sqliteTable(
     type: text().notNull(),
     team: text().notNull(),
     person: text().notNull(),
+    /**
+     * The record it belongs to: a drawing's workflow, which goes once none
+     * of its drawings is left. None for anything else.
+     */
+    parent: text(),
   },
   (table) => [
     primaryKey({ columns: [table.record, table.person] }),
