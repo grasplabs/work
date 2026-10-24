@@ -44,7 +44,7 @@ interface AlertKind {
 }
 
 /** Every kind of alert's name. */
-export type AlertKindName = "test";
+export type AlertKindName = "test" | "teams_bot_secret_expiring";
 
 /** Every kind of alert, by name. */
 export const alertKinds: Readonly<Record<AlertKindName, AlertKind>> = {
@@ -54,14 +54,49 @@ export const alertKinds: Readonly<Record<AlertKindName, AlertKind>> = {
     words: () => "A test from the admin: staff alerts reach this channel.",
     windowMs: 60 * 1000,
   },
+  /**
+   * Its Teams bot's secret runs out soon (src/clients/teams-bot-expiry.ts):
+   * `days` left, none or fewer once it has. Sent once for each stage of
+   * each expiry day, which its subject names.
+   */
+  teams_bot_secret_expiring: {
+    title: "Teams bot secret expiring",
+    words: ({ days = 0 }) => {
+      const action =
+        "Mint a new client secret for its bot in its own Entra and set it on its Setup, with the day it expires.";
+      if (days > 1) {
+        return `Its Teams bot's secret expires in ${days} days. ${action}`;
+      }
+      if (days === 1) {
+        return `Its Teams bot's secret expires tomorrow. ${action}`;
+      }
+      if (days === 0) {
+        return `Its Teams bot's secret expires today: Stephen stops answering in Teams once it has. ${action}`;
+      }
+      return `Its Teams bot's secret has expired: Stephen can't answer in Teams. ${action}`;
+    },
+    // Each stage of an expiry day is its own subject: once is enough.
+    windowMs: 400 * 24 * 60 * 60 * 1000,
+  },
 };
 
 /** An alert about client `clientId`. */
 export interface StaffAlert {
   clientId: string;
   kind: AlertKindName;
+  /**
+   * What of the client it's about, when one kind can be about several
+   * things in turn, such as the stage of a secret's expiry: alerts of
+   * another subject aren't held back by this one's. An identifier, never
+   * shown.
+   */
+  subject?: string;
   numbers?: AlertNumbers;
 }
+
+/** What `alert` is held back by: its kind, and its subject if it has one. */
+const heldBy = ({ kind, subject }: StaffAlert): string =>
+  subject === undefined ? kind : `${kind}/${subject}`;
 
 /** What became of an alert. */
 export type AlertOutcome =
@@ -96,14 +131,14 @@ const alertsWebhook = async (env: Env): Promise<URL | null> => {
  */
 const claim = async (
   env: Env,
-  { clientId, kind }: StaffAlert,
+  alert: StaffAlert,
   now: Date
 ): Promise<boolean> => {
   const db = adminDatabase(env.DB);
-  const since = now.getTime() - alertKinds[kind].windowMs;
+  const since = now.getTime() - alertKinds[alert.kind].windowMs;
   const claimed = await db
     .insert(staffAlerts)
-    .values({ clientId, kind, sentAt: now })
+    .values({ clientId: alert.clientId, kind: heldBy(alert), sentAt: now })
     .onConflictDoUpdate({
       target: [staffAlerts.clientId, staffAlerts.kind],
       set: { sentAt: now },
@@ -116,7 +151,7 @@ const claim = async (
 /** Gives back the claim of `alert` made at `at`, unless a later one replaced it. */
 const release = async (
   env: Env,
-  { clientId, kind }: StaffAlert,
+  alert: StaffAlert,
   at: Date
 ): Promise<void> => {
   const db = adminDatabase(env.DB);
@@ -124,8 +159,8 @@ const release = async (
     .delete(staffAlerts)
     .where(
       and(
-        eq(staffAlerts.clientId, clientId),
-        eq(staffAlerts.kind, kind),
+        eq(staffAlerts.clientId, alert.clientId),
+        eq(staffAlerts.kind, heldBy(alert)),
         eq(staffAlerts.sentAt, at)
       )
     );
