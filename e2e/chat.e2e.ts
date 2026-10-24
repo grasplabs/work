@@ -418,7 +418,7 @@ test("one control picks the model and how hard it thinks, sends both with the qu
   await page.goto("/");
   const control = page.getByRole("button", { name: /^Model: /u });
 
-  // The default model doesn't think: the control names it alone.
+  // The stack's first model doesn't think: the control names it alone.
   await expect(control).toHaveAccessibleName(
     "Model: llama-3.3-70b-instruct-fp8-fast. Change model"
   );

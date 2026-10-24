@@ -2,7 +2,15 @@ import { defineConfig, devices } from "@playwright/test";
 
 import { localSignIn } from "./apps/core/test/sign-in-config.ts";
 import { testAuthSecret, testCapabilityKey } from "./e2e/people.ts";
-import { corePort, idpOrigin, idpPort, origin, stateDir } from "./e2e/stack.ts";
+import {
+  corePort,
+  e2eModel,
+  e2eThinkingModel,
+  idpOrigin,
+  idpPort,
+  origin,
+  stateDir,
+} from "./e2e/stack.ts";
 
 /**
  * What the browser's own sandbox and policy hold, run in every browser
@@ -42,15 +50,6 @@ const packageApprovalTests = /(?:dashboard|engine-packages|inbox)\.e2e\.ts$/u;
  */
 const adminTests = /\/e2e\/admin\//u;
 const ci = process.env.CI === "true";
-
-/**
- * The models the stack's gateway allows: the default, which doesn't think,
- * and one that does, so the composer offers how hard it thinks. `--local`
- * reaches no AI Gateway, so a call to either fails: the chat test
- * (e2e/chat.e2e.ts) shows that failure.
- */
-const e2eModel = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
-const e2eThinkingModel = "workers-ai/@cf/zai-org/glm-5.3-flash";
 
 /** A `--var` for wrangler dev, quoted once for the shell. */
 const devVar = (name: string, value: string): string =>

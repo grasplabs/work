@@ -42,6 +42,7 @@ import { deadline } from "@grasp-os/shared/deadline";
 import type { Deadline, Stopped } from "@grasp-os/shared/deadline";
 import {
   defaultGatewayModels,
+  defaultRoleModels,
   modelGatewayConfigSchema as gatewayConfigSchema,
   modelRulesConfigSchema as rulesConfigSchema,
 } from "@grasp-os/shared/deployment-config";
@@ -358,8 +359,9 @@ export const gatewaySettings = (
 /**
  * The model for `role` (`MODEL_GATEWAY`'s `roles`), for a call that
  * carries sensitive data when `sensitive` is set: the one the deployment
- * named, or, for a role it left out, the first allowed model the rules let
- * the call use. `undefined` when there is none, and when the rules refuse
+ * named, or, for a role it left out, the role's default
+ * ({@link defaultRoleModels}) where it is allowed and the rules let the
+ * call use it, else the first allowed model they let it use. `undefined` when there is none, and when the rules refuse
  * the named model: a role never falls back to a model the deployment
  * didn't name for it. The gateway checks the rules again either way.
  */
@@ -375,7 +377,12 @@ export const modelForRole = (
     (rules?.eu?.deployment !== true || rules.eu.models.includes(model));
   const named = roles[role];
   if (named === undefined) {
-    return allowed.find(fits);
+    const fallback = defaultRoleModels[role];
+    return fallback !== undefined &&
+      allowed.includes(fallback) &&
+      fits(fallback)
+      ? fallback
+      : allowed.find(fits);
   }
   if (!fits(named)) {
     log.error("model.role_refused", { role, model: named });
