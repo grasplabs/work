@@ -25,6 +25,13 @@
  *   removed people and people Grasp doesn't know each get one line, in
  *   the language their app is set to, and nothing they wrote is read.
  *   The lines go out through connect like every send.
+ * - One of the client's own people Grasp hasn't seen yet (Teams' roster
+ *   says they are of the client's tenant, and no guest) is sent a link to
+ *   the deployment's own sign-in, once a day: it carries no token and
+ *   binds nothing, as their sign-in's ID token names them by the object
+ *   id their messages carry. Their first question is kept for the hour,
+ *   and answered with their next message once they have signed in.
+ *   Nobody from outside the tenant is ever sent the link.
  *
  * Only a member's message in their own private chat with the bot reaches
  * the Chat SDK, with who they are, and its conversation is kept
@@ -111,6 +118,21 @@ const messageRate = { burst: 10, perMinute: 20 };
 /** How often a person over the limit is told so: once a minute. */
 const toldRate = { burst: 1, perMinute: 1 };
 
+/** How often someone Grasp hasn't seen is sent the sign-in link: once a day. */
+const signInEveryMs = 24 * 60 * 60 * 1000;
+
+/** How long a newcomer's first question waits for their sign-in. */
+const keptMs = 60 * 60 * 1000;
+
+/** The longest question kept: what a chat message holds, near enough. */
+const maxKeptChars = 4000;
+
+/** The web's sign-in page (apps/web/src/routes/sign-in.tsx). */
+const signInPath = "/sign-in";
+
+/** Where a newcomer's first question waits, by their object id. */
+const keptKey = (oid: string): string => `door:teams:kept:${oid}`;
+
 /** How long the door remembers a message it took, to take a resend once. */
 const seenTtlMs = 24 * 60 * 60 * 1000;
 
@@ -130,9 +152,14 @@ type DoorLine =
   | "removed"
   | "signIn";
 
-/** A Teams activity, as far as the door reads it: never its text. */
+/**
+ * A Teams activity, as far as the door reads it. Its text is read only to
+ * keep the first question of one of the client's people Grasp hasn't seen
+ * yet, for after their sign-in.
+ */
 const activitySchema = z.object({
   type: z.string(),
+  text: z.string().optional(),
   id: z.string().min(1).max(256).optional(),
   serviceUrl: z.string(),
   locale: z.string().max(64).optional(),
@@ -160,6 +187,11 @@ export interface ChannelMessage {
   userId: string;
   thread: Thread;
   message: Message;
+  /**
+   * What they asked before Grasp knew them, kept since their first
+   * message, to be answered first: once, within the hour.
+   */
+  kept?: string;
 }
 
 /** What takes a member's message on from the door. */
@@ -182,8 +214,14 @@ const keepConversation = async (
     });
 };
 
-/** Sends one of Stephen's lines to the conversation `activity` came from. */
+/**
+ * Sends one of Stephen's lines to the conversation `activity` came from:
+ * for someone who should sign in, with a button to the deployment's own
+ * sign-in page. The link carries nothing of theirs and binds nothing: the
+ * sign-in's ID token names them, by the object id their messages carry.
+ */
 const sendLine = async (
+  env: Env,
   adapter: ConnectedTeamsAdapter,
   activity: Activity,
   line: DoorLine
@@ -193,8 +231,15 @@ const sendLine = async (
     serviceUrl: activity.serviceUrl,
     conversationType: activity.conversation.conversationType,
   });
+  const locale = localeOf(activity.locale);
+  const origin = signInConfig(env)?.origin;
   try {
-    await adapter.postMessage(threadId, say(line, localeOf(activity.locale)));
+    await adapter.postMessage(
+      threadId,
+      line === "signIn" && origin !== undefined
+        ? signInCard({ locale, url: `${origin}${signInPath}` })
+        : say(line, locale)
+    );
   } catch (error) {
     log.warn("channel.line_failed", {
       platform: "teams",
@@ -236,6 +281,40 @@ const unknownLine = async (
 };
 
 /**
+ * One of the client's own people Grasp hasn't seen: their first question
+ * kept for the hour, and the sign-in link once a day, nothing in between.
+ */
+const newcomer = async (
+  state: StateAdapter,
+  activity: Activity,
+  oid: string
+): Promise<{ line?: DoorLine }> => {
+  const text = activity.text?.trim().slice(0, maxKeptChars) ?? "";
+  if (text !== "") {
+    await state.setIfNotExists(keptKey(oid), text, keptMs);
+  }
+  const offered = await state.setIfNotExists(
+    `door:teams:sign-in:${oid}`,
+    true,
+    signInEveryMs
+  );
+  return offered ? { line: "signIn" } : {};
+};
+
+/** What a member asked before Grasp knew them, if it is still kept: taken once. */
+const keptQuestion = async (
+  state: StateAdapter,
+  oid: string
+): Promise<string | undefined> => {
+  const kept = await state.get<string>(keptKey(oid));
+  if (kept === null) {
+    return undefined;
+  }
+  await state.delete(keptKey(oid));
+  return kept;
+};
+
+/**
  * What the door does with a message before the Chat SDK sees it: the line
  * it sends and nothing more, or the member it is from.
  */
@@ -244,7 +323,7 @@ const gate = async (
   state: StateAdapter,
   adapter: ConnectedTeamsAdapter,
   activity: Activity
-): Promise<{ line?: DoorLine; userId?: string }> => {
+): Promise<{ line?: DoorLine; userId?: string; kept?: string }> => {
   // A message without an id can't be told from its resends: dropped.
   if (activity.id === undefined) {
     return {};
@@ -270,16 +349,20 @@ const gate = async (
   if (activity.from.aadObjectId === undefined) {
     return { line: "otherCompany" };
   }
-  const writer = await writerOf(env, "teams", activity.from.aadObjectId);
+  const oid = activity.from.aadObjectId;
+  const writer = await writerOf(env, "teams", oid);
   switch (writer.kind) {
     case "member": {
-      return { userId: writer.userId };
+      return { userId: writer.userId, kept: await keptQuestion(state, oid) };
     }
     case "removed": {
       return { line: "removed" };
     }
     case "unknown": {
-      return { line: await unknownLine(env, adapter, activity) };
+      const line = await unknownLine(env, adapter, activity);
+      return line === "signIn"
+        ? await newcomer(state, activity, oid)
+        : { line };
     }
     default: {
       return writer satisfies never;
@@ -512,9 +595,9 @@ export const channelResponse = async (
   const activity = parsed.data;
   const state = durableObjectState(inJurisdiction(env, env.CHAT_STATE));
   const adapter = teamsAdapter(env, teamsKeys);
-  const { line, userId } = await gate(env, state, adapter, activity);
+  const { line, userId, kept } = await gate(env, state, adapter, activity);
   if (line !== undefined) {
-    ctx.waitUntil(sendLine(adapter, activity, line));
+    ctx.waitUntil(sendLine(env, adapter, activity, line));
   }
   if (userId === undefined) {
     return new Response(null, { status: 200 });
@@ -532,7 +615,7 @@ export const channelResponse = async (
   const takeOn = handoff ?? answerInChat(env);
   chat.onDirectMessage(async (thread, message) => {
     await keepConversation(env, platform, thread.id, userId);
-    await takeOn({ platform, userId, thread, message });
+    await takeOn({ platform, userId, thread, message, kept });
   });
   // Answered at once: the platform gives up on a webhook long before an
   // answer is ready, and sends it again. The message is handled after,
