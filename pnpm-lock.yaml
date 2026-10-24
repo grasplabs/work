@@ -726,6 +726,9 @@ importers:
         specifier: 'catalog:'
         version: 4.6.5
     devDependencies:
+      '@cloudflare/vitest-pool-workers':
+        specifier: 'catalog:'
+        version: 0.22.0(patch_hash=1b5827a778f33949505b9ea8d43d71a1167964cc97e3ebf8eabf235c657d1323)(@cloudflare/workers-types@5.20261012.1)(@types/node@26.6.2)(@vitest/runner@4.1.11)(@vitest/snapshot@4.1.11)(vitest@4.1.11)
       '@cloudflare/workers-types':
         specifier: 'catalog:'
         version: 5.20261012.1
