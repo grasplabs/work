@@ -17,7 +17,7 @@ import {
 import { Input } from "@grasp-os/ui/components/input";
 import { Textarea } from "@grasp-os/ui/components/textarea";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { Link } from "@tanstack/react-router";
+import { Link, useRouter } from "@tanstack/react-router";
 import { CircleCheckIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
@@ -205,6 +205,7 @@ const RequestFlow = ({
   const { t } = useLingui();
   const core = useCore();
   const { busy, failure, run } = useCoreAction();
+  const router = useRouter();
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
   const [why, setWhy] = useState("");
@@ -257,6 +258,9 @@ const RequestFlow = ({
     );
     if (result !== undefined) {
       setSent(true);
+      // The page reads its requests again, so the new one shows under
+      // Requested, where "Forwarded to our team" says to find it.
+      await router.invalidate();
     }
   };
   if (sent) {
