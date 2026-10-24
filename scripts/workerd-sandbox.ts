@@ -22,12 +22,16 @@
  *   a top-level session of an owner in `platformOwners` may ask, and only
  *   core reaches this supervisor.
  *   Should V8 reach its own heap limit first, it aborts the process: a
- *   process that dies during its one call is that call's doing, refused as
- *   the App's too, never an outage it could fake. Ended by itself (its exit
- *   status or V8's abort says so) it is the call's memory, which only the
- *   call reaches; killed from outside (SIGKILL from the kernel's OOM killer, which a
- *   full cgroup sends to whichever process it picks) it is `crashed`,
- *   which load can cause, so core doesn't keep it as the input's verdict.
+ *   process that dies during its one call is refused as the App's too,
+ *   never an outage it could fake. Ended by itself (its exit status or
+ *   V8's abort says so) with V8's line that its heap reached its limit,
+ *   it is the call's memory, which only the call reaches. Otherwise it is
+ *   `crashed`, which load can cause, so core doesn't keep it as the
+ *   input's verdict: killed from outside (SIGKILL from the kernel's OOM
+ *   killer, which a full cgroup sends to whichever process it picks), or
+ *   an abort that isn't the heap's (V8 refused memory under strict
+ *   overcommit, workerd out of file descriptors). Only workerd writes
+ *   that line: the isolates are silenced (below).
  * - Someone local bypasses the supervisor, or floods it. The supervisor and
  *   every process listen only on Unix sockets in a directory it creates
  *   with mode 0700: no TCP port, nothing another user can reach. Calls in
@@ -394,6 +398,14 @@ const listens = async (
   return false;
 };
 
+/** What a workerd process wrote to its error output, as far as it was read. */
+interface ProcessOutput {
+  /** Whether V8 said the process's heap reached its limit. */
+  heapLimit: boolean;
+  /** Settles once all of it was read: the process closed it. */
+  read: Promise<void>;
+}
+
 /** One workerd process serving the sandbox host. */
 interface HostProcess {
   child: ChildProcess;
@@ -402,6 +414,7 @@ interface HostProcess {
   /** Settles once it's gone, however it went. */
   exited: Promise<void>;
   gone: boolean;
+  output: ProcessOutput;
 }
 
 /** Kills `pid`'s whole process group at once; never without a positive ID. */
@@ -440,25 +453,79 @@ const ownSignalStatuses = new Set([
 ]);
 
 /**
- * What a process that died during its one call says of it. `exited` when
- * it ended itself: workerd exits with a status of its own when V8 reaches
- * its heap limit (status 1 on the workerd built here), or V8 aborts it,
- * either way through nothing but the call it ran, so the input's doing
- * whatever the load. `crashed` when a signal from outside killed it,
- * above all SIGKILL from the kernel's OOM killer, which a full cgroup
- * sends to whichever process it picks: the load's doing.
+ * The line workerd writes as V8 ends it at its heap limit, as
+ * `workerd/jsg/setup.c++:38: fatal: V8 fatal error; location = Reached
+ * heap limit; message = : allocation failed: JavaScript heap out of
+ * memory`. V8 failing to get memory from the system says "process out of
+ * memory" instead: the host's doing, not the heap's.
  */
-const deathOf = (child: ChildProcess): "exited" | "crashed" => {
+const heapLimitLine =
+  /fatal: V8 fatal error;.*(?:JavaScript heap out of memory|heap limit)/u;
+
+/**
+ * Reads what workerd writes to its error output, line by line, passing
+ * each on to the supervisor's own (where it went before it was read
+ * here), and notes V8's heap limit line among them.
+ */
+const watchOutput = (stream: Readable | null): ProcessOutput => {
+  const output: ProcessOutput = { heapLimit: false, read: Promise.resolve() };
+  if (stream === null) {
+    return output;
+  }
+  const lines = createInterface({ input: stream, crlfDelay: Infinity });
+  lines.on("line", (line) => {
+    process.stderr.write(`${line}\n`);
+    if (heapLimitLine.test(line)) {
+      output.heapLimit = true;
+    }
+  });
+  output.read = (async () => {
+    try {
+      await once(lines, "close");
+    } catch {
+      // Closed by an error: read as far as it went.
+    }
+  })();
+  return output;
+};
+
+/**
+ * The longest to wait, once a process is gone, for the rest of what it
+ * wrote: its pipe closes as it exits, so this is only a backstop.
+ */
+const outputReadMs = 1000;
+
+/**
+ * What a process that died during its one call says of it. `exited` when
+ * it ended itself and V8 said its heap reached its limit: workerd exits
+ * with a status of its own then (status 1 on the workerd built here), or
+ * V8 aborts it, either way through nothing but the call it ran, so the
+ * input's doing whatever the load. `crashed` otherwise: a signal from
+ * outside killed it, above all SIGKILL from the kernel's OOM killer,
+ * which a full cgroup sends to whichever process it picks; or it aborted
+ * for a reason of the host's, V8 refused memory under strict overcommit
+ * or workerd out of file descriptors. Either is the load's doing.
+ */
+const deathOf = (
+  child: ChildProcess,
+  output: Pick<ProcessOutput, "heapLimit">
+): "exited" | "crashed" => {
   const { signalCode, exitCode } = child;
-  if (signalCode !== null) {
-    return ownSignals.has(signalCode) ? "exited" : "crashed";
-  }
-  if (exitCode === null || exitCode === 0) {
-    return "crashed";
-  }
-  return exitCode < signalStatus || ownSignalStatuses.has(exitCode)
-    ? "exited"
-    : "crashed";
+  const ownEnd =
+    signalCode === null
+      ? exitCode !== null &&
+        exitCode !== 0 &&
+        (exitCode < signalStatus || ownSignalStatuses.has(exitCode))
+      : ownSignals.has(signalCode);
+  return ownEnd && output.heapLimit ? "exited" : "crashed";
+};
+
+/** How `host` died during its call, once what it wrote has been read. */
+const hostDeathOf = async (
+  host: HostProcess
+): Promise<"exited" | "crashed"> => {
+  await Promise.race([host.output.read, sleep(outputReadMs)]);
+  return deathOf(host.child, host.output);
 };
 
 /**
@@ -1070,7 +1137,7 @@ class SandboxPool {
       return { kind: reason };
     }
     if (host.gone && !this.#stopping) {
-      return { kind: deathOf(host.child) };
+      return { kind: await hostDeathOf(host) };
     }
     if (reason === "unreadable") {
       return { kind: "unreadable", why: guard.unreadable() };
@@ -1676,7 +1743,7 @@ class SandboxPool {
     // a process slow to go is still the crash it is (`exitWaitMs`).
     await waitForExit(host, exitWaitMs(endsAt));
     if (host.gone && !this.#stopping) {
-      return { kind: deathOf(host.child) };
+      return { kind: await hostDeathOf(host) };
     }
     return { kind: "answered", status: 101, body: Buffer.alloc(0) };
   }
@@ -2027,8 +2094,11 @@ class SandboxPool {
         this.#config,
       ],
       // Its own process group, killed whole (`killGroup`).
-      { detached: true, stdio: ["ignore", "inherit", "inherit", "pipe"] }
+      // Its error output read here for V8's heap limit line
+      // (`watchOutput`), and passed on.
+      { detached: true, stdio: ["ignore", "inherit", "pipe", "pipe"] }
     );
+    const output = watchOutput(child.stderr);
     // Errors after it started (a failed signal) are only logged.
     child.on("error", (error) => {
       this.#settings.log({
@@ -2078,7 +2148,14 @@ class SandboxPool {
       await exited;
       throw new Error("The supervisor stopped while workerd started.");
     }
-    const host: HostProcess = { child, pid, socket, exited, gone: false };
+    const host: HostProcess = {
+      child,
+      pid,
+      socket,
+      exited,
+      gone: false,
+      output,
+    };
     this.#live.add(host);
     this.#settings.log({ event: "sandbox.process_started", pid });
     void this.#watch(host);

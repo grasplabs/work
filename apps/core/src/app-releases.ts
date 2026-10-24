@@ -251,17 +251,29 @@ const verified = new Map<string, Omit<Release, "manifestHash">>();
 /** How many verified releases one isolate keeps. */
 const verifiedMax = 32;
 
-/** Reads an artifact's bytes by their SHA-256: undefined for none. */
+/**
+ * Reads an artifact's bytes by their SHA-256, given how many bytes the
+ * manifest says it has: undefined for none. A reader may answer undefined
+ * for one of another size without reading it.
+ */
 export type ArtifactReader = (
-  sha256: string
+  sha256: string,
+  bytes: number
 ) => Promise<ArrayBuffer | Uint8Array | undefined>;
 
-/** A sealed release's artifacts, as stored: in R2, under their hashes. */
+/**
+ * A sealed release's artifacts, as stored: in R2, under their hashes. One
+ * whose size isn't the manifest's is never read, so an object grown in R2
+ * costs no memory before it is refused.
+ */
 const storedArtifacts =
   (env: Env): ArtifactReader =>
-  async (sha256) => {
+  async (sha256, bytes) => {
     const object = await env.FILES.get(artifactKey(sha256));
-    return object === null ? undefined : await object.arrayBuffer();
+    if (object !== null && object.size !== bytes) {
+      await object.body.cancel();
+    }
+    return object?.size === bytes ? await object.arrayBuffer() : undefined;
   };
 
 /**
@@ -301,7 +313,7 @@ const artifactText = async (
   read: ArtifactReader,
   entry: ReleaseArtifact
 ): Promise<string> => {
-  const bytes = await read(entry.sha256);
+  const bytes = await read(entry.sha256, entry.bytes);
   if (
     bytes === undefined ||
     bytes.byteLength !== entry.bytes ||

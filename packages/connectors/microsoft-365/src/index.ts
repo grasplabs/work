@@ -3,16 +3,23 @@ import { defineConnector } from "@grasp-os/connector-kit/connector";
 import { calendarTools } from "./calendar.ts";
 import { fileTools } from "./files.ts";
 import { graphHost } from "./graph.ts";
+import { listTools } from "./lists.ts";
+import { mailReplyTools } from "./mail-replies.ts";
+import { mailSortingTools } from "./mail-sorting.ts";
 import { mailTools } from "./mail.ts";
+import { todoTools } from "./todo.ts";
+import { workbookTools } from "./workbook.ts";
 
 /**
  * Native Microsoft 365 connector, on Microsoft Graph: mail and calendars
- * of one mailbox per call, and files in OneDrive and SharePoint, one drive
- * per call.
+ * of one mailbox per call, a person's own Microsoft To Do, files in
+ * OneDrive and SharePoint, one drive
+ * per call, SharePoint lists, one site per call, and the rows of a named
+ * table in an Excel workbook, one workbook per call.
  */
 export default defineConnector({
   name: "microsoft-365",
-  version: "0.2.0",
+  version: "0.3.0",
   provider: "microsoft",
   scopes: [
     "User.Read",
@@ -20,11 +27,27 @@ export default defineConnector({
     "Mail.ReadWrite.Shared",
     "Mail.Send",
     "Mail.Send.Shared",
+    // The categories a person has, so mail.categorise sets only those.
+    "MailboxSettings.Read",
     "Calendars.Read",
+    "Calendars.ReadWrite",
     "Calendars.Read.Shared",
     "Files.Read.All",
+    // Changing a workbook's rows: in the person's own files, and in those
+    // SharePoint lets them change.
+    "Files.ReadWrite.All",
     "Sites.Read.All",
+    "Tasks.ReadWrite",
   ],
   hosts: [graphHost],
-  tools: [...mailTools, ...calendarTools, ...fileTools],
+  tools: [
+    ...mailTools,
+    ...mailReplyTools,
+    ...mailSortingTools,
+    ...calendarTools,
+    ...fileTools,
+    ...listTools,
+    ...workbookTools,
+    ...todoTools,
+  ],
 });

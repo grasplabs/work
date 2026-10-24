@@ -17,6 +17,7 @@ import {
 import {
   appScreen,
   callFunction,
+  failureOf,
   fileRefusal,
   openPreview,
   previewTarget,
@@ -482,6 +483,24 @@ describe("a running screen's drafts once core refuses the person", () => {
     for (const cleanup of cleanups) {
       cleanup();
     }
+  });
+});
+
+describe("a screen core refuses to open", () => {
+  // As the refusal reaches the page over the connection: its code, with
+  // core's message, never a reason of the page's own.
+  it.each([
+    ["screen.not_found", "not-found"],
+    ["screen.unreviewed", "unreviewed"],
+    ["version.artifact_corrupt", "corrupt"],
+    ["version.manifest_corrupt", "corrupt"],
+    ["version.not_sealed", "not-sealed"],
+    ["version.revoked", "version-revoked"],
+    ["version.nothing_like_this", "unknown"],
+  ])("on %s, says it failed as %s", (code, reason) => {
+    expect(
+      failureOf(Object.assign(new Error("Refused."), { code }))
+    ).toStrictEqual(reason);
   });
 });
 

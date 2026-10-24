@@ -160,6 +160,11 @@ export interface CallRecord {
   provenance?: readonly string[];
   /** The held action it made, or the one its person confirmed. */
   pendingActionId?: string;
+  /**
+   * The SHA-256 of the old and new values it changed, as connect keeps
+   * them (`call_changes`), for a write that said what it changed.
+   */
+  changeHash?: string;
 }
 
 /**
@@ -285,6 +290,7 @@ export const auditCall = async (
   add("replayed", record.replayed === true ? true : undefined);
   add("recovery", record.recovery);
   add("pendingActionId", record.pendingActionId);
+  add("changeHash", record.changeHash);
   add("provenanceCount", provenance.length);
 
   const [first = [], ...rest] = provenanceGroups(provenance);

@@ -6,6 +6,7 @@ import {
   requestIdHeader,
   strictTransportSecurity,
 } from "@grasp-os/shared/http";
+import { interviewHearPath } from "@grasp-os/shared/interview-hear";
 import { interviewApiPath } from "@grasp-os/shared/interview-links";
 import { interviewStoryPath } from "@grasp-os/shared/interview-story";
 import { interviewTurnPath } from "@grasp-os/shared/interview-turn";
@@ -24,7 +25,7 @@ import {
   routerHostSchema,
   routerSecretHeader,
 } from "@grasp-os/shared/router";
-import { speechPath } from "@grasp-os/shared/voice";
+import { speechPath, transcriptionPath } from "@grasp-os/shared/voice";
 
 import { clientAddress } from "./client-address.ts";
 import { routeCache } from "./route-cache.ts";
@@ -166,6 +167,23 @@ const rateLimited = (url: URL, host: string): Response => {
 };
 
 /**
+ * An interview link's endpoints: core's src/onboarding/links.ts, its
+ * turns (src/onboarding/interview.ts), its read-back
+ * (src/onboarding/story.ts), where its lines are said
+ * (src/onboarding/speech.ts), and where what is said is written down
+ * (src/onboarding/transcription.ts, once per socket opened, or from a
+ * recording, src/onboarding/hear.ts).
+ */
+const interviewLinkPaths: ReadonlySet<string> = new Set([
+  interviewApiPath,
+  interviewTurnPath,
+  interviewStoryPath,
+  speechPath,
+  transcriptionPath,
+  interviewHearPath,
+]);
+
+/**
  * Forwards each request on a client's hostname to that client's core, with
  * the router secret so a client's workers.dev address is no back door.
  * Pass-through only: the method, path, query, headers and body go as they
@@ -211,16 +229,10 @@ export default {
     ) {
       return rateLimited(url, host);
     }
-    // An interview link's endpoints (core's src/onboarding/links.ts, its
-    // turns, src/onboarding/interview.ts, its read-back,
-    // src/onboarding/story.ts, and where its lines are said,
-    // src/onboarding/speech.ts), the same, from one budget; core counts per
-    // link too.
+    // An interview link's endpoints (`interviewLinkPaths`), the same, from
+    // one budget; core counts per link too.
     if (
-      (pathname === interviewApiPath ||
-        pathname === interviewTurnPath ||
-        pathname === interviewStoryPath ||
-        pathname === speechPath) &&
+      interviewLinkPaths.has(pathname) &&
       !(await withinLimit(env.INTERVIEW_RATE_LIMIT, request, host))
     ) {
       return rateLimited(url, host);

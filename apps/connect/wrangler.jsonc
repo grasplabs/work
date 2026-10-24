@@ -35,7 +35,10 @@
   // other app, as JSON by provider. While one is unset, connecting that
   // provider is refused. So is COMPOSIO_API_KEY, Grasp's key for the client's Composio
   // project (src/composio.ts): while it is unset, nothing of Composio is
-  // offered or reached. Their types are in src/env.d.ts.
+  // offered or reached. So are TEAMS_BOT_ID, TEAMS_BOT_TENANT_ID and
+  // TEAMS_BOT_SECRET, the client's own Teams bot (src/channels.ts): while one
+  // is unset, every channel request is refused. Their types are in
+  // src/env.d.ts.
   "secrets": { "required": ["CAPABILITY_SIGNING_KEY"] },
   // Vars the admin set through the API survive a deploy (keep_vars).
   "keep_vars": true,
