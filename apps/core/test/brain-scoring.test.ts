@@ -13,6 +13,7 @@ import {
   summarizeArm,
 } from "./brain-scoring.ts";
 import type { TrialObservation, TrialScore } from "./brain-scoring.ts";
+import type { BrainLanguage } from "./fixtures/brain-corpus.ts";
 import type { BrainExpectation } from "./fixtures/brain-tasks.ts";
 
 // The Brain baseline's scoring and statistics, as pure logic: what counts
@@ -56,7 +57,7 @@ const verdict = (
   expected: BrainExpectation,
   changes: Partial<TrialObservation>
 ) => {
-  const score = scoreTrial(expected, observed(changes));
+  const score = scoreTrial(expected, observed(changes), "en");
   return {
     completed: score.completed,
     authorized: score.authorized,
@@ -65,6 +66,13 @@ const verdict = (
     citationSupport: score.citationSupport,
   };
 };
+
+/** A task with one fact, from one source. */
+const fact = (value: string, marker: string): BrainExpectation => ({
+  kind: "answer",
+  facts: [[value]],
+  evidence: [{ source: "s.md#S", marker }],
+});
 
 /** The contract's section, as a Knowledge read returns it. */
 const leaseSection = ["## Lease\nOwner: Marta Ruiz."];
@@ -439,6 +447,68 @@ describe("scoring a trial", () => {
       time: false,
       negative: false,
       inDate: false,
+    });
+  });
+
+  it("reads numbers and dates as the task's language writes them, and as English does", () => {
+    const tolls = fact("18.240", "18.240 euro");
+    const pallets = fact("1,200", "1,200 pallets");
+    const due = fact("2026-11-16", "due 2026-11-16");
+    const right = (
+      expected: BrainExpectation,
+      language: BrainLanguage,
+      said: readonly string[]
+    ) =>
+      said.map(
+        (answer) =>
+          scoreTrial(
+            expected,
+            observed({
+              modelInput: "The sources.",
+              transcript: [
+                {
+                  by: "source",
+                  text: "18.240 euro, 1,200 pallets, due 2026-11-16",
+                },
+              ],
+              answer: `ANSWER: ${answer} [s.md]`,
+            }),
+            language
+          ).completed
+      );
+    expect({
+      dutchTolls: right(tolls, "nl", [
+        "18.240",
+        "18240",
+        "18,240",
+        "18.240  EURO",
+        "18.24",
+        "18,24",
+        "182.40",
+      ]),
+      englishPallets: right(pallets, "en", ["1200", "1,200", "1.200", "1,2"]),
+      englishDate: right(due, "en", [
+        "16 November 2026",
+        "November 16, 2026",
+        "16 Nov 2026",
+        "16/11/2026",
+        "2026-11-17",
+        "31/11/2026",
+      ]),
+      otherDates: [
+        right(due, "nl", ["16 november 2026", "16-11-2026"]),
+        right(due, "de", ["16. November 2026", "16.11.2026"]),
+        right(due, "fr", ["16 novembre 2026", "16/11/2026"]),
+        right(due, "es", ["16 de noviembre de 2026"]),
+      ],
+    }).toStrictEqual({
+      // As Dutch writes it, without separators, as English groups it, or
+      // with the source's wording in any case; never a decimal reading.
+      dutchTolls: [true, true, true, true, false, false, false],
+      // English has no Dutch reading: "1.200" is 1.2.
+      englishPallets: [true, true, false, false],
+      englishDate: [true, true, true, true, false, false],
+      otherDates: [[true, true], [true, true], [true, true], [true]],
     });
   });
 

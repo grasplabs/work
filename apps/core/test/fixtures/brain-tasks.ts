@@ -26,7 +26,7 @@ import type {
 } from "./brain-corpus.ts";
 
 /** Bumped with any change to the corpus, the tasks or the answer protocol. */
-export const brainSuiteVersion = "2026-10-21.1";
+export const brainSuiteVersion = "2026-10-22.1";
 
 /**
  * The SHA-256, as canonical JSON, of each version's sealed tasks with the
@@ -42,6 +42,10 @@ export const brainSealedDigests: Record<string, string> = {
   // every language: the sealed split is unchanged.
   "2026-10-21.1":
     "f39fed14e31c6ddac28a1fd6e60006eca5cdc8157819ec6b57d8fc5e7c891910",
+  // A bare number for a unit the question names, and a protocol line on
+  // giving each value on its own: the sealed split is unchanged.
+  "2026-10-22.1":
+    "f39fed14e31c6ddac28a1fd6e60006eca5cdc8157819ec6b57d8fc5e7c891910",
 };
 
 /** The SHA-256 of each version's whole suite (`suiteDigest` in brain-harness.ts). */
@@ -52,6 +56,8 @@ export const brainSuiteDigests: Record<string, string> = {
     "75451586827794a8f465192325fa96de0394a522d990d4008370df6ef6f875a6",
   "2026-10-21.1":
     "4a21fe8fce0828704dace23685144a89902d63e9b04496a6bd2e6cb77f233078",
+  "2026-10-22.1":
+    "861df9808491f2ea1506f81fea8ca6cdee22b780f0ca2b00abd18ef3a2867b0e",
 };
 
 export const brainSplits = ["dev", "validation", "sealed"] as const;
@@ -1061,7 +1067,8 @@ export const brainTasks: readonly BrainTask[] = [
       "Which form do I use for an expense claim, and within how many days?",
     query: "expense claims",
     expect: answer(
-      [["EXP-FORM-12"], ["30 days"]],
+      // The question names the unit: "within how many days?".
+      [["EXP-FORM-12"], ["30 days", "30"]],
       [
         {
           source: "handbook/expenses.md#Claims",
