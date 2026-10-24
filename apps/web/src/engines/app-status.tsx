@@ -52,7 +52,7 @@ export const StatusBadge = ({ status }: { status: AppStatus }) => (
 );
 
 /** What a builder can move a domain along, as core's `apps` names it. */
-type Transition = "publish" | "unpublish" | "archive" | "restore";
+export type Transition = "publish" | "unpublish" | "archive" | "restore";
 
 const moveOf = async (
   session: Session,
@@ -102,25 +102,33 @@ const ArchiveDialog = ({
 );
 
 /**
- * A builder's controls for the domain's status: Publish (or Unpublish)
- * and Archive while it is a draft or published, Restore once archived.
- * Each reads the page again afterwards, whatever core answered, so the
- * buttons act on the status shown.
+ * Moves the domain `app` along (`transition`), then reads the page again,
+ * whatever core answered, so the controls act on the status shown: `busy`
+ * meanwhile, and `failure` saying why core refused.
  */
-export const StatusActions = ({ app }: { app: App }) => {
+export const useStatusMove = (app: string) => {
   const router = useRouter();
   const { busy, failure, run } = useCoreAction();
-  const [archiving, setArchiving] = useState(false);
   const move = (transition: Transition): void => {
     void run(async (session) => {
       await changeThenRefresh(
-        async () => await moveOf(session, app.id, transition),
+        async () => await moveOf(session, app, transition),
         async () => {
           await router.invalidate({ sync: true });
         }
       );
     });
   };
+  return { busy, failure, move };
+};
+
+/**
+ * A builder's controls for the domain's status: Publish (or Unpublish)
+ * and Archive while it is a draft or published, Restore once archived.
+ */
+export const StatusActions = ({ app }: { app: App }) => {
+  const { busy, failure, move } = useStatusMove(app.id);
+  const [archiving, setArchiving] = useState(false);
   const { name, status } = app;
   return (
     <div className="flex flex-col items-end gap-1">
