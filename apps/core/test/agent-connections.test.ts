@@ -13,6 +13,7 @@ import {
   model,
   pointAtGateway,
   says,
+  transcript,
 } from "./agent-chat.ts";
 import { fakeGateway } from "./ai-gateway.ts";
 import { requestGranted } from "./apps.ts";
@@ -106,6 +107,19 @@ const reads = (all: AuditEvent[]) =>
       (action === "connection.call" &&
         ["held", "replayed"].includes(String(detail.outcome)))
   );
+
+/** The hour and minute `at` reads in `timeZone`, as `HH:MM`. */
+const clockIn = (timeZone: string, at: string | undefined): string =>
+  at === undefined
+    ? "none"
+    : new Intl.DateTimeFormat("en-GB", {
+        timeZone,
+        hour: "2-digit",
+        minute: "2-digit",
+        hourCycle: "h23",
+      }).format(new Date(at));
+
+const dayMs = 24 * 60 * 60 * 1000;
 
 describe("a chat's connections", setUpTime, () => {
   it("hold a write, with no key of the model's, for the person to confirm, and send it once when they do", async () => {
@@ -729,5 +743,90 @@ describe("a chat's connections", setUpTime, () => {
         .filter(({ action }) => action === "model.refused")
         .map(({ detail }) => detail.because)
     ).toStrictEqual(["connection", "connection"]);
+  });
+
+  it("end a write held in a Teams chat at midnight of the company's day, and run nothing pressed after it", async () => {
+    const send = codeStep(
+      `export default async (self, env) => await env.connections.call("MAIL", "mail.send", ${JSON.stringify(invoiceMail)});`
+    );
+    const waits = says("It waits for you to confirm it.");
+    // One turn in the Teams chat, then one in the web chat.
+    const { person, admin, mail, chat, grant } = await setUp(
+      send,
+      waits,
+      send,
+      waits
+    );
+    const timeZone = "Pacific/Auckland";
+    await admin.api.organization.update({ timeZone });
+    await grant(mail.id, "MAIL");
+    // The same workspace's agent, in a chat that came through Teams.
+    const teams = await chat.stub.createChat(
+      "Questions",
+      person.userId,
+      chat.id,
+      undefined,
+      undefined,
+      undefined,
+      "teams"
+    );
+    await chat.stub.ask(teams.id, { text: "Send Ben the invoice.", model });
+    await chat.ask("Send Ben the invoice.");
+
+    const waiting = await person.api.pendingActions.list();
+    const fromTeams = waiting.find(
+      ({ context }) => context.type === "chat" && context.chatId === teams.id
+    );
+    const fromWeb = waiting.find(
+      ({ context }) =>
+        context.type === "chat" && context.chatId === chat.chat.id
+    );
+    const endsIn = Date.parse(fromTeams?.endsAt ?? "") - Date.now();
+    expect({
+      held: [fromTeams, fromWeb].every((held) => held !== undefined),
+      teams: clockIn(timeZone, fromTeams?.endsAt),
+      withinTheDay: endsIn > 0 && endsIn <= dayMs,
+      web: fromWeb?.endsAt,
+    }).toStrictEqual({
+      held: true,
+      teams: "00:00",
+      withinTheDay: true,
+      web: undefined,
+    });
+
+    // The company's midnight passes before the person presses its card.
+    await connectDb()
+      .prepare("UPDATE pending_actions SET ends_at = ? WHERE id = ?")
+      .bind(Date.now() - 1, fromTeams?.id ?? "")
+      .run();
+    await expect(
+      outcome(
+        person.api.pendingActions.confirm(
+          fromTeams?.id ?? "",
+          fromTeams?.inputHash ?? ""
+        )
+      )
+    ).resolves.toBe("connect.pending_expired");
+    // Its chat's agent is told it ended; the web chat's still waits.
+    const messages = await transcript(chat.stub, teams.id);
+    const told = messages.filter(
+      ({ role, content }) =>
+        role === "system" &&
+        typeof content === "string" &&
+        content.includes(`pending ID ${fromTeams?.id}`)
+    );
+    const after = await person.api.pendingActions.list();
+    expect({
+      sent: await mail.did(),
+      waiting: after.map(({ id }) => id),
+      told: told.map(
+        ({ content }) =>
+          typeof content === "string" && content.includes("ended")
+      ),
+    }).toStrictEqual({
+      sent: { calls: 0, sent: [] },
+      waiting: [fromWeb?.id],
+      told: [true],
+    });
   });
 });
