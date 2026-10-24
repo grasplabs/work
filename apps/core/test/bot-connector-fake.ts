@@ -24,6 +24,8 @@ export const botConnectorFake = (bot: {
   const asked: string[] = [];
   /** The roster: `<conversation> <user id>` to what Teams says of them. */
   const members: Record<string, unknown> = {};
+  /** Conversations the bot was removed from: Teams refuses its posts there. */
+  const uninstalled = new Set<string>();
 
   const membersPath =
     /\/v3\/conversations\/(?<conversation>[^/]+)\/members\/(?<member>[^/]+)$/u;
@@ -68,6 +70,21 @@ export const botConnectorFake = (bot: {
         : Response.json({ error: { code: "MemberNotFound" } }, { status: 404 });
     }
     const activity = activitiesPath.exec(url.pathname)?.groups;
+    if (
+      request.method === "POST" &&
+      activity !== undefined &&
+      uninstalled.has(decodeURIComponent(activity.conversation ?? ""))
+    ) {
+      return Response.json(
+        {
+          error: {
+            code: "BotNotInConversationRoster",
+            message: "The bot is not part of the conversation roster.",
+          },
+        },
+        { status: 403 }
+      );
+    }
     if (request.method === "POST" && activity !== undefined) {
       posted.push({
         conversation: decodeURIComponent(activity.conversation ?? ""),
@@ -84,6 +101,10 @@ export const botConnectorFake = (bot: {
   return {
     posted,
     asked,
+    /** Removes the bot from `conversation`, as uninstalling its app does. */
+    uninstall: (conversation: string) => {
+      uninstalled.add(conversation);
+    },
     /** Adds to the roster, `<conversation> <user id>` to each member. */
     setMembers: (next: Record<string, unknown>) => {
       Object.assign(members, next);
