@@ -971,6 +971,16 @@ export interface WorkflowResourcesApi {
   share: (id: string, input: unknown) => Promise<void>;
   unshare: (id: string, input: unknown) => Promise<void>;
   members: (id: string) => Promise<WorkflowMember[]>;
+  /**
+   * Whether its owner lets people ask Stephen to start it in a chat app;
+   * for anyone with a role in it.
+   */
+  askable: (id: string) => Promise<boolean>;
+  /**
+   * Lets people ask Stephen to start it in a chat app, as themselves, or
+   * stops that; for its owner.
+   */
+  setAskable: (id: string, askable: unknown) => Promise<void>;
   delete: (id: string) => Promise<void>;
   /**
    * Releases the name of a deleted workflow, so a new workflow may take

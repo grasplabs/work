@@ -184,7 +184,10 @@ export default defineConfig({
       },
       port: corePort,
       reuseExistingServer: false,
-      timeout: 120_000,
+      // It builds the frontend and bundles core before it answers: close
+      // to two minutes on CI's runners, so 120 s left some runs refused
+      // before any test ran.
+      timeout: 240_000,
     },
     // Stands in for the client's Entra tenant.
     {
