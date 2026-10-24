@@ -21,6 +21,7 @@ import {
   callAs,
   chatOrigin,
   connectAccount,
+  mailboxAccount,
   outcome,
   ownAccount,
   someone,
@@ -1816,5 +1817,62 @@ describe("the Microsoft 365 connector's writes whose outcome can't be confirmed"
       "connect.outcome_unknown"
     );
     expect(writesSent()).toBe(1);
+  });
+});
+
+/**
+ * How a chat agent's list of `mailbox` ends, with `mailboxes` signed in
+ * as pointed at for its person (src/mailboxes.ts).
+ */
+const listAs = async (
+  connection: Connection,
+  mailbox: string,
+  mailboxes: string[]
+) =>
+  await outcome(
+    callAs(
+      agentFor(connection.person.userId),
+      {
+        connectionId: connection.id,
+        action: "mail.list",
+        input: { mailbox },
+      },
+      { mailboxes }
+    )
+  );
+
+describe("a chat agent's Microsoft 365 mail call", () => {
+  it("reaches its person's own mailbox, and a shared one only once pointed at for them", async () => {
+    const connection = await connected();
+    const ends = {
+      own: await listAs(connection, connection.person.email.toUpperCase(), []),
+      shared: await listAs(connection, invoices, []),
+      anotherPointed: await listAs(connection, invoices, [ceo]),
+    };
+    const reachedShared = graphPaths().some((path) =>
+      path.startsWith(mailboxPath)
+    );
+    expect({ ...ends, reachedShared }).toStrictEqual({
+      own: "ok",
+      shared: "connect.mailbox_not_pointed",
+      anotherPointed: "connect.mailbox_not_pointed",
+      reachedShared: false,
+    });
+    await expect(listAs(connection, invoices, [invoices])).resolves.toBe("ok");
+  });
+
+  it("takes a shared connection's own mailbox as the company's, which needs pointing at too", async () => {
+    const admin = someone("admin");
+    const account = mailboxAccount();
+    const id = await connectAccount(providers, admin, account, {
+      scope: "shared",
+    });
+    const connection = { id, person: admin };
+    await expect(listAs(connection, account.email, [])).resolves.toBe(
+      "connect.mailbox_not_pointed"
+    );
+    await expect(
+      listAs(connection, account.email, [account.email])
+    ).resolves.toBe("ok");
   });
 });

@@ -154,6 +154,57 @@ describe("a consent", () => {
   });
 });
 
+/** The rights a consent asks for, `classes` on and a shared mailbox pointed at. */
+const askedWithSharedMailbox = async (classes: CompanyToolClass[]) => {
+  const url = await startAs(someone(), { classes, sharedMailbox: true });
+  return url.searchParams.get("scope")?.split(" ") ?? [];
+};
+
+describe("a shared mailbox pointed at", () => {
+  it("adds shared mailboxes' rights to a consent, and sending from them only with Reach others", async () => {
+    const reading = await askedWithSharedMailbox(["read-own", "change-own"]);
+    const sending = await askedWithSharedMailbox([
+      "read-own",
+      "change-own",
+      "reach-others",
+    ]);
+    expect({
+      reading: reading.filter((right) => right.endsWith(".Shared")),
+      sending: sending.filter((right) => right.endsWith(".Shared")),
+    }).toStrictEqual({
+      reading: ["Mail.ReadWrite.Shared"],
+      sending: ["Mail.ReadWrite.Shared", "Mail.Send.Shared"],
+    });
+  });
+
+  it("asks the connections without shared mailboxes' rights to connect again", async () => {
+    const anna = someone();
+    const ben = someone();
+    const annas = await connectAccount(providers, anna, {
+      ...ownAccount(anna),
+      granted: defaultGrant,
+    });
+    const bens = await connectAccount(providers, ben, {
+      ...ownAccount(ben),
+      granted: `${defaultGrant} Mail.ReadWrite.Shared`,
+    });
+    // Made before grants were kept: the old wide set holds them.
+    const carl = someone();
+    const carls = await connectAccount(providers, carl, ownAccount(carl));
+
+    await exports.default.requireClassRights({
+      classes: [],
+      sharedMailbox: true,
+    });
+
+    expect({
+      annas: await stored(annas),
+      bens: await stored(bens),
+      carls: await stored(carls),
+    }).toStrictEqual({ annas: askedAgain, bens: active, carls: active });
+  });
+});
+
 describe("a class turned on", () => {
   it("asks the connections whose grant lacks its rights to connect again, and only those", async () => {
     const anna = someone();
@@ -175,8 +226,14 @@ describe("a class turned on", () => {
       bens: await stored(bens),
     }).toStrictEqual({ annas: askedAgain, bens: active });
     const recorded = await audit.events();
+    // Connections of the other tests here may be asked too: only these two
+    // are looked at.
     expect(
-      recorded.filter(({ action }) => action === "connection.needs_reauth")
+      recorded.filter(
+        ({ action, target }) =>
+          action === "connection.needs_reauth" &&
+          (target?.id === annas || target?.id === bens)
+      )
     ).toMatchObject([
       {
         actor: { type: "system" },

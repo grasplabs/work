@@ -196,6 +196,7 @@ export const startConnection = async (
     origin,
     returnTo,
     classes,
+    sharedMailbox,
     ...rest
   } = connectionErrors.parse(
     "connection.invalid",
@@ -250,7 +251,9 @@ export const startConnection = async (
     client_id: client.id,
     redirect_uri: redirectUri,
     scope: (
-      (classes === undefined ? undefined : rightsFor(provider.id, classes)) ??
+      (classes === undefined
+        ? undefined
+        : rightsFor(provider.id, classes, sharedMailbox === true)) ??
       provider.scopes
     ).join(provider.scopeSeparator),
     state,

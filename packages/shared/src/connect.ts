@@ -232,6 +232,12 @@ export const startConnectionSchema = z.strictObject({
     .array(companyToolClassSchema)
     .max(companyToolClasses.length)
     .optional(),
+  /**
+   * Whether the company pointed Stephen at a shared mailbox for anyone
+   * (core's shared-mailboxes.ts): Microsoft 365 is then asked for shared
+   * mailboxes' rights too. Absent from a core that predates it: not asked.
+   */
+  sharedMailbox: z.boolean().optional(),
 });
 export type StartConnection = z.input<typeof startConnectionSchema>;
 
@@ -526,6 +532,16 @@ export interface ConnectionsApi {
    */
   setToolClass: (
     toolClass: CompanyToolClass,
+    audience: ToolClassAudience
+  ) => Promise<void>;
+  /** The shared mailboxes Stephen is pointed at, and for whom. Admins only. */
+  sharedMailboxes: () => Promise<SharedMailboxSetting[]>;
+  /**
+   * Points Stephen at a shared mailbox for everyone or some teams, or for
+   * nobody. Admins only, never Grasp staff; audited.
+   */
+  pointSharedMailbox: (
+    mailbox: string,
     audience: ToolClassAudience
   ) => Promise<void>;
 }
@@ -864,8 +880,36 @@ export const defaultToolClassAudiences: Readonly<
 /** The classes an admin just turned on, for `ConnectApi.requireClassRights`. */
 export const requireClassRightsSchema = z.strictObject({
   classes: z.array(companyToolClassSchema).max(companyToolClasses.length),
+  /**
+   * Whether shared mailboxes' rights are needed too: an admin just pointed
+   * Stephen at one, or turned a class on while one is pointed at.
+   */
+  sharedMailbox: z.boolean().optional(),
 });
 export type RequireClassRights = z.input<typeof requireClassRightsSchema>;
+
+/** Most shared mailboxes one company points Stephen at. */
+export const sharedMailboxesMax = 50;
+
+/** A shared mailbox's address, as an admin names it: kept in lower case. */
+export const sharedMailboxSchema = z
+  .email()
+  .max(254)
+  .transform((mailbox) => mailbox.toLowerCase());
+
+/**
+ * A shared mailbox Stephen is pointed at, and for whom (`audience`): the
+ * chat's agent reaches a mailbox other than its person's own only when
+ * pointed at it for them, whatever classes are on.
+ */
+export interface SharedMailboxSetting {
+  mailbox: string;
+  audience: ToolClassAudience;
+  /** The admin who last changed it. */
+  changedBy: string;
+  /** ISO 8601. */
+  changedAt: string;
+}
 
 /** One class, as the company has it now. */
 export interface ToolClassSetting {
@@ -1917,6 +1961,8 @@ export const connectErrors = defineErrorFamily({
     "It isn't known what kind of action this is, so it wasn't done.",
   "connect.never":
     "Grasp never deletes, shares, forwards, sets rules or settings, or pays, whatever is allowed, so it wasn't done.",
+  "connect.mailbox_not_pointed":
+    "This mailbox isn't yours, and your company hasn't pointed Grasp at it for you, so nothing was done in it. An admin can.",
 });
 
 /**
