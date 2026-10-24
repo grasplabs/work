@@ -34,8 +34,17 @@ import { signInStaff } from "./people.ts";
 // in interview.e2e.ts. Its own file, as the fake microphone is the
 // browser's and plays this file's voice.
 
-/** The voice's sample rate, and how long it speaks and then pauses, in seconds. */
+/**
+ * The voice's sample rate, and in seconds how long the room is quiet
+ * first, then how long it speaks and pauses. The fake microphone starts
+ * the file over each time the page opens the microphone, and the ear opens
+ * it once Stephen has asked, so without the quiet first the voice starts
+ * as the ear does: there is no second before it to keep, and the stretch
+ * sent is only what is heard of the voice after it opened. The quiet is
+ * longer than the second kept (ear.ts), so that second is all there.
+ */
 const rate = 16_000;
+const quietFor = 1.5;
 const speaksFor = 1.6;
 const pausesFor = 3;
 
@@ -73,8 +82,12 @@ const voiceFile = path.join(os.tmpdir(), "grasp-e2e-talking.wav");
 writeFileSync(
   voiceFile,
   wavOf(
-    Array.from({ length: (speaksFor + pausesFor) * rate }, (_, at) =>
-      at < speaksFor * rate ? voiceAt(at) : 0
+    Array.from(
+      { length: (quietFor + speaksFor + pausesFor) * rate },
+      (_, at) => {
+        const voiced = at - quietFor * rate;
+        return voiced >= 0 && voiced < speaksFor * rate ? voiceAt(voiced) : 0;
+      }
     )
   )
 );
@@ -149,8 +162,13 @@ const secondBytes = rate * 2;
 interface Line {
   refused: string[];
   starts: number;
-  /** Bytes of audio each stretch sent, in order. */
-  stretches: number[];
+  /**
+   * The largest frame of each stretch, in bytes, in order: the second kept
+   * before it, which goes out at once as it starts, while what follows goes
+   * in batches of a tenth of a second (as does the silence that keeps the
+   * line open).
+   */
+  kept: number[];
 }
 
 /** A text frame's JSON, or nothing. */
@@ -171,11 +189,12 @@ const jsonOf = (message: string | Buffer): unknown => {
  * the stretch's words a moment after the page commits it.
  */
 const liveLine = async (page: Page): Promise<Line> => {
-  const line: Line = { refused: [], starts: 0, stretches: [] };
+  const line: Line = { refused: [], starts: 0, kept: [] };
   await page.routeWebSocket(
     "**/api/transcription",
     (socket: WebSocketRoute) => {
       let heard = 0;
+      let largest = 0;
       socket.onMessage((message) => {
         if (typeof message !== "string") {
           // Only audio core takes: 16-bit samples, at most 32 KiB a frame.
@@ -183,6 +202,7 @@ const liveLine = async (page: Page): Promise<Line> => {
             line.refused.push(`frame of ${message.length}`);
           }
           heard += message.length;
+          largest = Math.max(largest, message.length);
           const shown =
             partials[
               Math.min(Math.floor(heard / (secondBytes / 2)), partials.length) -
@@ -213,8 +233,9 @@ const liveLine = async (page: Page): Promise<Line> => {
           line.refused.push(message);
           return;
         }
-        line.stretches.push(heard);
+        line.kept.push(largest);
         heard = 0;
+        largest = 0;
         setTimeout(() => {
           socket.send(JSON.stringify({ type: "final", text: said, words: [] }));
         }, settleMs);
@@ -305,14 +326,15 @@ test("their words show while they talk, and all of them a moment after they stop
   expect({
     refused: line.refused,
     started: line.starts >= 1,
-    // A stretch goes out with the second before it, so it is more than the voice alone.
-    stretch: (line.stretches[0] ?? 0) >= speaksFor * secondBytes * 0.8,
+    // A stretch goes out with the second before its voice was known, so
+    // its start is in it: the quiet before the voice, all of that second.
+    kept: (line.kept[0] ?? 0) >= secondBytes * 0.9,
     answer: answer?.lines.at(-1),
     inTime: shown - commit <= 500,
   }).toStrictEqual({
     refused: [],
     started: true,
-    stretch: true,
+    kept: true,
     answer: { from: "person", text: said },
     inTime: true,
   });
