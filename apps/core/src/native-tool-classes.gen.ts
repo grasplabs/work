@@ -25,6 +25,7 @@ export const nativeToolClasses: Readonly<
   },
   "microsoft": {
     "calendar.create": "change-own",
+    "calendar.freeTime": "read-own",
     "calendar.get": "read-company",
     "calendar.list": "read-company",
     "calendar.update": "change-own",
