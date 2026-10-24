@@ -20,8 +20,9 @@ import {
   inputOf,
   partsOf,
   promptOf,
-  recipientOf,
+  recipientsOf,
   responseOf,
+  sameRecipients,
   timeoutOf,
 } from "./resource-decisions.ts";
 import type { BuiltDecision, DecisionAnswer } from "./resource-decisions.ts";
@@ -35,14 +36,14 @@ import type { BuiltDecision, DecisionAnswer } from "./resource-decisions.ts";
 //
 // - A test's decision reaching a person of the organization: it is kept in
 //   `app_test_decisions` alone, never in `workflow_decisions`, so no inbox,
-//   signal, notification or decision page lists it, and it asks only a
-//   principal of the test's fixture, by name, never a person, team or role.
-// - An answer by someone it doesn't ask: only the principal it names
-//   answers it (`decision.forbidden` for anyone else), and only one the
-//   fixture lets answer through that binding
+//   signal, notification or decision page lists it, and it asks only
+//   principals of the test's fixture, by name, never a person, team or role.
+// - An answer by someone it doesn't ask: only a principal it names answers
+//   it (`decision.forbidden` for anyone else), each one the fixture lets
+//   answer through that binding
 //   (`workflows.<alias>.deciders.<binding>`), checked as it opens and again
 //   as the run takes the outcome. Never the run's own principal (R8): a
-//   decision asking them is refused as it opens.
+//   decision asking them, among others or alone, is refused as it opens.
 // - A second answer, or one after the deadline or the run's end: an answer
 //   is one conditional update of an open decision before its deadline,
 //   after the engine says the run goes on; anything else is
@@ -115,21 +116,22 @@ const decidersOf = async (
   return Object.hasOwn(deciders, alias) ? (deciders[alias] ?? []) : [];
 };
 
-/** The fixture principal `recipients` asks, by name. */
-const recipientNameOf = (recipients: Json): string => {
-  const { kind, id } = partsOf(recipientOf(recipients));
-  if (kind !== "person") {
-    throw callInvalid(
-      "recipients: In a test, a decision asks one of its fixture's principals, by name."
-    );
-  }
-  return id;
-};
+/** The fixture principals `recipients` asks, by name. */
+const recipientNamesOf = (recipients: Json): string[] =>
+  recipientsOf(recipients).map((recipient) => {
+    const { kind, id } = partsOf(recipient);
+    if (kind !== "person") {
+      throw callInvalid(
+        "recipients: In a test, a decision asks its fixture's principals, by name."
+      );
+    }
+    return id;
+  });
 
 /**
  * Opens `run`'s decision for step `step` of task `task`, as `call` asks:
- * its recipient a principal of the test's fixture the binding covers there,
- * never the one the run acts for; its prompt and input what a decision
+ * its recipients principals of the test's fixture the binding covers
+ * there, never the one the run acts for; its prompt and input what a decision
  * takes. Its ID and deadline; the same step gets the same decision again.
  */
 export const openFixtureDecision = async (
@@ -142,16 +144,16 @@ export const openFixtureDecision = async (
   const binding = await bindingOf(env, run, call.binding);
   const contract = await contractOf(env, binding);
   const response = responseOf(contract);
-  const recipient = recipientNameOf(call.recipients);
+  const recipients = recipientNamesOf(call.recipients);
   const description = promptOf(call.prompt);
   const input = inputOf(contract.input, call.input);
-  if (principalId(recipient) === run.principal) {
+  if (recipients.some((name) => principalId(name) === run.principal)) {
     throw callInvalid(
       "recipients: The person the run acts for can't answer its decision."
     );
   }
   const deciders = await decidersOf(env, run.runId, call.binding);
-  if (!deciders.includes(recipient)) {
+  if (!recipients.every((name) => deciders.includes(name))) {
     throw callDenied();
   }
   const now = Date.now();
@@ -163,7 +165,7 @@ export const openFixtureDecision = async (
       runId: run.runId,
       task,
       step,
-      recipient,
+      recipients,
       description,
       input,
       response,
@@ -189,7 +191,7 @@ export const openFixtureDecision = async (
   if (
     opened === undefined ||
     opened.task !== task ||
-    opened.recipient !== recipient ||
+    !sameRecipients(opened.recipients, recipients) ||
     opened.description !== description ||
     canonicalJson(opened.input) !== canonicalJson(input)
   ) {
@@ -380,7 +382,7 @@ export const answerFixtureDecision = async (
   }
   const { task, approved, value = null, at } = answer.data;
   const open = await openDecisionOf(env, runId, task, at, wait);
-  if (open.recipient !== by) {
+  if (!open.recipients.includes(by)) {
     throw decisionErrors.create("decision.forbidden");
   }
   let payload: Json;
@@ -409,7 +411,6 @@ export const answerFixtureDecision = async (
       and(
         eq(appTestDecisions.id, open.id),
         eq(appTestDecisions.status, "open"),
-        eq(appTestDecisions.recipient, by),
         gt(appTestDecisions.expiresAt, now)
       )
     )

@@ -104,7 +104,8 @@ export interface DecisionAnswer {
 export const callInvalid = (issue: string) =>
   workflowResourceErrors.create("workflow.call_invalid", { issues: [issue] });
 
-export const callDenied = () => workflowResourceErrors.create("workflow.call_denied");
+export const callDenied = () =>
+  workflowResourceErrors.create("workflow.call_denied");
 
 /** The decision run `run` is, as the decision service names it. */
 export const decisionRunOf = (run: CallingRun): ResourceDecisionRun => ({

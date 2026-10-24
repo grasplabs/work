@@ -1205,8 +1205,8 @@ export const appTestDecisions = sqliteTable(
     /** The task that asks it, and its step in the task's scope. */
     task: text().notNull(),
     step: text().notNull(),
-    /** The fixture principal it asks, by name. */
-    recipient: text().notNull(),
+    /** The fixture principals it asks, by name: any one of them answers. */
+    recipients: text({ mode: "json" }).$type<string[]>().notNull(),
     description: text().notNull(),
     input: text({ mode: "json" }).$type<Json>().notNull(),
     /** The descriptor text of what an answer's payload must be. */
