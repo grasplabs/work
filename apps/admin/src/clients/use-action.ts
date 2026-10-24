@@ -20,6 +20,8 @@ const refusals: Readonly<Record<SettingsErrorCode, string>> = {
     "Secrets Store has no CLIENT_KEY, which the admin needs to record or seal the change: have deploy-ops write it, then try again.",
   secret_invalid:
     "That isn't a secret: paste the client secret's value as Entra shows it, without spaces.",
+  teams_bot_invalid:
+    "That isn't a Teams bot: give its app id and tenant as the GUIDs Entra shows, and the day its secret expires.",
 };
 
 /** A staff change to a client's settings (`useAction`), its refusals worded. */

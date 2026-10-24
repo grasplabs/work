@@ -9,6 +9,7 @@ import type { Identity } from "@grasp-os/shared/rpc";
 
 import { signInConfig } from "../auth/config.ts";
 import { onOrigin, personOf, tenantOf } from "../connections.ts";
+import { classesOn } from "../tool-classes.ts";
 
 // What the onboarding connects, from one of its steps: the admin starts a
 // flow at connect, consents at the provider, and the browser comes back
@@ -70,6 +71,7 @@ export const startOnboardingConnection = async (
     origin: config.origin,
     ...(tenant === undefined ? {} : { tenant }),
     returnTo: `${back.pathname}${back.search}`,
+    classes: await classesOn(env),
   });
 };
 

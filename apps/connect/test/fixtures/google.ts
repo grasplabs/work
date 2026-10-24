@@ -502,6 +502,77 @@ export const contentOf = (id: string, exportType: string | null) => {
   return id === fileIds.pdf ? invoicePdf : reportText;
 };
 
+/** The spreadsheet's sheets, as Sheets lists them: not in their order. */
+export const sheetNames = ["Invoices", "Ben's notes"] as const;
+
+/** The spreadsheet `id`'s metadata, as Sheets answers it. */
+export const spreadsheet = (id: string) => ({
+  spreadsheetId: id,
+  properties: { title: "Invoice register" },
+  sheets: [
+    { properties: { title: sheetNames[1], index: 1 } },
+    { properties: { title: sheetNames[0], index: 0 } },
+  ],
+});
+
+/** A cell as Sheets' grid data gives it. */
+const textCell = (value: string) => ({
+  formattedValue: value,
+  effectiveValue: { stringValue: value },
+});
+const numberCell = (value: number, shown = String(value), type = "NUMBER") => ({
+  formattedValue: shown,
+  effectiveValue: { numberValue: value },
+  effectiveFormat: { numberFormat: { type } },
+});
+const yesNoCell = (value: boolean) => ({
+  formattedValue: value ? "TRUE" : "FALSE",
+  effectiveValue: { boolValue: value },
+});
+
+/**
+ * Each sheet's rows as Sheets' grid data gives them: a day as its serial
+ * number in a DATE format, an empty cell inside a row as `{}`, trailing
+ * empty cells left out, an error as its error value.
+ */
+export const sheetGrid: Record<string, object[][]> = {
+  [sheetNames[0]]: [
+    [
+      textCell("Invoice"),
+      textCell("Amount"),
+      textCell("Due"),
+      textCell("Paid"),
+    ],
+    [
+      textCell("2026-0041"),
+      numberCell(1250, "1,250.00"),
+      numberCell(46_295, "30/09/2026", "DATE"),
+      yesNoCell(false),
+    ],
+    [textCell("2026-0042"), numberCell(980.5, "980.50"), {}, yesNoCell(true)],
+    [
+      textCell("2026-0043"),
+      {
+        formattedValue: "#DIV/0!",
+        effectiveValue: { errorValue: { type: "DIVIDE_BY_ZERO" } },
+      },
+    ],
+  ],
+  [sheetNames[1]]: [[textCell("Chase 0041 on Friday")]],
+};
+
+/** The same rows, as the tool gives them. */
+export const sheetRows: Record<string, (string | number | boolean | null)[][]> =
+  {
+    [sheetNames[0]]: [
+      ["Invoice", "Amount", "Due", "Paid"],
+      ["2026-0041", 1250, "30/09/2026", false],
+      ["2026-0042", 980.5, null, true],
+      ["2026-0043", "#DIV/0!"],
+    ],
+    [sheetNames[1]]: [["Chase 0041 on Friday"]],
+  };
+
 /** Google's error answers. */
 export const googleError = (code: number, status: string, reason: string) => ({
   error: {

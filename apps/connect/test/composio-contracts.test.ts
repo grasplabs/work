@@ -67,7 +67,7 @@ const tools: FakeTool[] = [
     run: () => ({ output: { id: "contact-1" } }),
   },
   {
-    name: "HUBSPOT_DELETE_CONTACTS",
+    name: "HUBSPOT_UPDATE_CONTACTS",
     inputSchema: { type: "object", properties: {}, required: [] },
     run: () => ({ output: { deleted: 0 } }),
   },
@@ -171,7 +171,7 @@ const tools: FakeTool[] = [
 
 const composio = fakeComposioApi([], { mcpTools: tools });
 
-/** The admin's allowlist: everything but `HUBSPOT_DELETE_CONTACTS`. */
+/** The admin's allowlist: everything but `HUBSPOT_UPDATE_CONTACTS`. */
 const rules: (string | ComposioToolRule)[] = [
   { name: "HUBSPOT_LIST_CONTACTS", read: true },
   "HUBSPOT_CREATE_CONTACT",
