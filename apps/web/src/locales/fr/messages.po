@@ -832,6 +832,10 @@ msgstr "{name}, heure de début"
 msgid "{name} has no app to show."
 msgstr "{name} n’a aucune application à afficher."
 
+#: src/settings/stephen-settings.tsx
+msgid "{name} in {appName}"
+msgstr "{name} dans {appName}"
+
 #: src/dashboard/widget-board.tsx
 msgid "{name} in {domain}"
 msgstr "{name} dans {domain}"
@@ -2764,6 +2768,14 @@ msgstr "en tant que {binding}"
 msgid "As each team's lead named them"
 msgstr "Telles que chaque responsable les a nommées"
 
+#: src/settings/stephen-settings.tsx
+msgid "As for Stephen"
+msgstr "Comme pour Stephen"
+
+#: src/settings/stephen-settings.tsx
+msgid "As for the whole company"
+msgstr "Comme pour toute l'entreprise"
+
 #: src/onboarding/work-record.tsx
 msgid "As it runs today"
 msgstr "Comme cela se passe aujourd’hui"
@@ -3478,6 +3490,10 @@ msgstr "Modifier les informations"
 msgid "Change plan"
 msgstr "Changer d’abonnement"
 
+#: src/settings/stephen-settings.tsx
+msgid "Change the company's"
+msgstr "Modifier ce qui est à l'entreprise"
+
 #: src/settings/person-limits.tsx
 msgid "Change the default limit"
 msgstr "Modifier la limite par défaut"
@@ -3485,6 +3501,10 @@ msgstr "Modifier la limite par défaut"
 #: src/settings/person-limits.tsx
 msgid "Change the limit for {name}"
 msgstr "Modifier la limite de {name}"
+
+#: src/settings/stephen-settings.tsx
+msgid "Change their own"
+msgstr "Modifier ce qui est à eux"
 
 #: src/onboarding/organization-dialogs.tsx
 msgid "Change this team"
@@ -3741,6 +3761,10 @@ msgstr "Choisir votre liste du personnel"
 #: src/workflows/chosen-at-run-time.tsx
 msgid "Chosen at run time: {options}"
 msgstr "Choisi pendant l’exécution : {options}"
+
+#: src/settings/stephen-settings.tsx
+msgid "Chosen teams"
+msgstr "Équipes choisies"
 
 #: src/activity/audit-log.tsx
 msgid "Clear"
@@ -4695,6 +4719,14 @@ msgstr "Pas d’entraînement sur vos données"
 msgid "Does nothing until it is turned on again."
 msgstr "Ne fait rien tant qu’elle n’est pas réactivée."
 
+#: src/settings/stephen-settings.tsx
+msgid "Does things for people here"
+msgstr "Agit pour les personnes ici"
+
+#: src/settings/stephen-settings.tsx
+msgid "Does things for people in {name}"
+msgstr "Agit pour les personnes dans {name}"
+
 #: src/engines/screen-approval.tsx
 msgid "Doesn't build now"
 msgstr "Ne se compile pas pour l'instant"
@@ -4825,6 +4857,10 @@ msgstr "Brouillon"
 msgctxt "a domain still being made"
 msgid "Draft"
 msgstr "Brouillon"
+
+#: src/settings/stephen-settings.tsx
+msgid "Drafts, events and files of their own, after they press a card."
+msgstr "Leurs propres brouillons, événements et fichiers, après avoir appuyé sur une carte."
 
 #: src/routes/_shell.onboarding.organization.$team.tsx
 msgid "Draw again"
@@ -5115,11 +5151,16 @@ msgstr "Chaque équipe a son responsable"
 msgid "Every team, whether it takes part or not. A team that was left out can be asked in: its lead gets a link first."
 msgstr "Chaque équipe, qu’elle participe ou non. Une équipe laissée de côté peut être invitée : son responsable reçoit d’abord un lien."
 
+#: src/settings/stephen-settings.tsx
+msgid "Every tool he has is of one of these kinds. Each is on for whom you choose, in every app."
+msgstr "Chacun de ses outils relève de l'un de ces types. Chacun est activé pour qui vous choisissez, dans chaque application."
+
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Every tool it has: domains and agents use only what they are granted."
 msgstr "Tous ses outils : les domaines et les agents n'utilisent que ce qui leur est accordé."
 
 #: src/knowledge/collection-markers.tsx
+#: src/settings/stephen-settings.tsx
 msgid "Everyone"
 msgstr "Tout le monde"
 
@@ -7228,6 +7269,10 @@ msgstr "Réalisé avec Grasp le {date}"
 msgid "Madrid"
 msgstr "Madrid"
 
+#: src/settings/stephen-settings.tsx
+msgid "Mail and messages to other people, after they press a card with every recipient."
+msgstr "Courriels et messages à d'autres personnes, après avoir appuyé sur une carte avec chaque destinataire."
+
 #: src/frame/app-sidebar.tsx
 msgid "Main"
 msgstr "Principal"
@@ -8192,6 +8237,7 @@ msgid "No: its hash or its link to the event before it doesn't match."
 msgstr "Non : son hachage ou son lien avec l’événement précédent ne correspond pas."
 
 #: src/brain/brain.ts
+#: src/settings/stephen-settings.tsx
 msgid "Nobody"
 msgstr "Personne"
 
@@ -8824,6 +8870,10 @@ msgstr "Désactivé"
 msgid "Off the usual way after step {number}"
 msgstr "Écarts après l’étape {number}"
 
+#: src/settings/stephen-settings.tsx
+msgid "Off, he answers nobody in any chat app. Grasp's own chat keeps working."
+msgstr "Désactivé, il ne répond à personne dans aucune application de messagerie. Le chat de Grasp continue de fonctionner."
+
 #: src/connections/offer-switch.tsx
 msgid "Off, nobody can connect it, admins included. Connections already made go on."
 msgstr "Désactivé, personne ne peut le connecter, administrateurs compris. Les connexions existantes continuent."
@@ -8886,6 +8936,10 @@ msgstr "selon une planification (son paramètre {param})"
 #: src/chat/builds-state.ts
 msgid "on every {event} event"
 msgstr "à chaque événement {event}"
+
+#: src/settings/stephen-settings.tsx
+msgid "On in chat apps"
+msgstr "Activé dans les applications de messagerie"
 
 #: src/chat/builds-state.ts
 msgid "on mail to {address}@"
@@ -9921,6 +9975,10 @@ msgctxt "column: how the person rated their interview"
 msgid "Rating"
 msgstr "Note"
 
+#: src/settings/stephen-settings.tsx
+msgid "Reach others"
+msgstr "Contacter d'autres personnes"
+
 #: src/workflows/workflow-diagram.tsx
 msgid "Reached"
 msgstr "Atteinte"
@@ -9989,6 +10047,10 @@ msgstr "A lu des sources restreintes et y est désormais soumis"
 msgid "Read the code of version {version}"
 msgstr "Lire le code de la version {version}"
 
+#: src/settings/stephen-settings.tsx
+msgid "Read the company's"
+msgstr "Lire ce qui est à l'entreprise"
+
 #: src/onboarding/hr-leads.tsx
 msgid "Read the leads from {name} again"
 msgstr "Relire les responsables depuis {name}"
@@ -10002,6 +10064,10 @@ msgstr "Lire la transcription"
 #: src/onboarding/work-record.tsx
 msgid "Read the transcript of {name}"
 msgstr "Lire la transcription de {name}"
+
+#: src/settings/stephen-settings.tsx
+msgid "Read their own"
+msgstr "Lire ce qui est à eux"
 
 #: src/activity/audit-words.ts
 msgid "Read what a guest wrote"
@@ -10977,6 +11043,14 @@ msgstr "Partager votre liste du personnel"
 msgid "Shared code changed"
 msgstr "Code partagé modifié"
 
+#: src/settings/stephen-settings.tsx
+msgid "Shared mailboxes, colleagues' calendars and the company's files."
+msgstr "Boîtes partagées, agendas des collègues et fichiers de l'entreprise."
+
+#: src/settings/stephen-settings.tsx
+msgid "Shared mailboxes, registers and the company's records, after they press a card."
+msgstr "Boîtes partagées, registres et données de l'entreprise, après avoir appuyé sur une carte."
+
 #: src/routes/_shell.domains.$engine.index.tsx
 msgid "Shared with"
 msgstr "Partagée avec"
@@ -11882,6 +11956,10 @@ msgstr "Équipes"
 msgid "Teams and roles"
 msgstr "Équipes et rôles"
 
+#: src/settings/stephen-settings.tsx
+msgid "Teams for {label}"
+msgstr "Équipes pour {label}"
+
 #: src/routes/_shell.onboarding.kickoff.tsx
 msgid "Teams named"
 msgstr "Équipes nommées"
@@ -12136,6 +12214,10 @@ msgstr "Les apps citées par les équipes, et celles utilisées que personne n�
 #: src/routes/_shell.integrations.index.tsx
 msgid "The apps your workflows can work in. Grasp only does what you allow per app."
 msgstr "Les applications dans lesquelles vos workflows peuvent travailler. Grasp ne fait que ce que vous autorisez, application par application."
+
+#: src/settings/stephen-settings.tsx
+msgid "The assistant people chat with in Microsoft Teams and the other chat apps. What is set here is all he may do: a place or an app only narrows it."
+msgstr "L'assistant avec qui les personnes discutent dans Microsoft Teams et les autres applications de messagerie. Ce qui est réglé ici est tout ce qu'il peut faire : un lieu ou une application ne fait que le restreindre."
 
 #: src/brain/brain-atlas.ts
 msgid "The board"
@@ -12773,6 +12855,10 @@ msgstr "Les chiffres apparaissent dès que la première personne commence son en
 #: src/settings/person-limits.tsx
 msgid "Their own limit"
 msgstr "Sa propre limite"
+
+#: src/settings/stephen-settings.tsx
+msgid "Their own mail, calendar and files. Runs at once."
+msgstr "Leur propre courrier, agenda et fichiers. S'exécute tout de suite."
 
 #: src/onboarding/interview-people.tsx
 msgid "Their rating"
@@ -14144,6 +14230,14 @@ msgstr "La suite"
 msgid "What he leaves alone"
 msgstr "Ce qu’il laisse de côté"
 
+#: src/settings/stephen-settings.tsx
+msgid "What he may do"
+msgstr "Ce qu'il peut faire"
+
+#: src/settings/stephen-settings.tsx
+msgid "What he may do in {appName}: as for the whole company, or for fewer people."
+msgstr "Ce qu'il peut faire dans {appName} : comme pour toute l'entreprise, ou pour moins de personnes."
+
 #: src/routes/_shell.onboarding.interviews.$person.tsx
 msgid "What is marked is what {who} wrote down."
 msgstr "Ce qui est surligné est ce que {who} a noté."
@@ -14441,6 +14535,10 @@ msgstr "D’où tout vient : conversations, documents, Pulse et connexions."
 msgid "Where it comes from"
 msgstr "D’où cela vient"
 
+#: src/settings/stephen-settings.tsx
+msgid "Where people reach him"
+msgstr "Où les personnes le joignent"
+
 #: src/routes/_shell.onboarding.interviewers.tsx
 msgid "Where people stop"
 msgstr "Où les gens s’arrêtent"
@@ -14546,6 +14644,10 @@ msgstr "Qui valide un nouvel outil"
 msgid "Who can answer"
 msgstr "Qui peut répondre"
 
+#: src/settings/stephen-settings.tsx
+msgid "Who can talk to him"
+msgstr "Qui peut lui parler"
+
 #: src/onboarding/interview-words.ts
 msgctxt "kind of fact"
 msgid "Who comes next"
@@ -14580,6 +14682,14 @@ msgstr "Qui dirige quelle équipe"
 #: src/routes/_shell.onboarding.interviewers.tsx
 msgid "Who people chose"
 msgstr "Qui les personnes ont choisi"
+
+#: src/settings/stephen-settings.tsx
+msgid "Who reaches him in {name}"
+msgstr "Qui le joint dans {name}"
+
+#: src/settings/stephen-settings.tsx
+msgid "Who reaches him in each place, as above or fewer, and whether he does things for people there or only answers."
+msgstr "Qui le joint dans chaque lieu, comme ci-dessus ou moins, et s'il y agit pour les personnes ou se contente de répondre."
 
 #: src/onboarding/work-record.tsx
 msgid "Who said what"
