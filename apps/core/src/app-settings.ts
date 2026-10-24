@@ -11,7 +11,7 @@ import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 import { appFor, toApp } from "./apps.ts";
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import { activeMember, organizationId } from "./auth/auth.ts";
-import { apps, teams } from "./db/core/schema.ts";
+import { appMembers, apps, teamMembers, teams } from "./db/core/schema.ts";
 import { indexAppNow } from "./knowledge/apps-collection.ts";
 import { requireNotStaff } from "./sharing.ts";
 import { openTo } from "./workflows/owners.ts";
@@ -56,6 +56,33 @@ const requireAudience = async (
 };
 
 /**
+ * That `userId` may answer for `app` now, as SQL: a current member of the
+ * organization who can open it (`openTo`) as its status lets them
+ * (app-access.ts). A draft or an archived App is open only to whoever
+ * builds it: an admin, or a builder by role in the organization who owns
+ * it or with whom it is shared as a builder, as a person or through a
+ * team.
+ */
+const mayAnswer = (userId: string, app: string): SQL => sql`(
+  ${activeMember(userId)} AND ${openTo(userId, app)}
+  AND (
+    EXISTS (SELECT 1 FROM ${apps} WHERE ${apps.id} = ${app} AND ${apps.status} = 'published')
+    OR ${activeMember(userId, ["admin"])}
+    OR (${activeMember(userId, ["builder"])} AND (
+      EXISTS (SELECT 1 FROM ${apps} WHERE ${apps.id} = ${app} AND ${apps.ownerId} = ${userId})
+      OR EXISTS (
+        SELECT 1 FROM ${appMembers}
+        WHERE ${appMembers.appId} = ${app} AND ${appMembers.role} = 'builder'
+          AND ((${appMembers.memberType} = 'person' AND ${appMembers.memberId} = ${userId})
+            OR (${appMembers.memberType} = 'team' AND ${appMembers.memberId} IN (
+              SELECT ${teamMembers.teamId} FROM ${teamMembers}
+              WHERE ${teamMembers.userId} = ${userId})))
+      )
+    ))
+  )
+)`;
+
+/**
  * `app.responsible_invalid` unless `userId` is a current member of the
  * organization who can open `app` now (`openTo`).
  */
@@ -65,7 +92,7 @@ const requireResponsible = async (
   userId: string
 ): Promise<void> => {
   const found = await drizzle(env.DB).get<{ ok: number } | undefined>(
-    sql`SELECT 1 AS ok WHERE ${activeMember(userId)} AND ${openTo(userId, app)}`
+    sql`SELECT 1 AS ok WHERE ${mayAnswer(userId, app)}`
   );
   if (found === undefined) {
     throw appErrors.create("app.responsible_invalid");
@@ -115,9 +142,7 @@ const planResponsible = async (
   }
   if (responsibleId !== null) {
     await requireResponsible(env, row.id, responsibleId);
-    plan.guards.push(
-      sql`${activeMember(responsibleId)} AND ${openTo(responsibleId, row.id)}`
-    );
+    plan.guards.push(mayAnswer(responsibleId, row.id));
   }
   plan.set.responsibleId = responsibleId;
   plan.guards.push(holds(apps.responsibleId, row.responsibleId));
