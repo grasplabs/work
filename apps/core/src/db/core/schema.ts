@@ -2295,11 +2295,13 @@ export const dependencyRequests = sqliteTable(
       table.graphHash,
       table.status
     ),
-    // The approvals in force the malware re-check is due to read, the
-    // longest unchecked first.
+    // The approvals the malware re-check is due to read: by when each was
+    // last found clean, never checked first. Led by that time, not the
+    // status, so the approvers' list of what is in force keeps reading the
+    // subject index in its order.
     index("dependency_requests_malware_idx").on(
-      table.status,
-      table.malwareCheckedAt
+      table.malwareCheckedAt,
+      table.status
     ),
   ]
 );

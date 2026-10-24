@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "f8407a71-63c5-4973-b895-8bf02f335d56",
+  "id": "f3783730-26b7-42d1-b7ec-6e1c3235bcdb",
   "prevId": "f0c932fd-6a80-45fd-894f-a51dcdbf94ee",
   "tables": {
     "access_revocations": {
@@ -3032,8 +3032,8 @@
         "dependency_requests_malware_idx": {
           "name": "dependency_requests_malware_idx",
           "columns": [
-            "status",
-            "malware_checked_at"
+            "malware_checked_at",
+            "status"
           ],
           "isUnique": false
         }
