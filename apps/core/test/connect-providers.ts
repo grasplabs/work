@@ -209,6 +209,24 @@ export const slackPostedUrl = "https://slack-control.test/posted";
 export const botConnectorUninstallUrl =
   "https://bot-connector-control.test/uninstall";
 
+/**
+ * The client's WhatsApp Business number, as core (`WHATSAPP_APP_SECRET`,
+ * `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_VERIFY_TOKEN`) and connect
+ * (`WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_ACCESS_TOKEN`) are set up with it.
+ */
+export const whatsAppNumber = {
+  appSecret: "acme-whatsapp-app-secret-for-tests",
+  phoneNumberId: "106540352242922",
+  verifyToken: "acme-whatsapp-verify-token-for-tests",
+  accessToken: "acme-whatsapp-access-token-for-tests",
+} as const;
+
+/**
+ * Where tests read what reached WhatsApp's Cloud API, in order: each
+ * message's recipient, its JSON, and whether it carried the client's token.
+ */
+export const whatsAppSentUrl = "https://whatsapp-control.test/sent";
+
 /** Where tests read the paths the fake npm registry was asked for, in order. */
 export const npmAskedUrl = "https://npm-control.test/asked";
 
@@ -245,6 +263,22 @@ const botFramework = (${botFrameworkKeysFake.toString()})();
 let botFrameworkKeys = [];
 let botFrameworkSharedKey = null;
 const botConnector = (${botConnectorFake.toString()})(${JSON.stringify(teamsBot)});
+const whatsAppSent = [];
+/** WhatsApp's Cloud API, as far as the door's adapter calls it. */
+const whatsAppAnswer = async (request, url) => {
+  const fields = await request.json();
+  whatsAppSent.push({
+    path: url.pathname,
+    to: fields.to,
+    fields,
+    authorized: request.headers.get("authorization") === ${JSON.stringify(`Bearer ${whatsAppNumber.accessToken}`)},
+  });
+  return Response.json({
+    messaging_product: "whatsapp",
+    contacts: [{ input: fields.to, wa_id: fields.to }],
+    messages: [{ id: "wamid." + crypto.randomUUID() }],
+  });
+};
 const slackCalls = [];
 /** Slack's Web API, as far as the door's adapter calls it. */
 const slackAnswer = async (request, url) => {
@@ -476,6 +510,12 @@ export default {
     }
     if (url.hostname === "registry.npmjs.org") {
       return await npm.answer(request);
+    }
+    if (url.hostname === "graph.facebook.com") {
+      return await whatsAppAnswer(request, url);
+    }
+    if (url.href === ${JSON.stringify(whatsAppSentUrl)}) {
+      return Response.json(whatsAppSent);
     }
     if (url.hostname === "slack.com") {
       return await slackAnswer(request, url);

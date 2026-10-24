@@ -79,6 +79,15 @@ interface __BaseEnv_Env {
    */
   SLACK_BOT_TOKEN?: string;
   /**
+   * The client's WhatsApp Business number: its Cloud API phone number id,
+   * the one number connect sends from, and the system user's access token
+   * it sends with (src/channels.ts), set by hand on staging until the
+   * console seals them per client. While either is unset, every WhatsApp
+   * request is refused as `unconfigured`.
+   */
+  WHATSAPP_PHONE_NUMBER_ID?: string;
+  WHATSAPP_ACCESS_TOKEN?: string;
+  /**
    * `none` on workerd and on-prem, which have no Cloudflare jurisdiction:
    * the clock's object is then taken from the plain namespace
    * (src/clock.ts). Unset or any other value means the EU. Never set in
