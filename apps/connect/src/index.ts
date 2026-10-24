@@ -27,6 +27,7 @@ import type {
   OrganizationConnection,
   ConnectResult,
   Disconnect,
+  RequireClassRights,
   DisconnectPersonal,
   FinishConnection,
   HeldCall,
@@ -73,6 +74,7 @@ import { catalog, catalogTools } from "./catalog.ts";
 import { keptChange } from "./changes.ts";
 import { channelSigningKeys } from "./channel-keys.ts";
 import { channelFetch } from "./channels.ts";
+import { requireClassRights } from "./class-rights.ts";
 import { clock, tickClock } from "./clock.ts";
 import {
   finishToolkitFlow,
@@ -351,6 +353,12 @@ export default class Connect
     connectionIds: readonly string[]
   ): Promise<ConnectionOwner[]> {
     return await connectionOwners(this.env.DB, connectionIds);
+  }
+
+  async requireClassRights(
+    request: RequireClassRights
+  ): Promise<{ reconnect: number }> {
+    return await requireClassRights(this.env, request);
   }
 
   async disconnect(request: Disconnect): Promise<{ revoked: boolean }> {
@@ -636,12 +644,14 @@ export default class Connect
     if (!parsed.success) {
       throw connectErrors.create("connect.invalid");
     }
-    const { person, id } = parsed.data;
+    const { person, id, via } = parsed.data;
     await take(
       this.env,
       person,
-      await heldFor(this.env, person, id, "decline"),
-      "decline"
+      await heldFor(this.env, person, id, "decline", via),
+      "decline",
+      false,
+      via
     );
   }
 
@@ -663,8 +673,8 @@ export default class Connect
     if (!parsed.success) {
       throw connectErrors.create("connect.invalid");
     }
-    const { capability, person, id, inputHash } = parsed.data;
-    const held = await heldFor(this.env, person, id, "confirm");
+    const { capability, person, id, inputHash, via } = parsed.data;
+    const held = await heldFor(this.env, person, id, "confirm", via);
     const call = callOf(held);
     let claims: CapabilityClaims | undefined;
     try {
@@ -686,11 +696,12 @@ export default class Connect
         id,
         codeOf(error) ?? "internal",
         held,
-        claims?.restricted
+        claims?.restricted,
+        via
       );
       throw error;
     }
-    await take(this.env, person, held, "confirm", claims.restricted);
+    await take(this.env, person, held, "confirm", claims.restricted, via);
     try {
       return await this.#carryOutAudited(call, claims, held);
     } catch (error) {

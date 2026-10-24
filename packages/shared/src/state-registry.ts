@@ -236,6 +236,7 @@ const coreDb: D1State = {
       `${core}channels/accounts.ts`,
       "Links a chat sent, good for 15 minutes: the chat sends a new one."
     ),
+    channel_conversations: exported(`${core}channels/door.ts`),
     invitations: exported(auth),
     teams: exported(auth),
     team_members: exported(auth),
@@ -315,6 +316,7 @@ const coreDb: D1State = {
     workflow_owners: exported(`${core}workflows/owners.ts`),
     hidden_connectors: exported(`${core}connections.ts`),
     tool_class_settings: exported(`${core}tool-classes.ts`),
+    shared_mailbox_pointers: exported(`${core}shared-mailboxes.ts`),
     app_requests: exported(`${core}app-requests.ts`),
     improvement_signal_computations: cache(`${core}signals.ts`),
     improvement_signals: cache(`${core}signals.ts`),
