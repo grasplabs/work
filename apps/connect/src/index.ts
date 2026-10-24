@@ -4,6 +4,7 @@ import {
   verifyCapability,
 } from "@grasp-os/shared/capability";
 import type { CapabilityClaims } from "@grasp-os/shared/capability";
+import type { ChannelSigningKeys } from "@grasp-os/shared/channel-keys";
 import {
   confirmActionSchema,
   connectCallSchema,
@@ -69,6 +70,7 @@ import { carryOut, connectionFor, heldOutcome } from "./call.ts";
 import type { CallDone, CallProgress } from "./call.ts";
 import { catalog, catalogTools } from "./catalog.ts";
 import { keptChange } from "./changes.ts";
+import { channelSigningKeys } from "./channel-keys.ts";
 import { channelFetch } from "./channels.ts";
 import { clock, tickClock } from "./clock.ts";
 import {
@@ -396,6 +398,15 @@ export default class Connect
   // oxlint-disable-next-line class-methods-use-this
   async npmMalwareReports(request: unknown): Promise<NpmMalwareReports> {
     return await npmMalwareReports(request);
+  }
+
+  // A chat platform's signing keys (src/channel-keys.ts), for core to
+  // check that a request from the platform really comes from it. Public
+  // data; nothing here is a client's.
+
+  // oxlint-disable-next-line class-methods-use-this
+  async channelSigningKeys(platform: unknown): Promise<ChannelSigningKeys> {
+    return await channelSigningKeys(platform);
   }
 
   // The chat platforms (src/channels.ts): core's chat adapters send every
