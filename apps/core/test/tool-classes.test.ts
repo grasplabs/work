@@ -135,6 +135,14 @@ const chatCalling = async (
   };
 };
 
+/**
+ * Points the chat's agent at the shared `mailbox` for everyone: a shared
+ * mailbox is reached only once pointed at (shared-mailboxes.test.ts).
+ */
+const pointedAt = async (admin: Admin, mailbox: string): Promise<void> => {
+  await admin.api.connections.pointSharedMailbox(mailbox, { who: "everyone" });
+};
+
 const answer = (answers: { list: string; send: string }) =>
   `Returned:\n${JSON.stringify(answers)}`;
 
@@ -152,39 +160,45 @@ const connectCalls = async (connectionId: string) => {
 describe("the classes a company turned on", setUpTime, () => {
   beforeEach(async () => {
     // Every test starts from the defaults.
-    await env.DB.prepare("DELETE FROM tool_class_settings").run();
-    await env.DB.prepare("DELETE FROM app_tool_classes").run();
+    await env.DB.batch([
+      env.DB.prepare("DELETE FROM tool_class_settings"),
+      env.DB.prepare("DELETE FROM shared_mailbox_pointers"),
+      env.DB.prepare("DELETE FROM app_tool_classes"),
+    ]);
   });
 
-  it("refuse, by default, every Microsoft 365 mail call of the chat's agent in core, so connect never sees one", async () => {
+  it("refuse, by default, the chat's agent's send in core, so connect never sees it", async () => {
     const admin = await signedInApi(idp, "admin");
     const person = await signedInApi(idp, "user");
     const { id, mailbox } = await connectShared(admin);
+    await pointedAt(admin, mailbox);
     const chat = await chatCalling(admin, person.userId, mailbox, id);
 
     await expect(chat.answered()).resolves.toBe(
-      // A shared mailbox is the company's: Read company and Reach others
-      // are off until an admin turns them on.
-      answer({ list: off, send: off })
+      // Reading the mailbox it is pointed at is on; Reach others is off
+      // until an admin turns it on.
+      answer({ list: "done", send: off })
     );
+    const calls = await connectCalls(id);
     expect({
-      calls: await connectCalls(id),
+      sends: calls.filter(({ detail }) => detail.action === "mail.send"),
       sent: await sentWith(chat.subject),
-    }).toStrictEqual({ calls: [], sent: [] });
+    }).toStrictEqual({ sends: [], sent: [] });
   });
 
   it("let a class through once an admin turns it on for everyone", async () => {
     const admin = await signedInApi(idp, "admin");
     const person = await signedInApi(idp, "user");
     const { id, mailbox } = await connectShared(admin);
+    await pointedAt(admin, mailbox);
     const chat = await chatCalling(admin, person.userId, mailbox, id);
 
-    await admin.api.connections.setToolClass("read-company", {
+    await admin.api.connections.setToolClass("reach-others", {
       who: "everyone",
     });
 
     await expect(chat.answered()).resolves.toBe(
-      answer({ list: "done", send: off })
+      answer({ list: "done", send: "held" })
     );
   });
 
@@ -193,6 +207,7 @@ describe("the classes a company turned on", setUpTime, () => {
     const inTeam = await signedInApi(idp, "user");
     const outside = await signedInApi(idp, "user");
     const { id, mailbox } = await connectShared(admin);
+    await pointedAt(admin, mailbox);
     const team = await teamOf(inTeam.userId);
     await admin.api.connections.setToolClass("reach-others", {
       who: "teams",
@@ -200,13 +215,13 @@ describe("the classes a company turned on", setUpTime, () => {
     });
     const theirs = await chatCalling(admin, inTeam.userId, mailbox, id);
     await expect(theirs.answered()).resolves.toBe(
-      answer({ list: off, send: "held" })
+      answer({ list: "done", send: "held" })
     );
 
     // One chat at a time: each answers before the next is set up.
     const others = await chatCalling(admin, outside.userId, mailbox, id);
     await expect(others.answered()).resolves.toBe(
-      answer({ list: off, send: off })
+      answer({ list: "done", send: off })
     );
     // Held for the person to confirm: nothing has gone out yet.
     await expect(sentWith(theirs.subject)).resolves.toStrictEqual([]);
@@ -357,6 +372,48 @@ describe("the classes a company turned on", setUpTime, () => {
     ).toMatchObject({
       audience: { who: "nobody" },
       changedBy: admin.userId,
+    });
+  });
+
+  it("ask Microsoft, when someone connects, only for the rights of the classes on, and the grants that lack a class turned on to be given again", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const person = await signedInApi(idp, "user");
+    const { id } = await connectShared(admin);
+    const asked = async () => {
+      const { url } = await person.api.connections.start({
+        provider: "microsoft",
+        scope: "personal",
+      });
+      return new URL(url).searchParams.get("scope")?.split(" ") ?? [];
+    };
+    const statusOf = async () => {
+      const listed = await admin.api.connections.list();
+      return listed.find((connection) => connection.id === id)?.status;
+    };
+
+    const before = await asked();
+    await admin.api.connections.setToolClass("reach-others", {
+      who: "teams",
+      teams: [await teamOf(person.userId)],
+    });
+    const sending = await asked();
+    // Made before grants were kept: it holds the old wide set, sending
+    // among it, but not changing the company's sites.
+    const afterSending = await statusOf();
+    await admin.api.connections.setToolClass("change-company", {
+      who: "everyone",
+    });
+
+    expect({
+      before: before.includes("Mail.Send"),
+      sending: sending.includes("Mail.Send"),
+      afterSending,
+      afterChanging: await statusOf(),
+    }).toStrictEqual({
+      before: false,
+      sending: true,
+      afterSending: "active",
+      afterChanging: "needs_reauth",
     });
   });
 });

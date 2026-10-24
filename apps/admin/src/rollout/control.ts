@@ -325,17 +325,34 @@ const resendApproval = async (
 };
 
 /**
+ * What staff confirm before a rollout goes past the ring it passed: that
+ * Stephen's eval passed on the release, and that one person sent the five
+ * demo messages in real Teams to a client of that ring (ring 0 is Grasp's
+ * own deployment and the test tenant). Both are a person's word, recorded
+ * with the approval; the eval's own run gates the release before it's
+ * published.
+ */
+export const ringChecksSchema = z.object({
+  evalPassed: z.boolean(),
+  demoSent: z.boolean(),
+});
+export type RingChecks = z.infer<typeof ringChecksSchema>;
+
+/**
  * Approves rollout `rolloutId`'s fleet, as `staff`: moves it on to the
  * first ring after the one it passed, audited, then tells its run, which
  * then reaches every ring after without asking again. Of two staff approving at
  * once, one does. Approving again once the rollout moved on sends the
  * approval again if its run still waits for it (`resendApproval`), so an
- * approval whose event was lost can be given again. Refused otherwise.
+ * approval whose event was lost can be given again. Refused otherwise,
+ * and as `ring_checks_missing` unless `checks` says the ring it passed
+ * passed both of `RingChecks`.
  */
 export const approveRollout = async (
   env: Env,
   staff: Staff,
-  rolloutId: string
+  rolloutId: string,
+  checks: RingChecks
 ): Promise<void> => {
   const db = adminDatabase(env.DB);
   const notWaiting = new RolloutError(
@@ -358,6 +375,12 @@ export const approveRollout = async (
   }
   if (row?.status !== "waiting") {
     throw notWaiting;
+  }
+  if (!(checks.evalPassed && checks.demoSent)) {
+    throw new RolloutError(
+      "ring_checks_missing",
+      `Rollout ${rolloutId}'s ring ${row.ring} needs its eval and its demo messages before the next ring`
+    );
   }
   const [after] = await db
     .select({ ring: min(rolloutTargets.ring) })
@@ -385,7 +408,11 @@ export const approveRollout = async (
           eq(rollouts.ring, row.ring)
         )
       ),
-    { action: "rollout.approve", target: rolloutId, detail: { ring: next } }
+    {
+      action: "rollout.approve",
+      target: rolloutId,
+      detail: { ring: next, evalPassed: true, demoSent: true },
+    }
   );
   if (!approved) {
     throw notWaiting;

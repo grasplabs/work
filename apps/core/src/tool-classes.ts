@@ -17,13 +17,14 @@ import type {
 import type { PermissionObject, Authority } from "@grasp-os/shared/permissions";
 import { requireAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { and, eq, or, sql } from "drizzle-orm";
+import { and, eq, ne, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import {
   appToolClasses,
+  sharedMailboxPointers,
   teamMembers,
   teams,
   toolClassSettings,
@@ -119,6 +120,17 @@ export const readToolClasses = async (
   });
 };
 
+/**
+ * The classes on for anyone in the company now: what a suite's consent
+ * asks the rights of (connect's provider-rights.ts).
+ */
+export const classesOn = async (env: Env): Promise<CompanyToolClass[]> => {
+  const settings = await readToolClasses(env);
+  return settings
+    .filter(({ audience }) => audience.who !== "nobody")
+    .map(({ toolClass }) => toolClass);
+};
+
 /** `audience` as stored: its `who`, and its teams sorted, each once. */
 export const storedOf = (
   audience: ToolClassAudience
@@ -128,6 +140,21 @@ export const storedOf = (
     audience.who === "teams" ? [...new Set(audience.teams)].toSorted() : []
   ),
 });
+
+/**
+ * Whether the company points Stephen at a shared mailbox for anyone
+ * (shared-mailboxes.ts): Microsoft 365 is then asked for shared
+ * mailboxes' rights too.
+ */
+export const anyMailboxPointed = async (env: Env): Promise<boolean> => {
+  const row = await drizzle(env.DB)
+    .select({ mailbox: sharedMailboxPointers.mailbox })
+    .from(sharedMailboxPointers)
+    .where(ne(sharedMailboxPointers.who, "nobody"))
+    .limit(1)
+    .get();
+  return row !== undefined;
+};
 
 /**
  * Turns `toolClass` on for everyone or some teams, or off. Admins only, and
@@ -212,6 +239,17 @@ export const setToolClass = async (
       detail,
     }),
   ]);
+  if (stored.who !== "nobody") {
+    // A class on for anyone asks the grants that lack its rights to be
+    // given again (GRA-717): its own rights, not every class's, so a grant
+    // made before them isn't asked again for a class that was on already.
+    // Asked even when nothing changed here, so an admin who sets it again
+    // after a failure here gets it done.
+    await env.CONNECT.requireClassRights({
+      classes: [parsedClass.data],
+      sharedMailbox: await anyMailboxPointed(env),
+    });
+  }
 };
 
 /** The audience `toolClass` has now: its row's, or the default. */
@@ -274,6 +312,15 @@ export const takesIn = async (
   return membership !== undefined;
 };
 
+/** A mail tool's class in its person's own mailbox. */
+const inOwnMailbox: Readonly<Record<CompanyToolClass, CompanyToolClass>> = {
+  "read-own": "read-own",
+  "read-company": "read-own",
+  "change-own": "change-own",
+  "change-company": "change-own",
+  "reach-others": "reach-others",
+};
+
 /**
  * Refuses a call of the chat's agent whose class is off for the person it
  * acts for, before core signs anything for connect: `connect.class_off`.
@@ -307,7 +354,15 @@ export const requireToolClassOn = async (
   if (toolClass === "never") {
     throw connectErrors.create("connect.class_off");
   }
-  const audience = await audienceNow(env, toolClass);
+  // A Microsoft 365 mail tool takes any mailbox the account may open: the
+  // mailbox it reaches is checked in connect, which knows it (its own, or
+  // one the company pointed the agent at: shared-mailboxes.ts), so here
+  // it has the class it has in the person's own mailbox.
+  const mailTool = owner.provider === "microsoft" && action.startsWith("mail.");
+  const audience = await audienceNow(
+    env,
+    mailTool ? inOwnMailbox[toolClass] : toolClass
+  );
   if (!(await takesIn(env, audience, authority.onBehalfOf))) {
     throw connectErrors.create("connect.class_off");
   }
