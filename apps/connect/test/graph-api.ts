@@ -8,7 +8,9 @@
  * write out and loses its answer. Events it makes or changes it keeps for
  * the test, and holds a change to the `If-Match` etag it is sent. Excel's
  * workbooks in the finance drive hold their named tables in memory, typed
- * as Excel types what it is sent, afresh for each test.
+ * as Excel types what it is sent, afresh for each test. Each person's To
+ * Do is theirs alone: Graph answers a token for its own user's lists only,
+ * as it answers a delegated `Tasks.ReadWrite` token.
  */
 import { egressHeader } from "@grasp-os/connector-kit/manifest";
 import {
@@ -20,6 +22,7 @@ import { z } from "zod";
 
 import {
   accessDenied,
+  graphAccessDenied,
   attachment,
   attachmentPage,
   childrenPage,
@@ -53,11 +56,13 @@ import {
   supplierRows,
   supplierTable,
   throttled,
+  todoLists,
   workbookIds,
 } from "./fixtures/graph.ts";
 import type { SheetCell } from "./fixtures/graph.ts";
 import { fakeProvider, json, route as routeOn } from "./internet.ts";
 import type { ProviderRoute } from "./internet.ts";
+import type { fakeProviders } from "./oauth-provider.ts";
 
 const users = String.raw`^/v1\.0/users/(?<mailbox>[^/]+)`;
 const drives = String.raw`^/v1\.0/drives/(?<drive>[^/]+)`;
@@ -74,6 +79,7 @@ const parts = [
   "id",
   "table",
   "row",
+  "task",
 ] as const;
 
 type Part = (typeof parts)[number];
@@ -688,6 +694,217 @@ const graphRoutes: ProviderRoute<Part>[] = [
   ),
 ];
 
+/** A task in someone's To Do, as Graph keeps it. */
+interface TodoTask {
+  id: string;
+  title: string;
+  status: string;
+  body: { contentType: string; content: string };
+  dueDateTime?: { dateTime: string; timeZone: string };
+  completedDateTime?: { dateTime: string; timeZone: string };
+  createdDateTime: string;
+  lastModifiedDateTime: string;
+  /** The effect key it was tagged with, if any. */
+  tag?: string;
+}
+
+const todoTaskSchema = z.object({
+  title: z.string(),
+  body: z.object({ contentType: z.string(), content: z.string() }).optional(),
+  dueDateTime: z
+    .object({ dateTime: z.string(), timeZone: z.string() })
+    .optional(),
+});
+
+/**
+ * Each person's To Do tasks, by their account's subject and the list.
+ * Cleared before each test.
+ */
+const todoTasks = new Map<string, TodoTask[]>();
+
+const tasksOf = (owner: string, list: string): TodoTask[] => {
+  const key = `${owner} ${list}`;
+  const tasks = todoTasks.get(key) ?? [];
+  todoTasks.set(key, tasks);
+  return tasks;
+};
+
+/** A task as Graph answers for it, without the tag it keeps. */
+const taskAnswer = ({ tag: _tag, ...task }: TodoTask) => ({
+  "@odata.etag": `W/"${task.id}"`,
+  importance: "normal",
+  isReminderOn: false,
+  ...task,
+});
+
+/** The `$expand` that reads a task's effect tag, as Graph documents it. */
+const tagExpansion = `singleValueExtendedProperties($filter=id eq '${effectPropertyId}')`;
+
+/**
+ * Graph pages a list's tasks with their tag expanded by two, fewer than a
+ * lookup asks for, as Graph may: a lookup must follow the next page.
+ */
+const taggedTaskPageSize = 2;
+
+/** A page of tasks with their effect tag expanded, from `$skip`. */
+const taggedTaskPage = (tasks: TodoTask[], skip: string | null) => {
+  const from = Number(skip ?? "0");
+  const to = from + taggedTaskPageSize;
+  return {
+    value: tasks.slice(from, to).map((task) => ({
+      ...taskAnswer(task),
+      ...(task.tag === undefined
+        ? {}
+        : {
+            singleValueExtendedProperties: [
+              { id: effectPropertyId, value: task.tag },
+            ],
+          }),
+    })),
+    ...(to < tasks.length
+      ? {
+          "@odata.nextLink": `https://graph.microsoft.com/v1.0/me/todo/lists/tasks?%24skip=${to}`,
+        }
+      : {}),
+  };
+};
+
+/** The effect key a task Graph is asked to make is tagged with, if any. */
+const tagOf = (made: unknown): string | undefined =>
+  taggedSchema
+    .safeParse(made)
+    .data?.singleValueExtendedProperties?.find(
+      (property) => property.id === effectPropertyId
+    )?.value;
+
+/** The person's own lists they shared during a test. Cleared before each. */
+const sharedSince = new Set<string>();
+
+/** The To Do list with this id, if Graph has one. */
+const listOf = (id: string) => {
+  const list = todoLists.find((each) => each.id === id);
+  return list !== undefined && sharedSince.has(id)
+    ? { ...list, isShared: true }
+    : list;
+};
+
+/**
+ * Graph's To Do routes. `ownerOf` says whose a request's token is, if the
+ * mailbox it names is that user: anyone else's To Do is refused.
+ */
+const todoRoutes = (
+  ownerOf: (mailbox: string, request: Request) => string | undefined
+): ProviderRoute<Part>[] => {
+  const lists = `${users}/todo/lists`;
+  /** The list's owner, or Graph's refusal. */
+  const opened = (
+    mailbox: string,
+    list: string,
+    request: Request
+  ): string | Response => {
+    const owner = ownerOf(mailbox, request);
+    if (owner === undefined) {
+      return json(graphAccessDenied, 403);
+    }
+    return listOf(list) === undefined ? json(notFound, 404) : owner;
+  };
+  return [
+    route("GET", lists, ({ mailbox, request }) =>
+      ownerOf(mailbox, request) === undefined
+        ? json(graphAccessDenied, 403)
+        : json({ value: todoLists.map(({ id }) => listOf(id)) })
+    ),
+    route("GET", `${lists}/(?<list>[^/]+)`, ({ mailbox, list, request }) => {
+      const owner = opened(mailbox, list, request);
+      return owner instanceof Response ? owner : json(listOf(list));
+    }),
+    route(
+      "GET",
+      `${lists}/(?<list>[^/]+)/tasks`,
+      ({ mailbox, list, query, request }) => {
+        const owner = opened(mailbox, list, request);
+        if (owner instanceof Response) {
+          return owner;
+        }
+        const tasks = tasksOf(owner, list);
+        const filter = query.get("$filter") ?? "";
+        // To Do refuses the extended property filter mail and events take.
+        if (filter.startsWith("singleValueExtendedProperties/")) {
+          return json({ error: { code: "Request_UnsupportedQuery" } }, 400);
+        }
+        const expand = query.get("$expand");
+        if (expand !== null) {
+          if (expand !== tagExpansion) {
+            return json({ error: { code: "BadRequest" } }, 400);
+          }
+          return json(taggedTaskPage(tasks, query.get("$skip")));
+        }
+        const openOnly = filter === "status ne 'completed'";
+        return json({
+          value: tasks
+            .filter(({ status }) => !openOnly || status !== "completed")
+            .map(taskAnswer),
+        });
+      }
+    ),
+    route(
+      "POST",
+      `${lists}/(?<list>[^/]+)/tasks`,
+      async ({ mailbox, list, request }) => {
+        const owner = opened(mailbox, list, request);
+        if (owner instanceof Response) {
+          return owner;
+        }
+        const body: unknown = await request.json();
+        const { title, body: note, dueDateTime } = todoTaskSchema.parse(body);
+        const now = new Date().toISOString();
+        const task: TodoTask = {
+          id: `AAkALgAAAAAAHYQDEapmEc2byACqAC-EWg0A${crypto.randomUUID().replaceAll("-", "")}=`,
+          title,
+          status: "notStarted",
+          body: note ?? { contentType: "text", content: "" },
+          ...(dueDateTime === undefined ? {} : { dueDateTime }),
+          createdDateTime: now,
+          lastModifiedDateTime: now,
+        };
+        const tag = tagOf(body);
+        tasksOf(owner, list).push({
+          ...task,
+          ...(tag === undefined ? {} : { tag }),
+        });
+        return json(taskAnswer(task), 201);
+      }
+    ),
+    route(
+      "PATCH",
+      `${lists}/(?<list>[^/]+)/tasks/(?<task>[^/]+)`,
+      async ({ mailbox, list, task: id, request }) => {
+        const owner = opened(mailbox, list, request);
+        if (owner instanceof Response) {
+          return owner;
+        }
+        const task = tasksOf(owner, list).find((each) => each.id === id);
+        if (task === undefined) {
+          return json(notFound, 404);
+        }
+        const { status } = z
+          .object({ status: z.string() })
+          .parse(await request.json());
+        const now = new Date().toISOString();
+        task.status = status;
+        task.lastModifiedDateTime = now;
+        if (status === "completed") {
+          task.completedDateTime = {
+            dateTime: now.replace("Z", ""),
+            timeZone: "UTC",
+          };
+        }
+        return json(taskAnswer(task));
+      }
+    ),
+  ];
+};
+
 /** SharePoint's answer to a download: the file, or a second redirect. */
 const sharePointAnswer = (url: URL): Response => {
   const id = url.searchParams.get("UniqueId");
@@ -703,10 +920,17 @@ const sharePointAnswer = (url: URL): Response => {
   });
 };
 
-/** Graph, SharePoint and the rest of the internet, for each test in the file. */
-export const fakeGraph = () => {
+/**
+ * Graph, SharePoint and the rest of the internet, for each test in the
+ * file. Given the OAuth providers, Graph knows whose each token is, and
+ * opens a person's To Do to their own token only; without them, it opens
+ * no one's.
+ */
+export const fakeGraph = (providers?: ReturnType<typeof fakeProviders>) => {
   beforeEach(() => {
     tagged.clear();
+    todoTasks.clear();
+    sharedSince.clear();
     duringLookup = undefined;
     events.clear();
     taggedEvents.clear();
@@ -714,10 +938,25 @@ export const fakeGraph = () => {
     attendeesLeftOut = undefined;
     resetWorkbooks();
   });
+  /** The subject of the token's account, if `mailbox` is that account. */
+  const ownerOf = (mailbox: string, request: Request): string | undefined => {
+    const token = (request.headers.get("authorization") ?? "").replace(
+      "Bearer ",
+      ""
+    );
+    const account = providers?.state.holders.get(token);
+    if (account === undefined) {
+      return undefined;
+    }
+    const isThem =
+      mailbox.toLowerCase() === account.email.toLowerCase() ||
+      mailbox === account.subject;
+    return isThem ? account.subject : undefined;
+  };
   const { sent, writesDone, fail } = fakeProvider({
     hosts: [graphHost],
     parts,
-    routes: graphRoutes,
+    routes: [...graphRoutes, ...todoRoutes(ownerOf)],
     unmatched: () =>
       json(
         { error: { code: "BadRequest", message: "Unsupported request" } },
@@ -815,6 +1054,10 @@ export const fakeGraph = () => {
     /** The rows of workbook `id`'s supplier table, as Excel holds them. */
     supplierRowsOf: (id: string): readonly SheetCell[][] =>
       workbooks.get(id)?.get(supplierTable)?.rows ?? [],
+    /** The person shares their own To Do list `id` with someone. */
+    shareList: (id: string) => {
+      sharedSince.add(id);
+    },
     sharePointHost,
   };
 };

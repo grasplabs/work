@@ -58,6 +58,7 @@ import {
   spoofedId,
   supplierColumns,
   supplierTable,
+  todoListIds,
   totalsRange,
   workbookIds,
 } from "./fixtures/graph.ts";
@@ -81,7 +82,7 @@ import type { Connection, Input } from "./tool-calls.ts";
 // that one, by construction.
 
 const providers = fakeProviders();
-const graph = fakeGraph();
+const graph = fakeGraph(providers);
 const audit = auditEvents();
 
 /** Someone's Microsoft 365 connection, made through OAuth. */
@@ -130,6 +131,13 @@ const mailboxInputs: Record<string, Input> = {
     end: "2026-10-05T00:00:00Z",
   },
   "calendar.get": { event: eventId(ceo, 1) },
+  "todo.lists": {},
+  "todo.tasks": { list: todoListIds.tasks },
+  "todo.create": { list: todoListIds.tasks, title: "Send the signed contract" },
+  "todo.complete": {
+    list: todoListIds.tasks,
+    task: "AAkALgAAAAAAHYQDEapmEc2b=",
+  },
   "calendar.create": {
     subject: "Focus time",
     start: "2026-10-26T14:00",
@@ -2364,6 +2372,257 @@ describe("the Microsoft 365 connector's right to change files", () => {
   });
 });
 
+/** The person's own mailbox, as their To Do is named. */
+const ownMailbox = ({ person }: Connection): string => person.email;
+
+/** The id of the task a To Do tool answered with. */
+const taskIdOf = (created: unknown): string =>
+  z.object({ task: z.object({ id: z.string() }) }).parse(created).task.id;
+
+describe("the Microsoft 365 connector's To Do tools", () => {
+  /** Calls `action` for the person's own To Do. */
+  const todo = async (
+    connection: Connection,
+    action: string,
+    input: Input,
+    idempotencyKey?: string
+  ) =>
+    await outputOf(
+      call(
+        connection,
+        action,
+        { mailbox: ownMailbox(connection), ...input },
+        {
+          resource: ownMailbox(connection),
+          ...(idempotencyKey === undefined ? {} : { idempotencyKey }),
+        }
+      )
+    );
+
+  const followUp = {
+    list: todoListIds.tasks,
+    title: "Send Northwind the signed contract",
+    note: "Promised in Tuesday's call.",
+    due: "2026-10-30",
+  };
+
+  it("list only the person's own To Do lists", async () => {
+    const connection = await connected();
+    // Only the list that is theirs alone: neither the one they shared nor
+    // the one shared with them.
+    await expect(todo(connection, "todo.lists", {})).resolves.toStrictEqual({
+      mailbox: ownMailbox(connection),
+      lists: [
+        { id: todoListIds.tasks, name: "Tasks", wellknownName: "defaultList" },
+      ],
+      nextPage: null,
+    });
+  });
+
+  it("make a task in the person's own list with its due day, and complete it", async () => {
+    const connection = await connected();
+    const created = await todo(
+      connection,
+      "todo.create",
+      followUp,
+      "run-3:follow-up"
+    );
+    expect(created).toMatchObject({
+      mailbox: ownMailbox(connection),
+      listId: todoListIds.tasks,
+      task: {
+        title: followUp.title,
+        status: "notStarted",
+        due: { dateTime: "2026-10-30T12:00:00", timeZone: "UTC" },
+        completedAt: null,
+      },
+    });
+    const id = taskIdOf(created);
+    const open = { list: todoListIds.tasks, openOnly: true };
+    await expect(todo(connection, "todo.tasks", open)).resolves.toMatchObject({
+      tasks: [{ id, title: followUp.title }],
+    });
+    await expect(
+      todo(
+        connection,
+        "todo.complete",
+        { list: todoListIds.tasks, task: id },
+        "run-3:done"
+      )
+    ).resolves.toMatchObject({
+      task: { id, status: "completed", completedAt: { timeZone: "UTC" } },
+    });
+    await expect(todo(connection, "todo.tasks", open)).resolves.toMatchObject({
+      tasks: [],
+    });
+    await expect(
+      todo(connection, "todo.tasks", { list: todoListIds.tasks })
+    ).resolves.toMatchObject({ tasks: [{ id, status: "completed" }] });
+  });
+
+  it("refuse another person's To Do, and lists shared with or by the person", async () => {
+    const connection = await connected();
+    // A capability for a colleague's mailbox: Graph opens no To Do but the
+    // token's own user's.
+    await expect(
+      toolError(
+        call(connection, "todo.lists", { mailbox: ceo }, { resource: ceo })
+      )
+    ).resolves.toMatchObject({ error: { code: "access_denied" } });
+    await expect(
+      toolError(
+        call(
+          connection,
+          "todo.create",
+          { ...followUp, mailbox: ceo },
+          { resource: ceo, idempotencyKey: "run-4:theirs" }
+        )
+      )
+    ).resolves.toMatchObject({ error: { code: "access_denied" } });
+    // A list shared either way reaches someone else: nothing is read,
+    // made or completed in it.
+    const calls: [string, Input][] = [
+      todoListIds.sharedWithThem,
+      todoListIds.sharedByThem,
+    ].flatMap((list): [string, Input][] => [
+      ["todo.tasks", { list }],
+      ["todo.create", { ...followUp, list }],
+      ["todo.complete", { list, task: "AAkALgAAAAAAHYQDEapmEc2b=" }],
+    ]);
+    const refusals = await Promise.all(
+      calls.map(
+        async ([action, input]) =>
+          await toolError(
+            call(
+              connection,
+              action,
+              { mailbox: ownMailbox(connection), ...input },
+              {
+                resource: ownMailbox(connection),
+                idempotencyKey: crypto.randomUUID(),
+              }
+            )
+          )
+      )
+    );
+    expect(refusals).toMatchObject(
+      calls.map(() => ({ error: { code: "access_denied" } }))
+    );
+    expect(graph.writesDone()).toBe(0);
+  });
+
+  it("find a task whose answer was lost by the tag it carries, and never make it twice", async () => {
+    const connection = await connected();
+    // Older tasks fill Graph's first page, so the lost one is on a later
+    // page.
+    await Promise.all(
+      ["one", "two", "three"].map(
+        async (n) =>
+          await todo(
+            connection,
+            "todo.create",
+            { ...followUp, title: `Earlier follow-up ${n}` },
+            `run-5:earlier-${n}`
+          )
+      )
+    );
+    graph.loseWriteAnswer();
+    await expect(
+      outcome(
+        call(
+          connection,
+          "todo.create",
+          { mailbox: ownMailbox(connection), ...followUp },
+          {
+            resource: ownMailbox(connection),
+            idempotencyKey: "run-5:follow-up",
+          }
+        )
+      )
+    ).resolves.toBe("connect.outcome_unknown");
+    await claimedAgo(connection);
+    const found = await todo(
+      connection,
+      "todo.create",
+      followUp,
+      "run-5:follow-up"
+    );
+    await expect(
+      todo(connection, "todo.create", followUp, "run-5:follow-up")
+    ).resolves.toStrictEqual(found);
+    expect(found).toMatchObject({ task: { title: followUp.title } });
+    // The three earlier tasks and the lost one, each made once.
+    expect(graph.writesDone()).toBe(4);
+    const { tasks } = z
+      .object({
+        tasks: z.array(z.object({ id: z.string(), title: z.string() })),
+      })
+      .parse(await todo(connection, "todo.tasks", { list: todoListIds.tasks }));
+    expect(
+      tasks.filter(({ title }) => title === followUp.title).map(({ id }) => id)
+    ).toStrictEqual([taskIdOf(found)]);
+  });
+
+  it("refuse a due day that doesn't exist before anything goes out", async () => {
+    const connection = await connected();
+    const sent = graph.sent.length;
+    await expect(
+      toolError(
+        call(
+          connection,
+          "todo.create",
+          { mailbox: ownMailbox(connection), ...followUp, due: "2026-02-30" },
+          {
+            resource: ownMailbox(connection),
+            idempotencyKey: "run-7:follow-up",
+          }
+        )
+      )
+    ).resolves.toBe("Invalid input: custom at due");
+    expect(graph.sent).toHaveLength(sent);
+  });
+
+  it("read no task of a list the person shared after its answer was lost", async () => {
+    const connection = await connected();
+    graph.loseWriteAnswer();
+    await expect(
+      outcome(
+        call(
+          connection,
+          "todo.create",
+          { mailbox: ownMailbox(connection), ...followUp },
+          {
+            resource: ownMailbox(connection),
+            idempotencyKey: "run-6:follow-up",
+          }
+        )
+      )
+    ).resolves.toBe("connect.outcome_unknown");
+    await claimedAgo(connection);
+    graph.shareList(todoListIds.tasks);
+    const tasksRead = () =>
+      graphPaths().filter((path) => path.endsWith("/tasks")).length;
+    const before = tasksRead();
+    await expect(
+      outcome(
+        call(
+          connection,
+          "todo.create",
+          { mailbox: ownMailbox(connection), ...followUp },
+          {
+            resource: ownMailbox(connection),
+            idempotencyKey: "run-6:follow-up",
+          }
+        )
+      )
+    ).resolves.toBe("connect.outcome_unknown");
+    // The list is no longer the person's alone: the task isn't looked for
+    // in it, so the outcome stays unknown. Only the POST that made the task
+    // went to its tasks, before the list was shared.
+    expect(tasksRead()).toBe(before);
+  });
+});
+
 describe("the Microsoft 365 connector's answers", () => {
   it("free a move's key when its folder lookup is throttled, so a retry moves once", async () => {
     const connection = await connected();
@@ -2563,6 +2822,7 @@ const readOnlyCalendars = [
   "Files.Read.All",
   "Files.ReadWrite.All",
   "Sites.Read.All",
+  "Tasks.ReadWrite",
 ];
 
 const graphScope = /^[A-Z]/u;
