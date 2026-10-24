@@ -95,10 +95,12 @@ export const signedCall = async (
   decision?: CapabilityDecision
 ) => {
   await authorize(env, authority, connection, action, permissionId, context);
+  // Its context first: one that doesn't exist, or isn't its caller's,
+  // refuses the call whatever it is.
+  const restricted = await isRestricted(env, authority, context);
   // The chat's agent may call only the classes the company turned on for
   // its person: one that is off never reaches connect (tool-classes.ts).
   await requireToolClassOn(env, authority, connection, action);
-  const restricted = await isRestricted(env, authority, context);
   const scope = {
     connectionId: connection.connectionId,
     resource: connection.resource,
