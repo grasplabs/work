@@ -10,6 +10,7 @@ import type {
   DeclaredPermission,
   Authority,
 } from "@grasp-os/shared/permissions";
+import { quotaLimitsSchema } from "@grasp-os/shared/quota-policy";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
@@ -1192,6 +1193,59 @@ describe("the built-in blueprints", () => {
     }).toStrictEqual({
       refused: "workflow.definition_invalid",
       workflows: [],
+      apps: [],
+    });
+
+    await reinstall();
+  });
+
+  it("delete the workflows they made for a copy refused partway through making them", async () => {
+    await reinstall();
+    const builder = await signedInApi(idp, "builder");
+    const contract = `fixture/greeter-${unique()}`;
+    await expect(
+      install(
+        releaseWith({
+          contracts: [{ key: contract, kind: "model" }],
+          workflows: [
+            { alias: "greet", binding: "GREET", definition: greeter(contract) },
+            { alias: "wave", binding: "WAVE", definition: greeter(contract) },
+          ],
+        })
+      )
+    ).resolves.toBeTruthy();
+    // Room for one workflow: the second is refused once the first is made.
+    const configured = quotaLimitsSchema.parse(env.QUOTA_LIMITS);
+    env.QUOTA_LIMITS = {
+      generation: configured.generation + 200,
+      limits: { ...configured.limits, workflowResourcesPerPerson: 1 },
+    };
+    let refused: string;
+    try {
+      refused = await outcome(
+        builder.api.apps.blueprints.create("hello", { name: "Partway" })
+      );
+    } finally {
+      env.QUOTA_LIMITS = {
+        generation: configured.generation + 201,
+        limits: configured.limits,
+      };
+    }
+    const counted = await env.DB.prepare(
+      "SELECT count(*) AS made, count(*) FILTER (WHERE deleted_at IS NULL) AS live FROM workflow_resources WHERE owner_id = ?"
+    )
+      .bind(builder.userId)
+      .first<{ made: number; live: number }>();
+    const listed = await builder.api.apps.list();
+    expect({
+      refused,
+      made: counted?.made,
+      live: counted?.live,
+      apps: listed.filter(({ name }) => name === "Partway"),
+    }).toStrictEqual({
+      refused: "workflow.resource_limit",
+      made: 1,
+      live: 0,
       apps: [],
     });
 

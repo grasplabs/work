@@ -146,9 +146,9 @@ import { workflowCallsIn } from "./workflows/code.ts";
 // - A failure halfway: every definition is checked as publication checks
 //   it before any workflow is made, so a definition that wouldn't publish
 //   makes none. The workflows are created and published before the App's
-//   batch; if the batch is refused, they are deleted (`discardShipped`),
-//   and one a deletion misses stays the creator's own, bound to nothing
-//   and allowed nothing. Either way each counts toward the creator's
+//   batch; if one of them fails, or the batch is refused, those made are
+//   deleted (`discardShipped`), and one a deletion misses stays the
+//   creator's own, bound to nothing and allowed nothing. Either way each counts toward the creator's
 //   quota, which deleted workflows do too.
 //
 // A built-in's code was reviewed with the platform that ships it, so the
@@ -282,6 +282,30 @@ interface ShippedWorkflow {
 }
 
 /**
+ * Deletes the workflows made for a copy that was refused, before or at
+ * its batch, which nothing binds and nothing may start: best-effort, as
+ * the creator may delete one left behind themselves. Each still counts toward their quota,
+ * as any deleted workflow does.
+ */
+const discardShipped = async (
+  env: Env,
+  by: Acting,
+  workflows: readonly Pick<ShippedWorkflow, "workflowId">[]
+): Promise<void> => {
+  for (const { workflowId } of workflows) {
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- a few, one at a time
+      await deleteWorkflowResource(env, by, workflowId);
+    } catch (error) {
+      log.warn("blueprints.workflow_discard_failed", {
+        workflowId,
+        ...errorFields(error),
+      });
+    }
+  }
+};
+
+/**
  * Creates and publishes, for `by`, a workflow of their own of each one
  * `shipped` lists (see above): created and published one at a time, as
  * `by` would themselves.
@@ -316,46 +340,31 @@ const createShippedWorkflows = async (
     }
   }
   const created: ShippedWorkflow[] = [];
-  for (const { alias, binding, name, definition } of named) {
-    // oxlint-disable-next-line no-await-in-loop -- a few, one at a time
-    const workflow = await createWorkflowResource(env, by, name);
-    // oxlint-disable-next-line no-await-in-loop -- after its creation
-    const published = await publishWorkflowVersion(env, by, workflow.id, {
-      definition,
-      basedOn: null,
-    });
-    created.push({
-      alias,
-      binding,
-      workflowId: workflow.id,
-      version: published.version,
-    });
-  }
-  return created;
-};
-
-/**
- * Deletes the workflows made for a copy whose batch was refused, which
- * nothing binds and nothing may start: best-effort, as the creator may
- * delete one left behind themselves. Each still counts toward their quota,
- * as any deleted workflow does.
- */
-const discardShipped = async (
-  env: Env,
-  by: Acting,
-  workflows: readonly ShippedWorkflow[]
-): Promise<void> => {
-  for (const { workflowId } of workflows) {
-    try {
+  // Every workflow made so far, published or not: deleted if a later one
+  // fails, so a refused copy leaves none behind.
+  const made: { workflowId: string }[] = [];
+  try {
+    for (const { alias, binding, name, definition } of named) {
       // oxlint-disable-next-line no-await-in-loop -- a few, one at a time
-      await deleteWorkflowResource(env, by, workflowId);
-    } catch (error) {
-      log.warn("blueprints.workflow_discard_failed", {
-        workflowId,
-        ...errorFields(error),
+      const workflow = await createWorkflowResource(env, by, name);
+      made.push({ workflowId: workflow.id });
+      // oxlint-disable-next-line no-await-in-loop -- after its creation
+      const published = await publishWorkflowVersion(env, by, workflow.id, {
+        definition,
+        basedOn: null,
+      });
+      created.push({
+        alias,
+        binding,
+        workflowId: workflow.id,
+        version: published.version,
       });
     }
+  } catch (error) {
+    await discardShipped(env, by, made);
+    throw error;
   }
+  return created;
 };
 
 const toBlueprint = (row: Row): Blueprint => ({
