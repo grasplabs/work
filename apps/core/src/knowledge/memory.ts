@@ -38,7 +38,11 @@ import {
 } from "../db/knowledge/schema.ts";
 import { isRestricted } from "../restricted.ts";
 import type { WorkContext } from "../restricted.ts";
-import { noteProvenance, readableForPerson } from "./access.ts";
+import {
+  audienceCondition,
+  noteProvenance,
+  readableForPerson,
+} from "./access.ts";
 import { ensureCollection } from "./collections.ts";
 import type { CollectionRow } from "./collections.ts";
 import { writeVersion } from "./documents.ts";
@@ -163,12 +167,14 @@ interface Found {
 
 /**
  * The files of `wanted` that exist and that the person `userId` may read,
- * with their versions now, in `wanted`'s order. An App's AGENTS.md needs
+ * with their versions now, in `wanted`'s order; working in a chat others
+ * share, only those every one of them may read. An App's AGENTS.md needs
  * the person to be able to read the App's code: one of its builders.
  */
 const findFiles = async (
   env: Env,
   userId: string,
+  work: WorkContext,
   wanted: Wanted[]
 ): Promise<Found[]> => {
   const role = await memberRole(env.DB, userId);
@@ -200,7 +206,8 @@ const findFiles = async (
                   )
                 )
               ),
-              await readableForPerson(env, db, userId)
+              await readableForPerson(env, db, userId),
+              await audienceCondition(env, work)
             )
           );
   const found: Found[] = [];
@@ -405,7 +412,7 @@ export const forContext = async (
   const found =
     wanted.length === 0
       ? []
-      : await findFiles(env, authority.onBehalfOf, wanted);
+      : await findFiles(env, authority.onBehalfOf, work, wanted);
   const key = await sha256Hex(
     JSON.stringify(
       found.map(({ wanted: { source, name, at }, documentId, version }) => [

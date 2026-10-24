@@ -134,6 +134,13 @@
       "when": 1792790356767,
       "tag": "0018_chat_tool_events",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "6",
+      "when": 1792852913081,
+      "tag": "0019_chat_thread",
+      "breakpoints": true
     }
   ]
 }

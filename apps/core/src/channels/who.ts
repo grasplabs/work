@@ -4,6 +4,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { activeMember } from "../auth/auth.ts";
 import { providerIds } from "../auth/config.ts";
 import { accounts } from "../db/core/schema.ts";
+import { inList } from "../db/d1.ts";
 import { personOnChannel } from "./accounts.ts";
 
 // Who is writing on a chat platform, by the id the platform verified and
@@ -61,4 +62,31 @@ export const writerOf = async (
   }
   const userId = await personOnChannel(env, platform, senderId);
   return userId === null ? { kind: "unknown" } : { kind: "member", userId };
+};
+
+/**
+ * The organization's active members among the Teams users whose Entra
+ * object ids are `oids`, by object id: their user ids. Anyone else (no
+ * longer a member, or unknown to Grasp) isn't in it.
+ */
+export const teamsMembers = async (
+  env: Env,
+  oids: readonly string[]
+): Promise<Map<string, string>> => {
+  if (oids.length === 0) {
+    return new Map();
+  }
+  const rows = await drizzle(env.DB)
+    .select({ oid: accounts.oid, userId: accounts.userId })
+    .from(accounts)
+    .where(
+      and(
+        inList(accounts.oid, oids),
+        eq(accounts.providerId, providerIds.entra),
+        activeMember(accounts.userId)
+      )
+    );
+  return new Map(
+    rows.flatMap(({ oid, userId }) => (oid === null ? [] : [[oid, userId]]))
+  );
 };

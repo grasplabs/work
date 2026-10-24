@@ -20,6 +20,8 @@ import type { ChannelLocale } from "./words.ts";
 // platform's name), found or made on their first message, with what it
 // cited; the answer goes back to the conversation they wrote in. The door
 // has already checked who wrote (door.ts), so the Workspace takes its word.
+// Asked in a group chat or channel, it is their one chat for that thread,
+// and its agent reads only what everyone in it may (knowledge/access.ts).
 //
 // While the turn runs, the platform shows Stephen typing, sent again every
 // few seconds, as a typing indicator lasts only that long, until the
@@ -185,7 +187,11 @@ const answerOne = async (
     userId,
     thread,
     afterward,
-  }: Pick<ChannelMessage, "platform" | "userId" | "thread" | "afterward">,
+    shared,
+  }: Pick<
+    ChannelMessage,
+    "platform" | "userId" | "thread" | "afterward" | "shared"
+  >,
   text: string,
   locale: ChannelLocale
 ): Promise<void> => {
@@ -198,7 +204,8 @@ const answerOne = async (
       chatAgentId,
       platform,
       text,
-      streaming?.onText
+      streaming?.onText,
+      shared === undefined ? undefined : { thread: thread.id, ...shared }
     );
   } catch (error) {
     stopTyping();

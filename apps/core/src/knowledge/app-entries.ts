@@ -86,12 +86,17 @@ export const authorize = async (
   reader: Reader
 ): Promise<Readable> => {
   const db = drizzle(env.KNOWLEDGE);
-  const { condition } = await collectionsAllowed(env, db, reader);
+  const { condition, shared } = await collectionsAllowed(env, db, reader);
   const rows = await db
     .select({ id: collections.id })
     .from(collections)
     .where(condition);
   const ids = rows.map(({ id }) => id);
+  // Who may open an App is decided person by person: in a chat others
+  // share, the asker's Apps would reach people who can't open them.
+  if (shared) {
+    return { collections: ids, only: { [appsCollectionId]: [] } };
+  }
   const person = ids.includes(appsCollectionId)
     ? await personOf(env, reader)
     : undefined;

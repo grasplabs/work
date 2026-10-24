@@ -31,14 +31,6 @@ const lines = {
   // Who may not talk to him: each gets one line, and nothing they sent is
   // read.
 
-  /** A group chat or a channel: he answers one person at a time. */
-  privateOnly: {
-    en: "I only answer in a private chat. Send me a direct message, and I'll help you there.",
-    nl: "Ik antwoord alleen in een privéchat. Stuur me een direct bericht, dan help ik je daar.",
-    de: "Ich antworte nur im privaten Chat. Schreiben Sie mir eine Direktnachricht, dann helfe ich Ihnen dort.",
-    fr: "Je ne réponds que dans une conversation privée. Envoyez-moi un message direct, et je vous aiderai là-bas.",
-    es: "Solo respondo en un chat privado. Envíame un mensaje directo y te ayudaré allí.",
-  },
   /** Someone from another company. */
   otherCompany: {
     en: "I only work for the people of the company that set me up, so I can't help you here.",

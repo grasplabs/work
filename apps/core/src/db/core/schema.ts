@@ -306,6 +306,25 @@ export const channelConversations = sqliteTable(
 );
 
 /**
+ * Who is in a chat that others share, a group chat or channel on a chat
+ * platform, as its agent reads for it (`knowledge/access.ts`): kept by the
+ * Workspace object that holds the chat, before each turn, from the
+ * platform's roster then. The agent reads only what every member may
+ * read, and nothing at all with `outsiders` in it: anyone Grasp can't name
+ * as one of the organization's active members (a guest, another company,
+ * someone the roster couldn't say).
+ */
+export const chatAudiences = sqliteTable("chat_audiences", {
+  chatId: text("chat_id").primaryKey(),
+  /** The Workspace object that holds the chat. */
+  workspaceId: text("workspace_id").notNull(),
+  /** The members Grasp knows, by user id. */
+  members: text({ mode: "json" }).$type<string[]>().notNull(),
+  outsiders: integer({ mode: "boolean" }).notNull(),
+  updatedAt: timestamp("updated_at").notNull(),
+});
+
+/**
  * Part of the organization plugin's model. Invitations aren't offered: people
  * join by signing in with the deployment's IdP.
  */

@@ -22,13 +22,20 @@ export const botConnectorFake = (bot: {
   const posted: { conversation: string; activity: unknown }[] = [];
   /** Conversations where Teams refuses a streamed message. */
   const unstreamed = new Set<string>();
-  /** Every roster read, as `<conversation> <user id>`. */
+  /**
+   * Every roster read, as `<conversation> <user id>`, or `<conversation> *`
+   * for a page of the whole roster.
+   */
   const asked: string[] = [];
   /** The roster: `<conversation> <user id>` to what Teams says of them. */
   const members: Record<string, unknown> = {};
 
   const membersPath =
     /\/v3\/conversations\/(?<conversation>[^/]+)\/members\/(?<member>[^/]+)$/u;
+  const rosterPath =
+    /\/v3\/conversations\/(?<conversation>[^/]+)\/pagedMembers$/u;
+  /** Members a roster page holds here: small, so tests page through. */
+  const rosterPageSize = 2;
   const activitiesPath =
     /\/v3\/conversations\/(?<conversation>[^/]+)\/activities(?:\/[^/]+)?$/u;
 
@@ -53,6 +60,20 @@ export const botConnectorFake = (bot: {
     });
   };
 
+  /** One page of `conversation`'s whole roster, from the token `url` names. */
+  const rosterPage = (conversation: string, url: URL): Response => {
+    asked.push(`${conversation} *`);
+    const everyone = Object.entries(members)
+      .filter(([key]) => key.startsWith(`${conversation} `))
+      .map(([, member]) => member);
+    const from = Number(url.searchParams.get("continuationToken") ?? "0");
+    const to = from + rosterPageSize;
+    return Response.json({
+      members: everyone.slice(from, to),
+      ...(to < everyone.length ? { continuationToken: String(to) } : {}),
+    });
+  };
+
   const botConnector = async (request: Request, url: URL) => {
     const bearer = (request.headers.get("authorization") ?? "").replace(
       /^Bearer /u,
@@ -68,6 +89,10 @@ export const botConnectorFake = (bot: {
       return Object.hasOwn(members, key)
         ? Response.json(members[key])
         : Response.json({ error: { code: "MemberNotFound" } }, { status: 404 });
+    }
+    const roster = rosterPath.exec(url.pathname)?.groups;
+    if (request.method === "GET" && roster !== undefined) {
+      return rosterPage(decodeURIComponent(roster.conversation ?? ""), url);
     }
     const activity = activitiesPath.exec(url.pathname)?.groups;
     if (request.method === "POST" && activity !== undefined) {

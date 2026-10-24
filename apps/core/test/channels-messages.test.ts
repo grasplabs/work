@@ -11,7 +11,7 @@ import {
 import { says } from "./agent-chat.ts";
 import { mockIdp } from "./idp.ts";
 import { acmeTenant, otherTenant } from "./sign-in-config.ts";
-import { signedInApi, unique } from "./sign-in.ts";
+import { signedInApi } from "./sign-in.ts";
 import {
   kept,
   member,
@@ -196,31 +196,6 @@ describe("someone who isn't one of the client's people", () => {
     expect(lines).toStrictEqual([
       "Ich helfe nur den eigenen Leuten des Unternehmens, nicht seinen Gästen, deshalb kann ich Ihnen hier nicht helfen.",
     ]);
-  });
-});
-
-describe("a group chat or a channel", () => {
-  it("gets one line, even from a known person, and nothing is taken", async () => {
-    const { teams } = await member(idp);
-    const group = `19:${unique()}@thread.v2`;
-
-    await post(
-      messageFrom(teams, {
-        conversation: {
-          id: group,
-          conversationType: "groupChat",
-          tenantId: acmeTenant,
-        },
-      })
-    );
-
-    await expect(kept(group)).resolves.toStrictEqual([]);
-    await expect(reached(group)).resolves.toMatchObject({
-      lines: [
-        "I only answer in a private chat. Send me a direct message, and I'll help you there.",
-      ],
-      asked: [],
-    });
   });
 });
 
