@@ -424,6 +424,14 @@ export interface ConnectionOwner {
    * an address may receive in another mailbox.
    */
   accountSenders: string[];
+  /**
+   * For a Composio connection: the class connect takes each tool it
+   * offers to be (its review's, and the admin's rule: connect's
+   * `allowedTool`), by the tool's name. Core holds the chat's agent's calls
+   * of them to the classes the company turned on. Absent for a native
+   * connection, whose classes core reads from the release.
+   */
+  toolClasses?: Record<string, Exclude<ToolClass, "never">>;
 }
 
 /**
@@ -534,6 +542,14 @@ export interface ConnectionsApi {
     toolClass: CompanyToolClass,
     audience: ToolClassAudience
   ) => Promise<void>;
+  /** The company apps Stephen is pointed at, and for whom. Admins only. */
+  appPointers: () => Promise<AppPointerSetting[]>;
+  /**
+   * Points Stephen at a company app's connection (a Composio one), for
+   * everyone or some teams, or for nobody: its reads there, only within
+   * `resources` when it names any. Admins only, never Grasp staff; audited.
+   */
+  pointApp: (request: PointApp) => Promise<void>;
   /** The shared mailboxes Stephen is pointed at, and for whom. Admins only. */
   sharedMailboxes: () => Promise<SharedMailboxSetting[]>;
   /**
@@ -904,6 +920,36 @@ export const sharedMailboxSchema = z
  */
 export interface SharedMailboxSetting {
   mailbox: string;
+  audience: ToolClassAudience;
+  /** The admin who last changed it. */
+  changedBy: string;
+  /** ISO 8601. */
+  changedAt: string;
+}
+
+/** Most resources one app pointer names. */
+export const appPointerResourcesMax = 50;
+
+/** What an admin points Stephen at in a company app (`pointApp`). */
+export const pointAppSchema = z.strictObject({
+  connectionId: identifierSchema,
+  /**
+   * The resources his reads there may name, as the admin's rule for a
+   * tool names its resource property (a pipeline, a ticket queue, a
+   * register); none is the whole app.
+   */
+  resources: z.array(identifierSchema).max(appPointerResourcesMax),
+  audience: toolClassAudienceSchema,
+});
+export type PointApp = z.input<typeof pointAppSchema>;
+
+/**
+ * A company app Stephen is pointed at: he reads there (Read company) for
+ * the people `audience` takes in, within `resources` when it names any.
+ */
+export interface AppPointerSetting {
+  connectionId: string;
+  resources: string[];
   audience: ToolClassAudience;
   /** The admin who last changed it. */
   changedBy: string;
@@ -1961,6 +2007,10 @@ export const connectErrors = defineErrorFamily({
     "It isn't known what kind of action this is, so it wasn't done.",
   "connect.never":
     "Grasp never deletes, shares, forwards, sets rules or settings, or pays, whatever is allowed, so it wasn't done.",
+  "connect.app_not_pointed":
+    "Your company hasn't pointed Grasp at this app for you, so it wasn't read. An admin can.",
+  "connect.resource_not_pointed":
+    "Your company pointed Grasp at other parts of this app for you, not this one, so it wasn't read.",
   "connect.mailbox_not_pointed":
     "This mailbox isn't yours, and your company hasn't pointed Grasp at it for you, so nothing was done in it. An admin can.",
 });

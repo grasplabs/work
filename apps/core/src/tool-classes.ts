@@ -10,6 +10,7 @@ import {
 } from "@grasp-os/shared/connect";
 import type {
   CompanyToolClass,
+  ConnectionOwner,
   ToolClass,
   ToolClassAudience,
   ToolClassSetting,
@@ -23,6 +24,7 @@ import { z } from "zod";
 
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import {
+  appPointers,
   sharedMailboxPointers,
   teamMembers,
   teams,
@@ -289,6 +291,85 @@ export const takesIn = async (
   return membership !== undefined;
 };
 
+/**
+ * What core signs into the capability of a call it let through: for a read
+ * in a company app pointed at within some resources, those resources.
+ */
+export interface ClassedCall {
+  resources?: string[];
+}
+
+/**
+ * The pointer at the company app `connectionId` that takes in the person
+ * `userId` (app-pointers.ts), if there is one: the resources it names.
+ */
+export const appPointerFor = async (
+  env: Env,
+  connectionId: string,
+  userId: string
+): Promise<{ resources: string[] } | undefined> => {
+  const row = await drizzle(env.DB)
+    .select()
+    .from(appPointers)
+    .where(eq(appPointers.connectionId, connectionId))
+    .get();
+  const audience = row === undefined ? undefined : audienceOf(row);
+  if (
+    row === undefined ||
+    audience === undefined ||
+    !(await takesIn(env, audience, userId))
+  ) {
+    return undefined;
+  }
+  let resources: unknown;
+  try {
+    resources = JSON.parse(row.resources);
+  } catch {
+    // Unreadable: no pointer, never more than the admin chose.
+    return undefined;
+  }
+  const parsed = storedTeamsSchema.safeParse(resources);
+  return parsed.success ? { resources: parsed.data } : undefined;
+};
+
+/**
+ * Refuses the chat's agent's call of a company app's tool (a Composio
+ * one) whose class is off for its person: by the class connect takes the
+ * tool to be (`ConnectionOwner.toolClasses`), `connect.class_unknown` for
+ * one it doesn't offer. Reading there is Read company, which an admin
+ * turns on app by app, by pointing the agent at it (`appPointerFor`):
+ * `connect.app_not_pointed` without a pointer for its person. The rest
+ * follow the company's classes.
+ */
+const requireAppClassOn = async (
+  env: Env,
+  authority: Authority,
+  owner: ConnectionOwner,
+  action: string
+): Promise<ClassedCall> => {
+  const toolClass =
+    owner.toolClasses !== undefined && Object.hasOwn(owner.toolClasses, action)
+      ? owner.toolClasses[action]
+      : undefined;
+  if (toolClass === undefined) {
+    throw connectErrors.create("connect.class_unknown");
+  }
+  if (toolClass === "read-company") {
+    const pointer = await appPointerFor(env, owner.id, authority.onBehalfOf);
+    if (pointer === undefined) {
+      throw connectErrors.create("connect.app_not_pointed");
+    }
+    return pointer.resources.length === 0
+      ? {}
+      : { resources: pointer.resources };
+  }
+  const audience = await audienceNow(env, toolClass);
+  if (!(await takesIn(env, audience, authority.onBehalfOf))) {
+    throw connectErrors.create("connect.class_off");
+  }
+  return {};
+};
+
 /** A mail tool's class in its person's own mailbox. */
 const inOwnMailbox: Readonly<Record<CompanyToolClass, CompanyToolClass>> = {
   "read-own": "read-own",
@@ -311,18 +392,16 @@ export const requireToolClassOn = async (
   authority: Authority,
   connection: ConnectionObject,
   action: string
-): Promise<void> => {
+): Promise<ClassedCall> => {
   if (authority.subject.type !== "agent") {
-    return;
+    return {};
   }
   const [owner] = await env.CONNECT.connectionOwners([connection.connectionId]);
   if (owner === undefined) {
     throw connectErrors.create("connect.connection_not_found");
   }
-  // Composio's tools get their class when their contract is generated
-  // (GRA-762); until then they run as their admin allowed them.
   if (owner.source === "composio") {
-    return;
+    return await requireAppClassOn(env, authority, owner, action);
   }
   const toolClass = nativeClasses.get(owner.provider)?.get(action);
   if (toolClass === undefined) {
@@ -343,4 +422,5 @@ export const requireToolClassOn = async (
   if (!(await takesIn(env, audience, authority.onBehalfOf))) {
     throw connectErrors.create("connect.class_off");
   }
+  return {};
 };

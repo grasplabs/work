@@ -24,6 +24,7 @@ import type {
   ListedConnection,
   OAuthProvider,
   OfferedCatalog,
+  AppPointerSetting,
   SharedMailboxSetting,
   ToolClassSetting,
 } from "@grasp-os/shared/connect";
@@ -37,6 +38,7 @@ import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
+import { pointApp, readAppPointers } from "./app-pointers.ts";
 import {
   auditedBatch,
   keepAuditEvent,
@@ -553,6 +555,19 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
   async setToolClass(toolClass: unknown, audience: unknown): Promise<void> {
     await withPerson(this.#check, async (identity) => {
       await setToolClass(this.#env, identity, toolClass, audience);
+    });
+  }
+
+  async appPointers(): Promise<AppPointerSetting[]> {
+    return await withPerson(this.#check, async (identity) => {
+      requireAdmin(identity);
+      return await readAppPointers(this.#env);
+    });
+  }
+
+  async pointApp(request: unknown): Promise<void> {
+    await withPerson(this.#check, async (identity) => {
+      await pointApp(this.#env, identity, request);
     });
   }
 

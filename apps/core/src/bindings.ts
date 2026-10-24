@@ -101,7 +101,7 @@ export const signedCall = async (
   const restricted = await isRestricted(env, authority, context);
   // The chat's agent may call only the classes the company turned on for
   // its person: one that is off never reaches connect (tool-classes.ts).
-  await requireToolClassOn(env, authority, connection, action);
+  const classed = await requireToolClassOn(env, authority, connection, action);
   const scope = {
     connectionId: connection.connectionId,
     resource: connection.resource,
@@ -129,6 +129,9 @@ export const signedCall = async (
       ...(authority.subject.type === "agent"
         ? { mailboxes: await mailboxesFor(env, authority.onBehalfOf) }
         : {}),
+      ...(classed.resources === undefined
+        ? {}
+        : { resources: classed.resources }),
     }
   );
   return { capability, scope };
