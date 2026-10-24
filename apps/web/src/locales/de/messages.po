@@ -78,6 +78,11 @@ msgstr "{0, plural, one {Insgesamt # Paket, ausgeführt in: {targets}} other {In
 msgid "{0, plural, one {# person} other {# people}}"
 msgstr "{0, plural, one {# Person} other {# Personen}}"
 
+#. placeholder {0}: cited.length
+#: src/chat/sources.tsx
+msgid "{0, plural, one {Based on # source} other {Based on # sources}}"
+msgstr "{0, plural, one {Basiert auf # Quelle} other {Basiert auf # Quellen}}"
+
 #. placeholder {0}: request.counts.refused
 #: src/dashboard/dependency-requests.tsx
 msgid "{0, plural, one {Needs # thing Grasp refuses to run} other {Needs # things Grasp refuses to run}}"
