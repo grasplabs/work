@@ -319,4 +319,46 @@ describe("the classes a company turned on", setUpTime, () => {
       changedBy: admin.userId,
     });
   });
+
+  it("ask Microsoft, when someone connects, only for the rights of the classes on, and the grants that lack a class turned on to be given again", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const person = await signedInApi(idp, "user");
+    const { id } = await connectShared(admin);
+    const asked = async () => {
+      const { url } = await person.api.connections.start({
+        provider: "microsoft",
+        scope: "personal",
+      });
+      return new URL(url).searchParams.get("scope")?.split(" ") ?? [];
+    };
+    const statusOf = async () => {
+      const listed = await admin.api.connections.list();
+      return listed.find((connection) => connection.id === id)?.status;
+    };
+
+    const before = await asked();
+    await admin.api.connections.setToolClass("reach-others", {
+      who: "teams",
+      teams: [await teamOf(person.userId)],
+    });
+    const sending = await asked();
+    // Made before grants were kept: it holds the old wide set, sending
+    // among it, but not changing the company's sites.
+    const afterSending = await statusOf();
+    await admin.api.connections.setToolClass("change-company", {
+      who: "everyone",
+    });
+
+    expect({
+      before: before.includes("Mail.Send"),
+      sending: sending.includes("Mail.Send"),
+      afterSending,
+      afterChanging: await statusOf(),
+    }).toStrictEqual({
+      before: false,
+      sending: true,
+      afterSending: "active",
+      afterChanging: "needs_reauth",
+    });
+  });
 });
