@@ -236,7 +236,19 @@ export const message = (mailbox: string, n: number, bodyType: string) => ({
             "Dear customer,\r\n\r\nPlease find attached invoice 2026-0041 for EUR 1,250.00.\r\n",
         },
   bccRecipients: [],
-  replyTo: [address("Northwind Billing", "billing@northwind.example.org")],
+  // Message 2 asks replies to go to another address, and copied someone.
+  ...(n === 2
+    ? {
+        ccRecipients: [address("Controller", "controller@example.com")],
+        replyTo: [
+          address("Northwind Accounts", "accounts@northwind.example.org"),
+        ],
+      }
+    : {
+        replyTo: [
+          address("Northwind Billing", "billing@northwind.example.org"),
+        ],
+      }),
 });
 
 /** A message's attachments, without their content (`$select`ed). */
@@ -347,6 +359,17 @@ export const draft = (mailbox: string, subject: string) => ({
   conversationId:
     "AAQkAGE1M2IyNGNmLTI5MTktNDUyZi1iOTVjLTc2ZjI5ZmNmZmQ2MwAQADraft9A=",
   webLink: `https://outlook.office365.com/owa/?ItemID=${encodeURIComponent(messageId(mailbox, 9))}&exvsurl=1&viewmodel=ReadMessageItem`,
+});
+
+/**
+ * What `POST /messages/{id}/createReply` returns: a draft in the
+ * conversation of message `n`.
+ */
+export const replyDraft = (mailbox: string, n: number, subject: string) => ({
+  ...draft(mailbox, subject),
+  id: messageId(mailbox, 8),
+  conversationId: messageSummary(mailbox, n).conversationId,
+  webLink: `https://outlook.office365.com/owa/?ItemID=${encodeURIComponent(messageId(mailbox, 8))}&exvsurl=1&viewmodel=ReadMessageItem`,
 });
 
 const utc = (dateTime: string) => ({ dateTime, timeZone: "UTC" });
