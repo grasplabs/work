@@ -722,6 +722,93 @@ describe("who answers a JSON workflow's decision", () => {
   });
 });
 
+/** `requestReview` asking its reviewer and team `teamId`'s members both. */
+const askingReviewerAndTeam = (teamId: string) =>
+  approvalTasks.map((task) =>
+    "request-review" in task
+      ? {
+          "request-review": {
+            ...requestReview,
+            with: {
+              ...requestReview.with,
+              recipients: `\${ [$params.reviewer, "team:${teamId}"] }`,
+            },
+          },
+        }
+      : task
+  );
+
+/** Team `teamId`, with a new member of it, as their session has them. */
+const teamWithMember = async (teamId: string): Promise<Identity> => {
+  const member = await person("user");
+  await env.DB.batch([
+    env.DB.prepare(
+      "INSERT INTO teams (id, name, organization_id, created_at) VALUES (?, 'Finance', 'organization', ?)"
+    ).bind(teamId, Date.now()),
+    env.DB.prepare(
+      "INSERT INTO team_members (id, team_id, user_id, created_at) VALUES (?, ?, ?, ?)"
+    ).bind(crypto.randomUUID(), teamId, member.userId, Date.now()),
+  ]);
+  return { ...member, teams: [{ id: teamId, name: "Finance" }] };
+};
+
+describe("a JSON workflow's decision asked of several", () => {
+  it("opens one decision any of them answers, once, waiting for each of them", async () => {
+    const teamId = crypto.randomUUID();
+    const colleague = await teamWithMember(teamId);
+    const { owner, reviewer, workflow } = await approvalWorkflow({
+      tasks: askingReviewerAndTeam(teamId),
+      deciders: async (asked) =>
+        await Promise.resolve([`person:${asked.userId}`, `team:${teamId}`]),
+    });
+    const runId = await started(owner, workflow.id, 5000);
+    const decision = await openedBy(runId);
+    const waiting = {
+      reviewer: await inboxOf(reviewer),
+      colleague: await inboxOf(colleague),
+      owner: await inboxOf(owner),
+    };
+    await confirmedAnswer(colleague, decision, { approved: true });
+    const run = await ended(owner, workflow.id, runId);
+    const late = await outcome(
+      confirmedAnswer(reviewer, decision, { approved: false })
+    );
+    const decisions = await decisionsOf(runId);
+    expect({
+      waiting: {
+        reviewer: waiting.reviewer.includes(decision),
+        colleague: waiting.colleague.includes(decision),
+        owner: waiting.owner.includes(decision),
+      },
+      late,
+      decisions: decisions.map(({ status }) => status),
+      end: endOf(run),
+    }).toStrictEqual({
+      waiting: { reviewer: true, colleague: true, owner: false },
+      late: "decision.closed",
+      decisions: ["approved"],
+      end: { status: "completed", output: { status: "approved" } },
+    });
+  });
+
+  it("refuses the call, opening nothing, when one of them is outside the binding", async () => {
+    const teamId = crypto.randomUUID();
+    await teamWithMember(teamId);
+    const { owner, workflow } = await approvalWorkflow({
+      tasks: askingReviewerAndTeam(teamId),
+    });
+    const runId = await started(owner, workflow.id, 5000);
+    const run = await ended(owner, workflow.id, runId);
+    expect({
+      end: endOf(run),
+      decisions: await decisionsOf(runId),
+    }).toStrictEqual({
+      end: { status: "failed", code: "workflow.call_denied" },
+      decisions: [],
+    });
+  });
+});
+
 describe("asking the people a JSON workflow's decision is for", () => {
   it("asks its recipient once, audited, the decision waiting in their inbox and nobody else's", async () => {
     const { admin, owner, reviewer, workflow } = await approvalWorkflow();
