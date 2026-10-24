@@ -14,16 +14,16 @@ export default defineConnector({
   name: "microsoft-365",
   version: "0.2.0",
   provider: "microsoft",
+  // The most any class asks for: connect asks only the rights of the
+  // classes a company turned on (apps/connect/src/provider-rights.ts).
   scopes: [
     "User.Read",
     "Mail.ReadWrite",
-    "Mail.ReadWrite.Shared",
     "Mail.Send",
-    "Mail.Send.Shared",
-    "Calendars.Read",
+    "Calendars.ReadWrite",
     "Calendars.Read.Shared",
-    "Files.Read.All",
-    "Sites.Read.All",
+    "Files.ReadWrite.All",
+    "Sites.ReadWrite.All",
   ],
   hosts: [graphHost],
   tools: [...mailTools, ...calendarTools, ...fileTools],

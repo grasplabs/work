@@ -120,6 +120,13 @@
       "when": 1792245595307,
       "tag": "0016_pending_action_keys",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1792844700673,
+      "tag": "0017_noisy_monster_badoon",
+      "breakpoints": true
     }
   ]
 }

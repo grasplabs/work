@@ -87,6 +87,13 @@ export const connections = sqliteTable(
      * it was connected (account-addresses.ts); null when never read.
      */
     accountSenders: text("account_senders", { mode: "json" }).$type<string[]>(),
+    /**
+     * For a suite's OAuth connection: the rights its grant holds, as the
+     * provider's answer listed them when it was connected
+     * (provider-rights.ts); null when connected before they were kept, or
+     * when the answer listed none.
+     */
+    grantedScopes: text("granted_scopes", { mode: "json" }).$type<string[]>(),
     connectedBy: text("connected_by"),
     /**
      * For a Composio connection: the MCP server and the auth config

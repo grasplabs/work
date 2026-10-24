@@ -25,6 +25,7 @@ import type {
   OrganizationConnection,
   ConnectResult,
   Disconnect,
+  RequireClassRights,
   DisconnectPersonal,
   FinishConnection,
   HeldCall,
@@ -68,6 +69,7 @@ import type { CallOutcome, CallRecord } from "./audit.ts";
 import { carryOut, connectionFor, heldOutcome } from "./call.ts";
 import type { CallDone, CallProgress } from "./call.ts";
 import { catalog, catalogTools } from "./catalog.ts";
+import { requireClassRights } from "./class-rights.ts";
 import { clock, tickClock } from "./clock.ts";
 import {
   finishToolkitFlow,
@@ -346,6 +348,12 @@ export default class Connect
     connectionIds: readonly string[]
   ): Promise<ConnectionOwner[]> {
     return await connectionOwners(this.env.DB, connectionIds);
+  }
+
+  async requireClassRights(
+    request: RequireClassRights
+  ): Promise<{ reconnect: number }> {
+    return await requireClassRights(this.env, request);
   }
 
   async disconnect(request: Disconnect): Promise<{ revoked: boolean }> {

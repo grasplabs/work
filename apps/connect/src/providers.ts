@@ -20,6 +20,7 @@ import type { AppRecord } from "./bundled-connectors.ts";
 import { hibobAccount, hibobCredential } from "./hibob.ts";
 import { idTokenClaims, lookupAccount } from "./oauth-client.ts";
 import type { TokenSet } from "./oauth-client.ts";
+import { classesOnByDefault, microsoftRights } from "./provider-rights.ts";
 
 // The providers people connect accounts from, as config records: one
 // generic OAuth flow (src/oauth.ts) runs them all, and one API-key sign-in
@@ -238,23 +239,9 @@ const microsoft: OAuthProviderConfig = {
   authorizationEndpoint: (tenant) =>
     `${microsoftLogin}/${tenant}/oauth2/v2.0/authorize`,
   tokenEndpoint: (tenant) => `${microsoftLogin}/${tenant}/oauth2/v2.0/token`,
-  // What the Microsoft 365 connector needs: mail (the person's own and
-  // shared mailboxes), calendars, and files in OneDrive and SharePoint.
-  scopes: [
-    "openid",
-    "profile",
-    "email",
-    "offline_access",
-    "User.Read",
-    "Mail.ReadWrite",
-    "Mail.ReadWrite.Shared",
-    "Mail.Send",
-    "Mail.Send.Shared",
-    "Calendars.Read",
-    "Calendars.Read.Shared",
-    "Files.Read.All",
-    "Sites.Read.All",
-  ],
+  // Those of the classes on by default; a consent asks those of the classes
+  // the company turned on (`rightsFor`, GRA-717).
+  scopes: microsoftRights(classesOnByDefault),
   scopeSeparator: " ",
   authorizationParams: () => ({ response_mode: "query" }),
   clientAuthentication: "client_secret_post",
