@@ -51,6 +51,8 @@ import { inJurisdiction } from "../durable-objects.ts";
 import { errorResponse } from "../errors.ts";
 import { boundedText, jsonOf } from "../request-body.ts";
 import { answerInChat } from "./answer.ts";
+import { cancelAction, confirmAction } from "./cards.tsx";
+import { pressCard } from "./press.ts";
 import type { ConnectedTeamsAdapter } from "./teams-adapter.ts";
 import { teamsAdapter, verifiedTeamsRequest } from "./teams.ts";
 import type { TeamsKeys } from "./teams.ts";
@@ -345,6 +347,11 @@ export const channelResponse = async (
   chat.onDirectMessage(async (thread, message) => {
     await keepConversation(env, platform, thread.id, userId);
     await takeOn({ platform, userId, thread, message });
+  });
+  // A press on a card of held writes, by the member the gate let in, in
+  // their own private chat (press.ts).
+  chat.onAction([confirmAction, cancelAction], async (event) => {
+    await pressCard(env, { platform, userId, event, state });
   });
   // Answered at once: the platform gives up on a webhook long before an
   // answer is ready, and sends it again. The message is handled after,

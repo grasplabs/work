@@ -60,7 +60,7 @@ const lineFor = (error: unknown): RefusedLine => {
 const rawSchema = z.object({ locale: z.string().max(64).optional() });
 
 /** The language the person's app is set to, if the platform said. */
-const appLocale = (raw: unknown): ChannelLocale => {
+export const appLocale = (raw: unknown): ChannelLocale => {
   const language = rawSchema
     .safeParse(raw)
     .data?.locale?.split("-")[0]

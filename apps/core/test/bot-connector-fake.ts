@@ -18,8 +18,17 @@ export const botConnectorFake = (bot: {
   const loginHost = "login.microsoftonline.com";
   const botConnectorHost = "smba.trafficmanager.net";
   const issued = new Set<string>();
-  /** Each conversation's activities, as their bodies. */
-  const posted: { conversation: string; activity: unknown }[] = [];
+  /**
+   * Each conversation's activities, as their bodies, in order: each post
+   * with the id the Bot Connector gave it, each edit with the id of the
+   * activity it replaced (`editOf`).
+   */
+  const posted: {
+    conversation: string;
+    activity: unknown;
+    id?: string;
+    editOf?: string;
+  }[] = [];
   /** Every roster read, as `<conversation> <user id>`. */
   const asked: string[] = [];
   /** The roster: `<conversation> <user id>` to what Teams says of them. */
@@ -29,6 +38,8 @@ export const botConnectorFake = (bot: {
     /\/v3\/conversations\/(?<conversation>[^/]+)\/members\/(?<member>[^/]+)$/u;
   const activitiesPath =
     /\/v3\/conversations\/(?<conversation>[^/]+)\/activities(?:\/[^/]+)?$/u;
+  const editPath =
+    /\/v3\/conversations\/(?<conversation>[^/]+)\/activities\/(?<activity>[^/]+)$/u;
 
   const token = async (request: Request): Promise<Response | undefined> => {
     const form = new URLSearchParams(await request.clone().text());
@@ -69,14 +80,23 @@ export const botConnectorFake = (bot: {
     }
     const activity = activitiesPath.exec(url.pathname)?.groups;
     if (request.method === "POST" && activity !== undefined) {
+      const id = `activity-${posted.length + 1}`;
       posted.push({
         conversation: decodeURIComponent(activity.conversation ?? ""),
         activity: await request.json(),
+        id,
       });
-      return Response.json(
-        { id: `activity-${posted.length}` },
-        { status: 201 }
-      );
+      return Response.json({ id }, { status: 201 });
+    }
+    const edited = editPath.exec(url.pathname)?.groups;
+    if (request.method === "PUT" && edited !== undefined) {
+      const editOf = decodeURIComponent(edited.activity ?? "");
+      posted.push({
+        conversation: decodeURIComponent(edited.conversation ?? ""),
+        activity: await request.json(),
+        editOf,
+      });
+      return Response.json({ id: editOf });
     }
     return Response.json({ error: { code: "NotFound" } }, { status: 404 });
   };
