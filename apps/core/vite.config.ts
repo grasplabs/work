@@ -18,6 +18,9 @@ import {
   directoryClient,
   documentsClient,
   landscapeClient,
+  slackApp,
+  teamsBot,
+  whatsAppNumber,
 } from "./test/connect-providers.ts";
 import { testSignIn } from "./test/sign-in-config.ts";
 import { withNoBackgroundCompile } from "./workerd-v8-flags.ts";
@@ -205,6 +208,15 @@ export const coreProject = (
             // env: the shortest archive retention the admin may set.
             AUDIT_ARCHIVE_RETENTION_DAYS: "365",
             ...testSignIn,
+            // The client's Teams bot, so its door is open
+            // (src/channels/door.ts).
+            TEAMS_BOT_ID: teamsBot.id,
+            // The client's Slack app, so its door is open too.
+            SLACK_SIGNING_SECRET: slackApp.signingSecret,
+            // The client's WhatsApp number (src/channels/whatsapp.ts).
+            WHATSAPP_APP_SECRET: whatsAppNumber.appSecret,
+            WHATSAPP_PHONE_NUMBER_ID: whatsAppNumber.phoneNumberId,
+            WHATSAPP_VERIFY_TOKEN: whatsAppNumber.verifyToken,
             // Few enough statistics points to reach each bound in a test.
             STATISTICS_POINT_LIMITS: "10/25",
             STATISTICS_READ_LIMITS: "20/60",
@@ -306,6 +318,15 @@ export const coreProject = (
                 MICROSOFT_DOCUMENTS_CLIENT_ID: documentsClient.id,
                 MICROSOFT_DOCUMENTS_CLIENT_SECRET: documentsClient.secret,
                 COMPOSIO_API_KEY: testComposioKey,
+                // The client's Teams bot, which Entra and the Bot Connector
+                // in test/connect-providers.ts know.
+                TEAMS_BOT_ID: teamsBot.id,
+                TEAMS_BOT_TENANT_ID: teamsBot.tenant,
+                TEAMS_BOT_SECRET: teamsBot.secret,
+                // Its Slack app, which the fake Slack there knows.
+                SLACK_BOT_TOKEN: slackApp.botToken,
+                WHATSAPP_PHONE_NUMBER_ID: whatsAppNumber.phoneNumberId,
+                WHATSAPP_ACCESS_TOKEN: whatsAppNumber.accessToken,
               },
               d1Databases: { DB: "grasp-os-connect" },
               // Its clock (connect's src/clock.ts).
