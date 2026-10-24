@@ -1,5 +1,6 @@
-import type { AuditActor } from "@grasp-os/shared/audit";
-import type { Provenance } from "@grasp-os/shared/knowledge";
+import type { BrainEvent } from "@grasp-os/brain/events";
+import type { Json } from "@grasp-os/brain/json";
+import type { Provenance } from "@grasp-os/brain/knowledge";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
 import type { Readable, ReadRecord } from "./authorize.ts";
@@ -56,13 +57,18 @@ export interface BrainPorts<C> {
     /** Refuses a reader who may not recall at all. */
     require: (reader: C) => Promise<void>;
     /**
+     * Whether `error`, thrown by a port, is the host refusing the caller:
+     * a recall answers it as `brain.denied`.
+     */
+    isRefusal: (error: unknown) => boolean;
+    /**
      * Who `reader` is, as a string that changes when what the host lets
      * them read changes: part of a recall's access revision.
      */
     key: (reader: C) => Promise<string>;
   };
   /** Who `reader` is, as the host's audit log names them. */
-  actorOf: (reader: C) => AuditActor;
+  actorOf: (reader: C) => Json;
   /**
    * The person whose memories `reader`'s commands are (memories.ts), or a
    * refusal (`brain.denied`) for a caller with none.
@@ -75,6 +81,11 @@ export interface BrainPorts<C> {
    * event to its own outbox in the batch of its change (audit.ts).
    */
   audit: {
+    /**
+     * The host's audit event for `entry`, with its ID, as the outbox
+     * stores it: what the host's log takes when it drains the outbox.
+     */
+    eventOf: (entry: BrainEvent) => { id: string; event: string };
     /** Drains the outbox soon, in the background, never failing. */
     drain: () => void;
   };

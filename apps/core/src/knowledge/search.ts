@@ -1,5 +1,5 @@
-import { toHex } from "@grasp-os/shared/encoding";
-import { collectionIdSchema, documentIdSchema } from "@grasp-os/shared/ids";
+import { toHex } from "@grasp-os/brain/encoding";
+import { collectionIdSchema, documentIdSchema } from "@grasp-os/brain/ids";
 import {
   collectionSearchOptionsSchema,
   documentTypeOf,
@@ -7,13 +7,13 @@ import {
   searchCoverageCap,
   searchOptionsSchema,
   searchQuerySchema,
-} from "@grasp-os/shared/knowledge";
+} from "@grasp-os/brain/knowledge";
 import type {
   Provenance,
   SearchCoverage,
   SearchHit,
   SearchResults,
-} from "@grasp-os/shared/knowledge";
+} from "@grasp-os/brain/knowledge";
 import { sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";

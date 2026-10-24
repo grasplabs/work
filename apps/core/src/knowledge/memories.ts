@@ -14,15 +14,14 @@ import type {
   MemoryPage,
   MemoryRecord,
 } from "@grasp-os/brain/contract";
-import { toHex } from "@grasp-os/shared/encoding";
-import { brainReceiptIdSchema, memoryIdSchema } from "@grasp-os/shared/ids";
-import { canonicalJson } from "@grasp-os/shared/json";
-import type { Json } from "@grasp-os/shared/json";
+import { toHex } from "@grasp-os/brain/encoding";
+import { brainReceiptIdSchema, memoryIdSchema } from "@grasp-os/brain/ids";
+import { canonicalJson } from "@grasp-os/brain/json";
+import type { Json } from "@grasp-os/brain/json";
 import { and, count, desc, eq, gt, lt, lte, or, sql } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { outboxedWhere } from "../audit-outbox.ts";
 import {
   brainMemories,
   brainReceipts,
@@ -30,7 +29,7 @@ import {
   documents,
   versions,
 } from "../db/knowledge/schema.ts";
-import { auditedBatch } from "./audit.ts";
+import { auditedBatch, outboxedWhere } from "./audit.ts";
 import { allowedFor } from "./authorize.ts";
 import type { Brain } from "./brain.ts";
 import { sectionCountOf, versionText } from "./documents.ts";
@@ -419,7 +418,7 @@ export const remember = async <C>(
           sql`SELECT ${memoryId}, 1, 'person', ${ownerId}, ${request.kind}, ${request.text}, ${JSON.stringify(sourceRefs)}, 'proposed', 'pending', ${now.getTime()}, ${now.getTime()} WHERE ${receiptStored(receiptId)}`
         ),
       outboxedWhere(
-        db,
+        brain,
         {
           actor: brain.ports.actorOf(reader),
           action: "knowledge.memory.remember",

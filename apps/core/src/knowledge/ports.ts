@@ -1,7 +1,8 @@
 import { brainErrors } from "@grasp-os/brain/contract";
+import { permissionErrors } from "@grasp-os/shared/permissions";
 import { drizzle } from "drizzle-orm/d1";
 
-import { drainKnowledgeOutboxSoon } from "../audit-outbox.ts";
+import { brainEventOf, drainKnowledgeOutboxSoon } from "../audit-outbox.ts";
 import { derivedHmacKey } from "../derived-keys.ts";
 import { runEngine } from "../workflows/engine.ts";
 import { noteProvenance, readerActor } from "./access.ts";
@@ -37,12 +38,14 @@ export const portsOf = (env: Env): BrainPorts<Reader> => ({
       await requireRecall(env, reader);
     },
     key: async (reader) => await recallKey(env, reader),
+    isRefusal: (error) => permissionErrors.codeOf(error) !== undefined,
   },
   onWrite: async (write) => {
     await checkWrite(env, write);
   },
   blobs: env.BRAIN_OBJECTS,
   audit: {
+    eventOf: brainEventOf,
     drain: () => {
       drainKnowledgeOutboxSoon(env);
     },
