@@ -248,7 +248,8 @@ const microsoft: OAuthProviderConfig = {
   tokenEndpoint: (tenant) => `${microsoftLogin}/${tenant}/oauth2/v2.0/token`,
   // What the Microsoft 365 connector needs: mail (the person's own and
   // shared mailboxes), calendars, files in OneDrive and SharePoint,
-  // changing an Excel workbook's rows, and the person's own To Do. The
+  // changing an Excel workbook's rows, drafts in the person's own OneDrive,
+  // and the person's own To Do. The
   // read-only connections below set scopes of their own, so none of these
   // reaches them.
   scopes: [

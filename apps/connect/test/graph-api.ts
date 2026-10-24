@@ -474,6 +474,70 @@ const workbookRoutes: ProviderRoute<Part>[] = [
   }),
 ];
 
+/**
+ * The files in the person's own OneDrive, by their decoded path from the
+ * drive's root (`Drafts from Stephen/Letter.docx`), as files.createDraft
+ * writes and finds them. Cleared before each test.
+ */
+const ownFiles = new Map<string, { id: string; bytes: Uint8Array }>();
+
+const ownFile = String.raw`^/v1\.0/me/drive/root:/[^/]+/[^/:]+`;
+
+const ownRoot = "/v1.0/me/drive/root:/";
+const contentSuffix = /:\/content$/u;
+
+/** The decoded path from the root a request names, without `:/content`. */
+const ownPathOf = (request: Request): string =>
+  decodeURIComponent(
+    new URL(request.url).pathname
+      .replace(ownRoot, "")
+      .replace(contentSuffix, "")
+  );
+
+const newOwnId = (): string =>
+  `01OWN${crypto.randomUUID().replaceAll("-", "").toUpperCase()}`;
+
+/** A file of the person's own OneDrive, as Graph describes it. */
+const driveItemOf = (path: string, id: string, bytes: Uint8Array) => ({
+  id,
+  name: path.split("/").at(-1),
+  size: bytes.byteLength,
+  webUrl: `https://example-my.sharepoint.com/personal/someone/Documents/${encodeURI(path)}`,
+});
+
+const ownFileRoutes: ProviderRoute<Part>[] = [
+  route("PUT", `${ownFile}:/content`, async ({ query, request }) => {
+    const path = ownPathOf(request);
+    const existing = ownFiles.get(path);
+    if (
+      existing !== undefined &&
+      query.get("@microsoft.graph.conflictBehavior") === "fail"
+    ) {
+      return json({ error: { code: "nameAlreadyExists" } }, 409);
+    }
+    const bytes = new Uint8Array(await request.arrayBuffer());
+    const id = existing?.id ?? newOwnId();
+    ownFiles.set(path, { id, bytes });
+    return json(driveItemOf(path, id, bytes), 201);
+  }),
+  route("GET", `${ownFile}:/content`, ({ request }) => {
+    const file = ownFiles.get(ownPathOf(request));
+    return file === undefined
+      ? json(notFound, 404)
+      : new Response(null, {
+          status: 302,
+          headers: { location: downloadUrl(file.id) },
+        });
+  }),
+  route("GET", ownFile, ({ request }) => {
+    const path = ownPathOf(request);
+    const file = ownFiles.get(path);
+    return file === undefined
+      ? json(notFound, 404)
+      : json(driveItemOf(path, file.id, file.bytes));
+  }),
+];
+
 const patchSchema = z.object({
   flag: z.unknown().optional(),
   categories: z.unknown().optional(),
@@ -482,6 +546,7 @@ const patchSchema = z.object({
 // `GET /me` is the OAuth fake's (oauth-provider.ts `profileOf`): it
 // answers for the account the bearer token was issued to.
 const graphRoutes: ProviderRoute<Part>[] = [
+  ...ownFileRoutes,
   route("GET", `${users}/outlook/masterCategories`, ({ query }) =>
     json(masterCategories(query.get("$skiptoken")))
   ),
@@ -983,11 +1048,13 @@ const sharePointAnswer = (url: URL): Response => {
   if (id === itemIds.twice) {
     return Response.redirect(downloadUrl(itemIds.report), 302);
   }
-  const content = {
-    [itemIds.pdf]: invoicePdf,
-    [itemIds.controls]: new TextEncoder().encode(controlText),
-    [itemIds.procedure]: new TextEncoder().encode(procedureTexts["3.0"]),
-  }[id ?? ""];
+  const own = [...ownFiles.values()].find((file) => file.id === id);
+  const content =
+    {
+      [itemIds.pdf]: invoicePdf,
+      [itemIds.controls]: new TextEncoder().encode(controlText),
+      [itemIds.procedure]: new TextEncoder().encode(procedureTexts["3.0"]),
+    }[id ?? ""] ?? own?.bytes;
   return new Response(content ?? new TextEncoder().encode(reportText), {
     headers: { "content-type": "application/octet-stream" },
   });
@@ -1004,6 +1071,7 @@ export const fakeGraph = (providers?: ReturnType<typeof fakeProviders>) => {
     tagged.clear();
     todoTasks.clear();
     sharedSince.clear();
+    ownFiles.clear();
     duringLookup = undefined;
     oversizedVersion = undefined;
     events.clear();
@@ -1137,5 +1205,12 @@ export const fakeGraph = (providers?: ReturnType<typeof fakeProviders>) => {
       sharedSince.add(id);
     },
     sharePointHost,
+    /** The file at `path` of the person's own OneDrive, if there is one. */
+    ownFile: (path: string): Uint8Array | undefined =>
+      ownFiles.get(path)?.bytes,
+    /** Puts a file at `path` of the person's own OneDrive, as they could. */
+    putOwnFile: (path: string, bytes: Uint8Array): void => {
+      ownFiles.set(path, { id: newOwnId(), bytes });
+    },
   };
 };
