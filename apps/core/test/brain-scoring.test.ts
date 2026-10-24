@@ -93,6 +93,86 @@ describe("scoring a trial", () => {
     });
   });
 
+  it("takes a citation that copied a handed source's label as citing that source", () => {
+    expect(
+      verdict(contract, {
+        answer:
+          "ANSWER: Marta Ruiz\nFrom [source: handbook/contracts.md#Lease]",
+      })
+    ).toStrictEqual({
+      completed: true,
+      authorized: true,
+      abstained: false,
+      evidenceRecall: 1,
+      citationSupport: 1,
+    });
+  });
+
+  it("takes a link to a document, as the product cites, as citing that document", () => {
+    const notes = { "doc-lease": "handbook/contracts.md", "doc-other": "x.md" };
+    const supportWith = (answer: string) =>
+      verdict(contract, { answer, notes }).citationSupport;
+    expect({
+      lease: supportWith(
+        "ANSWER: Marta Ruiz\nFrom [Lease](grasp:note/doc-lease)"
+      ),
+      other: supportWith(
+        "ANSWER: Marta Ruiz\nFrom [handbook/contracts.md](grasp:note/doc-other)"
+      ),
+      unknown: supportWith(
+        "ANSWER: Marta Ruiz\nFrom [Lease](grasp:note/doc-unknown)"
+      ),
+      onAnswerLine: verdict(contract, {
+        answer: "ANSWER: Marta Ruiz [Lease](grasp:note/doc-lease)",
+        notes,
+      }),
+    }).toStrictEqual({
+      lease: 1,
+      other: 0,
+      unknown: 0,
+      // A link on the answer line cites; it isn't part of the answer.
+      onAnswerLine: {
+        completed: true,
+        authorized: true,
+        abstained: false,
+        evidenceRecall: 1,
+        citationSupport: 1,
+      },
+    });
+  });
+
+  it("takes the answer line's keyword in the question's language, and in bold", () => {
+    const completedWith = (answer: string) =>
+      verdict(contract, { answer }).completed;
+    expect({
+      spanish: completedWith(
+        "RESPUESTA: Marta Ruiz\nSegún [handbook/contracts.md#Lease]"
+      ),
+      french: completedWith(
+        "**RÉPONSE :** Marta Ruiz\nSelon [handbook/contracts.md#Lease]"
+      ),
+      german: completedWith(
+        "Antwort: **Marta Ruiz**\nLaut [handbook/contracts.md#Lease]"
+      ),
+      dutch: completedWith(
+        "ANTWOORD: Marta Ruiz\nVolgens [handbook/contracts.md#Lease]"
+      ),
+      unmarked: completedWith(
+        "Marta Ruiz owns the lease [handbook/contracts.md#Lease]"
+      ),
+      boldAbstention: verdict(contract, {
+        answer: "**ABSTAIN:** no source names the owner.",
+      }).abstained,
+    }).toStrictEqual({
+      spanish: true,
+      french: true,
+      german: true,
+      dutch: true,
+      unmarked: false,
+      boldAbstention: true,
+    });
+  });
+
   it("doesn't complete a right answer the evidence never reached, or one that cites none of it", () => {
     expect({
       unseen: verdict(contract, { modelInput: "Contract register." }),
@@ -394,6 +474,8 @@ describe("scoring a trial", () => {
         trucks
       ),
       extra: completed(fleet, "37 trucks; 12 electric; 4 on order", trucks),
+      ended: completed(fleet, "37 trucks; 12 electric;", trucks),
+      empty: completed(fleet, "37 trucks;; 12 electric", trucks),
       eitherOrder: completed(conflict, "3 euro; gratis", parking),
       hedged: completed(conflict, "gratis of 3 euro; 3 euro", parking),
       added: completed(fleet, "37 and 99 trucks; 12 electric", trucks),
@@ -408,6 +490,8 @@ describe("scoring a trial", () => {
       unsplit: false,
       alternative: false,
       extra: false,
+      ended: true,
+      empty: true,
       eitherOrder: true,
       hedged: false,
       added: false,
@@ -625,6 +709,40 @@ const request = (...calls: string[]) => ({
   },
 });
 
+/**
+ * A chat completions request (Workers AI's models): the system prompt is
+ * a message, each call rides on the model's message, and each result is a
+ * message of its own naming its call.
+ */
+const completionsRequest = (...calls: string[]) => ({
+  url: "https://gateway.test/workers-ai/v1/chat/completions",
+  headers: new Headers(),
+  signal: new AbortController().signal,
+  body: {
+    messages: [
+      { role: "system", content: "You are the agent." },
+      { role: "user", content: "Who owns the lease?" },
+      ...calls.flatMap((call) => [
+        {
+          role: "assistant",
+          content: null,
+          tool_calls: [
+            {
+              id: call,
+              type: "function",
+              function: {
+                name: "executeCode",
+                arguments: JSON.stringify({ code: `return "${call}";` }),
+              },
+            },
+          ],
+        },
+        { role: "tool", tool_call_id: call, content: "x" },
+      ]),
+    ],
+  },
+});
+
 /** Each tool result's call and backing, in order. */
 const backings = (parts: ReturnType<typeof transcriptWithReads>) =>
   parts.flatMap(({ by, call, backing }) =>
@@ -784,6 +902,24 @@ describe("backing tool results with reads", () => {
         ["a", []],
         ["b", []],
       ],
+    });
+  });
+
+  it("reads chat completions as Anthropic's messages: who wrote what, and which call each result answers", () => {
+    const parts = transcriptWithReads(
+      [completionsRequest(), completionsRequest("a")],
+      [[], ["read by a"]]
+    );
+    expect({
+      backed: backings(parts),
+      by: parts.slice(-4).map(({ by }) => by),
+      system: parts.at(-4)?.text,
+      code: parts.at(-2)?.text,
+    }).toStrictEqual({
+      backed: [["a", ["read by a"]]],
+      by: ["source", "source", "model", "tool"],
+      system: "You are the agent.",
+      code: 'return "a";',
     });
   });
 });
