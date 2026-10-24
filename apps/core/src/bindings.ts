@@ -26,6 +26,7 @@ import type { KnowledgeBinding } from "./knowledge/tools-binding.ts";
 import { authorize, grantedPermissions } from "./permissions.ts";
 import { isRestricted } from "./restricted.ts";
 import type { WorkContext } from "./restricted.ts";
+import { requireToolClassOn } from "./tool-classes.ts";
 import { stampedMail } from "./workflows/mail-stamps.ts";
 import type { StampingRun } from "./workflows/mail-stamps.ts";
 
@@ -94,7 +95,12 @@ export const signedCall = async (
   decision?: CapabilityDecision
 ) => {
   await authorize(env, authority, connection, action, permissionId, context);
+  // The context is checked first: a call from a chat or App that isn't
+  // there is refused as that, whatever its class.
   const restricted = await isRestricted(env, authority, context);
+  // The chat's agent may call only the classes the company turned on for
+  // its person: one that is off never reaches connect (tool-classes.ts).
+  await requireToolClassOn(env, authority, connection, action);
   const scope = {
     connectionId: connection.connectionId,
     resource: connection.resource,
