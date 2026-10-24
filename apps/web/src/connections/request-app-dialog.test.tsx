@@ -13,8 +13,10 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
+import type { Loaded } from "../load-from-core.tsx";
 import { integrationsOf } from "./integrations.ts";
 import { RequestAppDialog } from "./request-app-dialog.tsx";
+import { RequestedApps } from "./requested-apps.tsx";
 
 // The Request app dialog against core's connections as the page reaches
 // them over RPC (the boundary from the web app), faked: the apps already
@@ -66,12 +68,22 @@ const settled = async (): Promise<void> => {
 /** The dialog open against core's connections, recording what it asked for. */
 const opened = async (): Promise<AppRequestInput[]> => {
   const sent: AppRequestInput[] = [];
+  // What core keeps: the requests so far, latest first.
+  const asked: AppRequest[] = [earlier];
   const connections = {
     appRequests: async (): Promise<AppRequest[]> =>
-      await Promise.resolve([earlier]),
+      await Promise.resolve([...asked]),
     requestApp: async (request: AppRequestInput): Promise<AppRequest> => {
       sent.push(request);
-      return await Promise.resolve({ ...earlier, name: request.name });
+      const saved: AppRequest = {
+        ...earlier,
+        id: `request-${asked.length + 1}`,
+        name: request.name,
+        why: request.why ?? null,
+        url: request.url ?? null,
+      };
+      asked.unshift(saved);
+      return await Promise.resolve(saved);
     },
   };
   const core = {
@@ -79,16 +91,32 @@ const opened = async (): Promise<AppRequestInput[]> => {
       action: (session: { connections: typeof connections }) => Promise<T>
     ): Promise<T> => await action({ connections }),
   };
+  // The dialog beside the Requested section, both reading core as the
+  // Integrations page does (its loader reads the requests on their own).
+  const readRequests = async (): Promise<Loaded<AppRequest[]>> => ({
+    state: "ready",
+    data: await connections.appRequests(),
+  });
   const rootRoute = createRootRoute({
-    component: () => (
-      <RequestAppDialog
-        integrations={integrations}
-        onOpenChange={() => {
-          // The test reads what was sent, not the dialog closing.
-        }}
-        open
-      />
-    ),
+    loader: (): { requests: Promise<Loaded<AppRequest[]>> } => ({
+      requests: readRequests(),
+    }),
+    component: () => {
+      const { requests }: { requests: Promise<Loaded<AppRequest[]>> } =
+        rootRoute.useLoaderData();
+      return (
+        <>
+          <RequestAppDialog
+            integrations={integrations}
+            onOpenChange={() => {
+              // The test reads what was sent, not the dialog closing.
+            }}
+            open
+          />
+          <RequestedApps requests={requests} />
+        </>
+      );
+    },
   });
   const router = createRouter({
     routeTree: rootRoute,
@@ -195,6 +223,18 @@ describe("requesting an app", () => {
       },
     ]);
     expect(document.body.textContent).toContain("Forwarded to our team");
+  });
+
+  it("shows the request it sent under Requested", async () => {
+    await opened();
+    await type(field("request-name"), "Exact Online");
+    await type(field("request-why"), "Read invoices");
+    await click("Send request");
+    const requested = document.querySelector(
+      '[aria-labelledby="integrations-requested"]'
+    );
+    expect(requested?.textContent).toContain("Exact Online");
+    expect(requested?.textContent).toContain("Read invoices");
   });
 
   it("does not send a link that is not a web address", async () => {
