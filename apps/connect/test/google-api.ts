@@ -1,9 +1,10 @@
 import {
   apisHost,
   gmailHost,
+  sheetsHost,
 } from "@grasp-os/connector-google-workspace/google";
 /**
- * Gmail, Calendar and Drive, as the Google Workspace connector reaches
+ * Gmail, Calendar, Drive and Sheets, as the Google Workspace connector reaches
  * them through connect's egress, serving the recorded answers in
  * test/fixtures/google.ts. Any other host takes whatever it is sent, as an
  * attacker's would. `rateLimit403` makes Google refuse the next request as
@@ -42,6 +43,8 @@ import {
   plainBody,
   searchResults,
   sentId,
+  sheetGrid,
+  spreadsheet,
 } from "./fixtures/google.ts";
 import { fakeProvider, json, route } from "./internet.ts";
 import type { ProviderRoute } from "./internet.ts";
@@ -205,13 +208,47 @@ export const fakeGoogle = () => {
           headers: { "content-type": query.get("mimeType") ?? "" },
         })
     ),
+    // Its metadata, or with `ranges` its grid data: the rows of the sheet
+    // the range names, quoted, whichever cells it names.
+    route(
+      sheetsHost,
+      "GET",
+      String.raw`^/v4/spreadsheets/(?<id>[^/]+)`,
+      ({ id, query }) => {
+        if (files[id]?.mimeType !== "application/vnd.google-apps.spreadsheet") {
+          return json(notFound, 404);
+        }
+        const range = query.get("ranges");
+        if (range === null) {
+          return json(spreadsheet(id));
+        }
+        const title = /^'(?<name>(?:[^']|'')+)'!/u
+          .exec(range)
+          ?.groups?.name?.replaceAll("''", "'");
+        const rows = title === undefined ? undefined : sheetGrid[title];
+        if (title === undefined || rows === undefined) {
+          return json(googleError(400, "INVALID_ARGUMENT", "badRequest"), 400);
+        }
+        const index = spreadsheet(id).sheets.find(
+          ({ properties }) => properties.title === title
+        )?.properties.index;
+        return json({
+          sheets: [
+            {
+              properties: { title, index },
+              data: [{ rowData: rows.map((values) => ({ values })) }],
+            },
+          ],
+        });
+      }
+    ),
   ];
 
   beforeEach(() => {
     attachments.clear();
   });
   const { sent, writesDone, fail } = fakeProvider({
-    hosts: [gmailHost, apisHost],
+    hosts: [gmailHost, apisHost, sheetsHost],
     parts,
     routes,
     unmatched: () =>

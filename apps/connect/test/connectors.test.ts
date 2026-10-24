@@ -535,6 +535,8 @@ describe("a native connector", () => {
       "mail.createDraft": "change-own",
       ...calendar,
       ...files,
+      // A spreadsheet of a shared drive, as its files.
+      "sheets.read": "read-company",
     });
   });
 });
