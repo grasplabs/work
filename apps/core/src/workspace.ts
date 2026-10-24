@@ -4,6 +4,7 @@ import { generatedPaths, generateModules } from "@grasp-os/sdk/host";
 import { agentErrors } from "@grasp-os/shared/agent";
 import { appErrors } from "@grasp-os/shared/apps";
 import {
+  actorOf,
   auditProvenanceMaxItems,
   createAuditEvent,
   delegateActorOf,
@@ -15,6 +16,7 @@ import type {
 } from "@grasp-os/shared/audit";
 import {
   chatChannelSchema,
+  chatPlatformSchema,
   chatToolEventsKept,
   projectDocumentMaxBytes,
   projectDocumentsMax,
@@ -307,6 +309,11 @@ export interface RunToFix {
  * A question for a chat's agent, the model to answer it with, and how hard
  * that model thinks first (`ChatQuestion`).
  */
+/** A chat platform's chat's title, as people know the platform. */
+const platformTitles: Readonly<Record<string, string>> = {
+  teams: "Microsoft Teams",
+};
+
 export const questionSchema = z.strictObject({
   text: z.string().trim().min(1).max(100_000),
   /** `<provider>/<model>`, one the deployment allows. */
@@ -1067,6 +1074,47 @@ export class Workspace extends DurableObject<Env> {
     }
     this.#provenanceChanged(chatId);
     return true;
+  }
+
+  /**
+   * Asks `text` in `personId`'s own chat on chat platform `via`, and waits
+   * for the answer: the chat is the person's one chat there, found by its
+   * channel, or made on their first message, audited as theirs. Asked
+   * with the deployment's default model, the first it allows, as Grasp's
+   * own app starts with. Like `ask`, it takes its caller's word for who
+   * asks: only the door of a chat platform calls it, once the platform's
+   * verified sender id named the person (channels/door.ts).
+   */
+  async askThrough(
+    personId: string,
+    agentId: string,
+    via: string,
+    text: string
+  ): Promise<{ chatId: string; answer: Answer }> {
+    const platform = chatPlatformSchema.parse(via);
+    const [found] = this.#db
+      .select()
+      .from(chats)
+      .where(and(eq(chats.personId, personId), eq(chats.via, platform)))
+      .orderBy(desc(chats.createdAt))
+      .limit(1)
+      .all();
+    const chat =
+      found ??
+      this.createChat(
+        platformTitles[platform] ?? platform,
+        personId,
+        agentId,
+        actorOf({ userId: personId, staff: false }, platform),
+        undefined,
+        undefined,
+        platform
+      );
+    const [model] = gatewaySettings(this.env).models;
+    if (model === undefined) {
+      throw modelErrors.create("model.unconfigured");
+    }
+    return { chatId: chat.id, answer: await this.#turn(chat, { text, model }) };
   }
 
   /**
