@@ -10,7 +10,7 @@ import { signInConfig } from "../auth/config.ts";
 import { citedIn } from "../chat-messages.ts";
 import { chatAgentId, personalWorkspaceId } from "../chats-rpc.ts";
 import { workspace } from "../durable-objects.ts";
-import { answerCard, sourcesCard } from "./cards.tsx";
+import { answerCard, heldWritesCard, sourcesCard } from "./cards.tsx";
 import {
   offerConnectOwn,
   ownMicrosoftNeed,
@@ -18,6 +18,7 @@ import {
 } from "./connect-own.ts";
 import type { Conversation } from "./connect-own.ts";
 import type { ChannelHandoff, ChannelMessage } from "./door.ts";
+import { checkOf, turnHeldWrites } from "./held.ts";
 import { teamsAdapter } from "./teams.ts";
 import { channelLocales, languageOf, say } from "./words.ts";
 import type { ChannelLocale } from "./words.ts";
@@ -35,6 +36,11 @@ import type { ChannelLocale } from "./words.ts";
 // fails or is refused ends in one of Stephen's lines, in the language the
 // person wrote in, never in the gateway's words, which name models and
 // budgets the person has no part in.
+//
+// A turn that had writes held (a meeting to put in the calendar, a row to
+// change) shows them after its answer on one card, in the order they run,
+// each with its exact values, and nothing changes until the person
+// presses Confirm on it (cards.tsx `heldWritesCard`, held.ts).
 
 /** How often typing is shown again while the turn runs. */
 const typingEveryMs = 3000;
@@ -204,6 +210,9 @@ const answerOne = async (
     "isDM" in thread && thread.isDM
       ? streamInto(thread, stopTyping)
       : undefined;
+  // Held writes are this turn's from here on: connect stamps each when
+  // it holds it, by the same clock.
+  const since = Date.now();
   let asked: Awaited<ReturnType<ReturnType<typeof workspace>["askThrough"]>>;
   try {
     asked = await workspace(env, personalWorkspaceId(userId)).askThrough(
@@ -262,8 +271,26 @@ const answerOne = async (
       locale,
     });
   };
+  // The turn's held writes, on one card after the answer: nothing changes
+  // until the person presses Confirm on it (held.ts).
+  const held = async () => {
+    const writes = await turnHeldWrites(env, userId, chatId, since);
+    if (writes.length === 0) {
+      return;
+    }
+    const check = checkOf(answer.provenance.sources);
+    await thread.post(
+      heldWritesCard({
+        locale,
+        writes,
+        ...(check === undefined ? {} : { check }),
+        openUrl: chatUrl,
+      })
+    );
+  };
   if (!streamed) {
     await thread.post(answerCard({ locale, text: final, sources, chatUrl }));
+    await held();
     await offer();
     return;
   }
@@ -273,6 +300,7 @@ const answerOne = async (
       async () => await thread.post(sourcesCard({ locale, sources, chatUrl }))
     );
   }
+  afterward(held);
   afterward(offer);
 };
 
