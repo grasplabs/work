@@ -60,6 +60,7 @@ const nothing: LinkFacts = {
   sent: new Set(),
   interviews: new Map(),
   mapped: new Set(),
+  unconfirmed: { teams: new Set(), people: new Set() },
 };
 
 const at = (day: string, time = "09:00:00") => `${day}T${time}.000Z`;
@@ -92,6 +93,7 @@ describe("whose links are due", () => {
 
   it("sends the team's once its lead agreed and the work is mapped", () => {
     const facts: LinkFacts = {
+      ...nothing,
       sent: new Set(["lea", "oli", "ona"]),
       interviews: completed(["lea", at("2026-10-12")]),
       mapped: new Set(["sales"]),

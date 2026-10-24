@@ -22,6 +22,7 @@ const view = (paused: boolean, sponsor: string | null): OnboardingView => ({
   agreed: true,
   paused,
   sponsor,
+  waiting: 0,
 });
 
 /** What a step says, as text without its markup. */

@@ -12,6 +12,7 @@ import {
   connectorEntries,
   connectorsFile,
 } from "../../connect/build.ts";
+import { testComposioClassesFile } from "../../connect/test/global-setup.ts";
 
 const connect = path.join(import.meta.dirname, "../../connect");
 const wrangler = path.join(connect, "node_modules/wrangler/bin/wrangler.js");
@@ -30,9 +31,19 @@ export const bundleConnect = async (): Promise<string> => {
     // Its output is only shown if bundling fails, in the error. Wrangler's
     // launcher passes Node's flags on to the CLI it spawns: without
     // Sparkplug, Node 24's GC segfault (vite.config.ts) can't kill it.
+    // The fake Composio's tools are classed as in connect's own tests.
     execFileSync(
       process.execPath,
-      ["--no-sparkplug", wrangler, "deploy", "--dry-run", "--outdir", out],
+      [
+        "--no-sparkplug",
+        wrangler,
+        "deploy",
+        "--dry-run",
+        "--outdir",
+        out,
+        "--alias",
+        `#composio-classes:${testComposioClassesFile}`,
+      ],
       { cwd: connect }
     );
     const bundle = path.join(out, "index.js");

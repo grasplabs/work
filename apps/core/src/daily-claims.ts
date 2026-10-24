@@ -2,8 +2,10 @@ import { and, eq, isNull, lt, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
-import type { improvementSignalComputations } from "./db/core/schema.ts";
-import type { knowledgeSignalComputations } from "./db/knowledge/schema.ts";
+import type {
+  improvementSignalComputations,
+  knowledgeSignalComputations,
+} from "./db/core/schema.ts";
 
 // Claiming a UTC day's computation, for what is computed once a day from
 // the 15-minute cron trigger: the improvement signals (signals.ts) and

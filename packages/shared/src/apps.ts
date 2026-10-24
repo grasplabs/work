@@ -537,6 +537,33 @@ export interface CreatedFromBlueprint {
   permissions: Permission[];
 }
 
+/**
+ * A built-in blueprint's newer code, offered to an App created from it
+ * (`AppBlueprintsApi.update`): merged, file by file, over the App's latest
+ * version (`over`), from the blueprint's code the App last took (`from`)
+ * to the blueprint's code now (`to`). A file only the blueprint changed
+ * takes its change; one only the App's builders changed keeps theirs; one
+ * both changed keeps theirs and is listed in `conflicts`. AGENTS.md is
+ * the App's own. Nothing is written until a builder accepts it.
+ */
+export interface BlueprintUpdate {
+  blueprint: string;
+  from: string;
+  to: string;
+  over: number;
+  /** How the merged files differ from version `over`'s. */
+  changes: FileDiff[];
+  /** Paths both changed, kept as the App has them, sorted. */
+  conflicts: string[];
+}
+
+/** What a builder accepts of a `BlueprintUpdate`: exactly what they saw. */
+export const acceptedUpdateSchema = z.strictObject({
+  to: z.string().regex(/^[0-9a-f]{64}$/u),
+  over: appVersionSchema,
+});
+export type AcceptedUpdate = z.input<typeof acceptedUpdateSchema>;
+
 /** Blueprints: code to create Apps from. */
 export interface AppBlueprintsApi {
   /**
@@ -553,6 +580,16 @@ export interface AppBlueprintsApi {
     blueprint: string,
     input: FromBlueprint
   ) => Promise<CreatedFromBlueprint>;
+  /**
+   * The newer code of the built-in the App was created from, merged over
+   * its latest version; null when there is none. Its builders.
+   */
+  update: (app: string) => Promise<BlueprintUpdate | null>;
+  /**
+   * Commits the update the builder saw as the App's next version, which
+   * is made current, as any, through a verified candidate. Its builders.
+   */
+  acceptUpdate: (app: string, accepted: AcceptedUpdate) => Promise<AppVersion>;
 }
 
 /**
