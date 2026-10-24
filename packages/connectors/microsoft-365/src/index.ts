@@ -23,6 +23,7 @@ export default defineConnector({
     "Mail.Send",
     "Mail.Send.Shared",
     "Calendars.Read",
+    "Calendars.ReadWrite",
     "Calendars.Read.Shared",
     "Files.Read.All",
     // Changing a workbook's rows: in the person's own files, and in those

@@ -260,6 +260,7 @@ const microsoft: OAuthProviderConfig = {
     "Mail.Send",
     "Mail.Send.Shared",
     "Calendars.Read",
+    "Calendars.ReadWrite",
     "Calendars.Read.Shared",
     "Files.Read.All",
     "Files.ReadWrite.All",
@@ -768,4 +769,28 @@ export const grantedAsAsked = (
     [...scopes].every((each) => granted.allowed.has(each)) &&
     granted.required.every((each) => scopes.has(each.toLowerCase()))
   );
+};
+
+/** The OpenID scopes, which a provider's answer may name or leave out. */
+const signInScopes: ReadonlySet<string> = new Set([
+  "openid",
+  "profile",
+  "email",
+  "offline_access",
+]);
+
+/**
+ * The scopes `provider` asks for now that a grant of `scope` (a token
+ * answer's) lacks, besides the OpenID ones: those its connector came to
+ * ask for after the connection was made.
+ */
+export const scopesLacking = (
+  { scopes }: OAuthProviderConfig,
+  scope: string
+): string[] => {
+  const granted = scopesOf(scope);
+  return scopes.filter((each) => {
+    const asked = each.toLowerCase();
+    return !(signInScopes.has(asked) || granted.has(asked));
+  });
 };
