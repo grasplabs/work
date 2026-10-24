@@ -354,6 +354,12 @@ describe("person limits", { timeout: 60_000 }, () => {
         },
       ],
     });
+
+    // The teams an admin may name in an exception, each with its name.
+    expect(
+      listed.teams.filter(({ teamId }) => teamId === few || teamId === many)
+    ).toHaveLength(2);
+    expect(listed.teams.every(({ name }) => name.length > 0)).toBeTruthy();
   });
 
   it("audit every change in the admin's name, with what it replaced, and let only admins make one", async () => {

@@ -25,8 +25,8 @@ import {
   appResourceBindings,
   permissions as permissionRows,
 } from "../src/db/core/schema.ts";
-import { createCollection } from "../src/knowledge/collections.ts";
-import { saveDocument } from "../src/knowledge/documents.ts";
+import { createCollection } from "../src/knowledge/collection-rules.ts";
+import { saveDocument } from "../src/knowledge/person-writes.ts";
 import {
   grantPermission,
   requestPermission,
