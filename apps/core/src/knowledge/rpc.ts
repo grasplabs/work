@@ -39,6 +39,7 @@ import { isAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 
 import { gapAnswerErasure } from "../brain-gaps.ts";
+import { brainRecordErasure } from "../brain-records.ts";
 import { documentReadingErasure } from "../onboarding/documents.ts";
 import { CoreRpcTarget } from "../rpc-target.ts";
 import { withPerson } from "../session-check.ts";
@@ -64,26 +65,57 @@ import { search } from "./search.ts";
 import { catalog, follow, read } from "./tools.ts";
 import { uploadErasure } from "./uploads.ts";
 
+/** The copies of people's words in core's own tables, as `OnErase` reaches them. */
+type Copies = Pick<OnErase, "count" | "rewrite" | "forgetActor">;
+
+/** `copies` as one: each counted, rewritten and forgotten in turn. */
+const allOf = (copies: readonly Copies[]): Copies => ({
+  count: async (holds) => {
+    let total = 0;
+    for (const each of copies) {
+      // oxlint-disable-next-line no-await-in-loop -- one table after another
+      total += await each.count(holds);
+    }
+    return total;
+  },
+  rewrite: async (by, rewrite) => {
+    for (const each of copies) {
+      // oxlint-disable-next-line no-await-in-loop -- one table after another
+      await each.rewrite(by, rewrite);
+    }
+  },
+  forgetActor: async (by, userId) => {
+    for (const each of copies) {
+      // oxlint-disable-next-line no-await-in-loop -- one table after another
+      await each.forgetActor(by, userId);
+    }
+  },
+});
+
 /**
  * What a purge reaches of core's own copies (purge.ts `OnErase`): the
- * brain's gap answers, the originals of uploaded files, the onboarding's
- * readings of the documents shared in it with what was drawn from them,
- * the Apps collection's entries and each person's Personal collection.
+ * brain's gap answers and records, the originals of uploaded files, the
+ * onboarding's readings of the documents shared in it with what was drawn
+ * from them, the Apps collection's entries and each person's Personal
+ * collection.
  */
 const coreErasure = (env: Env): OnErase => {
-  const answers = gapAnswerErasure(env);
   const readings = documentReadingErasure(env);
   return {
+    ...allOf([
+      gapAnswerErasure(env),
+      brainRecordErasure(env),
+      // A reading names no person: there is no one to forget in it.
+      {
+        ...readings,
+        forgetActor: async () => {
+          // Nothing to forget.
+        },
+      },
+    ]),
     ...uploadErasure(env),
     ...appsErasure(env),
     personalCollection: personalCollectionId,
-    count: async (holds) =>
-      (await answers.count(holds)) + (await readings.count(holds)),
-    rewrite: async (person, rewrite) => {
-      await answers.rewrite(person, rewrite);
-      await readings.rewrite(person, rewrite);
-    },
-    forgetActor: answers.forgetActor,
     forgetDocuments: readings.forgetDocuments,
   };
 };

@@ -90,7 +90,8 @@ const typeRules: readonly {
   // The onboarding: who works where, the plan, pausing it, the
   // agreements, and the gate that keeps the company out until Grasp's go.
   { action: "onboarding", type: "config" },
-  // An admin adding records the brain is built from.
+  // An admin adding records the brain is built from, and a purge
+  // rewriting a record's words.
   { action: "brain.records", type: "action" },
   // A gap's owner asked (Grasp's), and a person answering or closing it.
   { action: "brain.gap.asked", type: "action" },
