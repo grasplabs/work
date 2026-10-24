@@ -23,6 +23,7 @@ allowBuilds:
   # Install scripts of the model SDKs under pi-ai, which core never needs.
   "@google/genai": false
   protobufjs: false
+  core-js-pure: set this to true or false
 
 catalog:
   # Tooling
@@ -93,6 +94,7 @@ catalog:
   # the rest, its state in Durable Objects (packages/chat). Its adapters
   # move together; keep them on chat's version.
   "@chat-adapter/discord": 4.43.0
+  "@chat-adapter/gmail": 4.43.0
   "@chat-adapter/slack": 4.43.0
   "@chat-adapter/teams": 4.43.0
   chat: 4.43.0
