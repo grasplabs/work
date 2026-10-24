@@ -39,8 +39,8 @@
  * - Key rotation used to force fetches. Keys are kept per isolate for an
  *   hour; a key id not among them refreshes them at most once a minute.
  */
-import { TeamsAdapter } from "@chat-adapter/teams";
 import type { ChannelSigningKey } from "@grasp-os/shared/channel-keys";
+import { channelCredentialPlaceholder } from "@grasp-os/shared/connect";
 import { log } from "@grasp-os/shared/log";
 import type { Logger } from "chat";
 import { importJWK, jwtVerify } from "jose";
@@ -48,6 +48,7 @@ import type { JWTHeaderParameters } from "jose";
 import { z } from "zod";
 
 import { signInConfig } from "../auth/config.ts";
+import { ConnectedTeamsAdapter } from "./teams-adapter.ts";
 
 /** Who issues the tokens the Bot Framework sends its requests with. */
 const botFrameworkIssuer = "https://api.botframework.com";
@@ -283,22 +284,21 @@ const teamsLogger: Logger = {
 /**
  * Teams' adapter for this client's bot, every request it is handed checked
  * by {@link verifiedTeamsRequest} against `keys`, this isolate's unless a
- * test gives keys of its own. Its replies go out through connect,
- * which holds the bot's credential (GRA-709, GRA-757): until then, any
- * call to Microsoft as the bot fails here instead of going out.
+ * test gives keys of its own. Everything it sends goes out through
+ * connect, which holds the bot's credential: core builds the adapter with
+ * the placeholder connect swaps for it (`channelCredentialPlaceholder`),
+ * given as the token itself, so Microsoft's SDK never asks Entra for one.
  */
 export const teamsAdapter = (
   env: Env,
   keys: TeamsKeys = isolateKeys
-): TeamsAdapter =>
-  new TeamsAdapter({
+): ConnectedTeamsAdapter =>
+  new ConnectedTeamsAdapter(env, {
     appId: env.TEAMS_BOT_ID ?? "",
     appType: "SingleTenant",
     appTenantId: clientTenant(env),
     webhookVerifier: async (request, body) =>
       await verifiedTeamsRequest(env, request, body, keys),
-    token: () => {
-      throw new Error("Core holds no Teams bot credential.");
-    },
+    token: () => channelCredentialPlaceholder,
     logger: teamsLogger,
   });
