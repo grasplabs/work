@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { confirmAction } from "../src/channels/cards.tsx";
-import { chatAgentId,personalWorkspaceId } from "../src/chats-rpc.ts";
+import { chatAgentId, personalWorkspaceId } from "../src/chats-rpc.ts";
 import { workspace } from "../src/durable-objects.ts";
 import { codeStep, pointAtGateway, says } from "./agent-chat.ts";
 import { fakeGateway } from "./ai-gateway.ts";
@@ -39,17 +39,16 @@ const setUpTime = { timeout: 90_000 };
 
 type Person = Awaited<ReturnType<typeof signedInApi>>;
 
+const isFetcher = (value: unknown): value is Fetcher =>
+  typeof value === "object" && value !== null && "fetch" in value;
+
 /** The mail Graph sent with `subject`: none, unless connect sent it. */
 const sentWith = async (subject: string) => {
   const providers = testBinding("CONNECT_PROVIDERS");
-  if (
-    typeof providers !== "object" ||
-    providers === null ||
-    !("fetch" in providers)
-  ) {
+  if (!isFetcher(providers)) {
     throw new TypeError("Expected the providers Worker as CONNECT_PROVIDERS");
   }
-  const response = await (providers as Fetcher).fetch(graphSentUrl);
+  const response = await providers.fetch(graphSentUrl);
   return z
     .array(z.object({ subject: z.string(), to: z.array(z.string()) }).loose())
     .parse(await response.json())
@@ -118,13 +117,15 @@ const sendingTurn = async (
     )
   );
   const teams = teamsPerson(String(person.person.oid));
-  await post(messageFrom(teams, { text: asked }));
+  // The invoice's number is the person's, as a real one would be.
+  await post(messageFrom(teams, { text: `${asked} It's ${subject}.` }));
   const { sent } = await reached(teams.conversation);
   const card = sent.findLast(
     ({ id, activity }) =>
       id !== undefined && JSON.stringify(activity).includes(confirmAction)
   );
-  const connectCalls = (await allEvents()).filter(
+  const events = await allEvents();
+  const connectCalls = events.filter(
     ({ action, target }) =>
       action === "connection.call" && target?.id === outlook.id
   );
@@ -175,8 +176,9 @@ describe("reaching others from a Teams chat", setUpTime, () => {
       asked: "Mail ben@acme.test the invoice and copy cleo@acme.test.",
     });
     const card = JSON.stringify(turn.card?.activity ?? {});
+    const held = await turn.person.api.pendingActions.list();
     expect({
-      held: (await turn.person.api.pendingActions.list()).length,
+      held: held.length,
       shows: [
         turn.subject,
         turn.body,

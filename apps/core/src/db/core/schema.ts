@@ -2382,6 +2382,12 @@ export const dependencyRequests = sqliteTable(
      */
     endedGeneration: integer("ended_generation"),
     endedReason: text("ended_reason"),
+    /**
+     * When an approval in force was last found clean of malware reported
+     * since (OSV.dev and the registry's advisories), by the periodic
+     * re-check (`recheckMalware`, requests.ts): null until it was.
+     */
+    malwareCheckedAt: timestamp("malware_checked_at"),
   },
   (table) => [
     // One request waits per subject: a second pending row is refused.
@@ -2401,6 +2407,14 @@ export const dependencyRequests = sqliteTable(
       table.subjectType,
       table.subjectId,
       table.graphHash,
+      table.status
+    ),
+    // The approvals the malware re-check is due to read: by when each was
+    // last found clean, never checked first. Led by that time, not the
+    // status, so the approvers' list of what is in force keeps reading the
+    // subject index in its order.
+    index("dependency_requests_malware_idx").on(
+      table.malwareCheckedAt,
       table.status
     ),
   ]

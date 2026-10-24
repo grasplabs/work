@@ -120,16 +120,18 @@ describe("the card's check line", () => {
 describe("a Teams turn that holds writes", setUpTime, () => {
   it("sends one card naming both, after its answer, carrying what a press confirms", async () => {
     const admin = await signedInApi(idp, "admin");
-    const mail = await mailConnection();
+    // By the name its contract serves: a write from a chat app is checked
+    // against the fields its action takes (channels/stephen-rules.ts).
+    const mail = await mailConnection([], ["MAIL_SEND"]);
     const binding = `MAIL${unique()}`.toUpperCase();
     await requestGranted(idp, admin, {
       subject: { type: "agent", agentId: chatAgentId },
       object: { type: "connection", connectionId: mail.id },
-      actions: ["mail.send"],
+      actions: ["MAIL_SEND"],
       binding,
     });
     const send = (to: string, subject: string) =>
-      `await env.connections.call(${JSON.stringify(binding)}, "mail.send", ${JSON.stringify({ to, subject })});`;
+      `await env.connections.call(${JSON.stringify(binding)}, "MAIL_SEND", ${JSON.stringify({ to, subject })});`;
     const person = await member(
       idp,
       codeStep(
@@ -140,7 +142,7 @@ describe("a Teams turn that holds writes", setUpTime, () => {
 
     await post(
       messageFrom(person.teams, {
-        text: "Mail Ben the invoice and remind Cleo.",
+        text: "Mail ben@acme.test the invoice INV-7 and remind cleo@acme.test.",
       })
     );
 

@@ -1673,6 +1673,14 @@ export interface ConnectApi extends PackageRegistryApi, ChannelApi {
     request: ConnectorContractRequest
   ) => Promise<ConnectorContract>;
   /**
+   * Whether an action of a connection only reads, the input properties it
+   * takes and the connection's provider (`ActionShape`), by the rules a
+   * call of it goes by. `connect.action_not_found` for one the connection
+   * doesn't allow; `connect.server_unavailable` when a Composio server
+   * can't be reached to list its tools.
+   */
+  actionShape: (request: ActionShapeRequest) => Promise<ActionShape>;
+  /**
    * The held actions waiting for `person`, newest first (at most 200):
    * none for Grasp staff.
    */
@@ -1868,6 +1876,25 @@ export const connectorContractRequestSchema = z.strictObject({
 export type ConnectorContractRequest = z.input<
   typeof connectorContractRequestSchema
 >;
+
+/** Which action of which connection `actionShape` describes. */
+export const actionShapeRequestSchema = z.strictObject({
+  connectionId: connectionIdSchema,
+  action: permissionActionSchema,
+});
+export type ActionShapeRequest = z.input<typeof actionShapeRequestSchema>;
+
+/**
+ * What core needs to know of an action before a chat's agent calls it,
+ * without calling it: whether it only reads (as connect decides whether
+ * it holds a call), the input properties it takes (`null` when connect
+ * can't read them now), and the connection's provider.
+ */
+export interface ActionShape {
+  readOnly: boolean;
+  inputs: string[] | null;
+  provider: string;
+}
 
 /** One action of a generated contract. */
 export interface ConnectorContractAction {

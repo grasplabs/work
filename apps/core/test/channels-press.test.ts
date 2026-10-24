@@ -34,16 +34,18 @@ const setUpTime = { timeout: 90_000 };
  */
 const heldTurn = async (plan: MailAnswer[] = []) => {
   const admin = await signedInApi(idp, "admin");
-  const mail = await mailConnection(plan);
+  // By the name its contract serves: a write from a chat app is checked
+  // against the fields its action takes (channels/stephen-rules.ts).
+  const mail = await mailConnection(plan, ["MAIL_SEND"]);
   const binding = `MAIL${unique()}`.toUpperCase();
   await requestGranted(idp, admin, {
     subject: { type: "agent", agentId: chatAgentId },
     object: { type: "connection", connectionId: mail.id },
-    actions: ["mail.send"],
+    actions: ["MAIL_SEND"],
     binding,
   });
   const send = (to: string, subject: string) =>
-    `await env.connections.call(${JSON.stringify(binding)}, "mail.send", ${JSON.stringify({ to, subject })});`;
+    `await env.connections.call(${JSON.stringify(binding)}, "MAIL_SEND", ${JSON.stringify({ to, subject })});`;
   const person = await member(
     idp,
     codeStep(
@@ -52,7 +54,9 @@ const heldTurn = async (plan: MailAnswer[] = []) => {
     says("Both mails wait for you to confirm them.")
   );
   await post(
-    messageFrom(person.teams, { text: "Mail Ben the invoice and remind Cleo." })
+    messageFrom(person.teams, {
+      text: "Mail ben@acme.test the invoice INV-7 and remind cleo@acme.test.",
+    })
   );
   const { sent } = await reached(person.teams.conversation);
   const card = sent.findLast(

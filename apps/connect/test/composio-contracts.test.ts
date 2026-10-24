@@ -506,3 +506,50 @@ describe("a Composio connection's generated contract", () => {
     });
   });
 });
+
+const shapeOf = async (connectionId: string, action: string) =>
+  await exports.default.actionShape({ connectionId, action });
+
+describe("an action's shape, as core checks a chat app's write against it", () => {
+  it("is a read only as the admin said, with the fields its server lists, or none it can tell", async () => {
+    const connectionId = await hubspot();
+    expect({
+      list: await shapeOf(connectionId, "HUBSPOT_LIST_CONTACTS"),
+      create: await shapeOf(connectionId, "HUBSPOT_CREATE_CONTACT"),
+      unservable: await shapeOf(connectionId, "HUBSPOT.DOTTED"),
+      notAllowed: await outcome(
+        shapeOf(connectionId, "HUBSPOT_DELETE_CONTACTS")
+      ),
+    }).toStrictEqual({
+      list: { readOnly: true, inputs: ["limit"], provider: "hubspot" },
+      // Its server says it only reads: the admin didn't.
+      create: { readOnly: false, inputs: ["email"], provider: "hubspot" },
+      unservable: { readOnly: false, inputs: null, provider: "hubspot" },
+      notAllowed: "connect.action_not_found",
+    });
+  });
+
+  it("is a native tool's as its manifest says, and no connection's that's gone", async () => {
+    const native = await addConnection({
+      provider: "microsoft",
+      serverKind: "native",
+      server: "microsoft-365",
+    });
+    const gone = await hubspot(rules, { status: "disconnected" });
+    const send = await shapeOf(native, "mail.send");
+    const list = await shapeOf(native, "mail.list");
+    expect({
+      send: { readOnly: send.readOnly, provider: send.provider },
+      takesFields: (send.inputs ?? []).length > 0,
+      list: list.readOnly,
+      unknown: await outcome(shapeOf(native, "mail.nope")),
+      gone: await outcome(shapeOf(gone, "HUBSPOT_LIST_CONTACTS")),
+    }).toStrictEqual({
+      send: { readOnly: false, provider: "microsoft" },
+      takesFields: true,
+      list: true,
+      unknown: "connect.action_not_found",
+      gone: "connect.connection_not_found",
+    });
+  });
+});
