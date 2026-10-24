@@ -405,17 +405,26 @@ export const followedVersion = async (
 
 /**
  * Follows an App's version through `follow` until core's first push, then
- * lets go: refused as core refuses following it.
+ * lets go: the version it pushed, or refused as core refuses following it,
+ * or as its first push refuses it (thrown with that push's code), so a
+ * refusal never reads as a version delivered.
  */
 export const firstVersion = async (
   follow: Parameters<typeof followedVersion>[0]
-): Promise<AppVersionPush> => {
+): Promise<Extract<AppVersionPush, { type: "current" }>> => {
   const followed = await followedVersion(follow);
+  let push: AppVersionPush;
   try {
-    return await followed.next();
+    push = await followed.next();
   } finally {
     await followed.release();
   }
+  if (push.type === "refused") {
+    throw Object.assign(new Error(push.error.message), {
+      code: push.error.code,
+    });
+  }
+  return push;
 };
 
 /**
