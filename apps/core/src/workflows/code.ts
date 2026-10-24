@@ -28,6 +28,7 @@ import { NonRetryableError } from "@grasp-os/workerflow/errors";
 import type { RpcTarget } from "cloudflare:workers";
 import { z } from "zod";
 
+import { putCached, readCached } from "../cache-macs.ts";
 import { appBindingKinds, workflowBindingKinds } from "../permissions.ts";
 import { quietLoader } from "../quiet-loader.ts";
 import {
@@ -1214,6 +1215,14 @@ export const codesFailure = (error: unknown): string | undefined => {
 };
 
 /**
+ * The purpose a workflow's cached metadata is signed for (`putCached`): what
+ * it declares, its triggers among them, is registered and run with the
+ * App's permissions, so a trigger the code never declared must never be
+ * read back from R2.
+ */
+const workflowMetadataCachePurpose = "grasp-os workflow metadata cache";
+
+/**
  * What workflow `id` declares at an App version (with its `files`), read
  * from its code in an isolate of their own, kept by the loader for that
  * version: a version's code never changes. Each part is checked by
@@ -1233,9 +1242,16 @@ const declaredMetadata = async (
   // parameter read and trigger registration asks again. Kept where its
   // builds are (screens.ts), as what it read, never what it refused.
   const cacheKey = `workflow-metadata/${app}/${version}/${id}/${compilerVersion}.json`;
-  const cached = await env.FILES.get(cacheKey);
-  if (cached !== null) {
-    const kept = declaredMetadataSchema.safeParse(await cached.json());
+  // Triggers registered from it run with the App's permissions, so only
+  // what core read is read back: one whose MAC doesn't check is a miss.
+  const cached = await readCached(
+    env,
+    env.FILES,
+    workflowMetadataCachePurpose,
+    cacheKey
+  );
+  if (cached !== undefined) {
+    const kept = declaredMetadataSchema.safeParse(JSON.parse(cached));
     if (kept.success) {
       return kept.data;
     }
@@ -1271,7 +1287,13 @@ const declaredMetadata = async (
   if (metadata?.success !== true) {
     throw workflowErrors.create("workflow.invalid");
   }
-  await env.FILES.put(cacheKey, JSON.stringify(metadata.data));
+  await putCached(
+    env,
+    env.FILES,
+    workflowMetadataCachePurpose,
+    cacheKey,
+    JSON.stringify(metadata.data)
+  );
   return metadata.data;
 };
 

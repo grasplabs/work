@@ -36,6 +36,8 @@ const generated = [
   // The SDK's connector catalog, from the release's connectors
   // (apps/core/build-connector-catalog.ts).
   "packages/sdk/src/connector-catalog.gen.ts",
+  // Each native tool's class, from the same connectors.
+  "apps/core/src/native-tool-classes.gen.ts",
 ];
 
 /** Why a target may not extend Cap'n Web's or workerd's RpcTarget itself. */
@@ -226,6 +228,12 @@ export default defineConfig({
           "no-restricted-imports": "off",
           "grasp/no-unbounded-rpc-target": "off",
         },
+      },
+      {
+        // Core's JSX is Chat SDK's cards (apps/core/tsconfig.json), not
+        // React's DOM: a card's `style` is a word ("primary", "muted").
+        files: ["apps/core/src/**/*.tsx"],
+        rules: { "react/style-prop-object": "off" },
       },
       {
         // Schema files start as comment-only placeholders until their first table.

@@ -12,7 +12,6 @@ import { drizzle } from "drizzle-orm/d1";
 import { alias } from "drizzle-orm/sqlite-core";
 
 import { collections, documents, links } from "./db/knowledge/schema.ts";
-import { noteProvenance } from "./knowledge/access.ts";
 import { allowedFor } from "./knowledge/authorize.ts";
 import { portsOf } from "./knowledge/ports.ts";
 
@@ -156,8 +155,7 @@ export const brainNotes = async (
       moreLinks: Math.max(0, (totals.get(row.id) ?? 0) - its.length),
     };
   });
-  await noteProvenance(
-    env,
+  await portsOf(env).onRead(
     reader,
     {
       action: "knowledge.read",

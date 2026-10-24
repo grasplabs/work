@@ -140,6 +140,17 @@ export class OnboardingRpc extends CoreRpcTarget implements OnboardingApi {
   }
 
   async saveRoster(roster: RosterInput): Promise<OnboardingView> {
+    return await this.#keepRoster(roster, false);
+  }
+
+  async confirmRoster(roster: RosterInput): Promise<OnboardingView> {
+    return await this.#keepRoster(roster, true);
+  }
+
+  async #keepRoster(
+    roster: RosterInput,
+    confirmed: boolean
+  ): Promise<OnboardingView> {
     return await withPerson(this.#check, async (person) => {
       requireAdmin(person);
       const parsed = onboardingErrors.parse(
@@ -149,7 +160,8 @@ export class OnboardingRpc extends CoreRpcTarget implements OnboardingApi {
       );
       return await onboardingStore(this.#env).saveRoster(
         parsed,
-        actorOf(person)
+        actorOf(person),
+        { confirmed }
       );
     });
   }
@@ -262,7 +274,11 @@ export class OnboardingRpc extends CoreRpcTarget implements OnboardingApi {
       if (roster === null) {
         throw onboardingErrors.create("onboarding.no_roster");
       }
-      return await store.savePlan(parsed, actorOf(person));
+      const saved = await store.savePlan(parsed, actorOf(person));
+      // What is due under it goes now, as a plan whose first moment has
+      // passed already says: the alarm only looks again within the hour.
+      const sent = await store.releaseDue();
+      return sent.length === 0 ? saved : await store.view();
     });
   }
 

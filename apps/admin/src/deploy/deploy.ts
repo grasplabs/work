@@ -84,6 +84,7 @@ import {
   workersSubdomain,
 } from "./router.ts";
 import type { RouterHosts, SmokeOptions } from "./router.ts";
+import { sealedSecretPrints, sealedWorkerSecrets } from "./sealed-secrets.ts";
 import { sharedSecretPrints, workerSecrets } from "./secrets.ts";
 import type { DeploySecrets } from "./secrets.ts";
 import {
@@ -345,8 +346,9 @@ const recordFailure = async (
 /**
  * The versions a deploy uploaded, by app, each with the fingerprint of
  * everything that went into it (`uploadFingerprint`), of its secrets
- * alone (`secretsFingerprint`), and of the shared secrets among them
- * (`sharedSecretPrints`, secret by secret).
+ * alone (`secretsFingerprint`), and of the shared and the client's sealed
+ * secrets among them (`sharedSecretPrints`, `sealedSecretPrints`, secret
+ * by secret). A version recorded before sealed secrets were has none.
  */
 const recordedSchema = z.object({
   byApp: z.record(
@@ -356,6 +358,7 @@ const recordedSchema = z.object({
       fingerprint: z.string(),
       secrets: z.string(),
       shared: z.record(z.string(), z.string()),
+      sealed: z.record(z.string(), z.string()).optional(),
     })
   ),
 });
@@ -766,6 +769,14 @@ const uploadApp = async (
   // Read for every Worker, so a setting that went bad since the deploy
   // was prepared still stops it before the first one is uploaded.
   const vars = await coreVars(context, deploy);
+  // Read for every upload, so one staff set or replaced since the deploy
+  // started is the one it carries, and the fingerprint below changes.
+  const sealed = await sealedWorkerSecrets(
+    db,
+    secrets.clientKey,
+    clientId,
+    app
+  );
   const workerSecretValues = await workerSecrets(
     app,
     worker,
@@ -775,7 +786,8 @@ const uploadApp = async (
       generation: deploy.generation,
       rotationLiveAt: deploy.rotationLiveAt,
     },
-    context.now?.() ?? new Date()
+    context.now?.() ?? new Date(),
+    sealed
   );
   const workerVars = app === coreApp ? vars : {};
   checkBindingNames(worker, workerVars, workerSecretValues);
@@ -793,6 +805,7 @@ const uploadApp = async (
     workerSecretValues
   );
   const sharedPrint = await sharedSecretPrints(secrets, app);
+  const sealedPrint = await sealedSecretPrints(secrets.clientKey, sealed);
   const versions = await recordedNow(db, id);
   const recorded = versions[app];
   if (recorded?.fingerprint === fingerprint) {
@@ -820,6 +833,7 @@ const uploadApp = async (
     fingerprint,
     secrets: secretsPrint,
     shared: sharedPrint,
+    sealed: sealedPrint,
   };
   await act(
     db,
@@ -1118,9 +1132,10 @@ export interface UploadedWorker {
 }
 
 /**
- * The fingerprint `print` (of all its secrets, or of its shared ones) the
- * latest of client `clientId`'s deploys to record `app`'s version
- * `version` recorded for it (for `shared`, the JSON of its by-name map);
+ * The fingerprint `print` (of all its secrets, of its shared ones, or of
+ * its sealed ones) the latest of client `clientId`'s deploys to record
+ * `app`'s version `version` recorded for it (for `shared` and `sealed`,
+ * the JSON of its by-name map);
  * null when none did (a version uploaded
  * outside the admin, or before deploys recorded one).
  */
@@ -1129,7 +1144,7 @@ export const recordedPrintOf = async (
   clientId: string,
   app: string,
   version: string,
-  print: "secrets" | "shared"
+  print: "secrets" | "shared" | "sealed"
 ): Promise<string | null> => {
   const [row] = await db
     .select({

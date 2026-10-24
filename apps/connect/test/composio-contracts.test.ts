@@ -12,6 +12,7 @@ import {
   connectWith,
   outcome,
 } from "./connect.ts";
+import { composioClasses } from "./fixtures/composio-classes.ts";
 import type { FakeTool } from "./mcp-server.ts";
 import { testComposioKey } from "./provider-config.ts";
 
@@ -231,6 +232,14 @@ const contractOf = async (
 const parsed = (text: string | undefined): unknown =>
   text === undefined ? undefined : JSON.parse(text);
 
+/** The class and read flag a contract serves the list tool with. */
+const listOf = ({
+  actions: { HUBSPOT_LIST_CONTACTS: list },
+}: Awaited<ReturnType<typeof contractOf>>) => ({
+  class: list?.class,
+  readOnly: list?.readOnly,
+});
+
 describe("a Composio connection's generated contract", () => {
   beforeEach(() => {
     // The list tool as its server first lists it: tests change it.
@@ -293,6 +302,42 @@ describe("a Composio connection's generated contract", () => {
     expect(after.actions.HUBSPOT_LIST_CONTACTS?.input).not.toBe(
       before.actions.HUBSPOT_LIST_CONTACTS?.input
     );
+  });
+
+  it("carries each tool's class: a release that reclasses one is a changed contract, a read no more", async () => {
+    // Marked as a read, and allowed by name alone: for this one, the
+    // admin's rule already made it a change before the reclass.
+    const connections = await Promise.all(
+      [
+        [{ name: "HUBSPOT_LIST_CONTACTS", read: true }],
+        ["HUBSPOT_LIST_CONTACTS"],
+      ].map(async (allowed) => await hubspot(allowed))
+    );
+    const before = await Promise.all(
+      connections.map(async (id) => await contractOf(id))
+    );
+    const { hubspot: classed } = composioClasses;
+    if (classed === undefined) {
+      throw new Error("Expected HubSpot's classes");
+    }
+    classed.HUBSPOT_LIST_CONTACTS = "change-company";
+    try {
+      const after = await Promise.all(
+        connections.map(async (id) => await contractOf(id))
+      );
+      expect({ was: before.map(listOf), is: after.map(listOf) }).toStrictEqual({
+        was: [
+          { class: "read-company", readOnly: true },
+          { class: "read-company", readOnly: false },
+        ],
+        is: [
+          { class: "change-company", readOnly: false },
+          { class: "change-company", readOnly: false },
+        ],
+      });
+    } finally {
+      classed.HUBSPOT_LIST_CONTACTS = "read-company";
+    }
   });
 
   it("follows the admin's allowlist as it stands: a tool taken off it is gone", async () => {
