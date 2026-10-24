@@ -250,9 +250,8 @@ const microsoft: OAuthProviderConfig = {
   // Those of the classes on by default; a consent asks those of the classes
   // the company turned on (`rightsFor`, GRA-717).
   scopes: microsoftRights(classesOnByDefault),
-  // Asked of a connection made before grants were kept, since the
-  // connector writes workbooks: one made before can't, and is reconnected
-  // in place (tokens.ts). One granted by class holds its classes' rights.
+  // Asked for since the connector writes workbooks: a connection made
+  // before can't, and is reconnected in place. Change own asks for it.
   renewalRequires: ["Files.ReadWrite.All"],
   scopeSeparator: " ",
   authorizationParams: () => ({ response_mode: "query" }),
@@ -754,4 +753,28 @@ export const grantedAsAsked = (
     [...scopes].every((each) => granted.allowed.has(each)) &&
     granted.required.every((each) => scopes.has(each.toLowerCase()))
   );
+};
+
+/** The OpenID scopes, which a provider's answer may name or leave out. */
+const signInScopes: ReadonlySet<string> = new Set([
+  "openid",
+  "profile",
+  "email",
+  "offline_access",
+]);
+
+/**
+ * The scopes `provider` asks for now that a grant of `scope` (a token
+ * answer's) lacks, besides the OpenID ones: those its connector came to
+ * ask for after the connection was made.
+ */
+export const scopesLacking = (
+  { scopes }: OAuthProviderConfig,
+  scope: string
+): string[] => {
+  const granted = scopesOf(scope);
+  return scopes.filter((each) => {
+    const asked = each.toLowerCase();
+    return !(signInScopes.has(asked) || granted.has(asked));
+  });
 };

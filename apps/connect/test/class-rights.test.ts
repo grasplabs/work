@@ -65,22 +65,30 @@ const askedAgain = { status: "needs_reauth", tokens: 0 };
 
 /** What the defaults' consent is granted, as Entra's answer lists it. */
 const defaultGrant =
-  "openid profile email offline_access User.Read Mail.ReadWrite Calendars.ReadWrite Files.ReadWrite.All";
+  "openid profile email offline_access User.Read Mail.ReadWrite MailboxSettings.Read Calendars.ReadWrite Files.ReadWrite.All Tasks.ReadWrite";
 
 describe("a consent", () => {
   it("asks Microsoft only for the rights of the classes the company turned on", async () => {
     const defaults = [
       ...signIn,
       "Mail.ReadWrite",
+      "MailboxSettings.Read",
       "Calendars.ReadWrite",
       "Files.ReadWrite.All",
+      "Tasks.ReadWrite",
     ];
     await expect(askedFor()).resolves.toStrictEqual(rights(...defaults));
     await expect(askedFor(["read-own", "change-own"])).resolves.toStrictEqual(
       rights(...defaults)
     );
     await expect(askedFor(["read-own"])).resolves.toStrictEqual(
-      rights(...signIn, "Mail.Read", "Calendars.Read", "Files.Read")
+      rights(
+        ...signIn,
+        "Mail.Read",
+        "MailboxSettings.Read",
+        "Calendars.Read",
+        "Files.Read"
+      )
     );
     await expect(
       askedFor(["read-own", "change-own", "reach-others"])
@@ -92,6 +100,7 @@ describe("a consent", () => {
       rights(
         ...signIn,
         "Mail.Read",
+        "MailboxSettings.Read",
         "Calendars.Read",
         "Files.ReadWrite.All",
         "Calendars.Read.Shared",

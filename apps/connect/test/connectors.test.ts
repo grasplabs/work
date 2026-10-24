@@ -486,12 +486,12 @@ describe("a native connector", () => {
     expect(api.sent).toStrictEqual([]);
   });
 
-  it("is what each provider's connections run, with the scopes connect asks for when every class is on", () => {
+  it("is what each provider's connections run, with the scopes connect asks for when every class is on and a shared mailbox pointed at", () => {
     for (const config of Object.values(providerConfigs)) {
       const connector = nativeConnector(config.server);
       expect(connector?.manifest.provider).toBe(config.id);
       expect(
-        rightsFor(config.id, companyToolClasses) ?? config.scopes
+        rightsFor(config.id, companyToolClasses, true) ?? config.scopes
       ).toStrictEqual(
         expect.arrayContaining([...(connector?.manifest.scopes ?? [])])
       );
@@ -516,15 +516,27 @@ describe("a native connector", () => {
       "mail.list": "read-company",
       "mail.get": "read-company",
       "mail.readAttachment": "read-company",
-      "mail.move": "change-company",
+      "mail.move": "change-own",
+      "mail.flag": "change-own",
+      "mail.categorise": "change-own",
       "mail.send": "reach-others",
       "mail.createDraft": "change-company",
+      "mail.createReplyDraft": "change-company",
       ...calendar,
       ...files,
+      "lists.items": "read-company",
+      "calendar.create": "change-own",
+      "calendar.update": "change-own",
       "excel.listRows": "read-company",
       "excel.addRow": "change-company",
       "excel.updateRow": "change-company",
       "mail.thread": "read-company",
+      // A delegated token opens no one's To Do but its own user's.
+      "todo.lists": "read-own",
+      "todo.tasks": "read-own",
+      "todo.create": "change-own",
+      "todo.complete": "change-own",
+      "files.versions": "read-company",
     });
     expect(classesOf("google-workspace")).toStrictEqual({
       "mail.list": "read-own",

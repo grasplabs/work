@@ -8,6 +8,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { recordEventsIf } from "./audit.ts";
 import { connections, connectionTokens } from "./db/schema.ts";
 import {
+  grantedRights,
   holdsMicrosoftRights,
   microsoftRightsBefore,
 } from "./provider-rights.ts";
@@ -37,9 +38,15 @@ export const requireClassRights = async (
     request
   );
   const db = drizzle(env.DB);
+  // Only connections with tokens: one waiting to be connected again has
+  // none, and is asked already.
   const active = await db
-    .select({ id: connections.id, granted: connections.grantedScopes })
+    .select({ id: connections.id, granted: connectionTokens.grantedScopes })
     .from(connections)
+    .innerJoin(
+      connectionTokens,
+      eq(connectionTokens.connectionId, connections.id)
+    )
     .where(
       and(
         eq(connections.provider, "microsoft"),
@@ -50,7 +57,7 @@ export const requireClassRights = async (
   const lacking = active.filter(
     ({ granted }) =>
       !holdsMicrosoftRights(
-        granted ?? microsoftRightsBefore,
+        grantedRights(granted ?? undefined) ?? microsoftRightsBefore,
         classes,
         sharedMailbox
       )
