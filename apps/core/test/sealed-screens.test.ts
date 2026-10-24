@@ -6,7 +6,13 @@ import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
-import { loadRelease, sealedScreen } from "../src/app-releases.ts";
+import {
+  heldManifest,
+  loadRelease,
+  sealedScreen,
+  versionManifest,
+} from "../src/app-releases.ts";
+import { versionFiles } from "../src/apps.ts";
 import { appCandidateReports, appCandidates } from "../src/db/core/schema.ts";
 import {
   frameAccess,
@@ -76,19 +82,26 @@ const cachedBuilds = async (): Promise<number> => {
   return page.objects.length;
 };
 
+/** Whether `key` is a screen's or the server code's cached build. */
+const isCachedBuild = (key: string): boolean =>
+  /^[a-z-]+-builds\//u.test(key) && !key.startsWith("package-");
+
 /**
- * Rewrites every build cached in R2 that holds `word`, as someone who can
- * write to the bucket but doesn't hold core's secret could, keeping what
- * it was written with: how many it rewrote.
+ * Rewrites every entry cached in R2 that `isEntry` picks and holds `word`,
+ * as someone who can write to the bucket but doesn't hold core's secret
+ * could, keeping what it was written with: how many it rewrote.
  */
-const poisonBuildCache = async (word: string): Promise<number> => {
+const poisonCache = async (
+  word: string,
+  isEntry: (key: string) => boolean = isCachedBuild
+): Promise<number> => {
   let poisoned = 0;
   let cursor: string | undefined;
   do {
     // oxlint-disable-next-line no-await-in-loop -- one page after another
     const page = await env.FILES.list({ cursor, include: ["customMetadata"] });
     for (const { key, customMetadata } of page.objects) {
-      if (!/^[a-z-]+-builds\//u.test(key) || key.startsWith("package-")) {
+      if (!isEntry(key)) {
         continue;
       }
       // oxlint-disable-next-line no-await-in-loop -- one after another
@@ -491,8 +504,8 @@ describe("screens sealed with their release", { timeout: 120_000 }, () => {
       "Again"
     );
     const poisoned = {
-      screens: await poisonBuildCache("Desk"),
-      server: await poisonBuildCache("Sealed screens"),
+      screens: await poisonCache("Desk"),
+      server: await poisonCache("Sealed screens"),
     };
     await builder.api.apps.versions.setCurrent(app, version);
 
@@ -511,6 +524,33 @@ describe("screens sealed with their release", { timeout: 120_000 }, () => {
       served: false,
       server: false,
     });
+  });
+
+  it("reads an unsealed version's manifest from its code, not an inspection rewritten in R2's cache", async () => {
+    const { builder, app, id } = await published();
+    // Not made current, so not sealed: its manifest is its code's
+    // inspection, kept in R2 for the same code.
+    const { version } = await builder.api.apps.files.commit(
+      app,
+      { "screens/desk.tsx": `${files["screens/desk.tsx"]}\n` },
+      "Again"
+    );
+    const saved = await versionFiles(env, id, version);
+    await versionManifest(env, id, version, saved);
+    const rewrote = await poisonCache("Sealed screens", (key) =>
+      key.startsWith("inspections/")
+    );
+
+    // What core only holds is asked first, before an inspection again
+    // writes its own over the rewritten one.
+    const held = await heldManifest(env, id, version, saved);
+    const manifest = await versionManifest(env, id, version, saved);
+
+    expect({
+      rewrote: rewrote > 0,
+      read: JSON.stringify(manifest).includes("PWNED"),
+      held: JSON.stringify(held ?? {}).includes("PWNED"),
+    }).toStrictEqual({ rewrote: true, read: false, held: false });
   });
 
   it("refuses to make a version current whose screen doesn't build", async () => {
