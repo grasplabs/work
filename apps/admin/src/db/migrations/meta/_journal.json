@@ -169,6 +169,13 @@
       "when": 1792850243199,
       "tag": "0023_staff_alerts",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1792852864661,
+      "tag": "0024_client_watch",
+      "breakpoints": true
     }
   ]
 }

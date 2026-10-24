@@ -44,7 +44,27 @@ interface AlertKind {
 }
 
 /** Every kind of alert's name. */
-export type AlertKindName = "test";
+export type AlertKindName =
+  | "test"
+  | "stephen_refused"
+  | "stephen_failing"
+  | "stephen_slow"
+  | "stephen_over_budget"
+  | "stephen_busy"
+  | "stephen_sends_failing"
+  | "stephen_uninstalled"
+  | "stephen_connections_again";
+
+/**
+ * How long one of the watch's alerts holds back the next of its kind: as
+ * long as it takes, since the watch clears it once the signal is back
+ * under its bar (`clearStaffAlert`, src/clients/watch.ts). One alert as a
+ * signal goes over; another only once it went back and over again.
+ */
+const untilClearedMs = 400 * 24 * 60 * 60 * 1000;
+
+/** Milliseconds as seconds, to one decimal. */
+const secondsOf = (ms: number): string => (ms / 1000).toFixed(1);
 
 /** Every kind of alert, by name. */
 export const alertKinds: Readonly<Record<AlertKindName, AlertKind>> = {
@@ -53,6 +73,55 @@ export const alertKinds: Readonly<Record<AlertKindName, AlertKind>> = {
     title: "Test alert",
     words: () => "A test from the admin: staff alerts reach this channel.",
     windowMs: 60 * 1000,
+  },
+  // Stephen in the chat apps, over the last day, as the watch reads it.
+  stephen_refused: {
+    title: "Stephen: requests refused",
+    words: ({ refused = 0 }) =>
+      `Its door refused ${refused} requests in the last day as not sent by Teams for its bot. If its people are writing, check its bot's app id and tenant on its Setup.`,
+    windowMs: untilClearedMs,
+  },
+  stephen_failing: {
+    title: "Stephen: turns failing",
+    words: ({ failed = 0, turns = 0 }) =>
+      `${failed} of ${turns} turns in the last day ended in Stephen's line for a failure.`,
+    windowMs: untilClearedMs,
+  },
+  stephen_slow: {
+    title: "Stephen: answers slow",
+    words: ({ p90Ms = 0 }) =>
+      `9 in 10 answers in the last day took up to ${secondsOf(p90Ms)} s, over the bar of 12 s.`,
+    windowMs: untilClearedMs,
+  },
+  stephen_over_budget: {
+    title: "Stephen: over budget",
+    words: ({ overBudget = 0 }) =>
+      `${overBudget} turns in the last day were refused for the company's AI budget.`,
+    windowMs: untilClearedMs,
+  },
+  stephen_busy: {
+    title: "Stephen: busy",
+    words: ({ busy = 0 }) =>
+      `${busy} turns in the last day were turned away as the model or the agent was busy.`,
+    windowMs: untilClearedMs,
+  },
+  stephen_sends_failing: {
+    title: "Stephen: sends failing",
+    words: ({ failed = 0 }) =>
+      `Teams didn't take ${failed} of Stephen's answers or lines in the last day, besides any for an uninstalled app.`,
+    windowMs: untilClearedMs,
+  },
+  stephen_uninstalled: {
+    title: "Stephen: app uninstalled",
+    words: ({ uninstalled = 0 }) =>
+      `Teams refused ${uninstalled} of Stephen's answers in the last day as his app is no longer installed for those people.`,
+    windowMs: untilClearedMs,
+  },
+  stephen_connections_again: {
+    title: "Stephen: connections need a new sign-in",
+    words: ({ company = 0, personal = 0 }) =>
+      `${company} of the company's connections and ${personal} of people's own need a new sign-in before Stephen can use them.`,
+    windowMs: untilClearedMs,
   },
 };
 
@@ -129,6 +198,23 @@ const release = async (
         eq(staffAlerts.sentAt, at)
       )
     );
+};
+
+/**
+ * Clears what holds back the next `kind` alert about client `clientId`:
+ * the watch's alerts, once their signal is back under its bar, so the next
+ * time it goes over is told again. Whether one was held.
+ */
+export const clearStaffAlert = async (
+  env: Env,
+  clientId: string,
+  kind: AlertKindName
+): Promise<boolean> => {
+  const cleared = await adminDatabase(env.DB)
+    .delete(staffAlerts)
+    .where(and(eq(staffAlerts.clientId, clientId), eq(staffAlerts.kind, kind)))
+    .returning({ kind: staffAlerts.kind });
+  return cleared.length > 0;
 };
 
 /** Client `clientId`'s page in the admin; null while the admin has no hostname of its own. */

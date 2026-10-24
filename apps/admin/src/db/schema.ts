@@ -679,3 +679,18 @@ export const staffAlerts = sqliteTable(
   },
   (table) => [primaryKey({ columns: [table.clientId, table.kind] })]
 );
+
+/**
+ * What the admin's watch last read of how each client's Stephen fares
+ * (src/clients/watch.ts): the signals it reads from the client's admin
+ * snapshot, as JSON, and when. Counts only. One row a client, replaced
+ * at each read that answered.
+ */
+export const clientWatch = sqliteTable("client_watch", {
+  clientId: text("client_id")
+    .primaryKey()
+    .references(() => clients.id),
+  readAt: timestamp("read_at").notNull(),
+  /** `WatchedSignals` (src/clients/watch.ts), as JSON. */
+  signals: text().notNull(),
+});

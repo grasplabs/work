@@ -10,6 +10,8 @@ import { chatAgentId, personalWorkspaceId } from "../chats-rpc.ts";
 import { workspace } from "../durable-objects.ts";
 import { answerCard } from "./cards.tsx";
 import type { ChannelHandoff, ChannelMessage } from "./door.ts";
+import { countAnswered, countSignal } from "./signals.ts";
+import type { ChannelSignal } from "./signals.ts";
 import { channelLocales, languageOf, say } from "./words.ts";
 import type { ChannelLocale } from "./words.ts";
 
@@ -62,6 +64,38 @@ const appLocale = (raw: unknown): ChannelLocale => {
   return channelLocales.find((each) => each === language) ?? "en";
 };
 
+/** The count a refused or failed turn's line stands for (signals.ts). */
+const signalOfLine: Readonly<Record<RefusedLine, ChannelSignal | null>> = {
+  budget: "over_budget",
+  busy: "busy",
+  failed: "failed",
+  // Someone removed since the door let them in: nothing about Stephen.
+  removed: null,
+};
+
+/**
+ * Posts `content` in `thread`, counting a post the platform didn't take
+ * (`send_failed`), and one it refused as forbidden as the app uninstalled
+ * (`uninstalled`: Teams answers 403 to a bot no longer in the chat, which
+ * its adapter throws as a `PermissionError`). Throws what posting threw.
+ */
+const postIn = async (
+  env: Env,
+  platform: string,
+  thread: Thread,
+  content: Parameters<Thread["post"]>[0]
+): Promise<void> => {
+  try {
+    await thread.post(content);
+  } catch (error) {
+    await countSignal(env, platform, "send_failed");
+    if (error instanceof Error && error.name === "PermissionError") {
+      await countSignal(env, platform, "uninstalled");
+    }
+    throw error;
+  }
+};
+
 /** Shows typing in `thread` until the returned function is called. */
 const typingIn = (thread: Thread): (() => void) => {
   const show = async () => {
@@ -91,6 +125,7 @@ const answerOne = async (
   text: string,
   locale: ChannelLocale
 ): Promise<void> => {
+  const startedAt = Date.now();
   const stopTyping = typingIn(thread);
   let asked: Awaited<ReturnType<ReturnType<typeof workspace>["askThrough"]>>;
   try {
@@ -107,7 +142,11 @@ const answerOne = async (
       line,
       ...errorFields(error),
     });
-    await thread.post(say(line, locale));
+    const signal = signalOfLine[line];
+    if (signal !== null) {
+      await countSignal(env, platform, signal);
+    }
+    await postIn(env, platform, thread, say(line, locale));
     return;
   } finally {
     stopTyping();
@@ -115,25 +154,29 @@ const answerOne = async (
   const { chatId, answer } = asked;
   if (answer.outcome !== "answered" || answer.answer.trim() === "") {
     log.warn("channel.turn_failed", { platform, outcome: answer.outcome });
-    await thread.post(say("failed", locale));
+    await countSignal(env, platform, "failed");
+    await postIn(env, platform, thread, say("failed", locale));
     return;
   }
   const origin = signInConfig(env)?.origin;
-  if (origin === undefined) {
-    await thread.post(answer.answer);
-    return;
-  }
-  await thread.post(
-    answerCard({
-      locale,
-      text: answer.answer,
-      sources: answer.cited.map(({ title, collectionId, documentId }) => ({
-        title,
-        url: `${origin}/knowledge/${encodeURIComponent(collectionId)}?doc=${encodeURIComponent(documentId)}`,
-      })),
-      chatUrl: `${origin}/?chat=${encodeURIComponent(chatId)}`,
-    })
+  await postIn(
+    env,
+    platform,
+    thread,
+    origin === undefined
+      ? answer.answer
+      : answerCard({
+          locale,
+          text: answer.answer,
+          sources: answer.cited.map(({ title, collectionId, documentId }) => ({
+            title,
+            url: `${origin}/knowledge/${encodeURIComponent(collectionId)}?doc=${encodeURIComponent(documentId)}`,
+          })),
+          chatUrl: `${origin}/?chat=${encodeURIComponent(chatId)}`,
+        })
   );
+  // Timed to the answer posted, as the person waits for it.
+  await countAnswered(env, platform, Date.now() - startedAt);
 };
 
 /**

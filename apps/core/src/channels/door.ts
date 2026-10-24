@@ -59,6 +59,7 @@ import { errorResponse } from "../errors.ts";
 import { boundedText, jsonOf } from "../request-body.ts";
 import { answerInChat } from "./answer.ts";
 import { signInCard } from "./cards.tsx";
+import { countSignal } from "./signals.ts";
 import type { ConnectedTeamsAdapter } from "./teams-adapter.ts";
 import { teamsAdapter, verifiedTeamsRequest } from "./teams.ts";
 import type { TeamsKeys } from "./teams.ts";
@@ -397,6 +398,7 @@ export const channelResponse = async (
     );
   }
   if (!(await verifiedTeamsRequest(env, request, body, teamsKeys))) {
+    ctx.waitUntil(countSignal(env, platform, "refused"));
     return new Response("Unauthorized", { status: 401 });
   }
   const parsed = activitySchema.safeParse(jsonOf(body));

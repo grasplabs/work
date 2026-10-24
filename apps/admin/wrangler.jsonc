@@ -72,8 +72,9 @@
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ChatState"] }],
   // Imports newly published releases (src/releases/import.ts) every 5
   // minutes; on weekday mornings, posts the admin's digest to Discord
-  // (src/admin/discord-digest.ts, `digestCron`).
-  "triggers": { "crons": ["*/5 * * * *", "0 6,7 * * 1-5"] },
+  // (src/admin/discord-digest.ts, `digestCron`); every hour, watches
+  // Stephen at every client (src/clients/watch.ts, `watchCron`).
+  "triggers": { "crons": ["*/5 * * * *", "0 6,7 * * 1-5", "45 * * * *"] },
   // Onboards a client (src/provision/workflow.ts): an instance per attempt,
   // each claimed in D1 first (src/runners.ts), so two runs for one
   // client can't overlap.
