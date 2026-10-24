@@ -45,14 +45,20 @@ const locationOf = (response: Response, step: string): string => {
 };
 
 /**
- * Signs in as `email` the way a browser does: core starts the sign-in, the
- * IdP (told who by `loginHint`) sends the browser back, and core's callback
- * sets the session cookie. Returns that cookie's value; throws, with where
- * core sent the browser, when core refuses the sign-in.
+ * What wrangler's dev server says when it drops a request between its
+ * proxy and a Worker (core, or the fake IdP behind core's callback). The
+ * request never reached the code under test, so it's tried again. Core
+ * passes it on in its error redirect's query, where spaces are `+`.
  */
-export const signInAs = async (
+const droppedByDevServer = /Network[ +]connection[ +]lost/u;
+
+/** How many times a sign-in the dev server dropped is tried in all. */
+const signInAttempts = 3;
+
+/** One attempt at `signInAs`. */
+const signInOnce = async (
   email: string,
-  providerId: "microsoft" | "grasp-staff" = "microsoft"
+  providerId: "microsoft" | "grasp-staff"
 ): Promise<string> => {
   const started = await fetch(new URL("/api/auth/sign-in/sso", origin), {
     method: "POST",
@@ -64,7 +70,11 @@ export const signInAs = async (
       loginHint: email,
     }),
   });
-  const body: unknown = await started.json();
+  const text = await started.text();
+  if (droppedByDevServer.test(text)) {
+    throw new Error(`Sign-in as ${email} did not start: ${text}`);
+  }
+  const body: unknown = started.ok ? JSON.parse(text) : null;
   if (
     !started.ok ||
     typeof body !== "object" ||
@@ -89,6 +99,38 @@ export const signInAs = async (
   }
   return decodeURIComponent(session.slice(sessionCookie.length + 1));
 };
+
+/** `signInOnce`, tried again while the dev server drops it, `attemptsLeft` times in all. */
+const signInTrying = async (
+  email: string,
+  providerId: "microsoft" | "grasp-staff",
+  attemptsLeft: number
+): Promise<string> => {
+  try {
+    return await signInOnce(email, providerId);
+  } catch (error) {
+    const dropped =
+      error instanceof Error && droppedByDevServer.test(error.message);
+    if (!dropped || attemptsLeft <= 1) {
+      throw error;
+    }
+    return await signInTrying(email, providerId, attemptsLeft - 1);
+  }
+};
+
+/**
+ * Signs in as `email` the way a browser does: core starts the sign-in, the
+ * IdP (told who by `loginHint`) sends the browser back, and core's callback
+ * sets the session cookie. Returns that cookie's value; throws, with where
+ * core sent the browser, when core refuses the sign-in. A sign-in the dev
+ * server dropped (`droppedByDevServer`) is tried again: the serial journeys
+ * start on a fresh stack with no retries of their own, and there a single
+ * dropped request failed the whole part.
+ */
+export const signInAs = async (
+  email: string,
+  providerId: "microsoft" | "grasp-staff" = "microsoft"
+): Promise<string> => await signInTrying(email, providerId, signInAttempts);
 
 export interface Person {
   userId: string;
