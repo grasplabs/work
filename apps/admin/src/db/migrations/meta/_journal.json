@@ -169,6 +169,13 @@
       "when": 1792844644456,
       "tag": "0023_client_teams_bot",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1792850564611,
+      "tag": "0024_staff_alerts",
+      "breakpoints": true
     }
   ]
 }

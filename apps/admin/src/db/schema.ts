@@ -669,3 +669,20 @@ export const integrationBuilds = sqliteTable("integration_builds", {
   createdAt: timestamp("created_at").notNull(),
   updatedAt: timestamp("updated_at").notNull(),
 });
+
+/**
+ * When the admin last told staff of each kind of alert about each client
+ * (src/alerts.ts): an alert of the same client and kind within its window
+ * isn't sent again, so a storm is one message. Nothing of what an alert
+ * said is kept.
+ */
+export const staffAlerts = sqliteTable(
+  "staff_alerts",
+  {
+    clientId: text("client_id").notNull(),
+    /** The alert's kind, such as `teams_bot_secret_expiring`. */
+    kind: text().notNull(),
+    sentAt: timestamp("sent_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.clientId, table.kind] })]
+);
