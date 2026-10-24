@@ -330,10 +330,10 @@ const endOf = async (session: Session, run: number): Promise<unknown> => {
 /** The test's decisions of run `runId`, as their rows have them. */
 const decisionsOf = async (runId: string) => {
   const { results } = await env.DB.prepare(
-    "SELECT recipient, status, decided_by AS decidedBy FROM app_test_decisions WHERE run_id = ?"
+    "SELECT recipients, status, decided_by AS decidedBy FROM app_test_decisions WHERE run_id = ?"
   )
     .bind(runId)
-    .all<{ recipient: string; status: string; decidedBy: string | null }>();
+    .all<{ recipients: string; status: string; decidedBy: string | null }>();
   return results;
 };
 
@@ -400,7 +400,11 @@ describe(
         answered: "ok",
         end: { status: "completed", output: { status: "approved" } },
         decisions: [
-          { recipient: "approver", status: "approved", decidedBy: "approver" },
+          {
+            recipients: '["approver"]',
+            status: "approved",
+            decidedBy: "approver",
+          },
         ],
         organization: 0,
       });
@@ -440,7 +444,9 @@ describe(
       }).toStrictEqual({
         other: "decision.forbidden",
         own: "decision.forbidden",
-        meanwhile: [{ recipient: "approver", status: "open", decidedBy: null }],
+        meanwhile: [
+          { recipients: '["approver"]', status: "open", decidedBy: null },
+        ],
         waiting: "waiting",
         answered: "ok",
         end: { status: "completed", output: { status: "rejected" } },
@@ -499,6 +505,57 @@ describe(
       await second.session.close();
     });
 
+    it("is answered by any one of the principals it asks, never with the run's own among them", async () => {
+      const asking = (names: string[]) =>
+        approvalTasks().map((task) =>
+          "request-review" in task
+            ? {
+                "request-review": {
+                  ...task["request-review"],
+                  with: {
+                    ...task["request-review"].with,
+                    recipients: `\${ ${JSON.stringify(names)} }`,
+                  },
+                },
+              }
+            : task
+        );
+      const both = await invoicesApp(
+        { deciders: ["approver", "other"] },
+        { tasks: asking(["approver", "other"]) }
+      );
+      const first = await runningIn(both);
+      const answered = await respond(first.session, "other", first.run, {
+        approved: true,
+      });
+      const withOwn = await invoicesApp(
+        { deciders: ["approver", "desk-user"] },
+        { tasks: asking(["approver", "desk-user"]) }
+      );
+      const second = await runningIn(withOwn);
+      expect({
+        answered,
+        end: await endOf(first.session, first.run),
+        decisions: await decisionsOf(first.runId),
+        withOwn: await endOf(second.session, second.run),
+        withOwnDecisions: await decisionsOf(second.runId),
+      }).toStrictEqual({
+        answered: "ok",
+        end: { status: "completed", output: { status: "approved" } },
+        decisions: [
+          {
+            recipients: '["approver","other"]',
+            status: "approved",
+            decidedBy: "other",
+          },
+        ],
+        withOwn: { status: "failed", code: "workflow.call_invalid" },
+        withOwnDecisions: [],
+      });
+      await first.session.close();
+      await second.session.close();
+    });
+
     it("takes the first answer only: a second is refused, and the first stands", async () => {
       const app = await invoicesApp();
       const { session, run, runId } = await runningIn(app);
@@ -520,7 +577,11 @@ describe(
         second: "decision.closed",
         end: { status: "completed", output: { status: "approved" } },
         decisions: [
-          { recipient: "approver", status: "approved", decidedBy: "approver" },
+          {
+            recipients: '["approver"]',
+            status: "approved",
+            decidedBy: "approver",
+          },
         ],
       });
       await session.close();
@@ -538,7 +599,9 @@ describe(
       }).toStrictEqual({
         answered: "decision.closed",
         end: { status: "cancelled" },
-        decisions: [{ recipient: "approver", status: "open", decidedBy: null }],
+        decisions: [
+          { recipients: '["approver"]', status: "open", decidedBy: null },
+        ],
       });
       await session.close();
     });
@@ -584,7 +647,7 @@ describe(
           code: "workflow.decision_timed_out",
         },
         decisions: [
-          { recipient: "approver", status: "timed_out", decidedBy: null },
+          { recipients: '["approver"]', status: "timed_out", decidedBy: null },
         ],
         late: "decision.closed",
       });
