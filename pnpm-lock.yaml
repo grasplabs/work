@@ -554,6 +554,9 @@ importers:
       fflate:
         specifier: 'catalog:'
         version: 0.8.3
+      jose:
+        specifier: 'catalog:'
+        version: 6.2.12
       postal-mime:
         specifier: 'catalog:'
         version: 3.0.0
