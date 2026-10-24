@@ -89,7 +89,7 @@ const ownerInputSchema = z.string().min(1).max(256);
  * for whoever lists their notifications; what the App read
  * (app-provenance.ts) can't be decided in SQL, and isn't part of it.
  */
-const openTo = (userId: string | SQLiteColumn, app: string): SQL => sql`(
+export const openTo = (userId: string | SQLiteColumn, app: string): SQL => sql`(
   ${activeMember(userId, ["admin"])}
   OR EXISTS (SELECT 1 FROM ${apps} WHERE ${apps.id} = ${app} AND ${apps.ownerId} = ${userId})
   OR EXISTS (

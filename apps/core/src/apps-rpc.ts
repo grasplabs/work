@@ -1,5 +1,6 @@
 import type {
   App,
+  AppChanges,
   AppContents,
   AppsApi,
   CurrentExports,
@@ -9,7 +10,9 @@ import type { DefinitionPackage } from "@grasp-os/shared/definition-packages";
 
 import { AppBlueprintsRpc } from "./app-blueprints.ts";
 import { AppFilesRpc } from "./app-files-rpc.ts";
+import { AppIntegrationsRpc } from "./app-integrations.ts";
 import { AppMembersRpc } from "./app-members.ts";
+import { updateApp } from "./app-settings.ts";
 import { changeStatus } from "./app-status.ts";
 import type { AppTransition } from "./app-status.ts";
 import { AppVersionsRpc } from "./app-versions-rpc.ts";
@@ -27,7 +30,7 @@ import type { SessionCheck } from "./session-check.ts";
 
 /**
  * A signed-in person's `apps`, with `apps.files`, `apps.versions`,
- * `apps.members` and `apps.blueprints`, in SessionRpc's form. The App
+ * `apps.members`, `apps.blueprints` and `apps.integrations`, in SessionRpc's form. The App
  * functions check the person's role in the App and validate what the
  * client sent.
  */
@@ -38,6 +41,7 @@ export class AppsRpc extends CoreRpcTarget implements AppsApi {
   readonly #versions: AppVersionsRpc;
   readonly #members: AppMembersRpc;
   readonly #blueprints: AppBlueprintsRpc;
+  readonly #integrations: AppIntegrationsRpc;
 
   constructor(env: Env, check: SessionCheck) {
     super();
@@ -47,6 +51,7 @@ export class AppsRpc extends CoreRpcTarget implements AppsApi {
     this.#versions = new AppVersionsRpc(env, check);
     this.#members = new AppMembersRpc(env, check);
     this.#blueprints = new AppBlueprintsRpc(env, check);
+    this.#integrations = new AppIntegrationsRpc(env, check);
   }
 
   get files(): AppFilesRpc {
@@ -63,6 +68,10 @@ export class AppsRpc extends CoreRpcTarget implements AppsApi {
 
   get blueprints(): AppBlueprintsRpc {
     return this.#blueprints;
+  }
+
+  get integrations(): AppIntegrationsRpc {
+    return this.#integrations;
   }
 
   async create(app: NewApp): Promise<App> {
@@ -120,6 +129,13 @@ export class AppsRpc extends CoreRpcTarget implements AppsApi {
     return await withPerson(
       this.#check,
       async (by) => await changeStatus(this.#env, by, app, transition)
+    );
+  }
+
+  async update(app: string, changes: AppChanges): Promise<App> {
+    return await withPerson(
+      this.#check,
+      async (by) => await updateApp(this.#env, by, app, changes)
     );
   }
 

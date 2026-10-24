@@ -33,13 +33,15 @@ import { appMemoryPath } from "./memory-files.ts";
 // holds it, the purge rewrites the entry's history like any document's.
 //
 // The App registry is in the core database and the collection in
-// Knowledge's, so no batch holds both. Making a version current indexes
-// the App straight after (`indexAppNow`), and a cron trigger every 15
-// minutes indexes every App whose entry isn't of its current version
-// (`indexApps`): one whose indexing failed. Indexing
-// where a version is made current keeps entries current; the cron trigger
-// only catches up, so every 15 minutes is enough. `app_entries`, in core's
-// database, has the version each entry holds, written once the entry is:
+// Knowledge's, so no batch holds both. Making a version current, and
+// renaming or describing an App anew (app-settings.ts), indexes the App
+// straight after (`indexAppNow`), and a cron trigger every 15 minutes
+// indexes every App whose entry isn't of its current version, name and
+// description (`indexApps`): one whose indexing failed. Indexing where
+// they change keeps entries current; the cron trigger only catches up, so
+// every 15 minutes is enough. `app_entries`, in core's database, has the
+// version each entry holds and a hash of its name and description
+// (`described`), written once the entry is:
 // should that write fail, the entry is indexed again by the next run.
 //
 // Two indexings of one App at once (a version change and the cron, say)
@@ -98,6 +100,16 @@ interface IndexedApp {
 const entryText = (app: IndexedApp, body: string): string =>
   `---\n${stringify({ title: app.name, description: app.description, app: app.id })}---\n${body}`;
 
+/**
+ * The SHA-256 of an App's name and description, as `app_entries` keeps
+ * what its entry holds (`described`): a rename or a new description
+ * (app-settings.ts) makes the entry stale, as a new version does.
+ */
+const describedAs = async (
+  app: Pick<IndexedApp, "name" | "description">
+): Promise<string> =>
+  await sha256Hex(JSON.stringify([app.name, app.description]));
+
 /** The App `appId`, if it exists. */
 const appInUse = async (env: Env, appId: string) =>
   await drizzle(env.DB)
@@ -148,39 +160,42 @@ export const entryNow = async (
 };
 
 /**
- * Sets the version the App's entry holds, once the entry does. With
- * `onlyOver`, only while `app_entries` still holds what this indexing
- * read there (`version` undefined: no row): see `indexApp`.
+ * Sets the version, name and description (`describedAs`) the App's entry
+ * holds, once the entry does. With `onlyOver`, only while `app_entries`
+ * still holds what this indexing read there (undefined: no row): see
+ * `indexApp`.
  */
 const noteVersion = async (
   env: Env,
   appId: string,
   version: number,
-  onlyOver?: { version: number | undefined }
+  described: string,
+  onlyOver?: { version: number; described: string | null } | null
 ): Promise<void> => {
   await drizzle(env.DB)
     .insert(appEntries)
-    .values({ appId, version, indexedAt: new Date() })
+    .values({ appId, version, described, indexedAt: new Date() })
     .onConflictDoUpdate({
       target: appEntries.appId,
       set: {
         version: sql`excluded.version`,
+        described: sql`excluded.described`,
         indexedAt: sql`excluded.indexed_at`,
       },
-      ...(onlyOver === undefined
+      ...(onlyOver === null
         ? {}
         : {
             setWhere:
-              onlyOver.version === undefined
+              onlyOver === undefined
                 ? sql`0`
-                : eq(appEntries.version, onlyOver.version),
+                : sql`${appEntries.version} = ${onlyOver.version} AND ${appEntries.described} IS ${onlyOver.described}`,
           }),
     });
 };
 
 /**
  * Indexes the App `appId` at its current version, unless its entry holds
- * that version already, or it has none.
+ * that version, name and description already, or it has none.
  * Throws what failed, `knowledge.conflict` when another indexing wrote
  * first.
  */
@@ -189,7 +204,7 @@ const indexApp = async (env: Env, appId: string): Promise<void> => {
   const path = appEntryPath(appId);
   // What was noted and the entry first, then the App (see above).
   const noted = await drizzle(env.DB)
-    .select({ version: appEntries.version })
+    .select({ version: appEntries.version, described: appEntries.described })
     .from(appEntries)
     .where(eq(appEntries.appId, appId))
     .get();
@@ -215,7 +230,11 @@ const indexApp = async (env: Env, appId: string): Promise<void> => {
     );
   const app = await appInUse(env, appId);
   const version = app?.currentVersion ?? null;
-  if (app === undefined || version === null || noted?.version === version) {
+  if (app === undefined || version === null) {
+    return;
+  }
+  const described = await describedAs(app);
+  if (noted?.version === version && noted.described === described) {
     return;
   }
   const text = entryText(app, await agentsOf(env, appId, version));
@@ -226,7 +245,7 @@ const indexApp = async (env: Env, appId: string): Promise<void> => {
     // read, so an indexing that wrote another version's text meanwhile,
     // and noted it, isn't covered up: its note stays, which differs from
     // the App's, and the next run indexes the App again.
-    await noteVersion(env, appId, version, { version: noted?.version });
+    await noteVersion(env, appId, version, described, noted);
     // A version number can come back (W, then V again), so the guard above
     // can't tell every write since; the entry's own version only grows.
     // Moved on since it was read, the entry may hold another version's
@@ -277,7 +296,7 @@ const indexApp = async (env: Env, appId: string): Promise<void> => {
   // so. Kept from a note made since (an unchanged-text indexing of another
   // version, say), the two would agree with the App and never be indexed
   // again, with this text in the entry.
-  await noteVersion(env, appId, version);
+  await noteVersion(env, appId, version, described, null);
 };
 
 /**
@@ -297,7 +316,7 @@ export const indexAppNow = async (env: Env, appId: string): Promise<void> => {
 
 /**
  * Indexes the Apps in use whose entries aren't of their current version,
- * at most `indexedPerRun`, one at a time, from a random one on (by ID,
+ * name and description, at most `indexedPerRun`, one at a time, from a random one on (by ID,
  * wrapping around): Apps whose indexing fails every time can't keep the
  * others waiting run after run. The cron trigger calls it every 15
  * minutes.
@@ -305,16 +324,34 @@ export const indexAppNow = async (env: Env, appId: string): Promise<void> => {
 export const indexApps = async (env: Env): Promise<void> => {
   const [noted, inUse] = await Promise.all([
     drizzle(env.DB)
-      .select({ appId: appEntries.appId, version: appEntries.version })
+      .select({
+        appId: appEntries.appId,
+        version: appEntries.version,
+        described: appEntries.described,
+      })
       .from(appEntries),
     drizzle(env.DB)
-      .select({ id: apps.id, currentVersion: apps.currentVersion })
+      .select({
+        id: apps.id,
+        currentVersion: apps.currentVersion,
+        name: apps.name,
+        description: apps.description,
+      })
       .from(apps)
       .where(isNotNull(apps.currentVersion)),
   ]);
-  const held = new Map(noted.map(({ appId, version }) => [appId, version]));
-  const stale = inUse
-    .filter(({ id, currentVersion }) => held.get(id) !== currentVersion)
+  const held = new Map(noted.map((entry) => [entry.appId, entry]));
+  const checked = await Promise.all(
+    inUse.map(async (app) => {
+      const entry = held.get(app.id);
+      const current =
+        entry?.version === app.currentVersion &&
+        entry.described === (await describedAs(app));
+      return { id: app.id, current };
+    })
+  );
+  const stale = checked
+    .filter(({ current }) => !current)
     .map(({ id }) => id)
     .toSorted();
   const [start = 0] = crypto.getRandomValues(new Uint32Array(1));
