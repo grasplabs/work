@@ -39,6 +39,9 @@ catalogs:
     '@chat-adapter/teams':
       specifier: 4.43.0
       version: 4.43.0
+    '@chat-adapter/telegram':
+      specifier: 4.43.0
+      version: 4.43.0
     '@chat-adapter/whatsapp':
       specifier: 4.43.0
       version: 4.43.0
@@ -521,6 +524,9 @@ importers:
       '@chat-adapter/teams':
         specifier: 'catalog:'
         version: 4.43.0(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.6.5)
+      '@chat-adapter/telegram':
+        specifier: 'catalog:'
+        version: 4.43.0(supports-color@10.2.2)(zod@4.6.5)
       '@chat-adapter/whatsapp':
         specifier: 'catalog:'
         version: 4.43.0(supports-color@10.2.2)(zod@4.6.5)
@@ -1452,6 +1458,10 @@ packages:
 
   '@chat-adapter/teams@4.43.0':
     resolution: {integrity: sha512-+fMTr9ouzS5y9v/HmN+gVGmC3rscSs06rEnoIaYM0btReX1MW09/SLoxROeAU8EAxp/quOddIn4qp4+YQgWpbw==}
+    engines: {node: '>=20'}
+
+  '@chat-adapter/telegram@4.43.0':
+    resolution: {integrity: sha512-tBtRW7QzvF8pI5rrIUwEWesDMZLPaPdyhn9leTrC5J0B8cwb/uXvhgmrtaOQ5GzEQR8AnbIINGHyEY32nMeNLw==}
     engines: {node: '>=20'}
 
   '@chat-adapter/whatsapp@4.43.0':
@@ -8771,6 +8781,16 @@ snapshots:
     transitivePeerDependencies:
       - ai
       - debug
+      - supports-color
+      - workflow
+      - zod
+
+  '@chat-adapter/telegram@4.43.0(supports-color@10.2.2)(zod@4.6.5)':
+    dependencies:
+      '@chat-adapter/shared': 4.43.0(supports-color@10.2.2)(zod@4.6.5)
+      chat: 4.43.0(supports-color@10.2.2)(zod@4.6.5)
+    transitivePeerDependencies:
+      - ai
       - supports-color
       - workflow
       - zod

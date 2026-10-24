@@ -482,7 +482,12 @@ describe("every adapter", () => {
         (request: Request, options: WebhookOptions) => Promise<Response>
       > = chat.webhooks;
       const platforms = Object.keys(webhooks);
-      expect(platforms).toStrictEqual(["teams", "slack", "whatsapp"]);
+      expect(platforms).toStrictEqual([
+        "teams",
+        "slack",
+        "whatsapp",
+        "telegram",
+      ]);
       for (const [platform, webhook] of Object.entries(webhooks)) {
         // oxlint-disable-next-line no-await-in-loop
         const response = await webhook(

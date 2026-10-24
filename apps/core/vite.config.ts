@@ -20,6 +20,7 @@ import {
   landscapeClient,
   slackApp,
   teamsBot,
+  telegramBot,
   whatsAppNumber,
 } from "./test/connect-providers.ts";
 import { testSignIn } from "./test/sign-in-config.ts";
@@ -217,6 +218,8 @@ export const coreProject = (
             WHATSAPP_APP_SECRET: whatsAppNumber.appSecret,
             WHATSAPP_PHONE_NUMBER_ID: whatsAppNumber.phoneNumberId,
             WHATSAPP_VERIFY_TOKEN: whatsAppNumber.verifyToken,
+            // The client's Telegram bot (src/channels/telegram.ts).
+            TELEGRAM_WEBHOOK_SECRET: telegramBot.webhookSecret,
             // Few enough statistics points to reach each bound in a test.
             STATISTICS_POINT_LIMITS: "10/25",
             STATISTICS_READ_LIMITS: "20/60",
@@ -327,6 +330,7 @@ export const coreProject = (
                 SLACK_BOT_TOKEN: slackApp.botToken,
                 WHATSAPP_PHONE_NUMBER_ID: whatsAppNumber.phoneNumberId,
                 WHATSAPP_ACCESS_TOKEN: whatsAppNumber.accessToken,
+                TELEGRAM_BOT_TOKEN: telegramBot.token,
               },
               d1Databases: { DB: "grasp-os-connect" },
               // Its clock (connect's src/clock.ts).

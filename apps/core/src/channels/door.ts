@@ -42,6 +42,9 @@
  * its people are known only by the Slack account they linked to Grasp, and
  * someone who hasn't linked one gets the link, once, and nothing more.
  *
+ * Telegram (telegram.ts) does too, by the webhook's secret; its people
+ * are known by the Telegram account they linked.
+ *
  * WhatsApp (whatsapp.ts) comes in the same way as Slack: by Meta's
  * signature, for the client's own number, its people known only by the
  * WhatsApp account they linked to Grasp.
@@ -73,6 +76,11 @@ import type { ConnectedTeamsAdapter } from "./teams-adapter.ts";
 import { teamsAdapter, verifiedTeamsRequest } from "./teams.ts";
 import type { TeamsKeys } from "./teams.ts";
 import {
+  telegramAdapter,
+  telegramSetUp,
+  verifiedTelegramRequest,
+} from "./telegram.ts";
+import {
   verifiedWhatsAppRequest,
   whatsAppAdapter,
   whatsAppSetUp,
@@ -93,6 +101,7 @@ export const channelAdapters = (
   teams: teamsAdapter(env, teamsKeys),
   slack: slackAdapter(env),
   whatsapp: whatsAppAdapter(env),
+  telegram: telegramAdapter(env),
 });
 
 /** A platform the door has an adapter for. */
@@ -106,6 +115,9 @@ type Platform = keyof ReturnType<typeof channelAdapters>;
 const isSetUp = (env: Env, platform: string): platform is Platform => {
   if (platform === "whatsapp") {
     return whatsAppSetUp(env);
+  }
+  if (platform === "telegram") {
+    return telegramSetUp(env);
   }
   if (platform === "slack") {
     return (
@@ -796,6 +808,163 @@ const whatsAppResponse = async (
   return new Response(null, { status: 200 });
 };
 
+/**
+ * A Telegram update, as far as the door reads one: its id, and a new
+ * message's sender, chat and language, never its text. Edits, channel
+ * posts and every other kind are left out, and dropped.
+ */
+const telegramUpdateSchema = z.object({
+  update_id: z.number().int(),
+  message: z
+    .object({
+      message_id: z.number().int(),
+      from: z
+        .object({
+          id: z.number().int(),
+          is_bot: z.boolean(),
+          language_code: z.string().max(35).optional(),
+        })
+        .optional(),
+      chat: z.object({ id: z.number().int(), type: z.string() }),
+    })
+    .optional(),
+});
+type TelegramMessage = NonNullable<
+  z.infer<typeof telegramUpdateSchema>["message"]
+>;
+type TelegramSent = TelegramMessage & {
+  from: NonNullable<TelegramMessage["from"]>;
+};
+
+/**
+ * What the door does with a Telegram message before the Chat SDK sees it,
+ * as `slackGate` does with Slack's: the line it sends and nothing more, a
+ * link for someone who hasn't linked their Telegram account, or the member
+ * it is from.
+ */
+const telegramGate = async (
+  env: Env,
+  state: StateAdapter,
+  updateId: number,
+  message: TelegramSent
+): Promise<{ line?: DoorLine; link?: true; userId?: string }> => {
+  const first = await state.setIfNotExists(
+    `door:telegram:${updateId}`,
+    true,
+    seenTtlMs
+  );
+  if (!first) {
+    return {};
+  }
+  const sender = String(message.from.id);
+  if (!messages.take(`telegram:${sender}`)) {
+    log.info("channel.limited", { platform: "telegram" });
+    return told.take(`telegram:${sender}`) ? { line: "tooFast" } : {};
+  }
+  if (message.chat.type !== "private") {
+    return { line: "privateOnly" };
+  }
+  const writer = await writerOf(env, "telegram", sender);
+  return writer.kind === "member" ? { userId: writer.userId } : { link: true };
+};
+
+/**
+ * Sends one of Stephen's lines, or a link to sign in by, to the chat
+ * `message` came from, in the language the sender's Telegram is set to.
+ */
+const sendTelegramLine = async (
+  env: Env,
+  origin: string,
+  message: TelegramSent,
+  line: DoorLine | "link"
+): Promise<void> => {
+  const adapter = telegramAdapter(env);
+  const threadId = adapter.encodeThreadId({
+    chatId: String(message.chat.id),
+  });
+  const locale = localeOf(message.from.language_code);
+  try {
+    if (line === "link") {
+      const { path } = await offerChannelLink(env, {
+        platform: "telegram",
+        platformUserId: String(message.from.id),
+      });
+      await adapter.postMessage(
+        threadId,
+        signInCard({ locale, url: new URL(path, origin).href })
+      );
+      return;
+    }
+    await adapter.postMessage(threadId, say(line, locale));
+  } catch (error) {
+    log.warn("channel.line_failed", {
+      platform: "telegram",
+      line,
+      ...errorFields(error),
+    });
+  }
+};
+
+/**
+ * Answers a Telegram request whose body the door read: 401 unless it
+ * carries the client's webhook secret, and otherwise 200 at once, a
+ * member's message handled in the background.
+ */
+const telegramResponse = async (
+  request: Request,
+  env: Env,
+  body: string,
+  ctx: Pick<ExecutionContext, "waitUntil">,
+  handoff: ChannelHandoff | undefined
+): Promise<Response> => {
+  if (!verifiedTelegramRequest(env, request)) {
+    return new Response("Unauthorized", { status: 401 });
+  }
+  const parsed = telegramUpdateSchema.safeParse(jsonOf(body));
+  const message = parsed.success ? parsed.data.message : undefined;
+  // Only a person's new message: bots', edits and the rest are
+  // acknowledged and dropped.
+  if (!parsed.success || message?.from === undefined || message.from.is_bot) {
+    return new Response(null, { status: 200 });
+  }
+  const sent = { ...message, from: message.from };
+  const state = durableObjectState(inJurisdiction(env, env.CHAT_STATE));
+  const { line, link, userId } = await telegramGate(
+    env,
+    state,
+    parsed.data.update_id,
+    sent
+  );
+  const { origin } = new URL(request.url);
+  if (line !== undefined || link !== undefined) {
+    ctx.waitUntil(sendTelegramLine(env, origin, sent, line ?? "link"));
+  }
+  if (userId === undefined) {
+    return new Response(null, { status: 200 });
+  }
+  const chat = new Chat({
+    userName: "Stephen",
+    adapters: { telegram: telegramAdapter(env) },
+    state,
+    logger: "silent",
+    concurrency: "queue",
+  });
+  return handOn(env, ctx, chat, {
+    platform: "telegram",
+    userId,
+    handoff,
+    webhook: async (waitUntil) =>
+      await chat.webhooks.telegram(
+        new Request(request.url, {
+          method: "POST",
+          headers: request.headers,
+          body,
+        }),
+        { waitUntil }
+      ),
+  });
+};
+
 /** Options the tests set: the keys to check against, and the handoff. */
 export interface DoorOptions {
   teamsKeys?: TeamsKeys;
@@ -846,6 +1015,9 @@ export const channelResponse = async (
   }
   if (platform === "whatsapp") {
     return await whatsAppResponse(request, env, body, ctx, handoff);
+  }
+  if (platform === "telegram") {
+    return await telegramResponse(request, env, body, ctx, handoff);
   }
   if (!(await verifiedTeamsRequest(env, request, body, teamsKeys))) {
     return new Response("Unauthorized", { status: 401 });
