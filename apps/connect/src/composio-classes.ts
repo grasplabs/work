@@ -18,14 +18,16 @@ export type ComposioClasses = Readonly<
   Record<string, Readonly<Record<string, ToolClass>>>
 >;
 
-// Reviewed toolkits: the CRMs a pilot may run on, any of which an admin
-// connects (which one is the client's choice, not a release's). Each
+// Reviewed toolkits. First the CRMs a pilot may run on, any of which an
+// admin connects (which one is the client's choice, not a release's). Each
 // reads the company's records (`read-company`), and changes only the
 // status of a record, its notes and its tasks (`change-company`), held
 // for a card in chat. Left out on purpose, so never offered: creating or
 // merging records, anything about mail, workflows, marketing, imports,
 // schemas, owners' accounts or the app's own setup, queries in the app's
 // own language (SOQL), and tools that act on a sentence (`*_FROM_NL`).
+// Then the other company apps people spend time in, each as its comment
+// says, left out as the CRMs' are.
 export const composioClasses: ComposioClasses = {
   hubspot: {
     HUBSPOT_GET_COMPANY: "read-company",
@@ -127,5 +129,107 @@ export const composioClasses: ComposioClasses = {
     PIPEDRIVE_UPDATE_ACTIVITY: "change-company",
     PIPEDRIVE_UPDATE_DEAL: "change-company",
     PIPEDRIVE_UPDATE_NOTE: "change-company",
+  },
+  // A ticket queue: its issues, comments and work logs; changes file,
+  // move, assign and comment on issues. Not JQL, not projects' setup.
+  jira: {
+    JIRA_ADD_COMMENT: "change-company",
+    JIRA_ADD_WORKLOG: "change-company",
+    JIRA_ASSIGN_ISSUE: "change-company",
+    JIRA_CREATE_ISSUE: "change-company",
+    JIRA_EDIT_ISSUE: "change-company",
+    JIRA_GET_ALL_PROJECTS: "read-company",
+    JIRA_GET_ALL_STATUSES: "read-company",
+    JIRA_GET_ATTACHMENT_META: "read-company",
+    JIRA_GET_COMMENT: "read-company",
+    JIRA_GET_COMPONENTS: "read-company",
+    JIRA_GET_ISSUE: "read-company",
+    JIRA_GET_ISSUE_TYPES: "read-company",
+    JIRA_GET_ISSUE_WORKLOGS: "read-company",
+    JIRA_GET_PROJECT: "read-company",
+    JIRA_GET_PROJECT_VERSIONS: "read-company",
+    JIRA_GET_SPRINT: "read-company",
+    JIRA_GET_TRANSITIONS: "read-company",
+    JIRA_LIST_ALL_PROJECTS: "read-company",
+    JIRA_LIST_BOARDS: "read-company",
+    JIRA_LIST_ISSUE_COMMENTS: "read-company",
+    JIRA_LIST_SPRINTS: "read-company",
+    JIRA_SEARCH_ISSUES: "read-company",
+    JIRA_TRANSITION_ISSUE: "change-company",
+    JIRA_UPDATE_COMMENT: "change-company",
+  },
+  // A ticket queue. Reaches others: a reply, and an update, whose input
+  // can carry a public comment Zendesk emails the requester.
+  zendesk: {
+    ZENDESK_GET_RECENT_TICKETS: "read-company",
+    ZENDESK_GET_TICKET_COMMENTS: "read-company",
+    ZENDESK_GET_VIEWS: "read-company",
+    ZENDESK_GET_VIEWS_TICKETS: "read-company",
+    ZENDESK_GET_ZENDESK_TICKETS_TAGS: "read-company",
+    ZENDESK_GET_ZENDESK_TICKET_BY_ID: "read-company",
+    ZENDESK_LIST_ZENDESK_TICKETS: "read-company",
+    ZENDESK_REPLY_ZENDESK_TICKET: "reach-others",
+    ZENDESK_SEARCH_HELP_CENTER_ARTICLES: "read-company",
+    ZENDESK_SEARCH_ZENDESK: "read-company",
+    ZENDESK_UPDATE_TICKETS_TAGS: "change-company",
+    ZENDESK_UPDATE_ZENDESK_TICKET: "reach-others",
+  },
+  // A ticket queue. Reaches others: a reply, and a note, whose input can
+  // name people Freshdesk emails.
+  freshdesk: {
+    FRESHDESK_ADD_NOTE_TO_TICKET: "reach-others",
+    FRESHDESK_GET_SEARCH: "read-company",
+    FRESHDESK_GET_TICKETS: "read-company",
+    FRESHDESK_LIST_ALL_TICKET_CONVERSATIONS: "read-company",
+    FRESHDESK_REPLY_TO_TICKET: "reach-others",
+    FRESHDESK_SEARCH_COMPANIES: "read-company",
+    FRESHDESK_SEARCH_CONTACTS: "read-company",
+    FRESHDESK_SEARCH_SOLUTION_ARTICLES: "read-company",
+    FRESHDESK_UPDATE_TICKET: "change-company",
+    FRESHDESK_VIEW_TICKET: "read-company",
+  },
+  // Signing: reads an envelope's status and history; sending one, or
+  // making one from a template (which can send it), reaches its signers.
+  docusign: {
+    DOCUSIGN_CREATE_ENVELOPE_FROM_TEMPLATE: "reach-others",
+    DOCUSIGN_GET_ENVELOPE: "read-company",
+    DOCUSIGN_GET_TEMPLATE: "read-company",
+    DOCUSIGN_LIST_ALL_TEMPLATES: "read-company",
+    DOCUSIGN_RETRIEVE_ENVELOPE_AUDIT_EVENTS: "read-company",
+    DOCUSIGN_SEND_ENVELOPE: "reach-others",
+  },
+  // Phones: calls, their contacts and who is free; comments, tags and
+  // contacts change. Never starting a call: it rings someone.
+  aircall: {
+    AIRCALL_COMMENT_CALL: "change-company",
+    AIRCALL_GET_CALL: "read-company",
+    AIRCALL_GET_CONTACT: "read-company",
+    AIRCALL_GET_USER_AVAILABILITY: "read-company",
+    AIRCALL_LIST_CALLS: "read-company",
+    AIRCALL_LIST_CONTACTS: "read-company",
+    AIRCALL_LIST_TEAMS: "read-company",
+    AIRCALL_LIST_USERS_AVAILABILITY: "read-company",
+    AIRCALL_SEARCH_CALLS: "read-company",
+    AIRCALL_SEARCH_CONTACTS: "read-company",
+    AIRCALL_TAG_CALL: "change-company",
+    AIRCALL_UPDATE_CONTACT: "change-company",
+  },
+  // HR: the company's lookup tables only. No person's record, files,
+  // pay, benefits or time off: their data is too sensitive for a review
+  // by name alone.
+  bamboohr: {
+    BAMBOOHR_GET_JOB_SUMMARIES: "read-company",
+    BAMBOOHR_GET_META_DEPARTMENTS: "read-company",
+    BAMBOOHR_GET_META_DIVISIONS: "read-company",
+    BAMBOOHR_GET_META_JOB_TITLES: "read-company",
+    BAMBOOHR_GET_META_LOCATIONS: "read-company",
+    BAMBOOHR_GET_META_TIME_OFF_TYPES: "read-company",
+    BAMBOOHR_GET_TIME_OFF_POLICIES: "read-company",
+  },
+  // HR, as BambooHR: lookup tables only.
+  personio: {
+    PERSONIO_LIST_ABSENCE_TYPES: "read-company",
+    PERSONIO_LIST_DOCUMENT_CATEGORIES: "read-company",
+    PERSONIO_LIST_PROJECTS: "read-company",
   },
 };
