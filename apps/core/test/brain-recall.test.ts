@@ -18,12 +18,12 @@ import { newTeam, readCollection } from "./knowledge.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
 
 // The Brain's recall (knowledge/recall.ts), through the boundaries callers
-// reach it by: a person's Knowledge RPC, an agent's Knowledge tools across
-// what it may read, and a collection's stub. These tests start from the
-// ways it can fail (GRA-296's threat note): forged authority in the
-// arguments, a filter wider than the caller's reach, evidence from a
-// collection the caller can't read, a binding kept after its grant is
-// revoked, and a budget a recall ignores. Every caller reads through the
+// reach it by: a person's Knowledge RPC and a collection's stub; a chat's
+// own, `env.brain.recall`, is tested with the chat (agent-knowledge.test.ts).
+// These tests start from the ways it can fail (GRA-296's threat note):
+// forged authority in the arguments, a filter wider than the caller's
+// reach, evidence from a collection the caller can't read, a binding kept
+// after its grant is revoked, and a budget a recall ignores. Every caller reads through the
 // same service and the same access predicate, so the same source answers
 // the same way.
 
@@ -76,7 +76,6 @@ const cited = (pack: MemoryPack) => ({
   truncated: pack.truncated,
 });
 
-/** The Knowledge tools of `agent` acting for `person`, recall among them. */
 /** The HANDBOOK collection stub in the env of `agent` acting for `person`. */
 const handbookOf = async (
   agent: ReturnType<typeof newAgent>,
