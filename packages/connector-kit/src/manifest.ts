@@ -109,6 +109,27 @@ export const stampMetaKey = "grasp-os/stamp";
 export const stampPattern = /^[0-9a-f]{32}$/u;
 
 /**
+ * Call `_meta` key: `true` says the call is a held side effect its person
+ * confirmed, on a card that showed them its exact input; connect sends it
+ * to native connectors only, and only then. A tool may do with such a call
+ * what no call may do unseen: write a formula a person typed, say. App and
+ * agent code never sets it: it isn't part of a call's input.
+ */
+export const confirmedMetaKey = "grasp-os/confirmed";
+
+/**
+ * Result `_meta` key: what a successful write changed, as
+ * `{ before, after }` (JSON values of the tool's own shape, such as a row's
+ * cells), for the audit record of old and new values. Connect keeps it
+ * with the call's answer and records its hash in the call's audit event;
+ * it takes it from native connectors only.
+ */
+export const changeMetaKey = "grasp-os/change";
+
+/** Largest change a result may report, in bytes of JSON. */
+export const maxChangeBytes = 256 * 1024;
+
+/**
  * The header a mail tool puts a stamp on (`stampMetaKey`), and connect's
  * mail events read it back from.
  */

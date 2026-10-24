@@ -6,6 +6,7 @@ import { errorReportPath } from "@grasp-os/shared/error-reports";
 import { internalErrors, requestErrors } from "@grasp-os/shared/errors";
 import { guestApiPath } from "@grasp-os/shared/guests";
 import { requestIdHeader } from "@grasp-os/shared/http";
+import { interviewHearPath } from "@grasp-os/shared/interview-hear";
 import {
   interviewApiPath,
   interviewPagePath,
@@ -21,7 +22,7 @@ import { platformUpdatePath } from "@grasp-os/shared/platform-change";
 import { provisionProbePath } from "@grasp-os/shared/provision-probe";
 import { quotaPolicyReportPath } from "@grasp-os/shared/quota-policy-report";
 import { screenFramePath } from "@grasp-os/shared/screens";
-import { speechPath } from "@grasp-os/shared/voice";
+import { speechPath, transcriptionPath } from "@grasp-os/shared/voice";
 
 import { adminAskResponse } from "./admin-ask.ts";
 import { adminSnapshotResponse } from "./admin-snapshot.ts";
@@ -49,12 +50,14 @@ import { errorResponse } from "./errors.ts";
 import { guestResponse } from "./guests.ts";
 import { originalResponse } from "./knowledge/uploads.ts";
 import { mailIngressResponse } from "./mail-ingress.ts";
+import { hearResponse } from "./onboarding/hear.ts";
 import { interviewTurnResponse } from "./onboarding/interview.ts";
 import { labResponse } from "./onboarding/lab.ts";
 import { interviewResponse } from "./onboarding/links.ts";
 import { speechResponse } from "./onboarding/speech.ts";
 import { interviewStoryResponse } from "./onboarding/story.ts";
 import { onboardingSummaryResponse } from "./onboarding/summary.ts";
+import { transcriptionResponse } from "./onboarding/transcription.ts";
 import {
   packageArtifactResponse,
   withoutArtifactToken,
@@ -142,8 +145,9 @@ const originalPath = /^\/api\/knowledge\/uploads\/(?<id>[\w-]+)\/original$/u;
  * The pages a link opens, which have no session: the link's secret in the
  * body is all they have. A guest's (src/guests.ts), and someone's own
  * interview, with the device's key too (src/onboarding/links.ts), whose
- * lines are said at the speech endpoint, also for an admin signed in
- * (src/onboarding/speech.ts).
+ * lines are said at the speech endpoint, and what they say is written down
+ * over a WebSocket, both also for an admin signed in
+ * (src/onboarding/speech.ts, src/onboarding/transcription.ts).
  */
 const linkResponse = async (
   pathname: string,
@@ -166,6 +170,12 @@ const linkResponse = async (
   }
   if (pathname === speechPath) {
     return await speechResponse(request, env, requestId);
+  }
+  if (pathname === transcriptionPath) {
+    return transcriptionResponse(request, env, requestId, ctx);
+  }
+  if (pathname === interviewHearPath) {
+    return await hearResponse(request, env, requestId);
   }
   return undefined;
 };

@@ -192,9 +192,11 @@ export interface RunAdmission {
   createdAt: number;
   /**
    * For a child run: the run that started it, and where it sits in its
-   * lineage (quotas.ts, `admitChild`). None for the root of its own.
+   * lineage (quotas.ts, `admitChild`); for a run an event's trigger
+   * started, where it sits, with no parent (event-delivery.ts). None for
+   * the root of its own.
    */
-  lineage?: { parentRunId: string; rootRunId: string; depth: number };
+  lineage?: { parentRunId: string | null; rootRunId: string; depth: number };
 }
 
 /**

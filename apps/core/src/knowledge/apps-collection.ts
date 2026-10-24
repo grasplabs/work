@@ -227,6 +227,26 @@ const indexApp = async (env: Env, appId: string): Promise<void> => {
     // and noted it, isn't covered up: its note stays, which differs from
     // the App's, and the next run indexes the App again.
     await noteVersion(env, appId, version, { version: noted?.version });
+    // A version number can come back (W, then V again), so the guard above
+    // can't tell every write since; the entry's own version only grows.
+    // Moved on since it was read, the entry may hold another version's
+    // text under this note: the note goes, and the next run indexes the
+    // App again.
+    const now = await knowledge
+      .select({ version: documents.currentVersion })
+      .from(documents)
+      .where(
+        and(
+          eq(documents.collectionId, appsCollectionId),
+          eq(documents.path, path)
+        )
+      )
+      .get();
+    if ((now?.version ?? 0) !== ifVersion) {
+      await drizzle(env.DB)
+        .delete(appEntries)
+        .where(eq(appEntries.appId, appId));
+    }
     return;
   }
   const collection = await ensureCollection(

@@ -82,10 +82,20 @@ export const openingState = (
   },
 });
 
-/** The layouts a screen runs in: in Grasp's frame, or full page. */
+/**
+ * The layouts a screen runs in: in Grasp's frame, on its App's own page
+ * (the screen in the address's search), or full page.
+ */
 type ScreenLayout =
+  | "/apps/$app"
   | "/domains/$engine/apps/$screen"
   | "/domains/$engine/apps/$screen/full";
+
+/** Where `screen` of `app` opens in `layout`. */
+const layoutLocation = (layout: ScreenLayout, app: string, screen: string) =>
+  layout === "/apps/$app"
+    ? { to: layout, params: { app }, search: { screen } }
+    : { to: layout, params: { engine: app, screen } };
 
 /**
  * How a screen of `app` running in `layout` navigates the page: to the
@@ -136,10 +146,7 @@ export const useScreenNavigate = (
           params: { engine: app },
           search: { tab: "settings" },
         })
-      : router.buildLocation({
-          to: layout,
-          params: { engine: app, screen: target.screen },
-        });
+      : router.buildLocation(layoutLocation(layout, app, target.screen));
     // Already there, as it opens: the router commits nothing new, and that
     // is no refusal.
     const here = router.state.location;

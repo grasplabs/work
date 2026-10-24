@@ -39,6 +39,7 @@ expectTypeOf<ConnectorAction<"microsoft-365.mail@1">>().toEqualTypeOf<
   | "move"
   | "readAttachment"
   | "send"
+  | "thread"
 >();
 
 declare const ctx: ActionCtx<readonly [typeof mail, typeof gmail]>;

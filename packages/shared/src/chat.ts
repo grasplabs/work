@@ -235,6 +235,24 @@ export interface ChatCitation {
 export const chatCitationsMax = 50;
 
 /**
+ * A document an answer cites (`ChatCitation`), as the chat's agent may
+ * read it for the chat's person now: where it is, what it is called, and
+ * the start of what it says (its description, or else its first section),
+ * cut to {@link citedSnippetMax} characters. A document either of them can
+ * no longer read, or that is gone, is never one.
+ */
+export interface ChatCitedDocument {
+  documentId: string;
+  collectionId: string;
+  title: string;
+  path: string;
+  snippet: string;
+}
+
+/** Longest snippet of a cited document (`ChatCitedDocument`). */
+export const citedSnippetMax = 200;
+
+/**
  * One stored message of a chat, oldest first by `id`. The agent's
  * instructions and the APIs it was shown aren't among them.
  */
@@ -380,6 +398,40 @@ export const applyOutput = (
 };
 
 /**
+ * How one call of the chat's code ended: done, held for the person to
+ * confirm (a connection's side effect), refused (an expected error: no
+ * permission, an unknown ID, a run that had ended), or failed.
+ */
+export type ChatToolOutcome = "ok" | "pending" | "refused" | "failed";
+
+/**
+ * One call the chat's code made to one of its agent's APIs (Code Mode),
+ * as a line a page can show under the code step that made it: the call
+ * the audit log records, by the same words. Its summary holds identifiers
+ * and counts of what it was given and what it found, never what it read:
+ * the run's ID, how many hits a search had, which connection it called.
+ */
+export interface ChatToolEvent {
+  /** Its order in the chat: a later call has a higher ID. */
+  id: number;
+  /** The code step that made it (`ChatCode.callId`). */
+  callId: string;
+  /** The API and method, as the code called it, such as `workflows.runs`. */
+  method: string;
+  /** What it acted on, when the audit log names one. */
+  target: { type: string; id: string } | null;
+  /** Identifiers and counts of its input and result, never their content. */
+  summary: Record<string, string | number | boolean | null>;
+  outcome: ChatToolOutcome;
+  /** Why it was refused or failed: an error code. */
+  reason: string | null;
+  at: string;
+}
+
+/** Most calls a chat keeps the events of: its latest. */
+export const chatToolEventsKept = 200;
+
+/**
  * What changed in a chat since the last update: the messages stored since,
  * and the chat as it is now. The first update of a `watch` catches up: the
  * messages after the one it named, what the agent is writing then, and
@@ -398,6 +450,13 @@ export interface ChatUpdate {
    * replaces it once stored.
    */
   output?: ChatOutputUpdate | null;
+  /**
+   * The calls the chat's code made since the last update, oldest first;
+   * in a watch's first update, every one the chat keeps (the latest
+   * {@link chatToolEventsKept}), which a page merges by ID. Left out when
+   * there are none.
+   */
+  tools?: ChatToolEvent[];
   /** Whether the agent is working on a question. */
   running: boolean;
   /** The chat's provenance: in the first update, and whenever it changes. */
@@ -556,6 +615,12 @@ export interface ChatsApi {
    * proposed, most recently written first.
    */
   drafts: (chatId: string) => Promise<ChatDraft[]>;
+  /**
+   * The documents the chat's answer `messageId` cites, in the order it
+   * first links to them, each only while the chat's agent may still read
+   * it for the person; none for a message that isn't an answer.
+   */
+  cited: (chatId: string, messageId: number) => Promise<ChatCitedDocument[]>;
   /**
    * Screen `screen` of the chat's draft of `app` (its first screen when
    * none is named), built, to preview: for the person while they build

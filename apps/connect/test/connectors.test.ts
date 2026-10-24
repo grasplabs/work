@@ -519,6 +519,13 @@ describe("a native connector", () => {
       "mail.createReplyDraft": "change-company",
       ...calendar,
       ...files,
+      "lists.items": "read-company",
+      "calendar.create": "change-own",
+      "calendar.update": "change-own",
+      "excel.listRows": "read-company",
+      "excel.addRow": "change-company",
+      "excel.updateRow": "change-company",
+      "mail.thread": "read-company",
     });
     expect(classesOf("google-workspace")).toStrictEqual({
       "mail.list": "read-own",
