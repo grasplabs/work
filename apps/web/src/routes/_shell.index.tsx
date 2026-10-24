@@ -239,6 +239,7 @@ const OpenChat = ({
             </div>
           )}
           <ChatThread
+            chatId={chat.id}
             loaded={view.loaded}
             messages={view.messages}
             onRetry={() => {

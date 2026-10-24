@@ -7,6 +7,7 @@ import {
   applySettingsFn,
   rotateSecretsFn,
   setRingFn,
+  setSealedSecretFn,
   setSignInFn,
 } from "../src/clients/functions.ts";
 import { act, adminDatabase } from "../src/db/act.ts";
@@ -347,6 +348,29 @@ const changes: {
             { email: caller }
           ),
         audited: { action: "client.sign_in", clientId, target: null },
+      };
+    },
+  },
+  {
+    name: "setting a client's Teams bot secret",
+    arrange: async () => {
+      const clientId = await recordClient(1);
+      return {
+        make: async () =>
+          await callServerFn(
+            setSealedSecretFn,
+            {
+              clientId,
+              name: "TEAMS_BOT_SECRET",
+              value: "bot~secret.Value_0123456789",
+            },
+            { email: caller }
+          ),
+        audited: {
+          action: "client.sealed_secret",
+          clientId,
+          target: "TEAMS_BOT_SECRET",
+        },
       };
     },
   },

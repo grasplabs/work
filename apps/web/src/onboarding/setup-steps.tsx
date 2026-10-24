@@ -480,6 +480,22 @@ const shareDocument = async (
   }
 };
 
+/**
+ * Whoever is new on a list saved while the plan runs: no link of theirs
+ * goes out until the admin confirms the organization again. Null while
+ * nobody waits.
+ */
+const WaitingNote = ({ waiting }: { waiting: number }) =>
+  waiting > 0 ? (
+    <p className="text-muted-foreground text-xs">
+      {plural(waiting, {
+        one: "# person new on your list gets a link once you confirm your organization.",
+        other:
+          "# people new on your list get their links once you confirm your organization.",
+      })}
+    </p>
+  ) : null;
+
 /** Where connecting a directory comes back to: this step. */
 const companyStep = "/setup?step=company";
 
@@ -659,7 +675,7 @@ const Company = (props: StepProps) => {
   // Read on this visit, and from where: then Stephen says so, even when a roster was there as the step arrived.
   const [fresh, setFresh] = useState<DirectorySuite | "list" | null>(null);
   const list = useRef<HTMLInputElement>(null);
-  const { roster } = props.data.view;
+  const { roster, waiting } = props.data.view;
   const { directory, suites } = props.data;
   const people = roster?.people.length ?? 0;
   const teams = roster?.teams.length ?? 0;
@@ -834,6 +850,7 @@ const Company = (props: StepProps) => {
       ) : null}
       {roster === null ? null : (
         <>
+          <WaitingNote waiting={waiting} />
           <Primary
             onClick={() => {
               props.go("sources");
@@ -1448,6 +1465,7 @@ const ConfirmOrg = (props: StepProps & { roster: Roster }) => {
             ? t`A team without a lead gets its links on the first day, and I ask each person what they do.`
             : t`Switch a team off and nobody in it gets a link.`}
         </p>
+        <WaitingNote waiting={props.data.view.waiting} />
         <ErrorText>{failure}</ErrorText>
       </Onward>
       {saved ? (
@@ -1464,7 +1482,7 @@ const ConfirmOrg = (props: StepProps & { roster: Roster }) => {
           onClick={() => {
             void (async () => {
               const kept = await run(
-                async (session) => await session.onboarding.saveRoster(draft)
+                async (session) => await session.onboarding.confirmRoster(draft)
               );
               if (kept !== undefined) {
                 await refresh();

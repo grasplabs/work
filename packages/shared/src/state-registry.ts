@@ -293,6 +293,7 @@ const coreDb: D1State = {
       "Schedules: their next ticks are deadlines a move keeps (46.2 step 9)."
     ),
     workflow_decisions: exported(`${core}decisions/decisions.ts`),
+    workflow_decision_recipients: exported(`${core}decisions/decisions.ts`),
     workflow_decision_confirmations: transient(
       `${core}decisions/confirmations.ts`,
       "One-use confirmations, minutes long."
@@ -442,6 +443,7 @@ const connectDb: D1State = {
     ),
     audit_outbox: exported(`${connect}audit.ts`),
     audit_outbox_rejected: exported(`${connect}audit.ts`),
+    call_changes: exported(`${connect}changes.ts`),
     event_sources: exported(`${connect}events.ts`),
     connector_events: exported(`${connect}events.ts`),
   },
@@ -473,6 +475,7 @@ const workspaces: DurableObjectState = {
     audit_outbox: exported(`${core}workspace.ts`),
     chat_attachments: exported(`${core}workspace.ts`),
     chat_code_runs: exported(`${core}workspace.ts`),
+    chat_tool_events: exported(`${core}workspace.ts`),
     chat_build_jobs: exported(`${core}build-jobs.ts`),
     dashboards: exported(`${core}workspace.ts`),
     dashboard_widgets: exported(`${core}workspace.ts`),
@@ -621,6 +624,7 @@ const modelLedger: DurableObjectState = {
     request_scopes: exported(`${core}model-ledger.ts`),
     spend: exported(`${core}model-ledger.ts`),
     alerts: exported(`${core}model-ledger.ts`),
+    person_limits: exported(`${core}model-ledger.ts`),
     audit_outbox: exported(`${core}model-ledger.ts`),
   },
 };

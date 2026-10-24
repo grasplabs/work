@@ -71,6 +71,9 @@ const failureMessages: Readonly<Record<FailureReason, MessageDescriptor>> = {
   revoked: msg`The approval of this app's code was taken back, and the app was stopped. An admin can approve it again on the domain's page.`,
   "principal-changed": msg`Someone else signed in on this browser, so this app was stopped. Try again to open it as the person signed in now.`,
   "bad-input": msg`This link opens the app with something it doesn't take. Open the app from its domain instead.`,
+  corrupt: msg`This app's stored code no longer matches the code that was approved, so it wasn't opened. Tell an admin.`,
+  "not-sealed": msg`This version of the app hasn't been sealed, so it can't be opened. A builder can publish it again.`,
+  "version-revoked": msg`This version of the app was revoked and no longer runs. An admin can make another version current.`,
   unknown: msg`The app couldn't be loaded.`,
 };
 

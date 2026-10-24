@@ -66,9 +66,18 @@ import {
   MissingStoreSecretError,
   sharedStoreSecrets,
 } from "../deploy/context.ts";
-import { errorCode, latestDeployOf } from "../deploy/deploy.ts";
+import {
+  errorCode,
+  latestDeployOf,
+  recordedPrintOf,
+} from "../deploy/deploy.ts";
+import { DeployError } from "../deploy/errors.ts";
 import { importedManifest } from "../deploy/release.ts";
 import { mappedGeneration } from "../deploy/router.ts";
+import {
+  sealedSecretPrints,
+  sealedWorkerSecrets,
+} from "../deploy/sealed-secrets.ts";
 import { sharedSecretPrints } from "../deploy/secrets.ts";
 import type { DeploySecrets } from "../deploy/secrets.ts";
 import { deployOrder } from "../deploy/versions.ts";
@@ -378,25 +387,14 @@ const assertCompatible = async (
  * record (one the admin didn't make, or made before it recorded them)
  * proves nothing of what it runs, so it's refused too. A secret the store
  * holds and a version doesn't brings no old key back: its code never read
- * it. Refused as a secrets rollout's start is (`secrets_store_incomplete`)
- * while the store is missing one, or the key the fingerprints are made
- * with: there's nothing to compare against.
+ * it. `secrets` is what Secrets Store holds now (`storeSecretsNow`).
  */
 const assertSharedCurrent = async (
-  env: Env,
   db: AdminDatabase,
   clientId: string,
-  workers: readonly RestoredWorker[]
+  workers: readonly RestoredWorker[],
+  secrets: Pick<DeploySecrets, "clientKey" | "shared">
 ): Promise<void> => {
-  let secrets: Pick<DeploySecrets, "clientKey" | "shared">;
-  try {
-    secrets = await sharedStoreSecrets(env);
-  } catch (error) {
-    if (error instanceof MissingStoreSecretError) {
-      throw new RolloutError("secrets_store_incomplete", error.message);
-    }
-    throw error;
-  }
   const stale = await Promise.all(
     workers.map(async ({ app, version }) => {
       const [recorded, store] = await Promise.all([
@@ -418,6 +416,97 @@ const assertSharedCurrent = async (
 };
 
 /**
+ * The secrets in Secrets Store a rollback compares versions against.
+ * Refused as a secrets rollout's start is (`secrets_store_incomplete`)
+ * while the store is missing one, or the key the fingerprints are made
+ * with: there's nothing to compare against.
+ */
+const storeSecretsNow = async (
+  env: Env
+): Promise<Pick<DeploySecrets, "clientKey" | "shared">> => {
+  try {
+    return await sharedStoreSecrets(env);
+  } catch (error) {
+    if (error instanceof MissingStoreSecretError) {
+      throw new RolloutError("secrets_store_incomplete", error.message);
+    }
+    throw error;
+  }
+};
+
+const sealedPrintsSchema = z.record(z.string(), z.string());
+
+/**
+ * The fingerprints of the sealed secrets (src/deploy/sealed-secrets.ts)
+ * the deploy that uploaded client `clientId`'s version `version` of `app`
+ * recorded, by name: none for a version recorded before deploys recorded
+ * them, which ran none, as no client had one then.
+ */
+const recordedSealed = async (
+  db: AdminDatabase,
+  clientId: string,
+  app: string,
+  version: string
+): Promise<Record<string, string>> => {
+  const text = await recordedPrintOf(db, clientId, app, version, "sealed");
+  const parsed = sealedPrintsSchema.safeParse(JSON.parse(text ?? "{}"));
+  return parsed.success ? parsed.data : {};
+};
+
+/**
+ * Refuses (`sealed_secret_replaced`) putting `workers`' versions of client
+ * `clientId` back unless each runs, of every sealed secret of the
+ * client's it carries (its Teams bot's), the one the admin holds now: the
+ * fingerprints its deploy recorded against those of the client's sealed
+ * secrets, opened, secret by secret. A bot secret staff replaced, and may
+ * have revoked in the client's Entra, never comes back with a version
+ * that ran it. A secret set since that a version doesn't carry brings no
+ * old one back, and the rollback marks the client's settings pending, so
+ * its next deploy carries it again. One that no longer opens
+ * (`CLIENT_KEY` changed) proves nothing of what a version carries, so a
+ * version carrying any is refused then.
+ */
+const assertSealedCurrent = async (
+  db: AdminDatabase,
+  clientId: string,
+  workers: readonly RestoredWorker[],
+  clientKey: string
+): Promise<void> => {
+  const stale = await Promise.all(
+    workers.map(async ({ app, version }) => {
+      const recorded = await recordedSealed(db, clientId, app, version);
+      if (Object.keys(recorded).length === 0) {
+        return false;
+      }
+      let now: Record<string, string>;
+      try {
+        now = await sealedSecretPrints(
+          clientKey,
+          await sealedWorkerSecrets(db, clientKey, clientId, app)
+        );
+      } catch (error) {
+        if (
+          error instanceof DeployError &&
+          error.code === "sealed_secret_unreadable"
+        ) {
+          return true;
+        }
+        throw error;
+      }
+      return Object.entries(recorded).some(
+        ([name, print]) => now[name] !== print
+      );
+    })
+  );
+  if (stale.some(Boolean)) {
+    throw new RolloutError(
+      "sealed_secret_replaced",
+      `${clientId}'s previous versions don't run the Teams bot secret the admin holds now`
+    );
+  }
+};
+
+/**
  * Checks that client `clientId` can be rolled back from rollout
  * `rolloutId`: the rollout reached it and recorded what it ran before,
  * and a Worker of the client isn't serving its previous version, read
@@ -432,7 +521,9 @@ const assertSharedCurrent = async (
  * the one the previous versions carry, in the admin and the router's
  * map (`rotated_since`: the router would send a secret they don't have),
  * and they run the shared secrets Secrets Store holds now
- * (`shared_secret_replaced`, `assertSharedCurrent`).
+ * (`shared_secret_replaced`, `assertSharedCurrent`) and the client's
+ * sealed secrets the admin holds now (`sealed_secret_replaced`,
+ * `assertSealedCurrent`).
  */
 const check = async (
   env: Env,
@@ -516,7 +607,9 @@ const check = async (
       `${clientId}'s secrets rotated after rollout ${rolloutId} reached it`
     );
   }
-  await assertSharedCurrent(env, db, clientId, workers);
+  const secrets = await storeSecretsNow(env);
+  await assertSharedCurrent(db, clientId, workers, secrets);
+  await assertSealedCurrent(db, clientId, workers, secrets.clientKey);
   return { accountId: target.accountId, previous, workers };
 };
 

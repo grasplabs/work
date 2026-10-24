@@ -1,7 +1,8 @@
 /**
  * The model ledger's Durable Object SQLite (model-ledger.ts): every
  * provider request's reservation and charge, each budget scope's spend,
- * the alerts admins got, and the audit events waiting for the log.
+ * the alerts admins got, the limits the company's admins set per person,
+ * and the audit events waiting for the log.
  * Migrates itself on first wake-up after a release.
  */
 import { sql } from "drizzle-orm";
@@ -22,6 +23,7 @@ const scopes = [
   "run",
   "binding",
   "binding_day",
+  "person",
 ] as const;
 
 /**
@@ -273,6 +275,38 @@ export const alerts = sqliteTable(
         table.thresholdMicros,
       ],
     }),
+  ]
+);
+
+/**
+ * The limits the company's admins set per person (model-ledger.ts): the
+ * default for everyone (`subject_type` `default`, `subject_id` empty), and
+ * exceptions for a person or a team, by their ID. Each holds a monthly
+ * limit in micros of US dollars and a number of chat messages an hour;
+ * null for none. Kept here, beside the spend they limit, so an admission
+ * reads them in the same transaction it reserves in.
+ */
+export const personLimits = sqliteTable(
+  "person_limits",
+  {
+    subjectType: text("subject_type", {
+      enum: ["default", "person", "team"],
+    }).notNull(),
+    subjectId: text("subject_id").notNull(),
+    monthlyMicros: integer("monthly_micros"),
+    messagesAnHour: integer("messages_an_hour"),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.subjectType, table.subjectId] }),
+    check(
+      "person_limits_monthly",
+      sql`${table.monthlyMicros} IS NULL OR ${table.monthlyMicros} >= 0`
+    ),
+    check(
+      "person_limits_messages",
+      sql`${table.messagesAnHour} IS NULL OR ${table.messagesAnHour} > 0`
+    ),
   ]
 );
 
