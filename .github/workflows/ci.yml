@@ -348,6 +348,125 @@ jobs:
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
 
+  # Stephen's eval with a real model (GRA-739), for a change that touches
+  # Stephen: his instructions and tools, the card path, the connectors'
+  # tools whose classes decide what he may do alone, or the eval itself
+  # (scripts/stephen-eval.ts names the files). A broken hard rule blocks the
+  # merge, and the run's numbers go on the pull request. The required
+  # `stephen` (below) always ends, as GitHub counts a skipped required
+  # check as passing: a change that touches no Stephen file passes it
+  # without a model call.
+  stephen-changes:
+    name: stephen-changes
+    if: github.event_name != 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      stephen: ${{ steps.changed.outputs.stephen }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # The diff is against the base commit.
+          fetch-depth: 0
+      - uses: voidzero-dev/setup-vp@3754dd7dbdb32bd8f6d28b6043de13ad3a75f21f # v1.21.1
+        with:
+          node-version-file: .node-version
+          cache: true
+          run-install: |
+            - args: ["--frozen-lockfile"]
+      - id: changed
+        run: node scripts/stephen-eval.ts changed "$BASE"
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+
+  # The model is reached with the real AI binding, through an AI Gateway of
+  # CI's own (`STEPHEN_EVAL_GATEWAY`) whose spend limit caps what CI can
+  # spend, and each run's budget (`STEPHEN_EVAL_BUDGET_USD`) is the
+  # ledger's limit too. Its Cloudflare token comes from the stephen-eval
+  # environment's 1Password service account, as staging's does.
+  stephen-eval:
+    name: stephen-eval
+    needs: stephen-changes
+    if: needs.stephen-changes.outputs.stephen == 'true'
+    runs-on: ubuntu-latest
+    # The whole suite with a real model: about 70 turns and their judging.
+    timeout-minutes: 60
+    environment: stephen-eval
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      # Secrets never reach a pull request from a fork; we don't accept those.
+      - if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
+        run: |
+          echo "::error title=stephen::A pull request from a fork can't run Stephen's eval."
+          exit 1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: voidzero-dev/setup-vp@3754dd7dbdb32bd8f6d28b6043de13ad3a75f21f # v1.21.1
+        with:
+          node-version-file: .node-version
+          cache: true
+          run-install: |
+            - args: ["--frozen-lockfile"]
+      - uses: 1password/load-secrets-action@70062d7a876d3eb6334754fa26efd2fbd90c32f2 # v5.0.1
+        with:
+          export-env: true
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: op://grasp-os-stephen-eval/cloudflare/account-id
+          CLOUDFLARE_API_TOKEN: op://grasp-os-stephen-eval/cloudflare/api-token
+      # Fails on a broken hard rule (test/stephen-real-model.test.ts).
+      - name: Run Stephen's eval with the real model
+        run: |
+          set -o pipefail
+          vp -C apps/core test -c vite.stephen-model.config.ts 2>&1 | tee stephen-eval.log
+        env:
+          STEPHEN_MODEL: ${{ vars.STEPHEN_EVAL_MODEL }}
+          STEPHEN_MODEL_BUDGET_USD: ${{ vars.STEPHEN_EVAL_BUDGET_USD || '3' }}
+          STEPHEN_MODEL_GATEWAY: ${{ vars.STEPHEN_EVAL_GATEWAY || 'stephen-ci' }}
+      - name: Report the numbers
+        if: always()
+        run: node scripts/stephen-eval.ts report stephen-eval.log > stephen-eval.md
+      - name: Post the numbers on the pull request
+        if: always() && github.event_name == 'pull_request'
+        run: |
+          if [ -s stephen-eval.md ]; then
+            gh pr comment "$PR" --repo "$REPO" --body-file stephen-eval.md --edit-last --create-if-none
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+
+  stephen:
+    name: stephen
+    needs: [stephen-changes, stephen-eval]
+    if: always() && github.event_name != 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: |
+          echo "Stephen's files changed: $CHANGED; the eval ended as $EVAL"
+          if [ "$CHANGES" != success ]; then
+            echo "::error title=stephen::Finding what changed ended as $CHANGES."
+            exit 1
+          fi
+          if [ "$CHANGED" != true ]; then
+            echo "No Stephen file changed: the gate passes without a model call."
+            exit 0
+          fi
+          if [ "$EVAL" != success ]; then
+            echo "::error title=stephen::Stephen's eval ended as $EVAL: a broken hard rule, or a run that didn't finish, blocks the merge."
+            exit 1
+          fi
+        env:
+          CHANGES: ${{ needs.stephen-changes.result }}
+          CHANGED: ${{ needs.stephen-changes.outputs.stephen }}
+          EVAL: ${{ needs.stephen-eval.result }}
+
   # Deploys core and connect from the release job's bundle, never from
   # source: each Worker's modules, static files, bindings, compatibility
   # date and flags and D1 migrations are the manifest's, every file checked
