@@ -35,6 +35,7 @@
     "chat": "catalog:",
     "drizzle-orm": "catalog:",
     "fflate": "catalog:",
+    "jose": "catalog:",
     "postal-mime": "catalog:",
     "semver": "catalog:",
     "unpdf": "catalog:",
