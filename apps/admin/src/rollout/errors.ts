@@ -51,12 +51,24 @@ export const rolloutErrorCodes = [
    * could bring a retired provider key back.
    */
   "shared_secret_replaced",
+  /**
+   * A secret of the client's own, sealed in the admin (its Teams bot's),
+   * that its previous versions run was replaced since: going back could
+   * bring a revoked bot secret back.
+   */
+  "sealed_secret_replaced",
   /** Another runner (provisioning, another rollout, a rollback) has the client. */
   "client_busy",
   /** The rollback's run failed or was ended before it finished. */
   "rollback_failed",
   /** A secrets rollout can't start while Secrets Store is missing a shared secret. */
   "secrets_store_incomplete",
+  /**
+   * The next ring was approved without saying the eval passed and the
+   * demo messages were sent in real Teams on the ring before
+   * (src/rollout/control.ts, `RingChecks`).
+   */
+  "ring_checks_missing",
 ] as const;
 export type RolloutErrorCode = (typeof rolloutErrorCodes)[number];
 

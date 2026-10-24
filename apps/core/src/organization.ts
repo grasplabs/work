@@ -12,7 +12,7 @@ import type {
 } from "@grasp-os/shared/organization";
 import { isAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { defaultTimeZone } from "@grasp-os/shared/workflows";
+import { defaultTimeZone, nextScheduledRun } from "@grasp-os/shared/workflows";
 import { and, eq, ne, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -43,6 +43,26 @@ export const readOrganization = async (env: Env): Promise<Organization> => {
     dataRegion: "eu",
     signInDomains: signInConfig(env)?.domains ?? [],
   };
+};
+
+/**
+ * When the company's day that `now` falls on ends: the next midnight in
+ * its time zone, in milliseconds since the epoch. Read in UTC should the
+ * stored zone no longer be one the runtime knows.
+ */
+export const endOfCompanyDay = async (
+  env: Env,
+  now: number = Date.now()
+): Promise<number> => {
+  const { timeZone } = await readOrganization(env);
+  const midnight = { cron: "0 0 * * *" };
+  const next =
+    nextScheduledRun({ ...midnight, timeZone }, new Date(now)) ??
+    nextScheduledRun({ ...midnight, timeZone: defaultTimeZone }, new Date(now));
+  if (next === undefined) {
+    throw new Error("Midnight always comes");
+  }
+  return next.getTime();
 };
 
 const changesSchema = z

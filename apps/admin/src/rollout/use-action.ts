@@ -14,6 +14,8 @@ const refusals: Readonly<Record<RolloutErrorCode, string>> = {
   rollout_running:
     "Another rollout is running or waiting for approval: finish or cancel it first.",
   not_waiting: "It isn't waiting for approval or a retry.",
+  ring_checks_missing:
+    "Before the next ring: run Stephen's eval on this release, and send the five demo messages in real Teams on this ring. Tick both once they passed.",
   not_running: "Its run isn't going, so there's nothing to pause.",
   not_paused: "It isn't paused.",
   unknown_client: "There's no such client.",
@@ -31,6 +33,8 @@ const refusals: Readonly<Record<RolloutErrorCode, string>> = {
     "That client's secrets rotated since, and its previous versions don't have the new ones: roll out instead.",
   shared_secret_replaced:
     "A shared secret that client's previous versions run was replaced since, or the admin has no record of which they run, so going back could bring a retired key back: roll out instead.",
+  sealed_secret_replaced:
+    "That client's Teams bot secret was replaced since its previous versions ran, so going back could bring a revoked secret back: roll out instead.",
   client_busy:
     "Something else is deploying to that client right now: try again in a moment.",
   rollback_failed:

@@ -1,4 +1,4 @@
-import { actorOf } from "@grasp-os/shared/audit";
+import { actorOf, auditProvenanceMaxItems } from "@grasp-os/shared/audit";
 import type { AuditActor } from "@grasp-os/shared/audit";
 import type {
   Candidate,
@@ -20,6 +20,7 @@ import {
   brainRecordsMaxPerCall,
   brainRecordsMaxPerType,
   brainRecordsSchema,
+  onboardingIdPrefix,
   onboardingSourceIds,
 } from "@grasp-os/shared/brain-records";
 import type {
@@ -32,14 +33,15 @@ import { canonicalJson } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { requireAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { and, asc, count, eq, sql } from "drizzle-orm";
+import { and, asc, count, eq, gte, like, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { auditedBatch, outboxed, outboxedIfChanged } from "./audit-outbox.ts";
 import { brainRecords } from "./db/core/schema.ts";
+import { inList } from "./db/d1.ts";
 import type { OnErase } from "./knowledge/purge.ts";
 
-// The Playbook's records, as core keeps them (`brain_records`), and adding
+// The brain's records, as core keeps them (`brain_records`), and adding
 // them (`brain.addRecords`). Threat model, and how each is closed (the
 // design and its threat note are on GRA-527):
 //
@@ -65,6 +67,10 @@ import type { OnErase } from "./knowledge/purge.ts";
 //   workflow, a roster team's record or an `onb-` id
 //   (`keepOnboardingRecords`, as the system); `brain.addRecords` refuses
 //   them (`brainRecordInputSchema`).
+// - A deleted interview left in the brain: the onboarding alone takes its
+//   own records out (`purgeOnboardingRecords`, as the system), whole.
+// - A purged document left in the brain: the onboarding alone takes its
+//   own drawings out (`purgeOnboardingDrawings`, as the system), whole.
 // - A purged name or passage left in a record, reaching agents through
 //   `brain.read`: a Knowledge content purge reaches every record through
 //   core's `OnErase` (`brainRecordErasure`), rewriting the words in it as
@@ -399,7 +405,7 @@ const writeRecords = async (
     outboxed(db, {
       actor,
       action: "brain.records.added",
-      target: { type: "brain", id: "playbook" },
+      target: { type: "brain", id: "records" },
       provenance: fresh.map(keyOf),
       detail: { added: fresh.length },
     }),
@@ -441,7 +447,7 @@ const keepRecords = async (
 };
 
 /**
- * Adds `input` to the Playbook as `person`, all or none: for admins. A
+ * Adds `input` to the brain's records as `person`, all or none: for admins. A
  * record held already, exactly so, is left as it is. `onboarding` reads
  * what the onboarding gives the brain, when a record names it.
  */
@@ -489,13 +495,91 @@ export const keepOnboardingRecords = async (
   return kept;
 };
 
+/**
+ * Takes the onboarding's records `ids` out of the brain, for good, as the
+ * system (GRA-368): what rested on an interview that was deleted. Nothing
+ * else is ever taken out, and nothing is written over: a record goes
+ * whole, with every drawing that is a version of its own. One batch with
+ * its audit event, which names the records by id and counts them, never
+ * what they said. Ids the brain doesn't hold are left; returns how many
+ * it took out.
+ */
+export const purgeOnboardingRecords = async (
+  env: Env,
+  ids: readonly string[]
+): Promise<number> => {
+  const held = await heldOf(
+    env,
+    ids.filter((id) => id.startsWith(onboardingIdPrefix))
+  );
+  if (held.size === 0) {
+    return 0;
+  }
+  const db = drizzle(env.DB);
+  const gone = [...held.keys()];
+  await auditedBatch(env, db, [
+    db.delete(brainRecords).where(inList(brainRecords.id, gone)),
+    outboxed(db, {
+      actor: { type: "system" },
+      action: "brain.records.purged",
+      target: { type: "brain", id: "records" },
+      provenance: [...held]
+        .slice(0, auditProvenanceMaxItems)
+        .map(([id, { type }]) => keyOf({ type, id })),
+      detail: { purged: held.size },
+    }),
+  ]);
+  return held.size;
+};
+
+/**
+ * Takes out of the brain, for good, every drawing the onboarding gave it
+ * from `since` on: what may have been drawn with a document's reading
+ * that a Knowledge purge reached (onboarding/documents.ts). A drawing is
+ * a version of its workflow; the workflow stays, and is drawn again.
+ * Nothing else is taken out, and nothing written over. One batch with its
+ * audit event, which names the records by id and counts them, never what
+ * they said. Returns the ids taken out.
+ */
+export const purgeOnboardingDrawings = async (
+  env: Env,
+  since: Date
+): Promise<string[]> => {
+  const db = drizzle(env.DB);
+  const held = await db
+    .select({ id: brainRecords.id, type: brainRecords.type })
+    .from(brainRecords)
+    .where(
+      and(
+        eq(brainRecords.type, "workflowVersion"),
+        like(brainRecords.id, `${onboardingIdPrefix}%`),
+        gte(brainRecords.addedAt, since)
+      )
+    );
+  if (held.length === 0) {
+    return [];
+  }
+  const gone = held.map(({ id }) => id);
+  await auditedBatch(env, db, [
+    db.delete(brainRecords).where(inList(brainRecords.id, gone)),
+    outboxed(db, {
+      actor: { type: "system" },
+      action: "brain.records.purged",
+      target: { type: "brain", id: "records" },
+      provenance: held.slice(0, auditProvenanceMaxItems).map(keyOf),
+      detail: { purged: held.length },
+    }),
+  ]);
+  return gone;
+};
+
 /** A dated value of a team, by the team it is for. */
 interface ForTeam<T> {
   teamId: string;
   value: T;
 }
 
-/** The Playbook's records, as the brain reads them, oldest first. */
+/** The brain's records, as the brain reads them, oldest first. */
 export interface HeldRecords {
   sources: Source[];
   tools: Tool[];

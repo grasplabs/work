@@ -30,15 +30,12 @@ import {
   versions,
 } from "../db/knowledge/schema.ts";
 import { allowedFor } from "./authorize.ts";
-import { ensureCollection, requireWritable } from "./collections.ts";
+import { requireWritable } from "./collection-rules.ts";
+import { ensureCollection } from "./collections.ts";
 import type { CollectionRow } from "./collections.ts";
-import {
-  personWriter,
-  readableDocument,
-  versionText,
-  writeVersion,
-} from "./documents.ts";
+import { readableDocument, versionText, writeVersion } from "./documents.ts";
 import type { Writer } from "./documents.ts";
+import { personWriter } from "./person-writes.ts";
 import { portsOf } from "./ports.ts";
 
 // Skills in two collections, both in every person's catalog, and in an
@@ -175,7 +172,7 @@ export const syncGraspSkills = async (
         ifVersion: byPath.get(skill.path)?.currentVersion ?? 0,
         message: "From the release",
         restoredFrom: null,
-        graspSync: true,
+        sync: true,
       });
     } catch (error) {
       complete = false;

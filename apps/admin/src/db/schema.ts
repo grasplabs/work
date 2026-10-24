@@ -86,6 +86,13 @@ export const clients = sqliteTable(
      */
     signIn: text("sign_in"),
     /**
+     * Its own Teams bot, as staff set it: JSON (`teamsBotSchema`,
+     * src/clients/teams-bot.ts), the bot's app id, its tenant and the day
+     * its secret expires, never the secret. Every deploy gives its connect
+     * and core the bot's id from it; null for a client without a bot.
+     */
+    teamsBot: text("teams_bot"),
+    /**
      * When staff last changed what a deploy sets on its core: its sign-in
      * or a setting (src/clients/settings.ts). A rollout deploys a client
      * whose latest done deploy started before this, even on the release
@@ -330,6 +337,31 @@ export const settings = sqliteTable(
     updatedAt: timestamp("updated_at").notNull(),
   },
   (table) => [primaryKey({ columns: [table.clientId, table.key] })]
+);
+
+/**
+ * A secret of a client's own that can't be derived, such as its Teams
+ * bot's client secret, minted in the client's own Entra
+ * (src/deploy/sealed-secrets.ts): sealed with a key derived from
+ * `CLIENT_KEY`, which is in Secrets Store and never here, and opened only
+ * to give it to the client's own Worker at deploy. Never read back to
+ * anyone: only `setAt` and `setBy` are ever shown.
+ */
+export const clientSealedSecrets = sqliteTable(
+  "client_sealed_secrets",
+  {
+    clientId: text("client_id")
+      .notNull()
+      .references(() => clients.id),
+    /** The Worker secret it becomes, such as `TEAMS_BOT_SECRET`. */
+    name: text({ enum: ["TEAMS_BOT_SECRET"] }).notNull(),
+    /** AES-256-GCM, bound to the client and the name: `v1.<iv>.<ciphertext>`, base64. */
+    sealed: text().notNull(),
+    /** The staff member who last set it. */
+    setBy: text("set_by").notNull(),
+    setAt: timestamp("set_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.clientId, table.name] })]
 );
 
 /**
@@ -637,3 +669,23 @@ export const integrationBuilds = sqliteTable("integration_builds", {
   createdAt: timestamp("created_at").notNull(),
   updatedAt: timestamp("updated_at").notNull(),
 });
+
+/**
+ * When the admin last told staff of each kind of alert about each client
+ * (src/alerts.ts): an alert of the same client and kind within its window
+ * isn't sent again, so a storm is one message. Nothing of what an alert
+ * said is kept.
+ */
+export const staffAlerts = sqliteTable(
+  "staff_alerts",
+  {
+    clientId: text("client_id").notNull(),
+    /**
+     * The alert's kind, such as `test`, and its subject when it has one:
+     * `teams_bot_secret_expiring/2027-04-30/30` (src/alerts.ts).
+     */
+    kind: text().notNull(),
+    sentAt: timestamp("sent_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.clientId, table.kind] })]
+);

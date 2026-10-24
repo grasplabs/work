@@ -1,6 +1,7 @@
 import type { AppsApi } from "./apps.ts";
 import type { AuditApi } from "./audit-log.ts";
 import type { BrainApi } from "./brain.ts";
+import type { ChannelAccountsApi } from "./channel-accounts.ts";
 import type { ChatsApi } from "./chat.ts";
 import type {
   ConnectionsApi,
@@ -80,6 +81,8 @@ export interface SessionApi {
   readonly emailPreferences: EmailPreferencesApi;
   /** The person's own sessions: the browsers they are signed in on, and ending one. */
   readonly sessions: SessionsApi;
+  /** The person's own accounts on chat platforms, linked so the agent knows them there. */
+  readonly channelAccounts: ChannelAccountsApi;
   /** Permissions of Apps and agents. */
   readonly permissions: PermissionsApi;
   /**
@@ -102,7 +105,7 @@ export interface SessionApi {
   readonly knowledge: KnowledgeApi;
   /**
    * What the company brain is built from, assembled from the onboarding,
-   * the Playbook's records and the connections, each as the person may
+   * the brain's records and the connections, each as the person may
    * read it.
    */
   readonly brain: BrainApi;

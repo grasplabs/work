@@ -1,3 +1,4 @@
+import { maxDecisionRecipients } from "@grasp-os/open-workflow/generate";
 import type { AuditEntry } from "@grasp-os/shared/audit";
 import { decidersSchema } from "@grasp-os/shared/decisions";
 import { isExpectedError } from "@grasp-os/shared/errors";
@@ -117,28 +118,48 @@ export const decisionRunOf = (run: CallingRun): ResourceDecisionRun => ({
 const personId = /^[\w-]{1,128}$/u;
 
 /**
- * Who `recipients` asks, as deciders (`person:<id>`, `team:<id>` or
- * `role:<role>`): exactly one, a person's ID (a `person` value) or deciders
- * as the decision service names them. `workflow.call_invalid` otherwise.
+ * The most recipients one decision asks: as many as the generator lets a
+ * literal list have, and a decision binding names deciders.
  */
-const recipientOf = (recipients: Json): string => {
-  const list: readonly Json[] = Array.isArray(recipients) ? recipients : [];
-  const [recipient] = list;
-  if (list.length !== 1 || typeof recipient !== "string") {
-    throw callInvalid(
-      "recipients: Name exactly one recipient: a person, or a team or role the binding allows."
-    );
-  }
-  if (decidersSchema.safeParse(recipient).success) {
-    return recipient;
-  }
-  if (personId.test(recipient)) {
-    return `person:${recipient}`;
+const maxRecipients = maxDecisionRecipients;
+
+/** One recipient as deciders, from a person's ID or deciders as named. */
+const decidersOfRecipient = (recipient: Json): string => {
+  if (typeof recipient === "string") {
+    if (decidersSchema.safeParse(recipient).success) {
+      return recipient;
+    }
+    if (personId.test(recipient)) {
+      return `person:${recipient}`;
+    }
   }
   throw callInvalid(
     "recipients: Give a person, or person:, team: or role: as a decision names them."
   );
 };
+
+/**
+ * Who `recipients` asks, as deciders (`person:<id>`, `team:<id>` or
+ * `role:<role>`), each a person's ID (a `person` value) or deciders as the
+ * decision service names them, in the order given, each once: from one
+ * to {@link maxRecipients}. `workflow.call_invalid` otherwise.
+ */
+const recipientsOf = (recipients: Json): string[] => {
+  const list: readonly Json[] = Array.isArray(recipients) ? recipients : [];
+  if (list.length === 0 || list.length > maxRecipients) {
+    throw callInvalid(
+      `recipients: Name from 1 to ${maxRecipients} recipients: people, or teams or roles the binding allows.`
+    );
+  }
+  return [...new Set(list.map(decidersOfRecipient))];
+};
+
+/** `recipients` in one order, to tell whether two sets are the same. */
+const sameRecipients = (
+  left: readonly string[],
+  right: readonly string[]
+): boolean =>
+  canonicalJson([...left].toSorted()) === canonicalJson([...right].toSorted());
 
 /** Deciders as their kind and ID: everything after the first `:`. */
 const partsOf = (deciders: string): { kind: string; id: string } => {
@@ -370,12 +391,18 @@ export const openRunDecision = async (
     await requireCallAuthority(env, run, binding);
     const contract = await contractOf(env, binding);
     const response = responseOf(contract);
-    const recipient = recipientOf(call.recipients);
+    const recipients = recipientsOf(call.recipients);
+    const [recipient = ""] = recipients;
     const description = promptOf(call.prompt);
     const input = inputOf(contract.input, call.input);
-    requireNotPrincipal(recipient, run.principal);
-    if (!(await covers(env, binding.deciders, recipient))) {
-      throw callDenied();
+    for (const each of recipients) {
+      requireNotPrincipal(each, run.principal);
+    }
+    for (const each of recipients) {
+      // oxlint-disable-next-line no-await-in-loop -- at most 16, each a few point lookups
+      if (!(await covers(env, binding.deciders, each))) {
+        throw callDenied();
+      }
     }
     // Decided again last, nothing awaited of the call after it.
     await requireCallAuthority(env, run, binding);
@@ -383,6 +410,7 @@ export const openRunDecision = async (
     const opened = await openDecision(env, decisionRun, {
       step,
       from: recipient,
+      ...(recipients.length > 1 ? { recipients } : {}),
       description,
       timeout: timeoutOf(run, call.timeoutMs, Date.now()),
       // Its recipient is the run's choice: whoever it acts for, who may
@@ -400,6 +428,7 @@ export const openRunDecision = async (
     const asks = await decisionAsks(env, decisionRun, opened.decision);
     if (
       asks.deciders !== recipient ||
+      !sameRecipients(asks.recipients, recipients) ||
       asks.description !== description ||
       canonicalJson(asks.input) !== canonicalJson(input)
     ) {
@@ -485,7 +514,9 @@ export const checkCandidateDecision = async (
   }
   const contract = await contractOf(env, binding);
   responseOf(contract);
-  requireNotPrincipal(recipientOf(call.recipients), principal);
+  for (const recipient of recipientsOf(call.recipients)) {
+    requireNotPrincipal(recipient, principal);
+  }
   promptOf(call.prompt);
   inputOf(contract.input, call.input);
 };

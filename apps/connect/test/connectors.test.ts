@@ -1,6 +1,6 @@
 import { connectorManifestSchema } from "@grasp-os/connector-kit/manifest";
 import { signCapability } from "@grasp-os/shared/capability";
-import { toolClassOf } from "@grasp-os/shared/connect";
+import { companyToolClasses, toolClassOf } from "@grasp-os/shared/connect";
 import type { ConnectionPerson } from "@grasp-os/shared/connect";
 import { env, exports } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
@@ -13,6 +13,7 @@ import bundled from "#connectors";
 import { nativeConnector } from "../src/bundled-connectors.ts";
 import { connections, connectionTokens } from "../src/db/schema.ts";
 import type { EgressProps } from "../src/egress.ts";
+import { rightsFor } from "../src/provider-rights.ts";
 import { providers as providerConfigs } from "../src/providers.ts";
 import { accessTokenFor } from "../src/tokens.ts";
 import { connectApp, fakeApps } from "./app-provider.ts";
@@ -429,7 +430,7 @@ describe("a native connector", () => {
       "connect.resource_out_of_scope",
       "ok",
       "connect.idempotency_key_required",
-      "connect.action_not_found",
+      "connect.never",
       "connect.server_unavailable",
     ]);
     expect(providers.tokenRequests("refresh_token")).toStrictEqual([]);
@@ -485,11 +486,13 @@ describe("a native connector", () => {
     expect(api.sent).toStrictEqual([]);
   });
 
-  it("is what each provider's connections run, with the scopes connect asks for", () => {
+  it("is what each provider's connections run, with the scopes connect asks for when every class is on and a shared mailbox pointed at", () => {
     for (const config of Object.values(providerConfigs)) {
       const connector = nativeConnector(config.server);
       expect(connector?.manifest.provider).toBe(config.id);
-      expect(config.scopes).toStrictEqual(
+      expect(
+        rightsFor(config.id, companyToolClasses, true) ?? config.scopes
+      ).toStrictEqual(
         expect.arrayContaining([...(connector?.manifest.scopes ?? [])])
       );
     }
@@ -513,11 +516,29 @@ describe("a native connector", () => {
       "mail.list": "read-company",
       "mail.get": "read-company",
       "mail.readAttachment": "read-company",
-      "mail.move": "change-company",
+      "mail.move": "change-own",
+      "mail.flag": "change-own",
+      "mail.categorise": "change-own",
       "mail.send": "reach-others",
       "mail.createDraft": "change-company",
+      "mail.createReplyDraft": "change-company",
       ...calendar,
       ...files,
+      "lists.items": "read-company",
+      "calendar.freeTime": "read-own",
+      "calendar.create": "change-own",
+      "calendar.update": "change-own",
+      "excel.listRows": "read-company",
+      "excel.addRow": "change-company",
+      "excel.updateRow": "change-company",
+      "mail.thread": "read-company",
+      // A delegated token opens no one's To Do but its own user's.
+      "todo.lists": "read-own",
+      "todo.tasks": "read-own",
+      "todo.create": "change-own",
+      "todo.complete": "change-own",
+      "files.versions": "read-company",
+      "files.createDraft": "change-own",
     });
     expect(classesOf("google-workspace")).toStrictEqual({
       "mail.list": "read-own",
@@ -529,6 +550,10 @@ describe("a native connector", () => {
       "mail.createDraft": "change-own",
       ...calendar,
       ...files,
+      // A spreadsheet of a shared drive, as its files.
+      "sheets.read": "read-company",
+      // Only in the person's own calendar.
+      "calendar.create": "change-own",
     });
   });
 });

@@ -15,7 +15,9 @@ import { sweepTestFixtures } from "./app-tests.ts";
 import { auditLog } from "./audit-log.ts";
 import { drainAuditOutboxes } from "./audit-outbox.ts";
 import { sweepTokenKeys } from "./auth/app-tokens.ts";
+import { sweepChannelLinks } from "./channels/accounts.ts";
 import { refreshDailySignals } from "./daily-signals.ts";
+import { recheckMalware } from "./dependencies/requests.ts";
 import { inJurisdiction } from "./durable-objects.ts";
 import { sweepGuestChats } from "./guests.ts";
 import { indexApps } from "./knowledge/apps-collection.ts";
@@ -37,6 +39,7 @@ import { sweepStatistics } from "./statistics.ts";
 import { sweepCandidateRuns } from "./workflows/candidate-runs.ts";
 import { pumpConnectorEvents } from "./workflows/connector-events.ts";
 import { cancelArchivedRuns, repairControls } from "./workflows/controls.ts";
+import { drainEmittedEvents } from "./workflows/event-delivery.ts";
 import { deleteExpiredEmail } from "./workflows/kept-email.ts";
 import {
   repairResourceStarts,
@@ -118,6 +121,15 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     period: "minute",
     run: pumpConnectorEvents,
   },
+  // Events JSON workflows emitted, delivered to the system triggers that
+  // take them (src/workflows/event-delivery.ts).
+  {
+    name: "workflows.emitted_events",
+    period: "minute",
+    run: async (env) => {
+      await drainEmittedEvents(env);
+    },
+  },
   // Connect's own clock armed, if nothing has (connect's src/clock.ts).
   {
     name: "connect.clock",
@@ -151,6 +163,7 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     run: deleteExpiredEmail,
   },
   { name: "guests.sweep", period: "quarterHour", run: sweepGuestChats },
+  { name: "channels.links", period: "quarterHour", run: sweepChannelLinks },
   {
     name: "workflows.run_details",
     period: "quarterHour",
@@ -189,6 +202,13 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     name: "packages.files",
     period: "quarterHour",
     run: sweepPackageFiles,
+  },
+  // Approved packages checked again for malware reported since, a bounded
+  // number of graphs a run (src/dependencies/requests.ts).
+  {
+    name: "dependencies.malware",
+    period: "quarterHour",
+    run: recheckMalware,
   },
   { name: "apps.releases", period: "quarterHour", run: sweepReleases },
   {

@@ -57,6 +57,9 @@ const typeRules: readonly {
   { action: "connection.call", sideEffect: true, type: "action" },
   { action: "connection.call", type: "read" },
   { action: "connection.connect", type: "config" },
+  // Connect sending, editing or deleting a message as the client's own bot
+  // on a chat platform, or refusing a request core's chat adapters sent.
+  { action: "channel.call", type: "action" },
   // A connection whose grant ran out given a new one, by signing in again.
   { action: "connection.reconnected", type: "config" },
   { action: "connection.disconnect", type: "config" },
@@ -66,6 +69,10 @@ const typeRules: readonly {
   { action: "connection.consent", type: "config" },
   // An admin changing which connectors are offered.
   { action: "connection.offer_changed", type: "config" },
+  // An admin turning a class of tools on or off, and for whom.
+  { action: "connection.class.changed", type: "config" },
+  // An admin pointing Stephen at a shared mailbox, and for whom.
+  { action: "connection.mailbox.pointed", type: "config" },
   // A connection's tokens stopped working: it needs signing in again.
   { action: "connection.needs_reauth", type: "config" },
   // Connect reading what changed at a connection for workflows' event
@@ -83,8 +90,8 @@ const typeRules: readonly {
   // The onboarding: who works where, the plan, pausing it, the
   // agreements, and the gate that keeps the company out until Grasp's go.
   { action: "onboarding", type: "config" },
-  // An admin adding records to the Playbook the brain is built from, and
-  // a purge rewriting a record's words.
+  // An admin adding records the brain is built from, and a purge
+  // rewriting a record's words.
   { action: "brain.records", type: "action" },
   // A gap's owner asked (Grasp's), and a person answering or closing it.
   { action: "brain.gap.asked", type: "action" },
@@ -111,6 +118,9 @@ const typeRules: readonly {
   // A spending budget crossing its alert threshold or running out: filed
   // with the budgets it belongs to, not as a model call.
   { action: "model.budget", type: "config" },
+  // A company admin setting or removing a limit per person (core's
+  // src/model-ledger.ts): configuration, not a model call.
+  { action: "model.limit", type: "config" },
   // Core recording a new quota policy generation, the limits that apply
   // from then on (core's src/workflows/quotas.ts).
   { action: "quota_policy.recorded", type: "config" },
@@ -143,6 +153,9 @@ const typeRules: readonly {
   { action: "app.token.issued", type: "permission" },
   { action: "app.portable.called", type: "action" },
   { action: "app", type: "config" },
+  // A person linking a chat platform account to themselves, so the agent
+  // knows them there, or unlinking it: who they are on that door.
+  { action: "channel_account", type: "permission" },
   { action: "member", type: "config" },
   { action: "team", type: "config" },
   // A decision a run put to people: opened, asked, answered, timed out.

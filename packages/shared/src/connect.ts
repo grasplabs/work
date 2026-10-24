@@ -186,6 +186,17 @@ export const connectionPersonSchema = z.strictObject({
 });
 export type ConnectionPerson = z.infer<typeof connectionPersonSchema>;
 
+/** The classes a company turns on or off: all but `never`, which nothing does. */
+export const companyToolClasses = [
+  "read-own",
+  "read-company",
+  "change-own",
+  "change-company",
+  "reach-others",
+] as const satisfies readonly Exclude<ToolClass, "never">[];
+export const companyToolClassSchema = z.enum(companyToolClasses);
+export type CompanyToolClass = z.infer<typeof companyToolClassSchema>;
+
 /** Starts connecting an account through OAuth. */
 export const startConnectionSchema = z.strictObject({
   person: connectionPersonSchema,
@@ -211,6 +222,22 @@ export const startConnectionSchema = z.strictObject({
   tenant: identifierSchema.optional(),
   /** A path on the deployment's origin; core checks it. */
   returnTo: z.string().startsWith("/").max(returnPathMaxLength),
+  /**
+   * The classes the company turned on for anyone (core's tool-classes.ts):
+   * a suite asks its provider only for their rights (connect's
+   * provider-rights.ts). Absent from a core that predates them, which
+   * gets the rights of the classes on by default.
+   */
+  classes: z
+    .array(companyToolClassSchema)
+    .max(companyToolClasses.length)
+    .optional(),
+  /**
+   * Whether the company pointed Stephen at a shared mailbox for anyone
+   * (core's shared-mailboxes.ts): Microsoft 365 is then asked for shared
+   * mailboxes' rights too. Absent from a core that predates it: not asked.
+   */
+  sharedMailbox: z.boolean().optional(),
 });
 export type StartConnection = z.input<typeof startConnectionSchema>;
 
@@ -301,6 +328,13 @@ export interface ConnectionSummary {
    * from a connect that predates it.
    */
   tools?: string[];
+  /**
+   * Those of `tools` on offer: the ones Grasp classed (connect's
+   * composio-classes.ts). A tool nobody classed is never offered or run,
+   * whatever the admin allowed. Absent for a native connection, and from
+   * a connect that predates it, which runs every allowed tool.
+   */
+  offeredTools?: string[];
 }
 
 /**
@@ -490,6 +524,26 @@ export interface ConnectionsApi {
   requestApp: (request: AppRequestInput) => Promise<AppRequest>;
   /** The apps people asked for, latest first, at most {@link appRequestsListed}. */
   appRequests: () => Promise<AppRequest[]>;
+  /** Every class the company turns on or off, and for whom. Admins only. */
+  toolClasses: () => Promise<ToolClassSetting[]>;
+  /**
+   * Turns a class on for everyone or for some teams, or off. Admins only,
+   * never Grasp staff; audited.
+   */
+  setToolClass: (
+    toolClass: CompanyToolClass,
+    audience: ToolClassAudience
+  ) => Promise<void>;
+  /** The shared mailboxes Stephen is pointed at, and for whom. Admins only. */
+  sharedMailboxes: () => Promise<SharedMailboxSetting[]>;
+  /**
+   * Points Stephen at a shared mailbox for everyone or some teams, or for
+   * nobody. Admins only, never Grasp staff; audited.
+   */
+  pointSharedMailbox: (
+    mailbox: string,
+    audience: ToolClassAudience
+  ) => Promise<void>;
 }
 
 // The catalog: everything an admin can connect, in one list. Native
@@ -790,6 +844,83 @@ export const toolClassOf = ({
   return reach === "own" ? "change-own" : "change-company";
 };
 
+/** Most teams one class may be on for. */
+export const toolClassTeamsMax = 20;
+
+/**
+ * For whom a class is on: nobody, everyone, or the people in any of some
+ * teams. It binds the chat's agent, for the person it acts for, wherever
+ * it works (the web chat, a chat app): its calls of a class that is off
+ * for that person are refused before core signs them for connect.
+ */
+export const toolClassAudienceSchema = z.discriminatedUnion("who", [
+  z.strictObject({ who: z.literal("nobody") }),
+  z.strictObject({ who: z.literal("everyone") }),
+  z.strictObject({
+    who: z.literal("teams"),
+    teams: z.array(identifierSchema).min(1).max(toolClassTeamsMax),
+  }),
+]);
+export type ToolClassAudience = z.infer<typeof toolClassAudienceSchema>;
+
+/**
+ * Each class as it is until an admin changes it: reading and changing
+ * what is the person's own on for everyone, the rest off.
+ */
+export const defaultToolClassAudiences: Readonly<
+  Record<CompanyToolClass, ToolClassAudience>
+> = {
+  "read-own": { who: "everyone" },
+  "read-company": { who: "nobody" },
+  "change-own": { who: "everyone" },
+  "change-company": { who: "nobody" },
+  "reach-others": { who: "nobody" },
+};
+
+/** The classes an admin just turned on, for `ConnectApi.requireClassRights`. */
+export const requireClassRightsSchema = z.strictObject({
+  classes: z.array(companyToolClassSchema).max(companyToolClasses.length),
+  /**
+   * Whether shared mailboxes' rights are needed too: an admin just pointed
+   * Stephen at one, or turned a class on while one is pointed at.
+   */
+  sharedMailbox: z.boolean().optional(),
+});
+export type RequireClassRights = z.input<typeof requireClassRightsSchema>;
+
+/** Most shared mailboxes one company points Stephen at. */
+export const sharedMailboxesMax = 50;
+
+/** A shared mailbox's address, as an admin names it: kept in lower case. */
+export const sharedMailboxSchema = z
+  .email()
+  .max(254)
+  .transform((mailbox) => mailbox.toLowerCase());
+
+/**
+ * A shared mailbox Stephen is pointed at, and for whom (`audience`): the
+ * chat's agent reaches a mailbox other than its person's own only when
+ * pointed at it for them, whatever classes are on.
+ */
+export interface SharedMailboxSetting {
+  mailbox: string;
+  audience: ToolClassAudience;
+  /** The admin who last changed it. */
+  changedBy: string;
+  /** ISO 8601. */
+  changedAt: string;
+}
+
+/** One class, as the company has it now. */
+export interface ToolClassSetting {
+  toolClass: CompanyToolClass;
+  audience: ToolClassAudience;
+  /** The admin who last changed it; `null` while it is the default. */
+  changedBy: string | null;
+  /** ISO 8601; `null` while it is the default. */
+  changedAt: string | null;
+}
+
 /**
  * What an admin consents to before connecting a Composio toolkit: shown to
  * them word for word, sent back with the request, and recorded (as its
@@ -953,6 +1084,13 @@ export interface PendingAction {
   inputHash: string;
   /** ISO 8601. */
   requestedAt: string;
+  /**
+   * When it ends unconfirmed (ISO 8601): one asked for in a chat on a chat
+   * platform, such as Teams, ends at midnight of the company's day it was
+   * asked on, and is declined as expired after. Absent for one that waits
+   * until it is decided.
+   */
+  endsAt?: string;
   /**
    * The App's approved resource binding it came through, as it served then
    * (`HeldBinding`); null for any other call; `unreadable` when what connect
@@ -1354,10 +1492,73 @@ export const connectorEventsAckSchema = z
 export type ConnectorEventsAck = z.input<typeof connectorEventsAckSchema>;
 
 /**
- * What core reaches in connect, over the `CONNECT` service binding: the
- * npm registry among the rest (`PackageRegistryApi`).
+ * The chat platforms connect sends to as a client's own bot
+ * (`ChannelApi.channelFetch`). Each is added with its hosts and its
+ * credential in connect's src/channels.ts when it is switched on.
  */
-export interface ConnectApi extends PackageRegistryApi {
+export const channelPlatformSchema = z.enum(["teams"]);
+export type ChannelPlatform = z.infer<typeof channelPlatformSchema>;
+
+/**
+ * The credential core builds every chat adapter with, in place of the
+ * bot's real one, which only connect holds: as Teams' app password, and as
+ * the bearer token connect hands back when the adapter asks Microsoft for
+ * one. Connect swaps it for the real credential on the way out and refuses
+ * a request that carries anything else. Shaped as a JWT without a
+ * signature or an expiry, because Microsoft's Teams SDK decodes the token
+ * it is given and refreshes it once it expires: this one never does, and
+ * connect refreshes the real one.
+ */
+export const channelCredentialPlaceholder =
+  "eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJpc3MiOiJncmFzcC1vcy1jb25uZWN0Iiwic3ViIjoiY2hhbm5lbC1jcmVkZW50aWFsLXBsYWNlaG9sZGVyIn0.placeholder";
+
+/**
+ * The header on connect's own answers to a channel request, saying what
+ * kind it is (`channelAnswer`). It is dropped from every platform response,
+ * so a platform can't pass one off.
+ */
+export const channelHeader = "grasp-channel";
+
+/**
+ * Connect's own answers to a channel request, as `channelHeader` says:
+ * refused before it left (a host off the platform's list, a credential
+ * other than the placeholder), refused because the client's bot isn't set
+ * up yet, failed on the way, or the platform's answer that the bot was
+ * removed for that person or conversation (Teams' 403), passed on as it
+ * came, marked.
+ */
+export const channelAnswer = {
+  refused: "refused",
+  unconfigured: "unconfigured",
+  failed: "failed",
+  removed: "removed",
+} as const;
+export type ChannelAnswer = (typeof channelAnswer)[keyof typeof channelAnswer];
+
+/**
+ * How core's chat adapters reach their platforms: every request an
+ * adapter sends, its token request included, handed to connect as it is.
+ */
+export interface ChannelApi {
+  /**
+   * Sends `request` to `platform` as the client's own bot: only to that
+   * platform's hosts, and only carrying `channelCredentialPlaceholder`
+   * where the credential goes, which connect replaces with the real one.
+   * The platform's response, or connect's own answer (`channelHeader`).
+   * Throttled and failed sends are retried by connect before it answers.
+   */
+  channelFetch: (
+    platform: ChannelPlatform,
+    request: Request
+  ) => Promise<Response>;
+}
+
+/**
+ * What core reaches in connect, over the `CONNECT` service binding: the
+ * npm registry among the rest (`PackageRegistryApi`), and the chat
+ * platforms (`ChannelApi`).
+ */
+export interface ConnectApi extends PackageRegistryApi, ChannelApi {
   call: (call: ConnectCall) => Promise<ConnectResult>;
   /** The provider URL to send the person's browser to. */
   startConnection: (request: StartConnection) => Promise<{ url: string }>;
@@ -1396,6 +1597,14 @@ export interface ConnectApi extends PackageRegistryApi {
   connectionOwners: (
     connectionIds: readonly string[]
   ) => Promise<ConnectionOwner[]>;
+  /**
+   * Asks the connections whose grant lacks the rights of `classes`, those
+   * an admin just turned on, to be connected again (`needs_reauth`), in
+   * place. How many it asked.
+   */
+  requireClassRights: (
+    request: RequireClassRights
+  ) => Promise<{ reconnect: number }>;
   /**
    * Deletes the connection's tokens, revoking them at the provider where it
    * can (`revoked`); the connection takes no more calls.
@@ -1462,6 +1671,14 @@ export interface ConnectApi extends PackageRegistryApi {
   connectorContract: (
     request: ConnectorContractRequest
   ) => Promise<ConnectorContract>;
+  /**
+   * Whether an action of a connection only reads, the input properties it
+   * takes and the connection's provider (`ActionShape`), by the rules a
+   * call of it goes by. `connect.action_not_found` for one the connection
+   * doesn't allow; `connect.server_unavailable` when a Composio server
+   * can't be reached to list its tools.
+   */
+  actionShape: (request: ActionShapeRequest) => Promise<ActionShape>;
   /**
    * The held actions waiting for `person`, newest first (at most 200):
    * none for Grasp staff.
@@ -1659,6 +1876,25 @@ export type ConnectorContractRequest = z.input<
   typeof connectorContractRequestSchema
 >;
 
+/** Which action of which connection `actionShape` describes. */
+export const actionShapeRequestSchema = z.strictObject({
+  connectionId: connectionIdSchema,
+  action: permissionActionSchema,
+});
+export type ActionShapeRequest = z.input<typeof actionShapeRequestSchema>;
+
+/**
+ * What core needs to know of an action before a chat's agent calls it,
+ * without calling it: whether it only reads (as connect decides whether
+ * it holds a call), the input properties it takes (`null` when connect
+ * can't read them now), and the connection's provider.
+ */
+export interface ActionShape {
+  readOnly: boolean;
+  inputs: string[] | null;
+  provider: string;
+}
+
 /** One action of a generated contract. */
 export interface ConnectorContractAction {
   /** The tool a call of it names, e.g. `mail.send`. */
@@ -1668,6 +1904,16 @@ export interface ConnectorContractAction {
    * admin's rule for a Composio tool says (never Composio's hint).
    */
   readOnly: boolean;
+  /**
+   * The class Grasp gave a Composio tool (connect's composio-classes.ts),
+   * as reviewed: a call of it is a read only when `readOnly` says so too.
+   * In the contract, so a release that reclasses a tool is a changed
+   * contract an admin approves again, even where the admin's rule already
+   * made it a change. A native action's class is in its connector's
+   * manifest, so its contract carries none: one more field would change
+   * every native contract bound now.
+   */
+  class?: Exclude<ToolClass, "never">;
   /**
    * The JSON Schemas of its input and output, as the connector makes them
    * or a Composio server lists them (closed, composio-contracts.ts), each
@@ -1728,6 +1974,8 @@ export const connectErrors = defineErrorFamily({
   "connect.action_failed": "The action reported an error.",
   "connect.pending_not_found":
     "There's no such action waiting for you: it was confirmed or declined, or it isn't yours.",
+  "connect.pending_expired":
+    "This action waited past the end of the day it was asked on, so it ended and nothing was done. Ask again.",
   "connect.pending_changed":
     "This isn't the action you were shown, so nothing was done. Look at it again.",
   "connect.held":
@@ -1743,6 +1991,14 @@ export const connectErrors = defineErrorFamily({
   "connect.catalog_entry_not_found": "There's no such entry in the catalog.",
   "connect.catalog_unavailable":
     "Composio's toolkits can't be listed right now. Try again shortly.",
+  "connect.class_off":
+    "Your company hasn't turned this kind of action on for you, so it wasn't done. An admin can turn it on.",
+  "connect.class_unknown":
+    "It isn't known what kind of action this is, so it wasn't done.",
+  "connect.never":
+    "Grasp never deletes, shares, forwards, sets rules or settings, or pays, whatever is allowed, so it wasn't done.",
+  "connect.mailbox_not_pointed":
+    "This mailbox isn't yours, and your company hasn't pointed Grasp at it for you, so nothing was done in it. An admin can.",
 });
 
 /**

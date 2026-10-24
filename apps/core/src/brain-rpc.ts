@@ -72,11 +72,11 @@ import type { SessionCheck } from "./session-check.ts";
 // | tools              | the tools those documents name (admins)                  |
 // | connections        | the catalog's offered entries and the person's           |
 // |                    | connections                                              |
-// | sources, tools,    | the Playbook's records (brain-records.ts), for everyone  |
+// | sources, tools,    | the brain's records (brain-records.ts), for everyone     |
 // | candidates,        | signed in, after the onboarding's; a record's counts and |
 // | statements, teams, | stakeholders for an onboarding team join that team, for  |
 // | gaps               | whoever reads it; gaps with what became of them          |
-// | workflows          | the Playbook's, as the onboarding drew them, for         |
+// | workflows          | the brain's records, as the onboarding drew them, for    |
 // |                    | everyone signed in                                       |
 // | goals, landscape,  | nothing core can read holds them yet: empty              |
 // | policies           |                                                          |
@@ -96,7 +96,7 @@ import type { SessionCheck } from "./session-check.ts";
 // the tools its reading names, used by the teams it names: what the
 // admin's own list of them shows, never its text.
 //
-// The Playbook's records are company facts with no person in them (no
+// The brain's records are company facts with no person in them (no
 // author, no transcript), added by admins (`brain.addRecords`), so every
 // member reads them. The Intake App's statements and sources and the
 // workflow map's workflows stay in each App's own store, which only its
@@ -354,6 +354,45 @@ const documentTools = (
     }
   }
   return [...tools.values()];
+};
+
+/**
+ * The brain's tools, one per name as people mean it (`nameKey`), as
+ * `onboardingTeams` merges teams: a document's tool the brain has a
+ * record of too is that record, which keeps its id and source (statements
+ * name it by that id), used by the teams of both. Records are never
+ * merged with each other: each is a fact of its own, which statements may
+ * name by its id.
+ */
+const toolsOf = (
+  documents: readonly Tool[],
+  records: readonly Tool[]
+): Tool[] => {
+  const recorded = new Map<string, Tool>();
+  for (const tool of records) {
+    const key = nameKey(tool.name);
+    if (!recorded.has(key)) {
+      recorded.set(key, tool);
+    }
+  }
+  const merged = new Map<string, string[]>();
+  const fromDocuments = documents.filter(({ name, teamIds }) => {
+    const record = recorded.get(nameKey(name));
+    if (record === undefined) {
+      return true;
+    }
+    merged.set(record.id, [...(merged.get(record.id) ?? []), ...teamIds]);
+    return false;
+  });
+  return [
+    ...fromDocuments,
+    ...records.map((tool) => {
+      const teamIds = merged.get(tool.id);
+      return teamIds === undefined
+        ? tool
+        : { ...tool, teamIds: [...new Set([...tool.teamIds, ...teamIds])] };
+    }),
+  ];
 };
 
 /**
@@ -640,8 +679,8 @@ const connectionsOf = async (
 };
 
 /**
- * The onboarding's teams, with what the Playbook added for each, then the
- * Playbook's own. A value for a team the person can't see is left out. A
+ * The onboarding's teams, with what the records added for each, then the
+ * records' own. A value for a team the person can't see is left out. A
  * roster team's record (onboarding/brain-intake.ts) is that team, for
  * whoever can't read the roster: for an admin, the roster's team, which
  * is newer, with what was added for it.
@@ -674,7 +713,7 @@ const teamSources = ({ sourceId, counts, stakeholders }: Team): string[] => [
 ];
 
 /**
- * The Playbook's gaps, with what became of each, as every member reads
+ * The brain's gaps, with what became of each, as every member reads
  * them: what `brain.read` serves, and what a chat's agent reads too.
  */
 export const brainGaps = async (
@@ -761,7 +800,10 @@ export const readBrain = async (
     vision: visionOf(facts),
     goals: [],
     teams,
-    tools: [...documentTools(facts, teamsByName(onboarding)), ...records.tools],
+    tools: toolsOf(
+      documentTools(facts, teamsByName(onboarding)),
+      records.tools
+    ),
     sources: [...sources, ...records.sources],
     statements: records.statements,
     candidates: records.candidates,

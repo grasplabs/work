@@ -294,6 +294,19 @@ const expired = async (connectionId: string): Promise<void> => {
 };
 
 describe("a landscape read", () => {
+  it("of a connection renewed with the reads it asked for, and nothing to write, goes on", async () => {
+    const connectionId = await connectLandscape(someone("admin"));
+    await expired(connectionId);
+    providers.state.refreshGranted = asAsked;
+    const renewed = await codeOf(read(connectionId));
+    providers.state.refreshGranted = undefined;
+    const listed = await exports.default.landscapeConnections();
+    expect({
+      renewed,
+      status: listed.find(({ id }) => id === connectionId)?.status,
+    }).toStrictEqual({ renewed: "ok", status: "active" });
+  });
+
   it("of a connection whose renewal grants other access than it asked for needs an admin to connect it again", async () => {
     const connectionId = await connectLandscape(someone("admin"));
     await expired(connectionId);

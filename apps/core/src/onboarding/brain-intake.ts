@@ -34,7 +34,7 @@ import { log } from "@grasp-os/shared/log";
 //
 // Who each record rests on is kept apart, in the onboarding's own store
 // (`brain_sent`), so deleting an interview can find what it is in
-// (GRA-368): the brain itself never holds it.
+// (GRA-368, the store's `purgeBrain`): the brain itself never holds it.
 
 /** The staff list, as the source the brain found each team in. */
 export const rosterSource = "src-roster";
@@ -63,7 +63,7 @@ export const intakeIds = {
     await ownId("wf", team, work),
 };
 
-/** The Playbook's kind for each fact tag that is one; the rest are the drawing's. */
+/** The brain's statement kind for each fact tag that is one; the rest are the drawing's. */
 const statementKinds: Partial<Record<FactTag, StatementKind>> = {
   system: "tool",
   workaround: "tool",
@@ -102,6 +102,8 @@ export interface Rest {
   record: string;
   type: BrainRecord["type"];
   person: string;
+  /** A drawing's workflow: it goes once none of its drawings is left. */
+  parent?: string;
 }
 
 /** The records a team gives the brain, in the order they may be kept, and who each rests on. */
@@ -334,8 +336,11 @@ export const intakeOf = async (intake: TeamIntake): Promise<Intake> => {
     const id = await ownId("wfv", canonicalJson(body));
     const version = recordOf({ ...body, id });
     records.push(workflow, ...version);
+    // A workflow rests on the lead who named it and on whom it was drawn
+    // from, so it stays while any of them does; each drawing on whom it
+    // was drawn from, and the lead whose facts were its context.
     rests.push(
-      ...work.namedBy.map((person) => ({
+      ...[...new Set([...work.namedBy, ...work.drawn.from])].map((person) => ({
         record: workflowId,
         type: "workflow" as const,
         person,
@@ -346,6 +351,7 @@ export const intakeOf = async (intake: TeamIntake): Promise<Intake> => {
             record: id,
             type: "workflowVersion" as const,
             person,
+            parent: workflowId,
           })))
     );
   }

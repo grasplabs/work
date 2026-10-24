@@ -8,7 +8,8 @@
     "#connectors": {
       "types": "./src/connectors-bundle.d.ts",
       "default": "./dist/connectors.js"
-    }
+    },
+    "#composio-classes": "./src/composio-classes.ts"
   },
   "scripts": {
     "build": "node build.ts",
@@ -31,6 +32,7 @@
     "@grasp-os/connector-microsoft-365": "workspace:*",
     "@modelcontextprotocol/sdk": "catalog:",
     "drizzle-kit": "catalog:",
+    "fflate": "catalog:",
     "vite-plus": "catalog:",
     "wrangler": "catalog:"
   }

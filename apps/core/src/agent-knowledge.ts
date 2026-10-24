@@ -1,3 +1,4 @@
+import type { AuditDetailValue } from "@grasp-os/shared/audit";
 import type { MemoryPack } from "@grasp-os/shared/brain-api";
 import type {
   FollowResult,
@@ -18,8 +19,10 @@ import {
   auditedCall,
   chatAuthority,
   chatContext,
+  endedBy,
   recordRunReads,
   recordSources,
+  recordToolCall,
   requireOpenRun,
 } from "./agent-scope.ts";
 import type { AgentApi, AgentScope } from "./agent-scope.ts";
@@ -46,13 +49,9 @@ export class KnowledgeApi
   extends WorkerEntrypoint<Env, AgentScope>
   implements KnowledgeTools
 {
-  /** Runs one read as the chat's agent, after the run's check. */
-  async #asAgent<T>(
-    method: string,
-    run: (reader: Reader) => Promise<T>
-  ): Promise<T> {
+  /** Runs one read as the chat's agent. */
+  async #asAgent<T>(run: (reader: Reader) => Promise<T>): Promise<T> {
     const scope = this.ctx.props;
-    await requireOpenRun(this.env, scope, method);
     return await readAsDelegate(
       this.env,
       chatAuthority(scope),
@@ -60,6 +59,32 @@ export class KnowledgeApi
       undefined,
       run
     );
+  }
+
+  /**
+   * Runs one read after the run's check, and shows it in the chat however
+   * it ends (`recordToolCall`), with what `summaryOf` says of what it
+   * found. Knowledge records the read in the audit log itself.
+   */
+  async #shown<T>(
+    method: string,
+    summaryOf: (result: T) => Record<string, AuditDetailValue>,
+    call: () => Promise<T>
+  ): Promise<T> {
+    const scope = this.ctx.props;
+    await requireOpenRun(this.env, scope, method);
+    let result: T;
+    try {
+      result = await call();
+    } catch (error) {
+      await recordToolCall(this.env, scope, { method }, endedBy(error));
+      throw error;
+    }
+    await recordToolCall(this.env, scope, {
+      method,
+      detail: summaryOf(result),
+    });
+    return result;
   }
 
   /**
@@ -118,13 +143,18 @@ export class KnowledgeApi
   }
 
   async search(query: unknown, options?: unknown): Promise<SearchResults> {
-    const found = await this.#asAgent(
+    return await this.#shown(
       "knowledge.search",
-      async (reader) => await search(this.env, reader, query, options)
-    );
-    return await this.#recorded(
-      found,
-      found.hits.map(({ documentId }) => documentId)
+      (found) => ({ hits: found.hits.length }),
+      async () => {
+        const found = await this.#asAgent(
+          async (reader) => await search(this.env, reader, query, options)
+        );
+        return await this.#recorded(
+          found,
+          found.hits.map(({ documentId }) => documentId)
+        );
+      }
     );
   }
 
@@ -134,41 +164,60 @@ export class KnowledgeApi
    * what it handed over recorded with the chat, as a search's is.
    */
   async recall(input: unknown): Promise<MemoryPack> {
-    const { pack, sources } = await this.#asAgent(
+    return await this.#shown(
       "knowledge.recall",
-      async (reader) => await recallWithSources(this.env, reader, input)
+      (pack) => ({ sources: pack.sourceVersions.length }),
+      async () => {
+        const { pack, sources } = await this.#asAgent(
+          async (reader) => await recallWithSources(this.env, reader, input)
+        );
+        // Every collection it read from, found or not, as a search records.
+        await recordSources(this.env, this.ctx.props, sources, [
+          ...new Set(
+            pack.sourceVersions.flatMap((ref) =>
+              ref.kind === "document" ? [ref.documentId] : []
+            )
+          ),
+        ]);
+        return pack;
+      }
     );
-    // Every collection it read from, found or not, as a search records.
-    await recordSources(this.env, this.ctx.props, sources, [
-      ...new Set(
-        pack.sourceVersions.flatMap((ref) =>
-          ref.kind === "document" ? [ref.documentId] : []
-        )
-      ),
-    ]);
-    return pack;
   }
 
   async read(documentId: unknown, options?: unknown): Promise<KnowledgeRead> {
-    const document = await this.#asAgent(
+    return await this.#shown(
       "knowledge.read",
-      async (reader) => await read(this.env, reader, documentId, options)
+      (document) => ({ document: document.id }),
+      async () => {
+        const document = await this.#asAgent(
+          async (reader) => await read(this.env, reader, documentId, options)
+        );
+        return await this.#recorded(document, [document.id]);
+      }
     );
-    return await this.#recorded(document, [document.id]);
   }
 
   async follow(documentId: unknown): Promise<FollowResult> {
-    const followed = await this.#asAgent(
+    return await this.#shown(
       "knowledge.follow",
-      async (reader) => await follow(this.env, reader, documentId)
+      (followed) => ({
+        document: typeof documentId === "string" ? documentId : null,
+        links: followed.links.length,
+        backlinks: followed.backlinks.length,
+      }),
+      async () => {
+        const followed = await this.#asAgent(
+          async (reader) => await follow(this.env, reader, documentId)
+        );
+        return await this.#recorded(followed, [
+          ...followed.links.flatMap(({ documentId: linked }) =>
+            linked === null ? [] : [linked]
+          ),
+          ...followed.backlinks.map(({ documentId: linking }) => linking),
+          ...followed.files.map(({ documentId: file }) => file),
+        ]);
+      }
     );
-    return await this.#recorded(followed, [
-      ...followed.links.flatMap(({ documentId: linked }) =>
-        linked === null ? [] : [linked]
-      ),
-      ...followed.backlinks.map(({ documentId: linking }) => linking),
-      ...followed.files.map(({ documentId: file }) => file),
-    ]);
   }
 
   /**

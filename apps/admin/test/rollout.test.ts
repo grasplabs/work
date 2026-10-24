@@ -7,7 +7,11 @@ import { z } from "zod";
 
 import { applySettings } from "../src/clients/apply.ts";
 import { clientSettings } from "../src/clients/queries.ts";
-import { SettingsError, setSignIn } from "../src/clients/settings.ts";
+import {
+  SettingsError,
+  setSealedSecret,
+  setSignIn,
+} from "../src/clients/settings.ts";
 import { cloudflareApi } from "../src/cloudflare/api.ts";
 import { deployVersion, deployVersions } from "../src/cloudflare/workers.ts";
 import { act, adminDatabase } from "../src/db/act.ts";
@@ -16,6 +20,7 @@ import {
   clientDeploys,
   clientRuns,
   clients,
+  clientSealedSecrets,
   clientWorkers,
   rollouts,
   rolloutTargets,
@@ -61,6 +66,8 @@ const tenantToken = "test-tenant-admin-token-rollout-9c3f20";
 const cloudflare = mockCloudflareApi(token, tenantToken);
 const db = adminDatabase(env.DB);
 const staff = { email: "staff@grasp.test", sub: "sub-staff" };
+/** What staff confirm of a ring before approving the next (src/rollout/control.ts). */
+const ringChecked = { evalPassed: true, demoSent: true };
 
 /** A release, published and imported. */
 const importedRelease = async (
@@ -612,7 +619,7 @@ describe("rolling a release out", () => {
       another: "rollout_running",
     });
 
-    await approveRollout(env, staff, rolloutId);
+    await approveRollout(env, staff, rolloutId, ringChecked);
     await run.waitForStatus("complete");
 
     const acmeWorkers = await workersOf(acme.clientId);
@@ -622,7 +629,7 @@ describe("rolling a release out", () => {
       targets: await targetsOf(rolloutId),
       actions: await rolloutActions(rolloutId),
       // Approving again, once it's moved on, is refused.
-      again: await codeOf(approveRollout(env, staff, rolloutId)),
+      again: await codeOf(approveRollout(env, staff, rolloutId, ringChecked)),
     }).toStrictEqual({
       releases: [release, release],
       rollout: { status: "done", ring: 2 },
@@ -701,6 +708,61 @@ describe("rolling a release out", () => {
     });
   });
 
+  it("holds the next ring until staff say the eval passed and the demo messages were sent on the ring before, and records that they did", async () => {
+    const before = await importedRelease("feat(core): the release before");
+    await activeClient(0, before);
+    const acme = await activeClient(1, before);
+    const release = await importedRelease("feat(core): checked first");
+    await using run = await followRollouts();
+    const rolloutId = await rollOut(release, { scope: "ring", ring: 1 });
+    await expect(
+      run.waitForStepResult({ name: "ring 1 approved" })
+    ).resolves.toBe("waiting");
+    const refused = await Promise.all(
+      [
+        { evalPassed: false, demoSent: false },
+        { evalPassed: true, demoSent: false },
+        { evalPassed: false, demoSent: true },
+      ].map(
+        async (checks) =>
+          await codeOf(approveRollout(env, staff, rolloutId, checks))
+      )
+    );
+    const held = await rolloutRow(rolloutId);
+
+    await approveRollout(env, staff, rolloutId, ringChecked);
+    await run.waitForStatus("complete");
+    const [approval] = await db
+      .select({ actor: auditEvents.actor, detail: auditEvents.detail })
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.target, rolloutId),
+          eq(auditEvents.action, "rollout.approve")
+        )
+      );
+
+    const workers = await workersOf(acme.clientId);
+    expect({
+      refused,
+      held,
+      acme: workers.map(({ releaseId }) => releaseId),
+      approval,
+    }).toStrictEqual({
+      refused: [
+        "ring_checks_missing",
+        "ring_checks_missing",
+        "ring_checks_missing",
+      ],
+      held: { status: "waiting", ring: 0 },
+      acme: [release, release],
+      approval: {
+        actor: staff.email,
+        detail: JSON.stringify({ ring: 1, evalPassed: true, demoSent: true }),
+      },
+    });
+  });
+
   it("sends an approval again when its event didn't reach the run, once staff approve again", async () => {
     const before = await importedRelease("feat(core): the release before");
     await activeClient(0, before);
@@ -724,10 +786,12 @@ describe("rolling a release out", () => {
       },
     };
     const lost = vi.spyOn(env.ROLLOUT, "get").mockResolvedValueOnce(losing);
-    const first = await codeOf(approveRollout(env, staff, rolloutId));
+    const first = await codeOf(
+      approveRollout(env, staff, rolloutId, ringChecked)
+    );
     lost.mockRestore();
 
-    await approveRollout(env, staff, rolloutId);
+    await approveRollout(env, staff, rolloutId, ringChecked);
     await run.waitForStatus("complete");
 
     const workers = await workersOf(acme.clientId);
@@ -1249,7 +1313,7 @@ describe("rolling a release out", () => {
 
     const rolloutId = await rollOut(release, { scope: "all" });
     await run.waitForStepResult({ name: "ring 1 approved" });
-    await approveRollout(env, staff, rolloutId);
+    await approveRollout(env, staff, rolloutId, ringChecked);
     await run.waitForStatus("complete");
 
     expect({
@@ -1300,7 +1364,7 @@ describe("rolling a release out", () => {
 
     const rolloutId = await rollOut(release, { scope: "all" });
     await run.waitForStepResult({ name: "ring 1 approved" });
-    await approveRollout(env, staff, rolloutId);
+    await approveRollout(env, staff, rolloutId, ringChecked);
     await run.waitForStepResult({ name: "retry 1 asked" });
     const failed = await targetsOf(rolloutId);
     // Staff give the hostname back and retry: acme already runs the
@@ -1344,7 +1408,7 @@ describe("rolling a release out", () => {
 
     const rolloutId = await rollOut(release, { scope: "all" });
     await run.waitForStepResult({ name: "ring 1 approved" });
-    await approveRollout(env, staff, rolloutId);
+    await approveRollout(env, staff, rolloutId, ringChecked);
     await expect(
       run.waitForStepResult({ name: "retry 1 asked" })
     ).resolves.toBe("waiting");
@@ -1359,7 +1423,7 @@ describe("rolling a release out", () => {
       runner: await runnerOf(acme.clientId),
       beta: betaWorkers.map(({ releaseId }) => releaseId),
       // It waits for a retry, not an approval.
-      approve: await codeOf(approveRollout(env, staff, rolloutId)),
+      approve: await codeOf(approveRollout(env, staff, rolloutId, ringChecked)),
     }).toStrictEqual({
       rollout: { status: "waiting", ring: 2 },
       targets: {
@@ -1690,7 +1754,7 @@ describe("rolling out to the fleet a few clients at a time", () => {
     const rolloutId = await rollOut(release, { scope: "all" });
     await run.waitForStepResult({ name: "ring 1 approved" });
     const claims = watchClaims();
-    await approveRollout(env, staff, rolloutId);
+    await approveRollout(env, staff, rolloutId, ringChecked);
     await run.waitForStepResult({ name: "retry 1 asked" });
     const peak = await claims.stop();
     const failed = await fleetStatuses(rolloutId, fleet);
@@ -1785,7 +1849,7 @@ describe("rolling out to the fleet a few clients at a time", () => {
       }
     );
 
-    await approveRollout(env, staff, rolloutId);
+    await approveRollout(env, staff, rolloutId, ringChecked);
     await run.waitForStatus("paused");
     const started = await run.childRuns();
     await Promise.all(started.map(settled));
@@ -1840,7 +1904,7 @@ describe("rolling out to the fleet a few clients at a time", () => {
       }
     );
 
-    await approveRollout(env, staff, rolloutId);
+    await approveRollout(env, staff, rolloutId, ringChecked);
     await vi.waitUntil(async () => {
       const row = await rolloutRow(rolloutId);
       return row?.status === "failed";
@@ -1891,7 +1955,7 @@ describe("rolling out to the fleet a few clients at a time", () => {
 
     const rolloutId = await rollOut(release, { scope: "all" });
     await run.waitForStepResult({ name: "ring 1 approved" });
-    await approveRollout(env, staff, rolloutId);
+    await approveRollout(env, staff, rolloutId, ringChecked);
     await run.waitForStatus("complete");
     await rollbacks.waitForAll();
 
@@ -1965,7 +2029,7 @@ describe("rolling new secrets out", () => {
       run.waitForStepResult({ name: "ring 2 approved" })
     ).resolves.toBe("waiting");
     const acmeBeforeApproval = deploymentCounts(acme.account);
-    await approveRollout(env, staff, rolloutId);
+    await approveRollout(env, staff, rolloutId, ringChecked);
     await run.waitForStatus("complete");
     for (const spy of logs) {
       spy.mockRestore();
@@ -2502,7 +2566,7 @@ describe("controlling a rollout", () => {
       rollout: await rolloutRow(rolloutId),
       runner: await runnerOf(internal.clientId),
       actions: actions.slice(-2),
-      approve: await codeOf(approveRollout(env, staff, rolloutId)),
+      approve: await codeOf(approveRollout(env, staff, rolloutId, ringChecked)),
       // Signed with the key the rolled-back core's auth secret gives.
       notices: internal.account.notices,
     }).toMatchObject({
@@ -2608,6 +2672,59 @@ describe("controlling a rollout", () => {
         {
           target: previous.core,
           detail: { what: "rollback", error: "core_404" },
+        },
+      ],
+    });
+  });
+
+  it("rolls a client back without following its core's redirect, and audits that the notice wasn't taken", async () => {
+    const before = await importedRelease("feat(core): the release before");
+    const internal = await activeClient(0, before);
+    const previous = await recordedVersionsOf(internal.clientId);
+    const release = await importedRelease("feat(core): an older core");
+    await using run = await followRollouts();
+    const rolloutId = await rollOut(release, { scope: "ring", ring: 0 });
+    await run.waitForStatus("complete");
+    // A core, or a hop in front of it, that sends the signed notice on.
+    internal.account.redirectsTo = "https://elsewhere.example";
+    const warn = vi.spyOn(console, "warn").mockReturnValue();
+    await using rollbacks = await followRollbacks();
+
+    try {
+      await rollbacks.rollBack(rolloutId, internal.clientId);
+    } finally {
+      warn.mockRestore();
+    }
+
+    const unrecorded = await db
+      .select({ target: auditEvents.target, detail: auditEvents.detail })
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.clientId, internal.clientId),
+          eq(auditEvents.action, "rollout.activity_unrecorded")
+        )
+      );
+    expect({
+      live: await liveVersionsOf(internal.clientId, internal.account),
+      targets: await targetsOf(rolloutId),
+      notices: internal.account.notices,
+      redirected: cloudflare.redirected(),
+      unrecorded: unrecorded.map(({ target, detail }) => ({
+        target,
+        detail: parsedDetail(detail),
+      })),
+    }).toStrictEqual({
+      live: previous,
+      targets: {
+        [internal.clientId]: { ring: 0, status: "rolled_back", error: null },
+      },
+      notices: [],
+      redirected: [],
+      unrecorded: [
+        {
+          target: previous.core,
+          detail: { what: "rollback", error: "core_307" },
         },
       ],
     });
@@ -3201,6 +3318,71 @@ describe("controlling a rollout", () => {
         .toSorted((a, b) => a.clientId.localeCompare(b.clientId)),
       unreadable: "secrets_store_incomplete",
       state: rolledOut,
+    });
+  });
+
+  it("rolls a client back to versions carrying its Teams bot secret only while that is the one the admin holds", async () => {
+    const before = await importedRelease("feat(core): runs its own bot");
+    const internal = await activeClient(0, before);
+    const setBotSecret = async (value: string): Promise<void> => {
+      await setSealedSecret(env, staff, {
+        clientId: internal.clientId,
+        name: "TEAMS_BOT_SECRET",
+        value,
+      });
+    };
+    await setBotSecret("first~bot.Secret_0123456789");
+    // Its next deploy carries it: the versions a rollback goes back to.
+    await runDeploy(
+      await deployContext(env),
+      await startDeploy(db, staff, internal.clientId, before)
+    );
+    const previous = await recordedVersionsOf(internal.clientId);
+    const release = await importedRelease("feat(core): runs it too");
+    await using run = await followRollouts();
+    await using rollbacks = await followRollbacks();
+    const rolloutId = await rollOut(release, { scope: "ring", ring: 0 });
+    await run.waitForStatus("complete");
+    const counts = deploymentCounts(internal.account);
+
+    // Staff replace it, and may revoke the first in the client's Entra.
+    await setBotSecret("second~bot.Secret_0123456789");
+    const replaced = await codeOf(
+      rollbackClient(env, staff, rolloutId, internal.clientId)
+    );
+    const untouched = deploymentCounts(internal.account);
+    // The first is set again: what the previous versions carry is current.
+    await setBotSecret("first~bot.Secret_0123456789");
+    const sealedNow = async () =>
+      await db
+        .select({ sealed: clientSealedSecrets.sealed })
+        .from(clientSealedSecrets)
+        .where(eq(clientSealedSecrets.clientId, internal.clientId));
+    const checked = await sealedNow();
+    // Checked, and about to put the versions back: a replacement now would
+    // be passed over by them.
+    await rollbacks.startUntil(rolloutId, internal.clientId, "plan");
+    const midway = await codeOf(setBotSecret("third~bot.Secret_0123456789"));
+    await rollbacks.waitForAll();
+    const kept = await sealedNow();
+
+    expect({
+      replaced,
+      untouched,
+      midway,
+      kept,
+      live: await liveVersionsOf(internal.clientId, internal.account),
+      runner: await runnerOf(internal.clientId),
+      // Once it's done, it can be set again.
+      after: await codeOf(setBotSecret("third~bot.Secret_0123456789")),
+    }).toStrictEqual({
+      replaced: "sealed_secret_replaced",
+      untouched: counts,
+      midway: "client_busy",
+      kept: checked,
+      live: previous,
+      runner: null,
+      after: "resolved",
     });
   });
 
@@ -3970,7 +4152,7 @@ describe("controlling a rollout", () => {
 
     const rolloutId = await rollOut(release, { scope: "ring", ring: 1 });
     await run.waitForStepResult({ name: "ring 1 approved" });
-    await approveRollout(env, staff, rolloutId);
+    await approveRollout(env, staff, rolloutId, ringChecked);
     await run.waitForStatus("complete");
 
     const workers = await workersOf(acme.clientId);
@@ -4323,7 +4505,7 @@ describe("controlling a rollout", () => {
       status,
       rollout: await rolloutRow(rolloutId),
       acme: deploymentCounts(acme.account),
-      approve: await codeOf(approveRollout(env, staff, rolloutId)),
+      approve: await codeOf(approveRollout(env, staff, rolloutId, ringChecked)),
       cancelAgain: await codeOf(cancelRollout(env, staff, rolloutId)),
       actions: actions.slice(-3),
     }).toStrictEqual({

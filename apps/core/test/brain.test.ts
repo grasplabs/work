@@ -1,4 +1,5 @@
 import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
+import type { BrainRecordInput } from "@grasp-os/shared/brain-records";
 import { visionFields } from "@grasp-os/shared/kickoff";
 import type { VisionField } from "@grasp-os/shared/kickoff";
 import type { RosterInput } from "@grasp-os/shared/onboarding";
@@ -23,7 +24,8 @@ import { connectDb } from "./test-env.ts";
 // onboarding, which only admins see, reaching anyone else; an interview
 // shown before the admin's progress counts it, an employee's shown at
 // all, or anything said in one reaching the brain; a tool counted twice
-// when two documents name it; a hidden entry's connection lost; an empty
+// when two documents, or a document and a brain record, name it; a
+// hidden entry's connection lost; an empty
 // deployment failing to give the brain anything to build from.
 
 const idp = mockIdp();
@@ -550,6 +552,71 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
         `src.document-${second.id}`,
       ].toSorted(),
       member: { sources: [], tools: [], changes: [] },
+    });
+  });
+
+  it("shows a tool a document and a brain record both name once, as the record, used by the teams of both", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const member = await signedInApi(idp, "user");
+    await admin.api.onboarding.saveRoster(roster);
+    const tag = crypto.randomUUID().slice(0, 8);
+    const record: Extract<BrainRecordInput, { type: "tool" }> = {
+      type: "tool",
+      id: `tool-${tag}`,
+      name: `ledger ${tag}`,
+      teamIds: ["team-ops"],
+      sourceId: `src-${tag}`,
+      ai: "none",
+    };
+    await admin.api.brain.addRecords([
+      {
+        type: "source",
+        id: `src-${tag}`,
+        kind: "interview",
+        title: "Operations interview",
+        date: today(),
+      },
+      record,
+    ]);
+    const document = await shareDocument(
+      admin,
+      `booking-${crypto.randomUUID()}.docx`,
+      [`Ledger ${tag}`, `Claims ${tag}`],
+      ["Finance"]
+    );
+
+    const workspace = await admin.api.brain.read();
+    const asMember = await member.api.brain.read();
+    // Other tests' documents name tools too: this test's alone.
+    const tools = workspace.tools.filter(({ name }) => name.includes(tag));
+
+    expect({ tools, member: asMember.tools }).toStrictEqual({
+      tools: [
+        {
+          id: `tool.document-claims-${tag}`,
+          name: `Claims ${tag}`,
+          teamIds: ["team-finance"],
+          sourceId: `src.document-${document.id}`,
+        },
+        // The record keeps its id, name and source.
+        {
+          id: record.id,
+          name: record.name,
+          teamIds: ["team-ops", "team-finance"],
+          sourceId: record.sourceId,
+          ai: "none",
+        },
+      ],
+      // A member reads no shared document: the record as it was added.
+      member: [
+        {
+          id: record.id,
+          name: record.name,
+          teamIds: ["team-ops"],
+          sourceId: record.sourceId,
+          ai: "none",
+        },
+      ],
     });
   });
 

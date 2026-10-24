@@ -20,6 +20,7 @@ import type { AppRecord } from "./bundled-connectors.ts";
 import { hibobAccount, hibobCredential } from "./hibob.ts";
 import { idTokenClaims, lookupAccount } from "./oauth-client.ts";
 import type { TokenSet } from "./oauth-client.ts";
+import { classesOnByDefault, microsoftRights } from "./provider-rights.ts";
 
 // The providers people connect accounts from, as config records: one
 // generic OAuth flow (src/oauth.ts) runs them all, and one API-key sign-in
@@ -105,6 +106,14 @@ export interface OAuthProviderConfig {
     allowed: ReadonlySet<string>;
     required: readonly string[];
   };
+  /**
+   * Scopes a renewed token must hold, or its connection is marked for
+   * reconnecting (`needs_reauth`), which keeps it and its permissions
+   * (oauth.ts): scopes added to `scopes` after connections were made, which
+   * a connection made before lacks until its person consents again. Only a
+   * renewal that lists what it granted is checked.
+   */
+  renewalRequires?: readonly string[];
   /**
    * Only shared connections, never a person's own (the landscape's, the
    * directory's, the documents').
@@ -238,23 +247,12 @@ const microsoft: OAuthProviderConfig = {
   authorizationEndpoint: (tenant) =>
     `${microsoftLogin}/${tenant}/oauth2/v2.0/authorize`,
   tokenEndpoint: (tenant) => `${microsoftLogin}/${tenant}/oauth2/v2.0/token`,
-  // What the Microsoft 365 connector needs: mail (the person's own and
-  // shared mailboxes), calendars, and files in OneDrive and SharePoint.
-  scopes: [
-    "openid",
-    "profile",
-    "email",
-    "offline_access",
-    "User.Read",
-    "Mail.ReadWrite",
-    "Mail.ReadWrite.Shared",
-    "Mail.Send",
-    "Mail.Send.Shared",
-    "Calendars.Read",
-    "Calendars.Read.Shared",
-    "Files.Read.All",
-    "Sites.Read.All",
-  ],
+  // Those of the classes on by default; a consent asks those of the classes
+  // the company turned on (`rightsFor`, GRA-717).
+  scopes: microsoftRights(classesOnByDefault),
+  // Asked for since the connector writes workbooks: a connection made
+  // before can't, and is reconnected in place. Change own asks for it.
+  renewalRequires: ["Files.ReadWrite.All"],
   scopeSeparator: " ",
   authorizationParams: () => ({ response_mode: "query" }),
   clientAuthentication: "client_secret_post",
@@ -291,6 +289,9 @@ const landscapeScopes = [
 const microsoftLandscape: OAuthProviderConfig = {
   ...microsoft,
   id: "microsoft-landscape",
+  // Read-only: the write a Microsoft 365 renewal must still hold isn't
+  // asked for here, so its renewal requires nothing of it.
+  renewalRequires: [],
   // No connector: its connection takes no calls, only core's sync reads it.
   server: "microsoft-landscape",
   scopes: landscapeScopes,
@@ -333,13 +334,17 @@ const google: OAuthProviderConfig = {
   tokenEndpoint: () => "https://oauth2.googleapis.com/token",
   revocationEndpoint: "https://oauth2.googleapis.com/revoke",
   // What the Google Workspace connector needs: Gmail (read, label, draft,
-  // send), calendar events and Drive, read-only where it only reads.
+  // send), calendar events (putting one in the person's own calendar) and
+  // which calendar is theirs, and Drive, read-only where it only reads. A
+  // connection granted before the connector wrote events is marked for
+  // reconnecting on its first refused write (tokens.ts `markIfGrantLacks`).
   scopes: [
     "openid",
     "email",
     "profile",
     "https://www.googleapis.com/auth/gmail.modify",
-    "https://www.googleapis.com/auth/calendar.events.readonly",
+    "https://www.googleapis.com/auth/calendar.events",
+    "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
     "https://www.googleapis.com/auth/drive.readonly",
   ],
   scopeSeparator: " ",
@@ -392,6 +397,9 @@ const microsoftDirectoryScopes = [
 const microsoftDirectory: OAuthProviderConfig = {
   ...microsoft,
   id: "microsoft-directory",
+  // Read-only: the write a Microsoft 365 renewal must still hold isn't
+  // asked for here, so its renewal requires nothing of it.
+  renewalRequires: [],
   // No connector: its connection takes no calls, only core's read uses it.
   server: "microsoft-directory",
   scopes: microsoftDirectoryScopes,
@@ -506,6 +514,9 @@ const microsoftDocumentsScopes = [
 const microsoftDocuments: OAuthProviderConfig = {
   ...microsoft,
   id: "microsoft-documents",
+  // Read-only: the write a Microsoft 365 renewal must still hold isn't
+  // asked for here, so its renewal requires nothing of it.
+  renewalRequires: [],
   // No connector: its connection takes no calls, only core's reads use it.
   server: "microsoft-documents",
   scopes: microsoftDocumentsScopes,
@@ -699,6 +710,32 @@ export const providerFor = (id: string): ProviderConfig | undefined => {
 /** How Entra may prefix a Microsoft Graph scope in a token's answer. */
 const graphScopePrefix = "https://graph.microsoft.com/";
 
+/** The scopes a token answer lists, lowercase, Graph's by their short name. */
+const scopesOf = (scope: string): Set<string> =>
+  new Set(
+    scope
+      .split(" ")
+      .filter((each) => each !== "")
+      // Entra may name Graph's scopes by their full URI.
+      .map((each) => each.toLowerCase().replace(graphScopePrefix, ""))
+  );
+
+/**
+ * Whether a renewal's `tokens` still hold every scope `provider` requires
+ * of one (`renewalRequires`). An answer that lists none passes: nothing
+ * says it lacks one.
+ */
+export const renewalHolds = (
+  { renewalRequires = [] }: OAuthProviderConfig,
+  { scope }: TokenSet
+): boolean => {
+  if (scope === undefined) {
+    return true;
+  }
+  const scopes = scopesOf(scope);
+  return renewalRequires.every((each) => scopes.has(each.toLowerCase()));
+};
+
 /**
  * Whether `tokens` were granted exactly the access `provider` asks for,
  * where it must hold no more (`granted`): every scope the provider's
@@ -715,15 +752,33 @@ export const grantedAsAsked = (
   if (scope === undefined) {
     return false;
   }
-  const scopes = new Set(
-    scope
-      .split(" ")
-      .filter((each) => each !== "")
-      // Entra may name Graph's scopes by their full URI.
-      .map((each) => each.toLowerCase().replace(graphScopePrefix, ""))
-  );
+  const scopes = scopesOf(scope);
   return (
     [...scopes].every((each) => granted.allowed.has(each)) &&
     granted.required.every((each) => scopes.has(each.toLowerCase()))
   );
+};
+
+/** The OpenID scopes, which a provider's answer may name or leave out. */
+const signInScopes: ReadonlySet<string> = new Set([
+  "openid",
+  "profile",
+  "email",
+  "offline_access",
+]);
+
+/**
+ * The scopes `provider` asks for now that a grant of `scope` (a token
+ * answer's) lacks, besides the OpenID ones: those its connector came to
+ * ask for after the connection was made.
+ */
+export const scopesLacking = (
+  { scopes }: OAuthProviderConfig,
+  scope: string
+): string[] => {
+  const granted = scopesOf(scope);
+  return scopes.filter((each) => {
+    const asked = each.toLowerCase();
+    return !(signInScopes.has(asked) || granted.has(asked));
+  });
 };

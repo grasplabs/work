@@ -384,6 +384,40 @@ describe("interview link rate limit", () => {
     expect(statuses).toStrictEqual([200, 429]);
   });
 
+  it("limits the sockets a link opens to be heard from the same budget as its link's endpoint", async () => {
+    const limiter = limiterAllowing(1);
+    const statuses = [
+      await interviewFrom(
+        "192.0.2.27",
+        "https://acme.interview.test/api/interview",
+        limiter
+      ),
+      await interviewFrom(
+        "192.0.2.27",
+        "https://acme.interview.test/api/transcription",
+        limiter
+      ),
+    ].map(({ status }) => status);
+    expect(statuses).toStrictEqual([200, 429]);
+  });
+
+  it("limits the recordings a link has written down from the same budget as its link's endpoint", async () => {
+    const limiter = limiterAllowing(1);
+    const statuses = [
+      await interviewFrom(
+        "192.0.2.28",
+        "https://acme.interview.test/api/interview",
+        limiter
+      ),
+      await interviewFrom(
+        "192.0.2.28",
+        "https://acme.interview.test/api/interview/hear",
+        limiter
+      ),
+    ].map(({ status }) => status);
+    expect(statuses).toStrictEqual([200, 429]);
+  });
+
   it("limits nothing else by it", async () => {
     const none = limiterAllowing(0);
     const others = await Promise.all(
@@ -403,6 +437,102 @@ describe("interview link rate limit", () => {
     const response = await exports.default.fetch(
       "https://acme.interview.test/api/interview",
       { method: "POST", headers: { "cf-connecting-ip": "192.0.2.24" } }
+    );
+    expect(response.status).toBe(200);
+  });
+});
+
+/** A chat platform's webhook request to core, through the router. */
+const channelFrom = async (
+  ip: string,
+  url: string,
+  limiter: RateLimit
+): Promise<Response> =>
+  await worker.fetch(
+    new Request(url, {
+      method: "POST",
+      headers: { "cf-connecting-ip": ip },
+      body: "{}",
+    }),
+    {
+      ...env,
+      CHANNELS_RATE_LIMIT: limiter,
+      INTERVIEW_RATE_LIMIT: limiterAllowing(1000),
+      GUEST_RATE_LIMIT: limiterAllowing(1000),
+      AUTH_RATE_LIMIT: limiterAllowing(1000),
+    }
+  );
+
+describe("chat platform rate limit", () => {
+  const cores = fakeCores();
+
+  beforeAll(async () => {
+    const admin = await routerKeyAdmin();
+    await admin.create(testRouterKey);
+    const core = { coreUrl: "https://grasp-os-core.acme.workers.dev" };
+    await Promise.all([
+      mapHost("acme.channels.test", {
+        ...core,
+        clientId: "acme",
+        generation: 1,
+      }),
+      mapHost("beta.channels.test", {
+        ...core,
+        clientId: "beta",
+        generation: 1,
+      }),
+    ]);
+  });
+
+  it("limits every platform's webhook per hostname and client address, without reaching core", async () => {
+    const limiter = limiterAllowing(2);
+    const teams = "https://acme.channels.test/api/channels/teams";
+    const statuses = [
+      await channelFrom("192.0.2.31", teams, limiter),
+      await channelFrom("192.0.2.31", teams, limiter),
+      await channelFrom("192.0.2.31", teams, limiter),
+      // Another platform's door shares the address's budget.
+      await channelFrom(
+        "192.0.2.31",
+        "https://acme.channels.test/api/channels/slack",
+        limiter
+      ),
+      await channelFrom("192.0.2.32", teams, limiter),
+      await channelFrom(
+        "192.0.2.31",
+        "https://beta.channels.test/api/channels/teams",
+        limiter
+      ),
+    ].map(({ status }) => status);
+    expect(statuses).toStrictEqual([200, 200, 429, 429, 200, 200]);
+    expect(
+      cores.received.filter(({ url }) =>
+        new URL(url).pathname.startsWith("/api/channels/")
+      )
+    ).toHaveLength(4);
+  });
+
+  it("limits nothing else by it", async () => {
+    const none = limiterAllowing(0);
+    const others = await Promise.all(
+      ["/", "/api/channels", "/api/guest", "/api/auth/session"].map(
+        async (path) => {
+          const response = await channelFrom(
+            "192.0.2.33",
+            `https://acme.channels.test${path}`,
+            none
+          );
+          return response.status;
+        }
+      )
+    );
+    expect(others).toStrictEqual([200, 200, 200, 200]);
+  });
+
+  it("counts with the rate limiter binding it's deployed with", async () => {
+    const response = await exports.default.fetch(
+      "https://acme.channels.test/api/channels/teams",
+      { method: "POST", headers: { "cf-connecting-ip": "192.0.2.34" } }
     );
     expect(response.status).toBe(200);
   });

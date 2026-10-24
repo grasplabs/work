@@ -334,13 +334,13 @@ test("Stephen says his line a sentence at a time, without a gap, its words light
   // From here: the sound check's own line may still be ending as Start shows.
   const startedAt = await page.evaluate(() => performance.now());
 
-  // While he talks, the box is a voice bar; once he asks, it is the box to answer in.
+  // While he talks, the box is a voice bar; once he asks, the bar listens to them.
   await expect(page.getByText("Stephen is talking")).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Type instead" })
   ).toBeVisible();
   await expect(page.getByText(line)).toBeVisible();
-  await expect(page.getByLabel("Your answer")).toBeVisible({
+  await expect(page.getByText("Listening", { exact: true })).toBeVisible({
     timeout: 30_000,
   });
 

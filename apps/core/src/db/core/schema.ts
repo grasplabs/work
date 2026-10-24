@@ -119,6 +119,9 @@ export const accounts = sqliteTable(
   },
   (table) => [
     index("accounts_user_id_idx").on(table.userId),
+    // Who writes in Teams, by the object id its messages carry
+    // (channels/who.ts).
+    index("accounts_oid_idx").on(table.oid),
     uniqueIndex("accounts_provider_account_idx").on(
       table.providerId,
       table.accountId
@@ -215,6 +218,91 @@ export const memberRemovals = sqliteTable(
     disconnectedAt: timestamp("disconnected_at"),
   },
   (table) => [primaryKey({ columns: [table.organizationId, table.userId] })]
+);
+
+/**
+ * A person's account on a chat platform that carries no Entra object id
+ * (Slack, WhatsApp, Telegram...), linked to them (`channels/accounts.ts`):
+ * one person per platform account, by the platform's own verified sender
+ * id. Its id names it to the person and in the audit log, which never
+ * holds the platform id itself (a WhatsApp id is a phone number).
+ */
+export const channelAccounts = sqliteTable(
+  "channel_accounts",
+  {
+    id: text().primaryKey(),
+    platform: text().notNull(),
+    platformUserId: text("platform_user_id").notNull(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** What the platform called them when they linked it; never who they are. */
+    name: text(),
+    linkedAt: timestamp("linked_at").notNull(),
+    /** How it was linked: a sign-in link the chat sent, so far the only way. */
+    linkedHow: text("linked_how", { enum: ["sign_in_link"] }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("channel_accounts_platform_user_idx").on(
+      table.platform,
+      table.platformUserId
+    ),
+    index("channel_accounts_user_id_idx").on(table.userId),
+  ]
+);
+
+/**
+ * One-use links a chat sent someone it doesn't know, each bound to the
+ * platform account it was sent to (`channels/accounts.ts`). Only the
+ * secret's hash is kept. Used or not, a link is gone soon after it
+ * expires.
+ */
+export const channelLinks = sqliteTable(
+  "channel_links",
+  {
+    secretHash: text("secret_hash").primaryKey(),
+    platform: text().notNull(),
+    platformUserId: text("platform_user_id").notNull(),
+    name: text(),
+    createdAt: timestamp("created_at").notNull(),
+    expiresAt: timestamp("expires_at").notNull(),
+    /** Set once, by the sign-in it linked, with whose. */
+    usedAt: timestamp("used_at"),
+    usedBy: text("used_by"),
+    /** Set when the chat sent the same account a newer link. */
+    replacedAt: timestamp("replaced_at"),
+  },
+  (table) => [
+    index("channel_links_platform_user_idx").on(
+      table.platform,
+      table.platformUserId
+    ),
+    index("channel_links_expires_at_idx").on(table.expiresAt),
+  ]
+);
+
+/**
+ * The chat conversations people write to the agent in, each the person's
+ * own private chat with the client's bot on its platform (`channels/door.ts`),
+ * so a later message, or the agent's answer, finds it again. `threadId` is
+ * the Chat SDK's thread id, which names the conversation and where the
+ * platform takes its replies.
+ */
+export const channelConversations = sqliteTable(
+  "channel_conversations",
+  {
+    platform: text().notNull(),
+    threadId: text("thread_id").notNull(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at").notNull(),
+    lastMessageAt: timestamp("last_message_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.platform, table.threadId] }),
+    index("channel_conversations_user_id_idx").on(table.userId),
+  ]
 );
 
 /**
@@ -2172,6 +2260,32 @@ export const workflowDecisions = sqliteTable(
 );
 
 /**
+ * The recipients of a decision asked of more than one (a JSON workflow's
+ * `grasp.decision` naming several, src/decisions/decisions.ts): each
+ * `person:<id>`, `team:<id>` or `role:<role>`, any of whom may answer it,
+ * the first answer the only one. Written once, with the decision; a
+ * decision of one recipient has none here, its `deciders` alone saying
+ * who answers.
+ */
+export const workflowDecisionRecipients = sqliteTable(
+  "workflow_decision_recipients",
+  {
+    decisionId: text("decision_id")
+      .notNull()
+      .references(() => workflowDecisions.id),
+    deciders: text().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.decisionId, table.deciders] }),
+    // The decisions asked of someone (`waitingDecisions`).
+    index("workflow_decision_recipients_deciders_idx").on(
+      table.deciders,
+      table.decisionId
+    ),
+  ]
+);
+
+/**
  * One-use confirmations of a person's answer to a decision
  * (src/decisions/confirmations.ts), minted by the trusted host decision UI
  * once the person confirmed exactly what they answer, and taken by the
@@ -2268,6 +2382,12 @@ export const dependencyRequests = sqliteTable(
      */
     endedGeneration: integer("ended_generation"),
     endedReason: text("ended_reason"),
+    /**
+     * When an approval in force was last found clean of malware reported
+     * since (OSV.dev and the registry's advisories), by the periodic
+     * re-check (`recheckMalware`, requests.ts): null until it was.
+     */
+    malwareCheckedAt: timestamp("malware_checked_at"),
   },
   (table) => [
     // One request waits per subject: a second pending row is refused.
@@ -2287,6 +2407,14 @@ export const dependencyRequests = sqliteTable(
       table.subjectType,
       table.subjectId,
       table.graphHash,
+      table.status
+    ),
+    // The approvals the malware re-check is due to read: by when each was
+    // last found clean, never checked first. Led by that time, not the
+    // status, so the approvers' list of what is in force keeps reading the
+    // subject index in its order.
+    index("dependency_requests_malware_idx").on(
+      table.malwareCheckedAt,
       table.status
     ),
   ]
@@ -2582,6 +2710,33 @@ export const hiddenConnectors = sqliteTable(
   },
   (table) => [primaryKey({ columns: [table.source, table.connectorId] })]
 );
+
+/**
+ * The classes of tools an admin changed (tool-classes.ts): one row each,
+ * for whom it is on now (`who`: `nobody`, `everyone` or `teams`, then the
+ * team IDs in `teams` as a JSON array). A class without a row is as
+ * `defaultToolClassAudiences` has it.
+ */
+export const toolClassSettings = sqliteTable("tool_class_settings", {
+  toolClass: text("tool_class").primaryKey(),
+  who: text({ enum: ["nobody", "everyone", "teams"] }).notNull(),
+  teams: text().notNull().default("[]"),
+  changedBy: text("changed_by").notNull(),
+  changedAt: timestamp("changed_at").notNull(),
+});
+
+/**
+ * The shared mailboxes an admin pointed Stephen at (shared-mailboxes.ts),
+ * by address in lower case: for whom it is on now (`who`: `nobody`,
+ * `everyone` or `teams`, then the team IDs in `teams` as a JSON array).
+ */
+export const sharedMailboxPointers = sqliteTable("shared_mailbox_pointers", {
+  mailbox: text().primaryKey(),
+  who: text({ enum: ["nobody", "everyone", "teams"] }).notNull(),
+  teams: text().notNull().default("[]"),
+  changedBy: text("changed_by").notNull(),
+  changedAt: timestamp("changed_at").notNull(),
+});
 
 /**
  * Apps people asked Grasp to add, as the catalog doesn't have them
@@ -3184,8 +3339,22 @@ export const triggerResourceVersions = sqliteTable(
     configHash: text("config_hash").notNull(),
     principalBinding: text("principal_binding").notNull(),
     createdAt: timestamp("created_at").notNull(),
+    /**
+     * For a system trigger: the catalog event contract and the event type
+     * of it whose emitted events start its workflow
+     * (workflows/event-delivery.ts). Null for any other kind, and for a
+     * system trigger from before they were kept, which then takes none.
+     */
+    eventContract: text("event_contract"),
+    eventType: text("event_type"),
   },
-  (table) => [primaryKey({ columns: [table.triggerId, table.version] })]
+  (table) => [
+    primaryKey({ columns: [table.triggerId, table.version] }),
+    // The system triggers' versions that take an event of a type.
+    index("trigger_resource_versions_event")
+      .on(table.eventContract, table.eventType)
+      .where(sql`${table.eventContract} IS NOT NULL`),
+  ]
 );
 
 /**
@@ -3337,7 +3506,9 @@ export const workflowResourceRuns = sqliteTable(
      * For a child run (a `run` task's, workflows/run-children.ts): the run
      * that started it, its lineage's root and its depth under it (quotas.ts,
      * `admitChild`), pinned with it. Null, null and 0 for a run its own
-     * start admitted, the root of its own lineage.
+     * start admitted, the root of its own lineage. A run an emitted event's
+     * trigger started (workflows/event-delivery.ts) has a root and a depth
+     * but no parent: it joins the emitting run's lineage, not its life.
      */
     parentRunId: text("parent_run_id"),
     rootRunId: text("root_run_id"),
@@ -3461,8 +3632,9 @@ export const workflowRunFileChunks = sqliteTable(
  * attempt run again writes nothing new. Each names its run, its pinned
  * binding and catalog contract, and the envelope the host minted: its
  * source is the emitting run, never what the workflow says. Delivery to
- * what consumes platform events (system triggers) marks it delivered; until
- * something consumes them, each waits here. Retention removes an event's
+ * what consumes platform events (system triggers,
+ * workflows/event-delivery.ts) marks it delivered, or undeliverable with
+ * why; until then each waits here. Retention removes an event's
  * subject and data with its run's details (workflows/retention.ts), and
  * closes one still undelivered then (its `delivered_at` the removal's
  * time), so nothing delivers it without its data.
@@ -3490,6 +3662,18 @@ export const workflowEmittedEvents = sqliteTable(
     createdAt: timestamp("created_at").notNull(),
     deliveredAt: timestamp("delivered_at"),
     detailsRemovedAt: timestamp("details_removed_at"),
+    /** How many deliveries of it failed and were tried again. */
+    deliveryAttempts: integer("delivery_attempts").notNull().default(0),
+    /**
+     * Until when a drain holds it (its lease), or, after a failed
+     * delivery, when it is tried again; null for one never tried.
+     */
+    deliveryAt: timestamp("delivery_at"),
+    /**
+     * Why it was closed undeliverable (a workflow error code), set with
+     * `delivered_at`; null for one delivered, or closed by retention.
+     */
+    undeliverable: text(),
   },
   (table) => [
     index("workflow_emitted_events_run").on(table.runId),
@@ -3977,7 +4161,7 @@ export const landscapeStagedPeople = sqliteTable(
 );
 
 /**
- * The Playbook's records (brain-records.ts): one row each, never written
+ * The brain's records (brain-records.ts): one row each, never written
  * over, in the order they were added. `body` is the record as
  * `brainRecordSchema` parsed it, as canonical JSON, so a record sent again
  * compares as the same text. No row names who added it: the audit log does.
@@ -4018,7 +4202,7 @@ export const brainRecords = sqliteTable(
 );
 
 /**
- * What became of the Playbook's gaps (brain-records.ts): one row once a
+ * What became of the brain's gaps (brain-gaps.ts): one row once a
  * gap was asked about, answered or closed, each set once, never cleared.
  * A gap with no row is open and nobody was asked.
  */

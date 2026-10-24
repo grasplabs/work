@@ -103,6 +103,8 @@ export const eventWords = (
     "client.rotate_secrets": `rotated ${company}'s secrets`,
     "client.apply_settings": `applied ${company}'s settings`,
     "client.sign_in": `changed how ${company}'s people sign in`,
+    "client.sealed_secret": `set one of ${company}'s secrets`,
+    "client.teams_bot": `changed ${company}'s Teams bot`,
   };
   return `${event.actor} ${what[event.action]}`;
 };

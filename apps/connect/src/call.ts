@@ -1,4 +1,5 @@
 import {
+  confirmedMetaKey,
   effectKeyMetaKey,
   findMetaKey,
   stampMetaKey,
@@ -20,6 +21,8 @@ import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
+import { changeOf } from "./changes.ts";
+import type { CallChange } from "./changes.ts";
 import {
   allowedTool,
   composioServer,
@@ -39,6 +42,7 @@ import {
   scopeOf,
 } from "./idempotency.ts";
 import type { Repeat, Row, StoredAnswer } from "./idempotency.ts";
+import { requirePointedMailbox } from "./mailboxes.ts";
 import { McpError } from "./mcp.ts";
 import type {
   McpServer,
@@ -46,6 +50,7 @@ import type {
   McpTool,
   McpToolResult,
 } from "./mcp.ts";
+import { isNeverTool } from "./never.ts";
 import { hold, waitingUnder } from "./pending.ts";
 import type { HeldAction } from "./pending.ts";
 import {
@@ -56,6 +61,7 @@ import {
   uncertainFailure,
   withProvenance,
 } from "./policy.ts";
+import { markIfGrantLacks } from "./tokens.ts";
 
 const retryAfterSchema = z.object({
   error: z.object({
@@ -80,6 +86,31 @@ const notPerformed = ({ output }: McpToolResult): Error => {
     "connect.server_unavailable",
     wait === undefined ? undefined : { retryAfterSeconds: wait }
   );
+};
+
+const accessDeniedSchema = z.object({
+  error: z.object({ code: z.literal("access_denied") }),
+});
+
+/**
+ * Whether a native connector's tool says its provider refused it access
+ * (`{ error: { code: "access_denied" } }`, as the connector kit reports a
+ * 401 or 403).
+ */
+const isAccessDenied = (
+  { serverKind }: Connection,
+  { isError, output }: McpToolResult
+): boolean => {
+  if (serverKind !== "native" || !isError) {
+    return false;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(output);
+  } catch {
+    return false;
+  }
+  return accessDeniedSchema.safeParse(parsed).success;
 };
 
 /** Most characters of a tool's error text connect logs. */
@@ -151,6 +182,8 @@ export interface CallDone extends StoredAnswer {
   recovery?: RecoveryMode;
   /** Its effect was found (recovery `find`): the answer is the original's. */
   reconciled?: boolean;
+  /** What it changed, as its native connector said: kept with its answer. */
+  change?: CallChange;
 }
 
 /** What a held call answers: nothing done yet. */
@@ -220,7 +253,8 @@ const toolFor = async (
  * tool comes from its manifest, and its server (an isolate, with the
  * connection's token for its egress) is only opened once the call passed
  * every check. A Composio server is asked for its tools, and only for one
- * its admin allowed, which is what the admin's rule says it is.
+ * its admin allowed and Grasp classed, which is what its class and the
+ * admin's rule say it is.
  */
 const actionFor = async (
   env: Env,
@@ -235,6 +269,10 @@ const actionFor = async (
   open: () => Promise<McpServer>;
   openLookup: () => Promise<McpServer>;
 }> => {
+  // Never, whatever is allowed: before anything else is looked up.
+  if (isNeverTool(action)) {
+    throw connectErrors.create("connect.never");
+  }
   if (connection.serverKind === "native") {
     const native = nativeAction(connection, action);
     return {
@@ -252,8 +290,8 @@ const actionFor = async (
         ),
     };
   }
-  // Only a tool the admin allowed, asked for before anything goes out,
-  // and taken to be what the admin said it is.
+  // Only a tool the admin allowed and Grasp classed, asked for before
+  // anything goes out, and taken to be what its class and the admin say.
   const rule = allowedTool(connection, action);
   if (rule === undefined) {
     throw connectErrors.create("connect.action_not_found");
@@ -561,8 +599,27 @@ const readOnce = async (
   return { ...answerOf(read), replayed: false };
 };
 
+/**
+ * What a write that went through changed, as its native connector says;
+ * one it reports in a way that can't be kept leaves the call of unknown
+ * outcome, as an answer that can't be read does: never kept without it.
+ */
+const changeAfterWrite = async (
+  connection: Connection,
+  done: McpToolResult,
+  store: Store
+): Promise<CallChange | undefined> => {
+  try {
+    return changeOf(connection, done);
+  } catch {
+    await store.spend();
+    throw connectErrors.create("connect.outcome_unknown");
+  }
+};
+
 /** A side effect about to go out under its claimed key. */
 interface Sent {
+  env: Env;
   /** The call's capability ID, for what is logged of it. */
   callId: string;
   connection: Connection;
@@ -582,7 +639,7 @@ interface Sent {
  * outcome is unknown; freed only when the call certainly did nothing.
  */
 const sendClaimed = async (
-  { callId, connection, tool, input, meta, store }: Sent,
+  { env, callId, connection, tool, input, meta, store }: Sent,
   server: McpServer,
   recovering = false
 ): Promise<Omit<CallDone, "sideEffect">> => {
@@ -628,12 +685,26 @@ const sendClaimed = async (
     await (recovering ? store.spend() : store.release());
     throw notPerformed(done);
   }
+  // ...or the provider refused it access, and the connection's grant lacks
+  // a right its connector asks for now: it is marked for its person to
+  // reconnect, in place, and the call answered as on any connection that
+  // needs it. A native connector's refusal comes before it acts (policy.ts
+  // `uncertainFailure`), so the key is freed, as for a call that did
+  // nothing: the same call goes through once they have reconnected.
+  if (
+    isAccessDenied(connection, done) &&
+    (await markIfGrantLacks(env, connection.id))
+  ) {
+    await (recovering ? store.spend() : store.release());
+    throw connectErrors.create("connect.connection_inactive");
+  }
   const answer = answerOf(done);
   return {
     ...answer,
     replayed: false,
     commit: store.completion(answer),
     spend: store.spend,
+    change: await changeAfterWrite(connection, done, store),
   };
 };
 
@@ -651,7 +722,7 @@ const findEffect = async (
   meta: Record<string, Json>,
   server: McpServer,
   store: Store
-): Promise<StoredAnswer | undefined> => {
+): Promise<(StoredAnswer & { change?: CallChange }) | undefined> => {
   let found: McpToolResult;
   try {
     found = withProvenance(
@@ -664,7 +735,10 @@ const findEffect = async (
     throw connectErrors.create("connect.outcome_unknown");
   }
   if (!found.isError) {
-    return answerOf(found);
+    return {
+      ...answerOf(found),
+      change: await changeAfterWrite(connection, found, store),
+    };
   }
   // Only "certainly not there", never "the lookup did nothing" (a
   // throttled GET), lets the call go out again.
@@ -728,19 +802,22 @@ const recover = async (
 
 /**
  * The `_meta` a side effect is sent with: for a native connector, its
- * effect key and a workflow run's mail stamp (`stamp`); nothing for any
- * other server, whose tools are code we don't review, and where nothing
- * is recovered.
+ * effect key, a workflow run's mail stamp (`stamp`), and whether it is
+ * the held action its person just confirmed (`confirmed`); nothing for
+ * any other server, whose tools are code we don't review, and where
+ * nothing is recovered.
  */
 const nativeMetaOf = async (
   connection: Connection,
   scope: Parameters<typeof effectKeyOf>[0],
-  stamp: string | null
+  stamp: string | null,
+  confirmed: boolean
 ): Promise<Record<string, Json> | undefined> =>
   connection.serverKind === "native"
     ? {
         [effectKeyMetaKey]: await effectKeyOf(scope),
         ...(stamp === null ? {} : { [stampMetaKey]: stamp }),
+        ...(confirmed ? { [confirmedMetaKey]: true } : {}),
       }
     : undefined;
 
@@ -805,6 +882,7 @@ export const carryOut = async (
   progress.sideEffect = sideEffect;
   requireAllowedEffect(claims, sideEffect);
   checkResourceScope(resource, tool, input);
+  requirePointedMailbox(claims, connection, call.action, tool, input);
   if (recovering !== undefined) {
     // Recovered only as the call itself would run now: every check above
     // has passed again (the capability core signed for this caller now,
@@ -844,8 +922,14 @@ export const carryOut = async (
   if (store === undefined || scope === undefined) {
     throw connectErrors.create("connect.idempotency_key_required");
   }
-  const meta = await nativeMetaOf(connection, scope, call.stamp ?? null);
+  const meta = await nativeMetaOf(
+    connection,
+    scope,
+    call.stamp ?? null,
+    held !== undefined
+  );
   const sent: Sent = {
+    env,
     callId: claims.jti,
     connection,
     tool,

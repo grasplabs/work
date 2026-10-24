@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { builtinModules } from "node:module";
 
 import {
   cloudflareTest,
@@ -17,6 +18,7 @@ import {
   directoryClient,
   documentsClient,
   landscapeClient,
+  teamsBot,
 } from "./test/connect-providers.ts";
 import { testSignIn } from "./test/sign-in-config.ts";
 import { withNoBackgroundCompile } from "./workerd-v8-flags.ts";
@@ -154,6 +156,26 @@ export const coreProject = (
       // Tests here build Apps and run workflows in workerd, which takes far
       // longer than Vitest's 5 s default, most of all on a loaded CI runner.
       testTimeout: 60_000,
+      // Microsoft's Teams SDK, under the Teams adapter, is CommonJS that
+      // requires dual packages (msal-node, lru-cache) the tests' module
+      // fallback can't load: bundled first, as Wrangler bundles it for the
+      // Worker, so each require resolves. Node's built-ins stay imports,
+      // which workerd's nodejs_compat serves.
+      deps: {
+        optimizer: {
+          ssr: {
+            enabled: true,
+            include: ["@chat-adapter/teams"],
+            exclude: ["@opentelemetry/api"],
+            rolldownOptions: {
+              external: [
+                ...builtinModules,
+                ...builtinModules.map((name) => `node:${name}`),
+              ],
+            },
+          },
+        },
+      },
       ...test,
       // Setup files one after another, as listed (Vitest's default runs
       // them at once): the check of the runtime reports before
@@ -184,6 +206,9 @@ export const coreProject = (
             // env: the shortest archive retention the admin may set.
             AUDIT_ARCHIVE_RETENTION_DAYS: "365",
             ...testSignIn,
+            // The client's Teams bot, so its door is open
+            // (src/channels/door.ts).
+            TEAMS_BOT_ID: teamsBot.id,
             // Few enough statistics points to reach each bound in a test.
             STATISTICS_POINT_LIMITS: "10/25",
             STATISTICS_READ_LIMITS: "20/60",
@@ -285,6 +310,11 @@ export const coreProject = (
                 MICROSOFT_DOCUMENTS_CLIENT_ID: documentsClient.id,
                 MICROSOFT_DOCUMENTS_CLIENT_SECRET: documentsClient.secret,
                 COMPOSIO_API_KEY: testComposioKey,
+                // The client's Teams bot, which Entra and the Bot Connector
+                // in test/connect-providers.ts know.
+                TEAMS_BOT_ID: teamsBot.id,
+                TEAMS_BOT_TENANT_ID: teamsBot.tenant,
+                TEAMS_BOT_SECRET: teamsBot.secret,
               },
               d1Databases: { DB: "grasp-os-connect" },
               // Its clock (connect's src/clock.ts).

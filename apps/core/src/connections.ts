@@ -24,6 +24,8 @@ import type {
   ListedConnection,
   OAuthProvider,
   OfferedCatalog,
+  SharedMailboxSetting,
+  ToolClassSetting,
 } from "@grasp-os/shared/connect";
 import type { SignInConfig } from "@grasp-os/shared/deployment-config";
 import { authErrors, requestErrors } from "@grasp-os/shared/errors";
@@ -49,6 +51,13 @@ import { errorResponse } from "./errors.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
+import { pointSharedMailbox, readSharedMailboxes } from "./shared-mailboxes.ts";
+import {
+  anyMailboxPointed,
+  classesOn,
+  readToolClasses,
+  setToolClass,
+} from "./tool-classes.ts";
 
 // Connecting accounts, as core's part in it: the signed-in person's API
 // over `/rpc`, and the callback the provider sends the browser back to.
@@ -379,6 +388,8 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
       origin: config.origin,
       tenant,
       returnTo: `${back.pathname}${back.search}`,
+      classes: await classesOn(this.#env),
+      sharedMailbox: await anyMailboxPointed(this.#env),
     });
   }
 
@@ -529,6 +540,32 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
               .onConflictDoNothing(),
             event,
           ]));
+    });
+  }
+
+  async toolClasses(): Promise<ToolClassSetting[]> {
+    return await withPerson(this.#check, async (identity) => {
+      requireAdmin(identity);
+      return await readToolClasses(this.#env);
+    });
+  }
+
+  async setToolClass(toolClass: unknown, audience: unknown): Promise<void> {
+    await withPerson(this.#check, async (identity) => {
+      await setToolClass(this.#env, identity, toolClass, audience);
+    });
+  }
+
+  async sharedMailboxes(): Promise<SharedMailboxSetting[]> {
+    return await withPerson(this.#check, async (identity) => {
+      requireAdmin(identity);
+      return await readSharedMailboxes(this.#env);
+    });
+  }
+
+  async pointSharedMailbox(mailbox: unknown, audience: unknown): Promise<void> {
+    await withPerson(this.#check, async (identity) => {
+      await pointSharedMailbox(this.#env, identity, mailbox, audience);
     });
   }
 

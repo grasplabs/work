@@ -41,6 +41,8 @@ export const staffActions = [
   "client.rotate_secrets",
   "client.apply_settings",
   "client.sign_in",
+  "client.sealed_secret",
+  "client.teams_bot",
 ] as const;
 export type StaffAction = (typeof staffActions)[number];
 

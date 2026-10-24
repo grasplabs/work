@@ -18,7 +18,7 @@ import {
   unique,
 } from "./sign-in.ts";
 
-// The Playbook's records (`brain.addRecords`, core's brain-records.ts), as
+// The brain's records (`brain.addRecords`, core's brain-records.ts), as
 // an admin adds them and every member reads them in `brain.read`. What
 // can go wrong, tried here (the threat note is on GRA-527): someone who
 // isn't an admin writing the brain; a record written over, or a retry
@@ -105,7 +105,7 @@ const interview = (tag: string) => {
   return { ids, records };
 };
 
-describe("the Playbook's records", { timeout: 120_000 }, () => {
+describe("the brain's records", { timeout: 120_000 }, () => {
   it("are added by an admin, read by every member in the brain, and audited", async () => {
     const admin = await signedInApi(idp, "admin");
     await admin.api.onboarding.saveRoster(roster);
