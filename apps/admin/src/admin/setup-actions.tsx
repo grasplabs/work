@@ -52,6 +52,7 @@ import type { ClientSetup } from "../clients/setup.ts";
 import { SignInFields, signInOf, textOf } from "../clients/sign-in-fields.tsx";
 import { useSettingsAction } from "../clients/use-action.ts";
 import type { ClientSignInRecord } from "../deploy/core-config.ts";
+import type { SealedSecretName } from "../deploy/sealed-secrets.ts";
 import {
   confirmClientWorkersPaid,
   retryClient,
@@ -606,20 +607,29 @@ export const ApplySettings = ({
 };
 
 /**
- * Setting its Teams bot's secret, or replacing it: sent once to the admin,
- * which seals it (src/clients/settings.ts) and never sends it back, so the
- * field always starts empty and is emptied again once it's sent.
+ * Setting one of its sealed secrets, or replacing it: sent once to the
+ * admin, which seals it (src/clients/settings.ts) and never sends it
+ * back, so the field always starts empty and is emptied again once it's
+ * sent.
  */
-export const TeamsBotSecretChange = ({
+export const SealedSecretChange = ({
   clientId,
+  name,
+  label,
+  description,
   set,
   refresh,
 }: {
   clientId: string;
+  name: SealedSecretName;
+  /** What the field asks for, such as "Client secret". */
+  label: string;
+  description: string;
   set: boolean;
   refresh: Refresh;
 }) => {
   const { busy, failure, run } = useSettingsAction();
+  const id = `setup-${name.toLowerCase().replaceAll("_", "-")}`;
   return (
     <form
       className="flex flex-col gap-3 border-t px-5 py-4"
@@ -633,7 +643,7 @@ export const TeamsBotSecretChange = ({
             await thenRefresh(
               async () =>
                 await setSealedSecretFn({
-                  data: { clientId, name: "TEAMS_BOT_SECRET", value },
+                  data: { clientId, name, value },
                 }),
               refresh
             )
@@ -641,27 +651,25 @@ export const TeamsBotSecretChange = ({
       }}
     >
       <Field>
-        <FieldLabel htmlFor="setup-teams-bot-secret">
-          {set ? "New client secret" : "Client secret"}
+        <FieldLabel htmlFor={id}>
+          {set ? `New ${label.toLowerCase()}` : label}
         </FieldLabel>
         <Input
           autoComplete="off"
           className="max-w-md"
-          id="setup-teams-bot-secret"
+          id={id}
           name="value"
           required
           spellCheck={false}
           type="password"
         />
-        <FieldDescription>
-          The bot app&apos;s client secret, from its registration in the
-          company&apos;s own Entra. It is sealed and never shown again, here or
-          anywhere; its connect gets it with the next deploy.
-        </FieldDescription>
+        <FieldDescription>{description}</FieldDescription>
       </Field>
       <div className="flex flex-wrap items-center gap-3">
         <Button disabled={busy} size="sm" type="submit" variant="outline">
-          {set ? "Replace secret" : "Set secret"}
+          {set
+            ? `Replace ${label.toLowerCase()}`
+            : `Set ${label.toLowerCase()}`}
         </Button>
         <Failure failure={failure} />
       </div>

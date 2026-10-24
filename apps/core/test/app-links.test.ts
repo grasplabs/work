@@ -452,10 +452,18 @@ describe("an App's external links", { timeout: 120_000 }, () => {
     const { screen } = await openedApp();
     const body = { url: "https://help.example.com/" };
     const statuses: number[] = [];
-    for (let attempt = 0; attempt < 30; attempt += 1) {
-      // oxlint-disable-next-line no-await-in-loop -- one after another, as a loop in a screen sends them
-      const { status } = await screen.raw("help", "check", body);
-      statuses.push(status);
+    // The clock stands still, so no request comes back to the burst while
+    // the test sends: on a slow runner, 30 requests take long enough for
+    // one to.
+    vi.useFakeTimers({ toFake: ["Date"], now: Date.now() });
+    try {
+      for (let attempt = 0; attempt < 30; attempt += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- one after another, as a loop in a screen sends them
+        const { status } = await screen.raw("help", "check", body);
+        statuses.push(status);
+      }
+    } finally {
+      vi.useRealTimers();
     }
 
     expect({
