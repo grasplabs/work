@@ -58,6 +58,9 @@ import {
   eq,
   getTableColumns,
   inArray,
+  isNull,
+  lt,
+  or,
   sql,
 } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
@@ -499,6 +502,7 @@ const newRequest = (
   endedAt: null,
   endedGeneration: null,
   endedReason: null,
+  malwareCheckedAt: null,
 });
 
 /**
@@ -796,8 +800,11 @@ export const refuseMalware = async (
   by: Acting,
   subject: DependencySubject,
   found: readonly [MalwareFound, ...MalwareFound[]],
-  /** Where it was refused, when not at a resolve: an approval's request. */
-  at?: { request: string; at: "approval" }
+  /**
+   * Where it was refused, when not at a resolve: an approval's request,
+   * or a build of the approved graph (`refuseMalwareBefore`).
+   */
+  at?: { request: string; at: "approval" } | { graphHash: string; at: "build" }
 ): Promise<never> => {
   const db = drizzle(env.DB);
   const actor = by.actor ?? actorOf(by);
@@ -824,6 +831,29 @@ export const refuseMalware = async (
       (malware) => `${packageKey(malware.package)} (${malware.advisory})`
     ),
   });
+};
+
+/**
+ * Refuses a build of `subject`'s approved graph `graphHash` that would
+ * make a new artifact of packages reported as malware since the graph was
+ * approved (GRA-924), by either source (`knownMalwareIn`), as a resolve
+ * is refused (`refuseMalware`, at `build`). Fails closed when either
+ * can't be read (`package.malware_unchecked`), building nothing.
+ */
+export const refuseMalwareBefore = async (
+  env: Env,
+  by: Acting,
+  subject: DependencySubject,
+  graphHash: string,
+  packages: readonly DependencyPackageRef[]
+): Promise<void> => {
+  const [first, ...rest] = await knownMalwareIn(env, packages);
+  if (first !== undefined) {
+    await refuseMalware(env, by, subject, [first, ...rest], {
+      graphHash,
+      at: "build",
+    });
+  }
 };
 
 /** How an App's or a workflow's dependencies stand, for its builders. */
@@ -1665,24 +1695,35 @@ export const dependencyImpact = async (
 };
 
 /**
- * The statements, for a batch that revokes `named`'s graph and stores
- * event `revocation`, that deny the request waiting for that same subject
- * and graph, if one does, as `by`'s decision under `generation`: its audit
- * event first (`dependency.denied`, naming the revocation), written from
- * the very row the update then changes, and both only if the revocation
- * landed.
+ * Who denies the request a revocation denies with it: the person who
+ * revoked, or core itself for a revocation of reported malware
+ * (`recheckMalware`), which no person decided.
+ */
+interface Denier {
+  actor: AuditActor;
+  /** The person, if one decided; `null` for core's own revocation. */
+  userId: string | null;
+}
+
+/**
+ * The statements, for a batch that revokes `subject`'s graph `graphHash`
+ * and stores event `revocation`, that deny the request waiting for that
+ * same subject and graph, if one does, as `by`'s decision under
+ * `generation`: its audit event first (`dependency.denied`, naming the
+ * revocation), written from the very row the update then changes, and
+ * both only if the revocation landed.
  */
 const denyWaiting = (
   db: DrizzleD1Database,
-  by: Identity,
-  named: Listed,
+  by: Denier,
+  { subject, graphHash }: { subject: DependencySubject; graphHash: string },
   revocation: string,
   generation: number,
   reason: string
 ) => {
   const waits = and(
-    ofSubject(dependencyRequests, subjectOfRow(named)),
-    eq(dependencyRequests.graphHash, named.graphHash),
+    ofSubject(dependencyRequests, subject),
+    eq(dependencyRequests.graphHash, graphHash),
     eq(dependencyRequests.status, "pending"),
     storedEvent(revocation)
   );
@@ -1692,7 +1733,7 @@ const denyWaiting = (
     'id', ${eventId},
     'at', ${now.toISOString()},
     'source', 'core',
-    'actor', json(${JSON.stringify(actorOf(by))}),
+    'actor', json(${JSON.stringify(by.actor)}),
     'action', 'dependency.denied',
     'target', json_object('type', 'dependency_request', 'id', ${dependencyRequests.id}),
     'provenance', json('[]'),
@@ -1827,7 +1868,14 @@ export const endDependency = async (
     // A request waiting for the revoked graph is denied with it: approving
     // it later would bring back the lock, and what it pinned, unbuilt.
     ...(ending === "revoked"
-      ? denyWaiting(db, by, named, event.id, generation, reason)
+      ? denyWaiting(
+          db,
+          { actor: actorOf(by), userId: by.userId },
+          { subject, graphHash: named.graphHash },
+          event.id,
+          generation,
+          reason
+        )
       : []),
     // A revoked graph's lock goes, now that nothing waiting names it; a
     // retired one is in use (packages/locks.ts).
@@ -1848,4 +1896,268 @@ export const endDependency = async (
     ended.toSorted((a, b) => a.id.localeCompare(b.id)),
     "if they can be read"
   );
+};
+
+// Malware reported after an approval (GRA-924, threat T5). A graph is
+// checked for known malware as it is resolved and again as it is approved
+// (GRA-913), but a version reported later was still admitted: built
+// while nothing was pinned yet, and served or run from what was built.
+// What could go wrong, and what stops it:
+//
+// - A build of a version reported since the approval: an unpinned build
+//   asks again first (`refuseMalwareBefore`, packages/build.ts), and is
+//   refused as a resolve is (`dependency.malware`, audited as
+//   `dependency.malware_refused`), failing closed when either source
+//   can't be read (`package.malware_unchecked`).
+// - An artifact built before the report, served or run on: every graph in
+//   force (approved or retired) is checked again on core's clock, each at
+//   most every `malwareRecheckMs`, a bounded number a run
+//   (`recheckMalware`). One a report covers is revoked for its subject, as
+//   a person's revocation does (`endDependency`): the same batch, so its
+//   lock goes, the request waiting for it is denied, and the policy
+//   generation moves on, after which nothing of it is admitted, built,
+//   served or started, and a run in flight fails at its next call
+//   (workflows/sealed-packages.ts). Revoked by core, not a person: audited
+//   with a system actor and the advisory, and no `ended.by`.
+// - Sources out of reach taken as clean: a check that can't read either
+//   source revokes nothing, marks nothing checked, and is logged; the run
+//   stops there, and the next one asks again. A revocation that lost a
+//   race (a person ended or decided it meanwhile) marks nothing either.
+// - A source that answers wrongly revokes what it names: only versions of
+//   the graph count (`osvMalwareIn`), and the revocation names its
+//   advisory, so an admin can see why and approve a new graph.
+
+/** How long an approval in force goes between two checks for malware. */
+export const malwareRecheckMs = 6 * 60 * 60 * 1000;
+
+/** Most graphs one run of the re-check asks about, one after another. */
+export const malwareRecheckGraphs = 20;
+
+/** Core itself, as the actor of a revocation no person decided. */
+const coreActor: AuditActor = { type: "system" };
+
+/**
+ * Revokes every approval in force (approved or retired) of `subject`'s
+ * graph `graphHash` because packages in it are reported as malware
+ * (`found`), as core: one batch that lands only while those approvals are
+ * still the ones in force and the policy generation is the one read,
+ * recording `dependency.revoked` with the first advisory and how many
+ * were found, then each finding as `dependency.malware_refused` (at
+ * `recheck`), moving the generation on, denying the request waiting for
+ * the graph and dropping its lock, as `endDependency` does. `false` when
+ * it lost a race, or nothing was in force: the next run looks again.
+ */
+const revokeReportedMalware = async (
+  env: Env,
+  subject: DependencySubject,
+  graphHash: string,
+  found: readonly [MalwareFound, ...MalwareFound[]]
+): Promise<boolean> => {
+  const db = drizzle(env.DB);
+  const [inForceNow, generationNow] = await Promise.all([
+    endableIds(db, subject, graphHash, "revoked"),
+    policyGeneration(db),
+  ]);
+  const ids = inForceNow.map(({ id }) => id);
+  const [named] = ids;
+  if (named === undefined) {
+    return false;
+  }
+  const [first] = found;
+  const generation = generationNow + 1;
+  const reason = `Reported as malware: ${packageKey(first.package)} (${first.advisory})`;
+  const event = createAuditEvent(
+    {
+      actor: coreActor,
+      action: "dependency.revoked",
+      target: { type: "dependency_request", id: named },
+      detail: {
+        [subject.type]: subject.id,
+        graphHash,
+        approvals: ids.length,
+        approvalsDigest: await dependencyApprovalsDigest(ids),
+        reason: "malware",
+        package: first.package.name,
+        version: first.package.version,
+        advisory: first.advisory,
+        found: found.length,
+        policyGeneration: generation,
+      },
+    },
+    "core"
+  );
+  const inForce = endable(subject, graphHash, "revoked");
+  const readIds = sql`(SELECT value FROM json_each(${JSON.stringify(ids)}))`;
+  const lands = sql`(SELECT COUNT(*) FROM ${dependencyRequests} WHERE ${inForce}) = ${ids.length} AND (SELECT COUNT(*) FROM ${dependencyRequests} WHERE ${inForce} AND ${dependencyRequests.id} IN ${readIds}) = ${ids.length} AND ${policyGenerationSql} = ${generationNow}`;
+  const findings = found.slice(0, malwareAuditedMax).map((malware) =>
+    outboxedEventWhere(
+      db,
+      createAuditEvent(
+        {
+          actor: coreActor,
+          action: "dependency.malware_refused",
+          target: auditTargetOf(subject),
+          detail: {
+            [subject.type]: subject.id,
+            package: malware.package.name,
+            version: malware.package.version,
+            advisory: malware.advisory,
+            found: found.length,
+            at: "recheck",
+            revocation: event.id,
+          },
+        },
+        "core"
+      ),
+      storedEvent(event.id)
+    )
+  );
+  const [, ended] = await auditedBatch(env, db, [
+    outboxedEventWhere(db, event, lands),
+    db
+      .update(dependencyRequests)
+      .set({
+        status: "revoked",
+        endedBy: null,
+        endedAt: new Date(),
+        endedGeneration: generation,
+        endedReason: reason,
+      })
+      .where(
+        and(sql`${dependencyRequests.id} IN ${readIds}`, storedEvent(event.id))
+      )
+      .returning({ id: dependencyRequests.id }),
+    advancePolicy(db, storedEvent(event.id)),
+    ...findings,
+    ...denyWaiting(
+      db,
+      { actor: coreActor, userId: null },
+      { subject, graphHash },
+      event.id,
+      generation,
+      reason
+    ),
+    ...unusedLockStatements(db, subject),
+  ]);
+  return ended.length === ids.length;
+};
+
+/** One graph in force the re-check is due to read. */
+interface DueGraph {
+  subjectType: Row["subjectType"];
+  subjectId: string;
+  graphHash: string;
+}
+
+/**
+ * Checks one graph in force for malware reported since, by both sources
+ * (`knownMalwareIn`): clean, its approvals are marked checked at `at`;
+ * reported, they are revoked (`revokeReportedMalware`). `false` when the
+ * sources couldn't be read: nothing is marked or revoked, and it is
+ * logged.
+ */
+const recheckGraph = async (
+  env: Env,
+  db: DrizzleD1Database,
+  due: DueGraph,
+  at: Date
+): Promise<boolean> => {
+  const subject = subjectOfRow(due);
+  const inForce = and(
+    ofSubject(dependencyRequests, subject),
+    eq(dependencyRequests.graphHash, due.graphHash),
+    inArray(dependencyRequests.status, ["approved", "retired"])
+  );
+  const row = await db
+    .select({ snapshot: dependencyRequests.snapshot })
+    .from(dependencyRequests)
+    .where(inForce)
+    .limit(1)
+    .get();
+  if (row === undefined) {
+    // Ended since it was listed: nothing to check.
+    return true;
+  }
+  const { graph } = snapshotSchema.parse(JSON.parse(row.snapshot));
+  let found: MalwareFound[];
+  try {
+    found = await knownMalwareIn(
+      env,
+      graph.packages.map(({ name, version }) => ({ name, version }))
+    );
+  } catch (error) {
+    log.warn("dependencies.malware_unchecked", {
+      [subject.type]: subject.id,
+      graphHash: due.graphHash,
+      errorCode: packageErrors.codeOf(error) ?? "internal.unexpected",
+      ...errorFields(error),
+    });
+    return false;
+  }
+  const [first, ...rest] = found;
+  if (first === undefined) {
+    await db
+      .update(dependencyRequests)
+      .set({ malwareCheckedAt: at })
+      .where(inForce);
+    return true;
+  }
+  const revoked = await revokeReportedMalware(env, subject, due.graphHash, [
+    first,
+    ...rest,
+  ]);
+  if (!revoked) {
+    log.warn("dependencies.malware_revocation_raced", {
+      [subject.type]: subject.id,
+      graphHash: due.graphHash,
+    });
+  }
+  return true;
+};
+
+/**
+ * Checks the approvals in force (approved or retired) for malware reported
+ * since they were last found clean, on core's clock (clock.ts): each graph
+ * at most every {@link malwareRecheckMs}, the longest unchecked first, at
+ * most {@link malwareRecheckGraphs} a run, one at a time. A graph a report
+ * covers is revoked; one whose sources can't be read ends the run, to be
+ * asked again by the next.
+ */
+export const recheckMalware = async (
+  env: Env,
+  at: Date = new Date()
+): Promise<void> => {
+  const db = drizzle(env.DB);
+  const due = await db
+    .select({
+      subjectType: dependencyRequests.subjectType,
+      subjectId: dependencyRequests.subjectId,
+      graphHash: dependencyRequests.graphHash,
+    })
+    .from(dependencyRequests)
+    .where(
+      and(
+        inArray(dependencyRequests.status, ["approved", "retired"]),
+        or(
+          isNull(dependencyRequests.malwareCheckedAt),
+          lt(
+            dependencyRequests.malwareCheckedAt,
+            new Date(at.getTime() - malwareRecheckMs)
+          )
+        )
+      )
+    )
+    .groupBy(
+      dependencyRequests.subjectType,
+      dependencyRequests.subjectId,
+      dependencyRequests.graphHash
+    )
+    .orderBy(sql`MIN(coalesce(${dependencyRequests.malwareCheckedAt}, 0))`)
+    .limit(malwareRecheckGraphs);
+  for (const graph of due) {
+    // oxlint-disable-next-line no-await-in-loop -- one graph at a time, bounded
+    if (!(await recheckGraph(env, db, graph, at))) {
+      return;
+    }
+  }
 };

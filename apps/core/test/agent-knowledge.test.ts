@@ -155,6 +155,8 @@ describe("a chat's Knowledge", setUpTime, () => {
       provenance: { sources: [collectionId], restricted: false },
       // It links to no note: it cites none.
       cited: [],
+      check: null,
+      channelText: null,
     });
     // The model read the API's declaration before it wrote the code.
     const declared = JSON.stringify(gateway.requests[0]?.body);
@@ -511,6 +513,8 @@ describe("a chat's Knowledge", setUpTime, () => {
         // It read nothing it must name, and nothing restricted.
         provenance: { sources: [], restricted: false },
         cited: [],
+        check: null,
+        channelText: null,
       },
       result: `Returned:\n${JSON.stringify([["overdue_review", granted]])}`,
       calls: [{ method: "knowledge.signals", signals: 1, outcome: "ok" }],
@@ -758,6 +762,8 @@ describe("a chat's Knowledge", setUpTime, () => {
         answer,
         provenance: { sources: [collectionId], restricted: false },
         cited: [],
+        check: null,
+        channelText: null,
       });
     } finally {
       await env.KNOWLEDGE.prepare(
