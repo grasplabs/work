@@ -169,6 +169,8 @@ interface Line {
    * line open).
    */
   kept: number[];
+  /** Bytes each stretch sent after its largest frame, in order: what was heard as they talked. */
+  after: number[];
 }
 
 /** A text frame's JSON, or nothing. */
@@ -189,7 +191,7 @@ const jsonOf = (message: string | Buffer): unknown => {
  * the stretch's words a moment after the page commits it.
  */
 const liveLine = async (page: Page): Promise<Line> => {
-  const line: Line = { refused: [], starts: 0, kept: [] };
+  const line: Line = { refused: [], starts: 0, kept: [], after: [] };
   await page.routeWebSocket(
     "**/api/transcription",
     (socket: WebSocketRoute) => {
@@ -234,6 +236,7 @@ const liveLine = async (page: Page): Promise<Line> => {
           return;
         }
         line.kept.push(largest);
+        line.after.push(heard - largest);
         heard = 0;
         largest = 0;
         setTimeout(() => {
@@ -329,12 +332,18 @@ test("their words show while they talk, and all of them a moment after they stop
     // A stretch goes out with the second before its voice was known, so
     // its start is in it: the quiet before the voice, all of that second.
     kept: (line.kept[0] ?? 0) >= secondBytes * 0.9,
+    // And the voice as it goes on: all of it once known, a few tenths of a
+    // second in (`voicedLeastMs` in ear.ts, and the moments before it), and
+    // the pause that ends it. A line that stopped sending after the kept
+    // second would carry only the 0.4 s it pads a short stretch to.
+    after: (line.after[0] ?? 0) >= (speaksFor - 0.4) * secondBytes,
     answer: answer?.lines.at(-1),
     inTime: shown - commit <= 500,
   }).toStrictEqual({
     refused: [],
     started: true,
     kept: true,
+    after: true,
     answer: { from: "person", text: said },
     inTime: true,
   });

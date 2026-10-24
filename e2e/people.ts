@@ -55,12 +55,28 @@ const droppedByDevServer = /Network[ +]connection[ +]lost/u;
 /** How many times a sign-in the dev server dropped is tried in all. */
 const signInAttempts = 3;
 
+/**
+ * `response`, unless the dev server dropped the request it answers: then
+ * it throws, saying so (`droppedByDevServer`), wherever the drop shows,
+ * in its body or in the redirect core makes of it.
+ */
+const unlessDropped = async (
+  response: Response,
+  step: string
+): Promise<Response> => {
+  const said = `${response.headers.get("location") ?? ""} ${await response.clone().text()}`;
+  if (droppedByDevServer.test(said)) {
+    throw new Error(`${step} was dropped by the dev server: ${said.trim()}`);
+  }
+  return response;
+};
+
 /** One attempt at `signInAs`. */
 const signInOnce = async (
   email: string,
   providerId: "microsoft" | "grasp-staff"
 ): Promise<string> => {
-  const started = await fetch(new URL("/api/auth/sign-in/sso", origin), {
+  const startedAt = await fetch(new URL("/api/auth/sign-in/sso", origin), {
     method: "POST",
     headers: { origin, "content-type": "application/json" },
     body: JSON.stringify({
@@ -70,11 +86,8 @@ const signInOnce = async (
       loginHint: email,
     }),
   });
-  const text = await started.text();
-  if (droppedByDevServer.test(text)) {
-    throw new Error(`Sign-in as ${email} did not start: ${text}`);
-  }
-  const body: unknown = started.ok ? JSON.parse(text) : null;
+  const started = await unlessDropped(startedAt, `Sign-in as ${email}`);
+  const body: unknown = started.ok ? await started.json() : null;
   if (
     !started.ok ||
     typeof body !== "object" ||
@@ -84,11 +97,17 @@ const signInOnce = async (
   ) {
     throw new Error(`Sign-in as ${email} did not start (${started.status})`);
   }
-  const atIdp = await fetch(body.url, { redirect: "manual" });
-  const finished = await fetch(locationOf(atIdp, "The IdP"), {
-    redirect: "manual",
-    headers: { cookie: cookiesOf(started) },
-  });
+  const atIdp = await unlessDropped(
+    await fetch(body.url, { redirect: "manual" }),
+    "The IdP"
+  );
+  const finished = await unlessDropped(
+    await fetch(locationOf(atIdp, "The IdP"), {
+      redirect: "manual",
+      headers: { cookie: cookiesOf(started) },
+    }),
+    "Core's callback"
+  );
   const session = cookiesOf(finished)
     .split("; ")
     .find((pair) => pair.startsWith(`${sessionCookie}=`));
