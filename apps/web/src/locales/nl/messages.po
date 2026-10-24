@@ -4678,6 +4678,10 @@ msgstr "Doet niets tot de regel weer wordt aangezet."
 msgid "Does things for people here"
 msgstr "Doet hier dingen voor mensen"
 
+#: src/settings/stephen-settings.tsx
+msgid "Does things for people in {name}"
+msgstr "Doet dingen voor mensen in {name}"
+
 #: src/engines/screen-approval.tsx
 msgid "Doesn't build now"
 msgstr "Bouwt nu niet"

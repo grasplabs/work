@@ -4678,6 +4678,10 @@ msgstr "Does nothing until it is turned on again."
 msgid "Does things for people here"
 msgstr "Does things for people here"
 
+#: src/settings/stephen-settings.tsx
+msgid "Does things for people in {name}"
+msgstr "Does things for people in {name}"
+
 #: src/engines/screen-approval.tsx
 msgid "Doesn't build now"
 msgstr "Doesn't build now"

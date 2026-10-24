@@ -4678,6 +4678,10 @@ msgstr "Ne fait rien tant qu’elle n’est pas réactivée."
 msgid "Does things for people here"
 msgstr "Agit pour les personnes ici"
 
+#: src/settings/stephen-settings.tsx
+msgid "Does things for people in {name}"
+msgstr "Agit pour les personnes dans {name}"
+
 #: src/engines/screen-approval.tsx
 msgid "Doesn't build now"
 msgstr "Ne se compile pas pour l'instant"

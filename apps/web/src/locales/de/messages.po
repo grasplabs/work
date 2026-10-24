@@ -4678,6 +4678,10 @@ msgstr "Bewirkt nichts, bis sie wieder eingeschaltet wird."
 msgid "Does things for people here"
 msgstr "Erledigt hier Dinge für Personen"
 
+#: src/settings/stephen-settings.tsx
+msgid "Does things for people in {name}"
+msgstr "Erledigt Dinge für Personen in {name}"
+
 #: src/engines/screen-approval.tsx
 msgid "Doesn't build now"
 msgstr "Lässt sich gerade nicht bauen"

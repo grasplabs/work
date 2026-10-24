@@ -4678,6 +4678,10 @@ msgstr "No hace nada hasta que vuelvas a activarla."
 msgid "Does things for people here"
 msgstr "Hace cosas por las personas aquí"
 
+#: src/settings/stephen-settings.tsx
+msgid "Does things for people in {name}"
+msgstr "Hace cosas por las personas en {name}"
+
 #: src/engines/screen-approval.tsx
 msgid "Doesn't build now"
 msgstr "No se compila ahora"
