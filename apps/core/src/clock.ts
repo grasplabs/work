@@ -37,6 +37,7 @@ import { sweepStatistics } from "./statistics.ts";
 import { sweepCandidateRuns } from "./workflows/candidate-runs.ts";
 import { pumpConnectorEvents } from "./workflows/connector-events.ts";
 import { cancelArchivedRuns, repairControls } from "./workflows/controls.ts";
+import { drainEmittedEvents } from "./workflows/event-delivery.ts";
 import { deleteExpiredEmail } from "./workflows/kept-email.ts";
 import {
   repairResourceStarts,
@@ -71,7 +72,7 @@ export const clockTasks: readonly ClockTask<Env>[] = [
   // Documents whose indexing never started or ended unfinished, and failed
   // ones due another run (src/knowledge/indexing.ts).
   { name: "knowledge.indexing", period: "minute", run: sweepIndexing },
-  // Deploys apply migrations first (CI's db:migrate, and the console's
+  // Deploys apply migrations first (CI's db:migrate, and the admin's
   // deploy), so `platform_versions` exists. A version running before it
   // does records nothing, and the first run after the migration records
   // the version then running: only a version that came and went in
@@ -117,6 +118,15 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     name: "workflows.connector_events",
     period: "minute",
     run: pumpConnectorEvents,
+  },
+  // Events JSON workflows emitted, delivered to the system triggers that
+  // take them (src/workflows/event-delivery.ts).
+  {
+    name: "workflows.emitted_events",
+    period: "minute",
+    run: async (env) => {
+      await drainEmittedEvents(env);
+    },
   },
   // Connect's own clock armed, if nothing has (connect's src/clock.ts).
   {

@@ -307,6 +307,8 @@ test("the sidebar shows everyone the sections, and Settings each person the sect
         "Models",
         "AI spend",
         "Pulse",
+        // The company admin's view of the onboarding interviews.
+        "Onboarding",
         "Audit trail",
         // Every person's calls of unknown outcome, read only, for admins.
         "Unknown outcomes",
@@ -444,9 +446,7 @@ test("a runs read that never comes leaves the engine usable, and says so in its 
   const page = await pageOf(builder);
   const gate = await callGate(page, '["workflows","runs"]');
   gate.hold();
-  // An old link to the App leads to the engine.
-  await page.goto(`/apps/${app}`);
-  await expect(page).toHaveURL(new RegExp(`/domains/${app}$`, "u"));
+  await page.goto(`/domains/${app}`);
 
   await page.getByRole("tab", { name: /^Workflows/u }).click();
   await expect(

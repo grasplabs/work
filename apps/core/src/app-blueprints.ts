@@ -1,7 +1,15 @@
-import { appErrors, fromBlueprintSchema } from "@grasp-os/shared/apps";
+import { compilerVersion } from "@grasp-os/compiler";
+import {
+  acceptedUpdateSchema,
+  appErrors,
+  fromBlueprintSchema,
+} from "@grasp-os/shared/apps";
 import type {
+  AcceptedUpdate,
   AppBlueprintsApi,
+  AppVersion,
   Blueprint,
+  BlueprintUpdate,
   CreatedFromBlueprint,
   FromBlueprint,
 } from "@grasp-os/shared/apps";
@@ -9,7 +17,7 @@ import { actorOf } from "@grasp-os/shared/audit";
 import type { AuditEntry } from "@grasp-os/shared/audit";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { appIdSchema, blueprintIdSchema } from "@grasp-os/shared/ids";
-import type { BlueprintId } from "@grasp-os/shared/ids";
+import type { AppId, BlueprintId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { blueprintWorkflowSchema } from "@grasp-os/shared/permissions";
 import type { BlueprintWorkflow } from "@grasp-os/shared/permissions";
@@ -30,11 +38,17 @@ import {
   appFor,
   blueprintFiles,
   changeEntry,
+  checkPaths,
+  codeIdentity,
   deleteOtherBlueprintTrees,
+  diffFiles,
   editableApp,
   findVersion,
+  latestVersion,
+  readTree,
   storeBlueprintTree,
   storeTree,
+  supersededBy,
   toApp,
   toVersion,
   versionTree,
@@ -44,6 +58,7 @@ import type { AppRow, VersionRow } from "./apps.ts";
 import { auditedBatch, outboxed, outboxedIfChanged } from "./audit-outbox.ts";
 import type { Acting } from "./auth/identity.ts";
 import {
+  appOrigins,
   apps,
   appVersions,
   appWorkflowBindings,
@@ -53,6 +68,7 @@ import {
 import { ensureCollection } from "./knowledge/collections.ts";
 import { appMemoryPath } from "./knowledge/memory-files.ts";
 import {
+  appBindingKinds,
   bindingKindsOf,
   declarableOf,
   workflowBindingKinds,
@@ -78,8 +94,10 @@ import { workflowCallsIn } from "./workflows/code.ts";
 // organization) creates an App of their own from. The release ships
 // others, the built-ins (apps/core/blueprints/, builtins.ts), which
 // everyone who builds creates from, and which only the install changes.
-// Either way the new App is theirs, and nothing downstream knows where
-// its blueprint came from. Its first version is the blueprint's code, but
+// Either way the new App is theirs, with a fresh ID, and core records
+// where it came from (`app_origins`: the blueprint, a marked one's
+// version, the tree it was copied from), which grants nothing but what
+// the release vouches for (below). Its first version is the blueprint's code, but
 // for its AGENTS.md, and it asks for what the blueprint declares, each
 // request waiting for an admin: a built-in's `blueprint.json`, or what the
 // App asked for or was given as the version was marked, of the kinds
@@ -133,9 +151,53 @@ import { workflowCallsIn } from "./workflows/code.ts";
 //   and allowed nothing. Either way each counts toward the creator's
 //   quota, which deleted workflows do too.
 //
-// Marking, unmarking, installing and creating are audited, each in the
-// same batch as its change. Grasp staff neither mark, unmark nor create
-// from blueprints: which Apps get copied is the client's decision, and
+// A built-in's code was reviewed with the platform that ships it, so the
+// release vouches for it (`attested_code`, with the compiler and kit it
+// was reviewed with, `attested_release`): a copy's screens built from
+// exactly that code are approved by the release, not each by an admin
+// (screen-builds.ts, GRA-402). How that could go wrong, and what stops it:
+//
+// - Vouching for code someone changed. It holds only while the version's
+//   code (`codeIdentity`: every file but AGENTS.md, which agents write and
+//   nothing builds or runs) is the code the release vouches for, and the
+//   build's compiler and kit are the ones it was reviewed with: a change
+//   to any file, or a new release's kit, is a build an admin approves as
+//   any. What the release vouched for is approved as the exact build
+//   (its hash), so it stays approved only as long as that build runs.
+// - A claimed origin. `apps.blueprint` is a label any creator may give an
+//   App; only `app_origins`, written in the batch that creates the App
+//   from the blueprint, counts. A marked version vouches for nothing: its
+//   code is a builder's, so copies of it are approved by an admin, and no
+//   approval of its App's screens comes along.
+// - Overriding an admin. The release's approval never replaces a
+//   decision: a build an admin took back stays taken back, and an admin
+//   takes back one the release approved as any other. Once they took
+//   back a build of a screen, the release vouches for no build of that
+//   screen in the App again: a new version (an AGENTS.md written) builds
+//   it anew, and would otherwise be approved over their word.
+// - A release's word unseen. Each approval is audited
+//   (`app.artifact.attested`), and shows in the review as Grasp's.
+//
+// A built-in changes with the release, and an App created from it may
+// take the change: an update, offered, never applied (`blueprintUpdate`).
+// It is the blueprint's newer code merged file by file over the App's
+// latest version, from the code the App last took (kept under the App,
+// `app_origins.code`): what only the blueprint changed comes along, what
+// only the App's builders changed stays theirs, and a file both changed
+// stays theirs, listed as a conflict. Nothing is written until a builder
+// accepts exactly the update they saw (`acceptBlueprintUpdate`): then it
+// is the App's next version, theirs, made current only through a
+// verified candidate as any version (app-candidates.ts), with the same
+// checks, approvals and permissions as any. It ships no workflows and
+// asks for nothing: a copy's builders ask for what the newer code needs.
+// So a customer's edit is never overwritten, and an update grants
+// nothing it didn't before: the release vouches for its screens only if
+// the merged code is exactly the built-in's (above).
+//
+// Marking, unmarking, installing, creating and accepting an update are
+// audited, each in the same batch as its change. Grasp staff neither
+// mark, unmark, create from blueprints nor take their updates: which Apps
+// get copied, and what code they run, is the client's decision, and
 // creating asks for permissions, which staff never do for a client.
 
 type Row = typeof blueprints.$inferSelect;
@@ -496,6 +558,12 @@ export const createFromBlueprint = async (
     appId: source?.id ?? null,
     tree: blueprint.tree,
   });
+  // The blueprint's code, kept under the copy (`app_origins.code`): what an
+  // update of the blueprint is merged over. Its AGENTS.md isn't, as it
+  // isn't copied (above).
+  const taken = new Map(files);
+  taken.delete(appMemoryPath);
+  const takenCode = await versionTree(taken);
   // Replaced, not added: the copy has as many files as the blueprint.
   if (files.has(appMemoryPath)) {
     files.set(appMemoryPath, copiedMemory(blueprint.name));
@@ -511,6 +579,7 @@ export const createFromBlueprint = async (
   );
   const tree = await versionTree(files);
   await storeTree(env, app, tree);
+  await storeTree(env, app, takenCode);
   // What the blueprint ships, as the release stored it: refused whole if
   // any of it isn't, with nothing made.
   const shipped = blueprintWorkflowSchema.array().parse(blueprint.workflows);
@@ -546,6 +615,8 @@ export const createFromBlueprint = async (
     version: 1,
     parent: null,
     tree: tree.tree,
+    // The blueprint's code: the copy's AGENTS.md is its own.
+    code: takenCode.tree,
     files: files.size,
     authorId: by.userId,
     message: `Created from the blueprint ${blueprint.name}.`,
@@ -610,12 +681,23 @@ export const createFromBlueprint = async (
     );
   const statements = [
     db.insert(apps).select(appFromBlueprint),
+    // Where it came from, core's record (`app_origins`): only here, with
+    // the App, so no App has one it wasn't created with.
+    db.insert(appOrigins).values({
+      appId: app,
+      blueprintId: blueprint.id,
+      blueprintVersion: blueprint.version,
+      tree: blueprint.tree,
+      code: takenCode.tree,
+      createdAt: now,
+    }),
     outboxed(
       db,
       changeEntry(by, "app.created", app, {
         blueprint: blueprint.id,
         fromApp: blueprint.appId,
         fromVersion: blueprint.version,
+        fromTree: blueprint.tree,
       })
     ),
     db.insert(appVersions).values(versionRow),
@@ -684,6 +766,257 @@ export const createFromBlueprint = async (
   };
 };
 
+/** A merge's files (see `BlueprintUpdate`), and the paths both changed. */
+interface Merged {
+  files: Map<string, string>;
+  conflicts: string[];
+}
+
+/**
+ * `theirs` (the blueprint's code now) merged over `ours` (the App's latest
+ * files) from `base` (the blueprint's code the App last took), file by
+ * file: what only one side changed comes from that side, and a file both
+ * changed (to different content) stays as the App has it, listed as a
+ * conflict. AGENTS.md is the App's own, whatever the blueprint holds.
+ */
+const mergeOver = (
+  base: ReadonlyMap<string, string>,
+  ours: ReadonlyMap<string, string>,
+  theirs: ReadonlyMap<string, string>
+): Merged => {
+  const files = new Map<string, string>();
+  const conflicts: string[] = [];
+  const paths = new Set([...base.keys(), ...ours.keys(), ...theirs.keys()]);
+  for (const path of [...paths].toSorted()) {
+    const mine = ours.get(path);
+    const was = base.get(path);
+    const now = theirs.get(path);
+    let kept = mine;
+    if (path !== appMemoryPath && (mine === was || mine === now)) {
+      kept = now;
+    } else if (path !== appMemoryPath && now !== was) {
+      conflicts.push(path);
+    }
+    if (kept !== undefined) {
+      files.set(path, kept);
+    }
+  }
+  return { files, conflicts };
+};
+
+/** An update of the built-in an App was created from, worked out now. */
+interface PendingUpdate {
+  app: AppId;
+  origin: typeof appOrigins.$inferSelect;
+  blueprint: Row;
+  latest: VersionRow;
+  ours: Map<string, string>;
+  /** The blueprint's code now, without its AGENTS.md: the next base. */
+  theirs: Map<string, string>;
+  merged: Merged;
+}
+
+/**
+ * The update of the built-in blueprint `app` was created from, for one of
+ * its builders: undefined when it was created from none, from a marked
+ * version (whose code never changes), or the blueprint is gone or at the
+ * code the App last took.
+ */
+const pendingUpdate = async (
+  env: Env,
+  by: Acting,
+  app: unknown
+): Promise<PendingUpdate | undefined> => {
+  const found = await appFor(env, by, app, "builder");
+  requireNotStaff(by);
+  const origin = await drizzle(env.DB)
+    .select()
+    .from(appOrigins)
+    .where(eq(appOrigins.appId, found.id))
+    .get();
+  const blueprint =
+    origin === undefined
+      ? undefined
+      : await blueprintRow(env, blueprintIdSchema.parse(origin.blueprintId));
+  const latest = await latestVersion(env, found.id);
+  if (
+    origin === undefined ||
+    blueprint === undefined ||
+    blueprint.appId !== null ||
+    blueprint.tree === origin.tree ||
+    latest === null
+  ) {
+    return undefined;
+  }
+  const latestRow = await findVersion(env, found.id, latest);
+  const [base, ours, blueprintNow] = await Promise.all([
+    readTree(env, found.id, origin.code),
+    readTree(env, found.id, latestRow.tree),
+    blueprintFiles(env, {
+      id: blueprintIdSchema.parse(blueprint.id),
+      appId: null,
+      tree: blueprint.tree,
+    }),
+  ]);
+  const theirs = new Map(blueprintNow);
+  theirs.delete(appMemoryPath);
+  return {
+    app: found.id,
+    origin,
+    blueprint,
+    latest: latestRow,
+    ours,
+    theirs,
+    merged: mergeOver(base, ours, theirs),
+  };
+};
+
+/**
+ * The newer code of the built-in blueprint `app` was created from, merged
+ * over its latest version (`BlueprintUpdate`), for one of its builders;
+ * null when there is none. Reads only: nothing changes until a builder
+ * accepts it (`acceptBlueprintUpdate`).
+ */
+export const blueprintUpdate = async (
+  env: Env,
+  by: Acting,
+  app: unknown
+): Promise<BlueprintUpdate | null> => {
+  const pending = await pendingUpdate(env, by, app);
+  if (pending === undefined) {
+    return null;
+  }
+  return {
+    blueprint: pending.blueprint.id,
+    from: pending.origin.tree,
+    to: pending.blueprint.tree,
+    over: pending.latest.version,
+    changes: diffFiles(pending.ours, pending.merged.files),
+    conflicts: pending.merged.conflicts,
+  };
+};
+
+/**
+ * Accepts the update a builder of `app` saw (`accepted`: the blueprint's
+ * code it goes to, and the version it merges over): its merged files
+ * committed as the App's next version, by them, and the App's origin
+ * moved on to the code it took, in one audited batch. Refused as
+ * `app.conflict` when what they saw no longer holds: the blueprint
+ * changed again, a version was committed meanwhile, or the update was
+ * accepted already. Nothing is made current: the version goes through a
+ * verified candidate, as any (`setCurrent`), and asks for nothing.
+ */
+export const acceptBlueprintUpdate = async (
+  env: Env,
+  by: Acting,
+  app: unknown,
+  input: unknown
+): Promise<AppVersion> => {
+  const accepted = appErrors.parse("app.invalid", acceptedUpdateSchema, input);
+  const pending = await pendingUpdate(env, by, app);
+  if (
+    pending === undefined ||
+    pending.blueprint.tree !== accepted.to ||
+    pending.latest.version !== accepted.over
+  ) {
+    throw appErrors.create("app.conflict");
+  }
+  const { app: appId, origin, blueprint, latest, ours, theirs } = pending;
+  const { files, conflicts } = pending.merged;
+  checkPaths(
+    files.keys(),
+    new Set([...files.keys()].filter((path) => !ours.has(path)))
+  );
+  const tree = await versionTree(files);
+  const base = await versionTree(theirs);
+  await storeTree(env, appId, base);
+  const changed = tree.tree !== latest.tree;
+  if (changed) {
+    await storeTree(env, appId, tree);
+  }
+  const db = drizzle(env.DB);
+  // The origin moves on only from the code the builder's update was worked
+  // out from, to the blueprint's code as they saw it, over the version they
+  // saw (it runs before this batch commits a version): otherwise NULL,
+  // which the column refuses, and the whole batch with it.
+  const stillSeen = sql`${appOrigins.tree} = ${origin.tree} AND EXISTS (
+    SELECT 1 FROM ${blueprints}
+    WHERE ${blueprints.id} = ${blueprint.id} AND ${blueprints.tree} = ${blueprint.tree})
+    AND (SELECT max(${appVersions.version}) FROM ${appVersions}
+      WHERE ${appVersions.appId} = ${appId}) = ${latest.version}`;
+  const moveOrigin = db
+    .update(appOrigins)
+    .set({
+      tree: sql`CASE WHEN ${stillSeen} THEN ${blueprint.tree} ELSE NULL END`,
+      code: sql`CASE WHEN ${stillSeen} THEN ${base.tree} ELSE NULL END`,
+      blueprintVersion: null,
+    })
+    .where(eq(appOrigins.appId, appId));
+  const updated = (version: number) =>
+    outboxed(
+      db,
+      changeEntry(by, "app.blueprint.updated", appId, {
+        blueprint: blueprint.id,
+        from: origin.tree,
+        to: blueprint.tree,
+        version,
+        conflicts: conflicts.length,
+      })
+    );
+  const row: VersionRow = {
+    appId,
+    version: latest.version + 1,
+    parent: latest.version,
+    tree: tree.tree,
+    code: await codeIdentity(files),
+    files: files.size,
+    authorId: by.userId,
+    message: `Updated from the blueprint ${blueprint.name}.`,
+    createdAt: new Date(),
+    approved: null,
+    workflows: workflowsIn(files),
+    workflowCalls: workflowCallsIn(Object.fromEntries(files)),
+    exports: exportsIn(files),
+    proposedBy: null,
+    workflowBindings: await appBindingKinds(env, appId),
+  };
+  // Nothing of the App's files changes when each of the blueprint's
+  // changes was the App's already, or conflicts: only its origin moves on.
+  const write = changed
+    ? ([
+        moveOrigin,
+        db.insert(appVersions).values(row),
+        outboxed(
+          db,
+          changeEntry(by, "app.committed", appId, {
+            version: row.version,
+            parent: row.parent,
+            tree: row.tree,
+            files: row.files,
+          })
+        ),
+        updated(row.version),
+        // A person's commit, as any: it supersedes the open candidates of
+        // the versions before it.
+        ...supersededBy(db, by, appId, row.version),
+      ] as const)
+    : ([moveOrigin, updated(latest.version)] as const);
+  try {
+    await auditedBatch(env, db, write);
+  } catch (error) {
+    const now = await pendingUpdate(env, by, appId);
+    if (
+      now === undefined ||
+      now.blueprint.tree !== accepted.to ||
+      now.latest.version !== accepted.over
+    ) {
+      throw appErrors.create("app.conflict");
+    }
+    throw error;
+  }
+  return toVersion(changed ? row : latest);
+};
+
 /** An audit entry of the release's install: Grasp, with no person. */
 const installEntry = (
   action: string,
@@ -746,7 +1079,11 @@ export const installBuiltinBlueprint = async (
     fromBlueprintSchema,
     { name: builtin.name, description: builtin.description }
   );
-  const tree = await versionTree(new Map(Object.entries(builtin.files)));
+  const files = new Map(Object.entries(builtin.files));
+  const tree = await versionTree(files);
+  // What the release vouches for (see above): this code, built with this
+  // release's compiler and kit.
+  const attestedCode = await codeIdentity(files);
   const declared = [...builtin.permissions];
   const shipped = blueprintWorkflowSchema.array().parse(builtin.workflows);
   const stored = await blueprintRow(env, id);
@@ -756,7 +1093,9 @@ export const installBuiltinBlueprint = async (
       stored.description !== description ||
       stored.tree !== tree.tree ||
       JSON.stringify(stored.permissions) !== JSON.stringify(declared) ||
-      JSON.stringify(stored.workflows) !== JSON.stringify(shipped));
+      JSON.stringify(stored.workflows) !== JSON.stringify(shipped) ||
+      stored.attestedCode !== attestedCode ||
+      stored.attestedRelease !== compilerVersion);
   if (stored === undefined || stored.tree !== tree.tree) {
     await storeBlueprintTree(env, id, tree);
   }
@@ -777,13 +1116,18 @@ export const installBuiltinBlueprint = async (
               approved: true,
               permissions: declared,
               workflows: shipped,
+              attestedCode,
+              attestedRelease: compilerVersion,
               markedBy: null,
               markedAt: now,
             })
             .onConflictDoNothing(),
           outboxedIfChanged(
             db,
-            installEntry("blueprint.installed", id, { tree: tree.tree })
+            installEntry("blueprint.installed", id, {
+              tree: tree.tree,
+              release: compilerVersion,
+            })
           ),
         ]
       : [];
@@ -797,12 +1141,14 @@ export const installBuiltinBlueprint = async (
             tree: tree.tree,
             permissions: declared,
             workflows: shipped,
+            attestedCode,
+            attestedRelease: compilerVersion,
             markedAt: now,
           })
           .where(
             and(
               eq(blueprints.id, id),
-              sql`(${blueprints.name} IS NOT ${name} OR ${blueprints.description} IS NOT ${description} OR ${blueprints.tree} IS NOT ${tree.tree} OR ${blueprints.permissions} IS NOT ${JSON.stringify(declared)} OR ${blueprints.workflows} IS NOT ${JSON.stringify(shipped)})`
+              sql`(${blueprints.name} IS NOT ${name} OR ${blueprints.description} IS NOT ${description} OR ${blueprints.tree} IS NOT ${tree.tree} OR ${blueprints.permissions} IS NOT ${JSON.stringify(declared)} OR ${blueprints.workflows} IS NOT ${JSON.stringify(shipped)} OR ${blueprints.attestedCode} IS NOT ${attestedCode} OR ${blueprints.attestedRelease} IS NOT ${compilerVersion})`
             )
           ),
         outboxedIfChanged(
@@ -811,6 +1157,7 @@ export const installBuiltinBlueprint = async (
             name,
             description,
             tree: tree.tree,
+            release: compilerVersion,
             // What copies ask for and get, by the SHA-256 of each as stored.
             permissions: await sha256Hex(JSON.stringify(declared)),
             workflows: await sha256Hex(JSON.stringify(shipped)),
@@ -892,6 +1239,23 @@ export class AppBlueprintsRpc
     return await withPerson(
       this.#check,
       async (by) => await createFromBlueprint(this.#env, by, blueprint, input)
+    );
+  }
+
+  async update(app: string): Promise<BlueprintUpdate | null> {
+    return await withPerson(
+      this.#check,
+      async (by) => await blueprintUpdate(this.#env, by, app)
+    );
+  }
+
+  async acceptUpdate(
+    app: string,
+    accepted: AcceptedUpdate
+  ): Promise<AppVersion> {
+    return await withPerson(
+      this.#check,
+      async (by) => await acceptBlueprintUpdate(this.#env, by, app, accepted)
     );
   }
 }

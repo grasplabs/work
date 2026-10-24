@@ -14,11 +14,14 @@ import type {
   AuditEntry,
 } from "@grasp-os/shared/audit";
 import {
+  chatChannelSchema,
   projectDocumentMaxBytes,
   projectDocumentsMax,
   projectsMax,
 } from "@grasp-os/shared/chat";
 import type {
+  ChatChannel,
+  ChatCitedDocument,
   ChatDraft,
   ChatMessage,
   ChatProject,
@@ -137,7 +140,7 @@ import { readableSources, withheldSourceDetail } from "./history-access.ts";
 import { readAsDelegate } from "./knowledge/binding.ts";
 import { forContext } from "./knowledge/memory.ts";
 import { hasBrainGrant } from "./knowledge/recall-store.ts";
-import { catalog, noteListedSkills } from "./knowledge/tools.ts";
+import { catalog, cited, noteListedSkills } from "./knowledge/tools.ts";
 import { gatewaySettings, models } from "./models.ts";
 import { functionProblem, PreviewReports } from "./preview-reports.ts";
 import type { Reports } from "./preview-reports.ts";
@@ -310,8 +313,16 @@ export interface AnswerProvenance {
   restricted: boolean;
 }
 
-/** A turn's result, labelled with what it may hold. */
-export type Answer = TurnResult & { provenance: AnswerProvenance };
+/**
+ * A turn's result, labelled with what it may hold, with the documents its
+ * answer cites: those its chat's code was given before it that it links
+ * to, each while the chat's agent may still read it for its person
+ * (`ChatCitedDocument`). A channel shows them as the answer's sources.
+ */
+export type Answer = TurnResult & {
+  provenance: AnswerProvenance;
+  cited: ChatCitedDocument[];
+};
 
 /**
  * A stored message, as pi shapes it. Stored by this object only, so the
@@ -734,8 +745,11 @@ export class Workspace extends DurableObject<Env> {
     });
   }
 
-  /** Stores `message` as the chat's next, and shows it to its watchers. */
-  #keep(chatId: ChatId, message: Message): void {
+  /**
+   * Stores `message` as the chat's next, and shows it to its watchers;
+   * its ID.
+   */
+  #keep(chatId: ChatId, message: Message): number {
     const { id, createdAt } = this.#db
       .insert(chatMessages)
       .values({
@@ -758,6 +772,7 @@ export class Workspace extends DurableObject<Env> {
       this.#outputs.delete(chatId);
     }
     this.#changed(chatId, shown === undefined ? [] : [shown]);
+    return id;
   }
 
   /**
@@ -774,6 +789,10 @@ export class Workspace extends DurableObject<Env> {
    *
    * Made in project `projectId`, it is in it from the start: only one of
    * `personId`'s own, refused as if there were none otherwise.
+   *
+   * Made through a chat platform (`via`, its adapter's name), it is that
+   * platform's chat for good, and its agent's audit events name it; Grasp's
+   * own app (`web`) otherwise.
    */
   createChat(
     title: string,
@@ -781,13 +800,15 @@ export class Workspace extends DurableObject<Env> {
     agentId: string,
     by?: AuditActor,
     fix?: RunToFix,
-    projectId?: string
+    projectId?: string,
+    via: ChatChannel = "web"
   ): Chat {
     const agent = workspaceAgentIdSchema.safeParse(agentId);
     if (!agent.success) {
       // No agent core names: nowhere an agent can work.
       throw permissionErrors.create("permission.context_invalid");
     }
+    const channel = chatChannelSchema.parse(via);
     const [kept] = this.#db
       .select({ count: count() })
       .from(chats)
@@ -818,6 +839,7 @@ export class Workspace extends DurableObject<Env> {
           agentId: agent.data,
           restricted: fix?.restricted === true,
           projectId: project,
+          via: channel,
         })
         .returning()
         .get();
@@ -855,7 +877,7 @@ export class Workspace extends DurableObject<Env> {
    */
   #attachRun(chat: Chat, fix: RunToFix, by: AuditActor | undefined): void {
     const { report, sources, restricted } = fix;
-    const { id, createdAt, personId, agentId } = chat;
+    const { id, createdAt, personId, agentId, via } = chat;
     this.#db
       .insert(chatAttachments)
       .values({
@@ -885,7 +907,7 @@ export class Workspace extends DurableObject<Env> {
     if (restricted) {
       // As restricted.ts records a chat entering restricted mode.
       this.#outboxEntry({
-        actor: delegateActorOf(chatAuthority({ agentId, personId })),
+        actor: delegateActorOf(chatAuthority({ agentId, personId }), via),
         action: "context.restricted",
         target: { type: "chat", id },
         provenance: carried.slice(0, auditProvenanceMaxItems),
@@ -1040,7 +1062,7 @@ export class Workspace extends DurableObject<Env> {
     }
     // The agent acts for the chat's own person, as this object stored it,
     // never for whoever asks, and only while they are still a member.
-    const { personId, agentId } = chat;
+    const { personId, agentId, via } = chat;
     // Being deleted: its writes are being rejected, and it takes no more.
     if (this.#deleting.has(chat.id)) {
       throw agentErrors.create("agent.chat_not_found");
@@ -1074,7 +1096,7 @@ export class Workspace extends DurableObject<Env> {
       // `workspace` in durable-objects.ts), and whose agent acts in it, as
       // the chat stored it.
       const workspaceId = workspaceIdSchema.parse(this.ctx.id.name);
-      const scope = { workspaceId, agentId, chatId: chat.id, personId };
+      const scope = { workspaceId, agentId, chatId: chat.id, personId, via };
       // The organization's agent, acting for the chat's person, in this chat:
       // the audit log's actor, and the rules' context (its restricted mode).
       const authority = chatAuthority(scope);
@@ -1091,7 +1113,7 @@ export class Workspace extends DurableObject<Env> {
           model: parsed.data.model,
           effort: parsed.data.effort,
           purpose: "chat.turn",
-          trigger: delegateActorOf(authority),
+          trigger: delegateActorOf(authority, via),
           provenance: this.#sources(chat.id),
           work: { authority, context: work },
         },
@@ -1102,6 +1124,8 @@ export class Workspace extends DurableObject<Env> {
       this.#builds.delete(chat.id);
       started?.();
       this.#changed(chat.id);
+      // The turn's answer is the last response it keeps.
+      let answer: number | undefined;
       const result = await runTurn({
         history: this.#transcript(chat.id),
         question: parsed.data.text,
@@ -1142,7 +1166,10 @@ export class Workspace extends DurableObject<Env> {
           if (message.role === "assistant") {
             this.#partials.delete(chat.id);
           }
-          this.#keep(chat.id, message);
+          const id = this.#keep(chat.id, message);
+          if (message.role === "assistant") {
+            answer = id;
+          }
         },
         write: (partial) => {
           this.#partials.set(chat.id, partial);
@@ -1155,6 +1182,8 @@ export class Workspace extends DurableObject<Env> {
           sources: this.#sources(chat.id),
           restricted: this.isChatRestricted(chat.id) === true,
         },
+        cited:
+          answer === undefined ? [] : await this.#citedOrNone(scope, answer),
       };
     } finally {
       this.ctx.storage.kv.delete(`${turnKeyPrefix}${chat.id}`);
@@ -1563,6 +1592,7 @@ export class Workspace extends DurableObject<Env> {
             agentId: chat.agentId,
             chatId,
             personId: chat.personId,
+            via: chat.via,
           },
           { method: "output" },
           {
@@ -1954,6 +1984,94 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
+   * The documents the chat's message `messageId` cites, as `personId`'s
+   * page shows them under it (`ChatsApi.cited`): only in their own chat.
+   */
+  async cited(
+    chatId: unknown,
+    personId: string,
+    messageId: unknown
+  ): Promise<ChatCitedDocument[]> {
+    const chat = this.#ownChat(chatId, personId);
+    const id = z.int().positive().safeParse(messageId);
+    if (!id.success) {
+      return [];
+    }
+    const workspaceId = workspaceIdSchema.parse(this.ctx.id.name);
+    const scope = {
+      workspaceId,
+      agentId: chat.agentId,
+      chatId: chat.id,
+      personId,
+    };
+    return await this.#cited(scope, id.data);
+  }
+
+  /**
+   * The documents the chat's answer `messageId` cites (`citedIn`), each
+   * looked up now as the chat's agent acting for its person, so one either
+   * may no longer read is left out; none for a message that isn't an
+   * answer, or one that cites nothing.
+   */
+  async #cited(
+    scope: Pick<AgentScope, "workspaceId" | "agentId" | "chatId" | "personId">,
+    messageId: number
+  ): Promise<ChatCitedDocument[]> {
+    const stored = this.#db
+      .select()
+      .from(chatMessages)
+      .where(
+        and(
+          eq(chatMessages.chatId, scope.chatId),
+          eq(chatMessages.id, messageId)
+        )
+      )
+      .get();
+    const shown =
+      stored === undefined
+        ? undefined
+        : chatMessageOf(
+            stored.id,
+            storedMessageSchema.parse(JSON.parse(stored.message)),
+            stored.createdAt,
+            this.#givenBy(scope.chatId)(stored.id)
+          );
+    if (shown?.role !== "assistant" || shown.citations.length === 0) {
+      return [];
+    }
+    const documentIds = shown.citations.map(({ documentId }) => documentId);
+    return await readAsDelegate(
+      this.env,
+      chatAuthority(scope),
+      chatContext(scope),
+      undefined,
+      async (reader) => await cited(this.env, reader, documentIds)
+    );
+  }
+
+  /**
+   * `#cited` for a turn that has answered: the answer is stored and shown
+   * by then, so documents that can't be looked up now (Knowledge's
+   * database, or what the agent may read, failing) leave the turn's result
+   * without any, and never fail an answered turn. The page asks again
+   * (`cited`).
+   */
+  async #citedOrNone(
+    scope: Pick<AgentScope, "workspaceId" | "agentId" | "chatId" | "personId">,
+    messageId: number
+  ): Promise<ChatCitedDocument[]> {
+    try {
+      return await this.#cited(scope, messageId);
+    } catch (error) {
+      log.warn("agent.cited_failed", {
+        chatId: scope.chatId,
+        ...errorFields(error),
+      });
+      return [];
+    }
+  }
+
+  /**
    * Records with the run alone what an API call of it read (an App's
    * answer or files, the Knowledge catalog), before the call hands it
    * over: what the run's result rests on (`#withheldRuns`), never the
@@ -2028,7 +2146,7 @@ export class Workspace extends DurableObject<Env> {
         withheldAt !== null && readable.has(sourceId)
     );
     if (fresh.length > 0 || back.length > 0) {
-      const actor = delegateActorOf(chatAuthority(scope));
+      const actor = delegateActorOf(chatAuthority(scope), scope.via);
       this.ctx.storage.transactionSync(() => {
         for (const { runId, sourceId, withheldAt } of [...fresh, ...back]) {
           this.#db
@@ -3244,15 +3362,23 @@ export class Workspace extends DurableObject<Env> {
     }
     const id = chatIdSchema.parse(chatId);
     try {
+      // What the draft's code threw, for the agent's check alone: the
+      // screen's answer stays `internal.unexpected`, with no message.
+      let thrown: string | undefined;
       const answered = await this.#sealedPreviews.call(
         id,
         personId,
         appIdSchema.parse(appId),
         draft,
         request,
-        options
+        {
+          ...options,
+          draftFailure: (message) => {
+            thrown = message;
+          },
+        }
       );
-      const problem = functionProblem(request, answered.answer.result);
+      const problem = functionProblem(request, answered.answer.result, thrown);
       if (problem !== undefined) {
         this.#previewReports.report(id, appId, draft.revision, problem);
       }
@@ -3399,14 +3525,24 @@ export class Workspace extends DurableObject<Env> {
       },
       input,
     });
+    // What the draft's code threw, for the agent's own call: as data in
+    // its tool's result, never in any screen's answer.
+    let thrown: string | undefined;
     const { answer } = await this.#sealedPreviews.call(
       id,
       personId,
       app,
       draft,
-      request
+      request,
+      {
+        draftFailure: (message) => {
+          thrown = message;
+        },
+      }
     );
-    return JSON.stringify(answer);
+    return JSON.stringify(
+      thrown === undefined ? answer : { ...answer, thrown }
+    );
   }
 
   /** Deletes the draft files and drafts the conditions name, in that order. */

@@ -85,6 +85,22 @@ export const canReconnect = (
   (connection.scope === "personal" || isAdmin(identity.role)) &&
   !identity.staff;
 
+/**
+ * The connection an integration's page offers to sign in to again: the
+ * first whose access ran out that this person may sign in to again. An
+ * active one has nothing to sign in to again: connect refuses it as
+ * already connected.
+ */
+export const signInAgainTarget = (
+  integration: Integration,
+  identity: Pick<Identity, "role" | "staff">
+): ListedConnection | undefined =>
+  integration.connections.find(
+    (connection) =>
+      connection.status === "needs_reauth" &&
+      canReconnect(connection, integration.offered, identity)
+  );
+
 /** A step: its number in a ring, its title, and what it asks. */
 const Step = ({
   n,

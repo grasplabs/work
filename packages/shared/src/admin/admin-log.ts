@@ -53,7 +53,7 @@ export interface LogItem {
 }
 
 /**
- * The day a moment falls on, in UTC as its hours and the console's times
+ * The day a moment falls on, in UTC as its hours and the admin's times
  * are: on the reader's own calendar, an entry near midnight would sit under
  * a day its time doesn't belong to, and the server and the browser would
  * put it under different days.
@@ -345,7 +345,7 @@ export const logDays = (
 
 /**
  * How many entries each hour of one day has, by who did it: for a log that is one day long. What
- * has no time is left out. Hours are UTC's, as the console shows times, so a page drawn on the
+ * has no time is left out. Hours are UTC's, as the admin shows times, so a page drawn on the
  * server and again in the reader's browser counts each entry in the same hour.
  */
 export const logHours = (

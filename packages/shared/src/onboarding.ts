@@ -1,10 +1,18 @@
 import { z } from "zod";
 
 import type { AdminSnapshot } from "./admin-snapshot.ts";
+import type { OrgRules } from "./admin/onboarding-admin.ts";
+import type { OnboardingDirectoryApi } from "./directory.ts";
+import type { OnboardingPlacesApi } from "./document-places.ts";
 import { defineErrorFamily } from "./errors.ts";
+import type { OnboardingHrApi } from "./hr.ts";
 import type { KickoffApi } from "./kickoff.ts";
 import type { OnboardingChoicesApi } from "./onboarding-choices.ts";
 import type { OnboardingDocumentsApi } from "./onboarding-documents.ts";
+import type {
+  OrganizationChangeInput,
+  StaffOrganization,
+} from "./onboarding-organization.ts";
 import type {
   LogFilter,
   StaffAgreements,
@@ -14,6 +22,7 @@ import type {
   StaffNote,
   StaffOverview,
   StaffTranscript,
+  StaffWorks,
   StephenSetup,
   StephenSetupView,
 } from "./onboarding-staff.ts";
@@ -176,6 +185,9 @@ export const rosterSchema = z
 export type Roster = z.output<typeof rosterSchema>;
 export type RosterInput = z.input<typeof rosterSchema>;
 
+/** Whose links the admin took to send, by person. */
+export const linksTakenSchema = z.array(idSchema).max(onboardingPeopleMax);
+
 /**
  * When the interviews run: from the start day, for so many days. The leads'
  * links go out at `at` (by default the start of the start day); a team in
@@ -260,6 +272,70 @@ export interface OnboardingView {
    * is in, or when it did not. The one word of the kickoff the admin sees.
    */
   sponsor: string | null;
+  /**
+   * How many who take part wait for the admin to confirm the organization
+   * before their link can go out: new on a list saved while a plan was set.
+   */
+  waiting: number;
+}
+
+/**
+ * How the admin settles a piece of work its people told two ways, when
+ * nobody could say why: both ways kept, or which way holds, the way most
+ * told it (`first`) or the other.
+ */
+export const settleChoices = ["both", "first", "other"] as const;
+export type SettleChoice = (typeof settleChoices)[number];
+
+export const settleSchema = z.strictObject({
+  work: z.string().min(1).max(64),
+  holds: z.enum(settleChoices),
+});
+
+/**
+ * A step of a piece of work that its people told two ways, and nobody
+ * could say why: what only the admin can settle. Never who told which way.
+ */
+export interface Difference {
+  /** The piece of work's id. */
+  work: string;
+  /** The piece of work, in the company's own words. */
+  name: string;
+  /** The team that does it. */
+  team: string;
+  /** The step as most told it. */
+  way: string;
+  /** The other way some told it. */
+  other: string;
+  /** How the admin settled it; null while it is open. */
+  holds: SettleChoice | null;
+}
+
+/** What needs the admin once the interviews are done, and what Stephen thanks them with. */
+export interface OnboardingReview {
+  /** The differences nobody could explain, in the teams that take part. */
+  differences: Difference[];
+  /** How many pieces of work are drawn from what their people agreed to. */
+  mapped: number;
+}
+
+/**
+ * Someone's own link, as the company's admin takes it to send themselves:
+ * from their own email or chat, or on paper to whoever has no address.
+ * Grasp emails each link on its day as well; the admin's list is for
+ * whoever they would rather reach themselves.
+ */
+export interface LinkToSend {
+  person: string;
+  name: string;
+  /** Their team's name. */
+  team: string;
+  /** Empty when they have none. */
+  email: string;
+  /** The link's path, its secret after the `#`; null while it isn't out. */
+  path: string | null;
+  /** Out, and not taken by the admin since: new since they last took links. */
+  fresh: boolean;
 }
 
 /** How many weeks the programme with Grasp runs. */
@@ -288,14 +364,32 @@ export interface Programme {
  * programme for everyone signed in.
  */
 export interface OnboardingApi
-  extends OnboardingDocumentsApi, OnboardingChoicesApi {
+  extends
+    OnboardingDocumentsApi,
+    OnboardingDirectoryApi,
+    OnboardingChoicesApi,
+    OnboardingPlacesApi,
+    OnboardingHrApi {
   /** The programme, for the dashboard; null without a plan. Any role. */
   programme: () => Promise<Programme | null>;
   view: () => Promise<OnboardingView>;
-  /** Replaces who works where. */
+  /**
+   * Replaces who works where. While a plan is set, whoever is new on it
+   * gets no link until the admin confirms the organization.
+   */
   saveRoster: (roster: RosterInput) => Promise<OnboardingView>;
+  /** Replaces who works where, as the admin confirmed it: nobody waits for that any more. */
+  confirmRoster: (roster: RosterInput) => Promise<OnboardingView>;
   /** Sets when the interviews run; links go out by it. */
   savePlan: (plan: PlanInput) => Promise<OnboardingView>;
+  /** What only the admin can settle, and how much of the work is mapped. */
+  review: () => Promise<OnboardingReview>;
+  /** Settles a piece of work told two ways: both kept, or which holds. */
+  settle: (work: string, holds: SettleChoice) => Promise<OnboardingReview>;
+  /** Everyone who takes part, with their link once it is out. */
+  links: () => Promise<LinkToSend[]>;
+  /** The admin took these people's links to send: they are new no more. */
+  linksTaken: (people: string[]) => Promise<void>;
 }
 
 /** What only Grasp's staff do in an onboarding, the kickoff included. */
@@ -355,6 +449,26 @@ export interface OnboardingStaffApi extends KickoffApi {
   interviewers: () => Promise<StaffInterviewers>;
   /** The AI the onboarding used, by day, purpose and model. */
   aiUse: () => Promise<StaffAiUseRow[]>;
+  /**
+   * The organization as Grasp knows it, team by team: it names people, so
+   * every read is in the audit log.
+   */
+  organization: () => Promise<StaffOrganization>;
+  /** Puts the list right, one change at a time; each is in the log. */
+  changeOrganization: (change: OrganizationChangeInput) => Promise<void>;
+  /**
+   * Every piece of work as drawn from what its people agreed to, with
+   * this organization's rules for when one is known and the pieces Grasp
+   * counts as known by hand. It holds what people said, by name, so every
+   * read is in the audit log.
+   */
+  works: () => Promise<StaffWorks>;
+  /** Sets when a piece of work counts as known here; null takes the starting values back. */
+  setRules: (rules: OrgRules | null) => Promise<void>;
+  /** Counts a piece of work as known by hand, or leaves it to the rules again. */
+  countAsKnown: (work: string, counted: boolean) => Promise<void>;
+  /** Draws a piece of work again from everything its people agreed to. */
+  drawWorkAgain: (work: string) => Promise<void>;
 }
 
 /** Why the onboarding refused something. */
@@ -366,5 +480,15 @@ export const onboardingErrors = defineErrorFamily({
   "onboarding.no_link": "That person has no link out yet.",
   "onboarding.not_found": "Nobody on the list by that id.",
   "onboarding.no_team": "No team on the list by that id.",
+  "onboarding.team_taken": "There is a team with this name already.",
+  "onboarding.no_work": "That piece of work isn't on their team's map.",
+  "onboarding.not_now":
+    "No link goes out while the interviews are paused, before the agreements are in, or to someone who doesn't take part.",
+  "onboarding.no_map":
+    "The team's lead hasn't agreed to anything to draw its map from yet.",
   "onboarding.no_failed_mail": "That person has no mail that failed.",
+  "onboarding.no_difference":
+    "Nothing about that piece of work needs settling.",
+  "onboarding.nothing_to_draw":
+    "Nobody who does that work has agreed to anything yet.",
 });

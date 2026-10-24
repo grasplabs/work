@@ -8,7 +8,7 @@ import type { ReactNode, RefObject } from "react";
 
 import { SpokenText } from "../voice/spoken-text.tsx";
 import { narrationOf } from "../voice/timing.ts";
-import { useSay, useVoice } from "../voice/voice.ts";
+import { speak, useSay, useVoice } from "../voice/voice.ts";
 import type { Tone } from "../voice/voice.ts";
 import { readingSeconds } from "./setup.ts";
 
@@ -417,13 +417,15 @@ const supportUrl = "https://support.joingrasp.com";
 
 /** The pages the onboarding links to, by what is connected on a step. */
 const connectionPages = {
+  /** The Microsoft or Google sign-in that tells who works where. */
+  directory: "connections/sign-in",
   /** A staff list shared as a file. */
   staffList: "connections/staff-list",
   /** The places where documents live: SharePoint, Google Drive, Notion and the like. */
   documents: "connections/documents",
   /** Pulse, the app on the work laptops. */
   pulse: "connections/pulse",
-  /** The HR platform: Personio, AFAS and the like. */
+  /** The HR platform: Personio, AFAS, HiBob and the like. */
   hr: "connections/hr",
 } as const;
 
@@ -491,6 +493,36 @@ export const Callout = ({
       <SpokenText from={0} line={text} text={text} />
     </p>
   );
+};
+
+/** How long a line that follows a choice waits, in ms: a breath after the step's own line. */
+const followsMs = 200;
+
+/**
+ * A line that follows what is chosen on a step, such as when the links go
+ * out: said after what he is saying, and said again when the choice
+ * changes it. A line changed again before its turn came is not said, so
+ * quick choices never pile up behind him.
+ */
+export const useSayFollowing = (
+  text: string,
+  { tone = tones.even, quick = false }: StepVoice = {}
+): void => {
+  const shown = useRef(text);
+  useEffect(() => {
+    shown.current = text;
+    const id = window.setTimeout(() => {
+      speak(text, {
+        after: true,
+        tone,
+        quick,
+        still: () => shown.current === text,
+      });
+    }, followsMs);
+    return () => {
+      window.clearTimeout(id);
+    };
+  }, [text, tone, quick]);
 };
 
 /** A number with what it counts. */

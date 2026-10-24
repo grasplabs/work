@@ -1,0 +1,1271 @@
+/**
+ * A stand-in for the Cloudflare REST API: it answers at the real URLs, in
+ * the API's envelope, and keeps what each account holds, so the admin's
+ * client runs unchanged against it. Only the token it was made with gets
+ * in, and only to the accounts it holds. A test can plan failures (the
+ * Nth call answers 429 or 500) and read every call it got.
+ *
+ * It answers in place of `fetch` in the isolate the admin runs in, which
+ * is also where its Workflow steps run: the tests' isolate, for each test
+ * (test/cloudflare-api-mock.ts), and the browser journeys' admin, for its
+ * whole run (test/e2e-worker.ts). D1 queries run on real D1 databases, one
+ * for each database the fake holds at once (`CLIENT_D1_<n>`,
+ * vite.test.config.ts and vite.e2e.config.ts).
+ */
+import {
+  adminAskPath,
+  adminAskPurpose,
+  adminAskRequestSchema,
+} from "@grasp-os/shared/admin-ask";
+import {
+  adminSnapshotPath,
+  adminSnapshotPurpose,
+  adminSnapshotRequestSchema,
+} from "@grasp-os/shared/admin-snapshot";
+import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
+import { hkdfHmacKey } from "@grasp-os/shared/client-secrets";
+import { whenAborted } from "@grasp-os/shared/deadline";
+import { toHex } from "@grasp-os/shared/encoding";
+import {
+  onboardingSummaryPath,
+  onboardingSummaryPurpose,
+  onboardingSummaryRequestSchema,
+} from "@grasp-os/shared/onboarding-summary";
+import type { OnboardingSummary } from "@grasp-os/shared/onboarding-summary";
+import {
+  platformUpdateNoticeSchema,
+  platformUpdatePath,
+  platformUpdatePurpose,
+  platformUpdateSignatureHeader,
+} from "@grasp-os/shared/platform-change";
+import {
+  provisionProbePath,
+  provisionProbePurpose,
+  provisionProbeRequestSchema,
+} from "@grasp-os/shared/provision-probe";
+import type { ProvisionProbe } from "@grasp-os/shared/provision-probe";
+import { z } from "zod";
+
+import {
+  base,
+  envelope,
+  notFound,
+  paged,
+  refusal,
+  text,
+} from "./cloudflare-api-kit.ts";
+import type {
+  AccountState,
+  ApiCall,
+  Json,
+  Route,
+  VersionState,
+} from "./cloudflare-api-kit.ts";
+import {
+  dispatchRoutes,
+  forgetDatabases,
+  workerRoutes,
+} from "./cloudflare-api-workers.ts";
+
+/** The R2 jurisdiction a call names, as the API reads its header. */
+const jurisdictionOf = (call: ApiCall): string =>
+  call.headers.get("cf-r2-jurisdiction") ?? "default";
+
+const subdomainOf = (account: AccountState): Response =>
+  account.subdomain === undefined
+    ? notFound()
+    : envelope({ subdomain: account.subdomain });
+
+/**
+ * What a client's core answers a platform update notice with, as core
+ * does (core's src/platform-updates.ts): 204 once the signature checks
+ * out, with the key its live version's auth secret gives, and the notice
+ * parses; 403 otherwise. An account can have its core answer otherwise,
+ * as one from before the endpoint would (`noticeStatus`).
+ */
+const takeNotice = async (
+  account: AccountState,
+  live: VersionState,
+  request: Request
+): Promise<Response> => {
+  if (account.noticeStatus !== undefined) {
+    return new Response(null, { status: account.noticeStatus });
+  }
+  const body = await request.text();
+  const key = await hkdfHmacKey(
+    live.secrets.get("BETTER_AUTH_SECRET") ?? "",
+    platformUpdatePurpose,
+    ["sign"]
+  );
+  const expected = toHex(
+    new Uint8Array(
+      await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(body))
+    )
+  );
+  const notice = platformUpdateNoticeSchema.safeParse(JSON.parse(body));
+  if (
+    request.headers.get(platformUpdateSignatureHeader) !== expected ||
+    !notice.success
+  ) {
+    return new Response("Forbidden", { status: 403 });
+  }
+  account.notices.push(notice.data);
+  return new Response(null, { status: 204 });
+};
+
+/** What core answers a path it has no route for: its frontend's page. */
+const frontendPage = (): Response =>
+  new Response("<!doctype html><title>Grasp</title>", {
+    headers: { "content-type": "text/html" },
+  });
+
+/** The binding kinds core's probe asks (core's src/provision-probe.ts). */
+const probedKinds = new Set(["d1", "r2_bucket", "service"]);
+
+/** A few of each clock's tasks, as core's and connect's src/clock.ts name them. */
+const clockTaskNames = {
+  core: ["audit.drain", "workflows.schedules", "connect.clock"],
+  connect: ["oauth.flows", "vault.tokens"],
+};
+
+/**
+ * What a client's core answers the admin's provisioning probe with, as
+ * core does (core's src/provision-probe.ts), once the signature checks
+ * out with the key its live version's auth secret gives and the request
+ * parses: the version answering, the `CLIENT_ID` its live version runs
+ * with, each of its private bindings answering, and both clocks armed,
+ * unless the account says otherwise (`coreProbe`). Anything else, and
+ * any request to a core from before the probe, gets its frontend's page.
+ */
+const answerProbe = async (
+  account: AccountState,
+  live: VersionState,
+  request: Request
+): Promise<Response> => {
+  const probe = account.coreProbe ?? {};
+  if (probe === "absent") {
+    return frontendPage();
+  }
+  const body = await request.text();
+  const key = await hkdfHmacKey(
+    live.secrets.get("BETTER_AUTH_SECRET") ?? "",
+    provisionProbePurpose,
+    ["sign"]
+  );
+  const expected = toHex(
+    new Uint8Array(
+      await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(body))
+    )
+  );
+  if (
+    request.headers.get(platformUpdateSignatureHeader) !== expected ||
+    !provisionProbeRequestSchema.safeParse(JSON.parse(body)).success
+  ) {
+    return frontendPage();
+  }
+  const bindings = z
+    .array(
+      z
+        .object({
+          type: z.string(),
+          name: z.string(),
+          json: z.unknown().optional(),
+        })
+        .loose()
+    )
+    .parse(live.metadata.bindings ?? []);
+  const clientId = bindings.find(({ name }) => name === "CLIENT_ID")?.json;
+  const down = new Set(probe.down);
+  const clock = (name: "core" | "connect") =>
+    probe.clocksDown?.includes(name) === true
+      ? null
+      : { armed: true, tasks: clockTaskNames[name] };
+  return Response.json({
+    version: account.answeringVersion ?? live.id,
+    clientId:
+      probe.asClient ?? (typeof clientId === "string" ? clientId : null),
+    bindings: Object.fromEntries(
+      bindings
+        .filter(({ type }) => probedKinds.has(type))
+        .map(({ name }) => [name, !down.has(name)])
+    ),
+    clocks: { core: clock("core"), connect: clock("connect") },
+  } satisfies ProvisionProbe);
+};
+
+/** None begun: what a core answers that has no onboarding. */
+const noOnboarding: OnboardingSummary = {
+  stage: "none",
+  day: null,
+  days: null,
+  known: 0,
+  needs: 0,
+};
+
+/**
+ * What a client's core answers the admin's onboarding summary request
+ * with, as core does (core's src/onboarding/summary.ts): the account's
+ * summary once the signature checks out, with the key its live version's
+ * auth secret gives, and the request parses; 403 otherwise; 404 from a
+ * core from before the summary.
+ */
+const answerSummary = async (
+  account: AccountState,
+  live: VersionState,
+  request: Request
+): Promise<Response> => {
+  if (account.onboarding === "absent") {
+    return new Response("Not found", { status: 404 });
+  }
+  const body = await request.text();
+  const key = await hkdfHmacKey(
+    live.secrets.get("BETTER_AUTH_SECRET") ?? "",
+    onboardingSummaryPurpose,
+    ["sign"]
+  );
+  const expected = toHex(
+    new Uint8Array(
+      await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(body))
+    )
+  );
+  const asked = onboardingSummaryRequestSchema.safeParse(JSON.parse(body));
+  if (
+    request.headers.get(platformUpdateSignatureHeader) !== expected ||
+    !asked.success
+  ) {
+    return new Response("Forbidden", { status: 403 });
+  }
+  return Response.json(account.onboarding ?? noOnboarding);
+};
+
+/** Two hex characters at a time. */
+const hexPair = /../gu;
+
+/** A company with nothing begun: what a core answers that has no onboarding. */
+export const emptyAdminSnapshot = (name: string): AdminSnapshot => ({
+  now: new Date().toISOString(),
+  company: {
+    name,
+    timeZone: "Europe/Amsterdam",
+    signInDomains: [],
+    signIn: [],
+    admins: [],
+  },
+  contacts: null,
+  roster: null,
+  plan: null,
+  agreements: null,
+  agreed: false,
+  paused: false,
+  told: false,
+  mapped: [],
+  links: [],
+  interviews: [],
+  works: null,
+  kickoff: null,
+  gate: {
+    open: false,
+    closedSince: null,
+    threshold: 80,
+    known: 0,
+    ready: false,
+    over: false,
+    openedAt: null,
+  },
+  contract: null,
+  members: [],
+  integrations: null,
+  asked: [],
+  usage: [],
+});
+
+/**
+ * What a client's core answers the admin's snapshot request with,
+ * as core does (core's src/admin-snapshot.ts): the account's snapshot
+ * once the signature checks out, with the key its live version's auth
+ * secret gives for the admin's purpose, and the request parses, keeping
+ * whom it names as the reader; 401 for a request signed otherwise, 403
+ * for one that doesn't parse; 404 from a core from before the snapshot.
+ */
+const answerAdmin = async (
+  account: AccountState,
+  live: VersionState,
+  request: Request
+): Promise<Response> => {
+  if (account.admin === "absent") {
+    return new Response("Not found", { status: 404 });
+  }
+  await account.adminHeld?.();
+  const body = await request.text();
+  const key = await hkdfHmacKey(
+    live.secrets.get("BETTER_AUTH_SECRET") ?? "",
+    adminSnapshotPurpose,
+    ["verify"]
+  );
+  const signature = request.headers.get(platformUpdateSignatureHeader) ?? "";
+  const signed = await crypto.subtle.verify(
+    "HMAC",
+    key,
+    Uint8Array.from(signature.match(hexPair) ?? [], (pair) =>
+      Number.parseInt(pair, 16)
+    ),
+    new TextEncoder().encode(body)
+  );
+  if (!signed) {
+    return new Response("Unauthorized", { status: 401 });
+  }
+  const asked = adminSnapshotRequestSchema.safeParse(JSON.parse(body));
+  if (!asked.success || account.admin === "ended") {
+    return new Response("Forbidden", { status: 403 });
+  }
+  account.adminReaders.push(asked.data.staff.email);
+  if (account.admin === "garbled") {
+    return Response.json({ company: account.name });
+  }
+  return Response.json(account.admin ?? emptyAdminSnapshot(account.name));
+};
+
+/**
+ * What Grasp's own core answers Ask Grasp's question with, as core does
+ * (core's src/admin-ask.ts): the account's answer once the signature
+ * checks out, with the key its live version's auth secret gives for Ask
+ * Grasp's purpose, and the question parses, keeping it; 401 for a request
+ * signed otherwise, 403 for one that doesn't parse.
+ */
+const answerAsk = async (
+  account: AccountState,
+  live: VersionState,
+  request: Request
+): Promise<Response> => {
+  const body = await request.text();
+  const key = await hkdfHmacKey(
+    live.secrets.get("BETTER_AUTH_SECRET") ?? "",
+    adminAskPurpose,
+    ["verify"]
+  );
+  const signature = request.headers.get(platformUpdateSignatureHeader) ?? "";
+  const signed = await crypto.subtle.verify(
+    "HMAC",
+    key,
+    Uint8Array.from(signature.match(hexPair) ?? [], (pair) =>
+      Number.parseInt(pair, 16)
+    ),
+    new TextEncoder().encode(body)
+  );
+  if (!signed) {
+    return new Response("Unauthorized", { status: 401 });
+  }
+  const asked = adminAskRequestSchema.safeParse(JSON.parse(body));
+  if (!asked.success) {
+    return new Response("Forbidden", { status: 403 });
+  }
+  account.asked.push(asked.data);
+  if (account.ask === "no_model") {
+    return Response.json({ code: "admin_ask.no_model" }, { status: 503 });
+  }
+  return Response.json(account.ask ?? { text: "An answer.", truncated: false });
+};
+
+/**
+ * The workers.dev subdomains taken across Cloudflare: a subdomain is one
+ * account's only.
+ */
+const takenSubdomains = new Set<string>();
+
+/** What each account holds, at the paths the API serves it. */
+const accountRoutes: Route[] = [
+  {
+    method: "GET",
+    path: /^$/u,
+    answer: ({ account }) => envelope({ id: account.id, name: account.name }),
+  },
+  {
+    method: "GET",
+    path: /^\/workers\/subdomain$/u,
+    answer: ({ account }) => subdomainOf(account),
+  },
+  {
+    method: "PUT",
+    path: /^\/workers\/subdomain$/u,
+    answer: ({ account, json }) => {
+      const wanted = text(json, "subdomain");
+      if (takenSubdomains.has(wanted) && account.subdomain !== wanted) {
+        return refusal(400, 10_031, "Subdomain is unavailable");
+      }
+      takenSubdomains.add(wanted);
+      account.subdomain = wanted;
+      return subdomainOf(account);
+    },
+  },
+  {
+    method: "GET",
+    path: /^\/d1\/database$/u,
+    // The API matches `name` as a substring.
+    answer: ({ account, call }) => {
+      const name = call.query.get("name") ?? "";
+      return paged(
+        account.d1.filter((database) => database.name.includes(name)),
+        call.query
+      );
+    },
+  },
+  {
+    method: "POST",
+    path: /^\/d1\/database$/u,
+    answer: ({ account, json }) => {
+      const jurisdiction = account.d1Reports ?? text(json, "jurisdiction");
+      const database = {
+        uuid: crypto.randomUUID(),
+        name: text(json, "name"),
+        ...(jurisdiction === "" ? {} : { jurisdiction }),
+      };
+      account.d1.push(database);
+      return envelope(database);
+    },
+  },
+  {
+    method: "GET",
+    path: /^\/r2\/buckets\/(?<name>[^/]+)$/u,
+    answer: ({ account, call, params }) => {
+      const bucket = account.buckets.find(
+        ({ name, jurisdiction }) =>
+          name === params.name && jurisdiction === jurisdictionOf(call)
+      );
+      return bucket === undefined
+        ? notFound()
+        : envelope({
+            name: bucket.name,
+            jurisdiction: account.r2Reports ?? bucket.jurisdiction,
+          });
+    },
+  },
+  {
+    method: "POST",
+    path: /^\/r2\/buckets$/u,
+    answer: ({ account, call, json }) => {
+      const bucket = {
+        name: text(json, "name"),
+        jurisdiction: jurisdictionOf(call),
+      };
+      account.buckets.push(bucket);
+      return envelope({
+        ...bucket,
+        jurisdiction: account.r2Reports ?? bucket.jurisdiction,
+      });
+    },
+  },
+  {
+    method: "GET",
+    path: /^\/ai-gateway\/gateways\/(?<id>[^/]+)$/u,
+    answer: ({ account, params }) => {
+      const gateway = account.gateways.find(({ id }) => id === params.id);
+      return gateway === undefined ? notFound() : envelope(gateway);
+    },
+  },
+  {
+    method: "POST",
+    path: /^\/ai-gateway\/gateways$/u,
+    answer: ({ account, json }) => {
+      const gateway = { authentication: false, ...json };
+      account.gateways.push(gateway);
+      return envelope(gateway);
+    },
+  },
+  {
+    method: "PUT",
+    path: /^\/ai-gateway\/gateways\/(?<id>[^/]+)$/u,
+    answer: ({ account, params, json }) => {
+      const index = account.gateways.findIndex(({ id }) => id === params.id);
+      if (index === -1) {
+        return notFound();
+      }
+      // An update replaces the gateway's settings, as the API does.
+      const gateway = { id: params.id, authentication: false, ...json };
+      account.gateways[index] = gateway;
+      return envelope(gateway);
+    },
+  },
+];
+
+/** The roles every account has, as the API lists them. */
+const accountRoles = [
+  { id: "role-admin", name: "Administrator" },
+  { id: "role-read", name: "Administrator Read Only" },
+];
+
+/** An account's members and roles, as a tenant admin manages them, and its scripts. */
+const memberRoutes: Route[] = [
+  {
+    method: "GET",
+    path: /^\/members$/u,
+    answer: ({ account, call }) =>
+      paged(
+        [...account.members].map(([email, status]) => ({
+          id: `member-${email}`,
+          status,
+          user: { email },
+        })),
+        call.query
+      ),
+  },
+  {
+    method: "POST",
+    path: /^\/members$/u,
+    answer: ({ account, json }) => {
+      const email = text(json, "email");
+      const { roles } = json;
+      if (
+        !Array.isArray(roles) ||
+        !roles.every((role) => accountRoles.some(({ id }) => id === role))
+      ) {
+        return refusal(400, 1003, "Invalid roles");
+      }
+      // An existing user added as accepted is a member at once; otherwise
+      // it's an invitation.
+      const status =
+        text(json, "status") === "accepted" ? "accepted" : "pending";
+      account.members.set(email, status);
+      return envelope({ id: `member-${email}`, status, user: { email } });
+    },
+  },
+  {
+    method: "GET",
+    path: /^\/roles$/u,
+    answer: ({ call }) => paged(accountRoles, call.query),
+  },
+  {
+    method: "GET",
+    path: /^\/workers\/scripts$/u,
+    answer: ({ account }) =>
+      envelope([...account.scripts.keys()].map((id) => ({ id }))),
+  },
+];
+
+const routes = [
+  ...accountRoutes,
+  ...memberRoutes,
+  ...workerRoutes,
+  ...dispatchRoutes,
+];
+
+/** Whether `caller` is an accepted member of `account`. */
+const isMember = (account: AccountState, caller: string | undefined) =>
+  caller !== undefined && account.members.get(caller) === "accepted";
+
+/** Who the deployer's token and the tenant admin's belong to. */
+export const deployerEmail = "deployer@grasp.test";
+export const tenantEmail = "tenant@grasp.test";
+
+/** The route that serves `call`, with its path's named parts. */
+const routeOf = (
+  call: ApiCall,
+  rest: string
+): { route: Route; params: Record<string, string> } | null => {
+  for (const route of routes) {
+    const match = route.method === call.method ? route.path.exec(rest) : null;
+    if (match !== null) {
+      return { route, params: { ...match.groups } };
+    }
+  }
+  return null;
+};
+
+/**
+ * How a planned call fails: timed out at the edge (408), rate-limited
+ * (429, optionally with a `Retry-After`), a server error in the envelope (500, 503), the edge's
+ * HTML error page (502), no answer before it ran (`network`), or no answer
+ * after it ran (`lost`: the change is made, its response never arrives),
+ * or, for a D1 query, an answer that succeeds with a statement that didn't
+ * (`statement-failed`).
+ */
+export type Failure =
+  /** A refusal: the admin retries none. */
+  | 400
+  | 408
+  | 429
+  | 500
+  | 502
+  | 503
+  | "network"
+  | "lost"
+  | "statement-failed"
+  | { retryAfter: string };
+
+const lostConnection = (): never => {
+  throw new TypeError("Network connection lost.");
+};
+
+const failed = (failure: Exclude<Failure, "lost">): Response => {
+  if (failure === "network") {
+    return lostConnection();
+  }
+  if (failure === "statement-failed") {
+    return envelope([
+      { results: [], success: true, meta: {} },
+      { results: [], success: false, meta: {} },
+    ]);
+  }
+  if (typeof failure === "object") {
+    const response = refusal(
+      429,
+      971,
+      "Please wait and consider throttling your request speed"
+    );
+    response.headers.set("retry-after", failure.retryAfter);
+    return response;
+  }
+  if (failure === 400) {
+    return refusal(400, 10_000, "Bad request");
+  }
+  if (failure === 408) {
+    return refusal(408, 10_000, "Request timeout");
+  }
+  if (failure === 502) {
+    return new Response("<html>Bad gateway</html>", {
+      status: 502,
+      headers: { "content-type": "text/html" },
+    });
+  }
+  return failure === 429
+    ? refusal(
+        429,
+        971,
+        "Please wait and consider throttling your request speed"
+      )
+    : refusal(failure, 10_000, "Internal error");
+};
+
+/** Email Sending's domains in a zone. */
+const sendingRoute = /^\/zones\/(?<zone>[^/]+)\/email\/sending\/subdomains$/u;
+
+const accountRoute = /^\/accounts\/(?<id>[^/]+)(?<rest>\/.*)?$/u;
+
+/** A call's body: JSON parsed, form data as such, anything else as text. */
+const readBody = async (request: Request): Promise<unknown> => {
+  const type = request.headers.get("content-type") ?? "";
+  if (type.startsWith("application/json")) {
+    return await request.json();
+  }
+  if (type.startsWith("multipart/form-data")) {
+    return await request.formData();
+  }
+  return request.body === null ? undefined : await request.text();
+};
+
+/** A day, in ms. */
+const dayMs = 24 * 60 * 60 * 1000;
+
+/**
+ * Why the admin's usage query (src/cloudflare/analytics.ts) isn't one
+ * the fake answers: a dataset, field or filter it doesn't read as the
+ * schema names them, or a window that isn't the month so far and the last
+ * day, or another gateway than the client's; null when it is. So a typo
+ * fails the tests rather than reads nothing.
+ */
+const analyticsMisread = (
+  query: string,
+  variables: Record<string, unknown>
+): string | null => {
+  const expected = [
+    "workersInvocationsAdaptive(limit: 1, filter: { datetime_geq: $monthStart, datetime_leq: $now }) { sum { requests cpuTimeUs } }",
+    "workersInvocationsAdaptive(limit: 1, filter: { datetime_geq: $dayStart, datetime_leq: $now }) { sum { requests errors } }",
+    "aiGatewayRequestsAdaptiveGroups(limit: 1, filter: { datetime_geq: $monthStart, datetime_leq: $now, gateway: $gateway }) { sum { cost } }",
+    "accounts(filter: { accountTag: $a0 })",
+  ];
+  const missing = expected.find((part) => !query.includes(part));
+  if (missing !== undefined) {
+    return `The query doesn't read ${missing}`;
+  }
+  const now = Date.parse(String(variables.now));
+  const month = new Date(now);
+  const monthStart = Date.UTC(month.getUTCFullYear(), month.getUTCMonth(), 1);
+  if (
+    Number.isNaN(now) ||
+    Date.parse(String(variables.monthStart)) !== monthStart ||
+    Date.parse(String(variables.dayStart)) !== now - dayMs
+  ) {
+    return "The query's window isn't the month so far and the last day";
+  }
+  return variables.gateway === "grasp-os"
+    ? null
+    : "The query doesn't filter the client's AI Gateway";
+};
+
+/**
+ * A fake Cloudflare API that lets `token` (the deployer's) and
+ * `tenantToken` (a tenant admin's, which alone creates accounts) in, each
+ * to the accounts its user is an accepted member of. It answers what it's
+ * sent in place of `fetch` (`fetch`), until it's emptied (`reset`). Add
+ * accounts with `addAccount`; plan failures with `failCall`.
+ */
+export const fakeCloudflareApi = (
+  token: string,
+  tenantToken = `${token}-tenant-admin`
+) => {
+  const accounts = new Map<string, AccountState>();
+  const calls: ApiCall[] = [];
+  const planned = new Map<number, Failure>();
+  /** Failures planned for the next call a test picks out, each once. */
+  const matched: { matches: (call: ApiCall) => boolean; failure: Failure }[] =
+    [];
+  /**
+   * What runs before the fake answers the next call a test picks out, each
+   * once: something else landing while that call is in flight.
+   */
+  const interleaved: {
+    matches: (call: ApiCall) => boolean;
+    meanwhile: () => Promise<void>;
+  }[] = [];
+
+  /** Adds an account `member` is a member of, and returns what it holds. */
+  const addAccount = (
+    name = "Client",
+    member = deployerEmail
+  ): AccountState => {
+    const account: AccountState = {
+      id: crypto.randomUUID().replaceAll("-", ""),
+      name,
+      members: new Map([[member, "accepted"]]),
+      d1: [],
+      buckets: [],
+      gateways: [],
+      zones: [],
+      scripts: new Map(),
+      namespaces: new Map(),
+      workflows: new Map(),
+      assets: new Set(),
+      sessions: new Map(),
+      completions: new Set(),
+      scriptUploads: [],
+      notices: [],
+      adminReaders: [],
+      asked: [],
+    };
+    accounts.set(account.id, account);
+    return account;
+  };
+
+  /**
+   * Calls being answered now, and the most at once; and the most accounts
+   * with a call being answered at once.
+   */
+  const load = { now: 0, peak: 0, peakAccounts: 0 };
+  /** Calls being answered now, by account. */
+  const busyAccounts = new Map<string, number>();
+  /** Calls whose caller aborted them before they were answered. */
+  const aborted = { count: 0 };
+  /** Admin snapshot requests to cores under way, and the most at once in this test. */
+  const adminReads = { now: 0, peak: 0 };
+  /** The requests a redirect sent elsewhere, with the router secret they carried. */
+  const redirected: { url: string; routerSecret: string | null }[] = [];
+
+  /** Whose token a call carries: the deployer's or the tenant admin's. */
+  const callers = new Map([
+    [`Bearer ${token}`, deployerEmail],
+    [`Bearer ${tenantToken}`, tenantEmail],
+  ]);
+  /**
+   * What the analytics API answers the admin's usage query with: for each
+   * account the query names (variables `a0`, `a1`, ...), what the account
+   * reports, as GraphQL groups; an error for one the caller isn't a member
+   * of, as the API answers it, with the rest of the data.
+   */
+  const answerAnalytics = (body: unknown, caller: string): Response => {
+    const parsed = z
+      .object({
+        query: z.string(),
+        variables: z.record(z.string(), z.unknown()),
+      })
+      .safeParse(body);
+    const query = parsed.success ? parsed.data.query : "";
+    const variables = parsed.success ? parsed.data.variables : {};
+    const misread = analyticsMisread(query, variables);
+    if (misread !== null) {
+      // As the API answers a query it can't run: errors, and no data.
+      return Response.json({ data: null, errors: [{ message: misread }] });
+    }
+    const errors: { message: string }[] = [];
+    const viewer = Object.fromEntries(
+      Object.entries(variables)
+        .filter(([name]) => /^a\d+$/u.test(name))
+        .map(([name, tag]) => {
+          const account = accounts.get(typeof tag === "string" ? tag : "");
+          if (account === undefined || !isMember(account, caller)) {
+            errors.push({ message: `not authorized for ${String(tag)}` });
+            return [name, null];
+          }
+          const { usage } = account;
+          return [
+            name,
+            usage === undefined
+              ? []
+              : [
+                  {
+                    month: [
+                      {
+                        sum: {
+                          requests: usage.monthRequests,
+                          cpuTimeUs: usage.monthCpuTimeUs,
+                        },
+                      },
+                    ],
+                    day: [
+                      {
+                        sum: {
+                          requests: usage.dayRequests,
+                          errors: usage.dayErrors,
+                        },
+                      },
+                    ],
+                    ai: [{ sum: { cost: usage.monthAiCost } }],
+                  },
+                ],
+          ];
+        })
+    );
+    return Response.json({
+      data: { viewer },
+      errors: errors.length === 0 ? null : errors,
+    });
+  };
+
+  /**
+   * Answers a call that names no account (`/user`, `/accounts`,
+   * `/graphql`), or undefined for any other.
+   */
+  const answerUnscoped = (
+    call: ApiCall,
+    caller: string | undefined
+  ): Response | undefined => {
+    if (call.path === "/graphql" && call.method === "POST") {
+      return caller === undefined
+        ? refusal(403, 10_000, "Authentication error")
+        : answerAnalytics(call.body, caller);
+    }
+    if (call.path !== "/user" && call.path !== "/accounts") {
+      return undefined;
+    }
+    if (caller === undefined) {
+      return refusal(403, 10_000, "Authentication error");
+    }
+    if (call.path === "/user") {
+      return envelope({ email: caller });
+    }
+    if (call.method === "POST") {
+      if (caller !== tenantEmail) {
+        return refusal(403, 10_000, "Only a tenant admin creates accounts");
+      }
+      // The tenant admin who creates one is its only member.
+      const body: Json =
+        typeof call.body === "object" && call.body !== null
+          ? { ...call.body }
+          : {};
+      const created = addAccount(text(body, "name"), tenantEmail);
+      return envelope({ id: created.id, name: created.name });
+    }
+    // The API matches `name` loosely; the fake as a substring.
+    const name = call.query.get("name") ?? "";
+    return paged(
+      [...accounts.values()]
+        .filter(
+          (account) => isMember(account, caller) && account.name.includes(name)
+        )
+        .map(({ id, name: accountName }) => ({ id, name: accountName })),
+      call.query
+    );
+  };
+
+  /**
+   * Answers a call about zones (`/zones`, and Email Sending's domains in
+   * one), as the API does for zones in the accounts `caller` is a member
+   * of; undefined for any other call. A new zone is pending, as one whose
+   * name servers aren't delegated yet; a zone's name is Cloudflare's only.
+   */
+  const answerZones = (
+    call: ApiCall,
+    caller: string | undefined
+  ): Response | undefined => {
+    const sending = sendingRoute.exec(call.path)?.groups?.zone;
+    if (call.path !== "/zones" && sending === undefined) {
+      return undefined;
+    }
+    if (caller === undefined) {
+      return refusal(403, 10_000, "Authentication error");
+    }
+    const reachable = [...accounts.values()].filter((account) =>
+      isMember(account, caller)
+    );
+    const json: Json =
+      typeof call.body === "object" && call.body !== null
+        ? { ...call.body }
+        : {};
+    if (sending !== undefined) {
+      const zone = reachable
+        .flatMap(({ zones }) => zones)
+        .find(({ id }) => id === sending);
+      if (zone === undefined) {
+        return refusal(403, 9109, "Unauthorized to access requested resource");
+      }
+      if (call.method === "GET") {
+        return envelope(zone.sending);
+      }
+      const name = text(json, "name");
+      if (name !== zone.name && !name.endsWith(`.${zone.name}`)) {
+        return refusal(400, 1003, "Not a domain within the zone");
+      }
+      const existing = zone.sending.find((domain) => domain.name === name);
+      const domain = existing ?? {
+        tag: crypto.randomUUID().replaceAll("-", ""),
+        name,
+        enabled: true,
+      };
+      domain.enabled = true;
+      if (existing === undefined) {
+        zone.sending.push(domain);
+      }
+      return envelope(domain);
+    }
+    if (call.method === "GET") {
+      const accountId = call.query.get("account.id");
+      const name = call.query.get("name");
+      return paged(
+        reachable
+          .filter(({ id }) => accountId === null || id === accountId)
+          .flatMap(({ zones }) => zones)
+          .filter((zone) => name === null || zone.name === name)
+          .map(({ id, name: zoneName, status }) => ({
+            id,
+            name: zoneName,
+            status,
+          })),
+        call.query
+      );
+    }
+    const owner = z.object({ id: z.string() }).safeParse(json.account);
+    const account = reachable.find(({ id }) => id === owner.data?.id);
+    if (account === undefined) {
+      return refusal(403, 9109, "Unauthorized to access requested resource");
+    }
+    const name = text(json, "name");
+    if (
+      [...accounts.values()].some(({ zones }) =>
+        zones.some((zone) => zone.name === name)
+      )
+    ) {
+      return refusal(400, 1061, `${name} already exists`);
+    }
+    const zone = {
+      id: crypto.randomUUID().replaceAll("-", ""),
+      name,
+      status: "pending",
+      sending: [],
+    };
+    account.zones.push(zone);
+    return envelope({ id: zone.id, name, status: zone.status });
+  };
+
+  /** Answers `call` as the API would. */
+  const respond = async (
+    request: Request,
+    call: ApiCall
+  ): Promise<Response> => {
+    const caller = callers.get(request.headers.get("authorization") ?? "");
+    const unscoped = answerUnscoped(call, caller) ?? answerZones(call, caller);
+    if (unscoped !== undefined) {
+      return unscoped;
+    }
+    const match = accountRoute.exec(call.path)?.groups;
+    const found = routeOf(call, match?.rest ?? "");
+    const session = found?.route.session === true;
+    // An upload session's token opens its upload, and nothing else; the
+    // account's token doesn't open the upload.
+    if (session ? caller !== undefined : caller === undefined) {
+      return refusal(403, 10_000, "Authentication error");
+    }
+    const account = accounts.get(match?.id ?? "");
+    if (account === undefined || (!session && !isMember(account, caller))) {
+      return refusal(403, 9109, "Unauthorized to access requested resource");
+    }
+    if (found === null) {
+      // As the API answers a path it doesn't serve.
+      return refusal(400, 7003, "No route for the URI");
+    }
+    const json: Json =
+      typeof call.body === "object" && call.body !== null
+        ? { ...call.body }
+        : {};
+    return await found.route.answer({
+      account,
+      call,
+      params: found.params,
+      json,
+    });
+  };
+
+  const answer = async (request: Request): Promise<Response> => {
+    const url = new URL(request.url);
+    const call: ApiCall = {
+      method: request.method,
+      path: url.pathname.slice(new URL(base).pathname.length),
+      query: url.searchParams,
+      headers: request.headers,
+      body: await readBody(request),
+    };
+    calls.push(call);
+    const match = matched.findIndex(({ matches }) => matches(call));
+    const [picked] = match === -1 ? [] : matched.splice(match, 1);
+    const failure = planned.get(calls.length) ?? picked?.failure;
+    if (failure === "lost") {
+      await respond(request, call);
+      return lostConnection();
+    }
+    if (failure !== undefined) {
+      return failed(failure);
+    }
+    const between = interleaved.findIndex(({ matches }) => matches(call));
+    const [meanwhile] = between === -1 ? [] : interleaved.splice(between, 1);
+    await meanwhile?.meanwhile();
+    return await respond(request, call);
+  };
+
+  /**
+   * What a Worker on an account's workers.dev subdomain answers: its live
+   * version's `/health`, as core answers it, to a request carrying the
+   * router secret that version has, the platform update notices it
+   * takes, and the admin's signed requests it answers, its
+   * provisioning probe among them. Undefined for any other host.
+   */
+  /**
+   * The account and live version of the Worker a workers.dev `host`
+   * names, when it's on workers.dev and has a version with the first share
+   * of its traffic.
+   */
+  const workerAt = (host: { script?: string; subdomain?: string }) => {
+    const account = [...accounts.values()].find(
+      ({ subdomain }) => subdomain === host.subdomain
+    );
+    const script = account?.scripts.get(host.script ?? "");
+    const [only] = script?.deployments[0]?.versions ?? [];
+    const live = script?.versions.find(({ id }) => id === only?.version_id);
+    return account === undefined ||
+      live === undefined ||
+      script?.subdomain?.enabled !== true
+      ? undefined
+      : { account, live };
+  };
+
+  /** What a workers.dev Worker's live version answers, as core does. */
+  const workerAnswer = async (
+    request: Request,
+    url: URL,
+    { account, live }: NonNullable<ReturnType<typeof workerAt>>
+  ): Promise<Response> => {
+    if (account.unhealthy !== undefined && account.unhealthy > 0) {
+      account.unhealthy -= 1;
+      return new Response("Starting", { status: 503 });
+    }
+    const secret = live.secrets.get("ROUTER_SECRET");
+    if (
+      secret === undefined ||
+      request.headers.get("x-grasp-router-secret") !== secret
+    ) {
+      return new Response("Forbidden", { status: 403 });
+    }
+    if (url.pathname === platformUpdatePath && request.method === "POST") {
+      return await takeNotice(account, live, request);
+    }
+    if (url.pathname === onboardingSummaryPath && request.method === "POST") {
+      return await answerSummary(account, live, request);
+    }
+    if (url.pathname === provisionProbePath && request.method === "POST") {
+      return await answerProbe(account, live, request);
+    }
+    if (url.pathname === adminAskPath && request.method === "POST") {
+      return await answerAsk(account, live, request);
+    }
+    if (url.pathname === adminSnapshotPath && request.method === "POST") {
+      adminReads.now += 1;
+      adminReads.peak = Math.max(adminReads.peak, adminReads.now);
+      try {
+        // As fetch does: an aborted request ends at once, whatever its
+        // core was still doing.
+        return await Promise.race([
+          answerAdmin(account, live, request),
+          whenAborted(request.signal),
+        ]);
+      } finally {
+        adminReads.now -= 1;
+      }
+    }
+    return url.pathname === "/health"
+      ? Response.json({
+          ok: true,
+          version: account.answeringVersion ?? live.id,
+        })
+      : new Response("Not found", { status: 404 });
+  };
+
+  const workersDev = async (
+    request: Request,
+    { followed = false }: { followed?: boolean } = {}
+  ): Promise<Response | undefined> => {
+    const url = new URL(request.url);
+    const host = /^(?<script>[^.]+)\.(?<subdomain>[^.]+)\.workers\.dev$/u.exec(
+      url.hostname
+    )?.groups;
+    if (host === undefined) {
+      return undefined;
+    }
+    const worker = workerAt(host);
+    if (worker === undefined) {
+      return new Response("There is nothing here yet", { status: 404 });
+    }
+    const { account } = worker;
+    if (account.redirectsTo !== undefined && !followed) {
+      // Its body unread: a redirect that's followed sends it on.
+      return new Response(null, {
+        status: 307,
+        headers: { location: new URL(url.pathname, account.redirectsTo).href },
+      });
+    }
+    return await workerAnswer(request, url, worker);
+  };
+
+  /** What the API, or a Worker on workers.dev, answers `fetch(input, init)` with. */
+  const answerFetch = async (
+    input: RequestInfo | URL,
+    init?: RequestInit
+  ): Promise<Response> => {
+    const request = new Request(input, init);
+    const served = await workersDev(request);
+    const location = served?.headers.get("location");
+    if (
+      served !== undefined &&
+      served.status === 307 &&
+      typeof location === "string" &&
+      request.redirect !== "manual"
+    ) {
+      // As fetch does: the same request, headers and body, to wherever
+      // the redirect points. Whatever answers there answers as the core
+      // would, as a host relaying to it would.
+      redirected.push({
+        url: location,
+        routerSecret: request.headers.get("x-grasp-router-secret"),
+      });
+      return (await workersDev(request, { followed: true })) ?? served;
+    }
+    if (served !== undefined) {
+      return served;
+    }
+    if (!request.url.startsWith(`${base}/`)) {
+      throw new Error(`Unexpected outbound request to ${request.url}`);
+    }
+    load.now += 1;
+    load.peak = Math.max(load.peak, load.now);
+    const accountId = accountRoute.exec(
+      new URL(request.url).pathname.slice(new URL(base).pathname.length)
+    )?.groups?.id;
+    if (accountId !== undefined) {
+      busyAccounts.set(accountId, (busyAccounts.get(accountId) ?? 0) + 1);
+      load.peakAccounts = Math.max(load.peakAccounts, busyAccounts.size);
+    }
+    try {
+      // As fetch does: a request whose signal aborts before it's answered
+      // rejects at once, whatever the fake was doing with it.
+      let answered = false;
+      return await Promise.race([
+        (async () => {
+          const response = await answer(request);
+          answered = true;
+          return response;
+        })(),
+        (async () => {
+          try {
+            return await whenAborted(request.signal);
+          } catch (error) {
+            if (!answered) {
+              aborted.count += 1;
+            }
+            throw error;
+          }
+        })(),
+      ]);
+    } finally {
+      load.now -= 1;
+      if (accountId !== undefined) {
+        const left = (busyAccounts.get(accountId) ?? 1) - 1;
+        if (left === 0) {
+          busyAccounts.delete(accountId);
+        } else {
+          busyAccounts.set(accountId, left);
+        }
+      }
+    }
+  };
+
+  /** Empties the fake: no accounts, calls or plans left. */
+  const reset = (): void => {
+    accounts.clear();
+    forgetDatabases();
+    calls.length = 0;
+    planned.clear();
+    takenSubdomains.clear();
+    matched.length = 0;
+    interleaved.length = 0;
+    load.peak = 0;
+    load.peakAccounts = 0;
+    busyAccounts.clear();
+    aborted.count = 0;
+    adminReads.now = 0;
+    adminReads.peak = 0;
+    redirected.length = 0;
+  };
+
+  return {
+    /** Answers in place of `fetch`. */
+    fetch: answerFetch,
+    /** Empties the fake. */
+    reset,
+    /** Every call the fake got in this test, in order. */
+    calls,
+    /** The most calls it was answering at once in this test. */
+    peakConcurrency: () => load.peak,
+    /** The most accounts it was answering calls for at once in this test. */
+    peakAccounts: () => load.peakAccounts,
+    /** The most admin snapshot requests cores were answering at once in this test. */
+    peakAdminReads: () => adminReads.peak,
+    /** The requests a core's redirect sent elsewhere, in this test. */
+    redirected: (): readonly { url: string; routerSecret: string | null }[] =>
+      redirected,
+    /** How many calls their caller aborted before they were answered, in this test. */
+    abortedCalls: () => aborted.count,
+    /** Adds an account the token is a member of, and returns what it holds. */
+    addAccount,
+    /** The accounts named `name`, as the fake holds them. */
+    accountsNamed: (name: string): AccountState[] =>
+      [...accounts.values()].filter((account) => account.name === name),
+    /** Fails the `n`th call from now as `failure` says, whatever it asks. */
+    failCall: (n: number, failure: Failure) => {
+      planned.set(calls.length + n, failure);
+    },
+    /** Takes `subdomain` for an account outside the test, as another customer's. */
+    takeSubdomain: (subdomain: string) => {
+      takenSubdomains.add(subdomain);
+    },
+    /** Fails the next call `matches` picks out as `failure` says, once. */
+    failNext: (matches: (call: ApiCall) => boolean, failure: Failure) => {
+      matched.push({ matches, failure });
+    },
+    /**
+     * Runs `meanwhile` once the next call `matches` picks out has arrived
+     * and before it's answered, once: so what `meanwhile` does lands
+     * first, whatever the call then does.
+     */
+    beforeAnswering: (
+      matches: (call: ApiCall) => boolean,
+      meanwhile: () => Promise<void>
+    ) => {
+      interleaved.push({ matches, meanwhile });
+    },
+  };
+};

@@ -135,7 +135,7 @@ const readTreeAt = async (
 };
 
 /** A version's files, checked against the hash that names them. */
-const readTree = async (
+export const readTree = async (
   env: Env,
   app: AppId,
   tree: string
@@ -194,7 +194,8 @@ export const changeEntry = (
     | "app.candidate.moved"
     | "app.candidate.claimed"
     | "app.blueprint.marked"
-    | "app.blueprint.unmarked",
+    | "app.blueprint.unmarked"
+    | "app.blueprint.updated",
   app: AppId,
   detail: Record<string, AuditDetailValue>
 ): AuditEntry => ({
@@ -374,7 +375,7 @@ const latestFiles = async (env: Env, app: AppId) => {
  * `added` count, as with the limits: an App whose files already collide
  * can still be changed, and fixed.
  */
-const checkPaths = (
+export const checkPaths = (
   paths: Iterable<string>,
   added: ReadonlySet<string>
 ): void => {
@@ -475,6 +476,20 @@ export const versionTree = async (
   checkLimits(files);
   const json = canonicalJson(Object.fromEntries(files));
   return { tree: await sha256Hex(json), json };
+};
+
+/**
+ * The hash of `files`' code: their tree without AGENTS.md, which an App's
+ * agents write as they learn and nothing builds or runs. Two versions of
+ * the same code have the same hash, whatever their AGENTS.md: what the
+ * release vouches for in a built-in blueprint (app-blueprints.ts).
+ */
+export const codeIdentity = async (
+  files: ReadonlyMap<string, string>
+): Promise<string> => {
+  const code = new Map(files);
+  code.delete(appMemoryPath);
+  return await sha256Hex(canonicalJson(Object.fromEntries(code)));
 };
 
 /** Stores a tree under its hash, before any version row names it. */
@@ -745,9 +760,9 @@ export const applyChanges = (
  * still being checked as superseded, for `by`'s commit of `version`: the
  * statements, with their audit event, for the commit's batch.
  */
-const supersededBy = (
+export const supersededBy = (
   db: DrizzleD1Database,
-  by: Identity,
+  by: Pick<Acting, "userId" | "staff" | "actor">,
   app: AppId,
   version: number
 ) =>
@@ -814,6 +829,7 @@ export const commitFiles = async (
     version: (latest?.version ?? 0) + 1,
     parent: latest?.version ?? null,
     tree,
+    code: await codeIdentity(files),
     files: files.size,
     authorId: by.userId,
     message: text,
@@ -1009,6 +1025,7 @@ export const proposeDraft = async (
     version: (parent ?? 0) + 1,
     parent,
     tree,
+    code: await codeIdentity(files),
     files: files.size,
     authorId: by.userId,
     message: text,
@@ -1115,20 +1132,11 @@ export const getVersion = async (
   return toVersion(await findVersion(env, appId, version));
 };
 
-/** How the files of version `to` differ from those of `from`, by path. */
-export const diffVersions = async (
-  env: Env,
-  by: Identity,
-  app: unknown,
-  from: unknown,
-  to: unknown
-): Promise<FileDiff[]> => {
-  const { id: appId } = await appFor(env, by, app, "builder");
-  const treeOf = async (version: unknown) => {
-    const { tree } = await findVersion(env, appId, version);
-    return await readTree(env, appId, tree);
-  };
-  const [before, after] = await Promise.all([treeOf(from), treeOf(to)]);
+/** How the files `after` differ from `before`, by path. */
+export const diffFiles = (
+  before: ReadonlyMap<string, string>,
+  after: ReadonlyMap<string, string>
+): FileDiff[] => {
   const paths = [...new Set([...before.keys(), ...after.keys()])].toSorted();
   return paths.flatMap((path): FileDiff[] => {
     const old = before.get(path);
@@ -1143,6 +1151,23 @@ export const diffVersions = async (
       ? []
       : [{ path, change: "modified", before: old, after: now }];
   });
+};
+
+/** How the files of version `to` differ from those of `from`, by path. */
+export const diffVersions = async (
+  env: Env,
+  by: Identity,
+  app: unknown,
+  from: unknown,
+  to: unknown
+): Promise<FileDiff[]> => {
+  const { id: appId } = await appFor(env, by, app, "builder");
+  const treeOf = async (version: unknown) => {
+    const { tree } = await findVersion(env, appId, version);
+    return await readTree(env, appId, tree);
+  };
+  const [before, after] = await Promise.all([treeOf(from), treeOf(to)]);
+  return diffFiles(before, after);
 };
 
 /** Puts a version up for review. The current version can't be. */
@@ -1719,19 +1744,20 @@ export const makeCurrent = async (
     // is left is a conflict: the base moved, or the candidate ended.
     throw appErrors.create("app.conflict");
   }
-  // What its screens build to with this release's kit, which may not be
-  // the one it was committed under, and with the references they import,
-  // read back from its release, checked above (screen-builds.ts): in the
-  // background, never something making it current waits on. Bounded by
-  // the build wait; what doesn't get recorded now is when it is opened or
+  // What its screens build to, for what waits on an admin
+  // (screen-builds.ts), in the background: read from the release, which
+  // sealed them (screen-references.ts), checked above, so nothing is
+  // compiled. What doesn't get recorded now is when it is opened or
   // reviewed.
   waitUntil(
     recordVersionBuilds(env, appId, number, files, {
-      // Imported here, not at the top: the references reach releases,
-      // which reach back into this module for App lookups.
-      withReferences: async (built) => {
-        const { withScreenReferences } = await import("./screen-references.ts");
-        return await withScreenReferences(env, appId, number, built);
+      // Imported here, not at the top: the screens reach releases, which
+      // reach back into this module for App lookups.
+      codesOf: async () => {
+        const { versionScreenCodes } = await import("./screen-references.ts");
+        return await versionScreenCodes(env, appId, number, files, {
+          unsealed: "refuse",
+        });
       },
     })
   );

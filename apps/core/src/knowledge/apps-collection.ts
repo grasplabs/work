@@ -5,17 +5,11 @@ import { knowledgeErrors } from "@grasp-os/shared/knowledge";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { and, eq, isNotNull, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
-import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { stringify } from "yaml";
 
 import { versionFiles } from "../apps.ts";
-import { apps } from "../db/core/schema.ts";
-import {
-  appEntries,
-  brainPayloads,
-  documents,
-  versions,
-} from "../db/knowledge/schema.ts";
+import { appEntries, apps } from "../db/core/schema.ts";
+import { brainPayloads, documents, versions } from "../db/knowledge/schema.ts";
 import { appEntryPath, appsCollectionId } from "./app-entries.ts";
 import { ensureCollection } from "./collections.ts";
 import type { CollectionRow } from "./collections.ts";
@@ -44,18 +38,20 @@ import { appMemoryPath } from "./memory-files.ts";
 // minutes indexes every App whose entry isn't of its current version
 // (`indexApps`): one whose indexing failed. Indexing
 // where a version is made current keeps entries current; the cron trigger
-// only catches up, so every 15 minutes is enough. `app_entries` has the
-// version each entry holds, written in the entry's batch.
+// only catches up, so every 15 minutes is enough. `app_entries`, in core's
+// database, has the version each entry holds, written once the entry is:
+// should that write fail, the entry is indexed again by the next run.
 //
 // Two indexings of one App at once (a version change and the cron, say)
-// never write over each other: each reads the entry before the App, and
-// writes only over the entry's version it read (the save's `ifVersion`,
-// or the guard on `app_entries` when only that changes), so the one that
-// loses writes nothing. The one that wins may have read the App before a
-// version change that the loser saw, and so leave the text of a version
-// that is no longer current: `app_entries` then names that version, which
-// differs from the App's, and the next cron run indexes it again. So the
-// entry heals itself within 15 minutes.
+// never write over each other: each reads what `app_entries` holds and the
+// entry before the App, and writes only over the entry's version it read
+// (the save's `ifVersion`), so the one that loses writes nothing; one that
+// finds the text unchanged notes its version only over the note it read
+// (`noteVersion`). The one that wins may
+// have read the App before a version change that the loser saw, and so
+// leave the text of a version that is no longer current: `app_entries`
+// then names that version, which differs from the App's, and the next
+// cron run indexes it again. So the entry heals itself within 15 minutes.
 
 /** Who indexes: Grasp itself, with no person behind it. */
 const appsActor: AuditActor = { type: "system" };
@@ -151,23 +147,36 @@ export const entryNow = async (
   };
 };
 
-/** Sets the version the App's entry holds, in the entry's batch. */
-const noteVersion = (
-  db: DrizzleD1Database,
+/**
+ * Sets the version the App's entry holds, once the entry does. With
+ * `onlyOver`, only while `app_entries` still holds what this indexing
+ * read there (`version` undefined: no row): see `indexApp`.
+ */
+const noteVersion = async (
+  env: Env,
   appId: string,
   version: number,
-  onlyIf = sql`1`
-) =>
-  db
+  onlyOver?: { version: number | undefined }
+): Promise<void> => {
+  await drizzle(env.DB)
     .insert(appEntries)
-    .select(sql`SELECT ${appId}, ${version}, ${Date.now()} WHERE ${onlyIf}`)
+    .values({ appId, version, indexedAt: new Date() })
     .onConflictDoUpdate({
       target: appEntries.appId,
       set: {
         version: sql`excluded.version`,
         indexedAt: sql`excluded.indexed_at`,
       },
+      ...(onlyOver === undefined
+        ? {}
+        : {
+            setWhere:
+              onlyOver.version === undefined
+                ? sql`0`
+                : eq(appEntries.version, onlyOver.version),
+          }),
     });
+};
 
 /**
  * Indexes the App `appId` at its current version, unless its entry holds
@@ -178,33 +187,32 @@ const noteVersion = (
 const indexApp = async (env: Env, appId: string): Promise<void> => {
   const knowledge = drizzle(env.KNOWLEDGE);
   const path = appEntryPath(appId);
-  // The entry first, then the App (see above).
-  const [[noted], [stored]] = await knowledge.batch([
-    knowledge
-      .select({ version: appEntries.version })
-      .from(appEntries)
-      .where(eq(appEntries.appId, appId)),
-    knowledge
-      .select({
-        version: documents.currentVersion,
-        sha256: brainPayloads.sha256,
-      })
-      .from(documents)
-      .innerJoin(
-        versions,
-        and(
-          eq(versions.documentId, documents.id),
-          eq(versions.number, documents.currentVersion)
-        )
+  // What was noted and the entry first, then the App (see above).
+  const noted = await drizzle(env.DB)
+    .select({ version: appEntries.version })
+    .from(appEntries)
+    .where(eq(appEntries.appId, appId))
+    .get();
+  const [stored] = await knowledge
+    .select({
+      version: documents.currentVersion,
+      sha256: brainPayloads.sha256,
+    })
+    .from(documents)
+    .innerJoin(
+      versions,
+      and(
+        eq(versions.documentId, documents.id),
+        eq(versions.number, documents.currentVersion)
       )
-      .innerJoin(brainPayloads, eq(brainPayloads.key, versions.payloadKey))
-      .where(
-        and(
-          eq(documents.collectionId, appsCollectionId),
-          eq(documents.path, path)
-        )
-      ),
-  ]);
+    )
+    .innerJoin(brainPayloads, eq(brainPayloads.key, versions.payloadKey))
+    .where(
+      and(
+        eq(documents.collectionId, appsCollectionId),
+        eq(documents.path, path)
+      )
+    );
   const app = await appInUse(env, appId);
   const version = app?.currentVersion ?? null;
   if (app === undefined || version === null || noted?.version === version) {
@@ -214,13 +222,31 @@ const indexApp = async (env: Env, appId: string): Promise<void> => {
   const ifVersion = stored?.version ?? 0;
   // Compared by hash: the entry's payload isn't read.
   if (stored?.sha256 === (await sha256Hex(text))) {
-    // The same text: only the version it holds, while it is as read.
-    await noteVersion(
-      knowledge,
-      appId,
-      version,
-      sql`(SELECT ${documents.currentVersion} FROM ${documents} WHERE ${documents.collectionId} = ${appsCollectionId} AND ${documents.path} = ${path}) = ${ifVersion}`
-    );
+    // The same text: only the version it holds, and only over what was
+    // read, so an indexing that wrote another version's text meanwhile,
+    // and noted it, isn't covered up: its note stays, which differs from
+    // the App's, and the next run indexes the App again.
+    await noteVersion(env, appId, version, { version: noted?.version });
+    // A version number can come back (W, then V again), so the guard above
+    // can't tell every write since; the entry's own version only grows.
+    // Moved on since it was read, the entry may hold another version's
+    // text under this note: the note goes, and the next run indexes the
+    // App again.
+    const now = await knowledge
+      .select({ version: documents.currentVersion })
+      .from(documents)
+      .where(
+        and(
+          eq(documents.collectionId, appsCollectionId),
+          eq(documents.path, path)
+        )
+      )
+      .get();
+    if ((now?.version ?? 0) !== ifVersion) {
+      await drizzle(env.DB)
+        .delete(appEntries)
+        .where(eq(appEntries.appId, appId));
+    }
     return;
   }
   const collection = await ensureCollection(
@@ -236,7 +262,6 @@ const indexApp = async (env: Env, appId: string): Promise<void> => {
       ifVersion,
       message: `Version ${version} of the App`,
       restoredFrom: null,
-      also: [noteVersion(knowledge, appId, version)],
     });
   try {
     await write(text);
@@ -247,6 +272,12 @@ const indexApp = async (env: Env, appId: string): Promise<void> => {
     }
     await write(entryText(app, "This App's AGENTS.md is too large to search."));
   }
+  // Whatever was noted meanwhile: the entry now holds this version's text
+  // (its save's `ifVersion` made sure of that), and `app_entries` must say
+  // so. Kept from a note made since (an unchanged-text indexing of another
+  // version, say), the two would agree with the App and never be indexed
+  // again, with this text in the entry.
+  await noteVersion(env, appId, version);
 };
 
 /**
@@ -273,7 +304,7 @@ export const indexAppNow = async (env: Env, appId: string): Promise<void> => {
  */
 export const indexApps = async (env: Env): Promise<void> => {
   const [noted, inUse] = await Promise.all([
-    drizzle(env.KNOWLEDGE)
+    drizzle(env.DB)
       .select({ appId: appEntries.appId, version: appEntries.version })
       .from(appEntries),
     drizzle(env.DB)

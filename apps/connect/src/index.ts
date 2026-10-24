@@ -37,8 +37,19 @@ import type {
   UnknownOutcome,
   UnknownOutcomeListing,
 } from "@grasp-os/shared/connect";
+import type {
+  DirectoryConnection,
+  DirectoryRead,
+} from "@grasp-os/shared/directory";
+import type {
+  PlaceFile,
+  PlaceItemsRead,
+  PlacesConnection,
+  PlacesRead,
+} from "@grasp-os/shared/document-places";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import type { ErrorPayload } from "@grasp-os/shared/errors";
+import type { HrConnection, HrRead } from "@grasp-os/shared/hr";
 import type {
   LandscapeConnection,
   LandscapeRead,
@@ -49,6 +60,7 @@ import type {
   NpmMalwareReports,
   NpmMetadata,
 } from "@grasp-os/shared/packages";
+import type { ClockRegistration } from "@grasp-os/workerflow/clock";
 import { WorkerEntrypoint } from "cloudflare:workers";
 
 import { ackAuditEvents, auditCall, takeAuditEvents } from "./audit.ts";
@@ -64,11 +76,19 @@ import {
 import { connectionOwners } from "./connections.ts";
 import { connectorContract } from "./contracts.ts";
 import { requireDecision } from "./decisions.ts";
+import { directoryConnections, readDirectory } from "./directory.ts";
+import {
+  placesConnections,
+  readPlaceFile,
+  readPlaceItems,
+  readPlaces,
+} from "./document-places.ts";
 import {
   ackConnectorEvents,
   syncEventSources,
   takeConnectorEvents,
 } from "./events.ts";
+import { hrConnections, readHr } from "./hr.ts";
 import { landscapeConnections, readLandscape } from "./landscape.ts";
 import { catalogLogo } from "./logos.ts";
 import {
@@ -254,10 +274,12 @@ export default class Connect
   /**
    * Arms connect's clock if nothing has: core's clock asks every minute
    * (core's src/clock.ts), the repair path that starts it on a new
-   * deployment and after anything cleared its alarm.
+   * deployment and after anything cleared its alarm. Reports it as it
+   * left it, for the admin's provisioning probe (core's
+   * src/provision-probe.ts).
    */
-  async ensureClock(): Promise<void> {
-    await clock(this.env).ensure();
+  async ensureClock(): Promise<ClockRegistration> {
+    return await clock(this.env).ensureRegistered();
   }
 
   // The audit outbox (src/audit.ts). Core's cron trigger takes the events
@@ -396,6 +418,45 @@ export default class Connect
 
   async readLandscape(request: unknown): Promise<LandscapeRead> {
     return await readLandscape(this.env, request);
+  }
+
+  // The directory (src/directory.ts): for the onboarding, in core, only.
+
+  async directoryConnections(): Promise<DirectoryConnection[]> {
+    return await directoryConnections(this.env);
+  }
+
+  async readDirectory(request: unknown): Promise<DirectoryRead> {
+    return await readDirectory(this.env, request);
+  }
+
+  // The HR platform (src/hr.ts): for the onboarding, in core, only.
+
+  async hrConnections(): Promise<HrConnection[]> {
+    return await hrConnections(this.env);
+  }
+
+  async readHr(request: unknown): Promise<HrRead> {
+    return await readHr(this.env, request);
+  }
+
+  // Where the documents live (src/document-places.ts): for the
+  // onboarding, in core, only.
+
+  async placesConnections(): Promise<PlacesConnection[]> {
+    return await placesConnections(this.env);
+  }
+
+  async readPlaces(request: unknown): Promise<PlacesRead> {
+    return await readPlaces(this.env, request);
+  }
+
+  async readPlaceItems(request: unknown): Promise<PlaceItemsRead> {
+    return await readPlaceItems(this.env, request);
+  }
+
+  async readPlaceFile(request: unknown): Promise<PlaceFile> {
+    return await readPlaceFile(this.env, request);
   }
 
   // Generated connector contracts (src/contracts.ts): what an App's

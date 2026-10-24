@@ -5,13 +5,15 @@
  * (apps/core/src/code-mode.ts), which plain workerd doesn't enforce. And it
  * binds `SANDBOX_HOST` to the sandbox supervisor (workerd-sandbox.ts), so
  * core inspects untrusted App code in workerd processes of its own, killed
- * at their deadline, never in its own (apps/core/src/sandboxed.ts).
+ * at their deadline, never in its own (apps/core/src/sandboxed.ts). Its
+ * `ASSETS` are the on-prem profile's assets service (workerd-assets.ts).
  */
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
 import { z } from "zod";
 
+import { assetsBinding, assetsOf, assetsServices } from "./workerd-assets.ts";
 import { d1Bindings, d1DatabasesOf, d1Service } from "./workerd-d1.ts";
 import { r2Bindings, r2BucketsOf, r2Service } from "./workerd-r2.ts";
 import { parseJsonc } from "./wrangler-config-rules.ts";
@@ -42,7 +44,7 @@ const coreDurableObjects = (): { name: string; className: string }[] =>
     }));
 
 /**
- * The deployment's own hostname, as the console sets it (`SIGN_IN.origin`):
+ * The deployment's own hostname, as the admin sets it (`SIGN_IN.origin`):
  * the domain the router sorts its mail to it by.
  */
 export const smokeHostname = "acme.grasp.test";
@@ -85,6 +87,7 @@ export const smokeConfig = ({
   modules,
   storage,
 }: SmokeConfigInputs): string => {
+  const assets = assetsOf(coreWranglerConfig);
   const durableObjects = coreDurableObjects();
   const durableObjectBindings = durableObjects.map(
     ({ name, className }) =>
@@ -111,6 +114,11 @@ const config :Workerd.Config = (
     # Where untrusted App code runs: the sandbox supervisor, outside core's
     # process, which plain workerd's lack of a CPU limit can't stall.
     (name = "sandbox", external = (address = "unix:${sandboxSocket}", http = ())),
+    # Core's static assets (the frontend, and the compiler, SDK and kit
+    # files a seal, a build and a workflow run read), on the on-prem
+    # profile's assets service: workerd has no assets binding
+    # (apps/core/src/on-prem/assets.ts).
+    ${assetsServices(assets.directory).join(",\n    ")},
   ],
   sockets = [(name = "http", address = "127.0.0.1:${port}", http = (), service = "core")],
 );
@@ -125,6 +133,7 @@ const core :Workerd.Worker = (
     (name = "RUNTIME_PROFILE", text = "workerd"),
     (name = "SIGN_IN", text = ${JSON.stringify(JSON.stringify(signIn))}),
     (name = "SANDBOX_HOST", service = "sandbox"),
+    ${assetsBinding(assets.binding)},
     ${durableObjectBindings.join(",\n    ")},
     ${d1Bindings(d1DatabasesOf(coreWranglerConfig)).join(",\n    ")},
     ${r2Bindings(r2BucketsOf(coreWranglerConfig)).join(",\n    ")},

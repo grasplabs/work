@@ -140,6 +140,29 @@ const guests: DeclaredPermission = {
   binding: "GUESTS",
 };
 
+/** Where `hello`'s screen goes, in a release that ships one. */
+const helloScreen = "screens/hello.tsx";
+
+/**
+ * A release whose `hello` has a screen: one that calls its App, so it
+ * builds in the references each copy's own IDs make (`#grasp`).
+ */
+const helloWithScreen = (): Release =>
+  releaseWith({
+    files: {
+      ...hello().files,
+      [helloScreen]: `import { useMutation } from "@grasp-os/sdk/react";
+import { Button } from "@grasp-os/ui/components/button";
+import { api } from "#grasp";
+
+export default function Hello() {
+  const greet = useMutation(api.greetings.hello);
+  return <Button onClick={() => void greet({ name: "you" })}>Greet</Button>;
+}
+`,
+    },
+  });
+
 /** A model the deployment allows. */
 const allowedModel = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 
@@ -697,6 +720,301 @@ describe("the built-in blueprints", () => {
       afterRelease: [granted],
       next: [{ status: "requested", requestedBy: builder.userId }],
       rolledBack: ["requested"],
+    });
+
+    await reinstall();
+  });
+
+  it("have a copy's screens approved by the release while its code is exactly theirs, never over an admin, and only for a copy core made", async () => {
+    await expect(install(helloWithScreen())).resolves.toBeTruthy();
+    const admin = await signedInApi(idp, "admin");
+    const builder = await signedInApi(idp, "builder");
+    const files = helloWithScreen().blueprints.find(
+      ({ id }) => id === "hello"
+    )?.files;
+    const greeting = files?.[greetings];
+    if (!files || greeting === undefined) {
+      throw new Error("The release has no hello");
+    }
+    const { app } = await builder.api.apps.blueprints.create("hello", {
+      name: "Vouched",
+    });
+    const opened: { artifact: string }[] = [];
+    const events = await auditedDuring(async () => {
+      await builder.api.apps.versions.setCurrent(app.id, 1);
+      opened.push(await builder.api.screens.open(app.id, "hello"));
+    });
+    const [first] = opened;
+    if (!first) {
+      throw new Error("Nothing was opened");
+    }
+    const review = await admin.api.screenTrust.review(app.id);
+
+    // Its AGENTS.md written: the same code, built again for the version.
+    const { version: noted } = await builder.api.apps.files.commit(
+      app.id,
+      { "AGENTS.md": "Greets whoever asks.\n" },
+      "Notes"
+    );
+    await builder.api.apps.versions.setCurrent(app.id, noted);
+    const sameCode = await outcome(builder.api.screens.open(app.id, "hello"));
+
+    // Code of the builder's own, outside the screen too: an admin's to
+    // approve, as any.
+    const { version: mine } = await builder.api.apps.files.commit(
+      app.id,
+      { [greetings]: `${greeting}\n// Mine.\n` },
+      "Mine"
+    );
+    await builder.api.apps.versions.setCurrent(app.id, mine);
+    const changed = await outcome(builder.api.screens.open(app.id, "hello"));
+
+    // Back to the first version, then taken back by an admin: their word
+    // stands, whatever the release vouches for.
+    await builder.api.apps.versions.setCurrent(app.id, 1);
+    const back = await outcome(builder.api.screens.open(app.id, "hello"));
+    await admin.api.screenTrust.revoke(app.id, first.artifact);
+    const revoked = await outcome(builder.api.screens.open(app.id, "hello"));
+    // A builder's new version of the same code builds the screen anew (its
+    // references name the version): the release vouches for it no more,
+    // so it waits for an admin.
+    const { version: renoted } = await builder.api.apps.files.commit(
+      app.id,
+      // Over the builder's own code: the built-in's again.
+      {
+        "AGENTS.md": "Greets whoever asks, again.\n",
+        [greetings]: greeting,
+      },
+      "Notes again"
+    );
+    await builder.api.apps.versions.setCurrent(app.id, renoted);
+    const afterRevoke = await outcome(
+      builder.api.screens.open(app.id, "hello")
+    );
+    const reviewAfterRevoke = await admin.api.screenTrust.review(app.id);
+
+    // The same code in an App labelled as hello's but not created from
+    // it, and in a copy of a marked version of the copy: nobody vouches.
+    const labelled = await builder.api.apps.create({
+      name: "Labelled",
+      blueprint: "hello",
+    });
+    const { version: own } = await builder.api.apps.files.commit(
+      labelled.id,
+      files,
+      "Hello's code"
+    );
+    await builder.api.apps.versions.setCurrent(labelled.id, own);
+    const { id: marked } = await builder.api.apps.blueprints.mark(app.id, 1);
+    const { app: copyOfCopy } = await builder.api.apps.blueprints.create(
+      marked,
+      { name: "Copy of a copy" }
+    );
+    await builder.api.apps.versions.setCurrent(copyOfCopy.id, 1);
+
+    expect({
+      attested: events
+        .filter(({ action }) => action === "app.artifact.attested")
+        .map(({ actor, target, detail }) => ({
+          actor,
+          target: target?.id,
+          artifact: detail.artifact,
+          version: detail.version,
+          screen: detail.screen,
+        })),
+      review: review.screens.map(({ screen, artifact, trust, decidedBy }) => ({
+        screen,
+        artifact,
+        trust,
+        decidedBy,
+      })),
+      sameCode,
+      changed,
+      back,
+      revoked,
+      afterRevoke,
+      reviewAfterRevoke: reviewAfterRevoke.screens.map(
+        ({ artifact, trust, decidedBy }) => ({
+          other: artifact !== first.artifact,
+          trust,
+          decidedBy,
+        })
+      ),
+      labelled: await outcome(builder.api.screens.open(labelled.id, "hello")),
+      copyOfCopy: await outcome(
+        builder.api.screens.open(copyOfCopy.id, "hello")
+      ),
+    }).toStrictEqual({
+      attested: [
+        {
+          actor: { type: "system" },
+          target: app.id,
+          artifact: first.artifact,
+          version: 1,
+          screen: "hello",
+        },
+      ],
+      review: [
+        {
+          screen: "hello",
+          artifact: first.artifact,
+          trust: "approved",
+          decidedBy: "grasp",
+        },
+      ],
+      sameCode: "ok",
+      changed: "screen.unreviewed",
+      back: "ok",
+      revoked: "screen.revoked",
+      afterRevoke: "screen.unreviewed",
+      reviewAfterRevoke: [
+        { other: true, trust: "unreviewed", decidedBy: null },
+      ],
+      labelled: "screen.unreviewed",
+      copyOfCopy: "screen.unreviewed",
+    });
+
+    await reinstall();
+  });
+
+  it("offer a copy their newer code as an update its builders take or leave, merged over their edits, and made current only as any version", async () => {
+    await reinstall();
+    const builder = await signedInApi(idp, "builder");
+    const stranger = await signedInApi(idp, "builder");
+    const { app } = await builder.api.apps.blueprints.create("hello", {
+      name: "Edited",
+    });
+    const { app: untouched } = await builder.api.apps.blueprints.create(
+      "hello",
+      { name: "Untouched" }
+    );
+    const unchanged = await builder.api.apps.blueprints.update(app.id);
+    const released = await helloRow();
+
+    // The builder's own greeting, made current.
+    const mine = `${hello().files[greetings]}\n// Mine.\n`;
+    const { version: edited } = await builder.api.apps.files.commit(
+      app.id,
+      { [greetings]: mine },
+      "Mine"
+    );
+    await builder.api.apps.versions.setCurrent(app.id, edited);
+
+    // A release that changes the greeting too, and the schema.
+    const schema = `${hello().files["schema.ts"]}\n// Release 2.\n`;
+    const next = releaseWith({
+      files: {
+        ...hello().files,
+        [greetings]: `${hello().files[greetings]}\n// Release 2.\n`,
+        "schema.ts": schema,
+      },
+    });
+    await expect(install(next)).resolves.toBeTruthy();
+    const installed = await helloRow();
+    const offered = await builder.api.apps.blueprints.update(app.id);
+    if (!offered) {
+      throw new Error("No update was offered");
+    }
+    // Offered, not applied: the copy is as its builder left it.
+    const before = await builder.api.apps.files.read(app.id);
+    const stale = await outcome(
+      builder.api.apps.blueprints.acceptUpdate(app.id, {
+        to: offered.to,
+        over: 1,
+      })
+    );
+    const forStranger = await outcome(
+      stranger.api.apps.blueprints.update(app.id)
+    );
+
+    const accepted: { version: number }[] = [];
+    const events = await auditedDuring(async () => {
+      accepted.push(
+        await builder.api.apps.blueprints.acceptUpdate(app.id, {
+          to: offered.to,
+          over: edited,
+        })
+      );
+    });
+    const [taken] = accepted;
+    if (!taken) {
+      throw new Error("Nothing was accepted");
+    }
+    const again = await outcome(
+      builder.api.apps.blueprints.acceptUpdate(app.id, {
+        to: offered.to,
+        over: edited,
+      })
+    );
+    const afterwards = await builder.api.apps.blueprints.update(app.id);
+    const { currentVersion: currentBefore } = await builder.api.apps.get(
+      app.id
+    );
+    await builder.api.apps.versions.setCurrent(app.id, taken.version);
+    const { currentVersion: current } = await builder.api.apps.get(app.id);
+
+    // A copy nobody edited takes the newer code whole; a copy of a marked
+    // version of it is offered nothing, as a marked version never changes.
+    const whole = await builder.api.apps.blueprints.update(untouched.id);
+    const { version: wholeVersion } =
+      await builder.api.apps.blueprints.acceptUpdate(untouched.id, {
+        to: offered.to,
+        over: 1,
+      });
+    const { id: marked } = await builder.api.apps.blueprints.mark(
+      untouched.id,
+      1
+    );
+    const { app: ofMarked } = await builder.api.apps.blueprints.create(marked, {
+      name: "Of a marked one",
+    });
+
+    expect({
+      unchanged,
+      offered: {
+        ...offered,
+        changes: offered.changes.map(({ path, change }) => [path, change]),
+      },
+      before: before[greetings],
+      stale,
+      forStranger,
+      audited: events.map(({ action, detail }) => [
+        action,
+        detail.version ?? null,
+      ]),
+      files: await builder.api.apps.files.read(app.id, taken.version),
+      again,
+      afterwards,
+      currentBefore,
+      current,
+      whole: whole?.conflicts,
+      wholeFiles: await builder.api.apps.files.read(untouched.id, wholeVersion),
+      ofMarked: await builder.api.apps.blueprints.update(ofMarked.id),
+    }).toStrictEqual({
+      unchanged: null,
+      offered: {
+        blueprint: "hello",
+        from: released?.tree,
+        to: installed?.tree,
+        over: edited,
+        changes: [["schema.ts", "modified"]],
+        conflicts: [greetings],
+      },
+      before: mine,
+      stale: "app.conflict",
+      forStranger: "app.not_found",
+      audited: [
+        ["app.committed", taken.version],
+        ["app.blueprint.updated", taken.version],
+      ],
+      files: { ...hello().files, [greetings]: mine, "schema.ts": schema },
+      again: "app.conflict",
+      afterwards: null,
+      currentBefore: edited,
+      current: taken.version,
+      whole: [],
+      wholeFiles: next.blueprints.find(({ id }) => id === "hello")?.files,
+      ofMarked: null,
     });
 
     await reinstall();

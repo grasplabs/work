@@ -4,6 +4,7 @@ import {
   delegateActorOf,
 } from "@grasp-os/shared/audit";
 import type { AuditDetailValue, AuditEntry } from "@grasp-os/shared/audit";
+import type { ChatChannel } from "@grasp-os/shared/chat";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { connectionIdSchema, identifierSchema } from "@grasp-os/shared/ids";
 import type { ChatId, WorkspaceId } from "@grasp-os/shared/ids";
@@ -39,6 +40,11 @@ export interface AgentScope {
   chatId: ChatId;
   /** The person the chat belongs to, whom the agent acts for. */
   personId: string;
+  /**
+   * The channel the chat came through, as the chat stored it, which the
+   * agent's audit events name; Grasp's own app (`web`) when not given.
+   */
+  via?: ChatChannel;
   /** The code run the stub was made for: it answers only while that runs. */
   runId: string;
 }
@@ -271,7 +277,7 @@ export const auditAgentCall = async (
   ended?: { outcome: CallOutcome; reason: string | null }
 ): Promise<void> => {
   await keepAuditEvent(env, drizzle(env.DB), {
-    actor: delegateActorOf(chatAuthority(scope)),
+    actor: delegateActorOf(chatAuthority(scope), scope.via),
     action: "agent.call",
     target,
     // The actor is the organization's agent, in everyone's chats: which chat

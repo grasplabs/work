@@ -15,18 +15,18 @@ import { onboardingStore } from "../src/onboarding/store.ts";
 import { summaryOf } from "../src/onboarding/summary.ts";
 import { routed } from "./sign-in.ts";
 
-// The onboarding summary for the console (src/onboarding/summary.ts): only
-// the console may read it, and what it reads is numbers only. The ways it
+// The onboarding summary for the admin (src/onboarding/summary.ts): only
+// the admin may read it, and what it reads is numbers only. The ways it
 // can fail, tried here:
 //
-// - Anyone but the console reading it: unsigned, signed with another key,
+// - Anyone but the admin reading it: unsigned, signed with another key,
 //   sent long ago, or not a request at all.
-// - A name, a team or a word anyone said reaching the console.
+// - A name, a team or a word anyone said reaching the admin.
 
 /** A name nobody else uses, to look for where it must not be. */
 const sentinel = "Ottoline Brackenbury";
 
-/** `body`'s signature as the console makes it, with the key `secret` gives. */
+/** `body`'s signature as the admin makes it, with the key `secret` gives. */
 const signatureOf = async (
   body: string,
   secret = env.BETTER_AUTH_SECRET,
@@ -138,6 +138,7 @@ const view = (more: Partial<OnboardingView> = {}): OnboardingView => ({
   agreed: true,
   paused: false,
   sponsor: null,
+  waiting: 0,
   ...more,
 });
 

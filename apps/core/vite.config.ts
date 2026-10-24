@@ -14,6 +14,8 @@ import { testVersionModule } from "./test/compiler-version.ts";
 import {
   connectClient,
   connectProvidersScript,
+  directoryClient,
+  documentsClient,
   landscapeClient,
 } from "./test/connect-providers.ts";
 import { testSignIn } from "./test/sign-in-config.ts";
@@ -179,7 +181,7 @@ export const coreProject = (
             BETTER_AUTH_SECRET: "test-better-auth-secret-of-32-chars-or-more",
             CAPABILITY_SIGNING_KEY: capabilitySigningKey,
             // The audit log works out when to purge archives from its own
-            // env: the shortest archive retention the console may set.
+            // env: the shortest archive retention the admin may set.
             AUDIT_ARCHIVE_RETENTION_DAYS: "365",
             ...testSignIn,
             // Few enough statistics points to reach each bound in a test.
@@ -278,6 +280,10 @@ export const coreProject = (
                 MICROSOFT_CLIENT_SECRET: connectClient.secret,
                 MICROSOFT_LANDSCAPE_CLIENT_ID: landscapeClient.id,
                 MICROSOFT_LANDSCAPE_CLIENT_SECRET: landscapeClient.secret,
+                MICROSOFT_DIRECTORY_CLIENT_ID: directoryClient.id,
+                MICROSOFT_DIRECTORY_CLIENT_SECRET: directoryClient.secret,
+                MICROSOFT_DOCUMENTS_CLIENT_ID: documentsClient.id,
+                MICROSOFT_DOCUMENTS_CLIENT_SECRET: documentsClient.secret,
                 COMPOSIO_API_KEY: testComposioKey,
               },
               d1Databases: { DB: "grasp-os-connect" },

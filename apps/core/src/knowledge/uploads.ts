@@ -24,7 +24,7 @@ import type {
   UploadExtension,
   UploadMediaType,
 } from "@grasp-os/shared/uploads";
-import { and, asc, eq, gt, inArray, lt, or, sql } from "drizzle-orm";
+import { and, asc, count, eq, gt, inArray, lt, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
@@ -37,11 +37,8 @@ import {
   staffRole,
   teamsOf,
 } from "../auth/identity.ts";
-import {
-  collections,
-  uploadCleanups,
-  uploads,
-} from "../db/knowledge/schema.ts";
+import { uploadCleanups, uploads } from "../db/core/schema.ts";
+import { collections } from "../db/knowledge/schema.ts";
 import { errorResponse } from "../errors.ts";
 import { runEngine } from "../workflows/engine.ts";
 import { allowedCollections, noteProvenance } from "./access.ts";
@@ -49,6 +46,7 @@ import { readableCollection, requireWritable } from "./collections.ts";
 import type { CollectionRow } from "./collections.ts";
 import { findByPath, writeVersion } from "./documents.ts";
 import { ExtractorUnavailableError, extractorFor } from "./extract.ts";
+import type { ErasedFiles, OnErase } from "./purge.ts";
 
 // Files uploaded into Knowledge (see @grasp-os/shared/uploads). An upload
 // is checked by what arrived (its size, and that its first bytes are the
@@ -56,10 +54,16 @@ import { ExtractorUnavailableError, extractorFor } from "./extract.ts";
 // original stored in R2 (checked against its hash), and its extraction
 // started: a run of core's own workflow (extraction.ts) on the engine,
 // whose one step extracts the text in a sandbox (extract.ts) and saves it
-// as the next version of the document at the file's name, in the save
-// pipeline's batch, which marks the upload ready too. The uploader's access
-// is checked again just before that save. Whatever fails ends the upload
-// failed, with the code of why.
+// as the next version of the document at the file's name, then marks the
+// upload ready. The uploader's access is checked again just before that
+// save. Whatever fails ends the upload failed, with the code of why.
+//
+// Uploads are core's records, in core's database; the document is
+// Knowledge's. So no batch holds both, and an upload is claimed for its
+// save first (`saving`), which a purge's forgetting refuses
+// (`uploadErasure`): a purge never forgets an upload whose text is being
+// saved, and an upload it forgot is never saved, so no extracted text
+// lands after a purge that named its document.
 //
 // Each upload has an original of its own, kept while the upload is: for
 // downloading the original of a document's version, which comes as an
@@ -80,6 +84,9 @@ export const extractionRunId = (uploadId: string): string =>
   `upload-${uploadId}`;
 
 type UploadRow = typeof uploads.$inferSelect;
+
+/** The states of an upload that hasn't ended. */
+const unended = ["pending", "extracting", "saving"] as const;
 
 /** The first bytes of each type: a PDF's header, a ZIP's for Office files. */
 const signatures: Readonly<Record<UploadExtension, readonly number[]>> = {
@@ -117,7 +124,8 @@ const toUpload = (row: UploadRow): Upload => ({
   name: row.path,
   mediaType: mediaTypeOf(row),
   bytes: row.bytes,
-  status: row.status,
+  // Being saved is still extracting, as people see it.
+  status: row.status === "saving" ? "extracting" : row.status,
   documentId:
     row.documentId === null ? null : documentIdSchema.parse(row.documentId),
   version: row.version,
@@ -156,7 +164,7 @@ export const failUpload = async (
   uploadId: string,
   code: string
 ): Promise<void> => {
-  const db = drizzle(env.KNOWLEDGE);
+  const db = drizzle(env.DB);
   const row = await db
     .select()
     .from(uploads)
@@ -172,12 +180,7 @@ export const failUpload = async (
     db
       .update(uploads)
       .set({ status: "failed", failure: code, updatedAt: now })
-      .where(
-        and(
-          eq(uploads.id, uploadId),
-          inArray(uploads.status, ["pending", "extracting"])
-        )
-      ),
+      .where(and(eq(uploads.id, uploadId), inArray(uploads.status, unended))),
     outboxedWhere(
       db,
       {
@@ -233,13 +236,14 @@ export const uploadFile = async (
   ) {
     throw uploadErrors.create("upload.unsupported");
   }
-  const db = drizzle(env.KNOWLEDGE);
+  const knowledge = drizzle(env.KNOWLEDGE);
   const collection = await readableCollection(
-    db,
-    await allowedCollections(env, db, { type: "person", person }),
+    knowledge,
+    await allowedCollections(env, knowledge, { type: "person", person }),
     collectionId
   );
   requireWritable(env, person, collection);
+  const db = drizzle(env.DB);
   const sha256 = hex(await crypto.subtle.digest("SHA-256", bytes));
   const now = new Date();
   const actor = actorOf(person);
@@ -310,7 +314,7 @@ export const getUpload = async (
 ): Promise<Upload> => {
   const row =
     typeof uploadId === "string"
-      ? await drizzle(env.KNOWLEDGE)
+      ? await drizzle(env.DB)
           .select()
           .from(uploads)
           .where(
@@ -482,20 +486,25 @@ export const extractUpload = async (
   env: Env,
   uploadId: string
 ): Promise<void> => {
-  const db = drizzle(env.KNOWLEDGE);
-  const found = await db
-    .select({ upload: uploads, collection: collections })
+  const db = drizzle(env.DB);
+  const knowledge = drizzle(env.KNOWLEDGE);
+  const row = await db
+    .select()
     .from(uploads)
-    .innerJoin(collections, eq(collections.id, uploads.collectionId))
     .where(eq(uploads.id, uploadId))
     .get();
-  if (
-    found === undefined ||
-    ["ready", "failed"].includes(found.upload.status)
-  ) {
+  if (row === undefined || ["ready", "failed"].includes(row.status)) {
     return;
   }
-  const { upload: row, collection } = found;
+  const collection = await knowledge
+    .select()
+    .from(collections)
+    .where(eq(collections.id, row.collectionId))
+    .get();
+  if (collection === undefined) {
+    // Its collection is gone (a personal purge): left to be forgotten.
+    return;
+  }
   await db
     .update(uploads)
     .set({ status: "extracting", updatedAt: new Date() })
@@ -534,16 +543,28 @@ export const extractUpload = async (
   }
   // The version first, then a later upload: one saved after this read
   // moves the version on, and the save below conflicts.
-  const current = await findByPath(db, row.collectionId, row.path);
+  const current = await findByPath(knowledge, row.collectionId, row.path);
   const ifVersion = current?.currentVersion ?? 0;
   if (await laterUploadSaved(db, row)) {
     throw uploadErrors.create("upload.superseded");
   }
-  await requireStillWritable(env, db, row, collection);
+  await requireStillWritable(env, knowledge, row, collection);
   const actor: AuditActor = auditActorSchema.parse(JSON.parse(row.actor));
+  // Claimed for the save, unless it was forgotten meanwhile (a purge of
+  // its document, whose text this would save again) or ended: then it is
+  // left. A purge's forgetting refuses a claimed upload, so none forgets
+  // it from here on.
+  const [claimed] = await db
+    .update(uploads)
+    .set({ status: "saving", updatedAt: new Date() })
+    .where(and(eq(uploads.id, uploadId), inArray(uploads.status, unended)))
+    .returning({ id: uploads.id });
+  if (claimed === undefined) {
+    return;
+  }
   // A conflict (someone saved the document meanwhile) throws, and the
   // step's retry saves on top of their version.
-  await writeVersion(
+  const saved = await writeVersion(
     env,
     { actor, userId: row.uploadedBy },
     {
@@ -553,84 +574,37 @@ export const extractUpload = async (
       ifVersion,
       message: `Uploaded ${row.path}`,
       restoredFrom: null,
-      also: [
-        db
-          .update(uploads)
-          .set({
-            status: "ready",
-            documentId: sql`(SELECT id FROM documents WHERE collection_id = ${row.collectionId} AND path = ${row.path})`,
-            version: ifVersion + 1,
-            updatedAt: new Date(),
-          })
-          .where(
-            and(
-              eq(uploads.id, uploadId),
-              inArray(uploads.status, ["pending", "extracting"])
-            )
-          ),
-        // Fails the batch unless the update above made the upload ready
-        // with this version: when it was forgotten meanwhile (a purge of
-        // its document, say, whose text this would save again) or ended.
-        // It inserts a cleanup without a key, which NOT NULL refuses; D1
-        // has no other way to abort a batch on a condition. The step's
-        // retry then finds the upload gone, or ended, and leaves it.
-        db
-          .insert(uploadCleanups)
-          .select(
-            sql`SELECT NULL, NULL, NULL WHERE NOT EXISTS (SELECT 1 FROM ${uploads} WHERE ${uploads.id} = ${uploadId} AND ${uploads.status} = 'ready' AND ${uploads.version} = ${ifVersion + 1})`
-          ),
-        // Ready, so its original stays.
-        db
-          .delete(uploadCleanups)
-          .where(eq(uploadCleanups.key, originalKey(row.collectionId, row.id))),
-        outboxed(db, {
-          actor: { type: "system" },
-          action: "knowledge.upload.extracted",
-          target: { type: "upload", id: uploadId },
-          detail: {
-            collectionId: row.collectionId,
-            extractor: extractor.name,
-            version: ifVersion + 1,
-          },
-        }),
-      ],
     }
   );
+  await auditedBatch(env, db, [
+    db
+      .update(uploads)
+      .set({
+        status: "ready",
+        documentId: saved.id,
+        version: saved.currentVersion,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(uploads.id, uploadId), eq(uploads.status, "saving"))),
+    // Ready, so its original stays.
+    db
+      .delete(uploadCleanups)
+      .where(eq(uploadCleanups.key, originalKey(row.collectionId, row.id))),
+    outboxed(db, {
+      actor: { type: "system" },
+      action: "knowledge.upload.extracted",
+      target: { type: "upload", id: uploadId },
+      detail: {
+        collectionId: row.collectionId,
+        extractor: extractor.name,
+        version: saved.currentVersion,
+      },
+    }),
+  ]);
 };
 
 /** Most uploads, and cleanups, looked at at once. */
 const sweepBatch = 20;
-
-/**
- * Statements for a purge's batch (purge.ts) that forget the uploads
- * `where` selects and record their originals for deleting, which
- * `cleanUpOriginals` then does.
- */
-export const forgetUploads = (db: DrizzleD1Database, where: SQL | undefined) =>
-  [
-    db
-      .insert(uploadCleanups)
-      .select(
-        db
-          .select({
-            key: sql<string>`'knowledge/' || ${uploads.collectionId} || '/' || ${uploads.id}`.as(
-              "key"
-            ),
-            uploadId: uploads.id,
-            // One that ended has its original written: deleted at once.
-            // One still pending may still be storing it: its cleanup
-            // waits until it can't be.
-            createdAt:
-              sql<Date>`CASE WHEN ${uploads.status} IN ('ready', 'failed') THEN 0 ELSE ${uploads.createdAt} END`.as(
-                "created_at"
-              ),
-          })
-          .from(uploads)
-          .where(where)
-      )
-      .onConflictDoNothing(),
-    db.delete(uploads).where(where),
-  ] as const;
 
 /**
  * Deletes the originals recorded for deleting whose upload is gone or
@@ -639,7 +613,7 @@ export const forgetUploads = (db: DrizzleD1Database, where: SQL | undefined) =>
  * already, and the cron trigger deletes what's left.
  */
 export const cleanUpOriginals = async (env: Env): Promise<void> => {
-  const db = drizzle(env.KNOWLEDGE);
+  const db = drizzle(env.DB);
   try {
     const cleanups = await db
       .select({ key: uploadCleanups.key })
@@ -661,6 +635,95 @@ export const cleanUpOriginals = async (env: Env): Promise<void> => {
   }
 };
 
+/** The uploads of `scope`: a collection's, or those under a document's name. */
+const uploadsOf = (scope: ErasedFiles): SQL =>
+  ("path" in scope
+    ? and(
+        eq(uploads.collectionId, scope.collectionId),
+        eq(uploads.path, scope.path)
+      )
+    : eq(uploads.collectionId, scope.collectionId)) ?? sql`0`;
+
+/**
+ * Forgets the uploads of `scope` and records their originals for deleting,
+ * then deletes what it can: one batch, which fails while one of them is
+ * claimed for its save (`saving`), as `knowledge.conflict`: running the
+ * purge again a moment later forgets it, or finds its text saved.
+ */
+const forgetUploads = async (env: Env, scope: ErasedFiles): Promise<void> => {
+  const db = drizzle(env.DB);
+  const where = uploadsOf(scope);
+  const saving = and(where, eq(uploads.status, "saving"));
+  try {
+    await db.batch([
+      // Fails the batch while one is being saved: it inserts a cleanup
+      // without a key, which NOT NULL refuses; D1 has no other way to
+      // abort a batch on a condition.
+      db
+        .insert(uploadCleanups)
+        .select(
+          sql`SELECT NULL, NULL, NULL WHERE EXISTS (SELECT 1 FROM ${uploads} WHERE ${saving})`
+        ),
+      db
+        .insert(uploadCleanups)
+        .select(
+          db
+            .select({
+              key: sql<string>`'knowledge/' || ${uploads.collectionId} || '/' || ${uploads.id}`.as(
+                "key"
+              ),
+              uploadId: uploads.id,
+              // One that ended has its original written: deleted at once.
+              // One still pending may still be storing it: its cleanup
+              // waits until it can't be.
+              createdAt:
+                sql<Date>`CASE WHEN ${uploads.status} IN ('ready', 'failed') THEN 0 ELSE ${uploads.createdAt} END`.as(
+                  "created_at"
+                ),
+            })
+            .from(uploads)
+            .where(where)
+        )
+        .onConflictDoNothing(),
+      db.delete(uploads).where(where),
+    ]);
+  } catch (error) {
+    const stillSaving = await db
+      .select({ id: uploads.id })
+      .from(uploads)
+      .where(saving)
+      .get();
+    if (stillSaving !== undefined) {
+      throw knowledgeErrors.create("knowledge.conflict");
+    }
+    throw error;
+  }
+  await cleanUpOriginals(env);
+};
+
+/**
+ * The uploads as a Knowledge purge reaches them (purge.ts `OnErase`): the
+ * originals of the files uploaded as the documents it purges hold the data
+ * too, so it forgets the uploads and deletes their originals.
+ */
+export const uploadErasure = (
+  env: Env
+): Pick<OnErase, "countFiles" | "forgetFiles"> => ({
+  countFiles: async (scopes) => {
+    if (scopes.length === 0) {
+      return 0;
+    }
+    const [found] = await drizzle(env.DB)
+      .select({ count: count() })
+      .from(uploads)
+      .where(or(...scopes.map(uploadsOf)));
+    return found?.count ?? 0;
+  },
+  forgetFiles: async (_person, scope) => {
+    await forgetUploads(env, scope);
+  },
+});
+
 /** How long an upload may go unchanged before the cron trigger looks at it. */
 const staleAfterMs = 10 * 60_000;
 
@@ -680,12 +743,12 @@ const endedStatuses: ReadonlySet<string> = new Set([
  */
 export const sweepUploads = async (env: Env): Promise<void> => {
   await cleanUpOriginals(env);
-  const stale = await drizzle(env.KNOWLEDGE)
+  const stale = await drizzle(env.DB)
     .select({ id: uploads.id })
     .from(uploads)
     .where(
       and(
-        inArray(uploads.status, ["pending", "extracting"]),
+        inArray(uploads.status, unended),
         lt(uploads.updatedAt, new Date(Date.now() - staleAfterMs))
       )
     )
@@ -746,20 +809,30 @@ export const originalResponse = async (
       requestId
     );
   }
-  const db = drizzle(env.KNOWLEDGE);
+  const knowledge = drizzle(env.KNOWLEDGE);
   const reader = { type: "person", person } as const;
-  const found = await db
-    .select({ upload: uploads, collection: collections })
+  const ready = await drizzle(env.DB)
+    .select()
     .from(uploads)
-    .innerJoin(collections, eq(collections.id, uploads.collectionId))
-    .where(
-      and(
-        eq(uploads.id, uploadId),
-        eq(uploads.status, "ready"),
-        await allowedCollections(env, db, reader)
-      )
-    )
+    .where(and(eq(uploads.id, uploadId), eq(uploads.status, "ready")))
     .get();
+  const collection =
+    ready === undefined
+      ? undefined
+      : await knowledge
+          .select()
+          .from(collections)
+          .where(
+            and(
+              eq(collections.id, ready.collectionId),
+              await allowedCollections(env, knowledge, reader)
+            )
+          )
+          .get();
+  const found =
+    ready === undefined || collection === undefined
+      ? undefined
+      : { upload: ready, collection };
   const original = found
     ? await env.FILES.get(originalKey(found.collection.id, found.upload.id))
     : null;

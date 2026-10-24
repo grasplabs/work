@@ -1,0 +1,36 @@
+diff --git a/dist/worker/lib/cloudflare/test-internal.mjs b/dist/worker/lib/cloudflare/test-internal.mjs
+index 0e2022f4106d157988f41def39e9b60fb4ccbc26..203f1ee51e41d4375af64e0bc5d8762235d1c288 100644
+--- a/dist/worker/lib/cloudflare/test-internal.mjs
++++ b/dist/worker/lib/cloudflare/test-internal.mjs
+@@ -304,18 +304,25 @@ const IGNORED_KEYS = ["self"];
+ */
+ function createProxyPrototypeClass(superClass, getUnknownPrototypeKey) {
+ 	function Class(...args) {
+-		Class.prototype = new Proxy(Class.prototype, { get(target, key, receiver) {
+-			const value = Reflect.get(target, key, receiver);
+-			if (value !== void 0) return value;
+-			if (typeof key === "symbol" || IGNORED_KEYS.includes(key)) return;
+-			return getUnknownPrototypeKey.call(receiver, key);
+-		} });
++		// Grasp OS patch: the prototype is wrapped once, here, rather than
++		// again on every construction, which nested one more Proxy per
++		// instance until a property lookup overflowed the stack (GRA-972).
++		if (!Class[kPrototypeProxied]) {
++			Class[kPrototypeProxied] = true;
++			Class.prototype = new Proxy(Class.prototype, { get(target, key, receiver) {
++				const value = Reflect.get(target, key, receiver);
++				if (value !== void 0) return value;
++				if (typeof key === "symbol" || IGNORED_KEYS.includes(key)) return;
++				return getUnknownPrototypeKey.call(receiver, key);
++			} });
++		}
+ 		return Reflect.construct(superClass, args, Class);
+ 	}
+ 	Reflect.setPrototypeOf(Class.prototype, superClass.prototype);
+ 	Reflect.setPrototypeOf(Class, superClass);
+ 	return Class;
+ }
++const kPrototypeProxied = Symbol("kPrototypeProxied");
+ /**
+ * Only properties and methods declared on the prototype can be accessed over
+ * RPC. This function throws a helpful error message if a property isn't

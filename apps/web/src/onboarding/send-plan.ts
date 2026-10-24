@@ -147,6 +147,27 @@ export const choiceOfPlan = (plan: {
 };
 
 /**
+ * What the screen starts from: the choice a saved plan was made from, or
+ * the first one. A team held before that no longer takes part, switched
+ * off or gone from the list since, is held no more.
+ */
+export const choiceShown = (
+  plan: {
+    start: string;
+    at?: string;
+    later?: Record<string, string | null>;
+  } | null,
+  today: string,
+  teams: string[]
+): SendChoice => {
+  const before = plan === null ? firstChoice(today) : choiceOfPlan(plan);
+  return {
+    ...before,
+    held: before.held.filter((team) => teams.includes(team)),
+  };
+};
+
+/**
  * The plan a choice makes over a plan saved before: what the admin did
  * not change stays as it was. How many days the interviews run is not on
  * the screen, so it stays; the first moment stays while its day and hour

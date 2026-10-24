@@ -18,9 +18,10 @@ import type { LogFields } from "@grasp-os/shared/log";
 import { mailIngressPath } from "@grasp-os/shared/mail-ingress";
 import { onboardingSummaryPath } from "@grasp-os/shared/onboarding-summary";
 import { platformUpdatePath } from "@grasp-os/shared/platform-change";
+import { provisionProbePath } from "@grasp-os/shared/provision-probe";
 import { quotaPolicyReportPath } from "@grasp-os/shared/quota-policy-report";
 import { screenFramePath } from "@grasp-os/shared/screens";
-import { speechPath } from "@grasp-os/shared/voice";
+import { speechPath, transcriptionPath } from "@grasp-os/shared/voice";
 
 import { adminAskResponse } from "./admin-ask.ts";
 import { adminSnapshotResponse } from "./admin-snapshot.ts";
@@ -54,12 +55,14 @@ import { interviewResponse } from "./onboarding/links.ts";
 import { speechResponse } from "./onboarding/speech.ts";
 import { interviewStoryResponse } from "./onboarding/story.ts";
 import { onboardingSummaryResponse } from "./onboarding/summary.ts";
+import { transcriptionResponse } from "./onboarding/transcription.ts";
 import {
   packageArtifactResponse,
   withoutArtifactToken,
 } from "./packages/serve.ts";
 import { platformUpdateResponse } from "./platform-updates.ts";
 import { liveConnectionApp, portableLiveResponse } from "./portable-live.ts";
+import { provisionProbeResponse } from "./provision-probe.ts";
 import { checkRouterSecret } from "./router-secret.ts";
 import { rpcResponse } from "./rpc.ts";
 import { screenFrameResponse, screenModuleResponse } from "./screen-frame.ts";
@@ -140,8 +143,9 @@ const originalPath = /^\/api\/knowledge\/uploads\/(?<id>[\w-]+)\/original$/u;
  * The pages a link opens, which have no session: the link's secret in the
  * body is all they have. A guest's (src/guests.ts), and someone's own
  * interview, with the device's key too (src/onboarding/links.ts), whose
- * lines are said at the speech endpoint, also for an admin signed in
- * (src/onboarding/speech.ts).
+ * lines are said at the speech endpoint, and what they say is written down
+ * over a WebSocket, both also for an admin signed in
+ * (src/onboarding/speech.ts, src/onboarding/transcription.ts).
  */
 const linkResponse = async (
   pathname: string,
@@ -164,6 +168,9 @@ const linkResponse = async (
   }
   if (pathname === speechPath) {
     return await speechResponse(request, env, requestId);
+  }
+  if (pathname === transcriptionPath) {
+    return transcriptionResponse(request, env, requestId, ctx);
   }
   return undefined;
 };
@@ -290,7 +297,7 @@ const route = async (
   const url = new URL(request.url);
   const { pathname } = url;
   if (pathname === "/health") {
-    // The version answering, where there is version metadata: the console's
+    // The version answering, where there is version metadata: the admin's
     // smoke check compares it with the version it just deployed. Behind the
     // router-secret check, as every route is.
     const version = env.CF_VERSION_METADATA?.id;
@@ -300,6 +307,14 @@ const route = async (
   }
   if (pathname === "/rpc") {
     return await rpcResponse(request, env, requestId);
+  }
+  // The admin's alone: anyone else's request goes on as one to a path
+  // core has no route for (src/provision-probe.ts).
+  if (pathname === provisionProbePath) {
+    const probe = await provisionProbeResponse(request, env);
+    if (probe !== undefined) {
+      return probe;
+    }
   }
   if (pathname === screenFramePath) {
     return await screenFrameResponse(env, url);
@@ -325,7 +340,7 @@ const route = async (
     return await handler(request, env, requestId);
   }
   if (pathname === labPath) {
-    return await labResponse(request, env, requestId);
+    return await labResponse(request, env, requestId, ctx);
   }
   const linked = await linkResponse(pathname, request, env, requestId, ctx);
   if (linked !== undefined) {

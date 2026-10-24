@@ -69,6 +69,46 @@ describe("Workspace schema", () => {
     expect(chat).toMatchObject({ title: "Plans" });
   });
 
+  it("reads a chat made before chats kept their channel as made in Grasp's own app", async () => {
+    const stub = newWorkspace();
+    const before = migrations.journal.entries.findIndex(
+      ({ tag }) => tag === "0017_chat_via"
+    );
+    await runInDurableObject(stub, async (_instance, state) => {
+      await state.storage.deleteAll();
+      migrateOnWake(state, {
+        journal: { entries: migrations.journal.entries.slice(0, before) },
+        migrations: migrations.migrations,
+      });
+      state.storage.sql.exec(
+        "INSERT INTO chats (id, title, created_at, restricted, person_id, agent_id) VALUES ('old', 'Old', 1, 0, 'person-1', 'agent-1')"
+      );
+    });
+    await evictDurableObject(stub);
+
+    // Waking up on this release's code applies the migration.
+    const teams = await stub.createChat(
+      "From Teams",
+      "person-1",
+      "agent-1",
+      undefined,
+      undefined,
+      undefined,
+      "teams"
+    );
+    const web = await stub.createChat("From Grasp", "person-1", "agent-1");
+    await runInDurableObject(stub, (_instance, state) => {
+      const rows = state.storage.sql
+        .exec("SELECT id, via FROM chats ORDER BY rowid")
+        .toArray();
+      expect(rows).toStrictEqual([
+        { id: "old", via: "web" },
+        { id: teams.id, via: "teams" },
+        { id: web.id, via: "web" },
+      ]);
+    });
+  });
+
   it("keeps chats that have a person and an agent, and drops those without, with their rows, when chats take both for good", async () => {
     const stub = newWorkspace();
     // The schema as it was before chats had to have both.

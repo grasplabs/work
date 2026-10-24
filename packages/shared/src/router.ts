@@ -51,7 +51,7 @@ const isWorkersDevOrigin = (value: string): boolean => {
 
 /**
  * One entry of the router's hostname map (KV, key: the hostname as
- * `routerHostKey` gives it), written by the console. `generation` counts the
+ * `routerHostKey` gives it), written by the admin. `generation` counts the
  * client's router secrets: raising it rotates the secret.
  */
 export const routerHostSchema = z.object({
@@ -63,8 +63,13 @@ export const routerHostSchema = z.object({
 });
 export type RouterHost = z.infer<typeof routerHostSchema>;
 
-/** Hostnames no client gets: the platform's own, under `<domain>`. */
+/**
+ * Hostnames no client gets: the platform's own, under `<domain>`. `admin`
+ * is the admin's own host (`ADMIN_HOST`); `console` stays reserved from
+ * when the admin was called that.
+ */
 export const reservedClientIds: ReadonlySet<string> = new Set([
+  "admin",
   "console",
   "internal",
   "staging",
@@ -74,7 +79,7 @@ export const reservedClientIds: ReadonlySet<string> = new Set([
 
 /**
  * A new client's id, which is its hostname's label (`<id>.<domain>`): a
- * lowercase DNS label of at most 50 characters, so the console's
+ * lowercase DNS label of at most 50 characters, so the admin's
  * workers.dev subdomain for it, `grasp-<id>-<6 hex>` at its longest,
  * still fits a 63-character label, and never a reserved one. So one
  * hostname is one client's.
@@ -91,7 +96,7 @@ export const routerHostKey = (hostname: string): string =>
 /**
  * A client's router secret: `HMAC-SHA256(routerKey, "router:<clientId>:<generation>")`
  * as lowercase hex (`deriveClientSecret`). The router derives it on every
- * forward, the console to set it on the client's core, so nothing per
+ * forward, the admin to set it on the client's core, so nothing per
  * client is stored anywhere. `routerKey` is the one `ROUTER_KEY` in
  * Secrets Store (grasp-os-ops).
  */

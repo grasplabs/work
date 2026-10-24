@@ -40,10 +40,21 @@ export const onboarding = sqliteTable(
      */
     toldAt: text("told_at"),
     /**
+     * When a piece of work counts as known here, as JSON
+     * (`orgRulesSchema`), or `null` while the starting values hold.
+     */
+    rules: text(),
+    /**
      * What the admin chose about what Grasp may connect, as JSON
      * (`setupChoicesSchema`), or `null` before anything.
      */
     choices: text(),
+    /**
+     * The teams and people new on a list the admin saved while a plan was
+     * set, as JSON (`unconfirmedSchema`): their links wait until the admin
+     * confirms the organization. `null` while nothing waits.
+     */
+    unconfirmed: text(),
   },
   (table) => [check("onboarding_one_row", sql`${table.id} = 1`)]
 );
@@ -98,6 +109,11 @@ export const links = sqliteTable("links", {
    * making someone a lead afterwards tells nobody about their interview.
    */
   ledTeam: text("led_team"),
+  /**
+   * When the company's admin took the link to send it themselves (ISO
+   * 8601): it is new to them no more. None while they haven't.
+   */
+  takenAt: text("taken_at"),
   /**
    * The version of what their interview holds: a save goes up by one, and
    * so does a delete or a new start, so no copy from before either ever
@@ -303,6 +319,28 @@ export const drawnWorks = sqliteTable("drawn_works", {
   drawn: text(),
   agreed: text().notNull(),
   at: text().notNull(),
+});
+
+/**
+ * How the company's admin settled a piece of work told two ways that
+ * nobody could explain: both ways kept, or which way holds, the way most
+ * told it (`first`) or the other. Apart from the drawing, so drawing it
+ * again keeps it; it goes with the piece of work.
+ */
+export const settledWorks = sqliteTable("settled_works", {
+  work: text().primaryKey(),
+  holds: text({ enum: ["both", "first", "other"] }).notNull(),
+  at: text().notNull(),
+});
+
+/**
+ * The pieces of work Grasp counts as known by hand, before the rules say
+ * so: when, and by which staff member. Goes with the piece of work.
+ */
+export const countedWorks = sqliteTable("counted_works", {
+  work: text().primaryKey(),
+  at: text().notNull(),
+  by: text().notNull(),
 });
 
 /**

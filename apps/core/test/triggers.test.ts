@@ -155,6 +155,34 @@ const schedulesOf = async (app: string) => {
   return results;
 };
 
+/**
+ * Copies what core cached in R2 of the workflows `app` declares at version
+ * `from` over the entries of version `to`, MACs included, as someone who
+ * can write to the bucket but doesn't hold core's secret could; with
+ * `keepMac` false, without them: how many it copied.
+ */
+const forgeDeclarations = async (
+  app: string,
+  from: number,
+  to: number,
+  keepMac: boolean
+): Promise<number> => {
+  const page = await env.FILES.list({
+    prefix: `workflow-metadata/${app}/${from}/`,
+    include: ["customMetadata"],
+  });
+  const copies = page.objects.map(async ({ key, customMetadata }) => {
+    const object = await env.FILES.get(key);
+    await env.FILES.put(
+      key.replace(`/${from}/`, `/${to}/`),
+      (await object?.text()) ?? "",
+      keepMac && customMetadata !== undefined ? { customMetadata } : {}
+    );
+  });
+  await Promise.all(copies);
+  return copies.length;
+};
+
 const runCount = async (builder: Person, app: string): Promise<number> => {
   const runs = await builder.api.workflows.list(app);
   return runs.length;
@@ -292,6 +320,31 @@ describe("schedule triggers", () => {
     await expect(runCount(builder, app)).resolves.toBe(0);
     await expect(nextRunOf(app)).rejects.toThrow("has no schedule");
   });
+
+  it.each([
+    { forged: "with the MAC core gave another version's", keepMac: true },
+    { forged: "without a MAC", keepMac: false },
+  ])(
+    "register only what the code declares, not one forged into R2's cache $forged",
+    async ({ keepMac }) => {
+      const builder = await personApi("builder");
+      const app = await appWith(builder, weekly());
+      // The same workflow, started only by hand, its cached declarations
+      // replaced with the scheduled version's before it is made current.
+      const version = await committed(
+        builder,
+        app,
+        weekly(`[{ type: "manual" }]`)
+      );
+      const forged = await forgeDeclarations(app, 1, version, keepMac);
+      await builder.api.apps.versions.setCurrent(app, version);
+
+      expect({
+        forged,
+        schedules: await schedulesOf(app),
+      }).toStrictEqual({ forged: 1, schedules: [] });
+    }
+  );
 
   it("show with their workflow as its current version registered them, to anyone with a role in the App", async () => {
     const builder = await personApi("builder");
