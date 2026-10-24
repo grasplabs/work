@@ -201,7 +201,7 @@ const salesLedBy = async (staff: Person, run: string) => {
   const ids = { team: `sales-${run}`, lea: `lea-${run}`, sam: `sam-${run}` };
   const { core, api } = apiOf(staff);
   try {
-    await api.onboarding.saveRoster({
+    await api.onboarding.confirmRoster({
       teams: [{ id: ids.team, name: "Sales", lead: ids.lea }],
       people: [
         { id: ids.lea, name: "Lea", team: ids.team },
