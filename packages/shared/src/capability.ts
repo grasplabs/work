@@ -159,6 +159,12 @@ export const capabilityClaimsSchema = z.strictObject({
    * person's own mailbox, no other; absent is none.
    */
   mailboxes: z.array(z.string().min(1).max(254)).max(50).optional(),
+  /**
+   * Only for a chat's agent, on a company app its company pointed it at
+   * within some of its resources (core's app-pointers.ts): its reads there
+   * may name only these. Absent is the whole app.
+   */
+  resources: z.array(identifierSchema).max(50).optional(),
 });
 export type CapabilityClaims = z.infer<typeof capabilityClaimsSchema>;
 
@@ -194,6 +200,8 @@ export interface CapabilityScope extends CapabilityCall {
   decision?: CapabilityDecision | undefined;
   /** Only for a chat's agent: `CapabilityClaims.mailboxes`. */
   mailboxes?: readonly string[] | undefined;
+  /** Only for a chat's agent: `CapabilityClaims.resources`. */
+  resources?: readonly string[] | undefined;
 }
 
 /** Why connect refuses a call before looking at it any further. */
@@ -258,6 +266,9 @@ export const signCapability = async (
     ...(scope.mailboxes === undefined
       ? {}
       : { mailboxes: [...scope.mailboxes] }),
+    ...(scope.resources === undefined
+      ? {}
+      : { resources: [...scope.resources] }),
   };
   capabilityClaimsSchema.parse(claims);
   const payload = toBase64Url(new TextEncoder().encode(JSON.stringify(claims)));

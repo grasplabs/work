@@ -324,6 +324,7 @@ const coreDb: D1State = {
     stephen_places: exported(`${core}stephen-reach.ts`),
     app_tool_classes: exported(`${core}stephen-reach.ts`),
     shared_mailbox_pointers: exported(`${core}shared-mailboxes.ts`),
+    app_pointers: exported(`${core}app-pointers.ts`),
     app_requests: exported(`${core}app-requests.ts`),
     improvement_signal_computations: cache(`${core}signals.ts`),
     improvement_signals: cache(`${core}signals.ts`),

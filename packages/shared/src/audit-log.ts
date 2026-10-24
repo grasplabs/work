@@ -78,6 +78,8 @@ const typeRules: readonly {
   { action: "stephen.place.changed", type: "config" },
   // An admin pointing Stephen at a shared mailbox, and for whom.
   { action: "connection.mailbox.pointed", type: "config" },
+  // An admin pointing Stephen at a company app, and for whom.
+  { action: "connection.app.pointed", type: "config" },
   // A connection's tokens stopped working: it needs signing in again.
   { action: "connection.needs_reauth", type: "config" },
   // Connect reading what changed at a connection for workflows' event
