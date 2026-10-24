@@ -3,15 +3,12 @@ import type {
   AuditDetailValue,
   AuditEntry,
 } from "@grasp-os/shared/audit";
-import { actorOf } from "@grasp-os/shared/audit";
 import { collectionIdSchema, documentIdSchema } from "@grasp-os/shared/ids";
 import {
   documentTypeOf,
   historyOptionsSchema,
   knowledgeErrors,
   listDocumentsOptionsSchema,
-  restoreInputSchema,
-  saveInputSchema,
   versionInputSchema,
 } from "@grasp-os/shared/knowledge";
 import type {
@@ -25,8 +22,6 @@ import type {
   Version,
   VersionSummary,
 } from "@grasp-os/shared/knowledge";
-import { isAdmin } from "@grasp-os/shared/roles";
-import type { Identity } from "@grasp-os/shared/rpc";
 import { and, asc, desc, eq, gt, lt, ne } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
@@ -47,7 +42,7 @@ import type { Reader } from "./access.ts";
 import { auditedBatch } from "./audit.ts";
 import { allowedFor } from "./authorize.ts";
 import type { Allowed } from "./authorize.ts";
-import { readableCollection, requireWritable } from "./collections.ts";
+import { readableCollection } from "./collections.ts";
 import type { CollectionRow } from "./collections.ts";
 import {
   FrontmatterError,
@@ -58,7 +53,6 @@ import type { ParsedDocument } from "./frontmatter.ts";
 import { publishInline } from "./indexing.ts";
 import { extractLinks, splitSections } from "./markdown.ts";
 import type { Link, Section } from "./markdown.ts";
-import { memoryFileOf, requireWithinLimit } from "./memory-files.ts";
 import {
   commitPayload,
   committedKey,
@@ -334,33 +328,22 @@ const conflict = (existing: DocumentRow | undefined) =>
 
 /**
  * Reads `text` for the document at `path` in `collection`, refused as a
- * save would refuse it: one to the Grasp skills by anything but their
- * sync (`graspSync`), over a document's limits, frontmatter that doesn't
- * fit its type, or, for a memory file, over that file's size limit. A
- * purge's text
- * (`purge`) is checked for the fields every type has only
- * (`parseBaseFields`), whatever its type says.
+ * save would refuse it: as the host's `onWrite` port refuses it (core's:
+ * the Grasp skills by anything but their sync, a memory file over its
+ * size limit), over a document's limits, or frontmatter that doesn't fit
+ * its type. A purge's text (`purge`) is checked for the fields every type
+ * has only (`parseBaseFields`), whatever its type says.
  */
 export const checkedText = async (
   env: Env,
   collection: CollectionRow,
   path: string,
   text: string,
-  graspSync = false,
+  sync = false,
   purge = false
 ): Promise<Prepared> => {
-  // The Grasp skills are the release's (grasp-skills.ts): no save,
-  // restore or purge changes them, an admin's neither; the next
-  // sync would only put the release's text back.
-  if (collection.source === "grasp" && !graspSync) {
-    throw knowledgeErrors.create("knowledge.read_only");
-  }
-  const prepared = prepare(path, text, purge);
-  const memoryFile = await memoryFileOf(collection, path);
-  if (memoryFile !== undefined) {
-    requireWithinLimit(env, memoryFile, text);
-  }
-  return prepared;
+  await portsOf(env).onWrite({ collection, path, text, sync });
+  return prepare(path, text, purge);
 };
 
 /**
@@ -369,22 +352,13 @@ export const checkedText = async (
  * frontmatter): a person saving themselves, or the one an agent or App
  * acts for. `detail` goes into the save's audit event: for an App, the
  * person it acted for, how (interactive or a workflow run) and its
- * version, which its actor doesn't name. `admin` is set only for an admin
- * saving themselves, never for an agent or App acting for one.
+ * version, which its actor doesn't name.
  */
 export interface Writer {
   actor: AuditActor;
   userId: string;
   detail?: Record<string, AuditDetailValue>;
-  admin?: boolean;
 }
-
-/** A person, saving a version themselves. */
-export const personWriter = (person: Identity): Writer => ({
-  actor: actorOf(person),
-  userId: person.userId,
-  admin: isAdmin(person.role),
-});
 
 /** A new version of the document at `path` in `collection`. */
 export interface Write {
@@ -399,8 +373,11 @@ export interface Write {
    * current version: they commit with it or not at all.
    */
   also?: BatchItem<"sqlite">[];
-  /** Set only by the sync of the Grasp skills, their one writer. */
-  graspSync?: true;
+  /**
+   * Set by the host's own sync of what it alone writes (core's Grasp
+   * skills), which its `onWrite` port lets through.
+   */
+  sync?: true;
   /**
    * Checked last, just before the batch is sent, with nothing awaited in
    * between: throws to refuse the write, such as a delegate's context that
@@ -478,7 +455,7 @@ export const writeVersion = async (
   write: Write
 ): Promise<DocumentSummary> => {
   const { collection, path, text, ifVersion, message, restoredFrom } = write;
-  const { also = [], graspSync = false } = write;
+  const { also = [], sync = false } = write;
   const db = drizzle(env.KNOWLEDGE);
   const existing = await findByPath(db, collection.id, path);
   const prepared = await checkedText(
@@ -486,7 +463,7 @@ export const writeVersion = async (
     collection,
     path,
     text,
-    graspSync,
+    sync,
     write.purge === true
   );
   if ((existing?.currentVersion ?? 0) !== ifVersion) {
@@ -619,64 +596,6 @@ export const readableDocument = async (
     throw knowledgeErrors.create("knowledge.not_found");
   }
   return found;
-};
-
-/** Saves a new version of a document, or its first. */
-export const saveDocument = async (
-  env: Env,
-  person: Identity,
-  input: unknown
-): Promise<DocumentSummary> => {
-  const { collectionId, path, text, ifVersion, message } =
-    knowledgeErrors.parse("knowledge.invalid", saveInputSchema, input);
-  const db = drizzle(env.KNOWLEDGE);
-  const allowed = await allowedFor(portsOf(env), { type: "person", person });
-  const collection = await readableCollection(
-    db,
-    allowed.collections,
-    collectionId
-  );
-  requireWritable(env, person, collection);
-  return await writeVersion(env, personWriter(person), {
-    collection,
-    path,
-    text,
-    ifVersion,
-    message: message === undefined || message === "" ? null : message,
-    restoredFrom: null,
-  });
-};
-
-/** Saves an earlier version's text as the next version. */
-export const restoreVersion = async (
-  env: Env,
-  person: Identity,
-  input: unknown
-): Promise<DocumentSummary> => {
-  const { documentId, version, ifVersion } = knowledgeErrors.parse(
-    "knowledge.invalid",
-    restoreInputSchema,
-    input
-  );
-  const db = drizzle(env.KNOWLEDGE);
-  const { document, collection } = await readableDocument(
-    db,
-    await allowedFor(portsOf(env), { type: "person", person }),
-    documentId
-  );
-  requireWritable(env, person, collection);
-  const restored = await versionText(env, db, document.id, version);
-  if (restored === undefined) {
-    throw knowledgeErrors.create("knowledge.not_found");
-  }
-  return await writeVersion(env, personWriter(person), {
-    collection,
-    path: document.path,
-    text: restored,
-    ifVersion,
-    message: null,
-    restoredFrom: version,
-  });
 };
 
 /** A document with its current version, or with `version`. */

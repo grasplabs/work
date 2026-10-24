@@ -71,8 +71,10 @@ import {
   RotateSecrets,
   SettingUpNow,
   SignInChange,
+  TeamsBotChange,
   TeamsBotSecretChange,
   TestAlert,
+  TeamsPackageDownload,
   useRefreshSetup,
 } from "./setup-actions.tsx";
 import type { Refresh } from "./setup-actions.tsx";
@@ -1058,6 +1060,13 @@ const Status = ({
 /** What a ring change records besides. */
 const ringSchema = z.object({ ring: z.number() });
 
+/** What staff did by hand that needs nothing of its event to say, in a sentence. */
+const plainEventWords: Readonly<Record<string, string>> = {
+  "client.rotate_secrets": "Rotated its secrets.",
+  "client.sign_in": "Changed how its people sign in.",
+  "client.teams_bot": "Changed its Teams bot.",
+};
+
 /** What staff did by hand, in a sentence. */
 const eventWords = ({
   action,
@@ -1087,12 +1096,6 @@ const eventWords = ({
     case "client.unpin": {
       return "Let it follow the rollouts again.";
     }
-    case "client.rotate_secrets": {
-      return "Rotated its secrets.";
-    }
-    case "client.sign_in": {
-      return "Changed how its people sign in.";
-    }
     case "client.sealed_secret": {
       return target === "TEAMS_BOT_SECRET"
         ? "Set its Teams bot's secret."
@@ -1112,7 +1115,7 @@ const eventWords = ({
         : `Linked it to ${target} in Attio.`;
     }
     default: {
-      return action;
+      return plainEventWords[action] ?? action;
     }
   }
 };
@@ -1686,7 +1689,10 @@ const Releases = ({
   );
 };
 
-/** The client's own Teams bot: whether its secret is set, and setting it. */
+/**
+ * The client's own Teams bot: its app id, tenant and secret's expiry, its
+ * secret, setting each, and its app package for its IT.
+ */
 const TeamsBotSection = ({
   clientId,
   setup,
@@ -1696,22 +1702,37 @@ const TeamsBotSection = ({
   setup: ClientSetup;
   refresh: Refresh;
 }) => {
+  const bot = setup.teamsBot;
   const botSecret = setup.sealedSecrets.find(
     ({ name }) => name === "TEAMS_BOT_SECRET"
   );
   return (
     <SetupSection
-      description="The client secret of its own Teams bot, kept sealed by the admin and given only to its connect, with each deploy."
+      description="Its own Teams bot, registered in its own Entra: its connect sends as it and its core answers it, from the next deploy. The secret is kept sealed by the admin and given only to its connect."
       title="Its Teams bot"
     >
-      {botSecret === undefined ? (
-        <Quiet>No secret set.</Quiet>
+      {bot === null && botSecret === undefined ? (
+        <Quiet>No bot set.</Quiet>
       ) : (
         <Facts
           rows={[
+            ...(bot === null
+              ? []
+              : [
+                  { label: "App id", value: bot.appId },
+                  { label: "Tenant", value: bot.tenantId },
+                  {
+                    label: "Secret expires",
+                    value: formatDate(bot.secretExpiresOn),
+                  },
+                ]),
             {
               label: "Secret",
-              value: `Set on ${dayOf(botSecret.setAt)} by ${botSecret.setBy}`,
+              value:
+                botSecret === undefined
+                  ? "Not set"
+                  : `Set on ${dayOf(botSecret.setAt)} by ${botSecret.setBy}`,
+              attention: botSecret === undefined,
             },
             ...(setup.configPending
               ? [
@@ -1725,6 +1746,12 @@ const TeamsBotSection = ({
           ]}
         />
       )}
+      {bot === null ? null : (
+        <Body>
+          <TeamsPackageDownload clientId={clientId} />
+        </Body>
+      )}
+      <TeamsBotChange bot={bot} clientId={clientId} refresh={refresh} />
       <TeamsBotSecretChange
         clientId={clientId}
         refresh={refresh}

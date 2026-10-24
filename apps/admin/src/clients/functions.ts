@@ -24,11 +24,14 @@ import {
   setRing,
   setSealedSecret,
   setSignIn,
+  setTeamsBot,
   SettingsError,
   signInInputSchema,
+  teamsBotInputSchema,
 } from "./settings.ts";
 import type { SettingsErrorCode } from "./settings.ts";
 import { getClientSetup } from "./setup.ts";
+import { clientTeamsPackage } from "./teams-package.ts";
 
 const clientSchema = z.object({ clientId: z.string().min(1) });
 
@@ -148,6 +151,30 @@ export const sendTestAlertFn = createServerFn({ method: "POST" })
     });
     return await sendStaffAlert(env, { clientId: data.clientId, kind: "test" });
   });
+
+/**
+ * Sets a client's Teams bot (its app id, tenant and secret's expiry), or
+ * takes it away with null: its connect and core get it with the next
+ * deploy.
+ */
+export const setTeamsBotFn = createServerFn({ method: "POST" })
+  .validator(teamsBotInputSchema)
+  .handler(
+    async ({ data, context }) =>
+      await change(async () => await setTeamsBot(env, context.staff, data))
+  );
+
+/**
+ * A client's Teams app package (src/clients/teams-package.ts), for its IT
+ * to upload to Teams; null for a client without a bot. Nothing in it is
+ * secret: the bot's id and the client's name.
+ */
+export const fetchTeamsPackageFn = createServerFn({ method: "GET" })
+  .validator(clientSchema)
+  .handler(
+    async ({ data }) =>
+      await clientTeamsPackage(adminDatabase(env.DB), data.clientId)
+  );
 
 /**
  * Rotates a client's derived secrets (src/deploy/rotation.ts): changed
