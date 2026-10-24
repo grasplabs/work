@@ -154,6 +154,14 @@ msgstr "{answered} respondidas"
 msgid "{app} has no tools."
 msgstr "{app} no tiene herramientas."
 
+#: src/connections/connected-dialog.tsx
+msgid "{app} is connected"
+msgstr "{app} está conectado"
+
+#: src/connections/connected-dialog.tsx
+msgid "{app} is connected again"
+msgstr "{app} vuelve a estar conectado"
+
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "{app} isn't connected yet."
 msgstr "{app} aún no está conectado."
@@ -844,10 +852,6 @@ msgstr "{name} está invitado, pero aún no entrevistado."
 msgid "{name} is named, but not seen in use yet."
 msgstr "{name} se nombra, pero aún no se ha visto en uso."
 
-#: src/connections/connect-dialog.tsx
-msgid "{name} is read-only"
-msgstr "{name} es de solo lectura"
-
 #: src/routes/_shell.settings.members.tsx
 msgid "{name} is removed. {count, plural, one {# personal connection was disconnected.} other {# personal connections were disconnected.}}"
 msgstr "Se ha eliminado a {name}. {count, plural, one {Se ha desconectado # conexión personal.} other {Se han desconectado # conexiones personales.}}"
@@ -860,6 +864,10 @@ msgstr "{name} ha cerrado sesión en todas partes."
 msgid "{name} logo"
 msgstr "Logotipo de {name}"
 
+#: src/connections/connect-dialog.tsx
+msgid "{name} may write. Change to Read"
+msgstr "{name} puede escribir. Cambiar a Lectura"
+
 #: src/chat/builds-state.ts
 msgid "{name} no longer changes the domain's data (write → read)"
 msgstr "{name} ya no cambia los datos del dominio (escritura → lectura)"
@@ -867,6 +875,10 @@ msgstr "{name} ya no cambia los datos del dominio (escritura → lectura)"
 #: src/chat/builds-state.ts
 msgid "{name} now changes the domain's data (read → write)"
 msgstr "{name} ahora cambia los datos del dominio (lectura → escritura)"
+
+#: src/connections/connect-dialog.tsx
+msgid "{name} reads only. Change to Write"
+msgstr "{name} solo lee. Cambiar a Escritura"
 
 #: src/onboarding/setup-steps.tsx
 msgid "{name} takes part"
@@ -1788,6 +1800,10 @@ msgstr "Un paso"
 #: src/onboarding/setup-steps.tsx
 msgid "A team without a lead gets its links on the first day, and I ask each person what they do."
 msgstr "Un equipo sin responsable recibe sus enlaces el primer día, y pregunto a cada persona qué hace."
+
+#: src/connections/connect-dialog.tsx
+msgid "A tool switched on starts as Read where Composio says it only reads; Grasp doesn't check that. A Read tool runs without asking. A call of a Write tool from chat, or from a person using a domain, waits for that person to confirm it; a workflow's run makes it as one of its steps. Press a tool's badge to change it. Mark a tool Read only if it changes nothing: marked wrongly, it changes things without asking."
+msgstr "Una herramienta activada empieza en Lectura donde Composio dice que solo lee; Grasp no lo comprueba. Una herramienta en Lectura se ejecuta sin preguntar. La llamada a una herramienta en Escritura desde un chat, o por una persona que usa un dominio, espera a que esa persona la confirme; la ejecución de un flujo de trabajo la hace como uno de sus pasos. Pulsa la etiqueta de una herramienta para cambiarla. Pon una herramienta en Lectura solo si no cambia nada: mal marcada, cambia cosas sin preguntar."
 
 #: src/dashboard/standard-widgets.tsx
 msgid "A workflow is redesigned with AI and waits for its test."
@@ -3326,6 +3342,7 @@ msgstr "No se puede leer"
 
 #: src/chat/brain-questions.tsx
 #: src/chat/project-dialog.tsx
+#: src/connections/connect-dialog.tsx
 #: src/decision-confirmation.tsx
 #: src/engines/app-status.tsx
 #: src/engines/package-approvals.tsx
@@ -3705,6 +3722,7 @@ msgid "Click to open Usage"
 msgstr "Haz clic para abrir Uso"
 
 #: src/connections/connect-dialog.tsx
+#: src/connections/connected-dialog.tsx
 #: src/connections/connection-list.tsx
 #: src/dashboard/report-dialog.tsx
 #: src/dashboard/widget-block.tsx
@@ -3993,11 +4011,6 @@ msgstr "Conectada, acceso directo"
 #: src/brain/brain.ts
 msgid "Connected, via Composio"
 msgstr "Conectada, a través de Composio"
-
-#: src/routes/_shell.integrations.$integration.tsx
-#: src/routes/_shell.integrations.index.tsx
-msgid "Connected."
-msgstr "Conectada."
 
 #: src/connection-errors.ts
 msgid "Connecting didn't work. Try again, or ask an admin."
@@ -4711,6 +4724,11 @@ msgstr "hecho"
 #: src/routes/_shell.workflows.index.tsx
 msgid "Done"
 msgstr "Listo"
+
+#: src/connections/connect-dialog.tsx
+msgctxt "a step that is finished"
+msgid "Done"
+msgstr "Hecho"
 
 #: src/inbox/inbox-page.tsx
 msgctxt "inbox tab: what someone dealt with"
@@ -5488,6 +5506,7 @@ msgid "for every model call this month"
 msgstr "por todas las llamadas a modelos este mes"
 
 #: src/connections/connect-dialog.tsx
+#: src/connections/connected-dialog.tsx
 msgid "For everyone"
 msgstr "Para todos"
 
@@ -5735,6 +5754,14 @@ msgstr "Grasp permite enviarlo una vez más, exactamente igual que antes, y una 
 #: src/dashboard/pile-cards.tsx
 msgid "Grasp makes this change on {connection}, with exactly what is shown."
 msgstr "Grasp hace este cambio en {connection}, exactamente con lo que se muestra."
+
+#: src/connections/connected-dialog.tsx
+msgid "Grasp may read and write in {app}, only for what you allow."
+msgstr "Grasp puede leer y escribir en {app}, solo para lo que permitas."
+
+#: src/connections/connected-dialog.tsx
+msgid "Grasp may use {app} only through the tools you allowed."
+msgstr "Grasp solo puede usar {app} con las herramientas que permitiste."
 
 #: src/dashboard/outcome-card.tsx
 msgid "Grasp never sends it again. Nothing is changed or undone on {connection}."
@@ -6669,6 +6696,7 @@ msgid "Jump to the newest message"
 msgstr "Ir al mensaje más reciente"
 
 #: src/connections/connect-dialog.tsx
+#: src/connections/connected-dialog.tsx
 msgid "Just for you"
 msgstr "Solo para ti"
 
@@ -7518,6 +7546,11 @@ msgstr "Necesita tu propia app de inicio de sesión"
 
 #: src/dashboard/widget-board.tsx
 #: src/workflows/workflows-table.tsx
+msgid "Never"
+msgstr "Nunca"
+
+#: src/connections/connect-dialog.tsx
+msgctxt "what a tool may do"
 msgid "Never"
 msgstr "Nunca"
 
@@ -8846,6 +8879,7 @@ msgid "Only when a condition holds:"
 msgstr "Solo cuando se cumple una condición:"
 
 #: src/connections/connect-dialog.tsx
+#: src/connections/connected-dialog.tsx
 msgid "Only you can use it."
 msgstr "Solo tú puedes usarlo."
 
@@ -9784,6 +9818,11 @@ msgctxt "button: read a transcript"
 msgid "Read"
 msgstr "Leer"
 
+#: src/connections/connect-dialog.tsx
+msgctxt "what a tool may do"
+msgid "Read"
+msgstr "Lectura"
+
 #: src/activity/audit-words.ts
 msgid "Read a domain's statistics"
 msgstr "Leyó las estadísticas de un dominio"
@@ -9850,14 +9889,9 @@ msgstr "Leyó lo que cambió en una conexión"
 msgid "Read what could be improved"
 msgstr "Leyó lo que podría mejorarse"
 
-#: src/connections/connect-dialog.tsx
 #: src/knowledge/collection-markers.tsx
 msgid "Read-only"
 msgstr "Solo lectura"
-
-#: src/connections/connect-dialog.tsx
-msgid "Read-only is ticked where Composio says a tool only reads; Grasp doesn't check that. A read-only tool runs without asking. A call of any other tool from chat, or from a person using a domain, waits for that person to confirm it; a workflow's run makes it as one of its steps. Mark a tool read-only only if it changes nothing: marked wrongly, it changes things without asking."
-msgstr "«Solo lectura» está marcado donde Composio dice que una herramienta solo lee; Grasp no lo comprueba. Una herramienta de solo lectura se ejecuta sin preguntar. La llamada a cualquier otra herramienta desde un chat, o por una persona que usa un dominio, espera a que esa persona la confirme; la ejecución de un flujo de trabajo la hace como uno de sus pasos. Marca una herramienta como de solo lectura solo si no cambia nada: si se marca mal, cambia cosas sin preguntar."
 
 #: src/onboarding/document-drop.tsx
 msgid "Reading"
@@ -11556,6 +11590,10 @@ msgstr "Participa en las entrevistas"
 #: src/routes/_shell.settings.models.tsx
 msgid "Takes sensitive data"
 msgstr "Admite datos sensibles"
+
+#: src/connections/connect-dialog.tsx
+msgid "Taking long? <0>Try again</0>"
+msgstr "¿Tarda mucho? <0>Inténtalo de nuevo</0>"
 
 #: src/onboarding/organization-words.ts
 msgctxt "filter: teams that take part in the interviews"
@@ -13623,6 +13661,10 @@ msgctxt "dashboard: what waits on you, settled on its own page"
 msgid "Waiting elsewhere"
 msgstr "Pendiente en otro lugar"
 
+#: src/connections/connect-dialog.tsx
+msgid "Waiting for {app}"
+msgstr "Esperando a {app}"
+
 #: src/onboarding/setup-steps.tsx
 msgid "Waiting for {signIn}"
 msgstr "Esperando a {signIn}"
@@ -14089,6 +14131,10 @@ msgstr "Qué hacemos"
 #: src/interview/closed.tsx
 msgid "What you agreed to is kept. Forgot something? This link works until {closes}."
 msgstr "Lo que has confirmado queda guardado. ¿Se te olvidó algo? Este enlace funciona hasta el {closes}."
+
+#: src/connections/connected-dialog.tsx
+msgid "What you chose"
+msgstr "Lo que elegiste"
 
 #: src/landscape/data-tab.tsx
 msgid "What your identity provider granted {appName}."
@@ -14648,6 +14694,11 @@ msgstr "Se aplicaría"
 msgid "Would run after approval"
 msgstr "Se ejecutaría tras la aprobación"
 
+#: src/connections/connect-dialog.tsx
+msgctxt "what a tool may do"
+msgid "Write"
+msgstr "Escritura"
+
 #: src/routes/guest.tsx
 msgid "Write your answer"
 msgstr "Escribe tu respuesta"
@@ -14751,6 +14802,11 @@ msgstr "Has terminado este chat. Gracias por tu tiempo."
 msgid "You show me who’s who, where the documents are, and which tools people use."
 msgstr "Tú me enseñas quién es quién, dónde están los documentos y qué herramientas usa la gente."
 
+#. {host} is the web address of the sign-in page, e.g. login.microsoftonline.com.
+#: src/connections/connect-dialog.tsx
+msgid "You sign in at <0>{host}</0>"
+msgstr "Inicias sesión en <0>{host}</0>"
+
 #: src/connections/connect-dialog.tsx
 msgid "You sign in on {app}’s own page."
 msgstr "Inicias sesión en la propia página de {app}."
@@ -14839,6 +14895,7 @@ msgid "your organization"
 msgstr "tu organización"
 
 #: src/connections/connect-dialog.tsx
+#: src/connections/connected-dialog.tsx
 msgid "Your organization uses it through the permissions you grant."
 msgstr "Tu organización lo usa mediante los permisos que concedes."
 

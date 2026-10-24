@@ -792,6 +792,12 @@ export type ShadcnComponent = keyof typeof shadcnComponents;
  * a screen. Optional, and without page chrome of their own.
  */
 export const graspComponents = {
+  "auto-height": {
+    status: "supported",
+    summary:
+      "A box whose height eases to fit what is inside, and content that fades in, so a dialog glides between its steps.",
+    exports: ["AutoHeight", "FadeIn"],
+  },
   grid: {
     status: "supported",
     summary:
@@ -859,6 +865,12 @@ export const graspComponents = {
     summary:
       "Text with a light sweeping across it, for what is still being worked out.",
     exports: ["Shimmer"],
+  },
+  "success-mark": {
+    status: "supported",
+    summary:
+      "A check that lands with a pulse, for a step that went through. Decorative: say what succeeded beside it.",
+    exports: ["SuccessMark"],
   },
   "split-pane": {
     status: "supported",
