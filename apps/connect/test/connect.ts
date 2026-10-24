@@ -152,6 +152,7 @@ export type Signed = Partial<
     | "decision"
     | "heldUntil"
     | "mailboxes"
+    | "resources"
   >
 >;
 

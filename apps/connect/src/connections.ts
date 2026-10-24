@@ -228,12 +228,27 @@ export const composioServer = (env: Env, connection: Connection): McpServer => {
 };
 
 /**
+ * The class each tool a Composio connection offers is taken to be
+ * (`allowedTool`), by its name.
+ */
+const offeredToolClasses = (
+  connection: Pick<Connection, "provider" | "tools">
+): Record<string, Exclude<ToolClass, "never">> =>
+  Object.fromEntries(
+    offeredToolNames(connection).flatMap((name) => {
+      const rule = allowedTool(connection, name);
+      return rule === undefined ? [] : [[name, rule.class]];
+    })
+  );
+
+/**
  * Whose each connection `request` names is (`ConnectApi.connectionOwners`),
  * disconnected ones too: what an App read through a connection before it
  * was disconnected is still its owner's alone. With what it is (its
  * source and provider) and its account: its ID, name, email address and
  * the other addresses it receives mail at, which core records with the
- * mail a workflow run sends through it. Unknown IDs are left out.
+ * mail a workflow run sends through it, and, for a Composio one, the
+ * class of each tool it offers. Unknown IDs are left out.
  */
 export const connectionOwners = async (
   db: D1Database,
@@ -259,12 +274,16 @@ export const connectionOwners = async (
       accountEmail: connections.accountEmail,
       accountAddresses: connections.accountAddresses,
       accountSenders: connections.accountSenders,
+      tools: connections.tools,
     })
     .from(connections)
     .where(inArray(connections.id, ids));
-  return rows.map(({ accountAddresses, accountSenders, ...row }) => ({
+  return rows.map(({ accountAddresses, accountSenders, tools, ...row }) => ({
     ...row,
     accountAddresses: accountAddresses ?? [],
     accountSenders: accountSenders ?? [],
+    ...(row.source === "composio" && {
+      toolClasses: offeredToolClasses({ provider: row.provider, tools }),
+    }),
   }));
 };
