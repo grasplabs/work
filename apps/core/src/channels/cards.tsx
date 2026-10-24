@@ -419,3 +419,32 @@ export const signInCard = ({
     </Card>
   ),
 });
+
+/**
+ * A member's own Microsoft 365, to connect or sign in to again
+ * (connect-own.ts): a button to the deployment's own page that starts
+ * connect's sign-in for whoever is signed in there. The link carries
+ * nothing of theirs: the flow finishes only for the person who started it.
+ */
+export const connectOwnCard = ({
+  locale,
+  url,
+  reconnect,
+}: {
+  locale: ChannelLocale;
+  url: string;
+  reconnect: boolean;
+}): PostableCard => ({
+  card: cardOf(
+    <Card>
+      <CardText>
+        {say(reconnect ? "reconnectOwn" : "connectOwn", locale)}
+      </CardText>
+      <Actions>
+        <LinkButton style="primary" url={ownLink(url)}>
+          {say("connectOwnButton", locale)}
+        </LinkButton>
+      </Actions>
+    </Card>
+  ),
+});

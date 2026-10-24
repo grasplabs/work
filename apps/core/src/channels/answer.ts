@@ -2,14 +2,20 @@ import { agentErrors } from "@grasp-os/shared/agent";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { modelErrors } from "@grasp-os/shared/models";
 import { permissionErrors } from "@grasp-os/shared/permissions";
-import type { Thread } from "chat";
 import { z } from "zod";
 
 import { signInConfig } from "../auth/config.ts";
 import { chatAgentId, personalWorkspaceId } from "../chats-rpc.ts";
 import { workspace } from "../durable-objects.ts";
 import { answerCard } from "./cards.tsx";
+import {
+  offerConnectOwn,
+  ownMicrosoftNeed,
+  takeKeptAsk,
+} from "./connect-own.ts";
+import type { Conversation } from "./connect-own.ts";
 import type { ChannelHandoff, ChannelMessage } from "./door.ts";
+import { teamsAdapter } from "./teams.ts";
 import { channelLocales, languageOf, say } from "./words.ts";
 import type { ChannelLocale } from "./words.ts";
 
@@ -63,7 +69,7 @@ const appLocale = (raw: unknown): ChannelLocale => {
 };
 
 /** Shows typing in `thread` until the returned function is called. */
-const typingIn = (thread: Thread): (() => void) => {
+const typingIn = (thread: Conversation): (() => void) => {
   const show = async () => {
     try {
       await thread.startTyping();
@@ -87,7 +93,7 @@ const answerOne = async (
     platform,
     userId,
     thread,
-  }: Pick<ChannelMessage, "platform" | "userId" | "thread">,
+  }: Pick<ChannelMessage, "platform" | "userId"> & { thread: Conversation },
   text: string,
   locale: ChannelLocale
 ): Promise<void> => {
@@ -134,6 +140,52 @@ const answerOne = async (
       chatUrl: `${origin}/?chat=${encodeURIComponent(chatId)}`,
     })
   );
+  // Without their own Microsoft 365 he answered from what the company
+  // shared alone: once a day, he offers to connect it.
+  await offerConnectOwn(env, thread, {
+    userId,
+    platform,
+    question: text,
+    locale,
+  });
+};
+
+/**
+ * Once `userId` connected their own Microsoft 365 (core's callback): says
+ * so in the conversation they asked in, and answers what they asked again,
+ * now with it. Nothing, if nothing they asked is still kept.
+ */
+export const carryOnAfterConnecting = async (
+  env: Env,
+  userId: string
+): Promise<void> => {
+  // Only once theirs works: a flow for another app carries nothing on.
+  if ((await ownMicrosoftNeed(env, userId)) !== undefined) {
+    return;
+  }
+  const kept = await takeKeptAsk(env, userId);
+  if (kept?.platform !== "teams") {
+    return;
+  }
+  const adapter = teamsAdapter(env);
+  const conversation: Conversation = {
+    id: kept.threadId,
+    post: async (message) => await adapter.postMessage(kept.threadId, message),
+    startTyping: async () => {
+      await adapter.startTyping(kept.threadId);
+    },
+  };
+  try {
+    await conversation.post(say("connectedOwn", kept.locale));
+    await answerOne(
+      env,
+      { platform: "teams", userId, thread: conversation },
+      kept.question,
+      kept.locale
+    );
+  } catch (error) {
+    log.warn("channel.carry_on_failed", errorFields(error));
+  }
 };
 
 /**

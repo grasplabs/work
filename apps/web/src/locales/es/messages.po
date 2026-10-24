@@ -4023,6 +4023,10 @@ msgstr "No se pudo conectar. Vuelve a intentarlo o pregunta a un administrador."
 msgid "Connecting it needs your organization's own sign-in app, which Grasp can't use yet."
 msgstr "Para conectarla, tu organización necesita su propia app de inicio de sesión, que Grasp aún no puede usar."
 
+#: src/routes/_shell.connect-microsoft.tsx
+msgid "Connecting your Microsoft 365"
+msgstr "Conectando tu Microsoft 365"
+
 #: src/engines/resource-bindings.tsx
 #: src/inbox/items.ts
 #: src/routes/_shell.settings.outcomes.tsx
@@ -11616,6 +11620,10 @@ msgstr "Admite datos sensibles"
 msgctxt "filter: teams that take part in the interviews"
 msgid "Taking part"
 msgstr "Participan"
+
+#: src/routes/_shell.connect-microsoft.tsx
+msgid "Taking you to the Microsoft sign-in…"
+msgstr "Te llevamos al inicio de sesión de Microsoft…"
 
 #: src/onboarding/work-list.tsx
 msgid "Talked"
