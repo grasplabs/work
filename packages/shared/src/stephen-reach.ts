@@ -88,6 +88,8 @@ export interface StephenReach {
   changedAt: string | null;
   places: StephenPlaceSetting[];
   apps: StephenAppSetting[];
+  /** The company's teams, by name: what an audience may name. */
+  teams: { teamId: string; name: string }[];
 }
 
 /** What Stephen does for one person in one place, as the door asks it. */

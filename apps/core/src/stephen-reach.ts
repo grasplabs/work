@@ -22,10 +22,11 @@ import type {
   StephenPlaceSetting,
   StephenReach,
 } from "@grasp-os/shared/stephen-reach";
-import { eq, or, sql } from "drizzle-orm";
+import { asc, eq, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
+import { organizationId } from "./auth/auth.ts";
 import {
   appToolClasses,
   stephenPlaces,
@@ -128,10 +129,15 @@ const teamsDetail = (stored: string): Record<string, string> =>
 /** Settings › Stephen as the company has it now, for admins to read. */
 export const readStephenReach = async (env: Env): Promise<StephenReach> => {
   const db = drizzle(env.DB);
-  const [whole, places, apps] = await Promise.all([
+  const [whole, places, apps, companyTeams] = await Promise.all([
     db.select().from(stephenReach).where(eq(stephenReach.id, stephenId)).get(),
     db.select().from(stephenPlaces),
     db.select().from(appToolClasses),
+    db
+      .select({ teamId: teams.id, name: teams.name })
+      .from(teams)
+      .where(eq(teams.organizationId, organizationId))
+      .orderBy(asc(teams.name), asc(teams.id)),
   ]);
   const storedPlaces = new Map(places.map((row) => [row.place, row]));
   const placeNames = [
@@ -184,6 +190,7 @@ export const readStephenReach = async (env: Env): Promise<StephenReach> => {
           }),
         };
       }),
+    teams: companyTeams,
   };
 };
 

@@ -63,8 +63,11 @@ describe("Settings › Stephen", setUpTime, () => {
   it("reaches everyone and acts for them in Teams until an admin changes it", async () => {
     const admin = await signedInApi(idp, "admin");
     const person = await signedInApi(idp, "user");
+    const team = await teamOf(person.userId);
     await expect(inTeams(person)).resolves.toStrictEqual([reachesActs]);
     const settings = await admin.api.connections.stephenReach();
+    // The teams an audience may name, by name.
+    expect(settings.teams).toContainEqual({ teamId: team, name: "Sales" });
     expect({
       on: settings.on,
       audience: settings.audience,
