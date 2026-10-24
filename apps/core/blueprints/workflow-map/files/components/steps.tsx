@@ -38,7 +38,7 @@ const withNumber = (step: Step, name: NumberName, typed: string): Step => {
   const { [name]: previous, ...others } = step.numbers ?? {};
   const value = Number(typed);
   if (typed.trim() === "" || !Number.isFinite(value)) {
-    // A step with no numbers left has none, as the Playbook stores it.
+    // A step with no numbers left has none, as the brain stores it.
     const { numbers: _cleared, ...without } = step;
     return Object.keys(others).length === 0
       ? without
