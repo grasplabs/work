@@ -236,11 +236,6 @@ export interface KnowledgeTools {
   read: (documentId: string, options?: ReadOptions) => Promise<KnowledgeRead>;
   /** A document's links and backlinks, and for a skill, its files. */
   follow: (documentId: string) => Promise<FollowResult>;
-  /**
-   * The Brain's recall (brain-api.ts) across every collection it may read,
-   * under its `brain` grant: a bounded memory pack.
-   */
-  recall: (input: RecallInput) => Promise<MemoryPack>;
 }
 
 /**

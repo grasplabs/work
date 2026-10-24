@@ -47,7 +47,7 @@ import { agentKnowledgeSignals } from "./knowledge/signals.ts";
  */
 export class KnowledgeApi
   extends WorkerEntrypoint<Env, AgentScope>
-  implements Omit<KnowledgeTools, "recall">
+  implements KnowledgeTools
 {
   /** Runs one read as the chat's agent, after the run's check. */
   async #asAgent<T>(
