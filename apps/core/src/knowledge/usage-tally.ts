@@ -56,7 +56,7 @@ export interface KnowledgeTally {
 
 /**
  * The reads (`detail.read`) of several documents at once that read what
- * they say: an agent's memory files, a page of Playbook records. Listing
+ * they say: an agent's memory files, a page of the brain's records. Listing
  * an agent's skills names them, every turn, without reading one, so it
  * doesn't count, nor does listing a collection's documents.
  */
