@@ -27,6 +27,8 @@ import type { McpListedTool } from "./mcp.ts";
 //   nothing of any other tool is even read. The class is fingerprinted
 //   with the rest, so a release that reclasses a tool stops the binding
 //   until an admin approves it again;
+// - a tool an admin pointed at some places takes only them: its resource
+//   property is served as one of them, required (`pointedInput`);
 // - a tool is served only by a name an App can declare, once: a name
 //   listed twice is ambiguous, and left out;
 // - the list is read up to `maxListedTools`, and each schema is checked for
@@ -200,6 +202,45 @@ const servedSchema = (schema: unknown): string | undefined => {
 };
 
 /**
+ * `input`, a served input schema's JSON text, held to the places an admin
+ * pointed its tool at (`ToolRule.places`): its resource property is one of
+ * them, and required. Unchanged for a tool pointed nowhere in particular;
+ * undefined where the schema names no such property, as no call of it
+ * could name a place. The places are the admin's, so a change to them
+ * changes the contract, and a binding stops until an admin approves it
+ * again.
+ */
+const pointedInput = (
+  input: string,
+  resource: string | undefined,
+  places: readonly string[] | undefined
+): string | undefined => {
+  if (places === undefined) {
+    return input;
+  }
+  const schema: unknown = JSON.parse(input);
+  if (
+    resource === undefined ||
+    !isShallowJson(schema) ||
+    !isRecord(schema) ||
+    !isRecord(schema.properties) ||
+    !Object.hasOwn(schema.properties, resource)
+  ) {
+    return undefined;
+  }
+  const properties: Record<string, Json> = { ...schema.properties };
+  setOwn(properties, resource, { type: "string", enum: [...places] });
+  const required = Array.isArray(schema.required)
+    ? schema.required.filter((each): each is string => typeof each === "string")
+    : [];
+  return JSON.stringify({
+    ...schema,
+    properties,
+    required: required.includes(resource) ? required : [...required, resource],
+  });
+};
+
+/**
  * The tools the server lists, each named once; a name listed twice is left
  * out, whatever either entry holds (one without a schema too), as a call
  * of it is refused (`McpServer.tool`).
@@ -239,10 +280,14 @@ export const composioContract = async (
     const rule = actionNamePattern.test(name)
       ? allowedTool(connection, name)
       : undefined;
-    const input =
+    const served =
       rule === undefined || inputSchema === undefined
         ? undefined
         : servedSchema(inputSchema);
+    const input =
+      served === undefined
+        ? undefined
+        : pointedInput(served, rule?.resource, rule?.places);
     const output =
       input === undefined || outputSchema === undefined
         ? textAnswer

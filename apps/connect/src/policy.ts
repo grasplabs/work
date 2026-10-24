@@ -9,8 +9,9 @@ import type { McpServerTool, McpTool, McpToolResult } from "./mcp.ts";
 // is what the class Grasp gave it and the admin's allowlist say
 // (`composioTool`, threat model CN16), whatever the server declares about
 // it: one nobody classed isn't run at all (`allowedTool`), a read only if
-// both its class and the admin say so, and held to one resource only by
-// the input property the admin named.
+// both its class and the admin say so, held to one resource only by the
+// input property the admin named, and to the places the admin pointed it
+// at, if any.
 
 type ServerKind = Connection["serverKind"];
 
@@ -30,6 +31,7 @@ export const composioTool = (
   inputProperties,
   readOnly: rule.read,
   resourceField: rule.resource,
+  ...(rule.places === undefined ? {} : { places: rule.places }),
 });
 
 /**
@@ -77,6 +79,40 @@ export const checkResourceScope = (
     input[resourceField] === resource;
   if (!inScope) {
     throw connectErrors.create("connect.resource_out_of_scope");
+  }
+};
+
+/**
+ * Keeps a call of a tool an admin pointed at some places (`McpTool.places`)
+ * on them, whatever the capability names: the person Stephen acts for may
+ * ask about anything, and he reads only where the admin pointed him. Its
+ * resource property must name one of the places exactly, and its input
+ * may hold only properties the tool's schema declares, so no other
+ * spelling of that property names somewhere else. A call that names no
+ * place, such as a search across the whole app, is refused too: it would
+ * reach beyond them.
+ */
+export const checkPlaces = (
+  tool: McpTool,
+  input: Readonly<Record<string, Json>>
+): void => {
+  const { places, resourceField, inputProperties } = tool;
+  if (places === undefined) {
+    return;
+  }
+  const declared = new Set(inputProperties);
+  const named =
+    resourceField !== undefined && declared.has(resourceField)
+      ? input[resourceField]
+      : undefined;
+  const inPlace =
+    resourceField !== undefined &&
+    resourceFieldPattern.test(resourceField) &&
+    Object.keys(input).every((key) => declared.has(key)) &&
+    typeof named === "string" &&
+    places.includes(named);
+  if (!inPlace) {
+    throw connectErrors.create("connect.place_out_of_scope");
   }
 };
 

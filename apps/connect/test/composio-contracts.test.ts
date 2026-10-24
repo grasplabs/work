@@ -223,6 +223,17 @@ const hubspot = async (
     ...fields,
   });
 
+/** The list tool, pointed at two pipelines in `resource`, and the create tool. */
+const pointedAt = (resource: string): ComposioToolRule[] => [
+  {
+    name: "HUBSPOT_LIST_CONTACTS",
+    read: true,
+    resource,
+    places: ["pipeline-sales", "pipeline-support"],
+  },
+  { name: "HUBSPOT_CREATE_CONTACT" },
+];
+
 const contractOf = async (
   connectionId: string,
   contract = "composio.hubspot@1"
@@ -302,6 +313,37 @@ describe("a Composio connection's generated contract", () => {
     expect(after.actions.HUBSPOT_LIST_CONTACTS?.input).not.toBe(
       before.actions.HUBSPOT_LIST_CONTACTS?.input
     );
+  });
+
+  it("serves a tool the admin pointed at some places with its resource as one of them, required, and leaves it out where its schema has no such property", async () => {
+    const [list] = tools;
+    if (list === undefined) {
+      throw new Error("Expected the list tool");
+    }
+    list.inputSchema = {
+      ...listInput,
+      properties: { ...listInput.properties, pipeline_id: { type: "string" } },
+    };
+    const served = await contractOf(await hubspot(pointedAt("pipeline_id")));
+    const elsewhere = await contractOf(await hubspot(pointedAt("queue_id")));
+    expect({
+      input: parsed(served.actions.HUBSPOT_LIST_CONTACTS?.input),
+      elsewhere: Object.keys(elsewhere.actions),
+    }).toStrictEqual({
+      input: {
+        type: "object",
+        properties: {
+          limit: { type: "integer", minimum: 1 },
+          pipeline_id: {
+            type: "string",
+            enum: ["pipeline-sales", "pipeline-support"],
+          },
+        },
+        required: ["pipeline_id"],
+        additionalProperties: false,
+      },
+      elsewhere: ["HUBSPOT_CREATE_CONTACT"],
+    });
   });
 
   it("carries each tool's class: a release that reclasses one is a changed contract, a read no more", async () => {

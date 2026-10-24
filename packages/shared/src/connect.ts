@@ -889,23 +889,56 @@ export const composioConsentText =
 /** Most tools an admin may allow on one Composio connection. */
 export const composioToolsMax = 1000;
 
+/** Most places an admin may point one Composio tool at. */
+export const composioPlacesMax = 50;
+
+/**
+ * One place an admin points a Composio tool at: a value of its resource
+ * property, as the app knows it (a pipeline's, a ticket queue's or a
+ * folder's ID). Only text, never a pattern: a call names it exactly.
+ */
+const composioPlaceSchema = z
+  .string()
+  .min(1)
+  .max(256)
+  // oxlint-disable-next-line no-control-regex -- control characters are what it refuses
+  .regex(/^[^\u0000-\u001F\u007F]+$/u);
+
 /**
  * What the admin says about one tool they allow on a Composio connection,
  * in place of anything its server declares (threat model CN16): whether a
  * call of it only reads (`read`; otherwise it is a side effect, held for
- * its person as every write is), and which input property names the one
+ * its person as every write is), which input property names the one
  * resource a call of it acts on (`resource`; otherwise it can't be called
- * for one resource).
+ * for one resource), and where the admin pointed it (`places`: then every
+ * call of it must name one of them in that property, or it is refused).
+ * Places need a resource property to be named in.
  */
-export const composioToolRuleSchema = z.strictObject({
-  name: permissionActionSchema,
-  read: z.boolean().optional(),
-  /** A plain property name, one the tool's input takes. */
-  resource: z
-    .string()
-    .regex(/^[A-Za-z_]\w{0,127}$/u)
-    .optional(),
-});
+export const composioToolRuleSchema = z
+  .strictObject({
+    name: permissionActionSchema,
+    read: z.boolean().optional(),
+    /** A plain property name, one the tool's input takes. */
+    resource: z
+      .string()
+      .regex(/^[A-Za-z_]\w{0,127}$/u)
+      .optional(),
+    /** Each place once: the values its resource property may hold. */
+    places: z
+      .array(composioPlaceSchema)
+      .min(1)
+      .max(composioPlacesMax)
+      .refine((places) => new Set(places).size === places.length, {
+        message: "Each place once",
+      })
+      .optional(),
+  })
+  .refine(
+    ({ places, resource }) => places === undefined || resource !== undefined,
+    {
+      message: "Places are named in a resource property",
+    }
+  );
 export type ComposioToolRule = z.infer<typeof composioToolRuleSchema>;
 
 /** One allowed tool: by name alone (a side effect, no resource), or its rule. */
@@ -1917,6 +1950,8 @@ export const connectErrors = defineErrorFamily({
     "It isn't known what kind of action this is, so it wasn't done.",
   "connect.never":
     "Grasp never deletes, shares, forwards, sets rules or settings, or pays, whatever is allowed, so it wasn't done.",
+  "connect.place_out_of_scope":
+    "An admin pointed this tool at some places only, and this call names none of them, so it wasn't run.",
 });
 
 /**
