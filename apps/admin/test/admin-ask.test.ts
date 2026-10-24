@@ -150,4 +150,23 @@ describe("Ask Grasp", () => {
       refused: "no_model",
     });
   });
+
+  it("never follows a redirect from Grasp's own core: the question goes nowhere else and gets no answer", async () => {
+    const { clientId, account } = await liveClient();
+    account.ask = { text: "Answered elsewhere.", truncated: false };
+    account.redirectsTo = "https://elsewhere.example";
+    const answer = await asGrasp(
+      clientId,
+      async () => await ask([{ role: "user", text: "Which company?" }])
+    );
+    expect({
+      answer,
+      asked: account.asked.length,
+      redirected: cloudflare.redirected(),
+    }).toStrictEqual({
+      answer: { text: null, truncated: false, refused: "not_answered" },
+      asked: 0,
+      redirected: [],
+    });
+  });
 });

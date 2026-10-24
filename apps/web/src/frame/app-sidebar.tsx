@@ -27,6 +27,7 @@ import type { ComponentType, SVGProps } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
 import { DashboardItem } from "../dashboard/nav-item.tsx";
+import { WorkflowsItem } from "../workflows/nav-item.tsx";
 import { IntegrationsIcon } from "./integrations-icon.tsx";
 import { PersonMenu } from "./person-menu.tsx";
 import { SidebarBrand } from "./sidebar-brand.tsx";
@@ -117,16 +118,21 @@ export const AppSidebar = ({
                       <SectionItem key={section.to} section={section} />
                     ))}
                     <DashboardItem identity={identity} />
-                    {sections.slice(1).map((section) =>
-                      section.to === "/domains" ? (
-                        <Fragment key={section.to}>
-                          <SectionItem section={section} />
-                          <SurfaceNav core={core} />
-                        </Fragment>
-                      ) : (
-                        <SectionItem key={section.to} section={section} />
-                      )
-                    )}
+                    {sections.slice(1).map((section) => {
+                      if (section.to === "/domains") {
+                        return (
+                          <Fragment key={section.to}>
+                            <SectionItem section={section} />
+                            <SurfaceNav core={core} />
+                          </Fragment>
+                        );
+                      }
+                      // With how many workflows need the person.
+                      if (section.to === "/workflows") {
+                        return <WorkflowsItem key={section.to} />;
+                      }
+                      return <SectionItem key={section.to} section={section} />;
+                    })}
                   </>
                 )}
                 {identity.staff ? <SectionItem section={onboarding} /> : null}

@@ -495,7 +495,9 @@ const eraseGapAnswerer = async (
  * The gap answers as a Knowledge purge reaches them: they hold people's
  * words too, so a purge rewrites them and forgets who gave them.
  */
-export const gapAnswerErasure = (env: Env): OnErase => ({
+export const gapAnswerErasure = (
+  env: Env
+): Pick<OnErase, "count" | "rewrite" | "forgetActor"> => ({
   count: async (holds) => await countGapAnswers(env, holds),
   rewrite: async (person, rewrite) => {
     await rewriteGapAnswers(env, person, rewrite);

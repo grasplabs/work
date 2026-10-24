@@ -338,6 +338,28 @@ export const chatCodeRuns = sqliteTable(
   ]
 );
 
+/**
+ * The calls a chat's code made to its agent's APIs, as the chat shows
+ * them (`ChatToolEvent` in shared/chat.ts): the code step that made each
+ * one, from its run's own record, and the call as JSON: method, target,
+ * identifiers and counts, how it ended. Never what a call read. Only the
+ * chat's latest `chatToolEventsKept`; deleted with the chat.
+ */
+export const chatToolEvents = sqliteTable(
+  "chat_tool_events",
+  {
+    id: integer().primaryKey({ autoIncrement: true }),
+    chatId: text("chat_id")
+      .$type<ChatId>()
+      .notNull()
+      .references(() => chats.id),
+    callId: text("call_id").notNull(),
+    event: text().notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [index("chat_tool_events_chat").on(table.chatId, table.id)]
+);
+
 /** The kinds of build a chat's code can hand to a durable job. */
 export const buildJobKinds = ["check", "propose"] as const;
 

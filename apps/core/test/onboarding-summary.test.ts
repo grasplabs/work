@@ -138,6 +138,7 @@ const view = (more: Partial<OnboardingView> = {}): OnboardingView => ({
   agreed: true,
   paused: false,
   sponsor: null,
+  waiting: 0,
   ...more,
 });
 

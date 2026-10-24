@@ -121,10 +121,16 @@ export const workOf = (record: WorkRecord): Work => {
   };
 };
 
-/** The model a call was made to, by the name its maker gives it: one the admin has no price for is another. */
+/**
+ * The model a call was made to, by the name its maker gives it: one the admin has no price for is
+ * another. Core counts what Stephen hears, live or from a recording, as `transcription`: his ears.
+ */
 const modelOf = (name: string): Model => {
   if (name === "voice") {
     return "voice";
+  }
+  if (name === "transcription") {
+    return "ears";
   }
   return (
     (["opus", "sonnet", "haiku"] as const).find((model) =>
@@ -135,8 +141,9 @@ const modelOf = (name: string): Model => {
 
 /**
  * What the Worker counted, as the admin counts use: tokens read (new and kept together) and
- * written, minutes spoken, and what that cost at the admin's prices, with what the model had kept
- * of an earlier call at a tenth. A model with no price is counted as another, its spend unknown.
+ * written, minutes spoken and heard, and what that cost at the admin's prices, with what the model
+ * had kept of an earlier call at a tenth. A model with no price is counted as another, its spend
+ * unknown.
  */
 export const meteredOf = (usage: MeterDay[]): RealHappened["metered"] =>
   usage.flatMap((day) =>
@@ -144,12 +151,14 @@ export const meteredOf = (usage: MeterDay[]): RealHappened["metered"] =>
       Object.entries(day.use[purpose] ?? {}).flatMap(([name, took]) => {
         const model = modelOf(name);
         const price = PRICES[model];
-        const spoken = took.seconds / 60;
+        const minutes = took.seconds / 60;
+        const heard = model === "ears" ? minutes : 0;
+        const spoken = minutes - heard;
         const spend =
           (took.tokensIn / 1e6) * price.tokensIn +
           (took.kept / 1e6) * price.tokensIn * KEPT_SHARE +
           (took.tokensOut / 1e6) * price.tokensOut +
-          spoken * price.minute;
+          minutes * price.minute;
         return [
           {
             day: day.day,
@@ -159,7 +168,7 @@ export const meteredOf = (usage: MeterDay[]): RealHappened["metered"] =>
               tokensIn: took.tokensIn + took.kept,
               tokensOut: took.tokensOut,
               spoken,
-              heard: 0,
+              heard,
               spend,
             },
           },

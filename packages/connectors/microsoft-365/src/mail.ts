@@ -59,6 +59,9 @@ const graphMessage = z.object({
   subject: z.string().nullish(),
   bodyPreview: z.string().nullish(),
   body: z.object({ contentType: z.string(), content: z.string() }).nullish(),
+  uniqueBody: z
+    .object({ contentType: z.string(), content: z.string() })
+    .nullish(),
   from: graphAddress.nullish(),
   toRecipients: z.array(graphAddress).nullish(),
   ccRecipients: z.array(graphAddress).nullish(),
@@ -70,6 +73,7 @@ const graphMessage = z.object({
   isDraft: z.boolean().nullish(),
   hasAttachments: z.boolean().nullish(),
   importance: z.string().nullish(),
+  flag: z.object({ flagStatus: z.string().nullish() }).nullish(),
   parentFolderId: z.string().nullish(),
   conversationId: z.string().nullish(),
   internetMessageId: z.string().nullish(),
@@ -91,6 +95,7 @@ const summaryFields = [
   "isDraft",
   "hasAttachments",
   "importance",
+  "flag",
   "parentFolderId",
   "conversationId",
   "internetMessageId",
@@ -119,6 +124,8 @@ const summarySchema = z.strictObject({
   isDraft: z.boolean(),
   hasAttachments: z.boolean(),
   importance: z.string().nullable(),
+  /** Graph's follow-up flag: `notFlagged`, `flagged` or `complete`. */
+  flagStatus: z.string().nullable(),
   webLink: z.string().nullable(),
 });
 
@@ -153,6 +160,7 @@ const summaryOf = (
   isDraft: message.isDraft ?? false,
   hasAttachments: message.hasAttachments ?? false,
   importance: message.importance ?? null,
+  flagStatus: message.flag?.flagStatus ?? null,
   webLink: message.webLink ?? null,
 });
 
@@ -174,12 +182,13 @@ const searchSchema = z
 const listMessages = defineTool({
   name: "mail.list",
   description:
-    "Lists messages in a mailbox, newest first, or in one of its folders (a folder ID, or a well-known name such as inbox or archive), optionally filtered or searched.",
+    "Lists messages in a mailbox, newest first, or in one of its folders (a folder ID, or a well-known name such as inbox or archive), optionally filtered (unread, flagged, received after) or searched. Each names its conversationId: read the whole conversation with mail.thread.",
   input: z.strictObject({
     mailbox: mailboxSchema,
     folder: idSchema.optional(),
     search: searchSchema.optional(),
     unreadOnly: z.boolean().optional(),
+    flaggedOnly: z.boolean().optional(),
     receivedAfter: z.iso.datetime({ offset: true }).optional(),
     top: topSchema,
     page: pageSchema,
@@ -198,11 +207,15 @@ const listMessages = defineTool({
     folder,
     search,
     unreadOnly,
+    flaggedOnly,
     receivedAfter,
     top,
     page,
   }) => {
-    const filtered = unreadOnly === true || receivedAfter !== undefined;
+    const filtered =
+      unreadOnly === true ||
+      flaggedOnly === true ||
+      receivedAfter !== undefined;
     if (search !== undefined && filtered) {
       throw new ToolError(
         "Microsoft 365 can't search and filter at once: search, or filter",
@@ -214,6 +227,7 @@ const listMessages = defineTool({
       ? [
           `receivedDateTime ge ${receivedAfter ?? "1900-01-01T00:00:00Z"}`,
           ...(unreadOnly === true ? ["isRead eq false"] : []),
+          ...(flaggedOnly === true ? ["flag/flagStatus eq 'flagged'"] : []),
         ].join(" and ")
       : undefined;
     const path =
@@ -242,6 +256,95 @@ const listMessages = defineTool({
         nextPage: nextPageOf(nextLink),
       },
       provenance: value.map(({ id }) => id),
+    };
+  },
+});
+
+/**
+ * A conversation's ID, as Graph gives it in a message's `conversationId`:
+ * base64, so it may hold `+` and `/`. It only ever goes into a `$filter`
+ * string literal, never a path, and can't hold the quote that would end
+ * the literal.
+ */
+const conversationSchema = z
+  .string()
+  .min(1)
+  .max(512)
+  .regex(/^[\w=+/!.-]+$/u);
+
+/** How many messages of a conversation mail.thread returns at most. */
+const threadMessageLimit = 25;
+
+/**
+ * How many characters of each message's own text mail.thread returns at
+ * most, so a whole thread stays a size a model reads in one go.
+ */
+const threadBodyLimit = 8000;
+
+/** `text` cut to `limit` characters, never inside a surrogate pair. */
+const cutText = (text: string, limit: number): string => {
+  if (text.length <= limit) {
+    return text;
+  }
+  const astral = (text.codePointAt(limit - 1) ?? 0) > 0xff_ff;
+  return text.slice(0, astral ? limit - 1 : limit);
+};
+
+const threadMessages = defineTool({
+  name: "mail.thread",
+  description:
+    "Gets the messages of one conversation (a conversationId from mail.list or mail.get) in every folder of a mailbox, Sent Items included, oldest first, each with its own text without the earlier messages quoted below it. The last 25 at most: earlierMessages is true when the conversation has older ones. A body over 8,000 characters is cut, and bodyCut says so. A thread whose last message, leaving out drafts (isDraft), is someone else's waits on the mailbox's owner.",
+  input: z.strictObject({
+    mailbox: mailboxSchema,
+    conversation: conversationSchema,
+  }),
+  output: z.strictObject({
+    mailbox: z.string(),
+    conversationId: z.string(),
+    messages: z.array(
+      summarySchema.extend({
+        body: z.string().nullable(),
+        bodyCut: z.boolean(),
+      })
+    ),
+    earlierMessages: z.boolean(),
+  }),
+  readOnly: true,
+  reach: "company",
+  resource: "mailbox",
+  routes: [get("/messages")],
+  run: async ({ mailbox, conversation }) => {
+    // The newest messages first, so a long conversation keeps its last
+    // word, the one triage reads; then turned oldest first. Graph sorts by
+    // a filtered property only once it leads the filter. A message's
+    // `uniqueBody` is its own text without the earlier ones quoted below
+    // it, so a thread read whole doesn't repeat itself.
+    const { value, "@odata.nextLink": nextLink } = await graphJson(
+      graphUrl(`/users/${segment(mailbox)}/messages`, {
+        $select: `${summaryFields},uniqueBody`,
+        $top: String(threadMessageLimit),
+        $orderby: "receivedDateTime desc",
+        $filter: `receivedDateTime ge 1900-01-01T00:00:00Z and conversationId eq '${conversation}'`,
+      }),
+      pageOf(graphMessage),
+      { headers: preferBody("text") }
+    );
+    const messages = value.toReversed();
+    return {
+      output: {
+        mailbox,
+        conversationId: conversation,
+        messages: messages.map((message) => {
+          const body = message.uniqueBody?.content ?? null;
+          return {
+            ...summaryOf(mailbox, message),
+            body: body === null ? null : cutText(body, threadBodyLimit),
+            bodyCut: body !== null && body.length > threadBodyLimit,
+          };
+        }),
+        earlierMessages: nextLink !== undefined,
+      },
+      provenance: messages.map(({ id }) => id),
     };
   },
 });
@@ -665,6 +768,7 @@ const createDraft = defineTool({
 
 export const mailTools = [
   listMessages,
+  threadMessages,
   getMessage,
   readAttachment,
   moveMessage,

@@ -57,6 +57,12 @@ export const deployErrorCodes = [
   "reserved_secret_name",
   /** A Worker's required secret has no value. */
   "missing_secret",
+  /**
+   * A secret staff set for the client (src/deploy/sealed-secrets.ts)
+   * doesn't open under `CLIENT_KEY`: it is set again before the Worker
+   * deploys without it.
+   */
+  "sealed_secret_unreadable",
   /** The release has a Worker the admin doesn't deploy. */
   "unknown_worker",
   /** The release's Workers bind each other as services in a cycle. */
