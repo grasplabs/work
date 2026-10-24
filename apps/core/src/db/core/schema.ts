@@ -639,10 +639,11 @@ export const blueprints = sqliteTable(
  * the blueprint, the version of its App a marked one was (null for a
  * built-in), the tree it was copied from, and that tree's code
  * (`codeIdentity`), stored under the App as a version's tree is, for an
- * update to be merged over. Written only in the batch that creates the
- * App from the blueprint: unlike `apps.blueprint`, a label a creator may
- * give any App, this is core's record, which the release's vouching for a
- * built-in's code reads.
+ * update to be merged over. Written in the batch that creates the App
+ * from the blueprint, and moved on to a built-in's newer code only in the
+ * batch that commits an update a builder accepted: unlike
+ * `apps.blueprint`, a label a creator may give any App, this is core's
+ * record, which the release's vouching for a built-in's code reads.
  */
 export const appOrigins = sqliteTable("app_origins", {
   appId: text("app_id")
