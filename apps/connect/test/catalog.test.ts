@@ -33,7 +33,7 @@ const toolkits: FakeToolkit[] = [
         tags: ["createHint"],
       },
       // Tagged with nothing: not taken for a read.
-      { slug: "HUBSPOT_DELETE_CONTACT" },
+      { slug: "HUBSPOT_UPDATE_CONTACT" },
     ],
   },
   {
@@ -318,7 +318,7 @@ describe("a catalog entry's tools", () => {
         readOnly: false,
       },
       {
-        name: "HUBSPOT_DELETE_CONTACT",
+        name: "HUBSPOT_UPDATE_CONTACT",
         description: null,
         inputs: [],
         readOnly: false,
