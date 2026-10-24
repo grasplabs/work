@@ -820,6 +820,10 @@ msgstr "{name} vanaf"
 msgid "{name} has no app to show."
 msgstr "{name} heeft geen app om te tonen."
 
+#: src/settings/stephen-settings.tsx
+msgid "{name} in {appName}"
+msgstr "{name} in {appName}"
+
 #: src/dashboard/widget-board.tsx
 msgid "{name} in {domain}"
 msgstr "{name} in {domain}"
@@ -2736,6 +2740,14 @@ msgstr "als {binding}"
 msgid "As each team's lead named them"
 msgstr "Zoals de teamleider ze noemde"
 
+#: src/settings/stephen-settings.tsx
+msgid "As for Stephen"
+msgstr "Zoals voor Stephen"
+
+#: src/settings/stephen-settings.tsx
+msgid "As for the whole company"
+msgstr "Zoals voor het hele bedrijf"
+
 #: src/onboarding/work-record.tsx
 msgid "As it runs today"
 msgstr "Zoals het nu gaat"
@@ -3449,6 +3461,14 @@ msgstr "Gegevens wijzigen"
 msgid "Change plan"
 msgstr "Abonnement wijzigen"
 
+#: src/settings/stephen-settings.tsx
+msgid "Change the company's"
+msgstr "Wat van het bedrijf is wijzigen"
+
+#: src/settings/stephen-settings.tsx
+msgid "Change their own"
+msgstr "Hun eigen wijzigen"
+
 #: src/onboarding/organization-dialogs.tsx
 msgid "Change this team"
 msgstr "Dit team wijzigen"
@@ -3688,6 +3708,10 @@ msgstr "Kies je personeelslijst"
 #: src/workflows/chosen-at-run-time.tsx
 msgid "Chosen at run time: {options}"
 msgstr "Gekozen tijdens de run: {options}"
+
+#: src/settings/stephen-settings.tsx
+msgid "Chosen teams"
+msgstr "Gekozen teams"
 
 #: src/activity/audit-log.tsx
 msgid "Clear"
@@ -4634,6 +4658,10 @@ msgstr "Traint niet op je gegevens"
 msgid "Does nothing until it is turned on again."
 msgstr "Doet niets tot de regel weer wordt aangezet."
 
+#: src/settings/stephen-settings.tsx
+msgid "Does things for people here"
+msgstr "Doet hier dingen voor mensen"
+
 #: src/engines/screen-approval.tsx
 msgid "Doesn't build now"
 msgstr "Bouwt nu niet"
@@ -4764,6 +4792,10 @@ msgstr "Concept"
 msgctxt "a domain still being made"
 msgid "Draft"
 msgstr "Concept"
+
+#: src/settings/stephen-settings.tsx
+msgid "Drafts, events and files of their own, after they press a card."
+msgstr "Hun eigen concepten, afspraken en bestanden, nadat ze op een kaart drukken."
 
 #: src/routes/_shell.onboarding.organization.$team.tsx
 msgid "Draw again"
@@ -5046,11 +5078,16 @@ msgstr "Elk team heeft zijn lead"
 msgid "Every team, whether it takes part or not. A team that was left out can be asked in: its lead gets a link first."
 msgstr "Elk team, of het meedoet of niet. Een team dat buiten bleef, kan erbij worden gevraagd: de teamleider krijgt eerst een link."
 
+#: src/settings/stephen-settings.tsx
+msgid "Every tool he has is of one of these kinds. Each is on for whom you choose, in every app."
+msgstr "Elk hulpmiddel dat hij heeft hoort bij een van deze soorten. Elke soort staat aan voor wie je kiest, in elke app."
+
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Every tool it has: domains and agents use only what they are granted."
 msgstr "Al zijn tools: domeinen en agents gebruiken alleen wat hun is toegekend."
 
 #: src/knowledge/collection-markers.tsx
+#: src/settings/stephen-settings.tsx
 msgid "Everyone"
 msgstr "Iedereen"
 
@@ -7118,6 +7155,10 @@ msgstr "Gemaakt met Grasp op {date}"
 msgid "Madrid"
 msgstr "Madrid"
 
+#: src/settings/stephen-settings.tsx
+msgid "Mail and messages to other people, after they press a card with every recipient."
+msgstr "Mail en berichten aan anderen, nadat ze op een kaart met elke ontvanger drukken."
+
 #: src/frame/app-sidebar.tsx
 msgid "Main"
 msgstr "Hoofdmenu"
@@ -8050,6 +8091,7 @@ msgid "No: its hash or its link to the event before it doesn't match."
 msgstr "Nee: de hash of de koppeling naar de gebeurtenis ervoor klopt niet."
 
 #: src/brain/brain.ts
+#: src/settings/stephen-settings.tsx
 msgid "Nobody"
 msgstr "Niemand"
 
@@ -8678,6 +8720,10 @@ msgstr "Uit"
 msgid "Off the usual way after step {number}"
 msgstr "Afwijkingen na stap {number}"
 
+#: src/settings/stephen-settings.tsx
+msgid "Off, he answers nobody in any chat app. Grasp's own chat keeps working."
+msgstr "Uit beantwoordt hij niemand in een chatapp. De eigen chat van Grasp blijft werken."
+
 #: src/connections/offer-switch.tsx
 msgid "Off, nobody can connect it, admins included. Connections already made go on."
 msgstr "Uit: niemand kan het koppelen, beheerders ook niet. Bestaande koppelingen blijven werken."
@@ -8740,6 +8786,10 @@ msgstr "volgens schema (de parameter {param})"
 #: src/chat/builds-state.ts
 msgid "on every {event} event"
 msgstr "bij elke gebeurtenis {event}"
+
+#: src/settings/stephen-settings.tsx
+msgid "On in chat apps"
+msgstr "Aan in chatapps"
 
 #: src/chat/builds-state.ts
 msgid "on mail to {address}@"
@@ -9774,6 +9824,10 @@ msgctxt "column: how the person rated their interview"
 msgid "Rating"
 msgstr "Beoordeling"
 
+#: src/settings/stephen-settings.tsx
+msgid "Reach others"
+msgstr "Anderen bereiken"
+
 #: src/workflows/workflow-diagram.tsx
 msgid "Reached"
 msgstr "Bereikt"
@@ -9842,6 +9896,10 @@ msgstr "Beperkte bronnen gelezen en is daar nu aan gebonden"
 msgid "Read the code of version {version}"
 msgstr "Lees de code van versie {version}"
 
+#: src/settings/stephen-settings.tsx
+msgid "Read the company's"
+msgstr "Wat van het bedrijf is lezen"
+
 #: src/onboarding/hr-leads.tsx
 msgid "Read the leads from {name} again"
 msgstr "Teamleiders opnieuw uit {name} lezen"
@@ -9855,6 +9913,10 @@ msgstr "Transcript lezen"
 #: src/onboarding/work-record.tsx
 msgid "Read the transcript of {name}"
 msgstr "Transcript van {name} lezen"
+
+#: src/settings/stephen-settings.tsx
+msgid "Read their own"
+msgstr "Hun eigen lezen"
 
 #: src/activity/audit-words.ts
 msgid "Read what a guest wrote"
@@ -10824,6 +10886,14 @@ msgstr "Deel je personeelslijst"
 msgid "Shared code changed"
 msgstr "Gedeelde code gewijzigd"
 
+#: src/settings/stephen-settings.tsx
+msgid "Shared mailboxes, colleagues' calendars and the company's files."
+msgstr "Gedeelde postvakken, agenda's van collega's en de bestanden van het bedrijf."
+
+#: src/settings/stephen-settings.tsx
+msgid "Shared mailboxes, registers and the company's records, after they press a card."
+msgstr "Gedeelde postvakken, registers en de gegevens van het bedrijf, nadat ze op een kaart drukken."
+
 #: src/routes/_shell.domains.$engine.index.tsx
 msgid "Shared with"
 msgstr "Gedeeld met"
@@ -11720,6 +11790,10 @@ msgstr "Teams"
 msgid "Teams and roles"
 msgstr "Teams en rollen"
 
+#: src/settings/stephen-settings.tsx
+msgid "Teams for {label}"
+msgstr "Teams voor {label}"
+
 #: src/routes/_shell.onboarding.kickoff.tsx
 msgid "Teams named"
 msgstr "Genoemde teams"
@@ -11974,6 +12048,10 @@ msgstr "De apps die teams noemden, en de apps die in gebruik zijn maar door niem
 #: src/routes/_shell.integrations.index.tsx
 msgid "The apps your workflows can work in. Grasp only does what you allow per app."
 msgstr "De apps waarin je workflows kunnen werken. Grasp doet alleen wat je per app toestaat."
+
+#: src/settings/stephen-settings.tsx
+msgid "The assistant people chat with in Microsoft Teams and the other chat apps. What is set here is all he may do: a place or an app only narrows it."
+msgstr "De assistent met wie mensen chatten in Microsoft Teams en de andere chatapps. Wat hier staat is alles wat hij mag: een plek of een app beperkt het alleen."
 
 #: src/brain/brain-atlas.ts
 msgid "The board"
@@ -12599,6 +12677,10 @@ msgstr "Hun link werkt niet meer, en wat ze zeiden, gaat mee."
 #: src/routes/_shell.onboarding.interviewers.tsx
 msgid "Their numbers show once the first person starts their interview."
 msgstr "De cijfers verschijnen zodra de eerste persoon aan het interview begint."
+
+#: src/settings/stephen-settings.tsx
+msgid "Their own mail, calendar and files. Runs at once."
+msgstr "Hun eigen mail, agenda en bestanden. Gebeurt meteen."
 
 #: src/onboarding/interview-people.tsx
 msgid "Their rating"
@@ -13922,6 +14004,14 @@ msgstr "Wat er daarna gebeurt"
 msgid "What he leaves alone"
 msgstr "Waar hij niet aan komt"
 
+#: src/settings/stephen-settings.tsx
+msgid "What he may do"
+msgstr "Wat hij mag"
+
+#: src/settings/stephen-settings.tsx
+msgid "What he may do in {appName}: as for the whole company, or for fewer people."
+msgstr "Wat hij in {appName} mag: zoals voor het hele bedrijf, of voor minder mensen."
+
 #: src/routes/_shell.onboarding.interviews.$person.tsx
 msgid "What is marked is what {who} wrote down."
 msgstr "Wat gemarkeerd is, heeft {who} opgeschreven."
@@ -14219,6 +14309,10 @@ msgstr "Waar alles vandaan komt: gesprekken, documenten, Pulse en koppelingen."
 msgid "Where it comes from"
 msgstr "Waar het vandaan komt"
 
+#: src/settings/stephen-settings.tsx
+msgid "Where people reach him"
+msgstr "Waar mensen hem bereiken"
+
 #: src/routes/_shell.onboarding.interviewers.tsx
 msgid "Where people stop"
 msgstr "Waar mensen stoppen"
@@ -14323,6 +14417,10 @@ msgstr "Wie keurt een nieuwe tool goed"
 msgid "Who can answer"
 msgstr "Wie kan antwoorden"
 
+#: src/settings/stephen-settings.tsx
+msgid "Who can talk to him"
+msgstr "Wie met hem kan praten"
+
 #: src/onboarding/interview-words.ts
 msgctxt "kind of fact"
 msgid "Who comes next"
@@ -14357,6 +14455,14 @@ msgstr "Wie welk team leidt"
 #: src/routes/_shell.onboarding.interviewers.tsx
 msgid "Who people chose"
 msgstr "Wie mensen kozen"
+
+#: src/settings/stephen-settings.tsx
+msgid "Who reaches him in {name}"
+msgstr "Wie hem bereikt in {name}"
+
+#: src/settings/stephen-settings.tsx
+msgid "Who reaches him in each place, as above or fewer, and whether he does things for people there or only answers."
+msgstr "Wie hem op elke plek bereikt, zoals hierboven of minder, en of hij daar dingen voor mensen doet of alleen antwoordt."
 
 #: src/onboarding/work-record.tsx
 msgid "Who said what"

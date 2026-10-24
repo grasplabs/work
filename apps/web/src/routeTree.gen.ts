@@ -63,6 +63,7 @@ import { Route as ShellSettingsProfileRouteImport } from './routes/_shell.settin
 import { Route as ShellSettingsPulseRouteImport } from './routes/_shell.settings.pulse'
 import { Route as ShellSettingsSecurityRouteImport } from './routes/_shell.settings.security'
 import { Route as ShellSettingsSpendRouteImport } from './routes/_shell.settings.spend'
+import { Route as ShellSettingsStephenRouteImport } from './routes/_shell.settings.stephen'
 import { Route as ShellSettingsWorkspaceRouteImport } from './routes/_shell.settings.workspace'
 import { Route as ShellWorkflowsIndexRouteImport } from './routes/_shell.workflows.index'
 import { Route as ShellWorkflowsWorkflowRouteImport } from './routes/_shell.workflows.$workflow'
@@ -371,6 +372,11 @@ const ShellSettingsSpendRoute = ShellSettingsSpendRouteImport.update({
   path: '/spend',
   getParentRoute: () => ShellSettingsRoute,
 } as any)
+const ShellSettingsStephenRoute = ShellSettingsStephenRouteImport.update({
+  id: '/stephen',
+  path: '/stephen',
+  getParentRoute: () => ShellSettingsRoute,
+} as any)
 const ShellSettingsWorkspaceRoute = ShellSettingsWorkspaceRouteImport.update({
   id: '/workspace',
   path: '/workspace',
@@ -604,6 +610,7 @@ export interface FileRoutesByFullPath {
   '/settings/pulse': typeof ShellSettingsPulseRoute
   '/settings/security': typeof ShellSettingsSecurityRoute
   '/settings/spend': typeof ShellSettingsSpendRoute
+  '/settings/stephen': typeof ShellSettingsStephenRoute
   '/settings/workspace': typeof ShellSettingsWorkspaceRoute
   '/workflows/$workflow': typeof ShellWorkflowsWorkflowRoute
   '/kit/components/$name': typeof KitComponentsNameRoute
@@ -688,6 +695,7 @@ export interface FileRoutesByTo {
   '/settings/pulse': typeof ShellSettingsPulseRoute
   '/settings/security': typeof ShellSettingsSecurityRoute
   '/settings/spend': typeof ShellSettingsSpendRoute
+  '/settings/stephen': typeof ShellSettingsStephenRoute
   '/settings/workspace': typeof ShellSettingsWorkspaceRoute
   '/workflows/$workflow': typeof ShellWorkflowsWorkflowRoute
   '/kit/components/$name': typeof KitComponentsNameRoute
@@ -778,6 +786,7 @@ export interface FileRoutesById {
   '/_shell/settings/pulse': typeof ShellSettingsPulseRoute
   '/_shell/settings/security': typeof ShellSettingsSecurityRoute
   '/_shell/settings/spend': typeof ShellSettingsSpendRoute
+  '/_shell/settings/stephen': typeof ShellSettingsStephenRoute
   '/_shell/settings/workspace': typeof ShellSettingsWorkspaceRoute
   '/_shell/workflows/$workflow': typeof ShellWorkflowsWorkflowRoute
   '/kit_/components/$name': typeof KitComponentsNameRoute
@@ -868,6 +877,7 @@ export interface FileRouteTypes {
     | '/settings/pulse'
     | '/settings/security'
     | '/settings/spend'
+    | '/settings/stephen'
     | '/settings/workspace'
     | '/workflows/$workflow'
     | '/kit/components/$name'
@@ -952,6 +962,7 @@ export interface FileRouteTypes {
     | '/settings/pulse'
     | '/settings/security'
     | '/settings/spend'
+    | '/settings/stephen'
     | '/settings/workspace'
     | '/workflows/$workflow'
     | '/kit/components/$name'
@@ -1041,6 +1052,7 @@ export interface FileRouteTypes {
     | '/_shell/settings/pulse'
     | '/_shell/settings/security'
     | '/_shell/settings/spend'
+    | '/_shell/settings/stephen'
     | '/_shell/settings/workspace'
     | '/_shell/workflows/$workflow'
     | '/kit_/components/$name'
@@ -1481,6 +1493,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShellSettingsSpendRouteImport
       parentRoute: typeof ShellSettingsRoute
     }
+    '/_shell/settings/stephen': {
+      id: '/_shell/settings/stephen'
+      path: '/stephen'
+      fullPath: '/settings/stephen'
+      preLoaderRoute: typeof ShellSettingsStephenRouteImport
+      parentRoute: typeof ShellSettingsRoute
+    }
     '/_shell/settings/workspace': {
       id: '/_shell/settings/workspace'
       path: '/workspace'
@@ -1784,6 +1803,7 @@ interface ShellSettingsRouteChildren {
   ShellSettingsPulseRoute: typeof ShellSettingsPulseRoute
   ShellSettingsSecurityRoute: typeof ShellSettingsSecurityRoute
   ShellSettingsSpendRoute: typeof ShellSettingsSpendRoute
+  ShellSettingsStephenRoute: typeof ShellSettingsStephenRoute
   ShellSettingsWorkspaceRoute: typeof ShellSettingsWorkspaceRoute
   ShellSettingsIndexRoute: typeof ShellSettingsIndexRoute
   ShellSettingsPackagesIndexRoute: typeof ShellSettingsPackagesIndexRoute
@@ -1803,6 +1823,7 @@ const ShellSettingsRouteChildren: ShellSettingsRouteChildren = {
   ShellSettingsPulseRoute: ShellSettingsPulseRoute,
   ShellSettingsSecurityRoute: ShellSettingsSecurityRoute,
   ShellSettingsSpendRoute: ShellSettingsSpendRoute,
+  ShellSettingsStephenRoute: ShellSettingsStephenRoute,
   ShellSettingsWorkspaceRoute: ShellSettingsWorkspaceRoute,
   ShellSettingsIndexRoute: ShellSettingsIndexRoute,
   ShellSettingsPackagesIndexRoute: ShellSettingsPackagesIndexRoute,
