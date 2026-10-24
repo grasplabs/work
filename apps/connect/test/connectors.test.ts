@@ -544,6 +544,8 @@ describe("a native connector", () => {
       "mail.createDraft": "change-own",
       ...calendar,
       ...files,
+      // Only in the person's own calendar.
+      "calendar.create": "change-own",
     });
   });
 });
