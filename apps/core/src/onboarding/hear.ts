@@ -9,10 +9,12 @@ import {
 } from "@grasp-os/shared/interview-hear";
 import type { HearAnswer } from "@grasp-os/shared/interview-hear";
 import { log } from "@grasp-os/shared/log";
+import { modelErrors } from "@grasp-os/shared/models";
 import { z } from "zod";
 
 import { errorResponse } from "../errors.ts";
-import { voiceGatewayRoute } from "../models.ts";
+import { models } from "../models.ts";
+import type { Listening } from "../models.ts";
 import { boundedBytes } from "../request-body.ts";
 import { linkHeaders, linkRefusal } from "./links.ts";
 import { onboardingStore } from "./store.ts";
@@ -26,10 +28,13 @@ import { heardBudgets } from "./transcription.ts";
 // worker/interview.ts, `hear`).
 //
 // Written down by ElevenLabs's Scribe through the deployment's AI Gateway,
-// on the path live transcription and speech take (`voiceGatewayRoute`),
-// with the key the gateway stores: core sends none, and asks ElevenLabs
-// to keep nothing (`enable_logging=false`). The words to listen out for
-// are the store's (`listeningTerms`), never the page's.
+// on the path live transcription and speech take, with the key the
+// gateway stores: core sends none, and asks ElevenLabs to keep nothing
+// (`enable_logging=false`). Only once the model gateway admitted it
+// (models.ts, `models(env).listen`): the allowlist and the rules judge it,
+// and the deployment's budgets hold its seconds, before anything is sent;
+// the way to the upstream is the one its admission hands over. The words
+// to listen out for are the store's (`listeningTerms`), never the page's.
 //
 // What it must not do, and what stops it:
 //
@@ -40,15 +45,40 @@ import { heardBudgets } from "./transcription.ts";
 // - Keep the audio: the recording is read, sent on and dropped. Nothing
 //   heard is logged, counted or audited; only its seconds are counted.
 // - Run up the bill: a recording is at most `hearMaxBytes` and
-//   `hearSecondsMax` long; what is written down counts against the same
-//   minutes a day as the live line (`heardBudgets`); the router limits the
-//   endpoint per address, as every link endpoint.
+//   `hearSecondsMax` long; the model gateway admits it against the
+//   deployment's budgets for its seconds, refused as any model call when
+//   they have no room (`hear.over_budget`), and charges and audits what
+//   was heard once it is written down, never anything heard. The minutes a
+//   day the live line has (`heardBudgets`) stay a second bound, below the
+//   budgets; the router limits the endpoint per address, as every link
+//   endpoint.
 
-/** The model a recording is written down by: ElevenLabs's Scribe v2, for whole recordings. */
-const scribeModel = "scribe_v2";
+/**
+ * The model a recording is written down by, as the gateway's allowlist
+ * names it: ElevenLabs's Scribe v2, for whole recordings. The deployment
+ * must list it, as it lists the live line's.
+ */
+export const hearingModel = "elevenlabs/scribe_v2";
+
+/** What the gateway is told every recording is for. */
+const purpose = "onboarding.hear";
 
 /** How long the upstream may take to write a recording down. */
 const hearTimeoutMs = 20_000;
+
+type HearCode = Parameters<typeof hearErrors.create>[0];
+
+/** The gateway's refusals, as the page is told them; any other is a failure. */
+const gatewayRefusals: Partial<Record<string, readonly [number, HearCode]>> = {
+  "model.over_budget": [429, "hear.over_budget"],
+  "model.budget_busy": [503, "hear.busy"],
+  "model.queued": [503, "hear.busy"],
+  "model.unconfigured": [503, "hear.unavailable"],
+  "model.not_allowed": [503, "hear.unavailable"],
+  "model.eu_only": [503, "hear.unavailable"],
+  "model.sensitive_data": [503, "hear.unavailable"],
+  "model.unpriced": [503, "hear.unavailable"],
+};
 
 /** Scribe's answer, as far as it is read: the words, as one text. */
 const writtenSchema = z.object({ text: z.string() });
@@ -106,17 +136,13 @@ const formOf = async (request: Request): Promise<Asked | null> => {
 
 /** What the upstream wrote down, or why not: `undefined` when it failed. */
 const writtenDown = async (
-  env: Env,
+  { route, modelId }: Listening,
   asked: Asked,
   keyterms: readonly string[],
   requestId: string
 ): Promise<string | undefined> => {
-  const route = voiceGatewayRoute(env);
-  if (route === undefined) {
-    return undefined;
-  }
   const sent = new FormData();
-  sent.set("model_id", scribeModel);
+  sent.set("model_id", modelId);
   sent.set("language_code", asked.locale);
   sent.set("tag_audio_events", "false");
   for (const term of keyterms) {
@@ -156,6 +182,38 @@ const writtenDown = async (
   return written.data.text.trim();
 };
 
+/**
+ * The model gateway's admission for `seconds` of a recording, or the
+ * page's refusal when it wasn't admitted (audited by the gateway).
+ */
+const admitted = async (
+  env: Env,
+  seconds: number,
+  requestId: string
+): Promise<Listening | Response> => {
+  try {
+    return await models(env).listen({
+      model: hearingModel,
+      seconds,
+      // Admitted within half of it at most, written down in the rest.
+      openMs: 2 * hearTimeoutMs,
+      purpose,
+      // A recording on a link is the system's, as a line said on one is.
+      trigger: { type: "system" },
+      work: { onboarding: true },
+      requestId,
+    });
+  } catch (error) {
+    const modelCode = modelErrors.codeOf(error);
+    const [status, code] = gatewayRefusals[modelCode ?? ""] ?? [
+      502,
+      "hear.failed",
+    ];
+    log.warn("hear.unadmitted", { requestId, code: modelCode ?? code });
+    return refused(status, hearErrors.create(code), requestId);
+  }
+};
+
 /** `POST /api/interview/hear`: a recording on someone's link, written down. */
 export const hearResponse = async (
   request: Request,
@@ -189,21 +247,25 @@ export const hearResponse = async (
   if (heard >= heardBudgets.link) {
     return refused(429, hearErrors.create("hear.limited"), requestId);
   }
-  if (voiceGatewayRoute(env) === undefined) {
-    return refused(503, hearErrors.create("hear.unavailable"), requestId);
-  }
+  // The stretch as the page measured it: never more than it may be.
+  const seconds = Math.min(hearSecondsMax, asked.seconds);
   const keyterms = await store.listeningTerms(person);
-  const text = await writtenDown(env, asked, keyterms, requestId);
+  const listening = await admitted(
+    env,
+    Math.max(1, Math.ceil(seconds)),
+    requestId
+  );
+  if (listening instanceof Response) {
+    return listening;
+  }
+  const text = await writtenDown(listening, asked, keyterms, requestId);
+  // Sent upstream either way, so charged either way.
+  await listening.heard(seconds, text === undefined ? "failed" : "answered");
   if (text === undefined) {
     return refused(502, hearErrors.create("hear.failed"), requestId);
   }
   try {
-    // The stretch as the page measured it: never more than it may be.
-    await store.countHeard(
-      who,
-      "interviews",
-      Math.min(hearSecondsMax, asked.seconds)
-    );
+    await store.countHeard(who, "interviews", seconds);
   } catch {
     log.error("hear.count_failed", { requestId });
   }

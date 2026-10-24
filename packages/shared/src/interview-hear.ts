@@ -42,6 +42,10 @@ export const hearErrors = defineErrorFamily({
   "hear.invalid": "That isn't a recording that can be written down.",
   "hear.limited":
     "Grasp has listened a lot today on this link. Type your answer, and it listens again tomorrow.",
+  "hear.over_budget":
+    "The AI budget for listening is used up. Type your answer for now.",
+  "hear.busy":
+    "Listening is busy right now. Type your answer, or try again in a moment.",
   "hear.unavailable": "Listening isn't set up for this deployment yet.",
   "hear.failed": "That couldn't be written down. Say it once more, or type it.",
 });
