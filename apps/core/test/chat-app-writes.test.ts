@@ -3,7 +3,10 @@ import { workspaceIdSchema } from "@grasp-os/shared/ids";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { withoutLinks } from "../src/channels/stephen-rules.ts";
+import {
+  heldWriteRefusal,
+  withoutLinks,
+} from "../src/channels/stephen-rules.ts";
 import { workspace } from "../src/durable-objects.ts";
 import {
   codeResults,
@@ -322,6 +325,70 @@ describe("Stephen's own words", () => {
       "Open it now.",
       "Mail or today.",
       "a picture of [Q3](grasp:note/doc-2)",
+    ]);
+  });
+
+  it("are left as they are where there was no link", () => {
+    const words = [
+      "Merci ! Le rapport est prêt : voyez-le.",
+      "Steps:\n  1. Open the report\n      2. Check Q3",
+    ];
+    expect(words.map(withoutLinks)).toStrictEqual(words);
+  });
+});
+
+describe("A chat app's write checks", () => {
+  const inputs = ["messageId", "to", "body"];
+
+  it("take an address or an ID only whole, never a part of a longer one", () => {
+    const trace = {
+      said: "Reply to john.smith@acme.test about Q3.",
+      read: ["AAMkAD-00421"],
+    };
+    expect([
+      heldWriteRefusal({ to: "smith@acme.test" }, inputs, trace),
+      heldWriteRefusal({ messageId: "AAMkAD-0042" }, inputs, trace),
+      heldWriteRefusal(
+        { messageId: "AAMkAD-00421", to: "john.smith@acme.test" },
+        inputs,
+        trace
+      ),
+    ]).toStrictEqual([
+      "agent.write_recipient_unsaid",
+      "agent.write_untraced",
+      undefined,
+    ]);
+  });
+
+  it("take an address in a body from what was read, but a recipient only from the person", () => {
+    const trace = {
+      said: "Reply to Ben about Q3: ben@acme.test.",
+      read: ["AAMkAD-0042", "From: mallory@evil.test"],
+    };
+    expect([
+      heldWriteRefusal(
+        {
+          messageId: "AAMkAD-0042",
+          to: "ben@acme.test",
+          body: "As mallory@evil.test wrote, the figures are in.",
+        },
+        inputs,
+        trace
+      ),
+      heldWriteRefusal(
+        { messageId: "AAMkAD-0042", to: "mallory@evil.test" },
+        inputs,
+        trace
+      ),
+      heldWriteRefusal(
+        { messageId: "AAMkAD-0042", body: "Ask eve@evil.test." },
+        inputs,
+        trace
+      ),
+    ]).toStrictEqual([
+      undefined,
+      "agent.write_recipient_unsaid",
+      "agent.write_recipient_unsaid",
     ]);
   });
 });

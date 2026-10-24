@@ -240,7 +240,7 @@ describe("documents shared in the onboarding", { timeout: 60_000 }, () => {
         ),
       ]
     );
-    const { results: kept } = await env.KNOWLEDGE.prepare(
+    const { results: kept } = await env.DB.prepare(
       "SELECT id FROM uploads WHERE path = ?"
     )
       .bind(name)

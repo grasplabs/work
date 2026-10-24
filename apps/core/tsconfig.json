@@ -8,7 +8,11 @@
       "@cloudflare/vitest-pool-workers/types"
     ],
     // Keeps the browser's globals out of a Worker's types (see the file).
-    "paths": { "@xmldom/xmldom": ["./types/xmldom.d.ts"] }
+    "paths": { "@xmldom/xmldom": ["./types/xmldom.d.ts"] },
+    // Core's JSX is Chat SDK's cards (src/channels/cards.tsx), never React:
+    // a chat app's card is data each adapter renders natively.
+    "jsx": "react-jsx",
+    "jsxImportSource": "chat"
   },
   "include": [
     "src",

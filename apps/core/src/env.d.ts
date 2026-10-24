@@ -8,6 +8,12 @@ interface __BaseEnv_Env {
   /** Sign-in (src/auth/config.ts): JSON, parsed with `deploymentConfig`. */
   SIGN_IN?: unknown;
   ENTRA_CLIENT_SECRET?: string;
+  /**
+   * The client's Teams bot: its Microsoft app id, the audience of every
+   * request Teams sends it (src/channels/teams.ts). Unset, every request
+   * from Teams is refused.
+   */
+  TEAMS_BOT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
   /** The model gateway (src/models.ts): JSON. */
   MODEL_GATEWAY?: unknown;

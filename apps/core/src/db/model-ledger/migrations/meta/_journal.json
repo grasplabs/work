@@ -43,6 +43,13 @@
       "when": 1792075585777,
       "tag": "0005_model_admission",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1792771123714,
+      "tag": "0006_person_limits",
+      "breakpoints": true
     }
   ]
 }

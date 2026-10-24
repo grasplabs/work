@@ -1586,7 +1586,7 @@ describe("releasing a deleted workflow's name", () => {
       kind: "system",
       workflowId: workflow.id,
       version: 1,
-      config: {},
+      config: { event: { contract: "notes", type: "note.created" } },
     });
     // Neither holds a grant to start it, so neither keeps it from being
     // deleted; both still name it.
