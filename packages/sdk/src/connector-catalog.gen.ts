@@ -93,6 +93,10 @@ export interface ConnectorCatalog {
     };
   };
   readonly "microsoft-365.files@1": {
+    readonly createDraft: {
+      readonly input: { format: "word" | "text"; name: string; text: string };
+      readonly output: { folder: string; id: string; name: string; size: number | null; webUrl: string | null };
+    };
     readonly list: {
       readonly input: { drive: string; folder?: string; page?: string; top?: number };
       readonly output: { drive: string; items: Array<{ drive: string; id: string; kind: "file" | "folder" | "other"; lastModifiedAt: string | null; mimeType: string | null; name: string; parentId: string | null; size: number | null; webUrl: string | null }>; nextPage: string | null };

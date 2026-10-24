@@ -31,6 +31,7 @@ export const nativeToolClasses: Readonly<
     "excel.addRow": "change-company",
     "excel.listRows": "read-company",
     "excel.updateRow": "change-company",
+    "files.createDraft": "change-own",
     "files.list": "read-company",
     "files.read": "read-company",
     "files.search": "read-company",

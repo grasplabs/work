@@ -537,6 +537,7 @@ describe("a native connector", () => {
       "todo.create": "change-own",
       "todo.complete": "change-own",
       "files.versions": "read-company",
+      "files.createDraft": "change-own",
     });
     expect(classesOf("google-workspace")).toStrictEqual({
       "mail.list": "read-own",
