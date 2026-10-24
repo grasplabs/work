@@ -1482,6 +1482,10 @@ msgstr "{waiting, plural, one {# wachtende run} other {# wachtende runs}} van {n
 msgid "{waiting, plural, one {# waiting} other {# waiting}}"
 msgstr "{waiting, plural, one {# wacht} other {# wachten}}"
 
+#: src/workflows/nav-item.tsx
+msgid "{waiting, plural, one {# workflow needs you} other {# workflows need you}}"
+msgstr "{waiting, plural, one {# workflow heeft je nodig} other {# workflows hebben je nodig}}"
+
 #: src/routes/_shell.onboarding.agreements.tsx
 msgid "{waiting, plural, one {All three in place, or no link goes out: # link waits.} other {All three in place, or no link goes out: # links wait.}}"
 msgstr "{waiting, plural, one {Pas als alle drie rond zijn, gaat er een link uit: # link wacht.} other {Pas als alle drie rond zijn, gaat er een link uit: # links wachten.}}"
@@ -14563,6 +14567,7 @@ msgstr "workflow.json"
 #: src/routes/_shell.workflows.$workflow.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/routes/decisions.$decision.tsx
+#: src/workflows/nav-item.tsx
 msgid "Workflows"
 msgstr "Workflows"
 

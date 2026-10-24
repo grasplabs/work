@@ -20,6 +20,7 @@ import m0017 from './0017_links_taken.sql';
 import m0018 from './0018_counted_works.sql';
 import m0019 from './0019_settled_works.sql';
 import m0020 from './0020_unconfirmed.sql';
+import m0021 from './0021_brain_sent_parent.sql';
 
   export default {
     journal,
@@ -44,7 +45,8 @@ m0016,
 m0017,
 m0018,
 m0019,
-m0020
+m0020,
+m0021
     }
   }
   
