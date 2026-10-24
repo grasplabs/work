@@ -29,6 +29,7 @@
  * Only a member's message in their own private chat with the bot reaches
  * the Chat SDK, with who they are, and its conversation is kept
  * (`channel_conversations`) so a later message, and the answer, find it.
+ * It is answered in the person's own chat for the platform (answer.ts).
  *
  * Slack (slack.ts) comes in the same way, by its own signature and ids:
  * its people are known only by the Slack account they linked to Grasp, and
@@ -60,6 +61,7 @@ import { inJurisdiction } from "../durable-objects.ts";
 import { errorResponse } from "../errors.ts";
 import { boundedText, jsonOf } from "../request-body.ts";
 import { offerChannelLink } from "./accounts.ts";
+import { answerInChat } from "./answer.ts";
 import { signInCard } from "./cards.tsx";
 import {
   gmailAdapter,
@@ -445,15 +447,19 @@ const slackResponse = async (
   if (userId === undefined) {
     return new Response(null, { status: 200 });
   }
+  // As for Teams: one turn at a time per conversation, answered by the
+  // same agent in the person's own chat for Slack (answer.ts).
   const chat = new Chat({
     userName: "Stephen",
     adapters: { slack: slackAdapter(env) },
     state,
     logger: "silent",
+    concurrency: "queue",
   });
+  const takeOn = handoff ?? answerInChat(env);
   chat.onDirectMessage(async (thread, message) => {
     await keepConversation(env, "slack", thread.id, userId);
-    await handoff?.({ platform: "slack", userId, thread, message });
+    await takeOn({ platform: "slack", userId, thread, message });
   });
   return await chat.webhooks.slack(
     new Request(request.url, {
@@ -679,26 +685,42 @@ export const channelResponse = async (
     return new Response(null, { status: 200 });
   }
 
+  // One turn at a time per conversation: a message sent while one is
+  // answered waits for it, in order, rather than being dropped.
   const chat = new Chat({
     userName: "Stephen",
     adapters: { teams: adapter },
     state,
     logger: "silent",
+    concurrency: "queue",
   });
+  const takeOn = handoff ?? answerInChat(env);
   chat.onDirectMessage(async (thread, message) => {
     await keepConversation(env, platform, thread.id, userId);
-    await handoff?.({ platform, userId, thread, message });
+    await takeOn({ platform, userId, thread, message });
   });
-  return await chat.webhooks.teams(
-    new Request(request.url, {
-      method: "POST",
-      headers: request.headers,
-      body,
-    }),
-    {
-      waitUntil: (promise) => {
-        ctx.waitUntil(promise);
-      },
+  // Answered at once: the platform gives up on a webhook long before an
+  // answer is ready, and sends it again. The message is handled after,
+  // as the request's background work.
+  const settled = async (promise: Promise<unknown>): Promise<void> => {
+    try {
+      await promise;
+    } catch (error) {
+      log.error("channel.handle_failed", { platform, ...errorFields(error) });
     }
+  };
+  const background = (promise: Promise<unknown>): void => {
+    ctx.waitUntil(settled(promise));
+  };
+  background(
+    chat.webhooks.teams(
+      new Request(request.url, {
+        method: "POST",
+        headers: request.headers,
+        body,
+      }),
+      { waitUntil: background }
+    )
   );
+  return new Response(null, { status: 200 });
 };

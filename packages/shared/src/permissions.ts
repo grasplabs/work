@@ -313,6 +313,10 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   "SANDBOX_HOST",
   "SANDBOX_IN_PROCESS",
   "SIGN_IN",
+  // The client's own Slack app (core's src/channels/slack.ts, connect's
+  // src/channels.ts).
+  "SLACK_BOT_TOKEN",
+  "SLACK_SIGNING_SECRET",
   // An App's statistics (core's src/statistics.ts), next to its permissions.
   "STATISTICS",
   "STATISTICS_POINT_LIMITS",

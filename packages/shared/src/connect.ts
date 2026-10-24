@@ -497,6 +497,16 @@ export interface ConnectionsApi {
   requestApp: (request: AppRequestInput) => Promise<AppRequest>;
   /** The apps people asked for, latest first, at most {@link appRequestsListed}. */
   appRequests: () => Promise<AppRequest[]>;
+  /** Every class the company turns on or off, and for whom. Admins only. */
+  toolClasses: () => Promise<ToolClassSetting[]>;
+  /**
+   * Turns a class on for everyone or for some teams, or off. Admins only,
+   * never Grasp staff; audited.
+   */
+  setToolClass: (
+    toolClass: CompanyToolClass,
+    audience: ToolClassAudience
+  ) => Promise<void>;
 }
 
 // The catalog: everything an admin can connect, in one list. Native
@@ -796,6 +806,60 @@ export const toolClassOf = ({
   }
   return reach === "own" ? "change-own" : "change-company";
 };
+
+/** The classes a company turns on or off: all but `never`, which nothing does. */
+export const companyToolClasses = [
+  "read-own",
+  "read-company",
+  "change-own",
+  "change-company",
+  "reach-others",
+] as const satisfies readonly Exclude<ToolClass, "never">[];
+export const companyToolClassSchema = z.enum(companyToolClasses);
+export type CompanyToolClass = z.infer<typeof companyToolClassSchema>;
+
+/** Most teams one class may be on for. */
+export const toolClassTeamsMax = 20;
+
+/**
+ * For whom a class is on: nobody, everyone, or the people in any of some
+ * teams. It binds the chat's agent, for the person it acts for, wherever
+ * it works (the web chat, a chat app): its calls of a class that is off
+ * for that person are refused before core signs them for connect.
+ */
+export const toolClassAudienceSchema = z.discriminatedUnion("who", [
+  z.strictObject({ who: z.literal("nobody") }),
+  z.strictObject({ who: z.literal("everyone") }),
+  z.strictObject({
+    who: z.literal("teams"),
+    teams: z.array(identifierSchema).min(1).max(toolClassTeamsMax),
+  }),
+]);
+export type ToolClassAudience = z.infer<typeof toolClassAudienceSchema>;
+
+/**
+ * Each class as it is until an admin changes it: reading and changing
+ * what is the person's own on for everyone, the rest off.
+ */
+export const defaultToolClassAudiences: Readonly<
+  Record<CompanyToolClass, ToolClassAudience>
+> = {
+  "read-own": { who: "everyone" },
+  "read-company": { who: "nobody" },
+  "change-own": { who: "everyone" },
+  "change-company": { who: "nobody" },
+  "reach-others": { who: "nobody" },
+};
+
+/** One class, as the company has it now. */
+export interface ToolClassSetting {
+  toolClass: CompanyToolClass;
+  audience: ToolClassAudience;
+  /** The admin who last changed it; `null` while it is the default. */
+  changedBy: string | null;
+  /** ISO 8601; `null` while it is the default. */
+  changedAt: string | null;
+}
 
 /**
  * What an admin consents to before connecting a Composio toolkit: shown to
@@ -1533,6 +1597,14 @@ export interface ConnectApi extends PackageRegistryApi, ChannelApi {
     request: ConnectorContractRequest
   ) => Promise<ConnectorContract>;
   /**
+   * Whether an action of a connection only reads, the input properties it
+   * takes and the connection's provider (`ActionShape`), by the rules a
+   * call of it goes by. `connect.action_not_found` for one the connection
+   * doesn't allow; `connect.server_unavailable` when a Composio server
+   * can't be reached to list its tools.
+   */
+  actionShape: (request: ActionShapeRequest) => Promise<ActionShape>;
+  /**
    * The held actions waiting for `person`, newest first (at most 200):
    * none for Grasp staff.
    */
@@ -1729,6 +1801,25 @@ export type ConnectorContractRequest = z.input<
   typeof connectorContractRequestSchema
 >;
 
+/** Which action of which connection `actionShape` describes. */
+export const actionShapeRequestSchema = z.strictObject({
+  connectionId: connectionIdSchema,
+  action: permissionActionSchema,
+});
+export type ActionShapeRequest = z.input<typeof actionShapeRequestSchema>;
+
+/**
+ * What core needs to know of an action before a chat's agent calls it,
+ * without calling it: whether it only reads (as connect decides whether
+ * it holds a call), the input properties it takes (`null` when connect
+ * can't read them now), and the connection's provider.
+ */
+export interface ActionShape {
+  readOnly: boolean;
+  inputs: string[] | null;
+  provider: string;
+}
+
 /** One action of a generated contract. */
 export interface ConnectorContractAction {
   /** The tool a call of it names, e.g. `mail.send`. */
@@ -1823,6 +1914,10 @@ export const connectErrors = defineErrorFamily({
   "connect.catalog_entry_not_found": "There's no such entry in the catalog.",
   "connect.catalog_unavailable":
     "Composio's toolkits can't be listed right now. Try again shortly.",
+  "connect.class_off":
+    "Your company hasn't turned this kind of action on for you, so it wasn't done. An admin can turn it on.",
+  "connect.class_unknown":
+    "It isn't known what kind of action this is, so it wasn't done.",
 });
 
 /**

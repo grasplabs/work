@@ -23,7 +23,8 @@ allowBuilds:
   # Install scripts of the model SDKs under pi-ai, which core never needs.
   "@google/genai": false
   protobufjs: false
-  core-js-pure: set this to true or false
+  # A banner asking for funding, under the Gmail adapter's Babel runtime.
+  core-js-pure: false
 
 catalog:
   # Tooling

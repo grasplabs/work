@@ -4,6 +4,7 @@ import { generatedPaths, generateModules } from "@grasp-os/sdk/host";
 import { agentErrors } from "@grasp-os/shared/agent";
 import { appErrors } from "@grasp-os/shared/apps";
 import {
+  actorOf,
   auditProvenanceMaxItems,
   createAuditEvent,
   delegateActorOf,
@@ -15,6 +16,7 @@ import type {
 } from "@grasp-os/shared/audit";
 import {
   chatChannelSchema,
+  chatPlatformSchema,
   chatToolEventsKept,
   projectDocumentMaxBytes,
   projectDocumentsMax,
@@ -101,6 +103,12 @@ import type {
   BuildJobOpening,
   BuildJobRow,
 } from "./build-job-records.ts";
+import {
+  channelText,
+  heldWriteRefusal,
+  turnCheckOf,
+} from "./channels/stephen-rules.ts";
+import type { HeldWriteRefusal, TurnCheck } from "./channels/stephen-rules.ts";
 import { revokeChatPermissions } from "./chat-connections.ts";
 import {
   chatMessageOf,
@@ -200,6 +208,8 @@ interface LiveTurn {
   id: string;
   events: Message[];
   notices: Set<string>;
+  /** What the turn read through connections, for its check line. */
+  reads: TurnCheck[];
 }
 
 /** A build job, with the chat's agent and person it acts for. */
@@ -299,6 +309,12 @@ export interface RunToFix {
  * A question for a chat's agent, the model to answer it with, and how hard
  * that model thinks first (`ChatQuestion`).
  */
+/** A chat platform's chat's title, as people know the platform. */
+const platformTitles: Readonly<Record<string, string>> = {
+  teams: "Microsoft Teams",
+  slack: "Slack",
+};
+
 export const questionSchema = z.strictObject({
   text: z.string().trim().min(1).max(100_000),
   /** `<provider>/<model>`, one the deployment allows. */
@@ -326,6 +342,14 @@ export interface AnswerProvenance {
 export type Answer = TurnResult & {
   provenance: AnswerProvenance;
   cited: ChatCitedDocument[];
+  /**
+   * In a chat that came through a chat platform: what the turn read, as a
+   * held write's card says it on its check line (`turnCheckOf`), and the
+   * mark of the text that told the model how to answer there
+   * (`channelText`). Both `null` in Grasp's own app.
+   */
+  check: TurnCheck | null;
+  channelText: string | null;
 };
 
 /**
@@ -389,6 +413,9 @@ export interface CodeRunOpening {
  * a few collections or a connection, each an identifier.
  */
 const sourcesSchema = z.array(identifierSchema).max(auditProvenanceMaxItems);
+
+/** What a chat read, as `keepRead` keeps it (`trace:<chat>`). */
+const traceSchema = z.array(z.string());
 
 /**
  * Longest source a run's result rests on: a connection call's names its
@@ -470,6 +497,17 @@ const stopReason = (chatId: ChatId, error: unknown): string => {
  * the wake knows what the turn itself stored.
  */
 const turnKeyPrefix = "turn:";
+
+/**
+ * What a chat that came through a chat platform read, as `trace:<chat>`:
+ * each text value its connection reads returned, newest first, that its
+ * writes are traced to before they are held (channels/stephen-rules.ts).
+ * Kept across turns, up to {@link traceCharsMax}, oldest dropped first.
+ */
+const traceKeyPrefix = "trace:";
+
+/** Most characters of what a chat read that its writes are traced to. */
+const traceCharsMax = 200_000;
 
 /**
  * What a chat says in place of the answer a restart cut short: the person
@@ -1040,6 +1078,47 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
+   * Asks `text` in `personId`'s own chat on chat platform `via`, and waits
+   * for the answer: the chat is the person's one chat there, found by its
+   * channel, or made on their first message, audited as theirs. Asked
+   * with the deployment's default model, the first it allows, as Grasp's
+   * own app starts with. Like `ask`, it takes its caller's word for who
+   * asks: only the door of a chat platform calls it, once the platform's
+   * verified sender id named the person (channels/door.ts).
+   */
+  async askThrough(
+    personId: string,
+    agentId: string,
+    via: string,
+    text: string
+  ): Promise<{ chatId: string; answer: Answer }> {
+    const platform = chatPlatformSchema.parse(via);
+    const [found] = this.#db
+      .select()
+      .from(chats)
+      .where(and(eq(chats.personId, personId), eq(chats.via, platform)))
+      .orderBy(desc(chats.createdAt))
+      .limit(1)
+      .all();
+    const chat =
+      found ??
+      this.createChat(
+        platformTitles[platform] ?? platform,
+        personId,
+        agentId,
+        actorOf({ userId: personId, staff: false }, platform),
+        undefined,
+        undefined,
+        platform
+      );
+    const [model] = gatewaySettings(this.env).models;
+    if (model === undefined) {
+      throw modelErrors.create("model.unconfigured");
+    }
+    return { chatId: chat.id, answer: await this.#turn(chat, { text, model }) };
+  }
+
+  /**
    * Asks the chat's agent a question and waits for its answer: the agent
    * loop runs here, its code runs in isolates of its own, and every model
    * request goes through the model gateway, and its rules, as the chat's
@@ -1082,6 +1161,7 @@ export class Workspace extends DurableObject<Env> {
       id: crypto.randomUUID(),
       events: [],
       notices: new Set(),
+      reads: [],
     };
     this.#turns.set(chat.id, live);
     // Marked in storage as long as it is in `#turns`, however it ends.
@@ -1188,6 +1268,8 @@ export class Workspace extends DurableObject<Env> {
         },
         cited:
           answer === undefined ? [] : await this.#citedOrNone(scope, answer),
+        check: via === "web" ? null : turnCheckOf(live.reads),
+        channelText: context.channel?.mark ?? null,
       };
     } finally {
       this.ctx.storage.kv.delete(`${turnKeyPrefix}${chat.id}`);
@@ -1317,8 +1399,11 @@ export class Workspace extends DurableObject<Env> {
         turn: true,
       },
     });
-    const inProject = this.#chat(work.chatId).projectId !== null;
-    return { memory, skills, inProject };
+    const { projectId, via } = this.#chat(work.chatId);
+    const inProject = projectId !== null;
+    // A chat that came through a chat platform: how to answer there.
+    const channel = via === "web" ? undefined : await channelText();
+    return { memory, skills, inProject, channel };
   }
 
   /**
@@ -1998,6 +2083,74 @@ export class Workspace extends DurableObject<Env> {
       this.#keepRunSources(chatId, runId, reads);
     });
     return call;
+  }
+
+  /**
+   * Keeps what a connection read of a code run of a chat platform's chat
+   * returned (`values`, its text values), that the chat's later writes are
+   * traced to, and, while its turn is under way, what it read for the
+   * turn's check line (`check`). Why not, and nothing kept, once the run
+   * has ended or a revocation closed it (`open` when kept).
+   */
+  keepRead(
+    chatId: ChatId,
+    runId: string,
+    values: readonly string[],
+    check: TurnCheck
+  ): CodeRunAdmission["call"] {
+    const { call } = this.admitFromCodeRun(chatId, runId);
+    if (call !== "open") {
+      return call;
+    }
+    this.#turns.get(chatId)?.reads.push(check);
+    const key = `${traceKeyPrefix}${chatId}`;
+    const kept = traceSchema.safeParse(this.ctx.storage.kv.get(key));
+    const trace: string[] = [];
+    let chars = 0;
+    for (const value of new Set([
+      ...values,
+      ...(kept.success ? kept.data : []),
+    ])) {
+      if (chars + value.length > traceCharsMax) {
+        continue;
+      }
+      chars += value.length;
+      trace.push(value);
+    }
+    this.ctx.storage.kv.put(key, trace);
+    return call;
+  }
+
+  /**
+   * Why a write of a chat platform's chat can't be held, or `undefined`
+   * when it can (channels/stephen-rules.ts): `input`, against the fields
+   * its action takes (`inputs`), traced to what the chat's person said in
+   * it and what it read (`keepRead`).
+   */
+  heldWriteRefusal(
+    chatId: ChatId,
+    input: unknown,
+    inputs: readonly string[] | null
+  ): HeldWriteRefusal | undefined {
+    const kept = traceSchema.safeParse(
+      this.ctx.storage.kv.get(`${traceKeyPrefix}${chatId}`)
+    );
+    const said = this.#transcript(chatId)
+      .flatMap((message) => {
+        if (message.role !== "user") {
+          return [];
+        }
+        return typeof message.content === "string"
+          ? [message.content]
+          : message.content.flatMap((part) =>
+              part.type === "text" ? [part.text] : []
+            );
+      })
+      .join("\n");
+    return heldWriteRefusal(input, inputs, {
+      said,
+      read: kept.success ? kept.data : [],
+    });
   }
 
   /**
@@ -2839,6 +2992,7 @@ export class Workspace extends DurableObject<Env> {
           eq(chatDrafts.chatId, id)
         );
         this.#db.delete(chats).where(eq(chats.id, id)).run();
+        this.ctx.storage.kv.delete(`${traceKeyPrefix}${id}`);
         this.#outboxed(by, "chat.deleted", id, { declined });
       });
       this.#deliverAudit();
