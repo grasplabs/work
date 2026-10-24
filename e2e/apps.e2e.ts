@@ -284,7 +284,9 @@ test("the sidebar shows everyone the sections, and Settings each person the sect
     await expect(sections.last()).toHaveText("Security");
     return {
       // Without how many wait.
-      nav: texts.map((text) => text.replace(/\d+ things? waiting$/u, "")),
+      nav: texts.map((text) =>
+        text.replace(/\d+ (?:things? waiting|workflows? needs? you)$/u, "")
+      ),
       menu,
       settings: await sections.allTextContents(),
     };
