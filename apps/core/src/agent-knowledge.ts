@@ -25,6 +25,7 @@ import {
 import type { AgentApi, AgentScope } from "./agent-scope.ts";
 import type { Reader } from "./knowledge/access.ts";
 import { readAsDelegate } from "./knowledge/binding.ts";
+import { brainOf } from "./knowledge/ports.ts";
 import { recallWithSources } from "./knowledge/recall.ts";
 import { search } from "./knowledge/search.ts";
 import { agentKnowledgeSignals } from "./knowledge/signals.ts";
@@ -104,7 +105,7 @@ export class KnowledgeApi
           chatContext(scope),
           undefined,
           async (reader) => {
-            const listed = await catalog(this.env, reader);
+            const listed = await catalog(brainOf(this.env), reader);
             // What it names rests on those collections: withheld once
             // they can't be read (history-access.ts), never provenance.
             await recordRunReads(this.env, scope, [
@@ -120,7 +121,7 @@ export class KnowledgeApi
   async search(query: unknown, options?: unknown): Promise<SearchResults> {
     const found = await this.#asAgent(
       "knowledge.search",
-      async (reader) => await search(this.env, reader, query, options)
+      async (reader) => await search(brainOf(this.env), reader, query, options)
     );
     return await this.#recorded(
       found,
@@ -136,7 +137,8 @@ export class KnowledgeApi
   async recall(input: unknown): Promise<MemoryPack> {
     const { pack, sources } = await this.#asAgent(
       "knowledge.recall",
-      async (reader) => await recallWithSources(this.env, reader, input)
+      async (reader) =>
+        await recallWithSources(brainOf(this.env), reader, input)
     );
     // Every collection it read from, found or not, as a search records.
     await recordSources(this.env, this.ctx.props, sources, [
@@ -152,7 +154,8 @@ export class KnowledgeApi
   async read(documentId: unknown, options?: unknown): Promise<KnowledgeRead> {
     const document = await this.#asAgent(
       "knowledge.read",
-      async (reader) => await read(this.env, reader, documentId, options)
+      async (reader) =>
+        await read(brainOf(this.env), reader, documentId, options)
     );
     return await this.#recorded(document, [document.id]);
   }
@@ -160,7 +163,7 @@ export class KnowledgeApi
   async follow(documentId: unknown): Promise<FollowResult> {
     const followed = await this.#asAgent(
       "knowledge.follow",
-      async (reader) => await follow(this.env, reader, documentId)
+      async (reader) => await follow(brainOf(this.env), reader, documentId)
     );
     return await this.#recorded(followed, [
       ...followed.links.flatMap(({ documentId: linked }) =>

@@ -15,7 +15,6 @@ import type { PurgePlan, PurgeResult } from "@grasp-os/shared/knowledge";
 import { log } from "@grasp-os/shared/log";
 import { and, asc, count, eq, gt, inArray, lte, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
-import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import type { z } from "zod";
 
@@ -30,6 +29,7 @@ import {
   versions,
 } from "../db/knowledge/schema.ts";
 import { auditedBatch } from "./audit.ts";
+import type { Brain } from "./brain.ts";
 import type { CollectionRow } from "./collections.ts";
 import { checkedText, indexedValuesOf, writeVersion } from "./documents.ts";
 import type { DocumentRow, Writer } from "./documents.ts";
@@ -46,7 +46,6 @@ import {
   stagePayload,
 } from "./payloads.ts";
 import type { PayloadRef, StagedPayload } from "./payloads.ts";
-import { portsOf } from "./ports.ts";
 import {
   collectionPlan,
   eraseCollectionFromSearchIndex,
@@ -254,8 +253,8 @@ export interface ErasedDocument {
 const parseInput = (input: unknown): PurgeInput =>
   knowledgeErrors.parse("knowledge.invalid", purgeInputSchema, input);
 
-const tokenKey = async (env: Env): Promise<CryptoKey> =>
-  await portsOf(env).keys.hmac("grasp-os knowledge purge token", [
+const tokenKey = async <C>(brain: Brain<C>): Promise<CryptoKey> =>
+  await brain.ports.keys.hmac("grasp-os knowledge purge token", [
     "sign",
     "verify",
   ]);
@@ -271,8 +270,8 @@ const tokenPattern = /^(?<expiresAt>\d{1,15})\.(?<mac>[\w-]{1,128})$/u;
  * `person` for exactly `input`, and not yet expired. It holds no purged
  * text: the admin sends the input again.
  */
-const requireToken = async (
-  env: Env,
+const requireToken = async <C>(
+  brain: Brain<C>,
   by: Writer,
   input: PurgeInput,
   token: unknown
@@ -281,11 +280,11 @@ const requireToken = async (
     typeof token === "string" ? tokenPattern.exec(token)?.groups : undefined;
   const expiresAt = Number(groups?.expiresAt);
   let valid = false;
-  if (groups?.mac !== undefined && expiresAt > portsOf(env).clock().getTime()) {
+  if (groups?.mac !== undefined && expiresAt > brain.ports.clock().getTime()) {
     try {
       valid = await crypto.subtle.verify(
         "HMAC",
-        await tokenKey(env),
+        await tokenKey(brain),
         fromBase64Url(groups.mac),
         tokenData(by, input, expiresAt)
       );
@@ -299,15 +298,15 @@ const requireToken = async (
 };
 
 /** A token for `person` to confirm `input` with, and when it expires. */
-const tokenFor = async (
-  env: Env,
+const tokenFor = async <C>(
+  brain: Brain<C>,
   by: Writer,
   input: PurgeInput
 ): Promise<{ token: string; expiresAt: string }> => {
-  const expiresAt = portsOf(env).clock().getTime() + tokenLifetimeMs;
+  const expiresAt = brain.ports.clock().getTime() + tokenLifetimeMs;
   const mac = await crypto.subtle.sign(
     "HMAC",
-    await tokenKey(env),
+    await tokenKey(brain),
     tokenData(by, input, expiresAt)
   );
   return {
@@ -414,24 +413,24 @@ const personalScope = async (
  * with the collection gone, still rebuilds, and another when the
  * collection changed since it was read.
  */
-const purgePersonal = async (
-  env: Env,
+const purgePersonal = async <C>(
+  brain: Brain<C>,
   by: Writer,
   input: PersonalPurge,
   onErase: OnErase
 ): Promise<PurgeResult> => {
-  const db = drizzle(env.KNOWLEDGE);
+  const { db } = brain;
   const { collectionId, documentIds, counts } = await personalScope(
     db,
     input,
     onErase
   );
-  const brain = await personCounts(db, input.userId);
+  const memoryCounts = await personCounts(db, input.userId);
   const purgeId = crypto.randomUUID();
   const inCollection = documentsIn(db, collectionId);
   const secure = await secureDeleteReady(db);
   const plan = secure
-    ? await collectionPlan(env, db, collectionId, indexedValuesOf)
+    ? await collectionPlan(brain, db, collectionId, indexedValuesOf)
     : ({ kind: "unknown" } as const);
   // The versions' payloads, unreferenced once they go, are collected right
   // after: erased from R2 too.
@@ -439,7 +438,7 @@ const purgePersonal = async (
   // Recorded before anything changes, the host's files included, so no
   // purge goes unrecorded however far it gets, with the rebuild it owes
   // (as a content purge records them).
-  await auditedBatch(portsOf(env), db, [
+  await auditedBatch(brain.ports, db, [
     outboxed(
       db,
       purgeEntry(
@@ -447,7 +446,7 @@ const purgePersonal = async (
         "knowledge.purged",
         input,
         { collectionId, documentIds },
-        { ...counts, ...brain },
+        { ...counts, ...memoryCounts },
         purgeId
       )
     ),
@@ -483,7 +482,7 @@ const purgePersonal = async (
     // failed: it writes no more.
     await owedWritesDone(db, purgeId);
   }
-  await collectPayloads(env, db);
+  await collectPayloads(brain, db);
   await cleanSearchIndex(async () => {
     await eraseCollectionFromSearchIndex(db, plan, { secure, id: purgeId });
   });
@@ -825,12 +824,12 @@ const rewritten = (
  * (`purgedMarker`) marked `unreadable`, which the purge saves in its place:
  * whatever the object holds can't be checked for the terms, so it goes.
  */
-const purgeTextOf = async (
-  env: Env,
+const purgeTextOf = async <C>(
+  brain: Brain<C>,
   ref: PayloadRef
 ): Promise<{ text: string; unreadable: boolean }> => {
   try {
-    return { text: await readPayload(env, ref), unreadable: false };
+    return { text: await readPayload(brain, ref), unreadable: false };
   } catch (error) {
     if (knowledgeErrors.codeOf(error) !== "knowledge.unavailable") {
       throw error;
@@ -902,8 +901,8 @@ const documentsNamed = async (
 };
 
 /** The text (its payload's) and message of `document`'s version `number`. */
-const versionOf = async (
-  env: Env,
+const versionOf = async <C>(
+  brain: Brain<C>,
   db: DrizzleD1Database,
   document: DocumentRow,
   number: number
@@ -924,7 +923,7 @@ const versionOf = async (
     .get();
   return row === undefined
     ? undefined
-    : { ...(await purgeTextOf(env, row)), message: row.message };
+    : { ...(await purgeTextOf(brain, row)), message: row.message };
 };
 
 /**
@@ -938,14 +937,14 @@ const versionOf = async (
  * term back into (`OnErase` `requireRewritable`). Returns the text it
  * would save.
  */
-const requireSavable = async (
-  env: Env,
+const requireSavable = async <C>(
+  brain: Brain<C>,
   db: DrizzleD1Database,
   { document, collection }: Named,
   matcher: Matcher,
   onErase: OnErase
 ): Promise<string | undefined> => {
-  const current = await versionOf(env, db, document, document.currentVersion);
+  const current = await versionOf(brain, db, document, document.currentVersion);
   if (current === undefined) {
     return undefined;
   }
@@ -960,7 +959,7 @@ const requireSavable = async (
   );
   const text = purgeChangeOf(current, matcher)?.text ?? current.text;
   try {
-    await checkedText(env, collection, document.path, text, false, true);
+    await checkedText(brain, collection, document.path, text, false, true);
   } catch (error) {
     const code = knowledgeErrors.codeOf(error);
     if (code === undefined) {
@@ -1016,8 +1015,8 @@ const replacedEntry = (
  * rewritten text, and rewrites its message, in one batch that marks the
  * payloads left unreferenced for collecting.
  */
-const repointVersions = async (
-  env: Env,
+const repointVersions = async <C>(
+  brain: Brain<C>,
   db: DrizzleD1Database,
   document: DocumentRow,
   changes: {
@@ -1030,7 +1029,7 @@ const repointVersions = async (
     await Promise.all(
       changes.map(
         async ({ changed }) =>
-          await stagePayload(env, db, document.collectionId, changed.text)
+          await stagePayload(brain, db, document.collectionId, changed.text)
       )
     );
   const released = releasing(
@@ -1105,8 +1104,8 @@ const repointVersions = async (
  * when one would be too large to store (`requireStorable`): a purge scans
  * them all first, so one that can't be finished changes nothing.
  */
-const rewriteVersions = async (
-  env: Env,
+const rewriteVersions = async <C>(
+  brain: Brain<C>,
   db: DrizzleD1Database,
   document: DocumentRow,
   upTo: number,
@@ -1148,7 +1147,7 @@ const rewriteVersions = async (
       refs.map(async (ref) => ({
         number: ref.number,
         message: ref.message,
-        ...(await purgeTextOf(env, ref)),
+        ...(await purgeTextOf(brain, ref)),
       }))
     );
     const rows = page.map((row) => ({
@@ -1178,7 +1177,7 @@ const rewriteVersions = async (
     changedVersions += changes.length;
     if (write !== undefined && changes.length > 0) {
       // oxlint-disable-next-line no-await-in-loop -- a page at a time, to bound memory
-      await repointVersions(env, db, document, changes, write);
+      await repointVersions(brain, db, document, changes, write);
     }
     const last = page.at(-1);
     if (last === undefined || page.length < versionsPerPage) {
@@ -1193,8 +1192,8 @@ const rewriteVersions = async (
  * would still start a longer word in what it leaves: every version, the
  * one it saves too. Checks it can.
  */
-const countDocument = async (
-  env: Env,
+const countDocument = async <C>(
+  brain: Brain<C>,
   db: DrizzleD1Database,
   named: Named,
   matcher: Matcher,
@@ -1206,9 +1205,9 @@ const countDocument = async (
   beside: boolean;
 }> => {
   const { document } = named;
-  const saved = await requireSavable(env, db, named, matcher, onErase);
+  const saved = await requireSavable(brain, db, named, matcher, onErase);
   const inVersions = await rewriteVersions(
-    env,
+    brain,
     db,
     document,
     document.currentVersion,
@@ -1257,8 +1256,8 @@ const filesNamed = (document: DocumentRow): ErasedFiles => ({
  * was, so running it again finishes it; one run again after it finished
  * finds nothing, and writes nothing.
  */
-const purgeDocument = async (
-  env: Env,
+const purgeDocument = async <C>(
+  brain: Brain<C>,
   db: DrizzleD1Database,
   by: Writer,
   named: Named,
@@ -1272,14 +1271,14 @@ const purgeDocument = async (
   const at = document.currentVersion;
   const { actor } = by;
   const earlier = await rewriteVersions(
-    env,
+    brain,
     db,
     document,
     at - 1,
     matcher,
     actor
   );
-  const current = await versionOf(env, db, document, at);
+  const current = await versionOf(brain, db, document, at);
   const changed = current && purgeChangeOf(current, matcher);
   const changedVersions = earlier.changed + (changed === undefined ? 0 : 1);
   const counts: Counts = {
@@ -1290,7 +1289,7 @@ const purgeDocument = async (
     // Search may still hold an earlier generation, with the terms, while
     // its current version waits for indexing (a purge that failed to
     // publish, say): published now, or the purge fails.
-    await requireCurrentIndexed(env, db, document.id, by.actor);
+    await requireCurrentIndexed(brain, db, document.id, by.actor);
     return counts;
   }
   const text = changed?.text ?? current.text;
@@ -1322,7 +1321,7 @@ const purgeDocument = async (
             ? [outboxed(db, replacedEntry(actor, document, at))]
             : []),
         ];
-  await writeVersion(env, by, {
+  await writeVersion(brain, by, {
     collection,
     path: document.path,
     text,
@@ -1344,8 +1343,8 @@ const purgeDocument = async (
  * often one is left (when `matcher` counts them), checking every document
  * first.
  */
-const contentCounts = async (
-  env: Env,
+const contentCounts = async <C>(
+  brain: Brain<C>,
   db: DrizzleD1Database,
   named: Named[],
   matcher: Matcher,
@@ -1362,7 +1361,7 @@ const contentCounts = async (
   let tokensKnown = true;
   for (const one of named) {
     // oxlint-disable-next-line no-await-in-loop -- one document at a time, to bound memory
-    const document = await countDocument(env, db, one, matcher, onErase);
+    const document = await countDocument(brain, db, one, matcher, onErase);
     counts.push(document.counts);
     removed += document.removed;
     left += document.left;
@@ -1418,19 +1417,25 @@ const stillFoundIn = async (
  * last, also when nothing was left to change, so running a purge again
  * finishes a cleanup that failed.
  */
-const purgeContent = async (
-  env: Env,
+const purgeContent = async <C>(
+  brain: Brain<C>,
   by: Writer,
   input: ContentPurge,
   onErase: OnErase
 ): Promise<PurgeResult> => {
-  const db = drizzle(env.KNOWLEDGE);
+  const { db } = brain;
   const named = await documentsNamed(db, input);
   const matcher = matcherOf(input.terms, { countLeft: false });
   // Read before anything changes: whether a term is part of a longer
   // token anywhere, so the index needs rebuilding, is recorded with the
   // purge, and a run again after its text is rewritten still knows.
-  const { tokensKnown } = await contentCounts(env, db, named, matcher, onErase);
+  const { tokensKnown } = await contentCounts(
+    brain,
+    db,
+    named,
+    matcher,
+    onErase
+  );
   // Before anything is deleted: so the purge's deletes are secure ones,
   // which leave nothing in the index's pages (search-erasure.ts).
   const secure = await secureDeleteReady(db);
@@ -1441,7 +1446,7 @@ const purgeContent = async (
   // next purge to rebuild. A separator another document's text explained
   // at a purge's check that this one then takes the term from is covered
   // so, too.
-  await auditedBatch(portsOf(env), db, [
+  await auditedBatch(brain.ports, db, [
     outboxed(
       db,
       purgeEntry(
@@ -1474,7 +1479,7 @@ const purgeContent = async (
     );
     for (const one of named) {
       // oxlint-disable-next-line no-await-in-loop -- one document at a time, to bound memory
-      done.push(await purgeDocument(env, db, by, one, matcher, onErase));
+      done.push(await purgeDocument(brain, db, by, one, matcher, onErase));
     }
   } finally {
     // A rebuild from now on covers this purge's writes, also when one of
@@ -1483,7 +1488,7 @@ const purgeContent = async (
   }
   // What the rewrites let go of leaves R2 now; a failure fails the purge,
   // and running it again collects what's left (`collecting` rows).
-  await collectPayloads(env, db);
+  await collectPayloads(brain, db);
   await cleanSearchIndex(async () => {
     await eraseFromSearchIndex(db, input.terms, {
       secure,
@@ -1514,14 +1519,14 @@ const purgeContent = async (
  * token returned. Admins only (not Grasp staff), behind `knowledge_purge`.
  * Recorded in the audit log, without the terms.
  */
-export const preparePurge = async (
-  env: Env,
+export const preparePurge = async <C>(
+  brain: Brain<C>,
   by: Writer,
   input: unknown,
   onErase: OnErase
 ): Promise<PurgePlan> => {
   const parsed = parseInput(input);
-  const db = drizzle(env.KNOWLEDGE);
+  const { db } = brain;
   let scope: { collectionId?: string; documentIds: string[] };
   let counts: Counts;
   let originals: number;
@@ -1543,7 +1548,7 @@ export const preparePurge = async (
     scope = { documentIds: named.map(({ document }) => document.id) };
     const matcher = matcherOf(parsed.terms, { countLeft: true });
     ({ counts, removed, left } = await contentCounts(
-      env,
+      brain,
       db,
       named,
       matcher,
@@ -1551,7 +1556,7 @@ export const preparePurge = async (
     ));
     hostCopies = await onErase.count((text) => holdsTerm(text, matcher));
   }
-  await auditedBatch(portsOf(env), db, [
+  await auditedBatch(brain.ports, db, [
     outboxed(
       db,
       purgeEntry(by, "knowledge.purge.prepared", parsed, scope, {
@@ -1568,7 +1573,7 @@ export const preparePurge = async (
     inLongerWords: left,
     hostCopies,
     originals,
-    ...(await tokenFor(env, by, parsed)),
+    ...(await tokenFor(brain, by, parsed)),
   };
 };
 
@@ -1577,16 +1582,16 @@ export const preparePurge = async (
  * for it. What it removes is counted as it runs, so it may differ from
  * what was prepared; the counts returned are what it removed.
  */
-export const purge = async (
-  env: Env,
+export const purge = async <C>(
+  brain: Brain<C>,
   by: Writer,
   input: unknown,
   token: unknown,
   onErase: OnErase
 ): Promise<PurgeResult> => {
   const parsed = parseInput(input);
-  await requireToken(env, by, parsed, token);
+  await requireToken(brain, by, parsed, token);
   return parsed.type === "personal"
-    ? await purgePersonal(env, by, parsed, onErase)
-    : await purgeContent(env, by, parsed, onErase);
+    ? await purgePersonal(brain, by, parsed, onErase)
+    : await purgeContent(brain, by, parsed, onErase);
 };

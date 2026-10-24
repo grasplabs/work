@@ -9,12 +9,12 @@ import { documentTypeOf } from "@grasp-os/shared/knowledge";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { and, desc, eq, gt, lt, or } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { collections, documents } from "./db/knowledge/schema.ts";
+import type { Reader } from "./knowledge/access.ts";
 import { allowedFor } from "./knowledge/authorize.ts";
-import { portsOf } from "./knowledge/ports.ts";
+import type { Brain } from "./knowledge/brain.ts";
 
 // What changed in the brain since a moment (`brain.changes`): one feed of
 // what core records today, newest first, a page at a time, as the person
@@ -131,7 +131,7 @@ interface Placed {
  * and `sources` (the onboarding's, which only an admin is given).
  */
 export const brainChanges = async (
-  env: Env,
+  brain: Brain<Reader>,
   person: Identity,
   options: unknown,
   sources: readonly SourceChange[]
@@ -147,8 +147,8 @@ export const brainChanges = async (
   );
   const after = cursor === undefined ? undefined : positionOf(cursor);
   const reader = { type: "person", person } as const;
-  const db = drizzle(env.KNOWLEDGE);
-  const allowed = await allowedFor(portsOf(env), reader);
+  const { db } = brain;
+  const allowed = await allowedFor(brain.ports, reader);
   // One more than a page: whether another follows.
   const rows = await db
     .select({
@@ -216,7 +216,7 @@ export const brainChanges = async (
       ({ change }) => change.kind === "document" && change.document.id === id
     )
   );
-  await portsOf(env).onRead(
+  await brain.ports.onRead(
     reader,
     {
       action: "knowledge.read",
