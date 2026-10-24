@@ -2,7 +2,8 @@ import { providerFetch } from "@grasp-os/connector-kit/provider";
 import { z } from "zod";
 
 // Google's APIs, as this connector's tools reach them: plain `fetch` to
-// gmail.googleapis.com (Gmail) and www.googleapis.com (Calendar, Drive),
+// gmail.googleapis.com (Gmail), www.googleapis.com (Calendar, Drive) and
+// sheets.googleapis.com (Sheets),
 // through connect's egress, which adds the token and lets through only the
 // called tool's routes (threat model R9, Q11).
 //
@@ -13,6 +14,9 @@ import { z } from "zod";
 // capability names. Drive has no path of its own per drive: it takes a
 // shared drive in the query (`corpora=drive&driveId=...`) and addresses a
 // file by its ID alone, so drive.ts holds each call to its drive itself.
+// Sheets, the same: a spreadsheet is a Drive file, addressed by its ID
+// alone, so sheets.ts reads its Drive metadata first and goes no further
+// unless it is in the bound drive.
 //
 // Batch endpoints are never declared, and the egress strips method
 // override headers, which Google honours on a POST. None of the endpoints
@@ -21,6 +25,7 @@ import { z } from "zod";
 
 export const gmailHost = "gmail.googleapis.com";
 export const apisHost = "www.googleapis.com";
+export const sheetsHost = "sheets.googleapis.com";
 
 /**
  * An ID Google gives a message, a thread, an event, a file or a label:
