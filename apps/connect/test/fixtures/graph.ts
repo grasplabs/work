@@ -734,3 +734,49 @@ export const supplierRows = (): SheetCell[][] => [
     constant(""),
   ],
 ];
+
+/** Graph's answer when a token may not open what it asked for. */
+export const graphAccessDenied = {
+  error: {
+    code: "ErrorAccessDenied",
+    message: "Access is denied. Check credentials and try again.",
+  },
+};
+
+/** A person's Microsoft To Do lists, by what they are to them. */
+export const todoListIds = {
+  /** Their default list, Tasks: theirs, shared with no one. */
+  tasks: "AAMkADIyAAAAABrJAAA=",
+  /** A list they made and shared with colleagues. */
+  sharedByThem: "AAMkADIyAAAAABrKAAA=",
+  /** A colleague's list shared with them. */
+  sharedWithThem: "AAMkADIyAAAAABrLAAA=",
+};
+
+/** A person's To Do lists, as Graph answers for them. */
+export const todoLists = [
+  {
+    "@odata.etag": 'W/"m1fdwWoFiE2YS9yegTKoYwAA/ZGlTQ=="',
+    id: todoListIds.tasks,
+    displayName: "Tasks",
+    isOwner: true,
+    isShared: false,
+    wellknownListName: "defaultList",
+  },
+  {
+    "@odata.etag": 'W/"m1fdwWoFiE2YS9yegTKoYwAA/ZGlTR=="',
+    id: todoListIds.sharedByThem,
+    displayName: "Office move",
+    isOwner: true,
+    isShared: true,
+    wellknownListName: "none",
+  },
+  {
+    "@odata.etag": 'W/"m1fdwWoFiE2YS9yegTKoYwAA/ZGlTS=="',
+    id: todoListIds.sharedWithThem,
+    displayName: "Board pack",
+    isOwner: false,
+    isShared: true,
+    wellknownListName: "none",
+  },
+];

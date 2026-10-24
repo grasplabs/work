@@ -6,11 +6,13 @@ import { graphHost } from "./graph.ts";
 import { listTools } from "./lists.ts";
 import { mailReplyTools } from "./mail-replies.ts";
 import { mailTools } from "./mail.ts";
+import { todoTools } from "./todo.ts";
 import { workbookTools } from "./workbook.ts";
 
 /**
  * Native Microsoft 365 connector, on Microsoft Graph: mail and calendars
- * of one mailbox per call, files in OneDrive and SharePoint, one drive
+ * of one mailbox per call, a person's own Microsoft To Do, files in
+ * OneDrive and SharePoint, one drive
  * per call, SharePoint lists, one site per call, and the rows of a named
  * table in an Excel workbook, one workbook per call.
  */
@@ -32,6 +34,7 @@ export default defineConnector({
     // SharePoint lets them change.
     "Files.ReadWrite.All",
     "Sites.Read.All",
+    "Tasks.ReadWrite",
   ],
   hosts: [graphHost],
   tools: [
@@ -41,5 +44,6 @@ export default defineConnector({
     ...fileTools,
     ...listTools,
     ...workbookTools,
+    ...todoTools,
   ],
 });
