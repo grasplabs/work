@@ -36,7 +36,7 @@ import { testBinding } from "./test-env.ts";
 const serviceUrl = "https://smba.trafficmanager.net/emea/";
 
 /** Every request core itself sent to Microsoft while a test ran. */
-const toMicrosoft: string[] = [];
+export const toMicrosoft: string[] = [];
 
 const isFetcher = (value: unknown): value is Fetcher =>
   typeof value === "object" && value !== null && "fetch" in value;
@@ -238,10 +238,16 @@ export const kept = async (conversation: string) => {
     .map(({ platform, userId }) => ({ platform, userId }));
 };
 
-/** A member of the client signed in once, writing to the bot on Teams. */
-export const member = async (idp: Idp, ...replies: GatewayReply[]) => {
+/**
+ * A member of the client signed in once, writing to the bot on Teams,
+ * whose chats `gateway` answers. Workspace objects share their
+ * env, so people in one test share one gateway.
+ */
+export const memberAnsweredBy = async (
+  idp: Idp,
+  gateway: ReturnType<typeof fakeGateway>
+) => {
   const signedIn = await signedInApi(idp, "user");
-  const gateway = fakeGateway(...replies);
   await pointAtGateway(
     workspace(env, personalWorkspaceId(signedIn.userId)),
     gateway
@@ -253,3 +259,6 @@ export const member = async (idp: Idp, ...replies: GatewayReply[]) => {
   return { ...signedIn, gateway, teams: teamsPerson(oid) };
 };
 
+/** A member whose chats `replies` answer, in order. */
+export const member = async (idp: Idp, ...replies: GatewayReply[]) =>
+  await memberAnsweredBy(idp, fakeGateway(...replies));

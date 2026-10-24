@@ -1,4 +1,12 @@
-import { describe, expect, it, afterEach, beforeEach, vi } from "vite-plus/test";
+import { env } from "cloudflare:workers";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vite-plus/test";
 
 import { says } from "./agent-chat.ts";
 import { mockIdp } from "./idp.ts";

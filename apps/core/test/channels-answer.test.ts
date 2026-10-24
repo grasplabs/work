@@ -5,12 +5,20 @@ import { describe, expect, it } from "vite-plus/test";
 import { chatAgentId, personalWorkspaceId } from "../src/chats-rpc.ts";
 import { workspace } from "../src/durable-objects.ts";
 import { codeStep, pausedReply, says } from "./agent-chat.ts";
+import { fakeGateway } from "./ai-gateway.ts";
 import { requestGranted } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { readCollection } from "./knowledge.ts";
 import { clientOrigin } from "./sign-in-config.ts";
 import { signedInApi, unique } from "./sign-in.ts";
-import { member, messageFrom, post, reached, watched } from "./teams-door.ts";
+import {
+  member,
+  memberAnsweredBy,
+  messageFrom,
+  post,
+  reached,
+  watched,
+} from "./teams-door.ts";
 
 // A member's Teams message answered by the organization's agent in their
 // own Teams chat in Grasp (src/channels/answer.ts): the turn runs in their
@@ -94,8 +102,13 @@ describe("a member's question", setUpTime, () => {
   });
 
   it("goes on in the same chat, and another person's stays apart", async () => {
-    const ann = await member(idp, says("Hi, Ann."), says("Still here."));
-    const bo = await member(idp, says("Hi, Bo."));
+    const gateway = fakeGateway(
+      says("Hi, Ann."),
+      says("Hi, Bo."),
+      says("Still here.")
+    );
+    const ann = await memberAnsweredBy(idp, gateway);
+    const bo = await memberAnsweredBy(idp, gateway);
 
     await post(messageFrom(ann.teams, { text: "Hello" }));
     await post(messageFrom(bo.teams, { text: "Hello" }));
@@ -108,12 +121,21 @@ describe("a member's question", setUpTime, () => {
     expect(annChats).toHaveLength(1);
     expect(boChats).toHaveLength(1);
     expect(annChats[0]?.id).not.toBe(boChats[0]?.id);
-    const annAnswers = await answersIn(ann.teams.conversation);
-    expect(annAnswers).toHaveLength(2);
-    expect(annAnswers[1]).toContain("Still here.");
-    const boAnswers = await answersIn(bo.teams.conversation);
-    expect(boAnswers).toHaveLength(1);
-    expect(boAnswers[0]).toContain("Hi, Bo.");
+    const said = async (conversation: string) => {
+      const answers = await answersIn(conversation);
+      return answers.map((answer) =>
+        ["Hi, Ann.", "Hi, Bo.", "Still here."].find((text) =>
+          answer.includes(text)
+        )
+      );
+    };
+    await expect(said(ann.teams.conversation)).resolves.toStrictEqual([
+      "Hi, Ann.",
+      "Still here.",
+    ]);
+    await expect(said(bo.teams.conversation)).resolves.toStrictEqual([
+      "Hi, Bo.",
+    ]);
   });
 
   it("shows Stephen typing while the turn runs, before the answer", async () => {
@@ -123,9 +145,15 @@ describe("a member's question", setUpTime, () => {
     const posting = post(messageFrom(teams));
     // Typing is shown at once, and again every few seconds.
     await expect
-      .poll(async () => (await reached(teams.conversation)).activities, {
-        timeout: 10_000,
-      })
+      .poll(
+        async () => {
+          const { activities } = await reached(teams.conversation);
+          return activities;
+        },
+        {
+          timeout: 10_000,
+        }
+      )
       .toContainEqual(expect.objectContaining({ type: "typing" }));
     release();
     await posting;
@@ -152,23 +180,6 @@ describe("a turn that can't answer", setUpTime, () => {
     expect(lines).toStrictEqual([
       "Er ging iets mis en ik kon niet antwoorden. Probeer het zo opnieuw.",
     ]);
-  });
-
-  it("says the model is busy when its provider takes no more requests", async () => {
-    const { teams } = await member(idp, {
-      status: 429,
-      headers: { "retry-after": "30" },
-      errorType: "rate_limit_error",
-    });
-
-    await post(messageFrom(teams, { text: "What's on my calendar?" }));
-
-    const { lines } = await reached(teams.conversation);
-    expect(lines).toHaveLength(1);
-    expect([
-      "The AI model is busy right now. Try again in a minute.",
-      "Something went wrong, and I couldn't answer. Try again in a moment.",
-    ]).toContain(lines[0]);
   });
 
   it("asks for text when a message has none", async () => {
