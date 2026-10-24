@@ -34,6 +34,12 @@
  * its people are known only by the Slack account they linked to Grasp, and
  * someone who hasn't linked one gets the link, once, and nothing more.
  *
+ * Gmail (gmail.ts) is Stephen's own mailbox: a push Google signed for it
+ * starts the adapter reading what is new, and only mail from an address a
+ * person linked to themselves goes on; someone on the client's own domains
+ * who hasn't linked theirs is sent the link, once a day, and anyone else
+ * nothing, so a forged sender never draws a reply.
+ *
  * Teams' and Slack's adapters send through axios, which workerd refuses
  * as it builds its requests: `@grasp-os/chat/workerd` puts the fix in, so
  * it is imported before any adapter loads.
@@ -55,6 +61,13 @@ import { errorResponse } from "../errors.ts";
 import { boundedText, jsonOf } from "../request-body.ts";
 import { offerChannelLink } from "./accounts.ts";
 import { signInCard } from "./cards.tsx";
+import {
+  gmailAdapter,
+  gmailSetUp,
+  ownDomainOf,
+  verifiedGmailPush,
+} from "./gmail.ts";
+import type { GmailKeys } from "./gmail.ts";
 import { slackAdapter, verifiedSlackRequest } from "./slack.ts";
 import type { ConnectedTeamsAdapter } from "./teams-adapter.ts";
 import { teamsAdapter, verifiedTeamsRequest } from "./teams.ts";
@@ -75,8 +88,11 @@ export const channelAdapters = (
   slack: slackAdapter(env),
 });
 
-/** A platform the door has an adapter for. */
-type Platform = keyof ReturnType<typeof channelAdapters>;
+/**
+ * A platform the door has an adapter for: Gmail's is built per push, for
+ * the mailbox the deployment set up (gmail.ts).
+ */
+type Platform = keyof ReturnType<typeof channelAdapters> | "gmail";
 
 /**
  * Whether the deployment set `platform` up: Teams once it has the bot's id
@@ -84,6 +100,9 @@ type Platform = keyof ReturnType<typeof channelAdapters>;
  * secret, without which every request would be refused anyway.
  */
 const isSetUp = (env: Env, platform: string): platform is Platform => {
+  if (platform === "gmail") {
+    return gmailSetUp(env) !== undefined;
+  }
   if (platform === "slack") {
     return (
       env.SLACK_SIGNING_SECRET !== undefined && env.SLACK_SIGNING_SECRET !== ""
@@ -450,9 +469,127 @@ const slackResponse = async (
   );
 };
 
+/** How often someone unknown on the client's own domains is sent the link. */
+const gmailLinkEveryMs = 24 * 60 * 60 * 1000;
+
+/**
+ * Sends `address` the link to sign in by, in reply to their mail: once a
+ * day, and only on one of the client's own sign-in domains, so a forged
+ * sender elsewhere draws nothing. Their mail isn't read or quoted.
+ */
+const offerGmailLink = async (
+  env: Env,
+  state: StateAdapter,
+  thread: Thread,
+  address: string,
+  origin: string
+): Promise<void> => {
+  const domains = signInConfig(env)?.domains ?? [];
+  if (ownDomainOf(address, domains) === undefined) {
+    log.info("channel.unknown", { platform: "gmail", reason: "domain" });
+    return;
+  }
+  if (
+    !(await state.setIfNotExists(
+      `door:gmail:link:${address}`,
+      true,
+      gmailLinkEveryMs
+    ))
+  ) {
+    return;
+  }
+  try {
+    const { path } = await offerChannelLink(env, {
+      platform: "gmail",
+      platformUserId: address,
+    });
+    await thread.post(
+      signInCard({ locale: "en", url: new URL(path, origin).href })
+    );
+  } catch (error) {
+    log.warn("channel.line_failed", {
+      platform: "gmail",
+      line: "link",
+      ...errorFields(error),
+    });
+  }
+};
+
+/**
+ * Answers a Gmail push whose body the door read: 401 unless Google signed
+ * it for Stephen's mailbox and this deployment's subscription, and
+ * otherwise what the adapter answers, each new mail handled in the
+ * background. Only mail from an address a person linked goes on.
+ */
+const gmailResponse = async (
+  request: Request,
+  env: Env,
+  body: string,
+  ctx: Pick<ExecutionContext, "waitUntil">,
+  handoff: ChannelHandoff | undefined,
+  gmailKeys: GmailKeys | undefined
+): Promise<Response> => {
+  const setUp = gmailSetUp(env);
+  const pushId =
+    setUp === undefined
+      ? undefined
+      : await verifiedGmailPush(env, request, body, gmailKeys);
+  if (setUp === undefined || pushId === undefined) {
+    return new Response("Unauthorized", { status: 401 });
+  }
+  const state = durableObjectState(inJurisdiction(env, env.CHAT_STATE));
+  if (!(await state.setIfNotExists(`door:gmail:${pushId}`, true, seenTtlMs))) {
+    return new Response(null, { status: 200 });
+  }
+  const adapter = gmailAdapter(env, setUp, gmailKeys);
+  const chat = new Chat({
+    userName: "Stephen",
+    adapters: { gmail: adapter },
+    state,
+    logger: "silent",
+  });
+  const { origin } = new URL(request.url);
+  chat.onNewMention(async (thread, message) => {
+    const address = message.author.userId.toLowerCase();
+    // Stephen's own mail, and what he sent, never goes on.
+    if (message.author.isMe || address === setUp.mailbox) {
+      return;
+    }
+    if (!messages.take(`gmail:${address}`)) {
+      log.info("channel.limited", { platform: "gmail" });
+      return;
+    }
+    const writer = await writerOf(env, "gmail", address);
+    if (writer.kind !== "member") {
+      await offerGmailLink(env, state, thread, address, origin);
+      return;
+    }
+    await keepConversation(env, "gmail", thread.id, writer.userId);
+    await handoff?.({
+      platform: "gmail",
+      userId: writer.userId,
+      thread,
+      message,
+    });
+  });
+  return await chat.webhooks.gmail(
+    new Request(request.url, {
+      method: "POST",
+      headers: request.headers,
+      body,
+    }),
+    {
+      waitUntil: (promise) => {
+        ctx.waitUntil(promise);
+      },
+    }
+  );
+};
+
 /** Options the tests set: the keys to check against, and the handoff. */
 export interface DoorOptions {
   teamsKeys?: TeamsKeys;
+  gmailKeys?: GmailKeys;
   handoff?: ChannelHandoff;
 }
 
@@ -467,7 +604,7 @@ export const channelResponse = async (
   platform: string,
   requestId: string,
   ctx: Pick<ExecutionContext, "waitUntil">,
-  { teamsKeys, handoff }: DoorOptions = {}
+  { teamsKeys, gmailKeys, handoff }: DoorOptions = {}
 ): Promise<Response> => {
   if (!isSetUp(env, platform)) {
     return errorResponse(
@@ -493,6 +630,9 @@ export const channelResponse = async (
   }
   if (platform === "slack") {
     return await slackResponse(request, env, body, ctx, handoff);
+  }
+  if (platform === "gmail") {
+    return await gmailResponse(request, env, body, ctx, handoff, gmailKeys);
   }
   if (!(await verifiedTeamsRequest(env, request, body, teamsKeys))) {
     return new Response("Unauthorized", { status: 401 });
