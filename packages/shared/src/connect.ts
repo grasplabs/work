@@ -1497,7 +1497,7 @@ export type ConnectorEventsAck = z.input<typeof connectorEventsAckSchema>;
  * (`ChannelApi.channelFetch`). Each is added with its hosts and its
  * credential in connect's src/channels.ts when it is switched on.
  */
-export const channelPlatformSchema = z.enum(["teams"]);
+export const channelPlatformSchema = z.enum(["teams", "slack"]);
 export type ChannelPlatform = z.infer<typeof channelPlatformSchema>;
 
 /**

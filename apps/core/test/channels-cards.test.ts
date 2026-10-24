@@ -1,3 +1,4 @@
+import { cardToBlockKit } from "@chat-adapter/slack";
 import { cardToAdaptiveCard } from "@chat-adapter/teams/cards";
 import type { TeamsCardElement } from "@chat-adapter/teams/cards";
 import type { CardChild, CardElement, PostableCard } from "chat";
@@ -493,6 +494,104 @@ describe("Stephen's cards in Teams", () => {
 
 /** Values for every line's room, the same in each language. */
 const values = { count: 3, where: "Sales register.xlsx" };
+
+/** Block Kit's limits, as Slack documents them for a message's blocks. */
+const slackLimits = {
+  blocks: 50,
+  sectionText: 3000,
+  headerText: 150,
+  contextElements: 10,
+  actionsElements: 25,
+  buttonText: 75,
+  buttonValue: 2000,
+  url: 3000,
+};
+
+/** A Block Kit node's own text: its `text`, or its text object's. */
+const slackTextOf = (node: unknown): string => {
+  const text: unknown =
+    typeof node === "object" && node !== null
+      ? Reflect.get(node, "text")
+      : undefined;
+  if (typeof text === "string") {
+    return text;
+  }
+  const inner: unknown =
+    typeof text === "object" && text !== null
+      ? Reflect.get(text, "text")
+      : undefined;
+  return typeof inner === "string" ? inner : "";
+};
+
+/** How many elements a Block Kit node holds. */
+const elementsIn = (node: object): number => {
+  const elements: unknown = Reflect.get(node, "elements");
+  return Array.isArray(elements) ? elements.length : 0;
+};
+
+/** The limits one Block Kit node breaks, itself and not its children. */
+const breaksOf = (node: object): string[] => {
+  const type: unknown = Reflect.get(node, "type");
+  const text = slackTextOf(node).length;
+  const value: unknown = Reflect.get(node, "value");
+  const url: unknown = Reflect.get(node, "url");
+  const broken: [boolean, string][] = [
+    [type === "section" && text > slackLimits.sectionText, "sectionText"],
+    [type === "header" && text > slackLimits.headerText, "headerText"],
+    [
+      type === "context" && elementsIn(node) > slackLimits.contextElements,
+      "contextElements",
+    ],
+    [
+      type === "actions" && elementsIn(node) > slackLimits.actionsElements,
+      "actionsElements",
+    ],
+    [type === "button" && text > slackLimits.buttonText, "buttonText"],
+    [
+      type === "button" &&
+        typeof value === "string" &&
+        value.length > slackLimits.buttonValue,
+      "buttonValue",
+    ],
+    [typeof url === "string" && url.length > slackLimits.url, "url"],
+  ];
+  return broken.filter(([is]) => is).map(([, name]) => name);
+};
+
+/** What of a card Block Kit would refuse, by the limit it breaks. */
+const pastSlack = (postable: PostableCard): string[] => {
+  const blocks = cardToBlockKit(postable.card);
+  const past = new Set<string>(
+    blocks.length > slackLimits.blocks ? ["blocks"] : []
+  );
+  const walk = (node: unknown): void => {
+    if (typeof node !== "object" || node === null) {
+      return;
+    }
+    if (!Array.isArray(node)) {
+      for (const broken of breaksOf(node)) {
+        past.add(broken);
+      }
+    }
+    for (const value of Object.values(node)) {
+      walk(value);
+    }
+  };
+  walk(blocks);
+  return [...past];
+};
+
+describe("Stephen's cards in Slack", () => {
+  it("are all within Block Kit's block, text, button and link limits", () => {
+    expect(
+      Object.fromEntries(
+        everyCard.map(({ name, card }) => [name, pastSlack(card)])
+      )
+    ).toStrictEqual(
+      Object.fromEntries(everyCard.map(({ name }) => [name, []]))
+    );
+  });
+});
 
 describe("Stephen's lines", () => {
   it("are in all five languages, naming the same values as the English", () => {
