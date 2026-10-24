@@ -10,6 +10,7 @@
  * `graphControlUrl`. Imported by vite.config.ts (Node) and the tests
  * (workerd), so it only holds data.
  */
+import { botFrameworkKeysFake } from "../../connect/test/bot-framework-keys-fake.ts";
 import { graphEventsFake } from "../../connect/test/graph-events-fake.ts";
 import { npmRegistryFake } from "../../connect/test/npm-registry-fake.ts";
 import { osvFake } from "../../connect/test/osv-fake.ts";
@@ -133,6 +134,23 @@ export const osvReportUrl = "https://osv-control.test/report";
  */
 export const osvAnswerUrl = "https://osv-control.test/answer";
 
+/**
+ * Where tests publish Microsoft's Bot Framework signing keys, as
+ * login.botframework.com serves them to connect: POST `{ keys }`, public
+ * JWKs each with its `endorsements`.
+ */
+export const botFrameworkKeysUrl = "https://botframework-control.test/keys";
+
+/**
+ * Where tests have login.botframework.com fail its key set: POST
+ * `{ status }` to have it answer with that status, `{ status: null }` to
+ * have it answer as before.
+ */
+export const botFrameworkFailUrl = "https://botframework-control.test/fail";
+
+/** Where tests read the paths login.botframework.com was asked for, in order. */
+export const botFrameworkAskedUrl = "https://botframework-control.test/asked";
+
 /** Where tests read the paths the fake npm registry was asked for, in order. */
 export const npmAskedUrl = "https://npm-control.test/asked";
 
@@ -165,6 +183,7 @@ const losesAnswer = (mailbox) => {
   return true;
 };
 const npm = (${npmRegistryFake.toString()})();
+const botFramework = (${botFrameworkKeysFake.toString()})();
 const landscape = { grants: [], apps: [], people: [], throttle: null, failing: false };
 const directory = { users: [] };
 const hibob = { key: null, employees: [] };
@@ -374,6 +393,25 @@ export default {
     }
     if (url.hostname === "registry.npmjs.org") {
       return await npm.answer(request);
+    }
+    if (url.hostname === "login.botframework.com") {
+      return botFramework.answer(request);
+    }
+    if (request.method === "POST" && url.href === ${JSON.stringify(botFrameworkKeysUrl)}) {
+      const { keys } = await request.json();
+      botFramework.setKeys(keys);
+      return new Response(null, { status: 204 });
+    }
+    if (request.method === "POST" && url.href === ${JSON.stringify(botFrameworkFailUrl)}) {
+      const { status } = await request.json();
+      botFramework.override(
+        botFramework.keysPath,
+        status === null ? undefined : () => new Response("Unavailable", { status })
+      );
+      return new Response(null, { status: 204 });
+    }
+    if (url.href === ${JSON.stringify(botFrameworkAskedUrl)}) {
+      return Response.json(botFramework.asked.map(({ path }) => path));
     }
     if (url.href === ${JSON.stringify(npmAskedUrl)}) {
       return Response.json(npm.asked.map(({ path }) => path));

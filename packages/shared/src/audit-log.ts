@@ -150,6 +150,9 @@ const typeRules: readonly {
   { action: "app.token.issued", type: "permission" },
   { action: "app.portable.called", type: "action" },
   { action: "app", type: "config" },
+  // A person linking a chat platform account to themselves, so the agent
+  // knows them there, or unlinking it: who they are on that door.
+  { action: "channel_account", type: "permission" },
   { action: "member", type: "config" },
   { action: "team", type: "config" },
   // A decision a run put to people: opened, asked, answered, timed out.
