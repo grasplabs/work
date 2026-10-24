@@ -1,7 +1,6 @@
+import { unicode61Dropped, unicode61Kept } from "@grasp-os/brain/unicode61";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
-
-import { unicode61Dropped, unicode61Kept } from "../src/knowledge/unicode61.ts";
 
 // The purge's table of the search index's token characters
 // (src/knowledge/unicode61.ts) against the tokenizer itself, every code

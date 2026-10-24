@@ -1,3 +1,5 @@
+import type { ReadRecord } from "@grasp-os/brain/authorize";
+import { collections } from "@grasp-os/brain/schema";
 import {
   actorOf,
   auditProvenanceMaxItems,
@@ -20,11 +22,9 @@ import { keepAuditEvent } from "../audit-outbox.ts";
 import { teamsOf } from "../auth/identity.ts";
 import { collectionTeams } from "../db/core/schema.ts";
 import { inList } from "../db/d1.ts";
-import { collections } from "../db/knowledge/schema.ts";
 import { grantedPermissions } from "../permissions.ts";
 import { restrict } from "../restricted.ts";
 import type { WorkContext } from "../restricted.ts";
-import type { ReadRecord } from "./authorize.ts";
 
 // The one place core decides what Knowledge may be read by whom: the
 // host side of Knowledge's `authorize` port (app-entries.ts `authorize`

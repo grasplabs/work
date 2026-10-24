@@ -1,3 +1,18 @@
+import { allowedFor } from "@grasp-os/brain/authorize";
+import { ensureCollection } from "@grasp-os/brain/collections";
+import type { CollectionRow } from "@grasp-os/brain/collections";
+import {
+  readableDocument,
+  versionText,
+  writeVersion,
+} from "@grasp-os/brain/documents";
+import type { Writer } from "@grasp-os/brain/documents";
+import {
+  brainPayloads,
+  collections,
+  documents,
+  versions,
+} from "@grasp-os/brain/schema";
 import { actorOf } from "@grasp-os/shared/audit";
 import type { AuditActor } from "@grasp-os/shared/audit";
 import { sha256Hex } from "@grasp-os/shared/encoding";
@@ -23,18 +38,7 @@ import interviewAStakeholder from "../../skills/interview-a-stakeholder/SKILL.md
 import runABaseline from "../../skills/run-a-baseline/SKILL.md";
 import writeBoardPage from "../../skills/write-board-page/SKILL.md";
 import { outboxed } from "../audit-outbox.ts";
-import {
-  brainPayloads,
-  collections,
-  documents,
-  versions,
-} from "../db/knowledge/schema.ts";
-import { allowedFor } from "./authorize.ts";
 import { requireWritable } from "./collection-rules.ts";
-import { ensureCollection } from "./collections.ts";
-import type { CollectionRow } from "./collections.ts";
-import { readableDocument, versionText, writeVersion } from "./documents.ts";
-import type { Writer } from "./documents.ts";
 import { personWriter } from "./person-writes.ts";
 import { portsOf, brainOf } from "./ports.ts";
 

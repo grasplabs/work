@@ -1,3 +1,11 @@
+import { allowedFor } from "@grasp-os/brain/authorize";
+import { readableCollection } from "@grasp-os/brain/collections";
+import {
+  readableDocument,
+  versionText,
+  writeVersion,
+} from "@grasp-os/brain/documents";
+import type { Writer } from "@grasp-os/brain/documents";
 import { actorOf } from "@grasp-os/shared/audit";
 import {
   knowledgeErrors,
@@ -8,11 +16,7 @@ import type { DocumentSummary } from "@grasp-os/shared/knowledge";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { drizzle } from "drizzle-orm/d1";
 
-import { allowedFor } from "./authorize.ts";
 import { requireWritable } from "./collection-rules.ts";
-import { readableCollection } from "./collections.ts";
-import { readableDocument, versionText, writeVersion } from "./documents.ts";
-import type { Writer } from "./documents.ts";
 import { portsOf, brainOf } from "./ports.ts";
 
 // A person saving and restoring Knowledge's documents themselves: core

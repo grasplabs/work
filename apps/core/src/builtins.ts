@@ -1,3 +1,4 @@
+import knowledgeMigrations from "@grasp-os/brain/migrations/journal" with { type: "json" };
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
@@ -8,7 +9,6 @@ import type { BuiltinBlueprint } from "#blueprints";
 
 import { installBuiltinBlueprint } from "./app-blueprints.ts";
 import coreMigrations from "./db/core/migrations/meta/_journal.json" with { type: "json" };
-import knowledgeMigrations from "./db/knowledge/migrations/meta/_journal.json" with { type: "json" };
 import { inJurisdiction } from "./durable-objects.ts";
 import { graspSkills, syncGraspSkills } from "./knowledge/grasp-skills.ts";
 import type { GraspSkill } from "./knowledge/grasp-skills.ts";

@@ -1,3 +1,4 @@
+import { collections } from "@grasp-os/brain/schema";
 import { jsonSchemaOf, schemaFromDescriptor } from "@grasp-os/sdk/host";
 import { actorOf } from "@grasp-os/shared/audit";
 import type { ConnectorContract } from "@grasp-os/shared/connect";
@@ -32,7 +33,6 @@ import {
   teams,
   workflowBindingApprovals,
 } from "./db/core/schema.ts";
-import { collections } from "./db/knowledge/schema.ts";
 import { gatewaySettings } from "./models.ts";
 import { requireMemberAdmin, stillAdminSql } from "./permissions.ts";
 import { pinnedTemplate } from "./resource-templates.ts";

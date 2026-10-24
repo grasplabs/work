@@ -1,3 +1,6 @@
+import { allowedFor } from "@grasp-os/brain/authorize";
+import type { Brain } from "@grasp-os/brain/brain";
+import { collections, documents } from "@grasp-os/brain/schema";
 import {
   brainChangesMaxAgeMs,
   brainChangesOptionsSchema,
@@ -11,10 +14,7 @@ import { and, desc, eq, gt, lt, or } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { z } from "zod";
 
-import { collections, documents } from "./db/knowledge/schema.ts";
 import type { Reader } from "./knowledge/access.ts";
-import { allowedFor } from "./knowledge/authorize.ts";
-import type { Brain } from "./knowledge/brain.ts";
 
 // What changed in the brain since a moment (`brain.changes`): one feed of
 // what core records today, newest first, a page at a time, as the person

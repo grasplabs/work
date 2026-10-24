@@ -65,7 +65,12 @@ export const foundStateOf = (
     appDirs.push(path.posix.dirname(config));
   }
   const schemas: Record<string, string[]> = {};
-  for (const appDir of appDirs) {
+  // The apps' schema folders, and a package's that owns a whole database
+  // an app binds (the Brain's, packages/brain/src/db).
+  const packageDbs = readdirSync(path.join(root, "packages"))
+    .map((pkg) => `packages/${pkg}`)
+    .filter((dir) => existsSync(path.join(root, dir, "src/db")));
+  for (const appDir of [...appDirs, ...packageDbs]) {
     for (const file of filesUnder(root, `${appDir}/src/db`)) {
       if (path.posix.basename(file) !== "schema.ts") {
         continue;
