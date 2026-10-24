@@ -228,6 +228,8 @@ export const workflowResourceErrors = defineErrorFamily({
     "This test run went on longer than a test run may, so it failed. Shorten what it waits for to test it.",
   "workflow.candidate_wait_limit":
     "This test run would wait longer than a test run may, so it failed. Shorten the wait to test it.",
+  "workflow.creates_exhausted":
+    "This chat created as many Apps and workflows as one question may. Tell the person what you made.",
 });
 
 /**

@@ -10,6 +10,7 @@ import { knowledgeApi } from "./agent-knowledge.ts";
 import { memoryApi } from "./agent-memory.ts";
 import { auditAgentCall, requireOpenRun } from "./agent-scope.ts";
 import type { AgentApi, AgentScope } from "./agent-scope.ts";
+import { workflowBuildApi } from "./agent-workflow-build.ts";
 import { workflowsApi } from "./agent-workflows.ts";
 import { workspace } from "./durable-objects.ts";
 import type { ProjectForAgent } from "./workspace.ts";
@@ -165,6 +166,7 @@ export const agentApis: readonly AgentApi[] = [
   appsApi,
   buildApi,
   workflowsApi,
+  workflowBuildApi,
   memoryApi,
   brainAgentApi,
 ].map((api) => ({

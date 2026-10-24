@@ -143,6 +143,25 @@ export const bindWorkflowToApp = async (
     removedAt: null,
   };
   const db = drizzle(env.DB);
+  // The binding this one replaces, named in its event, so a rebind's
+  // record says what ran before. Read here; should another rebind land
+  // between this read and the batch, the batch's update still removes
+  // whichever is active, and the event names the one read.
+  const replacing = await db
+    .select({
+      id: appWorkflowBindings.id,
+      workflowId: appWorkflowBindings.workflowResourceId,
+      version: appWorkflowBindings.workflowResourceVersion,
+    })
+    .from(appWorkflowBindings)
+    .where(
+      and(
+        eq(appWorkflowBindings.appId, found.id),
+        eq(appWorkflowBindings.alias, alias),
+        eq(appWorkflowBindings.status, "active")
+      )
+    )
+    .get();
   try {
     await auditedBatch(env, db, [
       db
@@ -174,7 +193,17 @@ export const bindWorkflowToApp = async (
         actor: by.actor ?? actorOf(by),
         action: "workflow.app_binding.bound",
         target: { type: "app", id: found.id },
-        detail: { binding: row.id, alias, workflowId: workflow.id, version },
+        detail: {
+          binding: row.id,
+          alias,
+          workflowId: workflow.id,
+          version,
+          // Flat, as every event's detail is (`auditDetailValueSchema`):
+          // null for a binding that replaces none.
+          replacedBinding: replacing?.id ?? null,
+          replacedWorkflowId: replacing?.workflowId ?? null,
+          replacedVersion: replacing?.version ?? null,
+        },
       }),
     ]);
   } catch (error) {
