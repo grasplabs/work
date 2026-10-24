@@ -7,8 +7,9 @@ import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { readableCollection } from "../src/knowledge/collections.ts";
-import { personWriter, writeVersion } from "../src/knowledge/documents.ts";
+import { writeVersion } from "../src/knowledge/documents.ts";
 import { pendingGraceMs } from "../src/knowledge/payloads.ts";
+import { personWriter } from "../src/knowledge/person-writes.ts";
 import { allEvents } from "./audit-events.ts";
 import { runCron } from "./cron.ts";
 import { mockIdp } from "./idp.ts";

@@ -45,16 +45,8 @@ import { withPerson } from "../session-check.ts";
 import type { SessionCheck } from "../session-check.ts";
 import type { Reader } from "./access.ts";
 import { appsErasure } from "./apps-collection.ts";
-import { createCollection, listCollections } from "./collections.ts";
-import {
-  backlinks,
-  getDocument,
-  history,
-  listDocuments,
-  personWriter,
-  restoreVersion,
-  saveDocument,
-} from "./documents.ts";
+import { createCollection, listCollections } from "./collection-rules.ts";
+import { backlinks, getDocument, history, listDocuments } from "./documents.ts";
 import type { Writer } from "./documents.ts";
 import { copySkill, skillCollections } from "./grasp-skills.ts";
 import {
@@ -64,6 +56,7 @@ import {
   remember,
 } from "./memories.ts";
 import { personalCollectionId } from "./memory-files.ts";
+import { personWriter, restoreVersion, saveDocument } from "./person-writes.ts";
 import { preparePurge, purge } from "./purge.ts";
 import type { OnErase } from "./purge.ts";
 import { recall } from "./recall.ts";
