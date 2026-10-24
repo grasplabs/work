@@ -184,6 +184,12 @@ const mailboxInputs: Record<string, Input> = {
     list: todoListIds.tasks,
     task: "AAkALgAAAAAAHYQDEapmEc2b=",
   },
+  "calendar.freeTime": {
+    start: "2026-10-26T00:00",
+    end: "2026-10-27T00:00",
+    timeZone: "Europe/Amsterdam",
+    minutes: 30,
+  },
   "calendar.create": {
     subject: "Focus time",
     start: "2026-10-26T14:00",
@@ -290,14 +296,15 @@ describe("the Microsoft 365 connector's scoping", () => {
     );
     expect(unbound).toStrictEqual([]);
     // Only the tools that work in the person's own mailbox or OneDrive go
-    // to /me: the mail tools to ask whose the token is, files.createDraft
-    // to write its draft.
+    // to /me: the mail tools and calendar.freeTime to ask whose the token
+    // is, files.createDraft to write its draft.
     const askWho = Object.entries(manifest.actions)
       .filter(([, { routes }]) =>
         routes.some(({ path }) => path.startsWith("/v1.0/me"))
       )
       .map(([name, { reach }]) => `${name} ${reach}`);
     expect(askWho.toSorted()).toStrictEqual([
+      "calendar.freeTime own",
       "files.createDraft own",
       "mail.categorise own",
       "mail.flag own",
@@ -1418,8 +1425,139 @@ describe("the Microsoft 365 connector's calendar tools", () => {
   });
 });
 
-/** The organization's time zone, in the calendar writes below. */
+/** The organization's time zone, in the calendar tools below. */
 const amsterdam = "Europe/Amsterdam";
+
+/** Looks for free time in a calendar. */
+const freeTime = async (connection: Connection, input: Input) =>
+  await call(connection, "calendar.freeTime", input);
+
+describe("the Microsoft 365 connector's free time", () => {
+  it("finds free stretches around a person's events in working hours, in the organization's time zone", async () => {
+    const connection = await connected();
+    const own = connection.person.email;
+    // Monday 26 October in Amsterdam, a day after the clocks went back:
+    // UTC+1, so 09:00 there is 08:00 UTC.
+    graph.holdEvents(own, [
+      { start: "2026-10-26T08:00:00", end: "2026-10-26T09:00:00" },
+      { start: "2026-10-26T11:00:00", end: "2026-10-26T12:00:00" },
+      { start: "2026-10-26T12:20:00", end: "2026-10-26T14:00:00" },
+      {
+        start: "2026-10-26T14:00:00",
+        end: "2026-10-26T15:00:00",
+        showAs: "free",
+      },
+      {
+        start: "2026-10-26T15:00:00",
+        end: "2026-10-26T15:30:00",
+        isCancelled: true,
+      },
+    ]);
+    // From Saturday, over the weekend and the change of clocks.
+    await expect(
+      outputOf(
+        freeTime(connection, {
+          mailbox: own,
+          start: "2026-10-24T00:00",
+          end: "2026-10-27T00:00",
+          timeZone: amsterdam,
+          minutes: 30,
+        })
+      )
+    ).resolves.toStrictEqual({
+      mailbox: own,
+      timeZone: amsterdam,
+      // 13:00 to 13:20 is too short; the free and the cancelled events
+      // leave their time free.
+      free: [
+        { start: "2026-10-26T10:00", end: "2026-10-26T12:00", minutes: 120 },
+        { start: "2026-10-26T15:00", end: "2026-10-26T17:00", minutes: 120 },
+      ],
+    });
+    const ownPath = `/v1.0/users/${encodeURIComponent(own)}`;
+    expect(requests()).toMatchObject([
+      {
+        path: `${ownPath}/calendarView`,
+        query: {
+          startDateTime: "2026-10-23T22:00:00.000Z",
+          endDateTime: "2026-10-26T23:00:00.000Z",
+        },
+        headers: { prefer: 'outlook.timezone="UTC"' },
+      },
+      { path: `${ownPath}/calendarView`, query: { $skiptoken: "2" } },
+      { path: `${ownPath}/calendarView`, query: { $skiptoken: "4" } },
+    ]);
+  });
+
+  it("puts each event on the organization's day, not UTC's, and takes working hours as given", async () => {
+    const connection = await connected();
+    const own = connection.person.email;
+    const auckland = "Pacific/Auckland";
+    // Auckland is UTC+13 in October: its Tuesday morning is Monday evening
+    // in UTC, and its Wednesday morning Tuesday evening.
+    graph.holdEvents(own, [
+      { start: "2026-10-26T20:00:00", end: "2026-10-26T22:30:00" },
+      { start: "2026-10-27T19:00:00", end: "2026-10-27T21:00:00" },
+      // All of Thursday, as the person sees it.
+      {
+        start: "2026-10-29T00:00:00",
+        end: "2026-10-30T00:00:00",
+        isAllDay: true,
+      },
+    ]);
+    await expect(
+      outputOf(
+        freeTime(connection, {
+          mailbox: own,
+          start: "2026-10-27T00:00",
+          end: "2026-10-30T00:00",
+          timeZone: auckland,
+          minutes: 60,
+          workingHours: {
+            from: "08:00",
+            to: "12:00",
+            days: ["tuesday", "wednesday", "thursday"],
+          },
+        })
+      )
+    ).resolves.toMatchObject({
+      free: [
+        { start: "2026-10-27T08:00", end: "2026-10-27T09:00", minutes: 60 },
+        { start: "2026-10-28T10:00", end: "2026-10-28T12:00", minutes: 120 },
+      ],
+    });
+  });
+
+  it("refuses another person's calendar, a shared one, and a range it can't read", async () => {
+    const connection = await connected();
+    const range = {
+      start: "2026-10-26T00:00",
+      end: "2026-10-27T00:00",
+      timeZone: amsterdam,
+      minutes: 30,
+    };
+    for (const mailbox of [ceo, invoices]) {
+      // oxlint-disable-next-line no-await-in-loop -- one calendar at a time
+      await expect(
+        toolError(freeTime(connection, { ...range, mailbox }))
+      ).resolves.toMatchObject({ error: { code: "invalid" } });
+    }
+    // Neither calendar's events were read: only whose the token is.
+    expect(graphPaths()).toStrictEqual([]);
+    const own = connection.person.email;
+    const wrongs: Input[] = [
+      { end: range.start },
+      { end: "2026-12-01T00:00" },
+      { workingHours: { from: "17:00", to: "09:00", days: ["monday"] } },
+    ];
+    for (const wrong of wrongs) {
+      // oxlint-disable-next-line no-await-in-loop -- one input at a time
+      await expect(
+        toolError(freeTime(connection, { ...range, mailbox: own, ...wrong }))
+      ).resolves.toMatchObject({ error: { code: "invalid" } });
+    }
+  });
+});
 
 /** An hour of focus time in `mailbox`'s calendar, in Amsterdam time. */
 const focusTime = (mailbox: string) => ({

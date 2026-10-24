@@ -137,6 +137,7 @@ import {
   listPendingActions,
   pendingActionFor,
   refuseConfirmation,
+  refuseEnded,
   take,
 } from "./pending.ts";
 import type { HeldAction } from "./pending.ts";
@@ -673,6 +674,8 @@ export default class Connect
     }
     const { capability, person, id, inputHash } = parsed.data;
     const held = await heldFor(this.env, person, id, "confirm");
+    // Its day over: declined as expired, whatever the press carries.
+    await refuseEnded(this.env, person, held);
     const call = callOf(held);
     let claims: CapabilityClaims | undefined;
     try {

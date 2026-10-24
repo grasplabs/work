@@ -18,6 +18,7 @@ import type { PackageRegistryApi } from "./packages.ts";
 import { codeSubjectSchema, permissionActionSchema } from "./permissions.ts";
 import type { CodeSubject, WorkContext } from "./permissions.ts";
 import { roleSchema } from "./roles.ts";
+import type { StephenReachApi } from "./stephen-reach.ts";
 import { eventTypeSchema } from "./workflows.ts";
 
 /**
@@ -474,7 +475,7 @@ export const appRequestsListed = 200;
  * needs it (`needs_reauth`) is starting one for its provider and scope:
  * finished with the account it holds, it is that connection again.
  */
-export interface ConnectionsApi {
+export interface ConnectionsApi extends StephenReachApi {
   start: (request: {
     provider: OAuthProvider;
     scope: ConnectionScope;
@@ -1131,6 +1132,13 @@ export interface PendingAction {
   /** ISO 8601. */
   requestedAt: string;
   /**
+   * When it ends unconfirmed (ISO 8601): one asked for in a chat on a chat
+   * platform, such as Teams, ends at midnight of the company's day it was
+   * asked on, and is declined as expired after. Absent for one that waits
+   * until it is decided.
+   */
+  endsAt?: string;
+  /**
    * The App's approved resource binding it came through, as it served then
    * (`HeldBinding`); null for any other call; `unreadable` when what connect
    * stored no longer reads as one, which core never confirms.
@@ -1535,7 +1543,7 @@ export type ConnectorEventsAck = z.input<typeof connectorEventsAckSchema>;
  * (`ChannelApi.channelFetch`). Each is added with its hosts and its
  * credential in connect's src/channels.ts when it is switched on.
  */
-export const channelPlatformSchema = z.enum(["teams"]);
+export const channelPlatformSchema = z.enum(["teams", "slack"]);
 export type ChannelPlatform = z.infer<typeof channelPlatformSchema>;
 
 /**
@@ -2013,6 +2021,8 @@ export const connectErrors = defineErrorFamily({
   "connect.action_failed": "The action reported an error.",
   "connect.pending_not_found":
     "There's no such action waiting for you: it was confirmed or declined, or it isn't yours.",
+  "connect.pending_expired":
+    "This action waited past the end of the day it was asked on, so it ended and nothing was done. Ask again.",
   "connect.pending_changed":
     "This isn't the action you were shown, so nothing was done. Look at it again.",
   "connect.held":

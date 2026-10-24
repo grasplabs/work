@@ -1,6 +1,6 @@
 /**
  * What the company brain is built from: everything steps 1 and 2 of the
- * Playbook collected, as records. The prototype read these from its mock
+ * onboarding collected, as records. The prototype read these from its mock
  * workspace; here they are what core assembles (`brain.read`, core's
  * brain-rpc.ts) and the web app's brain is built from. Only the fields the
  * brain reads are here, as the prototype named them.
@@ -152,7 +152,7 @@ export interface Source {
   who?: string;
   /** How it was collected: "Live, 45 minutes", "Chat link", "OAuth". */
   how?: string;
-  /** The Playbook step that collected it. */
+  /** The onboarding step that collected it. */
   step?: 1 | 2 | 3 | 4 | 5 | 6;
   /** For an import from a connection: what it read. */
   connection?: "directory" | "signIn" | "pulse";
@@ -343,7 +343,7 @@ export interface Workspace {
 
 /**
  * The brain's workspace, assembled by core from what it holds: the
- * onboarding, the Playbook's records and the connections. Each part as the
+ * onboarding, the brain's records and the connections. Each part as the
  * person may read it; what core has no source for yet comes back empty.
  */
 export interface BrainApi {
@@ -359,7 +359,7 @@ export interface BrainApi {
    */
   notes: (options?: BrainNotesOptions) => Promise<BrainNotePage>;
   /**
-   * Adds records to the Playbook (brain-records.ts), all or none: for
+   * Adds records to the brain (brain-records.ts), all or none: for
    * admins. A record core holds already, exactly so, is left as it is.
    */
   addRecords: (records: BrainRecordInput[]) => Promise<BrainRecordsAdded>;

@@ -29,6 +29,9 @@ import type { ProvisioningView } from "../provision/queries.ts";
 import { listReleases } from "../releases/queries.ts";
 import { clientHistory, clientSettings } from "./queries.ts";
 import type { HistoryEntry } from "./queries.ts";
+import type { TeamsBot } from "./teams-bot.ts";
+import type { WatchedSignals } from "./watch-signals.ts";
+import { lastWatched } from "./watch.ts";
 
 /** How many of a client's deploys the section lists: the latest. */
 export const setupDeployLimit = 20;
@@ -92,6 +95,8 @@ export interface ClientSetup {
   signIn: ClientSignInRecord | null;
   /** Whether a `SIGN_IN` setting replaces that on deploy. */
   signInOverridden: boolean;
+  /** Its own Teams bot (src/clients/teams-bot.ts); null when it has none. */
+  teamsBot: TeamsBot | null;
   /** Whether a change to what a deploy sets on its core waits for its next deploy. */
   configPending: boolean;
   /**
@@ -100,6 +105,11 @@ export interface ClientSetup {
    * value, sealed or not, so nothing of it reaches the page.
    */
   sealedSecrets: SetupSealedSecret[];
+  /**
+   * What the admin's watch last read of how its Stephen fares
+   * (src/clients/watch.ts), and when; null before it read any.
+   */
+  watched: { readAt: Date; signals: WatchedSignals } | null;
   /** The newest first: its latest `setupDeployLimit`. */
   deploys: SetupDeploy[];
   /** Whether it has older deploys than those. */
@@ -150,6 +160,7 @@ const byHand: ReadonlySet<string> = new Set([
   "client.rotate_secrets",
   "client.sign_in",
   "client.sealed_secret",
+  "client.teams_bot",
   "client.apply_settings",
   "client.stripe_customer",
   "client.rooms_project",
@@ -289,16 +300,25 @@ export const getClientSetup = async (
     })
     .from(clients)
     .where(eq(clients.id, clientId));
-  const [settings, sealedSecrets, deploys, workers, listed, rollout, history] =
-    await Promise.all([
-      clientSettings(db, clientId),
-      sealedSecretsOf(db, clientId),
-      deploysOf(db, clientId),
-      workersOf(db, clientId),
-      listReleases(db),
-      rolloutOf(db, clientId),
-      clientHistory(db, clientId),
-    ]);
+  const [
+    settings,
+    sealedSecrets,
+    deploys,
+    workers,
+    listed,
+    rollout,
+    history,
+    watched,
+  ] = await Promise.all([
+    clientSettings(db, clientId),
+    sealedSecretsOf(db, clientId),
+    deploysOf(db, clientId),
+    workersOf(db, clientId),
+    listReleases(db),
+    rolloutOf(db, clientId),
+    clientHistory(db, clientId),
+    lastWatched(env, clientId),
+  ]);
   // Core's release is the one its people meet.
   const runs =
     workers.find(({ worker }) => worker === "core")?.releaseId ?? null;
@@ -307,8 +327,10 @@ export const getClientSetup = async (
     account: account ?? null,
     signIn: settings?.signIn ?? null,
     signInOverridden: settings?.signInOverridden ?? false,
+    teamsBot: settings?.teamsBot ?? null,
     configPending: settings?.configPending ?? false,
     sealedSecrets,
+    watched,
     deploys: deploys.slice(0, setupDeployLimit),
     moreDeploys: deploys.length > setupDeployLimit,
     workers,

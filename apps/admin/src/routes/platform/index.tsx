@@ -40,6 +40,7 @@ import {
   spreadOf,
 } from "../../admin/platform.ts";
 import type { PlatformNeed, Standing } from "../../admin/platform.ts";
+import { RingChecklist, uncheckedRing } from "../../admin/rollout-parts.tsx";
 import { formatDate, formatPercent, whole } from "../../admin/words.ts";
 import { fetchClientGrid, fetchGridLive } from "../../clients/functions.ts";
 import type { GridRow, LiveStatus } from "../../clients/grid.ts";
@@ -95,15 +96,18 @@ const ApproveRing = ({
 }) => {
   const router = useRouter();
   const { busy, failure, run } = useRolloutAction();
+  const [checks, setChecks] = useState(uncheckedRing);
   return (
     <div className="flex flex-col items-end gap-1">
+      <RingChecklist checks={checks} onChange={setChecks} />
       <Button
         disabled={busy}
         onClick={() => {
           void run(
             async () =>
               await thenRefresh(
-                async () => await approveRolloutFn({ data: { rolloutId } }),
+                async () =>
+                  await approveRolloutFn({ data: { rolloutId, checks } }),
                 async () => {
                   await router.invalidate({ sync: true });
                 }

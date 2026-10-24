@@ -236,6 +236,11 @@ const coreDb: D1State = {
       `${core}channels/accounts.ts`,
       "Links a chat sent, good for 15 minutes: the chat sends a new one."
     ),
+    channel_conversations: exported(`${core}channels/door.ts`),
+    channel_signals: transient(
+      `${core}channels/signals.ts`,
+      "Hourly counts of how Stephen fared in the chat apps, kept a week for the admin's watch."
+    ),
     invitations: exported(auth),
     teams: exported(auth),
     team_members: exported(auth),
@@ -315,6 +320,9 @@ const coreDb: D1State = {
     workflow_owners: exported(`${core}workflows/owners.ts`),
     hidden_connectors: exported(`${core}connections.ts`),
     tool_class_settings: exported(`${core}tool-classes.ts`),
+    stephen_reach: exported(`${core}stephen-reach.ts`),
+    stephen_places: exported(`${core}stephen-reach.ts`),
+    app_tool_classes: exported(`${core}stephen-reach.ts`),
     shared_mailbox_pointers: exported(`${core}shared-mailboxes.ts`),
     app_pointers: exported(`${core}app-pointers.ts`),
     app_requests: exported(`${core}app-requests.ts`),

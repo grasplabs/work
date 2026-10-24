@@ -150,6 +150,7 @@ export type Signed = Partial<
     | "readOnly"
     | "origin"
     | "decision"
+    | "heldUntil"
     | "mailboxes"
     | "resources"
   >

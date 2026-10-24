@@ -25,7 +25,8 @@
  *
  * M365_SMOKE_OWN_MAILBOX, the token's user's own address, also puts an
  * event in their calendar a week from now, with nobody invited, and moves
- * it by an hour; it stays there, titled "Grasp OS smoke test".
+ * it by an hour; it stays there, titled "Grasp OS smoke test". With it,
+ * free time is looked for in that calendar.
  */
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
@@ -182,6 +183,26 @@ describe.runIf(smoke.success)("Microsoft 365, live", () => {
       ).resolves.toMatchObject({
         event: { start: { dateTime: `${day}T15:00:00.0000000`, timeZone } },
       });
+    }
+  );
+
+  it.runIf(config?.M365_SMOKE_OWN_MAILBOX !== undefined)(
+    "finds free time in the user's own calendar",
+    async () => {
+      const id = await connection();
+      const own = config?.M365_SMOKE_OWN_MAILBOX ?? "";
+      const day = new Date(Date.now() + 7 * 24 * 3600 * 1000)
+        .toISOString()
+        .slice(0, "2026-10-26".length);
+      const range = {
+        start: `${day}T00:00`,
+        end: `${day}T23:59`,
+        timeZone: "Europe/Amsterdam",
+        minutes: 15,
+      };
+      await expect(
+        run(id, "calendar.freeTime", { ...range, mailbox: own }, own)
+      ).resolves.toMatchObject({ mailbox: own });
     }
   );
 });

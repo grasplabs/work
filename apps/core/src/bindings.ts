@@ -62,6 +62,12 @@ export interface CallGrant {
    */
   notAfter?: number;
   /**
+   * When a side effect connect holds from the call ends unconfirmed, in
+   * milliseconds since the epoch (`heldWritesEnd`); without it, one waits
+   * until its person decides it.
+   */
+  heldUntil?: number;
+  /**
    * For an App action's connector resource: the approved binding the call
    * comes through, which a held call pins and its confirmation checks.
    */
@@ -90,6 +96,7 @@ export const signedCall = async (
     readOnly,
     sensitive,
     notAfter,
+    heldUntil,
     binding,
   }: CallGrant,
   { action, idempotencyKey }: Pick<ConnectCall, "action" | "idempotencyKey">,
@@ -117,6 +124,7 @@ export const signedCall = async (
       readOnly,
       sensitive,
       notAfter,
+      heldUntil,
       origin: {
         permissionId,
         context,
@@ -217,6 +225,8 @@ export interface StubCaller {
   sensitive?: boolean;
   /** When the work it comes from must end: the capability expires by then. */
   notAfter?: number;
+  /** When a side effect connect holds from it ends (`CallGrant.heldUntil`). */
+  heldUntil?: number;
   /**
    * The resolver's last word, asked just before the call goes to connect,
    * after the permission check and the signing awaited: whether the work
@@ -274,6 +284,7 @@ const signedStub = async (
         readOnly: caller.readOnly,
         sensitive: caller.sensitive,
         notAfter: caller.notAfter,
+        heldUntil: caller.heldUntil,
         context,
         connection,
         permissionId,
