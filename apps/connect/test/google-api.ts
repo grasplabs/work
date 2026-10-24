@@ -80,6 +80,24 @@ const newEventSchema = z
   })
   .loose();
 
+/** A file Drive made for this app, with its text. */
+interface MadeFile {
+  id: string;
+  name: string;
+  mimeType: string;
+  parents: string[];
+  appProperties: Record<string, string>;
+  text: string | null;
+}
+
+/** A file Drive made, as it answers with it. */
+const fileAnswer = ({ id, name, mimeType }: MadeFile) => ({
+  id,
+  name,
+  mimeType,
+  webViewLink: `https://docs.google.com/document/d/${id}/edit`,
+});
+
 /** The access token a request carries. */
 const tokenOf = (request: Request): string =>
   (request.headers.get("authorization") ?? "").replace(/^Bearer /u, "");
@@ -94,6 +112,8 @@ export const fakeGoogle = (holderOf: (token: string) => string | undefined) => {
   const attachments = new Map<string, { size: number; data: string }>();
   /** The events Calendar's insert made, by calendar and ID. */
   const made = new Map<string, Record<string, unknown>>();
+  /** The files Drive made for this app, with their text, in order. */
+  const madeFiles: MadeFile[] = [];
 
   const routes: ProviderRoute<Part>[] = [
     // A search for `deleted` finds more than asked for, one deleted since.
@@ -240,12 +260,59 @@ export const fakeGoogle = (holderOf: (token: string) => string | undefined) => {
         );
       }
     ),
-    route(apisHost, "GET", String.raw`^/drive/v3/files`, ({ query }) =>
-      json(
-        (query.get("q") ?? "").startsWith("fullText")
+    route(apisHost, "GET", String.raw`^/drive/v3/files`, ({ query }) => {
+      const q = query.get("q") ?? "";
+      // This app's own files, by their app property, as Drive finds them.
+      const property =
+        /appProperties has \{ key='(?<key>\w+)' and value='(?<value>\w+)' \}/u.exec(
+          q
+        )?.groups;
+      if (property !== undefined) {
+        return json({
+          files: madeFiles
+            .filter(
+              (file) =>
+                file.appProperties[property.key ?? ""] === property.value
+            )
+            .map(fileAnswer),
+        });
+      }
+      return json(
+        q.startsWith("fullText")
           ? searchResults
           : filePage(query.get("pageToken"))
-      )
+      );
+    }),
+    // A file uploaded with its metadata: Drive converts text to a Doc.
+    route(
+      apisHost,
+      "POST",
+      String.raw`^/upload/drive/v3/files`,
+      async ({ request }) => {
+        const boundary = /boundary=(?<b>\S+)/u.exec(
+          request.headers.get("content-type") ?? ""
+        )?.groups?.b;
+        const sent = await request.text();
+        const sections = sent
+          .split(`--${boundary ?? ""}`)
+          .slice(1, -1)
+          .map((part) => part.split("\r\n\r\n").slice(1).join("\r\n\r\n"));
+        const [metadata = "", media = ""] = sections;
+        const file = {
+          ...z
+            .object({
+              name: z.string(),
+              mimeType: z.string(),
+              parents: z.array(z.string()),
+              appProperties: z.record(z.string(), z.string()).default({}),
+            })
+            .parse(JSON.parse(metadata.trimEnd())),
+          id: `file-${madeFiles.length + 1}`,
+          text: media.replace(/\r\n$/u, ""),
+        };
+        madeFiles.push(file);
+        return json(fileAnswer(file));
+      }
     ),
     route(
       apisHost,
@@ -310,6 +377,7 @@ export const fakeGoogle = (holderOf: (token: string) => string | undefined) => {
   beforeEach(() => {
     attachments.clear();
     made.clear();
+    madeFiles.length = 0;
   });
   const { sent, writesDone, fail } = fakeProvider({
     hosts: [gmailHost, apisHost, sheetsHost],
@@ -322,6 +390,8 @@ export const fakeGoogle = (holderOf: (token: string) => string | undefined) => {
     sent,
     /** The events Calendar made, as it keeps them, with `sendUpdates`. */
     made: () => [...made.values()],
+    /** The files Drive made for this app, with their text. */
+    madeFiles: () => [...madeFiles],
     /** The writes Google carried out. */
     writesDone,
     /** Makes Google refuse the next request as Drive and Calendar rate limit. */
@@ -330,6 +400,10 @@ export const fakeGoogle = (holderOf: (token: string) => string | undefined) => {
         status: 403,
         body: googleError(403, "PERMISSION_DENIED", "userRateLimitExceeded"),
       });
+    },
+    /** Makes Google answer the next write with `status` and `body`. */
+    failNextWrite: (status: number, body: unknown) => {
+      fail({ status, body, writesOnly: true });
     },
     /** Makes Google answer the next request with `status` and `body`. */
     failNext: (status: number, body: unknown) => {
