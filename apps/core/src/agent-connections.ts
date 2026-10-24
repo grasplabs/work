@@ -37,6 +37,7 @@ import { askInChat, askableConnections } from "./chat-connections.ts";
 import type { AskableConnection, AskedConnection } from "./chat-connections.ts";
 import { connectionOwnersOf } from "./connections.ts";
 import { workspace } from "./durable-objects.ts";
+import { endOfCompanyDay } from "./organization.ts";
 import { grantedPermissions } from "./permissions.ts";
 
 // Connections for a chat's code: `await env.connections.call("OUTLOOK",
@@ -148,6 +149,19 @@ export const connectionGrants = async (
       : [{ ...grant, name: permission.binding, actions: permission.actions }];
   });
 };
+
+/**
+ * When a write this chat's agent has held ends unconfirmed: in a chat on a
+ * chat platform, such as Teams, at midnight of the company's day, for its
+ * card scrolls away and its days and values may have moved on, so a press
+ * tomorrow never runs yesterday's values (connect declines it as
+ * expired). In Grasp's own app, where the person sees it again, never.
+ */
+const heldWritesEnd = async (
+  env: Env,
+  { via }: Pick<AgentScope, "via">
+): Promise<number | undefined> =>
+  via === undefined || via === "web" ? undefined : await endOfCompanyDay(env);
 
 /**
  * Tells the chat's watchers a write was held, so the person sees it to
@@ -295,9 +309,16 @@ export class ConnectionsApi extends WorkerEntrypoint<Env, AgentScope> {
     // recorded here, once; what connect takes, connect records.
     const { grant, request } = await (async () => {
       const named = await this.#grantNamed(connection);
+      const authority = chatAuthority(scope);
       const signed = await signedStubCall(
         this.env,
-        chatAuthority(scope),
+        async () => {
+          const heldUntil = await heldWritesEnd(this.env, scope);
+          return {
+            authority,
+            ...(heldUntil === undefined ? {} : { heldUntil }),
+          };
+        },
         named,
         [action, input]
       );
