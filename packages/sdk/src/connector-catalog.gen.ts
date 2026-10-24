@@ -7,6 +7,10 @@
  */
 export interface ConnectorCatalog {
   readonly "google-workspace.calendar@1": {
+    readonly create: {
+      readonly input: { body?: string; calendar: string; end: string; location?: string; showAs?: "busy" | "free"; start: string; subject: string; timeZone: string };
+      readonly output: { event: { calendar: string; end: string; id: string; isAllDay: boolean; isCancelled: boolean; location: string | null; organizer: { address: string | null; name: string | null } | null; recurringEventId: string | null; start: string; subject: string | null; webLink: string | null } };
+    };
     readonly get: {
       readonly input: { calendar: string; event: string };
       readonly output: { event: { attendees: Array<{ address: string | null; name: string | null; optional: boolean; response: string | null }>; body: string | null; calendar: string; end: string; id: string; isAllDay: boolean; isCancelled: boolean; joinUrl: string | null; location: string | null; organizer: { address: string | null; name: string | null } | null; recurringEventId: string | null; start: string; subject: string | null; webLink: string | null } };
@@ -60,10 +64,20 @@ export interface ConnectorCatalog {
       readonly output: { id: string; mailbox: string; sent: true; threadId: string | null };
     };
   };
+  readonly "google-workspace.sheets@1": {
+    readonly read: {
+      readonly input: { cells?: string; drive: string; sheet?: string; spreadsheet: string; top?: number };
+      readonly output: { drive: string; id: string; more: boolean; name: string; range: string; rows: Array<Array<(string) | (number) | (boolean) | null>>; sheet: string; sheets: Array<string> };
+    };
+  };
   readonly "microsoft-365.calendar@1": {
     readonly create: {
       readonly input: { body?: string; end: string; location?: string; mailbox: string; showAs?: "free" | "tentative" | "busy" | "oof" | "workingElsewhere"; start: string; subject: string; timeZone: string };
       readonly output: { event: { bodyPreview: string | null; end: { dateTime: string; timeZone: string }; id: string; isAllDay: boolean; isCancelled: boolean; location: string | null; mailbox: string; organizer: { address: string | null; name: string | null } | null; showAs: string | null; start: { dateTime: string; timeZone: string }; subject: string | null; webLink: string | null } };
+    };
+    readonly freeTime: {
+      readonly input: { end: string; mailbox: string; minutes: number; start: string; timeZone: string; workingHours?: { days: Array<"sunday" | "monday" | "tuesday" | "wednesday" | "thursday" | "friday" | "saturday">; from: string; to: string } };
+      readonly output: { free: Array<{ end: string; minutes: number; start: string }>; mailbox: string; timeZone: string };
     };
     readonly get: {
       readonly input: { event: string; mailbox: string };

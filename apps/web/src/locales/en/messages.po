@@ -142,9 +142,21 @@ msgstr "{all, plural, one {{count} of # person} other {{count} of # people}}"
 msgid "{alone} of {handled} items without a person"
 msgstr "{alone} of {handled} items without a person"
 
+#: src/settings/person-limits.tsx
+msgid "{amount} a month, {messagesAnHour, plural, one {# message an hour} other {# messages an hour}}"
+msgstr "{amount} a month, {messagesAnHour, plural, one {# message an hour} other {# messages an hour}}"
+
+#: src/settings/person-limits.tsx
+msgid "{amount} a month, no limit on messages"
+msgstr "{amount} a month, no limit on messages"
+
 #: src/dashboard/spend-widget.tsx
 msgid "{amount} in all"
 msgstr "{amount} in all"
+
+#: src/settings/person-limits.tsx
+msgid "{amount} of {limitShown}"
+msgstr "{amount} of {limitShown}"
 
 #: src/brain/brain-atlas.ts
 msgid "{answered} answered"
@@ -896,6 +908,10 @@ msgstr "{name}: {count}"
 #: src/routes/_shell.settings.spend.tsx
 msgid "{name}: {shown} of the limit"
 msgstr "{name}: {shown} of the limit"
+
+#: src/settings/person-limits.tsx
+msgid "{name}: {shown} of their limit"
+msgstr "{name}: {shown} of their limit"
 
 #: src/chat/builds.tsx
 msgid "{name}: version {version} waiting for review"
@@ -1789,6 +1805,10 @@ msgstr "A staff list is the quickest way in: names, email addresses, teams and j
 msgid "A step"
 msgstr "A step"
 
+#: src/settings/person-limits.tsx
+msgid "A team no longer in your organization"
+msgstr "A team no longer in your organization"
+
 #: src/onboarding/setup-steps.tsx
 msgid "A team without a lead gets its links on the first day, and I ask each person what they do."
 msgstr "A team without a lead gets its links on the first day, and I ask each person what they do."
@@ -1957,6 +1977,10 @@ msgstr "Add a widget"
 #: src/routes/_shell.onboarding.stephen.tsx
 msgid "Add a word"
 msgstr "Add a word"
+
+#: src/settings/person-limits.tsx
+msgid "Add an exception"
+msgstr "Add an exception"
 
 #: src/chat/project-dialog.tsx
 msgid "Add documents"
@@ -3413,6 +3437,7 @@ msgid "change"
 msgstr "change"
 
 #: src/routes/_shell.settings.outcomes.tsx
+#: src/settings/person-limits.tsx
 msgid "Change"
 msgstr "Change"
 
@@ -3452,6 +3477,14 @@ msgstr "Change details"
 #: src/routes/_shell.settings.billing.tsx
 msgid "Change plan"
 msgstr "Change plan"
+
+#: src/settings/person-limits.tsx
+msgid "Change the default limit"
+msgstr "Change the default limit"
+
+#: src/settings/person-limits.tsx
+msgid "Change the limit for {name}"
+msgstr "Change the limit for {name}"
 
 #: src/onboarding/organization-dialogs.tsx
 msgid "Change this team"
@@ -3672,6 +3705,14 @@ msgstr "Choose a collection"
 #: src/routes/_shell.onboarding.kickoff.tsx
 msgid "Choose a file"
 msgstr "Choose a file"
+
+#: src/settings/person-limits.tsx
+msgid "Choose a person or a team"
+msgstr "Choose a person or a team"
+
+#: src/settings/person-limits.tsx
+msgid "Choose a person or a team."
+msgstr "Choose a person or a team."
 
 #: src/onboarding/place-picker.tsx
 msgid "Choose documents"
@@ -4388,6 +4429,10 @@ msgctxt "row height"
 msgid "Default"
 msgstr "Default"
 
+#: src/settings/person-limits.tsx
+msgid "Default limit"
+msgstr "Default limit"
+
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Default: {fallback}"
 msgstr "Default: {fallback}"
@@ -4947,6 +4992,10 @@ msgstr "Enough is known: it is past {threshold}%. The company comes in the momen
 msgid "Enter a number."
 msgstr "Enter a number."
 
+#: src/settings/person-limits.tsx
+msgid "Enter a whole number from 1 to {most}, or leave it empty."
+msgstr "Enter a whole number from 1 to {most}, or leave it empty."
+
 #: src/engines/resource-bindings.tsx
 msgid "Enter a whole percent from 1 to 99."
 msgstr "Enter a whole percent from 1 to 99."
@@ -4954,6 +5003,10 @@ msgstr "Enter a whole percent from 1 to 99."
 #: src/engines/resource-bindings.tsx
 msgid "Enter an amount in US dollars from {least} to {most}, such as 2.50."
 msgstr "Enter an amount in US dollars from {least} to {most}, such as 2.50."
+
+#: src/settings/person-limits.tsx
+msgid "Enter an amount of at least 0, or leave it empty."
+msgstr "Enter an amount of at least 0, or leave it empty."
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Enter an amount, such as 12.50."
@@ -5105,6 +5158,10 @@ msgstr "Everyone who does it has talked, so a step one of them told counts."
 #: src/onboarding/work-record.tsx
 msgid "Everyone who does this work has talked."
 msgstr "Everyone who does this work has talked."
+
+#: src/settings/person-limits.tsx
+msgid "Everyone without an exception"
+msgstr "Everyone without an exception"
 
 #: src/onboarding/organization-words.ts
 msgid "Everyone's link is due: out once the interviews run."
@@ -5817,6 +5874,14 @@ msgstr "Grasp will show a path here once it observes an MCP, native connector or
 #: src/dashboard/dependency-requests.tsx
 msgid "Grasp won't run what {about} needs: {requirement}"
 msgstr "Grasp won't run what {about} needs: {requirement}"
+
+#: src/settings/person-limits.tsx
+msgid "Grasp's budget allows at most {most} a month for one person, so no limit can be above it. Ask Grasp to raise the budget first."
+msgstr "Grasp's budget allows at most {most} a month for one person, so no limit can be above it. Ask Grasp to raise the budget first."
+
+#: src/settings/person-limits.tsx
+msgid "Grasp's budgets can't be read just now, so no limit can be checked against them. Contact Grasp."
+msgstr "Grasp's budgets can't be read just now, so no limit can be checked against them. Contact Grasp."
 
 #: src/routes/_shell.onboarding.kickoff.tsx
 msgid "Grasp's first conversation with the sponsor, read for the ten things Stephen needs before his first interview."
@@ -6896,6 +6961,14 @@ msgstr "Leads talked: {count} of {of}"
 msgid "Leave"
 msgstr "Leave"
 
+#: src/settings/person-limits.tsx
+msgid "Leave a field empty for no limit."
+msgstr "Leave a field empty for no limit."
+
+#: src/settings/person-limits.tsx
+msgid "Leave a field empty for no limit. A monthly limit can be at most {ceiling}, Grasp's budget for one person."
+msgstr "Leave a field empty for no limit. A monthly limit can be at most {ceiling}, Grasp's budget for one person."
+
 #: src/onboarding/work-record.tsx
 msgid "Leave it to the rules"
 msgstr "Leave it to the rules"
@@ -6966,6 +7039,14 @@ msgstr "Licence"
 #: src/frame/person-menu.tsx
 msgid "Light"
 msgstr "Light"
+
+#: src/settings/person-limits.tsx
+msgid "Limit for {name}"
+msgstr "Limit for {name}"
+
+#: src/settings/person-limits.tsx
+msgid "Limits per person"
+msgstr "Limits per person"
 
 #: src/onboarding/interviews-progress.tsx
 #: src/settings/chat-accounts.tsx
@@ -7258,6 +7339,10 @@ msgstr "Mentioned"
 msgid "Messages"
 msgstr "Messages"
 
+#: src/settings/person-limits.tsx
+msgid "Messages they send Grasp in a chat app."
+msgstr "Messages they send Grasp in a chat app."
+
 #: src/interview/sound-check.tsx
 msgid "Microphone: {name}"
 msgstr "Microphone: {name}"
@@ -7401,9 +7486,17 @@ msgstr "Mortgage advice"
 msgid "Mosaic"
 msgstr "Mosaic"
 
+#: src/settings/person-limits.tsx
+msgid "Most a month, in US dollars"
+msgstr "Most a month, in US dollars"
+
 #: src/onboarding/work-rules.tsx
 msgid "Most differences are findings: it depends on the case, the office or the date. Only one nobody can explain needs someone to settle it."
 msgstr "Most differences are findings: it depends on the case, the office or the date. Only one nobody can explain needs someone to settle it."
+
+#: src/settings/person-limits.tsx
+msgid "Most messages an hour"
+msgstr "Most messages an hour"
 
 #: src/onboarding/setup-steps.tsx
 msgid "Most people can’t name every tool they use, so a small app on the work laptops tells me. We set it up with you or your IT, or you skip it for now."
@@ -7841,6 +7934,14 @@ msgstr "No interviews yet. They start once the company has told its team."
 msgid "No invoices yet."
 msgstr "No invoices yet."
 
+#: src/settings/person-limits.tsx
+msgid "No limit"
+msgstr "No limit"
+
+#: src/settings/person-limits.tsx
+msgid "No limit set"
+msgstr "No limit set"
+
 #: src/onboarding/interview-people.tsx
 msgid "No link out yet: it waits for its day, or for their team lead."
 msgstr "No link out yet: it waits for its day, or for their team lead."
@@ -7900,9 +8001,17 @@ msgstr "No model is set up for this deployment yet."
 msgid "No modules yet. A module holds calculations a task calls through a local binding."
 msgstr "No modules yet. A module holds calculations a task calls through a local binding."
 
+#: src/settings/person-limits.tsx
+msgid "No monthly limit, {messagesAnHour, plural, one {# message an hour} other {# messages an hour}}"
+msgstr "No monthly limit, {messagesAnHour, plural, one {# message an hour} other {# messages an hour}}"
+
 #: src/workflows/triggers.tsx
 msgid "No next run"
 msgstr "No next run"
+
+#: src/settings/person-limits.tsx
+msgid "No one is in your organization yet."
+msgstr "No one is in your organization yet."
 
 #: src/engines/resource-bindings.tsx
 msgid "No other domain serves every function it declares, public and exactly as declared."
@@ -9354,6 +9463,7 @@ msgid "Pending"
 msgstr "Pending"
 
 #: src/onboarding/interview-people.tsx
+#: src/settings/person-limits.tsx
 msgid "People"
 msgstr "People"
 
@@ -10089,6 +10199,7 @@ msgid "Reminded on {date}"
 msgstr "Reminded on {date}"
 
 #: src/routes/_shell.settings.members.tsx
+#: src/settings/person-limits.tsx
 msgid "Remove"
 msgstr "Remove"
 
@@ -10104,6 +10215,10 @@ msgstr "Remove {file}"
 #: src/routes/_shell.settings.members.tsx
 msgid "Remove {name}?"
 msgstr "Remove {name}?"
+
+#: src/settings/person-limits.tsx
+msgid "Remove the exception for {name}"
+msgstr "Remove the exception for {name}"
 
 #: src/routes/_shell.onboarding.stephen.tsx
 msgid "Remove: {item}"
@@ -10594,6 +10709,7 @@ msgstr "Same version, different contents: {changed}"
 #: src/chat/project-dialog.tsx
 #: src/knowledge/document.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
+#: src/settings/person-limits.tsx
 #: src/workflows/resource-params.tsx
 msgid "Save"
 msgstr "Save"
@@ -11149,6 +11265,10 @@ msgstr "Someone else signed in on this browser, so this app was stopped. Try aga
 msgid "Someone no longer here"
 msgstr "Someone no longer here"
 
+#: src/settings/person-limits.tsx
+msgid "Someone no longer in your organization"
+msgstr "Someone no longer in your organization"
+
 #: src/routes/_shell.onboarding.interviewers.tsx
 msgid "Someone's own work"
 msgstr "Someone's own work"
@@ -11693,6 +11813,10 @@ msgctxt "workflows filter"
 msgid "Team"
 msgstr "Team"
 
+#: src/settings/person-limits.tsx
+msgid "Team {name}"
+msgstr "Team {name}"
+
 #: src/onboarding/interview-words.ts
 msgid "Team does not take part"
 msgstr "Team does not take part"
@@ -11735,6 +11859,7 @@ msgstr "Team size unknown."
 #: src/brain/brain.ts
 #: src/knowledge/collection-markers.tsx
 #: src/routes/_shell.settings.profile.tsx
+#: src/settings/person-limits.tsx
 msgid "Teams"
 msgstr "Teams"
 
@@ -12118,6 +12243,10 @@ msgstr "The day the other teams get their links"
 msgid "the deadline"
 msgstr "the deadline"
 
+#: src/settings/person-limits.tsx
+msgid "The default"
+msgstr "The default"
+
 #: src/chat/composer.tsx
 msgid "The default, {each}"
 msgstr "The default, {each}"
@@ -12194,6 +12323,10 @@ msgstr "The export didn't work. Try again."
 #: src/routes/_shell.policies.documents.$policyId.tsx
 msgid "The file could not be read. Try a PDF or a text file."
 msgstr "The file could not be read. Try a PDF or a text file."
+
+#: src/settings/person-limits.tsx
+msgid "The first {listed} people, by name."
+msgstr "The first {listed} people, by name."
 
 #: src/routes/_shell.settings.models.tsx
 msgid "The first {shown} by domain; more domains have models bound."
@@ -12637,9 +12770,17 @@ msgstr "Their link stops working, and what they said goes with them."
 msgid "Their numbers show once the first person starts their interview."
 msgstr "Their numbers show once the first person starts their interview."
 
+#: src/settings/person-limits.tsx
+msgid "Their own limit"
+msgstr "Their own limit"
+
 #: src/onboarding/interview-people.tsx
 msgid "Their rating"
 msgstr "Their rating"
+
+#: src/settings/person-limits.tsx
+msgid "Their team's limit"
+msgstr "Their team's limit"
 
 #: src/onboarding/staff-words.ts
 msgctxt "kickoff field"
@@ -12714,6 +12855,10 @@ msgstr "These releases can never be made current: {releases}."
 #: src/routes/_shell.policies.documents.$policyId.tsx
 msgid "These requirements are about how people work, not which apps they use. They stay in your policy; no rule watches them."
 msgstr "These requirements are about how people work, not which apps they use. They stay in your policy; no rule watches them."
+
+#: src/settings/person-limits.tsx
+msgid "They are no longer in your organization."
+msgstr "They are no longer in your organization."
 
 #: src/routes/_shell.settings.members.tsx
 msgid "They are signed out everywhere, their personal connections are disconnected, and they cannot sign in again."
@@ -12945,6 +13090,10 @@ msgstr "This list is too large. I can take up to {peopleMost} people in up to {t
 #: src/routes/_shell.settings.models.tsx
 msgid "This month"
 msgstr "This month"
+
+#: src/settings/person-limits.tsx
+msgid "This month by person"
+msgstr "This month by person"
 
 #: src/routes/_shell.settings.spend.tsx
 msgid "This month so far"
@@ -13932,6 +14081,14 @@ msgctxt "kickoff field"
 msgid "What counts as success"
 msgstr "What counts as success"
 
+#: src/settings/person-limits.tsx
+msgid "What each person's model calls may cost a month, and how many messages they may send an hour. A person's own exception goes first, then their team's, then the default."
+msgstr "What each person's model calls may cost a month, and how many messages they may send an hour. A person's own exception goes first, then their team's, then the default."
+
+#: src/settings/person-limits.tsx
+msgid "What each person's model calls may cost a month, and how many messages they may send an hour. A person's own exception goes first, then their team's, then the default. Grasp's budget of {ceiling} a person is the ceiling."
+msgstr "What each person's model calls may cost a month, and how many messages they may send an hour. A person's own exception goes first, then their team's, then the default. Grasp's budget of {ceiling} a person is the ceiling."
+
 #: src/routes/_shell.settings.members.tsx
 msgid "What each role may do in Grasp. An admin gives each member theirs."
 msgstr "What each role may do in Grasp. An admin gives each member theirs."
@@ -14363,6 +14520,7 @@ msgstr "While Stephen talks to your team: how far the interviews are, team by te
 
 #: src/inbox/item-detail.tsx
 #: src/onboarding/work-record.tsx
+#: src/settings/person-limits.tsx
 msgid "Who"
 msgstr "Who"
 

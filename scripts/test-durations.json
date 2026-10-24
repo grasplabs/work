@@ -195,7 +195,6 @@
   "@grasp-os/core test/upload-routing.test.ts": 2.2,
   "@grasp-os/core test/uploads.test.ts": 11.5,
   "@grasp-os/core test/v1-leftovers.test.ts": 0,
-  "@grasp-os/core test/vector-index.test.ts": 0.1,
   "@grasp-os/core test/watched-mailbox-lineage.test.ts": 39.5,
   "@grasp-os/core test/workflow-action-files.test.ts": 10.9,
   "@grasp-os/core test/workflow-action-reads.test.ts": 11.3,

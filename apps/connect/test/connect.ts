@@ -146,7 +146,12 @@ export const capabilityFor = async (
 export type Signed = Partial<
   Pick<
     CapabilityScope,
-    "restricted" | "readOnly" | "origin" | "decision" | "mailboxes"
+    | "restricted"
+    | "readOnly"
+    | "origin"
+    | "decision"
+    | "heldUntil"
+    | "mailboxes"
   >
 >;
 

@@ -525,6 +525,7 @@ describe("a native connector", () => {
       ...calendar,
       ...files,
       "lists.items": "read-company",
+      "calendar.freeTime": "read-own",
       "calendar.create": "change-own",
       "calendar.update": "change-own",
       "excel.listRows": "read-company",
@@ -549,6 +550,10 @@ describe("a native connector", () => {
       "mail.createDraft": "change-own",
       ...calendar,
       ...files,
+      // A spreadsheet of a shared drive, as its files.
+      "sheets.read": "read-company",
+      // Only in the person's own calendar.
+      "calendar.create": "change-own",
     });
   });
 });
