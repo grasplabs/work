@@ -428,7 +428,7 @@ const keepRecords = async (
 };
 
 /**
- * Adds `input` to the Playbook as `person`, all or none: for admins. A
+ * Adds `input` to the brain's records as `person`, all or none: for admins. A
  * record held already, exactly so, is left as it is. `onboarding` reads
  * what the onboarding gives the brain, when a record names it.
  */
@@ -503,7 +503,7 @@ export const purgeOnboardingRecords = async (
     outboxed(db, {
       actor: { type: "system" },
       action: "brain.records.purged",
-      target: { type: "brain", id: "playbook" },
+      target: { type: "brain", id: "records" },
       provenance: [...held]
         .slice(0, auditProvenanceMaxItems)
         .map(([id, { type }]) => keyOf({ type, id })),
@@ -546,7 +546,7 @@ export const purgeOnboardingDrawings = async (
     outboxed(db, {
       actor: { type: "system" },
       action: "brain.records.purged",
-      target: { type: "brain", id: "playbook" },
+      target: { type: "brain", id: "records" },
       provenance: held.slice(0, auditProvenanceMaxItems).map(keyOf),
       detail: { purged: held.length },
     }),
