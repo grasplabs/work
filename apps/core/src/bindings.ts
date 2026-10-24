@@ -26,6 +26,7 @@ import type { KnowledgeBinding } from "./knowledge/tools-binding.ts";
 import { authorize, grantedPermissions } from "./permissions.ts";
 import { isRestricted } from "./restricted.ts";
 import type { WorkContext } from "./restricted.ts";
+import { mailboxesFor } from "./shared-mailboxes.ts";
 import { requireToolClassOn } from "./tool-classes.ts";
 import { stampedMail } from "./workflows/mail-stamps.ts";
 import type { StampingRun } from "./workflows/mail-stamps.ts";
@@ -123,6 +124,11 @@ export const signedCall = async (
       },
       context,
       decision,
+      // The chat's agent reaches its person's own mailbox and those its
+      // company pointed it at for them, no other (shared-mailboxes.ts).
+      ...(authority.subject.type === "agent"
+        ? { mailboxes: await mailboxesFor(env, authority.onBehalfOf) }
+        : {}),
     }
   );
   return { capability, scope };
