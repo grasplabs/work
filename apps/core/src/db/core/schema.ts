@@ -119,6 +119,9 @@ export const accounts = sqliteTable(
   },
   (table) => [
     index("accounts_user_id_idx").on(table.userId),
+    // Who writes in Teams, by the object id its messages carry
+    // (channels/who.ts).
+    index("accounts_oid_idx").on(table.oid),
     uniqueIndex("accounts_provider_account_idx").on(
       table.providerId,
       table.accountId
@@ -275,6 +278,30 @@ export const channelLinks = sqliteTable(
       table.platformUserId
     ),
     index("channel_links_expires_at_idx").on(table.expiresAt),
+  ]
+);
+
+/**
+ * The chat conversations people write to the agent in, each the person's
+ * own private chat with the client's bot on its platform (`channels/door.ts`),
+ * so a later message, or the agent's answer, finds it again. `threadId` is
+ * the Chat SDK's thread id, which names the conversation and where the
+ * platform takes its replies.
+ */
+export const channelConversations = sqliteTable(
+  "channel_conversations",
+  {
+    platform: text().notNull(),
+    threadId: text("thread_id").notNull(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at").notNull(),
+    lastMessageAt: timestamp("last_message_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.platform, table.threadId] }),
+    index("channel_conversations_user_id_idx").on(table.userId),
   ]
 );
 
@@ -2697,6 +2724,55 @@ export const toolClassSettings = sqliteTable("tool_class_settings", {
   changedBy: text("changed_by").notNull(),
   changedAt: timestamp("changed_at").notNull(),
 });
+
+/**
+ * Settings › Stephen, as a whole (stephen-reach.ts): one row, `stephen`,
+ * once an admin changed it: whether he answers in chat apps at all, and
+ * for whom (`who` and `teams`, as in `tool_class_settings`). No row: on,
+ * for everyone.
+ */
+export const stephenReach = sqliteTable("stephen_reach", {
+  id: text().primaryKey(),
+  on: integer({ mode: "boolean" }).notNull(),
+  who: text({ enum: ["nobody", "everyone", "teams"] }).notNull(),
+  teams: text().notNull().default("[]"),
+  changedBy: text("changed_by").notNull(),
+  changedAt: timestamp("changed_at").notNull(),
+});
+
+/**
+ * The places Stephen works in that an admin changed (stephen-reach.ts):
+ * one row per chat platform, by its adapter's name. `who` narrows who
+ * reaches him there (`asStephen`: as for him as a whole); `acts` says
+ * whether he does things there or only answers. No row: as Stephen, and
+ * he acts.
+ */
+export const stephenPlaces = sqliteTable("stephen_places", {
+  place: text().primaryKey(),
+  who: text({ enum: ["asStephen", "nobody", "everyone", "teams"] }).notNull(),
+  teams: text().notNull().default("[]"),
+  acts: integer({ mode: "boolean" }).notNull(),
+  changedBy: text("changed_by").notNull(),
+  changedAt: timestamp("changed_at").notNull(),
+});
+
+/**
+ * How an app narrows a class of tools the company turned on
+ * (stephen-reach.ts): one row per native app (its provider) and class an
+ * admin changed. `asClass`: as the class is. No row: as the class is.
+ */
+export const appToolClasses = sqliteTable(
+  "app_tool_classes",
+  {
+    app: text().notNull(),
+    toolClass: text("tool_class").notNull(),
+    who: text({ enum: ["asClass", "nobody", "everyone", "teams"] }).notNull(),
+    teams: text().notNull().default("[]"),
+    changedBy: text("changed_by").notNull(),
+    changedAt: timestamp("changed_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.app, table.toolClass] })]
+);
 
 /**
  * Apps people asked Grasp to add, as the catalog doesn't have them
