@@ -29,7 +29,6 @@ import {
   links,
   sections,
 } from "../db/knowledge/schema.ts";
-import { noteProvenance } from "./access.ts";
 import type { Reader } from "./access.ts";
 import { allowedFor } from "./authorize.ts";
 import {
@@ -236,8 +235,7 @@ export const read = async (
   const { document, collection, section: row } = found;
   // Recorded before a missing section is refused, as a missing version is:
   // how many sections a document has says something of it too.
-  const provenance = await noteProvenance(
-    env,
+  const provenance = await portsOf(env).onRead(
     reader,
     {
       action: "knowledge.read",
@@ -471,8 +469,7 @@ export const follow = async (
       description: row.description,
     }));
   }
-  const provenance = await noteProvenance(
-    env,
+  const provenance = await portsOf(env).onRead(
     reader,
     {
       action: "knowledge.read",
@@ -510,8 +507,7 @@ export const noteListedSkills = async (
     .select({ id: collections.id, sensitive: collections.sensitive })
     .from(collections)
     .where(inList(collections.id, ids));
-  return await noteProvenance(
-    env,
+  return await portsOf(env).onRead(
     reader,
     {
       action: "knowledge.read",
