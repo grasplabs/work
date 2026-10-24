@@ -20,6 +20,15 @@ interface __BaseEnv_Env {
    * Slack's door answers 404.
    */
   SLACK_SIGNING_SECRET?: string;
+  /**
+   * The client's WhatsApp Business number (src/channels/whatsapp.ts): the
+   * Meta app's secret every webhook is signed with, a Worker secret; the
+   * Cloud API's id of the number; and the token Meta's subscription check
+   * must name. Until all three are set, WhatsApp's door answers 404.
+   */
+  WHATSAPP_APP_SECRET?: string;
+  WHATSAPP_PHONE_NUMBER_ID?: string;
+  WHATSAPP_VERIFY_TOKEN?: string;
   GOOGLE_CLIENT_SECRET?: string;
   /** The model gateway (src/models.ts): JSON. */
   MODEL_GATEWAY?: unknown;

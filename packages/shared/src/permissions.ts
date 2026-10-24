@@ -327,6 +327,12 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   "TEAMS_BOT_TENANT_ID",
   "TOKEN_ENCRYPTION_KEY",
   "TOKEN_ENCRYPTION_KEY_PREVIOUS",
+  // The client's own WhatsApp number (core's src/channels/whatsapp.ts,
+  // connect's src/channels.ts).
+  "WHATSAPP_ACCESS_TOKEN",
+  "WHATSAPP_APP_SECRET",
+  "WHATSAPP_PHONE_NUMBER_ID",
+  "WHATSAPP_VERIFY_TOKEN",
   "WORKFLOW_BETWEEN_STEPS_MS",
   "WORKFLOW_BUILD_READ_MS",
   "WORKFLOW_OFF_WAIT_MS",

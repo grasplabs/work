@@ -270,7 +270,7 @@ describe("a platform the deployment hasn't set up", () => {
     const { teams } = await member(idp);
 
     await expect(
-      post(messageFrom(teams), { path: "/api/channels/whatsapp" })
+      post(messageFrom(teams), { path: "/api/channels/discord" })
     ).resolves.toBe(404);
     await expect(
       post(messageFrom(teams), { coreEnv: { ...env, TEAMS_BOT_ID: "" } })
