@@ -552,6 +552,8 @@ describe("a native connector", () => {
       ...files,
       // A spreadsheet of a shared drive, as its files.
       "sheets.read": "read-company",
+      // Only in the person's own calendar.
+      "calendar.create": "change-own",
     });
   });
 });
