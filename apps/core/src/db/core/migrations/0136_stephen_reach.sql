@@ -25,11 +25,3 @@ CREATE TABLE `stephen_reach` (
 	`changed_by` text NOT NULL,
 	`changed_at` integer NOT NULL
 );
---> statement-breakpoint
-CREATE TABLE `tool_class_settings` (
-	`tool_class` text PRIMARY KEY NOT NULL,
-	`who` text NOT NULL,
-	`teams` text DEFAULT '[]' NOT NULL,
-	`changed_by` text NOT NULL,
-	`changed_at` integer NOT NULL
-);
