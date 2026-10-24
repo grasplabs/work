@@ -4,6 +4,7 @@ import { generatedPaths, generateModules } from "@grasp-os/sdk/host";
 import { agentErrors } from "@grasp-os/shared/agent";
 import { appErrors } from "@grasp-os/shared/apps";
 import {
+  actorOf,
   auditProvenanceMaxItems,
   createAuditEvent,
   delegateActorOf,
@@ -15,6 +16,7 @@ import type {
 } from "@grasp-os/shared/audit";
 import {
   chatChannelSchema,
+  chatPlatformSchema,
   chatToolEventsKept,
   projectDocumentMaxBytes,
   projectDocumentsMax,
@@ -307,6 +309,56 @@ export interface RunToFix {
  * A question for a chat's agent, the model to answer it with, and how hard
  * that model thinks first (`ChatQuestion`).
  */
+/**
+ * How often a chat platform is told an answer's text so far: Teams shows
+ * an update about once a second, and each is a call back to the door.
+ */
+const textEveryMs = 300;
+
+/**
+ * `tell`, called with the latest text at most every {@link textEveryMs},
+ * and once more at the end of a window that held more: text in between is
+ * dropped, as the next call carries all of it.
+ */
+const throttled = (tell: (text: string) => unknown) => {
+  let last = Number.NEGATIVE_INFINITY;
+  let gone = false;
+  let pending: string | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  // A caller that went away stops being told; the turn goes on.
+  const send = async (text: string): Promise<void> => {
+    last = Date.now();
+    try {
+      await tell(text);
+    } catch {
+      gone = true;
+    }
+  };
+  return (text: string): void => {
+    if (gone) {
+      return;
+    }
+    const wait = last + textEveryMs - Date.now();
+    if (wait <= 0) {
+      void send(text);
+      return;
+    }
+    pending = text;
+    timer ??= setTimeout(() => {
+      timer = undefined;
+      if (pending !== undefined && !gone) {
+        void send(pending);
+        pending = undefined;
+      }
+    }, wait);
+  };
+};
+
+/** A chat platform's chat's title, as people know the platform. */
+const platformTitles: Readonly<Record<string, string>> = {
+  teams: "Microsoft Teams",
+};
+
 export const questionSchema = z.strictObject({
   text: z.string().trim().min(1).max(100_000),
   /** `<provider>/<model>`, one the deployment allows. */
@@ -1070,6 +1122,52 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
+   * Asks `text` in `personId`'s own chat on chat platform `via`, and waits
+   * for the answer, telling `onText`, if given, the answer's text so far as
+   * the model writes it, at most every {@link textEveryMs}: the chat is the person's one chat there, found by its
+   * channel, or made on their first message, audited as theirs. Asked
+   * with the deployment's default model, the first it allows, as Grasp's
+   * own app starts with. Like `ask`, it takes its caller's word for who
+   * asks: only the door of a chat platform calls it, once the platform's
+   * verified sender id named the person (channels/door.ts).
+   */
+  async askThrough(
+    personId: string,
+    agentId: string,
+    via: string,
+    text: string,
+    onText?: (text: string) => unknown
+  ): Promise<{ chatId: string; answer: Answer }> {
+    const platform = chatPlatformSchema.parse(via);
+    const [found] = this.#db
+      .select()
+      .from(chats)
+      .where(and(eq(chats.personId, personId), eq(chats.via, platform)))
+      .orderBy(desc(chats.createdAt))
+      .limit(1)
+      .all();
+    const chat =
+      found ??
+      this.createChat(
+        platformTitles[platform] ?? platform,
+        personId,
+        agentId,
+        actorOf({ userId: personId, staff: false }, platform),
+        undefined,
+        undefined,
+        platform
+      );
+    const [model] = gatewaySettings(this.env).models;
+    if (model === undefined) {
+      throw modelErrors.create("model.unconfigured");
+    }
+    return {
+      chatId: chat.id,
+      answer: await this.#turn(chat, { text, model }, undefined, onText),
+    };
+  }
+
+  /**
    * Asks the chat's agent a question and waits for its answer: the agent
    * loop runs here, its code runs in isolates of its own, and every model
    * request goes through the model gateway, and its rules, as the chat's
@@ -1088,7 +1186,8 @@ export class Workspace extends DurableObject<Env> {
   async #turn(
     chat: Chat,
     question: Question,
-    started?: () => void
+    started?: () => void,
+    onText?: (text: string) => unknown
   ): Promise<Answer> {
     const parsed = questionSchema.safeParse(question);
     if (!parsed.success) {
@@ -1161,6 +1260,7 @@ export class Workspace extends DurableObject<Env> {
       this.#changed(chat.id);
       // The turn's answer is the last response it keeps.
       let answer: number | undefined;
+      const textSoFar = onText === undefined ? undefined : throttled(onText);
       const result = await runTurn({
         history: this.#transcript(chat.id),
         question: parsed.data.text,
@@ -1209,6 +1309,7 @@ export class Workspace extends DurableObject<Env> {
         write: (partial) => {
           this.#partials.set(chat.id, partial);
           this.#changed(chat.id);
+          textSoFar?.(partialOf(partial).text);
         },
       });
       return {
