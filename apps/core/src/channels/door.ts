@@ -25,6 +25,8 @@
  *   removed people and people Grasp doesn't know each get one line, in
  *   the language their app is set to, and nothing they wrote is read.
  *   The lines go out through connect like every send.
+ * - Someone Settings › Stephen doesn't let reach him, here or at all
+ *   (`stephenFor`), is told so in one line, and nothing they wrote is read.
  * - One of the client's own people Grasp hasn't seen yet (Teams' roster
  *   says they are of the client's tenant, and no guest) is sent a link to
  *   the deployment's own sign-in, once a day: it carries no token and
@@ -57,6 +59,7 @@ import { channelConversations } from "../db/core/schema.ts";
 import { inJurisdiction } from "../durable-objects.ts";
 import { errorResponse } from "../errors.ts";
 import { boundedText, jsonOf } from "../request-body.ts";
+import { stephenFor } from "../stephen-reach.ts";
 import { answerInChat } from "./answer.ts";
 import { signInCard } from "./cards.tsx";
 import type { ConnectedTeamsAdapter } from "./teams-adapter.ts";
@@ -135,7 +138,8 @@ type DoorLine =
   | "otherCompany"
   | "guest"
   | "removed"
-  | "signIn";
+  | "signIn"
+  | "notTurnedOn";
 
 /**
  * A Teams activity, as far as the door reads it. Its text is read only to
@@ -170,6 +174,11 @@ export interface ChannelMessage {
   platform: Platform;
   /** The member who wrote it. */
   userId: string;
+  /**
+   * Whether Settings › Stephen lets him do things for them here, or only
+   * answer (`stephenFor`): what holds writes for a press must ask it.
+   */
+  acts: boolean;
   thread: Thread;
   message: Message;
   /**
@@ -314,7 +323,12 @@ const gate = async (
   state: StateAdapter,
   adapter: ConnectedTeamsAdapter,
   activity: Activity
-): Promise<{ line?: DoorLine; userId?: string; kept?: string }> => {
+): Promise<{
+  line?: DoorLine;
+  userId?: string;
+  acts?: boolean;
+  kept?: string;
+}> => {
   // A message without an id can't be told from its resends: dropped.
   if (activity.id === undefined) {
     return {};
@@ -344,7 +358,17 @@ const gate = async (
   const writer = await writerOf(env, "teams", oid);
   switch (writer.kind) {
     case "member": {
-      return { userId: writer.userId, kept: await keptQuestion(state, oid) };
+      // Settings › Stephen: whether he answers them here at all, asked
+      // before anything they wrote is read.
+      const reach = await stephenFor(env, writer.userId, "teams");
+      if (!reach.reaches) {
+        return { line: "notTurnedOn" };
+      }
+      return {
+        userId: writer.userId,
+        acts: reach.acts,
+        kept: await keptQuestion(state, oid),
+      };
     }
     case "removed": {
       return { line: "removed" };
@@ -414,7 +438,12 @@ export const channelResponse = async (
   const activity = parsed.data;
   const state = durableObjectState(inJurisdiction(env, env.CHAT_STATE));
   const adapter = teamsAdapter(env, teamsKeys);
-  const { line, userId, kept } = await gate(env, state, adapter, activity);
+  const { line, userId, acts, kept } = await gate(
+    env,
+    state,
+    adapter,
+    activity
+  );
   if (line !== undefined) {
     ctx.waitUntil(sendLine(env, adapter, activity, line));
   }
@@ -438,7 +467,15 @@ export const channelResponse = async (
   };
   chat.onDirectMessage(async (thread, message) => {
     await keepConversation(env, platform, thread.id, userId);
-    await takeOn({ platform, userId, thread, message, kept, afterward });
+    await takeOn({
+      platform,
+      userId,
+      thread,
+      message,
+      acts: acts ?? false,
+      kept,
+      afterward,
+    });
   });
   // Answered at once: the platform gives up on a webhook long before an
   // answer is ready, and sends it again. The message is handled after,
