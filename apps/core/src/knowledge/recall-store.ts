@@ -1,11 +1,8 @@
-import { brainErrors } from "@grasp-os/shared/brain-api";
 import type { CollectionId } from "@grasp-os/shared/ids";
 import type { Provenance } from "@grasp-os/shared/knowledge";
-import type { Authority } from "@grasp-os/shared/permissions";
 import { drizzle } from "drizzle-orm/d1";
 
 import { collections } from "../db/knowledge/schema.ts";
-import { grantedPermissions } from "../permissions.ts";
 import type { Reader } from "./access.ts";
 import { allowedFor } from "./authorize.ts";
 import { readableCollection } from "./collections.ts";
@@ -61,31 +58,10 @@ export interface BrainStore {
   accessKey: (reader: Reader) => Promise<string>;
 }
 
-/**
- * Whether `authority` holds an active `brain` grant, read now: what an
- * App, run or agent needs to recall. A chat asks it before recalling for
- * a question (agent.ts), and recall asks it again as it reads.
- */
-export const hasBrainGrant = async (
-  env: Env,
-  authority: Authority
-): Promise<boolean> => {
-  const granted = await grantedPermissions(env, authority);
-  return granted.some(
-    ({ object, actions }) =>
-      object.type === "platform" && actions.includes("brain")
-  );
-};
-
 /** The Brain's store over Knowledge's D1 database. */
 export const d1BrainStore = (env: Env): BrainStore => ({
   requireBrainGrant: async (reader) => {
-    if (reader.type === "person") {
-      return;
-    }
-    if (!(await hasBrainGrant(env, reader.authority))) {
-      throw brainErrors.create("brain.denied");
-    }
+    await portsOf(env).recall.require(reader);
   },
   requireReadable: async (reader, collectionIds) => {
     const db = drizzle(env.KNOWLEDGE);
@@ -109,8 +85,9 @@ export const d1BrainStore = (env: Env): BrainStore => ({
   accessKey: async (reader) => {
     // What may be read now: each collection the reader may read, with
     // what decides who reads it (its access, whether it is sensitive),
-    // and for an App or agent its grants, the brain grant among them. A
-    // change to any of those changes the key.
+    // and who the reader is as the host says (`recall.key`: core's names
+    // an App's or agent's grants, the brain grant among them). A change to
+    // any of those changes the key.
     const db = drizzle(env.KNOWLEDGE);
     const allowed = await allowedFor(portsOf(env), reader);
     const readable = await db
@@ -122,18 +99,8 @@ export const d1BrainStore = (env: Env): BrainStore => ({
       .from(collections)
       .where(allowed.collections)
       .orderBy(collections.id);
-    const permissions =
-      reader.type === "person"
-        ? []
-        : await grantedPermissions(env, reader.authority);
-    const grants = permissions.map(({ id }) => id).toSorted();
     return JSON.stringify([
-      reader.type,
-      reader.type === "person"
-        ? reader.person.userId
-        : reader.authority.onBehalfOf,
-      reader.type === "person" ? null : (reader.permissionId ?? null),
-      grants,
+      await portsOf(env).recall.key(reader),
       readable.map(({ id, access, sensitive }) => [id, access, sensitive]),
     ]);
   },

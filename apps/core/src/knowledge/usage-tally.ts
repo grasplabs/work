@@ -1,23 +1,13 @@
 import type { AuditDetailValue, AuditEvent } from "@grasp-os/shared/audit";
 
 import { askerOf } from "../signal-tally.ts";
+import { nearestCollectionsMax } from "./search-detail.ts";
 
 // What the Knowledge usage signals (signals.ts) need of the audit log: the
 // documents read, and the searches that found nothing, per collection, key
 // and asker. The AuditLog object tallies one stretch of the log at a time
 // with these (`AuditLog.tallyStretch`), so only small partial totals cross
 // to the Worker, which adds them up.
-
-/** Most collections an empty search of every collection is put down to. */
-export const nearestCollectionsMax = 3;
-
-/**
- * The collections a search of every collection that found nothing came
- * closest in, for its audit event's `detail.nearest` (search.ts): their
- * IDs, comma-separated, never its words or any document.
- */
-export const nearestDetail = (collectionIds: readonly string[]): string =>
-  collectionIds.slice(0, nearestCollectionsMax).join(",");
 
 /** The collections an empty search is about: the one it named, or nearest. */
 const collectionsOf = (
