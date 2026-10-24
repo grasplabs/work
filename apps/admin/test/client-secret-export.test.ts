@@ -91,7 +91,8 @@ const deployed = async (
       { ...worker, requiredSecrets: [] },
       secrets,
       { id: clientId, generation, rotationLiveAt },
-      now
+      now,
+      new Map()
     );
     byApp[app] = Object.fromEntries(
       running.map(({ name, value }) => [name, value])

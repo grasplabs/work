@@ -121,6 +121,7 @@ import {
   workersSubdomain,
 } from "../deploy/router.ts";
 import type { RouterHosts, SmokeOptions } from "../deploy/router.ts";
+import { sealedWorkerSecrets } from "../deploy/sealed-secrets.ts";
 import { clientAuthSecret, workerSecrets } from "../deploy/secrets.ts";
 import type { DeploySecrets } from "../deploy/secrets.ts";
 import {
@@ -559,7 +560,7 @@ const coreVarsOf = async (
   );
 };
 
-/** The secrets Worker `app` runs with: the client's derived ones and the shared ones it needs. */
+/** The secrets Worker `app` runs with: the client's derived and sealed ones, and the shared ones it needs. */
 const secretsOf = async (context: ProvisionContext, loaded: Loaded, app: App) =>
   await workerSecrets(
     app,
@@ -570,7 +571,13 @@ const secretsOf = async (context: ProvisionContext, loaded: Loaded, app: App) =>
       generation: loaded.client.generation,
       rotationLiveAt: loaded.client.rotationLiveAt,
     },
-    context.now?.() ?? new Date()
+    context.now?.() ?? new Date(),
+    await sealedWorkerSecrets(
+      context.db,
+      context.secrets.clientKey,
+      loaded.held.clientId,
+      app
+    )
   );
 
 /**
