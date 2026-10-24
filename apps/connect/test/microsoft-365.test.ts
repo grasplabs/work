@@ -268,7 +268,7 @@ const siteInputs: Record<string, Input> = {
 };
 
 describe("the Microsoft 365 connector's scoping", () => {
-  it("binds every route of every tool to its mailbox, drive, site or workbook's named table, and reads /me only to know whose a mailbox is", () => {
+  it("binds every route of every tool to its mailbox, drive, site or workbook's named table, reads /me only to know whose a mailbox is, and writes under /me only for drafts in the person's own OneDrive", () => {
     const unbound = Object.entries(manifest.actions).flatMap(
       ([name, { resource, routes }]) =>
         routes
@@ -285,14 +285,18 @@ describe("the Microsoft 365 connector's scoping", () => {
                   path.startsWith(
                     "/v1.0/drives/{drive}/items/{workbook}/workbook/tables/{table}/"
                   )) ||
-                (method === "GET" && path === "/v1.0/me")
+                (method === "GET" && path === "/v1.0/me") ||
+                (name === "files.createDraft" &&
+                  resource === null &&
+                  path.startsWith("/v1.0/me/drive/root:/{folder}/{name}"))
               )
           )
           .map(({ path }) => `${name} ${path}`)
     );
     expect(unbound).toStrictEqual([]);
-    // Only the tools that work in the person's own mailbox ask whose the
-    // token is, and nothing goes to /me but that one read.
+    // Only the tools that work in the person's own mailbox or OneDrive go
+    // to /me: the mail tools and calendar.freeTime to ask whose the token
+    // is, files.createDraft to write its draft.
     const askWho = Object.entries(manifest.actions)
       .filter(([, { routes }]) =>
         routes.some(({ path }) => path.startsWith("/v1.0/me"))
@@ -300,6 +304,7 @@ describe("the Microsoft 365 connector's scoping", () => {
       .map(([name, { reach }]) => `${name} ${reach}`);
     expect(askWho.toSorted()).toStrictEqual([
       "calendar.freeTime own",
+      "files.createDraft own",
       "mail.categorise own",
       "mail.flag own",
       "mail.move own",
@@ -313,6 +318,7 @@ describe("the Microsoft 365 connector's scoping", () => {
         ...Object.keys(driveInputs),
         ...Object.keys(siteInputs),
         ...Object.keys(workbookInputs),
+        "files.createDraft",
       ].toSorted()
     );
     expect(manifest.hosts).toStrictEqual(["graph.microsoft.com"]);

@@ -231,6 +231,11 @@ const coreDb: D1State = {
     organizations: exported(auth),
     members: exported(auth),
     member_removals: exported(`${core}organization.ts`),
+    channel_accounts: exported(`${core}channels/accounts.ts`),
+    channel_links: transient(
+      `${core}channels/accounts.ts`,
+      "Links a chat sent, good for 15 minutes: the chat sends a new one."
+    ),
     invitations: exported(auth),
     teams: exported(auth),
     team_members: exported(auth),
@@ -309,6 +314,7 @@ const coreDb: D1State = {
     workflow_param_values: exported(`${core}workflows/params.ts`),
     workflow_owners: exported(`${core}workflows/owners.ts`),
     hidden_connectors: exported(`${core}connections.ts`),
+    tool_class_settings: exported(`${core}tool-classes.ts`),
     app_requests: exported(`${core}app-requests.ts`),
     improvement_signal_computations: cache(`${core}signals.ts`),
     improvement_signals: cache(`${core}signals.ts`),
