@@ -19,6 +19,7 @@ import { z } from "zod";
 
 import { ensureCollection } from "../knowledge/collections.ts";
 import { localExtractor } from "../knowledge/extract.ts";
+import type { OnErase } from "../knowledge/purge.ts";
 import { uploadFile } from "../knowledge/uploads.ts";
 import { gatewaySettings, modelForRole, models } from "../models.ts";
 import type { ModelsEnv } from "../models.ts";
@@ -33,6 +34,13 @@ import { onboardingStore } from "./store.ts";
 // it leaves open about the work, for that team's interviews. Stephen asks
 // the admin one question only when he can't use it without: an old version
 // or a draft, or a team he can't tell.
+//
+// The reading is a copy of the document, so a Knowledge purge reaches it
+// (`documentReadingErasure`): one naming the document, or a term the
+// reading holds, forgets it whole, with every drawing made since it was
+// shared and what of those the brain holds (the store's
+// `forgetDocuments`). Never rewritten instead: the model's words for the
+// document may say a term otherwise than the purge spells it.
 
 /** Old Office formats, refused with the way out. */
 const oldOffice = new Set(["doc", "xls", "ppt", "rtf"]);
@@ -269,4 +277,65 @@ export const shareDocument = async (
     { id, name: input.name, reading },
     actorOf(person)
   );
+};
+
+/** Every text a document's reading keeps: its name, the reading and the admin's answer. */
+const textsOf = ({ name, reading, answer }: OnboardingDocument): string[] => [
+  name,
+  reading.about,
+  ...reading.tools,
+  ...reading.teams,
+  ...reading.unclear,
+  ...(reading.ask === null
+    ? []
+    : [reading.ask.question, ...reading.ask.options]),
+  ...(answer === null ? [] : [answer]),
+];
+
+/**
+ * The shared documents' readings as a Knowledge purge reaches them
+ * (knowledge/purge.ts `OnErase`): a content purge forgets each holding a
+ * term, and each of a document it names, by its path in the onboarding's
+ * collection, which is the name it was shared by.
+ */
+export const documentReadingErasure = (
+  env: Env
+): Pick<OnErase, "count" | "rewrite" | "forgetDocuments"> => {
+  const store = onboardingStore(env);
+  return {
+    count: async (holds) => {
+      const shared = await store.documents();
+      return shared.filter((document) => textsOf(document).some(holds)).length;
+    },
+    rewrite: async (person, rewrite) => {
+      const shared = await store.documents();
+      const holding = shared.filter((document) =>
+        textsOf(document).some((text) => rewrite(text) !== text)
+      );
+      if (holding.length > 0) {
+        await store.forgetDocuments(
+          holding.map(({ id }) => id),
+          actorOf(person)
+        );
+      }
+    },
+    forgetDocuments: async (person, named) => {
+      const paths = new Set(
+        named.flatMap(({ collectionId, path }) =>
+          collectionId === onboardingDocumentsCollection ? [path] : []
+        )
+      );
+      if (paths.size === 0) {
+        return;
+      }
+      const shared = await store.documents();
+      const of = shared.filter(({ name }) => paths.has(name));
+      if (of.length > 0) {
+        await store.forgetDocuments(
+          of.map(({ id }) => id),
+          actorOf(person)
+        );
+      }
+    },
+  };
 };
