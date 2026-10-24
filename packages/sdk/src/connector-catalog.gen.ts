@@ -7,6 +7,10 @@
  */
 export interface ConnectorCatalog {
   readonly "google-workspace.calendar@1": {
+    readonly create: {
+      readonly input: { body?: string; calendar: string; end: string; location?: string; showAs?: "busy" | "free"; start: string; subject: string; timeZone: string };
+      readonly output: { event: { calendar: string; end: string; id: string; isAllDay: boolean; isCancelled: boolean; location: string | null; organizer: { address: string | null; name: string | null } | null; recurringEventId: string | null; start: string; subject: string | null; webLink: string | null } };
+    };
     readonly get: {
       readonly input: { calendar: string; event: string };
       readonly output: { event: { attendees: Array<{ address: string | null; name: string | null; optional: boolean; response: string | null }>; body: string | null; calendar: string; end: string; id: string; isAllDay: boolean; isCancelled: boolean; joinUrl: string | null; location: string | null; organizer: { address: string | null; name: string | null } | null; recurringEventId: string | null; start: string; subject: string | null; webLink: string | null } };
@@ -17,6 +21,10 @@ export interface ConnectorCatalog {
     };
   };
   readonly "google-workspace.files@1": {
+    readonly createDraft: {
+      readonly input: { format: "doc" | "text"; name: string; text: string };
+      readonly output: { id: string; mimeType: string; name: string; webUrl: string | null };
+    };
     readonly list: {
       readonly input: { drive: string; folder?: string; page?: string; top?: number };
       readonly output: { drive: string; items: Array<{ drive: string; id: string; kind: "file" | "folder" | "other"; lastModifiedAt: string | null; mimeType: string; name: string; parentId: string | null; size: number | null; webUrl: string | null }>; nextPage: string | null };
