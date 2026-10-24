@@ -15,10 +15,18 @@ export const composioClasses: Record<string, Record<string, ToolClass>> = {
     HUBSPOT_GET_CONTACT: "read-company",
     HUBSPOT_SEARCH: "read-company",
     HUBSPOT_CREATE_CONTACT: "change-company",
-    HUBSPOT_DELETE_CONTACT: "change-company",
-    HUBSPOT_DELETE_CONTACTS: "change-company",
+    HUBSPOT_UPDATE_CONTACT: "change-company",
+    HUBSPOT_UPDATE_CONTACTS: "change-company",
     HUBSPOT_EXPORT_EVERYTHING: "read-company",
     HUBSPOT_REFUSED: "never",
+    // Classed as a review could get them wrong: Never by their names
+    // (src/never.ts), whatever their class. The shareholders' list only
+    // has a word of the rule inside another, and runs.
+    HUBSPOT_DELETE_COMPANY: "change-company",
+    HUBSPOT_SHARE_LIST: "read-company",
+    HUBSPOT_UPDATE_SETTINGS: "change-company",
+    HUBSPOT_CREATE_PAYMENT: "change-company",
+    HUBSPOT_LIST_SHAREHOLDERS: "read-company",
     // Composio's server serves these wrong (composio-contracts.test.ts):
     // classed, so it's their shape that keeps them out.
     HUBSPOT_HUGE: "read-company",
@@ -34,7 +42,7 @@ export const composioClasses: Record<string, Record<string, ToolClass>> = {
     HUBSPOT_PROTO: "read-company",
   },
   acme_erp: { ACME_ERP_LIST_ORDERS: "read-company" },
-  // The tests' own mail server (connect.ts). `mail.forward` fails on
+  // The tests' own mail server (connect.ts). `mail.relay` fails on
   // demand (idempotency.test.ts), so it is classed a read, which lets a
   // test take a failing tool down the read path.
   mail: {
@@ -42,7 +50,7 @@ export const composioClasses: Record<string, Record<string, ToolClass>> = {
     "mail.bounce": "change-company",
     "mail.draft": "change-company",
     "mail.export": "read-company",
-    "mail.forward": "read-company",
+    "mail.relay": "read-company",
     "mail.list": "read-company",
     "mail.mixed": "read-company",
     "mail.open": "read-company",
