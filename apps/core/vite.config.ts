@@ -117,6 +117,7 @@ export const coreProject = (
   {
     sandboxSocket,
     bindings = {},
+    remoteBindings = false,
   }: {
     /**
      * For the on-prem project: the sandbox supervisor's socket, read when
@@ -126,6 +127,12 @@ export const coreProject = (
     sandboxSocket?: () => string;
     /** Bindings a project adds to the tests' env, such as a run's size. */
     bindings?: Record<string, unknown>;
+    /**
+     * Whether bindings Wrangler marks remote reach Cloudflare: only the
+     * opt-in real-model run (vite.brain-model.config.ts), for the AI
+     * binding, with the developer's Wrangler login.
+     */
+    remoteBindings?: boolean;
   } = {}
 ) =>
   defineProject({
@@ -195,7 +202,7 @@ export const coreProject = (
       cloudflareTest(() => ({
         wrangler: { configPath: "./wrangler.jsonc" },
         // Tests run fully local, including in CI without Cloudflare credentials.
-        remoteBindings: false,
+        remoteBindings,
         miniflare: {
           bindings: {
             ROUTER_SECRET: "test-router-secret",
@@ -342,8 +349,16 @@ export default coreProject({
     // The Brain baseline's larger scale sizes, on request only:
     // vite.brain-scale.config.ts.
     "test/brain-scale-sizes.test.ts",
+    // The Brain baseline against a real model, which costs money, on
+    // request only: vite.brain-model.config.ts.
+    "test/brain-real-model.test.ts",
     // The Brain baseline, in a group of its own: vite.brain.config.ts.
     "test/brain-baseline.test.ts",
+    // Stephen's eval, in a group of its own: vite.stephen.config.ts.
+    "test/stephen-eval.test.ts",
+    // Stephen's eval against a real model, which costs money, on request
+    // only: vite.stephen-model.config.ts.
+    "test/stephen-real-model.test.ts",
     "build-blueprints.test.ts",
     "host-json.bundle.test.ts",
   ],

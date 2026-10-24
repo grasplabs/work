@@ -222,6 +222,7 @@
   "@grasp-os/core test/workflow-time-between-steps.test.ts": 46.7,
   "@grasp-os/core test/workspace.test.ts": 0.1,
   "@grasp-os/core:brain test/brain-baseline.test.ts": 79.4,
+  "@grasp-os/core:stephen test/stephen-eval.test.ts": 80,
   "@grasp-os/core:on-prem test/on-prem/app-calls.test.ts": 12.9,
   "@grasp-os/core:on-prem test/on-prem/app-tests.test.ts": 137.5,
   "@grasp-os/core:on-prem test/on-prem/builds.test.ts": 68.8,
