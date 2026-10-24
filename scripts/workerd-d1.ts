@@ -33,23 +33,28 @@ const migrationNumber = (file: string): number =>
   Number(leadingDigits.exec(file)?.[0] ?? 0);
 
 /**
- * A database's migrations as Wrangler applies them: its `.sql` files by
- * their leading number, then by name, each split at Drizzle's statement
- * breakpoints.
+ * A database's migration files in the order Wrangler applies them: its
+ * `.sql` files by their leading number, then by name.
  */
-export const d1Migrations = (migrationsDir: string): D1Migration[] =>
+export const d1MigrationFiles = (migrationsDir: string): string[] =>
   readdirSync(migrationsDir)
     .filter((file) => file.endsWith(".sql"))
     .toSorted(
       (a, b) => migrationNumber(a) - migrationNumber(b) || a.localeCompare(b)
-    )
-    .map((file) => ({
-      name: file,
-      queries: readFileSync(path.join(migrationsDir, file), "utf-8")
-        .split(statementBreakpoint)
-        .map((query) => query.trim())
-        .filter((query) => query.replace(commentLine, "").trim().length > 0),
-    }));
+    );
+
+/**
+ * A database's migrations as Wrangler applies them (`d1MigrationFiles`),
+ * each split at Drizzle's statement breakpoints.
+ */
+export const d1Migrations = (migrationsDir: string): D1Migration[] =>
+  d1MigrationFiles(migrationsDir).map((file) => ({
+    name: file,
+    queries: readFileSync(path.join(migrationsDir, file), "utf-8")
+      .split(statementBreakpoint)
+      .map((query) => query.trim())
+      .filter((query) => query.replace(commentLine, "").trim().length > 0),
+  }));
 
 /** Every D1 database a Worker binds, from its wrangler.jsonc. */
 export const d1DatabasesOf = (wranglerConfig: string): D1DatabaseConfig[] =>

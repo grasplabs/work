@@ -64,5 +64,16 @@
       "namespace_id": "1003",
       "simple": { "limit": 300, "period": 60 },
     },
+    // A chat platform's webhook (/api/channels/<platform>), per hostname
+    // and client address: 600 a minute. Every message a client's people
+    // send their bot comes from the few addresses of the platform's own
+    // servers, so the budget is a whole company's, not a person's; core
+    // limits each person too. A flood from anywhere else is cut to ten a
+    // second before core checks a signature.
+    {
+      "name": "CHANNELS_RATE_LIMIT",
+      "namespace_id": "1006",
+      "simple": { "limit": 600, "period": 60 },
+    },
   ],
 }
