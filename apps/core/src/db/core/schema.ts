@@ -119,6 +119,9 @@ export const accounts = sqliteTable(
   },
   (table) => [
     index("accounts_user_id_idx").on(table.userId),
+    // Who writes in Teams, by the object id its messages carry
+    // (channels/who.ts).
+    index("accounts_oid_idx").on(table.oid),
     uniqueIndex("accounts_provider_account_idx").on(
       table.providerId,
       table.accountId
@@ -277,6 +280,49 @@ export const channelLinks = sqliteTable(
     index("channel_links_expires_at_idx").on(table.expiresAt),
   ]
 );
+
+/**
+ * The chat conversations people write to the agent in, each the person's
+ * own private chat with the client's bot on its platform (`channels/door.ts`),
+ * so a later message, or the agent's answer, finds it again. `threadId` is
+ * the Chat SDK's thread id, which names the conversation and where the
+ * platform takes its replies.
+ */
+export const channelConversations = sqliteTable(
+  "channel_conversations",
+  {
+    platform: text().notNull(),
+    threadId: text("thread_id").notNull(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at").notNull(),
+    lastMessageAt: timestamp("last_message_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.platform, table.threadId] }),
+    index("channel_conversations_user_id_idx").on(table.userId),
+  ]
+);
+
+/**
+ * Who is in a chat that others share, a group chat or channel on a chat
+ * platform, as its agent reads for it (`knowledge/access.ts`): kept by the
+ * Workspace object that holds the chat, before each turn, from the
+ * platform's roster then. The agent reads only what every member may
+ * read, and nothing at all with `outsiders` in it: anyone Grasp can't name
+ * as one of the organization's active members (a guest, another company,
+ * someone the roster couldn't say).
+ */
+export const chatAudiences = sqliteTable("chat_audiences", {
+  chatId: text("chat_id").primaryKey(),
+  /** The Workspace object that holds the chat. */
+  workspaceId: text("workspace_id").notNull(),
+  /** The members Grasp knows, by user id. */
+  members: text({ mode: "json" }).$type<string[]>().notNull(),
+  outsiders: integer({ mode: "boolean" }).notNull(),
+  updatedAt: timestamp("updated_at").notNull(),
+});
 
 /**
  * Part of the organization plugin's model. Invitations aren't offered: people

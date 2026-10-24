@@ -50,6 +50,7 @@
     "@grasp-os/web": "workspace:*",
     "@types/react": "catalog:",
     "@types/semver": "catalog:",
+    "axios": "catalog:",
     "drizzle-kit": "catalog:",
     "react": "catalog:",
     "vite-plus": "catalog:",

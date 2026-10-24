@@ -146,6 +146,44 @@ export interface AnswerCard {
   chatUrl: string;
 }
 
+/** `sources` as numbered links, within half a card's room for outside text. */
+const listedSources = (sources: readonly AnswerSource[], room: Room) =>
+  sources.slice(0, maxSources).map((source, index) => {
+    const title = fit(
+      source.title.replaceAll(linkBreakers, ""),
+      maxTitleChars,
+      room
+    );
+    const address = linkable(source.url);
+    const url =
+      address !== null && sizeOf(address) <= room.left ? address : null;
+    if (url !== null) {
+      room.left -= sizeOf(url);
+    }
+    return { label: `${index + 1}. ${title.text}`, url, key: `${index}` };
+  });
+
+/** The numbered sources under an answer, if it has any. */
+const SourcesSection = ({
+  locale,
+  listed,
+}: {
+  locale: ChannelLocale;
+  listed: ReturnType<typeof listedSources>;
+}) =>
+  listed.length === 0 ? null : (
+    <Section>
+      <CardText style="bold">{say("sources", locale)}</CardText>
+      {listed.map(({ label, url, key }) =>
+        url === null ? (
+          <CardText key={key}>{label}</CardText>
+        ) : (
+          <CardLink key={key} label={label} url={url} />
+        )
+      )}
+    </Section>
+  );
+
 /**
  * An answer with its numbered sources, labelled as made by AI where the
  * platform has a label for it (Teams). Text past what the platform takes
@@ -160,20 +198,7 @@ export const answerCard = ({
   // The sources take at most half the room, so a long answer keeps the
   // rest; a source whose address no longer fits is named without a link.
   const sourcesRoom: Room = { left: outsideBytes / 2 };
-  const listed = sources.slice(0, maxSources).map((source, index) => {
-    const title = fit(
-      source.title.replaceAll(linkBreakers, ""),
-      maxTitleChars,
-      sourcesRoom
-    );
-    const address = linkable(source.url);
-    const url =
-      address !== null && sizeOf(address) <= sourcesRoom.left ? address : null;
-    if (url !== null) {
-      sourcesRoom.left -= sizeOf(url);
-    }
-    return { label: `${index + 1}. ${title.text}`, url, key: `${index}` };
-  });
+  const listed = listedSources(sources, sourcesRoom);
   const room: Room = {
     left: outsideBytes - (outsideBytes / 2 - sourcesRoom.left),
   };
@@ -187,19 +212,34 @@ export const answerCard = ({
       {answer.whole ? null : (
         <CardText style="muted">{say("answerTooLong", locale)}</CardText>
       )}
-      {listed.length === 0 ? null : (
-        <Section>
-          <CardText style="bold">{say("sources", locale)}</CardText>
-          {listed.map(({ label, url, key }) =>
-            url === null ? (
-              <CardText key={key}>{label}</CardText>
-            ) : (
-              <CardLink key={key} label={label} url={url} />
-            )
-          )}
-        </Section>
-      )}
+      {SourcesSection({ locale, listed })}
       {whole ? null : (
+        <Actions>
+          <LinkButton url={ownLink(chatUrl)}>
+            {say("openInGrasp", locale)}
+          </LinkButton>
+        </Actions>
+      )}
+    </Card>
+  );
+  return { card: cardOf(card), aiGenerated: true };
+};
+
+/**
+ * The numbered sources of an answer the person saw streamed as text, sent
+ * right after it, labelled as made by AI like the answer; with the link to
+ * the chat in Grasp when there are more sources than a card lists.
+ */
+export const sourcesCard = ({
+  locale,
+  sources,
+  chatUrl,
+}: Omit<AnswerCard, "text">): PostableCard => {
+  const listed = listedSources(sources, { left: outsideBytes });
+  const card = (
+    <Card>
+      {SourcesSection({ locale, listed })}
+      {sources.length <= maxSources ? null : (
         <Actions>
           <LinkButton url={ownLink(chatUrl)}>
             {say("openInGrasp", locale)}
