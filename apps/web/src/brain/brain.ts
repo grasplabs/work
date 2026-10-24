@@ -69,7 +69,7 @@ export type Group =
   | "gaps"
   | "sources";
 
-/** The Playbook step that wrote a note. 0 is the company itself. */
+/** The onboarding step that wrote a note. 0 is the company itself. */
 export type NoteStep = 0 | 1 | 2;
 
 /** Something a note refers to: another note, a workflow on the Workflows page, or plain words. */

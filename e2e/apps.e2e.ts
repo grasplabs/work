@@ -308,6 +308,8 @@ test("the sidebar shows everyone the sections, and Settings each person the sect
         "Members and roles",
         "Models",
         "AI spend",
+        // Who can reach Stephen and what he may do for whom.
+        "Stephen",
         "Pulse",
         // The company admin's view of the onboarding interviews.
         "Onboarding",

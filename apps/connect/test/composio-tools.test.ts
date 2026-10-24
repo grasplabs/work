@@ -26,6 +26,14 @@ import type { Call } from "./connect.ts";
 // read-only, or naming a resource property of its own; an admin's rule
 // naming a property the tool doesn't take.
 
+/** Tools the fake classes, that Grasp never runs by their names. */
+const neverTools = [
+  "HUBSPOT_DELETE_COMPANY",
+  "HUBSPOT_SHARE_LIST",
+  "HUBSPOT_UPDATE_SETTINGS",
+  "HUBSPOT_CREATE_PAYMENT",
+];
+
 /** An owner the HubSpot read fails for. */
 const brokenOwner = "owner-broken";
 
@@ -82,6 +90,19 @@ const composio = fakeComposioApi(
         readOnly: true,
         inputs: ["owner_id"],
         run: () => ({ output: { ran: "refused" } }),
+      },
+      // Tools Grasp never runs (src/never.ts), classed all the same.
+      ...neverTools.map((name) => ({
+        name,
+        readOnly: true,
+        inputs: ["owner_id"],
+        run: () => ({ output: { ran: name } }),
+      })),
+      {
+        name: "HUBSPOT_LIST_SHAREHOLDERS",
+        readOnly: true,
+        inputs: ["owner_id"],
+        run: () => ({ output: { ran: "shareholders" } }),
       },
     ],
   }
@@ -167,6 +188,53 @@ describe("a Composio tool Grasp didn't class", () => {
       requests: 0,
       ran: [],
     });
+  });
+});
+
+describe("a Composio tool Grasp never runs", () => {
+  it("is refused, neither offered nor run, even when the admin allowed it by name and a review classed it", async () => {
+    const connectionId = await addConnection({
+      provider: "hubspot",
+      server: `https://backend.composio.dev/v3/mcp/${crypto.randomUUID()}?connected_account_id=ca_1`,
+      tools: JSON.stringify([
+        ...neverTools,
+        { name: "HUBSPOT_LIST_SHAREHOLDERS", read: true },
+      ]),
+    });
+    const requestsBefore = composio.state.mcp.requests;
+    const ends = await Promise.all(
+      neverTools.map(
+        async (action) =>
+          await outcome(
+            callAs(agentFor("user-anna"), {
+              ...read(connectionId, action, { owner_id: owner }),
+              idempotencyKey: crypto.randomUUID(),
+            })
+          )
+      )
+    );
+    const listed = await exports.default.listConnections(someone());
+    const connection = listed.find(({ id }) => id === connectionId);
+    expect({
+      ends,
+      offered: connection?.offeredTools,
+      requests: composio.state.mcp.requests - requestsBefore,
+      ran: composio.state.mcp.ran,
+    }).toStrictEqual({
+      ends: neverTools.map(() => "connect.never"),
+      offered: ["HUBSPOT_LIST_SHAREHOLDERS"],
+      requests: 0,
+      ran: [],
+    });
+    // A word of the rule only inside another isn't one of its words.
+    await expect(
+      outcome(
+        callAs(
+          agentFor("user-anna"),
+          read(connectionId, "HUBSPOT_LIST_SHAREHOLDERS", { owner_id: owner })
+        )
+      )
+    ).resolves.toBe("ok");
   });
 });
 

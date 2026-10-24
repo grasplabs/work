@@ -12,7 +12,7 @@ import { z } from "zod";
 
 import { recordEvents } from "./audit.ts";
 
-// Sending as a client's own bot on a chat platform, Teams first. Core's
+// Sending as a client's own bot on a chat platform, Teams and Slack. Core's
 // chat adapters (the Chat SDK's) run in core and send through one fetch,
 // which hands each request here as it is (`channelFetch`); connect sends
 // it on as the bot, or refuses it. Core never holds the bot's secret or
@@ -42,6 +42,13 @@ import { recordEvents } from "./audit.ts";
 //   a platform needs it and adds it here.
 // - A bot that isn't set up: until the console sets the bot's ID, tenant
 //   and secret, every request is refused as `unconfigured`.
+//
+// Slack: only Slack's Web API (`https://slack.com/api/<method>`), and of
+// it only the methods an adapter needs to answer in a chat: posting,
+// changing and removing its own messages, and reading who it is and
+// whom it writes to (`slackMethods`). Each must carry the placeholder as
+// its bearer token, which connect swaps for the app's bot token
+// (`SLACK_BOT_TOKEN`); Slack's token never goes back to core.
 //
 // The token is cached in this isolate until shortly before it expires,
 // keyed by the bot's app, tenant and a hash of its secret, so rotating the
@@ -124,6 +131,25 @@ const botConnectorMethods: ReadonlySet<string> = new Set([
   "POST",
   "PUT",
   "DELETE",
+]);
+
+/** Slack's Web API, where every one of its methods is a path. */
+const slackHost = "slack.com";
+
+/** A Slack Web API method's path. */
+const slackMethodPath = /^\/api\/(?<method>[a-z]+\.[a-zA-Z.]+)$/u;
+
+/**
+ * The Slack methods an adapter may call, and whether each changes
+ * something at Slack, recorded as Teams' writes are.
+ */
+const slackMethods: ReadonlyMap<string, { write: boolean }> = new Map([
+  ["chat.postMessage", { write: true }],
+  ["chat.update", { write: true }],
+  ["chat.delete", { write: true }],
+  ["auth.test", { write: false }],
+  ["users.info", { write: false }],
+  ["conversations.info", { write: false }],
 ]);
 
 /** Methods that change something at the platform, recorded. */
@@ -220,7 +246,9 @@ const statedOf = (
   method: knownMethods.has(method) ? method : "other",
   host:
     url !== undefined &&
-    (url.hostname === loginHost || botConnectorHosts.has(url.hostname))
+    (url.hostname === loginHost ||
+      url.hostname === slackHost ||
+      botConnectorHosts.has(url.hostname))
       ? url.hostname
       : "other",
 });
@@ -722,6 +750,188 @@ const teamsFetch = async (
 };
 
 /**
+ * Sends one request on to Slack with the bot's token, tried again while
+ * Slack rate limits it and asks for a short wait.
+ */
+const sendToSlack = async (
+  token: string,
+  url: URL,
+  headers: Headers,
+  body: Uint8Array
+): Promise<
+  { response: Response; attempts: number } | { response: undefined }
+> => {
+  headers.set("authorization", `Bearer ${token}`);
+  let attempts = 0;
+  for (;;) {
+    attempts += 1;
+    let response: Response;
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- one try after another
+      response = await fetch(url, {
+        method: "POST",
+        headers,
+        body,
+        redirect: "manual",
+        signal: AbortSignal.timeout(requestTimeoutMs),
+      });
+    } catch {
+      return { response: undefined };
+    }
+    if (response.status !== 429 || attempts >= maxAttempts) {
+      return { response, attempts };
+    }
+    const waitMs = retryWaitMs(response.headers.get("retry-after"), attempts);
+    if (waitMs > maxRetryWaitMs) {
+      return { response, attempts };
+    }
+    // oxlint-disable-next-line no-await-in-loop -- once, then again
+    await response.body?.cancel();
+    // oxlint-disable-next-line no-await-in-loop -- the wait it asked for
+    await scheduler.wait(waitMs);
+  }
+};
+
+/**
+ * `body` without the token Slack's client also puts in it (`token`, the
+ * placeholder): Slack would read a token in the body before the bearer
+ * connect sets. A body carrying any other token is refused (undefined).
+ */
+const withoutBodyToken = (
+  contentType: string | null,
+  body: Uint8Array
+): Uint8Array | undefined => {
+  const text = new TextDecoder().decode(body);
+  if (contentType?.includes("application/x-www-form-urlencoded") === true) {
+    const form = new URLSearchParams(text);
+    const token = form.get("token");
+    if (token !== null && token !== channelCredentialPlaceholder) {
+      return undefined;
+    }
+    form.delete("token");
+    return new TextEncoder().encode(form.toString());
+  }
+  if (contentType?.includes("application/json") === true) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      return body;
+    }
+    if (typeof parsed !== "object" || parsed === null || !("token" in parsed)) {
+      return body;
+    }
+    const { token, ...rest } = parsed;
+    return token === channelCredentialPlaceholder
+      ? new TextEncoder().encode(JSON.stringify(rest))
+      : undefined;
+  }
+  return body;
+};
+
+/**
+ * Why a Slack request is refused, or the bot's token, whether its method
+ * changes something, and its body: only Slack's Web API over HTTPS, one of
+ * the methods an adapter may call (`slackMethods`), posted, with the
+ * placeholder as its token, within the size limit, and only while the
+ * client's app is set up.
+ */
+const checkedSlackRequest = async (
+  env: Env,
+  request: Request,
+  url: URL
+): Promise<
+  | { refused: RefusedReason }
+  | { token: string; write: boolean; body: Uint8Array }
+> => {
+  if (
+    url.protocol !== "https:" ||
+    url.username !== "" ||
+    url.password !== "" ||
+    url.port !== "" ||
+    url.hostname !== slackHost
+  ) {
+    return { refused: "host" };
+  }
+  const token = env.SLACK_BOT_TOKEN;
+  if (token === undefined || token === "") {
+    return { refused: "unconfigured" };
+  }
+  const method = slackMethodPath.exec(url.pathname)?.groups?.method;
+  const allowed = method === undefined ? undefined : slackMethods.get(method);
+  if (allowed === undefined || url.search !== "") {
+    return { refused: "path" };
+  }
+  if (request.method !== "POST") {
+    return { refused: "method" };
+  }
+  if (
+    request.headers.get("authorization") !==
+    `Bearer ${channelCredentialPlaceholder}`
+  ) {
+    return { refused: "credential" };
+  }
+  const body = await readCapped(request.body, maxChannelRequestBytes);
+  if (body === undefined) {
+    return { refused: "too_large" };
+  }
+  const sent = withoutBodyToken(request.headers.get("content-type"), body);
+  return sent === undefined
+    ? { refused: "credential" }
+    : { token, write: allowed.write, body: sent };
+};
+
+/**
+ * A Slack request: one of the Web API methods an adapter may call, sent on
+ * as the bot, or refused (`checkedSlackRequest`).
+ */
+const slackFetch = async (
+  env: Env,
+  request: Request,
+  url: URL
+): Promise<Response> => {
+  const platform = "slack";
+  const stated = statedOf(request.method, url);
+  const checked = await checkedSlackRequest(env, request, url);
+  if ("refused" in checked) {
+    return await refuse(env, platform, checked.refused, stated);
+  }
+  const { token, write, body } = checked;
+  const headers = new Headers();
+  for (const name of forwardedHeaders) {
+    const value = request.headers.get(name);
+    if (value !== null) {
+      headers.set(name, value);
+    }
+  }
+  const sent = await sendToSlack(token, url, headers, body);
+  if (sent.response === undefined) {
+    log.warn("channel.failed", { platform, ...stated });
+    if (write) {
+      await record(env, { platform, outcome: "failed", ...stated });
+    }
+    return failed();
+  }
+  const { response, attempts } = sent;
+  const { status } = response;
+  log.info("channel.request", { platform, ...stated, status, attempts });
+  if (write) {
+    await record(env, {
+      platform,
+      outcome: response.ok ? "ok" : "failed",
+      ...stated,
+      status,
+      attempts: attempts > 1 ? attempts : undefined,
+    });
+  }
+  if (status >= 300 && status < 400 && status !== 304) {
+    await response.body?.cancel();
+    return failed();
+  }
+  return await passedBack(response);
+};
+
+/**
  * Sends a chat adapter's request on to its platform as the client's own
  * bot (`ChannelApi.channelFetch`), or refuses it.
  */
@@ -743,5 +953,7 @@ export const channelFetch = async (
   if (!parsed.success) {
     return await refuse(env, named, "platform", statedOf(request.method, url));
   }
-  return await teamsFetch(env, request, url);
+  return parsed.data === "slack"
+    ? await slackFetch(env, request, url)
+    : await teamsFetch(env, request, url);
 };
