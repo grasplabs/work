@@ -299,6 +299,13 @@ const admissionSchema = z
     /** When it is charged in full unless settled before, in ms since the epoch. */
     reconcileAt: z.int().positive(),
     /**
+     * How long after it is admitted it holds its shares of the requests in
+     * flight at most, below {@link maxLeaseMs}: none for a live
+     * transcription, whose socket stays open for minutes (models.ts,
+     * `listen`). {@link maxLeaseMs} without one.
+     */
+    leaseMs: z.int().min(0).max(maxLeaseMs).optional(),
+    /**
      * The generation of the quota policy its run lineage's request limit
      * comes from; none for a request with no lineage.
      */
@@ -654,7 +661,10 @@ export class ModelLedger extends DurableObject<Env> {
           policyGeneration: admission.policyGeneration ?? null,
           subject: admission.fair.subject,
           resource: admission.fair.resource,
-          leaseEndsAt: Math.min(admission.deadline, now + maxLeaseMs),
+          leaseEndsAt: Math.min(
+            admission.deadline,
+            now + (admission.leaseMs ?? maxLeaseMs)
+          ),
         })
         .run();
       for (const {
