@@ -54,6 +54,7 @@ import {
   pdfAttachmentId,
   pdfBase64,
   personalDrive,
+  procedureTexts,
   replyDraft,
   reportText,
   spoofedId,
@@ -199,6 +200,7 @@ const mailboxInputs: Record<string, Input> = {
 const driveInputs: Record<string, Input> = {
   "files.list": {},
   "files.search": { query: "invoice" },
+  "files.versions": { item: itemIds.procedure },
   "files.read": { item: itemIds.report },
 };
 
@@ -1685,6 +1687,10 @@ describe("the Microsoft 365 connector's calendar writes", () => {
   });
 });
 
+/** The size of the procedure's text at `version`, in bytes. */
+const versionSize = (version: string): number =>
+  new TextEncoder().encode(procedureTexts[version]).byteLength;
+
 describe("the Microsoft 365 connector's file tools", () => {
   it("list a drive's top folder or a folder in it, page by page", async () => {
     const connection = await connected();
@@ -1771,6 +1777,7 @@ describe("the Microsoft 365 connector's file tools", () => {
         drive: financeDrive,
         id: itemIds.report,
         name: "Month-end report.txt",
+        version: null,
         mimeType: "text/plain",
         size: new TextEncoder().encode(reportText).byteLength,
         encoding: "text",
@@ -1824,6 +1831,168 @@ describe("the Microsoft 365 connector's file tools", () => {
     expect(
       graphPaths().filter((path) => path.endsWith("/content"))
     ).toStrictEqual([`${drivePath}/items/${itemIds.controls}/content`]);
+  });
+
+  it("list a file's versions newest first, each with when and by whom it was saved", async () => {
+    const connection = await connected();
+    const sanne = { name: "Sanne Visser", email: "sanne.visser@example.com" };
+    // Graph's pre-authenticated download link of each isn't passed on.
+    await expect(
+      resultOf(
+        call(connection, "files.versions", {
+          drive: financeDrive,
+          item: itemIds.procedure,
+        })
+      )
+    ).resolves.toStrictEqual({
+      output: {
+        drive: financeDrive,
+        id: itemIds.procedure,
+        name: "Advice procedure.txt",
+        versions: [
+          {
+            id: "3.0",
+            current: true,
+            savedAt: "2026-10-12T09:41:07Z",
+            savedBy: sanne,
+            size: versionSize("3.0"),
+          },
+          {
+            id: "2.0",
+            current: false,
+            savedAt: "2026-06-03T14:20:55Z",
+            savedBy: {
+              name: "Daan Bakker",
+              email: "daan.bakker@example.com",
+            },
+            size: versionSize("2.0"),
+          },
+          {
+            id: "1.0",
+            current: false,
+            savedAt: "2025-11-18T08:05:30Z",
+            savedBy: sanne,
+            size: versionSize("1.0"),
+          },
+        ],
+        nextPage: null,
+      },
+      provenance: [itemIds.procedure],
+    });
+    expect(graphPaths()).toStrictEqual([
+      `${drivePath}/items/${itemIds.procedure}`,
+      `${drivePath}/items/${itemIds.procedure}/versions`,
+    ]);
+  });
+
+  it("page through a file's versions, the newest alone current", async () => {
+    const connection = await connected();
+    const pageSchema = z.object({
+      versions: z.array(z.object({ id: z.string(), current: z.boolean() })),
+      nextPage: z.string().nullable(),
+    });
+    const seen: { id: string; current: boolean }[] = [];
+    let page: string | undefined;
+    do {
+      const read = pageSchema.parse(
+        // oxlint-disable-next-line no-await-in-loop -- each page follows the last
+        await outputOf(
+          call(connection, "files.versions", {
+            drive: financeDrive,
+            item: itemIds.procedure,
+            top: 1,
+            ...(page === undefined ? {} : { page }),
+          })
+        )
+      );
+      seen.push(...read.versions);
+      page = read.nextPage ?? undefined;
+    } while (page !== undefined);
+    expect(seen).toStrictEqual([
+      { id: "3.0", current: true },
+      { id: "2.0", current: false },
+      { id: "1.0", current: false },
+    ]);
+  });
+
+  it("refuse an older version too big to read before asking for its content", async () => {
+    const connection = await connected();
+    graph.oversizeVersion("1.0");
+    await expect(
+      toolError(
+        call(connection, "files.read", {
+          drive: financeDrive,
+          item: itemIds.procedure,
+          version: "1.0",
+        })
+      )
+    ).resolves.toMatchObject({ error: { code: "too_large" } });
+    expect(graphPaths()).not.toContain(
+      `${drivePath}/items/${itemIds.procedure}/versions/1.0/content`
+    );
+  });
+
+  it("read an older version of a file, to compare it with the current one", async () => {
+    const connection = await connected();
+    const procedure = { drive: financeDrive, item: itemIds.procedure };
+    const [current, older] = await Promise.all([
+      outputOf(call(connection, "files.read", procedure)),
+      outputOf(
+        call(connection, "files.read", { ...procedure, version: "1.0" })
+      ),
+    ]);
+    expect([current, older]).toMatchObject([
+      { version: null, content: procedureTexts["3.0"] },
+      {
+        id: itemIds.procedure,
+        name: "Advice procedure.txt",
+        version: "1.0",
+        size: versionSize("1.0"),
+        content: procedureTexts["1.0"],
+      },
+    ]);
+    const versionPath = `${drivePath}/items/${itemIds.procedure}/versions/1.0`;
+    expect(graphPaths()).toContain(`${versionPath}/content`);
+    const download = graph.sent.find(({ path }) =>
+      path.includes("/_vti_history/")
+    );
+    expect(download?.host).toBe(graph.sharePointHost);
+    expect(download?.headers).not.toHaveProperty("authorization");
+    // A version the file doesn't have is Graph's to refuse.
+    await expect(
+      toolError(
+        call(connection, "files.read", { ...procedure, version: "9.0" })
+      )
+    ).resolves.toMatchObject({ error: { code: "not_found" } });
+  });
+
+  it("give no versions of a file the person may not open, of a folder or of another drive's file", async () => {
+    const connection = await connected();
+    const refusals = await Promise.all(
+      (
+        [
+          ["files.versions", { item: itemIds.locked }],
+          ["files.read", { item: itemIds.locked, version: "1.0" }],
+          ["files.versions", { item: itemIds.folder }],
+          ["files.versions", { item: itemIds.foreign }],
+        ] satisfies [string, Input][]
+      ).map(
+        async ([tool, input]) =>
+          await toolError(
+            call(connection, tool, { drive: financeDrive, ...input })
+          )
+      )
+    );
+    expect(refusals).toMatchObject([
+      { error: { code: "access_denied" } },
+      { error: { code: "access_denied" } },
+      { error: { code: "not_a_file" } },
+      { error: { code: "not_found" } },
+    ]);
+    // Each was refused on the file itself, before its versions were asked for.
+    expect(
+      graphPaths().filter((path) => path.includes("/versions"))
+    ).toStrictEqual([]);
   });
 
   it("follow a download's redirect only to SharePoint over HTTPS, once", async () => {

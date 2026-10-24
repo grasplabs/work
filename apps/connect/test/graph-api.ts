@@ -48,6 +48,8 @@ import {
   moved,
   notFound,
   patched,
+  procedureTexts,
+  procedureVersion,
   replyDraft,
   notIndexed,
   reportText,
@@ -59,6 +61,9 @@ import {
   supplierTable,
   throttled,
   todoLists,
+  versionAt,
+  versionDownloadUrl,
+  versionPage,
   workbookIds,
 } from "./fixtures/graph.ts";
 import type { SheetCell } from "./fixtures/graph.ts";
@@ -82,6 +87,7 @@ const parts = [
   "table",
   "row",
   "task",
+  "version",
 ] as const;
 
 type Part = (typeof parts)[number];
@@ -220,6 +226,9 @@ const keepTag = (mailbox: string, id: string, made: unknown): void => {
 
 /** Runs once while Graph answers the next lookup by effect key. */
 let duringLookup: (() => Promise<void>) | undefined;
+
+/** A version of the procedure Graph says is too big to read, if any. */
+let oversizedVersion: string | undefined;
 
 type GraphEvent = Record<string, unknown> & {
   id: string;
@@ -701,7 +710,44 @@ const graphRoutes: ProviderRoute<Part>[] = [
     json(searchResults(drive))
   ),
   route("GET", `${drives}/items/(?<id>[^/]+)`, ({ drive, id }) =>
-    json(item(drive, id))
+    id === itemIds.locked ? json(accessDenied, 403) : json(item(drive, id))
+  ),
+  route(
+    "GET",
+    `${drives}/items/(?<id>[^/]+)/versions`,
+    ({ drive, id, query }) => {
+      if (id === itemIds.locked) {
+        return json(accessDenied, 403);
+      }
+      return id === itemIds.procedure
+        ? json(versionPage(drive, id, query))
+        : json(notFound, 404);
+    }
+  ),
+  route(
+    "GET",
+    `${drives}/items/(?<id>[^/]+)/versions/(?<version>[^/]+)`,
+    ({ id, version }) => {
+      const found =
+        id === itemIds.procedure ? procedureVersion(version) : undefined;
+      if (found === undefined) {
+        return json(notFound, 404);
+      }
+      return json(
+        version === oversizedVersion
+          ? { ...found, size: 5 * 1024 * 1024 }
+          : found
+      );
+    }
+  ),
+  route(
+    "GET",
+    `${drives}/items/(?<id>[^/]+)/versions/(?<version>[^/]+)/content`,
+    ({ version }) =>
+      new Response(null, {
+        status: 302,
+        headers: { location: versionDownloadUrl(version) },
+      })
   ),
   route(
     "GET",
@@ -927,6 +973,12 @@ const todoRoutes = (
 
 /** SharePoint's answer to a download: the file, or a second redirect. */
 const sharePointAnswer = (url: URL): Response => {
+  const version = versionAt(url.pathname);
+  if (version !== undefined) {
+    return new Response(new TextEncoder().encode(procedureTexts[version]), {
+      headers: { "content-type": "application/octet-stream" },
+    });
+  }
   const id = url.searchParams.get("UniqueId");
   if (id === itemIds.twice) {
     return Response.redirect(downloadUrl(itemIds.report), 302);
@@ -934,6 +986,7 @@ const sharePointAnswer = (url: URL): Response => {
   const content = {
     [itemIds.pdf]: invoicePdf,
     [itemIds.controls]: new TextEncoder().encode(controlText),
+    [itemIds.procedure]: new TextEncoder().encode(procedureTexts["3.0"]),
   }[id ?? ""];
   return new Response(content ?? new TextEncoder().encode(reportText), {
     headers: { "content-type": "application/octet-stream" },
@@ -952,6 +1005,7 @@ export const fakeGraph = (providers?: ReturnType<typeof fakeProviders>) => {
     todoTasks.clear();
     sharedSince.clear();
     duringLookup = undefined;
+    oversizedVersion = undefined;
     events.clear();
     taggedEvents.clear();
     inviteDuringRead = false;
@@ -1040,6 +1094,10 @@ export const fakeGraph = (providers?: ReturnType<typeof fakeProviders>) => {
     /** Graph's next event read leaves the guest list out, or sends it as null. */
     leaveOutAttendees: (how: "missing" | "null") => {
       attendeesLeftOut = how;
+    },
+    /** Graph says this version of the procedure is 5 MiB, past what a read takes. */
+    oversizeVersion: (version: string) => {
+      oversizedVersion = version;
     },
     /** Runs `meanwhile` while Graph answers the next lookup by effect key. */
     whileLookingUp: (meanwhile: () => Promise<void>) => {
