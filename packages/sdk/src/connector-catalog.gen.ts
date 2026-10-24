@@ -65,6 +65,10 @@ export interface ConnectorCatalog {
       readonly input: { body?: string; end: string; location?: string; mailbox: string; showAs?: "free" | "tentative" | "busy" | "oof" | "workingElsewhere"; start: string; subject: string; timeZone: string };
       readonly output: { event: { bodyPreview: string | null; end: { dateTime: string; timeZone: string }; id: string; isAllDay: boolean; isCancelled: boolean; location: string | null; mailbox: string; organizer: { address: string | null; name: string | null } | null; showAs: string | null; start: { dateTime: string; timeZone: string }; subject: string | null; webLink: string | null } };
     };
+    readonly freeTime: {
+      readonly input: { end: string; mailbox: string; minutes: number; start: string; timeZone: string; workingHours?: { days: Array<"sunday" | "monday" | "tuesday" | "wednesday" | "thursday" | "friday" | "saturday">; from: string; to: string } };
+      readonly output: { free: Array<{ end: string; minutes: number; start: string }>; mailbox: string; timeZone: string };
+    };
     readonly get: {
       readonly input: { event: string; mailbox: string };
       readonly output: { event: { attendees: Array<{ address: string | null; name: string | null; response: string | null; type: string | null }>; body: { content: string; contentType: string } | null; bodyPreview: string | null; end: { dateTime: string; timeZone: string }; id: string; isAllDay: boolean; isCancelled: boolean; joinUrl: string | null; location: string | null; mailbox: string; organizer: { address: string | null; name: string | null } | null; showAs: string | null; start: { dateTime: string; timeZone: string }; subject: string | null; webLink: string | null } };
