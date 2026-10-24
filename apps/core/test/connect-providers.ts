@@ -171,6 +171,13 @@ export const botConnectorMembersUrl =
   "https://bot-connector-control.test/members";
 
 /**
+ * Where tests have Teams refuse streamed messages in a conversation: POST
+ * `{ refuse }`, the conversation's id.
+ */
+export const botConnectorStreamsUrl =
+  "https://bot-connector-control.test/streams";
+
+/**
  * Where tests read what reached the Bot Connector, in order: `{ posted,
  * asked }`, the activities it took (`{ conversation, activity }` each) and
  * the roster reads (`<conversation id> <user id>` each).
@@ -431,6 +438,11 @@ export default {
     if (request.method === "POST" && url.href === ${JSON.stringify(botConnectorMembersUrl)}) {
       const { members } = await request.json();
       botConnector.setMembers(members);
+      return new Response(null, { status: 204 });
+    }
+    if (request.method === "POST" && url.href === ${JSON.stringify(botConnectorStreamsUrl)}) {
+      const { refuse } = await request.json();
+      botConnector.refuseStreams(refuse);
       return new Response(null, { status: 204 });
     }
     if (url.href === ${JSON.stringify(botConnectorPostedUrl)}) {
