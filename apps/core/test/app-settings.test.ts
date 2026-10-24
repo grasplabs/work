@@ -263,6 +263,32 @@ describe("who answers for an App", slow, () => {
   });
 });
 
+describe("who answers for a draft", slow, () => {
+  it("is only someone who builds it, as only they open a draft", async () => {
+    const [owner, builder, user] = await Promise.all([
+      personApi("builder"),
+      personApi("builder"),
+      personApi("user"),
+    ]);
+    const { id: app } = await owner.api.apps.create({
+      name: `Draft ${unique()}`,
+    });
+    await share(owner, app, builder, "builder");
+    await share(owner, app, user, "user");
+
+    const refused = await outcome(
+      owner.api.apps.update(app, { responsible: user.userId })
+    );
+    const named = await owner.api.apps.update(app, {
+      responsible: builder.userId,
+    });
+    expect({ refused, named: named.responsible }).toStrictEqual({
+      refused: "app.responsible_invalid",
+      named: builder.userId,
+    });
+  });
+});
+
 describe("whom an App is made for", slow, () => {
   it("is a team or a member of the organization a builder names, or nobody in particular, and grants nothing", async () => {
     const [owner, admin, person] = await Promise.all([
