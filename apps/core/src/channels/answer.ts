@@ -2,13 +2,15 @@ import { agentErrors } from "@grasp-os/shared/agent";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { modelErrors } from "@grasp-os/shared/models";
 import { permissionErrors } from "@grasp-os/shared/permissions";
+import { StreamingPlan } from "chat";
 import type { Thread } from "chat";
 import { z } from "zod";
 
 import { signInConfig } from "../auth/config.ts";
+import { citedIn } from "../chat-messages.ts";
 import { chatAgentId, personalWorkspaceId } from "../chats-rpc.ts";
 import { workspace } from "../durable-objects.ts";
-import { answerCard } from "./cards.tsx";
+import { answerCard, sourcesCard } from "./cards.tsx";
 import type { ChannelHandoff, ChannelMessage } from "./door.ts";
 import { channelLocales, languageOf, say } from "./words.ts";
 import type { ChannelLocale } from "./words.ts";
@@ -20,7 +22,9 @@ import type { ChannelLocale } from "./words.ts";
 // has already checked who wrote (door.ts), so the Workspace takes its word.
 //
 // While the turn runs, the platform shows Stephen typing, sent again every
-// few seconds, as a typing indicator lasts only that long. A turn that
+// few seconds, as a typing indicator lasts only that long, until the
+// answer's first words, which stream in as the model writes them where
+// the platform streams (Teams' private chats). A turn that
 // fails or is refused ends in one of Stephen's lines, in the language the
 // person wrote in, never in the gateway's words, which name models and
 // budgets the person has no part in.
@@ -80,27 +84,125 @@ const typingIn = (thread: Thread): (() => void) => {
   };
 };
 
-/** One question asked in the person's chat for `platform`, and its answer posted. */
+/** Text as it is fed to a stream, a piece at a time, until it ends. */
+const textFeed = () => {
+  let controller: ReadableStreamDefaultController<string> | undefined;
+  let ended = false;
+  const reader = new ReadableStream<string>({
+    start: (started) => {
+      controller = started;
+    },
+  }).getReader();
+  const pieces: AsyncIterable<string> = {
+    [Symbol.asyncIterator]: () => ({
+      next: async (): Promise<IteratorResult<string>> => {
+        const read = await reader.read();
+        return read.done
+          ? { done: true, value: undefined }
+          : { done: false, value: read.value };
+      },
+    }),
+  };
+  return {
+    push: (piece: string) => {
+      if (!ended) {
+        controller?.enqueue(piece);
+      }
+    },
+    end: () => {
+      if (!ended) {
+        ended = true;
+        controller?.close();
+      }
+    },
+    pieces,
+  };
+};
+
+/**
+ * An answer streamed into `thread` as the model writes it, where the
+ * platform streams (Teams, in a private chat): `onText` takes the text so
+ * far; `finish` adds what the last update missed of `final` and waits for
+ * the stream to end. Nothing is posted until the first words, so a turn
+ * that fails before any leaves no empty message. A step's words before
+ * the agent ran code, and the answer after, are told apart by a blank
+ * line, as the person sees them in Grasp.
+ */
+const streamInto = (thread: Thread, onFirst: () => void) => {
+  const feed = textFeed();
+  let posting: Promise<unknown> | undefined;
+  let current = "";
+  let finished = false;
+  const tell = (text: string): void => {
+    if (finished || text === "" || text === current) {
+      return;
+    }
+    let piece = text.startsWith(current)
+      ? text.slice(current.length)
+      : `\n\n${text}`;
+    if (posting === undefined) {
+      piece = piece.trimStart();
+      onFirst();
+      posting = thread.post(
+        new StreamingPlan(feed.pieces, { aiGenerated: true })
+      );
+    }
+    current = text;
+    feed.push(piece);
+  };
+  return {
+    onText: tell,
+    /** Whether anything was streamed, once the stream has ended. */
+    finish: async (final?: string): Promise<boolean> => {
+      if (posting !== undefined && final?.startsWith(current) === true) {
+        tell(final);
+      }
+      finished = true;
+      feed.end();
+      if (posting === undefined) {
+        return false;
+      }
+      await posting;
+      return true;
+    },
+  };
+};
+
+/** The answer as a chat app shows it: no links to Grasp's own notes. */
+const shownText = (text: string): string =>
+  citedIn(text, () => false).text.trim();
+
+/**
+ * One question asked in the person's chat for `platform`, and its answer
+ * posted: streamed as the model writes it where the platform streams, then
+ * its sources; otherwise whole, with them, once it is done. A stream the
+ * platform refuses ends in the whole answer instead.
+ */
 const answerOne = async (
   env: Env,
   {
     platform,
     userId,
     thread,
-  }: Pick<ChannelMessage, "platform" | "userId" | "thread">,
+    afterward,
+  }: Pick<ChannelMessage, "platform" | "userId" | "thread" | "afterward">,
   text: string,
   locale: ChannelLocale
 ): Promise<void> => {
   const stopTyping = typingIn(thread);
+  const streaming = thread.isDM ? streamInto(thread, stopTyping) : undefined;
   let asked: Awaited<ReturnType<ReturnType<typeof workspace>["askThrough"]>>;
   try {
     asked = await workspace(env, personalWorkspaceId(userId)).askThrough(
       userId,
       chatAgentId,
       platform,
-      text
+      text,
+      streaming?.onText
     );
   } catch (error) {
+    stopTyping();
+    await streaming?.finish();
     const line = lineFor(error);
     log.warn("channel.turn_refused", {
       platform,
@@ -109,31 +211,44 @@ const answerOne = async (
     });
     await thread.post(say(line, locale));
     return;
-  } finally {
-    stopTyping();
   }
+  stopTyping();
   const { chatId, answer } = asked;
-  if (answer.outcome !== "answered" || answer.answer.trim() === "") {
+  const answered = answer.outcome === "answered";
+  const final = shownText(answer.answer);
+  let streamed = false;
+  try {
+    streamed = (await streaming?.finish(answered ? final : undefined)) ?? false;
+  } catch (error) {
+    log.warn("channel.stream_refused", { platform, ...errorFields(error) });
+  }
+  if (!answered || final === "") {
     log.warn("channel.turn_failed", { platform, outcome: answer.outcome });
     await thread.post(say("failed", locale));
     return;
   }
   const origin = signInConfig(env)?.origin;
   if (origin === undefined) {
-    await thread.post(answer.answer);
+    if (!streamed) {
+      await thread.post(final);
+    }
     return;
   }
-  await thread.post(
-    answerCard({
-      locale,
-      text: answer.answer,
-      sources: answer.cited.map(({ title, collectionId, documentId }) => ({
-        title,
-        url: `${origin}/knowledge/${encodeURIComponent(collectionId)}?doc=${encodeURIComponent(documentId)}`,
-      })),
-      chatUrl: `${origin}/?chat=${encodeURIComponent(chatId)}`,
-    })
-  );
+  const sources = answer.cited.map(({ title, collectionId, documentId }) => ({
+    title,
+    url: `${origin}/knowledge/${encodeURIComponent(collectionId)}?doc=${encodeURIComponent(documentId)}`,
+  }));
+  const chatUrl = `${origin}/?chat=${encodeURIComponent(chatId)}`;
+  if (!streamed) {
+    await thread.post(answerCard({ locale, text: final, sources, chatUrl }));
+    return;
+  }
+  // Under the answer's last words, which Teams gets once this returns.
+  if (sources.length > 0) {
+    afterward(
+      async () => await thread.post(sourcesCard({ locale, sources, chatUrl }))
+    );
+  }
 };
 
 /**

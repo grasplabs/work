@@ -20,6 +20,8 @@ export const botConnectorFake = (bot: {
   const issued = new Set<string>();
   /** Each conversation's activities, as their bodies. */
   const posted: { conversation: string; activity: unknown }[] = [];
+  /** Conversations where Teams refuses a streamed message. */
+  const unstreamed = new Set<string>();
   /** Every roster read, as `<conversation> <user id>`. */
   const asked: string[] = [];
   /** The roster: `<conversation> <user id>` to what Teams says of them. */
@@ -69,10 +71,18 @@ export const botConnectorFake = (bot: {
     }
     const activity = activitiesPath.exec(url.pathname)?.groups;
     if (request.method === "POST" && activity !== undefined) {
-      posted.push({
-        conversation: decodeURIComponent(activity.conversation ?? ""),
-        activity: await request.json(),
-      });
+      const conversation = decodeURIComponent(activity.conversation ?? "");
+      const body: unknown = await request.json();
+      const streamed = JSON.stringify(body).includes(
+        '"streamType":"streaming"'
+      );
+      if (streamed && unstreamed.has(conversation)) {
+        return Response.json(
+          { error: { code: "ContentStreamNotAllowed" } },
+          { status: 403 }
+        );
+      }
+      posted.push({ conversation, activity: body });
       return Response.json(
         { id: `activity-${posted.length}` },
         { status: 201 }
@@ -84,6 +94,10 @@ export const botConnectorFake = (bot: {
   return {
     posted,
     asked,
+    /** Teams refuses streamed messages in `conversation` from now on. */
+    refuseStreams: (conversation: string) => {
+      unstreamed.add(conversation);
+    },
     /** Adds to the roster, `<conversation> <user id>` to each member. */
     setMembers: (next: Record<string, unknown>) => {
       Object.assign(members, next);

@@ -192,6 +192,12 @@ export interface ChannelMessage {
    * message, to be answered first: once, within the hour.
    */
   kept?: string;
+  /**
+   * Sends `send` once the platform has the reply as it stands: on Teams,
+   * after a streamed answer's last words, which Microsoft's SDK sends only
+   * once the message's handler has returned.
+   */
+  afterward: (send: () => Promise<unknown>) => void;
 }
 
 /** What takes a member's message on from the door. */
@@ -523,7 +529,22 @@ const slackResponse = async (
   const takeOn = handoff ?? answerInChat(env);
   chat.onDirectMessage(async (thread, message) => {
     await keepConversation(env, "slack", thread.id, userId);
-    await takeOn({ platform: "slack", userId, thread, message });
+    // Slack takes a reply whole, no stream: it has it once the handler
+    // posted it, so what comes after goes right after, in order.
+    const later: (() => Promise<unknown>)[] = [];
+    await takeOn({
+      platform: "slack",
+      userId,
+      thread,
+      message,
+      afterward: (send) => {
+        later.push(send);
+      },
+    });
+    for (const send of later) {
+      // oxlint-disable-next-line no-await-in-loop -- in the order they were asked for
+      await send();
+    }
   });
   return await chat.webhooks.slack(
     new Request(request.url, {
@@ -613,9 +634,13 @@ export const channelResponse = async (
     concurrency: "queue",
   });
   const takeOn = handoff ?? answerInChat(env);
+  const later: (() => Promise<unknown>)[] = [];
+  const afterward = (send: () => Promise<unknown>): void => {
+    later.push(send);
+  };
   chat.onDirectMessage(async (thread, message) => {
     await keepConversation(env, platform, thread.id, userId);
-    await takeOn({ platform, userId, thread, message, kept });
+    await takeOn({ platform, userId, thread, message, kept, afterward });
   });
   // Answered at once: the platform gives up on a webhook long before an
   // answer is ready, and sends it again. The message is handled after,
@@ -630,15 +655,20 @@ export const channelResponse = async (
   const background = (promise: Promise<unknown>): void => {
     ctx.waitUntil(settled(promise));
   };
-  background(
-    chat.webhooks.teams(
+  const handled = async (): Promise<void> => {
+    await chat.webhooks.teams(
       new Request(request.url, {
         method: "POST",
         headers: request.headers,
         body,
       }),
       { waitUntil: background }
-    )
-  );
+    );
+    for (const send of later) {
+      // oxlint-disable-next-line no-await-in-loop -- in the order they were asked for
+      await send();
+    }
+  };
+  background(handled());
   return new Response(null, { status: 200 });
 };
