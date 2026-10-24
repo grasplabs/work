@@ -6,8 +6,8 @@
  *
  * To run it, get a delegated Graph access token for a test tenant's user,
  * with the connector's scopes (User.Read, Mail.ReadWrite,
- * Mail.ReadWrite.Shared, Mail.Send, Mail.Send.Shared, Calendars.Read,
- * Calendars.ReadWrite, Calendars.Read.Shared, Files.Read.All,
+ * Mail.ReadWrite.Shared, Mail.Send, Mail.Send.Shared, MailboxSettings.Read,
+ * Calendars.Read, Calendars.ReadWrite, Calendars.Read.Shared, Files.Read.All,
  * Sites.Read.All; Graph Explorer gives one), then, from the repo root:
  *
  *   M365_SMOKE_ACCESS_TOKEN=<token> \
@@ -18,9 +18,10 @@
  *
  * Add M365_SMOKE_WRITES=1 to also create a draft in the mailbox, try to
  * move it to a folder of another mailbox (refused), and move it to Deleted
- * Items. M365_SMOKE_FOREIGN_FOLDER names that other folder: say, the
- * user's own Inbox's ID (GET /me/mailFolders/inbox) when M365_SMOKE_MAILBOX
- * is a shared mailbox. Never point it at a client's tenant.
+ * Items. A move works only in the user's own mailbox, so for the writes
+ * M365_SMOKE_MAILBOX must be the user's own. M365_SMOKE_FOREIGN_FOLDER
+ * names that other folder: say, a shared mailbox's Inbox's ID. Never point
+ * it at a client's tenant.
  *
  * M365_SMOKE_OWN_MAILBOX, the token's user's own address, also puts an
  * event in their calendar a week from now, with nobody invited, and moves

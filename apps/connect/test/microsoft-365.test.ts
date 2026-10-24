@@ -28,12 +28,17 @@ import {
 import {
   archiveFolderId,
   attachmentsSkipToken,
+  categoriesSkipToken,
   endlessAttachments,
   foreignFolderId,
   bigAttachmentId,
   childrenSkipToken,
   ceo,
+  contractCount,
+  contractsList,
   financeDrive,
+  financeSite,
+  hrSite,
   flaggedMessage,
   invoicePdf,
   longBody,
@@ -49,10 +54,13 @@ import {
   pdfAttachmentId,
   pdfBase64,
   personalDrive,
+  procedureTexts,
+  replyDraft,
   reportText,
   spoofedId,
   supplierColumns,
   supplierTable,
+  todoListIds,
   totalsRange,
   workbookIds,
 } from "./fixtures/graph.ts";
@@ -76,7 +84,7 @@ import type { Connection, Input } from "./tool-calls.ts";
 // that one, by construction.
 
 const providers = fakeProviders();
-const graph = fakeGraph();
+const graph = fakeGraph(providers);
 const audit = auditEvents();
 
 /** Someone's Microsoft 365 connection, made through OAuth. */
@@ -86,8 +94,39 @@ const connected = async (): Promise<Connection> => {
   return { id, person };
 };
 
+/**
+ * Someone's connection, with their own mailbox: the address they sign in
+ * with, which Graph's `/me` names, and any aliases it lists besides.
+ */
+const connectedOwn = async (aliases: string[] = []) => {
+  const person = someone();
+  const id = await connectAccount(providers, person, {
+    ...ownAccount(person),
+    aliases,
+  });
+  return {
+    connection: { id, person },
+    own: person.email,
+    ownPath: `/v1.0/users/${encodeURIComponent(person.email)}`,
+  };
+};
+
+const invoiceSubject = "Invoice 2026-0041 from Northwind Supplies";
+
+/** An email in `mailbox`, as a card shows it: as Graph has it. */
+const shownEmail = (mailbox: string) => ({
+  mailbox,
+  message: messageId(mailbox, 1),
+  from: "billing@northwind.example.org",
+  subject: invoiceSubject,
+});
+
 /** What left connect, each request with its query and JSON body parsed. */
 const requests = () => parsedRequests(graph.sent);
+
+/** The requests with `method` that reached Graph. */
+const writesOf = (method: string) =>
+  requests().filter((request) => request.method === method);
 
 /** Graph's requests' paths. */
 const graphPaths = (): string[] =>
@@ -112,13 +151,38 @@ const mailboxInputs: Record<string, Input> = {
     attachment: pdfAttachmentId,
   },
   "mail.move": { message: messageId(ceo, 1), destination: "archive" },
+  "mail.flag": {
+    message: messageId(ceo, 1),
+    from: "billing@northwind.example.org",
+    subject: invoiceSubject,
+    flag: "flagged",
+  },
+  "mail.categorise": {
+    message: messageId(ceo, 1),
+    from: "billing@northwind.example.org",
+    subject: invoiceSubject,
+    categories: ["Finance"],
+  },
   "mail.send": { subject: "Hi", body: "Hi", to: ["a@example.com"] },
   "mail.createDraft": { subject: "Hi", body: "Hi", to: ["a@example.com"] },
+  "mail.createReplyDraft": {
+    message: messageId(ceo, 1),
+    subject: "RE: Hi",
+    body: "Hi",
+    to: ["billing@northwind.example.org"],
+  },
   "calendar.list": {
     start: "2026-09-28T00:00:00Z",
     end: "2026-10-05T00:00:00Z",
   },
   "calendar.get": { event: eventId(ceo, 1) },
+  "todo.lists": {},
+  "todo.tasks": { list: todoListIds.tasks },
+  "todo.create": { list: todoListIds.tasks, title: "Send the signed contract" },
+  "todo.complete": {
+    list: todoListIds.tasks,
+    task: "AAkALgAAAAAAHYQDEapmEc2b=",
+  },
   "calendar.create": {
     subject: "Focus time",
     start: "2026-10-26T14:00",
@@ -136,6 +200,7 @@ const mailboxInputs: Record<string, Input> = {
 const driveInputs: Record<string, Input> = {
   "files.list": {},
   "files.search": { query: "invoice" },
+  "files.versions": { item: itemIds.procedure },
   "files.read": { item: itemIds.report },
 };
 
@@ -191,27 +256,52 @@ const workbookInputs: Record<string, Input> = {
   },
 };
 
+/** Input for each list tool, but its site. */
+const siteInputs: Record<string, Input> = {
+  "lists.items": { list: contractsList },
+};
+
 describe("the Microsoft 365 connector's scoping", () => {
-  it("binds every route of every tool to its mailbox, drive or workbook's named table, never /me", () => {
+  it("binds every route of every tool to its mailbox, drive, site or workbook's named table, reads /me only to know whose a mailbox is, and writes under /me only for drafts in the person's own OneDrive", () => {
     const unbound = Object.entries(manifest.actions).flatMap(
       ([name, { resource, routes }]) =>
         routes
           .filter(
-            ({ path }) =>
+            ({ method, path }) =>
               !(
                 (resource === "mailbox" &&
                   path.startsWith("/v1.0/users/{mailbox}/")) ||
                 (resource === "drive" &&
                   path.startsWith("/v1.0/drives/{drive}/")) ||
+                (resource === "site" &&
+                  path.startsWith("/v1.0/sites/{site}/")) ||
                 (resource === "workbook" &&
                   path.startsWith(
                     "/v1.0/drives/{drive}/items/{workbook}/workbook/tables/{table}/"
-                  ))
+                  )) ||
+                (method === "GET" && path === "/v1.0/me") ||
+                (name === "files.createDraft" &&
+                  resource === null &&
+                  path.startsWith("/v1.0/me/drive/root:/{folder}/{name}"))
               )
           )
           .map(({ path }) => `${name} ${path}`)
     );
     expect(unbound).toStrictEqual([]);
+    // Only the tools that work in the person's own mailbox or OneDrive go
+    // to /me: the mail tools to ask whose the token is, files.createDraft
+    // to write its draft.
+    const askWho = Object.entries(manifest.actions)
+      .filter(([, { routes }]) =>
+        routes.some(({ path }) => path.startsWith("/v1.0/me"))
+      )
+      .map(([name, { reach }]) => `${name} ${reach}`);
+    expect(askWho.toSorted()).toStrictEqual([
+      "files.createDraft own",
+      "mail.categorise own",
+      "mail.flag own",
+      "mail.move own",
+    ]);
     expect(
       Object.keys(manifest.actions).toSorted(),
       "every tool is tested for scoping below"
@@ -219,7 +309,9 @@ describe("the Microsoft 365 connector's scoping", () => {
       [
         ...Object.keys(mailboxInputs),
         ...Object.keys(driveInputs),
+        ...Object.keys(siteInputs),
         ...Object.keys(workbookInputs),
+        "files.createDraft",
       ].toSorted()
     );
     expect(manifest.hosts).toStrictEqual(["graph.microsoft.com"]);
@@ -252,6 +344,17 @@ describe("the Microsoft 365 connector's scoping", () => {
     await expect(
       refusalsFor(connection, driveInputs, "drive", financeDrive, [
         personalDrive,
+      ])
+    ).resolves.toStrictEqual(new Set(["connect.resource_out_of_scope"]));
+    expect(graph.sent).toStrictEqual([]);
+  });
+
+  it("keeps a call for one site out of every other", async () => {
+    const connection = await connected();
+    await expect(
+      refusalsFor(connection, siteInputs, "site", financeSite, [
+        hrSite,
+        financeSite.toUpperCase(),
       ])
     ).resolves.toStrictEqual(new Set(["connect.resource_out_of_scope"]));
     expect(graph.sent).toStrictEqual([]);
@@ -665,34 +768,35 @@ describe("the Microsoft 365 connector's mail tools", () => {
     ]);
   });
 
-  it("move a message once for its idempotency key, to a folder of its own mailbox", async () => {
-    const connection = await connected();
+  it("move an email once for its idempotency key, to a folder of the person's own mailbox", async () => {
+    const { connection, own, ownPath } = await connectedOwn();
     const move = async (destination: string, idempotencyKey: string) =>
       await outputOf(
         call(
           connection,
           "mail.move",
-          { mailbox: invoices, message: messageId(invoices, 1), destination },
-          { resource: invoices, idempotencyKey }
+          { mailbox: own, message: messageId(own, 1), destination },
+          { resource: own, idempotencyKey }
         )
       );
     const first = await move("archive", "run-7:move-invoice");
     expect(first).toStrictEqual({
-      mailbox: invoices,
-      previousId: messageId(invoices, 1),
-      id: movedId(invoices, 1),
+      mailbox: own,
+      previousId: messageId(own, 1),
+      id: movedId(own, 1),
       folderId: archiveFolderId,
     });
     await expect(move("archive", "run-7:move-invoice")).resolves.toStrictEqual(
       first
     );
-    // The destination is looked up in the bound mailbox, and the message
-    // moved to the folder it names there.
+    // The destination is looked up in the bound mailbox (once Graph's
+    // `/me` said it is the person's own), and the message moved to the
+    // folder it names there.
     expect(requests()).toMatchObject([
-      { method: "GET", path: `${mailboxPath}/mailFolders/archive` },
+      { method: "GET", path: `${ownPath}/mailFolders/archive` },
       {
         method: "POST",
-        path: `${mailboxPath}/messages/${encodeURIComponent(messageId(invoices, 1))}/move`,
+        path: `${ownPath}/messages/${encodeURIComponent(messageId(own, 1))}/move`,
         body: { destinationId: archiveFolderId },
       },
     ]);
@@ -700,9 +804,228 @@ describe("the Microsoft 365 connector's mail tools", () => {
     await expect(
       toolError(move(foreignFolderId, "run-7:move-away"))
     ).resolves.toMatchObject({ error: { code: "not_found" } });
-    expect(requests().filter(({ method }) => method === "POST")).toHaveLength(
-      1
+    expect(writesOf("POST")).toHaveLength(1);
+  });
+
+  it("move an email only when it and its folder are the ones the card shows", async () => {
+    const { connection, own } = await connectedOwn();
+    const move = async (shown: Input, idempotencyKey: string) =>
+      await outcome(
+        call(
+          connection,
+          "mail.move",
+          {
+            mailbox: own,
+            message: messageId(own, 1),
+            destination: "archive",
+            ...shown,
+          },
+          { resource: own, idempotencyKey }
+        )
+      );
+    const outcomes = [
+      await move({ from: "someone@example.org" }, "run-7:move-from"),
+      await move({ subject: "Invoice 2026-0042" }, "run-7:move-subject"),
+      await move({ folderName: "Deleted Items" }, "run-7:move-folder"),
+      // As Graph has them, the sender in any case: it moves.
+      await move(
+        {
+          from: "Billing@Northwind.example.org",
+          subject: invoiceSubject,
+          folderName: "Archive",
+        },
+        "run-7:move-shown"
+      ),
+    ];
+    expect(outcomes).toStrictEqual([
+      "connect.action_failed",
+      "connect.action_failed",
+      "connect.action_failed",
+      "ok",
+    ]);
+    expect(writesOf("POST")).toHaveLength(1);
+  });
+
+  it("flag an email in the person's own mailbox, checked against the card first", async () => {
+    const { connection, own, ownPath } = await connectedOwn();
+    await expect(
+      outputOf(
+        call(
+          connection,
+          "mail.flag",
+          { ...shownEmail(own), flag: "flagged" },
+          { resource: own, idempotencyKey: "run-3:flag" }
+        )
+      )
+    ).resolves.toStrictEqual({
+      mailbox: own,
+      id: messageId(own, 1),
+      flag: "flagged",
+    });
+    const path = `${ownPath}/messages/${encodeURIComponent(messageId(own, 1))}`;
+    expect(requests()).toMatchObject([
+      { method: "GET", path, query: { $select: "id,from,subject" } },
+      {
+        method: "PATCH",
+        path,
+        body: { flag: { flagStatus: "flagged" } },
+      },
+    ]);
+  });
+
+  it("set a flag of unknown outcome again once its call can no longer be out: it sets the same flag", async () => {
+    const { connection, own } = await connectedOwn();
+    const complete = async () =>
+      await outcome(
+        call(
+          connection,
+          "mail.flag",
+          { ...shownEmail(own), flag: "complete" },
+          { resource: own, idempotencyKey: "run-3:complete" }
+        )
+      );
+    graph.loseWriteAnswer();
+    const lost = await complete();
+    const early = await complete();
+    await claimedAgo(connection);
+    const recovered = await complete();
+    const patches = writesOf("PATCH").map(({ body }) => JSON.stringify(body));
+    expect({ lost, early, recovered, patches }).toStrictEqual({
+      lost: "connect.outcome_unknown",
+      early: "connect.outcome_unknown",
+      recovered: "ok",
+      patches: Array.from({ length: 2 }, () =>
+        JSON.stringify({ flag: { flagStatus: "complete" } })
+      ),
+    });
+  });
+
+  // "Waiting on others" is on the second page of the person's categories.
+  it("set an email's categories to exactly those asked, and the same again when its answer was lost", async () => {
+    const { connection, own } = await connectedOwn();
+    const categorise = async (idempotencyKey: string) =>
+      await outcome(
+        call(
+          connection,
+          "mail.categorise",
+          {
+            ...shownEmail(own),
+            categories: ["Finance", "Waiting on others", "Finance"],
+          },
+          { resource: own, idempotencyKey }
+        )
+      );
+    await expect(categorise("run-3:categorise")).resolves.toBe("ok");
+    graph.loseWriteAnswer();
+    const lost = await categorise("run-3:categorise-again");
+    await claimedAgo(connection);
+    const recovered = await categorise("run-3:categorise-again");
+    const patches = writesOf("PATCH").map(({ body }) => JSON.stringify(body));
+    expect({ lost, recovered, patches }).toStrictEqual({
+      lost: "connect.outcome_unknown",
+      recovered: "ok",
+      patches: Array.from({ length: 3 }, () =>
+        JSON.stringify({ categories: ["Finance", "Waiting on others"] })
+      ),
+    });
+  });
+
+  it("refuse a category the person doesn't have, before anything changes", async () => {
+    const { connection, own, ownPath } = await connectedOwn();
+    await expect(
+      toolError(
+        call(
+          connection,
+          "mail.categorise",
+          { ...shownEmail(own), categories: ["Finance", "Board only"] },
+          { resource: own, idempotencyKey: "run-3:new-category" }
+        )
+      )
+    ).resolves.toMatchObject({ error: { code: "invalid" } });
+    // Every page of their categories was read, the next on the tool's own
+    // route, before it was refused.
+    const categories = `${ownPath}/outlook/masterCategories`;
+    expect(requests()).toMatchObject([
+      { method: "GET", path: categories },
+      {
+        method: "GET",
+        path: categories,
+        query: { $skiptoken: categoriesSkipToken },
+      },
+    ]);
+    expect(graph.writesDone()).toBe(0);
+  });
+
+  it("flag or categorise only an email that is the one the card shows", async () => {
+    const { connection, own } = await connectedOwn();
+    const shown = [
+      { from: "someone@example.org" },
+      { subject: "Invoice 2026-0042 from Northwind Supplies" },
+      { subject: "invoice 2026-0041 from northwind supplies" },
+    ];
+    const outcomes = await Promise.all(
+      shown.flatMap((differs) => [
+        outcome(
+          call(
+            connection,
+            "mail.flag",
+            { ...shownEmail(own), ...differs, flag: "flagged" },
+            { resource: own, idempotencyKey: crypto.randomUUID() }
+          )
+        ),
+        outcome(
+          call(
+            connection,
+            "mail.categorise",
+            { ...shownEmail(own), ...differs, categories: ["Finance"] },
+            { resource: own, idempotencyKey: crypto.randomUUID() }
+          )
+        ),
+      ])
     );
+    expect(new Set(outcomes)).toStrictEqual(new Set(["connect.action_failed"]));
+    expect(graph.writesDone()).toBe(0);
+  });
+
+  it("work only in the person's own mailbox, by any of their addresses, asking only whose the token is", async () => {
+    const alias = "the.person@acme.test";
+    const { connection } = await connectedOwn([alias]);
+    // invoices@ is a mailbox the token opens, but not the person's own.
+    const inputs: Record<string, Input> = {
+      "mail.flag": { flag: "flagged" },
+      "mail.categorise": { categories: ["Finance"] },
+      "mail.move": { destination: "archive" },
+    };
+    const elsewhere = await Promise.all(
+      Object.entries(inputs).map(
+        async ([action, input]) =>
+          await toolError(
+            call(
+              connection,
+              action,
+              { ...shownEmail(invoices), ...input },
+              { resource: invoices, idempotencyKey: crypto.randomUUID() }
+            )
+          )
+      )
+    );
+    expect(elsewhere).toMatchObject(
+      Array.from({ length: 3 }, () => ({ error: { code: "invalid" } }))
+    );
+    // Only `/me` was asked: nothing reached the mailbox.
+    expect(graph.sent).toStrictEqual([]);
+    // An alias of theirs, in another case, is their own mailbox.
+    const shouted = alias.toUpperCase();
+    await expect(
+      outcome(
+        call(
+          connection,
+          "mail.flag",
+          { ...shownEmail(shouted), flag: "flagged" },
+          { resource: shouted, idempotencyKey: "run-3:alias" }
+        )
+      )
+    ).resolves.toBe("ok");
   });
 
   it("send mail from a shared mailbox", async () => {
@@ -814,6 +1137,197 @@ describe("the Microsoft 365 connector's mail tools", () => {
         },
       },
     ]);
+  });
+});
+
+/** The write requests that reached Graph. */
+const writes = () => requests().filter(({ method }) => method !== "GET");
+
+const draftReply = async (
+  connection: Connection,
+  input: Input,
+  idempotencyKey: string
+) =>
+  await call(connection, "mail.createReplyDraft", input, {
+    resource: invoices,
+    idempotencyKey,
+  });
+
+describe("the Microsoft 365 connector's reply drafts", () => {
+  const sender = "billing@northwind.example.org";
+  const reply = {
+    mailbox: invoices,
+    message: messageId(invoices, 1),
+    subject: "RE: Invoice 2026-0041 from Northwind Supplies",
+    body: "Thanks, we'll pay it this week.",
+    to: [sender],
+  };
+  const replyPath = `${mailboxPath}/messages/${encodeURIComponent(messageId(invoices, 1))}`;
+  const made = replyDraft(invoices, 1, reply.subject);
+  const drafted = {
+    mailbox: invoices,
+    inReplyTo: messageId(invoices, 1),
+    id: made.id,
+    conversationId: made.conversationId,
+    webLink: made.webLink,
+  };
+
+  it("draft a reply to a message's sender in its conversation, and never send it", async () => {
+    const connection = await connected();
+    await expect(
+      outputOf(draftReply(connection, reply, "run-8:reply"))
+    ).resolves.toStrictEqual(drafted);
+    // The message replied to is read in the bound mailbox, then the draft
+    // made with the recipients and subject the call holds, the person's
+    // text above the quoted message.
+    expect(requests()).toMatchObject([
+      { method: "GET", path: replyPath },
+      {
+        method: "POST",
+        path: `${replyPath}/createReply`,
+        body: {
+          comment: reply.body,
+          message: {
+            subject: reply.subject,
+            toRecipients: [{ emailAddress: { address: sender } }],
+            ccRecipients: [],
+          },
+        },
+      },
+    ]);
+    // Its only write makes a draft: no call of it can send.
+    expect(
+      manifest.actions["mail.createReplyDraft"]?.routes
+        .filter(({ method }) => method !== "GET")
+        .map(({ path }) => path)
+    ).toStrictEqual(["/v1.0/users/{mailbox}/messages/{message}/createReply"]);
+  });
+
+  it("reply to the message's other recipients only when replying to all, and to no one else", async () => {
+    const connection = await connected();
+    const refusals = await Promise.all(
+      [
+        { ...reply, to: ["someone@elsewhere.example.com"] },
+        { ...reply, to: [sender, invoices] },
+        { ...reply, cc: [invoices] },
+        { ...reply, replyAll: true, cc: ["someone@elsewhere.example.com"] },
+      ].map(
+        async (input, index) =>
+          await toolError(
+            draftReply(connection, input, `run-8:refused-${index}`)
+          )
+      )
+    );
+    expect(refusals).toMatchObject(
+      Array.from({ length: 4 }, () => ({ error: { code: "invalid" } }))
+    );
+    expect(writes()).toStrictEqual([]);
+    // Replying to all, the message's To may be on it, in any case.
+    await outputOf(
+      draftReply(
+        connection,
+        {
+          ...reply,
+          replyAll: true,
+          to: ["Billing@Northwind.example.org"],
+          cc: [invoices],
+        },
+        "run-8:reply-all"
+      )
+    );
+    expect(writes()).toMatchObject([
+      {
+        path: `${replyPath}/createReply`,
+        body: {
+          message: {
+            toRecipients: [
+              { emailAddress: { address: "Billing@Northwind.example.org" } },
+            ],
+            ccRecipients: [{ emailAddress: { address: invoices } }],
+          },
+        },
+      },
+    ]);
+  });
+
+  it("reply to the address a message asks replies to go to, and to all with its Cc", async () => {
+    const connection = await connected();
+    const second = {
+      ...reply,
+      message: messageId(invoices, 2),
+      to: ["accounts@northwind.example.org"],
+    };
+    // Its Cc is someone the message was only copied to: not a reply's.
+    await expect(
+      toolError(
+        draftReply(
+          connection,
+          { ...second, to: ["controller@example.com"] },
+          "run-8:cc-only"
+        )
+      )
+    ).resolves.toMatchObject({ error: { code: "invalid" } });
+    await outputOf(draftReply(connection, second, "run-8:reply-to"));
+    await outputOf(
+      draftReply(
+        connection,
+        { ...second, replyAll: true, cc: ["controller@example.com"] },
+        "run-8:reply-all-cc"
+      )
+    );
+    const secondPath = `${mailboxPath}/messages/${encodeURIComponent(messageId(invoices, 2))}`;
+    expect(writes()).toMatchObject([
+      {
+        path: `${secondPath}/createReply`,
+        body: {
+          message: {
+            toRecipients: [
+              { emailAddress: { address: "accounts@northwind.example.org" } },
+            ],
+            ccRecipients: [],
+          },
+        },
+      },
+      {
+        path: `${secondPath}/createReply`,
+        body: {
+          message: {
+            toRecipients: [
+              { emailAddress: { address: "accounts@northwind.example.org" } },
+            ],
+            ccRecipients: [
+              { emailAddress: { address: "controller@example.com" } },
+            ],
+          },
+        },
+      },
+    ]);
+  });
+
+  it("find a reply draft whose answer was lost, and never make it twice", async () => {
+    const connection = await connected();
+    graph.loseWriteAnswer();
+    await expect(
+      outcome(draftReply(connection, reply, "run-8:reply-lost"))
+    ).resolves.toBe("connect.outcome_unknown");
+    await claimedAgo(connection);
+    const found = await outputOf(
+      draftReply(connection, reply, "run-8:reply-lost")
+    );
+    const repeat = await outputOf(
+      draftReply(connection, reply, "run-8:reply-lost")
+    );
+    // The draft found by its key is the one the lost answer made.
+    expect(found).toMatchObject({
+      mailbox: invoices,
+      inReplyTo: messageId(invoices, 1),
+      id: drafted.id,
+    });
+    expect({
+      repeat,
+      writesDone: graph.writesDone(),
+      writes: writes().length,
+    }).toStrictEqual({ repeat: found, writesDone: 1, writes: 1 });
   });
 });
 
@@ -1179,6 +1693,10 @@ describe("the Microsoft 365 connector's calendar writes", () => {
   });
 });
 
+/** The size of the procedure's text at `version`, in bytes. */
+const versionSize = (version: string): number =>
+  new TextEncoder().encode(procedureTexts[version]).byteLength;
+
 describe("the Microsoft 365 connector's file tools", () => {
   it("list a drive's top folder or a folder in it, page by page", async () => {
     const connection = await connected();
@@ -1265,6 +1783,7 @@ describe("the Microsoft 365 connector's file tools", () => {
         drive: financeDrive,
         id: itemIds.report,
         name: "Month-end report.txt",
+        version: null,
         mimeType: "text/plain",
         size: new TextEncoder().encode(reportText).byteLength,
         encoding: "text",
@@ -1320,6 +1839,168 @@ describe("the Microsoft 365 connector's file tools", () => {
     ).toStrictEqual([`${drivePath}/items/${itemIds.controls}/content`]);
   });
 
+  it("list a file's versions newest first, each with when and by whom it was saved", async () => {
+    const connection = await connected();
+    const sanne = { name: "Sanne Visser", email: "sanne.visser@example.com" };
+    // Graph's pre-authenticated download link of each isn't passed on.
+    await expect(
+      resultOf(
+        call(connection, "files.versions", {
+          drive: financeDrive,
+          item: itemIds.procedure,
+        })
+      )
+    ).resolves.toStrictEqual({
+      output: {
+        drive: financeDrive,
+        id: itemIds.procedure,
+        name: "Advice procedure.txt",
+        versions: [
+          {
+            id: "3.0",
+            current: true,
+            savedAt: "2026-10-12T09:41:07Z",
+            savedBy: sanne,
+            size: versionSize("3.0"),
+          },
+          {
+            id: "2.0",
+            current: false,
+            savedAt: "2026-06-03T14:20:55Z",
+            savedBy: {
+              name: "Daan Bakker",
+              email: "daan.bakker@example.com",
+            },
+            size: versionSize("2.0"),
+          },
+          {
+            id: "1.0",
+            current: false,
+            savedAt: "2025-11-18T08:05:30Z",
+            savedBy: sanne,
+            size: versionSize("1.0"),
+          },
+        ],
+        nextPage: null,
+      },
+      provenance: [itemIds.procedure],
+    });
+    expect(graphPaths()).toStrictEqual([
+      `${drivePath}/items/${itemIds.procedure}`,
+      `${drivePath}/items/${itemIds.procedure}/versions`,
+    ]);
+  });
+
+  it("page through a file's versions, the newest alone current", async () => {
+    const connection = await connected();
+    const pageSchema = z.object({
+      versions: z.array(z.object({ id: z.string(), current: z.boolean() })),
+      nextPage: z.string().nullable(),
+    });
+    const seen: { id: string; current: boolean }[] = [];
+    let page: string | undefined;
+    do {
+      const read = pageSchema.parse(
+        // oxlint-disable-next-line no-await-in-loop -- each page follows the last
+        await outputOf(
+          call(connection, "files.versions", {
+            drive: financeDrive,
+            item: itemIds.procedure,
+            top: 1,
+            ...(page === undefined ? {} : { page }),
+          })
+        )
+      );
+      seen.push(...read.versions);
+      page = read.nextPage ?? undefined;
+    } while (page !== undefined);
+    expect(seen).toStrictEqual([
+      { id: "3.0", current: true },
+      { id: "2.0", current: false },
+      { id: "1.0", current: false },
+    ]);
+  });
+
+  it("refuse an older version too big to read before asking for its content", async () => {
+    const connection = await connected();
+    graph.oversizeVersion("1.0");
+    await expect(
+      toolError(
+        call(connection, "files.read", {
+          drive: financeDrive,
+          item: itemIds.procedure,
+          version: "1.0",
+        })
+      )
+    ).resolves.toMatchObject({ error: { code: "too_large" } });
+    expect(graphPaths()).not.toContain(
+      `${drivePath}/items/${itemIds.procedure}/versions/1.0/content`
+    );
+  });
+
+  it("read an older version of a file, to compare it with the current one", async () => {
+    const connection = await connected();
+    const procedure = { drive: financeDrive, item: itemIds.procedure };
+    const [current, older] = await Promise.all([
+      outputOf(call(connection, "files.read", procedure)),
+      outputOf(
+        call(connection, "files.read", { ...procedure, version: "1.0" })
+      ),
+    ]);
+    expect([current, older]).toMatchObject([
+      { version: null, content: procedureTexts["3.0"] },
+      {
+        id: itemIds.procedure,
+        name: "Advice procedure.txt",
+        version: "1.0",
+        size: versionSize("1.0"),
+        content: procedureTexts["1.0"],
+      },
+    ]);
+    const versionPath = `${drivePath}/items/${itemIds.procedure}/versions/1.0`;
+    expect(graphPaths()).toContain(`${versionPath}/content`);
+    const download = graph.sent.find(({ path }) =>
+      path.includes("/_vti_history/")
+    );
+    expect(download?.host).toBe(graph.sharePointHost);
+    expect(download?.headers).not.toHaveProperty("authorization");
+    // A version the file doesn't have is Graph's to refuse.
+    await expect(
+      toolError(
+        call(connection, "files.read", { ...procedure, version: "9.0" })
+      )
+    ).resolves.toMatchObject({ error: { code: "not_found" } });
+  });
+
+  it("give no versions of a file the person may not open, of a folder or of another drive's file", async () => {
+    const connection = await connected();
+    const refusals = await Promise.all(
+      (
+        [
+          ["files.versions", { item: itemIds.locked }],
+          ["files.read", { item: itemIds.locked, version: "1.0" }],
+          ["files.versions", { item: itemIds.folder }],
+          ["files.versions", { item: itemIds.foreign }],
+        ] satisfies [string, Input][]
+      ).map(
+        async ([tool, input]) =>
+          await toolError(
+            call(connection, tool, { drive: financeDrive, ...input })
+          )
+      )
+    );
+    expect(refusals).toMatchObject([
+      { error: { code: "access_denied" } },
+      { error: { code: "access_denied" } },
+      { error: { code: "not_a_file" } },
+      { error: { code: "not_found" } },
+    ]);
+    // Each was refused on the file itself, before its versions were asked for.
+    expect(
+      graphPaths().filter((path) => path.includes("/versions"))
+    ).toStrictEqual([]);
+  });
+
   it("follow a download's redirect only to SharePoint over HTTPS, once", async () => {
     const connection = await connected();
     const outcomes = await Promise.all(
@@ -1341,6 +2022,239 @@ describe("the Microsoft 365 connector's file tools", () => {
         .map(({ host }) => host)
         .filter((host) => host !== "graph.microsoft.com")
     ).toStrictEqual([graph.sharePointHost]);
+  });
+});
+
+describe("the Microsoft 365 connector's list tools", () => {
+  const contracts = { site: financeSite, list: contractsList };
+
+  it("read the items of a list that meet every condition, with only their own columns", async () => {
+    const connection = await connected();
+    const result = await resultOf(
+      call(connection, "lists.items", {
+        ...contracts,
+        where: [
+          { column: "Supplier", is: "eq", value: "O'Brien & Sons" },
+          { column: "Amount", is: "ge", value: 5000 },
+        ],
+      })
+    );
+    // Items 3, 7, 11... are O'Brien's; from 20 on they're worth 5,000.
+    const ids = Array.from({ length: contractCount }, (_, index) => index + 1)
+      .filter((n) => n % 4 === 3 && n >= 20)
+      .map(String);
+    expect(result.provenance).toStrictEqual(ids);
+    expect(result.output).toMatchObject({
+      site: financeSite,
+      list: contractsList,
+      nextPage: null,
+    });
+    expect(
+      z
+        .object({ items: z.array(z.unknown()) })
+        .parse(result.output)
+        .items.at(0)
+    ).toStrictEqual({
+      id: "23",
+      fields: {
+        id: "23",
+        Title: "Contract 23",
+        Supplier: "O'Brien & Sons",
+        Status: "Open",
+        Amount: 5750,
+        Renewal_x0020_date: "2027-06-01T00:00:00Z",
+        _x0032_nd_x0020_signatory: "Legal",
+        Regions: ["EU", "UK"],
+        Website: JSON.stringify({
+          Description: "Supplier portal",
+          Url: "https://suppliers.example.com/23",
+        }),
+        Modified: "2026-06-13T09:30:00Z",
+        Created: "2026-01-05T08:00:00Z",
+        AuthorLookupId: "11",
+        EditorLookupId: "11",
+        Attachments: false,
+      },
+      createdAt: "2026-01-05T08:00:00Z",
+      lastModifiedAt: "2026-06-13T09:30:00Z",
+      webUrl: `https://${graph.sharePointHost}/sites/Finance/Lists/Contracts/23_.000`,
+    });
+    // The filter is built from the conditions, its quote doubled as OData
+    // does, and Graph is told it may filter on columns that aren't indexed.
+    const [sent] = requests();
+    expect(sent).toMatchObject({
+      path: `/v1.0/sites/${encodeURIComponent(financeSite)}/lists/${contractsList}/items`,
+      query: {
+        $filter:
+          "fields/Supplier eq 'O''Brien & Sons' and fields/Amount ge 5000",
+      },
+    });
+    expect(graph.sent[0]?.headers).toMatchObject({
+      prefer: "HonorNonIndexedQueriesWarningMayFailRandomly",
+    });
+  });
+
+  it("read only the columns asked for, one of SharePoint's own too", async () => {
+    const connection = await connected();
+    const output = await outputOf(
+      call(connection, "lists.items", {
+        ...contracts,
+        columns: ["Title", "Status", "ContentType"],
+        top: 1,
+      })
+    );
+    expect(output).toMatchObject({
+      items: [
+        {
+          id: "1",
+          fields: {
+            id: "1",
+            Title: "Contract 1",
+            Status: "Open",
+            ContentType: "Item",
+          },
+        },
+      ],
+    });
+    expect(requests()[0]?.query).toMatchObject({
+      $expand: "fields($select=Title,Status,ContentType)",
+    });
+  });
+
+  it("take no condition that could be anything but a literal on a column", async () => {
+    const connection = await connected();
+    const refusals = await Promise.all(
+      [
+        { column: "Status eq 'Open' or Amount", is: "gt", value: 0 },
+        { column: "Status", is: "eq or", value: "Open" },
+      ].map(
+        async (condition) =>
+          await toolError(
+            call(connection, "lists.items", {
+              ...contracts,
+              where: [condition],
+            })
+          )
+      )
+    );
+    expect(refusals).toStrictEqual([
+      "Invalid input: invalid_format at where.0.column",
+      "Invalid input: invalid_value at where.0.is",
+    ]);
+    expect(graph.sent).toStrictEqual([]);
+  });
+
+  it("refuse a list in a site the person can't open, as Graph does", async () => {
+    const connection = await connected();
+    await expect(
+      toolError(
+        call(
+          connection,
+          "lists.items",
+          { site: hrSite, list: contractsList },
+          { resource: hrSite }
+        )
+      )
+    ).resolves.toMatchObject({ error: { code: "access_denied" } });
+  });
+
+  it("cut a long list at its bound, and go on from there page by page", async () => {
+    const connection = await connected();
+    const pageSchema = z.object({
+      items: z.array(z.object({ id: z.string() })),
+      nextPage: z.string().nullable(),
+    });
+    const first = pageSchema.parse(
+      await outputOf(call(connection, "lists.items", contracts))
+    );
+    expect({
+      read: first.items.length,
+      nextPage: first.nextPage,
+    }).toStrictEqual({
+      read: 50,
+      nextPage: `%24skiptoken=${encodeURIComponent("Paged=TRUE&p_ID=50")}`,
+    });
+    const second = pageSchema.parse(
+      await outputOf(
+        call(connection, "lists.items", {
+          ...contracts,
+          page: first.nextPage ?? "",
+        })
+      )
+    );
+    // The rest, from where the first page ended.
+    expect({
+      read: second.items.map(({ id }) => Number(id)),
+      nextPage: second.nextPage,
+    }).toStrictEqual({
+      read: Array.from(
+        { length: contractCount - 50 },
+        (_, index) => index + 51
+      ),
+      nextPage: null,
+    });
+    // Never more than a page's bound, whatever is asked.
+    await expect(
+      toolError(call(connection, "lists.items", { ...contracts, top: 500 }))
+    ).resolves.toBe("Invalid input: too_big at top");
+    expect(requests().map(({ query }) => query.$top)).toStrictEqual([
+      "50",
+      "50",
+    ]);
+  });
+});
+
+describe("the Microsoft 365 connector's list pages", () => {
+  const contracts = { site: financeSite, list: contractsList };
+
+  it("keep a page's conditions and columns on the next page", async () => {
+    const connection = await connected();
+    const asked = {
+      ...contracts,
+      where: [{ column: "Status", is: "eq", value: "Open" }],
+      columns: ["Title", "Status"],
+      top: 10,
+    };
+    const pageSchema = z.object({
+      items: z.array(
+        z.object({ id: z.string(), fields: z.record(z.string(), z.unknown()) })
+      ),
+      nextPage: z.string().nullable(),
+    });
+    const first = pageSchema.parse(
+      await outputOf(call(connection, "lists.items", asked))
+    );
+    const second = pageSchema.parse(
+      await outputOf(
+        call(connection, "lists.items", {
+          ...asked,
+          page: first.nextPage ?? "",
+        })
+      )
+    );
+    const items = [...first.items, ...second.items];
+    // Open contracts are those whose number isn't a multiple of 3.
+    const open = Array.from({ length: contractCount }, (_, index) => index + 1)
+      .filter((n) => n % 3 !== 0)
+      .slice(0, 20)
+      .map(String);
+    expect({
+      ids: items.map(({ id }) => id),
+      columns: [
+        ...new Set(items.flatMap(({ fields }) => Object.keys(fields))),
+      ].toSorted(),
+      statuses: [...new Set(items.map(({ fields }) => fields.Status))],
+    }).toStrictEqual({
+      ids: open,
+      columns: ["Status", "Title", "id"],
+      statuses: ["Open"],
+    });
+    const [, again] = requests();
+    expect(again?.query).toMatchObject({
+      $filter: "fields/Status eq 'Open'",
+      $expand: "fields($select=Title,Status)",
+      $top: "10",
+    });
   });
 });
 
@@ -1910,17 +2824,268 @@ describe("the Microsoft 365 connector's right to change files", () => {
   });
 });
 
-describe("the Microsoft 365 connector's answers", () => {
-  it("free a move's key when its folder lookup is throttled, so a retry moves once", async () => {
+/** The person's own mailbox, as their To Do is named. */
+const ownMailbox = ({ person }: Connection): string => person.email;
+
+/** The id of the task a To Do tool answered with. */
+const taskIdOf = (created: unknown): string =>
+  z.object({ task: z.object({ id: z.string() }) }).parse(created).task.id;
+
+describe("the Microsoft 365 connector's To Do tools", () => {
+  /** Calls `action` for the person's own To Do. */
+  const todo = async (
+    connection: Connection,
+    action: string,
+    input: Input,
+    idempotencyKey?: string
+  ) =>
+    await outputOf(
+      call(
+        connection,
+        action,
+        { mailbox: ownMailbox(connection), ...input },
+        {
+          resource: ownMailbox(connection),
+          ...(idempotencyKey === undefined ? {} : { idempotencyKey }),
+        }
+      )
+    );
+
+  const followUp = {
+    list: todoListIds.tasks,
+    title: "Send Northwind the signed contract",
+    note: "Promised in Tuesday's call.",
+    due: "2026-10-30",
+  };
+
+  it("list only the person's own To Do lists", async () => {
     const connection = await connected();
+    // Only the list that is theirs alone: neither the one they shared nor
+    // the one shared with them.
+    await expect(todo(connection, "todo.lists", {})).resolves.toStrictEqual({
+      mailbox: ownMailbox(connection),
+      lists: [
+        { id: todoListIds.tasks, name: "Tasks", wellknownName: "defaultList" },
+      ],
+      nextPage: null,
+    });
+  });
+
+  it("make a task in the person's own list with its due day, and complete it", async () => {
+    const connection = await connected();
+    const created = await todo(
+      connection,
+      "todo.create",
+      followUp,
+      "run-3:follow-up"
+    );
+    expect(created).toMatchObject({
+      mailbox: ownMailbox(connection),
+      listId: todoListIds.tasks,
+      task: {
+        title: followUp.title,
+        status: "notStarted",
+        due: { dateTime: "2026-10-30T12:00:00", timeZone: "UTC" },
+        completedAt: null,
+      },
+    });
+    const id = taskIdOf(created);
+    const open = { list: todoListIds.tasks, openOnly: true };
+    await expect(todo(connection, "todo.tasks", open)).resolves.toMatchObject({
+      tasks: [{ id, title: followUp.title }],
+    });
+    await expect(
+      todo(
+        connection,
+        "todo.complete",
+        { list: todoListIds.tasks, task: id },
+        "run-3:done"
+      )
+    ).resolves.toMatchObject({
+      task: { id, status: "completed", completedAt: { timeZone: "UTC" } },
+    });
+    await expect(todo(connection, "todo.tasks", open)).resolves.toMatchObject({
+      tasks: [],
+    });
+    await expect(
+      todo(connection, "todo.tasks", { list: todoListIds.tasks })
+    ).resolves.toMatchObject({ tasks: [{ id, status: "completed" }] });
+  });
+
+  it("refuse another person's To Do, and lists shared with or by the person", async () => {
+    const connection = await connected();
+    // A capability for a colleague's mailbox: Graph opens no To Do but the
+    // token's own user's.
+    await expect(
+      toolError(
+        call(connection, "todo.lists", { mailbox: ceo }, { resource: ceo })
+      )
+    ).resolves.toMatchObject({ error: { code: "access_denied" } });
+    await expect(
+      toolError(
+        call(
+          connection,
+          "todo.create",
+          { ...followUp, mailbox: ceo },
+          { resource: ceo, idempotencyKey: "run-4:theirs" }
+        )
+      )
+    ).resolves.toMatchObject({ error: { code: "access_denied" } });
+    // A list shared either way reaches someone else: nothing is read,
+    // made or completed in it.
+    const calls: [string, Input][] = [
+      todoListIds.sharedWithThem,
+      todoListIds.sharedByThem,
+    ].flatMap((list): [string, Input][] => [
+      ["todo.tasks", { list }],
+      ["todo.create", { ...followUp, list }],
+      ["todo.complete", { list, task: "AAkALgAAAAAAHYQDEapmEc2b=" }],
+    ]);
+    const refusals = await Promise.all(
+      calls.map(
+        async ([action, input]) =>
+          await toolError(
+            call(
+              connection,
+              action,
+              { mailbox: ownMailbox(connection), ...input },
+              {
+                resource: ownMailbox(connection),
+                idempotencyKey: crypto.randomUUID(),
+              }
+            )
+          )
+      )
+    );
+    expect(refusals).toMatchObject(
+      calls.map(() => ({ error: { code: "access_denied" } }))
+    );
+    expect(graph.writesDone()).toBe(0);
+  });
+
+  it("find a task whose answer was lost by the tag it carries, and never make it twice", async () => {
+    const connection = await connected();
+    // Older tasks fill Graph's first page, so the lost one is on a later
+    // page.
+    await Promise.all(
+      ["one", "two", "three"].map(
+        async (n) =>
+          await todo(
+            connection,
+            "todo.create",
+            { ...followUp, title: `Earlier follow-up ${n}` },
+            `run-5:earlier-${n}`
+          )
+      )
+    );
+    graph.loseWriteAnswer();
+    await expect(
+      outcome(
+        call(
+          connection,
+          "todo.create",
+          { mailbox: ownMailbox(connection), ...followUp },
+          {
+            resource: ownMailbox(connection),
+            idempotencyKey: "run-5:follow-up",
+          }
+        )
+      )
+    ).resolves.toBe("connect.outcome_unknown");
+    await claimedAgo(connection);
+    const found = await todo(
+      connection,
+      "todo.create",
+      followUp,
+      "run-5:follow-up"
+    );
+    await expect(
+      todo(connection, "todo.create", followUp, "run-5:follow-up")
+    ).resolves.toStrictEqual(found);
+    expect(found).toMatchObject({ task: { title: followUp.title } });
+    // The three earlier tasks and the lost one, each made once.
+    expect(graph.writesDone()).toBe(4);
+    const { tasks } = z
+      .object({
+        tasks: z.array(z.object({ id: z.string(), title: z.string() })),
+      })
+      .parse(await todo(connection, "todo.tasks", { list: todoListIds.tasks }));
+    expect(
+      tasks.filter(({ title }) => title === followUp.title).map(({ id }) => id)
+    ).toStrictEqual([taskIdOf(found)]);
+  });
+
+  it("refuse a due day that doesn't exist before anything goes out", async () => {
+    const connection = await connected();
+    const sent = graph.sent.length;
+    await expect(
+      toolError(
+        call(
+          connection,
+          "todo.create",
+          { mailbox: ownMailbox(connection), ...followUp, due: "2026-02-30" },
+          {
+            resource: ownMailbox(connection),
+            idempotencyKey: "run-7:follow-up",
+          }
+        )
+      )
+    ).resolves.toBe("Invalid input: custom at due");
+    expect(graph.sent).toHaveLength(sent);
+  });
+
+  it("read no task of a list the person shared after its answer was lost", async () => {
+    const connection = await connected();
+    graph.loseWriteAnswer();
+    await expect(
+      outcome(
+        call(
+          connection,
+          "todo.create",
+          { mailbox: ownMailbox(connection), ...followUp },
+          {
+            resource: ownMailbox(connection),
+            idempotencyKey: "run-6:follow-up",
+          }
+        )
+      )
+    ).resolves.toBe("connect.outcome_unknown");
+    await claimedAgo(connection);
+    graph.shareList(todoListIds.tasks);
+    const tasksRead = () =>
+      graphPaths().filter((path) => path.endsWith("/tasks")).length;
+    const before = tasksRead();
+    await expect(
+      outcome(
+        call(
+          connection,
+          "todo.create",
+          { mailbox: ownMailbox(connection), ...followUp },
+          {
+            resource: ownMailbox(connection),
+            idempotencyKey: "run-6:follow-up",
+          }
+        )
+      )
+    ).resolves.toBe("connect.outcome_unknown");
+    // The list is no longer the person's alone: the task isn't looked for
+    // in it, so the outcome stays unknown. Only the POST that made the task
+    // went to its tasks, before the list was shared.
+    expect(tasksRead()).toBe(before);
+  });
+});
+
+describe("the Microsoft 365 connector's answers", () => {
+  it("free a move's key when a lookup before it is throttled, so a retry moves once", async () => {
+    const { connection, own } = await connectedOwn();
     const move = async () =>
       await outcome(
         call(
           connection,
           "mail.move",
           {
-            mailbox: invoices,
-            message: messageId(invoices, 1),
+            mailbox: own,
+            message: messageId(own, 1),
             destination: "archive",
           },
           { idempotencyKey: "run-8:move-lookup" }
@@ -1944,16 +3109,16 @@ describe("the Microsoft 365 connector's answers", () => {
     ).resolves.toMatchObject({ error: { code: "not_found" } });
   });
 
-  it("free a throttled move's key after its folder lookup, a read", async () => {
-    const connection = await connected();
+  it("free a throttled move's key after the lookups before it, reads", async () => {
+    const { connection, own } = await connectedOwn();
     const move = async () =>
       await outcome(
         call(
           connection,
           "mail.move",
           {
-            mailbox: invoices,
-            message: messageId(invoices, 1),
+            mailbox: own,
+            message: messageId(own, 1),
             destination: "archive",
           },
           { idempotencyKey: "run-8:move" }
@@ -2104,11 +3269,13 @@ const readOnlyCalendars = [
   "Mail.ReadWrite.Shared",
   "Mail.Send",
   "Mail.Send.Shared",
+  "MailboxSettings.Read",
   "Calendars.Read",
   "Calendars.Read.Shared",
   "Files.Read.All",
   "Files.ReadWrite.All",
   "Sites.Read.All",
+  "Tasks.ReadWrite",
 ];
 
 const graphScope = /^[A-Z]/u;

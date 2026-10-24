@@ -3,6 +3,7 @@ import type { Identity, SessionApi } from "@grasp-os/shared/rpc";
 import { AppsRpc } from "./apps-rpc.ts";
 import { AuditRpc } from "./audit-rpc.ts";
 import { BrainRpc } from "./brain-rpc.ts";
+import { ChannelAccountsRpc } from "./channels/accounts.ts";
 import { ChatsRpc } from "./chats-rpc.ts";
 import { ConnectionsRpc } from "./connections.ts";
 import { DashboardRpc } from "./dashboard-rpc.ts";
@@ -81,6 +82,7 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
   readonly #dashboard: DashboardRpc;
   readonly #emailPreferences: EmailPreferencesRpc;
   readonly #sessions: SessionsRpc;
+  readonly #channelAccounts: ChannelAccountsRpc;
   readonly #notifications: NotificationsRpc;
   readonly #onboarding: OnboardingRpc;
   readonly #onboardingStaff: OnboardingStaffRpc;
@@ -122,6 +124,7 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
     this.#dashboard = new DashboardRpc(env, full);
     this.#emailPreferences = new EmailPreferencesRpc(env, full);
     this.#sessions = new SessionsRpc(env, full, sessionId);
+    this.#channelAccounts = new ChannelAccountsRpc(env, full);
     this.#notifications = new NotificationsRpc(env, full);
     this.#onboarding = new OnboardingRpc(env, check);
     this.#onboardingStaff = new OnboardingStaffRpc(env, check);
@@ -130,6 +133,10 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
 
   get sessions(): SessionsRpc {
     return this.#sessions;
+  }
+
+  get channelAccounts(): ChannelAccountsRpc {
+    return this.#channelAccounts;
   }
 
   get notifications(): NotificationsRpc {

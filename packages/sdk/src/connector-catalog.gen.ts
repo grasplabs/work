@@ -93,23 +93,49 @@ export interface ConnectorCatalog {
     };
   };
   readonly "microsoft-365.files@1": {
+    readonly createDraft: {
+      readonly input: { format: "word" | "text"; name: string; text: string };
+      readonly output: { folder: string; id: string; name: string; size: number | null; webUrl: string | null };
+    };
     readonly list: {
       readonly input: { drive: string; folder?: string; page?: string; top?: number };
       readonly output: { drive: string; items: Array<{ drive: string; id: string; kind: "file" | "folder" | "other"; lastModifiedAt: string | null; mimeType: string | null; name: string; parentId: string | null; size: number | null; webUrl: string | null }>; nextPage: string | null };
     };
     readonly read: {
-      readonly input: { as?: "text" | "base64"; drive: string; item: string };
-      readonly output: { content: string | null; drive: string; encoding: "text" | "base64"; id: string; mimeType: string | null; name: string; size: number };
+      readonly input: { as?: "text" | "base64"; drive: string; item: string; version?: string };
+      readonly output: { content: string | null; drive: string; encoding: "text" | "base64"; id: string; mimeType: string | null; name: string; size: number; version: string | null };
     };
     readonly search: {
       readonly input: { drive: string; page?: string; query: string; top?: number };
       readonly output: { drive: string; items: Array<{ drive: string; id: string; kind: "file" | "folder" | "other"; lastModifiedAt: string | null; mimeType: string | null; name: string; parentId: string | null; size: number | null; webUrl: string | null }>; nextPage: string | null };
     };
+    readonly versions: {
+      readonly input: { drive: string; item: string; page?: string; top?: number };
+      readonly output: { drive: string; id: string; name: string; nextPage: string | null; versions: Array<{ current: boolean; id: string; savedAt: string | null; savedBy: { email: string | null; name: string | null } | null; size: number | null }> };
+    };
+  };
+  readonly "microsoft-365.lists@1": {
+    readonly items: {
+      readonly input: { columns?: Array<string>; list: string; page?: string; site: string; top?: number; where?: Array<{ column: string; is: "eq" | "ne" | "gt" | "ge" | "lt" | "le"; value: (string) | (number) }> };
+      readonly output: { items: Array<{ createdAt: string | null; fields: Record<string, (string) | (number) | (boolean) | (Array<string>) | null>; id: string; lastModifiedAt: string | null; webUrl: string | null }>; list: string; nextPage: string | null; site: string };
+    };
   };
   readonly "microsoft-365.mail@1": {
+    readonly categorise: {
+      readonly input: { categories: Array<string>; from: string; mailbox: string; message: string; subject: string };
+      readonly output: { categories: Array<string>; id: string; mailbox: string };
+    };
     readonly createDraft: {
       readonly input: { bcc?: Array<string>; body: string; bodyType?: "text" | "html"; cc?: Array<string>; mailbox: string; replyTo?: Array<string>; subject: string; to: Array<string> };
       readonly output: { conversationId: string | null; id: string; mailbox: string; webLink: string | null };
+    };
+    readonly createReplyDraft: {
+      readonly input: { body: string; cc?: Array<string>; mailbox: string; message: string; replyAll?: boolean; subject: string; to: Array<string> };
+      readonly output: { conversationId: string | null; id: string; inReplyTo: string; mailbox: string; webLink: string | null };
+    };
+    readonly flag: {
+      readonly input: { flag: "flagged" | "complete" | "notFlagged"; from: string; mailbox: string; message: string; subject: string };
+      readonly output: { flag: string; id: string; mailbox: string };
     };
     readonly get: {
       readonly input: { bodyType?: "text" | "html"; mailbox: string; message: string };
@@ -120,7 +146,7 @@ export interface ConnectorCatalog {
       readonly output: { mailbox: string; messages: Array<{ bodyPreview: string | null; cc: Array<{ address: string | null; name: string | null }>; conversationId: string | null; flagStatus: string | null; folderId: string | null; from: { address: string | null; name: string | null } | null; hasAttachments: boolean; id: string; importance: string | null; internetMessageId: string | null; isDraft: boolean; isRead: boolean; mailbox: string; receivedAt: string | null; sentAt: string | null; subject: string | null; to: Array<{ address: string | null; name: string | null }>; webLink: string | null }>; nextPage: string | null };
     };
     readonly move: {
-      readonly input: { destination: string; mailbox: string; message: string };
+      readonly input: { destination: string; folderName?: string; from?: string; mailbox: string; message: string; subject?: string };
       readonly output: { folderId: string | null; id: string; mailbox: string; previousId: string };
     };
     readonly readAttachment: {
@@ -134,6 +160,24 @@ export interface ConnectorCatalog {
     readonly thread: {
       readonly input: { conversation: string; mailbox: string };
       readonly output: { conversationId: string; earlierMessages: boolean; mailbox: string; messages: Array<{ body: string | null; bodyCut: boolean; bodyPreview: string | null; cc: Array<{ address: string | null; name: string | null }>; conversationId: string | null; flagStatus: string | null; folderId: string | null; from: { address: string | null; name: string | null } | null; hasAttachments: boolean; id: string; importance: string | null; internetMessageId: string | null; isDraft: boolean; isRead: boolean; mailbox: string; receivedAt: string | null; sentAt: string | null; subject: string | null; to: Array<{ address: string | null; name: string | null }>; webLink: string | null }> };
+    };
+  };
+  readonly "microsoft-365.todo@1": {
+    readonly complete: {
+      readonly input: { list: string; mailbox: string; task: string };
+      readonly output: { listId: string; mailbox: string; task: { completedAt: { dateTime: string; timeZone: string } | null; createdAt: string | null; due: { dateTime: string; timeZone: string } | null; id: string; importance: string | null; lastModifiedAt: string | null; status: string | null; title: string | null } };
+    };
+    readonly create: {
+      readonly input: { due?: string; list: string; mailbox: string; note?: string; title: string };
+      readonly output: { listId: string; mailbox: string; task: { completedAt: { dateTime: string; timeZone: string } | null; createdAt: string | null; due: { dateTime: string; timeZone: string } | null; id: string; importance: string | null; lastModifiedAt: string | null; status: string | null; title: string | null } };
+    };
+    readonly lists: {
+      readonly input: { mailbox: string; page?: string; top?: number };
+      readonly output: { lists: Array<{ id: string; name: string | null; wellknownName: string | null }>; mailbox: string; nextPage: string | null };
+    };
+    readonly tasks: {
+      readonly input: { list: string; mailbox: string; openOnly?: boolean; page?: string; top?: number };
+      readonly output: { listId: string; mailbox: string; nextPage: string | null; tasks: Array<{ completedAt: { dateTime: string; timeZone: string } | null; createdAt: string | null; due: { dateTime: string; timeZone: string } | null; id: string; importance: string | null; lastModifiedAt: string | null; status: string | null; title: string | null }> };
     };
   };
 }
