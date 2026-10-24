@@ -314,6 +314,7 @@ const coreDb: D1State = {
     workflow_param_values: exported(`${core}workflows/params.ts`),
     workflow_owners: exported(`${core}workflows/owners.ts`),
     hidden_connectors: exported(`${core}connections.ts`),
+    tool_class_settings: exported(`${core}tool-classes.ts`),
     app_requests: exported(`${core}app-requests.ts`),
     improvement_signal_computations: cache(`${core}signals.ts`),
     improvement_signals: cache(`${core}signals.ts`),
