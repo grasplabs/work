@@ -45,7 +45,12 @@ import {
 import type { DocumentRow } from "./documents.ts";
 import { parseBaseFields } from "./frontmatter.ts";
 import { requireCurrentIndexed } from "./indexing.ts";
-import { forgetPerson, personCounts } from "./memories.ts";
+import {
+  countStatements,
+  eraseStatements,
+  forgetPerson,
+  personCounts,
+} from "./memories.ts";
 import { personalCollectionId } from "./memory-files.ts";
 import {
   collectPayloads,
@@ -92,6 +97,16 @@ import { unicode61Dropped, unicode61Kept } from "./unicode61.ts";
 //   saved as the next version, which makes its sections, links, search
 //   rows and the document's title and description again, and fails for
 //   anyone who saved meanwhile from text not yet purged.
+//
+// A content purge reaches the Brain's memory records too, everyone's,
+// whatever documents it names (memories.ts, `eraseStatements`): each
+// statement holding a term is redacted as text is, and deleted when no
+// word is left of it but the markers (`erasedStatement`), matched
+// decomposed (NFD) as text is. Its plan counts them (`memories`), each change is
+// audited, and its check counts one still holding a term with the
+// documents a term still finds (`stillFound`): remembered after the purge
+// read it, or a form it leaves on purpose, as the index would find it
+// (`foldedHolds`: "Rene" for "René", "tom-visser" for "tom visser").
 //
 // Both reach the copies of people's words the host keeps outside
 // Knowledge too, through its `OnErase` hook (core's: the brain's gap
@@ -144,8 +159,9 @@ import { unicode61Dropped, unicode61Kept } from "./unicode61.ts";
 // it again), collection names and
 // descriptions, other documents that quote the text, a term split by
 // Markdown or a line break, a term spelled otherwise (a variant, an
-// accent left out or encoded otherwise: "Rene" for "René", which the
-// index folds to the same token), a term joined to more of a word
+// accent left out of the text: "Rene" for the term "René", which the
+// index folds to the same token; a term without one removes the accented
+// form, as text and terms are matched decomposed, NFD), a term joined to more of a word
 // ("Toms", "tomVisser", "automated": not removed, only counted; the words
 // index keeps those as other tokens, the trigram index finds the term
 // inside them), an address or a domain inside a longer one
@@ -633,8 +649,23 @@ const anyOf = (alternatives: string[]): RegExp =>
  * preparing a purge, finds every occurrence anywhere, to count those the
  * purge leaves (inside a longer word or address, which the trigram index
  * still finds). Longest first, so a term inside a longer one doesn't
- * leave the rest of the longer one behind.
+ * leave the rest of the longer one behind. Of the terms decomposed (NFD),
+ * as the texts are matched (`decomposed`).
  */
+/**
+ * A term or a text decomposed (NFD), as the search index's tokenizer reads
+ * it (`remove_diacritics 2`): an accent is a combining character after its
+ * letter, which the pattern of each character of a term skips
+ * (`literal`), as the index drops it from the token. So "Visser" with an
+ * accent after its last letter is the name, whether the accent was typed
+ * apart or merged with the letter ("é"), and a term without an accent
+ * ("Jose") removes the accented form ("José") too, as the index finds
+ * both by it: erasing more, the safe side. A term with an accent
+ * ("René") keeps it: "Rene" is another word to it, which the index still
+ * finds by the term (`stillFound`).
+ */
+const decomposed = (text: string): string => text.normalize("NFD");
+
 interface Matcher {
   anywhere: RegExp;
   remove: RegExp;
@@ -645,9 +676,9 @@ const matcherOf = (
   terms: string[],
   { countLeft }: { countLeft: boolean }
 ): Matcher => {
-  const longestFirst = terms.toSorted(
-    (one, other) => other.length - one.length
-  );
+  const longestFirst = terms
+    .map(decomposed)
+    .toSorted((one, other) => other.length - one.length);
   return {
     // Not global: `test` would carry `lastIndex` from one text to the next.
     anywhere: new RegExp(longestFirst.map(literal).join("|"), "iu"),
@@ -663,16 +694,21 @@ const matcherOf = (
  * "Tom.Ann"), which one pass would leave to a purge run again. It ends:
  * a term can't overlap the marker (`purgeTermSchema`), so each pass
  * replaces text outside the markers, or markers with fewer of them.
+ *
+ * Matched decomposed (`decomposed`), as the terms are. Text holding a
+ * term comes back composed (NFC); text holding none, as it was, byte for
+ * byte. `visit` sees the decomposed text.
  */
 const without = (
   text: string,
   matcher: Matcher,
   visit?: (current: string, index: number, length: number) => void
 ): string => {
-  if (!matcher.anywhere.test(text)) {
+  const apart = decomposed(text);
+  if (!matcher.anywhere.test(apart)) {
     return text;
   }
-  let current = text;
+  let current = apart;
   for (;;) {
     let next = "";
     let end = 0;
@@ -683,7 +719,7 @@ const without = (
     }
     next += current.slice(end);
     if (next === current) {
-      return current;
+      return current === apart ? text : current.normalize("NFC");
     }
     current = next;
   }
@@ -701,16 +737,105 @@ const leftIn = (texts: (string | null)[], matcher: Matcher): number => {
   }
   let total = 0;
   for (const text of texts) {
-    if (text !== null && anywhere.test(text)) {
-      total += [...text.matchAll(left)].length;
+    const apart = text === null ? "" : decomposed(text);
+    if (anywhere.test(apart)) {
+      total += [...apart.matchAll(left)].length;
     }
   }
   return total;
 };
 
+/** A letter or a digit: what makes a word. */
+const wordCharacter = /[\p{L}\p{N}]/u;
+
+/**
+ * A memory statement with the terms removed (`without`), or `null` when
+ * nothing of it is left but the markers, punctuation and spaces: a record
+ * that says nothing is deleted rather than kept as a husk. Whether what
+ * is left still means what the person meant can't be told without
+ * reading it, so any word left keeps it, redacted, as a document is.
+ */
+const erasedStatement = (
+  statement: string,
+  matcher: Matcher
+): string | null => {
+  const now = without(statement, matcher);
+  return now === statement ||
+    wordCharacter.test(now.replaceAll(purgedMarker, ""))
+    ? now
+    : null;
+};
+
+const keptCharacter = new RegExp(`^[${classOf(unicode61Kept)}]$`, "u");
+const droppedCharacter = new RegExp(`^${dropped}$`, "u");
+
+/**
+ * `text`'s tokens as the search index's tokenizer folds them (unicode61,
+ * `remove_diacritics 2`): runs of the characters it keeps, its dropped
+ * diacritics left out, in lower case. Decomposed for compatibility first
+ * (NFKD), so a precomposed accent is a dropped diacritic and a ligature
+ * ("ﬁ") its letters: a check counts a little more than the index finds,
+ * never less.
+ */
+const foldedTokens = (text: string): string[] => {
+  const tokens: string[] = [];
+  let token = "";
+  for (const character of text.normalize("NFKD")) {
+    if (droppedCharacter.test(character)) {
+      continue;
+    }
+    if (keptCharacter.test(character)) {
+      token += character.toLowerCase();
+    } else if (token !== "") {
+      tokens.push(token);
+      token = "";
+    }
+  }
+  if (token !== "") {
+    tokens.push(token);
+  }
+  return tokens;
+};
+
+/**
+ * Whether a text holds a term as the search index would find it: its
+ * folded tokens (`foldedTokens`), in order, among the text's, as a phrase
+ * query matches. So a form a content purge leaves on purpose is counted
+ * too: spelled without its accents ("Rene" for "René"), joined otherwise
+ * ("tom-visser" for "tom visser"), or with a ligature. A term with no
+ * token (punctuation only) is never found. Alongside what the purge
+ * removes (`statementHolds`), never instead of it.
+ */
+const foldedHolds = (terms: readonly string[]): ((text: string) => boolean) => {
+  const phrases = terms.map(foldedTokens).filter((phrase) => phrase.length > 0);
+  return (text) => {
+    const tokens = foldedTokens(text);
+    return phrases.some((phrase) =>
+      tokens.some((_, start) =>
+        phrase.every((token, at) => tokens[start + at] === token)
+      )
+    );
+  };
+};
+
 /** Whether a content purge would remove a term from `text`. */
 const holdsTerm = (text: string, matcher: Matcher): boolean =>
   without(text, matcher) !== text;
+
+/**
+ * Whether a memory statement holds a term, for a plan's and a check's
+ * counts of memory records, which no index holds yet: one the purge
+ * removes (`holdsTerm`: inside running text of a script written without
+ * spaces, beside an emoji, a Greek final sigma in either case), or one
+ * the index would find, which it leaves on purpose (`foldedHolds`).
+ */
+const statementHolds = (
+  terms: readonly string[],
+  matcher: Matcher
+): ((statement: string) => boolean) => {
+  const folded = foldedHolds(terms);
+  return (statement) => holdsTerm(statement, matcher) || folded(statement);
+};
 
 /** How often a term is removed from `text`, in every pass (`without`). */
 const removalsIn = (text: string, matcher: Matcher): number => {
@@ -802,7 +927,7 @@ const besideInIndexed = (
       "name" in frontmatter ? frontmatter.name : undefined,
     ];
   } catch {
-    return matcher.anywhere.test(text);
+    return matcher.anywhere.test(decomposed(text));
   }
   return [text, ...decoded].some(
     (value) => typeof value === "string" && besideLongerToken(value, matcher)
@@ -1505,6 +1630,12 @@ const purgeContent = async (
   ]);
   const done: Counts[] = [];
   try {
+    // The Brain's records hold people's words too, everyone's, whatever
+    // documents the purge names: before its documents, so one whose purge
+    // fails doesn't leave them holding a term.
+    await eraseStatements(env, actorOf(person), purgeId, (statement) =>
+      erasedStatement(statement, matcher)
+    );
     // The host's copies hold people's words too: every one is rewritten,
     // whatever documents the purge names. First, so a document whose
     // purge fails doesn't leave them holding a term.
@@ -1543,13 +1674,19 @@ const purgeContent = async (
     input.terms,
     named.map(({ document }) => document.id)
   );
-  // A copy written after the rewrite read it is left to a purge again.
+  // A record or copy written after the purge read it is left to a purge
+  // again.
+  const memories = await countStatements(
+    env,
+    statementHolds(input.terms, matcher)
+  );
   const hostCopies = await onErase.count((text) => holdsTerm(text, matcher));
-  const stillFound = inDocuments + hostCopies;
+  const stillFound = inDocuments + memories + hostCopies;
   if (stillFound > 0) {
     log.warn("knowledge.purge_still_found", {
       purgeId,
       documents: inDocuments,
+      memories,
       hostCopies,
     });
   }
@@ -1577,8 +1714,10 @@ export const preparePurge = async (
   let removed = 0;
   let left = 0;
   let hostCopies = 0;
+  let brain: { memories: number; receipts?: number };
   if (parsed.type === "personal") {
     ({ counts, ...scope } = await personalScope(db, parsed));
+    brain = await personCounts(db, parsed.userId);
     originals =
       scope.collectionId === undefined
         ? 0
@@ -1591,6 +1730,12 @@ export const preparePurge = async (
     scope = { documentIds: named.map(({ document }) => document.id) };
     const matcher = matcherOf(parsed.terms, { countLeft: true });
     ({ counts, removed, left } = await contentCounts(env, db, named, matcher));
+    brain = {
+      memories: await countStatements(
+        env,
+        statementHolds(parsed.terms, matcher)
+      ),
+    };
     hostCopies = await onErase.count((text) => holdsTerm(text, matcher));
   }
   await auditedBatch(portsOf(env), db, [
@@ -1600,7 +1745,8 @@ export const preparePurge = async (
         ...counts,
         ...(parsed.type === "content"
           ? { occurrences: removed, inLongerWords: left, hostCopies }
-          : await personCounts(db, parsed.userId)),
+          : {}),
+        ...brain,
       })
     ),
   ]);
@@ -1608,6 +1754,7 @@ export const preparePurge = async (
     ...counts,
     occurrences: removed,
     inLongerWords: left,
+    memories: brain.memories,
     hostCopies,
     originals,
     ...(await tokenFor(env, person, parsed)),
