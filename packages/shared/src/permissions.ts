@@ -325,6 +325,10 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   "TEAMS_BOT_ID",
   "TEAMS_BOT_SECRET",
   "TEAMS_BOT_TENANT_ID",
+  // The client's own Telegram bot (core's src/channels/telegram.ts,
+  // connect's src/channels.ts).
+  "TELEGRAM_BOT_TOKEN",
+  "TELEGRAM_WEBHOOK_SECRET",
   "TOKEN_ENCRYPTION_KEY",
   "TOKEN_ENCRYPTION_KEY_PREVIOUS",
   // The client's own WhatsApp number (core's src/channels/whatsapp.ts,
