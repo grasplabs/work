@@ -189,24 +189,63 @@ export const isolateSettings = {
   limits: { cpuMs: platformLimits.compilerTaskCpuMs, subRequests: 0 },
 } satisfies Omit<WorkerLoaderWorkerCode, "mainModule" | "modules">;
 
+/** The longest a read of platform code from the assets may take. */
+export const platformCodeReadMs = 10_000;
+
+/**
+ * Platform code read once per isolate: the compiler's and the package
+ * builder's, by assets binding and then by what it is and its release's
+ * version. It is the release's, so a build doesn't read 15 to 28 MB of it
+ * from the assets again, and many builds at once don't each hold their
+ * own copy in core's 128 MB isolate. Only a read that worked is kept.
+ * Reads running now are shared by the same keys: builds that start
+ * together share one, for as long as a read may take (`sharedRun`), so
+ * one whose request was cancelled holds no other build.
+ */
+const memoiser = <T>() => {
+  const done = new WeakMap<Fetcher, Map<string, T>>();
+  const running = new WeakMap<Fetcher, Map<string, SharedRun<T>>>();
+  return async (
+    assets: Fetcher,
+    key: string,
+    read: () => Promise<T>
+  ): Promise<T> => {
+    const reads = done.get(assets) ?? new Map<string, T>();
+    done.set(assets, reads);
+    const kept = reads.get(key);
+    if (kept !== undefined) {
+      return kept;
+    }
+    const reading = running.get(assets) ?? new Map<string, SharedRun<T>>();
+    running.set(assets, reading);
+    const code = await sharedRun(reading, key, platformCodeReadMs, read);
+    reads.set(key, code);
+    return code;
+  };
+};
+
+/** Loader isolates' code, read once per isolate (`memoiser`). */
+const memoisedWorker = memoiser<WorkerLoaderWorkerCode>();
+
 /** The compiler's isolate as a Loader takes it, its code read from the assets. */
 const compilerWorker = async (
   assets: Fetcher
-): Promise<WorkerLoaderWorkerCode> => {
-  const [source, kitJson] = await Promise.all([
-    readCompilerFile(assets, compilerAssets.source, "javascript"),
-    readCompilerFile(assets, compilerAssets.kit, "json"),
-  ]);
-  const kit: unknown = JSON.parse(kitJson);
-  return {
-    ...isolateSettings,
-    mainModule: "compiler.js",
-    modules: {
-      "compiler.js": source,
-      [kitModule]: { json: kit },
-    },
-  };
-};
+): Promise<WorkerLoaderWorkerCode> =>
+  await memoisedWorker(assets, `compiler:${version}`, async () => {
+    const [source, kitJson] = await Promise.all([
+      readCompilerFile(assets, compilerAssets.source, "javascript"),
+      readCompilerFile(assets, compilerAssets.kit, "json"),
+    ]);
+    const kit: unknown = JSON.parse(kitJson);
+    return {
+      ...isolateSettings,
+      mainModule: "compiler.js",
+      modules: {
+        "compiler.js": source,
+        [kitModule]: { json: kit },
+      },
+    };
+  });
 
 /**
  * The compiler, in one isolate per release that every build shares, with
@@ -254,46 +293,8 @@ export interface PlatformCode {
   cpuMs: number;
 }
 
-/**
- * The platform code read so far, by assets binding and then by what it is
- * and its release's version: read once per isolate, as it is the
- * release's, so a build doesn't read 15 to 28 MB of it from the assets
- * before the sandbox has even taken it. Only a read that worked is kept.
- */
-const platformCodeRead = new WeakMap<Fetcher, Map<string, PlatformCode>>();
-
-/**
- * The reads running now, by the same keys: builds that start together
- * share one, for as long as a read may take (`sharedRun`), so one whose
- * request was cancelled holds no other build.
- */
-const platformCodeReading = new WeakMap<
-  Fetcher,
-  Map<string, SharedRun<PlatformCode>>
->();
-
-/** The longest a read of platform code from the assets may take. */
-export const platformCodeReadMs = 10_000;
-
-const memoisedCode = async (
-  assets: Fetcher,
-  key: string,
-  read: () => Promise<PlatformCode>
-): Promise<PlatformCode> => {
-  const reads = platformCodeRead.get(assets) ?? new Map<string, PlatformCode>();
-  platformCodeRead.set(assets, reads);
-  const kept = reads.get(key);
-  if (kept !== undefined) {
-    return kept;
-  }
-  const reading =
-    platformCodeReading.get(assets) ??
-    new Map<string, SharedRun<PlatformCode>>();
-  platformCodeReading.set(assets, reading);
-  const code = await sharedRun(reading, key, platformCodeReadMs, read);
-  reads.set(key, code);
-  return code;
-};
+/** The sandbox host's platform code, read once per isolate (`memoiser`). */
+const memoisedCode = memoiser<PlatformCode>();
 
 /**
  * The App compiler's code, read from core's static assets once per
@@ -342,21 +343,26 @@ export const startPackageBuilder = async (
   loader: WorkerLoader,
   assets: Fetcher
 ): Promise<Service<PackageBuilder>> => {
-  const [source, wasm] = await Promise.all([
-    readCompilerFile(assets, compilerAssets.packageBuilder, "javascript"),
-    readCompilerBytes(assets, compilerAssets.esbuildWasm, "wasm"),
-  ]);
-  return loader
-    .load({
-      ...packageBuilderSettings,
-      mainModule: "package-builder.js",
-      modules: {
-        "package-builder.js": source,
-        // Compiled as the isolate loads; the isolate itself can't.
-        "esbuild.wasm": { wasm },
-      },
-    })
-    .getEntrypoint<PackageBuilder>();
+  const code = await memoisedWorker(
+    assets,
+    `package-builder:${version}`,
+    async () => {
+      const [source, wasm] = await Promise.all([
+        readCompilerFile(assets, compilerAssets.packageBuilder, "javascript"),
+        readCompilerBytes(assets, compilerAssets.esbuildWasm, "wasm"),
+      ]);
+      return {
+        ...packageBuilderSettings,
+        mainModule: "package-builder.js",
+        modules: {
+          "package-builder.js": source,
+          // Compiled as the isolate loads; the isolate itself can't.
+          "esbuild.wasm": { wasm },
+        },
+      };
+    }
+  );
+  return loader.load(code).getEntrypoint<PackageBuilder>();
 };
 
 /**

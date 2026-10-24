@@ -1728,6 +1728,10 @@ msgstr "Una plantilla nueva"
 msgid "A new version of this domain is available."
 msgstr "Hay una nueva versión de este dominio."
 
+#: src/settings/chat-accounts.tsx
+msgid "A newer link was sent since. Open the latest one from the chat app."
+msgstr "Desde entonces se ha enviado un enlace más reciente. Abre el último desde la aplicación de chat."
+
 #: src/onboarding/work-record.tsx
 msgid "A normal one takes {normal} hours. The quickest took {least}, the longest {most}."
 msgstr "Uno normal lleva {normal} horas. El más rápido llevó {least}, el más largo {most}."
@@ -2911,6 +2915,10 @@ msgstr "pedido por el agente, en su chat"
 msgid "Asked the agent to fix a run"
 msgstr "Pidió al agente que arreglara una ejecución"
 
+#: src/activity/audit-words.ts
+msgid "Asked to send, edit or delete a chat app message as the company's bot"
+msgstr "Pidió enviar, editar o eliminar un mensaje de una app de chat como el bot de la empresa"
+
 #: src/routes/_shell.onboarding.organization.$team.tsx
 msgid "Asked which work they do"
 msgstr "Se le pregunta qué trabajo hace"
@@ -3595,6 +3603,14 @@ msgstr "Chat"
 msgctxt "the chat beside an App being built"
 msgid "Chat"
 msgstr "Chat"
+
+#: src/settings/chat-accounts.tsx
+msgid "Chat apps"
+msgstr "Aplicaciones de chat"
+
+#: src/settings/chat-accounts.tsx
+msgid "Chat apps where Grasp knows it’s you. Write to Grasp in one, and it sends you a link to connect your account here. Unlink one you no longer use."
+msgstr "Aplicaciones de chat en las que Grasp sabe que eres tú. Escribe a Grasp en una y te enviará un enlace para vincular tu cuenta aquí. Desvincula la que ya no uses."
 
 #: src/chat/chat-list.tsx
 msgid "Chat name"
@@ -4564,6 +4580,10 @@ msgstr "Descubrimiento"
 #: src/landscape/landscape-overview.ts
 msgid "Discovery sources"
 msgstr "Fuentes de detección"
+
+#: src/settings/chat-accounts.tsx
+msgid "Dismiss"
+msgstr "Cerrar"
 
 #: src/dashboard/signals.tsx
 msgctxt "put a signal away until something new"
@@ -5761,6 +5781,10 @@ msgstr "Grasp registra tu palabra de que surtió efecto y no lo vuelve a enviar 
 msgid "Grasp resolved these packages from the npm registry and checked each one's files against the registry's hash. A licence is as the package states it."
 msgstr "Grasp resolvió estos paquetes desde el registro de npm y comprobó los archivos de cada uno con el hash del registro. Una licencia es la que indica el propio paquete."
 
+#: src/settings/chat-accounts.tsx
+msgid "Grasp sent this link to that account in {app}. Link it only if it is yours: Grasp then answers it as you, with what you can see."
+msgstr "Grasp envió este enlace a esa cuenta en {app}. Vincúlala solo si es tuya: Grasp le responderá en tu nombre, con lo que tú puedes ver."
+
 #: src/dashboard/outcome-card.tsx
 msgid "Grasp sent this, but its answer was lost: nobody can tell whether it took effect. Check on {connection} before you say."
 msgstr "Grasp envió esto, pero su respuesta se perdió: nadie sabe si surtió efecto. Compruébalo en {connection} antes de responder."
@@ -6084,6 +6108,10 @@ msgstr "No pude conectar el lugar donde están tus documentos. Vuelve a intentar
 #: src/onboarding/setup-steps.tsx
 msgid "I could not find the columns. The first row should name them: name, email, team and job."
 msgstr "No encontré las columnas. La primera fila debe nombrarlas: nombre, correo, equipo y puesto."
+
+#: src/interview/words.ts
+msgid "I could not hear that. Say it once more, or type it."
+msgstr "No lo he oído. Dilo otra vez o escríbelo."
 
 #: src/onboarding/setup-steps.tsx
 msgid "I could not keep it. Try again in a moment."
@@ -6940,6 +6968,7 @@ msgid "Light"
 msgstr "Claro"
 
 #: src/onboarding/interviews-progress.tsx
+#: src/settings/chat-accounts.tsx
 msgid "Link"
 msgstr "Enlace"
 
@@ -6966,9 +6995,17 @@ msgstr "Enlace enviado"
 msgid "Link out on {date}"
 msgstr "Enlace enviado el {date}"
 
+#: src/settings/chat-accounts.tsx
+msgid "Link your {app} account {account}?"
+msgstr "¿Vincular tu cuenta de {app} {account}?"
+
 #: src/brain/brain-markdown.ts
 msgid "Linked"
 msgstr "Notas enlazadas"
+
+#: src/settings/chat-accounts.tsx
+msgid "Linked {time}"
+msgstr "Vinculada {time}"
 
 #: src/screens/screen-links.ts
 msgid "Links can't be opened here."
@@ -7392,6 +7429,16 @@ msgstr "Mover a un proyecto"
 msgid "Moved old entries out of the audit trail"
 msgstr "Sacó entradas antiguas del registro de auditoría"
 
+#: src/interview/voice-bar.tsx
+msgctxt "turn your microphone off for a moment"
+msgid "Mute"
+msgstr "Silenciar"
+
+#: src/interview/voice-bar.tsx
+msgctxt "your microphone is off for a moment"
+msgid "Muted"
+msgstr "En silencio"
+
 #: src/chat/project-dialog.tsx
 #: src/onboarding/interviews-progress.tsx
 #: src/routes/_shell.settings.packages.index.tsx
@@ -7687,6 +7734,10 @@ msgstr "No hay tarjeta guardada"
 #: src/landscape/overview-tab.tsx
 msgid "No certifications on file"
 msgstr "No consta ninguna certificación"
+
+#: src/settings/chat-accounts.tsx
+msgid "No chat app accounts are linked."
+msgstr "No hay cuentas de aplicaciones de chat vinculadas."
 
 #: src/chat/chat-list.tsx
 msgid "No chats yet. Drag one here, or move it from its menu."
@@ -8336,6 +8387,10 @@ msgstr "No indicados"
 #: src/policies/policy.ts
 msgid "Not made by {vendors}"
 msgstr "No desarrollada por {vendors}"
+
+#: src/settings/chat-accounts.tsx
+msgid "Not mine"
+msgstr "No es mía"
 
 #: src/connections/connection-list.tsx
 msgid "Not named by the provider"
@@ -12272,6 +12327,10 @@ msgstr "Los archivos de memoria, las skills y los archivos subidos que leen tus 
 msgid "The message"
 msgstr "El mensaje"
 
+#: src/interview/words.ts
+msgid "The microphone is not available here. Type your answer."
+msgstr "El micrófono no está disponible aquí. Escribe tu respuesta."
+
 #: src/engines/store-change-errors.ts
 msgid "The migration {migration} failed on its fixture {fixture} when this version was sealed: {reason}. It runs on no records, so the version can't be made current: fix the migration or its fixture and build the domain again."
 msgstr "La migración {migration} falló en su registro de prueba {fixture} cuando se selló esta versión: {reason}. No se ejecuta sobre ningún registro, así que la versión no puede hacerse actual: corrige la migración o su registro de prueba y vuelve a crear el dominio."
@@ -12733,6 +12792,10 @@ msgstr "Este cambio se está aplicando de nuevo, así que ahora no se puede aban
 msgid "This change was already abandoned."
 msgstr "Este cambio ya se abandonó."
 
+#: src/settings/chat-accounts.tsx
+msgid "This chat account is linked to someone else. They need to unlink it first."
+msgstr "Esta cuenta de chat está vinculada a otra persona. Esa persona debe desvincularla primero."
+
 #: src/routes/guest.tsx
 msgid "This chat asks how your work is done. Everything you write is kept and read by the people who invited you, who may copy it into their own records and keep it there. Please don't share passwords, bank details or anything you wouldn't put in an email."
 msgstr "Este chat pregunta cómo haces tu trabajo. Todo lo que escribas se guarda y lo leen las personas que te invitaron, que pueden copiarlo en sus propios registros y conservarlo allí. No compartas contraseñas, datos bancarios ni nada que no pondrías en un correo."
@@ -12842,6 +12905,10 @@ msgstr "Esto es lo que he anotado."
 msgid "This is what is new."
 msgstr "Esto es lo nuevo."
 
+#: src/settings/chat-accounts.tsx
+msgid "This link can’t be used"
+msgstr "Este enlace no se puede usar"
+
 #: src/routes/_shell.links.$app.$surface.tsx
 msgid "This link doesn't open anything you can open"
 msgstr "Este enlace no abre nada que puedas abrir"
@@ -12851,9 +12918,21 @@ msgstr "Este enlace no abre nada que puedas abrir"
 msgid "This link doesn't work. Ask whoever sent it for a new one."
 msgstr "Este enlace no funciona. Pide uno nuevo a quien te lo envió."
 
+#: src/settings/chat-accounts.tsx
+msgid "This link has been used already. Each link works once."
+msgstr "Este enlace ya se ha usado. Cada enlace funciona una sola vez."
+
 #: src/routes/guest.tsx
 msgid "This link has expired. Ask whoever sent it for a new one."
 msgstr "Este enlace ha caducado. Pide uno nuevo a quien te lo envió."
+
+#: src/settings/chat-accounts.tsx
+msgid "This link has expired. Write to Grasp in the chat app for a new one."
+msgstr "Este enlace ha caducado. Escribe a Grasp en la aplicación de chat para recibir uno nuevo."
+
+#: src/settings/chat-accounts.tsx
+msgid "This link isn’t one Grasp sent. Write to Grasp in the chat app for a new one."
+msgstr "Este enlace no lo envió Grasp. Escribe a Grasp en la aplicación de chat para recibir uno nuevo."
 
 #: src/screens/screen-frame.tsx
 msgid "This link opens the app with something it doesn't take. Open the app from its domain instead."
@@ -13320,6 +13399,19 @@ msgstr "Resultados desconocidos"
 #: src/brain/brain.ts
 msgid "Unknown source"
 msgstr "Fuente desconocida"
+
+#: src/settings/chat-accounts.tsx
+msgid "Unlink"
+msgstr "Desvincular"
+
+#: src/settings/chat-accounts.tsx
+msgid "Unlink {app} account {shown}"
+msgstr "Desvincular la cuenta de {app} {shown}"
+
+#: src/interview/voice-bar.tsx
+msgctxt "turn your microphone back on"
+msgid "Unmute"
+msgstr "Activar el micrófono"
 
 #: src/engines/app-page.tsx
 #: src/engines/app-status.tsx

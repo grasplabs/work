@@ -5,6 +5,7 @@ import { authErrors, requestErrors } from "@grasp-os/shared/errors";
 import type { CodedError } from "@grasp-os/shared/errors";
 import { interviewErrors } from "@grasp-os/shared/interview-links";
 import { log } from "@grasp-os/shared/log";
+import { modelErrors } from "@grasp-os/shared/models";
 import { isAdmin, roleErrors } from "@grasp-os/shared/roles";
 import {
   transcriptionCloseCodes,
@@ -22,6 +23,8 @@ import type { z } from "zod";
 
 import { identify } from "../auth/identity.ts";
 import { errorResponse } from "../errors.ts";
+import { models } from "../models.ts";
+import type { Listening, ListeningOutcome } from "../models.ts";
 import { jsonOf } from "../request-body.ts";
 import { isOwnOrigin } from "../rpc.ts";
 import { sessionRecheckMs } from "../session-check.ts";
@@ -82,9 +85,19 @@ import type { Took } from "./store.ts";
 //   admin has minutes a day (`heardBudgets`), which a socket holds as it
 //   opens (the store's `transcriptionOpened`), so sockets opened side by
 //   side share one budget; the router limits sockets opened per address.
+//   And the deployment's own budgets bound it all together (GRA-1064): the
+//   model gateway admits each socket as it opens, for the seconds it
+//   holds, before the upstream is opened (models.ts, `listen`), judged by
+//   the allowlist and the rules as any model call, and refused as one
+//   when a budget has no room (`transcription.over_budget`); once it
+//   closed, it is charged the seconds it heard, and audited as a model
+//   call, never with anything heard. The relay's own limits stay a
+//   second bound, below the budgets.
 // - Tell the company who talked, and when: a session on a link is noted
 //   in the onboarding's own log, which only staff read; an admin's is in
-//   the audit log, opened and closed, with its ID and seconds.
+//   the audit log, opened and closed, with its ID and seconds. The
+//   gateway's `model.call` for a session on a link is the system's, as a
+//   line said on one is: it names neither the person nor the session.
 
 /** How long the page has to send `start`. */
 const startWaitMs = 10_000;
@@ -103,6 +116,36 @@ export const maxOpenMs = 2 * maxSessionSeconds * 1000;
  * interview has them talk; for an admin, enough to try the pages.
  */
 export const heardBudgets = { link: 60 * 60, admin: 30 * 60 } as const;
+
+/**
+ * The transcription model a socket listens with, as the gateway's
+ * allowlist names it: the deployment must list it, as it lists a voice.
+ */
+export const transcriptionModel = "elevenlabs/scribe_v2_realtime";
+
+/** What the gateway is told every socket is for. */
+const purpose = "onboarding.transcription";
+
+/** The gateway's refusals, as the page is told them; any other is a failure. */
+const gatewayRefusals: Partial<
+  Record<string, Parameters<typeof transcriptionErrors.create>[0]>
+> = {
+  "model.over_budget": "transcription.over_budget",
+  "model.budget_busy": "transcription.busy",
+  "model.queued": "transcription.busy",
+  "model.unconfigured": "transcription.unavailable",
+  "model.not_allowed": "transcription.unavailable",
+  "model.eu_only": "transcription.unavailable",
+  "model.sensitive_data": "transcription.unavailable",
+  "model.unpriced": "transcription.unavailable",
+};
+
+/** Refusals that leave the session as `limited`: a budget, the link's or the deployment's. */
+const limitedCodes: ReadonlySet<string> = new Set([
+  "transcription.limited",
+  "transcription.over_budget",
+  "transcription.busy",
+]);
 
 /** Bytes of one second of audio at `sampleRate`: 16-bit, mono. */
 const bytesPerSecond = (sampleRate: number): number => sampleRate * 2;
@@ -237,6 +280,20 @@ const closeCodeOf = (ended: Ended): number => {
     : transcriptionCloseCodes.ended;
 };
 
+/**
+ * How a session the gateway admitted ended, as its audit entry says:
+ * cancelled when it ended before its upstream opened.
+ */
+const outcomeOf = (
+  ended: Ended,
+  session: TranscriptionSession | undefined
+): ListeningOutcome => {
+  if (ended === "failed") {
+    return "failed";
+  }
+  return session === undefined ? "cancelled" : "answered";
+};
+
 /** One page's socket, and the session it relays to. */
 class Relay {
   readonly #env: Env;
@@ -249,6 +306,8 @@ class Relay {
   #deadline: ReturnType<typeof setTimeout> | undefined = undefined;
   #session: TranscriptionSession | undefined = undefined;
   #hearer: Hearer | undefined = undefined;
+  /** What the model gateway admitted, to charge once the session ends. */
+  #listening: Listening | undefined = undefined;
   /** Seconds this socket holds of its budget, and the day it holds them on. */
   #held = 0;
   #day = "";
@@ -367,12 +426,19 @@ class Relay {
       this.#ctx.waitUntil(this.#count("page"));
       return;
     }
+    const listening = await this.#admitted(hearer, held.held);
+    if (listening === undefined) {
+      return;
+    }
     let session: TranscriptionSession;
     try {
-      session = await gatewayTranscription(this.#env).open({
+      // The page names none: what to listen out for is the store's.
+      const keyterms = await onboardingStore(this.#env).listeningTerms(
+        hearer.person
+      );
+      session = await gatewayTranscription(listening).open({
         language: start.language,
-        // The page names none: what to listen out for is the server's.
-        keyterms: [],
+        keyterms,
         sampleRate: start.sampleRate,
         ...(start.previousText === undefined
           ? {}
@@ -404,6 +470,51 @@ class Relay {
       void this.#checkAgain(hearer, openedAt);
     }, sessionRecheckMs);
     void this.#relay(session);
+  }
+
+  /**
+   * The model gateway's admission for the seconds held: the allowlist,
+   * the rules and the deployment's budgets, before anything is sent
+   * upstream. `undefined` once the session ended, refused, failed, or
+   * left by the page meanwhile; what was admitted then is given back.
+   */
+  async #admitted(
+    hearer: Hearer,
+    seconds: number
+  ): Promise<Listening | undefined> {
+    let listening: Listening;
+    try {
+      listening = await models(this.#env).listen({
+        model: transcriptionModel,
+        seconds,
+        // Open at most `maxOpenMs`, ended by the check after it.
+        openMs: maxOpenMs + sessionRecheckMs,
+        purpose,
+        trigger: hearer.by,
+        work: { onboarding: true },
+        requestId: this.#requestId,
+      });
+    } catch (error) {
+      const modelCode = modelErrors.codeOf(error);
+      const code = gatewayRefusals[modelCode ?? ""] ?? "transcription.failed";
+      log.warn("transcription.unadmitted", {
+        requestId: this.#requestId,
+        code: modelCode ?? code,
+      });
+      if (limitedCodes.has(code)) {
+        this.#refuse(transcriptionErrors.create(code));
+      } else {
+        this.#fail(transcriptionErrors.create(code));
+      }
+      return undefined;
+    }
+    this.#listening = listening;
+    if (this.#isEnded()) {
+      // The page left while it was admitted: nothing heard.
+      this.#ctx.waitUntil(this.#charge("cancelled"));
+      return undefined;
+    }
+    return listening;
   }
 
   /** Ends the session once it has been open too long, or may no longer listen. */
@@ -490,8 +601,7 @@ class Relay {
   }
 
   #refuse(error: CodedError): void {
-    const limited =
-      transcriptionErrors.codeOf(error) === "transcription.limited";
+    const limited = limitedCodes.has(transcriptionErrors.codeOf(error) ?? "");
     this.#end(limited ? "limited" : "refused", error);
   }
 
@@ -522,6 +632,22 @@ class Relay {
     if (this.#hearer !== undefined) {
       this.#ctx.waitUntil(this.#count(ended));
     }
+    if (this.#listening !== undefined) {
+      this.#ctx.waitUntil(this.#charge(outcomeOf(ended, this.#session)));
+    }
+  }
+
+  /** Seconds of audio passed on upstream. */
+  #seconds(): number {
+    return this.#rate === 0 ? 0 : this.#bytes / bytesPerSecond(this.#rate);
+  }
+
+  /**
+   * Charges what the upstream heard against the deployment's budgets, and
+   * audits it as a model call (`Listening.heard`, which never throws).
+   */
+  async #charge(outcome: ListeningOutcome): Promise<void> {
+    await this.#listening?.heard(this.#seconds(), outcome);
   }
 
   async #count(ended: Ended): Promise<void> {
@@ -534,8 +660,7 @@ class Relay {
         ...this.#note(hearer),
         who: hearer.who,
         purpose: hearer.counted,
-        seconds:
-          this.#rate === 0 ? 0 : this.#bytes / bytesPerSecond(this.#rate),
+        seconds: this.#seconds(),
         held: this.#held,
         day: this.#day,
         ended,

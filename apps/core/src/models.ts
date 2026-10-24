@@ -84,7 +84,9 @@ import {
   bindingRequestMicros,
   bindingScopes,
   budgetPeriods,
+  budgetPersonOf,
   hasBudget,
+  limitedPersonOf,
   lineageModelRequests,
   scopesFor,
 } from "./model-budgets.ts";
@@ -93,6 +95,7 @@ import type {
   Admitted as LedgerAdmitted,
   LedgerScope,
   LedgerScopeName,
+  LimitedPerson,
   Settled,
   Settlement,
 } from "./model-ledger.ts";
@@ -109,11 +112,13 @@ import { judgeCall } from "./model-rules.ts";
 import type { Judged, Refusal } from "./model-rules.ts";
 import {
   charactersOf,
+  hearingPricesOf,
+  parseHearingRef,
   parseVoiceRef,
   voicePricesOf,
   wordsOf,
 } from "./voice-models.ts";
-import type { VoiceRef } from "./voice-models.ts";
+import type { HearingRef, VoiceRef } from "./voice-models.ts";
 import { askAgainMs } from "./workflows/admission.ts";
 import { quotaPolicy } from "./workflows/quotas.ts";
 
@@ -245,16 +250,19 @@ const parseModelRef = (ref: string): ModelRef | undefined => {
 };
 
 /**
- * A model the gateway offers: a text model of pi's catalog, or a voice
- * model of our own (voice-models.ts), which only speech takes
- * (`models(env).speak`). Each check stays its own, so no text call can
- * name a voice model, nor a speech call a text model.
+ * A model the gateway offers: a text model of pi's catalog, a voice model
+ * of our own (voice-models.ts), which only speech takes
+ * (`models(env).speak`), or a transcription model of our own, which only
+ * listening takes (`models(env).listen`). Each check stays its own, so no
+ * call of one kind can name a model of another.
  */
 const modelRefSchema = z
   .string()
   .refine(
     (ref) =>
-      parseModelRef(ref) !== undefined || parseVoiceRef(ref) !== undefined,
+      parseModelRef(ref) !== undefined ||
+      parseVoiceRef(ref) !== undefined ||
+      parseHearingRef(ref) !== undefined,
     { message: "A <provider>/<model> the gateway offers" }
   );
 
@@ -843,7 +851,8 @@ interface Route extends Admitted {
    * The scopes a provider request sent now counts against, in this month,
    * its run lineage's limited by the quota policy in force now, and that
    * policy's generation (none for a call with no lineage). Throws when the
-   * policy can't be read.
+   * policy, or the teams of the person it is made for, can't be read:
+   * nothing is admitted without the limits they give.
    */
   scopesNow: () => Promise<{
     period: string;
@@ -851,6 +860,11 @@ interface Route extends Admitted {
     policyGeneration: number | undefined;
     /** Whose shares of the requests in flight it takes, under the policy now. */
     fair: Fairness;
+    /**
+     * The person it is made for, and their teams, whose limit the ledger
+     * reserves it against; none for a call made for nobody.
+     */
+    person: LimitedPerson | undefined;
   }>;
   /**
    * What the call's provider requests may reserve together, under its
@@ -880,6 +894,12 @@ interface Route extends Admitted {
    * it, or why it can't be bounded (`textBound`).
    */
   bound: (body: unknown) => RequestBound | { held: Refusal };
+  /**
+   * How long a provider request holds its shares of the requests in
+   * flight once admitted, below the ledger's most: a live
+   * transcription's not at all (`listen`).
+   */
+  leaseMs?: number;
 }
 
 /** The most one provider request may use: its prompt, and its answer. */
@@ -905,6 +925,7 @@ type Admitting = Pick<
   | "notes"
   | "place"
   | "bound"
+  | "leaseMs"
 >;
 
 interface Request extends Route {
@@ -1110,7 +1131,10 @@ const retryAfterSeconds = (
   heldBy: readonly LedgerScopeName[],
   heldUntil: number
 ): number => {
-  if (!(isThePerson(trigger) && heldBy.every((scope) => scope === "user"))) {
+  // The limit admins set for the person counts their own calls, as their
+  // user scope does.
+  const own = heldBy.every((scope) => scope === "user" || scope === "person");
+  if (!(isThePerson(trigger) && own)) {
     return busyRetry.sharedSeconds;
   }
   const waitMs = heldUntil - Date.now();
@@ -1462,7 +1486,7 @@ const admitRequest = async (
   if ("held" in now) {
     return now;
   }
-  const { period, scopes, policyGeneration, fair } = now;
+  const { period, scopes, policyGeneration, fair, person } = now;
   const budgeted = hasBudget(scopes) || perRequest !== undefined;
   if (price === undefined && budgeted) {
     return { held: { code: "model.unpriced" } };
@@ -1497,8 +1521,10 @@ const admitRequest = async (
       actor: call.trigger,
       deadline: callDeadline,
       reconcileAt: callDeadline + reconcileGraceMs,
+      ...(route.leaseMs === undefined ? {} : { leaseMs: route.leaseMs }),
       ...(policyGeneration === undefined ? {} : { policyGeneration }),
       fair,
+      ...(person === undefined ? {} : { person }),
     });
     if ("policyBehind" in admitted) {
       if (!retried) {
@@ -2489,6 +2515,10 @@ const scopesNowOf = (
     // One clock for both, so a request at a month's last instant never
     // counts its day in one month and its month in the next.
     const { month, day } = budgetPeriods(env);
+    // The person's teams as core's records have them now, so a person
+    // moved between teams is held to the right limit from their next
+    // request.
+    const person = await limitedPersonOf(env, budgetPersonOf(call));
     return {
       period: month,
       scopes: scopesOn(
@@ -2504,6 +2534,7 @@ const scopesNowOf = (
       // holds through an outage.
       policyGeneration: policy.generation,
       fair: { place, subject, resource, shares: modelSharesOf(policy) },
+      person,
     };
   };
 };
@@ -3435,6 +3466,26 @@ const recordSpeech = async (
   );
 };
 
+// Listening: a transcription model writes down what someone says
+// (voice-models.ts), live over a socket (transcription.ts), or from a
+// recording. It goes through the gateway as speech does, as what is heard
+// is interview content: the allowlist and the rules judge it before
+// anything is sent, failing closed; the ledger admits it against the
+// budgets at its price per second, for the most it may hear, before the
+// upstream is opened; and the audit log records it once it ended, with
+// the seconds heard and what they cost, never anything heard. The caller
+// reaches the provider only through the route its admission hands it
+// (`Listening.route`), and is held to the seconds admitted.
+//
+// One provider request a listening, whatever its length: its reservation
+// is all it may hear, charged what it heard once it ended (`heard`), or
+// in full should it never say so (the ledger's reconciliation). Unlike a
+// text model's request it holds no share of the requests in flight while
+// it is open (`listeningLeaseMs`): a socket open for minutes would
+// otherwise keep Stephen's own turns, and every chat, from the client's
+// share. ElevenLabs's own limit on sockets at once, the relay's per link,
+// and the router's per address bound how many are open.
+
 /** How the gateway reaches the voice provider, for a request of one's own. */
 export interface VoiceGatewayRoute {
   /** `https://workers-binding.ai/ai-gateway/gateways/<gateway>/<provider>`. */
@@ -3445,39 +3496,264 @@ export interface VoiceGatewayRoute {
 }
 
 /**
- * Where live transcription (transcription.ts) reaches ElevenLabs at the
+ * Where a listening the gateway admitted reaches ElevenLabs at the
  * deployment's gateway: the path speech takes (`voice.provider`), over
  * the AI binding, with the gateway's token where one is set
- * (`speechRequest`). `undefined`, so nothing is sent, where the config
- * doesn't parse, allows no voice model (the client agreed to none), there
- * is no AI binding (plain workerd), or the deployment keeps every call in
- * the EU and ElevenLabs would be reached at its native host.
+ * (`speechRequest`).
  */
-export const voiceGatewayRoute = (
-  env: ModelsEnv
-): VoiceGatewayRoute | undefined => {
-  const config = modelGatewayConfig(env);
-  if (
-    config === undefined ||
-    typeof env.AI?.fetch !== "function" ||
-    !config.models.some((ref) => parseVoiceRef(ref) !== undefined)
-  ) {
-    return undefined;
-  }
-  const provider = config.voice?.provider ?? nativeVoiceProvider;
-  if (deploymentStaysInEu(env) && provider === nativeVoiceProvider) {
-    return undefined;
-  }
+const voiceGatewayRoute = (
+  env: ModelsEnv,
+  ai: AiBinding,
+  config: ModelGatewayConfig
+): VoiceGatewayRoute => {
   const token = env.AI_GATEWAY_TOKEN;
   return {
-    base: `https://workers-binding.ai/ai-gateway/gateways/${config.gateway}/${provider}`,
-    transport: createAiBindingFetch(env.AI),
+    base: `https://workers-binding.ai/ai-gateway/gateways/${config.gateway}/${config.voice?.provider ?? nativeVoiceProvider}`,
+    transport: createAiBindingFetch(ai),
     headers: {
       "cf-aig-authorization": `Bearer ${
         token === undefined || token === ""
           ? CLOUDFLARE_GATEWAY_BINDING_AUTH_SENTINEL
           : token
       }`,
+    },
+  };
+};
+
+/** The most seconds one listening may hear: above any socket's or recording's. */
+const maxListeningSeconds = 60 * 60;
+
+/** The longest one listening may stay open. */
+const maxListeningOpenMs = 60 * 60 * 1000;
+
+/**
+ * How long a listening holds its shares of the requests in flight once
+ * admitted: not at all. It waits for one to be admitted, as any request
+ * does, and gives it back at once.
+ */
+const listeningLeaseMs = 0;
+
+const listeningSchema = z.strictObject({
+  model: sessionShape.model,
+  purpose: sessionShape.purpose,
+  trigger: sessionShape.trigger,
+  provenance: sessionShape.provenance,
+  connections: sessionShape.connections,
+  work: sessionShape.work,
+  requestId: sessionShape.requestId,
+  /**
+   * The most seconds of audio it may hear: what the ledger reserves, and
+   * what the caller holds the upstream to.
+   */
+  seconds: z.int().positive().max(maxListeningSeconds),
+  /** How long it may stay open, in ms: when it is charged in full, if never settled. */
+  openMs: z.int().positive().max(maxListeningOpenMs),
+});
+type ListeningSession = z.output<typeof listeningSchema>;
+
+/** A transcription model asked to listen. */
+export type ListeningCall = z.input<typeof listeningSchema> & {
+  /** Where the call works: required, so no caller can leave it out. */
+  work: NonNullable<z.input<typeof listeningSchema>["work"]>;
+};
+
+/** How a listening ended, as the audit log records it. */
+export type ListeningOutcome = "answered" | "failed" | "cancelled";
+
+/** A listening the gateway admitted: the way to the provider, and how it is charged. */
+export interface Listening {
+  /** The model as its provider's API names it, such as `scribe_v2_realtime`. */
+  modelId: string;
+  route: VoiceGatewayRoute;
+  /** The seconds admitted: the most it may hear. */
+  seconds: number;
+  /**
+   * Charges the seconds it heard (whole seconds, rounded up, and never
+   * more than admitted), gives the rest of its reservation back, and
+   * audits it as a model call. Once: a second call does nothing. Never
+   * throws.
+   */
+  heard: (seconds: number, outcome: ListeningOutcome) => Promise<void>;
+}
+
+/** What the audit log records of one listening, however it ended. */
+interface HeardRecord {
+  /** Seconds charged. */
+  seconds: number;
+  cost: number;
+  outcome: Outcome;
+  ledger: Ledgered;
+}
+
+/** A listening's audit entry: a `model.call`, as any model call's. */
+const listeningEntry = (
+  call: ListeningSession,
+  ref: HearingRef,
+  judged: Judged,
+  recorded: HeardRecord
+): AuditEntry =>
+  keepingProvenance(call.provenance, (provenance, dropped) => ({
+    actor: call.trigger,
+    action: "model.call",
+    requestId: call.requestId,
+    provenance,
+    // A transcription model counts seconds heard, not tokens (`seconds`).
+    model: {
+      provider: ref.provider,
+      model: ref.id,
+      inputTokens: 0,
+      outputTokens: 0,
+    },
+    cost: { amount: recorded.cost, currency: "USD" },
+    detail: {
+      purpose: call.purpose,
+      outcome: recorded.outcome,
+      attempt: 1,
+      seconds: recorded.seconds,
+      ledger: recorded.ledger.state,
+      ledgerRequests: recorded.ledger.requests,
+      ledgerCharged: recorded.ledger.charged,
+      ledgerHeld: recorded.ledger.held,
+      euOnly: judged.euOnly ?? null,
+      sensitive: judged.sensitive ?? null,
+      provenanceDropped: dropped,
+      chat: chatOf(call),
+      ...workflowRunOf(call),
+    },
+  }));
+
+/** The most a listening can add to its audit event (`largestRecord`). */
+const largestHeard: HeardRecord = {
+  seconds: maxListeningSeconds,
+  cost: Number.MAX_VALUE,
+  outcome: "invalid_output",
+  ledger: largestRecord.ledger,
+};
+
+/** Seconds heard as the ledger counts them: all of them input. */
+const secondCounts = (seconds: number): TokenCounts => ({
+  input: seconds,
+  output: 0,
+  cacheRead: 0,
+  cacheWrite: 0,
+});
+
+/** The seconds a listening is charged: whole, rounded up, at most `most`. */
+const chargedSeconds = (heard: number, most: number): number =>
+  Number.isFinite(heard) ? Math.min(most, Math.ceil(Math.max(0, heard))) : most;
+
+/**
+ * Checks a listening against the deployment's config and rules, as
+ * `admitSpeech` does a line, and has the ledger admit it for the most it
+ * may hear, before anything is sent. A transcription model the allowlist
+ * doesn't list (or a voice model, or a text model), one the rules don't
+ * let it use, or a budget with no room refuses it, audited as a refused
+ * model call. Fails closed: a config or rules that don't parse, or no AI
+ * binding (plain workerd), send nothing.
+ */
+const listenThrough = async (
+  env: ModelsEnv,
+  fields: ListeningCall,
+  signal: AbortSignal | undefined
+): Promise<Listening> => {
+  const call = parseCall(listeningSchema, fields);
+  const config = modelGatewayConfig(env);
+  const rules = modelRules(env);
+  const ai = env.AI;
+  if (
+    config === undefined ||
+    rules === undefined ||
+    ai === undefined ||
+    typeof ai.fetch !== "function"
+  ) {
+    throw modelErrors.create("model.unconfigured");
+  }
+  const ref = config.models.includes(call.model)
+    ? parseHearingRef(call.model)
+    : undefined;
+  if (ref === undefined) {
+    return await refuse(env, call, { code: "model.not_allowed" });
+  }
+  try {
+    createAuditEvent(
+      listeningEntry(call, ref, largestJudged, largestHeard),
+      "core"
+    );
+  } catch {
+    // Never expected, as for a text model's call (`admit`).
+    throw modelErrors.create("model.invalid_call");
+  }
+  const verdict = await judgeCall(env, rules, call);
+  if (!verdict.ok) {
+    return await refuse(env, call, verdict);
+  }
+  // The config already keeps an EU model off ElevenLabs's native host
+  // (deployment-config.ts); a call that must stay in the EU never reaches
+  // it either, whatever the config says.
+  const { euOnly } = verdict.judged;
+  if (
+    euOnly !== undefined &&
+    (config.voice?.provider ?? nativeVoiceProvider) === nativeVoiceProvider
+  ) {
+    return await refuse(env, call, { code: "model.eu_only", because: euOnly });
+  }
+  const price = await pinnedPrice(hearingPricesOf(ref));
+  if (price === undefined) {
+    // Never expected: the transcription catalog's prices are ours.
+    return await refuse(env, call, { code: "model.unpriced" });
+  }
+  const place = crypto.randomUUID();
+  const admitting: Admitting = {
+    env,
+    call,
+    price,
+    perRequest: undefined,
+    // What it may hear is all it is billed for, known before it opens.
+    bound: () => ({ inputTokens: call.seconds, outputTokens: 0 }),
+    scopesNow: scopesNowOf(env, call, place, (_day, lineageRequests) =>
+      scopesFor(rules.budgets, call, lineageRequests)
+    ),
+    disclose: shareIdentity(call).disclose,
+    notes: Promise.resolve(),
+    place,
+    leaseMs: listeningLeaseMs,
+  };
+  const admitted = await admitWaiting(admitting, null, {
+    endsAt: Date.now() + call.openMs,
+    signal: signal ?? new AbortController().signal,
+  });
+  if ("held" in admitted) {
+    return await refuse(env, call, admitted.held);
+  }
+  let ended = false;
+  return {
+    modelId: ref.id,
+    route: voiceGatewayRoute(env, ai, config),
+    seconds: call.seconds,
+    heard: async (heard, outcome) => {
+      if (ended) {
+        return;
+      }
+      ended = true;
+      const seconds = chargedSeconds(heard, call.seconds);
+      const settled = await settleAdmitted(admitting, admitted, {
+        by: "usage",
+        tokens: secondCounts(seconds),
+      });
+      try {
+        await keepAuditEvent(
+          env,
+          drizzle(env.DB),
+          listeningEntry(call, ref, verdict.judged, {
+            seconds,
+            cost: costDollars(price, secondCounts(seconds)),
+            outcome,
+            ledger: ledgerOf([settled]),
+          })
+        );
+      } catch (error) {
+        log.error("model.listening_unaudited", errorFields(error));
+      }
     },
   };
 };
@@ -3599,6 +3875,13 @@ const agentModel = async (
  * trigger, work }, signal)` has a voice model say a line: judged by the
  * same rules, charged per character against the same budgets, and
  * audited like a call. It returns the audio and when each word is said.
+ *
+ * `await models(env).listen({ model, seconds, openMs, purpose, trigger,
+ * work }, signal)` admits a transcription model to hear at most `seconds`
+ * of audio: judged by the same rules, reserved per second against the
+ * same budgets, refused and audited like a call when they don't let it
+ * through. It returns the way to the provider, and `heard`, which charges
+ * what was heard and audits it once it ended.
  */
 export const models = (env: ModelsEnv) => ({
   call: async <Output = undefined>(
@@ -3610,4 +3893,8 @@ export const models = (env: ModelsEnv) => ({
   ): Promise<AgentModel> => await agentModel(env, session, provenance),
   speak: async (call: SpeechCall, signal?: AbortSignal): Promise<Speech> =>
     await speakLine(env, call, signal),
+  listen: async (
+    call: ListeningCall,
+    signal?: AbortSignal
+  ): Promise<Listening> => await listenThrough(env, call, signal),
 });

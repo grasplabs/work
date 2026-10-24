@@ -71,6 +71,7 @@ import {
   RotateSecrets,
   SettingUpNow,
   SignInChange,
+  TeamsBotSecretChange,
   useRefreshSetup,
 } from "./setup-actions.tsx";
 import type { Refresh } from "./setup-actions.tsx";
@@ -1091,6 +1092,11 @@ const eventWords = ({
     case "client.sign_in": {
       return "Changed how its people sign in.";
     }
+    case "client.sealed_secret": {
+      return target === "TEAMS_BOT_SECRET"
+        ? "Set its Teams bot's secret."
+        : "Set one of its secrets.";
+    }
     case "client.apply_settings": {
       return "Applied its settings.";
     }
@@ -1679,6 +1685,54 @@ const Releases = ({
   );
 };
 
+/** The client's own Teams bot: whether its secret is set, and setting it. */
+const TeamsBotSection = ({
+  clientId,
+  setup,
+  refresh,
+}: {
+  clientId: string;
+  setup: ClientSetup;
+  refresh: Refresh;
+}) => {
+  const botSecret = setup.sealedSecrets.find(
+    ({ name }) => name === "TEAMS_BOT_SECRET"
+  );
+  return (
+    <SetupSection
+      description="The client secret of its own Teams bot, kept sealed by the admin and given only to its connect, with each deploy."
+      title="Its Teams bot"
+    >
+      {botSecret === undefined ? (
+        <Quiet>No secret set.</Quiet>
+      ) : (
+        <Facts
+          rows={[
+            {
+              label: "Secret",
+              value: `Set on ${dayOf(botSecret.setAt)} by ${botSecret.setBy}`,
+            },
+            ...(setup.configPending
+              ? [
+                  {
+                    label: "Live",
+                    value: "With the next deploy",
+                    attention: true,
+                  },
+                ]
+              : []),
+          ]}
+        />
+      )}
+      <TeamsBotSecretChange
+        clientId={clientId}
+        refresh={refresh}
+        set={botSecret !== undefined}
+      />
+    </SetupSection>
+  );
+};
+
 const Settings = ({
   clientId,
   setup,
@@ -1789,6 +1843,9 @@ const Settings = ({
           <RotateSecrets clientId={clientId} refresh={refresh} />
         )}
       </SetupSection>
+      {client === null ? null : (
+        <TeamsBotSection clientId={clientId} refresh={refresh} setup={setup} />
+      )}
     </>
   );
 };
