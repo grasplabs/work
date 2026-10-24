@@ -1051,7 +1051,7 @@ describe("a chat's Knowledge", setUpTime, () => {
       ifVersion: 0,
     });
     const recallStep = codeStep(
-      `export default async (self, env) => { const outcome = async (asked) => { try { const pack = await asked; return pack.items.length; } catch (error) { return error.code ?? String(error); } }; return [await outcome(env.knowledge.recall({ query: ${JSON.stringify(word)} })), await outcome(env.knowledge.recall({ query: ${JSON.stringify(word)}, filters: { collectionIds: [${JSON.stringify(handbook)}] } }))]; };`
+      `export default async (self, env) => { const outcome = async (asked) => { try { const pack = await asked; return pack.items.length; } catch (error) { return error.code ?? String(error); } }; return [await outcome(env.brain.recall({ query: ${JSON.stringify(word)} })), await outcome(env.brain.recall({ query: ${JSON.stringify(word)}, filters: { collectionIds: [${JSON.stringify(handbook)}] } }))]; };`
     );
     const { stub, chat, ask, agent } = await chatOf(
       person.userId,
