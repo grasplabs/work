@@ -17,9 +17,8 @@ import type { Page, Route, WebSocketRoute } from "@playwright/test";
 import { z } from "zod";
 
 import { test } from "./csp.ts";
-import { interviewLinkOf } from "./interview-link.ts";
-import { apiOf, signInStaff } from "./people.ts";
-import type { Person } from "./people.ts";
+import { invited } from "./interview-turns.ts";
+import { signInStaff } from "./people.ts";
 
 // Stephen's ears, end to end (GRA-381): someone who chose to talk is heard
 // through the browser's fake microphone, which plays a recorded voice over
@@ -90,33 +89,6 @@ test.use({
     ],
   },
 });
-
-/** Today, as core's plan reads it (UTC). */
-const today = (): string => new Date().toISOString().slice(0, 10);
-
-/** Someone in a team of their own, with their interview link out; their link's path. */
-const invited = async (
-  staff: Person,
-  person: string,
-  name: string
-): Promise<string> => {
-  const { core, api } = apiOf(staff);
-  try {
-    await api.onboarding.saveRoster({
-      teams: [{ id: `team-${person}`, name: "Finance", lead: null }],
-      people: [{ id: person, name, team: `team-${person}` }],
-    });
-    await api.onboarding.savePlan({ start: today() });
-    await api.onboardingStaff.setAgreements({
-      processing: true,
-      assessment: true,
-      council: "none",
-    });
-  } finally {
-    core[Symbol.dispose]();
-  }
-  return await interviewLinkOf(person);
-};
 
 const question =
   "Hi, I'm Stephen, an AI. What do you do first with an invoice?";
@@ -287,6 +259,65 @@ const watchTimes = async (page: Page, words: string): Promise<void> => {
   }, words);
 };
 
+/** What the loop tells (`grasp:interview-loop`), as far as this test reads it. */
+const loopSchema = z.array(
+  z.union([
+    z.object({
+      happened: z.object({
+        type: z.string(),
+        at: z.number(),
+        stretch: z.number().optional(),
+      }),
+    }),
+    z.object({ did: z.object({ type: z.string() }) }),
+  ])
+);
+
+/** Notes on `window.loopEvents` what the interview's loop tells. */
+const watchLoop = async (page: Page): Promise<void> => {
+  await page.addInitScript(() => {
+    const told: unknown[] = [];
+    // `loopEventName` in apps/web/src/interview/loop.ts.
+    window.addEventListener("grasp:interview-loop", (event) => {
+      if (event instanceof CustomEvent) {
+        told.push(event.detail);
+      }
+    });
+    Object.assign(window, { loopEvents: told });
+  });
+};
+
+/** The ear kept at most this much of what it heard before a stretch began (ear.ts). */
+const keptMs = 1000;
+
+/**
+ * The first stretch, in ms on the page's clock: how long it went on, and
+ * how much the ear had heard before it began, since it last began to listen.
+ */
+const heardOf = (
+  told: z.infer<typeof loopSchema>
+): { span: number; before: number } => {
+  const happened = told.flatMap((event) =>
+    "happened" in event ? [event.happened] : []
+  );
+  const start = happened.find(
+    ({ type, stretch }) => type === "stretch-start" && stretch === 1
+  );
+  const end = happened.find(
+    ({ type, stretch }) => type === "stretch-end" && stretch === 1
+  );
+  const listened = happened.findLast(
+    ({ type, at }) => type === "listen" && at <= (start?.at ?? 0)
+  );
+  if (start === undefined || end === undefined || listened === undefined) {
+    return { span: Number.NaN, before: Number.NaN };
+  }
+  return {
+    span: end.at - start.at,
+    before: Math.min(start.at - listened.at, keptMs),
+  };
+};
+
 /** Opens the link and starts the interview by talking, through the sound check. */
 const startTalking = async (page: Page, link: string): Promise<void> => {
   await page.goto(link);
@@ -312,6 +343,7 @@ test("their words show while they talk, and all of them a moment after they stop
   const asked = await turns(page);
   const line = await liveLine(page);
   await watchTimes(page, said);
+  await watchLoop(page);
 
   await startTalking(page, link);
 
@@ -330,11 +362,21 @@ test("their words show while they talk, and all of them a moment after they stop
   );
   const commit = times.commits[0] ?? Number.NaN;
   const shown = times.shown.find((at) => at >= commit) ?? Number.NaN;
+  const heard = heardOf(
+    loopSchema.parse(
+      await page.evaluate((): unknown => Reflect.get(window, "loopEvents"))
+    )
+  );
   expect({
     refused: line.refused,
     started: line.starts >= 1,
-    // A stretch goes out with the second before it, so it is more than the voice alone.
-    stretch: (line.stretches[0] ?? 0) >= speaksFor * secondBytes * 0.8,
+    // A stretch goes out with what was heard before it began, up to a
+    // second, so it is more than its own voice. Where the voice already
+    // ran when he stopped and the ear began to listen, only that much was
+    // heard of it: the microphone plays it over and over, whatever he does.
+    stretch:
+      (line.stretches[0] ?? 0) >=
+      ((heard.span + heard.before) / 1000) * secondBytes * 0.8,
     answer: answer?.lines.at(-1),
     inTime: shown - commit <= 500,
   }).toStrictEqual({
