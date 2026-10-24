@@ -20,6 +20,8 @@
   },
   "dependencies": {
     "@better-auth/sso": "catalog:",
+    "@chat-adapter/gmail": "catalog:",
+    "@chat-adapter/slack": "catalog:",
     "@chat-adapter/teams": "catalog:",
     "@earendil-works/pi-agent-core": "catalog:",
     "@earendil-works/pi-ai": "catalog:",
@@ -50,6 +52,7 @@
     "@grasp-os/web": "workspace:*",
     "@types/react": "catalog:",
     "@types/semver": "catalog:",
+    "axios": "catalog:",
     "drizzle-kit": "catalog:",
     "react": "catalog:",
     "vite-plus": "catalog:",

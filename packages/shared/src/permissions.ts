@@ -269,6 +269,17 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   "EMAIL",
   "ENTRA_CLIENT_SECRET",
   "FILES",
+  // Stephen's own Gmail mailbox and the Pub/Sub push that tells core of
+  // new mail (core's src/channels/gmail.ts), its tokens connect's
+  // (connect's src/channels.ts).
+  "GMAIL_CLIENT_ID",
+  "GMAIL_CLIENT_SECRET",
+  "GMAIL_MAILBOX",
+  "GMAIL_PUBSUB_AUDIENCE",
+  "GMAIL_PUBSUB_SERVICE_ACCOUNT",
+  "GMAIL_PUBSUB_SUBSCRIPTION",
+  "GMAIL_PUBSUB_TOPIC",
+  "GMAIL_REFRESH_TOKEN",
   "GOOGLE_CLIENT_ID",
   "GOOGLE_CLIENT_SECRET",
   // The directory's Google client (connect's providers.ts).
@@ -313,6 +324,10 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   "SANDBOX_HOST",
   "SANDBOX_IN_PROCESS",
   "SIGN_IN",
+  // The client's own Slack app (core's src/channels/slack.ts, connect's
+  // src/channels.ts).
+  "SLACK_BOT_TOKEN",
+  "SLACK_SIGNING_SECRET",
   // An App's statistics (core's src/statistics.ts), next to its permissions.
   "STATISTICS",
   "STATISTICS_POINT_LIMITS",

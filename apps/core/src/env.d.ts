@@ -14,6 +14,24 @@ interface __BaseEnv_Env {
    * from Teams is refused.
    */
   TEAMS_BOT_ID?: string;
+  /**
+   * The client's Slack app's signing secret, a Worker secret: every request
+   * Slack sends the app is signed with it (src/channels/slack.ts). Unset,
+   * Slack's door answers 404.
+   */
+  SLACK_SIGNING_SECRET?: string;
+  /**
+   * Stephen's own Gmail mailbox, which people email, and the Pub/Sub push
+   * that tells its door of new mail (src/channels/gmail.ts): the push's
+   * audience, the service account it pushes as, its subscription and the
+   * topic the mailbox's watch publishes to. Until the first four are set,
+   * Gmail's door answers 404. The mailbox's token is connect's.
+   */
+  GMAIL_MAILBOX?: string;
+  GMAIL_PUBSUB_AUDIENCE?: string;
+  GMAIL_PUBSUB_SERVICE_ACCOUNT?: string;
+  GMAIL_PUBSUB_SUBSCRIPTION?: string;
+  GMAIL_PUBSUB_TOPIC?: string;
   GOOGLE_CLIENT_SECRET?: string;
   /** The model gateway (src/models.ts): JSON. */
   MODEL_GATEWAY?: unknown;
