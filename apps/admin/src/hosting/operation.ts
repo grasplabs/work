@@ -83,6 +83,7 @@ import { deriveRouterSecret } from "@grasp-os/shared/router";
 import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 
+import { teamsBotOf, teamsBotVars } from "../clients/teams-bot.ts";
 import { findD1Database } from "../cloudflare/accounts.ts";
 import type { CloudflareApi } from "../cloudflare/api.ts";
 import { ensureSendingDomain } from "../cloudflare/email-sending.ts";
@@ -367,6 +368,7 @@ interface Loaded {
     generation: number;
     rotationLiveAt: Date | null;
     signIn: string | null;
+    teamsBot: string | null;
   };
 }
 
@@ -560,6 +562,20 @@ const coreVarsOf = async (
   );
 };
 
+/**
+ * The vars Worker `app` runs with: core's (`coreVarsOf`, read once and
+ * passed as `core`), and the client's Teams bot on connect and core, as a
+ * deploy gives them (src/clients/teams-bot.ts).
+ */
+const varsOf = (
+  loaded: Loaded,
+  app: App,
+  core: Readonly<Record<string, unknown>>
+): Record<string, unknown> => ({
+  ...(app === "core" ? core : {}),
+  ...teamsBotVars(app, teamsBotOf(loaded.client.teamsBot)),
+});
+
 /** The secrets Worker `app` runs with: the client's derived and sealed ones, and the shared ones it needs. */
 const secretsOf = async (context: ProvisionContext, loaded: Loaded, app: App) =>
   await workerSecrets(
@@ -595,6 +611,7 @@ const load = async (
       generation: clients.generation,
       rotationLiveAt: clients.rotationLiveAt,
       signIn: clients.signIn,
+      teamsBot: clients.teamsBot,
     })
     .from(clients)
     .where(eq(clients.id, held.clientId))
@@ -665,7 +682,7 @@ const validate = async (
     assertRunnable(loaded, worker);
     // oxlint-disable-next-line no-await-in-loop -- two Workers
     const secrets = await secretsOf(context, loaded, app);
-    checkBindingNames(worker, app === "core" ? vars : {}, secrets);
+    checkBindingNames(worker, varsOf(loaded, app, vars), secrets);
   }
   await assertHolds(db, held);
   await allocateClientResources(db, "system", {
@@ -755,7 +772,11 @@ const upload = async (
     lockMailSender(binding, mailSender);
   }
   const target = targetOf(loaded, inventory, app);
-  const vars = app === "core" ? await coreVarsOf(context, loaded) : {};
+  const vars = varsOf(
+    loaded,
+    app,
+    app === "core" ? await coreVarsOf(context, loaded) : {}
+  );
   const fingerprint = await keyedHash(
     await hkdfHmacKey(context.secrets.clientKey, uploadFingerprintPurpose, [
       "sign",
