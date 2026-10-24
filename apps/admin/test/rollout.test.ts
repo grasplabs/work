@@ -7,7 +7,11 @@ import { z } from "zod";
 
 import { applySettings } from "../src/clients/apply.ts";
 import { clientSettings } from "../src/clients/queries.ts";
-import { SettingsError, setSignIn } from "../src/clients/settings.ts";
+import {
+  SettingsError,
+  setSealedSecret,
+  setSignIn,
+} from "../src/clients/settings.ts";
 import { cloudflareApi } from "../src/cloudflare/api.ts";
 import { deployVersion, deployVersions } from "../src/cloudflare/workers.ts";
 import { act, adminDatabase } from "../src/db/act.ts";
@@ -16,6 +20,7 @@ import {
   clientDeploys,
   clientRuns,
   clients,
+  clientSealedSecrets,
   clientWorkers,
   rollouts,
   rolloutTargets,
@@ -2613,6 +2618,59 @@ describe("controlling a rollout", () => {
     });
   });
 
+  it("rolls a client back without following its core's redirect, and audits that the notice wasn't taken", async () => {
+    const before = await importedRelease("feat(core): the release before");
+    const internal = await activeClient(0, before);
+    const previous = await recordedVersionsOf(internal.clientId);
+    const release = await importedRelease("feat(core): an older core");
+    await using run = await followRollouts();
+    const rolloutId = await rollOut(release, { scope: "ring", ring: 0 });
+    await run.waitForStatus("complete");
+    // A core, or a hop in front of it, that sends the signed notice on.
+    internal.account.redirectsTo = "https://elsewhere.example";
+    const warn = vi.spyOn(console, "warn").mockReturnValue();
+    await using rollbacks = await followRollbacks();
+
+    try {
+      await rollbacks.rollBack(rolloutId, internal.clientId);
+    } finally {
+      warn.mockRestore();
+    }
+
+    const unrecorded = await db
+      .select({ target: auditEvents.target, detail: auditEvents.detail })
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.clientId, internal.clientId),
+          eq(auditEvents.action, "rollout.activity_unrecorded")
+        )
+      );
+    expect({
+      live: await liveVersionsOf(internal.clientId, internal.account),
+      targets: await targetsOf(rolloutId),
+      notices: internal.account.notices,
+      redirected: cloudflare.redirected(),
+      unrecorded: unrecorded.map(({ target, detail }) => ({
+        target,
+        detail: parsedDetail(detail),
+      })),
+    }).toStrictEqual({
+      live: previous,
+      targets: {
+        [internal.clientId]: { ring: 0, status: "rolled_back", error: null },
+      },
+      notices: [],
+      redirected: [],
+      unrecorded: [
+        {
+          target: previous.core,
+          detail: { what: "rollback", error: "core_307" },
+        },
+      ],
+    });
+  });
+
   it("rolls a client back even when the keys to tell its core are missing, auditing that it didn't", async () => {
     const before = await importedRelease("feat(core): the release before");
     const internal = await activeClient(0, before);
@@ -3201,6 +3259,71 @@ describe("controlling a rollout", () => {
         .toSorted((a, b) => a.clientId.localeCompare(b.clientId)),
       unreadable: "secrets_store_incomplete",
       state: rolledOut,
+    });
+  });
+
+  it("rolls a client back to versions carrying its Teams bot secret only while that is the one the admin holds", async () => {
+    const before = await importedRelease("feat(core): runs its own bot");
+    const internal = await activeClient(0, before);
+    const setBotSecret = async (value: string): Promise<void> => {
+      await setSealedSecret(env, staff, {
+        clientId: internal.clientId,
+        name: "TEAMS_BOT_SECRET",
+        value,
+      });
+    };
+    await setBotSecret("first~bot.Secret_0123456789");
+    // Its next deploy carries it: the versions a rollback goes back to.
+    await runDeploy(
+      await deployContext(env),
+      await startDeploy(db, staff, internal.clientId, before)
+    );
+    const previous = await recordedVersionsOf(internal.clientId);
+    const release = await importedRelease("feat(core): runs it too");
+    await using run = await followRollouts();
+    await using rollbacks = await followRollbacks();
+    const rolloutId = await rollOut(release, { scope: "ring", ring: 0 });
+    await run.waitForStatus("complete");
+    const counts = deploymentCounts(internal.account);
+
+    // Staff replace it, and may revoke the first in the client's Entra.
+    await setBotSecret("second~bot.Secret_0123456789");
+    const replaced = await codeOf(
+      rollbackClient(env, staff, rolloutId, internal.clientId)
+    );
+    const untouched = deploymentCounts(internal.account);
+    // The first is set again: what the previous versions carry is current.
+    await setBotSecret("first~bot.Secret_0123456789");
+    const sealedNow = async () =>
+      await db
+        .select({ sealed: clientSealedSecrets.sealed })
+        .from(clientSealedSecrets)
+        .where(eq(clientSealedSecrets.clientId, internal.clientId));
+    const checked = await sealedNow();
+    // Checked, and about to put the versions back: a replacement now would
+    // be passed over by them.
+    await rollbacks.startUntil(rolloutId, internal.clientId, "plan");
+    const midway = await codeOf(setBotSecret("third~bot.Secret_0123456789"));
+    await rollbacks.waitForAll();
+    const kept = await sealedNow();
+
+    expect({
+      replaced,
+      untouched,
+      midway,
+      kept,
+      live: await liveVersionsOf(internal.clientId, internal.account),
+      runner: await runnerOf(internal.clientId),
+      // Once it's done, it can be set again.
+      after: await codeOf(setBotSecret("third~bot.Secret_0123456789")),
+    }).toStrictEqual({
+      replaced: "sealed_secret_replaced",
+      untouched: counts,
+      midway: "client_busy",
+      kept: checked,
+      live: previous,
+      runner: null,
+      after: "resolved",
     });
   });
 

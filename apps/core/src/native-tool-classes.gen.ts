@@ -26,6 +26,9 @@ export const nativeToolClasses: Readonly<
   "microsoft": {
     "calendar.get": "read-company",
     "calendar.list": "read-company",
+    "excel.addRow": "change-company",
+    "excel.listRows": "read-company",
+    "excel.updateRow": "change-company",
     "files.list": "read-company",
     "files.read": "read-company",
     "files.search": "read-company",
@@ -35,5 +38,6 @@ export const nativeToolClasses: Readonly<
     "mail.move": "change-company",
     "mail.readAttachment": "read-company",
     "mail.send": "reach-others",
+    "mail.thread": "read-company",
   },
 };

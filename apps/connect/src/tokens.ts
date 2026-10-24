@@ -9,7 +9,12 @@ import { recordEventIf } from "./audit.ts";
 import { connections, connectionTokens } from "./db/schema.ts";
 import { isInvalidGrant, refreshTokens, revokeToken } from "./oauth-client.ts";
 import type { TokenSet } from "./oauth-client.ts";
-import { bearer, grantedAsAsked, providerFor } from "./providers.ts";
+import {
+  bearer,
+  grantedAsAsked,
+  providerFor,
+  renewalHolds,
+} from "./providers.ts";
 import type {
   Credential,
   OAuthClientCredentials,
@@ -207,7 +212,7 @@ const markDead = async (
   env: Env,
   provider: string,
   row: TokenRow,
-  reason: "invalid_grant" | "unreadable" | "scopes_changed"
+  reason: "invalid_grant" | "unreadable" | "scopes_changed" | "scopes_missing"
 ): Promise<boolean> => {
   const db = drizzle(env.DB);
   return await recordEventIf(
@@ -233,6 +238,16 @@ const markDead = async (
       db.delete(connectionTokens).where(unchanged(row)),
     ]
   );
+};
+
+/** Whether the connection keeps the rights it was granted (GRA-717). */
+const grantKept = async (env: Env, connectionId: string): Promise<boolean> => {
+  const connection = await drizzle(env.DB)
+    .select({ granted: connections.grantedScopes })
+    .from(connections)
+    .where(eq(connections.id, connectionId))
+    .get();
+  return connection?.granted !== null && connection?.granted !== undefined;
 };
 
 interface RefreshContext {
@@ -320,6 +335,22 @@ const refreshUnderLease = async (
       // (Entra can't, and its refresh token lapses unused).
       await discardMint(provider, context.client, minted);
       if (!(await markDead(env, provider.id, row, "scopes_changed"))) {
+        return undefined;
+      }
+      throw connectErrors.create("connect.connection_inactive");
+    }
+    // A connection made before its provider asked for a scope it now
+    // needs (writing workbooks) can't do what it is now asked to: it is
+    // marked for its person to reconnect it, in place, with its
+    // permissions, and consent to the new scope. One whose grant was kept
+    // was asked by its company's classes (provider-rights.ts), and a class
+    // turned on since asks it again then (class-rights.ts).
+    if (
+      !renewalHolds(provider, minted) &&
+      !(await grantKept(env, row.connectionId))
+    ) {
+      await discardMint(provider, context.client, minted);
+      if (!(await markDead(env, provider.id, row, "scopes_missing"))) {
         return undefined;
       }
       throw connectErrors.create("connect.connection_inactive");

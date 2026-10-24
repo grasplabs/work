@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "793a562e-f269-4c47-b597-a5287ac44de0",
+  "id": "6cd08406-9b41-4dba-b082-bb9254efb67e",
   "prevId": "f0c932fd-6a80-45fd-894f-a51dcdbf94ee",
   "tables": {
     "access_revocations": {
@@ -7016,52 +7016,6 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "tool_class_settings": {
-      "name": "tool_class_settings",
-      "columns": {
-        "tool_class": {
-          "name": "tool_class",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "who": {
-          "name": "who",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "teams": {
-          "name": "teams",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'[]'"
-        },
-        "changed_by": {
-          "name": "changed_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "changed_at": {
-          "name": "changed_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
     "trigger_resource_versions": {
       "name": "trigger_resource_versions",
       "columns": {
@@ -7113,9 +7067,33 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
+        },
+        "event_contract": {
+          "name": "event_contract",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "event_type": {
+          "name": "event_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
-      "indexes": {},
+      "indexes": {
+        "trigger_resource_versions_event": {
+          "name": "trigger_resource_versions_event",
+          "columns": [
+            "event_contract",
+            "event_type"
+          ],
+          "isUnique": false,
+          "where": "\"trigger_resource_versions\".\"event_contract\" IS NOT NULL"
+        }
+      },
       "foreignKeys": {
         "trigger_resource_versions_trigger_id_trigger_resources_id_fk": {
           "name": "trigger_resource_versions_trigger_id_trigger_resources_id_fk",
@@ -8360,6 +8338,28 @@
         "details_removed_at": {
           "name": "details_removed_at",
           "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "delivery_attempts": {
+          "name": "delivery_attempts",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "delivery_at": {
+          "name": "delivery_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "undeliverable": {
+          "name": "undeliverable",
+          "type": "text",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false

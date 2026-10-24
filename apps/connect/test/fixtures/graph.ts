@@ -74,6 +74,9 @@ const address = (name: string, mailbox: string) => ({
   emailAddress: { name, address: mailbox },
 });
 
+/** The number of the one message a person flagged. */
+export const flaggedMessage = 3;
+
 /** One message of `mailbox`, as a list returns it (`$select`ed fields). */
 export const messageSummary = (mailbox: string, n: number) => ({
   "@odata.etag": 'W/"CQAAABYAAABmtXf2uSv0SqAGJ5k6N7QDAAAm7mc9"',
@@ -89,6 +92,7 @@ export const messageSummary = (mailbox: string, n: number) => ({
   isDraft: false,
   hasAttachments: n === 1,
   importance: "normal",
+  flag: { flagStatus: n === flaggedMessage ? "flagged" : "notFlagged" },
   parentFolderId:
     "AQMkAGE1M2IyNGNmLTI5MTktNDUyZi1iOTVjLTc2ZjI5ZmNmZmQ2MwAuAAADZ2zAAAA=",
   conversationId: `AAQkAGE1M2IyNGNmLTI5MTktNDUyZi1iOTVjLTc2ZjI5ZmNmZmQ2MwAQAC${n}Ym9A=`,
@@ -96,8 +100,21 @@ export const messageSummary = (mailbox: string, n: number) => ({
   webLink: `https://outlook.office365.com/owa/?ItemID=${encodeURIComponent(messageId(mailbox, n))}&exvsurl=1&viewmodel=ReadMessageItem`,
 });
 
-/** A page of `mailbox`'s messages: two per page, three in all. */
-export const messagePage = (mailbox: string, skip: number) => {
+/**
+ * A page of `mailbox`'s messages: two per page, three in all; or the
+ * flagged ones only, when `flaggedOnly`.
+ */
+export const messagePage = (
+  mailbox: string,
+  skip: number,
+  flaggedOnly = false
+) => {
+  if (flaggedOnly) {
+    return {
+      "@odata.context": `https://graph.microsoft.com/v1.0/$metadata#users('${encodeURIComponent(mailbox)}')/messages(id,subject,bodyPreview)`,
+      value: [messageSummary(mailbox, flaggedMessage)],
+    };
+  }
   const numbers = skip === 0 ? [1, 2] : [3];
   return {
     "@odata.context": `https://graph.microsoft.com/v1.0/$metadata#users('${encodeURIComponent(mailbox)}')/messages(id,subject,bodyPreview)`,
@@ -106,6 +123,97 @@ export const messagePage = (mailbox: string, skip: number) => {
       ? {
           // Graph names the user its own way here, and repeats the query.
           "@odata.nextLink": `https://graph.microsoft.com/v1.0/users('${encodeURIComponent(mailbox)}')/messages?%24select=id%2csubject%2cbodyPreview&%24top=2&%24orderby=receivedDateTime+desc&%24skip=2`,
+        }
+      : {}),
+  };
+};
+
+/**
+ * A conversation of three messages: Northwind asks, the mailbox answers
+ * from its Sent Items, and Northwind asks again, unanswered. Base64, with
+ * a `+` and a `/` as Graph's conversation IDs can have.
+ */
+export const threadConversationId =
+  "AAQkAGE1M2IyNGNmLTI5MTktNDUyZi1iOTVjLTc2ZjI5ZmNmZmQ2MwAQAD+Th/9A=";
+
+/** A conversation of `longThreadLength` messages, one of them long. */
+export const longConversationId =
+  "AAQkAGE1M2IyNGNmLTI5MTktNDUyZi1iOTVjLTc2ZjI5ZmNmZmQ2MwAQADLongTh9A=";
+
+export const longThreadLength = 30;
+
+/** The text of the newest message of the long conversation. */
+// An emoji's two halves sit across the 8,000th character, where its body is cut.
+export const longBody = `${"Line of the contract under review.\r\n".repeat(222)}Total: 🧾\r\n${"Line of the contract under review.\r\n".repeat(78)}End.`;
+
+/** Sent Items' ID. */
+const sentItemsId =
+  "AQMkAGE1M2IyNGNmLTI5MTktNDUyZi1iOTVjLTc2ZjI5ZmNmZmQ2MwAuAAADSentAAA=";
+
+const northwind = address("Northwind Billing", "billing@northwind.example.org");
+
+/** Message `n` (1 the oldest) of a conversation, with its own text. */
+const threadMessage = (
+  mailbox: string,
+  conversation: string,
+  n: number,
+  length: number
+) => {
+  const fromMailbox = conversation === threadConversationId && n === 2;
+  const text =
+    conversation === longConversationId && n === length
+      ? longBody
+      : `Message ${n} of the conversation about invoice 2026-0041.`;
+  const at = new Date(Date.UTC(2026, 8, 1, 8, n)).toISOString();
+  return {
+    "@odata.etag": 'W/"CQAAABYAAABmtXf2uSv0SqAGJ5k6N7QDAAAm7mc9"',
+    id: messageId(mailbox, 100 + n),
+    subject: `${n === 1 ? "" : "RE: "}Invoice 2026-0041 from Northwind Supplies`,
+    bodyPreview: text.slice(0, 255),
+    uniqueBody: { contentType: "text", content: text },
+    from: fromMailbox ? address("Invoices", mailbox) : northwind,
+    toRecipients: [fromMailbox ? northwind : address("Invoices", mailbox)],
+    ccRecipients: [],
+    receivedDateTime: at,
+    sentDateTime: at,
+    isRead: n < length,
+    isDraft: false,
+    hasAttachments: false,
+    importance: "normal",
+    flag: { flagStatus: "notFlagged" },
+    parentFolderId: fromMailbox
+      ? sentItemsId
+      : "AQMkAGE1M2IyNGNmLTI5MTktNDUyZi1iOTVjLTc2ZjI5ZmNmZmQ2MwAuAAADZ2zAAAA=",
+    conversationId: conversation,
+    internetMessageId: `<AM0PR07MB7${n}.eurprd07.prod.outlook.com>`,
+    webLink: `https://outlook.office365.com/owa/?ItemID=${encodeURIComponent(messageId(mailbox, 100 + n))}&exvsurl=1&viewmodel=ReadMessageItem`,
+  };
+};
+
+/**
+ * The first page of a conversation's messages in `mailbox`, newest first,
+ * `top` of them, as Graph answers a `conversationId` filter: none for a
+ * conversation it doesn't know.
+ */
+export const conversationPage = (
+  mailbox: string,
+  conversation: string,
+  top: number
+) => {
+  const length = {
+    [threadConversationId]: 3,
+    [longConversationId]: longThreadLength,
+  }[conversation];
+  const numbers = Array.from({ length: length ?? 0 }, (_, at) => at + 1);
+  const newest = numbers.toReversed().slice(0, top);
+  return {
+    "@odata.context": `https://graph.microsoft.com/v1.0/$metadata#users('${encodeURIComponent(mailbox)}')/messages`,
+    value: newest.map((n) =>
+      threadMessage(mailbox, conversation, n, length ?? 0)
+    ),
+    ...(numbers.length > top
+      ? {
+          "@odata.nextLink": `https://graph.microsoft.com/v1.0/users('${encodeURIComponent(mailbox)}')/messages?%24top=${top}&%24skip=${top}`,
         }
       : {}),
   };
@@ -455,3 +563,57 @@ export const notFound = {
     message: "The specified object was not found in the store.",
   },
 };
+
+/** Excel workbooks of `financeDrive`, by drive item ID. */
+export const workbookIds = {
+  /** The supplier register, with its table and a named range. */
+  register: "01BYE5RZ5SUPPLIERREGISTERXLSXAAAA",
+  /** Another workbook, with a table of the same name. */
+  other: "01BYE5RZ2OTHERWORKBOOKXLSXAAAAAAA",
+};
+
+/** The register's named table. */
+export const supplierTable = "Suppliers";
+
+/** A named range of the register: a name Excel knows, but no table. */
+export const totalsRange = "Totals";
+
+/** The supplier table's columns, as its header row names them. */
+export const supplierColumns = ["Supplier", "IBAN", "Since", "Amount"];
+
+/**
+ * Excel's days 2024-01-01 and 2025-06-15, as its serial numbers count
+ * them: what a date-formatted cell holds.
+ */
+export const daySerials = { first: 45_292, second: 45_823 };
+
+/**
+ * A cell as Excel holds it: its value, the number format it is shown in,
+ * and its formula (the value itself, for a constant).
+ */
+export interface SheetCell {
+  value: string | number | boolean;
+  format: string;
+  formula: string | number | boolean;
+}
+
+const constant = (
+  value: string | number | boolean,
+  format = "General"
+): SheetCell => ({ value, format, formula: value });
+
+/** The supplier table's rows as Excel holds them, fresh for each test. */
+export const supplierRows = (): SheetCell[][] => [
+  [
+    constant("Northwind Supplies"),
+    constant("NL91ABNA0417164300"),
+    constant(daySerials.first, "yyyy-mm-dd"),
+    constant(1200),
+  ],
+  [
+    constant("Contoso Paper"),
+    constant("NL02RABO0123456789"),
+    constant(daySerials.second, String.raw`[$-409]d\-mmm\-yyyy;@`),
+    constant(""),
+  ],
+];

@@ -70,6 +70,24 @@ export const keepLine = async (
   });
 };
 
+/** Most keys one delete of the bucket takes. */
+const deleteBatch = 1000;
+
+/**
+ * Deletes the lines kept for `keys`, whether or not any is: what was said
+ * from someone's interview, once it is deleted.
+ */
+export const forgetLines = async (
+  env: Pick<Env, "FILES">,
+  keys: readonly SpokenKey[]
+): Promise<void> => {
+  const stored = [...new Set(await Promise.all(keys.map(keyOf)))];
+  for (let at = 0; at < stored.length; at += deleteBatch) {
+    // oxlint-disable-next-line no-await-in-loop -- one page of keys at a time
+    await env.FILES.delete(stored.slice(at, at + deleteBatch));
+  }
+};
+
 /**
  * Deletes lines kept longer than a month, from the cron: in code, not a
  * bucket rule, so it runs wherever core does. One page of the prefix a

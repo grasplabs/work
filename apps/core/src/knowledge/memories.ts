@@ -31,7 +31,6 @@ import {
   documents,
   versions,
 } from "../db/knowledge/schema.ts";
-import { readerActor } from "./access.ts";
 import type { Reader } from "./access.ts";
 import { auditedBatch } from "./audit.ts";
 import { allowedFor } from "./authorize.ts";
@@ -434,7 +433,7 @@ export const remember = async (
       outboxedWhere(
         db,
         {
-          actor: readerActor(reader),
+          actor: portsOf(env).actorOf(reader),
           action: "knowledge.memory.remember",
           target: { type: "memory", id: memoryId },
           provenance: sourceRefs

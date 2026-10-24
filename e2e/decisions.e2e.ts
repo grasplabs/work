@@ -10,7 +10,8 @@ import type { Person } from "./people.ts";
 // sent: the person it was sent to opens it, signs in, approves, and
 // confirms that answer in Grasp's dialog (cancelling first records
 // nothing), and the run goes on with their answer. Anyone else who opens the same link
-// only sees that it isn't for them.
+// only sees that it isn't for them. While it waits, the nav counts its
+// workflow beside Workflows.
 
 /**
  * Keeps each ask's recipients, as a workflow that mails them would, in the
@@ -200,6 +201,16 @@ test("the person a decision link was sent to approves it, and the run goes on", 
     page.getByRole("heading", { name: "Sign in to answer" })
   ).toBeVisible(pageRead);
   await signInTo(context, decider);
+  // Beside Workflows, the nav counts the workflow that needs them.
+  const shell = await context.newPage();
+  await shell.goto("/workflows");
+  const workflows = shell
+    .getByRole("navigation", { name: "Main" })
+    .getByRole("link", { name: /^Workflows/u });
+  await expect(workflows).toHaveAccessibleName(
+    /1 workflow needs you$/u,
+    pageRead
+  );
   await page.clock.install();
   await page.goto(link);
   await expect(
@@ -246,6 +257,9 @@ test("the person a decision link was sent to approves it, and the run goes on", 
     /^Approved by Person on /u,
     pageRead
   );
+  // Answered, it needs them no more.
+  await shell.reload();
+  await expect(workflows).toHaveAccessibleName("Workflows", pageRead);
 
   const { core, api } = apiOf(builder);
   try {

@@ -1441,10 +1441,73 @@ export const connectorEventsAckSchema = z
 export type ConnectorEventsAck = z.input<typeof connectorEventsAckSchema>;
 
 /**
- * What core reaches in connect, over the `CONNECT` service binding: the
- * npm registry among the rest (`PackageRegistryApi`).
+ * The chat platforms connect sends to as a client's own bot
+ * (`ChannelApi.channelFetch`). Each is added with its hosts and its
+ * credential in connect's src/channels.ts when it is switched on.
  */
-export interface ConnectApi extends PackageRegistryApi {
+export const channelPlatformSchema = z.enum(["teams"]);
+export type ChannelPlatform = z.infer<typeof channelPlatformSchema>;
+
+/**
+ * The credential core builds every chat adapter with, in place of the
+ * bot's real one, which only connect holds: as Teams' app password, and as
+ * the bearer token connect hands back when the adapter asks Microsoft for
+ * one. Connect swaps it for the real credential on the way out and refuses
+ * a request that carries anything else. Shaped as a JWT without a
+ * signature or an expiry, because Microsoft's Teams SDK decodes the token
+ * it is given and refreshes it once it expires: this one never does, and
+ * connect refreshes the real one.
+ */
+export const channelCredentialPlaceholder =
+  "eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJpc3MiOiJncmFzcC1vcy1jb25uZWN0Iiwic3ViIjoiY2hhbm5lbC1jcmVkZW50aWFsLXBsYWNlaG9sZGVyIn0.placeholder";
+
+/**
+ * The header on connect's own answers to a channel request, saying what
+ * kind it is (`channelAnswer`). It is dropped from every platform response,
+ * so a platform can't pass one off.
+ */
+export const channelHeader = "grasp-channel";
+
+/**
+ * Connect's own answers to a channel request, as `channelHeader` says:
+ * refused before it left (a host off the platform's list, a credential
+ * other than the placeholder), refused because the client's bot isn't set
+ * up yet, failed on the way, or the platform's answer that the bot was
+ * removed for that person or conversation (Teams' 403), passed on as it
+ * came, marked.
+ */
+export const channelAnswer = {
+  refused: "refused",
+  unconfigured: "unconfigured",
+  failed: "failed",
+  removed: "removed",
+} as const;
+export type ChannelAnswer = (typeof channelAnswer)[keyof typeof channelAnswer];
+
+/**
+ * How core's chat adapters reach their platforms: every request an
+ * adapter sends, its token request included, handed to connect as it is.
+ */
+export interface ChannelApi {
+  /**
+   * Sends `request` to `platform` as the client's own bot: only to that
+   * platform's hosts, and only carrying `channelCredentialPlaceholder`
+   * where the credential goes, which connect replaces with the real one.
+   * The platform's response, or connect's own answer (`channelHeader`).
+   * Throttled and failed sends are retried by connect before it answers.
+   */
+  channelFetch: (
+    platform: ChannelPlatform,
+    request: Request
+  ) => Promise<Response>;
+}
+
+/**
+ * What core reaches in connect, over the `CONNECT` service binding: the
+ * npm registry among the rest (`PackageRegistryApi`), and the chat
+ * platforms (`ChannelApi`).
+ */
+export interface ConnectApi extends PackageRegistryApi, ChannelApi {
   call: (call: ConnectCall) => Promise<ConnectResult>;
   /** The provider URL to send the person's browser to. */
   startConnection: (request: StartConnection) => Promise<{ url: string }>;

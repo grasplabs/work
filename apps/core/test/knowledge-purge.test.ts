@@ -9,6 +9,7 @@ import { env } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it, vi } from "vite-plus/test";
 
+import { drainAuditOutboxes } from "../src/audit-outbox.ts";
 import { forContext, saveUserMemory } from "../src/knowledge/memory.ts";
 import { rebuildSearchIndex } from "../src/knowledge/search-erasure.ts";
 import { actingFor, newChat } from "./contexts.ts";
@@ -1155,6 +1156,9 @@ describe("a purge of content", setUpTime, () => {
     }
     const added = (await indexedSections()) - before;
     await payOwedRebuilds();
+    // The saves' audit events delivered first: a drain of them while the
+    // purge runs would count as its writes.
+    await drainAuditOutboxes(env);
     const large = await purgeOne();
     // A rebuild of the whole index writes at least a row for each section
     // it holds: what the corpus grew by would show, many times over.
@@ -2663,6 +2667,9 @@ describe("a personal purge's search index", setUpTime, () => {
     ).run();
     const added = (await indexedSections()) - before;
     await payOwedRebuilds();
+    // The saves' audit events delivered first: a drain of them while the
+    // purge runs would count as its writes.
+    await drainAuditOutboxes(env);
     const large = await purgeOne();
     // A rebuild writes at least a row for each section the index holds.
     expect({

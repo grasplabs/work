@@ -14,6 +14,7 @@ import type { AdminDatabase } from "../db/act.ts";
 import {
   clientDeploys,
   clients,
+  clientSealedSecrets,
   clientWorkers,
   rollouts,
   rolloutTargets,
@@ -59,6 +60,13 @@ export interface SetupWorker {
   deployedAt: Date | null;
 }
 
+/** A secret staff sealed for the client, as the Setup shows it: never its value. */
+export interface SetupSealedSecret {
+  name: (typeof clientSealedSecrets.name.enumValues)[number];
+  setBy: string;
+  setAt: Date;
+}
+
 /** What staff did to the client by hand, as the audit log recorded it. */
 export interface SetupEvent {
   id: string;
@@ -86,6 +94,12 @@ export interface ClientSetup {
   signInOverridden: boolean;
   /** Whether a change to what a deploy sets on its core waits for its next deploy. */
   configPending: boolean;
+  /**
+   * The secrets of its own staff sealed for it, such as its Teams bot's
+   * (src/deploy/sealed-secrets.ts): who set each and when, never the
+   * value, sealed or not, so nothing of it reaches the page.
+   */
+  sealedSecrets: SetupSealedSecret[];
   /** The newest first: its latest `setupDeployLimit`. */
   deploys: SetupDeploy[];
   /** Whether it has older deploys than those. */
@@ -135,6 +149,7 @@ const byHand: ReadonlySet<string> = new Set([
   "client.unpin",
   "client.rotate_secrets",
   "client.sign_in",
+  "client.sealed_secret",
   "client.apply_settings",
   "client.stripe_customer",
   "client.rooms_project",
@@ -180,6 +195,21 @@ const workersOf = async (
     .where(eq(clientWorkers.clientId, clientId));
   return rows.toSorted((a, b) => a.worker.localeCompare(b.worker));
 };
+
+/** Who set each of client `clientId`'s sealed secrets, and when: only these columns, never `sealed`. */
+const sealedSecretsOf = async (
+  db: AdminDatabase,
+  clientId: string
+): Promise<SetupSealedSecret[]> =>
+  await db
+    .select({
+      name: clientSealedSecrets.name,
+      setBy: clientSealedSecrets.setBy,
+      setAt: clientSealedSecrets.setAt,
+    })
+    .from(clientSealedSecrets)
+    .where(eq(clientSealedSecrets.clientId, clientId))
+    .orderBy(clientSealedSecrets.name);
 
 /** What release `releaseId` keeps in an account, as its manifest names it. */
 const resourcesOf = async (
@@ -259,9 +289,10 @@ export const getClientSetup = async (
     })
     .from(clients)
     .where(eq(clients.id, clientId));
-  const [settings, deploys, workers, listed, rollout, history] =
+  const [settings, sealedSecrets, deploys, workers, listed, rollout, history] =
     await Promise.all([
       clientSettings(db, clientId),
+      sealedSecretsOf(db, clientId),
       deploysOf(db, clientId),
       workersOf(db, clientId),
       listReleases(db),
@@ -277,6 +308,7 @@ export const getClientSetup = async (
     signIn: settings?.signIn ?? null,
     signInOverridden: settings?.signInOverridden ?? false,
     configPending: settings?.configPending ?? false,
+    sealedSecrets,
     deploys: deploys.slice(0, setupDeployLimit),
     moreDeploys: deploys.length > setupDeployLimit,
     workers,

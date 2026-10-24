@@ -18,7 +18,9 @@ import { clientGrid, defaultLiveOptions, gridLive } from "./grid.ts";
 import type { LiveStatus } from "./grid.ts";
 import {
   ringInputSchema,
+  sealedSecretInputSchema,
   setRing,
+  setSealedSecret,
   setSignIn,
   SettingsError,
   signInInputSchema,
@@ -116,6 +118,18 @@ export const setSignInFn = createServerFn({ method: "POST" })
   .handler(
     async ({ data, context }) =>
       await change(async () => await setSignIn(env, context.staff, data))
+  );
+
+/**
+ * Seals a secret of a client's own, such as its Teams bot's, replacing the
+ * one it had. It answers whether it changed, never the value: nothing
+ * reads one back.
+ */
+export const setSealedSecretFn = createServerFn({ method: "POST" })
+  .validator(sealedSecretInputSchema)
+  .handler(
+    async ({ data, context }) =>
+      await change(async () => await setSealedSecret(env, context.staff, data))
   );
 
 /**
