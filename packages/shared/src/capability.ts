@@ -152,6 +152,13 @@ export const capabilityClaimsSchema = z.strictObject({
    * held call's read with one is refused.
    */
   decision: capabilityDecisionSchema.optional(),
+  /**
+   * Only for a chat's agent: the shared mailboxes its company pointed it
+   * at for the person it acts for, in lower case (core's
+   * shared-mailboxes.ts). Its Microsoft 365 mail calls reach those and its
+   * person's own mailbox, no other; absent is none.
+   */
+  mailboxes: z.array(z.string().min(1).max(254)).max(50).optional(),
 });
 export type CapabilityClaims = z.infer<typeof capabilityClaimsSchema>;
 
@@ -185,6 +192,8 @@ export interface CapabilityScope extends CapabilityCall {
   heldUntil?: number | undefined;
   /** What a person decided of the call: signed, not compared. */
   decision?: CapabilityDecision | undefined;
+  /** Only for a chat's agent: `CapabilityClaims.mailboxes`. */
+  mailboxes?: readonly string[] | undefined;
 }
 
 /** Why connect refuses a call before looking at it any further. */
@@ -246,6 +255,9 @@ export const signCapability = async (
     ...(scope.context === undefined ? {} : { context: scope.context }),
     ...(scope.heldUntil === undefined ? {} : { heldUntil: scope.heldUntil }),
     ...(scope.decision === undefined ? {} : { decision: scope.decision }),
+    ...(scope.mailboxes === undefined
+      ? {}
+      : { mailboxes: [...scope.mailboxes] }),
   };
   capabilityClaimsSchema.parse(claims);
   const payload = toBase64Url(new TextEncoder().encode(JSON.stringify(claims)));

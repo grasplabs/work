@@ -2726,6 +2726,19 @@ export const toolClassSettings = sqliteTable("tool_class_settings", {
 });
 
 /**
+ * The shared mailboxes an admin pointed Stephen at (shared-mailboxes.ts),
+ * by address in lower case: for whom it is on now (`who`: `nobody`,
+ * `everyone` or `teams`, then the team IDs in `teams` as a JSON array).
+ */
+export const sharedMailboxPointers = sqliteTable("shared_mailbox_pointers", {
+  mailbox: text().primaryKey(),
+  who: text({ enum: ["nobody", "everyone", "teams"] }).notNull(),
+  teams: text().notNull().default("[]"),
+  changedBy: text("changed_by").notNull(),
+  changedAt: timestamp("changed_at").notNull(),
+});
+
+/**
  * Apps people asked Grasp to add, as the catalog doesn't have them
  * (app-requests.ts): one row each, by its name in lower case, so the
  * same app asked for twice is one request.
