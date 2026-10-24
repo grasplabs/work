@@ -85,9 +85,6 @@ const micros = 1_000_000;
 /** Headroom on the estimate: a real agent may take more steps than the stub. */
 const estimateMargin = 1.5;
 
-/** The repeats of a sealed run, as GRA-676 asks. */
-const sealedRepeats = 3;
-
 const idp = mockIdp();
 
 /** The run's quality, latency and cost by arm and task family. */
@@ -151,13 +148,15 @@ describe("the Brain baseline against a real model", () => {
       const spent = await charged();
       const trials = report.scores.length;
       const perTrial = spent / trials;
+      // Trials as a run of each split would take them, at the repeats a run
+      // with these settings (`BRAIN_MODEL_REPEATS`) is given.
       const planned = {
         validation:
           tasksOf("validation").length * brainArms.length * settings.repeats,
         sealed:
           tasksOf("sealed", { openSealed: true }).length *
           brainArms.length *
-          sealedRepeats,
+          settings.repeats,
       };
       const projectedUsd = (count: number) =>
         (count * perTrial * estimateMargin) / micros;
