@@ -7,6 +7,7 @@ import {
   requestIdHeader,
   strictTransportSecurity,
 } from "@grasp-os/shared/http";
+import { interviewHearPath } from "@grasp-os/shared/interview-hear";
 import { interviewApiPath } from "@grasp-os/shared/interview-links";
 import { interviewStoryPath } from "@grasp-os/shared/interview-story";
 import { interviewTurnPath } from "@grasp-os/shared/interview-turn";
@@ -25,7 +26,7 @@ import {
   routerHostSchema,
   routerSecretHeader,
 } from "@grasp-os/shared/router";
-import { speechPath } from "@grasp-os/shared/voice";
+import { speechPath, transcriptionPath } from "@grasp-os/shared/voice";
 
 import { clientAddress } from "./client-address.ts";
 import { routeCache } from "./route-cache.ts";
@@ -145,6 +146,46 @@ const withinLimit = async (
 const signOutPath = `${authBasePath}/sign-out`;
 
 /**
+ * The router's own 429, with the headers core puts on every response it
+ * makes (a request ID, `nosniff`, HSTS on https), since it answers in
+ * core's place. The request ID is logged with the refusal.
+ */
+const rateLimited = (url: URL, host: string): Response => {
+  const requestId = crypto.randomUUID();
+  const { code, message } = requestErrors.create("request.rate_limited");
+  const headers = new Headers({
+    "retry-after": String(limitPeriodS),
+    [requestIdHeader]: requestId,
+    "x-content-type-options": "nosniff",
+  });
+  if (url.protocol === "https:") {
+    headers.set("strict-transport-security", strictTransportSecurity);
+  }
+  log.warn("router.rate_limited", { host, requestId });
+  return Response.json(
+    { code, message, details: { requestId } } satisfies ErrorPayload,
+    { status: 429, headers }
+  );
+};
+
+/**
+ * An interview link's endpoints: core's src/onboarding/links.ts, its
+ * turns (src/onboarding/interview.ts), its read-back
+ * (src/onboarding/story.ts), where its lines are said
+ * (src/onboarding/speech.ts), and where what is said is written down
+ * (src/onboarding/transcription.ts, once per socket opened, or from a
+ * recording, src/onboarding/hear.ts).
+ */
+const interviewLinkPaths: ReadonlySet<string> = new Set([
+  interviewApiPath,
+  interviewTurnPath,
+  interviewStoryPath,
+  speechPath,
+  transcriptionPath,
+  interviewHearPath,
+]);
+
+/**
  * The limit a request to `pathname` counts against, if any: the public
  * endpoints core reaches without a session.
  */
@@ -166,43 +207,12 @@ const limiterFor = (pathname: string, env: Env): RateLimit | undefined => {
   if (pathname.startsWith(`${channelsApiPath}/`)) {
     return env.CHANNELS_RATE_LIMIT;
   }
-  // An interview link's endpoints (core's src/onboarding/links.ts, its
-  // turns, src/onboarding/interview.ts, its read-back,
-  // src/onboarding/story.ts, and where its lines are said,
-  // src/onboarding/speech.ts), the same, from one budget; core counts per
-  // link too.
-  if (
-    pathname === interviewApiPath ||
-    pathname === interviewTurnPath ||
-    pathname === interviewStoryPath ||
-    pathname === speechPath
-  ) {
+  // An interview link's endpoints (`interviewLinkPaths`), the same, from
+  // one budget; core counts per link too.
+  if (interviewLinkPaths.has(pathname)) {
     return env.INTERVIEW_RATE_LIMIT;
   }
   return undefined;
-};
-
-/**
- * The router's own 429, with the headers core puts on every response it
- * makes (a request ID, `nosniff`, HSTS on https), since it answers in
- * core's place. The request ID is logged with the refusal.
- */
-const rateLimited = (url: URL, host: string): Response => {
-  const requestId = crypto.randomUUID();
-  const { code, message } = requestErrors.create("request.rate_limited");
-  const headers = new Headers({
-    "retry-after": String(limitPeriodS),
-    [requestIdHeader]: requestId,
-    "x-content-type-options": "nosniff",
-  });
-  if (url.protocol === "https:") {
-    headers.set("strict-transport-security", strictTransportSecurity);
-  }
-  log.warn("router.rate_limited", { host, requestId });
-  return Response.json(
-    { code, message, details: { requestId } } satisfies ErrorPayload,
-    { status: 429, headers }
-  );
 };
 
 /**

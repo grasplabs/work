@@ -43,6 +43,7 @@ import {
   fetchClientLive,
   rotateSecretsFn,
   setRingFn,
+  setSealedSecretFn,
   setSignInFn,
 } from "../clients/functions.ts";
 import type { LiveStatus, Reach } from "../clients/grid.ts";
@@ -601,6 +602,70 @@ export const ApplySettings = ({
         </div>
       ) : null}
     </Body>
+  );
+};
+
+/**
+ * Setting its Teams bot's secret, or replacing it: sent once to the admin,
+ * which seals it (src/clients/settings.ts) and never sends it back, so the
+ * field always starts empty and is emptied again once it's sent.
+ */
+export const TeamsBotSecretChange = ({
+  clientId,
+  set,
+  refresh,
+}: {
+  clientId: string;
+  set: boolean;
+  refresh: Refresh;
+}) => {
+  const { busy, failure, run } = useSettingsAction();
+  return (
+    <form
+      className="flex flex-col gap-3 border-t px-5 py-4"
+      onSubmit={(event) => {
+        event.preventDefault();
+        const form = event.currentTarget;
+        const value = textOf(new FormData(form), "value");
+        form.reset();
+        void run(
+          async () =>
+            await thenRefresh(
+              async () =>
+                await setSealedSecretFn({
+                  data: { clientId, name: "TEAMS_BOT_SECRET", value },
+                }),
+              refresh
+            )
+        );
+      }}
+    >
+      <Field>
+        <FieldLabel htmlFor="setup-teams-bot-secret">
+          {set ? "New client secret" : "Client secret"}
+        </FieldLabel>
+        <Input
+          autoComplete="off"
+          className="max-w-md"
+          id="setup-teams-bot-secret"
+          name="value"
+          required
+          spellCheck={false}
+          type="password"
+        />
+        <FieldDescription>
+          The bot app&apos;s client secret, from its registration in the
+          company&apos;s own Entra. It is sealed and never shown again, here or
+          anywhere; its connect gets it with the next deploy.
+        </FieldDescription>
+      </Field>
+      <div className="flex flex-wrap items-center gap-3">
+        <Button disabled={busy} size="sm" type="submit" variant="outline">
+          {set ? "Replace secret" : "Set secret"}
+        </Button>
+        <Failure failure={failure} />
+      </div>
+    </form>
   );
 };
 

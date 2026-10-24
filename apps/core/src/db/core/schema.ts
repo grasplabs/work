@@ -727,10 +727,11 @@ export const blueprints = sqliteTable(
  * the blueprint, the version of its App a marked one was (null for a
  * built-in), the tree it was copied from, and that tree's code
  * (`codeIdentity`), stored under the App as a version's tree is, for an
- * update to be merged over. Written only in the batch that creates the
- * App from the blueprint: unlike `apps.blueprint`, a label a creator may
- * give any App, this is core's record, which the release's vouching for a
- * built-in's code reads.
+ * update to be merged over. Written in the batch that creates the App
+ * from the blueprint, and moved on to a built-in's newer code only in the
+ * batch that commits an update a builder accepted: unlike
+ * `apps.blueprint`, a label a creator may give any App, this is core's
+ * record, which the release's vouching for a built-in's code reads.
  */
 export const appOrigins = sqliteTable("app_origins", {
   appId: text("app_id")
@@ -2259,6 +2260,32 @@ export const workflowDecisions = sqliteTable(
 );
 
 /**
+ * The recipients of a decision asked of more than one (a JSON workflow's
+ * `grasp.decision` naming several, src/decisions/decisions.ts): each
+ * `person:<id>`, `team:<id>` or `role:<role>`, any of whom may answer it,
+ * the first answer the only one. Written once, with the decision; a
+ * decision of one recipient has none here, its `deciders` alone saying
+ * who answers.
+ */
+export const workflowDecisionRecipients = sqliteTable(
+  "workflow_decision_recipients",
+  {
+    decisionId: text("decision_id")
+      .notNull()
+      .references(() => workflowDecisions.id),
+    deciders: text().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.decisionId, table.deciders] }),
+    // The decisions asked of someone (`waitingDecisions`).
+    index("workflow_decision_recipients_deciders_idx").on(
+      table.deciders,
+      table.decisionId
+    ),
+  ]
+);
+
+/**
  * One-use confirmations of a person's answer to a decision
  * (src/decisions/confirmations.ts), minted by the trusted host decision UI
  * once the person confirmed exactly what they answer, and taken by the
@@ -3271,8 +3298,22 @@ export const triggerResourceVersions = sqliteTable(
     configHash: text("config_hash").notNull(),
     principalBinding: text("principal_binding").notNull(),
     createdAt: timestamp("created_at").notNull(),
+    /**
+     * For a system trigger: the catalog event contract and the event type
+     * of it whose emitted events start its workflow
+     * (workflows/event-delivery.ts). Null for any other kind, and for a
+     * system trigger from before they were kept, which then takes none.
+     */
+    eventContract: text("event_contract"),
+    eventType: text("event_type"),
   },
-  (table) => [primaryKey({ columns: [table.triggerId, table.version] })]
+  (table) => [
+    primaryKey({ columns: [table.triggerId, table.version] }),
+    // The system triggers' versions that take an event of a type.
+    index("trigger_resource_versions_event")
+      .on(table.eventContract, table.eventType)
+      .where(sql`${table.eventContract} IS NOT NULL`),
+  ]
 );
 
 /**
@@ -3424,7 +3465,9 @@ export const workflowResourceRuns = sqliteTable(
      * For a child run (a `run` task's, workflows/run-children.ts): the run
      * that started it, its lineage's root and its depth under it (quotas.ts,
      * `admitChild`), pinned with it. Null, null and 0 for a run its own
-     * start admitted, the root of its own lineage.
+     * start admitted, the root of its own lineage. A run an emitted event's
+     * trigger started (workflows/event-delivery.ts) has a root and a depth
+     * but no parent: it joins the emitting run's lineage, not its life.
      */
     parentRunId: text("parent_run_id"),
     rootRunId: text("root_run_id"),
@@ -3548,8 +3591,9 @@ export const workflowRunFileChunks = sqliteTable(
  * attempt run again writes nothing new. Each names its run, its pinned
  * binding and catalog contract, and the envelope the host minted: its
  * source is the emitting run, never what the workflow says. Delivery to
- * what consumes platform events (system triggers) marks it delivered; until
- * something consumes them, each waits here. Retention removes an event's
+ * what consumes platform events (system triggers,
+ * workflows/event-delivery.ts) marks it delivered, or undeliverable with
+ * why; until then each waits here. Retention removes an event's
  * subject and data with its run's details (workflows/retention.ts), and
  * closes one still undelivered then (its `delivered_at` the removal's
  * time), so nothing delivers it without its data.
@@ -3577,6 +3621,18 @@ export const workflowEmittedEvents = sqliteTable(
     createdAt: timestamp("created_at").notNull(),
     deliveredAt: timestamp("delivered_at"),
     detailsRemovedAt: timestamp("details_removed_at"),
+    /** How many deliveries of it failed and were tried again. */
+    deliveryAttempts: integer("delivery_attempts").notNull().default(0),
+    /**
+     * Until when a drain holds it (its lease), or, after a failed
+     * delivery, when it is tried again; null for one never tried.
+     */
+    deliveryAt: timestamp("delivery_at"),
+    /**
+     * Why it was closed undeliverable (a workflow error code), set with
+     * `delivered_at`; null for one delivered, or closed by retention.
+     */
+    undeliverable: text(),
   },
   (table) => [
     index("workflow_emitted_events_run").on(table.runId),
@@ -4170,8 +4226,12 @@ export const uploads = sqliteTable(
     uploadedBy: text("uploaded_by").notNull(),
     /** JSON: the audit log's actor for the person who uploaded it. */
     actor: text().notNull(),
+    /**
+     * `saving`: claimed for the save of its text, which a purge's
+     * forgetting refuses (knowledge/uploads.ts).
+     */
     status: text({
-      enum: ["pending", "extracting", "ready", "failed"],
+      enum: ["pending", "extracting", "saving", "ready", "failed"],
     }).notNull(),
     /** The code of the error it failed with. */
     failure: text(),

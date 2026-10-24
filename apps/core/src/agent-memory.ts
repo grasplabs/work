@@ -4,6 +4,9 @@ import {
   admitEffect,
   chatAuthority,
   chatContext,
+  endedBy,
+  isRunRefusal,
+  recordToolCall,
   requireOpenRun,
 } from "./agent-scope.ts";
 import type { AgentApi, AgentScope } from "./agent-scope.ts";
@@ -24,6 +27,7 @@ export class MemoryApi extends WorkerEntrypoint<Env, AgentScope> {
   async saveUser(input: unknown): Promise<{ version: number }> {
     const scope = this.ctx.props;
     await requireOpenRun(this.env, scope, "memory.saveUser");
+    const method = "memory.saveUser";
     try {
       // Recorded here when refused: knowledge records only a save.
       await admitEffect(this.env, scope, "memory.saveUser");
@@ -38,8 +42,17 @@ export class MemoryApi extends WorkerEntrypoint<Env, AgentScope> {
           await admitEffect(this.env, scope, "memory.saveUser");
         }
       );
+      // Knowledge records the save; the chat shows it here.
+      await recordToolCall(this.env, scope, {
+        method,
+        detail: { version: saved.currentVersion },
+      });
       return { version: saved.currentVersion };
     } catch (error) {
+      // A closed run's refusal is shown where it is recorded (admitEffect).
+      if (!isRunRefusal(error)) {
+        await recordToolCall(this.env, scope, { method }, endedBy(error));
+      }
       throw forSandbox(error);
     }
   }

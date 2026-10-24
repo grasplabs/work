@@ -106,6 +106,14 @@ export interface OAuthProviderConfig {
     required: readonly string[];
   };
   /**
+   * Scopes a renewed token must hold, or its connection is marked for
+   * reconnecting (`needs_reauth`), which keeps it and its permissions
+   * (oauth.ts): scopes added to `scopes` after connections were made, which
+   * a connection made before lacks until its person consents again. Only a
+   * renewal that lists what it granted is checked.
+   */
+  renewalRequires?: readonly string[];
+  /**
    * Only shared connections, never a person's own (the landscape's, the
    * directory's, the documents').
    */
@@ -239,7 +247,8 @@ const microsoft: OAuthProviderConfig = {
     `${microsoftLogin}/${tenant}/oauth2/v2.0/authorize`,
   tokenEndpoint: (tenant) => `${microsoftLogin}/${tenant}/oauth2/v2.0/token`,
   // What the Microsoft 365 connector needs: mail (the person's own and
-  // shared mailboxes), calendars, and files in OneDrive and SharePoint.
+  // shared mailboxes), calendars, files in OneDrive and SharePoint, and
+  // changing an Excel workbook's rows.
   scopes: [
     "openid",
     "profile",
@@ -253,8 +262,12 @@ const microsoft: OAuthProviderConfig = {
     "Calendars.Read",
     "Calendars.Read.Shared",
     "Files.Read.All",
+    "Files.ReadWrite.All",
     "Sites.Read.All",
   ],
+  // Asked for since the connector writes workbooks: a connection made
+  // before can't, and is reconnected in place.
+  renewalRequires: ["Files.ReadWrite.All"],
   scopeSeparator: " ",
   authorizationParams: () => ({ response_mode: "query" }),
   clientAuthentication: "client_secret_post",
@@ -291,6 +304,9 @@ const landscapeScopes = [
 const microsoftLandscape: OAuthProviderConfig = {
   ...microsoft,
   id: "microsoft-landscape",
+  // Read-only: the write a Microsoft 365 renewal must still hold isn't
+  // asked for here, so its renewal requires nothing of it.
+  renewalRequires: [],
   // No connector: its connection takes no calls, only core's sync reads it.
   server: "microsoft-landscape",
   scopes: landscapeScopes,
@@ -392,6 +408,9 @@ const microsoftDirectoryScopes = [
 const microsoftDirectory: OAuthProviderConfig = {
   ...microsoft,
   id: "microsoft-directory",
+  // Read-only: the write a Microsoft 365 renewal must still hold isn't
+  // asked for here, so its renewal requires nothing of it.
+  renewalRequires: [],
   // No connector: its connection takes no calls, only core's read uses it.
   server: "microsoft-directory",
   scopes: microsoftDirectoryScopes,
@@ -506,6 +525,9 @@ const microsoftDocumentsScopes = [
 const microsoftDocuments: OAuthProviderConfig = {
   ...microsoft,
   id: "microsoft-documents",
+  // Read-only: the write a Microsoft 365 renewal must still hold isn't
+  // asked for here, so its renewal requires nothing of it.
+  renewalRequires: [],
   // No connector: its connection takes no calls, only core's reads use it.
   server: "microsoft-documents",
   scopes: microsoftDocumentsScopes,
@@ -699,6 +721,32 @@ export const providerFor = (id: string): ProviderConfig | undefined => {
 /** How Entra may prefix a Microsoft Graph scope in a token's answer. */
 const graphScopePrefix = "https://graph.microsoft.com/";
 
+/** The scopes a token answer lists, lowercase, Graph's by their short name. */
+const scopesOf = (scope: string): Set<string> =>
+  new Set(
+    scope
+      .split(" ")
+      .filter((each) => each !== "")
+      // Entra may name Graph's scopes by their full URI.
+      .map((each) => each.toLowerCase().replace(graphScopePrefix, ""))
+  );
+
+/**
+ * Whether a renewal's `tokens` still hold every scope `provider` requires
+ * of one (`renewalRequires`). An answer that lists none passes: nothing
+ * says it lacks one.
+ */
+export const renewalHolds = (
+  { renewalRequires = [] }: OAuthProviderConfig,
+  { scope }: TokenSet
+): boolean => {
+  if (scope === undefined) {
+    return true;
+  }
+  const scopes = scopesOf(scope);
+  return renewalRequires.every((each) => scopes.has(each.toLowerCase()));
+};
+
 /**
  * Whether `tokens` were granted exactly the access `provider` asks for,
  * where it must hold no more (`granted`): every scope the provider's
@@ -715,13 +763,7 @@ export const grantedAsAsked = (
   if (scope === undefined) {
     return false;
   }
-  const scopes = new Set(
-    scope
-      .split(" ")
-      .filter((each) => each !== "")
-      // Entra may name Graph's scopes by their full URI.
-      .map((each) => each.toLowerCase().replace(graphScopePrefix, ""))
-  );
+  const scopes = scopesOf(scope);
   return (
     [...scopes].every((each) => granted.allowed.has(each)) &&
     granted.required.every((each) => scopes.has(each.toLowerCase()))

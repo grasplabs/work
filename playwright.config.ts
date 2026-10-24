@@ -23,6 +23,13 @@ const onboardingTests = /onboarding\.e2e\.ts$/u;
  */
 const interviewTests = /interview\.e2e\.ts$/u;
 /**
+ * The journeys that matter most, end to end (e2e/*-journey.e2e.ts): the
+ * admin's onboarding, an employee's interview on a phone, a lead's by
+ * voice. Each sends links, which tells the team, and replaces the roster
+ * the tests before read, so they run last, one at a time.
+ */
+const journeyTests = /journey\.e2e\.ts$/u;
+/**
  * What grants, retires or revokes package approvals: each bumps the
  * deployment's shared policy generation in the one database every worker
  * uses, so a decision another worker's browser already shows is refused as
@@ -76,6 +83,7 @@ export default defineConfig({
         onboardingTests,
         packageApprovalTests,
         interviewTests,
+        journeyTests,
         adminTests,
       ],
     },
@@ -116,6 +124,16 @@ export default defineConfig({
       testMatch: interviewTests,
       dependencies: ["onboarding"],
       workers: 1,
+    },
+    {
+      name: "journeys",
+      // Never tried again: a flaky journey shows as itself, with the trace
+      // of the run that failed.
+      use: { ...devices["Desktop Chrome"], trace: "retain-on-failure" },
+      testMatch: journeyTests,
+      dependencies: ["interview"],
+      workers: 1,
+      retries: 0,
     },
   ],
   // Never a server already running: on this checkout's ports (e2e/stack.ts)

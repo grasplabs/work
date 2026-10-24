@@ -74,6 +74,7 @@
     "./error-reports": "./src/error-reports.ts",
     "./errors": "./src/errors.ts",
     "./guests": "./src/guests.ts",
+    "./interview-hear": "./src/interview-hear.ts",
     "./interview-links": "./src/interview-links.ts",
     "./interview-story": "./src/interview-story.ts",
     "./interview-turn": "./src/interview-turn.ts",
