@@ -80,6 +80,7 @@ import {
   desc,
   eq,
   gt,
+  gte,
   inArray,
   isNotNull,
   isNull,
@@ -96,8 +97,12 @@ import { z } from "zod";
 
 import { drainObjectOutbox } from "../audit-outbox.ts";
 import { signInConfig } from "../auth/config.ts";
-import { keepOnboardingRecords } from "../brain-records.ts";
+import {
+  keepOnboardingRecords,
+  purgeOnboardingDrawings,
+} from "../brain-records.ts";
 import { organizations } from "../db/core/schema.ts";
+import { inList } from "../db/d1.ts";
 import { migrateOnWake } from "../db/migrate.ts";
 import migrations from "../db/onboarding/migrations/migrations.js";
 import {
@@ -201,6 +206,11 @@ import type { WorkBrief, WorkKnown } from "./work-drawing.ts";
 //   in only as the mail is sent. Each link goes by email on its day, and
 //   one reminder after `remindAfterWorkingDays`; the admin's update twice
 //   a week holds the admin's own numbers, never a name (mail-text.ts).
+// - A purged document living on in its reading (GRA-970): a Knowledge
+//   purge that reaches a shared document forgets its reading here, every
+//   drawing that may have had it for context, and those drawings in the
+//   brain (`forgetDocuments`). A drawing under way when it goes is thrown
+//   away as it ends, and drawn again.
 
 /** The one store of a deployment, by the name it is reached under. */
 const storeName = "onboarding";
@@ -277,6 +287,18 @@ const quietly = async (promise: Promise<unknown>): Promise<void> => {
   }
 };
 
+/**
+ * Waits for `promise`, whatever became of it: for the brain's work after
+ * it, which runs all the same. Whoever started it heard how it went.
+ */
+const whatever = async (promise: Promise<unknown>): Promise<void> => {
+  try {
+    await promise;
+  } catch {
+    // Its caller was told.
+  }
+};
+
 /** The days of the week the admin's update goes out: Monday and Thursday. */
 const updateWeekdays: ReadonlySet<number> = new Set([1, 4]);
 
@@ -309,6 +331,25 @@ export interface Took {
   tokensOut?: number;
   seconds?: number;
 }
+
+/**
+ * A live transcription, as the onboarding notes it: its ID, who it is
+ * for, and the person whose link it is on, if it is on one.
+ */
+export interface TranscriptionSessionNote {
+  id: string;
+  by: AuditActor;
+  person?: string;
+}
+
+/** How a line said on someone's link is counted: `link:<person>`. */
+const linkWho = "link:";
+
+/**
+ * The key what is heard for `who` is counted under, beside what is said
+ * for them, in the same daily table.
+ */
+const heardKey = (who: string): string => `${who}:heard`;
 
 /** What one interview turn knows of who it is with, from the store (`turnContext`). */
 /** What the drawing gets from one interview: only what its person agreed to. */
@@ -648,6 +689,12 @@ export class Onboarding extends DurableObject<Env> {
   readonly #calls = new Map<string, { minute: string; count: number }>();
   /** The delivery of mail running now: the next waits for it. */
   #mailing: Promise<unknown> = Promise.resolve();
+  /**
+   * What the store is doing with the brain now, giving it a team or
+   * taking drawings out of it: the next waits for it, so neither loses
+   * track of what the other wrote.
+   */
+  #braining: Promise<unknown> = Promise.resolve();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -1570,6 +1617,10 @@ export class Onboarding extends DurableObject<Env> {
    * what it gave (`brain:<team>`), or null.
    */
   async intakeNext(now: number = Date.now()): Promise<string | null> {
+    return await this.#withBrain(async () => await this.#intakeDue(now));
+  }
+
+  async #intakeDue(now: number): Promise<string | null> {
     const drawing = new Set(
       this.#dueToDraw(now).map(({ id, work }) => work?.team ?? id)
     );
@@ -2425,7 +2476,7 @@ export class Onboarding extends DurableObject<Env> {
     if (link.keyMark === null || link.keyMark !== keyMark) {
       return refused("interview.elsewhere");
     }
-    const who = `link:${person.id}`;
+    const who = `${linkWho}${person.id}`;
     return answered({ who, said: this.voiceSaid(who, now) });
   }
 
@@ -2450,20 +2501,178 @@ export class Onboarding extends DurableObject<Env> {
     seconds: number,
     now: string = new Date().toISOString()
   ): void {
-    const day = now.slice(0, 10);
-    const add = counted(seconds);
     this.ctx.storage.transactionSync(() => {
+      this.#countSeconds(who, { purpose, model: "voice", seconds }, now);
+    });
+  }
+
+  /**
+   * Whom a live transcription on someone's link is for, from the device
+   * it is on, while their interview may be saved, as a line said is
+   * (`speechOnLink`): the key what is heard is counted under, the seconds
+   * heard under it today, and the person, for the onboarding's own log.
+   */
+  transcriptionOnLink(
+    secretMark: string,
+    keyMark: string,
+    now: string = new Date().toISOString()
+  ): LinkAnswer<{ who: string; heard: number; person: string }> {
+    const found = this.speechOnLink(secretMark, keyMark, now);
+    if (!found.ok) {
+      return found;
+    }
+    const who = heardKey(found.value.who);
+    const person = found.value.who.slice(linkWho.length);
+    return answered({ who, heard: this.voiceSaid(who, now), person });
+  }
+
+  /**
+   * Whether a live transcription open on someone's link may go on, as it
+   * might open (`transcriptionOnLink`): checked again while it is open,
+   * so it doesn't count as a call on the link.
+   */
+  transcriptionStill(
+    secretMark: string,
+    keyMark: string,
+    now: string = new Date().toISOString()
+  ): LinkAnswer<null> {
+    const found = this.#onLink(secretMark, now, "save", false);
+    if (!found.ok) {
+      return found;
+    }
+    const { link } = found.value;
+    if (link.keyMark === null || link.keyMark !== keyMark) {
+      return refused("interview.elsewhere");
+    }
+    return answered(null);
+  }
+
+  /** Seconds heard by live transcription for an admin today. */
+  heardForAdmin(
+    userId: string,
+    now: string = new Date().toISOString()
+  ): { who: string; heard: number } {
+    const who = heardKey(`admin:${userId}`);
+    return { who, heard: this.voiceSaid(who, now) };
+  }
+
+  /**
+   * Opens a live transcription for `who`: holds the seconds it may hear
+   * against `who`'s budget for today, at once, so sockets opened side by
+   * side share one budget rather than each finding it untouched, and a
+   * socket whose close is never counted keeps what it held. Notes it on
+   * someone's link in the onboarding's own log, which only staff read,
+   * never in the audit log, which would tell the company who talked, and
+   * when; for an admin in the audit log, with the session's ID and
+   * nothing heard. The seconds held, and the day they are held on; none,
+   * and nothing noted, when the budget is spent.
+   */
+  transcriptionOpened(
+    session: TranscriptionSessionNote & {
+      who: string;
+      budget: number;
+      most: number;
+    },
+    now: string = new Date().toISOString()
+  ): { held: number; day: string } {
+    const day = now.slice(0, 10);
+    const held = this.ctx.storage.transactionSync(() => {
+      const left = session.budget - this.voiceSaid(session.who, now);
+      const most = Math.floor(Math.min(left, session.most));
+      if (most <= 0) {
+        return 0;
+      }
       this.#db.delete(voiceUse).where(lt(voiceUse.day, day)).run();
       this.#db
         .insert(voiceUse)
-        .values({ who, day, seconds: add })
+        .values({ who: session.who, day, seconds: most })
         .onConflictDoUpdate({
           target: [voiceUse.who, voiceUse.day],
-          set: { seconds: sql`${voiceUse.seconds} + ${add}` },
+          set: { seconds: sql`${voiceUse.seconds} + ${most}` },
         })
         .run();
-      this.meter({ purpose, model: "voice", seconds: add }, now);
+      if (session.person === undefined) {
+        this.#changed(session.by, "onboarding.transcription.opened", {
+          session: session.id,
+        });
+      } else {
+        this.#noted(session.person, "transcription.opened", now);
+      }
+      return most;
     });
+    if (held > 0 && session.person === undefined) {
+      this.#deliverAudit();
+    }
+    return { held, day };
+  }
+
+  /**
+   * Counts a live transcription once it closed: the seconds of audio it
+   * heard in the onboarding's use, what it held and didn't hear given
+   * back to `who`'s budget on the day it was held (`transcriptionOpened`),
+   * and notes it as it was opened, with how it ended. Never anything
+   * heard.
+   */
+  transcriptionClosed(
+    session: TranscriptionSessionNote & {
+      who: string;
+      purpose: Took["purpose"];
+      seconds: number;
+      held: number;
+      day: string;
+      ended: string;
+    },
+    now: string = new Date().toISOString()
+  ): void {
+    const seconds = Math.min(counted(session.seconds), session.held);
+    const back = session.held - seconds;
+    this.ctx.storage.transactionSync(() => {
+      if (back > 0) {
+        this.#db
+          .update(voiceUse)
+          .set({ seconds: sql`max(${voiceUse.seconds} - ${back}, 0)` })
+          .where(
+            and(eq(voiceUse.who, session.who), eq(voiceUse.day, session.day))
+          )
+          .run();
+      }
+      this.meter(
+        { purpose: session.purpose, model: "transcription", seconds },
+        now
+      );
+      if (session.person === undefined) {
+        this.#changed(session.by, "onboarding.transcription.closed", {
+          session: session.id,
+          seconds: Math.round(seconds),
+          ended: session.ended,
+        });
+      } else {
+        this.#noted(session.person, "transcription.closed", now);
+      }
+    });
+    if (session.person === undefined) {
+      this.#deliverAudit();
+    }
+  }
+
+  /** Adds `took`'s seconds to `who`'s today, and to the onboarding's use; the days before today go. */
+  #countSeconds(
+    who: string,
+    took: Took & { seconds: number },
+    now: string
+  ): void {
+    const day = now.slice(0, 10);
+    const add = counted(took.seconds);
+    this.#db.delete(voiceUse).where(lt(voiceUse.day, day)).run();
+    this.#db
+      .insert(voiceUse)
+      .values({ who, day, seconds: add })
+      .onConflictDoUpdate({
+        target: [voiceUse.who, voiceUse.day],
+        set: { seconds: sql`${voiceUse.seconds} + ${add}` },
+      })
+      .run();
+    this.meter({ ...took, seconds: add }, now);
   }
 
   /** The AI used, by day, purpose and model. */
@@ -2704,6 +2913,112 @@ export class Onboarding extends DurableObject<Env> {
     });
     this.#deliverAudit();
     return documentOf({ ...row, answer });
+  }
+
+  /**
+   * Forgets shared documents' readings for good, as a Knowledge purge
+   * reached them (documents.ts `documentReadingErasure`): each reading,
+   * its question and the admin's answer, so neither Stephen's context nor
+   * the brain's sources and tools (brain-rpc.ts) show them again; every
+   * drawing made since the first of them was shared, which may have had
+   * it for context, to be drawn again without it; and every drawing the
+   * brain was given since (`purgeOnboardingDrawings`), each of which is
+   * given again once drawn again. The brain first: when that fails,
+   * nothing here has changed, and running the purge again finds the
+   * readings still here. In the audit log by counts alone. Within
+   * `#withBrain`, so no intake lands between. Returns how many readings
+   * it forgot.
+   */
+  async forgetDocuments(
+    ids: readonly string[],
+    by: AuditActor
+  ): Promise<number> {
+    return await this.#withBrain(async () => {
+      const rows = this.#db
+        .select({ id: documents.id, at: documents.at })
+        .from(documents)
+        .where(inList(documents.id, ids))
+        .all();
+      const [first] = rows.map(({ at }) => at).toSorted();
+      if (first === undefined) {
+        return 0;
+      }
+      const purged = await purgeOnboardingDrawings(this.env, new Date(first));
+      const now = new Date().toISOString();
+      this.ctx.storage.transactionSync(() => {
+        this.#db
+          .delete(documents)
+          .where(
+            inList(
+              documents.id,
+              rows.map(({ id }) => id)
+            )
+          )
+          .run();
+        const forgotten = this.#db
+          .select({ work: drawnWorks.work })
+          .from(drawnWorks)
+          .where(gte(drawnWorks.at, first))
+          .all()
+          .map(({ work }) => work);
+        this.#db
+          .delete(drawnWorks)
+          .where(inList(drawnWorks.work, forgotten))
+          .run();
+        this.#db
+          .delete(drawFailures)
+          .where(
+            inList(
+              drawFailures.item,
+              forgotten.map((work) => `work:${work}`)
+            )
+          )
+          .run();
+        // A drawing given since but drawn before is given again as it is.
+        const given = this.#db
+          .selectDistinct({ team: brainSent.team })
+          .from(brainSent)
+          .where(inList(brainSent.record, purged))
+          .all();
+        this.#db
+          .delete(brainSent)
+          .where(inList(brainSent.record, purged))
+          .run();
+        for (const { team } of given) {
+          this.#brainDue(team, now);
+        }
+        this.#changed(by, "onboarding.document.purged", {
+          documents: rows.length,
+          drawings: forgotten.length,
+          records: purged.length,
+        });
+      });
+      this.#deliverAudit();
+      await this.#armDrawing();
+      return rows.length;
+    });
+  }
+
+  /** The shared documents' ids: what a drawing has for context as it starts. */
+  #sharedIds(): string[] {
+    return this.#db
+      .select({ id: documents.id })
+      .from(documents)
+      .all()
+      .map(({ id }) => id);
+  }
+
+  /** Whether any of `ids` (`#sharedIds`) was forgotten since (`forgetDocuments`). */
+  #anyForgotten(ids: readonly string[]): boolean {
+    if (ids.length === 0) {
+      return false;
+    }
+    const left = this.#db
+      .select({ id: documents.id })
+      .from(documents)
+      .where(inList(documents.id, ids))
+      .all();
+    return left.length < ids.length;
   }
 
   /**
@@ -3768,6 +4083,7 @@ export class Onboarding extends DurableObject<Env> {
       return;
     }
     const { brief, lead } = briefed;
+    const shared = this.#sharedIds();
     const drawn = await drawWork(this.env, brief, (took) => {
       this.meter(took, at);
     });
@@ -3775,7 +4091,9 @@ export class Onboarding extends DurableObject<Env> {
       const gone = [...drawn.from, ...(lead === null ? [] : [lead])].some(
         (person) => this.#agreedAt(person) === null
       );
-      if (gone) {
+      // A document it had for context purged meanwhile: drawn again
+      // without it, as the work is still due.
+      if (gone || this.#anyForgotten(shared)) {
         return;
       }
       this.#keepDrawing(due, drawn, at);
@@ -4096,6 +4414,17 @@ export class Onboarding extends DurableObject<Env> {
     });
   }
 
+  /** Runs `work` with the brain once what it is doing with it now is done. */
+  async #withBrain<T>(work: () => Promise<T>): Promise<T> {
+    const before = this.#braining;
+    const run = (async () => {
+      await before;
+      return await work();
+    })();
+    this.#braining = whatever(run);
+    return await run;
+  }
+
   /**
    * Stops drawing a piece of work that keeps failing, until someone agrees
    * to something new about it: what was drawn of it before stays.
@@ -4373,7 +4702,9 @@ export class Onboarding extends DurableObject<Env> {
   #onLink(
     secretMark: string,
     now: string,
-    use: "open" | "save" | "delete"
+    use: "open" | "save" | "delete",
+    /** Whether it counts as a call on the link: a check again does not. */
+    call = true
   ): LinkAnswer<{
     person: Roster["people"][number];
     link: typeof links.$inferSelect;
@@ -4390,7 +4721,7 @@ export class Onboarding extends DurableObject<Env> {
     if (roster === null || person === undefined) {
       return refused("interview.link_invalid");
     }
-    if (!this.#withinLimit(person.id, now)) {
+    if (call && !this.#withinLimit(person.id, now)) {
       return refused("interview.limited");
     }
     const [link] = this.#db

@@ -756,6 +756,8 @@ export const fakeCloudflareApi = (
   const aborted = { count: 0 };
   /** Admin snapshot requests to cores under way, and the most at once in this test. */
   const adminReads = { now: 0, peak: 0 };
+  /** The requests a redirect sent elsewhere, with the router secret they carried. */
+  const redirected: { url: string; routerSecret: string | null }[] = [];
 
   /** Whose token a call carries: the deployer's or the tenant admin's. */
   const callers = new Map([
@@ -1052,21 +1054,12 @@ export const fakeCloudflareApi = (
       : { account, live };
   };
 
-  const workersDev = async (
-    request: Request
-  ): Promise<Response | undefined> => {
-    const url = new URL(request.url);
-    const host = /^(?<script>[^.]+)\.(?<subdomain>[^.]+)\.workers\.dev$/u.exec(
-      url.hostname
-    )?.groups;
-    if (host === undefined) {
-      return undefined;
-    }
-    const worker = workerAt(host);
-    if (worker === undefined) {
-      return new Response("There is nothing here yet", { status: 404 });
-    }
-    const { account, live } = worker;
+  /** What a workers.dev Worker's live version answers, as core does. */
+  const workerAnswer = async (
+    request: Request,
+    url: URL,
+    { account, live }: NonNullable<ReturnType<typeof workerAt>>
+  ): Promise<Response> => {
     if (account.unhealthy !== undefined && account.unhealthy > 0) {
       account.unhealthy -= 1;
       return new Response("Starting", { status: 503 });
@@ -1112,6 +1105,32 @@ export const fakeCloudflareApi = (
       : new Response("Not found", { status: 404 });
   };
 
+  const workersDev = async (
+    request: Request,
+    { followed = false }: { followed?: boolean } = {}
+  ): Promise<Response | undefined> => {
+    const url = new URL(request.url);
+    const host = /^(?<script>[^.]+)\.(?<subdomain>[^.]+)\.workers\.dev$/u.exec(
+      url.hostname
+    )?.groups;
+    if (host === undefined) {
+      return undefined;
+    }
+    const worker = workerAt(host);
+    if (worker === undefined) {
+      return new Response("There is nothing here yet", { status: 404 });
+    }
+    const { account } = worker;
+    if (account.redirectsTo !== undefined && !followed) {
+      // Its body unread: a redirect that's followed sends it on.
+      return new Response(null, {
+        status: 307,
+        headers: { location: new URL(url.pathname, account.redirectsTo).href },
+      });
+    }
+    return await workerAnswer(request, url, worker);
+  };
+
   /** What the API, or a Worker on workers.dev, answers `fetch(input, init)` with. */
   const answerFetch = async (
     input: RequestInfo | URL,
@@ -1119,6 +1138,22 @@ export const fakeCloudflareApi = (
   ): Promise<Response> => {
     const request = new Request(input, init);
     const served = await workersDev(request);
+    const location = served?.headers.get("location");
+    if (
+      served !== undefined &&
+      served.status === 307 &&
+      typeof location === "string" &&
+      request.redirect !== "manual"
+    ) {
+      // As fetch does: the same request, headers and body, to wherever
+      // the redirect points. Whatever answers there answers as the core
+      // would, as a host relaying to it would.
+      redirected.push({
+        url: location,
+        routerSecret: request.headers.get("x-grasp-router-secret"),
+      });
+      return (await workersDev(request, { followed: true })) ?? served;
+    }
     if (served !== undefined) {
       return served;
     }
@@ -1183,6 +1218,7 @@ export const fakeCloudflareApi = (
     aborted.count = 0;
     adminReads.now = 0;
     adminReads.peak = 0;
+    redirected.length = 0;
   };
 
   return {
@@ -1198,6 +1234,9 @@ export const fakeCloudflareApi = (
     peakAccounts: () => load.peakAccounts,
     /** The most admin snapshot requests cores were answering at once in this test. */
     peakAdminReads: () => adminReads.peak,
+    /** The requests a core's redirect sent elsewhere, in this test. */
+    redirected: (): readonly { url: string; routerSecret: string | null }[] =>
+      redirected,
     /** How many calls their caller aborted before they were answered, in this test. */
     abortedCalls: () => aborted.count,
     /** Adds an account the token is a member of, and returns what it holds. */

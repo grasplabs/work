@@ -3198,8 +3198,22 @@ export const triggerResourceVersions = sqliteTable(
     configHash: text("config_hash").notNull(),
     principalBinding: text("principal_binding").notNull(),
     createdAt: timestamp("created_at").notNull(),
+    /**
+     * For a system trigger: the catalog event contract and the event type
+     * of it whose emitted events start its workflow
+     * (workflows/event-delivery.ts). Null for any other kind, and for a
+     * system trigger from before they were kept, which then takes none.
+     */
+    eventContract: text("event_contract"),
+    eventType: text("event_type"),
   },
-  (table) => [primaryKey({ columns: [table.triggerId, table.version] })]
+  (table) => [
+    primaryKey({ columns: [table.triggerId, table.version] }),
+    // The system triggers' versions that take an event of a type.
+    index("trigger_resource_versions_event")
+      .on(table.eventContract, table.eventType)
+      .where(sql`${table.eventContract} IS NOT NULL`),
+  ]
 );
 
 /**
@@ -3351,7 +3365,9 @@ export const workflowResourceRuns = sqliteTable(
      * For a child run (a `run` task's, workflows/run-children.ts): the run
      * that started it, its lineage's root and its depth under it (quotas.ts,
      * `admitChild`), pinned with it. Null, null and 0 for a run its own
-     * start admitted, the root of its own lineage.
+     * start admitted, the root of its own lineage. A run an emitted event's
+     * trigger started (workflows/event-delivery.ts) has a root and a depth
+     * but no parent: it joins the emitting run's lineage, not its life.
      */
     parentRunId: text("parent_run_id"),
     rootRunId: text("root_run_id"),
@@ -3475,8 +3491,9 @@ export const workflowRunFileChunks = sqliteTable(
  * attempt run again writes nothing new. Each names its run, its pinned
  * binding and catalog contract, and the envelope the host minted: its
  * source is the emitting run, never what the workflow says. Delivery to
- * what consumes platform events (system triggers) marks it delivered; until
- * something consumes them, each waits here. Retention removes an event's
+ * what consumes platform events (system triggers,
+ * workflows/event-delivery.ts) marks it delivered, or undeliverable with
+ * why; until then each waits here. Retention removes an event's
  * subject and data with its run's details (workflows/retention.ts), and
  * closes one still undelivered then (its `delivered_at` the removal's
  * time), so nothing delivers it without its data.
@@ -3504,6 +3521,18 @@ export const workflowEmittedEvents = sqliteTable(
     createdAt: timestamp("created_at").notNull(),
     deliveredAt: timestamp("delivered_at"),
     detailsRemovedAt: timestamp("details_removed_at"),
+    /** How many deliveries of it failed and were tried again. */
+    deliveryAttempts: integer("delivery_attempts").notNull().default(0),
+    /**
+     * Until when a drain holds it (its lease), or, after a failed
+     * delivery, when it is tried again; null for one never tried.
+     */
+    deliveryAt: timestamp("delivery_at"),
+    /**
+     * Why it was closed undeliverable (a workflow error code), set with
+     * `delivered_at`; null for one delivered, or closed by retention.
+     */
+    undeliverable: text(),
   },
   (table) => [
     index("workflow_emitted_events_run").on(table.runId),

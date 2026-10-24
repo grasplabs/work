@@ -24,7 +24,7 @@ import {
   routerHostSchema,
   routerSecretHeader,
 } from "@grasp-os/shared/router";
-import { speechPath } from "@grasp-os/shared/voice";
+import { speechPath, transcriptionPath } from "@grasp-os/shared/voice";
 
 import { clientAddress } from "./client-address.ts";
 import { routeCache } from "./route-cache.ts";
@@ -214,13 +214,15 @@ export default {
     // An interview link's endpoints (core's src/onboarding/links.ts, its
     // turns, src/onboarding/interview.ts, its read-back,
     // src/onboarding/story.ts, and where its lines are said,
-    // src/onboarding/speech.ts), the same, from one budget; core counts per
-    // link too.
+    // src/onboarding/speech.ts, and where what is said is written down,
+    // src/onboarding/transcription.ts, once per socket opened), the same,
+    // from one budget; core counts per link too.
     if (
       (pathname === interviewApiPath ||
         pathname === interviewTurnPath ||
         pathname === interviewStoryPath ||
-        pathname === speechPath) &&
+        pathname === speechPath ||
+        pathname === transcriptionPath) &&
       !(await withinLimit(env.INTERVIEW_RATE_LIMIT, request, host))
     ) {
       return rateLimited(url, host);
