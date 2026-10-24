@@ -8,8 +8,9 @@ import { z } from "zod";
 import { signInConfig } from "../auth/config.ts";
 import { chatAgentId, personalWorkspaceId } from "../chats-rpc.ts";
 import { workspace } from "../durable-objects.ts";
-import { answerCard } from "./cards.tsx";
+import { answerCard, heldWritesCard } from "./cards.tsx";
 import type { ChannelHandoff } from "./door.ts";
+import { checkOf, turnHeldWrites } from "./held.ts";
 import { channelLocales, languageOf, say } from "./words.ts";
 import type { ChannelLocale } from "./words.ts";
 
@@ -24,6 +25,11 @@ import type { ChannelLocale } from "./words.ts";
 // fails or is refused ends in one of Stephen's lines, in the language the
 // person wrote in, never in the gateway's words, which name models and
 // budgets the person has no part in.
+//
+// A turn that had writes held (a meeting to put in the calendar, a row to
+// change) shows them after its answer on one card, in the order they run,
+// each with its exact values, and nothing changes until the person
+// presses Confirm on it (cards.tsx `heldWritesCard`, held.ts).
 
 /** How often typing is shown again while the turn runs. */
 const typingEveryMs = 3000;
@@ -94,6 +100,9 @@ export const answerInChat =
       return;
     }
     const stopTyping = typingIn(thread);
+    // Held writes are this turn's from here on: connect stamps each when
+    // it holds it, by the same clock.
+    const since = Date.now();
     let asked: Awaited<ReturnType<ReturnType<typeof workspace>["askThrough"]>>;
     try {
       asked = await workspace(env, personalWorkspaceId(userId)).askThrough(
@@ -125,6 +134,7 @@ export const answerInChat =
       await thread.post(answer.answer);
       return;
     }
+    const chatUrl = `${origin}/?chat=${encodeURIComponent(chatId)}`;
     await thread.post(
       answerCard({
         locale,
@@ -133,7 +143,19 @@ export const answerInChat =
           title,
           url: `${origin}/knowledge/${encodeURIComponent(collectionId)}?doc=${encodeURIComponent(documentId)}`,
         })),
-        chatUrl: `${origin}/?chat=${encodeURIComponent(chatId)}`,
+        chatUrl,
       })
     );
+    const writes = await turnHeldWrites(env, userId, chatId, since);
+    if (writes.length > 0) {
+      const check = checkOf(answer.provenance.sources);
+      await thread.post(
+        heldWritesCard({
+          locale,
+          writes,
+          ...(check === undefined ? {} : { check }),
+          openUrl: chatUrl,
+        })
+      );
+    }
   };
