@@ -13,6 +13,7 @@ export const nativeToolClasses: Readonly<
     "calendar.create": "change-own",
     "calendar.get": "read-company",
     "calendar.list": "read-company",
+    "files.createDraft": "change-own",
     "files.list": "read-company",
     "files.read": "read-company",
     "files.search": "read-company",
