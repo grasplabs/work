@@ -86,6 +86,7 @@ describe("Settings › Stephen", setUpTime, () => {
         },
       ],
       microsoft: [
+        "read-own",
         "read-company",
         "change-own",
         "change-company",
@@ -200,9 +201,13 @@ describe("Settings › Stephen", setUpTime, () => {
       notAnApp: await outcome(
         admin.api.connections.setAppToolClass("zoho", "read-company", everyone)
       ),
-      // Microsoft 365 has no tool that only reads the person's own.
+      // Google Workspace has no tool that changes the company's.
       classItLacks: await outcome(
-        admin.api.connections.setAppToolClass("microsoft", "read-own", everyone)
+        admin.api.connections.setAppToolClass(
+          "google",
+          "change-company",
+          everyone
+        )
       ),
       asClassForStephen: await outcome(
         admin.api.connections.setStephenReach(

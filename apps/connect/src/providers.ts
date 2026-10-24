@@ -247,8 +247,11 @@ const microsoft: OAuthProviderConfig = {
     `${microsoftLogin}/${tenant}/oauth2/v2.0/authorize`,
   tokenEndpoint: (tenant) => `${microsoftLogin}/${tenant}/oauth2/v2.0/token`,
   // What the Microsoft 365 connector needs: mail (the person's own and
-  // shared mailboxes), calendars, files in OneDrive and SharePoint, and
-  // changing an Excel workbook's rows.
+  // shared mailboxes), calendars, files in OneDrive and SharePoint,
+  // changing an Excel workbook's rows, drafts in the person's own OneDrive,
+  // and the person's own To Do. The
+  // read-only connections below set scopes of their own, so none of these
+  // reaches them.
   scopes: [
     "openid",
     "profile",
@@ -259,12 +262,14 @@ const microsoft: OAuthProviderConfig = {
     "Mail.ReadWrite.Shared",
     "Mail.Send",
     "Mail.Send.Shared",
+    "MailboxSettings.Read",
     "Calendars.Read",
     "Calendars.ReadWrite",
     "Calendars.Read.Shared",
     "Files.Read.All",
     "Files.ReadWrite.All",
     "Sites.Read.All",
+    "Tasks.ReadWrite",
   ],
   // Asked for since the connector writes workbooks: a connection made
   // before can't, and is reconnected in place.

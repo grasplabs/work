@@ -21,6 +21,7 @@ export const familyNamespaces = [
   "auth",
   "brain",
   "capability",
+  "channel",
   "connect",
   "connection",
   "contract",
