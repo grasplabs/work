@@ -6085,6 +6085,10 @@ msgstr "Ich konnte nicht verbinden, wo Ihre Dokumente liegen. Versuchen Sie es m
 msgid "I could not find the columns. The first row should name them: name, email, team and job."
 msgstr "Ich konnte die Spalten nicht finden. Die erste Zeile sollte sie benennen: Name, E-Mail, Team und Funktion."
 
+#: src/interview/words.ts
+msgid "I could not hear that. Say it once more, or type it."
+msgstr "Das habe ich nicht gehört. Sagen Sie es bitte noch einmal, oder tippen Sie es."
+
 #: src/onboarding/setup-steps.tsx
 msgid "I could not keep it. Try again in a moment."
 msgstr "Ich konnte es nicht speichern. Versuchen Sie es gleich noch einmal."
@@ -12281,6 +12285,10 @@ msgstr "Die Gedächtnisdateien, Skills und hochgeladenen Dateien, die Ihre Agent
 #: src/onboarding/setup-steps.tsx
 msgid "The message"
 msgstr "Die Nachricht"
+
+#: src/interview/words.ts
+msgid "The microphone is not available here. Type your answer."
+msgstr "Das Mikrofon ist hier nicht verfügbar. Tippen Sie Ihre Antwort."
 
 #: src/engines/store-change-errors.ts
 msgid "The migration {migration} failed on its fixture {fixture} when this version was sealed: {reason}. It runs on no records, so the version can't be made current: fix the migration or its fixture and build the domain again."
