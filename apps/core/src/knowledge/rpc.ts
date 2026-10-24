@@ -39,6 +39,7 @@ import { isAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 
 import { gapAnswerErasure } from "../brain-gaps.ts";
+import { brainRecordErasure } from "../brain-records.ts";
 import { CoreRpcTarget } from "../rpc-target.ts";
 import { withPerson } from "../session-check.ts";
 import type { SessionCheck } from "../session-check.ts";
@@ -70,13 +71,40 @@ import { search } from "./search.ts";
 import { catalog, follow, read } from "./tools.ts";
 import { uploadErasure } from "./uploads.ts";
 
+/** The copies of people's words in core's own tables, as `OnErase` reaches them. */
+type Copies = Pick<OnErase, "count" | "rewrite" | "forgetActor">;
+
+/** `copies` as one: each counted, rewritten and forgotten in turn. */
+const allOf = (copies: readonly Copies[]): Copies => ({
+  count: async (holds) => {
+    let total = 0;
+    for (const each of copies) {
+      // oxlint-disable-next-line no-await-in-loop -- one table after another
+      total += await each.count(holds);
+    }
+    return total;
+  },
+  rewrite: async (by, rewrite) => {
+    for (const each of copies) {
+      // oxlint-disable-next-line no-await-in-loop -- one table after another
+      await each.rewrite(by, rewrite);
+    }
+  },
+  forgetActor: async (by, userId) => {
+    for (const each of copies) {
+      // oxlint-disable-next-line no-await-in-loop -- one table after another
+      await each.forgetActor(by, userId);
+    }
+  },
+});
+
 /**
  * What a purge reaches of core's own (purge.ts `OnErase`): the brain's gap
- * answers, the originals of uploaded files, the Apps collection's entries
- * and each person's Personal collection.
+ * answers and records, the originals of uploaded files, the Apps
+ * collection's entries and each person's Personal collection.
  */
 const coreErasure = (env: Env): OnErase => ({
-  ...gapAnswerErasure(env),
+  ...allOf([gapAnswerErasure(env), brainRecordErasure(env)]),
   ...uploadErasure(env),
   ...appsErasure(env),
   personalCollection: personalCollectionId,

@@ -99,12 +99,13 @@ import { unicode61Dropped, unicode61Kept } from "./unicode61.ts";
 //
 // Both reach the copies of people's words the host keeps outside
 // Knowledge too, through its `OnErase` hook (core's: the brain's gap
-// answers), so Knowledge names none of them: a personal purge forgets the
-// person as the author of any, a content purge rewrites every one holding
-// a term, whatever documents it names, before its documents. Its plan
-// counts them (`hostCopies`), and its check counts one still holding a
-// term (written after the rewrite read it) with the documents a term
-// still finds (`stillFound`).
+// answers and records), so Knowledge names none of them: a personal purge
+// forgets the person as the author of any, a content purge rewrites every
+// one holding a term, whatever documents it names, before its documents.
+// Its plan counts them (`hostCopies`), and its check counts one still
+// holding a term (written after the rewrite read it, or a form it leaves
+// on purpose, as a memory statement's) with the documents a term still
+// finds (`stillFound`).
 //
 // Both have the host forget the files it keeps as the documents they
 // purge (`OnErase` `forgetFiles`; core's: the originals of uploaded files,
@@ -809,8 +810,9 @@ const holdsTerm = (text: string, matcher: Matcher): boolean =>
   without(text, matcher) !== text;
 
 /**
- * Whether a memory statement holds a term, for a plan's and a check's
- * counts of memory records, which no index holds yet: one the purge
+ * Whether a memory statement or a host's copy (`OnErase` `count`) holds a
+ * term, for a plan's and a check's counts of them, which no index holds
+ * yet: one the purge
  * removes (`holdsTerm`: inside running text of a script written without
  * spaces, beside an emoji, a Greek final sigma in either case), or one
  * the index would find, which it leaves on purpose (`foldedHolds`).
@@ -1573,7 +1575,7 @@ const purgeContent = async (
     // The Brain's records hold people's words too, everyone's, whatever
     // documents the purge names: before its documents, so one whose purge
     // fails doesn't leave them holding a term.
-    await eraseStatements(env, actorOf(person), purgeId, (statement) =>
+    await eraseStatements(env, by.actor, purgeId, (statement) =>
       erasedStatement(statement, matcher)
     );
     // The host's copies hold people's words too: every one is rewritten,
@@ -1610,7 +1612,7 @@ const purgeContent = async (
     env,
     statementHolds(input.terms, matcher)
   );
-  const hostCopies = await onErase.count((text) => holdsTerm(text, matcher));
+  const hostCopies = await onErase.count(statementHolds(input.terms, matcher));
   const stillFound = inDocuments + memories + hostCopies;
   if (stillFound > 0) {
     log.warn("knowledge.purge_still_found", {
@@ -1671,7 +1673,7 @@ export const preparePurge = async (
         statementHolds(parsed.terms, matcher)
       ),
     };
-    hostCopies = await onErase.count((text) => holdsTerm(text, matcher));
+    hostCopies = await onErase.count(statementHolds(parsed.terms, matcher));
   }
   await auditedBatch(portsOf(env), db, [
     outboxed(

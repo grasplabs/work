@@ -289,7 +289,7 @@ export const eraseStatements = async (
       .flatMap(write);
     if (first !== undefined) {
       // oxlint-disable-next-line no-await-in-loop -- one bounded batch after another
-      await auditedBatch(env, db, [first, ...rest]);
+      await auditedBatch(portsOf(env), db, [first, ...rest]);
     }
   }
   const deleted = changes.filter(({ now }) => now === null).length;
