@@ -19,13 +19,15 @@ import type {
 import { useSyncExternalStore } from "react";
 
 import { readingSeconds } from "../onboarding/setup.ts";
+import { answerMeter, waitedOf } from "./answer-meter.ts";
+import type { Measured } from "./answer-meter.ts";
 import { askStory, askTurn, turnFailed } from "./api.ts";
 import type { EarlyEvent, TurnFailed } from "./api.ts";
 import type { DotSign } from "./dot-signs.ts";
-import { openEar } from "./ear.ts";
+import { openEar, pauseMs } from "./ear.ts";
 import type { Ear, EarEvent } from "./ear.ts";
 import { keepNow, linkNow, progressNow, update } from "./kept.ts";
-import { hangUp, muteMic } from "./mic.ts";
+import { hangUp, lastHeard, muteMic } from "./mic.ts";
 import {
   afterTurn,
   approved,
@@ -36,8 +38,27 @@ import {
   withFactText,
   withLine,
 } from "./progress.ts";
-import { prepare, say, sayInPieces, setSound, stopSpeaking } from "./speech.ts";
+import {
+  onFirstSound,
+  piecesOf,
+  prepare,
+  say,
+  sayInPieces,
+  setSound,
+  stopSpeaking,
+} from "./speech.ts";
 import type { Saying, Voicing } from "./speech.ts";
+import {
+  hiccup,
+  pauseFor,
+  quietFloor,
+  retryWaits,
+  step,
+  stillIn,
+  troubleOf,
+  unanswered,
+} from "./turn-taking.ts";
+import type { Act, Floor, Happening, Wait } from "./turn-taking.ts";
 import type { LoopWords } from "./words.ts";
 
 // The interview as it runs: Stephen says his line, out loud (speech.ts),
@@ -52,16 +73,28 @@ import type { LoopWords } from "./words.ts";
 // with the interview (kept.ts); this is only the moment. Ported from the
 // prototype (grasplabs/prototype, packages/grasp:
 // src/data/interview-loop.ts), with his voice and his ears: whoever chose
-// to talk is listened to while it is their turn (ear.ts), their words show
-// as they say them, and once a stretch is written down it is their answer,
-// as if typed. When to answer (turn-taking) is plain for now: once all
-// they said is written down and they aren't speaking.
+// to talk is listened to while it is their turn, and their words show as
+// they say them.
+//
+// Whose turn it is is decided by turn-taking.ts, which is told everything
+// that happens here, also what his ears hear (ear.ts), and says what to
+// do: he answers when they are done, waits when they aren't, and drops his
+// answer when they talk on. One ear is opened for the conversation, for
+// whoever chose to talk, and it is deaf whenever the floor says so: while
+// he speaks, and through the read-back until he asks whether it is right.
 //
 // When core can't be reached, a turn is asked for again by itself, twice.
 // Only when that doesn't help does anyone notice: Stephen says so himself,
-// as his own line, and whether it is their connection or our side. What
-// they typed is kept, and he goes on trying: after a while, at once when
-// the connection is back, and with whatever they type next.
+// as his own line, and whether it is their connection or our side; those
+// lines are fetched ahead, so he can still say them. What they said is
+// kept, and he goes on trying: after a while, at once when the connection
+// is back, and with whatever they say next.
+//
+// Every answer is measured from their last word to his first sound
+// (answer-meter.ts) and sent with the next turn, which core keeps for
+// staff. Everything that happens, what is done about it and each answer
+// measured is told on `window` as a `loopEventName` event, so tests can
+// follow the conversation.
 
 /** What Stephen is doing, and what is on screen with it. */
 export interface LoopState {
@@ -77,9 +110,20 @@ export interface LoopState {
   telling: { now: string[]; told: string[] } | null;
   /** What they said since his last line, for the bubble over the box. */
   said: Said | null;
+  /** They are talking right now. */
+  talking: boolean;
   /** The sign beside him: what he is doing, or the little he feels. */
   sign: DotSign | null;
 }
+
+/** What happens in the conversation, as it is told on `window` (`loopEventName`). */
+export type LoopEvent =
+  | { happened: Happening }
+  | { did: Act }
+  | { measured: Measured; waited: number | null };
+
+/** The name of the event on `window` that tells each `LoopEvent`. */
+export const loopEventName = "grasp:interview-loop";
 
 /** What they said, with what Stephen marked in it, and whether it is still on its way. */
 export interface Said {
@@ -93,14 +137,10 @@ const notedMs = 2600;
 const penMs = 1400;
 /** How long nothing may come in of a turn before that try is given up. */
 const quietMs = 20_000;
-/** A hiccup is asked again by itself after these waits: three tries in all. */
-const waits = [800, 2000];
-/** Once he said it doesn't work, he tries again after each of these; then he says they can come back later. */
-const later = [5000, 10_000, 20_000, 30_000];
-/** How long he waits for the rest of a sentence they stopped in the middle of. */
-const nudgeMs = 5000;
 /** How long a story is waited for once he said which part it is. */
 const storyWaitMs = 2500;
+/** How he sounds saying that something doesn't work. */
+const sorry: VoiceTag = "upbeat, reassuring";
 /** How long their yes to a part stays before the next part. */
 const agreedMs = 900;
 /** The shortest a line takes on screen, however short. */
@@ -122,6 +162,7 @@ const idle: LoopState = {
   from: 0,
   telling: null,
   said: null,
+  talking: false,
   sign: null,
 };
 
@@ -149,17 +190,12 @@ export const useLoop = (): LoopState =>
 let words: LoopWords | null = null;
 /** Whether the conversation is on screen: nothing that comes back late does anything once it is not. */
 let on = false;
-/** What they typed or said that he has not answered yet. */
-let carry: { text: string; typed: boolean }[] = [];
-/** Stephen's ears, while the conversation is on and they chose to talk. */
-let ear: Ear | null = null;
-let earOpening = false;
-/** What is heard so far of the stretch they are saying. */
-let live = "";
-/** The stretches they said whose words are still to come. */
-const unwritten = new Set<number>();
+/** Whose turn it is, and what they said that he hasn't answered yet. */
+let floor: Floor = quietFloor;
 /** The turn on its way: how to give it up, and whether his line from it is out. */
 interface Pending {
+  /** The floor's number for it, when it answers what they said. */
+  turn: number | null;
   giving: AbortController;
   spoke: boolean;
   /** His line leads to the read-back or the end. */
@@ -175,8 +211,9 @@ let speaking = 0;
 let sayingCount = 0;
 /** His line being said while the rest of it is still being written. */
 let underway: Saying | null = null;
-let nudging = 0;
 let noting = 0;
+/** The waits the floor set, by name. */
+const waits = new Map<Wait, number>();
 /** How he says the line on screen, and whether it asked something. */
 let tone: VoiceTag | null = null;
 let asked = false;
@@ -184,7 +221,19 @@ let asked = false;
 let troubled = 0;
 let owed: (() => void) | null = null;
 let again = 0;
+/** How long they waited for his voice the answer before, for the next turn; none when it wasn't heard. */
+let waited: number | undefined;
+let unmeasure: (() => void) | null = null;
 
+/** Tells whoever follows the conversation what happens in it. */
+const announce = (event: LoopEvent): void => {
+  window.dispatchEvent(new CustomEvent(loopEventName, { detail: event }));
+};
+
+const meter = answerMeter((answer) => {
+  waited = waitedOf(answer);
+  announce({ measured: answer, waited: waited ?? null });
+});
 const pause = async (ms: number): Promise<void> => {
   // oxlint-disable-next-line promise/avoid-new -- setTimeout has no promise form in browsers
   await new Promise<void>((resolve) => {
@@ -205,7 +254,9 @@ const signFor = (doing: LoopState["doing"]): DotSign | null => {
     return (tone === null ? undefined : feelings[tone]) ?? null;
   }
   if (doing === "listening") {
-    return carry.length === 0 && asked ? "question" : null;
+    return floor.parts.length === 0 && !floor.talking && asked
+      ? "question"
+      : null;
   }
   return null;
 };
@@ -216,16 +267,13 @@ const show = (
   more: Partial<LoopState> = {}
 ): void => {
   state = { ...state, doing, telling: null, ...more };
-  // He listens only while it is their turn: never to himself.
-  ear?.setDeaf(doing !== "listening");
   set({ sign: more.sign === undefined ? signFor(doing) : more.sign });
 };
 
-/** He stops: what he says, and what he would do next by himself. */
+/** He stops: what he says. */
 const rest = (): void => {
   stopSpeaking();
   underway = null;
-  window.clearTimeout(nudging);
 };
 
 /** How he says a line: in the voice of whoever holds the interview. */
@@ -242,17 +290,13 @@ const drop = (): void => {
   window.clearTimeout(again);
 };
 
-/** What they typed and said since his last line, with what is heard of what they are saying, for the bubble. */
+/** What they said since his last line, for the bubble: every stretch so far, and what they are saying now. */
 const bubble = (): void => {
   window.clearTimeout(noting);
-  const text = [...carry.map((part) => part.text), live]
-    .filter((part) => part !== "")
-    .join(" ");
+  const text = unanswered(floor);
   set({
-    said:
-      text === "" && unwritten.size === 0
-        ? null
-        : { text, marks: [], waiting: true },
+    said: text === "" ? null : { text, marks: [], waiting: true },
+    talking: floor.talking,
     sign: signFor(state.doing),
   });
 };
@@ -261,7 +305,7 @@ const bubble = (): void => {
 const fade = (): void => {
   window.clearTimeout(noting);
   noting = window.setTimeout(() => {
-    if (carry.length === 0) {
+    if (floor.parts.length === 0 && floor.live === "") {
       set({ said: null });
     }
   }, notedMs);
@@ -277,11 +321,16 @@ const wroteDown = (): void => {
   }, penMs);
 };
 
-/** He waits for their answer: in the box at the bottom, and by ear when they chose to talk. */
-const listen = (): void => {
+/**
+ * He waits for their answer: in the box at the bottom, and through the ear
+ * when they chose to talk. With `afterReading`, he listens again after the
+ * read-back's lines: he asked whether it is right, or it wasn't the
+ * read-back after all.
+ */
+const listen = (afterReading = false, nudge = false): void => {
   show("listening");
-  // oxlint-disable-next-line no-use-before-define -- hearing what they say leads back to answering them
-  void hearken();
+  // oxlint-disable-next-line no-use-before-define -- the floor decides, and may open the ear
+  happen({ type: "listen", at: performance.now(), asked: afterReading, nudge });
 };
 
 /**
@@ -296,12 +345,21 @@ const speak = (
   {
     noted = false,
     open = false,
+    answers = false,
     after,
-  }: { noted?: boolean; open?: boolean; after: () => void }
+  }: {
+    noted?: boolean;
+    open?: boolean;
+    /** It answers what they said, which is then his. */
+    answers?: boolean;
+    after: () => void;
+  }
 ): void => {
   speaking += 1;
   const mine = speaking;
   rest();
+  // oxlint-disable-next-line no-use-before-define -- the floor closes the ear while he speaks
+  happen({ type: "speak", at: performance.now(), answers });
   tone = how;
   asked = line.trim().endsWith("?");
   sayingCount += 1;
@@ -354,10 +412,8 @@ const sayThrough = async (
 };
 
 /** A hiccup is worth asking again; a refusal or a budget used up is not. */
-const hiccup = (answer: StephenTurn | TurnFailed): boolean =>
-  turnFailed(answer) &&
-  (answer.status === 0 || answer.status >= 500) &&
-  answer.status !== 503;
+const retries = (answer: StephenTurn | TurnFailed): boolean =>
+  turnFailed(answer) && hiccup(answer.status);
 
 /** One try at a turn, given up when nothing comes in for a while. */
 const attempt = async (
@@ -397,8 +453,8 @@ const reach = async (
   onEvent: (event: EarlyEvent) => void
 ): Promise<StephenTurn | TurnFailed> => {
   let answer = await attempt(request, giving, onEvent);
-  for (const wait of waits) {
-    if (!hiccup(answer) || giving.signal.aborted) {
+  for (const wait of retryWaits) {
+    if (!retries(answer) || giving.signal.aborted) {
       return answer;
     }
     // oxlint-disable-next-line no-await-in-loop -- backing off between tries
@@ -406,6 +462,7 @@ const reach = async (
     if (giving.signal.aborted) {
       return answer;
     }
+    meter.again();
     // oxlint-disable-next-line no-await-in-loop -- one try at a time
     answer = await attempt(request, giving, onEvent);
   }
@@ -415,6 +472,12 @@ const reach = async (
 /** The turn still owed is asked for again: after a while, or the moment the connection is back. */
 const tryAgain = (): void => {
   if (!on || owed === null) {
+    return;
+  }
+  // They are saying something: once that is written down, it is asked for with it.
+  if (floor.talking || floor.parts.some(({ waiting }) => waiting)) {
+    window.clearTimeout(again);
+    again = window.setTimeout(tryAgain, 2000);
     return;
   }
   const retry = owed;
@@ -434,29 +497,59 @@ const trouble = (status: number, retry: () => void): void => {
   if (words === null) {
     return;
   }
-  const tried = troubled;
+  const told = words;
+  const { say: line, again: after } = troubleOf({
+    tried: troubled,
+    status,
+    online: navigator.onLine,
+  });
   troubled += 1;
   const wait = (): void => {
     listen();
     owed = retry;
     window.clearTimeout(again);
-    const after = later[tried];
-    if (after !== undefined) {
+    if (after !== null) {
       again = window.setTimeout(tryAgain, after);
     }
   };
-  const theirs = status === 0 || !navigator.onLine;
-  if (tried === 0) {
-    speak(theirs ? words.offline : words.trouble, "upbeat, reassuring", {
-      after: wait,
-    });
+  if (line === null) {
+    wait();
     return;
   }
-  if (tried === later.length) {
-    speak(words.stillTrouble, "upbeat, reassuring", { after: wait });
-    return;
+  speak(told[line], sorry, { after: wait });
+};
+
+/** The lines he may have to say when nothing can be fetched any more are fetched ahead, a sentence at a time as he says them. */
+const readyToTell = (told: LoopWords): void => {
+  const voicing = voiceOf(sorry);
+  for (const line of [
+    told.offline,
+    told.trouble,
+    told.stillTrouble,
+    told.unheard,
+    told.noMicrophone,
+  ]) {
+    for (const piece of piecesOf(line)) {
+      prepare(piece.text, voicing);
+    }
   }
-  wait();
+};
+
+/**
+ * Something he has to tell them that is no part of the conversation: he
+ * couldn't hear them, or can't listen here. He says it himself, and then
+ * his own line stands there again.
+ */
+const notice = (line: string, then: () => void): void => {
+  const was = state.line;
+  const question = asked;
+  speak(line, sorry, {
+    after: () => {
+      asked = question;
+      set({ line: was });
+      then();
+    },
+  });
 };
 
 /** What core is told: what was said and written down, and what just happened. */
@@ -492,6 +585,7 @@ const requestOf = (
         : Math.min(240, Math.max(0, (Date.now() - now.startedAt) / 60_000)),
     ...(reading === undefined ? {} : { reading }),
     adding: now.adding,
+    ...(waited === undefined ? {} : { waited }),
   };
 };
 
@@ -518,16 +612,14 @@ const theirs = (
         waiting: false,
       };
 
-/** What they typed since his last line, as one line of theirs; none when nothing. */
+/** What they said since his last line, as one line of theirs; none when nothing. */
 const saidNow = (): InterviewLine | undefined => {
-  const text = carry
-    .map((part) => part.text)
-    .join(" ")
-    .trim();
-  const typed = carry.every((part) => part.typed);
-  return text === ""
-    ? undefined
-    : { from: "person", text, ...(typed ? { typed: true as const } : {}) };
+  const text = unanswered(floor);
+  if (text === "") {
+    return undefined;
+  }
+  const typed = floor.live === "" && floor.parts.every((part) => part.typed);
+  return { from: "person", text, ...(typed ? { typed } : {}) };
 };
 
 /** The stories asked for, by the lines they are of: each is asked for once. */
@@ -635,6 +727,8 @@ const readPart = async (): Promise<void> => {
   speaking += 1;
   const mine = speaking;
   rest();
+  // oxlint-disable-next-line no-use-before-define -- he doesn't listen until he asks whether it is right
+  happen({ type: "speak", at: performance.now(), readsBack: true });
   tone = "easy, light";
   asked = true;
   const intro = now.adding ? told.added : told.intro(part.group, part.first);
@@ -669,7 +763,7 @@ const readPart = async (): Promise<void> => {
   ) {
     return;
   }
-  listen();
+  listen(true);
 };
 
 /** What he does once his line is said: the read-back, the end, or waiting for the answer. */
@@ -678,7 +772,7 @@ const onward = (): void => {
     void readPart();
     return;
   }
-  listen();
+  listen(true);
 };
 
 /** They say yes to the part of the read-back on screen: with the button, or in words. */
@@ -689,7 +783,11 @@ export const agreeToPart = (inWords?: string): void => {
   speaking += 1;
   rest();
   drop();
-  carry = [];
+  const at = performance.now();
+  // oxlint-disable-next-line no-use-before-define -- what they said is answered, and he doesn't listen meanwhile
+  happen({ type: "answered", at });
+  // oxlint-disable-next-line no-use-before-define -- as above
+  happen({ type: "wait", at });
   window.clearTimeout(noting);
   state = { ...state, doing: "idle", telling: null };
   set({
@@ -809,7 +907,7 @@ const taken = (
   { mine, order, inRead, part, said, answered }: Turn
 ): void => {
   const decided = order !== turns || progressNow().person === "completed";
-  const answering = carry.length > 0;
+  const answering = floor.parts.length > 0 || floor.talking;
   if (turnFailed(turn)) {
     notesLost(mine, { decided, answering });
     return;
@@ -837,7 +935,8 @@ const taken = (
   if (reads && !inRead && (state.doing === "listening" || mine.waits)) {
     onward();
   } else if (mine.waits) {
-    listen();
+    // He waited to read back, and it isn't that after all: he listens.
+    listen(true);
   }
 };
 
@@ -853,16 +952,20 @@ const earlyOf = (
   const { mine, inRead, said } = known;
   let next: EarlyNext | null = null;
   const after = inRead
-    ? listen
+    ? (): void => {
+        listen(true);
+      }
     : (): void => {
         const { wants } = progressNow();
         if (mine.leads === null || wants === "readback" || wants === "end") {
           onward();
           return;
         }
-        // He said he will read back: what he wrote down from this turn may still be on its way.
+        // He said he will read back: what he wrote down from this turn may still be on its way, and he waits for it without listening.
         mine.waits = true;
         show("thinking");
+        // oxlint-disable-next-line no-use-before-define -- the floor keeps the ear closed
+        happen({ type: "wait", at: performance.now() });
       };
   /** The screen follows where the interview goes once his line is out; the read-back and the end wait for what he wrote down. */
   const steer = (): void => {
@@ -888,7 +991,7 @@ const earlyOf = (
     pending = null;
     troubled = 0;
     mine.spoke = true;
-    carry = [];
+    meter.line(performance.now());
     known.answered = conversed(said);
     if (whole) {
       hisLine(line);
@@ -897,22 +1000,33 @@ const earlyOf = (
     }
     window.clearTimeout(noting);
     set({ said: theirs(said) });
-    speak(line.say, line.tone, { after, open: !whole });
+    speak(line.say, line.tone, { after, open: !whole, answers: true });
     steer();
   };
   const onEvent = (early: EarlyEvent): void => {
     if ("opening" in early) {
-      begin(early.opening, false);
+      const { opening } = early;
+      // oxlint-disable-next-line no-use-before-define -- not while they may be starting to talk
+      whenStill(() => {
+        begin(opening, false);
+      });
     } else if ("line" in early) {
-      if (known.opening === null) {
-        begin(early.line, true);
-      } else {
-        rounded(known, early.line);
-      }
+      const { line } = early;
+      // oxlint-disable-next-line no-use-before-define -- as above
+      whenStill(() => {
+        if (known.opening === null) {
+          begin(line, true);
+        } else {
+          rounded(known, line);
+        }
+      });
     } else if ("next" in early) {
       ({ next } = early);
       if (early.next.wants === "readback" || early.next.wants === "end") {
         mine.leads = early.next;
+        // From this line on he doesn't listen, until he asks whether what he reads back is right.
+        // oxlint-disable-next-line no-use-before-define -- the floor closes the ear
+        happen({ type: "reads-back", at: performance.now() });
         // The story of the first part is asked for while he says he will read back.
         foretell();
       }
@@ -922,21 +1036,22 @@ const earlyOf = (
   return { after, onEvent };
 };
 
-/** A whole turn, before he said anything of it: he says it now, or waits for the rest of what they type. */
-const answer = (
-  turn: StephenTurn,
-  known: Turn,
-  { after, nudge }: { after: () => void; nudge: () => void }
-): void => {
-  const { inRead, part, said } = known;
+/** A whole turn, before he said anything of it: he says it now, or waits for the rest of what they say. */
+const answer = (turn: StephenTurn, known: Turn, after: () => void): void => {
+  const { inRead, part, said, mine } = known;
   troubled = 0;
   if (turn.more) {
     // They stopped in the middle of a sentence: he waits for the rest, and answers with what there is.
-    listen();
-    nudging = window.setTimeout(nudge, nudgeMs);
+    show("listening");
+    if (mine.turn !== null) {
+      // oxlint-disable-next-line no-use-before-define -- the floor waits for the rest
+      happen({ type: "more", at: performance.now(), turn: mine.turn });
+    }
     return;
   }
-  carry = [];
+  // oxlint-disable-next-line no-use-before-define -- what they said is his now
+  happen({ type: "answered", at: performance.now() });
+  meter.line(performance.now());
   const answered = conversed(said);
   if (turn.say !== "") {
     hisLine(turn);
@@ -958,17 +1073,23 @@ const answer = (
     onward();
     return;
   }
-  speak(turn.say, turn.tone, { noted: turn.facts.length > 0, after });
+  speak(turn.say, turn.tone, {
+    noted: turn.facts.length > 0,
+    answers: true,
+    after,
+  });
 };
 
 /**
  * One turn: core is told what happened, and Stephen does what comes back.
  * His line comes first, the moment it is written, and shows at once; what
- * he wrote down follows while it does.
+ * he wrote down follows while it does. `turn` is the floor's number for
+ * it when it answers what they said.
  */
 const ask = async (
   event: InterviewEvent,
-  said?: InterviewLine
+  said?: InterviewLine,
+  turn: number | null = null
 ): Promise<void> => {
   if (words === null) {
     return;
@@ -985,8 +1106,11 @@ const ask = async (
   if (request === null) {
     return;
   }
+  // The wait for his voice goes with one turn only.
+  waited = undefined;
   drop();
   const mine: Pending = {
+    turn,
     giving: new AbortController(),
     spoke: false,
     leads: null,
@@ -1003,102 +1127,182 @@ const ask = async (
     answered: -1,
     opening: null,
   };
-  show("thinking");
+  // Spoken, he looks as if he listens a moment longer: the floor says when he thinks.
+  const looksListening =
+    turn !== null && floor.asking === turn && floor.doing === "listening";
+  if (!looksListening) {
+    show("thinking");
+  }
   const { after, onEvent } = earlyOf(known);
-  const turn = await reach(request, mine.giving, onEvent);
+  const answered = await reach(request, mine.giving, onEvent);
   if (mine.spoke) {
     // Begun with its first sentence, his line came only with the whole turn, or never: he says what there is.
     const { opening } = known;
     if (opening !== null) {
       rounded(
         known,
-        turnFailed(turn) || turn.say === ""
+        turnFailed(answered) || answered.say === ""
           ? opening
-          : { say: turn.say, tone: turn.tone }
+          : { say: answered.say, tone: answered.tone }
       );
     }
-    taken(turn, known);
+    taken(answered, known);
     return;
   }
   if (pending !== mine || !on) {
     return;
   }
   pending = null;
-  if (turnFailed(turn)) {
-    // What they typed is kept, and asked with again, with whatever they type meanwhile.
-    trouble(turn.status, () => {
-      void ask(event, said === undefined ? undefined : (saidNow() ?? said));
+  if (turnFailed(answered)) {
+    // What they said is kept, and asked with again, with whatever they say meanwhile.
+    if (turn === null) {
+      trouble(answered.status, () => {
+        void ask(event, said);
+      });
+      return;
+    }
+    // oxlint-disable-next-line no-use-before-define -- the floor keeps what they said
+    happen({ type: "failed", at: performance.now(), turn });
+    trouble(answered.status, () => {
+      // oxlint-disable-next-line no-use-before-define -- as above
+      happen({ type: "retry", at: performance.now() });
     });
     return;
   }
-  answer(turn, known, {
-    after,
-    nudge: () => {
-      void ask("nudge", saidNow());
-    },
+  answer(answered, known, after);
+};
+
+/** What they said goes to him: in the read-back, a plain yes needs no thinking about. */
+const askedFor = ({
+  turn,
+  text,
+  typed,
+  nudge,
+}: Extract<Act, { type: "ask" }>): void => {
+  if (words === null) {
+    return;
+  }
+  const said: InterviewLine = {
+    from: "person",
+    text,
+    ...(typed ? { typed } : {}),
+  };
+  if (!isReading(progressNow())) {
+    void ask(nudge ? "nudge" : "answer", said, turn);
+    return;
+  }
+  if (words.agrees.test(text)) {
+    agreeToPart(text);
+    return;
+  }
+  void ask("readback", said, turn);
+};
+
+/** Does `go` once they make no sound: at once, unless they made one so lately they may be starting to talk; then a moment later, at most. */
+const whenStill = (go: () => void, since = performance.now()): void => {
+  const wait = stillIn({
+    now: performance.now(),
+    since,
+    lastHeard: lastHeard(),
+    hearing: floor.hearing,
   });
-};
-
-/**
- * Whether to answer now: once all they said is written down, they aren't
- * speaking, and it is their turn. Turn-taking (GRA-383) makes this finer.
- */
-const settle = (): void => {
-  if (
-    !on ||
-    carry.length === 0 ||
-    unwritten.size > 0 ||
-    ear?.talking === true ||
-    state.doing !== "listening"
-  ) {
+  if (wait === 0) {
+    go();
     return;
   }
-  // oxlint-disable-next-line no-use-before-define -- answering is where settling leads
-  void commit();
+  window.setTimeout(() => {
+    whenStill(go, since);
+  }, wait);
 };
 
-/** What the ear hears, while the conversation is on. */
-const heard = (event: EarEvent): void => {
-  if (!on) {
-    return;
-  }
-  if (event.type === "stretch-start") {
-    unwritten.add(event.stretch);
-    live = "";
-    bubble();
-  } else if (event.type === "partial") {
-    live = event.text;
-    bubble();
-  } else if (event.type === "final" || event.type === "unheard") {
-    unwritten.delete(event.stretch);
-    live = "";
-    if (event.type === "final" && event.text !== "") {
-      carry.push({ text: event.text, typed: false });
+/** Stephen's ears, while the conversation is on and they chose to talk. */
+let ear: Ear | null = null;
+let earOpening = false;
+/** The ear numbers its stretches from 1; the floor's are counted on across ears. */
+let stretchesBefore = 0;
+/** Whether the stretch being said comes in live: then a breath ends it. */
+let swift = false;
+
+/** What the ear hears, as it happens to the floor. */
+const heardBy =
+  (opened: Ear, from: number) =>
+  (event: EarEvent): void => {
+    if (!on || ear !== opened) {
+      return;
     }
-    bubble();
-    if (carry.length === 0 && unwritten.size === 0) {
-      set({ said: null });
+    const at = performance.now();
+    const stretch = from + ("stretch" in event ? event.stretch : 0);
+    stretchesBefore = Math.max(stretchesBefore, stretch);
+    switch (event.type) {
+      case "stretch-start": {
+        ({ live: swift } = event);
+        // oxlint-disable-next-line no-use-before-define -- what is heard happens to the floor
+        happen({ type: "stretch-start", at: event.at, stretch });
+        break;
+      }
+      case "partial": {
+        // oxlint-disable-next-line no-use-before-define -- as above
+        happen({ type: "partial", at, stretch, text: event.text });
+        break;
+      }
+      case "stretch-end": {
+        // oxlint-disable-next-line no-use-before-define -- as above
+        happen({ type: "stretch-end", at: lastHeard(), stretch });
+        break;
+      }
+      case "final": {
+        // oxlint-disable-next-line no-use-before-define -- as above
+        happen({ type: "final", at, stretch, text: event.text });
+        break;
+      }
+      case "unheard": {
+        // oxlint-disable-next-line no-use-before-define -- as above
+        happen({ type: "unheard", at, stretch });
+        break;
+      }
+      case "line": {
+        // The ear falls back to recordings by itself: nothing changes here.
+        break;
+      }
+      default: {
+        event satisfies never;
+      }
     }
-    settle();
+  };
+
+/** Without a microphone, he says so, and from then on they type. */
+const noMicrophone = (): void => {
+  update((progress) => ({ ...progress, mode: "type" }));
+  // oxlint-disable-next-line no-use-before-define -- the floor stops listening by ear
+  happen({ type: "voice", at: performance.now(), on: false });
+  if (words !== null) {
+    notice(words.noMicrophone, () => {
+      listen();
+    });
   }
 };
 
-/** Opens his ears, once, for whoever chose to talk; without a microphone they type. */
+/** Opens his ears, once, for whoever chose to talk; it hears from now on. */
 const hearken = async (): Promise<void> => {
+  if (ear !== null) {
+    ear.setDeaf(false);
+    return;
+  }
   const link = linkNow();
-  if (
-    ear !== null ||
-    earOpening ||
-    words === null ||
-    link === null ||
-    progressNow().mode !== "talk"
-  ) {
+  if (earOpening || words === null || link === null) {
     return;
   }
   earOpening = true;
-  const opened = await openEar({ locale: words.locale, link });
+  const opened = await openEar({
+    locale: words.locale,
+    link,
+    pause: () => pauseFor(swift, pauseMs),
+  });
   earOpening = false;
   if (opened === null) {
+    if (on) {
+      noMicrophone();
+    }
     return;
   }
   if (!on) {
@@ -1106,51 +1310,139 @@ const hearken = async (): Promise<void> => {
     return;
   }
   ear = opened;
-  opened.on(heard);
-  opened.setDeaf(state.doing !== "listening");
+  opened.on(heardBy(opened, stretchesBefore));
+  // The floor may have stopped listening while the microphone was asked for.
+  opened.setDeaf(!floor.hearing);
+};
+
+/** His ears hear nothing for now: what is being said counts for nothing. */
+const unhear = (): void => {
+  ear?.setDeaf(true);
 };
 
 /** Lets go of his ears and of the microphone. */
-const unhear = (): void => {
+const hangUpEar = (): void => {
   ear?.close();
   ear = null;
-  live = "";
-  unwritten.clear();
+  swift = false;
   hangUp();
   // A new conversation never starts muted.
   muteMic(false);
 };
 
-/** Everything they typed or said since his last line goes to him. */
-const commit = async (): Promise<void> => {
-  rest();
-  const said = saidNow();
-  if (said === undefined || words === null) {
+/** One of the floor's waits is set, in place of one of the same name. */
+const waitFor = (wait: Wait, ms: number): void => {
+  window.clearTimeout(waits.get(wait));
+  waits.set(
+    wait,
+    window.setTimeout(() => {
+      waits.delete(wait);
+      // oxlint-disable-next-line no-use-before-define -- a wait over is something that happens
+      happen({ type: "waited", at: performance.now(), wait });
+    }, ms)
+  );
+};
+
+/** Does what the floor says. */
+const perform = (act: Act): void => {
+  switch (act.type) {
+    case "hear": {
+      void hearken();
+      return;
+    }
+    case "deaf": {
+      unhear();
+      return;
+    }
+    case "ask": {
+      askedFor(act);
+      return;
+    }
+    case "drop": {
+      if (pending?.turn === act.turn) {
+        drop();
+      }
+      return;
+    }
+    case "hush": {
+      speaking += 1;
+      rest();
+      return;
+    }
+    case "after": {
+      waitFor(act.wait, act.ms);
+      return;
+    }
+    case "clear": {
+      window.clearTimeout(waits.get(act.wait));
+      waits.delete(act.wait);
+      return;
+    }
+    case "quiet": {
+      meter.quiet(act.at);
+      return;
+    }
+    case "unheard": {
+      // He couldn't hear them: he says so, and listens for it again; what he did hear is answered if no more comes.
+      if (words !== null) {
+        notice(words.unheard, () => {
+          listen(false, true);
+        });
+      }
+      return;
+    }
+    default: {
+      act satisfies never;
+    }
+  }
+};
+
+/** What is on screen follows the floor: what they said, whether they talk, and whether he thinks yet. */
+const follow = (happening: Happening): void => {
+  if (happening.type === "waited" && happening.wait === "thinking") {
+    if (floor.doing === "thinking" && state.doing === "listening") {
+      show("thinking");
+    }
     return;
   }
-  if (!isReading(progressNow())) {
-    await ask("answer", said);
-    return;
+  if (happening.type === "stretch-start" && state.doing === "thinking") {
+    show("listening");
   }
-  // A plain yes needs no thinking about.
-  if (words.agrees.test(said.text)) {
-    agreeToPart(said.text);
-    return;
+  if (happening.type === "final") {
+    meter.words(happening.at);
   }
-  await ask("readback", said);
+  const heard =
+    happening.type === "stretch-start" ||
+    happening.type === "partial" ||
+    happening.type === "stretch-end" ||
+    happening.type === "final" ||
+    happening.type === "unheard" ||
+    happening.type === "typed";
+  if (heard) {
+    bubble();
+  }
+};
+
+/** Something happens: the floor decides what to do, and it is done. */
+const happen = (happening: Happening): void => {
+  const { floor: now, acts } = step(floor, happening);
+  floor = now;
+  announce({ happened: happening });
+  follow(happening);
+  for (const act of acts) {
+    announce({ did: act });
+    perform(act);
+  }
 };
 
 /** What they typed is their answer: typing over him stops him at once. */
 export const sendTyped = (text: string): void => {
-  const said = text.trim();
-  if (!on || said === "" || state.doing === "idle") {
+  if (!on || text.trim() === "" || state.doing === "idle") {
     return;
   }
-  speaking += 1;
-  drop();
-  carry.push({ text: said, typed: true });
-  bubble();
-  void commit();
+  const at = performance.now();
+  meter.sent(at);
+  happen({ type: "typed", at, text });
 };
 
 /** A line as it is quoted in a sentence: without its own full stop. */
@@ -1170,6 +1462,9 @@ export const changeLine = (id: string, was: string, now: string): void => {
 
 /** What the conversation says by itself follows the language on screen. */
 export const setLoopWords = (next: LoopWords): void => {
+  if (on && next.offline !== words?.offline) {
+    readyToTell(next);
+  }
   words = next;
 };
 
@@ -1183,12 +1478,18 @@ export const startLoop = (): void => {
     return;
   }
   on = true;
-  carry = [];
+  floor = quietFloor;
   drop();
   state = idle;
   troubled = 0;
+  waited = undefined;
   window.addEventListener("online", tryAgain);
+  unmeasure = onFirstSound((at) => {
+    meter.voice(at);
+  });
+  readyToTell(words);
   const now = progressNow();
+  happen({ type: "voice", at: performance.now(), on: now.mode === "talk" });
   // Whoever chose to type isn't surprised by a voice, back on the link too.
   if (now.mode === "type") {
     setSound(false);
@@ -1205,15 +1506,19 @@ export const startLoop = (): void => {
  * with it, unless the copy kept elsewhere took this one's place.
  */
 export const stopLoop = ({ keep = true }: { keep?: boolean } = {}): void => {
-  const unanswered = saidNow();
-  if (on && keep && unanswered !== undefined) {
-    update((progress) => withLine(progress, unanswered));
+  const unsaid = saidNow();
+  if (on && keep && unsaid !== undefined) {
+    update((progress) => withLine(progress, unsaid));
   }
   on = false;
   speaking += 1;
   drop();
-  carry = [];
-  unhear();
+  happen({ type: "stop", at: performance.now() });
+  floor = quietFloor;
+  hangUpEar();
+  meter.stop();
+  unmeasure?.();
+  unmeasure = null;
   rest();
   window.clearTimeout(noting);
   window.removeEventListener("online", tryAgain);

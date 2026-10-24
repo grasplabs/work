@@ -6085,6 +6085,10 @@ msgstr "Ik kon niet koppelen waar je documenten staan. Probeer het opnieuw met e
 msgid "I could not find the columns. The first row should name them: name, email, team and job."
 msgstr "Ik kon de kolommen niet vinden. De eerste rij moet ze noemen: naam, e-mail, team en functie."
 
+#: src/interview/words.ts
+msgid "I could not hear that. Say it once more, or type it."
+msgstr "Ik kon dat niet horen. Zeg het nog een keer, of typ het."
+
 #: src/onboarding/setup-steps.tsx
 msgid "I could not keep it. Try again in a moment."
 msgstr "Ik kon het niet bewaren. Probeer het zo nog eens."
@@ -12281,6 +12285,10 @@ msgstr "De geheugenbestanden, skills en uploads die je agents lezen, staan in <0
 #: src/onboarding/setup-steps.tsx
 msgid "The message"
 msgstr "Het bericht"
+
+#: src/interview/words.ts
+msgid "The microphone is not available here. Type your answer."
+msgstr "De microfoon werkt hier niet. Typ je antwoord."
 
 #: src/engines/store-change-errors.ts
 msgid "The migration {migration} failed on its fixture {fixture} when this version was sealed: {reason}. It runs on no records, so the version can't be made current: fix the migration or its fixture and build the domain again."
