@@ -158,7 +158,12 @@ export interface CloudflareApiOptions {
  */
 const envelopeSchema = z.object({
   success: z.boolean(),
-  errors: z.array(z.object({ code: z.number(), message: z.string() })),
+  // Null, not empty, on some successes: an assets upload session answers
+  // `"errors": null` (seen on a real account, GRA-430).
+  errors: z
+    .array(z.object({ code: z.number(), message: z.string() }))
+    .nullish()
+    .transform((errors) => errors ?? []),
   result: z.unknown(),
   result_info: z.object({ total_count: z.number().optional() }).nullish(),
 });

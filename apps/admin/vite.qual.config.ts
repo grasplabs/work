@@ -1,0 +1,159 @@
+import { readdirSync, readFileSync } from "node:fs";
+
+import {
+  cloudflareTest,
+  readD1Migrations,
+} from "@cloudflare/vitest-pool-workers";
+import { tanstackStart } from "@tanstack/react-start/plugin/vite";
+import react from "@vitejs/plugin-react";
+import { defineProject } from "vite-plus";
+
+import { accessTeam } from "./test/access-config.ts";
+import { discordTest } from "./test/discord-config.ts";
+import { relay } from "./test/qualification/relay.ts";
+
+const requireEnv = (name: string): string => {
+  const value = process.env[name];
+  if (value === undefined || value === "") {
+    throw new Error(`${name} is required`);
+  }
+  return value;
+};
+const accountId = requireEnv("CLOUDFLARE_ACCOUNT_ID");
+const prefix = requireEnv("QUAL_PREFIX");
+
+const migrations = await readD1Migrations(
+  `${import.meta.dirname}/src/db/migrations`
+);
+
+/**
+ * Core's Knowledge migrations as their files hold them, for the test that
+ * applies real migrations through the admin's client (FTS5 tables,
+ * triggers, comments).
+ */
+const knowledgeMigrationsDir = `${import.meta.dirname}/../core/src/db/knowledge/migrations`;
+const knowledgeMigrationFiles = readdirSync(knowledgeMigrationsDir)
+  .filter((name) => name.endsWith(".sql"))
+  .toSorted()
+  .map((name) => ({
+    name,
+    sql: readFileSync(`${knowledgeMigrationsDir}/${name}`, "utf-8"),
+  }));
+
+/**
+ * The real-account qualification (GRA-430), run by hand, never in CI:
+ * `vp test --config apps/admin/vite.qual.config.ts`, with
+ * CLOUDFLARE_ACCOUNT_ID, QUAL_PREFIX, QUAL_RELEASE_DIR and QUAL_LOG set,
+ * Node's proxy on (NODE_USE_ENV_PROXY=1). As the admin's tests, in
+ * workerd, with every outside call through test/qualification/relay.ts.
+ *
+ * The admin's tests, in workerd. The Cloudflare Vite plugin (vite.config.ts)
+ * can't run as a Vitest project, so the test pool runs the Worker instead,
+ * with TanStack Start's plugin for the modules its handler loads: the tests
+ * go through the real entry (src/server.ts), app included.
+ */
+export default defineProject({
+  // As in every admin build (vite.config.ts, src/admin/discord-gateway.ts).
+  resolve: {
+    alias: {
+      "discord.js": `${import.meta.dirname}/src/admin/discord-gateway.ts`,
+    },
+  },
+  test: {
+    name: "admin-qualification",
+    include: ["test/qualification/**/*.qual.ts"],
+    // The first page a test file renders loads the whole app through Vite's
+    // module runner, about 2 s on an idle machine and several times that on
+    // a loaded one (CI, or the whole repo's suites at once), past Vitest's
+    // 5 s default. A hang still fails, just later.
+    testTimeout: 30 * 60_000,
+    hookTimeout: 10 * 60_000,
+    // The pool inlines every dependency, and the module runner loads each
+    // module with its own round trip to Vite, one import after another.
+    // lucide-react's entry re-exports about 1,850 icon modules, so a page
+    // with an icon (the rollouts page's Selects) took several times as long
+    // as the rest of the app: past 30 s under CI's load. Pre-bundled, it is
+    // one module. React stays out of the bundle, so there is one React.
+    //
+    // The Chat SDK's Discord adapter reads discord-api-types, whose .mjs
+    // re-exports CommonJS the module runner can't load from workerd one
+    // file at a time: pre-bundled too.
+    deps: {
+      optimizer: {
+        ssr: {
+          enabled: true,
+          include: [
+            "@grasp-os/ui > lucide-react",
+            "@chat-adapter/discord > discord-api-types/v10",
+          ],
+        },
+      },
+    },
+    // Checks the runtime is workerd, then brings the database up to the
+    // committed migrations: one after the other, as listed (Vitest's
+    // default runs them at once), so the check reports before the
+    // migrations fail on their `cloudflare:` imports.
+    setupFiles: [
+      "../../scripts/assert-workerd.ts",
+      "./test/apply-migrations.ts",
+    ],
+    sequence: { setupFiles: "list" },
+  },
+  plugins: [
+    tanstackStart(),
+    react(),
+    cloudflareTest({
+      wrangler: { configPath: "./wrangler.jsonc" },
+      // Tests run fully local, including in CI without Cloudflare credentials.
+      remoteBindings: false,
+      miniflare: {
+        bindings: {
+          // The Access team test/access.ts stands in for.
+          CF_ACCESS_AUD: accessTeam.audience,
+          CF_ACCESS_ISS: accessTeam.issuer,
+          // Off whatever a developer's .dev.vars sets: the tests of the
+          // bypass set it themselves.
+          DEV_ACCESS_EMAIL: "",
+          // Grasp's Discord application, which test/discord.test.ts stands
+          // in for (src/admin/discord.ts).
+          DISCORD_PUBLIC_KEY: discordTest.publicKey,
+          DISCORD_STAFF_IDS: discordTest.staffIds.join(","),
+          // workerd has no jurisdictions (src/env.d.ts).
+          DURABLE_OBJECT_JURISDICTION: "none",
+          // Where provisioned clients are served (src/deploy/context.ts).
+          CLIENT_DOMAIN: "qual.invalid",
+          // Grasp's Rooms, which test/admin-proposal.test.ts stands in for.
+          ROOMS_ORIGIN: "https://rooms.grasp.test",
+          // Where TanStack Start answers server functions: the build sets
+          // it; here the Worker reads it from process.env, which workerd
+          // fills from its vars, so tests can call them through the entry.
+          TSS_SERVER_FN_BASE: "/_serverFn/",
+          // Grasp's OAuth apps, which clients' sign-in names (src/deploy/core-config.ts).
+          ENTRA_CLIENT_ID: "test-entra-app",
+          GOOGLE_CLIENT_ID: "test-google-app.apps.googleusercontent.com",
+          ADMIN_MIGRATIONS: migrations,
+          QUAL_ACCOUNT_ID: accountId,
+          QUAL_PREFIX: prefix,
+          QUAL_VARIANT: process.env.QUAL_VARIANT ?? "exact",
+          QUAL_ATTACK: process.env.QUAL_ATTACK ?? "",
+          QUAL_PROVISION: process.env.QUAL_PROVISION ?? "1",
+          KNOWLEDGE_MIGRATION_FILES: knowledgeMigrationFiles,
+        },
+        outboundService: relay({
+          prefix,
+          accountId,
+          releaseDir: requireEnv("QUAL_RELEASE_DIR"),
+          logFile: requireEnv("QUAL_LOG"),
+        }),
+        // Where the fake Cloudflare API runs client D1 queries, one for
+        // each database it holds at once (test/cloudflare-api-workers.ts).
+        d1Databases: Object.fromEntries(
+          Array.from({ length: 24 }, (_, slot) => [
+            `CLIENT_D1_${slot}`,
+            `client-d1-${slot}`,
+          ])
+        ),
+      },
+    }),
+  ],
+});
