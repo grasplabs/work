@@ -14,6 +14,7 @@ import { answerCard, sourcesCard } from "./cards.tsx";
 import type { ChannelHandoff, ChannelMessage } from "./door.ts";
 import { channelLocales, languageOf, say } from "./words.ts";
 import type { ChannelLocale } from "./words.ts";
+import { postOffers } from "./workflow-offers.ts";
 
 // A member's message answered by the organization's agent, in the
 // person's own chat for that platform in their own Workspace (`via`, the
@@ -227,11 +228,18 @@ const answerOne = async (
     await thread.post(say("failed", locale));
     return;
   }
+  // The starts the turn offered, each on its card, under the answer.
+  const offers = async () => {
+    await postOffers(env, thread, { chatId, userId }, locale);
+  };
   const origin = signInConfig(env)?.origin;
   if (origin === undefined) {
     if (!streamed) {
       await thread.post(final);
+      await offers();
+      return;
     }
+    afterward(offers);
     return;
   }
   const sources = answer.cited.map(({ title, collectionId, documentId }) => ({
@@ -241,6 +249,7 @@ const answerOne = async (
   const chatUrl = `${origin}/?chat=${encodeURIComponent(chatId)}`;
   if (!streamed) {
     await thread.post(answerCard({ locale, text: final, sources, chatUrl }));
+    await offers();
     return;
   }
   // Under the answer's last words, which Teams gets once this returns.
@@ -249,6 +258,7 @@ const answerOne = async (
       async () => await thread.post(sourcesCard({ locale, sources, chatUrl }))
     );
   }
+  afterward(offers);
 };
 
 /**

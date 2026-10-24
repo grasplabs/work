@@ -6946,6 +6946,10 @@ msgstr "Let Grasp’s mail through"
 msgid "Let me put it all together for you."
 msgstr "Let me put it all together for you."
 
+#: src/workflows/ask-stephen.tsx
+msgid "Let people ask Stephen to start it"
+msgstr "Let people ask Stephen to start it"
+
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Let the interviews run again"
 msgstr "Let the interviews run again"
@@ -11394,6 +11398,10 @@ msgstr "Stephen asks about"
 #: src/onboarding/organization-words.ts
 msgid "Stephen asks them which work comes back most. To ask about a piece of work, open the person."
 msgstr "Stephen asks them which work comes back most. To ask about a piece of work, open the person."
+
+#: src/workflows/ask-stephen.tsx
+msgid "Stephen can offer it in Microsoft Teams to anyone who may start it. It starts only when they press Start, and runs as them."
+msgstr "Stephen can offer it in Microsoft Teams to anyone who may start it. It starts only when they press Start, and runs as them."
 
 #: src/routes/_shell.onboarding.kickoff.tsx
 msgid "Stephen is reading it. This takes a minute."

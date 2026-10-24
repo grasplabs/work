@@ -459,3 +459,53 @@ export const signInCard = ({
     </Card>
   ),
 });
+
+/** The Start button's action id, for the channel layer's `onAction`. */
+export const startAction = "workflow.start";
+
+/** A workflow Stephen offers to start, as the person sees it first. */
+export interface StartOfferCard {
+  locale: ChannelLocale;
+  /** Its id in `chat_workflow_offers`, which the press names. */
+  offerId: string;
+  workflow: string;
+  /** The values it starts with, each whole (workflow-offers.ts). */
+  values: readonly { label: string; value: string }[];
+}
+
+/**
+ * A workflow offered on a card: its name, each value it would start with,
+ * and Start, whose press names only the offer, so it starts exactly what
+ * the card showed, and only for the person it was offered to.
+ */
+export const startOfferCard = ({
+  locale,
+  offerId,
+  workflow,
+  values,
+}: StartOfferCard): PostableCard => {
+  const room: Room = { left: outsideBytes };
+  const name = fit(workflow, maxTitleChars, room).text;
+  const shown = values.map((each) => ({
+    label: fit(each.label, maxLabelChars, room).text,
+    value: fit(each.value, Number.POSITIVE_INFINITY, room).text,
+  }));
+  const card = (
+    <Card>
+      <CardText>{say("startOffer", locale, { workflow: name })}</CardText>
+      {shown.length === 0 ? null : (
+        <Fields>
+          {shown.map(({ label, value }, at) => (
+            <Field key={`${offerId}.${at}`} label={label} value={value} />
+          ))}
+        </Fields>
+      )}
+      <Actions>
+        <Button id={startAction} style="primary" value={offerId}>
+          {say("startButton", locale)}
+        </Button>
+      </Actions>
+    </Card>
+  );
+  return { card: cardOf(card), aiGenerated: true };
+};

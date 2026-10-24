@@ -6946,6 +6946,10 @@ msgstr "Laissez passer les e-mails de Grasp"
 msgid "Let me put it all together for you."
 msgstr "Je rassemble tout pour vous."
 
+#: src/workflows/ask-stephen.tsx
+msgid "Let people ask Stephen to start it"
+msgstr "Permettre de demander à Stephen de le lancer"
+
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Let the interviews run again"
 msgstr "Relancer les entretiens"
@@ -11394,6 +11398,10 @@ msgstr "Stephen interroge sur"
 #: src/onboarding/organization-words.ts
 msgid "Stephen asks them which work comes back most. To ask about a piece of work, open the person."
 msgstr "Stephen leur demande quel travail revient le plus. Pour les interroger sur une tâche, ouvrez la personne."
+
+#: src/workflows/ask-stephen.tsx
+msgid "Stephen can offer it in Microsoft Teams to anyone who may start it. It starts only when they press Start, and runs as them."
+msgstr "Stephen peut le proposer dans Microsoft Teams à toute personne autorisée à le lancer. Il ne démarre que lorsqu’elle appuie sur Lancer, et s’exécute en son nom."
 
 #: src/routes/_shell.onboarding.kickoff.tsx
 msgid "Stephen is reading it. This takes a minute."

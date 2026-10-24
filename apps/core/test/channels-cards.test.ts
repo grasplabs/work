@@ -492,7 +492,11 @@ describe("Stephen's cards in Teams", () => {
 });
 
 /** Values for every line's room, the same in each language. */
-const values = { count: 3, where: "Sales register.xlsx" };
+const values = {
+  count: 3,
+  where: "Sales register.xlsx",
+  workflow: "Weekly report",
+};
 
 describe("Stephen's lines", () => {
   it("are in all five languages, naming the same values as the English", () => {

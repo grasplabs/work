@@ -58,13 +58,15 @@ import { inJurisdiction } from "../durable-objects.ts";
 import { errorResponse } from "../errors.ts";
 import { boundedText, jsonOf } from "../request-body.ts";
 import { answerInChat } from "./answer.ts";
-import { signInCard } from "./cards.tsx";
+import { signInCard, startAction } from "./cards.tsx";
 import type { ConnectedTeamsAdapter } from "./teams-adapter.ts";
 import { teamsAdapter, verifiedTeamsRequest } from "./teams.ts";
 import type { TeamsKeys } from "./teams.ts";
 import { writerOf } from "./who.ts";
 import { channelLocales, say } from "./words.ts";
 import type { ChannelLocale } from "./words.ts";
+import { pressOffer } from "./workflow-offers.ts";
+import type { PressLine } from "./workflow-offers.ts";
 
 /**
  * Every platform's adapter, keyed by the platform's name, checking
@@ -163,6 +165,28 @@ type Activity = z.infer<typeof activitySchema>;
 const localeOf = (locale: string | undefined): ChannelLocale => {
   const language = locale?.split("-")[0]?.toLowerCase();
   return channelLocales.find((each) => each === language) ?? "en";
+};
+
+/** What Stephen says of a press on Start, in `locale`. */
+const pressSaid = (
+  said: PressLine,
+  locale: ChannelLocale,
+  workflow = ""
+): string => {
+  switch (said) {
+    case "started":
+    case "startRefused": {
+      return say(said, locale, { workflow });
+    }
+    case "startGone":
+    case "notYours":
+    case "alreadyAnswered": {
+      return say(said, locale);
+    }
+    default: {
+      return said satisfies never;
+    }
+  }
 };
 
 /** A member's message, as the door hands it on. */
@@ -436,6 +460,22 @@ export const channelResponse = async (
   const afterward = (send: () => Promise<unknown>): void => {
     later.push(send);
   };
+  // A press on Start, on a card offering a workflow: the member who
+  // pressed it, as the door verified them, starts it, if it is theirs.
+  chat.onAction(startAction, async (event) => {
+    if (event.thread === null) {
+      return;
+    }
+    const locale = localeOf(activity.locale);
+    const pressed = await pressOffer(env, {
+      offerId: event.value ?? "",
+      userId,
+      platform,
+      threadId: event.threadId,
+      locale,
+    });
+    await event.thread.post(pressSaid(pressed.line, locale, pressed.workflow));
+  });
   chat.onDirectMessage(async (thread, message) => {
     await keepConversation(env, platform, thread.id, userId);
     await takeOn({ platform, userId, thread, message, kept, afterward });

@@ -316,6 +316,74 @@ const lines = {
     fr: "Quelque chose sur cette carte a changé après que je l’ai montrée, je n’ai donc rien modifié. Redemandez-moi pour obtenir une nouvelle carte.",
     es: "Algo de esta tarjeta cambió después de que te la mostrara, así que no he cambiado nada. Vuelve a pedírmelo para recibir una tarjeta nueva.",
   },
+
+  // A workflow he offers to start: a card with its values and a Start
+  // button, then what became of the run, told where it was pressed.
+
+  /** Above the values a workflow would start with. */
+  startOffer: {
+    en: "I can start {workflow} for you with these values. Nothing starts until you press Start.",
+    nl: "Ik kan {workflow} voor je starten met deze waarden. Er start niets voordat je op Starten drukt.",
+    de: "Ich kann {workflow} mit diesen Werten für Sie starten. Es startet nichts, bevor Sie auf Starten klicken.",
+    fr: "Je peux lancer {workflow} pour vous avec ces valeurs. Rien ne démarre tant que vous n’appuyez pas sur Lancer.",
+    es: "Puedo iniciar {workflow} por ti con estos valores. No se inicia nada hasta que pulses Iniciar.",
+  },
+  /** The offer's button. */
+  startButton: {
+    en: "Start",
+    nl: "Starten",
+    de: "Starten",
+    fr: "Lancer",
+    es: "Iniciar",
+  },
+  /** Once the press started the run. */
+  started: {
+    en: "I started {workflow} for you. I'll tell you here when it has finished.",
+    nl: "Ik heb {workflow} voor je gestart. Ik laat het je hier weten zodra het klaar is.",
+    de: "Ich habe {workflow} für Sie gestartet. Ich sage Ihnen hier Bescheid, sobald es fertig ist.",
+    fr: "J’ai lancé {workflow} pour vous. Je vous préviendrai ici lorsqu’il sera terminé.",
+    es: "He iniciado {workflow} por ti. Te avisaré aquí cuando haya terminado.",
+  },
+  /** The run ended as it should. */
+  runCompleted: {
+    en: "{workflow} has finished.",
+    nl: "{workflow} is klaar.",
+    de: "{workflow} ist fertig.",
+    fr: "{workflow} est terminé.",
+    es: "{workflow} ha terminado.",
+  },
+  /** The run failed. */
+  runFailed: {
+    en: "{workflow} didn't finish. You can see what happened in Grasp.",
+    nl: "{workflow} is niet afgerond. In Grasp zie je wat er is gebeurd.",
+    de: "{workflow} wurde nicht abgeschlossen. In Grasp sehen Sie, was passiert ist.",
+    fr: "{workflow} ne s’est pas terminé. Vous pouvez voir ce qui s’est passé dans Grasp.",
+    es: "{workflow} no ha terminado. Puedes ver lo que ha pasado en Grasp.",
+  },
+  /** The run was stopped before it ended. */
+  runStopped: {
+    en: "{workflow} was stopped before it finished.",
+    nl: "{workflow} is gestopt voordat het klaar was.",
+    de: "{workflow} wurde angehalten, bevor es fertig war.",
+    fr: "{workflow} a été arrêté avant de se terminer.",
+    es: "{workflow} se detuvo antes de terminar.",
+  },
+  /** An offer that ran out, or that he can no longer find. */
+  startGone: {
+    en: "This card has expired, and nothing was started. Ask me again if you still need it.",
+    nl: "Deze kaart is verlopen en er is niets gestart. Vraag het me opnieuw als je het nog nodig hebt.",
+    de: "Diese Karte ist abgelaufen, und es wurde nichts gestartet. Fragen Sie mich noch einmal, wenn Sie es noch brauchen.",
+    fr: "Cette carte a expiré, et rien n’a été lancé. Redemandez-moi si vous en avez encore besoin.",
+    es: "Esta tarjeta ha caducado y no se ha iniciado nada. Vuelve a pedírmelo si todavía lo necesitas.",
+  },
+  /** A press the workflow, or who may start it, no longer allows. */
+  startRefused: {
+    en: "I couldn't start {workflow}. It may have changed, or who can start it may have. Ask me again to try once more.",
+    nl: "Ik kon {workflow} niet starten. Het kan zijn veranderd, of wie het mag starten. Vraag het me opnieuw om het nog eens te proberen.",
+    de: "Ich konnte {workflow} nicht starten. Es hat sich vielleicht geändert, oder wer es starten darf. Fragen Sie mich noch einmal, um es erneut zu versuchen.",
+    fr: "Je n’ai pas pu lancer {workflow}. Il a peut-être changé, ou les personnes qui peuvent le lancer. Redemandez-moi pour réessayer.",
+    es: "No he podido iniciar {workflow}. Puede que haya cambiado, o quién puede iniciarlo. Vuelve a pedírmelo para intentarlo otra vez.",
+  },
 } as const satisfies Record<string, Line>;
 
 export type LineName = keyof typeof lines;
