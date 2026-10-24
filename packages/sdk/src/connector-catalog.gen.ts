@@ -21,6 +21,10 @@ export interface ConnectorCatalog {
     };
   };
   readonly "google-workspace.files@1": {
+    readonly createDraft: {
+      readonly input: { format: "doc" | "text"; name: string; text: string };
+      readonly output: { id: string; mimeType: string; name: string; webUrl: string | null };
+    };
     readonly list: {
       readonly input: { drive: string; folder?: string; page?: string; top?: number };
       readonly output: { drive: string; items: Array<{ drive: string; id: string; kind: "file" | "folder" | "other"; lastModifiedAt: string | null; mimeType: string; name: string; parentId: string | null; size: number | null; webUrl: string | null }>; nextPage: string | null };

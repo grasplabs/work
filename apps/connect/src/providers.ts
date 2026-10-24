@@ -351,7 +351,8 @@ const google: OAuthProviderConfig = {
   revocationEndpoint: "https://oauth2.googleapis.com/revoke",
   // What the Google Workspace connector needs: Gmail (read, label, draft,
   // send), calendar events (putting one in the person's own calendar) and
-  // which calendar is theirs, and Drive, read-only where it only reads. A
+  // which calendar is theirs, and Drive, read-only but for the drafts it
+  // makes in the person's own Drive (`drive.file`: only its own files). A
   // connection granted before the connector wrote events is marked for
   // reconnecting on its first refused write (tokens.ts `markIfGrantLacks`).
   scopes: [
@@ -362,6 +363,7 @@ const google: OAuthProviderConfig = {
     "https://www.googleapis.com/auth/calendar.events",
     "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
     "https://www.googleapis.com/auth/drive.readonly",
+    "https://www.googleapis.com/auth/drive.file",
   ],
   scopeSeparator: " ",
   authorizationParams: (tenant) => ({
