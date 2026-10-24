@@ -747,19 +747,22 @@ describe("a chat's connections", setUpTime, () => {
 
   it("end a write held in a Teams chat at midnight of the company's day, and run nothing pressed after it", async () => {
     const send = codeStep(
-      `export default async (self, env) => await env.connections.call("MAIL", "mail.send", ${JSON.stringify(invoiceMail)});`
+      `export default async (self, env) => await env.connections.call("MAIL", "MAIL_SEND", ${JSON.stringify(invoiceMail)});`
     );
     const waits = says("It waits for you to confirm it.");
     // One turn in the Teams chat, then one in the web chat.
-    const { person, admin, mail, chat, grant } = await setUp(
-      send,
-      waits,
-      send,
-      waits
-    );
+    const { person, admin, chat } = await setUp(send, waits, send, waits);
     const timeZone = "Pacific/Auckland";
     await admin.api.organization.update({ timeZone });
-    await grant(mail.id, "MAIL");
+    // A send whose fields its server lists, so core can check a Teams
+    // chat's write against them (channels/stephen-rules.ts).
+    const mail = await mailConnection([], ["MAIL_SEND"]);
+    await requestGranted(idp, admin, {
+      subject: chat.agent,
+      object: { type: "connection", connectionId: mail.id },
+      actions: ["MAIL_SEND"],
+      binding: "MAIL",
+    });
     // The same workspace's agent, in a chat that came through Teams.
     const teams = await chat.stub.createChat(
       "Questions",
@@ -770,8 +773,9 @@ describe("a chat's connections", setUpTime, () => {
       undefined,
       "teams"
     );
-    await chat.stub.ask(teams.id, { text: "Send Ben the invoice.", model });
-    await chat.ask("Send Ben the invoice.");
+    const asked = "Send ben@acme.test the invoice.";
+    await chat.stub.ask(teams.id, { text: asked, model });
+    await chat.ask(asked);
 
     const waiting = await person.api.pendingActions.list();
     const fromTeams = waiting.find(
