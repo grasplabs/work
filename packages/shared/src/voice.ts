@@ -239,6 +239,10 @@ export const transcriptionErrors = defineErrorFamily({
   "transcription.invalid": "That isn't something live transcription takes.",
   "transcription.limited":
     "Stephen has listened a lot today. Type your answers, and he listens again tomorrow.",
+  "transcription.over_budget":
+    "The AI budget for listening is used up. Type your answers for now.",
+  "transcription.busy":
+    "Listening is busy right now. Type your answer, or try again in a moment.",
   "transcription.expired":
     "This listening session reached its end. Start a new one to go on.",
   "transcription.unavailable":

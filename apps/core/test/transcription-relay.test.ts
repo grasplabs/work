@@ -9,12 +9,21 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
+import { modelLedger } from "../src/model-ledger.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
+import { transcriptionModel } from "../src/onboarding/transcription.ts";
 import { allEvents, logHead, eventsAfter } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { closeWhenTestEnds } from "./open-sockets.ts";
 import { clientOrigin } from "./sign-in-config.ts";
-import { routed, signedInWithRole, unique } from "./sign-in.ts";
+import {
+  openRpc,
+  routed,
+  signedIn,
+  signedInWithRole,
+  staffPerson,
+  unique,
+} from "./sign-in.ts";
 
 // What someone says, written down as they say it, relayed through core
 // over a WebSocket on the page's own origin (src/onboarding/
@@ -33,6 +42,8 @@ import { routed, signedInWithRole, unique } from "./sign-in.ts";
 // - Listening on after the link or the admin no longer may: the person
 //   taken off the list, the onboarding paused, the admin made a member.
 // - Sockets opened side by side on one link, each hearing a day's budget.
+// - Listening past the deployment's own budgets, or with a model its
+//   allowlist or its rules don't let it use (GRA-1064).
 
 const idp = mockIdp();
 
@@ -40,10 +51,12 @@ const dayMs = 24 * 60 * 60 * 1000;
 
 const isoDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 
-/** The deployment's gateway, allowing a voice model: transcription may run. */
+const voiceModel = "elevenlabs/eleven_v4";
+
+/** The deployment's gateway, allowing the transcription model: transcription may run. */
 const gatewayConfig = {
   gateway: "grasp-os-test",
-  models: ["elevenlabs/eleven_v4"],
+  models: [voiceModel, transcriptionModel],
 };
 
 /** What a session answers, as far as these tests read it: the device's key. */
@@ -138,17 +151,38 @@ const fakeUpstream = () => {
 
 type Upstream = ReturnType<typeof fakeUpstream>;
 
-/** What `run` returns while the fake upstream stands behind the gateway. */
-const relaying = async <T>(run: (upstream: Upstream) => Promise<T>) => {
-  const before = env.MODEL_GATEWAY;
+let monthsUsed = 0;
+
+/** A month no other test counts budgets in: from 2800, clear of other files. */
+const newMonth = (): string => {
+  monthsUsed += 1;
+  return `${2800 + Math.floor(monthsUsed / 12)}-${String((monthsUsed % 12) + 1).padStart(2, "0")}`;
+};
+
+/**
+ * What `run` returns while the fake upstream stands behind the gateway,
+ * under `config` over the gateway's, budgets counted in `month`.
+ */
+const relaying = async <T>(
+  run: (upstream: Upstream) => Promise<T>,
+  { config = {}, month }: { config?: object; month?: string } = {}
+) => {
+  const before = {
+    gateway: env.MODEL_GATEWAY,
+    month: env.MODEL_BUDGET_MONTH,
+  };
   const upstream = fakeUpstream();
   const ai: AiBinding = env.AI;
   const spy = vi.spyOn(ai, "fetch").mockImplementation(upstream.fetch);
-  env.MODEL_GATEWAY = gatewayConfig;
+  env.MODEL_GATEWAY = { ...gatewayConfig, ...config };
+  if (month !== undefined) {
+    env.MODEL_BUDGET_MONTH = month;
+  }
   try {
     return { upstream, result: await run(upstream) };
   } finally {
-    env.MODEL_GATEWAY = before;
+    env.MODEL_GATEWAY = before.gateway;
+    env.MODEL_BUDGET_MONTH = before.month;
     spy.mockRestore();
   }
 };
@@ -283,6 +317,45 @@ const refusalOf = async (page: Awaited<ReturnType<typeof listen>>) => {
     ),
     code,
   };
+};
+
+/** Two seconds of 8 kHz audio: 32,000 bytes, a frame's most. */
+const twoSeconds = (): Uint8Array => new Uint8Array(32_000).fill(7);
+
+/** A start on `link`, its audio at 8 kHz. */
+const slowStart = (link: { secret: string; key: string }) =>
+  ({ type: "start", language: "en", sampleRate: 8000, link }) as const;
+
+/**
+ * Scribe realtime's price, with keyterms, as the ledger pins it: micros
+ * per million seconds, rounded up ($0.47 an hour).
+ */
+const microsPerMillionSeconds = Math.ceil((0.47 / 3600) * 1e12);
+
+/** What `seconds` heard cost, in micros, as the ledger charges them. */
+const heardMicros = (seconds: number): number =>
+  Math.ceil((seconds * microsPerMillionSeconds) / 1e6);
+
+/** What the deployment spent and holds in `month`, as the ledger counts it. */
+const deploymentSpend = async (month: string) => {
+  const spent = await modelLedger(env).spendOf(month, ["deployment"], 10);
+  const [row] = spent.deployment ?? [];
+  return { spent: row?.spentMicros ?? 0, held: row?.reservedMicros ?? 0 };
+};
+
+/**
+ * Holds `seconds` of a link's day as a socket opened elsewhere would,
+ * so the next socket on it holds only what is left.
+ */
+const holdOfDay = async (personId: string, seconds: number) => {
+  await onboardingStore(env).transcriptionOpened({
+    id: crypto.randomUUID(),
+    by: { type: "system" },
+    person: personId,
+    who: `link:${personId}:heard`,
+    budget: 60 * 60,
+    most: seconds,
+  });
 };
 
 /** Seconds of audio the onboarding counted as heard for `purpose`. */
@@ -717,5 +790,224 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
         toBase64(new TextEncoder().encode(marker)).slice(0, 24),
       ].filter((needle) => stored.includes(needle)),
     }).toStrictEqual({ noted: [true, true], kept: [] });
+  });
+
+  it("spends the deployment's budget through transcription, refuses the next socket once it is spent, and shows staff what it heard by purpose", async () => {
+    const { ada, bo, roster } = await openedTwo();
+    const [adaPerson, boPerson] = roster.people.map(({ id }) => id);
+    // A minute left on each link today: each socket holds a minute.
+    await holdOfDay(adaPerson ?? "", 59 * 60);
+    await holdOfDay(boPerson ?? "", 59 * 60);
+    const month = newMonth();
+    const minute = heardMicros(60);
+    const head = await logHead();
+    const staff = await signedIn(idp, "grasp-staff", staffPerson());
+    const { core } = await openRpc(staff);
+    const before = await heardCounted("interviews");
+    const { upstream, result } = await relaying(
+      async () => {
+        const first = await listen();
+        first.start(slowStart(ada));
+        const ready = await first.next();
+        // While Ada's minute is held, Bo's doesn't fit beside it.
+        const busy = await listen();
+        busy.start(slowStart(bo));
+        const held = await refusalOf(busy);
+        // Ada talks for her whole minute, and leaves.
+        for (let frame = 0; frame < 30; frame += 1) {
+          first.socket.send(twoSeconds());
+        }
+        first.socket.close(1000, "Done");
+        await first.ended();
+        await vi.waitFor(
+          async () => {
+            await expect(deploymentSpend(month)).resolves.toStrictEqual({
+              spent: minute,
+              held: 0,
+            });
+            // And Bo's minute back on his link, from the socket refused.
+            await expect(
+              onboardingStore(env).voiceSaid(`link:${boPerson}:heard`)
+            ).resolves.toBe(59 * 60);
+          },
+          { timeout: 10_000 }
+        );
+        // Spent: what is left is less than Bo's minute.
+        const next = await listen();
+        next.start(slowStart(bo));
+        const spent = await refusalOf(next);
+        return { ready: ready?.type, held, spent };
+      },
+      {
+        // A cent: a minute of Scribe realtime (0.78¢) fits, two don't.
+        config: { budgets: { deployment: { limit: 0.01 } } },
+        month,
+      }
+    );
+
+    const events = await eventsAfter(head);
+    const gateway = events.filter(
+      ({ action, detail }) =>
+        action.startsWith("model.") &&
+        detail?.purpose === "onboarding.transcription"
+    );
+    const numbers = await core.authenticate();
+    // What staff see heard for interviews, once Ada's socket is counted.
+    const heard = await vi.waitFor(
+      async () => {
+        const rows = await numbers.onboardingStaff.aiUse();
+        const seconds =
+          rows
+            .filter(
+              ({ purpose, model }) =>
+                purpose === "interviews" && model === "transcription"
+            )
+            .reduce((sum, row) => sum + row.seconds, 0) - before;
+        if (seconds < 60) {
+          throw new Error(`Expected a minute heard, got ${seconds}`);
+        }
+        return seconds;
+      },
+      { timeout: 10_000 }
+    );
+    expect({
+      ...result,
+      upstreams: upstream.opened.length,
+      gateway: gateway.map(({ action, actor, model, cost, detail }) => ({
+        action,
+        actor,
+        model,
+        cost,
+        seconds: detail?.seconds,
+        reason: detail?.reason,
+      })),
+      heard,
+    }).toStrictEqual({
+      ready: "ready",
+      held: { errors: ["transcription.busy"], code: 1008 },
+      spent: { errors: ["transcription.over_budget"], code: 1008 },
+      // Only Ada's socket reached the upstream.
+      upstreams: 1,
+      gateway: [
+        {
+          action: "model.refused",
+          actor: { type: "system" },
+          model: undefined,
+          cost: undefined,
+          seconds: undefined,
+          reason: "model.budget_busy",
+        },
+        {
+          action: "model.call",
+          actor: { type: "system" },
+          model: {
+            provider: "elevenlabs",
+            model: "scribe_v2_realtime",
+            inputTokens: 0,
+            outputTokens: 0,
+          },
+          // Before the ledger rounds it up to a micro.
+          cost: {
+            amount: (60 * microsPerMillionSeconds) / 1e12,
+            currency: "USD",
+          },
+          seconds: 60,
+          reason: undefined,
+        },
+        {
+          action: "model.refused",
+          actor: { type: "system" },
+          model: undefined,
+          cost: undefined,
+          seconds: undefined,
+          reason: "model.over_budget",
+        },
+      ],
+      heard: 60,
+    });
+  });
+
+  it.each([
+    [
+      "the allowlist names only a voice model",
+      { models: [voiceModel] },
+      "model.not_allowed",
+    ],
+    [
+      "the sensitive-data rule doesn't name it",
+      { sensitive: { models: [voiceModel] } },
+      "model.sensitive_data",
+    ],
+    [
+      "the deployment stays in the EU, and the EU rule doesn't name it",
+      {
+        eu: { deployment: true, models: [voiceModel] },
+        voice: { provider: "custom-elevenlabs-eu" },
+      },
+      "model.eu_only",
+    ],
+  ] as const)(
+    "refuses a socket when %s, opening nothing upstream, audited as a refused model call",
+    async (_, config, reason) => {
+      const { ada } = await openedTwo();
+      const head = await logHead();
+
+      const { upstream, result } = await relaying(
+        async () => {
+          const page = await listen();
+          page.start({
+            type: "start",
+            language: "en",
+            sampleRate: 16_000,
+            link: ada,
+          });
+          return await refusalOf(page);
+        },
+        { config }
+      );
+
+      const events = await eventsAfter(head);
+      const refused = events.filter(({ action }) => action === "model.refused");
+      expect({
+        ...result,
+        upstream: upstream.opened.length,
+        refused: refused.map(({ detail }) => [detail?.reason, detail?.model]),
+      }).toStrictEqual({
+        errors: ["transcription.unavailable"],
+        code: 1011,
+        upstream: 0,
+        refused: [[reason, transcriptionModel]],
+      });
+    }
+  );
+
+  it("listens at ElevenLabs's EU host when the deployment stays in the EU and its EU rule names the model", async () => {
+    const { ada } = await openedTwo();
+
+    const { upstream, result } = await relaying(
+      async () => {
+        const page = await listen();
+        page.start({
+          type: "start",
+          language: "en",
+          sampleRate: 16_000,
+          link: ada,
+        });
+        const ready = await page.next();
+        page.socket.close(1000, "Done");
+        return ready?.type;
+      },
+      {
+        config: {
+          eu: { deployment: true, models: [transcriptionModel] },
+          voice: { provider: "custom-elevenlabs-eu" },
+        },
+      }
+    );
+
+    expect([result, upstream.opened[0]?.url.pathname]).toStrictEqual([
+      "ready",
+      "/ai-gateway/gateways/grasp-os-test/custom-elevenlabs-eu/v1/speech-to-text/realtime",
+    ]);
   });
 });

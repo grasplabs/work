@@ -4,9 +4,12 @@ import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
+import { modelLedger } from "../src/model-ledger.ts";
+import { models } from "../src/models.ts";
+import { hearingModel } from "../src/onboarding/hear.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { heardBudgets } from "../src/onboarding/transcription.ts";
-import { allEvents } from "./audit-events.ts";
+import { allEvents, eventsAfter, logHead } from "./audit-events.ts";
 import { codeOf, openedFor } from "./interview-link.ts";
 import { routed } from "./sign-in.ts";
 
@@ -21,11 +24,15 @@ import { routed } from "./sign-in.ts";
 // - A request that isn't a recording, or is too large.
 // - The recording kept anywhere: the store, the database, the audit log.
 // - Listening out for words the page chose, or for more than 30.
+// - Writing down past the deployment's own budgets, or with a model its
+//   allowlist doesn't list (GRA-1064).
 
-/** The deployment's gateway, allowing a voice model: transcription may run. */
+const voiceModel = "elevenlabs/eleven_v4";
+
+/** The deployment's gateway, allowing the recordings' model: they may be written down. */
 const gatewayConfig = {
   gateway: "grasp-os-test",
-  models: ["elevenlabs/eleven_v4"],
+  models: [voiceModel, hearingModel],
 };
 
 /** A text model, which no recording is written down by. */
@@ -76,25 +83,77 @@ const fakeScribe = (status = 200) => {
   return { fetch, asked };
 };
 
-/** What `run` returns while the fake Scribe stands behind the gateway. */
+let monthsUsed = 0;
+
+/** A month no other test counts budgets in: from 2900, clear of other files. */
+const newMonth = (): string => {
+  monthsUsed += 1;
+  return `${2900 + Math.floor(monthsUsed / 12)}-${String((monthsUsed % 12) + 1).padStart(2, "0")}`;
+};
+
+/**
+ * What `run` returns while the fake Scribe stands behind the gateway,
+ * under `config`, budgets counted in `month`.
+ */
 const hearing = async <T>(
   run: () => Promise<T>,
   {
     status = 200,
     config = gatewayConfig,
-  }: { status?: number; config?: unknown } = {}
+    month,
+  }: { status?: number; config?: unknown; month?: string } = {}
 ) => {
-  const before = env.MODEL_GATEWAY;
+  const before = {
+    gateway: env.MODEL_GATEWAY,
+    month: env.MODEL_BUDGET_MONTH,
+  };
   const scribe = fakeScribe(status);
   const ai: AiBinding = env.AI;
   const spy = vi.spyOn(ai, "fetch").mockImplementation(scribe.fetch);
   Reflect.set(env, "MODEL_GATEWAY", config);
+  if (month !== undefined) {
+    env.MODEL_BUDGET_MONTH = month;
+  }
   try {
     return { asked: scribe.asked, result: await run() };
   } finally {
-    env.MODEL_GATEWAY = before;
+    env.MODEL_GATEWAY = before.gateway;
+    env.MODEL_BUDGET_MONTH = before.month;
     spy.mockRestore();
   }
+};
+
+/**
+ * Scribe's price, with keyterms, as the ledger pins it: micros per
+ * million seconds, rounded up ($0.27 an hour).
+ */
+const microsPerMillionSeconds = Math.ceil((0.27 / 3600) * 1e12);
+
+/** What `seconds` heard cost, in micros, as the ledger charges them. */
+const heardMicros = (seconds: number): number =>
+  Math.ceil((seconds * microsPerMillionSeconds) / 1e6);
+
+/** What the deployment spent and holds in `month`, as the ledger counts it. */
+const deploymentSpend = async (month: string) => {
+  const spent = await modelLedger(env).spendOf(month, ["deployment"], 10);
+  const [row] = spent.deployment ?? [];
+  return { spent: row?.spentMicros ?? 0, held: row?.reservedMicros ?? 0 };
+};
+
+/** The gateway's audit events for recordings after `head`, as these tests read them. */
+const gatewayEvents = async (head: number) => {
+  const events = await eventsAfter(head);
+  return events
+    .filter(({ detail }) => detail?.purpose === "onboarding.hear")
+    .map(({ action, actor, model, cost, detail }) => ({
+      action,
+      actor,
+      model: model?.model,
+      cost: cost?.amount,
+      seconds: detail?.seconds,
+      outcome: detail?.outcome,
+      reason: detail?.reason,
+    }));
 };
 
 /** A recording as the page sends it, with the link and what it measured. */
@@ -323,16 +382,114 @@ describe(
         // A deployment whose client agreed to no voice model.
         { config: { gateway: "grasp-os-test", models: [textModel] } }
       );
+      const voiceOnly = await hearing(
+        async () => await codeOf(await hear(recording(link))),
+        // A voice, but not the model recordings are written down by.
+        { config: { gateway: "grasp-os-test", models: [voiceModel] } }
+      );
       const failing = await hearing(
         async () => await codeOf(await hear(recording(link))),
         { status: 500 }
       );
       expect({
         unset: unset.result,
+        voiceOnly: [...voiceOnly.result, voiceOnly.asked.length],
         failing: failing.result,
       }).toStrictEqual({
         unset: [503, "hear.unavailable"],
+        voiceOnly: [503, "hear.unavailable", 0],
         failing: [502, "hear.failed"],
+      });
+    });
+
+    it("charges the deployment's budget what was heard, refuses while another listening holds it, and once it is spent", async () => {
+      const { link } = await openedFor();
+      const month = newMonth();
+      const head = await logHead();
+      const { asked, result } = await hearing(
+        async () => {
+          // Two minutes held elsewhere: no room for half a minute beside them.
+          const elsewhere = await models(env).listen({
+            model: hearingModel,
+            seconds: 120,
+            openMs: 60_000,
+            purpose: "onboarding.hear",
+            trigger: { type: "system" },
+            work: { onboarding: true },
+          });
+          const busy = await codeOf(
+            await hear(recording(link, { seconds: "30" }))
+          );
+          await elsewhere.heard(100, "answered");
+          const first = await hear(recording(link, { seconds: "29.2" }));
+          const charged = await deploymentSpend(month);
+          // Spent: what is left is less than another half minute.
+          const spent = await codeOf(
+            await hear(recording(link, { seconds: "30" }))
+          );
+          return { busy, first: first.status, charged, spent };
+        },
+        {
+          // A cent: 100 seconds of Scribe (0.75¢) and half a minute
+          // (0.225¢) fit, another half minute doesn't.
+          config: {
+            ...gatewayConfig,
+            budgets: { deployment: { limit: 0.01 } },
+          },
+          month,
+        }
+      );
+      expect({
+        ...result,
+        sent: asked.length,
+        events: await gatewayEvents(head),
+      }).toStrictEqual({
+        busy: [503, "hear.busy"],
+        first: 200,
+        // Whole seconds, rounded up.
+        charged: { spent: heardMicros(100) + heardMicros(30), held: 0 },
+        spent: [429, "hear.over_budget"],
+        // Only the recording admitted reached Scribe.
+        sent: 1,
+        events: [
+          {
+            action: "model.refused",
+            actor: { type: "system" },
+            model: undefined,
+            cost: undefined,
+            seconds: undefined,
+            outcome: undefined,
+            reason: "model.budget_busy",
+          },
+          {
+            action: "model.call",
+            actor: { type: "system" },
+            model: "scribe_v2",
+            cost: (100 * microsPerMillionSeconds) / 1e12,
+            seconds: 100,
+            outcome: "answered",
+            reason: undefined,
+          },
+          {
+            action: "model.call",
+            actor: { type: "system" },
+            model: "scribe_v2",
+            // Before the ledger rounds it up to a micro.
+            cost: (30 * microsPerMillionSeconds) / 1e12,
+            seconds: 30,
+            outcome: "answered",
+            reason: undefined,
+          },
+          {
+            action: "model.refused",
+            actor: { type: "system" },
+            model: undefined,
+            cost: undefined,
+            seconds: undefined,
+            outcome: undefined,
+            reason: "model.over_budget",
+          },
+        ],
       });
     });
   }
