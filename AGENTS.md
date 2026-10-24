@@ -63,13 +63,13 @@ Nobody pushes to `main` directly. In an emergency, organisation owners can merge
 
 Conflicts: rebase your branch on `main`. For generated files (lockfile, Worker types, route trees) take either side and regenerate (`vp install`, `vp run -r typegen`, `vp run -r build`) instead of merging by hand. Migrations are different: keep `main`'s, delete your branch's, and run `vp run -r db:generate` again so yours come after them. A migration on `main` never changes; `vp run check:migrations` enforces it.
 
-## Working from Shipmunk
+## Working from Linear
 
-Work is planned in Shipmunk (workspace Grasp), not in this repo. It replaced Linear on 6 October 2026, and issue numbers changed in the move: find an issue by its title, not by a number from an older commit, pull request or note.
+Work is planned in Linear (workspace Grasp OS, team GRA), not in this repo. Issues spent 6 to 15 October 2026 in Shipmunk and came back with new numbers: find an issue by its title, not by a number from an older commit, pull request or note.
 
-- Only pick up issues in **To Do**; their blockers are done. Parent issues are containers; never pick one up.
+- Only pick up issues in **Todo**; their blockers are done. Parent issues are containers; never pick one up.
 - Move the issue to **In Progress** when you start and to **In Review** when the pull request is ready. Branch names and PR titles don't carry the issue ID, so move issues by hand.
-- When your issue is **Done**, move any issue it blocked to **To Do** once all of that issue's blockers are done.
+- When your issue is **Done**, move any issue it blocked to **Todo** once all of that issue's blockers are done.
 - Issues labelled **Security** are reviewed by a person before merge.
 - Don't follow an issue blindly: if its scope conflicts with this file or the code, raise it in the issue.
 
