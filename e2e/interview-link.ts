@@ -22,7 +22,7 @@ import { stateDir } from "./stack.ts";
 const linkPurpose = "grasp-os onboarding link";
 
 /** The onboarding store's databases in the stack's local state. */
-const storeFiles = async (): Promise<string[]> => {
+export const storeFiles = async (): Promise<string[]> => {
   const root = path.join(stateDir, "v3", "do");
   const all = await readdir(root);
   const folders = all.filter((name) => name.endsWith("-Onboarding"));

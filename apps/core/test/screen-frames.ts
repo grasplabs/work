@@ -58,6 +58,8 @@ export interface LoadedFrame {
   modules: Record<string, string>;
   /** The import map's addresses, by name. */
   addresses: Record<string, string>;
+  /** The import map's Subresource Integrity, by address. */
+  integrity: Record<string, string>;
   /** The hash sources of the scripts a browser would run inline in it. */
   inline: string[];
 }
@@ -106,8 +108,9 @@ export const loadFrame = async (
   const html = await response.text();
   // SAFETY: core's own document, which writes these shapes.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-  const { imports } = jsonIn(importMapPattern, html) as {
+  const { imports, integrity = {} } = jsonIn(importMapPattern, html) as {
     imports: Record<string, string>;
+    integrity?: Record<string, string>;
   };
   // SAFETY: as above, core's own document.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
@@ -135,6 +138,7 @@ export const loadFrame = async (
     screen,
     modules,
     addresses: imports,
+    integrity,
     inline,
   };
 };

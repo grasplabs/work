@@ -272,6 +272,11 @@ export interface OnboardingView {
    * is in, or when it did not. The one word of the kickoff the admin sees.
    */
   sponsor: string | null;
+  /**
+   * How many who take part wait for the admin to confirm the organization
+   * before their link can go out: new on a list saved while a plan was set.
+   */
+  waiting: number;
 }
 
 /**
@@ -368,8 +373,13 @@ export interface OnboardingApi
   /** The programme, for the dashboard; null without a plan. Any role. */
   programme: () => Promise<Programme | null>;
   view: () => Promise<OnboardingView>;
-  /** Replaces who works where. */
+  /**
+   * Replaces who works where. While a plan is set, whoever is new on it
+   * gets no link until the admin confirms the organization.
+   */
   saveRoster: (roster: RosterInput) => Promise<OnboardingView>;
+  /** Replaces who works where, as the admin confirmed it: nobody waits for that any more. */
+  confirmRoster: (roster: RosterInput) => Promise<OnboardingView>;
   /** Sets when the interviews run; links go out by it. */
   savePlan: (plan: PlanInput) => Promise<OnboardingView>;
   /** What only the admin can settle, and how much of the work is mapped. */
