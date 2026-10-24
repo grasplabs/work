@@ -8,6 +8,11 @@ import type { AuditActor, AuditEntry } from "@grasp-os/shared/audit";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
+import { personLimitSubjectSchema } from "@grasp-os/shared/models";
+import type {
+  PersonLimitFrom,
+  PersonLimitSubject,
+} from "@grasp-os/shared/models";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { DurableObject } from "cloudflare:workers";
 import {
@@ -32,6 +37,7 @@ import migrations from "./db/model-ledger/migrations/migrations.js";
 import {
   alerts,
   auditOutbox,
+  personLimits,
   policy,
   queue,
   requestScopes,
@@ -145,6 +151,28 @@ import { queueLiveMs } from "./workflows/admission.ts";
 //   member who invited them, it says only that the budget is used up
 //   (models.ts).
 //
+// It also keeps the limits the company's admins set per person (D8): a
+// default monthly limit and messages an hour, and exceptions for a person
+// or a team (`person_limits`). They limit within Grasp's budgets, never
+// beside them:
+//
+// - A limit lifting spend above Grasp's budgets: the person's limit is one
+//   more scope (`person`), reserved against beside the console's, which
+//   still refuse on their own; and a monthly limit above Grasp's budget
+//   for one person or for the deployment is refused when it is set
+//   (`setPersonLimit`). Should the console lower a budget below a limit
+//   set before, the budget still refuses first.
+// - A call choosing its own limit: the gateway passes only whose call it
+//   is and their teams (core's own records, never App code), and an
+//   admission naming the `person` scope itself is refused. The ledger
+//   reads the limit in the same transaction it reserves in, so a limit
+//   lowered applies to the very next request, and none races it.
+// - A limit set mid-month missing what was already spent: the `person`
+//   scope is counted for every request with a person, limit or not, as a
+//   model binding's are, so a limit set later counts the month's spend.
+// - A change nobody can account for: each is audited in the admin's name,
+//   with what it was before, in the same transaction as the change.
+//
 // It also admits each request fairly among the client's requests in
 // flight, for one person and of one App, in the same transaction as its
 // budgets: a request's receipt is its lease on its shares, and the calls
@@ -197,6 +225,7 @@ const scopeNames = [
   "run",
   "binding",
   "binding_day",
+  "person",
 ] as const;
 
 /**
@@ -264,6 +293,123 @@ const priceSchema = z.strictObject({
 
 const periodPattern = /^\d{4}-(?:0[1-9]|1[0-2])$/u;
 
+/** The most teams of a person an admission names, to find their limit by. */
+export const personTeamsMost = 100;
+
+/**
+ * Whose limit a request counts against: the person, by the key of their
+ * user scope, and the teams they are in.
+ */
+const limitedPersonSchema = z.strictObject({
+  key: z.string().min(1).max(512),
+  teams: z.array(z.string().min(1).max(512)).max(personTeamsMost),
+});
+
+/** The person a request counts for, and their teams. */
+export type LimitedPerson = z.input<typeof limitedPersonSchema>;
+
+/** A limit an admin set, as the ledger keeps it: micros a month, messages an hour. */
+export interface StoredPersonLimit {
+  subject: PersonLimitSubject;
+  monthlyMicros: number | null;
+  messagesAnHour: number | null;
+}
+
+/** A person's limit, and where it comes from. */
+export interface AppliedPersonLimit {
+  from: PersonLimitFrom;
+  monthlyMicros: number | null;
+  messagesAnHour: number | null;
+}
+
+/** A stored limit's values alone. */
+const limitValues = ({ monthlyMicros, messagesAnHour }: StoredPersonLimit) => ({
+  monthlyMicros,
+  messagesAnHour,
+});
+
+/** The more generous of two limits, none being the most. */
+const moreGenerous = (one: number | null, other: number | null) =>
+  one === null || other === null ? null : Math.max(one, other);
+
+/**
+ * The limit that applies to `person` in `teams`, of those `stored`: their
+ * own exception; else their teams' exceptions, the most generous of each
+ * (a team's exception grants, so being in one more team never takes
+ * away); else the default; else none.
+ */
+export const appliedLimit = (
+  stored: readonly StoredPersonLimit[],
+  person: string,
+  teams: readonly string[]
+): AppliedPersonLimit => {
+  const own = stored.find(
+    ({ subject }) => subject.type === "person" && subject.userId === person
+  );
+  if (own !== undefined) {
+    return { from: "person", ...limitValues(own) };
+  }
+  const ofTeams = stored.filter(
+    ({ subject }) => subject.type === "team" && teams.includes(subject.teamId)
+  );
+  const [first, ...rest] = ofTeams;
+  if (first !== undefined) {
+    let { monthlyMicros, messagesAnHour } = first;
+    for (const one of rest) {
+      monthlyMicros = moreGenerous(monthlyMicros, one.monthlyMicros);
+      messagesAnHour = moreGenerous(messagesAnHour, one.messagesAnHour);
+    }
+    return { from: "team", monthlyMicros, messagesAnHour };
+  }
+  const fallback = stored.find(({ subject }) => subject.type === "default");
+  return fallback === undefined
+    ? { from: "none", monthlyMicros: null, messagesAnHour: null }
+    : { from: "default", ...limitValues(fallback) };
+};
+
+/** A subject as `person_limits` keys it: its type, and its ID (none for the default). */
+const subjectKey = (
+  subject: PersonLimitSubject
+): { subjectType: PersonLimitSubject["type"]; subjectId: string } => {
+  if (subject.type === "person") {
+    return { subjectType: "person", subjectId: subject.userId };
+  }
+  if (subject.type === "team") {
+    return { subjectType: "team", subjectId: subject.teamId };
+  }
+  return { subjectType: "default", subjectId: "" };
+};
+
+/** A `person_limits` row's subject; none for one that can't be read. */
+const subjectOf = (row: {
+  subjectType: string;
+  subjectId: string;
+}): PersonLimitSubject | undefined => {
+  if (row.subjectType === "person") {
+    return personLimitSubjectSchema.safeParse({
+      type: "person",
+      userId: row.subjectId,
+    }).data;
+  }
+  if (row.subjectType === "team") {
+    return personLimitSubjectSchema.safeParse({
+      type: "team",
+      teamId: row.subjectId,
+    }).data;
+  }
+  return row.subjectType === "default" ? { type: "default" } : undefined;
+};
+
+const storedLimitSchema = z.strictObject({
+  monthlyMicros: microsSchema.nullable(),
+  messagesAnHour: z.int().positive().nullable(),
+});
+
+/** What an admin's limit came to: set, or refused as above Grasp's budget. */
+export type PersonLimitSetting =
+  | { state: "set" }
+  | { state: "above_budget"; ceilingMicros: number };
+
 const admissionSchema = z
   .strictObject({
     /** The provider request's ID: one per HTTP request. */
@@ -274,12 +420,13 @@ const admissionSchema = z
      * Each scope once, at most one of each kind the gateway counts (the
      * deployment, the workflow, the person, the run, a model binding's
      * month and day): a bound that also keeps a decision's audit event
-     * within its detail limit.
+     * within its detail limit. The person's limit is one more, which the
+     * ledger adds itself (`person`).
      */
     scopes: z
       .array(scopeSchema)
       .min(1)
-      .max(scopeNames.length)
+      .max(scopeNames.length - 1)
       .refine(
         (all) =>
           new Set(all.map(({ scope, key }) => `${scope}\n${key}`)).size ===
@@ -312,9 +459,18 @@ const admissionSchema = z
     policyGeneration: z.int().min(0).optional(),
     /** Whose shares of the requests in flight it takes, and how many there are. */
     fair: fairnessSchema,
+    /**
+     * The person it counts for, whose limit the ledger reserves against
+     * as the `person` scope; none for a call made for nobody.
+     */
+    person: limitedPersonSchema.optional(),
   })
   .refine(({ deadline, reconcileAt }) => deadline <= reconcileAt, {
     message: "A request comes due no sooner than its deadline",
+  })
+  // Only the ledger sets a person's limit, from what admins set.
+  .refine(({ scopes }) => scopes.every(({ scope }) => scope !== "person"), {
+    message: "The ledger makes the person's scope",
   });
 
 /** A provider request to admit. */
@@ -499,6 +655,20 @@ const decidedBefore = (row: RequestRow): Decided => {
   };
 };
 
+/** Micros as US dollars, none as none. */
+const dollarsOf = (micros: number | null): number | null =>
+  micros === null ? null : micros / microsPerDollar;
+
+/** A limit's subject as audit detail: its type, and its person or team. */
+const limitDetail = ({
+  subjectType,
+  subjectId,
+}: ReturnType<typeof subjectKey>) => ({
+  subject: subjectType,
+  ...(subjectType === "person" ? { userId: subjectId } : {}),
+  ...(subjectType === "team" ? { teamId: subjectId } : {}),
+});
+
 /** The deployment's model ledger, in the EU unless turned off. */
 export const modelLedger = (
   env: Pick<Env, "MODEL_LEDGER" | "DURABLE_OBJECT_JURISDICTION">
@@ -572,18 +742,22 @@ export class ModelLedger extends DurableObject<Env> {
           alerted: 0,
         };
       }
+      if (admission.person !== undefined) {
+        this.#carryPersonSpend(admission.person.key, admission.period);
+      }
+      const scopes =
+        admission.person === undefined
+          ? admission.scopes
+          : [...admission.scopes, this.#personScope(admission.person)];
       const { price } = admission;
       const unpriced = [price, ...price.tiers].some(
         (rates) => rates.input === 0 || rates.output === 0
       );
-      if (
-        unpriced &&
-        admission.scopes.some(({ limitMicros }) => limitMicros !== null)
-      ) {
+      if (unpriced && scopes.some(({ limitMicros }) => limitMicros !== null)) {
         this.#leaveQueue(admission.fair.place);
         return { admitted: { ok: false, unpriced: true } as const, alerted: 0 };
       }
-      const rows = admission.scopes.map((scope) => ({
+      const rows = scopes.map((scope) => ({
         scope,
         row: this.#spendOf(scope, admission.period),
       }));
@@ -648,7 +822,7 @@ export class ModelLedger extends DurableObject<Env> {
           id: admission.id,
           fingerprint,
           period: admission.period,
-          scopes: JSON.stringify(admission.scopes),
+          scopes: JSON.stringify(scopes),
           model: admission.model,
           priceVersion: admission.price.version,
           prices: JSON.stringify(admission.price),
@@ -674,7 +848,7 @@ export class ModelLedger extends DurableObject<Env> {
         alertMicros,
         limitRequests,
         names,
-      } of admission.scopes) {
+      } of scopes) {
         this.#db
           .insert(requestScopes)
           .values({
@@ -713,6 +887,247 @@ export class ModelLedger extends DurableObject<Env> {
     }
     this.#deliverIfStored();
     return admitted;
+  }
+
+  /**
+   * The `person` scope of a request made for `person`: keyed as their user
+   * scope, limited to what admins set for them, counted without a limit
+   * when they set none. Inside the transaction that admits it.
+   */
+  #personScope({ key, teams }: z.output<typeof limitedPersonSchema>) {
+    const { monthlyMicros } = appliedLimit(
+      this.#storedLimits(key, teams),
+      key,
+      teams
+    );
+    return scopeSchema.parse({
+      scope: "person",
+      key,
+      limitMicros: monthlyMicros,
+      // Admins are told when it is used up, not before: it is theirs to
+      // set, and they read each person's spend in Settings.
+      alertMicros: null,
+      names: { user: key },
+    });
+  }
+
+  /**
+   * Starts `person`'s spend in `period` from their user scope's, the first
+   * time a request of theirs counts against the person scope there: what
+   * they spent before this release counted it still counts against the
+   * limit admins set. Only requests admitted before then can hold a
+   * reservation on the user scope at that moment: each still open is
+   * attached to the person scope too, its hold reserved there, so its
+   * settlement charges the person scope what it cost, as any request's
+   * does. Inside the transaction that admits.
+   */
+  #carryPersonSpend(person: string, period: string): void {
+    const personPeriod = periodOf("person", period);
+    const earlier = this.#spendOf(
+      {
+        scope: "user",
+        key: person,
+        limitMicros: null,
+        alertMicros: null,
+        names: {},
+      },
+      period
+    );
+    const started = this.#db
+      .insert(spend)
+      .values({
+        scope: "person",
+        key: person,
+        period: personPeriod,
+        spentMicros: earlier.spentMicros,
+        reservedMicros: earlier.reservedMicros,
+        requests: earlier.requests,
+      })
+      .onConflictDoNothing()
+      .returning({ key: spend.key })
+      .all();
+    if (started.length === 0) {
+      return;
+    }
+    const open = this.#db
+      .select({ id: requests.id })
+      .from(requests)
+      .innerJoin(requestScopes, eq(requestScopes.requestId, requests.id))
+      .where(
+        and(
+          inArray(requests.state, ["dispatched", "unknown", "quarantined"]),
+          eq(requestScopes.scope, "user"),
+          eq(requestScopes.key, person),
+          sql`${reservedPeriodSql} = ${period}`
+        )
+      )
+      .all();
+    for (const { id } of open) {
+      this.#db
+        .insert(requestScopes)
+        .values({
+          requestId: id,
+          scope: "person",
+          key: person,
+          limitMicros: null,
+          alertMicros: null,
+          names: JSON.stringify({ user: person }),
+          period: personPeriod,
+          limitRequests: null,
+        })
+        .run();
+    }
+  }
+
+  /**
+   * The limits stored for `person`, `teams` and the default (all of them
+   * with neither), each that can be read: one that can't is left out,
+   * logged, so a damaged row never stops the calls it would limit.
+   */
+  #storedLimits(person?: string, teams: readonly string[] = []) {
+    const rows = this.#db
+      .select()
+      .from(personLimits)
+      .where(
+        person === undefined
+          ? undefined
+          : sql`${personLimits.subjectType} = 'default' OR (${personLimits.subjectType} = 'person' AND ${personLimits.subjectId} = ${person}) OR (${personLimits.subjectType} = 'team' AND ${inList(personLimits.subjectId, teams)})`
+      )
+      .all();
+    return rows.flatMap((row): StoredPersonLimit[] => {
+      const subject = subjectOf(row);
+      const values = storedLimitSchema.safeParse({
+        monthlyMicros: row.monthlyMicros,
+        messagesAnHour: row.messagesAnHour,
+      }).data;
+      if (subject === undefined || values === undefined) {
+        log.error("model.person_limit_unreadable", {
+          subject: row.subjectType,
+        });
+        return [];
+      }
+      return [{ subject, ...values }];
+    });
+  }
+
+  /** Every limit admins set: the default and each exception. */
+  async personLimits(): Promise<StoredPersonLimit[]> {
+    await Promise.resolve();
+    return this.#storedLimits();
+  }
+
+  /** The limit that applies to `person`, in `teams`. */
+  async personLimitOf(input: LimitedPerson): Promise<AppliedPersonLimit> {
+    const { key, teams } = limitedPersonSchema.parse(input);
+    await Promise.resolve();
+    return appliedLimit(this.#storedLimits(key, teams), key, teams);
+  }
+
+  /**
+   * Sets the limit for `subject`, audited in the name of `by` with what
+   * it replaced, in one transaction; refused, changing nothing, when its
+   * monthly limit is above `ceilingMicros` (Grasp's budget, none for no
+   * budget).
+   */
+  async setPersonLimit(
+    subjectInput: PersonLimitSubject,
+    limitInput: Pick<StoredPersonLimit, "monthlyMicros" | "messagesAnHour">,
+    ceilingMicros: number | null,
+    by: AuditActor
+  ): Promise<PersonLimitSetting> {
+    const subject = personLimitSubjectSchema.parse(subjectInput);
+    const limit = storedLimitSchema.parse(limitInput);
+    const ceiling = microsSchema.nullable().parse(ceilingMicros);
+    const actor = auditActorSchema.parse(by);
+    if (
+      ceiling !== null &&
+      limit.monthlyMicros !== null &&
+      limit.monthlyMicros > ceiling
+    ) {
+      await Promise.resolve();
+      return { state: "above_budget", ceilingMicros: ceiling };
+    }
+    const key = subjectKey(subject);
+    this.ctx.storage.transactionSync(() => {
+      const before = this.#limitRow(key);
+      this.#db
+        .insert(personLimits)
+        .values({ ...key, ...limit, updatedAt: Date.now() })
+        .onConflictDoUpdate({
+          target: [personLimits.subjectType, personLimits.subjectId],
+          set: { ...limit, updatedAt: Date.now() },
+        })
+        .run();
+      this.#outbox({
+        actor,
+        action: "model.limit.set",
+        detail: {
+          ...limitDetail(key),
+          monthly: dollarsOf(limit.monthlyMicros),
+          messagesAnHour: limit.messagesAnHour,
+          "before.monthly": dollarsOf(before?.monthlyMicros ?? null),
+          "before.messagesAnHour": before?.messagesAnHour ?? null,
+          "before.set": before !== undefined,
+        },
+      });
+    });
+    this.#deliverIfStored();
+    return { state: "set" };
+  }
+
+  /**
+   * Removes `subject`'s limit, audited in the name of `by` with what it
+   * was; nothing for a subject with none.
+   */
+  async removePersonLimit(
+    subjectInput: PersonLimitSubject,
+    by: AuditActor
+  ): Promise<void> {
+    const key = subjectKey(personLimitSubjectSchema.parse(subjectInput));
+    const actor = auditActorSchema.parse(by);
+    this.ctx.storage.transactionSync(() => {
+      const before = this.#limitRow(key);
+      if (before === undefined) {
+        return;
+      }
+      this.#db
+        .delete(personLimits)
+        .where(
+          and(
+            eq(personLimits.subjectType, key.subjectType),
+            eq(personLimits.subjectId, key.subjectId)
+          )
+        )
+        .run();
+      this.#outbox({
+        actor,
+        action: "model.limit.removed",
+        detail: {
+          ...limitDetail(key),
+          "before.monthly": dollarsOf(before.monthlyMicros),
+          "before.messagesAnHour": before.messagesAnHour,
+        },
+      });
+    });
+    this.#deliverIfStored();
+    await Promise.resolve();
+  }
+
+  /** The stored row of subject `key`, if any. Inside a transaction. */
+  #limitRow(key: ReturnType<typeof subjectKey>) {
+    return this.#db
+      .select({
+        monthlyMicros: personLimits.monthlyMicros,
+        messagesAnHour: personLimits.messagesAnHour,
+      })
+      .from(personLimits)
+      .where(
+        and(
+          eq(personLimits.subjectType, key.subjectType),
+          eq(personLimits.subjectId, key.subjectId)
+        )
+      )
+      .get();
   }
 
   /**

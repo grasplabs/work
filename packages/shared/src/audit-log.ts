@@ -113,6 +113,9 @@ const typeRules: readonly {
   // A spending budget crossing its alert threshold or running out: filed
   // with the budgets it belongs to, not as a model call.
   { action: "model.budget", type: "config" },
+  // A company admin setting or removing a limit per person (core's
+  // src/model-ledger.ts): configuration, not a model call.
+  { action: "model.limit", type: "config" },
   // Core recording a new quota policy generation, the limits that apply
   // from then on (core's src/workflows/quotas.ts).
   { action: "quota_policy.recorded", type: "config" },
