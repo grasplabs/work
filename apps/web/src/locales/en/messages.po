@@ -1466,6 +1466,10 @@ msgstr "{vendor} · usage unknown"
 msgid "{visible, plural, one {# shown. Drag to reorder.} other {# shown. Drag to reorder.}}"
 msgstr "{visible, plural, one {# shown. Drag to reorder.} other {# shown. Drag to reorder.}}"
 
+#: src/onboarding/setup-steps.tsx
+msgid "{waiting, plural, one {# person new on your list gets a link once you confirm your organization.} other {# people new on your list get their links once you confirm your organization.}}"
+msgstr "{waiting, plural, one {# person new on your list gets a link once you confirm your organization.} other {# people new on your list get their links once you confirm your organization.}}"
+
 #: src/dashboard/nav-item.tsx
 msgid "{waiting, plural, one {# thing waiting} other {# things waiting}}"
 msgstr "{waiting, plural, one {# thing waiting} other {# things waiting}}"
@@ -12673,6 +12677,10 @@ msgstr "This app lost its connection to the page and was stopped."
 msgid "This app wants to open a page on another site in a new tab. Open it only if you expected to go there."
 msgstr "This app wants to open a page on another site in a new tab. Open it only if you expected to go there."
 
+#: src/screens/screen-frame.tsx
+msgid "This app's stored code no longer matches the code that was approved, so it wasn't opened. Tell an admin."
+msgstr "This app's stored code no longer matches the code that was approved, so it wasn't opened. Tell an admin."
+
 #: src/interview/sound-check.tsx
 msgid "This browser cannot listen. You can type your answers."
 msgstr "This browser cannot listen. You can type your answers."
@@ -12878,6 +12886,14 @@ msgstr "This version changes the domain's data, and the change can't be applied:
 #: src/engines/store-change-errors.ts
 msgid "This version changes the domain's data, and the change can't be applied: filling in one of its new fields would make a record larger than a record may be."
 msgstr "This version changes the domain's data, and the change can't be applied: filling in one of its new fields would make a record larger than a record may be."
+
+#: src/screens/screen-frame.tsx
+msgid "This version of the app hasn't been sealed, so it can't be opened. A builder can publish it again."
+msgstr "This version of the app hasn't been sealed, so it can't be opened. A builder can publish it again."
+
+#: src/screens/screen-frame.tsx
+msgid "This version of the app was revoked and no longer runs. An admin can make another version current."
+msgstr "This version of the app was revoked and no longer runs. An admin can make another version current."
 
 #: src/engines/store-change-errors.ts
 msgid "This version's data change is still being applied. Try again in a moment."

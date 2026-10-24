@@ -1466,6 +1466,10 @@ msgstr "{vendor} · uso desconocido"
 msgid "{visible, plural, one {# shown. Drag to reorder.} other {# shown. Drag to reorder.}}"
 msgstr "{visible, plural, one {# visible. Arrastra para reordenar.} other {# visibles. Arrastra para reordenar.}}"
 
+#: src/onboarding/setup-steps.tsx
+msgid "{waiting, plural, one {# person new on your list gets a link once you confirm your organization.} other {# people new on your list get their links once you confirm your organization.}}"
+msgstr "{waiting, plural, one {# persona nueva en tu lista recibe un enlace en cuanto confirmes tu organización.} other {# personas nuevas en tu lista reciben su enlace en cuanto confirmes tu organización.}}"
+
 #: src/dashboard/nav-item.tsx
 msgid "{waiting, plural, one {# thing waiting} other {# things waiting}}"
 msgstr "{waiting, plural, one {# cosa pendiente} other {# cosas pendientes}}"
@@ -12673,6 +12677,10 @@ msgstr "Esta aplicación perdió su conexión con la página y se detuvo."
 msgid "This app wants to open a page on another site in a new tab. Open it only if you expected to go there."
 msgstr "Esta app quiere abrir una página de otro sitio en una pestaña nueva. Ábrela solo si esperabas ir allí."
 
+#: src/screens/screen-frame.tsx
+msgid "This app's stored code no longer matches the code that was approved, so it wasn't opened. Tell an admin."
+msgstr "El código guardado de esta aplicación ya no coincide con el código aprobado, así que no se abrió. Avisa a un administrador."
+
 #: src/interview/sound-check.tsx
 msgid "This browser cannot listen. You can type your answers."
 msgstr "Este navegador no puede escuchar. Puedes escribir tus respuestas."
@@ -12878,6 +12886,14 @@ msgstr "Esta versión cambia los datos del dominio y el cambio no se puede aplic
 #: src/engines/store-change-errors.ts
 msgid "This version changes the domain's data, and the change can't be applied: filling in one of its new fields would make a record larger than a record may be."
 msgstr "Esta versión cambia los datos del dominio y el cambio no se puede aplicar: rellenar uno de sus nuevos campos haría un registro más grande de lo que puede ser un registro."
+
+#: src/screens/screen-frame.tsx
+msgid "This version of the app hasn't been sealed, so it can't be opened. A builder can publish it again."
+msgstr "Esta versión de la aplicación no se ha sellado, así que no se puede abrir. Un creador puede publicarla de nuevo."
+
+#: src/screens/screen-frame.tsx
+msgid "This version of the app was revoked and no longer runs. An admin can make another version current."
+msgstr "Esta versión de la aplicación se revocó y ya no se ejecuta. Un administrador puede hacer actual otra versión."
 
 #: src/engines/store-change-errors.ts
 msgid "This version's data change is still being applied. Try again in a moment."
