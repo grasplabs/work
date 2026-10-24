@@ -78,8 +78,20 @@ export const landscapeGranted =
  * it carries the authorization's PKCE challenge, so only the flow's own
  * verifier redeems it.
  */
-export const consentCode = (url: URL, tenant: string, subject: string) =>
-  [url.searchParams.get("code_challenge"), tenant, subject].join(".");
+export const consentCode = (
+  url: URL,
+  tenant: string,
+  subject: string,
+  granted?: string
+) =>
+  [
+    url.searchParams.get("code_challenge"),
+    tenant,
+    subject,
+    // What Entra says it granted (`scope`), when the test gives it: base64,
+    // since rights have dots of their own.
+    ...(granted === undefined ? [] : [btoa(granted)]),
+  ].join(".");
 
 /**
  * Where tests post a message arriving in a mailbox's inbox:
@@ -387,7 +399,7 @@ export default {
       return new Response("Not found", { status: 404 });
     }
     const form = new URLSearchParams(await request.text());
-    const [challenge, tenant, subject] = (form.get("code") ?? "").split(".");
+    const [challenge, tenant, subject, granted] = (form.get("code") ?? "").split(".");
     const verifier = new TextEncoder().encode(form.get("code_verifier") ?? "");
     const digest = base64Url(
       new Uint8Array(await crypto.subtle.digest("SHA-256", verifier))
@@ -426,6 +438,7 @@ export default {
       ...(forLandscape ? { scope: ${JSON.stringify(landscapeGranted)} } : {}),
       ...(forDirectory ? { scope: ${JSON.stringify(directoryGranted)} } : {}),
       ...(forDocuments ? { scope: ${JSON.stringify(documentsGranted)} } : {}),
+      ...(granted === undefined ? {} : { scope: atob(granted) }),
     });
   },
 };

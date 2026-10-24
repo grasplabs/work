@@ -37,8 +37,11 @@ const setUpTime = { timeout: 60_000 };
 
 type Admin = Awaited<ReturnType<typeof signedInApi>>;
 
-/** A shared Microsoft 365 mailbox, as an admin connects it. */
-const connectShared = async (admin: Admin) => {
+/**
+ * A shared Microsoft 365 mailbox, as an admin connects it: granted
+ * `granted`, if given, or made before connect kept grants.
+ */
+const connectShared = async (admin: Admin, granted?: string) => {
   const subject = `team-${crypto.randomUUID()}`;
   const { url } = await admin.api.connections.start({
     provider: "microsoft",
@@ -46,7 +49,7 @@ const connectShared = async (admin: Admin) => {
   });
   const authorization = new URL(url);
   const query = new URLSearchParams({
-    code: consentCode(authorization, acmeTenant, subject),
+    code: consentCode(authorization, acmeTenant, subject, granted),
     state: authorization.searchParams.get("state") ?? "",
   });
   await routed(`/api/connections/callback?${query.toString()}`, {
@@ -60,6 +63,10 @@ const connectShared = async (admin: Admin) => {
   }
   return { id: connection.id, mailbox };
 };
+
+/** A grant that holds Read company's rights. */
+const readCompanyGrant =
+  "openid profile email offline_access User.Read Mail.ReadWrite Files.Read.All Sites.Read.All Calendars.Read.Shared Tasks.Read";
 
 const sentSchema = z.array(z.object({ subject: z.string() }).loose());
 
@@ -175,7 +182,9 @@ describe("the classes a company turned on", setUpTime, () => {
   it("let a class through once an admin turns it on for everyone", async () => {
     const admin = await signedInApi(idp, "admin");
     const person = await signedInApi(idp, "user");
-    const { id, mailbox } = await connectShared(admin);
+    // Granted Read company's rights already, so turning it on asks no one
+    // to connect again.
+    const { id, mailbox } = await connectShared(admin, readCompanyGrant);
     const chat = await chatCalling(admin, person.userId, mailbox, id);
 
     await admin.api.connections.setToolClass("read-company", {

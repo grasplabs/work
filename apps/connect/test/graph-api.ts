@@ -20,6 +20,7 @@ import {
 import { beforeEach } from "vite-plus/test";
 import { z } from "zod";
 
+import { contractDocx } from "./fixtures/graph-apps.ts";
 import {
   accessDenied,
   graphAccessDenied,
@@ -67,6 +68,12 @@ import {
   workbookIds,
 } from "./fixtures/graph.ts";
 import type { SheetCell } from "./fixtures/graph.ts";
+import {
+  appControls,
+  appParts,
+  appRoutes,
+  resetApps,
+} from "./graph-apps-fake.ts";
 import { fakeProvider, json, route as routeOn } from "./internet.ts";
 import type { ProviderRoute } from "./internet.ts";
 import type { fakeProviders } from "./oauth-provider.ts";
@@ -88,9 +95,10 @@ const parts = [
   "row",
   "task",
   "version",
+  ...appParts,
 ] as const;
 
-type Part = (typeof parts)[number];
+export type Part = (typeof parts)[number];
 
 /** One condition of a list's `$filter`. */
 interface Condition {
@@ -1054,6 +1062,7 @@ const sharePointAnswer = (url: URL): Response => {
       [itemIds.pdf]: invoicePdf,
       [itemIds.controls]: new TextEncoder().encode(controlText),
       [itemIds.procedure]: new TextEncoder().encode(procedureTexts["3.0"]),
+      [itemIds.contract]: contractDocx,
     }[id ?? ""] ?? own?.bytes;
   return new Response(content ?? new TextEncoder().encode(reportText), {
     headers: { "content-type": "application/octet-stream" },
@@ -1079,6 +1088,7 @@ export const fakeGraph = (providers?: ReturnType<typeof fakeProviders>) => {
     inviteDuringRead = false;
     attendeesLeftOut = undefined;
     resetWorkbooks();
+    resetApps();
   });
   /** The subject of the token's account, if `mailbox` is that account. */
   const ownerOf = (mailbox: string, request: Request): string | undefined => {
@@ -1098,7 +1108,13 @@ export const fakeGraph = (providers?: ReturnType<typeof fakeProviders>) => {
   const { sent, writesDone, fail } = fakeProvider({
     hosts: [graphHost],
     parts,
-    routes: [...graphRoutes, ...todoRoutes(ownerOf)],
+    // Planner, OneNote and the suppliers list come first: the suppliers
+    // list's routes are more particular than the other lists'.
+    routes: [
+      ...appRoutes(route, ownerOf),
+      ...graphRoutes,
+      ...todoRoutes(ownerOf),
+    ],
     unmatched: () =>
       json(
         { error: { code: "BadRequest", message: "Unsupported request" } },
@@ -1110,6 +1126,7 @@ export const fakeGraph = (providers?: ReturnType<typeof fakeProviders>) => {
         : new Response("Taken"),
   });
   return {
+    ...appControls,
     sent,
     /** The writes Graph carried out. */
     writesDone,
