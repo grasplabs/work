@@ -32,6 +32,10 @@ export const composioClasses: Record<string, Record<string, ToolClass>> = {
     HUBSPOT_TWICE: "read-company",
     HUBSPOT_SHADOWED: "read-company",
     HUBSPOT_PROTO: "read-company",
+    // The CRM of core's Stephen eval, whose note plants an instruction
+    // (core's test/fixtures/stephen-world.ts).
+    HUBSPOT_SEARCH_NOTES: "read-company",
+    HUBSPOT_UPDATE_DEAL: "change-company",
   },
   acme_erp: { ACME_ERP_LIST_ORDERS: "read-company" },
   // The tests' own mail server (connect.ts). `mail.forward` fails on
