@@ -1710,6 +1710,35 @@ const aiKindsOf = (source: string): WorkflowCalls["kinds"] =>
   );
 
 /**
+ * The model binding of each AI step of a workflow whose outline can't be
+ * read, by its name (`$ai` for one whose name can't be read), as its code
+ * names it (`aiStepCalls`); none for one whose binding can't be read,
+ * which no release builds.
+ */
+const aiModelsOf = (source: string): WorkflowCalls["models"] => {
+  const models: WorkflowCalls["models"] = {};
+  for (const { name, binding } of aiStepCalls(source) ?? []) {
+    if (binding !== null) {
+      const step = name ?? "$ai";
+      models[step] = [...(models[step] ?? []), binding];
+    }
+  }
+  return models;
+};
+
+/** The model binding each AI step of `steps` names, by step name. */
+const outlineModelsOf = (
+  steps: readonly StepOutline[]
+): WorkflowCalls["models"] =>
+  Object.fromEntries(
+    steps.flatMap(({ name, kind, options: { binding } }) =>
+      kind === "ai" && typeof binding === "string"
+        ? [[name, [binding]] satisfies [string, string[]]]
+        : []
+    )
+  );
+
+/**
  * The App's bindings the workflow in `source` calls, as a review shows
  * them and its runs are held to: by step, as its outline names them, and
  * all together. A workflow whose steps can't be read (a step in a `try`,
@@ -1726,7 +1755,7 @@ export const reviewedCalls = (source: string): WorkflowCalls => {
     context = readContext(source);
   } catch (error) {
     if (error instanceof WorkflowError) {
-      return { steps: null, kinds: {}, all: [] };
+      return { steps: null, kinds: {}, models: {}, keyed: [], all: [] };
     }
     throw error;
   }
@@ -1747,6 +1776,8 @@ export const reviewedCalls = (source: string): WorkflowCalls => {
       outline === null
         ? aiKindsOf(source)
         : Object.fromEntries(steps.map(({ name, kind }) => [name, kind])),
+    models: outline === null ? aiModelsOf(source) : outlineModelsOf(steps),
+    keyed: steps.flatMap(({ name, key }) => (key === undefined ? [] : [name])),
     all: envCallsIn(bindings, [run.body]),
     ...(dynamic.length === 0 ? {} : { dynamic: Object.fromEntries(dynamic) }),
   };

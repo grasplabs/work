@@ -4,6 +4,8 @@ import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import {
   callReviewed,
+  modelReviewed,
+  stepReviewed,
   inboundEmailIndexSchema,
   isRetryable,
   maxStepRetries,
@@ -350,6 +352,33 @@ export const createTestEngine = (options: TestEngineOptions = {}) => {
     }
   };
 
+  // As the host refuses it (`stepReviewed`): a step under a name its
+  // review doesn't show, or under a key when its review shows it written
+  // without one.
+  const checkStep = (name: string): void => {
+    if (calls !== undefined && calls !== null && !stepReviewed(calls, name)) {
+      const error = workflowErrors.create("workflow.step_not_reviewed");
+      error.message = `Step "${name}" isn't one the review of this version shows: run steps only as the workflow's function writes them.`;
+      throw error;
+    }
+  };
+  // As the host refuses it (`modelReviewed`): a model call naming another
+  // binding than its AI step's review shows; it fails the step, caught or
+  // not.
+  const checkModel = (step: string, binding: string): void => {
+    if (calls === undefined || calls === null) {
+      return;
+    }
+    if (!modelReviewed(calls, running?.step ?? step, binding)) {
+      const error = workflowErrors.create("workflow.step_not_reviewed");
+      error.message = `Step "${step}" asked model ${binding}, which the review of this version doesn't show it asking: ask each AI step's model only as its \`step.llm\` names it.`;
+      if (running !== undefined) {
+        running.refused = error;
+      }
+      throw error;
+    }
+  };
+
   const engine: WorkflowEngine = {
     runId: runIdSchema.parse(options.runId ?? "run-1"),
     params: options.params ?? {},
@@ -361,6 +390,7 @@ export const createTestEngine = (options: TestEngineOptions = {}) => {
         // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
         return fromStored(results.get(name)) as Awaited<ReturnType<typeof fn>>;
       }
+      checkStep(name);
       const step = stepNameOf(name);
       const call = {
         name: step.name,
@@ -437,6 +467,7 @@ export const createTestEngine = (options: TestEngineOptions = {}) => {
       }
     },
     sleep: async (name, milliseconds) => {
+      checkStep(name);
       if (!recorded.has(name)) {
         recorded.set(name, null);
         log({ type: "sleep", name: stepNameOf(name).name, milliseconds });
@@ -445,6 +476,7 @@ export const createTestEngine = (options: TestEngineOptions = {}) => {
       await Promise.resolve();
     },
     callModel: async (request) => {
+      checkModel(request.step, request.binding);
       modelRequests.push(request);
       if (!options.model) {
         throw new Error(
@@ -477,6 +509,7 @@ export const createTestEngine = (options: TestEngineOptions = {}) => {
         },
       ]),
     waitForDecision: async (name, { decision, timeout }) => {
+      checkStep(name);
       const replayed = recorded.get(name);
       if (replayed !== undefined) {
         // SAFETY: only this method records under a decision wait's name.

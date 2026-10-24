@@ -480,6 +480,8 @@ describe(describeWorkflow, () => {
       expect(reviewedCalls(source)).toStrictEqual({
         steps: null,
         kinds: {},
+        models: {},
+        keyed: [],
         all: [],
       });
     }
@@ -887,6 +889,34 @@ const llm = (binding: string): string =>
 /** `source`'s AI steps, as `name:binding`. */
 const bindings = (source: string): string[] | undefined =>
   aiStepCalls(source)?.map(({ name, binding }) => `${name}:${binding}`);
+
+describe(reviewedCalls, () => {
+  it("keeps the model binding each AI step names and which steps are keyed, read or not", () => {
+    const read = reviewedCalls(
+      workflowSource(`${llm("reader")}
+  for (const item of input.items) {
+    await step.do("each", { description: "Each", key: item.id }, async () => 1);
+  }
+  await step.do("tidy", { description: "Tidy" }, async () => 1);`)
+    );
+    // A step in a \`try\`: its steps can't be read, its AI steps can.
+    const unread = reviewedCalls(
+      workflowSource(`try { ${llm("reader")} } catch {}`)
+    );
+
+    expect({
+      read: { models: read.models, keyed: read.keyed },
+      unread: {
+        steps: unread.steps,
+        models: unread.models,
+        keyed: unread.keyed,
+      },
+    }).toStrictEqual({
+      read: { models: { read: ["reader"] }, keyed: ["each"] },
+      unread: { steps: null, models: { read: ["reader"] }, keyed: [] },
+    });
+  });
+});
 
 describe(aiStepCalls, () => {
   it("reads every AI step's name and binding, wherever it sits, and only the workflow's own step", () => {
