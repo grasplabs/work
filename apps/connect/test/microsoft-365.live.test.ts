@@ -6,8 +6,8 @@
  *
  * To run it, get a delegated Graph access token for a test tenant's user,
  * with the connector's scopes (User.Read, Mail.ReadWrite,
- * Mail.ReadWrite.Shared, Mail.Send, Mail.Send.Shared, Calendars.Read,
- * Calendars.ReadWrite, Calendars.Read.Shared, Files.Read.All,
+ * Mail.ReadWrite.Shared, Mail.Send, Mail.Send.Shared, MailboxSettings.Read,
+ * Calendars.Read, Calendars.ReadWrite, Calendars.Read.Shared, Files.Read.All,
  * Sites.Read.All; Graph Explorer gives one), then, from the repo root:
  *
  *   M365_SMOKE_ACCESS_TOKEN=<token> \
@@ -18,13 +18,15 @@
  *
  * Add M365_SMOKE_WRITES=1 to also create a draft in the mailbox, try to
  * move it to a folder of another mailbox (refused), and move it to Deleted
- * Items. M365_SMOKE_FOREIGN_FOLDER names that other folder: say, the
- * user's own Inbox's ID (GET /me/mailFolders/inbox) when M365_SMOKE_MAILBOX
- * is a shared mailbox. Never point it at a client's tenant.
+ * Items. A move works only in the user's own mailbox, so for the writes
+ * M365_SMOKE_MAILBOX must be the user's own. M365_SMOKE_FOREIGN_FOLDER
+ * names that other folder: say, a shared mailbox's Inbox's ID. Never point
+ * it at a client's tenant.
  *
  * M365_SMOKE_OWN_MAILBOX, the token's user's own address, also puts an
  * event in their calendar a week from now, with nobody invited, and moves
- * it by an hour; it stays there, titled "Grasp OS smoke test".
+ * it by an hour; it stays there, titled "Grasp OS smoke test". With it,
+ * free time is looked for in that calendar.
  */
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
@@ -181,6 +183,26 @@ describe.runIf(smoke.success)("Microsoft 365, live", () => {
       ).resolves.toMatchObject({
         event: { start: { dateTime: `${day}T15:00:00.0000000`, timeZone } },
       });
+    }
+  );
+
+  it.runIf(config?.M365_SMOKE_OWN_MAILBOX !== undefined)(
+    "finds free time in the user's own calendar",
+    async () => {
+      const id = await connection();
+      const own = config?.M365_SMOKE_OWN_MAILBOX ?? "";
+      const day = new Date(Date.now() + 7 * 24 * 3600 * 1000)
+        .toISOString()
+        .slice(0, "2026-10-26".length);
+      const range = {
+        start: `${day}T00:00`,
+        end: `${day}T23:59`,
+        timeZone: "Europe/Amsterdam",
+        minutes: 15,
+      };
+      await expect(
+        run(id, "calendar.freeTime", { ...range, mailbox: own }, own)
+      ).resolves.toMatchObject({ mailbox: own });
     }
   );
 });

@@ -29,6 +29,13 @@ import {
   topSchema,
   v1,
 } from "./graph.ts";
+import {
+  fromSchema,
+  meRoute,
+  requireOwnMailbox,
+  requireShown,
+  subjectSchema,
+} from "./mail-sorting.ts";
 
 // Mail, in one mailbox per call: a person's own or a shared one (such as
 // invoices@), always as `/users/{mailbox}`, so a call's capability binds
@@ -36,7 +43,9 @@ import {
 // of the messages it came from. Reading, filing and drafting stay in the
 // mailbox, but the mailbox may be a shared one or a colleague's the
 // connection may open (`Mail.ReadWrite.Shared`), so they reach `company`;
-// sending reaches whoever the message goes to (`others`).
+// sending reaches whoever the message goes to (`others`). Moving, flagging
+// and categorising work only in the person's own mailbox (`own`,
+// mail-sorting.ts).
 
 const users = `${v1}/users/{mailbox}`;
 
@@ -528,16 +537,22 @@ const readAttachment = defineTool({
   },
 });
 
-const graphFolder = z.object({ id: z.string() });
+const graphFolder = z.object({
+  id: z.string(),
+  displayName: z.string().nullish(),
+});
 
 const moveMessage = defineTool({
   name: "mail.move",
   description:
-    "Moves a message to another folder of its mailbox (a folder ID, or a well-known name such as archive). The moved message has a new ID.",
+    "Moves an email in the person's own mailbox to another of its folders (a folder ID, or a well-known name such as archive). The moved email has a new ID. Give the email's sender and subject, and the folder's name, as the person sees them: they must match.",
   input: z.strictObject({
     mailbox: mailboxSchema,
     message: idSchema,
     destination: idSchema,
+    from: fromSchema.optional(),
+    subject: subjectSchema.optional(),
+    folderName: z.string().min(1).max(256).optional(),
   }),
   output: z.strictObject({
     mailbox: z.string(),
@@ -546,31 +561,47 @@ const moveMessage = defineTool({
     folderId: z.string().nullable(),
   }),
   readOnly: false,
-  reach: "company",
+  reach: "own",
   destructive: true,
   resource: "mailbox",
-  routes: [get("/mailFolders/{destination}"), post("/messages/{message}/move")],
+  routes: [
+    meRoute,
+    get("/messages/{message}"),
+    get("/mailFolders/{destination}"),
+    post("/messages/{message}/move"),
+  ],
   describe: {
     title: "Move an email to another folder",
     fields: [
       { label: "Mailbox", input: "mailbox" },
+      { label: "From", input: "from" },
+      { label: "Subject", input: "subject" },
+      { label: "To folder", input: "folderName" },
+      { label: "Folder", input: "destination" },
       { label: "Message", input: "message" },
-      { label: "To folder", input: "destination" },
     ],
   },
-  run: async ({ mailbox, message, destination }) => {
+  run: async ({ mailbox, message, destination, from, subject, folderName }) => {
+    await requireOwnMailbox(mailbox);
+    const path = `/users/${segment(mailbox)}/messages/${segment(message)}`;
+    await requireShown(path, { from, subject });
     // The destination is looked up in this mailbox first, on a route the
     // egress binds to it, and the message moved to the folder that names:
     // a folder of another mailbox is never a destination.
     const folder = await graphJson(
       graphUrl(
         `/users/${segment(mailbox)}/mailFolders/${segment(destination)}`,
-        { $select: "id" }
+        { $select: "id,displayName" }
       ),
       graphFolder
     );
+    if (folderName !== undefined && folder.displayName !== folderName) {
+      throw new ToolError("That folder isn't the one the card names", {
+        code: invalidCode,
+      });
+    }
     const moved = await graphJson(
-      graphUrl(`/users/${segment(mailbox)}/messages/${segment(message)}/move`),
+      graphUrl(`${path}/move`),
       graphMessage,
       jsonBody({ destinationId: folder.id })
     );
@@ -585,7 +616,7 @@ const moveMessage = defineTool({
   },
 });
 
-const recipientsSchema = z.array(z.email().max(256)).max(100);
+export const recipientsSchema = z.array(z.email().max(256)).max(100);
 
 /** A message to send or keep as a draft. */
 const draftInput = z.strictObject({
@@ -668,7 +699,7 @@ const foundMessage = z.object({
  * derives it, the kit checks it), so it can't break out of the filter's
  * string literal.
  */
-const findByEffect = async (
+export const findByEffect = async (
   mailbox: string,
   key: string
 ): Promise<z.infer<typeof foundMessage> | undefined> => {
