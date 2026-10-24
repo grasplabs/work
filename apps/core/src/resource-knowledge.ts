@@ -1,8 +1,17 @@
+import {
+  brainContractVersion,
+  brainErrors,
+  resourceRecallInputSchema,
+} from "@grasp-os/shared/brain-api";
+import type { MemoryPack } from "@grasp-os/shared/brain-api";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { collectionIdSchema, permissionIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, CollectionId, PermissionId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
-import { knowledgeErrors } from "@grasp-os/shared/knowledge";
+import {
+  knowledgeErrors,
+  searchQueryMaxLength,
+} from "@grasp-os/shared/knowledge";
 import type { SearchHit, SearchResults } from "@grasp-os/shared/knowledge";
 import { knowledgeSearchMaxLength } from "@grasp-os/shared/operation-limits";
 import { operationErrors } from "@grasp-os/shared/operations";
@@ -13,6 +22,8 @@ import { z } from "zod";
 import { permissions } from "./db/core/schema.ts";
 import { documents } from "./db/knowledge/schema.ts";
 import { readAsDelegate } from "./knowledge/binding.ts";
+import { d1BrainStore } from "./knowledge/recall-store.ts";
+import { recallWithSources } from "./knowledge/recall.ts";
 import { search } from "./knowledge/search.ts";
 import { read } from "./knowledge/tools.ts";
 import type {
@@ -49,6 +60,15 @@ const knowledgeContract = {
     request: { id: "a document ID, 1 to 256" },
     answer: "a document's title and text",
   },
+  recall: {
+    request: {
+      query: `string, 1 to ${searchQueryMaxLength}`,
+      collections: "declared collection names, each once, optional",
+      budget: "maxItems, maxTokens and deadlineMs, each optional",
+    },
+    answer: `a Brain memory pack (${brainContractVersion})`,
+    needs: "the App's brain permission",
+  },
 } as const;
 
 /** The knowledge contract's fingerprint, computed once. */
@@ -68,6 +88,8 @@ const defaultHits = 20;
 interface BoundCollection {
   readonly permissionId: PermissionId;
   readonly collectionId: CollectionId;
+  /** The declaration's names for it: one, or more bound to the same. */
+  readonly names: readonly string[];
 }
 
 /**
@@ -117,6 +139,7 @@ const boundCollections = async (
     bound.set(collectionId, {
       permissionId: permissionIdSchema.parse(permissionId),
       collectionId: collectionIdSchema.parse(collectionId),
+      names: [...(bound.get(collectionId)?.names ?? []), name],
     });
   }
   return [...bound.values()];
@@ -240,6 +263,99 @@ const readBound = async (
   }
 };
 
+/**
+ * Whether the person the call acts for may read `collectionId` under the
+ * binding's `permissionId`, now: refused alike when it is hidden or gone.
+ */
+const readableNow = async (
+  env: Env,
+  caller: BindingCaller,
+  { permissionId, collectionId }: BoundCollection
+): Promise<boolean> => {
+  try {
+    await readAsDelegate(
+      env,
+      caller.authority,
+      caller.context,
+      permissionId,
+      async (reader) => {
+        await d1BrainStore(env).requireReadable(reader, [collectionId]);
+      }
+    );
+    return true;
+  } catch (error) {
+    if (knowledgeErrors.codeOf(error) === "knowledge.not_found") {
+      return false;
+    }
+    throw error;
+  }
+};
+
+/** A Brain refusal, as the operation host answers an App. */
+const asOperationError = (error: unknown): unknown => {
+  const code = brainErrors.codeOf(error);
+  if (code === "brain.denied") {
+    return operationErrors.create("resource.unavailable");
+  }
+  if (code === "brain.invalid" || code === "brain.not_found") {
+    return operationErrors.create("resource.invalid_args");
+  }
+  return error;
+};
+
+/**
+ * The Brain's recall (knowledge/recall.ts) over the bound collections, or
+ * the ones `request` names of them, as far as the person the call acts
+ * for may read each: the same service, checks and audit as every other
+ * caller's. The App recalls only under its own `brain` permission, read
+ * on every call, and never from a collection the declaration doesn't
+ * bind; one its person can't read is left out, as a search leaves it.
+ */
+const recallBound = async (
+  env: Env,
+  caller: BindingCaller,
+  bound: readonly BoundCollection[],
+  { query, collections, budget }: z.output<typeof resourceRecallInputSchema>
+): Promise<MemoryPack> => {
+  // The operation host refused names the declaration doesn't have; a
+  // name that isn't bound still never widens what is read.
+  const asked =
+    collections === undefined
+      ? bound
+      : bound.filter(({ names }) =>
+          names.some((name) => collections.includes(name))
+        );
+  const readable: CollectionId[] = [];
+  // One collection after another, each under its own permission.
+  for (const binding of asked) {
+    // oxlint-disable-next-line no-await-in-loop -- one collection at a time
+    if (await readableNow(env, caller, binding)) {
+      readable.push(binding.collectionId);
+    }
+  }
+  try {
+    // Under every collection permission the App holds, and only within
+    // those this binding names that the person may read now.
+    const { pack, provenance } = await readAsDelegate(
+      env,
+      caller.authority,
+      caller.context,
+      undefined,
+      async (reader) =>
+        await recallWithSources(
+          env,
+          reader,
+          { query, ...(budget === undefined ? {} : { budget }) },
+          readable
+        )
+    );
+    caller.sources.note(provenance);
+    return pack;
+  } catch (error) {
+    throw asOperationError(error);
+  }
+};
+
 export const knowledgeAdapter: ResourceAdapter<"knowledge"> = {
   bind: async (env, app, declaration, target) => {
     const bound = await boundCollections(env, app, declaration, target);
@@ -249,15 +365,30 @@ export const knowledgeAdapter: ResourceAdapter<"knowledge"> = {
       : {
           contractId: knowledgeContract.contractId,
           fingerprint,
-          call: async (caller, { method, args }) =>
-            method === "search"
-              ? await searchBound(
-                  env,
-                  caller,
-                  bound,
-                  searchSchema.parse(args[0])
-                )
-              : await readBound(env, caller, bound, readSchema.parse(args[0])),
+          call: async (caller, { method, args }) => {
+            if (method === "search") {
+              return await searchBound(
+                env,
+                caller,
+                bound,
+                searchSchema.parse(args[0])
+              );
+            }
+            if (method === "recall") {
+              return await recallBound(
+                env,
+                caller,
+                bound,
+                resourceRecallInputSchema.parse(args[0])
+              );
+            }
+            return await readBound(
+              env,
+              caller,
+              bound,
+              readSchema.parse(args[0])
+            );
+          },
         };
   },
 };

@@ -117,7 +117,7 @@ export const collectionReads = (
       await asDelegate(async (reader) => await follow(env, reader, documentId)),
     recall: async (input) =>
       await asDelegate(
-        async (reader) => await recall(env, reader, input, collectionId)
+        async (reader) => await recall(env, reader, input, [collectionId])
       ),
   };
 };
