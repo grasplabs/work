@@ -29,6 +29,8 @@ import {
   reportText,
   sentId,
   sheetCsv,
+  sheetNames,
+  sheetRows,
   signaturePng,
   teamCalendar,
   threadId,
@@ -118,6 +120,7 @@ const driveInputs: Record<string, Input> = {
   "files.list": {},
   "files.search": { query: "invoice" },
   "files.read": { item: fileIds.report },
+  "sheets.read": { spreadsheet: fileIds.sheet },
 };
 
 describe("the Google Workspace connector's scoping", () => {
@@ -126,8 +129,8 @@ describe("the Google Workspace connector's scoping", () => {
       ([name, { resource, routes: declared }]) =>
         declared.map((route) => ({ name, resource, ...route }))
     );
-    // Drive has no path per drive: its tools hold a call to the drive
-    // themselves (tested below).
+    // Drive and Sheets have no path per drive: their tools hold a call to
+    // the drive themselves (tested below).
     const unbound = routes
       .filter(
         ({ resource, path }) =>
@@ -136,7 +139,9 @@ describe("the Google Workspace connector's scoping", () => {
               path.startsWith("/gmail/v1/users/{mailbox}/")) ||
             (resource === "calendar" &&
               path.startsWith("/calendar/v3/calendars/{calendar}/")) ||
-            (resource === "drive" && path.startsWith("/drive/v3/files"))
+            (resource === "drive" &&
+              (path.startsWith("/drive/v3/files") ||
+                path.startsWith("/v4/spreadsheets/{spreadsheet}")))
           )
       )
       .map(({ name, path }) => `${name} ${path}`);
@@ -154,6 +159,7 @@ describe("the Google Workspace connector's scoping", () => {
     expect(manifest.hosts).toStrictEqual([
       "gmail.googleapis.com",
       "www.googleapis.com",
+      "sheets.googleapis.com",
     ]);
     // No batch endpoint, and no redirect is ever followed.
     expect(
@@ -1142,6 +1148,156 @@ describe("the Google Workspace connector's Drive tools", () => {
         ({ path, query }) => query.alt === "media" || path.endsWith("/export")
       )
     ).toStrictEqual([]);
+  });
+});
+
+describe("the Google Workspace connector's Sheets tools", () => {
+  it("read a spreadsheet's first sheet in order, as values, after Drive says it is in the drive", async () => {
+    const connection = await connected();
+    const [first, ...others] = sheetNames;
+    await expect(
+      resultOf(
+        call(
+          connection,
+          "sheets.read",
+          { drive: financeDrive, spreadsheet: fileIds.sheet },
+          { resource: financeDrive }
+        )
+      )
+    ).resolves.toStrictEqual({
+      output: {
+        drive: financeDrive,
+        id: fileIds.sheet,
+        name: "Invoice register",
+        // In the spreadsheet's order, not in Sheets' answer's.
+        sheets: [first, ...others],
+        sheet: first,
+        range: `'${first}'!1:201`,
+        rows: sheetRows[first],
+        more: false,
+      },
+      provenance: [fileIds.sheet],
+    });
+    // Drive's metadata first, which says its drive; then Sheets: the
+    // spreadsheet's sheets, then the first rows of the first, one more
+    // than it gives to tell there are more.
+    expect(
+      requests().map(({ host, path, query }) => ({
+        host,
+        path,
+        ranges: query.ranges,
+        grid: query.includeGridData,
+      }))
+    ).toStrictEqual([
+      {
+        host: "www.googleapis.com",
+        path: `/drive/v3/files/${fileIds.sheet}`,
+        ranges: undefined,
+        grid: undefined,
+      },
+      {
+        host: "sheets.googleapis.com",
+        path: `/v4/spreadsheets/${fileIds.sheet}`,
+        ranges: undefined,
+        grid: undefined,
+      },
+      {
+        host: "sheets.googleapis.com",
+        path: `/v4/spreadsheets/${fileIds.sheet}`,
+        ranges: `'${first}'!1:201`,
+        grid: "true",
+      },
+    ]);
+  });
+
+  it("read a named sheet's cells, its name quoted, and say when there are more rows than asked for", async () => {
+    const connection = await connected();
+    const [register, notes] = sheetNames;
+    const read = await outputOf(
+      call(connection, "sheets.read", {
+        drive: financeDrive,
+        spreadsheet: fileIds.sheet,
+        sheet: register,
+        cells: "A1:D3",
+        top: 2,
+      })
+    );
+    await call(connection, "sheets.read", {
+      drive: financeDrive,
+      spreadsheet: fileIds.sheet,
+      sheet: notes,
+    });
+    expect(read).toMatchObject({
+      sheet: register,
+      range: `'${register}'!A1:D3`,
+      rows: sheetRows[register]?.slice(0, 2),
+      more: true,
+    });
+    expect(
+      requests().flatMap(({ query }) =>
+        query.ranges === undefined ? [] : [query.ranges]
+      )
+    ).toStrictEqual([`'${register}'!A1:D3`, "'Ben''s notes'!1:201"]);
+  });
+
+  it("read nothing of another drive's file, a file that isn't a spreadsheet, or a sheet it doesn't have", async () => {
+    const connection = await connected();
+    const inputs: Input[] = [
+      { spreadsheet: fileIds.foreign },
+      { spreadsheet: fileIds.myDrive },
+      { spreadsheet: fileIds.trashed },
+      { spreadsheet: fileIds.report },
+      { spreadsheet: fileIds.sheet, sheet: "Salaries" },
+    ];
+    const refusals = await Promise.all(
+      inputs.map(
+        async (input) =>
+          await toolError(
+            call(
+              connection,
+              "sheets.read",
+              { drive: financeDrive, ...input },
+              { resource: financeDrive }
+            )
+          )
+      )
+    );
+    expect(refusals).toMatchObject([
+      { error: { code: "not_found" } },
+      { error: { code: "not_found" } },
+      { error: { code: "not_found" } },
+      { error: { code: "not_a_file" } },
+      { error: { code: "not_found" } },
+    ]);
+    // Only the spreadsheet in the drive reached Sheets, and none of its
+    // cells were read.
+    expect(
+      requests()
+        .filter(({ host }) => host === "sheets.googleapis.com")
+        .map(({ path, query }) => ({ path, ranges: query.ranges }))
+    ).toStrictEqual([
+      { path: `/v4/spreadsheets/${fileIds.sheet}`, ranges: undefined },
+    ]);
+  });
+
+  it("refuses cells that aren't A1 notation before anything goes out", async () => {
+    const connection = await connected();
+    const refusals = await Promise.all(
+      ["A1:B2'!Z", "Sheet1!A1", "a1", "A1:B2:C3"].map(
+        async (cells) =>
+          await toolError(
+            call(connection, "sheets.read", {
+              drive: financeDrive,
+              spreadsheet: fileIds.sheet,
+              cells,
+            })
+          )
+      )
+    );
+    expect(new Set(refusals)).toStrictEqual(
+      new Set(["Invalid input: invalid_format at cells"])
+    );
+    expect(google.sent).toStrictEqual([]);
   });
 });
 
