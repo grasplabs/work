@@ -2911,6 +2911,10 @@ msgstr "pedido por el agente, en su chat"
 msgid "Asked the agent to fix a run"
 msgstr "Pidió al agente que arreglara una ejecución"
 
+#: src/activity/audit-words.ts
+msgid "Asked to send, edit or delete a chat app message as the company's bot"
+msgstr "Pidió enviar, editar o eliminar un mensaje de una app de chat como el bot de la empresa"
+
 #: src/routes/_shell.onboarding.organization.$team.tsx
 msgid "Asked which work they do"
 msgstr "Se le pregunta qué trabajo hace"

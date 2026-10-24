@@ -57,6 +57,9 @@ const typeRules: readonly {
   { action: "connection.call", sideEffect: true, type: "action" },
   { action: "connection.call", type: "read" },
   { action: "connection.connect", type: "config" },
+  // Connect sending, editing or deleting a message as the client's own bot
+  // on a chat platform, or refusing a request core's chat adapters sent.
+  { action: "channel.call", type: "action" },
   // A connection whose grant ran out given a new one, by signing in again.
   { action: "connection.reconnected", type: "config" },
   { action: "connection.disconnect", type: "config" },

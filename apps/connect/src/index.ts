@@ -68,6 +68,7 @@ import type { CallOutcome, CallRecord } from "./audit.ts";
 import { carryOut, connectionFor, heldOutcome } from "./call.ts";
 import type { CallDone, CallProgress } from "./call.ts";
 import { catalog, catalogTools } from "./catalog.ts";
+import { channelFetch } from "./channels.ts";
 import { clock, tickClock } from "./clock.ts";
 import {
   finishToolkitFlow,
@@ -394,6 +395,13 @@ export default class Connect
   // oxlint-disable-next-line class-methods-use-this
   async npmMalwareReports(request: unknown): Promise<NpmMalwareReports> {
     return await npmMalwareReports(request);
+  }
+
+  // The chat platforms (src/channels.ts): core's chat adapters send every
+  // request through here, and connect sends it on as the client's own bot.
+
+  async channelFetch(platform: unknown, request: unknown): Promise<Response> {
+    return await channelFetch(this.env, platform, request);
   }
 
   // The catalog (src/catalog.ts): what can be connected.
