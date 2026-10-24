@@ -293,6 +293,7 @@ const coreDb: D1State = {
       "Schedules: their next ticks are deadlines a move keeps (46.2 step 9)."
     ),
     workflow_decisions: exported(`${core}decisions/decisions.ts`),
+    workflow_decision_recipients: exported(`${core}decisions/decisions.ts`),
     workflow_decision_confirmations: transient(
       `${core}decisions/confirmations.ts`,
       "One-use confirmations, minutes long."
