@@ -18,6 +18,7 @@ import type { PackageRegistryApi } from "./packages.ts";
 import { codeSubjectSchema, permissionActionSchema } from "./permissions.ts";
 import type { CodeSubject, WorkContext } from "./permissions.ts";
 import { roleSchema } from "./roles.ts";
+import type { StephenReachApi } from "./stephen-reach.ts";
 import { eventTypeSchema } from "./workflows.ts";
 
 /**
@@ -466,7 +467,7 @@ export const appRequestsListed = 200;
  * needs it (`needs_reauth`) is starting one for its provider and scope:
  * finished with the account it holds, it is that connection again.
  */
-export interface ConnectionsApi {
+export interface ConnectionsApi extends StephenReachApi {
   start: (request: {
     provider: OAuthProvider;
     scope: ConnectionScope;
