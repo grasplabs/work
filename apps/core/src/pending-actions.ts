@@ -31,6 +31,7 @@ import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 import { loadWorkflowBuild } from "./workflow-builds.ts";
+import { runEngine } from "./workflows/engine.ts";
 import {
   callingRunOf,
   requireCallAuthority,
@@ -177,6 +178,17 @@ const requireHeldRunCallAllowed = async (
     binding.target.permissionId !== held.permissionId
   ) {
     throw workflowResourceErrors.create("workflow.call_denied");
+  }
+  // Confirming sends the call now: not while its run is paused, as its
+  // row says or, ahead of the row, as the engine does.
+  const live =
+    run.paused === true ? undefined : await runEngine(env).status(run.runId);
+  if (
+    run.paused === true ||
+    live?.status === "paused" ||
+    live?.status === "waitingForPause"
+  ) {
+    throw workflowResourceErrors.create("workflow.run_paused");
   }
   await requireCallAuthority(env, run, binding);
 };

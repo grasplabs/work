@@ -2215,6 +2215,12 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
   async pause(command?: ControlFence): Promise<PauseOutcome> {
     const { sql } = this.ctx.storage;
     return await this.#command((run, now): CommandDecision<PauseOutcome> => {
+      // A run rolling back can't be paused: a pause then is ignored, and
+      // takes no fence, so it says nothing of which controls reached the
+      // run.
+      if (run.status === "rollingBack") {
+        return { outcome: "ignored" };
+      }
       if (!takesFence(sql, run, command)) {
         return { outcome: "fenced" };
       }

@@ -6,6 +6,7 @@ import {
 } from "@grasp-os/sdk/host";
 import type { BoundWorkflow, WorkflowPin } from "@grasp-os/sdk/host";
 import { versionErrors } from "@grasp-os/shared/app-releases";
+import type { AuditEntry } from "@grasp-os/shared/audit";
 import { expectedMessageOf, isExpectedCode } from "@grasp-os/shared/errors";
 import { appIdSchema, workflowResourceIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
@@ -22,7 +23,7 @@ import type { Authority } from "@grasp-os/shared/permissions";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import { workflowErrors } from "@grasp-os/shared/workflows";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -31,8 +32,9 @@ import { loadRelease } from "./app-releases.ts";
 import type { Release } from "./app-releases.ts";
 import { bindingPinnedSql, startAppBinding } from "./app-workflow-bindings.ts";
 import { usableApp } from "./apps.ts";
-import { auditedBatch, outboxed } from "./audit-outbox.ts";
+import { auditedBatch, outboxed, outboxedWhere } from "./audit-outbox.ts";
 import {
+  workflowResourceRunControlKeys,
   workflowResourceRunControls,
   workflowResources,
   workflowResourceRuns,
@@ -44,13 +46,17 @@ import { requireNotRevoked } from "./release-runner.ts";
 import { screenStartFiles } from "./screen-start-files.ts";
 import { coreStartKey } from "./workflow-start-intents.ts";
 import { appSendHoldsSql, appStartHoldsSql } from "./workflow-starts.ts";
+import { runEngine } from "./workflows/engine.ts";
 import {
   applyCancel,
+  applyResourceControl,
   cancelRepairAfterMs,
   resultOf,
+  runEntry,
   runOf,
+  unended,
 } from "./workflows/resource-runs.ts";
-import type { RunRow } from "./workflows/resource-runs.ts";
+import type { ResourceControlRow, RunRow } from "./workflows/resource-runs.ts";
 import { tellQueryFollowers } from "./workflows/run-changes.ts";
 import { admitRunEvent, unlessAccepted } from "./workflows/run-events.ts";
 import type { AdmittedEvent } from "./workflows/run-events.ts";
@@ -146,13 +152,29 @@ import type { AdmittedEvent } from "./workflows/run-events.ts";
 //   is admitted again, as the event the restart forgot. A send
 //   resumes no paused run (the event waits for the run's resume), and
 //   answers no decision, which only `decide` does.
-// - Controls this platform can't serialize yet: an independent run has no
-//   paused state of its own (the engine's pause shows as running), so
-//   pause and resume are refused (`workflow.control_refused`) and offered
-//   to nobody; cancel is the one control, one receipt per run whatever key
-//   asks for it, settled once (`superseded` when the run ended otherwise
-//   first), and applied again by the repair when its stop failed
-//   (resource-runs.ts, `repairResourceTerminations`).
+// - Controls that undo one another: a pause or resume delivered late
+//   undoing a newer control, or one outliving a cancel. Each admitted
+//   control takes the run's next control generation in the statement that
+//   writes its receipt, and goes to the engine with it, which ignores one
+//   older than the newest it took (engine.ts); a receipt settles from the
+//   generation the engine says it took, never from a status alone
+//   (resource-runs.ts, `settleResourceControls`). One pause or resume is
+//   unresolved at a time: the same kind asked again, under any key, joins
+//   it, its key kept with the receipt it joined, so a retry under it is
+//   answered that receipt again, never decided anew to undo a control
+//   admitted since (`workflow_resource_run_control_keys`); the other, or either while a cancel is asked, is a conflict
+//   (`workflow.control_conflict`). A cancel has priority: one per run
+//   whatever key asks for it, it takes the next generation, so a pause or
+//   resume admitted before it can no longer reach the engine, and
+//   terminate is final there. A
+//   request the run is already past (pausing a paused run) is applied at
+//   once, as the engine has it, not the row, which may lag behind it.
+//   Every receipt is applied again by the repair while it stays admitted
+//   (`repairResourceTerminations`), and settled once, by the run's end at
+//   the latest.
+// - Controls while the run rolls back: none is offered or admitted while
+//   the engine says the run is rolling back (spec 10.7.3: during a
+//   compensation nothing may be paused, resumed or cancelled from an App).
 
 /** A workflow reference, as the SDK sends it. */
 const referenceSchema = z.strictObject({
@@ -473,63 +495,61 @@ const seenRun = async (
 
 /** Whether a run in `status` has ended. */
 const isEnded = (status: RunRow["status"]): boolean =>
-  status !== "starting" && status !== "running";
-
-/** Whether a cancel was asked of run `runId`. */
-const cancelAsked = async (env: Env, runId: string): Promise<boolean> =>
-  (await drizzle(env.DB)
-    .select({ id: workflowResourceRunControls.id })
-    .from(workflowResourceRunControls)
-    .where(eq(workflowResourceRunControls.runId, runId))
-    .get()) !== undefined;
+  !unended.includes(status);
 
 /**
- * Where a run is in its lifecycle, each later than the one before along
- * every path a run takes: queued, then running or a cancel asked while
- * queued; running, then a cancel asked; ended last. A cancel asked is a
- * stage of its own wherever it is asked, so the snapshot it changes is a
- * revision of its own.
+ * Run `row` as it is now, and the control a screen sees applying on it:
+ * its cancel if one is asked, which has priority, otherwise the pause or
+ * resume unresolved; none once it has ended. Read in one batch, so both
+ * are of one moment, and so of the revision the row says.
  */
-const stages = {
-  queued: 1,
-  queuedCancelling: 2,
-  running: 3,
-  runningCancelling: 4,
-  ended: 5,
-} as const;
-
-/** How many stages a policy generation holds (`revisionOf`). */
-const stagesPerGeneration = 5;
-
-/**
- * The revision of a run at `stage` of its lifecycle under its workflow's
- * policy generation `generation`, which every grant and revocation on the
- * workflow moves on (workflow-resources.ts, `nextGeneration`): the App's
- * `start` grant among them. Both only move forward, and a generation
- * moved on is later than any stage of the one before, so the revision
- * moves forward with either: what the person may do with the run (an App
- * grant revoked or given again) is a revision of its own, never a change
- * under the same one. Everything else a snapshot holds is the run's, or
- * the gate's to keep current (the person's role, the build's trust).
- */
-const revisionOf = (
-  generation: number,
-  stage: (typeof stages)[keyof typeof stages]
-): number => generation * stagesPerGeneration + stage;
-
-/** Run `row`'s stage, a cancel asked of it or not. */
-const stageOf = (
-  row: RunRow,
-  cancelling: boolean
-): (typeof stages)[keyof typeof stages] => {
-  if (isEnded(row.status)) {
-    return stages.ended;
+const runAndPending = async (
+  env: Env,
+  row: RunRow
+): Promise<[RunRow, ResourceControlRow["kind"] | undefined]> => {
+  const db = drizzle(env.DB);
+  const [rows, admitted] = await db.batch([
+    db
+      .select()
+      .from(workflowResourceRuns)
+      .where(eq(workflowResourceRuns.id, row.id)),
+    db
+      .select({ kind: workflowResourceRunControls.kind })
+      .from(workflowResourceRunControls)
+      .where(
+        and(
+          eq(workflowResourceRunControls.runId, row.id),
+          eq(workflowResourceRunControls.state, "admitted")
+        )
+      ),
+  ]);
+  const now = rows[0] ?? row;
+  if (isEnded(now.status)) {
+    return [now, undefined];
   }
-  if (row.status === "starting") {
-    return cancelling ? stages.queuedCancelling : stages.queued;
-  }
-  return cancelling ? stages.runningCancelling : stages.running;
+  const kinds = admitted.map(({ kind }) => kind);
+  return [
+    now,
+    kinds.includes("cancel")
+      ? "cancel"
+      : kinds.find((kind) => kind !== "cancel"),
+  ];
 };
+
+/**
+ * The revision of a run's snapshot: the run's own (`summary_revision`,
+ * moved on by every write that changes what its snapshot shows, in that
+ * write) and its workflow's policy generation, which every grant and
+ * revocation on the workflow moves on (workflow-resources.ts,
+ * `nextGeneration`): the App's `start` grant among them. Both only move
+ * forward, so their sum does with either: what the person may do with the
+ * run (an App grant revoked or given again) is a revision of its own,
+ * never a change under the same one. Everything else a snapshot holds is
+ * the gate's to keep current (the person's role, the build's trust). One
+ * more, so the first is 1.
+ */
+const revisionOf = (generation: number, row: RunRow): number =>
+  generation + row.summaryRevision + 1;
 
 /** Workflow `id`'s policy generation now. */
 const generationOf = async (env: Env, id: string): Promise<number> => {
@@ -545,6 +565,7 @@ const generationOf = async (env: Env, id: string): Promise<number> => {
 const statusOf = {
   starting: "queued",
   running: "running",
+  paused: "paused",
   completed: "completed",
   failed: "failed",
   cancelled: "cancelled",
@@ -714,15 +735,13 @@ const runSnapshot = async (
   // under the one before it is never numbered as one of the newer's, and
   // the read again it causes is a revision of its own.
   const generation = await generationOf(env, pin.workflowId);
-  const { row, originAppVersion } = await seenRun(
-    env,
-    asking,
-    resolved.alias,
-    pin,
-    runId
-  );
+  const seen = await seenRun(env, asking, resolved.alias, pin, runId);
+  const { originAppVersion } = seen;
+  // The run and the control it has applying, read together: one moment of
+  // it, under the revision its row says (`summary_revision`, which every
+  // write that changes either moves on in that write).
+  const [row, pending] = await runAndPending(env, seen.row);
   const ended = isEnded(row.status);
-  const cancelling = !ended && (await cancelAsked(env, row.id));
   const mayStart = await holds(env, mayStartSql(asking, resolved.alias, pin));
   const status = statusOf[row.status];
   const contract = await startedContract(
@@ -757,18 +776,19 @@ const runSnapshot = async (
     finishedAt: row.endedAt === null ? null : row.endedAt.getTime(),
     waits: [],
     control: {
-      canPause: false,
-      canResume: false,
-      canCancel: !ended && !cancelling && mayStart,
-      pendingControl: cancelling ? { kind: "cancel", stage: "applying" } : null,
+      canPause:
+        mayStart &&
+        pending === undefined &&
+        (row.status === "starting" || row.status === "running"),
+      canResume: mayStart && pending === undefined && row.status === "paused",
+      canCancel: !ended && pending !== "cancel" && mayStart,
+      pendingControl:
+        pending === undefined ? null : { kind: pending, stage: "applying" },
     },
     ...(output === undefined ? {} : { output }),
     ...(row.status === "failed" ? { error: failureOf(result.error) } : {}),
   };
-  return {
-    value,
-    revision: revisionOf(generation, stageOf(row, cancelling)),
-  };
+  return { value, revision: revisionOf(generation, row) };
 };
 
 /** The start `command` asks for, admitted: its run's handle. */
@@ -809,45 +829,448 @@ const started = async (
   };
 };
 
-/** Run `runId`'s cancel receipt, if one was asked for. */
-const cancelOf = async (env: Env, runId: string) =>
+/** Run `runId`'s control receipts, settled or not. */
+const receiptsOf = async (
+  env: Env,
+  runId: string
+): Promise<ResourceControlRow[]> =>
   await drizzle(env.DB)
     .select()
     .from(workflowResourceRunControls)
-    .where(
-      and(
-        eq(workflowResourceRunControls.runId, runId),
-        eq(workflowResourceRunControls.kind, "cancel")
-      )
-    )
-    .get();
+    .where(eq(workflowResourceRunControls.runId, runId));
+
+/** A key a pause or resume of a run was asked under, and its receipt. */
+type ControlKey = typeof workflowResourceRunControlKeys.$inferSelect;
+
+/** The keys run `runId`'s pauses and resumes were asked under. */
+const keysOf = async (env: Env, runId: string): Promise<ControlKey[]> =>
+  await drizzle(env.DB)
+    .select()
+    .from(workflowResourceRunControlKeys)
+    .where(eq(workflowResourceRunControlKeys.runId, runId));
 
 /**
- * A cancel receipt of run `row`, as a screen is answered it: admitted,
- * under the revision of the run cancelling where it is now (queued or
- * running); settled, its end's.
+ * The receipt a request for `kind` under `key` was answered before, if
+ * any: a cancel's, whatever its key; a pause's or resume's, its own or the
+ * one it joined, as its key has it.
  */
-const receiptAnswer = async (
-  env: Env,
-  row: RunRow,
-  state: "admitted" | "applied" | "superseded"
-): Promise<Json> => {
-  const generation = await generationOf(env, row.workflowResourceId);
-  const now = state === "admitted" ? await runOf(env, row.id) : undefined;
-  return {
-    kind: "cancel",
-    state,
-    revision: revisionOf(
-      generation,
-      state === "admitted" ? stageOf(now ?? row, true) : stages.ended
-    ),
-  };
+const answeredBefore = (
+  receipts: readonly ResourceControlRow[],
+  keys: readonly ControlKey[],
+  kind: ResourceControlRow["kind"],
+  key: string
+): ResourceControlRow | undefined => {
+  if (kind === "cancel") {
+    return receipts.find((receipt) => receipt.kind === "cancel");
+  }
+  const keyed = keys.find((each) => each.kind === kind && each.key === key);
+  return keyed === undefined
+    ? receipts.find((receipt) => receipt.kind === kind && receipt.key === key)
+    : receipts.find(({ id }) => id === keyed.receiptId);
 };
 
 /**
- * The control `command` asks of a run, admitted: its receipt. Only a
- * cancel, one per run whatever key asks for it; pause and resume can't be
- * serialized with it for an independent run yet (see the header).
+ * Keeps `key` of a pause or resume that joined `receipt`, unresolved, of
+ * run `runId`, and answers the receipt the key has: `receipt`, or the one
+ * a request under the same key was given first, by the key's uniqueness.
+ */
+const joinKey = async (
+  env: Env,
+  runId: string,
+  kind: "pause" | "resume",
+  key: string,
+  receipt: ResourceControlRow
+): Promise<ResourceControlRow> => {
+  try {
+    await drizzle(env.DB)
+      .insert(workflowResourceRunControlKeys)
+      .values({ runId, kind, key, receiptId: receipt.id });
+  } catch (error) {
+    if (!isUniqueViolation(error)) {
+      throw error;
+    }
+  }
+  const [receipts, keys] = await Promise.all([
+    receiptsOf(env, runId),
+    keysOf(env, runId),
+  ]);
+  return answeredBefore(receipts, keys, kind, key) ?? receipt;
+};
+
+/**
+ * A receipt of run `runId`, as a screen is answered it: its kind and
+ * state, under the revision of the run's snapshot now, which shows it
+ * (`summary_revision` moves on as a receipt is admitted or settled).
+ */
+const receiptAnswer = async (
+  env: Env,
+  runId: string,
+  workflowId: string,
+  receipt: Pick<ResourceControlRow, "kind" | "state">
+): Promise<Json> => {
+  const generation = await generationOf(env, workflowId);
+  const row = await runOf(env, runId);
+  if (row === undefined) {
+    throw workflowResourceErrors.create("workflow.run_unavailable");
+  }
+  return {
+    kind: receipt.kind,
+    state: receipt.state,
+    revision: revisionOf(generation, row),
+  };
+};
+
+/** Where the engine has a run as its controls are decided. */
+type Live = Awaited<ReturnType<ReturnType<typeof runEngine>["status"]>>;
+
+/** Engine statuses of a run that has ended. */
+const endedLive = new Set(["complete", "errored", "terminated"]);
+
+/** What a screen's request for a control of a run comes to. */
+type Admission =
+  | { type: "admit" }
+  | { type: "done" }
+  | { type: "answer"; receipt: ResourceControlRow }
+  | { type: "join"; receipt: ResourceControlRow }
+  | {
+      type: "refused";
+      code:
+        | "workflow.control_conflict"
+        | "workflow.control_refused"
+        | "workflow.control_rolling_back";
+    };
+
+/**
+ * What a request for `kind` of run `row` under `key` comes to, with the
+ * run's receipts and the keys they were asked under, and where the engine
+ * has it (`live`; nothing when it has no record yet, or couldn't say for a
+ * cancel). See the header.
+ */
+const admissionOf = (
+  row: RunRow,
+  receipts: readonly ResourceControlRow[],
+  keys: readonly ControlKey[],
+  kind: ResourceControlRow["kind"],
+  key: string,
+  live: Live
+): Admission => {
+  // The same request again (a cancel under any key), settled or not: what
+  // it was answered first, the receipt it joined included.
+  const same = answeredBefore(receipts, keys, kind, key);
+  if (same !== undefined) {
+    return { type: "answer", receipt: same };
+  }
+  const unresolved = receipts.filter(({ state }) => state === "admitted");
+  const joined = unresolved.find((receipt) => receipt.kind === kind);
+  if (joined !== undefined) {
+    return { type: "join", receipt: joined };
+  }
+  if (live?.status === "rollingBack") {
+    return { type: "refused", code: "workflow.control_rolling_back" };
+  }
+  if (kind === "cancel") {
+    if (!isEnded(row.status)) {
+      return { type: "admit" };
+    }
+    // Nothing to stop: a cancelled run's cancel is done; any other end
+    // can't be undone.
+    return row.status === "cancelled"
+      ? { type: "done" }
+      : { type: "refused", code: "workflow.control_refused" };
+  }
+  if (
+    isEnded(row.status) ||
+    (live !== undefined && endedLive.has(live.status))
+  ) {
+    return { type: "refused", code: "workflow.control_refused" };
+  }
+  if (unresolved.length > 0) {
+    // A cancel asked, or the other of pause and resume unresolved.
+    return { type: "refused", code: "workflow.control_conflict" };
+  }
+  const paused =
+    live?.status === "paused" || live?.status === "waitingForPause";
+  const already = kind === "pause" ? live?.status === "paused" : !paused;
+  return already ? { type: "done" } : { type: "admit" };
+};
+
+/** What a screen's pause or resume is audited as. */
+const requestedAction = {
+  pause: "workflow.run.pause_requested",
+  resume: "workflow.run.resume_requested",
+} as const;
+
+/**
+ * Writes the receipt for `kind` of run `row` under `key`, only while the
+ * person may still start the workflow through the binding and nobody
+ * admitted a control of the run since `row` was read, read in the
+ * statements that write it: admitted under the run's next control
+ * generation, the snapshot moving on with it; or, for a request the run is
+ * already past (`done`), applied at once under the current one. A cancel
+ * takes the next generation too, so a pause or resume admitted before it
+ * is superseded unsent (resource-runs.ts, `applyResourceControl`), or by
+ * the run's end at the latest. A pause or resume is audited as asked, under the App's screen, naming the
+ * person (a cancel's stop is, as it is first asked: `applyCancel`).
+ * Whether it was written.
+ */
+const writeReceipt = async (
+  env: Env,
+  asking: Asking,
+  may: SQL,
+  row: RunRow,
+  kind: ResourceControlRow["kind"],
+  key: string,
+  done: boolean
+): Promise<string | undefined> => {
+  const db = drizzle(env.DB);
+  const id = crypto.randomUUID();
+  const now = Date.now();
+  const generation = done ? row.controlGeneration : row.controlGeneration + 1;
+  // Every column by its name, in the table's order: drizzle refuses a
+  // select that doesn't match the table, so a column the table gains (or
+  // one moved) fails here, never takes a value meant for another.
+  const insert = (condition: SQL) =>
+    db.insert(workflowResourceRunControls).select(
+      db
+        .select({
+          id: sql<string>`${id}`.as("id"),
+          runId: workflowResourceRuns.id,
+          appId: sql<string>`${asking.app}`.as("app_id"),
+          principalId: sql<string>`${asking.by.userId}`.as("principal_id"),
+          key: sql<string>`${key}`.as("key"),
+          kind: sql<ResourceControlRow["kind"]>`${kind}`.as("kind"),
+          state: sql<
+            ResourceControlRow["state"]
+          >`${done ? "applied" : "admitted"}`.as("state"),
+          createdAt: sql<Date>`${now}`.as("created_at"),
+          settledAt: sql<Date | null>`${done ? now : null}`.as("settled_at"),
+          attempts: sql<number>`0`.as("attempts"),
+          nextAt: sql<Date>`${now + cancelRepairAfterMs}`.as("next_at"),
+          stopRequestedAt: sql<Date | null>`NULL`.as("stop_requested_at"),
+          generation: sql<number>`${generation}`.as("generation"),
+        })
+        .from(workflowResourceRuns)
+        .where(and(eq(workflowResourceRuns.id, row.id), condition))
+    );
+  const written = sql`EXISTS (SELECT 1 FROM ${workflowResourceRunControls} WHERE ${workflowResourceRunControls.id} = ${id})`;
+  // A pause's or resume's key, with its receipt, in the same batch: a key
+  // another request took first (one that joined) fails the whole write.
+  const keyed =
+    kind === "cancel"
+      ? []
+      : [
+          db.insert(workflowResourceRunControlKeys).select(
+            db
+              .select({
+                runId: workflowResourceRunControls.runId,
+                kind: sql<"pause" | "resume">`${kind}`.as("kind"),
+                key: sql<string>`${key}`.as("key"),
+                receiptId: workflowResourceRunControls.id,
+              })
+              .from(workflowResourceRunControls)
+              .where(eq(workflowResourceRunControls.id, id))
+          ),
+        ];
+  const entry: AuditEntry | undefined =
+    kind === "cancel"
+      ? undefined
+      : {
+          ...runEntry(row, requestedAction[kind]),
+          actor: { type: "app", appId: asking.app, part: "screen" },
+          detail: {
+            ...runEntry(row, requestedAction[kind]).detail,
+            onBehalfOf: asking.by.userId,
+            control: id,
+            // The run already where it asked: applied as it was written.
+            ...(done ? { already: true } : {}),
+          },
+        };
+  const unchanged = and(
+    eq(workflowResourceRuns.id, row.id),
+    eq(workflowResourceRuns.controlGeneration, row.controlGeneration),
+    inArray(workflowResourceRuns.status, unended)
+  );
+  try {
+    await (done
+      ? auditedBatch(env, db, [
+          insert(
+            sql`${may} AND EXISTS (SELECT 1 FROM ${workflowResourceRuns} WHERE ${and(eq(workflowResourceRuns.id, row.id), eq(workflowResourceRuns.controlGeneration, row.controlGeneration))})`
+          ),
+          ...keyed,
+          ...(entry === undefined ? [] : [outboxedWhere(db, entry, written)]),
+        ])
+      : auditedBatch(env, db, [
+          db
+            .update(workflowResourceRuns)
+            .set({
+              controlGeneration: generation,
+              summaryRevision: sql`${workflowResourceRuns.summaryRevision} + 1`,
+            })
+            .where(and(unchanged, may)),
+          insert(sql`changes() > 0`),
+          ...keyed,
+          ...(entry === undefined ? [] : [outboxedWhere(db, entry, written)]),
+        ]));
+  } catch (error) {
+    // A twin written first (a cancel under any key, a pause or resume
+    // under this one, its own or joined to another): answered by the caller, its audit with it unwritten.
+    // The unique indexes are the guard, as the generation is none for a
+    // request the run is already past.
+    if (!isUniqueViolation(error)) {
+      throw error;
+    }
+  }
+  const found = await db
+    .select({ id: workflowResourceRunControls.id })
+    .from(workflowResourceRunControls)
+    .where(eq(workflowResourceRunControls.id, id))
+    .get();
+  return found?.id;
+};
+
+/** What deciding a control comes to: a receipt, done at once, or refused. */
+type Decided =
+  | { type: "receipt"; receipt: ResourceControlRow }
+  | { type: "applied" }
+  | {
+      type: "refused";
+      code:
+        | "workflow.control_conflict"
+        | "workflow.control_refused"
+        | "workflow.control_rolling_back"
+        | "workflow.start_denied";
+    };
+
+/**
+ * Decides `command` of run `row` as it is (see the header): the receipt
+ * it is answered, written now or found; a cancel of a cancelled run done;
+ * or why it is refused.
+ */
+const decide = async (
+  env: Env,
+  asking: Asking,
+  may: SQL,
+  row: RunRow,
+  command: Extract<WorkflowCommand, { command: "pause" | "resume" | "cancel" }>
+): Promise<Decided> => {
+  const kind = command.command;
+  // The receipts before the engine, both after `row`: a control admitted
+  // since `row` moved the run's generation on, so the write below fails;
+  // one admitted before it is either unresolved here (joined or a
+  // conflict) or settled, which only happens once the engine took it, so
+  // the status read after shows it. Read the other way round, a control
+  // settling between the two reads would make the run look already past
+  // a request it isn't, and that request be applied at once unsent.
+  const [receipts, keys] = await Promise.all([
+    receiptsOf(env, row.id),
+    keysOf(env, row.id),
+  ]);
+  let live: Live;
+  if (!isEnded(row.status)) {
+    try {
+      live = await runEngine(env).status(row.id);
+    } catch (error) {
+      // A cancel goes ahead without the engine's word, as it always has;
+      // a pause or resume needs it to know what the run is past.
+      if (kind !== "cancel") {
+        throw error;
+      }
+    }
+  }
+  const admission = admissionOf(
+    row,
+    receipts,
+    keys,
+    kind,
+    command.idempotencyKey,
+    live
+  );
+  if (admission.type === "refused") {
+    return admission;
+  }
+  if (admission.type === "answer") {
+    return { type: "receipt", receipt: admission.receipt };
+  }
+  if (admission.type === "join" && kind !== "cancel") {
+    return {
+      type: "receipt",
+      receipt: await joinKey(
+        env,
+        row.id,
+        kind,
+        command.idempotencyKey,
+        admission.receipt
+      ),
+    };
+  }
+  if (admission.type === "done" && kind === "cancel") {
+    return { type: "applied" };
+  }
+  const written = await writeReceipt(
+    env,
+    asking,
+    may,
+    row,
+    kind,
+    command.idempotencyKey,
+    admission.type === "done"
+  );
+  const [after, afterKeys] = await Promise.all([
+    receiptsOf(env, row.id),
+    keysOf(env, row.id),
+  ]);
+  // Its own; or a twin written first, under this key (its own or joined
+  // to another) or, a cancel's, another; or one of its kind admitted
+  // meanwhile under another key, which it joins, keeping its key.
+  let receipt =
+    after.find(({ id }) => id === written) ??
+    answeredBefore(after, afterKeys, kind, command.idempotencyKey);
+  const unresolved = after.find(
+    (each) => each.kind === kind && each.state === "admitted"
+  );
+  if (receipt === undefined && unresolved !== undefined) {
+    receipt =
+      kind === "cancel"
+        ? unresolved
+        : await joinKey(env, row.id, kind, command.idempotencyKey, unresolved);
+  }
+  if (receipt === undefined) {
+    // Another control admitted meanwhile, or the person may no longer.
+    const stillMay = await holds(env, may);
+    return {
+      type: "refused",
+      code: stillMay ? "workflow.control_conflict" : "workflow.start_denied",
+    };
+  }
+  if (receipt.id === written) {
+    await tellQueryFollowers(env, row.id);
+  }
+  return { type: "receipt", receipt };
+};
+
+/** Audits a screen's control of run `row` refused for `code`. */
+const auditRefused = async (
+  env: Env,
+  asking: Asking,
+  row: RunRow,
+  kind: ResourceControlRow["kind"],
+  code: string
+): Promise<void> => {
+  const db = drizzle(env.DB);
+  const entry = runEntry(row, "workflow.run.control_refused");
+  await auditedBatch(env, db, [
+    outboxed(db, {
+      ...entry,
+      actor: { type: "app", appId: asking.app, part: "screen" },
+      detail: { ...entry.detail, kind, code, onBehalfOf: asking.by.userId },
+    }),
+  ]);
+};
+
+/**
+ * The control `command` asks of a run, decided (see the header): its
+ * receipt, admitted and applied at once, or answered again; a refusal
+ * throws.
  */
 const controlled = async (
   env: Env,
@@ -863,60 +1286,55 @@ const controlled = async (
     pin,
     command.runId
   );
-  if (command.command !== "cancel") {
-    throw workflowErrors.create("workflow.control_refused");
-  }
-  let receipt = await cancelOf(env, row.id);
-  if (receipt === undefined) {
-    if (isEnded(row.status)) {
-      // Nothing to stop: a cancelled run's cancel is done; any other end
-      // can't be undone.
-      if (row.status !== "cancelled") {
-        throw workflowErrors.create("workflow.control_refused");
-      }
-      return await receiptAnswer(env, row, "applied");
+  const kind = command.command;
+  const may = mayStartSql(asking, resolved.alias, pin);
+  const answer = async (receipt: Pick<ResourceControlRow, "kind" | "state">) =>
+    await receiptAnswer(env, row.id, row.workflowResourceId, receipt);
+  let receipt: ResourceControlRow | undefined;
+  // A cancel that lost its write to a control admitted at once is decided
+  // again, once, against the run as it is then: a cancel always wins.
+  for (let attempt = 0; receipt === undefined; attempt += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- once more at most
+    const current = attempt === 0 ? row : ((await runOf(env, row.id)) ?? row);
+    // oxlint-disable-next-line no-await-in-loop -- once more at most
+    const decided = await decide(env, asking, may, current, command);
+    if (decided.type === "applied") {
+      // oxlint-disable-next-line no-await-in-loop -- done: the last turn
+      return await answer({ kind, state: "applied" });
     }
-    const id = crypto.randomUUID();
-    const now = Date.now();
-    try {
-      // Written only while the person may still start the workflow
-      // through the binding, read in this statement; a twin sent at
-      // once, under whatever key, writes nothing.
-      await drizzle(env.DB).run(sql`INSERT INTO ${workflowResourceRunControls}
-        (id, run_id, app_id, principal_id, key, kind, state, created_at,
-          next_at)
-        SELECT ${id}, ${row.id}, ${asking.app}, ${asking.by.userId},
-          ${command.idempotencyKey}, 'cancel', 'admitted', ${now},
-          ${now + cancelRepairAfterMs}
-        WHERE ${mayStartSql(asking, resolved.alias, pin)}`);
-    } catch (error) {
-      // The twin's receipt, written first: answered below.
-      if (!isUniqueViolation(error)) {
-        throw error;
-      }
-    }
-    receipt = await cancelOf(env, row.id);
-    if (receipt === undefined) {
-      throw workflowResourceErrors.create("workflow.start_denied");
-    }
-    if (receipt.id === id) {
-      await tellQueryFollowers(env, row.id);
+    if (decided.type === "receipt") {
+      ({ receipt } = decided);
+    } else if (
+      kind !== "cancel" ||
+      attempt > 0 ||
+      decided.code !== "workflow.control_conflict"
+    ) {
+      // oxlint-disable-next-line no-await-in-loop -- refused: the last turn
+      await auditRefused(env, asking, current, kind, decided.code);
+      throw decided.code === "workflow.start_denied"
+        ? workflowResourceErrors.create(decided.code)
+        : workflowErrors.create(decided.code);
     }
   }
   if (receipt.state === "admitted") {
     try {
-      await applyCancel(env, receipt, row.id);
-      receipt = (await cancelOf(env, row.id)) ?? receipt;
+      await (receipt.kind === "cancel"
+        ? applyCancel(env, receipt, row.id)
+        : applyResourceControl(env, receipt));
+      const settled = await receiptsOf(env, row.id);
+      const { id: asked } = receipt;
+      receipt = settled.find(({ id }) => id === asked) ?? receipt;
     } catch (error) {
       // Admitted all the same, which is what the screen is answered: the
       // repair applies it again (resource-runs.ts, `repairAdmittedCancels`).
-      log.error("workflow.resource_run_cancel_failed", {
+      log.error("workflow.resource_run_control_failed", {
         runId: row.id,
+        kind: receipt.kind,
         ...errorFields(error),
       });
     }
   }
-  return await receiptAnswer(env, row, receipt.state);
+  return await answer(receipt);
 };
 
 /**

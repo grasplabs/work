@@ -9273,6 +9273,11 @@ msgctxt "status of a policy rule"
 msgid "Paused"
 msgstr "En pause"
 
+#: src/workflows/resource-runs.tsx
+msgctxt "status of a workflow run"
+msgid "Paused"
+msgstr "En pause"
+
 #: src/onboarding/interviews-progress.tsx
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Paused: no link opens and none goes out. The links that are due go out once they run again."
@@ -12448,6 +12453,10 @@ msgstr "L'exécution a échoué."
 #: src/workflows/test-run.tsx
 msgid "The run is going."
 msgstr "L'exécution est en cours."
+
+#: src/workflows/test-run.tsx
+msgid "The run is paused."
+msgstr "L'exécution est en pause."
 
 #: src/workflows/test-run.tsx
 msgid "The run is starting."

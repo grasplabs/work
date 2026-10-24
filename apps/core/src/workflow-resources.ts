@@ -2923,7 +2923,7 @@ const pinningAppsSql = (id: string) => sql`SELECT pinned.id AS id,
 const liveRunsSql = (id: string) => sql`(SELECT COUNT(*)
     FROM workflow_resource_runs AS run
     WHERE run.workflow_resource_id = ${id}
-      AND run.status IN ('starting', 'running'))`;
+      AND run.status IN ('starting', 'running', 'paused'))`;
 
 /**
  * That something still pins a version of `id`, as SQL: the current version

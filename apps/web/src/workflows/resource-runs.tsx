@@ -26,6 +26,7 @@ import { formatDateTime } from "../format.ts";
 const statusLabels: Readonly<Record<WorkflowRunStatus, MessageDescriptor>> = {
   starting: msg({ message: "Starting", context: "status of a workflow run" }),
   running: msg({ message: "Running", context: "status of a workflow run" }),
+  paused: msg({ message: "Paused", context: "status of a workflow run" }),
   completed: msg({ message: "Completed", context: "status of a workflow run" }),
   failed: msg({ message: "Failed", context: "status of a workflow run" }),
   cancelled: msg({ message: "Cancelled", context: "status of a workflow run" }),

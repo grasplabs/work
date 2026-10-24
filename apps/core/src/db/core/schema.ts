@@ -3342,7 +3342,14 @@ export const workflowResourceRuns = sqliteTable(
     buildHash: text("build_hash").notNull(),
     principalId: text("principal_id").notNull(),
     status: text({
-      enum: ["starting", "running", "completed", "failed", "cancelled"],
+      enum: [
+        "starting",
+        "running",
+        "paused",
+        "completed",
+        "failed",
+        "cancelled",
+      ],
     }).notNull(),
     engineSequence: integer("engine_sequence").notNull().default(0),
     createdAt: timestamp("created_at").notNull(),
@@ -3390,6 +3397,18 @@ export const workflowResourceRuns = sqliteTable(
      * later pass while the engine ends it.
      */
     stopRequestedAt: timestamp("stop_requested_at"),
+    /**
+     * The newest control generation a screen's pause, resume or cancel took
+     * (screen-workflows.ts): each admitted one takes the next, and goes to
+     * the engine with it, which ignores one older than the newest it took.
+     */
+    controlGeneration: integer("control_generation").notNull().default(0),
+    /**
+     * Moves on with every write that changes what a screen's snapshot of the
+     * run shows (its status, a control admitted or settled), in the write's
+     * own statement: the snapshot's revision is read from it.
+     */
+    summaryRevision: integer("summary_revision").notNull().default(0),
   },
   (table) => [
     // A run's children that haven't ended, for its end to stop them.
@@ -3591,7 +3610,7 @@ export const workflowResourceRunControls = sqliteTable(
       .references(() => apps.id),
     principalId: text("principal_id").notNull(),
     key: text().notNull(),
-    kind: text({ enum: ["cancel"] }).notNull(),
+    kind: text({ enum: ["pause", "resume", "cancel"] }).notNull(),
     state: text({ enum: ["admitted", "applied", "superseded"] }).notNull(),
     createdAt: timestamp("created_at").notNull(),
     settledAt: timestamp("settled_at"),
@@ -3607,10 +3626,24 @@ export const workflowResourceRunControls = sqliteTable(
      * that stop exactly once, however often it is asked again.
      */
     stopRequestedAt: timestamp("stop_requested_at"),
+    /**
+     * The run's control generation it was admitted under (its run's
+     * `control_generation`), which it goes to the engine with; one applied
+     * at once, the run already where it asked, keeps the run's current one.
+     */
+    generation: integer().notNull().default(0),
   },
   (table) => [
-    uniqueIndex("workflow_resource_run_controls_kind_idx").on(
+    // One cancel per run, whatever key asks for it; pauses and resumes are
+    // as many as the run takes, one unresolved at a time, and one per key:
+    // two overlapping requests under one key write one receipt between
+    // them, even one the run is already past, which takes no generation.
+    uniqueIndex("workflow_resource_run_controls_cancel_idx")
+      .on(table.runId)
+      .where(sql`${table.kind} = 'cancel'`),
+    uniqueIndex("workflow_resource_run_controls_key_idx").on(
       table.runId,
+      table.key,
       table.kind
     ),
     index("workflow_resource_run_controls_run_idx").on(
@@ -3622,6 +3655,29 @@ export const workflowResourceRunControls = sqliteTable(
       table.nextAt
     ),
   ]
+);
+
+/**
+ * The keys a screen's pause or resume of an independent run was asked
+ * under (screen-workflows.ts), each with the receipt it was answered: its
+ * own, or, for one that joined a pause or resume already unresolved, that
+ * one's. One per run, kind and key, so a request sent again under a key
+ * is answered the receipt it was first, never decided anew: a retry of a
+ * request that joined another can't undo a control admitted since.
+ */
+export const workflowResourceRunControlKeys = sqliteTable(
+  "workflow_resource_run_control_keys",
+  {
+    runId: text("run_id")
+      .notNull()
+      .references(() => workflowResourceRuns.id),
+    kind: text({ enum: ["pause", "resume"] }).notNull(),
+    key: text().notNull(),
+    receiptId: text("receipt_id")
+      .notNull()
+      .references(() => workflowResourceRunControls.id),
+  },
+  (table) => [primaryKey({ columns: [table.runId, table.kind, table.key] })]
 );
 
 /**
