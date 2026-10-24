@@ -53,6 +53,7 @@ import {
   pdfAttachmentId,
   pdfBase64,
   personalDrive,
+  replyDraft,
   reportText,
   spoofedId,
   supplierColumns,
@@ -118,6 +119,12 @@ const mailboxInputs: Record<string, Input> = {
   "mail.move": { message: messageId(ceo, 1), destination: "archive" },
   "mail.send": { subject: "Hi", body: "Hi", to: ["a@example.com"] },
   "mail.createDraft": { subject: "Hi", body: "Hi", to: ["a@example.com"] },
+  "mail.createReplyDraft": {
+    message: messageId(ceo, 1),
+    subject: "RE: Hi",
+    body: "Hi",
+    to: ["billing@northwind.example.org"],
+  },
   "calendar.list": {
     start: "2026-09-28T00:00:00Z",
     end: "2026-10-05T00:00:00Z",
@@ -837,6 +844,197 @@ describe("the Microsoft 365 connector's mail tools", () => {
         },
       },
     ]);
+  });
+});
+
+/** The write requests that reached Graph. */
+const writes = () => requests().filter(({ method }) => method !== "GET");
+
+const draftReply = async (
+  connection: Connection,
+  input: Input,
+  idempotencyKey: string
+) =>
+  await call(connection, "mail.createReplyDraft", input, {
+    resource: invoices,
+    idempotencyKey,
+  });
+
+describe("the Microsoft 365 connector's reply drafts", () => {
+  const sender = "billing@northwind.example.org";
+  const reply = {
+    mailbox: invoices,
+    message: messageId(invoices, 1),
+    subject: "RE: Invoice 2026-0041 from Northwind Supplies",
+    body: "Thanks, we'll pay it this week.",
+    to: [sender],
+  };
+  const replyPath = `${mailboxPath}/messages/${encodeURIComponent(messageId(invoices, 1))}`;
+  const made = replyDraft(invoices, 1, reply.subject);
+  const drafted = {
+    mailbox: invoices,
+    inReplyTo: messageId(invoices, 1),
+    id: made.id,
+    conversationId: made.conversationId,
+    webLink: made.webLink,
+  };
+
+  it("draft a reply to a message's sender in its conversation, and never send it", async () => {
+    const connection = await connected();
+    await expect(
+      outputOf(draftReply(connection, reply, "run-8:reply"))
+    ).resolves.toStrictEqual(drafted);
+    // The message replied to is read in the bound mailbox, then the draft
+    // made with the recipients and subject the call holds, the person's
+    // text above the quoted message.
+    expect(requests()).toMatchObject([
+      { method: "GET", path: replyPath },
+      {
+        method: "POST",
+        path: `${replyPath}/createReply`,
+        body: {
+          comment: reply.body,
+          message: {
+            subject: reply.subject,
+            toRecipients: [{ emailAddress: { address: sender } }],
+            ccRecipients: [],
+          },
+        },
+      },
+    ]);
+    // Its only write makes a draft: no call of it can send.
+    expect(
+      manifest.actions["mail.createReplyDraft"]?.routes
+        .filter(({ method }) => method !== "GET")
+        .map(({ path }) => path)
+    ).toStrictEqual(["/v1.0/users/{mailbox}/messages/{message}/createReply"]);
+  });
+
+  it("reply to the message's other recipients only when replying to all, and to no one else", async () => {
+    const connection = await connected();
+    const refusals = await Promise.all(
+      [
+        { ...reply, to: ["someone@elsewhere.example.com"] },
+        { ...reply, to: [sender, invoices] },
+        { ...reply, cc: [invoices] },
+        { ...reply, replyAll: true, cc: ["someone@elsewhere.example.com"] },
+      ].map(
+        async (input, index) =>
+          await toolError(
+            draftReply(connection, input, `run-8:refused-${index}`)
+          )
+      )
+    );
+    expect(refusals).toMatchObject(
+      Array.from({ length: 4 }, () => ({ error: { code: "invalid" } }))
+    );
+    expect(writes()).toStrictEqual([]);
+    // Replying to all, the message's To may be on it, in any case.
+    await outputOf(
+      draftReply(
+        connection,
+        {
+          ...reply,
+          replyAll: true,
+          to: ["Billing@Northwind.example.org"],
+          cc: [invoices],
+        },
+        "run-8:reply-all"
+      )
+    );
+    expect(writes()).toMatchObject([
+      {
+        path: `${replyPath}/createReply`,
+        body: {
+          message: {
+            toRecipients: [
+              { emailAddress: { address: "Billing@Northwind.example.org" } },
+            ],
+            ccRecipients: [{ emailAddress: { address: invoices } }],
+          },
+        },
+      },
+    ]);
+  });
+
+  it("reply to the address a message asks replies to go to, and to all with its Cc", async () => {
+    const connection = await connected();
+    const second = {
+      ...reply,
+      message: messageId(invoices, 2),
+      to: ["accounts@northwind.example.org"],
+    };
+    // Its Cc is someone the message was only copied to: not a reply's.
+    await expect(
+      toolError(
+        draftReply(
+          connection,
+          { ...second, to: ["controller@example.com"] },
+          "run-8:cc-only"
+        )
+      )
+    ).resolves.toMatchObject({ error: { code: "invalid" } });
+    await outputOf(draftReply(connection, second, "run-8:reply-to"));
+    await outputOf(
+      draftReply(
+        connection,
+        { ...second, replyAll: true, cc: ["controller@example.com"] },
+        "run-8:reply-all-cc"
+      )
+    );
+    const secondPath = `${mailboxPath}/messages/${encodeURIComponent(messageId(invoices, 2))}`;
+    expect(writes()).toMatchObject([
+      {
+        path: `${secondPath}/createReply`,
+        body: {
+          message: {
+            toRecipients: [
+              { emailAddress: { address: "accounts@northwind.example.org" } },
+            ],
+            ccRecipients: [],
+          },
+        },
+      },
+      {
+        path: `${secondPath}/createReply`,
+        body: {
+          message: {
+            toRecipients: [
+              { emailAddress: { address: "accounts@northwind.example.org" } },
+            ],
+            ccRecipients: [
+              { emailAddress: { address: "controller@example.com" } },
+            ],
+          },
+        },
+      },
+    ]);
+  });
+
+  it("find a reply draft whose answer was lost, and never make it twice", async () => {
+    const connection = await connected();
+    graph.loseWriteAnswer();
+    await expect(
+      outcome(draftReply(connection, reply, "run-8:reply-lost"))
+    ).resolves.toBe("connect.outcome_unknown");
+    await claimedAgo(connection);
+    const found = await outputOf(
+      draftReply(connection, reply, "run-8:reply-lost")
+    );
+    const repeat = await outputOf(
+      draftReply(connection, reply, "run-8:reply-lost")
+    );
+    // The draft found by its key is the one the lost answer made.
+    expect(found).toMatchObject({
+      mailbox: invoices,
+      inReplyTo: messageId(invoices, 1),
+      id: drafted.id,
+    });
+    expect({
+      repeat,
+      writesDone: graph.writesDone(),
+      writes: writes().length,
+    }).toStrictEqual({ repeat: found, writesDone: 1, writes: 1 });
   });
 });
 

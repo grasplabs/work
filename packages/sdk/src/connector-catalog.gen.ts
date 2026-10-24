@@ -117,6 +117,10 @@ export interface ConnectorCatalog {
       readonly input: { bcc?: Array<string>; body: string; bodyType?: "text" | "html"; cc?: Array<string>; mailbox: string; replyTo?: Array<string>; subject: string; to: Array<string> };
       readonly output: { conversationId: string | null; id: string; mailbox: string; webLink: string | null };
     };
+    readonly createReplyDraft: {
+      readonly input: { body: string; cc?: Array<string>; mailbox: string; message: string; replyAll?: boolean; subject: string; to: Array<string> };
+      readonly output: { conversationId: string | null; id: string; inReplyTo: string; mailbox: string; webLink: string | null };
+    };
     readonly get: {
       readonly input: { bodyType?: "text" | "html"; mailbox: string; message: string };
       readonly output: { message: { attachments: Array<{ contentType: string | null; id: string; isInline: boolean; kind: "file" | "item" | "reference" | "other"; name: string | null; size: number }>; bcc: Array<{ address: string | null; name: string | null }>; body: { content: string; contentType: string } | null; bodyPreview: string | null; cc: Array<{ address: string | null; name: string | null }>; conversationId: string | null; flagStatus: string | null; folderId: string | null; from: { address: string | null; name: string | null } | null; hasAttachments: boolean; id: string; importance: string | null; internetMessageId: string | null; isDraft: boolean; isRead: boolean; mailbox: string; moreAttachments: boolean; receivedAt: string | null; replyTo: Array<{ address: string | null; name: string | null }>; sentAt: string | null; subject: string | null; to: Array<{ address: string | null; name: string | null }>; webLink: string | null } };

@@ -585,7 +585,7 @@ const moveMessage = defineTool({
   },
 });
 
-const recipientsSchema = z.array(z.email().max(256)).max(100);
+export const recipientsSchema = z.array(z.email().max(256)).max(100);
 
 /** A message to send or keep as a draft. */
 const draftInput = z.strictObject({
@@ -668,7 +668,7 @@ const foundMessage = z.object({
  * derives it, the kit checks it), so it can't break out of the filter's
  * string literal.
  */
-const findByEffect = async (
+export const findByEffect = async (
   mailbox: string,
   key: string
 ): Promise<z.infer<typeof foundMessage> | undefined> => {

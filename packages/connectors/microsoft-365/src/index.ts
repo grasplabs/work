@@ -4,6 +4,7 @@ import { calendarTools } from "./calendar.ts";
 import { fileTools } from "./files.ts";
 import { graphHost } from "./graph.ts";
 import { listTools } from "./lists.ts";
+import { mailReplyTools } from "./mail-replies.ts";
 import { mailTools } from "./mail.ts";
 import { workbookTools } from "./workbook.ts";
 
@@ -35,6 +36,7 @@ export default defineConnector({
   hosts: [graphHost],
   tools: [
     ...mailTools,
+    ...mailReplyTools,
     ...calendarTools,
     ...fileTools,
     ...listTools,
