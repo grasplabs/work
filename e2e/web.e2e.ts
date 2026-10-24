@@ -486,10 +486,10 @@ test("says an address no page has, and an App that isn't there, are not found, i
   const nav = page.getByRole("navigation", { name: "Main" });
   await expect(nav.getByRole("link", { name: "Domains" })).toBeVisible();
 
-  // An old link to an App is an engine's now.
+  // An App that isn't there, on its own page.
   await page.goto("/apps/no-such-app");
   await expect(
-    page.getByRole("heading", { name: "Domain not found" })
+    page.getByRole("heading", { name: "App not found" })
   ).toBeVisible();
   await expect(
     page.getByRole("navigation", { name: "Breadcrumb" })

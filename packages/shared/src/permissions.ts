@@ -317,6 +317,10 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   "STATISTICS",
   "STATISTICS_POINT_LIMITS",
   "STATISTICS_READ_LIMITS",
+  // The client's own Teams bot (connect's src/channels.ts).
+  "TEAMS_BOT_ID",
+  "TEAMS_BOT_SECRET",
+  "TEAMS_BOT_TENANT_ID",
   "TOKEN_ENCRYPTION_KEY",
   "TOKEN_ENCRYPTION_KEY_PREVIOUS",
   "WORKFLOW_BETWEEN_STEPS_MS",

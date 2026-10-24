@@ -20,6 +20,17 @@ export const boundedText = async (
   return bytes === undefined ? undefined : new TextDecoder().decode(bytes);
 };
 
+/**
+ * A request's body as bytes, read no further than `max` bytes: undefined
+ * past them, as `boundedText`.
+ */
+export const boundedBytes = async (
+  body: ReadableStream<Uint8Array> | null,
+  max: number,
+  deadlineMs = readDeadlineMs
+): Promise<Uint8Array<ArrayBuffer> | undefined> =>
+  body === null ? new Uint8Array() : await readAtMost(body, max, deadlineMs);
+
 /** `text` as JSON, or undefined when it isn't. */
 export const jsonOf = (text: string): unknown => {
   try {

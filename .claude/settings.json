@@ -1,7 +1,7 @@
 {
   "permissions": {
     "allow": [
-      "mcp__Shipmunk",
+      "mcp__Linear",
       "mcp__github__pull_request_read",
       "mcp__github__add_issue_comment",
       "mcp__github__add_reply_to_pull_request_comment",

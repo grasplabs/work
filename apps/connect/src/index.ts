@@ -69,7 +69,9 @@ import type { CallOutcome, CallRecord } from "./audit.ts";
 import { carryOut, connectionFor, heldOutcome } from "./call.ts";
 import type { CallDone, CallProgress } from "./call.ts";
 import { catalog, catalogTools } from "./catalog.ts";
+import { keptChange } from "./changes.ts";
 import { channelSigningKeys } from "./channel-keys.ts";
+import { channelFetch } from "./channels.ts";
 import { clock, tickClock } from "./clock.ts";
 import {
   finishToolkitFlow,
@@ -405,6 +407,13 @@ export default class Connect
   // oxlint-disable-next-line class-methods-use-this
   async channelSigningKeys(platform: unknown): Promise<ChannelSigningKeys> {
     return await channelSigningKeys(platform);
+  }
+
+  // The chat platforms (src/channels.ts): core's chat adapters send every
+  // request through here, and connect sends it on as the client's own bot.
+
+  async channelFetch(platform: unknown, request: unknown): Promise<Response> {
+    return await channelFetch(this.env, platform, request);
   }
 
   // The catalog (src/catalog.ts): what can be connected.
@@ -756,6 +765,9 @@ export default class Connect
     // doesn't have: a side effect's answer is stored with its events. If
     // that fails, the call happened but went unrecorded: its key is spent,
     // and it is recorded, as far as possible, with an unknown outcome.
+    // What it changed is kept with its answer and events, its hash in them;
+    // preparing it comes after the call went out, so its failure is one of
+    // recording too.
     const record: CallRecord = {
       call: stated,
       claims,
@@ -768,11 +780,11 @@ export default class Connect
       pendingActionId: done.pending?.id ?? held?.id,
     };
     try {
-      await auditCall(
-        this.env,
-        record,
-        done.commit === undefined ? [] : [done.commit]
-      );
+      const kept = await keptChange(this.env, claims, call, done.change);
+      await auditCall(this.env, { ...record, changeHash: kept.hash }, [
+        ...(done.commit === undefined ? [] : [done.commit]),
+        ...kept.writes,
+      ]);
     } catch (error) {
       log.error("audit.record_failed", errorFields(error));
       await done.spend?.().catch((spendError: unknown) => {

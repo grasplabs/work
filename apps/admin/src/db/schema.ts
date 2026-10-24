@@ -333,6 +333,31 @@ export const settings = sqliteTable(
 );
 
 /**
+ * A secret of a client's own that can't be derived, such as its Teams
+ * bot's client secret, minted in the client's own Entra
+ * (src/deploy/sealed-secrets.ts): sealed with a key derived from
+ * `CLIENT_KEY`, which is in Secrets Store and never here, and opened only
+ * to give it to the client's own Worker at deploy. Never read back to
+ * anyone: only `setAt` and `setBy` are ever shown.
+ */
+export const clientSealedSecrets = sqliteTable(
+  "client_sealed_secrets",
+  {
+    clientId: text("client_id")
+      .notNull()
+      .references(() => clients.id),
+    /** The Worker secret it becomes, such as `TEAMS_BOT_SECRET`. */
+    name: text({ enum: ["TEAMS_BOT_SECRET"] }).notNull(),
+    /** AES-256-GCM, bound to the client and the name: `v1.<iv>.<ciphertext>`, base64. */
+    sealed: text().notNull(),
+    /** The staff member who last set it. */
+    setBy: text("set_by").notNull(),
+    setAt: timestamp("set_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.clientId, table.name] })]
+);
+
+/**
  * When each client's core last answered the admin's read of its admin
  * snapshot (src/clients/admin.ts), and why its latest read failed. Never
  * the snapshot or anything in it: the admin holds no client data, so a

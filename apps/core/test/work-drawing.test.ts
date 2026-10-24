@@ -7,6 +7,7 @@ import type {
 } from "@grasp-os/shared/interview-links";
 import type { FactTag } from "@grasp-os/shared/interview-turn";
 import type { Roster, SettleChoice } from "@grasp-os/shared/onboarding";
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
@@ -79,6 +80,12 @@ const team = async () => {
     { processing: true, assessment: true, council: "none" },
     by
   );
+  // The store is shared across tests, so this roster took the last test's
+  // people out, and that set the alarm to draw soon. Taken away, what is
+  // due is drawn only when the test asks.
+  await runInDurableObject(store, async (_instance, state) => {
+    await state.storage.deleteAlarm();
+  });
   return ids;
 };
 

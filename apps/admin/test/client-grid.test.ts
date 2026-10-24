@@ -392,10 +392,19 @@ describe("the client grid", () => {
     });
   });
 
-  it("reads a client's onboarding from its core, signed for, numbers only, and says when its core can't be asked", async () => {
+  it("reads a client's onboarding from its core, signed for, numbers only, says when its core can't be asked, and never follows one that redirects", async () => {
     const release = await importedRelease("feat(core): onboarding on the grid");
     const onboarding = await liveClient(release);
     const older = await liveClient(release);
+    const moved = await liveClient(release);
+    moved.account.onboarding = {
+      stage: "interviews",
+      day: 1,
+      days: 14,
+      known: 2,
+      needs: 0,
+    };
+    moved.account.redirectsTo = "https://elsewhere.example";
     onboarding.account.onboarding = {
       stage: "interviews",
       day: 4,
@@ -410,6 +419,8 @@ describe("the client grid", () => {
     expect({
       onboarding: live[onboarding.clientId]?.onboarding,
       older: live[older.clientId]?.onboarding,
+      moved: live[moved.clientId]?.onboarding,
+      redirected: cloudflare.redirected(),
     }).toStrictEqual({
       onboarding: {
         stage: "interviews",
@@ -419,6 +430,9 @@ describe("the client grid", () => {
         needs: 1,
       },
       older: "unreachable",
+      // Unknown: what answers at the redirect's target isn't its core.
+      moved: null,
+      redirected: [],
     });
   });
 

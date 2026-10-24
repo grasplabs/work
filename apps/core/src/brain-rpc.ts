@@ -357,6 +357,45 @@ const documentTools = (
 };
 
 /**
+ * The brain's tools, one per name as people mean it (`nameKey`), as
+ * `onboardingTeams` merges teams: a document's tool the Playbook has a
+ * record of too is that record, which keeps its id and source (statements
+ * name it by that id), used by the teams of both. Records are never
+ * merged with each other: each is a fact of its own, which statements may
+ * name by its id.
+ */
+const toolsOf = (
+  documents: readonly Tool[],
+  records: readonly Tool[]
+): Tool[] => {
+  const recorded = new Map<string, Tool>();
+  for (const tool of records) {
+    const key = nameKey(tool.name);
+    if (!recorded.has(key)) {
+      recorded.set(key, tool);
+    }
+  }
+  const merged = new Map<string, string[]>();
+  const fromDocuments = documents.filter(({ name, teamIds }) => {
+    const record = recorded.get(nameKey(name));
+    if (record === undefined) {
+      return true;
+    }
+    merged.set(record.id, [...(merged.get(record.id) ?? []), ...teamIds]);
+    return false;
+  });
+  return [
+    ...fromDocuments,
+    ...records.map((tool) => {
+      const teamIds = merged.get(tool.id);
+      return teamIds === undefined
+        ? tool
+        : { ...tool, teamIds: [...new Set([...tool.teamIds, ...teamIds])] };
+    }),
+  ];
+};
+
+/**
  * The onboarding's sources, each with when it came in: the kickoff when
  * its transcript came in, the staff list when it was last saved, the team
  * leads' interviews and the documents shared. The one definition of which
@@ -761,7 +800,10 @@ export const readBrain = async (
     vision: visionOf(facts),
     goals: [],
     teams,
-    tools: [...documentTools(facts, teamsByName(onboarding)), ...records.tools],
+    tools: toolsOf(
+      documentTools(facts, teamsByName(onboarding)),
+      records.tools
+    ),
     sources: [...sources, ...records.sources],
     statements: records.statements,
     candidates: records.candidates,

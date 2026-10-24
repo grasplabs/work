@@ -73,6 +73,39 @@ const createTriggerSchema = z.strictObject({
   config: z.json(),
 });
 
+/**
+ * A system trigger's configuration (spec 15.1: "declared resource/event
+ * type"): the catalog event contract, by its key, and the type of it
+ * whose emitted events start its workflow (workflows/event-delivery.ts),
+ * the event's data its input. Nothing else: no expression, no URL.
+ */
+export const systemTriggerConfigSchema = z.strictObject({
+  event: z.strictObject({
+    contract: z.string().min(1).max(256),
+    type: z.string().min(1).max(256),
+  }),
+});
+
+/**
+ * The event a trigger of `kind` with `config` takes, as its version keeps
+ * it: a system trigger's, checked (`workflow.resource_invalid`); none for
+ * any other kind.
+ */
+const eventOf = (
+  kind: (typeof triggerKinds)[number],
+  config: unknown
+): { eventContract: string | null; eventType: string | null } => {
+  if (kind !== "system") {
+    return { eventContract: null, eventType: null };
+  }
+  const { event } = workflowResourceErrors.parse(
+    "workflow.resource_invalid",
+    systemTriggerConfigSchema,
+    config
+  );
+  return { eventContract: event.contract, eventType: event.type };
+};
+
 /** A trigger, as its registry answers it. */
 export interface TriggerResource {
   id: TriggerId;
@@ -141,6 +174,7 @@ export const createTriggerResource = async (
     createTriggerSchema,
     input
   );
+  const event = eventOf(kind, config);
   const workflow = await requireWorkflowRole(env, by, workflowId, "builder");
   await requirePublished(env, workflow.id, version);
   const id = triggerIdSchema.parse(crypto.randomUUID());
@@ -172,6 +206,7 @@ export const createTriggerResource = async (
       configHash,
       principalBinding: by.userId,
       createdAt: now,
+      ...event,
     }),
     outboxed(
       db,
@@ -313,6 +348,11 @@ export const updateTriggerVersion = async (
         WHERE trigger_id = ${trigger.id} AND version = ${trigger.version})`,
       principalBinding: trigger.principal,
       createdAt: new Date(),
+      // Its configuration stays, as its hash does: only the version moves.
+      eventContract: sql`(SELECT event_contract FROM trigger_resource_versions
+        WHERE trigger_id = ${trigger.id} AND version = ${trigger.version})`,
+      eventType: sql`(SELECT event_type FROM trigger_resource_versions
+        WHERE trigger_id = ${trigger.id} AND version = ${trigger.version})`,
     }),
     db
       .update(triggerResources)
