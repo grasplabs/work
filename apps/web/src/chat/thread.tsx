@@ -239,6 +239,22 @@ const WorkedFor = ({ seconds }: { seconds: number }) => {
   return <AnswerTop>{t`Worked for ${time}`}</AnswerTop>;
 };
 
+/** The quiet row of actions under an answer, with what it cites when it cites any. */
+const ReplyActions = ({
+  cited,
+  children,
+}: {
+  cited?: { chatId: string; messageId: number };
+  children: ReactNode;
+}) =>
+  cited === undefined ? (
+    <MessageActions>{children}</MessageActions>
+  ) : (
+    <AnswerSources chatId={cited.chatId} messageId={cited.messageId}>
+      {children}
+    </AnswerSources>
+  );
+
 /** One response of the agent's, stored or being written. */
 const Reply = ({
   reply,
@@ -249,7 +265,7 @@ const Reply = ({
   top,
   sign,
   onRetry,
-  sources,
+  cited,
 }: {
   reply: ChatPartial & {
     end?: Answer["end"];
@@ -268,8 +284,8 @@ const Reply = ({
   sign?: WorkState;
   /** Asks the last question again, offered under the last answer. */
   onRetry?: () => void;
-  /** The documents a stored answer cites, under it. */
-  sources?: ReactNode;
+  /** A stored answer that cites documents: its chat and message, so its row of actions can open them. */
+  cited?: { chatId: string; messageId: number };
 }) => {
   const { t } = useLingui();
   const answer = reply.text.trim();
@@ -320,19 +336,18 @@ const Reply = ({
             </div>
           ) : null}
         </MessageContent>
-        {sources}
         {sign === undefined ? null : (
           <GraspSign said={reply.text.length} state={sign} />
         )}
         {quiet || (answer === "" && onRetry === undefined) ? null : (
-          <MessageActions>
+          <ReplyActions cited={cited}>
             {answer === "" ? null : <CopyAnswer text={answer} />}
             {onRetry === undefined || reply.end === "failed" ? null : (
               <MessageAction label={t`Ask again`} onClick={onRetry}>
                 <RefreshCcwIcon />
               </MessageAction>
             )}
-          </MessageActions>
+          </ReplyActions>
         )}
       </Message>
     </div>
@@ -474,10 +489,10 @@ export const ChatThread = ({
                         ? doing
                         : undefined
                     }
-                    sources={
-                      message.citations.length === 0 ? undefined : (
-                        <AnswerSources chatId={chatId} messageId={message.id} />
-                      )
+                    cited={
+                      message.citations.length === 0
+                        ? undefined
+                        : { chatId, messageId: message.id }
                     }
                     top={topOf(message.id)}
                     writing={false}

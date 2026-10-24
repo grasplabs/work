@@ -1,5 +1,11 @@
 import type { ChatCitedDocument, ChatProvenance } from "@grasp-os/shared/chat";
 import { Badge } from "@grasp-os/ui/components/badge";
+import { Button } from "@grasp-os/ui/components/button";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@grasp-os/ui/components/collapsible";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";
 import {
@@ -10,16 +16,19 @@ import {
   FileTextIcon,
 } from "lucide-react";
 import { useEffect, useState } from "react";
+import type { ReactNode } from "react";
 
 import { loadFromCore } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
+import { MessageActions } from "./message.tsx";
 
 // What the chat's answers may hold, in the prototype's sources look
 // (grasplabs/prototype `components/ai-elements/sources.tsx`): the
 // collections and connections core says the chat read from, each
 // collection one link away in Knowledge; and under each answer, the
-// documents it cites. Only what core reports: the page never guesses a
-// source.
+// documents it cites, behind "Based on N sources" in the answer's quiet
+// row of actions (`components/chat/citations.tsx` `AnswerSources`). Only
+// what core reports: the page never guesses a source.
 
 /** A source the chat read, as the page names it. */
 export interface SourceName {
@@ -97,19 +106,23 @@ export const ChatSources = ({
 };
 
 /**
- * The documents a stored answer cites, numbered under it in the order it
- * first links to them, each with its path and the start of what it says,
- * and each opening on its collection's page (`?doc=`). Core looks them up
- * as the chat's agent for the person, when the answer shows: a document
- * either can no longer read isn't among them. Nothing shows until core
- * answers, nor when it can't: the answer's own links still open each.
+ * Under a stored answer: its quiet row of actions (`children`), with
+ * "Based on N sources" beside them, which opens the documents it cites,
+ * numbered in the order it first links to them, each with its path and the
+ * start of what it says, and each opening on its collection's page
+ * (`?doc=`). Core looks them up as the chat's agent for the person, when
+ * the answer shows: a document either can no longer read isn't among
+ * them. Until core answers, or when it can't or lists none, the row holds
+ * only the actions: the answer's own links still open each document.
  */
 export const AnswerSources = ({
   chatId,
   messageId,
+  children,
 }: {
   chatId: string;
   messageId: number;
+  children?: ReactNode;
 }) => {
   const { t } = useLingui();
   const core = useCore();
@@ -131,41 +144,61 @@ export const AnswerSources = ({
     };
   }, [core, chatId, messageId]);
   if (cited.length === 0) {
-    return null;
+    return <MessageActions>{children}</MessageActions>;
   }
   return (
-    <ol aria-label={t`Sources`} className="flex flex-col gap-2 text-xs">
-      {cited.map(
-        ({ documentId, collectionId, title, path, snippet }, index) => (
-          <li key={documentId}>
-            <Link
-              className="group flex items-start gap-2"
-              params={{ collection: collectionId }}
-              search={{ doc: documentId }}
-              to="/knowledge/$collection"
-            >
-              <span className="text-muted-foreground w-4 flex-none text-right tabular-nums">
-                {index + 1}
-              </span>
-              <FileTextIcon
-                aria-hidden="true"
-                className="text-muted-foreground mt-px size-3.5 flex-none"
-              />
-              <span className="flex min-w-0 flex-col gap-0.5">
-                <span className="text-primary font-medium group-hover:underline">
-                  {title}
-                </span>
-                <span className="text-muted-foreground truncate">{path}</span>
-                {snippet === "" ? null : (
-                  <span className="text-muted-foreground line-clamp-2">
-                    {snippet}
+    <Collapsible>
+      <MessageActions>
+        {children}
+        <CollapsibleTrigger render={<Button size="sm" variant="ghost" />}>
+          <BookOpenIcon data-icon="inline-start" />
+          <Plural
+            one="Based on # source"
+            other="Based on # sources"
+            value={cited.length}
+          />
+        </CollapsibleTrigger>
+      </MessageActions>
+      <CollapsibleContent>
+        <ol
+          aria-label={t`Sources`}
+          className="flex flex-col gap-2 pt-2 text-xs"
+        >
+          {cited.map(
+            ({ documentId, collectionId, title, path, snippet }, index) => (
+              <li key={documentId}>
+                <Link
+                  className="group flex items-start gap-2"
+                  params={{ collection: collectionId }}
+                  search={{ doc: documentId }}
+                  to="/knowledge/$collection"
+                >
+                  <span className="text-muted-foreground w-4 flex-none text-right tabular-nums">
+                    {index + 1}
                   </span>
-                )}
-              </span>
-            </Link>
-          </li>
-        )
-      )}
-    </ol>
+                  <FileTextIcon
+                    aria-hidden="true"
+                    className="text-muted-foreground mt-px size-3.5 flex-none"
+                  />
+                  <span className="flex min-w-0 flex-col gap-0.5">
+                    <span className="text-primary font-medium group-hover:underline">
+                      {title}
+                    </span>
+                    <span className="text-muted-foreground truncate">
+                      {path}
+                    </span>
+                    {snippet === "" ? null : (
+                      <span className="text-muted-foreground line-clamp-2">
+                        {snippet}
+                      </span>
+                    )}
+                  </span>
+                </Link>
+              </li>
+            )
+          )}
+        </ol>
+      </CollapsibleContent>
+    </Collapsible>
   );
 };
