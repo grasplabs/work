@@ -15,7 +15,8 @@ import { z } from "zod";
 // `/users/{mailbox}` only, never `/me`, so the egress binds every request
 // to the mailbox a call's capability names: a call for one mailbox can't
 // reach another. Files go through `/drives/{drive}`, a OneDrive or a
-// SharePoint document library alike, bound the same way.
+// SharePoint document library alike, bound the same way, and SharePoint
+// lists through `/sites/{site}`.
 //
 // None of the endpoints used echoes request headers into its answer (the
 // token would reach this code if one did): Graph's answers carry its own

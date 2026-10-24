@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "fd41dddf-b5f1-489b-8f84-e588a34c5859",
+  "id": "fab6b3be-cbf7-4da8-a9e1-e90b4f413d31",
   "prevId": "f8e89c0a-45b2-4961-a5a9-495293644bec",
   "tables": {
     "audit_outbox": {
@@ -377,6 +377,13 @@
           "notNull": false,
           "autoincrement": false
         },
+        "granted_scopes": {
+          "name": "granted_scopes",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "updated_at": {
           "name": "updated_at",
           "type": "integer",
@@ -494,13 +501,6 @@
         },
         "account_senders": {
           "name": "account_senders",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "granted_scopes": {
-          "name": "granted_scopes",
           "type": "text",
           "primaryKey": false,
           "notNull": false,

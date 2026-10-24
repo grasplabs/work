@@ -60,6 +60,7 @@ import {
   uncertainFailure,
   withProvenance,
 } from "./policy.ts";
+import { markIfGrantLacks } from "./tokens.ts";
 
 const retryAfterSchema = z.object({
   error: z.object({
@@ -84,6 +85,31 @@ const notPerformed = ({ output }: McpToolResult): Error => {
     "connect.server_unavailable",
     wait === undefined ? undefined : { retryAfterSeconds: wait }
   );
+};
+
+const accessDeniedSchema = z.object({
+  error: z.object({ code: z.literal("access_denied") }),
+});
+
+/**
+ * Whether a native connector's tool says its provider refused it access
+ * (`{ error: { code: "access_denied" } }`, as the connector kit reports a
+ * 401 or 403).
+ */
+const isAccessDenied = (
+  { serverKind }: Connection,
+  { isError, output }: McpToolResult
+): boolean => {
+  if (serverKind !== "native" || !isError) {
+    return false;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(output);
+  } catch {
+    return false;
+  }
+  return accessDeniedSchema.safeParse(parsed).success;
 };
 
 /** Most characters of a tool's error text connect logs. */
@@ -592,6 +618,7 @@ const changeAfterWrite = async (
 
 /** A side effect about to go out under its claimed key. */
 interface Sent {
+  env: Env;
   /** The call's capability ID, for what is logged of it. */
   callId: string;
   connection: Connection;
@@ -611,7 +638,7 @@ interface Sent {
  * outcome is unknown; freed only when the call certainly did nothing.
  */
 const sendClaimed = async (
-  { callId, connection, tool, input, meta, store }: Sent,
+  { env, callId, connection, tool, input, meta, store }: Sent,
   server: McpServer,
   recovering = false
 ): Promise<Omit<CallDone, "sideEffect">> => {
@@ -656,6 +683,19 @@ const sendClaimed = async (
   if (didNothing(connection.serverKind, done)) {
     await (recovering ? store.spend() : store.release());
     throw notPerformed(done);
+  }
+  // ...or the provider refused it access, and the connection's grant lacks
+  // a right its connector asks for now: it is marked for its person to
+  // reconnect, in place, and the call answered as on any connection that
+  // needs it. A native connector's refusal comes before it acts (policy.ts
+  // `uncertainFailure`), so the key is freed, as for a call that did
+  // nothing: the same call goes through once they have reconnected.
+  if (
+    isAccessDenied(connection, done) &&
+    (await markIfGrantLacks(env, connection.id))
+  ) {
+    await (recovering ? store.spend() : store.release());
+    throw connectErrors.create("connect.connection_inactive");
   }
   const answer = answerOf(done);
   return {
@@ -887,6 +927,7 @@ export const carryOut = async (
     held !== undefined
   );
   const sent: Sent = {
+    env,
     callId: claims.jti,
     connection,
     tool,

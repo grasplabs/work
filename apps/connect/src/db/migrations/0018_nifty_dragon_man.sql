@@ -1,1 +1,0 @@
-ALTER TABLE `connections` ADD `granted_scopes` text;

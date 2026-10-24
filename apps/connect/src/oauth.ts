@@ -51,7 +51,7 @@ import {
 import { exchangeCode, revokeToken } from "./oauth-client.ts";
 import type { TokenSet } from "./oauth-client.ts";
 import { dropPendingActions } from "./pending.ts";
-import { grantedRights, rightsFor } from "./provider-rights.ts";
+import { rightsFor } from "./provider-rights.ts";
 import { grantedAsAsked, providerFor } from "./providers.ts";
 import type {
   ApiKeyProviderConfig,
@@ -324,10 +324,7 @@ const isDuplicate = (error: unknown): boolean =>
   error.message.includes("connections");
 
 /** What a connection keeps of its sign-in: tokens or a key, sealed. */
-type Kept = Parameters<typeof firstTokens>[2] & {
-  /** The rights an OAuth grant holds, as its answer listed them. */
-  granted?: string[] | null;
-};
+type Kept = Parameters<typeof firstTokens>[2];
 
 /** What a connection is connected for: its scope, and its tenant if pinned. */
 type Target = Pick<FlowRow, "scope" | "tenant">;
@@ -369,7 +366,6 @@ const storeConnection = async (
       accountEmail: account.email?.toLowerCase() ?? null,
       accountAddresses: addresses?.receives ?? null,
       accountSenders: addresses?.sends ?? null,
-      grantedScopes: tokens.granted ?? null,
       connectedBy: person.userId,
       createdAt: now,
       updatedAt: now,
@@ -436,6 +432,9 @@ const reconnect = async (
             ),
             generation: sql<number>`${row.generation}`.as("generation"),
             refreshUntil: sql<null>`NULL`.as("refresh_until"),
+            grantedScopes: sql<string | null>`${row.grantedScopes}`.as(
+              "granted_scopes"
+            ),
             updatedAt: sql<Date>`${now.getTime()}`.as("updated_at"),
           })
           .from(connections)
@@ -448,9 +447,6 @@ const reconnect = async (
           tenant: tenantOf(flow),
           accountName: account.name,
           accountEmail: account.email?.toLowerCase() ?? null,
-          // The grant it holds now: one reconnected for a class turned on
-          // holds that class's rights (provider-rights.ts).
-          grantedScopes: tokens.granted ?? null,
           // A lookup that failed keeps what was read before.
           ...(addresses === undefined
             ? {}
@@ -625,7 +621,7 @@ const keepTokens = async (
       accessToken: tokens.accessToken,
       refreshToken,
       expiresAt: tokens.expiresAt,
-      granted: grantedRights(tokens.scope),
+      scope: tokens.scope,
     },
     drop,
     refuse

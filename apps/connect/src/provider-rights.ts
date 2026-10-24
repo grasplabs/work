@@ -6,10 +6,10 @@ import type { CompanyToolClass } from "@grasp-os/shared/connect";
 
 // What Microsoft 365 is asked for, by the classes a company turned on
 // (GRA-717): least privilege at any breadth. A consent asks only the
-// rights of the classes on for anyone in the company, a connection keeps
-// the rights it was granted (`connections.granted_scopes`), and turning a
-// class on asks the connections that lack its rights to connect again,
-// in place (`requireClassRights`). The ways it can fail, which the tests
+// rights of the classes on for anyone in the company, a connection's tokens
+// keep the rights they were granted (`connection_tokens.granted_scopes`),
+// and turning a class on asks the connections that lack its rights to
+// connect again, in place (`requireClassRights`). The ways it can fail, which the tests
 // start from: a consent asks a right no class that is on needs (sending
 // mail while Reach others is off); a class turned on runs on a grant that
 // lacks its rights, and fails at Microsoft instead of asking the person;
@@ -29,21 +29,27 @@ const microsoftSignIn = [
 ] as const;
 
 /**
- * Each class's rights. Reading the person's own is reading their mailbox,
- * calendar and OneDrive; changing it, writing them (drafts, events, their
- * own documents). The company's is SharePoint and others' calendars, and
- * reaching others is sending mail. `Tasks.ReadWrite` joins changing the
- * person's own once its To Do tools exist (GRA-722), and the shared
- * mailbox's rights come with pointing Stephen at one (GRA-724).
+ * Each class's rights. Reading the person's own is reading their mailbox
+ * (and its categories), calendar and OneDrive; changing it, writing them
+ * (drafts, flags, events, their own documents, their To Do). The
+ * company's is SharePoint and others' calendars, and reaching others is
+ * sending mail. Shared mailboxes' rights come with pointing Stephen at one
+ * (GRA-724).
  */
 const microsoftClassRights: Readonly<
   Record<CompanyToolClass, readonly string[]>
 > = {
-  "read-own": ["Mail.Read", "Calendars.Read", "Files.Read"],
+  "read-own": [
+    "Mail.Read",
+    "MailboxSettings.Read",
+    "Calendars.Read",
+    "Files.Read",
+  ],
   "change-own": [
     "Mail.ReadWrite",
     "Calendars.ReadWrite",
     "Files.ReadWrite.All",
+    "Tasks.ReadWrite",
   ],
   "read-company": ["Files.Read.All", "Sites.Read.All", "Calendars.Read.Shared"],
   "change-company": ["Files.ReadWrite.All", "Sites.ReadWrite.All"],
