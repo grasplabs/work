@@ -17,7 +17,18 @@ import {
 import type { Json } from "@grasp-os/shared/json";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { executionErrors } from "@grasp-os/shared/workflows";
-import { and, count, desc, eq, exists, gt, lte, sql } from "drizzle-orm";
+import {
+  and,
+  count,
+  desc,
+  eq,
+  exists,
+  gt,
+  inArray,
+  lte,
+  or,
+  sql,
+} from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
@@ -40,6 +51,7 @@ import {
   teams,
   users,
   workflowDecisionConfirmations,
+  workflowDecisionRecipients,
   workflowDecisions,
   workflowResourceRuns,
   workflowResources,
@@ -295,6 +307,29 @@ const liveRunOf = (run: DecisionRun): SQL =>
 // Run side: the host (workflows/host.ts) calls these for its run only.
 
 /**
+ * The statements that store `recipients` as decision `id`'s, while
+ * `stands`: none for a decision of one recipient.
+ */
+const recipientsStored = (
+  db: DrizzleD1Database,
+  id: string,
+  recipients: readonly string[],
+  stands: SQL
+) =>
+  recipients.length < 2
+    ? []
+    : [
+        db
+          .insert(workflowDecisionRecipients)
+          .select(
+            sql`SELECT ${id}, value FROM json_each(${JSON.stringify(
+              recipients
+            )}) WHERE ${stands}`
+          )
+          .onConflictDoNothing(),
+      ];
+
+/**
  * Opens the run's decision for `step`, or finds the one it opened: a step
  * that runs again after a crash opens nothing new. Its deadline is set
  * here, once, and is the one the run and every answer go by.
@@ -305,6 +340,12 @@ export const openDecision = async (
   request: {
     step: string;
     from: string;
+    /**
+     * Everyone it is asked of, when more than one (an independent run's
+     * call naming several): any of them answers it, the first answer the
+     * only one. `from` is the first of them.
+     */
+    recipients?: readonly string[];
     description: string;
     timeout: number;
     /** Never answered by the run's starter (`eligibleMembers`). */
@@ -353,10 +394,16 @@ export const openDecision = async (
     db
       .delete(workflowDecisions)
       .where(and(eq(workflowDecisions.id, row.id), sql`NOT ${liveRun}`)),
+    // Its recipients, with the decision or not at all: never another
+    // decision's, which a step run again finds instead of this one.
+    ...recipientsStored(db, row.id, request.recipients ?? [], stands),
     outboxedWhere(
       db,
       decisionEntry(actorOfRun(run), "workflow.decision.opened", run, row, {
         from: request.from,
+        ...(request.recipients === undefined
+          ? {}
+          : { recipients: request.recipients.length }),
       }),
       stands
     ),
@@ -410,13 +457,29 @@ export const decisionAsks = async (
   env: Env,
   run: DecisionRun,
   decision: string
-): Promise<{ deciders: string; description: string; input: Json | null }> => {
+): Promise<{
+  deciders: string;
+  recipients: string[];
+  description: string;
+  input: Json | null;
+}> => {
   const { deciders, description, input } = await runDecision(
     env,
     run,
     decision
   );
-  return { deciders, description, input: input ?? null };
+  const stored = await drizzle(env.DB)
+    .select({ deciders: workflowDecisionRecipients.deciders })
+    .from(workflowDecisionRecipients)
+    .where(eq(workflowDecisionRecipients.decisionId, decision))
+    .orderBy(workflowDecisionRecipients.deciders);
+  return {
+    deciders,
+    recipients:
+      stored.length === 0 ? [deciders] : stored.map((row) => row.deciders),
+    description,
+    input: input ?? null,
+  };
 };
 
 /** The deadline of the run's decision `decision`, in milliseconds. */
@@ -466,6 +529,29 @@ const decidersCondition = (deciders: string): SQL => {
 };
 
 /**
+ * Members one of decision `decision`'s recipients names, when it has more
+ * than one (`workflow_decision_recipients`), as a condition on `members`.
+ */
+const recipientsCondition = (
+  decision: string | SQLiteColumn
+): SQL => sql`EXISTS (
+  SELECT 1 FROM ${workflowDecisionRecipients} AS named
+  WHERE named.decision_id = ${decision}
+    AND (
+      (substr(named.deciders, 1, 7) = 'person:'
+        AND substr(named.deciders, 8) = ${members.userId})
+      OR (substr(named.deciders, 1, 5) = 'role:'
+        AND substr(named.deciders, 6) = ${members.role})
+      OR (substr(named.deciders, 1, 5) = 'team:' AND EXISTS (
+        SELECT 1 FROM ${teamMembers}
+        INNER JOIN ${teams} ON ${teams.id} = ${teamMembers.teamId}
+        WHERE ${teamMembers.userId} = ${members.userId}
+          AND ${teamMembers.teamId} = substr(named.deciders, 6)
+          AND ${teams.organizationId} = ${organizationId}))
+    )
+)`;
+
+/**
  * The members who may answer a decision now, as a condition on `members`:
  * active members of the organization its deciders name, but never whoever
  * started its run (R8). A `person:` decision names one person, so it only
@@ -479,6 +565,8 @@ const decidersCondition = (deciders: string): SQL => {
 const eligibleMembers = (
   deciders: string,
   run: {
+    /** The decision's ID: its recipients, if it has more than one. */
+    id: string | SQLiteColumn;
     runId: string | null | SQLiteColumn;
     resourceRunId: string | null | SQLiteColumn;
   },
@@ -505,7 +593,7 @@ const eligibleMembers = (
     and(
       eq(members.organizationId, organizationId),
       notRemoved(members.userId),
-      decidersCondition(deciders),
+      or(decidersCondition(deciders), recipientsCondition(run.id)),
       starter
     ) ?? sql`0`
   );
@@ -532,6 +620,7 @@ const mayAnswer = (
             eligibleMembers(
               deciders,
               {
+                id: workflowDecisions.id,
                 runId: workflowDecisions.runId,
                 resourceRunId: workflowDecisions.resourceRunId,
               },
@@ -1055,7 +1144,17 @@ export const waitingDecisions = async (
       .where(
         and(
           stillOpen(workflowDecisions, now),
-          inList(workflowDecisions.deciders, naming),
+          or(
+            inList(workflowDecisions.deciders, naming),
+            // One asked of several, them among them.
+            inArray(
+              workflowDecisions.id,
+              db
+                .select({ id: workflowDecisionRecipients.decisionId })
+                .from(workflowDecisionRecipients)
+                .where(inList(workflowDecisionRecipients.deciders, naming))
+            )
+          ),
           runUnended(),
           after === undefined
             ? undefined

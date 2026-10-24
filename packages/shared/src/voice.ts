@@ -5,11 +5,12 @@
 // what is said or heard is interview content, judged by the same rules as
 // any model call.
 //
-// Only speech is implemented today (core's src/speech.ts), and said for
-// the onboarding's pages at `POST /api/speech` (core's
-// src/onboarding/speech.ts). Live transcription is the interface it will
-// take, once a live run proves ElevenLabs's realtime transcription through
-// AI Gateway.
+// Speech is core's src/speech.ts, said for the onboarding's pages at
+// `POST /api/speech` (core's src/onboarding/speech.ts). Live transcription
+// is core's src/transcription.ts, which the onboarding's pages reach over a
+// WebSocket on their own origin, `GET /api/transcription` (core's
+// src/onboarding/transcription.ts): no provider token or host ever reaches
+// the browser.
 
 import { z } from "zod";
 
@@ -164,4 +165,87 @@ export const speechErrors = defineErrorFamily({
   "speech.busy": "The voice is busy. Try again in a moment.",
   "speech.unavailable": "The voice isn't set up for this deployment yet.",
   "speech.failed": "The voice couldn't say that. Try again.",
+});
+
+// `GET /api/transcription`: what someone says, written down as they say
+// it. A WebSocket on the page's own origin, which core relays to the
+// transcription upstream. On someone's interview link, with the link's
+// secret and the device's key in the first frame; or for an admin signed
+// in, with the session the upgrade carries. The frames are described where
+// core serves it (src/onboarding/transcription.ts).
+
+/** Where the onboarding's pages open a live transcription. */
+export const transcriptionPath = "/api/transcription";
+
+/** The sample rates the audio may have, in samples a second. */
+export const transcriptionSampleRates = [
+  8000, 16_000, 22_050, 24_000, 44_100, 48_000,
+] as const;
+
+/** The most one audio frame may hold: about a second of 16 kHz audio. */
+export const transcriptionFrameMaxBytes = 32 * 1024;
+
+/** The most a text frame from the page may hold: a start, or a commit. */
+export const transcriptionTextMaxBytes = 4 * 1024;
+
+/** The longest `previousText` the page may send. */
+export const transcriptionPreviousTextMaxChars = 1000;
+
+/** The first frame: the language, the audio's rate, and whose interview. */
+export const transcriptionStartSchema = z.strictObject({
+  type: z.literal("start"),
+  language: interviewLocaleSchema,
+  sampleRate: z.union(transcriptionSampleRates.map((rate) => z.literal(rate))),
+  previousText: z.string().max(transcriptionPreviousTextMaxChars).optional(),
+  /** Someone's interview link: its secret, and the device's key. */
+  link: z
+    .strictObject({ secret: interviewSecretSchema, key: interviewSecretSchema })
+    .optional(),
+});
+export type TranscriptionStart = z.input<typeof transcriptionStartSchema>;
+
+/** A text frame after `ready`: settle what was said so far. */
+export const transcriptionCommitSchema = z.strictObject({
+  type: z.literal("commit"),
+});
+
+/** What core sends the page, each a text frame of JSON. */
+export type TranscriptionMessage =
+  | {
+      type: "ready";
+      /** The session's ID, as its audit entries name it. */
+      session: string;
+      /** Seconds of audio this socket takes before it ends. */
+      maxSeconds: number;
+    }
+  | { type: "partial"; text: string }
+  | { type: "final"; text: string; words: SpokenWord[] }
+  | { type: "error"; code: string; message: string };
+
+/**
+ * How core closes the page's socket: `ended` when either side ended it, or
+ * the session reached its length; `refused` after a frame or a link it
+ * refused, or a budget spent; `failed` when the upstream failed. An
+ * `error` frame says why before any but `ended`.
+ */
+export const transcriptionCloseCodes = {
+  ended: 1000,
+  refused: 1008,
+  failed: 1011,
+} as const;
+
+/** Why a live transcription was refused or ended. */
+export const transcriptionErrors = defineErrorFamily({
+  "transcription.invalid": "That isn't something live transcription takes.",
+  "transcription.limited":
+    "Stephen has listened a lot today. Type your answers, and he listens again tomorrow.",
+  "transcription.over_budget":
+    "The AI budget for listening is used up. Type your answers for now.",
+  "transcription.busy":
+    "Listening is busy right now. Type your answer, or try again in a moment.",
+  "transcription.expired":
+    "This listening session reached its end. Start a new one to go on.",
+  "transcription.unavailable":
+    "Live transcription isn't set up for this deployment yet.",
+  "transcription.failed": "Live transcription stopped. Try again.",
 });

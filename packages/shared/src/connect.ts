@@ -301,6 +301,13 @@ export interface ConnectionSummary {
    * from a connect that predates it.
    */
   tools?: string[];
+  /**
+   * Those of `tools` on offer: the ones Grasp classed (connect's
+   * composio-classes.ts). A tool nobody classed is never offered or run,
+   * whatever the admin allowed. Absent for a native connection, and from
+   * a connect that predates it, which runs every allowed tool.
+   */
+  offeredTools?: string[];
 }
 
 /**
@@ -737,6 +744,58 @@ export interface CatalogTool {
    */
   readOnly: boolean;
 }
+
+/**
+ * Whom a tool reaches: only the person it acts for (`own`: their mail,
+ * their calendar, a draft in their mailbox), what the company keeps
+ * together (`company`: a SharePoint library, a shared drive), or other
+ * people (`others`: anything that reaches someone else, such as sending
+ * an email). A tool that can reach further than its usual call says the
+ * furthest: a drive tool that takes a person's OneDrive or a SharePoint
+ * library is `company`.
+ */
+export const toolReaches = ["own", "company", "others"] as const;
+export const toolReachSchema = z.enum(toolReaches);
+export type ToolReach = z.infer<typeof toolReachSchema>;
+
+/**
+ * The classes a company turns on or off, rather than tool by tool. `never`
+ * is the platform's own rule, for what Grasp never does whatever a company
+ * turns on: no tool's reach makes one.
+ */
+export const toolClasses = [
+  "read-own",
+  "read-company",
+  "change-own",
+  "change-company",
+  "reach-others",
+  "never",
+] as const;
+export type ToolClass = (typeof toolClasses)[number];
+
+/**
+ * A tool's class, from what it declares. Reaching others is its own class
+ * whatever the flags say: a read that reaches someone (a read receipt, a
+ * meeting's attendees told) still reaches them. Otherwise a read-only tool
+ * reads and any other changes something. Whether a change destroys
+ * anything doesn't move it to another class: it decides how a held call
+ * reads, not whether the class is on.
+ */
+export const toolClassOf = ({
+  readOnly,
+  reach,
+}: {
+  readOnly: boolean;
+  reach: ToolReach;
+}): Exclude<ToolClass, "never"> => {
+  if (reach === "others") {
+    return "reach-others";
+  }
+  if (readOnly) {
+    return reach === "own" ? "read-own" : "read-company";
+  }
+  return reach === "own" ? "change-own" : "change-company";
+};
 
 /**
  * What an admin consents to before connecting a Composio toolkit: shown to
@@ -1302,10 +1361,73 @@ export const connectorEventsAckSchema = z
 export type ConnectorEventsAck = z.input<typeof connectorEventsAckSchema>;
 
 /**
- * What core reaches in connect, over the `CONNECT` service binding: the
- * npm registry among the rest (`PackageRegistryApi`).
+ * The chat platforms connect sends to as a client's own bot
+ * (`ChannelApi.channelFetch`). Each is added with its hosts and its
+ * credential in connect's src/channels.ts when it is switched on.
  */
-export interface ConnectApi extends PackageRegistryApi {
+export const channelPlatformSchema = z.enum(["teams"]);
+export type ChannelPlatform = z.infer<typeof channelPlatformSchema>;
+
+/**
+ * The credential core builds every chat adapter with, in place of the
+ * bot's real one, which only connect holds: as Teams' app password, and as
+ * the bearer token connect hands back when the adapter asks Microsoft for
+ * one. Connect swaps it for the real credential on the way out and refuses
+ * a request that carries anything else. Shaped as a JWT without a
+ * signature or an expiry, because Microsoft's Teams SDK decodes the token
+ * it is given and refreshes it once it expires: this one never does, and
+ * connect refreshes the real one.
+ */
+export const channelCredentialPlaceholder =
+  "eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJpc3MiOiJncmFzcC1vcy1jb25uZWN0Iiwic3ViIjoiY2hhbm5lbC1jcmVkZW50aWFsLXBsYWNlaG9sZGVyIn0.placeholder";
+
+/**
+ * The header on connect's own answers to a channel request, saying what
+ * kind it is (`channelAnswer`). It is dropped from every platform response,
+ * so a platform can't pass one off.
+ */
+export const channelHeader = "grasp-channel";
+
+/**
+ * Connect's own answers to a channel request, as `channelHeader` says:
+ * refused before it left (a host off the platform's list, a credential
+ * other than the placeholder), refused because the client's bot isn't set
+ * up yet, failed on the way, or the platform's answer that the bot was
+ * removed for that person or conversation (Teams' 403), passed on as it
+ * came, marked.
+ */
+export const channelAnswer = {
+  refused: "refused",
+  unconfigured: "unconfigured",
+  failed: "failed",
+  removed: "removed",
+} as const;
+export type ChannelAnswer = (typeof channelAnswer)[keyof typeof channelAnswer];
+
+/**
+ * How core's chat adapters reach their platforms: every request an
+ * adapter sends, its token request included, handed to connect as it is.
+ */
+export interface ChannelApi {
+  /**
+   * Sends `request` to `platform` as the client's own bot: only to that
+   * platform's hosts, and only carrying `channelCredentialPlaceholder`
+   * where the credential goes, which connect replaces with the real one.
+   * The platform's response, or connect's own answer (`channelHeader`).
+   * Throttled and failed sends are retried by connect before it answers.
+   */
+  channelFetch: (
+    platform: ChannelPlatform,
+    request: Request
+  ) => Promise<Response>;
+}
+
+/**
+ * What core reaches in connect, over the `CONNECT` service binding: the
+ * npm registry among the rest (`PackageRegistryApi`), and the chat
+ * platforms (`ChannelApi`).
+ */
+export interface ConnectApi extends PackageRegistryApi, ChannelApi {
   call: (call: ConnectCall) => Promise<ConnectResult>;
   /** The provider URL to send the person's browser to. */
   startConnection: (request: StartConnection) => Promise<{ url: string }>;
@@ -1616,6 +1738,16 @@ export interface ConnectorContractAction {
    * admin's rule for a Composio tool says (never Composio's hint).
    */
   readOnly: boolean;
+  /**
+   * The class Grasp gave a Composio tool (connect's composio-classes.ts),
+   * as reviewed: a call of it is a read only when `readOnly` says so too.
+   * In the contract, so a release that reclasses a tool is a changed
+   * contract an admin approves again, even where the admin's rule already
+   * made it a change. A native action's class is in its connector's
+   * manifest, so its contract carries none: one more field would change
+   * every native contract bound now.
+   */
+  class?: Exclude<ToolClass, "never">;
   /**
    * The JSON Schemas of its input and output, as the connector makes them
    * or a Composio server lists them (closed, composio-contracts.ts), each

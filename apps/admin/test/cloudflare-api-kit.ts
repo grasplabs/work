@@ -96,6 +96,13 @@ export interface AccountState {
   /** The version its Workers' health checks name, as an old version still answering would. */
   answeringVersion?: string;
   /**
+   * Where its Workers redirect every request (307, to the same path), as a
+   * core or a hop in front of it gone wrong or hostile would. The fake
+   * follows the redirect as fetch does, unless the request says
+   * `redirect: "manual"`, and records what it sent there (`redirected`).
+   */
+  redirectsTo?: string;
+  /**
    * How its core answers the admin's provisioning probe
    * (@grasp-os/shared/provision-probe) unlike a healthy one: `absent` for
    * a core from before the probe, which answers it as any path it has no

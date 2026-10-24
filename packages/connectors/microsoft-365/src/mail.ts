@@ -29,11 +29,23 @@ import {
   topSchema,
   v1,
 } from "./graph.ts";
+import {
+  fromSchema,
+  meRoute,
+  requireOwnMailbox,
+  requireShown,
+  subjectSchema,
+} from "./mail-sorting.ts";
 
 // Mail, in one mailbox per call: a person's own or a shared one (such as
 // invoices@), always as `/users/{mailbox}`, so a call's capability binds
 // every request to its mailbox. Each result names its mailbox and the IDs
-// of the messages it came from.
+// of the messages it came from. Reading, filing and drafting stay in the
+// mailbox, but the mailbox may be a shared one or a colleague's the
+// connection may open (`Mail.ReadWrite.Shared`), so they reach `company`;
+// sending reaches whoever the message goes to (`others`). Moving, flagging
+// and categorising work only in the person's own mailbox (`own`,
+// mail-sorting.ts).
 
 const users = `${v1}/users/{mailbox}`;
 
@@ -56,6 +68,9 @@ const graphMessage = z.object({
   subject: z.string().nullish(),
   bodyPreview: z.string().nullish(),
   body: z.object({ contentType: z.string(), content: z.string() }).nullish(),
+  uniqueBody: z
+    .object({ contentType: z.string(), content: z.string() })
+    .nullish(),
   from: graphAddress.nullish(),
   toRecipients: z.array(graphAddress).nullish(),
   ccRecipients: z.array(graphAddress).nullish(),
@@ -67,6 +82,7 @@ const graphMessage = z.object({
   isDraft: z.boolean().nullish(),
   hasAttachments: z.boolean().nullish(),
   importance: z.string().nullish(),
+  flag: z.object({ flagStatus: z.string().nullish() }).nullish(),
   parentFolderId: z.string().nullish(),
   conversationId: z.string().nullish(),
   internetMessageId: z.string().nullish(),
@@ -88,6 +104,7 @@ const summaryFields = [
   "isDraft",
   "hasAttachments",
   "importance",
+  "flag",
   "parentFolderId",
   "conversationId",
   "internetMessageId",
@@ -116,6 +133,8 @@ const summarySchema = z.strictObject({
   isDraft: z.boolean(),
   hasAttachments: z.boolean(),
   importance: z.string().nullable(),
+  /** Graph's follow-up flag: `notFlagged`, `flagged` or `complete`. */
+  flagStatus: z.string().nullable(),
   webLink: z.string().nullable(),
 });
 
@@ -150,6 +169,7 @@ const summaryOf = (
   isDraft: message.isDraft ?? false,
   hasAttachments: message.hasAttachments ?? false,
   importance: message.importance ?? null,
+  flagStatus: message.flag?.flagStatus ?? null,
   webLink: message.webLink ?? null,
 });
 
@@ -171,12 +191,13 @@ const searchSchema = z
 const listMessages = defineTool({
   name: "mail.list",
   description:
-    "Lists messages in a mailbox, newest first, or in one of its folders (a folder ID, or a well-known name such as inbox or archive), optionally filtered or searched.",
+    "Lists messages in a mailbox, newest first, or in one of its folders (a folder ID, or a well-known name such as inbox or archive), optionally filtered (unread, flagged, received after) or searched. Each names its conversationId: read the whole conversation with mail.thread.",
   input: z.strictObject({
     mailbox: mailboxSchema,
     folder: idSchema.optional(),
     search: searchSchema.optional(),
     unreadOnly: z.boolean().optional(),
+    flaggedOnly: z.boolean().optional(),
     receivedAfter: z.iso.datetime({ offset: true }).optional(),
     top: topSchema,
     page: pageSchema,
@@ -187,6 +208,7 @@ const listMessages = defineTool({
     nextPage: z.string().nullable(),
   }),
   readOnly: true,
+  reach: "company",
   resource: "mailbox",
   routes: [get("/messages"), get("/mailFolders/{folder}/messages")],
   run: async ({
@@ -194,11 +216,15 @@ const listMessages = defineTool({
     folder,
     search,
     unreadOnly,
+    flaggedOnly,
     receivedAfter,
     top,
     page,
   }) => {
-    const filtered = unreadOnly === true || receivedAfter !== undefined;
+    const filtered =
+      unreadOnly === true ||
+      flaggedOnly === true ||
+      receivedAfter !== undefined;
     if (search !== undefined && filtered) {
       throw new ToolError(
         "Microsoft 365 can't search and filter at once: search, or filter",
@@ -210,6 +236,7 @@ const listMessages = defineTool({
       ? [
           `receivedDateTime ge ${receivedAfter ?? "1900-01-01T00:00:00Z"}`,
           ...(unreadOnly === true ? ["isRead eq false"] : []),
+          ...(flaggedOnly === true ? ["flag/flagStatus eq 'flagged'"] : []),
         ].join(" and ")
       : undefined;
     const path =
@@ -238,6 +265,95 @@ const listMessages = defineTool({
         nextPage: nextPageOf(nextLink),
       },
       provenance: value.map(({ id }) => id),
+    };
+  },
+});
+
+/**
+ * A conversation's ID, as Graph gives it in a message's `conversationId`:
+ * base64, so it may hold `+` and `/`. It only ever goes into a `$filter`
+ * string literal, never a path, and can't hold the quote that would end
+ * the literal.
+ */
+const conversationSchema = z
+  .string()
+  .min(1)
+  .max(512)
+  .regex(/^[\w=+/!.-]+$/u);
+
+/** How many messages of a conversation mail.thread returns at most. */
+const threadMessageLimit = 25;
+
+/**
+ * How many characters of each message's own text mail.thread returns at
+ * most, so a whole thread stays a size a model reads in one go.
+ */
+const threadBodyLimit = 8000;
+
+/** `text` cut to `limit` characters, never inside a surrogate pair. */
+const cutText = (text: string, limit: number): string => {
+  if (text.length <= limit) {
+    return text;
+  }
+  const astral = (text.codePointAt(limit - 1) ?? 0) > 0xff_ff;
+  return text.slice(0, astral ? limit - 1 : limit);
+};
+
+const threadMessages = defineTool({
+  name: "mail.thread",
+  description:
+    "Gets the messages of one conversation (a conversationId from mail.list or mail.get) in every folder of a mailbox, Sent Items included, oldest first, each with its own text without the earlier messages quoted below it. The last 25 at most: earlierMessages is true when the conversation has older ones. A body over 8,000 characters is cut, and bodyCut says so. A thread whose last message, leaving out drafts (isDraft), is someone else's waits on the mailbox's owner.",
+  input: z.strictObject({
+    mailbox: mailboxSchema,
+    conversation: conversationSchema,
+  }),
+  output: z.strictObject({
+    mailbox: z.string(),
+    conversationId: z.string(),
+    messages: z.array(
+      summarySchema.extend({
+        body: z.string().nullable(),
+        bodyCut: z.boolean(),
+      })
+    ),
+    earlierMessages: z.boolean(),
+  }),
+  readOnly: true,
+  reach: "company",
+  resource: "mailbox",
+  routes: [get("/messages")],
+  run: async ({ mailbox, conversation }) => {
+    // The newest messages first, so a long conversation keeps its last
+    // word, the one triage reads; then turned oldest first. Graph sorts by
+    // a filtered property only once it leads the filter. A message's
+    // `uniqueBody` is its own text without the earlier ones quoted below
+    // it, so a thread read whole doesn't repeat itself.
+    const { value, "@odata.nextLink": nextLink } = await graphJson(
+      graphUrl(`/users/${segment(mailbox)}/messages`, {
+        $select: `${summaryFields},uniqueBody`,
+        $top: String(threadMessageLimit),
+        $orderby: "receivedDateTime desc",
+        $filter: `receivedDateTime ge 1900-01-01T00:00:00Z and conversationId eq '${conversation}'`,
+      }),
+      pageOf(graphMessage),
+      { headers: preferBody("text") }
+    );
+    const messages = value.toReversed();
+    return {
+      output: {
+        mailbox,
+        conversationId: conversation,
+        messages: messages.map((message) => {
+          const body = message.uniqueBody?.content ?? null;
+          return {
+            ...summaryOf(mailbox, message),
+            body: body === null ? null : cutText(body, threadBodyLimit),
+            bodyCut: body !== null && body.length > threadBodyLimit,
+          };
+        }),
+        earlierMessages: nextLink !== undefined,
+      },
+      provenance: messages.map(({ id }) => id),
     };
   },
 });
@@ -331,6 +447,7 @@ const getMessage = defineTool({
     }),
   }),
   readOnly: true,
+  reach: "company",
   resource: "mailbox",
   routes: [get("/messages/{message}"), get("/messages/{message}/attachments")],
   run: async ({ mailbox, message: id, bodyType }) => {
@@ -387,6 +504,7 @@ const readAttachment = defineTool({
     content: z.string().nullable(),
   }),
   readOnly: true,
+  reach: "company",
   resource: "mailbox",
   routes: [get("/messages/{message}/attachments/{attachment}")],
   run: async ({ mailbox, message, attachment, as }) => {
@@ -419,16 +537,22 @@ const readAttachment = defineTool({
   },
 });
 
-const graphFolder = z.object({ id: z.string() });
+const graphFolder = z.object({
+  id: z.string(),
+  displayName: z.string().nullish(),
+});
 
 const moveMessage = defineTool({
   name: "mail.move",
   description:
-    "Moves a message to another folder of its mailbox (a folder ID, or a well-known name such as archive). The moved message has a new ID.",
+    "Moves an email in the person's own mailbox to another of its folders (a folder ID, or a well-known name such as archive). The moved email has a new ID. Give the email's sender and subject, and the folder's name, as the person sees them: they must match.",
   input: z.strictObject({
     mailbox: mailboxSchema,
     message: idSchema,
     destination: idSchema,
+    from: fromSchema.optional(),
+    subject: subjectSchema.optional(),
+    folderName: z.string().min(1).max(256).optional(),
   }),
   output: z.strictObject({
     mailbox: z.string(),
@@ -437,30 +561,47 @@ const moveMessage = defineTool({
     folderId: z.string().nullable(),
   }),
   readOnly: false,
+  reach: "own",
   destructive: true,
   resource: "mailbox",
-  routes: [get("/mailFolders/{destination}"), post("/messages/{message}/move")],
+  routes: [
+    meRoute,
+    get("/messages/{message}"),
+    get("/mailFolders/{destination}"),
+    post("/messages/{message}/move"),
+  ],
   describe: {
     title: "Move an email to another folder",
     fields: [
       { label: "Mailbox", input: "mailbox" },
+      { label: "From", input: "from" },
+      { label: "Subject", input: "subject" },
+      { label: "To folder", input: "folderName" },
+      { label: "Folder", input: "destination" },
       { label: "Message", input: "message" },
-      { label: "To folder", input: "destination" },
     ],
   },
-  run: async ({ mailbox, message, destination }) => {
+  run: async ({ mailbox, message, destination, from, subject, folderName }) => {
+    await requireOwnMailbox(mailbox);
+    const path = `/users/${segment(mailbox)}/messages/${segment(message)}`;
+    await requireShown(path, { from, subject });
     // The destination is looked up in this mailbox first, on a route the
     // egress binds to it, and the message moved to the folder that names:
     // a folder of another mailbox is never a destination.
     const folder = await graphJson(
       graphUrl(
         `/users/${segment(mailbox)}/mailFolders/${segment(destination)}`,
-        { $select: "id" }
+        { $select: "id,displayName" }
       ),
       graphFolder
     );
+    if (folderName !== undefined && folder.displayName !== folderName) {
+      throw new ToolError("That folder isn't the one the card names", {
+        code: invalidCode,
+      });
+    }
     const moved = await graphJson(
-      graphUrl(`/users/${segment(mailbox)}/messages/${segment(message)}/move`),
+      graphUrl(`${path}/move`),
       graphMessage,
       jsonBody({ destinationId: folder.id })
     );
@@ -475,7 +616,7 @@ const moveMessage = defineTool({
   },
 });
 
-const recipientsSchema = z.array(z.email().max(256)).max(100);
+export const recipientsSchema = z.array(z.email().max(256)).max(100);
 
 /** A message to send or keep as a draft. */
 const draftInput = z.strictObject({
@@ -558,7 +699,7 @@ const foundMessage = z.object({
  * derives it, the kit checks it), so it can't break out of the filter's
  * string literal.
  */
-const findByEffect = async (
+export const findByEffect = async (
   mailbox: string,
   key: string
 ): Promise<z.infer<typeof foundMessage> | undefined> => {
@@ -580,6 +721,7 @@ const sendMail = defineTool({
   input: draftInput,
   output: z.strictObject({ mailbox: z.string(), sent: z.literal(true) }),
   readOnly: false,
+  reach: "others",
   destructive: false,
   resource: "mailbox",
   // Recovery `none`: a sent email of unknown outcome stays unknown. Not
@@ -618,6 +760,7 @@ const createDraft = defineTool({
     webLink: z.string().nullable(),
   }),
   readOnly: false,
+  reach: "company",
   destructive: false,
   resource: "mailbox",
   routes: [get("/messages"), post("/messages")],
@@ -656,6 +799,7 @@ const createDraft = defineTool({
 
 export const mailTools = [
   listMessages,
+  threadMessages,
   getMessage,
   readAttachment,
   moveMessage,

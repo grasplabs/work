@@ -874,6 +874,149 @@ describe("the built-in blueprints", () => {
     await reinstall();
   });
 
+  it("offer a copy their newer code as an update its builders take or leave, merged over their edits, and made current only as any version", async () => {
+    await reinstall();
+    const builder = await signedInApi(idp, "builder");
+    const stranger = await signedInApi(idp, "builder");
+    const { app } = await builder.api.apps.blueprints.create("hello", {
+      name: "Edited",
+    });
+    const { app: untouched } = await builder.api.apps.blueprints.create(
+      "hello",
+      { name: "Untouched" }
+    );
+    const unchanged = await builder.api.apps.blueprints.update(app.id);
+    const released = await helloRow();
+
+    // The builder's own greeting, made current.
+    const mine = `${hello().files[greetings]}\n// Mine.\n`;
+    const { version: edited } = await builder.api.apps.files.commit(
+      app.id,
+      { [greetings]: mine },
+      "Mine"
+    );
+    await builder.api.apps.versions.setCurrent(app.id, edited);
+
+    // A release that changes the greeting too, and the schema.
+    const schema = `${hello().files["schema.ts"]}\n// Release 2.\n`;
+    const next = releaseWith({
+      files: {
+        ...hello().files,
+        [greetings]: `${hello().files[greetings]}\n// Release 2.\n`,
+        "schema.ts": schema,
+      },
+    });
+    await expect(install(next)).resolves.toBeTruthy();
+    const installed = await helloRow();
+    const offered = await builder.api.apps.blueprints.update(app.id);
+    if (!offered) {
+      throw new Error("No update was offered");
+    }
+    // Offered, not applied: the copy is as its builder left it.
+    const before = await builder.api.apps.files.read(app.id);
+    const stale = await outcome(
+      builder.api.apps.blueprints.acceptUpdate(app.id, {
+        to: offered.to,
+        over: 1,
+      })
+    );
+    const forStranger = await outcome(
+      stranger.api.apps.blueprints.update(app.id)
+    );
+
+    const accepted: { version: number }[] = [];
+    const events = await auditedDuring(async () => {
+      accepted.push(
+        await builder.api.apps.blueprints.acceptUpdate(app.id, {
+          to: offered.to,
+          over: edited,
+        })
+      );
+    });
+    const [taken] = accepted;
+    if (!taken) {
+      throw new Error("Nothing was accepted");
+    }
+    const again = await outcome(
+      builder.api.apps.blueprints.acceptUpdate(app.id, {
+        to: offered.to,
+        over: edited,
+      })
+    );
+    const afterwards = await builder.api.apps.blueprints.update(app.id);
+    const { currentVersion: currentBefore } = await builder.api.apps.get(
+      app.id
+    );
+    await builder.api.apps.versions.setCurrent(app.id, taken.version);
+    const { currentVersion: current } = await builder.api.apps.get(app.id);
+
+    // A copy nobody edited takes the newer code whole; a copy of a marked
+    // version of it is offered nothing, as a marked version never changes.
+    const whole = await builder.api.apps.blueprints.update(untouched.id);
+    const { version: wholeVersion } =
+      await builder.api.apps.blueprints.acceptUpdate(untouched.id, {
+        to: offered.to,
+        over: 1,
+      });
+    const { id: marked } = await builder.api.apps.blueprints.mark(
+      untouched.id,
+      1
+    );
+    const { app: ofMarked } = await builder.api.apps.blueprints.create(marked, {
+      name: "Of a marked one",
+    });
+
+    expect({
+      unchanged,
+      offered: {
+        ...offered,
+        changes: offered.changes.map(({ path, change }) => [path, change]),
+      },
+      before: before[greetings],
+      stale,
+      forStranger,
+      audited: events.map(({ action, detail }) => [
+        action,
+        detail.version ?? null,
+      ]),
+      files: await builder.api.apps.files.read(app.id, taken.version),
+      again,
+      afterwards,
+      currentBefore,
+      current,
+      whole: whole?.conflicts,
+      wholeFiles: await builder.api.apps.files.read(untouched.id, wholeVersion),
+      ofMarked: await builder.api.apps.blueprints.update(ofMarked.id),
+    }).toStrictEqual({
+      unchanged: null,
+      offered: {
+        blueprint: "hello",
+        from: released?.tree,
+        to: installed?.tree,
+        over: edited,
+        changes: [["schema.ts", "modified"]],
+        conflicts: [greetings],
+      },
+      before: mine,
+      stale: "app.conflict",
+      forStranger: "app.not_found",
+      audited: [
+        ["app.committed", taken.version],
+        ["app.blueprint.updated", taken.version],
+      ],
+      files: { ...hello().files, [greetings]: mine, "schema.ts": schema },
+      again: "app.conflict",
+      afterwards: null,
+      currentBefore: edited,
+      current: taken.version,
+      whole: [],
+      wholeFiles: next.blueprints.find(({ id }) => id === "hello")?.files,
+      ofMarked: null,
+    });
+
+    await reinstall();
+  });
+
   it("give each App created from them a workflow of its creator's own, bound to it, which starts only once an admin grants and approves it", async () => {
     await reinstall();
     const admin = await signedInApi(idp, "admin");

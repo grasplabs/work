@@ -2,6 +2,7 @@ import { auditIdentifierMaxLength } from "@grasp-os/shared/audit";
 import {
   connectorProviderSchema,
   oauthProviderSchema,
+  toolReachSchema,
 } from "@grasp-os/shared/connect";
 import { permissionActionSchema } from "@grasp-os/shared/permissions";
 import { z } from "zod";
@@ -106,6 +107,27 @@ export const stampMetaKey = "grasp-os/stamp";
 
 /** A stamp, as core makes it: 16 random bytes, in lowercase hex. */
 export const stampPattern = /^[0-9a-f]{32}$/u;
+
+/**
+ * Call `_meta` key: `true` says the call is a held side effect its person
+ * confirmed, on a card that showed them its exact input; connect sends it
+ * to native connectors only, and only then. A tool may do with such a call
+ * what no call may do unseen: write a formula a person typed, say. App and
+ * agent code never sets it: it isn't part of a call's input.
+ */
+export const confirmedMetaKey = "grasp-os/confirmed";
+
+/**
+ * Result `_meta` key: what a successful write changed, as
+ * `{ before, after }` (JSON values of the tool's own shape, such as a row's
+ * cells), for the audit record of old and new values. Connect keeps it
+ * with the call's answer and records its hash in the call's audit event;
+ * it takes it from native connectors only.
+ */
+export const changeMetaKey = "grasp-os/change";
+
+/** Largest change a result may report, in bytes of JSON. */
+export const maxChangeBytes = 256 * 1024;
 
 /**
  * The header a mail tool puts a stamp on (`stampMetaKey`), and connect's
@@ -300,14 +322,20 @@ const jsonSchemaObject = z.record(z.string(), z.json());
 
 /**
  * What connect knows of one action (tool) before running it, and decides
- * by before it reads a token: whether it is read-only, the input property
- * that selects its resource, its input properties, and the only requests
- * it may send. And how a held call of it is shown (`describe`), if the
- * tool says.
+ * by before it reads a token: whether it is read-only, whom it reaches,
+ * the input property that selects its resource, its input properties, and
+ * the only requests it may send. And how a held call of it is shown
+ * (`describe`), if the tool says.
  */
 const actionManifestSchema = z.strictObject({
   routes: z.array(routeSchema).max(maxRoutes),
   readOnly: z.boolean(),
+  /**
+   * Whom it reaches (`toolReaches`), which with `readOnly` makes its class
+   * (`toolClassOf`). Required: a tool that doesn't say has no class, and a
+   * manifest holding one is refused, by the build and by connect.
+   */
+  reach: toolReachSchema,
   /** How a call of unknown outcome may be recovered (`recoveryModes`). */
   recovery: z.enum(recoveryModes),
   resource: z
