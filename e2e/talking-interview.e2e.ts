@@ -17,9 +17,8 @@ import type { Page, Route, WebSocketRoute } from "@playwright/test";
 import { z } from "zod";
 
 import { test } from "./csp.ts";
-import { interviewLinkOf } from "./interview-link.ts";
-import { apiOf, signInStaff } from "./people.ts";
-import type { Person } from "./people.ts";
+import { invited } from "./interview-turns.ts";
+import { signInStaff } from "./people.ts";
 
 // Stephen's ears, end to end (GRA-381): someone who chose to talk is heard
 // through the browser's fake microphone, which plays a recorded voice over
@@ -90,33 +89,6 @@ test.use({
     ],
   },
 });
-
-/** Today, as core's plan reads it (UTC). */
-const today = (): string => new Date().toISOString().slice(0, 10);
-
-/** Someone in a team of their own, with their interview link out; their link's path. */
-const invited = async (
-  staff: Person,
-  person: string,
-  name: string
-): Promise<string> => {
-  const { core, api } = apiOf(staff);
-  try {
-    await api.onboarding.saveRoster({
-      teams: [{ id: `team-${person}`, name: "Finance", lead: null }],
-      people: [{ id: person, name, team: `team-${person}` }],
-    });
-    await api.onboarding.savePlan({ start: today() });
-    await api.onboardingStaff.setAgreements({
-      processing: true,
-      assessment: true,
-      council: "none",
-    });
-  } finally {
-    core[Symbol.dispose]();
-  }
-  return await interviewLinkOf(person);
-};
 
 const question =
   "Hi, I'm Stephen, an AI. What do you do first with an invoice?";
