@@ -158,7 +158,7 @@ export const transcriptOf = (body: unknown): TranscriptPart[] => [
 ];
 
 /** The tool results the model got since the person last wrote. */
-const resultsSinceQuestion = (body: unknown): string[] => {
+export const resultsSinceQuestion = (body: unknown): string[] => {
   const messages = messagesOf(body);
   const asked = messages.findLastIndex(
     ({ role, content }) =>
@@ -174,7 +174,7 @@ const resultsSinceQuestion = (body: unknown): string[] => {
 
 const tokensOf = (text: string): number => Math.ceil(text.length / 4);
 
-const codeStep = (code: string, input: string): GatewayReply => ({
+export const codeStep = (code: string, input: string): GatewayReply => ({
   text: "",
   toolCalls: [
     {
@@ -187,7 +187,7 @@ const codeStep = (code: string, input: string): GatewayReply => ({
   outputTokens: tokensOf(code),
 });
 
-const says = (text: string, input: string): GatewayReply => ({
+export const says = (text: string, input: string): GatewayReply => ({
   text,
   inputTokens: tokensOf(input),
   outputTokens: tokensOf(text),
