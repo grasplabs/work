@@ -136,6 +136,15 @@ export const capabilityClaimsSchema = z.strictObject({
    */
   context: workContextSchema.optional(),
   /**
+   * When a side effect connect holds from this call ends unconfirmed, in
+   * milliseconds since the epoch: after it, connect declines it as
+   * expired, and a confirmation runs nothing. Core sets it for a chat on a
+   * chat platform, where a card scrolls away and its values may have moved
+   * on (midnight of the company's day); without it, a held side effect
+   * waits until it is decided. Only the capability says it.
+   */
+  heldUntil: z.int().nonnegative().optional(),
+  /**
    * Only on the capability core signs once a person decided a call that
    * waits for them, from their own session, after checking its permission
    * and context again (`CapabilityDecision`). Connect decides that call
@@ -172,6 +181,8 @@ export interface CapabilityScope extends CapabilityCall {
   origin: z.input<typeof originSchema>;
   /** Where the call is made, for the audit log: signed, not compared. */
   context?: z.input<typeof workContextSchema> | undefined;
+  /** When a side effect held from it ends unconfirmed: signed, not compared. */
+  heldUntil?: number | undefined;
   /** What a person decided of the call: signed, not compared. */
   decision?: CapabilityDecision | undefined;
 }
@@ -233,6 +244,7 @@ export const signCapability = async (
     sensitive: scope.sensitive === true,
     origin: scope.origin,
     ...(scope.context === undefined ? {} : { context: scope.context }),
+    ...(scope.heldUntil === undefined ? {} : { heldUntil: scope.heldUntil }),
     ...(scope.decision === undefined ? {} : { decision: scope.decision }),
   };
   capabilityClaimsSchema.parse(claims);
