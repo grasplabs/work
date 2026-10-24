@@ -1,7 +1,10 @@
 import type { MemoryPack, RecallInput } from "@grasp-os/brain/contract";
 import { recall } from "@grasp-os/brain/recall";
 import { d1BrainStore } from "@grasp-os/brain/recall-store";
-import type { KnowledgeApi, KnowledgeTools } from "@grasp-os/shared/knowledge";
+import type {
+  CollectionReader,
+  KnowledgeApi,
+} from "@grasp-os/shared/knowledge";
 import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
@@ -9,7 +12,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { brainOf } from "../src/knowledge/ports.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
-import { actingFor, collectionIn, envOf, knowledgeIn } from "./contexts.ts";
+import { actingFor, collectionIn, envOf } from "./contexts.ts";
 import { mockIdp } from "./idp.ts";
 import { newTeam, readCollection } from "./knowledge.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
@@ -74,15 +77,19 @@ const cited = (pack: MemoryPack) => ({
 });
 
 /** The Knowledge tools of `agent` acting for `person`, recall among them. */
-const agentRecall = async (
+/** The HANDBOOK collection stub in the env of `agent` acting for `person`. */
+const handbookOf = async (
   agent: ReturnType<typeof newAgent>,
   person: Person
-): Promise<KnowledgeTools> => {
-  const tools = knowledgeIn(await envOf(actingFor(agent, person.userId)));
-  if (!tools) {
-    throw new Error("No KNOWLEDGE binding");
+): Promise<CollectionReader> => {
+  const stub = collectionIn(
+    await envOf(actingFor(agent, person.userId)),
+    "HANDBOOK"
+  );
+  if (!stub) {
+    throw new Error("No HANDBOOK binding");
   }
-  return tools;
+  return stub;
 };
 
 describe("the Brain's recall", setUpTime, () => {
@@ -237,54 +244,34 @@ describe("the Brain's recall", setUpTime, () => {
       admin,
       readCollection(agent, granted.collectionId)
     );
-    const tools = await agentRecall(agent, admin);
-    const stub = collectionIn(
-      await envOf(actingFor(agent, admin.userId)),
-      "HANDBOOK"
-    );
-    if (!stub) {
-      throw new Error("No HANDBOOK binding");
-    }
+    const stub = await handbookOf(agent, admin);
     // A collection grant alone gives no recall: Apps and agents start
     // without the Brain.
-    const withoutBrain = await Promise.all([
-      outcome(tools.recall({ query: word })),
-      outcome(stub.recall({ query: word })),
-    ]);
+    const withoutBrain = await outcome(stub.recall({ query: word }));
     const brainGrant = await requestGranted(idp, admin, {
       subject: agent,
       object: { type: "platform" },
       actions: ["brain"],
       binding: "BRAIN",
     });
-    const before = cited(await tools.recall({ query: word })).sources;
-    const throughStub = cited(await stub.recall({ query: word })).sources;
-    const widened = await Promise.all([
-      outcome(
-        tools.recall({
-          query: word,
-          filters: { collectionIds: [ungranted.collectionId] },
-        })
-      ),
-      outcome(
-        stub.recall({
-          query: word,
-          filters: { collectionIds: [ungranted.collectionId] },
-        })
-      ),
-    ]);
+    const before = cited(await stub.recall({ query: word })).sources;
+    const widened = await outcome(
+      stub.recall({
+        query: word,
+        filters: { collectionIds: [ungranted.collectionId] },
+      })
+    );
     await admin.api.permissions.revoke(collectionGrant);
-    const afterCollection = [
-      cited(await tools.recall({ query: word })).sources,
-      await outcome(stub.recall({ query: word })),
-    ];
+    const afterCollection = await outcome(stub.recall({ query: word }));
     await requestGranted(
       idp,
       admin,
       readCollection(agent, granted.collectionId)
     );
     await admin.api.permissions.revoke(brainGrant);
-    const afterBrain = await outcome(tools.recall({ query: word }));
+    // The new collection grant is a new stub: the old one held the revoked.
+    const regranted = await handbookOf(agent, admin);
+    const afterBrain = await outcome(regranted.recall({ query: word }));
     const only = {
       kind: "document",
       documentId: granted.documentId,
@@ -295,16 +282,14 @@ describe("the Brain's recall", setUpTime, () => {
     expect({
       withoutBrain,
       before,
-      throughStub,
       widened,
       afterCollection,
       afterBrain,
     }).toStrictEqual({
-      withoutBrain: ["brain.denied", "brain.denied"],
+      withoutBrain: "brain.denied",
       before: [only],
-      throughStub: [only],
-      widened: ["brain.not_found", "brain.not_found"],
-      afterCollection: [[], "brain.denied"],
+      widened: "brain.not_found",
+      afterCollection: "brain.denied",
       afterBrain: "brain.denied",
     });
   });
@@ -422,10 +407,10 @@ describe("the Brain's recall", setUpTime, () => {
       actions: ["brain"],
       binding: "BRAIN",
     });
-    const forUser = await agentRecall(agent, user);
-    const forAdmin = await agentRecall(agent, admin);
+    const forUser = await handbookOf(agent, user);
+    const forAdmin = await handbookOf(agent, admin);
     expect({
-      user: cited(await forUser.recall({ query: word })).sources.length,
+      user: await outcome(forUser.recall({ query: word })),
       userNamed: await outcome(
         forUser.recall({
           query: word,
@@ -433,7 +418,11 @@ describe("the Brain's recall", setUpTime, () => {
         })
       ),
       admin: cited(await forAdmin.recall({ query: word })).sources.length,
-    }).toStrictEqual({ user: 0, userNamed: "brain.not_found", admin: 1 });
+    }).toStrictEqual({
+      user: "brain.not_found",
+      userNamed: "brain.not_found",
+      admin: 1,
+    });
   });
 
   it("quotes a match deep in a long section with the words around it", async () => {
