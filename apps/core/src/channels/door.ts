@@ -428,15 +428,19 @@ const slackResponse = async (
   if (userId === undefined) {
     return new Response(null, { status: 200 });
   }
+  // As for Teams: one turn at a time per conversation, answered by the
+  // same agent in the person's own chat for Slack (answer.ts).
   const chat = new Chat({
     userName: "Stephen",
     adapters: { slack: slackAdapter(env) },
     state,
     logger: "silent",
+    concurrency: "queue",
   });
+  const takeOn = handoff ?? answerInChat(env);
   chat.onDirectMessage(async (thread, message) => {
     await keepConversation(env, "slack", thread.id, userId);
-    await handoff?.({ platform: "slack", userId, thread, message });
+    await takeOn({ platform: "slack", userId, thread, message });
   });
   return await chat.webhooks.slack(
     new Request(request.url, {

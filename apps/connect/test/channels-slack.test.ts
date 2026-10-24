@@ -68,6 +68,17 @@ const webApi = (
           }),
   });
 
+/** A message posted with `token` in its form body, as Slack's client does. */
+const postedWith = (token: string) =>
+  new Request("https://slack.com/api/chat.postMessage", {
+    method: "POST",
+    headers: {
+      "content-type": "application/x-www-form-urlencoded",
+      authorization: `Bearer ${channelCredentialPlaceholder}`,
+    },
+    body: new URLSearchParams({ channel: "D0123", text: "Hi", token }),
+  });
+
 describe("sending as the client's Slack app", () => {
   it("refuses anywhere but Slack's Web API, and methods an adapter has no use for", async () => {
     const statuses = [];
@@ -186,5 +197,23 @@ describe("sending as the client's Slack app", () => {
       tries: slack.sent.length,
       recorded: await audit.events(),
     }).toStrictEqual({ status: 200, tries: 2, recorded: [] });
+  });
+
+  it("takes the placeholder token Slack's client puts in the body out, and refuses any other", async () => {
+    const ok = await connect().channelFetch(
+      "slack",
+      postedWith(channelCredentialPlaceholder)
+    );
+    const other = await connect().channelFetch(
+      "slack",
+      postedWith("xoxb-other")
+    );
+    expect({
+      statuses: [ok.status, other.status],
+      bodies: slack.sent.map(({ body }) => body),
+    }).toStrictEqual({
+      statuses: [200, 403],
+      bodies: ["channel=D0123&text=Hi"],
+    });
   });
 });

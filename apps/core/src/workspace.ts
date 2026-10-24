@@ -304,6 +304,7 @@ export interface RunToFix {
 /** A chat platform's chat's title, as people know the platform. */
 const platformTitles: Readonly<Record<string, string>> = {
   teams: "Microsoft Teams",
+  slack: "Slack",
 };
 
 export const questionSchema = z.strictObject({

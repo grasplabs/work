@@ -793,6 +793,43 @@ const sendToSlack = async (
 };
 
 /**
+ * `body` without the token Slack's client also puts in it (`token`, the
+ * placeholder): Slack would read a token in the body before the bearer
+ * connect sets. A body carrying any other token is refused (undefined).
+ */
+const withoutBodyToken = (
+  contentType: string | null,
+  body: Uint8Array
+): Uint8Array | undefined => {
+  const text = new TextDecoder().decode(body);
+  if (contentType?.includes("application/x-www-form-urlencoded") === true) {
+    const form = new URLSearchParams(text);
+    const token = form.get("token");
+    if (token !== null && token !== channelCredentialPlaceholder) {
+      return undefined;
+    }
+    form.delete("token");
+    return new TextEncoder().encode(form.toString());
+  }
+  if (contentType?.includes("application/json") === true) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      return body;
+    }
+    if (typeof parsed !== "object" || parsed === null || !("token" in parsed)) {
+      return body;
+    }
+    const { token, ...rest } = parsed;
+    return token === channelCredentialPlaceholder
+      ? new TextEncoder().encode(JSON.stringify(rest))
+      : undefined;
+  }
+  return body;
+};
+
+/**
  * Why a Slack request is refused, or the bot's token, whether its method
  * changes something, and its body: only Slack's Web API over HTTPS, one of
  * the methods an adapter may call (`slackMethods`), posted, with the
@@ -835,9 +872,13 @@ const checkedSlackRequest = async (
     return { refused: "credential" };
   }
   const body = await readCapped(request.body, maxChannelRequestBytes);
-  return body === undefined
-    ? { refused: "too_large" }
-    : { token, write: allowed.write, body };
+  if (body === undefined) {
+    return { refused: "too_large" };
+  }
+  const sent = withoutBodyToken(request.headers.get("content-type"), body);
+  return sent === undefined
+    ? { refused: "credential" }
+    : { token, write: allowed.write, body: sent };
 };
 
 /**

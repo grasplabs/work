@@ -11,14 +11,25 @@ import { z } from "zod";
 import { channelResponse } from "../src/channels/door.ts";
 import type { ChannelMessage } from "../src/channels/door.ts";
 import { say } from "../src/channels/words.ts";
+import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import {
   channelConversations,
   channelAccounts,
   channelLinks,
 } from "../src/db/core/schema.ts";
+import { workspace } from "../src/durable-objects.ts";
+import { pointAtGateway, says } from "./agent-chat.ts";
+import { fakeGateway } from "./ai-gateway.ts";
 import { slackApp, slackPostedUrl } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { signedInApi, unique } from "./sign-in.ts";
+import {
+  member,
+  messageFrom as teamsMessageFrom,
+  post as postToTeams,
+  reached,
+  watched,
+} from "./teams-door.ts";
 import { testBinding } from "./test-env.ts";
 
 // Slack as a door into core (src/channels/slack.ts, src/channels/door.ts),
@@ -31,6 +42,8 @@ import { testBinding } from "./test-env.ts";
 // connect to the fake Slack behind it (test/connect-providers.ts).
 
 const idp = mockIdp();
+
+watched();
 
 const isFetcher = (value: unknown): value is Fetcher =>
   typeof value === "object" && value !== null && "fetch" in value;
@@ -73,6 +86,8 @@ interface Sent {
   /** Slack's headers, or none of them (`null`). */
   signed?: { timestamp?: number; secret?: string; body?: string } | null;
   doorEnv?: Env;
+  /** Whether the door hands messages to the test (`true`) or to the agent. */
+  caught?: boolean;
 }
 
 /**
@@ -82,7 +97,7 @@ interface Sent {
  */
 const post = async (
   payload: unknown,
-  { signed = {}, doorEnv = env }: Sent = {}
+  { signed = {}, doorEnv = env, caught = true }: Sent = {}
 ) => {
   const body = JSON.stringify(payload);
   const headers = new Headers({ "content-type": "application/json" });
@@ -106,12 +121,14 @@ const post = async (
     "slack",
     "request-1",
     ctx,
-    {
-      handoff: async (message) => {
-        handed.push(message);
-        await Promise.resolve();
-      },
-    }
+    caught
+      ? {
+          handoff: async (message) => {
+            handed.push(message);
+            await Promise.resolve();
+          },
+        }
+      : {}
   );
   const text = await response.text();
   await waitOnExecutionContext(ctx);
@@ -136,7 +153,12 @@ const messageFrom = (
     type: "message",
     user,
     text: "What's on my calendar today?",
-    ts: `${Math.floor(Date.now() / 1000)}.000100`,
+    // Unique, as Slack's are: the Chat SDK takes a message once by it.
+    ts: `${Math.floor(Date.now() / 1000)}.${String(
+      crypto.getRandomValues(new Uint32Array(1))[0] ?? 0
+    )
+      .padStart(10, "0")
+      .slice(0, 6)}`,
     channel,
     channel_type: channelType,
     ...extra,
@@ -334,5 +356,38 @@ describe("who gets in from Slack", () => {
       statuses: results.map(({ status }) => status),
       sent: await slackSawIn(ownChannel),
     }).toStrictEqual({ handed: [], statuses: [200, 200], sent: [] });
+  });
+});
+
+describe("a linked person's question in Slack", () => {
+  it("gets the same answer as the same question in Teams, in their own Slack chat", async () => {
+    const answer = "Parental leave lasts sixteen weeks.";
+    const { userId, slackUser } = await linkedPerson();
+    await pointAtGateway(
+      workspace(env, personalWorkspaceId(userId)),
+      fakeGateway(says(answer))
+    );
+    const question = "How long is parental leave?";
+    const fromSlack = messageFrom(slackUser);
+    fromSlack.event.text = question;
+    await post(fromSlack, { caught: false });
+
+    const inTeams = await member(idp, says(answer));
+    await postToTeams(teamsMessageFrom(inTeams.teams, { text: question }));
+
+    const slackPosts = await slackSawIn(fromSlack.event.channel);
+    const { activities } = await reached(inTeams.teams.conversation);
+    const teamsAnswer = JSON.stringify(
+      activities.filter(({ type }) => type === "message")
+    );
+    expect({
+      slack: slackPosts.some(
+        ({ method, fields, authorized }) =>
+          method === "chat.postMessage" &&
+          authorized &&
+          JSON.stringify(fields).includes(answer)
+      ),
+      teams: teamsAnswer.includes(answer),
+    }).toStrictEqual({ slack: true, teams: true });
   });
 });
