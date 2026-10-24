@@ -174,14 +174,13 @@ export type StartInvoker =
   | { type: "app"; authority: Authority; agent?: StartingAgent | null }
   | { type: "agent"; authority: Authority; context?: WorkContext }
   /**
-   * Nothing dispatches independent triggers yet. Once something does, a
-   * trigger fired by an event a workflow run caused (its mail, a connector
-   * event its call caused, a record its step wrote) must start its run as
-   * that run's descendant, as App triggers' stamped mail and events do
-   * (inbound-email.ts, connector-events.ts), or it opens a lineage of its
-   * own past the run's limits (GRA-692).
+   * A trigger fired by an event a workflow run caused (an event its `emit`
+   * task sent, workflows/event-delivery.ts) starts its run as that run's
+   * descendant, as App triggers' stamped mail and events do
+   * (inbound-email.ts, connector-events.ts), in `cause`, or it would open
+   * a lineage of its own past the run's limits (GRA-692).
    */
-  | { type: "trigger"; triggerId: string }
+  | { type: "trigger"; triggerId: string; cause?: TriggerCause }
   /**
    * A run's `run` task starting its child (workflows/run-children.ts):
    * only with the parent workflow's own `start` grant on the child's
@@ -190,6 +189,19 @@ export type StartInvoker =
    * where its lineage admitted the child already (quotas.ts, `admitChild`).
    */
   | { type: "workflow"; parent: ParentRun; place: ChildPlace };
+
+/**
+ * The run whose event fired a trigger: where its lineage admitted the
+ * trigger's run already (quotas.ts, `admitChild`), and whether it ran
+ * restricted, which the trigger's run then does too. The trigger's run
+ * joins its lineage, never its life: it isn't the run's child, and goes
+ * on after the run ends.
+ */
+export interface TriggerCause {
+  readonly runId: string;
+  readonly restricted: boolean;
+  readonly place: ChildPlace;
+}
 
 /** The run whose `run` task starts a child, as its host knows it. */
 export interface ParentRun {
@@ -238,9 +250,10 @@ export interface StartAuthorization {
   actor: AuditActor;
   /**
    * For a child run: its parent and where it sits in its lineage, pinned
-   * with its row (resource-runs.ts, `RunAdmission.lineage`).
+   * with its row (resource-runs.ts, `RunAdmission.lineage`); for a run an
+   * event's trigger starts, where it sits, with no parent.
    */
-  lineage?: { parentRunId: string; rootRunId: string; depth: number };
+  lineage?: { parentRunId: string | null; rootRunId: string; depth: number };
   /**
    * That it still holds, as SQL, read as the admitting statement runs: of
    * a fixed size whatever the version binds, as `required` holds the
@@ -1026,9 +1039,12 @@ const restrictedStart = async (
         ? true
         : await chatRestricted(() => ({ authority, context }));
     }
-    case "person":
-    case "trigger": {
+    case "person": {
       return false;
+    }
+    case "trigger": {
+      // Restricted spreads to the run an event of a restricted run starts.
+      return invoker.cause?.restricted ?? false;
     }
     case "workflow": {
       // Restricted only ever spreads down a lineage, never lifts.
@@ -1038,6 +1054,31 @@ const restrictedStart = async (
       return invoker satisfies never;
     }
   }
+};
+
+/** Where a start of `invoker` sits in a lineage, if not at a root of its own. */
+const lineageOf = (
+  invoker: StartInvoker
+): Pick<StartAuthorization, "lineage"> => {
+  if (invoker.type === "workflow") {
+    return {
+      lineage: {
+        parentRunId: invoker.parent.runId,
+        rootRunId: invoker.place.rootRunId,
+        depth: invoker.place.depth,
+      },
+    };
+  }
+  if (invoker.type === "trigger" && invoker.cause !== undefined) {
+    return {
+      lineage: {
+        parentRunId: null,
+        rootRunId: invoker.cause.place.rootRunId,
+        depth: invoker.cause.place.depth,
+      },
+    };
+  }
+  return {};
 };
 
 /**
@@ -1241,15 +1282,7 @@ export const decideWorkflowStart = async (
       restricted,
       buildHash,
       actor: rule.actor,
-      ...(invoker.type === "workflow"
-        ? {
-            lineage: {
-              parentRunId: invoker.parent.runId,
-              rootRunId: invoker.place.rootRunId,
-              depth: invoker.place.depth,
-            },
-          }
-        : {}),
+      ...lineageOf(invoker),
       holds,
       packages,
     },

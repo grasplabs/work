@@ -1466,6 +1466,10 @@ msgstr "{vendor} · gebruik onbekend"
 msgid "{visible, plural, one {# shown. Drag to reorder.} other {# shown. Drag to reorder.}}"
 msgstr "{visible, plural, one {# getoond. Sleep om de volgorde te wijzigen.} other {# getoond. Sleep om de volgorde te wijzigen.}}"
 
+#: src/onboarding/setup-steps.tsx
+msgid "{waiting, plural, one {# person new on your list gets a link once you confirm your organization.} other {# people new on your list get their links once you confirm your organization.}}"
+msgstr "{waiting, plural, one {# nieuwe persoon op je lijst krijgt een link zodra je je organisatie bevestigt.} other {# nieuwe mensen op je lijst krijgen hun link zodra je je organisatie bevestigt.}}"
+
 #: src/dashboard/nav-item.tsx
 msgid "{waiting, plural, one {# thing waiting} other {# things waiting}}"
 msgstr "{waiting, plural, one {# ding wacht} other {# dingen wachten}}"
@@ -12669,6 +12673,10 @@ msgstr "Deze app is de verbinding met de pagina kwijtgeraakt en is gestopt."
 msgid "This app wants to open a page on another site in a new tab. Open it only if you expected to go there."
 msgstr "Deze app wil een pagina van een andere site openen in een nieuw tabblad. Open die alleen als je verwachtte daarheen te gaan."
 
+#: src/screens/screen-frame.tsx
+msgid "This app's stored code no longer matches the code that was approved, so it wasn't opened. Tell an admin."
+msgstr "De opgeslagen code van deze app komt niet meer overeen met de goedgekeurde code, dus hij is niet geopend. Laat het een beheerder weten."
+
 #: src/interview/sound-check.tsx
 msgid "This browser cannot listen. You can type your answers."
 msgstr "Deze browser kan niet luisteren. Je kunt je antwoorden typen."
@@ -12874,6 +12882,14 @@ msgstr "Deze versie wijzigt de gegevens van het domein, en de wijziging kan niet
 #: src/engines/store-change-errors.ts
 msgid "This version changes the domain's data, and the change can't be applied: filling in one of its new fields would make a record larger than a record may be."
 msgstr "Deze versie wijzigt de gegevens van het domein, en de wijziging kan niet worden toegepast: het invullen van een van de nieuwe velden zou een record groter maken dan een record mag zijn."
+
+#: src/screens/screen-frame.tsx
+msgid "This version of the app hasn't been sealed, so it can't be opened. A builder can publish it again."
+msgstr "Deze versie van de app is niet verzegeld, dus hij kan niet worden geopend. Een bouwer kan hem opnieuw publiceren."
+
+#: src/screens/screen-frame.tsx
+msgid "This version of the app was revoked and no longer runs. An admin can make another version current."
+msgstr "Deze versie van de app is ingetrokken en draait niet meer. Een beheerder kan een andere versie actueel maken."
 
 #: src/engines/store-change-errors.ts
 msgid "This version's data change is still being applied. Try again in a moment."

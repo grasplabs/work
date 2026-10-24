@@ -294,7 +294,7 @@ const systemTrigger = async (by: Person, id: string) =>
     kind: "system",
     workflowId: id,
     version: 1,
-    config: {},
+    config: { event: { contract: "notes", type: "note.created" } },
   });
 
 /** Version `version` of App `app`, approved (1), unapproved (0) or from before approvals (null). */
@@ -847,7 +847,7 @@ describe("a trigger starting a workflow", () => {
       kind: "system",
       workflowId: workflow.id,
       version: 1,
-      config: {},
+      config: { event: { contract: "notes", type: "note.created" } },
     });
     const tries = {
       adminMoves: await outcome(
@@ -918,7 +918,7 @@ describe("a trigger starting a workflow", () => {
       kind: "system",
       workflowId: workflow.id,
       version: 1,
-      config: { event: "note.created" },
+      config: { event: { contract: "notes", type: "note.created" } },
     });
     await granted(
       bob,
@@ -971,7 +971,7 @@ describe("a trigger starting a workflow", () => {
         kind: "system",
         workflowId: workflow.id,
         version: 1,
-        config: { event: "note.created" },
+        config: { event: { contract: "notes", type: "note.created" } },
       });
       await granted(
         ada,
@@ -1217,7 +1217,7 @@ describe("permissions of independent resources", () => {
       kind: "system",
       workflowId: workflow.id,
       version: 1,
-      config: {},
+      config: { event: { contract: "notes", type: "note.created" } },
     });
     const subject = { type: "workflow", workflowId: workflow.id } as const;
     const ask = async (by: Person, permission: PermissionRequest) =>
@@ -1415,7 +1415,7 @@ describe("what code and triggers may learn and name", () => {
       kind: "system",
       workflowId: theirs.id,
       version: 1,
-      config: {},
+      config: { event: { contract: "notes", type: "note.created" } },
     });
     const ask = async (by: Person, permission: PermissionRequest) =>
       await outcome(requestPermission(env, by, permission, rolesOf(by)));
