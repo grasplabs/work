@@ -1,4 +1,4 @@
-import type { MemoryPack } from "@grasp-os/shared/brain-api";
+import type { MemoryPack } from "@grasp-os/brain/contract";
 import type { CollectionId, PermissionId } from "@grasp-os/shared/ids";
 import type {
   BacklinkPage,

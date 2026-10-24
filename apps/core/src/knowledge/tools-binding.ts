@@ -1,4 +1,4 @@
-import type { MemoryPack } from "@grasp-os/shared/brain-api";
+import type { MemoryPack } from "@grasp-os/brain/contract";
 import type {
   FollowResult,
   KnowledgeCatalog,

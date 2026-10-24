@@ -7,13 +7,13 @@ import {
   memoriesListInputSchema,
   receiptsGetInputSchema,
   rememberInputSchema,
-} from "@grasp-os/shared/brain-api";
+} from "@grasp-os/brain/contract";
 import type {
   BrainSourceRef,
   CommandReceipt,
   MemoryPage,
   MemoryRecord,
-} from "@grasp-os/shared/brain-api";
+} from "@grasp-os/brain/contract";
 import { toHex } from "@grasp-os/shared/encoding";
 import { brainReceiptIdSchema, memoryIdSchema } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
