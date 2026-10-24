@@ -503,6 +503,40 @@ const FilterSelect = ({
   );
 };
 
+/**
+ * The success screen for the connection a flow just made, once core sent
+ * the browser back here with it. Only a connection the page lists: anyone
+ * can put an ID in a link.
+ */
+const Returned = ({
+  connection,
+  integrations,
+}: {
+  connection: string | undefined;
+  integrations: readonly Integration[];
+}) => {
+  const navigate = useNavigate({ from: "/integrations/" });
+  const connectedTo =
+    connection === undefined
+      ? undefined
+      : integrations.find((integration) =>
+          integration.connections.some(({ id }) => id === connection)
+        );
+  return (
+    <ConnectedDialog
+      again={false}
+      app={connectedTo?.name ?? ""}
+      connection={connectedTo?.connections.find(({ id }) => id === connection)}
+      onClose={() => {
+        void navigate({
+          replace: true,
+          search: (last) => ({ ...last, connection: undefined }),
+        });
+      }}
+    />
+  );
+};
+
 const Integrations = () => {
   const { catalog, connections, requests } = Route.useLoaderData();
   const { identity } = Route.useRouteContext();
@@ -514,14 +548,6 @@ const Integrations = () => {
     connections.state === "ready" ? connections.data : []
   );
   const filter = filterOf(search);
-  // Only a connection the page lists: anyone can put an ID in a link.
-  const connectedTo =
-    connection === undefined
-      ? undefined
-      : integrations.find((integration) =>
-          integration.connections.some(({ id }) => id === connection)
-        );
-  const navigate = useNavigate({ from: "/integrations/" });
   const choices = useChoices(integrations);
   const sections = sectionsOf(integrations, filter, q);
   const shown = sections.reduce(
@@ -556,19 +582,7 @@ const Integrations = () => {
               }
               title={t`Integrations`}
             />
-            <ConnectedDialog
-              again={false}
-              app={connectedTo?.name ?? ""}
-              connection={connectedTo?.connections.find(
-                ({ id }) => id === connection
-              )}
-              onClose={() => {
-                void navigate({
-                  replace: true,
-                  search: (last) => ({ ...last, connection: undefined }),
-                });
-              }}
-            />
+            <Returned connection={connection} integrations={integrations} />
             {connectionError === undefined ? null : (
               <ErrorText>{connectionErrorMessage(connectionError)}</ErrorText>
             )}
