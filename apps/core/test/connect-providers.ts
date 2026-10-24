@@ -201,6 +201,14 @@ export const slackApp = {
  */
 export const slackPostedUrl = "https://slack-control.test/posted";
 
+/**
+ * Where tests remove the bot from a conversation, as uninstalling its app
+ * does: POST `{ conversation }`; the Bot Connector refuses its posts there
+ * with 403 from then on.
+ */
+export const botConnectorUninstallUrl =
+  "https://bot-connector-control.test/uninstall";
+
 /** Where tests read the paths the fake npm registry was asked for, in order. */
 export const npmAskedUrl = "https://npm-control.test/asked";
 
@@ -487,6 +495,11 @@ export default {
     if (request.method === "POST" && url.href === ${JSON.stringify(botConnectorStreamsUrl)}) {
       const { refuse } = await request.json();
       botConnector.refuseStreams(refuse);
+      return new Response(null, { status: 204 });
+    }
+    if (request.method === "POST" && url.href === ${JSON.stringify(botConnectorUninstallUrl)}) {
+      const { conversation } = await request.json();
+      botConnector.uninstall(conversation);
       return new Response(null, { status: 204 });
     }
     if (url.href === ${JSON.stringify(botConnectorPostedUrl)}) {

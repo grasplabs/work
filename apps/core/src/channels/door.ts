@@ -67,6 +67,7 @@ import { stephenFor } from "../stephen-reach.ts";
 import { offerChannelLink } from "./accounts.ts";
 import { answerInChat } from "./answer.ts";
 import { signInCard } from "./cards.tsx";
+import { countSignal } from "./signals.ts";
 import { slackAdapter, verifiedSlackRequest } from "./slack.ts";
 import type { ConnectedTeamsAdapter } from "./teams-adapter.ts";
 import { teamsAdapter, verifiedTeamsRequest } from "./teams.ts";
@@ -637,6 +638,7 @@ export const channelResponse = async (
     return await slackResponse(request, env, body, ctx, handoff);
   }
   if (!(await verifiedTeamsRequest(env, request, body, teamsKeys))) {
+    ctx.waitUntil(countSignal(env, platform, "refused"));
     return new Response("Unauthorized", { status: 401 });
   }
   const parsed = activitySchema.safeParse(jsonOf(body));
