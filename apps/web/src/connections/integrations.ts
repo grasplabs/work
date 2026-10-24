@@ -354,3 +354,63 @@ export const roundedDown = (count: number): number => {
   }
   return Math.floor(count / step) * step;
 };
+
+/** A name as it is compared: letters and digits only, so "Google Sheets" is "google_sheets". */
+const plain = (name: string): string =>
+  name.toLocaleLowerCase().replaceAll(/[^\p{L}\p{N}]/gu, "");
+
+/**
+ * The catalog's apps that the company could connect and has no connection
+ * to: offered to it, and not carrying the name of an app it is connected
+ * to under another entry (Microsoft's toolkit next to the native Microsoft
+ * provider), as the prototype's `beyond` does.
+ */
+export const beyond = (integrations: readonly Integration[]): Integration[] => {
+  const own = new Set(
+    integrations
+      .filter((integration) => stateOf(integration) !== "not_connected")
+      .map(({ name }) => plain(name))
+  );
+  return integrations.filter(
+    (integration) =>
+      integration.offered &&
+      stateOf(integration) === "not_connected" &&
+      !own.has(plain(integration.name))
+  );
+};
+
+/** Shortest names a name may hold to count as the app being meant (the prototype's `nearestApps`). */
+const shortestHeld = 4;
+/** Fewest characters of a typed name worth looking for. */
+const shortestSought = 3;
+
+/**
+ * The apps nearest to a name, to offer instead of a request: those whose
+ * name holds it or is held by it, the one named exactly so first, then the
+ * shortest. Too little typed finds nothing.
+ */
+export const nearestApps = (
+  integrations: readonly Integration[],
+  named: string,
+  most = 3
+): Integration[] => {
+  const wanted = plain(named);
+  if (wanted.length < shortestSought) {
+    return [];
+  }
+  return integrations
+    .filter((integration) => {
+      const name = plain(integration.name);
+      return (
+        name.includes(wanted) ||
+        (name.length >= shortestHeld && wanted.includes(name))
+      );
+    })
+    .toSorted(
+      (one, other) =>
+        Number(plain(other.name) === wanted) -
+          Number(plain(one.name) === wanted) ||
+        one.name.length - other.name.length
+    )
+    .slice(0, most);
+};

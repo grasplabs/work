@@ -190,6 +190,10 @@ msgstr "{artifacts, plural, one {# damit erstellter Build ({targets}) stoppt sof
 msgid "{asked, plural, one {# question is still open, each with who can answer it.} other {# questions are still open, each with who can answer it.}}"
 msgstr "{asked, plural, one {# Frage ist noch offen, mit wer sie beantworten kann.} other {# Fragen sind noch offen, jede mit wer sie beantworten kann.}}"
 
+#: src/connections/request-app-dialog.tsx
+msgid "{asker} already asked for it on {askedOn}."
+msgstr "{asker} hat es am {askedOn} schon angefragt."
+
 #: src/dashboard/standard-widgets.tsx
 msgid "{back} a month expected return"
 msgstr "{back} pro Monat erwarteter Ertrag"
@@ -1679,6 +1683,10 @@ msgstr "Ein Entwurf: Nur seine Builder öffnen ihn, und seine Auslöser greifen 
 msgid "A file is downloaded only when you ask for it, with a click."
 msgstr "Eine Datei wird nur heruntergeladen, wenn Sie mit einem Klick darum bitten."
 
+#: src/connections/request-app-dialog.tsx
+msgid "A former member"
+msgstr "Ein ehemaliges Mitglied"
+
 #: src/activity/audit-words.ts
 msgid "A guest chat changed"
 msgstr "Ein Gast-Chat hat sich geändert"
@@ -1792,6 +1800,10 @@ msgstr "Ein Team ohne Teamleitung bekommt seine Links am ersten Tag, und ich fra
 #: src/dashboard/standard-widgets.tsx
 msgid "A workflow is redesigned with AI and waits for its test."
 msgstr "Ein Workflow ist mit KI neu gestaltet und wartet auf seinen Test."
+
+#: src/connections/request-app-dialog.tsx
+msgid "A workflow needs an app that is not here yet? Tell Grasp which one, and what it should do there."
+msgstr "Braucht ein Workflow eine App, die es hier noch nicht gibt? Sagen Sie Grasp, welche, und was es dort tun soll."
 
 #: src/routes/_shell.settings.notifications.tsx
 msgid "A workflow to check or approve, a run waiting on you, or a change to a live workflow."
@@ -2299,6 +2311,10 @@ msgstr "Fast geschafft"
 msgid "Already decided: {model}"
 msgstr "Bereits entschieden: {model}"
 
+#: src/connections/request-app-dialog.tsx
+msgid "Already here, in case you mean one of these"
+msgstr "Schon da, falls Sie eine davon meinen"
+
 #: src/onboarding/about-story.tsx
 msgid "Alright, here’s the plan."
 msgstr "Also, das ist der Plan."
@@ -2511,6 +2527,7 @@ msgctxt "people filter: link"
 msgid "Anywhere"
 msgstr "Überall"
 
+#: src/connections/request-app-dialog.tsx
 #: src/dashboard/dependency-requests.tsx
 #: src/engines/screen-approval.tsx
 #: src/inbox/items.ts
@@ -3326,6 +3343,7 @@ msgstr "Nicht lesbar"
 
 #: src/chat/brain-questions.tsx
 #: src/chat/project-dialog.tsx
+#: src/connections/request-app-dialog.tsx
 #: src/decision-confirmation.tsx
 #: src/engines/app-status.tsx
 #: src/engines/package-approvals.tsx
@@ -3706,6 +3724,7 @@ msgstr "Klicken, um die Nutzung zu öffnen"
 
 #: src/connections/connect-dialog.tsx
 #: src/connections/connection-list.tsx
+#: src/connections/request-app-dialog.tsx
 #: src/dashboard/report-dialog.tsx
 #: src/dashboard/widget-block.tsx
 #: src/engines/package-approvals.tsx
@@ -3916,6 +3935,7 @@ msgid "Confirmed by the board"
 msgstr "Von der Geschäftsführung bestätigt"
 
 #: src/connections/integration-row.tsx
+#: src/connections/request-app-dialog.tsx
 #: src/onboarding/connect-steps.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Connect"
@@ -5491,9 +5511,17 @@ msgstr "für alle Modellaufrufe diesen Monat"
 msgid "For everyone"
 msgstr "Für alle"
 
+#: src/connections/request-app-dialog.tsx
+msgid "For example Personio or Twinfield"
+msgstr "Zum Beispiel Personio oder Twinfield"
+
 #: src/onboarding/organization-dialogs.tsx
 msgid "For example: answers customers' questions"
 msgstr "Zum Beispiel: beantwortet Fragen von Kunden"
+
+#: src/connections/request-app-dialog.tsx
+msgid "For example: read new hires and prepare their first day"
+msgstr "Zum Beispiel: neue Mitarbeitende lesen und ihren ersten Tag vorbereiten"
 
 #: src/routes/_shell.onboarding.notes.tsx
 msgid "For Grasp's staff on this onboarding alone; the company doesn't see them."
@@ -5523,6 +5551,10 @@ msgstr "Nur für diese Organisation. Jede Organisation beginnt mit denselben Wer
 msgctxt "kind of app"
 msgid "Forms and surveys"
 msgstr "Formulare und Umfragen"
+
+#: src/connections/request-app-dialog.tsx
+msgid "Forwarded to our team"
+msgstr "An unser Team weitergeleitet"
 
 #: src/brain/brain.ts
 msgid "Found in {source}"
@@ -5673,6 +5705,11 @@ msgstr "Grasp-Zugriff"
 #: src/routes/sign-in.tsx
 msgid "Grasp can't be reached right now. Try again in a moment."
 msgstr "Grasp ist gerade nicht erreichbar. Versuchen Sie es gleich noch einmal."
+
+#: src/connections/request-app-dialog.tsx
+msgctxt "“Requested” is the name of a section on the Integrations page."
+msgid "Grasp checks what it takes to connect it. You find it under Requested."
+msgstr "Grasp prüft, was es braucht, um sie zu verbinden. Sie finden sie unter Angefragt."
 
 #: src/routes/_shell.policies.documents.$policyId.tsx
 msgid "Grasp could not be reached. Check the connection and upload the policy again."
@@ -6431,6 +6468,10 @@ msgstr "Er hat keine Schritte."
 msgid "It is no longer held."
 msgstr "Er wird nicht mehr zurückgehalten."
 
+#: src/connections/request-app-dialog.tsx
+msgid "It is not one of these"
+msgstr "Es ist keine davon"
+
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "It isn't offered to your organization: offer it on its Overview before connecting it."
 msgstr "Es wird Ihrer Organisation nicht angeboten: Bieten Sie es in der Übersicht an, bevor Sie es verbinden."
@@ -6562,6 +6603,10 @@ msgstr "Die Teamleitung hat sie genannt, und niemand im Team wird dazu befragt. 
 #: src/routes/_shell.onboarding.organization.$team.tsx
 msgid "Its lead names the team's work in their interview: what there is, how much of it, and who does which."
 msgstr "Die Teamleitung nennt die Arbeit des Teams in ihrem Interview: was es gibt, wie viel davon und wer was macht."
+
+#: src/connections/request-app-dialog.tsx
+msgid "Its link"
+msgstr "Ihr Link"
 
 #: src/onboarding/organization-words.ts
 msgid "Its links go out from {at}, its lead first."
@@ -8853,6 +8898,7 @@ msgstr "Nur Sie können es nutzen."
 msgid "Only your organization's admins can abandon a change to a store."
 msgstr "Nur die Admins Ihrer Organisation können eine Änderung an einem Speicher verwerfen."
 
+#: src/connections/request-app-dialog.tsx
 #: src/inbox/item-detail.tsx
 msgid "Open"
 msgstr "Öffnen"
@@ -10110,6 +10156,14 @@ msgstr "Bericht"
 msgid "Repository content, snippets, editor context, build logs or engineering documentation."
 msgstr "Repository-Inhalte, Snippets, Editor-Kontext, Build-Logs oder technische Dokumentation."
 
+#: src/connections/request-app-dialog.tsx
+msgid "Request an app"
+msgstr "Eine App anfragen"
+
+#: src/routes/_shell.integrations.index.tsx
+msgid "Request app"
+msgstr "App anfragen"
+
 #: src/connections/requested-apps.tsx
 msgctxt "apps someone asked for"
 msgid "Requested"
@@ -10708,6 +10762,10 @@ msgstr "Senden"
 #: src/chat/brain-questions.tsx
 msgid "Send answer"
 msgstr "Antwort senden"
+
+#: src/connections/request-app-dialog.tsx
+msgid "Send request"
+msgstr "Anfrage senden"
 
 #: src/onboarding/organization-dialogs.tsx
 msgid "Send the link now"
@@ -13405,6 +13463,10 @@ msgstr "Nutzung unbekannt"
 msgid "Use a staff list instead"
 msgstr "Stattdessen eine Mitarbeiterliste verwenden"
 
+#: src/connections/request-app-dialog.tsx
+msgid "Use an address that starts with http:// or https://."
+msgstr "Nutzen Sie eine Adresse, die mit http:// oder https:// beginnt."
+
 #: src/onboarding/setup-steps.tsx
 msgid "Use another list"
 msgstr "Andere Liste verwenden"
@@ -13983,6 +14045,10 @@ msgstr "Was lief"
 #: src/dashboard/report-dialog.tsx
 msgid "What ran, the decisions it asked for, every workflow and what could be better. Keep it as Markdown, or save it as a PDF from the print window."
 msgstr "Was lief, die Entscheidungen, um die es bat, jeder Workflow und was besser sein könnte. Behalten Sie ihn als Markdown oder speichern Sie ihn im Druckfenster als PDF."
+
+#: src/connections/request-app-dialog.tsx
+msgid "What should Grasp do there?"
+msgstr "Was soll Grasp dort tun?"
 
 #: src/routes/_shell.onboarding.notes.tsx
 msgid "What should the next person at Grasp know?"
