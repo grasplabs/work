@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@grasp-os/connector-kit": "workspace:*",
+    "fflate": "catalog:",
     "zod": "catalog:"
   },
   "devDependencies": {
