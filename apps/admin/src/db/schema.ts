@@ -86,6 +86,13 @@ export const clients = sqliteTable(
      */
     signIn: text("sign_in"),
     /**
+     * Its own Teams bot, as staff set it: JSON (`teamsBotSchema`,
+     * src/clients/teams-bot.ts), the bot's app id, its tenant and the day
+     * its secret expires, never the secret. Every deploy gives its connect
+     * and core the bot's id from it; null for a client without a bot.
+     */
+    teamsBot: text("teams_bot"),
+    /**
      * When staff last changed what a deploy sets on its core: its sign-in
      * or a setting (src/clients/settings.ts). A rollout deploys a client
      * whose latest done deploy started before this, even on the release
@@ -662,3 +669,23 @@ export const integrationBuilds = sqliteTable("integration_builds", {
   createdAt: timestamp("created_at").notNull(),
   updatedAt: timestamp("updated_at").notNull(),
 });
+
+/**
+ * When the admin last told staff of each kind of alert about each client
+ * (src/alerts.ts): an alert of the same client and kind within its window
+ * isn't sent again, so a storm is one message. Nothing of what an alert
+ * said is kept.
+ */
+export const staffAlerts = sqliteTable(
+  "staff_alerts",
+  {
+    clientId: text("client_id").notNull(),
+    /**
+     * The alert's kind, such as `test`, and its subject when it has one:
+     * `teams_bot_secret_expiring/2027-04-30/30` (src/alerts.ts).
+     */
+    kind: text().notNull(),
+    sentAt: timestamp("sent_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.clientId, table.kind] })]
+);

@@ -14,6 +14,12 @@ interface __BaseEnv_Env {
    * from Teams is refused.
    */
   TEAMS_BOT_ID?: string;
+  /**
+   * The client's Slack app's signing secret, a Worker secret: every request
+   * Slack sends the app is signed with it (src/channels/slack.ts). Unset,
+   * Slack's door answers 404.
+   */
+  SLACK_SIGNING_SECRET?: string;
   GOOGLE_CLIENT_SECRET?: string;
   /** The model gateway (src/models.ts): JSON. */
   MODEL_GATEWAY?: unknown;

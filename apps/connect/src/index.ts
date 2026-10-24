@@ -27,6 +27,7 @@ import type {
   OrganizationConnection,
   ConnectResult,
   Disconnect,
+  RequireClassRights,
   DisconnectPersonal,
   FinishConnection,
   HeldCall,
@@ -73,6 +74,7 @@ import { catalog, catalogTools } from "./catalog.ts";
 import { keptChange } from "./changes.ts";
 import { channelSigningKeys } from "./channel-keys.ts";
 import { channelFetch } from "./channels.ts";
+import { requireClassRights } from "./class-rights.ts";
 import { clock, tickClock } from "./clock.ts";
 import {
   finishToolkitFlow,
@@ -135,6 +137,7 @@ import {
   listPendingActions,
   pendingActionFor,
   refuseConfirmation,
+  refuseEnded,
   take,
 } from "./pending.ts";
 import type { HeldAction } from "./pending.ts";
@@ -351,6 +354,12 @@ export default class Connect
     connectionIds: readonly string[]
   ): Promise<ConnectionOwner[]> {
     return await connectionOwners(this.env.DB, connectionIds);
+  }
+
+  async requireClassRights(
+    request: RequireClassRights
+  ): Promise<{ reconnect: number }> {
+    return await requireClassRights(this.env, request);
   }
 
   async disconnect(request: Disconnect): Promise<{ revoked: boolean }> {
@@ -665,6 +674,8 @@ export default class Connect
     }
     const { capability, person, id, inputHash } = parsed.data;
     const held = await heldFor(this.env, person, id, "confirm");
+    // Its day over: declined as expired, whatever the press carries.
+    await refuseEnded(this.env, person, held);
     const call = callOf(held);
     let claims: CapabilityClaims | undefined;
     try {
