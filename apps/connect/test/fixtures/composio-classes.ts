@@ -55,7 +55,7 @@ export const composioClasses: Record<string, Record<string, ToolClass>> = {
     // test/mail-server.ts).
     MAIL_SEARCH: "read-company",
     MAIL_SEND: "reach-others",
-    // A chat app's reads and writes (core's chat-app-writes.test.ts).
+    // A chat app's mail read and reply (core's chat-app-writes.test.ts).
     MAIL_READ: "read-company",
     MAIL_REPLY: "change-company",
   },
