@@ -8,6 +8,8 @@ import { noteProvenance, readerActor } from "./access.ts";
 import type { Reader } from "./access.ts";
 import { authorize } from "./app-entries.ts";
 import type { Readable, ReadRecord } from "./authorize.ts";
+import type { CollectionRow } from "./collections.ts";
+import { checkWrite } from "./write-rules.ts";
 
 // What Knowledge asks of its host, in one place: the rest of Knowledge
 // reaches Grasp's people, roles, teams and Apps, its buckets, audit log,
@@ -39,6 +41,18 @@ export interface KnowledgePorts {
     record: ReadRecord,
     ...sources: { id: string; sensitive: boolean }[]
   ) => Promise<Provenance>;
+  /**
+   * Called before every version is written, by anyone: throws to refuse
+   * what the host never lets be saved (core's: the Grasp skills but by
+   * their sync, a memory file over its limit). `sync` is the host's own
+   * sync writing (documents.ts `Write.sync`).
+   */
+  onWrite: (write: {
+    collection: CollectionRow;
+    path: string;
+    text: string;
+    sync: boolean;
+  }) => Promise<void>;
   /** Who `reader` is, as the host's audit log names them. */
   actorOf: (reader: Reader) => AuditActor;
   /** Payloads (payloads.ts), in a bucket whose jurisdiction the host set. */
@@ -85,6 +99,9 @@ export const portsOf = (env: Env): KnowledgePorts => ({
   onRead: async (reader, record, ...sources) =>
     await noteProvenance(env, reader, record, ...sources),
   actorOf: readerActor,
+  onWrite: async (write) => {
+    await checkWrite(env, write);
+  },
   blobs: env.BRAIN_OBJECTS,
   audit: {
     drain: () => {

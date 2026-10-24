@@ -136,6 +136,10 @@ describe("a member's answer", setUpTime, () => {
     const { activities } = await reached(teams.conversation);
     const messages = activities
       .filter(({ type }) => type === "message")
+      // Not the card offering their own Microsoft 365 (connect-own.ts).
+      .filter(
+        (activity) => !JSON.stringify(activity).includes("/connect-microsoft")
+      )
       .map((each) => JSON.stringify(each));
     expect(messages).toHaveLength(1);
     expect(messages[0]).toContain(answer);

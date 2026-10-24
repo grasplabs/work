@@ -41,9 +41,23 @@ const newAgent = () => ({
   agentId: `agent-${unique()}`,
 });
 
-/** A word no other test's documents hold. */
+const rareLetters = "abcdefghijklmnopqrstuvwxyz";
+
+/** Random letters after the "zq" a rare word starts with. */
+const rareWordLength = 16;
+
+/**
+ * A word no other test's document holds, nor comes close to: a recall that
+ * finds nothing tries trigrams with room for one typo (search.ts), so two
+ * rare words sharing two of their three pieces would find each other. A
+ * UUID's letters alone (a to f, often under ten of them) did, about once in
+ * a thousand pairs; 16 letters of 26 leave pieces no other word shares.
+ */
 const rareWord = (): string =>
-  `zq${crypto.randomUUID().replaceAll(/[^a-f]/gu, "")}`;
+  `zq${Array.from(
+    crypto.getRandomValues(new Uint8Array(rareWordLength)),
+    (byte) => rareLetters.charAt(byte % rareLetters.length)
+  ).join("")}`;
 
 /** A collection of `access` with one document saying `text`. */
 const collectionSaying = async (

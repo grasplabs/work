@@ -63,7 +63,7 @@ export const intakeIds = {
     await ownId("wf", team, work),
 };
 
-/** The Playbook's kind for each fact tag that is one; the rest are the drawing's. */
+/** The brain's statement kind for each fact tag that is one; the rest are the drawing's. */
 const statementKinds: Partial<Record<FactTag, StatementKind>> = {
   system: "tool",
   workaround: "tool",

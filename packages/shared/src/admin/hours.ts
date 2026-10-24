@@ -1,6 +1,6 @@
 /**
  * The one place hours and euros are calculated. Screens never store or type a total; they call
- * these functions. Counting rule from the Playbook: ten forms a day at fifteen minutes of active
+ * these functions. Counting rule: ten forms a day at fifteen minutes of active
  * work is 2.5 hours a day, and people only multiply when each handles their own volume.
  */
 

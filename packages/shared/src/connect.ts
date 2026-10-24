@@ -187,6 +187,17 @@ export const connectionPersonSchema = z.strictObject({
 });
 export type ConnectionPerson = z.infer<typeof connectionPersonSchema>;
 
+/** The classes a company turns on or off: all but `never`, which nothing does. */
+export const companyToolClasses = [
+  "read-own",
+  "read-company",
+  "change-own",
+  "change-company",
+  "reach-others",
+] as const satisfies readonly Exclude<ToolClass, "never">[];
+export const companyToolClassSchema = z.enum(companyToolClasses);
+export type CompanyToolClass = z.infer<typeof companyToolClassSchema>;
+
 /** Starts connecting an account through OAuth. */
 export const startConnectionSchema = z.strictObject({
   person: connectionPersonSchema,
@@ -212,6 +223,22 @@ export const startConnectionSchema = z.strictObject({
   tenant: identifierSchema.optional(),
   /** A path on the deployment's origin; core checks it. */
   returnTo: z.string().startsWith("/").max(returnPathMaxLength),
+  /**
+   * The classes the company turned on for anyone (core's tool-classes.ts):
+   * a suite asks its provider only for their rights (connect's
+   * provider-rights.ts). Absent from a core that predates them, which
+   * gets the rights of the classes on by default.
+   */
+  classes: z
+    .array(companyToolClassSchema)
+    .max(companyToolClasses.length)
+    .optional(),
+  /**
+   * Whether the company pointed Stephen at a shared mailbox for anyone
+   * (core's shared-mailboxes.ts): Microsoft 365 is then asked for shared
+   * mailboxes' rights too. Absent from a core that predates it: not asked.
+   */
+  sharedMailbox: z.boolean().optional(),
 });
 export type StartConnection = z.input<typeof startConnectionSchema>;
 
@@ -506,6 +533,16 @@ export interface ConnectionsApi extends StephenReachApi {
    */
   setToolClass: (
     toolClass: CompanyToolClass,
+    audience: ToolClassAudience
+  ) => Promise<void>;
+  /** The shared mailboxes Stephen is pointed at, and for whom. Admins only. */
+  sharedMailboxes: () => Promise<SharedMailboxSetting[]>;
+  /**
+   * Points Stephen at a shared mailbox for everyone or some teams, or for
+   * nobody. Admins only, never Grasp staff; audited.
+   */
+  pointSharedMailbox: (
+    mailbox: string,
     audience: ToolClassAudience
   ) => Promise<void>;
 }
@@ -808,17 +845,6 @@ export const toolClassOf = ({
   return reach === "own" ? "change-own" : "change-company";
 };
 
-/** The classes a company turns on or off: all but `never`, which nothing does. */
-export const companyToolClasses = [
-  "read-own",
-  "read-company",
-  "change-own",
-  "change-company",
-  "reach-others",
-] as const satisfies readonly Exclude<ToolClass, "never">[];
-export const companyToolClassSchema = z.enum(companyToolClasses);
-export type CompanyToolClass = z.infer<typeof companyToolClassSchema>;
-
 /** Most teams one class may be on for. */
 export const toolClassTeamsMax = 20;
 
@@ -851,6 +877,40 @@ export const defaultToolClassAudiences: Readonly<
   "change-company": { who: "nobody" },
   "reach-others": { who: "nobody" },
 };
+
+/** The classes an admin just turned on, for `ConnectApi.requireClassRights`. */
+export const requireClassRightsSchema = z.strictObject({
+  classes: z.array(companyToolClassSchema).max(companyToolClasses.length),
+  /**
+   * Whether shared mailboxes' rights are needed too: an admin just pointed
+   * Stephen at one, or turned a class on while one is pointed at.
+   */
+  sharedMailbox: z.boolean().optional(),
+});
+export type RequireClassRights = z.input<typeof requireClassRightsSchema>;
+
+/** Most shared mailboxes one company points Stephen at. */
+export const sharedMailboxesMax = 50;
+
+/** A shared mailbox's address, as an admin names it: kept in lower case. */
+export const sharedMailboxSchema = z
+  .email()
+  .max(254)
+  .transform((mailbox) => mailbox.toLowerCase());
+
+/**
+ * A shared mailbox Stephen is pointed at, and for whom (`audience`): the
+ * chat's agent reaches a mailbox other than its person's own only when
+ * pointed at it for them, whatever classes are on.
+ */
+export interface SharedMailboxSetting {
+  mailbox: string;
+  audience: ToolClassAudience;
+  /** The admin who last changed it. */
+  changedBy: string;
+  /** ISO 8601. */
+  changedAt: string;
+}
 
 /** One class, as the company has it now. */
 export interface ToolClassSetting {
@@ -1025,6 +1085,13 @@ export interface PendingAction {
   inputHash: string;
   /** ISO 8601. */
   requestedAt: string;
+  /**
+   * When it ends unconfirmed (ISO 8601): one asked for in a chat on a chat
+   * platform, such as Teams, ends at midnight of the company's day it was
+   * asked on, and is declined as expired after. Absent for one that waits
+   * until it is decided.
+   */
+  endsAt?: string;
   /**
    * The App's approved resource binding it came through, as it served then
    * (`HeldBinding`); null for any other call; `unreadable` when what connect
@@ -1430,7 +1497,7 @@ export type ConnectorEventsAck = z.input<typeof connectorEventsAckSchema>;
  * (`ChannelApi.channelFetch`). Each is added with its hosts and its
  * credential in connect's src/channels.ts when it is switched on.
  */
-export const channelPlatformSchema = z.enum(["teams"]);
+export const channelPlatformSchema = z.enum(["teams", "slack"]);
 export type ChannelPlatform = z.infer<typeof channelPlatformSchema>;
 
 /**
@@ -1531,6 +1598,14 @@ export interface ConnectApi extends PackageRegistryApi, ChannelApi {
   connectionOwners: (
     connectionIds: readonly string[]
   ) => Promise<ConnectionOwner[]>;
+  /**
+   * Asks the connections whose grant lacks the rights of `classes`, those
+   * an admin just turned on, to be connected again (`needs_reauth`), in
+   * place. How many it asked.
+   */
+  requireClassRights: (
+    request: RequireClassRights
+  ) => Promise<{ reconnect: number }>;
   /**
    * Deletes the connection's tokens, revoking them at the provider where it
    * can (`revoked`); the connection takes no more calls.
@@ -1900,6 +1975,8 @@ export const connectErrors = defineErrorFamily({
   "connect.action_failed": "The action reported an error.",
   "connect.pending_not_found":
     "There's no such action waiting for you: it was confirmed or declined, or it isn't yours.",
+  "connect.pending_expired":
+    "This action waited past the end of the day it was asked on, so it ended and nothing was done. Ask again.",
   "connect.pending_changed":
     "This isn't the action you were shown, so nothing was done. Look at it again.",
   "connect.held":
@@ -1919,6 +1996,10 @@ export const connectErrors = defineErrorFamily({
     "Your company hasn't turned this kind of action on for you, so it wasn't done. An admin can turn it on.",
   "connect.class_unknown":
     "It isn't known what kind of action this is, so it wasn't done.",
+  "connect.never":
+    "Grasp never deletes, shares, forwards, sets rules or settings, or pays, whatever is allowed, so it wasn't done.",
+  "connect.mailbox_not_pointed":
+    "This mailbox isn't yours, and your company hasn't pointed Grasp at it for you, so nothing was done in it. An admin can.",
 });
 
 /**
