@@ -47,6 +47,7 @@ import type { SQL } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { z } from "zod";
 
+import { teamsBotOf, teamsBotVars } from "../clients/teams-bot.ts";
 import { CloudflareApiError } from "../cloudflare/api.ts";
 import type { CloudflareApi } from "../cloudflare/api.ts";
 import { deployVersions, liveVersion } from "../cloudflare/workers.ts";
@@ -256,6 +257,7 @@ const deployOf = async (db: AdminDatabase, id: string) => {
       generation: clients.generation,
       rotationLiveAt: clients.rotationLiveAt,
       signIn: clients.signIn,
+      teamsBot: clients.teamsBot,
     })
     .from(clientDeploys)
     .innerJoin(clients, eq(clients.id, clientDeploys.clientId))
@@ -789,7 +791,12 @@ const uploadApp = async (
     context.now?.() ?? new Date(),
     sealed
   );
-  const workerVars = app === coreApp ? vars : {};
+  // The client's Teams bot, as staff set it, on connect and core: read
+  // with the deploy, as its sign-in is.
+  const workerVars = {
+    ...(app === coreApp ? vars : {}),
+    ...teamsBotVars(app, teamsBotOf(deploy.teamsBot)),
+  };
   checkBindingNames(worker, workerVars, workerSecretValues);
   const mailSender = mailSenderOf(context, clientId);
   const fingerprint = await uploadFingerprint(secrets.clientKey, {
