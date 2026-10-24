@@ -127,6 +127,13 @@
       "when": 1792768425108,
       "tag": "0017_call_changes",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1792845936126,
+      "tag": "0018_granted_scopes",
+      "breakpoints": true
     }
   ]
 }

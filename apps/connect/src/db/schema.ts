@@ -425,6 +425,12 @@ export const composioCleanups = sqliteTable(
  * changes nothing (it would store stale tokens, or bring deleted ones
  * back). `refresh_until` is a short lease: while it runs, one refresh is
  * under way and others wait for its result, across isolates.
+ *
+ * `granted_scopes` is what the provider last said these tokens were
+ * granted (its token answer's `scope`), as it said it; null when it said
+ * nothing, or for tokens stored before connect kept it. It tells a
+ * connection made before its connector asked for a right from one the
+ * provider refuses for another reason (tokens.ts `markIfGrantLacks`).
  */
 export const connectionTokens = sqliteTable("connection_tokens", {
   connectionId: text("connection_id")
@@ -434,6 +440,7 @@ export const connectionTokens = sqliteTable("connection_tokens", {
   accessExpiresAt: timestamp("access_expires_at").notNull(),
   generation: integer().notNull(),
   refreshUntil: timestamp("refresh_until"),
+  grantedScopes: text("granted_scopes"),
   updatedAt: timestamp("updated_at").notNull(),
 });
 
