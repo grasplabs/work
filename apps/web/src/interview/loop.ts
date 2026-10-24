@@ -22,7 +22,10 @@ import { readingSeconds } from "../onboarding/setup.ts";
 import { askStory, askTurn, turnFailed } from "./api.ts";
 import type { EarlyEvent, TurnFailed } from "./api.ts";
 import type { DotSign } from "./dot-signs.ts";
+import { openEar } from "./ear.ts";
+import type { Ear, EarEvent } from "./ear.ts";
 import { keepNow, linkNow, progressNow, update } from "./kept.ts";
+import { hangUp, muteMic } from "./mic.ts";
 import {
   afterTurn,
   approved,
@@ -48,7 +51,11 @@ import type { LoopWords } from "./words.ts";
 // agree to it, put a line right or take one out. What was said is kept
 // with the interview (kept.ts); this is only the moment. Ported from the
 // prototype (grasplabs/prototype, packages/grasp:
-// src/data/interview-loop.ts), with his voice; his ears come later.
+// src/data/interview-loop.ts), with his voice and his ears: whoever chose
+// to talk is listened to while it is their turn (ear.ts), their words show
+// as they say them, and once a stretch is written down it is their answer,
+// as if typed. When to answer (turn-taking) is plain for now: once all
+// they said is written down and they aren't speaking.
 //
 // When core can't be reached, a turn is asked for again by itself, twice.
 // Only when that doesn't help does anyone notice: Stephen says so himself,
@@ -142,8 +149,15 @@ export const useLoop = (): LoopState =>
 let words: LoopWords | null = null;
 /** Whether the conversation is on screen: nothing that comes back late does anything once it is not. */
 let on = false;
-/** What they typed that he has not answered yet. */
-let carry: string[] = [];
+/** What they typed or said that he has not answered yet. */
+let carry: { text: string; typed: boolean }[] = [];
+/** Stephen's ears, while the conversation is on and they chose to talk. */
+let ear: Ear | null = null;
+let earOpening = false;
+/** What is heard so far of the stretch they are saying. */
+let live = "";
+/** The stretches they said whose words are still to come. */
+const unwritten = new Set<number>();
 /** The turn on its way: how to give it up, and whether his line from it is out. */
 interface Pending {
   giving: AbortController;
@@ -202,6 +216,8 @@ const show = (
   more: Partial<LoopState> = {}
 ): void => {
   state = { ...state, doing, telling: null, ...more };
+  // He listens only while it is their turn: never to himself.
+  ear?.setDeaf(doing !== "listening");
   set({ sign: more.sign === undefined ? signFor(doing) : more.sign });
 };
 
@@ -226,14 +242,17 @@ const drop = (): void => {
   window.clearTimeout(again);
 };
 
-/** What they typed since his last line, for the bubble. */
+/** What they typed and said since his last line, with what is heard of what they are saying, for the bubble. */
 const bubble = (): void => {
   window.clearTimeout(noting);
+  const text = [...carry.map((part) => part.text), live]
+    .filter((part) => part !== "")
+    .join(" ");
   set({
     said:
-      carry.length === 0
+      text === "" && unwritten.size === 0
         ? null
-        : { text: carry.join(" "), marks: [], waiting: true },
+        : { text, marks: [], waiting: true },
     sign: signFor(state.doing),
   });
 };
@@ -258,9 +277,11 @@ const wroteDown = (): void => {
   }, penMs);
 };
 
-/** He waits for their answer, in the box at the bottom. */
+/** He waits for their answer: in the box at the bottom, and by ear when they chose to talk. */
 const listen = (): void => {
   show("listening");
+  // oxlint-disable-next-line no-use-before-define -- hearing what they say leads back to answering them
+  void hearken();
 };
 
 /**
@@ -499,8 +520,14 @@ const theirs = (
 
 /** What they typed since his last line, as one line of theirs; none when nothing. */
 const saidNow = (): InterviewLine | undefined => {
-  const text = carry.join(" ").trim();
-  return text === "" ? undefined : { from: "person", text, typed: true };
+  const text = carry
+    .map((part) => part.text)
+    .join(" ")
+    .trim();
+  const typed = carry.every((part) => part.typed);
+  return text === ""
+    ? undefined
+    : { from: "person", text, ...(typed ? { typed: true as const } : {}) };
 };
 
 /** The stories asked for, by the lines they are of: each is asked for once. */
@@ -1012,7 +1039,89 @@ const ask = async (
   });
 };
 
-/** Everything they typed since his last line goes to him. */
+/**
+ * Whether to answer now: once all they said is written down, they aren't
+ * speaking, and it is their turn. Turn-taking (GRA-383) makes this finer.
+ */
+const settle = (): void => {
+  if (
+    !on ||
+    carry.length === 0 ||
+    unwritten.size > 0 ||
+    ear?.talking === true ||
+    state.doing !== "listening"
+  ) {
+    return;
+  }
+  // oxlint-disable-next-line no-use-before-define -- answering is where settling leads
+  void commit();
+};
+
+/** What the ear hears, while the conversation is on. */
+const heard = (event: EarEvent): void => {
+  if (!on) {
+    return;
+  }
+  if (event.type === "stretch-start") {
+    unwritten.add(event.stretch);
+    live = "";
+    bubble();
+  } else if (event.type === "partial") {
+    live = event.text;
+    bubble();
+  } else if (event.type === "final" || event.type === "unheard") {
+    unwritten.delete(event.stretch);
+    live = "";
+    if (event.type === "final" && event.text !== "") {
+      carry.push({ text: event.text, typed: false });
+    }
+    bubble();
+    if (carry.length === 0 && unwritten.size === 0) {
+      set({ said: null });
+    }
+    settle();
+  }
+};
+
+/** Opens his ears, once, for whoever chose to talk; without a microphone they type. */
+const hearken = async (): Promise<void> => {
+  const link = linkNow();
+  if (
+    ear !== null ||
+    earOpening ||
+    words === null ||
+    link === null ||
+    progressNow().mode !== "talk"
+  ) {
+    return;
+  }
+  earOpening = true;
+  const opened = await openEar({ locale: words.locale, link });
+  earOpening = false;
+  if (opened === null) {
+    return;
+  }
+  if (!on) {
+    opened.close();
+    return;
+  }
+  ear = opened;
+  opened.on(heard);
+  opened.setDeaf(state.doing !== "listening");
+};
+
+/** Lets go of his ears and of the microphone. */
+const unhear = (): void => {
+  ear?.close();
+  ear = null;
+  live = "";
+  unwritten.clear();
+  hangUp();
+  // A new conversation never starts muted.
+  muteMic(false);
+};
+
+/** Everything they typed or said since his last line goes to him. */
 const commit = async (): Promise<void> => {
   rest();
   const said = saidNow();
@@ -1039,7 +1148,7 @@ export const sendTyped = (text: string): void => {
   }
   speaking += 1;
   drop();
-  carry.push(said);
+  carry.push({ text: said, typed: true });
   bubble();
   void commit();
 };
@@ -1104,6 +1213,7 @@ export const stopLoop = ({ keep = true }: { keep?: boolean } = {}): void => {
   speaking += 1;
   drop();
   carry = [];
+  unhear();
   rest();
   window.clearTimeout(noting);
   window.removeEventListener("online", tryAgain);

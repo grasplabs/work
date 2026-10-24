@@ -7392,6 +7392,16 @@ msgstr "Naar project verplaatsen"
 msgid "Moved old entries out of the audit trail"
 msgstr "Oude vermeldingen uit het auditlogboek verplaatst"
 
+#: src/interview/voice-bar.tsx
+msgctxt "turn your microphone off for a moment"
+msgid "Mute"
+msgstr "Dempen"
+
+#: src/interview/voice-bar.tsx
+msgctxt "your microphone is off for a moment"
+msgid "Muted"
+msgstr "Gedempt"
+
 #: src/chat/project-dialog.tsx
 #: src/onboarding/interviews-progress.tsx
 #: src/routes/_shell.settings.packages.index.tsx
@@ -13320,6 +13330,11 @@ msgstr "Onbekende uitkomsten"
 #: src/brain/brain.ts
 msgid "Unknown source"
 msgstr "Onbekende bron"
+
+#: src/interview/voice-bar.tsx
+msgctxt "turn your microphone back on"
+msgid "Unmute"
+msgstr "Dempen opheffen"
 
 #: src/engines/app-page.tsx
 #: src/engines/app-status.tsx

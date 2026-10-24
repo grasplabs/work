@@ -353,6 +353,28 @@ export interface Took {
   seconds?: number;
 }
 
+/** The most words transcription is asked to listen out for. */
+export const listeningTermsMax = 30;
+
+/**
+ * Words to listen out for, as transcription takes them: each once,
+ * whatever its case, longer than two characters and shorter than forty,
+ * the first `listeningTermsMax` of them, in the order given.
+ */
+const listenFor = (terms: readonly string[]): string[] => {
+  const seen = new Set<string>();
+  const kept: string[] = [];
+  for (const term of terms) {
+    const word = term.replaceAll(/\s+/gu, " ").trim();
+    const key = word.toLowerCase();
+    if (word.length > 2 && word.length < 40 && !seen.has(key)) {
+      seen.add(key);
+      kept.push(word);
+    }
+  }
+  return kept.slice(0, listeningTermsMax);
+};
+
 /**
  * A live transcription, as the onboarding notes it: its ID, who it is
  * for, and the person whose link it is on, if it is on one.
@@ -1485,6 +1507,35 @@ export class Onboarding extends DurableObject<Env> {
       known: known.join("\n\n"),
       terms: [...new Set(terms)],
     };
+  }
+
+  /**
+   * The words to listen out for when someone talks (`listenFor`): the
+   * company's name, the names of `person`'s team and its lead, the
+   * company's own words from Stephen's setup, and the tools the shared
+   * documents name. Without `person`, as for an admin, the team's names
+   * are left out.
+   */
+  async listeningTerms(person?: string): Promise<string[]> {
+    const roster = this.#roster();
+    const own = roster?.people.find(({ id }) => id === person);
+    const team = roster?.teams.find(({ id }) => id === own?.team);
+    const names = (roster?.people ?? [])
+      .filter(
+        (each) =>
+          own !== undefined &&
+          (each.team === own.team || each.id === team?.lead) &&
+          !each.away
+      )
+      .map(({ name }) => firstName(name));
+    return listenFor([
+      await companyName(this.env),
+      ...(own === undefined ? [] : [firstName(own.name)]),
+      ...(team === undefined ? [] : [team.name]),
+      ...names,
+      ...this.stephen().setup.terms,
+      ...this.documents().flatMap(({ reading }) => reading.tools),
+    ]);
   }
 
   /**
@@ -2698,6 +2749,26 @@ export class Onboarding extends DurableObject<Env> {
     if (session.person === undefined) {
       this.#deliverAudit();
     }
+  }
+
+  /**
+   * Counts a recording written down for `who` (hear.ts): its seconds,
+   * against the same budget as live transcription's, and in the
+   * onboarding's use. Never anything heard.
+   */
+  countHeard(
+    who: string,
+    purpose: Took["purpose"],
+    seconds: number,
+    now: string = new Date().toISOString()
+  ): void {
+    this.ctx.storage.transactionSync(() => {
+      this.#countSeconds(
+        who,
+        { purpose, model: "transcription", seconds },
+        now
+      );
+    });
   }
 
   /** Adds `took`'s seconds to `who`'s today, and to the onboarding's use; the days before today go. */
