@@ -23,23 +23,21 @@ export default defineConnector({
   name: "microsoft-365",
   version: "0.3.0",
   provider: "microsoft",
+  // The most any class asks for: connect asks only the rights of the
+  // classes a company turned on (apps/connect/src/provider-rights.ts).
   scopes: [
     "User.Read",
     "Mail.ReadWrite",
-    "Mail.ReadWrite.Shared",
     "Mail.Send",
-    "Mail.Send.Shared",
     // The categories a person has, so mail.categorise sets only those.
     "MailboxSettings.Read",
-    "Calendars.Read",
     "Calendars.ReadWrite",
     "Calendars.Read.Shared",
-    "Files.Read.All",
     // Changing a workbook's rows: in the person's own files, and in those
     // SharePoint lets them change; and drafts in the person's own OneDrive
     // (files.createDraft, under /me/drive).
     "Files.ReadWrite.All",
-    "Sites.Read.All",
+    "Sites.ReadWrite.All",
     "Tasks.ReadWrite",
   ],
   hosts: [graphHost],

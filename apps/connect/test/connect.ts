@@ -43,7 +43,7 @@ export const allowedTools = [
   "mail.bounce",
   "mail.draft",
   "mail.export",
-  "mail.forward",
+  "mail.relay",
   "mail.list",
   "mail.mixed",
   "mail.open",

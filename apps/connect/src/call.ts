@@ -49,6 +49,7 @@ import type {
   McpTool,
   McpToolResult,
 } from "./mcp.ts";
+import { isNeverTool } from "./never.ts";
 import { hold, waitingUnder } from "./pending.ts";
 import type { HeldAction } from "./pending.ts";
 import {
@@ -267,6 +268,10 @@ const actionFor = async (
   open: () => Promise<McpServer>;
   openLookup: () => Promise<McpServer>;
 }> => {
+  // Never, whatever is allowed: before anything else is looked up.
+  if (isNeverTool(action)) {
+    throw connectErrors.create("connect.never");
+  }
   if (connection.serverKind === "native") {
     const native = nativeAction(connection, action);
     return {
