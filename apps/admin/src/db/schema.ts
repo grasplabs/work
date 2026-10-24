@@ -86,6 +86,13 @@ export const clients = sqliteTable(
      */
     signIn: text("sign_in"),
     /**
+     * Its own Teams bot, as staff set it: JSON (`teamsBotSchema`,
+     * src/clients/teams-bot.ts), the bot's app id, its tenant and the day
+     * its secret expires, never the secret. Every deploy gives its connect
+     * and core the bot's id from it; null for a client without a bot.
+     */
+    teamsBot: text("teams_bot"),
+    /**
      * When staff last changed what a deploy sets on its core: its sign-in
      * or a setting (src/clients/settings.ts). A rollout deploys a client
      * whose latest done deploy started before this, even on the release
