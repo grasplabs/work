@@ -4,7 +4,7 @@ import { interviewApiPath } from "@grasp-os/shared/interview-links";
 import type { InterviewLine } from "@grasp-os/shared/interview-links";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { speakerVoices, voiceModels } from "../src/onboarding/spoken-lines.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
@@ -145,12 +145,17 @@ const inTheBrain = async (ids: Ids, said: Said) => {
 };
 
 /**
- * Takes the store's alarm away, so that what is due is given to the brain
- * only when the test asks: the alarm would otherwise give it first.
+ * Holds the store's own alarm for the test: each test draws what is due
+ * and gives the team to the brain itself, step by step, as the alarm would
+ * (`drawAll`, `intakeNext`). A delete or a drawing sets the alarm half a
+ * second on, and on a slow runner it got there first: its drawing's
+ * `model.call` landed amid a delete's audit events, or it gave the team to
+ * the brain before the test did. Deleting the alarm isn't enough: the next
+ * delete or drawing sets it again, and one already going runs on.
  */
-const withoutAlarm = async (): Promise<void> => {
-  await runInDurableObject(onboardingStore(env), async (_instance, state) => {
-    await state.storage.deleteAlarm();
+const holdAlarm = async (): Promise<void> => {
+  await runInDurableObject(onboardingStore(env), (instance) => {
+    vi.spyOn(instance, "alarm").mockResolvedValue();
   });
 };
 
@@ -339,6 +344,8 @@ const goneFromStore = async (person: string): Promise<void> => {
 };
 
 describe("deleting an interview", { timeout: 180_000 }, () => {
+  beforeEach(holdAlarm);
+
   it.each(ways)(
     "$way takes out their words, their facts, their part in every drawing and the brain's records on them, and the work is drawn again without them (D1, D2, W7)",
     async ({ remove, audited }) => {
@@ -610,7 +617,6 @@ describe("deleting an interview", { timeout: 180_000 }, () => {
     await mapped(ids);
     await toldWith(ids, said);
     await drawAll(ids);
-    await withoutAlarm();
     // Max deletes his interview as the brain is about to keep the team.
     let deleting: Promise<number> | undefined;
     const batch = env.DB.batch.bind(env.DB);

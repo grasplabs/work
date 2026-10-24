@@ -10,7 +10,9 @@ import { createServerFn } from "@tanstack/react-start";
 import { env } from "cloudflare:workers";
 import { z } from "zod";
 
-import { adminDatabase } from "../db/act.ts";
+import { sendStaffAlert } from "../alerts.ts";
+import type { AlertOutcome } from "../alerts.ts";
+import { adminDatabase, audit } from "../db/act.ts";
 import { rotateClientSecrets } from "../deploy/rotation.ts";
 import { adminReader } from "./admin.ts";
 import { applySettings } from "./apply.ts";
@@ -22,11 +24,14 @@ import {
   setRing,
   setSealedSecret,
   setSignIn,
+  setTeamsBot,
   SettingsError,
   signInInputSchema,
+  teamsBotInputSchema,
 } from "./settings.ts";
 import type { SettingsErrorCode } from "./settings.ts";
 import { getClientSetup } from "./setup.ts";
+import { clientTeamsPackage } from "./teams-package.ts";
 
 const clientSchema = z.object({ clientId: z.string().min(1) });
 
@@ -130,6 +135,45 @@ export const setSealedSecretFn = createServerFn({ method: "POST" })
   .handler(
     async ({ data, context }) =>
       await change(async () => await setSealedSecret(env, context.staff, data))
+  );
+
+/**
+ * Sends a test alert about a client to the staff alerts' channel
+ * (src/alerts.ts), to see the channel works: audited as the staff member
+ * who sent it (`alert.test`), and answered with what became of it.
+ */
+export const sendTestAlertFn = createServerFn({ method: "POST" })
+  .validator(clientSchema)
+  .handler(async ({ data, context }): Promise<AlertOutcome> => {
+    await audit(adminDatabase(env.DB), context.staff, {
+      action: "alert.test",
+      clientId: data.clientId,
+    });
+    return await sendStaffAlert(env, { clientId: data.clientId, kind: "test" });
+  });
+
+/**
+ * Sets a client's Teams bot (its app id, tenant and secret's expiry), or
+ * takes it away with null: its connect and core get it with the next
+ * deploy.
+ */
+export const setTeamsBotFn = createServerFn({ method: "POST" })
+  .validator(teamsBotInputSchema)
+  .handler(
+    async ({ data, context }) =>
+      await change(async () => await setTeamsBot(env, context.staff, data))
+  );
+
+/**
+ * A client's Teams app package (src/clients/teams-package.ts), for its IT
+ * to upload to Teams; null for a client without a bot. Nothing in it is
+ * secret: the bot's id and the client's name.
+ */
+export const fetchTeamsPackageFn = createServerFn({ method: "GET" })
+  .validator(clientSchema)
+  .handler(
+    async ({ data }) =>
+      await clientTeamsPackage(adminDatabase(env.DB), data.clientId)
   );
 
 /**
