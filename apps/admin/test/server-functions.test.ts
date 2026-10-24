@@ -193,7 +193,7 @@ const changes: {
         make: async () =>
           await callServerFn(
             approveRolloutFn,
-            { rolloutId },
+            { rolloutId, checks: { evalPassed: true, demoSent: true } },
             { email: caller }
           ),
         audited: {
