@@ -5,6 +5,7 @@ import { fileTools } from "./files.ts";
 import { graphHost } from "./graph.ts";
 import { listTools } from "./lists.ts";
 import { mailReplyTools } from "./mail-replies.ts";
+import { mailSortingTools } from "./mail-sorting.ts";
 import { mailTools } from "./mail.ts";
 import { todoTools } from "./todo.ts";
 import { workbookTools } from "./workbook.ts";
@@ -26,6 +27,8 @@ export default defineConnector({
     "Mail.ReadWrite.Shared",
     "Mail.Send",
     "Mail.Send.Shared",
+    // The categories a person has, so mail.categorise sets only those.
+    "MailboxSettings.Read",
     "Calendars.Read",
     "Calendars.ReadWrite",
     "Calendars.Read.Shared",
@@ -40,6 +43,7 @@ export default defineConnector({
   tools: [
     ...mailTools,
     ...mailReplyTools,
+    ...mailSortingTools,
     ...calendarTools,
     ...fileTools,
     ...listTools,

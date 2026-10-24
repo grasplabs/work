@@ -261,6 +261,7 @@ const microsoft: OAuthProviderConfig = {
     "Mail.ReadWrite.Shared",
     "Mail.Send",
     "Mail.Send.Shared",
+    "MailboxSettings.Read",
     "Calendars.Read",
     "Calendars.ReadWrite",
     "Calendars.Read.Shared",

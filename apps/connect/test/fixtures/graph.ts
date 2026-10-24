@@ -18,6 +18,25 @@ export const invoices = "invoices@example.com";
 /** Another mailbox of the same tenant. */
 export const ceo = "ceo@example.com";
 
+/** Where the second page of a person's categories starts. */
+export const categoriesSkipToken = "c4e8a2f6-1b3d-4f7a-9c2e-5d8b1a6f3e07";
+
+/**
+ * `GET /outlook/masterCategories`: the categories the person has, over
+ * two pages.
+ */
+export const masterCategories = (skipToken: string | null) =>
+  skipToken === categoriesSkipToken
+    ? {
+        value: [
+          { id: "a7c2", displayName: "Waiting on others", color: "preset3" },
+        ],
+      }
+    : {
+        value: [{ id: "f1d3", displayName: "Finance", color: "preset0" }],
+        "@odata.nextLink": `https://graph.microsoft.com/v1.0/users('person%40acme.test')/outlook/masterCategories?%24select=displayName&%24skiptoken=${categoriesSkipToken}`,
+      };
+
 /** A SharePoint document library. */
 export const financeDrive =
   "b!kR3pQ9xLmUe2Vt7Wj4hYc1s0nAoBdFgHiJkLmNoPqRsTuVwXyZaBcDeFgHiJkLm";
@@ -338,8 +357,9 @@ export const mailFolder = (id: string) =>
   id === "archive" || id === archiveFolderId
     ? {
         "@odata.context":
-          "https://graph.microsoft.com/v1.0/$metadata#users('invoices%40example.com')/mailFolders(id)/$entity",
+          "https://graph.microsoft.com/v1.0/$metadata#users('invoices%40example.com')/mailFolders(id,displayName)/$entity",
         id: archiveFolderId,
+        displayName: "Archive",
       }
     : undefined;
 
@@ -348,6 +368,17 @@ export const moved = (mailbox: string, n: number) => ({
   ...messageSummary(mailbox, n),
   id: movedId(mailbox, n),
   parentFolderId: archiveFolderId,
+});
+
+/** What `PATCH /messages/{id}` returns: the message, with its changes. */
+export const patched = (
+  mailbox: string,
+  n: number,
+  changes: { flag?: unknown; categories?: unknown }
+) => ({
+  ...messageSummary(mailbox, n),
+  flag: changes.flag ?? { flagStatus: "notFlagged" },
+  categories: changes.categories ?? [],
 });
 
 /** What `POST /messages` returns for a new draft. */
