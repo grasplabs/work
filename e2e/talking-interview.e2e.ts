@@ -34,8 +34,17 @@ import { signInStaff } from "./people.ts";
 // in interview.e2e.ts. Its own file, as the fake microphone is the
 // browser's and plays this file's voice.
 
-/** The voice's sample rate, and how long it speaks and then pauses, in seconds. */
+/**
+ * The voice's sample rate, and in seconds how long the room is quiet
+ * first, then how long it speaks and pauses. The fake microphone starts
+ * the file over each time the page opens the microphone, and the ear opens
+ * it once Stephen has asked, so without the quiet first the voice starts
+ * as the ear does: there is no second before it to keep, and the stretch
+ * sent is only what is heard of the voice after it opened. The quiet is
+ * longer than the second kept (ear.ts), so that second is all there.
+ */
 const rate = 16_000;
+const quietFor = 1.5;
 const speaksFor = 1.6;
 const pausesFor = 3;
 
@@ -73,8 +82,12 @@ const voiceFile = path.join(os.tmpdir(), "grasp-e2e-talking.wav");
 writeFileSync(
   voiceFile,
   wavOf(
-    Array.from({ length: (speaksFor + pausesFor) * rate }, (_, at) =>
-      at < speaksFor * rate ? voiceAt(at) : 0
+    Array.from(
+      { length: (quietFor + speaksFor + pausesFor) * rate },
+      (_, at) => {
+        const voiced = at - quietFor * rate;
+        return voiced >= 0 && voiced < speaksFor * rate ? voiceAt(voiced) : 0;
+      }
     )
   )
 );
@@ -149,8 +162,15 @@ const secondBytes = rate * 2;
 interface Line {
   refused: string[];
   starts: number;
-  /** Bytes of audio each stretch sent, in order. */
-  stretches: number[];
+  /**
+   * The largest frame of each stretch, in bytes, in order: the second kept
+   * before it, which goes out at once as it starts, while what follows goes
+   * in batches of a tenth of a second (as does the silence that keeps the
+   * line open).
+   */
+  kept: number[];
+  /** Bytes each stretch sent after its largest frame, in order: what was heard as they talked. */
+  after: number[];
 }
 
 /** A text frame's JSON, or nothing. */
@@ -171,11 +191,12 @@ const jsonOf = (message: string | Buffer): unknown => {
  * the stretch's words a moment after the page commits it.
  */
 const liveLine = async (page: Page): Promise<Line> => {
-  const line: Line = { refused: [], starts: 0, stretches: [] };
+  const line: Line = { refused: [], starts: 0, kept: [], after: [] };
   await page.routeWebSocket(
     "**/api/transcription",
     (socket: WebSocketRoute) => {
       let heard = 0;
+      let largest = 0;
       socket.onMessage((message) => {
         if (typeof message !== "string") {
           // Only audio core takes: 16-bit samples, at most 32 KiB a frame.
@@ -183,6 +204,7 @@ const liveLine = async (page: Page): Promise<Line> => {
             line.refused.push(`frame of ${message.length}`);
           }
           heard += message.length;
+          largest = Math.max(largest, message.length);
           const shown =
             partials[
               Math.min(Math.floor(heard / (secondBytes / 2)), partials.length) -
@@ -213,8 +235,10 @@ const liveLine = async (page: Page): Promise<Line> => {
           line.refused.push(message);
           return;
         }
-        line.stretches.push(heard);
+        line.kept.push(largest);
+        line.after.push(heard - largest);
         heard = 0;
+        largest = 0;
         setTimeout(() => {
           socket.send(JSON.stringify({ type: "final", text: said, words: [] }));
         }, settleMs);
@@ -259,65 +283,6 @@ const watchTimes = async (page: Page, words: string): Promise<void> => {
   }, words);
 };
 
-/** What the loop tells (`grasp:interview-loop`), as far as this test reads it. */
-const loopSchema = z.array(
-  z.union([
-    z.object({
-      happened: z.object({
-        type: z.string(),
-        at: z.number(),
-        stretch: z.number().optional(),
-      }),
-    }),
-    z.object({ did: z.object({ type: z.string() }) }),
-  ])
-);
-
-/** Notes on `window.loopEvents` what the interview's loop tells. */
-const watchLoop = async (page: Page): Promise<void> => {
-  await page.addInitScript(() => {
-    const told: unknown[] = [];
-    // `loopEventName` in apps/web/src/interview/loop.ts.
-    window.addEventListener("grasp:interview-loop", (event) => {
-      if (event instanceof CustomEvent) {
-        told.push(event.detail);
-      }
-    });
-    Object.assign(window, { loopEvents: told });
-  });
-};
-
-/** The ear kept at most this much of what it heard before a stretch began (ear.ts). */
-const keptMs = 1000;
-
-/**
- * The first stretch, in ms on the page's clock: how long it went on, and
- * how much the ear had heard before it began, since it last began to listen.
- */
-const heardOf = (
-  told: z.infer<typeof loopSchema>
-): { span: number; before: number } => {
-  const happened = told.flatMap((event) =>
-    "happened" in event ? [event.happened] : []
-  );
-  const start = happened.find(
-    ({ type, stretch }) => type === "stretch-start" && stretch === 1
-  );
-  const end = happened.find(
-    ({ type, stretch }) => type === "stretch-end" && stretch === 1
-  );
-  const listened = happened.findLast(
-    ({ type, at }) => type === "listen" && at <= (start?.at ?? 0)
-  );
-  if (start === undefined || end === undefined || listened === undefined) {
-    return { span: Number.NaN, before: Number.NaN };
-  }
-  return {
-    span: end.at - start.at,
-    before: Math.min(start.at - listened.at, keptMs),
-  };
-};
-
 /** Opens the link and starts the interview by talking, through the sound check. */
 const startTalking = async (page: Page, link: string): Promise<void> => {
   await page.goto(link);
@@ -343,7 +308,6 @@ test("their words show while they talk, and all of them a moment after they stop
   const asked = await turns(page);
   const line = await liveLine(page);
   await watchTimes(page, said);
-  await watchLoop(page);
 
   await startTalking(page, link);
 
@@ -362,27 +326,24 @@ test("their words show while they talk, and all of them a moment after they stop
   );
   const commit = times.commits[0] ?? Number.NaN;
   const shown = times.shown.find((at) => at >= commit) ?? Number.NaN;
-  const heard = heardOf(
-    loopSchema.parse(
-      await page.evaluate((): unknown => Reflect.get(window, "loopEvents"))
-    )
-  );
   expect({
     refused: line.refused,
     started: line.starts >= 1,
-    // A stretch goes out with what was heard before it began, up to a
-    // second, so it is more than its own voice. Where the voice already
-    // ran when he stopped and the ear began to listen, only that much was
-    // heard of it: the microphone plays it over and over, whatever he does.
-    stretch:
-      (line.stretches[0] ?? 0) >=
-      ((heard.span + heard.before) / 1000) * secondBytes * 0.8,
+    // A stretch goes out with the second before its voice was known, so
+    // its start is in it: the quiet before the voice, all of that second.
+    kept: (line.kept[0] ?? 0) >= secondBytes * 0.9,
+    // And the voice as it goes on: all of it once known, a few tenths of a
+    // second in (`voicedLeastMs` in ear.ts, and the moments before it), and
+    // the pause that ends it. A line that stopped sending after the kept
+    // second would carry only the 0.4 s it pads a short stretch to.
+    after: (line.after[0] ?? 0) >= (speaksFor - 0.4) * secondBytes,
     answer: answer?.lines.at(-1),
     inTime: shown - commit <= 500,
   }).toStrictEqual({
     refused: [],
     started: true,
-    stretch: true,
+    kept: true,
+    after: true,
     answer: { from: "person", text: said },
     inTime: true,
   });
