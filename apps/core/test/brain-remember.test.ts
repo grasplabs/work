@@ -1,4 +1,4 @@
-import type { CommandReceipt } from "@grasp-os/shared/brain-api";
+import type { CommandReceipt } from "@grasp-os/brain/contract";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 

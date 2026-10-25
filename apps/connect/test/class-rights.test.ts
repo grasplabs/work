@@ -65,7 +65,7 @@ const askedAgain = { status: "needs_reauth", tokens: 0 };
 
 /** What the defaults' consent is granted, as Entra's answer lists it. */
 const defaultGrant =
-  "openid profile email offline_access User.Read Mail.ReadWrite MailboxSettings.Read Calendars.ReadWrite Files.ReadWrite.All Tasks.ReadWrite";
+  "openid profile email offline_access User.Read Mail.ReadWrite MailboxSettings.Read Calendars.ReadWrite Files.ReadWrite.All Tasks.ReadWrite Notes.ReadWrite";
 
 describe("a consent", () => {
   it("asks Microsoft only for the rights of the classes the company turned on", async () => {
@@ -76,6 +76,7 @@ describe("a consent", () => {
       "Calendars.ReadWrite",
       "Files.ReadWrite.All",
       "Tasks.ReadWrite",
+      "Notes.ReadWrite",
     ];
     await expect(askedFor()).resolves.toStrictEqual(rights(...defaults));
     await expect(askedFor(["read-own", "change-own"])).resolves.toStrictEqual(
@@ -87,7 +88,8 @@ describe("a consent", () => {
         "Mail.Read",
         "MailboxSettings.Read",
         "Calendars.Read",
-        "Files.Read"
+        "Files.Read",
+        "Notes.Read"
       )
     );
     await expect(
@@ -102,9 +104,12 @@ describe("a consent", () => {
         "Mail.Read",
         "MailboxSettings.Read",
         "Calendars.Read",
+        "Notes.Read",
         "Files.ReadWrite.All",
         "Calendars.Read.Shared",
-        "Sites.ReadWrite.All"
+        "Sites.ReadWrite.All",
+        // Planner's: changing a plan's tasks takes in reading them.
+        "Tasks.ReadWrite"
       )
     );
   });
@@ -285,12 +290,11 @@ describe("a class turned on", () => {
     // An answer that lists nothing, as kept before: the old wide set.
     const annas = await connectAccount(providers, anna, ownAccount(anna));
 
-    await exports.default.requireClassRights({
-      classes: ["read-company", "reach-others"],
-    });
+    await exports.default.requireClassRights({ classes: ["reach-others"] });
     await expect(stored(annas)).resolves.toStrictEqual(active);
 
-    await exports.default.requireClassRights({ classes: ["change-company"] });
+    // Read company now reads Planner too, which the wide set never asked.
+    await exports.default.requireClassRights({ classes: ["read-company"] });
     await expect(stored(annas)).resolves.toStrictEqual(askedAgain);
   });
 

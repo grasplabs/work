@@ -228,7 +228,7 @@ const versionOf = (
 };
 
 /** A file of `drive`, as Graph describes it, or a ToolError. */
-const fileIn = async (drive: string, id: string): Promise<GraphItem> => {
+export const fileIn = async (drive: string, id: string): Promise<GraphItem> => {
   const item = await graphJson(
     graphUrl(`/drives/${segment(drive)}/items/${segment(id)}`, {
       $select: itemFields,

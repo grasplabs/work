@@ -191,6 +191,66 @@ describe("a Composio tool Grasp didn't class", () => {
   });
 });
 
+describe("a chat agent's read in a company app pointed at within some resources", () => {
+  it("runs on those resources alone, while changes aren't bound by them", async () => {
+    const connectionId = await hubspot();
+    const pointed = { resources: [owner] };
+    const ends = await Promise.all([
+      outcome(
+        callAs(
+          agentFor("user-anna"),
+          read(connectionId, "HUBSPOT_LIST_CONTACTS", { owner_id: owner }),
+          pointed
+        )
+      ),
+      outcome(
+        callAs(
+          agentFor("user-anna"),
+          read(connectionId, "HUBSPOT_LIST_CONTACTS", { owner_id: "owner-9" }),
+          pointed
+        )
+      ),
+      // Not pointed at within any: the whole app.
+      outcome(
+        callAs(
+          agentFor("user-anna"),
+          read(connectionId, "HUBSPOT_LIST_CONTACTS", { owner_id: "owner-9" })
+        )
+      ),
+      // A change waits for its person, wherever it goes.
+      outcome(
+        callAs(
+          agentFor("user-anna", "agent-chat", "interactive"),
+          {
+            ...read(connectionId, "HUBSPOT_CREATE_CONTACT", {
+              owner_id: "owner-9",
+              email: "ben@acme.test",
+            }),
+            idempotencyKey: crypto.randomUUID(),
+          },
+          pointed
+        )
+      ),
+    ]);
+    expect(ends).toStrictEqual([
+      "ok",
+      "connect.resource_not_pointed",
+      "ok",
+      "ok",
+    ]);
+  });
+
+  it("is offered with its class, for core to hold it to the company's", async () => {
+    const connectionId = await hubspot();
+    const [owned] = await exports.default.connectionOwners([connectionId]);
+    expect(owned?.toolClasses).toStrictEqual({
+      HUBSPOT_LIST_CONTACTS: "read-company",
+      HUBSPOT_GET_CONTACT: "change-company",
+      HUBSPOT_CREATE_CONTACT: "change-company",
+    });
+  });
+});
+
 describe("a Composio tool Grasp never runs", () => {
   it("is refused, neither offered nor run, even when the admin allowed it by name and a review classed it", async () => {
     const connectionId = await addConnection({

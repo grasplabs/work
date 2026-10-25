@@ -21,6 +21,7 @@ import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
+import { requirePointedResource } from "./app-pointers.ts";
 import { changeOf } from "./changes.ts";
 import type { CallChange } from "./changes.ts";
 import {
@@ -883,6 +884,7 @@ export const carryOut = async (
   requireAllowedEffect(claims, sideEffect);
   checkResourceScope(resource, tool, input);
   requirePointedMailbox(claims, connection, call.action, tool, input);
+  requirePointedResource(claims, connection, call.action, input);
   if (recovering !== undefined) {
     // Recovered only as the call itself would run now: every check above
     // has passed again (the capability core signed for this caller now,

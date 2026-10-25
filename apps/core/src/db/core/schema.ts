@@ -304,6 +304,91 @@ export const channelConversations = sqliteTable(
     index("channel_conversations_user_id_idx").on(table.userId),
   ]
 );
+/**
+ * A workflow Stephen offered to start, on a card in a person's chat app:
+ * the workflow, the exact version and input the card shows, and, once the
+ * person pressed Start, where they pressed it and the start it made, so
+ * the run's end is told there once (`toldAt`). Good for a day unpressed
+ * (`expiresAt`). Kept by channels/workflow-offers.ts.
+ */
+export const chatWorkflowOffers = sqliteTable(
+  "chat_workflow_offers",
+  {
+    id: text().primaryKey(),
+    /** The person it is offered to, whom the start acts for. */
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** The chat whose turn offered it, and its Workspace object. */
+    workspaceId: text("workspace_id").notNull(),
+    chatId: text("chat_id").notNull(),
+    workflowId: text("workflow_id").notNull(),
+    /** Its name when offered, as the card shows it. */
+    workflowName: text("workflow_name").notNull(),
+    version: integer().notNull(),
+    /** Its input, as the version's contract took it: canonical JSON. */
+    input: text().notNull(),
+    createdAt: timestamp("created_at").notNull(),
+    expiresAt: timestamp("expires_at").notNull(),
+    /** When its card was posted: each is posted once. */
+    postedAt: timestamp("posted_at"),
+    /** Where the person pressed Start, by the Chat SDK's names. */
+    platform: text(),
+    threadId: text("thread_id"),
+    locale: text(),
+    pressedAt: timestamp("pressed_at"),
+    /** The start's receipt and its run, once it started. */
+    startId: text("start_id"),
+    runId: text("run_id"),
+    /** When the run's end was told where it was pressed. */
+    toldAt: timestamp("told_at"),
+  },
+  (table) => [
+    index("chat_workflow_offers_chat_idx").on(table.chatId),
+    index("chat_workflow_offers_run_idx").on(table.runId),
+    index("chat_workflow_offers_user_idx").on(table.userId),
+  ]
+);
+
+/**
+ * How Stephen fared in the chat apps, counted by the hour
+ * (src/channels/signals.ts): requests refused at the door, turns by how
+ * they ended, answer times by bucket, sends that failed. Counts only,
+ * never who or what; kept a week, for Grasp's admin to watch.
+ */
+export const channelSignals = sqliteTable(
+  "channel_signals",
+  {
+    /** The hour it counts, as its first millisecond. */
+    hour: timestamp("hour").notNull(),
+    platform: text().notNull(),
+    /** Such as `refused`, `answered` or `answered_within_8000`. */
+    signal: text().notNull(),
+    count: integer().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.hour, table.platform, table.signal] }),
+  ]
+);
+
+/**
+ * Who is in a chat that others share, a group chat or channel on a chat
+ * platform, as its agent reads for it (`knowledge/access.ts`): kept by the
+ * Workspace object that holds the chat, before each turn, from the
+ * platform's roster then. The agent reads only what every member may
+ * read, and nothing at all with `outsiders` in it: anyone Grasp can't name
+ * as one of the organization's active members (a guest, another company,
+ * someone the roster couldn't say).
+ */
+export const chatAudiences = sqliteTable("chat_audiences", {
+  chatId: text("chat_id").primaryKey(),
+  /** The Workspace object that holds the chat. */
+  workspaceId: text("workspace_id").notNull(),
+  /** The members Grasp knows, by user id. */
+  members: text({ mode: "json" }).$type<string[]>().notNull(),
+  outsiders: integer({ mode: "boolean" }).notNull(),
+  updatedAt: timestamp("updated_at").notNull(),
+});
 
 /**
  * Part of the organization plugin's model. Invitations aren't offered: people
@@ -2726,6 +2811,21 @@ export const toolClassSettings = sqliteTable("tool_class_settings", {
 });
 
 /**
+ * The company apps an admin pointed Stephen at (app-pointers.ts), by their
+ * connection in connect: the resources his reads there may name, as a
+ * JSON array (none is the whole app), and for whom it is on now (`who`,
+ * then the team IDs in `teams` as a JSON array).
+ */
+export const appPointers = sqliteTable("app_pointers", {
+  connectionId: text("connection_id").primaryKey(),
+  resources: text().notNull().default("[]"),
+  who: text({ enum: ["nobody", "everyone", "teams"] }).notNull(),
+  teams: text().notNull().default("[]"),
+  changedBy: text("changed_by").notNull(),
+  changedAt: timestamp("changed_at").notNull(),
+});
+
+/**
  * The shared mailboxes an admin pointed Stephen at (shared-mailboxes.ts),
  * by address in lower case: for whom it is on now (`who`: `nobody`,
  * `everyone` or `teams`, then the team IDs in `teams` as a JSON array).
@@ -2737,6 +2837,55 @@ export const sharedMailboxPointers = sqliteTable("shared_mailbox_pointers", {
   changedBy: text("changed_by").notNull(),
   changedAt: timestamp("changed_at").notNull(),
 });
+
+/**
+ * Settings › Stephen, as a whole (stephen-reach.ts): one row, `stephen`,
+ * once an admin changed it: whether he answers in chat apps at all, and
+ * for whom (`who` and `teams`, as in `tool_class_settings`). No row: on,
+ * for everyone.
+ */
+export const stephenReach = sqliteTable("stephen_reach", {
+  id: text().primaryKey(),
+  on: integer({ mode: "boolean" }).notNull(),
+  who: text({ enum: ["nobody", "everyone", "teams"] }).notNull(),
+  teams: text().notNull().default("[]"),
+  changedBy: text("changed_by").notNull(),
+  changedAt: timestamp("changed_at").notNull(),
+});
+
+/**
+ * The places Stephen works in that an admin changed (stephen-reach.ts):
+ * one row per chat platform, by its adapter's name. `who` narrows who
+ * reaches him there (`asStephen`: as for him as a whole); `acts` says
+ * whether he does things there or only answers. No row: as Stephen, and
+ * he acts.
+ */
+export const stephenPlaces = sqliteTable("stephen_places", {
+  place: text().primaryKey(),
+  who: text({ enum: ["asStephen", "nobody", "everyone", "teams"] }).notNull(),
+  teams: text().notNull().default("[]"),
+  acts: integer({ mode: "boolean" }).notNull(),
+  changedBy: text("changed_by").notNull(),
+  changedAt: timestamp("changed_at").notNull(),
+});
+
+/**
+ * How an app narrows a class of tools the company turned on
+ * (stephen-reach.ts): one row per native app (its provider) and class an
+ * admin changed. `asClass`: as the class is. No row: as the class is.
+ */
+export const appToolClasses = sqliteTable(
+  "app_tool_classes",
+  {
+    app: text().notNull(),
+    toolClass: text("tool_class").notNull(),
+    who: text({ enum: ["asClass", "nobody", "everyone", "teams"] }).notNull(),
+    teams: text().notNull().default("[]"),
+    changedBy: text("changed_by").notNull(),
+    changedAt: timestamp("changed_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.app, table.toolClass] })]
+);
 
 /**
  * Apps people asked Grasp to add, as the catalog doesn't have them
@@ -3207,6 +3356,13 @@ export const workflowResources = sqliteTable(
      */
     nameReleasedAt: timestamp("name_released_at"),
     nameReleasedBy: text("name_released_by"),
+    /**
+     * Its owner lets people ask Stephen to start it in a chat app: he may
+     * offer it on a card to anyone who could start it themselves, and the
+     * press starts it as them (channels/workflow-offers.ts). Off until the
+     * owner turns it on.
+     */
+    askable: integer({ mode: "boolean" }).notNull().default(false),
   },
   (table) => [
     // Listing reads a person's own workflows by owner (`listWorkflowResources`).
@@ -4161,10 +4317,11 @@ export const landscapeStagedPeople = sqliteTable(
 );
 
 /**
- * The Playbook's records (brain-records.ts): one row each, never written
+ * The brain's records (brain-records.ts): one row each, never written
  * over, in the order they were added. `body` is the record as
  * `brainRecordSchema` parsed it, as canonical JSON, so a record sent again
  * compares as the same text. No row names who added it: the audit log does.
+ * Never written over, but for a content purge rewriting its words.
  */
 export const brainRecords = sqliteTable(
   "brain_records",
@@ -4188,13 +4345,20 @@ export const brainRecords = sqliteTable(
     id: text().notNull(),
     body: text().notNull(),
     addedAt: timestamp("added_at").notNull(),
+    /**
+     * When a Knowledge content purge last rewrote `body` (brain-records.ts
+     * `brainRecordErasure`): the record is the company's as purged from
+     * then on, and the same id sent again is left as it is, never its
+     * words put back.
+     */
+    purgedAt: timestamp("purged_at"),
   },
   // One id is one record, whatever its type.
   (table) => [uniqueIndex("brain_records_id_idx").on(table.id)]
 );
 
 /**
- * What became of the Playbook's gaps (brain-records.ts): one row once a
+ * What became of the brain's gaps (brain-gaps.ts): one row once a
  * gap was asked about, answered or closed, each set once, never cleared.
  * A gap with no row is open and nobody was asked.
  */

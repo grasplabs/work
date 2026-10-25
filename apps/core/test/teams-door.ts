@@ -19,6 +19,7 @@ import type { GatewayReply } from "./ai-gateway.ts";
 import {
   botConnectorMembersUrl,
   botConnectorPostedUrl,
+  botConnectorUninstallUrl,
   botFrameworkSharedKeyUrl,
   teamsBot,
 } from "./connect-providers.ts";
@@ -99,8 +100,18 @@ export const watched = () => {
   });
 };
 
-/** A token Microsoft signed for the client's bot. */
-export const signed = async (): Promise<string> => {
+/**
+ * A token Microsoft signed for the client's bot; with `claims` changed, or
+ * signed with `key` instead (one Microsoft never published, under the
+ * published key's id).
+ */
+export const signed = async ({
+  claims = {},
+  key,
+}: {
+  claims?: Record<string, unknown>;
+  key?: JoseKey;
+} = {}): Promise<string> => {
   const now = Math.floor(Date.now() / 1000);
   return await new SignJWT({
     iss: "https://api.botframework.com",
@@ -108,9 +119,10 @@ export const signed = async (): Promise<string> => {
     serviceurl: serviceUrl,
     nbf: now - 60,
     exp: now + 3600,
+    ...claims,
   })
     .setProtectedHeader({ alg: "RS256", kid: signingKey.kid })
-    .sign(signingKey.privateKey);
+    .sign(key ?? signingKey.privateKey);
 };
 
 /** Someone writing on Teams: their object id, and their private chat. */
@@ -211,6 +223,14 @@ export const reached = async (conversation: string) => {
       .map(({ text }) => text),
     asked: asked.filter((key) => key.startsWith(`${conversation} `)),
   };
+};
+
+/** Removes the bot from `person`'s chat, as uninstalling its app does. */
+export const uninstalledFor = async (person: TeamsPerson): Promise<void> => {
+  await providers().fetch(botConnectorUninstallUrl, {
+    method: "POST",
+    body: JSON.stringify({ conversation: person.conversation }),
+  });
 };
 
 /** Sets what Teams' roster says of `person` in their chat. */

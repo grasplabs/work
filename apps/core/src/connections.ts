@@ -24,6 +24,7 @@ import type {
   ListedConnection,
   OAuthProvider,
   OfferedCatalog,
+  AppPointerSetting,
   SharedMailboxSetting,
   ToolClassSetting,
 } from "@grasp-os/shared/connect";
@@ -33,10 +34,12 @@ import { errorFields, log } from "@grasp-os/shared/log";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import { isAdmin, requireAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
+import type { StephenReach } from "@grasp-os/shared/stephen-reach";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
+import { pointApp, readAppPointers } from "./app-pointers.ts";
 import {
   auditedBatch,
   keepAuditEvent,
@@ -52,6 +55,12 @@ import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 import { pointSharedMailbox, readSharedMailboxes } from "./shared-mailboxes.ts";
+import {
+  readStephenReach,
+  setAppToolClass,
+  setStephenPlace,
+  setStephenReach,
+} from "./stephen-reach.ts";
 import {
   anyMailboxPointed,
   classesOn,
@@ -556,6 +565,19 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
     });
   }
 
+  async appPointers(): Promise<AppPointerSetting[]> {
+    return await withPerson(this.#check, async (identity) => {
+      requireAdmin(identity);
+      return await readAppPointers(this.#env);
+    });
+  }
+
+  async pointApp(request: unknown): Promise<void> {
+    await withPerson(this.#check, async (identity) => {
+      await pointApp(this.#env, identity, request);
+    });
+  }
+
   async sharedMailboxes(): Promise<SharedMailboxSetting[]> {
     return await withPerson(this.#check, async (identity) => {
       requireAdmin(identity);
@@ -566,6 +588,39 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
   async pointSharedMailbox(mailbox: unknown, audience: unknown): Promise<void> {
     await withPerson(this.#check, async (identity) => {
       await pointSharedMailbox(this.#env, identity, mailbox, audience);
+    });
+  }
+
+  async stephenReach(): Promise<StephenReach> {
+    return await withPerson(this.#check, async (identity) => {
+      requireAdmin(identity);
+      return await readStephenReach(this.#env);
+    });
+  }
+
+  async setStephenReach(on: unknown, audience: unknown): Promise<void> {
+    await withPerson(this.#check, async (identity) => {
+      await setStephenReach(this.#env, identity, on, audience);
+    });
+  }
+
+  async setStephenPlace(
+    place: unknown,
+    audience: unknown,
+    acts: unknown
+  ): Promise<void> {
+    await withPerson(this.#check, async (identity) => {
+      await setStephenPlace(this.#env, identity, place, audience, acts);
+    });
+  }
+
+  async setAppToolClass(
+    app: unknown,
+    toolClass: unknown,
+    audience: unknown
+  ): Promise<void> {
+    await withPerson(this.#check, async (identity) => {
+      await setAppToolClass(this.#env, identity, app, toolClass, audience);
     });
   }
 
@@ -642,7 +697,8 @@ const redirect = (to: URL): Response =>
  */
 export const handleConnectionCallback = async (
   request: Request,
-  env: Env
+  env: Env,
+  onConnected?: (userId: string) => void
 ): Promise<Response | undefined> => {
   const config = signInConfig(env);
   if (request.method !== "GET" || config === undefined) {
@@ -679,6 +735,8 @@ export const handleConnectionCallback = async (
   } catch (error) {
     return failed(errorCodeOf(error));
   }
+  // A chat app may be waiting on it (channels/connect-own.ts).
+  onConnected?.(identity.userId);
   const back = onOrigin(config.origin, finished.returnTo) ?? connectionsPage;
   back.searchParams.set("connection", finished.connectionId);
   return redirect(back);

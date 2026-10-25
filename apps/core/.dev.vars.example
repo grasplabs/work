@@ -12,3 +12,13 @@ BETTER_AUTH_SECRET=
 # Signs the capability each call to connect carries. The same value as in
 # apps/connect/.dev.vars; at least 32 characters, e.g. `openssl rand -base64 32`.
 CAPABILITY_SIGNING_KEY=
+# Optional: Stephen's own Gmail mailbox, as a chat platform
+# (src/channels/gmail.ts). Its door stays closed (404) until the first four
+# are set. The audience, service account and subscription are the Pub/Sub
+# push subscription's; the topic is the one the mailbox's watch publishes
+# to. The mailbox's OAuth client and refresh token are connect's.
+GMAIL_MAILBOX=
+GMAIL_PUBSUB_AUDIENCE=
+GMAIL_PUBSUB_SERVICE_ACCOUNT=
+GMAIL_PUBSUB_SUBSCRIPTION=
+GMAIL_PUBSUB_TOPIC=

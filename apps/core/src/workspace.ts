@@ -149,9 +149,15 @@ import {
   emailPreferences,
 } from "./db/workspace/schema.ts";
 import { readableSources, withheldSourceDetail } from "./history-access.ts";
+import {
+  audienceMaxMembers,
+  audienceOf,
+  keepAudience,
+} from "./knowledge/access.ts";
 import { readAsDelegate } from "./knowledge/binding.ts";
 import { forContext } from "./knowledge/memory.ts";
-import { hasBrainGrant } from "./knowledge/recall-store.ts";
+import { brainOf } from "./knowledge/ports.ts";
+import { hasBrainGrant } from "./knowledge/recall-grants.ts";
 import { catalog, cited, noteListedSkills } from "./knowledge/tools.ts";
 import { gatewaySettings, models } from "./models.ts";
 import { functionProblem, PreviewReports } from "./preview-reports.ts";
@@ -309,10 +315,88 @@ export interface RunToFix {
  * A question for a chat's agent, the model to answer it with, and how hard
  * that model thinks first (`ChatQuestion`).
  */
+/**
+ * How often a chat platform is told an answer's text so far: Teams shows
+ * an update about once a second, and each is a call back to the door.
+ */
+const textEveryMs = 300;
+
+/**
+ * `tell`, called with the latest text at most every {@link textEveryMs},
+ * and once more at the end of a window that held more: text in between is
+ * dropped, as the next call carries all of it.
+ */
+const throttled = (tell: (text: string) => unknown) => {
+  let last = Number.NEGATIVE_INFINITY;
+  let gone = false;
+  let pending: string | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  // A caller that went away stops being told; the turn goes on.
+  const send = async (text: string): Promise<void> => {
+    last = Date.now();
+    try {
+      await tell(text);
+    } catch {
+      gone = true;
+    }
+  };
+  return (text: string): void => {
+    if (gone) {
+      return;
+    }
+    const wait = last + textEveryMs - Date.now();
+    if (wait <= 0) {
+      void send(text);
+      return;
+    }
+    pending = text;
+    timer ??= setTimeout(() => {
+      timer = undefined;
+      if (pending !== undefined && !gone) {
+        void send(pending);
+        pending = undefined;
+      }
+    }, wait);
+  };
+};
+
 /** A chat platform's chat's title, as people know the platform. */
 const platformTitles: Readonly<Record<string, string>> = {
   teams: "Microsoft Teams",
+  slack: "Slack",
 };
+
+/**
+ * A chat others share on a chat platform, as its door names it: the Chat
+ * SDK's thread, whether it is a group chat or a channel, and who is in it
+ * now (`Audience` in knowledge/access.ts).
+ */
+const sharedChatSchema = z.strictObject({
+  thread: z.string().min(1).max(2048),
+  kind: z.enum(["group", "channel"]),
+  audience: z.strictObject({
+    members: z
+      .array(z.string().min(1).max(256))
+      .max(audienceMaxMembers + 1)
+      .readonly(),
+    outsiders: z.boolean(),
+  }),
+});
+export type SharedChat = z.infer<typeof sharedChatSchema>;
+
+/** The title of a chat others share on `platform`. */
+const sharedTitle = (platform: string, kind: SharedChat["kind"]): string =>
+  `${platformTitles[platform] ?? platform} ${kind === "group" ? "group chat" : "channel"}`;
+
+/**
+ * What a chat others share gets of the agent's APIs: its chat, and
+ * Knowledge, read for everyone in it. No connections, so nothing is read
+ * from or written to anyone's own accounts, and nothing is held for a
+ * person to confirm; no Apps, builds, workflows or memory saves, which act
+ * as the one person who asked; no brain, which reads as that person.
+ */
+const sharedApiNames: ReadonlySet<string> = new Set(["chat", "knowledge"]);
+const sharedApis = agentApis.filter(({ name }) => sharedApiNames.has(name));
 
 export const questionSchema = z.strictObject({
   text: z.string().trim().min(1).max(100_000),
@@ -537,7 +621,12 @@ const interruptedMessage = (): AssistantMessage => ({
 });
 
 /** How a write a chat's agent had held for its person ended. */
-export type HeldOutcome = "confirmed" | "declined" | "unknown" | "failed";
+export type HeldOutcome =
+  | "confirmed"
+  | "declined"
+  | "expired"
+  | "unknown"
+  | "failed";
 
 /** A held write, as its chat's agent knows it: the ID its call answered with. */
 const heldSchema = z.strictObject({
@@ -557,6 +646,8 @@ const heldOutcomes: Record<HeldOutcome, string> = {
     "The person confirmed it and it was carried out. Don't ask for it again.",
   declined:
     "The person declined it: it was not carried out and won't be. Don't ask for it again unless they say so.",
+  expired:
+    "It waited past the end of the company's day without the person confirming it, so it ended and was not carried out. If they still want it, ask for it afresh, with today's values.",
   unknown:
     "The person confirmed it and it was sent, but whether it took effect is unknown: it may have been carried out. It won't be sent again; check the outside system before asking for it again.",
   failed:
@@ -842,7 +933,8 @@ export class Workspace extends DurableObject<Env> {
     by?: AuditActor,
     fix?: RunToFix,
     projectId?: string,
-    via: ChatChannel = "web"
+    via: ChatChannel = "web",
+    thread?: string
   ): Chat {
     const agent = workspaceAgentIdSchema.safeParse(agentId);
     if (!agent.success) {
@@ -881,6 +973,7 @@ export class Workspace extends DurableObject<Env> {
           restricted: fix?.restricted === true,
           projectId: project,
           via: channel,
+          thread: thread ?? null,
         })
         .returning()
         .get();
@@ -1078,43 +1171,76 @@ export class Workspace extends DurableObject<Env> {
 
   /**
    * Asks `text` in `personId`'s own chat on chat platform `via`, and waits
-   * for the answer: the chat is the person's one chat there, found by its
+   * for the answer, telling `onText`, if given, the answer's text so far as
+   * the model writes it, at most every {@link textEveryMs}: the chat is the person's one chat there, found by its
    * channel, or made on their first message, audited as theirs. Asked
    * with the deployment's default model, the first it allows, as Grasp's
    * own app starts with. Like `ask`, it takes its caller's word for who
    * asks: only the door of a chat platform calls it, once the platform's
    * verified sender id named the person (channels/door.ts).
+   *
+   * Asked where others read the answer (`shared`: a group chat, a
+   * channel), it is the person's one chat for that thread instead, and who
+   * is in it is kept first: its agent reads only what all of them may.
    */
   async askThrough(
     personId: string,
     agentId: string,
     via: string,
-    text: string
+    text: string,
+    onText?: (text: string) => unknown,
+    shared?: SharedChat
   ): Promise<{ chatId: string; answer: Answer }> {
     const platform = chatPlatformSchema.parse(via);
+    const where = sharedChatSchema.optional().parse(shared);
     const [found] = this.#db
       .select()
       .from(chats)
-      .where(and(eq(chats.personId, personId), eq(chats.via, platform)))
+      .where(
+        and(
+          eq(chats.personId, personId),
+          eq(chats.via, platform),
+          where === undefined
+            ? isNull(chats.thread)
+            : eq(chats.thread, where.thread)
+        )
+      )
       .orderBy(desc(chats.createdAt))
       .limit(1)
       .all();
     const chat =
       found ??
       this.createChat(
-        platformTitles[platform] ?? platform,
+        where === undefined
+          ? (platformTitles[platform] ?? platform)
+          : sharedTitle(platform, where.kind),
         personId,
         agentId,
         actorOf({ userId: personId, staff: false }, platform),
         undefined,
         undefined,
-        platform
+        platform,
+        where?.thread
       );
     const [model] = gatewaySettings(this.env).models;
     if (model === undefined) {
       throw modelErrors.create("model.unconfigured");
     }
-    return { chatId: chat.id, answer: await this.#turn(chat, { text, model }) };
+    if (where !== undefined) {
+      await keepAudience(
+        this.env,
+        {
+          workspaceId: workspaceIdSchema.parse(this.ctx.id.name),
+          chatId: chat.id,
+        },
+        personId,
+        where.audience
+      );
+    }
+    return {
+      chatId: chat.id,
+      answer: await this.#turn(chat, { text, model }, undefined, onText),
+    };
   }
 
   /**
@@ -1136,7 +1262,8 @@ export class Workspace extends DurableObject<Env> {
   async #turn(
     chat: Chat,
     question: Question,
-    started?: () => void
+    started?: () => void,
+    onText?: (text: string) => unknown
   ): Promise<Answer> {
     const parsed = questionSchema.safeParse(question);
     if (!parsed.success) {
@@ -1184,8 +1311,14 @@ export class Workspace extends DurableObject<Env> {
       // the audit log's actor, and the rules' context (its restricted mode).
       const authority = chatAuthority(scope);
       const work = chatContext(scope);
+      // A chat others share reads for all of them, as they were last
+      // kept: one whose audience isn't kept reads nothing, so takes no turn.
+      const shared = chat.thread !== null;
+      if (shared && (await audienceOf(this.env, work)) === undefined) {
+        throw permissionErrors.create("permission.context_invalid");
+      }
       // Before the model is admitted: what memory reads is a source too.
-      const context = await this.#turnContext(scope, authority, work);
+      const context = await this.#turnContext(scope, authority, work, shared);
       // Refuses a model the deployment or its rules don't allow before
       // anything is kept. Every request carries everything the chat has
       // read from, in this turn and every one before it, read again for
@@ -1209,11 +1342,12 @@ export class Workspace extends DurableObject<Env> {
       this.#changed(chat.id);
       // The turn's answer is the last response it keeps.
       let answer: number | undefined;
+      const textSoFar = onText === undefined ? undefined : throttled(onText);
       const result = await runTurn({
         history: this.#transcript(chat.id),
         question: parsed.data.text,
         model,
-        apis: agentApis,
+        apis: shared ? sharedApis : agentApis,
         context,
         scope,
         whyStop: async () =>
@@ -1257,6 +1391,7 @@ export class Workspace extends DurableObject<Env> {
         write: (partial) => {
           this.#partials.set(chat.id, partial);
           this.#changed(chat.id);
+          textSoFar?.(partialOf(partial).text);
         },
       });
       return {
@@ -1366,11 +1501,16 @@ export class Workspace extends DurableObject<Env> {
   async #turnContext(
     scope: Parameters<typeof auditAgentCall>[1],
     authority: Parameters<typeof forContext>[1],
-    work: Extract<WorkContext, { type: "chat" }>
+    work: Extract<WorkContext, { type: "chat" }>,
+    shared: boolean
   ): Promise<TurnContext> {
-    const memory = await forContext(this.env, authority, work, {
-      type: "own",
-    });
+    // Never the person's own USER.md where others read the answer.
+    const memory = await forContext(
+      this.env,
+      authority,
+      work,
+      shared ? { type: "channel" } : { type: "own" }
+    );
     this.#keepSources(work.chatId, memory.provenance.collectionIds);
     // The skills listed go into the prompt: a read of their collections,
     // noted as any Knowledge read is (restricting the chat first were any
@@ -1381,10 +1521,14 @@ export class Workspace extends DurableObject<Env> {
       work,
       undefined,
       async (reader) => {
-        const found = await catalog(this.env, reader);
+        const found = await catalog(brainOf(this.env), reader);
         return {
           ...found,
-          listed: await noteListedSkills(this.env, reader, found.skills),
+          listed: await noteListedSkills(
+            brainOf(this.env),
+            reader,
+            found.skills
+          ),
         };
       }
     );
@@ -2269,7 +2413,7 @@ export class Workspace extends DurableObject<Env> {
       chatAuthority(scope),
       chatContext(scope),
       undefined,
-      async (reader) => await cited(this.env, reader, documentIds)
+      async (reader) => await cited(brainOf(this.env), reader, documentIds)
     );
   }
 

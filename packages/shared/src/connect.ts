@@ -19,6 +19,7 @@ import type { PackageRegistryApi } from "./packages.ts";
 import { codeSubjectSchema, permissionActionSchema } from "./permissions.ts";
 import type { CodeSubject, WorkContext } from "./permissions.ts";
 import { roleSchema } from "./roles.ts";
+import type { StephenReachApi } from "./stephen-reach.ts";
 import { eventTypeSchema } from "./workflows.ts";
 
 /**
@@ -425,6 +426,14 @@ export interface ConnectionOwner {
    * an address may receive in another mailbox.
    */
   accountSenders: string[];
+  /**
+   * For a Composio connection: the class connect takes each tool it
+   * offers to be (its review's, and the admin's rule: connect's
+   * `allowedTool`), by the tool's name. Core holds the chat's agent's calls
+   * of them to the classes the company turned on. Absent for a native
+   * connection, whose classes core reads from the release.
+   */
+  toolClasses?: Record<string, Exclude<ToolClass, "never">>;
 }
 
 /**
@@ -467,7 +476,7 @@ export const appRequestsListed = 200;
  * needs it (`needs_reauth`) is starting one for its provider and scope:
  * finished with the account it holds, it is that connection again.
  */
-export interface ConnectionsApi {
+export interface ConnectionsApi extends StephenReachApi {
   start: (request: {
     provider: OAuthProvider;
     scope: ConnectionScope;
@@ -535,6 +544,14 @@ export interface ConnectionsApi {
     toolClass: CompanyToolClass,
     audience: ToolClassAudience
   ) => Promise<void>;
+  /** The company apps Stephen is pointed at, and for whom. Admins only. */
+  appPointers: () => Promise<AppPointerSetting[]>;
+  /**
+   * Points Stephen at a company app's connection (a Composio one), for
+   * everyone or some teams, or for nobody: its reads there, only within
+   * `resources` when it names any. Admins only, never Grasp staff; audited.
+   */
+  pointApp: (request: PointApp) => Promise<void>;
   /** The shared mailboxes Stephen is pointed at, and for whom. Admins only. */
   sharedMailboxes: () => Promise<SharedMailboxSetting[]>;
   /**
@@ -912,6 +929,36 @@ export interface SharedMailboxSetting {
   changedAt: string;
 }
 
+/** Most resources one app pointer names. */
+export const appPointerResourcesMax = 50;
+
+/** What an admin points Stephen at in a company app (`pointApp`). */
+export const pointAppSchema = z.strictObject({
+  connectionId: identifierSchema,
+  /**
+   * The resources his reads there may name, as the admin's rule for a
+   * tool names its resource property (a pipeline, a ticket queue, a
+   * register); none is the whole app.
+   */
+  resources: z.array(identifierSchema).max(appPointerResourcesMax),
+  audience: toolClassAudienceSchema,
+});
+export type PointApp = z.input<typeof pointAppSchema>;
+
+/**
+ * A company app Stephen is pointed at: he reads there (Read company) for
+ * the people `audience` takes in, within `resources` when it names any.
+ */
+export interface AppPointerSetting {
+  connectionId: string;
+  resources: string[];
+  audience: ToolClassAudience;
+  /** The admin who last changed it. */
+  changedBy: string;
+  /** ISO 8601. */
+  changedAt: string;
+}
+
 /** One class, as the company has it now. */
 export interface ToolClassSetting {
   toolClass: CompanyToolClass;
@@ -1085,6 +1132,13 @@ export interface PendingAction {
   inputHash: string;
   /** ISO 8601. */
   requestedAt: string;
+  /**
+   * When it ends unconfirmed (ISO 8601): one asked for in a chat on a chat
+   * platform, such as Teams, ends at midnight of the company's day it was
+   * asked on, and is declined as expired after. Absent for one that waits
+   * until it is decided.
+   */
+  endsAt?: string;
   /**
    * The App's approved resource binding it came through, as it served then
    * (`HeldBinding`); null for any other call; `unreadable` when what connect
@@ -1497,7 +1551,13 @@ export type ConnectorEventsAck = z.input<typeof connectorEventsAckSchema>;
  * (`ChannelApi.channelFetch`). Each is added with its hosts and its
  * credential in connect's src/channels.ts when it is switched on.
  */
-export const channelPlatformSchema = z.enum(["teams"]);
+export const channelPlatformSchema = z.enum([
+  "teams",
+  "slack",
+  "whatsapp",
+  "telegram",
+  "gmail",
+]);
 export type ChannelPlatform = z.infer<typeof channelPlatformSchema>;
 
 /**
@@ -1975,6 +2035,8 @@ export const connectErrors = defineErrorFamily({
   "connect.action_failed": "The action reported an error.",
   "connect.pending_not_found":
     "There's no such action waiting for you: it was confirmed or declined, or it isn't yours.",
+  "connect.pending_expired":
+    "This action waited past the end of the day it was asked on, so it ended and nothing was done. Ask again.",
   "connect.pending_changed":
     "This isn't the action you were shown, so nothing was done. Look at it again.",
   "connect.held":
@@ -1996,6 +2058,10 @@ export const connectErrors = defineErrorFamily({
     "It isn't known what kind of action this is, so it wasn't done.",
   "connect.never":
     "Grasp never deletes, shares, forwards, sets rules or settings, or pays, whatever is allowed, so it wasn't done.",
+  "connect.app_not_pointed":
+    "Your company hasn't pointed Grasp at this app for you, so it wasn't read. An admin can.",
+  "connect.resource_not_pointed":
+    "Your company pointed Grasp at other parts of this app for you, not this one, so it wasn't read.",
   "connect.mailbox_not_pointed":
     "This mailbox isn't yours, and your company hasn't pointed Grasp at it for you, so nothing was done in it. An admin can.",
 });

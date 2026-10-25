@@ -272,6 +272,59 @@ describe("model rules", { timeout: 60_000 }, () => {
     ]);
   });
 
+  it("send an EU-only deployment's Claude call to Claude in Amazon Bedrock's EU profile, through the gateway's custom provider, with no key, at Bedrock's regional prices", async () => {
+    const claude = "anthropic/claude-opus-5-5";
+    const euClaude = "bedrock-eu/claude-opus-5-5";
+    const { fake, call } = withRules(
+      {
+        models: [...allowed, claude, euClaude],
+        eu: { models: [euClaude], deployment: true },
+      },
+      { text: "Hallo.", inputTokens: 1000, outputTokens: 100 }
+    );
+    const answered = hello(euClaude);
+
+    await expect(outcome(call(hello(claude)))).resolves.toBe("model.eu_only");
+    await expect(call(answered)).resolves.toMatchObject({ text: "Hallo." });
+
+    // Only the EU call was sent: to the gateway's custom provider for
+    // Bedrock, as the EU profile, with no key (the gateway holds it).
+    expect(
+      fake.requests.map(({ url, body, headers }) => ({
+        path: new URL(url).pathname,
+        body,
+        key: headers.get("x-api-key"),
+        authorization: headers.get("authorization"),
+        logged: headers.get("cf-aig-collect-log-payload"),
+      }))
+    ).toMatchObject([
+      {
+        path: `/ai-gateway/gateways/${gateway}/custom-bedrock-eu/v1/messages`,
+        body: { model: "eu.anthropic.claude-opus-5-5" },
+        key: null,
+        authorization: null,
+        logged: "false",
+      },
+    ]);
+    // Opus 5.5 at Bedrock's regional prices: $4.40 and $22 a million.
+    const events = await eventsOf(answered.trigger);
+    expect(
+      events.map(({ action, model, detail, cost }) => ({
+        action,
+        model,
+        detail,
+        cents: Math.round((cost?.amount ?? 0) * 100 * 1e6) / 1e6,
+      }))
+    ).toMatchObject([
+      {
+        action: "model.call",
+        model: { provider: "bedrock-eu", model: "claude-opus-5-5" },
+        detail: { euOnly: "deployment" },
+        cents: 0.66,
+      },
+    ]);
+  });
+
   it("keep a listed workflow's AI steps in the EU, and no other caller's", async () => {
     const eu = {
       models: [euModel],
