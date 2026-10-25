@@ -3,7 +3,7 @@ import type { BatchItem } from "drizzle-orm/batch";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import type { z } from "zod";
 
-import { auditedBatch, outboxed } from "./audit.ts";
+import { auditedBatch, outboxed, outboxedIfChanged } from "./audit.ts";
 import type { Brain } from "./brain.ts";
 import type { CollectionRow } from "./collections.ts";
 import { inList } from "./db/d1.ts";
@@ -13,6 +13,7 @@ import {
   documents,
   links,
   sections,
+  transcripts,
   versions,
 } from "./db/schema.ts";
 import { checkedText, indexedValuesOf, writeVersion } from "./documents.ts";
@@ -57,6 +58,13 @@ import {
   rebuildOwedIfChanged,
   secureDeleteReady,
 } from "./search-erasure.ts";
+import {
+  replaceTranscript,
+  rewrittenTranscript,
+  storedTranscript,
+  transcriptTexts,
+} from "./transcripts.ts";
+import type { ReadAt, Transcript } from "./transcripts.ts";
 import { unicode61Dropped, unicode61Kept } from "./unicode61.ts";
 
 // Purging personal data from Knowledge, for good, when someone leaves or
@@ -64,8 +72,8 @@ import { unicode61Dropped, unicode61Kept } from "./unicode61.ts";
 // removes and returns a token, and confirms it with that token. Two kinds:
 //
 // - `personal`: the person's Personal collection (their USER.md and
-//   whatever else is in it) is deleted with every version, section, link
-//   and search row, and so are their Brain memories and command receipts
+//   whatever else is in it) is deleted with every version, section, link,
+//   transcript and search row, and so are their Brain memories and command receipts
 //   (memories.ts). One batch, with its audit event, which counts them.
 // - `content`: every occurrence of some terms (a name, an email address, a
 //   passage), in any case and as a whole word as the search index's
@@ -81,6 +89,12 @@ import { unicode61Dropped, unicode61Kept } from "./unicode61.ts";
 //   saved as the next version, which makes its sections, links, search
 //   rows and the document's title and description again, and fails for
 //   anyone who saved meanwhile from text not yet purged.
+//
+// A content purge rewrites a named document's transcript (transcripts.ts)
+// as it rewrites its text: every speaker, turn and chapter title, counted
+// in its plan and its check, kept with the version it saves, or rewritten
+// where it stands (audited, `knowledge.transcript.purged`) when no
+// version's text held a term.
 //
 // A content purge reaches the Brain's memory records too, everyone's,
 // whatever documents it names (memories.ts, `eraseStatements`): each
@@ -481,6 +495,9 @@ const purgePersonal = async <C>(
       ...released.before,
       db.delete(sections).where(inArray(sections.documentId, inCollection)),
       db.delete(links).where(inArray(links.fromDocumentId, inCollection)),
+      db
+        .delete(transcripts)
+        .where(inArray(transcripts.documentId, inCollection)),
       db.delete(versions).where(inArray(versions.documentId, inCollection)),
       db.delete(documents).where(eq(documents.collectionId, collectionId)),
       db.delete(collections).where(eq(collections.id, collectionId)),
@@ -1119,6 +1136,49 @@ const requireStorable = (
 };
 
 /**
+ * A document's transcript as a purge finds it (transcripts.ts): as stored,
+ * with the version it was saved with, and with the terms removed from its
+ * speakers, words and chapter titles; `changed` when that removed any.
+ * Refuses with `knowledge.invalid` when the rewrite would be too large to
+ * store, as `requireStorable` does for a version.
+ */
+const transcriptPurgeOf = async (
+  db: DrizzleD1Database,
+  document: DocumentRow,
+  matcher: Matcher
+): Promise<
+  | {
+      version: number;
+      at: ReadAt;
+      texts: string[];
+      redacted: Transcript;
+      changed: boolean;
+    }
+  | undefined
+> => {
+  const stored = await storedTranscript(db, document.id);
+  if (stored === undefined) {
+    return undefined;
+  }
+  const redacted = rewrittenTranscript(stored.transcript, (text) =>
+    without(text, matcher)
+  );
+  const texts = transcriptTexts(stored.transcript);
+  const changed = transcriptTexts(redacted).some(
+    (text, index) => text !== texts[index]
+  );
+  const bytes = new TextEncoder().encode(JSON.stringify(redacted)).byteLength;
+  if (changed && bytes > rewrittenMaxBytes) {
+    throw knowledgeErrors.create("knowledge.invalid", {
+      issues: [
+        `terms: removing them makes the transcript of document ${document.id} too large to store (${bytes} bytes, at most ${rewrittenMaxBytes})`,
+      ],
+    });
+  }
+  return { version: stored.version, at: stored.at, texts, redacted, changed };
+};
+
+/**
  * The audit event of a version a purge replaced by its tombstone because
  * its payload couldn't be read: missing, or not the text its hash names.
  */
@@ -1343,13 +1403,21 @@ const countDocument = async <C>(
   // as the next version too (`purgeDocument`).
   const savesToo = changes && saved !== undefined;
   const leftInSaved = savesToo ? leftIn([saved], matcher) : 0;
+  const transcript = await transcriptPurgeOf(db, document, matcher);
   return {
     counts: {
-      documents: changes ? 1 : 0,
+      documents: changes || transcript?.changed === true ? 1 : 0,
       versions: inVersions.changed,
     },
-    removed: inVersions.removed,
-    left: inVersions.left + leftInSaved,
+    removed:
+      inVersions.removed +
+      (transcript === undefined ? 0 : removedFrom(transcript.texts, matcher)),
+    left:
+      inVersions.left +
+      leftInSaved +
+      (transcript === undefined
+        ? 0
+        : leftIn(transcriptTexts(transcript.redacted), matcher)),
     beside: inVersions.beside,
   };
 };
@@ -1387,7 +1455,8 @@ const purgeDocument = async <C>(
   by: Writer,
   named: Named,
   matcher: Matcher,
-  onErase: OnErase
+  onErase: OnErase,
+  purgeId: string
 ): Promise<Counts> => {
   const { document, collection } = named;
   // Before anything of it changes: one the host is saving now refuses, and
@@ -1406,11 +1475,30 @@ const purgeDocument = async <C>(
   const current = await versionOf(brain, db, document, at);
   const changed = current && purgeChangeOf(current, matcher);
   const changedVersions = earlier.changed + (changed === undefined ? 0 : 1);
+  const transcript = await transcriptPurgeOf(db, document, matcher);
   const counts: Counts = {
-    documents: changedVersions > 0 ? 1 : 0,
+    documents: changedVersions > 0 || transcript?.changed === true ? 1 : 0,
     versions: changedVersions,
   };
-  if (current === undefined || counts.documents === 0) {
+  if (
+    transcript?.changed === true &&
+    (current === undefined || changedVersions === 0)
+  ) {
+    // Only the transcript held a term: rewritten where it stands, with
+    // its own event, as no version is saved to carry it.
+    // Written only over the transcript as it was read, and recorded only
+    // when it was: another purge at once never has its removal undone.
+    await auditedBatch(brain.ports, db, [
+      replaceTranscript(db, document.id, transcript.at, transcript.redacted),
+      outboxedIfChanged(brain, {
+        actor,
+        action: "knowledge.transcript.purged",
+        target: { type: "document", id: document.id },
+        detail: { purgeId, version: transcript.version },
+      }),
+    ]);
+  }
+  if (current === undefined || changedVersions === 0) {
     // Search may still hold an earlier generation, with the terms, while
     // its current version waits for indexing (a purge that failed to
     // publish, say): published now, or the purge fails.
@@ -1459,6 +1547,11 @@ const purgeDocument = async <C>(
     // purged all the same (`parseBaseFields`).
     purge: true,
     also: pointCurrent,
+    // Kept with the version the purge saves, its terms removed: a save
+    // without one would take it away.
+    ...(transcript?.version === at
+      ? { purgedTranscript: transcript.redacted, transcriptRead: transcript.at }
+      : {}),
   });
   return counts;
 };
@@ -1532,6 +1625,26 @@ const stillFoundIn = async (
     }
   }
   return found.size;
+};
+
+/** How many of `documentIds` have a transcript with a text `holds` is true of. */
+const transcriptsHolding = async (
+  db: DrizzleD1Database,
+  documentIds: readonly string[],
+  holds: (text: string) => boolean
+): Promise<number> => {
+  let holding = 0;
+  for (const documentId of documentIds) {
+    // oxlint-disable-next-line no-await-in-loop -- one document at a time, to bound memory
+    const stored = await storedTranscript(db, documentId);
+    if (
+      stored !== undefined &&
+      transcriptTexts(stored.transcript).some(holds)
+    ) {
+      holding += 1;
+    }
+  }
+  return holding;
 };
 
 /**
@@ -1610,7 +1723,16 @@ const purgeContent = async <C>(
     );
     for (const one of named) {
       // oxlint-disable-next-line no-await-in-loop -- one document at a time, to bound memory
-      done.push(await purgeDocument(brain, db, by, one, matcher, onErase));
+      const counts = await purgeDocument(
+        brain,
+        db,
+        by,
+        one,
+        matcher,
+        onErase,
+        purgeId
+      );
+      done.push(counts);
     }
   } finally {
     // A rebuild from now on covers this purge's writes, also when one of
@@ -1639,13 +1761,21 @@ const purgeContent = async <C>(
     statementHolds(input.terms, matcher)
   );
   const hostCopies = await onErase.count(statementHolds(input.terms, matcher));
-  const stillFound = inDocuments + memories + hostCopies;
+  // A transcript saved after the purge read it, or a form it leaves on
+  // purpose, as a memory statement's.
+  const inTranscripts = await transcriptsHolding(
+    db,
+    named.map(({ document }) => document.id),
+    statementHolds(input.terms, matcher)
+  );
+  const stillFound = inDocuments + memories + hostCopies + inTranscripts;
   if (stillFound > 0) {
     log.warn("knowledge.purge_still_found", {
       purgeId,
       documents: inDocuments,
       memories,
       hostCopies,
+      transcripts: inTranscripts,
     });
   }
   return { purgeId, ...sum(done), stillFound };

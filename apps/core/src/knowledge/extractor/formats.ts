@@ -1,10 +1,15 @@
 import { unzipSync } from "fflate";
 import { extractText } from "unpdf";
 
+import { TooLargeError } from "./too-large.ts";
+import { vttExtraction } from "./vtt.ts";
+import type { VttExtraction } from "./vtt.ts";
+
 // Each file type's text as Markdown, with the headings that make its
 // sections: a PDF's pages, a Word document's own headings, an Excel
-// workbook's sheets. This runs only inside the extractor's sandbox
-// (worker.ts), never in core: a file crafted to exhaust a parser exhausts
+// workbook's sheets, a WebVTT file's turns (vtt.ts, with its
+// transcript). This runs only inside the extractor's sandbox (worker.ts),
+// never in core: a file crafted to exhaust a parser exhausts
 // only that isolate.
 //
 // Word and Excel files are ZIP archives of XML, unzipped with fflate's
@@ -21,14 +26,6 @@ import { extractText } from "unpdf";
  * inflated past it.
  */
 const unzippedMaxBytes = 16 * 1024 * 1024;
-
-/** Why a file was refused before reading it. */
-export class TooLargeError extends Error {
-  constructor() {
-    super("The file unzips to more than a document holds");
-    this.name = "TooLargeError";
-  }
-}
 
 /** The parts of an Office file that `wanted` names, by name, as text. */
 const unzipParts = (
@@ -400,13 +397,17 @@ const xlsxMarkdown = (bytes: Uint8Array): string => {
     .join("\n\n");
 };
 
+/** What reading a file gives: its Markdown, or that and its transcript. */
+export type Extraction = string | VttExtraction;
+
 /** The types the extractor reads, by media type. */
 export const formats: Readonly<
-  Record<string, (bytes: Uint8Array) => string | Promise<string>>
+  Record<string, (bytes: Uint8Array) => Extraction | Promise<Extraction>>
 > = {
   "application/pdf": pdfMarkdown,
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
     docxMarkdown,
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
     xlsxMarkdown,
+  "text/vtt": vttExtraction,
 };

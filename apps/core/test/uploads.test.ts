@@ -769,11 +769,11 @@ export default class extends WorkerEntrypoint {
       );
     let markdown: string;
     try {
-      markdown = await localExtractor(env)({
+      ({ markdown } = await localExtractor(env)({
         name: "policy.pdf",
         mediaType: "application/pdf",
         bytes: new Uint8Array([1]),
-      });
+      }));
     } finally {
       loading.mockRestore();
     }

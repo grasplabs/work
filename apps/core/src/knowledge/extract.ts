@@ -1,7 +1,9 @@
+import { transcriptSchema } from "@grasp-os/brain/transcripts";
+import type { Transcript } from "@grasp-os/brain/transcripts";
 import { knowledgeErrors } from "@grasp-os/shared/knowledge";
 import { log } from "@grasp-os/shared/log";
 import { isolateBase } from "@grasp-os/shared/runtime";
-import { uploadErrors } from "@grasp-os/shared/uploads";
+import { uploadErrors, uploadTypes } from "@grasp-os/shared/uploads";
 import type { UploadMediaType } from "@grasp-os/shared/uploads";
 import { z } from "zod";
 
@@ -91,13 +93,19 @@ export interface ExtractInput {
   bytes: Uint8Array;
 }
 
+/** A file's text as Markdown, and its transcript when it is one (WebVTT). */
+export interface Extracted {
+  markdown: string;
+  transcript?: Transcript;
+}
+
 /**
  * Turns a file into Markdown. Throws an expected error for what no retry
  * changes (`upload.too_complex`, `knowledge.too_large`),
  * `ExtractorUnavailableError` when it couldn't try, and any other error
  * when it couldn't read the file.
  */
-export type Extractor = (file: ExtractInput) => Promise<string>;
+export type Extractor = (file: ExtractInput) => Promise<Extracted>;
 
 /**
  * The extractor couldn't be reached, or failed for a moment, before it
@@ -161,10 +169,15 @@ const markdownMaxBytes = 1024 * 1024;
 
 /**
  * What the sandbox may answer. Its code is core's, but it runs what it was
- * handed, so its answer is checked like any other input.
+ * handed, so its answer is checked like any other input: a transcript as
+ * the Brain takes one.
  */
 const extractedSchema = z.discriminatedUnion("ok", [
-  z.strictObject({ ok: z.literal(true), markdown: z.string() }),
+  z.strictObject({
+    ok: z.literal(true),
+    markdown: z.string(),
+    transcript: transcriptSchema.optional(),
+  }),
   z.strictObject({
     ok: z.literal(false),
     reason: z.enum(["unreadable", "too_large"]),
@@ -328,7 +341,8 @@ export const localExtractor =
       new TextEncoder().encode(extracted.markdown).byteLength <=
         markdownMaxBytes
     ) {
-      return extracted.markdown;
+      const { markdown, transcript } = extracted;
+      return transcript === undefined ? { markdown } : { markdown, transcript };
     }
     if (extracted.ok || extracted.reason === "too_large") {
       throw knowledgeErrors.create("knowledge.too_large");
@@ -352,7 +366,7 @@ const workersAiExtractor =
     if (converted.format === "error") {
       throw new Error("Workers AI couldn't convert the file");
     }
-    return converted.data;
+    return { markdown: converted.data };
   };
 
 /** Which extractor an upload got, as its audit events name it. */
@@ -361,16 +375,19 @@ export type ExtractorName = "workers-ai" | "local";
 /**
  * The extractor for a file in `collection`: Workers AI's conversion for a
  * normal collection; the local one for a sensitive collection, for a
- * deployment whose config keeps everything in the EU, and without an AI
- * binding (on-prem).
+ * deployment whose config keeps everything in the EU, without an AI
+ * binding (on-prem), and for a WebVTT file, which only it reads as a
+ * transcript.
  */
 export const extractorFor = (
   env: Omit<ModelsEnv, "AI"> & { AI?: Ai } & LocalExtractorEnv,
-  collection: { sensitive: boolean }
+  collection: { sensitive: boolean },
+  mediaType?: UploadMediaType
 ): { name: ExtractorName; extract: Extractor } => {
   const ai = env.AI;
   if (
     collection.sensitive ||
+    mediaType === uploadTypes.vtt ||
     deploymentStaysInEu(env) ||
     typeof ai?.toMarkdown !== "function"
   ) {

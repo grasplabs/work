@@ -34,6 +34,7 @@
     "./search-erasure": "./src/search-erasure.ts",
     "./tokens": "./src/tokens.ts",
     "./tools": "./src/tools.ts",
+    "./transcripts": "./src/transcripts.ts",
     "./unicode61": "./src/unicode61.ts"
   },
   "scripts": {

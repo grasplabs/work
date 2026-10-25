@@ -219,11 +219,11 @@ export const shareDocument = async (
   // file behind in Knowledge, and sharing it again makes no second one.
   let text: string;
   try {
-    text = await localExtractor(env)({
+    ({ markdown: text } = await localExtractor(env)({
       name: input.name,
       mediaType: uploadTypes[extension],
       bytes: input.bytes,
-    });
+    }));
   } catch (error) {
     // Too large or complex stays so, however often it is tried again.
     const permanent =
