@@ -911,8 +911,12 @@ const keptRowsAfter = async <C>(
  * shared page holds only records the host keeps; a call reads a bounded
  * number of rows, so its work doesn't grow with the records kept from the
  * caller, and a page it couldn't fill in that time comes back short, even
- * empty, with a cursor to go on from. Cursors are encrypted: one after a
- * record the caller can't see looks like any other.
+ * empty, with a cursor to go on from. Cursors are encrypted, so none names
+ * a record the caller can't see; but a short page with a cursor tells how
+ * many records of that stretch the host kept from them: counts only, of
+ * records already in their audience that rest on what they can't read (an
+ * accepted Low of the GRA-298 review; checking cited sources in the query
+ * itself, so the host rarely drops one, is the follow-up).
  */
 export const memoriesList = async <C>(
   brain: Brain<C>,
@@ -962,7 +966,7 @@ export const memoriesList = async <C>(
   const last = page.at(-1);
   // Where the next page starts: after the page's last record when more
   // follow; after the last row read when the read ran out first, which the
-  // cursor, encrypted, doesn't tell apart.
+  // cursor, encrypted, doesn't name.
   let next: { recordedAt: Date; id: string } | undefined;
   if (rows.length > size && last !== undefined) {
     next = last;
