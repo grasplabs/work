@@ -102,10 +102,12 @@ export const WorkCanvas = ({
                 </span>
                 <span className="flex flex-wrap gap-1.5 pl-7">
                   <Badge variant="secondary">
-                    {plural(people, {
-                      one: "Told by # person",
-                      other: "Told by # people",
-                    })}
+                    {people === null
+                      ? t`Told by fewer than 5 people`
+                      : plural(people, {
+                          one: "Told by # person",
+                          other: "Told by # people",
+                        })}
                   </Badge>
                   <MinutesBadge minutes={step.minutes} />
                 </span>

@@ -613,7 +613,8 @@ export interface DrawnTotals {
  * people gave for a normal one, once enough gave them. Never what anyone said it is.
  */
 export interface StaffStep {
-  people: number;
+  /** How many told it: 0, at least `MIN_GROUP`, or none under that (`shownCount`). */
+  people: number | null;
   minutes: DrawnNumber<number>;
 }
 
@@ -623,9 +624,9 @@ export interface StaffStep {
  * at least 5 people. No text of the drawing, and nothing by person.
  */
 export interface StaffDrawing {
-  /** When it was drawn, and from how many people's interviews. */
+  /** When it was drawn, and from how many people's interviews (`shownCount`). */
   at: string;
-  heard: number;
+  heard: number | null;
   per: DrawnWork["per"];
   unit: DrawnWork["unit"];
   steps: StaffStep[];
@@ -679,6 +680,16 @@ export const shownNumber = <Value>(
     ? { people, value: value() }
     : { people: null, value: null };
 };
+
+/**
+ * How many people something rests on, as staff may see it in a team of `team` people: none
+ * under `MIN_GROUP` but for a team of one, as with its numbers. An exact count diffed across
+ * interviews as they come in would say which steps one person told (GRA-1079).
+ */
+export const shownCount = (count: number, team: number): number | null =>
+  count === 0 || count >= MIN_GROUP || (team === 1 && count === 1)
+    ? count
+    : null;
 
 /** The numbers someone gave, as far as `totalsOf` reads them. */
 export type GivenNumbers = Pick<Told, "volume" | "takes" | "wrong" | "out">;
@@ -741,11 +752,14 @@ export const staffDrawingOf = (
     shownNumber(values.length, team, () => medianOf(values));
   return {
     at,
-    heard: tellers.length,
+    heard: shownCount(tellers.length, team),
     per,
     unit,
     steps: steps.map((_, index) => ({
-      people: tellers.filter((each) => each.steps.includes(index)).length,
+      people: shownCount(
+        tellers.filter((each) => each.steps.includes(index)).length,
+        team
+      ),
       minutes: shownOf(minutesOf(index)),
     })),
     differently: differently.map(({ after }, index) => ({

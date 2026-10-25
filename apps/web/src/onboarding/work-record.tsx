@@ -164,7 +164,11 @@ const MissingList = ({
       const number = each.step + 1;
       const { people, needed } = each;
       return {
-        text: t`Step ${number}: ${people} of ${needed} needed told it`,
+        // Under 5 at a real organization, how many isn't staff's (GRA-1079).
+        text:
+          people === null
+            ? t`Step ${number}: fewer than 5 people told it so far`
+            : t`Step ${number}: ${people} of ${needed} needed told it`,
         sub: each.text,
         action: (
           <Button
@@ -267,6 +271,13 @@ const StepEvidence = ({
   };
   const { people } = step;
   const { needed } = record;
+  // How many told it, in words: fewer than 5 at a real organization, never how many (GRA-1079).
+  let told = t`Fewer than 5 people told it so far.`;
+  if (people !== null) {
+    told = step.enough
+      ? t`${people} told it: enough for it to count.`
+      : t`${people} of the ${needed} needed told it.`;
+  }
   return (
     <>
       <div className="flex flex-col gap-2">
@@ -276,9 +287,7 @@ const StepEvidence = ({
             step.enough ? "text-muted-foreground" : "text-status-attention"
           }
         >
-          {step.enough
-            ? t`${people} told it: enough for it to count.`
-            : t`${people} of the ${needed} needed told it.`}
+          {told}
         </p>
       </div>
       {step.other === null ? null : (
@@ -571,7 +580,9 @@ const StepsTold = ({ record }: { record: RecordOfWork }) => {
                   ))}
                 </span>
                 <span className="text-muted-foreground pl-7 tabular-nums sm:pl-0 sm:text-right">
-                  {t`${people} of ${talked}`}
+                  {people === null
+                    ? t`Fewer than 5`
+                    : t`${people} of ${talked}`}
                 </span>
               </div>
               {each.other === null ? null : (

@@ -265,11 +265,12 @@ describe("the work in Grasp's onboarding area", { timeout: 60_000 }, () => {
       // Nothing anyone said: past when it was drawn, only its units.
       strings: ["week", "minutes"],
       keys: ["at", "differently", "heard", "per", "steps", "totals", "unit"],
-      heard: 2,
-      // How many told each step; nobody gave a step's minutes here.
+      // Two of three talked: under 5, how many isn't staff's, of the work or
+      // of a step (GRA-1079); nobody gave a step's minutes here.
+      heard: null,
       steps: [
-        { people: 2, minutes: { people: 0, value: null } },
-        { people: 2, minutes: { people: 0, value: null } },
+        { people: null, minutes: { people: 0, value: null } },
+        { people: null, minutes: { people: 0, value: null } },
       ],
       // Fewer than 5 gave each number: neither how many nor a value (GRA-1079).
       totals: {

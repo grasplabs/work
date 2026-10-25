@@ -5427,6 +5427,10 @@ msgstr "Minder dan {least} van {of}"
 msgid "Fewer than 10 users"
 msgstr "Minder dan 10 gebruikers"
 
+#: src/onboarding/work-record.tsx
+msgid "Fewer than 5"
+msgstr "Minder dan 5"
+
 #: src/onboarding/work-canvas.tsx
 msgid "Fewer than 5 people"
 msgstr "Minder dan 5 mensen"
@@ -5434,6 +5438,10 @@ msgstr "Minder dan 5 mensen"
 #: src/onboarding/work-record.tsx
 msgid "Fewer than 5 people gave it."
 msgstr "Minder dan 5 mensen gaven het."
+
+#: src/onboarding/work-record.tsx
+msgid "Fewer than 5 people told it so far."
+msgstr "Tot nu toe hebben minder dan 5 mensen hem verteld."
 
 #: src/onboarding/work-rules.tsx
 msgid "Fewer than this, and the workflow is still being heard."
@@ -11713,6 +11721,10 @@ msgstr "Stap {number} wordt op twee manieren verteld, en niemand kan zeggen waar
 msgid "Step {number}: {people} of {needed} needed told it"
 msgstr "Stap {number}: {people} van {needed} benodigde mensen hebben hem verteld"
 
+#: src/onboarding/work-record.tsx
+msgid "Step {number}: fewer than 5 people told it so far"
+msgstr "Stap {number}: tot nu toe door minder dan 5 mensen verteld"
+
 #: src/workflows/history-view.tsx
 msgid "Step {ordinal}"
 msgstr "Stap {ordinal}"
@@ -13549,6 +13561,10 @@ msgstr "Gelezen tokens"
 #: src/routes/_shell.onboarding.ai-use.tsx
 msgid "Tokens written"
 msgstr "Geschreven tokens"
+
+#: src/onboarding/work-canvas.tsx
+msgid "Told by fewer than 5 people"
+msgstr "Verteld door minder dan 5 mensen"
 
 #: src/onboarding/work-record.tsx
 msgid "Told it"

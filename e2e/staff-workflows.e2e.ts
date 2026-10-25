@@ -204,7 +204,11 @@ test("staff see a drawn piece of work as numbers only, never what anyone said, i
   const today = page.getByRole("region", { name: "As it runs today" });
   await expect(
     today.getByRole("list", { name: "The steps" }).getByRole("button")
-  ).toHaveText([/Step 1.*Told by 2 people/u, /Step 2.*Told by 2 people/u]);
+  ).toHaveText([
+    // Two told each: under 5, how many isn't staff's (GRA-1079).
+    /Step 1.*Told by fewer than 5 people/u,
+    /Step 2.*Told by fewer than 5 people/u,
+  ]);
   await expect(today).not.toContainText("Write the order down");
   await expect(today).not.toContainText("When the shop is new");
   await expect(
@@ -219,10 +223,10 @@ test("staff see a drawn piece of work as numbers only, never what anyone said, i
     page.getByText("Fewer than 5 people gave it.").first()
   ).toBeVisible();
 
-  // A step opens how many told it.
+  // A step opens how many told it, which under 5 it doesn't say.
   await today.getByRole("button", { name: /Step 2/u }).click();
   await expect(
     page.getByRole("complementary", { name: "Who told this step" })
-  ).toContainText("2 of the 3 needed told it.");
+  ).toContainText("Fewer than 5 people told it so far.");
   expect(cspViolations).toStrictEqual([]);
 });

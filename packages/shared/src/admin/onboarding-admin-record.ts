@@ -47,7 +47,9 @@ export interface Said {
 export type StepWay = "main" | "other" | "none";
 
 /** One step of a piece of work, as the interviews have it. */
-export interface StepRecord extends Said {
+export interface StepRecord extends Omit<Said, "people"> {
+  /** How many told it; none when fewer than 5 did at a real organization (`shownCount`). */
+  people: number | null;
   /** How each interview told it, in the order of `interviews`. */
   ways: StepWay[];
   /** A document or a log describes it too. */
@@ -160,18 +162,22 @@ export const recordOf = (view: OrgView, id: string): WorkRecord | null => {
     steps: work.steps.map((text, index) => {
       const ways = tellings.map((each) => wayOf(each.kept, index));
       const otherWay = ways.filter((way) => way === "other").length;
-      // A real organization's count is its drawing's: who told it is never staff's.
+      // A real organization's count is its drawing's, none under 5: who told it is never staff's.
       const people =
-        work.stepPeople?.[index] ?? ways.filter((way) => way !== "none").length;
+        work.stepPeople === undefined
+          ? ways.filter((way) => way !== "none").length
+          : (work.stepPeople[index] ?? null);
       const documented = (work.documented ?? []).includes(index);
       return {
         text,
         people,
         ways,
         documented,
+        // Not known to count while fewer than 5 told it at a real organization.
         enough:
-          people >= needed ||
-          (people >= 1 && people >= needed - 1 && documented),
+          people !== null &&
+          (people >= needed ||
+            (people >= 1 && people >= needed - 1 && documented)),
         other:
           differs && differs.step === index && otherWay > 0
             ? {

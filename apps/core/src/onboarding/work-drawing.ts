@@ -524,11 +524,14 @@ const shownSchema = <Value extends z.ZodType>(value: Value) =>
  */
 const staffDrawingSchema = z.object({
   at: z.string(),
-  heard: z.number(),
+  heard: z.number().nullable(),
   per: z.enum(["week", "month"]),
   unit: z.enum(["minutes", "hours"]),
   steps: z.array(
-    z.object({ people: z.number(), minutes: shownSchema(z.number()) })
+    z.object({
+      people: z.number().nullable(),
+      minutes: shownSchema(z.number()),
+    })
   ),
   differently: z.array(
     z.object({ after: z.number(), outOfTen: shownSchema(z.number()) })

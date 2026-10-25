@@ -112,6 +112,27 @@ describe("a drawing as staff get it", () => {
     });
   });
 
+  it("holds back how many told each step, and how many it was drawn from, until five did", () => {
+    // One interview completes in a team of 8, then three more: diffing exact
+    // counts across them would say which steps each person told.
+    const after = (count: number) => {
+      const staff = staffDrawingOf(
+        drawing(people(count, () => ({ steps: [0, 1] }))),
+        8
+      );
+      return {
+        heard: staff.heard,
+        steps: staff.steps.map((step) => step.people),
+      };
+    };
+
+    expect([1, 4, 5].map(after)).toStrictEqual([
+      { heard: null, steps: [null, null] },
+      { heard: null, steps: [null, null] },
+      { heard: 5, steps: [5, 5] },
+    ]);
+  });
+
   it("holds back a step's minutes six told but only one gave, and a case's share only one gave", () => {
     // All six tell the step and the case; only one gives minutes or a share.
     const tellers = people(6, (index) => ({

@@ -5427,6 +5427,10 @@ msgstr "Menos de {least} de {of}"
 msgid "Fewer than 10 users"
 msgstr "Menos de 10 usuarios"
 
+#: src/onboarding/work-record.tsx
+msgid "Fewer than 5"
+msgstr "Menos de 5"
+
 #: src/onboarding/work-canvas.tsx
 msgid "Fewer than 5 people"
 msgstr "Menos de 5 personas"
@@ -5434,6 +5438,10 @@ msgstr "Menos de 5 personas"
 #: src/onboarding/work-record.tsx
 msgid "Fewer than 5 people gave it."
 msgstr "Menos de 5 personas lo dieron."
+
+#: src/onboarding/work-record.tsx
+msgid "Fewer than 5 people told it so far."
+msgstr "Hasta ahora lo han contado menos de 5 personas."
 
 #: src/onboarding/work-rules.tsx
 msgid "Fewer than this, and the workflow is still being heard."
@@ -11713,6 +11721,10 @@ msgstr "El paso {number} se cuenta de dos formas, y nadie sabe por qué"
 msgid "Step {number}: {people} of {needed} needed told it"
 msgstr "Paso {number}: lo han contado {people} de las {needed} personas necesarias"
 
+#: src/onboarding/work-record.tsx
+msgid "Step {number}: fewer than 5 people told it so far"
+msgstr "Paso {number}: hasta ahora contado por menos de 5 personas"
+
 #: src/workflows/history-view.tsx
 msgid "Step {ordinal}"
 msgstr "Paso {ordinal}"
@@ -13549,6 +13561,10 @@ msgstr "Tokens leídos"
 #: src/routes/_shell.onboarding.ai-use.tsx
 msgid "Tokens written"
 msgstr "Tokens escritos"
+
+#: src/onboarding/work-canvas.tsx
+msgid "Told by fewer than 5 people"
+msgstr "Contado por menos de 5 personas"
 
 #: src/onboarding/work-record.tsx
 msgid "Told it"

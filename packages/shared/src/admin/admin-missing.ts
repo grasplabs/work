@@ -9,7 +9,14 @@ import type { WorkRecord } from "./onboarding-admin-record.ts";
 export type Missing =
   | { kind: "difference"; step: number; text: string }
   | { kind: "people"; count: number }
-  | { kind: "step"; step: number; text: string; people: number; needed: number }
+  | {
+      kind: "step";
+      step: number;
+      text: string;
+      /** None when fewer than 5 told it at a real organization. */
+      people: number | null;
+      needed: number;
+    }
   /** More steps than fit a list that too few people described: how many, of how many, and how many people a step needs. */
   | { kind: "steps"; count: number; of: number; needed: number }
   | { kind: "number"; which: "volume" | "takes" | "wrong" }

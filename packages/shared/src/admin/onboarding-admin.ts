@@ -97,9 +97,10 @@ export interface Work {
   totals?: DrawnTotals;
   /**
    * A real organization's: how many people told each step, by position, as its drawing counts
-   * them; staff never learn who (GRA-1084). A sample's are counted from its made-up people.
+   * them, none under 5 (`shownCount`); staff never learn who (GRA-1084). A sample's are counted
+   * from its made-up people.
    */
-  stepPeople?: number[];
+  stepPeople?: (number | null)[];
   /** What right looks like. */
   right: string;
   /** When to stop and ask, from "when". */
