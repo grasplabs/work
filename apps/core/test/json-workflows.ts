@@ -1,6 +1,7 @@
 import type { Role } from "@grasp-os/shared/roles";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import type { WorkflowResourceRun } from "@grasp-os/shared/workflow-resources";
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { expect, vi } from "vite-plus/test";
 
@@ -192,3 +193,18 @@ export const hostOf = async (
 /** The code `settled` failed with, or "ok". */
 export const codeOf = (settled: Settled<unknown>): unknown =>
   settled.ok ? "ok" : settled.error.code;
+
+/** The value step `name` of run `runId` recorded, as its journal keeps it. */
+export const recordedText = async (
+  runId: string,
+  name: string
+): Promise<string> =>
+  await runInDurableObject(runObjectOf(env, runId), (_object, state) => {
+    const [row] = state.storage.sql
+      .exec<{ value: string | null }>(
+        "SELECT value FROM steps WHERE name = ? AND state = 'succeeded'",
+        name
+      )
+      .toArray();
+    return row?.value ?? "";
+  });
