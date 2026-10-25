@@ -18,18 +18,16 @@ import { member, messageFrom, post, reached } from "./teams-door.ts";
  */
 export const heldTurn = async (idp: Idp, plan: MailAnswer[] = []) => {
   const admin = await signedInApi(idp, "admin");
-  // A send whose fields its server lists, so core can check a chat app's
-  // write against them (channels/stephen-rules.ts).
-  const mail = await mailConnection(plan, ["MAIL_SEND"]);
+  const mail = await mailConnection(plan);
   const binding = `MAIL${unique()}`.toUpperCase();
   await requestGranted(idp, admin, {
     subject: { type: "agent", agentId: chatAgentId },
     object: { type: "connection", connectionId: mail.id },
-    actions: ["MAIL_SEND"],
+    actions: ["mail.send"],
     binding,
   });
   const send = (to: string, subject: string) =>
-    `await env.connections.call(${JSON.stringify(binding)}, "MAIL_SEND", ${JSON.stringify({ to, subject })});`;
+    `await env.connections.call(${JSON.stringify(binding)}, "mail.send", ${JSON.stringify({ to, subject })});`;
   const person = await member(
     idp,
     codeStep(
@@ -38,9 +36,7 @@ export const heldTurn = async (idp: Idp, plan: MailAnswer[] = []) => {
     says("Both mails wait for you to confirm them.")
   );
   await post(
-    messageFrom(person.teams, {
-      text: "Mail ben@acme.test the invoice and remind cleo@acme.test.",
-    })
+    messageFrom(person.teams, { text: "Mail Ben the invoice and remind Cleo." })
   );
   const { sent } = await reached(person.teams.conversation);
   const card = sent.findLast(
@@ -97,10 +93,17 @@ export const editsOf = async (turn: Turn): Promise<string[]> => {
 export const linesAfterCard = async (turn: Turn): Promise<string[]> => {
   const { sent } = await reached(turn.person.teams.conversation);
   const at = sent.findIndex(({ id }) => id === turn.cardId);
-  return sent
-    .slice(at + 1)
-    .filter(({ editOf }) => editOf === undefined)
-    .flatMap(({ activity }) =>
-      activity.text === undefined ? [] : [activity.text]
-    );
+  return (
+    sent
+      .slice(at + 1)
+      .filter(({ editOf }) => editOf === undefined)
+      // Not the card offering their own Microsoft 365 (connect-own.ts).
+      .filter(
+        ({ activity }) =>
+          !JSON.stringify(activity).includes("/connect-microsoft")
+      )
+      .flatMap(({ activity }) =>
+        activity.text === undefined ? [] : [activity.text]
+      )
+  );
 };

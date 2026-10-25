@@ -203,7 +203,7 @@ interface ReadSources {
 }
 
 /** What one client's read came to, before it's told with its history. */
-type ReadOutcome =
+export type ReadOutcome =
   | { snapshot: AdminSnapshot; at: Date }
   | { error: AdminReadError };
 
@@ -457,6 +457,50 @@ export const clientAdmins = async (
       error: outcome?.error ?? "no_answer",
     };
   });
+};
+
+/**
+ * Every active client's admin snapshot alone, as `staff`, or why it isn't
+ * here: what the admin's watch reads (src/clients/watch.ts), without the
+ * billing, proposal and CRM a page shows beside it. Each client's read is
+ * kept as `clientAdmins` keeps it.
+ */
+export const clientSnapshots = async (
+  env: Env,
+  staff: Staff,
+  options: AdminReadOptions = defaultAdminReadOptions
+): Promise<{ client: GridRow; outcome: ReadOutcome }[]> => {
+  if (staff.email === "") {
+    throw new Error("Reading clients' admin snapshots takes a staff member");
+  }
+  const db = adminDatabase(env.DB);
+  const grid = await clientGrid(env);
+  const active = grid.filter(({ status }) => status === "active");
+  const secrets = await ifStored(
+    async (): Promise<DeploySecrets> => await deploySecrets(env)
+  );
+  const askedAt = new Date();
+  const sources: ReadSources = {
+    env,
+    staff,
+    secrets,
+    timeoutMs: options.timeoutMs,
+  };
+  const read = await eachLimited(
+    active,
+    options.concurrency,
+    async (row) => await readClient(sources, row)
+  );
+  const answered = active.map((client, index) => ({
+    client,
+    outcome: read[index] ?? ({ error: "no_answer" } satisfies ReadOutcome),
+  }));
+  await keepOutcomes(
+    db,
+    answered.map(({ client, outcome }) => [client.id, outcome] as const),
+    askedAt
+  );
+  return answered;
 };
 
 /**

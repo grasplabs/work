@@ -76,6 +76,7 @@ import {
   brainStubModel,
   modelStrings,
   searchedSections,
+  systemTextOf,
   transcriptOf,
   stubReader,
 } from "./brain-stub-model.ts";
@@ -106,7 +107,7 @@ import { newTeam, readCollection } from "./knowledge.ts";
 import { callAuth, openRpc, signedInApi } from "./sign-in.ts";
 
 /** Bumped with any change to how the harness runs or measures a trial. */
-export const brainHarnessVersion = "2";
+export const brainHarnessVersion = "7";
 
 export const brainArms = ["agent", "fullContext", "fullText"] as const;
 export type BrainArm = (typeof brainArms)[number];
@@ -148,7 +149,13 @@ export const minimumMeaningfulGain = 0.05;
 /** The most characters of sources the full-context arm hands the model. */
 export const fullContextChars = 60_000;
 
-/** The instructions every arm's question carries, so all answer alike. */
+/**
+ * The instructions every arm answers by, so all answer alike: the
+ * company's AGENTS.md, in every chat's memory (the system prompt), never
+ * in the question. The person's message is what they typed, as in the
+ * product, so whatever the platform reads from it (a recall's query)
+ * reads only that.
+ */
 export const answerProtocol = [
   "Answer from what you can read in this chat: your memory, this conversation and Knowledge.",
   "Cite each source you used in square brackets: [path#heading], [memory] or [session].",
@@ -167,9 +174,7 @@ interface Source {
 
 const renderPrompt = (question: string, sources?: readonly Source[]) =>
   [
-    answerProtocol,
-    "",
-    `Question: ${question}`,
+    question,
     ...(sources === undefined
       ? []
       : [
@@ -447,15 +452,15 @@ const grantedKeys = (company: BrainCompany): string[] => [
  * The month and day the run's model calls count in, whatever the clock
  * says: a run across midnight at a month's end still reads one total.
  */
-const brainBudgetMonth = "2400-01";
-const brainBudgetDay = "2400-01-01";
+export const brainBudgetMonth = "2400-01";
+export const brainBudgetDay = "2400-01-01";
 
 /** Points `stub` at the provider, its calls counted in the run's month. */
 const pointAt = async (
   stub: Workspace["stub"],
   gateway: Provider["gateway"]
 ) => {
-  await pointAtGateway(stub, gateway);
+  await pointAtGateway(stub, gateway, { config: gateway.config });
   await setObjectEnv(stub, {
     MODEL_BUDGET_MONTH: brainBudgetMonth,
     MODEL_BUDGET_DAY: brainBudgetDay,
@@ -463,7 +468,7 @@ const pointAt = async (
 };
 
 /** What the ledger has charged for the run's model calls, in micros. */
-const charged = async (): Promise<number> => {
+export const charged = async (): Promise<number> => {
   const { deployment = [] } = await modelLedger(env).spendOf(
     brainBudgetMonth,
     ["deployment"],
@@ -529,6 +534,17 @@ export const setUpBrainCompany = async (idp: Idp): Promise<BrainCompany> => {
     });
     documents.set(key, { id: saved.id, version: saved.currentVersion });
   }
+  // The answer protocol, as the company's rules every chat follows.
+  const { memory } = await admin.api.memory.collections();
+  if (memory === null) {
+    throw new Error("The admin's Memory collection wasn't set up");
+  }
+  await admin.api.knowledge.saveDocument({
+    collectionId: memory,
+    path: "AGENTS.md",
+    text: answerProtocol,
+    ifVersion: 0,
+  });
   for (const persona of brainPersonas) {
     const person = people[persona];
     // oxlint-disable-next-line no-await-in-loop -- one person at a time
@@ -888,10 +904,24 @@ interface Hold {
 }
 
 /**
+ * The gateway config a run's objects get (`MODEL_GATEWAY`), and the model
+ * its chats ask: the test gateway's by default.
+ */
+export interface BrainModelSetup {
+  model: string;
+  config: { gateway: string; models: readonly string[] } & Record<
+    string,
+    unknown
+  >;
+}
+
+const testModelSetup: BrainModelSetup = { model, config: gatewayConfig };
+
+/**
  * The run's one model provider, behind every persona's object: trials run
  * one at a time, so it answers for the trial under way.
  */
-const providerOf = (respond: BrainProvider) => {
+const providerOf = (respond: BrainProvider, setup: BrainModelSetup) => {
   let turn: StubTurn = { phase: "prior" };
   let hold: Hold | undefined;
   const answer = respond(() => turn);
@@ -940,7 +970,7 @@ const providerOf = (respond: BrainProvider) => {
     },
   };
   return {
-    gateway: { ...gateway, binding },
+    gateway: { ...gateway, binding, ...setup },
     recorded,
     /** How long reading the audit log took the harness so far. */
     observingMs: () => observingMs,
@@ -1490,7 +1520,7 @@ const changedInTrial = ({
 const earlierTurns = async (
   company: BrainCompany,
   place: Workspace,
-  { setTurn }: Provider,
+  { setTurn, gateway: { model: asked } }: Provider,
   {
     chatId,
     plan: { arm, task },
@@ -1507,7 +1537,7 @@ const earlierTurns = async (
     setTurn({ phase: "prior", reads: task.query });
     await elsewhere.stub.ask(elsewhere.chatId, {
       text: `Earlier, in another chat: ${task.question}`,
-      model,
+      model: asked,
     });
   }
   setTurn(
@@ -1528,7 +1558,7 @@ const earlierTurns = async (
       await changeState(company, place, chatId, arm);
     }
     // oxlint-disable-next-line no-await-in-loop -- in order, as said
-    await place.stub.ask(chatId, { text: said, model });
+    await place.stub.ask(chatId, { text: said, model: asked });
     // oxlint-disable-next-line no-await-in-loop -- in order, as said
     await keep();
   }
@@ -1617,7 +1647,7 @@ const runTrial = async (
       setTurn({ phase: "question", task, searches: arm === "agent", arm });
       const reply = await place.stub.ask(chat.id, {
         text: renderPrompt(task.question, handed.sources),
-        model,
+        model: gateway.model,
       });
       ({ answer } = reply);
       if (reply.outcome !== "answered") {
@@ -1778,6 +1808,22 @@ const lastSaid = async (place: Workspace, chatId: string): Promise<string> => {
     : "";
 };
 
+/**
+ * The paths of the company's Knowledge documents, by ID: what a citation
+ * linking one, as the product cites (`grasp:note/<id>`), cites.
+ */
+const notesOf = (company: BrainCompany): Record<string, string> => {
+  const paths = new Map(
+    Object.entries(brainDocuments).map(([key, { path }]) => [key, path])
+  );
+  return Object.fromEntries(
+    [...company.documents].flatMap(([key, { id }]) => {
+      const path = paths.get(key);
+      return path === undefined ? [] : [[id, path]];
+    })
+  );
+};
+
 const runDurabilityCase = async (
   company: BrainCompany,
   place: Workspace,
@@ -1806,7 +1852,7 @@ const runDurabilityCase = async (
   setTurn({ phase: "prior" });
   for (const said of task.priorTurns ?? []) {
     // oxlint-disable-next-line no-await-in-loop -- in order, as said
-    await place.stub.ask(chat.id, { text: said, model });
+    await place.stub.ask(chat.id, { text: said, model: gateway.model });
   }
   // The same input both times: the prompt, its sources read once.
   const { sources } = await sourcesFor(company, place, { arm, task });
@@ -1845,7 +1891,10 @@ const runDurabilityCase = async (
     // Never rejects: a turn the restart cut off is a failed attempt.
     const asking = (async () => {
       try {
-        const reply = await place.stub.ask(chat.id, { text, model });
+        const reply = await place.stub.ask(chat.id, {
+          text,
+          model: gateway.model,
+        });
         ({ answer } = reply);
         if (reply.outcome !== "answered") {
           failure = `${reply.outcome}: ${reply.error ?? ""}`;
@@ -1932,8 +1981,9 @@ const runDurabilityCase = async (
   );
   const retry = await attempt(2, false);
   const ledgerAfter = await ledgerRequests();
+  const notes = notesOf(company);
   const scoreOf = (observed: TrialObservation) =>
-    scoreTrial(task.expect, observed);
+    scoreTrial(task.expect, { ...observed, notes });
   return {
     kind,
     arm,
@@ -1963,8 +2013,13 @@ const fieldOf = (request: GatewayRequest, field: string): unknown =>
     ? Reflect.get(request.body, field)
     : null;
 
-/** The person's memory and the listed skills: theirs and this run's own. */
-const ownSections = /<(?<section>memory|skills)>[\s\S]*?<\/\k<section>>/gu;
+/**
+ * The person's memory and the listed skills: theirs and this run's own.
+ * Memory is a section of one block per file (`<memory source=… file=…>`):
+ * each goes, whichever files there are.
+ */
+const ownSections =
+  /<(?<section>memory|skills)(?: [^>]*)?>[\s\S]*?<\/\k<section>>/gu;
 
 /**
  * What each request told the model before the chat: the agent's
@@ -1973,9 +2028,7 @@ const ownSections = /<(?<section>memory|skills)>[\s\S]*?<\/\k<section>>/gu;
  * and run and are pinned apart (sources and skills).
  */
 const promptOf = (request: GatewayRequest): string =>
-  modelStrings(fieldOf(request, "system"))
-    .join("\n")
-    .replaceAll(ownSections, "<$<section>/>");
+  systemTextOf(request.body).replaceAll(ownSections, "<$<section>/>");
 
 /** A seeded shuffle, so arms take turns going first without luck deciding. */
 const shuffled = <T>(items: readonly T[], random: () => number): T[] => {
@@ -2003,6 +2056,11 @@ export interface RunIdentity {
   /** The stored corpus at the start of each window it ran. */
   sources: Partial<Record<BrainWindow, string>>;
   model: { id: string; provider: string; gateway: string };
+  /**
+   * The build that ran, for a run outside CI: its commit, whether the
+   * tree had changes on top, and where it ran.
+   */
+  build?: BrainBuild;
   /** Each distinct tool contract the agent's requests carried. */
   tools: string[];
   /** Each distinct set of instructions and API declarations they carried. */
@@ -2056,6 +2114,14 @@ export interface BrainReport {
   scores: TrialScore[];
 }
 
+/** The build a run ran, as its identity pins it. */
+export interface BrainBuild {
+  sha: string;
+  dirty: boolean;
+  /** Where it ran: the runtime and how the model was reached. */
+  profile: string;
+}
+
 export interface BrainRunOptions {
   split: BrainSplit;
   repeats: number;
@@ -2075,6 +2141,10 @@ export interface BrainRunOptions {
   respond?: BrainProvider;
   /** The provider's name in the run's identity; required with `respond`. */
   providerName?: string;
+  /** The model the chats ask and the gateway config: the test gateway's by default. */
+  modelSetup?: BrainModelSetup;
+  /** The build, pinned in the identity of a run outside CI. */
+  build?: BrainBuild;
   /** How the gate reads Knowledge's database: every row by default. */
   knowledgeState?: KnowledgeStateCheck;
 }
@@ -2226,6 +2296,37 @@ const backgroundMissed = (
     : ["cost.index-update"]),
 ];
 
+/**
+ * One unmeasured turn in each object first: what the deployment sets up
+ * once, on first use, is neither a trial's latency nor its change.
+ */
+const warmUp = async (
+  company: BrainCompany,
+  places: ReadonlyMap<BrainPersona, Workspace>,
+  provider: Provider
+) => {
+  for (const place of places.values()) {
+    // oxlint-disable-next-line no-await-in-loop -- one object at a time
+    await pointAt(place.stub, provider.gateway);
+    provider.setTurn({ phase: "prior" });
+    // oxlint-disable-next-line no-await-in-loop -- one object at a time
+    const chat = await place.stub.createChat(
+      "Baseline warm-up",
+      company.people[place.persona].userId,
+      place.agent.agentId
+    );
+    // oxlint-disable-next-line no-await-in-loop -- one object at a time
+    await place.stub.ask(chat.id, {
+      text: "Warm-up: just say noted.",
+      model: provider.gateway.model,
+    });
+  }
+};
+
+/** The build in a run's identity, when it ran outside CI. */
+const buildIdentity = (build: BrainBuild | undefined) =>
+  build === undefined ? {} : { build };
+
 /** Runs the baseline on a company loaded at `t0`, window by window. */
 export const runBrainBaseline = async (
   company: BrainCompany,
@@ -2240,6 +2341,8 @@ export const runBrainBaseline = async (
     seed = 295,
     respond = stubReader,
     providerName,
+    modelSetup = testModelSetup,
+    build,
     knowledgeState = "rows",
   }: BrainRunOptions
 ): Promise<BrainReport> => {
@@ -2251,27 +2354,13 @@ export const runBrainBaseline = async (
   }
   const providerId = providerName ?? brainStubModel;
   const random = seededRandom(seed);
-  const provider = providerOf(respond);
+  const provider = providerOf(respond, modelSetup);
   const places = new Map<BrainPersona, Workspace>();
   for (const persona of brainPersonas) {
     // oxlint-disable-next-line no-await-in-loop -- one workspace at a time
     places.set(persona, await workspaceOf(company, persona));
   }
-  // One unmeasured turn in each object first: what the deployment sets up
-  // once, on first use, is neither a trial's latency nor its change.
-  for (const place of places.values()) {
-    // oxlint-disable-next-line no-await-in-loop -- one object at a time
-    await pointAt(place.stub, provider.gateway);
-    provider.setTurn({ phase: "prior" });
-    // oxlint-disable-next-line no-await-in-loop -- one object at a time
-    const chat = await place.stub.createChat(
-      "Baseline warm-up",
-      company.people[place.persona].userId,
-      place.agent.agentId
-    );
-    // oxlint-disable-next-line no-await-in-loop -- one object at a time
-    await place.stub.ask(chat.id, { text: "Warm-up: just say noted.", model });
-  }
+  await warmUp(company, places, provider);
   const observations: TrialObservation[] = [];
   const sources: RunIdentity["sources"] = {};
   const retrieval: RunIdentity["retrieval"] = {};
@@ -2346,9 +2435,12 @@ export const runBrainBaseline = async (
     retry,
   ]);
   const byId = new Map(brainTasks.map((task) => [task.id, task]));
+  const notes = notesOf(company);
   const scores = observations.flatMap((observed) => {
     const task = byId.get(observed.taskId);
-    return task === undefined ? [] : [scoreTrial(task.expect, observed)];
+    return task === undefined
+      ? []
+      : [scoreTrial(task.expect, { ...observed, notes })];
   });
   const scoresOf = (arm: string) => scores.filter((score) => score.arm === arm);
   const armScores = scores.filter(({ arm }) =>
@@ -2399,10 +2491,11 @@ export const runBrainBaseline = async (
       sources,
       retrieval,
       model: {
-        id: model,
+        id: modelSetup.model,
         provider: providerId,
-        gateway: gatewayConfig.gateway,
+        gateway: modelSetup.config.gateway,
       },
+      ...buildIdentity(build),
       tools: await contracts((request) => fieldOf(request, "tools")),
       prompt: await contracts(promptOf),
       skills: await digestOf(catalogs),
@@ -2413,7 +2506,7 @@ export const runBrainBaseline = async (
           key,
           actions: ["read"],
         })),
-        gateway: gatewayConfig,
+        gateway: modelSetup.config,
         protocol: answerProtocol,
         budgets: { searchedSections, fullContextChars },
       }),

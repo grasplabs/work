@@ -49,6 +49,11 @@ export interface TrialObservation {
   changedTables?: readonly string[];
   /** Why the trial failed, if it did: it still counts, as not completed. */
   error?: string;
+  /**
+   * The paths of the run's Knowledge documents, by ID: what a citation
+   * linking one (`grasp:note/<id>`) cites.
+   */
+  notes?: Readonly<Record<string, string>>;
   latencyMs: number;
   costMicros: number;
   /**
@@ -99,9 +104,21 @@ export interface TrialScore {
 export const normalized = (text: string): string =>
   text.normalize("NFC").toLowerCase().replaceAll(/\s+/gu, " ").trim();
 
-const abstention = /^\s*abstain\b/iu;
-/** The protocol's answer line: `ANSWER:` and only the answer, on one line. */
-const answerLine = /^\s*answer:(?<answer>[^\n]*)/iu;
+/**
+ * The protocol's abstention: `ABSTAIN` first, bold or not (`**ABSTAIN:**`),
+ * as models write markdown.
+ */
+const abstention = /^\s*(?:\*\*)?\s*abstain\b/iu;
+/**
+ * The protocol's answer line: `ANSWER:` and only the answer, on one line.
+ * Its keyword may be in the question's language, as real models translate
+ * it (`RESPUESTA:`, `RÉPONSE :`), and bold; neither changes what the
+ * answer says.
+ */
+const answerLine =
+  /^\s*(?:\*\*)?\s*(?:answer|antwoord|antwort|réponse|reponse|respuesta)\s*:\s*(?:\*\*)?(?<answer>[^\n]*)/iu;
+/** Markdown emphasis around the answer's values (`**3**`), which isn't theirs. */
+const emphasis = /\*\*|__/gu;
 /**
  * Words that turn an answer line around ("not Marta Ruiz"), in the five
  * languages: such a line asserts nothing the task can check.
@@ -114,11 +131,39 @@ const citation = /\[(?<cited>[^\]\n]{1,300})\]/gu;
 export const isAbstention = (answer: string): boolean =>
   abstention.test(answer);
 
-/** The sources an answer cites, as `[path#heading]`, `[memory]` or `[session]`. */
-export const citationsOf = (answer: string): string[] =>
-  [...answer.matchAll(citation)].map(
-    ({ groups }) => groups?.cited?.trim() ?? ""
-  );
+/**
+ * The label the harness puts before each source it hands over
+ * (`[source: path#heading]`), which real models copy into their citations.
+ */
+const sourceLabel = /^source:\s*/iu;
+
+/**
+ * A link to a Knowledge document as the product's agent is told to cite
+ * one (src/agent.ts): `[its title](grasp:note/<documentId>)`.
+ */
+const noteLink = /\[[^\]\n]*\]\(\s*<?grasp:note\/(?<id>[\w-]{1,128})>?\s*\)/gu;
+
+/**
+ * The sources an answer cites, as `[path#heading]`, `[memory]` or
+ * `[session]`; a citation that copied a handed source's label as well,
+ * `[source: path#heading]`, cites that source. A link to a document, as
+ * the product cites (`[title](grasp:note/<id>)`), cites that document's
+ * path, by `notes`: the paths of the run's documents, by ID. A link to
+ * one it doesn't name cites nothing a task expects.
+ */
+export const citationsOf = (
+  answer: string,
+  notes: Readonly<Record<string, string>> = {}
+): string[] => {
+  const linked = [...answer.matchAll(noteLink)].map(({ groups }) => {
+    const id = groups?.id ?? "";
+    return Object.hasOwn(notes, id) ? (notes[id] ?? "") : `grasp:note/${id}`;
+  });
+  const bracketed = [
+    ...answer.replaceAll(noteLink, " ").matchAll(citation),
+  ].map(({ groups }) => (groups?.cited?.trim() ?? "").replace(sourceLabel, ""));
+  return [...linked, ...bracketed];
+};
 
 const wordCharacter = /[\p{L}\p{N}]/u;
 const digit = /\p{N}/u;
@@ -233,7 +278,12 @@ const answers = (
   if (negation.test(said)) {
     return false;
   }
-  const values = said.split(";").map((value) => value.trim());
+  // A semicolon after the last value ("Tor 4;") ends the list: it adds
+  // no value.
+  const values = said
+    .split(";")
+    .map((value) => value.trim())
+    .filter((value) => value !== "");
   const evidence = expected.evidence.map(({ marker }) => normalized(marker));
   if (values.length !== expected.facts.length) {
     return false;
@@ -300,10 +350,10 @@ export const scoreTrial = (
   // What the answer asserts: its answer line, citations aside. Facts named
   // only in an explanation or a citation's label aren't the answer.
   const said = normalized(
-    (answerLine.exec(observed.answer)?.groups?.answer ?? "").replaceAll(
-      citation,
-      " "
-    )
+    (answerLine.exec(observed.answer)?.groups?.answer ?? "")
+      .replaceAll(noteLink, " ")
+      .replaceAll(citation, " ")
+      .replaceAll(emphasis, "")
   );
   const input = normalized(observed.modelInput);
   const parts = observed.transcript.map(({ by, text, backing = [] }) => ({
@@ -377,7 +427,7 @@ export const scoreTrial = (
       )
     );
   }).length;
-  const cited = citationsOf(observed.answer);
+  const cited = citationsOf(observed.answer, observed.notes);
   const supported = cited.filter((source) =>
     expect.evidence.some((evidence) => names(source, evidence.source))
   ).length;

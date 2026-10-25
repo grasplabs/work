@@ -27,6 +27,7 @@ import type {
   OrganizationConnection,
   ConnectResult,
   Disconnect,
+  RequireClassRights,
   DisconnectPersonal,
   FinishConnection,
   HeldCall,
@@ -41,6 +42,7 @@ import type {
 } from "@grasp-os/shared/connect";
 import type {
   DirectoryConnection,
+  DirectoryLookup,
   DirectoryRead,
 } from "@grasp-os/shared/directory";
 import type {
@@ -73,6 +75,7 @@ import { catalog, catalogTools } from "./catalog.ts";
 import { keptChange } from "./changes.ts";
 import { channelSigningKeys } from "./channel-keys.ts";
 import { channelFetch } from "./channels.ts";
+import { requireClassRights } from "./class-rights.ts";
 import { clock, tickClock } from "./clock.ts";
 import {
   finishToolkitFlow,
@@ -81,7 +84,11 @@ import {
 import { connectionOwners } from "./connections.ts";
 import { actionShape, connectorContract } from "./contracts.ts";
 import { requireDecision } from "./decisions.ts";
-import { directoryConnections, readDirectory } from "./directory.ts";
+import {
+  directoryConnections,
+  lookUpInDirectory,
+  readDirectory,
+} from "./directory.ts";
 import {
   placesConnections,
   readPlaceFile,
@@ -135,6 +142,7 @@ import {
   listPendingActions,
   pendingActionFor,
   refuseConfirmation,
+  refuseEnded,
   take,
 } from "./pending.ts";
 import type { HeldAction } from "./pending.ts";
@@ -353,6 +361,12 @@ export default class Connect
     return await connectionOwners(this.env.DB, connectionIds);
   }
 
+  async requireClassRights(
+    request: RequireClassRights
+  ): Promise<{ reconnect: number }> {
+    return await requireClassRights(this.env, request);
+  }
+
   async disconnect(request: Disconnect): Promise<{ revoked: boolean }> {
     return await disconnect(this.env, request);
   }
@@ -441,7 +455,8 @@ export default class Connect
     return await readLandscape(this.env, request);
   }
 
-  // The directory (src/directory.ts): for the onboarding, in core, only.
+  // The directory (src/directory.ts): for the onboarding, and to know the
+  // people writing to Stephen on a chat platform, in core, only.
 
   async directoryConnections(): Promise<DirectoryConnection[]> {
     return await directoryConnections(this.env);
@@ -449,6 +464,10 @@ export default class Connect
 
   async readDirectory(request: unknown): Promise<DirectoryRead> {
     return await readDirectory(this.env, request);
+  }
+
+  async lookUpInDirectory(request: unknown): Promise<DirectoryLookup> {
+    return await lookUpInDirectory(this.env, request);
   }
 
   // The HR platform (src/hr.ts): for the onboarding, in core, only.
@@ -667,6 +686,8 @@ export default class Connect
     }
     const { capability, person, id, inputHash, via } = parsed.data;
     const held = await heldFor(this.env, person, id, "confirm", via);
+    // Its day over: declined as expired, whatever the press carries.
+    await refuseEnded(this.env, person, held);
     const call = callOf(held);
     let claims: CapabilityClaims | undefined;
     try {

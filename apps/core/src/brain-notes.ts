@@ -8,12 +8,12 @@ import { collectionIdSchema, documentIdSchema } from "@grasp-os/shared/ids";
 import { documentTypeOf } from "@grasp-os/shared/knowledge";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { and, asc, count, eq, gt, inArray, lte, sql } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/d1";
 import { alias } from "drizzle-orm/sqlite-core";
 
 import { collections, documents, links } from "./db/knowledge/schema.ts";
+import type { Reader } from "./knowledge/access.ts";
 import { allowedFor } from "./knowledge/authorize.ts";
-import { portsOf } from "./knowledge/ports.ts";
+import type { Brain } from "./knowledge/brain.ts";
 
 // Every note in the brain with its links (`brain.notes`), a page at a
 // time, as the person may read them: what core records today, Knowledge
@@ -47,7 +47,7 @@ const target = alias(documents, "target");
 
 /** A page of `person`'s notes, in ID order, after `options.cursor`. */
 export const brainNotes = async (
-  env: Env,
+  brain: Brain<Reader>,
   person: Identity,
   options: unknown
 ): Promise<BrainNotePage> => {
@@ -57,8 +57,8 @@ export const brainNotes = async (
     options
   );
   const reader = { type: "person", person } as const;
-  const db = drizzle(env.KNOWLEDGE);
-  const allowed = await allowedFor(portsOf(env), reader);
+  const { db } = brain;
+  const allowed = await allowedFor(brain.ports, reader);
   // One more than a page: whether another follows.
   const rows = await db
     .select({
@@ -155,7 +155,7 @@ export const brainNotes = async (
       moreLinks: Math.max(0, (totals.get(row.id) ?? 0) - its.length),
     };
   });
-  await portsOf(env).onRead(
+  await brain.ports.onRead(
     reader,
     {
       action: "knowledge.read",
