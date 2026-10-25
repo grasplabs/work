@@ -7,6 +7,7 @@ import type {
   ConnectionScope,
   ListedConnection,
 } from "@grasp-os/shared/connect";
+import { failureText } from "@grasp-os/shared/errors";
 import { isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { Button } from "@grasp-os/ui/components/button";
@@ -17,15 +18,17 @@ import {
   DialogDescription,
   DialogTitle,
 } from "@grasp-os/ui/components/dialog";
+import { Spinner } from "@grasp-os/ui/components/spinner";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { useEffect, useState } from "react";
+import { CheckIcon } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
+import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { LoadingLines } from "../frame/page-states.tsx";
 import { loadFromCore, notLoadedText } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
-import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
 import { AppLogo } from "./app-logo.tsx";
 import type { Integration } from "./integrations.ts";
@@ -101,23 +104,57 @@ export const signInAgainTarget = (
       canReconnect(connection, integration.offered, identity)
   );
 
-/** A step: its number in a ring, its title, and what it asks. */
+/** Where a step is: waiting its turn, the one to act on, or done. */
+type StepState = "idle" | "active" | "done";
+
+const ringClass: Readonly<Record<StepState, string>> = {
+  idle: "bg-card text-muted-foreground grid size-6 place-items-center rounded-full border text-xs transition-colors duration-300",
+  active:
+    "border-foreground bg-card grid size-6 place-items-center rounded-full border text-xs font-medium transition-colors duration-300",
+  done: "bg-muted grid size-6 place-items-center rounded-full border border-transparent transition-colors duration-300",
+};
+
+/**
+ * A step's number in a ring, as in the prototype (`StepRing`): grey while
+ * it waits, dark while it is the one to act on, and a check that pops in
+ * once it is done.
+ */
+const StepRing = ({ n, state }: { n: number; state: StepState }) => {
+  const { t } = useLingui();
+  return (
+    <span className={ringClass[state]}>
+      {state === "done" ? (
+        <CheckIcon
+          aria-label={t({
+            message: "Done",
+            context: "a step that is finished",
+          })}
+          className="motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-50 size-3.5 motion-safe:duration-300"
+        />
+      ) : (
+        n
+      )}
+    </span>
+  );
+};
+
+/** A step: its ring, its title (muted unless it is the one to act on), and what it asks. */
 const Step = ({
   n,
   title,
+  state,
   last = false,
   children,
 }: {
   n: number;
   title: string;
+  state: StepState;
   last?: boolean;
   children: ReactNode;
 }) => (
-  <li className="flex gap-3">
+  <li className="flex gap-3" data-state={state}>
     <div className="flex w-6 flex-none flex-col items-center">
-      <span className="border-foreground bg-card grid size-6 place-items-center rounded-full border text-xs font-medium">
-        {n}
-      </span>
+      <StepRing n={n} state={state} />
       {last ? null : (
         <span
           aria-hidden="true"
@@ -132,11 +169,145 @@ const Step = ({
           : "flex min-w-0 flex-1 flex-col gap-2 pb-5"
       }
     >
-      <h3 className="flex h-6 items-center font-medium">{title}</h3>
+      <h3
+        className={
+          state === "active"
+            ? "flex h-6 items-center font-medium transition-colors"
+            : "text-muted-foreground flex h-6 items-center transition-colors"
+        }
+      >
+        {title}
+      </h3>
       {children}
     </div>
   </li>
 );
+
+/**
+ * Starting the sign-in at core, which answers with the provider's address
+ * to send the browser to. "Try again" starts another attempt while one is
+ * still waiting: only the newest attempt counts, so an older one that
+ * answers late neither sends the browser away nor ends the wait. `attempt`
+ * numbers them, so the waiting row starts over with each.
+ */
+const useSignInStart = () => {
+  const core = useCore();
+  const [attempt, setAttempt] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState<string>();
+  const newest = useRef(0);
+  const begin = async (
+    action: (session: Session) => Promise<{ url: string }>
+  ): Promise<void> => {
+    newest.current += 1;
+    const mine = newest.current;
+    setAttempt(mine);
+    setBusy(true);
+    setFailure(undefined);
+    try {
+      const started = await core.withSession(action);
+      if (newest.current === mine) {
+        // Still busy: the browser leaves for the provider.
+        goTo(started);
+      }
+    } catch (error) {
+      if (newest.current === mine) {
+        setFailure(failureText(error));
+        setBusy(false);
+      }
+    }
+  };
+  return { attempt, begin, busy, failure };
+};
+
+/** How long a start may take before the dialog offers to try again. */
+const takingLongMs = 6000;
+
+/**
+ * While core starts the sign-in: a spinner row and, once it takes long,
+ * a way to try again, as in the prototype (`Waiting`). Trying again is
+ * held to what the step's own button is: with every tool switched off
+ * meanwhile, there is nothing to start.
+ */
+const Starting = ({
+  app,
+  disabled,
+  onRetry,
+}: {
+  app: string;
+  disabled: boolean;
+  onRetry: () => void;
+}) => {
+  const [long, setLong] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setLong(true);
+    }, takingLongMs);
+    return () => {
+      clearTimeout(timer);
+    };
+  }, []);
+  return (
+    <div className="flex flex-col gap-2">
+      <output className="flex h-10 items-center gap-2 rounded-lg border px-3">
+        <span className="text-muted-foreground">
+          <Spinner className="size-3.5" />
+        </span>
+        <Trans>Waiting for {app}</Trans>
+      </output>
+      {long ? (
+        <p className="text-muted-foreground">
+          <Trans>
+            Taking long?{" "}
+            <Button
+              disabled={disabled}
+              onClick={onRetry}
+              size="xs"
+              variant="link"
+            >
+              Try again
+            </Button>
+          </Trans>
+        </p>
+      ) : null}
+    </div>
+  );
+};
+
+/**
+ * The step's button, Cancel beside it; while core starts the sign-in, the
+ * waiting row instead.
+ */
+const Actions = ({
+  app,
+  attempt,
+  busy,
+  disabled = false,
+  onClose,
+  onStart,
+  children,
+}: {
+  app: string;
+  /** Which attempt is waiting: each starts the waiting row over. */
+  attempt: number;
+  busy: boolean;
+  disabled?: boolean;
+  onClose: () => void;
+  onStart: () => void;
+  children: ReactNode;
+}) =>
+  busy ? (
+    <Starting app={app} disabled={disabled} key={attempt} onRetry={onStart} />
+  ) : (
+    <div className="flex items-center gap-2">
+      <Button disabled={disabled} onClick={onStart}>
+        {children}
+      </Button>
+      <Button onClick={onClose} variant="outline">
+        <Trans>Cancel</Trans>
+      </Button>
+    </div>
+  );
 
 /** What signing in means, in three lines. */
 const SignInSteps = ({ app }: { app: string }) => (
@@ -176,6 +347,11 @@ const ScopeOption = ({
       className="accent-primary mt-1"
       name="scope"
       onChange={() => {
+        onScope(value);
+      }}
+      // A click on the option already chosen accepts it too, which
+      // changes nothing and so fires no change.
+      onClick={() => {
         onScope(value);
       }}
       type="radio"
@@ -263,54 +439,60 @@ const NativeFlow = ({
   identity,
   again,
   returnTo,
+  onClose,
 }: {
   integration: Integration;
   identity: Identity;
   /** The connection to sign in to again, keeping its scope. */
   again: ListedConnection | undefined;
   returnTo: string;
+  onClose: () => void;
 }) => {
-  const { busy, failure, run } = useCoreAction();
+  const { attempt, begin, busy, failure } = useSignInStart();
   const { t } = useLingui();
   const [scope, setScope] = useState<ConnectionScope>(
     again?.scope ?? "personal"
   );
+  // Done once the admin chose who uses it, the default (just for them)
+  // included: by picking an option, or by going on to sign in with it.
+  const [chose, setChose] = useState(false);
   const provider = oauthProviderSchema.safeParse(integration.id);
   const app = integration.name;
   const start = async (): Promise<void> => {
     if (!provider.success) {
       return;
     }
-    goTo(
-      await run(
-        async (session) =>
-          await session.connections.start({
-            provider: provider.data,
-            scope,
-            returnTo,
-          })
-      )
+    setChose(true);
+    await begin(
+      async (session) =>
+        await session.connections.start({
+          provider: provider.data,
+          scope,
+          returnTo,
+        })
     );
   };
   const signIn = (
     <>
       <SignInSteps app={app} />
-      <Button
-        className="self-start"
-        disabled={busy}
-        onClick={() => {
+      <Actions
+        app={app}
+        attempt={attempt}
+        busy={busy}
+        onClose={onClose}
+        onStart={() => {
           void start();
         }}
       >
         <Trans>Sign in to {app}</Trans>
-      </Button>
+      </Actions>
       <ErrorText>{failure}</ErrorText>
     </>
   );
   if (again !== undefined || !isAdmin(identity.role)) {
     return (
       <ol className="flex flex-col">
-        <Step last n={1} title={t`Sign in`}>
+        <Step last n={1} state="active" title={t`Sign in`}>
           {signIn}
         </Step>
       </ol>
@@ -318,10 +500,16 @@ const NativeFlow = ({
   }
   return (
     <ol className="flex flex-col">
-      <Step n={1} title={t`Who uses it`}>
-        <ScopeChoice onScope={setScope} scope={scope} />
+      <Step n={1} state={chose ? "done" : "active"} title={t`Who uses it`}>
+        <ScopeChoice
+          onScope={(chosen) => {
+            setScope(chosen);
+            setChose(true);
+          }}
+          scope={scope}
+        />
       </Step>
-      <Step last n={2} title={t`Sign in`}>
+      <Step last n={2} state={chose ? "active" : "idle"} title={t`Sign in`}>
         {signIn}
       </Step>
     </ol>
@@ -338,11 +526,13 @@ const NativeFlow = ({
 const ComposioFlow = ({
   integration,
   returnTo,
+  onClose,
 }: {
   integration: Integration;
   returnTo: string;
+  onClose: () => void;
 }) => {
-  const { busy, failure, run } = useCoreAction();
+  const { attempt, begin, busy, failure } = useSignInStart();
   const core = useCore();
   const [listed, setListed] = useState<Loaded<CatalogTool[]>>();
   const [allowed, setAllowed] = useState<AllowedTool[]>([]);
@@ -368,21 +558,23 @@ const ComposioFlow = ({
   }, [core, source, id]);
   const tools = listed?.state === "ready" ? listed.data : undefined;
   const connect = async (): Promise<void> => {
-    goTo(
-      await run(
-        async (session) =>
-          await session.connections.connectToolkit({
-            toolkit: integration.id,
-            tools: toolRules(allowed),
-            consent: composioConsentText,
-            returnTo,
-          })
-      )
+    await begin(
+      async (session) =>
+        await session.connections.connectToolkit({
+          toolkit: integration.id,
+          tools: toolRules(allowed),
+          consent: composioConsentText,
+          returnTo,
+        })
     );
   };
   return (
     <ol className="flex flex-col">
-      <Step n={1} title={t`What Grasp may do`}>
+      <Step
+        n={1}
+        state={allowed.length === 0 ? "active" : "done"}
+        title={t`What Grasp may do`}
+      >
         <p className="text-muted-foreground">
           <Trans>
             Read-only is ticked where Composio says a tool only reads; Grasp
@@ -420,22 +612,30 @@ const ComposioFlow = ({
           </fieldset>
         )}
       </Step>
-      <Step last n={2} title={t`Consent and sign in`}>
+      <Step
+        last
+        n={2}
+        state={allowed.length === 0 ? "idle" : "active"}
+        title={t`Consent and sign in`}
+      >
         {/* The consent stays as written: core keeps a hash of the exact
             text consented to (connection-list.tsx shows it again). */}
         <blockquote className="text-muted-foreground border-l-2 pl-3">
           {composioConsentText}
         </blockquote>
         <SignInSteps app={app} />
-        <Button
-          className="self-start"
-          disabled={busy || allowed.length === 0}
-          onClick={() => {
+        <Actions
+          app={app}
+          attempt={attempt}
+          busy={busy}
+          disabled={allowed.length === 0}
+          onClose={onClose}
+          onStart={() => {
             void connect();
           }}
         >
           <Trans>Consent and connect</Trans>
-        </Button>
+        </Actions>
         <ErrorText>{failure}</ErrorText>
       </Step>
     </ol>
@@ -492,12 +692,18 @@ export const ConnectDialog = ({
             identity={identity}
             integration={integration}
             returnTo={returnTo ?? returnToOf(integration.key)}
+            onClose={() => {
+              onOpenChange(false);
+            }}
           />
         ) : null}
         {open && integration.source === "composio" ? (
           <ComposioFlow
             integration={integration}
             returnTo={returnTo ?? returnToOf(integration.key)}
+            onClose={() => {
+              onOpenChange(false);
+            }}
           />
         ) : null}
       </DialogContent>
