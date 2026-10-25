@@ -15,7 +15,8 @@ import { brainOf } from "./knowledge/ports.ts";
 //   (`readTranscripts`), so only from documents the person may read now,
 //   as the `authorize` port says, and recorded as a Knowledge read. Each
 //   is a source of its own.
-// - A team's interviews: never their words. The turns are the team's
+// - A team's interviews: never their words, for anyone, Grasp's staff and
+//   admins included. The turns are the team's
 //   admitted statements the brain already holds (onboarding/brain-intake.ts:
 //   only facts the speaker approved in the read-back, names taken out,
 //   once five of the team agreed), one a turn, spoken by the team, in the
@@ -23,7 +24,10 @@ import { brainOf } from "./knowledge/ports.ts";
 //   together. Nothing is stored for them: withdrawing or correcting an
 //   interview takes its statements out of the brain (the onboarding's
 //   purge), and the turns with them. Raw lines, the kickoff's transcript
-//   and a team lead's interview never become turns.
+//   and a team lead's interview never become turns. They reach exactly the
+//   audience the read-back admitted the statements to (the notice's
+//   `company.role_and_team`: the company's Brain, by team and role, never
+//   by name), as the statements themselves do: whoever reads the brain.
 
 /** A Knowledge document's source, as the brain names it. */
 export const knowledgeSourceId = (documentId: string): string =>

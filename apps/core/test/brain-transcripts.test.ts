@@ -6,7 +6,15 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
-import { outcome, signedInApi, unique } from "./sign-in.ts";
+import { newTeam } from "./knowledge.ts";
+import {
+  callAuth,
+  letSessionRecheckPass,
+  openRpc,
+  outcome,
+  signedInApi,
+  unique,
+} from "./sign-in.ts";
 
 // Transcripts on the brain's sources (`Source.transcript`, served by
 // `brain.read`), from the producer people use: a WebVTT file uploaded into
@@ -16,7 +24,8 @@ import { outcome, signedInApi, unique } from "./sign-in.ts";
 // kickoff's absence in brain.test.ts. The ways it can leak, tried here:
 //
 // - To someone who may not read the document: another person, an admin
-//   (who reads the collections for admins, never a person's own).
+//   (who reads the collections for admins, never a person's own), or
+//   someone who could read it a moment ago and no longer may.
 // - Past an edit that replaced the text.
 // - Past a purge: a name left in a speaker or a turn, or found by search;
 //   anything of a Personal collection after a personal purge.
@@ -143,6 +152,56 @@ describe("transcripts on the brain's sources", { timeout: 120_000 }, () => {
       },
       other: undefined,
       admin: undefined,
+    });
+  });
+
+  it("is checked on every read: a reader who leaves the team loses its turns, on a new connection at once and on an open one at its next session check", async () => {
+    const owner = await signedInApi(idp, "admin");
+    const reader = await signedInApi(idp, "user");
+    const teamId = await newTeam(owner, [reader]);
+    const collection = await owner.api.knowledge.createCollection({
+      name: `Finance ${unique()}`,
+      access: "teams",
+      teams: [teamId],
+    });
+    const upload = await uploaded(
+      { api: owner.api, collectionId: collection.id },
+      "Finance call.vtt",
+      meetingVtt(`Fay${unique()}`)
+    );
+    const before = await sourceOf(reader.api, upload.documentId);
+    // They leave the team, on the session they read it in.
+    await callAuth("/organization/remove-team-member", owner.session, {
+      teamId,
+      userId: reader.userId,
+    });
+    // A new connection reads who they are now; an open one reads again
+    // once its reading of the session is due (`sessionRecheckMs`, as for
+    // every call): the transcript itself is never kept.
+    const { core: fresh } = await openRpc(reader.session);
+    const afterFresh = await sourceOf(fresh.authenticate(), upload.documentId);
+    const afterHeld = await (async () => {
+      using _clock = letSessionRecheckPass();
+      return await sourceOf(reader.api, upload.documentId);
+    })();
+
+    const ownerStill = await sourceOf(owner.api, upload.documentId);
+
+    expect({
+      before: {
+        turns: before?.transcript?.turns.length,
+        chapters: before?.transcript?.chapters,
+      },
+      afterFresh,
+      afterHeld,
+      owner: ownerStill?.id,
+    }).toStrictEqual({
+      // Captions have no chapters (a WebVTT chapters track is a file of
+      // its own): the field is there, empty.
+      before: { turns: 3, chapters: [] },
+      afterFresh: undefined,
+      afterHeld: undefined,
+      owner: `src.knowledge-${upload.documentId}`,
     });
   });
 

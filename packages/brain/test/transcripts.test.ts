@@ -153,6 +153,38 @@ describe("a document's transcript", () => {
     });
   });
 
+  it("is decided on every read: once the host's authorize no longer gives the collection, its turns and chapters are gone", async () => {
+    const { brain } = testHost();
+    const team = await newCollection(brain, "Team");
+    const name = word();
+    const call = await save(brain, team, "call.md", "# Call", {
+      transcript: meeting(name, "the plan"),
+    });
+    const shown = async (reads: string[]) => {
+      const { transcripts } = await readTranscripts(brain, {
+        userId: "reader",
+        reads,
+      });
+      const found = transcripts.find(
+        ({ documentId }) => documentId === call.id
+      );
+      return found === undefined
+        ? null
+        : {
+            turns: found.transcript.turns.length,
+            chapters: found.transcript.chapters.map(({ title }) => title),
+          };
+    };
+    const before = await shown([team.id]);
+    // The same reader, once the host took the collection away.
+    const after = await shown([]);
+
+    expect({ before, after }).toStrictEqual({
+      before: { turns: 3, chapters: [`Opening by ${name}`, "Invoices"] },
+      after: null,
+    });
+  });
+
   it("goes with the next save that brings none, so an edit never keeps the turns of the text it replaced", async () => {
     const { brain, events } = testHost();
     const notes = await newCollection(brain, "Notes");

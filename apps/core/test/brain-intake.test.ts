@@ -1,5 +1,6 @@
 import type { Workspace } from "@grasp-os/shared/brain";
 import type { BrainRecordInput } from "@grasp-os/shared/brain-records";
+import type { SessionApi } from "@grasp-os/shared/rpc";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -17,7 +18,13 @@ import {
   told,
 } from "./onboarding-team.ts";
 import type { Ids } from "./onboarding-team.ts";
-import { outcome, signedInApi } from "./sign-in.ts";
+import {
+  openRpc,
+  outcome,
+  signedIn,
+  signedInApi,
+  staffPerson,
+} from "./sign-in.ts";
 
 // What the onboarding learned, in the brain (GRA-367,
 // src/onboarding/brain-intake.ts): once a piece of work is drawn, its
@@ -329,7 +336,7 @@ describe(
       });
     });
 
-    it("carries as its interviews' transcript only the statements their people approved, never what they said, read or left unapproved", async () => {
+    it("carries as its interviews' transcript only the statements their people approved, to staff, admins and members alike, and nothing to anyone outside", async () => {
       const store = onboardingStore(env);
       const ids = await team();
       await mapped(ids);
@@ -368,25 +375,43 @@ describe(
       await othersTold(ids);
       await answering([ticketsReply(ids)], async () => await store.drawNext());
       await store.intakeNext();
+      // The audience the read-back admitted them to (GRA-329's notice,
+      // `company.role_and_team`): the company's Brain, by team and role,
+      // never by name. Its readers, staff and admins included, each get
+      // the approved statements and never a raw turn; nobody outside the
+      // deployment gets anything.
       const member = await signedInApi(idp, "user");
-      const brain = await member.api.brain.read();
-      const teamId = `team-${ids.team}`;
-      const source = brain.sources.find(
-        ({ teamIds }) => teamIds?.includes(teamId) === true
+      const admin = await signedInApi(idp, "admin");
+      const { core: staffCore } = await openRpc(
+        await signedIn(idp, "grasp-staff", staffPerson())
       );
-      const statements = brain.statements
-        .filter(({ sourceId }) => sourceId === source?.id)
-        .map(({ text }) => text);
-      const shown = JSON.stringify(source?.transcript);
-      expect({
-        transcript: source?.transcript,
-        sameAsStatements: source?.transcript?.turns
-          .map(({ text }) => text)
-          .toSorted(),
-        unsaid: ["Lea never answers", "skips the queue", "You said"].filter(
-          (words) => shown.includes(words)
-        ),
-      }).toStrictEqual({
+      const staff = staffCore.authenticate();
+      const { core: nobodyCore } = await openRpc();
+      const teamId = `team-${ids.team}`;
+      const shownTo = async (api: SessionApi) => {
+        const brain = await api.brain.read();
+        const source = brain.sources.find(
+          ({ teamIds }) => teamIds?.includes(teamId) === true
+        );
+        const shown = JSON.stringify(source?.transcript);
+        return {
+          transcript: source?.transcript,
+          sameAsStatements:
+            JSON.stringify(
+              source?.transcript?.turns.map(({ text }) => text).toSorted()
+            ) ===
+            JSON.stringify(
+              brain.statements
+                .filter(({ sourceId }) => sourceId === source?.id)
+                .map(({ text }) => text)
+                .toSorted()
+            ),
+          unsaid: ["Lea never answers", "skips the queue", "You said"].filter(
+            (words) => shown.includes(words)
+          ),
+        };
+      };
+      const admitted = {
         transcript: {
           unit: "passage",
           turns: [
@@ -409,8 +434,19 @@ describe(
           ],
           chapters: [],
         },
-        sameAsStatements: statements.toSorted(),
+        sameAsStatements: true,
         unsaid: [],
+      };
+      expect({
+        staff: await shownTo(staff),
+        admin: await shownTo(admin.api),
+        member: await shownTo(member.api),
+        nobody: await outcome(nobodyCore.authenticate().brain.read()),
+      }).toStrictEqual({
+        staff: admitted,
+        admin: admitted,
+        member: admitted,
+        nobody: "auth.unauthenticated",
       });
     });
 
