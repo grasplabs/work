@@ -27,7 +27,8 @@ import { brainOf } from "./knowledge/ports.ts";
 // said, put together, and Grasp's staff only numbers. Nothing core holds
 // is that yet (the brain's statements are each one person's approved
 // words, names taken out), so an interview source shows no turns and no
-// count of them: its source says only how many people it rests on. Raw
+// count of them: its source says only how many people it rests on (that
+// aggregated view is GRA-1084, under GRA-330). Raw
 // lines, approved statements, the kickoff's transcript and a team lead's
 // interview never become turns.
 
