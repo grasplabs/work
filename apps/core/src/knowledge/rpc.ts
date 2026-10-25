@@ -9,7 +9,7 @@ import type {
   ReceiptsGetInput,
   RecallInput,
   RememberInput,
-} from "@grasp-os/shared/brain-api";
+} from "@grasp-os/brain/contract";
 import type {
   BacklinkPage,
   Collection,
@@ -39,22 +39,15 @@ import { isAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 
 import { gapAnswerErasure } from "../brain-gaps.ts";
+import { brainRecordErasure } from "../brain-records.ts";
 import { documentReadingErasure } from "../onboarding/documents.ts";
 import { CoreRpcTarget } from "../rpc-target.ts";
 import { withPerson } from "../session-check.ts";
 import type { SessionCheck } from "../session-check.ts";
 import type { Reader } from "./access.ts";
 import { appsErasure } from "./apps-collection.ts";
-import { createCollection, listCollections } from "./collections.ts";
-import {
-  backlinks,
-  getDocument,
-  history,
-  listDocuments,
-  personWriter,
-  restoreVersion,
-  saveDocument,
-} from "./documents.ts";
+import { createCollection, listCollections } from "./collection-rules.ts";
+import { backlinks, getDocument, history, listDocuments } from "./documents.ts";
 import type { Writer } from "./documents.ts";
 import { copySkill, skillCollections } from "./grasp-skills.ts";
 import {
@@ -64,6 +57,8 @@ import {
   remember,
 } from "./memories.ts";
 import { personalCollectionId } from "./memory-files.ts";
+import { personWriter, restoreVersion, saveDocument } from "./person-writes.ts";
+import { brainOf } from "./ports.ts";
 import { preparePurge, purge } from "./purge.ts";
 import type { OnErase } from "./purge.ts";
 import { recall } from "./recall.ts";
@@ -71,26 +66,57 @@ import { search } from "./search.ts";
 import { catalog, follow, read } from "./tools.ts";
 import { uploadErasure } from "./uploads.ts";
 
+/** The copies of people's words in core's own tables, as `OnErase` reaches them. */
+type Copies = Pick<OnErase, "count" | "rewrite" | "forgetActor">;
+
+/** `copies` as one: each counted, rewritten and forgotten in turn. */
+const allOf = (copies: readonly Copies[]): Copies => ({
+  count: async (holds) => {
+    let total = 0;
+    for (const each of copies) {
+      // oxlint-disable-next-line no-await-in-loop -- one table after another
+      total += await each.count(holds);
+    }
+    return total;
+  },
+  rewrite: async (by, rewrite) => {
+    for (const each of copies) {
+      // oxlint-disable-next-line no-await-in-loop -- one table after another
+      await each.rewrite(by, rewrite);
+    }
+  },
+  forgetActor: async (by, userId) => {
+    for (const each of copies) {
+      // oxlint-disable-next-line no-await-in-loop -- one table after another
+      await each.forgetActor(by, userId);
+    }
+  },
+});
+
 /**
  * What a purge reaches of core's own copies (purge.ts `OnErase`): the
- * brain's gap answers, the originals of uploaded files, the onboarding's
- * readings of the documents shared in it with what was drawn from them,
- * the Apps collection's entries and each person's Personal collection.
+ * brain's gap answers and records, the originals of uploaded files, the
+ * onboarding's readings of the documents shared in it with what was drawn
+ * from them, the Apps collection's entries and each person's Personal
+ * collection.
  */
 const coreErasure = (env: Env): OnErase => {
-  const answers = gapAnswerErasure(env);
   const readings = documentReadingErasure(env);
   return {
+    ...allOf([
+      gapAnswerErasure(env),
+      brainRecordErasure(env),
+      // A reading names no person: there is no one to forget in it.
+      {
+        ...readings,
+        forgetActor: async () => {
+          // Nothing to forget.
+        },
+      },
+    ]),
     ...uploadErasure(env),
     ...appsErasure(env),
     personalCollection: personalCollectionId,
-    count: async (holds) =>
-      (await answers.count(holds)) + (await readings.count(holds)),
-    rewrite: async (person, rewrite) => {
-      await answers.rewrite(person, rewrite);
-      await readings.rewrite(person, rewrite);
-    },
-    forgetActor: answers.forgetActor,
     forgetDocuments: readings.forgetDocuments,
   };
 };
@@ -135,25 +161,26 @@ export class KnowledgeRpc extends CoreRpcTarget implements KnowledgeApi {
     options: CommandOptions
   ): Promise<CommandReceipt> {
     return await this.#asReader(
-      async (reader) => await remember(this.#env, reader, input, options)
+      async (reader) =>
+        await remember(brainOf(this.#env), reader, input, options)
     );
   }
 
   async receiptsGet(input: ReceiptsGetInput): Promise<CommandReceipt> {
     return await this.#asReader(
-      async (reader) => await receiptsGet(this.#env, reader, input)
+      async (reader) => await receiptsGet(brainOf(this.#env), reader, input)
     );
   }
 
   async memoriesGet(input: MemoriesGetInput): Promise<MemoryRecord> {
     return await this.#asReader(
-      async (reader) => await memoriesGet(this.#env, reader, input)
+      async (reader) => await memoriesGet(brainOf(this.#env), reader, input)
     );
   }
 
   async memoriesList(input?: MemoriesListInput): Promise<MemoryPage> {
     return await this.#asReader(
-      async (reader) => await memoriesList(this.#env, reader, input)
+      async (reader) => await memoriesList(brainOf(this.#env), reader, input)
     );
   }
 
@@ -176,7 +203,7 @@ export class KnowledgeRpc extends CoreRpcTarget implements KnowledgeApi {
   ): Promise<DocumentPage> {
     return await this.#asReader(
       async (reader) =>
-        await listDocuments(this.#env, reader, collectionId, options)
+        await listDocuments(brainOf(this.#env), reader, collectionId, options)
     );
   }
 
@@ -186,7 +213,7 @@ export class KnowledgeRpc extends CoreRpcTarget implements KnowledgeApi {
   ): Promise<DocumentRead> {
     return await this.#asReader(
       async (reader) =>
-        await getDocument(this.#env, reader, documentId, version)
+        await getDocument(brainOf(this.#env), reader, documentId, version)
     );
   }
 
@@ -202,7 +229,8 @@ export class KnowledgeRpc extends CoreRpcTarget implements KnowledgeApi {
     options?: HistoryOptions
   ): Promise<HistoryPage> {
     return await this.#asReader(
-      async (reader) => await history(this.#env, reader, documentId, options)
+      async (reader) =>
+        await history(brainOf(this.#env), reader, documentId, options)
     );
   }
 
@@ -218,25 +246,26 @@ export class KnowledgeRpc extends CoreRpcTarget implements KnowledgeApi {
     options?: ListDocumentsOptions
   ): Promise<BacklinkPage> {
     return await this.#asReader(
-      async (reader) => await backlinks(this.#env, reader, documentId, options)
+      async (reader) =>
+        await backlinks(brainOf(this.#env), reader, documentId, options)
     );
   }
 
   async search(query: string, options?: SearchOptions): Promise<SearchResults> {
     return await this.#asReader(
-      async (reader) => await search(this.#env, reader, query, options)
+      async (reader) => await search(brainOf(this.#env), reader, query, options)
     );
   }
 
   async recall(input: RecallInput): Promise<MemoryPack> {
     return await this.#asReader(
-      async (reader) => await recall(this.#env, reader, input)
+      async (reader) => await recall(brainOf(this.#env), reader, input)
     );
   }
 
   async catalog(): Promise<KnowledgeCatalog> {
     return await this.#asReader(
-      async (reader) => await catalog(this.#env, reader)
+      async (reader) => await catalog(brainOf(this.#env), reader)
     );
   }
 
@@ -245,13 +274,14 @@ export class KnowledgeRpc extends CoreRpcTarget implements KnowledgeApi {
     options?: ReadOptions
   ): Promise<KnowledgeRead> {
     return await this.#asReader(
-      async (reader) => await read(this.#env, reader, documentId, options)
+      async (reader) =>
+        await read(brainOf(this.#env), reader, documentId, options)
     );
   }
 
   async follow(documentId: string): Promise<FollowResult> {
     return await this.#asReader(
-      async (reader) => await follow(this.#env, reader, documentId)
+      async (reader) => await follow(brainOf(this.#env), reader, documentId)
     );
   }
 
@@ -274,7 +304,7 @@ export class KnowledgeRpc extends CoreRpcTarget implements KnowledgeApi {
       this.#check,
       async (person) =>
         await preparePurge(
-          this.#env,
+          brainOf(this.#env),
           purgerOf(person),
           input,
           coreErasure(this.#env)
@@ -287,7 +317,7 @@ export class KnowledgeRpc extends CoreRpcTarget implements KnowledgeApi {
       this.#check,
       async (person) =>
         await purge(
-          this.#env,
+          brainOf(this.#env),
           purgerOf(person),
           input,
           token,

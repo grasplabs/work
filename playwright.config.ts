@@ -228,7 +228,10 @@ export default defineConfig({
       },
       port: corePort,
       reuseExistingServer: false,
-      timeout: 120_000,
+      // Building the frontend and starting wrangler takes about 120 s on a
+      // CI runner, so a runner a few seconds slower missed a 120 s limit
+      // before any test ran.
+      timeout: 240_000,
     },
     // Stands in for the client's Entra tenant.
     {

@@ -38,7 +38,11 @@ import {
 } from "../db/knowledge/schema.ts";
 import { isRestricted } from "../restricted.ts";
 import type { WorkContext } from "../restricted.ts";
-import { noteProvenance, readableForPerson } from "./access.ts";
+import {
+  audienceCondition,
+  noteProvenance,
+  readableForPerson,
+} from "./access.ts";
 import { ensureCollection } from "./collections.ts";
 import type { CollectionRow } from "./collections.ts";
 import { writeVersion } from "./documents.ts";
@@ -50,6 +54,7 @@ import {
   personalCollectionId,
 } from "./memory-files.ts";
 import { readPayload } from "./payloads.ts";
+import { brainOf } from "./ports.ts";
 
 // An agent's memory: the files it always has in its context, by where it
 // works. The agent loop calls `forContext` for the memory of each turn,
@@ -163,12 +168,14 @@ interface Found {
 
 /**
  * The files of `wanted` that exist and that the person `userId` may read,
- * with their versions now, in `wanted`'s order. An App's AGENTS.md needs
+ * with their versions now, in `wanted`'s order; working in a chat others
+ * share, only those every one of them may read. An App's AGENTS.md needs
  * the person to be able to read the App's code: one of its builders.
  */
 const findFiles = async (
   env: Env,
   userId: string,
+  work: WorkContext,
   wanted: Wanted[]
 ): Promise<Found[]> => {
   const role = await memberRole(env.DB, userId);
@@ -200,7 +207,8 @@ const findFiles = async (
                   )
                 )
               ),
-              await readableForPerson(env, db, userId)
+              await readableForPerson(env, db, userId),
+              await audienceCondition(env, work)
             )
           );
   const found: Found[] = [];
@@ -332,7 +340,7 @@ const textsOf = async (
         const row = rows.find(
           (one) => one.documentId === documentId && one.number === version
         );
-        return row === undefined ? "" : await readPayload(env, row);
+        return row === undefined ? "" : await readPayload(brainOf(env), row);
       }
       const files = await versionFiles(env, at.appId, version);
       return files[appMemoryPath];
@@ -405,7 +413,7 @@ export const forContext = async (
   const found =
     wanted.length === 0
       ? []
-      : await findFiles(env, authority.onBehalfOf, wanted);
+      : await findFiles(env, authority.onBehalfOf, work, wanted);
   const key = await sha256Hex(
     JSON.stringify(
       found.map(({ wanted: { source, name, at }, documentId, version }) => [
@@ -488,7 +496,7 @@ const personalCollection = async (
   actor: Parameters<typeof ensureCollection>[2]
 ): Promise<CollectionRow> => {
   const collection = await ensureCollection(
-    env,
+    brainOf(env),
     {
       id: await personalCollectionId(userId),
       name: "Personal",
@@ -522,7 +530,11 @@ export const memoryCollections = async (
   const actor = actorOf(person);
   const personal = await personalCollection(env, person.userId, actor);
   const memory = isAdmin(person.role)
-    ? await ensureCollection(env, memoryCollectionRow(person.userId), actor)
+    ? await ensureCollection(
+        brainOf(env),
+        memoryCollectionRow(person.userId),
+        actor
+      )
     : await drizzle(env.KNOWLEDGE)
         .select({ id: collections.id })
         .from(collections)
@@ -581,7 +593,7 @@ export const saveUserMemory = async (
   const actor = delegateActorOf(authority);
   const collection = await personalCollection(env, authority.onBehalfOf, actor);
   return await writeVersion(
-    env,
+    brainOf(env),
     { actor, userId: authority.onBehalfOf },
     {
       collection,

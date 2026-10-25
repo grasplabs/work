@@ -35,6 +35,16 @@ const memberSchema = z.object({
 });
 export type TeamsMember = z.infer<typeof memberSchema>;
 
+/** One page of a conversation's roster, as far as the door reads it. */
+const rosterPageSchema = z.object({
+  members: z.array(memberSchema.extend({ aadObjectId: z.string().optional() })),
+  continuationToken: z.string().optional(),
+});
+type RosterMember = z.infer<typeof rosterPageSchema>["members"][number];
+
+/** Most members a roster page holds: the Bot Connector's own maximum. */
+const rosterPageSize = 500;
+
 /**
  * Teams' adapter, sending through connect: Microsoft's SDK builds its
  * clients when the adapter is made, and every client it makes later is a
@@ -63,5 +73,35 @@ export class ConnectedTeamsAdapter extends TeamsAdapter {
       .apiFor(serviceUrl)
       .conversations.getMemberById(conversationId, userId);
     return memberSchema.parse(member);
+  }
+
+  /**
+   * Everyone in the conversation `conversationId`, as Teams' roster says,
+   * page by page: `undefined` once it holds more than `atMost`, without
+   * reading further.
+   */
+  async rosterOf(
+    serviceUrl: string,
+    conversationId: string,
+    atMost: number
+  ): Promise<RosterMember[] | undefined> {
+    const { conversations } = this.app.apiFor(serviceUrl);
+    const everyone: RosterMember[] = [];
+    let token: string | undefined;
+    do {
+      // oxlint-disable-next-line no-await-in-loop -- each page names the next
+      const page: unknown = await conversations.getPagedMembers(
+        conversationId,
+        rosterPageSize,
+        token
+      );
+      const { members, continuationToken } = rosterPageSchema.parse(page);
+      everyone.push(...members);
+      if (everyone.length > atMost) {
+        return undefined;
+      }
+      token = continuationToken === "" ? undefined : continuationToken;
+    } while (token !== undefined);
+    return everyone;
   }
 }

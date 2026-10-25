@@ -7,19 +7,19 @@ import {
   memoriesListInputSchema,
   receiptsGetInputSchema,
   rememberInputSchema,
-} from "@grasp-os/shared/brain-api";
+} from "@grasp-os/brain/contract";
 import type {
   BrainSourceRef,
   CommandReceipt,
   MemoryPage,
   MemoryRecord,
-} from "@grasp-os/shared/brain-api";
+} from "@grasp-os/brain/contract";
+import type { AuditActor } from "@grasp-os/shared/audit";
 import { toHex } from "@grasp-os/shared/encoding";
 import { brainReceiptIdSchema, memoryIdSchema } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { and, count, desc, eq, gt, lt, lte, or, sql } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -31,11 +31,10 @@ import {
   documents,
   versions,
 } from "../db/knowledge/schema.ts";
-import type { Reader } from "./access.ts";
 import { auditedBatch } from "./audit.ts";
 import { allowedFor } from "./authorize.ts";
+import type { Brain } from "./brain.ts";
 import { sectionCountOf, versionText } from "./documents.ts";
-import { portsOf } from "./ports.ts";
 
 // The Brain's memory commands (GRA-297; the Brain design's "Brain SDK and
 // API" and "Memory model"): `remember`, `receipts.get`, `memories.get`
@@ -54,8 +53,10 @@ import { portsOf } from "./ports.ts";
 // accepted fact.
 //
 // A person's records and receipts are personal data: a personal purge
-// (purge.ts) deletes them with the rest (`forgetPerson`), and the clock
-// deletes receipts past their retention (`sweepBrainReceipts`).
+// (purge.ts) deletes them with the rest (`forgetPerson`), a content purge
+// redacts or deletes every record holding its terms, whoever's
+// (`eraseStatements`), and the clock deletes receipts past their
+// retention (`sweepBrainReceipts`).
 //
 // This slice serves a signed-in person, for their own `person`-scoped
 // records. An App or agent can't remember yet: writing will be a
@@ -90,24 +91,16 @@ export const receiptsSweptPerStatement = 1000;
 /** How long one sweep goes on deleting, in milliseconds. */
 const sweepBudgetMs = 5000;
 
-/** The person a command acts for, or a refusal for anyone else, yet. */
-const personOf = (reader: Reader): string => {
-  if (reader.type !== "person") {
-    throw brainErrors.create("brain.denied");
-  }
-  return reader.person.userId;
-};
-
 /** Who may read a receipt back, and whose keys are whose. */
 const callerKey = (userId: string): string => canonicalJson(["person", userId]);
 
 /** `parts` keyed to this deployment: never computable from them alone. */
-const keyed = async (
-  env: Env,
+const keyed = async <C>(
+  brain: Brain<C>,
   purpose: string,
   parts: Json
 ): Promise<string> => {
-  const key = await portsOf(env).keys.hmac(purpose, ["sign"]);
+  const key = await brain.ports.keys.hmac(purpose, ["sign"]);
   const mac = await crypto.subtle.sign(
     "HMAC",
     key,
@@ -146,6 +139,153 @@ export const personCounts = async (
   return { memories: memories?.count ?? 0, receipts: receipts?.count ?? 0 };
 };
 
+/** Records one page of a content purge's scan of every record reads. */
+const recordsPerScanPage = 200;
+
+/**
+ * Records one batch of a content purge rewrites or deletes: each is an
+ * audit event and a write, so a batch stays well within D1's statements
+ * per invocation.
+ */
+const recordsPerEraseBatch = 50;
+
+interface StatementRow {
+  id: string;
+  revision: number;
+  statement: string;
+}
+
+/**
+ * Hands `visit` every record's statement, a page at a time in ID order,
+ * whoever's it is and whatever its scope: what a content purge reaches.
+ */
+const scanStatements = async (
+  db: DrizzleD1Database,
+  visit: (page: StatementRow[]) => void
+): Promise<void> => {
+  for (let after = ""; ;) {
+    // oxlint-disable-next-line no-await-in-loop -- a page at a time, to bound memory
+    const page = await db
+      .select({
+        id: brainMemories.id,
+        revision: brainMemories.revision,
+        statement: brainMemories.statement,
+      })
+      .from(brainMemories)
+      .where(gt(brainMemories.id, after))
+      .orderBy(brainMemories.id)
+      .limit(recordsPerScanPage);
+    visit(page);
+    const last = page.at(-1);
+    if (last === undefined || page.length < recordsPerScanPage) {
+      return;
+    }
+    after = last.id;
+  }
+};
+
+/**
+ * How many records' statements `holds` is true of, everyone's: those a
+ * content purge's terms are in, which it would erase (its plan) or failed
+ * to (its check).
+ */
+export const countStatements = async <C>(
+  { db }: Brain<C>,
+  holds: (statement: string) => boolean
+): Promise<number> => {
+  let total = 0;
+  await scanStatements(db, (page) => {
+    total += page.filter(({ statement }) => holds(statement)).length;
+  });
+  return total;
+};
+
+/**
+ * Erases what a content purge removes from every record's statement,
+ * whoever's it is (GRA-1027): `erase` says, for each statement, what it
+ * becomes (itself when it holds nothing to remove), or `null` when
+ * nothing worth keeping is left, and the record is deleted. A redacted
+ * record gets its next revision and is pending indexing again, so search,
+ * when it holds records, indexes the redacted statement in place of the
+ * old one. Each change is audited, with `purgeId`, never the text, in the
+ * batch that makes it; a batch makes all of its changes or none.
+ *
+ * A write is conditional on the revision read, so a record changed since
+ * (deleted by a personal purge, say) is left as it is, unrecorded. A
+ * record remembered after its page was read isn't reached: the purge's
+ * check counts it (`countStatements`), and running the purge again
+ * erases it.
+ *
+ * Receipts stay: they hold no text (the request's hash is keyed to the
+ * deployment), and a retry of the remember they answer must replay them
+ * rather than store the statement again. Returns how many records it
+ * redacted and deleted.
+ */
+export const eraseStatements = async <C>(
+  brain: Brain<C>,
+  actor: AuditActor,
+  purgeId: string,
+  erase: (statement: string) => string | null
+): Promise<{ redacted: number; deleted: number }> => {
+  const { db } = brain;
+  const changes: { id: string; revision: number; now: string | null }[] = [];
+  await scanStatements(db, (page) => {
+    for (const { id, revision, statement } of page) {
+      const now = erase(statement);
+      if (now !== statement) {
+        changes.push({ id, revision, now });
+      }
+    }
+  });
+  const updatedAt = new Date();
+  const write = ({ id, revision, now }: (typeof changes)[number]) => {
+    const asRead = and(
+      eq(brainMemories.id, id),
+      eq(brainMemories.revision, revision)
+    );
+    const event = outboxedWhere(
+      db,
+      {
+        actor,
+        action: "knowledge.memory.purged",
+        target: { type: "memory", id },
+        detail: {
+          purgeId,
+          change: now === null ? "deleted" : "redacted",
+          revision,
+        },
+      },
+      sql`EXISTS (SELECT 1 FROM ${brainMemories} WHERE ${asRead})`
+    );
+    return [
+      // Before the write, on the same condition: recorded only if made.
+      event,
+      now === null
+        ? db.delete(brainMemories).where(asRead)
+        : db
+            .update(brainMemories)
+            .set({
+              statement: now,
+              revision: revision + 1,
+              indexingState: "pending",
+              updatedAt,
+            })
+            .where(asRead),
+    ] as const;
+  };
+  for (let at = 0; at < changes.length; at += recordsPerEraseBatch) {
+    const [first, ...rest] = changes
+      .slice(at, at + recordsPerEraseBatch)
+      .flatMap(write);
+    if (first !== undefined) {
+      // oxlint-disable-next-line no-await-in-loop -- one bounded batch after another
+      await auditedBatch(brain.ports, db, [first, ...rest]);
+    }
+  }
+  const deleted = changes.filter(({ now }) => now === null).length;
+  return { redacted: changes.length - deleted, deleted };
+};
+
 /**
  * Deletes the receipts past their retention as of `now`, by
  * `brain_receipts_retention_idx`, `receiptsSweptPerStatement` at a time,
@@ -153,21 +293,19 @@ export const personCounts = async (
  * the next deletes. Their keys are forgotten, and `receipts.get` answers
  * them as never made. The clock runs it (src/clock.ts).
  */
-export const sweepBrainReceipts = async (
-  env: Env,
+export const sweepBrainReceipts = async <C>(
+  brain: Brain<C>,
   now: Date,
   budgetMs = sweepBudgetMs
 ): Promise<void> => {
   const ends = Date.now() + budgetMs;
   for (;;) {
     // oxlint-disable-next-line no-await-in-loop -- one bounded delete after another
-    const { meta } = await env.KNOWLEDGE.prepare(
-      `DELETE FROM brain_receipts WHERE rowid IN (
-         SELECT rowid FROM brain_receipts WHERE retention_until <= ? LIMIT ?
+    const { meta } = await brain.db.run(
+      sql`DELETE FROM brain_receipts WHERE rowid IN (
+         SELECT rowid FROM brain_receipts WHERE retention_until <= ${now.getTime()} LIMIT ${receiptsSweptPerStatement}
        )`
-    )
-      .bind(now.getTime(), receiptsSweptPerStatement)
-      .run();
+    );
     if (meta.changes < receiptsSweptPerStatement || Date.now() >= ends) {
       return;
     }
@@ -212,19 +350,19 @@ const recordOf = (row: typeof brainMemories.$inferSelect): MemoryRecord => ({
  * exist, which answers the same), or a memory revision that isn't theirs.
  * A memory never cites what its author couldn't read.
  */
-const requireCitable = async (
-  env: Env,
-  reader: Reader,
+const requireCitable = async <C>(
+  brain: Brain<C>,
+  reader: C,
   ownerId: string,
   refs: readonly BrainSourceRef[]
 ): Promise<void> => {
   if (refs.length === 0) {
     return;
   }
-  const db = drizzle(env.KNOWLEDGE);
+  const { db } = brain;
   const documentRefs = refs.filter((ref) => ref.kind === "document");
   const memoryRefs = refs.filter((ref) => ref.kind === "memory");
-  const allowed = await allowedFor(portsOf(env), reader);
+  const allowed = await allowedFor(brain.ports, reader);
   const citable = await Promise.all([
     ...documentRefs.map(async (ref) => {
       const row = await db
@@ -246,7 +384,7 @@ const requireCitable = async (
       }
       // Only the current version's sections are stored, so the section is
       // looked for in the cited version's own text, as its save split it.
-      const text = await versionText(env, db, ref.documentId, ref.version);
+      const text = await versionText(brain, db, ref.documentId, ref.version);
       const sections =
         text === undefined ? undefined : sectionCountOf(row.path, text);
       return sections !== undefined && ref.section < sections;
@@ -272,12 +410,12 @@ const requireCitable = async (
 };
 
 /** The receipt kept for `keyHash`, if it is still kept. */
-const keptReceipt = async (
-  env: Env,
+const keptReceipt = async <C>(
+  brain: Brain<C>,
   keyHash: string,
   now: Date
 ): Promise<typeof brainReceipts.$inferSelect | undefined> => {
-  const db = drizzle(env.KNOWLEDGE);
+  const { db } = brain;
   const row = await db
     .select()
     .from(brainReceipts)
@@ -302,12 +440,12 @@ const keptReceipt = async (
  * citations are checked. The batch checks again as it writes
  * (`withinBound`), so calls in flight together can't pass it.
  */
-const requireWithinBound = async (
-  env: Env,
+const requireWithinBound = async <C>(
+  brain: Brain<C>,
   caller: string,
   now: Date
 ): Promise<void> => {
-  const [recent] = await drizzle(env.KNOWLEDGE)
+  const [recent] = await brain.db
     .select({ count: count() })
     .from(brainReceipts)
     .where(
@@ -351,13 +489,13 @@ const replayed = (
  * batch; refused text keeps only its receipt. Refusals are the Brain's
  * stable codes.
  */
-export const remember = async (
-  env: Env,
-  reader: Reader,
+export const remember = async <C>(
+  brain: Brain<C>,
+  reader: C,
   input: unknown,
   options: unknown
 ): Promise<CommandReceipt> => {
-  const ownerId = personOf(reader);
+  const ownerId = brain.ports.ownerOf(reader);
   const request = brainErrors.parse(
     "brain.invalid",
     rememberInputSchema,
@@ -373,7 +511,7 @@ export const remember = async (
     throw brainErrors.create("brain.invalid");
   }
   const caller = callerKey(ownerId);
-  const keyHash = await keyed(env, "grasp-os brain command key", [
+  const keyHash = await keyed(brain, "grasp-os brain command key", [
     caller,
     "remember",
     brainContractVersion,
@@ -382,7 +520,7 @@ export const remember = async (
   const sourceRefs = request.sourceRefs ?? [];
   // The caller too, so a request's hash says nothing across people: the
   // same text remembered by two people hashes apart.
-  const requestHash = await keyed(env, "grasp-os brain request", [
+  const requestHash = await keyed(brain, "grasp-os brain request", [
     caller,
     "remember",
     brainContractVersion,
@@ -390,15 +528,15 @@ export const remember = async (
     request.text,
     sourceRefs,
   ]);
-  const now = portsOf(env).clock();
-  const kept = await keptReceipt(env, keyHash, now);
+  const now = brain.ports.clock();
+  const kept = await keptReceipt(brain, keyHash, now);
   if (kept !== undefined) {
     return replayed(kept, requestHash);
   }
   // After the replay, so a retry of a kept command still answers.
-  await requireWithinBound(env, caller, now);
-  await requireCitable(env, reader, ownerId, sourceRefs);
-  const db = drizzle(env.KNOWLEDGE);
+  await requireWithinBound(brain, caller, now);
+  await requireCitable(brain, reader, ownerId, sourceRefs);
+  const { db } = brain;
   const receiptId = crypto.randomUUID();
   const memoryId = crypto.randomUUID();
   const receipt = {
@@ -418,7 +556,7 @@ export const remember = async (
   // without the others, and calls in flight together can't pass the bound.
   let stored: { id: string }[];
   try {
-    [stored] = await auditedBatch(portsOf(env), db, [
+    [stored] = await auditedBatch(brain.ports, db, [
       db
         .insert(brainReceipts)
         .select(
@@ -433,7 +571,7 @@ export const remember = async (
       outboxedWhere(
         db,
         {
-          actor: portsOf(env).actorOf(reader),
+          actor: brain.ports.actorOf(reader),
           action: "knowledge.memory.remember",
           target: { type: "memory", id: memoryId },
           provenance: sourceRefs
@@ -448,7 +586,7 @@ export const remember = async (
     ]);
   } catch (error) {
     // Another call with the same key committed first: answer as its retry.
-    const raced = await keptReceipt(env, keyHash, now);
+    const raced = await keptReceipt(brain, keyHash, now);
     if (raced !== undefined) {
       return replayed(raced, requestHash);
     }
@@ -467,18 +605,18 @@ export const remember = async (
  * `brain.receipt_expired` until the clock sweeps it, and then one never
  * made.
  */
-export const receiptsGet = async (
-  env: Env,
-  reader: Reader,
+export const receiptsGet = async <C>(
+  brain: Brain<C>,
+  reader: C,
   input: unknown
 ): Promise<CommandReceipt> => {
-  const ownerId = personOf(reader);
+  const ownerId = brain.ports.ownerOf(reader);
   const { receiptId } = brainErrors.parse(
     "brain.invalid",
     receiptsGetInputSchema,
     input
   );
-  const row = await drizzle(env.KNOWLEDGE)
+  const row = await brain.db
     .select()
     .from(brainReceipts)
     .where(
@@ -491,7 +629,7 @@ export const receiptsGet = async (
   if (row === undefined) {
     throw brainErrors.create("brain.not_found");
   }
-  if (expired(row.retentionUntil, portsOf(env).clock())) {
+  if (expired(row.retentionUntil, brain.ports.clock())) {
     throw brainErrors.create("brain.receipt_expired");
   }
   return receiptOf(row);
@@ -500,18 +638,18 @@ export const receiptsGet = async (
 /**
  * One of the person's own records; anyone else's is `brain.not_found`.
  */
-export const memoriesGet = async (
-  env: Env,
-  reader: Reader,
+export const memoriesGet = async <C>(
+  brain: Brain<C>,
+  reader: C,
   input: unknown
 ): Promise<MemoryRecord> => {
-  const ownerId = personOf(reader);
+  const ownerId = brain.ports.ownerOf(reader);
   const { memoryId } = brainErrors.parse(
     "brain.invalid",
     memoriesGetInputSchema,
     input
   );
-  const row = await drizzle(env.KNOWLEDGE)
+  const row = await brain.db
     .select()
     .from(brainMemories)
     .where(
@@ -538,13 +676,13 @@ interface CursorScope {
  * only the person it was written for walks on from it, through the same
  * kind of record.
  */
-const cursorSeal = async (
-  env: Env,
+const cursorSeal = async <C>(
+  brain: Brain<C>,
   { caller, kind }: CursorScope,
   recordedAt: number,
   id: string
 ): Promise<string> =>
-  await keyed(env, "grasp-os brain list cursor", [
+  await keyed(brain, "grasp-os brain list cursor", [
     caller,
     kind ?? null,
     recordedAt,
@@ -552,13 +690,13 @@ const cursorSeal = async (
   ]);
 
 /** A cursor for `scope` after the record `row`. */
-const writeCursor = async (
-  env: Env,
+const writeCursor = async <C>(
+  brain: Brain<C>,
   scope: CursorScope,
   row: typeof brainMemories.$inferSelect
 ): Promise<string> => {
   const recordedAt = row.recordedAt.getTime();
-  const seal = await cursorSeal(env, scope, recordedAt, row.id);
+  const seal = await cursorSeal(brain, scope, recordedAt, row.id);
   return btoa(JSON.stringify([recordedAt, row.id, seal]));
 };
 
@@ -566,8 +704,8 @@ const writeCursor = async (
  * `cursor` read back, or a refusal for one core didn't write for
  * `scope`.
  */
-const readCursor = async (
-  env: Env,
+const readCursor = async <C>(
+  brain: Brain<C>,
   scope: CursorScope,
   cursor: string
 ): Promise<{ recordedAt: Date; id: string }> => {
@@ -578,7 +716,7 @@ const readCursor = async (
     throw brainErrors.create("brain.invalid");
   }
   const [recordedAt, id, seal] = parsed;
-  if (seal !== (await cursorSeal(env, scope, recordedAt, id))) {
+  if (seal !== (await cursorSeal(brain, scope, recordedAt, id))) {
     throw brainErrors.create("brain.invalid");
   }
   return { recordedAt: new Date(recordedAt), id };
@@ -588,12 +726,12 @@ const readCursor = async (
  * The person's own records, newest first, a bounded page at a time, of
  * one kind if asked: the next page starts after `cursor`.
  */
-export const memoriesList = async (
-  env: Env,
-  reader: Reader,
+export const memoriesList = async <C>(
+  brain: Brain<C>,
+  reader: C,
   input: unknown = {}
 ): Promise<MemoryPage> => {
-  const ownerId = personOf(reader);
+  const ownerId = brain.ports.ownerOf(reader);
   const caller = callerKey(ownerId);
   const { kind, limit, cursor } = brainErrors.parse(
     "brain.invalid",
@@ -603,8 +741,8 @@ export const memoriesList = async (
   const size = limit ?? defaultPage;
   const scope = { caller, kind };
   const after =
-    cursor === undefined ? undefined : await readCursor(env, scope, cursor);
-  const rows = await drizzle(env.KNOWLEDGE)
+    cursor === undefined ? undefined : await readCursor(brain, scope, cursor);
+  const rows = await brain.db
     .select()
     .from(brainMemories)
     .where(
@@ -630,7 +768,7 @@ export const memoriesList = async (
     records: page.map(recordOf),
     cursor:
       rows.length > size && last !== undefined
-        ? await writeCursor(env, scope, last)
+        ? await writeCursor(brain, scope, last)
         : null,
   };
 };

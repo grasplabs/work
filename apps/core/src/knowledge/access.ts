@@ -18,7 +18,11 @@ import type { DrizzleD1Database } from "drizzle-orm/d1";
 
 import { keepAuditEvent } from "../audit-outbox.ts";
 import { teamsOf } from "../auth/identity.ts";
-import { collectionTeams } from "../db/core/schema.ts";
+import {
+  chatAudiences,
+  collectionTeams,
+  teamMembers,
+} from "../db/core/schema.ts";
 import { inList } from "../db/d1.ts";
 import { collections } from "../db/knowledge/schema.ts";
 import { grantedPermissions } from "../permissions.ts";
@@ -42,6 +46,13 @@ import type { ReadRecord } from "./authorize.ts";
 // marked with where it came from and recorded in the audit log, and
 // restricted data puts the chat or App an App or agent works in in
 // restricted mode (`noteProvenance`).
+//
+// In a chat others share (a group chat or channel on a chat platform), an
+// agent reads only what every member of the chat may read
+// (`audienceCondition`), whoever asked: never a personal collection, nor
+// one for admins, nor one shared with teams that leave any member out, nor
+// anything at all while someone Grasp can't name as an active member is
+// in it (a guest, another company's people).
 
 /**
  * Who reads Knowledge: a signed-in person, or an App or agent acting for
@@ -110,6 +121,148 @@ const readableBy = async (
         : and(eq(collections.access, "teams"), inList(collections.id, shared))
     ) ?? sql`0`
   );
+};
+
+/** Who is in a chat others share, as `chat_audiences` keeps them. */
+export interface Audience {
+  members: readonly string[];
+  /** Someone Grasp can't name as one of the organization's members. */
+  outsiders: boolean;
+}
+
+/**
+ * The most members an audience is read for: past it, the chat reads
+ * nothing, as if someone in it couldn't be named. A Teams channel's whole
+ * team can be thousands; deciding for each is no answer's work.
+ */
+export const audienceMaxMembers = 1000;
+
+/** The audience of the chat `context` is, if others share it. */
+export const audienceOf = async (
+  env: Env,
+  context: WorkContext
+): Promise<Audience | undefined> => {
+  if (context.type !== "chat") {
+    return undefined;
+  }
+  const [row] = await drizzle(env.DB)
+    .select({
+      workspaceId: chatAudiences.workspaceId,
+      members: chatAudiences.members,
+      outsiders: chatAudiences.outsiders,
+    })
+    .from(chatAudiences)
+    .where(eq(chatAudiences.chatId, context.chatId))
+    .limit(1);
+  if (row === undefined) {
+    return undefined;
+  }
+  // Kept by another Workspace object's chat of that id: read as nothing.
+  if (row.workspaceId !== context.workspaceId) {
+    return { members: [], outsiders: true };
+  }
+  return { members: row.members, outsiders: row.outsiders };
+};
+
+/**
+ * Keeps who is in the chat `chatId`, held by the Workspace object
+ * `workspaceId`, for its agent's reads from now on: the person who asked
+ * always among them.
+ */
+export const keepAudience = async (
+  env: Env,
+  { workspaceId, chatId }: { workspaceId: string; chatId: string },
+  asker: string,
+  { members, outsiders }: Audience
+): Promise<void> => {
+  const kept = {
+    members: [...new Set([asker, ...members])],
+    outsiders,
+    updatedAt: new Date(),
+  };
+  await drizzle(env.DB)
+    .insert(chatAudiences)
+    .values({ chatId, workspaceId, ...kept })
+    .onConflictDoUpdate({ target: chatAudiences.chatId, set: kept });
+};
+
+/**
+ * Collections every member of `audience` may read, as a condition on
+ * `collections`: those for everyone, and those for teams that hold each
+ * member through one team or another, as `readableBy` reads them for each.
+ * Never a personal collection or one for admins, and no owner's exception:
+ * a collection its owner alone reads is read by no audience. Nothing while
+ * the audience has anyone Grasp can't name, or is too large to decide.
+ */
+const readableByAll = async (env: Env, audience: Audience): Promise<SQL> => {
+  const { members, outsiders } = audience;
+  if (
+    outsiders ||
+    members.length === 0 ||
+    members.length > audienceMaxMembers
+  ) {
+    return sql`0`;
+  }
+  const db = drizzle(env.DB);
+  const memberships = await db
+    .select({ userId: teamMembers.userId, teamId: teamMembers.teamId })
+    .from(teamMembers)
+    .where(inList(teamMembers.userId, members));
+  const teamsByMember = new Map<string, Set<string>>();
+  for (const { userId, teamId } of memberships) {
+    const each = teamsByMember.get(userId) ?? new Set<string>();
+    each.add(teamId);
+    teamsByMember.set(userId, each);
+  }
+  const allTeams = [...new Set(memberships.map(({ teamId }) => teamId))];
+  const shares =
+    allTeams.length === 0
+      ? []
+      : await db
+          .select({
+            collectionId: collectionTeams.collectionId,
+            teamId: collectionTeams.teamId,
+          })
+          .from(collectionTeams)
+          .where(inList(collectionTeams.teamId, allTeams));
+  const teamsByCollection = new Map<string, Set<string>>();
+  for (const { collectionId, teamId } of shares) {
+    const each = teamsByCollection.get(collectionId) ?? new Set<string>();
+    each.add(teamId);
+    teamsByCollection.set(collectionId, each);
+  }
+  const forEveryMember = [...teamsByCollection].flatMap(([id, shared]) =>
+    members.every((member) =>
+      [...(teamsByMember.get(member) ?? [])].some((team) => shared.has(team))
+    )
+      ? [id]
+      : []
+  );
+  return (
+    or(
+      eq(collections.access, "everyone"),
+      forEveryMember.length === 0
+        ? undefined
+        : and(
+            eq(collections.access, "teams"),
+            inList(collections.id, forEveryMember)
+          )
+    ) ?? sql`0`
+  );
+};
+
+/**
+ * What an agent working in `context` may read for the chat's audience, as
+ * a condition on `collections`: undefined for a context nobody else shares.
+ */
+export const audienceCondition = async (
+  env: Env,
+  context: WorkContext
+): Promise<SQL | undefined> => {
+  const audience = await audienceOf(env, context);
+  return audience === undefined
+    ? undefined
+    : await readableByAll(env, audience);
 };
 
 /** A collection as `mayRead` needs it: its access, owner and teams. */
@@ -187,6 +340,11 @@ export interface CollectionsAllowed {
    * collection's own rule applies on top); undefined for a person.
    */
   granted: readonly string[] | undefined;
+  /**
+   * Whether the reader works in a chat others share: what it reads is
+   * read for all of them (`audienceCondition`).
+   */
+  shared: boolean;
 }
 
 /**
@@ -207,12 +365,17 @@ export const collectionsAllowed = async (
         admin: isAdmin(role),
       }),
       granted: undefined,
+      shared: false,
     };
   }
-  const { authority, permissionId } = reader;
-  const granted = await grantedToRead(env, authority, permissionId);
+  const { authority, permissionId, context } = reader;
+  const [granted, audience] = await Promise.all([
+    grantedToRead(env, authority, permissionId),
+    audienceCondition(env, context),
+  ]);
+  const shared = audience !== undefined;
   if (granted.length === 0) {
-    return { condition: sql`0`, granted };
+    return { condition: sql`0`, granted, shared };
   }
   const teams = await teamsOf(env.DB, authority.onBehalfOf);
   return {
@@ -230,9 +393,11 @@ export const collectionsAllowed = async (
           userId: authority.onBehalfOf,
           teamIds: teams.map(({ id }) => id),
           admin: false,
-        })
+        }),
+        audience
       ) ?? sql`0`,
     granted,
+    shared,
   };
 };
 

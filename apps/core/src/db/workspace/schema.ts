@@ -50,6 +50,14 @@ export const chats = sqliteTable(
      * kept are `web`: there was no other.
      */
     via: text().$type<ChatChannel>().notNull().default("web"),
+    /**
+     * For a chat others share on a chat platform (a group chat, or a
+     * channel's thread), the Chat SDK's thread id: the person's one chat
+     * for it. Null for the person's own chats, a private one on a chat
+     * platform included. Its agent reads only what everyone in it may
+     * (`chat_audiences` in core's database).
+     */
+    thread: text(),
   },
   // A person's list, newest first.
   (table) => [

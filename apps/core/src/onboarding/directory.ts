@@ -36,7 +36,8 @@ import { startOnboardingConnection } from "./connections.ts";
  * never read.
  */
 const connectionOf = async (
-  env: Env
+  env: Env,
+  provider?: DirectoryConnection["provider"]
 ): Promise<DirectoryConnection | undefined> => {
   const config = signInConfig(env);
   if (config === undefined) {
@@ -45,15 +46,28 @@ const connectionOf = async (
   const listed = await env.CONNECT.directoryConnections();
   return listed
     .filter(
-      ({ provider, tenant }) =>
-        tenant.toLowerCase() ===
-        tenantOf(config, directorySuiteOf(provider))?.toLowerCase()
+      (connection) =>
+        (provider === undefined || connection.provider === provider) &&
+        connection.tenant.toLowerCase() ===
+          tenantOf(config, directorySuiteOf(connection.provider))?.toLowerCase()
     )
     .toSorted(
       (one, other) =>
         Number(one.status !== "active") - Number(other.status !== "active") ||
         other.connectedAt.localeCompare(one.connectedAt)
     )[0];
+};
+
+/**
+ * The Microsoft directory of the deployment's own Entra tenant, while it
+ * can be read: what knows the people writing on Teams by their object id
+ * (channels/who.ts). None while it needs reconnecting.
+ */
+export const entraDirectoryOf = async (
+  env: Env
+): Promise<DirectoryConnection | undefined> => {
+  const connection = await connectionOf(env, "microsoft-directory");
+  return connection?.status === "active" ? connection : undefined;
 };
 
 /** The directory connected for the onboarding; null before one is. */

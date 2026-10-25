@@ -7,6 +7,8 @@
  * after each, whether it worked or not.
  */
 import { Button } from "@grasp-os/ui/components/button";
+import { Checkbox } from "@grasp-os/ui/components/checkbox";
+import { Label } from "@grasp-os/ui/components/label";
 import {
   Table,
   TableBody,
@@ -17,10 +19,11 @@ import {
 } from "@grasp-os/ui/components/table";
 import { cn } from "@grasp-os/ui/lib/utils";
 import { Link, useRouter } from "@tanstack/react-router";
-import { useState } from "react";
+import { useId, useState } from "react";
 
 import { Cost, usd } from "../clients/cost.tsx";
 import { formatTime } from "../releases/format.ts";
+import type { RingChecks } from "../rollout/control.ts";
 import type { RolloutCost } from "../rollout/cost.ts";
 import {
   approveRolloutFn,
@@ -110,9 +113,57 @@ const Alert = ({ children }: { children: string }) => (
   </p>
 );
 
+/** Nothing checked yet. */
+export const uncheckedRing: RingChecks = { evalPassed: false, demoSent: false };
+
+/**
+ * What staff confirm of the ring a rollout passed before approving the
+ * next (`RingChecks`): Stephen's eval on the release, and the five demo
+ * messages sent in real Teams on that ring.
+ */
+export const RingChecklist = ({
+  checks,
+  onChange,
+}: {
+  checks: RingChecks;
+  onChange: (checks: RingChecks) => void;
+}) => {
+  const id = useId();
+  return (
+    <fieldset className="flex flex-col gap-1 text-sm">
+      <legend className="sr-only">Before the next ring</legend>
+      <div className="flex items-center gap-2">
+        <Checkbox
+          checked={checks.evalPassed}
+          id={`${id}-eval`}
+          onCheckedChange={(checked) => {
+            onChange({ ...checks, evalPassed: checked });
+          }}
+        />
+        <Label htmlFor={`${id}-eval`}>
+          Stephen&apos;s eval passed on this release
+        </Label>
+      </div>
+      <div className="flex items-center gap-2">
+        <Checkbox
+          checked={checks.demoSent}
+          id={`${id}-demo`}
+          onCheckedChange={(checked) => {
+            onChange({ ...checks, demoSent: checked });
+          }}
+        />
+        <Label htmlFor={`${id}-demo`}>
+          The five demo messages, sent in real Teams on this ring, all answered
+        </Label>
+      </div>
+    </fieldset>
+  );
+};
+
 /** What staff can do to the rollout as a whole, as its status lets them. */
 export const Controls = ({ rollout }: { rollout: RolloutView }) => {
   const { busy, failure, act } = useControl();
+  const [checks, setChecks] = useState(uncheckedRing);
   const data = { rolloutId: rollout.id };
   const active = rollout.status === "running" || rollout.status === "waiting";
   const waiting = rollout.status === "waiting" && rollout.run !== "paused";
@@ -123,7 +174,9 @@ export const Controls = ({ rollout }: { rollout: RolloutView }) => {
         disabled={busy}
         key="approve"
         onClick={() => {
-          act(async () => await approveRolloutFn({ data }));
+          act(
+            async () => await approveRolloutFn({ data: { ...data, checks } })
+          );
         }}
         size="sm"
       >
@@ -185,9 +238,14 @@ export const Controls = ({ rollout }: { rollout: RolloutView }) => {
     return null;
   }
   return (
-    <div className="flex flex-wrap items-center gap-2 border-t px-5 py-4">
-      {buttons}
-      {failure === null ? null : <Alert>{failure}</Alert>}
+    <div className="flex flex-col gap-3 border-t px-5 py-4">
+      {waiting && failed === 0 ? (
+        <RingChecklist checks={checks} onChange={setChecks} />
+      ) : null}
+      <div className="flex flex-wrap items-center gap-2">
+        {buttons}
+        {failure === null ? null : <Alert>{failure}</Alert>}
+      </div>
     </div>
   );
 };
